@@ -4,7 +4,7 @@
  * The Training details page: everything the panel would otherwise unfold INSIDE the left dock — what the module shows,
  * the vocabulary's numbers, the models' sentences, the executor's replay gate, the prior's readout — on a page of its own
  * over the scene, wide enough for its tables. The panel lists each readout as one line (its conclusion) and opens the page
- * on that section; its header's "Details" opens it on the first.
+ * on that section; its header's ⓘ opens it on the first.
  *
  * A modal dialog (the readouts are read, not compared against the scene): a tab per section down the left, the chosen
  * section's body on the right, scrolling on its own. While it is open everything else on the page is `inert` — the Tab

@@ -183,7 +183,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   `below_glidepath` (`TRAINING_FREE_OUTCOMES`), and the live executor sends the masks back and is cut at the same step (AV32).
 - **The Training dock never unfolds long content**: what is read once (the module, the switches, the vocabulary) and every
   readout's tables are on the modal DETAILS PAGE (`training/TrainingDetails.tsx`, portalled, a tab per section, a section
-  with nothing to show listed disabled with its reason); the dock has a header "Details" and one line per readout — its name
+  with nothing to show listed disabled with its reason); the dock has a header ⓘ ("Training details") and one line per readout — its name
   and conclusion — opening the page on that section (AV33).
 - **Scrollbars are styled ONCE, globally** (top of `index.css`: `--scrollbar-*` tokens, `::-webkit-scrollbar*` for
   Chromium/Safari, the standard properties only under `@supports not selector(::-webkit-scrollbar)` — Chromium 121+ lets them

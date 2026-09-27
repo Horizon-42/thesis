@@ -32,10 +32,11 @@
  * A model's words are flown live like the truth's (Fly, or a band click with the panel's switch on): the backend flies
  * the model's sentence again from its first step (`trainingAutopilot.ts`), which lands on the sample's own track.
  *
- * THE HEADER IS SHORT: the tabs, the callsign (its type, stratum and counts in its tooltip), the runway, one chip of the
- * labeller's own verdicts (a model's: how its sample ended), one of the executor's replay when it is on, the live
- * executor's line, the cursor, and the buttons — Fly, Read-back and Prior (the truth's), and ⓘ for the notes. Every chip
- * carries its full reading in its tooltip.
+ * THE HEADER IS SHORT: the tabs, the callsign (its type, stratum and counts in its tooltip), the runway, a model's chip (how
+ * its sample ended), the live executor's line, the cursor, and the buttons — Fly, Read-back and Prior (the truth's), and ⓘ
+ * for the notes. Every chip carries its full reading in its tooltip; the executor's replay of the flight is read in the
+ * notes (its words' dots say it). The labeller's own verdicts are TALLIED AT EACH ROW'S END (`rowTally`, the truth's only),
+ * lined up on the slash.
  *
  * The cursor is in flight time and is moved by clicking a band or a step number: what it reports is the artefact's own
  * step, never a rounded pixel. It does NOT drive `viewer.clock`: Training loads no CZML, and the clock belongs to
@@ -104,6 +105,7 @@ import {
   trainingWordLabel,
   TRAINING_COLUMN_INDEX,
   TRAINING_COLUMNS,
+  type TrainingColumn,
   type TrainingFlight,
   type TrainingSentence,
   type TrainingSentenceEvent,
@@ -115,8 +117,11 @@ import {
 
 // One SVG unit is one pixel: the bar is as wide as the dock and always VIEW_H tall.
 const GUTTER = 96;
-const PAD_R = 22;
+/** The right margin: each row's tally of the labeller's verdicts. */
+const PAD_R = 44;
 const HEAD_H = 22;
+/** Where a row's tally puts its slash, past the plot's right end (px): the counts of every row line up on it. */
+const TALLY_SLASH = 22;
 const ROW_H = 20;
 const AXIS_H = 22;
 const VIEW_H = HEAD_H + TRAINING_COLUMNS.length * ROW_H + AXIS_H;
@@ -167,41 +172,46 @@ function executorVerdictText(word: TrainingExecutorWord): string {
   return `the executor: ${word.status}${told}${checks ? ` — ${checks}` : ""}${word.reason ? ` — ${word.reason}` : ""}`;
 }
 
-/** The replay's chip — its outcome and its words inside of those judged — and its full reading, for the tooltip. */
-function replayChip(flight: TrainingExecutorFlight): { text: string; ok: boolean; title: string } {
-  if (!flight.flown) return { text: "replay: not flown", ok: false, title: `the executor's replay does not fly it: ${flight.group}` };
+/** The replay of this flight in words, for the notes: its outcome and its words inside of those judged. */
+function replayText(flight: TrainingExecutorFlight): string {
+  if (!flight.flown) return `The executor's replay does not fly it: ${flight.group}.`;
   const counts = executorWordCounts(flight);
   // the judge's own tally, as the replay gate counts it (the word left to intercept the final on its own counts twice)
   const { wordsInside, wordsJudged } = flight.counts;
-  const title = `The executor (${flight.group}) flew this sentence from row 0, each word said where the observed aircraft ` +
+  return `The executor (${flight.group}) flew this sentence from row 0, each word said where the observed aircraft ` +
     `heard it: ${TRAINING_OUTCOME_TAG[flight.outcome]}` +
     (flight.crossing === null ? "" : `, ${crossingText(flight.crossing)} at ${formatSeconds(flight.crossing.atS)} s`) +
     ` · ${wordsInside}/${wordsJudged} words inside their envelopes, each re-drawn from where the executor was told it` +
     (counts.notJudged ? `, ${counts.notJudged} not judged` : "") + (counts.notReached ? `, ${counts.notReached} not reached` : "") +
     (counts.superseded ? `, ${counts.superseded} superseded` : "") +
     ` · evaluation ${flight.evaluation.replay} (observed ${flight.evaluation.observed})` +
-    (flight.refused === null ? "" : ` · its track refused by the labeller's gate: ${flight.refused}`);
-  return {
-    text: `replay: ${TRAINING_OUTCOME_TAG[flight.outcome]} · ${wordsInside}/${wordsJudged}${flight.refused === null ? "" : " · refused"}`,
-    ok: flight.outcome === "landed" && wordsInside === wordsJudged && flight.refused === null, title,
-  };
+    (flight.refused === null ? "" : ` · its track refused by the labeller's gate: ${flight.refused}`) + ".";
 }
 
-/** The labeller's verdicts in one chip, and what each count leaves out, for the tooltip. */
-function verdictChip(flight: TrainingFlight): { text: string; title: string } {
-  const verdicts = trainingVerdicts(flight);
-  const capture = verdicts.captureTurn;
-  const captureText = capture === null ? "—"
-    : capture.progressOk && capture.rateOk ? "✓"
-      : `✗ ${[capture.progressOk ? null : "monotone", capture.rateOk ? null : "rate"].filter(Boolean).join(", ")}`;
-  return {
-    text: `heading ${verdicts.headingContained}/${verdicts.headingJudged} · capture ${captureText} · altitude ` +
-      `${verdicts.altitudeContained}/${verdicts.altitudeWords} · speed ${verdicts.speedContained}/${verdicts.speedWords}`,
-    title: "The labeller's own checks of this flight's envelopes (Reading.checks): heading words inside their bands" +
-      (verdicts.headingNotJudged ? ` (${verdicts.headingNotJudged} more with no row of their own: the lead reaches the clearance)` : "") +
-      `; the capture turn ${capture === null ? "— none, on the final at entry" : `monotone ${checkMark(capture.progressOk)}, rate ` +
-        `and bank ${checkMark(capture.rateOk)}`}; altitude tubes held; speed words held.`,
-  };
+/** A row's tally of the labeller's own checks (Reading.checks), written at its end: the words held of those judged — split
+ *  at the slash, which every row lines up on — or, on the approach row, the capture turn's mark; with its reading, for the
+ *  tooltip. null for a row with no check of its own (runway, angle; the approach with no capture turn). */
+function rowTally(verdicts: ReturnType<typeof trainingVerdicts>, column: TrainingColumn):
+  { held: string; of: string; ok: boolean; title: string } | null {
+  const count = (held: number, of: number, what: string) => ({ held: `${held}`, of: `/${of}`, ok: held === of, title: `${held} of ${of} ${what}` });
+  switch (column) {
+    case "heading":
+      return count(verdicts.headingContained, verdicts.headingJudged, "heading words inside their bands" +
+        (verdicts.headingNotJudged ? ` (${verdicts.headingNotJudged} more with no row of their own: the lead reaches the clearance)` : ""));
+    case "altitude":
+      return count(verdicts.altitudeContained, verdicts.altitudeWords, "altitude tubes held");
+    case "speed":
+      return count(verdicts.speedContained, verdicts.speedWords, "speed words held");
+    case "approach": {
+      const capture = verdicts.captureTurn;
+      if (capture === null) return null;
+      const ok = capture.progressOk && capture.rateOk;
+      return { held: checkMark(ok), of: "", ok,
+        title: `the capture turn: monotone ${checkMark(capture.progressOk)}, rate and bank ${checkMark(capture.rateOk)}` };
+    }
+    default:
+      return null;
+  }
 }
 
 /** The dot a word's executor verdict draws: filled for a verdict, hollow for none; none for a word with no check. */
@@ -343,8 +353,6 @@ export default function TrainingSentenceBar() {
   // the sentence read, as the live executor's source: its answer is drawn only over the sentence it flew
   const readSource = sourceOf(read);
   const autopilot = autopilotOnScreen(trainingAutopilot, selection, readSource);
-  const replay = executor === null ? null : replayChip(executor);
-  const verdictsChip = verdictChip(flight);
   const flightFacts = `${flight.typecode ?? "type unknown"} · ${flight.stratum} · ${flight.rows} steps · ` +
     `${verdicts.instructionsAfterStep0} words after step 0 · ${verdicts.silentSteps} of ${flight.rows - 1} later steps silent`;
   // the Fly button: the selected word's segment of the sentence read, and what the live executor is doing with it
@@ -440,17 +448,7 @@ export default function TrainingSentenceBar() {
             {modelName}: not flown ({notFlown.flight.group}) — the truth is shown
           </span>
         ) : null}
-        {generated === null ? (
-          <>
-            <span className="training-chip" title={verdictsChip.title}>{verdictsChip.text}</span>
-            {replay !== null ? (
-              <span className="training-chip training-sentence-executor" title={replay.title}
-                style={{ color: replay.ok ? TRAINING_EXECUTOR_COLOR : executor!.flown ? TRAINING_OUTSIDE_COLOR : TRAINING_RAW_COLOR }}>
-                {replay.text}
-              </span>
-            ) : null}
-          </>
-        ) : (
+        {generated === null ? null : (
           <span className="training-chip training-sample-chip" title={chip!.title}
             style={{ borderColor: modelColour!, color: generated.outcome === "landed" ? undefined : TRAINING_OUTSIDE_COLOR }}>
             {chip!.text}
@@ -539,6 +537,8 @@ export default function TrainingSentenceBar() {
             const y = HEAD_H + position * ROW_H;
             const colour = TRAINING_COLUMN_COLOR[column];
             const selectedColumn = column === focusColumn;
+            // the labeller's checks are the truth's: a model's sentence has none
+            const tally = generated === null ? rowTally(verdicts, column) : null;
             return (
               <g key={column} aria-label={`${column} row`}>
                 <rect x={GUTTER} y={y} width={plotW} height={ROW_H} className={`training-sentence-row-bg${position % 2 ? " odd" : ""}`} />
@@ -594,6 +594,14 @@ export default function TrainingSentenceBar() {
                     </g>
                   );
                 })}
+                {tally !== null ? (
+                  <text y={y + ROW_H / 2 + 4} className="training-sentence-tally" aria-label={`${column}: ${tally.title}`}
+                    style={tally.ok ? undefined : { fill: TRAINING_OUTSIDE_COLOR }}>
+                    <title>{tally.title}</title>
+                    <tspan x={GUTTER + plotW + TALLY_SLASH} textAnchor={tally.of ? "end" : "middle"}>{tally.held}</tspan>
+                    {tally.of ? <tspan x={GUTTER + plotW + TALLY_SLASH} textAnchor="start">{tally.of}</tspan> : null}
+                  </text>
+                ) : null}
                 {/* under a model's row: where the truth says a word of this column */}
                 {generated !== null ? truthEvents.filter((event) => event.row > 0 && event.column === position).map((event) => (
                   <line key={`truth-${event.row}`} x1={xFor(timeOf(event.row))} x2={xFor(timeOf(event.row))} y1={y + ROW_H - 5}
@@ -659,8 +667,15 @@ export default function TrainingSentenceBar() {
 
       {notesOpen ? (
         <footer className="training-sentence-legend">
-          <span>{flight.callsign}: {flightFacts} · {verdictsChip.title}</span>
-          {replay !== null && generated === null ? <span>{replay.title}</span> : null}
+          <span>{flight.callsign}: {flightFacts}</span>
+          {generated === null ? (
+            <span>
+              At a row's end: the labeller's own checks of this flight's envelopes (Reading.checks) — heading words inside
+              their bands, altitude tubes held, speed words held, of those judged (red when one is not); the capture turn's
+              mark on the approach row.
+            </span>
+          ) : null}
+          {executor !== null && generated === null ? <span>{replayText(executor)}</span> : null}
           {chip !== null ? <span>{chip.title}</span> : null}
           <span>
             A band is a word in force, from the tick where it was issued to the next word of its column; step 0 gives all

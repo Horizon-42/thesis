@@ -464,7 +464,7 @@ that divergence is a known open item (see the README's "Future Improvements").
   （switch on … under Draw / loading … / cannot be read）。打开时 `document.body` 下它以外的元素都设 `inert`（Tab 出不去）；Esc
   （焦点在哪都行）、右上角 ×、点背景（左键）关闭，焦点回到打开它的那个按钮——按钮由面板传进来，因为 Safari 点按钮不给它焦点；
   面板被隐藏（切到别的任务）时详情页关掉，回来不会自己再开。↑↓ 在有内容的节之间移动。
-- 左栏：标题旁一个 **Details** 按钮打开第一节；Draw 下面每个读数一行——名字加结论（如 "Replay gate  val · spec 0d6a68a92c6f"、
+- 左栏：标题旁一个 **ⓘ**（aria-label "Training details"，与模块里别处的 ⓘ 一致，2026-09-27 由 "Details" 按钮改来）打开第一节；Draw 下面每个读数一行——名字加结论（如 "Replay gate  val · spec 0d6a68a92c6f"、
   "Models' sentences  base 86% · landing r1 98% · …"），装不下时省略号，全文在提示里——点它打开详情页的那一节。左栏里不再有表格。
 - 各表按宽页重排（`TrainingResults.tsx`）：表头大写小字、行间细线、数字右对齐等宽数字、合计行加底色；门表的 ✓ / ✗ 用绿 / 红，
   放在份额旁边；先验的似然表里每行三者中最低的加粗；**原来只在每行提示里的先验读数**（第一个预测步的第一名命中率、换词步数、

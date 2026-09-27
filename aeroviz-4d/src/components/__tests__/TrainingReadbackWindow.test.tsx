@@ -285,7 +285,7 @@ describe("the live executor in the read-back check", () => {
     expect([tail.getAttribute("stroke-dasharray"), tail.getAttribute("stroke-opacity")]).toEqual(["4 3", "0.45"]);
     // one line, naming the word it flew — whichever word is selected now
     expect(screen.getByLabelText("The autopilot, live").textContent)
-      .toBe("Autopilot — heading 225° from step 8 · ✓ inside its envelope · solid blue, then a faded dashed tail");
+      .toBe("Autopilot — heading 225° from step 8 · in envelope · solid blue, then a faded dashed tail");
     cleanup();
     open(ALL, 0, 60, "speed", null, autopilotSegment());
     expect(screen.getByLabelText("The autopilot, live").textContent).toMatch(/^Autopilot — heading 225° from step 8/);

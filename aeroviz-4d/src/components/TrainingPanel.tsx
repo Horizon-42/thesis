@@ -18,7 +18,8 @@
  * KEPT SHORT, TOP TO BOTTOM: the set, the flight list, the live executor, the Draw switches (short labels, the full
  * reading in each tooltip), then "Details": one line per readout behind the overlays, its conclusion. Everything longer —
  * what the module is, the vocabulary's numbers, the readouts' tables — is on the DETAILS PAGE (`TrainingDetails`), opened
- * by the header's "Details" or by a readout's line, on its section; the dock never unfolds it.
+ * by the header's ⓘ (as every ⓘ in the module opens its notes) or by a readout's line, on its section; the dock never
+ * unfolds it.
  *
  * Over the open set it offers the OVERLAYS published for it (`useTrainingOverlays`): the executor's replay and the
  * prior's predictions, each behind its own switch; a set with none says so and folds away the command that writes one.
@@ -523,8 +524,9 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
         <h2>Training</h2>
         {/* Everything read ONCE — what the module is, the vocabulary, the readouts — is on the details page, so the
             flight list keeps the dock's height. */}
-        <button type="button" className="training-details-open" aria-haspopup="dialog" onClick={openDetails("overview")}>
-          Details
+        <button type="button" className="training-details-open" aria-haspopup="dialog" aria-label="Training details"
+          title="Training details" onClick={openDetails("overview")}>
+          ⓘ
         </button>
       </header>
 
