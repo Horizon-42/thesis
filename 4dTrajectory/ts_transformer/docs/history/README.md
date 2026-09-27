@@ -2,7 +2,7 @@
 
 这里的文档都是**记录**：实验已经跑完，或方案已经放下；有效的结论已进 `../reference/` 的默认值、契约和陷阱（表里写了编号）。
 文中的路径、状态、"下一步"都停在它写成的那天，不再改；文件名原样保留，所以旧路径按文件名就能找到。
-代码已归档的研究线，文档在 `../../archive/<名>/docs/`；还有 10 份记录暂留在 `docs/` 根目录（原因见 `../README.md`）。
+代码已归档的研究线，文档在 `../../archive/<名>/docs/`（以前留在 `docs/` 根目录的 10 份记录 2026-09-27 移进来了，`../README.md`）。
 `OPEN_ITEMS_2026-09-18.md` 是单模型路径到 2026-09-18 的状态记录（原 `docs/OPEN_ITEMS.md`），仍开着的决定已移到仓库的
 `docs/open-items.md`。
 
@@ -46,12 +46,15 @@
 | `control_parameter_prediction.zh.md` | 控制路径 2026-08-16 的全貌（调用图、模块表）→ 被取代的记录 |
 | `current_architecture.zh.html` | 2026-07-31 的架构快照 → 被 `../reference/prediction_paths.md`、`layout.md` 取代 |
 | `RESUME_ksjc_v5_ladder.md` | KSJC 模仿剂量梯子的恢复说明 → 没有恢复，被 w64 复现取代（D3） |
+| `2026-08-19_control_bank_wiggle_diagnosis.zh.md` | 控制输出坡度摆动的诊断 → `simple-v3`、T6–T8（插图在 `docs/figures/`） |
 
 ## 2026-09_frames — 坐标系与跑道
 
 | 文件 | 问的什么 → 结论 |
 |---|---|
-| `2026-09-03_airport_frame_ablation_results.md` | 机场坐标系 → 保留 `enu`（D1、C2）；计划在 `docs/` 根目录 |
+| `2026-09-03_airport_frame_ablation_plan.md` | 机场坐标系消融的计划 → 结果在下一行（D1） |
+| `2026-09-03_airport_frame_ablation_results.md` | 机场坐标系 → 保留 `enu`（D1、C2） |
+| `2026-09-03_krdu_nw_endpoint_bias.md` | 状态模型 KRDU 终点偏西北 → 是模型不是数据（T13） |
 | `2026-09-03_runway_frame_experiments_index.zh.md` | 9-03 四份文档的索引 |
 | `2026-09-03_runway_hypothesis_expansion.md` | 跑道假设扩展 |
 | `2026-09-03_state_v2_anchor_relative_results.md` | 以锚点为原点的状态输出 → 否决（D2） |
@@ -60,10 +63,12 @@
 
 | 文件 | 问的什么 → 结论 |
 |---|---|
+| `2026-09-04_procedure_constraints_design.zh.md` | 程序约束的量测与设计 → 惩罚项不采用（D5） |
 | `2026-09-04_constraint_methods_survey.zh.md` | 约束方法调研与 P0–P3 顺序 → 已执行 |
 | `2026-09-05_control_constraint_design.zh.md` | 控制路径的约束 → barrier 采用（D6）；名义律一半已归档 |
 | `2026-09-05_control_penalty_results.zh.md` | 惩罚项 → 不采用（D5） |
 | `2026-09-05_final_constraint_results.zh.md` | 走廊作有界输出 → `corridor-bounded`（D2） |
+| `2026-09-06_control_hooks_results.zh.md` | 指令钩子（barrier / trombone）读数 → D6、H1–H4 |
 | `2026-09-08_hard_constraints_survey_and_integration_plan.md` | 硬约束接进训练 → H0–H6 没做；§3 的文献调研仍可参考 |
 
 ## 2026-09_latent_anytime — 潜在意图、任意时刻预测
@@ -75,8 +80,14 @@
 | `2026-09-07_l1_lowdim_results.zh.md` | 低维控制头 → 32 段无代价（D16） |
 | `2026-09-08_straight_in_residual_readout.zh.md` | 直线进近残差在哪 → 沿航迹方向，是时间误差（T22） |
 | `2026-09-08_wind_residual_readout.zh.md` | 风解释多少残差 → 不加风 |
+| `2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` | 任意时刻预测与 ETA 校准（A、B 线）的设计 → R1–R4 |
+| `2026-09-07_latent_intent_design.zh.md` | 潜在意图 L0–L5 的设计 → D11–D13、R5–R6 |
 
-设计文档（`2026-09-07_anytime_…`、`2026-09-07_latent_intent_design.zh.md`）暂在 `docs/` 根目录。
+## 2026-09_specific_force — 比力控制参数化
+
+| 文件 | 问的什么 → 结论 |
+|---|---|
+| `2026-09-14_specific_force_control_design.md` | 比力控制参数化 N3–N7′ → C27、D25–D27（`specific-force+path-angle` 过了预设的门，采用与否由用户定） |
 
 ## 2026-09_package_reviews — 包的审查
 

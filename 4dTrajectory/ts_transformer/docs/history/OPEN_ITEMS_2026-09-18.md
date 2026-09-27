@@ -49,7 +49,7 @@ state A_threshold_enu). Literature: repo `docs/literature/hierarchical_predictio
 
 ## Specific-force control parameterisation — MEASURED, NOT ADOPTED; the final descent diagnosed (2026-09-15, branch `specific-force-control`)
 
-Design `docs/2026-09-14_specific_force_control_design.md`; literature
+Design `docs/history/2026-09_specific_force/2026-09-14_specific_force_control_design.md`; literature
 `docs/literature/control_normalization/` (repo root).
 
 **The ask.** The user: "…是不是可以修改aerodynamic 或者增加一个normalize 处理？" The head's thrust channel was
@@ -503,7 +503,7 @@ the review's route and controller findings applied and re-measured). Artifacts:
 
 ## Current state (2026-09-07) — the latent-intent design supersedes everything below it
 
-The control path was redesigned on 2026-09-07 (`docs/2026-09-07_latent_intent_design.zh.md`,
+The control path was redesigned on 2026-09-07 (`docs/history/2026-09_latent_anytime/2026-09-07_latent_intent_design.zh.md`,
 its §〇 status table is the live one). What that design settled and what is running:
 
 | step | state | number |
@@ -514,7 +514,7 @@ its §〇 status table is the live one). What that design settled and what is ru
 | L3 CTA conditioning | code done + reviewed (`dev-l2`); the delivery layer for a LATE CTA is three predict-time hooks, L3.c/d run and L3.e built but **not run** | `cta_conditioning=given`, `predict --cta-offset-s`. L3.c: the barrier holds the corridor but the trajectories stall on the outer segment. L3.d: a speed floor alone has nowhere to put the delay (total time fixed by the CTA + path fixed ⇒ mean speed fixed) and trades stall for thrust-over-max, arriving early and flying on. L3.e (`dev-trombone`, 2026-09-08): `outputs/constraints/trombone.py` + `barrier+trombone` / `barrier+speed-floor+trombone`, and `predict --truncate-at-threshold` so the readouts cover the approach and not the flying after it. Arms `docs/experiments/l3e_path_stretch_arms.json` (KRDU val, four predict-only, dry-runs clean); **known cost: ~58 % of the fleet is already aligned with the course at the anchor and cannot be stretched at all** — its unabsorbed delay is reported as `tromboneDelayS` with an engaged share of zero. See §六 L3.c/d/e of `2026-09-07_latent_intent_design.zh.md` |
 | L4 scene encoder | **NOT built — gate failed** | scene entity features add nothing (d_join R² 0.37 vs 0.38); the observable lead ETA correlates 0.11 with the lead's true landing |
 | L5.a fitted teacher | code done + reviewed (`dev-l5`); its startup blocker fixed (`e8df12f`) | the fit itself is a GPU job and **has not run**: `docs/experiments/l5_fitted_teacher_arms.json` points at `4dTrajectory/outputs/KRDU/experiments/l5_fitted_teacher_20260907/basis_fit.json`, which **does not exist until** `run_ts.py control_basis_oracle --checkpoint .../l1_lowdim_20260907/L1_native32/checkpoint.pt --out <that directory> --splits train,val` has been run (8255 flights, ~2–3 h). Until then both arms die at the dataset build, by design — the config carries the path, the dataset opens it. It used to die EARLIER, at the provenance check, because it fingerprinted the manifests without the pre-split lateral-pass roster (14 435 candidates against the checkpoint's 14 378 eligible); `e8df12f` moved that rule into `data_provenance.checkpoint_data_provenance`, which every replaying runner now calls |
-| A/B anytime prediction + calibrated ETA | **A0 / A1 / B0 measured; A0.b code done and reviewed (`dev-a0b`), its two arms NOT trained**; the rest design only | `docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` §〇 is the live status table (commands §〇.1, B0's numbers §〇.2). Built and measured: `run_ts.py anytime_curve` (A0-fixed over a remaining-path anchor grid, strata fixed at L−1) and `run_ts.py eta_error_readout` (B0, CPU readout) — KRDU val vectored \|Δt\| p80 **65.8–72.5 s** against straight-in **12.0–20.3 s**, so per-stratum ETA calibration is necessary and B's 120 s veto has about one doubling of margin. **Three A0-random arms have now run and all fail the L−1 veto** (2949–2990 m against native32's 1322); §2.4c's diagnosis is two mechanisms — the LR scheduler stepped on a stalled selection metric (9.4e-7 by epoch 60) and a time-uniform anchor draw that, pooled over flights, sits nearer the runway than its own anchor population (draws 34.3 % under 6 km against a population 25.1 %). **A0.b is the fix and is CODE ONLY**: `lr_plateau_metric` + `random_train_anchor_sampling=remaining-path-uniform`, arms `A0b_lr_objective` / `A0b_lr_objective_path_uniform` in `docs/experiments/a0_random_arms.json` — a GPU job that has not run, and until it does the random-anchor line has no established base. Still design: A2 / A3, B1–B3 (quantile duration head + split-conformal + `--cta-from-quantiles`, the first CTA arm that does not read the future), deliverable B4 = 80 % interval width vs remaining path and `s_freeze`; C = conditional diffusion over the 96 operating numbers trained on the L5.a fitted table, guided THROUGH the differentiable rollout (observed prefix / CTA / corridor), a REPLACEMENT for the CVAE if L2.e′ leaves z under ~1 nat, gated first by a retrieval ceiling on the same table (C0) |
+| A/B anytime prediction + calibrated ETA | **A0 / A1 / B0 measured; A0.b code done and reviewed (`dev-a0b`), its two arms NOT trained**; the rest design only | `docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` §〇 is the live status table (commands §〇.1, B0's numbers §〇.2). Built and measured: `run_ts.py anytime_curve` (A0-fixed over a remaining-path anchor grid, strata fixed at L−1) and `run_ts.py eta_error_readout` (B0, CPU readout) — KRDU val vectored \|Δt\| p80 **65.8–72.5 s** against straight-in **12.0–20.3 s**, so per-stratum ETA calibration is necessary and B's 120 s veto has about one doubling of margin. **Three A0-random arms have now run and all fail the L−1 veto** (2949–2990 m against native32's 1322); §2.4c's diagnosis is two mechanisms — the LR scheduler stepped on a stalled selection metric (9.4e-7 by epoch 60) and a time-uniform anchor draw that, pooled over flights, sits nearer the runway than its own anchor population (draws 34.3 % under 6 km against a population 25.1 %). **A0.b is the fix and is CODE ONLY**: `lr_plateau_metric` + `random_train_anchor_sampling=remaining-path-uniform`, arms `A0b_lr_objective` / `A0b_lr_objective_path_uniform` in `docs/experiments/a0_random_arms.json` — a GPU job that has not run, and until it does the random-anchor line has no established base. Still design: A2 / A3, B1–B3 (quantile duration head + split-conformal + `--cta-from-quantiles`, the first CTA arm that does not read the future), deliverable B4 = 80 % interval width vs remaining path and `s_freeze`; C = conditional diffusion over the 96 operating numbers trained on the L5.a fitted table, guided THROUGH the differentiable rollout (observed prefix / CTA / corridor), a REPLACEMENT for the CVAE if L2.e′ leaves z under ~1 nat, gated first by a retrieval ceiling on the same table (C0) |
 
 **Abolished by that design** (entries below are history): the P1.d closure tracker (its BLOCKER
 is not being fixed; the code was DELETED 2026-09-07 by audit T1-9), the K join-anchor decoder,
@@ -587,7 +587,7 @@ the `2026-09-07_control_training_review` P0/P1 objective fixes. The closure outp
   Work lives in the `../thesis-hc` worktree (`dev-hard-constraints`), unmerged.
 - **Control command-hook campaigns DONE 2026-09-06 (`control_hooks_20260906` v1 at KRDU,
   `control_hooks_v2_20260906` at KRDU + KSJC; report
-  `docs/2026-09-06_control_hooks_results.zh.md`).** Adopted: the v2 soft barrier as a
+  `docs/history/2026-09_constraints/2026-09-06_control_hooks_results.zh.md`).** Adopted: the v2 soft barrier as a
   predict-time safety layer; not adopted: any hook inside the training loop (six arms, none
   beat its predict-time counterpart), the hard gate. The nominal law's code was archived
   2026-09-07 (`archive/nominal_law_hook_2026_09/`; it was the unadopted hook's only
@@ -630,7 +630,7 @@ the `2026-09-07_control_training_review` P0/P1 objective fixes. The closure outp
   only data-consistent procedure constraint is the final segment (corridor + glidepath,
   gated by each flight's own join distance, never `d_faf`); IAF legs / pre-FAF join
   window / fix discs are normative and must not enter a loss. Design + measurements:
-  `docs/2026-09-04_procedure_constraints_design.zh.md`; the method survey (penalty,
+  `docs/history/2026-09_constraints/2026-09-04_procedure_constraints_design.zh.md`; the method survey (penalty,
   bounded reparametrization, projection layers, primal-dual, sampling, two-stage with the
   optimizer) with reading list and the P0–P3 order:
   `docs/history/2026-09_constraints/2026-09-04_constraint_methods_survey.zh.md`.
@@ -652,7 +652,7 @@ the `2026-09-07_control_training_review` P0/P1 objective fixes. The closure outp
   between parallels is the genuine unresolved mode; direction is not. →
   `docs/history/2026-09_frames/2026-09-03_runway_hypothesis_expansion.md`
 - **The state model's KRDU endpoints sit ~250 m NW of every runway, and it is the model,
-  not the data** (`docs/2026-09-03_krdu_nw_endpoint_bias.md`): a world-fixed translation of
+  not the data** (`docs/history/2026-09_frames/2026-09-03_krdu_nw_endpoint_bias.md`): a world-fixed translation of
   the whole predicted path present from the FIRST predicted step (240–350 m off the
   aircraft's actual position, path then parallel to the truth within 1.3°), on straight-in
   flights (established +204 m lateral miss, vectored +24 m), reproduced by noise-free

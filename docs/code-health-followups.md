@@ -12,7 +12,7 @@ the entry itself is deleted.
 
 Checked entry by entry against `dev-two-tier` `1a7ac875` plus branch `dev-frontend-followups`, then updated after branch
 `dev-followups-no-training` (2026-09-25) fixed every entry whose fix touches neither the training nor the post-training
-(the right-hand column): **27 open, 7 partly, 57 resolved or dismissed, 5 obsolete** (recounted from the table 2026-09-27; one open row is blocked on a source). *open*: the problem is still in the
+(the right-hand column): **20 open, 7 partly, 65 resolved or dismissed, 5 obsolete** (recounted from the table 2026-09-27; one open row is blocked on a source). *open*: the problem is still in the
 code; *partly*: some of it is fixed (the note says what is left); *resolved*: fixed (the note says by what);
 *dismissed*: not a defect (the note says why); *obsolete*: the code is gone. A resolved, dismissed or obsolete entry's
 text is removed below (its row stays); rows follow the entries' order; note the two sets of numbers (§19–§21 each appear
@@ -65,7 +65,7 @@ added three entries (the rows after the performance index's).
 | 2026-09-03 — 14 pre-existing failures in `trajectory_data_process/tests` | resolved | all fixed; entry removed | — |
 | ts: reusable measurement code lives in `docs/` (09-07) | resolved | runners import `inference/arm_readout.py`, 15 test preambles removed (`3f38f8af`); the thirteen `docs/*.py` moved on branch `docs-reorg` (2026-09-26): seven became runners, six went to three archives, `test_docs_holds_no_python` guards it (L20); entry removed; the tests' `sys.path` lines are the next row | — |
 | ts: five test files still touch `sys.path` (09-26) | open | new; see the entry | no: tests |
-| ts: ten dated records stay in the `docs/` root because hashed code cites them by path (09-26) | open | new; see the entry | **yes — executor**: the path edits change the executor source hash; do them with the next executor spec |
+| ts: ten dated records stay in the `docs/` root because hashed code cites them by path (09-26) | resolved | moved into `docs/history/` and `archive/*/docs/`, every path rewritten (branch `dev-executor-v11`, v11 milestone 1); entry removed | — |
 | ts: the auto-batch probe measures a smaller graph than a latent run | resolved | the probe hands a latent model the future, as training does (`b10b1d68`); entry removed | — |
 | scene data plane: review leftovers (09-07) | resolved | (7)–(9), (12), (14) and the three test gaps fixed, (11) documented, a landed-before-t₀ neighbour no longer a lead (`96d299d1`, `50412e71`); (10), (13) obsolete; entry removed | — |
 | ts: T2 leftovers (09-07) | resolved | `chart_scale` required (`6c363ef9`); the transport-chart rollouts kept as the scaled chart's test reference; the pointers demoted (`06801fe7`); entry removed | — |
@@ -113,17 +113,18 @@ added three entries (the rows after the performance index's).
 | `READABLE_REPORT_SCHEMA_VERSIONS` reads four report versions (09-25) | open | new; see the entry | **yes — data plane**: ts `lateral_eligibility` reads reports through it |
 | ts `docs/reference/runners.md` still names `instruction_training_export` as the Training helpers' home (09-25) | resolved | the line names `instructions/training_files.py` (branch `docs-reorg`); entry removed | — |
 | `aeroviz-4d/python/requirements.txt` still lists `pyproj` (09-26) | open | new; see the entry | no: a requirements list |
-| `autopilot/__init__.py` names the executor design by its old path (09-26) | open | renamed to `docs/executor_design.zh.md` with spec v10 (`9557315d`); the docs reorganisation then moved the design to `docs/two_tier/`; see the entry | **yes — executor**: the edit changes the executor source hash; do it with the next executor spec |
+| `autopilot/__init__.py` names the executor design by its old path (09-26) | resolved | points at `docs/two_tier/executor_design.zh.md` (branch `dev-executor-v11`, v11 milestone 1); entry removed | — |
 | The land law leaves a shallow final class's tube near the threshold on some profiles (09-26) | open | new; see the entry | **yes — executor** (a law change is a new spec) |
-| No mode reports when the executor's glidepath floor binds (09-26) | open | new; see the entry | **yes — executor** (adds a Flown mode; the backend payload reads the modes) |
+| No mode reports when the executor's glidepath floor binds (09-26) | resolved | mode `glidepath_floor`, counted per vertical word; the replay summary files a word it pushed out apart (branch `dev-executor-v11`, v11 milestone 2); entry removed | — |
 | The Training export and the live model flight fly a model without the procedure's masks (09-26) | resolved | fixed on `dev-training-rounds` (2026-09-27): the export speaks under the model's own masks and reads its sentences with the readout's `said_rows` (glidepath stop included), the overlay records the sets with their data digests, the backend rebuilds them, checks the digests and cuts the re-flight at the same step (`aeroviz-autopilot-segment-v5`); entry removed | — |
-| The judge folds a wrong-parallel-runway approach into timeout / crossed off runway; its landed lateral limit is 1,000 m where there is no parallel (09-26) | open | new; see the entry | **yes — executor** (the judge is in the spec's source hash; readouts change) |
-| `outputs/envelope.py` names `docs/specific_force_teacher_distribution.py` (09-26) | open | new; see the entry | **yes — executor**: the edit changes the executor source hash; do it with the next executor spec |
+| The judge folds a wrong-parallel-runway approach into timeout / crossed off runway; its landed lateral limit is 1,000 m where there is no parallel (09-26) | resolved | outcome `crossed_other_runway` (another runway's threshold crossed over that runway, lined up, any height; a line-up that never reaches it stays a timeout); landed within the runway's FAS course half-width, 106.7 m (branch `dev-executor-v11`, v11 milestone 2); entry removed | — |
+| `outputs/envelope.py` names `docs/specific_force_teacher_distribution.py` (09-26) | resolved | names the runner `experiments/specific_force_teacher_distribution.py` (branch `dev-executor-v11`, v11 milestone 1); entry removed | — |
 | `instructions/grammar.py` is outside the labeller sha (09-26) | open | new; see the entry | **yes — every sentence artefact and prior**: adding it to the hash changes the labeller sha they record; do it with the next vocabulary spec |
-| The judge calls a captured, on-centreline crossing that is too high "crossed off runway" (09-27) | open | new; see the entry | **yes — executor** (the judge is in the spec's source hash; readouts' outcome counts move) |
+| The judge calls a captured, on-centreline crossing that is too high "crossed off runway" (09-27) | resolved | outcome `crossed_too_high` (branch `dev-executor-v11`, v11 milestone 2); entry removed | — |
 | The terrain downloader overwrites the shared `download_manifest.csv` (09-27) | open | new; see the entry | no: data tooling |
-| The executor spec binds the source's BYTES, comments included (09-27) | open | new; see the entry | **yes — executor**: a new hash definition refuses v10; do it with the next executor spec (v11) |
-| `ExecutorParams.check` lets a NaN rate or factor through (09-27) | open | new; see the entry | **yes — executor**: `params.py` is hashed; fix it with v11 |
+| The executor spec binds the source's BYTES, comments included (09-27) | resolved | the hash is over each file's logic, `spec.logic` (branch `dev-executor-v11`, v11 milestone 1); entry removed | — |
+| `ExecutorParams.check` lets a NaN rate or factor through (09-27) | resolved | every value finite and positive (branch `dev-executor-v11`, v11 milestone 1); entry removed | — |
+| A free sentence is judged against the runway pointed at the executor's stop, not at its end (09-27) | open | new; see the entry | **yes — post-training**: the landing reward reads the outcome |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -495,58 +496,12 @@ same under the law before and after the glidepath floor, so it is older than it.
 case uses 15 rows. Judgement: the reach test (`in_reach`, from the tube's lower edge at the steepest class) and the
 crossing point's clamp to the admitted heights meet at an edge; look at it with the next executor change.
 
-## No mode reports when the executor's glidepath floor binds (2026-09-26)
-
-**Verified** (opus review of `9557315d`). Under "descend to land" the vertical law's floor (never under the published
-glidepath's lower edge) sets the aim without a mode of its own: `aim_left_tube` stays false, and the replay summary counts
-a word it pushes out of its tube as "altitude word outside its tube". A `glidepath_floor` mode (MODES, judge, summary)
-would make its cost readable; it changes the Flown modes the backend's payload reads, so it waits for the next executor
-spec and a quiet frontend.
-
-## The judge folds a wrong-parallel-runway approach into timeout / crossed off runway; its landed lateral limit is 1,000 m where there is no parallel (2026-09-26)
-
-**Verified** (opus diagnosis, prior readouts §16, `outputs/POOLED/prior/v3_runway_mismatch_diagnosis_20260926/`). `autopilot/judge.py`
-`_outcome` (lines 124–138) tests only the pointed runway's threshold plane: an aircraft flown down the PARALLEL runway (the
-prior's heading words lined it up there, the clearance came too late for the capture) ends as `timeout`, and one that
-touches down on the parallel after a late capture as `crossed_off_runway` — the failure exists (landing 10 / 8,000 val
-sentences, base ≈ 28 / 8,000) but no readout names it. Separately, the `landed` test's lateral limit is the harvest's
-assignment limit, min(1,000 m, half the parallel spacing): at an airport without a parallel a crossing 654 m off the centreline
-counts as landed (base model, KMSY JBU75_11_a39338 sample 3). Fix (judgement): an outcome of its own for crossing another
-runway's threshold plane within its landing condition (ending the flight there), and the landed lateral limit at the
-runway itself (the LPV cone's half-width at the threshold, ~107 m). Both change the executor's source hash: a new spec and a
-new replay gate.
-
-## `autopilot/__init__.py` names the executor design by its old path (2026-09-26)
-
-**Verified.** Spec v10 (`9557315d`) renamed the docstring's pointer to `docs/executor_design.zh.md`; the docs
-reorganisation (branch `docs-reorg`, merged into `dev-two-tier` 2026-09-26) moved the design to
-`docs/two_tier/executor_design.zh.md`. Every `.py` of `autopilot/` is in the executor source hash, so correcting the
-docstring makes the current code refuse spec v10 — change it with the next executor spec (with the ten dated records
-below). `autopilot/README.md` (not hashed) points at the new path.
-
-## `outputs/envelope.py` names `docs/specific_force_teacher_distribution.py` (2026-09-26)
-
-**Verified.** Two comments (`envelope.py:110`, `:118`) cite the measurement behind the specific-force box by its old
-path; the script is the runner `experiments/specific_force_teacher_distribution.py` since branch `docs-reorg`
-(2026-09-26, layout L20). `outputs.envelope` is imported directly by `autopilot/`, so it is in the executor source hash
-(`spec.executor_source_files`, contract C33): editing the comment makes the current code refuse executor spec v10 —
-change it together with the next executor change, as the `autopilot/__init__.py` entry above.
-
 ## ts: five test files still touch `sys.path` (2026-09-26)
 
 **Verified** (split off the resolved `docs/` scripts entry). `test_architecture`, `test_final_approach_geometry`,
 `test_guidance_skeleton_mirrors`, `test_import_boundaries` and `test_prior_procedure` add to `sys.path`; three of them add
 `4dTrajectory/optimization`, which `tests/conftest.py` does not. **Judgement**: move that one path into `conftest.py` and
 drop the per-file lines, or say in each why it stays.
-
-## ts: ten dated records stay in the `docs/` root because hashed code cites them by path (2026-09-26)
-
-**Verified.** The docs reorganisation (branch `docs-reorg`) moved every finished record into `docs/history/` or
-`archive/<line>/docs/`, except ten that `ts_transformer/config.py`, `outputs/envelope.py` and
-`outputs/constraints/speed_floor.py` cite by path — all three in the executor source hash (contract C33), so correcting
-the comments would make the current code refuse executor spec v10. `4dTrajectory/ts_transformer/docs/README.md` lists the
-ten and where each goes. With the next executor spec: `git mv` them, fix those comments (and `autopilot/__init__.py`,
-`envelope.py:110/118`, the entries above), re-write the spec and re-run the train replay gate.
 
 ## `instructions/grammar.py` is outside the labeller sha (2026-09-26)
 
@@ -555,16 +510,6 @@ rules the prior's speaker masks by (`grammar.step_allowed`, prior design §5.1) 
 not among the files the labeller sha covers; a change to it alone would change what every model may say with no identity
 moving. Unchanged since it was written (`0bbe6abf`, 2026-09-25). Adding it to `LABELLER_MODULES` changes the labeller sha
 every sentence artefact and every prior's `config.json` records, so it waits for the next vocabulary spec (judgement).
-
-## The judge calls a captured, on-centreline crossing that is too high "crossed off runway" (2026-09-27)
-
-**Verified** (`autopilot/judge.py` `_outcome`, `instructions/labeller/read.py` `landing_passages`; prior readouts §17, the lineup
-diagnosis `outputs/POOLED/prior/v3_stage2_lineup_diagnosis_20260927/`). A captured flight whose threshold-plane crossing is
-not a landing passage becomes `crossed_off_runway` — whether it was wide of the centreline OR more than
-`landing_max_height_m` (100 m) above the threshold. In the stage-2 run 34 of 35 such real-start sentences at round 5 were on
-the centreline (median 8–23 m off) and 140–260 m too high: the name reads as a lateral miss and hides a vertical one. Give
-the too-high crossing its own outcome with the next executor spec, with the other runway's crossing and the tighter lateral
-limit already queued there (prior readouts §16).
 
 ## The terrain downloader overwrites the shared `download_manifest.csv` (2026-09-27)
 
@@ -577,22 +522,12 @@ airports' provenance. Avoided for KAUS by downloading first with
 the tiles exist). Fix (judgement): a per-airport default manifest `<out>/<ICAO>/download_manifest.csv`, or merge
 rows by airport group instead of rewriting.
 
-## The executor spec binds the source's BYTES, comments included (2026-09-27)
+## A free sentence is judged against the runway pointed at the executor's stop, not at its end (2026-09-27)
 
-**Verified** (`autopilot/spec.py:99` `executor_source_sha256`: sha256 over each file's raw bytes). Any edit to a hashed file —
-a comment, a docstring, a doc path in a comment — makes the code refuse every stored executor spec (contract C33). That is
-what holds the ten dated records in the `docs/` root, the old doc path in `autopilot/__init__.py` and the `envelope.py`
-comments (the entries above): fixing words costs a new spec and a re-run replay gate. **Judgement / the user's todo
-(2026-09-27)**: keep the binding (a spec's gate and every readout flown with it must describe the code that runs), but hash
-the LOGIC — each file's `ast.dump` with docstrings stripped (comments never reach the AST) — so a wording edit no longer
-refuses a spec and any code change still does. A new definition refuses v10 by itself, so it goes in with the next real
-executor change (v11: the judge's fixes, prior readouts §16–§17), with the waiting comment and doc-path fixes in the same
-spec; a test pins that a docstring or comment edit leaves the hash unchanged and a one-token code edit moves it.
-
-## `ExecutorParams.check` lets a NaN rate or factor through (2026-09-27)
-
-**Verified** (opus review of the heading-lead ablation runner, `dev-heading-lead`). `autopilot/params.py` `check` refuses a
-non-positive rate as `min(positive) <= 0.0`; with a NaN among them `min` does not trip the comparison, and an `inf` passes too —
-the first cycle then raises in `inverse.attitude` (or flies nonsense). The ablation runner validates its own arguments
-(`positive`), so no stored spec is affected. Fix: `all(math.isfinite(v) and v > 0 for v in positive)`; `params.py` is in the
-executor source hash, so it goes in with v11.
+**Plausible** (opus review of executor v11 milestone 2, `prior_free_generation.flight_rows`). A free sentence's outcome is
+`judge.outcome_of` against the runway pointer of the LAST step the executor flew (`runway[-1]`). The executor flies on after
+three outcomes the judge reads earlier (crossing without the capture, another runway's threshold, the stall cut-off), and a
+model may re-point the runway in those extra steps, so the outcome can be read against a runway pointed after the flight
+ended — in principle turning another runway's crossing into a crossing of the "pointed" one. Not observed. Fix (judgement):
+read the pointer in force at the judge's end row (a second `outcome_of` against it, or stop the executor at those outcomes);
+it moves free-generation outcomes and the landing reward, so it waits for a stage that re-reads them.

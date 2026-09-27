@@ -42,7 +42,7 @@ LIMITS = ("bank_cap", "bank_rate", "load_factor", "path_rate_limited", "stall_fl
           "stall")
 #: What the laws were doing each cycle.
 MODES = ("captured", "tracking", "bent", "intercepting", "intercepting_off_word", "go_around", "level_captured",
-         "aim_left_tube")
+         "aim_left_tube", "glidepath_floor")
 
 
 @dataclass(frozen=True)
@@ -135,7 +135,8 @@ class Executor:
                             "path_rate_limited": vertical_modes["path_rate_limited"]}.items():
             self.limits[name].append(value)
         for name, value in {**lateral_modes, "level_captured": vertical_modes["level_captured"],
-                            "aim_left_tube": vertical_modes["aim_left_tube"]}.items():
+                            "aim_left_tube": vertical_modes["aim_left_tube"],
+                            "glidepath_floor": vertical_modes["glidepath_floor"]}.items():
             self.modes[name].append(value)
 
         after = read_state(self.state, self.charts)

@@ -2,7 +2,7 @@
 
 The closed-form decision vector regressed on per-flight labels: a comparison arm whose tracker
 was deleted on 2026-09-07 and whose training was FROZEN on 2026-09-09. Archived 2026-09-18 with
-the manoeuvre-token plan's repository clean-up (`docs/2026-09-18_manoeuvre_token_plan.zh.md`
+the manoeuvre-token plan's repository clean-up (`archive/manoeuvre_codes_2026_09/docs/2026-09-18_manoeuvre_token_plan.zh.md`
 §5.1). Results: `archive/closure_2026_09/docs/2026-09-06_closure_p1c_results.zh.md`, `archive/closure_2026_09/docs/2026-09-06_closure_p1d_tracking_results.zh.md`.
 Off the import path on purpose: nothing live imports it.
 

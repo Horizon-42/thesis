@@ -238,7 +238,7 @@
    | `prior_train`（第 1 步，base） | 不说话 | 写空列表：teacher forcing 训练，它的自由生成读数都只开词表规则（§9.1） |
    | `prior_landing_reward`（第一阶段，landing） | 本阶段定的：空（后训练设计 §2），runner 里一个常数 | 每一轮写空列表 |
    | `prior_augmented_reward`（第二阶段，augmented） | 本阶段定的：`procedure-altitudes-v2`（后训练设计 §3），runner 里一个常数 | 每一轮写它；第 0 轮的读数是起点模型（landing，自己的是空）在本阶段屏蔽下的读数 |
-   | `prior_free_generation` | 默认模型自己的（`--procedure-masks own`）；换成别的：`none`，或逗号隔开的名字 | 不写模型。读数格式不变（`ts-prior-free-generation-v4`）：`procedure_masks` 仍记开没开程序高度，模型自己的在它的目录里，日志写明两者是否相同——不换 schema，已有的读数照样能用。开着程序高度，就同时按下滑道下沿结束句子、读切入前的三项（与原来相同） |
+   | `prior_free_generation` | 默认模型自己的（`--procedure-masks own`）；换成别的：`none`，或逗号隔开的名字 | 不写模型。读数格式没因此变（当时 `ts-prior-free-generation-v4`；执行器 v11 起是 v5，因为判定多了两个结局）：`procedure_masks` 仍记开没开程序高度，模型自己的在它的目录里，日志写明两者是否相同——不换 schema，已有的读数照样能用。开着程序高度，就同时按下滑道下沿结束句子、读切入前的三项（与原来相同） |
    | `prior_generation_training_export`（训练视图） | 明确传空（它现在就这样飞，行为不变） | 不写。按模型自己的屏蔽导出，要等导出格式能带上"低于下滑道下沿"的结束（`docs/code-health-followups.md` 已有一条，属于前端那边的分支） |
    | `prior_procedure_check`（标注数据，不是模型） | 直接用程序高度的规则和数据（`procedure.published_procedures`）：它检查的是规则本身 | 不写 |
    | 后端的模型航迹（`aeroviz_backend/autopilot_segment`） | 不说话，重飞导出的词 | — |

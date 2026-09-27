@@ -1,5 +1,5 @@
-"""Executor E7 check: how much the executor's result moves with the parameters method A sets (executor design §9,
-the E7 plan item 5) — on TRAIN, never val.
+"""Executor E7 check: how much the executor's result moves with its own parameters (τ_ψ from method A, p from the
+procedure standards, the γ̇ factor; executor design §9, the E7 plan item 5) — on TRAIN, never val.
 
 One seeded train sample (`replay.draw`: per airport, own dynamics, a published approach speed) is flown once
 per variant: the spec's own parameters, then each of τ_ψ, p and the γ̇ factor moved alone — τ_ψ (the executor's own

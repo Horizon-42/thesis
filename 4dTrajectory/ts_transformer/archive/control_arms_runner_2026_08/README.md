@@ -7,7 +7,7 @@ and taken off the import path. Nothing here runs against the current package.
 
 The train → predict → evaluate → publish driver for a set of control arms declared in a
 JSON file (`{"base_recipe": …, "arms": [{"key", "label", "overrides"}]}`). It drove the
-bank-wiggle investigation (`docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md`) and the
+bank-wiggle investigation (`docs/history/2026-08_control_path/2026-08-19_control_bank_wiggle_diagnosis.zh.md`) and the
 KSJC imitation-weight ladder (`docs/experiments/imitation_ksjc_v5_*.json`,
 `docs/history/2026-08_control_path/RESUME_ksjc_v5_ladder.md`).
 

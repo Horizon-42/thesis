@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Read out the airport-center frame ablation: stratified, paired, and at the runway.
 
-Plan: ``docs/2026-09-03_airport_frame_ablation_plan.md`` (Phase 5). The three questions
+Plan: ``docs/history/2026-09_frames/2026-09-03_airport_frame_ablation_plan.md`` (Phase 5). The three questions
 were fixed before any number was looked at, and each one has its own table here:
 
   H1  target conditioning — FDE / endpoint error by arm, per stratum, plus the endpoint's

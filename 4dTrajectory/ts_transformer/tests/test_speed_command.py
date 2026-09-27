@@ -1,4 +1,4 @@
-"""The speed-command control axis, ts side (docs/2026-09-14_specific_force_control_design.md §12).
+"""The speed-command control axis, ts side (docs/history/2026-09_specific_force/2026-09-14_specific_force_control_design.md §12).
 
 ``control_thrust_parameterization="speed-command"`` makes the head's first column a target
 airspeed RELATIVE to the anchor's, Δv, flown by a first-order speed loop through the

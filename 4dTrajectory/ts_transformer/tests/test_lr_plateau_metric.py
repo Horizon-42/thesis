@@ -1,6 +1,6 @@
 """`lr_plateau_metric`: WHICH number the learning-rate plateau is measured on.
 
-A0.b of `docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` §2.4c. On the
+A0.b of `docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` §2.4c. On the
 `A0_random_hr8_tv1_grid` arm the validation OBJECTIVE improved to epoch 60 while the
 checkpoint-selection value — a dense-grid ADE — stalled after epoch 8, so
 `ReduceLROnPlateau`, stepped with the selection value, halved the learning rate from epoch

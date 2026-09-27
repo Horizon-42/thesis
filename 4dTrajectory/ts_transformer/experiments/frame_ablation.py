@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Train, predict and evaluate a set of arms (state or control) that differ by one axis.
 
-The airport-center frame ablation (``4dTrajectory/ts_transformer/docs/
+The airport-center frame ablation (``4dTrajectory/ts_transformer/docs/history/2026-09_frames/
 2026-09-03_airport_frame_ablation_plan.md``) compares one recipe under three charts —
 threshold-anchored, airport-anchored, airport-anchored + target conditioning. Every arm
 starts from the same base config, overrides only the fields the arm names, and goes

@@ -25,7 +25,7 @@ it in a view; the file is left exactly as it was taken, not silently ported.
 
 ## Why it is archived
 
-`docs/2026-09-06_control_hooks_results.zh.md` §结论: the **barrier** filter was ADOPTED as a
+`docs/history/2026-09_constraints/2026-09-06_control_hooks_results.zh.md` §结论: the **barrier** filter was ADOPTED as a
 predict-time safety layer (`predict --command-hook barrier --hook-saturation soft`); the
 nominal law was kept "as an option" and never adopted. Its second consumer — the P1.d closure
 tracker, which reused the `control_nominal_*` gains — was deleted in the same audit (T1-9,
@@ -39,7 +39,7 @@ predict-time barrier and the on-final gate it shares.
 
 ## The documents that cite it
 
-- `docs/2026-09-06_control_hooks_results.zh.md` — the R-arm numbers (KRDU + KSJC).
+- `docs/history/2026-09_constraints/2026-09-06_control_hooks_results.zh.md` — the R-arm numbers (KRDU + KSJC).
 - `docs/history/2026-09_constraints/2026-09-05_control_constraint_design.zh.md` — the design (§P1, the v2 thrust law).
 - `docs/history/2026-09_latent_anytime/2026-09-07_control_training_review.zh.md` §5 proposes a closed-loop (DAgger) teacher
   built on these three laws. That is a PROPOSAL against archived code: reviving it means

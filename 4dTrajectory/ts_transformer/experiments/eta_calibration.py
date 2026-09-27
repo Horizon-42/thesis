@@ -2,7 +2,7 @@
 """B2: split-conformal calibration of a quantile checkpoint's arrival-time interval.
 
 Anytime / calibrated-ETA design
-(`4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`)
+(`4dTrajectory/ts_transformer/docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`)
 §三 3.2. The quantile duration head (B1) publishes five levels of ``p(T | history)``; this
 runner turns them into an interval with a MEASURED coverage, per difficulty stratum, and
 stores the result beside the checkpoint so `predict` can stamp it on every record::

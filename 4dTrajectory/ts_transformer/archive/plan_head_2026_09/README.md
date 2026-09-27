@@ -1,7 +1,7 @@
 # plan_head_2026_09 — the plan-and-guidance HEAD (design v5, 2026-09-09 … 09-12)
 
 Archived 2026-09-18 when the manoeuvre-token plan
-(`docs/2026-09-18_manoeuvre_token_plan.zh.md`, §5.1) replaced it. Design, steps and every
+(`archive/manoeuvre_codes_2026_09/docs/2026-09-18_manoeuvre_token_plan.zh.md`, §5.1) replaced it. Design, steps and every
 measurement (§12.1–§12.11: the oracle ceilings, rolled windows, the order hold, the K = 4
 mixture, the assigned time, the pooled five-airport head): `archive/plan_head_2026_09/docs/2026-09-09_plan_and_guidance_design.md`
 (superseded). Off the import path on purpose: nothing live imports it.

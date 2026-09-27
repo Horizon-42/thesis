@@ -2,7 +2,7 @@
 
 The metric averages the SAME common-grid ADE over the anchor sets a cohort can support —
 L−1 plus whichever of `anchor_grid`'s candidate remaining-path bins clear the coverage gate
-(A1 of `docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`). Five things
+(A1 of `docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`). Five things
 decide whether that number means what it says, and each is a test here:
 
 * every anchor set contributes its value AND its coverage, and the published mean is the

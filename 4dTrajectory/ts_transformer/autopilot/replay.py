@@ -313,7 +313,10 @@ def summary(verdicts: list[Verdict]) -> dict[str, Any]:
             capture["progress_ok"] and capture["rate_ok"])
         words_failed["cleared, corridor never entered"] += corridor["cleared"] and not corridor["entered"]
         words_failed["cleared, corridor left after entry"] += corridor["cleared"] and corridor["inside"] < corridor["rows"]
-        words_failed["altitude word outside its tube"] += sum(not x["contained"] for x in v.words["vertical"])
+        words_failed["altitude word outside its tube"] += sum(not x["contained"] and not x["glidepath_floor_cycles"]
+                                                              for x in v.words["vertical"])
+        words_failed["altitude word outside its tube, the glidepath floor held it"] += sum(
+            not x["contained"] and x["glidepath_floor_cycles"] > 0 for x in v.words["vertical"])
         words_failed["speed word outside its band"] += sum(not x["contained"] for x in v.words["speed"])
     n = len(verdicts)
     return {"flights": n, "outcomes": dict(outcomes.most_common()),

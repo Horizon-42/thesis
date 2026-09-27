@@ -51,8 +51,9 @@ verdicts: the judge would say how the EXECUTOR flew the prior's words, not what 
 prior's answer. SI units.
 
 **The words run to where the executor stopped, the track to the outcome**: `flight_rows` counts a sentence to the step
-whose cycles ended the flight for the executor, which flies on after two outcomes its judge reads earlier — crossing the
-threshold without the capture, and the stall cut-off (`executor.Executor.finished` stops at neither) — so a sample's last
+whose cycles ended the flight for the executor, which flies on after three outcomes its judge reads earlier — crossing
+the threshold without the capture, crossing another runway's threshold, and the stall cut-off (the executor stops at none
+of them) — so a sample's last
 words can follow its ``endS``. They are written as the formal readout counts them (its runway pointed at the end is read
 from them); the frontend shades the rows after the end.
 
@@ -103,7 +104,7 @@ from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_sta
 
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_GENERATION_SCHEMA`); the reader refuses anything else
 #: by name. A name changes with its file's shape or meaning, on both sides, in one change.
-SCHEMA = "aeroviz-training-generation-v2"
+SCHEMA = "aeroviz-training-generation-v3"
 PAYLOAD_FILE = "generation.json"
 RUNNER = "ts_transformer.experiments.prior_generation_training_export"
 #: The one tree every checkout's outputs are (a worktree links it): a readout's prior is known by its path from here on.
@@ -265,7 +266,8 @@ def sample_payload(flown: Flown, index: int, row: dict[str, Any], grid: np.ndarr
         "sample": row["sample"], "outcome": row["outcome"], "endS": round(start_s + row["end_s"], 3),
         "crossing": None if crossing is None else {"crossM": round(crossing["cross_m"], 2),
                                                    "heightM": round(crossing["height_m"], 2),
-                                                   "atS": round(start_s + crossing["at_row"] * flown.cycle_s, 3)},
+                                                   "atS": round(start_s + crossing["at_row"] * flown.cycle_s, 3),
+                                                   "runway": crossing["runway_index"]},
         "firstRunway": row["first_runway"], "lastRunway": row["last_runway"], "runwayChanges": row["runway_changes"],
         "goArounds": row["go_arounds"], "clearedAtEnd": row["cleared_at_end"],
         "forbiddenMass": {column: round(mass, 6) for column, mass in row["forbidden_mass"].items()},

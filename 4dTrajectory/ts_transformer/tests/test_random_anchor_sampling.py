@@ -1,6 +1,6 @@
 """`random_train_anchor_sampling`: WHERE along the approach a random train anchor is drawn.
 
-A0.b of `docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` §2.4c. The
+A0.b of `docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` §2.4c. The
 default `uniform` policy draws over a flight's admissible SAMPLES, i.e. uniformly in TIME;
 pooled over flights that over-weights the near end relative to the stored anchor population,
 because every flight gets one draw whatever its length and a kilometre near the runway holds

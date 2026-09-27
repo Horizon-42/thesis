@@ -86,7 +86,7 @@ from ts_transformer.prior.procedure import RunwayProcedure, below_floor, pre_joi
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-GENERATION_SCHEMA = "ts-prior-free-generation-v4"
+GENERATION_SCHEMA = "ts-prior-free-generation-v5"
 #: The outcome of a sentence that took its aircraft below the glidepath lower edge (post-training design §3.5): not the
 #: executor's judge's — the runner's, over the judge's outcomes.
 BELOW_GLIDEPATH = "below_glidepath"

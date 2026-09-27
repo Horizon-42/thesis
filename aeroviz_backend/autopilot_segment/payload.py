@@ -31,7 +31,7 @@ from aeroviz_backend.autopilot_segment.verdict import HeadingFacts, selected_hea
 
 #: MIRROR of `aeroviz-4d/src/data/trainingAutopilot.ts` (`TRAINING_AUTOPILOT_SCHEMA`); the reader refuses anything
 #: else by name. A name changes with the payload's shape, on both sides, in one change.
-SCHEMA = "aeroviz-autopilot-segment-v5"
+SCHEMA = "aeroviz-autopilot-segment-v6"
 #: The end of a segment flown to its ``stopRow``: the executor reached it. Otherwise the end is the judge's outcome
 #: (`judge.OUTCOMES`, mirrored by `trainingOverlays.ts`'s `TRAINING_EXECUTOR_OUTCOMES`), or — a model's sentence spoken
 #: under the procedure's altitudes — `fly.BELOW_GLIDEPATH` (v5: the request names the masks, the answer this end). MIRROR of `trainingAutopilot.ts`
@@ -213,7 +213,8 @@ def segment_payload(result: FlownSegment, context: FlightContext, words: Words) 
             "flownS": round((verdict.end_row - word_cycle(result, spec.step_s)) * flown.cycle_s, 3),
             "crossing": None if crossing is None else {"crossM": round(crossing["cross_m"], 2),
                                                        "heightM": round(crossing["height_m"], 2),
-                                                       "atS": round(started_s + crossing["at_row"] * flown.cycle_s, 3)},
+                                                       "atS": round(started_s + crossing["at_row"] * flown.cycle_s, 3),
+                                                       "runway": crossing["runway_index"]},
             "refused": verdict.refused,
         },
         "word": word,

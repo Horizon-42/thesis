@@ -835,7 +835,7 @@ class BackendTest(unittest.TestCase):
         params = SimpleNamespace(word_clock="track", cycle_s=1.0, timeout_factor=1.5)
         words = SimpleNamespace(**vars(MODEL_WORDS), spec=SimpleNamespace(sha256="v" * 64))
         context = SimpleNamespace(geometry=geometry2(), reading=SimpleNamespace(words=np.zeros((20, 6))), group="own dynamics")
-        record = {"sha256": "s" * 64, "source": {"executor_source_sha256": "c" * 64}}
+        record = {"sha256": "s" * 64, "source": {"executor_source_sha256": "c" * 64, "python": "3"}}
         flown_with = []
 
         def flying(context_, params_, words_, column, row, superseded, model, masks):

@@ -1,4 +1,4 @@
-"""The path-angle vertical contract, ts side (docs/2026-09-14_specific_force_control_design.md §14).
+"""The path-angle vertical contract, ts side (docs/history/2026-09_specific_force/2026-09-14_specific_force_control_design.md §14).
 
 ``control_thrust_parameterization="specific-force+path-angle"`` makes the head's THIRD column a
 path-angle target γ*, flown by a first-order path loop through the load factor the lag RHS

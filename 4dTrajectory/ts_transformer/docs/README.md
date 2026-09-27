@@ -26,7 +26,6 @@ docs/
   tutorials/           教程与综述；arch_*.svg 由 `python run_ts.py trace_architecture` 生成
   figures/             2026-08-19 坡度摆动诊断的插图
   history/             做完的研究线（代码仍在的），按线分子目录，文件名不改
-  2026-…（10 份）       留在根目录的历史记录，见下
 ```
 
 - **代码已归档的研究线**，文档跟代码一起放在 `../archive/<名>/docs/`（oracle 教师、场景编码、closure、计划头、两层 v2、
@@ -34,21 +33,18 @@ docs/
 - **`docs/` 下不放代码**（`tests/test_architecture.py::test_docs_holds_no_python`，布局规则 L20）：测量代码是
   `experiments/` 下的 runner，一次性脚本进 `archive/`。
 
-## 留在根目录的 10 份历史记录
+## 以前留在根目录的 10 份记录
 
-它们都已是记录（结论已进 `reference/` 的默认值或陷阱），但被**参与执行器源码指纹的代码**按路径引用（`config.py`、
-`outputs/envelope.py`、`outputs/constraints/speed_floor.py`；契约 C33）：改那几行注释会让现行代码拒绝执行器规格 v9。
-所以等下一次执行器规格重建时，再和那些注释一起移进 `history/`（或对应的 `archive/`）。
+它们被参与执行器源码指纹的代码按路径引用，一直等到执行器 v11（2026-09-27）：v11 起指纹只算代码逻辑（去掉文档字符串的语法树，
+注释不算），改注释不再作废规格，于是移进 `history/` 和对应的 `archive/`，引用它们路径的代码与文档一起改了（仓库的
+`docs/CHANGELOG.md` 是历史，没改；按文件名总能找到）。
 
-| 文件 | 是什么 | 以后去哪 |
-|---|---|---|
-| `2026-08-19_control_bank_wiggle_diagnosis.zh.md` | 控制输出坡度摆动的诊断 → `simple-v3`、T6–T8 | `history/2026-08_control_path/` |
-| `2026-09-03_airport_frame_ablation_plan.md` | 机场坐标系消融的计划（结果在 `history/2026-09_frames/`）→ D1 | `history/2026-09_frames/` |
-| `2026-09-03_krdu_nw_endpoint_bias.md` | 状态模型 KRDU 终点偏西北 → T13 | `history/2026-09_frames/` |
-| `2026-09-04_procedure_constraints_design.zh.md` | 程序约束的量测与设计 → D5 | `history/2026-09_constraints/` |
-| `2026-09-06_control_hooks_results.zh.md` | 指令钩子（barrier / trombone）读数 → D6、H1–H4 | `history/2026-09_constraints/` |
-| `2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` | 任意时刻预测与 ETA 校准（A、B 线）→ R1–R4 | `history/2026-09_latent_anytime/` |
-| `2026-09-07_latent_intent_design.zh.md` | 潜在意图 L0–L5 → D11–D13、R5–R6 | `history/2026-09_latent_anytime/` |
-| `2026-09-14_specific_force_control_design.md` | 比力控制参数化 N3–N7′ → C27、D25–D27 | `history/2026-09_specific_force/` |
-| `2026-09-17_two_tier_plan_v2.zh.md` | 两层 v2 计划（代码已归档）；§10–§12 的数可引用 | `archive/two_tier_v2_2026_09/docs/` |
-| `2026-09-18_manoeuvre_token_plan.zh.md` | 意图编码计划（代码已归档） | `archive/manoeuvre_codes_2026_09/docs/` |
+| 文件 | 现在在哪 |
+|---|---|
+| `2026-08-19_control_bank_wiggle_diagnosis.zh.md` | `history/2026-08_control_path/` |
+| `2026-09-03_airport_frame_ablation_plan.md`、`2026-09-03_krdu_nw_endpoint_bias.md` | `history/2026-09_frames/` |
+| `2026-09-04_procedure_constraints_design.zh.md`、`2026-09-06_control_hooks_results.zh.md` | `history/2026-09_constraints/` |
+| `2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`、`2026-09-07_latent_intent_design.zh.md` | `history/2026-09_latent_anytime/` |
+| `2026-09-14_specific_force_control_design.md` | `history/2026-09_specific_force/` |
+| `2026-09-17_two_tier_plan_v2.zh.md` | `../archive/two_tier_v2_2026_09/docs/` |
+| `2026-09-18_manoeuvre_token_plan.zh.md` | `../archive/manoeuvre_codes_2026_09/docs/` |

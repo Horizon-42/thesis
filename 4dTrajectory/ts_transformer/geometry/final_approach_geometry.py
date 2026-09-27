@@ -18,7 +18,7 @@ Everything here is torch so one implementation serves the bounded output layer
 (``outputs.state.model.StateOutputLayer``), the training-time penalty
 (``objective.procedure_loss``) and the inference-time projection (``forecast``); NumPy callers wrap their arrays.
 
-**Which rows are "on the final".**  The measured data (docs/2026-09-04_procedure_constraints_design.zh.md)
+**Which rows are "on the final".**  The measured data (docs/history/2026-09_constraints/2026-09-04_procedure_constraints_design.zh.md)
 say 15–62 % of flights join the final INSIDE the FAF, so the FAF distance is not the
 gate.  Two gates exist:
 

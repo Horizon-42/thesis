@@ -90,7 +90,7 @@ export function mockAutopilotAnswer(sample: TrainingSample, request: TrainingAut
     },
     end: toLanding
       ? { reason: "landed", reachedSegmentEnd: null, offsetFromObserved: null, flownS: cycles,
-          crossing: { crossM: -1.5, heightM: 15.2, atS: tS[n - 1] }, refused: null }
+          crossing: { crossM: -1.5, heightM: 15.2, atS: tS[n - 1], runway: 0 }, refused: null }
       : { reason: TRAINING_AUTOPILOT_SEGMENT_END, reachedSegmentEnd: true,
           offsetFromObserved: model === null ? { horizontalM: 120, aboveM: -8, groundSpeedMps: 1.5 } : null, flownS: cycles,
           crossing: null, refused: null },

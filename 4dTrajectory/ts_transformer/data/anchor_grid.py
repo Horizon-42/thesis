@@ -16,7 +16,7 @@ are RE-EXPORTED here, the same objects, so every reading consumer keeps one impo
 while the training sampler reads the same numbers at module scope.
 
 Anytime-prediction design
-(``docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md``) §2.3, §六 1–2.
+(``docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md``) §2.3, §六 1–2.
 
 **Why remaining PATH and not time**: it is the covariate the NEAR / FAR strata are already
 cut on (``approach_difficulty.remaining_path_m``, whose per-sample form

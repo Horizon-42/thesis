@@ -1,4 +1,4 @@
-"""The lag model's two control laws (ts_transformer/docs/2026-09-14_specific_force_control_design.md).
+"""The lag model's two control laws (ts_transformer/docs/history/2026-09_specific_force/2026-09-14_specific_force_control_design.md).
 
 Under the specific-force law the RHS re-solves the thrust at every stage as
 ``clamp(W·a_x + D, T_lo, T_max)`` and subtracts the same drag, so the speed equation must

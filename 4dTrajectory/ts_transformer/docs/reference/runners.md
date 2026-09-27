@@ -16,7 +16,7 @@ rebased — same rule, new IDs.
 ### R1 · `run_ts.py anytime_curve` — A0
 
 **Runners for the anytime / calibrated-ETA line** (2026-09-07,
-`docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`):
+`docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`):
 
 - `run_ts.py anytime_curve` — **A0**: replays `--checkpoint LABEL=PATH` (repeatable) from the
   `anchor_grid` REMAINING-PATH grid (which it imports, and which the `anchor-grid-common-grid-ade`
@@ -111,7 +111,7 @@ rebased — same rule, new IDs.
 
 ### R5 · `run_ts.py latent_probe` — L2.f
 
-**The latent line's own runner** (`docs/2026-09-07_latent_intent_design.zh.md` §六 L2.f):
+**The latent line's own runner** (`docs/history/2026-09_latent_anytime/2026-09-07_latent_intent_design.zh.md` §六 L2.f):
 
 - `run_ts.py latent_probe` — **L2.f**: the training-side densities of one or more latent
   checkpoints on a split (`--checkpoint LABEL=PATH`, repeatable), through the SAME cohort
@@ -228,10 +228,11 @@ frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `t
 ### R12 · the executor: `executor_spec` → `executor_sensitivity` → `executor_replay`
 
 2026-09-24 (`docs/two_tier/executor_design.zh.md` §9–§11; layout L31). `executor_spec --instructions <artefact>
---dir <new dir> --word-clock {time,distance,track}` (`ts-executor-spec-v5` since 2026-09-24: the executor takes no
-information beyond the vocabulary and the pointed runway's published threshold crossing height) refuses a dirty tree,
-an existing directory and a labeller other than the artefact's; takes τ_ψ (the heading lead) and p (the vocabulary's
-bank limit over the lead) by method A from the vocabulary. Nothing is measured from data: the turn rates, the bank
+--dir <new dir> --word-clock {time,distance,track}` (`ts-executor-spec-v6` since v11, 2026-09-27: the executor takes no
+information beyond the vocabulary, the pointed runway's published threshold crossing height and glidepath, and the
+procedure standards' roll rate) refuses a dirty tree, an existing directory and a labeller other than the artefact's;
+takes τ_ψ (the heading lead) by method A from the vocabulary and p = `ROLL_RATE_DEG_S` (5°/s, FAA Order 8260.3G App. E
+§4 ¶6.a, ICAO Doc 8168 Vol II; up to v10 it was the bank limit over the lead, 8°/s). Nothing is measured from data: the turn rates, the bank
 limit, the speed changes' pace (a speed step over the shortest speed hold, 0.25 m/s²) and the altitude tolerance are
 the vocabulary's, read at run time; the landing crosses each candidate's published TCH, read at replay
 (`autopilot/runway_data.py`, the harvest's runway data at the evaluation CLI's default configuration and CIFP; the draw
@@ -267,7 +268,7 @@ Every airport is built before any is written.
 
 `executor_training_export --executor <spec dir> --replay <spec dir>/replay-val --instructions <artefact>
 --airports-root <…/public/data/airports> --set instruction_v3 --airport ICAO [--airport …] [--overlay-id
-executor_<spec dir name>] [--device cpu]` (schema `aeroviz-training-executor-v2` since 2026-09-24, `instruction-v3`;
+executor_<spec dir name>] [--device cpu]` (schema `aeroviz-training-executor-v3` since executor v11, 2026-09-27: a crossing names the runway crossed, and the outcomes `crossed_too_high` and `crossed_other_runway`; v2 since 2026-09-24, `instruction-v3`;
 the replay `ts-executor-replay-v3`): opens the spec with
 `replay.open_executor` (refused unless this executor code measured it), rebuilds the set's flights, flies those the
 replay flies (own and stand-in dynamics) in one batch per airport and judges them. `replay.json` keeps each flight's
@@ -292,7 +293,7 @@ refused (`docs/code-health-followups.md`, 2026-09-24). ~7 s per airport of 40 fl
 `prior_generation_training_export --prior <prior dir, or one round of a post-training run> --instructions <artefact>
 --executor <spec dir> [--readout <its val free generation>] --airports-root … --set <a read-back set> --airport ICAO
 [--airport …] [--samples 4] [--temperature 1.0] [--seed 1337] [--overlay-id generation_<name>[_r<NN>]_<sha256, 8 digits>]`
-(2026-09-26, schema `aeroviz-training-generation-v2` since the models were named the same day — v1 carried a free `--label`;
+(2026-09-26, schema `aeroviz-training-generation-v3` since executor v11, 2026-09-27 — a crossing names the runway crossed, two more outcomes; v2 since the models were named on 2026-09-26 — v1 carried a free `--label`;
 kind `prior-generation`; the frontend side AV31, AV32): the model's OWN sentences over the set's
 flights — `prior_free_generation.speak_and_fly` on the flights its val readout flies (own dynamics; the rest listed with their
 group), `--samples` each, one CPU generator seeded once and drawn in the order the airports are named (so a re-run is
@@ -466,7 +467,7 @@ Each prior sentence and each flight's observed track are read before the join (`
 `N_LOOK`: the most under the DA, the most climbed after the dip, the most under the FAA MVA where not cleared —
 `prior.mva`, FUS3 charts under `repo_layout.MVA_ROOT`), counted in each summary's `pre_join` past the track tolerance
 (DA, MVA) and an altitude step (climb), said beside observed; `generation.json`'s `procedure_masks` says whether the
-altitudes were on. Without them the run is draw for draw the one before it (40 select sentences checked). `generation.json` is `ts-prior-free-generation-v4` since 2026-09-26 (`procedure_masks`, the
+altitudes were on. Without them the run is draw for draw the one before it (40 select sentences checked). `generation.json` is `ts-prior-free-generation-v5` since executor v11, 2026-09-27 (the judge's two new outcomes and a crossing's `runway_index`; v4 since 2026-09-26: `procedure_masks`, the
 time-limit factors per start kind, the MVA chart read, the prior rows' `pre_join` / `pre_join_observed` — the climb read
 only inside a stretch of barred rows from `N_LOOK`, restarting after a go-around); v2 added `below_glidepath` and
 `glidepath_mask`. `--augment-seed S` (post-training design §4): every drawn flight is
@@ -545,11 +546,19 @@ over the stopped replays, the height the executor gave up to the observed aircra
 kind × angle class × lateral capture); per descent class, on each replay's longest ≥ 20 s run of "descend to land" after
 the capture, both mean path angles (height lost ÷ distance to go covered, each ≥ 500 m), the observed aircraft against the
 glidepath at the run's start and the height given up per minute; at the first captured cycle inside the FAF, executor −
-observed, apart for the replays that flew "descend to land" with the shallowest class before it. A what-if flies the same
-sample with ONE line of `Vertical.rate` replaced in-process (`class_centre_in_tube`: inside the tube after the capture, the
-class's nominal angle, never steeper than the line to the crossing point; refused unless the line is there exactly once) —
-stops and outcomes only; the executor's source and spec are untouched. Writes `diagnosis.json`
-(`ts-prior-glidepath-diagnosis-v1`); from a clean tree, never over an existing directory; development splits only.
+observed, apart for the replays that flew "descend to land" with the shallowest class before it. What-ifs (`WHAT_IFS`,
+`--what-ifs`) fly the same sample with a line or two of `Vertical.rate` replaced in-process (`law_changed`; refused unless
+each line is there exactly once) — the aim inside the word's tube after the capture, against the v11 law (level below the
+published glidepath, toward the crossing point on or above it): `toward_below_glidepath` (the law up to v10: toward the
+crossing point below the glidepath too), `class_centre_in_tube` (the class's nominal angle, never steeper than the line to
+the crossing point, below the glidepath too), `join_from_below_centre` (the law below, the class centre on or above it), and
+the two centre laws with the landing's reach read from the aircraft's own height instead of the tube's lower edge
+(`*_own_reach`); each is read in full as the law is,
+and on the replay gate's flights from row 0 (`replay_words`: landed, words inside, failures by check); the executor's
+source and spec are untouched. Writes `diagnosis.json` (`ts-prior-glidepath-diagnosis-v3` since executor v11's third
+milestone, 2026-09-27: "the law" is the v11 law; v2 the same day measured the what-ifs against the v10 law —
+`analyses/shallow_class_law_20260927/`; v1 read one what-if, stops and outcomes only); from a clean tree, never over an existing
+directory; development splits only.
 
 ### R18 · `run_ts.py prior_closed_loop` — archived 2026-09-25 → `archive/closed_loop_sft_2026_09/` (`docs/reference/entries.md` there)
 
@@ -588,8 +597,8 @@ ratio (v2: advantage × the NLL, no ratio — the adopted landing model's run).
 <its replay-train/replay.json> [--per-airport 400] [--seed 1337] [--leads 2 4 6 8] [--bank-limits 25 32] [--bank-rates
 derived 3 5] [--keep-records] --out <new dir> [--resume]`. A cell is (lead L, bank limit φ, roll rate p): the formal
 vocabulary with `heading_lead_s` = L and `turn_bank_max_deg` = φ and nothing else, the formal executor parameters with
-τ_ψ = L and p = φ ÷ L (`derived`, method A via `autopilot/derive.py`) or a given p (which breaks p·τ_ψ = φ, on which the
-executor's own turns rely). Every cell relabels the formal train replay gate's sample (`replay.draw`, own and stand-in
+τ_ψ = L (method A, `autopilot/derive.py`) and p = φ ÷ L (`derived`: the executor's p up to spec v10) or a given p (under
+tan φ ÷ 2L, `derive.stopping_roll_rate_deg_s`, the executor's own turns can outrun their stopping rate). Every cell relabels the formal train replay gate's sample (`replay.draw`, own and stand-in
 dynamics) under its own vocabulary and flies it through `executor_replay.fly_airport` (judged, written as records, graded
 by evaluation, paired with the observed verdicts graded once). The reference cell (the formal values) is flown first and
 must reproduce the formal replay in every field the replay stores but its two verdicts, or nothing else is flown. Per

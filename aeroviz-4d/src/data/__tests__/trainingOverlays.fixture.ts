@@ -99,7 +99,7 @@ export function mockExecutorOverlay(): Record<string, unknown> {
     flights: [
       {
         flightKey: VECTORED_KEY, datasetId: `KXXX:${VECTORED_KEY}`, group: "own dynamics", flown: true, outcome: "landed",
-        flewTheSentence: false, endS: (rows - 1) * 2, crossing: { crossM: 1.5, heightM: 20.8, atS: (rows - 1) * 2 - 0.4 },
+        flewTheSentence: false, endS: (rows - 1) * 2, crossing: { crossM: 1.5, heightM: 20.8, atS: (rows - 1) * 2 - 0.4, runway: 0 },
         refused: null, evaluation: { replay: "pass", observed: "pass" },
         alignment: { meanHorizontalDistanceM: 800, meanVerticalDistanceM: 30, landingTimeMinusObservedS: -4.2 },
         limits: { cycles: 98, bound: { bank_cap: 3, bank_rate: 10 } },
@@ -287,7 +287,7 @@ const opening = (runway: number) => [
 export function mockGenerationOverlay(id: string): Record<string, unknown> {
   const postTrained = MOCK_MODELS[id].name !== "base";
   const landed = {
-    sample: 0, outcome: "landed", endS: 110, crossing: { crossM: -1.2, heightM: 16.5, atS: 109.8 }, firstRunway: 0, lastRunway: 0,
+    sample: 0, outcome: "landed", endS: 110, crossing: { crossM: -1.2, heightM: 16.5, atS: 109.8, runway: 0 }, firstRunway: 0, lastRunway: 0,
     runwayChanges: 0, goArounds: 0, clearedAtEnd: true, forbiddenMass: { runway: 0, approach: 0, angle: 0.0004 }, rows: 56,
     events: [...opening(WORD.runway09), { row: 12, column: 2, value: WORD.heading225 }, { row: 16, column: 2, value: WORD.heading180 },
       { row: 24, column: 1, value: WORD.cleared }, { row: 24, column: 3, value: WORD.land }, { row: 24, column: 4, value: WORD.descent3 },

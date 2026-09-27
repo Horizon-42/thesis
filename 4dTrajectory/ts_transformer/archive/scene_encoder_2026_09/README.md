@@ -1,7 +1,7 @@
 # Archived: the scene encoder's data plane and its explainability readout (2026-09-05 → 09-07)
 
 A **completed** line of the scene design (`archive/scene_encoder_2026_09/docs/2026-09-05_scene_phase0_results.zh.md`;
-`docs/2026-09-07_latent_intent_design.zh.md` §L4), kept in the repository as the record
+`docs/history/2026-09_latent_anytime/2026-09-07_latent_intent_design.zh.md` §L4), kept in the repository as the record
 behind its numbers and taken off the import path. Nothing here runs against the current
 package; the files are left exactly as they were taken (archive convention:
 `tests/test_architecture.py` refuses a live import of anything under `archive/`).

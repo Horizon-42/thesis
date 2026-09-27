@@ -63,7 +63,9 @@ PREDICTOR = "executor"
 HORIZON = "sentence"
 #: v4 (2026-09-24): the vocabulary-only executor (stage 1: every word acts when said, the clock-skipped heading
 #: words counted apart; stage 2: the landing crosses the pointed runway's published TCH).
-REPLAY_SCHEMA = "ts-executor-replay-v4"
+#: v5 (2026-09-27, executor v11): the outcomes `crossed_too_high` and `crossed_other_runway`, a crossing's `runway_index`,
+#: each altitude word's `glidepath_floor_cycles`.
+REPLAY_SCHEMA = "ts-executor-replay-v5"
 
 
 def executor_forecast(flown: Flown, index: int, verdict: Outcome | Verdict, inputs: Any,

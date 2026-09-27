@@ -510,9 +510,10 @@ backend runs no command hooks, so the executor steps it cycle by cycle, the same
 constraints on them), `executor` (the cycle loop, `fly`), `judge` (the three-layer verdict, with the
 labeller's own checks), `replay` (who is flown — own dynamics or a stand-in's, the performance index's
 substitute; a flight without aircraft dynamics is counted, never flown, C31 — drawing, flying and reading
-a batch), `derive` (method A: every parameter from the vocabulary), `runway_data` (each candidate runway's published TCH, the
-one runway datum beyond the vocabulary) and `spec` (`ts-executor-spec-v5`: the parameters written once with their sha
-and the executor's source hash, `executor_source_files`; C33). Method B (`observe`,
+a batch), `derive` (method A: τ_ψ from the vocabulary; p is the standards' 5°/s, a constant of the spec runner since v11),
+`runway_data` (each candidate runway's published TCH, the one runway datum beyond the vocabulary) and `spec`
+(`ts-executor-spec-v6`: the parameters written once with their sha and the executor's source hash over the code's logic,
+`executor_source_files`, `logic`; C33). Method B (`observe`,
 the word delays) and method A's flown checks are archived (`archive/executor_vocabulary_only_2026_09/`: the executor
 takes no information beyond the vocabulary, the user's rule of 2026-09-24). It may import the data plane
 (`data.dataset`), the shared dynamics and geometry, and `instructions/`; never

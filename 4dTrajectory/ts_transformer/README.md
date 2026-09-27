@@ -44,7 +44,7 @@ acceptance rules, not landing certification.
 
 ## Status
 
-> **Historical (pre-v5, pre-2026-08-16).** The live status is `CLAUDE.md` ("Current defaults and their status") and `docs/2026-09-07_latent_intent_design.zh.md` §〇; this section is kept as the record of the first generation.
+> **Historical (pre-v5, pre-2026-08-16).** The live status is `CLAUDE.md` ("Current defaults and their status") and `docs/history/2026-09_latent_anytime/2026-09-07_latent_intent_design.zh.md` §〇; this section is kept as the record of the first generation.
 
 The current code keeps three explicit prediction contracts: `normalized`, `full`, and
 `window`. They share channels, output heads, losses, split policy, and anchor policy, while

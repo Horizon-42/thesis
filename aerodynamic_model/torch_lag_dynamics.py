@@ -32,7 +32,7 @@ drag at the resolved load, computed once per stage and subtracted again by the R
   ``T = a_x · T_max`` (``ts_transformer/outputs/envelope.py``); ``a_z`` is the load factor;
 * :class:`SpecificForceLaw` — the specific force along the path, ``a_x = (T - D)/W``, flown by
   ``clamp(W·a_x + D, T_lo, T_max)``. Wherever the clamp does not bind ``V' = g·(a_x - sin γ)``
-  and the airframe leaves the speed equation (``ts_transformer/docs/
+  and the airframe leaves the speed equation (``ts_transformer/docs/history/2026-09_specific_force/
   2026-09-14_specific_force_control_design.md``);
 * :class:`SpeedCommandLaw` — a speed command relative to the anchor airspeed, ``a_Δ`` m/s,
   flown by a first-order speed loop through the specific-force thrust: wherever the clamp does
@@ -363,7 +363,7 @@ class SpecificForceLaw(_ControlLaw):
 @dataclass(frozen=True)
 class SpeedCommandLaw(_ControlLaw):
     """The first actuator is a speed command RELATIVE to the anchor's airspeed, ``a_Δ`` m/s,
-    flown by a first-order speed loop (``ts_transformer/docs/
+    flown by a first-order speed loop (``ts_transformer/docs/history/2026-09_specific_force/
     2026-09-14_specific_force_control_design.md`` §12).
 
     At every RHS evaluation the loop asks for the specific force
@@ -413,7 +413,7 @@ class SpeedCommandLaw(_ControlLaw):
 @dataclass(frozen=True)
 class PathAngleLaw(_ControlLaw):
     """The THIRD actuator is a path-angle target ``γ*`` in radians, flown by a first-order path
-    loop through the load factor (``ts_transformer/docs/
+    loop through the load factor (``ts_transformer/docs/history/2026-09_specific_force/
     2026-09-14_specific_force_control_design.md`` §14); longitudinally it is
     :class:`SpecificForceLaw`.
 

@@ -258,7 +258,7 @@ def test_a_heading_word_is_flown_to_arrive_when_its_lead_runs_out_no_faster_than
     to_go = torch.tensor([4.0, 3.0, -5.0, 4.0, 1.0], dtype=F64)
     speed = torch.full((5,), 140.0, dtype=F64)
     stop = float(stopping_rate_deg_s(torch.tensor([6.0], dtype=F64), torch.tensor([140.0], dtype=F64), params))
-    # at 140 m/s and p 8°/s the bank can still be taken out before 6° from 2.6°/s
+    # at 140 m/s and p 5°/s the bank can still be taken out before 6° from 2.05°/s
     assert stop == pytest.approx(math.degrees(math.sqrt(2 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s) / 140.0
                                                         * math.radians(6.0))))
     # 6° over the 4 s or 3 s left; past the lead (and under 2Δt) a hold at 2Δt, here held to the stopping rate;
@@ -280,9 +280,82 @@ def test_the_parameters_are_checked_against_the_designs_constraints():
     params.check(one)
     for change, message in ((dict(heading_time_constant_s=1.5), "under 2 Δt"),
                             (dict(path_time_constant_s=1.0), "under 2 Δt"),
-                            (dict(timeout_factor=0.0), "positive")):
+                            (dict(timeout_factor=0.0), "positive"),
+                            # a NaN slips past a `min(...) <= 0` test; an inf is no rate either
+                            (dict(bank_rate_deg_s=math.nan), "finite"),
+                            (dict(path_rate_factor=math.inf), "finite")):
         with pytest.raises(ValueError, match=message):
             replace(params, **change).check(one)
+
+
+def test_the_executor_hash_reads_the_logic_not_the_wording():
+    """v11 (the user's rule, 2026-09-27): the spec binds what the code does — a docstring, a comment or a line break is
+    free, one token of code is not."""
+    from ts_transformer.autopilot import spec as executor_spec
+
+    source = '''"""Module docstring."""
+import math
+
+
+class Law:
+    """Class docstring."""
+
+    def rate(self, error: float) -> float:
+        """Method docstring."""
+        # a comment
+        return math.copysign(min(abs(error), 3.0), error)
+
+
+def only_prose():
+    """Nothing else."""
+'''
+    reworded = (source.replace("Module docstring.", "Reworded.").replace("# a comment", "# another comment")
+                .replace("return math.copysign(min(abs(error), 3.0), error)",
+                         "return math.copysign(\n            min(abs(error), 3.0), error)"))
+    assert executor_spec.logic(reworded) == executor_spec.logic(source)
+    assert "docstring" not in executor_spec.logic(source) and "comment" not in executor_spec.logic(source)
+    assert executor_spec.logic(source.replace("3.0", "3.5")) != executor_spec.logic(source)
+    # a body that held only its docstring still compiles as written back
+    compile(executor_spec.logic(source), "<logic>", "exec")
+
+
+def test_the_executor_source_hash_is_taken_over_the_logic(tmp_path, monkeypatch):
+    """`executor_source_sha256` itself — not only `logic` — ignores the wording of a hashed file and moves with its
+    code."""
+    from ts_transformer.autopilot import spec as executor_spec
+
+    module = tmp_path / "law.py"
+    monkeypatch.setattr(executor_spec, "executor_source_files", lambda: [("autopilot/law.py", module)])
+    module.write_text('''"""The law."""\n\n\ndef rate(e):\n    """Rate."""\n    return e / 4.0  # τ_ψ\n''')
+    first = executor_spec.executor_source_sha256()
+    module.write_text('''"""The law, reworded."""\n\n\ndef rate(e):\n    # another comment\n    return e / 4.0\n''')
+    assert executor_spec.executor_source_sha256() == first
+    module.write_text('''"""The law."""\n\n\ndef rate(e):\n    return e / 5.0\n''')
+    assert executor_spec.executor_source_sha256() != first
+
+
+def test_the_standards_roll_rate_stops_the_executors_own_turns_within_the_bank_limit():
+    """`derive.stopping_roll_rate_deg_s`: the slowest p at which `lateral.rate_for_error` never outruns the stopping rate
+    before the bank limit binds — checked against the laws themselves over speeds and errors; the spec runner's 5°/s
+    clears it for the test vocabulary (32°, lead 4 s)."""
+    from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
+    from ts_transformer.autopilot import derive
+    from ts_transformer.autopilot.lateral import rate_for_error, stopping_rate_deg_s
+    from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
+
+    one = spec(turn_rate_max_deg_s=10.0)          # the bank limit, not r_max, is the cap here
+    floor = derive.stopping_roll_rate_deg_s(one, 4.0)
+    assert floor == pytest.approx(math.degrees(math.tan(math.radians(32.0)) / 8.0)) and floor < ROLL_RATE_DEG_S
+    speed = torch.linspace(50.0, 160.0, 23, dtype=F64)[:, None]
+    error = torch.linspace(0.5, 180.0, 360, dtype=F64)[None, :]
+    bank_capped = GRAVITY_MPS2 * math.tan(math.radians(32.0)) / speed
+
+    def excess(p_deg_s: float) -> float:
+        params = _params(bank_rate_deg_s=p_deg_s)
+        own = torch.minimum(rate_for_error(error, params, one), torch.rad2deg(bank_capped))
+        return float((own - stopping_rate_deg_s(error, speed, params)).max())
+
+    assert excess(floor) <= 1e-9 and excess(ROLL_RATE_DEG_S) <= 0.0 and excess(0.9 * floor) > 0.0
 
 
 
@@ -302,8 +375,10 @@ def _params(**changes):
     from dataclasses import replace
     from ts_transformer.autopilot.params import ExecutorParams
 
-    # τ_ψ = the lead and p = the bank limit over the lead: method A's values from the vocabulary (`derive`)
-    base = ExecutorParams(cycle_s=1.0, heading_time_constant_s=4.0, bank_rate_deg_s=8.0, path_time_constant_s=2.0,
+    from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
+
+    # τ_ψ = the lead (method A, `derive`) and the standards' roll rate, as the spec runner writes them
+    base = ExecutorParams(cycle_s=1.0, heading_time_constant_s=4.0, bank_rate_deg_s=ROLL_RATE_DEG_S, path_time_constant_s=2.0,
                           path_rate_factor=2.0, timeout_factor=1.5, word_clock="time")
     return replace(base, **changes)
 
@@ -489,6 +564,64 @@ def test_the_flights_outcome_is_the_first_event_it_meets():
     assert limited["cycles"] > 0 and limited["wanted_minus_given"] > 1e-4
 
 
+def _parallels():
+    """A test airport with two parallel runways 09R (the frame's origin) and 09L, 1,500 m north, a crossing runway 03
+    whose threshold lies 2 km past 09R's, 200 m south of its centreline, and 27L, 09R's other end."""
+    from ts_transformer.instructions.airport import AirportGeometry
+
+    ends = [{"ident": "09R", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0},
+            {"ident": "09L", "threshold_e_m": 0.0, "threshold_n_m": 1500.0, "course_deg": 90.0},
+            {"ident": "03", "threshold_e_m": 2000.0, "threshold_n_m": -200.0, "course_deg": 30.0},
+            {"ident": "27L", "threshold_e_m": 3000.0, "threshold_n_m": 0.0, "course_deg": 270.0}]
+    return AirportGeometry.from_dict({
+        "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": 100.0},
+        "candidates": [{**end, "elevation_m": 100.0, "length_m": 3000.0} for end in ends], "runway_ends": ends})
+
+
+def test_a_crossing_is_judged_against_the_runway_itself_and_another_runway_ends_the_flight():
+    """v11 (prior readouts §16–§17): captured, a crossing of the pointed threshold lands only within the runway's own
+    lateral limit (the FAS course half-width at the threshold, 106.7 m) and height; on the centreline but too high is
+    `crossed_too_high`, wide of the runway `crossed_off_runway`; crossing another runway's threshold over that runway
+    itself, lined up with it, at any height, is `crossed_other_runway`, where the flight ends; crossing a runway at an
+    angle, beside it, or its other end the wrong way is not."""
+    from ts_transformer.autopilot.judge import CROSSINGS, OUTCOMES, _outcome, runway_lateral_limit_m
+
+    geometry, one = _parallels(), spec()
+    assert runway_lateral_limit_m(geometry, 0, one) == pytest.approx(350.0 * 0.3048)
+    assert set(CROSSINGS) < set(OUTCOMES)
+
+    def judged(n_m, height_m, *, captured=True, track_deg=90.0, e_from=-3000.0, e_to=200.0):
+        """A straight flight at ``n_m`` north of 09R's centreline, from ``e_from`` (3 km before its threshold) to
+        ``e_to``."""
+        e = np.arange(e_from, e_to + 1.0, 70.0)
+        n = np.full(len(e), n_m)
+        height = np.full(len(e), 100.0 + height_m)
+        track = {"e": e, "n": n, "height": height, "track": np.full(len(e), track_deg)}
+        states = np.ones((len(e), 7))
+        return _outcome(states, track, np.full(len(e), captured), np.zeros(len(e), dtype=bool), geometry, 0, one)
+
+    kind, row, crossing = judged(-50.0, 20.0)
+    assert kind == "landed" and crossing["runway_index"] == 0 and crossing["cross_m"] == pytest.approx(50.0)
+    assert judged(-5.0, 180.0)[0] == "crossed_too_high"                    # on the centreline, 80 m above the window
+    assert judged(-300.0, 20.0)[0] == "crossed_off_runway"                 # inside the harvest's 750 m, off the runway
+    assert judged(-300.0, 20.0, captured=False)[0] == "crossed_without_capture"
+    assert judged(-1300.0, 20.0, captured=False)[0] == "timeout"           # beyond 09R's 750 m, far from 09L
+    # lined up with 09L and crossing its threshold over the runway: another runway, the flight ends there — low, or
+    # passing over it high (the wrong-runway line-ups of prior readouts §16 pass 60–280 m up)
+    kind, row, crossing = judged(1480.0, 20.0, captured=False)
+    assert kind == "crossed_other_runway" and crossing["runway_index"] == 1
+    assert crossing["cross_m"] == pytest.approx(20.0) and crossing["height_m"] == pytest.approx(20.0)
+    assert judged(1480.0, 250.0, captured=False)[0] == "crossed_other_runway"
+    # 300 m beside 09L is not over it (within the harvest's 750 m, outside the runway's 106.7 m)
+    assert judged(1200.0, 20.0, captured=False)[0] == "timeout"
+    # captured on 09R and landing there: 03's threshold, 2 km on and at an angle, is never reached first — and past
+    # 09R's threshold, crossing 03's plane low over its threshold at 60° to its course is not landing on it, nor is
+    # flying on down 09R past its other end, 27L, whose plane it crosses the wrong way
+    assert judged(-50.0, 20.0, e_to=4000.0)[0] == "landed"
+    assert judged(-200.0, 20.0, captured=False, e_from=500.0, e_to=4000.0)[0] == "timeout"
+    assert judged(0.0, 20.0, captured=False, e_from=500.0, e_to=4000.0)[0] == "timeout"
+
+
 def test_descents_level_off_at_their_targets_inside_the_tubes():
     """§5.3: a descent to a target levels off at it without passing it; the next descent word releases it."""
     legs = [(100, 0.0, 75.0, 0.0), (80, 0.0, 75.0, -75.0 * np.tan(np.radians(2.1))), (120, 0.0, 75.0, 0.0),
@@ -522,8 +655,11 @@ def test_the_executor_spec_is_written_once_and_refused_unless_it_is_the_current_
 
     from ts_transformer.autopilot import spec as executor_spec
 
+    import platform
+
     params = _params()
-    source = {"executor_source_sha256": executor_spec.executor_source_sha256(), "git": {"head": "x", "dirty": False}}
+    source = {"executor_source_sha256": executor_spec.executor_source_sha256(), "python": platform.python_version(),
+              "git": {"head": "x", "dirty": False}}
     executor_spec.write_spec(tmp_path, params, "vocabulary", {"data": {}}, source)
     loaded, record = executor_spec.load_spec(tmp_path)
     assert loaded == params and record["sha256"] == executor_spec.params_sha256(params)
@@ -531,8 +667,12 @@ def test_the_executor_spec_is_written_once_and_refused_unless_it_is_the_current_
     with pytest.raises(FileExistsError):
         executor_spec.write_spec(tmp_path, params, "vocabulary", {}, source)
     assert executor_spec.params_sha256(replace(params, bank_rate_deg_s=3.0)) != record["sha256"]
-    with pytest.raises(ValueError, match="other executor code"):
+    with pytest.raises(ValueError, match=r"other executor code \(000000000000, now [0-9a-f]{12}\)$"):
         executor_spec.require_current_executor({**record, "source": {**source, "executor_source_sha256": "0" * 64}})
+    # the written-back logic is the running Python's: a spec written under another names it
+    with pytest.raises(ValueError, match="written under Python 2.7.0, this is"):
+        executor_spec.require_current_executor({**record, "source": {**source, "executor_source_sha256": "0" * 64,
+                                                                      "python": "2.7.0"}})
     stored = json.loads((tmp_path / "spec.json").read_text())
     for broken, message in (({**stored, "params": {**stored["params"], "bank_rate_deg_s": 9.0}}, "do not hash"),
                             ({**stored, "params": {**stored["params"], "extra_s": 1.0}}, "extra"),
@@ -802,7 +942,9 @@ def test_crossings_are_told_apart_by_capture_and_by_the_landing_condition():
     level[1:, ALTITUDE] = UNCHANGED
     level[1:, ANGLE] = UNCHANGED
     _, high, _ = _fly_sentence(signals, level)                  # captured, never descends: 1000 m over the threshold
-    assert high.outcome == "crossed_off_runway" and high.crossing["height_m"] > 500.0
+    # on the centreline and too high — a vertical miss, not a lateral one (v11)
+    assert high.outcome == "crossed_too_high" and high.crossing["height_m"] > 500.0
+    assert abs(high.crossing["cross_m"]) < 50.0
     straight = [(40, 0.0, 90.0, 0.0), (30, 0.0, 80.0, 0.0), (110, 0.0, 72.0, -72.0 * np.tan(np.radians(3.0)))]
     aligned = instruction_flight(*fly_legs(straight, 90.0, 950.0, -300.0, 0.0))
     _, _, on_final = _fly_sentence(aligned)
@@ -976,7 +1118,7 @@ def test_an_executor_spec_is_opened_only_against_its_own_vocabulary_and_labeller
     from ts_transformer.autopilot import spec as executor_spec
 
     one = spec()
-    source = {"executor_source_sha256": executor_spec.executor_source_sha256(), "labeller_source_sha256": "a" * 64,
+    source = {"executor_source_sha256": executor_spec.executor_source_sha256(), "python": "3", "labeller_source_sha256": "a" * 64,
               "git": {"head": "x", "dirty": False}}
     executor_spec.write_spec(tmp_path / "spec", _params(), one.sha256, {}, source)
     monkeypatch.setattr(replay.artefact, "load_spec", lambda directory: one)
@@ -1108,6 +1250,11 @@ def test_descend_to_land_never_goes_under_the_published_glidepaths_lower_edge_be
         assert aim_deg(on, 8000.0, captured) == pytest.approx(aim_deg(on, 8000.0, captured, glidepath_tan=0.0))
     assert aim_deg(30.0, -200.0, True) == pytest.approx(aim_deg(30.0, -200.0, True, glidepath_tan=0.0))
     assert aim_deg(under, 8000.0, True, go_around=True) == pytest.approx(-words.spec.climb_angle_centre_deg)
+    # v11: between the edge and the glidepath, after the capture, the shallowest class waits level for the glidepath
+    # (the approach joined from below); before the capture it flies the class as before
+    between = on - 30.0
+    assert aim_deg(between, 8000.0, True) == pytest.approx(0.0)
+    assert aim_deg(between, 8000.0, False) == pytest.approx(words.angle_deg(1))
     # on the edge, 60° off the course (a base leg), under the steepest class: without the edge the law descends
     # steeper than the edge falls there (half the glidepath's slope); with it, exactly that; flying away, level
     edge, steepest = TEST_TCH_M + 8000.0 * tan3 - GLIDEPATH_BELOW_M, words.n_descent
@@ -1230,6 +1377,7 @@ def test_a_final_said_under_the_glidepaths_lower_edge_is_held_at_the_edge():
     under the lower edge (the glidepath less `GLIDEPATH_BELOW_M`): it levels off there, still lands, and crosses inside
     evaluation's vertical gate; the land word gives up its tube where the two disagree."""
     from evaluation.thresholds import RNAV_TERMINAL_VERTICAL_BOUND_M
+    from ts_transformer.autopilot import replay
     from ts_transformer.autopilot.judge import flown_track
     from ts_transformer.autopilot.vertical import GLIDEPATH_BELOW_M
 
@@ -1248,6 +1396,13 @@ def test_a_final_said_under_the_glidepaths_lower_edge_is_held_at_the_edge():
     assert abs(verdict.crossing["height_m"] - TEST_TCH_M) <= RNAV_TERMINAL_VERTICAL_BOUND_M
     land = verdict.words["vertical"][-1]
     assert land["inside"] < land["rows"]
+    # the edge set the aim: mode `glidepath_floor`, counted for the flight and inside the land word's own span — the
+    # replay summary files the word under the floor, not under the law
+    assert flown.modes["glidepath_floor"][0].any() and verdict.words["glidepath_floor_cycles"] > 0
+    assert land["glidepath_floor_cycles"] > 0 and not any(v["glidepath_floor_cycles"] for v in verdict.words["vertical"][:-1])
+    failures = replay.summary([verdict])["word_failures"]
+    assert failures["altitude word outside its tube, the glidepath floor held it"] == 1
+    assert "altitude word outside its tube" not in failures
 
 
 def test_a_speed_word_is_flown_at_the_vocabularys_pace_both_ways():

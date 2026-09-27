@@ -59,7 +59,7 @@ rebased — same rule, new IDs.
 ### C27 · the control head's FOUR contracts (`control_thrust_parameterization`)
 
 - **The control head has FOUR contracts — `control_thrust_parameterization` — and each is ONE row**
-  (2026-09-14 → 09-16; `docs/2026-09-14_specific_force_control_design.md`; the one-row structure:
+  (2026-09-14 → 09-16; `docs/history/2026-09_specific_force/2026-09-14_specific_force_control_design.md`; the one-row structure:
   `archive/two_tier_v2_2026_09/docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11):
   - **`thrust-fraction`** (the default, every stored run, pinned by every named recipe) is the
     box below. **`specific-force`** makes the first column `n_x = (T − D)/W` (box `[−0.20, 0.23]` g,
@@ -497,9 +497,14 @@ it was measured against, and `source`: `executor_source_sha256` over `executor_s
 but `spec.py`, plus every repository module they import directly — `ts_transformer.config`, `data.dataset`,
 `outputs.envelope`, `outputs.dynamics.*`, `outputs.constraints.speed_floor`, `geometry.flyability`, `geokit`, …, labelled
 by module name so the hash is the same from any checkout) and the labeller's source sha. `replay.open_executor` refuses a
-spec of another schema (`ts-executor-spec-v5`), of other executor code, of another vocabulary, or of another labeller.
-**So a byte changed in any hashed file — a comment included — makes the current code refuse every stored spec**: a new
-spec is written and the train replay gate re-run (v7 → v9 on 2026-09-26 came that way).
+spec of another schema (`ts-executor-spec-v6`), of other executor code, of another vocabulary, or of another labeller.
+**Since executor v11 (2026-09-27, the user's rule) the hash is over each file's LOGIC, not its bytes** (`spec.logic`: the
+syntax tree without the docstrings of the module, its classes and functions, written back by `ast.unparse`; comments
+never reach the tree): a docstring, a comment or a line break is free, **any change to the code makes the current code
+refuse every stored spec** — a new spec is written and the train replay gate re-run (v7 → v9 and v9 → v10 on 2026-09-26
+came that way, and v11 does; up to v10 the hash was over bytes, comments included, and held ten dated records in
+`docs/`). The written-back text is the running Python's: another Python version may differ and is refused as other code
+— the spec records `source.python` and the refusal names it.
 
 ### C34 · a prior checkpoint belongs to one sentence artefact
 

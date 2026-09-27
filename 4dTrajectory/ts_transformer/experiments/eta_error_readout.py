@@ -2,7 +2,7 @@
 """B0: what the arrival-time error actually looks like, per difficulty stratum.
 
 Anytime / calibrated-ETA design
-(`4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`)
+(`4dTrajectory/ts_transformer/docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`)
 §三 3.1: the duration head is a point estimate and there is no interval anywhere in the
 package. Before a quantile head or a conformal calibrator is worth building, the SIZE of
 the thing they would have to cover has to be known — and it is already on disk, one

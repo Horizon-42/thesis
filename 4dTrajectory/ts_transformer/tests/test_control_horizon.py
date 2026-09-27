@@ -1,4 +1,4 @@
-"""`control_horizon_s` — a FIXED rollout horizon (two-tier L1, `docs/2026-09-17_two_tier_plan_v2.zh.md` §3).
+"""`control_horizon_s` — a FIXED rollout horizon (two-tier L1, `archive/two_tier_v2_2026_09/docs/2026-09-17_two_tier_plan_v2.zh.md` §3).
 
 The contract, each piece pinned here: every window set admits only anchors with Δ of truth
 after them; a sample's targets cover [0, Δ] at the segment ends; the model rolls exactly Δ

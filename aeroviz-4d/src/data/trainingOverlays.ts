@@ -60,7 +60,7 @@ export const TRAINING_OVERLAY_KINDS = ["executor-replay", "prior-prediction", "p
 export type TrainingOverlayKind = (typeof TRAINING_OVERLAY_KINDS)[number];
 /** MIRROR of `executor_training_export.SCHEMA`: v2 (instruction-v3) gives each heading word judged its band and a
  *  verdict per row, and each flight judged its flown track as the judge read it; v1 (turns and holds) is refused. */
-export const TRAINING_EXECUTOR_SCHEMA = "aeroviz-training-executor-v2";
+export const TRAINING_EXECUTOR_SCHEMA = "aeroviz-training-executor-v3";
 /** MIRROR of `executor_training_export.STATUSES`: one per word. */
 export const TRAINING_EXECUTOR_STATUSES = [
   "inside", "outside", "not judged", "not reached", "superseded", "no check",
@@ -69,7 +69,8 @@ export type TrainingExecutorStatus = (typeof TRAINING_EXECUTOR_STATUSES)[number]
 /** MIRROR of `ts_transformer.autopilot.judge.OUTCOMES`: how the executor's flight ended — the replay's, and the live
  *  executor's when it flew on to the landing (pinned by the backend's `test_autopilot_segment.MirrorTest`). */
 export const TRAINING_EXECUTOR_OUTCOMES = [
-  "landed", "crossed_without_capture", "crossed_off_runway", "ground_contact", "timeout", "dynamics_failure",
+  "landed", "crossed_too_high", "crossed_off_runway", "crossed_other_runway", "crossed_without_capture", "ground_contact",
+  "timeout", "dynamics_failure",
 ] as const;
 export type TrainingExecutorOutcome = (typeof TRAINING_EXECUTOR_OUTCOMES)[number];
 /** MIRROR of `prior_free_generation.BELOW_GLIDEPATH`: a free sentence under the procedure's altitudes stops at the first
@@ -91,15 +92,17 @@ export const TRAINING_PRIOR_RULES = ["B0_majority", "B1_active_config", "B3_same
 export const TRAINING_PRIOR_SCHEMA = "aeroviz-training-prior-v3";
 /** MIRROR of `prior_generation_training_export.SCHEMA`: the prior's own sentences, flown; v2 names the model (its name,
  *  round, run and start model) where v1 carried a free label. */
-export const TRAINING_GENERATION_SCHEMA = "aeroviz-training-generation-v2";
+export const TRAINING_GENERATION_SCHEMA = "aeroviz-training-generation-v3";
 /** MIRROR of `prior_generation_training_export.MODEL_NAMES`: the prior's models, in the order they are trained — base
  *  (data alone), landing (post-trained on the landing reward), augmented (landing post-trained again on augmented
  *  starts). The views order them so. */
 export const TRAINING_MODEL_NAMES = ["base", "landing", "augmented"] as const;
 export type TrainingModelName = (typeof TRAINING_MODEL_NAMES)[number];
-/** MIRROR of `ts_transformer.autopilot.judge.CROSSINGS`: the outcomes read at a crossing of the threshold, which carry
- *  where it was crossed; no other outcome does. */
-export const TRAINING_CROSSING_OUTCOMES: readonly TrainingFreeOutcome[] = ["landed", "crossed_without_capture", "crossed_off_runway"];
+/** MIRROR of `ts_transformer.autopilot.judge.CROSSINGS`: the outcomes read at a crossing of a threshold (the pointed
+ *  runway's, or another's for `crossed_other_runway`), which carry where it was crossed; no other outcome does. */
+export const TRAINING_CROSSING_OUTCOMES: readonly TrainingFreeOutcome[] = [
+  "landed", "crossed_too_high", "crossed_off_runway", "crossed_other_runway", "crossed_without_capture",
+];
 
 // ── shapes ───────────────────────────────────────────────────────────────────
 
@@ -175,6 +178,9 @@ export interface TrainingCrossing {
   crossM: number;
   heightM: number;
   atS: number;
+  /** The candidate runway crossed (the flight's candidates' order, as `firstRunway` / `lastRunway`): the pointed one,
+   *  or another for `crossed_other_runway`. `crossM` and `heightM` are against it. */
+  runway: number;
 }
 
 /** A flight of the set the replay does not fly: `group` says why. */
@@ -333,8 +339,8 @@ export interface TrainingGeneratedTrack {
 
 /** ONE sentence the prior said over a flight (one sample), flown by the executor: its words from the first predicted row
  *  on (the rows before are observed only; the first predicted row says every column), and how the flight ended. Its
- *  words run to where the EXECUTOR stopped, which is after ``endS`` for two outcomes the judge reads earlier (crossing
- *  without the capture, the stall cut-off): the rows after the end are the model still speaking to a flight that is
+ *  words run to where the EXECUTOR stopped, which is after ``endS`` for three outcomes the judge reads earlier (crossing
+ *  without the capture, another runway's threshold, the stall cut-off): the rows after the end are the model still speaking to a flight that is
  *  over — counted as the formal readout counts them, shaded in the bar. */
 export interface TrainingGeneratedSentence extends TrainingSentence {
   sample: number;
@@ -701,7 +707,8 @@ function eachFlight<T>(reader: Reader, sample: TrainingSample, read: (item: Read
 // ── what the executor's judge says of a word (the replay's and the live executor's) ──
 
 export function readCrossing(reader: Reader): TrainingCrossing {
-  return { crossM: reader.number("crossM"), heightM: reader.number("heightM"), atS: reader.number("atS") };
+  return { crossM: reader.number("crossM"), heightM: reader.number("heightM"), atS: reader.number("atS"),
+    runway: reader.count("runway") };
 }
 
 /**

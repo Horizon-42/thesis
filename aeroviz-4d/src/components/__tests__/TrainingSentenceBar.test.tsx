@@ -176,7 +176,7 @@ describe("TrainingSentenceBar", () => {
     // the second sample crossed the threshold without the capture at 150 s — the executor flies on after it — and the
     // model spoke on for 15 steps
     generations(0, (raw) => {
-      Object.assign(raw.flights[0].samples[1], { outcome: "crossed_without_capture", crossing: { crossM: 80, heightM: 30, atS: 149.6 },
+      Object.assign(raw.flights[0].samples[1], { outcome: "crossed_without_capture", crossing: { crossM: 80, heightM: 30, atS: 149.6, runway: 0 },
         rows: 90 });
     });
     appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 1 };
@@ -286,6 +286,18 @@ describe("TrainingSentenceBar", () => {
     expect(screen.queryByText("152 s")).toBeNull();
     fireEvent.click(samples.querySelector("button")!);
     expect(setTrainingSource).toHaveBeenCalledWith({ overlayId: BASE_MODEL_ID, sample: 0 });
+  });
+
+  it("names the runway a sample crossed — for another runway's threshold, that runway, not the one it pointed at", () => {
+    select();
+    // the second sample pointed at 27 to its end but crossed 09's threshold lined up with it
+    generations(0, (raw) => {
+      Object.assign(raw.flights[0].samples[1], { outcome: "crossed_other_runway",
+        crossing: { crossM: 12, heightM: 140, atS: 149.6, runway: 0 } });
+    });
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 1 };
+    render(<TrainingSentenceBar />);
+    expect(screen.getByText("#2: other runway on 09 at 150 s (observed 120 s)")).toBeTruthy();
   });
 
   it("keeps the truth's own axis under its tab, never stretched by a model's sample it does not show", () => {

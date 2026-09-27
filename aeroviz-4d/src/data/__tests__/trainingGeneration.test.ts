@@ -161,7 +161,7 @@ describe("a generation overlay", () => {
 
   it("refuses a sample whose runways, crossing or track disagree with its own words and end", () => {
     expect(refusal((raw) => { raw.flights[0].samples[1].lastRunway = 0; })).toMatch("its words say 0 → 1");
-    expect(refusal((raw) => { raw.flights[0].samples[1].crossing = { crossM: 0, heightM: 10, atS: 140 }; })).toMatch("is timeout and carries a crossing");
+    expect(refusal((raw) => { raw.flights[0].samples[1].crossing = { crossM: 0, heightM: 10, atS: 140, runway: 0 }; })).toMatch("is timeout and carries a crossing");
     expect(refusal((raw) => { landedSample(raw).crossing = null; })).toMatch("is landed with no crossing");
     expect(refusal((raw) => { landedSample(raw).endS = 104; })).toMatch("its track ends at 110 s, not at 104 s");
     expect(refusal((raw) => { landedSample(raw).track.tS[0] = 0; })).toMatch("does not start at the first predicted row (8 s)");

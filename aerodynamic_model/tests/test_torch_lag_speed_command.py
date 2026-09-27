@@ -1,4 +1,4 @@
-"""The lag model's speed-command law (ts_transformer/docs/2026-09-14_specific_force_control_design.md §12).
+"""The lag model's speed-command law (ts_transformer/docs/history/2026-09_specific_force/2026-09-14_specific_force_control_design.md §12).
 
 Under :class:`SpeedCommandLaw` the first actuator is a speed command relative to the anchor
 airspeed, and the RHS asks for the specific force ``sin γ + (V₀ + a_Δ − V)/(g·τ_V)``, flown

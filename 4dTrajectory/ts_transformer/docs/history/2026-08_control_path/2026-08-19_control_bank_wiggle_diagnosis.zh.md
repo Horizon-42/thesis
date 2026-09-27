@@ -17,7 +17,7 @@
 `prediction_output=control` 的预测轨迹带有大量参考航迹上不存在的转弯和弧线。**即使
 参考是一条笔直的进近，预测出来仍然是弯的。**
 
-![一条笔直进近上的预测](figures/straight_in_example.png)
+![一条笔直进近上的预测](../../figures/straight_in_example.png)
 
 左：SWA2970 的参考航迹（橙）笔直——路径长度和直线距离只差 0.5 %；预测（蓝）两次鼓出去
 再拉回来。右：同一条航班，把参考航迹通过动力学**反解**出来的 bank（橙）几乎恒为 0，
@@ -52,7 +52,7 @@
 
 把每条航班的 bank 剖面拆成「所有航班的平均剖面」和「各自的残差」：
 
-![bank 能量的去向](figures/bank_energy_share.png)
+![bank 能量的去向](../../figures/bank_energy_share.png)
 
 **真实航迹的 bank 只有 3 % 是共用的**（几乎全是航班特有的，逐段航班间标准差 2.63°）；
 **模型的 bank 有 71 % 是共用的**（航班间标准差只有 2.23°，而共用剖面本身摆幅达 16°）。
@@ -60,7 +60,7 @@
 
 ### 3.3 而且那条共用剖面不是数据的平均值
 
-![剖面对比](figures/bank_profile_comparison.png)
+![剖面对比](../../figures/bank_profile_comparison.png)
 
 | | RMS | 范围 |
 |---|---:|---|
@@ -133,7 +133,7 @@ bias 是 192 = 64 段 × 3 控制量，正好就是那条共用剖面。10.5 倍
 把权重改为按 `NEUTRAL_LOGIT_PERTURBATION / sqrt(fan_in)` 播种（保持中性起点，实测未训练
 输出偏离中性平均 0.4 %、最坏 1.7 % 的包络跨度），重跑完整成对实验：
 
-![修复反而更差](figures/attempted_fix_regression.png)
+![修复反而更差](../../figures/attempted_fix_regression.png)
 
 | | 零初始化 | 播种初始化 |
 |---|---:|---:|
@@ -155,7 +155,7 @@ bias 是 192 = 64 段 × 3 控制量，正好就是那条共用剖面。10.5 倍
 4 条航班（0.4 %）的预测航迹长度是参考的 1.5 倍以上，最坏 **21 倍**（参考 1.3 km，
 预测 27.5 km，绕了一整圈）。原因与 bank 无关：
 
-![时长头的下限](figures/final_time_floor.png)
+![时长头的下限](../../figures/final_time_floor.png)
 
 ```
   预测剩余时长范围  [125, 631] s

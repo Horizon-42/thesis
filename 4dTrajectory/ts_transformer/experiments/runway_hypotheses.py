@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Runway-hypothesis expansion: one threshold-anchored forecast per candidate runway.
 
-The airport-frame ablation (``4dTrajectory/ts_transformer/docs/
+The airport-frame ablation (``4dTrajectory/ts_transformer/docs/history/2026-09_frames/
 2026-09-03_airport_frame_ablation_results.md``) showed that the chart's threshold anchor IS
 the model's runway knowledge: take it away and the deterministic predictor averages
 across each parallel pair. The complementary question is what that knowledge is WORTH —
