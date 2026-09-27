@@ -134,16 +134,22 @@ def losses(traffic: Traffic, separation: Separation) -> list[Loss]:
     return out
 
 
+def next_behind(traffic: Traffic, leader: int, separation: Separation) -> int | None:
+    """The established aircraft next behind ``leader`` on the approach clock, on its runway or one separated as one."""
+    runway = traffic.runway[leader]
+    behind = [k for k in range(len(traffic.e_m))
+              if k != leader and traffic.established[k] and separation.one_runway(runway, traffic.runway[k])
+              and traffic.along_m[k] < traffic.along_m[leader]]
+    return max(behind, key=lambda k: traffic.along_m[k]) if behind else None
+
+
 def wake_at_threshold(traffic: Traffic, leader: int, separation: Separation) -> Loss | None:
     """``leader`` is over its threshold now: the established aircraft next behind it on the same runway (or a pair
     separated as one) must be the on-approach wake minimum behind it on the approach clock (TBL 5-5-2, 5-5-4 h)."""
-    runway = traffic.runway[leader]
-    behind = [k for k in range(len(traffic.e_m))
-              if k != leader and traffic.established[k] and traffic.runway[k] is not None
-              and separation.one_runway(runway, traffic.runway[k]) and traffic.along_m[k] < traffic.along_m[leader]]
-    if not behind:
+    follower = next_behind(traffic, leader, separation)
+    if follower is None:
         return None
-    follower = max(behind, key=lambda k: traffic.along_m[k])
+    runway = traffic.runway[leader]
     required, known = _wake_m(separation.wake_nm, traffic.category[leader], traffic.category[follower])
     gap = float(traffic.along_m[leader] - traffic.along_m[follower])
     if not known or gap >= required:
