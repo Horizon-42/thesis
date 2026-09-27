@@ -23,6 +23,7 @@ from ts_transformer.inference.runway_schedule import (
     parallel_relations,
     sample_schedules,
     schedule,
+    read_cwt_tables,
     violations,
     wake_category,
 )
@@ -251,3 +252,38 @@ def test_a_flight_far_from_the_others_lands_at_its_drawn_arrival():
     out = sample_schedules([near, far], errors, ONE_RUNWAY, delay_weight_per_s=1 / 60, min_probability=EPS)
     assert np.allclose(out["far"].times_s, 5000.0 - errors["far"]) and np.all(out["far"].delays_s == 0.0)
     assert out["far"].runways == ("05L", "05L", "05L")
+
+
+def _cwt_files(tmp_path, table_rows: str, supplement_rows: str = ""):
+    table = tmp_path / "table.csv"
+    table.write_text("type_designator,class,engine_number_type_faa_weight_class,icao_wtc,cwt,srs,lahso_group,pdf_page\n"
+                     + table_rows, encoding="utf-8")
+    supplement = tmp_path / "supplement.csv"
+    supplement.write_text("type_designator,cwt,source,added\n" + supplement_rows, encoding="utf-8")
+    return table, supplement
+
+
+def test_the_type_table_is_the_orders_table_plus_the_supplement(tmp_path):
+    table, supplement = _cwt_files(tmp_path, "B738,Fixed-wing,2J/L,Medium,F,III,8,24\nQ4,Fixed-wing,1J/S,Medium,,III,,94\n",
+                                   "EL2,I,N JO 7360.7 (GENOT 25/41),2026-09-27\n")
+    assert read_cwt_tables(table, supplement) == {"B738": "F", "EL2": "I"}      # a blank CWT column is left out
+
+
+@pytest.mark.parametrize("table_rows, supplement_rows", [
+    ("B738,Fixed-wing,2J/L,Medium,F,III,8,24\n", "B738,F,somewhere,2026-09-27\n"),      # in both tables
+    ("B738,Fixed-wing,2J/L,Medium,F,III,8,24\nB738,Fixed-wing,2J/L,Medium,F,III,8,24\n", ""),   # twice in one
+    ("B738,Fixed-wing,2J/L,Medium,Z,III,8,24\n", ""),                                        # not a category
+    ("", "EL2,I,,2026-09-27\n"),                                                              # no source
+])
+def test_the_type_table_refuses_a_doubled_type_a_bad_category_and_an_unsourced_row(tmp_path, table_rows, supplement_rows):
+    with pytest.raises(ValueError):
+        read_cwt_tables(*_cwt_files(tmp_path, table_rows, supplement_rows))
+
+
+def test_the_committed_type_table_reads_and_covers_the_types_the_scheduler_used():
+    categories = read_cwt_tables()
+    assert len(categories) > 2_600
+    assert {code: categories[code] for code in ("A320", "B38M", "B763", "B772", "E75L", "A388")} == {
+        "A320": "F", "B38M": "F", "B763": "C", "B772": "B", "E75L": "G", "A388": "A"}
+    with pytest.raises(KeyError):
+        wake_category("Q4")                                                               # the Order gives it none

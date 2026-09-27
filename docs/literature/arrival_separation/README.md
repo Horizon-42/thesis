@@ -705,6 +705,7 @@ annotated for simultaneous approaches, PRM or offset approaches, HUR, FMA, CTRDs
 | `download.sh` | re-fetches everything in `papers/`, cuts the two PDF excerpts with ghostscript, and regenerates the parsed 7360.1K CSV. It does not fetch the `../runway_assignment/` files |
 | `papers/7110.65BB_*.html` | 7110.65BB Change 3 sections: 0-0 (Explanation of Changes), 2-1, 3-9, 3-10, 5-5, 5-9, 7-4; for §2.9 also 1-2, 2-7, 4-5, 4-8, 5-1, 5-2, 5-14, 7-2, 7-9; plus the index |
 | `papers/7210.3EE_*.html` | 7210.3EE Change 3, Ch. 10 Sec. 4, plus the index |
+| `cwt_supplement.csv` | this project's supplement to 7360.1K Appendix A: types the Order does not list yet, one row each with its source (`type_designator,cwt,source,added`); read with the parsed Appendix A by `inference/runway_schedule.py` `read_cwt_tables` (a type in both is refused) |
 | `papers/PCG_*.html` | P/CG Change 3: letters A, B, C, D, E, F, L, P, S, T, U, V, plus the index |
 | `papers/FAA_JO_7210.632A_…pdf`, `papers/FAA_JO_7210.633A_…pdf` | occurrence reporting and quality assurance (§2.9) |
 | `papers/FAA_atpubs_publications_index.html`, `FAA_at_notices_*.html` | edition, change and notice evidence |

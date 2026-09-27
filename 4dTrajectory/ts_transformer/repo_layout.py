@@ -33,6 +33,11 @@ COMPARISON_AIRPORTS_ROOT = REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airpo
 #: The FAA minimum vectoring altitude charts, one directory per download date (git-ignored; fetched by
 #: `docs/literature/minimum_vectoring_altitude/download.sh`).
 MVA_ROOT = REPO_ROOT / "data" / "MVA"
+#: Every ICAO type designator's consolidated wake turbulence (CWT) category: FAA JO 7360.1K Appendix A, parsed and
+#: committed with its source (`docs/literature/arrival_separation/`), and this project's supplement — types the Order
+#: does not list yet, each row with its source (read by `inference.runway_schedule.wake_category`).
+CWT_TABLE = REPO_ROOT / "docs" / "literature" / "arrival_separation" / "papers" / "FAA_JO_7360.1K_AppendixA_categories_parsed.csv"
+CWT_SUPPLEMENT = REPO_ROOT / "docs" / "literature" / "arrival_separation" / "cwt_supplement.csv"
 CZML_SCRIPT = REPO_ROOT / "aeroviz-4d" / "python" / "build_scenario_comparison_czml.py"
 
 
