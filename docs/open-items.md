@@ -14,7 +14,9 @@ change you are making go in `docs/code-health-followups.md` instead.
   - `prior/mva.py`：`FACILITY` 加 `"KAUS": "AUS"`，`CHARTS_DATE` 改为 `2026-09-27`（五个机场的图逐字节不变）；
     `test_prior_mva.py` 钉着五个机场。改了会进先验运行记录的元数据，所以等用户点头、别在运行中改。
   - 读测试机场的 runner 要能指定 heldout 根（`repo_layout.arrival_manifest_path(airport, root)` 已支持参数）。
-  - 北向跑道（36L 703、36R 236）远少于 2000；要补的话找冬季北风时段下载到另一个根，再 `--merge-source` 进 heldout 根。
+  - 北向跑道已补（用户 09-27）：冬季 2025-12-24 → 2026-01-29 下载后合并进 heldout 根，每跑道 18L 20,204 / 18R 3,989 /
+    36L 3,516 / 36R 1,265——只有 36R 不到 2000（冬季北向运行时到达主要落 36L）。合并用的源目录
+    `outputs/harvest-heldout-winter/`（1.3 GB）还留着，删不删由用户定。
 
 - **观测的速度通道含有未来 7.5 s 的信息，不能当因果模型的输入（2026-09-24 核实代码；影响大小未量）。**
   `flight_scenarios.state_samples_from_track` 对每个 ADS-B 点在前后各 7.5 s（`DEFAULT_WINDOW_S = 15`）的窗口里做

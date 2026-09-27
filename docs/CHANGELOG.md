@@ -1,5 +1,15 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-27 — KAUS 补北向运行：冬季数据合并进测试机场；没有 ADS-B 附件也能合并
+
+- 用户：北向跑道要补（36L 703、36R 236 远少于 2000）。按 IEM METAR 在 2025-10 → 2026-04 里找北风最多的 60 天窗口（35 %，夏季窗口只有 5 %），下载到 `outputs/harvest-heldout-winter`：到 2025-12-24 各跑道都已够数或放弃，32,163 条，指派 8,523。
+- 合并被拒：`--merge-source` 无条件打开 `outputs/adsb-metadata/KAUS`，而新下载的轨迹都自带来源时间、用不到它。修在
+  `harvest/adsb_metadata.py`（`AbsentSidecar`：没有附件就在出处里记“没有”，真要查的第一条才点名报错）与 `__main__._state_metadata`，
+  重建来源时间（`--rebuild-fresh-from`）仍然必须有；TD28，opus 审查无必须修，`dev-two-tier` `23891422`。
+- 硬链接副本上试合并与正式合并结果逐项相同。合并后 tracks 103,354、指派 28,974；每跑道 18L 20,204 / 18R 3,989 / 36L 3,516 /
+  36R 1,265（只有 36R 不到 2000）；arrivals 28,879，横向合格 28,747；观测 CZML 1.55 GB 重新发布，`check-publication` 0 错误；
+  live 根、冻结代、附件目录、其他机场的前端数据都没有变。
+
 ### 2026-09-27 — 第六个机场 KAUS：只作测试数据，单独放在 `outputs/harvest-heldout/`
 
 - 用户：再下载一个机场，只当测试数据，相关数据都要有，ADS-B 每条跑道 2000 条；不能挤占训练、不能损坏现有文件，

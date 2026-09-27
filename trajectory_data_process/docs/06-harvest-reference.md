@@ -521,9 +521,21 @@ in with `summary.json` only on success.
   5 indeterminate, 75 evaluation-only. Observed events 20,445 / 20,993 (97 %); verdicts pass 16,061 /
   fail 1,777 / indeterminate 2,612.
 - **The runway mix is the airport's, not a sampling choice.** At KAUS the east runway 18L/36R takes the arrivals
-  and 18R/36L mostly departures; late July to September is almost all south flow, so the 36 ends are short of
-  the 2,000 target. A north-flow period (winter fronts) would have to be downloaded into another root and
-  combined with `--merge-source` INTO `outputs/harvest-heldout` (TD24) — not done.
+  in summer and 18R/36L mostly departures; late July to September is almost all south flow (METAR: 5 % of reports
+  with a northerly wind ≥ 5 kt), so the 36 ends were short of the 2,000 target.
+- **North-flow top-up (user, 2026-09-27), MERGED.** The 60-day window with the most northerly wind in Oct 2025 –
+  Apr 2026 (35 %, from IEM METAR) was downloaded into its own root:
+  `--airport KAUS --count 2000 --start 2026-01-29T00:00:00Z --max-lookback-days 60
+  --output trajectory_data_process/outputs/harvest-heldout-winter --no-czml --no-publish` — 141 chunks; it stopped at
+  2025-12-24 because every runway was done (36L) or given up (18L 1,332, 18R 3,349, 36R 1,029). Winter tracks
+  32,163 (assigned 8,523). A trial merge on a hard-linked copy matched the real one exactly; then
+  `--output trajectory_data_process/outputs/harvest-heldout --merge-source …/harvest-heldout-winter --jobs 8`
+  (needs TD28: KAUS has no ADS-B sidecar). **Merged root**: tracks 103,354 (assigned 28,974 — one summer track
+  unassignable at download is assigned on reclassification — ambiguous 4, unassignable 654, not_landing 73,722);
+  per runway 18L 20,204 / 18R 3,989 / 36L 3,516 / **36R 1,265** (the only end under 2,000: in winter north flow the
+  arrivals go to 36L); arrivals v7 28,879 (18L 20,126 / 18R 3,982 / 36L 3,516 / 36R 1,255); lateral roster 28,747
+  eligible, 126 fail, 6 indeterminate, 95 evaluation-only; verdicts pass 23,277 / fail 2,065 / indeterminate 3,632;
+  observed CZML 1.55 GB republished. `harvest-heldout-winter/` is kept as the merge's source (1.3 GB).
 - **Static data** (all from the same sources as the five): `config/runway_thresholds.json` gained a KAUS entry
   — `build_runway_config.build_config(["KAUS"])` into a scratch file (the CLI refuses an existing output),
   `width_ft` from FAA NASR `APT_RWY.csv` 2026-08-06 (`docs/regulation/FAA_NASR_APT_CSV_2026-08-06.zip`, both
