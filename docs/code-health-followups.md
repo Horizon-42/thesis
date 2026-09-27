@@ -122,6 +122,7 @@ added three entries (the rows after the performance index's).
 | `instructions/grammar.py` is outside the labeller sha (09-26) | open | new; see the entry | **yes — every sentence artefact and prior**: adding it to the hash changes the labeller sha they record; do it with the next vocabulary spec |
 | The judge calls a captured, on-centreline crossing that is too high "crossed off runway" (09-27) | open | new; see the entry | **yes — executor** (the judge is in the spec's source hash; readouts' outcome counts move) |
 | The terrain downloader overwrites the shared `download_manifest.csv` (09-27) | open | new; see the entry | no: data tooling |
+| The executor spec binds the source's BYTES, comments included (09-27) | open | new; see the entry | **yes — executor**: a new hash definition refuses v10; do it with the next executor spec (v11) |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -574,3 +575,15 @@ airports' provenance. Avoided for KAUS by downloading first with
 `--manifest data/usgs_tnm_elevation/download_manifest.KAUS.csv` (the script then skips its download step because
 the tiles exist). Fix (judgement): a per-airport default manifest `<out>/<ICAO>/download_manifest.csv`, or merge
 rows by airport group instead of rewriting.
+
+## The executor spec binds the source's BYTES, comments included (2026-09-27)
+
+**Verified** (`autopilot/spec.py:99` `executor_source_sha256`: sha256 over each file's raw bytes). Any edit to a hashed file —
+a comment, a docstring, a doc path in a comment — makes the code refuse every stored executor spec (contract C33). That is
+what holds the ten dated records in the `docs/` root, the old doc path in `autopilot/__init__.py` and the `envelope.py`
+comments (the entries above): fixing words costs a new spec and a re-run replay gate. **Judgement / the user's todo
+(2026-09-27)**: keep the binding (a spec's gate and every readout flown with it must describe the code that runs), but hash
+the LOGIC — each file's `ast.dump` with docstrings stripped (comments never reach the AST) — so a wording edit no longer
+refuses a spec and any code change still does. A new definition refuses v10 by itself, so it goes in with the next real
+executor change (v11: the judge's fixes, prior readouts §16–§17), with the waiting comment and doc-path fixes in the same
+spec; a test pins that a docstring or comment edit leaves the hash unchanged and a one-token code edit moves it.
