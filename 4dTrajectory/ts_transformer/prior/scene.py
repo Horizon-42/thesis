@@ -176,15 +176,17 @@ class SceneIndex:
         hi = bisect.bisect_right(self._starts, end_s)
         return [item for item in self.flights[lo:hi] if item.end_s >= start_s]
 
-    def segments(self) -> list[list[Presence]]:
-        """The flights chained into segments: a flight joins the segment whose time it overlaps (§3.2)."""
+    def segments(self, step_s: float) -> list[list[Presence]]:
+        """The flights chained into segments on the steps their rows hang on (§3.2; multi-aircraft design §2.1): a flight
+        whose first step is no later than the segment's last step joins it, so no step is in two segments."""
         out: list[list[Presence]] = []
         end = -np.inf
         for item in self.flights:
-            if item.start_s > end:
+            first, last = hung_span(item, step_s)
+            if first > end:
                 out.append([])
             out[-1].append(item)
-            end = max(end, item.end_s)
+            end = max(end, last)
         return out
 
 

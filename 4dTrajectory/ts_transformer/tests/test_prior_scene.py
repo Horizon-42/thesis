@@ -26,7 +26,7 @@ def test_the_scene_index_finds_overlapping_flights_and_chains_segments():
     assert [p.dataset_id for p in index.overlapping(450.0, 450.0)] == ["c"]
     # a long flight that started well before the window is still found
     assert [p.dataset_id for p in index.overlapping(300.0, 300.0)] == ["b"]
-    assert [[p.dataset_id for p in s] for s in index.segments()] == [["a", "b", "c"], ["d"]]
+    assert [[p.dataset_id for p in s] for s in index.segments(2.0)] == [["a", "b", "c"], ["d"]]
 
 
 def _roster(tmp_path, rows):
@@ -87,7 +87,7 @@ def test_the_census_counts_others_leaders_and_the_landing_window():
     ego_to_go = ego.to_threshold_m[N_LOOK:]
     landings = Landings(np.array([1016.0 - CONTEXT_WINDOW_S + 10.0]), {"09": np.array([1016.0 - CONTEXT_WINDOW_S + 10.0])})
     none = np.zeros((0, 2))
-    out = census_airport([ego], [ahead, far, behind, other_runway], landings, none)
+    out = census_airport([ego], [ahead, far, behind, other_runway], landings, none, 2.0)
     assert out["predicted_steps"] == len(rows)
     gaps = []
     for p in (ahead, far):
@@ -115,7 +115,7 @@ def test_the_census_sees_a_window_reach_back_into_a_test_day():
     start = test_end + 600.0                                           # ten minutes into the next day
     ego = _place("ego", start, start + 2000.0)
     landings = Landings(np.zeros(0), {"09": np.zeros(0)})
-    out = census_airport([ego], [], landings, np.array([[test_start, test_end]]))
+    out = census_airport([ego], [], landings, np.array([[test_start, test_end]]), 2.0)
     rows = ego.times_s[N_LOOK:]
     assert out["window_reaches_a_test_day_share"] == pytest.approx((rows - CONTEXT_WINDOW_S < test_end).mean())
     assert 0.0 < out["window_reaches_a_test_day_share"] < 1.0
