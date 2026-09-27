@@ -28,7 +28,7 @@
 | 4 回放门 | v11 训练集、验证集每格都过：训练集落地 99.63 %、词在包络内 97.54 %、evaluation 98.30 %；验证集 99.90 / 97.50 / 98.46 % | 执行器设计 §11，[v11 读数](readouts/2026-09-27_executor_v11_readout.zh.md) |
 | 5 先验 | 第三版第 0 步、第 1 步（单机）、单机自由生成完成；**base 模型** `prior/v3_step1_20260924/full_s1337`（§3） | `docs/two_tier/prior_design.zh.md`、`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md` §3–§5 |
 | 6 后训练 | 第一阶段**采用**（landing，`prior/v3_rl_20260925/grpo_s1337/round_01`）；闭环监督微调（CAT-K）不采用；第二阶段上一版不采用（§4.3），**第二阶段完成，采用第 7 轮 = augmented**（用户 2026-09-27；§4.4、§9） | `docs/two_tier/post_training_design.zh.md`；读数文档（`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md`）§6–§16 |
-| 7 多机 | 设计草稿写好（2026-09-26），等用户确认；代码没开始，不碰正在跑的第二阶段 | `docs/two_tier/multi_aircraft_design.zh.md`（§9 是要用户定的事） |
+| 7 多机 | **设计已确认**（用户 2026-09-27 回答 §9 第 1–13 项；场景的步按第 3 条对齐）；复查后的第 14 项（M2 只训一个变体、一个种子）等用户定；**M0 开发中**（工作树 `dev-multi-aircraft`，按多机设计 §6.4 的顺序） | `docs/two_tier/multi_aircraft_design.zh.md`（§6.4 开发顺序，§8 取值，§9 已定的事） |
 | 前端 / 后端 | Training 视图有按运行日划分的集和叠加层，各轮模型可切换、按模型自己的程序屏蔽导出，详情页；叠加层在 v11 上重新导出（§7） | §7 |
 
 ---

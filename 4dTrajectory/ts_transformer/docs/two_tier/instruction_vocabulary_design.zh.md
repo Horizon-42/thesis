@@ -448,7 +448,7 @@ LPV 的航道宽度只用来评估飞出的航迹。与管制、程序的高度�
   `docs/literature/arrival_separation/README.md` 与 `inference/runway_schedule.py`；两侧基线之间至少
   304.8 m 垂直间隔（5-9-1 b）。
 - 吸收延误靠减速、晚转基线（航向词的时机）和绕行。数据里有盘旋和等待航线（开发集中有累计转角上千度的
-  转弯），它们由一串航向词表达。多机的设计在先验设计 §3、§9 第 2–5 步。
+  转弯），它们由一串航向词表达。多机的设计在[多机设计](multi_aircraft_design.zh.md)。
 
 ---
 
