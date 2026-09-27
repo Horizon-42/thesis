@@ -155,3 +155,45 @@ def test_the_census_runner_reads_the_train_days_of_an_artefact(tmp_path, monkeyp
     assert census["landing_context"]["KXXX"]["landings_kept"] == 0 and airport["landing_in_window_share"] == 0.0
     with pytest.raises(SystemExit):
         prior_scene_census.main(["--instructions", str(directory), "--out", str(tmp_path / "census")])
+
+
+
+# ---- several aircraft on the scene's steps (multi-aircraft design §2.1, §2.3)
+def _minutes(name: str, start: float, end: float, speaking: bool = True):
+    from ts_transformer.prior.scene import Presence
+
+    times = np.arange(start * 60.0, end * 60.0 + 1e-9, 2.0)
+    return Presence(name, "KXXX", "05", end * 60.0 + 30.0, speaking, times, np.zeros(len(times)))
+
+
+def test_rows_hang_on_the_nearest_step_and_the_steps_are_whole_multiples():
+    from ts_transformer.prior.scene import hang, scene_steps
+
+    assert list(hang(np.array([3.4, 4.99, 5.0, 6.2]), 2.0)) == [4.0, 4.0, 6.0, 6.0]
+    assert list(scene_steps(3.4, 10.1, 2.0)) == [4.0, 6.0, 8.0, 10.0]
+
+
+def test_a_segment_is_cut_as_the_design_draws_it():
+    """Figure 1's made-up segment (experiments/scene_sample_figure): cuts at 15:44 and 31:50, D and H carried."""
+    from ts_transformer.prior.scene import samples
+
+    segment = [_minutes("A", 0.0, 9.0), _minutes("B", 3.0, 12.5), _minutes("C", 7.0, 15.7), _minutes("D", 12.0, 21.0),
+               _minutes("E", 18.0, 27.0), _minutes("F", 19.5, 28.5), _minutes("X", 21.5, 26.0, speaking=False),
+               _minutes("G", 23.0, 31.8), _minutes("H", 28.0, 37.5), _minutes("I", 33.5, 42.0),
+               _minutes("J", 37.0, 46.0), _minutes("K", 40.0, 49.0)]
+    cut = samples(segment, 2.0)
+    assert [s.loss_start_s for s in cut] == [0.0, 944.0, 1910.0] and cut[-1].loss_end_s == 49 * 60.0
+    assert [[f.dataset_id for f in s.carried] for s in cut] == [[], ["D"], ["H"]]
+    assert [len(s.flights) for s in cut] == [4, 6, 4]            # every flight with a step in the loss span
+
+
+def test_a_short_segment_is_one_sample_and_the_cut_step_is_the_later_samples():
+    from ts_transformer.prior.scene import samples
+
+    assert len(samples([_minutes("A", 0.0, 20.0)], 2.0)) == 1
+    # two aircraft through the whole window (one entering at minute 15): every step ties, the earliest is taken, and the
+    # one whose first row hangs on the cut is only in the later sample, not carried
+    cut = samples([_minutes("A", 0.0, 30.0), _minutes("E", 15.0, 30.0)], 2.0)
+    assert [s.loss_start_s for s in cut] == [0.0, 900.0]
+    assert [f.dataset_id for f in cut[0].flights] == ["A"]
+    assert ([f.dataset_id for f in cut[1].flights], [f.dataset_id for f in cut[1].carried]) == (["A", "E"], ["A"])
