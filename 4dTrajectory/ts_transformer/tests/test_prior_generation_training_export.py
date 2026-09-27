@@ -317,6 +317,7 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
     payload = json.loads((training / overlay_id / export.PAYLOAD_FILE).read_text(encoding="utf-8"))
     sample = json.loads((training / SET_ID / "sample.json").read_text(encoding="utf-8"))
     assert payload["schema"] == export.SCHEMA and payload["base"]["setId"] == SET_ID and payload["readout"] is None
+    assert payload["producedBy"]["device"] == "cpu"                     # the speaker's; the executor is always on CPU
     assert payload["model"] == {"name": "base", "round": None, "run": "4dTrajectory/outputs/POOLED/prior/v_test/full_s1",
                                 "checkpointSha256": checkpoint, "variant": "full",
                                 "trainedAt": {"head": "test", "dirty": False}, "fineTuning": None}
@@ -387,6 +388,17 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
     assert [f["augmentation"] for f in again["flights"]] == [f["augmentation"] for f in moved["flights"]]
     with pytest.raises(SystemExit):                                     # no readout of augmented starts
         export.main([*augmented[:-1], "moved-readout", "--readout", str(tmp_path)])
+    # the speaker on the GPU (as the formal readout runs it): the same moves (drawn on the CPU), the executor still on the
+    # CPU — each sample starts from the moved state — and the device recorded
+    if torch.cuda.is_available():
+        assert export.main([*augmented[:-1], "moved-cuda", "--device", "cuda"]) == 0
+        on_gpu = json.loads((training / "moved-cuda" / export.PAYLOAD_FILE).read_text(encoding="utf-8"))
+        assert on_gpu["producedBy"]["device"] == "cuda"
+        assert [f["augmentation"] for f in on_gpu["flights"]] == [f["augmentation"] for f in moved["flights"]]
+        for item, cpu_item in zip(on_gpu["flights"], moved["flights"]):
+            assert len(item["samples"]) == 3
+            assert {(s["track"]["lat"][0], s["track"]["lon"][0]) for s in item["samples"]} == {
+                (s["track"]["lat"][0], s["track"]["lon"][0]) for s in cpu_item["samples"]}
     # a flight none of the draws fits is not flown and says how many draws it took; the others keep their own samples,
     # flown under the augmented time limit
     from ts_transformer.experiments.prior_free_generation import AugmentedStarts

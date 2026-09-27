@@ -332,7 +332,10 @@ every model exported with one seed flies each flight from the same moved start),
 written as kind `prior-generation-augmented`, schema `aeroviz-training-augmented-generation-v1` (the v3 kind untouched): no
 `readout` (refused with `--readout`), `generation.augment` = the draw's rule, per flight `augmentDraws` (null: not drawn, not
 on its own dynamics), `augmentation` (null: no plausible draw — not flown) and `observed` (the moved rows 0 … `N_LOOK` − 1);
-default id `generation_augstart_<name>[_r<NN>]_<sha8>`.
+default id `generation_augstart_<name>[_r<NN>]_<sha8>`; the move is written unrounded (the live backend re-flies from it).
+**`--device`** (default cpu; 2026-09-27): the speaker's device and its samples' generator, as the formal readout's — cuda
+draws other samples than cpu — the executor always on CPU (the live backend re-flies there); recorded in
+`producedBy.device`.
 
 `prior_training_export --prior <prior dir> --instructions <artefact> --airports-root … --set instruction_v3 --airport
 ICAO [--airport …] [--overlay-id prior_<prior dir name>]` (schema `aeroviz-training-prior-v3` since the prior's third

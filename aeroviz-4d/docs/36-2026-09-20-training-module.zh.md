@@ -278,6 +278,9 @@ python run_ts.py prior_generation_training_export --augment-seed 1337 \
   范围以内，`augmentDraws` 在 1–10 之间（不在自己动力学上的航班为 null，没抽），`augmentation` 为 null 的航班不飞、界面写明原因
   （"no plausible augmented start in 10 draws"）。
 - **先导出哪几个模型**：采纳的三个——base、landing r1、augmented r7，五个机场；别的轮次要看时再导。
+- **用 GPU**（`--device cuda`，默认 cpu）：先验（说话的模型）和它采样的随机数发生器放在 GPU 上，和正式读数一样；执行器
+  始终在 CPU 上飞（后端现飞也在 CPU 上，这样现飞才和样本逐点相同）。GPU 的随机数和 CPU 的不同，所以同一个种子在 GPU
+  上抽出的样本和 CPU 上的不同；用的设备写在 `producedBy.device`。增强量是用 CPU 上的 numpy 抽的，与设备无关。
 
 ---
 
