@@ -12,7 +12,7 @@ the entry itself is deleted.
 
 Checked entry by entry against `dev-two-tier` `1a7ac875` plus branch `dev-frontend-followups`, then updated after branch
 `dev-followups-no-training` (2026-09-25) fixed every entry whose fix touches neither the training nor the post-training
-(the right-hand column): **26 open, 7 partly, 57 resolved or dismissed, 5 obsolete** (recounted from the table 2026-09-27; one open row is blocked on a source). *open*: the problem is still in the
+(the right-hand column): **27 open, 7 partly, 57 resolved or dismissed, 5 obsolete** (recounted from the table 2026-09-27; one open row is blocked on a source). *open*: the problem is still in the
 code; *partly*: some of it is fixed (the note says what is left); *resolved*: fixed (the note says by what);
 *dismissed*: not a defect (the note says why); *obsolete*: the code is gone. A resolved, dismissed or obsolete entry's
 text is removed below (its row stays); rows follow the entries' order; note the two sets of numbers (§19–§21 each appear
@@ -123,6 +123,7 @@ added three entries (the rows after the performance index's).
 | The judge calls a captured, on-centreline crossing that is too high "crossed off runway" (09-27) | open | new; see the entry | **yes — executor** (the judge is in the spec's source hash; readouts' outcome counts move) |
 | The terrain downloader overwrites the shared `download_manifest.csv` (09-27) | open | new; see the entry | no: data tooling |
 | The executor spec binds the source's BYTES, comments included (09-27) | open | new; see the entry | **yes — executor**: a new hash definition refuses v10; do it with the next executor spec (v11) |
+| `ExecutorParams.check` lets a NaN rate or factor through (09-27) | open | new; see the entry | **yes — executor**: `params.py` is hashed; fix it with v11 |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -587,3 +588,11 @@ the LOGIC — each file's `ast.dump` with docstrings stripped (comments never re
 refuses a spec and any code change still does. A new definition refuses v10 by itself, so it goes in with the next real
 executor change (v11: the judge's fixes, prior readouts §16–§17), with the waiting comment and doc-path fixes in the same
 spec; a test pins that a docstring or comment edit leaves the hash unchanged and a one-token code edit moves it.
+
+## `ExecutorParams.check` lets a NaN rate or factor through (2026-09-27)
+
+**Verified** (opus review of the heading-lead ablation runner, `dev-heading-lead`). `autopilot/params.py` `check` refuses a
+non-positive rate as `min(positive) <= 0.0`; with a NaN among them `min` does not trip the comparison, and an `inf` passes too —
+the first cycle then raises in `inverse.attitude` (or flies nonsense). The ablation runner validates its own arguments
+(`positive`), so no stored spec is affected. Fix: `all(math.isfinite(v) and v > 0 for v in positive)`; `params.py` is in the
+executor source hash, so it goes in with v11.

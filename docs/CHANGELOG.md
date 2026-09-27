@@ -1,5 +1,18 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-27 — 航向提前量消融（第一级）：L 4 s、坡度上限 32° 不变，p 5°/s 与 8°/s 分不出
+
+- 两层模型进度报告 P0 第 1 条。新 runner `run_ts.py heading_lead_ablation`（R23，分支 `dev-heading-lead` `840ced77`，等合并）：一格 =
+  (提前量 L, 坡度上限, 滚转率 p)，正式词表只改这两个值、v10 执行器参数只改 τ_ψ = L 和 p；每格把 v10 训练集回放门的原样本重标、重飞、
+  用 evaluation 评分并与观测配对；参考格（正式值）必须逐架重现 v10 的回放才飞别的格。`executor_replay.fly_airport` 加了逐架附加列的接口
+  （正式回放的输出不变）。不碰执行器 / 标注器源码指纹覆盖的文件：v10、v5 照旧现行。两轮 opus 审查，ts 全套 1,521 通过。
+- 用户选全交叉 24 格（L 2/4/6/8 s × 25°/32° × p 推出/3/5°/s），结果 `4dTrajectory/outputs/POOLED/analyses/heading_lead_ablation_20260927/`
+  （航迹记录评分后删掉，296 MB），28 分钟 CPU。参考格 2,000 架逐位一致。读数
+  `4dTrajectory/ts_transformer/docs/two_tier/readouts/2026-09-27_heading_lead_ablation.zh.md`：L 4 与 6 s 分不出（evaluation 98.4 / 98.1 %），
+  2 与 8 s 更差；25° 下航向词在包络内 98.0 → 90.7 %；p 5°/s 每列与 8°/s 相当，3°/s 太慢。L 和坡度上限都不改 → 词表、先验不动、不重训；
+  p 要不要改成 5°/s 进 v11，待用户定。
+- 用户同时定了 v11：另一条跑道的入口、"截获了但太高"各给新结局名；同批加下滑道下限的模式标记、改最平一档的飞法。
+
 ### 2026-09-27 — KAUS 补北向运行：冬季数据合并进测试机场；没有 ADS-B 附件也能合并
 
 - 用户：北向跑道要补（36L 703、36R 236 远少于 2000）。按 IEM METAR 在 2025-10 → 2026-04 里找北风最多的 60 天窗口（35 %，夏季窗口只有 5 %），下载到 `outputs/harvest-heldout-winter`：到 2025-12-24 各跑道都已够数或放弃，32,163 条，指派 8,523。
