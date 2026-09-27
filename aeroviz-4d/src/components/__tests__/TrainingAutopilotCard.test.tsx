@@ -2,7 +2,7 @@
  * The live executor's card in the Training panel: nothing before a word is flown, a refusal with its reason, and a
  * flown segment written out — the word it flew, its verdict first, the two times, the rest in Details — with "Replay
  * in 3D", which asks the backend nothing; a refusal's "Fly again" picks the word anew. A model's word says it has no
- * observed counterpart, and how closely the live flight lands on the sample it re-flies.
+ * observed counterpart, and how closely the live flight lands on the sample it re-flies. The sentence bar's line stays short.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -20,7 +20,7 @@ vi.mock("../../context/AppContext", () => ({
   useApp: () => ({ ...appState, replayTrainingAutopilot, setTrainingPick }),
 }));
 
-import TrainingAutopilotCard from "../TrainingAutopilotCard";
+import TrainingAutopilotCard, { TrainingAutopilotStatus } from "../TrainingAutopilotCard";
 import { parseTrainingSample, type TrainingSample } from "../../data/trainingSample";
 import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
 import { formatElapsed } from "../../data/trainingText";
@@ -102,7 +102,7 @@ describe("TrainingAutopilotCard", () => {
     expect(document.querySelector(".training-autopilot-title")!.textContent).toBe("heading 225° · steps 8–10, flown on to step 12");
     // the verdict first, in the segment's colour
     const verdict = document.querySelector(".training-autopilot-verdict") as HTMLElement;
-    expect(verdict.textContent).toBe("✓ inside its envelope");
+    expect(verdict.textContent).toBe("in envelope");
     expect(verdict.style.color).toBe("rgb(37, 99, 235)");
     // what its faded, dashed tail is: the lead flown past the next heading word
     expect(document.querySelector(".training-autopilot-tail")!.textContent).toBe("Faded, dashed: the last 4 s, past where " +
@@ -192,9 +192,34 @@ describe("TrainingAutopilotCard", () => {
     appState.trainingAutopilot = { status: "ready", request: asked, segment: answer.value, playedAt: 1, roundTripS: 0.5 };
     render(<TrainingAutopilotCard />);
     const verdict = document.querySelector(".training-autopilot-verdict") as HTMLElement;
-    expect(verdict.textContent).toBe("✗ outside its envelope");
+    expect(verdict.textContent).toBe("out of envelope");
     expect(verdict.style.color).toBe("rgb(255, 45, 45)");
     expect(document.querySelector(".training-autopilot-ended")!.textContent).toBe("The flight did not get there within its time limit.");
+  });
+});
+
+describe("the sentence bar's line", () => {
+  it("is short: a badly ended flight a tag, a refusal's reason and the word in the tooltip — the word in the line only off the selection", () => {
+    const set = sample();
+    const asked = mockAutopilotRequest(set, VECTORED_KEY, "heading", 8);
+    const selection = mockSelection(set, asked);
+    const raw = mockAutopilotAnswer(set, asked);
+    raw.end = { reason: "timeout", reachedSegmentEnd: false, offsetFromObserved: null, flownS: 8, crossing: null, refused: null };
+    const answer = parseTrainingAutopilot(raw, asked, selection);
+    if (!answer.ok) throw new Error(answer.problem);
+    const view = { status: "ready", request: asked, segment: answer.value, playedAt: 1, roundTripS: 0.5 } as const;
+    const { container, unmount } = render(<TrainingAutopilotStatus selection={selection} view={view} named={false} />);
+    const line = container.firstChild as HTMLElement;
+    expect(line.textContent).toBe("Autopilot · in envelope · timed out · 8.00 s flown · computed 1.24 s");
+    expect(line.title).toBe("heading 225°: in envelope; the flight did not get there within its time limit; 8.00 s flown, " +
+      "computed 1.24 s");
+    unmount();
+    const { container: off, unmount: offDone } = render(<TrainingAutopilotStatus selection={selection} view={view} named />);
+    expect(off.textContent).toBe("Autopilot · heading 225° · in envelope · timed out · 8.00 s flown · computed 1.24 s");
+    offDone();
+    render(<TrainingAutopilotStatus selection={selection} named={false}
+      view={{ status: "failed", request: asked, problem: "the backend refused (400): 0 executor specs" }} />);
+    expect(screen.getByText("Autopilot · not flown").title).toBe("heading 225° not flown — the backend refused (400): 0 executor specs");
   });
 });
 

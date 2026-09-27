@@ -1,5 +1,16 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-27 — 句子条的现飞状态行缩短，不再把 Fly again 等按钮挤到第二行；判定计数挪到各行末尾；左栏 Details 换成 ⓘ
+
+- 用户：选词现飞算完后，句子条头部那一行信息太多，把 "↻ Fly again" / Read-back / Prior 挤到第二行；只要飞行时间、计算时间，是否在包络内
+  可留，词本身不必重复。`TrainingAutopilotStatus` 现在只写 "Autopilot · ✓ inside its envelope · 8.00 s flown · computed 1.24 s"；飞得不好时
+  加一个短标签（`TRAINING_OUTCOME_TAG`，原来是整句结束方式）；没飞成只写 "not flown"，原因在提示里；词只在选中已移到别的词时写出（否则
+  选中的色块就是它），词与完整读法总在提示里；这一行不换行。面板里的结果卡不变。文档 36 §4.7 的"句子条头部一行"、35 AV26、索引 AV26。
+- 同一批（用户）：判定措辞改短、去掉对勾——`TRAINING_VERDICT_TEXT` 为 "in envelope" / "out of envelope" / "not judged" /
+  "no envelope"（句子条、结果卡、读数窗口共用）；头部的 "replay: landed · 15/15" 删掉（冗余：每个词的点已说了它；完整读法留在
+  ⓘ 说明里）；"heading 11/11 · capture ✓ · altitude 2/2 · speed 1/1" 挪到句子条各行的末尾，斜杠对齐（右边距 22 → 44 px），
+  只在读真值时写；左栏标题旁的 "Details" 按钮换成 ⓘ。文档 36 §4.1、§4.2，35 AV33，索引 AV33。
+
 ### 2026-09-27 — 多机设计确认；按第一性原理复查；M0 开始
 
 - 用户逐项回答多机设计 §9 第 1–13 项（起点 A = 从数据训 scene；先"一架由模型指挥"；平行跑道按 `runway_schedule` 的读法；硬 / 软按第 0 步

@@ -192,7 +192,7 @@ describe("TrainingPanel", () => {
     it("says on its details page what each switch shows, and the vocabulary, as text", async () => {
       render(<TrainingPanel hidden={false} />);
       await screen.findByText("TST1");
-      const open = screen.getByRole("button", { name: "Details" });
+      const open = screen.getByRole("button", { name: "Training details" });
       fireEvent.click(open);
       const page = screen.getByRole("dialog", { name: "Training details" });
       const about = page.querySelector(".training-notes-list")!.textContent!;
@@ -267,7 +267,7 @@ describe("TrainingPanel", () => {
       await screen.findByRole("list", { name: "Readouts" });
       fireEvent.click(screen.getByLabelText("Executor replay"));
       await waitFor(() => expect(screen.queryByRole("button", { name: /Replay gate/ })).toBeNull());
-      fireEvent.click(screen.getByRole("button", { name: "Details" }));
+      fireEvent.click(screen.getByRole("button", { name: "Training details" }));
       const tab = within(screen.getByRole("dialog")).getByRole("tab", { name: /The executor's replay gate/ }) as HTMLButtonElement;
       expect(tab.disabled).toBe(true);
       expect(tab.title).toBe("switch on Executor replay under Draw");

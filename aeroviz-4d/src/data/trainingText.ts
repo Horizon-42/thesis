@@ -50,10 +50,10 @@ export const TRAINING_OUTCOME_TAG: Record<TrainingFreeOutcome, string> = {
 
 /** The live executor's verdict on its word, as it is read first. */
 export const TRAINING_VERDICT_TEXT: Record<TrainingAutopilotStatus, string> = {
-  inside: "✓ inside its envelope",
-  outside: "✗ outside its envelope",
+  inside: "in envelope",
+  outside: "out of envelope",
   "not judged": "not judged",
-  "no check": "no envelope of its own",
+  "no check": "no envelope",
 };
 
 export function checkMark(ok: boolean): string {

@@ -148,7 +148,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   words it told are the sentence bar's for that segment; a heading band is bounded by the FLOWN track its judge read, never
   by the sentence's stop (the executor may hear the next word late); started by the sentence bar's "▶ Fly" (or a band
   click, "Fly on band click" on); the pick and the cursor belong to the flight on screen (`trainingSelectionKey`) and reset
-  with it; one short status line (word · inside/outside · "N s flown in M ms"); blue `#2563eb` inside its envelope, the
+  with it; one short unbroken status line (inside/outside · "N s flown · computed M ms"; the word only once the selection moves off it; the full reading in its tooltip); blue `#2563eb` inside its envelope, the
   whole line a loud red `#ff2d2d` outside (`autopilotColour`), never the replay's teal; each request names its page
   and its number there (`clientId`, `seq`): a later one from the same page supersedes the earlier still waiting or flying
   (409), so clicking through bands flies only the last; backend 400 / 404 / 409 / 422 / 500. A MODEL's word (the bar reading
@@ -183,7 +183,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   `below_glidepath` (`TRAINING_FREE_OUTCOMES`), and the live executor sends the masks back and is cut at the same step (AV32).
 - **The Training dock never unfolds long content**: what is read once (the module, the switches, the vocabulary) and every
   readout's tables are on the modal DETAILS PAGE (`training/TrainingDetails.tsx`, portalled, a tab per section, a section
-  with nothing to show listed disabled with its reason); the dock has a header "Details" and one line per readout — its name
+  with nothing to show listed disabled with its reason); the dock has a header ⓘ ("Training details") and one line per readout — its name
   and conclusion — opening the page on that section (AV33).
 - **Scrollbars are styled ONCE, globally** (top of `index.css`: `--scrollbar-*` tokens, `::-webkit-scrollbar*` for
   Chromium/Safari, the standard properties only under `@supports not selector(::-webkit-scrollbar)` — Chromium 121+ lets them

@@ -46,7 +46,7 @@ import {
 } from "../../data/__tests__/trainingOverlays.fixture";
 import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
 import { VECTORED_KEY, WORD } from "../../data/__tests__/trainingSample.fixture";
-import { TRAINING_MODEL_COLOR } from "../../utils/trainingWordColors";
+import { TRAINING_MODEL_COLOR, TRAINING_OUTSIDE_COLOR } from "../../utils/trainingWordColors";
 import { mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "../../data/__tests__/trainingAutopilot.fixture";
 
 /** Publish the fixture's overlays for the selected flight, as the panel does. */
@@ -314,8 +314,8 @@ describe("TrainingSentenceBar", () => {
     appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
     render(<TrainingSentenceBar />);
     expect(screen.getByText("base: not flown (stand-in dynamics) — the truth is shown")).toBeTruthy();
-    // the truth is drawn with its whole header: the labeller's verdicts, and the Fly button for its words
-    expect(screen.getByText(/^heading \d+\/\d+ · capture/)).toBeTruthy();
+    // the truth is drawn whole: the labeller's tallies at its rows' ends, and the Fly button for its words
+    expect(document.querySelectorAll(".training-sentence-tally").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "▶ Fly" })).toBeTruthy();
     expect((document.querySelector(".training-sentence-bar") as HTMLElement).style.borderColor).toBe("");
     // the straight-in flight's opening words: cleared at entry, the other five in force
@@ -368,21 +368,25 @@ describe("TrainingSentenceBar", () => {
     expect(setTrainingPick).toHaveBeenLastCalledWith({ source: null, column: "heading", row: 8, attempt: 3 });
   });
 
-  it("reads out the live executor's segment in one short line: the word, its verdict, the two times", () => {
+  it("reads out the live executor's segment in one short line: its verdict and the two times, the word only off the selection", () => {
     select();
     const parsed = parseTrainingSample(mockSample());
     if (!parsed.ok) throw new Error(parsed.problem);
     const request = mockAutopilotRequest(parsed.value, VECTORED_KEY, "heading", 8);
     appState.trainingAutopilot = { status: "flying", request };
     const { unmount } = render(<TrainingSentenceBar />);
-    expect(screen.getByText("Autopilot · flying heading 225° …")).toBeTruthy();
+    // no band selected: the line names the word it flies
+    expect(screen.getByText("Autopilot · heading 225° · flying …").title).toBe("flying heading 225°");
     unmount();
     const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, mockSelection(parsed.value, request));
     if (!answer.ok) throw new Error(answer.problem);
     appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 0, roundTripS: 0.5 };
     const { unmount: done } = render(<TrainingSentenceBar />);
+    // its band selected: the band names it, the line does not
+    fireEvent.click(screen.getByLabelText(/^heading 225° .* issued at step 8 /));
     const line = document.querySelector(".training-sentence-autopilot")!;
-    expect(line.textContent).toBe("Autopilot · heading 225° · ✓ inside its envelope · 8.00 s flown in 1.24 s");
+    expect(line.textContent).toBe("Autopilot · in envelope · 8.00 s flown · computed 1.24 s");
+    expect((line as HTMLElement).title).toMatch(/^heading 225°: in envelope; the flight reached .*; 8\.00 s flown, computed 1\.24 s$/);
     expect((line.querySelector("strong") as HTMLElement).style.color).toBe("rgb(37, 99, 235)");
     done();
     // outside its envelope: the verdict in the loud red
@@ -396,7 +400,7 @@ describe("TrainingSentenceBar", () => {
     appState.trainingAutopilot = { status: "ready", request, segment: flown.value, playedAt: 0, roundTripS: 0.5 };
     render(<TrainingSentenceBar />);
     const red = document.querySelector(".training-sentence-autopilot strong") as HTMLElement;
-    expect(red.textContent).toBe("✗ outside its envelope");
+    expect(red.textContent).toBe("out of envelope");
     expect(red.style.color).toBe("rgb(255, 45, 45)");
   });
 
@@ -412,10 +416,12 @@ describe("TrainingSentenceBar", () => {
     // a heading word's verdict: its band's rows on the flown track, from where it was told plus the lead
     expect(screen.getByLabelText(/^heading 180° .* issued at step 10 /).textContent).toMatch(
       /the executor: outside, told at its step 10 — ✗ track within ±4\.5° of the word, 4 s after it was told, to the next word's \(7\/8 rows\)/);
-    // the replay in one chip, its full reading in the tooltip
-    const chip = screen.getByText("replay: landed · 5/7");
-    expect(chip.getAttribute("title")).toMatch(/The executor \(own dynamics\) flew this sentence from row 0.*: landed, 1\.5 m right of the centreline, 20\.8 m above the threshold/);
-    expect(chip.getAttribute("title")).toMatch(/5\/7 words inside their envelopes.* · evaluation pass \(observed pass\)/);
+    // the replay is no chip of the header (its words' dots say it): its reading is in the notes
+    expect(document.querySelector(".training-sentence-head")!.textContent).not.toMatch(/replay/);
+    fireEvent.click(screen.getByRole("button", { name: "How to read the bar" }));
+    const notes = document.querySelector(".training-sentence-legend")!.textContent!;
+    expect(notes).toMatch(/The executor \(own dynamics\) flew this sentence from row 0.*: landed, 1\.5 m right of the centreline, 20\.8 m above the threshold/);
+    expect(notes).toMatch(/5\/7 words inside their envelopes.* · evaluation pass \(observed pass\)\./);
   });
 
   it("says why a flight the replay does not fly has no verdicts", () => {
@@ -423,7 +429,8 @@ describe("TrainingSentenceBar", () => {
     overlays(1);
     render(<TrainingSentenceBar />);
     expect(document.querySelectorAll(".training-sentence-verdict")).toHaveLength(0);
-    expect(screen.getByText("replay: not flown").getAttribute("title")).toBe("the executor's replay does not fly it: no identified type");
+    fireEvent.click(screen.getByRole("button", { name: "How to read the bar" }));
+    expect(document.querySelector(".training-sentence-legend")!.textContent).toMatch(/The executor's replay does not fly it: no identified type\./);
   });
 
   it("opens the prior's predictions from its own button", () => {
@@ -495,14 +502,36 @@ describe("TrainingSentenceBar", () => {
       .toBe(`A320 · vectored · ${MOCK_ROWS} steps · 6 words after step 0 · ${MOCK_ROWS - 5} of ${MOCK_ROWS - 1} later steps silent`);
   });
 
-  it("reads out the labeller's verdicts in one chip, what each leaves out in its tooltip", () => {
+  it("writes the labeller's verdicts at the end of their rows, lined up on the slash, what each leaves out in its tooltip", () => {
     select();
-    render(<TrainingSentenceBar />);
-    expect(screen.getByText("heading 2/3 · capture ✓ · altitude 1/2 · speed 1/1")).toBeTruthy();
+    const { unmount } = render(<TrainingSentenceBar />);
+    const tallies = () => [...document.querySelectorAll(".training-sentence-tally")] as SVGTextElement[];
+    const written = () => tallies().map((tally) => [...tally.querySelectorAll("tspan")].map((span) => span.textContent).join(""));
+    expect(tallies().map((tally) => tally.getAttribute("aria-label"))).toEqual([
+      "approach: the capture turn: monotone ✓, rate and bank ✓",
+      "heading: 2 of 3 heading words inside their bands",
+      "altitude: 1 of 2 altitude tubes held",
+      "speed: 1 of 1 speed words held",
+    ]);
+    expect(written()).toEqual(["✓", "2/3", "1/2", "1/1"]);
+    // red where a word did not hold; every slash at one x
+    expect(tallies().map((tally) => tally.style.fill)).toEqual(["", TRAINING_OUTSIDE_COLOR, TRAINING_OUTSIDE_COLOR, ""]);
+    expect(new Set(tallies().flatMap((tally) => [...tally.querySelectorAll("tspan")].map((span) => span.getAttribute("x")))).size).toBe(1);
+    unmount();
+    // the straight-in flight: no capture turn (no mark), a heading word with no row of its own said in the tooltip
     select(1);
     render(<TrainingSentenceBar />);
-    const chip = screen.getByText("heading 0/0 · capture — · altitude 2/2 · speed 1/1");
-    expect(chip.getAttribute("title")).toMatch(/\(1 more with no row of their own: the lead reaches the clearance\).*none, on the final at entry/);
+    expect(written()).toEqual(["0/0", "2/2", "1/1"]);
+    expect(tallies()[0].querySelector("title")!.textContent).toBe(
+      "0 of 0 heading words inside their bands (1 more with no row of their own: the lead reaches the clearance)");
+  });
+
+  it("writes no tallies over a model's sentence: the labeller's checks are the truth's", () => {
+    select();
+    generations();
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
+    render(<TrainingSentenceBar />);
+    expect(document.querySelectorAll(".training-sentence-tally")).toHaveLength(0);
   });
 
   it("marks the clearance, the capture and the unspecified speed", () => {

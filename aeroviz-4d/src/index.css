@@ -660,17 +660,18 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   letter-spacing: 0.02em;
 }
 
-/* Opens the details page (`TrainingDetails`) on its first section: everything read once lives there. */
+/* The panel header's ⓘ, opening the details page (`TrainingDetails`) on its first section: everything read once lives
+   there — the module's one icon for "more to read". */
 .training-details-open {
   margin-left: auto;
-  padding: 1px 8px;
-  border: 1px solid rgba(103, 232, 249, 0.35);
-  border-radius: 999px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
   background: none;
-  color: rgba(103, 232, 249, 0.9);
+  color: rgba(103, 232, 249, 0.85);
   cursor: pointer;
-  font-size: 11px;
-  line-height: 1.4;
+  font-size: 13px;
+  line-height: 1.2;
 }
 
 .training-details-open:hover {
@@ -1032,16 +1033,6 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 .training-autopilot-details p {
   font-size: 10.5px;
   color: rgba(224, 230, 240, 0.7);
-}
-
-/* A long refusal is cut to one line; its tooltip holds all of it. */
-.training-sentence-autopilot-failed {
-  display: inline-block;
-  vertical-align: bottom;
-  max-width: 60ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* The two times the live executor is read by: the simulated flight and the computation, side by side. */
@@ -1601,6 +1592,14 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-size: 11px;
 }
 
+/* A row's tally at its end: muted when every word held (red, inline, when one did not); the counts line up on the slash. */
+.training-sentence-tally {
+  fill: rgba(224, 230, 240, 0.55);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+
 .training-sentence-word {
   font-size: 11px;
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;
@@ -1947,9 +1946,10 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   color: rgba(224, 230, 240, 0.5);
 }
 
-.training-sentence-executor,
+/* The live executor's line: short, and never broken — the header wraps around it whole. */
 .training-sentence-autopilot {
   font-size: 11px;
+  white-space: nowrap;
 }
 
 /* A window's footer: one row of swatches, each explained in its tooltip. */
