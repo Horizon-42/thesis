@@ -3,7 +3,8 @@
 From one instruction artefact split by operating day and each airport's arrivals manifest (its runway targets, for the
 separation rules; checked to be the manifest the artefact's signals were read from), every arrival of the training days
 — with a sentence or without (background) — is in its airport's scene on the steps its rows hang on (§2.1: even UTC
-seconds, `prior.scene.hung_span`), and at every step with two or more aircraft they are judged by `inference.separation`:
+seconds, `prior.scene.hung_span`), and at every step with two or more aircraft they are judged by `inference.separation`
+under both readings — `VISUAL`, which the closed loop's checks and the reward use, and `IFR`, reported beside it:
 
 - an aircraft's position is interpolated at the step from its rows (at most half a step past its first or last row, held
   there); its runway is the one it landed on (the observed census is a measurement, not a model input); its position on
@@ -51,7 +52,7 @@ import numpy as np
 from geokit import NM_M
 
 from ts_transformer.inference.runway_schedule import SAME, Separation, faa_separation, read_cwt_tables, wake_category
-from ts_transformer.inference.separation import Traffic, losses, next_behind, wake_at_threshold
+from ts_transformer.inference.separation import READINGS, VISUAL, Traffic, losses, next_behind, wake_at_threshold
 from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
 from ts_transformer.instructions.artefact import (
     arrival_manifest_sha256s, load_candidates, load_sentences, load_signals, load_spec,
@@ -142,12 +143,35 @@ def _traffic(tracks: Sequence[Track], t_s: float) -> Traffic:
                    tuple(t.category for t in tracks))
 
 
+def _record(episodes: list[dict[str, Any]], open_episodes: dict[tuple[str, str], dict[str, Any]], here: list[Track],
+            found, t_s: float, step_s: float) -> None:
+    """Add this step's losses to the episodes: a pair's loss over consecutive steps is one episode."""
+    for loss in found:
+        pair = tuple(sorted((here[loss.i].key, here[loss.j].key)))
+        episode = open_episodes.get(pair)
+        if episode is None or episode["last_s"] != t_s - step_s:
+            episode = {"pair": list(pair), "relation": loss.relation, "first_s": float(t_s), "steps": 0,
+                       "kinds": [], "min_ratio": math.inf, "wake_known": True, "responsible": []}
+            open_episodes[pair] = episode
+            episodes.append(episode)
+        episode["steps"] += 1
+        episode["last_s"] = float(t_s)
+        episode["min_ratio"] = min(episode["min_ratio"], loss.distance_m / loss.required_m)
+        episode["wake_known"] = episode["wake_known"] and loss.wake_known
+        if loss.kind not in episode["kinds"]:
+            episode["kinds"].append(loss.kind)
+        for k in loss.responsible:
+            answer = {"key": here[k].key, "speaking": here[k].presence.speaking}
+            if answer not in episode["responsible"]:
+                episode["responsible"].append(answer)
+
+
 def census_airport(tracks: list[Track], separation: Separation, step_s: float) -> dict[str, Any]:
     by_key = {t.key: t for t in tracks}
     index = SceneIndex([t.presence for t in tracks])
     segments = index.segments(step_s)
-    episodes: list[dict[str, Any]] = []
-    open_episodes: dict[tuple[str, str], dict[str, Any]] = {}
+    episodes: dict[str, list[dict[str, Any]]] = {reading: [] for reading in READINGS}
+    open_episodes: dict[str, dict[tuple[str, str], dict[str, Any]]] = {reading: {} for reading in READINGS}
     together: set[tuple[str, str]] = set()
     closing: list[float] = []
     closing_left_out = judged_steps = 0
@@ -164,28 +188,14 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
             traffic = _traffic(here, float(t_s))
             together.update(tuple(sorted((here[a].key, here[b].key)))
                             for a in range(len(here)) for b in range(a + 1, len(here)))
-            for loss in losses(traffic, separation):
-                pair = tuple(sorted((here[loss.i].key, here[loss.j].key)))
-                episode = open_episodes.get(pair)
-                if episode is None or episode["last_s"] != t_s - step_s:
-                    episode = {"pair": list(pair), "relation": loss.relation, "first_s": float(t_s), "steps": 0,
-                               "kinds": [], "min_ratio": math.inf, "wake_known": True, "responsible": []}
-                    open_episodes[pair] = episode
-                    episodes.append(episode)
-                episode["steps"] += 1
-                episode["last_s"] = float(t_s)
-                episode["min_ratio"] = min(episode["min_ratio"], loss.distance_m / loss.required_m)
-                episode["wake_known"] = episode["wake_known"] and loss.wake_known
-                if loss.kind not in episode["kinds"]:
-                    episode["kinds"].append(loss.kind)
-                for k in loss.responsible:
-                    answer = {"key": here[k].key, "speaking": here[k].presence.speaking}
-                    if answer not in episode["responsible"]:
-                        episode["responsible"].append(answer)
+            for reading in READINGS:
+                _record(episodes[reading], open_episodes[reading], here, losses(traffic, separation, reading),
+                        float(t_s), step_s)
+            # closing speeds between consecutive established aircraft on one runway
             for k in range(len(here)):
                 if not traffic.established[k]:
                     continue
-                follower = next_behind(traffic, k, separation)
+                follower = next_behind(traffic, k, separation, VISUAL)
                 if follower is None:
                     continue
                 if not (here[k].presence.speaking and here[follower].presence.speaking):
@@ -195,8 +205,8 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
                                      - np.interp(t_s, here[k].presence.times_s, here[k].along_rate_mps)))
 
     # at every landing: the established aircraft next behind, its landing interval on the approach clock
-    landing = {"judged": 0, "untyped": 0, "below_required": 0, "wake_losses": 0, "interval_m": [],
-               "interval_minus_required_m": [], "required_nm": Counter()}
+    landings = {reading: {"judged": 0, "untyped": 0, "below_required": 0, "wake_losses": 0, "interval_m": [],
+                          "interval_minus_required_m": [], "required_nm": Counter()} for reading in READINGS}
     for leader in tracks:
         t_s = leader.presence.landing_s
         near = [by_key[p.dataset_id] for p in index.overlapping(t_s, t_s) if p.dataset_id != leader.key]
@@ -211,21 +221,22 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
                         np.append(traffic.along_m, along_threshold), np.append(traffic.established, True),
                         (*traffic.category, leader.category))
         lead = len(near)
-        follower = next_behind(scene, lead, separation)
-        if follower is None:
-            continue
-        if leader.category is None or near[follower].category is None:
-            landing["untyped"] += 1
-            continue
-        landing["judged"] += 1
-        required_nm = separation.distance_nm(leader.presence.runway, leader.category, near[follower].presence.runway,
-                                             near[follower].category)
-        landing["required_nm"][f"{required_nm:g}"] += 1
-        interval = along_threshold - float(scene.along_m[follower])
-        landing["interval_m"].append(interval)
-        landing["interval_minus_required_m"].append(interval - required_nm * NM_M)
-        landing["below_required"] += interval < required_nm * NM_M
-        landing["wake_losses"] += wake_at_threshold(scene, lead, separation) is not None
+        for reading, landing in landings.items():
+            follower = next_behind(scene, lead, separation, reading)
+            if follower is None:
+                continue
+            if leader.category is None or near[follower].category is None:
+                landing["untyped"] += 1
+                continue
+            landing["judged"] += 1
+            required_nm = separation.distance_nm(leader.presence.runway, leader.category,
+                                                 near[follower].presence.runway, near[follower].category)
+            landing["required_nm"][f"{required_nm:g}"] += 1
+            interval = along_threshold - float(scene.along_m[follower])
+            landing["interval_m"].append(interval)
+            landing["interval_minus_required_m"].append(interval - required_nm * NM_M)
+            landing["below_required"] += interval < required_nm * NM_M
+            landing["wake_losses"] += wake_at_threshold(scene, lead, separation, reading) is not None
 
     # order swaps (§4.1)
     swaps = {"same_runway": [0, 0], "same_direction_other_runway": [0, 0]}
@@ -264,7 +275,32 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
             opens += WINDOW_EVERY_S
 
     hours = scene_seconds / 3600.0
-    pairs_with_a_loss = {tuple(e["pair"]) for e in episodes}
+
+    def judged(reading: str) -> dict[str, Any]:
+        found, landing = episodes[reading], landings[reading]
+        pairs = {tuple(e["pair"]) for e in found}
+        return {
+            "losses": {"episodes": len(found), "episodes_per_scene_hour": len(found) / hours,
+                       "pairs_with_a_loss": len(pairs), "pairs_with_a_loss_per_scene_hour": len(pairs) / hours,
+                       "pairs_with_a_loss_share": len(pairs) / len(together) if together else None,
+                       "by_kind": dict(Counter(kind for e in found for kind in e["kinds"])),
+                       "by_relation": dict(Counter(e["relation"] for e in found)),
+                       "untyped_in_trail": sum(not e["wake_known"] for e in found),
+                       "a_flight_with_a_sentence_answers": sum(any(r["speaking"] for r in e["responsible"])
+                                                               for e in found),
+                       "steps": _quantiles([e["steps"] for e in found]),
+                       "min_distance_over_required": _quantiles([e["min_ratio"] for e in found])},
+            "at_landing": {"judged": landing["judged"], "untyped": landing["untyped"],
+                           "below_required": landing["below_required"], "wake_losses": landing["wake_losses"],
+                           "interval_m": _quantiles(landing["interval_m"]),
+                           "interval_minus_required_m": _quantiles(landing["interval_minus_required_m"]),
+                           "required_nm": dict(sorted(landing["required_nm"].items())),
+                           "required_is_the_radar_minimum_share": (
+                               landing["required_nm"][f"{separation.same_nm:g}"] / landing["judged"]
+                               if landing["judged"] else None)},
+            "episodes": found,
+        }
+
     return {
         "flights": {"speaking": sum(t.presence.speaking for t in tracks),
                     "background": sum(not t.presence.speaking for t in tracks),
@@ -275,25 +311,8 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
         "scene_hours": hours, "steps_with_two_or_more": judged_steps,
         "segment_minutes": _quantiles(segment_minutes),
         "pairs_in_the_scene_together": len(together),
-        "losses": {"episodes": len(episodes), "episodes_per_scene_hour": len(episodes) / hours,
-                   "pairs_with_a_loss": len(pairs_with_a_loss),
-                   "pairs_with_a_loss_per_scene_hour": len(pairs_with_a_loss) / hours,
-                   "pairs_with_a_loss_share": len(pairs_with_a_loss) / len(together) if together else None,
-                   "by_kind": dict(Counter(kind for e in episodes for kind in e["kinds"])),
-                   "by_relation": dict(Counter(e["relation"] for e in episodes)),
-                   "untyped_in_trail": sum(not e["wake_known"] for e in episodes),
-                   "a_flight_with_a_sentence_answers": sum(any(r["speaking"] for r in e["responsible"])
-                                                           for e in episodes),
-                   "steps": _quantiles([e["steps"] for e in episodes]),
-                   "min_distance_over_required": _quantiles([e["min_ratio"] for e in episodes])},
-        "at_landing": {"judged": landing["judged"], "untyped": landing["untyped"],
-                       "below_required": landing["below_required"], "wake_losses": landing["wake_losses"],
-                       "interval_m": _quantiles(landing["interval_m"]),
-                       "interval_minus_required_m": _quantiles(landing["interval_minus_required_m"]),
-                       "required_nm": dict(sorted(landing["required_nm"].items())),
-                       "required_is_the_radar_minimum_share": (
-                           landing["required_nm"][f"{separation.same_nm:g}"] / landing["judged"]
-                           if landing["judged"] else None)},
+        "check_reading": VISUAL,
+        "readings": {reading: judged(reading) for reading in READINGS},
         "closing_speed_on_a_final_mps": {**_quantiles(closing), "pairs_with_a_background_flight_left_out": closing_left_out},
         "order_swaps": {group: {"swapped": s, "pairs": n, "share": s / n if n else None}
                         for group, (s, n) in swaps.items()},
@@ -303,7 +322,6 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
         "windows": {"count": len(window_flights), "flights": _quantiles(window_flights),
                     "entering_with_a_sentence": _quantiles(entering), "airborne_at_opening": _quantiles(airborne)},
         "A_max": max(max(sample_flights), max(window_flights)),
-        "episodes": episodes,
     }
 
 
@@ -354,8 +372,9 @@ def main(argv: list[str] | None = None) -> int:
                         separation.along_nm[flight.runway] * NM_M, spec, spec.step_s)
                   for i, flight in by_airport[airport]]
         report[airport] = census_airport(tracks, separation, spec.step_s)
-        print(f"{airport}: {len(tracks)} flights, {report[airport]['losses']['episodes']} loss episodes, "
-              f"A_max {report[airport]['A_max']}, {time.perf_counter() - started:.0f}s", flush=True)
+        found = {reading: report[airport]["readings"][reading]["losses"]["pairs_with_a_loss"] for reading in READINGS}
+        print(f"{airport}: {len(tracks)} flights, pairs with a loss {found}, A_max {report[airport]['A_max']}, "
+              f"{time.perf_counter() - started:.0f}s", flush=True)
 
     payload = {"schema": "ts-traffic-census-v1", "written_utc": utc_now(), "split": SPLIT,
                "only_airports": args.airports, "instructions": repo_relative(directory), "spec_sha256": spec.sha256,

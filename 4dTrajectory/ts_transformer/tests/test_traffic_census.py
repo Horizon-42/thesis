@@ -38,13 +38,16 @@ def test_the_census_counts_an_in_trail_loss_the_landing_intervals_the_closing_sp
     separation = Separation(same_nm=3.0, speed_mps=70.0, along_nm={"R": 0.0}, wake_nm=CWT_ON_APPROACH_NM)
     census = census_airport([leader, follower, late], separation, STEP_S)
 
-    losses = census["losses"]
+    # one runway: the two readings judge alike
+    assert census["check_reading"] == "visual" and census["readings"]["visual"] == census["readings"]["ifr"]
+    judged = census["readings"]["visual"]
+    losses = judged["losses"]
     assert (losses["episodes"], losses["pairs_with_a_loss"], losses["by_kind"]) == (1, 1, {"in_trail": 1})
-    episode = census["episodes"][0]
+    episode = judged["episodes"][0]
     assert episode["steps"] == len(range(146, 201, 2)) and episode["responsible"] == [{"key": "F", "speaking": True}]
     assert census["closing_speed_on_a_final_mps"]["p50"] == pytest.approx(10.0)
     # at G's landing L is 3.8 km behind, at L's F is 4.86 km: both under 3 NM, neither a TBL 5-5-2 (F behind F) loss
-    landing = census["at_landing"]
+    landing = judged["at_landing"]
     assert (landing["judged"], landing["below_required"], landing["wake_losses"], landing["required_nm"]) == (
         2, 2, 0, {"3": 2})
     assert landing["interval_m"]["min"] == pytest.approx(3_800.0)
