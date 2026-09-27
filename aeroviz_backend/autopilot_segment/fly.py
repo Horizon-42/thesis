@@ -22,6 +22,12 @@ checks point for point. A sentence spoken under the procedure's altitudes
 ends where its free generation ended it: at the first flown step whose end state sank more than the track tolerance below
 the glidepath lower edge of the runway in force (`glidepath_stop`, the readout's rule read on the flown record, as the
 readout reads it — after the flight); the flight is cut there and its answer's outcome is `BELOW_GLIDEPATH`.
+
+A model's sentence spoken from an AUGMENTED start (`ModelSentence.augmentation`, its overlay's
+`prior-generation-augmented` flight) is flown from that start, as its free generation flew it
+(`prior_free_generation.prior_rows` with augmentations): the executor's state at the first step moved by
+`prior.augment.augment_state` (`moved_inputs`), the observed rows the sentence is read against moved by
+`augment_signals`, and the time limit the augmented one (× `augment.TIMEOUT_FACTOR`).
 """
 
 from __future__ import annotations
@@ -36,7 +42,8 @@ import torch
 
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.executor import Flown
-from ts_transformer.autopilot.flights import flight_inputs, rebuild_series
+from ts_transformer.autopilot.flights import FlightInputs, flight_inputs, rebuild_series
+from ts_transformer.autopilot.frame import ALT, LAT, LON, PSI, SPEED
 from ts_transformer.autopilot.judge import Verdict, flown_track, judge, read_flown
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.runway_data import VerticalPath, published_vertical_paths
@@ -48,6 +55,7 @@ from ts_transformer.instructions.labeller.read import Reading, admit, read_fligh
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.training_files import require_stored_sentence, runway_hae_minus_msl_m, stored_sentence
 from ts_transformer.instructions.words import RUNWAY, UNCHANGED, Words
+from ts_transformer.prior.augment import TIMEOUT_FACTOR, Augmentation, augment_signals, augment_state
 from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.procedure import RunwayProcedure, below_floor
 from ts_transformer.repo_layout import arrival_manifest_path
@@ -176,27 +184,43 @@ def fly_until(executor: single.SingleExecutor, sentence: single.Sentence,
 MODEL_WORD_CLOCK = "time"
 
 
-def model_time_limit_s(context: FlightContext, first_row: int, params: ExecutorParams, step_s: float) -> float:
+def model_time_limit_s(context: FlightContext, first_row: int, params: ExecutorParams, step_s: float,
+                       augmented: bool = False) -> float:
     """A model's flight's time limit: the observed flight's remaining time from the sentence's first step × the spec's
-    timeout factor. MIRROR of `experiments.prior_free_generation.limits_s` for a real start (``augmented=False``; a runner
-    the backend does not import; pinned by `test_autopilot_segment.ModelSegmentTest`)."""
-    return (len(context.reading.words) - first_row) * step_s * params.timeout_factor
+    timeout factor — or, from an ``augmented`` start, × `augment.TIMEOUT_FACTOR`. MIRROR of
+    `experiments.prior_free_generation.limits_s` (a runner the backend does not import; pinned both ways by
+    `test_autopilot_segment.ModelSegmentTest`)."""
+    return (len(context.reading.words) - first_row) * step_s * (TIMEOUT_FACTOR if augmented else params.timeout_factor)
+
+
+def moved_inputs(inputs: FlightInputs, geometry: AirportGeometry, augmentation: Augmentation) -> FlightInputs:
+    """One flight's executor state at its first step moved like its augmented start (`augment_state`). MIRROR of
+    `experiments.prior_free_generation.augmented_inputs` for one flight (pinned by `test_autopilot_segment.
+    AugmentedStartTest`)."""
+    state = inputs.initial_state.clone()
+    row = state[0]
+    moved = augment_state(float(row[LAT]), float(row[LON]), float(row[ALT]), float(row[SPEED]), float(row[PSI]),
+                          geometry, augmentation)
+    state[0, [LAT, LON, ALT, SPEED, PSI]] = torch.tensor(moved, dtype=state.dtype)
+    return replace(inputs, initial_state=state)
 
 
 def fly_one_until(context: FlightContext, segment: Segment, reading: Reading, signals: FlightSignals,
                   params: ExecutorParams, words: Words, stop_steps: int | None, superseded: Callable[[], bool], *,
-                  model_limit_s: float | None = None) -> tuple[Flown, bool, float]:
+                  model_limit_s: float | None = None, augmentation: Augmentation | None = None) -> tuple[Flown, bool, float]:
     """The segment's sentence (``reading``, the observed rows ``signals`` from its first step) flown from the observed
     state at its first step to ``stop_steps`` (or its outcome): the flown record, whether it stopped there, and the
     executor's own wall time. Set up as `replay.fly_sentences` sets up `executor.fly` — its time limit, runways, chart,
     approach speed and word clock — and stepped here (`fly_until`). ``model_limit_s``: a model's sentence, flown as its
     free generation flew it — its time limit, and every word heard at its own step (the time clock) — None for the
-    truth."""
+    truth; ``augmentation``: a model's sentence spoken from an augmented start, flown from the state moved like it."""
     spec = words.spec
     limit_s = len(reading.words) * spec.step_s * params.timeout_factor if model_limit_s is None else model_limit_s
-    executor = single.SingleExecutor(flight_inputs([series_from_row(context.series, segment.start_row)], device=DEVICE),
-                                     context.geometry, context.vertical_paths, context.approach_ias_mps, params, words,
-                                     time_limit_s=limit_s)
+    inputs = flight_inputs([series_from_row(context.series, segment.start_row)], device=DEVICE)
+    if augmentation is not None:
+        inputs = moved_inputs(inputs, context.geometry, augmentation)
+    executor = single.SingleExecutor(inputs, context.geometry, context.vertical_paths, context.approach_ias_mps, params,
+                                     words, time_limit_s=limit_s)
     rows = len(reading.words)
     clock = (single.word_clock(params, signals.e_m[:rows], signals.n_m[:rows], spec.step_s) if model_limit_s is None
              else single.TimeClock(params.cycle_s))
@@ -288,14 +312,17 @@ def fly_segment(context: FlightContext, params: ExecutorParams, words: Words, co
             raise RequestRefused(f"a model's sentences are flown on the flight's own dynamics only, as its free generation "
                                  f"flies them: this flight flies on {context.group}")
         segment = model_segment(model, column, row, lead, words)
-        reading = model_reading(context.signals, segment, model, words)
+        # from an augmented start, the observed rows as the model read them: moved like its start
+        observed = context.signals if model.augmentation is None else augment_signals(context.signals, model.augmentation)
+        reading = model_reading(observed, segment, model, words)
         # the judge reads the flown track against the runway the MODEL points at (the observed rows name the observed one)
-        signals = replace(segment_signals(context.signals, segment),
+        signals = replace(segment_signals(observed, segment),
                           runway=context.geometry.candidates[reading.runway_index].ident)
-        limit_s = model_time_limit_s(context, model.first_row, params, spec.step_s)
+        limit_s = model_time_limit_s(context, model.first_row, params, spec.step_s, augmented=model.augmentation is not None)
     flown, reached, fly_s = fly_one_until(context, segment, reading, signals, params, words,
                                           None if segment.to_landing else segment.stop_row - segment.start_row,
-                                          superseded, model_limit_s=limit_s)
+                                          superseded, model_limit_s=limit_s,
+                                          augmentation=None if model is None else model.augmentation)
     glidepath_step = None
     if procedure_masks is not None and procedure_masks.altitudes:
         stop = glidepath_stop(flown, segment.grid, context.geometry, procedure_masks.finals[context.geometry.code], words)

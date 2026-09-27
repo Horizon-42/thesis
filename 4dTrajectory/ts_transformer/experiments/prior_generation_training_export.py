@@ -309,8 +309,9 @@ def observed_payload(signals: FlightSignals, geometry: AirportGeometry, hae_minu
 
 
 def augmentation_payload(move: Augmentation) -> dict[str, float]:
-    return {"rotationDeg": round(move.rotation_deg, 4), "altitudeM": round(move.altitude_m, 3),
-            "speedScale": round(move.speed_scale, 6)}
+    """The move as drawn, unrounded: the live backend flies a sample again from it, and a rotation rounded to 0.0001°
+    already moves a start ~20 km out by ~2 cm (the flight would no longer be the sample's own to the centimetre)."""
+    return {"rotationDeg": move.rotation_deg, "altitudeM": move.altitude_m, "speedScale": move.speed_scale}
 
 
 def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[str, np.ndarray], instructions: Path,

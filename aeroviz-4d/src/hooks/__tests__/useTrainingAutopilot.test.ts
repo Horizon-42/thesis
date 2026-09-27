@@ -11,7 +11,7 @@ import { parseTrainingSample, trainingSelectionOf, type TrainingSample } from ".
 import { nextPick } from "../../data/trainingAutopilot";
 import { VECTORED_KEY, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import { mockAutopilotAnswer, mockAutopilotRequest } from "../../data/__tests__/trainingAutopilot.fixture";
-import { BASE_MODEL_ID, mockGenerationViews } from "../../data/__tests__/trainingOverlays.fixture";
+import { AUGSTART_BASE_ID, BASE_MODEL_ID, MOCK_MOVE, mockGenerationViews } from "../../data/__tests__/trainingOverlays.fixture";
 
 const { appState, cursor, setTrainingAutopilot } = vi.hoisted(() => ({
   appState: { trainingSelection: null as unknown, trainingPick: null as any, trainingGenerations: [] as unknown[] },
@@ -136,8 +136,18 @@ describe("useTrainingAutopilot", () => {
     rerender();
     await waitFor(() => expect(last()?.status).toBe("ready"));
     const asked = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(asked.sentence).toMatchObject({ overlayId: BASE_MODEL_ID, sample: 1, firstRow: 4, rows: 76 });
+    expect(asked.sentence).toMatchObject({ overlayId: BASE_MODEL_ID, sample: 1, firstRow: 4, rows: 76, augmentation: null });
     expect(last().segment.source).toMatchObject({ kind: "model", sample: 1 });
+  });
+
+  it("asks for a word of a sample from an augmented start with the move its overlay's flight was flown from", async () => {
+    appState.trainingGenerations = mockGenerationViews(set, 0, () => undefined, [AUGSTART_BASE_ID]);
+    appState.trainingPick = nextPick(null, { overlayId: AUGSTART_BASE_ID, sample: 0 }, "heading", 12);
+    renderHook(() => useTrainingAutopilot(BACKEND));
+    await waitFor(() => expect(last()?.status).toBe("ready"));
+    const asked = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(asked.sentence).toMatchObject({ overlayId: AUGSTART_BASE_ID, augmentation: MOCK_MOVE });
+    expect(last().segment.source).toMatchObject({ kind: "model", augmentation: MOCK_MOVE });
   });
 });
 

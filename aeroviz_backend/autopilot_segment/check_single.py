@@ -45,7 +45,7 @@ from aeroviz_backend.autopilot_segment.segment import model_sentence
 
 CPU = torch.device("cpu")
 AIRPORTS = ("KMSY", "KRDU", "KSJC", "KSMF", "KSTL")
-MODELS = ("base", "landing_r01", "augmented_r07")
+MODELS = ("base", "landing_r01", "augmented_r07", "augstart_base", "augstart_landing_r01", "augstart_augmented_r07")
 #: Round-off: how far apart two floats of the two executors may be (wanted rates, a verdict's check numbers).
 ROUNDOFF = 1e-6
 #: How far apart two flown states may be, metres, horizontally or vertically.
@@ -57,16 +57,20 @@ def never() -> bool:
 
 
 def torch_fly_one_until(context, segment, reading, signals, params, words, stop_steps, superseded, *,
-                        model_limit_s=None) -> tuple[Flown, bool, float]:
+                        model_limit_s=None, augmentation=None) -> tuple[Flown, bool, float]:
     """The backend's drive before the single-flight executor: `executor.Executor` on a batch of one, set up as
-    `replay.fly_sentences` sets it up, stepped as `executor.fly` steps it and stopped at ``stop_steps``."""
+    `replay.fly_sentences` sets it up, stepped as `executor.fly` steps it and stopped at ``stop_steps`` — from the
+    augmented start (``augmentation``) when the sample was spoken from one, moved as `fly.moved_inputs` moves it."""
     spec = words.spec
     limit_s = len(reading.words) * spec.step_s * params.timeout_factor if model_limit_s is None else model_limit_s
     batch = replay.Batch(signals=[signals], series=[series_from_row(context.series, segment.start_row)],
                          readings=[reading], geometries=[context.geometry], vertical_paths=[context.vertical_paths],
                          approach_ias_mps=[context.approach_ias_mps], groups=[context.group], drawn={})
     f64 = torch.float64
-    executor = Executor(batch.inputs(CPU), Runways.of(batch.geometries, batch.vertical_paths, dtype=f64, device=CPU),
+    inputs = batch.inputs(CPU)
+    if augmentation is not None:
+        inputs = fly_module.moved_inputs(inputs, context.geometry, augmentation)
+    executor = Executor(inputs, Runways.of(batch.geometries, batch.vertical_paths, dtype=f64, device=CPU),
                         AirportCharts.of(batch.geometries, dtype=f64, device=CPU),
                         torch.tensor(batch.approach_ias_mps, dtype=f64, device=CPU), params, words,
                         time_limit_s=torch.tensor([limit_s], dtype=f64, device=CPU))
@@ -177,7 +181,7 @@ def main(argv: list[str] | None = None) -> None:
         directory, params, record, words = backend.executor_for(artefact)
         flights = sample["flights"][: args.limit or None]
         overlays = {entry["id"]: entry for entry in backend._json(args.airports_root / airport / "training" / "overlays.json")["overlays"]
-                    if entry["base"] == args.set and entry["kind"] == "prior-generation"}
+                    if entry["base"] == args.set and entry["kind"] in ("prior-generation", "prior-generation-augmented")}
         generations = {name: backend._json(args.airports_root / airport / "training" / entry["file"])
                        for name in args.models for oid, entry in overlays.items() if oid.startswith(f"generation_{name}_")}
         for item in flights:
@@ -200,7 +204,9 @@ def main(argv: list[str] | None = None) -> None:
                     record_ = {"overlayId": generation["overlayId"], "sample": flown_sample["sample"],
                                "firstRow": generation["generation"]["firstPredictedRow"], "rows": flown_sample["rows"],
                                "events": flown_sample["events"],
-                               "procedureMasks": generation["generation"]["procedureMasks"]}
+                               "procedureMasks": generation["generation"]["procedureMasks"],
+                               # from an augmented start: the flight's move (null from its own start)
+                               "augmentation": entry[0]["augmentation"] if "augment" in generation["generation"] else None}
                     model = model_sentence(record_, words, len(context.geometry.candidates), len(context.reading.words),
                                            params.timeout_factor)
                     masks = backend.procedure_masks(artefact, model.procedure_masks)

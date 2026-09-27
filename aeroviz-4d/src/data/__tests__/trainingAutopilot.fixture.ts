@@ -19,7 +19,7 @@ import {
   type TrainingAutopilotRequest,
 } from "../trainingAutopilot";
 import { sentenceColumnRuns, trainingSelectionOf, type TrainingSample, type TrainingSelection } from "../trainingSample";
-import type { TrainingGeneratedSentence, TrainingProcedureMask } from "../trainingOverlays";
+import type { TrainingAugmentation, TrainingGeneratedSentence, TrainingProcedureMask } from "../trainingOverlays";
 import { mockGeneratedPoint } from "./trainingOverlays.fixture";
 
 export function mockAutopilotRequest(sample: TrainingSample, flightKey: string, column: TrainingAutopilotRequest["column"],
@@ -28,14 +28,15 @@ export function mockAutopilotRequest(sample: TrainingSample, flightKey: string, 
 }
 
 /** A request for a MODEL's word: ``sentence`` (a sample the generation fixture's reader gave) of ``overlayId``, spoken
- *  under ``procedureMasks`` (none by default: base's). */
+ *  under ``procedureMasks`` (none by default: base's), from ``augmentation`` (null: the flight's own start). */
 export function mockModelAutopilotRequest(sample: TrainingSample, flightKey: string, column: TrainingAutopilotRequest["column"],
   row: number, overlayId: string, sentence: TrainingGeneratedSentence,
-  procedureMasks: TrainingProcedureMask[] = [],
+  procedureMasks: TrainingProcedureMask[] = [], augmentation: TrainingAugmentation | null = null,
 ): TrainingAutopilotRequest {
   return { airport: sample.airport, setId: sample.setId, flightKey, column, row,
     sentence: { overlayId, sample: sentence.sample, firstRow: sentence.firstRow, rows: sentence.rows,
-      events: sentence.events.map(({ row: step, column: index, value }) => ({ row: step, column: index, value })), procedureMasks } };
+      events: sentence.events.map(({ row: step, column: index, value }) => ({ row: step, column: index, value })), procedureMasks,
+      augmentation } };
 }
 
 /** The flight on screen that ``request`` asks about: its selection. */
@@ -80,7 +81,8 @@ export function mockAutopilotAnswer(sample: TrainingSample, request: TrainingAut
     vocabularySpecSha256: sample.vocabulary.specSha256,
     group: "own dynamics",
     source: model === null ? { kind: "truth" }
-      : { kind: "model", overlayId: model.overlayId, sample: model.sample, firstRow: model.firstRow },
+      : { kind: "model", overlayId: model.overlayId, sample: model.sample, firstRow: model.firstRow,
+        augmentation: model.augmentation === null ? null : { ...model.augmentation } },
     segment: {
       column: request.column, row: run.row, endRow: run.endRow, stopRow, toLanding, observedS: model === null ? steps * stepS : null,
       told: segmentWords(request, flight, stopRow),

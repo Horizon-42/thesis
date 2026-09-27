@@ -45,6 +45,7 @@ import {
   TRAINING_FREE_OUTCOMES,
   type TrainingCrossing,
   type TrainingFreeOutcome,
+  type TrainingAugmentation,
   type TrainingProcedureMask,
   type TrainingExecutorCheck,
   type TrainingGeneratedSentence,
@@ -69,7 +70,7 @@ import {
 
 /** MIRROR of `aeroviz_backend/autopilot_segment/payload.py` `SCHEMA`: the backend's answer; anything else is refused by
  *  name (the backend's `MirrorTest` pins these four). */
-export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v6";
+export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v7";
 /** MIRROR of `autopilot_segment/verdict.py` `STATUSES`: the selected word's verdict. */
 export const TRAINING_AUTOPILOT_STATUSES = ["inside", "outside", "not judged", "no check"] as const;
 export type TrainingAutopilotStatus = (typeof TRAINING_AUTOPILOT_STATUSES)[number];
@@ -96,6 +97,9 @@ export interface TrainingAutopilotSentence {
   rows: number;
   events: TrainingSentenceEvent[];
   procedureMasks: TrainingProcedureMask[];
+  /** The augmented start it was spoken from (its overlay's `prior-generation-augmented` flight: the backend flies it from
+   *  there), or null from the flight's own. */
+  augmentation: TrainingAugmentation | null;
 }
 
 /** What the Training view asks for: the clicked word's segment of the selected flight — of its truth (``sentence``
@@ -183,7 +187,9 @@ export interface TrainingAutopilotSegment {
   /** "own dynamics" or "stand-in dynamics" (a stand-in's errors are its aerodynamics, not the executor's). */
   group: string;
   /** Which sentence was flown: the truth's, or one sample of a model's own, flown again from its first step. */
-  source: { kind: "truth" } | { kind: "model"; overlayId: string; sample: number; firstRow: number };
+  source: { kind: "truth" } | {
+    kind: "model"; overlayId: string; sample: number; firstRow: number; augmentation: TrainingAugmentation | null;
+  };
   segment: {
     column: TrainingColumn;
     row: number;
@@ -507,11 +513,11 @@ function readTiming(timing: Reader, states: number): TrainingAutopilotSegment["t
 }
 
 /** What the Training view asks the backend for: the picked word's segment of the flight on screen — of the truth, or of
- *  the model's sample the pick names (``model``: that sample as the view read it, and the procedure's masks its overlay
- *  says it was spoken under). */
+ *  the model's sample the pick names (``model``: that sample as the view read it, the procedure's masks its overlay
+ *  says it was spoken under, and the augmented start it was spoken from — null from the flight's own). */
 export function trainingAutopilotRequest(
   selection: TrainingSelection, pick: TrainingPick,
-  model: { sentence: TrainingGeneratedSentence; procedureMasks: TrainingProcedureMask[] } | null,
+  model: { sentence: TrainingGeneratedSentence; procedureMasks: TrainingProcedureMask[]; augmentation: TrainingAugmentation | null } | null,
 ): TrainingAutopilotRequest {
   if ((pick.source === null) !== (model === null)) throw new Error("a model's pick is flown with its sentence, the truth's without");
   return {
@@ -520,6 +526,7 @@ export function trainingAutopilotRequest(
       overlayId: pick.source.overlayId, sample: pick.source.sample, firstRow: model.sentence.firstRow, rows: model.sentence.rows,
       events: model.sentence.events.map(({ row, column, value }) => ({ row, column, value })),
       procedureMasks: model.procedureMasks.map(({ name, dataSha256 }) => ({ name, dataSha256 })),
+      augmentation: model.augmentation === null ? null : { ...model.augmentation },
     },
   };
 }
@@ -553,12 +560,19 @@ export function parseTrainingAutopilot(
     }
     const source = answer.child("source");
     const kind = source.oneOf("kind", ["truth", "model"] as const);
+    const moved = kind === "truth" ? null : source.nullableChild("augmentation");
     const flownSource: TrainingAutopilotSegment["source"] = kind === "truth" ? { kind }
-      : { kind, overlayId: source.string("overlayId"), sample: source.count("sample"), firstRow: source.count("firstRow") };
+      : { kind, overlayId: source.string("overlayId"), sample: source.count("sample"), firstRow: source.count("firstRow"),
+        augmentation: moved === null ? null : { rotationDeg: moved.number("rotationDeg"), altitudeM: moved.number("altitudeM"),
+          speedScale: moved.number("speedScale") } };
     const asked = request.sentence;
+    // the start it was flown from is the one asked for: none, or the same move
+    const sameStart = (flown: TrainingAugmentation | null, wanted: TrainingAugmentation | null) => (flown === null || wanted === null
+      ? flown === wanted
+      : flown.rotationDeg === wanted.rotationDeg && flown.altitudeM === wanted.altitudeM && flown.speedScale === wanted.speedScale);
     if (flownSource.kind === "truth" ? asked !== null
       : asked === null || flownSource.overlayId !== asked.overlayId || flownSource.sample !== asked.sample
-        || flownSource.firstRow !== asked.firstRow) {
+        || flownSource.firstRow !== asked.firstRow || !sameStart(flownSource.augmentation, asked.augmentation)) {
       source.fail(`flew ${flownSource.kind === "truth" ? "the truth" : `${flownSource.overlayId} #${flownSource.sample}`}, but ` +
         `${asked === null ? "the truth" : `${asked.overlayId} #${asked.sample}`} was asked for`);
     }

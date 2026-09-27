@@ -83,14 +83,35 @@ describe("a model's word", () => {
     const source = { overlayId: BASE_MODEL_ID, sample: 0 };
     const masks = [{ name: TRAINING_PROCEDURE_ALTITUDES, dataSha256: "d".repeat(64) }];
     const asked = trainingAutopilotRequest(selection, { source, column: "heading", row: 12, attempt: 0 },
-      { sentence, procedureMasks: masks });
+      { sentence, procedureMasks: masks, augmentation: null });
     expect(asked.sentence).toMatchObject({ overlayId: BASE_MODEL_ID, sample: 0, firstRow: MOCK_GENERATION_FIRST_ROW, rows: 56 });
     // the masks it was spoken under go with it: the backend cuts the flight where the glidepath lower edge stopped it
     expect(asked.sentence!.procedureMasks).toEqual(masks);
     expect(asked.sentence!.events).toHaveLength(sentence.events.length);
     expect(() => trainingAutopilotRequest(selection, { source, column: "heading", row: 12, attempt: 0 }, null)).toThrow(/with its sentence/);
     expect(() => trainingAutopilotRequest(selection, { source: null, column: "heading", row: 8, attempt: 0 },
-      { sentence, procedureMasks: [] })).toThrow();
+      { sentence, procedureMasks: [], augmentation: null })).toThrow();
+  });
+
+  it("asks for a word of a sample from an augmented start with its move, and refuses an answer flown from another start", () => {
+    const set = sample();
+    const { sentence } = modelAsk(set);
+    const selection = mockSelection(set, mockAutopilotRequest(set, VECTORED_KEY, "heading", 8));
+    const move = { rotationDeg: 7.2, altitudeM: 84, speedScale: 1.03 };
+    const asked = trainingAutopilotRequest(selection, { source: { overlayId: BASE_MODEL_ID, sample: 0 }, column: "heading", row: 12,
+      attempt: 0 }, { sentence, procedureMasks: [], augmentation: move });
+    expect(asked.sentence!.augmentation).toEqual(move);
+    const request = mockModelAutopilotRequest(set, VECTORED_KEY, "heading", 12, BASE_MODEL_ID, sentence, [], move);
+    const parsed = parseTrainingAutopilot(mockAutopilotAnswer(set, request), request, selection);
+    if (!parsed.ok) throw new Error(parsed.problem);
+    expect(parsed.value.source).toMatchObject({ kind: "model", augmentation: move });
+    // flown from its own start, or another move: not the sample asked about
+    for (const flown of [null, { ...move, altitudeM: 83 }]) {
+      const raw = mockAutopilotAnswer(set, request);
+      raw.source.augmentation = flown;
+      const refused = parseTrainingAutopilot(raw, request, selection);
+      expect(refused.ok).toBe(false);
+    }
   });
 
   it("may end below the glidepath, where its sample was stopped — spoken under the procedure's altitudes only", () => {
@@ -121,7 +142,8 @@ describe("a model's word", () => {
     const { request } = modelAsk(set);
     const parsed = parseTrainingAutopilot(mockAutopilotAnswer(set, request), request, mockSelection(set, request));
     if (!parsed.ok) throw new Error(parsed.problem);
-    expect(parsed.value.source).toEqual({ kind: "model", overlayId: BASE_MODEL_ID, sample: 0, firstRow: MOCK_GENERATION_FIRST_ROW });
+    expect(parsed.value.source).toEqual({ kind: "model", overlayId: BASE_MODEL_ID, sample: 0, firstRow: MOCK_GENERATION_FIRST_ROW,
+      augmentation: null });
     // heading 225° said at 12, the next heading word at 16, flown a lead past it
     expect(parsed.value.segment).toMatchObject({ row: 12, endRow: 16, stopRow: 18, observedS: null });
     expect(parsed.value.end.offsetFromObserved).toBeNull();
@@ -146,7 +168,7 @@ describe("a model's word", () => {
     // and the truth's word answered as a model's
     const truth = mockAutopilotRequest(set, VECTORED_KEY, "heading", 8);
     const raw = mockAutopilotAnswer(set, truth);
-    raw.source = { kind: "model", overlayId: BASE_MODEL_ID, sample: 0, firstRow: 4 };
+    raw.source = { kind: "model", overlayId: BASE_MODEL_ID, sample: 0, firstRow: 4, augmentation: null };
     const result = parseTrainingAutopilot(raw, truth, mockSelection(set, truth));
     expect(result.ok ? "" : result.problem).toMatch(/flew generation_base #0, but the truth was asked for/);
   });

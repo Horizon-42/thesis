@@ -31,7 +31,7 @@ from aeroviz_backend.autopilot_segment.verdict import HeadingFacts, selected_hea
 
 #: MIRROR of `aeroviz-4d/src/data/trainingAutopilot.ts` (`TRAINING_AUTOPILOT_SCHEMA`); the reader refuses anything
 #: else by name. A name changes with the payload's shape, on both sides, in one change.
-SCHEMA = "aeroviz-autopilot-segment-v6"
+SCHEMA = "aeroviz-autopilot-segment-v7"
 #: The end of a segment flown to its ``stopRow``: the executor reached it. Otherwise the end is the judge's outcome
 #: (`judge.OUTCOMES`, mirrored by `trainingOverlays.ts`'s `TRAINING_EXECUTOR_OUTCOMES`), or — a model's sentence spoken
 #: under the procedure's altitudes — `fly.BELOW_GLIDEPATH` (v5: the request names the masks, the answer this end). MIRROR of `trainingAutopilot.ts`
@@ -196,7 +196,11 @@ def segment_payload(result: FlownSegment, context: FlightContext, words: Words) 
     return {
         # which sentence was flown: the truth's, or one sample of a model's own (flown again from its first step)
         "source": ({"kind": "truth"} if model is None else
-                   {"kind": "model", "overlayId": model.overlay_id, "sample": model.sample, "firstRow": model.first_row}),
+                   {"kind": "model", "overlayId": model.overlay_id, "sample": model.sample, "firstRow": model.first_row,
+                    # v7: the augmented start it was spoken from, echoed as asked (null: the flight's own)
+                    "augmentation": None if model.augmentation is None else {
+                        "rotationDeg": model.augmentation.rotation_deg, "altitudeM": model.augmentation.altitude_m,
+                        "speedScale": model.augmentation.speed_scale}}),
         "segment": {
             "column": COLUMNS[segment.column], "row": segment.row, "endRow": segment.end_row,
             "stopRow": segment.stop_row, "toLanding": segment.to_landing, "observedS": None if observed_s is None else round(observed_s, 3),

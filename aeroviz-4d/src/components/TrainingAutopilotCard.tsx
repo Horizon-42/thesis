@@ -32,7 +32,7 @@ import {
   type TrainingAutopilotSegment,
   type TrainingAutopilotView,
 } from "../data/trainingAutopilot";
-import { sourceOnScreen, type TrainingFreeOutcome } from "../data/trainingOverlays";
+import { augmentationText, sourceOnScreen, type TrainingFreeOutcome } from "../data/trainingOverlays";
 import { formatSeconds, type TrainingSelection } from "../data/trainingSample";
 import {
   checkText,
@@ -211,8 +211,10 @@ export default function TrainingAutopilotCard() {
           {segment.source.kind === "truth"
             ? `From the observed state at step ${segment.segment.row}, told the six words in force there and then the sentence's ` +
               "words as the observed aircraft heard them"
-            : `The model's sentence flown again from its first step (${segment.source.firstRow}), from the observed state there, ` +
-              `each word heard at the step it was said, as its free generation flew it; shown from step ${segment.segment.row}`}
+            : `The model's sentence flown again from its first step (${segment.source.firstRow}), from ` +
+              (segment.source.augmentation === null ? "the observed state there"
+                : `its augmented start (the observed state there moved ${augmentationText(segment.source.augmentation)})`) +
+              `, each word heard at the step it was said, as its free generation flew it; shown from step ${segment.segment.row}`}
           : {endText(segment)}.
           {end.offsetFromObserved === null ? "" : ` There it was ${end.offsetFromObserved.horizontalM.toFixed(0)} m from the ` +
             `observed aircraft, ${Math.abs(end.offsetFromObserved.aboveM).toFixed(0)} m ${end.offsetFromObserved.aboveM >= 0

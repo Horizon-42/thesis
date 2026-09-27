@@ -15,6 +15,13 @@
   实例，图由 `experiments/traffic_separation_examples.py` 画（它原来用 `np.arange(…, last + 1e-9, …)` 取纪元秒的步，丢了最后一步，改用
   `scene_steps`；跑道标签原来按字母顺序放在左右两边，KSMF 的 17L / 17R 标反了，改为放在各自跑道外侧）。
 - 代码健康待办加一条：`faa_separation(visual_parallels=True)` 是另一个不同的"目视"。
+### 2026-09-27 — 增强起点上的样本也能现飞（答复格式 v7）
+
+- 请求里模型的句子带 `augmentation`（真实起点为 null）；后端 `fly.moved_inputs` 按 `augment_state` 挪执行器第 8 行的状态（与
+  `prior_free_generation.augmented_inputs` 逐位相同），`augment_signals` 挪观测行，时限 ×2（`model_time_limit_s(augmented=True)`，
+  与 `limits_s` 两边钉住）；`aeroviz-autopilot-segment-v6` → v7，答复的 `source` 带回增强量，前端核对。句子条上增强起点的 ▶ Fly 打开。
+- 真实数据核对：已发布的三个模型、三个机场、九个词，现飞与导出样本最大差 2.9 cm（真实起点 0.000 m）——差在导出器把增强量取整
+  （转角 0.0001°），导出器改为写不取整的值；已发布的 15 份叠加层还是取整的。文档 36 §4.7、§4.10，35 AV26、AV35。
 
 ### 2026-09-27 — Training：模型从增强起点怎么飞（新叠加层种类 + 前端的起点开关）
 
