@@ -64,26 +64,29 @@ def test_the_census_counts_an_in_trail_loss_the_landing_intervals_the_closing_sp
 SEPARATION = Separation(same_nm=3.0, speed_mps=70.0,
                         relations={frozenset(("S1", "S2")): SINGLE, frozenset(("I1", "I2")): INDEPENDENT},
                         spacing_nm={frozenset(("S1", "S2")): 0.08, frozenset(("I1", "I2")): 1.0},
+                        right_nm={("S1", "S2"): -0.08, ("S2", "S1"): 0.08, ("I1", "I2"): -1.0, ("I2", "I1"): 1.0},
                         along_nm={"S1": 0.0, "S2": 0.0, "I1": 0.0, "I2": 0.0}, wake_nm=CWT_ON_APPROACH_NM)
 
 
-@pytest.mark.parametrize("track_minus_course_deg, lost_under_visual", [
-    (45.0, True),       # steeper than 30°
-    (20.0, False),      # closing on its centreline at 20°
-    (-20.0, True),      # 20° off, heading away from its centreline
-    (380.0, False),     # 20° as the census stores it, unwrapped along the rows: wrapped at the step
+@pytest.mark.parametrize("track_minus_course_deg, right_of_course_m, lost_under_visual", [
+    (45.0, -1_800.0, True),     # steeper than 30°
+    (20.0, -1_800.0, False),    # turning in from outside at 20°
+    (-20.0, -1_800.0, False),   # 20° off, outside, heading further out: away from A's final
+    (20.0, 1_000.0, True),      # overshot past the midline (0.5 NM) toward A's final
+    (380.0, -1_800.0, False),   # 20° as the census stores it, unwrapped along the rows: wrapped at the step
 ])
-def test_a_turn_on_beside_an_independent_final_is_free_under_the_visual_reading_only_when_it_intercepts_at_30_deg(
-        track_minus_course_deg, lost_under_visual):
-    """A on I1's final; B, 1.8 km left of I2's centreline and 2 km behind, turning in until it is captured at 150 s and
-    still there when A lands: one IFR episode until the capture, under VISUAL only when B does not intercept."""
+def test_a_turn_on_beside_an_independent_final_is_free_under_the_visual_reading_only_once_turned_in(
+        track_minus_course_deg, right_of_course_m, lost_under_visual):
+    """A on I1's final; B, on I2 (1 NM left of I1), 2 km behind and turning in until it is captured at 150 s and
+    still there when A lands: one IFR episode until the capture, under VISUAL only while B is not turned in."""
     from ts_transformer.experiments.traffic_census import census_airport
 
     t = np.arange(0.0, 200.0 + 1e-9, STEP_S)
     final = _track("A", t, -15_000.0 + 70.0 * t, 70.0, landing_s=15_000.0 / 70.0, runway="I1")
     t_b = np.arange(0.0, 240.0 + 1e-9, STEP_S)
     turning = _track("B", t_b, -17_000.0 + 70.0 * t_b, 70.0, n=1_800.0, landing_s=17_000.0 / 70.0, runway="I2",
-                     captured_s=150.0, track_minus_course_deg=track_minus_course_deg, right_of_course_m=-1_800.0)
+                     captured_s=150.0, track_minus_course_deg=track_minus_course_deg,
+                     right_of_course_m=right_of_course_m)
     census = census_airport([final, turning], SEPARATION, STEP_S)
 
     ifr, visual = census["readings"]["ifr"]["losses"], census["readings"]["visual"]["losses"]

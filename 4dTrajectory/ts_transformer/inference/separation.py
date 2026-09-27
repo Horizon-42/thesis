@@ -17,11 +17,14 @@ Two readings of the rules (design §3.2; user 2026-09-27, provisional): the clos
   traffic-in-sight report and an instruction to keep it — words the vocabulary does not have (user 2026-09-27). From
   `IFR` it differs in two places, and it never judges a pair `IFR` would not:
   - dependent and independent parallels (2,500 ft apart or more): no minimum between the two runways once BOTH aircraft
-    intercept their own centrelines at `FAA_VISUAL_INTERCEPT_MAX_DEG` or less (7-4-4 c2 a / c3 a: approved separation
-    until each is on a heading "which will intercept the extended centerline of the runway at an angle not greater than
-    30 degrees"; then c2 c / c3 c: no other separation with the adjacent centreline); before that, the `IFR` rule. An
-    aircraft intercepts when it is established, or its track is within 30° of the course and heads toward its
-    centreline or along it (`_intercepting`); the heading is read as the track (no wind);
+    are turned in (`_turned_in`; 7-4-4 c2 a / c3 a: approved separation until each is on a heading "which will
+    intercept the extended centerline of the runway at an angle not greater than 30 degrees"; then c2 c / c3 c: no
+    other separation with the adjacent centreline); before that, the `IFR` rule. Turned in: its track within
+    `FAA_VISUAL_INTERCEPT_MAX_DEG` of its course (the heading read as the track: no wind), and on its own side of the
+    midline between the two centrelines. The midline is our reading of "will intercept": an aircraft that has overshot
+    its centreline into the other final's half, or is still crossing that half toward its own (c2 / c3 b, d), has not
+    intercepted; one drifting a few degrees off its own centreline, or turning in from outside, has — reading it as
+    "heading toward its centreline" made every aircraft drifting a degree away from it a loss (readout §2);
   - two aircraft both ESTABLISHED on finals of runways of other directions are not judged (7-4-4 c4; the
     crossing-runway gate at the threshold, 3-10-4, is not modelled).
   A pair under 2,500 ft is judged as one runway, as under `IFR`: 7-4-4 c1 (as amended by N JO 7110.805) clears a
@@ -136,12 +139,14 @@ def _wake_m(table: dict[tuple[str, str], float], leader: str | None, follower: s
     return table.get((leader, follower), 0.0) * NM_M, True     # a blank cell of the table sets no wake minimum
 
 
-def _intercepting(traffic: Traffic, k: int) -> bool:
-    """7-4-4 c2 (a)(1) / c3 (a)(1): established on its final, or on a track that meets its own centreline at
-    `FAA_VISUAL_INTERCEPT_MAX_DEG` or less — within that of the course and heading toward the centreline, or along it."""
-    angle = float(traffic.track_minus_course_deg[k])
-    return bool(traffic.established[k]) or (
-        abs(angle) <= FAA_VISUAL_INTERCEPT_MAX_DEG and float(traffic.right_of_course_m[k]) * angle <= 0.0)
+def _turned_in(traffic: Traffic, k: int, other: str, separation: Separation) -> bool:
+    """7-4-4 c2 (a)(1) / c3 (a)(1), beside the final of the parallel runway ``other``: aircraft ``k``'s track is within
+    `FAA_VISUAL_INTERCEPT_MAX_DEG` of its course, and it is on its own side of the midline between the two centrelines
+    (module docstring)."""
+    other_right_m = separation.right_nm[(traffic.runway[k], other)] * NM_M      # the other centreline, right of its own
+    toward_other_m = float(traffic.right_of_course_m[k]) * math.copysign(1.0, other_right_m)
+    return (abs(float(traffic.track_minus_course_deg[k])) <= FAA_VISUAL_INTERCEPT_MAX_DEG
+            and toward_other_m < 0.5 * abs(other_right_m))
 
 
 def losses(traffic: Traffic, separation: Separation, reading: str) -> list[Loss]:
@@ -160,8 +165,9 @@ def losses(traffic: Traffic, separation: Separation, reading: str) -> list[Loss]
             both = bool(traffic.established[i] and traffic.established[j])     # established: a runway is in force
             ahead, behind = (i, j) if traffic.along_m[i] >= traffic.along_m[j] else (j, i)
             if reading == VISUAL:
-                if relation in (DEPENDENT, INDEPENDENT) and _intercepting(traffic, i) and _intercepting(traffic, j):
-                    continue            # 7-4-4 c2 / c3: both intercept their centrelines at 30° or less
+                if (relation in (DEPENDENT, INDEPENDENT) and _turned_in(traffic, i, rj, separation)
+                        and _turned_in(traffic, j, ri, separation)):
+                    continue            # 7-4-4 c2 / c3: both turned in, at 30° or less, on their own sides
                 if relation == UNRELATED and both:
                     continue            # established on finals of other directions: 3-10-4 not modelled
             if both and separation.one_runway(ri, rj):

@@ -38,7 +38,7 @@ def test_along_nm_is_a_thresholds_position_along_the_landing_direction_from_the_
     targets = {"23R": {"lat": lat0 + north / METRES_PER_DEG_LAT, "lon": lon0 + east / metres_per_deg_lon(lat0),
                        "course_deg": COURSE_DEG},
                "23L": {"lat": lat0, "lon": lon0, "course_deg": COURSE_DEG}}
-    _, _, _, along_nm = parallel_relations(targets, ())
+    along_nm = parallel_relations(targets, ())[4]
     assert {runway: along_nm[runway] * NM_M for runway in along_nm} == pytest.approx(figure.ALONG_M, abs=1e-6)
 
 

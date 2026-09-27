@@ -35,12 +35,15 @@ from ts_transformer.inference.separation import (
 RADAR_M = 3.0 * NM_M
 VERTICAL_M = 1_000.0 * FT_M
 #: One runway "R", a pair separated as one "S1"/"S2", a dependent parallel pair "L1"/"L2" (1.0 NM diagonal), an
-#: independent pair "I1"/"I2", all landing east; "X" is a runway of another direction.
+#: independent pair "I1"/"I2", all landing east, the second of each pair north of (left of) the first; "X" is a runway
+#: of another direction.
 SEPARATION = Separation(same_nm=3.0, speed_mps=70.0,
                         relations={frozenset(("S1", "S2")): SINGLE, frozenset(("L1", "L2")): DEPENDENT,
                                    frozenset(("I1", "I2")): INDEPENDENT},
                         spacing_nm={frozenset(("S1", "S2")): 0.1, frozenset(("L1", "L2")): 0.6,
                                     frozenset(("I1", "I2")): 1.5},
+                        right_nm={("S1", "S2"): -0.1, ("S2", "S1"): 0.1, ("L1", "L2"): -0.6, ("L2", "L1"): 0.6,
+                                  ("I1", "I2"): -1.5, ("I2", "I1"): 1.5},
                         diagonal_nm={frozenset(("L1", "L2")): 1.0}, wake_nm=CWT_ON_APPROACH_NM)
 
 
@@ -174,12 +177,14 @@ def test_traffic_refuses_a_broken_contract(runway, along, angle, right, establis
 def test_the_visual_reading_frees_parallels_once_both_intercept_at_30_deg_or_less():
     """7-4-4 c2 a / c3 a: approved separation until each is on a heading intercepting its centreline at 30° or less."""
     diagonal = traffic((-5_000, 0, 700, "L1", True, "F"), (-6_000, 1_100, 700, "L2", True, "F"))
-    # 500 m left of its centreline: turned right (+) it closes on it, turned left (−) it heads away
-    for angle, lost in ((20.0, False), (FAA_VISUAL_INTERCEPT_MAX_DEG, False), (31.0, True), (75.0, True),
-                        (-20.0, True)):
+    # the second aircraft 500 m outside its centreline (left, away from the other final), or 1,500 m inside it — past
+    # the midline between the two finals (0.3 NM for L, 0.75 NM for I)
+    for angle, right, lost in ((20.0, -500.0, False), (FAA_VISUAL_INTERCEPT_MAX_DEG, -500.0, False),
+                               (31.0, -500.0, True), (75.0, -500.0, True), (-20.0, -500.0, False),
+                               (0.0, 1_500.0, True), (-20.0, 1_500.0, True)):
         for runways in (("I1", "I2"), ("L1", "L2")):
             turning_in = traffic((-8_000, 0, 700, runways[0], True, "F"),
-                                 (-9_000, 1_800, 800, runways[1], False, "F", angle, -500.0))
+                                 (-9_000, 1_800, 800, runways[1], False, "F", angle, right))
             assert [(loss.kind, loss.responsible) for loss in losses(turning_in, SEPARATION, IFR)] == [
                 (RADAR_OR_VERTICAL, (1,))]
             assert losses(turning_in, SEPARATION, VISUAL) == (losses(turning_in, SEPARATION, IFR) if lost else [])
@@ -195,15 +200,17 @@ PAIRS = {SAME: ("R", "R"), SINGLE: ("S1", "S2"), DEPENDENT: ("L1", "L2"), INDEPE
 
 
 def test_the_visual_reading_is_the_ifr_reading_less_exactly_what_7_4_4_c_frees():
-    """Every relation × who is established × track less course × side of the centreline × order: VISUAL is IFR, except
-    none between parallels 2,500 ft or more apart that both intercept at 30° or less, and none between established finals
-    of other directions."""
+    """Every relation × who is established × track less course × distance off the centreline × order: VISUAL is IFR,
+    except none between parallels 2,500 ft or more apart that are both turned in (within 30° of the course, on their own
+    side of the midline), and none between established finals of other directions."""
     limit = FAA_VISUAL_INTERCEPT_MAX_DEG
 
-    def intercepting(established: bool, angle: float, right: float) -> bool:
-        return established or (abs(angle) <= limit and right * angle <= 0.0)
+    def turned_in(runway: str, other: str, angle: float, right: float) -> bool:
+        other_right_m = SEPARATION.right_nm[(runway, other)] * NM_M
+        return abs(angle) <= limit and right * math.copysign(1.0, other_right_m) < abs(other_right_m) / 2
 
-    kinematics = list(itertools.product((0.0, limit, limit + 1.0, -limit, -limit - 1.0, 90.0), (-400.0, 0.0, 400.0)))
+    kinematics = list(itertools.product((0.0, limit, limit + 1.0, -limit, -limit - 1.0, 90.0),
+                                        (-400.0, 0.0, 400.0, 1_500.0, -1_500.0)))
     for relation, (ra, rb) in PAIRS.items():
         for est_a, est_b in itertools.product((False, True), repeat=2):
             if rb is None and est_b:
@@ -211,8 +218,8 @@ def test_the_visual_reading_is_the_ifr_reading_less_exactly_what_7_4_4_c_frees()
             for (angle_a, right_a), (angle_b, right_b) in itertools.product(kinematics, repeat=2):
                 a = (-3_000.0, 0.0, 600.0, ra, est_a, "F", angle_a, right_a)
                 b = (-4_000.0, 1_100.0, 600.0, rb, est_b, "F", angle_b, right_b)
-                freed = ((relation in (DEPENDENT, INDEPENDENT) and intercepting(est_a, angle_a, right_a)
-                          and intercepting(est_b, angle_b, right_b))
+                freed = ((relation in (DEPENDENT, INDEPENDENT) and turned_in(ra, rb, angle_a, right_a)
+                          and turned_in(rb, ra, angle_b, right_b))
                          or (relation == UNRELATED and est_a and est_b))
                 for scene in (traffic(a, b), traffic(b, a)):
                     ifr = losses(scene, SEPARATION, IFR)

@@ -116,7 +116,7 @@ def test_staggered_thresholds_are_separated_on_the_approach_clock():
     targets = {"23L": {"lat": 35.0, "lon": -80.0, "course_deg": 225.0},
                "23R": {"lat": 35.0 + 0.67 * NM_M * math.cos(math.radians(225.0)) / -METRES_PER_DEG_LAT,
                        "lon": -80.0 + 0.67 * NM_M * math.sin(math.radians(225.0)) / -metres_per_deg_lon(35.0), "course_deg": 225.0}}
-    along = parallel_relations(targets, [ParallelRegime(2500.0, SINGLE)])[3]
+    along = parallel_relations(targets, [ParallelRegime(2500.0, SINGLE)])[4]
     assert along["23L"] - along["23R"] == pytest.approx(0.67, abs=1e-3)
 
 
@@ -149,10 +149,12 @@ def test_the_parallel_relation_follows_the_centerline_spacing_bands():
                 "09": {"lat": 35.0, "lon": -80.0, "course_deg": 90.0}}
 
     for offset, relation, diag in ((700.0, SINGLE, None), (3000.0, DEPENDENT, 1.0), (4000.0, DEPENDENT, 1.5), (6000.0, INDEPENDENT, None)):
-        relations, spacing, diagonal, along = parallel_relations(targets(offset), regimes)
+        relations, spacing, right, diagonal, along = parallel_relations(targets(offset), regimes)
         pair = frozenset(("36L", "36R"))
         assert relations[pair] == relation
         assert spacing[pair] == pytest.approx(offset * FT_M / NM_M, rel=1e-6)
+        # north-bound, 36R lies east of 36L: to its right; and 36L to 36R's left
+        assert right[("36L", "36R")] == pytest.approx(spacing[pair]) == pytest.approx(-right[("36R", "36L")])
         assert diagonal.get(pair) == diag
         assert along["36L"] == pytest.approx(along["36R"], abs=1e-9)          # level thresholds: no stagger
         assert frozenset(("36L", "09")) not in relations                    # another direction: no parallel relation

@@ -64,7 +64,8 @@ class Separation:
     """The one definition of the minimum time between two landings (`gap_s`).
 
     ``relations`` maps an unordered runway pair to its relation and ``spacing_nm`` to its centerline
-    spacing; ``same_nm`` is the radar minimum on one runway; ``wake_nm`` the in-trail wake minimum by
+    spacing; ``right_nm`` maps an ORDERED pair ``(a, b)`` of those to how far b's centreline lies right
+    of a's (signed, looking along the landing direction); ``same_nm`` is the radar minimum on one runway; ``wake_nm`` the in-trail wake minimum by
     (leader category, follower category), applied only on one runway or a pair separated as one;
     ``speed_mps`` converts a distance to the time it takes the follower to close it; ``along_nm`` is
     each runway's threshold position along its course from a common origin (a runway not in it sits
@@ -74,6 +75,7 @@ class Separation:
     speed_mps: float
     relations: Mapping[frozenset, str] = field(default_factory=dict)
     spacing_nm: Mapping[frozenset, float] = field(default_factory=dict)
+    right_nm: Mapping[tuple[str, str], float] = field(default_factory=dict)
     diagonal_nm: Mapping[frozenset, float] = field(default_factory=dict)
     wake_nm: Mapping[tuple[str, str], float] = field(default_factory=dict)
     along_nm: Mapping[str, float] = field(default_factory=dict)
@@ -115,13 +117,15 @@ class Separation:
 
 def parallel_relations(
     targets: Mapping[str, Mapping[str, float]], regimes: Sequence[ParallelRegime], *, max_course_diff_deg: float = 10.0,
-) -> tuple[dict[frozenset, str], dict[frozenset, float], dict[frozenset, float], dict[str, float]]:
-    """``(relations, spacing_nm, diagonal_nm, along_nm)``: every pair of runways with (nearly) the same
-    inbound course, its centerline spacing and its relation under ``regimes`` (sorted by ``below_ft``; a
-    spacing at or above the last band is independent), and every runway's threshold position along its
-    own course from the first runway's threshold. ``targets``: runway -> ``{lat, lon, course_deg}``, the
+) -> tuple[dict[frozenset, str], dict[frozenset, float], dict[tuple[str, str], float], dict[frozenset, float],
+           dict[str, float]]:
+    """``(relations, spacing_nm, right_nm, diagonal_nm, along_nm)``: every pair of runways with (nearly) the
+    same inbound course, its centerline spacing, how far each one's centreline lies right of the other's
+    (both orders, signed), and its relation under ``regimes`` (sorted by ``below_ft``; a spacing at or
+    above the last band is independent), and every runway's threshold position along its own course from
+    the first runway's threshold. ``targets``: runway -> ``{lat, lon, course_deg}``, the
     arrivals manifest's (the course a COMPASS bearing: 0 = north, clockwise)."""
-    relations, spacing, diagonal = {}, {}, {}
+    relations, spacing, right, diagonal = {}, {}, {}, {}
     names = sorted(targets)
     bands = sorted(regimes, key=lambda band: band.below_ft)
     origin = targets[names[0]]
@@ -140,14 +144,16 @@ def parallel_relations(
             east = (float(tb["lon"]) - float(ta["lon"])) * metres_per_deg_lon(float(ta["lat"]))
             north = (float(tb["lat"]) - float(ta["lat"])) * METRES_PER_DEG_LAT
             course = math.radians(float(ta["course_deg"]))
-            spacing_m = abs(east * math.cos(course) - north * math.sin(course))
+            right_m = east * math.cos(course) - north * math.sin(course)      # b's threshold right of a's course
+            spacing_m = abs(right_m)
             pair = frozenset((a, b))
             spacing[pair] = spacing_m / NM_M
+            right[(a, b)], right[(b, a)] = right_m / NM_M, -right_m / NM_M
             band = next((band for band in bands if spacing_m / FT_M < band.below_ft), None)
             relations[pair] = INDEPENDENT if band is None else band.relation
             if band is not None and band.relation == DEPENDENT:
                 diagonal[pair] = band.diagonal_nm
-    return relations, spacing, diagonal, along
+    return relations, spacing, right, diagonal, along
 
 
 # ── The FAA arrival minima ──────────────────────────────────────────────────────────────────────────
@@ -268,11 +274,11 @@ def faa_separation(
     ``visual_parallels`` is the visual-approach reading instead: no minimum between two parallel
     runways at all (7-4-4 c, pilots maintain visual separation once the leader is on its centreline);
     each runway keeps its own radar and wake minima."""
-    relations, spacing, diagonal, along = parallel_relations(targets, FAA_PARALLEL_REGIMES)
+    relations, spacing, right, diagonal, along = parallel_relations(targets, FAA_PARALLEL_REGIMES)
     if visual_parallels:
         relations = {pair: INDEPENDENT for pair in relations}
         diagonal = {}
-    return Separation(same_nm=radar_nm, speed_mps=speed_mps, relations=relations, spacing_nm=spacing,
+    return Separation(same_nm=radar_nm, speed_mps=speed_mps, relations=relations, spacing_nm=spacing, right_nm=right,
                       diagonal_nm=diagonal, wake_nm=CWT_ON_APPROACH_NM, along_nm=along)
 
 
