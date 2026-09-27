@@ -258,10 +258,9 @@
   没有必须修的，建议项已修。**现有模型已补记录**（用户同意，2026-09-26 22:25 UTC）：22 个目录，脚本和日志在
   `outputs/POOLED/prior/procedure_masks_stamp_20260927/`，带截断那次运行的 8 轮跑完后补在 `procedure_masks_stamp_20260927_clip/`（没有记录的目录 `load_prior` 拒绝打开）。与 `dev-training-rounds` 试合并：代码自动合并，只有
   `docs/CHANGELOG.md`、`docs/code-health-followups.md` 两处文字冲突。
-- **分支 `dev-heading-lead`（工作树 `.claude/worktrees/heading-lead`，`840ced77`）**：航向提前量消融的 runner `heading_lead_ablation`（R23）、
-  `executor_replay.fly_airport` 的逐架附加列接口；两轮 opus 审查、ts 全套 1,521 通过；不碰执行器 / 标注器指纹覆盖的文件。**等合并**：
-  dev-two-tier 之后多了一个文档提交，不能快进；两边改的文件不重叠，合并提交能保住消融 `plan.json` 记的 `840ced77`。消融结果从这个工作树跑，
-  合并后再删工作树和分支（删前 unlink 数据软链接）。
+- **分支 `dev-heading-lead` 已合并进 dev-two-tier**（用户 2026-09-27，合并提交 `fbeea349`，保住消融 `plan.json` 记的 `840ced77`）：runner
+  `heading_lead_ablation`（R23）、`executor_replay.fly_airport` 的逐架附加列接口；两轮 opus 审查、ts 全套 1,521 通过。工作树和分支已删；
+  `analyses/heading_lead_ablation_20260927/run.sh` 写的是已删工作树的路径，只作记录。
 - **工作树 `training-rounds`（分支 `dev-training-rounds`，`f90a306c`）**：不是这边建的，另一个会话的，不要动。
 - **本地分支**：`dev-two-tier`、`main`、`wip-r32-leg-timing`（跑道意图 R3.2 没采纳的第三种改法，远端也有；跑道意图计划 §18.2 引用它
   备查，保留）。2026-09-26 删掉的：工作树 `post-train`、`rebuild`、`training-sentences` 及分支 `dev-post-train`、`dev-training-followups`、
@@ -344,11 +343,11 @@
 3. **航向提前量 L 的消融：做完**（2026-09-27，[消融读数](readouts/2026-09-27_heading_lead_ablation.zh.md)，
    `outputs/POOLED/analyses/heading_lead_ablation_20260927/`）。训练集回放门的原样本（1,904 架自有动力学），24 格逐格重标、重飞，参考格与
    v10 的回放逐架一致。**L = 4 s、坡度上限 32° 不变**（L 4 与 6 s 分不出，2 与 8 s、25° 都更差）→ 词表、句子产物、先验不动，第二级不做、
-   不因 L 重训。**p 5°/s 与 8°/s 读不出差别**（3°/s 太慢）；改不改成 5°/s 待用户定，要改就进 v11。
+   不因 L 重训。**p 5°/s 与 8°/s 读不出差别**（3°/s 太慢）；**v11 改成 5°/s**（用户 2026-09-27）。
 4. **下一版执行器规格 v11**（接着做；用户 2026-09-26 同意列入、2026-09-27 定了结局名和同批项）：判定给"过另一条跑道的入口"和
    "截获了、在中线上但太高"各自的新结局（`crossed_off_runway` 只剩横向偏出），"落地"的横向判据收紧到跑道本身（约 107 m）（先验读数
    §16–§17）；下滑道下限起作用时的模式标记；"下降至落地"最平一档在下沿以上偏陡的飞法（先设计、单独量）；源码指纹按去掉文档字符串的
-   语法树算，同批修掉等指纹的注释和路径；p 看用户（上面第 3 条）。前端结局镜像加两个名字，和做前端的会话协调。之后：训练集回放门、
+   语法树算，同批修掉等指纹的注释和路径；p = 5°/s（引用出处，不再由词表推出）。前端结局镜像加两个名字，和做前端的会话协调。之后：训练集回放门、
    验证集回放门、base / landing / augmented 在 v11 上重读、叠加层重新导出（写 `public/data` 要用户同意）、重启后端。
 5. ~~后端重启~~：已做（2026-09-27，§7）。
 6. 可选：前端叠加层在 v5 / v10 上重新导出（写 `public/data`，要用户同意）。
