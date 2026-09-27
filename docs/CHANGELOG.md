@@ -1,5 +1,19 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-27 — 后端现飞改用单条执行器：一段 0.54 s → 9 ms，与 torch 执行器按结果一致
+
+- 用户："批量执行的对单条来说太慢了……写好后替换后端实时跑词段的调用"。量下来：torch 执行器一次飞一架每个 1 s 周期约 2.7 ms（每个小运算的
+  开销，动力学与各律各半），浏览器里看到的"算了 5 s"是冷启动（每架新航班重建 1.5–2 s + 首次载入）。用户选：纯 Python 重写、按结果核对
+  （逐位相同做不到：torch 的 atan2、hypot 同一架批量飞和单独飞就差最后一位，sin / sqrt / atan / tanh 与标准数学库也差）；放后端包、钉住
+  它照写的代码而不进执行器规格的指纹（v11 规格不动）；冷启动一起做。
+- `aeroviz_backend/autopilot_segment/single.py`：各律、反解、词钟、结束条件与缩放运输图上的 RK4（每周期两步 0.5 s）逐个表达式照写；
+  `MIRRORED_MODULES` + `MIRRORED_SOURCE_SHA256`（`23e5a02ad412`，按 `spec.logic`），后端选规格时核对，对不上就拒绝飞。`fly.open_flights`：
+  一个集合的航班第一次被请求时一起重建（一次 `rebuild_series`），每架航班自己的拒绝只拒它自己（`rebuilt_each`）。`check_single.py`：
+  逐段对照工具。分支 `dev-single-executor`（`eb1155c0`、`e257fa4c`），opus 审查没有找到照写错误，建议项都改了；合并 `218c8d5a`，后端已重启。
+- 验证：合成航班上每种模式、每个限制都有一处起作用，两份执行器逐周期一致（`aeroviz_backend/tests/test_single_executor.py`，后端 192 条通过）；
+  训练视图全部航班 7,578 段逐段对照一段不差（航迹最大差 1.6e-8 m），单条 49 s 对 torch 3,397 s；真实后端上一段 201 个周期 12 ms、集合第一次
+  约 3.8 s 之后每架 2–18 ms；浏览器里 augmented r7 的词现飞 15 ms、与样本 0.00 m。带程序屏蔽的模型的词第一次仍要 1.9 s（建屏蔽，没动）。
+
 ### 2026-09-27 — 执行器 v11：p = 5°/s、下滑道下方平飞、落地按跑道本身判、两个新结局、源码指纹只算逻辑
 
 - 分支 `dev-executor-v11`，三步（每步 opus 审查）：`a347fb3a`（源码指纹按去掉文档字符串的语法树算，规格 `ts-executor-spec-v6` 记
