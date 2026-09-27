@@ -36,7 +36,7 @@
 代码：`experiments/traffic_labelled.py`（runner，R26）、`experiments/traffic_loop.py`（闭环）；提交 `d57d3e17`（分支 `dev-multi-aircraft`，opus 审查过，
 审查指出的问题都已改、变异测试核过），通过线按用户定的判法改在 `5171643c`。产物：`outputs/POOLED/traffic/labelled_v2_20260928/labelled.json`
 （格式 `ts-traffic-labelled-v2`，干净的树，五个机场约 20 分钟，CPU）；按原文判法的第一次正式跑 `labelled_20260928`（v1，`d57d3e17`）数完全相同、
-只差"过没过"，已被 v2 取代。
+只差"过没过"，被 v2 取代后删除（用户 2026-09-28 同意）。
 
 ## 2 通过线：目视读法（检查和奖励用的读法）
 
