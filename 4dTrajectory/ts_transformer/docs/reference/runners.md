@@ -650,3 +650,24 @@ holds each example's numbers (distances at its first, closest and last step) and
 IFR episode summarised at its first step. Refuses a census of another schema. Output:
 `docs/two_tier/readouts/figures/parallel_runway_separation/`.
 
+### R26 · `run_ts.py traffic_labelled` — every labelled flight flies its labelled words together on the training days' scenes, judged as the closed loop judges (multi-aircraft design §6.4 step 5)
+
+2026-09-28. `traffic_labelled --instructions <sentence artefact> --executor <executor spec> --out <new dir> [--airports ...]
+[--chunk 300] [--device cpu]`. Every labelled flight of the training days that the executor can fly (the replay gate's
+groups: own dynamics, stand-in reported apart) flies its stored sentence from row 0 as the replay gate flies it (re-read
+first, the spec's track clock, time limit × 1.5), to its own end: the executor judge's outcome, or the glidepath lower
+edge's stop when that comes strictly before it (`own_end`; `prior_free_generation` lets any stop win). The rest — labelled
+flights the executor cannot fly (C31, counted by reason) and the background arrivals — are replayed as the census replays
+them. The scene closed loop (`experiments/traffic_loop.py`, shared with M3 and M4, not a runner): controlled aircraft on
+the 2 s steps from the step their first row hangs on; each step first the landings since the last step (TBL 5-5-2, the
+others interpolated at the crossing), then every pair under one reading; the controlled aircraft that answer are ended
+(`lost_separation`), replayed ones never. It runs under VISUAL and IFR twice: with the flown flights (`executor`) and with
+the same flights along their recorded rows on the same steps (`recorded`: established from the artefact's capture row,
+landed at the crossing read off its own rows — the roster's landing time can fall up to 7 s before the last row). The
+pass line (design §3.4 step 0; read as what the executor adds, user 2026-09-28, §9 item 17) is the executor run's VISUAL
+ended share LESS the recorded control's, over the own-dynamics flights, ≤ 3 % per airport and pooled: the recorded traffic
+already breaks the check where its controllers kept visual separation. Per flight: its own end, its landing from its
+first step in both runs, who ended it in each run and reading. Writes `labelled.json` (`ts-traffic-labelled-v2`; v1 gated
+the raw share) into a NEW directory; about 20 minutes over the five airports, CPU. Formal: `outputs/POOLED/traffic/`
+`labelled_v2_20260928/`: 3.93 % of the own-dynamics flights ended under VISUAL against 2.76 % along their recorded rows —
+the executor adds 1.17 points (KSTL 2.62, the most): passes (readout `2026-09-28_labelled_traffic.zh.md`).

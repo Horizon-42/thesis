@@ -18,7 +18,8 @@ if __package__ in (None, ""):  # run by path: the package's parent goes on the p
         sys.path.insert(0, str(_PACKAGE_PARENT))
 
 PACKAGE = "ts_transformer.experiments"
-NOT_RUNNERS = {"__main__", "support"}
+#: Modules here that are not runners: shared code the runners import (the scene closed loop: M0 step 5, M3, M4).
+NOT_RUNNERS = {"__main__", "support", "traffic_loop"}
 
 
 def runner_names() -> list[str]:
