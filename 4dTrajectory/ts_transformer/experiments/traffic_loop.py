@@ -66,6 +66,7 @@ class Controlled:
     along_m: np.ndarray                 # [S] position on the approach clock
     track_minus_course_deg: np.ndarray  # [S] −180–180°
     right_of_course_m: np.ndarray       # [S]
+    along_speed_mps: np.ndarray         # [S] its speed along its course: ground speed × cos(track − course)
     established: np.ndarray             # [S] bool
     category: str | None
     outcome: str
@@ -75,7 +76,7 @@ class Controlled:
         count = len(self.times_s)
         if count == 0 or not all(len(values) == count for values in (
                 self.e_m, self.n_m, self.height_m, self.runway, self.along_m, self.track_minus_course_deg,
-                self.right_of_course_m, self.established)):
+                self.right_of_course_m, self.along_speed_mps, self.established)):
             raise ValueError(f"{self.key}: a controlled aircraft holds one value per step, and at least one step")
 
     @property
@@ -95,27 +96,31 @@ class Controlled:
 
 
 def _on_runway(presence: Presence, first_step_s: float, step_s: float, e_m: np.ndarray, n_m: np.ndarray,
-               height_m: np.ndarray, track_deg: np.ndarray, established: np.ndarray, runway: str,
-               geometry: AirportGeometry, separation: Separation, category: str | None, outcome: str,
+               height_m: np.ndarray, track_deg: np.ndarray, ground_speed_mps: np.ndarray, established: np.ndarray,
+               runway: str, geometry: AirportGeometry, separation: Separation, category: str | None, outcome: str,
                landing_s: float | None) -> Controlled:
     candidate = geometry.candidates[geometry.candidate_index(runway)]
     relative = relative_to_runway(e_m, n_m, track_deg, height_m, candidate)
+    angle = np.asarray(relative.track_minus_course_deg, dtype=np.float64)
     return Controlled(presence, first_step_s + step_s * np.arange(len(e_m)), np.asarray(e_m, dtype=np.float64),
                       np.asarray(n_m, dtype=np.float64), np.asarray(height_m, dtype=np.float64), (runway,) * len(e_m),
-                      separation.along_nm[runway] * NM_M - relative.before_threshold_m,
-                      np.asarray(relative.track_minus_course_deg, dtype=np.float64), relative.right_of_course_m,
+                      separation.along_nm[runway] * NM_M - relative.before_threshold_m, angle,
+                      relative.right_of_course_m,
+                      np.asarray(ground_speed_mps, dtype=np.float64) * np.cos(np.radians(angle)),
                       np.asarray(established, dtype=bool), category, outcome, landing_s)
 
 
 def flown(presence: Presence, step_s: float, e_m: np.ndarray, n_m: np.ndarray, height_m: np.ndarray,
-          track_deg: np.ndarray, captured: np.ndarray, runway: str, geometry: AirportGeometry, separation: Separation,
-          category: str | None, outcome: str, landing_from_first_s: float | None) -> Controlled:
+          track_deg: np.ndarray, ground_speed_mps: np.ndarray, captured: np.ndarray, runway: str,
+          geometry: AirportGeometry, separation: Separation, category: str | None, outcome: str,
+          landing_from_first_s: float | None) -> Controlled:
     """An aircraft flown from the step its first row hangs on, on one runway throughout (the labelled words say it once):
     its states at its steps (``track_deg`` compass), the executor's capture at each (the established flag, design §3.2),
     and its threshold crossing counted from its first step (None: it did not land)."""
     first = float(hang(presence.start_s, step_s))
-    return _on_runway(presence, first, step_s, e_m, n_m, height_m, track_deg, captured, runway, geometry, separation,
-                      category, outcome, None if landing_from_first_s is None else first + landing_from_first_s)
+    return _on_runway(presence, first, step_s, e_m, n_m, height_m, track_deg, ground_speed_mps, captured, runway,
+                      geometry, separation, category, outcome,
+                      None if landing_from_first_s is None else first + landing_from_first_s)
 
 
 def recorded(presence: Presence, flight: FlightSignals, capture_row: int, landing_from_first_row_s: float,
@@ -128,8 +133,8 @@ def recorded(presence: Presence, flight: FlightSignals, capture_row: int, landin
     rows = len(presence.times_s)
     first = float(hang(presence.start_s, step_s))
     return _on_runway(presence, first, step_s, flight.e_m[:rows], flight.n_m[:rows], flight.altitude_m[:rows],
-                      flight.track_deg[:rows], np.arange(rows) >= capture_row, flight.runway, geometry, separation,
-                      category, "landed", first + landing_from_first_row_s)
+                      flight.track_deg[:rows], flight.ground_speed_mps[:rows], np.arange(rows) >= capture_row,
+                      flight.runway, geometry, separation, category, "landed", first + landing_from_first_row_s)
 
 
 def join(*parts: Traffic) -> Traffic:
