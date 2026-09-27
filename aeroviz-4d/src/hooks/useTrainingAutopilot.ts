@@ -38,8 +38,10 @@ export default function useTrainingAutopilot(backendUrl: string = AEROVIZ_BACKEN
       : generationOnScreen(trainingGenerations, trainingPick.source, trainingSelection);
     const sentence = read?.sentence ?? null;
     if (trainingPick.source !== null && sentence?.sample !== trainingPick.source.sample) return null;
+    // a sample from an augmented start is flown from that start (`start`: its overlay's flight's; null from its own)
     const model = read === null || sentence === null ? null
-      : { sentence, procedureMasks: read.view.overlay.generation.procedureMasks };
+      : { sentence, procedureMasks: read.view.overlay.generation.procedureMasks,
+        augmentation: read.view.flight.start?.augmentation ?? null };
     return JSON.stringify({ request: trainingAutopilotRequest(trainingSelection, trainingPick, model), attempt: trainingPick.attempt });
   }, [trainingSelection, trainingPick, trainingGenerations]);
 

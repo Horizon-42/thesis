@@ -551,7 +551,7 @@ describe("TrainingSentenceBar", () => {
     expect(setTrainingSource).toHaveBeenLastCalledWith({ overlayId: AUGSTART_POST_ID, sample: 1 });
     fromLanding();
     // reading landing r1 from its augmented start: no Truth tab, the moved observed steps, no truth ticks or observed end,
-    // the move on the chip, and no live flight
+    // the move on the chip — and its words flown live from that start
     appState.trainingSource = { overlayId: AUGSTART_POST_ID, sample: 0 };
     render(<TrainingSentenceBar />);
     expect(screen.getByRole("button", { name: "Augmented start" }).getAttribute("aria-pressed")).toBe("true");
@@ -564,8 +564,11 @@ describe("TrainingSentenceBar", () => {
       .toMatch(/^From an augmented start: .* drawn with seed 1337 in 2 draws; its time limit 2× .*the source flight landed on 09/);
     fireEvent.click(screen.getByLabelText(/^heading 225° .* said by landing r1 at step 12 /));
     const fly = screen.getByRole("button", { name: "▶ Fly" }) as HTMLButtonElement;
-    expect(fly.disabled).toBe(true);
-    expect(fly.title).toMatch(/not flown live/);
+    expect(fly.disabled).toBe(false);
+    expect(fly.title).toMatch(/from its first step \(4\), from its augmented start, to the end of this heading word's segment/);
+    fireEvent.click(fly);
+    expect(setTrainingPick).toHaveBeenLastCalledWith({ source: { overlayId: AUGSTART_POST_ID, sample: 0 }, column: "heading",
+      row: 12, attempt: 0 });
     // back to the real start: the same model there
     fireEvent.click(screen.getByRole("button", { name: "Real start" }));
     expect(setTrainingSource).toHaveBeenLastCalledWith({ overlayId: POST_TRAINED_ID, sample: 0 });

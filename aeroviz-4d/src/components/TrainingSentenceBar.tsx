@@ -375,7 +375,7 @@ export default function TrainingSentenceBar() {
   // the Fly button: the selected word's segment of the sentence read, and what the live executor is doing with it
   const focusRun = focusColumn === null ? null : sentenceWordAt(sentence, focusColumn, cursorRow);
   /** A model's word said after its flight ended has no flight to fly. */
-  const flyable = (row: number) => !movedRead && (generated === null || timeOf(row) < generated.endS);
+  const flyable = (row: number) => generated === null || timeOf(row) < generated.endS;
   const pickedHere = focusRun !== null && trainingPick !== null && sameSource(trainingPick.source, readSource)
     && trainingPick.column === focusColumn && trainingPick.row === focusRun.row;
   const flyingHere = pickedHere && autopilot?.status === "flying";
@@ -504,13 +504,12 @@ export default function TrainingSentenceBar() {
         <button type="button" className="training-autopilot-fly" disabled={focusRun === null || flyingHere || !flyable(focusRun.row)}
           title={focusRun === null
             ? "Select a word (click its band): the executor then flies that word's segment from where it was said."
-            : movedRead
-              ? "The live executor flies from the observed flight's own state; a sample from an augmented start is not flown live."
             : !flyable(focusRun.row)
               ? `The model said this word after its flight had ended (${formatSeconds(generated!.endS)} s): there is no flight to fly.`
               : generated === null
                 ? `The executor flies ${focusColumn} from step ${focusRun.row} now, on the backend, from the observed state there.`
-                : `The executor flies the model's sentence again from its first step (${generated.firstRow}) to the end of this ` +
+                : `The executor flies the model's sentence again from its first step (${generated.firstRow})` +
+                  (movedRead ? ", from its augmented start," : "") + ` to the end of this ` +
                   `${focusColumn} word's segment, on the backend — the sample's own flight — and judges the word.`}
           onClick={() => setTrainingPick(nextPick(trainingPick, readSource, focusColumn!, focusRun!.row))}>
           {flyLabel}

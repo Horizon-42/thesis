@@ -368,6 +368,8 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
         assert item["flown"] and item["augmentDraws"] >= 1 and len(item["samples"]) == 3
         move = Augmentation(item["augmentation"]["rotationDeg"], item["augmentation"]["altitudeM"],
                             item["augmentation"]["speedScale"])
+        # written as drawn, not rounded to a display precision: the backend moves the start by exactly this
+        assert move.rotation_deg != round(move.rotation_deg, 4) and move.speed_scale != round(move.speed_scale, 6)
         assert abs(move.rotation_deg) <= 15 and abs(move.altitude_m) <= 150 and abs(move.speed_scale - 1) <= 0.05
         # the moved rows 0 … N_LOOK − 1 the prior read, on the flight's clock; the samples start from the moved state
         rows = augment_signals(observed, move)

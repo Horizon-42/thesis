@@ -1006,7 +1006,7 @@ def model_record(**changes) -> dict:
                {"row": 14, "column": HEADING, "value": 14}, {"row": 15, "column": RUNWAY, "value": 1},
                {"row": 16, "column": SPEED, "value": 9}]
     return {"overlayId": "generation_x", "sample": 2, "firstRow": 8, "rows": 18, "events": events, "procedureMasks": [],
-            **changes}
+            "augmentation": None, **changes}
 
 
 MODEL_WORDS = SimpleNamespace(
@@ -1054,6 +1054,31 @@ class ModelSegmentTest(unittest.TestCase):
                            timeout_factor=1.5)
         with self.assertRaisesRegex(RequestRefused, "has no"):
             model_sentence({"overlayId": "x"}, MODEL_WORDS, runways=2, observed_rows=20, timeout_factor=1.5)
+
+    def test_an_augmented_start_is_a_move_within_the_draws_limits_under_its_own_time_limit(self):
+        from ts_transformer.prior.augment import Augmentation
+
+        moved = self.sentence(augmentation={"rotationDeg": 7.2, "altitudeM": -84, "speedScale": 1.03})
+        self.assertEqual(moved.augmentation, Augmentation(7.2, -84.0, 1.03))
+        self.assertIsNone(self.sentence().augmentation)
+        for value, message in (({"rotationDeg": 16, "altitudeM": 0, "speedScale": 1}, "outside the draw's limits"),
+                               ({"rotationDeg": 0, "altitudeM": 151, "speedScale": 1}, "outside the draw's limits"),
+                               ({"rotationDeg": 0, "altitudeM": 0, "speedScale": 1.06}, "outside the draw's limits"),
+                               ({"rotationDeg": 0, "altitudeM": 0}, "must be null or"),
+                               ({"rotationDeg": True, "altitudeM": 0, "speedScale": 1}, "must be null or"),
+                               ({"rotationDeg": 10 ** 400, "altitudeM": 0, "speedScale": 1}, "must be null or"),
+                               ({"rotationDeg": float("nan"), "altitudeM": 0, "speedScale": 1}, "must be null or"),
+                               ("moved", "must be null or")):
+            with self.subTest(value=value), self.assertRaisesRegex(RequestRefused, re.escape(message)):
+                self.sentence(augmentation=value)
+        with self.assertRaisesRegex(RequestRefused, re.escape("has no ['augmentation']")):
+            model_sentence({key: value for key, value in model_record().items() if key != "augmentation"}, MODEL_WORDS,
+                           runways=2, observed_rows=20, timeout_factor=1.5)
+        # its time limit is × 2 (`augment.TIMEOUT_FACTOR`): 12 observed steps left from step 8, 1 + 24 steps said at most
+        move = {"rotationDeg": 0, "altitudeM": 0, "speedScale": 1}
+        self.assertEqual(self.sentence(augmentation=move, rows=8 + 25).rows, 33)
+        with self.assertRaisesRegex(RequestRefused, "lets it say 25"):
+            self.sentence(augmentation=move, rows=8 + 26)
 
     def test_a_models_steps_are_bounded_by_its_free_generations_own_cap(self):
         from ts_transformer.prior.generate import rows_for
@@ -1145,6 +1170,8 @@ class ModelSegmentTest(unittest.TestCase):
                                 hae_minus_msl_m=-32.0)
         self.assertEqual(fly_module.model_time_limit_s(context, N_LOOK, params, 2.0),
                          limits_s(batch, params, 2.0, augmented=False)[0])
+        self.assertEqual(fly_module.model_time_limit_s(context, N_LOOK, params, 2.0, augmented=True),
+                         limits_s(batch, params, 2.0, augmented=True)[0])
 
     def test_a_model_word_is_its_own_step_s_result_in_the_judges_verdict(self):
         segment = model_segment(self.sentence(), HEADING, 10, LEAD, MODEL_WORDS)
@@ -1293,16 +1320,18 @@ class ModelFlightTest(unittest.TestCase):
                              observed_track_deg=np.full(20, 90.0), observed_distance_m=200.0 * rows, hae_minus_msl_m=-32.0)
 
     def fly(self, column: int, row: int, end_row: int, group: str = "own dynamics", events: list | None = None,
-            read_rows: int | None = None, stop: int | None = None):
+            read_rows: int | None = None, stop: int | None = None, augmentation: dict | None = None):
         """``read_rows``: the rows the judge read through the labeller's gate — None, a gate that refused the track;
         ``stop``: the step the glidepath lower edge stops the flight at, under the procedure's altitudes (None: spoken
         under none)."""
-        record = model_record() if events is None else model_record(events=events)
+        record = model_record(augmentation=augmentation) if events is None else model_record(events=events,
+                                                                                               augmentation=augmentation)
         sentence = model_sentence(record, MODEL_WORDS, runways=2, observed_rows=20, timeout_factor=1.5)
         asked = {}
 
-        def fly_one_until_(context, segment, reading, signals, params, words, stop_steps, superseded, *, model_limit_s=None):
-            asked.update(stop_steps=stop_steps, model_limit_s=model_limit_s)
+        def fly_one_until_(context, segment, reading, signals, params, words, stop_steps, superseded, *, model_limit_s=None,
+                           augmentation=None):
+            asked.update(stop_steps=stop_steps, model_limit_s=model_limit_s, augmentation=augmentation, flown_signals=signals)
             return flown([float(c) for c in range(20)], 19), stop_steps is not None, 0.0
 
         def judge(run, index, geometry, runway_index, judged, signals, spec, words):
@@ -1360,6 +1389,24 @@ class ModelFlightTest(unittest.TestCase):
         _, early = self.fly(HEADING, 8, 12)                      # stopped at 12, before the change: the sentence's last too
         self.assertEqual((early["runway_index"], early["runway"]), (1, "27"))
 
+    def test_from_an_augmented_start_it_is_flown_from_the_moved_start_under_the_augmented_limit(self):
+        from ts_transformer.prior.augment import Augmentation, augment_signals
+
+        move = {"rotationDeg": 10.0, "altitudeM": 50.0, "speedScale": 1.02}
+        result, asked = self.fly(HEADING, 10, 16, augmentation=move)
+        # 12 observed steps left from step 8, 2 s each, × 2
+        self.assertEqual(asked["model_limit_s"], 48.0)
+        self.assertEqual(asked["augmentation"], Augmentation(10.0, 50.0, 1.02))
+        # the rows the sentence is read against: the observed ones moved as the model read them, from its first step
+        moved = augment_signals(self.context().signals, Augmentation(10.0, 50.0, 1.02))
+        flown_rows = len(asked["flown_signals"].e_m)
+        np.testing.assert_allclose(asked["flown_signals"].e_m, moved.e_m[8: 8 + flown_rows])
+        np.testing.assert_allclose(asked["flown_signals"].altitude_m, moved.altitude_m[8: 8 + flown_rows])
+        # its own start: none
+        _, own = self.fly(HEADING, 10, 16)
+        self.assertIsNone(own["augmentation"])
+        self.assertEqual(own["model_limit_s"], 36.0)
+
     def test_an_angle_word_is_judged_on_its_tube_from_its_step(self):
         record = model_record()
         events = sorted([*record["events"], {"row": 11, "column": ANGLE, "value": 2}],
@@ -1412,6 +1459,28 @@ class ModelFlightTest(unittest.TestCase):
                           SimpleNamespace(e_m=np.zeros(20), n_m=np.zeros(20)), params, words, None, NEVER, model_limit_s=36.0)
         self.assertEqual(recorded["executor"]["time_limit_s"], 36.0)
         self.assertIsInstance(recorded["clock"], single.TimeClock)
+
+
+class AugmentedStartTest(unittest.TestCase):
+    """`fly.moved_inputs` is the free generation's `augmented_inputs` for one flight: the executor's state at the first
+    step moved alike — position rotated about the airport, raised, sped up, ψ turned — the rest untouched."""
+
+    def test_the_moved_state_is_the_free_generations(self):
+        from ts_transformer.experiments.prior_free_generation import augmented_inputs
+        from ts_transformer.prior.augment import Augmentation
+        from ts_transformer.tests import test_autopilot as executor_tests
+        from ts_transformer.tests.support import fly_legs, instruction_airport, instruction_flight
+
+        geometry_ = instruction_airport()
+        signals = instruction_flight(*fly_legs(executor_tests.DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
+        inputs, *_ = executor_tests._physics(signals, geometry_)
+        move = Augmentation(-12.5, 120.0, 0.97)
+        ours = fly_module.moved_inputs(inputs, geometry_, move)
+        theirs = augmented_inputs(inputs, [geometry_], [move])
+        self.assertTrue(torch.equal(ours.initial_state, theirs.initial_state))
+        self.assertFalse(torch.equal(ours.initial_state, inputs.initial_state))
+        for name in ("aero_params", "frame_params", "max_thrust_n"):
+            self.assertTrue(torch.equal(getattr(ours, name), getattr(inputs, name)), name)
 
 
 class FreeGenerationTest(unittest.TestCase):

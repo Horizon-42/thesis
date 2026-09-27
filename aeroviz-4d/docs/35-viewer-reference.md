@@ -493,7 +493,9 @@ that divergence is a known open item (see the README's "Future Improvements").
   增强在上下限以内；`observed` 正好 `firstPredictedRow` 个点、从 0 起每点一步；一架航班的样本都从同一个起点起飞。
 - 界面：句子条头部 `Real start | Augmented start`（只在发布了增强起点时出现），两边各自一组模型标签页（`trainingModelGroups`
   按起点分开调用，名字不串）；读增强起点的样本时没有 Truth 标签页、不画真值的发令短竖线和观测结束虚线，灰底写 "observed,
-  moved"，样本小块写增强量，▶ Fly 关掉（后端从观测状态起飞；增强起点的现飞是下一步）；左栏 Sentences read 下面单列一组
+  moved"，样本小块写增强量；▶ Fly 照样能用：请求带上增强量，后端按 `augment_state` 挪执行器的起点（`fly.moved_inputs`，
+  与第二阶段的 `augmented_inputs` 逐位相同）、按 `augment_signals` 挪观测行、时限 ×2，飞出来就是那个样本（导出的增强量
+  取整到 0.0001° 时差约 2 cm，此后导出不取整）；左栏 Sentences read 下面单列一组
   "From augmented starts"；详情页的模型一节多一张表；三维把增强后的前 8 行用模型颜色虚线画出，接到样本航迹起点。
 
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
@@ -558,7 +560,8 @@ that divergence is a known open item (see the README's "Future Improvements").
   下一个航向词总放得下；会截短的是没有上限的距离词钟一步越过下一个词、或更长的提前量——2026-09-25 全部 3,526 个航向词试飞，0 次。
 - 前端把答复绑到屏幕上这一段：同一架航班、`endRow` 是色块的终点、词表规格相同、**告诉执行器的词就是句子条这一段显示的词**；
   航向带的行是执行器自己飞过的步，以判决读到的飞出航迹为界、不以句子段尾为界（执行器可能晚听到下一个航向词）；
-  对不上整份拒读；答复只画在它飞的那一句上（`autopilotOnScreen` 比 `source`）。答复格式 `aeroviz-autopilot-segment-v6` 两边钉住
+  对不上整份拒读；答复只画在它飞的那一句上（`autopilotOnScreen` 比 `source`）。答复格式 `aeroviz-autopilot-segment-v7` 两边钉住
+  （v7：模型的句子带 `augmentation`，增强起点的样本从挪过的起点飞，AV35）
   （v5：模型的句子带它说话时的程序屏蔽 `procedureMasks`——名字和数据摘要，后端重建后核对，不一致按名字拒绝；在程序高度下说的句子
   飞完按自由生成的规则 `fly.glidepath_stop` 截在下滑道下边界的那一步，结局 `below_glidepath`；`GlidepathStopTest` 逐架钉住它与
   `glidepath_stops` 相同）（`SCHEMA` / `TRAINING_AUTOPILOT_SCHEMA`，判定状态与结局

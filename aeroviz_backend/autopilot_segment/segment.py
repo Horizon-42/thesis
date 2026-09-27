@@ -31,6 +31,7 @@ from ts_transformer.instructions.signals import ROW_FIELDS, FlightSignals
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, APPROACH, APPROACH_CLEARED, COLUMNS, HEADING, RUNWAY, SPEED, UNCHANGED, Words,
 )
+from ts_transformer.prior.augment import LIMITS, TIMEOUT_FACTOR, Augmentation
 from ts_transformer.prior.scene import N_LOOK
 
 from aeroviz_backend.autopilot_segment.errors import RequestRefused
@@ -62,7 +63,9 @@ class Segment:
 class ModelSentence:
     """A model's own sentence of a flight (the prior's free generation, one sample), as the request carries it: its
     words from its first step (``first_row``, where it first spoke: every column said there) to its ``rows``, at the
-    flight's own steps; ``overlay_id`` and ``sample`` name it for the answer."""
+    flight's own steps; ``overlay_id`` and ``sample`` name it for the answer; ``augmentation``: the move of the
+    augmented start it was spoken from (`prior.augment`, its overlay's `prior-generation-augmented` flight), None from
+    the flight's own start."""
 
     overlay_id: str
     sample: int
@@ -72,6 +75,7 @@ class ModelSentence:
     # the procedure's masks it was spoken under, as its overlay records them: each set's name and the digest of the data
     # it read (`prior.masks`); empty: the vocabulary's rules alone
     procedure_masks: tuple[tuple[str, str], ...]
+    augmentation: Augmentation | None = None
 
     @property
     def last_runway(self) -> int:
@@ -95,15 +99,37 @@ def model_steps_max(observed_rows: int, first_row: int, timeout_factor: float) -
     return 1 + math.ceil((observed_rows - first_row) * timeout_factor)
 
 
+def model_augmentation(value: object) -> Augmentation | None:
+    """The request's ``augmentation``: null (the flight's own start), or ``{rotationDeg, altitudeM, speedScale}`` — a
+    move within the draw's limits (`prior.augment.LIMITS`), refused by name otherwise."""
+    if value is None:
+        return None
+    keys = ("rotationDeg", "altitudeM", "speedScale")
+    # a JSON number past a double's range (a huge integer) has no float: refused like any other non-number
+    if not isinstance(value, dict) or set(value) != set(keys) or not all(
+            isinstance(value[key], float) and math.isfinite(value[key])
+            or isinstance(value[key], int) and not isinstance(value[key], bool) and abs(value[key]) < 1e300
+            for key in keys):
+        raise RequestRefused(f"the sentence's augmentation must be null or {{rotationDeg, altitudeM, speedScale}}, got {value!r}")
+    move = Augmentation(float(value["rotationDeg"]), float(value["altitudeM"]), float(value["speedScale"]))
+    if abs(move.rotation_deg) > LIMITS.rotation_deg or abs(move.altitude_m) > LIMITS.altitude_m \
+            or abs(move.speed_scale - 1.0) > LIMITS.speed_fraction + 1e-9:
+        raise RequestRefused(f"the sentence's augmentation {value!r} is outside the draw's limits: ±{LIMITS.rotation_deg}°, "
+                             f"±{LIMITS.altitude_m} m, ×1 ± {LIMITS.speed_fraction}")
+    return move
+
+
 def model_sentence(record: object, words: Words, runways: int, observed_rows: int, timeout_factor: float) -> ModelSentence:
     """A model's sentence from the request's ``sentence`` (``{overlayId, sample, firstRow, rows, events,
-    procedureMasks}``; ``procedureMasks``: ``[{name, dataSha256}]``, the sets its overlay says it was spoken under), refused by
-    name unless its words are the vocabulary's, in (step, column) order, from a first step inside the observed flight
-    that says every column — the prior's first predicted step (`N_LOOK`), where the free generation starts and which
-    its time limit counts from — over no more steps than its flight can say (`model_steps_max`)."""
+    procedureMasks, augmentation}``; ``procedureMasks``: ``[{name, dataSha256}]``, the sets its overlay says it was spoken
+    under; ``augmentation``: `model_augmentation`), refused by name unless its words are the vocabulary's, in (step,
+    column) order, from a first step inside the observed flight that says every column — the prior's first predicted
+    step (`N_LOOK`), where the free generation starts and which its time limit counts from — over no more steps than its
+    flight can say (`model_steps_max`, under an augmented start's time limit when it has one)."""
     if not isinstance(record, dict):
         raise RequestRefused(f"the sentence must be an object, got {record!r}")
-    missing = [key for key in ("overlayId", "sample", "firstRow", "rows", "events", "procedureMasks") if key not in record]
+    missing = [key for key in ("overlayId", "sample", "firstRow", "rows", "events", "procedureMasks", "augmentation")
+               if key not in record]
     if missing:
         raise RequestRefused(f"the sentence has no {missing}")
     overlay_id = record["overlayId"]
@@ -117,7 +143,8 @@ def model_sentence(record: object, words: Words, runways: int, observed_rows: in
         raise RequestRefused(f"the observed flight's {observed_rows} steps leave none to fly after the sentence's first, {first}")
     if rows <= first:
         raise RequestRefused(f"the sentence ends at step {rows}, not after its first step {first}")
-    most = model_steps_max(observed_rows, first, timeout_factor)
+    augmentation = model_augmentation(record["augmentation"])
+    most = model_steps_max(observed_rows, first, timeout_factor if augmentation is None else TIMEOUT_FACTOR)
     if rows - first > most:
         raise RequestRefused(f"the sentence says {rows - first} steps from its first step {first}: its flight's time limit "
                              f"lets it say {most}")
@@ -145,7 +172,8 @@ def model_sentence(record: object, words: Words, runways: int, observed_rows: in
                                               and all(isinstance(value, str) for value in item.values()) for item in masks):
         raise RequestRefused(f"the sentence's procedureMasks must be a list of {{name, dataSha256}}, got {masks!r}")
     return ModelSentence(overlay_id=overlay_id, sample=sample, first_row=first, rows=rows, grid=grid,
-                         procedure_masks=tuple((item["name"], item["dataSha256"]) for item in masks))
+                         procedure_masks=tuple((item["name"], item["dataSha256"]) for item in masks),
+                         augmentation=augmentation)
 
 
 def sentence_instructions(grid: np.ndarray, words: Words) -> list[Instruction]:

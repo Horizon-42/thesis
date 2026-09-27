@@ -141,7 +141,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **`EXPERIMENT_HORIZON_MODES` = `config.HORIZON_MODES` + the executor replay's `sentence`** — its records' horizon, stamped
   by the comparison builder; unlisted, one executor category would empty the airport's picker (AV25).
 - **Training's live executor flies the CLICKED word's segment on the backend, every time** (`POST /autopilot/segment`,
-  `aeroviz-autopilot-segment-v6`; `trainingPick`, never the hover cursor): from the observed state where the word is said to
+  `aeroviz-autopilot-segment-v7`; `trainingPick`, never the hover cursor): from the observed state where the word is said to
   where its envelope ends (the next word of its column; a heading word's a lead later — drawn as a faded, dashed TAIL from
   where the executor heard the next heading word, `nextWordHeardS` / `autopilotRunAndTail`; the sentence's end: to the landing),
   the executor's own stepper driven cycle by cycle and stopped there (never fly-then-cut); the answer is refused unless the
@@ -191,7 +191,8 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **A model's sentences from AUGMENTED starts are a kind of their own** (`prior-generation-augmented`,
   `aeroviz-training-augmented-generation-v1`, exporter `--augment-seed`): each flight's move and moved observed rows 0–7, the
   same move for every model of one seed, no readout; the bar's `Real start | Augmented start` switch filters the model tabs by
-  start (group per start family, never mixed); no truth marks and no live Fly over a moved sample (AV35).
+  start (group per start family, never mixed); no truth marks over a moved sample; its words fly live FROM the moved start
+  (the request's `augmentation`, `fly.moved_inputs` = the generation's `augmented_inputs`, limit ×2) (AV35).
 
 ## Comparison CZML colour contract
 
