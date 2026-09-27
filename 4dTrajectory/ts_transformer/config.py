@@ -43,7 +43,7 @@ MODELS = ("itransformer", "patchtst")
 # "start where the aircraft is" is the zero output rather than something the network
 # must reconstruct from a 120 s history. Measured motivation: the absolute form put every
 # KRDU forecast ~250 m NW of the aircraft from its first step
-# (docs/2026-09-03_krdu_nw_endpoint_bias.md).
+# (docs/history/2026-09_frames/2026-09-03_krdu_nw_endpoint_bias.md).
 STATE_POSITION_ABSOLUTE = "absolute"
 # VETOED (2026-09-03 state-v2 campaign, by that campaign's OWN pre-registered decision
 # rule): it did not clear the bar it was registered against, and `corridor-bounded` did.
@@ -69,7 +69,7 @@ STATE_POSITION_REFERENCES_AVAILABLE = (
 # Which rows the corridor binds. ``on-final``: rows inside the full-scale cone and aligned
 # with the course, read from the prediction itself (deployable). ``faf``: every row inside
 # the coded FAF distance — the optimizer's convention and the ablation the measured join
-# distances argue against (docs/2026-09-04_procedure_constraints_design.zh.md).
+# distances argue against (docs/history/2026-09_constraints/2026-09-04_procedure_constraints_design.zh.md).
 # The ONE corridor gate (`final_approach_geometry.membership`): inside the membership cone
 # AND aligned with the course. The FAF-distance gate (`faf`) was DELETED 2026-09-09 (review
 # §5): never set in any stored run, and a FAF-gated projection wrecked vectored flights. The
@@ -107,7 +107,7 @@ INTENT_FIELDS = ("intent_conditioning",)
 # identity check, and it is a delivery-form demonstration, never a prediction result.
 CTA_CONDITIONING_OFF = "off"
 CTA_CONDITIONING_GIVEN = "given"
-# B3 (`docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` §三 3.3): the CTA
+# B3 (`docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` §三 3.3): the CTA
 # is the model's OWN duration quantile, so the decoder reads no future. It is a PREDICT-TIME
 # label — `predict --cta-from-quantiles` stamps it on the config written beside the records
 # so every naming surface says `cta=self-q` — and never a value a training run may select
@@ -231,7 +231,7 @@ def default_aircraft_filter(prediction_output: str) -> str:
             else AIRCRAFT_FILTER_ALL_FLIGHTS)
 
 
-# Retired outputs (2026-09-18, `docs/2026-09-18_manoeuvre_token_plan.zh.md` §5): the closure
+# Retired outputs (2026-09-18, `archive/manoeuvre_codes_2026_09/docs/2026-09-18_manoeuvre_token_plan.zh.md` §5): the closure
 # arm (scene design P1.c), the plan-and-guidance head (design v5) and the two-tier v2
 # segment-plan layer. Their code is under archive/ and their checkpoints no longer load;
 # the NAMES stay so a published category or an old run directory still reads and names.
@@ -317,7 +317,7 @@ CONTROL_DYNAMICS_BACKENDS = (
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
 )
-# WHICH quantity the longitudinal control is (docs/2026-09-14_specific_force_control_design.md).
+# WHICH quantity the longitudinal control is (docs/history/2026-09_specific_force/2026-09-14_specific_force_control_design.md).
 # ``thrust-fraction`` commands T / T_max — normalised by the actuator; every run before
 # 2026-09-14 trained under it and every named recipe pins it. ``specific-force`` commands
 # n_x = (T - D)/W — normalised by the EFFECT: the lag RHS re-solves the thrust at every RK4
@@ -372,7 +372,7 @@ CONTROL_RECIPE_SIMPLE_V1_LAG = "simple-v1-lag"
 # from 3.65 to 0.79 deg (0.55), per-flight bank skill from -0.073 to +0.197, AND improves
 # ADE on 77.8 % of flights (median -58.2 m, p=4.7e-79). Everything is frozen here,
 # including the three time constants — a recipe that leaves a field open does not name one
-# configuration. See docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md.
+# configuration. See docs/history/2026-08_control_path/2026-08-19_control_bank_wiggle_diagnosis.zh.md.
 CONTROL_RECIPE_SIMPLE_V2 = "simple-v2"
 # simple-v2 plus direct supervision of the control schedule against the one
 # control_inverse_dynamics reads off the flown track. simple-v2 scored position (order 0)
@@ -385,7 +385,7 @@ CONTROL_RECIPE_SIMPLE_V2 = "simple-v2"
 # from 3.92 to 0.36 deg (0.41), sign reversals there from 5 to 0, AND improves ADE on 57.0 % of
 # flights (median 656 -> 501 m, p=1.9e-7) with FDE unchanged. Unlike the velocity term,
 # whose doses bought bank structure at 18-50 % of FDE, this one costs no accuracy.
-# See docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md section 12.
+# See docs/history/2026-08_control_path/2026-08-19_control_bank_wiggle_diagnosis.zh.md section 12.
 CONTROL_RECIPE_SIMPLE_V3 = "simple-v3"
 CONTROL_RECIPE_NAMES = (
     CONTROL_RECIPE_CUSTOM,
@@ -428,7 +428,7 @@ SIMPLE_V3_IMITATION_LOSS_WEIGHT = 64.0
 
 CHECKPOINT_SELECTION_OBJECTIVE = "fixed-anchor-objective"
 CHECKPOINT_SELECTION_COMMON_GRID_ADE = "fixed-anchor-common-grid-ade"
-# A1 (`docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`): the SAME
+# A1 (`docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`): the SAME
 # common-grid ADE, averaged over five anchor sets — L−1 plus `anchor_grid`'s four
 # remaining-path bins — instead of L−1 alone. For a random-anchor arm the fixed metric is
 # blind to what the arm improves: it scores the one anchor such a model is LEAST
@@ -456,7 +456,7 @@ CHECKPOINT_SELECTION_COMMON_GRID_METRICS = (
 #
 # `selection` is what every run before this axis existed did: the scheduler was stepped with
 # the checkpoint-selection value, which is right while the two move together and wrong the
-# moment they part. A0.b (`docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`
+# moment they part. A0.b (`docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`
 # §2.4c) measured them parting on a random-anchor arm: the validation OBJECTIVE improved to
 # epoch 60 (1.147 -> 0.707) while the selection metric — a dense-grid ADE — stalled after
 # epoch 8, so the LR was halved from epoch 20 on and reached 9.4e-7 by epoch 60. The model
@@ -626,7 +626,7 @@ CONTROL_HOOK_BARRIER_TROMBONE = "barrier+trombone"
 CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE = "barrier+speed-floor+trombone"
 # ``nominal-residual`` — a fixed tracking law toward the centreline and glidepath with the
 # command as a bounded residual — was NEVER ADOPTED
-# (docs/2026-09-06_control_hooks_results.zh.md) and its code is archived
+# (docs/history/2026-09_constraints/2026-09-06_control_hooks_results.zh.md) and its code is archived
 # (archive/nominal_law_hook_2026_09/). The VALUE stays because six 2026-09-06 configs, and
 # the checkpoints `load_checkpoint` rebuilds from them, carry it; `build_command_hook`
 # refuses to construct it, so it cannot be chosen for new work.
@@ -858,7 +858,7 @@ RETIRED_CONSTANT_FIELDS: dict[str, Any] = {
     "plan_conditioning_dropout": 0.0,
 }
 
-# The RETIRED-OUTPUT kind (2026-09-18, `docs/2026-09-18_manoeuvre_token_plan.zh.md` §5). These
+# The RETIRED-OUTPUT kind (2026-09-18, `archive/manoeuvre_codes_2026_09/docs/2026-09-18_manoeuvre_token_plan.zh.md` §5). These
 # fields belonged to the closure, plan and segment-plan views, which left the contract with
 # their outputs (`PREDICTION_OUTPUTS_RETIRED`, code under archive/). A state or control config
 # written while they existed carries each at the default below — the ownership rule
@@ -1855,7 +1855,7 @@ class ControlOutput(OutputSpec):
                 "a plan token beside a latent intent is two answers to one question (what the "
                 "flight is going to do); the latent line is its own axis"
             )
-        # Two-tier L1 (`docs/2026-09-17_two_tier_plan_v2.zh.md` §3): a FIXED rollout horizon.
+        # Two-tier L1 (`archive/two_tier_v2_2026_09/docs/2026-09-17_two_tier_plan_v2.zh.md` §3): a FIXED rollout horizon.
         # Under Δ > 0 nothing predicts the duration — the head emits its N segments over
         # exactly Δ seconds and the targets cover [0, Δ] (`dataset.target_horizon_s`) — so
         # every axis that would decide the duration has nothing to decide and is REFUSED
@@ -2074,7 +2074,7 @@ class TSConfig:
     # source of cross-airport orientation variance. ``airport-enu`` moves the ANCHOR to
     # the airport reference point: one chart per airport, shared by all its runways, in
     # which the target is an ordinary point rather than the origin (the target-
-    # conditioning ablation, docs/2026-09-03_airport_frame_ablation_plan.md).
+    # conditioning ablation, docs/history/2026-09_frames/2026-09-03_airport_frame_ablation_plan.md).
     coordinate_frame: str = "enu"
     # ``channels`` appends the target's chart position and runway course to the observed
     # history as INPUT-ONLY constant channels (target_conditioning.CONDITIONING_CHANNELS),
@@ -2266,7 +2266,7 @@ class TSConfig:
     # The true-time-position objective scores POSITION only, so a rollout may thread the
     # right places with the wrong heading and swing back between them — the measured
     # signature of that is a bank profile shared by every flight (see
-    # docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md). This term scores the chart
+    # docs/history/2026-08_control_path/2026-08-19_control_bank_wiggle_diagnosis.zh.md). This term scores the chart
     # velocity at the same endpoints, on the same measured rows the position term uses:
     # supervision weights are already zero on fitted-tail velocities, so the placeholder
     # rows cannot enter. Zero keeps the frozen simple-v1 behaviour.
@@ -2433,7 +2433,7 @@ class TSConfig:
             raise ValueError(
                 f"prediction_output={self.prediction_output!r} is retired (2026-09-18): its code is "
                 "under archive/ and its checkpoints no longer load "
-                "(docs/2026-09-18_manoeuvre_token_plan.zh.md §5)"
+                "(archive/manoeuvre_codes_2026_09/docs/2026-09-18_manoeuvre_token_plan.zh.md §5)"
             )
         # A sequence field arrives as a tuple, a JSON list or an arm file's list: ONE form.
         for name in SEQUENCE_FIELDS:

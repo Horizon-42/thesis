@@ -49,9 +49,11 @@ def test_the_reference_is_the_formal_values_first_and_the_grid_holds_every_cell_
     cells = ablation.cells_of(reference, [2.0, 4.0], [25.0, 32.0], [None, 3.0])
     assert cells[0] == reference and len(cells) == len(set(cells)) == 8
     assert ablation.Cell(4.0, 25.0, 3.0) in cells
-    # a spec whose p is not method A's has no cell that reproduces it
-    with pytest.raises(ValueError, match="not method A"):
-        ablation.reference_cell(spec, _params(bank_rate_deg_s=6.0))
+    # since v11 the executor's p is given (the standards' 5°/s): the reference cell carries it
+    assert ablation.reference_cell(spec, _params(bank_rate_deg_s=5.0)) == ablation.Cell(4.0, 32.0, 5.0)
+    # a spec whose τ_ψ is not the lead has no cell that reproduces it
+    with pytest.raises(ValueError, match="not the vocabulary's lead"):
+        ablation.reference_cell(spec, _params(heading_time_constant_s=6.0))
     assert [ablation.parse_rate(v) for v in (ablation.DERIVED, "3")] == [None, 3.0]
 
 

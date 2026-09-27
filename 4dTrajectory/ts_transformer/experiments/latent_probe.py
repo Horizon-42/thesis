@@ -2,7 +2,7 @@
 """L2.f: measure a latent checkpoint's prior and posterior DIRECTLY, on the split's flights.
 
 Latent-intent design
-(`4dTrajectory/ts_transformer/docs/2026-09-07_latent_intent_design.zh.md`) §六 L2.e' 结果 /
+(`4dTrajectory/ts_transformer/docs/history/2026-09_latent_anytime/2026-09-07_latent_intent_design.zh.md`) §六 L2.e' 结果 /
 L2.f. Three 180-epoch arms were read as "the budget works, the information is just small"
 because every number a training run wrote — total KL, active units, shuffled ΔADE — is
 blind to WHERE the KL is spent. The answer came from asking the two densities directly:

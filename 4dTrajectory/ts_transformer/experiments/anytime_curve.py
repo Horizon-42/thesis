@@ -2,7 +2,7 @@
 """A0: how a prediction gets better as the aircraft flies — the re-anchoring curve.
 
 Anytime-prediction design
-(`4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`)
+(`4dTrajectory/ts_transformer/docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`)
 §二 2.1–2.4. Every evaluation in this package anchors at the fixed anchor (`default_anchor`:
 L−1, `seq_len − 1`, 120 s after the 25 km slice starts, unless a run carries an
 `anchor_floor_index`), which is the moment the ego history knows LEAST about where the

@@ -2,7 +2,7 @@
 """Fit piecewise-constant control schedules to observed tracks — the width study, and the
 teacher table it turned out to be worth building.
 
-Latent-intent design (`4dTrajectory/ts_transformer/docs/2026-09-07_latent_intent_design.zh.md`)
+Latent-intent design (`4dTrajectory/ts_transformer/docs/history/2026-09_latent_anytime/2026-09-07_latent_intent_design.zh.md`)
 §六 L0 and §六 L5.a. Both modes do the SAME thing to one flight — direct shooting through
 the package's own differentiable rollout, total duration GIVEN (the truth's), the fit's
 objective the 3-D position error on the 2 s supervision grid — and differ only in which

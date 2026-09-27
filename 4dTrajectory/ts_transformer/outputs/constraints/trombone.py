@@ -1,6 +1,6 @@
 """The per-step path stretch: the delay the remaining path cannot absorb, flown as a dog-leg.
 
-The measured problem (L3.d, ``docs/2026-09-07_latent_intent_design.zh.md`` §六 L3.d). Under
+The measured problem (L3.d, ``docs/history/2026-09_latent_anytime/2026-09-07_latent_intent_design.zh.md`` §六 L3.d). Under
 a late CTA the duration head obeys the arrival time exactly, so the rollout's TOTAL TIME is
 fixed; the network's own path is what it is; and a fixed path flown in a fixed time has a
 fixed mean speed. The speed floor can refuse the infeasibly slow commands that produced the

@@ -135,7 +135,7 @@ Everything below is serialised into every checkpoint.
   like every other rate gain — uncapped it bangs between the envelope corners at 8
   segments).
   Predict-time: `predict --command-hook barrier --hook-saturation soft` on any lag checkpoint
-  — **this is the adopted use (2026-09-06, `docs/2026-09-06_control_hooks_results.zh.md`)**:
+  — **this is the adopted use (2026-09-06, `docs/history/2026-09_constraints/2026-09-06_control_hooks_results.zh.md`)**:
   the v2 soft barrier applied at prediction to the `simple-v3` baseline is a net gain at both
   airports (KRDU pooled FDE 1650 → 1449 m, ADE 1333 → 1278, FDE better on 84 % of flights and
   none worse by 1 km; KSJC 996 → 930 m, 90 % better; straight-in endpoint |xt| p95 1821/407 →
@@ -265,7 +265,7 @@ meaning and codebase pointers: `docs/history/2026-08_control_path/2026-08-24_ksj
   A fourth, `_initialize_control_head`'s zeroed weight, genuinely starves the backbone of
   gradient (0.000e+00, 20/20 tensors) but is also not the cause: seeding it raised the shared
   share to 81 % and regressed ADE on 84.8 % of flights. Full write-up with figures:
-  `docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md`.
+  `docs/history/2026-08_control_path/2026-08-19_control_bank_wiggle_diagnosis.zh.md`.
 - **The duration head cannot predict below ~125 s** against a true range starting at 21 s, so
   a handful of flights whose anchor is already close to the runway (0.4 % on KSJC) fly a full
   loop — the rollout runs five minutes when the threshold is thirty seconds away. Separate

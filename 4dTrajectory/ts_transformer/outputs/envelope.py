@@ -22,7 +22,7 @@ the same on every airframe — four since 2026-09-16:
 2026-08-18 one sigmoid output meant 100 kN on a small jet and 400 kN on a heavy).
 ``specific-force`` makes it mean the same MOTION: the lag RHS re-solves the thrust at every
 stage and the drag cancels, so the same n_x moves a C550 and a B77W identically
-(``docs/2026-09-14_specific_force_control_design.md``). ``speed-command`` keeps that
+(``docs/history/2026-09_specific_force/2026-09-14_specific_force_control_design.md``). ``speed-command`` keeps that
 invariance and adds the restoring force n_x lacks; ``specific-force+path-angle`` leaves the
 speed to n_x and closes the VERTICAL channel instead, which is the one the open-loop load
 factor turns into a double integrator (design §7.5.3). The evaluation record contract is newtons
@@ -107,7 +107,7 @@ MAX_LOAD_FACTOR = 2.0
 # speed-rate error costs the imitation MSE the same under both contracts for the median
 # airframe and one imitation weight reads the same in both arms. The floor sits below the
 # truth teacher's p0.1 (-0.179 g on KRDU val) and below the feasible floor of 99.7 % of its
-# states (`docs/specific_force_teacher_distribution.py`); the box cuts 0.10 % of that
+# states (`experiments/specific_force_teacher_distribution.py`); the box cuts 0.10 % of that
 # teacher. Like the thrust-fraction box it is the head's SEARCH SPACE: feasibility is the
 # thrust clamp inside the lag RHS, which admits the thrust-fraction box's thrust RANGE at
 # every state — the same range, not the same trajectories (see NEUTRAL_SPECIFIC_FORCE).
@@ -115,7 +115,7 @@ MIN_SPECIFIC_FORCE = -0.20
 MAX_SPECIFIC_FORCE = 0.23
 # The specific-force neutral: n_x = sin(gamma) holds speed, and -0.05 is the hold on a
 # ~2.9 deg descent — an approach's dominant condition, beside the truth teacher's median
-# (-0.059 g, KRDU val, `docs/specific_force_teacher_distribution.py`). NOT level trim, which
+# (-0.059 g, KRDU val, `experiments/specific_force_teacher_distribution.py`). NOT level trim, which
 # is what the thrust-fraction neutral (0.2) means for the median airframe: under that law
 # the drag feedback bounds the overspeed a level-trim command builds on a descent (~210 m/s
 # on four synthetic 2.5-3 deg KRDU descents over 416 s), while under specific-force the speed

@@ -107,8 +107,10 @@ def word_rate(error_deg: torch.Tensor, to_go_s: torch.Tensor, speed_mps: torch.T
 def rate_for_error(error_deg: torch.Tensor, params: ExecutorParams, spec: VocabularySpec) -> torch.Tensor:
     """§4.1: the compass track rate, deg/s, of the executor's OWN turn that takes out a heading error of ``error_deg``
     (target − track) — its own intercept, a go-around, the line's heading: ``e / τ_ψ`` within the vocabulary's largest
-    turn rate. It needs no stopping limit (`stopping_rate_deg_s`): with p τ_ψ equal to the vocabulary's bank limit
-    (`derive`), ``e / τ_ψ`` exceeds the stopping rate only where the bank limit binds first (``2 φ > tan φ``)."""
+    turn rate. It needs no stopping limit (`stopping_rate_deg_s`): ``e / τ_ψ`` exceeds the stopping rate only past
+    ``e = 2 g p τ_ψ² / V``, where it asks for a bank of ``tan φ > 2 p τ_ψ`` — beyond the vocabulary's bank limit, which
+    binds first, as long as ``2 p τ_ψ ≥ tan φ_max`` (`derive.stopping_roll_rate_deg_s`; the spec runner refuses a slower
+    p)."""
     return (error_deg / params.heading_time_constant_s).clamp(-spec.turn_rate_max_deg_s, spec.turn_rate_max_deg_s)
 
 

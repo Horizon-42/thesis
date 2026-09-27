@@ -61,7 +61,7 @@ def build_command_hook(
         # archive/nominal_law_hook_2026_09/ and cannot be flown from here.
         raise ValueError(
             "the nominal-law hook is archived (archive/nominal_law_hook_2026_09/); its "
-            "numbers are in docs/2026-09-06_control_hooks_results.zh.md and the adopted "
+            "numbers are in docs/history/2026-09_constraints/2026-09-06_control_hooks_results.zh.md and the adopted "
             "hook is 'barrier'"
         )
     hard = config.control_hook_saturation == HOOK_SATURATION_HARD

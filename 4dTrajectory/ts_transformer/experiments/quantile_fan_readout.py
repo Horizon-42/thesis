@@ -2,7 +2,7 @@
 """B3: does the quantile fan actually contain the flight it is a fan of?
 
 Anytime / calibrated-ETA design
-(`4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`)
+(`4dTrajectory/ts_transformer/docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`)
 §三 3.3 and gate 3.4-3. `predict --cta-from-quantiles` decodes one trajectory per duration
 quantile — a `cta=self-q` arm, the first CTA arm that reads no future — and this is its
 readout::

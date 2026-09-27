@@ -276,7 +276,7 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
             "to the anchor's, flown by a speed loop through the same thrust) or "
             "specific-force+path-angle (the specific force, and a path-angle target in place "
             "of the load factor, flown by a path loop); all but the first first-order-lag "
-            "only (docs/2026-09-14_specific_force_control_design.md §2, §12, §14)"
+            "only (docs/history/2026-09_specific_force/2026-09-14_specific_force_control_design.md §2, §12, §14)"
         ),
     )
     parser.add_argument(
@@ -648,7 +648,7 @@ _NEW_RUN_VOCABULARIES = (
      "there is nothing to train under it"),
     ("control_command_hook", CONTROL_HOOKS_AVAILABLE,
      "the nominal-law hook is archived (archive/nominal_law_hook_2026_09/); its numbers are "
-     "in docs/2026-09-06_control_hooks_results.zh.md"),
+     "in docs/history/2026-09_constraints/2026-09-06_control_hooks_results.zh.md"),
     ("state_position_reference", STATE_POSITION_REFERENCES_AVAILABLE,
      "anchor-relative was VETOED by the 2026-09-03 state-v2 campaign's own pre-registered "
      "rule; the value exists so that campaign's artifact still loads"),

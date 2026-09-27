@@ -1,8 +1,8 @@
 # two_tier_v2_2026_09 — the two-tier plan v2 (L1 short-horizon control + L2 segment-plan layer)
 
 Archived 2026-09-18 when the manoeuvre-token plan
-(`docs/2026-09-18_manoeuvre_token_plan.zh.md`, §5.1) replaced it. Design and every measurement:
-`docs/2026-09-17_two_tier_plan_v2.zh.md` (superseded; its §10–§12 numbers are what the new plan
+(`../manoeuvre_codes_2026_09/docs/2026-09-18_manoeuvre_token_plan.zh.md`, §5.1) replaced it. Design and every measurement:
+`archive/two_tier_v2_2026_09/docs/2026-09-17_two_tier_plan_v2.zh.md` (superseded; its §10–§12 numbers are what the new plan
 cites). Off the import path on purpose (`tests/test_architecture.py`): nothing live imports it.
 
 | file | was | replaced by |
@@ -19,4 +19,4 @@ The `PREDICTION_SEGMENT_PLAN` name survives only in `config.PREDICTION_OUTPUTS_R
 stored config carrying it is refused at load. `control_horizon_s` (fixed rollout horizon) and
 `inference/receding.py` stayed live: the new executor uses both.
 
-**Documents** (moved here 2026-09-26 from `docs/`, basenames kept): `docs/` holds the two-tier feasibility study (`2026-09-16_two_tier_transformer_feasibility.zh.md`) and the T0c / T1a arm declarations; plan v2 itself stays in `docs/` (cited by path from `config.py`, which the executor source hash covers).
+**Documents** (moved here 2026-09-26 from `docs/`, basenames kept): `docs/` holds the two-tier feasibility study (`2026-09-16_two_tier_transformer_feasibility.zh.md`) and the T0c / T1a arm declarations; plan v2 itself (`archive/two_tier_v2_2026_09/docs/2026-09-17_two_tier_plan_v2.zh.md`) followed on 2026-09-27, when executor v11's source hash stopped covering comments.

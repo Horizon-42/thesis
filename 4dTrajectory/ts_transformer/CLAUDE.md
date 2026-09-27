@@ -49,7 +49,7 @@ of the package, not a migration in progress.
   code under `archive/{closure,plan_head,two_tier_v2}_2026_09/` (a README each), stored checkpoints
   refused at load, published categories kept (the frontend mirrors `PREDICTION_OUTPUTS_PUBLISHED`).
   Only the rule guidance stayed live, as `outputs/guidance/`. Their numbers:
-  `archive/plan_head_2026_09/docs/2026-09-09_plan_and_guidance_design.md` §12, `docs/2026-09-17_two_tier_plan_v2.zh.md` §10–§12 (P3, P4, P9).
+  `archive/plan_head_2026_09/docs/2026-09-09_plan_and_guidance_design.md` §12, `archive/two_tier_v2_2026_09/docs/2026-09-17_two_tier_plan_v2.zh.md` §10–§12 (P3, P4, P9).
 - **`manoeuvre` — the SECOND LAYER's line; the second layer itself is not built.** The
   **intent-code** layer (a learned FSQ code per segment, the executor conditioned on it, a causal
   prior over codes) is **ARCHIVED 2026-09-20**: `archive/manoeuvre_codes_2026_09/` (README there;
@@ -153,8 +153,9 @@ of the package, not a migration in progress.
   from every runway end the harvest builds; the labeller, the judge and the display share one heading-word check,
   `envelope.heading_words_inside`, since `instruction-v3`) (C30).
 - **An executor spec is bound to the executor's source** (`executor_source_sha256` over `autopilot/` and every repository
-  module it imports directly — `config`, `data.dataset`, `outputs.envelope`, …), the vocabulary and the labeller: a byte
-  changed in a hashed file, a comment included, makes the current code refuse every stored spec (C33). **A prior belongs to
+  module it imports directly — `config`, `data.dataset`, `outputs.envelope`, …), the vocabulary and the labeller: since v11
+  the hash is over each file's LOGIC (`spec.logic`: docstrings stripped, comments never parsed) — wording is free, a code
+  change in a hashed file makes the current code refuse every stored spec (C33). **A prior belongs to
   one sentence artefact**: spec, labeller, day split and candidate table must match (`ts-prior-checkpoint-v3`, C34).
   **A prior speaks under the procedure's masks it was trained under**: named sets, recorded beside its checkpoint
   (`procedure_masks.json`, `prior/masks.py`), read by `load_prior`; the vocabulary's rules apart, always on (C35).

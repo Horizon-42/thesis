@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Score any set of control arms on the metrics that diagnosed the bank wiggle.
 
-Every experiment in the queue (docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md) is
+Every experiment in the queue (docs/history/2026-08_control_path/2026-08-19_control_bank_wiggle_diagnosis.zh.md) is
 judged the same way, so arms from different experiments are directly comparable:
 
   common-profile share   how much of the bank is the SAME on every flight

@@ -3,16 +3,18 @@ limit and the roll rate moved over ONE train sample, relabelled and replayed by 
 no formal artefact written.
 
 Why: L = 4 s (the vocabulary's `heading_lead_s`) was set on 2026-09-24 under the old first-order heading law
-(vocabulary design §10.1); the law now arrives on each heading word exactly L after it is heard, and method A derives
-τ_ψ = L and p = bank limit ÷ L (`autopilot/derive.py`), so L also sets how fast the executor rolls — 8°/s, the fast end
-of every source (repo `docs/literature/roll_rate_and_turn_response/`: procedure design assumes 3–5°/s, PANS-OPS a 25°
-bank).
+(vocabulary design §10.1); the law now arrives on each heading word exactly L after it is heard, method A derives
+τ_ψ = L (`autopilot/derive.py`), and up to spec v10 it derived p = bank limit ÷ L too — 8°/s, the fast end of every
+source (repo `docs/literature/roll_rate_and_turn_response/`: procedure design assumes 3–5°/s, PANS-OPS a 25° bank). The
+first run (on v10, readout `docs/two_tier/readouts/2026-09-27_heading_lead_ablation.zh.md`) kept L and the bank limit and
+led executor v11 to the standards' p = 5°/s; the reference cell carries the executor's own p.
 
 A cell is (L, bank limit φ, roll rate p). Its vocabulary is the formal spec's (``--instructions``) with `heading_lead_s`
 = L and `turn_bank_max_deg` = φ, nothing else changed; its executor is the formal spec's parameters (``--executor``,
-which must be the current executor code's) with τ_ψ = L and p = φ ÷ L (``derived``: method A, `derive`) or a given p.
-A given p breaks method A's p·τ_ψ = φ, on which the executor's own turns rely (`lateral.rate_for_error`: its intercept,
-a go-around, the line) — they may overshoot, and that is part of what such a cell measures. Every cell re-reads the SAME
+which must be the current executor code's) with τ_ψ = L (method A, `derive`) and p = φ ÷ L (``derived``: the
+executor's p up to spec v10, `derived_rate`) or a given p. A p under `derive.stopping_roll_rate_deg_s` (tan φ ÷ 2L)
+lets the executor's own turns (`lateral.rate_for_error`: its intercept, a go-around, the line) outrun the rate they can
+be stopped at — they may overshoot, and that is part of what such a cell measures. Every cell re-reads the SAME
 sample with the labeller under its own vocabulary (a flight the labeller refuses under it is counted, not flown) and
 flies it (`executor_replay.fly_airport`: judged, written as records, graded by evaluation and paired with the observed
 flights' verdicts, graded once, here). The sample is the formal train replay gate's (`replay.draw`: own and stand-in
@@ -42,9 +44,9 @@ again before every cell), on the CPU (the reference must reproduce a CPU replay 
 
     python run_ts.py heading_lead_ablation \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/v5_20260926 \\
-        --executor 4dTrajectory/outputs/POOLED/executor/v10_20260926 \\
-        --reference-replay 4dTrajectory/outputs/POOLED/executor/v10_20260926/replay-train/replay.json \\
-        --out 4dTrajectory/outputs/POOLED/analyses/heading_lead_ablation_20260927
+        --executor 4dTrajectory/outputs/POOLED/executor/<the formal spec> \\
+        --reference-replay 4dTrajectory/outputs/POOLED/executor/<the formal spec>/replay-train/replay.json \\
+        --out 4dTrajectory/outputs/POOLED/analyses/<new directory>
 """
 
 from __future__ import annotations
@@ -85,7 +87,7 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state
 ABLATION_SCHEMA = "ts-heading-lead-ablation-v1"
 SPLIT = "train"
 CPU = torch.device("cpu")
-#: p = the bank limit over the lead (method A, `derive.roll_rate_deg_s`).
+#: p = the bank limit over the lead (`derived_rate`).
 DERIVED = "derived"
 #: The grid proposed in the progress report (§3 item 1, the user's choice 2026-09-27): L on the 2 s step, the bank limit
 #: at PANS-OPS's 25° and the vocabulary's measured 32°, p derived or at the sources' 3 and 5°/s.
@@ -109,7 +111,7 @@ GROUPS = (replay.OWN, replay.STAND_IN)
 class Cell:
     lead_s: float
     bank_limit_deg: float
-    #: None: derived, the bank limit over the lead (method A).
+    #: None: derived, the bank limit over the lead (`derived_rate`).
     bank_rate_deg_s: float | None
 
     @property
@@ -128,14 +130,20 @@ class Cell:
         if not 0.0 < math.radians(self.bank_limit_deg) <= BANK_MAX_RAD:
             raise ValueError(f"bank limit {self.bank_limit_deg:g}° outside (0, {math.degrees(BANK_MAX_RAD):g}°]")
         tau = derive.heading_time_constant_s(vocabulary, base.cycle_s)      # refuses a lead under 2Δt first
-        rate = derive.roll_rate_deg_s(vocabulary) if self.bank_rate_deg_s is None else self.bank_rate_deg_s
+        rate = derived_rate(vocabulary) if self.bank_rate_deg_s is None else self.bank_rate_deg_s
         params = replace(base, heading_time_constant_s=tau, bank_rate_deg_s=rate)
         params.check(vocabulary)
         return params
 
 
+def derived_rate(vocabulary: VocabularySpec) -> float:
+    """p, deg/s, as the executor derived it up to spec v10 (method A before v11): the bank limit reached within one
+    lead."""
+    return vocabulary.turn_bank_max_deg / vocabulary.heading_lead_s
+
+
 def positive(value: str) -> float:
-    """An argument that must be a finite positive number (`ExecutorParams.check` lets a NaN through)."""
+    """An argument that must be a finite positive number, refused as the argument it is (before a cell is built)."""
     number = float(value)
     if not (math.isfinite(number) and number > 0.0):
         raise argparse.ArgumentTypeError(f"{value} is not a finite positive number")
@@ -153,11 +161,12 @@ def cells_of(reference: Cell, leads: list[float], bank_limits: list[float], rate
 
 
 def reference_cell(spec: VocabularySpec, params: ExecutorParams) -> Cell:
-    """The formal values as a cell: the vocabulary's lead and bank limit, p derived — refused unless that IS the formal
-    executor's p and τ_ψ (the formal spec was written by method A)."""
-    cell = Cell(spec.heading_lead_s, spec.turn_bank_max_deg, None)
+    """The formal values as a cell: the vocabulary's lead and bank limit and the executor's own p (``derived`` when it
+    is the bank limit over the lead) — refused unless the cell's executor IS the formal one (τ_ψ = the lead, method A)."""
+    rate = params.bank_rate_deg_s
+    cell = Cell(spec.heading_lead_s, spec.turn_bank_max_deg, None if rate == derived_rate(spec) else rate)
     if cell.executor(params, spec) != params:
-        raise ValueError("the executor spec's τ_ψ and p are not method A's from its vocabulary: no cell reproduces it")
+        raise ValueError("the executor spec's τ_ψ is not the vocabulary's lead (method A): no cell reproduces it")
     return cell
 
 

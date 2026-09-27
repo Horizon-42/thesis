@@ -5,7 +5,7 @@ Why this folder exists: the question was whether a Joint-Embedding Predictive Ar
 trajectory that follows a predicted set of operating parameters (the `control` output:
 N segments of bounded controls + a duration, integrated by the point-mass RK4 rollout) more
 accurate. The answer is at the bottom (§4) and was written against the state of the
-latent-intent design on 2026-09-06 (`4dTrajectory/ts_transformer/docs/2026-09-07_latent_intent_design.zh.md`,
+latent-intent design on 2026-09-06 (`4dTrajectory/ts_transformer/docs/history/2026-09_latent_anytime/2026-09-07_latent_intent_design.zh.md`,
 §〇 status table and L2.c / L2.d results).
 
 The PDFs are **not tracked in git** (root `.gitignore` has `*.pdf`); `./download.sh`

@@ -7,7 +7,7 @@ run on the v5 roster (42,650 arrivals); the live harvest has since changed. They
 
 - `measure_procedure_adherence.py` (2026-09-04, `388574f4`) — per runway: coded off-axis entry, where the flight became
   established on the LPV cone, and the inside-FAF share inside the cone and the glidepath window. Behind
-  `docs/2026-09-04_procedure_constraints_design.zh.md`.
+  `docs/history/2026-09_constraints/2026-09-04_procedure_constraints_design.zh.md`.
 - `measure_procedure_compliance.py` (2026-09-12, `863acbae`) — the nested tiers A (final) / B (+ IF) / C (+ a coded
   transition). Its report and tier-C flight list are `docs/2026-09-12_procedure_compliance_census.zh.md` and
   `docs/2026-09-12_procedure_compliance_tier_C_flights.json` here (the report's commands name the scripts' old

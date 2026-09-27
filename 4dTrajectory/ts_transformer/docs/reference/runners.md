@@ -16,7 +16,7 @@ rebased — same rule, new IDs.
 ### R1 · `run_ts.py anytime_curve` — A0
 
 **Runners for the anytime / calibrated-ETA line** (2026-09-07,
-`docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`):
+`docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`):
 
 - `run_ts.py anytime_curve` — **A0**: replays `--checkpoint LABEL=PATH` (repeatable) from the
   `anchor_grid` REMAINING-PATH grid (which it imports, and which the `anchor-grid-common-grid-ade`
@@ -111,7 +111,7 @@ rebased — same rule, new IDs.
 
 ### R5 · `run_ts.py latent_probe` — L2.f
 
-**The latent line's own runner** (`docs/2026-09-07_latent_intent_design.zh.md` §六 L2.f):
+**The latent line's own runner** (`docs/history/2026-09_latent_anytime/2026-09-07_latent_intent_design.zh.md` §六 L2.f):
 
 - `run_ts.py latent_probe` — **L2.f**: the training-side densities of one or more latent
   checkpoints on a split (`--checkpoint LABEL=PATH`, repeatable), through the SAME cohort
@@ -228,10 +228,11 @@ frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `t
 ### R12 · the executor: `executor_spec` → `executor_sensitivity` → `executor_replay`
 
 2026-09-24 (`docs/two_tier/executor_design.zh.md` §9–§11; layout L31). `executor_spec --instructions <artefact>
---dir <new dir> --word-clock {time,distance,track}` (`ts-executor-spec-v5` since 2026-09-24: the executor takes no
-information beyond the vocabulary and the pointed runway's published threshold crossing height) refuses a dirty tree,
-an existing directory and a labeller other than the artefact's; takes τ_ψ (the heading lead) and p (the vocabulary's
-bank limit over the lead) by method A from the vocabulary. Nothing is measured from data: the turn rates, the bank
+--dir <new dir> --word-clock {time,distance,track}` (`ts-executor-spec-v6` since v11, 2026-09-27: the executor takes no
+information beyond the vocabulary, the pointed runway's published threshold crossing height and glidepath, and the
+procedure standards' roll rate) refuses a dirty tree, an existing directory and a labeller other than the artefact's;
+takes τ_ψ (the heading lead) by method A from the vocabulary and p = `ROLL_RATE_DEG_S` (5°/s, FAA Order 8260.3G App. E
+§4 ¶6.a, ICAO Doc 8168 Vol II; up to v10 it was the bank limit over the lead, 8°/s). Nothing is measured from data: the turn rates, the bank
 limit, the speed changes' pace (a speed step over the shortest speed hold, 0.25 m/s²) and the altitude tolerance are
 the vocabulary's, read at run time; the landing crosses each candidate's published TCH, read at replay
 (`autopilot/runway_data.py`, the harvest's runway data at the evaluation CLI's default configuration and CIFP; the draw
@@ -588,8 +589,8 @@ ratio (v2: advantage × the NLL, no ratio — the adopted landing model's run).
 <its replay-train/replay.json> [--per-airport 400] [--seed 1337] [--leads 2 4 6 8] [--bank-limits 25 32] [--bank-rates
 derived 3 5] [--keep-records] --out <new dir> [--resume]`. A cell is (lead L, bank limit φ, roll rate p): the formal
 vocabulary with `heading_lead_s` = L and `turn_bank_max_deg` = φ and nothing else, the formal executor parameters with
-τ_ψ = L and p = φ ÷ L (`derived`, method A via `autopilot/derive.py`) or a given p (which breaks p·τ_ψ = φ, on which the
-executor's own turns rely). Every cell relabels the formal train replay gate's sample (`replay.draw`, own and stand-in
+τ_ψ = L (method A, `autopilot/derive.py`) and p = φ ÷ L (`derived`: the executor's p up to spec v10) or a given p (under
+tan φ ÷ 2L, `derive.stopping_roll_rate_deg_s`, the executor's own turns can outrun their stopping rate). Every cell relabels the formal train replay gate's sample (`replay.draw`, own and stand-in
 dynamics) under its own vocabulary and flies it through `executor_replay.fly_airport` (judged, written as records, graded
 by evaluation, paired with the observed verdicts graded once). The reference cell (the formal values) is flown first and
 must reproduce the formal replay in every field the replay stores but its two verdicts, or nothing else is flown. Per

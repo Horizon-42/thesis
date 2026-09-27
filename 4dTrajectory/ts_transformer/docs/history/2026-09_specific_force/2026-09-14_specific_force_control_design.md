@@ -590,7 +590,7 @@ over flights, as Δ = prediction − truth. Command Δ is the model's segment co
 - **Under SF a vertical law is energy-neutral by construction.** It moves height into speed and never
   creates or destroys energy.
 - That is the third law the 2026-09-06 nominal-law hook lacked under δ
-  (`docs/2026-09-06_control_hooks_results.zh.md`):
+  (`docs/history/2026-09_constraints/2026-09-06_control_hooks_results.zh.md`):
   - v1 passed the thrust through. The speed fell 88 → 58 m/s and the rollout landed 584 m short.
   - v2 had to integrate a parallel no-hook rollout to hold its speed.
   - That campaign also found that a hook belongs at inference: training through one made the network lazy,

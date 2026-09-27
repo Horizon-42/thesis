@@ -1,4 +1,4 @@
-"""The lag model's path-angle law (ts_transformer/docs/2026-09-14_specific_force_control_design.md §14).
+"""The lag model's path-angle law (ts_transformer/docs/history/2026-09_specific_force/2026-09-14_specific_force_control_design.md §14).
 
 Under :class:`PathAngleLaw` the THIRD actuator is a path-angle target and the RHS re-solves the
 load factor ``n = [cos γ + V(γ* − γ)/(g τ_γ)]/cos φ`` at every stage, flown through the

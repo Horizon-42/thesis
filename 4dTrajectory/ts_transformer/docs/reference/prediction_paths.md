@@ -236,7 +236,7 @@ point of the package, not a migration in progress.
 
 ### P5 · control-path axes: latent intent and CTA conditioning
 
-- **The control path also carries two AXES (2026-09-07, `docs/2026-09-07_latent_intent_design.zh.md`)**:
+- **The control path also carries two AXES (2026-09-07, `docs/history/2026-09_latent_anytime/2026-09-07_latent_intent_design.zh.md`)**:
   `latent_dim > 0` puts a latent intent z on the control output (`outputs/control/latent.py`:
   q(z | future) in training only, a K-component mixture prior from the context, z reaches
   the controls AND the duration; inference decodes the prior's top-1; `predict
@@ -250,7 +250,7 @@ point of the package, not a migration in progress.
 ### P6 · control-path axis: the duration head
 
 - **...and a third axis, the DURATION HEAD** (2026-09-07,
-  `docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` §三):
+  `docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` §三):
   `duration_head=quantile` replaces the scalar `FinalTimeHead` with
   `QuantileFinalTimeHead`'s five `config.DURATION_QUANTILES`, monotone by cumulative
   softplus. Its MEDIAN is the duration the rollout flies (`final_time_s` unchanged), all

@@ -12,7 +12,7 @@ the entry itself is deleted.
 
 Checked entry by entry against `dev-two-tier` `1a7ac875` plus branch `dev-frontend-followups`, then updated after branch
 `dev-followups-no-training` (2026-09-25) fixed every entry whose fix touches neither the training nor the post-training
-(the right-hand column): **27 open, 7 partly, 57 resolved or dismissed, 5 obsolete** (recounted from the table 2026-09-27; one open row is blocked on a source). *open*: the problem is still in the
+(the right-hand column): **22 open, 7 partly, 62 resolved or dismissed, 5 obsolete** (recounted from the table 2026-09-27; one open row is blocked on a source). *open*: the problem is still in the
 code; *partly*: some of it is fixed (the note says what is left); *resolved*: fixed (the note says by what);
 *dismissed*: not a defect (the note says why); *obsolete*: the code is gone. A resolved, dismissed or obsolete entry's
 text is removed below (its row stays); rows follow the entries' order; note the two sets of numbers (§19–§21 each appear
@@ -65,7 +65,7 @@ added three entries (the rows after the performance index's).
 | 2026-09-03 — 14 pre-existing failures in `trajectory_data_process/tests` | resolved | all fixed; entry removed | — |
 | ts: reusable measurement code lives in `docs/` (09-07) | resolved | runners import `inference/arm_readout.py`, 15 test preambles removed (`3f38f8af`); the thirteen `docs/*.py` moved on branch `docs-reorg` (2026-09-26): seven became runners, six went to three archives, `test_docs_holds_no_python` guards it (L20); entry removed; the tests' `sys.path` lines are the next row | — |
 | ts: five test files still touch `sys.path` (09-26) | open | new; see the entry | no: tests |
-| ts: ten dated records stay in the `docs/` root because hashed code cites them by path (09-26) | open | new; see the entry | **yes — executor**: the path edits change the executor source hash; do them with the next executor spec |
+| ts: ten dated records stay in the `docs/` root because hashed code cites them by path (09-26) | resolved | moved into `docs/history/` and `archive/*/docs/`, every path rewritten (branch `dev-executor-v11`, v11 milestone 1); entry removed | — |
 | ts: the auto-batch probe measures a smaller graph than a latent run | resolved | the probe hands a latent model the future, as training does (`b10b1d68`); entry removed | — |
 | scene data plane: review leftovers (09-07) | resolved | (7)–(9), (12), (14) and the three test gaps fixed, (11) documented, a landed-before-t₀ neighbour no longer a lead (`96d299d1`, `50412e71`); (10), (13) obsolete; entry removed | — |
 | ts: T2 leftovers (09-07) | resolved | `chart_scale` required (`6c363ef9`); the transport-chart rollouts kept as the scaled chart's test reference; the pointers demoted (`06801fe7`); entry removed | — |
@@ -113,17 +113,17 @@ added three entries (the rows after the performance index's).
 | `READABLE_REPORT_SCHEMA_VERSIONS` reads four report versions (09-25) | open | new; see the entry | **yes — data plane**: ts `lateral_eligibility` reads reports through it |
 | ts `docs/reference/runners.md` still names `instruction_training_export` as the Training helpers' home (09-25) | resolved | the line names `instructions/training_files.py` (branch `docs-reorg`); entry removed | — |
 | `aeroviz-4d/python/requirements.txt` still lists `pyproj` (09-26) | open | new; see the entry | no: a requirements list |
-| `autopilot/__init__.py` names the executor design by its old path (09-26) | open | renamed to `docs/executor_design.zh.md` with spec v10 (`9557315d`); the docs reorganisation then moved the design to `docs/two_tier/`; see the entry | **yes — executor**: the edit changes the executor source hash; do it with the next executor spec |
+| `autopilot/__init__.py` names the executor design by its old path (09-26) | resolved | points at `docs/two_tier/executor_design.zh.md` (branch `dev-executor-v11`, v11 milestone 1); entry removed | — |
 | The land law leaves a shallow final class's tube near the threshold on some profiles (09-26) | open | new; see the entry | **yes — executor** (a law change is a new spec) |
 | No mode reports when the executor's glidepath floor binds (09-26) | open | new; see the entry | **yes — executor** (adds a Flown mode; the backend payload reads the modes) |
 | The Training export and the live model flight fly a model without the procedure's masks (09-26) | resolved | fixed on `dev-training-rounds` (2026-09-27): the export speaks under the model's own masks and reads its sentences with the readout's `said_rows` (glidepath stop included), the overlay records the sets with their data digests, the backend rebuilds them, checks the digests and cuts the re-flight at the same step (`aeroviz-autopilot-segment-v5`); entry removed | — |
 | The judge folds a wrong-parallel-runway approach into timeout / crossed off runway; its landed lateral limit is 1,000 m where there is no parallel (09-26) | open | new; see the entry | **yes — executor** (the judge is in the spec's source hash; readouts change) |
-| `outputs/envelope.py` names `docs/specific_force_teacher_distribution.py` (09-26) | open | new; see the entry | **yes — executor**: the edit changes the executor source hash; do it with the next executor spec |
+| `outputs/envelope.py` names `docs/specific_force_teacher_distribution.py` (09-26) | resolved | names the runner `experiments/specific_force_teacher_distribution.py` (branch `dev-executor-v11`, v11 milestone 1); entry removed | — |
 | `instructions/grammar.py` is outside the labeller sha (09-26) | open | new; see the entry | **yes — every sentence artefact and prior**: adding it to the hash changes the labeller sha they record; do it with the next vocabulary spec |
 | The judge calls a captured, on-centreline crossing that is too high "crossed off runway" (09-27) | open | new; see the entry | **yes — executor** (the judge is in the spec's source hash; readouts' outcome counts move) |
 | The terrain downloader overwrites the shared `download_manifest.csv` (09-27) | open | new; see the entry | no: data tooling |
-| The executor spec binds the source's BYTES, comments included (09-27) | open | new; see the entry | **yes — executor**: a new hash definition refuses v10; do it with the next executor spec (v11) |
-| `ExecutorParams.check` lets a NaN rate or factor through (09-27) | open | new; see the entry | **yes — executor**: `params.py` is hashed; fix it with v11 |
+| The executor spec binds the source's BYTES, comments included (09-27) | resolved | the hash is over each file's logic, `spec.logic` (branch `dev-executor-v11`, v11 milestone 1); entry removed | — |
+| `ExecutorParams.check` lets a NaN rate or factor through (09-27) | resolved | every value finite and positive (branch `dev-executor-v11`, v11 milestone 1); entry removed | — |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -516,37 +516,12 @@ runway's threshold plane within its landing condition (ending the flight there),
 runway itself (the LPV cone's half-width at the threshold, ~107 m). Both change the executor's source hash: a new spec and a
 new replay gate.
 
-## `autopilot/__init__.py` names the executor design by its old path (2026-09-26)
-
-**Verified.** Spec v10 (`9557315d`) renamed the docstring's pointer to `docs/executor_design.zh.md`; the docs
-reorganisation (branch `docs-reorg`, merged into `dev-two-tier` 2026-09-26) moved the design to
-`docs/two_tier/executor_design.zh.md`. Every `.py` of `autopilot/` is in the executor source hash, so correcting the
-docstring makes the current code refuse spec v10 — change it with the next executor spec (with the ten dated records
-below). `autopilot/README.md` (not hashed) points at the new path.
-
-## `outputs/envelope.py` names `docs/specific_force_teacher_distribution.py` (2026-09-26)
-
-**Verified.** Two comments (`envelope.py:110`, `:118`) cite the measurement behind the specific-force box by its old
-path; the script is the runner `experiments/specific_force_teacher_distribution.py` since branch `docs-reorg`
-(2026-09-26, layout L20). `outputs.envelope` is imported directly by `autopilot/`, so it is in the executor source hash
-(`spec.executor_source_files`, contract C33): editing the comment makes the current code refuse executor spec v10 —
-change it together with the next executor change, as the `autopilot/__init__.py` entry above.
-
 ## ts: five test files still touch `sys.path` (2026-09-26)
 
 **Verified** (split off the resolved `docs/` scripts entry). `test_architecture`, `test_final_approach_geometry`,
 `test_guidance_skeleton_mirrors`, `test_import_boundaries` and `test_prior_procedure` add to `sys.path`; three of them add
 `4dTrajectory/optimization`, which `tests/conftest.py` does not. **Judgement**: move that one path into `conftest.py` and
 drop the per-file lines, or say in each why it stays.
-
-## ts: ten dated records stay in the `docs/` root because hashed code cites them by path (2026-09-26)
-
-**Verified.** The docs reorganisation (branch `docs-reorg`) moved every finished record into `docs/history/` or
-`archive/<line>/docs/`, except ten that `ts_transformer/config.py`, `outputs/envelope.py` and
-`outputs/constraints/speed_floor.py` cite by path — all three in the executor source hash (contract C33), so correcting
-the comments would make the current code refuse executor spec v10. `4dTrajectory/ts_transformer/docs/README.md` lists the
-ten and where each goes. With the next executor spec: `git mv` them, fix those comments (and `autopilot/__init__.py`,
-`envelope.py:110/118`, the entries above), re-write the spec and re-run the train replay gate.
 
 ## `instructions/grammar.py` is outside the labeller sha (2026-09-26)
 
@@ -576,23 +551,3 @@ airports' provenance. Avoided for KAUS by downloading first with
 `--manifest data/usgs_tnm_elevation/download_manifest.KAUS.csv` (the script then skips its download step because
 the tiles exist). Fix (judgement): a per-airport default manifest `<out>/<ICAO>/download_manifest.csv`, or merge
 rows by airport group instead of rewriting.
-
-## The executor spec binds the source's BYTES, comments included (2026-09-27)
-
-**Verified** (`autopilot/spec.py:99` `executor_source_sha256`: sha256 over each file's raw bytes). Any edit to a hashed file —
-a comment, a docstring, a doc path in a comment — makes the code refuse every stored executor spec (contract C33). That is
-what holds the ten dated records in the `docs/` root, the old doc path in `autopilot/__init__.py` and the `envelope.py`
-comments (the entries above): fixing words costs a new spec and a re-run replay gate. **Judgement / the user's todo
-(2026-09-27)**: keep the binding (a spec's gate and every readout flown with it must describe the code that runs), but hash
-the LOGIC — each file's `ast.dump` with docstrings stripped (comments never reach the AST) — so a wording edit no longer
-refuses a spec and any code change still does. A new definition refuses v10 by itself, so it goes in with the next real
-executor change (v11: the judge's fixes, prior readouts §16–§17), with the waiting comment and doc-path fixes in the same
-spec; a test pins that a docstring or comment edit leaves the hash unchanged and a one-token code edit moves it.
-
-## `ExecutorParams.check` lets a NaN rate or factor through (2026-09-27)
-
-**Verified** (opus review of the heading-lead ablation runner, `dev-heading-lead`). `autopilot/params.py` `check` refuses a
-non-positive rate as `min(positive) <= 0.0`; with a NaN among them `min` does not trip the comparison, and an `inf` passes too —
-the first cycle then raises in `inverse.attitude` (or flies nonsense). The ablation runner validates its own arguments
-(`positive`), so no stored spec is affected. Fix: `all(math.isfinite(v) and v > 0 for v in positive)`; `params.py` is in the
-executor source hash, so it goes in with v11.

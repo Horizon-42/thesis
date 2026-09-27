@@ -52,7 +52,7 @@ an anchor 8 km out and the input distribution has changed — closer, lower, slo
 already established. So A0 has to be **two arms**: *A0-fixed* (existing checkpoints, whose
 curve carries the out-of-distribution cost as well as the information gain) and *A0-random*
 (`random_train_anchor=True`, in distribution at every anchor). Their difference is that cost
-(source: `docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` §2.2).
+(source: `docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` §2.2).
 
 Why it is a deliverable rather than a curiosity: an arrival manager needs to know *how many
 minutes before landing the arrival time can be trusted to ±30 s*, and that quantity did not
@@ -406,7 +406,7 @@ come from the full-cohort runs.
 ## Sources
 
 **Design document** —
-`4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`:
+`4dTrajectory/ts_transformer/docs/history/2026-09_latent_anytime/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`:
 §〇 status table and §〇.1 the A0 / B0 run commands with cost and refusal notes; §一 why this
 line exists (the 962 m intent budget, the AMAN freeze point); §2.1 the definition of P(s);
 §2.2 the out-of-distribution trap and the two-arm design; §2.3 the anchor grid; §2.4 the

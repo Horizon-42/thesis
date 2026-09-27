@@ -3,7 +3,7 @@
 The second layer as a small **discrete intent space**: a learned encoder + FSQ compressed 20–60 s
 of the truth into one code `z`, the control-path executor held that tokenizer as a submodule and
 flew the segment under the code, and a causal transformer over code sequences was the prior that
-said the next code. Design: `docs/2026-09-18_manoeuvre_token_plan.zh.md` (the intent-token plan)
+said the next code. Design: `archive/manoeuvre_codes_2026_09/docs/2026-09-18_manoeuvre_token_plan.zh.md` (the intent-token plan)
 and `docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md` §5.2 **as it read before 2026-09-20**.
 
 **Archived 2026-09-20.** Plan v3 §10's audit (written after the user stopped the stage B queue)
@@ -86,4 +86,4 @@ read them through plan v3 §10 item 1):
   names (the publisher cannot import torch, so `manoeuvre_readout` is a mirror of
   `readout.RECORDS_BLOCK` here).
 
-**Documents** (moved here 2026-09-26 from `docs/`, basenames kept): `docs/` holds the intent-code readouts (`2026-09-18_manoeuvre_token_results.zh.md`) and the campaign's arm declarations; the plan itself stays in `docs/` (cited by path from `config.py`, which the executor source hash covers).
+**Documents** (moved here 2026-09-26 from `docs/`, basenames kept): `docs/` holds the intent-code readouts (`2026-09-18_manoeuvre_token_results.zh.md`) and the campaign's arm declarations; the plan itself (`archive/manoeuvre_codes_2026_09/docs/2026-09-18_manoeuvre_token_plan.zh.md`) followed on 2026-09-27, when executor v11's source hash stopped covering comments.

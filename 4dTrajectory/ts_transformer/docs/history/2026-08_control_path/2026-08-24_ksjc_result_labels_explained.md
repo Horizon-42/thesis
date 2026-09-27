@@ -315,7 +315,7 @@ re-ran the v2 baseline against a later manifest generation.
 Background: under `simple-v1(-lag)`, position-only supervision let the model share one
 bank profile across flights (71 % of bank energy; per-flight skill ≈ 0). These
 campaigns tested four candidate causes on identical data. Full write-up with figures:
-`docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md`; conclusions frozen in the
+`docs/history/2026-08_control_path/2026-08-19_control_bank_wiggle_diagnosis.zh.md`; conclusions frozen in the
 package `CLAUDE.md` ("three plausible causes … are NOT it").
 
 **`wiggle_loss_design` — the velocity-dose ladder (5 arms), the axis that WAS it:**

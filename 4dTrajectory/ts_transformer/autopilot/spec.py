@@ -6,6 +6,12 @@ from, the labeller that reads the flights and the executor's source hash (`execu
 that flies a sentence and derives the values — a spec written by other code is refused at replay,
 `require_current_executor`), and the git state; ``measurements.json`` where every value comes from. Nothing
 here is ever overwritten.
+
+The source hash covers the code's LOGIC, not its wording (`logic`): each file's syntax tree with every docstring
+removed, written back as normalised source (`ast.unparse`) — comments never reach the tree, so a comment, a docstring
+or a line break is free, and any change to what the code does moves the hash (the user's rule, 2026-09-27: a spec and
+every readout flown with it describe the code that runs). The normalised text is the running Python's; another
+Python version may write it differently, and is refused like other code.
 """
 
 from __future__ import annotations
@@ -15,6 +21,7 @@ import hashlib
 import importlib.machinery
 import importlib.util
 import json
+import platform
 import sysconfig
 from dataclasses import asdict, fields
 from pathlib import Path
@@ -23,9 +30,10 @@ from typing import Any
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.io_utils import write_json_atomic
 
-#: v5 (2026-09-24, the vocabulary-only plan's stage 2): nothing measured from data is left — the speed changes'
-#: pace is the vocabulary's, the landing crosses at the runway's published TCH (v4: r_turn, φ_cap and the delays went).
-EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v5"
+#: v6 (2026-09-27, executor v11): the source hash is over the code's logic (`logic`), no longer its bytes
+#: (v5, 2026-09-24: nothing measured from data is left — the speed changes' pace is the vocabulary's, the landing
+#: crosses at the runway's published TCH).
+EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v6"
 PACKAGE = Path(__file__).resolve().parent
 #: Imported by the executor but not part of what decides a flown track or a value: the instruction language
 #: (its own hash, the labeller's, is recorded in the spec and checked at replay), the path and file helpers, and the
@@ -96,11 +104,25 @@ def params_sha256(params: ExecutorParams) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+DOCUMENTED = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def logic(source: str) -> str:
+    """A module's logic as text: its syntax tree with the docstring of the module, every class and every function
+    removed (a body left empty holds ``pass``), written back by `ast.unparse` — no comment, docstring or layout in it."""
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if (isinstance(node, DOCUMENTED) and node.body and isinstance(node.body[0], ast.Expr)
+                and isinstance(node.body[0].value, ast.Constant) and isinstance(node.body[0].value.value, str)):
+            node.body = node.body[1:] or [ast.Pass()]
+    return ast.unparse(tree)
+
+
 def executor_source_sha256() -> str:
-    """sha256 over `executor_source_files` (label and bytes, in order)."""
+    """sha256 over `executor_source_files` (label and `logic`, in order)."""
     digest = hashlib.sha256()
     for label, path in executor_source_files():
-        digest.update(label.encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
+        digest.update(label.encode("utf-8") + b"\0" + logic(path.read_text(encoding="utf-8")).encode("utf-8") + b"\0")
     return digest.hexdigest()
 
 
@@ -132,7 +154,11 @@ def load_spec(directory: Path) -> tuple[ExecutorParams, dict[str, Any]]:
 
 
 def require_current_executor(record: dict[str, Any]) -> None:
-    """A spec written by other executor code is refused: its values belong to other laws."""
-    if record["source"]["executor_source_sha256"] != executor_source_sha256():
+    """A spec written by other executor code is refused: its values belong to other laws. The refusal names the Python
+    version the spec was written under when it is not this one (`logic` is that version's written-back text)."""
+    source = record["source"]
+    if source["executor_source_sha256"] != executor_source_sha256():
+        python = ("" if source["python"] == platform.python_version()
+                  else f"; written under Python {source['python']}, this is {platform.python_version()}")
         raise ValueError("the executor spec was written by other executor code "
-                         f"({record['source']['executor_source_sha256'][:12]}, now {executor_source_sha256()[:12]})")
+                         f"({source['executor_source_sha256'][:12]}, now {executor_source_sha256()[:12]}{python})")

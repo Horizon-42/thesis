@@ -282,7 +282,7 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
     prior.parent.mkdir(parents=True)
     _prior_dir(prior, tmp_path / "artefact", roster)
     executor_spec.write_spec(tmp_path / "executor", _params(), one.sha256, {}, {
-        "executor_source_sha256": executor_spec.executor_source_sha256(), "labeller_source_sha256": labeller_source_sha256(),
+        "executor_source_sha256": executor_spec.executor_source_sha256(), "python": "3", "labeller_source_sha256": labeller_source_sha256(),
         "git": {"head": "test", "dirty": False}})
 
     unflown = {straight.dataset_id}

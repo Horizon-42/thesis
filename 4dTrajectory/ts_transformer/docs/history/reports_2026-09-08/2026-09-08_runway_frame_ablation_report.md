@@ -26,7 +26,7 @@ predicting anchor-relative displacements triggered its own pre-registered veto.
 The chart used for training and inference is a local ENU (east-north-up) frame anchored at
 the assigned runway threshold. The destination is therefore always the origin, and the
 position channels *are* distance-to-go. Three hypotheses were pre-registered before any
-run (source: `4dTrajectory/ts_transformer/docs/2026-09-03_airport_frame_ablation_plan.md`,
+run (source: `4dTrajectory/ts_transformer/docs/history/2026-09_frames/2026-09-03_airport_frame_ablation_plan.md`,
 "Question"):
 
 - **H1 — target conditioning.** Threshold anchoring is a strong prior; removing it should

@@ -10,7 +10,7 @@ divisors sat in ``dynamics_arrays`` fifty lines apart. Renaming a channel withou
 its divisor, or vice versa, was a silent mislabel; now both come from one feature set.
 
 **Two feature sets, one per value of ``control_condition_features``** (design N4,
-``docs/2026-09-14_specific_force_control_design.md`` §11):
+``docs/history/2026-09_specific_force/2026-09-14_specific_force_control_design.md`` §11):
 
 - ``raw`` scales each quantity on its own. It is what every run before 2026-09-15 read.
 - ``ratios`` replaces the installed thrust and the wing area by the groups the rollout

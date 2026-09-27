@@ -1,4 +1,4 @@
-"""The specific-force control axis, ts side (docs/2026-09-14_specific_force_control_design.md §5).
+"""The specific-force control axis, ts side (docs/history/2026-09_specific_force/2026-09-14_specific_force_control_design.md §5).
 
 ``control_thrust_parameterization="specific-force"`` makes the head's first column the
 specific force ``n_x = (T - D)/W`` instead of ``T/T_max``. What must hold for that to be the

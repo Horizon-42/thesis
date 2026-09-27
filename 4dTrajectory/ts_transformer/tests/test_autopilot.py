@@ -258,7 +258,7 @@ def test_a_heading_word_is_flown_to_arrive_when_its_lead_runs_out_no_faster_than
     to_go = torch.tensor([4.0, 3.0, -5.0, 4.0, 1.0], dtype=F64)
     speed = torch.full((5,), 140.0, dtype=F64)
     stop = float(stopping_rate_deg_s(torch.tensor([6.0], dtype=F64), torch.tensor([140.0], dtype=F64), params))
-    # at 140 m/s and p 8°/s the bank can still be taken out before 6° from 2.6°/s
+    # at 140 m/s and p 5°/s the bank can still be taken out before 6° from 2.05°/s
     assert stop == pytest.approx(math.degrees(math.sqrt(2 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s) / 140.0
                                                         * math.radians(6.0))))
     # 6° over the 4 s or 3 s left; past the lead (and under 2Δt) a hold at 2Δt, here held to the stopping rate;
@@ -280,9 +280,82 @@ def test_the_parameters_are_checked_against_the_designs_constraints():
     params.check(one)
     for change, message in ((dict(heading_time_constant_s=1.5), "under 2 Δt"),
                             (dict(path_time_constant_s=1.0), "under 2 Δt"),
-                            (dict(timeout_factor=0.0), "positive")):
+                            (dict(timeout_factor=0.0), "positive"),
+                            # a NaN slips past a `min(...) <= 0` test; an inf is no rate either
+                            (dict(bank_rate_deg_s=math.nan), "finite"),
+                            (dict(path_rate_factor=math.inf), "finite")):
         with pytest.raises(ValueError, match=message):
             replace(params, **change).check(one)
+
+
+def test_the_executor_hash_reads_the_logic_not_the_wording():
+    """v11 (the user's rule, 2026-09-27): the spec binds what the code does — a docstring, a comment or a line break is
+    free, one token of code is not."""
+    from ts_transformer.autopilot import spec as executor_spec
+
+    source = '''"""Module docstring."""
+import math
+
+
+class Law:
+    """Class docstring."""
+
+    def rate(self, error: float) -> float:
+        """Method docstring."""
+        # a comment
+        return math.copysign(min(abs(error), 3.0), error)
+
+
+def only_prose():
+    """Nothing else."""
+'''
+    reworded = (source.replace("Module docstring.", "Reworded.").replace("# a comment", "# another comment")
+                .replace("return math.copysign(min(abs(error), 3.0), error)",
+                         "return math.copysign(\n            min(abs(error), 3.0), error)"))
+    assert executor_spec.logic(reworded) == executor_spec.logic(source)
+    assert "docstring" not in executor_spec.logic(source) and "comment" not in executor_spec.logic(source)
+    assert executor_spec.logic(source.replace("3.0", "3.5")) != executor_spec.logic(source)
+    # a body that held only its docstring still compiles as written back
+    compile(executor_spec.logic(source), "<logic>", "exec")
+
+
+def test_the_executor_source_hash_is_taken_over_the_logic(tmp_path, monkeypatch):
+    """`executor_source_sha256` itself — not only `logic` — ignores the wording of a hashed file and moves with its
+    code."""
+    from ts_transformer.autopilot import spec as executor_spec
+
+    module = tmp_path / "law.py"
+    monkeypatch.setattr(executor_spec, "executor_source_files", lambda: [("autopilot/law.py", module)])
+    module.write_text('''"""The law."""\n\n\ndef rate(e):\n    """Rate."""\n    return e / 4.0  # τ_ψ\n''')
+    first = executor_spec.executor_source_sha256()
+    module.write_text('''"""The law, reworded."""\n\n\ndef rate(e):\n    # another comment\n    return e / 4.0\n''')
+    assert executor_spec.executor_source_sha256() == first
+    module.write_text('''"""The law."""\n\n\ndef rate(e):\n    return e / 5.0\n''')
+    assert executor_spec.executor_source_sha256() != first
+
+
+def test_the_standards_roll_rate_stops_the_executors_own_turns_within_the_bank_limit():
+    """`derive.stopping_roll_rate_deg_s`: the slowest p at which `lateral.rate_for_error` never outruns the stopping rate
+    before the bank limit binds — checked against the laws themselves over speeds and errors; the spec runner's 5°/s
+    clears it for the test vocabulary (32°, lead 4 s)."""
+    from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
+    from ts_transformer.autopilot import derive
+    from ts_transformer.autopilot.lateral import rate_for_error, stopping_rate_deg_s
+    from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
+
+    one = spec(turn_rate_max_deg_s=10.0)          # the bank limit, not r_max, is the cap here
+    floor = derive.stopping_roll_rate_deg_s(one, 4.0)
+    assert floor == pytest.approx(math.degrees(math.tan(math.radians(32.0)) / 8.0)) and floor < ROLL_RATE_DEG_S
+    speed = torch.linspace(50.0, 160.0, 23, dtype=F64)[:, None]
+    error = torch.linspace(0.5, 180.0, 360, dtype=F64)[None, :]
+    bank_capped = GRAVITY_MPS2 * math.tan(math.radians(32.0)) / speed
+
+    def excess(p_deg_s: float) -> float:
+        params = _params(bank_rate_deg_s=p_deg_s)
+        own = torch.minimum(rate_for_error(error, params, one), torch.rad2deg(bank_capped))
+        return float((own - stopping_rate_deg_s(error, speed, params)).max())
+
+    assert excess(floor) <= 1e-9 and excess(ROLL_RATE_DEG_S) <= 0.0 and excess(0.9 * floor) > 0.0
 
 
 
@@ -302,8 +375,10 @@ def _params(**changes):
     from dataclasses import replace
     from ts_transformer.autopilot.params import ExecutorParams
 
-    # τ_ψ = the lead and p = the bank limit over the lead: method A's values from the vocabulary (`derive`)
-    base = ExecutorParams(cycle_s=1.0, heading_time_constant_s=4.0, bank_rate_deg_s=8.0, path_time_constant_s=2.0,
+    from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
+
+    # τ_ψ = the lead (method A, `derive`) and the standards' roll rate, as the spec runner writes them
+    base = ExecutorParams(cycle_s=1.0, heading_time_constant_s=4.0, bank_rate_deg_s=ROLL_RATE_DEG_S, path_time_constant_s=2.0,
                           path_rate_factor=2.0, timeout_factor=1.5, word_clock="time")
     return replace(base, **changes)
 
@@ -522,8 +597,11 @@ def test_the_executor_spec_is_written_once_and_refused_unless_it_is_the_current_
 
     from ts_transformer.autopilot import spec as executor_spec
 
+    import platform
+
     params = _params()
-    source = {"executor_source_sha256": executor_spec.executor_source_sha256(), "git": {"head": "x", "dirty": False}}
+    source = {"executor_source_sha256": executor_spec.executor_source_sha256(), "python": platform.python_version(),
+              "git": {"head": "x", "dirty": False}}
     executor_spec.write_spec(tmp_path, params, "vocabulary", {"data": {}}, source)
     loaded, record = executor_spec.load_spec(tmp_path)
     assert loaded == params and record["sha256"] == executor_spec.params_sha256(params)
@@ -531,8 +609,12 @@ def test_the_executor_spec_is_written_once_and_refused_unless_it_is_the_current_
     with pytest.raises(FileExistsError):
         executor_spec.write_spec(tmp_path, params, "vocabulary", {}, source)
     assert executor_spec.params_sha256(replace(params, bank_rate_deg_s=3.0)) != record["sha256"]
-    with pytest.raises(ValueError, match="other executor code"):
+    with pytest.raises(ValueError, match=r"other executor code \(000000000000, now [0-9a-f]{12}\)$"):
         executor_spec.require_current_executor({**record, "source": {**source, "executor_source_sha256": "0" * 64}})
+    # the written-back logic is the running Python's: a spec written under another names it
+    with pytest.raises(ValueError, match="written under Python 2.7.0, this is"):
+        executor_spec.require_current_executor({**record, "source": {**source, "executor_source_sha256": "0" * 64,
+                                                                      "python": "2.7.0"}})
     stored = json.loads((tmp_path / "spec.json").read_text())
     for broken, message in (({**stored, "params": {**stored["params"], "bank_rate_deg_s": 9.0}}, "do not hash"),
                             ({**stored, "params": {**stored["params"], "extra_s": 1.0}}, "extra"),
@@ -976,7 +1058,7 @@ def test_an_executor_spec_is_opened_only_against_its_own_vocabulary_and_labeller
     from ts_transformer.autopilot import spec as executor_spec
 
     one = spec()
-    source = {"executor_source_sha256": executor_spec.executor_source_sha256(), "labeller_source_sha256": "a" * 64,
+    source = {"executor_source_sha256": executor_spec.executor_source_sha256(), "python": "3", "labeller_source_sha256": "a" * 64,
               "git": {"head": "x", "dirty": False}}
     executor_spec.write_spec(tmp_path / "spec", _params(), one.sha256, {}, source)
     monkeypatch.setattr(replay.artefact, "load_spec", lambda directory: one)

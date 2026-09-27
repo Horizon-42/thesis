@@ -349,7 +349,7 @@ cost and the bank collapse being a *fight* rather than a property of the penalty
 re-tests the training-time corridor penalty on a teacher-free base: two training arms
 (λ = 2e-4, the corrected parity dose, and λ = 1e-3, the 09-05 dose) plus two predict-only
 arms applying the soft barrier hook to the base and to the parity arm (source:
-`docs/2026-09-07_latent_intent_design.zh.md` §六 L1.c; campaign `l1c_procedure_20260908`,
+`docs/history/2026-09_latent_anytime/2026-09-07_latent_intent_design.zh.md` §六 L1.c; campaign `l1c_procedure_20260908`,
 KRDU, 180 epochs, seed 1337, val n = 1,404). Gate: corridor violation down ≥ 5 points,
 vectored ADE no worse than +30 m, bank skill ≥ 0.70; veto at vectored ADE worse by > 100 m.
 **It has not been run.** Also listed as not done: PatchTST through the bounded map, a second

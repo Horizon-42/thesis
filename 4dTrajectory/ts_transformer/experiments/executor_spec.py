@@ -1,8 +1,8 @@
 """Executor E7: write the executor's spec (executor design §9–§10).
 
-The executor takes no information beyond the vocabulary (the user's rule, 2026-09-24): method A
-(`autopilot/derive.py`) sets τ_ψ = the heading lead and p = the bank limit over the lead; the turn rates, the bank
-limit, the speed changes' pace and the altitude tolerance are the vocabulary's, read at run time; a word takes effect
+The executor takes no information beyond the vocabulary (the user's rule, 2026-09-24) and the procedure standards:
+method A (`autopilot/derive.py`) sets τ_ψ = the heading lead; the roll rate p is the standards' 5°/s (`ROLL_RATE_DEG_S`);
+the turn rates, the bank limit, the speed changes' pace and the altitude tolerance are the vocabulary's, read at run time; a word takes effect
 when it is said; the landing crosses the pointed runway at its published threshold crossing height and never
 descends under its published glidepath's lower edge (read at replay, `runway_data.published_vertical_paths`;
 every candidate's is recorded in ``measurements.json`` as the spec is written). Nothing is measured from data (the measurements that set these before are
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import platform
 from dataclasses import asdict
 from pathlib import Path
 
@@ -41,6 +42,12 @@ PATH_TIME_CONSTANT_S = 2.0 * CYCLE_S
 PATH_RATE_FACTOR = 2.0
 #: A flight is given this many times its own sentence's time before it times out (§8.3).
 TIMEOUT_FACTOR = 1.5
+#: p, deg/s: the roll rate the procedure standards allow (user 2026-09-27, the heading-lead ablation: it reads the same as
+#: the bank limit over the lead, 8°/s, which is faster than every source). FAA Order 8260.3G (2024) App. E, Sec. 4, ¶6.a:
+#: "Roll-in rates of up to five degrees per second and bank angles of 25 degrees may be used"; ICAO Doc 8168 Vol II
+#: Part II, Sec 4, Ch 1, 1.3.9.1: "5 seconds for establishment of bank" (25°, reading: 5°/s). Quotes and files:
+#: repo `docs/literature/roll_rate_and_turn_response/` §3.1–§3.2.
+ROLL_RATE_DEG_S = 5.0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -67,12 +74,16 @@ def main(argv: list[str] | None = None) -> int:
     executor, labeller = executor_source_sha256(), labeller_source_sha256()
     spec = load_spec(instructions)
 
-    tau, roll_rate = derive.heading_time_constant_s(spec, CYCLE_S), derive.roll_rate_deg_s(spec)
+    tau, roll_rate = derive.heading_time_constant_s(spec, CYCLE_S), ROLL_RATE_DEG_S
+    floor = derive.stopping_roll_rate_deg_s(spec, tau)
+    if roll_rate < floor:
+        parser.error(f"the standards' roll rate {roll_rate:g}°/s is under {floor:.2f}°/s: with this vocabulary's bank limit "
+                     "and lead the executor's own turns would outrun their stopping rate (`derive.stopping_roll_rate_deg_s`)")
     params = ExecutorParams(cycle_s=CYCLE_S, heading_time_constant_s=tau, bank_rate_deg_s=roll_rate,
                             path_time_constant_s=PATH_TIME_CONSTANT_S, path_rate_factor=PATH_RATE_FACTOR,
                             timeout_factor=TIMEOUT_FACTOR, word_clock=args.word_clock)
     params.check(spec)
-    print(f"method A (the vocabulary): τ_ψ {tau:g} s, p {roll_rate:g}°/s", flush=True)
+    print(f"method A (the vocabulary): τ_ψ {tau:g} s; the standards' roll rate p {roll_rate:g}°/s", flush=True)
 
     if executor_source_sha256() != executor or labeller_source_sha256() != labeller:
         raise SystemExit("the executor's or the labeller's code changed while the spec was measured; measure again")
@@ -81,8 +92,13 @@ def main(argv: list[str] | None = None) -> int:
             "heading_time_constant_s": {"value": tau, "rule": "heading_lead_s, the time a heading word gives to "
                                                               "arrive — τ_ψ eases out the executor's own turns only; "
                                                               "heading words arrive a lead after they are heard"},
-            "bank_rate_deg_s": {"value": roll_rate, "rule": "turn_bank_max_deg / heading_lead_s: the vocabulary's "
-                                                            "bank limit reached within one lead"},
+        },
+        "from_the_standards": {
+            "bank_rate_deg_s": {"value": roll_rate, "rule": "the procedure standards' roll rate: FAA Order 8260.3G App. E "
+                                                            "Sec. 4 ¶6.a (up to 5°/s), ICAO Doc 8168 Vol II Part II Sec 4 "
+                                                            "Ch 1 1.3.9.1 (bank established in 5 s)",
+                                "floor_deg_s": floor, "floor_rule": "tan(turn_bank_max_deg) / (2 τ_ψ): the executor's own "
+                                                                    "turns stop within the bank limit"},
         },
         "from_the_vocabulary": {"turn_rate_max_deg_s": spec.turn_rate_max_deg_s,
                                 "turn_rate_min_deg_s": spec.turn_rate_min_deg_s,
@@ -101,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         "fixed": {"cycle_s": CYCLE_S, "path_time_constant_s": PATH_TIME_CONSTANT_S, "path_rate_factor": PATH_RATE_FACTOR,
                   "timeout_factor": TIMEOUT_FACTOR},
     }
-    source = {"executor_source_sha256": executor, "labeller_source_sha256": labeller,
+    source = {"executor_source_sha256": executor, "python": platform.python_version(), "labeller_source_sha256": labeller,
               "instructions": artefact_name, "git": git}
     write_spec(directory, params, spec.sha256, measurements, source)
     print(f"executor spec {params_sha256(params)[:12]} → {directory}")

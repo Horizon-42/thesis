@@ -1,6 +1,6 @@
 """The per-step speed floor: a stall margin held THROUGH the thrust command.
 
-The measured problem (L3.c, ``docs/2026-09-07_latent_intent_design.zh.md`` §六 L3.c): on the
+The measured problem (L3.c, ``docs/history/2026-09_latent_anytime/2026-09-07_latent_intent_design.zh.md`` §六 L3.c): on the
 CTA base the control output is unflyable almost everywhere, 99.9 % of the hard violations
 are the STALL term, and **77–94 % of the stall samples sit at ≥ 20 km remaining** — the
 model commands infeasibly low speeds on the OUTER segment, and a late CTA pushes more of
@@ -61,7 +61,7 @@ says it fires mostly far from the runway. A gate here would leave the entire pro
 untouched.
 
 **Under the specific-force law** (``control_thrust_parameterization="specific-force"``,
-``docs/2026-09-14_specific_force_control_design.md``) the first column is ``n_x = (T - D)/W``
+``docs/history/2026-09_specific_force/2026-09-14_specific_force_control_design.md``) the first column is ``n_x = (T - D)/W``
 and the RHS makes ``V' = g·(a_x - sin γ)`` wherever the thrust clamp does not bind, so the
 same inversion is drag-free and mass-free::
 

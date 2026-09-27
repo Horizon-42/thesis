@@ -39,7 +39,7 @@ def endpoint_geometry(eval_record: dict, states: dict, row: dict) -> dict:
     cosine, sine = math.cos(psi), math.sin(psi)
     # The first predicted step against the kinematic extrapolation of the anchor state:
     # a model that is not anchored to the aircraft shows up HERE, as a jump at t = dt
-    # (the KRDU NW translation, docs/2026-09-03_krdu_nw_endpoint_bias.md).
+    # (the KRDU NW translation, docs/history/2026-09_frames/2026-09-03_krdu_nw_endpoint_bias.md).
     anchor = eval_record["initial_state"]
     first = states["predicted_states"][1]
     a_e, a_n = _world_en(float(anchor["lat"]), float(anchor["lon"]), lat0, lon0)
