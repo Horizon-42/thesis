@@ -581,3 +581,26 @@ readout.json}` (the stage's masks: none, C35; a round directory is a prior run `
 readout, once), `history.json`, `choice.json`; from a
 clean tree unless `--smoke`. Val and the sealed test days are never read. `ts-prior-landing-reward-v3` since the clipped
 ratio (v2: advantage × the NLL, no ratio — the adopted landing model's run).
+
+### R23 · `run_ts.py heading_lead_ablation` — the heading lead, the bank limit and the roll rate moved over one train sample (two-tier progress report 2026-09-27, P0 item 1)
+
+2026-09-27. `heading_lead_ablation --instructions <formal artefact> --executor <formal executor spec> --reference-replay
+<its replay-train/replay.json> [--per-airport 400] [--seed 1337] [--leads 2 4 6 8] [--bank-limits 25 32] [--bank-rates
+derived 3 5] [--keep-records] --out <new dir> [--resume]`. A cell is (lead L, bank limit φ, roll rate p): the formal
+vocabulary with `heading_lead_s` = L and `turn_bank_max_deg` = φ and nothing else, the formal executor parameters with
+τ_ψ = L and p = φ ÷ L (`derived`, method A via `autopilot/derive.py`) or a given p (which breaks p·τ_ψ = φ, on which the
+executor's own turns rely). Every cell relabels the formal train replay gate's sample (`replay.draw`, own and stand-in
+dynamics) under its own vocabulary and flies it through `executor_replay.fly_airport` (judged, written as records, graded
+by evaluation, paired with the observed verdicts graded once). The reference cell (the formal values) is flown first and
+must reproduce the formal replay in every field the replay stores but its two verdicts, or nothing else is flown. Per
+dynamics group × stratum: landed; words inside, judged under the cell's own vocabulary (comparable neither across L nor
+across φ — a longer lead judges a heading word later, the capture turn is judged against φ); evaluation; heading words
+per flight; over the landed flights the time-aligned mean and largest distance to the observed track and the time-free
+Hausdorff distance (the observed rows closed to the threshold, the flown line ended at its interpolated crossing, both
+read as lines at `DENSIFY_M` = 5 m; a non-finite value counted apart); the landing time; the cycles the bank limit and p
+bound; the airport × stratum cells clearing the three gates; refusals; paired changes against the reference. No code the
+executor's or the labeller's source hash covers changes, so the formal executor v10 and sentence artefact v5 stay current.
+Writes `plan.json` (commit and library versions; `--resume` continues only the same plan), `observed/<ICAO>/`,
+`cells/<nn>_<cell>/{cell.json, evaluation/<ICAO>.json}` (the flown records dropped once graded unless `--keep-records`),
+`ablation.json` (`ts-heading-lead-ablation-v1`) and `ablation.md`; train only, CPU, from a clean tree at the plan's commit,
+checked before a cell is flown and before its result is written.
