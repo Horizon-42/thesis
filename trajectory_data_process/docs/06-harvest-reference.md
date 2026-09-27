@@ -498,3 +498,37 @@ in with `summary.json` only on success.
   start sample itself was the record's last row in all 1,500. The silent 70 m/s fallback is gone: a start without
   a speed refuses the flight by name (none of the 25,064 does). Viewer only — nothing reads the tail's
   time.
+
+## Held-out test airport (2026-09-27)
+
+### TD27 · KAUS is held-out test data in its own root, `outputs/harvest-heldout/`
+
+- **Why its own root.** `repo_layout.discover_k_airports()` (ts pipeline, `instruction_signals`, cv and every
+  ablation runner) and the `discover_k_airports()` of `prepare_scenario_inputs.py` / `run_scenario_optimization.py`
+  take EVERY `K*` airport with an arrivals manifest under the live root `outputs/harvest/` as a default airport.
+  A test airport there would be trained on by the next default run. So KAUS was downloaded with
+  `--output trajectory_data_process/outputs/harvest-heldout`, and the live root still holds exactly the five
+  training airports. **Never merge or move KAUS into `outputs/harvest/`.** A consumer that evaluates on it names
+  the root explicitly (`arrival_manifest_path("KAUS", <heldout root>)`); nothing does yet.
+- **The download** (2026-09-27, branch `dev-heldout-kaus`):
+  `python -m trajectory_data_process.harvest --airport KAUS --count 2000 --start 2026-09-27T00:00:00Z
+  --max-lookback-days 60 --output trajectory_data_process/outputs/harvest-heldout
+  --frontend-data aeroviz-4d/public/data` — 240 chunks, 2026-07-29 → 2026-09-27, about 3 h at `nice 19`.
+  tracks 71,191 (assigned 20,450, ambiguous 4, unassignable 539, not_landing 50,198); per runway 18L 18,871,
+  18R 640, 36L 703, 36R 236; **36L and 36R given up** (4 dry days, the runner's `DEFAULT_DRY_GIVE_UP_DAYS`);
+  18R ran to the lookback limit. Arrivals v7: 20,375 included (18L 18,805 / 36L 703 / 18R 633 / 36R 234;
+  58 `takeoff_in_segment`, 17 `local_circuit`); lateral roster: 20,271 eligible, 99 lateral fail,
+  5 indeterminate, 75 evaluation-only. Observed events 20,445 / 20,993 (97 %); verdicts pass 16,061 /
+  fail 1,777 / indeterminate 2,612.
+- **The runway mix is the airport's, not a sampling choice.** At KAUS the east runway 18L/36R takes the arrivals
+  and 18R/36L mostly departures; late July to September is almost all south flow, so the 36 ends are short of
+  the 2,000 target. A north-flow period (winter fronts) would have to be downloaded into another root and
+  combined with `--merge-source` INTO `outputs/harvest-heldout` (TD24) — not done.
+- **Static data** (all from the same sources as the five): `config/runway_thresholds.json` gained a KAUS entry
+  — `build_runway_config.build_config(["KAUS"])` into a scratch file (the CLI refuses an existing output),
+  `width_ft` from FAA NASR `APT_RWY.csv` 2026-08-06 (`docs/regulation/FAA_NASR_APT_CSV_2026-08-06.zip`, both
+  runways 150 ft), then `extract_approach_minima.py --config <scratch>` (four LPV plates, d-TPP 2609), appended
+  with the other airports' bytes unchanged. Every threshold is a CIFP 2608 Path Point (TCH 16.0–18.4 m, courses
+  178.7° / 358.7°). METAR `data/metar/KAUS/asos_2026-07-28_2026-09-27.csv` (1,615 reports); MVA
+  `data/MVA/2026-09-27/AUS_MVA_FUS{3,5}` (`docs/literature/minimum_vectoring_altitude/`); runway numbers are
+  18/36 in every source (Austin renumbered from 17/35).

@@ -12,7 +12,7 @@ the entry itself is deleted.
 
 Checked entry by entry against `dev-two-tier` `1a7ac875` plus branch `dev-frontend-followups`, then updated after branch
 `dev-followups-no-training` (2026-09-25) fixed every entry whose fix touches neither the training nor the post-training
-(the right-hand column): **20 open, 7 partly, 57 resolved or dismissed, 5 obsolete** (recounted 2026-09-26). *open*: the problem is still in the
+(the right-hand column): **26 open, 7 partly, 57 resolved or dismissed, 5 obsolete** (recounted from the table 2026-09-27; one open row is blocked on a source). *open*: the problem is still in the
 code; *partly*: some of it is fixed (the note says what is left); *resolved*: fixed (the note says by what);
 *dismissed*: not a defect (the note says why); *obsolete*: the code is gone. A resolved, dismissed or obsolete entry's
 text is removed below (its row stays); rows follow the entries' order; note the two sets of numbers (§19–§21 each appear
@@ -121,6 +121,7 @@ added three entries (the rows after the performance index's).
 | `outputs/envelope.py` names `docs/specific_force_teacher_distribution.py` (09-26) | open | new; see the entry | **yes — executor**: the edit changes the executor source hash; do it with the next executor spec |
 | `instructions/grammar.py` is outside the labeller sha (09-26) | open | new; see the entry | **yes — every sentence artefact and prior**: adding it to the hash changes the labeller sha they record; do it with the next vocabulary spec |
 | The judge calls a captured, on-centreline crossing that is too high "crossed off runway" (09-27) | open | new; see the entry | **yes — executor** (the judge is in the spec's source hash; readouts' outcome counts move) |
+| The terrain downloader overwrites the shared `download_manifest.csv` (09-27) | open | new; see the entry | no: data tooling |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -562,3 +563,14 @@ not a landing passage becomes `crossed_off_runway` — whether it was wide of th
 the centreline (median 8–23 m off) and 140–260 m too high: the name reads as a lateral miss and hides a vertical one. Give
 the too-high crossing its own outcome with the next executor spec, with the other runway's crossing and the tighter lateral
 limit already queued there (prior readouts §16).
+
+## The terrain downloader overwrites the shared `download_manifest.csv` (2026-09-27)
+
+**Verified** (`tnm_elevation_downloader/download_tnm_elevation.py` `write_manifest` opens the manifest with `"w"`;
+`preprocess_aeroviz_airport.sh` step 7 passes no `--manifest`). The default manifest
+`data/usgs_tnm_elevation/download_manifest.csv` records every airport's tiles, but one airport's download
+rewrites it with that airport's rows only, so the one-click script run for a NEW airport erases the other
+airports' provenance. Avoided for KAUS by downloading first with
+`--manifest data/usgs_tnm_elevation/download_manifest.KAUS.csv` (the script then skips its download step because
+the tiles exist). Fix (judgement): a per-airport default manifest `<out>/<ICAO>/download_manifest.csv`, or merge
+rows by airport group instead of rewriting.

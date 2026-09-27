@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Re-download the FAA Minimum Vectoring Altitude (MVA) charts of the four terminal facilities that
+# Re-download the FAA Minimum Vectoring Altitude (MVA) charts of the five terminal facilities that
 # cover the thesis airports into data/MVA/<date>/ (git-ignored), then print the sha256 of each file.
 #
 #   bash docs/literature/minimum_vectoring_altitude/download.sh              # -> data/MVA/2026-09-26/
 #   bash docs/literature/minimum_vectoring_altitude/download.sh 2026-12-01   # -> data/MVA/2026-12-01/
 #
-# Facilities: MSY (KMSY), RDU (KRDU), NCT (KSJC and KSMF), T75 (KSTL). The FAA MVA page lists two
+# Facilities: MSY (KMSY), RDU (KRDU), NCT (KSJC and KSMF), T75 (KSTL), AUS (KAUS, the held-out test
+# airport; added 2026-09-27, so data/MVA/2026-09-26/ does not hold it). The FAA MVA page lists two
 # current charts per facility, FUS3 and FUS5 (README.md section 2), and both are fetched: the AIXM 5.1
 # XML (for a parser) and the PDF (for reading by eye). Nothing else is downloaded.
 #
@@ -49,5 +50,10 @@ C=(curl -fsSL -A 'Mozilla/5.0' --retry 3 --retry-delay 5)
 "${C[@]}" -o "$OUT/T75_MVA_FUS3.pdf" https://aeronav.faa.gov/MVA_Charts/pdf/T75_MVA_FUS3.pdf
 "${C[@]}" -o "$OUT/T75_MVA_FUS5.xml" https://aeronav.faa.gov/MVA_Charts/aixm/T75_MVA_FUS5.xml
 "${C[@]}" -o "$OUT/T75_MVA_FUS5.pdf" https://aeronav.faa.gov/MVA_Charts/pdf/T75_MVA_FUS5.pdf
+
+"${C[@]}" -o "$OUT/AUS_MVA_FUS3.xml" https://aeronav.faa.gov/MVA_Charts/aixm/AUS_MVA_FUS3.xml
+"${C[@]}" -o "$OUT/AUS_MVA_FUS3.pdf" https://aeronav.faa.gov/MVA_Charts/pdf/AUS_MVA_FUS3.pdf
+"${C[@]}" -o "$OUT/AUS_MVA_FUS5.xml" https://aeronav.faa.gov/MVA_Charts/aixm/AUS_MVA_FUS5.xml
+"${C[@]}" -o "$OUT/AUS_MVA_FUS5.pdf" https://aeronav.faa.gov/MVA_Charts/pdf/AUS_MVA_FUS5.pdf
 
 (cd "$OUT" && sha256sum -- *.xml *.pdf)

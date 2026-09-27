@@ -103,3 +103,5 @@ finish its write — confirm the process is gone (`kill -0`) before rebuilding d
 - A killed harvest's staging directories (`harvest/staging.py`) are listed at the end of every run and
   removed only by `--remove-staging-leftovers` (no lock: never swept automatically); a moved-aside
   `tracks/` is kept while `tracks/` is missing (TD25).
+- **KAUS is the held-out TEST airport, in its own root `outputs/harvest-heldout/`** — never in (or merged into)
+  the live `outputs/harvest/`, whose every `K*` airport `discover_k_airports()` trains on by default (TD27).

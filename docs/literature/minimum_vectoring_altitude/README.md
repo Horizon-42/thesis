@@ -1,4 +1,4 @@
-# Minimum Vectoring Altitude (MVA) charts for KMSY, KRDU, KSJC, KSMF and KSTL (downloaded 2026-09-26)
+# Minimum Vectoring Altitude (MVA) charts for KMSY, KRDU, KSJC, KSMF and KSTL (downloaded 2026-09-26), and KAUS (2026-09-27)
 
 This folder records where the FAA's published minimum vectoring altitudes for the five thesis airports
 came from, what each file says about its own date, and how the AIXM 5.1 XML is laid out, so that a parser
@@ -9,8 +9,13 @@ How to read it:
 - **"(reading)"** marks a step the source does not state, such as a conclusion drawn from file contents
   or from matching a chart name to a regulation paragraph.
 - The downloaded files are **not tracked in git**. They live in `data/MVA/2026-09-26/` (the `data/` tree
-  is git-ignored). `./download.sh [DATE]` fetches the same 16 files into `data/MVA/<DATE>/`, refuses to
+  is git-ignored). `./download.sh [DATE]` fetches the files into `data/MVA/<DATE>/`, refuses to
   write into a date directory that already exists, and prints the SHA-256 of every file.
+- **`data/MVA/2026-09-27/` adds AUS (Austin TRACON, for the held-out test airport KAUS)**: the script
+  gained the AUS files, and the whole set of 20 was downloaded into a new date directory. Its 16 older
+  files are byte-identical to `2026-09-26/` (SHA-256 compared on 2026-09-27), so the charts of the
+  five training airports are the same in both directories. `2026-09-26/` holds no AUS file, and
+  `ts_transformer/prior/mva.py` still reads `2026-09-26` and does not list KAUS (§3).
 - The files are kept **byte for byte as served**. The FAA says its certification lapses once a file is
   modified (§1).
 
@@ -98,6 +103,7 @@ Sector containing each airport reference point (from the XML):
 
 | airport | FUS3 sector, MVA | FUS5 sector, MVA |
 |---|---|---|
+| KAUS | `A`, 2,000 ft | `A`, 2,000 ft |
 | KMSY | `F`, 1,500 ft | `F`, 1,600 ft |
 | KRDU | `A`, 2,000 ft | `A`, 2,000 ft |
 | KSJC | `OAK_N`, 2,000 ft | `M1`, **4,500 ft** |
@@ -136,6 +142,20 @@ effective date:
 | `T75_MVA_FUS3.pdf` | 636,791 | `e1a61d95ea64f3966feb9ce463875a2381d3c82107b5ce5cea970ebfc6e09179` | `T75_MVA_FUS3_2024_v1` | 2024-10-10 | 2024-12-09 14:23 |
 | `T75_MVA_FUS5.xml` | 216,200 | `29af11792b6ccc8c31498fa9cdd1beb7be442f8c76e2d3623bdc0c1967373e70` | `T75_MVA_FUS5_2024_v1` | — | 2024-11-04 20:07 |
 | `T75_MVA_FUS5.pdf` | 646,293 | `9cb8b3c33183da2a84aec51b2964ffbbc28aa268965dbaaa763bbc50e1b4d8f5` | `T75_MVA_FUS5_2024_v1` | 2024-10-10 | 2024-12-09 14:23 |
+
+AUS (Austin ATCT/TRACON; FAA page entry "AUS, Austin ATCT/TRACON"), downloaded 2026-09-27 into
+`data/MVA/2026-09-27/` together with the 16 files above (unchanged):
+
+| file | bytes | SHA-256 | project name stated in the file | PDF created (UTC) | server Last-Modified (UTC) |
+|---|---:|---|---|---|---|
+| `AUS_MVA_FUS3.xml` | 166,798 | `afcc44fb56cc8ac00c6fb204a8988e839827ae7ffb56695ba3380c6dd28b63b6` | `AUS_MVA_FUS3_2025_v1` | — | 2025-10-20 20:49 |
+| `AUS_MVA_FUS3.pdf` | 631,698 | `0d1096af9cd885a4e6ce4d26af44855af0aae0eac3f7efdcf7cb1fade094b240` | `AUS_MVA_FUS3_2025_v1` | 2025-05-22 | 2025-10-20 20:51 |
+| `AUS_MVA_FUS5.xml` | 163,527 | `ac4f165718189ddc862195161950fca0c6b2b528d9db71247cf5596754cfd3ea` | `AUS_MVA_FUS5_2025_v1` | — | 2025-10-20 20:49 |
+| `AUS_MVA_FUS5.pdf` | 631,995 | `5ba52e39abb5ef8e04818c9bfccbe72eb25b9acab645631620f6cd27c7537c74` | `AUS_MVA_FUS5_2025_v1` | 2025-05-22 | 2025-10-20 20:51 |
+
+The AUS XML parses under `prior.mva.load_chart` (FUS3 26 sectors, FUS5 24); both charts cover the
+airport and points 25 km north, south, east and west of it (600–790 m MSL). The PDFs were not
+compared label by label with the XML as §5 did for the other eight.
 
 The FAA re-uses a file name when it revises a chart. To see whether a chart has changed since
 2026-09-26, run `./download.sh <new date>` and compare the SHA-256 values with this table.

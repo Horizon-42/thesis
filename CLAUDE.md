@@ -161,6 +161,10 @@ Short index; the full text (with measurements) is in the named file, which loads
 - **Flight identity is `flight_key` = `id_runway_icao24_landingTime`, never `id` alone** — the
   raw harvest carries no unique flight id (`id` is the callsign). Four layers have already been
   bitten. → `flight_scenarios/CLAUDE.md`
+- **KAUS is held-out test data** (2026-09-27): its harvest lives in `trajectory_data_process/outputs/harvest-heldout/`,
+  NOT the live `outputs/harvest/` — every default airport list (`discover_k_airports()`, ts and scenario runners)
+  is "every K-airport in the live root", so moving it there makes it training data. →
+  `trajectory_data_process/CLAUDE.md` (TD27)
 - **Harvest is manifest-only**: `tracks/manifest.json` and `arrivals/manifest.json` are the
   rosters; scenario/optimizer/TS loaders follow them and never glob (globbing counts orphans).
   Evaluation's read side is likewise `summary.json`-rostered. →

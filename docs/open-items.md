@@ -9,6 +9,13 @@ change you are making go in `docs/code-health-followups.md` instead.
 
 ---
 
+- **KAUS 测试机场：数据齐了，代码还没接（2026-09-27）。** 数据在 `trajectory_data_process/outputs/harvest-heldout/KAUS`
+  （TD27），不在 live 根，默认的机场列表看不到它——这是故意的。要用它做测试时：
+  - `prior/mva.py`：`FACILITY` 加 `"KAUS": "AUS"`，`CHARTS_DATE` 改为 `2026-09-27`（五个机场的图逐字节不变）；
+    `test_prior_mva.py` 钉着五个机场。改了会进先验运行记录的元数据，所以等用户点头、别在运行中改。
+  - 读测试机场的 runner 要能指定 heldout 根（`repo_layout.arrival_manifest_path(airport, root)` 已支持参数）。
+  - 北向跑道（36L 703、36R 236）远少于 2000；要补的话找冬季北风时段下载到另一个根，再 `--merge-source` 进 heldout 根。
+
 - **观测的速度通道含有未来 7.5 s 的信息，不能当因果模型的输入（2026-09-24 核实代码；影响大小未量）。**
   `flight_scenarios.state_samples_from_track` 对每个 ADS-B 点在前后各 7.5 s（`DEFAULT_WINDOW_S = 15`）的窗口里做
   最小二乘拟合，得到速度、航迹、升降角；ts 数据集（`data/dataset.py`，默认 `reference_velocity_source = track-fit`）和

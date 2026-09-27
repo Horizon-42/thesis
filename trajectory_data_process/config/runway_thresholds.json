@@ -669,6 +669,111 @@
           ]
         }
       ]
+    },
+    "KAUS": {
+      "name": "Austin Bergstrom International Airport",
+      "lat": 30.197535,
+      "lon": -97.662015,
+      "elevation_m": 165.2,
+      "runway_width_effective_date": "2026-08-06",
+      "runways": [
+        {
+          "name": "18L/36R",
+          "width_ft": 150,
+          "length_ft": 9000,
+          "surface": "CON",
+          "thresholds": [
+            {
+              "ident": "18L",
+              "lat": 30.2038,
+              "lon": -97.657898,
+              "elevation_m": 149.96,
+              "elevation_source": "runway_end",
+              "heading_deg": 179.0,
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 692.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 492.0,
+                "chart": "00556RY18L.PDF",
+                "procedure": "RNAV (GPS) Y RWY 18L",
+                "amendment": "Amdt 3B 05SEP24",
+                "chart_effective": "03 SEP 2026 to 01 OCT 2026",
+                "note": null
+              }
+            },
+            {
+              "ident": "36R",
+              "lat": 30.1791,
+              "lon": -97.657204,
+              "elevation_m": 144.48,
+              "elevation_source": "runway_end",
+              "heading_deg": 359.0,
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 680.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 480.0,
+                "chart": "00556RY36R.PDF",
+                "procedure": "RNAV (GPS) Y RWY 36R",
+                "amendment": "Amdt 2C 05SEP24",
+                "chart_effective": "03 SEP 2026 to 01 OCT 2026",
+                "note": null
+              }
+            }
+          ]
+        },
+        {
+          "name": "18R/36L",
+          "width_ft": 150,
+          "length_ft": 12250,
+          "surface": "CON",
+          "thresholds": [
+            {
+              "ident": "18R",
+              "lat": 30.2136,
+              "lon": -97.679398,
+              "elevation_m": 165.2,
+              "elevation_source": "runway_end",
+              "heading_deg": 179.0,
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 834.0,
+                "decision_height_above_touchdown_ft": 292.0,
+                "touchdown_zone_elevation_ft": 542.0,
+                "chart": "00556RY18R.PDF",
+                "procedure": "RNAV (GPS) Y RWY 18R",
+                "amendment": "Amdt 3B 05SEP24",
+                "chart_effective": "03 SEP 2026 to 01 OCT 2026",
+                "note": null
+              }
+            },
+            {
+              "ident": "36L",
+              "lat": 30.179899,
+              "lon": -97.678497,
+              "elevation_m": 148.74,
+              "elevation_source": "runway_end",
+              "heading_deg": 359.0,
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 696.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 496.0,
+                "chart": "00556RY36L.PDF",
+                "procedure": "RNAV (GPS) Y RWY 36L",
+                "amendment": "Amdt 3B 05SEP24",
+                "chart_effective": "03 SEP 2026 to 01 OCT 2026",
+                "note": null
+              }
+            }
+          ]
+        }
+      ]
     }
   }
 }

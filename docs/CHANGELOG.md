@@ -1,5 +1,26 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-27 — 第六个机场 KAUS：只作测试数据，单独放在 `outputs/harvest-heldout/`
+
+- 用户：再下载一个机场，只当测试数据，相关数据都要有，ADS-B 每条跑道 2000 条；不能挤占训练、不能损坏现有文件，
+  在 worktree 里做（分支 `dev-heldout-kaus`）。
+- 选 KAUS（奥斯汀）：规模与五个机场相当，两条平行跑道 18L/36R、18R/36L 四端都有 LPV（CIFP 与进近图一致）；NASR 宽度、
+  得州 DOF、奥斯汀 TRACON 的 MVA、IEM METAR、USGS 1 m 地形都有。排除的：KSAT、KPDX、KOAK、KABQ、KTUS 等有跑道端没有垂直引导。
+- **单独的根目录**：`discover_k_airports()` 把 live 根下每个 K 开头的机场默认当训练机场，所以 KAUS 下载到
+  `trajectory_data_process/outputs/harvest-heldout/KAUS`（TD27，根 `CLAUDE.md` 加了一条）。
+- 结果（2026-07-29 → 09-27，240 块）：tracks 71,191，指派 20,450；每跑道 18L 18,871 / 18R 640 / 36L 703 / 36R 236——
+  这个季节几乎全是南向运行，36L、36R 连续 4 天没有新着陆被放弃，只有 18L 到 2000；arrivals v7 20,375 条，横向合格 20,271。
+  观测评估 pass 16,061 / fail 1,777 / indeterminate 2,612。
+- 静态数据：`runway_thresholds.json` 加 KAUS（生成器写到临时文件 + NASR 宽度 + 进近图最低标准，其他机场字节不变）；
+  进近图 `data/RNAV_CHARTS/KAUS`（d-TPP 2609）；METAR 7/28–9/27；MVA 新快照 `data/MVA/2026-09-27/`（`download.sh` 加 AUS，
+  原 16 个文件与 09-26 逐字节相同）；地形 4 块 USGS 1 m（1.6 GB）；前端 `airports/KAUS/`（机场、跑道、程序、图、障碍物、
+  航路点、地形瓦片、观测 CZML 1.07 GB、观测报告），`index.json` 只加了 KAUS 一条。`check-publication` 磁盘 + 服务器 0 错误
+  （用临时 5175 端口；用户 5173 上的开发服务器启动早于新目录，要重启才看得到 KAUS 的 comparison / landings）。
+- 防损坏：开工前给 live 数据做了文件清单（路径、大小、修改时间，87 万个文件），完工后比对——除 `index.json` 加的一条外，
+  变的只有另一个会话同时重发的五个机场 `training/`。地形下载器会用 `w` 覆盖 `download_manifest.csv`（一键脚本不传
+  `--manifest`），所以 KAUS 的清单单独写成 `download_manifest.KAUS.csv`，原文件哈希不变；记入 code-health-followups。
+- 没做（要用户点头）：`prior/mva.py` 的 `FACILITY` 加 KAUS 并改用 `2026-09-27`（它写进先验运行的元数据，测试也钉着五个机场）；
+  北向运行时段的补充下载；ts / 优化器读 KAUS 时指定 heldout 根的代码。
 ### 2026-09-27 — Training：模型按它自己的程序屏蔽说话，被下滑道下边界截停的句子一路显示到实时执行器（branch `dev-training-rounds`）
 
 - 用户：程序屏蔽应该在模型预测时就加上；`dev-procedure-masks` 已经让屏蔽跟着模型走（`procedure_masks.json`），只剩 Training 这一条链
