@@ -350,6 +350,27 @@ def test_the_readout_counts_ended_flights_and_splits_pairs_and_ends_between_the_
                        "ended": {"both": 0, "executor_only": 1, "recorded_only": 0}}
 
 
+def test_the_pass_line_gates_what_the_executor_adds_over_the_own_dynamics_flights():
+    """Of 20 own-dynamics flights the executor's run ends 2 and the recorded control 1 (another): the executor adds
+    5 points, over the 3 % line; a stand-in ended in the executor's run alone is not gated."""
+    from ts_transformer.experiments.traffic_labelled import EXECUTOR, RECORDED, pass_line
+    from ts_transformer.experiments.traffic_loop import Run
+
+    ended = {"t_s": 0.0, "kind": "in_trail", "relation": "same", "with": "X", "with_controlled": True}
+    rows = [{"key": f"F{k}", "group": "own dynamics"} for k in range(20)] + [{"key": "S", "group": "stand-in dynamics"}]
+    runs = {(EXECUTOR, "visual"): Run("visual", ended={"F0": ended, "F1": ended, "S": ended}),
+            (RECORDED, "visual"): Run("visual", ended={"F2": ended})}
+    line = pass_line(runs, rows)
+    assert line == {"flights": 20, "added_share": pytest.approx(0.05), "passes": False, "ended_share": pytest.approx(0.10),
+                    "recorded_ended_share": pytest.approx(0.05), "ended_in_the_executor_run_alone": 2,
+                    "ended_in_the_recorded_run_alone": 1}
+    # the recorded control ends two others: 10 % ended in each run, so the executor adds nothing and the line passes
+    runs[(RECORDED, "visual")] = Run("visual", ended={"F2": ended, "F3": ended})
+    again = pass_line(runs, rows)
+    assert (again["added_share"], again["passes"], again["ended_in_the_executor_run_alone"]) == (
+        pytest.approx(0.0), True, 2)
+
+
 def _labelled_artefact(tmp_path):
     """Four flights of one vectored approach onto the fixture's runway 09 in a tmp artefact, with a tmp arrivals
     manifest recorded as the one the signals were read from: "a", "b" entering 30 s after it (3 km behind while both
@@ -469,7 +490,8 @@ def test_the_runner_flies_the_labelled_words_ends_both_vectored_and_counts_the_o
     landing = rows["KXXX:c"]["landing_after_first_step_s"]
     assert landing["recorded"] == pytest.approx(crossing) and abs(landing["executor"] - crossing) < 30.0
     assert airport["landing_minus_recorded_s"]["n"] == 3
-    line = {"flights": 3, "ended_share": pytest.approx(2 / 3), "passes": False,
+    # both runs end a and b: the executor adds nothing, so the line passes whatever the share ended
+    line = {"flights": 3, "added_share": pytest.approx(0.0), "passes": True, "ended_share": pytest.approx(2 / 3),
             "recorded_ended_share": pytest.approx(2 / 3), "ended_in_the_executor_run_alone": 0,
             "ended_in_the_recorded_run_alone": 0}
     assert airport["pass_line"] == line and payload["pass_line"] == {**line, "by_airport": {"KXXX": line}}

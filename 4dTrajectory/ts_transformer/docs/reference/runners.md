@@ -661,10 +661,10 @@ others interpolated at the crossing), then every pair under one reading; the con
 (`lost_separation`), replayed ones never. It runs under VISUAL and IFR twice: with the flown flights (`executor`) and with
 the same flights along their recorded rows on the same steps (`recorded`: established from the artefact's capture row,
 landed at the crossing read off its own rows — the roster's landing time can fall up to 7 s before the last row). The
-pass line (design §3.4 step 0: ≤ 3 % ended) is the executor run's VISUAL ended share over the own-dynamics flights; the
-recorded control's share and the flights ended in the executor's run alone stand beside it, because the recorded traffic
-already breaks the check (the review's probe: 3.85 % pooled). Per flight: its own end, its landing from its first step
-in both runs, who ended it in each run and reading. Writes `labelled.json` (`ts-traffic-labelled-v1`) into a NEW
-directory; about 20 minutes over the five airports, CPU. Formal: `outputs/POOLED/traffic/labelled_20260928/` (`d57d3e17`):
-3.93 % of the own-dynamics flights ended under VISUAL against 2.76 % along their recorded rows (+1.17 points; KSTL +2.62) —
-the pass line fails as written, how it is read is the user's call (readout `2026-09-28_labelled_traffic.zh.md` §5).
+pass line (design §3.4 step 0; read as what the executor adds, user 2026-09-28, §9 item 17) is the executor run's VISUAL
+ended share LESS the recorded control's, over the own-dynamics flights, ≤ 3 % per airport and pooled: the recorded traffic
+already breaks the check where its controllers kept visual separation. Per flight: its own end, its landing from its
+first step in both runs, who ended it in each run and reading. Writes `labelled.json` (`ts-traffic-labelled-v2`; v1 gated
+the raw share) into a NEW directory; about 20 minutes over the five airports, CPU. Formal: `outputs/POOLED/traffic/`
+`labelled_v2_20260928/`: 3.93 % of the own-dynamics flights ended under VISUAL against 2.76 % along their recorded rows —
+the executor adds 1.17 points (KSTL 2.62, the most): passes (readout `2026-09-28_labelled_traffic.zh.md`).

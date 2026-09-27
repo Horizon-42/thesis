@@ -1,6 +1,7 @@
 """Multi-aircraft M0 step 5 (design §6.4; the "labelled words" setting, §2.2): every flight with a sentence flies its
 labelled words on its own executor, all together on the training days' scenes, judged every step as the closed loop
-judges (`traffic_loop`) — design §3.4 step 0, the second pass line: at most `PASS_SHARE` of the flown flights ended.
+judges (`traffic_loop`) — design §3.4 step 0, the second pass line: what the executor adds to the flights ended is at
+most `PASS_SHARE`.
 
 Who flies — the replay gate's rule (`autopilot.replay.group_of`): every flight with a sentence whose type the executor
 can fly, on its own dynamics or a stand-in's (reported apart), from its row 0, its stored sentence said on the executor
@@ -18,10 +19,11 @@ same steps, the same check and the same replayed aircraft, so what differs is th
 aircraft that answer for its losses: `VISUAL`, the check and the reward, and `IFR`, reported beside it (design §3.2).
 Beside each: pairs and ended flights in both runs or in one only.
 
-The pass line is the executor run's ended share under `VISUAL`, over the flights on their own dynamics — the replay
-gate's rule: a stand-in's errors are its aerodynamics, reported, never gated (`autopilot.replay`). It holds the recorded
-traffic's own losses too: beside it stand the recorded control's share over the same flights and the flights ended in
-the executor's run alone (what the executor adds).
+The pass line (user 2026-09-28, design §9 item 17) is what the executor adds: under `VISUAL`, over the flights on
+their own dynamics (the replay gate's rule: a stand-in's errors are its aerodynamics, reported, never gated,
+`autopilot.replay`), the executor run's ended share less the recorded control's — the recorded traffic already breaks
+the check where its controllers kept visual separation, which the model cannot say (design §3.2) — per airport and
+pooled. Beside it: both shares, and the flights ended in either run alone.
 
 Only training days are read. Writes ``labelled.json`` into a NEW directory; ``--airports`` limits it to a smoke test and
 says so.
@@ -64,10 +66,11 @@ from ts_transformer.prior.masks import SETS, ProcedureMasks
 from ts_transformer.prior.scene import Presence, presence
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
 
-SCHEMA = "ts-traffic-labelled-v1"
+#: v2 (2026-09-28): the pass line gates what the executor adds (`pass_line`), not its ended share.
+SCHEMA = "ts-traffic-labelled-v2"
 SPLIT = "train"
-#: Design §3.4 step 0, the second pass line (user 2026-09-27, §9 item 5): at most this share of the flights flying the
-#: labelled words ended by the check.
+#: Design §3.4 step 0, the second pass line (user 2026-09-27, §9 item 5; read as what the executor adds, 2026-09-28,
+#: §9 item 17): the flights flying the labelled words ended by the check, less the same flights along their records.
 PASS_SHARE = 0.03
 EXECUTOR, RECORDED = "executor", "recorded"
 MODES = (EXECUTOR, RECORDED)
@@ -226,13 +229,14 @@ def compared(executor: Run, control: Run) -> dict[str, Any]:
 
 def pass_line(runs: dict[tuple[str, str], Run], rows: list[dict[str, Any]]) -> dict[str, Any]:
     """The second pass line over the flights on their own dynamics (module docstring): the executor run's ended share
-    under `VISUAL`, the recorded control's beside it, and how many were ended in the executor's run alone."""
+    under `VISUAL` less the recorded control's, both shares, and how many were ended in either run alone."""
     gated = {row["key"] for row in rows if row["group"] == replay.OWN}
     executor = gated & set(runs[(EXECUTOR, VISUAL)].ended)
     control = gated & set(runs[(RECORDED, VISUAL)].ended)
     share = len(executor) / len(gated)
-    return {"flights": len(gated), "ended_share": share, "passes": share <= PASS_SHARE,
-            "recorded_ended_share": len(control) / len(gated),
+    recorded_share = len(control) / len(gated)
+    return {"flights": len(gated), "added_share": share - recorded_share, "passes": share - recorded_share <= PASS_SHARE,
+            "ended_share": share, "recorded_ended_share": recorded_share,
             "ended_in_the_executor_run_alone": len(executor - control),
             "ended_in_the_recorded_run_alone": len(control - executor)}
 
@@ -346,9 +350,9 @@ def main(argv: list[str] | None = None) -> int:
     }
     out.mkdir(parents=True)
     write_json_atomic(out / "labelled.json", payload)
-    print(f"pooled: own dynamics ended under the check {line['ended_share']:.2%} (pass line {PASS_SHARE:.0%}: "
-          f"{'passes' if line['passes'] else 'fails'}), the recorded control {line['recorded_ended_share']:.2%}; "
-          f"wrote {out / 'labelled.json'}")
+    print(f"pooled: own dynamics ended under the check {line['ended_share']:.2%}, the recorded control "
+          f"{line['recorded_ended_share']:.2%}: the executor adds {line['added_share']:.2%} (pass line {PASS_SHARE:.0%}: "
+          f"{'passes' if line['passes'] else 'fails'}); wrote {out / 'labelled.json'}")
     return 0
 
 
