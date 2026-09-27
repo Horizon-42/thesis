@@ -17,10 +17,10 @@ from unittest import mock
 import numpy as np
 import torch
 
-from aeroviz_backend.autopilot_segment import fly as fly_module, payload as payload_module
-from aeroviz_backend.autopilot_segment.backend import FLIGHT_CACHE_SIZE, AutopilotSegmentBackend
+from aeroviz_backend.autopilot_segment import fly as fly_module, payload as payload_module, single
+from aeroviz_backend.autopilot_segment.backend import AutopilotSegmentBackend
 from aeroviz_backend.autopilot_segment.errors import NotFlyable, NotListed, RequestRefused, Superseded
-from aeroviz_backend.autopilot_segment.fly import FlightContext, FlownSegment, fly_batch_until, fly_until
+from aeroviz_backend.autopilot_segment.fly import FlightContext, FlownSegment, fly_one_until, fly_until
 from aeroviz_backend.autopilot_segment.payload import (
     SCHEMA, SEGMENT_END, band_cut_by_stop, heading_facts, heading_payload, next_word_heard_s, segment_payload, track_payload,
 )
@@ -158,7 +158,7 @@ class FakeExecutor:
     def __init__(self, cycles: int, done_after: int | None = None) -> None:
         self.cycles, self.step_rows, self.count, self.heard = cycles, 2, 0, []
         self.done_after = done_after
-        self.done = torch.zeros(1, dtype=torch.bool)
+        self.done = False
 
     def now(self):
         return None
@@ -166,7 +166,7 @@ class FakeExecutor:
     def cycle(self, force, sentence_s):
         self.heard.append(float(force))
         self.count += 1
-        self.done = torch.tensor([self.done_after is not None and self.count >= self.done_after])
+        self.done = self.done_after is not None and self.count >= self.done_after
 
 
 class FakeClock:
@@ -174,12 +174,12 @@ class FakeClock:
         self.times = times
 
     def now(self, cycle, state):
-        return torch.tensor([self.times[cycle]], dtype=torch.float64)
+        return self.times[cycle]
 
 
 class FakeSentences:
     def at(self, heard_s):
-        return heard_s[0]
+        return heard_s
 
 
 class StopTest(unittest.TestCase):
@@ -219,9 +219,10 @@ class StopTest(unittest.TestCase):
 
 
 class StepperTest(unittest.TestCase):
-    """`fly_until` IS `executor.fly` up to its stop — the real executor on a synthetic downwind, base and final (the
-    executor tests' own flight): without a stop state for state, with one the whole flight cut at the first cycle that
-    starts a step the clock puts at the stop. If `fly`'s loop changes, this fails before the copy goes stale."""
+    """`fly_until` driving the single-flight executor IS `executor.fly` up to its stop — the torch executor on a synthetic
+    downwind, base and final (the executor tests' own flight): without a stop the same flight, with one the whole flight
+    cut at the first cycle that starts a step the clock puts at the stop. The same flight means the same cycles, sentence
+    times, modes and limits and states apart by round-off (`single`'s contract; `test_single_executor.py` flies more)."""
 
     def setUp(self):
         from ts_transformer.instructions.labeller.read import read_flight
@@ -229,40 +230,46 @@ class StepperTest(unittest.TestCase):
         from ts_transformer.tests import test_autopilot as executor_tests
         from ts_transformer.tests.support import fly_legs, instruction_airport, instruction_flight, instruction_spec
 
-        self.spec, geometry = instruction_spec(), instruction_airport()
+        self.spec, self.geometry = instruction_spec(), instruction_airport()
         self.words, self.params = Words(self.spec), executor_tests._params()
         self.signals = instruction_flight(*fly_legs(executor_tests.DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
-        self.grid = read_flight(self.signals, geometry, self.spec, self.words).words
-        self.physics = executor_tests._physics(self.signals, geometry)
-        self.limit = torch.tensor([len(self.grid) * self.spec.step_s * self.params.timeout_factor], dtype=torch.float64)
-
-    def clock(self, name: str):
-        from ts_transformer.autopilot.sentence import TimeClock, TrackClock
-        if name == "time":
-            return TimeClock(self.params.cycle_s)
-        rows = len(self.grid)
-        return TrackClock.of([self.signals.e_m[:rows]], [self.signals.n_m[:rows]], self.spec.step_s, self.params.cycle_s,
-                             device=torch.device("cpu"))
+        self.grid = read_flight(self.signals, self.geometry, self.spec, self.words).words
+        self.physics = executor_tests._physics(self.signals, self.geometry)
+        self.paths = executor_tests.vertical_paths(self.geometry)
+        self.limit = len(self.grid) * self.spec.step_s * self.params.timeout_factor
 
     def fly(self, name: str, stop: int | None):
-        from ts_transformer.autopilot.executor import Executor, fly
-        from ts_transformer.autopilot.sentence import Sentences
+        from ts_transformer.autopilot.executor import fly
+        from ts_transformer.autopilot.sentence import Sentences, TimeClock, TrackClock
         inputs, runways, charts, approach = self.physics
-        sentences = lambda: Sentences([self.grid], self.words, device=torch.device("cpu"))  # noqa: E731
-        whole = fly(inputs, sentences(), self.clock(name), runways, charts, approach, self.params, self.words,
-                    time_limit_s=self.limit)
-        executor = Executor(inputs, runways, charts, approach, self.params, self.words, time_limit_s=self.limit)
-        reached = fly_until(executor, sentences(), self.clock(name), self.spec.step_s, stop, NEVER)
+        rows = len(self.grid)
+        e_m, n_m = self.signals.e_m[:rows], self.signals.n_m[:rows]
+        torch_clock = (TimeClock(self.params.cycle_s) if name == "time"
+                       else TrackClock.of([e_m], [n_m], self.spec.step_s, self.params.cycle_s, device=torch.device("cpu")))
+        whole = fly(inputs, Sentences([self.grid], self.words, device=torch.device("cpu")), torch_clock, runways, charts,
+                    approach, self.params, self.words, time_limit_s=torch.tensor([self.limit], dtype=torch.float64))
+        executor = single.SingleExecutor(inputs, self.geometry, self.paths, float(approach[0]), self.params, self.words,
+                                         time_limit_s=self.limit)
+        clock = (single.TimeClock(self.params.cycle_s) if name == "time"
+                 else single.TrackClock(e_m, n_m, self.spec.step_s, self.params.cycle_s))
+        reached = fly_until(executor, single.Sentence(self.grid, self.words), clock, self.spec.step_s, stop, NEVER)
         return whole, executor.flown(), reached, executor.step_rows
 
-    def test_without_a_stop_it_is_executor_fly_state_for_state(self):
+    def assert_flown_as(self, stepped, whole, cycles, name):
+        self.assertEqual(stepped.commands.shape[1], cycles, name)
+        self.assertTrue(torch.allclose(stepped.states, whole.states[:, : cycles + 1], rtol=0.0, atol=1e-6), name)
+        self.assertTrue(torch.allclose(stepped.commands, whole.commands[:, :cycles], rtol=0.0, atol=1e-8), name)
+        self.assertTrue(torch.equal(stepped.sentence_s, whole.sentence_s[:, :cycles]), name)
+        for group in ("modes", "limits"):
+            for key, flags in getattr(whole, group).items():
+                self.assertTrue(torch.equal(getattr(stepped, group)[key], flags[:, :cycles]), f"{name}: {key}")
+
+    def test_without_a_stop_it_is_executor_fly(self):
         for name in ("time", "track"):
             whole, stepped, reached, _ = self.fly(name, None)
             self.assertFalse(reached)
-            self.assertTrue(torch.equal(stepped.states, whole.states), name)
-            self.assertTrue(torch.equal(stepped.commands, whole.commands), name)
             self.assertTrue(torch.equal(stepped.done_cycle, whole.done_cycle), name)
-            self.assertTrue(torch.equal(stepped.sentence_s, whole.sentence_s), name)
+            self.assert_flown_as(stepped, whole, whole.commands.shape[1], name)
 
     def test_with_a_stop_it_is_executor_fly_cut_where_the_clock_first_starts_a_step_there(self):
         for name in ("time", "track"):
@@ -271,71 +278,53 @@ class StepperTest(unittest.TestCase):
             self.assertTrue(reached)
             starts = row_at(whole.sentence_s[0].numpy(), self.spec.step_s)[::step_rows]
             cycle = int(np.searchsorted(starts, stop)) * step_rows
-            self.assertEqual(stepped.commands.shape[1], cycle, name)
-            self.assertTrue(torch.equal(stepped.states, whole.states[:, : cycle + 1]), name)
-            self.assertTrue(torch.equal(stepped.commands, whole.commands[:, :cycle]), name)
+            self.assert_flown_as(stepped, whole, cycle, name)
 
 
 class SetupTest(unittest.TestCase):
-    """`fly_batch_until` sets the executor up as `replay.fly_sentences` sets up `executor.fly` — the same inputs, runways,
-    charts, approach speeds, parameters, words, time limit and word clock — with its own stepper in place of `fly`."""
+    """`fly_one_until` sets the single-flight executor up as `replay.fly_sentences` sets up `executor.fly`: the flight's
+    inputs from the observed state at the segment's first step (`flight_inputs` of `series_from_row`), its airport, its
+    runways' published vertical paths, its approach speed, the time limit of its sentence, and the spec's word clock
+    over the segment's observed rows."""
 
     def test_the_executor_is_set_up_as_the_replay_sets_it_up(self):
-        calls: dict[str, list] = {"inputs": [], "sentences": [], "runways": [], "charts": []}
-
-        def recorder(name, value):
-            def record(*args, **kwargs):
-                calls[name].append((args, kwargs))
-                return value
-            return record
-
-        grid = np.arange(42).reshape(7, 6)
-        batch = SimpleNamespace(inputs=recorder("inputs", "the inputs"), readings=[SimpleNamespace(words=grid)],
-                                geometries=["the geometry"], vertical_paths=[(VerticalPath(15.0, 3.0),)], approach_ias_mps=[70.0])
-        params, words = SimpleNamespace(timeout_factor=1.5), SimpleNamespace(spec=SimpleNamespace(step_s=2.0))
+        grid = np.arange(42).reshape(7, 6) % 5
+        grid[0] = 1
+        rows = np.arange(10, dtype=np.float64)
+        signals = SimpleNamespace(e_m=100.0 * rows, n_m=-5.0 * rows)
+        context = SimpleNamespace(series="the series", geometry="the geometry", vertical_paths=(VerticalPath(15.0, 3.0),),
+                                  approach_ias_mps=70.0)
+        segment = SimpleNamespace(start_row=4)
+        params = SimpleNamespace(timeout_factor=1.5, cycle_s=1.0, word_clock="track")
+        words = SimpleNamespace(spec=SimpleNamespace(step_s=2.0))
         recorded = {}
 
         class Stop(Exception):
             pass
 
-        def record(name, stops=True):
-            def recorder(*args, **kwargs):
-                recorded[name] = (args, kwargs)
-                if stops:
-                    raise Stop
-            return recorder
+        def executor(*args, **kwargs):
+            recorded["executor"] = (args, kwargs)
+            return "the executor"
 
-        clock = mock.Mock(return_value="the clock")
-        with mock.patch.object(fly_module, "Sentences", recorder("sentences", "the sentences")), \
-                mock.patch("ts_transformer.autopilot.replay.Sentences", recorder("sentences", "the sentences")), \
-                mock.patch("ts_transformer.autopilot.replay.word_clock", clock), \
-                mock.patch.object(fly_module.Runways, "of", recorder("runways", "the runways")), \
-                mock.patch.object(fly_module.AirportCharts, "of", recorder("charts", "the charts")), \
-                mock.patch.object(fly_module, "Executor", record("executor", stops=False)), \
-                mock.patch.object(fly_module, "fly_until", record("fly_until")), \
-                mock.patch("ts_transformer.autopilot.replay.fly", record("fly")):
-            with self.assertRaises(Stop):
-                fly_batch_until(batch, params, words, None, NEVER)
-            with self.assertRaises(Stop):
-                fly_module.replay.fly_sentences(batch, params, words, device=fly_module.DEVICE)
-        (inputs, runways, charts, ias, *rest), kwargs = recorded["executor"]
-        (fly_inputs, _sentences, _clock, fly_runways, fly_charts, fly_ias, *fly_rest), fly_kwargs = recorded["fly"]
-        self.assertEqual((inputs, runways, charts), (fly_inputs, fly_runways, fly_charts))
-        self.assertTrue(torch.equal(ias, fly_ias))
-        self.assertEqual(rest, fly_rest)
-        self.assertTrue(torch.equal(kwargs["time_limit_s"], fly_kwargs["time_limit_s"]))
-        # every piece built from the same arguments on both paths (the grids compared as arrays)
-        for name in ("inputs", "runways", "charts"):
-            self.assertEqual(len(calls[name]), 2, name)
-            self.assertEqual(calls[name][0], calls[name][1], name)
-        (ours, our_kwargs), (theirs, their_kwargs) = calls["sentences"]
-        self.assertEqual(len(ours[0]), 1)
-        np.testing.assert_array_equal(ours[0][0], theirs[0][0])
-        self.assertEqual((ours[1:], our_kwargs), (theirs[1:], their_kwargs))
-        # the word clock: asked for once by each, the same way, and handed to the stepper as to `fly`
-        self.assertEqual(clock.call_args_list[0], clock.call_args_list[1])
-        self.assertEqual(recorded["fly_until"][0][1:3], ("the sentences", "the clock"))
-        self.assertEqual((_sentences, _clock), ("the sentences", "the clock"))
+        def stepper(executor_, sentence, clock, step_s, stop_steps, superseded):
+            recorded["stepper"] = (executor_, sentence, clock, step_s, stop_steps)
+            raise Stop
+
+        with mock.patch.object(fly_module, "series_from_row", lambda series, row: (series, row)), \
+                mock.patch.object(fly_module, "flight_inputs", lambda series, device: ("inputs of", series)), \
+                mock.patch.object(single, "SingleExecutor", executor), \
+                mock.patch.object(single, "Sentence", lambda grid_, words_: ("the sentence", grid_.tolist())), \
+                mock.patch.object(fly_module, "fly_until", stepper), self.assertRaises(Stop):
+            fly_one_until(context, segment, SimpleNamespace(words=grid), signals, params, words, 3, NEVER)
+        args, kwargs = recorded["executor"]
+        self.assertEqual(args, (("inputs of", [("the series", 4)]), "the geometry", (VerticalPath(15.0, 3.0),), 70.0,
+                                params, words))
+        self.assertEqual(kwargs, {"time_limit_s": 7 * 2.0 * 1.5})        # `replay.fly_sentences`' limit
+        executor_, sentence, clock, step_s, stop_steps = recorded["stepper"]
+        self.assertEqual((executor_, sentence, step_s, stop_steps), ("the executor", ("the sentence", grid.tolist()), 2.0, 3))
+        # the spec's clock over the sentence's rows of the observed flight, as `replay.word_clock` reads them
+        self.assertIsInstance(clock, single.TrackClock)
+        self.assertEqual((clock.e, clock.n), ((100.0 * rows[:7]).tolist(), (-5.0 * rows[:7]).tolist()))
 
 
 SPEC = SimpleNamespace(heading_lead_s=4.0, heading_tolerance_deg=4.5, step_s=2.0, rows_exact=lambda seconds: int(round(seconds / 2.0)))
@@ -743,14 +732,52 @@ class BackendTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, r"2 executor specs .* \(\['three', 'two'\]\); one is needed"):
                     backend.executor_for(Path(tmp) / "artefact")
 
-    def test_a_rebuilt_flight_is_kept_for_the_next_requests_and_the_oldest_let_go(self):
+    def test_a_sets_flights_are_rebuilt_together_once_and_kept(self):
         backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
-        with mock.patch("aeroviz_backend.autopilot_segment.backend.open_flight", lambda artefact, split, key, words: key):
-            self.assertEqual(backend.flight(Path("a"), "val", "K:0", None), ("K:0", False))
-            self.assertEqual(backend.flight(Path("a"), "val", "K:0", None), ("K:0", True))
-            for index in range(1, FLIGHT_CACHE_SIZE + 1):
-                backend.flight(Path("a"), "val", f"K:{index}", None)
-            self.assertEqual(backend.flight(Path("a"), "val", "K:0", None), ("K:0", False))
+        opened = []
+
+        def open_flights(artefact, split, dataset_ids, words):
+            opened.append(dataset_ids)
+            refused = {"K:2": NotFlyable("K:2 cannot be flown: no aircraft dynamics"),
+                       "K:3": ValueError("K:3: the rebuilt flight's altitude_m differs from the stored signals")}
+            return {key: refused[key] if key in refused else f"context {key}" for key in dataset_ids}
+
+        sample = {"flights": [{"datasetId": f"K:{index}"} for index in range(4)]}
+        with mock.patch("aeroviz_backend.autopilot_segment.backend.open_flights", open_flights):
+            self.assertEqual(backend.flight(Path("a"), "val", sample, "K:0", None), ("context K:0", False))
+            self.assertEqual(backend.flight(Path("a"), "val", sample, "K:1", None), ("context K:1", True))
+            self.assertEqual(opened, [("K:0", "K:1", "K:2", "K:3")])  # the whole set, once
+            # each flight answers for itself: the data cannot fly one (422), a check refused another (500, its reason)
+            with self.assertRaisesRegex(NotFlyable, "K:2 cannot be flown: no aircraft dynamics"):
+                backend.flight(Path("a"), "val", sample, "K:2", None)
+            with self.assertRaisesRegex(ValueError, "K:3: the rebuilt flight's altitude_m differs"):
+                backend.flight(Path("a"), "val", sample, "K:3", None)
+            self.assertEqual(len(opened), 1)
+            # another set (other flights, or another artefact) is rebuilt on its own
+            backend.flight(Path("a"), "val", {"flights": sample["flights"][:2]}, "K:0", None)
+            backend.flight(Path("b"), "val", sample, "K:0", None)
+            self.assertEqual(len(opened), 3)
+
+
+class OpenFlightsTest(unittest.TestCase):
+    def test_a_set_rebuilt_together_refused_as_a_whole_is_rebuilt_flight_by_flight(self):
+        """`rebuilt_each`: one `rebuild_series` over the set; when it refuses, each flight alone, so the flight that
+        fails answers for its own refusal and the others are rebuilt."""
+        calls = []
+
+        def rebuild(artefact, flights):
+            calls.append([flight for flight in flights])
+            if "bad" in flights:
+                raise ValueError("bad: the rebuilt flight's runway differs")
+            return [f"series of {flight}" for flight in flights]
+
+        with mock.patch.object(fly_module, "rebuild_series", rebuild):
+            self.assertEqual(fly_module.rebuilt_each(Path("a"), ["one", "two"]), ["series of one", "series of two"])
+            self.assertEqual(calls, [["one", "two"]])
+            each = fly_module.rebuilt_each(Path("a"), ["one", "bad", "two"])
+        self.assertEqual((each[0], each[2]), ("series of one", "series of two"))
+        self.assertIsInstance(each[1], ValueError)
+        self.assertEqual(calls[1:], [["one", "bad", "two"], ["one"], ["bad"], ["two"]])
 
     def test_a_request_names_a_column_and_an_integer_step(self):
         backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
@@ -824,7 +851,7 @@ class BackendTest(unittest.TestCase):
         sample = {"flights": [{"flightKey": "F", "datasetId": "KXXX:F"}]}
         with mock.patch.object(backend, "training_set", lambda airport, set_id: (Path("a"), "val", sample)), \
                 mock.patch.object(backend, "executor_for", lambda artefact: (Path("e"), None, {}, None)), \
-                mock.patch.object(backend, "flight", lambda artefact, split, key, words: (None, False)), \
+                mock.patch.object(backend, "flight", lambda artefact, split, sample_, key, words: (None, False)), \
                 mock.patch("aeroviz_backend.autopilot_segment.backend.fly_segment", flying):
             with self.assertRaises(Superseded):
                 backend.fly(request)
@@ -847,7 +874,7 @@ class BackendTest(unittest.TestCase):
         answers = []
         with mock.patch.object(backend, "training_set", lambda airport, set_id: (Path("a"), "val", sample)), \
                 mock.patch.object(backend, "executor_for", lambda artefact: (Path("e"), params, record, words)), \
-                mock.patch.object(backend, "flight", lambda artefact, split, key, words_: (context, False)), \
+                mock.patch.object(backend, "flight", lambda artefact, split, sample_, key, words_: (context, False)), \
                 mock.patch("aeroviz_backend.autopilot_segment.backend.fly_segment", flying), \
                 mock.patch("aeroviz_backend.autopilot_segment.backend.segment_payload", lambda *args: {}):
             for seq, sentence in enumerate((model_record(), None), start=1):
@@ -1274,7 +1301,7 @@ class ModelFlightTest(unittest.TestCase):
         sentence = model_sentence(record, MODEL_WORDS, runways=2, observed_rows=20, timeout_factor=1.5)
         asked = {}
 
-        def fly_batch_until(batch, params, words, stop_steps, superseded, *, model_limit_s=None):
+        def fly_one_until_(context, segment, reading, signals, params, words, stop_steps, superseded, *, model_limit_s=None):
             asked.update(stop_steps=stop_steps, model_limit_s=model_limit_s)
             return flown([float(c) for c in range(20)], 19), stop_steps is not None, 0.0
 
@@ -1293,8 +1320,7 @@ class ModelFlightTest(unittest.TestCase):
             asked.update(stop_finals=finals, stop_grid=grid)
             return stop
 
-        with mock.patch.object(fly_module, "segment_batch", lambda *args: None), \
-                mock.patch.object(fly_module, "fly_batch_until", fly_batch_until), \
+        with mock.patch.object(fly_module, "fly_one_until", fly_one_until_), \
                 mock.patch.object(fly_module, "judge", judge), \
                 mock.patch.object(fly_module, "glidepath_stop", glidepath_stop), \
                 mock.patch.object(fly_module, "read_flown", lambda *args: admitted):
@@ -1359,11 +1385,9 @@ class ModelFlightTest(unittest.TestCase):
         self.assertEqual(result.segment.row, 10)
 
     def test_the_drive_is_the_time_clock_under_the_given_limit(self):
-        """`fly_batch_until` for a model: its stepper handed the time clock (the spec's word clock not even asked for)
+        """`fly_one_until` for a model: its stepper handed the time clock (the spec's word clock not even asked for)
         and the executor the limit given."""
-        grid = np.arange(42).reshape(7, 6)
-        batch = SimpleNamespace(inputs=lambda *args, **kwargs: "the inputs", readings=[SimpleNamespace(words=grid)],
-                                geometries=["the geometry"], vertical_paths=[(VerticalPath(15.0, 3.0),)], approach_ias_mps=[70.0])
+        context = SimpleNamespace(series="the series", geometry="the geometry", vertical_paths=(), approach_ias_mps=70.0)
         params, words = SimpleNamespace(timeout_factor=1.5, cycle_s=1.0), SimpleNamespace(spec=SimpleNamespace(step_s=2.0))
         recorded = {}
 
@@ -1374,31 +1398,30 @@ class ModelFlightTest(unittest.TestCase):
             recorded["executor"] = kwargs
             return SimpleNamespace()
 
-        def stepper(executor_, sentences, clock, *args):
+        def stepper(executor_, sentence, clock, *args):
             recorded["clock"] = clock
             raise Stop
 
-        clock = mock.Mock(side_effect=AssertionError("the spec's word clock asked for"))
-        with mock.patch.object(fly_module, "Sentences", lambda *args, **kwargs: "the sentences"), \
-                mock.patch("ts_transformer.autopilot.replay.word_clock", clock), \
-                mock.patch.object(fly_module.Runways, "of", lambda *args, **kwargs: "the runways"), \
-                mock.patch.object(fly_module.AirportCharts, "of", lambda *args, **kwargs: "the charts"), \
-                mock.patch.object(fly_module, "Executor", executor), \
+        with mock.patch.object(fly_module, "series_from_row", lambda series, row: series), \
+                mock.patch.object(fly_module, "flight_inputs", lambda series, device: "the inputs"), \
+                mock.patch.object(single, "SingleExecutor", executor), \
+                mock.patch.object(single, "Sentence", lambda *args: "the sentence"), \
+                mock.patch.object(single, "word_clock", mock.Mock(side_effect=AssertionError("the spec's clock asked for"))), \
                 mock.patch.object(fly_module, "fly_until", stepper), self.assertRaises(Stop):
-            fly_batch_until(batch, params, words, None, NEVER, model_limit_s=36.0)
-        self.assertEqual(float(recorded["executor"]["time_limit_s"][0]), 36.0)
-        self.assertIsInstance(recorded["clock"], fly_module.TimeClock)
+            fly_one_until(context, SimpleNamespace(start_row=8), SimpleNamespace(words=np.zeros((7, 6))),
+                          SimpleNamespace(e_m=np.zeros(20), n_m=np.zeros(20)), params, words, None, NEVER, model_limit_s=36.0)
+        self.assertEqual(recorded["executor"]["time_limit_s"], 36.0)
+        self.assertIsInstance(recorded["clock"], single.TimeClock)
 
 
 class FreeGenerationTest(unittest.TestCase):
-    """A model's sentence flown on the backend's drive — `fly_until` with the time clock, the words said as a grid —
-    IS the flight the free generation flew while the model said them (`prior_free_generation.speak_and_fly`, its own
-    loop, a scripted speaker in the prior's place): the real executor on the executor tests' synthetic downwind, base
-    and final, state for state. The export writes those words; the frontend re-flies them."""
+    """A model's sentence flown on the backend's drive — `fly_until` driving the single-flight executor with the time
+    clock, the words said as a grid — IS the flight the free generation flew while the model said them
+    (`prior_free_generation.speak_and_fly`, its own loop and the torch executor, a scripted speaker in the prior's
+    place) on the executor tests' synthetic downwind, base and final: the same cycles, sentence times, modes and limits,
+    the states apart by round-off. The export writes those words; the frontend re-flies them."""
 
     def test_the_backends_drive_flies_the_free_generations_flight(self):
-        from ts_transformer.autopilot.executor import Executor
-        from ts_transformer.autopilot.sentence import Sentences, TimeClock
         from ts_transformer.experiments import prior_free_generation as generation
         from ts_transformer.instructions.labeller.read import read_flight
         from ts_transformer.instructions.words import Words
@@ -1433,17 +1456,17 @@ class FreeGenerationTest(unittest.TestCase):
                                                           procedure_masks=ProcedureMasks.none())
         step_rows = int(round(spec.step_s / params.cycle_s))
         grid = said[0][: generation.steps_said(spoken, 0, said.shape[1], step_rows)]
-        executor = Executor(inputs, runways, charts, approach, params, words,
-                            time_limit_s=torch.tensor([limit], dtype=torch.float64))
-        self.assertFalse(fly_until(executor, Sentences([grid], words, device=torch.device("cpu")), TimeClock(params.cycle_s),
-                                   spec.step_s, None, NEVER))
+        executor = single.SingleExecutor(inputs, geometry_, executor_tests.vertical_paths(geometry_), float(approach[0]),
+                                         params, words, time_limit_s=limit)
+        self.assertFalse(fly_until(executor, single.Sentence(grid, words), single.TimeClock(params.cycle_s), spec.step_s,
+                                   None, NEVER))
         again = executor.flown()
         self.assertTrue(torch.equal(again.done_cycle, spoken.done_cycle))
         # through the cycle the flight ended in — all the export keeps: the generation's loop flies out the rest of that
-        # step, its cycles after the end, which the stepper does not
+        # step, its cycles after the end, which the stepper does not; the states apart by round-off (`single`'s contract)
         cycles = int(spoken.done_cycle[0]) + 1
-        self.assertTrue(torch.equal(again.states[:, : cycles + 1], spoken.states[:, : cycles + 1]))
-        self.assertTrue(torch.equal(again.commands[:, :cycles], spoken.commands[:, :cycles]))
+        self.assertTrue(torch.allclose(again.states[:, : cycles + 1], spoken.states[:, : cycles + 1], rtol=0.0, atol=1e-6))
+        self.assertTrue(torch.allclose(again.commands[:, :cycles], spoken.commands[:, :cycles], rtol=0.0, atol=1e-8))
         self.assertTrue(torch.equal(again.sentence_s[:, :cycles], spoken.sentence_s[:, :cycles]))
         # and what the judge reads of the flight besides its states: the modes and the limits that bound, cycle by cycle
         for name in (*again.modes, *again.limits):

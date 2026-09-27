@@ -69,7 +69,7 @@ class AutopilotSegmentBackend:
         # each Training set's flights, rebuilt together the first time the set is asked for (`open_flights`: one read of
         # the split's signals, the airports' procedure files and arrival manifests, ~2 s for a set of 40 where one flight
         # alone took 1.5–2 s): keyed by the artefact, the split and the set's flights
-        self._sets: dict[tuple[Path, str, tuple[str, ...]], dict[str, FlightContext | NotFlyable]] = {}
+        self._sets: dict[tuple[Path, str, tuple[str, ...]], dict[str, FlightContext | NotFlyable | ValueError]] = {}
         self._files: dict[Path, tuple[int, dict[str, Any]]] = {}
         # the procedure's masks built for an artefact's airports (the published finals are read once)
         self._masks: dict[tuple[Path, tuple[str, ...]], ProcedureMasks] = {}
@@ -143,14 +143,15 @@ class AutopilotSegmentBackend:
     def flight(self, artefact: Path, split: str, sample: dict[str, Any], dataset_id: str, words: Words
                ) -> tuple[FlightContext, bool]:
         """The flight rebuilt — with every other flight of its set, the first time the set is asked for — and whether
-        it was kept from an earlier request; a flight the data cannot fly is refused (`NotFlyable`)."""
+        it was kept from an earlier request; a flight the data cannot fly is refused (`NotFlyable`), one a check refused
+        with that check's reason (`ValueError`, as when it was opened alone)."""
         key = (artefact, split, tuple(item["datasetId"] for item in sample["flights"]))
         kept = key in self._sets
         if not kept:
             self._sets[key] = open_flights(artefact, split, key[2], words)
         context = self._sets[key][dataset_id]
-        if isinstance(context, NotFlyable):
-            raise NotFlyable(str(context))
+        if isinstance(context, (NotFlyable, ValueError)):
+            raise type(context)(str(context))
         return context, kept
 
     def _claim(self, client: str, seq: int) -> None:

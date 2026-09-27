@@ -16,9 +16,9 @@ and the same crossing, and the flown tracks agree to the round-off the compariso
 (`aeroviz_backend/tests/test_single_executor.py`; the fleet check `check_single`).
 
 PINNED TO ITS SOURCE. The executor spec's hash does not cover this module (it would make every stored spec refuse);
-instead this module records the logic of every file it mirrors (`MIRRORED_SOURCE_SHA256`: the executor spec's files —
-`autopilot/` and its direct imports, `spec.executor_source_files` — and the dynamics modules the rollout reaches,
-`MIRRORED_DYNAMICS`), and `require_mirrored_source` refuses to fly when the code on disk is another: a change to any of
+instead this module records the logic of every file it mirrors (`MIRRORED_SOURCE_SHA256` over `mirrored_source_files`:
+the executor spec's files — `autopilot/` and its direct imports, `spec.executor_source_files` — and every module named in
+`MIRRORED_MODULES`), and `require_mirrored_source` refuses to fly when the code on disk is another: a change to any of
 them is a change here too, and the pin is updated with it. ``spec.logic`` reads each file, so a comment or docstring
 never moves the pin.
 
@@ -33,6 +33,7 @@ import hashlib
 import importlib.util
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Sequence
 
 import numpy as np
@@ -46,7 +47,7 @@ from aerodynamic_model.torch_scaled_transport_chart_dynamics import SCALED_TRANS
 from geokit import METRES_PER_DEG_LAT, WGS84_A, WGS84_E2
 from ts_transformer.autopilot.executor import LIMITS, MODES, Flown
 from ts_transformer.autopilot.flights import FlightInputs
-from ts_transformer.autopilot.inverse import LOAD_FACTOR_MAX, LOAD_FACTOR_MIN
+from ts_transformer.autopilot.inverse import BANK_MAX_RAD, LOAD_FACTOR_MAX, LOAD_FACTOR_MIN
 from ts_transformer.autopilot.lateral import capture_planning_rate_deg_s
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
@@ -61,33 +62,54 @@ from ts_transformer.instructions.words import (
 )
 from ts_transformer.outputs.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION
 
-#: The dynamics modules the rollout reaches beyond the executor spec's own files (which reach them through
-#: `outputs.dynamics.rollout`): what `Plant` mirrors.
-MIRRORED_DYNAMICS = (
+#: Every module whose logic this one re-implements, named whether or not the executor spec's files already hold it (a
+#: module the laws stop importing directly would otherwise leave the pin unnoticed): the cycle, the laws, the inverse,
+#: the frame, the words and clocks, the stall floor, and the dynamics the rollout reaches (`Plant`). Constants are
+#: imported, not mirrored: a module read only for one (`aerodynamic_model.common`) is not pinned.
+MIRRORED_MODULES = (
+    "ts_transformer.autopilot.executor",
+    "ts_transformer.autopilot.lateral",
+    "ts_transformer.autopilot.vertical",
+    "ts_transformer.autopilot.speed",
+    "ts_transformer.autopilot.inverse",
+    "ts_transformer.autopilot.frame",
+    "ts_transformer.autopilot.sentence",
+    "ts_transformer.autopilot.replay",
+    "ts_transformer.autopilot.plant",
+    "ts_transformer.outputs.constraints.speed_floor",
+    "ts_transformer.outputs.dynamics.rollout",
     "ts_transformer.outputs.dynamics.backends",
     "aerodynamic_model.torch_piecewise_rollout",
     "aerodynamic_model.torch_scaled_transport_chart_dynamics",
     "aerodynamic_model.torch_transport_chart_dynamics",
     "aerodynamic_model.torch_dynamics",
-    "aerodynamic_model.common",
 )
 #: The logic of every file this module mirrors, when it was written (`mirrored_source_sha256`).
-MIRRORED_SOURCE_SHA256 = "aaa5156a39d0e2b976073fc6caf06dda2151d128a2bf676991264f8b882969d1"
+MIRRORED_SOURCE_SHA256 = "23e5a02ad41293044aeeb327b8b926e1a195a0633839ea414286a2005e41c422"
 
 _UNITS = SCALED_TRANSPORT_CHART_REFERENCE_UNITS
 _DT_CAP = EXECUTOR_DYNAMICS.control_rollout_integrator_dt_s
 
 
-def mirrored_source_sha256() -> str:
-    """sha256 over the logic (`spec.logic`) of the executor spec's files (`spec.executor_source_files`, by their labels)
-    and of `MIRRORED_DYNAMICS`, in that order — the digest `spec.executor_source_sha256` takes, over more files."""
+def mirrored_source_files() -> list[tuple[str, Path]]:
+    """What the pin covers, as ``(label, file)``: the executor spec's files (`spec.executor_source_files`: `autopilot/`
+    and every repository module it imports directly — any change there is a new executor), then every one of
+    `MIRRORED_MODULES` not among them, by module name."""
     files = list(executor_source_files())
-    labels = {label for label, _ in files}
-    for name in MIRRORED_DYNAMICS:
-        if name not in labels:
-            files.append((name, importlib.util.find_spec(name).origin))
+    held = {path.resolve() for _, path in files}
+    for name in MIRRORED_MODULES:
+        path = Path(importlib.util.find_spec(name).origin).resolve()
+        if path not in held:
+            files.append((name, path))
+            held.add(path)
+    return files
+
+
+def mirrored_source_sha256() -> str:
+    """sha256 over the logic (`spec.logic`) of `mirrored_source_files`, in order — the digest
+    `spec.executor_source_sha256` takes, over more files."""
     digest = hashlib.sha256()
-    for label, path in files:
+    for label, path in mirrored_source_files():
         with open(path, encoding="utf-8") as handle:
             digest.update(label.encode("utf-8") + b"\0" + logic(handle.read()).encode("utf-8") + b"\0")
     return digest.hexdigest()
@@ -117,7 +139,14 @@ def _clamp(x: float, low: float = -math.inf, high: float = math.inf) -> float:
 
 
 def _sign(x: float) -> float:
-    return x if x != x else (1.0 if x > 0.0 else (-1.0 if x < 0.0 else 0.0))
+    return 1.0 if x > 0.0 else (-1.0 if x < 0.0 else 0.0)
+
+
+def _divide(a: float, b: float) -> float:
+    """``a / b`` as IEEE (and torch) divide: by zero is ±inf, or NaN for 0 / 0."""
+    if b != 0.0:
+        return a / b
+    return math.nan if a == 0.0 or a != a else math.copysign(math.inf, a) * math.copysign(1.0, b)
 
 
 def _remainder(x: float, m: float) -> float:
@@ -263,8 +292,8 @@ class Plant:
     def step(self, state: Sequence[float], command: Sequence[float], duration_s: float) -> tuple[float, ...]:
         fraction, bank, load = command
         thrust = fraction * self.max_thrust_n
+        lat, lon, alt, speed, psi, gamma, mass = state
         try:
-            lat, lon, alt, speed, psi, gamma, mass = state
             cos_gamma = math.cos(gamma)
             chart = ((math.radians(lon) - self.lon0_rad) * WGS84_A * math.cos(self.lat0_rad),
                      (math.radians(lat) - self.lat0_rad) * WGS84_A, alt - self.alt0_m,
@@ -273,14 +302,15 @@ class Plant:
             # `torch_piecewise_rollout._piecewise_schedule`: ceil(duration / dt_cap) steps of min(the rest, dt_cap)
             for local in range(math.ceil(duration_s / _DT_CAP)):
                 s = self._rk4(s, thrust, bank, load, _min(_clamp(duration_s - local * _DT_CAP, 0.0), _DT_CAP))
-            east, north, up, ve, vn, vu, mass = (s[i] * _UNITS[i] for i in range(7))
+            east, north, up, ve, vn, vu, mass_end = (s[i] * _UNITS[i] for i in range(7))
             horizontal = math.sqrt(ve * ve + vn * vn)
             return (self.lat0_deg + math.degrees(north / WGS84_A),
                     self.lon0_deg + math.degrees(east / (WGS84_A * math.cos(self.lat0_rad))), self.alt0_m + up,
-                    math.sqrt(horizontal * horizontal + vu * vu), math.atan2(vn, ve), math.atan2(vu, horizontal), mass)
+                    math.sqrt(horizontal * horizontal + vu * vu), math.atan2(vn, ve), math.atan2(vu, horizontal), mass_end)
         except (ArithmeticError, ValueError):
-            # the dynamics left the reals: the torch rollout writes NaN, and the flight is done
-            return (math.nan,) * 7
+            # the dynamics left the reals: the torch rollout writes NaN (the mass, whose rate is zero, stays), and the
+            # flight is done
+            return (math.nan,) * 6 + (mass,)
 
 
 # ---- the words said, and the clocks they are said on (`sentence`)
@@ -351,7 +381,7 @@ class DistanceClock:
         self.last = (state.e_m, state.n_m)
         index = min(max(bisect.bisect_right(self.path, self.flown) - 1, 0), len(self.path) - 2)
         low, high = self.path[index], self.path[index + 1]
-        time = (index + _clamp((self.flown - low) / (high - low), 0.0, 1.0)) * self.step_s
+        time = (index + _clamp(_divide(self.flown - low, high - low), 0.0, 1.0)) * self.step_s
         end = (self.rows - 1) * self.step_s
         if time >= end:
             time = end + self.beyond_s
@@ -656,6 +686,8 @@ class SingleExecutor:
         self.lateral, self.vertical = Lateral(params, words), Vertical(params, words)
         self.speed = Speed(approach_ias_mps, words)
         self.bank_cap_rad = math.radians(spec.turn_bank_max_deg)
+        if not 0.0 < self.bank_cap_rad <= BANK_MAX_RAD:
+            raise ValueError(f"bank cap {spec.turn_bank_max_deg:.1f}° outside (0, {math.degrees(BANK_MAX_RAD):.0f}°]")
         self.cycles = int(math.ceil(time_limit_s / params.cycle_s))
         self.step_rows = int(round(spec.step_s / params.cycle_s))
         self.state = tuple(inputs.initial_state[0].tolist())
@@ -721,11 +753,11 @@ class SingleExecutor:
         for name in MODES:
             self.modes[name].append(modes[name])
 
-        finite = all(math.isfinite(value) for value in self.state)
         after = self.chart.read(self.state)
-        before_after = relative(after, runway)[0] if finite else math.nan
+        before_after = relative(after, runway)[0]
         finished = ((self.lateral.captured and before_after <= 0.0) or (before_after > 0.0 and after.height_m < runway.elevation_m)
-                    or not finite or after.speed_mps <= 0.0 or (cycle + 1) * params.cycle_s >= self.time_limit_s)
+                    or not all(math.isfinite(value) for value in self.state) or after.speed_mps <= 0.0
+                    or (cycle + 1) * params.cycle_s >= self.time_limit_s)
         if finished and not self.done:
             self.done_cycle = cycle
         self.done = self.done or finished

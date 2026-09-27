@@ -1,9 +1,11 @@
 """The single-flight executor against the batched torch executor on the Training sets' own flights (the results contract
 of `single`, the user's choice of 2026-09-27): every segment the live executor can fly, answered twice through the
 backend's own path (`fly.fly_segment`) — once as it now flies (`fly.fly_one_until`, the single-flight executor), once
-with `torch_fly_one_until` (the backend's drive before, `executor.Executor` on a batch of one) — and compared: the same
-refusal or none, the same outcome, end row, crossing runway and verdict for every word, the same stop; how far apart
-the flown states are, and how long each took.
+with `torch_fly_one_until` (the backend's drive before, `executor.Executor` on a batch of one) — and compared on
+everything the contract names: the same refusal or none; the same cycles, sentence times, modes and limits every cycle
+and the same wanted rates (to `ROUNDOFF`); the same outcome, end row, crossing runway, stop, the verdict's limit counts
+and every word's verdict and check numbers (floats to `ROUNDOFF`); the flown states no further apart than
+`STATE_BOUND_M` — and how long each took.
 
     python -m aeroviz_backend.autopilot_segment.check_single --out <directory>
         [--airport KRDU …] [--models base landing_r01 augmented_r07] [--limit N]
@@ -18,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -33,19 +34,22 @@ from ts_transformer.autopilot.frame import AirportCharts
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.sentence import Sentences, TimeClock, row_at
 from ts_transformer.data.dataset import series_from_row
-from ts_transformer.instructions import training_files
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import COMPARISON_AIRPORTS_ROOT
 
 from aeroviz_backend.autopilot_segment import fly as fly_module
 from aeroviz_backend.autopilot_segment.backend import AutopilotSegmentBackend
-from aeroviz_backend.autopilot_segment.errors import NotFlyable, RequestRefused, Superseded
+from aeroviz_backend.autopilot_segment.errors import NotFlyable, RequestRefused
 from aeroviz_backend.autopilot_segment.segment import model_sentence
 
 CPU = torch.device("cpu")
 AIRPORTS = ("KMSY", "KRDU", "KSJC", "KSMF", "KSTL")
 MODELS = ("base", "landing_r01", "augmented_r07")
+#: Round-off: how far apart two floats of the two executors may be (wanted rates, a verdict's check numbers).
+ROUNDOFF = 1e-6
+#: How far apart two flown states may be, metres, horizontally or vertically.
+STATE_BOUND_M = 1e-6
 
 
 def never() -> bool:
@@ -98,11 +102,24 @@ def answer(context, params, words, column, row, model=None, masks=None, *, refer
         return {"refused": f"{type(error).__name__}: {error}"}
     finally:
         fly_module.fly_one_until = saved
-    verdict = result.verdict
-    return {"refused": None, "outcome": verdict.outcome, "end_row": verdict.end_row,
-            "crossing": verdict.crossing, "words": replay.word_results(verdict), "reached": result.reached_end,
-            "glidepath_step": result.glidepath_step, "states": result.flown.states[0].numpy(),
-            "cycles": int(result.flown.commands.shape[1]), "fly_s": result.fly_s}
+    verdict, flown = result.verdict, result.flown
+    return {"refused": None, "outcome": verdict.outcome, "end_row": verdict.end_row, "crossing": verdict.crossing,
+            "words": replay.word_results(verdict), "checks": verdict.words, "verdict_limits": verdict.limits,
+            "reached": result.reached_end, "glidepath_step": result.glidepath_step, "states": flown.states[0].numpy(),
+            "cycles": int(flown.commands.shape[1]), "sentence_s": flown.sentence_s[0].numpy(),
+            "wanted": flown.wanted[0].numpy(), "flags": {**flown.modes, **flown.limits}, "fly_s": result.fly_s}
+
+
+def same(a: Any, b: Any) -> bool:
+    """Equal, floats to `ROUNDOFF` (NaN equal to NaN), through dicts, lists and tuples."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(same(a[key], b[key]) for key in a)
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(same(x, y) for x, y in zip(a, b))
+    if isinstance(a, float) or isinstance(b, float):
+        return (isinstance(a, (int, float)) and isinstance(b, (int, float))
+                and (abs(a - b) <= ROUNDOFF or (a != a and b != b)))
+    return a == b
 
 
 def compare(ours: dict[str, Any], theirs: dict[str, Any], chart) -> dict[str, Any]:
@@ -110,17 +127,26 @@ def compare(ours: dict[str, Any], theirs: dict[str, Any], chart) -> dict[str, An
     if ours["refused"] or theirs["refused"]:
         return {"differs": [] if ours["refused"] == theirs["refused"] else ["refusal"], "refused": True}
     differs = [key for key in ("outcome", "end_row", "words", "reached", "glidepath_step", "cycles") if ours[key] != theirs[key]]
+    differs += [key for key in ("checks", "verdict_limits") if not same(ours[key], theirs[key])]
     a, b = ours["crossing"], theirs["crossing"]
     if (a is None) != (b is None) or (a is not None and a["runway_index"] != b["runway_index"]):
         differs.append("crossing")
+    if ours["cycles"] == theirs["cycles"]:
+        if not np.allclose(ours["sentence_s"], theirs["sentence_s"], rtol=0.0, atol=ROUNDOFF):
+            differs.append("sentence_s")
+        if not np.allclose(ours["wanted"], theirs["wanted"], rtol=0.0, atol=ROUNDOFF, equal_nan=True):
+            differs.append("wanted")
+        differs += [name for name, flags in theirs["flags"].items() if not torch.equal(ours["flags"][name], flags)]
     rows = min(len(ours["states"]), len(theirs["states"]))
     s, t = ours["states"][:rows], theirs["states"][:rows]
     finite = np.isfinite(s).all(axis=1) & np.isfinite(t).all(axis=1)
     e1, n1 = chart(s[finite])
     e2, n2 = chart(t[finite])
-    return {"differs": differs, "refused": False,
-            "horizontal_m": float(np.max(np.hypot(e1 - e2, n1 - n2))) if finite.any() else 0.0,
-            "vertical_m": float(np.max(np.abs(s[finite, 2] - t[finite, 2]))) if finite.any() else 0.0,
+    horizontal = float(np.max(np.hypot(e1 - e2, n1 - n2))) if finite.any() else 0.0
+    vertical = float(np.max(np.abs(s[finite, 2] - t[finite, 2]))) if finite.any() else 0.0
+    if max(horizontal, vertical) > STATE_BOUND_M or not np.array_equal(np.isfinite(s).all(axis=1), np.isfinite(t).all(axis=1)):
+        differs.append("states")
+    return {"differs": differs, "refused": False, "horizontal_m": horizontal, "vertical_m": vertical,
             "crossing_m": (None if a is None or b is None else
                            max(abs(a["cross_m"] - b["cross_m"]), abs(a["height_m"] - b["height_m"]))),
             "fly_s": (ours["fly_s"], theirs["fly_s"]), "cycles": ours["cycles"]}

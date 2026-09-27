@@ -16,8 +16,9 @@ A MODEL's word (`segment.model_segment`) is flown as the prior's free generation
 (`experiments.prior_free_generation.speak_and_fly`): from the observed state at the sentence's first step, each word
 heard at the step it was said (the time clock: `ClosedLoop.step` tells step k's words on its first cycle), under the
 same time limit — the observed flight's remaining time from that step × the spec's timeout factor (`limits_s`) — and
-judged against the runway the model points at, not the observed one. The executor is deterministic, so the flight is
-the exported sample's own, which the frontend checks point for point. A sentence spoken under the procedure's altitudes
+judged against the runway the model points at, not the observed one. The executor is deterministic and the single-flight
+executor flies the torch executor's flight to round-off, so the flight is the exported sample's own, which the frontend
+checks point for point. A sentence spoken under the procedure's altitudes
 ends where its free generation ended it: at the first flown step whose end state sank more than the track tolerance below
 the glidepath lower edge of the runway in force (`glidepath_stop`, the readout's rule read on the flown record, as the
 readout reads it — after the flight); the flight is cut there and its answer's outcome is `BELOW_GLIDEPATH`.
@@ -75,13 +76,14 @@ class FlightContext:
 
 
 def open_flights(artefact: Path, split: str, dataset_ids: Sequence[str], words: Words
-                 ) -> dict[str, FlightContext | NotFlyable]:
+                 ) -> dict[str, FlightContext | NotFlyable | ValueError]:
     """Labelled flights of ``artefact`` (a Training set's), each with its stored signals, the flight rebuilt from the
     data plane and checked against them (`rebuild_series`), the labeller's reading, which must give the stored sentence,
     and the offset that gives its heights back as the aircraft reported them — what they share read once: the split's
     signals and sentences, the candidates, each airport's published vertical paths and height offsets, and one
-    `rebuild_series` over them all (one read of each arrival manifest). A flight the data cannot fly is its
-    `NotFlyable`."""
+    `rebuild_series` over them all (one read of each arrival manifest). Each flight answers for itself, as one opened
+    alone did: a flight the data cannot fly is its `NotFlyable`, one a check refuses its `ValueError` — the others open
+    (`rebuilt_each`)."""
     spec = words.spec
     signals = load_signals(artefact, split)
     positions: dict[str, list[int]] = {}
@@ -90,36 +92,61 @@ def open_flights(artefact: Path, split: str, dataset_ids: Sequence[str], words: 
     sentences = load_sentences(artefact, split, spec)
     stored = {int(value): k for k, value in enumerate(sentences["signal_index"])}
     geometries = load_candidates(artefact)
-    flights, readings = [], []
+    contexts: dict[str, FlightContext | NotFlyable | ValueError] = {}
+    read: list[tuple[FlightSignals, Reading]] = []
     for dataset_id in dataset_ids:
-        if dataset_id not in positions or len(positions[dataset_id]) != 1:
-            raise ValueError(f"{dataset_id} is not a labelled {split} flight of {artefact.name}")
-        (index,) = positions[dataset_id]
-        if index not in stored:
-            raise ValueError(f"{dataset_id} has no stored sentence in {artefact.name}")
-        flight = signals[index]
-        reading = read_flight(flight, geometries[flight.airport], spec, words)
-        require_stored_sentence(dataset_id, reading, stored_sentence(sentences, stored[index]))
-        flights.append(flight)
-        readings.append(reading)
-    series = rebuild_series(artefact, flights)
-    airports = sorted({flight.airport for flight in flights})
+        try:
+            if dataset_id not in positions or len(positions[dataset_id]) != 1:
+                raise ValueError(f"{dataset_id} is not a labelled {split} flight of {artefact.name}")
+            (index,) = positions[dataset_id]
+            if index not in stored:
+                raise ValueError(f"{dataset_id} has no stored sentence in {artefact.name}")
+            flight = signals[index]
+            reading = read_flight(flight, geometries[flight.airport], spec, words)
+            require_stored_sentence(dataset_id, reading, stored_sentence(sentences, stored[index]))
+        except ValueError as error:
+            contexts[dataset_id] = error
+            continue
+        read.append((flight, reading))
+    airports = sorted({flight.airport for flight, _ in read})
     paths = {airport: published_vertical_paths(geometries[airport]) for airport in airports}
     offsets = {airport: runway_hae_minus_msl_m(artefact, airport, arrival_manifest_path(airport)) for airport in airports}
-    contexts: dict[str, FlightContext | NotFlyable] = {}
-    for flight, reading, rebuilt in zip(flights, readings, series):
+    for (flight, reading), rebuilt in zip(read, rebuilt_each(artefact, [flight for flight, _ in read])):
+        if isinstance(rebuilt, ValueError):
+            contexts[flight.dataset_id] = rebuilt
+            continue
         group = replay.group_of(rebuilt)
         if group not in (replay.OWN, replay.STAND_IN):
             contexts[flight.dataset_id] = NotFlyable(f"{flight.dataset_id} cannot be flown: {group}")
             continue
         geometry = geometries[flight.airport]
-        observed = admit(flight, geometry, spec)
+        try:
+            observed = admit(flight, geometry, spec)
+        except ValueError as error:
+            contexts[flight.dataset_id] = error
+            continue
         contexts[flight.dataset_id] = FlightContext(
             signals=flight, series=rebuilt, reading=reading, geometry=geometry, vertical_paths=paths[flight.airport],
             group=group, approach_ias_mps=replay.flight_approach_ias_mps(rebuilt, group),
             observed_track_deg=observed.smoothed.track_deg, observed_distance_m=observed.smoothed.distance_m,
             hae_minus_msl_m=offsets[flight.airport][flight.runway])
     return contexts
+
+
+def rebuilt_each(artefact: Path, flights: list[FlightSignals]) -> list[FlightSeries | ValueError]:
+    """Each flight rebuilt (`rebuild_series`): all in one call — one read of each arrival manifest — unless that call
+    refuses one of them; then each alone, so the flight that fails answers for its refusal and the rest are flown."""
+    try:
+        return list(rebuild_series(artefact, flights))
+    except ValueError:
+        pass
+    each: list[FlightSeries | ValueError] = []
+    for flight in flights:
+        try:
+            each.extend(rebuild_series(artefact, [flight]))
+        except ValueError as error:
+            each.append(error)
+    return each
 
 
 def fly_until(executor: single.SingleExecutor, sentence: single.Sentence,
