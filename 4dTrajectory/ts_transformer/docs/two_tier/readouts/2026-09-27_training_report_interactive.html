@@ -1,0 +1,1147 @@
+<title>从 base 到 augmented</title>
+<meta name="description" content="两层进近模型的一次完整训练：预训练与两段后训练。交互式实验报告，边读边去数据文件里取数。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700&display=swap">
+<style>
+:root{
+  --ground:#F4F6F9; --surface:#FFFFFF; --sunk:#EBEEF3;
+  --ink:#152033; --ink-2:#4B566A; --ink-3:#7A8599;
+  --rule:#D6DCE5; --rule-2:#C3CAD6;
+  --accent:#A11F6C; --accent-soft:#F7E5EF;
+  --series-a:#2457A4; --series-b:#A11F6C; --series-c:#7A8599;
+  --ok:#1C7348; --ok-soft:#E2F2E9;
+  --bad:#B02A1D; --bad-soft:#FAE8E5;
+  --warn:#8F5712; --warn-soft:#FBEFD9;
+  --slot:#FFF3CC; --slot-ink:#5E4600;
+  --note-w:#EDF1F7; --note-r:#F3EEF6;
+  --shadow:0 1px 0 rgba(21,32,51,.04), 0 6px 18px -10px rgba(21,32,51,.18);
+  --serif:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --sans:"IBM Plex Sans","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --ground:#0E1420; --surface:#151D2B; --sunk:#1B2536;
+    --ink:#E5E9F0; --ink-2:#A3ADBE; --ink-3:#7C8699;
+    --rule:#29344A; --rule-2:#364259;
+    --accent:#E27AB6; --accent-soft:#3A1D30;
+    --series-a:#7FA9EC; --series-b:#E27AB6; --series-c:#7C8699;
+    --ok:#5BCB90; --ok-soft:#15342A;
+    --bad:#F2877D; --bad-soft:#3C1D1B;
+    --warn:#E6AD5E; --warn-soft:#382A15;
+    --slot:#3A3217; --slot-ink:#F3DC93;
+    --note-w:#18233A; --note-r:#241B31;
+    --shadow:0 1px 0 rgba(0,0,0,.2), 0 8px 22px -12px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#0E1420; --surface:#151D2B; --sunk:#1B2536;
+  --ink:#E5E9F0; --ink-2:#A3ADBE; --ink-3:#7C8699;
+  --rule:#29344A; --rule-2:#364259;
+  --accent:#E27AB6; --accent-soft:#3A1D30;
+  --series-a:#7FA9EC; --series-b:#E27AB6; --series-c:#7C8699;
+  --ok:#5BCB90; --ok-soft:#15342A;
+  --bad:#F2877D; --bad-soft:#3C1D1B;
+  --warn:#E6AD5E; --warn-soft:#382A15;
+  --slot:#3A3217; --slot-ink:#F3DC93;
+  --note-w:#18233A; --note-r:#241B31;
+  --shadow:0 1px 0 rgba(0,0,0,.2), 0 8px 22px -12px rgba(0,0,0,.6);
+}
+
+html{background:var(--ground)}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.75;-webkit-font-smoothing:antialiased}
+.page{padding-inline:20px;padding-block:0 96px}
+.wrap{max-width:45rem;margin-inline:auto}
+@media (min-width:1180px){
+  .wrap{margin-left:max(28px, calc(50% - 34rem))}
+}
+
+/* ---------- top bar ---------- */
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:color-mix(in srgb,var(--ground) 92%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--rule);margin-inline:-20px;padding:10px 20px}
+.bar-in{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;max-width:67rem}
+@media (min-width:1180px){.bar-in{margin-left:max(8px, calc(50% - 34rem))}}
+.bar-title{font-family:var(--serif);font-weight:700;font-size:15px;letter-spacing:.02em}
+.bar-prog{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.meter{width:140px;height:6px;border-radius:3px;background:var(--sunk);overflow:hidden;display:flex}
+.meter i{display:block;height:100%}
+.meter .m-ok{background:var(--ok)} .meter .m-shown{background:var(--warn)}
+.bar-nav{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:13px}
+.bar-nav a{color:var(--ink-2);text-decoration:none}
+.bar-nav a:hover{color:var(--accent)}
+.bar-reset{margin-left:auto;font:inherit;font-size:12px;color:var(--ink-3);background:none;border:1px solid var(--rule);border-radius:4px;padding:2px 8px;cursor:pointer}
+.bar-reset.arm{color:var(--bad);border-color:var(--bad)}
+
+/* ---------- type ---------- */
+header.hero{padding-block:56px 20px}
+.kicker{font-size:13px;letter-spacing:.14em;color:var(--accent);font-weight:600}
+h1{font-family:var(--serif);font-weight:700;font-size:clamp(2rem,5vw,2.9rem);line-height:1.2;margin:.3em 0 .35em;text-wrap:balance;letter-spacing:.01em}
+.sub{font-size:1.08rem;color:var(--ink-2);max-width:36em;margin:0}
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(10.5rem,1fr));gap:10px 22px;margin:26px 0 0;padding:14px 0 0;border-top:1px solid var(--rule);font-size:13px}
+.meta div{display:flex;flex-direction:column}
+.meta b{font-weight:500;color:var(--ink-3);font-size:12px;letter-spacing:.06em}
+.meta span{color:var(--ink);font-variant-numeric:tabular-nums}
+h2{font-family:var(--serif);font-weight:700;font-size:1.6rem;line-height:1.35;margin:3.2rem 0 .8rem;text-wrap:balance;display:flex;gap:.6rem;align-items:baseline}
+h2 .sec{font-family:var(--mono);font-size:.8rem;color:var(--accent);font-weight:500;letter-spacing:.04em;flex:none}
+h3{font-size:1.1rem;font-weight:600;margin:2.2rem 0 .5rem;text-wrap:balance}
+p{margin:.8rem 0}
+strong{font-weight:600}
+code,.mono{font-family:var(--mono);font-size:.86em}
+p code, li code, td code{background:var(--sunk);padding:.05em .35em;border-radius:3px;word-break:break-all}
+a{color:var(--accent)}
+ul,ol{padding-left:1.3rem;margin:.6rem 0}
+li{margin:.25rem 0}
+hr.sep{border:0;border-top:1px solid var(--rule);margin:3rem 0 0}
+
+/* ---------- side notes ---------- */
+.note{font-size:13.5px;line-height:1.65;padding:12px 14px;border-radius:6px;margin:1rem 0;color:var(--ink)}
+.note.write{background:var(--note-w)}
+.note.read{background:var(--note-r)}
+.note .tag{display:inline-block;font-size:11.5px;font-weight:600;letter-spacing:.12em;margin-right:.5em;padding:0 .45em;border-radius:3px;border:1px solid currentColor}
+.note.write .tag{color:var(--series-a)}
+.note.read .tag{color:var(--accent)}
+.note p{margin:.4rem 0}
+.note ul{margin:.3rem 0;padding-left:1.1rem}
+@media (min-width:1180px){
+  .note{float:right;clear:right;width:17.5rem;margin:.3rem -20.5rem 1rem 0;position:relative}
+  .note::before{content:"";position:absolute;left:-1.6rem;top:1.05rem;width:1rem;border-top:1px dashed var(--rule-2)}
+  .flow-clear{clear:right}
+}
+
+/* ---------- boxes ---------- */
+.howto{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:18px 20px;margin:28px 0 0;box-shadow:var(--shadow)}
+.howto h3{margin:0 0 .4rem;font-size:1rem}
+.howto ol{margin:.4rem 0 0}
+.legend-syms{display:flex;flex-wrap:wrap;gap:6px 18px;margin:.7rem 0 0;font-size:13.5px;color:var(--ink-2)}
+.legend-syms span b{font-family:var(--mono);color:var(--accent);margin-right:.35em;font-weight:500}
+pre.cmd-block{background:var(--sunk);border-radius:6px;padding:10px 12px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.6;margin:.6rem 0;white-space:pre}
+.abstract{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:18px 20px;box-shadow:var(--shadow);line-height:1.95}
+.abstract p{margin:.3rem 0}
+.caption{font-size:13px;color:var(--ink-2);margin:.4rem 0 1.2rem}
+.neg{border:1px solid var(--rule);border-left:0;border-radius:8px;padding:0;margin:1.6rem 0;background:var(--surface);overflow:hidden}
+.neg-h{background:var(--bad-soft);color:var(--bad);font-weight:600;font-size:13.5px;padding:8px 16px;letter-spacing:.04em}
+.neg-b{padding:4px 16px 12px}
+
+/* ---------- pipeline ---------- */
+.pipe{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px;margin:1.2rem 0 1.6rem;list-style:none;padding:0}
+.pipe li{margin:0;display:flex;align-items:center;gap:8px}
+.pipe .st{border:1px solid var(--rule-2);background:var(--surface);border-radius:6px;padding:8px 12px;font-size:13.5px;line-height:1.45}
+.pipe .st b{display:block;font-family:var(--mono);font-weight:500;font-size:14px;color:var(--ink)}
+.pipe .st small{color:var(--ink-2)}
+.pipe .st.model{border-color:var(--accent);background:var(--accent-soft)}
+.pipe .arr{color:var(--ink-3);font-size:14px}
+
+/* ---------- tables ---------- */
+.tbl{overflow-x:auto;margin:1rem 0 .4rem}
+table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top}
+thead th{font-weight:600;font-size:12.5px;color:var(--ink-2);border-bottom:1.5px solid var(--rule-2);white-space:nowrap}
+td.n,th.n{text-align:right;white-space:nowrap}
+tr.hl td{background:var(--accent-soft)}
+td.muted{color:var(--ink-3)}
+
+/* ---------- slots ---------- */
+.slot{font:inherit;font-family:var(--mono);font-size:.9em;border:0;border-bottom:1.5px dashed var(--slot-ink);background:var(--slot);color:var(--slot-ink);padding:0 .35em;border-radius:3px 3px 0 0;cursor:pointer;white-space:nowrap;line-height:1.5}
+.slot.done{background:transparent;border-bottom:1.5px solid var(--ok);color:var(--ink);font-weight:500;cursor:pointer}
+.slot.shown{background:transparent;border-bottom:1.5px solid var(--warn);color:var(--ink)}
+
+/* ---------- task cards ---------- */
+.task{background:var(--surface);border:1px solid var(--rule);border-radius:8px;margin:1.3rem 0;padding:14px 16px 12px;box-shadow:var(--shadow);scroll-margin-top:84px}
+.task.solved{border-color:color-mix(in srgb,var(--ok) 45%,var(--rule))}
+.task.revealed{border-color:color-mix(in srgb,var(--warn) 50%,var(--rule))}
+.t-head{display:flex;gap:10px;align-items:baseline}
+.t-sym{font-family:var(--mono);color:var(--accent);font-size:15px;flex:none;width:1.1em;text-align:center}
+.t-no{font-size:12px;font-weight:600;letter-spacing:.08em;color:var(--ink-2);flex:none;white-space:nowrap}
+.t-q{font-weight:500;line-height:1.6}
+.t-body{margin:8px 0 0 calc(1.1em + 10px);display:flex;flex-direction:column;gap:6px}
+.row{display:flex;gap:8px;align-items:flex-start;font-size:13.5px}
+.row .lbl{flex:none;width:2.6em;color:var(--ink-3);font-size:12px;padding-top:3px;letter-spacing:.06em}
+.row .val{min-width:0;flex:1;overflow-wrap:anywhere}
+.row code{font-size:12.5px;background:var(--sunk);padding:2px 6px;border-radius:3px;display:inline-block;line-height:1.5}
+.row .txt{color:var(--ink-2)}
+.cmd{display:flex;align-items:stretch;gap:0;background:var(--sunk);border-radius:5px;overflow:hidden}
+.cmd code{flex:1;background:none;font-size:12.5px;padding:6px 10px;overflow-x:auto;white-space:pre;display:block}
+.btn{font:inherit;font-size:12.5px;border:1px solid var(--rule-2);background:var(--surface);color:var(--ink);border-radius:5px;padding:3px 10px;cursor:pointer;line-height:1.6}
+.btn:hover{border-color:var(--ink-3)}
+.btn.primary{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.btn.ghost{background:none;border-color:transparent;color:var(--ink-2);padding-inline:4px}
+.btn.ghost:hover{color:var(--accent)}
+.cmd .btn{border:0;border-left:1px solid var(--rule);border-radius:0;background:transparent;color:var(--ink-2)}
+.hint-list{display:flex;flex-direction:column;gap:6px}
+.hint-item{border-left:2px solid var(--rule-2);padding-left:10px}
+.ans{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:4px}
+.ans label{font-size:12.5px;color:var(--ink-2)}
+.ans input{font-family:var(--mono);font-size:15px;width:9.5rem;padding:5px 9px;border:1px solid var(--rule-2);border-radius:5px;background:var(--ground);color:var(--ink)}
+.ans input:disabled{opacity:.85}
+.ans .unit{font-size:13.5px;color:var(--ink-2)}
+.fb{font-size:13.5px;line-height:1.65;border-radius:5px;padding:0}
+.fb:not(:empty){padding:8px 11px}
+.fb.ok{background:var(--ok-soft)}
+.fb.bad{background:var(--bad-soft)}
+.fb.soft{background:var(--warn-soft)}
+.fb .fb-h{font-weight:600;margin-right:.4em}
+.fb.ok .fb-h{color:var(--ok)} .fb.bad .fb-h{color:var(--bad)} .fb.soft .fb-h{color:var(--warn)}
+.tries{font-size:12px;color:var(--ink-3)}
+.opts{display:flex;flex-direction:column;gap:6px;margin-top:2px}
+.opt{font:inherit;font-size:14px;text-align:left;border:1px solid var(--rule-2);background:var(--ground);color:var(--ink);border-radius:6px;padding:8px 12px;cursor:pointer;line-height:1.6;display:flex;gap:10px}
+.opt:hover:not(:disabled){border-color:var(--ink-3)}
+.opt .k{font-family:var(--mono);color:var(--ink-3);flex:none}
+.opt.picked-bad{border-color:var(--bad);background:var(--bad-soft)}
+.opt.picked-ok{border-color:var(--ok);background:var(--ok-soft)}
+.opt:disabled{cursor:default}
+.uses{font-size:12.5px;color:var(--ink-2)}
+.uses .slot{font-size:12px}
+
+@media (max-width:640px){.bar-nav{display:none}.bar-reset{margin-left:0}}
+button:focus-visible,input:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- charts ---------- */
+figure.chart{margin:1.4rem 0 .4rem}
+figure.chart svg{width:100%;height:auto;display:block;max-width:100%}
+.chart-legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12.5px;color:var(--ink-2);margin-top:4px}
+.chart-legend i{display:inline-block;width:18px;height:0;border-top:2px solid;vertical-align:middle;margin-right:6px}
+.chart-legend i.dash{border-top-style:dashed}
+.chart-legend i.box{height:10px;width:14px;border:0}
+
+details{margin:.8rem 0;background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:0 14px}
+details summary{cursor:pointer;padding:8px 0;font-size:14px;color:var(--ink-2)}
+details[open] summary{border-bottom:1px solid var(--rule);margin-bottom:6px}
+
+.checklist{list-style:none;padding:0}
+.checklist li{padding-left:1.6em;position:relative}
+.checklist li::before{content:"□";position:absolute;left:0;color:var(--accent);font-family:var(--mono)}
+footer{margin-top:4rem;padding-top:1rem;border-top:1px solid var(--rule);font-size:13px;color:var(--ink-3)}
+
+@media (prefers-reduced-motion:no-preference){
+  .task{transition:border-color .25s}
+  .fb{transition:background-color .2s}
+}
+@media (max-width:520px){
+  body{font-size:15.5px}
+  .t-body{margin-left:0}
+  .ans input{width:8rem}
+}
+</style>
+
+<div class="page">
+<div class="bar" role="navigation" aria-label="进度与目录">
+  <div class="bar-in">
+    <span class="bar-title">从 base 到 augmented</span>
+    <span class="bar-prog"><span class="meter" aria-hidden="true"><i class="m-ok" id="m-ok"></i><i class="m-shown" id="m-shown"></i></span><span id="prog-text">已读对 0 / 0</span></span>
+    <nav class="bar-nav">
+      <a href="#s0">摘要</a><a href="#s2">数据</a><a href="#s3">预训练</a><a href="#s4">第一阶段</a><a href="#s5">第二阶段</a><a href="#s6">局限</a><a href="#s8">附录</a>
+    </nav>
+    <button class="bar-reset" id="reset" type="button">清空我的作答</button>
+  </div>
+</div>
+
+<div class="wrap">
+<header class="hero">
+  <div class="kicker">实验报告 · 两层进近模型 · 单机</div>
+  <h1>从 base 到 augmented</h1>
+  <p class="sub">一个“管制员语言模型”的完整训练：先模仿真实管制员说话（预训练），再学会让飞机落地（第一阶段后训练），最后在程序高度约束下、从没见过的起点也能落地（第二阶段后训练）。</p>
+  <div class="meta">
+    <div><b>日期</b><span>2026-09-27</span></div>
+    <div><b>机场</b><span>KMSY · KRDU · KSJC · KSMF · KSTL</span></div>
+    <div><b>数据</b><span>90 个运行日的 ADS-B 到达航迹</span></div>
+    <div><b>执行器</b><span>v10（下滑道下限）</span></div>
+    <div><b>所有数字来自</b><span>验证集；测试集未开封</span></div>
+  </div>
+
+  <section class="howto" aria-labelledby="howto-h">
+    <h3 id="howto-h">这份报告怎么用</h3>
+    <ol>
+      <li>正文里黄底的 <span class="slot" tabindex="-1">✦ 读数 n</span> 是空着的数字。去它下面那张卡片写的文件里把数读出来，填进去、按“核对”。读对了，这个数会填回正文，连同摘要里的同一个数。</li>
+      <li>前面几题把文件、键名、读取命令都给你；越往后给得越少，第二阶段那几题要你自己找文件。</li>
+      <li>读错时，常见的读错（读了相邻的组、读了选择集的数、小数和百分数弄混、位数不够）会被认出来，告诉你错在哪。算错三次以后可以看答案，那一格会标成黄色。</li>
+      <li>浅蓝底的<b>写法</b>和浅紫底的<b>读法</b>是教学注释：写法讲一份报告为什么这么组织，读法讲读数据时要当心什么。真正交出去的报告里不写它们。</li>
+      <li>作答只存在你这个浏览器里；顶栏可以清空。</li>
+    </ol>
+    <div class="legend-syms">
+      <span><b>✦</b>读数：去文件里读一个数</span>
+      <span><b>△</b>计算：用读到的数算一个数</span>
+      <span><b>◇</b>判断：从几个说法里挑对的</span>
+    </div>
+    <p style="margin:.9rem 0 .2rem;font-size:14px">读文件的办法：在仓库根目录 <code>/home/supercomputing/studys/thesis</code> 下用 <code>jq</code>。没有 jq 时用 python，效果一样：</p>
+<pre class="cmd-block">jq '.model.nll_per_step' 4dTrajectory/outputs/POOLED/prior/v3_step1_20260924/full_s1337/readout.json
+python3 -c "import json; d=json.load(open('4dTrajectory/outputs/POOLED/prior/v3_step1_20260924/full_s1337/readout.json')); print(d['model']['nll_per_step'])"</pre>
+    <p style="margin:.2rem 0 0;font-size:14px">不知道一个文件里有什么，先看它的顶层键：<code>jq 'keys' 文件</code>；看某一层：<code>jq '.readout.prior | keys' 文件</code>。</p>
+  </section>
+</header>
+
+<!-- ============================================================ -->
+<h2 id="s0"><span class="sec">§0</span>摘要</h2>
+
+<aside class="note write"><span class="tag">写法</span>
+<p>摘要最后写，却放在最前面。它要让只读这一段的人拿走五样东西：问题、做法（一句）、主要的数<b>连同它的对照</b>、结论、最大的局限。</p>
+<p>这一段会随着你往下读数慢慢填满——这正是写报告的顺序：先有数，再有摘要。</p>
+</aside>
+
+<div class="abstract">
+<p><b>问题</b>：能不能训练一个模型，像进近管制员一样每 2 s 说一行指令词，让规则执行器照着飞、把飞机带到跑道上，同时说话的方式不离开真实管制员？</p>
+<p><b>结果</b>：预训练得到的 base 模仿得很好，验证集每步负对数似然 <span class="slot" data-id="p_nll"></span>，最强的基线是 <span class="slot" data-id="p_prev"></span>，低了 <span class="slot" data-id="c_rel"></span> %；但让它自己说、执行器照着飞，只有 <span class="slot" data-id="f_base"></span> % 的句子落地。第一阶段后训练只奖励“落地”，得到 landing：落地 <span class="slot" data-id="l_val"></span> %，在真实航班语境下说的话几乎没变。第二阶段加上程序高度约束和从没飞过的扩充起点，得到 augmented：扩充起点落地 <span class="slot" data-id="a_la"></span> → <span class="slot" data-id="a_7a"></span> %，真实起点 <span class="slot" data-id="a_lr"></span> → <span class="slot" data-id="a_7r"></span> %，略降，但在事先定的 1 个百分点线以内，按规则采用。</p>
+<p><b>局限</b>：后训练只用了一个训练种子；执行器的结局分类把“太高”和“偏到侧面”记成同一种；测试集还没打开，这里所有的数都在验证集上。</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s1"><span class="sec">§1</span>问题与做法</h2>
+
+<aside class="note write"><span class="tag">写法</span>
+<p>问题要写成<b>数据能回答</b>的形式。“模型好不好”回答不了；“落地率比 base 高多少、说话方式离标注多远”回答得了。</p>
+<p>同时写下<b>什么结果算成功</b>——最好在跑之前。本报告里每个阶段的选轮规则和判定线都是跑之前写定的。</p>
+</aside>
+
+<p>模型分两层。上层是<b>先验</b>（一个 330 万参数的 Transformer），每 2 s 说一行词，一行六列：<b>跑道</b>、<b>进近</b>（许可 / 复飞）、<b>航向</b>（5° 一档）、<b>高度</b>、<b>下降角</b>（档位）、<b>速度</b>。下层是<b>执行器</b>，一套只读词表的规则，把这一行词变成飞机每 1 s 的动作。先验看不到未来：每一步只给它此刻以前知道的东西（位置、过去的运动、候选跑道、此前 30 分钟的落地情况、自己已经说过的词）。</p>
+
+<p>训练分三步，每一步产出一个模型，名字就是它学到的东西：</p>
+
+<ol class="pipe" aria-label="训练流程">
+  <li><div class="st"><b>标注的句子</b><small>从真实航迹读出的词<br>44,362 架训练航班</small></div><span class="arr" aria-hidden="true">→</span></li>
+  <li><div class="st"><b>预训练</b><small>逐步预测下一行词</small></div><span class="arr" aria-hidden="true">→</span></li>
+  <li><div class="st model"><b>base</b><small>会模仿</small></div><span class="arr" aria-hidden="true">→</span></li>
+  <li><div class="st"><b>第一阶段</b><small>落地才给分</small></div><span class="arr" aria-hidden="true">→</span></li>
+  <li><div class="st model"><b>landing</b><small>会落地</small></div><span class="arr" aria-hidden="true">→</span></li>
+  <li><div class="st"><b>第二阶段</b><small>程序高度 + 扩充起点</small></div><span class="arr" aria-hidden="true">→</span></li>
+  <li><div class="st model"><b>augmented</b><small>陌生起点也会落地</small></div></li>
+</ol>
+
+<p>两类指标，缺一不可：</p>
+<ul>
+  <li><b>负对数似然（teacher forcing 下）</b>：把真实的上文喂给模型，只考它下一步。模型给“标注里真实说的那个词”的概率是 p，损失就是 −ln p；六列加起来，按步平均。0 表示每次都百分之百猜中，越小越好。它量的是“像不像管制员”。</li>
+  <li><b>落地率（自由生成下）</b>：让模型自己说、执行器照着飞，看飞机有没有在它说的那条跑道上落地。它量的是“说的话管不管用”。一句话从第 8 行（前 16 s 只观察）开始说，每架航班说 4 句。</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="s2"><span class="sec">§2</span>数据与划分</h2>
+
+<aside class="note read"><span class="tag">读法</span>
+<p>四个集各管一件事：</p>
+<ul>
+<li><b>训练集</b>：训练。</li>
+<li><b>内部选择集</b>：选变体、选轮次，可以看很多遍。</li>
+<li><b>验证集</b>：每个选定的模型只读一次，报告的数都来自它。</li>
+<li><b>测试集</b>：封存，最后才开。</li>
+</ul>
+<p>一个数被用来“挑”过，它就不再是没见过的数据上的成绩。</p>
+</aside>
+
+<p>五个机场、90 个运行日（一天从 UTC 9 时切开，让一个运行日落在当地的一个白天和夜里）。<b>按天划分，不按航班</b>：同一天的航班共用跑道构型和天气，按航班划分，验证集里就会有“模型在训练时已经见过当天”的航班。划分写进了仓库（<code>data/day_split_20260924.json</code>），任何人重跑都是同一份：测试 14 天、验证 14 天、内部选择 9 天，其余是训练集。测试日的航班连标注都没做。</p>
+
+<div class="task" data-id="d1"></div>
+<div class="task" data-id="d2"></div>
+
+<p>这 <span class="slot" data-id="d2"></span> 架是<b>标注器接受</b>的航班：验证日合格的到达有 10,757 架，标注器拒绝了一些（地速不可能、最后不在五边上……）。报告里的“多少架”要写清楚数的是哪一层。</p>
+
+<!-- ============================================================ -->
+<h2 id="s3"><span class="sec">§3</span>实验一　预训练：base</h2>
+
+<aside class="note write"><span class="tag">写法</span>
+<p>配置段只写别人重现它需要的东西：数据产物、代码提交、种子、结构和训练超参数、用时。本节的每一项都能在 <code>config.json</code> 里找到。</p>
+</aside>
+
+<p><b>配置</b>：句子产物 <code>instruction_language/v4_20260924</code>；d 192、4 层、6 头，3,298,517 个参数；AdamW，学习率 3×10⁻⁴，预热 500 步，每批约 16,384 步；验证集连续 3 个 epoch 不降就停，最多 30 个；代码 <code>47c7b790</code>（干净的工作树）。每个 epoch 约 70 s。</p>
+
+<h3>选哪个变体：规则跑之前写定</h3>
+
+<p>三个变体只差一处：<b>full</b>（候选跑道带此前的落地情况、各列按顺序输出）、<b>no-context</b>（不带落地情况）、<b>unordered</b>（各列不按顺序）。在内部选择集上比每步负对数似然：</p>
+
+<div class="tbl"><table>
+<thead><tr><th>变体</th><th>种子</th><th class="n">每步负对数似然（内部选择集）</th></tr></thead>
+<tbody>
+<tr><td>full</td><td>1337</td><td class="n">0.28398</td></tr>
+<tr><td>full</td><td>2024</td><td class="n">0.28383</td></tr>
+<tr><td>no-context</td><td>1337</td><td class="n">0.28479</td></tr>
+<tr><td>unordered</td><td>1337</td><td class="n">0.29776</td></tr>
+</tbody></table></div>
+<p class="caption">出处：<code>v3_step1_20260924/choice.json</code>（<code>nll_per_step</code>、<code>runs</code>、<code>seed_line</code>）。</p>
+
+<p>规则：领先者是种子 1337 里最低的那个；<b>种子线</b> = full 两个种子之差的绝对值，当作“同一配置换个种子会差多少”的尺子；与领先者相差不超过种子线的变体里，按 no-context → full → unordered 的顺序取第一个（输入最少的优先）。</p>
+
+<div class="task" data-id="q_seed"></div>
+
+<h3>训练曲线</h3>
+
+<figure class="chart" id="fig-curve" aria-label="base 的训练曲线"></figure>
+<div class="chart-legend"><span><i style="border-color:var(--series-c)" class="dash"></i>训练集（边训边算的平均）</span><span><i style="border-color:var(--series-a)"></i>验证集</span></div>
+<p class="caption">出处：<code>v3_step1_20260924/full_s1337/history.json</code>。第 1 个 epoch 训练集是 3.04，画不下，从第 2 个起画。</p>
+
+<div class="task" data-id="t_epoch"></div>
+
+<aside class="note read"><span class="tag">读法</span>
+<p>前十几个 epoch 验证集比训练集还低，不是出错：训练集的数是一个 epoch 里边训边算的平均，模型在这期间还在变、而且开着 dropout；验证集是 epoch 结束后、关着 dropout 算的。</p>
+</aside>
+
+<h3>验证集读一次</h3>
+
+<div class="task" data-id="p_nll"></div>
+
+<aside class="note read"><span class="tag">读法</span>
+<p>验证集读数和训练曲线的最低点是<b>同一个数</b>：早停用的就是验证集，保留的是 28 个 epoch 里验证集最好的那个。所以这个数被“挑”过一次，略偏乐观——很小，但要知道。这正是测试集要封存的原因。</p>
+</aside>
+
+<p><b>对照</b>是两个不用学习的基线，从模型自己的训练航班里数出来、按同一口径算：<b>重复上一条</b>（每一步都说和上一步一样的词）和<b>只看上一个词</b>（按训练集里“上一个词是 x 时下一个词”的频率猜）。</p>
+
+<div class="task" data-id="p_prev"></div>
+<div class="task" data-id="c_rel"></div>
+<div class="task" data-id="c_ppl"></div>
+
+<p>跑道单独看：它只在第一个预测步说一次，在总的负对数似然里几乎看不见（每架约 190 步里的 1 步），所以要单独报。对照是三条不用学习的规则：B0 机场最常用的跑道、B1 此前 30 分钟用得最多的、B3 同方向上一架落的那条。</p>
+
+<div class="task" data-id="p_rw"></div>
+
+<p>第 1 步的门<b>过了</b>：每一列都低于两个基线；还没建立在五边上的航班上，跑道命中率 <span class="slot" data-id="p_rw"></span> %，赢 B1（69.60 %）和 B3（72.08 %）。</p>
+
+<h3>让 base 自己说：自由生成</h3>
+
+<p>负对数似然低只说明“在真实上文里猜得准”。真正要用时，上文是模型自己说出来、执行器飞出来的，和训练时见过的不一样。于是在验证集上每机场抽 400 架（种子 1337），每架从第 8 行起让 base 说 4 句（温度 1），执行器照着飞，时间上限是观测剩余时间的 1.5 倍；同一批航班另用<b>标注的词</b>飞一次作对照。</p>
+
+<div class="task" data-id="f_base"></div>
+<div class="task" data-id="f_vec"></div>
+<div class="task" data-id="q_ceiling"></div>
+
+<p>失败的样子（读数文档 §5.2）：没落地的句子平均说 47.0 个航向词，落地的只有 12.4 个——绕来绕去直到超时，许可给得很晚。执行器飞出的路径一旦和观测不同，base 读到的就是训练时没见过的位置，于是一直修正航向。这是后训练要解决的问题。</p>
+
+<!-- ============================================================ -->
+<h2 id="s4"><span class="sec">§4</span>实验二　第一阶段后训练：landing</h2>
+
+<aside class="note write"><span class="tag">写法</span>
+<p>做法写到能照着重做：奖励是什么、损失有几项、各项的系数、每轮多少数据、跑几轮、怎么选轮。选轮规则直接引用 <code>choice.json</code> 里存的原文，读者可以自己核对。</p>
+</aside>
+
+<p><b>做法</b>：每轮从训练集运行日抽每机场 400 架（换种子），每架让模型说 8 句、执行器照着飞。<b>落地得 1 分，否则 0</b>；同一架航班的 8 句互相比，比这 8 句平均好的那几句加强、差的减弱（这类做法叫 GRPO）。损失还有两项把模型拴住：0.04 × 离 base 的距离（KL 散度），和 1 × 数据项（在真实航班上 teacher forcing，也就是继续做预训练的事）。8 轮，每轮在内部选择集上读一次（每机场 200 架 × 2 句，每轮同一批航班、同一个种子）。</p>
+
+<p><b>选轮规则</b>（<code>v3_rl_20260925/grpo_s1337/choice.json</code> 的 <code>rule</code>）：护栏以内（落在观测跑道上的比例不低于第 0 轮 − 2 个点；每架航向词不多于第 0 轮的 1.2 倍），选择集落地率最高的一轮；与最高相差 1.5 个百分点以内的，取最早的。</p>
+
+<figure class="chart" id="fig-s1" aria-label="第一阶段各轮在选择集上的落地率"></figure>
+<div class="chart-legend"><span><i style="border-color:var(--series-a)"></i>选择集落地率（2,000 句）</span><span><i class="box" style="background:var(--accent-soft)"></i>与最高相差 1.5 个百分点以内</span></div>
+<p class="caption">出处：<code>v3_rl_20260925/grpo_s1337/choice.json</code> 的 <code>landed</code>（第 0 轮就是 base）。9 轮都在护栏以内。</p>
+
+<div class="task" data-id="q_rule1"></div>
+
+<aside class="note read"><span class="tag">读法</span>
+<p>为什么是“1.5 个点以内取最早”？选择集 2,000 句上，落地率 96 % 左右时的抽样波动约 ±0.9 个百分点（95 %）。差不到这么多的两轮分不出高下，就取训练更少、离 base 更近的那一轮。</p>
+</aside>
+
+<h3>验证集读一次</h3>
+
+<div class="task" data-id="l_val"></div>
+<div class="task" data-id="c_vecgain"></div>
+
+<aside class="note write"><span class="tag">写法</span>
+<p><b>百分点</b>和<b>百分比</b>不是一回事。83.3 % → 93.9 % 是“提高 10.6 个百分点”，也是“相对提高 12.8 %”。报告里两个比例相比，用百分点；要说相对变化，写明“相对”。</p>
+</aside>
+
+<p>它是不是靠“怪说法”换来的落地？看两个数：说了多少航向词、在真实语境下还像不像管制员。</p>
+
+<div class="task" data-id="l_head"></div>
+<div class="task" data-id="l_tf"></div>
+
+<h3>这个提升是不是碰巧</h3>
+
+<p>base 和 landing 在<b>同一批航班、同一个句号（同一个随机数序列）</b>上各说了 4 句，可以一对一配对。只数“一个落地、另一个没落地”的对：b = 只有 base 落地，c = 只有 landing 落地。如果两个模型一样好，b 和 c 应该差不多；z = (c − b) ÷ √(b + c)，|z| 大于 2 左右，差别就不太可能是抽到的句子碰巧好。</p>
+
+<p>在同一个执行器 v10 上（<code>v3_reread_v10_20260926/</code> 的 <code>val_base_400x4</code> 和 <code>val_stage1_400x4</code>），8,000 对里 b = 163、c = 803。</p>
+
+<details><summary>自己数一遍（python，在仓库根目录运行）</summary>
+<pre class="cmd-block">import json
+P = '4dTrajectory/outputs/POOLED/prior/'
+def landed(path):
+    g = json.load(open(P + path))
+    return {(f['dataset_id'], f['sample']): f['outcome'] == 'landed'
+            for f in g['flights'] if f['source'] == 'prior'}
+a = landed('v3_reread_v10_20260926/val_base_400x4/generation.json')
+b = landed('v3_reread_v10_20260926/val_stage1_400x4/generation.json')
+assert a.keys() == b.keys()          # 真的是同一批句子，才能配对
+only_a = sum(a[k] and not b[k] for k in a)
+only_b = sum(b[k] and not a[k] for k in a)
+print(len(a), only_a, only_b, (only_b - only_a) / (only_a + only_b) ** 0.5)</pre>
+<p style="font-size:13.5px">把两个目录换成第二阶段的那两对，就能数出 §5 里的 246 / 172 和 360 / 711。</p>
+</details>
+
+<div class="task" data-id="c_z1"></div>
+
+<div class="neg">
+  <div class="neg-h">负结果：先试过的闭环监督微调（CAT-K），不采用</div>
+  <div class="neg-b">
+  <p>在按落地强化之前，先试了另一条路：让模型在自己飞出来的轨迹上，按“这一刻标注说了什么”来学（闭环监督微调）。验证集总落地率 90.2 → 93.1 %，看起来更好。</p>
+  <div class="task" data-id="k_vec"></div>
+  <div class="task" data-id="q_catk"></div>
+  <p>失败在目标上：按时间对齐的标注，放在已经离开观测航迹的轨迹上不成立（链 220 s 时偏约 1 km），“此刻许可 / 此刻转向”在那里往往不对。</p>
+  </div>
+</div>
+
+<aside class="note write"><span class="tag">写法</span>
+<p>负结果要写。写清楚它<b>在哪个数上看起来好、在哪个数上露了馅、为什么失败</b>——下一个人就不用再走一遍。</p>
+<p>这里露馅的地方是<b>分组</b>：总数升了，难的那一组降了。只报总数，就会把它当成功。</p>
+</aside>
+
+<!-- ============================================================ -->
+<h2 id="s5"><span class="sec">§5</span>实验三　第二阶段后训练：augmented</h2>
+
+<p><b>要解决的两件事</b>：一，先验说的话要守程序规定的高度（不能让飞机在五边上低于下滑道太多）；二，只在真实航班的起点上练，模型可能只会飞“见过的进场”。</p>
+
+<p><b>做法</b>（后训练设计 §3–§5）：</p>
+<ul>
+  <li><b>程序高度屏蔽</b>（<code>procedure-altitudes-v2</code>）：说词时把违规的高度、下降角词的概率置零——FAF 以内不低于公布下滑道 − 60 m；切入五边前不低于决断高度；跌破入口高度后不许再爬升。</li>
+  <li><b>扩充起点</b>：把真实起点绕机场转 ±15°（25 km 处约 ±6.5 km 的弧）、高度 ±150 m、速度 ±5 %，均匀取；时间上限放到观测剩余时间的 2 倍。</li>
+  <li>每轮每机场 200 个真实起点 + 200 个扩充起点，每个 8 句；从 <b>landing</b> 起，拉回 <b>base</b>；损失与第一阶段相同，另加<b>截断的比</b>（ε = 0.2，下面说为什么）；8 轮。</li>
+</ul>
+
+<h3>到这一版之前，失败了五次</h3>
+
+<aside class="note write"><span class="tag">写法</span>
+<p>迭代史写成一张表：每次一行，“看到了什么 → 改了什么”。细节、中间数字留在读数文档里，报告只留让读者明白<b>最后这个配方为什么长这样</b>的那几行。</p>
+</aside>
+
+<div class="tbl"><table>
+<thead><tr><th>运行</th><th>配方</th><th>看到了什么</th><th>于是改了</th></tr></thead>
+<tbody>
+<tr><td><code>v3_augmented</code></td><td>固定 β = 0.04，没有数据项</td><td>一轮就学会“遥控”执行器：每架许可 / 复飞词 0.71 → 1.88、下降角词 1.91 → 4.56；teacher forcing 负对数似然 +21 %</td><td>离 base 的距离给预算、自动调 β</td></tr>
+<tr><td><code>v3_augbudget</code> ×3</td><td>距离预算</td><td>拉回弱了模型冲出去，拉回强了连第一阶段学到的落地一起拉掉，来回摆</td><td>加回第一阶段的数据项</td></tr>
+<tr><td><code>v3_augdata</code></td><td>+ 数据项</td><td>真实航班上的说法守住了，但在自己飞出来的情形里离 base 越走越远；扩充起点只到 84.5 %</td><td>一半真实起点 + 程序高度 v2，重启</td></tr>
+<tr><td><code>v3_stage2_restart</code></td><td>+ 一半真实起点</td><td>第 2 轮<b>一遍训练之内</b>突然漂走：离 base 的距离最大 5.96（平常约 0.01）</td><td>离线复现：奖励项没有截断；加截断的比</td></tr>
+<tr class="hl"><td><code>v3_stage2_clip</code></td><td>+ 截断的比 ε = 0.2</td><td>每一遍的距离最大 ≤ 0.021，8 轮跑完</td><td>采用第 7 轮</td></tr>
+</tbody></table></div>
+<p class="caption">目录都在 <code>4dTrajectory/outputs/POOLED/prior/</code> 下（名字后面带日期 <code>_20260926</code>）；细节见读数文档 §9、§10、§15、§17。</p>
+
+<h3>选轮</h3>
+
+<p><b>选轮规则</b>（<code>v3_stage2_clip_20260926/aug_s1337/choice.json</code> 的 <code>rule</code>）：护栏以内——真实起点落地不低于第 0 轮 − 1 个点；落在观测跑道上不低于第 0 轮 − 2 个点；五列说话方式离标注都不超过第 0 轮 + ln 1.2——扩充起点落地率最高的一轮；与最高相差 1.5 个百分点以内的，取最早的。</p>
+
+<figure class="chart" id="fig-s2" aria-label="第二阶段各轮在选择集上的落地率"></figure>
+<div class="chart-legend"><span><i style="border-color:var(--series-a)"></i>真实起点（2,000 句）</span><span><i style="border-color:var(--series-b)"></i>扩充起点（1,992 句）</span><span><i class="dash" style="border-color:var(--series-a)"></i>真实起点的护栏：第 0 轮 − 1 个点</span><span><i class="box" style="background:var(--bad-soft)"></i>被护栏排除的轮</span></div>
+<p class="caption">出处：<code>choice.json</code> 的 <code>real_landed</code>、<code>augmented_landed</code>、<code>excluded_by_the_guards</code>。第 0 轮就是 landing。</p>
+
+<div class="task" data-id="q_rule2"></div>
+
+<h3>验证集读一次：自己找文件</h3>
+
+<aside class="note read"><span class="tag">读法</span>
+<p>打开一个结果文件，先读<b>文件头</b>，再读数：</p>
+<ul>
+<li><code>split</code>：哪个集</li>
+<li><code>prior.directory</code>：哪个模型</li>
+<li><code>executor.directory</code>：哪一版执行器</li>
+<li><code>procedure_masks</code>：开没开程序屏蔽（稍早的文件叫 <code>glidepath_mask</code>，最早的连这个字段都没有）</li>
+<li><code>seed</code>、<code>samples</code>、<code>drawn.per_airport</code>：哪一批航班、几句</li>
+</ul>
+<p>两个数只有文件头都对得上，才能并排比。</p>
+</aside>
+
+<p>验证集：每机场 400 架 × 4 句，种子 1337，扩充起点的种子 1337；landing 和第 7 轮开<b>同一套</b>程序屏蔽，在同一批航班上说话。四份结果都在 <code>4dTrajectory/outputs/POOLED/prior/v3_stage2_clip_20260926/</code> 里。</p>
+
+<div class="task" data-id="q_exec"></div>
+<div class="task" data-id="q_fair"></div>
+<div class="task" data-id="a_lr"></div>
+<div class="task" data-id="a_7r"></div>
+<div class="task" data-id="a_la"></div>
+<div class="task" data-id="a_7a"></div>
+
+<div class="tbl"><table>
+<thead><tr><th></th><th class="n">landing 真实</th><th class="n">第 7 轮 真实</th><th class="n">landing 扩充</th><th class="n">第 7 轮 扩充</th></tr></thead>
+<tbody>
+<tr><td>句数</td><td class="n">8,000</td><td class="n">8,000</td><td class="n">7,936</td><td class="n">7,936</td></tr>
+<tr><td>落地</td><td class="n"><span class="slot" data-id="a_lr"></span> %</td><td class="n"><span class="slot" data-id="a_7r"></span> %</td><td class="n"><span class="slot" data-id="a_la"></span> %</td><td class="n"><span class="slot" data-id="a_7a"></span> %</td></tr>
+<tr><td>直线进近 / 被引导</td><td class="n">99.08 / 93.99 %</td><td class="n">98.89 / 91.83 %</td><td class="n">82.98 / 93.27 %</td><td class="n">89.99 / 93.23 %</td></tr>
+<tr><td>超时</td><td class="n">1.84 %</td><td class="n">2.30 %</td><td class="n">9.35 %</td><td class="n">4.69 %</td></tr>
+<tr><td>越过入口偏在跑道外</td><td class="n">0.47 %</td><td class="n">0.97 %</td><td class="n">2.81 %</td><td class="n">3.29 %</td></tr>
+<tr><td>成对：只有 landing 落地 / 只有第 7 轮落地</td><td class="n" colspan="2">246 / 172</td><td class="n" colspan="2">360 / 711</td></tr>
+</tbody></table></div>
+<p class="caption">扩充起点少 64 句：有 16 架源航班重抽了几次也没抽到合理的扩充起点，整架去掉，16 × 4 = 64（文件里 <code>augmented_left_out</code> = 16）。“直线进近 / 被引导”按源航班的标注分组；扩充起点转过 ±15° 以后，“直线进近”那一组已经不直了，所以它反而比被引导的难。</p>
+
+<h3>判定</h3>
+
+<p><b>事先定的判定线</b>（用户 2026-09-27 同意，在读验证集之前）：第 7 轮真实起点的落地率不低于 landing − 1 个百分点，就采用。</p>
+
+<div class="task" data-id="c_margin"></div>
+<div class="task" data-id="c_zaug"></div>
+<div class="task" data-id="c_ci"></div>
+
+<aside class="note read"><span class="tag">读法</span>
+<p>三种“不确定度”，量的东西不同：</p>
+<ul>
+<li><b>区间</b>：同一个模型，换一批句子，落地率会晃多少。</li>
+<li><b>配对 z</b>：这两个检查点在这批航班上是不是真的不同。</li>
+<li><b>种子线</b>：同一个训练方法换个种子，结果会差多少。</li>
+</ul>
+<p>本阶段量了前两种，没量第三种。所以能说“第 7 轮比 landing 在真实起点上差，是真的”，不能说“这个方法一定会让真实起点变差 0.9 个点”。</p>
+</aside>
+
+<div class="task" data-id="q_concl"></div>
+
+<h3>真实起点为什么掉了</h3>
+
+<p>只读诊断（<code>v3_stage2_lineup_diagnosis_20260927/</code>）：按选择集读数原样重跑真实起点的句子，逐句与存下的读数一致，再加上 base 同一批航班：</p>
+
+<div class="tbl"><table>
+<thead><tr><th>选择集真实起点，2,000 句</th><th class="n">base</th><th class="n">landing</th><th class="n">第 5 轮</th></tr></thead>
+<tbody>
+<tr><td>落地</td><td class="n">88.8 %</td><td class="n">96.4 %</td><td class="n">94.9 %</td></tr>
+<tr><td>截获了、在中线上，越过入口时太高</td><td class="n">53</td><td class="n">5</td><td class="n">22</td></tr>
+<tr><td>超时</td><td class="n">137</td><td class="n">48</td><td class="n">60</td></tr>
+<tr><td>落地句子：说“下降至落地”时比下滑道高</td><td class="n">322 m</td><td class="n">203 m</td><td class="n">255 m</td></tr>
+</tbody></table></div>
+
+<p><b>读法</b>：新增的失败主要是<b>部分退回 base 的老毛病</b>——“下降至落地”说得晚、说的时候太高，越过入口时仍然太高。拉回 base 的那一项和数据项每一步都在往回拉；真实起点落地率本来就高，8 句有好有坏、能提供训练信号的起点只有 17–26 %（第一阶段是 870 / 2,000），守不住第一阶段学到的“早点降”。另一个解释（扩充起点上学到的飞法被搬了过来）没被排除。</p>
+
+<aside class="note read"><span class="tag">读法</span>
+<p>这张表里的“太高”在执行器的判定里记作“越过入口偏在跑道外”——判定没有把“在中线上但太高”和“偏到侧面”分开。一个结局名下藏着两种失败，读分类统计时要知道。</p>
+</aside>
+
+<h3>最低引导高度（MVA）：一个没有公平对照的数</h3>
+
+<p>MVA 是管制员引导飞机时不能低于的高度，按扇区公布。它只作<b>读数</b>，不作约束：真实航迹切入前就有 28.5 % 低于它（多数时候飞机已按公布的程序飞，不再受 MVA 约束，ADS-B 分不出是哪一种）。</p>
+
+<div class="task" data-id="m_aug"></div>
+<div class="task" data-id="q_mva"></div>
+
+<!-- ============================================================ -->
+<h2 id="s5b"><span class="sec">§5′</span>三个模型并排</h2>
+
+<aside class="note write"><span class="tag">写法</span>
+<p>并排的表只放<b>同一口径</b>的数：同一批航班、同一个种子、同一版执行器、同一套屏蔽。有一格口径不同，就在那一格加注，而不是悄悄放进去。</p>
+</aside>
+
+<div class="tbl"><table>
+<thead><tr><th>验证集，执行器 v10，开程序屏蔽</th><th class="n">base</th><th class="n">landing</th><th class="n">augmented</th><th class="n">标注的词</th></tr></thead>
+<tbody>
+<tr><td>真实起点落地</td><td class="n">88.96 %<sup>*</sup></td><td class="n"><span class="slot" data-id="a_lr"></span> %</td><td class="n"><span class="slot" data-id="a_7r"></span> %</td><td class="n">99.75 %</td></tr>
+<tr><td>　其中被引导</td><td class="n">81.18 %<sup>*</sup></td><td class="n">93.99 %</td><td class="n">91.83 %</td><td class="n">99.60 %</td></tr>
+<tr><td>扩充起点落地</td><td class="n muted">没在验证集上读</td><td class="n"><span class="slot" data-id="a_la"></span> %</td><td class="n"><span class="slot" data-id="a_7a"></span> %</td><td class="n muted">—</td></tr>
+<tr><td>每架航向词（真实起点）</td><td class="n">16.72</td><td class="n">13.43</td><td class="n">14.34</td><td class="n">13.15</td></tr>
+</tbody></table></div>
+<p class="caption">* base 那一列只开了下滑道下沿（程序屏蔽的第一版，<code>v3_reread_v10_20260926/val_base_masked_400x4</code>），没在完整的 v2 屏蔽下读过。同一批航班上，landing 在两种屏蔽下都是 97.19 %，差别可以忽略——但严格说它不是同一口径，所以加注。</p>
+
+<!-- ============================================================ -->
+<h2 id="s6"><span class="sec">§6</span>局限</h2>
+
+<aside class="note write"><span class="tag">写法</span>
+<p>局限不是谦虚的套话。每一条写清楚：它会让哪个数偏向哪边，或者让哪个结论说不了。</p>
+</aside>
+
+<ol>
+  <li><b>后训练只有一个训练种子。</b>配对 z 说明检查点之间的差别是真的，说明不了方法本身的稳定性。</li>
+  <li><b>预训练的验证集参与了早停。</b>验证集负对数似然是 28 个 epoch 里挑出的最低点，略偏乐观。</li>
+  <li><b>选轮在选择集上比了多次。</b>选中那一轮的选择集读数偏乐观，所以结论只用验证集的数。</li>
+  <li><b>结局分类太粗。</b>“太高”和“偏到侧面”记成同一个结局；说一条跑道、飞到平行的另一条，被藏在“超时”里（读数文档 §16，landing 约 0.12 %）；没有平行跑道的机场，落地的横向判据是 1,000 m，偏松。</li>
+  <li><b>执行器版本在报告期间变过</b>（v7 / v8 → v10）。跨版本的数不并排；§5′ 的表都在 v10 上。</li>
+  <li><b>扩充起点的 MVA 比例在验证集上没有公平对照。</b></li>
+  <li><b>每架航班的 4 句相关。</b>按句子独立算的区间偏窄。</li>
+  <li><b>只有五个机场，测试集未开封。</b>留出机场 KAUS 还没读，所以这里没有“换一个机场还行不行”的证据。</li>
+</ol>
+
+<!-- ============================================================ -->
+<h2 id="s7"><span class="sec">§7</span>结论与下一步</h2>
+
+<p><b>结论</b>：预训练得到的 base 模仿得好，但闭环下只有九成落地，失败的样子是说个不停的航向词。只奖励落地的第一阶段把落地率提到 97 %，而说话方式反而更接近标注。第二阶段在程序高度约束下，把扩充起点的落地率提高了约 4.4 个百分点，代价是真实起点约 0.9 个百分点（事先定的线以内），采用第 7 轮作为 augmented。</p>
+
+<p><b>下一步</b>（按优先级，见进度报告 <code>docs/two_tier/readouts/2026-09-27_progress_report.zh.md</code>）：先做要改代码、再重跑回放或实验的事——航向提前量的消融；执行器 v11（把“太高”、飞到另一条跑道分出来，收紧落地的横向判据），之后三个模型在 v11 上重读；需要时重训。然后是多机，和在留出机场 KAUS 上读泛化。</p>
+
+<!-- ============================================================ -->
+<h2 id="s8"><span class="sec">§8</span>附录</h2>
+
+<h3>A　读一个数的七步</h3>
+<ol>
+  <li><b>找出处</b>：哪个文件。报告里的每个数都应该能指回一个文件。</li>
+  <li><b>读文件头</b>：集、模型、执行器、屏蔽、种子、样本量。</li>
+  <li><b>找对组</b>：模型说的（<code>prior</code>）还是标注的（<code>labelled</code>）；全部（<code>all</code>）还是分组；真实起点还是扩充起点。</li>
+  <li><b>对单位</b>：文件里的比例是 0–1 的小数，报告里写百分数；“每步”还是“每架”。</li>
+  <li><b>找对照</b>：同一批航班、同一口径的另一个数。没有对照的数只是一个数。</li>
+  <li><b>问不确定度</b>：换一批句子、换一个种子，它会动多少。</li>
+  <li><b>只说数据撑得住的话</b>：事实和读法分开写，读法标明是读法。</li>
+</ol>
+
+<h3>B　写报告的清单</h3>
+<ul class="checklist">
+  <li>摘要有问题、做法、带对照的主要数字、结论、最大的局限</li>
+  <li>问题能用数回答；成功的标准在跑之前写下</li>
+  <li>数据划分写清楚每个集的用途，以及哪个集没被碰过</li>
+  <li>配置能让别人重现：数据产物、代码提交、种子、超参数</li>
+  <li>选择规则在跑之前写定，报告里引用原文</li>
+  <li>每张表写明集、样本量、每个数是什么的比例</li>
+  <li>并排的数口径一致；不一致的格子加注</li>
+  <li>比例相比用百分点</li>
+  <li>写出不确定度，并说明它量的是哪一种变化</li>
+  <li>分组看，别让总数盖住某一组的退步</li>
+  <li>负结果也写，写清楚为什么失败</li>
+  <li>局限写清楚会让哪个数偏向哪边</li>
+</ul>
+
+<h3>C　本报告用到的文件</h3>
+<p>都在 <code>4dTrajectory/outputs/POOLED/prior/</code> 下。</p>
+<div class="tbl"><table>
+<thead><tr><th>文件</th><th>里面是什么</th></tr></thead>
+<tbody>
+<tr><td><code>v3_step1_20260924/choice.json</code></td><td>预训练选变体：各变体的负对数似然、种子线、选中的变体</td></tr>
+<tr><td><code>v3_step1_20260924/full_s1337/config.json</code></td><td>base 的配置、划分、各集航班数、代码提交</td></tr>
+<tr><td><code>v3_step1_20260924/full_s1337/history.json</code></td><td>每个 epoch 的训练集 / 验证集负对数似然</td></tr>
+<tr><td><code>v3_step1_20260924/full_s1337/readout.json</code></td><td>base 的验证集读数：分列、基线、第一步跑道与三条规则</td></tr>
+<tr><td><code>v3_freegen_20260925/val_400x4/generation.json</code></td><td>base 在验证集上的自由生成（执行器 v7）</td></tr>
+<tr><td><code>v3_sft_20260925/val_kept_400x4/generation.json</code></td><td>CAT-K 第 1 轮的验证集自由生成（负结果）</td></tr>
+<tr><td><code>v3_rl_20260925/grpo_s1337/{choice,history}.json</code></td><td>第一阶段的选轮规则、各轮选择集读数</td></tr>
+<tr><td><code>v3_rl_20260925/val_kept_400x4/generation.json</code></td><td>landing 的验证集自由生成（执行器 v8，不开屏蔽）</td></tr>
+<tr><td><code>v3_reread_v10_20260926/val_*_400x4/generation.json</code></td><td>base、landing 在执行器 v10 上的验证集重读（开 / 不开下滑道下沿）</td></tr>
+<tr><td><code>v3_stage2_clip_20260926/aug_s1337/{choice,history}.json</code></td><td>第二阶段的选轮规则、各轮选择集读数</td></tr>
+<tr><td><code>v3_stage2_clip_20260926/val_*_400x4/generation.json</code></td><td>landing 与第 7 轮在验证集上的自由生成：真实起点、扩充起点</td></tr>
+</tbody></table></div>
+
+<p>文字版的完整读数：<code>4dTrajectory/ts_transformer/docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md</code>（§4、§5、§7、§17 对应本报告的三个实验）。</p>
+
+<footer>
+  页面文件：<code>4dTrajectory/ts_transformer/docs/two_tier/readouts/2026-09-27_training_report_interactive.html</code>。所有数字 2026-09-27 从上表的文件里重新读过。
+</footer>
+</div>
+</div>
+
+<script>
+(function(){
+"use strict";
+const R = '4dTrajectory/outputs/POOLED/prior/';
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fileRow = p => `<div class="row"><span class="lbl">文件</span><span class="val"><code>${esc(p)}</code></span></div>`;
+const keyRow  = k => `<div class="row"><span class="lbl">键</span><span class="val"><code>${esc(k)}</code></span></div>`;
+const textRow = (h, lbl='') => `<div class="row"><span class="lbl">${lbl}</span><span class="val txt">${h}</span></div>`;
+const cmdRow  = (k, p) => { const c = `jq '${k}' ${p}`; return `<div class="cmd"><code>${esc(c)}</code><button class="btn copy" type="button" data-copy="${esc(c)}">复制</button></div>`; };
+
+const STEP1 = R + 'v3_step1_20260924/full_s1337/';
+const FG_BASE = R + 'v3_freegen_20260925/val_400x4/generation.json';
+const S2 = R + 'v3_stage2_clip_20260926/';
+
+/* Every answer below was read from the file it names on 2026-09-27. */
+const T = {
+d1:{kind:'read', q:'训练集用了多少个运行日？', unit:'天', ans:53, dec:0, tol:0,
+  show:[fileRow(STEP1+'config.json'), keyRow('.instructions.day_split.counts.train'), cmdRow('.instructions.day_split.counts.train', STEP1+'config.json')],
+  traps:[[44362,'这是训练集的<b>航班</b>数（<code>.flights.train</code>）。题目问的是运行日的天数。'],[14,'14 是验证集（也是测试集）的天数。'],[9,'9 是内部选择集的天数。']],
+  ok:'53 个运行日。同一个文件里 <code>.instructions.day_split.days</code> 列出了每一天，<code>method</code> 写着划分的算法——按天、按固定种子排序，谁来重跑都是同一份。'},
+d2:{kind:'read', q:'验证集上有多少架已标注的航班？', unit:'架', ans:10633, dec:0, tol:0,
+  show:[fileRow(STEP1+'config.json'), keyRow('.flights.val'), cmdRow('.flights.val', STEP1+'config.json')],
+  traps:[[14,'这是验证集的天数，不是航班数。'],[44362,'这是训练集的。'],[6842,'这是内部选择集的。']],
+  ok:'10,633 架。'},
+q_seed:{kind:'choice', q:'按事先写定的规则，该选哪个变体？',
+  show:[textRow('读 <code>choice.json</code> 的 <code>seed_line</code>，再和上表各变体与 full（1337）的差比一比。', '提示')],
+  opts:[
+   ['no-context：输入最少，和 full 只差 0.3 %，可以忽略', false, '“可以忽略”要有一把尺子。这里的尺子是种子线：同一配置换个种子就差 0.00016。no-context 差 0.00081，是种子线的约 5 倍，不在线内。'],
+   ['full：no-context 差 0.00081，是种子线 0.00016 的约 5 倍；线内只有 full 自己', true, '对（<code>choice.json</code> 的 <code>within_seed_line</code> 只有 full）。规则是跑之前写定的，这一步没有“看了结果再挑”的余地。另外要知道：种子线只用两个种子量，本身很粗——它是写规则时负担得起的尺子，不是精确的噪声估计。'],
+   ['先看三个变体在验证集上的数，再定', false, '选择只能用内部选择集。验证集每个模型只读一次；拿它来挑，验证集的数就成了“挑过的最好成绩”，不再是没见过的数据上的成绩。']
+  ]},
+t_epoch:{kind:'read', q:'验证集负对数似然最低的是第几个 epoch？', unit:'', ans:25, dec:0, tol:0,
+  show:[fileRow(STEP1+'history.json'), textRow('每个 epoch 一项，在 <code>.epochs</code> 数组里；找 <code>val_nll_per_step</code> 最小的那一项，读它的 <code>epoch</code>。', '键')],
+  hints:[cmdRow('.epochs | min_by(.val_nll_per_step) | .epoch', STEP1+'history.json')],
+  traps:[[28,'28 是训练<b>停下</b>的 epoch：之后连续 3 个 epoch 都没更低（<code>patience</code> = 3）才停。保留的是更早那个最低点的权重。']],
+  ok:'第 25 个。第 26–28 个都没有更低，第 28 个结束时停下，权重退回第 25 个。'},
+p_nll:{kind:'read', q:'base 在验证集上每个预测步的负对数似然（六列加起来，四位小数）', unit:'', ans:0.26429, dec:4, tol:0.00006,
+  show:[fileRow(STEP1+'readout.json'), keyRow('.model.nll_per_step'), cmdRow('.model.nll_per_step', STEP1+'readout.json')],
+  traps:[[0.2375,'这是“第一步之后”的（<code>nll_after_first_per_step</code>）。第一个预测步要一次说出全部六列、最难，主数字包含它。'],[0.2840,'这是<b>内部选择集</b>上的（<code>choice.json</code>）。题目问验证集。'],[0.3191,'这是第一步跑道“每架”的数（<code>first_step_runway.nll_per_flight</code>）。'],[1.3025,'这是困惑度（<code>perplexity_per_step</code>）。']],
+  ok:'0.2643，按 1,907,304 个预测步、10,633 架航班平均。它和训练曲线第 25 个 epoch 的验证集读数完全一样——见旁边的读法。'},
+p_prev:{kind:'read', q:'最强的基线“只看上一个词”，同一口径下的每步负对数似然（四位小数）', unit:'', ans:0.61352, dec:4, tol:0.00006,
+  show:[fileRow(STEP1+'readout.json'), keyRow('.baselines["previous word"].all'), cmdRow('.baselines["previous word"].all', STEP1+'readout.json'), textRow('键名里有空格，jq 里要写成 <code>["previous word"]</code>。', '注意')],
+  traps:[[0.8836,'这是“重复上一条”（<code>repeat</code>），较弱的那个基线。'],[0.3490,'这只是航向一列（<code>heading</code>）。要六列加起来的 <code>all</code>。']],
+  ok:'0.6135。基线也要“同口径”：同一批航班、同样的计算规则、从模型自己的训练航班数出来。换一个口径，比较就失去意义。'},
+c_rel:{kind:'calc', q:'模型比最强的基线低百分之几？（相对降幅，一位小数）', unit:'%', ans:56.92, dec:1, tol:0.06, uses:['p_nll','p_prev'],
+  hints:[textRow('相对降幅 = (1 − 模型 ÷ 基线) × 100', '公式')],
+  traps:[[34.92,'你算的是差值（0.6135 − 0.2643 = 0.3492）。相对降幅要除以基线。',0.06],[70.09,'这是对“重复上一条”的降幅。要和<b>最强</b>的基线比；和弱基线比会显得更好看，这正是要避免的。',0.06],[232.1,'这是倍数（基线 ÷ 模型 ≈ 2.32）。',1],[2.321,'这是倍数（基线 ÷ 模型）。',0.01]],
+  ok:'约 56.9 %。'},
+c_ppl:{kind:'calc', q:'困惑度 = e 的（负对数似然）次方。算一下，三位小数。', unit:'', ans:1.30251, dec:3, tol:0.0006, uses:['p_nll'],
+  hints:[textRow('python：<code>import math; math.exp(0.2643)</code>', '怎么算')],
+  traps:[[0.7678,'指数的符号反了：困惑度是 e 的 +0.2643 次方。',0.001]],
+  ok:'约 1.30：平均每一步，模型像是在 1.3 个等可能的选项里挑一个。但别被它的小骗了：绝大多数步是“不变”，很好猜；在真正换词的那些步上，模型给“换”的平均概率只有 0.26–0.66（<code>mean_change_probability_where_changed</code>）。“什么时候换”比“换成什么”难。'},
+p_rw:{kind:'read', q:'第一个预测步说跑道：在“还没建立在五边上”的航班上，前 1 命中率（%，两位小数）', unit:'%', pct:true, ans:81.4795, dec:2, tol:0.006,
+  show:[fileRow(STEP1+'readout.json'), textRow('<code>model</code> → <code>first_step_runway</code> → <code>by_establishment</code> → <code>"not established"</code> → <code>top1</code>', '键')],
+  hints:[cmdRow('.model.first_step_runway.by_establishment["not established"].top1', STEP1+'readout.json')],
+  traps:[[86.61,'这是<b>全部</b>航班的。题目问还没建立在五边上的那一组。'],[99.77,'这是<b>已经建立</b>在五边上的那一组。'],[72.08,'这是规则 B3 的（在 <code>.rules</code> 里），不是模型的。'],[69.60,'这是规则 B1 的，不是模型的。'],[48.69,'这是 B0（机场最常用跑道）的，不是模型的。']],
+  ok:'81.48 %（7,651 架）。已经在五边上的航班跑道一目了然（99.77 %），真正考模型的是还没建立的那些，所以设计的“门”写在这一组上。'},
+f_base:{kind:'read', q:'base 自己说、执行器照着飞：验证集上的落地率（%，两位小数）', unit:'%', pct:true, ans:90.20, dec:2, tol:0.006,
+  show:[fileRow(FG_BASE), textRow('<code>readout</code> → <code>prior</code>（模型说的）→ <code>all</code> → <code>outcomes</code> → <code>landed</code>。文件有 7 MB，大半是逐句记录（<code>flights</code>），用 jq 只取要的那一层。', '键')],
+  hints:[cmdRow('.readout.prior.all.outcomes.landed', FG_BASE)],
+  traps:[[99.90,'这是 <code>labelled</code>：执行器照<b>标注的词</b>飞的对照，不是模型说的。'],[93.97,'这是直线进近（<code>straight-in</code>）那一组。'],[83.29,'这是被引导（<code>vectored</code>）那一组。'],[89.06,'这是执行器 v10 上的重读（<code>v3_reread_v10_20260926</code>）。题目给的是 v7 那次。'],[88.96,'这是执行器 v10 上开下滑道下沿的重读。题目给的是 v7 那次。']],
+  ok:'90.20 %，8,000 句 = 2,000 架 × 4 句。'},
+f_vec:{kind:'read', q:'其中<b>被引导</b>的航班（管制员给航向引导上五边的）落地率（%，两位小数）', unit:'%', pct:true, ans:83.2861, dec:2, tol:0.006,
+  show:[fileRow(FG_BASE), textRow('和上一题同一层，把 <code>all</code> 换成 <code>vectored</code>。', '键')],
+  hints:[cmdRow('.readout.prior.vectored.outcomes.landed', FG_BASE)],
+  traps:[[90.20,'这是全部航班的。'],[99.86,'这是 <code>labelled</code> 的被引导组。'],[93.97,'这是直线进近那一组。']],
+  ok:'83.29 %，直线进近 93.97 %。难的在被引导的航班上。'},
+q_ceiling:{kind:'choice', q:'同一个文件里还有 <code>labelled</code> 一组：执行器照标注的词飞，99.9 % 落地。它在报告里起什么作用？',
+  opts:[
+   ['它是模型要追的目标，模型到 99.9 % 才算成功', false, '不完全。标注的词是看了整条真实航迹读出来的，带着“未来”；模型只能看过去。99.9 % 是执行器在“词完全对”时的上限，不是模型必须达到的线。'],
+   ['它说明执行器本身几乎不会让飞机失败，所以模型那约 10 % 的失败主要是说的词造成的', true, '对。这是一个<b>上限对照</b>：同样的起点、同样的执行器，换成对的词就几乎都能落地。它把失败归到了先验身上，而不是执行器。'],
+   ['模型比标注差 9.7 个百分点，说明模型不可用', false, '一个对照给不出“可用 / 不可用”。可用的线要事先定——当时定的是“先只记录”。']
+  ]},
+q_rule1:{kind:'choice', q:'按规则，第一阶段选第几轮？',
+  show:[textRow('各轮选择集落地率（<code>landed</code>）：90.0、<b>96.45</b>、95.35、95.55、95.1、95.2、95.95、96.05、95.1 %（第 0–8 轮）', '数')],
+  opts:[
+   ['第 1 轮', true, '对。最高是第 1 轮（96.45 %），1.5 个点以内（≥ 94.95 %）的有第 1–8 轮，取最早的——还是第 1 轮。'],
+   ['第 7 轮', false, '第 7 轮 96.05 % 确实在 1.5 个点以内，但规则取<b>最早</b>的：训练更少、离 base 更近。'],
+   ['第 8 轮：训练得最久', false, '训练得久不等于更好；第 8 轮在选择集上只有 95.1 %。选轮只看规则。'],
+   ['第 0 轮', false, '第 0 轮就是 base 本身（90.0 %），比最高差了 6 个多点。']
+  ]},
+l_val:{kind:'read', q:'landing 在验证集上的落地率（%，一位小数）', unit:'%', pct:true, ans:97.225, dec:1, tol:0.051,
+  show:[fileRow(R+'v3_rl_20260925/val_kept_400x4/generation.json'), textRow('和读 base 时同一个位置。', '键')],
+  hints:[cmdRow('.readout.prior.all.outcomes.landed', R+'v3_rl_20260925/val_kept_400x4/generation.json')],
+  traps:[[96.45,'这是第 1 轮在<b>选择集</b>上的数（<code>choice.json</code>）。题目问验证集。',0.04],[99.90,'这是 <code>labelled</code>。',0.04],[99.0,'这是直线进近那一组。',0.04]],
+  ok:'97.2 %（文件里是 0.97225）。与 base 的 90.2 % 是<b>同一批 2,000 架、同一个种子</b>，所以能并排比。'},
+c_vecgain:{kind:'calc', q:'被引导的航班上，落地率提高了多少？（landing 的被引导 − base 的被引导，一位小数）', unit:'个百分点', range:[10.6,10.7], dec:1, tol:0.051, ans:10.65, uses:['f_vec'],
+  show:[textRow('landing 的被引导落地率要你自己读：还是 <code>v3_rl_20260925/val_kept_400x4/generation.json</code>，<code>vectored</code> 组。', '要读')],
+  hints:[cmdRow('.readout.prior.vectored.outcomes.landed', R+'v3_rl_20260925/val_kept_400x4/generation.json')],
+  traps:[[12.8,'这是<b>相对</b>增幅（10.65 ÷ 83.29）。“提高多少个百分点”是两个百分数直接相减。',0.1],[7.0,'这是全部航班的提高（97.2 − 90.2）。题目问被引导的。',0.06],[-10.65,'顺序反了：landing − base。',0.06]],
+  ok:'约 10.6–10.7 个百分点（93.94 − 83.29）；直线进近只从 94.0 到 99.0。提升主要在难的那一组，这比总数更能说明它学到了东西。'},
+l_head:{kind:'read', q:'被引导的航班上，landing 每架说几个航向词？（第一步之后，两位小数）', unit:'个', ans:31.4713, dec:2, tol:0.006,
+  show:[fileRow(R+'v3_rl_20260925/val_kept_400x4/generation.json'), textRow('<code>readout.prior.vectored</code> 下的 <code>words_after_first_per_flight</code>，其中 <code>heading</code>。', '键')],
+  hints:[cmdRow('.readout.prior.vectored.words_after_first_per_flight.heading', R+'v3_rl_20260925/val_kept_400x4/generation.json')],
+  traps:[[31.43,'这是 <code>labelled</code>（标注）的数——正好可以拿来对照。题目问模型说的。'],[13.04,'这是全部航班的。题目问被引导的。',0.01],[37.42,'这是 base 的（在 <code>v3_freegen_20260925</code> 那份里）。']],
+  ok:'31.47 个；标注是 31.43 个，base 是 37.42 个。base 失败的样子是说个不停的航向词；landing 把它降到和标注几乎一样。奖励只看落地，却把说话方式拉回了数据这边。'},
+l_tf:{kind:'read', q:'第 1 轮在内部选择集上的 teacher forcing 负对数似然（四位小数）', unit:'', ans:0.28480, dec:4, tol:0.00006,
+  show:[fileRow(R+'v3_rl_20260925/grpo_s1337/history.json'), textRow('<code>rounds</code> 数组里 <code>round</code> = 1 的那一项的 <code>select_tf_nll</code>。', '键')],
+  hints:[cmdRow('.rounds[] | select(.round == 1) | .select_tf_nll', R+'v3_rl_20260925/grpo_s1337/history.json')],
+  traps:[[0.2840,'这是第 0 轮（也就是 base）的。'],[0.2643,'这是 base 在<b>验证集</b>上的，不是选择集。'],[0.2800,'这是后面几轮的。题目问第 1 轮。']],
+  ok:'0.2848；第 0 轮 0.2840，只高 0.3 %。落地率涨了 6 个多点，在真实航班的语境下说的话几乎没变——这是数据项在守。'},
+c_z1:{kind:'calc', q:'b = 163（只有 base 落地），c = 803（只有 landing 落地）。z = (c − b) ÷ √(b + c)，两位小数。', unit:'', ans:20.5917, dec:2, tol:0.011,
+  traps:[[-20.59,'符号反了：按定义，landing 多落地为正。',0.02],[640,'这是 c − b，还没除以 √(b + c)。',0.5],[0.6625,'分母用的是 b + c，不是它的平方根。',0.01]],
+  ok:'约 20.6，远大于 2：这批航班上 landing 比 base 落地多，不是抽到的句子碰巧好。但它说的是“这两个检查点”，不是“这个训练方法”——换一个训练种子会怎样，这里没量。'},
+k_vec:{kind:'read', q:'CAT-K 在验证集<b>被引导</b>航班上的落地率（%，两位小数）', unit:'%', pct:true, ans:80.9844, dec:2, tol:0.006,
+  show:[fileRow(R+'v3_sft_20260925/val_kept_400x4/generation.json'), textRow('和读 base 被引导时同一个位置。', '键')],
+  hints:[cmdRow('.readout.prior.vectored.outcomes.landed', R+'v3_sft_20260925/val_kept_400x4/generation.json')],
+  traps:[[93.13,'这是全部航班的。',0.01],[99.75,'这是直线进近那一组。'],[99.86,'这是 <code>labelled</code> 的被引导组。']],
+  ok:'80.98 %，比 base 的 83.29 % 还低。'},
+q_catk:{kind:'choice', q:'CAT-K 验证集总落地 90.2 → 93.1 %。为什么报告写“失败，不采用”？',
+  opts:[
+   ['提升全部来自直线进近（94.0 → 99.7 %），被引导的反而变差（83.3 → 81.0 %）；teacher forcing 负对数似然 0.284 → 0.452，它学成了“早许可、少说话”，离数据越来越远', true, '对。两处露馅：<b>分组</b>（难的那一组退步）和<b>另一类指标</b>（离数据变远）。每架航向词只剩 5.6 个，标注是 12.7 个。'],
+   ['2.9 个百分点太小，不值得', false, '大小不是理由。如果它在各组都提升、又没离开数据，2.9 个点也值得。'],
+   ['因为后来的按落地强化更好', false, '那是事后的比较。不采用的理由在它自己的数据里就有：分组和负对数似然。']
+  ]},
+q_rule2:{kind:'choice', q:'按规则，第二阶段选第几轮？',
+  show:[textRow('真实起点（<code>real_landed</code>）：96.4、95.85、95.65、94.9、95.05、94.9、95.3、95.95、95.55 %<br>扩充起点（<code>augmented_landed</code>）：87.50、86.95、89.66、89.71、89.01、90.46、90.71、90.56、91.37 %<br>其余几条护栏（跑道、五列说话方式）没有排除任何一轮。', '数')],
+  opts:[
+   ['第 8 轮', false, '第 8 轮扩充起点最高（91.37 %），但第 7 轮（90.56 %）在它 1.5 个点以内，规则取<b>最早</b>的。'],
+   ['第 7 轮', true, '对。先用护栏排除：真实起点要 ≥ 96.4 − 1 = 95.4 %，第 3–6 轮不够（<code>excluded_by_the_guards</code> = [3, 4, 5, 6]）。剩下 0、1、2、7、8；最高是第 8 轮 91.37 %，1.5 个点以内（≥ 89.87 %）的有第 7、8 轮，取最早 → 第 7 轮。'],
+   ['第 6 轮', false, '第 6 轮真实起点 95.3 %，低于护栏 95.4 %，被排除了。'],
+   ['第 2 轮', false, '第 2 轮 89.66 % 比 91.37 − 1.5 = 89.87 % 低一点，不在 1.5 个点以内。']
+  ]},
+q_exec:{kind:'choice', q:'先读文件头。第一阶段自己的验证集读数（<code>v3_rl_20260925/val_kept_400x4/generation.json</code>）用的是哪一版执行器？',
+  show:[textRow('<code>jq \'.executor.directory\' 文件</code>，看路径的最后一段。', '怎么读')],
+  opts:[
+   ['v7_20260925', false, 'v7 是 base 那次自由生成（<code>v3_freegen_20260925</code>）用的。再看一眼这份文件的 <code>executor.directory</code>。'],
+   ['v8_20260925', true, '对，v8。这份文件是旧格式（<code>schema</code> 是 <code>ts-prior-free-generation-v1</code>），连 <code>procedure_masks</code>、<code>glidepath_mask</code> 字段都没有——那时程序屏蔽还不存在。第二阶段那四份是 v10、<code>procedure_masks</code> 为 true（<code>procedure-altitudes-v2</code>）。字段<b>不存在</b>和字段为 false 是两回事，读的时候要分清。'],
+   ['v10_20260926', false, 'v10 是第二阶段那四份用的。这一份更早。']
+  ]},
+q_fair:{kind:'choice', q:'augmented 在真实起点上的落地率，应该和 landing 的哪个数比？',
+  opts:[
+   ['97.2 %：第一阶段报告里 landing 的验证集读数', false, '那次是执行器 v8、没开程序屏蔽。两个数碰巧都约是 97.2，但条件不同；<b>碰巧相同不等于可比</b>。'],
+   ['<code>v3_stage2_clip_20260926/val_stage1_400x4</code> 里的数：同一批航班、同一个种子、执行器 v10、同一套程序屏蔽', true, '对。对照必须和被比的那个数只差“模型”这一件事。第二阶段为此专门在同样的条件下把 landing 重读了一遍。'],
+   ['第 7 轮自己在选择集上的数', false, '那是同一个模型在另一批航班上的数；选择集还被拿来挑过轮，不能当对照。']
+  ]},
+a_lr:{kind:'read', q:'landing 在验证集<b>真实起点</b>上的落地率（开着与 augmented 相同的程序屏蔽；%，两位小数）', unit:'%', pct:true, ans:97.1875, dec:2, tol:0.006,
+  show:[textRow('目录 <code>v3_stage2_clip_20260926/</code> 里 <code>val_</code> 开头的子目录就是验证集读数。自己找对文件。', '去哪')],
+  hints:[textRow('<code>stage1</code> = 第一阶段的模型（landing），<code>kept</code> = 选中的一轮（augmented）；带 <code>_aug</code> 的是扩充起点。', '提示 1'), cmdRow('.readout.prior.all.outcomes.landed', S2+'val_stage1_400x4/generation.json')],
+  traps:[[97.225,'这是第一阶段自己的验证集读数（<code>v3_rl_20260925/val_kept_400x4</code>）：执行器 v8、没开屏蔽，与 augmented 不同口径。'],[96.40,'这是第二阶段第 0 轮在<b>选择集</b>上的数。'],[99.75,'这是 <code>labelled</code>。'],[96.26,'这是第 7 轮（<code>val_kept_400x4</code>）的。题目问 landing。'],[86.76,'这是扩充起点的。']],
+  ok:'97.19 %。它和第一阶段的 97.2 % 只是碰巧接近，条件并不一样。'},
+a_7r:{kind:'read', q:'第 7 轮（augmented）在验证集<b>真实起点</b>上的落地率（%，两位小数）', unit:'%', pct:true, ans:96.2625, dec:2, tol:0.006,
+  show:[textRow('同一个目录。', '去哪')],
+  hints:[textRow('选中的一轮叫 <code>kept</code>。', '提示 1'), cmdRow('.readout.prior.all.outcomes.landed', S2+'val_kept_400x4/generation.json')],
+  traps:[[95.95,'这是第 7 轮在<b>选择集</b>上的数（<code>choice.json</code> / <code>round_07/readout.json</code>）。'],[97.19,'这是 landing 的。'],[99.75,'这是 <code>labelled</code>。'],[91.18,'这是扩充起点的。']],
+  ok:'96.26 %。'},
+a_la:{kind:'read', q:'landing 在验证集<b>扩充起点</b>上的落地率（%，两位小数）', unit:'%', pct:true, ans:86.7566, dec:2, tol:0.006,
+  show:[textRow('同一个目录。', '去哪')],
+  hints:[textRow('landing 是 <code>stage1</code>，扩充起点带 <code>_aug</code>。这份文件里没有 <code>labelled</code> 组：扩充起点没有标注的词。', '提示 1'), cmdRow('.readout.prior.all.outcomes.landed', S2+'val_stage1_aug_400x4/generation.json')],
+  traps:[[87.50,'这是第二阶段第 0 轮在<b>选择集</b>上的扩充起点。'],[91.18,'这是第 7 轮的。'],[97.19,'这是真实起点的。']],
+  ok:'86.76 %，7,936 句。'},
+a_7a:{kind:'read', q:'第 7 轮在验证集<b>扩充起点</b>上的落地率（%，两位小数）', unit:'%', pct:true, ans:91.1794, dec:2, tol:0.006,
+  show:[textRow('同一个目录。', '去哪')],
+  hints:[cmdRow('.readout.prior.all.outcomes.landed', S2+'val_kept_aug_400x4/generation.json')],
+  traps:[[90.56,'这是第 7 轮在<b>选择集</b>上的数。'],[91.37,'这是第 8 轮在选择集上的数。'],[86.76,'这是 landing 的。'],[96.26,'这是真实起点的。']],
+  ok:'91.18 %。扩充起点 +4.4 个百分点，几乎全来自扩充起点里源航班是直线进近的那些不再超时（超时 9.35 → 4.69 %）。'},
+c_margin:{kind:'calc', q:'第 7 轮的真实起点离判定线（landing − 1 个百分点）还有多少个百分点？（两位小数）', unit:'个百分点', range:[0.07,0.08], ans:0.075, dec:2, tol:0.006, uses:['a_lr','a_7r'],
+  hints:[textRow('判定线 = landing − 1；余量 = 第 7 轮 − 判定线。', '公式')],
+  traps:[[-0.93,'这是两者之差（第 7 轮 − landing）。余量是离“landing − 1”那条线的距离。',0.01],[0.93,'这是两者之差的绝对值，不是离判定线的余量。',0.01],[1.07,'判定线是 landing <b>减</b> 1。',0.02]],
+  ok:'0.07 个百分点（96.26 − 96.19）。过线，但余量很小。报告里要把余量写出来，不能只写“过了”；线是量之前定的，所以现在不能放宽，也不能收紧。'},
+c_zaug:{kind:'calc', q:'扩充起点上成对比较：只有 landing 落地 360 对，只有第 7 轮落地 711 对。z = (c − b) ÷ √(b + c)，c 取第 7 轮。两位小数。', unit:'', ans:10.7254, dec:2, tol:0.011,
+  traps:[[-10.73,'符号反了：c 是“只有第 7 轮落地”的对数。',0.02],[351,'这是 c − b，还没除。',0.5]],
+  ok:'约 10.7。真实起点那一对是 246 / 172，z ≈ −3.6：两边的变化都是真的，一个变好、一个变坏。'},
+c_ci:{kind:'calc', q:'假装 8,000 句互相独立，第 7 轮真实起点 96.26 % 的 95 % 区间<b>半宽</b>是多少个百分点？1.96 × √(p(1 − p) ÷ n) × 100，两位小数。', unit:'个百分点', ans:0.4157, dec:2, tol:0.006, uses:['a_7r'],
+  hints:[textRow('p = 0.9626，n = 8000。', '代入')],
+  traps:[[0.21,'这是标准误，还没乘 1.96。',0.006],[0.0042,'这是小数形式；乘 100 换成百分点。',0.0002]],
+  ok:'约 ±0.42 个百分点。但 8,000 句并不独立：每架航班说 4 句，同一架的 4 句结局很相关（多数航班 4 句全落地），真正独立的单位更接近 2,000 架，区间要更宽。配对比较把航班本身的难易抵消掉了，所以比两个各自的区间更灵敏。'},
+q_concl:{kind:'choice', q:'报告的结论句该怎么写？',
+  opts:[
+   ['augmented 全面优于 landing。', false, '不对：真实起点下降了 0.93 个百分点，配对 z ≈ −3.6，这个下降是真的。“全面”说过头了。'],
+   ['augmented 在扩充起点上落地 +4.4 个百分点（配对 z ≈ 10.7），在真实起点上 −0.9 个百分点（z ≈ −3.6，真实，但在事先定的 1 个百分点线以内，余量 0.07），按规则采用。', true, '对。好坏两边都写、带着数和对照、说明判定依据是事先定的规则，并写出余量。'],
+   ['真实起点只降了 0.9 个点，是噪声，可以忽略。', false, '配对 z ≈ −3.6，不是噪声。它可以被接受，理由是事先定的线，而不是“看不见”。'],
+   ['扩充起点提高 4.4 %，说明模型能泛化到新机场。', false, '两处错：一，4.4 是百分点，不是百分比；二，扩充起点是同一批机场的起点转过、升降过，不是新机场。新机场要在留出的 KAUS 上读。']
+  ]},
+m_aug:{kind:'read', q:'第 7 轮在扩充起点上，切入前（且还没许可）低于 MVA 的句子占多少？（%，两位小数）', unit:'%', pct:true, ans:19.7707, dec:2, tol:0.006,
+  show:[fileRow(S2+'val_kept_aug_400x4/generation.json'), textRow('<code>readout.prior.all</code> 下有一组 <code>pre_join</code>（切入前）；<code>said_</code> 开头的是模型的句子，<code>observed_</code> 开头的是源航班的观测航迹。', '键')],
+  hints:[cmdRow('.readout.prior.all.pre_join', S2+'val_kept_aug_400x4/generation.json')],
+  traps:[[6.20,'这是 <code>observed_under_mva</code>：源航班的观测航迹。'],[24.23,'这是 landing 的（<code>val_stage1_aug_400x4</code>）。'],[5.36,'这是真实起点的。']],
+  ok:'19.77 %；源航班观测 6.20 %，landing 24.23 %。'},
+q_mva:{kind:'choice', q:'模型 19.8 %，源航班观测 6.2 %。报告能不能写“模型低于 MVA 的比例是真实飞行的 3 倍”？',
+  opts:[
+   ['能，19.8 ÷ 6.2 ≈ 3.2', false, '算术没错，比较错了。扩充起点绕机场转过 ±15°、升降过，走的不是源航班那条路。'],
+   ['不能直接这么写：扩充起点和源航班走的不是同一条路。在选择集上量过，把真实航迹同样转、升之后，本身就有 15.1 % 低于 MVA（同一集上 landing 的句子 25.4 %）。验证集上没量这个对照，报告要写出这个缺口', true, '对。对照要和被比的东西只差一件事。源航班的观测和扩充起点差了两件事（起点被移动过、飞的人不同），所以 3 倍这个数不能说明模型比真人低多少。'],
+   ['不用管，MVA 只是读数', false, '只作读数，不等于可以随便解读。读数也要有公平的对照，否则就不写倍数。']
+  ]}
+};
+
+/* ---------------- state ---------------- */
+const STORE = 'base-to-augmented-report-v1';
+let S = {};
+try { S = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; } catch (e) { S = {}; }
+const save = () => { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) {} };
+
+const cards = Array.from(document.querySelectorAll('.task[data-id]'));
+const order = cards.map(c => c.dataset.id);
+const numOf = {};
+order.forEach((id, i) => { numOf[id] = i + 1; });
+const SYM = {read:'✦', calc:'△', choice:'◇'};
+const KIND = {read:'读数', calc:'计算', choice:'判断'};
+
+function fmtVal(t, v) {
+  const x = Number(v);
+  if (t.dec === 0) return x.toLocaleString('en-US');
+  return x.toFixed(t.dec);
+}
+function renderSlots(id) {
+  const t = T[id]; const st = S[id];
+  document.querySelectorAll(`.slot[data-id="${id}"]`).forEach(el => {
+    el.setAttribute('role', 'button'); el.tabIndex = 0;
+    el.classList.remove('done', 'shown');
+    if (st && (st.st === 'ok' || st.st === 'shown') && t.kind !== 'choice') {
+      el.textContent = fmtVal(t, st.v);
+      el.classList.add(st.st === 'ok' ? 'done' : 'shown');
+      el.title = st.st === 'ok' ? '你读对的数' : '看过答案';
+    } else {
+      el.textContent = `${SYM[t.kind]} ${KIND[t.kind]} ${numOf[id]}`;
+      el.title = '点这里去读这个数';
+    }
+  });
+}
+document.addEventListener('keydown', e => { const s = e.target.closest && e.target.closest('.slot[data-id]'); if (s && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); s.click(); } });
+document.addEventListener('click', e => {
+  const s = e.target.closest('.slot[data-id]');
+  if (s) { const c = document.querySelector(`.task[data-id="${s.dataset.id}"]`); if (c) { c.scrollIntoView({behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'start'}); const inp = c.querySelector('input'); if (inp && !inp.disabled) setTimeout(() => inp.focus({preventScroll:true}), 350); } }
+  const cp = e.target.closest('.copy');
+  if (cp) {
+    const txt = cp.dataset.copy;
+    const done = () => { cp.textContent = '已复制'; setTimeout(() => cp.textContent = '复制', 1400); };
+    try { navigator.clipboard.writeText(txt).then(done, () => selectCode(cp)); } catch (err) { selectCode(cp); }
+  }
+});
+function selectCode(btn) {
+  const code = btn.parentElement.querySelector('code'); const r = document.createRange(); r.selectNodeContents(code);
+  const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); btn.textContent = '已选中，按 Ctrl+C';
+}
+
+/* ---------------- judging ---------------- */
+function parseNum(raw) {
+  let s = String(raw).trim()
+    .replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0))
+    .replace(/[．。]/g, '.').replace(/[−－–—]/g, '-').replace(/[＋]/g, '+')
+    .replace(/[%％\s个百分点架天]/g, '').replace(/[,，]/g, '');
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(s)) return null;
+  return {v: parseFloat(s), dec: (s.split('.')[1] || '').length};
+}
+function inTarget(t, v) {
+  if (t.range) return v >= t.range[0] - 1e-9 && v <= t.range[1] + 1e-9;
+  return Math.abs(v - t.ans) <= t.tol + 1e-12;
+}
+function judge(t, raw) {
+  const p = parseNum(raw);
+  if (!p) return {k:'fmt', msg:'没读懂这个数。只填数字，例如 0.2643 或 97.19。'};
+  let v = p.v, unitNote = '';
+  if (inTarget(t, v)) return {k:'ok'};
+  const trapHit = x => { for (const [tv, msg, tt] of (t.traps || [])) if (Math.abs(x - tv) <= (tt ?? Math.max(t.tol, 0.006)) + 1e-12) return msg; return null; };
+  let m = trapHit(v);
+  if (m) return {k:'trap', msg:m};
+  if (t.pct && Math.abs(v) <= 1 && Math.abs(t.ans) > 1) {
+    if (inTarget(t, v * 100)) return {k:'unit', msg:'数是对的，但文件里存的是 0–1 的小数，报告里写百分数：乘以 100 再填。'};
+    m = trapHit(v * 100);
+    if (m) return {k:'trap', msg:m + '（另外，报告里写百分数：乘以 100。）'};
+  }
+  if (t.dec != null && p.dec < t.dec) {
+    const f = Math.pow(10, p.dec);
+    if (Math.abs(Math.round(t.ans * f) / f - v) < 1e-9 || (t.range && Math.abs(Math.round(t.range[0] * f) / f - v) < 1e-9)) return {k:'prec', msg:`方向对了，但位数不够：这里要保留 ${t.dec} 位小数。`};
+  }
+  if (Math.abs(v - t.ans) <= Math.max(25 * t.tol, Math.abs(t.ans) * 0.004)) return {k:'near', msg:'很接近，但不对。看看是不是四舍五入错了一位，或者读了相邻的另一个数。'};
+  if (t.kind === 'calc') return {k:'wrong', msg:'不对。先确认用到的数都读对了（上面标着），再看公式。'};
+  return {k:'wrong', msg:'不对。先确认打开的是题目说的文件，再确认读的是哪一组：模型说的（prior）还是标注的（labelled），全部（all）还是某一组。'};
+}
+
+/* ---------------- building cards ---------------- */
+function build(card) {
+  const id = card.dataset.id, t = T[id];
+  if (!S[id]) S[id] = {tries:0};
+  const st = S[id];
+  const uses = t.uses ? `<div class="uses">用到：${t.uses.map(u => `<span class="slot" data-id="${u}"></span>`).join('　')}</div>` : '';
+  const show = (t.show || []).join('');
+  const hints = t.hints || [];
+  let body = `<div class="t-head"><span class="t-sym" aria-hidden="true">${SYM[t.kind]}</span><span class="t-no">${KIND[t.kind]} ${numOf[id]}</span><span class="t-q">${t.q}</span></div><div class="t-body">${uses}${show}`;
+  if (hints.length) body += `<div class="hint-list"></div><div><button class="btn ghost hint-btn" type="button">给我一点提示</button></div>`;
+  if (t.kind === 'choice') {
+    body += `<div class="opts" role="group">${t.opts.map((o, i) => `<button class="opt" type="button" data-i="${i}"><span class="k">${'ABCD'[i]}</span><span>${o[0]}</span></button>`).join('')}</div>`;
+  } else {
+    body += `<div class="ans"><label for="in-${id}">${t.kind === 'calc' ? '你算出的数' : '你读到的数'}</label><input id="in-${id}" type="text" inputmode="decimal" autocomplete="off" spellcheck="false"><span class="unit">${t.unit || ''}</span><button class="btn primary check" type="button">核对</button><span class="tries"></span><button class="btn ghost reveal" type="button" hidden>看答案</button></div>`;
+  }
+  body += `<div class="fb" role="status" aria-live="polite"></div></div>`;
+  card.innerHTML = body;
+  card.id = 'task-' + id;
+
+  const fb = card.querySelector('.fb');
+  const setFb = (cls, head, msg) => { fb.className = 'fb ' + cls; fb.innerHTML = `<span class="fb-h">${head}</span>${msg}`; };
+  const hl = card.querySelector('.hint-list'), hb = card.querySelector('.hint-btn');
+  const showHints = n => { if (!hl) return; hl.innerHTML = hints.slice(0, n).map(h => `<div class="hint-item">${h}</div>`).join(''); if (hb) { hb.hidden = n >= hints.length; hb.textContent = n ? '再给一点提示' : '给我一点提示'; } };
+  showHints(st.hints || 0);
+  if (hb) hb.addEventListener('click', () => { st.hints = Math.min((st.hints || 0) + 1, hints.length); showHints(st.hints); save(); });
+
+  if (t.kind === 'choice') {
+    const btns = card.querySelectorAll('.opt');
+    const lock = () => btns.forEach(b => b.disabled = true);
+    const paint = i => {
+      const o = t.opts[i];
+      btns.forEach(b => b.classList.remove('picked-bad'));
+      btns[i].classList.add(o[1] ? 'picked-ok' : 'picked-bad');
+      setFb(o[1] ? 'ok' : 'bad', o[1] ? '对。' : '不对。', o[2]);
+    };
+    if (st.st === 'ok') { paint(st.choice); lock(); card.classList.add('solved'); }
+    btns.forEach(b => b.addEventListener('click', () => {
+      const i = +b.dataset.i;
+      paint(i);
+      if (t.opts[i][1]) { st.st = 'ok'; st.choice = i; lock(); card.classList.add('solved'); onChange(id); }
+      else { st.tries = (st.tries || 0) + 1; }
+      save();
+    }));
+    return;
+  }
+
+  const inp = card.querySelector('input'), chk = card.querySelector('.check'), tries = card.querySelector('.tries'), rev = card.querySelector('.reveal');
+  const lock = () => { inp.disabled = true; chk.disabled = true; rev.hidden = true; };
+  const paintTries = () => { tries.textContent = st.tries ? `错了 ${st.tries} 次` : ''; rev.hidden = !(st.tries >= 3) || !!st.st; };
+  const answerText = () => t.range ? `${t.range[0].toFixed(t.dec)}–${t.range[1].toFixed(t.dec)}` : fmtVal(t, t.ans);
+  if (st.st === 'ok') { inp.value = st.raw || fmtVal(t, st.v); lock(); card.classList.add('solved'); setFb('ok', '对。', t.ok); }
+  else if (st.st === 'shown') { inp.value = answerText(); lock(); card.classList.add('revealed'); setFb('soft', `答案是 ${answerText()} ${t.unit || ''}。`, t.ok); }
+  paintTries();
+  const check = () => {
+    if (!inp.value.trim()) return;
+    const r = judge(t, inp.value);
+    if (r.k === 'ok') {
+      const p = parseNum(inp.value);
+      st.st = 'ok'; st.v = t.range ? p.v : t.ans; st.raw = inp.value.trim();
+      lock(); card.classList.add('solved'); setFb('ok', '对。', t.ok); onChange(id);
+    } else {
+      const counted = !['fmt', 'prec', 'unit'].includes(r.k);
+      if (counted) st.tries = (st.tries || 0) + 1;
+      setFb(r.k === 'trap' || r.k === 'wrong' ? 'bad' : 'soft', {trap:'读错了地方。', wrong:'不对。', near:'差一点。', fmt:'格式。', prec:'位数。', unit:'单位。'}[r.k], r.msg);
+    }
+    paintTries(); save();
+  };
+  chk.addEventListener('click', check);
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') check(); });
+  rev.addEventListener('click', () => {
+    st.st = 'shown'; st.v = t.ans; inp.value = answerText(); lock(); card.classList.add('revealed');
+    setFb('soft', `答案是 ${answerText()} ${t.unit || ''}。`, t.ok); onChange(id); save();
+  });
+}
+
+function progress() {
+  const n = order.length;
+  const ok = order.filter(id => S[id] && S[id].st === 'ok').length;
+  const shown = order.filter(id => S[id] && S[id].st === 'shown').length;
+  document.getElementById('prog-text').textContent = `已读对 ${ok} / ${n}` + (shown ? ` · 看了答案 ${shown}` : '');
+  document.getElementById('m-ok').style.width = (100 * ok / n) + '%';
+  document.getElementById('m-shown').style.width = (100 * shown / n) + '%';
+}
+function onChange(id) { renderSlots(id); progress(); drawCharts(); }
+
+cards.forEach(build);
+order.forEach(renderSlots);
+progress();
+
+const reset = document.getElementById('reset');
+let armT = null;
+reset.addEventListener('click', () => {
+  if (!reset.classList.contains('arm')) {
+    reset.classList.add('arm'); reset.textContent = '再点一次确认清空';
+    armT = setTimeout(() => { reset.classList.remove('arm'); reset.textContent = '清空我的作答'; }, 4000);
+    return;
+  }
+  clearTimeout(armT); S = {}; save();
+  cards.forEach(c => c.classList.remove('solved', 'revealed'));
+  cards.forEach(build); order.forEach(renderSlots); progress(); drawCharts();
+  reset.classList.remove('arm'); reset.textContent = '已清空';
+  setTimeout(() => reset.textContent = '清空我的作答', 1500);
+});
+
+/* ---------------- charts ---------------- */
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+function chart(fig, c) {
+  fig.innerHTML = '';
+  const W = 660, H = c.h || 300, L = 56, Rm = 18, Tp = 18, B = 44;
+  const svg = el('svg', {viewBox:`0 0 ${W} ${H}`, role:'img'}, fig);
+  const t = el('title', {}, svg); t.textContent = fig.getAttribute('aria-label') || '';
+  const X = x => L + (x - c.x[0]) / (c.x[1] - c.x[0]) * (W - L - Rm);
+  const Y = y => Tp + (1 - (y - c.y[0]) / (c.y[1] - c.y[0])) * (H - Tp - B);
+  (c.bands || []).forEach(b => {
+    if (b.x) el('rect', {x:X(b.x[0]), y:Tp, width:X(b.x[1]) - X(b.x[0]), height:H - Tp - B, style:`fill:${b.fill}`}, svg);
+    if (b.y) el('rect', {x:L, y:Y(b.y[1]), width:W - L - Rm, height:Y(b.y[0]) - Y(b.y[1]), style:`fill:${b.fill}`}, svg);
+  });
+  c.yTicks.forEach(v => {
+    el('line', {x1:L, x2:W - Rm, y1:Y(v), y2:Y(v), style:'stroke:var(--rule);stroke-width:1'}, svg);
+    const tx = el('text', {x:L - 8, y:Y(v) + 4, 'text-anchor':'end', style:'fill:var(--ink-3);font:11px var(--mono)'}, svg); tx.textContent = c.yFmt(v);
+  });
+  c.xTicks.forEach(v => {
+    const tx = el('text', {x:X(v), y:H - B + 18, 'text-anchor':'middle', style:'fill:var(--ink-3);font:11px var(--mono)'}, svg); tx.textContent = v;
+  });
+  const xl = el('text', {x:(L + W - Rm) / 2, y:H - 6, 'text-anchor':'middle', style:'fill:var(--ink-2);font:12px var(--sans)'}, svg); xl.textContent = c.xLabel;
+  const yl = el('text', {x:14, y:(Tp + H - B) / 2, 'text-anchor':'middle', transform:`rotate(-90 14 ${(Tp + H - B) / 2})`, style:'fill:var(--ink-2);font:12px var(--sans)'}, svg); yl.textContent = c.yLabel;
+  (c.hlines || []).forEach(h => {
+    el('line', {x1:L, x2:W - Rm, y1:Y(h.y), y2:Y(h.y), style:`stroke:${h.color};stroke-width:1.3;stroke-dasharray:5 4`}, svg);
+    const tx = el('text', {x:L + 6, y:Y(h.y) + 14, 'text-anchor':'start', style:`fill:${h.color};font:11px var(--sans)`}, svg); tx.textContent = h.label;
+  });
+  c.series.forEach(s => {
+    const d = s.pts.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join(' ');
+    el('path', {d, style:`fill:none;stroke:${s.color};stroke-width:${s.w || 2};${s.dash ? 'stroke-dasharray:4 4;' : ''}stroke-linejoin:round`}, svg);
+    if (s.dots) s.pts.forEach(p => {
+      el('circle', {cx:X(p[0]), cy:Y(p[1]), r:3.6, style:`fill:var(--surface);stroke:${s.color};stroke-width:1.8`}, svg);
+      if (s.labels) { const tx = el('text', {x:X(p[0]), y:Y(p[1]) + (s.labelBelow ? 16 : -9), 'text-anchor':'middle', style:`fill:${s.color};font:10.5px var(--mono)`}, svg); tx.textContent = s.labels(p[1]); }
+    });
+  });
+  (c.marks || []).forEach(m => {
+    el('circle', {cx:X(m.x), cy:Y(m.y), r:9, style:'fill:none;stroke:var(--accent);stroke-width:2'}, svg);
+    const tx = el('text', {x:X(m.x) + (m.dx || 0), y:Y(m.y) + (m.dy || -16), 'text-anchor':m.anchor || 'middle', style:'fill:var(--accent);font:600 12px var(--sans)'}, svg); tx.textContent = m.label;
+  });
+}
+const TRAIN = [0.4119,0.3646,0.3456,0.3326,0.3226,0.3150,0.3087,0.3012,0.2938,0.2881,0.2834,0.2793,0.2749,0.2723,0.2685,0.2661,0.2633,0.2605,0.2584,0.2564,0.2549,0.2526,0.2514,0.2485,0.2464,0.2454,0.2436];
+const VAL = [0.3688,0.3454,0.3320,0.3245,0.3176,0.3112,0.3021,0.2949,0.2909,0.2908,0.2792,0.2799,0.2745,0.2746,0.2704,0.2719,0.2700,0.2687,0.2710,0.2718,0.2678,0.2675,0.2649,0.2643,0.2659,0.2681,0.2680];
+const S1 = [90.0,96.45,95.35,95.55,95.1,95.2,95.95,96.05,95.1];
+const S2R = [96.4,95.85,95.65,94.9,95.05,94.9,95.3,95.95,95.55];
+const S2A = [87.50,86.95,89.66,89.71,89.01,90.46,90.71,90.56,91.37];
+const solved = id => S[id] && (S[id].st === 'ok' || S[id].st === 'shown');
+function drawCharts() {
+  chart(document.getElementById('fig-curve'), {
+    x:[2, 28], y:[0.24, 0.42], xTicks:[2,4,6,8,10,12,14,16,18,20,22,24,26,28], yTicks:[0.24,0.28,0.32,0.36,0.40],
+    yFmt:v => v.toFixed(2), xLabel:'epoch', yLabel:'每步负对数似然',
+    series:[{pts:TRAIN.map((v, i) => [i + 2, v]), color:'var(--series-c)', dash:true},
+            {pts:VAL.map((v, i) => [i + 2, v]), color:'var(--series-a)', dots:true, w:2}],
+    bands: solved('t_epoch') ? [{x:[25, 28], fill:'var(--sunk)'}] : [],
+    marks: solved('t_epoch') ? [{x:25, y:0.2643, label:'第 25 个最低；再等 3 个没降 → 停', dy:-18, anchor:'end', dx:6}] : []
+  });
+  chart(document.getElementById('fig-s1'), {
+    x:[-0.4, 8.4], y:[88, 98], xTicks:[0,1,2,3,4,5,6,7,8], yTicks:[88,90,92,94,96,98],
+    yFmt:v => v + ' %', xLabel:'轮', yLabel:'选择集落地率',
+    bands:[{y:[96.45 - 1.5, 96.45], fill:'var(--accent-soft)'}],
+    series:[{pts:S1.map((v, i) => [i, v]), color:'var(--series-a)', dots:true, labels:v => v.toFixed(2), labelBelow:false}],
+    marks: solved('q_rule1') ? [{x:1, y:96.45, label:'选中：第 1 轮', dy:-20}] : []
+  });
+  chart(document.getElementById('fig-s2'), {
+    h:330, x:[-0.4, 8.4], y:[85, 98], xTicks:[0,1,2,3,4,5,6,7,8], yTicks:[86,88,90,92,94,96,98],
+    yFmt:v => v + ' %', xLabel:'轮', yLabel:'选择集落地率',
+    bands:[{x:[2.5, 6.5], fill:'var(--bad-soft)'}].concat(solved('q_rule2') ? [{y:[91.37 - 1.5, 91.37], fill:'var(--accent-soft)'}] : []),
+    hlines:[{y:95.4, color:'var(--series-a)', label:'护栏 95.4 %'}],
+    series:[{pts:S2R.map((v, i) => [i, v]), color:'var(--series-a)', dots:true, labels:v => v.toFixed(2), labelBelow:true},
+            {pts:S2A.map((v, i) => [i, v]), color:'var(--series-b)', dots:true, labels:v => v.toFixed(2)}],
+    marks: solved('q_rule2') ? [{x:7, y:90.56, label:'选中：第 7 轮', dy:-22}] : []
+  });
+}
+drawCharts();
+})();
+</script>
