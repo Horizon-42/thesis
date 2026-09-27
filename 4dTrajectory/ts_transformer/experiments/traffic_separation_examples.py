@@ -43,6 +43,7 @@ from ts_transformer.inference.runway_schedule import (
     FAA_RADAR_NM,
     FAA_REDUCED_RADAR_NM,
     FAA_VERTICAL_FT,
+    FAA_VISUAL_INTERCEPT_MAX_DEG,
     faa_separation,
 )
 from ts_transformer.inference.separation import IFR, VISUAL
@@ -56,8 +57,6 @@ from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, repo_re
 AROUND_S = 180.0
 #: Both headings within this of their courses: aligned with the final (``dependent_aligned``).
 ALIGNED_DEG = 10.0
-#: 7-4-4 c2 a / c3 a: approved separation until the aircraft turning in intercepts its centreline at this or less.
-INTERCEPT_DEG = 30.0
 
 
 def _in_visual(census: dict[str, Any], airport: str, pair: list[str], first_s: float) -> bool:
@@ -86,7 +85,8 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "neither_established": sum(not any(r["established"]) for r in rows),
             "the_one_ahead_not_established": sum(not r["ahead_established"] for r in rows),
             "both_headings_within_10_deg_share": float(np.mean([max(r["headings"]) <= ALIGNED_DEG for r in rows])),
-            "larger_heading_over_30_deg_share": float(np.mean([max(r["headings"]) > INTERCEPT_DEG for r in rows])),
+            "larger_heading_over_30_deg_share": float(np.mean([max(r["headings"]) > FAA_VISUAL_INTERCEPT_MAX_DEG
+                                                               for r in rows])),
             "larger_heading_off_course_deg_p50": p50("max_heading"),
             "larger_off_centreline_m_p50": p50("max_lateral"), "height_difference_m_p50": p50("vertical"),
             "min_distance_over_required_p50": p50("min_ratio"),
@@ -110,11 +110,9 @@ def _apart(a: Track, b: Track, t_s: np.ndarray) -> tuple[np.ndarray, np.ndarray]
     return np.hypot(at(a, a.e_m) - at(b, b.e_m), at(a, a.n_m) - at(b, b.n_m)), np.abs(at(a, a.height_m) - at(b, b.height_m))
 
 
-def _heading_off(item: Track, flight, geometry: AirportGeometry, t_s: float) -> float:
-    candidate = geometry.candidates[geometry.candidate_index(flight.runway)]
-    rows = len(item.presence.times_s)
-    offset = (flight.track_deg[:rows] - candidate.course_deg + 180.0) % 360.0 - 180.0
-    return abs(float(np.interp(t_s, item.presence.times_s, offset)))
+def _heading_off(item: Track, t_s: float) -> float:
+    """The angle between its track and its runway's course at ``t_s``, as the census judges it."""
+    return float(np.interp(t_s, item.presence.times_s, item.off_course_deg))
 
 
 def draw(path: Path, title: str, verdict: str, pair: tuple[tuple[Track, Any], tuple[Track, Any]],
@@ -240,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
         for episode in census["airports"][airport]["readings"][IFR]["episodes"]:
             pair = [flown(key) for key in episode["pair"]]
             t_s = episode["first_s"]
-            headings = tuple(_heading_off(item, flight, geometry, t_s) for item, flight in pair)
+            headings = tuple(_heading_off(item, t_s) for item, _ in pair)
             established = tuple(t_s >= item.captured_s for item, _ in pair)
             if belongs(episode, headings, established):
                 members.append(episode)
@@ -273,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
                                   for moment, k in (("first", 0), ("closest", int(np.argmin(distance))),
                                                     ("last", len(during) - 1))},
                         "at_start": [{"established": episode["first_s"] >= item.captured_s,
-                                      "heading_off_course_deg": _heading_off(item, f, geometry, episode["first_s"]),
+                                      "heading_off_course_deg": _heading_off(item, episode["first_s"]),
                                       "off_centreline_m": abs(float(np.interp(episode["first_s"], item.presence.times_s,
                                                                               rel.right_of_course_m[:len(item.e_m)]))),
                                       "before_threshold_km": float(np.interp(

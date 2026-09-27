@@ -10,6 +10,7 @@ from ts_transformer.inference.runway_schedule import (
     CWT_DIRECTLY_BEHIND_NM,
     CWT_ON_APPROACH_NM,
     DEPENDENT,
+    FAA_VISUAL_INTERCEPT_MAX_DEG,
     INDEPENDENT,
     SAME,
     SINGLE,
@@ -43,10 +44,12 @@ SEPARATION = Separation(same_nm=3.0, speed_mps=70.0,
 
 
 def traffic(*aircraft) -> Traffic:
-    """Each aircraft: (east m, north m, height m, runway, established, category); on the approach clock at its east."""
-    e, n, h, runway, established, category = zip(*aircraft)
+    """Each aircraft: (east m, north m, height m, runway, established, category[, degrees off its course]); on the
+    approach clock at its east; flying its course unless said otherwise."""
+    e, n, h, runway, established, category, off = zip(*(a if len(a) == 7 else (*a, 0.0) for a in aircraft))
     along = np.array([x if r is not None else np.nan for x, r in zip(e, runway)], dtype=float)
-    return Traffic(np.array(e, float), np.array(n, float), np.array(h, float), tuple(runway), along,
+    off = np.array([x if r is not None else np.nan for x, r in zip(off, runway)], dtype=float)
+    return Traffic(np.array(e, float), np.array(n, float), np.array(h, float), tuple(runway), along, off,
                    np.array(established, bool), tuple(category))
 
 
@@ -92,13 +95,13 @@ def test_an_untyped_aircraft_in_trail_is_judged_on_the_radar_minimum_and_says_so
 def test_at_the_threshold_the_established_one_next_behind_must_be_the_on_approach_wake_minimum():
     # a D over the threshold, an H 9 km behind: TBL 5-5-2 wants 6 NM (TBL 5-5-1 only 5)
     scene = traffic((0, 0, 50, "R", True, "D"), (-9_000, 0, 550, "R", True, "H"), (-12_000, 0, 700, "R", True, "H"))
-    loss = wake_at_threshold(scene, 0, SEPARATION, IFR)
+    loss = wake_at_threshold(scene, 0, SEPARATION)
     assert (loss.kind, loss.j, loss.responsible, loss.relation) == (AT_THRESHOLD, 1, (1,), SAME)
     assert loss.required_m == pytest.approx(6.0 * NM_M) and loss.distance_m == pytest.approx(9_000)
     # not yet established, another runway, an untyped follower: not judged
-    assert wake_at_threshold(traffic((0, 0, 50, "R", True, "D"), (-9_000, 0, 550, "R", False, "H")), 0, SEPARATION, IFR) is None
-    assert wake_at_threshold(traffic((0, 0, 50, "R", True, "D"), (-9_000, 0, 550, "I1", True, "H")), 0, SEPARATION, IFR) is None
-    assert wake_at_threshold(traffic((0, 0, 50, "R", True, "D"), (-9_000, 0, 550, "R", True, None)), 0, SEPARATION, IFR) is None
+    assert wake_at_threshold(traffic((0, 0, 50, "R", True, "D"), (-9_000, 0, 550, "R", False, "H")), 0, SEPARATION) is None
+    assert wake_at_threshold(traffic((0, 0, 50, "R", True, "D"), (-9_000, 0, 550, "I1", True, "H")), 0, SEPARATION) is None
+    assert wake_at_threshold(traffic((0, 0, 50, "R", True, "D"), (-9_000, 0, 550, "R", True, None)), 0, SEPARATION) is None
 
 
 def test_in_trail_uses_the_directly_behind_table_and_the_one_runway_radar_minimum():
@@ -138,34 +141,49 @@ def test_the_vertical_minimum_is_1000_ft():
 
 def test_at_the_threshold_only_the_on_approach_table_binds_and_exactly_the_minimum_is_enough():
     # F behind F: the table is blank at the threshold, so 3 km is not judged there (in trail judges it)
-    assert wake_at_threshold(traffic((0, 0, 50, "R", True, "F"), (-3_000, 0, 250, "R", True, "F")), 0, SEPARATION, IFR) is None
+    assert wake_at_threshold(traffic((0, 0, 50, "R", True, "F"), (-3_000, 0, 250, "R", True, "F")), 0, SEPARATION) is None
     exactly = traffic((0, 0, 50, "R", True, "D"), (-6.0 * NM_M, 0, 550, "R", True, "H"))
-    assert wake_at_threshold(exactly, 0, SEPARATION, IFR) is None
-    across = wake_at_threshold(traffic((0, 0, 50, "S1", True, "D"), (-9_000, 150, 550, "S2", True, "H")), 0, SEPARATION, IFR)
+    assert wake_at_threshold(exactly, 0, SEPARATION) is None
+    across = wake_at_threshold(traffic((0, 0, 50, "S1", True, "D"), (-9_000, 150, 550, "S2", True, "H")), 0, SEPARATION)
     assert across.relation == SINGLE
 
 
-@pytest.mark.parametrize("runway, along, established", [
-    (None, 0.0, False),              # on the approach clock with no runway in force
-    ("R", float("nan"), False),      # a runway in force, not on the approach clock
-    (None, float("nan"), True),      # established with no runway
+@pytest.mark.parametrize("runway, along, off, established", [
+    (None, 0.0, float("nan"), False),            # on the approach clock with no runway in force
+    ("R", float("nan"), 0.0, False),             # a runway in force, not on the approach clock
+    ("R", 0.0, float("nan"), False),             # a runway in force, no angle off its course
+    (None, float("nan"), 0.0, False),            # an angle off a course with no runway in force
+    (None, float("nan"), float("nan"), True),    # established with no runway
 ])
-def test_traffic_refuses_a_broken_contract(runway, along, established):
+def test_traffic_refuses_a_broken_contract(runway, along, off, established):
     with pytest.raises(ValueError):
-        Traffic(np.zeros(1), np.zeros(1), np.zeros(1), (runway,), np.array([along]), np.array([established]), ("F",))
+        Traffic(np.zeros(1), np.zeros(1), np.zeros(1), (runway,), np.array([along]), np.array([off]),
+                np.array([established]), ("F",))
 
 
-def test_the_visual_reading_sets_no_minimum_between_runways_of_one_direction():
-    # side by side on a close pair, turning in beside a parallel final, both established on dependent parallels
-    side_by_side = traffic((-5_000, 0, 700, "S1", True, "F"), (-5_000, 150, 700, "S2", True, "F"))
-    turning_in = traffic((-8_000, 0, 700, "I1", True, "F"), (-9_000, 1_800, 800, "I2", False, "F"))
+def test_the_visual_reading_frees_parallels_once_both_intercept_at_30_deg_or_less():
+    """7-4-4 c2 a / c3 a: approved separation until each is on a heading intercepting its centreline at 30° or less."""
     diagonal = traffic((-5_000, 0, 700, "L1", True, "F"), (-6_000, 1_100, 700, "L2", True, "F"))
-    for scene in (side_by_side, turning_in, diagonal):
-        assert losses(scene, SEPARATION, IFR) and losses(scene, SEPARATION, VISUAL) == []
-    # no wake across a close pair at the threshold either
+    for off, lost in ((20.0, False), (FAA_VISUAL_INTERCEPT_MAX_DEG, False), (31.0, True), (75.0, True)):
+        for runways in (("I1", "I2"), ("L1", "L2")):
+            turning_in = traffic((-8_000, 0, 700, runways[0], True, "F"),
+                                 (-9_000, 1_800, 800, runways[1], False, "F", off))
+            assert [(loss.kind, loss.responsible) for loss in losses(turning_in, SEPARATION, IFR)] == [
+                (RADAR_OR_VERTICAL, (1,))]
+            assert losses(turning_in, SEPARATION, VISUAL) == (losses(turning_in, SEPARATION, IFR) if lost else [])
+    assert losses(diagonal, SEPARATION, IFR) and losses(diagonal, SEPARATION, VISUAL) == []
+    # neither established, the one 35° off: the IFR rule
+    both_turning = traffic((-8_000, 0, 700, "I1", False, "F", 10.0), (-9_000, 1_800, 800, "I2", False, "F", 35.0))
+    assert losses(both_turning, SEPARATION, VISUAL) == losses(both_turning, SEPARATION, IFR) != []
+
+
+def test_the_visual_reading_keeps_a_close_pair_as_one_runway():
+    """7-4-4 c1 (N JO 7110.805): a visual approach beside a pair under 2,500 ft needs visual separation (c1 b)."""
+    side_by_side = traffic((-5_000, 0, 700, "S1", True, "F"), (-8_000, 150, 700, "S2", True, "F"))
+    assert [loss.kind for loss in losses(side_by_side, SEPARATION, VISUAL)] == [IN_TRAIL]
+    assert losses(side_by_side, SEPARATION, VISUAL) == losses(side_by_side, SEPARATION, IFR)
     across = traffic((0, 0, 50, "S1", True, "D"), (-9_000, 150, 550, "S2", True, "H"))
-    assert wake_at_threshold(across, 0, SEPARATION, IFR) is not None
-    assert wake_at_threshold(across, 0, SEPARATION, VISUAL) is None
+    assert wake_at_threshold(across, 0, SEPARATION) is not None
 
 
 def test_the_visual_reading_keeps_one_runway_and_vectored_traffic_and_drops_established_converging_finals():
@@ -184,11 +202,29 @@ def test_the_visual_reading_keeps_one_runway_and_vectored_traffic_and_drops_esta
 
 
 @pytest.mark.parametrize("scene", [
-    Traffic(np.zeros(0), np.zeros(0), np.zeros(0), (), np.zeros(0), np.zeros(0, bool), ()),  # nobody to judge
+    Traffic(np.zeros(0), np.zeros(0), np.zeros(0), (), np.zeros(0), np.zeros(0), np.zeros(0, bool), ()),  # nobody
     traffic((-5_000, 0, 700, "R", True, "F"), (-7_000, 2_000, 800, "R", False, "F")),   # not both established
 ])
 def test_a_reading_not_listed_is_refused_whatever_the_scene(scene):
     with pytest.raises(ValueError, match="reading"):
         losses(scene, SEPARATION, "Visual")
-    with pytest.raises(ValueError, match="reading"):
-        next_behind(scene, 0, SEPARATION, "Visual")
+
+
+def test_the_visual_reading_never_judges_a_pair_the_ifr_reading_would_not():
+    random = np.random.default_rng(7)
+    runways = [None, "R", "S1", "S2", "L1", "L2", "I1", "I2", "X"]
+    for _ in range(2_000):
+        aircraft = []
+        for _ in range(3):
+            runway = runways[random.integers(len(runways))]
+            aircraft.append((random.uniform(-12_000, 0), random.uniform(-3_000, 3_000), random.uniform(0, 900), runway,
+                             runway is not None and bool(random.integers(2)), "FDH"[random.integers(3)],
+                             random.uniform(0, 180)))
+        scene = traffic(*aircraft)
+        assert set(losses(scene, SEPARATION, VISUAL)) <= set(losses(scene, SEPARATION, IFR))
+
+
+def test_next_behind_finds_the_established_one_on_the_runway_or_its_close_pair():
+    scene = traffic((0, 0, 50, "S1", True, "F"), (-4_000, 150, 250, "S2", True, "F"), (-3_000, 0, 200, "S1", False, "F"),
+                    (-2_000, 1_800, 150, "I1", True, "F"))
+    assert next_behind(scene, 0, SEPARATION) == 1

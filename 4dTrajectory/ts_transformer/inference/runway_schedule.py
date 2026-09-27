@@ -178,6 +178,10 @@ FAA_RADAR_NM = 3.0
 #: The vertical separation minimum up to FL 410 (4-5-1 a: "Up to and including FL 410- 1,000 feet.").
 FAA_VERTICAL_FT = 1_000.0
 FAA_REDUCED_RADAR_NM = 2.5      # 5-5-4 j, by authorization only
+#: Visual approaches to parallels 2,500 ft or more apart (7-4-4 c2 (a)(1), c3 (a)(1)): approved separation until the
+#: aircraft are on a heading or course "which will intercept the extended centerline of the runway at an angle not
+#: greater than 30 degrees".
+FAA_VISUAL_INTERCEPT_MAX_DEG = 30.0
 FAA_PARALLEL_REGIMES = (
     ParallelRegime(2500.0, SINGLE),              # 5-5-4 h NOTE
     ParallelRegime(3600.0, DEPENDENT, 1.0),      # 5-9-6 a2

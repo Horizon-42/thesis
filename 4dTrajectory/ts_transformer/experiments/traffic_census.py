@@ -9,7 +9,7 @@ under both readings — `VISUAL`, which the closed loop's checks and the reward 
 - an aircraft's position is interpolated at the step from its rows (at most half a step past its first or last row, held
   there); its runway is the one it landed on (the observed census is a measurement, not a model input); its position on
   the approach clock is its threshold's `Separation.along_nm` less its distance before that threshold along the course;
-  it is established on the final from its capture row on — the artefact's for a flight with a sentence, the labeller's
+  its angle off that runway's course is its track's (`relative_to_runway`); it is established on the final from its capture row on — the artefact's for a flight with a sentence, the labeller's
   own rule (`capture_row` on `admit`'s smoothed track) for a background flight `admit` takes, the same rule on the raw
   track for one it refuses (each group counted); a flight that never stays in the corridor is never established; its CWT
   category comes from its type (`runway_schedule.wake_category`; a flight without a type is counted);
@@ -17,7 +17,8 @@ under both readings — `VISUAL`, which the closed loop's checks and the reward 
   its closest step: the distance over the minimum, and the two); the pairs with a loss are counted beside the episodes;
 - at every landing (the leader over its threshold at its roster landing time) the established aircraft next behind it
   gives a landing interval on the approach clock, the distance the rules require (radar and TBL 5-5-2, design §2.5 / §9
-  item 6), whether it was below it, and whether TBL 5-5-2 alone was broken (`wake_at_threshold`);
+  item 6), whether it was below it, and whether TBL 5-5-2 alone was broken (`wake_at_threshold`) — the same under both
+  readings, so judged once;
 - on every final, consecutive established aircraft that both have a sentence give a closing speed: the rates along the
   landing direction, ground speed × cos(track − course), of the one behind less the one ahead (pairs with a background
   flight are left out and counted: its ground-speed channel is what the labeller may have refused it for);
@@ -66,7 +67,7 @@ from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.scene import Presence, SceneIndex, hung_span, presence, samples, scene_steps
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
 
-SCHEMA = "ts-traffic-census-v2"
+SCHEMA = "ts-traffic-census-v3"
 SPLIT = "train"
 #: `faa_separation` turns distances into times at an approach speed; nothing here reads a time, so any speed does.
 APPROACH_SPEED_MPS = 70.0
@@ -85,6 +86,7 @@ class Track:
     n_m: np.ndarray
     height_m: np.ndarray
     along_m: np.ndarray            # its position on the approach clock at each row
+    off_course_deg: np.ndarray     # |track − its runway's course| at each row, 0–180°
     along_rate_mps: np.ndarray     # ground speed × cos(track − course) at each row
     captured_s: float              # the time of its capture row; inf when it is never established
     capture_from: str              # "artefact", "admitted" or "raw" (`track`)
@@ -129,7 +131,7 @@ def track(flight: FlightSignals, sentence_rows: int | None, capture: int | None,
     rate = flight.ground_speed_mps[:rows] * np.cos(np.radians(flight.track_deg[:rows] - candidate.course_deg))
     first, last = hung_span(seen, step_s)
     return Track(seen, first, last, flight.e_m[:rows], flight.n_m[:rows], flight.altitude_m[:rows],
-                 along_threshold_m - raw.before_threshold_m, rate,
+                 along_threshold_m - raw.before_threshold_m, np.abs(raw.track_minus_course_deg), rate,
                  float(seen.times_s[capture]) if capture is not None else math.inf, source,
                  None if flight.typecode is None else wake_category(flight.typecode))
 
@@ -140,7 +142,8 @@ def _traffic(tracks: Sequence[Track], t_s: float) -> Traffic:
 
     return Traffic(np.array([at(t.e_m, t) for t in tracks]), np.array([at(t.n_m, t) for t in tracks]),
                    np.array([at(t.height_m, t) for t in tracks]), tuple(t.presence.runway for t in tracks),
-                   np.array([at(t.along_m, t) for t in tracks]), np.array([t_s >= t.captured_s for t in tracks]),
+                   np.array([at(t.along_m, t) for t in tracks]), np.array([at(t.off_course_deg, t) for t in tracks]),
+                   np.array([t_s >= t.captured_s for t in tracks]),
                    tuple(t.category for t in tracks))
 
 
@@ -195,11 +198,11 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
             for reading in READINGS:
                 _record(episodes[reading], open_episodes[reading], here, losses(traffic, separation, reading),
                         float(t_s), step_s)
-            # closing speeds between consecutive established aircraft on one runway (`VISUAL`: the same runway only)
+            # closing speeds between consecutive established aircraft on one runway (or a pair separated as one)
             for k in range(len(here)):
                 if not traffic.established[k]:
                     continue
-                follower = next_behind(traffic, k, separation, VISUAL)
+                follower = next_behind(traffic, k, separation)
                 if follower is None:
                     continue
                 if not (here[k].presence.speaking and here[follower].presence.speaking):
@@ -209,8 +212,8 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
                                      - np.interp(t_s, here[k].presence.times_s, here[k].along_rate_mps)))
 
     # at every landing: the established aircraft next behind, its landing interval on the approach clock
-    landings = {reading: {"judged": 0, "untyped": 0, "below_required": 0, "wake_losses": 0, "interval_m": [],
-                          "interval_minus_required_m": [], "required_nm": Counter()} for reading in READINGS}
+    landing = {"judged": 0, "untyped": 0, "below_required": 0, "wake_losses": 0, "interval_m": [],
+               "interval_minus_required_m": [], "required_nm": Counter()}
     for leader in tracks:
         t_s = leader.presence.landing_s
         near = [by_key[p.dataset_id] for p in index.overlapping(t_s, t_s) if p.dataset_id != leader.key]
@@ -222,25 +225,25 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
         along_threshold = separation.along_nm[leader.presence.runway] * NM_M
         scene = Traffic(np.append(traffic.e_m, leader.e_m[-1]), np.append(traffic.n_m, leader.n_m[-1]),
                         np.append(traffic.height_m, leader.height_m[-1]), (*traffic.runway, leader.presence.runway),
-                        np.append(traffic.along_m, along_threshold), np.append(traffic.established, True),
-                        (*traffic.category, leader.category))
+                        np.append(traffic.along_m, along_threshold),
+                        np.append(traffic.off_course_deg, leader.off_course_deg[-1]),
+                        np.append(traffic.established, True), (*traffic.category, leader.category))
         lead = len(near)
-        for reading, landing in landings.items():
-            follower = next_behind(scene, lead, separation, reading)
-            if follower is None:
-                continue
-            if leader.category is None or near[follower].category is None:
-                landing["untyped"] += 1
-                continue
-            landing["judged"] += 1
-            required_nm = separation.distance_nm(leader.presence.runway, leader.category,
-                                                 near[follower].presence.runway, near[follower].category)
-            landing["required_nm"][f"{required_nm:g}"] += 1
-            interval = along_threshold - float(scene.along_m[follower])
-            landing["interval_m"].append(interval)
-            landing["interval_minus_required_m"].append(interval - required_nm * NM_M)
-            landing["below_required"] += interval < required_nm * NM_M
-            landing["wake_losses"] += wake_at_threshold(scene, lead, separation, reading) is not None
+        follower = next_behind(scene, lead, separation)
+        if follower is None:
+            continue
+        if leader.category is None or near[follower].category is None:
+            landing["untyped"] += 1
+            continue
+        landing["judged"] += 1
+        required_nm = separation.distance_nm(leader.presence.runway, leader.category,
+                                             near[follower].presence.runway, near[follower].category)
+        landing["required_nm"][f"{required_nm:g}"] += 1
+        interval = along_threshold - float(scene.along_m[follower])
+        landing["interval_m"].append(interval)
+        landing["interval_minus_required_m"].append(interval - required_nm * NM_M)
+        landing["below_required"] += interval < required_nm * NM_M
+        landing["wake_losses"] += wake_at_threshold(scene, lead, separation) is not None
 
     # order swaps (§4.1)
     swaps = {"same_runway": [0, 0], "same_direction_other_runway": [0, 0]}
@@ -281,7 +284,7 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
     hours = scene_seconds / 3600.0
 
     def judged(reading: str) -> dict[str, Any]:
-        found, landing = episodes[reading], landings[reading]
+        found = episodes[reading]
         pairs = {tuple(e["pair"]) for e in found}
         return {
             "losses": {"episodes": len(found), "episodes_per_scene_hour": len(found) / hours,
@@ -294,14 +297,6 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
                                                                for e in found),
                        "steps": _quantiles([e["steps"] for e in found]),
                        "min_distance_over_required": _quantiles([e["min_ratio"] for e in found])},
-            "at_landing": {"judged": landing["judged"], "untyped": landing["untyped"],
-                           "below_required": landing["below_required"], "wake_losses": landing["wake_losses"],
-                           "interval_m": _quantiles(landing["interval_m"]),
-                           "interval_minus_required_m": _quantiles(landing["interval_minus_required_m"]),
-                           "required_nm": dict(sorted(landing["required_nm"].items())),
-                           "required_is_the_radar_minimum_share": (
-                               landing["required_nm"][f"{separation.same_nm:g}"] / landing["judged"]
-                               if landing["judged"] else None)},
             "episodes": found,
         }
 
@@ -317,6 +312,14 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
         "pairs_in_the_scene_together": len(together),
         "check_reading": VISUAL,
         "readings": {reading: judged(reading) for reading in READINGS},
+        "at_landing": {"judged": landing["judged"], "untyped": landing["untyped"],
+                       "below_required": landing["below_required"], "wake_losses": landing["wake_losses"],
+                       "interval_m": _quantiles(landing["interval_m"]),
+                       "interval_minus_required_m": _quantiles(landing["interval_minus_required_m"]),
+                       "required_nm": dict(sorted(landing["required_nm"].items())),
+                       "required_is_the_radar_minimum_share": (
+                           landing["required_nm"][f"{separation.same_nm:g}"] / landing["judged"]
+                           if landing["judged"] else None)},
         "closing_speed_on_a_final_mps": {**_quantiles(closing), "pairs_with_a_background_flight_left_out": closing_left_out},
         "order_swaps": {group: {"swapped": s, "pairs": n, "share": s / n if n else None}
                         for group, (s, n) in swaps.items()},

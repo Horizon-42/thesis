@@ -10,20 +10,20 @@ import pytest
 
 from geokit import NM_M
 
-from ts_transformer.inference.runway_schedule import CWT_ON_APPROACH_NM, SINGLE, Separation
+from ts_transformer.inference.runway_schedule import CWT_ON_APPROACH_NM, INDEPENDENT, SINGLE, Separation
 
 STEP_S = 2.0
 
 
 def _track(key: str, times: np.ndarray, along: np.ndarray, rate: float, *, n: float = 0.0, landing_s: float,
-           captured_s: float = 0.0, runway: str = "R"):
+           captured_s: float = 0.0, runway: str = "R", off_course_deg: float = 0.0):
     from ts_transformer.experiments.traffic_census import Track
     from ts_transformer.prior.scene import Presence, hung_span
 
     seen = Presence(key, "KXXX", runway, landing_s, True, times, np.abs(along))
     first, last = hung_span(seen, STEP_S)
     return Track(seen, first, last, along.copy(), np.full(len(times), n), np.full(len(times), 500.0), along,
-                 np.full(len(times), rate), captured_s, "artefact", "F")
+                 np.full(len(times), off_course_deg), np.full(len(times), rate), captured_s, "artefact", "F")
 
 
 def test_the_census_counts_an_in_trail_loss_the_landing_intervals_the_closing_speed_and_the_swaps():
@@ -49,7 +49,7 @@ def test_the_census_counts_an_in_trail_loss_the_landing_intervals_the_closing_sp
     assert episode["steps"] == len(range(146, 201, 2)) and episode["responsible"] == [{"key": "F", "speaking": True}]
     assert census["closing_speed_on_a_final_mps"]["p50"] == pytest.approx(10.0)
     # at G's landing L is 3.8 km behind, at L's F is 4.86 km: both under 3 NM, neither a TBL 5-5-2 (F behind F) loss
-    landing = judged["at_landing"]
+    landing = census["at_landing"]
     assert (landing["judged"], landing["below_required"], landing["wake_losses"], landing["required_nm"]) == (
         2, 2, 0, {"3": 2})
     assert landing["interval_m"]["min"] == pytest.approx(3_800.0)
@@ -59,26 +59,46 @@ def test_the_census_counts_an_in_trail_loss_the_landing_intervals_the_closing_sp
                                                             pytest.approx(3.0 * NM_M))
 
 
-def test_a_close_parallel_pair_loses_only_under_the_ifr_reading():
-    """The first test's L and F, each on its own runway of a pair 150 m apart separated as one: IFR judges them in
-    trail and at L's landing; the visual reading judges neither, and no closing speed is measured across the pair."""
+SEPARATION = Separation(same_nm=3.0, speed_mps=70.0,
+                        relations={frozenset(("S1", "S2")): SINGLE, frozenset(("I1", "I2")): INDEPENDENT},
+                        spacing_nm={frozenset(("S1", "S2")): 0.08, frozenset(("I1", "I2")): 1.0},
+                        along_nm={"S1": 0.0, "S2": 0.0, "I1": 0.0, "I2": 0.0}, wake_nm=CWT_ON_APPROACH_NM)
+
+
+@pytest.mark.parametrize("off_course_deg, lost_under_visual", [(45.0, True), (20.0, False)])
+def test_a_turn_on_beside_an_independent_final_loses_under_the_visual_reading_only_when_steeper_than_30_deg(
+        off_course_deg, lost_under_visual):
+    from ts_transformer.experiments.traffic_census import census_airport
+
+    t = np.arange(0.0, 200.0 + 1e-9, STEP_S)
+    final = _track("A", t, -15_000.0 + 70.0 * t, 70.0, landing_s=15_000.0 / 70.0, runway="I1")
+    turning = _track("B", t, -17_000.0 + 70.0 * t, 70.0, n=1_800.0, landing_s=17_000.0 / 70.0, runway="I2",
+                     captured_s=math.inf, off_course_deg=off_course_deg)
+    census = census_airport([final, turning], SEPARATION, STEP_S)
+
+    ifr, visual = census["readings"]["ifr"]["losses"], census["readings"]["visual"]["losses"]
+    assert (ifr["episodes"], ifr["by_relation"], ifr["by_kind"]) == (1, {"independent": 1}, {"radar_or_vertical": 1})
+    assert visual["episodes"] == int(lost_under_visual)
+    assert census["at_landing"]["judged"] == 0                  # nobody behind on A's runway or a pair judged as one
+
+
+def test_a_close_parallel_pair_is_one_runway_under_both_readings():
+    """The first test's L and F, each on its own runway of a pair 150 m apart: in trail across the pair, judged at L's
+    landing, and a closing speed measured across it, under both readings (7-4-4 c1 needs visual separation)."""
     from ts_transformer.experiments.traffic_census import census_airport
 
     t = np.arange(0.0, 200.0 + 1e-9, STEP_S)
     leader = _track("L", t, -15_000.0 + 70.0 * t, 70.0, landing_s=15_000.0 / 70.0, runway="S1")
     t_f = np.arange(0.0, 260.0 + 1e-9, STEP_S)
     follower = _track("F", t_f, -22_000.0 + 80.0 * t_f, 80.0, n=150.0, landing_s=22_000.0 / 80.0, runway="S2")
-    separation = Separation(same_nm=3.0, speed_mps=70.0, relations={frozenset(("S1", "S2")): SINGLE},
-                            spacing_nm={frozenset(("S1", "S2")): 0.08}, along_nm={"S1": 0.0, "S2": 0.0},
-                            wake_nm=CWT_ON_APPROACH_NM)
-    census = census_airport([leader, follower], separation, STEP_S)
+    census = census_airport([leader, follower], SEPARATION, STEP_S)
 
-    ifr, visual = census["readings"]["ifr"], census["readings"]["visual"]
+    ifr = census["readings"]["ifr"]
+    assert census["readings"]["visual"] == ifr
     assert (ifr["losses"]["episodes"], ifr["losses"]["by_relation"], ifr["losses"]["by_kind"]) == (
         1, {"single": 1}, {"in_trail": 1})
-    assert (ifr["at_landing"]["judged"], ifr["at_landing"]["below_required"]) == (1, 1)
-    assert (visual["losses"]["episodes"], visual["at_landing"]["judged"]) == (0, 0)
-    assert census["closing_speed_on_a_final_mps"]["n"] == 0
+    assert (census["at_landing"]["judged"], census["at_landing"]["below_required"]) == (1, 1)
+    assert census["closing_speed_on_a_final_mps"]["p50"] == pytest.approx(10.0)
 
 
 def _artefact(tmp_path, typecode: str = "A320"):

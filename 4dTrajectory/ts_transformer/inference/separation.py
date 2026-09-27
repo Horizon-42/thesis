@@ -3,25 +3,30 @@
 The rules are FAA JO 7110.65BB's, encoded once in `inference.runway_schedule`; this module applies them to a set of
 aircraft at one time. What the rules need that is not geometry is handed in by the caller, already computed: each
 aircraft's runway in force, its position on the approach clock (metres along its runway's landing direction from the
-airport's common origin: the threshold's `Separation.along_nm` less the distance still before it), whether it is
-established on its final (the capture of the labeller or the executor), and its CWT category (None: the record has no
-type). This package does not reach the instruction language (the architecture test), so the caller measures those.
+airport's common origin: the threshold's `Separation.along_nm` less the distance still before it), the angle between
+its track and that runway's course, whether it is established on its final (the capture of the labeller or the
+executor), and its CWT category (None: the record has no type). This package does not reach the instruction language
+(the architecture test), so the caller measures those.
 
 Two readings of the rules (design §3.2; user 2026-09-27, provisional): the closed loop's checks and the reward use
 `VISUAL`, and `IFR` is reported beside it.
 
 - `IFR` — the order's instrument rules as written, below.
-- `VISUAL` — the visual reading: in good weather controllers clear parallel arrivals for visual approaches (7-4-4 c)
-  and apply visual separation (7-2-1). Two aircraft on DIFFERENT runways of one direction (a close pair separated as
-  one included) have no minimum between them, established or not — no radar, no diagonal, no wake across the pair. Two
-  aircraft both ESTABLISHED on finals of runways of other directions are not judged (converging and crossing-runway
-  operations, 3-10-4, are not modelled). Everything else keeps its `IFR` rule: one runway its radar and wake minima;
-  runways of other directions while either aircraft is still being vectored, and an aircraft with no runway yet, the
-  radar-or-vertical rule. This is LOOSER than 7-4-4 c alone: its conditions keep approved separation until the aircraft
-  turning in is on a heading that intercepts its centreline at 30° or less (c2 a, c3 a), or until the preceding
-  aircraft is established (c1 as amended by N JO 7110.805), unless visual separation is applied — so the reading
-  assumes visual separation wherever those conditions are not met. The recorded traffic breaks the `IFR` reading on
-  parallel and crossing runways every hour at four of the five airports (readout
+- `VISUAL` — the visual-approach reading: in good weather controllers clear arrivals to several runways for visual
+  approaches (7-4-4 c). The reading assumes those clearances, and never visual separation (7-2-1), which takes a
+  traffic-in-sight report and an instruction to keep it — words the vocabulary does not have (user 2026-09-27). From
+  `IFR` it differs in two places, and it never judges a pair `IFR` would not:
+  - dependent and independent parallels (2,500 ft apart or more): no minimum between the two runways once BOTH
+    aircraft's tracks are within `FAA_VISUAL_INTERCEPT_MAX_DEG` of their runways' courses (7-4-4 c2 a / c3 a: approved
+    separation until each is on a heading intercepting its centreline at 30° or less; then c2 c / c3 c: no other
+    separation with the adjacent centreline); before that, the `IFR` rule;
+  - two aircraft both ESTABLISHED on finals of runways of other directions are not judged (7-4-4 c4; the
+    crossing-runway gate at the threshold, 3-10-4, is not modelled).
+  A pair under 2,500 ft is judged as one runway, as under `IFR`: 7-4-4 c1 (as amended by N JO 7110.805) clears a
+  visual approach there only when the succeeding aircraft keeps visual separation (c1 b). Not encoded: the same-side
+  cases of c2 / c3 (b) and (d), which hold the succeeding aircraft until it intercepts the farther centreline or is
+  established on the nearer one, and b1's "targets must not touch" (it needs a display scale). The recorded traffic
+  breaks the `IFR` reading on parallel and crossing runways every hour at four of the five airports (readout
   `2026-09-27_parallel_runway_separation.md`); ADS-B does not say which approach was a visual one, nor where visual
   separation was applied.
 
@@ -38,15 +43,15 @@ For each pair under `IFR`, by the runways in force (`Separation.relation`) and w
   said: the terminal radar minimum (3 NM, 5-5-4 a/b) unless vertically separated (5-5-5, 4-5-1 a). Where exactly one of
   the two is established, the other one — joining — is responsible; otherwise both are.
 
-Separately, when an aircraft is over its threshold, the established aircraft next behind it on the same runway (or a
-pair separated as one) must be at least the on-approach wake minimum behind it on the approach clock (TBL 5-5-2,
-5-5-4 h); an aircraft not yet established is left out (its place on the approach clock is not its place in the queue).
+Separately, under both readings, when an aircraft is over its threshold, the established aircraft next behind it on the
+same runway (or a pair separated as one) must be at least the on-approach wake minimum behind it on the approach clock
+(TBL 5-5-2, 5-5-4 h); an aircraft not yet established is left out (its place on the approach clock is not its place in the queue).
 A category is None when the record has no type: in trail, such a pair is judged on the radar minimum alone and says so
 (``wake_known``); at the threshold it is not judged — the caller counts those aircraft. Distances are metres; the
 vertical is between the two heights as given.
 
-`Traffic` holds its own contract: an aircraft has a position on the approach clock exactly when a runway is in force,
-and an established aircraft has one.
+`Traffic` holds its own contract: an aircraft has a position on the approach clock and an angle off its course exactly
+when a runway is in force, and an established aircraft has one.
 """
 
 from __future__ import annotations
@@ -62,8 +67,8 @@ from ts_transformer.inference.runway_schedule import (
     DEPENDENT,
     FAA_RADAR_NM,
     FAA_VERTICAL_FT,
+    FAA_VISUAL_INTERCEPT_MAX_DEG,
     INDEPENDENT,
-    SAME,
     UNRELATED,
     Separation,
 )
@@ -85,17 +90,20 @@ class Traffic:
     height_m: np.ndarray                # [N]
     runway: tuple[str | None, ...]      # the runway in force; None before one is said
     along_m: np.ndarray                 # [N] position on the approach clock; NaN where no runway is in force
+    off_course_deg: np.ndarray          # [N] |track − its runway's course|, 0–180°; NaN where no runway is in force
     established: np.ndarray             # [N] bool: established on the final of its runway in force
     category: tuple[str | None, ...]    # CWT category; None: the record has no type
 
     def __post_init__(self) -> None:
         count = len(self.e_m)
         if not all(len(field) == count for field in (self.n_m, self.height_m, self.runway, self.along_m,
-                                                        self.established, self.category)):
+                                                        self.off_course_deg, self.established, self.category)):
             raise ValueError("every field of a Traffic holds one value per aircraft")
         said = np.array([runway is not None for runway in self.runway], dtype=bool)
-        if not np.array_equal(said, np.isfinite(self.along_m)):
-            raise ValueError("an aircraft is on the approach clock exactly when a runway is in force")
+        if not (np.array_equal(said, np.isfinite(self.along_m))
+                and np.array_equal(said, np.isfinite(self.off_course_deg))):
+            raise ValueError("an aircraft is on the approach clock, and has an angle off its course, exactly when a "
+                             "runway is in force")
         if np.any(np.asarray(self.established, dtype=bool) & ~said):
             raise ValueError("an established aircraft has a runway in force")
 
@@ -122,19 +130,10 @@ def _wake_m(table: dict[tuple[str, str], float], leader: str | None, follower: s
     return table.get((leader, follower), 0.0) * NM_M, True     # a blank cell of the table sets no wake minimum
 
 
-def _check(reading: str) -> None:
-    if reading not in READINGS:
-        raise ValueError(f"reading {reading!r} is not one of {READINGS}")
-
-
-def _one_runway(separation: Separation, a: str | None, b: str | None, reading: str) -> bool:
-    """Separated as one runway: under `VISUAL` only the same runway, under `IFR` a close pair too."""
-    return separation.relation(a, b) == SAME if reading == VISUAL else separation.one_runway(a, b)
-
-
 def losses(traffic: Traffic, separation: Separation, reading: str) -> list[Loss]:
     """Every pair that has lost separation at this instant under ``reading`` (module docstring)."""
-    _check(reading)
+    if reading not in READINGS:
+        raise ValueError(f"reading {reading!r} is not one of {READINGS}")
     one_runway_m, radar_m, vertical_min_m = separation.same_nm * NM_M, FAA_RADAR_NM * NM_M, FAA_VERTICAL_FT * FT_M
     out = []
     count = len(traffic.e_m)
@@ -146,9 +145,13 @@ def losses(traffic: Traffic, separation: Separation, reading: str) -> list[Loss]
             relation = separation.relation(ri, rj) if ri is not None and rj is not None else NO_RUNWAY
             both = bool(traffic.established[i] and traffic.established[j])     # established: a runway is in force
             ahead, behind = (i, j) if traffic.along_m[i] >= traffic.along_m[j] else (j, i)
-            if reading == VISUAL and relation not in (SAME, NO_RUNWAY) and (relation != UNRELATED or both):
-                continue                # other runways of one direction; established on finals of other directions
-            if both and _one_runway(separation, ri, rj, reading):
+            if reading == VISUAL:
+                if relation in (DEPENDENT, INDEPENDENT) and max(
+                        traffic.off_course_deg[i], traffic.off_course_deg[j]) <= FAA_VISUAL_INTERCEPT_MAX_DEG:
+                    continue            # 7-4-4 c2 / c3: both intercept at 30° or less
+                if relation == UNRELATED and both:
+                    continue            # established on finals of other directions: 3-10-4 not modelled
+            if both and separation.one_runway(ri, rj):
                 wake, known = _wake_m(CWT_DIRECTLY_BEHIND_NM, traffic.category[ahead], traffic.category[behind])
                 required = max(one_runway_m, wake)
                 if horizontal < required:
@@ -170,22 +173,20 @@ def losses(traffic: Traffic, separation: Separation, reading: str) -> list[Loss]
     return out
 
 
-def next_behind(traffic: Traffic, leader: int, separation: Separation, reading: str) -> int | None:
-    """The established aircraft next behind ``leader`` on the approach clock, on its runway or (under `IFR`) one
-    separated as one."""
-    _check(reading)
+def next_behind(traffic: Traffic, leader: int, separation: Separation) -> int | None:
+    """The established aircraft next behind ``leader`` on the approach clock, on its runway or one separated as one."""
     runway = traffic.runway[leader]
     behind = [k for k in range(len(traffic.e_m))
-              if k != leader and traffic.established[k] and _one_runway(separation, runway, traffic.runway[k], reading)
+              if k != leader and traffic.established[k] and separation.one_runway(runway, traffic.runway[k])
               and traffic.along_m[k] < traffic.along_m[leader]]
     return max(behind, key=lambda k: traffic.along_m[k]) if behind else None
 
 
-def wake_at_threshold(traffic: Traffic, leader: int, separation: Separation, reading: str) -> Loss | None:
-    """``leader`` is over its threshold now: the established aircraft next behind it on the same runway (or, under
-    `IFR`, a pair separated as one) must be the on-approach wake minimum behind it on the approach clock (TBL 5-5-2,
-    5-5-4 h)."""
-    follower = next_behind(traffic, leader, separation, reading)
+def wake_at_threshold(traffic: Traffic, leader: int, separation: Separation) -> Loss | None:
+    """``leader`` is over its threshold now: the established aircraft next behind it on the same runway (or a pair
+    separated as one) must be the on-approach wake minimum behind it on the approach clock (TBL 5-5-2, 5-5-4 h); the
+    same under both readings."""
+    follower = next_behind(traffic, leader, separation)
     if follower is None:
         return None
     runway = traffic.runway[leader]
