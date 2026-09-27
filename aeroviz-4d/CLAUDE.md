@@ -159,7 +159,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **Training's code: one reader (`data/trainingReader.ts`) for every Training file; shared wording in `data/trainingText.ts`;
   the read-back is a pure model + four charts + a window shell (`components/training/`); the 3D scene is
   `scene/trainingEntities.ts`, built once per flight — Draw switches set `show`, they rebuild nothing**; a reading given only
-  in a tooltip is also page text behind an ⓘ (`training/NotesToggle.tsx`) (AV27).
+  in a tooltip is also page text behind an ⓘ (`training/NotesToggle.tsx`) or on the details page (AV27).
 - **The Training cursor is its own context (`useTrainingCursor`), which `useApp` does not read — it moves on every chart
   hover; read it only in leaves (`TrainingScene` runs the 3D layer; never a hook in `FlightApp`, or every hover re-renders
   the workbench). The Training panel stays mounted after a visit (`hidden` in other tasks), so its session
@@ -181,6 +181,13 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   base `#d946ef`, landing `#a3e635`, augmented `#b82e7a` — 3.3:1, a mark colour, not for running text); **a model speaks under
   its OWN procedure's masks** (`generation.procedureMasks`); under the procedure's altitudes a sentence may end
   `below_glidepath` (`TRAINING_FREE_OUTCOMES`), and the live executor sends the masks back and is cut at the same step (AV32).
+- **The Training dock never unfolds long content**: what is read once (the module, the switches, the vocabulary) and every
+  readout's tables are on the modal DETAILS PAGE (`training/TrainingDetails.tsx`, portalled, a tab per section, a section
+  with nothing to show listed disabled with its reason); the dock has a header "Details" and one line per readout — its name
+  and conclusion — opening the page on that section (AV33).
+- **Scrollbars are styled ONCE, globally** (top of `index.css`: `--scrollbar-*` tokens, `::-webkit-scrollbar*` for
+  Chromium/Safari, the standard properties only under `@supports not selector(::-webkit-scrollbar)` — Chromium 121+ lets them
+  override the parts); a component never styles its own scrollbar, it changes the tokens (AV34).
 
 ## Comparison CZML colour contract
 

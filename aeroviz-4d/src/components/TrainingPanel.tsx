@@ -16,8 +16,9 @@
  *   ④ an entry that is not a set entry  → greyed out on its own; the others still load (AV6)
  *
  * KEPT SHORT, TOP TO BOTTOM: the set, the flight list, the live executor, the Draw switches (short labels, the full
- * reading in each tooltip), then the readouts behind the overlays. What is read once — what the module is, the
- * vocabulary's numbers, the shas — is behind the header's ⓘ (`TrainingVocabularyNotes`).
+ * reading in each tooltip), then "Details": one line per readout behind the overlays, its conclusion. Everything longer —
+ * what the module is, the vocabulary's numbers, the readouts' tables — is on the DETAILS PAGE (`TrainingDetails`), opened
+ * by the header's "Details" or by a readout's line, on its section; the dock never unfolds it.
  *
  * Over the open set it offers the OVERLAYS published for it (`useTrainingOverlays`): the executor's replay and the
  * prior's predictions, each behind its own switch; a set with none says so and folds away the command that writes one.
@@ -34,13 +35,14 @@
  * while its switch is on — is flown by the backend now, never read from an overlay (`TrainingAutopilotCard`).
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useApp, type TrainingLayers } from "../context/AppContext";
-import useTrainingOverlays, { type OverlayKindState } from "../hooks/useTrainingOverlays";
+import useTrainingOverlays, { type OverlayKindState, type OverlaysManifestState } from "../hooks/useTrainingOverlays";
 import useTrainingAutopilot from "../hooks/useTrainingAutopilot";
 import TrainingAutopilotCard from "./TrainingAutopilotCard";
 import TrainingVocabularyNotes from "./TrainingVocabularyNotes";
 import ProblemBox from "./training/ProblemBox";
+import TrainingDetails, { type TrainingDetailsSection } from "./training/TrainingDetails";
 import { NotesList } from "./training/NotesToggle";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import {
@@ -62,11 +64,19 @@ import {
   type TrainingGenerationOverlay,
 } from "../data/trainingOverlays";
 import { TRAINING_OUTCOME_TAG, trainingModelText } from "../data/trainingText";
-import { TrainingExecutorGate, TrainingGenerationReadout, TrainingPriorReadout } from "./TrainingResults";
+import {
+  executorGateSummary,
+  generationSummary,
+  priorReadoutSummary,
+  TrainingExecutorGate,
+  TrainingGenerationReadout,
+  TrainingPriorReadout,
+} from "./TrainingResults";
 import type { GenerationItem } from "../hooks/useTrainingOverlays";
 import {
   fetchTrainingIndex,
   fetchTrainingSample,
+  TRAINING_COLUMNS,
   trainingIndexPath,
   trainingSelectionOf,
   trainingSetRefusal,
@@ -89,6 +99,10 @@ const LAYER_SWITCHES: Array<{ layer: keyof TrainingLayers; colour: string; text:
     title: "every runway the runway pointer can point at; the designated one is always drawn" },
 ];
 
+/** The overlay switches' names, as the Draw box and the details page's reasons say them. */
+const EXECUTOR_SWITCH = "Executor replay";
+const PRIOR_SWITCH = "Prior predictions";
+
 /** What the live executor's switch does. */
 const FLY_ON_CLICK = "On: clicking a word's band in the sentence bar flies its segment at once. Off: only the bar's Fly button does.";
 
@@ -109,6 +123,11 @@ type SampleState =
 const TRAINING_EXPORT_COMMAND =
   "python run_ts.py instruction_training_export --dir 4dTrajectory/outputs/POOLED/instruction_language/<an instruction-v3 artefact> " +
   "--airports-root aeroviz-4d/public/data/airports --airport ";
+
+/** The details page's readout sections, by title. */
+const MODELS_TITLE = "The models' own sentences";
+const EXECUTOR_TITLE = "The executor's replay gate";
+const PRIOR_TITLE = "The prior's readout";
 
 /** The commands that write the overlays, folded under a switch whose set has none. */
 const TRAINING_OVERLAY_COMMAND = {
@@ -270,6 +289,52 @@ function ModelSentences({ items, setId, airport, flights }: {
   );
 }
 
+/** Why no overlay can be read from the manifest, or null when it was read. */
+function manifestAbsence(manifest: OverlaysManifestState): string | null {
+  if (manifest.status === "ready") return null;
+  if (manifest.status === "absent") return "none published for this set";
+  return manifest.status === "invalid" ? "the overlays manifest cannot be read" : "loading …";
+}
+
+/** None of this set's — and how many entries the manifest rejected (a rejected entry names no kind or set; the dock
+ *  names each). */
+function noneReadable(manifest: OverlaysManifestState): string {
+  const rejected = manifest.status === "ready" ? manifest.overlays.rejected.length : 0;
+  return rejected === 0 ? "none published for this set"
+    : `none published for this set; ${rejected} ${rejected === 1 ? "entry" : "entries"} of the manifest rejected`;
+}
+
+/** Why an overlay's readout has nothing to show: the details page's disabled section says it. */
+function overlayAbsence<T>(manifest: OverlaysManifestState, state: OverlayKindState<T>, switchName: string): string {
+  const unread = manifestAbsence(manifest);
+  if (unread !== null) return unread;
+  if (state.entry === null) return noneReadable(manifest);
+  if (!state.shown) return `switch on ${switchName} under Draw`;
+  return state.load.status === "invalid" ? "cannot be read" : "loading …";
+}
+
+/** Why the models' sentences have nothing to show. */
+function generationAbsence(manifest: OverlaysManifestState, items: GenerationItem[]): string {
+  const unread = manifestAbsence(manifest);
+  if (unread !== null) return unread;
+  if (items.length === 0) return noneReadable(manifest);
+  return items.every(({ load }) => load.status === "invalid") ? "cannot be read" : "loading …";
+}
+
+/** One readout in the panel: its name and its conclusion on one line (in full in its tooltip); it opens the details
+ *  page on its section. */
+function DetailsLink({ name, summary, onOpen }: { name: string; summary: string; onOpen: (event: MouseEvent<HTMLElement>) => void }) {
+  return (
+    <li>
+      <button type="button" className="training-details-link" aria-haspopup="dialog" title={`${name}: ${summary}`} onClick={onOpen}>
+        <span className="training-details-link-name">{name}</span>
+        <span className="training-details-link-summary">{summary}</span>
+        <span className="training-details-link-open" aria-hidden="true">›</span>
+      </button>
+    </li>
+  );
+}
+
 function EmptyState({ airport }: { airport: string }) {
   return (
     <div className="training-empty" role="status">
@@ -299,7 +364,15 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
   const [setId, setSetId] = useState<string | null>(null);
   const [sampleState, setSampleState] = useState<SampleState>({ status: "idle" });
   const [flightKey, setFlightKey] = useState<string | null>(null);
-  const [aboutOpen, setAboutOpen] = useState<boolean>(false);
+  /** The details page while it is open: its section, and the control that opened it (the focus goes back there). */
+  const [details, setDetails] = useState<{ section: string; opener: HTMLElement } | null>(null);
+  const openDetails = (section: string) => (event: MouseEvent<HTMLElement>) => setDetails({ section, opener: event.currentTarget });
+  const showSection = useCallback((section: string) => setDetails((open) => (open === null ? null : { ...open, section })), []);
+  const closeDetails = useCallback(() => setDetails(null), []);
+  // a panel hidden (another task) closes its page: it does not come back unasked
+  useEffect(() => {
+    if (hidden) setDetails(null);
+  }, [hidden]);
 
   // ── the manifest ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -403,35 +476,63 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
 
   useEffect(() => () => setTrainingSelection(null), [setTrainingSelection]);
 
+  // ── the details page ──────────────────────────────────────────────────────
+  const generations = overlays.generations.flatMap(({ load }) => (load.status === "ready" ? [load.overlay] : []));
+  const detailsSections: TrainingDetailsSection[] = [
+    { id: "overview", title: "What this view shows", body: (
+      <>
+        <p className="training-details-lede">
+          Each arrival read as the instructions a controller could have given — {TRAINING_COLUMNS.length} columns per{" "}
+          {sample ? sample.vocabulary.stepS : "—"} s step — with what every word allows: a heading word's band over the
+          rows it is judged on, the capture turn and corridor, the altitude tube, the speed band.
+        </p>
+        <h4 className="training-details-subhead">What each switch draws</h4>
+        <NotesList items={[
+          ...LAYER_SWITCHES.map(({ layer, colour, text, title }) => ({ key: layer, text: title, name: (
+            <><span className="training-model-swatch" style={{ background: colour }} />{text}</>) })),
+          { key: "autopilot", text: FLY_ON_CLICK, name: (
+            <><span className="training-model-swatch" style={{ background: TRAINING_AUTOPILOT_COLOR }} />Fly on band click</>) },
+        ]} />
+        <h4 className="training-details-subhead">The overlays published over this set</h4>
+        {overlays.executor.entries.length + overlays.prior.entries.length + overlays.generations.length === 0 ? (
+          <p className="training-details-lede">None.</p>
+        ) : (
+          <NotesList items={[...overlays.executor.entries, ...overlays.prior.entries, ...overlays.generations.map(({ entry }) => entry)]
+            .map((item) => ({ key: item.id, name: <code>{item.id}</code>, text: item.title }))} />
+        )}
+      </>
+    ) },
+    sample ? { id: "vocabulary", title: "Vocabulary", body: <TrainingVocabularyNotes sample={sample} /> }
+      : { id: "vocabulary", title: "Vocabulary", body: null, absent: "no set read" },
+    sample && generations.length > 0
+      ? { id: "models", title: MODELS_TITLE, body: <TrainingGenerationReadout flights={sample.flights} overlays={generations} /> }
+      : { id: "models", title: MODELS_TITLE, body: null, absent: sample ? generationAbsence(overlays.manifest, overlays.generations) : "no set read" },
+    executorOverlay
+      ? { id: "executor", title: EXECUTOR_TITLE, body: <TrainingExecutorGate overlay={executorOverlay} /> }
+      : { id: "executor", title: EXECUTOR_TITLE, body: null,
+          absent: sample ? overlayAbsence(overlays.manifest, overlays.executor, EXECUTOR_SWITCH) : "no set read" },
+    priorOverlay && sample
+      ? { id: "prior", title: PRIOR_TITLE, body: <TrainingPriorReadout overlay={priorOverlay} stepS={sample.vocabulary.stepS} /> }
+      : { id: "prior", title: PRIOR_TITLE, body: null,
+          absent: sample ? overlayAbsence(overlays.manifest, overlays.prior, PRIOR_SWITCH) : "no set read" },
+  ];
+
   return (
     <section className="training-panel" aria-label="Training" hidden={hidden}>
       <header className="training-panel-header">
         <h2>Training</h2>
-        {/* Everything read ONCE — what the module is, the vocabulary, the shas — folds away, so the flight list keeps
-            the height the sentence bar would otherwise take. */}
-        <button type="button" className="training-about-toggle" aria-expanded={aboutOpen}
-          aria-label={aboutOpen ? "Hide what this panel shows" : "What does this panel show?"}
-          onClick={() => setAboutOpen((open) => !open)}>
-          {aboutOpen ? "×" : "ⓘ"}
+        {/* Everything read ONCE — what the module is, the vocabulary, the readouts — is on the details page, so the
+            flight list keeps the dock's height. */}
+        <button type="button" className="training-details-open" aria-haspopup="dialog" onClick={openDetails("overview")}>
+          Details
         </button>
       </header>
 
-      {aboutOpen ? (
-        <>
-          <p className="training-panel-lede">
-            Each arrival read as the instructions a controller could have given — six columns per{" "}
-            {sample ? sample.vocabulary.stepS : "—"} s step — with what every word allows: a heading word's band over the
-            rows it is judged on, the capture turn and corridor, the altitude tube, the speed band.
-          </p>
-          <NotesList items={[
-            ...LAYER_SWITCHES.map(({ layer, text, title }) => ({ key: layer, name: text, text: title })),
-            { key: "autopilot", name: "Fly on band click",
-              text: FLY_ON_CLICK },
-            ...[...overlays.executor.entries, ...overlays.prior.entries, ...overlays.generations.map(({ entry }) => entry)]
-              .map((item) => ({ key: item.id, name: item.id, text: item.title })),
-          ]} />
-          {sample ? <TrainingVocabularyNotes sample={sample} /> : null}
-        </>
+      {details !== null && !hidden ? (
+        <TrainingDetails context={[airport, sample?.setId, sample ? `${sample.flights.length} flights` : null]
+          .filter((part) => part).join(" · ")}
+          sections={detailsSections} sectionId={details.section} onSection={showSection} onClose={closeDetails}
+          opener={details.opener} />
       ) : null}
 
       {indexState.status === "loading" ? <p className="training-note" role="status">Reading {trainingIndexPath(airport)} …</p> : null}
@@ -522,9 +623,9 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
             {sample ? (
               <>
                 <OverlaySwitch state={overlays.executor} colour={TRAINING_EXECUTOR_COLOR} setId={sample.setId} airport={airport}
-                  text="Executor replay" />
+                  text={EXECUTOR_SWITCH} />
                 <OverlaySwitch state={overlays.prior} colour={undefined} setId={sample.setId} airport={airport}
-                  text="Prior predictions" />
+                  text={PRIOR_SWITCH} />
               </>
             ) : null}
           </fieldset>
@@ -535,11 +636,20 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
           {overlays.manifest.status === "ready" ? overlays.manifest.overlays.rejected.map((item) => (
             <ProblemBox key={`overlay-${item.id}`} title={`Overlay ${item.id} was rejected.`} detail={item.problem} />
           )) : null}
-          {executorOverlay ? <TrainingExecutorGate overlay={executorOverlay} /> : null}
-          {priorOverlay && sample ? <TrainingPriorReadout overlay={priorOverlay} stepS={sample.vocabulary.stepS} /> : null}
-          {sample && overlays.generations.some(({ load }) => load.status === "ready") ? (
-            <TrainingGenerationReadout flights={sample.flights}
-              overlays={overlays.generations.flatMap(({ load }) => (load.status === "ready" ? [load.overlay] : []))} />
+          {/* THE READOUTS: one line each here, their tables on the details page */}
+          {sample && (generations.length > 0 || executorOverlay || priorOverlay) ? (
+            <ul className="training-details-links" aria-label="Readouts">
+              {generations.length > 0 ? (
+                <DetailsLink name="Models' sentences" summary={generationSummary(generations, sample.flights)}
+                  onOpen={openDetails("models")} />
+              ) : null}
+              {executorOverlay ? (
+                <DetailsLink name="Replay gate" summary={executorGateSummary(executorOverlay)} onOpen={openDetails("executor")} />
+              ) : null}
+              {priorOverlay ? (
+                <DetailsLink name="Prior readout" summary={priorReadoutSummary(priorOverlay)} onOpen={openDetails("prior")} />
+              ) : null}
+            </ul>
           ) : null}
         </>
       ) : null}

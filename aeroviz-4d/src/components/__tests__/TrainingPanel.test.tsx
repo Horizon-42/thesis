@@ -4,7 +4,7 @@
  * set — the executor's replay and the prior's predictions — or, without them, the switches that say so.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const {
   appState, setTrainingSelection, setTrainingLayer, setTrainingExecutor, setTrainingPrior, setTrainingAutopilot,
@@ -189,13 +189,24 @@ describe("TrainingPanel", () => {
         .toMatch(/each altitude word's tube, and on the speed chart each speed word's transition and band/);
     });
 
-    it("says in its ⓘ what each switch shows and which overlays are over the set, as text", async () => {
+    it("says on its details page what each switch shows, and the vocabulary, as text", async () => {
       render(<TrainingPanel hidden={false} />);
       await screen.findByText("TST1");
-      fireEvent.click(screen.getByRole("button", { name: "What does this panel show?" }));
-      const about = document.querySelector(".training-notes-list")!.textContent!;
+      const open = screen.getByRole("button", { name: "Details" });
+      fireEvent.click(open);
+      const page = screen.getByRole("dialog", { name: "Training details" });
+      const about = page.querySelector(".training-notes-list")!.textContent!;
       expect(about).toMatch(/Altitude tubes \+ speed bandseach altitude word's tube, and on the speed chart each speed word's/);
       expect(about).toMatch(/Fly on band clickOn: clicking a word's band in the sentence bar flies its segment at once/);
+      // the sections this set has nothing for stay listed, disabled, and say why
+      expect((within(page).getByRole("tab", { name: /The executor's replay gate/ }) as HTMLButtonElement).disabled).toBe(true);
+      expect(within(page).getByRole("tab", { name: /The executor's replay gate/ }).textContent).toMatch(/none published for this set/);
+      fireEvent.click(within(page).getByRole("tab", { name: "Vocabulary" }));
+      expect(within(page).getByRole("tabpanel").textContent).toMatch(/Runway pointer/);
+      // Escape closes it, and the focus goes back to what opened it
+      fireEvent.keyDown(page, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(document.activeElement).toBe(open);
     });
 
     it("states the draw it came from, in full in its tooltip", async () => {
@@ -226,12 +237,50 @@ describe("TrainingPanel", () => {
       expect(screen.getByText("not flown")).toBeTruthy();
     });
 
-    it("folds the replay's gate table and the prior's readout under the switches", async () => {
+    it("lists the replay's gate and the prior's readout by their conclusions, and opens each on the details page", async () => {
       render(<TrainingPanel hidden={false} />);
-      expect(await screen.findByText(/The executor's val replay gate · spec 777777777777/)).toBeTruthy();
-      expect(screen.getByText(/The prior's val readout · 0\.1778 per step against 0\.3444 \/ 0\.3260/)).toBeTruthy();
-      expect(screen.getByText(/own dynamics at KXXX — gated, each share ≥ 95 %/)).toBeTruthy();
-      expect(screen.getByText(/stand-in dynamics at KXXX — reported, not gated: a stand-in's dynamics/)).toBeTruthy();
+      const links = await screen.findByRole("list", { name: "Readouts" });
+      expect((await within(links).findByRole("button", { name: /Replay gate/ })).textContent).toBe("Replay gateval · spec 777777777777›");
+      expect(within(links).getByRole("button", { name: /Prior readout/ }).textContent)
+        .toBe("Prior readoutval · 0.1778 per step against 0.3444 / 0.3260›");
+      // no table in the dock
+      expect(document.querySelector(".training-panel table")).toBeNull();
+
+      fireEvent.click(within(links).getByRole("button", { name: /Replay gate/ }));
+      let page = screen.getByRole("dialog", { name: "Training details" });
+      expect(within(page).getByRole("tab", { selected: true }).textContent).toBe("The executor's replay gate");
+      expect(within(page).getByText(/own dynamics/).closest("caption")!.textContent).toMatch(/own dynamics at KXXX\s*gated — each share ≥ 95 %/);
+      expect(within(page).getByText(/stand-in dynamics/).closest("caption")!.textContent)
+        .toMatch(/stand-in dynamics at KXXX\s*reported, not gated: a stand-in's dynamics/);
+      fireEvent.click(within(page).getByRole("button", { name: "Close the details" }));
+
+      fireEvent.click(within(links).getByRole("button", { name: /Prior readout/ }));
+      page = screen.getByRole("dialog", { name: "Training details" });
+      expect(within(page).getByRole("tab", { selected: true }).textContent).toBe("The prior's readout");
+      // the lowest of each row is marked; what a row's tooltip said is a table of its own
+      expect(within(page).getByText("Where the truth says a word")).toBeTruthy();
+      expect(page.querySelectorAll(".training-results-best").length).toBeGreaterThan(0);
+    });
+
+    it("says on the details page to switch an overlay on when its readout is switched off", async () => {
+      render(<TrainingPanel hidden={false} />);
+      await screen.findByRole("list", { name: "Readouts" });
+      fireEvent.click(screen.getByLabelText("Executor replay"));
+      await waitFor(() => expect(screen.queryByRole("button", { name: /Replay gate/ })).toBeNull());
+      fireEvent.click(screen.getByRole("button", { name: "Details" }));
+      const tab = within(screen.getByRole("dialog")).getByRole("tab", { name: /The executor's replay gate/ }) as HTMLButtonElement;
+      expect(tab.disabled).toBe(true);
+      expect(tab.title).toBe("switch on Executor replay under Draw");
+    });
+
+    it("closes its details page when the panel is hidden, and does not bring it back", async () => {
+      const { rerender } = render(<TrainingPanel hidden={false} />);
+      fireEvent.click(await within(await screen.findByRole("list", { name: "Readouts" })).findByRole("button", { name: /Prior readout/ }));
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      rerender(<TrainingPanel hidden />);
+      expect(screen.queryByRole("dialog")).toBeNull();
+      rerender(<TrainingPanel hidden={false} />);
+      expect(screen.queryByRole("dialog")).toBeNull();
     });
 
     it("stops publishing an overlay switched off", async () => {
@@ -311,12 +360,32 @@ describe("TrainingPanel", () => {
       expect(unflown?.getAttribute("title")).toBe("the model's sentences do not fly it: stand-in dynamics");
     });
 
-    it("folds how each model's samples landed, beside its formal readout here and at every airport, under the switches", async () => {
+    it("says how each model's samples landed, beside its formal readout here and at every airport, on the details page", async () => {
       render(<TrainingPanel hidden={false} />);
-      expect(await screen.findByText(/The models' own sentences, landed · base 50% \(val 90\.0%\) · landing r1 50% \(val 97\.0%\)/)).toBeTruthy();
-      expect(screen.getAllByText("val · KXXX")).toHaveLength(2);
-      expect(screen.getAllByText("val · all airports")).toHaveLength(2);
-      expect(screen.getByText(/^base \(v3_step1\/full_s1, trained on data alone\): 2 samples a flight at temperature 1, spoken under the vocabulary's rules alone \(seed 1337\)/)).toBeTruthy();
+      const link = await screen.findByText(/^base 50% \(val 90\.0%\) · landing r1 50% \(val 97\.0%\)$/);
+      fireEvent.click(link);
+      const page = screen.getByRole("dialog", { name: "Training details" });
+      expect(within(page).getAllByText("val · KXXX")).toHaveLength(2);
+      expect(within(page).getAllByText("val · all airports")).toHaveLength(2);
+      // what every model shares is said once; what differs is a column
+      const shared = within(page).getByLabelText("Shared by every model").textContent!;
+      expect(shared).toMatch(/samples a flight2/);
+      expect(shared).toMatch(/procedure masksnone \(the vocabulary's rules alone\)/);
+      const base = within(page).getAllByRole("row").find((row) => row.querySelector("th[scope='row']")?.textContent === "base")!;
+      expect(base.textContent).toMatch(/v3_step1\/full_s1/);
+      expect(base.textContent).toMatch(/trained on data alone/);
+    });
+
+    it("drops the column naming whose sentences a row counts when no model has a formal readout", async () => {
+      const bare = (id: string) => ({ ...(mockGenerationOverlay(id) as any), readout: null });
+      serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(), [OVERLAYS_PATH]: mockOverlaysWithGenerations(),
+              [BASE_PATH]: bare(BASE_MODEL_ID), [POST_PATH]: bare(POST_TRAINED_ID) });
+      render(<TrainingPanel hidden={false} />);
+      fireEvent.click(await screen.findByText(/^base 50% · landing r1 50%$/));
+      const page = screen.getByRole("dialog", { name: "Training details" });
+      expect([...page.querySelectorAll(".training-results-models thead th")].map((cell) => cell.textContent))
+        .toEqual(["model", "all", "straight-in", "vectored"]);
+      expect(within(page).getByText(/no formal readout was given/)).toBeTruthy();
     });
 
     it("reads a model that flies none of the set's flights without failing: nothing to count", async () => {
@@ -325,7 +394,7 @@ describe("TrainingPanel", () => {
       serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(), [OVERLAYS_PATH]: mockOverlaysWithGenerations(),
               [BASE_PATH]: none, [POST_PATH]: mockGenerationOverlay(POST_TRAINED_ID) });
       render(<TrainingPanel hidden={false} />);
-      expect(await screen.findByText(/The models' own sentences, landed · base — \(val 90\.0%\)/)).toBeTruthy();
+      expect(await screen.findByText(/^base — \(val 90\.0%\)/)).toBeTruthy();
     });
 
     it("checks the truth when the model chosen is not one of this set's", async () => {

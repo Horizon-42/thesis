@@ -1,5 +1,19 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-27 — 界面：Training 的详情页；全应用统一的滚动条（branch `dev-training-details`）
+
+- 用户："左边栏的详情……展开后都挤在左边栏里 根本没法读 可以单独设计一个详情页"。Training 左栏不再展开长内容：原来标题旁 ⓘ 下的
+  模块说明、开关说明、词表数值，和最下面三个折叠的读数表（回放门表、先验读数、模型句子落地表），都搬到一个模态的详情页
+  （`aeroviz-4d/src/components/training/TrainingDetails.tsx`，分节标签 + 单独滚动的内容区，没有内容的节灰掉并写明原因，Esc / × /
+  点背景关闭）；左栏留一个 **Details** 按钮和每个读数一行（名字 + 结论），点它打开对应的一节。
+- 各表按宽页重排（`TrainingResults.tsx`），数都与原来相同：先验原来只在每行提示里的读数成了一张表；似然表每行最低的加粗；模型
+  所有相同的抽样字段写一次，不同的做成列；没有正式读数时不出 "sentences of" 一列。
+- 用户："滑动条……和设计的颜色系统不搭配……最好是全局性质的修改"。`index.css` 开头一处定义全部滚动条（`--scrollbar-*` 变量；
+  Chromium / Safari 用 `::-webkit-scrollbar*` 画内缩圆头细条；Firefox 的标准属性放在 `@supports not selector(::-webkit-scrollbar)`
+  里，因为 Chromium 121 起它们会压过前者）；删掉程序详情页侧栏自己的那一份。
+- 文档：`aeroviz-4d/docs/36-…training-module.zh.md` §4.1、§4.9；`35-viewer-reference.md` AV33、AV34（AV27 改一句）；
+  `aeroviz-4d/CLAUDE.md` 两行索引。
+
 ### 2026-09-27 — 第六个机场 KAUS：只作测试数据，单独放在 `outputs/harvest-heldout/`
 
 - 用户：再下载一个机场，只当测试数据，相关数据都要有，ADS-B 每条跑道 2000 条；不能挤占训练、不能损坏现有文件，

@@ -3,7 +3,7 @@
  * ---------------------------
  * The vocabulary of the open set, read once: its spec and labeller, the columns and their classes, and every number a
  * word's envelope is drawn with — the one place in the Training views that states them (the sentence bar, the windows
- * and the legend name the envelopes and point here). Behind the panel's ⓘ.
+ * and the legend name the envelopes and point here). On the details page's "Vocabulary" section (`training/TrainingDetails`).
  */
 
 import { TRAINING_COLUMNS, TRAINING_SPEC_SHA256, type TrainingSample } from "../data/trainingSample";

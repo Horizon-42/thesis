@@ -107,7 +107,7 @@ function footerSwatches(m: ReadbackModel): Array<{ key: string; swatch: Swatch; 
         `speed ${vocabulary.smoothingS.speed} s; the raw rows are the faint line behind it` },
     { key: "raw", swatch: { kind: "line", colour: TRAINING_RAW_COLOR }, text: "raw", title: "the raw rows" },
     { key: "heading", swatch: { kind: "area", colour: TRAINING_HEADING_BAND_COLOR, opacity: 0.3 }, text: "heading band",
-      title: "a heading word's band: its target ± the tolerance over the rows it is judged on (the panel's ⓘ has the numbers)" },
+      title: "a heading word's band: its target ± the tolerance over the rows it is judged on (the numbers: the details page's Vocabulary)" },
     { key: "capture", swatch: { kind: "area", colour: TRAINING_CAPTURE_TURN_COLOR, opacity: 0.2, dash: "3 2" }, text: "capture turn",
       title: "from the clearance onto the course" },
     { key: "corridor", swatch: { kind: "area", colour: TRAINING_CORRIDOR_COLOR, opacity: 0.3 }, text: "corridor",
