@@ -21,8 +21,8 @@ executor was flying to (the words of the cycle that brought it there, as `glidep
   executor lost against it per minute;
 - **at the FAF** — each replay's first state inside the FAF reached on a captured cycle: executor − observed, and each
   against the glidepath, apart for the replays that flew "descend to land" with the shallowest descent class before it;
-- **what-ifs** — the same sample flown with ONE line of the vertical law changed (`WHAT_IFS`: the aim inside the word's
-  tube), each measured like the law as it is (every reading above) and on the replay gate's flights from row 0
+- **what-ifs** — the same sample flown with a line or two of the vertical law changed (`WHAT_IFS`: the aim inside the
+  word's tube, and where the reach of the landing is read from), each measured like the law as it is (every reading above) and on the replay gate's flights from row 0
   (`replay_words`: landed and the words inside their envelopes, the altitude column's failures apart). The changes live
   in this process only (`law_changed`): the executor's source and spec stay as measured.
 
@@ -82,34 +82,51 @@ AIM_IN_TUBE = "in_tube = torch.minimum(torch.maximum(toward, "
 #: Below the pointed runway's published glidepath (``height`` and the crossing height are above the threshold, the
 #: glidepath rises at its tangent from the crossing height).
 _BELOW_GLIDEPATH = "(height < crossing_height_m + to_go_m * glidepath_tan)"
-#: What each what-if makes of that line, after the capture only (before it every what-if is the law):
+#: The line that decides whether the landing can still be reached from the tube (from its lower edge, at the steepest
+#: class's lower edge), and the same read from the aircraft's own height.
+REACH = "in_reach = (lower - to_go_m * math.tan(self.steepest_low_rad) <= admitted_high)"
+OWN_REACH = "in_reach = (height - to_go_m * math.tan(self.steepest_low_rad) <= admitted_high)"
+_CENTRE = "torch.minimum(nominal, on_line)"
+#: What each what-if makes of the law, as ``(line, becomes)`` pairs, each line held exactly once; the aim changes after
+#: the capture only (before it every what-if is the law):
 WHAT_IFS = {
     # the class's nominal angle, never steeper than the line to the crossing point
-    "class_centre_in_tube": "in_tube = torch.minimum(torch.maximum("
-                            "torch.where(line_captured, torch.minimum(nominal, on_line), toward), ",
+    "class_centre_in_tube": ((AIM_IN_TUBE, "in_tube = torch.minimum(torch.maximum("
+                                           f"torch.where(line_captured, {_CENTRE}, toward), "),),
     # below the published glidepath, level (the tube's shallow side: as late a descent as the word allows) — the
     # approach joined from below, as the observed aircraft fly it; on or above it, the law
-    "join_from_below": "in_tube = torch.minimum(torch.maximum("
-                       f"torch.where(line_captured & {_BELOW_GLIDEPATH}, torch.zeros_like(toward), toward), ",
+    "join_from_below": ((AIM_IN_TUBE, "in_tube = torch.minimum(torch.maximum("
+                                      f"torch.where(line_captured & {_BELOW_GLIDEPATH}, torch.zeros_like(toward), toward), "),),
     # below it, level; on or above it, the class's nominal angle (never steeper than the line to the crossing point)
-    "join_from_below_centre": "in_tube = torch.minimum(torch.maximum("
-                              f"torch.where(line_captured, torch.where({_BELOW_GLIDEPATH}, torch.zeros_like(toward), "
-                              "torch.minimum(nominal, on_line)), toward), ",
+    "join_from_below_centre": ((AIM_IN_TUBE, "in_tube = torch.minimum(torch.maximum("
+                                             f"torch.where(line_captured, torch.where({_BELOW_GLIDEPATH}, "
+                                             f"torch.zeros_like(toward), {_CENTRE}), toward), "),),
+    # the class centre, the reach read from the aircraft's own height (it leaves the tube for the crossing point only
+    # when it could no longer get down to it at the steepest class's lower edge; the tube's lower edge lags it)
+    "class_centre_own_reach": ((AIM_IN_TUBE, "in_tube = torch.minimum(torch.maximum("
+                                             f"torch.where(line_captured, {_CENTRE}, toward), "),
+                               (REACH, OWN_REACH)),
+    # below the glidepath level, on or above it the class centre, the reach from its own height
+    "join_from_below_centre_own_reach": ((AIM_IN_TUBE, "in_tube = torch.minimum(torch.maximum("
+                                                       f"torch.where(line_captured, torch.where({_BELOW_GLIDEPATH}, "
+                                                       f"torch.zeros_like(toward), {_CENTRE}), toward), "),
+                                         (REACH, OWN_REACH)),
 }
 
 
 @contextmanager
 def law_changed(name: str) -> Iterator[None]:
-    """The vertical law with `AIM_IN_TUBE` replaced by what-if ``name``'s line (`WHAT_IFS`), in this process, restored on
-    exit (compiled at the law's own line numbers). Refused unless the law holds the line exactly once: the what-if is the
-    current law less that one line."""
+    """The vertical law with what-if ``name``'s lines replaced (`WHAT_IFS`), in this process, restored on exit (compiled at
+    the law's own line numbers). Refused unless the law holds each line exactly once: the what-if is the current law less
+    those lines."""
     lines, first = inspect.getsourcelines(vertical.Vertical.rate)
     source = textwrap.dedent("".join(lines))
-    if source.count(AIM_IN_TUBE) != 1:
-        raise RuntimeError(f"vertical.Vertical.rate holds {source.count(AIM_IN_TUBE)} copies of {AIM_IN_TUBE!r}, not 1")
+    for line, becomes in WHAT_IFS[name]:
+        if source.count(line) != 1:
+            raise RuntimeError(f"vertical.Vertical.rate holds {source.count(line)} copies of {line!r}, not 1")
+        source = source.replace(line, becomes)
     namespace = dict(vars(vertical))
-    exec(compile("\n" * (first - 1) + source.replace(AIM_IN_TUBE, WHAT_IFS[name]), vertical.__file__, "exec"),
-         namespace)
+    exec(compile("\n" * (first - 1) + source, vertical.__file__, "exec"), namespace)
     original = vertical.Vertical.rate
     vertical.Vertical.rate = namespace["rate"]
     try:
@@ -375,7 +392,7 @@ def what_if(name: str, batch: replay.Batch, words: Words, params: ExecutorParams
             procedures: dict[str, tuple[RunwayProcedure, ...]], chunk: int) -> dict[str, Any]:
     """The same sample flown under what-if ``name``: read as the law is (`diagnose`), and on the replay gate's flights."""
     with law_changed(name):
-        return {"change": {"replaced": AIM_IN_TUBE, "by": WHAT_IFS[name]},
+        return {"change": [{"replaced": line, "by": becomes} for line, becomes in WHAT_IFS[name]],
                 **diagnose(batch, words, params, procedures, chunk),
                 "replay": replay_words(batch, words, params, chunk)}
 

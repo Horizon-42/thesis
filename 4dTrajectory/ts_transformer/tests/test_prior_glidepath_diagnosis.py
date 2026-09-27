@@ -88,12 +88,17 @@ def test_joining_from_below_flies_level_under_the_glidepath_after_the_capture_an
     assert joined[above] == pytest.approx(law[above]) and joined[(False, 400.0, 8_000.0, tan3)] == pytest.approx(
         law[(False, 400.0, 8_000.0, tan3)])
     assert centred[0] == pytest.approx(min(WORDS.angle_deg(SHALLOWEST), law[above][0]))
-    assert set(WHAT_IFS) == {"class_centre_in_tube", "join_from_below", "join_from_below_centre"}
+    assert set(WHAT_IFS) == {"class_centre_in_tube", "join_from_below", "join_from_below_centre", "class_centre_own_reach",
+                             "join_from_below_centre_own_reach"}
+    # every what-if's lines are the law's, each once
+    for name in WHAT_IFS:
+        with diagnosis.law_changed(name):
+            pass
 
 
 def test_the_what_if_refuses_a_law_that_does_not_hold_its_line_once_and_restores_on_an_error(monkeypatch):
     law = vertical.Vertical.rate
-    monkeypatch.setattr(diagnosis, "AIM_IN_TUBE", "no such line")
+    monkeypatch.setitem(diagnosis.WHAT_IFS, "class_centre_in_tube", (("no such line", "x"),))
     with pytest.raises(RuntimeError, match="0 copies"):
         with diagnosis.law_changed("class_centre_in_tube"):
             pass

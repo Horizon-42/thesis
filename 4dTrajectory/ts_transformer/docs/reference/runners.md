@@ -546,11 +546,17 @@ over the stopped replays, the height the executor gave up to the observed aircra
 kind × angle class × lateral capture); per descent class, on each replay's longest ≥ 20 s run of "descend to land" after
 the capture, both mean path angles (height lost ÷ distance to go covered, each ≥ 500 m), the observed aircraft against the
 glidepath at the run's start and the height given up per minute; at the first captured cycle inside the FAF, executor −
-observed, apart for the replays that flew "descend to land" with the shallowest class before it. A what-if flies the same
-sample with ONE line of `Vertical.rate` replaced in-process (`class_centre_in_tube`: inside the tube after the capture, the
-class's nominal angle, never steeper than the line to the crossing point; refused unless the line is there exactly once) —
-stops and outcomes only; the executor's source and spec are untouched. Writes `diagnosis.json`
-(`ts-prior-glidepath-diagnosis-v1`); from a clean tree, never over an existing directory; development splits only.
+observed, apart for the replays that flew "descend to land" with the shallowest class before it. What-ifs (`WHAT_IFS`,
+`--what-ifs`) fly the same sample with a line or two of `Vertical.rate` replaced in-process (`law_changed`; refused unless
+each line is there exactly once) — the aim inside the word's tube after the capture: `class_centre_in_tube` (the class's
+nominal angle, never steeper than the line to the crossing point), `join_from_below` (level below the published glidepath,
+the law on or above it), `join_from_below_centre` (level below it, the class centre above it), and the two centre laws
+with the landing's reach read from the aircraft's own height instead of the tube's lower edge (`*_own_reach`); each is read
+in full as the law is,
+and on the replay gate's flights from row 0 (`replay_words`: landed, words inside, failures by check); the executor's
+source and spec are untouched. Writes `diagnosis.json` (`ts-prior-glidepath-diagnosis-v2` since executor v11, 2026-09-27:
+several what-ifs, each read in full; v1 read one, stops and outcomes only); from a clean tree, never over an existing
+directory; development splits only.
 
 ### R18 · `run_ts.py prior_closed_loop` — archived 2026-09-25 → `archive/closed_loop_sft_2026_09/` (`docs/reference/entries.md` there)
 
