@@ -494,7 +494,8 @@ angle words shallowing 4.3° → 3.2° → 2.3° keeps "descend to land" inside 
 but leaves it for 3 of 131 rows at 20 rows (and at 30 and 50), crossing at the admitted upper edge (TCH + 12.5 m): the
 same under the law before and after the glidepath floor, so it is older than it. `tests/test_autopilot.py`'s shallowing
 case uses 15 rows. Judgement: the reach test (`in_reach`, from the tube's lower edge at the steepest class) and the
-crossing point's clamp to the admitted heights meet at an edge; look at it with the next executor change.
+crossing point's clamp to the admitted heights meet at an edge; look at it with the next executor change. Executor v11 (2026-09-27) changed only the law below the published glidepath
+(join from below) and did not address or re-measure this profile; still open for the executor after v11.
 
 ## ts: five test files still touch `sys.path` (2026-09-26)
 
