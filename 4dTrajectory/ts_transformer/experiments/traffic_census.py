@@ -13,8 +13,8 @@ under both readings — `VISUAL`, which the closed loop's checks and the reward 
   own rule (`capture_row` on `admit`'s smoothed track) for a background flight `admit` takes, the same rule on the raw
   track for one it refuses (each group counted); a flight that never stays in the corridor is never established; its CWT
   category comes from its type (`runway_schedule.wake_category`; a flight without a type is counted);
-- a pair's loss over consecutive steps is one EPISODE, whatever the kind at each step (the kinds seen are listed); the
-  pairs with a loss are counted beside the episodes;
+- a pair's loss over consecutive steps is one EPISODE, whatever the kind at each step (the kinds seen are listed, and
+  its closest step: the distance over the minimum, and the two); the pairs with a loss are counted beside the episodes;
 - at every landing (the leader over its threshold at its roster landing time) the established aircraft next behind it
   gives a landing interval on the approach clock, the distance the rules require (radar and TBL 5-5-2, design §2.5 / §9
   item 6), whether it was below it, and whether TBL 5-5-2 alone was broken (`wake_at_threshold`);
@@ -66,6 +66,7 @@ from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.scene import Presence, SceneIndex, hung_span, presence, samples, scene_steps
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
 
+SCHEMA = "ts-traffic-census-v2"
 SPLIT = "train"
 #: `faa_separation` turns distances into times at an approach speed; nothing here reads a time, so any speed does.
 APPROACH_SPEED_MPS = 70.0
@@ -151,12 +152,15 @@ def _record(episodes: list[dict[str, Any]], open_episodes: dict[tuple[str, str],
         episode = open_episodes.get(pair)
         if episode is None or episode["last_s"] != t_s - step_s:
             episode = {"pair": list(pair), "relation": loss.relation, "first_s": float(t_s), "steps": 0,
-                       "kinds": [], "min_ratio": math.inf, "wake_known": True, "responsible": []}
+                       "kinds": [], "min_ratio": math.inf, "closest_m": None, "required_m": None, "wake_known": True,
+                       "responsible": []}
             open_episodes[pair] = episode
             episodes.append(episode)
         episode["steps"] += 1
         episode["last_s"] = float(t_s)
-        episode["min_ratio"] = min(episode["min_ratio"], loss.distance_m / loss.required_m)
+        if loss.distance_m / loss.required_m < episode["min_ratio"]:     # its closest step, against that step's minimum
+            episode["min_ratio"] = loss.distance_m / loss.required_m
+            episode["closest_m"], episode["required_m"] = loss.distance_m, loss.required_m
         episode["wake_known"] = episode["wake_known"] and loss.wake_known
         if loss.kind not in episode["kinds"]:
             episode["kinds"].append(loss.kind)
@@ -191,7 +195,7 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
             for reading in READINGS:
                 _record(episodes[reading], open_episodes[reading], here, losses(traffic, separation, reading),
                         float(t_s), step_s)
-            # closing speeds between consecutive established aircraft on one runway
+            # closing speeds between consecutive established aircraft on one runway (`VISUAL`: the same runway only)
             for k in range(len(here)):
                 if not traffic.established[k]:
                     continue
@@ -376,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{airport}: {len(tracks)} flights, pairs with a loss {found}, A_max {report[airport]['A_max']}, "
               f"{time.perf_counter() - started:.0f}s", flush=True)
 
-    payload = {"schema": "ts-traffic-census-v1", "written_utc": utc_now(), "split": SPLIT,
+    payload = {"schema": SCHEMA, "written_utc": utc_now(), "split": SPLIT,
                "only_airports": args.airports, "instructions": repo_relative(directory), "spec_sha256": spec.sha256,
                "arrival_manifest_sha256": manifests, "git": git_state(), "seconds": time.perf_counter() - started,
                "airports": report}

@@ -8,17 +8,19 @@ import math
 import numpy as np
 import pytest
 
-from ts_transformer.inference.runway_schedule import CWT_ON_APPROACH_NM, Separation
+from geokit import NM_M
+
+from ts_transformer.inference.runway_schedule import CWT_ON_APPROACH_NM, SINGLE, Separation
 
 STEP_S = 2.0
 
 
 def _track(key: str, times: np.ndarray, along: np.ndarray, rate: float, *, n: float = 0.0, landing_s: float,
-           captured_s: float = 0.0):
+           captured_s: float = 0.0, runway: str = "R"):
     from ts_transformer.experiments.traffic_census import Track
     from ts_transformer.prior.scene import Presence, hung_span
 
-    seen = Presence(key, "KXXX", "R", landing_s, True, times, np.abs(along))
+    seen = Presence(key, "KXXX", runway, landing_s, True, times, np.abs(along))
     first, last = hung_span(seen, STEP_S)
     return Track(seen, first, last, along.copy(), np.full(len(times), n), np.full(len(times), 500.0), along,
                  np.full(len(times), rate), captured_s, "artefact", "F")
@@ -53,6 +55,30 @@ def test_the_census_counts_an_in_trail_loss_the_landing_intervals_the_closing_sp
     assert landing["interval_m"]["min"] == pytest.approx(3_800.0)
     assert census["order_swaps"]["same_runway"] == {"swapped": 2, "pairs": 3, "share": pytest.approx(2 / 3)}
     assert census["A_max"] == 3
+    assert (episode["closest_m"], episode["required_m"]) == (pytest.approx(3.0 * NM_M * episode["min_ratio"]),
+                                                            pytest.approx(3.0 * NM_M))
+
+
+def test_a_close_parallel_pair_loses_only_under_the_ifr_reading():
+    """The first test's L and F, each on its own runway of a pair 150 m apart separated as one: IFR judges them in
+    trail and at L's landing; the visual reading judges neither, and no closing speed is measured across the pair."""
+    from ts_transformer.experiments.traffic_census import census_airport
+
+    t = np.arange(0.0, 200.0 + 1e-9, STEP_S)
+    leader = _track("L", t, -15_000.0 + 70.0 * t, 70.0, landing_s=15_000.0 / 70.0, runway="S1")
+    t_f = np.arange(0.0, 260.0 + 1e-9, STEP_S)
+    follower = _track("F", t_f, -22_000.0 + 80.0 * t_f, 80.0, n=150.0, landing_s=22_000.0 / 80.0, runway="S2")
+    separation = Separation(same_nm=3.0, speed_mps=70.0, relations={frozenset(("S1", "S2")): SINGLE},
+                            spacing_nm={frozenset(("S1", "S2")): 0.08}, along_nm={"S1": 0.0, "S2": 0.0},
+                            wake_nm=CWT_ON_APPROACH_NM)
+    census = census_airport([leader, follower], separation, STEP_S)
+
+    ifr, visual = census["readings"]["ifr"], census["readings"]["visual"]
+    assert (ifr["losses"]["episodes"], ifr["losses"]["by_relation"], ifr["losses"]["by_kind"]) == (
+        1, {"single": 1}, {"in_trail": 1})
+    assert (ifr["at_landing"]["judged"], ifr["at_landing"]["below_required"]) == (1, 1)
+    assert (visual["losses"]["episodes"], visual["at_landing"]["judged"]) == (0, 0)
+    assert census["closing_speed_on_a_final_mps"]["n"] == 0
 
 
 def _artefact(tmp_path, typecode: str = "A320"):

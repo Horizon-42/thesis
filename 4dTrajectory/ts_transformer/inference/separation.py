@@ -11,14 +11,19 @@ Two readings of the rules (design §3.2; user 2026-09-27, provisional): the clos
 `VISUAL`, and `IFR` is reported beside it.
 
 - `IFR` — the order's instrument rules as written, below.
-- `VISUAL` — the visual-approach reading: in good weather controllers clear parallel arrivals for visual approaches and
-  the pilots keep visual separation (7-4-4 c), so two aircraft on DIFFERENT runways of one direction (a close pair
-  separated as one included) have no minimum between them — no radar, no diagonal, no wake across the pair; and two
-  aircraft ESTABLISHED on finals of runways of other directions are not judged (converging and crossing-runway
-  operations, 3-10-4, are not modelled). One runway keeps its radar and wake minima; aircraft still being vectored keep
-  the radar-or-vertical rule. The recorded traffic breaks the `IFR` reading on parallel and crossing runways every hour
-  at four of the five airports (readout `2026-09-27_parallel_runway_separation.md`); ADS-B does not say which approach
-  was a visual one.
+- `VISUAL` — the visual reading: in good weather controllers clear parallel arrivals for visual approaches (7-4-4 c)
+  and apply visual separation (7-2-1). Two aircraft on DIFFERENT runways of one direction (a close pair separated as
+  one included) have no minimum between them, established or not — no radar, no diagonal, no wake across the pair. Two
+  aircraft both ESTABLISHED on finals of runways of other directions are not judged (converging and crossing-runway
+  operations, 3-10-4, are not modelled). Everything else keeps its `IFR` rule: one runway its radar and wake minima;
+  runways of other directions while either aircraft is still being vectored, and an aircraft with no runway yet, the
+  radar-or-vertical rule. This is LOOSER than 7-4-4 c alone: its conditions keep approved separation until the aircraft
+  turning in is on a heading that intercepts its centreline at 30° or less (c2 a, c3 a), or until the preceding
+  aircraft is established (c1 as amended by N JO 7110.805), unless visual separation is applied — so the reading
+  assumes visual separation wherever those conditions are not met. The recorded traffic breaks the `IFR` reading on
+  parallel and crossing runways every hour at four of the five airports (readout
+  `2026-09-27_parallel_runway_separation.md`); ADS-B does not say which approach was a visual one, nor where visual
+  separation was applied.
 
 For each pair under `IFR`, by the runways in force (`Separation.relation`) and who is established:
 
@@ -117,15 +122,19 @@ def _wake_m(table: dict[tuple[str, str], float], leader: str | None, follower: s
     return table.get((leader, follower), 0.0) * NM_M, True     # a blank cell of the table sets no wake minimum
 
 
-def _one_runway(separation: Separation, a: str | None, b: str | None, reading: str) -> bool:
-    """Separated as one runway: under `VISUAL` only the same runway, under `IFR` a close pair too."""
+def _check(reading: str) -> None:
     if reading not in READINGS:
         raise ValueError(f"reading {reading!r} is not one of {READINGS}")
+
+
+def _one_runway(separation: Separation, a: str | None, b: str | None, reading: str) -> bool:
+    """Separated as one runway: under `VISUAL` only the same runway, under `IFR` a close pair too."""
     return separation.relation(a, b) == SAME if reading == VISUAL else separation.one_runway(a, b)
 
 
 def losses(traffic: Traffic, separation: Separation, reading: str) -> list[Loss]:
     """Every pair that has lost separation at this instant under ``reading`` (module docstring)."""
+    _check(reading)
     one_runway_m, radar_m, vertical_min_m = separation.same_nm * NM_M, FAA_RADAR_NM * NM_M, FAA_VERTICAL_FT * FT_M
     out = []
     count = len(traffic.e_m)
@@ -164,6 +173,7 @@ def losses(traffic: Traffic, separation: Separation, reading: str) -> list[Loss]
 def next_behind(traffic: Traffic, leader: int, separation: Separation, reading: str) -> int | None:
     """The established aircraft next behind ``leader`` on the approach clock, on its runway or (under `IFR`) one
     separated as one."""
+    _check(reading)
     runway = traffic.runway[leader]
     behind = [k for k in range(len(traffic.e_m))
               if k != leader and traffic.established[k] and _one_runway(separation, runway, traffic.runway[k], reading)

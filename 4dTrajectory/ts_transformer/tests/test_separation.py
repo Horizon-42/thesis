@@ -26,6 +26,7 @@ from ts_transformer.inference.separation import (
     VISUAL,
     Traffic,
     losses,
+    next_behind,
     wake_at_threshold,
 )
 
@@ -174,5 +175,20 @@ def test_the_visual_reading_keeps_one_runway_and_vectored_traffic_and_drops_esta
     converging_vectored = traffic((-3_000, 0, 700, "R", True, "F"), (-3_000, 3_000, 700, "X", False, "F"))
     assert losses(converging_established, SEPARATION, VISUAL) == []
     assert [loss.kind for loss in losses(converging_vectored, SEPARATION, VISUAL)] == [RADAR_OR_VERTICAL]
+    # one aircraft joining the other's runway, and one with no runway yet: radar or vertical, as under IFR
+    joining = traffic((-5_000, 0, 700, "R", True, "F"), (-7_000, 2_000, 800, "R", False, "F"))
+    no_runway = traffic((-5_000, 0, 700, "R", True, "F"), (-7_000, 2_000, 800, None, False, "F"))
+    for scene in (joining, no_runway):
+        assert [loss.kind for loss in losses(scene, SEPARATION, VISUAL)] == [RADAR_OR_VERTICAL]
+        assert losses(scene, SEPARATION, VISUAL) == losses(scene, SEPARATION, IFR)
+
+
+@pytest.mark.parametrize("scene", [
+    Traffic(np.zeros(0), np.zeros(0), np.zeros(0), (), np.zeros(0), np.zeros(0, bool), ()),  # nobody to judge
+    traffic((-5_000, 0, 700, "R", True, "F"), (-7_000, 2_000, 800, "R", False, "F")),   # not both established
+])
+def test_a_reading_not_listed_is_refused_whatever_the_scene(scene):
     with pytest.raises(ValueError, match="reading"):
-        losses(in_trail, SEPARATION, "vfr")
+        losses(scene, SEPARATION, "Visual")
+    with pytest.raises(ValueError, match="reading"):
+        next_behind(scene, 0, SEPARATION, "Visual")

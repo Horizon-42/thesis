@@ -14,9 +14,12 @@ The episode drawn is the category's TYPICAL one: its closest approach (distance 
 median, the earliest of equals — chosen by rule, not by eye. Each figure has a plan view (airport frame, north up; the
 flights' full tracks faint, three minutes either side of the episode solid, the episode itself thick; runways and
 their extended centrelines; where each is captured) and the pair's horizontal distance and height difference over
-time against 3 NM and 1,000 ft. For each airport and relation a category is drawn from, ``examples.json`` also summarises
-every IFR episode of that relation at its start: how many had both, one or neither aircraft established, and the larger
-heading off the course, the larger distance off the centreline and the height difference between the two. Writes
+time against 3 NM and 1,000 ft; ``examples.json`` gives each example's two distances at its first step, its closest and
+its last. For every relation at each airport a category is drawn from (KMSY has none), ``examples.json`` also
+summarises every IFR episode of that relation at its start: how many had both, one or neither aircraft established,
+whether the one ahead on the approach clock was, the larger heading off the course (and how often it was over the 30°
+of 7-4-4 c2 a / c3 a), the larger distance off the centreline and the height difference between the two; and each
+episode's closest approach (and, where 3 NM was required, how many came no closer than 2.5 NM, 5-5-4 j). Writes
 ``<category>.svg`` and ``examples.json`` into ``--out``.
 
     python run_ts.py traffic_separation_examples --census 4dTrajectory/outputs/POOLED/traffic/census_<date> \\
@@ -35,11 +38,17 @@ from typing import Any, Callable
 import numpy as np
 from geokit import FT_M, NM_M
 
-from ts_transformer.experiments.traffic_census import APPROACH_SPEED_MPS, Track, track
-from ts_transformer.inference.runway_schedule import FAA_RADAR_NM, FAA_VERTICAL_FT, faa_separation
+from ts_transformer.experiments.traffic_census import APPROACH_SPEED_MPS, SCHEMA, Track, track
+from ts_transformer.inference.runway_schedule import (
+    FAA_RADAR_NM,
+    FAA_REDUCED_RADAR_NM,
+    FAA_VERTICAL_FT,
+    faa_separation,
+)
 from ts_transformer.inference.separation import IFR, VISUAL
 from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals, load_spec
+from ts_transformer.prior.scene import scene_steps
 from ts_transformer.io_utils import write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, repo_relative
 
@@ -47,6 +56,8 @@ from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, repo_re
 AROUND_S = 180.0
 #: Both headings within this of their courses: aligned with the final (``dependent_aligned``).
 ALIGNED_DEG = 10.0
+#: 7-4-4 c2 a / c3 a: approved separation until the aircraft turning in intercepts its centreline at this or less.
+INTERCEPT_DEG = 30.0
 
 
 def _in_visual(census: dict[str, Any], airport: str, pair: list[str], first_s: float) -> bool:
@@ -69,19 +80,34 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     def p50(name: str) -> float:
         return float(np.median([r[name] for r in rows]))
 
+    radar_bound = [r["closest_m"] for r in rows if r["required_m"] == FAA_RADAR_NM * NM_M]
     return {"episodes": len(rows), "both_established": sum(all(r["established"]) for r in rows),
             "one_established": sum(r["established"][0] != r["established"][1] for r in rows),
             "neither_established": sum(not any(r["established"]) for r in rows),
+            "the_one_ahead_not_established": sum(not r["ahead_established"] for r in rows),
             "both_headings_within_10_deg_share": float(np.mean([max(r["headings"]) <= ALIGNED_DEG for r in rows])),
+            "larger_heading_over_30_deg_share": float(np.mean([max(r["headings"]) > INTERCEPT_DEG for r in rows])),
             "larger_heading_off_course_deg_p50": p50("max_heading"),
             "larger_off_centreline_m_p50": p50("max_lateral"), "height_difference_m_p50": p50("vertical"),
-            "min_distance_over_required_p50": p50("min_ratio")}
+            "min_distance_over_required_p50": p50("min_ratio"),
+            "closest_nm_p5": float(np.percentile([r["closest_m"] for r in rows], 5)) / NM_M,
+            "closest_nm_p50": p50("closest_m") / NM_M,
+            "where_3_nm_required": {"episodes": len(radar_bound), "closest_at_least_2_5_nm": sum(
+                d >= FAA_REDUCED_RADAR_NM * NM_M for d in radar_bound)}}
 
 
 def typical(episodes: list[dict[str, Any]]) -> dict[str, Any]:
     """The episode whose closest approach (distance over the minimum) is nearest the median, the earliest of equals."""
     median = float(np.median([e["min_ratio"] for e in episodes]))
     return min(episodes, key=lambda e: (abs(e["min_ratio"] - median), e["first_s"]))
+
+
+def _apart(a: Track, b: Track, t_s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The pair's horizontal distance and height difference (m) at the times ``t_s``."""
+    def at(item: Track, values: np.ndarray) -> np.ndarray:
+        return np.interp(t_s, item.presence.times_s, values)
+
+    return np.hypot(at(a, a.e_m) - at(b, b.e_m), at(a, a.n_m) - at(b, b.n_m)), np.abs(at(a, a.height_m) - at(b, b.height_m))
 
 
 def _heading_off(item: Track, flight, geometry: AirportGeometry, t_s: float) -> float:
@@ -92,7 +118,7 @@ def _heading_off(item: Track, flight, geometry: AirportGeometry, t_s: float) -> 
 
 
 def draw(path: Path, title: str, verdict: str, pair: tuple[tuple[Track, Any], tuple[Track, Any]],
-         geometry: AirportGeometry, episode: dict[str, Any]) -> None:
+         geometry: AirportGeometry, episode: dict[str, Any], step_s: float) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -146,11 +172,9 @@ def draw(path: Path, title: str, verdict: str, pair: tuple[tuple[Track, Any], tu
 
     # the pair over time
     (a, _), (b, _) = pair
-    t = np.arange(max(a.presence.times_s[0], b.presence.times_s[0], first - AROUND_S),
-                  min(a.presence.times_s[-1], b.presence.times_s[-1], last + AROUND_S) + 1e-9, 2.0)
-    distance = np.hypot(np.interp(t, a.presence.times_s, a.e_m) - np.interp(t, b.presence.times_s, b.e_m),
-                        np.interp(t, a.presence.times_s, a.n_m) - np.interp(t, b.presence.times_s, b.n_m))
-    vertical = np.abs(np.interp(t, a.presence.times_s, a.height_m) - np.interp(t, b.presence.times_s, b.height_m))
+    t = scene_steps(max(a.first_step_s, b.first_step_s, first - AROUND_S),
+                    min(a.last_step_s, b.last_step_s, last + AROUND_S), step_s)
+    distance, vertical = _apart(a, b, t)
     series.plot(t - first, distance / 1000.0, color="#111827", label="horizontal distance")
     series.axhline(FAA_RADAR_NM * NM_M / 1000.0, color="#111827", linewidth=0.8, linestyle="--")
     series.annotate("3 NM", (t[0] - first, FAA_RADAR_NM * NM_M / 1000.0), textcoords="offset points", xytext=(2, 3))
@@ -180,6 +204,8 @@ def main(argv: list[str] | None = None) -> int:
     resolve = lambda p: p if p.is_absolute() else REPO_ROOT / p  # noqa: E731
     census_dir, directory, out = resolve(args.census), resolve(args.instructions), resolve(args.out)
     census = json.loads((census_dir / "census.json").read_text(encoding="utf-8"))
+    if census["schema"] != SCHEMA:
+        parser.error(f"{census_dir} is a {census['schema']} census; this runner reads {SCHEMA}")
     if repo_relative(directory) != census["instructions"]:
         parser.error(f"the census read {census['instructions']}, not {repo_relative(directory)}")
     spec, candidates = load_spec(directory), load_candidates(directory)
@@ -192,9 +218,6 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     chosen: dict[str, Any] = {}
     summaries: dict[str, Any] = {}
-    census_relation = {"turn_on_independent": "independent", "close_parallel_pair": "single",
-                       "dependent_aligned": "dependent", "crossing_established": "unrelated",
-                       "same_runway_in_trail": "same"}
     for name, (airport, belongs) in CATEGORIES.items():
         geometry = candidates[airport]
         manifest = json.loads(arrival_manifest_path(airport).read_text(encoding="utf-8"))
@@ -221,17 +244,22 @@ def main(argv: list[str] | None = None) -> int:
             established = tuple(t_s >= item.captured_s for item, _ in pair)
             if belongs(episode, headings, established):
                 members.append(episode)
+            ahead = int(np.interp(t_s, pair[1][0].presence.times_s, pair[1][0].along_m)
+                        > np.interp(t_s, pair[0][0].presence.times_s, pair[0][0].along_m))
             by_relation.setdefault(episode["relation"], []).append({
-                "established": established, "headings": headings, "max_heading": max(headings),
+                "established": established, "ahead_established": established[ahead], "headings": headings,
+                "max_heading": max(headings), "closest_m": episode["closest_m"], "required_m": episode["required_m"],
                 "max_lateral": max(off_centreline(item, flight, t_s) for item, flight in pair),
                 "vertical": abs(float(np.interp(t_s, pair[0][0].presence.times_s, pair[0][0].height_m)
                                       - np.interp(t_s, pair[1][0].presence.times_s, pair[1][0].height_m))),
                 "min_ratio": episode["min_ratio"]})
-        summaries[f"{airport} {census_relation[name]}"] = _summary(by_relation[census_relation[name]])
+        summaries.update({f"{airport} {relation}": _summary(rows) for relation, rows in by_relation.items()})
         episode = typical(members)
         pair = tuple(flown(key) for key in episode["pair"])
         visual = _in_visual(census, airport, episode["pair"], episode["first_s"])
         a, b = pair
+        during = scene_steps(episode["first_s"], episode["last_s"], spec.step_s)
+        distance, vertical = _apart(a[0], b[0], during)
         rows = [relative_to_runway(f.e_m, f.n_m, f.track_deg, f.altitude_m,
                                    geometry.candidates[geometry.candidate_index(f.runway)]) for _, f in pair]
         chosen[name] = {"airport": airport, "episodes_in_category": len(members), "pair": episode["pair"],
@@ -239,6 +267,11 @@ def main(argv: list[str] | None = None) -> int:
                         "last_s": episode["last_s"], "seconds": episode["last_s"] - episode["first_s"] + spec.step_s,
                         "kinds": episode["kinds"], "min_distance_over_required": episode["min_ratio"],
                         "loss_under_visual": visual,
+                        # the pair at the episode's first step, its closest (horizontal) and its last
+                        "apart": {moment: {"distance_km": float(distance[k]) / 1000.0,
+                                           "height_difference_m": float(vertical[k])}
+                                  for moment, k in (("first", 0), ("closest", int(np.argmin(distance))),
+                                                    ("last", len(during) - 1))},
                         "at_start": [{"established": episode["first_s"] >= item.captured_s,
                                       "heading_off_course_deg": _heading_off(item, f, geometry, episode["first_s"]),
                                       "off_centreline_m": abs(float(np.interp(episode["first_s"], item.presence.times_s,
@@ -249,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
                                      for (item, f), rel in zip(pair, rows)]}
         verdict = (f"IFR reading: loss ({', '.join(episode['kinds'])}); "
                    f"visual reading: {'loss' if visual else 'no loss'}")
-        draw(out / f"{name}.svg", f"{airport} — {name.replace('_', ' ')}", verdict, pair, geometry, episode)
+        draw(out / f"{name}.svg", f"{airport} — {name.replace('_', ' ')}", verdict, pair, geometry, episode, spec.step_s)
         print(f"{name}: {len(members)} episodes, drew {episode['pair']} ({chosen[name]['seconds']:.0f} s)", flush=True)
     write_json_atomic(out / "examples.json", {"census": repo_relative(census_dir), "rule": "closest approach nearest "
                                               "the category's median, the earliest of equals", "examples": chosen,
