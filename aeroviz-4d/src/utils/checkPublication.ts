@@ -322,6 +322,7 @@ const OVERLAY_READERS: Record<TrainingOverlayKind,
   "executor-replay": parseTrainingExecutorOverlay,
   "prior-prediction": parseTrainingPriorOverlay,
   "prior-generation": parseTrainingGenerationOverlay,
+  "prior-generation-augmented": parseTrainingGenerationOverlay,
 };
 
 /**

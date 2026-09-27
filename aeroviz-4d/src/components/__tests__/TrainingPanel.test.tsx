@@ -40,7 +40,7 @@ vi.mock("../../context/AppContext", () => ({
 import TrainingPanel from "../TrainingPanel";
 import { SET_ID, STRAIGHT_KEY, VECTORED_KEY, mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import {
-  AUGMENTED_R1_ID, AUGMENTED_R2_ID, BASE_MODEL_ID, EXECUTOR_ID, POST_TRAINED_ID, PRIOR_ID, mockExecutorOverlay, mockGenerationOverlay, mockOverlays,
+  AUGMENTED_R1_ID, AUGMENTED_R2_ID, AUGSTART_BASE_ID, AUGSTART_POST_ID, BASE_MODEL_ID, EXECUTOR_ID, POST_TRAINED_ID, PRIOR_ID, mockExecutorOverlay, mockGenerationOverlay, mockOverlays,
   mockOverlaysWithGenerations, mockPriorOverlay,
 } from "../../data/__tests__/trainingOverlays.fixture";
 
@@ -374,6 +374,38 @@ describe("TrainingPanel", () => {
       const base = within(page).getAllByRole("row").find((row) => row.querySelector("th[scope='row']")?.textContent === "base")!;
       expect(base.textContent).toMatch(/v3_step1\/full_s1/);
       expect(base.textContent).toMatch(/trained on data alone/);
+    });
+
+    it("lists the models flown from augmented starts apart, and counts them apart on the details page", async () => {
+      const path = (id: string) => `data/airports/KXXX/training/${id}/generation.json`;
+      serve({
+        [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(),
+        [OVERLAYS_PATH]: mockOverlaysWithGenerations([BASE_MODEL_ID, POST_TRAINED_ID, AUGSTART_BASE_ID, AUGSTART_POST_ID]),
+        ...Object.fromEntries([BASE_MODEL_ID, POST_TRAINED_ID, AUGSTART_BASE_ID, AUGSTART_POST_ID]
+          .map((id) => [path(id), mockGenerationOverlay(id)])),
+      });
+      appState.trainingSource = { overlayId: AUGSTART_BASE_ID, sample: 0 };
+      render(<TrainingPanel hidden={false} />);
+      const family = await screen.findByRole("group", { name: "From augmented starts" });
+      await waitFor(() => expect(family.textContent).toBe("From augmented startsbase 1/2 landedlanding r1 1/2 landed"));
+      expect((within(family).getByLabelText(/^base/) as HTMLInputElement).checked).toBe(true);
+      fireEvent.click(within(family).getByLabelText(/^landing r1/));
+      expect(setTrainingSource).toHaveBeenCalledWith({ overlayId: AUGSTART_POST_ID, sample: 0 });
+      // the straight-in flight is not on its own dynamics: never drawn
+      const unflown = [...document.querySelectorAll(".training-flight-samples")].find((item) => item.textContent === "—");
+      expect(unflown?.getAttribute("title")).toBe("the model's sentences do not fly it: stand-in dynamics");
+      // the readout line: the set's own starts, then the augmented ones; the details page: a table each
+      const link = screen.getByText(/^base 50% \(val 90\.0%\) · landing r1 50% \(val 97\.0%\) · augmented starts: base 50% · landing r1 50%$/);
+      fireEvent.click(link);
+      const page = screen.getByRole("dialog", { name: "Training details" });
+      expect(within(page).getByText("From augmented starts")).toBeTruthy();
+      expect(within(page).getByText(/Every flight on its own dynamics found a plausible start within 10 draws\./)).toBeTruthy();
+      expect([...page.querySelectorAll(".training-results-models caption strong")].map((cell) => cell.textContent))
+        .toEqual(["Landed", "Landed from augmented starts"]);
+      const shared = [...page.querySelectorAll("[aria-label='Shared by every model']")].map((item) => item.textContent!);
+      expect(shared[1]).toMatch(/startsaugmented, seed 1337: rotated within ±15°, raised within ±150 m, sped up within ±5%, up to 10 draws/);
+      expect(shared[1]).toMatch(/time limit2× the observed remaining time/);
+      expect(shared[1]).toMatch(/formal readoutnone \(augmented starts\)/);
     });
 
     it("drops the column naming whose sentences a row counts when no model has a formal readout", async () => {

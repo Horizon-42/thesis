@@ -1,5 +1,13 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-27 — Training：模型从增强起点怎么飞（新叠加层种类 + 前端的起点开关）
+
+- 用户：前端 40 架都是真实 val 航班，想看模型从第二阶段后训练的增强起点（绕机场转 ±15°、±150 m、±5 % 速度）怎么飞。
+  `prior_generation_training_export --augment-seed` 写新种类 `prior-generation-augmented`（格式
+  `aeroviz-training-augmented-generation-v1`，v3 不动）：与第二阶段同一套抽法，每个机场重新播种、按集合里能飞的航班顺序抽，
+  与模型无关；时限 ×2；没有正式读数。前端：读取器、句子条 `Real start | Augmented start`、左栏分组、详情页一张表、三维画出
+  增强后的前 8 行；增强起点上不现飞。设计：文档 36 §2.8、§4.10；35 AV35；ts runners R13。
+
 ### 2026-09-27 — 句子条的现飞状态行缩短，不再把 Fly again 等按钮挤到第二行；判定计数挪到各行末尾；左栏 Details 换成 ⓘ
 
 - 用户：选词现飞算完后，句子条头部那一行信息太多，把 "↻ Fly again" / Read-back / Prior 挤到第二行；只要飞行时间、计算时间，是否在包络内

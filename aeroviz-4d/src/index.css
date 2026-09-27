@@ -885,6 +885,16 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   color: rgba(224, 230, 240, 0.55);
 }
 
+/* The models flown from augmented starts: a family of their own under the set's own, set off by a rule. */
+.training-model-family {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid #2a3552;
+}
+
 .training-model {
   display: flex;
   align-items: center;
@@ -1729,6 +1739,11 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 /* a model's rounds, beside the tabs when it is published at several */
 .training-round-tabs {
   margin-left: 4px;
+}
+
+/* Where the models' sentences start: a segmented control before the tabs of the models flown from there. */
+.training-start-tabs {
+  margin-right: 4px;
 }
 
 .training-round-tabs .training-source-tab {

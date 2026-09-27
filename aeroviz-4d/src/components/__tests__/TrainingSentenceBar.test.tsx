@@ -42,7 +42,7 @@ import { MOCK_ROWS, mockSample } from "../../data/__tests__/trainingSample.fixtu
 import { EXECUTOR_ID, PRIOR_ID, mockExecutorOverlay, mockOverlayEntry, mockPriorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
 import { parseTrainingExecutorOverlay, parseTrainingPriorOverlay, type TrainingGenerationView } from "../../data/trainingOverlays";
 import {
-  AUGMENTED_R1_ID, AUGMENTED_R2_ID, BASE_MODEL_ID, POST_TRAINED_ID, mockGenerationViews,
+  AUGMENTED_R1_ID, AUGMENTED_R2_ID, AUGSTART_BASE_ID, AUGSTART_POST_ID, BASE_MODEL_ID, POST_TRAINED_ID, mockGenerationViews,
 } from "../../data/__tests__/trainingOverlays.fixture";
 import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
 import { VECTORED_KEY, WORD } from "../../data/__tests__/trainingSample.fixture";
@@ -532,6 +532,61 @@ describe("TrainingSentenceBar", () => {
     appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
     render(<TrainingSentenceBar />);
     expect(document.querySelectorAll(".training-sentence-tally")).toHaveLength(0);
+  });
+
+  it("offers the augmented starts beside the real ones: a family of its own, read against nothing of the truth's start", () => {
+    select();
+    generations(0, () => undefined, [BASE_MODEL_ID, POST_TRAINED_ID, AUGSTART_BASE_ID, AUGSTART_POST_ID]);
+    // reading the truth: the real start's tabs (Truth, base, landing r1), the switch on "Real start"
+    const { unmount } = render(<TrainingSentenceBar />);
+    expect(screen.getByRole("button", { name: "Real start" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Truth" })).toBeTruthy();
+    // the switch takes the model read to its augmented start (none read: the first model there), keeping the sample
+    fireEvent.click(screen.getByRole("button", { name: "Augmented start" }));
+    expect(setTrainingSource).toHaveBeenLastCalledWith({ overlayId: AUGSTART_BASE_ID, sample: 0 });
+    unmount();
+    appState.trainingSource = { overlayId: POST_TRAINED_ID, sample: 1 };
+    const { unmount: fromLanding } = render(<TrainingSentenceBar />);
+    fireEvent.click(screen.getByRole("button", { name: "Augmented start" }));
+    expect(setTrainingSource).toHaveBeenLastCalledWith({ overlayId: AUGSTART_POST_ID, sample: 1 });
+    fromLanding();
+    // reading landing r1 from its augmented start: no Truth tab, the moved observed steps, no truth ticks or observed end,
+    // the move on the chip, and no live flight
+    appState.trainingSource = { overlayId: AUGSTART_POST_ID, sample: 0 };
+    render(<TrainingSentenceBar />);
+    expect(screen.getByRole("button", { name: "Augmented start" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByRole("button", { name: "Truth" })).toBeNull();
+    expect(screen.getAllByRole("button", { pressed: true }).map((button) => button.textContent)).toContain("landing r1");
+    expect(screen.getByText("observed, moved")).toBeTruthy();
+    expect(document.querySelectorAll(".training-sentence-truth-tick")).toHaveLength(0);
+    expect(screen.queryByLabelText(/the observed flight's sentence ends/)).toBeNull();
+    expect(screen.getByText(/^#1: landed on 09 at 110 s · moved \+7\.2°, \+84 m, ×1\.030$/).getAttribute("title"))
+      .toMatch(/^From an augmented start: .* drawn with seed 1337 in 2 draws; its time limit 2× .*the source flight landed on 09/);
+    fireEvent.click(screen.getByLabelText(/^heading 225° .* said by landing r1 at step 12 /));
+    const fly = screen.getByRole("button", { name: "▶ Fly" }) as HTMLButtonElement;
+    expect(fly.disabled).toBe(true);
+    expect(fly.title).toMatch(/not flown live/);
+    // back to the real start: the same model there
+    fireEvent.click(screen.getByRole("button", { name: "Real start" }));
+    expect(setTrainingSource).toHaveBeenLastCalledWith({ overlayId: POST_TRAINED_ID, sample: 0 });
+  });
+
+  it("goes back to the truth from an augmented start whose model has no real-start overlay", () => {
+    select();
+    generations(0, () => undefined, [BASE_MODEL_ID, AUGSTART_POST_ID]);
+    appState.trainingSource = { overlayId: AUGSTART_POST_ID, sample: 0 };
+    render(<TrainingSentenceBar />);
+    fireEvent.click(screen.getByRole("button", { name: "Real start" }));
+    expect(setTrainingSource).toHaveBeenLastCalledWith(null);
+  });
+
+  it("says why an augmented start's model does not fly a flight, and reads the truth", () => {
+    select(1);
+    generations(1, () => undefined, [AUGSTART_BASE_ID]);
+    appState.trainingSource = { overlayId: AUGSTART_BASE_ID, sample: 0 };
+    render(<TrainingSentenceBar />);
+    expect(screen.getByText("base: not flown (stand-in dynamics) — the truth is shown")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "▶ Fly" })).toBeTruthy();
   });
 
   it("marks the clearance, the capture and the unspecified speed", () => {

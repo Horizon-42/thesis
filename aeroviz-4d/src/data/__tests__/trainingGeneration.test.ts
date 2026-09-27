@@ -7,16 +7,20 @@ import { describe, expect, it } from "vitest";
 
 import { parseTrainingSample, sentenceColumnRuns, sentenceWordAt, trainingClearedValue, type TrainingSample } from "../trainingSample";
 import {
+  augmentationText,
   generatedRowAt,
   generatedTrackRows,
   generationLanded,
   generationOnScreen,
+  generationUnflownReason,
+  isAugmentedStart,
   parseTrainingGenerationOverlay,
   parseTrainingOverlays,
   trainingModelGroups,
   trainingModelLabel,
   trainingOverlaysOf,
   trainingRunName,
+  TRAINING_AUGMENTED_GENERATION_SCHEMA,
   TRAINING_BELOW_GLIDEPATH,
   TRAINING_GENERATION_SCHEMA,
   TRAINING_PROCEDURE_ALTITUDES,
@@ -26,7 +30,7 @@ import {
 import { trainingSelectionOf } from "../trainingSample";
 import { SET_ID, STRAIGHT_KEY, VECTORED_KEY, WORD, mockSample } from "./trainingSample.fixture";
 import {
-  AUGMENTED_R1_ID, AUGMENTED_R2_ID, BASE_MODEL_ID, MOCK_GENERATION_FIRST_ROW, POST_TRAINED_ID, mockGenerationEntry, mockGenerationOverlay,
+  AUGMENTED_R1_ID, AUGMENTED_R2_ID, AUGSTART_BASE_ID, BASE_MODEL_ID, MOCK_GENERATION_FIRST_ROW, MOCK_MOVE, POST_TRAINED_ID, mockGenerationEntry, mockGenerationOverlay,
   mockOverlaysWithGenerations,
 } from "./trainingOverlays.fixture";
 import { trainingModelColour, TRAINING_MODEL_COLOR } from "../../utils/trainingWordColors";
@@ -307,5 +311,61 @@ describe("the models grouped for the views", () => {
       ["augmented · generation_aug_r2", ["augmented r2 · generation_aug_r2"]],
       ["augmented · generation_aug_r2_again", ["augmented r2 · generation_aug_r2_again"]],
     ]);
+  });
+});
+
+describe("a generation overlay from augmented starts", () => {
+  const moved = (change: (raw: any) => void = () => undefined, id = AUGSTART_BASE_ID) => {
+    const raw: any = mockGenerationOverlay(id);
+    change(raw);
+    return parseTrainingGenerationOverlay(raw, mockGenerationEntry(id), sample());
+  };
+  const movedRefusal = (change: (raw: any) => void) => {
+    const result = moved(change);
+    if (result.ok) throw new Error("the change was accepted");
+    return result.problem;
+  };
+
+  it("is a kind of its own, each flight with its move and moved observed rows, and no readout", () => {
+    const parsed = parseTrainingOverlays(mockOverlaysWithGenerations([BASE_MODEL_ID, AUGSTART_BASE_ID]));
+    if (!parsed.ok) throw new Error(parsed.problem);
+    expect(trainingOverlaysOf(parsed.value, SET_ID, "prior-generation-augmented").map((item) => item.id)).toEqual([AUGSTART_BASE_ID]);
+    const result = moved();
+    if (!result.ok) throw new Error(result.problem);
+    const overlay = result.value;
+    expect(isAugmentedStart(overlay)).toBe(true);
+    expect(isAugmentedStart(read())).toBe(false);
+    expect(overlay.readout).toBeNull();
+    expect(overlay.generation.augment).toEqual({ seed: 1337, tries: 10, limits: { rotationDeg: 15, altitudeM: 150, speedFraction: 0.05 },
+      timeoutFactor: 2 });
+    const [vectored, straight] = overlay.flights;
+    expect(vectored.start!.augmentation).toEqual(MOCK_MOVE);
+    expect(vectored.start!.observed!.tS).toEqual([0, 2, 4, 6]);
+    expect(augmentationText(MOCK_MOVE)).toBe("+7.2°, +84 m, ×1.030");
+    expect(straight.start).toEqual({ draws: null, augmentation: null, observed: null });
+    expect(generationUnflownReason(straight)).toBe("stand-in dynamics");
+    // a real start's flight has no start of its own
+    expect(read().flights[0].start).toBeNull();
+  });
+
+  it("says why an own-dynamics flight with no plausible move is not flown", () => {
+    const result = moved((raw) => {
+      Object.assign(raw.flights[0], { flown: false, samples: [], augmentDraws: 10, augmentation: null, observed: null });
+    });
+    if (!result.ok) throw new Error(result.problem);
+    expect(generationUnflownReason(result.value.flights[0])).toBe("no plausible augmented start in 10 draws");
+  });
+
+  it("is refused whole, by name, when its start does not add up", () => {
+    expect(movedRefusal((raw) => { raw.schema = TRAINING_GENERATION_SCHEMA; })).toMatch(
+      `expected ${JSON.stringify(TRAINING_AUGMENTED_GENERATION_SCHEMA)}`);
+    expect(movedRefusal((raw) => { raw.readout = null; })).toMatch("carries a readout");
+    expect(movedRefusal((raw) => { raw.flights[0].augmentation.rotationDeg = 16; })).toMatch("outside ±15°");
+    expect(movedRefusal((raw) => { raw.flights[0].augmentDraws = 11; })).toMatch("augmentDraws");
+    expect(movedRefusal((raw) => { raw.flights[0].augmentation = null; })).toMatch("is flown without a move");
+    expect(movedRefusal((raw) => { raw.flights[0].observed = null; })).toMatch("no moved observed rows with a move");
+    expect(movedRefusal((raw) => { raw.flights[0].observed.tS[2] = 5; })).toMatch("tS[2] is 5 s, not the step at 4 s");
+    expect(movedRefusal((raw) => { raw.flights[0].observed.lat.pop(); })).toMatch("lat");
+    expect(movedRefusal((raw) => { raw.flights[0].samples[1].track.lat[0] += 0.01; })).toMatch("start from 2 places");
   });
 });

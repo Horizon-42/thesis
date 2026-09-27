@@ -358,6 +358,7 @@ def test_the_frontend_reader_mirrors_the_exporters_names():
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_EXECUTOR_STATUSES"))) == executor_export.STATUSES
     assert json.loads(_ts_constant("TRAINING_PRIOR_SCHEMA")) == prior_export.SCHEMA
     assert json.loads(_ts_constant("TRAINING_GENERATION_SCHEMA")) == generation_export.SCHEMA
+    assert json.loads(_ts_constant("TRAINING_AUGMENTED_GENERATION_SCHEMA")) == generation_export.AUGMENTED_SCHEMA
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_MODEL_NAMES"))) == generation_export.MODEL_NAMES
     # a free sentence's outcomes: the judge's (the executor's list, pinned by the backend's MirrorTest) and the glidepath stop
     from ts_transformer.experiments.prior_free_generation import BELOW_GLIDEPATH, FREE_OUTCOMES

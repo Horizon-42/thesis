@@ -324,7 +324,15 @@ and switches between the rounds (AV32). The executor spec must be one this code 
 (2026-09-26 evening: `v10_20260926`; the code refuses every earlier one, C33). ~2 min a
 model for five airports of 40 flights on CPU, 1.2–1.9 MB an airport; a re-run is identical. Tests:
 `tests/test_prior_generation_training_export.py` (the pieces, and `main` end to end on a synthetic artefact with stand-in
-series).
+series). **`--augment-seed N`** (2026-09-27, the Training module §2.8): every flight flies from an AUGMENTED start instead —
+stage 2's own code (`prior_free_generation.augmented_starts` / `augmented_inputs`, `prior.augment`: ±15°, ±150 m, ±5 %,
+plausible within the train split's 1st–99th percentile start altitude, ≤ `AUGMENT_TRIES` draws), one move a flyable flight
+drawn from `np.random.default_rng(N)` afresh at each airport in the set's order (apart from the samples' torch generator, so
+every model exported with one seed flies each flight from the same moved start), time limit × `augment.TIMEOUT_FACTOR`;
+written as kind `prior-generation-augmented`, schema `aeroviz-training-augmented-generation-v1` (the v3 kind untouched): no
+`readout` (refused with `--readout`), `generation.augment` = the draw's rule, per flight `augmentDraws` (null: not drawn, not
+on its own dynamics), `augmentation` (null: no plausible draw — not flown) and `observed` (the moved rows 0 … `N_LOOK` − 1);
+default id `generation_augstart_<name>[_r<NN>]_<sha8>`.
 
 `prior_training_export --prior <prior dir> --instructions <artefact> --airports-root … --set instruction_v3 --airport
 ICAO [--airport …] [--overlay-id prior_<prior dir name>]` (schema `aeroviz-training-prior-v3` since the prior's third

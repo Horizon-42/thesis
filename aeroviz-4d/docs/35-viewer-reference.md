@@ -483,6 +483,19 @@ that divergence is a known open item (see the README's "Future Improvements").
 - **组件不再各自写滚动条样式**；要不同的只改这几个变量。原来唯一的一处（程序详情页的侧栏）已删掉。整个应用都是深色表面，所以
   只有一套颜色。
 
+### AV35 · 增强起点上的模型句子：`prior-generation-augmented` 叠加层（2026-09-27）
+
+- 用户（2026-09-27）：前端 40 架都是真实 val 航班，想看模型从第二阶段后训练用的**增强起点**怎么飞。导出器
+  `prior_generation_training_export --augment-seed 1337`（ts R13）写另一种叠加层：种类 `prior-generation-augmented`，格式
+  `aeroviz-training-augmented-generation-v1`，§2.7 的 v3 不动。每架航班多 `augmentDraws`、`augmentation`（转角、抬高、速度倍数）、
+  `observed`（增强后的第 0–7 行）；同一个种子下每个模型的增强起点相同；没有正式读数。设计：文档 36 §2.8、§4.10。
+- 读取器（`parseAugmentedStart`）核对：抽了几次在 1–`tries` 之间且只有自己动力学的航班才抽；有增强 ⇔ 飞了 ⇔ 有 `observed`；
+  增强在上下限以内；`observed` 正好 `firstPredictedRow` 个点、从 0 起每点一步；一架航班的样本都从同一个起点起飞。
+- 界面：句子条头部 `Real start | Augmented start`（只在发布了增强起点时出现），两边各自一组模型标签页（`trainingModelGroups`
+  按起点分开调用，名字不串）；读增强起点的样本时没有 Truth 标签页、不画真值的发令短竖线和观测结束虚线，灰底写 "observed,
+  moved"，样本小块写增强量，▶ Fly 关掉（后端从观测状态起飞；增强起点的现飞是下一步）；左栏 Sentences read 下面单列一组
+  "From augmented starts"；详情页的模型一节多一张表；三维把增强后的前 8 行用模型颜色虚线画出，接到样本航迹起点。
+
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
 
 - 根目录的发布器 `--executor-replay` 把执行器的 val 回放记录（和 ts 预测同一个记录契约）发布成 Experiments 类别，每个机场

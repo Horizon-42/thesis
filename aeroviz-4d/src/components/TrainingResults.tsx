@@ -5,7 +5,8 @@
  * gate (the formal val replay's own table, for this airport and all airports), the prior's val readout (per column,
  * against the two baselines, and what it says where the truth changes a word) and the models' own sentences (how many
  * landed: on this set's flights, counted from the samples on screen, beside each model's formal val free generation; and
- * how each model's sentences were drawn and flown). The formal numbers are copied from the artefacts by the exporters;
+ * how each model's sentences were drawn and flown — and, apart, the same from augmented starts). The formal numbers are
+ * copied from the artefacts by the exporters;
  * the only thing counted here is the set's own samples.
  *
  * Each readout also has a one-line SUMMARY — its conclusion, without its name — which is what the panel lists beside the
@@ -15,6 +16,7 @@
 import { formatSeconds, TRAINING_COLUMNS, TRAINING_STRATA, type TrainingFlight } from "../data/trainingSample";
 import {
   generationLanded,
+  isAugmentedStart,
   trainingModelGroups,
   trainingRunName,
   type TrainingExecutorOverlay,
@@ -251,12 +253,17 @@ function namedModels(published: TrainingGenerationOverlay[]) {
     .flatMap((group) => group.members.map((overlay) => ({ overlay, label: group.memberLabel(overlay) })));
 }
 
+/** The models' landed shares on the set in one line — from augmented starts after, apart. */
 export function generationSummary(published: TrainingGenerationOverlay[], flights: TrainingFlight[]): string {
-  return namedModels(published).map(({ overlay, label }) => {
+  const line = (overlays: TrainingGenerationOverlay[]) => namedModels(overlays).map(({ overlay, label }) => {
     const own = generationLanded(overlay, flights).all;
     return `${label} ${own === null ? "—" : `${(own.landed * 100).toFixed(0)}%`}` +
       (overlay.readout === null ? "" : ` (${overlay.readout.split} ${(overlay.readout.prior.all.all.landed * 100).toFixed(1)}%)`);
   }).join(" · ");
+  const own = published.filter((overlay) => !isAugmentedStart(overlay));
+  const moved = published.filter(isAugmentedStart);
+  return [own.length > 0 ? line(own) : null, moved.length > 0 ? `augmented starts: ${line(moved)}` : null]
+    .filter((part) => part !== null).join(" · ");
 }
 
 /** How the sentences were drawn and flown, one field of the models' table. A field every model shares is said once
@@ -268,6 +275,10 @@ interface DrawnField {
 
 const DRAWN_FIELDS: DrawnField[] = [
   { name: "run", value: (overlay) => trainingRunName(overlay.model.run) },
+  { name: "starts", value: ({ generation: { augment } }) => (augment === null
+    ? "the set's own: the observed state at the first predicted step"
+    : `augmented, seed ${augment.seed}: rotated within ±${augment.limits.rotationDeg}°, raised within ±${augment.limits.altitudeM} m, ` +
+      `sped up within ±${augment.limits.speedFraction * 100}%, up to ${augment.tries} draws for a plausible one`) },
   { name: "trained", value: ({ model }) => trainingModelOrigin(model) },
   { name: "procedure masks", value: ({ generation }) => (generation.procedureMasks.length === 0 ? "none (the vocabulary's rules alone)"
     : generation.procedureMasks.map((item) => item.name).join(", ")) },
@@ -275,13 +286,63 @@ const DRAWN_FIELDS: DrawnField[] = [
   { name: "temperature", value: ({ generation }) => String(generation.temperature) },
   { name: "seed", value: ({ generation }) => String(generation.seed) },
   { name: "executor spec", value: ({ generation }) => shortSha(generation.executor.specSha256) },
-  { name: "time limit", value: ({ generation }) => `${generation.executor.timeoutFactor}× the observed remaining time` },
-  { name: "formal readout", value: ({ readout }) => (readout === null ? "not given"
+  { name: "time limit", value: ({ generation }) => `${generation.augment?.timeoutFactor ?? generation.executor.timeoutFactor}× ` +
+    "the observed remaining time" },
+  { name: "formal readout", value: ({ readout, generation }) => (generation.augment !== null ? "none (augmented starts)"
+    : readout === null ? "not given"
     : `${readout.drawn.flights.toLocaleString("en")} ${readout.split} flights ` +
       `(${readout.drawn.perAirport === 0 ? "every flight" : `${readout.drawn.perAirport} an airport`}), written ${utcText(readout.writtenUtc)}`) },
 ];
 
-export function TrainingGenerationReadout({ overlays: published, flights }: { overlays: TrainingGenerationOverlay[]; flights: TrainingFlight[] }) {
+/** THE MODELS' OWN SENTENCES: from the set's own starts, then — apart, never in one table — from augmented starts. */
+export function TrainingGenerationReadout({ overlays, flights }: { overlays: TrainingGenerationOverlay[]; flights: TrainingFlight[] }) {
+  const own = overlays.filter((overlay) => !isAugmentedStart(overlay));
+  const moved = overlays.filter(isAugmentedStart);
+  return (
+    <>
+      <p className="training-details-lede">
+        Each model speaks from its first predicted step (the steps before are observed), a sentence of its own, and the
+        executor flies each step as it is said. Landed: on the runway pointed at the end, as the executor's judge reads a
+        landing. Only flights on their own aircraft dynamics are flown, as in the formal readout.
+      </p>
+      {own.length > 0 ? <GenerationTables published={own} flights={flights} caption="Landed" /> : null}
+      {moved.length > 0 ? (
+        <>
+          <h4 className="training-details-subhead">From augmented starts</h4>
+          <p className="training-details-lede">
+            The same flights, each flown from a start moved as post-training stage 2 moves one — rotated about the airport,
+            raised or lowered, sped up or slowed down, drawn until it is like the data's — the same move for every model. The
+            model reads the moved observed steps; the truth never flew from there, so there is no labelled-words row.
+            {unfittedText(moved)}
+          </p>
+          <GenerationTables published={moved} flights={flights} caption="Landed from augmented starts" />
+        </>
+      ) : null}
+    </>
+  );
+}
+
+/** How many flights on their own dynamics had no plausible augmented start, and so are counted nowhere below — said, never
+ *  left out silently (one seed over one set: every model's are the same flights). */
+function unfittedText(moved: TrainingGenerationOverlay[]): string {
+  const counts = new Set(moved.map((overlay) => overlay.flights.filter((flight) => flight.start!.draws !== null
+    && flight.start!.augmentation === null).length));
+  const tries = moved[0].generation.augment!.tries;
+  if (counts.size === 1) {
+    const [count] = counts;
+    return count === 0 ? ` Every flight on its own dynamics found a plausible start within ${tries} draws.`
+      : ` ${count} flight${count === 1 ? "" : "s"} on its own dynamics found no plausible start in ${tries} draws: not flown, ` +
+        "not counted.";
+  }
+  return ` Some flights on their own dynamics found no plausible start in ${tries} draws (${[...counts].join(" / ")} by ` +
+    "overlay): not flown, not counted.";
+}
+
+/** One family of the models' sentences (all from the set's own starts, or all from augmented ones): the landed table and
+ *  how they were drawn and flown. */
+function GenerationTables({ published, flights, caption }: {
+  published: TrainingGenerationOverlay[]; flights: TrainingFlight[]; caption: string;
+}) {
   const named = namedModels(published);
   const airport = published[0].airport;
   const common = DRAWN_FIELDS.filter((field) => new Set(published.map(field.value)).size === 1);
@@ -299,14 +360,9 @@ export function TrainingGenerationReadout({ overlays: published, flights }: { ov
   ];
   return (
     <>
-      <p className="training-details-lede">
-        Each model speaks from its first predicted step (the steps before are observed), a sentence of its own, and the
-        executor flies each step as it is said. Landed: on the runway pointed at the end, as the executor's judge reads a
-        landing. Only flights on their own aircraft dynamics are flown, as in the formal readout.
-      </p>
       <table className="training-results-table training-results-models">
         <caption>
-          <strong>Landed</strong>
+          <strong>{caption}</strong>
           <span className="training-results-caption-note">
             {withReadout ? "each sample on this set's flights, and in the model's formal free generation"
               : "each sample on this set's flights (no formal readout was given)"}
@@ -339,8 +395,8 @@ export function TrainingGenerationReadout({ overlays: published, flights }: { ov
         })}
       </table>
       <p className="training-results-note">
-        "labelled words": the truth sentence flown the same way from the same step — how far the executor alone gets. Each
-        model speaks as it was trained to: under the vocabulary's rules and the procedure's masks it was post-trained under,
+        {withReadout ? "\"labelled words\": the truth sentence flown the same way from the same step — how far the executor " +
+          "alone gets. " : ""}Each model speaks as it was trained to: under the vocabulary's rules and the procedure's masks it was post-trained under,
         if any; under the procedure's altitudes (the floor before the join, no climbing back, the glidepath's lower edge) a
         sentence stops at the first step that sinks below the edge — "below glidepath".
       </p>

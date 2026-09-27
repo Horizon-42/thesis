@@ -8,7 +8,9 @@
  *  • THE SAMPLE READ solid in the model's colour at its ellipsoid height (dashed where terrain hides it), its ground trace
  *    dashed under it, where its flight ended (named with the model, the sample and the outcome), and where it said each
  *    heading word and the clearance — every mark of the model's in its own colour, the truth's in the column colours;
- *  • ITS OTHER SAMPLES thin and faint, so the spread of what the model says over one flight is seen at once.
+ *  • ITS OTHER SAMPLES thin and faint, so the spread of what the model says over one flight is seen at once;
+ *  • from an AUGMENTED START, the moved observed steps the model read before it spoke, dashed in its colour, joined to
+ *    where its samples start — the truth, drawn as ever, is where they were moved from.
  *
  * The truth — the observed track and the envelopes of its sentence — is drawn whatever is read (`useTrainingTrackLayer`):
  * a model's flight is always read against it. When the truth is read, nothing of a model is drawn.
@@ -29,6 +31,7 @@ import {
   generatedRowAt,
   generatedTrackRows,
   generationOnScreen,
+  isAugmentedStart,
   overlayOnScreen,
   trainingModelGroups,
   type TrainingGeneratedSentence,
@@ -85,6 +88,14 @@ function buildModel(viewer: Cesium.Viewer, view: TrainingGenerationView, label: 
       group.add(marker(TRAINING_ENTITY.modelIssue(index), `${label}: cleared to join the final`, at(point), css, 10));
     }
   });
+  const observed = view.flight.start?.observed ?? null;
+  if (observed !== null) {
+    group.add({
+      id: TRAINING_ENTITY.modelMoved, name: `${label}: the observed steps it read, moved like its augmented start`,
+      polyline: { positions: Cesium.Cartesian3.fromDegreesArrayHeights([...lonLatHeights(observed), ...lonLatHeights(track).slice(0, 3)]),
+        width: 2.5, material: new Cesium.PolylineDashMaterialProperty({ color: colour(css, 0.9) }) },
+    });
+  }
   group.add(marker(TRAINING_ENTITY.modelEnd, `Where ${label}'s flight ended`, at(last), css, 10,
     `${label} #${read.sample + 1}: ${TRAINING_OUTCOME_TAG[read.outcome]}`));
   return group.remove;
@@ -122,7 +133,8 @@ export default function useTrainingGenerationLayers(): void {
   const read = shown?.sentence ?? null;
   // named as the bar names it: the run or the overlay id said when another published model has the same name
   const label = view === null ? null : trainingModelGroups(
-    trainingGenerations.flatMap((item) => overlayOnScreen(item, selection) ?? []), (item) => item.overlay,
+    trainingGenerations.flatMap((item) => overlayOnScreen(item, selection) ?? [])
+      .filter((item) => isAugmentedStart(item.overlay) === isAugmentedStart(view.overlay)), (item) => item.overlay,
   ).find((group) => group.members.includes(view))!.memberLabel(view);
 
   useEffect(() => {
