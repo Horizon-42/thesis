@@ -20,6 +20,7 @@ from ts_transformer.experiments import prior_generation_training_export as expor
 from ts_transformer.experiments.prior_free_generation import GENERATION_SCHEMA, flight_rows
 from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.instructions.words import UNCHANGED, Words
+from ts_transformer.prior.augment import Augmentation, augment_signals, augment_state
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.tests.test_instruction_training_export import HAE_MINUS_MSL_M, _offsets
 from ts_transformer.tests.test_prior_free_generation import _speak
@@ -350,3 +351,59 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
         start = inputs([series(observed)], device=None, anchor=N_LOOK).initial_state[0].numpy()
         assert {(s["track"]["lat"][0], s["track"]["lon"][0]) for s in item["samples"]} == {
             (round(float(start[0]), 7), round(float(start[1]), 7))}
+    # from augmented starts: a kind of its own, each flight with its move and the moved rows the prior read, flown from
+    # the moved state; one seed, one move a flight whatever the model or the samples' seed
+    # the synthetic artefact holds no train split: a window every moved start fits (the check itself: prior_free_generation)
+    monkeypatch.setattr(export, "start_altitude_windows", lambda instructions: {"KXXX": (-1e4, 1e5)})
+    augmented = [*args, "--augment-seed", "7", "--overlay-id", "moved"]
+    assert export.main(augmented) == 0
+    moved = json.loads((training / "moved" / export.PAYLOAD_FILE).read_text(encoding="utf-8"))
+    assert moved["schema"] == export.AUGMENTED_SCHEMA and "readout" not in moved
+    assert moved["generation"]["augment"] == {"seed": 7, "tries": 10, "limits": {
+        "rotationDeg": 15.0, "altitudeM": 150.0, "speedFraction": 0.05}, "timeoutFactor": 2.0}
+    manifest = json.loads((training / sets.OVERLAYS_FILE).read_text(encoding="utf-8"))
+    assert {o["id"]: o["kind"] for o in manifest["overlays"]}["moved"] == sets.KIND_AUGMENTED_GENERATION
+    for item in moved["flights"]:
+        observed = signals_by_id[item["datasetId"]]
+        assert item["flown"] and item["augmentDraws"] >= 1 and len(item["samples"]) == 3
+        move = Augmentation(item["augmentation"]["rotationDeg"], item["augmentation"]["altitudeM"],
+                            item["augmentation"]["speedScale"])
+        assert abs(move.rotation_deg) <= 15 and abs(move.altitude_m) <= 150 and abs(move.speed_scale - 1) <= 0.05
+        # the moved rows 0 … N_LOOK − 1 the prior read, on the flight's clock; the samples start from the moved state
+        rows = augment_signals(observed, move)
+        assert item["observed"]["tS"] == [round(float(t), 3) for t in observed.time_s[:N_LOOK]]
+        assert np.allclose(item["observed"]["altitudeM"], rows.altitude_m[:N_LOOK], atol=0.006)
+        start = inputs([series(observed)], device=None, anchor=N_LOOK).initial_state[0].numpy()
+        lat, lon, altitude, _, _ = augment_state(float(start[0]), float(start[1]), float(start[2]), float(start[3]),
+                                                 float(start[4]), instruction_airport(), move)
+        for sample in item["samples"]:                                  # each written to its display precision
+            track = sample["track"]
+            assert (track["lat"][0], track["lon"][0]) == pytest.approx((lat, lon), abs=1.5e-7)
+            assert track["altitudeM"][0] == pytest.approx(altitude, abs=0.006)
+    assert export.main([*augmented[:-1], "moved-again", "--seed", "99"]) == 0
+    again = json.loads((training / "moved-again" / export.PAYLOAD_FILE).read_text(encoding="utf-8"))
+    assert [f["augmentation"] for f in again["flights"]] == [f["augmentation"] for f in moved["flights"]]
+    with pytest.raises(SystemExit):                                     # no readout of augmented starts
+        export.main([*augmented[:-1], "moved-readout", "--readout", str(tmp_path)])
+    # a flight none of the draws fits is not flown and says how many draws it took; the others keep their own samples,
+    # flown under the augmented time limit
+    from ts_transformer.experiments.prior_free_generation import AugmentedStarts
+    real_draw, real_limits, asked = export.augmented_starts, export.limits_s, []
+
+    def first_unfitted(signals, inputs, rng, windows):
+        drawn = real_draw(signals, inputs, rng, windows)
+        return AugmentedStarts([None, *drawn.moves[1:]], [10, *drawn.draws[1:]])
+
+    def limits(batch, params, step_s, *, augmented):
+        asked.append(augmented)
+        return real_limits(batch, params, step_s, augmented=augmented)
+
+    monkeypatch.setattr(export, "augmented_starts", first_unfitted)
+    monkeypatch.setattr(export, "limits_s", limits)
+    assert export.main([*augmented[:-1], "moved-gap"]) == 0
+    gap = json.loads((training / "moved-gap" / export.PAYLOAD_FILE).read_text(encoding="utf-8"))
+    first, second = gap["flights"]
+    assert first["flown"] is False and first["samples"] == [] and first["augmentDraws"] == 10
+    assert first["augmentation"] is None and first["observed"] is None
+    assert second["flown"] and second["augmentation"] == moved["flights"][1]["augmentation"] and len(second["samples"]) == 3
+    assert asked == [True]

@@ -50,6 +50,18 @@ runway pointed first and last, and the probability the prior put on what the mas
 verdicts: the judge would say how the EXECUTOR flew the prior's words, not what the prior said; the landing is the
 prior's answer. SI units.
 
+**From augmented starts** (``--augment-seed``; the Training module §2.8, post-training design §4): each flight flies not
+from its own start but from an augmented one — the same code as stage 2 and its val readouts
+(`prior_free_generation.augmented_starts`, `prior.augment`): rotated about the airport, raised, sped up, drawn until
+plausible, at most `AUGMENT_TRIES` draws; a flight with no plausible draw is not flown. The draw is the flyable flights'
+in the set's order, from a generator seeded with ``--augment-seed`` afresh at each airport and apart from the samples' —
+so every model exported with one seed over one set and artefact flies each flight from the same moved start. The prior
+reads the moved observed rows and the executor starts from the moved state; the time limit is the source's observed
+remaining time × `augment.TIMEOUT_FACTOR`, as in training. Written as a kind of its own (`KIND_AUGMENTED_GENERATION`,
+`AUGMENTED_SCHEMA`): each flight adds its augmentation and the moved observed rows the prior read (rows 0 to
+`N_LOOK` − 1; the samples' tracks start at row `N_LOOK`). No formal readout: stage 2's augmented val readouts drew their
+own moves.
+
 **The words run to where the executor stopped, the track to the outcome**: `flight_rows` counts a sentence to the step
 whose cycles ended the flight for the executor, which flies on after three outcomes its judge reads earlier — crossing
 the threshold without the capture, crossing another runway's threshold, and the stall cut-off (the executor stops at none
@@ -65,6 +77,7 @@ import argparse
 import json
 import re
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -80,7 +93,8 @@ from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.runway_data import published_vertical_paths
 from ts_transformer.experiments.prior_augmented_reward import AUGMENTED_REWARD_SCHEMA
 from ts_transformer.experiments.prior_free_generation import (
-    BELOW_GLIDEPATH, GENERATION_SCHEMA, _physics, limits_s, said_rows, speak_and_fly,
+    AUGMENT_TRIES, BELOW_GLIDEPATH, GENERATION_SCHEMA, _physics, augmented_inputs, augmented_starts, limits_s, said_rows,
+    speak_and_fly, start_altitude_windows,
 )
 from ts_transformer.experiments.prior_landing_reward import LANDING_REWARD_SCHEMA
 from ts_transformer.experiments.prior_train import rosters
@@ -91,11 +105,13 @@ from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.instructions.readout import STRATA
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.training_files import (
-    KIND_GENERATION, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays,
+    KIND_AUGMENTED_GENERATION, KIND_GENERATION, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays,
     require_overlays_unchanged, rounded, runway_hae_minus_msl_m, serialise, write_overlay,
 )
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
 from ts_transformer.io_utils import utc_now
+from ts_transformer.prior import augment
+from ts_transformer.prior.augment import Augmentation, augment_signals
 from ts_transformer.prior.data import VARIANTS, airport_landings
 from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.model import Prior
@@ -105,6 +121,9 @@ from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_sta
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_GENERATION_SCHEMA`); the reader refuses anything else
 #: by name. A name changes with its file's shape or meaning, on both sides, in one change.
 SCHEMA = "aeroviz-training-generation-v3"
+#: MIRROR of `TRAINING_AUGMENTED_GENERATION_SCHEMA` in the same file: the same sentences flown from augmented starts, each
+#: flight with its augmentation and moved observed rows, no formal readout.
+AUGMENTED_SCHEMA = "aeroviz-training-augmented-generation-v1"
 PAYLOAD_FILE = "generation.json"
 RUNNER = "ts_transformer.experiments.prior_generation_training_export"
 #: The one tree every checkout's outputs are (a worktree links it): a readout's prior is known by its path from here on.
@@ -278,12 +297,31 @@ def sample_payload(flown: Flown, index: int, row: dict[str, Any], grid: np.ndarr
     }
 
 
+def observed_payload(signals: FlightSignals, geometry: AirportGeometry, hae_minus_msl_m: float) -> dict[str, Any]:
+    """The observed rows the prior reads before it speaks (rows 0 to `N_LOOK` − 1), on the flight's own clock, in MSL and
+    in the ellipsoid height Cesium draws in (``hae_minus_msl_m``: the flight's runway's)."""
+    rows = slice(0, N_LOOK)
+    lat, lon = geometry.frame.latlon_from_horizontal(np.asarray(signals.e_m[rows], dtype=np.float64),
+                                                     np.asarray(signals.n_m[rows], dtype=np.float64))
+    height = np.asarray(signals.altitude_m[rows], dtype=np.float64)
+    return {"tS": rounded(signals.time_s[rows], 3), "lon": rounded(lon, 7), "lat": rounded(lat, 7),
+            "altitudeM": rounded(height, 2), "altitudeHaeM": rounded(height + hae_minus_msl_m, 2)}
+
+
+def augmentation_payload(move: Augmentation) -> dict[str, float]:
+    return {"rotationDeg": round(move.rotation_deg, 4), "altitudeM": round(move.altitude_m, 3),
+            "speedScale": round(move.speed_scale, 6)}
+
+
 def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[str, np.ndarray], instructions: Path,
                   geometry: AirportGeometry, model: Prior, params: ExecutorParams, words: Words, landings: Any,
                   samples: int, *, generator: torch.Generator, temperature: float,
-                  procedure_masks: ProcedureMasks) -> list[dict[str, Any]]:
+                  procedure_masks: ProcedureMasks, augment_seed: int | None = None,
+                  windows: dict[str, tuple[float, float]] | None = None) -> list[dict[str, Any]]:
     """Every flight of the set: those the val readout flies (their own dynamics) flown ``samples`` times with the
-    prior speaking under ``procedure_masks`` (its own), in one batch; the rest listed with the reason."""
+    prior speaking under ``procedure_masks`` (its own), in one batch; the rest listed with the reason. With
+    ``augment_seed``, each flies from an augmented start (module docstring; ``windows``: `start_altitude_windows`) — one
+    with no plausible draw is not flown — and each flight carries its augmentation and moved observed rows."""
     spec = words.spec
     offsets = runway_hae_minus_msl_m(instructions, geometry.code, arrival_manifest_path(geometry.code))
     located = base_flights(base, flights, sentences)
@@ -298,31 +336,53 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
         if not np.array_equal(reading.words, sentences["words"][sentences["offsets"][k]: sentences["offsets"][k + 1]]):
             raise ValueError(f"{signals[j].dataset_id}: the re-read sentence differs from the stored one")
         readings.append(reading)
-    by_flight: dict[int, list[dict[str, Any]]] = {j: [] for j in flyable}
-    if flyable:
-        batch = replay.Batch(signals=[signals[j] for j in flyable], series=[series[j] for j in flyable],
-                             readings=readings, geometries=[geometry] * len(flyable),
-                             vertical_paths=[published_vertical_paths(geometry)] * len(flyable),
-                             approach_ias_mps=[replay.flight_approach_ias_mps(series[j], replay.OWN) for j in flyable],
-                             groups=[replay.OWN] * len(flyable), drawn={})
-        cpu = torch.device("cpu")
-        repeated = replay.subset(batch, [n for n in range(len(flyable)) for _ in range(samples)])
+    cpu = torch.device("cpu")
+    batch = replay.Batch(signals=[signals[j] for j in flyable], series=[series[j] for j in flyable],
+                         readings=readings, geometries=[geometry] * len(flyable),
+                         vertical_paths=[published_vertical_paths(geometry)] * len(flyable),
+                         approach_ias_mps=[replay.flight_approach_ias_mps(series[j], replay.OWN) for j in flyable],
+                         groups=[replay.OWN] * len(flyable), drawn={})
+    # from augmented starts: one move a flyable flight, drawn afresh at each airport; a flight none fits is not flown
+    moves: list[Augmentation | None] = [None] * len(flyable)
+    draws: list[int] = [0] * len(flyable)
+    if augment_seed is not None and flyable:
+        drawn = augmented_starts(batch.signals, flight_inputs(batch.series, device=cpu, anchor=N_LOOK),
+                                 np.random.default_rng(augment_seed), windows)
+        moves, draws = drawn.moves, drawn.draws
+    kept = [n for n in range(len(flyable)) if augment_seed is None or moves[n] is not None]
+    by_flight: dict[int, list[dict[str, Any]]] = {flyable[n]: [] for n in kept}
+    if kept:
+        index = [n for n in kept for _ in range(samples)]
+        repeated = replay.subset(batch, index)
+        inputs = flight_inputs(repeated.series, device=cpu, anchor=N_LOOK)
+        if augment_seed is not None:
+            repeated = replace(repeated, signals=[augment_signals(s, moves[n]) for s, n in zip(repeated.signals, index)])
+            inputs = augmented_inputs(inputs, repeated.geometries, [moves[n] for n in index])
         runways, charts, approach = _physics(repeated, cpu)
-        limits = limits_s(repeated, params, spec.step_s, augmented=False)
-        flown, said, forbidden, _ = speak_and_fly(model, repeated.signals, repeated.geometries,
-                                                  flight_inputs(repeated.series, device=cpu, anchor=N_LOOK), runways,
+        limits = limits_s(repeated, params, spec.step_s, augmented=augment_seed is not None)
+        flown, said, forbidden, _ = speak_and_fly(model, repeated.signals, repeated.geometries, inputs, runways,
                                                   charts, approach, limits, words, params, landings,
                                                   generator=generator, temperature=temperature,
                                                   procedure_masks=procedure_masks)
         rows, grids, stops = said_rows(repeated, flown, said, forbidden, words, [i % samples for i in range(len(said))],
                                        procedure_masks)
         for i, row in enumerate(rows):
-            j = flyable[i // samples]
+            j = flyable[index[i]]
             by_flight[j].append(sample_payload(flown, i, row, grids[i], geometry, words, offsets[signals[j].runway],
                                                -1 if stops is None else int(stops.step[i])))
-    return [{"flightKey": item["flightKey"], "datasetId": item["datasetId"], "group": groups[j],
-             "flown": j in by_flight, "samples": by_flight.get(j, [])}
-            for j, item in enumerate(base.sample["flights"])]
+    payloads = [{"flightKey": item["flightKey"], "datasetId": item["datasetId"], "group": groups[j],
+                 "flown": j in by_flight, "samples": by_flight.get(j, [])}
+                for j, item in enumerate(base.sample["flights"])]
+    if augment_seed is not None:
+        at = {j: n for n, j in enumerate(flyable)}
+        for j, payload in enumerate(payloads):
+            move = moves[at[j]] if j in at else None
+            # null draws: not drawn (not on its own dynamics); null augmentation: none of the draws fitted
+            payload["augmentDraws"] = draws[at[j]] if j in at else None
+            payload["augmentation"] = None if move is None else augmentation_payload(move)
+            payload["observed"] = None if move is None else observed_payload(augment_signals(signals[j], move), geometry,
+                                                                             offsets[signals[j].runway])
+    return payloads
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -338,8 +398,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--samples", type=int, default=4)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=1337)
+    parser.add_argument("--augment-seed", type=int, default=None,
+                        help="fly every flight from an augmented start drawn with this seed (a kind of its own)")
     parser.add_argument("--overlay-id", default=None,
-                        help="default: generation_<its name>[_r<round>]_<its checkpoint's sha256, 8 digits>")
+                        help="default: generation_[augstart_]<its name>[_r<round>]_<its checkpoint's sha256, 8 digits>")
     args = parser.parse_args(argv)
 
     def resolved(path: Path) -> Path:
@@ -352,6 +414,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(f"an airport is named twice in {airports}")
     if args.samples < 1:
         parser.error("--samples is at least 1")
+    augmented = args.augment_seed is not None
+    if augmented and args.readout is not None:
+        parser.error("--readout is the prior's own starts' readout: an export from augmented starts carries none")
     started = time.perf_counter()
     params, record, words = replay.open_executor(executor, instructions)
     spec = words.spec
@@ -359,7 +424,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     model_part = model_block(prior_dir, config_file, checkpoint_sha, model.config.variant)
     name = display_name(model_part["name"], model_part["round"])
     suffix = "" if model_part["round"] is None else f"_r{model_part['round']:02d}"
-    overlay_id = args.overlay_id or f"generation_{model_part['name']}{suffix}_{checkpoint_sha[:8]}"
+    start = "augstart_" if augmented else ""
+    overlay_id = args.overlay_id or f"generation_{start}{model_part['name']}{suffix}_{checkpoint_sha[:8]}"
     missing = [code for code in airports if code not in model.config.airports]
     if missing:
         parser.error(f"the prior knows no airport {missing} ({list(model.config.airports)})")
@@ -373,6 +439,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if VARIANTS[model.config.variant].landing_context else None)
     flights = load_signals(instructions, SPLIT)
     sentences = load_sentences(instructions, SPLIT, spec)
+    windows = start_altitude_windows(instructions) if augmented else None
     bases: dict[str, BaseSet] = {}
     existing = {}
     for code in airports:
@@ -393,24 +460,35 @@ def main(argv: Sequence[str] | None = None) -> int:
                   "executor": {
                       "specSha256": record["sha256"], "wordClock": params.word_clock, "cycleS": params.cycle_s,
                       "timeoutFactor": params.timeout_factor}}
+    if augmented:
+        limits = augment.LIMITS
+        generation["augment"] = {"seed": args.augment_seed, "tries": AUGMENT_TRIES,
+                                 "limits": {"rotationDeg": limits.rotation_deg, "altitudeM": limits.altitude_m,
+                                            "speedFraction": limits.speed_fraction},
+                                 "timeoutFactor": augment.TIMEOUT_FACTOR}
     masks_text = ", ".join(procedure_masks.names) or "no procedure's masks"
+    starts = f"augmented starts (seed {args.augment_seed})" if augmented else f"step {N_LOOK}"
     title = (f"{name} · {prior_dir.parent.name}/{prior_dir.name} · its own sentences, {args.samples} a flight "
-             f"({masks_text}), flown by executor spec {record['sha256'][:12]} from step {N_LOOK}")
+             f"({masks_text}), flown by executor spec {record['sha256'][:12]} from {starts}")
     generator = torch.Generator().manual_seed(args.seed)
     built = {}
     for code in airports:
         payloads = build_airport(bases[code], flights, sentences, instructions, geometries[code], model, params, words,
                                  landings, args.samples, generator=generator, temperature=args.temperature,
-                                 procedure_masks=procedure_masks)
-        payload = {"schema": SCHEMA, "overlayId": overlay_id, "airport": code, "writtenUtc": utc_now(),
-                   "producedBy": source, "base": bases[code].block, "model": model_part, "generation": generation,
-                   "readout": readouts[code], "columns": list(COLUMNS), "flights": payloads}
-        entry = overlay_entry(overlay_id, KIND_GENERATION, bases[code], title, PAYLOAD_FILE, len(payloads), source)
+                                 procedure_masks=procedure_masks, augment_seed=args.augment_seed, windows=windows)
+        payload = {"schema": AUGMENTED_SCHEMA if augmented else SCHEMA, "overlayId": overlay_id, "airport": code,
+                   "writtenUtc": utc_now(), "producedBy": source, "base": bases[code].block, "model": model_part,
+                   "generation": generation, **({} if augmented else {"readout": readouts[code]}),
+                   "columns": list(COLUMNS), "flights": payloads}
+        entry = overlay_entry(overlay_id, KIND_AUGMENTED_GENERATION if augmented else KIND_GENERATION, bases[code], title,
+                              PAYLOAD_FILE, len(payloads), source)
         built[code] = (serialise(payload), entry)
         said = [s for item in payloads for s in item["samples"]]
         landed = sum(s["outcome"] == "landed" for s in said)
-        print(f"  {code}: {sum(item['flown'] for item in payloads)} of {len(payloads)} flights flown, {landed} of "
-              f"{len(said)} samples landed; {time.perf_counter() - started:.0f} s", flush=True)
+        unfitted = sum(item["augmentDraws"] is not None and item["augmentation"] is None for item in payloads) if augmented else 0
+        print(f"  {code}: {sum(item['flown'] for item in payloads)} of {len(payloads)} flights flown"
+              + (f" ({unfitted} with no plausible augmentation in {AUGMENT_TRIES} draws)" if augmented else "")
+              + f", {landed} of {len(said)} samples landed; {time.perf_counter() - started:.0f} s", flush=True)
     # no airport is written while another's manifest changed since the start (each write checks its own again)
     for code in airports:
         require_overlays_unchanged(root / code / "training", code, overlay_id, existing[code])

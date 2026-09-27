@@ -351,7 +351,8 @@ its val readout; the executor export runs from a worktree — the spec's hash co
 root publisher's `--executor-replay` files the replay's records under Experiments (R13). `prior_generation_training_export`
 (2026-09-26) writes a model's OWN sentences over a set — free generation's own loop under the model's OWN procedure's masks (read by `said_rows`, the glidepath stop included),
 `--samples` a flight, words + flown track + outcome, the model NAMED from its config (base / landing / augmented, its round,
-run and start model; `MODEL_NAMES` is a frontend mirror), the formal val readout bound by prior / spec / artefact (R13).
+run and start model; `MODEL_NAMES` is a frontend mirror), the formal val readout bound by prior / spec / artefact; with
+`--augment-seed` from stage 2's augmented starts instead, a kind + schema of its own (R13).
 `heading_reading_compare` (ARCHIVED 2026-09-24 with the holds reading) flew one train sample under every heading reading at
 fixed executor parameters, pairing evaluation with the observed flights graded by the same code (vocabulary design §10.1) (R14).
 **The prior** (third version, 2026-09-24): `prior_train` (one variant — landing context, ordered heads — on single-aircraft

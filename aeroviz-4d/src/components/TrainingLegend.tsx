@@ -34,8 +34,9 @@ export default function TrainingLegend({ layers, vocabulary, executorTrack, auto
   executorTrack: boolean;
   /** The colour the live executor's segment is drawn in (`autopilotColour`), or null when none is drawn. */
   autopilotColour: string | null;
-  /** The model whose own sentence is read (its name, colour and how many samples it said), or null for the truth. */
-  model: { label: string; colour: string; samples: number } | null;
+  /** The model whose own sentence is read (its name, colour, how many samples it said and whether from an augmented
+   *  start), or null for the truth. */
+  model: { label: string; colour: string; samples: number; moved: boolean } | null;
 }) {
   const [open, setOpen] = useState<boolean>(false);
   const rows: Array<{ key: string; swatch: Swatch; text: string; title: string; shown: boolean }> = [
@@ -48,6 +49,9 @@ export default function TrainingLegend({ layers, vocabulary, executorTrack, auto
       { key: "model-others", swatch: { kind: "line", colour: model.colour, opacity: TRAINING_OTHER_SAMPLE_ALPHA } satisfies Swatch,
         shown: model.samples > 1,
         text: `${model.label}: its other samples`, title: `the other ${model.samples - 1} sentences ${model.label} said over this flight, flown the same way` },
+      { key: "model-moved", swatch: { kind: "line", colour: model.colour, dash: "4 3" } satisfies Swatch, shown: model.moved,
+        text: "moved observed steps", title: `the observed steps ${model.label} read before it spoke, moved like its augmented ` +
+          "start (rotated about the airport, raised, sped up); its samples fly on from their end — the truth is where they were moved from" },
     ]),
     { key: "heading", swatch: { kind: "line", colour: TRAINING_HEADING_BAND_COLOR }, shown: layers.headingBands,
       text: "heading word: judged rows",

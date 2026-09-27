@@ -24,6 +24,7 @@ import {
   fetchTrainingOverlays,
   fetchTrainingPriorOverlay,
   trainingOverlaysOf,
+  TRAINING_GENERATION_KINDS,
   type TrainingExecutorOverlay,
   type TrainingGenerationOverlay,
   type TrainingGenerationView,
@@ -117,7 +118,7 @@ export interface GenerationItem {
 function useGenerationOverlays(manifest: OverlaysManifestState, airport: string | null, sample: TrainingSample | null): GenerationItem[] {
   const entries = useMemo(
     () => (manifest.status === "ready" && sample && manifest.overlays.airport === airport && sample.airport === airport
-      ? trainingOverlaysOf(manifest.overlays, sample.setId, "prior-generation") : []),
+      ? TRAINING_GENERATION_KINDS.flatMap((kind) => trainingOverlaysOf(manifest.overlays, sample.setId, kind)) : []),
     [manifest, sample, airport],
   );
   const [loads, setLoads] = useState<Record<string, OverlayLoad<TrainingGenerationOverlay>>>({});

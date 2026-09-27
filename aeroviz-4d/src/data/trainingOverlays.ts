@@ -56,7 +56,9 @@ import {
 /** MIRROR of the exporter's `OVERLAYS_SCHEMA` (`ts_transformer/instructions/training_files.py`): the manifest of overlays. */
 export const TRAINING_OVERLAYS_SCHEMA = "aeroviz-training-overlays-v1";
 /** MIRROR of `OVERLAY_KINDS`: what an overlay can be. */
-export const TRAINING_OVERLAY_KINDS = ["executor-replay", "prior-prediction", "prior-generation"] as const;
+export const TRAINING_OVERLAY_KINDS = [
+  "executor-replay", "prior-prediction", "prior-generation", "prior-generation-augmented",
+] as const;
 export type TrainingOverlayKind = (typeof TRAINING_OVERLAY_KINDS)[number];
 /** MIRROR of `executor_training_export.SCHEMA`: v2 (instruction-v3) gives each heading word judged its band and a
  *  verdict per row, and each flight judged its flown track as the judge read it; v1 (turns and holds) is refused. */
@@ -93,6 +95,11 @@ export const TRAINING_PRIOR_SCHEMA = "aeroviz-training-prior-v3";
 /** MIRROR of `prior_generation_training_export.SCHEMA`: the prior's own sentences, flown; v2 names the model (its name,
  *  round, run and start model) where v1 carried a free label. */
 export const TRAINING_GENERATION_SCHEMA = "aeroviz-training-generation-v3";
+/** MIRROR of `prior_generation_training_export.AUGMENTED_SCHEMA`: the same sentences flown from AUGMENTED starts (kind
+ *  `prior-generation-augmented`, the Training module §2.8) — each flight with its move and moved observed rows, no readout. */
+export const TRAINING_AUGMENTED_GENERATION_SCHEMA = "aeroviz-training-augmented-generation-v1";
+/** The two kinds a model's own sentences come in: from the set's own starts, and from augmented ones. */
+export const TRAINING_GENERATION_KINDS = ["prior-generation", "prior-generation-augmented"] as const satisfies readonly TrainingOverlayKind[];
 /** MIRROR of `prior_generation_training_export.MODEL_NAMES`: the prior's models, in the order they are trained — base
  *  (data alone), landing (post-trained on the landing reward), augmented (landing post-trained again on augmented
  *  starts). The views order them so. */
@@ -361,6 +368,31 @@ export interface TrainingGeneratedSentence extends TrainingSentence {
   track: TrainingGeneratedTrack;
 }
 
+/** How an augmented start was moved (`prior.augment`): rotated clockwise about the airport, raised, sped up. */
+export interface TrainingAugmentation {
+  rotationDeg: number;
+  altitudeM: number;
+  speedScale: number;
+}
+
+/** The observed rows the prior read before it spoke — rows 0 … firstPredictedRow − 1, a step apart from 0 — moved like its
+ *  start; its samples' tracks start at the first predicted row. */
+export interface TrainingObservedRows {
+  tS: number[];
+  lon: number[];
+  lat: number[];
+  altitudeM: number[];
+  altitudeHaeM: number[];
+}
+
+/** A flight's augmented start: how many draws it took (null: none drawn — not on its own dynamics), the move (null: none of
+ *  the draws was plausible, so it is not flown) and the moved observed rows. */
+export interface TrainingAugmentedStart {
+  draws: number | null;
+  augmentation: TrainingAugmentation | null;
+  observed: TrainingObservedRows | null;
+}
+
 /** A flight of the set the val readout does not fly (not on its own dynamics): `group` says why. */
 export interface TrainingGenerationFlight {
   flightKey: string;
@@ -369,6 +401,8 @@ export interface TrainingGenerationFlight {
   flown: boolean;
   /** One per sample, in sample order; none when not flown. */
   samples: TrainingGeneratedSentence[];
+  /** From augmented starts: this flight's; null from its own start. */
+  start: TrainingAugmentedStart | null;
 }
 
 /** The landed share of the prior's sentences (and of the labelled words flown from the same row), in all and per
@@ -419,6 +453,11 @@ export interface TrainingGenerationOverlay {
      *  the vocabulary's rules alone. The live executor sends them back with a sample it flies again. */
     procedureMasks: TrainingProcedureMask[];
     executor: { specSha256: string; wordClock: string; cycleS: number; timeoutFactor: number };
+    /** From augmented starts: the seed every flight's move was drawn with, the draws allowed, the half-widths of the
+     *  draws and the time limit's factor (of the source's observed remaining time); null from the set's own starts. */
+    augment: {
+      seed: number; tries: number; limits: { rotationDeg: number; altitudeM: number; speedFraction: number }; timeoutFactor: number;
+    } | null;
   };
   /** The prior's formal val free generation, when the exporter was given it. */
   readout: {
@@ -577,6 +616,24 @@ export function generationOnScreen(
   // a sample number chosen over an overlay of the same id with more samples (another airport's) reads this one's last
   const { samples } = view.flight;
   return { view, sentence: samples.length === 0 ? null : samples[Math.min(source.sample, samples.length - 1)] };
+}
+
+/** Whether an overlay's sentences were flown from augmented starts (kind `prior-generation-augmented`), not the set's own. */
+export function isAugmentedStart(overlay: TrainingGenerationOverlay): boolean {
+  return overlay.generation.augment !== null;
+}
+
+/** Why a flight of a generation overlay holds no sample: not on its own dynamics (its group), or — from augmented starts —
+ *  none of its draws was plausible. */
+export function generationUnflownReason(flight: TrainingGenerationFlight): string {
+  return flight.start !== null && flight.start.draws !== null
+    ? `no plausible augmented start in ${flight.start.draws} draws` : flight.group;
+}
+
+/** The move of an augmented start in a few words: "+7.2°, +84 m, ×1.03". */
+export function augmentationText(move: TrainingAugmentation): string {
+  const signed = (value: number, digits: number) => `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(digits)}`;
+  return `${signed(move.rotationDeg, 1)}°, ${signed(move.altitudeM, 0)} m, ×${move.speedScale.toFixed(3)}`;
 }
 
 /** A model sentence the views read (`generationOnScreen`) as the source it is — its overlay and the sample shown — or
@@ -1200,6 +1257,44 @@ function parseGenerationModel(model: Reader): TrainingGenerationModel {
   };
 }
 
+/** A flight's augmented start, bound to the draw's rule and to its samples: drawn (1 … tries draws) exactly when it is on its
+ *  own dynamics, moved within the limits exactly when it is flown, its moved observed rows a step apart from 0 up to the
+ *  first predicted row, where every sample's track starts. */
+function parseAugmentedStart(
+  item: Reader, augment: NonNullable<TrainingGenerationOverlay["generation"]["augment"]>, flown: boolean, firstRow: number,
+  stepS: number, samples: TrainingGeneratedSentence[],
+): TrainingAugmentedStart {
+  const draws = item.nullableInteger("augmentDraws", 1, augment.tries);
+  const moved = item.nullableChild("augmentation");
+  if (moved !== null && draws === null) item.fail("is moved without a draw");
+  if ((moved !== null) !== flown) item.fail(`is ${flown ? "" : "not "}flown ${moved === null ? "without" : "with"} a move`);
+  const augmentation = moved === null ? null : {
+    rotationDeg: moved.number("rotationDeg"), altitudeM: moved.number("altitudeM"), speedScale: moved.number("speedScale"),
+  };
+  if (augmentation !== null) {
+    const { limits } = augment;
+    if (Math.abs(augmentation.rotationDeg) > limits.rotationDeg || Math.abs(augmentation.altitudeM) > limits.altitudeM
+      || Math.abs(augmentation.speedScale - 1) > limits.speedFraction + 1e-9) {
+      moved!.fail(`moves ${augmentationText(augmentation)}, outside ±${limits.rotationDeg}°, ±${limits.altitudeM} m, ` +
+        `×1 ± ${limits.speedFraction}`);
+    }
+  }
+  const rows = item.nullableChild("observed");
+  if ((rows !== null) !== (augmentation !== null)) item.fail(`has ${rows === null ? "no " : ""}moved observed rows ${augmentation === null ? "without" : "with"} a move`);
+  let observed: TrainingObservedRows | null = null;
+  if (rows !== null) {
+    const tS = rows.numbers("tS", firstRow);
+    const offStep = tS.findIndex((value, index) => Math.abs(value - index * stepS) > TIME_SLACK);
+    if (offStep >= 0) rows.fail(`tS[${offStep}] is ${tS[offStep]} s, not the step at ${offStep * stepS} s`);
+    observed = { tS, lon: rows.numbers("lon", firstRow), lat: rows.numbers("lat", firstRow),
+      altitudeM: rows.numbers("altitudeM", firstRow), altitudeHaeM: rows.numbers("altitudeHaeM", firstRow) };
+    // every sample flies from the one moved start
+    const starts = new Set(samples.map((one) => `${one.track.lat[0]},${one.track.lon[0]},${one.track.altitudeM[0]}`));
+    if (starts.size > 1) item.fail(`its samples start from ${starts.size} places, not one moved start`);
+  }
+  return { draws, augmentation, observed };
+}
+
 /** Parse a generation overlay against the manifest entry that listed it and the sample it is drawn over — all or
  *  nothing. */
 export function parseTrainingGenerationOverlay(
@@ -1207,8 +1302,10 @@ export function parseTrainingGenerationOverlay(
 ): Parsed<TrainingGenerationOverlay> {
   return attempt(() => {
     const overlay = Reader.of(raw, "generation overlay");
-    if (overlay.raw("schema") !== TRAINING_GENERATION_SCHEMA) {
-      overlay.fail(`schema is ${JSON.stringify(overlay.raw("schema"))}, expected ${JSON.stringify(TRAINING_GENERATION_SCHEMA)}`);
+    const augmented = entry.kind === "prior-generation-augmented";
+    const schema = augmented ? TRAINING_AUGMENTED_GENERATION_SCHEMA : TRAINING_GENERATION_SCHEMA;
+    if (overlay.raw("schema") !== schema) {
+      overlay.fail(`schema is ${JSON.stringify(overlay.raw("schema"))}, expected ${JSON.stringify(schema)}`);
     }
     overlay.sameNames("columns", TRAINING_COLUMNS);
     const base = parseBase(overlay, entry, sample);
@@ -1228,7 +1325,17 @@ export function parseTrainingGenerationOverlay(
     }
     const executor = generation.child("executor");
     const cycleS = executor.number("cycleS");
-    const readout = overlay.nullableChild("readout");
+    // from augmented starts: no readout (stage 2's augmented readouts drew their own moves), the draw's rule instead
+    if (augmented && overlay.raw("readout") !== undefined) overlay.fail("carries a readout: one from augmented starts has none");
+    const readout = augmented ? null : overlay.nullableChild("readout");
+    const augmentReader = augmented ? generation.child("augment") : null;
+    const augment = augmentReader === null ? null : {
+      seed: augmentReader.integer("seed", 0, Number.MAX_SAFE_INTEGER), tries: augmentReader.count("tries", 1),
+      limits: { rotationDeg: augmentReader.child("limits").number("rotationDeg"),
+        altitudeM: augmentReader.child("limits").number("altitudeM"),
+        speedFraction: augmentReader.child("limits").number("speedFraction") },
+      timeoutFactor: augmentReader.number("timeoutFactor"),
+    };
     return {
       overlayId: entry.id,
       airport: sample.airport,
@@ -1238,6 +1345,7 @@ export function parseTrainingGenerationOverlay(
         samples, temperature: generation.number("temperature"), seed: generation.number("seed"), firstPredictedRow, procedureMasks,
         executor: { specSha256: executor.string("specSha256"), wordClock: executor.string("wordClock"), cycleS,
           timeoutFactor: executor.number("timeoutFactor") },
+        augment,
       },
       readout: readout === null ? null : {
         split: readout.string("split"), writtenUtc: readout.string("writtenUtc"),
@@ -1251,10 +1359,11 @@ export function parseTrainingGenerationOverlay(
           item.fail(`is ${flown ? "" : "not "}flown and holds ${list.length} samples${flown ? `, not ${samples}` : ""}`);
         }
         if (firstPredictedRow >= flight.rows) item.fail(`has ${flight.rows} rows: the prior speaks from row ${firstPredictedRow}`);
+        const samplesRead = list.map((one, index) => parseGeneratedSentence(one, index, firstPredictedRow, stepS, cycleS, sample,
+          procedureMasks.some((item) => item.name === TRAINING_PROCEDURE_ALTITUDES)));
         return {
-          flightKey: flight.flightKey, datasetId: flight.datasetId, group: item.string("group"), flown,
-          samples: list.map((one, index) => parseGeneratedSentence(one, index, firstPredictedRow, stepS, cycleS, sample,
-            procedureMasks.some((item) => item.name === TRAINING_PROCEDURE_ALTITUDES))),
+          flightKey: flight.flightKey, datasetId: flight.datasetId, group: item.string("group"), flown, samples: samplesRead,
+          start: augment === null ? null : parseAugmentedStart(item, augment, flown, firstPredictedRow, stepS, samplesRead),
         };
       }),
     };

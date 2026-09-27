@@ -58,6 +58,8 @@ import {
 } from "../utils/trainingWordColors";
 import {
   generationLanded,
+  generationUnflownReason,
+  isAugmentedStart,
   trainingModelGroups,
   trainingOverlaysPath,
   type TrainingExecutorFlight,
@@ -139,6 +141,9 @@ const TRAINING_OVERLAY_COMMAND = {
   "prior-generation": "python run_ts.py prior_generation_training_export --prior <prior dir, or one round of a post-training run> " +
     "--instructions <artefact> --executor <executor spec dir> --readout <its val free generation> " +
     "--airports-root aeroviz-4d/public/data/airports --set ",
+  "prior-generation-augmented": "python run_ts.py prior_generation_training_export --augment-seed 1337 --prior <prior dir, or one " +
+    "round of a post-training run> --instructions <artefact> --executor <executor spec dir> " +
+    "--airports-root aeroviz-4d/public/data/airports --set ",
 } as const;
 
 /** One overlay kind's switch: on / off, which overlay (when several), and what failed. */
@@ -190,7 +195,7 @@ function ExecutorTag({ flight }: { flight: TrainingExecutorFlight }) {
 /** A flight's samples of the chosen model, one mark each: filled where the flight landed, hollow where it did not. */
 function SampleMarks({ flight, colour }: { flight: TrainingGenerationFlight; colour: string }) {
   if (!flight.flown) {
-    return <span className="training-flight-samples" title={`the model's sentences do not fly it: ${flight.group}`}>—</span>;
+    return <span className="training-flight-samples" title={`the model's sentences do not fly it: ${generationUnflownReason(flight)}`}>—</span>;
   }
   const landed = flight.samples.filter((item) => item.outcome === "landed").length;
   return (
@@ -245,8 +250,25 @@ function ModelSentences({ items, setId, airport, flights }: {
     );
   }
   const chosen = items.some(({ entry }) => entry.id === trainingSource?.overlayId) ? trainingSource!.overlayId : null;
-  const groups = trainingModelGroups(items.flatMap(({ load }) => (load.status === "ready" ? [load.overlay] : [])),
-    (overlay) => overlay);
+  const ready = items.flatMap(({ load }) => (load.status === "ready" ? [load.overlay] : []));
+  // from the set's own starts, then from augmented ones: two families, each grouped and named apart
+  const groups = trainingModelGroups(ready.filter((overlay) => !isAugmentedStart(overlay)), (overlay) => overlay);
+  const moved = trainingModelGroups(ready.filter(isAugmentedStart), (overlay) => overlay);
+  const lines = (family: typeof groups) => family.map((group) => (group.members.length === 1 ? (
+    <ModelLine key={group.key} overlay={group.members[0]} text={group.memberLabel(group.members[0])}
+      chosen={chosen === group.members[0].overlayId} flights={flights} indent={false} />
+  ) : (
+    <div key={group.key} className="training-model-group" role="group" aria-label={`${group.title}: the rounds published`}>
+      <span className="training-model training-model-heading">
+        <span className="training-model-swatch" style={{ background: trainingModelColour(group) }} />
+        <span className="training-model-name">{group.title}</span>
+      </span>
+      {group.members.map((overlay) => (
+        <ModelLine key={overlay.overlayId} overlay={overlay} text={`r${overlay.model.round}`}
+          chosen={chosen === overlay.overlayId} flights={flights} indent />
+      ))}
+    </div>
+  )));
   return (
     <div className="training-models" role="radiogroup" aria-label="Which sentence is read">
       <span className="training-models-title">Sentences read</span>
@@ -255,21 +277,15 @@ function ModelSentences({ items, setId, airport, flights }: {
         <span className="training-model-swatch training-model-swatch-truth" />
         truth (labelled)
       </label>
-      {groups.map((group) => (group.members.length === 1 ? (
-        <ModelLine key={group.key} overlay={group.members[0]} text={group.memberLabel(group.members[0])}
-          chosen={chosen === group.members[0].overlayId} flights={flights} indent={false} />
-      ) : (
-        <div key={group.key} className="training-model-group" role="group" aria-label={`${group.title}: the rounds published`}>
-          <span className="training-model training-model-heading">
-            <span className="training-model-swatch" style={{ background: trainingModelColour(group) }} />
-            <span className="training-model-name">{group.title}</span>
+      {lines(groups)}
+      {moved.length > 0 ? (
+        <div className="training-model-family" role="group" aria-label="From augmented starts">
+          <span className="training-models-title" title="Each flight flown from a start moved as post-training stage 2 moves one: rotated about the airport, raised or lowered, sped up or slowed down — the same move for every model">
+            From augmented starts
           </span>
-          {group.members.map((overlay) => (
-            <ModelLine key={overlay.overlayId} overlay={overlay} text={`r${overlay.model.round}`}
-              chosen={chosen === overlay.overlayId} flights={flights} indent />
-          ))}
+          {lines(moved)}
         </div>
-      )))}
+      ) : null}
       {items.filter(({ load }) => load.status !== "ready").map(({ entry, load, retry }) => (
         <div key={entry.id}>
           <label className="training-model" title={entry.title}>

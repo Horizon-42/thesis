@@ -84,7 +84,10 @@ import {
   executorWordAt,
   executorWordCounts,
   generatedRowAt,
+  augmentationText,
   generationOnScreen,
+  generationUnflownReason,
+  isAugmentedStart,
   sourceOf,
   overlayOnScreen,
   trainingModelGroups,
@@ -228,21 +231,26 @@ function verdictMark(status: TrainingExecutorWord["status"]): { fill: string; st
 function sampleChip(view: TrainingGenerationView, label: string, sentence: TrainingGeneratedSentence, flight: TrainingFlight,
   runwayName: (index: number) => string, stepS: number): { text: string; title: string } {
   const { generation } = view.overlay;
+  const move = view.flight.start?.augmentation ?? null;
   const later = sentence.events.filter((event) => event.row > sentence.firstRow);
   const said = later.filter((event) => event.row * stepS < sentence.endS).length;
   const where = sentence.crossing !== null
     ? ` on ${runwayName(sentence.crossing.runway)}` : `, pointing at ${runwayName(sentence.lastRunway)}`;
   return {
     text: `#${sentence.sample + 1}: ${TRAINING_OUTCOME_TAG[sentence.outcome]}${where} at ${formatSeconds(sentence.endS)} s ` +
-      `(observed ${formatSeconds(flight.rows * stepS)} s)`,
-    title: `${label}, sample ${sentence.sample + 1} of ${generation.samples}: it spoke from step ` +
+      (move === null ? `(observed ${formatSeconds(flight.rows * stepS)} s)` : `· moved ${augmentationText(move)}`),
+    title: (move === null ? "" : `From an augmented start: the flight's start rotated ${augmentationText(move)} (about the ` +
+      `airport, raised, speed ×), drawn with seed ${generation.augment!.seed} in ${view.flight.start!.draws} ` +
+      `draw${view.flight.start!.draws === 1 ? "" : "s"}; its time limit ${generation.augment!.timeoutFactor}× the observed ` +
+      "flight's remaining time. ") +
+      `${label}, sample ${sentence.sample + 1} of ${generation.samples}: it spoke from step ` +
       `${sentence.firstRow}, ${said} words after it before the flight ended` +
       (later.length > said ? ` (and ${later.length - said} after the end, to where the executor stopped)` : "") +
       `; the executor flew each step as it was said and the flight ` +
       `${TRAINING_OUTCOME_TEXT[sentence.outcome]}${sentence.crossing === null ? "" : ` — ${crossingText(sentence.crossing)}`} at ` +
       `${formatSeconds(sentence.endS)} s. Runway ${runwayName(sentence.firstRunway)} at its first step` +
       (sentence.lastRunway === sentence.firstRunway ? "" : `, ${runwayName(sentence.lastRunway)} at its end`) +
-      ` (observed ${flight.runway})` + (sentence.runwayChanges ? `, ${sentence.runwayChanges} runway changes` : "") +
+      ` (${move === null ? "observed" : "the source flight landed on"} ${flight.runway})` + (sentence.runwayChanges ? `, ${sentence.runwayChanges} runway changes` : "") +
       (sentence.goArounds ? `, ${sentence.goArounds} go-around words` : "") +
       `; ${sentence.clearedAtEnd ? "cleared" : "not cleared"} at its end. The masks removed a mean ` +
       Object.entries(sentence.forbiddenMass).map(([column, mass]) => `${column} ${mass.toFixed(4)}`).join(", ") +
@@ -290,15 +298,24 @@ export default function TrainingSentenceBar() {
   const plotW = frameW - GUTTER - PAD_R;
   const { tS } = flight.signals;
   // THE SENTENCE READ: the truth, or the chosen model's sample of this flight (none: a flight its readout does not fly)
-  const models = trainingModelGroups(trainingGenerations.flatMap((view) => overlayOnScreen(view, selection) ?? []),
-    (view) => view.overlay);
+  const onScreen = trainingGenerations.flatMap((view) => overlayOnScreen(view, selection) ?? []);
   const read = generationOnScreen(trainingGenerations, trainingSource, selection);
   const model = read?.view ?? null;
+  // THE START the models' sentences fly from: the set's own, or augmented ones (the chosen model's kind) — two families,
+  // each with its own tabs; the truth is of the set's own start only
+  const augmentedStart = model !== null && isAugmentedStart(model.overlay);
+  const startsOffered = onScreen.some((view) => isAugmentedStart(view.overlay));
+  const models = trainingModelGroups(onScreen.filter((view) => isAugmentedStart(view.overlay) === augmentedStart),
+    (view) => view.overlay);
   const modelGroup = models.find((group) => group.members.some((view) => view === model)) ?? null;
   const modelName = model === null ? null : modelGroup!.memberLabel(model);
   // remembered at render, not only on a click here: the panel chooses rounds too (a write the render reads nowhere)
-  if (model !== null) roundRead.current[modelGroup!.key] = model.overlay.overlayId;
+  // a model's tab in each start family remembers its own round: the group key is the same in both
+  const familyKey = (key: string) => `${augmentedStart ? "augmented start" : "own start"} ${key}`;
+  if (model !== null) roundRead.current[familyKey(modelGroup!.key)] = model.overlay.overlayId;
   const generated = read?.sentence ?? null;
+  // a sample flown from an augmented start is read: nothing of the truth's own start is drawn against it
+  const movedRead = generated !== null && augmentedStart;
   const modelColour = model === null ? null : trainingModelColour(model.overlay.model);
   const sentence: TrainingSentence<TrainingSentenceEvent> = generated ?? trainingTruthSentence(flight);
   // Step r covers [r·step, (r+1)·step): the axis ends where the last step does — of the flight, or of the sentence read
@@ -341,8 +358,8 @@ export default function TrainingSentenceBar() {
   ] : [
     ...(modelClearance === null ? [] : [{ at: timeOf(modelClearance.row), key: "model-cleared", colour: TRAINING_COLUMN_COLOR.approach,
       dash: "3 3", title: `${modelName!} cleared the flight to join the final at ${formatSeconds(timeOf(modelClearance.row))} s` }]),
-    { at: flight.rows * stepS, key: "observed-end", colour: TRAINING_TRACE_COLOR, dash: "2 3",
-      title: `the observed flight's sentence ends at ${formatSeconds(flight.rows * stepS)} s` },
+    ...(movedRead ? [] : [{ at: flight.rows * stepS, key: "observed-end", colour: TRAINING_TRACE_COLOR, dash: "2 3",
+      title: `the observed flight's sentence ends at ${formatSeconds(flight.rows * stepS)} s` }]),
     { at: generated.endS, key: "model-end", colour: modelColour!, dash: undefined,
       title: `${modelName!}'s flight ${TRAINING_OUTCOME_TEXT[generated.outcome]} at ${formatSeconds(generated.endS)} s` },
   ];
@@ -358,7 +375,7 @@ export default function TrainingSentenceBar() {
   // the Fly button: the selected word's segment of the sentence read, and what the live executor is doing with it
   const focusRun = focusColumn === null ? null : sentenceWordAt(sentence, focusColumn, cursorRow);
   /** A model's word said after its flight ended has no flight to fly. */
-  const flyable = (row: number) => generated === null || timeOf(row) < generated.endS;
+  const flyable = (row: number) => !movedRead && (generated === null || timeOf(row) < generated.endS);
   const pickedHere = focusRun !== null && trainingPick !== null && sameSource(trainingPick.source, readSource)
     && trainingPick.column === focusColumn && trainingPick.row === focusRun.row;
   const flyingHere = pickedHere && autopilot?.status === "flying";
@@ -372,9 +389,18 @@ export default function TrainingSentenceBar() {
     : xFor(timeOf(generated.rows)) - xFor(generated.endS);
   // a model chosen that does not fly this flight: the truth is drawn, and said so
   const notFlown = model !== null && generated === null ? model : null;
+  /** The chosen model's other start (the same name, round and run), or — none — the first model there; back to the set's own
+   *  start with none, the truth. The sample number is kept. */
+  const chooseStart = (augmented: boolean) => {
+    const family = onScreen.filter((view) => isAugmentedStart(view.overlay) === augmented);
+    const same = model === null ? undefined : family.find((view) => view.overlay.model.name === model.overlay.model.name
+      && view.overlay.model.round === model.overlay.model.round && view.overlay.model.run === model.overlay.model.run);
+    const next = same ?? (augmented ? trainingModelGroups(family, (view) => view.overlay)[0].members[0] : undefined);
+    setTrainingSource(next === undefined ? null : { overlayId: next.overlay.overlayId, sample: trainingSource?.sample ?? 0 });
+  };
   /** A model's tab: the round last read in it (the first, never read), from its first sample. */
   const chooseModel = (group: (typeof models)[number]) => {
-    const last = group.members.find((view) => view.overlay.overlayId === roundRead.current[group.key]) ?? group.members[0];
+    const last = group.members.find((view) => view.overlay.overlayId === roundRead.current[familyKey(group.key)]) ?? group.members[0];
     setTrainingSource({ overlayId: last.overlay.overlayId, sample: 0 });
   };
   /** A round's tooltip: the model in full, and how its samples of this flight ended. */
@@ -382,7 +408,7 @@ export default function TrainingSentenceBar() {
     const landed = view.flight.samples.filter((item) => item.outcome === "landed").length;
     return `${trainingModelText(view.overlay.model)}: ` + (view.flight.flown
       ? `${landed} of ${view.flight.samples.length} of its sentences for this flight landed`
-      : `does not fly this flight (${view.flight.group})`);
+      : `does not fly this flight (${generationUnflownReason(view.flight)})`);
   };
 
   return (
@@ -390,14 +416,32 @@ export default function TrainingSentenceBar() {
       style={generated === null ? undefined : { borderColor: modelColour! }}>
       <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} executorTrack={executor?.flown === true}
         autopilotColour={autopilot?.status === "ready" && autopilotHasLine(autopilot.segment) ? autopilotColour(autopilot.segment) : null}
-        model={model === null || generated === null ? null : { label: modelName!, colour: modelColour!, samples: model.flight.samples.length }} />
+        model={model === null || generated === null ? null
+          : { label: modelName!, colour: modelColour!, samples: model.flight.samples.length, moved: movedRead }} />
       <header className="training-sentence-head">
+        {startsOffered ? (
+          <span className="training-source-tabs training-start-tabs" role="group" aria-label="Where the models' sentences start">
+            <button type="button" className="training-source-tab" aria-pressed={!augmentedStart}
+              title="The set's own starts: each model speaks from the observed flight's state at its first predicted step"
+              onClick={() => chooseStart(false)}>
+              Real start
+            </button>
+            <button type="button" className="training-source-tab" aria-pressed={augmentedStart}
+              title={"Augmented starts: each flight's start moved as post-training stage 2 moves one — rotated about the airport, " +
+                "raised or lowered, sped up or slowed down — the same move for every model; the truth never flew from there"}
+              onClick={() => chooseStart(true)}>
+              Augmented start
+            </button>
+          </span>
+        ) : null}
         {models.length > 0 ? (
           <span className="training-source-tabs" role="group" aria-label="Which sentence is read">
-            <button type="button" className="training-source-tab" aria-pressed={model === null}
-              title="The labelled sentence of the observed flight" onClick={() => setTrainingSource(null)}>
-              Truth
-            </button>
+            {augmentedStart ? null : (
+              <button type="button" className="training-source-tab" aria-pressed={model === null}
+                title="The labelled sentence of the observed flight" onClick={() => setTrainingSource(null)}>
+                Truth
+              </button>
+            )}
             {models.map((group) => {
               const colour = trainingModelColour(group);
               const on = group === modelGroup;
@@ -445,7 +489,7 @@ export default function TrainingSentenceBar() {
         {notFlown !== null ? (
           <span className="training-chip training-sample-chip" title={`${modelName}'s sentences fly only the ` +
             "flights on their own aircraft dynamics, as its readout does"}>
-            {modelName}: not flown ({notFlown.flight.group}) — the truth is shown
+            {modelName}: not flown ({generationUnflownReason(notFlown.flight)}) — the truth is shown
           </span>
         ) : null}
         {generated === null ? null : (
@@ -460,6 +504,8 @@ export default function TrainingSentenceBar() {
         <button type="button" className="training-autopilot-fly" disabled={focusRun === null || flyingHere || !flyable(focusRun.row)}
           title={focusRun === null
             ? "Select a word (click its band): the executor then flies that word's segment from where it was said."
+            : movedRead
+              ? "The live executor flies from the observed flight's own state; a sample from an augmented start is not flown live."
             : !flyable(focusRun.row)
               ? `The model said this word after its flight had ended (${formatSeconds(generated!.endS)} s): there is no flight to fly.`
               : generated === null
@@ -521,14 +567,18 @@ export default function TrainingSentenceBar() {
 
           {/* a model's sentence: the steps it only observed, before it speaks */}
           {generated !== null ? (
-            <g aria-label={`steps 0–${generated.firstRow - 1}: observed only, the model speaks from step ${generated.firstRow}`}
+            <g aria-label={`steps 0–${generated.firstRow - 1}: observed${movedRead ? ", moved like the augmented start" : " only"}, ` +
+              `the model speaks from step ${generated.firstRow}`}
               className="training-sentence-observed">
-              <title>steps 0–{generated.firstRow - 1}: observed only — the model speaks from step {generated.firstRow}</title>
+              <title>
+                steps 0–{generated.firstRow - 1}: observed{movedRead ? ", moved like the augmented start" : " only"} — the model
+                speaks from step {generated.firstRow}
+              </title>
               <rect x={GUTTER} y={HEAD_H} width={Math.max(observedW, 0)} height={TRAINING_COLUMNS.length * ROW_H}
                 fill={TRAINING_RAW_COLOR} fillOpacity={0.12} />
               {observedW >= OBSERVED_LABEL_MIN_W ? (
                 <text x={GUTTER + observedW / 2} y={HEAD_H + (TRAINING_COLUMNS.length * ROW_H) / 2 + 4} textAnchor="middle"
-                  className="training-sentence-observed-label">observed</text>
+                  className="training-sentence-observed-label">{movedRead ? "observed, moved" : "observed"}</text>
               ) : null}
             </g>
           ) : null}
@@ -603,7 +653,7 @@ export default function TrainingSentenceBar() {
                   </text>
                 ) : null}
                 {/* under a model's row: where the truth says a word of this column */}
-                {generated !== null ? truthEvents.filter((event) => event.row > 0 && event.column === position).map((event) => (
+                {generated !== null && !movedRead ? truthEvents.filter((event) => event.row > 0 && event.column === position).map((event) => (
                   <line key={`truth-${event.row}`} x1={xFor(timeOf(event.row))} x2={xFor(timeOf(event.row))} y1={y + ROW_H - 5}
                     y2={y + ROW_H} stroke={TRAINING_TRACE_COLOR} strokeWidth={1.5} className="training-sentence-truth-tick" />
                 )) : null}

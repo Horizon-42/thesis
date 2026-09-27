@@ -48,7 +48,8 @@ SAMPLE_FILE = "sample.json"
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_OVERLAYS_SCHEMA`, `TRAINING_OVERLAY_KINDS`): the
 #: manifest of what is drawn OVER this airport's sets — another model's output on a set's own flights, each in a
 #: file of its own schema (`executor_training_export`: the executor's replay; `prior_training_export`: the prior's
-#: predictions; `prior_generation_training_export`: the prior's own sentences, flown). The index lists sets and keeps
+#: predictions; `prior_generation_training_export`: the prior's own sentences, flown — from the set's own starts, or with
+#: ``--augment-seed`` from augmented ones, a kind of its own). The index lists sets and keeps
 #: its shape; this file lists overlays, each naming the set it is drawn over and that set's sample by its sha256, so a
 #: set re-exported under the same id is not mistaken for it. A kind the reader does not know rejects that entry alone.
 OVERLAYS_SCHEMA = "aeroviz-training-overlays-v1"
@@ -56,7 +57,8 @@ OVERLAYS_FILE = "overlays.json"
 KIND_EXECUTOR = "executor-replay"
 KIND_PRIOR = "prior-prediction"
 KIND_GENERATION = "prior-generation"
-OVERLAY_KINDS = (KIND_EXECUTOR, KIND_PRIOR, KIND_GENERATION)
+KIND_AUGMENTED_GENERATION = "prior-generation-augmented"
+OVERLAY_KINDS = (KIND_EXECUTOR, KIND_PRIOR, KIND_GENERATION, KIND_AUGMENTED_GENERATION)
 
 #: Only validation flights are drawn: train is what a prior will be fitted on, and test stays shut.
 SPLIT = "val"

@@ -63,6 +63,7 @@ export const TRAINING_ENTITY = {
   modelTrack: (sample: number) => `training-model-track-${sample}`,
   modelGround: "training-model-ground",
   modelEnd: "training-model-end",
+  modelMoved: "training-model-moved",
   modelIssue: (index: number) => `training-model-issue-${index}`,
   modelFocusStretch: "training-model-focus-stretch",
   modelFocusIssue: "training-model-focus-issue",

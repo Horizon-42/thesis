@@ -188,6 +188,10 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **Scrollbars are styled ONCE, globally** (top of `index.css`: `--scrollbar-*` tokens, `::-webkit-scrollbar*` for
   Chromium/Safari, the standard properties only under `@supports not selector(::-webkit-scrollbar)` — Chromium 121+ lets them
   override the parts); a component never styles its own scrollbar, it changes the tokens (AV34).
+- **A model's sentences from AUGMENTED starts are a kind of their own** (`prior-generation-augmented`,
+  `aeroviz-training-augmented-generation-v1`, exporter `--augment-seed`): each flight's move and moved observed rows 0–7, the
+  same move for every model of one seed, no readout; the bar's `Real start | Augmented start` switch filters the model tabs by
+  start (group per start family, never mixed); no truth marks and no live Fly over a moved sample (AV35).
 
 ## Comparison CZML colour contract
 

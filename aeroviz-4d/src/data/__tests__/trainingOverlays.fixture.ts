@@ -14,6 +14,7 @@ import {
   parseTrainingGenerationOverlay,
   parseTrainingOverlays,
   TRAINING_EXECUTOR_SCHEMA,
+  TRAINING_AUGMENTED_GENERATION_SCHEMA,
   TRAINING_GENERATION_SCHEMA,
   TRAINING_PROCEDURE_ALTITUDES,
   TRAINING_OVERLAYS_SCHEMA,
@@ -220,12 +221,21 @@ export const AUGMENTED_R1_ID = "generation_aug_r1";
 export const AUGMENTED_R2_ID = "generation_aug_r2";
 /** The row a model first speaks at in these fixtures (the rows before are observed only). */
 export const MOCK_GENERATION_FIRST_ROW = 4;
+/** Base and landing r1 flown from augmented starts (kind `prior-generation-augmented`): the same move of each flight. */
+export const AUGSTART_BASE_ID = "generation_augstart_base";
+export const AUGSTART_POST_ID = "generation_augstart_post";
+const AUGSTART_IDS = [AUGSTART_BASE_ID, AUGSTART_POST_ID];
+/** The vectored flight's move in the augmented-start fixtures, and the draws it took. */
+export const MOCK_MOVE = { rotationDeg: 7.2, altitudeM: 84, speedScale: 1.03 };
 
 const PRIOR_RUNS = "4dTrajectory/outputs/POOLED/prior";
 /** Each fixture overlay's model, as the exporter writes it. */
 const MOCK_MODELS: Record<string, Record<string, unknown>> = {
   [BASE_MODEL_ID]: { name: "base", round: null, run: `${PRIOR_RUNS}/v3_step1/full_s1`, fineTuning: null },
   [POST_TRAINED_ID]: { name: "landing", round: 1, run: `${PRIOR_RUNS}/v3_rl/grpo_s1`, fineTuning: {
+    schema: "ts-prior-landing-reward-v1", from: `${PRIOR_RUNS}/v3_step1/full_s1`, fromName: "base", fromRound: null } },
+  [AUGSTART_BASE_ID]: { name: "base", round: null, run: `${PRIOR_RUNS}/v3_step1/full_s1`, fineTuning: null },
+  [AUGSTART_POST_ID]: { name: "landing", round: 1, run: `${PRIOR_RUNS}/v3_rl/grpo_s1`, fineTuning: {
     schema: "ts-prior-landing-reward-v1", from: `${PRIOR_RUNS}/v3_step1/full_s1`, fromName: "base", fromRound: null } },
   ...Object.fromEntries([[AUGMENTED_R1_ID, 1], [AUGMENTED_R2_ID, 2]].map(([id, round]) => [id, {
     name: "augmented", round, run: `${PRIOR_RUNS}/v3_stage2/aug_s1`, fineTuning: {
@@ -237,7 +247,7 @@ const MOCK_MODELS: Record<string, Record<string, unknown>> = {
 export function mockOverlaysWithGenerations(ids: string[] = [BASE_MODEL_ID, POST_TRAINED_ID]): Record<string, unknown> {
   const manifest = mockOverlays() as { overlays: unknown[] };
   const entry = (id: string) => ({
-    id, kind: "prior-generation", base: SET_ID, baseSampleSha256: MOCK_SAMPLE_SHA, title: `the ${id} test overlay`,
+    id, kind: AUGSTART_IDS.includes(id) ? "prior-generation-augmented" : "prior-generation", base: SET_ID, baseSampleSha256: MOCK_SAMPLE_SHA, title: `the ${id} test overlay`,
     file: `${id}/generation.json`, flights: 2, source: { runner: "test" },
   });
   return { ...manifest, overlays: [...manifest.overlays, ...ids.map(entry)] };
@@ -303,7 +313,7 @@ export function mockGenerationOverlay(id: string): Record<string, unknown> {
   };
   const cells = (all: number) => ({ all: { flights: 800, landed: all }, "straight-in": { flights: 500, landed: all + 0.03 },
     vectored: { flights: 300, landed: all - 0.05 } });
-  return {
+  const raw: Record<string, any> = {
     schema: TRAINING_GENERATION_SCHEMA,
     overlayId: id,
     airport: "KXXX",
@@ -329,6 +339,21 @@ export function mockGenerationOverlay(id: string): Record<string, unknown> {
       { flightKey: STRAIGHT_KEY, datasetId: `KXXX:${STRAIGHT_KEY}`, group: "stand-in dynamics", flown: false, samples: [] },
     ],
   };
+  if (AUGSTART_IDS.includes(id)) augmentedStarts(raw);
+  return raw;
+}
+
+/** What an overlay from augmented starts writes instead of a readout: the draw's rule, and each flight's move and moved
+ *  observed rows (rows 0 … first predicted row − 1, a step apart) — the straight-in flight not drawn (stand-in dynamics). */
+function augmentedStarts(raw: any): void {
+  raw.schema = TRAINING_AUGMENTED_GENERATION_SCHEMA;
+  delete raw.readout;
+  raw.generation.augment = { seed: 1337, tries: 10, limits: { rotationDeg: 15, altitudeM: 150, speedFraction: 0.05 }, timeoutFactor: 2 };
+  const rows = Array.from({ length: MOCK_GENERATION_FIRST_ROW }, (_, row) => row * 2);
+  Object.assign(raw.flights[0], { augmentDraws: 2, augmentation: { ...MOCK_MOVE }, observed: {
+    tS: rows, lon: rows.map((at) => -78.81 + at * 1e-4), lat: rows.map(() => 35.86),
+    altitudeM: rows.map((at) => 1300 - at * 5), altitudeHaeM: rows.map((at) => 1267 - at * 5) } });
+  Object.assign(raw.flights[1], { augmentDraws: null, augmentation: null, observed: null });
 }
 
 /** Both models' sentences over ``sample`` read as the panel publishes them, for the flight at ``position`` (``change``: of
