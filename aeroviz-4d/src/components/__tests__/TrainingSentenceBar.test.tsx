@@ -138,7 +138,7 @@ describe("TrainingSentenceBar", () => {
     // another round: the same sample number, so one flight is compared round by round
     fireEvent.click(screen.getByRole("button", { name: "augmented r2" }));
     expect(setTrainingSource).toHaveBeenLastCalledWith({ overlayId: AUGMENTED_R2_ID, sample: 1 });
-    // away and back: the tab returns to the round last read in it — read here, or chosen in the panel
+    // away and back: the tab returns to the round last read in it
     appState.trainingSource = { overlayId: AUGMENTED_R2_ID, sample: 1 };
     rerender(<TrainingSentenceBar />);
     appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };

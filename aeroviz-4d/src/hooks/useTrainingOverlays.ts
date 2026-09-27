@@ -48,8 +48,11 @@ export type OverlayLoad<T> =
   | { status: "invalid"; problem: string }
   | { status: "ready"; overlay: T };
 
+/** The overlay kinds behind a switch of their own — a model's sentences are chosen in the sentence bar instead. */
+export type TrainingSwitchKind = Exclude<TrainingOverlayKind, (typeof TRAINING_GENERATION_KINDS)[number]>;
+
 export interface OverlayKindState<T> {
-  kind: TrainingOverlayKind;
+  kind: TrainingSwitchKind;
   /** The overlays of this kind drawn over the open set, the latest listed last. */
   entries: TrainingOverlayEntry[];
   /** The one shown: the latest unless another is chosen. */
@@ -63,7 +66,7 @@ export interface OverlayKindState<T> {
 type Fetcher<T> = (airport: string, entry: TrainingOverlayEntry, sample: TrainingSample) => Promise<Parsed<T>>;
 
 function useOverlayKind<T extends { flights: Array<{ flightKey: string }> }>(
-  kind: TrainingOverlayKind, manifest: OverlaysManifestState, airport: string | null, sample: TrainingSample | null,
+  kind: TrainingSwitchKind, manifest: OverlaysManifestState, airport: string | null, sample: TrainingSample | null,
   fetcher: Fetcher<T>,
 ): OverlayKindState<T> {
   // Only the open airport's own manifest and sample: for one render after a switch both are still the last

@@ -97,7 +97,7 @@ export function trainingModelOrigin(model: TrainingGenerationModel): string {
 }
 
 /** A model named in full: its name and round, the run its rounds come from and the model it started from — a tab's,
- *  a panel line's, a table row's tooltip. */
+ *  a round's, a table row's tooltip. */
 export function trainingModelText(model: TrainingGenerationModel): string {
   return `${trainingModelLabel(model)} (${trainingRunName(model.run)}, ${trainingModelOrigin(model)})`;
 }

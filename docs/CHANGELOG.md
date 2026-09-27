@@ -1,5 +1,13 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-27 — Training 左栏删掉 "Sentences read"（读哪一句只在句子条上选）
+
+- 用户：左栏的 Sentences read（真值 / 各模型各轮的单选，含 "From augmented starts" 一组）与句子条的标签页重复，删干净。
+  `TrainingPanel` 的 `ModelSentences` / `ModelLine`、它们的样式（`.training-models`、`.training-model*` 中只属于它们的几条）、
+  模型句子的"none published"命令、面板测试里只测这块的用例和 `setTrainingSource` 的 mock 都删了；只读的开关种类收窄为
+  `TrainingSwitchKind`。留下的：模型叠加层读不了时在 Draw 下面写原因加 Retry（原来只在这块里）；航班列表上所读模型的样本点。
+  文档 36 §4.1、§4.8、§4.10，35 AV31、AV32、AV35。
+
 ### 2026-09-27 — 多机 M0 第 1–4 步：间隔判定的两种读法，观测航迹的普查，平行跑道间隔的英文读数
 
 - M0 第 1–4 步（分支 `dev-multi-aircraft`）：机型 → CWT 类别表（7360.1K 附录 A 全表 + 补充表）、失去间隔的判定 `inference/separation.py`、
