@@ -104,7 +104,7 @@ class Track:
         return self.first_step_s <= t_s <= self.last_step_s
 
 
-def _quantiles(values: Sequence[float]) -> dict[str, float | int]:
+def quantiles(values: Sequence[float]) -> dict[str, float | int]:
     array = np.asarray(values, dtype=np.float64)
     if not len(array):
         return {"n": 0}
@@ -141,7 +141,8 @@ def track(flight: FlightSignals, sentence_rows: int | None, capture: int | None,
                  None if flight.typecode is None else wake_category(flight.typecode))
 
 
-def _traffic(tracks: Sequence[Track], t_s: float) -> Traffic:
+def traffic_at(tracks: Sequence[Track], t_s: float) -> Traffic:
+    """``tracks`` at ``t_s``, each interpolated from its rows (the angle unwrapped, wrapped at the instant)."""
     def at(values: np.ndarray, item: Track) -> float:
         return float(np.interp(t_s, item.presence.times_s, values))
 
@@ -199,7 +200,7 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
             if len(here) < 2:
                 continue
             judged_steps += 1
-            traffic = _traffic(here, float(t_s))
+            traffic = traffic_at(here, float(t_s))
             together.update(tuple(sorted((here[a].key, here[b].key)))
                             for a in range(len(here)) for b in range(a + 1, len(here)))
             for reading in READINGS:
@@ -226,7 +227,7 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
         near = [by_key[p.dataset_id] for p in index.overlapping(t_s, t_s) if p.dataset_id != leader.key]
         if not near:
             continue
-        traffic = _traffic(near, t_s)
+        traffic = traffic_at(near, t_s)
         # the leader over its threshold: on the approach clock at its threshold, established (its position is its last
         # row's; the threshold's rule reads only the approach clock)
         along_threshold = separation.along_nm[leader.presence.runway] * NM_M
@@ -303,8 +304,8 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
                        "untyped_in_trail": sum(not e["wake_known"] for e in found),
                        "a_flight_with_a_sentence_answers": sum(any(r["speaking"] for r in e["responsible"])
                                                                for e in found),
-                       "steps": _quantiles([e["steps"] for e in found]),
-                       "min_distance_over_required": _quantiles([e["min_ratio"] for e in found])},
+                       "steps": quantiles([e["steps"] for e in found]),
+                       "min_distance_over_required": quantiles([e["min_ratio"] for e in found])},
             "episodes": found,
         }
 
@@ -316,26 +317,26 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
                     "background_never_established": sum(not t.presence.speaking and math.isinf(t.captured_s)
                                                         for t in tracks)},
         "scene_hours": hours, "steps_with_two_or_more": judged_steps,
-        "segment_minutes": _quantiles(segment_minutes),
+        "segment_minutes": quantiles(segment_minutes),
         "pairs_in_the_scene_together": len(together),
         "check_reading": VISUAL,
         "readings": {reading: judged(reading) for reading in READINGS},
         "at_landing": {"judged": landing["judged"], "untyped": landing["untyped"],
                        "below_required": landing["below_required"], "wake_losses": landing["wake_losses"],
-                       "interval_m": _quantiles(landing["interval_m"]),
-                       "interval_minus_required_m": _quantiles(landing["interval_minus_required_m"]),
+                       "interval_m": quantiles(landing["interval_m"]),
+                       "interval_minus_required_m": quantiles(landing["interval_minus_required_m"]),
                        "required_nm": dict(sorted(landing["required_nm"].items())),
                        "required_is_the_radar_minimum_share": (
                            landing["required_nm"][f"{separation.same_nm:g}"] / landing["judged"]
                            if landing["judged"] else None)},
-        "closing_speed_on_a_final_mps": {**_quantiles(closing), "pairs_with_a_background_flight_left_out": closing_left_out},
+        "closing_speed_on_a_final_mps": {**quantiles(closing), "pairs_with_a_background_flight_left_out": closing_left_out},
         "order_swaps": {group: {"swapped": s, "pairs": n, "share": s / n if n else None}
                         for group, (s, n) in swaps.items()},
         "flights_in_a_swap_share": len(involved) / len(tracks),
-        "samples": {"count": len(sample_flights), "flights": _quantiles(sample_flights),
-                    "loss_minutes": _quantiles(loss_minutes)},
-        "windows": {"count": len(window_flights), "flights": _quantiles(window_flights),
-                    "entering_with_a_sentence": _quantiles(entering), "airborne_at_opening": _quantiles(airborne)},
+        "samples": {"count": len(sample_flights), "flights": quantiles(sample_flights),
+                    "loss_minutes": quantiles(loss_minutes)},
+        "windows": {"count": len(window_flights), "flights": quantiles(window_flights),
+                    "entering_with_a_sentence": quantiles(entering), "airborne_at_opening": quantiles(airborne)},
         "A_max": max(max(sample_flights), max(window_flights)),
     }
 
