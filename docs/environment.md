@@ -96,3 +96,18 @@ gets a new ID here and ONE new line in the index.**
 
 - Frontend build config (Cesium Ion token, vite-plugin-cesium, TS strict, jsdom):
   `aeroviz-4d/CLAUDE.md`.
+
+### E13 · `start_aeroviz_fullstack.sh` runs on Linux and macOS
+
+- Since 2026-08-13 (`de82a481`, the `--replace` identity work) the launcher had been Linux-only:
+  util-linux `flock`/`setsid`, `/proc/<pid>/stat` start ticks, `/proc/<pid>/fd` and GNU
+  `stat -c`. On the Mac it died at `Missing required command: flock`, and installing `flock`
+  alone would not have helped (it then fails at `/proc`).
+- 2026-09-28: the five OS-specific operations live in one platform block in the script. The
+  Linux branch runs the same commands as before (verified on SP-AI: old and new scripts pass the
+  launcher tests, and a new `--replace` takes over a supervisor started by the old script — the
+  state-file format is unchanged). macOS uses perl `flock(2)`/`setsid(2)`, BSD `stat -f`,
+  `ps -o lstart=` (start time as epoch seconds) and `lsof`.
+- macOS needs bash ≥ 4.1 first on PATH (`{fd}>` redirection; `/bin/bash` is 3.2 and is refused
+  by name), plus `perl`, `ps`, `lsof` (all stock). BSD `chmod` treats a `--` AFTER the mode as a
+  file name — write `chmod -- 700 path`.

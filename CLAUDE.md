@@ -98,7 +98,7 @@ Modeling pipeline: `arrivals/manifest.json` → `flight_scenarios` (`FlightScena
 
 ## Environment
 
-Full text, with the investigation behind each line: `docs/environment.md` (E1–E12).
+Full text, with the investigation behind each line: `docs/environment.md` (E1–E13).
 
 - **`aeroviz` (Python 3.12) is THE thesis env on this Linux box** — `traffic`/`pyopensky`,
   `cifparse`/`arinc424`, `casadi` + IPOPT, `openap`, the geospatial stack, editable `geokit` and
@@ -120,6 +120,8 @@ Full text, with the investigation behind each line: `docs/environment.md` (E1–
 - Env spec backups in `.env-backup/` (E9); GPU RTX 4060 8 GB, cc 8.9, cu128 wheels (E10); 16 GB
   RAM, frequently swap-bound — UI lag is memory pressure, not a code change (E11); frontend build
   config → `aeroviz-4d/CLAUDE.md` (E12).
+- `start_aeroviz_fullstack.sh` runs on Linux AND macOS: OS-specific ops live in ONE platform block
+  (Linux branch = the original flock/setsid//proc commands); macOS needs bash ≥ 4.1 first on PATH (E13).
 
 ## Domain Context
 

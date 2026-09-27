@@ -1,5 +1,18 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-28 — `start_aeroviz_fullstack.sh` 在 macOS 上也能跑
+
+- 用户在 Mac 上启动报 `Missing required command: flock`。原因：`de82a481`（2026-08-13，`--replace` 的进程身份校验）起脚本
+  只能在 Linux 上跑——util-linux `flock`/`setsid`、`/proc/<pid>/stat`、`/proc/<pid>/fd`、GNU `stat -c`；单装 flock 也会在
+  `/proc` 处失败。
+- 改法（用户选"改成双平台，且不影响 Linux"）：五个平台相关操作（`file_stat`、`lock_fd`、`process_start_ticks`、
+  `process_holds_lock`、`exec_in_new_session`，外加只用于显示的 `local_addresses`）集中定义在脚本的一个平台块里；Linux 分支
+  执行的命令与原来相同，macOS 用 perl flock(2)/setsid(2)、BSD `stat -f`、`ps -o lstart=`、`lsof`。`chmod 700 --` 改成
+  `chmod -- 700`（BSD chmod 把 mode 之后的 `--` 当文件名）。加 bash ≥ 4.1 检查（macOS 的 /bin/bash 3.2 会明确报错）。
+- 新测试 `test_replace_refuses_a_supervisor_record_that_fails_identity`（伪造 start_ticks / lock_fd → `--replace` 拒绝，原实例
+  不受影响）：原来的测试在身份校验恒真时也能过。Mac 3/3；SP-AI 上旧脚本、新脚本各 3/3，且新脚本 `--replace` 能接管旧脚本
+  启动的实例（状态文件格式未变）。`docs/environment.md` E13。
+
 ### 2026-09-28 — 实时执行器启动时预热：第一次点不再等 2 秒以上
 
 - 用户：第一次跑 autopilot 要 2 秒以上。实测（冷启动的后端）：飞一段只要 1–11 ms；时间在第一次用到一个集合时现场重建它的
