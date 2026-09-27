@@ -548,14 +548,16 @@ the capture, both mean path angles (height lost ÷ distance to go covered, each 
 glidepath at the run's start and the height given up per minute; at the first captured cycle inside the FAF, executor −
 observed, apart for the replays that flew "descend to land" with the shallowest class before it. What-ifs (`WHAT_IFS`,
 `--what-ifs`) fly the same sample with a line or two of `Vertical.rate` replaced in-process (`law_changed`; refused unless
-each line is there exactly once) — the aim inside the word's tube after the capture: `class_centre_in_tube` (the class's
-nominal angle, never steeper than the line to the crossing point), `join_from_below` (level below the published glidepath,
-the law on or above it), `join_from_below_centre` (level below it, the class centre above it), and the two centre laws
-with the landing's reach read from the aircraft's own height instead of the tube's lower edge (`*_own_reach`); each is read
-in full as the law is,
+each line is there exactly once) — the aim inside the word's tube after the capture, against the v11 law (level below the
+published glidepath, toward the crossing point on or above it): `toward_below_glidepath` (the law up to v10: toward the
+crossing point below the glidepath too), `class_centre_in_tube` (the class's nominal angle, never steeper than the line to
+the crossing point, below the glidepath too), `join_from_below_centre` (the law below, the class centre on or above it), and
+the two centre laws with the landing's reach read from the aircraft's own height instead of the tube's lower edge
+(`*_own_reach`); each is read in full as the law is,
 and on the replay gate's flights from row 0 (`replay_words`: landed, words inside, failures by check); the executor's
-source and spec are untouched. Writes `diagnosis.json` (`ts-prior-glidepath-diagnosis-v2` since executor v11, 2026-09-27:
-several what-ifs, each read in full; v1 read one, stops and outcomes only); from a clean tree, never over an existing
+source and spec are untouched. Writes `diagnosis.json` (`ts-prior-glidepath-diagnosis-v3` since executor v11's third
+milestone, 2026-09-27: "the law" is the v11 law; v2 the same day measured the what-ifs against the v10 law —
+`analyses/shallow_class_law_20260927/`; v1 read one what-if, stops and outcomes only); from a clean tree, never over an existing
 directory; development splits only.
 
 ### R18 · `run_ts.py prior_closed_loop` — archived 2026-09-25 → `archive/closed_loop_sft_2026_09/` (`docs/reference/entries.md` there)

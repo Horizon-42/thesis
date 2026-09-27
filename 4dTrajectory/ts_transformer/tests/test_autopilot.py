@@ -1250,6 +1250,11 @@ def test_descend_to_land_never_goes_under_the_published_glidepaths_lower_edge_be
         assert aim_deg(on, 8000.0, captured) == pytest.approx(aim_deg(on, 8000.0, captured, glidepath_tan=0.0))
     assert aim_deg(30.0, -200.0, True) == pytest.approx(aim_deg(30.0, -200.0, True, glidepath_tan=0.0))
     assert aim_deg(under, 8000.0, True, go_around=True) == pytest.approx(-words.spec.climb_angle_centre_deg)
+    # v11: between the edge and the glidepath, after the capture, the shallowest class waits level for the glidepath
+    # (the approach joined from below); before the capture it flies the class as before
+    between = on - 30.0
+    assert aim_deg(between, 8000.0, True) == pytest.approx(0.0)
+    assert aim_deg(between, 8000.0, False) == pytest.approx(words.angle_deg(1))
     # on the edge, 60° off the course (a base leg), under the steepest class: without the edge the law descends
     # steeper than the edge falls there (half the glidepath's slope); with it, exactly that; flying away, level
     edge, steepest = TEST_TCH_M + 8000.0 * tan3 - GLIDEPATH_BELOW_M, words.n_descent

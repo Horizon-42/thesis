@@ -17,9 +17,11 @@ crossing point is the TCH moved into the word's tube extended to the threshold (
 class's two angles from where the altitude or angle word in force was said, ± the altitude tolerance, along the path
 flown; its inner half), within the heights admitted there — the TCH ± the altitude tolerance's inner half, within the
 landing condition; where the two do not meet, the admitted edge nearer the tube. The descent aims at that point every
-cycle — after the lateral capture the angle from here to there along the centreline, before it the class's nominal
-angle, never steeper than the straight line there (the shortest path there is, so it never descends into the ground
-on a downwind) — kept inside the tube in force (the class's two edges, the hold law's correction back from each) while
+cycle — after the lateral capture the angle from here to there along the centreline (below the pointed runway's
+published glidepath, level instead: the approach joined from below, as the observed aircraft fly it — the shallow classes'
+readout of 2026-09-27, where aiming at the crossing point from below rode the class's steep edge), before it the class's
+nominal angle, never steeper than the straight line there (the shortest path there is, so it never descends into the
+ground on a downwind) — kept inside the tube in force (the class's two edges, the hold law's correction back from each) while
 the admitted heights can still be reached from the tube, flying between level and the steepest class's lower edge;
 past that, straight toward the point (mode ``aim_left_tube``, after the capture: the landing comes first). A tube that will not reach the threshold at the admitted
 heights is flown while a later angle word could still bring it there — the judge re-anchors the tube at every angle word
@@ -156,7 +158,12 @@ class Vertical:
         upper = anchor - here * shallow_tan + self.tolerance_m - margin
         lower = anchor - here * steep_tan - self.tolerance_m + margin
         speed_tau = state.speed_mps * hold_tau
-        in_tube = torch.minimum(torch.maximum(toward, torch.atan(shallow_tan) + (height - upper) / speed_tau),
+        # after the capture, below the pointed runway's published glidepath: the least descent the tube allows (level where
+        # the class admits it) — the approach joined from below, as flown (the shallow classes' readout, 2026-09-27);
+        # on or above it, toward the crossing point
+        below_glidepath = line_captured & (height < crossing_height_m + to_go_m * glidepath_tan)
+        in_tube = torch.minimum(torch.maximum(torch.where(below_glidepath, torch.zeros_like(toward), toward),
+                                              torch.atan(shallow_tan) + (height - upper) / speed_tau),
                                 torch.atan(steep_tan) + (height - lower) / speed_tau)
         in_reach = (lower - to_go_m * math.tan(self.steepest_low_rad) <= admitted_high) & (upper >= admitted_low)
         self.left_tube = land & ~go_around & line_captured & ~in_reach

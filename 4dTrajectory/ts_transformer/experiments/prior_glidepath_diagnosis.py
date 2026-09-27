@@ -66,8 +66,10 @@ from ts_transformer.prior.procedure import (
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-#: v2 (2026-09-27, executor v11): several what-ifs, each read in full and on the replay gate's flights.
-DIAGNOSIS_SCHEMA = "ts-prior-glidepath-diagnosis-v2"
+#: v3 (2026-09-27, executor v11 milestone 3): "the law" is the v11 law (level below the glidepath after the capture), the
+#: what-ifs re-expressed against it (`toward_below_glidepath` is the law up to v10). v2 (the same day): several
+#: what-ifs, each read in full and on the replay gate's flights, against the v10 law.
+DIAGNOSIS_SCHEMA = "ts-prior-glidepath-diagnosis-v3"
 #: The shortest run of one "descend to land" class after the capture whose angles are read: its duration, s, and the
 #: distance to go each of the executor and the observed aircraft covered over it, m.
 MIN_RUN_S = 20.0
@@ -76,12 +78,11 @@ MIN_RUN_M = 500.0
 OBSERVED_ON_GLIDEPATH_M = 30.0
 #: The shallowest descent class.
 SHALLOWEST = ANGLE_LEVEL + 1
-#: The line of `vertical.Vertical.rate` every what-if changes: the aim inside the tube is the aim toward the crossing
-#: point (``toward``: after the capture, along the centreline to it), kept between the class's edges.
-AIM_IN_TUBE = "in_tube = torch.minimum(torch.maximum(toward, "
-#: Below the pointed runway's published glidepath (``height`` and the crossing height are above the threshold, the
-#: glidepath rises at its tangent from the crossing height).
-_BELOW_GLIDEPATH = "(height < crossing_height_m + to_go_m * glidepath_tan)"
+#: The line of `vertical.Vertical.rate` every aim what-if changes: the aim inside the tube — after the capture level below
+#: the published glidepath (``below_glidepath``, executor v11), else toward the crossing point (``toward``) — kept between
+#: the class's edges.
+AIM_IN_TUBE = "in_tube = torch.minimum(torch.maximum(torch.where(below_glidepath, torch.zeros_like(toward), toward),"
+_BELOW_GLIDEPATH = "below_glidepath"
 #: The line that decides whether the landing can still be reached from the tube (from its lower edge, at the steepest
 #: class's lower edge), and the same read from the aircraft's own height.
 REACH = "in_reach = (lower - to_go_m * math.tan(self.steepest_low_rad) <= admitted_high)"
@@ -90,26 +91,24 @@ _CENTRE = "torch.minimum(nominal, on_line)"
 #: What each what-if makes of the law, as ``(line, becomes)`` pairs, each line held exactly once; the aim changes after
 #: the capture only (before it every what-if is the law):
 WHAT_IFS = {
+    # the law up to spec v10: toward the crossing point below the glidepath too (the v11 law joins it from below)
+    "toward_below_glidepath": ((AIM_IN_TUBE, "in_tube = torch.minimum(torch.maximum(toward,"),),
     # the class's nominal angle, never steeper than the line to the crossing point
     "class_centre_in_tube": ((AIM_IN_TUBE, "in_tube = torch.minimum(torch.maximum("
-                                           f"torch.where(line_captured, {_CENTRE}, toward), "),),
-    # below the published glidepath, level (the tube's shallow side: as late a descent as the word allows) — the
-    # approach joined from below, as the observed aircraft fly it; on or above it, the law
-    "join_from_below": ((AIM_IN_TUBE, "in_tube = torch.minimum(torch.maximum("
-                                      f"torch.where(line_captured & {_BELOW_GLIDEPATH}, torch.zeros_like(toward), toward), "),),
+                                           f"torch.where(line_captured, {_CENTRE}, toward),"),),
     # below it, level; on or above it, the class's nominal angle (never steeper than the line to the crossing point)
     "join_from_below_centre": ((AIM_IN_TUBE, "in_tube = torch.minimum(torch.maximum("
-                                             f"torch.where(line_captured, torch.where({_BELOW_GLIDEPATH}, "
-                                             f"torch.zeros_like(toward), {_CENTRE}), toward), "),),
+                                             f"torch.where({_BELOW_GLIDEPATH}, torch.zeros_like(toward), "
+                                             f"torch.where(line_captured, {_CENTRE}, toward)),"),),
     # the class centre, the reach read from the aircraft's own height (it leaves the tube for the crossing point only
     # when it could no longer get down to it at the steepest class's lower edge; the tube's lower edge lags it)
     "class_centre_own_reach": ((AIM_IN_TUBE, "in_tube = torch.minimum(torch.maximum("
-                                             f"torch.where(line_captured, {_CENTRE}, toward), "),
+                                             f"torch.where(line_captured, {_CENTRE}, toward),"),
                                (REACH, OWN_REACH)),
     # below the glidepath level, on or above it the class centre, the reach from its own height
     "join_from_below_centre_own_reach": ((AIM_IN_TUBE, "in_tube = torch.minimum(torch.maximum("
-                                                       f"torch.where(line_captured, torch.where({_BELOW_GLIDEPATH}, "
-                                                       f"torch.zeros_like(toward), {_CENTRE}), toward), "),
+                                                       f"torch.where({_BELOW_GLIDEPATH}, torch.zeros_like(toward), "
+                                                       f"torch.where(line_captured, {_CENTRE}, toward)),"),
                                          (REACH, OWN_REACH)),
 }
 

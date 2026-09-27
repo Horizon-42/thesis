@@ -72,24 +72,25 @@ def test_the_what_if_flies_the_class_centre_inside_the_tube_after_the_capture_on
         assert centre[case] == pytest.approx(current[case])
 
 
-def test_joining_from_below_flies_level_under_the_glidepath_after_the_capture_and_the_law_on_or_above_it():
-    """`join_from_below`: captured, below the published glidepath (3°: 434 m up at 8 km) but above its lower edge (374 m,
-    where the law's floor already levels it), the shallowest class flies level — the approach joined from below, as the
-    observed aircraft fly it — where the law descends past the class's steep edge; on or above the glidepath, and before
-    the capture, it is the law. `join_from_below_centre` flies the class's nominal angle above it."""
+def test_the_law_joins_the_glidepath_from_below_after_the_capture_and_aims_at_the_crossing_point_on_or_above_it():
+    """Executor v11 (the shallow classes' readout, 2026-09-27): captured, below the published glidepath (3°: 434 m up at
+    8 km) but above its lower edge (374 m, where the floor already levels it), the shallowest class flies level — the
+    approach joined from below, as the observed aircraft fly it — where the law up to v10 (`toward_below_glidepath`)
+    descended past the class's steep edge toward the crossing point; on or above the glidepath, and before the capture,
+    the two are one. `join_from_below_centre` flies the class's nominal angle above it."""
     tan3 = math.tan(math.radians(3.0))
     below, above = (True, 400.0, 8_000.0, tan3), (True, 450.0, 8_000.0, tan3)   # above: in the tube's reach
-    law = {case: _aim(*case) for case in (below, above, (False, 400.0, 8_000.0, tan3))}
-    with diagnosis.law_changed("join_from_below"):
-        joined = {case: _aim(*case) for case in law}
+    uncaptured = (False, 400.0, 8_000.0, tan3)
+    law = {case: _aim(*case) for case in (below, above, uncaptured)}
+    with diagnosis.law_changed("toward_below_glidepath"):
+        before = {case: _aim(*case) for case in law}
     with diagnosis.law_changed("join_from_below_centre"):
         centred = _aim(*above)
-    assert law[below][0] > 1.0 and joined[below][0] == pytest.approx(0.0)
-    assert joined[above] == pytest.approx(law[above]) and joined[(False, 400.0, 8_000.0, tan3)] == pytest.approx(
-        law[(False, 400.0, 8_000.0, tan3)])
+    assert law[below][0] == pytest.approx(0.0) and before[below][0] > 1.0
+    assert law[above] == pytest.approx(before[above]) and law[uncaptured] == pytest.approx(before[uncaptured])
     assert centred[0] == pytest.approx(min(WORDS.angle_deg(SHALLOWEST), law[above][0]))
-    assert set(WHAT_IFS) == {"class_centre_in_tube", "join_from_below", "join_from_below_centre", "class_centre_own_reach",
-                             "join_from_below_centre_own_reach"}
+    assert set(WHAT_IFS) == {"toward_below_glidepath", "class_centre_in_tube", "join_from_below_centre",
+                             "class_centre_own_reach", "join_from_below_centre_own_reach"}
     # every what-if's lines are the law's, each once
     for name in WHAT_IFS:
         with diagnosis.law_changed(name):
