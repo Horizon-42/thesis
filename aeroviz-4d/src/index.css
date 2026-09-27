@@ -1034,16 +1034,6 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   color: rgba(224, 230, 240, 0.7);
 }
 
-/* A long refusal is cut to one line; its tooltip holds all of it. */
-.training-sentence-autopilot-failed {
-  display: inline-block;
-  vertical-align: bottom;
-  max-width: 60ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* The two times the live executor is read by: the simulated flight and the computation, side by side. */
 .training-autopilot-times {
   display: grid;
@@ -1947,9 +1937,11 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   color: rgba(224, 230, 240, 0.5);
 }
 
+/* The replay's chip and the live executor's line: short, and never broken — the header wraps around them whole. */
 .training-sentence-executor,
 .training-sentence-autopilot {
   font-size: 11px;
+  white-space: nowrap;
 }
 
 /* A window's footer: one row of swatches, each explained in its tooltip. */

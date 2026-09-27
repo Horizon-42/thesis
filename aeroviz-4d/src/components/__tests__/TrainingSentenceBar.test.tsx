@@ -368,21 +368,25 @@ describe("TrainingSentenceBar", () => {
     expect(setTrainingPick).toHaveBeenLastCalledWith({ source: null, column: "heading", row: 8, attempt: 3 });
   });
 
-  it("reads out the live executor's segment in one short line: the word, its verdict, the two times", () => {
+  it("reads out the live executor's segment in one short line: its verdict and the two times, the word only off the selection", () => {
     select();
     const parsed = parseTrainingSample(mockSample());
     if (!parsed.ok) throw new Error(parsed.problem);
     const request = mockAutopilotRequest(parsed.value, VECTORED_KEY, "heading", 8);
     appState.trainingAutopilot = { status: "flying", request };
     const { unmount } = render(<TrainingSentenceBar />);
-    expect(screen.getByText("Autopilot · flying heading 225° …")).toBeTruthy();
+    // no band selected: the line names the word it flies
+    expect(screen.getByText("Autopilot · heading 225° · flying …").title).toBe("flying heading 225°");
     unmount();
     const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, mockSelection(parsed.value, request));
     if (!answer.ok) throw new Error(answer.problem);
     appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 0, roundTripS: 0.5 };
     const { unmount: done } = render(<TrainingSentenceBar />);
+    // its band selected: the band names it, the line does not
+    fireEvent.click(screen.getByLabelText(/^heading 225° .* issued at step 8 /));
     const line = document.querySelector(".training-sentence-autopilot")!;
-    expect(line.textContent).toBe("Autopilot · heading 225° · ✓ inside its envelope · 8.00 s flown in 1.24 s");
+    expect(line.textContent).toBe("Autopilot · ✓ inside its envelope · 8.00 s flown · computed 1.24 s");
+    expect((line as HTMLElement).title).toMatch(/^heading 225°: ✓ inside its envelope; the flight reached .*; 8\.00 s flown, computed 1\.24 s$/);
     expect((line.querySelector("strong") as HTMLElement).style.color).toBe("rgb(37, 99, 235)");
     done();
     // outside its envelope: the verdict in the loud red

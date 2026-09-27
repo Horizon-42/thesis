@@ -554,7 +554,8 @@ that divergence is a known open item (see the README's "Future Improvements").
   `test_autopilot_segment.StepperTest` 钉住：单条执行器在后端的飞法下，不设段尾时就是 torch 执行器的 `executor.fly`（周期、词钟时刻、
   模式与限制相同，状态只差舍入），设了段尾时等于它在词钟首次把一个开始一步的周期放到段尾处截断；装配由 `SetupTest` 钉住（与
   `replay.fly_sentences` 的输入、跑道、图、进近速度、时限、词钟相同）；前端的四个镜像名由 `MirrorTest` 钉住。
-- 显示：句子条一行只写词、**在不在包络内**、"N s flown in M ms"（飞得不好时加怎么结束的）；结果卡第一行是判定，然后并排
+- 显示：句子条一行只写**在不在包络内**、"N s flown · computed M ms"（飞得不好时加一个结束方式的短标签），不写词（选中的色块就是它；选中已移到别的词时才写出飞的是哪个词），
+  词与完整读法在它的提示里，这一行不换行——头部的按钮不再被它挤到第二行（2026-09-27）；结果卡第一行是判定，然后并排
   "模拟飞行时间"（对照观测）与"计算用时"（往返），检查项，其余收进 Details；飞成了卡片上是 "Replay in 3D"（不请求），没飞成是
   "Fly again"（重新请求卡片上的那个词，不管句子条此时选中的是什么）；三维飞机标签走模拟时钟"已飞 / 全段 s simulated"。
 - **颜色按判定**：在包络内蓝 `#2563eb`，飞出包络整条换成醒目的红 `#ff2d2d`（`autopilotColour`：三维航迹、地面投影、飞机与

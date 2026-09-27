@@ -52,7 +52,8 @@
  * THE EXECUTOR, LIVE (`trainingAutopilot`): the Fly button PICKS the selected word of the sentence read for the live
  * executor (`trainingPick`, with its source; "↻ Fly again" once it has flown), and so does clicking a band while the
  * panel's switch is on (`trainingAutopilotAuto`; clicking the selected band again clears the pick) — never the cursor. Its
- * line (`TrainingAutopilotStatus`) names the word it flew, whether it stayed inside its envelope and the two times. A
+ * line (`TrainingAutopilotStatus`) says whether the word stayed inside its envelope and the two times — the word itself
+ * only once the selection has moved off it, so the line leaves the header's buttons on their row. A
  * model's word said after its flight ended has no flight to fly: its Fly button is off.
  *
  * THE BAR MEASURES ITSELF: its height is published on the workbench as `--training-bar-height`, so the docks end above it
@@ -455,7 +456,8 @@ export default function TrainingSentenceBar() {
             {chip!.text}
           </span>
         )}
-        {autopilot ? <TrainingAutopilotStatus view={autopilot} selection={selection} /> : null}
+        {autopilot ? <TrainingAutopilotStatus view={autopilot} selection={selection}
+          named={focusRun === null || autopilot.request.column !== focusColumn || autopilot.request.row !== focusRun.row} /> : null}
         <span className="training-sentence-cursor-readout">t = {formatSeconds(cursorS)} s · step {cursorRow}</span>
         <button type="button" className="training-autopilot-fly" disabled={focusRun === null || flyingHere || !flyable(focusRun.row)}
           title={focusRun === null

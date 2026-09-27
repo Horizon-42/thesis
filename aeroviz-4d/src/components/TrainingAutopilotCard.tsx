@@ -10,8 +10,9 @@
  *    browser's round trip); the checks behind the verdict; everything else — how it ended, the limits that bound, the
  *    computation part by part, the spec and code — folded into Details. "Replay in 3D" flies the same answer out again;
  *    flying it anew is the sentence bar's button — and a refusal's "Fly again", since the word selected may have moved;
- *  • in the sentence bar (`TrainingAutopilotStatus`): one line — the word, the verdict, "N s flown in M ms", and how the
- *    flight ended only when it ended badly.
+ *  • in the sentence bar (`TrainingAutopilotStatus`): one short line, sharing the header's row with its buttons — the
+ *    verdict, "N s flown · computed M ms", and how the flight ended (a tag) only when it ended badly; the word only once
+ *    the selection has moved off it (else it is the selected band); the word and the full reading are its tooltip.
  *
  * Every number is the backend's; this card writes them out. The word named is the one flown (`autopilotWord`), whichever
  * the views have selected since.
@@ -31,7 +32,7 @@ import {
   type TrainingAutopilotSegment,
   type TrainingAutopilotView,
 } from "../data/trainingAutopilot";
-import { sourceOnScreen } from "../data/trainingOverlays";
+import { sourceOnScreen, type TrainingFreeOutcome } from "../data/trainingOverlays";
 import { formatSeconds, type TrainingSelection } from "../data/trainingSample";
 import {
   checkText,
@@ -39,6 +40,7 @@ import {
   formatElapsed,
   formatUtc,
   shortSha,
+  TRAINING_OUTCOME_TAG,
   TRAINING_OUTCOME_TEXT,
   TRAINING_VERDICT_TEXT,
 } from "../data/trainingText";
@@ -65,9 +67,11 @@ function tailText(segment: TrainingAutopilotSegment): string | null {
     "one, whose band ends a lead after it.";
 }
 
-/** The flight ended short of what it was flown to: neither at its segment's stop nor landed. */
-function endedBadly(segment: TrainingAutopilotSegment): boolean {
-  return segment.end.reason !== TRAINING_AUTOPILOT_SEGMENT_END && segment.end.reason !== "landed";
+/** How the flight ended when it ended short of what it was flown to (neither at its segment's stop nor landed); null
+ *  when it did not. */
+function badEnd(segment: TrainingAutopilotSegment): TrainingFreeOutcome | null {
+  const { reason } = segment.end;
+  return reason === TRAINING_AUTOPILOT_SEGMENT_END || reason === "landed" ? null : reason;
 }
 
 /** How it ended, in words. */
@@ -97,28 +101,38 @@ function timingText(segment: TrainingAutopilotSegment, roundTripS: number): stri
   ].join(" · ");
 }
 
-/** The sentence bar's line: the word, the verdict in the segment's colour, the two times — and how the flight ended only
- *  when it ended badly. */
-export function TrainingAutopilotStatus({ view, selection }: { view: TrainingAutopilotView; selection: TrainingSelection }) {
+/** The sentence bar's line, short enough to share the header's row with its buttons: the verdict in the segment's
+ *  colour, the two times — and, only when the flight ended badly, how, in a tag. The word flown is named in the line only
+ *  when it is not the selected band (`named`: the selection has moved on since); always in the tooltip, with the full
+ *  reading. */
+export function TrainingAutopilotStatus({ view, selection, named }: {
+  view: TrainingAutopilotView; selection: TrainingSelection; named: boolean;
+}) {
   const word = autopilotWord(view.request, selection);
+  const head = named ? `Autopilot · ${word}` : "Autopilot";
   if (view.status === "flying") {
-    return <span className="training-sentence-autopilot" role="status">Autopilot · flying {word} …</span>;
+    return <span className="training-sentence-autopilot" role="status" title={`flying ${word}`}>{head} · flying …</span>;
   }
   if (view.status === "failed") {
     return (
-      <span className="training-sentence-autopilot training-sentence-autopilot-failed" title={view.problem}
+      <span className="training-sentence-autopilot" title={`${word} not flown — ${view.problem}`}
         style={{ color: TRAINING_OUTSIDE_COLOR }}>
-        Autopilot · {word} not flown — {view.problem}
+        {head} · not flown
       </span>
     );
   }
   const { segment } = view;
+  const bad = badEnd(segment);
+  const flown = formatElapsed(segment.end.flownS);
+  const computed = formatElapsed(segment.timing.computeS);
   return (
-    <span className="training-sentence-autopilot">
-      Autopilot · {word} ·{" "}
+    <span className="training-sentence-autopilot"
+      title={`${word}: ${TRAINING_VERDICT_TEXT[segment.word.status]}; the flight ${endText(segment)}; ${flown} flown, ` +
+        `computed ${computed}`}>
+      {head} ·{" "}
       <strong style={{ color: autopilotColour(segment) }}>{TRAINING_VERDICT_TEXT[segment.word.status]}</strong>
-      {endedBadly(segment) ? <span style={{ color: TRAINING_OUTSIDE_COLOR }}> · {endText(segment)}</span> : null}
-      {" "}· {formatElapsed(segment.end.flownS)} flown in {formatElapsed(segment.timing.computeS)}
+      {bad === null ? null : <span style={{ color: TRAINING_OUTSIDE_COLOR }}> · {TRAINING_OUTCOME_TAG[bad]}</span>}
+      {" "}· {flown} flown · computed {computed}
     </span>
   );
 }
@@ -159,7 +173,7 @@ export default function TrainingAutopilotCard() {
         {TRAINING_VERDICT_TEXT[segment.word.status]}
         {segment.word.reason === null ? "" : <span className="training-autopilot-reason"> — {segment.word.reason}</span>}
       </p>
-      {endedBadly(segment) ? (
+      {badEnd(segment) !== null ? (
         <p className="training-autopilot-ended" style={{ color: TRAINING_OUTSIDE_COLOR }}>The flight {endText(segment)}.</p>
       ) : null}
       {tailText(segment) === null ? null : <p className="training-autopilot-tail">{tailText(segment)}</p>}
