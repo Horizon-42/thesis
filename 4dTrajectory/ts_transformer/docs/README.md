@@ -21,6 +21,7 @@ docs/
   README.md            本文件
   two_tier/            现行设计：文件名不带日期，只写最终设计，原地改（历史交给 git 和 docs/CHANGELOG.md）
     readouts/          带日期的读数，只追加
+    figures/           设计文档的示意图；每张由一个 runner 画（`python run_ts.py <名字>`，脚本在 experiments/，测试核对图与脚本一致），不手改
   reference/           CLAUDE.md 索引的全文（P C D S G H L R T W 编号）+ ENGINEERING_NOTES.md
   experiments/         intents.json + 代码仍在的实验的配置（代码已归档的实验，配置跟着进 archive/<名>/docs/experiments/）
   tutorials/           教程与综述；arch_*.svg 由 `python run_ts.py trace_architecture` 生成

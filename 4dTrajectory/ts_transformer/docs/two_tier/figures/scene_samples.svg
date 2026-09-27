@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="710" viewBox="0 0 960 710" font-family="Noto Sans CJK SC, Noto Sans SC, PingFang SC, Microsoft YaHei, sans-serif">
+<defs><pattern id="context1" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="white"/><line x1="0" y1="0" x2="0" y2="6" stroke="#ea580c" stroke-width="3"/></pattern><pattern id="context2" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="white"/><line x1="0" y1="0" x2="0" y2="6" stroke="#16a34a" stroke-width="3"/></pattern></defs>
+<rect x="0.0" y="0.0" width="960.0" height="710.0" fill="white" stroke="none"/>
+<text x="150.0" y="18.0" font-size="15" text-anchor="start" fill="#111827" font-weight="bold">一段 49 分钟的场景怎样切成 teacher forcing 的样本（示意，不是真实数据）</text>
+<line x1="150.0" y1="78" x2="392.3" y2="78" stroke="#2563eb" stroke-width="6"/>
+<line x1="334.8" y1="112" x2="392.3" y2="112" stroke="#ea580c" stroke-width="3" stroke-dasharray="5,4"/>
+<line x1="392.3" y1="112" x2="640.2" y2="112" stroke="#ea580c" stroke-width="6"/>
+<line x1="581.2" y1="146" x2="640.2" y2="146" stroke="#16a34a" stroke-width="3" stroke-dasharray="5,4"/>
+<line x1="640.2" y1="146" x2="904.6" y2="146" stroke="#16a34a" stroke-width="6"/>
+<text x="142.0" y="198.0" font-size="12" text-anchor="end" fill="#111827" font-weight="normal">A</text>
+<rect x="150.0" y="186.0" width="138.6" height="14.0" fill="#2563eb" stroke="none"/>
+<text x="142.0" y="220.0" font-size="12" text-anchor="end" fill="#111827" font-weight="normal">B</text>
+<rect x="196.2" y="208.0" width="146.3" height="14.0" fill="#2563eb" stroke="none"/>
+<text x="142.0" y="242.0" font-size="12" text-anchor="end" fill="#111827" font-weight="normal">C</text>
+<rect x="257.8" y="230.0" width="134.0" height="14.0" fill="#2563eb" stroke="none"/>
+<text x="142.0" y="264.0" font-size="12" text-anchor="end" fill="#111827" font-weight="normal">D</text>
+<rect x="334.8" y="252.0" width="57.5" height="14.0" fill="#2563eb" stroke="none"/>
+<rect x="334.8" y="259.0" width="57.5" height="7.0" fill="url(#context1)" stroke="none"/>
+<rect x="392.3" y="252.0" width="81.1" height="14.0" fill="#ea580c" stroke="none"/>
+<text x="142.0" y="286.0" font-size="12" text-anchor="end" fill="#111827" font-weight="normal">E</text>
+<rect x="427.2" y="274.0" width="138.6" height="14.0" fill="#ea580c" stroke="none"/>
+<text x="142.0" y="308.0" font-size="12" text-anchor="end" fill="#111827" font-weight="normal">F</text>
+<rect x="450.3" y="296.0" width="138.6" height="14.0" fill="#ea580c" stroke="none"/>
+<text x="142.0" y="330.0" font-size="12" text-anchor="end" fill="#111827" font-weight="normal">X（背景飞机）</text>
+<rect x="481.1" y="318.0" width="69.3" height="14.0" fill="#f3f4f6" stroke="#9ca3af" stroke-dasharray="4,3"/>
+<text x="142.0" y="352.0" font-size="12" text-anchor="end" fill="#111827" font-weight="normal">G</text>
+<rect x="504.2" y="340.0" width="135.5" height="14.0" fill="#ea580c" stroke="none"/>
+<text x="142.0" y="374.0" font-size="12" text-anchor="end" fill="#111827" font-weight="normal">H</text>
+<rect x="581.2" y="362.0" width="59.0" height="14.0" fill="#ea580c" stroke="none"/>
+<rect x="581.2" y="369.0" width="59.0" height="7.0" fill="url(#context2)" stroke="none"/>
+<rect x="640.2" y="362.0" width="87.3" height="14.0" fill="#16a34a" stroke="none"/>
+<text x="142.0" y="396.0" font-size="12" text-anchor="end" fill="#111827" font-weight="normal">I</text>
+<rect x="665.9" y="384.0" width="130.9" height="14.0" fill="#16a34a" stroke="none"/>
+<text x="142.0" y="418.0" font-size="12" text-anchor="end" fill="#111827" font-weight="normal">J</text>
+<rect x="719.8" y="406.0" width="138.6" height="14.0" fill="#16a34a" stroke="none"/>
+<text x="142.0" y="440.0" font-size="12" text-anchor="end" fill="#111827" font-weight="normal">K</text>
+<rect x="766.0" y="428.0" width="138.6" height="14.0" fill="#16a34a" stroke="none"/>
+<rect x="381.0" y="478.0" width="77.0" height="90.0" fill="#fef3c7" stroke="none"/>
+<text x="462.0" y="474.0" font-size="10" text-anchor="start" fill="#92400e" font-weight="normal">← 损失起点后第 15–20 分钟</text>
+<rect x="623.3" y="478.0" width="77.0" height="90.0" fill="#fef3c7" stroke="none"/>
+<text x="704.3" y="474.0" font-size="10" text-anchor="start" fill="#92400e" font-weight="normal">← 损失起点后第 15–20 分钟</text>
+<polyline points="150.0,550.0 196.2,550.0 196.2,532.0 257.8,532.0 257.8,514.0 289.1,514.0 289.1,532.0 334.8,532.0 334.8,514.0 343.0,514.0 343.0,532.0 392.3,532.0 392.3,550.0 427.2,550.0 427.2,532.0 450.3,532.0 450.3,514.0 473.9,514.0 473.9,532.0 481.1,532.0 481.1,514.0 504.2,514.0 504.2,496.0 550.9,496.0 550.9,514.0 566.3,514.0 566.3,532.0 581.2,532.0 581.2,514.0 589.4,514.0 589.4,532.0 640.2,532.0 640.2,550.0 665.9,550.0 665.9,532.0 719.8,532.0 719.8,514.0 728.0,514.0 728.0,532.0 766.0,532.0 766.0,514.0 797.3,514.0 797.3,532.0 858.9,532.0 858.9,550.0 905.1,550.0 905.1,568.0" fill="none" stroke="#111827" stroke-width="1.5"/>
+<text x="142.0" y="572.0" font-size="10" text-anchor="end" fill="#4b5563" font-weight="normal">0</text>
+<text x="142.0" y="554.0" font-size="10" text-anchor="end" fill="#4b5563" font-weight="normal">1</text>
+<text x="142.0" y="536.0" font-size="10" text-anchor="end" fill="#4b5563" font-weight="normal">2</text>
+<text x="142.0" y="518.0" font-size="10" text-anchor="end" fill="#4b5563" font-weight="normal">3</text>
+<text x="142.0" y="500.0" font-size="10" text-anchor="end" fill="#4b5563" font-weight="normal">4</text>
+<text x="120.0" y="523.0" font-size="11" text-anchor="end" fill="#4b5563" font-weight="normal">在场架数</text>
+<line x1="392.3" y1="46" x2="392.3" y2="568" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="6,4"/>
+<text x="396.3" y="54.0" font-size="11" text-anchor="start" fill="#dc2626" font-weight="normal">切口 1（15:44，在场 1 架）</text>
+<line x1="640.2" y1="46" x2="640.2" y2="568" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="6,4"/>
+<text x="644.2" y="54.0" font-size="11" text-anchor="start" fill="#dc2626" font-weight="normal">切口 2（31:50，在场 1 架）</text>
+<text x="150.0" y="71.0" font-size="12" text-anchor="start" fill="#2563eb" font-weight="bold" stroke="white" stroke-width="4" stroke-linejoin="round" paint-order="stroke">样本 1：损失 0:00–15:44</text>
+<text x="334.8" y="105.0" font-size="12" text-anchor="start" fill="#ea580c" font-weight="bold" stroke="white" stroke-width="4" stroke-linejoin="round" paint-order="stroke">样本 2：前文 12:00 起，损失 15:44–31:50</text>
+<text x="581.2" y="139.0" font-size="12" text-anchor="start" fill="#16a34a" font-weight="bold" stroke="white" stroke-width="4" stroke-linejoin="round" paint-order="stroke">样本 3：前文 28:00 起，损失 31:50–49:00</text>
+<line x1="150" y1="568" x2="920.0" y2="568" stroke="#111827"/>
+<line x1="150.0" y1="568" x2="150.0" y2="573" stroke="#111827"/>
+<text x="150.0" y="586.0" font-size="11" text-anchor="middle" fill="#111827" font-weight="normal">0</text>
+<line x1="227.0" y1="568" x2="227.0" y2="573" stroke="#111827"/>
+<text x="227.0" y="586.0" font-size="11" text-anchor="middle" fill="#111827" font-weight="normal">5</text>
+<line x1="304.0" y1="568" x2="304.0" y2="573" stroke="#111827"/>
+<text x="304.0" y="586.0" font-size="11" text-anchor="middle" fill="#111827" font-weight="normal">10</text>
+<line x1="381.0" y1="568" x2="381.0" y2="573" stroke="#111827"/>
+<text x="381.0" y="586.0" font-size="11" text-anchor="middle" fill="#111827" font-weight="normal">15</text>
+<line x1="458.0" y1="568" x2="458.0" y2="573" stroke="#111827"/>
+<text x="458.0" y="586.0" font-size="11" text-anchor="middle" fill="#111827" font-weight="normal">20</text>
+<line x1="535.0" y1="568" x2="535.0" y2="573" stroke="#111827"/>
+<text x="535.0" y="586.0" font-size="11" text-anchor="middle" fill="#111827" font-weight="normal">25</text>
+<line x1="612.0" y1="568" x2="612.0" y2="573" stroke="#111827"/>
+<text x="612.0" y="586.0" font-size="11" text-anchor="middle" fill="#111827" font-weight="normal">30</text>
+<line x1="689.0" y1="568" x2="689.0" y2="573" stroke="#111827"/>
+<text x="689.0" y="586.0" font-size="11" text-anchor="middle" fill="#111827" font-weight="normal">35</text>
+<line x1="766.0" y1="568" x2="766.0" y2="573" stroke="#111827"/>
+<text x="766.0" y="586.0" font-size="11" text-anchor="middle" fill="#111827" font-weight="normal">40</text>
+<line x1="843.0" y1="568" x2="843.0" y2="573" stroke="#111827"/>
+<text x="843.0" y="586.0" font-size="11" text-anchor="middle" fill="#111827" font-weight="normal">45</text>
+<line x1="920.0" y1="568" x2="920.0" y2="573" stroke="#111827"/>
+<text x="920.0" y="586.0" font-size="11" text-anchor="middle" fill="#111827" font-weight="normal">50</text>
+<text x="535.0" y="604.0" font-size="11" text-anchor="middle" fill="#4b5563" font-weight="normal">分钟（从这一段的第一架飞机进入 25 km 范围算起；飞机在场 = 从它的第 0 行到越过入口前的最后一行）</text>
+<rect x="150.0" y="618.0" width="26.0" height="14.0" fill="#2563eb" stroke="none"/>
+<text x="184.0" y="629.0" font-size="12" text-anchor="start" fill="#111827" font-weight="normal">实心：这一步算在该样本的损失里（颜色 = 哪个样本）</text>
+<rect x="150.0" y="640.0" width="26.0" height="14.0" fill="url(#context1)" stroke="none"/>
+<text x="184.0" y="651.0" font-size="12" text-anchor="start" fill="#111827" font-weight="normal">斜线：切口前的这些步，在下一个样本里只作前文（输入），不算损失</text>
+<rect x="150.0" y="662.0" width="26.0" height="14.0" fill="#f3f4f6" stroke="#9ca3af" stroke-dasharray="4,3"/>
+<text x="184.0" y="673.0" font-size="12" text-anchor="start" fill="#111827" font-weight="normal">虚框：背景飞机（没有句子），在任何样本里都只作输入</text>
+<rect x="150.0" y="684.0" width="26.0" height="14.0" fill="#fef3c7" stroke="none"/>
+<text x="184.0" y="695.0" font-size="12" text-anchor="start" fill="#111827" font-weight="normal">黄色：每一刀的查找范围——这个样本的损失起点（段的开头或上一刀）之后第 15–20 分钟，在这里找场上架数最少的一步</text>
+</svg>
