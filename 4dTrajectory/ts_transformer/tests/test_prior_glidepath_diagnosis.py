@@ -16,7 +16,7 @@ from ts_transformer.autopilot import vertical
 from ts_transformer.autopilot.frame import Kinematics
 from ts_transformer.experiments import prior_glidepath_diagnosis as diagnosis
 from ts_transformer.experiments.prior_glidepath_diagnosis import (
-    SHALLOWEST, at_faf, class_centre_in_tube, flight_series, glidepath_m, height_lost, longest_run, observed_class,
+    SHALLOWEST, WHAT_IFS, at_faf, flight_series, glidepath_m, height_lost, longest_run, observed_class,
     read_stop, run_angles,
 )
 from ts_transformer.experiments.prior_free_generation import in_force
@@ -31,7 +31,8 @@ F64 = torch.float64
 WORDS = Words(instruction_spec())
 
 
-def _aim(captured: bool, above_threshold_m: float = 300.0, to_go_m: float = 8_000.0) -> tuple[float, bool]:
+def _aim(captured: bool, above_threshold_m: float = 300.0, to_go_m: float = 8_000.0,
+         glidepath_tan: float = 0.0) -> tuple[float, bool]:
     """The path angle the vertical law asks for (descending positive), deg, on its first cycle under "descend to land"
     with the shallowest class, level at 75 m/s ``above_threshold_m`` over a threshold ``to_go_m`` ahead on the course,
     and whether it left the tube. From 300 m at 8 km the line to the crossing point (about 2°) is steeper than the class
@@ -45,7 +46,8 @@ def _aim(captured: bool, above_threshold_m: float = 300.0, to_go_m: float = 8_00
                                 torch.tensor([SHALLOWEST]), torch.tensor([WORDS.angle_deg(SHALLOWEST)], dtype=F64),
                                 torch.tensor([[0, 0]]), torch.tensor([to_go_m], dtype=F64),
                                 torch.tensor([100.0], dtype=F64), torch.tensor([TEST_TCH_M], dtype=F64),
-                                torch.zeros(1, dtype=F64), torch.zeros(1, dtype=F64), torch.tensor([to_go_m], dtype=F64),
+                                torch.tensor([glidepath_tan], dtype=F64), torch.zeros(1, dtype=F64),
+                                torch.tensor([to_go_m], dtype=F64),
                                 torch.tensor([captured]), torch.tensor([False]))
     # level now: the reference is −aim
     return -math.degrees(float(wanted[0]) * params.path_time_constant_s), bool(modes["aim_left_tube"][0])
@@ -54,7 +56,7 @@ def _aim(captured: bool, above_threshold_m: float = 300.0, to_go_m: float = 8_00
 def test_the_what_if_flies_the_class_centre_inside_the_tube_after_the_capture_only_and_restores_the_law():
     law = vertical.Vertical.rate
     current = {case: _aim(*case) for case in ((True,), (False,), (True, 600.0, 3_000.0))}
-    with class_centre_in_tube():
+    with diagnosis.law_changed("class_centre_in_tube"):
         assert vertical.Vertical.rate is not law
         centre = {case: _aim(*case) for case in current}
     assert vertical.Vertical.rate is law
@@ -70,15 +72,34 @@ def test_the_what_if_flies_the_class_centre_inside_the_tube_after_the_capture_on
         assert centre[case] == pytest.approx(current[case])
 
 
+def test_joining_from_below_flies_level_under_the_glidepath_after_the_capture_and_the_law_on_or_above_it():
+    """`join_from_below`: captured, below the published glidepath (3°: 434 m up at 8 km) but above its lower edge (374 m,
+    where the law's floor already levels it), the shallowest class flies level — the approach joined from below, as the
+    observed aircraft fly it — where the law descends past the class's steep edge; on or above the glidepath, and before
+    the capture, it is the law. `join_from_below_centre` flies the class's nominal angle above it."""
+    tan3 = math.tan(math.radians(3.0))
+    below, above = (True, 400.0, 8_000.0, tan3), (True, 450.0, 8_000.0, tan3)   # above: in the tube's reach
+    law = {case: _aim(*case) for case in (below, above, (False, 400.0, 8_000.0, tan3))}
+    with diagnosis.law_changed("join_from_below"):
+        joined = {case: _aim(*case) for case in law}
+    with diagnosis.law_changed("join_from_below_centre"):
+        centred = _aim(*above)
+    assert law[below][0] > 1.0 and joined[below][0] == pytest.approx(0.0)
+    assert joined[above] == pytest.approx(law[above]) and joined[(False, 400.0, 8_000.0, tan3)] == pytest.approx(
+        law[(False, 400.0, 8_000.0, tan3)])
+    assert centred[0] == pytest.approx(min(WORDS.angle_deg(SHALLOWEST), law[above][0]))
+    assert set(WHAT_IFS) == {"class_centre_in_tube", "join_from_below", "join_from_below_centre"}
+
+
 def test_the_what_if_refuses_a_law_that_does_not_hold_its_line_once_and_restores_on_an_error(monkeypatch):
     law = vertical.Vertical.rate
     monkeypatch.setattr(diagnosis, "AIM_IN_TUBE", "no such line")
     with pytest.raises(RuntimeError, match="0 copies"):
-        with class_centre_in_tube():
+        with diagnosis.law_changed("class_centre_in_tube"):
             pass
     monkeypatch.undo()
     with pytest.raises(KeyError):
-        with class_centre_in_tube():
+        with diagnosis.law_changed("class_centre_in_tube"):
             raise KeyError("inside")
     assert vertical.Vertical.rate is law
 

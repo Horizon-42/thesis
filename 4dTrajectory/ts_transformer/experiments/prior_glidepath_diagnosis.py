@@ -21,10 +21,10 @@ executor was flying to (the words of the cycle that brought it there, as `glidep
   executor lost against it per minute;
 - **at the FAF** — each replay's first state inside the FAF reached on a captured cycle: executor − observed, and each
   against the glidepath, apart for the replays that flew "descend to land" with the shallowest descent class before it;
-- **a what-if** — the same sample flown with ONE line of the vertical law changed (`class_centre_in_tube`): inside the
-  word's tube after the capture, the class's nominal angle (never steeper than the line to the crossing point) instead of
-  the line to the crossing point; leaving the tube to land unchanged. Stops, outcomes and the height over the threshold
-  at each crossing. The change lives in this process only: the executor's source and spec stay as measured.
+- **what-ifs** — the same sample flown with ONE line of the vertical law changed (`WHAT_IFS`: the aim inside the word's
+  tube), each measured like the law as it is (every reading above) and on the replay gate's flights from row 0
+  (`replay_words`: landed and the words inside their envelopes, the altitude column's failures apart). The changes live
+  in this process only (`law_changed`): the executor's source and spec stay as measured.
 
 "After the capture" and "at the FAF" read each replay as the executor flew it to its end, past a stop (the executor is
 what is diagnosed; the stop is the check's). Writes ``--out`` (a new directory, from a clean tree): ``diagnosis.json``.
@@ -66,7 +66,8 @@ from ts_transformer.prior.procedure import (
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-DIAGNOSIS_SCHEMA = "ts-prior-glidepath-diagnosis-v1"
+#: v2 (2026-09-27, executor v11): several what-ifs, each read in full and on the replay gate's flights.
+DIAGNOSIS_SCHEMA = "ts-prior-glidepath-diagnosis-v2"
 #: The shortest run of one "descend to land" class after the capture whose angles are read: its duration, s, and the
 #: distance to go each of the executor and the observed aircraft covered over it, m.
 MIN_RUN_S = 20.0
@@ -75,24 +76,39 @@ MIN_RUN_M = 500.0
 OBSERVED_ON_GLIDEPATH_M = 30.0
 #: The shallowest descent class.
 SHALLOWEST = ANGLE_LEVEL + 1
-#: The line of `vertical.Vertical.rate` the what-if changes (the aim inside the tube is the aim toward the crossing
-#: point), and what it becomes (after the capture, the class's nominal angle, never steeper than the line to it).
+#: The line of `vertical.Vertical.rate` every what-if changes: the aim inside the tube is the aim toward the crossing
+#: point (``toward``: after the capture, along the centreline to it), kept between the class's edges.
 AIM_IN_TUBE = "in_tube = torch.minimum(torch.maximum(toward, "
-CENTRE_IN_TUBE = ("in_tube = torch.minimum(torch.maximum("
-                  "torch.where(line_captured, torch.minimum(nominal, on_line), toward), ")
+#: Below the pointed runway's published glidepath (``height`` and the crossing height are above the threshold, the
+#: glidepath rises at its tangent from the crossing height).
+_BELOW_GLIDEPATH = "(height < crossing_height_m + to_go_m * glidepath_tan)"
+#: What each what-if makes of that line, after the capture only (before it every what-if is the law):
+WHAT_IFS = {
+    # the class's nominal angle, never steeper than the line to the crossing point
+    "class_centre_in_tube": "in_tube = torch.minimum(torch.maximum("
+                            "torch.where(line_captured, torch.minimum(nominal, on_line), toward), ",
+    # below the published glidepath, level (the tube's shallow side: as late a descent as the word allows) — the
+    # approach joined from below, as the observed aircraft fly it; on or above it, the law
+    "join_from_below": "in_tube = torch.minimum(torch.maximum("
+                       f"torch.where(line_captured & {_BELOW_GLIDEPATH}, torch.zeros_like(toward), toward), ",
+    # below it, level; on or above it, the class's nominal angle (never steeper than the line to the crossing point)
+    "join_from_below_centre": "in_tube = torch.minimum(torch.maximum("
+                              f"torch.where(line_captured, torch.where({_BELOW_GLIDEPATH}, torch.zeros_like(toward), "
+                              "torch.minimum(nominal, on_line)), toward), ",
+}
 
 
 @contextmanager
-def class_centre_in_tube() -> Iterator[None]:
-    """The vertical law with `AIM_IN_TUBE` replaced by `CENTRE_IN_TUBE`, in this process, restored on exit (compiled at
-    the law's own line numbers). Refused unless the law holds the line exactly once: the what-if is the current law less
-    that one line."""
+def law_changed(name: str) -> Iterator[None]:
+    """The vertical law with `AIM_IN_TUBE` replaced by what-if ``name``'s line (`WHAT_IFS`), in this process, restored on
+    exit (compiled at the law's own line numbers). Refused unless the law holds the line exactly once: the what-if is the
+    current law less that one line."""
     lines, first = inspect.getsourcelines(vertical.Vertical.rate)
     source = textwrap.dedent("".join(lines))
     if source.count(AIM_IN_TUBE) != 1:
         raise RuntimeError(f"vertical.Vertical.rate holds {source.count(AIM_IN_TUBE)} copies of {AIM_IN_TUBE!r}, not 1")
     namespace = dict(vars(vertical))
-    exec(compile("\n" * (first - 1) + source.replace(AIM_IN_TUBE, CENTRE_IN_TUBE), vertical.__file__, "exec"),
+    exec(compile("\n" * (first - 1) + source.replace(AIM_IN_TUBE, WHAT_IFS[name]), vertical.__file__, "exec"),
          namespace)
     original = vertical.Vertical.rate
     vertical.Vertical.rate = namespace["rate"]
@@ -345,15 +361,23 @@ def diagnose(batch: replay.Batch, words: Words, params: ExecutorParams,
     }
 
 
-def what_if(batch: replay.Batch, words: Words, params: ExecutorParams,
+def replay_words(batch: replay.Batch, words: Words, params: ExecutorParams, chunk: int) -> dict[str, Any]:
+    """The replay gate's flights (`replay.fly_batch`: every sentence from its row 0, judged): `replay.summary` — landed,
+    the words inside their envelopes, the failures by check (the altitude column's apart)."""
+    verdicts = []
+    for start in range(0, len(batch.readings), chunk):
+        part = replay.subset(batch, list(range(start, min(start + chunk, len(batch.readings)))))
+        verdicts += replay.fly_batch(part, params, words, device=torch.device("cpu"))[1]
+    return replay.summary(verdicts)
+
+
+def what_if(name: str, batch: replay.Batch, words: Words, params: ExecutorParams,
             procedures: dict[str, tuple[RunwayProcedure, ...]], chunk: int) -> dict[str, Any]:
-    """The same sample flown under `class_centre_in_tube`: stops, outcomes and crossing heights."""
-    records = []
-    with class_centre_in_tube():
-        for part, flown, _grids, _finals, stops, rows in fly_sample(batch, words, params, procedures, chunk):
-            records += [outcome_record(part, flown, j, row, bool(stops.step[j] >= 0), words.spec)
-                        for j, row in enumerate(rows)]
-    return {"change": {"replaced": AIM_IN_TUBE, "by": CENTRE_IN_TUBE}, "summary": outcome_summary(records)}
+    """The same sample flown under what-if ``name``: read as the law is (`diagnose`), and on the replay gate's flights."""
+    with law_changed(name):
+        return {"change": {"replaced": AIM_IN_TUBE, "by": WHAT_IFS[name]},
+                **diagnose(batch, words, params, procedures, chunk),
+                "replay": replay_words(batch, words, params, chunk)}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -364,6 +388,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--per-airport", type=int, default=400)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--chunk", type=int, default=64)
+    parser.add_argument("--what-ifs", nargs="+", choices=sorted(WHAT_IFS), default=sorted(WHAT_IFS))
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     args = parser.parse_args(argv)
 
@@ -381,9 +406,12 @@ def main(argv: list[str] | None = None) -> int:
     procedures = published_procedures(load_candidates(instructions))
     batch = replay.draw(instructions, args.split, words.spec, words, per_airport=args.per_airport, seed=args.seed)
     print("the executor as measured:", flush=True)
-    current = diagnose(batch, words, params, procedures, args.chunk)
-    print("the what-if:", flush=True)
-    variant = what_if(batch, words, params, procedures, args.chunk)
+    current = {**diagnose(batch, words, params, procedures, args.chunk),
+               "replay": replay_words(batch, words, params, args.chunk)}
+    variants = {}
+    for name in args.what_ifs:
+        print(f"the what-if {name}:", flush=True)
+        variants[name] = what_if(name, batch, words, params, procedures, args.chunk)
     out.mkdir(parents=True)
     write_json_atomic(out / "diagnosis.json", {
         "schema": DIAGNOSIS_SCHEMA, "written_utc": utc_now(), "git": git, "split": args.split,
@@ -391,11 +419,15 @@ def main(argv: list[str] | None = None) -> int:
         "constants": {"min_run_s": MIN_RUN_S, "min_run_m": MIN_RUN_M, "observed_on_glidepath_m": OBSERVED_ON_GLIDEPATH_M,
                       "glidepath_below_m": GLIDEPATH_BELOW_M, "track_tolerance_m": track_tolerance_m(words.spec),
                       "observed_row": "the 2 s row the word clock matched to the executor's state, not interpolated"},
-        "replay_sample": batch.drawn, "current": current, "class_centre_in_tube": variant,
+        "replay_sample": batch.drawn, "current": current, "what_ifs": variants,
         "elapsed_s": time.perf_counter() - started})
-    for name, summary in (("as measured", current["summary"]), ("class centre in the tube", variant["summary"])):
+    for name, read in (("as measured", current), *variants.items()):
+        summary, gate = read["summary"], read["replay"]
+        angles = "  ".join(f"class {a['angle_class']}: {a['executor_deg']['p50']:.2f}° vs {a['observed_deg']['p50']:.2f}°"
+                           for a in read["after_capture"] if a["executor_deg"] is not None)
         print(f"{name}: stopped {summary['stopped']}/{summary['replays']} ({summary['stopped_share']:.2%}), outcomes "
-              f"{summary['outcomes']}, landed and not stopped {summary['landed_not_stopped_share']:.2%}")
+              f"{summary['outcomes']}; replay gate landed {gate['landed_share']:.4f}, words {gate['words_inside_share']:.4f}; "
+              f"after the capture, executor vs observed p50 — {angles}")
     print(f"at the stops, the observed aircraft: {current['stops']['observed']}  → {out}")
     return 0
 
