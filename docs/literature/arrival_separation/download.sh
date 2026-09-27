@@ -109,7 +109,8 @@ python3 - "$T/7360.1K.txt" papers/FAA_JO_7360.1K_AppendixA_categories_parsed.csv
 import csv, re, sys
 pages = open(sys.argv[1], encoding="utf-8", errors="replace").read().split("\f")
 CLASS = r"(?:[@$]?Fixed-wing|Gyroplane|Helicopter|Powered-lift)"
-HEAD = re.compile(r"^\s{0,8}([A-Z0-9]{1,4}\*?)\s+(" + CLASS + r")\s+(\d{1,2}[A-Z]/[JHLS]\+?)")
+# the asterisk after a designator marks a single-piloted military turbojet (ch. 2); it is not part of the designator
+HEAD = re.compile(r"^\s{0,8}([A-Z0-9]{1,4})(\*?)\s+(" + CLASS + r")\s+(\d{1,2}[A-Z]/[JHLS]\+?)")
 WTC = re.compile(r"\s+(Light/Medium|Medium/Heavy|Light|Medium|Heavy|Super)")
 PAT = {"CWT": r"[A-I]", "SRS": r"I{1,3}", "LAHSO": r"\d{1,2}"}
 rows = []
@@ -135,11 +136,12 @@ for p in range(10, 122):
             if vals[key]:
                 break
             vals[key] = tok
-        rows.append([m.group(1), m.group(2), m.group(3), wtc, vals["CWT"], vals["SRS"], vals["LAHSO"], p])
+        rows.append([m.group(1), "yes" if m.group(2) else "", m.group(3), m.group(4), wtc, vals["CWT"], vals["SRS"],
+                     vals["LAHSO"], p])
 with open(sys.argv[2], "w", newline="") as f:
     w = csv.writer(f)
-    w.writerow(["type_designator", "class", "engine_number_type_faa_weight_class", "icao_wtc",
-                "cwt", "srs", "lahso_group", "pdf_page"])
+    w.writerow(["type_designator", "single_piloted_military_turbojet", "class", "engine_number_type_faa_weight_class",
+                "icao_wtc", "cwt", "srs", "lahso_group", "pdf_page"])
     w.writerows(rows)
 print("parsed", len(rows), "Appendix A rows (expected 2653)")
 PY

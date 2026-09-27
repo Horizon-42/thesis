@@ -1,0 +1,457 @@
+{
+  "census": "4dTrajectory/outputs/POOLED/traffic/census_20260927",
+  "rule": "closest approach nearest the category's median, the earliest of equals",
+  "examples": {
+    "turn_on_independent": {
+      "airport": "KSMF",
+      "episodes_in_category": 164,
+      "pair": [
+        "KSMF:SKW3209_17R_a1311e_20260911T172316Z",
+        "KSMF:SWA3892_17L_ac0fb6_20260911T172216Z"
+      ],
+      "runways": [
+        "17R",
+        "17L"
+      ],
+      "first_s": 1789147236.0,
+      "last_s": 1789147304.0,
+      "seconds": 70.0,
+      "kinds": [
+        "radar_or_vertical"
+      ],
+      "min_distance_over_required": 0.7480587782378729,
+      "loss_under_visual": true,
+      "apart": {
+        "first": {
+          "distance_km": 5.551478906026677,
+          "height_difference_m": 185.8740289497224
+        },
+        "closest": {
+          "distance_km": 4.156214571889622,
+          "height_difference_m": 205.48647865815772
+        },
+        "last": {
+          "distance_km": 4.162878089034303,
+          "height_difference_m": 209.0151762947643
+        }
+      },
+      "at_start": [
+        {
+          "established": false,
+          "heading_off_course_deg": 74.99553089824639,
+          "off_centreline_m": 3172.200792883805,
+          "before_threshold_km": 10.067000971367829
+        },
+        {
+          "established": true,
+          "heading_off_course_deg": 0.19376402319284125,
+          "off_centreline_m": 2.6517794303156554,
+          "before_threshold_km": 7.648516465965166
+        }
+      ]
+    },
+    "close_parallel_pair": {
+      "airport": "KSJC",
+      "episodes_in_category": 194,
+      "pair": [
+        "KSJC:EJA976_30L_ad9b5e_20260514T221423Z",
+        "KSJC:SWA4310_30R_a143a3_20260514T221259Z"
+      ],
+      "runways": [
+        "30L",
+        "30R"
+      ],
+      "first_s": 1778796676.0,
+      "last_s": 1778796780.0,
+      "seconds": 106.0,
+      "kinds": [
+        "in_trail"
+      ],
+      "min_distance_over_required": 0.7505061042356328,
+      "loss_under_visual": true,
+      "apart": {
+        "first": {
+          "distance_km": 4.880016574422404,
+          "height_difference_m": 368.9914252249314
+        },
+        "closest": {
+          "distance_km": 4.169811915133176,
+          "height_difference_m": 244.11764013960848
+        },
+        "last": {
+          "distance_km": 4.303721948632714,
+          "height_difference_m": 228.2033195020748
+        }
+      },
+      "at_start": [
+        {
+          "established": true,
+          "heading_off_course_deg": 0.04982268173216653,
+          "off_centreline_m": 7.534433759872263,
+          "before_threshold_km": 12.469846323912801
+        },
+        {
+          "established": true,
+          "heading_off_course_deg": 1.6254179914399174,
+          "off_centreline_m": 61.81670826554558,
+          "before_threshold_km": 7.593465074266928
+        }
+      ]
+    },
+    "dependent_aligned": {
+      "airport": "KRDU",
+      "episodes_in_category": 186,
+      "pair": [
+        "KRDU:CXK634_23R_ac097f_20260502T001247Z",
+        "KRDU:EJA270_23L_a2a7eb_20260502T001420Z"
+      ],
+      "runways": [
+        "23R",
+        "23L"
+      ],
+      "first_s": 1777680718.0,
+      "last_s": 1777680766.0,
+      "seconds": 50.0,
+      "kinds": [
+        "radar_or_vertical"
+      ],
+      "min_distance_over_required": 0.6822000963715148,
+      "loss_under_visual": false,
+      "apart": {
+        "first": {
+          "distance_km": 4.120733755768184,
+          "height_difference_m": 296.46092817718284
+        },
+        "closest": {
+          "distance_km": 3.790303735440136,
+          "height_difference_m": 255.88162887077635
+        },
+        "last": {
+          "distance_km": 3.790303735440136,
+          "height_difference_m": 255.88162887077635
+        }
+      },
+      "at_start": [
+        {
+          "established": true,
+          "heading_off_course_deg": 1.3295269904003248,
+          "off_centreline_m": 7.103087782245936,
+          "before_threshold_km": 2.8143760571350143
+        },
+        {
+          "established": false,
+          "heading_off_course_deg": 0.5496041367024418,
+          "off_centreline_m": 10.407601659025008,
+          "before_threshold_km": 8.03939868971581
+        }
+      ]
+    },
+    "crossing_established": {
+      "airport": "KRDU",
+      "episodes_in_category": 544,
+      "pair": [
+        "KRDU:N181FA_32_a144e1_20260501T155709Z",
+        "KRDU:SWA2431_05R_ac62a9_20260501T155618Z"
+      ],
+      "runways": [
+        "32",
+        "05R"
+      ],
+      "first_s": 1777650962.0,
+      "last_s": 1777650978.0,
+      "seconds": 18.0,
+      "kinds": [
+        "radar_or_vertical"
+      ],
+      "min_distance_over_required": 0.7538886923653232,
+      "loss_under_visual": false,
+      "apart": {
+        "first": {
+          "distance_km": 5.422753799185645,
+          "height_difference_m": 98.98799163329704
+        },
+        "closest": {
+          "distance_km": 4.188605574781735,
+          "height_difference_m": 112.87305157586434
+        },
+        "last": {
+          "distance_km": 4.188605574781735,
+          "height_difference_m": 112.87305157586434
+        }
+      },
+      "at_start": [
+        {
+          "established": true,
+          "heading_off_course_deg": 0.4217571885158691,
+          "off_centreline_m": 14.12434859690156,
+          "before_threshold_km": 3.0287601834489726
+        },
+        {
+          "established": true,
+          "heading_off_course_deg": 0.2600700760343386,
+          "off_centreline_m": 1.8779177761592618,
+          "before_threshold_km": 1.6371366555333369
+        }
+      ]
+    },
+    "same_runway_in_trail": {
+      "airport": "KSTL",
+      "episodes_in_category": 211,
+      "pair": [
+        "KSTL:SWA142_30R_a2d3b3_20260708T042654Z",
+        "KSTL:SWA22_30R_ac078b_20260708T042801Z"
+      ],
+      "runways": [
+        "30R",
+        "30R"
+      ],
+      "first_s": 1783484766.0,
+      "last_s": 1783484812.0,
+      "seconds": 48.0,
+      "kinds": [
+        "in_trail"
+      ],
+      "min_distance_over_required": 0.9502695234731464,
+      "loss_under_visual": true,
+      "apart": {
+        "first": {
+          "distance_km": 5.53487326613934,
+          "height_difference_m": 289.12979544509164
+        },
+        "closest": {
+          "distance_km": 5.279697472416801,
+          "height_difference_m": 281.57189854622595
+        },
+        "last": {
+          "distance_km": 5.279697472416801,
+          "height_difference_m": 281.57189854622595
+        }
+      },
+      "at_start": [
+        {
+          "established": true,
+          "heading_off_course_deg": 0.16646635114295805,
+          "off_centreline_m": 1.1841875383854212,
+          "before_threshold_km": 3.3350682074335074
+        },
+        {
+          "established": true,
+          "heading_off_course_deg": 0.11028374736844171,
+          "off_centreline_m": 8.135609287590345,
+          "before_threshold_km": 8.869933627081133
+        }
+      ]
+    }
+  },
+  "episodes_at_their_start": {
+    "KSMF same": {
+      "episodes": 48,
+      "both_established": 20,
+      "one_established": 18,
+      "neither_established": 10,
+      "the_one_ahead_not_established": 21,
+      "both_headings_within_10_deg_share": 0.4583333333333333,
+      "larger_heading_over_30_deg_share": 0.5,
+      "larger_heading_off_course_deg_p50": 33.35532175720334,
+      "larger_off_centreline_m_p50": 513.1144201942985,
+      "height_difference_m_p50": 291.987159296925,
+      "min_distance_over_required_p50": 0.8723486737494237,
+      "closest_nm_p5": 1.197799354584169,
+      "closest_nm_p50": 2.688221241598967,
+      "where_3_nm_required": {
+        "episodes": 46,
+        "closest_at_least_2_5_nm": 31
+      }
+    },
+    "KSMF independent": {
+      "episodes": 253,
+      "both_established": 0,
+      "one_established": 164,
+      "neither_established": 89,
+      "the_one_ahead_not_established": 150,
+      "both_headings_within_10_deg_share": 0.11857707509881422,
+      "larger_heading_over_30_deg_share": 0.6996047430830039,
+      "larger_heading_off_course_deg_p50": 44.187551221087745,
+      "larger_off_centreline_m_p50": 1881.8873736860996,
+      "height_difference_m_p50": 195.92106187512837,
+      "min_distance_over_required_p50": 0.7094651203327623,
+      "closest_nm_p5": 1.001050879007995,
+      "closest_nm_p50": 2.128395360998287,
+      "where_3_nm_required": {
+        "episodes": 253,
+        "closest_at_least_2_5_nm": 87
+      }
+    },
+    "KSMF unrelated": {
+      "episodes": 1,
+      "both_established": 0,
+      "one_established": 0,
+      "neither_established": 1,
+      "the_one_ahead_not_established": 1,
+      "both_headings_within_10_deg_share": 0.0,
+      "larger_heading_over_30_deg_share": 1.0,
+      "larger_heading_off_course_deg_p50": 173.44898370462425,
+      "larger_off_centreline_m_p50": 4349.972744618706,
+      "height_difference_m_p50": 102.81990839906803,
+      "min_distance_over_required_p50": 0.7517944354563505,
+      "closest_nm_p5": 2.2553833063690516,
+      "closest_nm_p50": 2.2553833063690516,
+      "where_3_nm_required": {
+        "episodes": 1,
+        "closest_at_least_2_5_nm": 0
+      }
+    },
+    "KSJC same": {
+      "episodes": 268,
+      "both_established": 117,
+      "one_established": 126,
+      "neither_established": 25,
+      "the_one_ahead_not_established": 122,
+      "both_headings_within_10_deg_share": 0.5149253731343284,
+      "larger_heading_over_30_deg_share": 0.44029850746268656,
+      "larger_heading_off_course_deg_p50": 5.2522999395018815,
+      "larger_off_centreline_m_p50": 794.7194535839458,
+      "height_difference_m_p50": 291.0658892452117,
+      "min_distance_over_required_p50": 0.8143206959462113,
+      "closest_nm_p5": 1.0150573689776836,
+      "closest_nm_p50": 2.4429620878386338,
+      "where_3_nm_required": {
+        "episodes": 264,
+        "closest_at_least_2_5_nm": 123
+      }
+    },
+    "KSJC single": {
+      "episodes": 302,
+      "both_established": 85,
+      "one_established": 197,
+      "neither_established": 20,
+      "the_one_ahead_not_established": 159,
+      "both_headings_within_10_deg_share": 0.4139072847682119,
+      "larger_heading_over_30_deg_share": 0.5298013245033113,
+      "larger_heading_off_course_deg_p50": 41.46245718801276,
+      "larger_off_centreline_m_p50": 858.4149593342534,
+      "height_difference_m_p50": 282.1354737633202,
+      "min_distance_over_required_p50": 0.6344838006628094,
+      "closest_nm_p5": 0.3257340754652894,
+      "closest_nm_p50": 1.9194924173980212,
+      "where_3_nm_required": {
+        "episodes": 300,
+        "closest_at_least_2_5_nm": 85
+      }
+    },
+    "KRDU dependent": {
+      "episodes": 758,
+      "both_established": 142,
+      "one_established": 447,
+      "neither_established": 169,
+      "the_one_ahead_not_established": 352,
+      "both_headings_within_10_deg_share": 0.43271767810026385,
+      "larger_heading_over_30_deg_share": 0.29683377308707126,
+      "larger_heading_off_course_deg_p50": 15.949931546296654,
+      "larger_off_centreline_m_p50": 310.39499160974924,
+      "height_difference_m_p50": 292.16296475776517,
+      "min_distance_over_required_p50": 0.655680478723636,
+      "closest_nm_p5": 0.5758595171284301,
+      "closest_nm_p50": 1.5373386884208082,
+      "where_3_nm_required": {
+        "episodes": 616,
+        "closest_at_least_2_5_nm": 165
+      }
+    },
+    "KRDU unrelated": {
+      "episodes": 809,
+      "both_established": 544,
+      "one_established": 238,
+      "neither_established": 27,
+      "the_one_ahead_not_established": 107,
+      "both_headings_within_10_deg_share": 0.8800988875154512,
+      "larger_heading_over_30_deg_share": 0.08529048207663782,
+      "larger_heading_off_course_deg_p50": 0.7452547434936321,
+      "larger_off_centreline_m_p50": 8.504440722260858,
+      "height_difference_m_p50": 99.24448304088929,
+      "min_distance_over_required_p50": 0.7477359056897147,
+      "closest_nm_p5": 1.2224391734241595,
+      "closest_nm_p50": 2.243207717069144,
+      "where_3_nm_required": {
+        "episodes": 809,
+        "closest_at_least_2_5_nm": 260
+      }
+    },
+    "KRDU same": {
+      "episodes": 143,
+      "both_established": 16,
+      "one_established": 34,
+      "neither_established": 93,
+      "the_one_ahead_not_established": 102,
+      "both_headings_within_10_deg_share": 0.34265734265734266,
+      "larger_heading_over_30_deg_share": 0.6153846153846154,
+      "larger_heading_off_course_deg_p50": 73.05023301286205,
+      "larger_off_centreline_m_p50": 2624.282085531037,
+      "height_difference_m_p50": 266.69999999999993,
+      "min_distance_over_required_p50": 0.8288046336791217,
+      "closest_nm_p5": 1.2131194713005893,
+      "closest_nm_p50": 2.4864139010373654,
+      "where_3_nm_required": {
+        "episodes": 143,
+        "closest_at_least_2_5_nm": 68
+      }
+    },
+    "KSTL same": {
+      "episodes": 269,
+      "both_established": 211,
+      "one_established": 42,
+      "neither_established": 16,
+      "the_one_ahead_not_established": 20,
+      "both_headings_within_10_deg_share": 0.8810408921933085,
+      "larger_heading_over_30_deg_share": 0.08178438661710037,
+      "larger_heading_off_course_deg_p50": 0.44119404811260665,
+      "larger_off_centreline_m_p50": 10.810502561447583,
+      "height_difference_m_p50": 296.0965542413801,
+      "min_distance_over_required_p50": 0.9438000159733116,
+      "closest_nm_p5": 2.34887967759387,
+      "closest_nm_p50": 2.8314000479199346,
+      "where_3_nm_required": {
+        "episodes": 268,
+        "closest_at_least_2_5_nm": 239
+      }
+    },
+    "KSTL single": {
+      "episodes": 64,
+      "both_established": 20,
+      "one_established": 36,
+      "neither_established": 8,
+      "the_one_ahead_not_established": 13,
+      "both_headings_within_10_deg_share": 0.609375,
+      "larger_heading_over_30_deg_share": 0.109375,
+      "larger_heading_off_course_deg_p50": 3.4114593818664503,
+      "larger_off_centreline_m_p50": 189.56273671097335,
+      "height_difference_m_p50": 299.0345785544695,
+      "min_distance_over_required_p50": 0.8095688078475769,
+      "closest_nm_p5": 0.6029468744962848,
+      "closest_nm_p50": 2.4287064235427303,
+      "where_3_nm_required": {
+        "episodes": 63,
+        "closest_at_least_2_5_nm": 27
+      }
+    },
+    "KSTL dependent": {
+      "episodes": 67,
+      "both_established": 23,
+      "one_established": 32,
+      "neither_established": 12,
+      "the_one_ahead_not_established": 23,
+      "both_headings_within_10_deg_share": 0.6268656716417911,
+      "larger_heading_over_30_deg_share": 0.208955223880597,
+      "larger_heading_off_course_deg_p50": 2.6748138241313484,
+      "larger_off_centreline_m_p50": 51.704886256496316,
+      "height_difference_m_p50": 296.4879991986313,
+      "min_distance_over_required_p50": 0.6496826359533009,
+      "closest_nm_p5": 0.6839064109715132,
+      "closest_nm_p50": 1.237645153695962,
+      "where_3_nm_required": {
+        "episodes": 44,
+        "closest_at_least_2_5_nm": 10
+      }
+    }
+  }
+}

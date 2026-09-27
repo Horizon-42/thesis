@@ -12,8 +12,8 @@ the larger of the radar minimum and the wake minimum for the leader/follower cat
 parallels, the along-track stagger that keeps the diagonal separation (``sqrt(D^2 - s^2)`` for a diagonal
 minimum D and a centerline spacing s); independent parallels and runways of another direction impose
 none (crossing-runway operations are not modelled). `faa_separation` builds it from the FAA order, every
-value cited to its paragraph. Pure numpy / stdlib: no torch, no data plane; the one file it reads is the aircraft type
-table (`wake_category`).
+value cited to its paragraph. Pure numpy / stdlib, no torch; the files it reads are the two aircraft type tables
+(`read_cwt_tables`, paths from `repo_layout`).
 
 The approach clock (`Separation.approach_time_s`) is a landing's threshold time less its threshold's
 position along the course flown at the approach speed: the time the aircraft passes abeam a common
@@ -64,7 +64,8 @@ class Separation:
     """The one definition of the minimum time between two landings (`gap_s`).
 
     ``relations`` maps an unordered runway pair to its relation and ``spacing_nm`` to its centerline
-    spacing; ``same_nm`` is the radar minimum on one runway; ``wake_nm`` the in-trail wake minimum by
+    spacing; ``right_nm`` maps an ORDERED pair ``(a, b)`` of those to how far b's centreline lies right
+    of a's (signed, looking along the landing direction); ``same_nm`` is the radar minimum on one runway; ``wake_nm`` the in-trail wake minimum by
     (leader category, follower category), applied only on one runway or a pair separated as one;
     ``speed_mps`` converts a distance to the time it takes the follower to close it; ``along_nm`` is
     each runway's threshold position along its course from a common origin (a runway not in it sits
@@ -74,6 +75,7 @@ class Separation:
     speed_mps: float
     relations: Mapping[frozenset, str] = field(default_factory=dict)
     spacing_nm: Mapping[frozenset, float] = field(default_factory=dict)
+    right_nm: Mapping[tuple[str, str], float] = field(default_factory=dict)
     diagonal_nm: Mapping[frozenset, float] = field(default_factory=dict)
     wake_nm: Mapping[tuple[str, str], float] = field(default_factory=dict)
     along_nm: Mapping[str, float] = field(default_factory=dict)
@@ -115,13 +117,15 @@ class Separation:
 
 def parallel_relations(
     targets: Mapping[str, Mapping[str, float]], regimes: Sequence[ParallelRegime], *, max_course_diff_deg: float = 10.0,
-) -> tuple[dict[frozenset, str], dict[frozenset, float], dict[frozenset, float], dict[str, float]]:
-    """``(relations, spacing_nm, diagonal_nm, along_nm)``: every pair of runways with (nearly) the same
-    inbound course, its centerline spacing and its relation under ``regimes`` (sorted by ``below_ft``; a
-    spacing at or above the last band is independent), and every runway's threshold position along its
-    own course from the first runway's threshold. ``targets``: runway -> ``{lat, lon, course_deg}``, the
+) -> tuple[dict[frozenset, str], dict[frozenset, float], dict[tuple[str, str], float], dict[frozenset, float],
+           dict[str, float]]:
+    """``(relations, spacing_nm, right_nm, diagonal_nm, along_nm)``: every pair of runways with (nearly) the
+    same inbound course, its centerline spacing, how far each one's centreline lies right of the other's
+    (both orders, signed), and its relation under ``regimes`` (sorted by ``below_ft``; a spacing at or
+    above the last band is independent), and every runway's threshold position along its own course from
+    the first runway's threshold. ``targets``: runway -> ``{lat, lon, course_deg}``, the
     arrivals manifest's (the course a COMPASS bearing: 0 = north, clockwise)."""
-    relations, spacing, diagonal = {}, {}, {}
+    relations, spacing, right, diagonal = {}, {}, {}, {}
     names = sorted(targets)
     bands = sorted(regimes, key=lambda band: band.below_ft)
     origin = targets[names[0]]
@@ -140,14 +144,16 @@ def parallel_relations(
             east = (float(tb["lon"]) - float(ta["lon"])) * metres_per_deg_lon(float(ta["lat"]))
             north = (float(tb["lat"]) - float(ta["lat"])) * METRES_PER_DEG_LAT
             course = math.radians(float(ta["course_deg"]))
-            spacing_m = abs(east * math.cos(course) - north * math.sin(course))
+            right_m = east * math.cos(course) - north * math.sin(course)      # b's threshold right of a's course
+            spacing_m = abs(right_m)
             pair = frozenset((a, b))
             spacing[pair] = spacing_m / NM_M
+            right[(a, b)], right[(b, a)] = right_m / NM_M, -right_m / NM_M
             band = next((band for band in bands if spacing_m / FT_M < band.below_ft), None)
             relations[pair] = INDEPENDENT if band is None else band.relation
             if band is not None and band.relation == DEPENDENT:
                 diagonal[pair] = band.diagonal_nm
-    return relations, spacing, diagonal, along
+    return relations, spacing, right, diagonal, along
 
 
 # ── The FAA arrival minima ──────────────────────────────────────────────────────────────────────────
@@ -175,12 +181,31 @@ def parallel_relations(
 #   The order's 3,600 ft is inclusive ("no more than 3,600 feet"); the bands are half-open, which only
 #   differs at a spacing of exactly 3,600 ft.
 FAA_RADAR_NM = 3.0
+#: The vertical separation minimum up to FL 410 (4-5-1 a: "Up to and including FL 410- 1,000 feet.").
+FAA_VERTICAL_FT = 1_000.0
 FAA_REDUCED_RADAR_NM = 2.5      # 5-5-4 j, by authorization only
+#: Visual approaches to parallels 2,500 ft or more apart (7-4-4 c2 (a)(1), c3 (a)(1)): approved separation until the
+#: aircraft are on a heading or course "which will intercept the extended centerline of the runway at an angle not
+#: greater than 30 degrees".
+FAA_VISUAL_INTERCEPT_MAX_DEG = 30.0
 FAA_PARALLEL_REGIMES = (
     ParallelRegime(2500.0, SINGLE),              # 5-5-4 h NOTE
     ParallelRegime(3600.0, DEPENDENT, 1.0),      # 5-9-6 a2
     ParallelRegime(4300.0, DEPENDENT, 1.5),      # 5-9-6 a3 (independent needs FMA + PRM below 4,300 ft)
 )                                                # >= 4,300 ft: independent, 5-9-7 a2
+#: TBL 5-5-1 "Wake Turbulence Separation for Directly Behind" (5-5-4 g: following an aircraft conducting an instrument
+#: approach, or within 2,500 ft of and less than 1,000 ft below the flight path of a Category A–D aircraft), NM,
+#: (leader, follower) CWT category; a blank cell sets none (`docs/literature/arrival_separation/README.md` §2.3).
+CWT_DIRECTLY_BEHIND_NM: dict[tuple[str, str], float] = {
+    ("A", "B"): 5.0, ("A", "C"): 6.0, ("A", "D"): 6.0, ("A", "E"): 7.0, ("A", "F"): 7.0, ("A", "G"): 7.0,
+    ("A", "H"): 8.0, ("A", "I"): 8.0,
+    ("B", "B"): 3.0, ("B", "C"): 4.0, ("B", "D"): 4.0, ("B", "E"): 5.0, ("B", "F"): 5.0, ("B", "G"): 5.0,
+    ("B", "H"): 5.0, ("B", "I"): 5.0,
+    ("C", "E"): 3.5, ("C", "F"): 3.5, ("C", "G"): 3.5, ("C", "H"): 5.0, ("C", "I"): 5.0,
+    ("D", "B"): 3.0, ("D", "C"): 4.0, ("D", "D"): 4.0, ("D", "E"): 5.0, ("D", "F"): 5.0, ("D", "G"): 5.0,
+    ("D", "H"): 5.0, ("D", "I"): 5.0,
+    ("E", "I"): 4.0,
+}
 #: TBL 5-5-2 "Wake Turbulence Separation for On Approach" (5-5-4 h), NM, (leader, follower) CWT category.
 CWT_ON_APPROACH_NM: dict[tuple[str, str], float] = {
     ("A", "B"): 5.0, ("A", "C"): 6.0, ("A", "D"): 6.0, ("A", "E"): 7.0, ("A", "F"): 7.0, ("A", "G"): 7.0,
@@ -217,6 +242,9 @@ def read_cwt_tables(table: Path = CWT_TABLE, supplement: Path = CWT_SUPPLEMENT) 
                 add(row["type_designator"], row["cwt"], table)
     with supplement.open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
+            if None in row or None in row.values():
+                raise ValueError(f"{supplement.name}: {row} does not have the header's fields (quote a source "
+                                 "that holds a comma)")
             if not row["source"]:
                 raise ValueError(f"{supplement.name}: {row['type_designator']} has no source")
             add(row["type_designator"], row["cwt"], supplement)
@@ -225,6 +253,7 @@ def read_cwt_tables(table: Path = CWT_TABLE, supplement: Path = CWT_SUPPLEMENT) 
 
 @functools.cache
 def _cwt_by_typecode() -> dict[str, str]:
+    """The committed tables, read once per process (an edit to the supplement needs a new process)."""
     return read_cwt_tables()
 
 
@@ -245,11 +274,11 @@ def faa_separation(
     ``visual_parallels`` is the visual-approach reading instead: no minimum between two parallel
     runways at all (7-4-4 c, pilots maintain visual separation once the leader is on its centreline);
     each runway keeps its own radar and wake minima."""
-    relations, spacing, diagonal, along = parallel_relations(targets, FAA_PARALLEL_REGIMES)
+    relations, spacing, right, diagonal, along = parallel_relations(targets, FAA_PARALLEL_REGIMES)
     if visual_parallels:
         relations = {pair: INDEPENDENT for pair in relations}
         diagonal = {}
-    return Separation(same_nm=radar_nm, speed_mps=speed_mps, relations=relations, spacing_nm=spacing,
+    return Separation(same_nm=radar_nm, speed_mps=speed_mps, relations=relations, spacing_nm=spacing, right_nm=right,
                       diagonal_nm=diagonal, wake_nm=CWT_ON_APPROACH_NM, along_nm=along)
 
 

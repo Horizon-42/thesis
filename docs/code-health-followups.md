@@ -12,7 +12,7 @@ the entry itself is deleted.
 
 Checked entry by entry against `dev-two-tier` `1a7ac875` plus branch `dev-frontend-followups`, then updated after branch
 `dev-followups-no-training` (2026-09-25) fixed every entry whose fix touches neither the training nor the post-training
-(the right-hand column): **20 open, 7 partly, 65 resolved or dismissed, 5 obsolete** (recounted from the table 2026-09-27; one open row is blocked on a source). *open*: the problem is still in the
+(the right-hand column): **21 open, 7 partly, 65 resolved or dismissed, 5 obsolete** (recounted from the table 2026-09-27; one open row is blocked on a source). *open*: the problem is still in the
 code; *partly*: some of it is fixed (the note says what is left); *resolved*: fixed (the note says by what);
 *dismissed*: not a defect (the note says why); *obsolete*: the code is gone. A resolved, dismissed or obsolete entry's
 text is removed below (its row stays); rows follow the entries' order; note the two sets of numbers (§19–§21 each appear
@@ -125,6 +125,7 @@ added three entries (the rows after the performance index's).
 | The executor spec binds the source's BYTES, comments included (09-27) | resolved | the hash is over each file's logic, `spec.logic` (branch `dev-executor-v11`, v11 milestone 1); entry removed | — |
 | `ExecutorParams.check` lets a NaN rate or factor through (09-27) | resolved | every value finite and positive (branch `dev-executor-v11`, v11 milestone 1); entry removed | — |
 | A free sentence is judged against the runway pointed at the executor's stop, not at its end (09-27) | open | new; see the entry | **yes — post-training**: the landing reward reads the outcome |
+| `faa_separation(visual_parallels=True)` is a second, different "visual" (09-27) | open | new; see the entry | no: only the archived runway-intent runner and one test call it |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -532,3 +533,14 @@ model may re-point the runway in those extra steps, so the outcome can be read a
 ended — in principle turning another runway's crossing into a crossing of the "pointed" one. Not observed. Fix (judgement):
 read the pointer in force at the judge's end row (a second `outcome_of` against it, or stop the executor at those outcomes);
 it moves free-generation outcomes and the landing reward, so it waits for a stage that re-reads them.
+
+## `faa_separation(visual_parallels=True)` is a second, different "visual" (2026-09-27)
+
+**Verified** (opus review of the two separation readings, `11239312`). `runway_schedule.faa_separation(visual_parallels=True)`
+turns every parallel relation into `INDEPENDENT` and drops the diagonals. That is a second definition of "visual", and it is
+not the one `inference.separation.VISUAL` applies: combined with `losses(..., IFR)` it still judges a turn-on beside a
+parallel final by radar or vertical. Only the archived `runway_intent_r3` and `test_runway_schedule.py`'s
+`visual_parallels` test call it. Since 2026-09-27 it also contradicts the decided visual reading: it frees close pairs
+because "pilots maintain visual separation", which the multi-aircraft reading rules out (design §9 item 16). Fix
+(judgement): delete the flag and its test once nothing live needs the runway-intent reading, or name it after what it
+does (parallels as independent).
