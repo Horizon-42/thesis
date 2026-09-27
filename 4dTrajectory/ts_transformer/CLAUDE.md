@@ -389,7 +389,9 @@ over the formal train replay's sample, relabelled and flown with no hashed code 
 formal replay first; words inside compare neither across L nor across the bank limit. **Multi-aircraft M0**
 (2026-09-27): `traffic_census` judges the training days' observed traffic under both readings (C36) into a new directory
 (`ts-traffic-census-v3`; formal `census_20260927`: 0.98 vs 0.60 pairs/h) (R24); `traffic_separation_examples` draws five
-typical recorded losses for the readout (R25).
+typical recorded losses for the readout (R25); `traffic_labelled` flies every labelled flight on its labelled words together
+in the scene closed loop (`experiments/traffic_loop.py`, shared with M3/M4) beside the same flights along their records
+(formal `labelled_20260928`: 3.93 vs 2.76 % ended under VISUAL) (R26).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 
