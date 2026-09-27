@@ -191,7 +191,6 @@ class Svg:
     </marker>
   </defs>
   <style>
-    svg {{ background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }}
     .wire {{ fill: none; stroke: #6aa7ad; stroke-width: 1.3; opacity: .58; }}
     .equator {{ fill: none; stroke: #b65b13; stroke-width: 2.2; }}
     .meridian {{ fill: none; stroke: #3d58a8; stroke-width: 2.0; }}
@@ -364,7 +363,6 @@ def svg_2d_header(width: int, height: int, title: str) -> list[str]:
         f'<title id="title">{escape(title)}</title>',
         f'<defs><marker id="arrow" viewBox="0 0 8 6" markerWidth="{8 * ARROW_SCALE:g}" markerHeight="{6 * ARROW_SCALE:g}" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#263548"/></marker></defs>',
         """<style>
-svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 .axis { stroke: #263548; stroke-width: 2.2; marker-end: url(#arrow); }
 .ellipse { fill: #e7f7f8; stroke: #207b84; stroke-width: 2.2; }
 .helper { stroke: #8292a4; stroke-width: 1.5; stroke-dasharray: 6 5; fill: none; }
@@ -879,7 +877,9 @@ OVERVIEW_P_H_OVER_A = 0.30
 OVERVIEW_B_OVER_A = 0.90
 OVERVIEW_E2 = 1.0 - OVERVIEW_B_OVER_A**2
 # 00b and 00c share this low-elevation camera, so the same Earth looks identical in both.
-OVERVIEW_GLOBE_EYE = (cos(radians(12)) * cos(radians(-15)), cos(radians(12)) * sin(radians(-15)), sin(radians(12)))
+# Azimuth 30° keeps both axis piercing points, (λ=0°, φ=0°) and (λ=90°E, φ=0°), on the near
+# side; elevation 22° opens the equatorial plane so the λ and φ arcs of 00c stay apart.
+OVERVIEW_GLOBE_EYE = (cos(radians(22)) * cos(radians(30)), cos(radians(22)) * sin(radians(30)), sin(radians(22)))
 
 
 def overview_point() -> tuple[float, float, float]:
@@ -948,13 +948,12 @@ def ellipsoid_outline(camera: Camera, e2: float = WGS84_E2, samples: int = 241) 
     return out
 
 
-def overview_globe(title: str) -> tuple[Svg, list[Vec3]]:
-    """The shared Earth of 00b/00c: front-side graticule, outline, equator, P's meridian."""
-    lam_p = overview_point()[1]
+def overview_globe(title: str, highlighted_meridians: Sequence[float]) -> tuple[Svg, list[Vec3]]:
+    """The shared Earth of 00b/00c: front-side graticule, outline, equator, highlighted meridians."""
     lat_lines = [[overview_surface(f * pi / 180.0, 2.0 * pi * i / 144) for i in range(145)] for f in (-60, -30, 30, 60)]
     lon_lines = [[overview_surface(-pi / 2.0 + pi * i / 120, l * pi / 180.0) for i in range(121)] for l in range(0, 360, 30)]
     equator = [overview_surface(0.0, 2.0 * pi * i / 144) for i in range(145)]
-    meridian = [overview_surface(-pi / 2.0 + pi * i / 120, lam_p) for i in range(121)]
+    meridians = [[overview_surface(-pi / 2.0 + pi * i / 120, lam) for i in range(121)] for lam in highlighted_meridians]
     camera = Camera(OVERVIEW_GLOBE_EYE)
     outline = ellipsoid_outline(camera, OVERVIEW_E2)
     ends = [(1.4, 0.0, 0.0), (0.0, 1.4, 0.0), (0.0, 0.0, 1.3)]
@@ -963,7 +962,8 @@ def overview_globe(title: str) -> tuple[Svg, list[Vec3]]:
     for line in lat_lines + lon_lines:
         surface_polyline(svg, line, "wire", e2=OVERVIEW_E2)
     surface_polyline(svg, equator, "equator", "hidden", OVERVIEW_E2)
-    surface_polyline(svg, meridian, "meridian", "hidden", OVERVIEW_E2)
+    for meridian in meridians:
+        surface_polyline(svg, meridian, "meridian", "hidden", OVERVIEW_E2)
     svg.polyline(outline, "outline")
     for end, label in zip(ends, "XYZ"):
         svg.line((0.0, 0.0, 0.0), end, "axis", True)
@@ -1032,7 +1032,11 @@ def overview_enu_frame() -> str:
 
 
 def overview_ecef_frame() -> str:
-    svg, _ = overview_globe("ECEF frame centred on the Earth")
+    svg, _ = overview_globe("ECEF frame centred on the Earth", (0.0, pi / 2.0))
+    # X pierces the surface where the equator meets the prime meridian, Y where it meets 90°E.
+    for pierce, name, dx, dy in (((1.0, 0.0, 0.0), "λ = 0°", 12, 22), ((0.0, 1.0, 0.0), "λ = 90°E", -74, 48)):
+        svg.circle(pierce, 5.0, "surface")
+        svg.text(name, pierce, dx, dy, "indigo")
     target = geodetic_to_ecef_unit(*overview_point(), OVERVIEW_E2)
     q = (target[0], target[1], 0.0)
     svg.line((0.0, 0.0, 0.0), target, "vector", True)
@@ -1057,7 +1061,7 @@ def overview_geodetic_frame() -> str:
     f_point = mul(OVERVIEW_E2 * nu * cos(phi), radial)
     b = OVERVIEW_B_OVER_A
 
-    svg, _ = overview_globe("WGS 84 geodetic coordinates on an oblate ellipsoid")
+    svg, _ = overview_globe("WGS 84 geodetic coordinates on an oblate ellipsoid", (lam,))
     svg.line((0.0, 0.0, 0.0), radial, "helper")
     svg.line(f_point, s, "helper")
     svg.line(s, target, "normal", True)

@@ -2,7 +2,6 @@
 <title id="title">Iterative inverse latitude and atan2</title>
 <defs><marker id="arrow" viewBox="0 0 8 6" markerWidth="4.96" markerHeight="3.72" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#263548"/></marker></defs>
 <style>
-svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 .axis { stroke: #263548; stroke-width: 2.2; marker-end: url(#arrow); }
 .ellipse { fill: #e7f7f8; stroke: #207b84; stroke-width: 2.2; }
 .helper { stroke: #8292a4; stroke-width: 1.5; stroke-dasharray: 6 5; fill: none; }

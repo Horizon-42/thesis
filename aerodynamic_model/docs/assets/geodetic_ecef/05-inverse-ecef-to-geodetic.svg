@@ -6,7 +6,6 @@
     </marker>
   </defs>
   <style>
-    svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
     .wire { fill: none; stroke: #6aa7ad; stroke-width: 1.3; opacity: .58; }
     .equator { fill: none; stroke: #b65b13; stroke-width: 2.2; }
     .meridian { fill: none; stroke: #3d58a8; stroke-width: 2.0; }
