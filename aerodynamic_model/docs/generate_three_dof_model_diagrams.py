@@ -143,7 +143,7 @@ def derivation_canvas(title: str) -> Svg:
 
 
 def position_gamma_decomposition_diagram() -> str:
-    svg = derivation_canvas("位置方程 Step 1：γ 分解速度")
+    svg = derivation_canvas("Position equations, step 1: split V by γ")
     ox, oy = 300, 270
     gamma = 22
     vx, vy = arrow_vec(ox, oy, 320, gamma)
@@ -158,13 +158,13 @@ def position_gamma_decomposition_diagram() -> str:
     svg.text("V sin γ", ux + 8, uy + 8, "blue")
     svg.path(f"M{ox + 62},{oy} A62,62 0 0,0 {ox + 58},{oy - 23}", "alpha")
     svg.text("γ", ox + 74, oy - 8, "red")
-    svg.text("水平速度", hx - 32, hy + 34, "small")
-    svg.text("竖直速度", ux + 8, uy + 34, "small")
+    svg.text("horizontal", hx - 32, hy + 34, "small")
+    svg.text("vertical", ux + 8, uy + 34, "small")
     return svg.render()
 
 
 def position_psi_decomposition_diagram() -> str:
-    svg = derivation_canvas("位置方程 Step 2：ψ 分解水平速度")
+    svg = derivation_canvas("Position equations, step 2: split horizontal V by ψ")
     cx, cy = 334, 300
     px, py = arrow_vec(cx, cy, 272, 32)
     svg.ellipse(cx + 174, cy - 50, 238, 124, "soft")
@@ -184,7 +184,7 @@ def position_psi_decomposition_diagram() -> str:
 
 
 def alpha_vdot_derivation_diagram() -> str:
-    svg = derivation_canvas("Vdot 推导：把力投影到速度方向 eV")
+    svg = derivation_canvas("Vdot: project forces onto the velocity direction eV")
     ox, oy = 318, 258
     gamma = 15
     alpha = 14
@@ -222,13 +222,13 @@ def alpha_vdot_derivation_diagram() -> str:
 
 
 def alpha_psidot_derivation_diagram() -> str:
-    svg = derivation_canvas("ψdot 难点：水平转弯只看 V cosγ")
+    svg = derivation_canvas("ψdot: a horizontal turn only sees V cosγ")
 
     # Kinematics: heading changes in the horizontal plane, so the speed is Vh.
     kx, ky = 230, 250
     svg.ellipse(kx, ky, 138, 92, "soft")
     svg.path(f"M{kx - 74},{ky + 58} C{kx - 18},{ky + 96} {kx + 86},{ky + 58} {kx + 98},{ky - 20}", "path", True)
-    svg.text("水平面内转弯", kx - 70, ky + 112, "small")
+    svg.text("turn in horizontal plane", kx - 70, ky + 112, "small")
     svg.line(kx - 18, ky - 74, kx + 112, ky - 74, "axis", True)
     svg.text("Vh = V cosγ", kx + 20, ky - 90, "label")
     svg.line(kx + 106, ky - 74, kx + 42, ky - 22, "danger", True)
@@ -242,7 +242,7 @@ def alpha_psidot_derivation_diagram() -> str:
     svg.line(cx - 26, cy, cx + 144, cy, "horizon")
     svg.text("eψ", cx + 112, cy - 12, "label")
     svg.line(cx, cy + 14, cx, cy - 158, "component")
-    svg.text("竖直", cx - 36, cy - 156, "small")
+    svg.text("vertical", cx - 36, cy - 156, "small")
     svg.line(cx, cy, nx, ny, "axis", True)
     svg.text("N = L + T sinα", nx + 8, ny - 8, "label")
     svg.line(cx, cy, hx, hy, "lift", True)
@@ -271,12 +271,12 @@ def alpha_psidot_derivation_diagram() -> str:
 
 
 def alpha_gammadot_derivation_diagram() -> str:
-    svg = derivation_canvas("γdot 难点：竖直平面转动看整速度 V")
+    svg = derivation_canvas("γdot: rotation in the vertical plane uses the full V")
     ox, oy = 318, 264
     gamma = 17
     svg.line(72, oy + 18, 594, oy + 18, "horizon")
     svg.line(ox - 130, oy + 58, ox + 248, oy - 56, "path")
-    svg.text("竖直平面内改变飞行路径角", ox - 136, oy + 92, "small")
+    svg.text("vertical-plane turn", ox - 136, oy + 92, "small")
     svg.line(ox, oy, *arrow_vec(ox, oy, 132, gamma), "axis", True)
     svg.text("V", ox + 122, oy - 32, "label")
     ax, ay = ox - 72, oy + 10
@@ -310,17 +310,17 @@ def alpha_gammadot_derivation_diagram() -> str:
 
 
 def mass_flow_derivation_diagram() -> str:
-    svg = derivation_canvas("mdot 推导：推力对应燃油消耗")
+    svg = derivation_canvas("mdot: thrust maps to fuel consumption")
     svg.rect(92, 170, 220, 86, "soft")
-    svg.text("推力 T", 168, 206, "label")
-    svg.text("发动机工作量", 142, 236, "small")
+    svg.text("thrust T", 168, 206, "label")
+    svg.text("engine work", 142, 236, "small")
     svg.line(312, 212, 420, 212, "flow", True)
     svg.rect(420, 170, 220, 86, "warnbox")
-    svg.text("重量消耗", 494, 206, "label")
+    svg.text("weight loss", 494, 206, "label")
     svg.text("Wdot = -cT T", 480, 236, "formula")
     svg.line(640, 212, 748, 212, "flow", True)
     svg.rect(748, 170, 160, 86, "soft")
-    svg.text("质量变化", 794, 206, "label")
+    svg.text("mass change", 794, 206, "label")
     svg.text("W = mg", 800, 236, "formula")
     svg.rect(282, 304, 430, 56, "soft")
     svg.text("g mdot = -cT T  →  mdot = -(cT/g) T", 322, 340, "formula")
@@ -328,7 +328,7 @@ def mass_flow_derivation_diagram() -> str:
 
 
 def simplified_vdot_derivation_diagram() -> str:
-    svg = derivation_canvas("Vdot 推导：α≈0 后推力沿速度方向")
+    svg = derivation_canvas("Vdot: with α≈0 thrust acts along the velocity")
     ox, oy = 318, 258
     gamma = 14
     svg.line(70, oy + 18, 590, oy + 18, "horizon")
@@ -361,12 +361,12 @@ def simplified_vdot_derivation_diagram() -> str:
 
 
 def simplified_psidot_derivation_diagram() -> str:
-    svg = derivation_canvas("ψdot 难点：nmg sinμ 驱动水平速度转弯")
+    svg = derivation_canvas("ψdot: nmg sinμ turns the horizontal velocity")
 
     kx, ky = 230, 250
     svg.ellipse(kx, ky, 138, 92, "soft")
     svg.path(f"M{kx - 74},{ky + 58} C{kx - 18},{ky + 96} {kx + 86},{ky + 58} {kx + 98},{ky - 20}", "path", True)
-    svg.text("水平面内转弯", kx - 70, ky + 112, "small")
+    svg.text("turn in horizontal plane", kx - 70, ky + 112, "small")
     svg.line(kx - 18, ky - 74, kx + 112, ky - 74, "axis", True)
     svg.text("Vh = V cosγ", kx + 20, ky - 90, "label")
     svg.line(kx + 106, ky - 74, kx + 42, ky - 22, "danger", True)
@@ -379,7 +379,7 @@ def simplified_psidot_derivation_diagram() -> str:
     svg.line(cx - 26, cy, cx + 144, cy, "horizon")
     svg.text("eψ", cx + 112, cy - 12, "label")
     svg.line(cx, cy + 14, cx, cy - 158, "component")
-    svg.text("竖直", cx - 36, cy - 156, "small")
+    svg.text("vertical", cx - 36, cy - 156, "small")
     svg.line(cx, cy, nx, ny, "axis", True)
     svg.text("L = nmg", nx + 8, ny - 8, "label")
     svg.line(cx, cy, hx, hy, "lift", True)
@@ -408,12 +408,12 @@ def simplified_psidot_derivation_diagram() -> str:
 
 
 def simplified_gammadot_derivation_diagram() -> str:
-    svg = derivation_canvas("γdot 难点：nmg cosμ 改变飞行路径角")
+    svg = derivation_canvas("γdot: nmg cosμ changes the flight-path angle")
     ox, oy = 318, 264
     gamma = 16
     svg.line(72, oy + 18, 594, oy + 18, "horizon")
     svg.line(ox - 130, oy + 58, ox + 248, oy - 56, "path")
-    svg.text("竖直平面内改变飞行路径角", ox - 136, oy + 92, "small")
+    svg.text("vertical-plane turn", ox - 136, oy + 92, "small")
     svg.line(ox, oy, *arrow_vec(ox, oy, 132, gamma), "axis", True)
     svg.text("V", ox + 122, oy - 32, "label")
     ax, ay = ox - 72, oy + 10
@@ -446,7 +446,7 @@ def simplified_gammadot_derivation_diagram() -> str:
 def alpha_model_diagram() -> str:
     svg = Svg(1120, 760, "Alpha-input 3-DOF model force decomposition")
     svg.rect(34, 34, 1052, 692, "panel")
-    svg.text("完整模型：以攻角 α 为输入，先计算 L 与 D，再投影到轨迹方向", 64, 78, "title")
+    svg.text("Full model: input α; compute L, D, then project onto the path axes", 64, 78, "title")
 
     ox, oy = 365, 402
     gamma = 16
@@ -497,7 +497,7 @@ def alpha_model_diagram() -> str:
     svg.text("L + T sin α", cx + 94, cy - 48, "label")
     svg.path(f"M{cx + 2},{cy - 50} A58,58 0 0,1 {cx + 46},{cy - 39}", "bank")
     svg.text("φ", cx + 38, cy - 54, "violet")
-    svg.text("法向合力的 bank 分解", cx - 112, cy + 108, "label")
+    svg.text("bank split of the normal force", cx - 112, cy + 108, "label")
 
     svg.rect(680, 470, 360, 188, "soft")
     svg.tspan_text(
@@ -519,7 +519,7 @@ def alpha_model_diagram() -> str:
 def simplified_model_diagram() -> str:
     svg = Svg(1120, 760, "Simplified load-factor 3-DOF model force decomposition")
     svg.rect(34, 34, 1052, 692, "panel")
-    svg.text("简化模型：以载荷因子 n 为输入，直接令 L = nmg", 64, 78, "title")
+    svg.text("Simplified model: load factor n as input, with L = nmg directly", 64, 78, "title")
 
     ox, oy = 365, 402
     gamma = 12
@@ -555,7 +555,7 @@ def simplified_model_diagram() -> str:
     svg.text("nmg", cx + 94, cy - 48, "label")
     svg.path(f"M{cx + 3},{cy - 49} A57,57 0 0,1 {cx + 46},{cy - 39}", "bank")
     svg.text("μ", cx + 38, cy - 54, "violet")
-    svg.text("载荷因子的 bank 分解", cx - 106, cy + 108, "label")
+    svg.text("bank split of the load factor", cx - 106, cy + 108, "label")
 
     svg.rect(680, 470, 360, 188, "soft")
     svg.tspan_text(
@@ -577,35 +577,35 @@ def simplified_model_diagram() -> str:
 def bridge_stall_diagram() -> str:
     svg = Svg(1120, 720, "Bridge between alpha and load-factor models with stall conditions")
     svg.rect(34, 34, 1052, 652, "panel")
-    svg.text("两种模型的连接：α 决定气动能力，n 是简化模型的升力需求", 64, 78, "title")
+    svg.text("Linking the models: α sets lift capability, n is the lift demand", 64, 78, "title")
 
     svg.rect(88, 166, 286, 128, "soft")
-    svg.text("完整模型输入", 112, 202, "label")
+    svg.text("full-model input", 112, 202, "label")
     svg.text("u = [T, φ, α]", 112, 236, "formula")
     svg.text("α → CL(α) → L", 112, 268, "formula")
 
     svg.rect(418, 166, 286, 128, "soft")
-    svg.text("共同升力方程", 442, 202, "label")
+    svg.text("shared lift equation", 442, 202, "label")
     svg.text("L = 1/2 ρ V² S CL", 442, 236, "formula")
     svg.text("n = L/(mg)", 442, 268, "formula")
 
     svg.rect(748, 166, 286, 128, "soft")
-    svg.text("简化模型输入", 772, 202, "label")
+    svg.text("simplified-model input", 772, 202, "label")
     svg.text("u = [T, μ, n_cmd]", 772, 236, "formula")
     svg.text("n_cmd → CL_req → α_req", 772, 268, "formula")
 
     svg.line(374, 230, 418, 230, "flow", True)
     svg.line(704, 230, 748, 230, "flow", True)
     svg.path("M748,274 C650,362 508,362 374,274", "flow", True)
-    svg.text("反推关系", 528, 352, "label")
+    svg.text("inverse relation", 528, 352, "label")
 
     svg.rect(116, 404, 412, 166, "warnbox")
-    svg.text("完整模型 stall", 142, 438, "red")
+    svg.text("full-model stall", 142, 438, "red")
     svg.tspan_text(
         [
             "α ≥ αcrit",
-            "或 CL(α) ≥ CLmax",
-            "动力学中使用 post-stall 的 CL_actual 与 CD_actual",
+            "or CL(α) ≥ CLmax",
+            "dynamics use post-stall CL_actual, CD_actual",
         ],
         142,
         476,
@@ -614,12 +614,12 @@ def bridge_stall_diagram() -> str:
     )
 
     svg.rect(592, 404, 412, 166, "warnbox")
-    svg.text("简化模型 stall", 618, 438, "red")
+    svg.text("simplified-model stall", 618, 438, "red")
     svg.tspan_text(
         [
             "CL_req = 2mgn_cmd/(ρV²S)",
             "α_req = (CL_req - CL0)/CLα",
-            "n_actual = min(n_cmd, nmax) 并增加 stall drag",
+            "n_actual = min(n_cmd, nmax) + stall drag",
         ],
         618,
         476,
@@ -629,7 +629,7 @@ def bridge_stall_diagram() -> str:
 
     svg.line(360, 570, 360, 618, "danger", True)
     svg.line(826, 570, 826, 618, "danger", True)
-    svg.text("轨迹影响：V 下降、γ 下降、转弯能力低于命令值", 304, 650, "red")
+    svg.text("Trajectory effect: V drops, γ drops, turn capability below command", 304, 650, "red")
     return svg.render()
 
 

@@ -26,8 +26,8 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 .formula { fill: #263548; font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 </style>
 <rect width="980" height="560" fill="#fbfdff"/>
-<text class="title" x="34" y="42">e-hat 的来源：固定纬度圈上，经度 λ 增大的切向方向</text>
-<text class="subtitle" x="34" y="66">俯视 ECEF 的 X-Y 平面；圆半径 ρ=(ν+h)cosφ，改变 λ 只会沿这个圆切向移动</text>
+<text class="title" x="34" y="42">Where ê comes from: the tangent of increasing λ along a fixed parallel</text>
+<text class="subtitle" x="34" y="66">Top view of the ECEF X-Y plane; radius ρ=(ν+h)cosφ; changing λ moves only along this circle</text>
 <circle class="helper" cx="300.0" cy="310.0" r="170.0"/>
 <line class="axis" x1="90.0" y1="310.0" x2="555.0" y2="310.0"/>
 <line class="axis" x1="300.0" y1="520.0" x2="300.0" y2="80.0"/>
@@ -41,9 +41,9 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 <text class="teal" x="322.1" y="527.3">ê：East</text>
 <text class="label" x="221.0" y="444.3">Q(λ)</text>
 <text class="small" x="235.5" y="371.1">ρ</text>
-<text class="formula" x="540" y="166">水平投影：q(λ)=ρ[cosλ, sinλ, 0]^T</text>
-<text class="formula" x="540" y="206">沿经度求导：dq/dλ=ρ[-sinλ, cosλ, 0]^T</text>
-<text class="formula" x="540" y="246">归一化后：ê=[-sinλ, cosλ, 0]^T</text>
-<text class="formula" x="540" y="286">所以 ê 不依赖 φ 和 h；它只由当前经度 λ 决定。</text>
-<text class="small" x="540" y="344">注意：在极点附近 ρ≈0，经度方向本身变得不稳定，East 方向也随之病态。</text>
+<text class="formula" x="540" y="166">Horizontal projection: q(λ)=ρ[cosλ, sinλ, 0]^T</text>
+<text class="formula" x="540" y="206">Differentiate in λ: dq/dλ=ρ[-sinλ, cosλ, 0]^T</text>
+<text class="formula" x="540" y="246">Normalise: ê=[-sinλ, cosλ, 0]^T</text>
+<text class="formula" x="540" y="286">So ê depends on neither φ nor h, only on λ.</text>
+<text class="small" x="540" y="344">Near the poles ρ≈0: longitude and East become ill-defined.</text>
 </svg>

@@ -26,30 +26,30 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 .formula { fill: #263548; font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 </style>
 <rect width="980" height="560" fill="#fbfdff"/>
-<text class="title" x="34" y="42">总体思路：每步局部 x/y/z 增量，转回 WGS84/ECEF 保存轨迹</text>
-<text class="subtitle" x="34" y="66">飞机方程仍在局部切平面里积分；局部 origin 每步更新，长期位置不累计在固定平面</text>
+<text class="title" x="34" y="42">Overview: local x/y/z increment per step, stored back as WGS84/ECEF</text>
+<text class="subtitle" x="34" y="66">The aircraft equations are still integrated in a local tangent plane; the origin is reset every step, so position never accumulates in a fixed plane</text>
 <rect class="accent" x="42" y="122" width="212" height="92" rx="8"/>
-<text class="label" x="60" y="152">当前全球位置</text>
+<text class="label" x="60" y="152">Current global position</text>
 <text class="teal" x="60" y="178">φ, λ, h</text>
 <text class="small" x="60" y="200">WGS84 geodetic</text>
 <rect class="box" x="298" y="122" width="212" height="92" rx="8"/>
-<text class="label" x="316" y="152">本步 origin 和局部轴</text>
+<text class="label" x="316" y="152">Step origin + local axes</text>
 <text class="teal" x="316" y="178">ê,n̂,û</text>
 <text class="small" x="316" y="200">from current φ,λ</text>
 <rect class="box" x="554" y="122" width="212" height="92" rx="8"/>
-<text class="label" x="572" y="152">局部 solver</text>
+<text class="label" x="572" y="152">Local solver</text>
 <text class="teal" x="572" y="178">x,y,z,V,ψ,γ,m</text>
 <text class="small" x="572" y="200">same local equations</text>
 <rect class="box" x="298" y="298" width="212" height="92" rx="8"/>
-<text class="label" x="316" y="328">本步局部增量</text>
+<text class="label" x="316" y="328">Local step increment</text>
 <text class="teal" x="316" y="354">Δr=x ê+y n̂+z û</text>
 <text class="small" x="316" y="376">ECEF vector</text>
 <rect class="box" x="554" y="298" width="212" height="92" rx="8"/>
-<text class="label" x="572" y="328">ECEF 更新</text>
+<text class="label" x="572" y="328">ECEF update</text>
 <text class="teal" x="572" y="354">r₁=r₀+Δr</text>
 <text class="small" x="572" y="376">then inverse WGS84</text>
 <rect class="box" x="810" y="298" width="128" height="92" rx="8"/>
-<text class="label" x="828" y="328">下一步</text>
+<text class="label" x="828" y="328">Next step</text>
 <text class="teal" x="828" y="354">new φ,λ,h</text>
 <text class="small" x="828" y="376">new origin</text>
 <path class="arrow" d="M254,168 L296,168"/>
@@ -57,7 +57,7 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 <path class="arrow" d="M660,214 L410,296"/>
 <path class="arrow" d="M510,344 L552,344"/>
 <path class="arrow" d="M766,344 L808,344"/>
-<text class="formula" x="74" y="468">主方案：x,y,z 每步从 0 开始，只表示这一小步；WGS84/ECEF 才是长期轨迹状态。</text>
-<text class="formula" x="74" y="494">速度也要随新 frame 投影：v_ECEF → 新 ê,n̂,û → 新 V,ψ,γ。</text>
-<text class="small" x="718" y="420">下一步：新 φ,λ,h 成为新的 origin</text>
+<text class="formula" x="74" y="468">Main scheme: x,y,z restart at 0 every step and only describe that step; WGS84/ECEF is the long-term state.</text>
+<text class="formula" x="74" y="494">Velocity is re-projected too: v_ECEF → new ê,n̂,û → new V,ψ,γ.</text>
+<text class="small" x="718" y="420">next: new φ,λ,h become the origin</text>
 </svg>

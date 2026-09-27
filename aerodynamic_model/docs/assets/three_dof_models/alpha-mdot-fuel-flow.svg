@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="980" height="420" viewBox="0 0 980 420" role="img" aria-labelledby="title">
-  <title id="title">mdot 推导：推力对应燃油消耗</title>
+  <title id="title">mdot: thrust maps to fuel consumption</title>
   <defs>
     <marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L9,3.5 L0,7 Z" fill="#233143"/>
@@ -40,5 +40,5 @@
     .violet { fill: #7b3f93; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     .red { fill: #b7352d; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   </style>
-  <rect class="panel" x="26.0" y="26.0" width="928.0" height="368.0"/><text class="title" x="54.0" y="66.0">mdot 推导：推力对应燃油消耗</text><rect class="soft" x="92.0" y="170.0" width="220.0" height="86.0"/><text class="label" x="168.0" y="206.0">推力 T</text><text class="small" x="142.0" y="236.0">发动机工作量</text><line class="flow" x1="312.0" y1="212.0" x2="420.0" y2="212.0" marker-end="url(#arrow)"/><rect class="warnbox" x="420.0" y="170.0" width="220.0" height="86.0"/><text class="label" x="494.0" y="206.0">重量消耗</text><text class="formula" x="480.0" y="236.0">Wdot = -cT T</text><line class="flow" x1="640.0" y1="212.0" x2="748.0" y2="212.0" marker-end="url(#arrow)"/><rect class="soft" x="748.0" y="170.0" width="160.0" height="86.0"/><text class="label" x="794.0" y="206.0">质量变化</text><text class="formula" x="800.0" y="236.0">W = mg</text><rect class="soft" x="282.0" y="304.0" width="430.0" height="56.0"/><text class="formula" x="322.0" y="340.0">g mdot = -cT T  →  mdot = -(cT/g) T</text>
+  <rect class="panel" x="26.0" y="26.0" width="928.0" height="368.0"/><text class="title" x="54.0" y="66.0">mdot: thrust maps to fuel consumption</text><rect class="soft" x="92.0" y="170.0" width="220.0" height="86.0"/><text class="label" x="168.0" y="206.0">thrust T</text><text class="small" x="142.0" y="236.0">engine work</text><line class="flow" x1="312.0" y1="212.0" x2="420.0" y2="212.0" marker-end="url(#arrow)"/><rect class="warnbox" x="420.0" y="170.0" width="220.0" height="86.0"/><text class="label" x="494.0" y="206.0">weight loss</text><text class="formula" x="480.0" y="236.0">Wdot = -cT T</text><line class="flow" x1="640.0" y1="212.0" x2="748.0" y2="212.0" marker-end="url(#arrow)"/><rect class="soft" x="748.0" y="170.0" width="160.0" height="86.0"/><text class="label" x="794.0" y="206.0">mass change</text><text class="formula" x="800.0" y="236.0">W = mg</text><rect class="soft" x="282.0" y="304.0" width="430.0" height="56.0"/><text class="formula" x="322.0" y="340.0">g mdot = -cT T  →  mdot = -(cT/g) T</text>
 </svg>
