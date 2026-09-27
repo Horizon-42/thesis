@@ -305,7 +305,7 @@ that divergence is a known open item (see the README's "Future Improvements").
   种类（`executor-replay` / `prior-prediction`）、画在哪个集合上（`base`）、那个集合的样本文件的 sha256、文件位置
   （`training/<叠加层 id>/executor.json` 或 `prior.json`）。集合的索引 `index.json` 不动。写它们的是
   `run_ts.py executor_training_export` 和 `prior_training_export`（ts 的 R13）。
-- **绑定**：叠加层文件（`aeroviz-training-executor-v2` / `aeroviz-training-prior-v3`）自己写出所画集合的 id、样本的写出
+- **绑定**：叠加层文件（`aeroviz-training-executor-v3` / `aeroviz-training-prior-v3`）自己写出所画集合的 id、样本的写出
   时刻和规格 sha，每架航班按集合的顺序一架一条；执行器的每条词与句子的词逐条对应（步、列、值），先验每架的步数等于
   句子的步数。`trainingOverlays.ts` 逐项核对，对不上就整份拒读、说出是哪一项——例如集合按同一个 id 重新导出过，
   样本的写出时刻就不同，叠加层被拒读（"the set was re-exported after the overlay"）。`check-publication` 另外核对
@@ -395,7 +395,7 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 - 导出：`python run_ts.py prior_generation_training_export`（ts R13）——先验说、执行器飞，和正式自由生成读数同一条路径
   （`prior_free_generation.speak_and_fly`）；每架航班 `--samples` 个样本；只飞自己机型有动力学的航班。文件
-  `training/<叠加层 id>/generation.json`，格式 `aeroviz-training-generation-v2`（Python `SCHEMA` 与 `TRAINING_GENERATION_SCHEMA`
+  `training/<叠加层 id>/generation.json`，格式 `aeroviz-training-generation-v3`（Python `SCHEMA` 与 `TRAINING_GENERATION_SCHEMA`
   由 `test_training_overlays.py` 逐字比对），清单里的种类 `prior-generation`（清单格式不变，还是 v1：不认识的种类只拒这一条）。
 - 每个样本：事件（行、列、值，行是航班自己的步号，从 `firstPredictedRow` = 8 起、第一步六列都说）、结局、结束时刻、越过入口
   （只随 `TRAINING_CROSSING_OUTCOMES` = `judge.CROSSINGS` 出现）、首末跑道、换跑道与复飞词数、结束时是否许可、屏蔽拿掉的概率
@@ -510,7 +510,7 @@ that divergence is a known open item (see the README's "Future Improvements").
   下一个航向词总放得下；会截短的是没有上限的距离词钟一步越过下一个词、或更长的提前量——2026-09-25 全部 3,526 个航向词试飞，0 次。
 - 前端把答复绑到屏幕上这一段：同一架航班、`endRow` 是色块的终点、词表规格相同、**告诉执行器的词就是句子条这一段显示的词**；
   航向带的行是执行器自己飞过的步，以判决读到的飞出航迹为界、不以句子段尾为界（执行器可能晚听到下一个航向词）；
-  对不上整份拒读；答复只画在它飞的那一句上（`autopilotOnScreen` 比 `source`）。答复格式 `aeroviz-autopilot-segment-v5` 两边钉住
+  对不上整份拒读；答复只画在它飞的那一句上（`autopilotOnScreen` 比 `source`）。答复格式 `aeroviz-autopilot-segment-v6` 两边钉住
   （v5：模型的句子带它说话时的程序屏蔽 `procedureMasks`——名字和数据摘要，后端重建后核对，不一致按名字拒绝；在程序高度下说的句子
   飞完按自由生成的规则 `fly.glidepath_stop` 截在下滑道下边界的那一步，结局 `below_glidepath`；`GlidepathStopTest` 逐架钉住它与
   `glidepath_stops` 相同）（`SCHEMA` / `TRAINING_AUTOPILOT_SCHEMA`，判定状态与结局

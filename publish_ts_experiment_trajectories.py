@@ -1511,7 +1511,7 @@ def run_publication(
 #: `PREDICTOR`, `HORIZON`; `autopilot.spec.EXECUTOR_SPEC_SCHEMA`) — not imported: those modules pull in torch and
 #: the executor, and this orchestrator stays importable without them. `test_the_executor_names_mirror_the_runners`
 #: pins them.
-EXECUTOR_REPLAY_SCHEMA = "ts-executor-replay-v4"
+EXECUTOR_REPLAY_SCHEMA = "ts-executor-replay-v5"
 EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v6"
 EXECUTOR_PREDICTOR = "executor"
 EXECUTOR_HORIZON = "sentence"

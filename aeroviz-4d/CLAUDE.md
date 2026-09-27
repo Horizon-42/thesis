@@ -133,7 +133,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   clearance has no row of its own (not drawn, not judged); drawn as rectangles on the heading chart, its judged rows on the
   ground in 3D, rows outside red everywhere; the capture turn is its rows, clearance → capture (AV23).
 - **Training overlays sit BESIDE a set, never in it**: `training/overlays.json` (`aeroviz-training-overlays-v1`) lists the
-  executor's replay (`aeroviz-training-executor-v2`: each judged heading word's band on the flown rows + `judgedTrackDeg`) and
+  executor's replay (`aeroviz-training-executor-v3` since executor v11: a crossing names its runway; each judged heading word's band on the flown rows + `judgedTrackDeg`) and
   the prior's predictions (`aeroviz-training-prior-v3`: from `firstPredictedRow` on; the rows before are observed only), each bound to its set by id, the sample's `writtenUtc` and spec (and
   on disk its sha256) and flight by flight — refused whole on any mismatch; published as `trainingExecutor` /
   `trainingPrior`, apart from the selection; the executor's words are judged on envelopes re-drawn from where IT heard them,
@@ -141,7 +141,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **`EXPERIMENT_HORIZON_MODES` = `config.HORIZON_MODES` + the executor replay's `sentence`** — its records' horizon, stamped
   by the comparison builder; unlisted, one executor category would empty the airport's picker (AV25).
 - **Training's live executor flies the CLICKED word's segment on the backend, every time** (`POST /autopilot/segment`,
-  `aeroviz-autopilot-segment-v5`; `trainingPick`, never the hover cursor): from the observed state where the word is said to
+  `aeroviz-autopilot-segment-v6`; `trainingPick`, never the hover cursor): from the observed state where the word is said to
   where its envelope ends (the next word of its column; a heading word's a lead later — drawn as a faded, dashed TAIL from
   where the executor heard the next heading word, `nextWordHeardS` / `autopilotRunAndTail`; the sentence's end: to the landing),
   the executor's own stepper driven cycle by cycle and stopped there (never fly-then-cut); the answer is refused unless the
@@ -168,7 +168,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **The Training docks end ABOVE the sentence bar**: the bar publishes its measured height as `--training-bar-height` on
   `.workbench`, `.workbench:has(> .training-sentence-bar)` pads the overlay container by it; the flight list takes the leftover
   dock height (min ~5 two-line rows), the dock scrolls past that (AV30).
-- **Training reads the models' OWN sentences** (`prior-generation` overlays, `aeroviz-training-generation-v2`, written by ts
+- **Training reads the models' OWN sentences** (`prior-generation` overlays, `aeroviz-training-generation-v3`, written by ts
   `prior_generation_training_export`): `trainingSource` (null = truth, or `{overlayId, sample}`) picks the sentence the bar,
   the panel and 3D read; the truth is ALWAYS drawn in 3D; a model's bands are FLAT like the truth's (hatching cluttered the
   bar — the user, 2026-09-26): the frame says whose (border, a strip down the rows, tab, chip in its colour), the truth's issues

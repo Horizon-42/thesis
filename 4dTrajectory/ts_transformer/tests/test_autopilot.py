@@ -564,6 +564,64 @@ def test_the_flights_outcome_is_the_first_event_it_meets():
     assert limited["cycles"] > 0 and limited["wanted_minus_given"] > 1e-4
 
 
+def _parallels():
+    """A test airport with two parallel runways 09R (the frame's origin) and 09L, 1,500 m north, a crossing runway 03
+    whose threshold lies 2 km past 09R's, 200 m south of its centreline, and 27L, 09R's other end."""
+    from ts_transformer.instructions.airport import AirportGeometry
+
+    ends = [{"ident": "09R", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0},
+            {"ident": "09L", "threshold_e_m": 0.0, "threshold_n_m": 1500.0, "course_deg": 90.0},
+            {"ident": "03", "threshold_e_m": 2000.0, "threshold_n_m": -200.0, "course_deg": 30.0},
+            {"ident": "27L", "threshold_e_m": 3000.0, "threshold_n_m": 0.0, "course_deg": 270.0}]
+    return AirportGeometry.from_dict({
+        "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": 100.0},
+        "candidates": [{**end, "elevation_m": 100.0, "length_m": 3000.0} for end in ends], "runway_ends": ends})
+
+
+def test_a_crossing_is_judged_against_the_runway_itself_and_another_runway_ends_the_flight():
+    """v11 (prior readouts §16–§17): captured, a crossing of the pointed threshold lands only within the runway's own
+    lateral limit (the FAS course half-width at the threshold, 106.7 m) and height; on the centreline but too high is
+    `crossed_too_high`, wide of the runway `crossed_off_runway`; crossing another runway's threshold over that runway
+    itself, lined up with it, at any height, is `crossed_other_runway`, where the flight ends; crossing a runway at an
+    angle, beside it, or its other end the wrong way is not."""
+    from ts_transformer.autopilot.judge import CROSSINGS, OUTCOMES, _outcome, runway_lateral_limit_m
+
+    geometry, one = _parallels(), spec()
+    assert runway_lateral_limit_m(geometry, 0, one) == pytest.approx(350.0 * 0.3048)
+    assert set(CROSSINGS) < set(OUTCOMES)
+
+    def judged(n_m, height_m, *, captured=True, track_deg=90.0, e_from=-3000.0, e_to=200.0):
+        """A straight flight at ``n_m`` north of 09R's centreline, from ``e_from`` (3 km before its threshold) to
+        ``e_to``."""
+        e = np.arange(e_from, e_to + 1.0, 70.0)
+        n = np.full(len(e), n_m)
+        height = np.full(len(e), 100.0 + height_m)
+        track = {"e": e, "n": n, "height": height, "track": np.full(len(e), track_deg)}
+        states = np.ones((len(e), 7))
+        return _outcome(states, track, np.full(len(e), captured), np.zeros(len(e), dtype=bool), geometry, 0, one)
+
+    kind, row, crossing = judged(-50.0, 20.0)
+    assert kind == "landed" and crossing["runway_index"] == 0 and crossing["cross_m"] == pytest.approx(50.0)
+    assert judged(-5.0, 180.0)[0] == "crossed_too_high"                    # on the centreline, 80 m above the window
+    assert judged(-300.0, 20.0)[0] == "crossed_off_runway"                 # inside the harvest's 750 m, off the runway
+    assert judged(-300.0, 20.0, captured=False)[0] == "crossed_without_capture"
+    assert judged(-1300.0, 20.0, captured=False)[0] == "timeout"           # beyond 09R's 750 m, far from 09L
+    # lined up with 09L and crossing its threshold over the runway: another runway, the flight ends there — low, or
+    # passing over it high (the wrong-runway line-ups of prior readouts §16 pass 60–280 m up)
+    kind, row, crossing = judged(1480.0, 20.0, captured=False)
+    assert kind == "crossed_other_runway" and crossing["runway_index"] == 1
+    assert crossing["cross_m"] == pytest.approx(20.0) and crossing["height_m"] == pytest.approx(20.0)
+    assert judged(1480.0, 250.0, captured=False)[0] == "crossed_other_runway"
+    # 300 m beside 09L is not over it (within the harvest's 750 m, outside the runway's 106.7 m)
+    assert judged(1200.0, 20.0, captured=False)[0] == "timeout"
+    # captured on 09R and landing there: 03's threshold, 2 km on and at an angle, is never reached first — and past
+    # 09R's threshold, crossing 03's plane low over its threshold at 60° to its course is not landing on it, nor is
+    # flying on down 09R past its other end, 27L, whose plane it crosses the wrong way
+    assert judged(-50.0, 20.0, e_to=4000.0)[0] == "landed"
+    assert judged(-200.0, 20.0, captured=False, e_from=500.0, e_to=4000.0)[0] == "timeout"
+    assert judged(0.0, 20.0, captured=False, e_from=500.0, e_to=4000.0)[0] == "timeout"
+
+
 def test_descents_level_off_at_their_targets_inside_the_tubes():
     """§5.3: a descent to a target levels off at it without passing it; the next descent word releases it."""
     legs = [(100, 0.0, 75.0, 0.0), (80, 0.0, 75.0, -75.0 * np.tan(np.radians(2.1))), (120, 0.0, 75.0, 0.0),
@@ -884,7 +942,9 @@ def test_crossings_are_told_apart_by_capture_and_by_the_landing_condition():
     level[1:, ALTITUDE] = UNCHANGED
     level[1:, ANGLE] = UNCHANGED
     _, high, _ = _fly_sentence(signals, level)                  # captured, never descends: 1000 m over the threshold
-    assert high.outcome == "crossed_off_runway" and high.crossing["height_m"] > 500.0
+    # on the centreline and too high — a vertical miss, not a lateral one (v11)
+    assert high.outcome == "crossed_too_high" and high.crossing["height_m"] > 500.0
+    assert abs(high.crossing["cross_m"]) < 50.0
     straight = [(40, 0.0, 90.0, 0.0), (30, 0.0, 80.0, 0.0), (110, 0.0, 72.0, -72.0 * np.tan(np.radians(3.0)))]
     aligned = instruction_flight(*fly_legs(straight, 90.0, 950.0, -300.0, 0.0))
     _, _, on_final = _fly_sentence(aligned)
@@ -1312,6 +1372,7 @@ def test_a_final_said_under_the_glidepaths_lower_edge_is_held_at_the_edge():
     under the lower edge (the glidepath less `GLIDEPATH_BELOW_M`): it levels off there, still lands, and crosses inside
     evaluation's vertical gate; the land word gives up its tube where the two disagree."""
     from evaluation.thresholds import RNAV_TERMINAL_VERTICAL_BOUND_M
+    from ts_transformer.autopilot import replay
     from ts_transformer.autopilot.judge import flown_track
     from ts_transformer.autopilot.vertical import GLIDEPATH_BELOW_M
 
@@ -1330,6 +1391,13 @@ def test_a_final_said_under_the_glidepaths_lower_edge_is_held_at_the_edge():
     assert abs(verdict.crossing["height_m"] - TEST_TCH_M) <= RNAV_TERMINAL_VERTICAL_BOUND_M
     land = verdict.words["vertical"][-1]
     assert land["inside"] < land["rows"]
+    # the edge set the aim: mode `glidepath_floor`, counted for the flight and inside the land word's own span — the
+    # replay summary files the word under the floor, not under the law
+    assert flown.modes["glidepath_floor"][0].any() and verdict.words["glidepath_floor_cycles"] > 0
+    assert land["glidepath_floor_cycles"] > 0 and not any(v["glidepath_floor_cycles"] for v in verdict.words["vertical"][:-1])
+    failures = replay.summary([verdict])["word_failures"]
+    assert failures["altitude word outside its tube, the glidepath floor held it"] == 1
+    assert "altitude word outside its tube" not in failures
 
 
 def test_a_speed_word_is_flown_at_the_vocabularys_pace_both_ways():

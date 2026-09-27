@@ -94,7 +94,7 @@ from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_sta
 #: the reader refuses anything else by name. A name changes with its file's shape, on both sides, in one change: v2
 #: (2026-09-24, instruction-v3) gives every heading word judged its band and per-row verdicts (``heading``) and every
 #: flight judged its flown track as the judge read it (``judgedTrackDeg``); v1's heading verdicts were turns and holds.
-SCHEMA = "aeroviz-training-executor-v2"
+SCHEMA = "aeroviz-training-executor-v3"
 PAYLOAD_FILE = "executor.json"
 RUNNER = "ts_transformer.experiments.executor_training_export"
 STATUSES = ("inside", "outside", "not judged", "not reached", "superseded", "no check")
@@ -387,7 +387,8 @@ def flight_payload(item: dict[str, Any], group: str, flown: Flown | None, index:
         "endS": round(verdict.end_row * flown.cycle_s, 3),
         "crossing": None if crossing is None else {"crossM": round(crossing["cross_m"], 2),
                                                    "heightM": round(crossing["height_m"], 2),
-                                                   "atS": round(crossing["at_row"] * flown.cycle_s, 3)},
+                                                   "atS": round(crossing["at_row"] * flown.cycle_s, 3),
+                                                   "runway": crossing["runway_index"]},
         "refused": verdict.refused,
         "evaluation": {"replay": formal["replay_verdict"], "observed": formal["observed_verdict"]},
         "alignment": {"meanHorizontalDistanceM": round(formal["mean_horizontal_distance_m"], 1),

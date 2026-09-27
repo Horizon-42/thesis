@@ -31,7 +31,8 @@ glidepath less `GLIDEPATH_BELOW_M` — the glidepath's lower edge, the one the p
 (`prior.procedure`), which binds only inside the FAF and the LPV cone; here it binds at any lateral position, at the
 edge's height at the distance to go — by a hold law toward that line as the aircraft closes on it, at most level: under
 the edge it descends less steeply than the edge falls, level when more than V τ_h times the edge's slope under it, and
-rejoins the edge as the glidepath comes down (the approach joined from below, as flown). A class's tube leaves the height
+rejoins the edge as the glidepath comes down (the approach joined from below, as flown); a cycle whose aim the edge
+set is mode ``glidepath_floor`` (the judge counts it per word, so its cost is readable). A class's tube leaves the height
 inside it open ("descend to land" with the shallowest class holds level flight as well as 1.5°), and aiming at the
 crossing point from below the glidepath rides the tube's steep edge, far under the glidepath (prior readouts §12; the
 floor's effect on the replays, readouts §13). Nothing here is measured from data: the TCH and the glidepath are the
@@ -161,7 +162,7 @@ class Vertical:
         self.left_tube = land & ~go_around & line_captured & ~in_reach
         # never under the crossing height before the threshold: after the capture no steeper than the hold law toward
         # it or the line to it, whichever is steeper; before, than the straight line to it (never into the ground)
-        floor = torch.where(line_captured, torch.maximum(above_crossing / speed_tau, on_line), shortest)
+        crossing_floor = torch.where(line_captured, torch.maximum(above_crossing / speed_tau, on_line), shortest)
         # never under the published glidepath's lower edge before the threshold, captured or not, at the edge's height
         # at the distance to go: a hold law toward that line as the aircraft closes on it (the line falls at the
         # glidepath's slope times the share of the speed along the course; flying away from the runway it rises) — the
@@ -169,12 +170,15 @@ class Vertical:
         glidepath = crossing_height_m + to_go_m * glidepath_tan - GLIDEPATH_BELOW_M
         closing_tan = glidepath_tan * torch.cos(torch.deg2rad(off_course_deg))
         on_glidepath = torch.atan(closing_tan) + (height - glidepath) / speed_tau
-        floor = torch.where(to_go_m > 0.0, torch.minimum(floor, on_glidepath), floor)
-        aim = torch.minimum(torch.where(in_reach, in_tube, toward), floor).clamp(0.0, self.steepest_rad)
+        floor = torch.where(to_go_m > 0.0, torch.minimum(crossing_floor, on_glidepath), crossing_floor)
+        wanted_aim = torch.where(in_reach, in_tube, toward)
+        aim = torch.minimum(wanted_aim, floor).clamp(0.0, self.steepest_rad)
+        # the glidepath's lower edge set the aim this cycle: it held a "descend to land" above where the word would fly
+        glidepath_floor = land & ~go_around & (aim < torch.minimum(wanted_aim, crossing_floor).clamp(0.0, self.steepest_rad))
         reference = torch.where(land, torch.where(go_around, torch.full_like(aim, self.climb_rad), -aim),
                                 torch.where(self.captured, hold, -nominal))
         wanted = (reference - state.gamma_rad) / params.path_time_constant_s
         gamma_rate = wanted.clamp(-rate_max, rate_max)
         self.flown_m = self.flown_m + state.ground_speed_mps * params.cycle_s
         return gamma_rate, wanted, {"level_captured": self.captured.clone(), "aim_left_tube": self.left_tube.clone(),
-                                    "path_rate_limited": wanted.abs() > rate_max}
+                                    "glidepath_floor": glidepath_floor, "path_rate_limited": wanted.abs() > rate_max}

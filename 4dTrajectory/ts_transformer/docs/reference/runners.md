@@ -268,7 +268,7 @@ Every airport is built before any is written.
 
 `executor_training_export --executor <spec dir> --replay <spec dir>/replay-val --instructions <artefact>
 --airports-root <…/public/data/airports> --set instruction_v3 --airport ICAO [--airport …] [--overlay-id
-executor_<spec dir name>] [--device cpu]` (schema `aeroviz-training-executor-v2` since 2026-09-24, `instruction-v3`;
+executor_<spec dir name>] [--device cpu]` (schema `aeroviz-training-executor-v3` since executor v11, 2026-09-27: a crossing names the runway crossed, and the outcomes `crossed_too_high` and `crossed_other_runway`; v2 since 2026-09-24, `instruction-v3`;
 the replay `ts-executor-replay-v3`): opens the spec with
 `replay.open_executor` (refused unless this executor code measured it), rebuilds the set's flights, flies those the
 replay flies (own and stand-in dynamics) in one batch per airport and judges them. `replay.json` keeps each flight's
@@ -293,7 +293,7 @@ refused (`docs/code-health-followups.md`, 2026-09-24). ~7 s per airport of 40 fl
 `prior_generation_training_export --prior <prior dir, or one round of a post-training run> --instructions <artefact>
 --executor <spec dir> [--readout <its val free generation>] --airports-root … --set <a read-back set> --airport ICAO
 [--airport …] [--samples 4] [--temperature 1.0] [--seed 1337] [--overlay-id generation_<name>[_r<NN>]_<sha256, 8 digits>]`
-(2026-09-26, schema `aeroviz-training-generation-v2` since the models were named the same day — v1 carried a free `--label`;
+(2026-09-26, schema `aeroviz-training-generation-v3` since executor v11, 2026-09-27 — a crossing names the runway crossed, two more outcomes; v2 since the models were named on 2026-09-26 — v1 carried a free `--label`;
 kind `prior-generation`; the frontend side AV31, AV32): the model's OWN sentences over the set's
 flights — `prior_free_generation.speak_and_fly` on the flights its val readout flies (own dynamics; the rest listed with their
 group), `--samples` each, one CPU generator seeded once and drawn in the order the airports are named (so a re-run is
@@ -467,7 +467,7 @@ Each prior sentence and each flight's observed track are read before the join (`
 `N_LOOK`: the most under the DA, the most climbed after the dip, the most under the FAA MVA where not cleared —
 `prior.mva`, FUS3 charts under `repo_layout.MVA_ROOT`), counted in each summary's `pre_join` past the track tolerance
 (DA, MVA) and an altitude step (climb), said beside observed; `generation.json`'s `procedure_masks` says whether the
-altitudes were on. Without them the run is draw for draw the one before it (40 select sentences checked). `generation.json` is `ts-prior-free-generation-v4` since 2026-09-26 (`procedure_masks`, the
+altitudes were on. Without them the run is draw for draw the one before it (40 select sentences checked). `generation.json` is `ts-prior-free-generation-v5` since executor v11, 2026-09-27 (the judge's two new outcomes and a crossing's `runway_index`; v4 since 2026-09-26: `procedure_masks`, the
 time-limit factors per start kind, the MVA chart read, the prior rows' `pre_join` / `pre_join_observed` — the climb read
 only inside a stretch of barred rows from `N_LOOK`, restarting after a go-around); v2 added `below_glidepath` and
 `glidepath_mask`. `--augment-seed S` (post-training design §4): every drawn flight is

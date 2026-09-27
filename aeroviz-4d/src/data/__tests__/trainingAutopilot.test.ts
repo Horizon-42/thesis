@@ -106,7 +106,7 @@ describe("a model's word", () => {
     const unmasked = parseTrainingAutopilot(stopped, bare, mockSelection(set, bare));
     expect(unmasked.ok ? "" : unmasked.problem).toMatch("spoken without the procedure's altitudes");
     // a stop carries no crossing
-    const crossed = parseTrainingAutopilot({ ...stopped, end: { ...stopped.end, crossing: { crossM: 1, heightM: 15, atS: 100 } } },
+    const crossed = parseTrainingAutopilot({ ...stopped, end: { ...stopped.end, crossing: { crossM: 1, heightM: 15, atS: 100, runway: 0 } } },
       request, mockSelection(set, request));
     expect(crossed.ok ? "" : crossed.problem).toMatch("ends below_glidepath and carries a crossing");
     const truth = mockAutopilotRequest(set, VECTORED_KEY, "heading", 8);

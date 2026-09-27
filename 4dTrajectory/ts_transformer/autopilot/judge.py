@@ -11,11 +11,24 @@ of which is the outcome (at one row, in `EVENT_ORDER`):
   (§8.1: the stall floor should never let it);
 - ``ground_contact``: below the pointed threshold's elevation while still before it;
 - the pointed threshold plane crossed, bracketed and interpolated as the harvest does
-  (`instructions.labeller.read.landing_passages`, `final_approach.crossing.bracket_fraction`):
-  ``landed`` when the crossing meets the harvest's landing condition and the executor had captured the
-  line, ``crossed_without_capture`` when it meets it uncaptured, ``crossed_off_runway`` when a captured
-  crossing misses it (a crossing neither captured nor landing is a downwind abeam, not an event);
+  (`final_approach.crossing.bracket_fraction`). Captured, it is ``landed`` on the runway itself — within its lateral
+  limit (`runway_lateral_limit_m`: the final approach segment's full-scale course half-width at the threshold,
+  106.7 m, never beyond half the spacing to a parallel) and no higher than the landing condition's height above the
+  threshold — ``crossed_too_high`` within the lateral limit but higher (on the centreline and too high: a vertical miss,
+  not a lateral one), ``crossed_off_runway`` outside it. Uncaptured, it is ``crossed_without_capture`` when it meets the
+  harvest's landing condition (`instructions.labeller.read.landing_passages`) and no event otherwise (a downwind
+  abeam);
+- ``crossed_other_runway``: another candidate's threshold plane crossed within THAT runway's own lateral limit
+  (`runway_lateral_limit_m`) at any height, the track within the vocabulary's intercept angle of its course — lined up
+  with the wrong runway (the heading words led it there and the clearance came too late: prior readouts §16; those
+  flights pass over the parallel's threshold 60–280 m up, so no height bound, as a captured crossing of the pointed
+  runway is classed at any height). A line-up that never reaches that threshold stays what it becomes (a timeout). The
+  flight ends there; the executor itself stops only at the pointed runway, so it may fly on (as after
+  ``crossed_without_capture``), and what it flew after this row is not the flight's;
 - ``timeout``: none of these within the flight's time limit.
+
+A crossing carries where it happened — metres right of that runway's centreline, above its threshold, the fractional
+state row — and which candidate it crossed (``runway_index``).
 
 Layer 2, every word (§8.2): the sentence's words checked against what was FLOWN, with the labeller's own
 checks. The flown track is read at the sentence's 2 s rows through `read.admit` — the gate observed
@@ -33,7 +46,9 @@ flights pass, smoothing and the landing cut included — and judged from each wo
   (§2.2: monotone, rate and bank inside §2.3's range); and once the
   flight is in the corridor (`envelope.corridor`: position AND course — the labeller's capture is the first
   row of the run inside it), every later row to the landing stays inside;
-- altitude and angle words: `labeller.vertical.tube_checks`; speed words: `labeller.speed.span_checks`.
+- altitude and angle words: `labeller.vertical.tube_checks`, each with the cycles of its span in which the glidepath's
+  lower edge set the aim (mode ``glidepath_floor``: a word it pushed out of its tube failed for the procedure, not the
+  law); speed words: `labeller.speed.span_checks`.
 
 A word whose row the flown track never reaches is counted as ``not_reached`` and not judged: the sentence
 is time-indexed, so a word after the flight's end was never said to the executor — a flight that landed
@@ -48,11 +63,12 @@ from typing import Any
 import numpy as np
 
 from final_approach.crossing import bracket_fraction
+from flight_scenarios.fas_geometry import fas_course_geometry
 from ts_transformer.autopilot.executor import LIMITS, Flown
 from ts_transformer.autopilot.frame import ALT, GAMMA, LAT, LON, MASS, PSI, SPEED
 from ts_transformer.autopilot.sentence import row_at
 from ts_transformer.instructions import envelope
-from ts_transformer.instructions.airport import AirportGeometry, landing_cross_limit_m, relative_to_runway
+from ts_transformer.instructions.airport import AirportGeometry, RunwayRelative, landing_cross_limit_m, relative_to_runway
 from ts_transformer.instructions.labeller.lateral import turn_check
 from ts_transformer.instructions.labeller.read import Admitted, Reading, admit, landing_passages
 from ts_transformer.instructions.labeller.records import Instruction, Refused
@@ -63,12 +79,13 @@ from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, HEADING, Words, compass_from_math_rad, wrap180
 from ts_transformer.instructions.words import SPEED as SPEED_WORD
 
-OUTCOMES = ("landed", "crossed_without_capture", "crossed_off_runway", "ground_contact", "timeout",
-            "dynamics_failure")
+OUTCOMES = ("landed", "crossed_too_high", "crossed_off_runway", "crossed_other_runway", "crossed_without_capture",
+            "ground_contact", "timeout", "dynamics_failure")
 #: Which event is the outcome when two happen at the same row: a failure of the dynamics first (nothing
-#: after it is flight), then the ground, then the crossing.
-EVENT_ORDER = ("dynamics_failure", "ground_contact", "landed", "crossed_without_capture", "crossed_off_runway")
-CROSSINGS = ("landed", "crossed_without_capture", "crossed_off_runway")
+#: after it is flight), then the ground, then the pointed runway's crossing, then another runway's.
+EVENT_ORDER = ("dynamics_failure", "ground_contact", "landed", "crossed_too_high", "crossed_off_runway",
+               "crossed_without_capture", "crossed_other_runway")
+CROSSINGS = ("landed", "crossed_too_high", "crossed_off_runway", "crossed_other_runway", "crossed_without_capture")
 #: Which wanted rate (track, path angle, speed) a limit costs.
 LIMIT_RATE = {"bank_cap": 0, "bank_rate": 0, "load_factor": 1, "path_rate_limited": 1, "stall_floor": 2,
               "thrust_max": 2, "thrust_min": 2, "stall": 2}
@@ -81,7 +98,7 @@ class Verdict:
     #: the state row the outcome is read at (a crossing's first row past the plane)
     end_row: int
     #: at the interpolated threshold crossing, for a crossing outcome: metres right of the centreline and
-    #: above the threshold, and the (fractional) state row it happened at
+    #: above the threshold, the (fractional) state row it happened at, and the candidate crossed (``runway_index``)
     crossing: dict[str, float] | None
     #: layer 1: per limit, the cycles it bound and the mean |wanted − given| of the rate it costs then
     limits: dict[str, dict[str, float]]
@@ -106,38 +123,74 @@ def flown_track(states: np.ndarray, geometry: AirportGeometry) -> dict[str, np.n
             "ground_speed": speed * np.cos(gamma), "vertical_rate": speed * np.sin(gamma)}
 
 
+def runway_lateral_limit_m(geometry: AirportGeometry, index: int, spec: VocabularySpec) -> float:
+    """How far off candidate ``index``'s centreline a captured crossing may lie and still be a landing ON the runway: its
+    final approach segment's full-scale course half-width at the threshold (FAA Order 8260.58D Formula 3-1-1,
+    `flight_scenarios.fas_geometry`, the LPV cone the procedure's altitudes use; 350 ft = 106.7 m on every candidate
+    here), and never beyond the harvest's limit (`landing_cross_limit_m`: 1,000 m, half the spacing to a parallel)."""
+    return min(fas_course_geometry(geometry.candidates[index].length_m).course_width_m,
+               landing_cross_limit_m(geometry, index, spec.landing_cross_limit_m, spec.parallel_course_delta_deg))
+
+
+def _crossing(relative: RunwayRelative, row: int, runway_index: int) -> dict[str, float]:
+    """The crossing of ``relative``'s threshold plane between state rows ``row − 1`` and ``row``, interpolated."""
+    before, right, height = relative.before_threshold_m, relative.right_of_course_m, relative.height_above_threshold_m
+    fraction = bracket_fraction(-float(before[row - 1]), -float(before[row]))
+    return {"cross_m": float(right[row - 1] + fraction * (right[row] - right[row - 1])),
+            "height_m": float(height[row - 1] + fraction * (height[row] - height[row - 1])),
+            "at_row": float(row - 1 + fraction), "runway_index": runway_index}
+
+
 def _outcome(states: np.ndarray, track: dict[str, np.ndarray], captured: np.ndarray, stalled: np.ndarray,
              geometry: AirportGeometry, runway_index: int,
              spec: VocabularySpec) -> tuple[str, int, dict[str, float] | None]:
     """``captured`` and ``stalled`` per state row: the law's capture, and the dynamics' stall cut-off having
-    bound in the cycle that ended at the row."""
+    bound in the cycle that ended at the row. The events (module docstring), the earliest the outcome."""
     candidate = geometry.candidates[runway_index]
     relative = relative_to_runway(track["e"], track["n"], track["track"], track["height"], candidate)
-    before, right, height = relative.before_threshold_m, relative.right_of_course_m, relative.height_above_threshold_m
-    events: list[tuple[int, str]] = []
+    before, height = relative.before_threshold_m, relative.height_above_threshold_m
+    events: list[tuple[int, str, dict[str, float] | None]] = []
     bad = np.nonzero(~np.isfinite(states).all(axis=1) | (states[:, SPEED] <= 0.0) | stalled)[0]
     if len(bad):
-        events.append((int(bad[0]), "dynamics_failure"))
+        events.append((int(bad[0]), "dynamics_failure", None))
     ground = np.nonzero((before > 0.0) & (height < 0.0))[0]
     if len(ground):
-        events.append((int(ground[0]), "ground_contact"))
-    landings = set(landing_passages(relative, landing_cross_limit_m(geometry, runway_index, spec.landing_cross_limit_m,
-                                                                     spec.parallel_course_delta_deg), spec))
-    crossing = None
+        events.append((int(ground[0]), "ground_contact", None))
+    # the pointed runway: captured, judged against the runway itself; uncaptured, an event only as a landing passage
+    near = set(landing_passages(relative, landing_cross_limit_m(geometry, runway_index, spec.landing_cross_limit_m,
+                                                                 spec.parallel_course_delta_deg), spec))
+    on_runway_m = runway_lateral_limit_m(geometry, runway_index, spec)
     for row in np.nonzero((before[:-1] > 0.0) & (before[1:] <= 0.0))[0] + 1:
         row = int(row)
-        if row in landings or captured[row]:
-            fraction = bracket_fraction(-float(before[row - 1]), -float(before[row]))
-            crossing = {"cross_m": float(right[row - 1] + fraction * (right[row] - right[row - 1])),
-                        "height_m": float(height[row - 1] + fraction * (height[row] - height[row - 1])),
-                        "at_row": float(row - 1 + fraction)}
-            kind = ("landed" if captured[row] else "crossed_without_capture") if row in landings else "crossed_off_runway"
-            events.append((row, kind))
-            break
+        if not (captured[row] or row in near):
+            continue
+        crossing = _crossing(relative, row, runway_index)
+        if not captured[row]:
+            kind = "crossed_without_capture"
+        elif abs(crossing["cross_m"]) > on_runway_m:
+            kind = "crossed_off_runway"
+        else:
+            # under the threshold's elevation before it is ground contact, which comes first: a captured crossing on the
+            # runway is at most one cycle's descent below it
+            kind = "landed" if crossing["height_m"] <= spec.landing_max_height_m else "crossed_too_high"
+        events.append((row, kind, crossing))
+        break
+    # another runway: its threshold crossed over the runway itself, lined up with it, at any height
+    for index, other in enumerate(geometry.candidates):
+        if index == runway_index:
+            continue
+        theirs = relative_to_runway(track["e"], track["n"], track["track"], track["height"], other)
+        limit = runway_lateral_limit_m(geometry, index, spec)
+        for row in np.nonzero((theirs.before_threshold_m[:-1] > 0.0) & (theirs.before_threshold_m[1:] <= 0.0))[0] + 1:
+            crossing = _crossing(theirs, int(row), index)
+            if (abs(crossing["cross_m"]) <= limit
+                    and abs(float(theirs.track_minus_course_deg[row])) <= spec.intercept_angle_deg):
+                events.append((int(row), "crossed_other_runway", crossing))
+                break
     if not events:
         return "timeout", len(states) - 1, None
-    row, kind = min(events, key=lambda event: (event[0], EVENT_ORDER.index(event[1])))
-    return kind, row, crossing if kind in CROSSINGS else None
+    row, kind, crossing = min(events, key=lambda event: (event[0], EVENT_ORDER.index(event[1])))
+    return kind, row, crossing
 
 
 def _limits(flown: Flown, index: int, states: np.ndarray, end_row: int) -> dict[str, dict[str, float]]:
@@ -298,6 +351,10 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
     corridor = inside[from_row + int(entered[0]):] if len(entered) else np.zeros(0, dtype=bool)
     cleared = any(i.column == APPROACH for i in reached if i.kind == "clear")
     vertical = tube_checks(reached, smoothed.distance_m, smoothed.altitude_m, spec, words)
+    floor = flown.modes["glidepath_floor"][index, :end_row].cpu().numpy()
+    for v in vertical:
+        # the cycles of the word's span in which the glidepath's lower edge set the aim (its span in flown rows)
+        v["glidepath_floor_cycles"] = int(floor[v["row"] * step_rows: (v["row"] + v["rows"]) * step_rows].sum())
     speed = span_checks(reached, smoothed.ground_speed_mps, spec, words)
     clearance_ok = (capture_turn is not None and capture_turn["progress_ok"] and capture_turn["rate_ok"]
                     and len(corridor) > 0 and bool(corridor.all()))
@@ -310,6 +367,7 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
         "not_reached": never, "superseded_before_flown": superseded,
         "heading": headings, "capture_turn": capture_turn, "intercepting_off_word_cycles": off_word,
         "aim_left_tube_cycles": int(flown.modes["aim_left_tube"][index, :end_row].sum()),
+        "glidepath_floor_cycles": int(floor.sum()),
         "corridor": {"cleared": cleared, "entered": bool(len(corridor)), "rows": int(len(corridor)),
                      "inside": int(corridor.sum())},
         "vertical": vertical, "speed": speed, "all_contained": bool(contained)})

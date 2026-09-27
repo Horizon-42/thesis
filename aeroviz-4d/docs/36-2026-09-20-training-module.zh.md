@@ -14,7 +14,7 @@
 | 项 | 内容 |
 |---|---|
 | 词表 | 读法 `instruction-v3`（航向词按步读，词表设计 §10.1）。前端钉住的规格 sha `TRAINING_SPEC_SHA256` 是 **`145d6911e75b`**（2026-09-25：按运行日划分后在新训练集上重新测量，产物 `4dTrajectory/outputs/POOLED/instruction_language/v4_20260924/`）——现在的执行器代码只飞这份产物（执行器规格 `v6_20260924`）。按航班划分的 `v3_20260924`（规格 `0b4ea75be36d`）上导出的 `instruction_v3` 集合和画在它上面的 `executor_v5_20260924` 叠加层从此按规格 sha 拒读 |
-| 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；包络全部来自 `instructions/display.py`。样本格式 `aeroviz-training-sample-v7`，执行器叠加层 `aeroviz-training-executor-v2`，先验叠加层 `aeroviz-training-prior-v3`，模型自己说的句子 `aeroviz-training-generation-v2`（`prior_generation_training_export`，§2.7；v2 起模型按名字认：base / landing / augmented 加轮次） |
+| 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；包络全部来自 `instructions/display.py`。样本格式 `aeroviz-training-sample-v7`，执行器叠加层 `aeroviz-training-executor-v3`，先验叠加层 `aeroviz-training-prior-v3`，模型自己说的句子 `aeroviz-training-generation-v3`（`prior_generation_training_export`，§2.7；v2 起模型按名字认：base / landing / augmented 加轮次） |
 | 前端代码 | 数据：`src/data/trainingReader.ts`（三种文件共用的一个读取器：逐字段读，读不了就说出字段路径）、`trainingSample.ts`（集合与样本的契约）、`trainingOverlays.ts`（叠加层的契约）、`trainingAutopilot.ts`（实时执行器的契约、请求与三维回放的计算，§4.7）、`trainingText.ts`（各视图共用的措辞：结局、检查、越过入口、sha、时长）。视图：`src/components/Training{Panel,SentenceBar,ReadbackWindow,PriorWindow,Results,Legend,AutopilotCard,VocabularyNotes}.tsx`，读数窗口拆在 `src/components/training/`（`readbackModel.ts` 一次算好所有比例尺，四张图 `Readback{Plan,Heading,Altitude,Speed}.tsx`，画图小件 `chartKit.tsx`，两个浮动窗口共用的外壳 `TrainingWindow.tsx`，`ProblemBox.tsx`）。三维：`src/scene/trainingEntities.ts`（实体 id、坐标展开、几种线与点）、`src/hooks/useTrainingTrackLayer.ts`（观测航班；由什么也不渲染的叶子组件 `src/components/TrainingScene.tsx` 调用，游标变了只有它重渲染，§4.5）、`useTrainingExecutorLayers.ts`（回放与实时执行器）、`useTrainingGenerationLayers.ts`（模型自己说的句子，§4.8）。另有 `useTrainingOverlays.ts`、`useTrainingAutopilot.ts`、`useMeasuredWidth.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
 | 分支 | 左栏停在句子条上面、模型自己说的句子（§2.7、§4.8）：`dev-training-sentences`，2026-09-26 合并进 `dev-two-tier`（`e87bfcf3`）。模型的词也交给实时执行器飞、模型的带不再画斜线、模型结束处写时间（§4.7、§4.8）：`dev-model-autopilot`，2026-09-26 合并进 `dev-two-tier`（`46af94fd`），后端与前端已重启。航向词多飞的那个提前量画成淡色虚线的尾巴（§4.7）：`dev-heading-lead-tail`，2026-09-26 合并进 `dev-two-tier`（`02c14001`），后端与前端已重启。 多轮后训练之间切换、模型按名字认，以及模型按自己的程序屏蔽说话（§2.7、§4.7、§4.8）：`dev-training-rounds`，2026-09-27 合并进 `dev-two-tier`（`aa190a92`） |
 | 发布 | 现行集合 **`instruction_v3_day_split`**（2026-09-25，五个机场各 40 架新验证集航班，直线进近 / 被引导各 20，从 `v4_20260924` 导出）。**模型自己说的句子**（§2.7、§4.8）：base 模型（`prior/v3_step1_20260924/full_s1337`）和按落地奖励后训练的第 1 轮（`prior/v3_rl_20260925/grpo_s1337/round_01`）各一份，每架 4 个样本，执行器规格 `v7_20260925`；2026-09-26 经用户同意发布到 `public/data`（每个机场 `generation_v3_step1_20260924_full_s1337`、`generation_grpo_s1337_round_01`），`check-publication` 五个机场 0 错误。在这 40 × 5 架里按自己机型动力学能飞的 180 架 × 4 个样本上：base 模型落地 652/720（90.6 %），后训练 694/720（96.4 %）；两者正式 val 读数 90.2 % / 97.2 %。同时发布了先验第三版（base 模型）的教师强制预测 `prior_v3_step1_20260924_full_s1337` 和执行器 v6 的验证集回放 `executor_v6_20260924`（规格 v7 打开，每架重飞都与正式回放那一行相同，200 架飞 188 架全部落地）；实时执行器（§4.7）不需要叠加层。更早的集合与叠加层按名字拒读，发布记录见仓库 `docs/CHANGELOG.md` 。**2026-09-27 重新发布（v2，用户同意）**：两份 v1 模型句子从五个机场的 `overlays.json` 撤下，目录移到仓库 `data/retired_training_overlays/20260927/`（连同撤下前的清单）；新导出 base（`generation_base_fb81ccc9`）与 landing r1–r8（`generation_landing_rNN_<sha8>`），执行器规格 `v10_20260926`、产物 `v4_20260924`、每架 4 个样本、不带正式读数（盘上的读数是旧格式或另一份产物）；base 与 landing 的程序屏蔽都是"无"。`check-publication --server` 五个机场 0 错误、各 11 个叠加层对照集合读过；浏览器（5174 前端 + 8766 后端，合并后的代码）：landing r1–r8 按轮切换，r8 第 1 个样本的 "descend to land" 现飞 113.0 s、在包络内、与样本 0.00 m / 58 点。2026-09-27 又导出 augmented r1–r8（第二阶段 `v3_stage2_clip_20260926`，跑完补记屏蔽之后，`procedure-altitudes-v2`；保留的是第 7 轮）：五个机场各 19 个叠加层对照集合读过，0 错误。712 个样本（178 架 × 4）上落地：base 88.3 %，landing r1–r8 95.6–98.0 %，augmented r1–r8 94.5–96.3 %；augmented 被下滑道下边界截停的样本每轮 1–8 个，landing 与 base 没有（它们不带程序屏蔽）。截停的样本 KSTL SWA3316 augmented r1 第 4 个（414 s）在后端重飞：结局 `below_glidepath`、结束时刻与最后一点与样本逐位相同；句子条上写 "#4: below glidepath" |
@@ -147,7 +147,7 @@ python run_ts.py prior_training_export \
 - **清单**：每个机场一个 `training/overlays.json`（`aeroviz-training-overlays-v1`），一条一个叠加层：种类、所画的集合、
   那个集合样本文件的 sha256、文件位置。叠加层文件放在 `training/<叠加层 id>/`，目录已存在或清单里已有同名 id 就拒绝，
   五个机场都建好才写。`index.json` 不动。
-- **执行器**（`executor.json`，`aeroviz-training-executor-v2`）：用正式规格把集合里的航班重新飞一遍、判一遍。重飞是必须的：
+- **执行器**（`executor.json`，`aeroviz-training-executor-v3`）：用正式规格把集合里的航班重新飞一遍、判一遍。重飞是必须的：
   正式回放的 `replay.json` 只记了每架航班"哪一类词合不合格"的列表，没有记是哪一条词。重飞后每条判定对回句子里的词，
   并且**每架航班必须和正式回放的那一行一致**：结局、是否按原话飞完、判定列表、不判 / 没说到 / 被取代的词数完全相同，
   越过入口的偏离与高度差在 1e-9 以内（换一批航班一起飞，浮点求和的次序不同，差一个末位），否则导出停下、说出是哪一架。
@@ -221,7 +221,7 @@ python run_ts.py prior_generation_training_export \
   读（`prior_free_generation.said_rows`）：带程序高度时，句子在**飞到下滑道下边界以下（超过航迹容差）的那一步**截停，结局
   `below_glidepath`，之后说的词不算，航迹写到那一步结束时的状态，没有越过入口。载荷的 `generation.procedureMasks` 写出用了哪几套
   屏蔽和每套读的数据的摘要（`[{name, dataSha256}]`），实时执行器重飞这个样本时带回去核对（§4.7）。
-- **正式读数**（`--readout`，可选）：这个模型的正式 val 自由生成（`generation.json`，`ts-prior-free-generation-v4`）里先验与"标注的词"两行的落地比例（全部、
+- **正式读数**（`--readout`，可选）：这个模型的正式 val 自由生成（`generation.json`，`ts-prior-free-generation-v5`）里先验与"标注的词"两行的落地比例（全部、
   直线进近、被引导；某一类没有航班时写 null），**这个机场的一份和全部机场合起来的一份**，原样照抄（读数的抽样说"every labelled
   flight"时写 0；别的写法拒绝）；要求它确实是这个检查点（路径从 `4dTrajectory/outputs/` 往后比：
   读数是在工作树里跑的，工作树的 outputs 就是同一棵树）、同一份执行器规格（内容 sha）、同一份句子产物、val、`n_look`、
@@ -541,7 +541,7 @@ own flight — 0.00 m at most from sample #1 over 62 points"；差到 0.5 m 以�
 这一列的词、`seq` 不是非负整数）是 400；集合或航班没列出是 404；同一页面编号更大的请求取代了它是 409；航班按数据本身飞不了（它的机型没有动力学，正式
 回放同样不飞）是 422；其余列出了却飞不了的（规格不止一份、重读的句子不一样、某个文件不在）是 500，写出原因。
 
-**返回什么**（`aeroviz-autopilot-segment-v5`，前端 `trainingAutopilot.ts` 镜像；v5：请求里模型的句子带 `procedureMasks`，结局可以是
+**返回什么**（`aeroviz-autopilot-segment-v6`，前端 `trainingAutopilot.ts` 镜像；v6（执行器 v11，2026-09-27）：越过点带上越过的是哪条跑道（`crossing.runway`），结局多了"太高"和"另一条跑道"；v5：请求里模型的句子带 `procedureMasks`，结局可以是
 `below_glidepath`——只有模型的词，真值的不会）：飞的是哪一句（`source`）；用的规格、执行器代码的 sha、这次飞用的词钟（真值是规格的，模型的句子是时间词钟 `fly.MODEL_WORD_CLOCK`）；耗时
 （`timing`，后端墙钟秒数：排在前一段后面等了多久；然后是加起来等于总时间 `computeS` 的各项——找集合与执行器规格、重建航班
 （或沿用前几次请求重建好的）、准备这一段（句子、词钟、物理量）、执行器飞了多少个周期用了多久、判定、写答复）；

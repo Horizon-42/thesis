@@ -7,10 +7,10 @@ the `VocabularySpec`, never restated; the landing's crossing height is the point
 standards cite, or is one of the design's fixed choices (the runner's constants) — the executor takes nothing from data
 (the user's rule, 2026-09-24); this container only checks that a set of values is one the laws can fly:
 
+- every rate, factor, time constant and period finite and positive (first: the other checks divide by them);
 - the sentence's step a whole number of cycles (the judge reads the flown track at the sentence's rows);
 - ``τ_ψ ≥ 2 Δt`` (§4.1 constraint 1: each cycle removes at most half the heading error; the heading words' own law
   floors its time left at the same 2 Δt, `lateral.word_rate`);
-- every rate, factor, time constant and period finite and positive (first: the other checks divide by them);
 - ``τ_γ ≥ 2 Δt`` (the vocabulary's bank limit is checked against the grader's where it is flown,
   `inverse.attitude`).
 """

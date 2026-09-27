@@ -23,7 +23,7 @@
  * are shaded; under each row a white tick wherever the truth says a word of that column, so where the two sentences part
  * is read at a glance; a dashed line where the model cleared the flight, a solid one in its colour where its flight
  * ended — its time written on the axis under it, in its colour — a dashed white one where the observed flight's sentence
- * ends. Words a model said after its flight ended (the executor flies on after two outcomes its judge reads earlier) sit
+ * ends. Words a model said after its flight ended (the executor flies on after three outcomes its judge reads earlier) sit
  * under a grey shade. The
  * time axis is the observed flight's, stretched to the sentence read when that one runs longer (a model's flight that
  * timed out runs on to 1.5× the observed time): the truth is never squeezed by a sample it is not showing. Choosing a
@@ -86,7 +86,6 @@ import {
   sourceOf,
   overlayOnScreen,
   trainingModelGroups,
-  TRAINING_CROSSING_OUTCOMES,
   type TrainingExecutorFlight,
   type TrainingExecutorWord,
   type TrainingGeneratedSentence,
@@ -220,8 +219,8 @@ function sampleChip(view: TrainingGenerationView, label: string, sentence: Train
   const { generation } = view.overlay;
   const later = sentence.events.filter((event) => event.row > sentence.firstRow);
   const said = later.filter((event) => event.row * stepS < sentence.endS).length;
-  const where = TRAINING_CROSSING_OUTCOMES.includes(sentence.outcome)
-    ? ` on ${runwayName(sentence.lastRunway)}` : `, pointing at ${runwayName(sentence.lastRunway)}`;
+  const where = sentence.crossing !== null
+    ? ` on ${runwayName(sentence.crossing.runway)}` : `, pointing at ${runwayName(sentence.lastRunway)}`;
   return {
     text: `#${sentence.sample + 1}: ${TRAINING_OUTCOME_TAG[sentence.outcome]}${where} at ${formatSeconds(sentence.endS)} s ` +
       `(observed ${formatSeconds(flight.rows * stepS)} s)`,
