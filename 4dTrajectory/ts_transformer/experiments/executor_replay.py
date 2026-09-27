@@ -36,7 +36,7 @@ import time
 from collections import Counter, defaultdict
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import torch
@@ -168,15 +168,19 @@ def require_same_grading(replayed: dict[str, Any], observed: dict[str, Any], air
 
 
 def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any, *, chunk: int, device: torch.device,
-                records: Path, split: str, executor_dir: Path,
-                record: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Fly and judge one airport's flights, write their records, grade them; one row each, and the report."""
+                records: Path, split: str, checkpoint: str, extra_summary: dict[str, Any],
+                per_flight: Callable[[replay.Batch, Flown, list[Verdict]], list[dict[str, Any]]] | None = None,
+                ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Fly and judge one airport's flights, write their records (``checkpoint`` and ``extra_summary`` name what flew
+    them), grade them; one row each, and the report. ``per_flight`` adds columns to the rows, read off each chunk's
+    flown tracks (one dict per flight, in the chunk's order)."""
     rows, predictions, metrics = [], [], []
     for start in range(0, len(members), chunk):
         part = replay.subset(batch, members[start: start + chunk])
         flown, verdicts = replay.fly_batch(part, params, words, device=device)
         inputs = part.inputs(device)
         aligned = replay.flight_alignment(part, flown, verdicts)
+        more = [{} for _ in verdicts] if per_flight is None else per_flight(part, flown, verdicts)
         for j, verdict in enumerate(verdicts):
             counted = replay.word_results(verdict)
             series = part.series[j]
@@ -199,13 +203,12 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
                 "words_not_reached": 0 if verdict.words is None else verdict.words["not_reached"],
                 "words_superseded_before_flown": 0 if verdict.words is None else verdict.words["superseded_before_flown"],
                 "intercepting_off_word_cycles": 0 if verdict.words is None else verdict.words["intercepting_off_word_cycles"],
-                "refused": verdict.refused, "limits": verdict.limits, "recorded": recorded, **aligned[j]})
+                "refused": verdict.refused, "limits": verdict.limits, "recorded": recorded, **aligned[j], **more[j]})
         del flown, verdicts
     write_batch(predictions, output_dir=records, config_dict={"model": PREDICTOR, "horizon_mode": HORIZON,
                                                               "prediction_output": EXECUTOR_DYNAMICS.prediction_output,
                                                               "executor_params": asdict(params)},
-                flight_metrics=metrics, checkpoint=str(executor_dir), split=split,
-                extra_summary={"executor_spec_sha256": record["sha256"]})
+                flight_metrics=metrics, checkpoint=checkpoint, split=split, extra_summary=extra_summary)
     graded = evaluate_records(records)
     by_key = {row["flight_key"]: row for row in graded["trajectories"]}
     for row in rows:
@@ -251,7 +254,8 @@ def main(argv: list[str] | None = None) -> int:
         observed = {row["flight_key"]: row["verdict"] for row in observed_reports[airport]["trajectories"]}
         flown_rows, graded = fly_airport(batch, members, params, words, chunk=args.chunk,
                                          device=torch.device(args.device), records=out / "records" / airport,
-                                         split=args.split, executor_dir=executor, record=record)
+                                         split=args.split, checkpoint=str(executor),
+                                         extra_summary={"executor_spec_sha256": record["sha256"]})
         require_same_grading(graded, observed_reports[airport], airport)
         for row in flown_rows:
             row["observed_verdict"] = observed[row["flight_key"]]

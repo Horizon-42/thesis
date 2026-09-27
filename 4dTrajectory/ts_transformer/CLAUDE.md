@@ -378,7 +378,9 @@ the first stage's loss (reward + 0.04 × the pull to the base model + 1 × the t
 term the pull alone could not hold it, readouts §9), and the rounds are guarded by words per flight against the
 labelled words on both start kinds, not by the teacher-forced NLL. **Why the labelled replays sink below the edge** (`prior_glidepath_diagnosis`, R22): the
 executor against the observed aircraft cycle by cycle, the height given up by word, and a one-line what-if of the vertical
-law run in-process (readouts §12).
+law run in-process (readouts §12). **The heading-lead ablation** (`heading_lead_ablation`, R23, 2026-09-27): L, the bank limit and p moved
+over the formal train replay's sample, relabelled and flown with no hashed code touched; the reference cell must reproduce the
+formal replay first; words inside compare neither across L nor across the bank limit.
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 
