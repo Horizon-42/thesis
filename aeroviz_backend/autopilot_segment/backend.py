@@ -22,7 +22,6 @@ import json
 import re
 import threading
 import time
-from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -35,16 +34,14 @@ from ts_transformer.io_utils import utc_now
 from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.repo_layout import COMPARISON_AIRPORTS_ROOT, OPT_OUTPUTS_ROOT, REPO_ROOT
 
-from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused, Superseded
-from aeroviz_backend.autopilot_segment.fly import MODEL_WORD_CLOCK, FlightContext, fly_segment, open_flight
+from aeroviz_backend.autopilot_segment import single
+from aeroviz_backend.autopilot_segment.errors import NotFlyable, NotListed, RequestRefused, Superseded
+from aeroviz_backend.autopilot_segment.fly import MODEL_WORD_CLOCK, FlightContext, fly_segment, open_flights
 from aeroviz_backend.autopilot_segment.payload import SCHEMA, segment_payload
 from aeroviz_backend.autopilot_segment.segment import model_sentence
 
 #: Where executor specs are written (`run_ts.py executor_spec --dir`): each is a directory holding ``spec.json``.
 DEFAULT_EXECUTOR_ROOT = OPT_OUTPUTS_ROOT / "POOLED" / "executor"
-#: Flights kept rebuilt between requests (a rebuild opens the arrival manifest and the flight's track, ~1 s): the
-#: segments of one flight are usually flown one after another.
-FLIGHT_CACHE_SIZE = 8
 #: An airport as the frontend's directories name it; the request's airport is a path segment.
 AIRPORT_CODE = re.compile(r"[A-Z0-9]{3,4}")
 
@@ -69,7 +66,10 @@ class AutopilotSegmentBackend:
         self._claims = threading.Lock()
         # an artefact's spec, with the spec files it was chosen among (their paths and times of writing)
         self._executors: dict[Path, tuple[tuple[tuple[Path, int], ...], tuple[Path, ExecutorParams, dict[str, Any], Words]]] = {}
-        self._flights: OrderedDict[tuple[Path, str], FlightContext] = OrderedDict()
+        # each Training set's flights, rebuilt together the first time the set is asked for (`open_flights`: one read of
+        # the split's signals, the airports' procedure files and arrival manifests, ~2 s for a set of 40 where one flight
+        # alone took 1.5–2 s): keyed by the artefact, the split and the set's flights
+        self._sets: dict[tuple[Path, str, tuple[str, ...]], dict[str, FlightContext | NotFlyable | ValueError]] = {}
         self._files: dict[Path, tuple[int, dict[str, Any]]] = {}
         # the procedure's masks built for an artefact's airports (the published finals are read once)
         self._masks: dict[tuple[Path, tuple[str, ...]], ProcedureMasks] = {}
@@ -122,9 +122,11 @@ class AutopilotSegmentBackend:
     def executor_for(self, artefact: Path) -> tuple[Path, ExecutorParams, dict[str, Any], Words]:
         """The one executor spec written by this code for ``artefact``'s vocabulary (`replay.open_executor`); refused,
         naming every spec and why, when there is none or more than one. Chosen again when a spec is added, moved or
-        rewritten."""
+        rewritten — and only while the single-flight executor that flies it mirrors this code
+        (`single.require_mirrored_source`)."""
         listing = tuple((path.parent, path.stat().st_mtime_ns) for path in sorted(self.executor_root.glob("*/spec.json")))
         if artefact not in self._executors or self._executors[artefact][0] != listing:
+            single.require_mirrored_source()
             usable, refused = [], []
             for directory, _ in listing:
                 try:
@@ -138,17 +140,19 @@ class AutopilotSegmentBackend:
             self._executors[artefact] = (listing, usable[0])
         return self._executors[artefact][1]
 
-    def flight(self, artefact: Path, split: str, dataset_id: str, words: Words) -> tuple[FlightContext, bool]:
-        """The flight rebuilt, and whether it was kept from an earlier request."""
-        key = (artefact, dataset_id)
-        if key in self._flights:
-            self._flights.move_to_end(key)
-            return self._flights[key], True
-        context = open_flight(artefact, split, dataset_id, words)
-        self._flights[key] = context
-        while len(self._flights) > FLIGHT_CACHE_SIZE:
-            self._flights.popitem(last=False)
-        return context, False
+    def flight(self, artefact: Path, split: str, sample: dict[str, Any], dataset_id: str, words: Words
+               ) -> tuple[FlightContext, bool]:
+        """The flight rebuilt — with every other flight of its set, the first time the set is asked for — and whether
+        it was kept from an earlier request; a flight the data cannot fly is refused (`NotFlyable`), one a check refused
+        with that check's reason (`ValueError`, as when it was opened alone)."""
+        key = (artefact, split, tuple(item["datasetId"] for item in sample["flights"]))
+        kept = key in self._sets
+        if not kept:
+            self._sets[key] = open_flights(artefact, split, key[2], words)
+        context = self._sets[key][dataset_id]
+        if isinstance(context, (NotFlyable, ValueError)):
+            raise type(context)(str(context))
+        return context, kept
 
     def _claim(self, client: str, seq: int) -> None:
         """Make ``seq`` the page's latest request — unless the page already sent a later one."""
@@ -186,7 +190,7 @@ class AutopilotSegmentBackend:
             dataset_id = flights[0]["datasetId"]
             directory, params, record, words = self.executor_for(artefact)
             opening = time.perf_counter()
-            context, kept = self.flight(artefact, split, dataset_id, words)
+            context, kept = self.flight(artefact, split, sample, dataset_id, words)
             model = None if sentence is None else model_sentence(sentence, words, len(context.geometry.candidates),
                                                                  len(context.reading.words), params.timeout_factor)
             opened = time.perf_counter()

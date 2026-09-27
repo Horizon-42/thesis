@@ -298,8 +298,9 @@ export function autopilotWord(request: TrainingAutopilotRequest, selection: Trai
 
 /** How closely a model word's live flight lands on the exported sample it re-flies: the largest distance between the
  *  two at the times both hold a point (horizontal and vertical, metres), and how many they share — null when they share
- *  none. The executor is deterministic, so this is 0 up to the export's rounding; anything else means the backend's
- *  executor is not the one that flew the sample. */
+ *  none. The executor is deterministic and the backend's single-flight executor flies the torch executor's flight to
+ *  round-off (nanometres), so this is 0 up to the export's rounding; anything else means the backend's executor is not
+ *  the one that flew the sample. */
 export function autopilotSampleGap(segment: TrainingAutopilotSegment, sample: TrainingGeneratedSentence): { gapM: number; points: number } | null {
   const at = new Map(segment.track.tS.map((time, index) => [time.toFixed(3), index]));
   let gapM = 0;

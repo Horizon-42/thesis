@@ -20,18 +20,26 @@ frontend reads. Solver internals and defaults live in `4dTrajectory/CLAUDE.md`.
 - **`POST /autopilot/segment`** (the `autopilot_segment/` package, the Training view's live executor): flies one word's segment
   of a Training flight (to where the word's envelope ends: a heading word's a lead past the next heading word — the answer's
   `segment.nextWordHeardS`, from the judge's `words_said`, says where the executor heard it: the views draw the rest as a tail) with
-  `ts_transformer.autopilot` AS IS — its stepper `Executor`, driven as `executor.fly` drives it and stopped at the
-  segment's stop (`fly_until`); never a replay record or overlay; the answer carries per-part wall-clock `timing`. The spec is the ONE under
+  the SINGLE-FLIGHT executor (`single.py`, 2026-09-27: the executor's cycle for one flight in plain floats, ~9 ms for 200 cycles
+  where the torch `Executor` on a batch of one took ~0.55 s; the same result, not bitwise — torch's own atan2 / hypot differ
+  between a batch and one flight — checked by `test_single_executor.py` and the fleet check `check_single`; PINNED to the code it
+  mirrors, `MIRRORED_SOURCE_SHA256`: a code change in `autopilot/` or the dynamics it reaches makes the backend refuse to fly
+  until it is ported and the pin updated), driven as `executor.fly` drives it and stopped at the segment's stop (`fly_until`);
+  never a replay record or overlay; the answer carries per-part wall-clock `timing`. The spec is the ONE under
   `4dTrajectory/outputs/POOLED/executor/` that `replay.open_executor` accepts for the set's artefact, or it is refused
   naming each (looked up again when a spec is added, moved or rewritten). A bad request is 400 (`errors.RequestRefused`), a set
   or flight not listed 404 (`errors.NotListed`), superseded by a later request from the same page 409 (`errors.Superseded`: every
   request names its page, `clientId`, and its number there, `seq`; the page's lower-numbered ones still waiting are not
   flown, one flying stops before its next cycle, one arriving late is refused — the page's numbers decide, not arrival), a flight the data cannot fly (no aircraft dynamics) 422 (`errors.NotFlyable`; `errors` is stdlib-only so the server
   maps them without torch), anything else 500 with its reason. Built lazily on the first request (torch + ts_transformer,
-  ~470 MB); one flight at a time; the last 8 rebuilt flights cached. A request with a `sentence` (a model's sample) flies
+  ~470 MB); one flight at a time; a Training set's flights are rebuilt TOGETHER on its first request (`open_flights`: one
+  `rebuild_series`, the split's signals, procedure files and arrival manifests read once — ~3 s once, then every flight of the
+  set answers in milliseconds) and kept for the process; each flight answers for itself (one a check refuses is refused alone,
+  `rebuilt_each`). A request with a `sentence` (a model's sample) flies
   that sentence as `prior_free_generation` flew it — from the observed state at its first step, the time clock, the
   generation's time limit (`fly.model_time_limit_s` MIRRORS `limits_s`), the sentence's last runway — and so re-flies the exported
-  sample exactly. Full text: `aeroviz-4d/docs/35-viewer-reference.md` AV26.
+  sample to round-off (the single-flight executor against the torch one that flew it). Full text:
+  `aeroviz-4d/docs/35-viewer-reference.md` AV26.
 
 ## Observed tracks have TWO windows — the comparison overlay must use the model one
 

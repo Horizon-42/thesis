@@ -498,9 +498,13 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 - 用途是验证执行器，所以**每次选中都现飞**：`POST /autopilot/segment`（`aeroviz_backend/autopilot_segment/` 包：`segment`、
   `verdict`、`fly`、`payload`、`backend`、`errors`），不读执行器的
-  正式回放，也不读叠加层。执行器代码原样使用、不改一行（它的源码 sha 绑着每份执行器规格）；后端用执行器的单步接口
-  `Executor` 按 `executor.fly` 的方式一个周期一个周期地飞（`fly_until`），在词钟把一个开始一步的周期放到段尾之前停下，段尾之后
-  什么也不飞——与"飞满时限再截断"逐位相同。
+  正式回放，也不读叠加层。**飞的是单条执行器**（`single.py`，2026-09-27，用户要求）：执行器一个周期的计算照 torch 执行器逐个
+  表达式写成一架航班的纯 Python 浮点数——200 个周期约 9 ms，原来 torch 执行器一次一架约 0.55 s。一致按结果核对（逐位相同做不到：
+  torch 的 atan2、hypot 同一架航班批量飞和单独飞就差最后一位）：`test_single_executor.py` 的合成航班与 `check_single` 对训练视图全部
+  航班的每个词段，结局、每个词的判定、越过入口相同，状态只差舍入。它不进执行器规格的源码指纹，而是钉住它照写的代码
+  （`MIRRORED_SOURCE_SHA256`：执行器规格的文件加它照写的动力学模块，按 `spec.logic` 算），后端选规格时核对，对不上就拒绝飞。
+  按 `executor.fly` 的方式一个周期一个周期地飞（`fly_until`），在词钟把一个开始一步的周期放到段尾之前停下，段尾之后
+  什么也不飞。
 - 启动：选中一个词后按句子条头部的 **▶ Fly**（飞完变 **↻ Fly again**，同一选择的新一次尝试），或在面板 "Autopilot (live)"
   一栏的 **Fly on band click** 开着时直接点色块；只有点击才请求（`trainingPick`），游标不触发，图表悬停会移动游标。
 - **模型的词**（句子条读模型的样本时）：请求带上这句话（`sentence`：`overlayId`、`sample`、`firstRow`、`rows`、`events`，
@@ -547,9 +551,9 @@ that divergence is a known open item (see the README's "Future Improvements").
   `glidepath_stops` 相同）（`SCHEMA` / `TRAINING_AUTOPILOT_SCHEMA`，判定状态与结局
   名也是镜像）；它带 `timing`（后端墙钟：等待；加起来等于总计的各项——集合与规格、重建航班或沿用、准备这一段、执行器与算了的周期数、判定、
   写答复；`flyS` 只是执行器的周期，装配物理量算在"准备"里），前端加上浏览器往返时间。单步飞法由
-  `test_autopilot_segment.StepperTest` 钉住：真实执行器上，不设段尾时与 `executor.fly` 逐周期相同，设了段尾时等于它在词钟首次把
-  一个开始一步的周期放到段尾处截断；装配由 `SetupTest` 钉住（与 `replay.fly_sentences` 的输入、跑道、图、进近速度、时限、词钟
-  相同）；前端的四个镜像名由 `MirrorTest` 钉住。
+  `test_autopilot_segment.StepperTest` 钉住：单条执行器在后端的飞法下，不设段尾时就是 torch 执行器的 `executor.fly`（周期、词钟时刻、
+  模式与限制相同，状态只差舍入），设了段尾时等于它在词钟首次把一个开始一步的周期放到段尾处截断；装配由 `SetupTest` 钉住（与
+  `replay.fly_sentences` 的输入、跑道、图、进近速度、时限、词钟相同）；前端的四个镜像名由 `MirrorTest` 钉住。
 - 显示：句子条一行只写词、**在不在包络内**、"N s flown in M ms"（飞得不好时加怎么结束的）；结果卡第一行是判定，然后并排
   "模拟飞行时间"（对照观测）与"计算用时"（往返），检查项，其余收进 Details；飞成了卡片上是 "Replay in 3D"（不请求），没飞成是
   "Fly again"（重新请求卡片上的那个词，不管句子条此时选中的是什么）；三维飞机标签走模拟时钟"已飞 / 全段 s simulated"。
@@ -558,5 +562,7 @@ that divergence is a known open item (see the README's "Future Improvements").
 - 画法：与执行器回放的青色分开；三维里飞机按加速的实际时间把这一段飞出来（至少 8 倍、不超过 20 s，
   CallbackProperty，不碰 `viewer.clock`；飞完换成静态属性，不再每帧重建，被地形挡住的部分也画成虚线），读数窗口里四张图
   各一条蓝线，从观测线上说词的那一点出发。只有一个状态的答复（第一个周期就动力学失败）没有线可画（`autopilotHasLine`）。
-- 后端第一次收到这个请求时才载入 torch 与 ts_transformer（常驻内存约多 470 MB）；一次一段（锁），重建过的航班留最近 8 架。
+- 后端第一次收到这个请求时才载入 torch 与 ts_transformer（常驻内存约多 470 MB）；一次一段（锁）。**一个集合的航班在它第一次被请求
+  时一起重建**（`open_flights`：一次 `rebuild_series`，划分的信号、程序文件和到达清单各读一次；约 3 s，只一次），之后留在进程里，
+  集合里每架航班的请求都是毫秒级（原来每架新航班重建 1.5–2 s）。
   后端不热更新：改了这部分要重启后端。

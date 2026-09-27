@@ -1,19 +1,24 @@
-"""The flight: rebuilt from the data plane, the segment flown with the executor's own stepper, stopped at its stop.
+"""The flight: rebuilt from the data plane, the segment flown by the single-flight executor, stopped at its stop.
 
-NOTHING IS PRECOMPUTED, AND THE EXECUTOR IS USED AS IT IS. A flight is rebuilt from the arrival manifest its artefact
-recorded (`flights.rebuild_series` refuses a moved manifest or a rebuilt flight that differs from the stored signals),
-re-read with the labeller (it must give the stored sentence), and flown with `executor.Executor`, one control cycle at a
-time, driven exactly as `executor.fly` drives it — the spec's word clock read before each cycle, a step's words heard
-on the cycle that starts it (`sentence.row_at`, as `judge.words_said` reads the clock) — and stopped at the segment's
-stop: nothing past it is flown. The executor starts from the observed aircraft's state at the segment's first step (the
-data plane's flight first seen there, `dataset.series_from_row`).
+NOTHING IS PRECOMPUTED. A Training set's flights are rebuilt together from the arrival manifests their artefact recorded
+(`flights.rebuild_series` refuses a moved manifest or a rebuilt flight that differs from the stored signals) the first
+time the set is asked for, each re-read with the labeller (it must give the stored sentence). A segment is flown by
+`single.SingleExecutor` — the executor's cycle for one flight in plain floats, pinned to the executor's code
+(`single.require_mirrored_source`, checked when the spec is chosen), checked against `executor.Executor` by result —
+one control cycle at a time, driven exactly as `executor.fly` drives it: the spec's word clock read before each cycle, a
+step's words heard on the cycle that starts it (`sentence.row_at`, as `judge.words_said` reads the clock), and stopped at
+the segment's stop: nothing past it is flown. The executor starts from the observed aircraft's state at the segment's
+first step (the data plane's flight first seen there, `dataset.series_from_row`), set up as `replay.fly_sentences` sets
+up the batch's (`flights.flight_inputs`, the runways and the chart from the artefact's candidates, the published
+vertical paths, the approach speed, the time limit, the word clock).
 
 A MODEL's word (`segment.model_segment`) is flown as the prior's free generation flew it
 (`experiments.prior_free_generation.speak_and_fly`): from the observed state at the sentence's first step, each word
 heard at the step it was said (the time clock: `ClosedLoop.step` tells step k's words on its first cycle), under the
 same time limit — the observed flight's remaining time from that step × the spec's timeout factor (`limits_s`) — and
-judged against the runway the model points at, not the observed one. The executor is deterministic, so the flight is
-the exported sample's own, which the frontend checks point for point. A sentence spoken under the procedure's altitudes
+judged against the runway the model points at, not the observed one. The executor is deterministic and the single-flight
+executor flies the torch executor's flight to round-off, so the flight is the exported sample's own, which the frontend
+checks point for point. A sentence spoken under the procedure's altitudes
 ends where its free generation ended it: at the first flown step whose end state sank more than the track tolerance below
 the glidepath lower edge of the runway in force (`glidepath_stop`, the readout's rule read on the flown record, as the
 readout reads it — after the flight); the flight is cut there and its answer's outcome is `BELOW_GLIDEPATH`.
@@ -22,7 +27,7 @@ readout reads it — after the flight); the flight is cut there and its answer's
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -30,14 +35,12 @@ import numpy as np
 import torch
 
 from ts_transformer.autopilot import replay
-from ts_transformer.autopilot.executor import Executor, Flown
-from ts_transformer.autopilot.flights import rebuild_series
-from ts_transformer.autopilot.frame import AirportCharts
+from ts_transformer.autopilot.executor import Flown
+from ts_transformer.autopilot.flights import flight_inputs, rebuild_series
 from ts_transformer.autopilot.judge import Verdict, flown_track, judge, read_flown
-from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.runway_data import VerticalPath, published_vertical_paths
-from ts_transformer.autopilot.sentence import DistanceClock, Sentences, TimeClock, TrackClock, row_at
+from ts_transformer.autopilot.sentence import row_at
 from ts_transformer.data.dataset import FlightSeries, series_from_row
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals
@@ -49,6 +52,7 @@ from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.procedure import RunwayProcedure, below_floor
 from ts_transformer.repo_layout import arrival_manifest_path
 
+from aeroviz_backend.autopilot_segment import single
 from aeroviz_backend.autopilot_segment.errors import NotFlyable, RequestRefused, Superseded
 from aeroviz_backend.autopilot_segment.segment import (
     ModelSentence, Segment, judged_reading, model_reading, model_segment, segment_of, segment_reading, segment_signals,
@@ -71,39 +75,82 @@ class FlightContext:
     hae_minus_msl_m: float             # its runway's HAE − MSL offset (`training_files.runway_hae_minus_msl_m`)
 
 
-def open_flight(artefact: Path, split: str, dataset_id: str, words: Words) -> FlightContext:
-    """One labelled flight of ``artefact``: its stored signals, the flight rebuilt from the data plane and checked
-    against them (`rebuild_series`), the labeller's reading, which must give the stored sentence, and the offset that
-    gives its heights back as the aircraft reported them."""
+def open_flights(artefact: Path, split: str, dataset_ids: Sequence[str], words: Words
+                 ) -> dict[str, FlightContext | NotFlyable | ValueError]:
+    """Labelled flights of ``artefact`` (a Training set's), each with its stored signals, the flight rebuilt from the
+    data plane and checked against them (`rebuild_series`), the labeller's reading, which must give the stored sentence,
+    and the offset that gives its heights back as the aircraft reported them — what they share read once: the split's
+    signals and sentences, the candidates, each airport's published vertical paths and height offsets, and one
+    `rebuild_series` over them all (one read of each arrival manifest). Each flight answers for itself, as one opened
+    alone did: a flight the data cannot fly is its `NotFlyable`, one a check refuses its `ValueError` — the others open
+    (`rebuilt_each`)."""
     spec = words.spec
     signals = load_signals(artefact, split)
-    found = [index for index, item in enumerate(signals) if item.dataset_id == dataset_id]
-    if len(found) != 1:
-        raise ValueError(f"{dataset_id} is not a labelled {split} flight of {artefact.name}")
-    (index,) = found
-    flight = signals[index]
+    positions: dict[str, list[int]] = {}
+    for index, item in enumerate(signals):
+        positions.setdefault(item.dataset_id, []).append(index)
     sentences = load_sentences(artefact, split, spec)
     stored = {int(value): k for k, value in enumerate(sentences["signal_index"])}
-    if index not in stored:
-        raise ValueError(f"{dataset_id} has no stored sentence in {artefact.name}")
-    geometry = load_candidates(artefact)[flight.airport]
-    reading = read_flight(flight, geometry, spec, words)
-    require_stored_sentence(dataset_id, reading, stored_sentence(sentences, stored[index]))
-    (series,) = rebuild_series(artefact, [flight])
-    group = replay.group_of(series)
-    if group not in (replay.OWN, replay.STAND_IN):
-        raise NotFlyable(f"{dataset_id} cannot be flown: {group}")
-    observed = admit(flight, geometry, spec)
-    return FlightContext(signals=flight, series=series, reading=reading, geometry=geometry,
-                         vertical_paths=published_vertical_paths(geometry), group=group,
-                         approach_ias_mps=replay.flight_approach_ias_mps(series, group),
-                         observed_track_deg=observed.smoothed.track_deg,
-                         observed_distance_m=observed.smoothed.distance_m,
-                         hae_minus_msl_m=runway_hae_minus_msl_m(artefact, flight.airport,
-                                                                arrival_manifest_path(flight.airport))[flight.runway])
+    geometries = load_candidates(artefact)
+    contexts: dict[str, FlightContext | NotFlyable | ValueError] = {}
+    read: list[tuple[FlightSignals, Reading]] = []
+    for dataset_id in dataset_ids:
+        try:
+            if dataset_id not in positions or len(positions[dataset_id]) != 1:
+                raise ValueError(f"{dataset_id} is not a labelled {split} flight of {artefact.name}")
+            (index,) = positions[dataset_id]
+            if index not in stored:
+                raise ValueError(f"{dataset_id} has no stored sentence in {artefact.name}")
+            flight = signals[index]
+            reading = read_flight(flight, geometries[flight.airport], spec, words)
+            require_stored_sentence(dataset_id, reading, stored_sentence(sentences, stored[index]))
+        except ValueError as error:
+            contexts[dataset_id] = error
+            continue
+        read.append((flight, reading))
+    airports = sorted({flight.airport for flight, _ in read})
+    paths = {airport: published_vertical_paths(geometries[airport]) for airport in airports}
+    offsets = {airport: runway_hae_minus_msl_m(artefact, airport, arrival_manifest_path(airport)) for airport in airports}
+    for (flight, reading), rebuilt in zip(read, rebuilt_each(artefact, [flight for flight, _ in read])):
+        if isinstance(rebuilt, ValueError):
+            contexts[flight.dataset_id] = rebuilt
+            continue
+        group = replay.group_of(rebuilt)
+        if group not in (replay.OWN, replay.STAND_IN):
+            contexts[flight.dataset_id] = NotFlyable(f"{flight.dataset_id} cannot be flown: {group}")
+            continue
+        geometry = geometries[flight.airport]
+        try:
+            observed = admit(flight, geometry, spec)
+        except ValueError as error:
+            contexts[flight.dataset_id] = error
+            continue
+        contexts[flight.dataset_id] = FlightContext(
+            signals=flight, series=rebuilt, reading=reading, geometry=geometry, vertical_paths=paths[flight.airport],
+            group=group, approach_ias_mps=replay.flight_approach_ias_mps(rebuilt, group),
+            observed_track_deg=observed.smoothed.track_deg, observed_distance_m=observed.smoothed.distance_m,
+            hae_minus_msl_m=offsets[flight.airport][flight.runway])
+    return contexts
 
 
-def fly_until(executor: Executor, sentences: Sentences, clock: TimeClock | DistanceClock | TrackClock, step_s: float,
+def rebuilt_each(artefact: Path, flights: list[FlightSignals]) -> list[FlightSeries | ValueError]:
+    """Each flight rebuilt (`rebuild_series`): all in one call — one read of each arrival manifest — unless that call
+    refuses one of them; then each alone, so the flight that fails answers for its refusal and the rest are flown."""
+    try:
+        return list(rebuild_series(artefact, flights))
+    except ValueError:
+        pass
+    each: list[FlightSeries | ValueError] = []
+    for flight in flights:
+        try:
+            each.extend(rebuild_series(artefact, [flight]))
+        except ValueError as error:
+            each.append(error)
+    return each
+
+
+def fly_until(executor: single.SingleExecutor, sentence: single.Sentence,
+              clock: single.TimeClock | single.DistanceClock | single.TrackClock, step_s: float,
               stop_steps: int | None, superseded: Callable[[], bool]) -> bool:
     """Drive ``executor`` one cycle at a time exactly as `executor.fly` does — the word clock read before each cycle,
     a step's words heard on the cycle that starts it — and stop before the first cycle that starts a step the clock puts
@@ -115,26 +162,17 @@ def fly_until(executor: Executor, sentences: Sentences, clock: TimeClock | Dista
             raise Superseded(f"a newer request came in: stopped after {cycle} cycles")
         sentence_s = clock.now(cycle, executor.now())
         if cycle % executor.step_rows == 0:
-            if stop_steps is not None and int(row_at(sentence_s, step_s)[0]) >= stop_steps:
+            if stop_steps is not None and int(row_at(sentence_s, step_s)) >= stop_steps:
                 return True
             step_start_s = sentence_s
-        executor.cycle(sentences.at(step_start_s), sentence_s)
-        if bool(executor.done.all()):
+        executor.cycle(sentence.at(step_start_s), sentence_s)
+        if executor.done:
             break
     return False
 
 
-def segment_batch(context: FlightContext, segment: Segment, reading: Reading, signals: FlightSignals) -> replay.Batch:
-    """The segment as the replay's batch of one: its reading and observed rows, the flight from the step the executor
-    starts at."""
-    return replay.Batch(signals=[signals], series=[series_from_row(context.series, segment.start_row)],
-                        readings=[reading], geometries=[context.geometry],
-                        vertical_paths=[context.vertical_paths], approach_ias_mps=[context.approach_ias_mps],
-                        groups=[context.group], drawn={})
-
-
 #: The word clock a model's sentence is flown on, whatever the spec's (`ExecutorParams.word_clock`): its free generation's,
-#: every word heard at its own step (`TimeClock`, `fly_batch_until`).
+#: every word heard at its own step (`single.TimeClock`, `fly_one_until`).
 MODEL_WORD_CLOCK = "time"
 
 
@@ -145,27 +183,25 @@ def model_time_limit_s(context: FlightContext, first_row: int, params: ExecutorP
     return (len(context.reading.words) - first_row) * step_s * params.timeout_factor
 
 
-def fly_batch_until(batch: replay.Batch, params: ExecutorParams, words: Words, stop_steps: int | None,
-                    superseded: Callable[[], bool], *, model_limit_s: float | None = None) -> tuple[Flown, bool, float]:
-    """``batch``'s one sentence flown to ``stop_steps`` (or its outcome): the flown record, whether it stopped there,
-    and the executor's own wall time. The setup is `replay.fly_sentences`' — its time limit, runways, charts, approach
-    speeds and word clock — with the executor stepped here (`fly_until`) in place of `executor.fly`: the setup is pinned
-    against it by `test_autopilot_segment.SetupTest`, the stepping by `StepperTest`. ``model_limit_s``: a model's
-    sentence, flown as its free generation flew it — its time limit, and every word heard at its own step (the time
-    clock) — None for the truth."""
-    spec, f64 = words.spec, torch.float64
-    (reading,) = batch.readings
+def fly_one_until(context: FlightContext, segment: Segment, reading: Reading, signals: FlightSignals,
+                  params: ExecutorParams, words: Words, stop_steps: int | None, superseded: Callable[[], bool], *,
+                  model_limit_s: float | None = None) -> tuple[Flown, bool, float]:
+    """The segment's sentence (``reading``, the observed rows ``signals`` from its first step) flown from the observed
+    state at its first step to ``stop_steps`` (or its outcome): the flown record, whether it stopped there, and the
+    executor's own wall time. Set up as `replay.fly_sentences` sets up `executor.fly` — its time limit, runways, chart,
+    approach speed and word clock — and stepped here (`fly_until`). ``model_limit_s``: a model's sentence, flown as its
+    free generation flew it — its time limit, and every word heard at its own step (the time clock) — None for the
+    truth."""
+    spec = words.spec
     limit_s = len(reading.words) * spec.step_s * params.timeout_factor if model_limit_s is None else model_limit_s
-    executor = Executor(batch.inputs(DEVICE),
-                        Runways.of(batch.geometries, batch.vertical_paths, dtype=f64, device=DEVICE),
-                        AirportCharts.of(batch.geometries, dtype=f64, device=DEVICE),
-                        torch.tensor(batch.approach_ias_mps, dtype=f64, device=DEVICE), params, words,
-                        time_limit_s=torch.tensor([limit_s], dtype=f64, device=DEVICE))
-    sentences = Sentences([reading.words], words, device=DEVICE)
-    clock = (replay.word_clock(batch, params, spec.step_s, DEVICE) if model_limit_s is None
-             else TimeClock(params.cycle_s))
+    executor = single.SingleExecutor(flight_inputs([series_from_row(context.series, segment.start_row)], device=DEVICE),
+                                     context.geometry, context.vertical_paths, context.approach_ias_mps, params, words,
+                                     time_limit_s=limit_s)
+    rows = len(reading.words)
+    clock = (single.word_clock(params, signals.e_m[:rows], signals.n_m[:rows], spec.step_s) if model_limit_s is None
+             else single.TimeClock(params.cycle_s))
     started = time.perf_counter()
-    reached = fly_until(executor, sentences, clock, spec.step_s, stop_steps, superseded)
+    reached = fly_until(executor, single.Sentence(reading.words, words), clock, spec.step_s, stop_steps, superseded)
     fly_s = time.perf_counter() - started
     flown = executor.flown()
     if reached:
@@ -257,10 +293,9 @@ def fly_segment(context: FlightContext, params: ExecutorParams, words: Words, co
         signals = replace(segment_signals(context.signals, segment),
                           runway=context.geometry.candidates[reading.runway_index].ident)
         limit_s = model_time_limit_s(context, model.first_row, params, spec.step_s)
-    batch = segment_batch(context, segment, reading, signals)
-    flown, reached, fly_s = fly_batch_until(batch, params, words,
-                                            None if segment.to_landing else segment.stop_row - segment.start_row,
-                                            superseded, model_limit_s=limit_s)
+    flown, reached, fly_s = fly_one_until(context, segment, reading, signals, params, words,
+                                          None if segment.to_landing else segment.stop_row - segment.start_row,
+                                          superseded, model_limit_s=limit_s)
     glidepath_step = None
     if procedure_masks is not None and procedure_masks.altitudes:
         stop = glidepath_stop(flown, segment.grid, context.geometry, procedure_masks.finals[context.geometry.code], words)
