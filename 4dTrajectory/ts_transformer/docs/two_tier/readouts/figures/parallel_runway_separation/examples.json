@@ -20,7 +20,7 @@
         "radar_or_vertical"
       ],
       "min_distance_over_required": 0.7480587782378729,
-      "loss_under_visual": false,
+      "loss_under_visual": true,
       "apart": {
         "first": {
           "distance_km": 5.551478906026677,
@@ -38,13 +38,13 @@
       "at_start": [
         {
           "established": false,
-          "heading_off_course_deg": 74.99553089824637,
+          "heading_off_course_deg": 74.99553089824639,
           "off_centreline_m": 3172.200792883805,
           "before_threshold_km": 10.067000971367829
         },
         {
           "established": true,
-          "heading_off_course_deg": 0.19376402319282915,
+          "heading_off_course_deg": 0.19376402319284125,
           "off_centreline_m": 2.6517794303156554,
           "before_threshold_km": 7.648516465965166
         }
@@ -68,7 +68,7 @@
         "in_trail"
       ],
       "min_distance_over_required": 0.7505061042356328,
-      "loss_under_visual": false,
+      "loss_under_visual": true,
       "apart": {
         "first": {
           "distance_km": 4.880016574422404,
@@ -86,13 +86,13 @@
       "at_start": [
         {
           "established": true,
-          "heading_off_course_deg": 0.04982268173216818,
+          "heading_off_course_deg": 0.04982268173216653,
           "off_centreline_m": 7.534433759872263,
           "before_threshold_km": 12.469846323912801
         },
         {
           "established": true,
-          "heading_off_course_deg": 1.6254179914399232,
+          "heading_off_course_deg": 1.6254179914399174,
           "off_centreline_m": 61.81670826554558,
           "before_threshold_km": 7.593465074266928
         }
@@ -134,13 +134,13 @@
       "at_start": [
         {
           "established": true,
-          "heading_off_course_deg": 1.3295269904003337,
+          "heading_off_course_deg": 1.3295269904003248,
           "off_centreline_m": 7.103087782245936,
           "before_threshold_km": 2.8143760571350143
         },
         {
           "established": false,
-          "heading_off_course_deg": 0.5496041367024472,
+          "heading_off_course_deg": 0.5496041367024418,
           "off_centreline_m": 10.407601659025008,
           "before_threshold_km": 8.03939868971581
         }
@@ -182,13 +182,13 @@
       "at_start": [
         {
           "established": true,
-          "heading_off_course_deg": 0.4217571885159447,
+          "heading_off_course_deg": 0.4217571885158691,
           "off_centreline_m": 14.12434859690156,
           "before_threshold_km": 3.0287601834489726
         },
         {
           "established": true,
-          "heading_off_course_deg": 0.2600700760343293,
+          "heading_off_course_deg": 0.2600700760343386,
           "off_centreline_m": 1.8779177761592618,
           "before_threshold_km": 1.6371366555333369
         }
@@ -230,13 +230,13 @@
       "at_start": [
         {
           "established": true,
-          "heading_off_course_deg": 0.16646635114295058,
+          "heading_off_course_deg": 0.16646635114295805,
           "off_centreline_m": 1.1841875383854212,
           "before_threshold_km": 3.3350682074335074
         },
         {
           "established": true,
-          "heading_off_course_deg": 0.11028374736848749,
+          "heading_off_course_deg": 0.11028374736844171,
           "off_centreline_m": 8.135609287590345,
           "before_threshold_km": 8.869933627081133
         }
@@ -252,7 +252,7 @@
       "the_one_ahead_not_established": 21,
       "both_headings_within_10_deg_share": 0.4583333333333333,
       "larger_heading_over_30_deg_share": 0.5,
-      "larger_heading_off_course_deg_p50": 33.355321757203335,
+      "larger_heading_off_course_deg_p50": 33.35532175720334,
       "larger_off_centreline_m_p50": 513.1144201942985,
       "height_difference_m_p50": 291.987159296925,
       "min_distance_over_required_p50": 0.8723486737494237,
@@ -271,7 +271,7 @@
       "the_one_ahead_not_established": 150,
       "both_headings_within_10_deg_share": 0.11857707509881422,
       "larger_heading_over_30_deg_share": 0.6996047430830039,
-      "larger_heading_off_course_deg_p50": 44.18755122108776,
+      "larger_heading_off_course_deg_p50": 44.187551221087745,
       "larger_off_centreline_m_p50": 1881.8873736860996,
       "height_difference_m_p50": 195.92106187512837,
       "min_distance_over_required_p50": 0.7094651203327623,
@@ -309,7 +309,7 @@
       "the_one_ahead_not_established": 122,
       "both_headings_within_10_deg_share": 0.5149253731343284,
       "larger_heading_over_30_deg_share": 0.44029850746268656,
-      "larger_heading_off_course_deg_p50": 5.252299939501885,
+      "larger_heading_off_course_deg_p50": 5.2522999395018815,
       "larger_off_centreline_m_p50": 794.7194535839458,
       "height_difference_m_p50": 291.0658892452117,
       "min_distance_over_required_p50": 0.8143206959462113,
@@ -327,8 +327,8 @@
       "neither_established": 20,
       "the_one_ahead_not_established": 159,
       "both_headings_within_10_deg_share": 0.4139072847682119,
-      "larger_heading_over_30_deg_share": 0.5264900662251656,
-      "larger_heading_off_course_deg_p50": 40.35241889691726,
+      "larger_heading_over_30_deg_share": 0.5298013245033113,
+      "larger_heading_off_course_deg_p50": 41.46245718801276,
       "larger_off_centreline_m_p50": 858.4149593342534,
       "height_difference_m_p50": 282.1354737633202,
       "min_distance_over_required_p50": 0.6344838006628094,
@@ -347,7 +347,7 @@
       "the_one_ahead_not_established": 352,
       "both_headings_within_10_deg_share": 0.43271767810026385,
       "larger_heading_over_30_deg_share": 0.29683377308707126,
-      "larger_heading_off_course_deg_p50": 15.949931546296643,
+      "larger_heading_off_course_deg_p50": 15.949931546296654,
       "larger_off_centreline_m_p50": 310.39499160974924,
       "height_difference_m_p50": 292.16296475776517,
       "min_distance_over_required_p50": 0.655680478723636,
@@ -366,7 +366,7 @@
       "the_one_ahead_not_established": 107,
       "both_headings_within_10_deg_share": 0.8800988875154512,
       "larger_heading_over_30_deg_share": 0.08529048207663782,
-      "larger_heading_off_course_deg_p50": 0.7452547434936349,
+      "larger_heading_off_course_deg_p50": 0.7452547434936321,
       "larger_off_centreline_m_p50": 8.504440722260858,
       "height_difference_m_p50": 99.24448304088929,
       "min_distance_over_required_p50": 0.7477359056897147,
@@ -404,7 +404,7 @@
       "the_one_ahead_not_established": 20,
       "both_headings_within_10_deg_share": 0.8810408921933085,
       "larger_heading_over_30_deg_share": 0.08178438661710037,
-      "larger_heading_off_course_deg_p50": 0.441194048112598,
+      "larger_heading_off_course_deg_p50": 0.44119404811260665,
       "larger_off_centreline_m_p50": 10.810502561447583,
       "height_difference_m_p50": 296.0965542413801,
       "min_distance_over_required_p50": 0.9438000159733116,
@@ -423,7 +423,7 @@
       "the_one_ahead_not_established": 13,
       "both_headings_within_10_deg_share": 0.609375,
       "larger_heading_over_30_deg_share": 0.109375,
-      "larger_heading_off_course_deg_p50": 3.4114593818664187,
+      "larger_heading_off_course_deg_p50": 3.4114593818664503,
       "larger_off_centreline_m_p50": 189.56273671097335,
       "height_difference_m_p50": 299.0345785544695,
       "min_distance_over_required_p50": 0.8095688078475769,
@@ -442,7 +442,7 @@
       "the_one_ahead_not_established": 23,
       "both_headings_within_10_deg_share": 0.6268656716417911,
       "larger_heading_over_30_deg_share": 0.208955223880597,
-      "larger_heading_off_course_deg_p50": 2.6748138241312382,
+      "larger_heading_off_course_deg_p50": 2.6748138241313484,
       "larger_off_centreline_m_p50": 51.704886256496316,
       "height_difference_m_p50": 296.4879991986313,
       "min_distance_over_required_p50": 0.6496826359533009,

@@ -4,12 +4,16 @@
 
 - M0 第 1–4 步（分支 `dev-multi-aircraft`）：机型 → CWT 类别表（7360.1K 附录 A 全表 + 补充表）、失去间隔的判定 `inference/separation.py`、
   场景的步与样本切法 `prior/scene.py`、观测航迹普查 `experiments/traffic_census.py`；每步 opus 审查、改完再提交（最后 `eb583c80`）。
-- 判定有两种读法：`IFR`（照原文）和 `VISUAL`（同一方向的不同跑道之间不设最小间隔，都已建立在不同方向跑道五边上的不查）。用户 2026-09-27
-  暂定：检查和奖励用 `VISUAL`，`IFR` 并排报（多机设计 §3.2、§9 第 15 项）。审查指出 `VISUAL` 比 7-4-4 c 的条件宽，等于默认了目视间隔；
-  照原文收紧的读法待用户定（§9 第 16 项，建议收紧）。
-- 普查 `outputs/POOLED/traffic/census_20260927/`（格式 `ts-traffic-census-v2`）：失去间隔的对每小时 IFR 0.98、目视 0.33。英文读数
-  `4dTrajectory/ts_transformer/docs/two_tier/readouts/2026-09-27_parallel_runway_separation.md`，附五个航迹实例，图由
-  `experiments/traffic_separation_examples.py` 画（它原来用 `np.arange(…, last + 1e-9, …)` 取纪元秒的步，丢了最后一步，改用 `scene_steps`）。
+- 判定有两种读法：`IFR`（照原文）和 `VISUAL`。用户 2026-09-27 定：检查和奖励用 `VISUAL`，`IFR` 并排报（多机设计 §3.2、§9 第 15 项）。
+  `VISUAL` 先写成"同一方向的不同跑道之间一律不查"，审查指出它默认了目视间隔、比 7-4-4 c 宽；用户同意照原文改（§9 第 16 项，`8e878ab0`）：
+  只默认目视进近许可，相关 / 独立平行跑道要两机与五边夹角都不大于 30° 才不查，近距一对照一条跑道判（N JO 7110.805 的 c1 (b) 要目视间隔），
+  都已建立的不同方向五边不查（3-10-4 没建模）；普查格式 v3，落地检查只判一次。第二次审查后（`24e3770c`、`8e788f9f`）："转上五边"
+  = 夹角不大于 30° 且在两条五边中线的本侧（中线是读法；"朝本跑道五边飞才算"把五边上偏一度的都判成失去间隔，KRDU 584 → 789 对，弃用）；
+  `Traffic` 带带符号的航迹减五边方向与离中心线的距离，`Separation.right_nm` 带每对平行跑道带方向的间距；普查存不绕回的角、到步上再绕回。
+- 普查 `outputs/POOLED/traffic/census_20260927/`（格式 `ts-traffic-census-v3`，`8e788f9f`；先前各版移到了草稿目录，已被取代）：失去间隔的对
+  每小时 IFR 0.98、目视 0.60。英文读数 `4dTrajectory/ts_transformer/docs/two_tier/readouts/2026-09-27_parallel_runway_separation.md`，附五个航迹
+  实例，图由 `experiments/traffic_separation_examples.py` 画（它原来用 `np.arange(…, last + 1e-9, …)` 取纪元秒的步，丢了最后一步，改用
+  `scene_steps`；跑道标签原来按字母顺序放在左右两边，KSMF 的 17L / 17R 标反了，改为放在各自跑道外侧）。
 - 代码健康待办加一条：`faa_separation(visual_parallels=True)` 是另一个不同的"目视"。
 
 ### 2026-09-27 — 多机设计确认；按第一性原理复查；M0 开始
