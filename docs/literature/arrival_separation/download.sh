@@ -45,6 +45,13 @@ curl -sSL -A "$UA" -o papers/PCG_glossary-p.html                     "$PCG/gloss
 curl -sSL -A "$UA" -o papers/PCG_glossary-s.html                     "$PCG/glossary-s.html"
 curl -sSL -A "$UA" -o papers/PCG_glossary-l.html                     "$PCG/glossary-l.html"
 curl -sSL -A "$UA" -o papers/PCG_glossary-v.html                     "$PCG/glossary-v.html"
+# added 2026-09-27 for the approach-leg names (traffic pattern, final approach, established)
+curl -sSL -A "$UA" -o papers/PCG_glossary-b.html                     "$PCG/glossary-b.html"
+curl -sSL -A "$UA" -o papers/PCG_glossary-d.html                     "$PCG/glossary-d.html"
+curl -sSL -A "$UA" -o papers/PCG_glossary-e.html                     "$PCG/glossary-e.html"
+curl -sSL -A "$UA" -o papers/PCG_glossary-f.html                     "$PCG/glossary-f.html"
+curl -sSL -A "$UA" -o papers/PCG_glossary-t.html                     "$PCG/glossary-t.html"
+curl -sSL -A "$UA" -o papers/PCG_glossary-u.html                     "$PCG/glossary-u.html"
 curl -sSL -A "$UA" -o papers/US_AIP_index.html                       "$AIP/index.html"
 curl -sSL -A "$UA" -o papers/US_AIP_GEN_1.7_Differences_from_ICAO.html "$AIP/part1_gen_section_1.7.html"
 
