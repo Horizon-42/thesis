@@ -85,12 +85,15 @@ export function formatElapsed(seconds: number): string {
   return Math.round(seconds * 100) < 1000 ? `${seconds.toFixed(2)} s` : `${seconds.toFixed(1)} s`;
 }
 
+/** How a model was trained: on data alone, or post-trained from which model by which method. */
+export function trainingModelOrigin(model: TrainingGenerationModel): string {
+  const { fineTuning } = model;
+  return fineTuning === null ? "trained on data alone"
+    : `post-trained from ${trainingModelLabel({ name: fineTuning.fromName, round: fineTuning.fromRound })} by ${fineTuning.schema}`;
+}
+
 /** A model named in full: its name and round, the run its rounds come from and the model it started from — a tab's,
  *  a panel line's, a table row's tooltip. */
 export function trainingModelText(model: TrainingGenerationModel): string {
-  const { fineTuning } = model;
-  return `${trainingModelLabel(model)} (${trainingRunName(model.run)}` +
-    (fineTuning === null ? ", trained on data alone)"
-      : `, post-trained from ${trainingModelLabel({ name: fineTuning.fromName, round: fineTuning.fromRound })} by ` +
-        `${fineTuning.schema})`);
+  return `${trainingModelLabel(model)} (${trainingRunName(model.run)}, ${trainingModelOrigin(model)})`;
 }

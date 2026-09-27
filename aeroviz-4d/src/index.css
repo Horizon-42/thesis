@@ -8,6 +8,53 @@ body,
   height: 100%;
 }
 
+/* ── Scrollbars, everywhere ───────────────────────────────────────────────── */
+/* ONE style for every scrolling box in the app (every surface is dark): a thin rounded thumb in the app's blue on a
+ * transparent track, cyan while hovered or dragged; no arrow buttons. A component never styles its own scrollbar —
+ * it changes these tokens, if anything.
+ * Chromium and Safari draw the ::-webkit-scrollbar parts, which allow the inset pill; Firefox has only the standard
+ * properties — and Chromium (121+) would let those override the parts, so they apply only where the parts do not exist. */
+:root {
+  --scrollbar-size: 10px;
+  --scrollbar-thumb: rgba(126, 184, 247, 0.28);
+  --scrollbar-thumb-hover: rgba(103, 232, 249, 0.55);
+  --scrollbar-track: transparent;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+}
+
+::-webkit-scrollbar {
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: var(--scrollbar-track);
+}
+
+/* the transparent border insets the pill from the box's edge; the background stops at the border */
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb) padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+  border-width: 2px;
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+}
+
 /* ── Airport local terrain demo page ──────────────────────────────────────── */
 .local-terrain-page {
   position: fixed;
@@ -613,29 +660,21 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   letter-spacing: 0.02em;
 }
 
-/* The disclosure for everything read once. It stays in the header rather than
-   above the list, so the list's top edge does not move when it is opened. */
-.training-about-toggle {
+/* Opens the details page (`TrainingDetails`) on its first section: everything read once lives there. */
+.training-details-open {
   margin-left: auto;
-  padding: 0 4px;
-  border: none;
-  border-radius: 4px;
+  padding: 1px 8px;
+  border: 1px solid rgba(103, 232, 249, 0.35);
+  border-radius: 999px;
   background: none;
-  color: rgba(103, 232, 249, 0.85);
+  color: rgba(103, 232, 249, 0.9);
   cursor: pointer;
-  font-size: 14px;
-  line-height: 1.2;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
-.training-about-toggle:hover {
+.training-details-open:hover {
   background: rgba(103, 232, 249, 0.12);
-}
-
-.training-panel-lede {
-  margin: 4px 0 0;
-  font-size: 12px;
-  line-height: 1.45;
-  color: rgba(224, 230, 240, 0.7);
 }
 
 .training-empty {
@@ -767,33 +806,6 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   cursor: default;
 }
 
-.training-vocabulary {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin: 0;
-  font-size: 11.5px;
-}
-
-.training-vocabulary > div {
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-}
-
-.training-vocabulary dt {
-  color: rgba(224, 230, 240, 0.55);
-  white-space: nowrap;
-}
-
-.training-vocabulary dd {
-  margin: 0;
-  text-align: right;
-  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 10.5px;
-  overflow-wrap: anywhere;
-}
-
 .training-flight-list {
   list-style: none;
   margin: 0;
@@ -908,12 +920,6 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 }
 
 /* in a table's row heading, not a flex line */
-.training-results-table .training-model-swatch {
-  display: inline-block;
-  vertical-align: middle;
-  margin-right: 5px;
-}
-
 .training-model-swatch-truth {
   background: #e2e8f0;
 }
@@ -1114,52 +1120,411 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   cursor: default;
 }
 
-/* The readouts behind the overlays: the executor's gate table, the prior's readout. */
-.training-results {
-  margin-top: 6px;
-  padding: 4px 8px;
-  border: 1px solid #2a3552;
-  border-radius: 4px;
-  font-size: 11px;
+/* The readouts in the panel: one line each (a name, its conclusion), opening the details page on its section. */
+.training-details-links {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.training-results summary {
+.training-details-link {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 8px;
+  border: 1px solid #2a3552;
+  border-radius: 6px;
+  background: rgba(23, 32, 58, 0.55);
+  color: #c8d8ec;
   cursor: pointer;
+  font-size: 11px;
+  text-align: left;
+}
+
+.training-details-link:hover {
+  border-color: rgba(103, 232, 249, 0.4);
+  background: #1e2a44;
+}
+
+.training-details-link-name {
+  font-weight: 600;
+  color: #e0e6f0;
+}
+
+.training-details-link-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(224, 230, 240, 0.6);
+}
+
+.training-details-link-open {
+  color: rgba(103, 232, 249, 0.85);
+}
+
+/* ── The details page (`TrainingDetails`) ──────────────────────────────────── */
+/* Portalled into document.body (AV7) and modal: a dimmed scene behind, one sheet — tabs down the left, the section
+   scrolling on the right. */
+.training-details-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 450;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  box-sizing: border-box;
+  /* dimmed, not blurred: a blur would be recomputed over the live globe every frame */
+  background: rgba(2, 6, 16, 0.6);
+}
+
+.training-details {
+  width: min(1180px, 100%);
+  height: min(860px, 100%);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  border: 1px solid rgba(103, 232, 249, 0.3);
+  border-radius: 10px;
+  background: rgba(12, 16, 26, 0.98);
+  color: #e0e6f0;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  box-shadow: 0 24px 60px rgba(2, 8, 23, 0.6);
+  outline: none;
+}
+
+.training-details-head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid #1f2a44;
+}
+
+.training-details-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.training-details-context {
+  font-size: 12px;
+  color: rgba(224, 230, 240, 0.6);
+}
+
+.training-details-close {
+  margin-left: auto;
+  padding: 0 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: #c8d8ec;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.training-details-close:hover {
+  background: rgba(103, 232, 249, 0.12);
+}
+
+.training-details-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+}
+
+.training-details-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 8px;
+  border-right: 1px solid #1f2a44;
+  overflow-y: auto;
+}
+
+.training-details-tabs button {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 10px;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: 0 6px 6px 0;
+  background: none;
+  color: #c8d8ec;
+  cursor: pointer;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.training-details-tabs button:hover:not(:disabled) {
+  background: rgba(103, 232, 249, 0.07);
+}
+
+.training-details-tabs button[aria-selected="true"] {
+  border-left-color: #67e8f9;
+  background: rgba(103, 232, 249, 0.1);
+  color: #fff;
+  font-weight: 600;
+}
+
+.training-details-tabs button:disabled {
+  cursor: default;
+  color: rgba(224, 230, 240, 0.35);
+}
+
+.training-details-tab-absent {
+  font-size: 10.5px;
+  font-weight: 400;
+}
+
+.training-details-main {
+  min-width: 0;
+  overflow: auto;
+  padding: 16px 24px 24px;
+  font-size: 13px;
+  line-height: 1.55;
+  outline: none;
+}
+
+.training-details-main h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.training-details-subhead {
+  margin: 22px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7eb8f7;
+}
+
+.training-details-lede {
+  max-width: 78ch;
+  margin: 0 0 12px;
+  color: rgba(224, 230, 240, 0.78);
+}
+
+.training-details-main code {
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.92em;
   color: #c8d8ec;
 }
 
+/* a model's or a switch's colour, beside its name */
+.training-details-main .training-model-swatch {
+  display: inline-block;
+  vertical-align: middle;
+  width: 16px;
+  height: 4px;
+  margin-right: 8px;
+}
+
+/* the readings of each switch and overlay, and every field every model shares: a name column and its text */
+.training-details-main .training-notes-list,
+.training-details-main .training-vocabulary,
+.training-details-facts,
+.training-details-terms {
+  display: grid;
+  grid-template-columns: minmax(140px, max-content) minmax(0, 1fr);
+  gap: 0;
+  margin: 0 0 8px;
+  max-width: 1000px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.training-details-main .training-notes-list > div,
+.training-details-main .training-vocabulary > div,
+.training-details-facts > div,
+.training-details-terms > div {
+  display: contents;
+}
+
+.training-details-main .training-notes-list dt,
+.training-details-main .training-vocabulary dt,
+.training-details-facts dt,
+.training-details-terms dt {
+  display: block;
+  padding: 7px 16px 7px 0;
+  border-bottom: 1px solid #1c2640;
+  color: rgba(224, 230, 240, 0.6);
+  white-space: nowrap;
+}
+
+.training-details-main .training-notes-list dd,
+.training-details-main .training-vocabulary dd,
+.training-details-facts dd,
+.training-details-terms dd {
+  margin: 0;
+  padding: 7px 0;
+  border-bottom: 1px solid #1c2640;
+  color: #e0e6f0;
+  text-align: left;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.training-details-main .training-notes-list dt {
+  color: #e0e6f0;
+}
+
+.training-details-main .training-vocabulary dd,
+.training-details-facts dd {
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* ── The readouts' tables (on the details page) ── */
 .training-results-table {
-  width: 100%;
-  margin-top: 6px;
-  border-collapse: collapse;
-  font-size: 10.5px;
+  width: auto;
+  min-width: min(560px, 100%);
+  margin: 0 0 20px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
 
 .training-results-table caption {
+  caption-side: top;
+  padding: 0 0 6px;
   text-align: left;
-  padding-bottom: 2px;
-  color: rgba(224, 230, 240, 0.6);
+  font-size: 13px;
+  color: #e0e6f0;
 }
 
-.training-results-table th,
-.training-results-table td {
-  padding: 1px 3px;
+.training-results-caption-note {
+  margin-left: 10px;
+  font-size: 11.5px;
+  color: rgba(224, 230, 240, 0.55);
+}
+
+.training-results-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 7px 14px;
+  border-bottom: 1px solid #34456b;
+  background: #111a2b;
+  color: rgba(224, 230, 240, 0.65);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   text-align: right;
   white-space: nowrap;
-  border-bottom: 1px solid rgba(42, 53, 82, 0.6);
 }
 
-.training-results-table th[scope="row"] {
+.training-results-table thead th:first-child {
+  text-align: left;
+  border-top-left-radius: 6px;
+}
+
+.training-results-table thead th:last-child {
+  border-top-right-radius: 6px;
+}
+
+.training-results-table td,
+.training-results-table tbody th {
+  padding: 6px 14px;
+  border-bottom: 1px solid #1c2640;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.training-results-table tbody th {
   text-align: left;
   font-weight: 500;
+  color: #e0e6f0;
+}
+
+.training-results-table tbody tr:hover td,
+.training-results-table tbody tr:hover th[scope="row"] {
+  background: rgba(103, 232, 249, 0.05);
+}
+
+.training-results-total td,
+.training-results-total th {
+  font-weight: 600;
+  background: rgba(126, 184, 247, 0.06);
+}
+
+.training-results-best {
+  font-weight: 700;
+  color: #fff;
+}
+
+.training-results-mark {
+  display: inline-block;
+  width: 1.2em;
+  margin-left: 4px;
+  text-align: center;
+}
+
+.training-results-mark.is-pass {
+  color: #4ade80;
+}
+
+.training-results-mark.is-fail {
+  color: #f87171;
+}
+
+.training-results-count {
+  margin-left: 2px;
+  font-size: 11px;
+  color: rgba(224, 230, 240, 0.45);
+}
+
+.training-results-empty {
+  color: rgba(224, 230, 240, 0.35);
+}
+
+/* the models' table: a model's rows grouped under its name, a rule between models */
+.training-results-models tbody th[scope="rowgroup"] {
+  vertical-align: top;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 1px solid #2a3858;
+}
+
+.training-results-models tbody tr:last-child td {
+  border-bottom-color: #2a3858;
+}
+
+.training-results-table .training-results-where {
+  text-align: left;
+  color: rgba(224, 230, 240, 0.7);
+}
+
+/* a table of words, not numbers: left-aligned and allowed to wrap */
+.training-results-text td {
+  text-align: left;
+  white-space: normal;
+}
+
+.training-results-text thead th {
+  text-align: left;
 }
 
 .training-results-note {
-  margin: 6px 0 2px;
-  font-size: 10px;
-  line-height: 1.45;
-  color: rgba(224, 230, 240, 0.5);
+  max-width: 78ch;
+  margin: -8px 0 16px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgba(224, 230, 240, 0.6);
 }
 
 /* The bar spans the whole width above the transport: the sentence is read left to
@@ -5208,18 +5573,6 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   max-height: calc(100dvh - 32px);
   overflow-y: auto;
   padding-right: 4px;
-  scrollbar-width: thin;
-}
-
-.procedure-details-sidebar::-webkit-scrollbar,
-.procedure-details-inspector::-webkit-scrollbar {
-  width: 6px;
-}
-
-.procedure-details-sidebar::-webkit-scrollbar-thumb,
-.procedure-details-inspector::-webkit-scrollbar-thumb {
-  background: rgba(135, 163, 196, 0.22);
-  border-radius: 999px;
 }
 
 .procedure-details-main,

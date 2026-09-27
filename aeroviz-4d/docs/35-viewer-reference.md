@@ -347,9 +347,9 @@ that divergence is a known open item (see the README's "Future Improvements").
   Draw 开关只改 `show`；回放与实时执行器在 `useTrainingExecutorLayers.ts`；三维回放的计算（倍数、位置、标签）在
   `trainingAutopilot.ts`，不用 Cesium 就能测。
 - 实时执行器与叠加层的视图只在"属于屏幕上这架航班"时画（`autopilotOnScreen`、`overlayOnScreen`：机场、集合、航班都对上）。
-- **只在提示里的说明也写成页面文字**：读数窗口的色样与两行说明、先验窗口的读法、三维图例的每一行、面板上每个 Draw 开关与
-  叠加层，各有一个 ⓘ（`training/NotesToggle.tsx`：`aria-expanded` 的按钮，展开是一个 `role="note"` 的区块，列表用 `NotesList`），
-  键盘能到、读屏能读。
+- **只在提示里的说明也写成页面文字**：读数窗口的色样与两行说明、先验窗口的读法、三维图例的每一行，各有一个 ⓘ
+  （`training/NotesToggle.tsx`：`aria-expanded` 的按钮，展开是一个 `role="note"` 的区块，列表用 `NotesList`），键盘能到、读屏能读；
+  面板上每个 Draw 开关与叠加层的说明、先验读数表原来只在每行提示里的那些数，写在详情页上（AV33）。
 - 集合与叠加层里的名字镜像（`TRAINING_STRATA` ↔ `instructions.readout.STRATA`，`TRAINING_PRIOR_RULES` ↔ `prior.readout.RULES`）
   由后端的 `MirrorTest` 逐字比对；样本的其余镜像由 `test_instruction_training_export.py` 钉住。
 
@@ -451,6 +451,37 @@ that divergence is a known open item (see the README's "Future Improvements").
   `generation.procedureMasks` 含 `procedure-altitudes-v2`（`TRAINING_PROCEDURE_ALTITUDES`）时接受这个结局。实时执行器重飞时带回
   这几套屏蔽和数据摘要，后端核对后在同一步截停（AV26）。导出器拒绝在程序屏蔽下画的正式读数，结果表的说明写明这一点；修法见仓库
   `docs/code-health-followups.md`（2026-09-26）。
+
+### AV33 · Training 的详情页：左栏不再展开长内容（2026-09-27）
+
+- 用户（2026-09-27）："左边栏的详情……展开后都挤在左边栏里 根本没法读 可以单独设计一个详情页"。原来标题旁的 ⓘ 在左栏里展开
+  模块说明、每个开关的说明、词表的各项数值；最下面三个 `<details>` 在左栏里展开回放门表、先验读数表、模型句子的落地表——
+  左栏只有 220–280 px 宽，表格挤成一团。
+- 现在：`src/components/training/TrainingDetails.tsx` 是一个**模态**的详情页（经 portal 挂到 `document.body`，AV7；背景变暗），
+  左边一列分节标签（What this view shows · Vocabulary · The models' own sentences · The executor's replay gate · The prior's
+  readout），右边是选中那一节，单独滚动。没有内容的节照样列出、灰掉，写明原因——先看叠加层清单（loading … / the overlays
+  manifest cannot be read / none published for this set，清单拒了条目时后面写拒了几条），再看开关与下载
+  （switch on … under Draw / loading … / cannot be read）。打开时 `document.body` 下它以外的元素都设 `inert`（Tab 出不去）；Esc
+  （焦点在哪都行）、右上角 ×、点背景（左键）关闭，焦点回到打开它的那个按钮——按钮由面板传进来，因为 Safari 点按钮不给它焦点；
+  面板被隐藏（切到别的任务）时详情页关掉，回来不会自己再开。↑↓ 在有内容的节之间移动。
+- 左栏：标题旁一个 **Details** 按钮打开第一节；Draw 下面每个读数一行——名字加结论（如 "Replay gate  val · spec 0d6a68a92c6f"、
+  "Models' sentences  base 86% · landing r1 98% · …"），装不下时省略号，全文在提示里——点它打开详情页的那一节。左栏里不再有表格。
+- 各表按宽页重排（`TrainingResults.tsx`）：表头大写小字、行间细线、数字右对齐等宽数字、合计行加底色；门表的 ✓ / ✗ 用绿 / 红，
+  放在份额旁边；先验的似然表里每行三者中最低的加粗；**原来只在每行提示里的先验读数**（第一个预测步的第一名命中率、换词步数、
+  换词处说词的概率、第一名 / 前五名命中率、不该说时说词的比例）成了自己的一张表；第一个预测步的跑道单独一张表；模型句子的落地表
+  每个模型一组行（有正式读数时才出现 "sentences of" 一列，否则每行都是 "this set"），份额后面淡色写 "of N"；每个模型怎么抽样、
+  怎么飞：所有模型相同的字段（每架样本数、温度、种子、执行器规格、时限、正式读数）在表上面写一次，不同的字段（run、从哪个模型
+  后训练、程序屏蔽）是表的列。数都与原来相同，只是摆法变了。
+
+### AV34 · 滚动条全局统一一种样式（2026-09-27）
+
+- 用户（2026-09-27）：Training 左栏内外两个滚动条是浏览器默认样式，和配色不搭，"最好是全局性质的修改"。现在 `index.css` 开头
+  一处定义所有滚动区的滚动条：`:root` 上的 `--scrollbar-size`（10 px）、`--scrollbar-thumb`（应用的蓝 `#7eb8f7`，28 %）、
+  `--scrollbar-thumb-hover`（青 `#67e8f9`，55 %）、`--scrollbar-track`（透明）；Chromium / Safari 用 `::-webkit-scrollbar*`
+  画内缩的圆头细条（透明边 3 px，悬停时 2 px）、不要箭头按钮；Firefox 只有标准属性（`scrollbar-width: thin` + `scrollbar-color`），
+  放在 `@supports not selector(::-webkit-scrollbar)` 里——Chromium 121 起标准属性一设就压过 `::-webkit-scrollbar*`，不能两者都给它。
+- **组件不再各自写滚动条样式**；要不同的只改这几个变量。原来唯一的一处（程序详情页的侧栏）已删掉。整个应用都是深色表面，所以
+  只有一套颜色。
 
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
 

@@ -31,8 +31,8 @@ interface BrowserPlacement {
 const BROWSER_MAX_WIDTH = 860;
 const BROWSER_MAX_HEIGHT = 660;
 const VIEWPORT_MARGIN = 12;
-/** Past the trigger's edge: the left dock's inner padding + scrollbar, so the browser opens
- *  beside the panel instead of covering its edge. */
+/** Past the trigger's edge: the left dock's inner padding (12 px) + its scrollbar (`--scrollbar-size`, 10 px) with room
+ *  to spare, so the browser opens beside the panel instead of covering its edge. */
 const PANEL_CLEARANCE = 28;
 
 /** Beside the panel when the viewport has room, else pinned inside the right edge. */
