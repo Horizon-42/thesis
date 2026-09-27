@@ -19,6 +19,7 @@
 | 分支 | 左栏停在句子条上面、模型自己说的句子（§2.7、§4.8）：`dev-training-sentences`，2026-09-26 合并进 `dev-two-tier`（`e87bfcf3`）。模型的词也交给实时执行器飞、模型的带不再画斜线、模型结束处写时间（§4.7、§4.8）：`dev-model-autopilot`，2026-09-26 合并进 `dev-two-tier`（`46af94fd`），后端与前端已重启。航向词多飞的那个提前量画成淡色虚线的尾巴（§4.7）：`dev-heading-lead-tail`，2026-09-26 合并进 `dev-two-tier`（`02c14001`），后端与前端已重启。 多轮后训练之间切换、模型按名字认，以及模型按自己的程序屏蔽说话（§2.7、§4.7、§4.8）：`dev-training-rounds`，2026-09-27 合并进 `dev-two-tier`（`aa190a92`）。详情页（§4.9）与全局统一的滚动条（AV34）：`dev-training-details`，2026-09-27 合并进 `dev-two-tier`（`2aa72431`）。执行器 v11 的两个新结局（过另一条跑道的入口、越过入口太高）与越过入口时的跑道：`dev-executor-v11`，2026-09-27 合并进 `dev-two-tier` |
 | 发布 | 现行集合 **`instruction_v3_day_split`**（2026-09-25，五个机场各 40 架新验证集航班，直线进近 / 被引导各 20，从 `v4_20260924` 导出）。**模型自己说的句子**（§2.7、§4.8）：base 模型（`prior/v3_step1_20260924/full_s1337`）和按落地奖励后训练的第 1 轮（`prior/v3_rl_20260925/grpo_s1337/round_01`）各一份，每架 4 个样本，执行器规格 `v7_20260925`；2026-09-26 经用户同意发布到 `public/data`（每个机场 `generation_v3_step1_20260924_full_s1337`、`generation_grpo_s1337_round_01`），`check-publication` 五个机场 0 错误。在这 40 × 5 架里按自己机型动力学能飞的 180 架 × 4 个样本上：base 模型落地 652/720（90.6 %），后训练 694/720（96.4 %）；两者正式 val 读数 90.2 % / 97.2 %。同时发布了先验第三版（base 模型）的教师强制预测 `prior_v3_step1_20260924_full_s1337` 和执行器 v6 的验证集回放 `executor_v6_20260924`（规格 v7 打开，每架重飞都与正式回放那一行相同，200 架飞 188 架全部落地）；实时执行器（§4.7）不需要叠加层。更早的集合与叠加层按名字拒读，发布记录见仓库 `docs/CHANGELOG.md` 。**2026-09-27 重新发布（v2，用户同意）**：两份 v1 模型句子从五个机场的 `overlays.json` 撤下，目录移到仓库 `data/retired_training_overlays/20260927/`（连同撤下前的清单）；新导出 base（`generation_base_fb81ccc9`）与 landing r1–r8（`generation_landing_rNN_<sha8>`），执行器规格 `v10_20260926`、产物 `v4_20260924`、每架 4 个样本、不带正式读数（盘上的读数是旧格式或另一份产物）；base 与 landing 的程序屏蔽都是"无"。`check-publication --server` 五个机场 0 错误、各 11 个叠加层对照集合读过；浏览器（5174 前端 + 8766 后端，合并后的代码）：landing r1–r8 按轮切换，r8 第 1 个样本的 "descend to land" 现飞 113.0 s、在包络内、与样本 0.00 m / 58 点。2026-09-27 又导出 augmented r1–r8（第二阶段 `v3_stage2_clip_20260926`，跑完补记屏蔽之后，`procedure-altitudes-v2`；保留的是第 7 轮）：五个机场各 19 个叠加层对照集合读过，0 错误。712 个样本（178 架 × 4）上落地：base 88.3 %，landing r1–r8 95.6–98.0 %，augmented r1–r8 94.5–96.3 %；augmented 被下滑道下边界截停的样本每轮 1–8 个，landing 与 base 没有（它们不带程序屏蔽）。截停的样本 KSTL SWA3316 augmented r1 第 4 个（414 s）在后端重飞：结局 `below_glidepath`、结束时刻与最后一点与样本逐位相同；句子条上写 "#4: below glidepath" |
 | 实时执行器 | 后端 `POST /autopilot/segment`（`aeroviz_backend/autopilot_segment/` 包）：在句子条上点一个词，执行器从观测飞机说这个词时的状态飞这个词的一段（到它的包络结束之处：同列下一个词说出的地方，航向词再往后一个提前量；到了句子末尾就飞到落地），只判这个词。执行器代码一行不改，用它的单步接口 `Executor` 一个控制周期一个周期地飞，到段尾就停；每次都重新飞，不读任何回放或叠加层（§4.7）。用哪份执行器规格由后端按"现在的执行器代码接受的那一份"自动找：现在是 `v7_20260925`。界面上并排给出模拟飞行时间与计算用时。2026-09-25 在五个机场 200 架航班上逐段试飞 3,032 段：无异常，1,904 段飞到段尾、1,128 段落地；唯一的拒绝是没有机型动力学的航班（252 段，正式回放同样不飞）；每段耗时中位数 0.39 s、最长 3.6 s。单步飞法与"飞满时限再截断"逐位相同（216 段，状态与结束周期一致）。同一页面的新请求取代它还在排队或正在飞的旧请求（409），连点几个色块只飞最后一个。整模块审查之后又在同样 200 架航班的全部 3,526 个航向词上试飞：3,230 段飞成（3,037 段在包络内飞到段尾、143 段在包络内落地、49 段不判、1 段出界），296 段机型没有动力学；"带被段尾截短"的拒绝一次也没有出现（§4.7）。**模型说的词也能飞**：把模型的句子从它开口的那一步重新飞一遍，就是导出的那个样本自己的飞行——2026-09-26 在 KRDU、KMSY 两个模型各 4 架航班 × 2 个样本上飞了 104 段（每个样本前 4 个航向词或许可、最后一个高度词），与导出的航迹逐点比，最大差 0.000 m（§4.7 "模型的词"） |
+| 增强起点 | 2026-09-27 用户要看模型从增强起点怎么飞（§2.8 数据、§4.10 界面）。**设计已定，开发中**：分支 `dev-augmented-starts`（工作树 `.claude/worktrees/augmented-starts`）。顺序：① 导出器 `--augment-seed` 与新格式 + 测试；② 前端读取器与各视图；③ 一次审查、全套测试；④ 三个模型 × 五个机场导出到工作树镜像目录，`check-publication` 0 错误；⑤ 用户合并后，经用户同意再导出到正式目录。增强起点上的实时执行器不在这次（§4.10）。 |
 | 测试 | 2026-09-26（模型的词交给实时执行器，分支 `dev-model-autopilot`）：前端 Vitest 98 个文件 834 条，`tsc` 与 `npm run typecheck:scripts` 无错；后端 `aeroviz_backend/tests` 171 条（`test_autopilot_segment.py` 64 条：`ModelSegmentTest` 14 条——句子的读法与按名字拒绝（开口一步钉在 `N_LOOK`）、步数上限等于 `rows_for`、从模型开口的那一步飞、最后一步的词飞到结局、判决读的词、判决用句子最后的跑道、时限与 `prior_free_generation.limits_s` 相同、判定落在词自己的那一步、下降角词的管子从它那一步起（另用标注器自己的 `tube_checks` 在"平飞五步再 3° 下降"上核对）、第二次许可不判、航向词从自己那一步读、航迹从词的那一步切出；`ModelFlightTest` 6 条——只飞自己机型动力学、时间词钟与时限、判决用的跑道、下降角词判决读的句子、结束的那一步起拒绝、门截断之后的词拒绝；`BackendTest` 一条走通模型请求（按时限读句子、交给飞行、答复写时间词钟）；`FreeGenerationTest`——`speak_and_fly` 自己的循环照稿说话，与后端的飞法在真实执行器上逐状态、逐周期的模式与限制都相同）。opus 审查两轮：第一轮 1 条必须改（下降角词的管子）、3 条应改、若干小处；第二轮没有必须改的，1 条应改（判决没读到的词）与几处小处；全部改掉；浏览器（5174 前端 + 8766 后端，都从工作树起）：KRDU CMP466 base 模型第 1 个样本的 heading 045°（步 91–150，在包络内，与样本 0.00 m / 62 点）、后训练第 1 个样本的 heading 230°（飞到落地，与样本 0.00 m / 61 点）。2026-09-26（左栏与模型自己说的句子，分支 `dev-training-sentences`）：前端 Vitest 98 个文件 822 条，`tsc` 与 `npm run typecheck:scripts` 无错；ts 全套 1,434 条通过（新导出器 `test_prior_generation_training_export.py` 16 条，含在合成产物上端到端跑 `main`：集合顺序、自己动力学的航班各飞 3 个样本且各自从自己第 8 行的状态起飞、不飞的航班、清单、重跑逐字相同、不覆盖）。两轮 opus 审查（第一轮 8 条应改 + 11 条小处全部改掉，第二轮确认并补了一个没有航班可数时的崩溃与一个未钉住的镜像）。`check-publication --airports-root` 对工作树的镜像目录：五个机场各 4 个叠加层对照集合读过，0 错误。浏览器（5174）核对过：左栏停在句子条上面、标签页与样本、模型不飞的航班、结束之后涂暗（KMSY DAL8784 后训练第 2 个样本：325 s 越过入口没截获，模型一直说到 650 s）、三维模型航迹、图例。2026-09-26（多轮后训练之间切换，分支 `dev-training-rounds`）：前端 Vitest 98 个文件 843 条，`tsc` 与 `npm run typecheck:scripts` 无错；ts `test_prior_generation_training_export.py` + `test_training_overlays.py` 33 条（名字按方法给、各版本同名、未知方法拒绝、起步模型从它自己的配置读、带程序屏蔽的读数拒绝、`MODEL_NAMES` 镜像、`model` 块字段逐个与 TS 接口比对）。opus 审查一轮 + 复核：2 条必须改（只有一轮的第二个 run 没写 run；同一轮导出两次会出现 "r"/"rnull" 按钮）、4 条应改，全部改掉。真实数据：KRDU 上用 v10 执行器导出了 6 份到工作树里的镜像目录（base、landing r1/r2、augmented r1 两个 run 各一份、restart 的 r2），`check-publication --airports-root` 0 错误。2026-09-27（模型按自己的程序屏蔽说话、截停一路显示到实时执行器，同一分支）：Vitest 98 个文件 845 条；后端 `aeroviz_backend/tests` 178 条（`test_autopilot_segment.py` 71 条：`GlidepathStopTest`——截停步与 `glidepath_stops` 逐架相同、截停后真实判决读到的最后状态就是导出样本航迹的最后一点；`ProcedureMasksTest`——无屏蔽不读数据、摘要不同或不认识的一套按名字拒绝；`ModelFlightTest`——截在截停步、判决先读到事件时拒绝；`PayloadTest`——结局 `below_glidepath`、没有越过入口）；ts 全套 1,514 条。opus 审查 1 条必须改（截停晚一个周期）、3 条应改、7 条小处，全部改掉。2026-09-27（详情页与全局滚动条，分支 `dev-training-details`）：Vitest 99 个文件 853 条（`TrainingDetails.test.tsx` 5 条：没有内容的节写原因、↑↓ 跳过灰掉的节、要的节没内容时回到第一节并告诉面板、打开时其余部分 inert 且关上后焦点回到打开的按钮、只有左键点背景才关；`TrainingPanel.test.tsx` 新增：详情页上的开关说明与词表、各读数一行并打开对应的节、关掉叠加层时写"switch on … under Draw"、隐藏面板时关掉且不再自己打开、没有正式读数时不出 "sentences of" 列），`tsc` 与 `npm run typecheck:scripts` 无错。opus 审查两轮：第一轮没有必须改的，6 条应改（新表的列义只在提示里、灰掉的原因没看清单状态、模态但焦点能 Tab 出去、Safari 点按钮不给焦点所以焦点回不去、读数窗口提示仍指向已删的 ⓘ、Mac 上有样式的滚动条要占 10 px）与十几处小处，除 Mac 占位这一条（用户要的就是有样式的滚动条）外全部改掉；复核 3 处小处，改了 2 处。浏览器（5174，从工作树起）：KRDU 五节都看过，打开时应用其余部分 inert、焦点在对话框上，Esc 关后焦点回到 Details |
 | 盘上的旧集合 | `box`、`box_v3`、`prior_s1337_val`、`prior_s2024_val`、`instruction_v1`、`instruction_v2`（五个机场都有），`v15_nomerge_noposition`（只有 KRDU）。它们属于别的词表，仍在 `index.json` 里列着，界面按名字拒读、不下载。删不删由用户决定 |
 
@@ -235,6 +236,47 @@ python run_ts.py prior_generation_training_export \
   没飞的一个也没有。集合的进近词表必须有"cleared"与"go-around"（`TRAINING_APPROACH_CLEARED` / `TRAINING_APPROACH_GO_AROUND`
   是导出器 `APPROACH_NAMES` 的镜像，由 `test_instruction_training_export.py` 钉住）。
 - 导出时间：CPU 上每个模型五个机场约 2 分钟，每机场每模型 1.2–1.9 MB。
+
+### 2.8 增强起点上的模型句子（`prior-generation-augmented`）
+
+用户 2026-09-27：前端的 40 架都是真实的 val 航班，模型的句子都从观测状态起飞；augmented 这个模型是在**增强起点**上后训练的
+（后训练设计 §4：真实起点绕机场转一个角、抬高或降低、加减速），想在前端看模型从增强起点怎么飞。这一节是它的数据，界面见 §4.10。
+
+```bash
+python run_ts.py prior_generation_training_export --augment-seed 1337 \
+    --prior 4dTrajectory/outputs/POOLED/prior/v3_stage2_clip_20260926/aug_s1337/round_07 \
+    --instructions 4dTrajectory/outputs/POOLED/instruction_language/<它训练用的产物> \
+    --executor 4dTrajectory/outputs/POOLED/executor/<现在的执行器代码接受的规格> \
+    --airports-root aeroviz-4d/public/data/airports --set instruction_v3_day_split \
+    --airport KMSY --airport KRDU --airport KSJC --airport KSMF --airport KSTL
+```
+
+- **同一个导出器，多一个选项**：`prior_generation_training_export` 加 `--augment-seed`。给了它，每架航班不从自己的起点飞，而从
+  增强起点飞，写成**另一种叠加层**：种类 `prior-generation-augmented`，格式 `aeroviz-training-augmented-generation-v1`，默认 id
+  `generation_augstart_<名字>[_rNN]_<检查点 sha256 前 8 位>`。§2.7 的 `aeroviz-training-generation-v3` 一个字不改——盘上已发布的
+  17 份叠加层不用重导。
+- **增强怎么抽**——和第二阶段训练、它的 val 读数（`val_*_aug_400x4`）同一套代码（`prior_free_generation.augmented_starts`、
+  `prior.augment`）：
+  - 绕机场参考点转 δ ∈ [−15°, 15°]、抬高 Δh ∈ [−150, 150] m、加速 1 + κ，κ ∈ [−5 %, 5 %]，均匀抽；
+  - 抽到的起点必须"像数据"：第 8 行的高度落在这个机场训练集第 8 行高度的第 1–99 百分位之间，空速高于执行器在这个质量和高度下的
+    失速下限；
+  - 最多抽 10 次，都不行的航班不飞，列出原因。
+  - 随机数发生器用 `--augment-seed` 播种，按集合里**能飞的航班的顺序**逐架抽，与模型无关、与样本的随机数分开。所以同一个种子、
+    同一份产物、同一个集合导出的每个模型，**同一架航班的增强起点完全一样**——换模型比的是同一个起点。这和 val 读数里同一架航班的
+    增强不是同一个（那边按抽样的顺序抽），分布相同。
+- **怎么飞**：同 §2.7（`speak_and_fly`、模型自己的程序屏蔽、`said_rows` 的截停），只有两处不同，都与训练和 val 读数一致：
+  - 先验读的前 8 行观测、执行器起飞的状态，都换成增强后的；
+  - 时限是来源航班观测剩余时间的 **2 倍**（`augment.TIMEOUT_FACTOR`），真实起点是 1.5 倍。
+  - 前 8 行没有标注的词：那些词属于来源航班自己的起点，不属于增强后的。
+- **每架航班多写两样**：
+  - `augmentation`：`rotationDeg`、`altitudeM`、`speedScale`、`draws`（抽了几次）；没有合格的抽法时为 null，这架不飞；
+  - `observed`：增强后的前 8 行加起飞那一行（第 0–8 行，第 8 行就是增强后的起点），`tS`、经纬度、MSL 与椭球高——先验看到的
+    就是这一段，三维要把它画出来。
+  - 样本与 §2.7 逐字段相同（词、结局、结束时刻、越过入口、首末跑道、航迹……）。
+- **不写正式读数**（没有 `readout` 块）：第二阶段的 `val_*_aug` 读数是另一次抽法，只在 readouts 文档里。
+- **绑定与核对**：与 §2.7 相同；另外 `observed` 的最后一点必须就是每个样本航迹的第一点（同一个起点），增强量在上面的范围以内，
+  `draws` 在 1–10 之间，`augmentation` 为 null 的航班不飞。
+- **先导出哪几个模型**：采纳的三个——base、landing r1、augmented r7，五个机场；别的轮次要看时再导。
 
 ---
 
@@ -673,6 +715,26 @@ own flight — 0.00 m at most from sample #1 over 62 points"；差到 0.5 m 以�
   loading … / cannot be read）。
 - 打开时页面其余部分不可操作（`inert`，Tab 出不去）；Esc（焦点在哪都行）、右上角 ×、点背景关闭，焦点回到打开它的按钮；
   切到别的任务时关掉，回来不会自己再开；↑↓ 在有内容的节之间移动。
+
+### 4.10 增强起点
+
+§2.8 的叠加层在界面上怎么读。原则：它是"模型的句子"的一种，§4.8 的读法全部照用；不同的只有起点，而起点不是真值的。
+
+- **句子条头部多一个开关 `Real start | Augmented start`**：只在集合上发布了增强起点的叠加层时出现，放在标签页前面。
+  - 选 Augmented：标签页换成有增强起点叠加层的模型（没有 Truth——真值没从这个起点飞过）；从当前模型的增强起点那份开始，
+    它没有就从第一个；样本号保留。选回 Real：回到这个模型的真实起点那份，没有就回 Truth。
+  - 这仍是同一个 `trainingSource`（叠加层 id + 样本号），开关只是按叠加层的种类筛标签页；左栏的 Sentences read 同样分成两组。
+- **句子条**：前 8 行的灰底写 "observed, moved"；**不画真值的发令短竖线和观测航班结束的虚线**（那是来源航班自己起点的，
+  和这个起点比没有意义）；行末计数本来就只属于真值。头部样本小块写结局，后面写增强量："#1: landed on 23R at 312 s · moved
+  +7.2°, +84 m, ×1.03"，提示里写全（抽了几次、时限是来源航班剩余时间的 2 倍）。模型不飞、或这架没有合格增强的航班，写明原因，
+  句子条画真值（同 §4.8）。
+- **▶ Fly 在增强起点上关掉**，提示写原因：实时执行器现在从观测状态起飞（§4.7），增强起点要后端也做同样的增强
+  （`augment_state` + `augment_signals`），列为下一步，这次不做。读数窗口和先验窗口本来只在读真值时给出。
+- **三维**：真值照画（这时它表示"从哪架航班挪过来的"）；**增强后的前 8 行**用模型的颜色画一条虚线，接到样本航迹的起点——
+  先验看着的就是这一段；样本航迹、贴地投影、结局标签、其余样本细线都同 §4.4。图例加一行 "moved observed rows"。
+- **详情页**的 Models 一节加一张表："from augmented starts"——每个模型在集合的增强起点上落地的样本比例（全部 / 直线进近 / 被
+  引导），和真实起点那张并排读；左栏最下面的 Models' sentences 一行末尾加上增强起点的比例。
+- **不做**：增强起点上的实时执行器（上面）；前端自己抽增强（增强只由导出器抽，前端只画）。
 
 ## 5 核对
 
