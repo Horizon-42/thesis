@@ -21,7 +21,9 @@ from where the executor flew, masked by the vocabulary's compatibility rules and
 flies until the executor is done with it or its time limit (`prior_free_generation.limits_s`). Only the flights the val
 readout flies — their own dynamics (`replay.OWN`) — are flown; the rest of the set is listed with the reason. The
 outcome is the executor's judge's (`prior_free_generation.flight_rows`: `judge.outcome_of` on the runway pointed at the
-end). One generator, seeded, draws every sample of every airport in the order the airports are named.
+end). One generator, seeded, draws every sample of every airport in the order the airports are named — on the speaker's
+``--device`` (cpu by default; cuda as the formal readout runs it, other samples than cpu's), recorded in
+``producedBy.device``; the executor flies on CPU whatever the device, as the live backend flies a sample again.
 
 **The prior speaks as it was trained to**: under the vocabulary's rules and its OWN procedure's masks (`prior.masks`,
 recorded beside its checkpoint — none for base and landing, the procedure's altitudes for augmented), read as the formal
@@ -399,6 +401,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--samples", type=int, default=4)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=1337)
+    parser.add_argument("--device", default="cpu",
+                        help="the prior's (the speaker's), as the formal readout's `--device`; the executor always flies on "
+                             "CPU — the live backend flies a sample again there — and the samples' generator is on this "
+                             "device, so a cuda export draws other samples than a cpu one")
     parser.add_argument("--augment-seed", type=int, default=None,
                         help="fly every flight from an augmented start drawn with this seed (a kind of its own)")
     parser.add_argument("--overlay-id", default=None,
@@ -422,6 +428,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     params, record, words = replay.open_executor(executor, instructions)
     spec = words.spec
     model, config_file, checkpoint_sha, procedure_masks = open_trained_prior(prior_dir, instructions)
+    device = torch.device(args.device)
+    model.to(device)
     model_part = model_block(prior_dir, config_file, checkpoint_sha, model.config.variant)
     name = display_name(model_part["name"], model_part["round"])
     suffix = "" if model_part["round"] is None else f"_r{model_part['round']:02d}"
@@ -452,7 +460,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     source = {"runner": RUNNER, "prior": repo_relative(prior_dir), "executor": repo_relative(executor),
               "instructions": repo_relative(instructions),
-              "readout": None if args.readout is None else repo_relative(resolved(args.readout)), "git": git_state()}
+              "readout": None if args.readout is None else repo_relative(resolved(args.readout)), "git": git_state(),
+              # the speaker's device: with the seed it names the samples drawn (the executor flies on CPU either way)
+              "device": args.device}
     digests = procedure_masks.data_sha256()
     generation = {"samples": args.samples, "temperature": args.temperature, "seed": args.seed,
                   "firstPredictedRow": N_LOOK, "stepS": spec.step_s,
@@ -471,7 +481,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     starts = f"augmented starts (seed {args.augment_seed})" if augmented else f"step {N_LOOK}"
     title = (f"{name} · {prior_dir.parent.name}/{prior_dir.name} · its own sentences, {args.samples} a flight "
              f"({masks_text}), flown by executor spec {record['sha256'][:12]} from {starts}")
-    generator = torch.Generator().manual_seed(args.seed)
+    generator = torch.Generator(device=device).manual_seed(args.seed)
     built = {}
     for code in airports:
         payloads = build_airport(bases[code], flights, sentences, instructions, geometries[code], model, params, words,
