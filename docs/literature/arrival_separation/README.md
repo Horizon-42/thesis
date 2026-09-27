@@ -285,6 +285,9 @@ Notes on the table:
 - `papers/FAA_JO_7360.1K_AppendixA_categories_parsed.csv` is **derived**: all 2,653 Appendix A rows,
   parsed from `pdftotext -layout` output. The CWT, SRS and LAHSO codes are assigned to columns by
   position against each page's header. The parser is inline at the end of `download.sh`.
+  - The Order marks a single-piloted military turbojet with an asterisk after the designator (ch. 2). The asterisk
+    is not part of the designator, so it has its own column, `single_piloted_military_turbojet` (132 types, e.g.
+    T38, F5, F16). Until 2026-09-27 the CSV kept it on the designator (`T38*`), and a lookup of `T38` missed it.
   - Check: Appendices B and C repeat the category columns for every designator. **10,184 of 10,194**
     repeated entries agree with the Appendix A parse.
   - The 8 disagreements are inconsistencies inside the source itself: WH4, MIRA*, L18, NH90, PA34, STAR,

@@ -10,15 +10,15 @@ type). This package does not reach the instruction language (the architecture te
 For each pair, by the runways in force (`Separation.relation`) and who is established:
 
 - **in trail on one final** — both established on the same runway, or a pair separated as one: the horizontal distance
-  must be at least the radar minimum and the directly-behind wake minimum (TBL 5-5-1, 5-5-4 g); the vertical distance
-  does not count (the order gives only radar separation on the same final approach course, 5-9-6 a5). The aircraft
-  behind on the approach clock is responsible.
+  must be at least the one-runway radar minimum (`Separation.same_nm`) and the directly-behind wake minimum (TBL 5-5-1,
+  5-5-4 g); the vertical distance does not count (the order gives only radar separation on the same final approach
+  course, 5-9-6 a5). The aircraft behind on the approach clock is responsible (on a tie, the one listed later).
 - **dependent parallels, both established**: the diagonal minimum (5-9-6 a2 / a3) unless vertically separated; the
   aircraft behind is responsible.
 - **independent parallels, both established**: none (5-9-7).
-- **everything else** (not both established, other directions, a runway not said): the radar minimum unless vertically
-  separated (5-5-4 a/b, 5-5-5, 4-5-1 a). Where exactly one of the two is established, the other one — joining — is
-  responsible; where neither is, both are.
+- **everything else** — not both established, runways of other directions (both established or not), a runway not
+  said: the terminal radar minimum (3 NM, 5-5-4 a/b) unless vertically separated (5-5-5, 4-5-1 a). Where exactly one of
+  the two is established, the other one — joining — is responsible; otherwise both are.
 
 Separately, when an aircraft is over its threshold, the established aircraft next behind it on the same runway (or a
 pair separated as one) must be at least the on-approach wake minimum behind it on the approach clock (TBL 5-5-2,
@@ -26,6 +26,9 @@ pair separated as one) must be at least the on-approach wake minimum behind it o
 A category is None when the record has no type: in trail, such a pair is judged on the radar minimum alone and says so
 (``wake_known``); at the threshold it is not judged — the caller counts those aircraft. Distances are metres; the
 vertical is between the two heights as given.
+
+`Traffic` holds its own contract: an aircraft has a position on the approach clock exactly when a runway is in force,
+and an established aircraft has one.
 """
 
 from __future__ import annotations
@@ -67,10 +70,18 @@ class Traffic:
         if not all(len(field) == count for field in (self.n_m, self.height_m, self.runway, self.along_m,
                                                         self.established, self.category)):
             raise ValueError("every field of a Traffic holds one value per aircraft")
+        said = np.array([runway is not None for runway in self.runway], dtype=bool)
+        if not np.array_equal(said, np.isfinite(self.along_m)):
+            raise ValueError("an aircraft is on the approach clock exactly when a runway is in force")
+        if np.any(np.asarray(self.established, dtype=bool) & ~said):
+            raise ValueError("an established aircraft has a runway in force")
 
 
 @dataclass(frozen=True)
 class Loss:
+    """``i < j`` index the pair in `Traffic` order, except at the threshold, where ``i`` is the leader over it and ``j``
+    its follower. ``wake_known`` is False only in trail with a category unknown (the other kinds need none)."""
+
     i: int
     j: int
     kind: str                           # IN_TRAIL, DIAGONAL, RADAR_OR_VERTICAL or AT_THRESHOLD
@@ -88,9 +99,9 @@ def _wake_m(table: dict[tuple[str, str], float], leader: str | None, follower: s
     return table.get((leader, follower), 0.0) * NM_M, True     # a blank cell of the table sets no wake minimum
 
 
-def losses(traffic: Traffic, separation: Separation, *, radar_nm: float = FAA_RADAR_NM) -> list[Loss]:
+def losses(traffic: Traffic, separation: Separation) -> list[Loss]:
     """Every pair that has lost separation at this instant (module docstring)."""
-    radar_m, vertical_min_m = radar_nm * NM_M, FAA_VERTICAL_FT * FT_M
+    one_runway_m, radar_m, vertical_min_m = separation.same_nm * NM_M, FAA_RADAR_NM * NM_M, FAA_VERTICAL_FT * FT_M
     out = []
     count = len(traffic.e_m)
     for i in range(count):
@@ -103,7 +114,7 @@ def losses(traffic: Traffic, separation: Separation, *, radar_nm: float = FAA_RA
             ahead, behind = (i, j) if traffic.along_m[i] >= traffic.along_m[j] else (j, i)
             if both and separation.one_runway(ri, rj):
                 wake, known = _wake_m(CWT_DIRECTLY_BEHIND_NM, traffic.category[ahead], traffic.category[behind])
-                required = max(radar_m, wake)
+                required = max(one_runway_m, wake)
                 if horizontal < required:
                     out.append(Loss(i, j, IN_TRAIL, relation, required, horizontal, vertical, (behind,), known))
                 continue

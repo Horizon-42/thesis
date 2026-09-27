@@ -12,8 +12,8 @@ the larger of the radar minimum and the wake minimum for the leader/follower cat
 parallels, the along-track stagger that keeps the diagonal separation (``sqrt(D^2 - s^2)`` for a diagonal
 minimum D and a centerline spacing s); independent parallels and runways of another direction impose
 none (crossing-runway operations are not modelled). `faa_separation` builds it from the FAA order, every
-value cited to its paragraph. Pure numpy / stdlib: no torch, no data plane; the one file it reads is the aircraft type
-table (`wake_category`).
+value cited to its paragraph. Pure numpy / stdlib, no torch; the files it reads are the two aircraft type tables
+(`read_cwt_tables`, paths from `repo_layout`).
 
 The approach clock (`Separation.approach_time_s`) is a landing's threshold time less its threshold's
 position along the course flown at the approach speed: the time the aircraft passes abeam a common
@@ -175,6 +175,8 @@ def parallel_relations(
 #   The order's 3,600 ft is inclusive ("no more than 3,600 feet"); the bands are half-open, which only
 #   differs at a spacing of exactly 3,600 ft.
 FAA_RADAR_NM = 3.0
+#: The vertical separation minimum up to FL 410 (4-5-1 a: "Up to and including FL 410- 1,000 feet.").
+FAA_VERTICAL_FT = 1_000.0
 FAA_REDUCED_RADAR_NM = 2.5      # 5-5-4 j, by authorization only
 FAA_PARALLEL_REGIMES = (
     ParallelRegime(2500.0, SINGLE),              # 5-5-4 h NOTE
@@ -194,8 +196,6 @@ CWT_DIRECTLY_BEHIND_NM: dict[tuple[str, str], float] = {
     ("D", "H"): 5.0, ("D", "I"): 5.0,
     ("E", "I"): 4.0,
 }
-#: The vertical separation minimum up to FL 410 (4-5-1 a: "Up to and including FL 410- 1,000 feet.").
-FAA_VERTICAL_FT = 1_000.0
 #: TBL 5-5-2 "Wake Turbulence Separation for On Approach" (5-5-4 h), NM, (leader, follower) CWT category.
 CWT_ON_APPROACH_NM: dict[tuple[str, str], float] = {
     ("A", "B"): 5.0, ("A", "C"): 6.0, ("A", "D"): 6.0, ("A", "E"): 7.0, ("A", "F"): 7.0, ("A", "G"): 7.0,
@@ -232,6 +232,9 @@ def read_cwt_tables(table: Path = CWT_TABLE, supplement: Path = CWT_SUPPLEMENT) 
                 add(row["type_designator"], row["cwt"], table)
     with supplement.open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
+            if None in row or None in row.values():
+                raise ValueError(f"{supplement.name}: {row} does not have the header's fields (quote a source "
+                                 "that holds a comma)")
             if not row["source"]:
                 raise ValueError(f"{supplement.name}: {row['type_designator']} has no source")
             add(row["type_designator"], row["cwt"], supplement)
@@ -240,6 +243,7 @@ def read_cwt_tables(table: Path = CWT_TABLE, supplement: Path = CWT_SUPPLEMENT) 
 
 @functools.cache
 def _cwt_by_typecode() -> dict[str, str]:
+    """The committed tables, read once per process (an edit to the supplement needs a new process)."""
     return read_cwt_tables()
 
 

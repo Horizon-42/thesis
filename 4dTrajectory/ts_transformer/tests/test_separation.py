@@ -12,6 +12,8 @@ from ts_transformer.inference.runway_schedule import (
     DEPENDENT,
     INDEPENDENT,
     SAME,
+    SINGLE,
+    UNRELATED,
     Separation,
 )
 from ts_transformer.inference.separation import (
@@ -27,10 +29,13 @@ from ts_transformer.inference.separation import (
 
 RADAR_M = 3.0 * NM_M
 VERTICAL_M = 1_000.0 * FT_M
-#: One runway "R", a dependent parallel pair "L1"/"L2" (1.0 NM diagonal), an independent pair "I1"/"I2", all landing east.
+#: One runway "R", a pair separated as one "S1"/"S2", a dependent parallel pair "L1"/"L2" (1.0 NM diagonal), an
+#: independent pair "I1"/"I2", all landing east; "X" is a runway of another direction.
 SEPARATION = Separation(same_nm=3.0, speed_mps=70.0,
-                        relations={frozenset(("L1", "L2")): DEPENDENT, frozenset(("I1", "I2")): INDEPENDENT},
-                        spacing_nm={frozenset(("L1", "L2")): 0.6, frozenset(("I1", "I2")): 1.5},
+                        relations={frozenset(("S1", "S2")): SINGLE, frozenset(("L1", "L2")): DEPENDENT,
+                                   frozenset(("I1", "I2")): INDEPENDENT},
+                        spacing_nm={frozenset(("S1", "S2")): 0.1, frozenset(("L1", "L2")): 0.6,
+                                    frozenset(("I1", "I2")): 1.5},
                         diagonal_nm={frozenset(("L1", "L2")): 1.0}, wake_nm=CWT_ON_APPROACH_NM)
 
 
@@ -91,3 +96,57 @@ def test_at_the_threshold_the_established_one_next_behind_must_be_the_on_approac
     assert wake_at_threshold(traffic((0, 0, 50, "R", True, "D"), (-9_000, 0, 550, "R", False, "H")), 0, SEPARATION) is None
     assert wake_at_threshold(traffic((0, 0, 50, "R", True, "D"), (-9_000, 0, 550, "I1", True, "H")), 0, SEPARATION) is None
     assert wake_at_threshold(traffic((0, 0, 50, "R", True, "D"), (-9_000, 0, 550, "R", True, None)), 0, SEPARATION) is None
+
+
+def test_in_trail_uses_the_directly_behind_table_and_the_one_runway_radar_minimum():
+    # D before H: 5 NM directly behind (TBL 5-5-1), 6 NM only at the threshold (TBL 5-5-2)
+    assert losses(traffic((0, 0, 700, "R", True, "D"), (-9_500, 0, 700, "R", True, "H")), SEPARATION) == []
+    close = losses(traffic((0, 0, 700, "R", True, "D"), (-9_000, 0, 700, "R", True, "H")), SEPARATION)
+    assert close[0].required_m == pytest.approx(5.0 * NM_M)
+    # a pair separated as one is in trail too
+    single = losses(traffic((-5_000, 0, 700, "S1", True, "F"), (-9_000, 150, 700, "S2", True, "F")), SEPARATION)
+    assert [(loss.kind, loss.relation, loss.responsible) for loss in single] == [(IN_TRAIL, SINGLE, (1,))]
+    # the one-runway radar minimum is the Separation's (2.5 NM where authorized, 5-5-4 j)
+    reduced = Separation(same_nm=2.5, speed_mps=70.0, wake_nm=CWT_ON_APPROACH_NM)
+    pair = traffic((0, 0, 700, "R", True, "F"), (-2.6 * NM_M, 0, 700, "R", True, "F"))
+    assert losses(pair, reduced) == [] and losses(pair, SEPARATION)[0].required_m == pytest.approx(RADAR_M)
+
+
+def test_the_diagonal_is_the_dependent_minimum_and_vertical_separation_still_counts():
+    diagonal = losses(traffic((-5_000, 0, 700, "L1", True, "F"), (-6_000, 1_100, 700, "L2", True, "F")), SEPARATION)
+    assert diagonal[0].required_m == pytest.approx(1.0 * NM_M)
+    # 2.5 km apart: inside 3 NM, outside the 1.0 NM diagonal
+    assert losses(traffic((-5_000, 0, 700, "L1", True, "F"), (-7_300, 1_000, 700, "L2", True, "F")), SEPARATION) == []
+    stacked = traffic((-5_000, 0, 700, "L1", True, "F"), (-6_000, 1_100, 700 + VERTICAL_M + 1, "L2", True, "F"))
+    assert losses(stacked, SEPARATION) == []
+
+
+def test_established_on_runways_of_other_directions_is_radar_or_vertical_both_answering():
+    found = losses(traffic((-3_000, 0, 700, "R", True, "F"), (-3_000, 3_000, 700, "X", True, "F")), SEPARATION)
+    assert [(loss.kind, loss.relation, loss.responsible) for loss in found] == [(RADAR_OR_VERTICAL, UNRELATED, (0, 1))]
+
+
+def test_the_vertical_minimum_is_1000_ft():
+    below = losses(traffic((0, 4_000, 900, None, False, "F"), (0, 0, 900 + 200, "R", False, "F")), SEPARATION)
+    assert below[0].vertical_m == pytest.approx(200) and below[0].relation == NO_RUNWAY
+    assert losses(traffic((0, 4_000, 900, None, False, "F"), (0, 0, 900 + VERTICAL_M + 0.01, "R", False, "F")),
+                  SEPARATION) == []
+
+
+def test_at_the_threshold_only_the_on_approach_table_binds_and_exactly_the_minimum_is_enough():
+    # F behind F: the table is blank at the threshold, so 3 km is not judged there (in trail judges it)
+    assert wake_at_threshold(traffic((0, 0, 50, "R", True, "F"), (-3_000, 0, 250, "R", True, "F")), 0, SEPARATION) is None
+    exactly = traffic((0, 0, 50, "R", True, "D"), (-6.0 * NM_M, 0, 550, "R", True, "H"))
+    assert wake_at_threshold(exactly, 0, SEPARATION) is None
+    across = wake_at_threshold(traffic((0, 0, 50, "S1", True, "D"), (-9_000, 150, 550, "S2", True, "H")), 0, SEPARATION)
+    assert across.relation == SINGLE
+
+
+@pytest.mark.parametrize("runway, along, established", [
+    (None, 0.0, False),              # on the approach clock with no runway in force
+    ("R", float("nan"), False),      # a runway in force, not on the approach clock
+    (None, float("nan"), True),      # established with no runway
+])
+def test_traffic_refuses_a_broken_contract(runway, along, established):
+    with pytest.raises(ValueError):
+        Traffic(np.zeros(1), np.zeros(1), np.zeros(1), (runway,), np.array([along]), np.array([established]), ("F",))
