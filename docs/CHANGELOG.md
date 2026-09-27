@@ -1,5 +1,17 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-27 — 执行器 v11：p = 5°/s、下滑道下方平飞、落地按跑道本身判、两个新结局、源码指纹只算逻辑
+
+- 分支 `dev-executor-v11`，三步（每步 opus 审查）：`a347fb3a`（源码指纹按去掉文档字符串的语法树算，规格 `ts-executor-spec-v6` 记
+  Python 版本；p = 5°/s 引 FAA 8260.3G / ICAO Doc 8168，写规格时核对 p ≥ tan φ ÷ 2τ_ψ = 4.48°/s；参数检查挡住 NaN；十份带日期的
+  记录移进 `history/` 与 `archive/`）、`7369cfb9`（落地按跑道本身判：横向 ≤ FAS 满刻度半宽 106.7 m；新结局 `crossed_too_high`、
+  `crossed_other_runway`；越过点记跑道；下滑道下限的模式标记；回放、两种叠加层、实时执行器、自由生成的格式都换名，前端镜像跟着改）、
+  `551575a9`（最平两档截获后在公布下滑道下方平飞，用户从五种候选里选的）。
+- 读数：航向提前量消融（`docs/two_tier/readouts/2026-09-27_heading_lead_ablation.zh.md`）、最平两档的飞法
+  （`…/2026-09-27_shallow_class_law.zh.md`）、另一条跑道规则的核对（`4dTrajectory/outputs/POOLED/analyses/other_runway_crossing_20260927/`）。
+- 之后：正式规格 v11、训练集 / 验证集回放门、base / landing / augmented 在 v11 上重读；已发布的叠加层要重新导出（前端拒读旧格式）、
+  后端要重启。
+
 ### 2026-09-27 — 航向提前量消融（第一级）：L 4 s、坡度上限 32° 不变，p 5°/s 与 8°/s 分不出
 
 - 两层模型进度报告 P0 第 1 条。新 runner `run_ts.py heading_lead_ablation`（R23，分支 `dev-heading-lead` `840ced77`，等合并）：一格 =
