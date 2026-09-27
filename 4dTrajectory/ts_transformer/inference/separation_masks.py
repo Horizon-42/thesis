@@ -14,11 +14,11 @@ Both masks look only at the aircraft next ahead on the approach clock on the sam
   told), and only while the aircraft is more than ``no_speed_within_m`` from its threshold (7110.65BB 5-7-1 b4: no speed
   adjustment inside 5 NM). Both are predicted to the moment the one ahead crosses its threshold; a word whose predicted
   gap on the approach clock is then under the distance the rules require there (`Separation.distance_nm`: the one-runway
-  radar minimum or TBL 5-5-2, the distance design §2.5 gives the model) is masked. When every word falls short (a
-  **fallback**), the words with the largest gap stay — every word slower than the present speed ties while the leader
-  crosses inside their ramps, and a slower one never leaves less, so the slowest word is always among them (there is
-  always a word to say; the check after the step does the rest). "Unchanged" is masked when the word in force is (a new
-  word must be said) — so it stays allowed when the word in force is one of those best. **The prediction is an
+  radar minimum or TBL 5-5-2, the distance design §2.5 gives the model) is masked, and "unchanged" with the word in force
+  (a new word must be said). When every word falls short (a **fallback**) nothing is masked (user 2026-09-28, design §9
+  item 20): the word leaving the largest gap is always the vocabulary's slowest — a slower word never leaves less —
+  below any type's stall speed, so the model speaks from its own distribution and the check after the step decides.
+  **The prediction is an
   approximation, stated** (design §3.4): each aircraft moves along its own course from its present speed toward its
   target at the constant pace ``accel_mps2`` — the executor's speed law without its final exponential approach, and
   without the harder braking with which its "unspecified" law reaches the pilot's own speed by the threshold (so it is
@@ -83,7 +83,7 @@ def before_threshold_m(traffic: Traffic, k: int, separation: Separation) -> floa
 class SpeedCheck:
     """The speed-word mask on one aircraft: the one next ahead, each candidate word's predicted gap to it on the approach
     clock when it crosses its threshold, the distance required there, the words left, whether "unchanged" is, and
-    whether every word fell short (``fallback``: the best ones were left)."""
+    whether every word fell short (``fallback``: then nothing is masked)."""
 
     leader: int
     gaps_m: np.ndarray
@@ -113,7 +113,7 @@ def speed_check(traffic: Traffic, k: int, separation: Separation, along_speed_mp
     required = separation.distance_nm(traffic.runway[leader], traffic.category[leader], traffic.runway[k],
                                       traffic.category[k]) * NM_M
     fallback = not bool((gaps >= required).any())
-    allowed = gaps == gaps.max() if fallback else gaps >= required     # ties are exact: the same ramp, bit for bit
+    allowed = np.ones(len(gaps), dtype=bool) if fallback else gaps >= required
     return SpeedCheck(leader, gaps, required, allowed, bool(allowed[in_force]), fallback)
 
 

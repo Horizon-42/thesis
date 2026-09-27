@@ -75,13 +75,6 @@ def test_a_speed_word_is_masked_when_it_closes_the_gap_under_the_minimum_at_the_
                        FIVE_NM).unchanged_allowed
 
 
-def test_when_every_speed_word_falls_short_the_one_with_the_largest_gap_stays():
-    scene = traffic((-8_000.0, "R", True, "F"), (-10_000.0, "R", True, "F"))     # 2 km behind: nothing can reach 3 NM
-    check = speed_check(scene, 1, SEPARATION, np.array([70.0, 70.0]), np.array([70.0, 70.0]),
-                        np.array([60.0, 70.0, 80.0]), 0, PACE, FIVE_NM)
-    assert check.allowed.tolist() == [True, False, False] and check.unchanged_allowed    # the slowest, already in force
-
-
 def test_the_speed_mask_waits_for_both_to_be_established_and_stops_at_five_miles():
     words = np.array([60.0, 70.0, 80.0])
 
@@ -95,7 +88,7 @@ def test_the_speed_mask_waits_for_both_to_be_established_and_stops_at_five_miles
     assert check((-3_000.0, "R", True, "F"), (-9_300.0, "R", True, "F")) is not None        # outside it
     # behind a heavy (B → F: TBL 5-5-2 5 NM) the required distance is the wake one
     heavy = check((-8_000.0, "R", True, "B"), (-14_000.0, "R", True, "F"))
-    assert heavy.required_m == pytest.approx(5.0 * NM_M) and not heavy.allowed[1]
+    assert heavy.required_m == pytest.approx(5.0 * NM_M) and heavy.fallback and heavy.allowed.all()
 
 
 def test_a_clearance_is_masked_while_the_nearest_cleared_one_ahead_is_under_the_in_trail_minimum():
@@ -113,16 +106,15 @@ def test_a_clearance_is_masked_while_the_nearest_cleared_one_ahead_is_under_the_
     assert clearance_check(scene, 0, SEPARATION, cleared) is None                          # nothing cleared ahead of it
 
 
-def test_in_a_fallback_every_word_tied_for_the_largest_gap_stays():
-    """A B 2 km out holding 70 crosses in 28.6 s; an F 11 km out at 85 m/s needs 5 NM behind it and no word gives it: every
-    word the F cannot reach in 28.6 s (at or below 85 − 0.25 × 28.6 m/s) leaves the same gap, the largest — its word in
-    force (70) is one of them, so it may stay."""
+def test_in_a_fallback_nothing_is_masked():
+    """A B 2 km out holding 70 crosses in 28.6 s; an F 11 km out at 85 m/s needs 5 NM behind it and no word gives it (the
+    best would be the slowest): every word stays, "unchanged" too (design §9 item 20)."""
     scene = traffic((-2_000.0, "R", True, "B"), (-11_000.0, "R", True, "F"))
     words = np.arange(20.0, 255.0, 5.0)
     check = speed_check(scene, 1, SEPARATION, np.array([70.0, 85.0]), np.array([70.0, 70.0]), words,
                         int(np.flatnonzero(words == 70.0)[0]), PACE, FIVE_NM)
-    assert check.fallback and check.unchanged_allowed
-    assert check.allowed.tolist() == (words <= 85.0 - PACE * 2_000.0 / 70.0).tolist()
+    assert check.fallback and check.unchanged_allowed and check.allowed.all()
+    assert check.gaps_m.max() < check.required_m
 
 
 def test_the_leader_slowing_to_its_own_target_closes_the_gap():
@@ -144,7 +136,7 @@ def test_the_distance_required_at_the_crossing_is_tbl_5_5_2s():
         return speed_check(traffic((-8_000.0, "R", True, "F"), (-14_500.0, "R", True, category)), 1, SEPARATION,
                            np.array([70.0, 70.0]), np.array([70.0, 70.0]), np.array([70.0]), 0, PACE, FIVE_NM)
 
-    assert check("I").required_m == pytest.approx(4.0 * NM_M) and check("I").fallback
+    assert check("I").required_m == pytest.approx(4.0 * NM_M) and check("I").fallback and check("I").allowed.all()
     assert check("F").required_m == pytest.approx(3.0 * NM_M) and check("F").allowed[0]
 
 
@@ -210,26 +202,26 @@ def test_the_runner_reads_each_flights_words_and_speed_at_its_row_and_the_record
 
 
 def test_the_runner_takes_the_leaders_speed_word_and_tells_a_masked_word_the_record_did_not_break():
-    """L's word in force is 60: it slows from 70 and crosses at 94 s; F, holding 80, is predicted 4,760 m behind then —
-    but in the record it slowed to 60 m/s at 24 s and was 6.7 km behind."""
+    """L's word in force is 60: it slows from 70 and crosses at 94 s; F, holding 80, is predicted 4,860 m behind then (the
+    slowest words keep 3 NM: no fallback) — but in the record it slowed to 60 m/s at 24 s and was 6.8 km behind."""
     from ts_transformer.instructions.words import SPEED
 
     t = STEP_S * np.arange(43)
     words = _spoken("L", -6_000.0 + 70.0 * t, 70.0, {}, landing_s=6_000.0 / 70.0)[1]
     leader, _ = _spoken("L", -6_000.0 + 70.0 * t, 70.0, {0: {SPEED: words.speed_index(60.0)}}, landing_s=6_000.0 / 70.0)
     t_f = STEP_S * np.arange(46)
-    along = -12_280.0 + np.where(t_f <= 24.0, 80.0 * t_f, 80.0 * 24.0 + 60.0 * (t_f - 24.0))
+    along = -12_380.0 + np.where(t_f <= 24.0, 80.0 * t_f, 80.0 * 24.0 + 60.0 * (t_f - 24.0))
     follower, _ = _spoken("F", along, np.where(t_f < 24.0, 80.0, 60.0), {0: {SPEED: words.speed_index(80.0)}},
                           landing_s=500.0)
     read = _measure([leader, follower])
-    assert [(m["row"], round(m["gap_m"], 1)) for m in read["masked"]] == [(8, 4760.0)]
+    assert [(m["row"], round(m["gap_m"], 1)) for m in read["masked"]] == [(8, 4860.0)]
     assert read["masked"][0]["actual_gap_m"] > 3.0 * NM_M and read["masked_speed_words_the_record_then_broke"] == 0
 
 
 def test_the_runner_takes_a_background_aircraft_at_its_speed_and_as_cleared_once_established():
-    """B, background, established, 3.1 km ahead of F at 70 m/s: F's leader. Held at 70 it crosses in 112.6 s, and no
-    word keeps F 3 NM behind (a fallback: its 80 in force is masked, 1,994 m); F's clearance at row 12 (B 3,040 m ahead)
-    is masked, B counting as cleared."""
+    """B, background, established, 6 km ahead of F at 70 m/s: F's leader. Held at 70 it crosses in 71.4 s from row 8, so
+    F's 80 in force leaves 5,286 m (masked) where slower words keep 3 NM; F's clearance at row 32 (B 5,520 m ahead) is
+    masked, B counting as cleared."""
     from ts_transformer.experiments.traffic_census import Track
     from ts_transformer.instructions.words import APPROACH, APPROACH_CLEARED, SPEED
     from ts_transformer.prior.scene import Presence, hung_span
@@ -237,25 +229,26 @@ def test_the_runner_takes_a_background_aircraft_at_its_speed_and_as_cleared_once
     t = STEP_S * np.arange(46)
     words = _spoken("F", -12_280.0 + 80.0 * t, 80.0, {}, landing_s=500.0)[1]
     follower, _ = _spoken("F", -12_280.0 + 80.0 * t, 80.0,
-                          {0: {SPEED: words.speed_index(80.0)}, 12: {APPROACH: APPROACH_CLEARED}}, landing_s=500.0)
-    along = -9_000.0 + 70.0 * t
-    seen = Presence("B", "KXXX", "R", 9_000.0 / 70.0, False, t, np.abs(along))
+                          {0: {SPEED: words.speed_index(80.0)}, 32: {APPROACH: APPROACH_CLEARED}}, landing_s=500.0)
+    along = -6_120.0 + 70.0 * t
+    seen = Presence("B", "KXXX", "R", 6_120.0 / 70.0, False, t, np.abs(along))
     first, last = hung_span(seen, STEP_S)
     background = Track(seen, first, last, along.copy(), np.zeros(len(t)), np.full(len(t), 300.0), along,
                        np.zeros(len(t)), np.zeros(len(t)), np.full(len(t), 70.0), 0.0, "raw", "F")
     read = _measure([follower], [background])
     speed = [m for m in read["masked"] if m["column"] == "speed"]
-    assert [(m["row"], m["leader"], round(m["gap_m"], 1)) for m in speed] == [(8, "B", 1994.3)]
-    assert read["speed_words_masked_in_a_fallback"] == 1 and read["fallbacks"] == read["speed_checks"]
+    assert [(m["row"], m["leader"], round(m["gap_m"], 1)) for m in speed] == [(8, "B", 5285.7)]
+    assert read["fallbacks"] == 0 and read["speed_checks"] == 11                     # rows 8–18, to 5 NM
     clear = [m for m in read["masked"] if m["column"] == "approach"]
-    assert [(m["row"], m["leader"], round(m["gap_m"], 1)) for m in clear] == [(12, "B", 3040.0)]
+    assert [(m["row"], m["leader"], round(m["gap_m"], 1)) for m in clear] == [(32, "B", 5520.0)]
 
 
 def test_the_runner_masks_the_clearance_said_30_s_behind_a_cleared_aircraft(tmp_path, monkeypatch):
     """The step-5 fixture's four labelled flights: "b" flies "a"'s approach 30 s behind it, so when b is cleared at the
     start of its turn onto the final, a — cleared there 30 s earlier, its quarter turn flown since — is 1.4 km ahead on the
-    approach clock; "c" and "d" are alone. Behind a, b is under 3 NM whatever it says: every step it is checked, the word
-    in force (not the slowest) is masked and a new one is forced."""
+    approach clock; "c" and "d" are alone. Behind a, b says no speed word while it is checked: at first, far enough out,
+    slowing hard could still open 3 NM — its word in force cannot, so a new one is forced — then nothing can (a fallback,
+    which forces nothing)."""
     from ts_transformer.experiments import traffic_masks
     from ts_transformer.tests.test_traffic_loop import _labelled_artefact
 
@@ -274,7 +267,8 @@ def test_the_runner_masks_the_clearance_said_30_s_behind_a_cleared_aircraft(tmp_
     assert [(m["key"], m["leader"]) for m in event] == [("KXXX:b", "KXXX:a")]
     assert 1_000.0 < event[0]["gap_m"] < 2_000.0
     assert airport["speed_words_checked"] == airport["speed_words_masked"] == 0       # b says no speed word then
-    assert airport["forced_steps"] == airport["silent_steps_checked"] > 0
+    assert airport["speed_checks"] == airport["silent_steps_checked"] == airport["forced_steps"] + airport["fallbacks"]
+    assert airport["forced_steps"] > 0 and airport["fallbacks"] > 0
     assert airport["speed_words"] >= 4                                                   # each flight's word in force
     assert payload["totals"]["clearances_masked"] == 1
     assert payload["pass_line"]["masked_share"] == pytest.approx(

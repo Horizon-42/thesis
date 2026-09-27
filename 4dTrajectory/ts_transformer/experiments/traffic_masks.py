@@ -12,8 +12,8 @@ says every column) on, at each of its steps — counted as the procedure's check
   where both the flight and the aircraft next ahead of it are established and the flight is more than
   `instructions.spec.ATC_NO_SPEED_ASSIGNMENT_DISTANCE_M` from its threshold. A later step that says no speed word while the
   word in force is masked is **forced** (the mask would make the prior say a new word) — reported apart, like the
-  procedure check's rule 5. The checks where every word fell short (the mask's fallback: only the slowest words stay,
-  `separation_masks`) are counted, and the words and steps they masked apart;
+  procedure check's rule 5. The checks where every word fell short (the mask's fallback, which masks nothing:
+  `separation_masks`) are counted;
 - **clearances**: "cleared" in force at the first predicted step, and every "cleared" said after it.
 
 What the masks read that is not geometry, read here from the words: each aircraft's speed target in force — its speed
@@ -63,15 +63,15 @@ from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.scene import N_LOOK, presence, scene_steps
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
 
-SCHEMA = "ts-traffic-masks-v1"
+#: v2 (2026-09-28): a fallback masks nothing (design §9 item 20); v1 left the slowest words.
+SCHEMA = "ts-traffic-masks-v2"
 SPLIT = "train"
 #: Design §3.4 step 0, the first pass line (user 2026-09-27, §9 item 5): at most this share of the labelled speed words and
 #: clearances together masked.
 PASS_SHARE = 0.01
 #: What `measure_airport` counts, each over every airport.
-COUNTS = ("speed_words", "speed_words_checked", "speed_words_masked", "speed_words_masked_in_a_fallback",
-          "silent_steps_checked", "forced_steps", "forced_steps_in_a_fallback", "speed_checks", "fallbacks",
-          "clearances", "clearances_behind_a_cleared_aircraft", "clearances_masked")
+COUNTS = ("speed_words", "speed_words_checked", "speed_words_masked", "silent_steps_checked", "forced_steps",
+          "speed_checks", "fallbacks", "clearances", "clearances_behind_a_cleared_aircraft", "clearances_masked")
 
 
 class Spoken:
@@ -140,7 +140,6 @@ def measure_airport(spoken: list[Spoken], replayed: list[Track], separation: Sep
                         counts["speed_words_checked"] += 1
                         if not check.allowed[word]:
                             counts["speed_words_masked"] += 1
-                            counts["speed_words_masked_in_a_fallback"] += check.fallback
                             masked_actual.append(actual is not None and actual < check.required_m)
                             forbidden_events.append({"key": aircraft.key, "row": row, "column": "speed", "word": word,
                                                      "leader": here[check.leader].key,
@@ -149,7 +148,6 @@ def measure_airport(spoken: list[Spoken], replayed: list[Track], separation: Sep
                     else:
                         counts["silent_steps_checked"] += 1
                         counts["forced_steps"] += not check.unchanged_allowed
-                        counts["forced_steps_in_a_fallback"] += check.fallback and not check.unchanged_allowed
                 clear = (row == N_LOOK and flight.cleared(row)) or flight.grid[row, APPROACH] == APPROACH_CLEARED
                 if clear:
                     counts["clearances"] += 1
