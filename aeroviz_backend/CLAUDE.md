@@ -31,10 +31,14 @@ frontend reads. Solver internals and defaults live in `4dTrajectory/CLAUDE.md`.
   or flight not listed 404 (`errors.NotListed`), superseded by a later request from the same page 409 (`errors.Superseded`: every
   request names its page, `clientId`, and its number there, `seq`; the page's lower-numbered ones still waiting are not
   flown, one flying stops before its next cycle, one arriving late is refused — the page's numbers decide, not arrival), a flight the data cannot fly (no aircraft dynamics) 422 (`errors.NotFlyable`; `errors` is stdlib-only so the server
-  maps them without torch), anything else 500 with its reason. Built lazily on the first request (torch + ts_transformer,
-  ~470 MB); one flight at a time; a Training set's flights are rebuilt TOGETHER on its first request (`open_flights`: one
-  `rebuild_series`, the split's signals, procedure files and arrival manifests read once — ~3 s once, then every flight of the
-  set answers in milliseconds) and kept for the process; each flight answers for itself (one a check refuses is refused alone,
+  maps them without torch), anything else 500 with its reason. WARMED UP AT START (2026-09-28; `http_server.warm_autopilot`
+  runs `AutopilotSegmentBackend.warm_up` in a thread): the backend is built (torch + ts_transformer, ~470 MB) and every
+  read-back set of the current reading rule it can fly is opened — flights, spec, the procedure's masks — ~10 s for the five
+  airports (the first 4 s, then ~1 s each: the val split's files are read once for all of them and let go after), so a first
+  click answers in milliseconds (it took 2–4 s a set, the first model word 2 s more); a set the code cannot fly (another spec)
+  is logged as skipped; a request during the warm-up waits at most for the set being opened (the same lock). One flight at a
+  time; a Training set's flights are rebuilt TOGETHER (`open_flights`: one `rebuild_series`, procedure files and arrival
+  manifests read once; each airport's published vertical paths kept) and kept for the process; each flight answers for itself (one a check refuses is refused alone,
   `rebuilt_each`). A request with a `sentence` (a model's sample) flies
   that sentence as `prior_free_generation` flew it — from the observed state at its first step, the time clock, the
   generation's time limit (`fly.model_time_limit_s` MIRRORS `limits_s`), the sentence's last runway — and so re-flies the exported

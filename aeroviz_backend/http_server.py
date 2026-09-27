@@ -50,9 +50,10 @@ class AeroVizBackendApp:
         self.observed_trajectory_backend = (
             observed_trajectory_backend or ObservedTrajectoryBackend()
         )
-        # The Training view's live executor (`autopilot_segment`) is built on its first
-        # request: it imports torch and the ts_transformer package (~470 MB resident),
-        # which no other endpoint needs. Tests inject their own.
+        # The Training view's live executor (`autopilot_segment`) is built when first
+        # asked for: it imports torch and the ts_transformer package (~470 MB resident),
+        # which no other endpoint needs. The server asks for it at start, to warm it up
+        # (`warm_autopilot`); tests inject their own.
         self._autopilot_segment_backend = autopilot_segment_backend
         self._autopilot_segment_lock = threading.Lock()
 
@@ -384,17 +385,25 @@ def make_request_handler(
     return BoundAeroVizRequestHandler
 
 
+def warm_autopilot(app: AeroVizBackendApp) -> None:
+    """The Training view's live executor built and every set it can fly opened, before its first request
+    (`AutopilotSegmentBackend.warm_up`): run in a thread at start, so the first word flown does not wait 2–6 s."""
+    app.autopilot_segment_backend().warm_up(log=lambda line: print(line, flush=True))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the AeroViz backend server.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
 
+    app = AeroVizBackendApp()
     http_server = ThreadingHTTPServer(
         (args.host, args.port),
-        make_request_handler(),
+        make_request_handler(app),
     )
     print(f"AeroViz backend listening on http://{args.host}:{args.port}", flush=True)
+    threading.Thread(target=warm_autopilot, args=(app,), name="autopilot-warm-up", daemon=True).start()
     try:
         http_server.serve_forever()
     except KeyboardInterrupt:
