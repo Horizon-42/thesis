@@ -1,7 +1,8 @@
-# 两层模型：阶段记录（更新于 2026-09-26 22:30 UTC）
+# 两层模型：阶段记录（更新于 2026-09-27 06:30 UTC）
 
 **用途**：压缩上下文之前的交接文档。写明此刻每个阶段做到了哪里、产物在哪、关键数字、用户做过的决定、接下来按什么顺序做。
-设计本身在各自的设计文档里，这里只给结论和指路；历史看 git 和 `docs/CHANGELOG.md`。
+设计本身在各自的设计文档里，这里只给结论和指路；历史看 git 和 `docs/CHANGELOG.md`。**阶段小结与按优先级的待办**：
+[进度报告 2026-09-27](readouts/2026-09-27_progress_report.zh.md)（单机一段做完；先做要改代码并重跑回放 / 实验的事）。
 
 路径都相对 `4dTrajectory/`（`outputs/…`）或 `4dTrajectory/ts_transformer/`（`docs/…`、包名），除非写明是仓库根目录。
 
@@ -28,7 +29,7 @@
 | 5 先验 | 第三版第 0 步、第 1 步（单机）、单机自由生成完成；**base 模型** `prior/v3_step1_20260924/full_s1337`（§3） | `docs/two_tier/prior_design.zh.md`、`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md` §3–§5 |
 | 6 后训练 | 第一阶段**采用**（landing，`prior/v3_rl_20260925/grpo_s1337/round_01`）；闭环监督微调（CAT-K）不采用；第二阶段上一版不采用（§4.3），**第二阶段完成，采用第 7 轮 = augmented**（用户 2026-09-27；§4.4、§9） | `docs/two_tier/post_training_design.zh.md`；读数文档（`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md`）§6–§16 |
 | 7 多机 | 设计草稿写好（2026-09-26），等用户确认；代码没开始，不碰正在跑的第二阶段 | `docs/two_tier/multi_aircraft_design.zh.md`（§9 是要用户定的事） |
-| 前端 / 后端 | Training 视图有按运行日划分的集和叠加层；后端在执行器 v10 合并（`9557315d`）之前启动，**重启后才用 v10**（§7） | §7 |
+| 前端 / 后端 | Training 视图有按运行日划分的集和叠加层，各轮模型可切换、按模型自己的程序屏蔽导出；后端已重启、用 v10（§7） | §7 |
 
 ---
 
@@ -43,7 +44,7 @@
 | 执行器规格 | `outputs/POOLED/executor/v10_20260926/`（`replay-train/`） | 参数指纹 `0d6a68a92c6f`（与 v5–v9 相同），源码指纹 `2f0feee44d61`（`9557315d`）；现行代码拒绝 v9 及以前 |
 | base 模型 | `outputs/POOLED/prior/v3_step1_20260924/full_s1337/` | 只用数据训出，`ts-prior-checkpoint-v3`；对 v5 照样能加载（同一规格）。**不重训**（用户 2026-09-26） |
 | landing（第一阶段，采用） | `outputs/POOLED/prior/v3_rl_20260925/grpo_s1337/round_01/` | 第二阶段的起点 |
-| **第二阶段（在跑）** | `outputs/POOLED/prior/v3_stage2_clip_20260926/`（`run.sh`、`run.pid`、`run.log`；`aug_s1337/{config,history}.json`、`round_NN/`，跑完有 `choice.json` 与 `val_{kept,stage1}{,_aug}_400x4/`） | §4.4；第 0 步用 `v3_stage2_restart_20260926/stage0_check_train/check.json`（屏蔽没改） |
+| **augmented（第二阶段，采用第 7 轮）** | `outputs/POOLED/prior/v3_stage2_clip_20260926/aug_s1337/round_07/`（运行：`run.sh`、`run.log`、`aug_s1337/{config,history,choice}.json`、`round_NN/`、`val_{kept,stage1}{,_aug}_400x4/`） | §4.4；第 0 步用 `v3_stage2_restart_20260926/stage0_check_train/check.json`（屏蔽没改）；诊断 `v3_stage2_lineup_diagnosis_20260927/` |
 | MVA 图 | 仓库 `data/MVA/2026-09-26/{MSY,RDU,NCT,T75}_MVA_{FUS3,FUS5}.{xml,pdf}`（不进 git） | 出处 `docs/literature/minimum_vectoring_altitude/`；读取 `prior/mva.py` |
 | v10 上的诊断与验证集读数 | `outputs/POOLED/prior/v3_reread_v10_20260926/`（`diagnosis_train_400`、`val_{stage1,base}{,_masked}_400x4`） | 读数文档 §13，`run.sh` |
 | v9 上的验证集读数 | `outputs/POOLED/prior/v3_reread_v9_20260926/val_{stage1,base}{,_masked}_400x4/` | 读数文档 §11，`run.sh` |
@@ -254,7 +255,7 @@
   （先验设计 §5.1，契约 C35）。每个模型目录多一个 `procedure_masks.json`，`load_prior` 一起读出，说话器的程序屏蔽必须给；自由生成
   `--procedure-masks` 默认用模型自己的（`none` 或点名换）。重构前后逐位相同（真实起点开关各 50 句、扩充起点 200 句）；ts 全套通过；opus 审查
   没有必须修的，建议项已修。**现有模型已补记录**（用户同意，2026-09-26 22:25 UTC）：22 个目录，脚本和日志在
-  `outputs/POOLED/prior/procedure_masks_stamp_20260927/`；**带截断的运行跑完后再用同一个脚本补它的 8 轮**（没有记录的目录 `load_prior` 拒绝打开）。与 `dev-training-rounds` 试合并：代码自动合并，只有
+  `outputs/POOLED/prior/procedure_masks_stamp_20260927/`，带截断那次运行的 8 轮跑完后补在 `procedure_masks_stamp_20260927_clip/`（没有记录的目录 `load_prior` 拒绝打开）。与 `dev-training-rounds` 试合并：代码自动合并，只有
   `docs/CHANGELOG.md`、`docs/code-health-followups.md` 两处文字冲突。
 - **工作树 `training-rounds`（分支 `dev-training-rounds`，`f90a306c`）**：不是这边建的，另一个会话的，不要动。
 - **本地分支**：`dev-two-tier`、`main`、`wip-r32-leg-timing`（跑道意图 R3.2 没采纳的第三种改法，远端也有；跑道意图计划 §18.2 引用它
@@ -273,8 +274,8 @@
 - **Training 视图**（其他 agent 做的前端工作都已合并：模型自己说的句子 `e87bfcf3`、点词实时飞 `46af94fd`、高度基准 `7624c053`）：
   每个机场有 `instruction_v3_day_split` 集（建在句子产物 v4 上），叠加层有执行器 v6 回放、base 与第一阶段模型自己说的句子、
   第 1 步先验的预测。叠加层是在执行器 v7 上算的，v9 上的数差 0.5 个百分点以内；要不要在 v5 / v9 上重新导出，等用户（写 `public/data`）。
-- **后端**：在执行器 v10 合并（`9557315d`）之前启动，内存里是旧代码、用 v9；**重启后**点词实时飞自动选"现行代码唯一接受的执行器规格"
-  ——v10（能打开 Training 集用的句子产物 v4：同一规格、同一标注器）。重启要用户同意，或由用户自己重启。
+- **后端**：2026-09-27 已重启（另一个会话合并 `dev-training-rounds` 之后），点词实时飞用"现行代码唯一接受的执行器规格"——v10；模型的句子按
+  它自己的程序屏蔽重飞、被下滑道下沿截停处一致（后端答复 `aeroviz-autopilot-segment-v5`）。base、landing 各轮、augmented 已按新格式发布。
 
 ---
 
@@ -347,7 +348,7 @@
    - 第二级（新句子产物 → 重训 base、第一、第二阶段）：只在第一级显示别的 L 明显更好时考虑，用户决定。
 4. **下一版执行器规格要一起做的**（用户 2026-09-26 同意列入）：判定给"过另一条跑道的入口"自己的结局并在那里结束，"落地"的横向判据收紧到
    跑道本身（约 107 m）（先验读数 §16，`docs/code-health-followups.md`）；与上面的提前量消融一起，因为都要新的执行器规格。
-5. **后端重启**后实时执行器用 v10（§7）。
+5. ~~后端重启~~：已做（2026-09-27，§7）。
 6. 可选：前端叠加层在 v5 / v10 上重新导出（写 `public/data`，要用户同意）。
 7. 执行器遗留（执行器设计 §16）：下沿以上平缓档偏陡；多翻襟型别的进近速度卡在出处上；复飞期间的词、第一次截获的判定窗口。
 8. 之后：先验设计 §9 第 2–5 步（M1、前机一条边、完整场景、多机闭环与后训练：间隔作生成时的筛选和屏蔽）；先验交叉验证。
