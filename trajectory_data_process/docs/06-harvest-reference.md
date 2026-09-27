@@ -532,3 +532,15 @@ in with `summary.json` only on success.
   178.7° / 358.7°). METAR `data/metar/KAUS/asos_2026-07-28_2026-09-27.csv` (1,615 reports); MVA
   `data/MVA/2026-09-27/AUS_MVA_FUS{3,5}` (`docs/literature/minimum_vectoring_altitude/`); runway numbers are
   18/36 in every source (Austin renumbered from 17/35).
+
+### TD28 · a merge or reclassification needs the ADS-B sidecar only for a track without source timing (2026-09-27)
+
+- `--merge-source` and `--reclassify-existing` look a state row up in `outputs/adsb-metadata/<ICAO>/` only for a
+  track stored WITHOUT `source_integrity` (a harvest from before `harvest-tracks-v2-source-timing`); every track a
+  current download writes carries it. The CLI used to open the sidecar unconditionally, so an airport downloaded
+  only since then (KAUS: two fresh downloads to merge, no sidecar) was refused for a file no record needed.
+- Now `adsb_metadata.reclassification_metadata` returns the sidecar when its `manifest.json` exists, else
+  `AbsentSidecar`: provenance `{"absent": true, "manifest_path": …}`, an empty batch answered with `[]`, and the
+  first real lookup raising `FileNotFoundError` naming the file and `backfill_adsb_metadata.py` — inside the
+  staging directory, so the destination is untouched. `--rebuild-fresh-from` restores timing FROM the sidecar and
+  still requires it (`__main__._state_metadata`).

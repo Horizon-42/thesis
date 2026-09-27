@@ -32,7 +32,11 @@ from evaluation.context import contexts_for_airport
 from trajectory_data_process.acquisition.opensky_history import install_query_cancel_on_interrupt
 from trajectory_data_process.arrival_segment import ENTRY_RADIUS_KM
 from trajectory_data_process.harvest.airports import load_airport
-from trajectory_data_process.harvest.adsb_metadata import SidecarStateMetadata
+from trajectory_data_process.harvest.adsb_metadata import (
+    AbsentSidecar,
+    SidecarStateMetadata,
+    reclassification_metadata,
+)
 from trajectory_data_process.harvest.arrivals import arrival_manifest_path, write_arrival_records
 from trajectory_data_process.harvest.observed import (
     REPORT_NAME,
@@ -219,11 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         clear_harvest_checkpoint(paths)
 
     airport = load_airport(code, config_file=args.config, cifp_file=args.cifp)
-    metadata = (
-        SidecarStateMetadata(args.adsb_metadata, code)
-        if args.reclassify_existing or args.merge_source or args.rebuild_fresh_from
-        else None
-    )
+    metadata = _state_metadata(args, code)
 
     staging_rebuild = args.rebuild_fresh_from is not None
     if args.rebuild_fresh_from:
@@ -342,6 +342,19 @@ def main(argv: list[str] | None = None) -> int:
     _print_digest(code, manifest, summary, report)
     _note_staging_leftovers(paths)
     return 0
+
+
+def _state_metadata(
+    args: argparse.Namespace, code: str
+) -> SidecarStateMetadata | AbsentSidecar | None:
+    """The ADS-B sidecar a no-download mode reads. A freshness rebuild restores source timing
+    FROM it, so it needs one; a reclassification or merge needs it only for a track stored
+    without that timing (TD28); a download reads none."""
+    if args.rebuild_fresh_from:
+        return SidecarStateMetadata(args.adsb_metadata, code)
+    if args.reclassify_existing or args.merge_source:
+        return reclassification_metadata(args.adsb_metadata, code)
+    return None
 
 
 def _note_staging_leftovers(paths: HarvestPaths) -> None:

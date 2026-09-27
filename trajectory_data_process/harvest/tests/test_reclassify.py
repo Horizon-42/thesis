@@ -9,8 +9,8 @@ import pytest
 
 from final_approach import Projected
 
-from trajectory_data_process.harvest.__main__ import build_parser
-from trajectory_data_process.harvest.adsb_metadata import AdsbStateMetadata
+from trajectory_data_process.harvest.__main__ import _state_metadata, build_parser
+from trajectory_data_process.harvest.adsb_metadata import AbsentSidecar, AdsbStateMetadata
 from trajectory_data_process.harvest.approach_minima import no_vertical_minima
 from trajectory_data_process.harvest.airports import (
     PATH_POINT_TCH_SOURCE,
@@ -147,9 +147,13 @@ def _classified_source_timed():
 
 
 def _write_two_record_root(root) -> HarvestPaths:
+    return _write_root(root, (_classified(), _classified_source_timed()))
+
+
+def _write_root(root, tracks) -> HarvestPaths:
     paths = HarvestPaths(root, "KAAA")
     rows = []
-    for classified in (_classified(), _classified_source_timed()):
+    for classified in tracks:
         record = track_record(classified)
         relative = f"assigned/18/{record['flight_key']}.json"
         path = paths.tracks / relative
@@ -166,12 +170,43 @@ def _write_two_record_root(root) -> HarvestPaths:
         "airport": "KAAA",
         "altitude_source": "opensky_history_geoaltitude_m",
         "altitude_datum": "hae",
-        "counts": {"assigned": 2, "ambiguous": 0, "unassignable": 0, "not_landing": 0},
-        "total": 2,
+        "counts": {"assigned": len(rows), "ambiguous": 0, "unassignable": 0, "not_landing": 0},
+        "total": len(rows),
         "provenance": {"original": True},
         "records": rows,
     }), encoding="utf-8")
     return paths
+
+
+def test_source_timed_store_reclassifies_without_a_sidecar_and_records_its_absence(tmp_path):
+    """A store written by a current download needs no backfilled sidecar (TD28)."""
+    paths = _write_root(tmp_path / "root", (_classified_source_timed(),))
+    absent = AbsentSidecar(tmp_path / "adsb-metadata", "KAAA")
+
+    manifest = reclassify_stored_tracks(
+        _airport(), paths,
+        metadata_lookup=absent.lookup, metadata_provenance=absent.provenance,
+        metadata_lookup_many=absent.lookup_many,
+    )
+
+    assert manifest["total"] == 1
+    recorded = manifest["provenance"]["reclassification"]["adsb_metadata"]
+    assert recorded["absent"] is True
+    assert recorded["manifest_path"].endswith("adsb-metadata/KAAA/manifest.json")
+
+
+def test_a_track_without_source_timing_refuses_a_missing_sidecar_by_name(tmp_path):
+    """The legacy track needs state rows looked up: the absent sidecar is named, not guessed around."""
+    paths = _write_two_record_root(tmp_path / "root")
+    absent = AbsentSidecar(tmp_path / "adsb-metadata", "KAAA")
+
+    with pytest.raises(FileNotFoundError, match="adsb-metadata/KAAA/manifest.json is missing"):
+        reclassify_stored_tracks(
+            _airport(), paths,
+            metadata_lookup=absent.lookup, metadata_provenance=absent.provenance,
+            metadata_lookup_many=absent.lookup_many,
+        )
+    assert not any(paths.root.glob(".KAAA-reclassify-*"))   # the staging directory went with the failure
 
 
 def test_parallel_reclassification_is_byte_identical_to_serial(tmp_path):
@@ -382,3 +417,18 @@ def test_reclassification_orders_every_outcome_by_canonical_flight_time():
         "MIDDLE",
         "LATE",
     ]
+
+
+def test_only_the_freshness_rebuild_demands_a_sidecar(tmp_path):
+    """The CLI's choice (TD28): merge / reclassify take an absent sidecar, a rebuild refuses it."""
+    sidecars = str(tmp_path / "adsb-metadata")
+
+    def metadata(*mode):
+        return _state_metadata(build_parser().parse_args(
+            ["--airport", "KAAA", "--adsb-metadata", sidecars, *mode]), "KAAA")
+
+    assert isinstance(metadata("--merge-source", str(tmp_path / "other")), AbsentSidecar)
+    assert isinstance(metadata("--reclassify-existing"), AbsentSidecar)
+    assert metadata() is None
+    with pytest.raises(FileNotFoundError, match="run backfill_adsb_metadata.py"):
+        metadata("--rebuild-fresh-from", str(tmp_path / "legacy"))

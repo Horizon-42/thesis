@@ -8,7 +8,13 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from trajectory_data_process.harvest.adsb_metadata import SidecarStateMetadata
+import pytest
+
+from trajectory_data_process.harvest.adsb_metadata import (
+    AbsentSidecar,
+    SidecarStateMetadata,
+    reclassification_metadata,
+)
 
 
 def _write_partition(tmp_path, rows):
@@ -141,3 +147,22 @@ def test_duplicate_aware_backfill_contract_is_supported(tmp_path):
     assert SidecarStateMetadata(tmp_path, "KAAA").lookup(
         "abc123", timestamp.timestamp()
     ) is not None
+
+
+def test_reclassification_metadata_is_the_sidecar_when_one_exists(tmp_path):
+    timestamp = pd.Timestamp("2026-08-01T00:10:00Z")
+    _write_partition(tmp_path, [{
+        "time": timestamp, "icao24": "abc123", "velocity": 70.0,
+        "lastposupdate": timestamp.timestamp(), "lastcontact": timestamp.timestamp(),
+    }])
+    assert isinstance(reclassification_metadata(tmp_path, "kaaa"), SidecarStateMetadata)
+
+
+def test_an_absent_sidecar_answers_no_query_and_refuses_the_first_real_one(tmp_path):
+    metadata = reclassification_metadata(tmp_path, "KAAA")
+
+    assert isinstance(metadata, AbsentSidecar)
+    assert metadata.provenance["absent"] is True
+    assert metadata.lookup_many([]) == []          # every batch of source-timed tracks asks nothing
+    with pytest.raises(FileNotFoundError, match="KAAA/manifest.json is missing"):
+        metadata.lookup("abc123", 1785542400.0)

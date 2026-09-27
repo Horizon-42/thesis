@@ -105,3 +105,5 @@ finish its write — confirm the process is gone (`kill -0`) before rebuilding d
   `tracks/` is kept while `tracks/` is missing (TD25).
 - **KAUS is the held-out TEST airport, in its own root `outputs/harvest-heldout/`** — never in (or merged into)
   the live `outputs/harvest/`, whose every `K*` airport `discover_k_airports()` trains on by default (TD27).
+- A merge / reclassification needs the ADS-B sidecar only for a track WITHOUT source timing; with none on
+  disk it records `absent` and the first lookup raises by name (`AbsentSidecar`) (TD28).

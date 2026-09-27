@@ -172,6 +172,48 @@ class SidecarStateMetadata:
         return compact
 
 
+class AbsentSidecar:
+    """An airport with no backfilled sidecar, for ``--reclassify-existing`` / ``--merge-source``.
+
+    Those modes look a state row up only for a track stored WITHOUT source timing (no
+    ``source_integrity``: a harvest from before ``harvest-tracks-v2-source-timing``). Every track
+    a current download writes carries it, so an airport downloaded only since then (KAUS,
+    2026-09-27) has nothing to backfill -- and the merge used to refuse it for the missing
+    manifest anyway. Its provenance records the absence; the first row a track actually needs
+    raises, naming the file (TD28).
+    """
+
+    def __init__(self, root: Path, airport: str) -> None:
+        self.airport = airport.upper()
+        self.manifest_path = root / self.airport / "manifest.json"
+        self.provenance = {
+            "schema": SIDECAR_SCHEMA,
+            "airport": self.airport,
+            "manifest_path": str(self.manifest_path.resolve()),
+            "absent": True,
+        }
+
+    def lookup(self, icao24: str, state_time_s: float) -> AdsbStateMetadata | None:
+        return self.lookup_many([(icao24, state_time_s)])[0]
+
+    def lookup_many(
+        self, queries: list[tuple[str, float]] | tuple[tuple[str, float], ...]
+    ) -> list[AdsbStateMetadata | None]:
+        if queries:
+            raise FileNotFoundError(
+                f"{self.manifest_path} is missing, and a stored track has no source timing "
+                f"({len(queries)} state rows to look up); run backfill_adsb_metadata.py first"
+            )
+        return []
+
+
+def reclassification_metadata(root: Path, airport: str) -> SidecarStateMetadata | AbsentSidecar:
+    """The airport's sidecar when its manifest exists, else `AbsentSidecar`."""
+    if (root / airport.upper() / "manifest.json").is_file():
+        return SidecarStateMetadata(root, airport)
+    return AbsentSidecar(root, airport)
+
+
 def _load_catalog(base: Path, airport: str) -> list[_Partition]:
     manifest_path = base / "manifest.json"
     if not manifest_path.is_file():
