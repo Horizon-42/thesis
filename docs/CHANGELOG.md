@@ -1,5 +1,17 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-27 — 多机 M0 第 1–4 步：间隔判定的两种读法，观测航迹的普查，平行跑道间隔的英文读数
+
+- M0 第 1–4 步（分支 `dev-multi-aircraft`）：机型 → CWT 类别表（7360.1K 附录 A 全表 + 补充表）、失去间隔的判定 `inference/separation.py`、
+  场景的步与样本切法 `prior/scene.py`、观测航迹普查 `experiments/traffic_census.py`；每步 opus 审查、改完再提交（最后 `eb583c80`）。
+- 判定有两种读法：`IFR`（照原文）和 `VISUAL`（同一方向的不同跑道之间不设最小间隔，都已建立在不同方向跑道五边上的不查）。用户 2026-09-27
+  暂定：检查和奖励用 `VISUAL`，`IFR` 并排报（多机设计 §3.2、§9 第 15 项）。审查指出 `VISUAL` 比 7-4-4 c 的条件宽，等于默认了目视间隔；
+  照原文收紧的读法待用户定（§9 第 16 项，建议收紧）。
+- 普查 `outputs/POOLED/traffic/census_20260927/`（格式 `ts-traffic-census-v2`）：失去间隔的对每小时 IFR 0.98、目视 0.33。英文读数
+  `4dTrajectory/ts_transformer/docs/two_tier/readouts/2026-09-27_parallel_runway_separation.md`，附五个航迹实例，图由
+  `experiments/traffic_separation_examples.py` 画（它原来用 `np.arange(…, last + 1e-9, …)` 取纪元秒的步，丢了最后一步，改用 `scene_steps`）。
+- 代码健康待办加一条：`faa_separation(visual_parallels=True)` 是另一个不同的"目视"。
+
 ### 2026-09-27 — 多机设计确认；按第一性原理复查；M0 开始
 
 - 用户逐项回答多机设计 §9 第 1–13 项（起点 A = 从数据训 scene；先"一架由模型指挥"；平行跑道按 `runway_schedule` 的读法；硬 / 软按第 0 步
