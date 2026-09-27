@@ -49,6 +49,7 @@ from ts_transformer.inference.runway_schedule import (
 from ts_transformer.inference.separation import IFR, VISUAL
 from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals, load_spec
+from ts_transformer.instructions.words import wrap180
 from ts_transformer.prior.scene import scene_steps
 from ts_transformer.io_utils import write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, repo_relative
@@ -112,7 +113,7 @@ def _apart(a: Track, b: Track, t_s: np.ndarray) -> tuple[np.ndarray, np.ndarray]
 
 def _heading_off(item: Track, t_s: float) -> float:
     """The angle between its track and its runway's course at ``t_s``, as the census judges it."""
-    return float(np.interp(t_s, item.presence.times_s, item.off_course_deg))
+    return abs(float(wrap180(np.interp(t_s, item.presence.times_s, item.track_minus_course_deg))))
 
 
 def draw(path: Path, title: str, verdict: str, pair: tuple[tuple[Track, Any], tuple[Track, Any]],
@@ -128,6 +129,7 @@ def draw(path: Path, title: str, verdict: str, pair: tuple[tuple[Track, Any], tu
     colours = ("#2563eb", "#ea580c")
     # the runways of the two flights, their extended centrelines, the others faint
     runways = sorted({flight.runway for _, flight in pair})
+    mine_at = np.mean([(c.threshold_e_m, c.threshold_n_m) for c in geometry.candidates if c.ident in runways], axis=0)
     for candidate in geometry.candidates:
         ue, un = math.sin(math.radians(candidate.course_deg)), math.cos(math.radians(candidate.course_deg))
         e0, n0 = candidate.threshold_e_m / 1000.0, candidate.threshold_n_m / 1000.0
@@ -136,11 +138,15 @@ def draw(path: Path, title: str, verdict: str, pair: tuple[tuple[Track, Any], tu
                   color="#111827" if mine else "#d1d5db", linewidth=3.0 if mine else 2.0, solid_capstyle="butt")
         if mine:
             plan.plot([e0, e0 - ue * 20.0], [n0, n0 - un * 20.0], color="#9ca3af", linewidth=0.8, linestyle="--")
-            # the far end of the runway, one label each side, so a close pair's two do not overlap
-            side = 1 if runways.index(candidate.ident) else -1
-            plan.annotate(candidate.ident, (e0 + ue * candidate.length_m / 1000.0, n0 + un * candidate.length_m / 1000.0),
-                          textcoords="offset points", xytext=(6 * side, 8 * side), color="#111827",
-                          ha="left" if side > 0 else "right")
+            # beside the runway's middle (inside the view: it shows 2 km past the tracks, which end at the threshold), on
+            # its outer side (away from the other runway drawn), so each label sits by its own runway
+            right_e, right_n = un, -ue                                  # the right of the course
+            side = 1.0 if (candidate.threshold_e_m - mine_at[0]) * right_e + (
+                candidate.threshold_n_m - mine_at[1]) * right_n >= 0.0 else -1.0
+            plan.annotate(candidate.ident, (e0 + ue * candidate.length_m / 2000.0, n0 + un * candidate.length_m / 2000.0),
+                          textcoords="offset points", xytext=(10 * side * right_e, 10 * side * right_n),
+                          color="#111827", ha="left" if side * right_e >= 0 else "right", va="center",
+                          bbox={"boxstyle": "round,pad=0.15", "facecolor": "white", "edgecolor": "none", "alpha": 0.85})
     for (item, flight), colour in zip(pair, colours):
         t = item.presence.times_s
         e, n = item.e_m / 1000.0, item.n_m / 1000.0

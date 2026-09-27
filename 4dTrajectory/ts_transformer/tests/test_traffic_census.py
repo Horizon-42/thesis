@@ -16,14 +16,16 @@ STEP_S = 2.0
 
 
 def _track(key: str, times: np.ndarray, along: np.ndarray, rate: float, *, n: float = 0.0, landing_s: float,
-           captured_s: float = 0.0, runway: str = "R", off_course_deg: float = 0.0):
+           captured_s: float = 0.0, runway: str = "R", track_minus_course_deg: float = 0.0,
+           right_of_course_m: float = 0.0):
     from ts_transformer.experiments.traffic_census import Track
     from ts_transformer.prior.scene import Presence, hung_span
 
     seen = Presence(key, "KXXX", runway, landing_s, True, times, np.abs(along))
     first, last = hung_span(seen, STEP_S)
     return Track(seen, first, last, along.copy(), np.full(len(times), n), np.full(len(times), 500.0), along,
-                 np.full(len(times), off_course_deg), np.full(len(times), rate), captured_s, "artefact", "F")
+                 np.full(len(times), track_minus_course_deg), np.full(len(times), right_of_course_m),
+                 np.full(len(times), rate), captured_s, "artefact", "F")
 
 
 def test_the_census_counts_an_in_trail_loss_the_landing_intervals_the_closing_speed_and_the_swaps():
@@ -65,21 +67,62 @@ SEPARATION = Separation(same_nm=3.0, speed_mps=70.0,
                         along_nm={"S1": 0.0, "S2": 0.0, "I1": 0.0, "I2": 0.0}, wake_nm=CWT_ON_APPROACH_NM)
 
 
-@pytest.mark.parametrize("off_course_deg, lost_under_visual", [(45.0, True), (20.0, False)])
-def test_a_turn_on_beside_an_independent_final_loses_under_the_visual_reading_only_when_steeper_than_30_deg(
-        off_course_deg, lost_under_visual):
+@pytest.mark.parametrize("track_minus_course_deg, lost_under_visual", [
+    (45.0, True),       # steeper than 30°
+    (20.0, False),      # closing on its centreline at 20°
+    (-20.0, True),      # 20° off, heading away from its centreline
+    (380.0, False),     # 20° as the census stores it, unwrapped along the rows: wrapped at the step
+])
+def test_a_turn_on_beside_an_independent_final_is_free_under_the_visual_reading_only_when_it_intercepts_at_30_deg(
+        track_minus_course_deg, lost_under_visual):
+    """A on I1's final; B, 1.8 km left of I2's centreline and 2 km behind, turning in until it is captured at 150 s and
+    still there when A lands: one IFR episode until the capture, under VISUAL only when B does not intercept."""
     from ts_transformer.experiments.traffic_census import census_airport
 
     t = np.arange(0.0, 200.0 + 1e-9, STEP_S)
     final = _track("A", t, -15_000.0 + 70.0 * t, 70.0, landing_s=15_000.0 / 70.0, runway="I1")
-    turning = _track("B", t, -17_000.0 + 70.0 * t, 70.0, n=1_800.0, landing_s=17_000.0 / 70.0, runway="I2",
-                     captured_s=math.inf, off_course_deg=off_course_deg)
+    t_b = np.arange(0.0, 240.0 + 1e-9, STEP_S)
+    turning = _track("B", t_b, -17_000.0 + 70.0 * t_b, 70.0, n=1_800.0, landing_s=17_000.0 / 70.0, runway="I2",
+                     captured_s=150.0, track_minus_course_deg=track_minus_course_deg, right_of_course_m=-1_800.0)
     census = census_airport([final, turning], SEPARATION, STEP_S)
 
     ifr, visual = census["readings"]["ifr"]["losses"], census["readings"]["visual"]["losses"]
     assert (ifr["episodes"], ifr["by_relation"], ifr["by_kind"]) == (1, {"independent": 1}, {"radar_or_vertical": 1})
+    assert ifr["steps"]["max"] == len(range(0, 150, 2))
     assert visual["episodes"] == int(lost_under_visual)
-    assert census["at_landing"]["judged"] == 0                  # nobody behind on A's runway or a pair judged as one
+    assert census["at_landing"]["judged"] == 0      # B, established behind A, is on the other runway of the pair
+
+
+def _flown(track0: float, legs, *, compass: bool = False):
+    """A flight on the fixture airport's runway 09 (course 090, centreline east along n = 0), ending 300 m before its
+    threshold; ``compass``: its track stored in [0, 360) as a compass would give it, not continuous."""
+    from ts_transformer.experiments.traffic_census import track
+    from ts_transformer.tests.support import fly_legs, instruction_airport, instruction_flight, instruction_spec
+
+    e, n, altitude, course, speed = fly_legs(legs, track0, 1_000.0, -300.0, 0.0)
+    flight = instruction_flight(e, n, altitude, course % 360.0 if compass else course, speed)
+    return track(flight, None, None, instruction_airport(), 0.0, instruction_spec(), STEP_S)
+
+
+def test_the_census_reads_the_track_less_the_course_and_the_side_from_the_raw_track_unwrapped_along_the_rows():
+    from ts_transformer.instructions.words import wrap180
+
+    legs = [(30, 0.0, 90.0, 0.0), (15, -3.0, 90.0, 0.0), (60, 0.0, 80.0, -4.0)]
+    # 495° (135°) on the course 090 is 45° right of it; the flight starts north of the centreline (left), closing on it
+    from_the_left = _flown(90.0 + 360.0 + 45.0, legs)
+    assert float(wrap180(from_the_left.track_minus_course_deg[0])) == pytest.approx(45.0)
+    assert from_the_left.right_of_course_m[0] < 0.0
+    # 045° is 45° left of it; the flight starts south of the centreline (right), closing on it
+    from_the_right = _flown(45.0, legs)
+    assert float(wrap180(from_the_right.track_minus_course_deg[0])) == pytest.approx(-45.0)
+    assert from_the_right.right_of_course_m[0] > 0.0
+    # turning through the reciprocal (270°): continuous along the rows, so a step between two rows is not read as 0°
+    across = _flown(250.0, [(20, 2.0, 90.0, 0.0), (20, 0.0, 90.0, 0.0)]).track_minus_course_deg
+    assert np.max(np.abs(np.diff(across))) == pytest.approx(2.0)
+    assert float(wrap180(across[0])) == pytest.approx(160.0) and float(wrap180(across[-1])) == pytest.approx(-160.0)
+    # a compass track through north (350° → 010°) is continuous too
+    north = _flown(350.0, [(10, 2.0, 90.0, 0.0), (20, 0.0, 90.0, 0.0)], compass=True).track_minus_course_deg
+    assert np.max(np.abs(np.diff(north))) == pytest.approx(2.0)
 
 
 def test_a_close_parallel_pair_is_one_runway_under_both_readings():

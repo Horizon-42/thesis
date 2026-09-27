@@ -3,9 +3,9 @@
 The rules are FAA JO 7110.65BB's, encoded once in `inference.runway_schedule`; this module applies them to a set of
 aircraft at one time. What the rules need that is not geometry is handed in by the caller, already computed: each
 aircraft's runway in force, its position on the approach clock (metres along its runway's landing direction from the
-airport's common origin: the threshold's `Separation.along_nm` less the distance still before it), the angle between
-its track and that runway's course, whether it is established on its final (the capture of the labeller or the
-executor), and its CWT category (None: the record has no type). This package does not reach the instruction language
+airport's common origin: the threshold's `Separation.along_nm` less the distance still before it), its track less that
+runway's course and its distance right of the runway's extended centreline (both signed), whether it is established
+on its final (the capture of the labeller or the executor), and its CWT category (None: the record has no type). This package does not reach the instruction language
 (the architecture test), so the caller measures those.
 
 Two readings of the rules (design §3.2; user 2026-09-27, provisional): the closed loop's checks and the reward use
@@ -16,10 +16,12 @@ Two readings of the rules (design §3.2; user 2026-09-27, provisional): the clos
   approaches (7-4-4 c). The reading assumes those clearances, and never visual separation (7-2-1), which takes a
   traffic-in-sight report and an instruction to keep it — words the vocabulary does not have (user 2026-09-27). From
   `IFR` it differs in two places, and it never judges a pair `IFR` would not:
-  - dependent and independent parallels (2,500 ft apart or more): no minimum between the two runways once BOTH
-    aircraft's tracks are within `FAA_VISUAL_INTERCEPT_MAX_DEG` of their runways' courses (7-4-4 c2 a / c3 a: approved
-    separation until each is on a heading intercepting its centreline at 30° or less; then c2 c / c3 c: no other
-    separation with the adjacent centreline); before that, the `IFR` rule;
+  - dependent and independent parallels (2,500 ft apart or more): no minimum between the two runways once BOTH aircraft
+    intercept their own centrelines at `FAA_VISUAL_INTERCEPT_MAX_DEG` or less (7-4-4 c2 a / c3 a: approved separation
+    until each is on a heading "which will intercept the extended centerline of the runway at an angle not greater than
+    30 degrees"; then c2 c / c3 c: no other separation with the adjacent centreline); before that, the `IFR` rule. An
+    aircraft intercepts when it is established, or its track is within 30° of the course and heads toward its
+    centreline or along it (`_intercepting`); the heading is read as the track (no wind);
   - two aircraft both ESTABLISHED on finals of runways of other directions are not judged (7-4-4 c4; the
     crossing-runway gate at the threshold, 3-10-4, is not modelled).
   A pair under 2,500 ft is judged as one runway, as under `IFR`: 7-4-4 c1 (as amended by N JO 7110.805) clears a
@@ -50,8 +52,8 @@ A category is None when the record has no type: in trail, such a pair is judged 
 (``wake_known``); at the threshold it is not judged — the caller counts those aircraft. Distances are metres; the
 vertical is between the two heights as given.
 
-`Traffic` holds its own contract: an aircraft has a position on the approach clock and an angle off its course exactly
-when a runway is in force, and an established aircraft has one.
+`Traffic` holds its own contract: an aircraft has a position on the approach clock, a track less its course (in
+[−180°, 180°]) and a distance off its centreline exactly when a runway is in force, and an established aircraft has one.
 """
 
 from __future__ import annotations
@@ -90,20 +92,24 @@ class Traffic:
     height_m: np.ndarray                # [N]
     runway: tuple[str | None, ...]      # the runway in force; None before one is said
     along_m: np.ndarray                 # [N] position on the approach clock; NaN where no runway is in force
-    off_course_deg: np.ndarray          # [N] |track − its runway's course|, 0–180°; NaN where no runway is in force
+    track_minus_course_deg: np.ndarray  # [N] its track less its runway's course, −180–180° (+: turned right); NaN: no runway
+    right_of_course_m: np.ndarray       # [N] its distance right of its runway's extended centreline; NaN: no runway
     established: np.ndarray             # [N] bool: established on the final of its runway in force
     category: tuple[str | None, ...]    # CWT category; None: the record has no type
 
     def __post_init__(self) -> None:
         count = len(self.e_m)
         if not all(len(field) == count for field in (self.n_m, self.height_m, self.runway, self.along_m,
-                                                        self.off_course_deg, self.established, self.category)):
+                                                        self.track_minus_course_deg, self.right_of_course_m,
+                                                        self.established, self.category)):
             raise ValueError("every field of a Traffic holds one value per aircraft")
         said = np.array([runway is not None for runway in self.runway], dtype=bool)
-        if not (np.array_equal(said, np.isfinite(self.along_m))
-                and np.array_equal(said, np.isfinite(self.off_course_deg))):
-            raise ValueError("an aircraft is on the approach clock, and has an angle off its course, exactly when a "
-                             "runway is in force")
+        if not all(np.array_equal(said, np.isfinite(field))
+                   for field in (self.along_m, self.track_minus_course_deg, self.right_of_course_m)):
+            raise ValueError("an aircraft is on the approach clock, and has a track and a distance off its runway's "
+                             "course, exactly when a runway is in force")
+        if np.any(np.abs(self.track_minus_course_deg[said]) > 180.0):
+            raise ValueError("a track less its course lies in [-180, 180] degrees")
         if np.any(np.asarray(self.established, dtype=bool) & ~said):
             raise ValueError("an established aircraft has a runway in force")
 
@@ -130,6 +136,14 @@ def _wake_m(table: dict[tuple[str, str], float], leader: str | None, follower: s
     return table.get((leader, follower), 0.0) * NM_M, True     # a blank cell of the table sets no wake minimum
 
 
+def _intercepting(traffic: Traffic, k: int) -> bool:
+    """7-4-4 c2 (a)(1) / c3 (a)(1): established on its final, or on a track that meets its own centreline at
+    `FAA_VISUAL_INTERCEPT_MAX_DEG` or less — within that of the course and heading toward the centreline, or along it."""
+    angle = float(traffic.track_minus_course_deg[k])
+    return bool(traffic.established[k]) or (
+        abs(angle) <= FAA_VISUAL_INTERCEPT_MAX_DEG and float(traffic.right_of_course_m[k]) * angle <= 0.0)
+
+
 def losses(traffic: Traffic, separation: Separation, reading: str) -> list[Loss]:
     """Every pair that has lost separation at this instant under ``reading`` (module docstring)."""
     if reading not in READINGS:
@@ -146,9 +160,8 @@ def losses(traffic: Traffic, separation: Separation, reading: str) -> list[Loss]
             both = bool(traffic.established[i] and traffic.established[j])     # established: a runway is in force
             ahead, behind = (i, j) if traffic.along_m[i] >= traffic.along_m[j] else (j, i)
             if reading == VISUAL:
-                if relation in (DEPENDENT, INDEPENDENT) and max(
-                        traffic.off_course_deg[i], traffic.off_course_deg[j]) <= FAA_VISUAL_INTERCEPT_MAX_DEG:
-                    continue            # 7-4-4 c2 / c3: both intercept at 30° or less
+                if relation in (DEPENDENT, INDEPENDENT) and _intercepting(traffic, i) and _intercepting(traffic, j):
+                    continue            # 7-4-4 c2 / c3: both intercept their centrelines at 30° or less
                 if relation == UNRELATED and both:
                     continue            # established on finals of other directions: 3-10-4 not modelled
             if both and separation.one_runway(ri, rj):

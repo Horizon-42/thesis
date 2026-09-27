@@ -1,5 +1,6 @@
 """Loss of separation at one instant (`inference.separation`, multi-aircraft design §3.2)."""
 
+import itertools
 import math
 
 import numpy as np
@@ -44,13 +45,15 @@ SEPARATION = Separation(same_nm=3.0, speed_mps=70.0,
 
 
 def traffic(*aircraft) -> Traffic:
-    """Each aircraft: (east m, north m, height m, runway, established, category[, degrees off its course]); on the
-    approach clock at its east; flying its course unless said otherwise."""
-    e, n, h, runway, established, category, off = zip(*(a if len(a) == 7 else (*a, 0.0) for a in aircraft))
-    along = np.array([x if r is not None else np.nan for x, r in zip(e, runway)], dtype=float)
-    off = np.array([x if r is not None else np.nan for x, r in zip(off, runway)], dtype=float)
-    return Traffic(np.array(e, float), np.array(n, float), np.array(h, float), tuple(runway), along, off,
-                   np.array(established, bool), tuple(category))
+    """Each aircraft: (east m, north m, height m, runway, established, category[, track less course °[, metres right of
+    the centreline]]); on the approach clock at its east; on its centreline, flying its course, unless said otherwise."""
+    e, n, h, runway, established, category, angle, right = zip(*((*a, 0.0, 0.0)[:8] for a in aircraft))
+
+    def said(values) -> np.ndarray:
+        return np.array([x if r is not None else np.nan for x, r in zip(values, runway)], dtype=float)
+
+    return Traffic(np.array(e, float), np.array(n, float), np.array(h, float), tuple(runway), said(e), said(angle),
+                   said(right), np.array(established, bool), tuple(category))
 
 
 def test_the_wake_tables_are_transcribed_as_the_order_prints_them():
@@ -148,26 +151,35 @@ def test_at_the_threshold_only_the_on_approach_table_binds_and_exactly_the_minim
     assert across.relation == SINGLE
 
 
-@pytest.mark.parametrize("runway, along, off, established", [
-    (None, 0.0, float("nan"), False),            # on the approach clock with no runway in force
-    ("R", float("nan"), 0.0, False),             # a runway in force, not on the approach clock
-    ("R", 0.0, float("nan"), False),             # a runway in force, no angle off its course
-    (None, float("nan"), 0.0, False),            # an angle off a course with no runway in force
-    (None, float("nan"), float("nan"), True),    # established with no runway
+NAN = float("nan")
+
+
+@pytest.mark.parametrize("runway, along, angle, right, established", [
+    (None, 0.0, NAN, NAN, False),        # on the approach clock with no runway in force
+    ("R", NAN, 0.0, 0.0, False),         # a runway in force, not on the approach clock
+    ("R", 0.0, NAN, 0.0, False),         # a runway in force, no track less its course
+    ("R", 0.0, 0.0, NAN, False),         # a runway in force, no distance off its centreline
+    (None, NAN, 0.0, NAN, False),        # a track less a course with no runway in force
+    (None, NAN, NAN, 0.0, False),        # a distance off a centreline with no runway in force
+    ("R", 0.0, 190.0, 0.0, False),       # a track less its course outside [-180, 180]
+    ("R", 0.0, -340.0, 0.0, False),
+    (None, NAN, NAN, NAN, True),         # established with no runway
 ])
-def test_traffic_refuses_a_broken_contract(runway, along, off, established):
+def test_traffic_refuses_a_broken_contract(runway, along, angle, right, established):
     with pytest.raises(ValueError):
-        Traffic(np.zeros(1), np.zeros(1), np.zeros(1), (runway,), np.array([along]), np.array([off]),
-                np.array([established]), ("F",))
+        Traffic(np.zeros(1), np.zeros(1), np.zeros(1), (runway,), np.array([along]), np.array([angle]),
+                np.array([right]), np.array([established]), ("F",))
 
 
 def test_the_visual_reading_frees_parallels_once_both_intercept_at_30_deg_or_less():
     """7-4-4 c2 a / c3 a: approved separation until each is on a heading intercepting its centreline at 30° or less."""
     diagonal = traffic((-5_000, 0, 700, "L1", True, "F"), (-6_000, 1_100, 700, "L2", True, "F"))
-    for off, lost in ((20.0, False), (FAA_VISUAL_INTERCEPT_MAX_DEG, False), (31.0, True), (75.0, True)):
+    # 500 m left of its centreline: turned right (+) it closes on it, turned left (−) it heads away
+    for angle, lost in ((20.0, False), (FAA_VISUAL_INTERCEPT_MAX_DEG, False), (31.0, True), (75.0, True),
+                        (-20.0, True)):
         for runways in (("I1", "I2"), ("L1", "L2")):
             turning_in = traffic((-8_000, 0, 700, runways[0], True, "F"),
-                                 (-9_000, 1_800, 800, runways[1], False, "F", off))
+                                 (-9_000, 1_800, 800, runways[1], False, "F", angle, -500.0))
             assert [(loss.kind, loss.responsible) for loss in losses(turning_in, SEPARATION, IFR)] == [
                 (RADAR_OR_VERTICAL, (1,))]
             assert losses(turning_in, SEPARATION, VISUAL) == (losses(turning_in, SEPARATION, IFR) if lost else [])
@@ -175,6 +187,37 @@ def test_the_visual_reading_frees_parallels_once_both_intercept_at_30_deg_or_les
     # neither established, the one 35° off: the IFR rule
     both_turning = traffic((-8_000, 0, 700, "I1", False, "F", 10.0), (-9_000, 1_800, 800, "I2", False, "F", 35.0))
     assert losses(both_turning, SEPARATION, VISUAL) == losses(both_turning, SEPARATION, IFR) != []
+
+
+#: One pair of runways per relation, and a pair with one runway not said yet.
+PAIRS = {SAME: ("R", "R"), SINGLE: ("S1", "S2"), DEPENDENT: ("L1", "L2"), INDEPENDENT: ("I1", "I2"),
+         UNRELATED: ("R", "X"), NO_RUNWAY: ("R", None)}
+
+
+def test_the_visual_reading_is_the_ifr_reading_less_exactly_what_7_4_4_c_frees():
+    """Every relation × who is established × track less course × side of the centreline × order: VISUAL is IFR, except
+    none between parallels 2,500 ft or more apart that both intercept at 30° or less, and none between established finals
+    of other directions."""
+    limit = FAA_VISUAL_INTERCEPT_MAX_DEG
+
+    def intercepting(established: bool, angle: float, right: float) -> bool:
+        return established or (abs(angle) <= limit and right * angle <= 0.0)
+
+    kinematics = list(itertools.product((0.0, limit, limit + 1.0, -limit, -limit - 1.0, 90.0), (-400.0, 0.0, 400.0)))
+    for relation, (ra, rb) in PAIRS.items():
+        for est_a, est_b in itertools.product((False, True), repeat=2):
+            if rb is None and est_b:
+                continue
+            for (angle_a, right_a), (angle_b, right_b) in itertools.product(kinematics, repeat=2):
+                a = (-3_000.0, 0.0, 600.0, ra, est_a, "F", angle_a, right_a)
+                b = (-4_000.0, 1_100.0, 600.0, rb, est_b, "F", angle_b, right_b)
+                freed = ((relation in (DEPENDENT, INDEPENDENT) and intercepting(est_a, angle_a, right_a)
+                          and intercepting(est_b, angle_b, right_b))
+                         or (relation == UNRELATED and est_a and est_b))
+                for scene in (traffic(a, b), traffic(b, a)):
+                    ifr = losses(scene, SEPARATION, IFR)
+                    assert ifr or (relation == INDEPENDENT and est_a and est_b)      # the scene is not vacuous
+                    assert losses(scene, SEPARATION, VISUAL) == ([] if freed else ifr), (relation, a, b)
 
 
 def test_the_visual_reading_keeps_a_close_pair_as_one_runway():
@@ -202,7 +245,7 @@ def test_the_visual_reading_keeps_one_runway_and_vectored_traffic_and_drops_esta
 
 
 @pytest.mark.parametrize("scene", [
-    Traffic(np.zeros(0), np.zeros(0), np.zeros(0), (), np.zeros(0), np.zeros(0), np.zeros(0, bool), ()),  # nobody
+    Traffic(*[np.zeros(0)] * 3, (), *[np.zeros(0)] * 3, np.zeros(0, bool), ()),              # nobody to judge
     traffic((-5_000, 0, 700, "R", True, "F"), (-7_000, 2_000, 800, "R", False, "F")),   # not both established
 ])
 def test_a_reading_not_listed_is_refused_whatever_the_scene(scene):
@@ -219,7 +262,7 @@ def test_the_visual_reading_never_judges_a_pair_the_ifr_reading_would_not():
             runway = runways[random.integers(len(runways))]
             aircraft.append((random.uniform(-12_000, 0), random.uniform(-3_000, 3_000), random.uniform(0, 900), runway,
                              runway is not None and bool(random.integers(2)), "FDH"[random.integers(3)],
-                             random.uniform(0, 180)))
+                             random.uniform(-180, 180), random.uniform(-2_000, 2_000)))
         scene = traffic(*aircraft)
         assert set(losses(scene, SEPARATION, VISUAL)) <= set(losses(scene, SEPARATION, IFR))
 

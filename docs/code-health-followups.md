@@ -540,5 +540,7 @@ it moves free-generation outcomes and the landing reward, so it waits for a stag
 turns every parallel relation into `INDEPENDENT` and drops the diagonals. That is a second definition of "visual", and it is
 not the one `inference.separation.VISUAL` applies: combined with `losses(..., IFR)` it still judges a turn-on beside a
 parallel final by radar or vertical. Only the archived `runway_intent_r3` and `test_runway_schedule.py`'s
-`visual_parallels` test call it. Fix (judgement): delete the flag and its test once nothing live needs the runway-intent
-reading, or name it after what it does (parallels as independent).
+`visual_parallels` test call it. Since 2026-09-27 it also contradicts the decided visual reading: it frees close pairs
+because "pilots maintain visual separation", which the multi-aircraft reading rules out (design §9 item 16). Fix
+(judgement): delete the flag and its test once nothing live needs the runway-intent reading, or name it after what it
+does (parallels as independent).

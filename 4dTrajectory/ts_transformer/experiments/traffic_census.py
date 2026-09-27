@@ -9,9 +9,11 @@ under both readings — `VISUAL`, which the closed loop's checks and the reward 
 - an aircraft's position is interpolated at the step from its rows (at most half a step past its first or last row, held
   there); its runway is the one it landed on (the observed census is a measurement, not a model input); its position on
   the approach clock is its threshold's `Separation.along_nm` less its distance before that threshold along the course;
-  its angle off that runway's course is its track's (`relative_to_runway`); it is established on the final from its capture row on — the artefact's for a flight with a sentence, the labeller's
-  own rule (`capture_row` on `admit`'s smoothed track) for a background flight `admit` takes, the same rule on the raw
-  track for one it refuses (each group counted); a flight that never stays in the corridor is never established; its CWT
+  its track less that runway's course and its distance right of the centreline are its raw track's (`relative_to_runway`;
+  the angle unwrapped along the rows, so a step between two rows either side of ±180° interpolates across it, and
+  wrapped at the step); it is established on the final from its capture row on — the artefact's for a flight with a
+  sentence, the labeller's own rule (`capture_row` on `admit`'s smoothed track) for a background flight `admit` takes,
+  the same rule on the raw track for one it refuses (each group counted); a flight that never stays in the corridor is never established; its CWT
   category comes from its type (`runway_schedule.wake_category`; a flight without a type is counted);
 - a pair's loss over consecutive steps is one EPISODE, whatever the kind at each step (the kinds seen are listed, and
   its closest step: the distance over the minimum, and the two); the pairs with a loss are counted beside the episodes;
@@ -19,8 +21,8 @@ under both readings — `VISUAL`, which the closed loop's checks and the reward 
   gives a landing interval on the approach clock, the distance the rules require (radar and TBL 5-5-2, design §2.5 / §9
   item 6), whether it was below it, and whether TBL 5-5-2 alone was broken (`wake_at_threshold`) — the same under both
   readings, so judged once;
-- on every final, consecutive established aircraft that both have a sentence give a closing speed: the rates along the
-  landing direction, ground speed × cos(track − course), of the one behind less the one ahead (pairs with a background
+- on every final (a runway, or a pair separated as one), consecutive established aircraft that both have a sentence give
+  a closing speed: the rates along the landing direction, ground speed × cos(track − course), of the one behind less the one ahead (pairs with a background
   flight are left out and counted: its ground-speed channel is what the labeller may have refused it for);
 - order swaps (§4.1): two arrivals in the scene together that land on the same runway, or on two same-direction runways,
   where the one that entered later landed first;
@@ -63,6 +65,7 @@ from ts_transformer.instructions.labeller.read import admit
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
+from ts_transformer.instructions.words import wrap180
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.scene import Presence, SceneIndex, hung_span, presence, samples, scene_steps
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
@@ -86,7 +89,8 @@ class Track:
     n_m: np.ndarray
     height_m: np.ndarray
     along_m: np.ndarray            # its position on the approach clock at each row
-    off_course_deg: np.ndarray     # |track − its runway's course| at each row, 0–180°
+    track_minus_course_deg: np.ndarray  # its track less its runway's course at each row, UNWRAPPED along the rows
+    right_of_course_m: np.ndarray  # its distance right of its runway's extended centreline at each row
     along_rate_mps: np.ndarray     # ground speed × cos(track − course) at each row
     captured_s: float              # the time of its capture row; inf when it is never established
     capture_from: str              # "artefact", "admitted" or "raw" (`track`)
@@ -131,7 +135,8 @@ def track(flight: FlightSignals, sentence_rows: int | None, capture: int | None,
     rate = flight.ground_speed_mps[:rows] * np.cos(np.radians(flight.track_deg[:rows] - candidate.course_deg))
     first, last = hung_span(seen, step_s)
     return Track(seen, first, last, flight.e_m[:rows], flight.n_m[:rows], flight.altitude_m[:rows],
-                 along_threshold_m - raw.before_threshold_m, np.abs(raw.track_minus_course_deg), rate,
+                 along_threshold_m - raw.before_threshold_m,
+                 np.degrees(np.unwrap(np.radians(raw.track_minus_course_deg))), raw.right_of_course_m, rate,
                  float(seen.times_s[capture]) if capture is not None else math.inf, source,
                  None if flight.typecode is None else wake_category(flight.typecode))
 
@@ -142,7 +147,9 @@ def _traffic(tracks: Sequence[Track], t_s: float) -> Traffic:
 
     return Traffic(np.array([at(t.e_m, t) for t in tracks]), np.array([at(t.n_m, t) for t in tracks]),
                    np.array([at(t.height_m, t) for t in tracks]), tuple(t.presence.runway for t in tracks),
-                   np.array([at(t.along_m, t) for t in tracks]), np.array([at(t.off_course_deg, t) for t in tracks]),
+                   np.array([at(t.along_m, t) for t in tracks]),
+                   wrap180(np.array([at(t.track_minus_course_deg, t) for t in tracks])),
+                   np.array([at(t.right_of_course_m, t) for t in tracks]),
                    np.array([t_s >= t.captured_s for t in tracks]),
                    tuple(t.category for t in tracks))
 
@@ -226,7 +233,8 @@ def census_airport(tracks: list[Track], separation: Separation, step_s: float) -
         scene = Traffic(np.append(traffic.e_m, leader.e_m[-1]), np.append(traffic.n_m, leader.n_m[-1]),
                         np.append(traffic.height_m, leader.height_m[-1]), (*traffic.runway, leader.presence.runway),
                         np.append(traffic.along_m, along_threshold),
-                        np.append(traffic.off_course_deg, leader.off_course_deg[-1]),
+                        np.append(traffic.track_minus_course_deg, wrap180(leader.track_minus_course_deg[-1])),
+                        np.append(traffic.right_of_course_m, leader.right_of_course_m[-1]),
                         np.append(traffic.established, True), (*traffic.category, leader.category))
         lead = len(near)
         follower = next_behind(scene, lead, separation)
