@@ -27,10 +27,11 @@ a model reads is its own (``edge_features``): a single-aircraft prior's are `SIN
 keeps every layer as it was — its aircraft attention then reads only the aircraft itself, as it did alone — and gains,
 after that attention, a second one that reads only the OTHER aircraft present at the step, with those edge features
 (bias and value as above; ``edges`` then holds the traffic features, whose first columns are the model's own edge
-features). Its output layer starts at zero, so it adds exactly 0: until it learns, the model says what the
+features). Its output layer (no bias) starts at zero, so it adds exactly 0: until it learns, the model says what the
 single-aircraft prior says of each aircraft alone — to rounding, as a batch holding several aircraft sums in another
 order than one holding one (softmax over all present aircraft would not: another aircraft takes weight however zero its
-edges). An aircraft with no other present at a step reads nothing there (0; no row of the softmax is fully masked).
+edges). An aircraft with no other present at a step reads nothing there — 0, however the layer has learned: the
+output layer has no bias (no row of the softmax is fully masked). Only a single-aircraft prior gains one.
 
 **Rows.** Each aircraft-step carries its aircraft's own row number (``rows [B, A, T]``, multi-aircraft design §2.1): the
 position embedding reads it, and the first predicted step is each aircraft's own row `scene.N_LOOK`. In a
@@ -137,9 +138,9 @@ class TrafficAttention(nn.Module):
         self.qkv = nn.Linear(d, 3 * d)
         self.bias = nn.Sequential(nn.Linear(edges, d), nn.GELU(), nn.Linear(d, heads))
         self.value = nn.Sequential(nn.Linear(edges, d), nn.GELU(), nn.Linear(d, d))
-        self.out = nn.Linear(d, d)
+        # no bias: what an aircraft with no other present reads is 0, then as at the start
+        self.out = nn.Linear(d, d, bias=False)
         nn.init.zeros_(self.out.weight)
-        nn.init.zeros_(self.out.bias)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor, present: torch.Tensor, edges: torch.Tensor) -> torch.Tensor:
@@ -216,7 +217,7 @@ class SceneLayer(nn.Module):
         y = self.time_out(y.transpose(1, 2).reshape(batch, aircraft, rows, d))
         x = x + self.dropout(y.masked_fill(~present[..., None], 0.0))
         # among aircraft at one step: [B, T, A, ...]; with a traffic attention, the aircraft itself only
-        own = edges[..., : self.edges]
+        own = edges[..., : self.edges] if self.traffic is not None else edges
         y = self.aircraft_norm(x).transpose(1, 2)
         q, k, v = self.qkv(y).reshape(batch, rows, aircraft, 3, self.heads, head).unbind(dim=3)
         scores = torch.einsum("btihc,btjhc->bthij", q, k) / math.sqrt(head)
@@ -243,6 +244,8 @@ class Prior(nn.Module):
         super().__init__()
         if edge_features[0] != "self":
             raise ValueError(f"edge feature 0 is \"self\", not {edge_features[0]!r}")
+        if traffic_features and tuple(edge_features) != SINGLE_EDGE_FEATURES:
+            raise ValueError(f"a traffic attention is a single-aircraft prior's, not one reading {list(edge_features)}")
         if traffic_features and tuple(traffic_features[: len(edge_features)]) != tuple(edge_features):
             raise ValueError(f"the traffic features {list(traffic_features)} do not start with the edge features "
                              f"{list(edge_features)}")
@@ -374,6 +377,9 @@ def with_traffic(model: Prior, traffic_features: tuple[str, ...]) -> Prior:
     its output layer at zero — the same answers as ``model`` until it learns. On the CPU, in ``model``'s dtype."""
     if model.traffic_features:
         raise ValueError("the prior has a traffic attention already")
+    if model.edge_features != SINGLE_EDGE_FEATURES:
+        raise ValueError(f"a traffic attention is added to a single-aircraft prior, not one reading "
+                         f"{list(model.edge_features)}")
     traffic = Prior(model.config, model.candidates.cpu(), model.edge_features, traffic_features)
     missing, unexpected = traffic.load_state_dict({k: v.cpu() for k, v in model.state_dict().items()}, strict=False)
     if unexpected or any(".traffic." not in name for name in missing):

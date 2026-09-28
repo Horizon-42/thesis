@@ -552,13 +552,15 @@ package does not reach `instructions` (architecture test): the caller measures c
 2026-09-28 (multi-aircraft design §2.5, §6.2, §9 items 22–23). `prior.model.with_traffic(model, EDGE_FEATURES)` keeps every
 weight of a single-aircraft prior (augmented, for the multi-aircraft post-training) and adds, in every layer after the
 aircraft attention, a `TrafficAttention`: each aircraft reads only the OTHER aircraft present at its step, the edge
-features into a bias per head and into the value read, its output layer (weight and bias) at zero. The model's own
+features into a bias per head and into the value read, its output layer without a bias and its weight at zero. The model's own
 aircraft attention then reads only the aircraft itself, as it did alone. So the traffic attention adds exactly 0 until it
 learns, and the model answers as the single prior does for each aircraft alone — to rounding only (a batch holding
 several aircraft sums in another order than one holding one: 1e-15 in double, 1.2e-5 on augmented's logits in float32;
 the single prior itself differs as much between the two layouts). Zeroing the edge layers of a scene prior's attention
 would not do this — the softmax over all present aircraft gives another aircraft weight whatever its edges. An aircraft
-with no other present at a step reads 0 there (no softmax row is fully masked; no NaN forward or backward). At zero only
+with no other present at a step reads 0 there, however the layer has learned — the output layer has no bias (the
+first review found a bias there learning from the first step) — and no softmax row is fully masked (no NaN forward or
+backward). Only a single-aircraft prior gains one (`with_traffic` and `Prior` refuse other edge features). At zero only
 the output layer has a gradient; the layers inside follow once it moves. `edges` holds the traffic features, whose first
 columns are the model's own edge features (`SINGLE_EDGE_FEATURES`). The checkpoint `ts-prior-checkpoint-v5` is v3's payload
 plus `edge_features`, `traffic_features`, `edge_source_sha256` and `start` (the single prior's directory and checkpoint

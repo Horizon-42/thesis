@@ -70,7 +70,13 @@ def test_the_traffic_attention_reads_the_others_once_it_has_weights_and_never_an
     moved = _run(traffic, batch)
     alone = _run(single, _alone(batch, 0, 0))
     assert not torch.allclose(moved[HEADING][0, 0, N_LOOK:], alone[HEADING][0, 0, N_LOOK:])
-    # an aircraft with no other present at any step reads nothing: its answers are its own
+    # an aircraft with no other present at any step reads nothing: its answers are its own — whatever the traffic
+    # attention has learned (every weight moved, not only the output layer's)
+    for layer in traffic.layers:
+        for name, parameter in layer.traffic.named_parameters():
+            if name != "out.weight":
+                parameter.data += 0.05 * torch.randn(parameter.shape, generator=generator, dtype=torch.float64)
+    moved = _run(traffic, batch)
     lonely = {name: batch[name][:, :1] if name not in ("airport", "edges") else batch[name] for name in NAMES}
     lonely["edges"] = batch["edges"][:, :, :1, :1]
     for x, y in zip(_run(traffic, lonely), alone):
@@ -127,3 +133,8 @@ def test_every_weight_of_the_single_prior_is_kept_and_misfits_are_refused():
         with_traffic(traffic, EDGE_FEATURES)
     with pytest.raises(ValueError, match="do not start with"):
         Prior(single.config, single.candidates, ("self",), EDGE_FEATURES[1:])
+    with pytest.raises(ValueError, match="single-aircraft prior"):
+        with_traffic(Prior(single.config, single.candidates, EDGE_FEATURES), EDGE_FEATURES)
+    with pytest.raises(ValueError, match="single-aircraft prior"):
+        Prior(single.config, single.candidates, EDGE_FEATURES, EDGE_FEATURES)
+    assert all(layer.traffic.out.bias is None for layer in traffic.layers)
