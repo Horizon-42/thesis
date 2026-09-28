@@ -1,5 +1,14 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-28 — 多机 M1：单机模型看不看得到交互
+
+- `experiments/traffic_interaction.py`（R28）：base 在内部选择集上 teacher forcing，第一个预测步之后每一步的速度、航向、许可词负对数似然与换词概率，
+  按"有前机""忙"分开，在"是否已建立 × 离入口距离"的档里对齐（合计再加机场），按"机场 × 小时"成簇重抽。前机的定义提成 `prior.scene.leader_gap_m`，
+  场景普查改用它（输出不变）。
+- opus 审查找出三处，都已改：第 8 行（每列从头说、换词必然）被当成普通的步，让每个差都偏；合计没按机场对齐；按航班重抽太窄。
+- 正式结果 `outputs/POOLED/traffic/interaction_20260928/`（`cba749cc`）：有前机的步上速度词 +0.0077（约 15 %），忙的步上航向词 +0.0104（约 9 %），
+  集中在 KSJC、KSMF；许可词有前机时反而更好预测。只记录。读数 `readouts/2026-09-28_m1_interaction.zh.md`。
+
 ### 2026-09-28 — 多机 M0 第 6 步：两条间隔屏蔽，M0 完成
 
 - `inference/separation_masks.py`：多机闭环的两条间隔屏蔽（多机设计 §3.4 第 2 层）。速度词：本机与前机都已建立在五边上、本机在 5 NM 以外时，
