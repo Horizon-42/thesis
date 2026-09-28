@@ -762,7 +762,7 @@ unused. Readout `docs/two_tier/readouts/2026-09-28_m2_scene_prior.zh.md` §2, §
 ### R31 · `run_ts.py traffic_free_generation` — multi-aircraft M3: the post-training's start speaking to one aircraft of each scene (design §6.1, §6.6 step 4)
 
 2026-09-28. `traffic_free_generation --prior <single-aircraft prior (augmented)> --executor <spec> --instructions <artefact>
---split select --out <new dir> [--per-airport 400] [--samples 4] [--chunk 16] [--device]`. The start of M4: the prior with a
+--split select --out <new dir> [--per-airport 400] [--samples 4] [--aircraft-steps 300000] [--augment-seed N] [--device]`. The start of M4: the prior with a
 traffic attention at zero (`prior.model.with_traffic`, C37 — it answers as the prior does, to rounding) speaking in the
 closed loop of `experiments/traffic_speaking.py` ("one aircraft commanded": its scene's other flights replayed, the edge
 features of the steps encoded and the two separation masks computed each step and handed to `prior.scene_speaker.
@@ -773,6 +773,26 @@ scene — the prior's single-aircraft free generation — judged against the sce
 **labelled** (its labelled words flown), **recorded** (its record). Per source, pooled and per airport: outcomes with
 `lost_separation`, loss episodes per flight and per hour flown, relations; for the model's sources, the share of steps the
 separation masks took a word away (recorded by the loop) and the probability on what the masks removed. The procedure's
-masks are the prior's own. Writes `free_generation.json` (`ts-traffic-free-generation-v1`). Smoke (10 select flights × 4):
-about 5 s per flight for the four readings; the formal size (400 per airport × 4) about 2.5 hours.
+masks are the prior's own. A flight already in a loss it answers for at its first predicted step is counted and left out.
+Batches are bounded by `--aircraft-steps` (scenes × their most aircraft × (longest pre-roll + rows)); the pre-roll is
+encoded 64 steps at a time (`scene_speaker.BLOCK_STEPS`); each batch's rows are appended to `flights.jsonl` as it ends, and
+each batch's loop is closed (`SceneLoop.close`: the loop and its speaker hold each other, and the first formal run ran out of
+memory at 476 / 2,000 flights before it — kept as `free_generation_20260928.aborted-20260928T1330Z`). Writes
+`free_generation.json` (`ts-traffic-free-generation-v1`).
+
+**`--augment-seed`** (§6.6 step 5, `experiments/traffic_augment.py`): every flight's scene augmented one of three ways, a
+third each — **D** the leader (by landing order, same runway or a pair separated as one) moved whole by U[−60, 60] s, **B**
+the speaking flight's start moved as stage 2 moves it (the only kind with stage 2's × 2.0 time limit), **A** a flight with a
+sentence inserted `g` × the required gap before the speaking one on the approach clock (`g` ~ U[0.5, 2]; same runway, single
+pair, dependent parallel only) — drawn until no loss it answers for through its observed rows (judged not established),
+at most 10 draws, else left out and counted; the speaking flight's landing context is the scene's. Read as scene and alone
+only (a moved start has no record).
+
+**Formal** (2026-09-28, `a0c31f3c`, `outputs/POOLED/traffic/free_generation_20260928/`, select, 400 per airport × 4,
+79 min; readout `docs/two_tier/readouts/2026-09-28_m3_free_generation.zh.md`): lost separation under VISUAL — scene 11.5 %
+(IFR 13.2 %), alone 12.3 %, labelled 4.9 %, recorded 2.6 %; landed 84.9 / 84.2 / 94.9 / 97.4 %. Vectored 21.6 % against
+straight-in 4.0 %; a vectored landing is −111 s / +121 s (p10 / p90) off the record's time against the labelled words'
+−36 s / +21 s. The masks acted on 2.7 % (approach) and 1.05 % (speed) of the steps. 8 scene / alone samples (2 flights)
+started in a loss. The augmented run: `free_generation_aug_20260928/` (augment seed 7919, `de9a539a`; B 815, A 839,
+D 346, none left out).
 

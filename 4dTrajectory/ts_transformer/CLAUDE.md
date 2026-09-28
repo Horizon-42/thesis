@@ -404,7 +404,9 @@ pinned to the edge code by `edge_source_sha256` (R29). `traffic_scene_readout` r
 − base and scene − alone (attention between aircraft cut) on leader / busy steps (formal `scene_readout_20260928` and, with 4 batches
 per update, `scene_readout_acc4_20260928`: better nowhere, 0.2880 / 0.2868 vs 0.2839; the M1 gap stays) (R30). `traffic_free_generation` is M3 — augmented with a zero traffic attention
 speaking to one aircraft of each scene (`experiments/traffic_speaking.py`, `prior/scene_speaker.py`), read beside the
-same model alone, the labelled words and the record, all judged in the scene (R31).
+same model alone, the labelled words and the record, all judged in the scene; `--augment-seed` on augmented scenes
+(`experiments/traffic_augment.py`: leader moved, start moved, flight inserted) (formal `free_generation_20260928`: 11.5 % lost
+separation vs 4.9 % labelled, 2.6 % recorded; vectored 21.6 %) (R31).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 
