@@ -282,12 +282,22 @@ class RewardTuner:
         for parameter in reference.parameters():
             parameter.requires_grad_(False)
         self.rng = np.random.default_rng(seed)
-        self.optimiser = torch.optim.AdamW(model.parameters(), lr=config.learning_rate,
+        self.optimiser = torch.optim.AdamW(self._parameter_groups(), lr=config.learning_rate,
                                            weight_decay=config.weight_decay)
         self.schedule = torch.optim.lr_scheduler.LambdaLR(
             self.optimiser, lambda step: min(1.0, (step + 1) / config.warmup_steps))
         self.passes = 0
         self._data: Iterator[list[int]] = iter(())
+
+    def _parameter_groups(self) -> Any:
+        """What the optimiser trains, at the configured learning rate (a scene's tuner gives the traffic attention its
+        own)."""
+        return self.model.parameters()
+
+    def _data_loss(self, data: Split) -> torch.Tensor:
+        """The data term of one update: a batch of teacher-forced data flights' NLL per step (pretraining's loss)."""
+        nll, speaks = batch_nll(self.model, to_batch(data, self._data_batch(data), self.device))
+        return nll.sum() / speaks
 
     def _data_batch(self, data: Split) -> list[int]:
         """The next batch of data flights, the data reshuffled whenever it runs out."""
@@ -363,8 +373,7 @@ class RewardTuner:
             clipped, words = clipped + batch_clipped, words + batch_words
             clipped_trace.append(batch_clipped / batch_words)
             kl = (flight_kl(logits, reference, batch["targets"], batch["present"], batch["asked"]) / steps).mean()
-            nll, speaks = batch_nll(self.model, to_batch(data, self._data_batch(data), self.device))
-            data_loss = nll.sum() / speaks
+            data_loss = self._data_loss(data)
             loss = reward + self.config.kl_weight * kl + self.config.data_weight * data_loss
             if not torch.isfinite(loss):
                 raise FloatingPointError(f"pass {self.passes}: the loss is {float(loss)}")
