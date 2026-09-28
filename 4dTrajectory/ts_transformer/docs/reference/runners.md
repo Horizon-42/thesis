@@ -728,7 +728,9 @@ flight's asked rows), so the val NLL per step reads against base's 0.2643.
   today's — a code change in any of those files, the scheduler in `runway_schedule` included, refuses every scene prior.
 - Writes `checkpoint.pt`, `config.json`, `procedure_masks.json` (none: teacher forcing) and `history.json` into a NEW
   directory, from a clean tree unless `--limit` (SMOKE: the first N samples of each split). Train 15,812 samples (45
-  asking nothing, left out), val 3,800; about 5–6 minutes per epoch on the RTX 4060.
+  asking nothing, left out), val 3,800; 423 s per epoch on the RTX 4060.
+- Formal: `outputs/POOLED/prior/m2_scene_20260928/scene_s1337` (`17719c20`, clean): best at epoch 14 of 17, val 0.2681
+  per step against base's 0.2643 (its second seed 0.2644); 2.0 h. Read by R30.
 
 ### R30 · `run_ts.py traffic_scene_readout` — multi-aircraft M2's readout: what the scene prior gains from seeing traffic (design §6.1, §7)
 
@@ -745,4 +747,8 @@ a step counted); and for every reading and paired quantity M1's matched gap (fla
 strata). Every quantity is drawn with the same resamples — a generator of its own, airport by airport then the pool, as
 M1 drew — so base's matched gap reproduces M1's `interaction_20260928` to the bit, intervals included (tested). A smoke
 prior is read and recorded as one. A readout only (design §6.1: recorded; a leader-step gain within seed noise asks for
-a second seed). Writes `scene_readout.json` (`ts-traffic-scene-readout-v1`).
+a second seed). Writes `scene_readout.json` (`ts-traffic-scene-readout-v1`); about a minute on the GPU. Formal:
+`outputs/POOLED/traffic/scene_readout_20260928/` (`31814869`): the scene prior is better than base nowhere — 0.2880 per
+step against 0.2839 (alone 0.2872), speed with a leader +0.0008, heading +0.0020; M1's gap stays (speed · leader +0.0080
+against base's +0.0077); cutting the attention between aircraft barely moves its words (KL ≤ 0.008). Readout
+`docs/two_tier/readouts/2026-09-28_m2_scene_prior.zh.md`.
