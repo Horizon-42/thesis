@@ -1,7 +1,8 @@
 """Training the prior (prior design §7): teacher forcing on the training flights, early stopping on the val split's
 negative log-likelihood per predicted step, the best state kept. The loss is the six columns' cross entropy summed
-over the aircraft-steps the prior speaks at (`model.asked_entries`: from the first predicted step on) and the columns
-asked there (`Flight.asked`), per such step — a column left out drops from the sum, not from the count of steps, so a
+over the aircraft-steps the prior speaks at (`model.asked_entries`: from each aircraft's own first predicted step on) and
+the columns asked there (`Flight.asked`, which never holds a row before its aircraft's first predicted step — so a cell
+counts where it is present and asked), per such step — a column left out drops from the sum, not from the count of steps, so a
 closed-loop batch weighs a step the same whichever of its columns are asked. Design §9 step 1: every scene is one
 flight.
 
@@ -23,7 +24,7 @@ from torch import nn
 
 from ts_transformer.prior.data import Split, batches
 from ts_transformer.prior.generate import allowed_classes
-from ts_transformer.prior.model import Prior, asked_entries, self_edges
+from ts_transformer.prior.model import Prior, asked_entries, own_rows, self_edges
 from ts_transformer.prior.scene import N_LOOK
 
 
@@ -63,20 +64,21 @@ def to_batch(split: Split, indices: Sequence[int], device: torch.device) -> dict
                "airport": np.array([f.airport for f in flights], dtype=np.int64)}
     batch = {name: torch.as_tensor(value, device=device) for name, value in tensors.items()}
     batch["edges"] = self_edges(count, 1, rows, device)
+    batch["rows"] = own_rows(rows, device)
     return batch
 
 
 def batch_logits(model: Prior, batch: dict[str, torch.Tensor]) -> list[torch.Tensor]:
     """Teacher forcing: the heads see the truth's classes of the earlier columns."""
     return model(batch["features"], batch["relative"], batch["static"], batch["in_force"], batch["since"],
-                 batch["airport"], batch["present"], batch["edges"], batch["targets"])
+                 batch["airport"], batch["present"], batch["rows"], batch["edges"], batch["targets"])
 
 
 def column_nll(logits: list[torch.Tensor], targets: torch.Tensor, present: torch.Tensor,
                asked: torch.Tensor) -> torch.Tensor:
     """Summed negative log-likelihood per column over the aircraft-steps the prior speaks at and the columns asked
     there (``asked``, ``[B, A, T, 6]``): [6]."""
-    speaks = asked_entries(present)
+    speaks = present
     columns = []
     for c, logit in enumerate(logits):
         entries = speaks & asked[..., c]
@@ -87,7 +89,7 @@ def column_nll(logits: list[torch.Tensor], targets: torch.Tensor, present: torch
 def flight_nll(logits: list[torch.Tensor], targets: torch.Tensor, present: torch.Tensor,
                asked: torch.Tensor) -> torch.Tensor:
     """`column_nll` per scene rather than per column: ``[B]``, summed over the scene's asked cells."""
-    speaks = asked_entries(present)
+    speaks = present
     total = logits[0].new_zeros(len(targets))
     for c, logit in enumerate(logits):
         entries = speaks & asked[..., c]
@@ -101,7 +103,7 @@ def flight_kl(logits: list[torch.Tensor], reference: list[torch.Tensor], targets
     """``[B]``: how far the model is from the ``reference`` on each scene's own words, summed over its asked cells —
     per cell ``exp(r − p) − (r − p) − 1`` of the two log-probabilities of the word (an estimate of the KL divergence
     from the samples, ≥ 0, GRPO's)."""
-    speaks = asked_entries(present)
+    speaks = present
     total = logits[0].new_zeros(len(targets))
     for c, (logit, fixed) in enumerate(zip(logits, reference)):
         entries = speaks & asked[..., c]
@@ -121,7 +123,7 @@ def flight_surrogate(logits: list[torch.Tensor], start: list[torch.Tensor], targ
     model still the start (r = 1) its gradient is the advantage-weighted NLL's; a word whose probability has already moved
     by more than ``clip`` in its advantage's direction adds no gradient. A word is counted clipped where r left the
     interval."""
-    speaks = asked_entries(present)
+    speaks = present
     total = logits[0].new_zeros(len(targets))
     clipped, words = 0, 0
     for c, (logit, fixed) in enumerate(zip(logits, start)):
@@ -163,7 +165,7 @@ def masked(logits: list[torch.Tensor], allowed: Sequence[torch.Tensor | None]) -
 def batch_nll(model: Prior, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, int]:
     """``(summed NLL per column [6], the aircraft-steps the prior speaks at)`` of one batch."""
     nll = column_nll(batch_logits(model, batch), batch["targets"], batch["present"], batch["asked"])
-    return nll, int(asked_entries(batch["present"]).sum())
+    return nll, int(asked_entries(batch["present"], batch["rows"]).expand_as(batch["present"]).sum())
 
 
 @torch.no_grad()
@@ -280,12 +282,22 @@ class RewardTuner:
         for parameter in reference.parameters():
             parameter.requires_grad_(False)
         self.rng = np.random.default_rng(seed)
-        self.optimiser = torch.optim.AdamW(model.parameters(), lr=config.learning_rate,
+        self.optimiser = torch.optim.AdamW(self._parameter_groups(), lr=config.learning_rate,
                                            weight_decay=config.weight_decay)
         self.schedule = torch.optim.lr_scheduler.LambdaLR(
             self.optimiser, lambda step: min(1.0, (step + 1) / config.warmup_steps))
         self.passes = 0
         self._data: Iterator[list[int]] = iter(())
+
+    def _parameter_groups(self) -> Any:
+        """What the optimiser trains, at the configured learning rate (a scene's tuner gives the traffic attention its
+        own)."""
+        return self.model.parameters()
+
+    def _data_loss(self, data: Split) -> torch.Tensor:
+        """The data term of one update: a batch of teacher-forced data flights' NLL per step (pretraining's loss)."""
+        nll, speaks = batch_nll(self.model, to_batch(data, self._data_batch(data), self.device))
+        return nll.sum() / speaks
 
     def _data_batch(self, data: Split) -> list[int]:
         """The next batch of data flights, the data reshuffled whenever it runs out."""
@@ -309,7 +321,8 @@ class RewardTuner:
             masks = allowed_tensors([allowed[i] for i in indices], batch["targets"].shape[2],
                                     [logit.shape[-1] for logit in logits], self.device)
             logits, others = masked(logits, masks), [masked(other, masks) for other in others]
-        return batch, logits, others, asked_entries(batch["present"]).sum(dim=(1, 2)).to(logits[0].dtype)
+        speaks = asked_entries(batch["present"], batch["rows"]).expand_as(batch["present"])
+        return batch, logits, others, speaks.sum(dim=(1, 2)).to(logits[0].dtype)
 
     def distance(self, sentences: Split, allowed: Sequence[Mapping[int, np.ndarray]] | None = None) -> float:
         """How far the model is from the reference on ``sentences``, without updating: the pull's own measure (the mean
@@ -360,8 +373,7 @@ class RewardTuner:
             clipped, words = clipped + batch_clipped, words + batch_words
             clipped_trace.append(batch_clipped / batch_words)
             kl = (flight_kl(logits, reference, batch["targets"], batch["present"], batch["asked"]) / steps).mean()
-            nll, speaks = batch_nll(self.model, to_batch(data, self._data_batch(data), self.device))
-            data_loss = nll.sum() / speaks
+            data_loss = self._data_loss(data)
             loss = reward + self.config.kl_weight * kl + self.config.data_weight * data_loss
             if not torch.isfinite(loss):
                 raise FloatingPointError(f"pass {self.passes}: the loss is {float(loss)}")

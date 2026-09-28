@@ -159,6 +159,9 @@ of the package, not a migration in progress.
   one sentence artefact**: spec, labeller, day split and candidate table must match (`ts-prior-checkpoint-v3`, C34).
   **A prior speaks under the procedure's masks it was trained under**: named sets, recorded beside its checkpoint
   (`procedure_masks.json`, `prior/masks.py`), read by `load_prior`; the vocabulary's rules apart, always on (C35).
+  **A traffic prior** (`ts-prior-checkpoint-v5`, `prior.model.with_traffic`) is a single-aircraft prior plus a traffic
+  attention reading only the other aircraft, its output layer at zero: it answers as the single prior does alone, to
+  rounding, until it learns (C37).
 - **Loss of separation has ONE judge, two readings** (`inference/separation.py`, 2026-09-27): `IFR` (7110.65BB as written)
   and `VISUAL` — the closed loop's checks and reward — = 7-4-4 c with visual approach clearances and NEVER visual
   separation: parallels ≥ 2,500 ft free once both are turned in (≤ 30°, own side of the midline), close pairs one runway,
@@ -395,7 +398,18 @@ in the scene closed loop (`experiments/traffic_loop.py`, shared with M3/M4) besi
 `traffic_masks` measures the loop's two separation masks (`inference/separation_masks.py`: speed words, approach
 clearance; computed by the loop and handed to the speaker, the prior never imports them; a fallback masks nothing) on
 the labelled words (formal `masks_v2_20260928`: 0.32 % masked) (R27); `traffic_interaction` is M1 — the base prior's NLL
-on steps with a leader / busy, matched on phase and airport (formal `interaction_20260928`: speed +0.0077 with a leader) (R28).
+on steps with a leader / busy, matched on phase and airport (formal `interaction_20260928`: speed +0.0077 with a leader) (R28). `traffic_prior_train` is M2 — base's recipe on scene samples with 17 edge features
+(`inference/scene_edges.py`: motion from the row before, never the fitted velocities), checkpoint `ts-prior-checkpoint-v4`
+pinned to the edge code by `edge_source_sha256` (R29). `traffic_scene_readout` reads it against base on the select days — scene
+− base and scene − alone (attention between aircraft cut) on leader / busy steps (formal `scene_readout_20260928` and, with 4 batches
+per update, `scene_readout_acc4_20260928`: better nowhere, 0.2880 / 0.2868 vs 0.2839; the M1 gap stays) (R30). `traffic_free_generation` is M3 — augmented with a zero traffic attention
+speaking to one aircraft of each scene (`experiments/traffic_speaking.py`, `prior/scene_speaker.py`), read beside the
+same model alone, the labelled words and the record, all judged in the scene; `--augment-seed` on augmented scenes
+(`experiments/traffic_augment.py`: leader moved, start moved, flight inserted) (formal `free_generation_20260928`: 11.5 % lost
+separation vs 4.9 % labelled, 2.6 % recorded; vectored 21.6 %) (R31). `traffic_reward` is M4 — the traffic post-training
+from augmented + a zero traffic attention, real and augmented training scenes, reward = landed without losing separation,
+each sentence scored in its scene by the speaker's own layout and edge code (`experiments/traffic_tuner.py`), base alone,
+M2's scene samples as the data term (R32).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 

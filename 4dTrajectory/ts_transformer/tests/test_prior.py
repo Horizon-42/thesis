@@ -28,7 +28,7 @@ from ts_transformer.prior.data import (
     VARIANTS, Flight, Split, batches, column_classes, flight_steps, load_split, sentence_steps,
 )
 from ts_transformer.prior.masks import ProcedureMasks
-from ts_transformer.prior.model import EDGE_FEATURES, Prior, PriorConfig, asked_entries, self_edges
+from ts_transformer.prior.model import SINGLE_EDGE_FEATURES, Prior, PriorConfig, asked_entries, own_rows, self_edges
 from ts_transformer.prior.readout import Baselines, runway_breakdown
 from ts_transformer.prior.scene import N_LOOK, Landings, utc_s
 from ts_transformer.prior.train import column_nll
@@ -227,13 +227,14 @@ def _inputs(model, rows=ROWS, aircraft=1, pointer=1):
     return {"features": features, "relative": relative, "static": torch.zeros(1, aircraft, 0), "in_force": in_force,
             "since": torch.zeros(1, aircraft, rows, 6), "airport": torch.zeros(1, dtype=torch.long),
             "present": torch.ones(1, aircraft, rows, dtype=torch.bool), "edges": self_edges(1, aircraft, rows, torch.device("cpu")),
+            "rows": own_rows(rows, torch.device("cpu")).expand(1, aircraft, rows).clone(),
             "targets": targets}
 
 
 @torch.no_grad()
 def _run(model, batch):
     return model(batch["features"], batch["relative"], batch["static"], batch["in_force"], batch["since"],
-                 batch["airport"], batch["present"], batch["edges"], batch["targets"])
+                 batch["airport"], batch["present"], batch["rows"], batch["edges"], batch["targets"])
 
 
 def test_a_step_sees_only_itself_and_the_steps_before_it():
@@ -264,9 +265,13 @@ def test_the_first_predicted_step_says_every_column_and_the_rows_before_it_are_n
         assert torch.isfinite(logit[0, 0, N_LOOK + 1:, 0]).all()
     runway = logits[RUNWAY][0, 0]
     assert torch.isfinite(runway[N_LOOK:, 1:3]).all() and torch.isinf(runway[:, 3]).all()   # the empty slot never
-    asked = asked_entries(batch["present"])
+    asked = asked_entries(batch["present"], batch["rows"])
     assert not asked[0, 0, :N_LOOK].any() and asked[0, 0, N_LOOK:].all()
-    nll = column_nll(logits, batch["targets"], batch["present"], torch.ones_like(batch["targets"], dtype=torch.bool))
+    # the loss counts the cells asked, which never hold a row before an aircraft's first predicted step (`Flight.asked`:
+    # in a scene each aircraft's own rows, so the step's index is no longer the loss's mask)
+    every = torch.ones_like(batch["targets"], dtype=torch.bool)
+    every[:, :, :N_LOOK] = False
+    nll = column_nll(logits, batch["targets"], batch["present"], every)
     for c in range(6):
         expected = sum(float(-torch.log_softmax(logits[c][0, 0, t], dim=-1)[batch["targets"][0, 0, t, c]])
                        for t in range(N_LOOK, ROWS))
@@ -327,7 +332,7 @@ def test_the_aircraft_attention_is_symmetric_in_the_aircraft_and_reads_only_the_
     batch = _inputs(model, aircraft=3)
     generator = torch.Generator().manual_seed(3)
     batch["features"] = torch.randn(batch["features"].shape, generator=generator)
-    batch["edges"] = torch.randn(1, ROWS, 3, 3, len(EDGE_FEATURES), generator=generator)
+    batch["edges"] = torch.randn(1, ROWS, 3, 3, len(SINGLE_EDGE_FEATURES), generator=generator)
     logits = _run(model, batch)
     # every aircraft's output depends on the others (the scene is read)
     alone = dict(batch)
@@ -344,7 +349,7 @@ def test_the_aircraft_attention_is_symmetric_in_the_aircraft_and_reads_only_the_
         model.train(training)
         for scene in (alone, entering):
             out = model(*(scene[name] for name in ("features", "relative", "static", "in_force", "since", "airport",
-                                                   "present", "edges", "targets")))
+                                                   "present", "rows", "edges", "targets")))
             for logit in out:
                 assert not torch.isnan(logit[scene["present"]]).any()
     model.eval()
@@ -358,7 +363,7 @@ def test_the_aircraft_attention_is_symmetric_in_the_aircraft_and_reads_only_the_
     # the aircraft's order changes only the order of the outputs
     order = [2, 0, 1]
     swapped = {name: value[:, order] for name, value in batch.items()
-               if name in ("features", "relative", "static", "in_force", "since", "present", "targets")}
+               if name in ("features", "relative", "static", "in_force", "since", "present", "rows", "targets")}
     swapped.update(airport=batch["airport"], edges=batch["edges"][:, :, order][:, :, :, order])
     for a, b in zip(logits, _run(model, swapped)):
         finite = torch.isfinite(a[:, order])
@@ -619,3 +624,45 @@ def test_a_flight_s_rows_are_the_same_whichever_flights_they_are_computed_with()
                 assert np.array_equal(bits(together[0][k]), bits(alone[0]))
                 assert np.array_equal(bits(together[1][k]), bits(alone[1]))
         assert together[1].shape[-1] == len(prior_data.RELATIVE_FEATURES)
+
+
+def test_single_aircraft_rows_are_broadcast_and_read_as_their_steps():
+    """A single-aircraft batch hands the model its rows as ``[1, 1, T]`` (`own_rows`): the position embedding looked up
+    once per step and its gradient summed over the batch first — the arithmetic, forward and backward, of the prior
+    before scenes (checked bit for bit against that model's code at `2f235b23` in the M2 review); the same rows given
+    per aircraft give the same logits."""
+    model = _model()
+    batch = _inputs(model, aircraft=3)
+    batch["rows"] = own_rows(ROWS, torch.device("cpu"))
+    assert tuple(batch["rows"].shape) == (1, 1, ROWS)
+    broadcast = _run(model, batch)
+    batch["rows"] = batch["rows"].expand(1, 3, ROWS).clone()
+    for a, b in zip(broadcast, _run(model, batch)):
+        assert torch.equal(a, b)
+
+
+def test_an_aircraft_entering_later_speaks_from_its_own_rows_as_it_would_alone():
+    """Aircraft 1 enters at step 5 of a scene (rows 0, 1, … from there): its first predicted step, where "unchanged" is
+    masked, is the scene's step 5 + N_LOOK, aircraft 0's the scene's N_LOOK; and with aircraft 0 absent its outputs are
+    the ones it has alone from step 0."""
+    model = _model()
+    shift = 5
+    alone = _inputs(model)
+    scene = _inputs(model, rows=ROWS + shift, aircraft=2)
+    for name in ("features", "relative", "in_force", "since", "targets"):
+        scene[name][0, 1] = 0
+        scene[name][0, 1, shift:] = alone[name][0, 0]
+    scene["present"][0, 1, :shift] = False
+    scene["rows"] = scene["rows"].clone()
+    scene["rows"][0, 1] = torch.clamp(torch.arange(ROWS + shift) - shift, min=0)
+    solo, together = _run(model, alone), _run(model, scene)
+    first = shift + N_LOOK
+    assert torch.isinf(together[HEADING][0, 1, first, 0]) and not torch.isinf(together[HEADING][0, 1, N_LOOK, 0])
+    assert torch.isinf(together[HEADING][0, 0, N_LOOK, 0])                          # aircraft 0's own first step
+    speaks = asked_entries(scene["present"], scene["rows"])[0, 1]
+    assert speaks.tolist() == [False] * first + [True] * (ROWS + shift - first)      # from its own first step
+    scene["present"][0, 0] = False
+    together = _run(model, scene)
+    for a, b in zip(solo, together):
+        finite = torch.isfinite(a[0, 0])
+        assert torch.allclose(a[0, 0][finite], b[0, 1, shift:][finite], atol=1e-5)

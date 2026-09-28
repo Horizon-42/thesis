@@ -52,7 +52,7 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, RUNWAY, UNCHANGED, Words
 from ts_transformer.prior.data import SINCE_SCALE, STEP_FEATURES, VARIANTS, own_context, rows_inputs
 from ts_transformer.prior.masks import ProcedureMasks
-from ts_transformer.prior.model import Prior, self_edges
+from ts_transformer.prior.model import SINGLE_EDGE_FEATURES, Prior, own_rows, self_edges
 from ts_transformer.prior.scene import N_LOOK, Landings, utc_s
 
 #: The columns the vocabulary's rules mask: the runway (not said again, the lock), the approach and the descent angle
@@ -70,6 +70,7 @@ class Speaker:
         """``landings``: each airport's landing context (`data.airport_landings`), None for a variant without it;
         ``max_rows``: the most rows any flight will have (the model's position table must hold them);
         ``procedure_masks``: the procedure's masks it speaks under, over the vocabulary's rules (`masks`)."""
+        self._check(model)
         if VARIANTS[model.config.variant].landing_context != (landings is not None):
             raise ValueError(f"variant {model.config.variant} and the landing context given disagree")
         if max_rows > model.config.max_rows:
@@ -80,6 +81,7 @@ class Speaker:
         self.procedure = procedure_masks.speaking(self.geometries, words)
         masked = list(VOCABULARY_COLUMNS)
         masked += [c for rules in self.procedure for c in rules.columns if c not in masked]
+        masked += [c for c in self._more_masked_columns() if c not in masked]
         #: per step: the probability the model put, before the masks, on what they removed — [B] per masked column
         self.forbidden: dict[int, list[np.ndarray]] = {column: [] for column in masked}
         #: per step: the classes each masked column allowed, bit-packed ([B, ⌈classes / 8⌉] uint8, little-endian bits;
@@ -89,7 +91,7 @@ class Speaker:
         device = model.candidates.device
         count, slots = len(flights), model.config.candidate_slots
         width = len(VARIANTS[model.config.variant].relative_features)
-        self.contexts = [own_context(f, landings[f.airport]) if landings is not None else None for f in flights]
+        self.contexts = self._contexts(flights, landings)
         self.entry_s = [utc_s(f.entry_time_utc) for f in flights]
         self.step_s = words.spec.step_s
         self.time_s = np.arange(max_rows) * self.step_s          # every flight's rows, on the vocabulary's step
@@ -116,6 +118,22 @@ class Speaker:
         # the words said: the class in force per column (0: none yet) and the row it was said at
         self.value = np.zeros((count, 6), dtype=np.int64)
         self.said_row = np.zeros((count, 6), dtype=np.int64)
+
+    @staticmethod
+    def _check(model: Prior) -> None:
+        """A single-aircraft prior: the scene loop speaks for the others (`scene_speaker`)."""
+        if model.edge_features != SINGLE_EDGE_FEATURES or model.traffic_features:
+            raise ValueError(f"a scene prior (edge features {list(model.edge_features)}, traffic features "
+                             f"{list(model.traffic_features)}) speaks in the scene loop, not to single aircraft")
+
+    def _contexts(self, flights: Sequence[FlightSignals], landings: Mapping[str, Landings] | None
+                  ) -> list[Landings | None]:
+        """Each flight's landing context, its own landing left out (None for a variant without it)."""
+        return [own_context(f, landings[f.airport]) if landings is not None else None for f in flights]
+
+    def _more_masked_columns(self) -> tuple[int, ...]:
+        """Columns masked beyond the vocabulary's and the procedure's (none here)."""
+        return ()
 
     def _inputs(self, first: int) -> None:
         """Rows ``first`` … ``rows − 1``'s features and candidate relations (`data.rows_inputs`), the flights of one
@@ -161,15 +179,27 @@ class Speaker:
     def speak(self, active: np.ndarray, runway_locked: np.ndarray) -> np.ndarray:
         """``[B, 6]``: the classes sampled at the newest row (0: unchanged, else the word + 1), each column given the
         ones before it; an inactive flight says nothing (all 0); a flight whose runway is locked says no other runway."""
+        h, tokens, valid = self._newest()
+        return self._sample(h, tokens, valid, active, runway_locked)
+
+    def _newest(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """The rows not encoded yet, encoded (`Prior.extend`): the newest row's ``(h [B, 1, 1, d], tokens, valid)``."""
         model, rows, device = self.model, self.rows, self.features.device
         count, new = len(self.geometries), slice(self.encoded, self.rows)
         present = torch.ones((count, 1, rows - self.encoded), dtype=torch.bool, device=device)
         h, tokens, valid, self.past = model.extend(self.features[:, :, new], self.relative[:, :, new], self.static,
                                                    self.in_force[:, :, new], self.since[:, :, new], self.airport,
-                                                   present, self_edges(count, 1, rows - self.encoded, device),
+                                                   present, own_rows(rows - self.encoded, device, self.encoded),
+                                                   self_edges(count, 1, rows - self.encoded, device),
                                                    self.past)
         self.encoded = rows
-        h, tokens = h[:, :, -1:], tokens[:, :, -1:]
+        return h[:, :, -1:], tokens[:, :, -1:], valid
+
+    def _sample(self, h: torch.Tensor, tokens: torch.Tensor, valid: torch.Tensor, active: np.ndarray,
+                runway_locked: np.ndarray) -> np.ndarray:
+        """`speak`'s words from the newest row's encoding."""
+        model, rows, device = self.model, self.rows, self.features.device
+        count = len(self.geometries)
         opening = rows - 1 == N_LOOK
         first = torch.tensor([opening], device=device)
         chosen = torch.zeros((count, 1, 1, 6), dtype=torch.long, device=device)

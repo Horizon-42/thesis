@@ -376,7 +376,7 @@ def test_the_frontend_reader_mirrors_the_exporters_names():
 
 
 # ---- the prior's runner end to end, on a synthetic artefact and an untrained checkpoint (every write in tmp_path)
-def _prior_dir(directory, artefact, roster):
+def _prior_dir(directory, artefact, roster, variant="full"):
     """A prior directory as `prior_train` writes one, holding a small untrained network of ``artefact``'s spec, trained
     with the tracks roster ``roster``."""
     from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, roster_record
@@ -388,7 +388,7 @@ def _prior_dir(directory, artefact, roster):
     airports = tuple(sorted(geometries))
     slots = max(len(g.candidates) for g in geometries.values())
     config = PriorConfig(classes=column_classes(Words(one), slots), airports=airports, candidate_slots=slots,
-                         variant="full", d_model=32, layers=2, heads=4, feedforward=64, dropout=0.0)
+                         variant=variant, d_model=32, layers=2, heads=4, feedforward=64, dropout=0.0)
     torch.manual_seed(0)
     model = Prior(config, torch.as_tensor(prior_data.candidate_table(geometries, airports, slots)))
     directory.mkdir()
@@ -477,3 +477,97 @@ def test_the_frontend_reads_the_model_block_the_exporter_writes(tmp_path):
     block = generation_export.model_block(prior / "rl" / "round_01", config, "a" * 64, "full")
     assert read == set(block) - {"trainedAt"}
     assert set(re.findall(r"(\w+):", tuning)) == set(block["fineTuning"])
+
+
+def test_a_scene_prior_is_read_by_its_own_schema_with_its_edge_features_and_the_single_speaker_refuses_it(
+        tmp_path, monkeypatch):
+    """v4 (multi-aircraft design §9 item 10): the v3 payload plus the edge features, read by name; v3 reads as a
+    single-aircraft prior. A scene prior never speaks to single aircraft."""
+    from ts_transformer.experiments import prior_train
+    from ts_transformer.experiments.prior_train import SCENE_CHECKPOINT_SCHEMA, load_prior
+    from ts_transformer.experiments.traffic_scene_data import edge_source_sha256
+    from ts_transformer.prior.generate import Speaker
+    from ts_transformer.prior.masks import ProcedureMasks
+    from ts_transformer.prior.model import SINGLE_EDGE_FEATURES
+    from ts_transformer.tests.test_instruction_training_export import _artefact
+
+    flights = [instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0), dataset_id="KXXX:own",
+                                  split="val")]
+    _artefact(tmp_path / "artefact", flights)
+    roster = tmp_path / "tracks.json"
+    roster.write_text(json.dumps({"records": []}), encoding="utf-8")
+    monkeypatch.setattr(prior_train, "tracks_manifest_path", lambda code: roster)
+    _prior_dir(tmp_path / "prior", tmp_path / "artefact", roster)
+    single = load_prior(tmp_path / "prior", tmp_path / "artefact").model
+    assert single.edge_features == SINGLE_EDGE_FEATURES
+    # the same directory as a scene prior: its network reads three edge features
+    edges = ("self", "relative_front", "relative_left")
+    payload = torch.load(tmp_path / "prior" / "checkpoint.pt", weights_only=True)
+    torch.manual_seed(0)
+    scene = Prior(single.config, payload["state"]["candidates"], edges)
+    scene_payload = {**payload, "schema": SCENE_CHECKPOINT_SCHEMA, "edge_features": list(edges), "state": scene.state_dict(),
+                     "edge_source_sha256": edge_source_sha256()}
+    torch.save(scene_payload, tmp_path / "prior" / "checkpoint.pt")
+    from ts_transformer.prior.masks import MASKS_FILE, write_masks
+    (tmp_path / "prior" / MASKS_FILE).unlink()
+    write_masks(tmp_path / "prior", ProcedureMasks.none(), writer="test", git={"head": "test", "dirty": False})
+    record = json.loads((tmp_path / "prior" / "config.json").read_text(encoding="utf-8"))
+    (tmp_path / "prior" / "config.json").write_text(json.dumps({**record, "schema": SCENE_CHECKPOINT_SCHEMA}))
+    loaded = load_prior(tmp_path / "prior", tmp_path / "artefact").model
+    assert loaded.edge_features == edges
+    assert loaded.layers[0].edge_bias[0].in_features == 3
+    with pytest.raises(ValueError, match="scene prior"):
+        Speaker(loaded, flights, [], None, Words(spec()), max_rows=10, generator=torch.Generator(),
+                procedure_masks=ProcedureMasks.none())
+    # a mixed record (a v4 checkpoint beside a v3 config) is refused
+    (tmp_path / "prior" / "config.json").write_text(json.dumps(record))
+    with pytest.raises(SystemExit, match="is not a"):
+        load_prior(tmp_path / "prior", tmp_path / "artefact")
+    # edge features computed by other code are refused
+    (tmp_path / "prior" / "config.json").write_text(json.dumps({**record, "schema": SCENE_CHECKPOINT_SCHEMA}))
+    torch.save({**scene_payload, "edge_source_sha256": "0" * 64}, tmp_path / "prior" / "checkpoint.pt")
+    with pytest.raises(SystemExit, match="other code"):
+        load_prior(tmp_path / "prior", tmp_path / "artefact")
+
+
+def test_a_traffic_prior_is_read_by_its_own_schema_with_its_traffic_attention_and_the_single_speaker_refuses_it(
+        tmp_path, monkeypatch):
+    """v5 (multi-aircraft design §2.5, §6.2): a single-aircraft prior with a traffic attention — its own edge features
+    "self", the traffic attention's `EDGE_FEATURES` — read by name, its edge code checked as a scene prior's."""
+    from ts_transformer.experiments import prior_train
+    from ts_transformer.experiments.prior_train import TRAFFIC_CHECKPOINT_SCHEMA, load_prior
+    from ts_transformer.experiments.traffic_scene_data import edge_source_sha256
+    from ts_transformer.inference.scene_edges import EDGE_FEATURES
+    from ts_transformer.prior.generate import Speaker
+    from ts_transformer.prior.masks import ProcedureMasks
+    from ts_transformer.prior.model import SINGLE_EDGE_FEATURES, with_traffic
+    from ts_transformer.tests.test_instruction_training_export import _artefact
+
+    flights = [instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0), dataset_id="KXXX:own",
+                                  split="val")]
+    _artefact(tmp_path / "artefact", flights)
+    roster = tmp_path / "tracks.json"
+    roster.write_text(json.dumps({"records": []}), encoding="utf-8")
+    monkeypatch.setattr(prior_train, "tracks_manifest_path", lambda code: roster)
+    _prior_dir(tmp_path / "prior", tmp_path / "artefact", roster)
+    single = load_prior(tmp_path / "prior", tmp_path / "artefact")
+    torch.manual_seed(0)
+    traffic = with_traffic(single.model, EDGE_FEATURES)
+    payload = {**single.payload, "schema": TRAFFIC_CHECKPOINT_SCHEMA, "state": traffic.state_dict(),
+               "edge_features": list(SINGLE_EDGE_FEATURES), "traffic_features": list(EDGE_FEATURES),
+               "edge_source_sha256": edge_source_sha256(),
+               "start": {"directory": "prior", "checkpoint_sha256": "0" * 64}}
+    torch.save(payload, tmp_path / "prior" / "checkpoint.pt")
+    from ts_transformer.prior.masks import MASKS_FILE, write_masks
+    (tmp_path / "prior" / MASKS_FILE).unlink()
+    write_masks(tmp_path / "prior", ProcedureMasks.none(), writer="test", git={"head": "test", "dirty": False})
+    (tmp_path / "prior" / "config.json").write_text(json.dumps({**single.config, "schema": TRAFFIC_CHECKPOINT_SCHEMA}))
+    loaded = load_prior(tmp_path / "prior", tmp_path / "artefact").model
+    assert loaded.traffic_features == EDGE_FEATURES and loaded.edge_features == SINGLE_EDGE_FEATURES
+    assert all(torch.equal(value, loaded.state_dict()[name]) for name, value in traffic.state_dict().items())
+    with pytest.raises(ValueError, match="scene prior"):
+        Speaker(loaded, flights, [], None, Words(spec()), max_rows=10, generator=torch.Generator(),
+                procedure_masks=ProcedureMasks.none())
+    torch.save({**payload, "edge_source_sha256": "0" * 64}, tmp_path / "prior" / "checkpoint.pt")
+    with pytest.raises(SystemExit, match="other code"):
+        load_prior(tmp_path / "prior", tmp_path / "artefact")
