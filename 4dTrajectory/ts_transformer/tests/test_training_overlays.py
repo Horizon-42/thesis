@@ -12,7 +12,6 @@ The tests that ran both runners on the formal `v2_20260924` artefacts (the publi
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import re
@@ -261,13 +260,23 @@ def test_the_prior_s_first_predicted_truth_is_the_word_in_force_the_sample_shows
 
 
 # ---- the manifest and the set an overlay is drawn over
-def _base_files(training, *, kind=files.KIND_READBACK, rule=READING_RULE, schema=files.SAMPLE_SCHEMA):
+#: The HAE − MSL the synthetic set's flight is drawn at (the runway offset its exporter added).
+SET_DATUM_M = -32.0
+
+
+def _base_files(training, *, kind=files.KIND_READBACK, rule=READING_RULE, schema=files.SAMPLE_SCHEMA, candidates=None,
+                frame=None):
     one = spec()
+    msl = [1200.0, 1190.37, 1181.12]
     sample = {"schema": schema, "setId": "set_a", "airport": "KXXX", "writtenUtc": "2026-09-24T00:00:00+00:00",
               "vocabulary": {"specSha256": one.sha256, "readingRule": rule}, "cohort": {"split": files.SPLIT},
+              "candidatesSha256": candidates or files.candidates_sha256(instruction_airport()),
+              "airportFrame": frame or files.airport_frame(instruction_airport()),
               "flights": [{"datasetId": "KXXX:F_09_abc_20260101T000000Z", "flightKey": "F_09_abc_20260101T000000Z",
                            "rows": 3, "words": {"events": [{"row": 0, "column": 0, "value": 0},
-                                                           {"row": 2, "column": 2, "value": 18}]}}]}
+                                                           {"row": 2, "column": 2, "value": 18}]},
+                           "signals": {"altitudeHaeM": files.rounded(np.array(msl) + SET_DATUM_M, 2),
+                                       "raw": {"altitudeM": msl}}}]}
     index = {"schema": files.INDEX_SCHEMA, "airport": "KXXX",
              "sets": [{"id": "set_a", "kind": kind, "readingRule": rule, "vocabularySha256": one.sha256,
                        "file": "set_a/sample.json"}]}
@@ -280,24 +289,41 @@ def _base_files(training, *, kind=files.KIND_READBACK, rule=READING_RULE, schema
 def test_an_overlay_is_drawn_only_over_a_set_this_reader_reads(tmp_path):
     training = tmp_path / "KXXX" / "training"
     _base_files(training)
-    base = files.open_base_set(training, "KXXX", "set_a", spec())
-    raw = (training / "set_a" / "sample.json").read_bytes()
-    assert base.block["sampleSha256"] == hashlib.sha256(raw).hexdigest()
-    assert base.block["sampleWrittenUtc"] == "2026-09-24T00:00:00+00:00"
+    base = files.open_base_set(training, "KXXX", "set_a", spec(), instruction_airport())
+    # what the overlay shares with its set, never the set file's bytes or time of writing
+    assert base.block == {"setId": "set_a", "specSha256": spec().sha256,
+                          "candidatesSha256": files.candidates_sha256(instruction_airport()),
+                          "airportFrame": files.airport_frame(instruction_airport())}
     with pytest.raises(ValueError, match="lists no set other"):
-        files.open_base_set(training, "KXXX", "other", spec())
+        files.open_base_set(training, "KXXX", "other", spec(), instruction_airport())
+    moved = dict(files.airport_frame(instruction_airport()), lat=35.001)
     for change, message in ((dict(kind="prior-generated"), "prior-generated set"), (dict(rule="instruction-v1"), "instruction-v1"),
-                            (dict(schema="aeroviz-training-sample-v4"), "re-export the set first")):
+                            (dict(schema="aeroviz-training-sample-v4"), "re-export the set first"),
+                            (dict(candidates="0" * 64), "has candidates 000000000000, the overlay's artefact"),
+                            (dict(frame=moved), "is in the frame .* the overlay's artefact in")):
         shutil.rmtree(training)
         _base_files(training, **change)
         with pytest.raises(ValueError, match=message):
-            files.open_base_set(training, "KXXX", "set_a", spec())
+            files.open_base_set(training, "KXXX", "set_a", spec(), instruction_airport())
+
+
+def test_an_overlay_drawing_heights_adds_the_set_flight_s_own_datum(tmp_path):
+    training = tmp_path / "KXXX" / "training"
+    _base_files(training)
+    base = files.open_base_set(training, "KXXX", "set_a", spec(), instruction_airport())
+    signals = [instruction_flight(*fly_legs([(3, 0.0, 90.0, 0.0)], 270.0, 900.0, -5000.0, 300.0),
+                                  dataset_id="KXXX:F_09_abc_20260101T000000Z")]
+    assert abs(files.set_flight_datum_m(base.sample["flights"][0]) - SET_DATUM_M) <= 0.01    # two heights to 0.01 m
+    files.require_set_datum(base, signals, {"09": SET_DATUM_M})
+    files.require_set_datum(base, signals, {"09": SET_DATUM_M + 0.015})                       # within two roundings
+    with pytest.raises(ValueError, match=r"draws it -32\.00 m HAE − MSL, the overlay -31\.90 m"):
+        files.require_set_datum(base, signals, {"09": SET_DATUM_M + 0.1})
 
 
 def test_the_set_s_flights_must_carry_the_artefact_s_own_sentences(tmp_path):
     training = tmp_path / "KXXX" / "training"
     _base_files(training)
-    base = files.open_base_set(training, "KXXX", "set_a", spec())
+    base = files.open_base_set(training, "KXXX", "set_a", spec(), instruction_airport())
     signals = [instruction_flight(*fly_legs([(3, 0.0, 90.0, 0.0)], 270.0, 900.0, -5000.0, 300.0),
                                   dataset_id="KXXX:F_09_abc_20260101T000000Z")]
     grid = np.full((3, 6), UNCHANGED, dtype=np.int64)
@@ -315,7 +341,7 @@ def test_the_set_s_flights_must_carry_the_artefact_s_own_sentences(tmp_path):
 def test_an_overlay_is_added_beside_its_set_and_never_overwritten(tmp_path):
     training = tmp_path / "KXXX" / "training"
     _base_files(training)
-    base = files.open_base_set(training, "KXXX", "set_a", spec())
+    base = files.open_base_set(training, "KXXX", "set_a", spec(), instruction_airport())
     assert files.read_overlays(training, "KXXX", "ov_1") == []
     entry = files.overlay_entry("ov_1", files.KIND_EXECUTOR, base, "a title", "executor.json", 1, {"runner": "test"})
     with pytest.raises(ValueError):                                     # a payload that cannot be written stops the build
@@ -325,7 +351,7 @@ def test_an_overlay_is_added_beside_its_set_and_never_overwritten(tmp_path):
     assert "\n" not in out.read_text(encoding="utf-8")                    # compact: its arrays are long
     manifest = json.loads((training / files.OVERLAYS_FILE).read_text(encoding="utf-8"))
     assert manifest["schema"] == files.OVERLAYS_SCHEMA and [item["id"] for item in manifest["overlays"]] == ["ov_1"]
-    assert manifest["overlays"][0]["baseSampleSha256"] == base.sha256 and manifest["overlays"][0]["base"] == "set_a"
+    assert manifest["overlays"][0]["base"] == "set_a" and "baseSampleSha256" not in manifest["overlays"][0]
     with pytest.raises(ValueError, match="already lists overlay ov_1"):
         files.read_overlays(training, "KXXX", "ov_1")
     (training / "ov_9").mkdir()                                            # an overlay's directory is never reused
@@ -360,6 +386,7 @@ def test_the_frontend_reader_mirrors_the_exporters_names():
     assert json.loads(_ts_constant("TRAINING_GENERATION_SCHEMA")) == generation_export.SCHEMA
     assert json.loads(_ts_constant("TRAINING_AUGMENTED_GENERATION_SCHEMA")) == generation_export.AUGMENTED_SCHEMA
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_MODEL_NAMES"))) == generation_export.MODEL_NAMES
+    assert float(_ts_constant("TRAINING_DATUM_TOLERANCE_M")) == files.DATUM_TOLERANCE_M
     # a free sentence's outcomes: the judge's (the executor's list, pinned by the backend's MirrorTest) and the glidepath stop
     from ts_transformer.experiments.prior_free_generation import BELOW_GLIDEPATH, FREE_OUTCOMES
     from ts_transformer.prior.masks import PROCEDURE_ALTITUDES
@@ -435,7 +462,8 @@ def test_the_prior_export_writes_a_set_s_predictions_beside_it_and_refuses_a_sec
     payload = json.loads((training / "prior_prior" / "prior.json").read_text(encoding="utf-8"))
     sample = json.loads((training / SET_ID / "sample.json").read_text(encoding="utf-8"))
     assert payload["schema"] == prior_export.SCHEMA and payload["base"]["setId"] == SET_ID
-    assert payload["base"]["sampleWrittenUtc"] == sample["writtenUtc"]
+    assert payload["base"] == {"setId": SET_ID, "specSha256": sample["vocabulary"]["specSha256"],
+                               "candidatesSha256": sample["candidatesSha256"], "airportFrame": sample["airportFrame"]}
     assert [f["flightKey"] for f in payload["flights"]] == [f["flightKey"] for f in sample["flights"]]
     assert [f["rows"] for f in payload["flights"]] == [f["rows"] for f in sample["flights"]]
     assert all(f["firstPredictedRow"] == N_LOOK and len(f["columns"][0]["changeP"]) == f["rows"] - N_LOOK

@@ -22,21 +22,21 @@ import {
   type TrainingGenerationView,
   type TrainingOverlayEntry,
 } from "../trainingOverlays";
-import { MOCK_ROWS, SET_ID, STRAIGHT_KEY, VECTORED_KEY, WORD, mockSample } from "./trainingSample.fixture";
+import { MOCK_DATUM_M, MOCK_ROWS, MOCK_STEP_S, SET_ID, STRAIGHT_KEY, VECTORED_KEY, WORD, mockSample } from "./trainingSample.fixture";
 
 export const EXECUTOR_ID = "executor_test";
 export const PRIOR_ID = "prior_test";
-export const MOCK_SAMPLE_SHA = "5".repeat(64);
 
-/** What an overlay records of the fixture's set. */
+/** What an overlay records of the fixture's set: what the two share besides their flights. */
 export function mockBase(): Record<string, unknown> {
-  const sample = mockSample() as { writtenUtc: string };
-  return { setId: SET_ID, sampleWrittenUtc: sample.writtenUtc, sampleSha256: MOCK_SAMPLE_SHA, specSha256: TRAINING_SPEC_SHA256 };
+  const sample = mockSample() as { candidatesSha256: string; airportFrame: Record<string, unknown> };
+  return { setId: SET_ID, specSha256: TRAINING_SPEC_SHA256, candidatesSha256: sample.candidatesSha256,
+    airportFrame: { ...sample.airportFrame } };
 }
 
 export function mockOverlays(): Record<string, unknown> {
   const entry = (id: string, kind: string, file: string) => ({
-    id, kind, base: SET_ID, baseSampleSha256: MOCK_SAMPLE_SHA, title: `the ${kind} test overlay`, file: `${id}/${file}`,
+    id, kind, base: SET_ID, title: `the ${kind} test overlay`, file: `${id}/${file}`,
     flights: 2, source: { runner: "test" },
   });
   return {
@@ -79,7 +79,8 @@ export function mockExecutorOverlay(): Record<string, unknown> {
   const rows = 50;
   const range = (count: number, from = 0, step = 1) => Array.from({ length: count }, (_, i) => from + i * step);
   const eM = range(rows, -20000, 400);
-  // it reaches 180° a row after the observed flight: at its step 12 it is still 15° short
+  // it starts where the observed flight is at row 0, and reaches 180° a row after it: at its step 12 it is still 15° short
+  const observed = mockSetFlight(VECTORED_KEY).signals;
   const flownTrack = range(rows).map((row) => (row < 10 ? 270 : row < 12 ? 225 : row === 12 ? 195 : row < 25 ? 180 : 90));
   return {
     schema: TRAINING_EXECUTOR_SCHEMA,
@@ -107,8 +108,9 @@ export function mockExecutorOverlay(): Record<string, unknown> {
         counts: { wordsJudged: 7, wordsInside: 5, headingWordsNotJudged: 0 },
         track: {
           tS: range(rows, 0, 2), eM, nM: range(rows).map((row) => (row < 25 ? 2900 - row * 110 : 0)),
-          lon: eM.map((e) => -78 + e / 90000), lat: range(rows).map(() => 35), altitudeM: range(rows).map((row) => 1110 - row * 10),
-          altitudeHaeM: range(rows).map((row) => 1077 - row * 10), groundSpeedMps: range(rows).map(() => 100),
+          lon: eM.map((e) => -78 + e / 90000), lat: range(rows).map(() => observed.lat[0]),
+          altitudeM: range(rows).map((row) => observed.raw.altitudeM[0] - row * 10),
+          altitudeHaeM: range(rows).map((row) => observed.raw.altitudeM[0] - row * 10 + MOCK_DATUM_M), groundSpeedMps: range(rows).map(() => 100),
           trackDeg: flownTrack, distanceM: range(rows, 0, 200),
         },
         judgedTrackDeg: flownTrack.slice(0, rows - 1),
@@ -247,7 +249,7 @@ const MOCK_MODELS: Record<string, Record<string, unknown>> = {
 export function mockOverlaysWithGenerations(ids: string[] = [BASE_MODEL_ID, POST_TRAINED_ID]): Record<string, unknown> {
   const manifest = mockOverlays() as { overlays: unknown[] };
   const entry = (id: string) => ({
-    id, kind: AUGSTART_IDS.includes(id) ? "prior-generation-augmented" : "prior-generation", base: SET_ID, baseSampleSha256: MOCK_SAMPLE_SHA, title: `the ${id} test overlay`,
+    id, kind: AUGSTART_IDS.includes(id) ? "prior-generation-augmented" : "prior-generation", base: SET_ID, title: `the ${id} test overlay`,
     file: `${id}/generation.json`, flights: 2, source: { runner: "test" },
   });
   return { ...manifest, overlays: [...manifest.overlays, ...ids.map(entry)] };
@@ -260,9 +262,18 @@ export function mockGenerationEntry(id: string): TrainingOverlayEntry {
   return parsed.value.overlays.find((item) => item.id === id)!;
 }
 
-/** Where every sample of these fixtures is at ``at`` seconds: one straight descending line. */
+/** Where every sample of these fixtures is at ``at`` seconds: one straight descending line from where the observed VECTORED
+ *  flight is at the first predicted row (a generated track starts there). */
 export function mockGeneratedPoint(at: number): { lon: number; lat: number; altitudeM: number } {
-  return { lon: -78.8 + at * 1e-4, lat: 35.87, altitudeM: 1200 - at * 5 };
+  const observed = mockSetFlight(VECTORED_KEY).signals;
+  const row = MOCK_GENERATION_FIRST_ROW;
+  const since = at - row * MOCK_STEP_S;
+  return { lon: observed.lon[row] + since * 1e-4, lat: observed.lat[row], altitudeM: observed.raw.altitudeM[row] - since * 5 };
+}
+
+/** The fixture set's flight ``key`` as the exporter wrote it. */
+function mockSetFlight(key: string): { signals: { lon: number[]; lat: number[]; raw: { altitudeM: number[] } } } {
+  return (mockSample() as { flights: Array<{ flightKey: string; signals: never }> }).flights.find((flight) => flight.flightKey === key)!;
 }
 
 /** A flown track from the first predicted row's time to ``endS``, every 2 s step (the last point where it ended). */
@@ -273,7 +284,7 @@ function generatedTrack(endS: number) {
   const points = tS.map(mockGeneratedPoint);
   return {
     tS, lon: points.map((point) => point.lon), lat: points.map((point) => point.lat),
-    altitudeM: points.map((point) => point.altitudeM), altitudeHaeM: points.map((point) => point.altitudeM - 33),
+    altitudeM: points.map((point) => point.altitudeM), altitudeHaeM: points.map((point) => point.altitudeM + MOCK_DATUM_M),
     groundSpeedMps: tS.map(() => 70),
   };
 }
@@ -352,7 +363,7 @@ function augmentedStarts(raw: any): void {
   const rows = Array.from({ length: MOCK_GENERATION_FIRST_ROW }, (_, row) => row * 2);
   Object.assign(raw.flights[0], { augmentDraws: 2, augmentation: { ...MOCK_MOVE }, observed: {
     tS: rows, lon: rows.map((at) => -78.81 + at * 1e-4), lat: rows.map(() => 35.86),
-    altitudeM: rows.map((at) => 1300 - at * 5), altitudeHaeM: rows.map((at) => 1267 - at * 5) } });
+    altitudeM: rows.map((at) => 1300 - at * 5), altitudeHaeM: rows.map((at) => 1300 - at * 5 + MOCK_DATUM_M) } });
   Object.assign(raw.flights[1], { augmentDraws: null, augmentation: null, observed: null });
 }
 

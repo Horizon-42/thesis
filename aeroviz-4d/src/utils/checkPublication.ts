@@ -326,20 +326,11 @@ const OVERLAY_READERS: Record<TrainingOverlayKind,
 };
 
 /**
- * One overlay's file through the panel's own reader, against the sample of the set it is drawn over — and that
- * sample's sha256 on disk against the one the overlay recorded: a set re-exported under its id since would otherwise
- * be matched by id alone.
+ * One overlay's file through the panel's own reader, against the sample of the set it is drawn over: the reader binds
+ * the two by what they share — the set, spec, candidates, frame and every flight — never by the sample file's bytes.
  */
-export function checkTrainingOverlay(
-  entry: TrainingOverlayEntry, payload: unknown, sample: TrainingSample, sampleSha256: string,
-): PublicationFinding[] {
+export function checkTrainingOverlay(entry: TrainingOverlayEntry, payload: unknown, sample: TrainingSample): PublicationFinding[] {
   const findings: PublicationFinding[] = [];
-  if (entry.baseSampleSha256 !== sampleSha256) {
-    findings.push({
-      level: "error", category: entry.id,
-      message: `drawn over ${entry.base}'s sample ${entry.baseSampleSha256.slice(0, 12)}, the file on disk is ${sampleSha256.slice(0, 12)}`,
-    });
-  }
   const parsed = OVERLAY_READERS[entry.kind](payload, entry, sample);
   if (!parsed.ok) findings.push({ level: "error", category: entry.id, message: `${entry.file}: ${parsed.problem}` });
   else if (parsed.value.flights.length !== entry.flights) {

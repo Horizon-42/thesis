@@ -81,8 +81,8 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.training_files import (
     KIND_EXECUTOR, SPLIT, BaseSet, band_payload, base_flights, open_base_set, overlay_entry, read_overlays,
-    require_overlays_unchanged, require_stored_sentence, rounded, runway_hae_minus_msl_m, serialise, stored_sentence,
-    write_overlay,
+    require_overlays_unchanged, require_set_datum, require_stored_sentence, rounded, runway_hae_minus_msl_m, serialise,
+    stored_sentence, write_overlay,
 )
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, APPROACH, COLUMNS, HEADING, RUNWAY, SPEED, Words,
@@ -94,7 +94,9 @@ from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_sta
 #: the reader refuses anything else by name. A name changes with its file's shape, on both sides, in one change: v2
 #: (2026-09-24, instruction-v3) gives every heading word judged its band and per-row verdicts (``heading``) and every
 #: flight judged its flown track as the judge read it (``judgedTrackDeg``); v1's heading verdicts were turns and holds.
-SCHEMA = "aeroviz-training-executor-v3"
+#: v4 (2026-09-28): ``base`` records the set's spec, candidates and frame, no longer its sample file's sha256 or time
+#: of writing (`training_files.BaseSet.block`).
+SCHEMA = "aeroviz-training-executor-v4"
 PAYLOAD_FILE = "executor.json"
 RUNNER = "ts_transformer.experiments.executor_training_export"
 STATUSES = ("inside", "outside", "not judged", "not reached", "superseded", "no check")
@@ -414,6 +416,7 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
     offsets = runway_hae_minus_msl_m(instructions, geometry.code, arrival_manifest_path(geometry.code))
     located = base_flights(base, flights, sentences)
     signals = [flight for flight, _ in located]
+    require_set_datum(base, signals, offsets)
     series = rebuild_series(instructions, signals)
     groups = [replay.group_of(item) for item in series]
     flyable = [j for j, group in enumerate(groups) if group in (replay.OWN, replay.STAND_IN)]
@@ -511,7 +514,7 @@ def export(executor: Path, replay_dir: Path, instructions: Path, root: Path, air
         if (training / overlay_id).exists():
             raise ValueError(f"{training / overlay_id} exists; an overlay is never overwritten")
         existing[code] = read_overlays(training, code, overlay_id)
-        bases[code] = open_base_set(training, code, set_id, spec)
+        bases[code] = open_base_set(training, code, set_id, spec, geometries[code])
 
     source = {"runner": RUNNER, "executor": repo_relative(executor), "replay": repo_relative(replay_dir),
               "instructions": repo_relative(instructions), "git": git_state()}

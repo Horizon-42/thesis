@@ -12,7 +12,7 @@ the entry itself is deleted.
 
 Checked entry by entry against `dev-two-tier` `1a7ac875` plus branch `dev-frontend-followups`, then updated after branch
 `dev-followups-no-training` (2026-09-25) fixed every entry whose fix touches neither the training nor the post-training
-(the right-hand column): **21 open, 7 partly, 65 resolved or dismissed, 5 obsolete** (recounted from the table 2026-09-27; one open row is blocked on a source). *open*: the problem is still in the
+(the right-hand column): **27 open, 7 partly, 67 resolved or dismissed, 5 obsolete** (recounted from the table 2026-09-28; one open row is blocked on a source). *open*: the problem is still in the
 code; *partly*: some of it is fixed (the note says what is left); *resolved*: fixed (the note says by what);
 *dismissed*: not a defect (the note says why); *obsolete*: the code is gone. A resolved, dismissed or obsolete entry's
 text is removed below (its row stays); rows follow the entries' order; note the two sets of numbers (§19–§21 each appear
@@ -126,6 +126,12 @@ added three entries (the rows after the performance index's).
 | `ExecutorParams.check` lets a NaN rate or factor through (09-27) | resolved | every value finite and positive (branch `dev-executor-v11`, v11 milestone 1); entry removed | — |
 | A free sentence is judged against the runway pointed at the executor's stop, not at its end (09-27) | open | new; see the entry | **yes — post-training**: the landing reward reads the outcome |
 | `faa_separation(visual_parallels=True)` is a second, different "visual" (09-27) | open | new; see the entry | no: only the archived runway-intent runner and one test call it |
+| The labeller sha is over bytes and checked against the running code: one edit deadlocks the chain (09-28) | open | new; see the entry | **yes — every artefact's and prior's identity record** (no retrain); the fix edits `autopilot/replay.py`, inside the executor hash — batch with the executor-identity entry |
+| The executor spec refuses any other code, over 28 modules including all of `config.py` and `data/dataset.py` (09-28) | open | new; see the entry; the rule is the user's (2026-09-27) | **yes — executor identity** (no behaviour change) |
+| Two-tier data are bound to each airport's whole arrival manifest by its bytes (09-28) | open | new; see the entry | **yes — executor identity**: `autopilot/flights.py` is hashed, so the fix moves the source hash — batch with the executor-identity entry |
+| A Training overlay is bound to its set's file sha256 and writing time (09-28) | resolved | bound by what it shares with the set — spec, candidates, frame, and flight by flight its keys, words / steps and every drawn height's HAE − MSL; overlays v2, executor / prior / generation v4, augmented generation v2 (branch `dev-overlay-content-binding`; every published overlay is re-exported once, the user's OK); entry removed | — |
+| The frontend pins the vocabulary spec's sha (09-28) | open | new; see the entry — low value while the superseded `instruction_v3` set stays listed | no: a frontend constant |
+| The single-flight executor's pin refuses at run time, not in the tests (09-28) | open | new; see the entry | no: the backend |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -544,3 +550,66 @@ parallel final by radar or vertical. Only the archived `runway_intent_r3` and `t
 because "pilots maintain visual separation", which the multi-aircraft reading rules out (design §9 item 16). Fix
 (judgement): delete the flag and its test once nothing live needs the runway-intent reading, or name it after what it
 does (parallels as independent).
+
+## The labeller sha is over bytes and checked against the running code: one edit deadlocks the chain (2026-09-28)
+
+From the audit of the two-tier chain's identity checks (2026-09-28, `dev-two-tier` `97c579bd`), like the next five
+entries. **Verified.** `instructions/artefact.py` `labeller_source_sha256` hashes the BYTES of `LABELLER_MODULES` (14
+files) and `final_approach/crossing.py`, so a comment moves it (the executor's hash stopped doing that on 2026-09-27).
+`autopilot/replay.py` `open_executor` refuses an artefact unless its recorded labeller is the running code
+(`require_current_labeller`) and the spec's labeller is too (`replay.py:79-84`); `experiments/prior_train.py`
+`load_prior` refuses a prior whose recorded labeller is not the artefact's (`:107`). Together: after any edit to one of
+those 15 files the executor refuses artefact v5, and an artefact rebuilt by the new code refuses base, landing and
+augmented — retrain, or revert. This is why those files are on the frozen list and the training-affecting fixes waited
+on `dev-training-followups`. What the check guards is already checked by result: every exporter and the backend re-read
+each flight they show or fly and demand the stored sentence (`training_files.require_stored_sentence`, backend
+`fly.py:137`). Fix (judgement): hash the logic (`autopilot.spec.logic`); keep the running-code refusal only where one
+artefact is written (`instruction_labels`); record the labeller elsewhere as provenance; bind a prior to an artefact by
+a digest of the arrays it trained on (`sentences_*` and `signals_*` of train / select / val) instead of the code that
+wrote them — C26's rule (identity is the data, not its producer). Existing priors need the digest recorded once beside
+them (writes next to published models: the user's call). Makes the `grammar.py` entry moot.
+
+## The executor spec refuses any other code, over 28 modules including all of `config.py` and `data/dataset.py` (2026-09-28)
+
+**Verified.** `autopilot/spec.py` `executor_source_files` covers `autopilot/`'s 15 files and the 13 repository modules
+they import directly, among them `ts_transformer.config` (2,989 lines, the whole ts line's), `ts_transformer.data.dataset`
+(1,691 lines), `geokit` and `trajectory_data_process.harvest.airports`; `require_current_executor` refuses a spec written
+by other code — in the replay, every exporter and the backend's spec choice. `outputs/POOLED/executor/v5`–`v10` are six
+specs with the same params sha `0d6a68a92c6f`, differing only in the source hash; v8 was refused because its hash covered
+the archived CAT-K code. A full spec with its replays is ~2 GB, and each new one forced the val re-reads
+(`prior/v3_reread_v9`, `_v10`, `_v11`) and an overlay re-export. It did catch a real change once: with `dataset.py` in
+the hash, a change moved 711 of 1,000 select flights' mass or approach speed (CHANGELOG 2026-09-26). The rule is the
+user's (2026-09-27: a spec and every readout flown with it describe the code that runs). Fix (judgement, the user's
+decision): decide by result — re-fly a fixed sample (the stored train replay's flights, some per airport) and compare
+row by row, as `aeroviz_backend/autopilot_segment/check_single.py` does for the single-flight executor; equal → the spec
+stands for the new code (the new code identity recorded beside it), different → a new spec; and extend
+`autopilot/flights.require_same_flight` to what the executor reads from a series (type, mass, approach speed), so
+`config.py` and `dataset.py` can leave the hash.
+
+## Two-tier data are bound to each airport's whole arrival manifest by its bytes (2026-09-28)
+
+**Verified.** `autopilot/flights.py` `rebuild_series` (`:55`) and `instructions/training_files.py`
+`runway_hae_minus_msl_m` (`:251`) refuse unless each airport's `arrivals/manifest.json` has the sha256 the artefact
+recorded. The file holds every record of the airport (KRDU 24,202), and `--evaluate-only` / `--merge-source` rewrite it
+(root Open Items): any such rewrite refuses the replay, the exports, the live flights and the traffic loop, even when
+not one flight they use changed — though `require_same_flight`, right after, compares every rebuilt flight with its
+stored signals (1e-6). The same class as C26 (2026-09-07: a byte-bound roster identity refused every checkpoint). Fix
+(judgement): drop the file comparison, keep the per-flight one, and compare the one runway offset a flight uses.
+`flights.py` is inside the executor hash, so under today's rule the fix itself needs a new spec: do it with the previous
+entry.
+
+## The frontend pins the vocabulary spec's sha (2026-09-28)
+
+**Verified.** `aeroviz-4d/src/data/trainingSample.ts` `TRAINING_SPEC_SHA256` (`:53`) is compared at `:620`, `:641` and
+`trainingOverlays.ts:736`, although the sample carries the vocabulary's tables and the reader checks them. Its cost is a
+one-line edit when the spec is re-measured, never a re-export. It is also the only thing that hides the superseded
+flight-split set `instruction_v3` (sample v7, spec `0b4ea75be36d`), still listed in every airport's index (older sets
+kept as they are, the user 2026-09-26). Judgement: low value; remove it only once that set leaves the index.
+
+## The single-flight executor's pin refuses at run time, not in the tests (2026-09-28)
+
+**Verified.** `aeroviz_backend/autopilot_segment/single.py` `require_mirrored_source` (`:118`) runs when the backend
+picks its spec (`backend.py:148`): a logic change in any of the 32 files it mirrors makes the backend refuse every live
+flight until `single.py` is ported and `MIRRORED_SOURCE_SHA256` moved. `tests/test_single_executor.py` compares the two
+executors through every mode and limit, and `check_single` over a fleet. Judgement: the pin belongs in the suite (a
+change not ported fails a test); at run time it only reports the same thing later, to the user.

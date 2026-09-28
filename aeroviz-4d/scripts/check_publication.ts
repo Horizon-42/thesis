@@ -21,14 +21,13 @@
  * Training sets: every set the manifest lists must have its file; a set the panel refuses by
  * name (a superseded vocabulary) is a WARNING, since it is refused on purpose; every readable set
  * is parsed by the panel's own reader and compared with its manifest entry. Every overlay listed in
- * `training/overlays.json` (the executor's replay, the prior's predictions) is read against the sample
- * of the set it is drawn over, whose sha256 on disk must be the one it recorded.
+ * `training/overlays.json` (the executor's replay, the prior's predictions, the models' own sentences) is read
+ * against the sample of the set it is drawn over, by the panel's own reader.
  *
  * Exit status 1 on any error-level finding, 2 on a usage error. Runs under vite-node (no
  * build, no browser); `npm run typecheck:scripts` type-checks it.
  */
 
-import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -110,12 +109,6 @@ function parseArgs(argv: string[]): Options {
 
 function readJson(file: string): unknown {
   return JSON.parse(readFileSync(file, "utf8"));
-}
-
-/** A file read once: its JSON and its bytes' sha256 (the overlays record their set's sample by it). */
-function readJsonAndSha256(file: string): { value: unknown; sha256: string } {
-  const bytes = readFileSync(file);
-  return { value: JSON.parse(bytes.toString("utf8")), sha256: createHash("sha256").update(bytes).digest("hex") };
 }
 
 /** A served file's JSON, or why it is not JSON (a truncated body is named, and the run goes on). */
@@ -206,8 +199,8 @@ async function checkTraining(root: string, airport: string, server: string | nul
 
   const serverRoot = server ? `${server}/data/airports/${airport}/training` : null;
   let readable = 0;
-  // the readable sets' samples, for the overlays drawn over them: the parsed sample and its file's sha256
-  const samples = new Map<string, { sample: TrainingSample; sha256: string }>();
+  // the readable sets' samples, for the overlays drawn over them
+  const samples = new Map<string, TrainingSample>();
   if (serverRoot) {
     const problem = await served(`${serverRoot}/index.json`, "json");
     if (problem) findings.push({ level: "error", message: `server: training/index.json ${problem}` });
@@ -227,19 +220,19 @@ async function checkTraining(root: string, airport: string, server: string | nul
       continue;
     }
     // A truncated file is the commonest shape of a half-written export: name the set and go on.
-    let file: { value: unknown; sha256: string };
+    let raw: unknown;
     try {
-      file = readJsonAndSha256(sampleFile);
+      raw = readJson(sampleFile);
     } catch (error) {
       findings.push({ level: "error", category: entry.id, message: `${entry.file} is not readable JSON: ${unreadable(error)}` });
       continue;
     }
-    const read = checkTrainingSample(entry.id, file.value);
+    const read = checkTrainingSample(entry.id, raw);
     findings.push(...read.findings);
     if (read.value !== null) {
       readable += 1;
       findings.push(...checkTrainingSetAgrees(entry, read.value, airport));
-      samples.set(entry.id, { sample: read.value, sha256: file.sha256 });
+      samples.set(entry.id, read.value);
     }
     if (serverRoot) {
       const problem = await served(`${serverRoot}/${entry.file}`, "json");
@@ -262,7 +255,7 @@ async function checkTraining(root: string, airport: string, server: string | nul
  * against its set is an ERROR, named with the field.
  */
 async function checkOverlays(
-  trainingDir: string, samples: Map<string, { sample: TrainingSample; sha256: string }>, serverRoot: string | null,
+  trainingDir: string, samples: Map<string, TrainingSample>, serverRoot: string | null,
   findings: PublicationFinding[],
 ): Promise<{ overlays: number; readableOverlays: number }> {
   const manifestFile = path.join(trainingDir, "overlays.json");
@@ -283,8 +276,8 @@ async function checkOverlays(
   }
   let readable = 0;
   for (const entry of overlays.value.overlays) {
-    const base = samples.get(entry.base);
-    if (!base) {
+    const sample = samples.get(entry.base);
+    if (!sample) {
       findings.push({ level: "warn", category: entry.id, message: `drawn over ${entry.base}, a set the panel does not read` });
       continue;
     }
@@ -301,7 +294,7 @@ async function checkOverlays(
       findings.push({ level: "error", category: entry.id, message: `${entry.file} is not readable JSON: ${unreadable(error)}` });
       continue;
     }
-    const found = checkTrainingOverlay(entry, payload, base.sample, base.sha256);
+    const found = checkTrainingOverlay(entry, payload, sample);
     findings.push(...found);
     if (!found.length) readable += 1;
     if (serverRoot) {
@@ -310,7 +303,7 @@ async function checkOverlays(
       else {
         // the SERVED body through the same reader
         const body = await servedJson(`${serverRoot}/${entry.file}`);
-        const found = body.ok ? checkTrainingOverlay(entry, body.value, base.sample, base.sha256)
+        const found = body.ok ? checkTrainingOverlay(entry, body.value, sample)
           : [{ level: "error" as const, category: entry.id, message: `${entry.file}: ${body.problem}` }];
         for (const finding of found) findings.push({ ...finding, message: `server: ${finding.message}` });
       }

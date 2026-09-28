@@ -316,7 +316,9 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
     overlay_id = f"generation_base_{checkpoint[:8]}"                   # the default: its name and checkpoint
     payload = json.loads((training / overlay_id / export.PAYLOAD_FILE).read_text(encoding="utf-8"))
     sample = json.loads((training / SET_ID / "sample.json").read_text(encoding="utf-8"))
-    assert payload["schema"] == export.SCHEMA and payload["base"]["setId"] == SET_ID and payload["readout"] is None
+    assert payload["schema"] == export.SCHEMA and payload["readout"] is None
+    assert payload["base"] == {"setId": SET_ID, "specSha256": sample["vocabulary"]["specSha256"],
+                               "candidatesSha256": sample["candidatesSha256"], "airportFrame": sample["airportFrame"]}
     assert payload["producedBy"]["device"] == "cpu"                     # the speaker's; the executor is always on CPU
     assert payload["model"] == {"name": "base", "round": None, "run": "4dTrajectory/outputs/POOLED/prior/v_test/full_s1",
                                 "checkpointSha256": checkpoint, "variant": "full",
@@ -342,6 +344,13 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
     assert again["flights"] == payload["flights"]
     with pytest.raises(SystemExit):                                     # never overwritten
         export.main(args)
+    # heights on another datum than the set's flights: refused before anything is written
+    monkeypatch.setattr(export, "runway_hae_minus_msl_m",
+                        lambda *given: {ident: offset + 0.1 for ident, offset in _offsets(*given).items()})
+    with pytest.raises(ValueError, match="draws it -32.00 m HAE − MSL, the overlay -31.90 m"):
+        export.main([*args, "--overlay-id", "datum"])
+    assert not (training / "datum").exists()
+    monkeypatch.setattr(export, "runway_hae_minus_msl_m", _offsets)
     # both flights on their own dynamics: each flight's samples are its own, flown from its own state at N_LOOK
     unflown.clear()
     assert export.main([*args, "--overlay-id", "both"]) == 0

@@ -145,10 +145,10 @@ python run_ts.py prior_training_export \
     --airport KMSY --airport KRDU --airport KSJC --airport KSMF --airport KSTL
 ```
 
-- **清单**：每个机场一个 `training/overlays.json`（`aeroviz-training-overlays-v1`），一条一个叠加层：种类、所画的集合、
-  那个集合样本文件的 sha256、文件位置。叠加层文件放在 `training/<叠加层 id>/`，目录已存在或清单里已有同名 id 就拒绝，
+- **清单**：每个机场一个 `training/overlays.json`（`aeroviz-training-overlays-v2`），一条一个叠加层：种类、所画的集合、
+  文件位置。叠加层文件放在 `training/<叠加层 id>/`，目录已存在或清单里已有同名 id 就拒绝，
   五个机场都建好才写。`index.json` 不动。
-- **执行器**（`executor.json`，`aeroviz-training-executor-v3`）：用正式规格把集合里的航班重新飞一遍、判一遍。重飞是必须的：
+- **执行器**（`executor.json`，`aeroviz-training-executor-v4`）：用正式规格把集合里的航班重新飞一遍、判一遍。重飞是必须的：
   正式回放的 `replay.json` 只记了每架航班"哪一类词合不合格"的列表，没有记是哪一条词。重飞后每条判定对回句子里的词，
   并且**每架航班必须和正式回放的那一行一致**：结局、是否按原话飞完、判定列表、不判 / 没说到 / 被取代的词数完全相同，
   越过入口的偏离与高度差在 1e-9 以内（换一批航班一起飞，浮点求和的次序不同，差一个末位），否则导出停下、说出是哪一架。
@@ -162,14 +162,17 @@ python run_ts.py prior_training_export \
   的航班不画带**：判决读到了失败的那个状态（可能不是有限值），而导出的航迹有意不含它；这些航班的词照样有判决的状态和检查，
   只是没有航向带和判决读到的航迹。回放不飞的航班（没有识别出机型、机型没有公开进近速度）
   列出原因，没有航迹。飞出的航迹每 2 s 一点，到结局那一行，带 MSL 与椭球高；还附上这个机场与全部机场的回放门表。
-- **先验**（`prior.json`，`aeroviz-training-prior-v3`；第三版起前 `firstPredictedRow`（= 8）行只观察、没有预测，每列每步的数组
+- **先验**（`prior.json`，`aeroviz-training-prior-v4`；第三版起前 `firstPredictedRow`（= 8）行只观察、没有预测，每列每步的数组
   从第一个预测步开始；第一个预测步六列都要说；跑道在第一个预测步之后不再换，它的"换词"指标为空）：检查点必须是这份产物的规格、
   标注器与运行日划分训练的、不是冒烟试跑、候选跑道表与产物相同、状态整份载入，并且今天的航迹清单与训练时的相同（落地情况从它读）。推断用教师强制（每一步看到真值句子在它之前的词），与训练和读数时一样；第三版的先验导出时，要核对这条推断
   路径在 val 航班上复现 `readout.json` 的每步负对数似然（第二版核对过：10,540 架，差 1e-9 以内）。每架航班每列每个预测步：说一个词的概率、若说一个词最可能的
   3 个词（列的取值少于 3 个时更少，例如一个机场的候选跑道）及其概率、真值的概率；每架航班每步的负对数似然（总的和
   分列的，四舍五入前算）。val 的读数随文件一起走，原样照抄。
-- **绑定与核对**：叠加层自己写出所画集合的 id、样本的写出时刻、规格 sha；前端逐项核对，并核对每架航班的键、执行器的
-  每条词（步、列、值）、先验的步数，对不上整份拒读。`check-publication` 另外核对盘上样本文件的 sha256。
+- **绑定与核对**：叠加层自己写出它和所画集合共有的东西——集合 id、规格 sha、候选跑道 sha、机场坐标系；前端逐项核对，并
+  核对每架航班的键、执行器的每条词（步、列、值）、先验的步数、画出的每一行高度的 HAE − MSL（等于集合里这架航班的，0.02 m
+  以内）、从观测状态飞出的航迹的第一点（就是观测航迹那一行：执行器第 0 行，模型自己的句子第 8 行；增强起点不比），对不上
+  整份拒读。不按集合文件的字节或写出时刻绑定：集合用同样的航班重新导出，叠加层照读。导出器写之前同样核对
+  （候选跑道与坐标系是它自己产物的，每架航班的高度基准相同）。
 
 2026-09-24 画在 `instruction_v2` 集合上的执行器（规格 `2674ab8c71a9`）与先验（`prior/v1_20260924`）叠加层的发布与
 核对记在 `docs/CHANGELOG.md`；它们按名字拒读，v3 的叠加层要等 v3 的执行器规格、回放和先验。
@@ -198,7 +201,7 @@ python run_ts.py prior_generation_training_export \
   （落地、越过入口、触地、动力学失败）或超时（观测剩余时间的 1.5 倍）为止。每架航班采 `--samples`（默认 4）个样本，温度 1，
   种子 1337，一个随机数发生器按机场的先后顺序往下用。**只飞正式读数也飞的航班**：自己机型有动力学的（`replay.OWN`）；别的
   （替代动力学、没有动力学、没识别出机型）列出原因，没有样本。结局是执行器判决给的（`judge.outcome_of`，按最后所指的跑道）。
-- **每个样本写什么**（`generation.json`，`aeroviz-training-generation-v1`）：说出的词，写成和真值句子一样的事件（行、列、值），
+- **每个样本写什么**（`generation.json`，`aeroviz-training-generation-v4`）：说出的词，写成和真值句子一样的事件（行、列、值），
   行号就是这架航班自己的步号（第一个事件在第 8 行，六列都在）；结局、结束时刻、越过入口的偏离与高度差（只有越过入口的
   三种结局才有）、第一步与最后所指的跑道、换跑道次数、复飞词数、结束时是否已许可、屏蔽拿掉的概率（跑道 / 进近 / 下降角
   三列，每步平均）；执行器飞出的航迹，每 2 s 一点，**用这架航班自己的时钟**（从第 8 行的 16 s 起），到结局那一行（动力学失败的
@@ -229,7 +232,7 @@ python run_ts.py prior_generation_training_export \
   样本数与温度都相同、程序高度开没开与模型自己的一致，否则按名字拒绝。
 - **检查点**：`prior_train.load_prior` 能在这份产物上打开（规格、标注器、运行日划分、候选跑道表、整份状态）、不是冒烟试跑、
   今天的航迹清单与训练时相同（落地情况从它读，按 sha256 比）。
-- **绑定与核对**：与 §2.6 相同（集合 id、样本写出时刻、规格 sha，逐架航班的键）；另外逐个样本核对自己的账：事件按
+- **绑定与核对**：与 §2.6 相同（集合 id、规格 sha、候选跑道、坐标系，逐架航班的键与高度基准）；另外逐个样本核对自己的账：事件按
   (行, 列) 递增且在自己的行数以内、第一个预测步六列都说、首末跑道就是自己的跑道词、越过入口只随那三种结局出现、航迹从第 8 行的
   时刻开始、除最后一点外每点正好一步（界面按"第 k 点 = 第 8 + k 行"放词）、最后一点离前一点不超过一步、在结束时刻结束（动力学
   失败的早一个周期）；换跑道次数、复飞词数、结束时是否许可与它自己的词对得上；样本数等于声明的数；飞了的航班恰好有这么多样本，
@@ -252,9 +255,8 @@ python run_ts.py prior_generation_training_export --augment-seed 1337 \
 ```
 
 - **同一个导出器，多一个选项**：`prior_generation_training_export` 加 `--augment-seed`。给了它，每架航班不从自己的起点飞，而从
-  增强起点飞，写成**另一种叠加层**：种类 `prior-generation-augmented`，格式 `aeroviz-training-augmented-generation-v1`，默认 id
-  `generation_augstart_<名字>[_rNN]_<检查点 sha256 前 8 位>`。§2.7 的 `aeroviz-training-generation-v3` 一个字不改——盘上已发布的
-  17 份叠加层不用重导。
+  增强起点飞，写成**另一种叠加层**：种类 `prior-generation-augmented`，格式 `aeroviz-training-augmented-generation-v2`，默认 id
+  `generation_augstart_<名字>[_rNN]_<检查点 sha256 前 8 位>`。与集合的绑定同 §2.6，增强后的第 0–7 行也核对高度基准。
 - **增强怎么抽**——和第二阶段训练、它的 val 读数（`val_*_aug_400x4`）同一套代码（`prior_free_generation.augmented_starts`、
   `prior.augment`）：
   - 绕机场参考点转 δ ∈ [−15°, 15°]、抬高 Δh ∈ [−150, 150] m、加速 1 + κ，κ ∈ [−5 %, 5 %]，均匀抽；
@@ -755,8 +757,8 @@ own flight — 0.00 m at most from sample #1 over 62 points"；差到 0.5 m 以�
 - 加 `--server <地址>`：同样的文件从正在运行的开发服务器取，JSON 必须是 JSON（不是 SPA 回退页），能读的
   样本**把服务器返回的内容再用读取函数读一遍**——HTTP 200 不等于"能加载"。
 - 加 `--airports-root <目录>`：核对另一个目录（例如导出到临时目录的试跑），不能和 `--server` 同用。
-- 叠加层（包括模型自己说的句子）：`overlays.json` 用前端自己的读取函数读，每个叠加层对照它所画集合的样本读一遍，并核对盘上样本文件的 sha256 是
-  叠加层记下的那一个（集合重新导出过就报错）；画在界面不读的集合上的叠加层记为警告。加 `--server` 时服务器返回的叠加层
+- 叠加层（包括模型自己说的句子）：`overlays.json` 用前端自己的读取函数读，每个叠加层对照它所画集合的样本读一遍（按内容
+  绑定，§2.6）；画在界面不读的集合上的叠加层记为警告。加 `--server` 时服务器返回的叠加层
   也再读一遍。每种叠加层用它自己的读取函数（新加一种而没给读取函数，编译不过）。
 
 ---
@@ -777,11 +779,12 @@ own flight — 0.00 m at most from sample #1 over 62 points"；差到 0.5 m 以�
   `trainingSample.ts` 的钉住值、测试、`aeroviz-4d/CLAUDE.md` 与 `35-viewer-reference.md` 的对应条目和本文。
 - 格式名跟着文件的形状走：样本或索引的字段一有增、删、改名，Python 的 `SAMPLE_SCHEMA` / `INDEX_SCHEMA` 和
   TypeScript 的 `TRAINING_SAMPLE_SCHEMA` / `TRAINING_INDEX_SCHEMA` 在同一次改动里一起换新名字，盘上的集合重新导出；
-  不为"旧文件还能读"或"现在没人读错"保留旧名字。叠加层的四个格式名（`OVERLAYS_SCHEMA`、`executor_training_export.SCHEMA`、
-  `prior_training_export.SCHEMA`、`prior_generation_training_export.SCHEMA` 与 `trainingOverlays.ts` 里的
-  `TRAINING_OVERLAYS_SCHEMA`、`TRAINING_EXECUTOR_SCHEMA`、`TRAINING_PRIOR_SCHEMA`、`TRAINING_GENERATION_SCHEMA`）和叠加层的
-  种类列表同理，由 `test_training_overlays.py` 逐字比对。清单里出现界面不认识的种类时只拒这一条，别的照读。
-- 集合重新导出后，画在它上面的叠加层会被按名字拒读（样本的写出时刻变了）：重新生成叠加层，用新的叠加层 id。
+  不为"旧文件还能读"或"现在没人读错"保留旧名字。叠加层的五个格式名（`OVERLAYS_SCHEMA`、`executor_training_export.SCHEMA`、
+  `prior_training_export.SCHEMA`、`prior_generation_training_export.SCHEMA` / `AUGMENTED_SCHEMA` 与 `trainingOverlays.ts` 里的
+  `TRAINING_OVERLAYS_SCHEMA`、`TRAINING_EXECUTOR_SCHEMA`、`TRAINING_PRIOR_SCHEMA`、`TRAINING_GENERATION_SCHEMA`、
+  `TRAINING_AUGMENTED_GENERATION_SCHEMA`）、高度基准的容差（`DATUM_TOLERANCE_M`）和叠加层的种类列表同理，由 `test_training_overlays.py` 逐字比对。清单里出现界面不认识的种类时只拒这一条，别的照读。
+- 集合重新导出后，航班、句子、规格、跑道、坐标系与高度基准都没变，画在它上面的叠加层照读；有一样变了，叠加层整份拒读，
+  要重新生成（用新的叠加层 id）。
 - 长期事实一行写进 `aeroviz-4d/CLAUDE.md` 的索引，全文写进 `aeroviz-4d/docs/35-viewer-reference.md`
   （AV19–AV32）。导出器的说明在 `4dTrajectory/ts_transformer/docs/reference/runners.md`（R11；叠加层 R13）。
 - 词表的读法再换（例如 §10.2 的高度词）时，逐项检查本文 §2.3、§3、§4 里写到词的地方，与 `display.py` 同一次改动。

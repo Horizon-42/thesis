@@ -193,6 +193,15 @@ describe("a generation overlay", () => {
     })).toMatch("its last point is more than a step after the one before");
   });
 
+  it("refuses a track drawn on another datum than the set flight's", () => {
+    expect(refusal((raw) => { landedSample(raw).track.altitudeHaeM[2] -= 0.5; })).toMatch(/draws row 2 -33\.50 m HAE − MSL/);
+  });
+
+  it("refuses a track that does not start where the set's flight is at the first predicted row", () => {
+    expect(refusal((raw) => { landedSample(raw).track.lon[0] += 1e-5; }))
+      .toMatch(/samples\[0\]\.track: starts at .* at row 4, where it was flown from/);
+  });
+
   it("refuses a readout cell counted over no flight", () => {
     expect(refusal((raw) => { raw.readout.prior.here.all.flights = 0; })).toMatch("flights is 0, not a whole number of at least 1");
   });
@@ -367,5 +376,9 @@ describe("a generation overlay from augmented starts", () => {
     expect(movedRefusal((raw) => { raw.flights[0].observed.tS[2] = 5; })).toMatch("tS[2] is 5 s, not the step at 4 s");
     expect(movedRefusal((raw) => { raw.flights[0].observed.lat.pop(); })).toMatch("lat");
     expect(movedRefusal((raw) => { raw.flights[0].samples[1].track.lat[0] += 0.01; })).toMatch("start from 2 places");
+    expect(movedRefusal((raw) => { raw.flights[0].observed.altitudeHaeM[1] += 1; })).toMatch(/observed: draws row 1 -32\.00 m HAE − MSL/);
+    // a moved start is not the set's: every sample starts elsewhere, on the flight's own datum, and reads
+    const elsewhere = moved((raw) => raw.flights[0].samples.forEach((one: any) => { one.track.lat[0] += 0.01; }));
+    if (!elsewhere.ok) throw new Error(elsewhere.problem);
   });
 });

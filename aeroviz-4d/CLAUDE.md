@@ -28,7 +28,7 @@ npm run build:local-terrain:visual-assets
 # Does the picker load what was just published? The frontend's own guards over
 # categories.json + every comparison_index.json (names the rejected category and field),
 # the referenced CZML/report files, every readable Training set through the Training reader (and every overlay
-# drawn over one, against its sample's sha256), and — with --server — what the RUNNING dev server answers (a served
+# drawn over one, read against its sample), and — with --server — what the RUNNING dev server answers (a served
 # Training sample or overlay is parsed too).
 npm run check-publication -- --airport KSMF --server http://localhost:5173   # all airports if no --airport
 npm run check-publication -- --airports-root /tmp/export   # another airports directory (not with --server)
@@ -132,10 +132,14 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   heading word's, never past the clearance, the track within ±4.5° of its target row by row; a word the lead carries to the
   clearance has no row of its own (not drawn, not judged); drawn as rectangles on the heading chart, its judged rows on the
   ground in 3D, rows outside red everywhere; the capture turn is its rows, clearance → capture (AV23).
-- **Training overlays sit BESIDE a set, never in it**: `training/overlays.json` (`aeroviz-training-overlays-v1`) lists the
-  executor's replay (`aeroviz-training-executor-v3` since executor v11: a crossing names its runway; each judged heading word's band on the flown rows + `judgedTrackDeg`) and
-  the prior's predictions (`aeroviz-training-prior-v3`: from `firstPredictedRow` on; the rows before are observed only), each bound to its set by id, the sample's `writtenUtc` and spec (and
-  on disk its sha256) and flight by flight — refused whole on any mismatch; published as `trainingExecutor` /
+- **Training overlays sit BESIDE a set, never in it**: `training/overlays.json` (`aeroviz-training-overlays-v2`) lists the
+  executor's replay (`aeroviz-training-executor-v4`: a crossing names its runway; each judged heading word's band on the flown rows + `judgedTrackDeg`) and
+  the prior's predictions (`aeroviz-training-prior-v4`: from `firstPredictedRow` on; the rows before are observed only), each
+  bound to its set BY CONTENT, never by the sample file's bytes or `writtenUtc` (2026-09-28): the set id, spec,
+  `candidatesSha256` and `airportFrame`, and flight by flight (keys, the executor's words, the prior's steps, every drawn
+  height's HAE − MSL = the set flight's, 0.02 m, a track flown from the observed state starting AT that observed row) —
+  refused whole on any mismatch; a set exported again with the same
+  flights keeps its overlays; published as `trainingExecutor` /
   `trainingPrior`, apart from the selection; the executor's words are judged on envelopes re-drawn from where IT heard them,
   its lines and bands run on its own clock; the prior is teacher-forced (AV24).
 - **`EXPERIMENT_HORIZON_MODES` = `config.HORIZON_MODES` + the executor replay's `sentence`** — its records' horizon, stamped
@@ -168,7 +172,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **The Training docks end ABOVE the sentence bar**: the bar publishes its measured height as `--training-bar-height` on
   `.workbench`, `.workbench:has(> .training-sentence-bar)` pads the overlay container by it; the flight list takes the leftover
   dock height (min ~5 two-line rows), the dock scrolls past that (AV30).
-- **Training reads the models' OWN sentences** (`prior-generation` overlays, `aeroviz-training-generation-v3`, written by ts
+- **Training reads the models' OWN sentences** (`prior-generation` overlays, `aeroviz-training-generation-v4`, written by ts
   `prior_generation_training_export`): `trainingSource` (null = truth, or `{overlayId, sample}`) picks the sentence the bar,
   the panel and 3D read; the truth is ALWAYS drawn in 3D; a model's bands are FLAT like the truth's (hatching cluttered the
   bar — the user, 2026-09-26): the frame says whose (border, a strip down the rows, tab, chip in its colour), the truth's issues
@@ -189,7 +193,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   Chromium/Safari, the standard properties only under `@supports not selector(::-webkit-scrollbar)` — Chromium 121+ lets them
   override the parts); a component never styles its own scrollbar, it changes the tokens (AV34).
 - **A model's sentences from AUGMENTED starts are a kind of their own** (`prior-generation-augmented`,
-  `aeroviz-training-augmented-generation-v1`, exporter `--augment-seed`): each flight's move and moved observed rows 0–7, the
+  `aeroviz-training-augmented-generation-v2`, exporter `--augment-seed`): each flight's move and moved observed rows 0–7, the
   same move for every model of one seed, no readout; the bar's `Real start | Augmented start` switch filters the model tabs by
   start (group per start family, never mixed); no truth marks over a moved sample; its words fly live FROM the moved start
   (the request's `augmentation`, `fly.moved_inputs` = the generation's `augmented_inputs`, limit ×2) (AV35).

@@ -301,15 +301,19 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 ### AV24 · Training 的叠加层：执行器的回放与先验的预测，画在一个集合的航班上
 
-- **叠加层在集合旁边，不在集合里面。** 每个机场的 `training/overlays.json`（`aeroviz-training-overlays-v1`）列出叠加层：
-  种类（`executor-replay` / `prior-prediction`）、画在哪个集合上（`base`）、那个集合的样本文件的 sha256、文件位置
+- **叠加层在集合旁边，不在集合里面。** 每个机场的 `training/overlays.json`（`aeroviz-training-overlays-v2`）列出叠加层：
+  种类（`executor-replay` / `prior-prediction`）、画在哪个集合上（`base`）、文件位置
   （`training/<叠加层 id>/executor.json` 或 `prior.json`）。集合的索引 `index.json` 不动。写它们的是
   `run_ts.py executor_training_export` 和 `prior_training_export`（ts 的 R13）。
-- **绑定**：叠加层文件（`aeroviz-training-executor-v3` / `aeroviz-training-prior-v3`）自己写出所画集合的 id、样本的写出
-  时刻和规格 sha，每架航班按集合的顺序一架一条；执行器的每条词与句子的词逐条对应（步、列、值），先验每架的步数等于
-  句子的步数。`trainingOverlays.ts` 逐项核对，对不上就整份拒读、说出是哪一项——例如集合按同一个 id 重新导出过，
-  样本的写出时刻就不同，叠加层被拒读（"the set was re-exported after the overlay"）。`check-publication` 另外核对
-  盘上样本文件的 sha256。执行器的格式 v2（2026-09-24，`instruction-v3`）：每个被判的航向词带上它在飞出航迹上的航向带和
+- **绑定按内容，不按文件**（2026-09-28）：叠加层文件（`aeroviz-training-executor-v4` / `aeroviz-training-prior-v4`）
+  自己写出它和所画集合共有的东西——集合 id、规格 sha、候选跑道 sha（`candidatesSha256`：跑道编号指向它）和机场坐标系
+  （`airportFrame`），每架航班按集合的顺序一架一条；执行器的每条词与句子的词逐条对应（步、列、值），先验每架的步数等于
+  句子的步数，画高度的叠加层每一行的 HAE − MSL 等于集合里这架航班的（`TRAINING_DATUM_TOLERANCE_M` = 0.02 m：两边各是
+  两个写到 0.01 m 的高度之差），从集合的观测状态飞出的航迹第一点就是观测航迹那一行（执行器第 0 行，模型自己的句子第
+  `firstPredictedRow` 行；位置差不超过写出的 1e-7°、高度 0.01 m；增强起点是挪过的，不比）。`trainingOverlays.ts` 逐项核对，对不上就整份拒读、说出是哪一项；`check-publication` 用同一个
+  读取函数。**从不按集合文件的字节或写出时刻绑定**：集合用同样的航班重新导出，叠加层照读；航班、句子、规格、跑道、坐标系或
+  高度基准有一样变了才拒读。导出时同样核对（`training_files.open_base_set`：候选跑道与坐标系是导出器自己产物的；
+  `require_set_datum`：每架航班的高度基准）。执行器的格式 v2（2026-09-24，`instruction-v3`）：每个被判的航向词带上它在飞出航迹上的航向带和
   逐行判定（`heading`），每架被判的航班带上判决读到的飞出航迹（`judgedTrackDeg`：平滑、切到落地前，与 `track.trackDeg`
   同一分支，第 k 步就是 `track` 的第 k 个点，读取时核对）；动力学失败的航班没有这两样（判决读到了导出航迹有意不含的失败状态），
   词的状态与检查照旧。读取器要求：判决判过的每个航向词都带带子、别的词都不带；判定数 = 有判定的词数，离开航向词自己切入的
@@ -395,8 +399,8 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 - 导出：`python run_ts.py prior_generation_training_export`（ts R13）——先验说、执行器飞，和正式自由生成读数同一条路径
   （`prior_free_generation.speak_and_fly`）；每架航班 `--samples` 个样本；只飞自己机型有动力学的航班。文件
-  `training/<叠加层 id>/generation.json`，格式 `aeroviz-training-generation-v3`（Python `SCHEMA` 与 `TRAINING_GENERATION_SCHEMA`
-  由 `test_training_overlays.py` 逐字比对），清单里的种类 `prior-generation`（清单格式不变，还是 v1：不认识的种类只拒这一条）。
+  `training/<叠加层 id>/generation.json`，格式 `aeroviz-training-generation-v4`（Python `SCHEMA` 与 `TRAINING_GENERATION_SCHEMA`
+  由 `test_training_overlays.py` 逐字比对），清单里的种类 `prior-generation`（不认识的种类只拒这一条）；与集合的绑定同 AV24。
 - 每个样本：事件（行、列、值，行是航班自己的步号，从 `firstPredictedRow` = 8 起、第一步六列都说）、结局、结束时刻、越过入口
   （只随 `TRAINING_CROSSING_OUTCOMES` = `judge.CROSSINGS` 出现）、首末跑道、换跑道与复飞词数、结束时是否许可、屏蔽拿掉的概率
   （按列名的记录，列只能是六列之一——不镜像哪几列被屏蔽，后训练在加高度列的屏蔽）、航迹（航班自己的时钟，每点一步、最后一点
@@ -486,7 +490,7 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 - 用户（2026-09-27）：前端 40 架都是真实 val 航班，想看模型从第二阶段后训练用的**增强起点**怎么飞。导出器
   `prior_generation_training_export --augment-seed 1337`（ts R13）写另一种叠加层：种类 `prior-generation-augmented`，格式
-  `aeroviz-training-augmented-generation-v1`，§2.7 的 v3 不动。每架航班多 `augmentDraws`、`augmentation`（转角、抬高、速度倍数）、
+  `aeroviz-training-augmented-generation-v2`（与集合的绑定同 AV24，增强后的第 0–7 行也核对高度基准）。每架航班多 `augmentDraws`、`augmentation`（转角、抬高、速度倍数）、
   `observed`（增强后的第 0–7 行）；同一个种子下每个模型的增强起点相同；没有正式读数。设计：文档 36 §2.8、§4.10。
 - 读取器（`parseAugmentedStart`）核对：抽了几次在 1–`tries` 之间且只有自己动力学的航班才抽；有增强 ⇔ 飞了 ⇔ 有 `observed`；
   增强在上下限以内；`observed` 正好 `firstPredictedRow` 个点、从 0 起每点一步；一架航班的样本都从同一个起点起飞。
