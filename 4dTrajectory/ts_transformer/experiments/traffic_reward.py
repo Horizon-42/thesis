@@ -591,10 +591,15 @@ def main(argv: list[str] | None = None) -> int:
                                     if len(members) else None)
         passed = {**tuner.one_pass(sentences, advantages[keep], data, allowed, slots=slots),
                   "distance_at_start": start_distance, "distance_sentences": measured_on}
+        if device.type == "cuda":
+            passed["gpu_peak_gb"] = torch.cuda.max_memory_allocated(device) / 1e9
+            torch.cuda.reset_peak_memory_stats(device)
         log(f"round {round_number}: one pass over {len(keep)} sentences ({passed['batches']} updates), reward term "
             f"{passed['reward_mean']:.4f}, KL to the base at the start {start_distance}, {passed['kl_mean']:.4f} in the "
             f"pass (max {passed['kl_max']:.4f}), data NLL {passed['data_mean']:.4f}, words outside the clip "
-            f"{passed['clipped_share']:.4f}")
+            f"{passed['clipped_share']:.4f}, {passed['seconds']:.0f}s"
+            + (f", GPU peak {passed['gpu_peak_gb']:.2f} GB (the round's speaking and pass)" if "gpu_peak_gb" in passed
+               else ""))
         write_traffic_prior(directory, model, prior_dir, start, spec.sha256, git=git, smoke=args.smoke,
                             fine_tuning={"schema": TRAFFIC_REWARD_SCHEMA, "from": str(prior_dir), "base": str(base_dir),
                                          "round": round_number, "optimiser": asdict(config),
