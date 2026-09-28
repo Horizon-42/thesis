@@ -485,6 +485,7 @@ def test_a_scene_prior_is_read_by_its_own_schema_with_its_edge_features_and_the_
     single-aircraft prior. A scene prior never speaks to single aircraft."""
     from ts_transformer.experiments import prior_train
     from ts_transformer.experiments.prior_train import SCENE_CHECKPOINT_SCHEMA, load_prior
+    from ts_transformer.experiments.traffic_scene_data import edge_source_sha256
     from ts_transformer.prior.generate import Speaker
     from ts_transformer.prior.masks import ProcedureMasks
     from ts_transformer.prior.model import SINGLE_EDGE_FEATURES
@@ -504,8 +505,9 @@ def test_a_scene_prior_is_read_by_its_own_schema_with_its_edge_features_and_the_
     payload = torch.load(tmp_path / "prior" / "checkpoint.pt", weights_only=True)
     torch.manual_seed(0)
     scene = Prior(single.config, payload["state"]["candidates"], edges)
-    torch.save({**payload, "schema": SCENE_CHECKPOINT_SCHEMA, "edge_features": list(edges), "state": scene.state_dict()},
-               tmp_path / "prior" / "checkpoint.pt")
+    scene_payload = {**payload, "schema": SCENE_CHECKPOINT_SCHEMA, "edge_features": list(edges), "state": scene.state_dict(),
+                     "edge_source_sha256": edge_source_sha256()}
+    torch.save(scene_payload, tmp_path / "prior" / "checkpoint.pt")
     from ts_transformer.prior.masks import MASKS_FILE, write_masks
     (tmp_path / "prior" / MASKS_FILE).unlink()
     write_masks(tmp_path / "prior", ProcedureMasks.none(), writer="test", git={"head": "test", "dirty": False})
@@ -520,4 +522,9 @@ def test_a_scene_prior_is_read_by_its_own_schema_with_its_edge_features_and_the_
     # a mixed record (a v4 checkpoint beside a v3 config) is refused
     (tmp_path / "prior" / "config.json").write_text(json.dumps(record))
     with pytest.raises(SystemExit, match="is not a"):
+        load_prior(tmp_path / "prior", tmp_path / "artefact")
+    # edge features computed by other code are refused
+    (tmp_path / "prior" / "config.json").write_text(json.dumps({**record, "schema": SCENE_CHECKPOINT_SCHEMA}))
+    torch.save({**scene_payload, "edge_source_sha256": "0" * 64}, tmp_path / "prior" / "checkpoint.pt")
+    with pytest.raises(SystemExit, match="other code"):
         load_prior(tmp_path / "prior", tmp_path / "artefact")

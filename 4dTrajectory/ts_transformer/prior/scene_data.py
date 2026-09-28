@@ -50,84 +50,84 @@ class Node:
 
 @dataclass(frozen=True)
 class SceneSample:
-    """A sample on its ``steps`` steps: its airport, its aircraft (``[A]``), and per aircraft and step — present, own row,
-    the inputs, the targets and what the loss counts (``[A, T, …]``)."""
+    """A sample on its ``steps`` steps: its airport, its aircraft (each placed from its ``first_step``; rows past the last
+    step are left out) and the loss on steps ``[loss_from, loss_to)``. Its arrays are laid out only when a batch is
+    formed (`placed`): a flight carried across a cut is in two samples, and its rows are held once."""
 
     airport: int
-    keys: tuple[str, ...]
-    speaking: tuple[bool, ...]
-    present: np.ndarray            # [A, T] bool
-    rows: np.ndarray               # [A, T] int64, 0 where absent
-    features: np.ndarray           # [A, T, F] float32
-    relative: np.ndarray           # [A, T, K, R] float32
-    static: np.ndarray             # [A, S] float32
-    in_force: np.ndarray           # [A, T, 6] int64
-    since: np.ndarray              # [A, T, 6] float32
-    targets: np.ndarray            # [A, T, 6] int64
-    asked: np.ndarray              # [A, T, 6] bool
+    nodes: tuple[Node, ...]
+    steps: int
+    loss_from: int
+    loss_to: int
+
+    def __post_init__(self) -> None:
+        if len(self.nodes) > A_MAX:
+            raise ValueError(f"a sample of {len(self.nodes)} aircraft; the aircraft axis holds {A_MAX} (design §2.3)")
+        for node in self.nodes:
+            if not 0 <= node.first_step < self.steps:
+                raise ValueError(f"{node.key} starts at step {node.first_step}, outside the sample's {self.steps}")
 
     @property
-    def steps(self) -> int:
-        return self.present.shape[1]
+    def keys(self) -> tuple[str, ...]:
+        return tuple(node.key for node in self.nodes)
+
+    def kept(self, node: Node) -> int:
+        """How many of ``node``'s rows fall on the sample's steps."""
+        return min(node.rows, self.steps - node.first_step)
+
+    def asked(self, node: Node) -> np.ndarray:
+        """``[kept, 6]``: what the loss counts on ``node``'s kept rows — its own sentence's asked rows on the loss steps,
+        nothing for a background aircraft."""
+        kept = self.kept(node)
+        steps = np.arange(node.first_step, node.first_step + kept)
+        on_loss = (steps >= self.loss_from) & (steps < self.loss_to)
+        return node.asked[:kept] & on_loss[:, None] & node.speaking
+
+    @property
+    def asks(self) -> bool:
+        return any(self.asked(node).any() for node in self.nodes)
 
 
-def scene_sample(airport: int, nodes: Sequence[Node], steps: int, loss_from: int, loss_to: int) -> SceneSample:
-    """``nodes`` placed on ``steps`` steps, the loss on steps ``[loss_from, loss_to)`` (module docstring)."""
-    if len(nodes) > A_MAX:
-        raise ValueError(f"a sample of {len(nodes)} aircraft; the aircraft axis holds {A_MAX} (design §2.3)")
-    count = len(nodes)
-    first = nodes[0]
-    present = np.zeros((count, steps), dtype=bool)
-    rows = np.zeros((count, steps), dtype=np.int64)
-    features = np.zeros((count, steps, first.features.shape[1]), dtype=np.float32)
-    relative = np.zeros((count, steps, *first.relative.shape[1:]), dtype=np.float32)
-    in_force = np.zeros((count, steps, 6), dtype=np.int64)
-    since = np.zeros((count, steps, 6), dtype=np.float32)
-    targets = np.zeros((count, steps, 6), dtype=np.int64)
-    asked = np.zeros((count, steps, 6), dtype=bool)
-    loss = np.zeros(steps, dtype=bool)
-    loss[loss_from:loss_to] = True
-    for a, node in enumerate(nodes):
-        if node.first_step < 0:
-            raise ValueError(f"{node.key} starts before the sample's first step")
-        kept = min(node.rows, steps - node.first_step)
-        span = slice(node.first_step, node.first_step + kept)
-        present[a, span], rows[a, span] = True, np.arange(kept)
-        features[a, span], relative[a, span] = node.features[:kept], node.relative[:kept]
-        in_force[a, span], since[a, span], targets[a, span] = node.in_force[:kept], node.since[:kept], node.targets[:kept]
-        if node.speaking:
-            asked[a, span] = node.asked[:kept] & loss[span, None]
-    return SceneSample(airport, tuple(n.key for n in nodes), tuple(n.speaking for n in nodes), present, rows, features,
-                       relative, np.stack([n.static for n in nodes]).astype(np.float32), in_force, since, targets, asked)
-
-
-def batch_tensors(samples: Sequence[SceneSample], edges: Sequence[np.ndarray], slots: int, device: torch.device
-                  ) -> dict[str, torch.Tensor]:
-    """A batch of samples padded to the most aircraft and steps among them (padding absent) and to ``slots`` candidate
-    runways (the model's), with each sample's edge features (``[T, A, A, E]``): the batch `model.Prior` reads — the
-    keys `train.to_batch` gives a single-aircraft one."""
+def placed(samples: Sequence[SceneSample], slots: int) -> dict[str, np.ndarray]:
+    """The samples laid out on one grid, padded to the most aircraft and steps among them (padding absent) and to
+    ``slots`` candidate runways (the model's): per sample, aircraft and step — present, own row, the inputs, the targets
+    and what the loss counts; the keys `train.to_batch` gives a single-aircraft batch, without the edge features."""
     count = len(samples)
-    aircraft = max(len(s.keys) for s in samples)
+    aircraft = max(len(s.nodes) for s in samples)
     steps = max(s.steps for s in samples)
-    width = edges[0].shape[-1]
-    first = samples[0]
+    first = samples[0].nodes[0]
 
     def zeros(shape: tuple[int, ...], dtype) -> np.ndarray:
         return np.zeros(shape, dtype=dtype)
 
-    out = {"features": zeros((count, aircraft, steps, first.features.shape[2]), np.float32),
-           "relative": zeros((count, aircraft, steps, slots, first.relative.shape[3]), np.float32),
-           "static": zeros((count, aircraft, first.static.shape[1]), np.float32),
+    out = {"features": zeros((count, aircraft, steps, first.features.shape[1]), np.float32),
+           "relative": zeros((count, aircraft, steps, slots, first.relative.shape[2]), np.float32),
+           "static": zeros((count, aircraft, first.static.shape[0]), np.float32),
            "in_force": zeros((count, aircraft, steps, 6), np.int64), "since": zeros((count, aircraft, steps, 6), np.float32),
            "targets": zeros((count, aircraft, steps, 6), np.int64), "asked": zeros((count, aircraft, steps, 6), bool),
            "present": zeros((count, aircraft, steps), bool), "rows": zeros((count, aircraft, steps), np.int64),
-           "edges": zeros((count, steps, aircraft, aircraft, width), np.float32),
            "airport": np.array([s.airport for s in samples], dtype=np.int64)}
-    for b, (sample, edge) in enumerate(zip(samples, edges)):
-        a, t = len(sample.keys), sample.steps
-        for name in ("features", "in_force", "since", "targets", "asked", "present", "rows"):
-            out[name][b, :a, :t] = getattr(sample, name)
-        out["relative"][b, :a, :t, : sample.relative.shape[2]] = sample.relative
-        out["static"][b, :a] = sample.static
+    for b, sample in enumerate(samples):
+        for a, node in enumerate(sample.nodes):
+            kept = sample.kept(node)
+            span = slice(node.first_step, node.first_step + kept)
+            out["present"][b, a, span], out["rows"][b, a, span] = True, np.arange(kept)
+            for name in ("features", "in_force", "since", "targets"):
+                out[name][b, a, span] = getattr(node, name)[:kept]
+            out["relative"][b, a, span, : node.relative.shape[1]] = node.relative[:kept]
+            out["static"][b, a] = node.static
+            out["asked"][b, a, span] = sample.asked(node)
+    return out
+
+
+def batch_tensors(samples: Sequence[SceneSample], edges: Sequence[np.ndarray], slots: int, device: torch.device
+                  ) -> dict[str, torch.Tensor]:
+    """A batch of samples (`placed`) with each sample's edge features (``[T, A, A, E]``, padded as the samples): the
+    batch `model.Prior` reads."""
+    out = placed(samples, slots)
+    count, aircraft, steps = out["present"].shape
+    out["edges"] = np.zeros((count, steps, aircraft, aircraft, edges[0].shape[-1]), dtype=np.float32)
+    for b, edge in enumerate(edges):
+        t, a = edge.shape[:2]
         out["edges"][b, :t, :a, :a] = edge
     return {name: torch.as_tensor(value, device=device) for name, value in out.items()}

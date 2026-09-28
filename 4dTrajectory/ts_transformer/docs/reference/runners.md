@@ -704,3 +704,28 @@ A readout only (design §9 item 12). Writes `interaction.json` (`ts-traffic-inte
 minute on the GPU. Formal: `outputs/POOLED/traffic/interaction_20260928/` (`cba749cc`, base): speed words with a leader
 +0.0077 NLL per step (0.0035–0.0122), heading words when busy +0.0104, clearances with a leader −0.0082; KSJC and KSMF the
 most, KMSY and KRDU about none.
+
+### R29 · `run_ts.py traffic_prior_train` — multi-aircraft M2: the scene prior "scene", base's recipe on scene samples with edge features (design §6.1, §6.5)
+
+2026-09-28. `traffic_prior_train --variant full --instructions <artefact> --out <new dir> [--device] [--limit N]
+[TrainConfig flags]`. Base's network and training configuration (`PriorConfig` / `TrainConfig` defaults) teacher-forced on
+the training days' scene samples (`experiments/traffic_scene_data.build_split`: every flight of the split in its segment,
+a flight the labeller refused as background with the words "none", segments cut by design §2.3's rule), each aircraft at
+its own rows, with the 17 edge features of `inference/scene_edges.py` computed as each batch is formed; early stopping
+on the val days as base. The loss is per aircraft-step asked — the same cells as base's (the loss windows partition each
+flight's asked rows), so the val NLL per step reads against base's 0.2643.
+
+- **Motion in the edges** is each row's displacement since its row before (the prior's own node convention), never the
+  signals' fitted velocities (centred fits, 7.5 s of the future; the step 3–4 review, 2026-09-28): a first row has none
+  (`motion_unknown`), an aircraft that did not move has no frame (89 of 12.1 million row pairs).
+- **Batches**: at most 16,384 padded aircraft-steps, samples of similar size together: 1,976 batches per epoch on the
+  training days against base's 531 (a scene sample also holds background, context before the cut and padding) — a
+  smaller effective batch, stated, not matched; `history.json` records each epoch's batches and asked steps.
+- **Memory**: each flight's rows are held once and laid out per batch (`prior.scene_data.placed`): 4.0 GB peak to build
+  the training days (13 GB when every sample held dense arrays).
+- **Pinned edge semantics**: the checkpoint (`ts-prior-checkpoint-v4`) carries `edge_features` and `edge_source_sha256`
+  (`traffic_scene_data.EDGE_SOURCES`' logic + the CWT tables' bytes); `load_prior` refuses a scene prior whose hash is not
+  today's — a code change in any of those files, the scheduler in `runway_schedule` included, refuses every scene prior.
+- Writes `checkpoint.pt`, `config.json`, `procedure_masks.json` (none: teacher forcing) and `history.json` into a NEW
+  directory, from a clean tree unless `--limit` (SMOKE: the first N samples of each split). Train 15,812 samples (45
+  asking nothing, left out), val 3,800; about 5–6 minutes per epoch on the RTX 4060.

@@ -9,15 +9,18 @@ model's positions hold is left out and counted — a handful of tracks hours lon
 flights; a flight with a sentence that long is refused). The flights chain into
 segments and each segment is cut into samples by §2.3's rule (`prior.scene.SceneIndex.segments`, `prior.scene.samples`);
 a sample's steps run from its earliest flight's first step (a flight carried in from before the cut starts at its row
-0: context) to its last loss step (`prior.scene_data.scene_sample`). Beside each sample, what its edge features read
-(`inference.scene_edges.SceneRows`): every placed row's time, position, velocity, and — for a flight with a sentence — the
-runway in force before the step (its ``in_force``, the words said at an earlier row) with its position on that runway's
-approach clock and rate along it; the CWT category (`runway_schedule.wake_category`; none without a type — counted).
-The edge features themselves are computed when a batch is formed (`edges`): about 1.6 GB for the training days if kept.
+0: context) to its last loss step (`prior.scene_data.SceneSample`). Each flight's rows are held once, however many
+samples it is in, and laid out when a batch is formed — and so is what its edge features read
+(`inference.scene_edges.SceneRows`, `Built.rows`): every placed row's time and position, and — for a flight with a
+sentence — the runway in force before the step (its ``in_force``, the words said at an earlier row) with its position on
+that runway's approach clock; the CWT category (`runway_schedule.wake_category`; none without a type — counted). The
+edge features themselves are computed as a batch is formed (`edges`). A scene prior records what decides them
+(`edge_source_sha256`) and is read only by the same code.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import Counter
 from dataclasses import dataclass
@@ -27,6 +30,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 from geokit import NM_M
 
+from ts_transformer.autopilot.spec import logic
 from ts_transformer.experiments.traffic_census import APPROACH_SPEED_MPS
 from ts_transformer.inference.runway_schedule import Separation, faa_separation, wake_category
 from ts_transformer.inference.scene_edges import SceneRows, scene_edges
@@ -38,17 +42,73 @@ from ts_transformer.instructions.words import RUNWAY
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.prior.data import STATIC_FEATURES, flight_record, own_context, step_inputs
 from ts_transformer.prior.scene import Landings, Presence, SceneIndex, hang, presence, samples
-from ts_transformer.prior.scene_data import Node, SceneSample, scene_sample
-from ts_transformer.repo_layout import arrival_manifest_path
+from ts_transformer.prior.scene_data import Node, SceneSample
+from ts_transformer.repo_layout import CWT_SUPPLEMENT, CWT_TABLE, arrival_manifest_path
+
+PACKAGE = Path(__file__).resolve().parents[1]
+#: What decides a scene prior's edge features, as package paths: the features and the separation rules they read
+#: (`runway_schedule`), the clock position (`instructions.airport.relative_to_runway`), the runway in force
+#: (`prior.data.sentence_steps`), the steps and row times (`prior.scene.hang`, `presence`), what the samples hand them and
+#: how a batch lays them out — and the CWT tables the categories are read from (`EDGE_TABLES`). A scene prior's checkpoint
+#: records their hash (`edge_source_sha256`) and `prior_train.load_prior` reads it only on the same: a code change in any
+#: of these files — the scheduler's in `runway_schedule` too — refuses every scene prior, as the executor's hash refuses
+#: its specs.
+EDGE_SOURCES = ("inference/scene_edges.py", "inference/runway_schedule.py", "instructions/airport.py", "prior/data.py",
+                "prior/scene.py", "prior/scene_data.py", "experiments/traffic_scene_data.py")
+EDGE_TABLES = (CWT_TABLE, CWT_SUPPLEMENT)
+
+
+def edge_source_sha256() -> str:
+    """sha256 over `EDGE_SOURCES` (path and `autopilot.spec.logic`, in order: wording is free, code is not) and
+    `EDGE_TABLES` (name and bytes)."""
+    digest = hashlib.sha256()
+    for path in EDGE_SOURCES:
+        digest.update(path.encode("utf-8") + b"\0" + logic((PACKAGE / path).read_text(encoding="utf-8")).encode("utf-8")
+                      + b"\0")
+    for table in EDGE_TABLES:
+        digest.update(table.name.encode("utf-8") + b"\0" + table.read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class FlightRows:
+    """One flight as the samples place it, held once: its presence, a `Node`'s arrays over its rows, its positions, the
+    runway in force before each step with its position on that runway's approach clock (NaN without one) and its CWT
+    category."""
+
+    presence: Presence
+    node_rows: dict[str, np.ndarray]
+    e_m: np.ndarray
+    n_m: np.ndarray
+    height_m: np.ndarray
+    runway: list[str | None]
+    along_m: np.ndarray
+    category: str | None
 
 
 @dataclass(frozen=True)
 class Built:
-    """One sample: what the prior reads, what its edge features read, and its airport's separation rules."""
+    """One sample: what the prior reads, its flights (in the sample's order) and its airport's separation rules."""
 
     sample: SceneSample
-    rows: SceneRows
+    flights: tuple[FlightRows, ...]
     separation: Separation
+
+    @property
+    def rows(self) -> SceneRows:
+        """What the sample's edge features read, laid out on its steps."""
+        shape = (len(self.flights), self.sample.steps)
+        columns = {name: np.full(shape, np.nan) for name in ("time", "e", "n", "h", "along")}
+        runway: list[list[str | None]] = [[None] * self.sample.steps for _ in self.flights]
+        for a, (node, f) in enumerate(zip(self.sample.nodes, self.flights)):
+            kept = self.sample.kept(node)
+            span = slice(node.first_step, node.first_step + kept)
+            for name, values in (("time", f.presence.times_s), ("e", f.e_m), ("n", f.n_m), ("h", f.height_m),
+                                 ("along", f.along_m)):
+                columns[name][a, span] = values[:kept]
+            runway[a][span] = f.runway[:kept]
+        return SceneRows(columns["time"], columns["e"], columns["n"], columns["h"], columns["along"], runway,
+                         [f.category for f in self.flights])
 
 
 def edges(built: Built) -> np.ndarray:
@@ -56,19 +116,8 @@ def edges(built: Built) -> np.ndarray:
     return scene_edges(built.rows, built.separation)
 
 
-@dataclass(frozen=True)
-class _Flight:
-    presence: Presence
-    signals: FlightSignals
-    node_rows: dict[str, np.ndarray]     # a Node's arrays over the flight's rows
-    runway: list[str | None]             # per row: the runway in force before the step
-    along_m: np.ndarray                  # per row (NaN without a runway in force)
-    along_rate_mps: np.ndarray
-    category: str | None
-
-
 def _flight(signals: FlightSignals, grid: np.ndarray | None, capture_row: int | None, geometry: AirportGeometry,
-            separation: Separation, landings: Landings | None, airport: int) -> _Flight:
+            separation: Separation, landings: Landings | None, airport: int) -> FlightRows:
     rows = signals.n_rows if grid is None else len(grid)
     seen = presence(signals, None if grid is None else rows, geometry)
     if grid is None:
@@ -84,44 +133,25 @@ def _flight(signals: FlightSignals, grid: np.ndarray | None, capture_row: int | 
         arrays = {name: getattr(record, name) for name in ("features", "relative", "static", "in_force", "since",
                                                            "targets", "asked")}
         runway = [None if k == 0 else geometry.candidates[k - 1].ident for k in record.in_force[:, RUNWAY]]
-    along, rate = np.full(rows, np.nan), np.full(rows, np.nan)
+    along = np.full(rows, np.nan)
     for ident in {r for r in runway if r is not None}:
         on = np.array([r == ident for r in runway])
         candidate = geometry.candidates[geometry.candidate_index(ident)]
+        # the distance before the threshold reads the positions only (the track argument is not read here)
         relative_rows = relative_to_runway(signals.e_m[:rows][on], signals.n_m[:rows][on], signals.track_deg[:rows][on],
                                            signals.altitude_m[:rows][on], candidate)
         along[on] = separation.along_nm[ident] * NM_M - relative_rows.before_threshold_m
-        rate[on] = signals.ground_speed_mps[:rows][on] * np.cos(np.radians(relative_rows.track_minus_course_deg))
     category = None if signals.typecode is None else wake_category(signals.typecode)
-    return _Flight(seen, signals, arrays, runway, along, rate, category)
+    return FlightRows(seen, arrays, signals.e_m[:rows], signals.n_m[:rows], signals.altitude_m[:rows], runway, along,
+                      category)
 
 
-def _sample(members: Sequence[_Flight], first_s: float, steps: int, loss_from: int, loss_to: int, step_s: float,
+def _sample(members: Sequence[FlightRows], first_s: float, steps: int, loss_from: int, loss_to: int, step_s: float,
             airport: int, separation: Separation) -> Built:
-    nodes, starts = [], []
-    for f in members:
-        start = int(round((float(hang(f.presence.start_s, step_s)) - first_s) / step_s))
-        starts.append(start)
-        nodes.append(Node(f.presence.dataset_id, f.presence.speaking, start, **f.node_rows))
-    sample = scene_sample(airport, nodes, steps, loss_from, loss_to)
-    count = len(members)
-    shape = (count, steps)
-    time_s = np.full(shape, np.nan)
-    columns = {name: np.full(shape, np.nan) for name in ("e", "n", "h", "gs", "track", "vs", "along", "rate")}
-    runway: list[list[str | None]] = [[None] * steps for _ in range(count)]
-    for a, (f, start) in enumerate(zip(members, starts)):
-        kept = min(len(f.runway), steps - start)
-        span = slice(start, start + kept)
-        s = f.signals
-        time_s[a, span] = f.presence.times_s[:kept]
-        for name, values in (("e", s.e_m), ("n", s.n_m), ("h", s.altitude_m), ("gs", s.ground_speed_mps),
-                             ("track", s.track_deg), ("vs", s.vertical_rate_mps), ("along", f.along_m),
-                             ("rate", f.along_rate_mps)):
-            columns[name][a, span] = values[:kept]
-        runway[a][start: start + kept] = f.runway[:kept]
-    rows = SceneRows(time_s, columns["e"], columns["n"], columns["h"], columns["gs"], columns["track"], columns["vs"],
-                     columns["along"], columns["rate"], runway, [f.category for f in members])
-    return Built(sample, rows, separation)
+    nodes = tuple(Node(f.presence.dataset_id, f.presence.speaking,
+                       int(round((float(hang(f.presence.start_s, step_s)) - first_s) / step_s)), **f.node_rows)
+                  for f in members)
+    return Built(SceneSample(airport, nodes, steps, loss_from, loss_to), tuple(members), separation)
 
 
 def airport_separation(airport: str, recorded_sha256: Mapping[str, str]) -> Separation:
@@ -172,6 +202,8 @@ def build_split(directory: Path, split: str, spec: VocabularySpec, airports: Seq
             counts["with_a_sentence" if k is not None else "background"] += 1
             counts["without_a_type"] += s.typecode is None
         by_key = {f.presence.dataset_id: f for f in flights}
+        if len(by_key) != len(flights):
+            raise ValueError(f"{code}: {len(flights) - len(by_key)} flights share a dataset id with another")
         for segment in SceneIndex([f.presence for f in flights]).segments(step_s):
             cuts = samples(segment, step_s)
             for number, cut in enumerate(cuts):

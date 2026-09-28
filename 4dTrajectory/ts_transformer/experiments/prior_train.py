@@ -31,6 +31,7 @@ from typing import Any, Mapping, NamedTuple
 import numpy as np
 import torch
 
+from ts_transformer.experiments.traffic_scene_data import edge_source_sha256
 from ts_transformer.instructions.artefact import (
     labeller_source_sha256, load_candidates, load_day_split, load_spec, spec_labeller_source,
 )
@@ -85,8 +86,9 @@ def load_prior(directory: Path, instructions: Path) -> LoadedPrior:
     """The prior at ``directory`` on CPU, in eval mode, with its checkpoint payload, ``config.json`` and the procedure's
     masks it was trained under (`masks.read_masks`, built for the artefact's airports) — refused unless it is a
     `PRIOR_CHECKPOINT_SCHEMA` (single-aircraft) or `SCENE_CHECKPOINT_SCHEMA` (scene) checkpoint of ``instructions``' spec,
-    labeller and day split whose candidate table is the artefact's and whose state loads whole, and its record of the
-    procedure's masks holds on today's code and data."""
+    labeller and day split whose candidate table is the artefact's and whose state loads whole, a scene prior's edge
+    features are decided by today's code (`traffic_scene_data.edge_source_sha256`), and its record of the procedure's
+    masks holds on today's code and data."""
     payload = torch.load(directory / "checkpoint.pt", map_location="cpu", weights_only=True)
     config_file = json.loads((directory / "config.json").read_text(encoding="utf-8"))
     spec = load_spec(instructions)
@@ -105,6 +107,9 @@ def load_prior(directory: Path, instructions: Path) -> LoadedPrior:
     table = candidate_table(geometries, config.airports, config.candidate_slots)
     if not np.array_equal(table, payload["state"]["candidates"].numpy()):
         raise SystemExit("the prior's candidate runways are not the artefact's")
+    if schema == SCENE_CHECKPOINT_SCHEMA and payload["edge_source_sha256"] != edge_source_sha256():
+        raise SystemExit(f"the scene prior's edge features were computed by other code "
+                         f"(edge source {payload['edge_source_sha256'][:12]}, today {edge_source_sha256()[:12]})")
     edges = SINGLE_EDGE_FEATURES if schema == PRIOR_CHECKPOINT_SCHEMA else tuple(payload["edge_features"])
     model = Prior(config, torch.as_tensor(table), edges)
     model.load_state_dict(payload["state"], strict=True)
