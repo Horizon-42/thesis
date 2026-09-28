@@ -4,6 +4,7 @@ read a leader ahead; the judge ends it at a loss it answers for. On the scene-da
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from dataclasses import replace
 
@@ -162,3 +163,71 @@ def test_a_flown_scene_is_judged_from_its_first_predicted_step_on_its_steps(tmp_
     assert not aircraft.established[0]                            # the executor starts uncaptured
     outcome, end, run = judged(scene, aircraft, spec.step_s)
     assert outcome in (*OUTCOMES, LOST_SEPARATION) and (end is None) == (outcome != LOST_SEPARATION)
+
+
+def _batch(airport, signals, spec, keys):
+    """A replay batch of the fixture's flights at ``keys`` (no rebuilt series: the physics is the test aircraft's)."""
+    from ts_transformer.autopilot import replay
+    from ts_transformer.instructions.labeller.read import read_flight
+
+    geometry = airport.flights.geometry
+    flights = [signals[k] for k in keys]
+    readings = [read_flight(f, geometry, spec, Words(spec)) for f in flights]
+    return replay.Batch(signals=flights, series=[None] * len(keys), readings=readings, geometries=[geometry] * len(keys),
+                        vertical_paths=[()] * len(keys), approach_ias_mps=[70.0] * len(keys),
+                        groups=[replay.OWN] * len(keys), drawn={"split": "train"})
+
+
+def test_the_runner_reads_the_model_alone_and_in_its_scene_and_the_record(tmp_path, monkeypatch):
+    from ts_transformer.experiments import traffic_free_generation as runner
+    from ts_transformer.experiments.traffic_speaking import scene_of
+    from ts_transformer.inference.separation import IFR, VISUAL
+    from ts_transformer.tests.test_prior_speaker import _repeated
+
+    airport, signals, spec = _airport(tmp_path, monkeypatch)
+    keys = ["KXXX:f1", "KXXX:f3"]
+    batch = _batch(airport, signals, spec, keys)
+    physics = []
+    for key in keys:
+        flight = signals[key]
+        start = replace(flight, **{name: getattr(flight, name)[N_LOOK:] for name in
+                                   ("time_s", "e_m", "n_m", "altitude_m", "track_deg", "ground_speed_mps",
+                                    "vertical_rate_mps")})
+        physics.append(_physics(start, airport.flights.geometry))
+    samples = 2
+    index = torch.tensor([j for j in range(len(keys)) for _ in range(samples)])
+
+    def stacked(k):
+        tables = [p[k] for p in physics]
+        if isinstance(tables[0], torch.Tensor):
+            return torch.cat(tables)[index]
+        joined = type(tables[0])(**{f.name: torch.cat([getattr(t, f.name) for t in tables])
+                                    for f in dataclasses.fields(tables[0])})
+        return _repeated(joined, index)
+
+    monkeypatch.setattr(runner, "flight_inputs", lambda series, device, anchor: stacked(0))
+    monkeypatch.setattr(runner, "_physics", lambda batch, device: (stacked(1), stacked(2), stacked(3)))
+    monkeypatch.setattr(runner, "limits_s", lambda batch, params, step_s, augmented: [LIMIT_S] * len(batch.readings))
+    scenes = [scene_of(airport, key, LIMIT_S, spec.step_s) for key in keys]
+    torch.manual_seed(1)
+    model = with_traffic(_model(Words(spec)), EDGE_FEATURES).eval()
+    rows = runner.model_rows(model, batch, scenes, scenes, "scene", Words(spec), _params(), None, samples,
+                             generator=torch.Generator().manual_seed(4), temperature=1.0,
+                             procedure_masks=ProcedureMasks.none())
+    assert [r["dataset_id"] for r in rows] == [k for k in keys for _ in range(samples)]
+    assert [r["others"] for r in rows] == [2, 2, 0, 0] and all(r["source"] == "scene" for r in rows)
+    for r in rows:
+        assert set(r["mask_steps"]) == {"approach", "speed"} and r[VISUAL]["outcome"] and r[IFR]["outcome"]
+        assert r["flown_s"] > 0.0 and 0 <= r["mask_steps"]["speed"] <= r["steps_said"]
+    alone = runner.model_rows(model, batch, [replace(s, others=()) for s in scenes], scenes, "alone", Words(spec),
+                              _params(), None, samples, generator=torch.Generator().manual_seed(4), temperature=1.0,
+                              procedure_masks=ProcedureMasks.none())
+    assert all(r["mask_steps"] == {"approach": 0, "speed": 0} and r["speaking_with"] == 0 for r in alone)
+    assert [r["others"] for r in alone] == [2, 2, 0, 0]                      # judged against the scene it left
+    # the lone flight (no others) flies alone the same in both
+    assert [r["outcome"] for r in rows[2:]] == [r["outcome"] for r in alone[2:]]
+    recorded = runner.recorded_rows(batch, scenes, Words(spec))
+    assert [r["outcome"] for r in recorded] == ["landed", "landed"] or recorded[0][VISUAL]["outcome"] == "lost_separation"
+    readout = runner.summary(rows + alone + recorded)
+    assert set(readout) == {"scene", "alone", "recorded"} and readout["scene"]["flights"] == 4
+    assert readout["alone"]["mask_steps_share"] == {"approach": 0.0, "speed": 0.0}

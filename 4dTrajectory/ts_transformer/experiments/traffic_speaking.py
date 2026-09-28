@@ -194,6 +194,8 @@ class SceneLoop(ClosedLoop):
             raise ValueError("a scene per flight, in the flights' order")
         self.scenes, self.words = list(scenes), words
         self.approach_mps = approach_ias_mps.cpu().numpy()
+        #: per masked column, per step: which flights the separation masks took a word from ([B] bool)
+        self.separation_masked: dict[int, list[np.ndarray]] = {column: [] for column in MASK_COLUMNS}
         self._state: tuple[int, list[Aircraft] | None] = (-1, None)
         super().__init__(model, flights, geometries, inputs, runways, charts, approach_ias_mps, limits, words, params,
                          landings, generator=generator, temperature=temperature, procedure_masks=procedure_masks)
@@ -276,6 +278,7 @@ class SceneLoop(ClosedLoop):
                                     pointer - 1, speed if speed >= 0 else None,
                                     int(speaker.value[b, APPROACH]) - 1 == APPROACH_CLEARED, float(self.approach_mps[b]),
                                     self.words, row == N_LOOK)
+        self.separation_masked[column].append(~out.all(axis=1))
         return out
 
 

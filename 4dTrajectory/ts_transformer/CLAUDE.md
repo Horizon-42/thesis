@@ -402,7 +402,9 @@ on steps with a leader / busy, matched on phase and airport (formal `interaction
 (`inference/scene_edges.py`: motion from the row before, never the fitted velocities), checkpoint `ts-prior-checkpoint-v4`
 pinned to the edge code by `edge_source_sha256` (R29). `traffic_scene_readout` reads it against base on the select days — scene
 − base and scene − alone (attention between aircraft cut) on leader / busy steps (formal `scene_readout_20260928` and, with 4 batches
-per update, `scene_readout_acc4_20260928`: better nowhere, 0.2880 / 0.2868 vs 0.2839; the M1 gap stays) (R30).
+per update, `scene_readout_acc4_20260928`: better nowhere, 0.2880 / 0.2868 vs 0.2839; the M1 gap stays) (R30). `traffic_free_generation` is M3 — augmented with a zero traffic attention
+speaking to one aircraft of each scene (`experiments/traffic_speaking.py`, `prior/scene_speaker.py`), read beside the
+same model alone, the labelled words and the record, all judged in the scene (R31).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 

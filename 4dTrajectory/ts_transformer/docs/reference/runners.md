@@ -758,3 +758,21 @@ against base's +0.0077); cutting the attention between aircraft barely moves its
 `scene_readout_acc4_20260928/` (`a7abbe86`, the `--accumulate 4` prior): 0.2868 (alone 0.2867), speed with a leader
 +0.0005, heading +0.0013, M1's gap +0.0079 — the batch size explains part of the overall gap, the traffic is still
 unused. Readout `docs/two_tier/readouts/2026-09-28_m2_scene_prior.zh.md` §2, §5.
+
+### R31 · `run_ts.py traffic_free_generation` — multi-aircraft M3: the post-training's start speaking to one aircraft of each scene (design §6.1, §6.6 step 4)
+
+2026-09-28. `traffic_free_generation --prior <single-aircraft prior (augmented)> --executor <spec> --instructions <artefact>
+--split select --out <new dir> [--per-airport 400] [--samples 4] [--chunk 16] [--device]`. The start of M4: the prior with a
+traffic attention at zero (`prior.model.with_traffic`, C37 — it answers as the prior does, to rounding) speaking in the
+closed loop of `experiments/traffic_speaking.py` ("one aircraft commanded": its scene's other flights replayed, the edge
+features of the steps encoded and the two separation masks computed each step and handed to `prior.scene_speaker.
+SceneSpeaker`, the speaking aircraft judged afterwards from its first predicted step by `traffic_loop.Loop`; an other in the
+air more than 20 min before is read from there, counted). Each drawn flight read four ways, all judged the same way in its
+scene (VISUAL ends it, IFR beside): **scene** (the model, `--samples` times), **alone** (the same model with no other in its
+scene — the prior's single-aircraft free generation — judged against the scene: how much separation comes for free),
+**labelled** (its labelled words flown), **recorded** (its record). Per source, pooled and per airport: outcomes with
+`lost_separation`, loss episodes per flight and per hour flown, relations; for the model's sources, the share of steps the
+separation masks took a word away (recorded by the loop) and the probability on what the masks removed. The procedure's
+masks are the prior's own. Writes `free_generation.json` (`ts-traffic-free-generation-v1`). Smoke (10 select flights × 4):
+about 5 s per flight for the four readings; the formal size (400 per airport × 4) about 2.5 hours.
+

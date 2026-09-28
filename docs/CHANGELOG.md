@@ -1,5 +1,16 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-28 — 多机 M3 第 1–4 步：交通注意力、多机说话器、一架由模型指挥的闭环、M3 的程序
+
+- 第 1 步：单机模型加上每层一个"交通注意力"（`prior.model.with_traffic`），只读别的飞机，输出层没有偏置、权重从 0 起：开始时与单机模型相同到舍入；
+  检查点 `ts-prior-checkpoint-v5`（C37）。审查找出输出层原来的偏置从第一步起就有梯度（只有自己时读到的会是偏置），已去掉。
+- 第 2 步：`prior/scene_speaker.py`，每个场景一架由模型说话、其余照记录回放；边特征和间隔屏蔽由调用方按步给（先验包不导入 `inference`）。
+  `Speaker.speak` 拆成编码和采样两步，运算与顺序不变。
+- 第 3 步：`experiments/traffic_speaking.py`（不是 runner）：单机闭环换上场景说话器，每步给这一步的边特征和两条屏蔽，飞完再按场景判失去间隔。
+  `traffic_scene_data` 抽出 `airport_flights`（`build_split` 输出不变）；这是边特征代码哈希里的文件，所以 M2 的两个场景模型在新代码上读不了（不再用）。
+- 第 4 步：`experiments/traffic_free_generation.py`（R31）：M3 = M4 的第 0 轮，每架航班读四种：场景里的模型、单独的模型（按场景判：间隔有多少是白来的）、
+  标注的词、记录。
+
 ### 2026-09-28 — 多机 M2 第 6 步：场景模型按 base 的批大小再训一次
 
 - 用户选了读数 §4 的第 1 条（设计 §9 第 21 项）：`traffic_prior_train` 加 `--accumulate`（默认 4），每 4 批累积一次梯度再更新，
