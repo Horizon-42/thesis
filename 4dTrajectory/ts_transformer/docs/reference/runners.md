@@ -821,6 +821,11 @@ over the residual stream per layer; the select flights' record once. Guards and 
 start is checked against the ordering guards before training and refused if it fails them). Writes `config.json`,
 `round_00/readout.json`, `round_<k>/{sentences.npz, sentences.json, checkpoint.pt (v5, with its start), config.json,
 procedure_masks.json, readout.json}`, `history.json`, `choice.json`. The training days are built once (≈ 4.4 GB host
-memory, the loop's scenes and the data term's samples share each flight's rows). A CPU smoke (1 round, 2 + 2 scenes
-an airport × 2) ran end to end in 17 min.
+memory, the loop's scenes and the data term's samples share each flight's rows). The pass scores in parts sized by the
+GPU memory measured (`traffic_tuner.PAIR_COST`, `SCORE_BUDGET`: 64 KB an aircraft-step + 8 KB a pair-step with the
+layers recomputed in the backward — `Prior.encode(checkpoint=True)`; kept, 145 KB + 31 KB, and the first GPU smoke ran
+out of memory). GPU smoke (1 round, 20 + 20 scenes an airport × 8, select 20 × 2; `4d2c9c77`…`f3a8f4eb`): 24 min, host
+peak 7.5 GB, GPU peak 4.0 GB; 1,600 training sentences in 13 min, the pass over 680 (18 updates) 72 s, a select
+readout of 400 sentences ≈ 4 min. At the formal size (16,000 + 4,000 sentences a round) about 2.5 h a round, about 21 h
+for round 0 and 8 rounds (the loop's batches are fuller at size: M3 spoke 8,000 scene sentences in about 45 min).
 
