@@ -17,7 +17,11 @@
   只比键，集合换了观测航迹而键不变时叠加层会画在旧航迹旁边；已发布的 12,292 条航迹差为 0）。导出器写之前同样核对（`open_base_set` 查候选跑道与坐标系是自己产物的，`require_set_datum`
   查每架的高度基准）。`check-publication` 不再比对盘上文件的 sha256。
 - 格式名：清单 `aeroviz-training-overlays-v2`，执行器 / 先验 / 生成 v4，增强起点生成 v2（两边一起改，旧名按名字拒读）。
-  **已发布的叠加层要重导一次才能读**（用户同意后做）。
+  **合并（`2f557772`）后全部重导一次**（用户同意，"合并并重导 第三步也做"；`4dTrajectory/outputs/POOLED/training_export_content_binding_20260928/`，
+  39 分钟）：旧清单、每机场 25 个叠加层和集合 `instruction_v3_day_split` 移到 `data/retired_training_overlays/20260928_content_binding/`
+  （`retire.py`，没删）；集合从 v5 重新导出（KSJC 换 10 / 40 架），再按上次的参数和设备导出每机场 22 个叠加层。`check-publication --server`
+  五个机场 0 错误、各 22 个叠加层读过。与退役的比：执行器回放在航班没变的机场逐架相同；逐步预测只差显示的最后一位（0.0001）；模型句子在
+  KMSY、KRDU 逐字相同，KSJC 之后的机场是同一模型的另一组样本（随机数按机场顺序接着用），落地占比变化在 ±1.5 个百分点内。
 - 真数据试跑（临时目录，KRDU + KSJC，v5 句子产物、v11 执行器）：执行器、base 生成、增强起点 base 生成、逐步预测四种叠加层
   都导出、`check-publication` 0 错误；再从 v5 重新导出集合：KRDU（40 架同样的航班）4 个叠加层照读，KSJC（v5 多标注 1 架，
   抽样换了 10 / 40 架）4 个按名字拒读。

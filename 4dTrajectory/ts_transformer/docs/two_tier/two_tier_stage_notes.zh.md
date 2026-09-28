@@ -292,11 +292,16 @@
 ## 7 前端与后端
 
 - **Training 视图**（其他会话做的前端工作都已合并：模型自己说的句子 `e87bfcf3`、点词实时飞 `46af94fd`、高度基准 `7624c053`、
-  各轮切换 `aa190a92`、详情页 `2aa72431`）：每个机场有 `instruction_v3_day_split` 集（从句子产物 v4 导出，句子与 v5 逐位相同）。
-  **叠加层 2026-09-27 在 v11 上重新导出**（用户同意；`outputs/POOLED/training_export_v11_20260927/`）：v10 上的 18 份（执行器 v6 回放、17 份模型句子）
-  先移到仓库 `data/retired_training_overlays/20260927_executor_v11/`（没删），再导出执行器 `executor_v11_20260927`（v11 验证集回放）和 base、
-  landing r1–r8、augmented r1–r8 的句子（句子产物 v5、每架 4 个样本；base、landing r1、augmented r7 带各自的 v11 验证集读数）。
-  `check-publication --server` 五个机场 0 错误、各 19 个叠加层对照集合读过。
+  各轮切换 `aa190a92`、详情页 `2aa72431`）：每个机场有 `instruction_v3_day_split` 集（**2026-09-28 从句子产物 v5 重新导出**；
+  KSJC 的抽样因 v5 多标注 1 架换了 10 / 40 架，其余四个机场航班不变）。**叠加层按内容绑定集合**（`2f557772`：集合 id、规格、候选跑道、
+  坐标系，逐架航班的键、词 / 步数、高度基准、从观测状态飞出的航迹起点；不看集合文件的字节和写出时刻——集合用同样的航班重新导出，
+  叠加层照读），**2026-09-28 全部重新导出**（用户同意；`outputs/POOLED/training_export_content_binding_20260928/`）：旧清单、每机场 25 个
+  叠加层和旧集合先移到仓库 `data/retired_training_overlays/20260928_content_binding/`（没删），再导出每机场 22 个：执行器
+  `executor_v11_20260927`（v11 验证集回放）、逐步预测（base）、base、landing r1–r8、augmented r1–r8 的句子（CPU，每架 4 个样本；base、
+  landing r1、augmented r7 带各自的 v11 验证集读数）和三个增强起点（base、landing r1、augmented r7，cuda，种子 1337），参数与设备同上次。
+  与退役的逐架比：KMSY、KRDU 全部逐字相同；样本随机数按机场顺序接着用，KSJC 换了航班，其后的 KSJC、KSMF、KSTL 是同一模型的另一组样本
+  （各模型落地占比变化在 ±1.5 个百分点内，如 base 87.0 % 对 88.5 %、landing r1 96.6 % 对 96.3 %、augmented r7 94.6 % 对 95.2 %）。
+  `check-publication --server` 五个机场 0 错误、各 22 个叠加层对照集合读过。
 - **后端与 5173 前端**：2026-09-27 13:03 UTC 重启到合并后的代码（杀掉子进程，由用户的 `start_aeroviz_fullstack.sh` 拉起），点词实时飞用
   v11（后端答复 `aeroviz-autopilot-segment-v6`：越过入口时带跑道）。浏览器核对：augmented r7 第 1 个样本的 "descend to land" 现飞，在包络内，
   与样本最大差 0.00 m / 73 点。另一个会话的 5174 前端（工作树 `training-details`）还在跑。
