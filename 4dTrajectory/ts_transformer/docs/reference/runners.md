@@ -799,7 +799,7 @@ D 346, none left out).
 ### R32 · `run_ts.py traffic_reward` — multi-aircraft M4: the traffic post-training (design §6.2, §6.6 step 6)
 
 2026-09-28. `traffic_reward --prior <augmented> --base <base> --instructions <artefact> --executor <spec> --out <new dir>
-[--rounds 8] [--real-per-airport 200] [--augmented-per-airport 200] [--samples 8] [--select-per-airport 200]
+[--rounds 8] [--resume] [--real-per-airport 200] [--augmented-per-airport 200] [--samples 8] [--select-per-airport 200]
 [--select-samples 2] [--traffic-learning-rate 3e-4] [--aircraft-steps 300000] [--seed 1337] [--device] [--smoke]` plus
 `RewardConfig`'s flags (stage 2's recipe). The start is `with_traffic(augmented)` (C37: augmented's answers to rounding).
 Each round: a pool of 1.25 × 400 training-day flights per airport (the round's seed); the first 200 speak in their real
@@ -828,4 +828,14 @@ out of memory). GPU smoke (1 round, 20 + 20 scenes an airport × 8, select 20 ×
 peak 7.5 GB, GPU peak 4.0 GB; 1,600 training sentences in 13 min, the pass over 680 (18 updates) 72 s, a select
 readout of 400 sentences ≈ 4 min. At the formal size (16,000 + 4,000 sentences a round) about 2.5 h a round, about 21 h
 for round 0 and 8 rounds (the loop's batches are fuller at size: M3 spoke 8,000 scene sentences in about 45 min).
+
+**Round by round** (design §6.6 step 6 item 11, user 2026-09-28): `--rounds k` is the last round an invocation runs
+(0: round 0 alone) and `--resume` continues the run at `--out` from its last finished round. Every stream a round draws
+from is its own — the pool (seed + round), the augmentations ([seed, round]), the sentences said and the pass's batches and
+data ([seed, round, 1 / 2]) — and each round saves `optimiser.pt` (AdamW's moments, the warm-up's step) beside its v5
+checkpoint, so rounds run one per invocation are the computation of one invocation (tested bit for bit on the pass). A
+resume is refused when `config.json` differs apart from `written_utc`, `rounds`, `resumed` (the git commit is in it: run
+from a checkout fixed at one commit) or a round did not finish (its directory without `readout.json`, written last —
+move it aside as `round_<k>.aborted-<UTC>`). `choice.json` is written over the rounds finished at the end of each
+invocation.
 

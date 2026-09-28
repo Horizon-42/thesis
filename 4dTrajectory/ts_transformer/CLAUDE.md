@@ -409,7 +409,8 @@ same model alone, the labelled words and the record, all judged in the scene; `-
 separation vs 4.9 % labelled, 2.6 % recorded; vectored 21.6 %) (R31). `traffic_reward` is M4 — the traffic post-training
 from augmented + a zero traffic attention, real and augmented training scenes, reward = landed without losing separation,
 each sentence scored in its scene by the speaker's own layout and edge code (`experiments/traffic_tuner.py`), base alone,
-M2's scene samples as the data term (R32).
+M2's scene samples as the data term; runs round by round (`--rounds k`, then `--resume`: per-round streams, the optimiser's
+state saved per round, refused on another config or commit) (R32).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 
