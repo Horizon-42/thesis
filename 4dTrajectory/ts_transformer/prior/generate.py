@@ -70,9 +70,9 @@ class Speaker:
         """``landings``: each airport's landing context (`data.airport_landings`), None for a variant without it;
         ``max_rows``: the most rows any flight will have (the model's position table must hold them);
         ``procedure_masks``: the procedure's masks it speaks under, over the vocabulary's rules (`masks`)."""
-        if model.edge_features != SINGLE_EDGE_FEATURES:
-            raise ValueError(f"a scene prior (edge features {list(model.edge_features)}) speaks in the scene loop, not "
-                             "to single aircraft")
+        if model.edge_features != SINGLE_EDGE_FEATURES or model.traffic_features:
+            raise ValueError(f"a scene prior (edge features {list(model.edge_features)}, traffic features "
+                             f"{list(model.traffic_features)}) speaks in the scene loop, not to single aircraft")
         if VARIANTS[model.config.variant].landing_context != (landings is not None):
             raise ValueError(f"variant {model.config.variant} and the landing context given disagree")
         if max_rows > model.config.max_rows:

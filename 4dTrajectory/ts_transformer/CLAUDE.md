@@ -159,6 +159,9 @@ of the package, not a migration in progress.
   one sentence artefact**: spec, labeller, day split and candidate table must match (`ts-prior-checkpoint-v3`, C34).
   **A prior speaks under the procedure's masks it was trained under**: named sets, recorded beside its checkpoint
   (`procedure_masks.json`, `prior/masks.py`), read by `load_prior`; the vocabulary's rules apart, always on (C35).
+  **A traffic prior** (`ts-prior-checkpoint-v5`, `prior.model.with_traffic`) is a single-aircraft prior plus a traffic
+  attention reading only the other aircraft, its output layer at zero: it answers as the single prior does alone, to
+  rounding, until it learns (C37).
 - **Loss of separation has ONE judge, two readings** (`inference/separation.py`, 2026-09-27): `IFR` (7110.65BB as written)
   and `VISUAL` — the closed loop's checks and reward — = 7-4-4 c with visual approach clearances and NEVER visual
   separation: parallels ≥ 2,500 ft free once both are turned in (≤ 30°, own side of the midline), close pairs one runway,

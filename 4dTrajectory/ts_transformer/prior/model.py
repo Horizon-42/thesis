@@ -23,6 +23,15 @@ with one aircraft present reads only its own value. Edge feature 0 is "this is t
 a model reads is its own (``edge_features``): a single-aircraft prior's are `SINGLE_EDGE_FEATURES`; a scene prior's
 (multi-aircraft design §2.5) are computed outside this package (`inference.scene_edges`) and handed in.
 
+**Traffic attention** (multi-aircraft design §2.5, §6.2): a single-aircraft prior given ``traffic_features`` (`with_traffic`)
+keeps every layer as it was — its aircraft attention then reads only the aircraft itself, as it did alone — and gains,
+after that attention, a second one that reads only the OTHER aircraft present at the step, with those edge features
+(bias and value as above; ``edges`` then holds the traffic features, whose first columns are the model's own edge
+features). Its output layer starts at zero, so it adds exactly 0: until it learns, the model says what the
+single-aircraft prior says of each aircraft alone — to rounding, as a batch holding several aircraft sums in another
+order than one holding one (softmax over all present aircraft would not: another aircraft takes weight however zero its
+edges). An aircraft with no other present at a step reads nothing there (0; no row of the softmax is fully masked).
+
 **Rows.** Each aircraft-step carries its aircraft's own row number (``rows [B, A, T]``, multi-aircraft design §2.1): the
 position embedding reads it, and the first predicted step is each aircraft's own row `scene.N_LOOK`. In a
 single-aircraft scene it is the step's index, handed in as ``[1, 1, T]`` (`own_rows`) and broadcast: the position
@@ -117,12 +126,51 @@ class Past(NamedTuple):
                    torch.zeros((scenes, capacity), dtype=torch.bool, device=like.device), 0)
 
 
-class SceneLayer(nn.Module):
-    """Time attention → aircraft attention (edge bias + edge value) → feed-forward."""
+class TrafficAttention(nn.Module):
+    """Each aircraft reads the other aircraft present at its step (module docstring, "Traffic attention"); the output
+    layer starts at zero."""
 
-    def __init__(self, d: int, heads: int, feedforward: int, dropout: float, edges: int) -> None:
+    def __init__(self, d: int, heads: int, dropout: float, edges: int) -> None:
         super().__init__()
         self.heads = heads
+        self.norm = nn.LayerNorm(d)
+        self.qkv = nn.Linear(d, 3 * d)
+        self.bias = nn.Sequential(nn.Linear(edges, d), nn.GELU(), nn.Linear(d, heads))
+        self.value = nn.Sequential(nn.Linear(edges, d), nn.GELU(), nn.Linear(d, d))
+        self.out = nn.Linear(d, d)
+        nn.init.zeros_(self.out.weight)
+        nn.init.zeros_(self.out.bias)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor, present: torch.Tensor, edges: torch.Tensor) -> torch.Tensor:
+        """``x`` [B, A, R, d], ``present`` [B, A, R], ``edges`` [B, R, A, A, E] → what each aircraft-step reads,
+        [B, A, R, d]."""
+        batch, aircraft, rows, d = x.shape
+        head = d // self.heads
+        y = self.norm(x).transpose(1, 2)
+        q, k, v = self.qkv(y).reshape(batch, rows, aircraft, 3, self.heads, head).unbind(dim=3)
+        scores = torch.einsum("btihc,btjhc->bthij", q, k) / math.sqrt(head)
+        scores = scores + self.bias(edges).permute(0, 1, 4, 2, 3)
+        others = (present.transpose(1, 2)[:, :, None, None, :]
+                  & ~torch.eye(aircraft, dtype=torch.bool, device=x.device)[None, None, None])   # [B, R, 1, A, A]
+        heard = others.any(dim=-1, keepdim=True)                                                # another is present
+        scores = scores.masked_fill(~others, float("-inf")).masked_fill(~heard, 0.0)
+        weights = self.dropout(torch.softmax(scores, dim=-1) * others)
+        read = torch.einsum("bthij,btjhc->btihc", weights, v)
+        read = read + torch.einsum("bthij,btijhc->btihc", weights,
+                                   self.value(edges).reshape(batch, rows, aircraft, aircraft, self.heads, head))
+        return self.out(read.reshape(batch, rows, aircraft, d)).transpose(1, 2)
+
+
+class SceneLayer(nn.Module):
+    """Time attention → aircraft attention (edge bias + edge value) → traffic attention, when the model has one →
+    feed-forward."""
+
+    def __init__(self, d: int, heads: int, feedforward: int, dropout: float, edges: int, traffic: int = 0) -> None:
+        """``edges``: the model's own edge features (its aircraft attention reads the first ``edges`` columns);
+        ``traffic``: the traffic attention's, 0 for none (module docstring)."""
+        super().__init__()
+        self.heads, self.edges = heads, edges
         self.attention_dropout = dropout
         self.time_norm = nn.LayerNorm(d)
         self.time_qkv = nn.Linear(d, 3 * d)
@@ -132,6 +180,7 @@ class SceneLayer(nn.Module):
         self.out = nn.Linear(d, d)
         self.edge_bias = nn.Sequential(nn.Linear(edges, d), nn.GELU(), nn.Linear(d, heads))
         self.edge_value = nn.Sequential(nn.Linear(edges, d), nn.GELU(), nn.Linear(d, d))
+        self.traffic = TrafficAttention(d, heads, dropout, traffic) if traffic else None
         self.feedforward_norm = nn.LayerNorm(d)
         self.feedforward = nn.Sequential(nn.Linear(d, feedforward), nn.GELU(), nn.Dropout(dropout),
                                          nn.Linear(feedforward, d))
@@ -166,29 +215,38 @@ class SceneLayer(nn.Module):
                                                     dropout_p=self.attention_dropout if self.training else 0.0)
         y = self.time_out(y.transpose(1, 2).reshape(batch, aircraft, rows, d))
         x = x + self.dropout(y.masked_fill(~present[..., None], 0.0))
-        # among aircraft at one step: [B, T, A, ...]
+        # among aircraft at one step: [B, T, A, ...]; with a traffic attention, the aircraft itself only
+        own = edges[..., : self.edges]
         y = self.aircraft_norm(x).transpose(1, 2)
         q, k, v = self.qkv(y).reshape(batch, rows, aircraft, 3, self.heads, head).unbind(dim=3)
         scores = torch.einsum("btihc,btjhc->bthij", q, k) / math.sqrt(head)
-        scores = scores + self.edge_bias(edges).permute(0, 1, 4, 2, 3)
+        scores = scores + self.edge_bias(own).permute(0, 1, 4, 2, 3)
         others = present.transpose(1, 2)[:, :, None, None, :]                       # [B, T, 1, 1, A]: key present
         itself = torch.eye(aircraft, dtype=torch.bool, device=x.device)[None, None, None]
-        weights = torch.softmax(scores.masked_fill(~(others | itself), float("-inf")), dim=-1)
+        heard = itself if self.traffic is not None else others | itself
+        weights = torch.softmax(scores.masked_fill(~heard, float("-inf")), dim=-1)
         weights = self.dropout(weights)
         read = torch.einsum("bthij,btjhc->btihc", weights, v)
         read = read + torch.einsum("bthij,btijhc->btihc", weights,
-                                   self.edge_value(edges).reshape(batch, rows, aircraft, aircraft, self.heads, head))
+                                   self.edge_value(own).reshape(batch, rows, aircraft, aircraft, self.heads, head))
         x = x + self.dropout(self.out(read.reshape(batch, rows, aircraft, d)).transpose(1, 2))
+        if self.traffic is not None:
+            x = x + self.dropout(self.traffic(x, present, edges))
         return x + self.dropout(self.feedforward(self.feedforward_norm(x))), past
 
 
 class Prior(nn.Module):
     def __init__(self, config: PriorConfig, candidates: torch.Tensor,
-                 edge_features: tuple[str, ...] = SINGLE_EDGE_FEATURES) -> None:
+                 edge_features: tuple[str, ...] = SINGLE_EDGE_FEATURES, traffic_features: tuple[str, ...] = ()) -> None:
+        """``edge_features``: what the aircraft attention reads; ``traffic_features``: the traffic attention's (module
+        docstring), none by default — when given, its first columns are ``edge_features``, and ``edges`` holds them."""
         super().__init__()
         if edge_features[0] != "self":
             raise ValueError(f"edge feature 0 is \"self\", not {edge_features[0]!r}")
-        self.config, self.edge_features = config, tuple(edge_features)
+        if traffic_features and tuple(traffic_features[: len(edge_features)]) != tuple(edge_features):
+            raise ValueError(f"the traffic features {list(traffic_features)} do not start with the edge features "
+                             f"{list(edge_features)}")
+        self.config, self.edge_features, self.traffic_features = config, tuple(edge_features), tuple(traffic_features)
         variant = VARIANTS[config.variant]
         self.ordered = variant.ordered_heads
         d = config.d_model
@@ -203,8 +261,8 @@ class Prior(nn.Module):
         self.no_runway = nn.Parameter(torch.zeros(d))
         self.airport = nn.Embedding(len(config.airports), d)
         self.position = nn.Embedding(config.max_rows, d)
-        self.layers = nn.ModuleList(SceneLayer(d, config.heads, config.feedforward, config.dropout, len(edge_features))
-                                    for _ in range(config.layers))
+        self.layers = nn.ModuleList(SceneLayer(d, config.heads, config.feedforward, config.dropout, len(edge_features),
+                                               len(traffic_features)) for _ in range(config.layers))
         self.norm = nn.LayerNorm(d)
         self.heads = nn.ModuleDict({name: nn.Linear(d, config.classes[c])
                                     for c, name in enumerate(COLUMNS) if c != RUNWAY})
@@ -308,3 +366,16 @@ class Prior(nn.Module):
         logits tensors [B, A, T, classes]."""
         h, tokens, valid = self.encode(features, relative, static, in_force, since, airport, present, rows, edges)
         return self.logits(h, tokens, valid, chosen, rows == N_LOOK)
+
+
+def with_traffic(model: Prior, traffic_features: tuple[str, ...]) -> Prior:
+    """``model`` (a single-aircraft prior) with a traffic attention in every layer reading ``traffic_features``
+    (module docstring): every weight of ``model``, the traffic attention freshly initialised (the caller seeds torch),
+    its output layer at zero — the same answers as ``model`` until it learns. On the CPU, in ``model``'s dtype."""
+    if model.traffic_features:
+        raise ValueError("the prior has a traffic attention already")
+    traffic = Prior(model.config, model.candidates.cpu(), model.edge_features, traffic_features)
+    missing, unexpected = traffic.load_state_dict({k: v.cpu() for k, v in model.state_dict().items()}, strict=False)
+    if unexpected or any(".traffic." not in name for name in missing):
+        raise ValueError(f"the prior's state does not fit: missing {missing}, unexpected {unexpected}")
+    return traffic.to(dtype=next(model.parameters()).dtype)
