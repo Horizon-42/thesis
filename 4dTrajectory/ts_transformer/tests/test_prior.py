@@ -28,7 +28,7 @@ from ts_transformer.prior.data import (
     VARIANTS, Flight, Split, batches, column_classes, flight_steps, load_split, sentence_steps,
 )
 from ts_transformer.prior.masks import ProcedureMasks
-from ts_transformer.prior.model import EDGE_FEATURES, Prior, PriorConfig, asked_entries, self_edges
+from ts_transformer.prior.model import SINGLE_EDGE_FEATURES, Prior, PriorConfig, asked_entries, own_rows, self_edges
 from ts_transformer.prior.readout import Baselines, runway_breakdown
 from ts_transformer.prior.scene import N_LOOK, Landings, utc_s
 from ts_transformer.prior.train import column_nll
@@ -227,13 +227,14 @@ def _inputs(model, rows=ROWS, aircraft=1, pointer=1):
     return {"features": features, "relative": relative, "static": torch.zeros(1, aircraft, 0), "in_force": in_force,
             "since": torch.zeros(1, aircraft, rows, 6), "airport": torch.zeros(1, dtype=torch.long),
             "present": torch.ones(1, aircraft, rows, dtype=torch.bool), "edges": self_edges(1, aircraft, rows, torch.device("cpu")),
+            "rows": own_rows(1, aircraft, rows, torch.device("cpu")),
             "targets": targets}
 
 
 @torch.no_grad()
 def _run(model, batch):
     return model(batch["features"], batch["relative"], batch["static"], batch["in_force"], batch["since"],
-                 batch["airport"], batch["present"], batch["edges"], batch["targets"])
+                 batch["airport"], batch["present"], batch["rows"], batch["edges"], batch["targets"])
 
 
 def test_a_step_sees_only_itself_and_the_steps_before_it():
@@ -327,7 +328,7 @@ def test_the_aircraft_attention_is_symmetric_in_the_aircraft_and_reads_only_the_
     batch = _inputs(model, aircraft=3)
     generator = torch.Generator().manual_seed(3)
     batch["features"] = torch.randn(batch["features"].shape, generator=generator)
-    batch["edges"] = torch.randn(1, ROWS, 3, 3, len(EDGE_FEATURES), generator=generator)
+    batch["edges"] = torch.randn(1, ROWS, 3, 3, len(SINGLE_EDGE_FEATURES), generator=generator)
     logits = _run(model, batch)
     # every aircraft's output depends on the others (the scene is read)
     alone = dict(batch)
@@ -344,7 +345,7 @@ def test_the_aircraft_attention_is_symmetric_in_the_aircraft_and_reads_only_the_
         model.train(training)
         for scene in (alone, entering):
             out = model(*(scene[name] for name in ("features", "relative", "static", "in_force", "since", "airport",
-                                                   "present", "edges", "targets")))
+                                                   "present", "rows", "edges", "targets")))
             for logit in out:
                 assert not torch.isnan(logit[scene["present"]]).any()
     model.eval()
@@ -358,7 +359,7 @@ def test_the_aircraft_attention_is_symmetric_in_the_aircraft_and_reads_only_the_
     # the aircraft's order changes only the order of the outputs
     order = [2, 0, 1]
     swapped = {name: value[:, order] for name, value in batch.items()
-               if name in ("features", "relative", "static", "in_force", "since", "present", "targets")}
+               if name in ("features", "relative", "static", "in_force", "since", "present", "rows", "targets")}
     swapped.update(airport=batch["airport"], edges=batch["edges"][:, :, order][:, :, :, order])
     for a, b in zip(logits, _run(model, swapped)):
         finite = torch.isfinite(a[:, order])
@@ -619,3 +620,50 @@ def test_a_flight_s_rows_are_the_same_whichever_flights_they_are_computed_with()
                 assert np.array_equal(bits(together[0][k]), bits(alone[0]))
                 assert np.array_equal(bits(together[1][k]), bits(alone[1]))
         assert together[1].shape[-1] == len(prior_data.RELATIVE_FEATURES)
+
+
+#: The single-aircraft prior's arithmetic before scenes (M2 step 1: each aircraft's own rows, edge features a model's
+#: own), recorded at `2f235b23` with torch 2.x on CPU: `_model` on `_inputs` for one aircraft and for three with random
+#: edges and a late entrant, sha256 of the logits' bytes. A torch upgrade that moves them is re-recorded deliberately.
+SINGLE_FINGERPRINTS = {("full", 1): "5f2dd0da92717482", ("full", 3): "249d5831bd1bebaa",
+                       ("no-context", 1): "4a74fab3e81378cd", ("no-context", 3): "c1c4bd12663bd7f7"}
+
+
+@pytest.mark.parametrize("variant, aircraft", sorted(SINGLE_FINGERPRINTS))
+def test_the_single_aircraft_arithmetic_is_unchanged_bit_for_bit(variant, aircraft):
+    import hashlib
+
+    model = _model(variant)
+    batch = _inputs(model, aircraft=aircraft)
+    if aircraft == 3:
+        batch["edges"] = torch.randn(1, ROWS, 3, 3, 1, generator=torch.Generator().manual_seed(5))
+        batch["present"][0, 1, :4] = False
+    digest = hashlib.sha256()
+    for logit in _run(model, batch):
+        digest.update(logit.contiguous().numpy().tobytes())
+    assert digest.hexdigest()[:16] == SINGLE_FINGERPRINTS[(variant, aircraft)]
+
+
+def test_an_aircraft_entering_later_speaks_from_its_own_rows_as_it_would_alone():
+    """Aircraft 1 enters at step 5 of a scene (rows 0, 1, … from there): its first predicted step, where "unchanged" is
+    masked, is the scene's step 5 + N_LOOK, aircraft 0's the scene's N_LOOK; and with aircraft 0 absent its outputs are
+    the ones it has alone from step 0."""
+    model = _model()
+    shift = 5
+    alone = _inputs(model)
+    scene = _inputs(model, rows=ROWS + shift, aircraft=2)
+    for name in ("features", "relative", "in_force", "since", "targets"):
+        scene[name][0, 1] = 0
+        scene[name][0, 1, shift:] = alone[name][0, 0]
+    scene["present"][0, 1, :shift] = False
+    scene["rows"] = scene["rows"].clone()
+    scene["rows"][0, 1] = torch.clamp(torch.arange(ROWS + shift) - shift, min=0)
+    solo, together = _run(model, alone), _run(model, scene)
+    first = shift + N_LOOK
+    assert torch.isinf(together[HEADING][0, 1, first, 0]) and not torch.isinf(together[HEADING][0, 1, N_LOOK, 0])
+    assert torch.isinf(together[HEADING][0, 0, N_LOOK, 0])                          # aircraft 0's own first step
+    scene["present"][0, 0] = False
+    together = _run(model, scene)
+    for a, b in zip(solo, together):
+        finite = torch.isfinite(a[0, 0])
+        assert torch.allclose(a[0, 0][finite], b[0, 1, shift:][finite], atol=1e-5)

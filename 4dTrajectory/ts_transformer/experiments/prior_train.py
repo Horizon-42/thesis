@@ -39,7 +39,7 @@ from ts_transformer.instructions.words import Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.data import VARIANTS, Split, airport_landings, candidate_table, load_split
 from ts_transformer.prior.masks import ProcedureMasks, read_masks, write_masks
-from ts_transformer.prior.model import Prior, PriorConfig
+from ts_transformer.prior.model import SINGLE_EDGE_FEATURES, Prior, PriorConfig
 from ts_transformer.prior.readout import TOP_K, Baselines, full_readout, runway_rules
 from ts_transformer.prior.scene import CONTEXT_WINDOW_S, N_LOOK
 from ts_transformer.prior.train import TrainConfig, train
@@ -49,6 +49,10 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state, tracks_manifest_pat
 #: N_LOOK says every column; the words said so far shifted by a step; the landing context; ordered heads; the aircraft
 #: axis and its attention. v2 is not opened.
 PRIOR_CHECKPOINT_SCHEMA = "ts-prior-checkpoint-v3"
+#: v4 (2026-09-28, multi-aircraft design §2.5, §9 item 10): a scene prior — v3's payload plus ``edge_features``, the edge
+#: features its aircraft attention reads, in order. A v3 prior is a single-aircraft one, its edge features
+#: `SINGLE_EDGE_FEATURES` by definition; the two are read by their names, and this runner writes v3 only.
+SCENE_CHECKPOINT_SCHEMA = "ts-prior-checkpoint-v4"
 RUNNER = "ts_transformer.experiments.prior_train"
 
 
@@ -80,13 +84,15 @@ class LoadedPrior(NamedTuple):
 def load_prior(directory: Path, instructions: Path) -> LoadedPrior:
     """The prior at ``directory`` on CPU, in eval mode, with its checkpoint payload, ``config.json`` and the procedure's
     masks it was trained under (`masks.read_masks`, built for the artefact's airports) — refused unless it is a
-    `PRIOR_CHECKPOINT_SCHEMA` checkpoint of ``instructions``' spec, labeller and day split whose candidate table is the
-    artefact's and whose state loads whole, and its record of the procedure's masks holds on today's code and data."""
+    `PRIOR_CHECKPOINT_SCHEMA` (single-aircraft) or `SCENE_CHECKPOINT_SCHEMA` (scene) checkpoint of ``instructions``' spec,
+    labeller and day split whose candidate table is the artefact's and whose state loads whole, and its record of the
+    procedure's masks holds on today's code and data."""
     payload = torch.load(directory / "checkpoint.pt", map_location="cpu", weights_only=True)
     config_file = json.loads((directory / "config.json").read_text(encoding="utf-8"))
     spec = load_spec(instructions)
-    if payload["schema"] != PRIOR_CHECKPOINT_SCHEMA or config_file["schema"] != PRIOR_CHECKPOINT_SCHEMA:
-        raise SystemExit(f"{directory} is not a {PRIOR_CHECKPOINT_SCHEMA} prior")
+    schema = payload["schema"]
+    if schema not in (PRIOR_CHECKPOINT_SCHEMA, SCENE_CHECKPOINT_SCHEMA) or config_file["schema"] != schema:
+        raise SystemExit(f"{directory} is not a {PRIOR_CHECKPOINT_SCHEMA} or {SCENE_CHECKPOINT_SCHEMA} prior")
     if payload["spec_sha256"] != spec.sha256:
         raise SystemExit(f"the prior was trained on spec {payload['spec_sha256'][:12]}, {instructions} holds "
                          f"{spec.sha256[:12]}")
@@ -99,7 +105,8 @@ def load_prior(directory: Path, instructions: Path) -> LoadedPrior:
     table = candidate_table(geometries, config.airports, config.candidate_slots)
     if not np.array_equal(table, payload["state"]["candidates"].numpy()):
         raise SystemExit("the prior's candidate runways are not the artefact's")
-    model = Prior(config, torch.as_tensor(table))
+    edges = SINGLE_EDGE_FEATURES if schema == PRIOR_CHECKPOINT_SCHEMA else tuple(payload["edge_features"])
+    model = Prior(config, torch.as_tensor(table), edges)
     model.load_state_dict(payload["state"], strict=True)
     model.eval()
     return LoadedPrior(model, payload, config_file, read_masks(directory, geometries))

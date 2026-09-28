@@ -91,7 +91,7 @@ def test_the_loss_counts_only_the_asked_columns():
     model = _model(words)
     batches = [to_batch(s, [0], CPU) for s in splits]
     nll = [column_nll(model(b["features"], b["relative"], b["static"], b["in_force"], b["since"], b["airport"],
-                            b["present"], b["edges"], b["targets"]), b["targets"], b["present"], b["asked"])
+                            b["present"], b["rows"], b["edges"], b["targets"]), b["targets"], b["present"], b["asked"])
            for b in batches]
     assert float(nll[0][SPEED].detach()) == 0.0 and torch.allclose(nll[0][:SPEED], nll[1][:SPEED])
 
@@ -99,7 +99,7 @@ def test_the_loss_counts_only_the_asked_columns():
 def test_rows_encoded_one_at_a_time_are_the_rows_encoded_together():
     """`Prior.extend` (a speaker's row by row, each layer's keys and values kept) gives what `encode` gives, absent
     rows included."""
-    from ts_transformer.prior.model import self_edges
+    from ts_transformer.prior.model import own_rows, self_edges
 
     words = Words(spec())
     torch.manual_seed(3)
@@ -113,15 +113,16 @@ def test_rows_encoded_one_at_a_time_are_the_rows_encoded_together():
     present = torch.ones(batch, 1, rows, dtype=torch.bool)
     present[1, 0, 3] = False
     whole, tokens, valid = model.encode(features, relative, static, in_force, since, airport, present,
-                                        self_edges(batch, 1, rows, CPU))
+                                        own_rows(batch, 1, rows, CPU), self_edges(batch, 1, rows, CPU))
     past, pieces = model.no_past(batch, rows), []
     for low, high in ((0, N_LOOK + 1), *((t, t + 1) for t in range(N_LOOK + 1, rows))):
         h, piece_tokens, _, past = model.extend(features[:, :, low:high], relative[:, :, low:high], static,
                                                 in_force[:, :, low:high], since[:, :, low:high], airport,
-                                                present[:, :, low:high], self_edges(batch, 1, high - low, CPU), past)
+                                                present[:, :, low:high], own_rows(batch, 1, high - low, CPU, low),
+                                                self_edges(batch, 1, high - low, CPU), past)
         pieces.append(h)
         assert torch.allclose(piece_tokens, tokens[:, :, low:high])
     assert torch.allclose(torch.cat(pieces, dim=2), whole, atol=1e-5)
     with pytest.raises(ValueError, match="the past holds"):
         model.extend(features[:, :, :1], relative[:, :, :1], static, in_force[:, :, :1], since[:, :, :1], airport,
-                     present[:, :, :1], self_edges(batch, 1, 1, CPU), past)
+                     present[:, :, :1], own_rows(batch, 1, 1, CPU), self_edges(batch, 1, 1, CPU), past)

@@ -23,7 +23,7 @@ from torch import nn
 
 from ts_transformer.prior.data import Split, batches
 from ts_transformer.prior.generate import allowed_classes
-from ts_transformer.prior.model import Prior, asked_entries, self_edges
+from ts_transformer.prior.model import Prior, asked_entries, own_rows, self_edges
 from ts_transformer.prior.scene import N_LOOK
 
 
@@ -63,13 +63,14 @@ def to_batch(split: Split, indices: Sequence[int], device: torch.device) -> dict
                "airport": np.array([f.airport for f in flights], dtype=np.int64)}
     batch = {name: torch.as_tensor(value, device=device) for name, value in tensors.items()}
     batch["edges"] = self_edges(count, 1, rows, device)
+    batch["rows"] = own_rows(count, 1, rows, device)
     return batch
 
 
 def batch_logits(model: Prior, batch: dict[str, torch.Tensor]) -> list[torch.Tensor]:
     """Teacher forcing: the heads see the truth's classes of the earlier columns."""
     return model(batch["features"], batch["relative"], batch["static"], batch["in_force"], batch["since"],
-                 batch["airport"], batch["present"], batch["edges"], batch["targets"])
+                 batch["airport"], batch["present"], batch["rows"], batch["edges"], batch["targets"])
 
 
 def column_nll(logits: list[torch.Tensor], targets: torch.Tensor, present: torch.Tensor,

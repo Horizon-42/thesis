@@ -52,7 +52,7 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, RUNWAY, UNCHANGED, Words
 from ts_transformer.prior.data import SINCE_SCALE, STEP_FEATURES, VARIANTS, own_context, rows_inputs
 from ts_transformer.prior.masks import ProcedureMasks
-from ts_transformer.prior.model import Prior, self_edges
+from ts_transformer.prior.model import SINGLE_EDGE_FEATURES, Prior, own_rows, self_edges
 from ts_transformer.prior.scene import N_LOOK, Landings, utc_s
 
 #: The columns the vocabulary's rules mask: the runway (not said again, the lock), the approach and the descent angle
@@ -70,6 +70,9 @@ class Speaker:
         """``landings``: each airport's landing context (`data.airport_landings`), None for a variant without it;
         ``max_rows``: the most rows any flight will have (the model's position table must hold them);
         ``procedure_masks``: the procedure's masks it speaks under, over the vocabulary's rules (`masks`)."""
+        if model.edge_features != SINGLE_EDGE_FEATURES:
+            raise ValueError(f"a scene prior (edge features {list(model.edge_features)}) speaks in the scene loop, not "
+                             "to single aircraft")
         if VARIANTS[model.config.variant].landing_context != (landings is not None):
             raise ValueError(f"variant {model.config.variant} and the landing context given disagree")
         if max_rows > model.config.max_rows:
@@ -166,7 +169,8 @@ class Speaker:
         present = torch.ones((count, 1, rows - self.encoded), dtype=torch.bool, device=device)
         h, tokens, valid, self.past = model.extend(self.features[:, :, new], self.relative[:, :, new], self.static,
                                                    self.in_force[:, :, new], self.since[:, :, new], self.airport,
-                                                   present, self_edges(count, 1, rows - self.encoded, device),
+                                                   present, own_rows(count, 1, rows - self.encoded, device, self.encoded),
+                                                   self_edges(count, 1, rows - self.encoded, device),
                                                    self.past)
         self.encoded = rows
         h, tokens = h[:, :, -1:], tokens[:, :, -1:]
