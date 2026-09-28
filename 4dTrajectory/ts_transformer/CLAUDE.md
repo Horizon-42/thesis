@@ -406,7 +406,10 @@ per update, `scene_readout_acc4_20260928`: better nowhere, 0.2880 / 0.2868 vs 0.
 speaking to one aircraft of each scene (`experiments/traffic_speaking.py`, `prior/scene_speaker.py`), read beside the
 same model alone, the labelled words and the record, all judged in the scene; `--augment-seed` on augmented scenes
 (`experiments/traffic_augment.py`: leader moved, start moved, flight inserted) (formal `free_generation_20260928`: 11.5 % lost
-separation vs 4.9 % labelled, 2.6 % recorded; vectored 21.6 %) (R31).
+separation vs 4.9 % labelled, 2.6 % recorded; vectored 21.6 %) (R31). `traffic_reward` is M4 — the traffic post-training
+from augmented + a zero traffic attention, real and augmented training scenes, reward = landed without losing separation,
+each sentence scored in its scene by the speaker's own layout and edge code (`experiments/traffic_tuner.py`), base alone,
+M2's scene samples as the data term (R32).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 

@@ -796,3 +796,31 @@ straight-in 4.0 %; a vectored landing is −111 s / +121 s (p10 / p90) off the r
 started in a loss. The augmented run: `free_generation_aug_20260928/` (augment seed 7919, `de9a539a`; B 815, A 839,
 D 346, none left out).
 
+### R32 · `run_ts.py traffic_reward` — multi-aircraft M4: the traffic post-training (design §6.2, §6.6 step 6)
+
+2026-09-28. `traffic_reward --prior <augmented> --base <base> --instructions <artefact> --executor <spec> --out <new dir>
+[--rounds 8] [--real-per-airport 200] [--augmented-per-airport 200] [--samples 8] [--select-per-airport 200]
+[--select-samples 2] [--traffic-learning-rate 3e-4] [--aircraft-steps 300000] [--seed 1337] [--device] [--smoke]` plus
+`RewardConfig`'s flags (stage 2's recipe). The start is `with_traffic(augmented)` (C37: augmented's answers to rounding).
+Each round: a pool of 1.25 × 400 training-day flights per airport (the round's seed); the first 200 speak in their real
+scenes, the rest in pool order in augmented ones (`traffic_augment`, D / B / A) until 200 qualify (refused when an airport
+runs short); each scene spoken to 8 times in the scene loop (`traffic_free_generation.scene_sentences`: the start's
+procedure's masks and the two separation masks), judged under VISUAL, each sentence kept to its judged end; reward 1 =
+landed in the landing direction (the scene's landings) with no loss ending it first; advantages per scene; a scene
+starting in a loss it answers for, or whose sentences agree, is not trained on. One pass (`traffic_tuner.SceneRewardTuner`):
+stage 2's loss with each sentence scored in its scene by the speaker's own layout and edge code
+(`scene_speaker.scene_inputs`, `traffic_speaking.speaking_edges` — the start's distribution is the sampling one, tested
+with a traffic attention that reads the others and the others off the steps), base scoring the aircraft alone, the data
+term on M2's scene samples of the training days (2 of M2's batches an update, ≈ stage 2's asked steps), the traffic
+attention at 3e-4, the rest at 1e-5; a batch (stage 2's grouping, its own rows) is scored in parts of ≤ 16,384 padded
+aircraft-steps with the gradients summed. The loop reads each step's edge features from two steps back (an other off the
+step is carried forward at its row-before's motion; one step back read it "unknown" — the review of step 6). Select
+readouts every round (round 0 = the start): 200 select flights per airport × 2 in their real scenes and one fixed
+augmentation each (seed + 7919); the teacher-forced NLL on the select scene samples and the traffic attention's output
+over the residual stream per layer; the select flights' record once. Guards and choice: design §6.6 step 6 item 8 (the
+start is checked against the ordering guards before training and refused if it fails them). Writes `config.json`,
+`round_00/readout.json`, `round_<k>/{sentences.npz, sentences.json, checkpoint.pt (v5, with its start), config.json,
+procedure_masks.json, readout.json}`, `history.json`, `choice.json`. The training days are built once (≈ 4.4 GB host
+memory, the loop's scenes and the data term's samples share each flight's rows). A CPU smoke (1 round, 2 + 2 scenes
+an airport × 2) ran end to end in 17 min.
+
