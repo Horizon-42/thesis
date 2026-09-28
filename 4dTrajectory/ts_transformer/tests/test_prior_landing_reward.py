@@ -187,10 +187,12 @@ def test_the_reward_term_raises_a_better_sentence_s_words_and_lowers_a_worse_one
 
 
 def _cells(steps: int, classes: int = 5):
-    """One scene, one aircraft, ``steps`` spoken steps from the first predicted row, every column asked: targets class 1."""
+    """One scene, one aircraft, ``steps`` spoken steps from the first predicted row, every column asked there (never
+    before it: `Flight.asked`'s contract): targets class 1."""
     rows = N_LOOK + steps
     present = torch.ones((1, 1, rows), dtype=torch.bool)
     asked = torch.ones((1, 1, rows, 6), dtype=torch.bool)
+    asked[:, :, :N_LOOK] = False
     targets = torch.ones((1, 1, rows, 6), dtype=torch.long)
     start = [torch.zeros((1, 1, rows, classes)) for _ in range(6)]
     return present, asked, targets, start

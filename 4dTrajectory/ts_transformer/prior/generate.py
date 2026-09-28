@@ -169,7 +169,7 @@ class Speaker:
         present = torch.ones((count, 1, rows - self.encoded), dtype=torch.bool, device=device)
         h, tokens, valid, self.past = model.extend(self.features[:, :, new], self.relative[:, :, new], self.static,
                                                    self.in_force[:, :, new], self.since[:, :, new], self.airport,
-                                                   present, own_rows(count, 1, rows - self.encoded, device, self.encoded),
+                                                   present, own_rows(rows - self.encoded, device, self.encoded),
                                                    self_edges(count, 1, rows - self.encoded, device),
                                                    self.past)
         self.encoded = rows

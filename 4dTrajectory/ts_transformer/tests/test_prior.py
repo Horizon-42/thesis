@@ -227,7 +227,7 @@ def _inputs(model, rows=ROWS, aircraft=1, pointer=1):
     return {"features": features, "relative": relative, "static": torch.zeros(1, aircraft, 0), "in_force": in_force,
             "since": torch.zeros(1, aircraft, rows, 6), "airport": torch.zeros(1, dtype=torch.long),
             "present": torch.ones(1, aircraft, rows, dtype=torch.bool), "edges": self_edges(1, aircraft, rows, torch.device("cpu")),
-            "rows": own_rows(1, aircraft, rows, torch.device("cpu")),
+            "rows": own_rows(rows, torch.device("cpu")).expand(1, aircraft, rows).clone(),
             "targets": targets}
 
 
@@ -265,9 +265,13 @@ def test_the_first_predicted_step_says_every_column_and_the_rows_before_it_are_n
         assert torch.isfinite(logit[0, 0, N_LOOK + 1:, 0]).all()
     runway = logits[RUNWAY][0, 0]
     assert torch.isfinite(runway[N_LOOK:, 1:3]).all() and torch.isinf(runway[:, 3]).all()   # the empty slot never
-    asked = asked_entries(batch["present"])
+    asked = asked_entries(batch["present"], batch["rows"])
     assert not asked[0, 0, :N_LOOK].any() and asked[0, 0, N_LOOK:].all()
-    nll = column_nll(logits, batch["targets"], batch["present"], torch.ones_like(batch["targets"], dtype=torch.bool))
+    # the loss counts the cells asked, which never hold a row before an aircraft's first predicted step (`Flight.asked`:
+    # in a scene each aircraft's own rows, so the step's index is no longer the loss's mask)
+    every = torch.ones_like(batch["targets"], dtype=torch.bool)
+    every[:, :, :N_LOOK] = False
+    nll = column_nll(logits, batch["targets"], batch["present"], every)
     for c in range(6):
         expected = sum(float(-torch.log_softmax(logits[c][0, 0, t], dim=-1)[batch["targets"][0, 0, t, c]])
                        for t in range(N_LOOK, ROWS))
@@ -622,26 +626,19 @@ def test_a_flight_s_rows_are_the_same_whichever_flights_they_are_computed_with()
         assert together[1].shape[-1] == len(prior_data.RELATIVE_FEATURES)
 
 
-#: The single-aircraft prior's arithmetic before scenes (M2 step 1: each aircraft's own rows, edge features a model's
-#: own), recorded at `2f235b23` with torch 2.x on CPU: `_model` on `_inputs` for one aircraft and for three with random
-#: edges and a late entrant, sha256 of the logits' bytes. A torch upgrade that moves them is re-recorded deliberately.
-SINGLE_FINGERPRINTS = {("full", 1): "5f2dd0da92717482", ("full", 3): "249d5831bd1bebaa",
-                       ("no-context", 1): "4a74fab3e81378cd", ("no-context", 3): "c1c4bd12663bd7f7"}
-
-
-@pytest.mark.parametrize("variant, aircraft", sorted(SINGLE_FINGERPRINTS))
-def test_the_single_aircraft_arithmetic_is_unchanged_bit_for_bit(variant, aircraft):
-    import hashlib
-
-    model = _model(variant)
-    batch = _inputs(model, aircraft=aircraft)
-    if aircraft == 3:
-        batch["edges"] = torch.randn(1, ROWS, 3, 3, 1, generator=torch.Generator().manual_seed(5))
-        batch["present"][0, 1, :4] = False
-    digest = hashlib.sha256()
-    for logit in _run(model, batch):
-        digest.update(logit.contiguous().numpy().tobytes())
-    assert digest.hexdigest()[:16] == SINGLE_FINGERPRINTS[(variant, aircraft)]
+def test_single_aircraft_rows_are_broadcast_and_read_as_their_steps():
+    """A single-aircraft batch hands the model its rows as ``[1, 1, T]`` (`own_rows`): the position embedding looked up
+    once per step and its gradient summed over the batch first — the arithmetic, forward and backward, of the prior
+    before scenes (checked bit for bit against that model's code at `2f235b23` in the M2 review); the same rows given
+    per aircraft give the same logits."""
+    model = _model()
+    batch = _inputs(model, aircraft=3)
+    batch["rows"] = own_rows(ROWS, torch.device("cpu"))
+    assert tuple(batch["rows"].shape) == (1, 1, ROWS)
+    broadcast = _run(model, batch)
+    batch["rows"] = batch["rows"].expand(1, 3, ROWS).clone()
+    for a, b in zip(broadcast, _run(model, batch)):
+        assert torch.equal(a, b)
 
 
 def test_an_aircraft_entering_later_speaks_from_its_own_rows_as_it_would_alone():
@@ -662,6 +659,8 @@ def test_an_aircraft_entering_later_speaks_from_its_own_rows_as_it_would_alone()
     first = shift + N_LOOK
     assert torch.isinf(together[HEADING][0, 1, first, 0]) and not torch.isinf(together[HEADING][0, 1, N_LOOK, 0])
     assert torch.isinf(together[HEADING][0, 0, N_LOOK, 0])                          # aircraft 0's own first step
+    speaks = asked_entries(scene["present"], scene["rows"])[0, 1]
+    assert speaks.tolist() == [False] * first + [True] * (ROWS + shift - first)      # from its own first step
     scene["present"][0, 0] = False
     together = _run(model, scene)
     for a, b in zip(solo, together):

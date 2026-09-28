@@ -25,7 +25,9 @@ a model reads is its own (``edge_features``): a single-aircraft prior's are `SIN
 
 **Rows.** Each aircraft-step carries its aircraft's own row number (``rows [B, A, T]``, multi-aircraft design §2.1): the
 position embedding reads it, and the first predicted step is each aircraft's own row `scene.N_LOOK`. In a
-single-aircraft scene it is the step's index.
+single-aircraft scene it is the step's index, handed in as ``[1, 1, T]`` (`own_rows`) and broadcast: the position
+embedding is then looked up once per step and its gradient summed over the batch before the lookup's — the arithmetic,
+forward and backward, of the prior before scenes, bit for bit.
 
 **Heads** (§5). Six columns in `COLUMNS` order. With ordered heads, column k's head reads the hidden state plus the
 embeddings of the classes the earlier columns chose at this step (the truth in teacher forcing), so the words said
@@ -80,17 +82,16 @@ class PriorConfig:
         return cls(**{**data, "classes": tuple(data["classes"]), "airports": tuple(data["airports"])})
 
 
-def asked_entries(present: torch.Tensor) -> torch.Tensor:
-    """``[B, A, T]``: the aircraft-steps the prior speaks at — present, from the first predicted step on (by the step's
-    index: in a scene, each aircraft's own rows are held by the batch's ``asked``, never earlier than this)."""
-    rows = torch.arange(present.shape[-1], device=present.device)
+def asked_entries(present: torch.Tensor, rows: torch.Tensor) -> torch.Tensor:
+    """``[B, A, T]``: the aircraft-steps the prior speaks at — present, from their aircraft's own first predicted step
+    on (``rows``: each aircraft-step's own row, or one that broadcasts to it)."""
     return present & (rows >= N_LOOK)
 
 
-def own_rows(batch: int, aircraft: int, rows: int, device: torch.device, start: int = 0) -> torch.Tensor:
-    """``[B, A, T]``: rows ``start`` … ``start + rows − 1`` for every aircraft — a scene whose aircraft all start at its
-    first step (a single aircraft's)."""
-    return torch.arange(start, start + rows, device=device).expand(batch, aircraft, rows)
+def own_rows(rows: int, device: torch.device, start: int = 0) -> torch.Tensor:
+    """``[1, 1, T]``: rows ``start`` … ``start + rows − 1``, broadcast over every scene and aircraft — scenes whose
+    aircraft all start at their first step (single aircraft's; module docstring, "Rows")."""
+    return torch.arange(start, start + rows, device=device)[None, None]
 
 
 def self_edges(batch: int, aircraft: int, rows: int, device: torch.device) -> torch.Tensor:

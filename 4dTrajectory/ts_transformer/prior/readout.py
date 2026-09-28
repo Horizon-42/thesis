@@ -195,9 +195,8 @@ def model_readout(model: Prior, split: Split, config: TrainConfig, device: torch
     for indices in batches(split.flights, config.tokens_per_batch, None):
         batch = to_batch(split, indices, device)
         logits = batch_logits(model, batch)
-        asked = asked_entries(batch["present"])
-        rows = asked.shape[-1]
-        later = asked & (torch.arange(rows, device=device) > N_LOOK)
+        asked = asked_entries(batch["present"], batch["rows"])
+        later = asked & (batch["rows"] > N_LOOK)
         steps += int(asked.sum())
         for c, logit in enumerate(logits):
             log_p = torch.log_softmax(logit, dim=-1)

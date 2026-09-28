@@ -113,16 +113,16 @@ def test_rows_encoded_one_at_a_time_are_the_rows_encoded_together():
     present = torch.ones(batch, 1, rows, dtype=torch.bool)
     present[1, 0, 3] = False
     whole, tokens, valid = model.encode(features, relative, static, in_force, since, airport, present,
-                                        own_rows(batch, 1, rows, CPU), self_edges(batch, 1, rows, CPU))
+                                        own_rows(rows, CPU), self_edges(batch, 1, rows, CPU))
     past, pieces = model.no_past(batch, rows), []
     for low, high in ((0, N_LOOK + 1), *((t, t + 1) for t in range(N_LOOK + 1, rows))):
         h, piece_tokens, _, past = model.extend(features[:, :, low:high], relative[:, :, low:high], static,
                                                 in_force[:, :, low:high], since[:, :, low:high], airport,
-                                                present[:, :, low:high], own_rows(batch, 1, high - low, CPU, low),
+                                                present[:, :, low:high], own_rows(high - low, CPU, low),
                                                 self_edges(batch, 1, high - low, CPU), past)
         pieces.append(h)
         assert torch.allclose(piece_tokens, tokens[:, :, low:high])
     assert torch.allclose(torch.cat(pieces, dim=2), whole, atol=1e-5)
     with pytest.raises(ValueError, match="the past holds"):
         model.extend(features[:, :, :1], relative[:, :, :1], static, in_force[:, :, :1], since[:, :, :1], airport,
-                     present[:, :, :1], own_rows(batch, 1, 1, CPU), self_edges(batch, 1, 1, CPU), past)
+                     present[:, :, :1], own_rows(1, CPU), self_edges(batch, 1, 1, CPU), past)
