@@ -833,9 +833,12 @@ for round 0 and 8 rounds (the loop's batches are fuller at size: M3 spoke 8,000 
 (0: round 0 alone) and `--resume` continues the run at `--out` from its last finished round. Every stream a round draws
 from is its own — the pool (seed + round), the augmentations ([seed, round]), the sentences said and the pass's batches and
 data ([seed, round, 1 / 2]) — and each round saves `optimiser.pt` (AdamW's moments, the warm-up's step) beside its v5
-checkpoint, so rounds run one per invocation are the computation of one invocation (tested bit for bit on the pass). A
-resume is refused when `config.json` differs apart from `written_utc`, `rounds`, `resumed` (the git commit is in it: run
-from a checkout fixed at one commit) or a round did not finish (its directory without `readout.json`, written last —
-move it aside as `round_<k>.aborted-<UTC>`). `choice.json` is written over the rounds finished at the end of each
-invocation.
+checkpoint, so rounds run one per invocation are the computation of one invocation (bit for bit on the CPU, tested on the
+pass; on the GPU the same streams, the kernels' sums differing at rounding as between any two runs). A resume is refused
+when `config.json` differs apart from `written_utc`, `rounds`, `resumed` (the git commit and the device are in it: run
+from a checkout fixed at one commit — a commit made in it under a run refuses the resume, the first resume smoke showed
+it), when a round did not finish (its directory without `readout.json`, written last — move it aside as
+`round_<k>.aborted-<UTC>`; a run that did not finish round 0 is started again) or when the start failed the ordering
+guards. `choice.json` is written over the rounds finished at the end of each invocation; `--resume --rounds <the last
+finished>` writes it alone.
 

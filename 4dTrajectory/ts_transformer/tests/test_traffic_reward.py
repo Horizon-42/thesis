@@ -295,8 +295,13 @@ def test_a_resumed_run_continues_only_from_finished_rounds_of_the_same_configura
     (out / "round_01" / "readout.json").unlink()
     with pytest.raises(SystemExit, match="did not finish"):
         completed_rounds(out)
-    with pytest.raises(SystemExit, match="not 0"):
+    with pytest.raises(SystemExit, match="finished no round"):
         completed_rounds(tmp_path / "empty")
+    (out / "round_05").mkdir()
+    (out / "round_05" / "readout.json").write_text("{}")
+    (out / "round_01" / "readout.json").write_text("{}")
+    with pytest.raises(SystemExit, match="not 0"):
+        completed_rounds(out)
     stored = {"written_utc": "a", "rounds": 1, "resumed": [], "seed": 1337, "git": {"head": "x", "dirty": False},
               "select": {"per_airport": 200}}
     record = {**stored, "written_utc": "b", "rounds": 3, "git": {"head": "y", "dirty": False}}

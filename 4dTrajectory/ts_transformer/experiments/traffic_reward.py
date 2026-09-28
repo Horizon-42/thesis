@@ -38,13 +38,15 @@ augmented scenes, the words a flight says after its first step no farther from t
 the start (augmented) is. Val is not read here.
 
 **Round by round** (design §6.6 step 6 item 11): every stream a round draws from is its own — the pool (``seed`` + the
-round), the augmentations ([``seed``, round]), the sentences said and the pass's batches and data ([``seed``, round,
+round), the augmentations, the sentences said and the pass's batches and data ([``seed``, round, `AUGMENT_STREAM` /
 `SAMPLING_STREAM` / `PASS_STREAM`]) — and each round leaves beside its weights the optimiser's state (`OPTIMISER_FILE`:
 AdamW's moments, the warm-up's step), so ``--resume`` continues a run from its last finished round up to ``--rounds`` as
-one invocation would have: refused when the run was made with another configuration or code (its ``config.json``, the git
-commit included, apart from `RESUMABLE`) or a round did not finish (its directory without ``readout.json``, written last —
-move it aside as ``round_<k>.aborted-<UTC>``; nothing is deleted). Round 0 and the start's ordering check are the first
-invocation's; ``choice.json`` is written over the rounds finished at the end of each.
+one invocation would have (the same streams; on the GPU its kernels' sums differ at rounding between any two runs):
+refused when the run was made with another configuration, code or device (its ``config.json``, the git commit included,
+apart from `RESUMABLE`: run it from a checkout fixed at one commit) or a round did not finish (its directory without
+``readout.json``, written last — move it aside as ``round_<k>.aborted-<UTC>``; nothing is deleted), and when the start
+failed the ordering guards. Round 0 is the first invocation's; ``choice.json`` is written over the rounds finished at the
+end of each (``--resume --rounds`` the last finished round writes it alone).
 
 Writes into ``--out`` (a new directory, from a clean tree unless ``--smoke``; the same one with ``--resume``):
 ``config.json``, ``round_00/readout.json``, ``round_<k>/{sentences.npz, sentences.json, checkpoint.pt
@@ -121,8 +123,10 @@ GUARD_ORDER_GROWTH = 1.2
 #: (the landed guard's margin; about 1.4 binomial standard deviations over 2,000 select sentences at 11.5 %). The
 #: recorded share × `GUARD_ORDER_GROWTH` is the target line, reported (round 0 is four times the record).
 GUARD_LOSS_RISE = 0.01
-#: A round's own random streams beyond its pool and its augmentations (module docstring): the sentences said, and the
-#: pass's batches and data.
+#: A round's own random streams beyond its pool (``seed`` + the round), each [``seed``, round, stream] (module docstring):
+#: the augmentations, the sentences said, the pass's batches and data. (A seed list is padded with zeros: [seed, round]
+#: is the augmentations' stream.)
+AUGMENT_STREAM = 0
 SAMPLING_STREAM = 1
 PASS_STREAM = 2
 #: Beside a round's weights: what its pass leaves for the next (`traffic_tuner.SceneRewardTuner.state`).
@@ -421,7 +425,9 @@ def completed_rounds(out: Path) -> int:
     if unfinished:
         raise SystemExit(f"{out}: round(s) {unfinished} did not finish — move each aside as round_<k>.aborted-<UTC> "
                          f"and resume")
-    if not numbers or numbers != list(range(len(numbers))):
+    if not numbers:
+        raise SystemExit(f"{out} finished no round (round 0 is the first invocation's): move it aside and start again")
+    if numbers != list(range(len(numbers))):
         raise SystemExit(f"{out} holds rounds {numbers}, not 0 … k")
     return numbers[-1]
 
@@ -556,8 +562,9 @@ def main(argv: list[str] | None = None) -> int:
                    "order_growth": GUARD_ORDER_GROWTH, "word_columns": list(GUARD_WORD_COLUMNS),
                    "word_margin_ln": math.log(GUARD_WORD_GROWTH),
                    "lost_separation_target": recorded["lost_separation"] * GUARD_ORDER_GROWTH},
-        "streams": {"pool": "seed + round", "augmentations": "[seed, round]", "sampling": [SAMPLING_STREAM],
+        "streams": {"pool": "seed + round", "augmentations": [AUGMENT_STREAM], "sampling": [SAMPLING_STREAM],
                     "pass": [PASS_STREAM]},
+        "device": str(device),
         "n_look": N_LOOK, "resumed": []}
     if args.resume:
         stored = json.loads((out / "config.json").read_text(encoding="utf-8"))
@@ -565,18 +572,21 @@ def main(argv: list[str] | None = None) -> int:
         if differences:
             raise SystemExit(f"{out} was run with another configuration or code: {differences} differ")
         last = completed_rounds(out)
-        if args.rounds <= last:
-            parser.error(f"{out} has finished round {last}; --rounds {args.rounds} asks for nothing more")
+        if args.rounds < last:
+            parser.error(f"{out} has finished round {last}; --rounds {args.rounds} is behind it")
         history = [row for row in json.loads((out / "history.json").read_text(encoding="utf-8"))["rounds"]
                    if row["round"] <= last]
         if [row["round"] for row in history] != list(range(last + 1)):
             raise SystemExit(f"{out}/history.json does not hold rounds 0 … {last}")
+        failing = ordering_failures(history[0])
+        if failing:
+            raise SystemExit(f"the start failed the ordering guards {failing} (round 0): no round could be chosen")
         record = {**stored, "rounds": args.rounds,
                   "resumed": [*stored["resumed"], {"utc": utc_now(), "from_round": last, "to": args.rounds}]}
     else:
         out.mkdir(parents=True)
         last, history = -1, []
-    write_json_atomic(out / "config.json", record)
+        write_json_atomic(out / "config.json", record)
 
     def log(line: str) -> None:
         print(f"{line}  [{time.perf_counter() - started:.0f}s]", flush=True)
@@ -631,8 +641,10 @@ def main(argv: list[str] | None = None) -> int:
     tuner = SceneRewardTuner(model, base, config, device, seed=args.seed,
                              traffic_learning_rate=args.traffic_learning_rate, step_s=step_s)
     if last > 0:
-        tuner.load_state(torch.load(out / f"round_{last:02d}" / OPTIMISER_FILE, map_location=device,
-                                    weights_only=True))
+        # on the CPU as the one-run keeps it: `load_state_dict` moves the moments to each parameter's device, not the step
+        tuner.load_state(torch.load(out / f"round_{last:02d}" / OPTIMISER_FILE, map_location="cpu", weights_only=True))
+    if args.resume:
+        write_json_atomic(out / "config.json", record)                         # the state read: this resumption runs
     for round_number in range(last + 1, args.rounds + 1):
         directory = out / f"round_{round_number:02d}"
         directory.mkdir()
@@ -644,7 +656,7 @@ def main(argv: list[str] | None = None) -> int:
         taken = set(real)
         candidates, left_out = augmented_round(replay.subset(pool, [j for j in range(len(pool.signals))
                                                                     if j not in taken]),
-                                               train_airports, params, every_landing, [args.seed, round_number], windows,
+                                               train_airports, params, every_landing, [args.seed, round_number, AUGMENT_STREAM], windows,
                                                step_s)
         kept = first_per_airport(candidates.batch, args.augmented_per_airport, sorted({s.airport for s in pool.signals}))
         augmented = Round(replay.subset(candidates.batch, kept), [candidates.scenes[j] for j in kept],
