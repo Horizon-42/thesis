@@ -34,6 +34,7 @@ import torch
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import Words
+from ts_transformer.prior.data import own_context
 from ts_transformer.prior.generate import Speaker
 from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.model import Prior
@@ -53,13 +54,16 @@ class SceneSpeaker(Speaker):
                  landings: Mapping[str, Landings] | None, words: Words, *, others: Sequence[Sequence[Node]],
                  edges: Callable[[int, int], np.ndarray], masks: Callable[[int, np.ndarray], np.ndarray],
                  mask_columns: Sequence[int], history: int, max_rows: int, generator: torch.Generator,
-                 procedure_masks: ProcedureMasks, temperature: float = 1.0) -> None:
+                 procedure_masks: ProcedureMasks, temperature: float = 1.0,
+                 scene_landings: Sequence[Landings] | None = None) -> None:
         """``others``: per scene, its replayed aircraft (`Node.first_step` from the speaking aircraft's row 0);
-        ``history``: the most steps read before the speaking aircraft's row 0; the rest is `Speaker`'s (module docstring
-        for ``edges``, ``masks``, ``mask_columns``)."""
+        ``history``: the most steps read before the speaking aircraft's row 0; ``scene_landings``: each scene's landings
+        (an augmented scene moves or adds some; None: the airport's, ``landings``) for a variant with a landing context;
+        the rest is `Speaker`'s (module docstring for ``edges``, ``masks``, ``mask_columns``)."""
         if len(others) != len(flights):
             raise ValueError(f"{len(others)} scenes' other aircraft for {len(flights)} speaking aircraft")
         self.mask_columns = tuple(mask_columns)
+        self.scene_landings = scene_landings
         super().__init__(model, flights, geometries, landings, words, max_rows=max_rows, generator=generator,
                          procedure_masks=procedure_masks, temperature=temperature)
         self.others = [tuple(scene) for scene in others]
@@ -77,6 +81,12 @@ class SceneSpeaker(Speaker):
 
     def _more_masked_columns(self) -> tuple[int, ...]:
         return self.mask_columns
+
+    def _contexts(self, flights: Sequence[FlightSignals], landings: Mapping[str, Landings] | None
+                  ) -> list[Landings | None]:
+        if landings is None or self.scene_landings is None:
+            return super()._contexts(flights, landings)
+        return [own_context(f, scene) for f, scene in zip(flights, self.scene_landings)]
 
     def _newest(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Every scene's steps not encoded yet, encoded `BLOCK_STEPS` at a time: the speaking aircraft's newest row's

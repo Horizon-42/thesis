@@ -25,8 +25,9 @@ rule too: a runway changed under a clearance takes the approach with it). The pr
 
 With ``--augment-seed`` every flight's scene is augmented instead (`traffic_augment`: the leader moved, the start moved,
 a flight inserted, a third each, drawn until the scene qualifies; a flight with no qualifying draw is left out, counted)
-and read as **scene** and **alone** only — a moved start has no record, and its time limit is stage 2's
-(`prior.augment.TIMEOUT_FACTOR`); the readout adds each kind's.
+and read as **scene** and **alone** only — a moved start has no record; a moved start's time limit is stage 2's
+(`prior.augment.TIMEOUT_FACTOR`), a moved leader's or an inserted flight's scene keeps the spec's; the readout adds each
+kind's.
 
 Writes into a NEW directory ``flights.jsonl`` (every flight's rows, appended as each batch ends, so a run cut short
 keeps what it read) and ``free_generation.json`` (the readout); ``--per-airport`` is the sample's size (the readout says
@@ -122,7 +123,7 @@ def model_rows(model: Prior, batch: replay.Batch, scenes: Sequence[Scene], judge
                moves: Sequence[Augmentation | None] | None = None) -> list[dict[str, Any]]:
     """Every flight of ``batch`` flown ``samples`` times, the model speaking in ``scenes`` and judged with the others of
     ``judge_scenes`` (the same scenes, or — alone — the scenes it was taken out of); ``moves``: each flight's moved start
-    (`batch.signals` are already its moved rows; None: its own), and stage 2's time limit."""
+    (`batch.signals` are already its moved rows; None: its own) and, where moved, stage 2's time limit."""
     cpu, step_s = torch.device("cpu"), words.spec.step_s
     index = [j for j in range(len(batch.readings)) for _ in range(samples)]
     repeated = replay.subset(batch, index)
@@ -130,9 +131,11 @@ def model_rows(model: Prior, batch: replay.Batch, scenes: Sequence[Scene], judge
     inputs = flight_inputs(repeated.series, device=cpu, anchor=N_LOOK)
     if moves is not None:
         inputs = augmented_inputs(inputs, repeated.geometries, [moves[j] for j in index])
-    loop = SceneLoop(model, repeated.signals, repeated.geometries, inputs, runways, charts, approach,
-                     limits_s(repeated, params, step_s, augmented=moves is not None), words, params,
-                     landings, scenes=[scenes[j] for j in index], generator=generator, temperature=temperature,
+    own = limits_s(repeated, params, step_s, augmented=False)
+    moved_limits = limits_s(repeated, params, step_s, augmented=True)
+    limits = [moved_limits[k] if moves is not None and moves[j] is not None else own[k] for k, j in enumerate(index)]
+    loop = SceneLoop(model, repeated.signals, repeated.geometries, inputs, runways, charts, approach, limits, words,
+                     params, landings, scenes=[scenes[j] for j in index], generator=generator, temperature=temperature,
                      procedure_masks=procedure_masks)
     while loop.running:
         loop.step()

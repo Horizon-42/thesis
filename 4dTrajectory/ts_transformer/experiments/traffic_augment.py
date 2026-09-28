@@ -4,23 +4,34 @@ a speaking flight's scene changed so that it has traffic to deal with that the d
 
 The three ways of "one aircraft commanded" (§5.2, §9 item 7), a third each:
 
-- **D, the leader moved** — the replayed flight landing just before the speaking one on its runway (in the air at its
-  first predicted step) moved whole by δ ~ U[−`SHIFT_S`, `SHIFT_S`];
+- **D, the leader moved** — the replayed flight landing just before the speaking one on its runway or one separated as
+  one with it (`Separation.one_runway`), in the air at its first predicted step, moved whole by δ ~ U[−`SHIFT_S`,
+  `SHIFT_S`];
 - **B, the start moved** — the speaking flight's own start moved as post-training stage 2 moves it (`prior.augment`:
   rotated about the airport, raised, sped up; drawn until plausible, `prior_free_generation.augmented_starts`), the
   others as they were;
-- **A, a flight inserted** — a flight of the same airport and split with a sentence, not in the scene, landing in the
-  speaking flight's landing direction, moved whole to land ``g`` × the distance the rules require (at the approach speed,
-  `traffic_census.APPROACH_SPEED_MPS`) before the speaking flight's recorded landing, g ~ U[`GAP_RANGE`]: its new leader.
+- **A, a flight inserted** — a flight of the same airport and split with a sentence, not in the scene, landing on a
+  runway that must be spaced from the speaking flight's (the same, a pair separated as one, a dependent parallel: a
+  required distance above 0), moved whole to cross its threshold ``g`` × the required gap before the speaking flight's
+  recorded crossing ON THE APPROACH CLOCK (`Separation.approach_time_s`, `gap_s`: staggered thresholds counted, trap T3),
+  g ~ U[`GAP_RANGE`]: its new leader.
 
-Leaders are by landing order, not the approach clock: before they turn final (on a downwind) the clock does not say who
-lands first (design §2.5) — a reading of §5.2's "the leader" / "the gap to the leader", stated.
+Leaders are by landing order (on the approach clock for A), not by where the approach clock has them before they turn
+final: on a downwind the clock does not say who lands first (design §2.5) — a reading of §5.2's "the leader", stated.
+
+**What moves with the scene**: the speaking flight's landing context (the landings before each of its steps, for a variant
+that reads it) is the scene's — the moved leader's landing at its moved time, the inserted flight's landing added
+(`traffic_speaking.scene_landings`). A moved or inserted flight's own inputs keep the landing context of its own time (design §5.2 asks the
+scene's; rebuilding a replayed flight's rows is left out — its inputs reach the speaking one only through the traffic
+attention), stated. §5.3's checks that do not bear on one commanded aircraft are not made: losses between replayed flights
+end no one, and a replayed flight needs no dynamics.
 
 A moved or inserted flight keeps its rows' inputs (its landing context its own time's, as stage 2's moved start keeps its
 own) and its labelled words; an inserted one is keyed `INSERTED` after its own key.
 
-**Qualification** (§5.3): through the speaking flight's observed rows (to its first predicted step) no loss it answers
-for, under the loop's reading — a scene already lost when the prior starts to speak is not the prior's; a kind that cannot
+**Qualification** (§5.3): through the speaking flight's observed rows (to its first predicted step), judged as the loop
+judges its first step — not established (its executor starts uncaptured) — no loss it answers for, under the loop's
+reading — a scene already lost when the prior starts to speak is not the prior's; a kind that cannot
 apply (no leader to move, no flight to insert) or a draw that fails is drawn again, at most `TRIES` draws, else the flight
 is left out (the caller counts it).
 """
@@ -36,11 +47,11 @@ from geokit import NM_M
 
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.experiments.prior_free_generation import augmented_starts
-from ts_transformer.experiments.traffic_census import APPROACH_SPEED_MPS, Track
+from ts_transformer.experiments.traffic_census import Track
 from ts_transformer.experiments.traffic_loop import Controlled, recorded
 from ts_transformer.experiments.traffic_scene_data import FlightRows
-from ts_transformer.experiments.traffic_speaking import Scene, judged
-from ts_transformer.inference.runway_schedule import UNRELATED
+from ts_transformer.experiments.traffic_speaking import INSERTED, Scene, judged
+from ts_transformer.inference.runway_schedule import DEPENDENT, SAME, SINGLE
 from ts_transformer.inference.separation import VISUAL
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.prior.augment import Augmentation, augment_signals
@@ -50,7 +61,6 @@ KINDS = ("D", "B", "A")
 SHIFT_S = 60.0
 GAP_RANGE = (0.5, 2.0)
 TRIES = 10
-INSERTED = "+inserted"
 
 
 @dataclass(frozen=True)
@@ -81,8 +91,9 @@ def leader(scene: Scene, step_s: float) -> str | None:
     predicted step; None without one."""
     t0 = scene.first_step_s + N_LOOK * step_s
     own = scene.track(scene.key).presence
+    separation = scene.airport.flights.separation
     before = [(scene.track(k).presence.landing_s, k) for k in scene.others
-              if scene.track(k).on_step(t0) and scene.track(k).presence.runway == own.runway
+              if scene.track(k).on_step(t0) and separation.one_runway(scene.track(k).presence.runway, own.runway)
               and scene.track(k).presence.landing_s < own.landing_s]
     return max(before)[1] if before else None
 
@@ -93,8 +104,8 @@ def qualifies(scene: Scene, signals: FlightSignals, step_s: float) -> bool:
     own = scene.track(scene.key)
     rows = N_LOOK + 1
     seen = presence(signals, len(own.presence.times_s), scene.airport.flights.geometry)
-    capture = int(np.searchsorted(seen.times_s, own.captured_s))
-    whole: Controlled = recorded(seen, signals, capture, 0.0, scene.airport.flights.geometry,
+    never = len(seen.times_s)                     # not established: as the loop's first step
+    whole: Controlled = recorded(seen, signals, never, 0.0, scene.airport.flights.geometry,
                                  scene.airport.flights.separation, scene.speaking.category, step_s)
     cut = slice(0, rows)
     observed = dataclasses.replace(
@@ -134,7 +145,8 @@ def augment(scene: Scene, signals: FlightSignals, inputs: FlightInputs, pool: Se
         else:
             present = set(scene.others) | {scene.key}
             options = [k for k in pool if k not in present and scene.airport.flights.flights[k].presence.speaking
-                       and separation.relation(scene.airport.tracks[k].presence.runway, own.presence.runway) != UNRELATED]
+                       and separation.relation(scene.airport.tracks[k].presence.runway, own.presence.runway)
+                       in (SAME, SINGLE, DEPENDENT)]
             if not options:
                 continue
             key = options[int(rng.integers(len(options)))]
@@ -142,7 +154,10 @@ def augment(scene: Scene, signals: FlightSignals, inputs: FlightInputs, pool: Se
             gap = float(rng.uniform(*GAP_RANGE))
             required = separation.distance_nm(source.presence.runway, source.category, own.presence.runway,
                                               own.category) * NM_M
-            dt = own.presence.landing_s - gap * required / APPROACH_SPEED_MPS - source.presence.landing_s
+            clock = (separation.approach_time_s(own.presence.runway, own.presence.landing_s)
+                     - gap * separation.gap_s(source.presence.runway, source.category, own.presence.runway, own.category))
+            dt = clock + separation.along_nm[source.presence.runway] * NM_M / separation.speed_mps \
+                - source.presence.landing_s
             inserted = moved(scene.airport.flights.flights[key], source, dt, key + INSERTED, step_s)
             candidate = dataclasses.replace(scene, others=(*scene.others, key + INSERTED), moved=(inserted,))
             if qualifies(candidate, signals, step_s):

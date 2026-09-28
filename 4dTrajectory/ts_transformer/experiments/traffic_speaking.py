@@ -70,6 +70,8 @@ from ts_transformer.prior.scene_speaker import SceneSpeaker
 HISTORY_S = SAMPLE_MAX_S
 #: The columns the separation masks take words from (design §3.4 layer 2).
 MASK_COLUMNS = (APPROACH, SPEED)
+#: An inserted flight's key: its own, then this (`traffic_augment`).
+INSERTED = "+inserted"
 
 
 @dataclass(frozen=True)
@@ -229,6 +231,22 @@ def _target(other: FlightRows, force: np.ndarray | None, levels: Sequence[float]
     return speed_mps if math.isnan(own) else own
 
 
+def scene_landings(landings: Landings, scene: Scene) -> Landings:
+    """An airport's landings as ``scene`` has them: each moved flight's landing at its moved time, an inserted one's
+    added (module docstring)."""
+    times, by_runway = list(landings.times_s), {runway: list(t) for runway, t in landings.by_runway.items()}
+    for rows, _ in scene.moved:
+        key, runway = rows.presence.dataset_id, rows.presence.runway
+        if not key.endswith(INSERTED):
+            original = scene.airport.flights.flights[key].presence.landing_s
+            times.remove(original)
+            by_runway[runway].remove(original)
+        times.append(rows.presence.landing_s)
+        by_runway[runway].append(rows.presence.landing_s)
+    return Landings(np.sort(np.array(times, dtype=np.float64)),
+                    {runway: np.sort(np.array(t, dtype=np.float64)) for runway, t in by_runway.items()})
+
+
 class SceneLoop(ClosedLoop):
     """`ClosedLoop` of flights, each speaking in its scene (module docstring): ``scenes`` one per flight, in its order;
     ``approach_mps`` the speed each flight's "unspecified" word flies (its executor's)."""
@@ -250,9 +268,12 @@ class SceneLoop(ClosedLoop):
     def _make_speaker(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
                       landings: Any, words: Words, **options: Any) -> SceneSpeaker:
         others = [[other_node(scene, key, self.step_s) for key in scene.others] for scene in self.scenes]
+        # an augmented scene's landings are its own (`scene_landings`); a real scene's the airport's
+        per_scene = (None if landings is None else
+                     [scene_landings(landings[scene.airport.flights.code], scene) for scene in self.scenes])
         return SceneSpeaker(model, flights, geometries, landings, words, others=others, edges=self._edges,
                             masks=self._masks, mask_columns=MASK_COLUMNS, history=int(HISTORY_S // self.step_s),
-                            **options)
+                            scene_landings=per_scene, **options)
 
     def _edges(self, first: int, last: int) -> np.ndarray:
         """Every scene's edge features on batch steps ``first … last − 1`` (module docstring), from the step before

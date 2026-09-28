@@ -91,7 +91,7 @@ class Speaker:
         device = model.candidates.device
         count, slots = len(flights), model.config.candidate_slots
         width = len(VARIANTS[model.config.variant].relative_features)
-        self.contexts = [own_context(f, landings[f.airport]) if landings is not None else None for f in flights]
+        self.contexts = self._contexts(flights, landings)
         self.entry_s = [utc_s(f.entry_time_utc) for f in flights]
         self.step_s = words.spec.step_s
         self.time_s = np.arange(max_rows) * self.step_s          # every flight's rows, on the vocabulary's step
@@ -125,6 +125,11 @@ class Speaker:
         if model.edge_features != SINGLE_EDGE_FEATURES or model.traffic_features:
             raise ValueError(f"a scene prior (edge features {list(model.edge_features)}, traffic features "
                              f"{list(model.traffic_features)}) speaks in the scene loop, not to single aircraft")
+
+    def _contexts(self, flights: Sequence[FlightSignals], landings: Mapping[str, Landings] | None
+                  ) -> list[Landings | None]:
+        """Each flight's landing context, its own landing left out (None for a variant without it)."""
+        return [own_context(f, landings[f.airport]) if landings is not None else None for f in flights]
 
     def _more_masked_columns(self) -> tuple[int, ...]:
         """Columns masked beyond the vocabulary's and the procedure's (none here)."""

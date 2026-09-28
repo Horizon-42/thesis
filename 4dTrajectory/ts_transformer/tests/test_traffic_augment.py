@@ -69,3 +69,25 @@ def test_an_insertion_lands_the_gap_ahead_on_the_clock_and_a_moved_start_moves_t
     # nothing to move: D never applies alone
     assert augment(scene, signals["KXXX:f3"], inputs, [], np.random.default_rng(3), windows, spec.step_s,
                    kinds=("D",)) is None
+
+
+def test_the_speaking_flights_landings_are_the_scenes(tmp_path, monkeypatch):
+    """A moved leader's landing moves; an inserted flight's is added; the rest are the airport's."""
+    from ts_transformer.experiments.traffic_augment import moved
+    from ts_transformer.experiments.traffic_speaking import INSERTED, scene_landings, scene_of
+    from ts_transformer.prior.scene import Landings
+
+    airport, _, spec = _airport(tmp_path, monkeypatch)
+    times = np.array(sorted(f.presence.landing_s for f in airport.flights.flights.values()))
+    base = Landings(times, {"09": times})
+    scene = scene_of(airport, "KXXX:f1", LIMIT_S, spec.step_s)
+    leader = replace(scene, moved=(moved(scene.rows("KXXX:f2"), scene.track("KXXX:f2"), 40.0, "KXXX:f2", spec.step_s),))
+    moved_landings = scene_landings(base, leader)
+    original = airport.flights.flights["KXXX:f2"].presence.landing_s
+    assert original not in moved_landings.times_s and original + 40.0 in moved_landings.by_runway["09"]
+    assert len(moved_landings.times_s) == len(times)
+    inserted = replace(scene, moved=(moved(scene.rows("KXXX:f3"), scene.track("KXXX:f3"), -3_600.0,
+                                           "KXXX:f3" + INSERTED, spec.step_s),))
+    added = scene_landings(base, inserted)
+    assert len(added.times_s) == len(times) + 1 and np.all(np.diff(added.times_s) >= 0.0)
+
