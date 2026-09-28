@@ -732,8 +732,9 @@ flight's asked rows), so the val NLL per step reads against base's 0.2643.
 - Writes `checkpoint.pt`, `config.json`, `procedure_masks.json` (none: teacher forcing) and `history.json` into a NEW
   directory, from a clean tree unless `--limit` (SMOKE: the first N samples of each split). Train 15,812 samples (45
   asking nothing, left out), val 3,800; 423 s per epoch on the RTX 4060.
-- Formal: `outputs/POOLED/prior/m2_scene_20260928/scene_s1337` (`17719c20`, clean): best at epoch 14 of 17, val 0.2681
-  per step against base's 0.2643 (its second seed 0.2644); 2.0 h. Read by R30.
+- Formal: `outputs/POOLED/prior/m2_scene_20260928/scene_s1337` (`17719c20`, clean, an update after every batch): best at
+  epoch 14 of 17, val 0.2681 per step against base's 0.2643 (its second seed 0.2644); 2.0 h. `scene_acc4_s1337`
+  (`a7abbe86`, clean, `--accumulate 4`): best at epoch 19 of 22, val 0.2667; 2.6 h. Both read by R30.
 
 ### R30 · `run_ts.py traffic_scene_readout` — multi-aircraft M2's readout: what the scene prior gains from seeing traffic (design §6.1, §7)
 
@@ -753,5 +754,7 @@ prior is read and recorded as one. A readout only (design §6.1: recorded; a lea
 a second seed). Writes `scene_readout.json` (`ts-traffic-scene-readout-v1`); about a minute on the GPU. Formal:
 `outputs/POOLED/traffic/scene_readout_20260928/` (`31814869`): the scene prior is better than base nowhere — 0.2880 per
 step against 0.2839 (alone 0.2872), speed with a leader +0.0008, heading +0.0020; M1's gap stays (speed · leader +0.0080
-against base's +0.0077); cutting the attention between aircraft barely moves its words (KL ≤ 0.008). Readout
-`docs/two_tier/readouts/2026-09-28_m2_scene_prior.zh.md`.
+against base's +0.0077); cutting the attention between aircraft barely moves its words (KL ≤ 0.008).
+`scene_readout_acc4_20260928/` (`a7abbe86`, the `--accumulate 4` prior): 0.2868 (alone 0.2867), speed with a leader
++0.0005, heading +0.0013, M1's gap +0.0079 — the batch size explains part of the overall gap, the traffic is still
+unused. Readout `docs/two_tier/readouts/2026-09-28_m2_scene_prior.zh.md` §2, §5.
