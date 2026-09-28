@@ -180,6 +180,10 @@ def test_a_long_segment_is_cut_and_a_flight_across_the_cut_is_context_before_it(
     loss_from = int(np.argmax(second["asked"].any(axis=-1).any(axis=0)))
     assert loss_from > 0 and not asked[:loss_from].any() and asked[loss_from:].any()
     assert second["rows"][a, 0] == 0                                     # it starts at its own row 0: context
+    # what a batch asks of it is counted from the loss window on (the update's divisor, `asked_steps`)
+    from ts_transformer.experiments.traffic_prior_train import asked_steps
+
+    assert asked_steps(built[1]) == int(second["asked"].any(axis=-1).sum()) > 0
 
 
 def test_scene_batches_group_samples_by_padded_size():
@@ -222,5 +226,56 @@ def test_the_scene_training_runner_writes_a_scene_prior_its_loader_reads(tmp_pat
     assert loaded.payload["edge_source_sha256"] == traffic_scene_data.edge_source_sha256()
     epochs = json.loads((out / "history.json").read_text(encoding="utf-8"))["epochs"]
     assert len(epochs) == 2 and all(row["batches"] >= 1 and row["asked_steps"] > 0 for row in epochs)
+    assert all(row["updates"] == -(-row["batches"] // traffic_prior_train.ACCUMULATE) for row in epochs)
+    assert json.loads((out / "config.json").read_text(encoding="utf-8"))["accumulate"] == traffic_prior_train.ACCUMULATE
     with pytest.raises(SystemExit):                                                   # never overwritten
         traffic_prior_train.main(args)
+    # an update after every batch: as many updates as batches
+    every = tmp_path / "every"
+    assert traffic_prior_train.main([*args[:3], str(every), *args[4:], "--accumulate", "1"]) == 0
+    rows = json.loads((every / "history.json").read_text(encoding="utf-8"))["epochs"]
+    assert all(row["updates"] == row["batches"] for row in rows)
+
+
+def test_accumulated_batches_give_the_gradient_of_one_batch_holding_them_all(tmp_path, monkeypatch):
+    """Two batches accumulated, each divided by the aircraft-steps both ask, give the gradient of one batch holding both
+    samples (padding changes nothing the loss reads); `asked_steps` counts what the batch asks."""
+    from ts_transformer.experiments import traffic_scene_data
+    from ts_transformer.experiments.traffic_prior_train import accumulate, asked_steps, scene_batch
+    from ts_transformer.experiments.traffic_scene_data import build_split
+    from ts_transformer.inference.scene_edges import EDGE_FEATURES
+    from ts_transformer.instructions.artefact import load_candidates
+    from ts_transformer.instructions.words import Words
+    from ts_transformer.prior.data import candidate_table, column_classes
+    from ts_transformer.prior.model import Prior, PriorConfig
+
+    directory, manifest, spec, _ = _artefact(tmp_path, [0.0, 30.0, 10.0, 3_600.0], [0, 1, 3])
+    monkeypatch.setattr(traffic_scene_data, "arrival_manifest_path", lambda code: manifest)
+    built, _ = build_split(directory, "train", spec, ("KXXX",), None, 2_048)
+    geometries = load_candidates(directory)
+    slots = max(len(g.candidates) for g in geometries.values())
+    config = PriorConfig(classes=column_classes(Words(spec), slots), airports=("KXXX",), candidate_slots=slots,
+                         variant="no-context", d_model=32, layers=2, heads=4, feedforward=64, dropout=0.0)
+    torch.manual_seed(0)
+    model = Prior(config, torch.as_tensor(candidate_table(geometries, ("KXXX",), slots)), EDGE_FEATURES).double()
+    cpu = torch.device("cpu")
+
+    def batch(indices):
+        out = scene_batch(built, indices, slots, cpu)
+        return {name: value.double() if value.is_floating_point() else value for name, value in out.items()}
+
+    asked = asked_steps(built[0]) + asked_steps(built[1])
+    assert asked_steps(built[0]) == int(batch([0])["asked"].any(dim=-1).sum()) > 0
+    assert asked == int(batch([0, 1])["asked"].any(dim=-1).sum())
+
+    def gradients(batches):
+        model.zero_grad(set_to_none=True)
+        loss = accumulate(model, batches, asked, "test")
+        return loss, [p.grad.clone() for p in model.parameters() if p.grad is not None]
+
+    split_loss, split = gradients([batch([0]), batch([1])])
+    whole_loss, whole = gradients([batch([0, 1])])
+    assert split_loss == pytest.approx(whole_loss, rel=1e-12)
+    assert len(split) == len(whole)
+    for a, b in zip(split, whole):
+        torch.testing.assert_close(a, b, rtol=1e-9, atol=1e-12)

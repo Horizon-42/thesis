@@ -719,8 +719,11 @@ flight's asked rows), so the val NLL per step reads against base's 0.2643.
   signals' fitted velocities (centred fits, 7.5 s of the future; the step 3–4 review, 2026-09-28): a first row has none
   (`motion_unknown`), an aircraft that did not move has no frame (89 of 12.1 million row pairs).
 - **Batches**: at most 16,384 padded aircraft-steps, samples of similar size together: 1,976 batches per epoch on the
-  training days against base's 531 (a scene sample also holds background, context before the cut and padding) — a
-  smaller effective batch, stated, not matched; `history.json` records each epoch's batches and asked steps.
+  training days against base's 531 (a scene sample also holds background, context before the cut and padding). Since
+  2026-09-28 (design §6.5 step 6, §9 item 21) `--accumulate` (default 4) sums the gradients of 4 batches per update, the
+  loss per aircraft-step asked over all of them: 494 updates of about 16,700 asked steps per epoch against base's 531 of
+  about 15,600; the warm-up counts updates. The first formal run (`scene_s1337`) updated after every batch.
+  `history.json` records each epoch's batches, updates and asked steps.
 - **Memory**: each flight's rows are held once and laid out per batch (`prior.scene_data.placed`): 4.0 GB peak to build
   the training days (13 GB when every sample held dense arrays).
 - **Pinned edge semantics**: the checkpoint (`ts-prior-checkpoint-v4`) carries `edge_features` and `edge_source_sha256`

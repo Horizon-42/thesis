@@ -9,14 +9,17 @@ computed as its batch is formed. The loss is the columns' cross entropy summed o
 sentence, from its own first predicted step, on the sample's loss steps — per aircraft-step asked.
 
 The same token budget is a smaller batch than base's: base's tokens are the asked flights' own steps, a scene sample's
-also hold background aircraft, context before the cut and the aircraft axis' padding, so an epoch takes more, smaller
-steps (``history.json`` records each epoch's). Stated, not matched: matching the asked steps per step would multiply
-the padded tokens a batch holds on the GPU.
+also hold background aircraft, context before the cut and the aircraft axis' padding — 1,976 batches per epoch on the
+training days against base's 531. So the gradient of ``--accumulate`` (`ACCUMULATE`) consecutive batches is summed
+before each update, the loss per aircraft-step asked over all of them: 494 updates per epoch of about 16,700 asked steps
+each, against base's 531 of about 15,600 (design §6.5 step 6, §9 item 21; the first formal run, `scene_s1337`, updated
+after every batch). The warm-up counts updates, as base's. ``history.json`` records each epoch's batches, updates and
+asked steps.
 
 Writes into ``--out`` (a new directory; a clean tree unless ``--limit``, a SMOKE option that reads only the first samples
 of each split and says so; a sample of background aircraft alone asks nothing and is left out, counted):
 ``checkpoint.pt`` (`prior_train.SCENE_CHECKPOINT_SCHEMA`: base's payload plus the edge
-features and `traffic_scene_data.edge_source_sha256`), ``config.json`` (the artefact, its spec, labeller and day split, the rosters, what the samples hold, the git
+features and `traffic_scene_data.edge_source_sha256`), ``config.json`` (the artefact, its spec, labeller and day split, the rosters, what the samples hold, the batches per update, the git
 state), ``procedure_masks.json`` (none: teacher forcing speaks under no procedure's masks) and ``history.json``.
 
     python run_ts.py traffic_prior_train --variant full --seed 1337 \\
@@ -31,7 +34,7 @@ import copy
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, Iterator, Sequence
+from typing import Any, Callable, Iterable, Iterator, Sequence
 
 import numpy as np
 import torch
@@ -54,6 +57,9 @@ from ts_transformer.prior.train import TrainConfig, batch_logits, column_nll
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 RUNNER = "ts_transformer.experiments.traffic_prior_train"
+#: Batches per update: the integer nearest 1,976 / 531, the training days' batches per epoch here and base's (module
+#: docstring).
+ACCUMULATE = 4
 
 
 def scene_batches(built: Sequence[Built], tokens: int, rng: np.random.Generator | None) -> Iterator[list[int]]:
@@ -88,6 +94,26 @@ def scene_nll(model: Prior, batch: dict[str, torch.Tensor]) -> tuple[torch.Tenso
     return nll, int(batch["asked"].any(dim=-1).sum())
 
 
+def asked_steps(built: Built) -> int:
+    """The aircraft-steps its sample asks (the steps any column is asked at)."""
+    return sum(int(built.sample.asked(node).any(axis=1).sum()) for node in built.sample.nodes)
+
+
+def accumulate(model: Prior, batches: Iterable[dict[str, torch.Tensor]], asked: int, where: str) -> float:
+    """Backpropagate ``batches`` one at a time (their gradients add up), each batch's summed NLL divided by ``asked``,
+    the aircraft-steps all of them ask — the gradient of their loss per aircraft-step asked, taken as one batch; returns
+    that loss."""
+    total = 0.0
+    for batch in batches:
+        nll, _ = scene_nll(model, batch)
+        part = nll.sum() / asked
+        if not torch.isfinite(part):
+            raise FloatingPointError(f"{where}: the loss is {float(part)}")
+        part.backward()
+        total += float(part.detach())
+    return total
+
+
 @torch.no_grad()
 def scene_evaluate(model: Prior, built: Sequence[Built], config: TrainConfig, slots: int, device: torch.device
                    ) -> dict[str, Any]:
@@ -102,35 +128,39 @@ def scene_evaluate(model: Prior, built: Sequence[Built], config: TrainConfig, sl
 
 
 def scene_train(model: Prior, train_built: Sequence[Built], val_built: Sequence[Built], config: TrainConfig, slots: int,
-                device: torch.device, log: Callable[[str], None]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """`prior.train.train` on scene samples: the same optimiser, schedule, clipping and early stopping."""
+                accumulate_batches: int, device: torch.device, log: Callable[[str], None]
+                ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """`prior.train.train` on scene samples: the same optimiser, schedule, clipping and early stopping, an update after
+    every ``accumulate_batches`` batches."""
     torch.manual_seed(config.seed)
     rng = np.random.default_rng(config.seed)
     optimiser = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
     schedule = torch.optim.lr_scheduler.LambdaLR(optimiser, lambda step: min(1.0, (step + 1) / config.warmup_steps))
     best, best_state, stale, history = float("inf"), copy.deepcopy(model.state_dict()), 0, []
+    asked_by_sample = [asked_steps(b) for b in train_built]
     for epoch in range(1, config.max_epochs + 1):
         started = time.perf_counter()
         model.train()
-        total, steps, batches = 0.0, 0, 0
-        for indices in scene_batches(train_built, config.tokens_per_batch, rng):
-            nll, asked = scene_nll(model, scene_batch(train_built, indices, slots, device))
-            loss = nll.sum() / asked
-            if not torch.isfinite(loss):
-                raise FloatingPointError(f"epoch {epoch}: the loss is {float(loss)}")
+        total, steps, batches, updates = 0.0, 0, 0, 0
+        groups = list(scene_batches(train_built, config.tokens_per_batch, rng))
+        for first in range(0, len(groups), accumulate_batches):
+            update = groups[first: first + accumulate_batches]
+            asked = sum(asked_by_sample[i] for indices in update for i in indices)
             optimiser.zero_grad(set_to_none=True)
-            loss.backward()
+            loss = accumulate(model, (scene_batch(train_built, indices, slots, device) for indices in update), asked,
+                              f"epoch {epoch}")
             nn.utils.clip_grad_norm_(model.parameters(), config.clip_norm)
             optimiser.step()
             schedule.step()
-            total += float(loss.detach()) * asked
+            total += loss * asked
             steps += asked
-            batches += 1
+            batches += len(update)
+            updates += 1
         val = scene_evaluate(model, val_built, config, slots, device)
         if not np.isfinite(val["nll_per_step"]):
             raise FloatingPointError(f"epoch {epoch}: the val NLL is {val['nll_per_step']}")
         row = {"epoch": epoch, "train_nll_per_step": total / steps, "val_nll_per_step": val["nll_per_step"],
-               "val_per_column": val["per_column"], "batches": batches, "asked_steps": steps,
+               "val_per_column": val["per_column"], "batches": batches, "updates": updates, "asked_steps": steps,
                "seconds": time.perf_counter() - started}
         history.append(row)
         improved = val["nll_per_step"] < best
@@ -152,9 +182,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--variant", required=True, choices=sorted(VARIANTS))
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--limit", type=int, default=None, help="SMOKE: the first N samples of each split")
+    parser.add_argument("--accumulate", type=int, default=ACCUMULATE, help="batches per update (module docstring)")
     for field, default in asdict(TrainConfig()).items():
         parser.add_argument(f"--{field.replace('_', '-')}", type=type(default), default=default)
     args = parser.parse_args(argv)
+    if args.accumulate < 1:
+        parser.error("--accumulate is at least 1")
     instructions = args.instructions if args.instructions.is_absolute() else REPO_ROOT / args.instructions
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
     if out.exists():
@@ -187,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
     model = Prior(model_config, torch.as_tensor(candidate_table(geometries, airports, slots)), EDGE_FEATURES).to(device)
     parameters = sum(p.numel() for p in model.parameters())
     print(f"model {parameters} parameters, {len(EDGE_FEATURES)} edge features", flush=True)
-    best_state, history = scene_train(model, data["train"], data["val"], config, slots, device,
+    best_state, history = scene_train(model, data["train"], data["val"], config, slots, args.accumulate, device,
                                       lambda line: print(line, flush=True))
     out.mkdir(parents=True)
     torch.save({"schema": SCENE_CHECKPOINT_SCHEMA, "model_config": model_config.to_dict(), "train_config": asdict(config),
@@ -196,7 +229,8 @@ def main(argv: list[str] | None = None) -> int:
                out / "checkpoint.pt")
     write_json_atomic(out / "config.json", {
         "schema": SCENE_CHECKPOINT_SCHEMA, "written_utc": utc_now(), "model": model_config.to_dict(),
-        "edge_features": list(EDGE_FEATURES), "edge_source_sha256": edge_source, "train": asdict(config), "parameters": parameters, "n_look": N_LOOK,
+        "edge_features": list(EDGE_FEATURES), "edge_source_sha256": edge_source, "train": asdict(config),
+        "accumulate": args.accumulate, "parameters": parameters, "n_look": N_LOOK,
         "context_window_s": CONTEXT_WINDOW_S,
         "instructions": {"directory": str(instructions), "spec_sha256": spec.sha256,
                          "labeller_source_sha256": spec_labeller_source(instructions),
