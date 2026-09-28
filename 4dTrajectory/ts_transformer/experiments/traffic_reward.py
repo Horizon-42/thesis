@@ -72,8 +72,9 @@ from ts_transformer.experiments.prior_augmented_reward import (
 from ts_transformer.experiments.prior_free_generation import grouped, limits_s, start_altitude_windows
 from ts_transformer.experiments.prior_landing_reward import GUARD_RUNWAY_DROP, TIE_SHARE
 from ts_transformer.experiments.prior_train import (
-    PRIOR_CHECKPOINT_SCHEMA, TRAFFIC_CHECKPOINT_SCHEMA, load_prior, rosters,
+    PRIOR_CHECKPOINT_SCHEMA, TRAFFIC_CHECKPOINT_SCHEMA, LoadedPrior, load_prior, rosters,
 )
+from ts_transformer.experiments.traffic_loop import LOST_SEPARATION
 from ts_transformer.experiments.traffic_free_generation import (
     AIRCRAFT_STEPS, SceneSentences, augmented_scenes, recorded_rows, scene_sentences, speaking_batches, summary,
 )
@@ -218,13 +219,13 @@ def landing_gap_s(scene: Scene, runway: str, landing_s: float) -> float | None:
 
 
 def ordering(rows: Sequence[Mapping[str, Any]], round_: Round, samples: int, step_s: float) -> dict[str, Any]:
-    """On real scenes (design §4.3, one aircraft commanded): the landed sentences' median time from the first predicted
-    step to the landing and median gap to the landing before on the runway (`landing_gap_s`: the landing at its first
-    predicted step's time — its scene step, within a second — plus its flight time), each over the same flights'
-    recorded ones."""
+    """On real scenes (design §4.3, one aircraft commanded): the sentences that landed with no loss ending them first
+    (VISUAL) — their median time from the first predicted step to the landing and median gap to the landing before on
+    the runway (`landing_gap_s`: the landing at its first predicted step's time — its scene step, within a second — plus
+    its flight time) — each over the same flights' recorded ones."""
     times, gaps = [], []
     for s, row in enumerate(rows):
-        if row["outcome"] != LANDED:
+        if row[VISUAL]["outcome"] != LANDED:
             continue
         scene = round_.scenes[s // samples]
         times.append(row["end_s"])
@@ -251,10 +252,13 @@ def ordering(rows: Sequence[Mapping[str, Any]], round_: Round, samples: int, ste
 def side_readout(rows: Sequence[dict[str, Any]], round_: Round, samples: int, step_s: float, *,
                  real: bool) -> dict[str, Any]:
     """One side of the select readout (module docstring)."""
+    # the reward over the sentences the separation summary counts: a flight already in a loss it answers for at its
+    # first predicted step is left out (`traffic_free_generation.summary`)
+    counted = [r for r in rows if not r["starts_in_a_loss"]]
     out: dict[str, Any] = {"free_generation": grouped(list(rows)), "separation": summary(rows)["scene"],
-                           "reward": float(np.mean([r["reward"] for r in rows])),
-                           "reward_by_kind": {kind: float(np.mean([r["reward"] for r in rows if r["kind"] == kind]))
-                                              for kind in sorted({r["kind"] for r in rows})}}
+                           "reward": float(np.mean([r["reward"] for r in counted])),
+                           "reward_by_kind": {kind: float(np.mean([r["reward"] for r in counted if r["kind"] == kind]))
+                                              for kind in sorted({r["kind"] for r in counted})}}
     if real:
         out["ordering"] = ordering(rows, round_, samples, step_s)
     return out
@@ -303,6 +307,17 @@ def sentence_split(round_: Round, spoken: SceneSentences, keep: np.ndarray, samp
     return SceneSplit(dataclasses.replace(table, flights=flights), scenes, positions)
 
 
+def trained_scenes(spoken: SceneSentences, samples: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(each sentence's advantage — its reward less its scene's mean —, each scene's "starts in a loss the speaking
+    aircraft answers for", the sentences trained on: those of the scenes whose sentences differ and that do not start in
+    a loss)``."""
+    by_scene = np.array([r["reward"] for r in spoken.rows]).reshape(-1, samples)
+    starts_lost = np.array([any(r["starts_in_a_loss"] for r in spoken.rows[j * samples: (j + 1) * samples])
+                            for j in range(len(by_scene))])
+    trained = (by_scene.min(axis=1) != by_scene.max(axis=1)) & ~starts_lost
+    return group_advantages(by_scene).reshape(-1), starts_lost, np.flatnonzero(np.repeat(trained, samples))
+
+
 def write_sentences(path: Path, round_: Round, spoken: SceneSentences, advantages: np.ndarray) -> None:
     steps = np.array([len(s) for s in spoken.said])
     np.savez_compressed(path, dataset_id=np.array([s.dataset_id for s in round_.batch.signals]),
@@ -318,12 +333,11 @@ def round_summary(round_: Round, spoken: SceneSentences, samples: int) -> dict[s
     the scenes with a contrast, the ones starting in a loss."""
     rows = spoken.rows
     reward = np.array([r["reward"] for r in rows]).reshape(-1, samples)
-    starts_lost = np.array([any(r["starts_in_a_loss"] for r in rows[j * samples: (j + 1) * samples])
-                            for j in range(len(round_.scenes))])
+    _, starts_lost, _ = trained_scenes(spoken, samples)
 
     def shares(members: Sequence[dict[str, Any]]) -> dict[str, float]:
         return {"sentences": len(members), "reward": float(np.mean([r["reward"] for r in members])),
-                "lost_separation": float(np.mean([r[VISUAL]["outcome"] == "lost_separation" for r in members])),
+                "lost_separation": float(np.mean([r[VISUAL]["outcome"] == LOST_SEPARATION for r in members])),
                 "landed": float(np.mean([r["outcome"] == LANDED for r in members]))}
 
     return {"all": shares(rows),
@@ -331,6 +345,16 @@ def round_summary(round_: Round, spoken: SceneSentences, samples: int) -> dict[s
             "scenes": len(round_.scenes), "scenes_starting_in_a_loss": int(starts_lost.sum()),
             "scenes_with_contrast": int(((reward.min(axis=1) != reward.max(axis=1)) & ~starts_lost).sum()),
             "kinds": dict(Counter(round_.kinds))}
+
+
+def ordering_failures(row: Mapping[str, Any]) -> list[str]:
+    """The ordering guards (design §4.3) a round's real-scene readout fails: its median time to land and its median gap to
+    the landing before on the runway at most `GUARD_ORDER_GROWTH` × the same flights' recorded ones — unreadable (no
+    landing, or none with a landing before it) fails. Against the record, not round 0: the start is read against them
+    before training (`main` refuses a start that fails them — no round could then be chosen)."""
+    order = row["real"]["ordering"]
+    return [name for name, ratio in (("time to land", order["time_ratio"]), ("landing gap", order["gap_ratio"]))
+            if ratio is None or ratio > GUARD_ORDER_GROWTH]
 
 
 def guarded_choice(history: Sequence[Mapping[str, Any]], labelled: Mapping[str, Mapping[str, float]]
@@ -350,11 +374,7 @@ def guarded_choice(history: Sequence[Mapping[str, Any]], labelled: Mapping[str, 
             failed.append("observed runway")
         if row["real"]["separation"]["lost_separation"] > start["real"]["separation"]["lost_separation"] + GUARD_LOSS_RISE:
             failed.append("lost separation")
-        order = row["real"]["ordering"]
-        if order["time_ratio"] is None or order["time_ratio"] > GUARD_ORDER_GROWTH:
-            failed.append("time to land")
-        if order["gap_ratio"] is not None and order["gap_ratio"] > GUARD_ORDER_GROWTH:
-            failed.append("landing gap")
+        failed += ordering_failures(row)
         for side in ("real", "augmented"):
             said = row[side]["free_generation"]["all"]["words_after_first_per_flight"]
             first_said = start[side]["free_generation"]["all"]["words_after_first_per_flight"]
@@ -365,6 +385,24 @@ def guarded_choice(history: Sequence[Mapping[str, Any]], labelled: Mapping[str, 
     candidates = [row for row in history if row["round"] not in excluded]
     best = max(row["augmented"]["reward"] for row in candidates)
     return next(row["round"] for row in candidates if row["augmented"]["reward"] >= best - TIE_SHARE), excluded
+
+
+def write_traffic_prior(directory: Path, model: Prior, start_dir: Path, start: LoadedPrior, spec_sha256: str, *,
+                        git: Mapping[str, Any], smoke: bool, fine_tuning: Mapping[str, Any]) -> None:
+    """``model`` as a prior run `prior_train.load_prior` reads (`prior_train.TRAFFIC_CHECKPOINT_SCHEMA`): its checkpoint
+    — the start's payload with this state, the edge and traffic features, the edge code's hash and ``start`` (the
+    single-aircraft prior it grew from: its directory and checkpoint sha256) — its ``config.json`` (the start's, with
+    these) and the procedure's masks it speaks under (the start's; ``start`` as `load_prior` opened ``start_dir``)."""
+    grown_from = {"directory": str(start_dir), "checkpoint_sha256": file_sha256(start_dir / "checkpoint.pt")}
+    features = {"edge_features": list(model.edge_features), "traffic_features": list(model.traffic_features),
+                "edge_source_sha256": edge_source_sha256()}
+    torch.save({"schema": TRAFFIC_CHECKPOINT_SCHEMA, "model_config": model.config.to_dict(),
+                "train_config": start.config["train"], "state": copy.deepcopy(model.state_dict()),
+                "spec_sha256": spec_sha256, **features, "start": grown_from}, directory / "checkpoint.pt")
+    write_json_atomic(directory / "config.json", {**start.config, "schema": TRAFFIC_CHECKPOINT_SCHEMA,
+                                                  "written_utc": utc_now(), "git": dict(git), "smoke": smoke, **features,
+                                                  "start": grown_from, "fine_tuning": dict(fine_tuning)})
+    write_masks(directory, start.procedure_masks, writer=RUNNER, git=dict(git))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -410,7 +448,8 @@ def main(argv: list[str] | None = None) -> int:
     params, record, words = replay.open_executor(executor_dir, instructions)
     spec = load_spec(instructions)
     step_s = spec.step_s
-    single, start_payload, start_config, start_masks = load_prior(prior_dir, instructions)
+    start = load_prior(prior_dir, instructions)
+    single, start_payload, start_config, start_masks = start
     base, base_payload, base_config, _ = load_prior(base_dir, instructions)
     for directory, payload, loaded in ((prior_dir, start_payload, start_config), (base_dir, base_payload, base_config)):
         if loaded["smoke"] or payload["schema"] != PRIOR_CHECKPOINT_SCHEMA:
@@ -503,6 +542,10 @@ def main(argv: list[str] | None = None) -> int:
     readout = read_select(0)
     write_json_atomic(directory / "readout.json", readout)
     history = [history_row(0, readout)]
+    failing = ordering_failures(history[0])
+    if failing:
+        raise SystemExit(f"the start fails the ordering guards {failing} against the record "
+                         f"({history[0]['real']['ordering']}): no round could be chosen — not training")
     tuner = SceneRewardTuner(model, base, config, device, seed=args.seed,
                              traffic_learning_rate=args.traffic_learning_rate, step_s=step_s)
     generator = torch.Generator(device=device).manual_seed(args.seed)
@@ -528,12 +571,7 @@ def main(argv: list[str] | None = None) -> int:
         spoken = speak(model, round_, args.samples, words, params, landings, start_masks, generator=generator,
                        budget=args.aircraft_steps, source="train")
         earned = np.array([r["reward"] for r in spoken.rows])
-        by_scene = earned.reshape(-1, args.samples)
-        starts_lost = np.array([any(r["starts_in_a_loss"] for r in spoken.rows[j * args.samples: (j + 1) * args.samples])
-                                for j in range(len(round_.scenes))])
-        advantages = group_advantages(by_scene).reshape(-1)
-        trained = (by_scene.min(axis=1) != by_scene.max(axis=1)) & ~starts_lost
-        keep = np.flatnonzero(np.repeat(trained, args.samples))
+        advantages, _, keep = trained_scenes(spoken, args.samples)
         write_sentences(directory / "sentences.npz", round_, spoken, advantages)
         described = {**round_summary(round_, spoken, args.samples), "trained_on": len(keep),
                      "augmented_left_out": left_out, "drawn": pool.drawn}
@@ -557,19 +595,11 @@ def main(argv: list[str] | None = None) -> int:
             f"{passed['reward_mean']:.4f}, KL to the base at the start {start_distance}, {passed['kl_mean']:.4f} in the "
             f"pass (max {passed['kl_max']:.4f}), data NLL {passed['data_mean']:.4f}, words outside the clip "
             f"{passed['clipped_share']:.4f}")
-        torch.save({"schema": TRAFFIC_CHECKPOINT_SCHEMA, "model_config": model.config.to_dict(),
-                    "train_config": start_config["train"], "state": copy.deepcopy(model.state_dict()),
-                    "spec_sha256": spec.sha256, "edge_features": list(model.edge_features),
-                    "traffic_features": list(model.traffic_features), "edge_source_sha256": edge_source_sha256()},
-                   directory / "checkpoint.pt")
-        write_json_atomic(directory / "config.json", {
-            **start_config, "schema": TRAFFIC_CHECKPOINT_SCHEMA, "written_utc": utc_now(), "git": git,
-            "smoke": args.smoke, "edge_features": list(model.edge_features),
-            "traffic_features": list(model.traffic_features), "edge_source_sha256": edge_source_sha256(),
-            "fine_tuning": {"schema": TRAFFIC_REWARD_SCHEMA, "from": str(prior_dir), "base": str(base_dir),
-                            "round": round_number, "optimiser": asdict(config),
-                            "traffic_learning_rate": args.traffic_learning_rate, "samples": args.samples}})
-        write_masks(directory, start_masks, writer=RUNNER, git=git)
+        write_traffic_prior(directory, model, prior_dir, start, spec.sha256, git=git, smoke=args.smoke,
+                            fine_tuning={"schema": TRAFFIC_REWARD_SCHEMA, "from": str(prior_dir), "base": str(base_dir),
+                                         "round": round_number, "optimiser": asdict(config),
+                                         "traffic_learning_rate": args.traffic_learning_rate,
+                                         "samples": args.samples})
         readout = read_select(round_number)
         write_json_atomic(directory / "readout.json", readout)
         history.append(history_row(round_number, readout, train_pass=passed,

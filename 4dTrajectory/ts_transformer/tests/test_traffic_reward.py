@@ -1,7 +1,9 @@
 """Multi-aircraft M4's runner (`experiments/traffic_reward`, design §6.6 step 6): its sentences, cut at their judged ends
-and read back as training rows in their scenes, give back the distribution each word was sampled from; the landing gap
-reads the landing before on the runway; a round refuses to run short of augmented scenes; the guards exclude a round by
-name and the choice takes the earliest within the tie. On the scene-data fixture (a tmp artefact)."""
+and read back as training rows in their scenes, give back the distribution each word was sampled from — the others off
+the steps, a moved leader, the landing context; a scene starting in a loss is not trained on; the ordering and the traffic
+attention's readouts; the landing gap reads the landing before on the runway; a round refuses to run short of augmented
+scenes; a traffic prior it writes is read back by `load_prior`; the guards exclude a round by name and the choice takes the
+earliest within the tie. On the scene-data fixture (a tmp artefact)."""
 
 from __future__ import annotations
 
@@ -18,22 +20,9 @@ from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.tests.test_autopilot import _params, _physics
 from ts_transformer.tests.test_prior_speaker import _repeated
 from ts_transformer.tests.test_traffic_speaking import LIMIT_S, _batch
-from ts_transformer.tests.test_traffic_tuner import _split, _traffic_model
+from ts_transformer.tests.test_traffic_tuner import _airport, _split, _traffic_model
 
 CPU = torch.device("cpu")
-
-
-def _airport(tmp_path, monkeypatch, entries_s, labelled):
-    from ts_transformer.experiments import traffic_scene_data
-    from ts_transformer.experiments.traffic_speaking import scene_airports
-    from ts_transformer.instructions.artefact import load_signals
-    from ts_transformer.tests.test_traffic_scene_data import _artefact
-
-    directory, manifest, spec, _ = _artefact(tmp_path, entries_s, labelled)
-    monkeypatch.setattr(traffic_scene_data, "arrival_manifest_path", lambda code: manifest)
-    airports, _ = scene_airports(directory, "train", spec, ("KXXX",), None, 2_048)
-    signals = {s.dataset_id: s for s in load_signals(directory, "train")}
-    return airports["KXXX"], signals, spec
 
 
 def _patch_physics(monkeypatch, airport, signals, keys, samples):
@@ -63,23 +52,33 @@ def _patch_physics(monkeypatch, airport, signals, keys, samples):
         monkeypatch.setattr(module, "limits_s", lambda batch, params, step_s, augmented: [LIMIT_S] * len(batch.readings))
 
 
-def test_a_round_s_sentences_train_on_what_their_words_were_sampled_from(tmp_path, monkeypatch):
+@pytest.mark.parametrize("moved", [False, True])
+def test_a_round_s_sentences_train_on_what_their_words_were_sampled_from(tmp_path, monkeypatch, moved):
+    """f1 follows f0 by 120 s on its approach (in its scene, not in a loss; f0's rows 0.7 s off f1's steps), f2 an hour
+    later alone; ``moved``: f0 moved 37.3 s closer (augmentation D) and the prior reads the landing context — the scene's."""
+    from ts_transformer.experiments.traffic_augment import moved as moved_flight
     from ts_transformer.experiments.traffic_free_generation import speaking_batches
     from ts_transformer.experiments.traffic_reward import Round, round_summary, sentence_split, speak
     from ts_transformer.experiments.traffic_speaking import scene_of
     from ts_transformer.experiments.traffic_tuner import scene_layout, scene_logits
     from ts_transformer.prior.train import to_batch
 
-    # f1 follows f0 by 120 s on its approach (in its scene, not in a loss), f2 an hour later alone
-    airport, signals, spec = _airport(tmp_path, monkeypatch, [0.0, 120.0, 3_600.0], [0, 1, 2])
+    airport, signals, spec, *context = _airport(tmp_path, monkeypatch, [0.7, 120.0, 3_600.0], [0, 1, 2], context=moved)
     words, samples, keys = Words(spec), 2, ["KXXX:f1", "KXXX:f2"]
     _patch_physics(monkeypatch, airport, signals, keys, samples)
     batch = _batch(airport, signals, spec, keys)
     scenes = [scene_of(airport, key, LIMIT_S, spec.step_s) for key in keys]
     assert scenes[0].others == ("KXXX:f0",) and scenes[1].others == ()
     geometry = airport.flights.geometry
-    round_ = Round(batch, scenes, [None, None], ["real", "A"], [np.ones(len(geometry.candidates), dtype=bool)] * 2)
-    model = _traffic_model(words)
+    landings, variant = None, "no-context"
+    if moved:
+        leader = scenes[0]
+        scenes[0] = replace(leader, moved=(moved_flight(leader.rows("KXXX:f0"), leader.track("KXXX:f0"), 37.3, "KXXX:f0",
+                                                        spec.step_s),))
+        (landings,), variant = context, "full"
+    round_ = Round(batch, scenes, [None, None], ["D" if moved else "real", "A"],
+                   [np.ones(len(geometry.candidates), dtype=bool)] * 2)
+    model = _traffic_model(words, variant=variant)
     recorded, original = [], model.logits
 
     def spy(h, tokens, valid, chosen, first):
@@ -89,21 +88,22 @@ def test_a_round_s_sentences_train_on_what_their_words_were_sampled_from(tmp_pat
 
     model.logits = spy
     try:
-        spoken = speak(model, round_, samples, words, _params(), None, ProcedureMasks.none(),
+        spoken = speak(model, round_, samples, words, _params(), landings, ProcedureMasks.none(),
                        generator=torch.Generator().manual_seed(4), budget=10 ** 9, source="train")
     finally:
         del model.logits
     assert [r["dataset_id"] for r in spoken.rows] == [k for k in keys for _ in range(samples)]
-    assert [r["kind"] for r in spoken.rows] == ["real", "real", "A", "A"]
+    assert [r["kind"] for r in spoken.rows] == [round_.kinds[0]] * 2 + ["A", "A"]
     assert all(r["reward"] == float(r["visual"]["outcome"] == "landed") for r in spoken.rows)
     assert not any(r["starts_in_a_loss"] for r in spoken.rows)
     for s, row in enumerate(spoken.rows):
         assert len(spoken.said[s]) == row["judged_steps"] and len(spoken.positions[s]) == N_LOOK + row["judged_steps"]
         assert all(len(codes) == row["judged_steps"] for codes in spoken.allowed[s].values())
     described = round_summary(round_, spoken, samples)
-    assert described["scenes"] == 2 and described["kinds"] == {"real": 1, "A": 1}
+    assert described["scenes"] == 2 and described["kinds"] == {round_.kinds[0]: 1, "A": 1}
     keep = np.arange(len(spoken.rows))
-    sentences = sentence_split(round_, spoken, keep, samples, _split([], words, geometry), None, ("KXXX",), spec.step_s)
+    table = replace(_split([], words, geometry), variant=variant)
+    sentences = sentence_split(round_, spoken, keep, samples, table, landings, ("KXXX",), spec.step_s)
     single = to_batch(sentences.split, list(keep), CPU)
     with torch.no_grad():
         logits = scene_logits(model, scene_layout(sentences, list(keep), single, spec.step_s))
@@ -173,3 +173,86 @@ def test_the_guards_exclude_a_round_by_name_and_the_choice_takes_the_earliest_wi
     assert excluded == {3: ["lost separation"], 4: ["landed"], 5: ["landing gap"],
                         6: ["real heading words", "augmented heading words"], 7: ["time to land"]}
     assert guarded_choice([_row(0, reward=0.5), _row(1, reward=0.4)], labelled) == (0, {})
+
+
+def test_a_scene_starting_in_a_loss_is_not_trained_on_and_the_readouts_read_the_rest(tmp_path, monkeypatch):
+    """f1 follows f0 by 30 s (in a loss it answers for at its first predicted step), f3 an hour later alone."""
+    from ts_transformer.experiments.traffic_reward import Round, ordering, round_summary, speak, trained_scenes
+    from ts_transformer.experiments.traffic_speaking import scene_of
+
+    airport, signals, spec = _airport(tmp_path, monkeypatch)
+    words, samples, keys = Words(spec), 2, ["KXXX:f1", "KXXX:f3"]
+    _patch_physics(monkeypatch, airport, signals, keys, samples)
+    batch = _batch(airport, signals, spec, keys)
+    scenes = [scene_of(airport, key, LIMIT_S, spec.step_s) for key in keys]
+    geometry = airport.flights.geometry
+    round_ = Round(batch, scenes, [None, None], ["real", "real"], [np.ones(len(geometry.candidates), dtype=bool)] * 2)
+    spoken = speak(_traffic_model(words), round_, samples, words, _params(), None, ProcedureMasks.none(),
+                   generator=torch.Generator().manual_seed(4), budget=10 ** 9, source="scene")
+    assert [r["starts_in_a_loss"] for r in spoken.rows] == [True, True, False, False]
+    for r in spoken.rows[2:]:
+        r["reward"] = float(r is spoken.rows[2])                   # f3's two sentences differ
+    advantages, starts_lost, keep = trained_scenes(spoken, samples)
+    assert list(starts_lost) == [True, False] and list(keep) == [2, 3]
+    assert np.allclose(advantages[2:], [0.5, -0.5])
+    described = round_summary(round_, spoken, samples)
+    assert described["scenes_starting_in_a_loss"] == 1 and described["scenes_with_contrast"] == 1
+    # the ordering: f3 has no landing before it in its scene; f1 lands 20 s after f2 (background, entering 10 s after f0)
+    order = ordering(spoken.rows, round_, samples, spec.step_s)
+    assert order["recorded_gap_s"] == pytest.approx(20.0, abs=1.0)
+    landed = [r for r in spoken.rows if r["visual"]["outcome"] == "landed"]
+    assert order["time_to_land_s"] == (float(np.median([r["end_s"] for r in landed])) if landed else None)
+
+
+def test_the_traffic_readout_is_zero_at_the_start_and_reads_the_layer_once_it_moves(tmp_path, monkeypatch):
+    from ts_transformer.experiments.traffic_reward import traffic_readout
+    from ts_transformer.experiments.traffic_scene_data import build_split
+
+    _airport(tmp_path, monkeypatch)
+    from ts_transformer.instructions.artefact import load_spec
+    spec = load_spec(tmp_path / "artefact")
+    built = [b for b in build_split(tmp_path / "artefact", "train", spec, ("KXXX",), None, 2_048)[0] if b.sample.asks]
+    words = Words(spec)
+    at_zero = traffic_readout(_traffic_model(words, reads=False), built, 1, CPU)
+    moved = traffic_readout(_traffic_model(words, reads=True), built, 1, CPU)
+    assert at_zero["aircraft_steps_with_another"] > 0 and at_zero["traffic_output_over_residual"] == [0.0, 0.0]
+    assert all(r > 0.0 for r in moved["traffic_output_over_residual"])
+    assert moved["teacher_forced"]["nll_per_step"] != at_zero["teacher_forced"]["nll_per_step"]
+
+
+def test_a_traffic_prior_the_runner_writes_is_read_back_by_load_prior(tmp_path, monkeypatch):
+    import json
+
+    from ts_transformer.experiments import prior_train
+    from ts_transformer.experiments.prior_train import TRAFFIC_CHECKPOINT_SCHEMA, load_prior
+    from ts_transformer.experiments.traffic_reward import write_traffic_prior
+    from ts_transformer.inference.scene_edges import EDGE_FEATURES
+    from ts_transformer.io_utils import file_sha256
+    from ts_transformer.prior.model import with_traffic
+    from ts_transformer.tests.support import fly_legs, instruction_flight
+    from ts_transformer.tests.test_autopilot import DOWNWIND_BASE_FINAL
+    from ts_transformer.tests.test_instruction_training_export import _artefact
+    from ts_transformer.tests.test_training_overlays import _prior_dir
+
+    flights = [instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0), dataset_id="KXXX:own",
+                                  split="val")]
+    _artefact(tmp_path / "artefact", flights)
+    roster = tmp_path / "tracks.json"
+    roster.write_text(json.dumps({"records": []}), encoding="utf-8")
+    monkeypatch.setattr(prior_train, "tracks_manifest_path", lambda code: roster)
+    _prior_dir(tmp_path / "prior", tmp_path / "artefact", roster)
+    start = load_prior(tmp_path / "prior", tmp_path / "artefact")
+    torch.manual_seed(0)
+    model = with_traffic(start.model, EDGE_FEATURES)
+    for layer in model.layers:
+        torch.nn.init.normal_(layer.traffic.out.weight)
+    (tmp_path / "traffic").mkdir()
+    write_traffic_prior(tmp_path / "traffic", model, tmp_path / "prior", start, start.payload["spec_sha256"],
+                        git={"head": "test", "dirty": False}, smoke=True, fine_tuning={"round": 1})
+    loaded = load_prior(tmp_path / "traffic", tmp_path / "artefact")
+    assert loaded.payload["schema"] == loaded.config["schema"] == TRAFFIC_CHECKPOINT_SCHEMA
+    assert loaded.payload["start"] == loaded.config["start"] == {
+        "directory": str(tmp_path / "prior"), "checkpoint_sha256": file_sha256(tmp_path / "prior" / "checkpoint.pt")}
+    assert loaded.model.traffic_features == EDGE_FEATURES and loaded.config["fine_tuning"] == {"round": 1}
+    assert all(torch.equal(value, loaded.model.state_dict()[name]) for name, value in model.state_dict().items())
+    assert loaded.procedure_masks.names == start.procedure_masks.names

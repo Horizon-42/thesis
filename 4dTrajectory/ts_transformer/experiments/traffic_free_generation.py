@@ -171,6 +171,7 @@ def scene_sentences(model: Prior, batch: replay.Batch, scenes: Sequence[Scene], 
     e, n, h = speaker.e, speaker.n, speaker.h
     pre, placed = speaker.pre, speaker.others
     loop.close()
+    del speaker                                        # its past (the model's keys and values) goes with it
     rows, grids, stops = said_rows(repeated, flown, said, forbidden, words, [j % samples for j in range(len(said))],
                                    procedure_masks)
     cut_said, positions, allowed = [], [], []

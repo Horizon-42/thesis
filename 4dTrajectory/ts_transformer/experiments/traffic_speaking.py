@@ -330,10 +330,13 @@ class SceneLoop(ClosedLoop):
                             scene_landings=per_scene, **options)
 
     def _edges(self, first: int, last: int) -> np.ndarray:
-        """Every scene's edge features on batch steps ``first … last − 1`` (module docstring), from the step before
-        (an aircraft's motion is its displacement from its row before)."""
+        """Every scene's edge features on batch steps ``first … last − 1`` (module docstring), read from two steps before:
+        an aircraft's motion is its displacement from its row before, and another aircraft whose row at a step is later
+        than this one's instant is carried forward from its row before at that row's motion (`inference.scene_edges`) —
+        so every step reads what all of them at once read (`speaking_edges`; with one step before, a replayed flight's
+        motion read "unknown" whenever its row was off the step, the review of step 6)."""
         speaker = self.speaker
-        low = max(first - 1, 0)
+        low = max(first - 2, 0)
         out = np.zeros((len(self.scenes), last - first, speaker.aircraft, speaker.aircraft,
                         len(speaker.model.traffic_features)), dtype=np.float32)
         pointers = speaker.in_force[:, 0, : speaker.rows, RUNWAY].cpu().numpy()

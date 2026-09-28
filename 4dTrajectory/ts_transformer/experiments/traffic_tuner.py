@@ -45,15 +45,17 @@ from ts_transformer.prior.data import Split, batches
 from ts_transformer.prior.model import Prior, asked_entries
 from ts_transformer.prior.scene_speaker import scene_inputs
 from ts_transformer.prior.train import (
-    RewardConfig, RewardTuner, allowed_tensors, batch_logits, flight_kl, flight_surrogate, masked, to_batch,
+    RewardConfig, RewardTuner, TrainConfig, allowed_tensors, batch_logits, flight_kl, flight_surrogate, masked,
+    to_batch,
 )
 
-#: The most padded aircraft-steps a part of a batch is scored in at once, with gradients: M2's training batch.
-SCORE_AIRCRAFT_STEPS = 16_384
-#: M2's scene batches an update's data term reads: two of 16,384 padded aircraft-steps hold about 8,800 asked steps
-#: (M2's ratio, 3.7 padded to one asked), about the second stage's data batch (8,192 rows of single flights).
+#: M2's training batch, padded aircraft-steps (`traffic_prior_train`: pretraining's token budget).
+M2_BATCH = TrainConfig().tokens_per_batch
+#: The most padded aircraft-steps a part of a batch is scored in at once, with gradients: M2's batch.
+SCORE_AIRCRAFT_STEPS = M2_BATCH
+#: M2's scene batches an update's data term reads: two hold about 8,800 asked steps (M2's ratio, 3.7 padded to one
+#: asked), about the second stage's data batch (8,192 rows of single flights).
 DATA_BATCHES = 2
-DATA_AIRCRAFT_STEPS = 16_384
 
 
 @dataclass(frozen=True)
@@ -142,26 +144,25 @@ def scene_logits(model: Prior, layout: SceneBatch) -> list[torch.Tensor]:
     return [logit[:, :1, layout.pre: layout.pre + layout.rows] for logit in logits]
 
 
-def scene_size(sentences: SceneSplit, i: int, step_s: float) -> tuple[int, int]:
-    """A sentence laid out alone: its aircraft and its steps."""
+def scene_size(sentences: SceneSplit, i: int, step_s: float) -> tuple[int, int, int]:
+    """A sentence laid out alone: its aircraft, its pre-roll and its rows."""
     pre, others = _pre(sentences.scenes[i], step_s)
-    return 1 + len(others), pre + sentences.flights[i].rows
+    return 1 + len(others), pre, sentences.flights[i].rows
 
 
 def parts(sentences: SceneSplit, indices: Sequence[int], step_s: float, budget: int) -> list[list[int]]:
-    """``indices`` in parts of at most ``budget`` padded aircraft-steps laid out together (a larger sentence is a part of
-    its own), by size."""
+    """``indices`` in parts of at most ``budget`` padded aircraft-steps as `scene_layout` lays them out together — the
+    most aircraft × (the longest pre-roll + the most rows) each — a larger sentence a part of its own; by size."""
     sizes = {i: scene_size(sentences, i, step_s) for i in indices}
     out: list[list[int]] = [[]]
-    aircraft = steps = 0
-    for i in sorted(indices, key=lambda i: (sizes[i][0] * sizes[i][1], i)):
-        a, t = sizes[i]
-        grown = (len(out[-1]) + 1) * max(aircraft, a) * max(steps, t)
-        if out[-1] and grown > budget:
+    aircraft = pre = rows = 0
+    for i in sorted(indices, key=lambda i: (sizes[i][0] * (sizes[i][1] + sizes[i][2]), i)):
+        a, p, r = sizes[i]
+        if out[-1] and (len(out[-1]) + 1) * max(aircraft, a) * (max(pre, p) + max(rows, r)) > budget:
             out.append([])
-            aircraft = steps = 0
+            aircraft = pre = rows = 0
         out[-1].append(i)
-        aircraft, steps = max(aircraft, a), max(steps, t)
+        aircraft, pre, rows = max(aircraft, a), max(pre, p), max(rows, r)
     return out
 
 
@@ -237,7 +238,7 @@ class SceneRewardTuner(RewardTuner):
         for _ in range(DATA_BATCHES):
             indices = next(self._scene_data, None)
             if indices is None:
-                self._scene_data = scene_batches(data, DATA_AIRCRAFT_STEPS, self.rng)
+                self._scene_data = scene_batches(data, M2_BATCH, self.rng)
                 indices = next(self._scene_data)
             groups.append(indices)
         asked = sum(asked_steps(data[i]) for indices in groups for i in indices)

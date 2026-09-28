@@ -1,8 +1,9 @@
-"""The multi-aircraft post-training's optimiser (`experiments/traffic_tuner`, multi-aircraft design §6.6 step 6): a
-sentence scored in its scene gives back the distribution each of its words was sampled from — with a traffic attention
-that reads the others — laid out with sentences of other pre-rolls; at a zero traffic attention it scores as the
-single-aircraft tuner does; a batch scored in parts updates the model as in one piece; the traffic attention trains at
-its own learning rate. On the scene-data fixture (a tmp artefact)."""
+"""The multi-aircraft post-training's optimiser (`experiments/traffic_tuner`, multi-aircraft design §6.6 step 6): the
+loop's edge features, step by step, are the scorer's all at once — with the others' rows off the steps; a sentence scored
+in its scene gives back the distribution each of its words was sampled from — with a traffic attention that reads the
+others — laid out with sentences of other pre-rolls; at a zero traffic attention it scores as the single-aircraft tuner
+does; a batch scored in parts has the gradient of one piece; the traffic attention trains at its own learning rate. On
+the scene-data fixture (a tmp artefact)."""
 
 from __future__ import annotations
 
@@ -18,15 +19,41 @@ from ts_transformer.prior.model import with_traffic
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.prior.train import RewardConfig, RewardTuner
 from ts_transformer.tests.test_prior_speaker import _model
-from ts_transformer.tests.test_traffic_speaking import _airport, _loop
+from ts_transformer.tests.test_traffic_speaking import _loop
 
 CPU = torch.device("cpu")
 
 
-def _traffic_model(words, seed=1, reads=True):
+def _airport(tmp_path, monkeypatch, entries_s=(0.0, 30.0, 10.0, 3_600.0), labelled=(0, 1, 3), context=False):
+    """The scene-data fixture's flights entering ``entries_s`` apart (default: f0, f2 background and f1 on one approach,
+    f3 an hour later, alone — `test_traffic_speaking`'s), those at ``labelled`` with a sentence; ``context``: their inputs
+    with the landing context, their landings (`_landings`) returned too."""
+    from ts_transformer.experiments import traffic_scene_data
+    from ts_transformer.experiments.traffic_speaking import scene_airports
+    from ts_transformer.instructions.artefact import load_candidates, load_signals
+    from ts_transformer.tests.test_traffic_scene_data import _artefact
+
+    directory, manifest, spec, _ = _artefact(tmp_path, list(entries_s), list(labelled))
+    monkeypatch.setattr(traffic_scene_data, "arrival_manifest_path", lambda code: manifest)
+    signals = {s.dataset_id: s for s in load_signals(directory, "train")}
+    landings = _landings(signals, load_candidates(directory)["KXXX"]) if context else None
+    airports, _ = scene_airports(directory, "train", spec, ("KXXX",), landings, 2_048)
+    return (airports["KXXX"], signals, spec) + ((landings,) if context else ())
+
+
+def _landings(signals, geometry):
+    """The fixture's landings as an airport's landing context."""
+    from ts_transformer.data.day_split import parse_utc
+    from ts_transformer.prior.scene import Landings
+
+    times = np.sort([parse_utc(s.landing_time_utc).timestamp() for s in signals.values()])
+    return {"KXXX": Landings(times, {c.ident: times for c in geometry.candidates})}
+
+
+def _traffic_model(words, seed=1, reads=True, variant="no-context"):
     """A traffic prior; ``reads``: its traffic attention's output layer moved off zero, so the others change its words."""
     torch.manual_seed(seed)
-    model = with_traffic(_model(words), EDGE_FEATURES).eval()
+    model = with_traffic(_model(words, variant=variant), EDGE_FEATURES).eval()
     if reads:
         for layer in model.layers:
             torch.nn.init.normal_(layer.traffic.out.weight, std=0.2)
@@ -69,11 +96,37 @@ def _split(flights, words, geometry):
     return Split(list(flights), ("KXXX",), table, (("09",),), ((90.0,),), column_classes(words, 1), "no-context")
 
 
-def test_a_sentence_scored_in_its_scene_gives_back_what_its_words_were_sampled_from(tmp_path, monkeypatch):
+@pytest.mark.parametrize("off_s", [0.0, 0.7, -0.7])
+def test_the_loop_s_edge_features_step_by_step_are_the_scorer_s_all_at_once(tmp_path, monkeypatch, off_s):
+    """The others' rows sit at their recorded times, up to a second off the speaking aircraft's steps (here f0 and f2
+    ``off_s`` off f1's): another aircraft later than the step is then carried forward from its row before at that row's
+    motion, which the loop reads two steps back for."""
+    from ts_transformer.experiments.traffic_speaking import speaking_edges
+    from ts_transformer.inference.scene_edges import EDGE_FEATURES as FEATURES
+    from ts_transformer.instructions.words import RUNWAY
+
+    airport, signals, spec = _airport(tmp_path, monkeypatch, (off_s, 30.0, 10.0 + off_s, 3_600.0))
+    loop, scene, _ = _loop(_traffic_model(Words(spec)), airport, signals, spec, "KXXX:f1")
+    blocks, edges_of = [], loop.speaker.edges_of
+    loop.speaker.edges_of = lambda first, last: (blocks.append((first, edges_of(first, last))), blocks[-1][1])[1]
+    for _ in range(6):
+        loop.step()
+    speaker = loop.speaker
+    whole = speaking_edges(scene, speaker.e[0, : speaker.rows], speaker.n[0, : speaker.rows], speaker.h[0, : speaker.rows],
+                           speaker.in_force[0, 0, : speaker.rows, RUNWAY].numpy(), speaker.pre, spec.step_s)
+    assert len(blocks) > 3
+    for first, block in blocks:
+        assert np.array_equal(block[0], whole[first: first + len(block[0])])
+    # the others' motion is read where the speaking aircraft has moved (not "unknown")
+    assert (whole[speaker.pre + N_LOOK:, 0, 1, FEATURES.index("motion_unknown")] == 0.0).all()
+
+
+@pytest.mark.parametrize("off_s", [0.0, 0.7, -0.7])
+def test_a_sentence_scored_in_its_scene_gives_back_what_its_words_were_sampled_from(tmp_path, monkeypatch, off_s):
     from ts_transformer.experiments.traffic_tuner import SceneSplit, scene_layout, scene_logits
     from ts_transformer.prior.train import to_batch
 
-    airport, signals, spec = _airport(tmp_path, monkeypatch)
+    airport, signals, spec = _airport(tmp_path, monkeypatch, (off_s, 30.0, 10.0 + off_s, 3_600.0))
     words = Words(spec)
     model = _traffic_model(words)
     # f1 has two others in the air before it (a pre-roll of 15 steps); f3 is alone (none): scored together, f3's rows
@@ -131,26 +184,30 @@ def test_at_a_zero_traffic_attention_the_scene_tuner_measures_what_the_single_tu
     assert single > 1e-4 and scene == pytest.approx(single, rel=1e-4)
 
 
-def test_a_batch_scored_in_parts_updates_the_model_as_in_one_piece(tmp_path, monkeypatch):
+@pytest.mark.filterwarnings("ignore:Seems like `optimizer.step\\(\\)` has been overridden")
+def test_a_batch_scored_in_parts_has_the_gradient_of_one_piece(tmp_path, monkeypatch):
     from ts_transformer.experiments import traffic_tuner
     from ts_transformer.experiments.traffic_tuner import SceneRewardTuner
 
-    model, words, sentences, data, spec = _round(tmp_path, monkeypatch, reads=True)
+    _, words, sentences, data, spec = _round(tmp_path, monkeypatch, reads=True)
     advantages = np.array([0.5, -0.5, 0.25, -0.25])
-    states = []
+    gradients = []
     for budget in (10 ** 9, 1):
         monkeypatch.setattr(traffic_tuner, "SCORE_AIRCRAFT_STEPS", budget)
         trained = _traffic_model(words, reads=True)
         tuner = SceneRewardTuner(trained, _model(words), RewardConfig(), CPU, seed=0, traffic_learning_rate=3e-4,
                                  step_s=spec.step_s)
         assert len(tuner._parts(sentences, [0, 1, 2, 3])) == (1 if budget > 1 else 4)
+        seen, step = [], tuner.optimiser.step
+        tuner.optimiser.step = lambda: (seen.append({name: p.grad.clone() for name, p in trained.named_parameters()
+                                                     if p.grad is not None}), step())[1]
         record = tuner.one_pass(sentences, advantages, data, slots=1)
-        assert record["batches"] == 1 and record["sentences"] == 4
-        states.append({k: v.clone() for k, v in trained.state_dict().items()})
-    moved = max(float((states[0][k] - model.state_dict()[k]).abs().max()) for k in states[0])
-    assert moved > 0.0
-    for k in states[0]:
-        assert torch.allclose(states[0][k], states[1][k], atol=1e-6), k
+        assert record["batches"] == 1 and record["sentences"] == 4 and len(seen) == 1
+        gradients.append(seen[0])
+    assert gradients[0].keys() == gradients[1].keys()
+    assert max(float(g.abs().max()) for name, g in gradients[0].items() if ".traffic." not in name) > 0.0
+    for name, g in gradients[0].items():
+        assert torch.allclose(g, gradients[1][name], rtol=1e-4, atol=1e-7), name
 
 
 def test_the_traffic_attention_trains_at_its_own_learning_rate(tmp_path, monkeypatch):
