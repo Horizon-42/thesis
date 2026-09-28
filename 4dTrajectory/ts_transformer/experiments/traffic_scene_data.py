@@ -226,8 +226,15 @@ def build_split(directory: Path, split: str, spec: VocabularySpec, airports: Seq
     """Every sample of ``split`` at ``airports`` (`airport_flights`), and what was built: its counts, the samples, the
     most aircraft in one."""
     per_airport, counts = airport_flights(directory, split, spec, airports, landings, max_rows)
+    return split_samples(per_airport, counts, spec.step_s)
+
+
+def split_samples(per_airport: Sequence[AirportFlights], counts: Mapping[str, int], step_s: float
+                  ) -> tuple[list[Built], dict[str, Any]]:
+    """`build_split` of flights already built (`airport_flights`: its counts, ``counts``) — each flight's rows the
+    same objects, however many samples and closed loops read them."""
+    counts = Counter(counts)
     counts.update(dict.fromkeys(("samples", "most_aircraft"), 0))
-    step_s = spec.step_s
     built: list[Built] = []
     for airport in per_airport:
         by_key = airport.flights

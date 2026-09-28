@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+from dataclasses import dataclass
 import json
 import time
 from collections import Counter, defaultdict
@@ -117,6 +118,20 @@ def judged_steps(fields: dict[str, Any], aircraft: Controlled, steps_said: int, 
     return min(steps_said, int(round((end["t_s"] - aircraft.first_step_s) / step_s)))
 
 
+@dataclass(frozen=True)
+class SceneSentences:
+    """What `scene_sentences` said and flew, flight-major (flight ``j``'s samples at ``j · samples …``): each sentence's
+    row (`model_rows`) and — to train on it (M4) — up to its judged end (`judged_steps`: a loss that ended it ends what it
+    said), the words said (``said`` ``[steps, 6]``, `UNCHANGED` where a column says nothing), the positions the prior read
+    (``positions`` ``[N_LOOK + steps, 3]``: e, n, height) and what each step's masks allowed (``allowed``: per masked
+    column, `Speaker.allowed`'s bit-packed rows)."""
+
+    rows: list[dict[str, Any]]
+    said: list[np.ndarray]
+    positions: list[np.ndarray]
+    allowed: list[dict[int, np.ndarray]]
+
+
 def model_rows(model: Prior, batch: replay.Batch, scenes: Sequence[Scene], judge_scenes: Sequence[Scene], source: str,
                words: Words, params: Any, landings: Any, samples: int, *, generator: torch.Generator,
                temperature: float, procedure_masks: Any,
@@ -124,6 +139,16 @@ def model_rows(model: Prior, batch: replay.Batch, scenes: Sequence[Scene], judge
     """Every flight of ``batch`` flown ``samples`` times, the model speaking in ``scenes`` and judged with the others of
     ``judge_scenes`` (the same scenes, or — alone — the scenes it was taken out of); ``moves``: each flight's moved start
     (`batch.signals` are already its moved rows; None: its own) and, where moved, stage 2's time limit."""
+    return scene_sentences(model, batch, scenes, judge_scenes, source, words, params, landings, samples,
+                           generator=generator, temperature=temperature, procedure_masks=procedure_masks,
+                           moves=moves).rows
+
+
+def scene_sentences(model: Prior, batch: replay.Batch, scenes: Sequence[Scene], judge_scenes: Sequence[Scene],
+                    source: str, words: Words, params: Any, landings: Any, samples: int, *, generator: torch.Generator,
+                    temperature: float, procedure_masks: Any,
+                    moves: Sequence[Augmentation | None] | None = None) -> SceneSentences:
+    """`model_rows` with what each sentence said up to its judged end (`SceneSentences`)."""
     cpu, step_s = torch.device("cpu"), words.spec.step_s
     index = [j for j in range(len(batch.readings)) for _ in range(samples)]
     repeated = replay.subset(batch, index)
@@ -140,11 +165,15 @@ def model_rows(model: Prior, batch: replay.Batch, scenes: Sequence[Scene], judge
     while loop.running:
         loop.step()
     flown, said = loop.executor.flown(), loop.spoken.sentences()
-    forbidden = {c: np.stack(masses, axis=1) for c, masses in loop.speaker.forbidden.items()}
-    pre, placed = loop.speaker.pre, loop.speaker.others
+    speaker = loop.speaker
+    forbidden = {c: np.stack(masses, axis=1) for c, masses in speaker.forbidden.items()}
+    packed = {c: np.stack(steps, axis=1) for c, steps in speaker.allowed.items()}
+    e, n, h = speaker.e, speaker.n, speaker.h
+    pre, placed = speaker.pre, speaker.others
     loop.close()
     rows, grids, stops = said_rows(repeated, flown, said, forbidden, words, [j % samples for j in range(len(said))],
                                    procedure_masks)
+    cut_said, positions, allowed = [], [], []
     for j, row in enumerate(rows):
         grid = grids[j][: row["steps_said"]]
         pointer = grid[:, RUNWAY][grid[:, RUNWAY] != UNCHANGED]
@@ -160,7 +189,36 @@ def model_rows(model: Prior, batch: replay.Batch, scenes: Sequence[Scene], judge
                    masked_mass={COLUMNS[c]: float(forbidden[c][j, :counted].mean()) if counted else 0.0
                                 for c in MASK_COLUMNS},
                    **fields)
-    return rows
+        cut_said.append(grid[:counted])
+        positions.append(np.column_stack((e[j, : N_LOOK + counted], n[j, : N_LOOK + counted],
+                                          h[j, : N_LOOK + counted])))
+        allowed.append({c: codes[j, :counted] for c, codes in packed.items()})
+    return SceneSentences(rows, cut_said, positions, allowed)
+
+
+def speaking_batches(scenes: Sequence[Scene], limits: Sequence[float], sentence_rows: Sequence[int], samples: int,
+                     budget: int, step_s: float) -> list[list[int]]:
+    """The flights (their ``scenes``, time ``limits`` and labelled sentences' rows) in batches of the scene loop, by the
+    size of their scenes — each its aircraft × its steps (its pre-roll, as the speaker caps it, and its rows) — each batch
+    at most ``budget`` aircraft-steps over its ``samples`` loops a flight (a larger scene is a batch of its own)."""
+    history = int(HISTORY_S // step_s)
+
+    def size(j: int) -> tuple[int, int]:
+        scene = scenes[j]
+        pre = max([0] + [int(round((scene.first_step_s - hang(scene.rows(k).presence.start_s, step_s))
+                                   / step_s)) for k in scene.others])
+        return 1 + len(scene.others), min(pre, history) + rows_for(limits[j] + step_s, step_s)
+
+    order = sorted(range(len(scenes)), key=lambda j: (size(j), sentence_rows[j]))
+    batches: list[list[int]] = [[]]
+    for j in order:
+        grown = batches[-1] + [j]
+        if batches[-1] and (len(grown) * samples * max(size(k)[0] for k in grown)
+                            * max(size(k)[1] for k in grown)) > budget:
+            batches.append([j])
+        else:
+            batches[-1] = grown
+    return batches
 
 
 def labelled_rows(batch: replay.Batch, scenes: Sequence[Scene], words: Words, params: Any,
@@ -202,7 +260,7 @@ def recorded_rows(batch: replay.Batch, scenes: Sequence[Scene], words: Words) ->
     return rows
 
 
-def augmented_scenes(batch: replay.Batch, scenes: Sequence[Scene], airports: dict[str, Any], seed: int,
+def augmented_scenes(batch: replay.Batch, scenes: Sequence[Scene], airports: dict[str, Any], seed: int | Sequence[int],
                      windows: dict[str, tuple[float, float]], step_s: float
                      ) -> tuple[replay.Batch, list[Scene], list[Augmentation | None], list[dict[str, Any]], int]:
     """Every flight's scene augmented (`traffic_augment.augment`, one generator from ``seed`` in the batch's order):
@@ -305,25 +363,8 @@ def main(argv: list[str] | None = None) -> int:
           f"({built}), {time.perf_counter() - started:.0f}s", flush=True)
 
     generator = torch.Generator(device=torch.device(args.device)).manual_seed(args.seed)
-    step_s = words.spec.step_s
-    history = int(HISTORY_S // step_s)
-
-    def size(j: int) -> tuple[int, int]:
-        """A flight's scene: its aircraft and its steps (its pre-roll, as the speaker caps it, and its rows)."""
-        scene = scenes[j]
-        pre = max([0] + [int(round((scene.first_step_s - hang(scene.rows(k).presence.start_s, step_s))
-                                   / step_s)) for k in scene.others])
-        return 1 + len(scene.others), min(pre, history) + rows_for(limits[j] + step_s, step_s)
-
-    order = sorted(range(len(scenes)), key=lambda j: (size(j), len(batch.readings[j].words)))
-    batches: list[list[int]] = [[]]
-    for j in order:
-        grown = batches[-1] + [j]
-        if batches[-1] and (len(grown) * args.samples * max(size(k)[0] for k in grown)
-                            * max(size(k)[1] for k in grown)) > args.aircraft_steps:
-            batches.append([j])
-        else:
-            batches[-1] = grown
+    batches = speaking_batches(scenes, limits, [len(r.words) for r in batch.readings], args.samples,
+                               args.aircraft_steps, words.spec.step_s)
     out.mkdir(parents=True)
     rows: list[dict[str, Any]] = []
     done = 0
@@ -349,7 +390,7 @@ def main(argv: list[str] | None = None) -> int:
         done += len(chunk)
         held = (f", GPU {torch.cuda.memory_allocated() / 1e9:.2f} GB held" if torch.device(args.device).type == "cuda"
                 else "")
-        print(f"  {done}/{len(order)} flights ({len(batches)} batches), {time.perf_counter() - started:.0f}s{held}",
+        print(f"  {done}/{len(scenes)} flights ({len(batches)} batches), {time.perf_counter() - started:.0f}s{held}",
               flush=True)
 
     by_airport: dict[str, list[dict[str, Any]]] = defaultdict(list)

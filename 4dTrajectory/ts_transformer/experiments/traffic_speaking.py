@@ -89,6 +89,12 @@ def scene_airports(directory: Path, split: str, spec: VocabularySpec, airports: 
     replayed tracks, established from the artefact's capture row (a background flight: the labeller's own rule,
     `traffic_census.track`)."""
     per_airport, counts = airport_flights(directory, split, spec, airports, landings, max_rows)
+    return with_tracks(directory, split, spec, per_airport), dict(counts)
+
+
+def with_tracks(directory: Path, split: str, spec: VocabularySpec, per_airport: Sequence[AirportFlights]
+                ) -> dict[str, SceneAirport]:
+    """`scene_airports` of flights already built (`traffic_scene_data.airport_flights` of ``split``)."""
     signals = {s.dataset_id: (i, s) for i, s in enumerate(load_signals(directory, split))}
     sentences = load_sentences(directory, split, spec)
     offsets = sentences["offsets"]
@@ -103,7 +109,7 @@ def scene_airports(directory: Path, split: str, spec: VocabularySpec, airports: 
                                 None if k is None else int(sentences["capture_row"][k]), airport.geometry,
                                 airport.separation.along_nm[flight.runway] * NM_M, spec, spec.step_s)
         out[airport.code] = SceneAirport(airport, tracks)
-    return out, dict(counts)
+    return out
 
 
 @dataclass(frozen=True)
@@ -247,6 +253,54 @@ def scene_landings(landings: Landings, scene: Scene) -> Landings:
                     {runway: np.sort(np.array(t, dtype=np.float64)) for runway, t in by_runway.items()})
 
 
+def edge_rows(scene: Scene, e: np.ndarray, n: np.ndarray, h: np.ndarray, pointers: np.ndarray, rows: int, pre: int,
+              low: int, last: int, step_s: float) -> SceneRows:
+    """What ``scene``'s edge features on batch steps ``low … last − 1`` read (module docstring) — the one reading, for the
+    loop's speaker and for a trainer scoring a sentence in its scene: the speaking aircraft from batch step ``pre`` over its
+    first ``rows`` rows (its positions ``e``, ``n``, ``h`` and the runway class in force before each row, ``pointers``,
+    0: none), on the loop's steps; the others at their recorded rows."""
+    airport = scene.airport
+    geometry, separation = airport.flights.geometry, airport.flights.separation
+    members = [scene.speaking, *(scene.rows(k) for k in scene.others)]
+    span = last - low
+    shape = (len(members), span)
+    time_s, east, north, height, along = (np.full(shape, np.nan) for _ in range(5))
+    runway: list[list[str | None]] = [[None] * span for _ in members]
+    own_first, own_last = max(low - pre, 0), min(last - pre, rows)
+    if own_first < own_last:
+        cols = slice(own_first + pre - low, own_last + pre - low)
+        numbers = np.arange(own_first, own_last)
+        time_s[0, cols] = scene.first_step_s + numbers * step_s
+        east[0, cols], north[0, cols], height[0, cols] = e[numbers], n[numbers], h[numbers]
+        for j, pointer in zip(range(cols.start, cols.stop), pointers[own_first: own_last]):
+            if pointer:
+                candidate = geometry.candidates[int(pointer) - 1]
+                runway[0][j] = candidate.ident
+                before = relative_to_runway(east[0, j: j + 1], north[0, j: j + 1], np.zeros(1), height[0, j: j + 1],
+                                            candidate).before_threshold_m
+                along[0, j] = separation.along_nm[candidate.ident] * NM_M - float(before[0])
+    for m, other in enumerate(members[1:], start=1):
+        start = pre + int(round((float(hang(other.presence.start_s, step_s)) - scene.first_step_s) / step_s))
+        lo, hi = max(low, start), min(last, start + len(other.runway))
+        if lo >= hi:
+            continue
+        cols, own = slice(lo - low, hi - low), slice(lo - start, hi - start)
+        time_s[m, cols] = other.presence.times_s[own]
+        east[m, cols], north[m, cols], height[m, cols] = other.e_m[own], other.n_m[own], other.height_m[own]
+        along[m, cols] = other.along_m[own]
+        runway[m][cols] = other.runway[own]
+    return SceneRows(time_s, east, north, height, along, runway, [f.category for f in members])
+
+
+def speaking_edges(scene: Scene, e: np.ndarray, n: np.ndarray, h: np.ndarray, pointers: np.ndarray, pre: int,
+                   step_s: float) -> np.ndarray:
+    """``[pre + rows, A, A, E]``: ``scene``'s edge features on every step to its speaking aircraft's last row (`edge_rows`:
+    ``e``, ``n``, ``h``, ``pointers`` over its rows, from step ``pre``) — what the loop's speaker read, all at once."""
+    rows = len(e)
+    return scene_edges(edge_rows(scene, e, n, h, pointers, rows, pre, 0, pre + rows, step_s),
+                       scene.airport.flights.separation)
+
+
 class SceneLoop(ClosedLoop):
     """`ClosedLoop` of flights, each speaking in its scene (module docstring): ``scenes`` one per flight, in its order;
     ``approach_mps`` the speed each flight's "unspecified" word flies (its executor's)."""
@@ -278,44 +332,16 @@ class SceneLoop(ClosedLoop):
     def _edges(self, first: int, last: int) -> np.ndarray:
         """Every scene's edge features on batch steps ``first … last − 1`` (module docstring), from the step before
         (an aircraft's motion is its displacement from its row before)."""
-        speaker, step = self.speaker, self.step_s
+        speaker = self.speaker
         low = max(first - 1, 0)
-        span = last - low
-        width = len(speaker.model.traffic_features)
-        out = np.zeros((len(self.scenes), last - first, speaker.aircraft, speaker.aircraft, width), dtype=np.float32)
-        own_first, own_last = max(low - speaker.pre, 0), min(last - speaker.pre, speaker.rows)
-        pointers = speaker.in_force[:, 0, own_first: max(own_last, own_first), RUNWAY].cpu().numpy()
+        out = np.zeros((len(self.scenes), last - first, speaker.aircraft, speaker.aircraft,
+                        len(speaker.model.traffic_features)), dtype=np.float32)
+        pointers = speaker.in_force[:, 0, : speaker.rows, RUNWAY].cpu().numpy()
         for b, scene in enumerate(self.scenes):
-            airport = scene.airport
-            geometry, separation = airport.flights.geometry, airport.flights.separation
-            members = [scene.speaking, *(scene.rows(k) for k in scene.others)]
-            shape = (len(members), span)
-            time_s, e, n, h, along = (np.full(shape, np.nan) for _ in range(5))
-            runway: list[list[str | None]] = [[None] * span for _ in members]
-            if own_first < own_last:
-                cols = slice(own_first + speaker.pre - low, own_last + speaker.pre - low)
-                rows = np.arange(own_first, own_last)
-                time_s[0, cols] = scene.first_step_s + rows * step
-                e[0, cols], n[0, cols], h[0, cols] = speaker.e[b, rows], speaker.n[b, rows], speaker.h[b, rows]
-                for j, pointer in zip(range(cols.start, cols.stop), pointers[b]):
-                    if pointer:
-                        candidate = geometry.candidates[int(pointer) - 1]
-                        runway[0][j] = candidate.ident
-                        before = relative_to_runway(e[0, j: j + 1], n[0, j: j + 1], np.zeros(1), h[0, j: j + 1],
-                                                    candidate).before_threshold_m
-                        along[0, j] = separation.along_nm[candidate.ident] * NM_M - float(before[0])
-            for m, other in enumerate(members[1:], start=1):
-                start = speaker.pre + int(round((float(hang(other.presence.start_s, step)) - scene.first_step_s) / step))
-                lo, hi = max(low, start), min(last, start + len(other.runway))
-                if lo >= hi:
-                    continue
-                cols, own = slice(lo - low, hi - low), slice(lo - start, hi - start)
-                time_s[m, cols] = other.presence.times_s[own]
-                e[m, cols], n[m, cols], h[m, cols] = other.e_m[own], other.n_m[own], other.height_m[own]
-                along[m, cols] = other.along_m[own]
-                runway[m][cols] = other.runway[own]
-            rows_here = SceneRows(time_s, e, n, h, along, runway, [f.category for f in members])
-            out[b, :, : len(members), : len(members)] = scene_edges(rows_here, separation)[first - low:]
+            members = 1 + len(scene.others)
+            rows = edge_rows(scene, speaker.e[b], speaker.n[b], speaker.h[b], pointers[b], speaker.rows, speaker.pre,
+                             low, last, self.step_s)
+            out[b, :, :members, :members] = scene_edges(rows, scene.airport.flights.separation)[first - low:]
         return out
 
     def close(self) -> None:
