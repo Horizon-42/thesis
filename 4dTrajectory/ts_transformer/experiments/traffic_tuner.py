@@ -197,6 +197,23 @@ class SceneRewardTuner(RewardTuner):
         self._scene_data: Iterator[list[int]] = iter(())
         super().__init__(model, reference, config, device, seed=seed)
 
+    def restart(self, rng: np.random.Generator) -> None:
+        """The next pass draws from ``rng`` — its batches' order and its data term's from the start (a round's own
+        stream: a round run on its own draws what it would within one run)."""
+        self.rng = rng
+        self._scene_data = iter(())
+
+    def state(self) -> dict[str, Any]:
+        """What the next round's pass continues from beside the weights: the optimiser's state (AdamW's moments), the
+        warm-up's step and the passes made."""
+        return {"optimiser": self.optimiser.state_dict(), "schedule": self.schedule.state_dict(), "passes": self.passes}
+
+    def load_state(self, state: Mapping[str, Any]) -> None:
+        """`state` put back (the model already holding the weights it was saved with)."""
+        self.optimiser.load_state_dict(state["optimiser"])
+        self.schedule.load_state_dict(state["schedule"])
+        self.passes = state["passes"]
+
     def _parameter_groups(self) -> Any:
         traffic = traffic_parameters(self.model)
         own = {id(p) for p in traffic}
