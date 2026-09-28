@@ -17,9 +17,10 @@ import {
 import type { TrainingAutopilotStatus } from "./trainingAutopilot";
 import type { TrainingColumn } from "./trainingSample";
 
-/** The six columns as the views name them. */
+/** The six columns as the views name them — the angle column as "Descent": its classes are descent angles (and level,
+ *  and the climb). */
 export const TRAINING_COLUMN_LABEL: Record<TrainingColumn, string> = {
-  runway: "Runway", approach: "Approach", heading: "Heading", altitude: "Altitude", angle: "Angle", speed: "Speed",
+  runway: "Runway", approach: "Approach", heading: "Heading", altitude: "Altitude", angle: "Descent", speed: "Speed",
 };
 
 /** How the executor's flight ended (the judge's outcomes, and a model's sentence stopped below the glidepath), in words. */

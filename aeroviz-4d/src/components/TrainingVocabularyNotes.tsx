@@ -31,7 +31,7 @@ export default function TrainingVocabularyNotes({ sample }: { sample: TrainingSa
     ["Altitude", `${vocabulary.altitudeTargetsM[1] - vocabulary.altitudeTargetsM[0]} m MSL grid to ` +
       `${vocabulary.altitudeTargetsM[vocabulary.altitudeTargetsM.length - 1]} m, or "descend to land"; tube ` +
       `±${vocabulary.altitudeToleranceM} m`],
-    ["Angle", vocabulary.angleClasses.map((angle) => (angle.value === vocabulary.angleLevelValue ? angle.name
+    ["Descent", vocabulary.angleClasses.map((angle) => (angle.value === vocabulary.angleLevelValue ? angle.name
       : `${angle.name} ${angle.nominalDeg}° (${angle.lowDeg}…${angle.steepDeg}°)`)).join(" · ")],
     ["Speed", `ground speed ${vocabulary.speedTargetsMps[0]}…${vocabulary.speedTargetsMps[vocabulary.speedTargetsMps.length - 1]} ` +
       `m/s or "unspecified"; band ±${vocabulary.speedToleranceMps} m/s, at most ${vocabulary.speedAccelMaxMps2} m/s² between`],

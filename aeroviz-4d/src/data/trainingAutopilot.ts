@@ -360,6 +360,14 @@ export function autopilotPlaybackSpeedup(flownS: number): number {
   return Math.max(AUTOPILOT_PLAYBACK_MIN_SPEEDUP, flownS / AUTOPILOT_PLAYBACK_MAX_S);
 }
 
+/** How far into its segment the live executor's aircraft is at ``nowMs``, in simulated seconds: the fly-out's clock — the
+ *  real time since ``playedAt`` times the speed-up, held at the segment's end once flown out. The 3D aircraft and the
+ *  sentence bar's cursor both read it, so the two move together. */
+export function autopilotPlaybackS(track: TrainingAutopilotTrack, playedAt: number, nowMs: number): number {
+  const flownS = track.tS[track.tS.length - 1] - track.tS[0];
+  return Math.min(Math.max(nowMs - playedAt, 0) / 1000 * autopilotPlaybackSpeedup(flownS), flownS);
+}
+
 /** Where the live executor is ``flownS`` seconds into its segment: the last point at or before it and the fraction of
  *  the way to the next (1 at and past the segment's end). */
 export function autopilotFlownAt(track: TrainingAutopilotTrack, flownS: number): { index: number; fraction: number } {

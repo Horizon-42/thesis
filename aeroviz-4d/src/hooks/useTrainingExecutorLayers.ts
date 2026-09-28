@@ -36,6 +36,7 @@ import {
   autopilotHasLine,
   autopilotJudgedPoints,
   autopilotOnScreen,
+  autopilotPlaybackS,
   autopilotPlaybackSpeedup,
   autopilotRunAndTail,
   AUTOPILOT_TAIL_OPACITY,
@@ -105,7 +106,7 @@ function flyOut(viewer: Cesium.Viewer, view: Ready, bandsShown: () => boolean, o
   const last = positions.length - 1;
   const flownS = track.tS[last] - track.tS[0];
   const speedup = autopilotPlaybackSpeedup(flownS);
-  const now = () => autopilotFlownAt(track, ((Date.now() - playedAt) / 1000) * speedup);
+  const now = () => autopilotFlownAt(track, autopilotPlaybackS(track, playedAt, Date.now()));
   const aircraftAt = ({ index, fraction }: { index: number; fraction: number }) => (index === last
     ? positions[last] : Cesium.Cartesian3.lerp(positions[index], positions[index + 1], fraction, new Cesium.Cartesian3()));
   // the run solid to where the next word of the column was heard, the tail past it faded and dashed

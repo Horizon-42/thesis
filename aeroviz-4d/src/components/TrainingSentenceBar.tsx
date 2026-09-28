@@ -1,8 +1,8 @@
 /**
  * TrainingSentenceBar.tsx
  * -----------------------
- * The sentence as a picture: the six columns as six rows — runway pointer, approach, heading, altitude, angle, speed, in
- * the vocabulary's order — against the flight's own time. Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`.
+ * The sentence as a picture: the six columns as six rows — runway pointer, approach, heading, altitude, descent angle,
+ * speed, in the vocabulary's order — against the flight's own time. Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`.
  *
  * A BAND IS A WORD IN FORCE, from the step it was issued to the step the next word of its column replaces it. Step 0
  * carries all six columns, so every row opens with a band at 0; after that a column is "unchanged" until its next word,
@@ -54,10 +54,14 @@
  * panel's switch is on (`trainingAutopilotAuto`; clicking the selected band again clears the pick) — never the cursor. Its
  * line (`TrainingAutopilotStatus`) says whether the word stayed inside its envelope and the two times — the word itself
  * only once the selection has moved off it, so the line leaves the header's buttons on their row. A
- * model's word said after its flight ended has no flight to fly: its Fly button is off.
+ * model's word said after its flight ended has no flight to fly: its Fly button is off. On the flown word's row a small
+ * CURSOR says where the executor is (`AutopilotCursor`): at the word's step, pulsing, while the backend flies it; then
+ * with the 3D aircraft as it flies the segment out — the same clock, `autopilotPlaybackS` — faded past where the next
+ * word of the column was heard (the tail); left at the segment's end, as the aircraft is.
  *
- * THE BAR MEASURES ITSELF: its height is published on the workbench as `--training-bar-height`, so the docks end above it
- * (`index.css`) instead of under it.
+ * THE BAR MEASURES ITSELF: its height is published on the page's root as `--training-bar-height`, so the docks — and
+ * Cesium's credits — end above it (`index.css`) instead of under it; the bar itself sits at the bottom edge (Training
+ * hides Cesium's clock dial and timeline).
  */
 
 import { useLayoutEffect, useRef, useState } from "react";
@@ -68,6 +72,7 @@ import TrainingReadbackWindow from "./TrainingReadbackWindow";
 import { TrainingAutopilotStatus } from "./TrainingAutopilotCard";
 import useMeasuredWidth from "../hooks/useMeasuredWidth";
 import {
+  TRAINING_AUTOPILOT_COLOR,
   TRAINING_COLUMN_COLOR,
   TRAINING_CORRIDOR_COLOR,
   TRAINING_EXECUTOR_COLOR,
@@ -78,7 +83,16 @@ import {
   TRAINING_WORD_COLOR,
   trainingModelColour,
 } from "../utils/trainingWordColors";
-import { autopilotColour, autopilotHasLine, autopilotOnScreen, nextPick, sameSource } from "../data/trainingAutopilot";
+import {
+  AUTOPILOT_TAIL_OPACITY,
+  autopilotColour,
+  autopilotHasLine,
+  autopilotOnScreen,
+  autopilotPlaybackS,
+  nextPick,
+  sameSource,
+  type TrainingAutopilotView,
+} from "../data/trainingAutopilot";
 import {
   executorWordAt,
   executorWordCounts,
@@ -100,6 +114,7 @@ import {
   rowAtTime,
   sentenceColumnRuns,
   sentenceWordAt,
+  trainingBandLabel,
   trainingClearedValue,
   trainingKindLabel,
   trainingTruthSentence,
@@ -257,19 +272,73 @@ function sampleChip(view: TrainingGenerationView, label: string, sentence: Train
   };
 }
 
-/** The bar's own height on the workbench (`--training-bar-height`): the docks end above it. */
+/** The live executor on the flown word's row, in the flight's time: at the word's step, pulsing, while the backend
+ *  flies it; then where the 3D aircraft is as it flies the segment out (`autopilotPlaybackS`: the same clock), faded in
+ *  the tail; left at the segment's end. A leaf that moves itself each frame, so the bar never re-renders for it. */
+function AutopilotCursor({ view, stepS, y, x0, plotW, endS }: {
+  view: Extract<TrainingAutopilotView, { status: "flying" | "ready" }>;
+  stepS: number;
+  /** The top of the flown word's row. */
+  y: number;
+  /** The bar's time axis: where it starts, how wide it is (px) and the time it ends at (s). A flight flown past the axis's
+   *  end (the truth's last word flown on to a landing later than the observed one) holds the cursor there, and its title
+   *  says so. */
+  x0: number;
+  plotW: number;
+  endS: number;
+}) {
+  const node = useRef<SVGRectElement>(null);
+  // placed before paint (never a frame at the axis's origin), and again whenever the axis is laid out anew
+  useLayoutEffect(() => {
+    const rect = node.current!;
+    // the bar's xFor, clamped to the axis's end (primitives, so the effect runs again only when the axis changes)
+    const put = (seconds: number, faded: boolean) => {
+      rect.setAttribute("transform", `translate(${x0 + (Math.min(seconds, endS) / endS) * plotW} 0)`);
+      rect.style.opacity = faded ? String(AUTOPILOT_TAIL_OPACITY) : "";
+    };
+    if (view.status === "flying") {
+      put(view.request.row * stepS, false);
+      return undefined;
+    }
+    const { track, tailFrom } = view.segment;
+    const totalS = track.tS[track.tS.length - 1] - track.tS[0];
+    const tailS = tailFrom === null ? Infinity : track.tS[tailFrom];
+    let frame = 0;
+    const draw = () => {
+      const flownS = autopilotPlaybackS(track, view.playedAt, Date.now());
+      put(track.tS[0] + flownS, track.tS[0] + flownS > tailS);
+      if (flownS < totalS) frame = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(frame);
+  }, [view, stepS, x0, plotW, endS]);
+  const colour = view.status === "flying" ? TRAINING_AUTOPILOT_COLOR : autopilotColour(view.segment);
+  return (
+    <rect ref={node} x={-1.5} y={y + 1} width={3} height={ROW_H - 2} rx={1.5} fill={colour}
+      className={`training-sentence-autopilot-cursor${view.status === "flying" ? " waiting" : ""}`}>
+      <title>{view.status === "flying" ? "the executor flies this word on the backend"
+        : "the autopilot's aircraft, flying this word's segment out in 3D" +
+          (view.segment.track.tS[view.segment.track.tS.length - 1] > endS
+            ? ` (held at the axis's end, ${formatSeconds(endS)} s, while it flies on to ` +
+              `${formatSeconds(view.segment.track.tS[view.segment.track.tS.length - 1])} s)` : "")}</title>
+    </rect>
+  );
+}
+
+/** The bar's own height on the page's root (`--training-bar-height`): the docks end above it, and so do Cesium's credits,
+ *  which sit outside the workbench. */
 function useBarHeight(): (node: HTMLElement | null) => void {
   const [node, setNode] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => {
-    const shell = node?.closest<HTMLElement>(".workbench") ?? null;
-    if (node === null || shell === null) return;
-    const publish = () => shell.style.setProperty("--training-bar-height", `${node.offsetHeight}px`);
+    if (node === null) return;
+    const page = document.documentElement;
+    const publish = () => page.style.setProperty("--training-bar-height", `${node.offsetHeight}px`);
     publish();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
     observer?.observe(node);
     return () => {
       observer?.disconnect();
-      shell.style.removeProperty("--training-bar-height");
+      page.style.removeProperty("--training-bar-height");
     };
   }, [node]);
   return setNode;
@@ -637,7 +706,7 @@ export default function TrainingSentenceBar() {
                       ) : null}
                       {width >= LABEL_MIN_W ? (
                         <text x={x + width / 2} y={y + ROW_H / 2 + 4} textAnchor="middle" className="training-sentence-word" fill={colour}>
-                          {label}
+                          {trainingBandLabel(vocabulary, candidates, column, run.value)}
                         </text>
                       ) : null}
                     </g>
@@ -708,6 +777,12 @@ export default function TrainingSentenceBar() {
               {index === tickRows.length - 1 ? `${formatSeconds(timeOf(row))} s` : formatSeconds(timeOf(row))}
             </text>
           ) : null))}
+          {/* the live executor on its word's row, in the flight's time (none for a segment with no line: 3D flies nothing) */}
+          {autopilot !== null && (autopilot.status === "flying"
+            || (autopilot.status === "ready" && autopilotHasLine(autopilot.segment))) ? (
+            <AutopilotCursor view={autopilot} stepS={stepS} x0={GUTTER} plotW={plotW} endS={endS}
+              y={HEAD_H + TRAINING_COLUMN_INDEX[autopilot.request.column] * ROW_H} />
+          ) : null}
           {/* the cursor, kept on the axis (it may have been put past the truth's end while a longer sentence was read) */}
           <line x1={xFor(Math.min(cursorS, endS))} x2={xFor(Math.min(cursorS, endS))} y1={HEAD_H - 8}
             y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 4} className="training-sentence-cursor" />
@@ -729,8 +804,10 @@ export default function TrainingSentenceBar() {
           <span>
             A band is a word in force, from the tick where it was issued to the next word of its column; step 0 gives all
             six. Click a band to select its word — here, in the read-back check and in 3D — and again to clear it; ▶ Fly
-            flies the selected word's segment live (a band click does too, with the panel's "Fly on band click" on). The
-            dashed lines: the clearance, the capture of the final, the speed left to the pilot.
+            flies the selected word's segment live (a band click does too, with the panel's "Fly on band click" on): a short
+            bar on that word's row says where the executor is — pulsing at the word's step while the backend flies it, then
+            moving with the 3D aircraft, faded past where it heard the next word of the column, left at the segment's end.
+            The dashed lines: the clearance, the capture of the final, the speed left to the pilot.
           </span>
           {models.length > 0 ? (
             <span>

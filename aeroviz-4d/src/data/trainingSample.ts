@@ -456,6 +456,18 @@ export function trainingWordLabel(
   }
 }
 
+/** A word as its band in the sentence bar reads it, under its row's name: a descent class by its number and angle
+ *  ("1: 0.92°" — the row is named "Descent", so the class's own "descent " is not repeated; the names are the pinned
+ *  vocabulary's, AV19), the climb as "climb: …"; every other word as `trainingWordLabel` (its tooltip keeps that full
+ *  label). */
+export function trainingBandLabel(
+  vocabulary: TrainingVocabulary, candidates: TrainingCandidate[], column: TrainingColumn, value: number,
+): string {
+  if (column !== "angle" || value === vocabulary.angleLevelValue) return trainingWordLabel(vocabulary, candidates, column, value);
+  const angle = vocabulary.angleClasses[value];
+  return `${angle.name.replace(/^descent /, "")}: ${angle.nominalDeg.toFixed(2)}°`;
+}
+
 /** Why a word was issued, in words — one for every kind the labeller writes. */
 const KIND_LABEL: Record<TrainingWordKind, string> = {
   initial: "in force at entry (step 0)",

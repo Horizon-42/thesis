@@ -199,6 +199,13 @@ body,
   background: linear-gradient(90deg, #1e56a8 0%, #22ad7e 35%, #f5c447 66%, #c63734 100%);
 }
 
+/* On the root, as Cesium's credits sit outside the workbench and read them in Training: the left dock's width (they
+   stand clear of it) and how far the sentence bar sits from the bottom edge (they stand above it). */
+:root {
+  --overlay-left-width: clamp(220px, 17vw, 280px);
+  --training-bar-bottom: 8px;
+}
+
 /* ── Overlay grid container ───────────────────────────────────────────────── */
 /*
  *  Stretches over the Cesium canvas; panels sit in named grid areas.
@@ -206,7 +213,6 @@ body,
  *  each panel re-enables them individually.
  */
 .cesium-overlay-container {
-  --overlay-left-width: clamp(220px, 17vw, 280px);
   --overlay-panel-gap: 8px;
   position: absolute;
   inset: 0;
@@ -551,6 +557,22 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   display: none;
 }
 
+/* Training runs no clock: the native console and the full-screen button are hidden (WorkbenchShell) and the sentence bar
+   takes the bottom edge. `visibility`, which the viewer's forced resize reads, so the credits are laid out without them. */
+body.workbench-training-active .cesium-viewer-timelineContainer,
+body.workbench-training-active .cesium-viewer-animationContainer,
+body.workbench-training-active .cesium-viewer-fullscreenContainer {
+  visibility: hidden;
+}
+
+/* ... and Cesium's credits, which the viewer lays out at the bottom edge then, stand just above the sentence bar, right of
+   the left dock (the viewer writes their position inline, on every resize); in presentation mode, with no bar and no
+   dock, they stay where the viewer puts them. */
+body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewer-bottom {
+  left: calc(16px + var(--overlay-left-width) + 16px) !important;
+  bottom: calc(var(--training-bar-bottom) + var(--training-bar-height, 0px) + 4px) !important;
+}
+
 /* The way out of presentation mode (the top-bar toggle is hidden in this mode). */
 .workbench-presentation-exit {
   position: absolute;
@@ -632,10 +654,11 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 }
 
 /* While the sentence bar is up, the docks end ABOVE it — the bar spans the full width, so they would otherwise run under
-   it. Its height is its own measure (`--training-bar-height`, set by the bar as it resizes); the bottom padding that
-   cleared Cesium's clock dial is the bar's to cover now. */
+   it. Its height is its own measure (`--training-bar-height`, set on the page's root by the bar as it resizes); it sits
+   at the bottom edge, as far from it as the docks are from the top bar (Training hides Cesium's clock dial and
+   timeline). */
 .workbench:has(> .training-sentence-bar) > .cesium-overlay-container {
-  padding-bottom: calc(36px + var(--training-bar-height, 200px) + 8px);
+  padding-bottom: calc(var(--training-bar-bottom) + var(--training-bar-height, 200px) + 8px);
 }
 
 .workbench:has(> .training-sentence-bar) .left-overlay-panel-stack {
@@ -1447,14 +1470,14 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   color: rgba(224, 230, 240, 0.6);
 }
 
-/* The bar spans the whole width above the transport: the sentence is read left to
+/* The bar spans the whole width at the bottom edge: the sentence is read left to
    right against real time, so a narrow dock would compress the long gaps that are
    the most informative thing in it. */
 .training-sentence-bar {
   position: absolute;
   left: 16px;
   right: 16px;
-  bottom: 36px;
+  bottom: var(--training-bar-bottom);
   z-index: 109;
   pointer-events: auto;
   box-sizing: border-box;
@@ -1569,6 +1592,28 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 .training-sentence-cursor {
   stroke: #67e8f9;
   stroke-width: 1.5;
+}
+
+/* The live executor on its word's row (TrainingSentenceBar's AutopilotCursor): pulsing while the backend flies it. */
+.training-sentence-autopilot-cursor {
+  stroke: #ffffff;
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+.training-sentence-autopilot-cursor.waiting {
+  animation: training-autopilot-waiting 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes training-autopilot-waiting {
+  from { opacity: 1; }
+  to { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .training-sentence-autopilot-cursor.waiting {
+    animation: none;
+  }
 }
 
 .training-sentence-marker {

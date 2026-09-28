@@ -170,8 +170,9 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   survives a task switch at the same airport (another airport opened elsewhere drops it — no background download) —
   anything drawing Training state must check `mode`** (AV28).
 - **The Training docks end ABOVE the sentence bar**: the bar publishes its measured height as `--training-bar-height` on
-  `.workbench`, `.workbench:has(> .training-sentence-bar)` pads the overlay container by it; the flight list takes the leftover
-  dock height (min ~5 two-line rows), the dock scrolls past that (AV30).
+  the page's root (`document.documentElement`, 2026-09-28: Cesium's credits read it too), `.workbench:has(> .training-sentence-bar)`
+  pads the overlay container by it; the flight list takes the leftover dock height (min ~5 two-line rows), the dock scrolls past
+  that (AV30).
 - **Training reads the models' OWN sentences** (`prior-generation` overlays, `aeroviz-training-generation-v4`, written by ts
   `prior_generation_training_export`): `trainingSource` (null = truth, or `{overlayId, sample}`) picks the sentence the bar,
   the panel and 3D read; the truth is ALWAYS drawn in 3D; a model's bands are FLAT like the truth's (hatching cluttered the
@@ -197,6 +198,12 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   same move for every model of one seed, no readout; the bar's `Real start | Augmented start` switch filters the model tabs by
   start (group per start family, never mixed); no truth marks over a moved sample; its words fly live FROM the moved start
   (the request's `augmentation`, `fly.moved_inputs` = the generation's `augmented_inputs`, limit ×2) (AV35).
+- **Training hides Cesium's clock console** (dial, timeline, full-screen button — Training runs no clock): body class
+  `workbench-training-active` from `mode` (WorkbenchShell), `visibility: hidden` (the viewer's `forceResize` reads it, so the
+  credits are laid out without them); the sentence bar sits at the bottom edge (`--training-bar-bottom`), Cesium's credits are
+  lifted above it right of the left dock (`!important` over the viewer's inline position; `--overlay-left-width` on `:root`); the
+  angle row is named "Descent", its bands "1: 0.92°" (`trainingBandLabel`); the live executor's cursor on its word's row reads the
+  3D fly-out's clock (`autopilotPlaybackS`), a leaf moving itself per frame (AV36).
 
 ## Comparison CZML colour contract
 

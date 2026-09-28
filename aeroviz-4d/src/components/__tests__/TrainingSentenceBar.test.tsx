@@ -44,10 +44,14 @@ import { parseTrainingExecutorOverlay, parseTrainingPriorOverlay, type TrainingG
 import {
   AUGMENTED_R1_ID, AUGMENTED_R2_ID, AUGSTART_BASE_ID, AUGSTART_POST_ID, BASE_MODEL_ID, POST_TRAINED_ID, mockGenerationViews,
 } from "../../data/__tests__/trainingOverlays.fixture";
-import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
+import {
+  AUTOPILOT_PLAYBACK_MIN_SPEEDUP, AUTOPILOT_TAIL_OPACITY, parseTrainingAutopilot,
+} from "../../data/trainingAutopilot";
 import { VECTORED_KEY, WORD } from "../../data/__tests__/trainingSample.fixture";
 import { TRAINING_MODEL_COLOR, TRAINING_OUTSIDE_COLOR } from "../../utils/trainingWordColors";
-import { mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "../../data/__tests__/trainingAutopilot.fixture";
+import {
+  failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockSelection,
+} from "../../data/__tests__/trainingAutopilot.fixture";
 
 /** Publish the fixture's overlays for the selected flight, as the panel does. */
 function overlays(position = 0) {
@@ -402,6 +406,74 @@ describe("TrainingSentenceBar", () => {
     const red = document.querySelector(".training-sentence-autopilot strong") as HTMLElement;
     expect(red.textContent).toBe("out of envelope");
     expect(red.style.color).toBe("rgb(255, 45, 45)");
+  });
+
+  it("puts a cursor on the flown word's row: at its step while it flies on the backend, then with the 3D aircraft, faded in the tail, left at the end", () => {
+    select();
+    const parsed = parseTrainingSample(mockSample());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    // heading 225° said at step 8 (16 s), the next heading word at step 10 (20 s): flown 16–24 s, the tail from 20 s — 8 s,
+    // flown out at the least speed-up
+    const request = mockAutopilotRequest(parsed.value, VECTORED_KEY, "heading", 8);
+    const realMs = (flownS: number) => (flownS / AUTOPILOT_PLAYBACK_MIN_SPEEDUP) * 1000;
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => frames.push(callback));
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    const nextFrame = (ms: number) => {
+      now.mockReturnValue(1_000_000 + ms);
+      frames.shift()!(0);
+    };
+    const issue = (pattern: RegExp) => screen.getByLabelText(pattern).querySelector(".training-sentence-issue")!;
+    const cursor = () => document.querySelector(".training-sentence-autopilot-cursor") as SVGRectElement | null;
+    const at = () => Number(/^translate\(([-\d.]+) 0\)$/.exec(cursor()!.getAttribute("transform")!)![1]);
+    appState.trainingAutopilot = { status: "flying", request };
+    const { rerender, unmount } = render(<TrainingSentenceBar />);
+    const said = issue(/^heading 225° .* issued at step 8 /);
+    const x16 = Number(said.getAttribute("x"));
+    const x20 = Number(issue(/^heading 180° .* issued at step 10 /).getAttribute("x"));
+    // on the heading word's row, at its step, pulsing, no frame loop
+    expect(Number(cursor()!.getAttribute("y"))).toBe(Number(said.getAttribute("y")) - 1);
+    expect(cursor()!.classList.contains("waiting")).toBe(true);
+    expect(at()).toBeCloseTo(x16, 6);
+    expect(frames).toHaveLength(0);
+    // the answer arrives: the same cursor flies it out from the word's step
+    const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, mockSelection(parsed.value, request));
+    if (!answer.ok) throw new Error(answer.problem);
+    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 1_000_000, roundTripS: 0.5 };
+    rerender(<TrainingSentenceBar />);
+    expect(cursor()!.classList.contains("waiting")).toBe(false);
+    expect(at()).toBeCloseTo(x16, 6);
+    // 4 s along: where the next heading word is heard, not yet faded
+    nextFrame(realMs(4));
+    expect(at()).toBeCloseTo(x20, 6);
+    expect(cursor()!.style.opacity).toBe("");
+    // in the tail, faded as the 3D tail is
+    nextFrame(realMs(6));
+    expect(at()).toBeCloseTo(x16 + 1.5 * (x20 - x16), 6);
+    expect(cursor()!.style.opacity).toBe(String(AUTOPILOT_TAIL_OPACITY));
+    // flown out: left at the segment's end (24 s), and the loop stops
+    nextFrame(realMs(60));
+    expect(at()).toBeCloseTo(x16 + 2 * (x20 - x16), 6);
+    expect(frames).toHaveLength(0);
+    // Replay in 3D: a new start, from the word's step again, unfaded
+    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 1_000_000 + realMs(60), roundTripS: 0.5 };
+    rerender(<TrainingSentenceBar />);
+    expect(at()).toBeCloseTo(x16, 6);
+    expect(cursor()!.style.opacity).toBe("");
+    unmount();
+    raf.mockRestore();
+    now.mockRestore();
+    // a refusal flew nothing; nor did a flight that failed in its first cycle (one state: 3D flies nothing either)
+    appState.trainingAutopilot = { status: "failed", request, problem: "the backend did not answer" };
+    const refused = render(<TrainingSentenceBar />);
+    expect(cursor()).toBeNull();
+    refused.unmount();
+    const one = parseTrainingAutopilot(failedAnswer(mockAutopilotAnswer(parsed.value, request), 1), request,
+      mockSelection(parsed.value, request));
+    if (!one.ok) throw new Error(one.problem);
+    appState.trainingAutopilot = { status: "ready", request, segment: one.value, playedAt: 1, roundTripS: 0.5 };
+    render(<TrainingSentenceBar />);
+    expect(cursor()).toBeNull();
   });
 
   it("marks each word with the executor's verdict, and none where a word has no check of its own", () => {

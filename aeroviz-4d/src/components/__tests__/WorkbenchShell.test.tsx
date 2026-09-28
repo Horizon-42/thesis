@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 const { appState, setPresentationMode } = vi.hoisted(() => ({
-  appState: { presentationMode: false },
+  appState: { presentationMode: false, mode: "observe", viewer: null as unknown },
   setPresentationMode: vi.fn(),
 }));
 
@@ -28,6 +28,8 @@ function renderShell() {
 describe("WorkbenchShell", () => {
   beforeEach(() => {
     appState.presentationMode = false;
+    appState.mode = "observe";
+    appState.viewer = null;
     vi.clearAllMocks();
   });
 
@@ -56,6 +58,26 @@ describe("WorkbenchShell", () => {
     renderShell();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(setPresentationMode).toHaveBeenCalledWith(false);
+  });
+
+  it("hides Cesium's clock console in Training only — the viewer laid out again after each switch — and puts it back on leaving", () => {
+    // what the viewer's layout would read: the class at the moment it is asked to lay itself out
+    const training = () => document.body.classList.contains("workbench-training-active");
+    const laidOut: boolean[] = [];
+    appState.viewer = { forceResize: vi.fn(() => laidOut.push(training())) };
+    const shell = () => <WorkbenchShell><div /></WorkbenchShell>;
+    const { rerender, unmount } = render(shell());
+    expect(laidOut).toEqual([false]);
+    appState.mode = "training";
+    rerender(shell());
+    expect(laidOut).toEqual([false, true]);
+    appState.mode = "observe";
+    rerender(shell());
+    expect(laidOut).toEqual([false, true, false]);
+    appState.mode = "training";
+    rerender(shell());
+    unmount();
+    expect(training()).toBe(false);
   });
 
   it("does not listen for Escape when not in presentation mode", () => {

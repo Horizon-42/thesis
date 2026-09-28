@@ -387,8 +387,10 @@ that divergence is a known open item (see the README's "Future Improvements").
 ### AV30 · Training 的左栏停在句子条上面；航班列表占剩下的高度（2026-09-26）
 
 - 句子条横跨整个宽度，原来左栏一直伸到底，下半截（Draw 的开关、叠加层）被它盖住。现在句子条用 `ResizeObserver` 量自己的高度，
-  写到它所在的 `.workbench` 上（`--training-bar-height`，句子条卸下时删掉）；`index.css` 里
-  `.workbench:has(> .training-sentence-bar) > .cesium-overlay-container` 的底边距改成 36 px（句子条离底的距离）+ 句子条高 + 8 px，
+  写到页面的根元素上（`--training-bar-height`，句子条卸下时删掉；2026-09-28 之前写在 `.workbench` 上，Cesium 的署名在
+  工作台之外也要读它，AV36）；`index.css` 里
+  `.workbench:has(> .training-sentence-bar) > .cesium-overlay-container` 的底边距是句子条离底的距离（`--training-bar-bottom`，
+  8 px；2026-09-28 之前 36 px，给 Cesium 的时间轴让位）+ 句子条高 + 8 px，
   左右两侧的面板因此都在它上面结束；原来给 Cesium 时钟盘留的底边距（`left-overlay-panel-stack` 的 92 px）这时归零——那一块本来就被
   句子条盖着。
 - 左栏里 `TrainingPanel` 是 `flex: 1 0 auto`（填满左栏、不比内容矮），航班列表 `flex: 1 1 0; min-height: 176px`：列表拿剩下的高度，
@@ -499,6 +501,28 @@ that divergence is a known open item (see the README's "Future Improvements").
   moved"，样本小块写增强量；▶ Fly 照样能用：请求带上增强量，后端按 `augment_state` 挪执行器的起点（`fly.moved_inputs`，
   与第二阶段的 `augmented_inputs` 逐位相同）、按 `augment_signals` 挪观测行、时限 ×2，飞出来就是那个样本（导出的增强量
   取整到 0.0001° 时差约 2 cm，此后导出不取整）；详情页的模型一节多一张表；三维把增强后的前 8 行用模型颜色虚线画出，接到样本航迹起点。
+
+### AV36 · Training 藏起 Cesium 的时钟；句子条贴底；下降角一行叫 Descent；实时执行器的小游标（2026-09-28）
+
+- 用户（2026-09-28）：Training 里 Cesium 的控制台（时钟盘、时间轴）不起作用，藏起来让句子条沉底。Training 不载 CZML，句子条
+  有自己的时间，`viewer.clock` 属于 Observe 的回放。`WorkbenchShell` 按 `mode` 给 `body` 加 `workbench-training-active`，
+  `index.css` 把时钟盘、时间轴和全屏按钮设成 `visibility: hidden`，再 `viewer.forceResize()`：Cesium 排版时只看 `visibility`
+  （`display: none` 它看不出，演示模式用的就是那种，署名不动），所以署名随之排到最底下；回到别的模式时同一个 effect 再强制排一次，
+  时间轴重新排好。浏览器核对：Observe 的时钟盘、时间轴、全屏按钮照旧，Training 里都不见。
+- 句子条离底 `--training-bar-bottom`（8 px，同左栏离顶栏的距离，定义在 `:root`）。Cesium 的署名（ion 标志与 "Data attribution"）
+  必须看得见，而它们会落在句子条下面：Training 里用 `!important` 盖过 Cesium 每次排版写在行内的位置，放到句子条上方 4 px、左栏
+  右边（`calc(16px + var(--overlay-left-width) + 16px)`）；为此 `--training-bar-height`（AV30）写到根元素上，
+  `--overlay-left-width` 从 `.cesium-overlay-container` 挪到 `:root`（其余读它的地方都在根元素之下，值不变）。没选航班时没有
+  句子条，署名离底 12 px。
+- 下降角一行（`TRAINING_COLUMN_LABEL.angle`）的行名从 "Angle" 改成 "Descent"（用户：含糊），详情页词表的那一行也一样；带上的字
+  （`trainingBandLabel`）写成 "编号: 标称角"——"1: 0.92°"（类名去掉开头的 "descent "，行名已经说了），爬升 "climb: -1.32°"，平飞
+  "level"；带的提示、三维标签、读数与先验窗口仍用完整的词（`trainingWordLabel`）。
+- 实时执行器在飞的时候（文档 36 §4.7），句子条上它飞的那个词所在的行有一根带白边的短竖条（`AutopilotCursor`），颜色同飞出的线：后端还
+  在算时停在这个词说出的那一步、一闪一闪（`prefers-reduced-motion` 时不闪）；答复到了就与三维里的飞机一起走——两边读同一个时钟
+  `autopilotPlaybackS(track, playedAt, now)`（实际时间 × 倍数，飞完停在段尾），过了听到下一个同列词的那一点（尾巴）变淡 0.45，
+  飞完停在段尾；Replay in 3D 换一个 `playedAt`，它从头再走。它自己用 `requestAnimationFrame` 改自己的 `transform`，句子条不因它
+  每帧重画（AV29）；飞完就停掉循环，轴的宽度或长度变了在绘制之前重新放。浏览器核对（KRDU AAL557）：真值的 heading 170°（64 s，×8）
+  与 base 模型第 1 个样本的 heading 225°（74 s）——游标与三维标签的"已飞"同步，停在尾巴末端、变淡。
 
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
 

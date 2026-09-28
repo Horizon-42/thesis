@@ -13,6 +13,7 @@ import {
   trainingWordAt,
   trainingSetRefusal,
   trainingVerdicts,
+  trainingBandLabel,
   trainingWordLabel,
   TRAINING_COLUMNS,
   TRAINING_INDEX_SCHEMA,
@@ -341,6 +342,18 @@ describe("reading a sentence", () => {
     expect(label("angle", WORD.descent3)).toBe("descent 3 (3.06°)");
     expect(label("speed", WORD.speed110)).toBe("110 m/s");
     expect(label("speed", WORD.unspecified)).toBe("unspecified");
+  });
+
+  it("writes a descent class on its band by its number and angle, under the row named Descent", () => {
+    const { vocabulary, candidates } = parsed();
+    const band = (column: (typeof TRAINING_COLUMNS)[number], value: number) =>
+      trainingBandLabel(vocabulary, candidates, column, value);
+    expect(band("angle", WORD.descent3)).toBe("3: 3.06°");
+    expect(band("angle", WORD.level)).toBe("level");
+    expect(band("angle", vocabulary.angleClasses.findIndex((angle) => angle.name === "climb"))).toBe("climb: -1.22°");
+    // every other column's band reads its word in full
+    expect(band("heading", WORD.heading090)).toBe("090°");
+    expect(band("altitude", WORD.land)).toBe("descend to land");
   });
 
   it("runs a column from each issue to the next, the last to the end", () => {
