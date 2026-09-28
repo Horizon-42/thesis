@@ -177,7 +177,8 @@ def _batch(airport, signals, spec, keys):
     geometry = airport.flights.geometry
     flights = [signals[k] for k in keys]
     readings = [read_flight(f, geometry, spec, Words(spec)) for f in flights]
-    return replay.Batch(signals=flights, series=[None] * len(keys), readings=readings, geometries=[geometry] * len(keys),
+    # no rebuilt series: the flight's key stands where its series would be (the tests patch the executor's inputs)
+    return replay.Batch(signals=flights, series=list(keys), readings=readings, geometries=[geometry] * len(keys),
                         vertical_paths=[()] * len(keys), approach_ias_mps=[70.0] * len(keys),
                         groups=[replay.OWN] * len(keys), drawn={"split": "train"})
 
