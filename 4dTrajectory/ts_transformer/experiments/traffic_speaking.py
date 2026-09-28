@@ -106,17 +106,28 @@ def scene_airports(directory: Path, split: str, spec: VocabularySpec, airports: 
 
 @dataclass(frozen=True)
 class Scene:
-    """One speaking flight's scene: its airport, its key, the step its first row hangs on (epoch seconds), and the others
-    in the air at a step from there to the end of its time limit."""
+    """One speaking flight's scene: its airport, its key, the step its first row hangs on (epoch seconds), the others in
+    the air at a step from there to the end of its time limit, and — an augmented scene's (`traffic_augment`) — flights
+    moved in time or inserted (their rows and tracks, by their keys in ``others``)."""
 
     airport: SceneAirport
     key: str
     first_step_s: float
     others: tuple[str, ...]
+    moved: tuple[tuple[FlightRows, Track], ...] = ()
 
     @property
     def speaking(self) -> FlightRows:
         return self.airport.flights.flights[self.key]
+
+    def rows(self, key: str) -> FlightRows:
+        """A flight of the scene as the samples place it (a moved one's own)."""
+        return next((rows for rows, _ in self.moved if rows.presence.dataset_id == key), None) \
+            or self.airport.flights.flights[key]
+
+    def track(self, key: str) -> Track:
+        """A flight of the scene as the judge replays it (a moved one's own)."""
+        return next((track for _, track in self.moved if track.key == key), None) or self.airport.tracks[key]
 
 
 def scene_of(airport: SceneAirport, key: str, limit_s: float, step_s: float) -> Scene:
@@ -130,7 +141,7 @@ def scene_of(airport: SceneAirport, key: str, limit_s: float, step_s: float) -> 
 def other_node(scene: Scene, key: str, step_s: float) -> Node:
     """An other aircraft as the speaker places it: its rows from the step its first row hangs on, counted from the
     speaking aircraft's row 0."""
-    other = scene.airport.flights.flights[key]
+    other = scene.rows(key)
     first = int(round((float(hang(other.presence.start_s, step_s)) - scene.first_step_s) / step_s))
     return Node(key, other.presence.speaking, first, **other.node_rows)
 
@@ -160,8 +171,8 @@ def speaking_masks(scene: Scene, column: int, classes: int, t_s: float, aircraft
     relative = relative_to_runway(np.array([aircraft.e_m]), np.array([aircraft.n_m]), np.array([aircraft.track_deg]),
                                   np.array([aircraft.height_m]), candidate)
     angle = float(relative.track_minus_course_deg[0])
-    keys = [k for k in scene.others if airport.tracks[k].on_step(t_s)]
-    here = [airport.tracks[k] for k in keys]
+    keys = [k for k in scene.others if scene.track(k).on_step(t_s)]
+    here = [scene.track(k) for k in keys]
     traffic = join(Traffic(np.array([aircraft.e_m]), np.array([aircraft.n_m]), np.array([aircraft.height_m]),
                            (candidate.ident,),
                            np.array([separation.along_nm[candidate.ident] * NM_M - float(relative.before_threshold_m[0])]),
@@ -169,7 +180,7 @@ def speaking_masks(scene: Scene, column: int, classes: int, t_s: float, aircraft
                            np.array([aircraft.captured]), (scene.speaking.category,)),
                    traffic_at(here, t_s))
     levels = [words.speed_mps(i) for i in range(words.speed_unspecified)]
-    said = [_labelled(airport.flights.flights[k], t_s) for k in keys]
+    said = [_labelled(scene.rows(k), t_s) for k in keys]
     if column == SPEED:
         speeds = np.array([aircraft.ground_speed_mps * math.cos(math.radians(angle)),
                            *(float(np.interp(t_s, t.presence.times_s, t.along_rate_mps)) for t in here)])
@@ -177,7 +188,7 @@ def speaking_masks(scene: Scene, column: int, classes: int, t_s: float, aircraft
         if len(candidates) != classes - 1:
             raise ValueError(f"{len(candidates)} speed words, the column has {classes} classes")
         targets = np.array([candidates[speed_word] if speed_word is not None else speeds[0],
-                            *(_target(airport.flights.flights[k], force, levels, words, float(speeds[m]))
+                            *(_target(scene.rows(k), force, levels, words, float(speeds[m]))
                               for m, (k, force) in enumerate(zip(keys, said), start=1))])
         check = speed_check(traffic, 0, separation, speeds, targets, candidates, 0 if speed_word is None else speed_word,
                             speed_change_mps2(words.spec), ATC_NO_SPEED_ASSIGNMENT_DISTANCE_M)
@@ -256,7 +267,7 @@ class SceneLoop(ClosedLoop):
         for b, scene in enumerate(self.scenes):
             airport = scene.airport
             geometry, separation = airport.flights.geometry, airport.flights.separation
-            members = [scene.speaking, *(airport.flights.flights[k] for k in scene.others)]
+            members = [scene.speaking, *(scene.rows(k) for k in scene.others)]
             shape = (len(members), span)
             time_s, e, n, h, along = (np.full(shape, np.nan) for _ in range(5))
             runway: list[list[str | None]] = [[None] * span for _ in members]
@@ -352,6 +363,6 @@ def judged(scene: Scene, aircraft: Controlled, step_s: float, reading: str = VIS
     """The speaking aircraft judged with the others replayed (`traffic_loop.Loop` under ``reading``): its outcome
     (`traffic_loop.LOST_SEPARATION` when a loss it answers for ended it), that end, and the run."""
     run = Loop(scene.airport.flights.separation, reading, step_s).run(
-        [aircraft], [scene.airport.tracks[k] for k in scene.others])
+        [aircraft], [scene.track(k) for k in scene.others])
     end = run.ended.get(aircraft.key)
     return (LOST_SEPARATION if end is not None else aircraft.outcome), end, run

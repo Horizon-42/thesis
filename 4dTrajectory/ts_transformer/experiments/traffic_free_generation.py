@@ -23,6 +23,11 @@ starting in one is redrawn (design §5.3) — no reading can be blamed for it. T
 column, and the probability the model put on what the masks removed (the approach column's counts the vocabulary's own
 rule too: a runway changed under a clearance takes the approach with it). The procedure's masks are the prior's own.
 
+With ``--augment-seed`` every flight's scene is augmented instead (`traffic_augment`: the leader moved, the start moved,
+a flight inserted, a third each, drawn until the scene qualifies; a flight with no qualifying draw is left out, counted)
+and read as **scene** and **alone** only — a moved start has no record, and its time limit is stage 2's
+(`prior.augment.TIMEOUT_FACTOR`); the readout adds each kind's.
+
 Writes into a NEW directory ``flights.jsonl`` (every flight's rows, appended as each batch ends, so a run cut short
 keeps what it read) and ``free_generation.json`` (the readout); ``--per-airport`` is the sample's size (the readout says
 so). A batch holds at most ``--aircraft-steps`` scenes × their most aircraft × (their longest pre-roll + rows): the past
@@ -52,8 +57,11 @@ from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.flights import flight_inputs
 from ts_transformer.autopilot.judge import outcome_of
 from ts_transformer.experiments.prior_free_generation import (
-    _physics, fly_reference, flight_rows, glidepath_stops, limits_s, reference_grid, said_rows,
+    _physics, augmented_inputs, fly_reference, flight_rows, glidepath_stops, limits_s, reference_grid, said_rows,
+    start_altitude_windows,
 )
+from ts_transformer.experiments.traffic_augment import KINDS, augment
+from ts_transformer.prior.augment import Augmentation
 from ts_transformer.prior.generate import rows_for
 from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, load_prior, rosters
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION, Controlled, recorded
@@ -110,15 +118,20 @@ def judged_steps(fields: dict[str, Any], aircraft: Controlled, steps_said: int, 
 
 def model_rows(model: Prior, batch: replay.Batch, scenes: Sequence[Scene], judge_scenes: Sequence[Scene], source: str,
                words: Words, params: Any, landings: Any, samples: int, *, generator: torch.Generator,
-               temperature: float, procedure_masks: Any) -> list[dict[str, Any]]:
+               temperature: float, procedure_masks: Any,
+               moves: Sequence[Augmentation | None] | None = None) -> list[dict[str, Any]]:
     """Every flight of ``batch`` flown ``samples`` times, the model speaking in ``scenes`` and judged with the others of
-    ``judge_scenes`` (the same scenes, or — alone — the scenes it was taken out of)."""
+    ``judge_scenes`` (the same scenes, or — alone — the scenes it was taken out of); ``moves``: each flight's moved start
+    (`batch.signals` are already its moved rows; None: its own), and stage 2's time limit."""
     cpu, step_s = torch.device("cpu"), words.spec.step_s
     index = [j for j in range(len(batch.readings)) for _ in range(samples)]
     repeated = replay.subset(batch, index)
     runways, charts, approach = _physics(repeated, cpu)
-    loop = SceneLoop(model, repeated.signals, repeated.geometries, flight_inputs(repeated.series, device=cpu, anchor=N_LOOK),
-                     runways, charts, approach, limits_s(repeated, params, step_s, augmented=False), words, params,
+    inputs = flight_inputs(repeated.series, device=cpu, anchor=N_LOOK)
+    if moves is not None:
+        inputs = augmented_inputs(inputs, repeated.geometries, [moves[j] for j in index])
+    loop = SceneLoop(model, repeated.signals, repeated.geometries, inputs, runways, charts, approach,
+                     limits_s(repeated, params, step_s, augmented=moves is not None), words, params,
                      landings, scenes=[scenes[j] for j in index], generator=generator, temperature=temperature,
                      procedure_masks=procedure_masks)
     while loop.running:
@@ -167,7 +180,7 @@ def recorded_rows(batch: replay.Batch, scenes: Sequence[Scene], words: Words) ->
     its rows), from its first predicted step, judged in its scene."""
     step_s, rows = words.spec.step_s, []
     for flight, reading, geometry, scene in zip(batch.signals, batch.readings, batch.geometries, scenes):
-        own = scene.airport.tracks[scene.key]
+        own = scene.track(scene.key)
         seen = presence(flight, len(reading.words), geometry)
         capture = int(np.searchsorted(seen.times_s, own.captured_s))
         whole = recorded(seen, flight, capture, replay.observed_landing_s(flight, reading, geometry), geometry,
@@ -182,6 +195,26 @@ def recorded_rows(batch: replay.Batch, scenes: Sequence[Scene], words: Words) ->
                      "outcome": aircraft.outcome, "others": len(scene.others),
                      **separation_fields(scene, aircraft, step_s)})
     return rows
+
+
+def augmented_scenes(batch: replay.Batch, scenes: Sequence[Scene], airports: dict[str, Any], seed: int,
+                     windows: dict[str, tuple[float, float]], step_s: float
+                     ) -> tuple[replay.Batch, list[Scene], list[Augmentation | None], list[dict[str, Any]], int]:
+    """Every flight's scene augmented (`traffic_augment.augment`, one generator from ``seed`` in the batch's order):
+    ``(the flights kept — their rows moved where the start is —, their scenes, their moved starts, what was drawn, how
+    many were left out)``."""
+    rng = np.random.default_rng(seed)
+    pools = {code: [k for k, f in airport.flights.flights.items() if f.presence.speaking]
+             for code, airport in airports.items()}
+    drawn = []
+    for j, (scene, signals) in enumerate(zip(scenes, batch.signals)):
+        inputs = flight_inputs(batch.series[j: j + 1], device=torch.device("cpu"), anchor=N_LOOK)
+        drawn.append(augment(scene, signals, inputs, pools[signals.airport], rng, windows, step_s))
+    kept = [j for j, a in enumerate(drawn) if a is not None]
+    part = replay.subset(batch, kept)
+    part = dataclasses.replace(part, signals=[drawn[j].signals for j in kept])
+    return (part, [drawn[j].scene for j in kept], [drawn[j].augmentation for j in kept],
+            [{"kind": drawn[j].kind, "draws": drawn[j].draws, **drawn[j].drawn} for j in kept], len(drawn) - len(kept))
 
 
 def summary(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
@@ -226,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--aircraft-steps", type=int, default=AIRCRAFT_STEPS, help="a batch's most (module docstring)")
+    parser.add_argument("--augment-seed", type=int, default=None, help="augmented scenes drawn with this seed")
     parser.add_argument("--device", default="cuda", help="the prior's; the executor flies on CPU")
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     args = parser.parse_args(argv)
@@ -249,9 +283,19 @@ def main(argv: list[str] | None = None) -> int:
     batch = replay.draw(instructions, args.split, words.spec, words, per_airport=args.per_airport, seed=args.seed)
     airports, built = scene_airports(instructions, args.split, words.spec, model.config.airports, landings,
                                      model.config.max_rows)
-    limits = limits_s(batch, params, words.spec.step_s, augmented=False)
+    augmented = args.augment_seed is not None
+    limits = limits_s(batch, params, words.spec.step_s, augmented=augmented)
     scenes = [scene_of(airports[g.code], s.dataset_id, limit, words.spec.step_s)
               for s, g, limit in zip(batch.signals, batch.geometries, limits)]
+    moves: list[Augmentation | None] | None = None
+    draws: list[dict[str, Any]] = [{} for _ in scenes]
+    left_out = 0
+    if augmented:
+        batch, scenes, moves, draws, left_out = augmented_scenes(batch, scenes, airports, args.augment_seed,
+                                                                 start_altitude_windows(instructions), words.spec.step_s)
+        limits = limits_s(batch, params, words.spec.step_s, augmented=True)
+        print(f"augmented scenes: {dict(Counter(d['kind'] for d in draws))}, {left_out} with no qualifying draw left "
+              f"out", flush=True)
     print(f"{len(batch.readings)} {args.split} flights ({batch.drawn['excluded']} not flown), scenes built "
           f"({built}), {time.perf_counter() - started:.0f}s", flush=True)
 
@@ -262,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
     def size(j: int) -> tuple[int, int]:
         """A flight's scene: its aircraft and its steps (its pre-roll, as the speaker caps it, and its rows)."""
         scene = scenes[j]
-        pre = max([0] + [int(round((scene.first_step_s - hang(scene.airport.flights.flights[k].presence.start_s, step_s))
+        pre = max([0] + [int(round((scene.first_step_s - hang(scene.rows(k).presence.start_s, step_s))
                                    / step_s)) for k in scene.others])
         return 1 + len(scene.others), min(pre, history) + rows_for(limits[j] + step_s, step_s)
 
@@ -280,13 +324,19 @@ def main(argv: list[str] | None = None) -> int:
     done = 0
     for chunk in batches:
         part, here = replay.subset(batch, chunk), [scenes[j] for j in chunk]
-        alone = [dataclasses.replace(s, others=()) for s in here]
+        alone = [dataclasses.replace(s, others=(), moved=()) for s in here]
+        chunk_moves = None if moves is None else [moves[j] for j in chunk]
         new: list[dict[str, Any]] = []
         for source, speaking in (("scene", here), ("alone", alone)):
-            new += model_rows(model, part, speaking, here, source, words, params, landings, args.samples,
-                              generator=generator, temperature=args.temperature, procedure_masks=own_masks)
-        new += labelled_rows(part, here, words, params, own_masks)
-        new += recorded_rows(part, here, words)
+            rows_here = model_rows(model, part, speaking, here, source, words, params, landings, args.samples,
+                                   generator=generator, temperature=args.temperature, procedure_masks=own_masks,
+                                   moves=chunk_moves)
+            for k, row in enumerate(rows_here):
+                row["augmented"] = draws[chunk[k // args.samples]] or None
+            new += rows_here
+        if not augmented:
+            new += labelled_rows(part, here, words, params, own_masks)
+            new += recorded_rows(part, here, words)
         with (out / "flights.jsonl").open("a", encoding="utf-8") as stream:
             for row in new:
                 stream.write(json.dumps(row) + "\n")
@@ -298,6 +348,8 @@ def main(argv: list[str] | None = None) -> int:
     for row in rows:
         by_airport[row["airport"]].append(row)
     readout = {"pooled": summary(rows), "airports": {code: summary(part) for code, part in sorted(by_airport.items())}}
+    if augmented:
+        readout["kinds"] = {kind: summary([r for r in rows if r["augmented"]["kind"] == kind]) for kind in KINDS}
     write_json_atomic(out / "free_generation.json", {
         "schema": SCHEMA, "written_utc": utc_now(), "git": git, "split": args.split, "drawn": batch.drawn,
         "per_airport": args.per_airport, "samples": args.samples, "temperature": args.temperature, "seed": args.seed,
@@ -306,6 +358,7 @@ def main(argv: list[str] | None = None) -> int:
         "executor": {"directory": repo_relative(executor_dir), "sha256": record["sha256"]},
         "instructions": repo_relative(instructions), "scenes": built, "history_s": HISTORY_S,
         "readings": {"ends": VISUAL, "beside": IFR}, "aircraft_steps": args.aircraft_steps, "batches": len(batches),
+        "augment_seed": args.augment_seed, "augmented_left_out": left_out,
         "readout": readout, "flights_file": "flights.jsonl", "elapsed_s": time.perf_counter() - started})
     for source, entry in readout["pooled"].items():
         shares = "  ".join(f"{name} {share:.3f}" for name, share in entry["outcomes"].items())
