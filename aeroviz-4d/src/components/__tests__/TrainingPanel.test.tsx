@@ -300,14 +300,14 @@ describe("TrainingPanel", () => {
       expect(fetched.filter((url) => url.startsWith("data/airports/KYYY/training/prior_test"))).toEqual([]);
     });
 
-    it("refuses an overlay drawn over the set before it was re-exported, and says why", async () => {
+    it("refuses an overlay drawn over other candidate runways than the set's, and says why", async () => {
       const stale: any = mockExecutorOverlay();
-      stale.base.sampleWrittenUtc = "2026-09-01T00:00:00+00:00";
+      stale.base.candidatesSha256 = "6".repeat(64);
       serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(), [OVERLAYS_PATH]: mockOverlays(), [EXECUTOR_PATH]: stale,
               [PRIOR_PATH]: mockPriorOverlay() });
       render(<TrainingPanel hidden={false} />);
       expect(await screen.findByText(`Overlay ${EXECUTOR_ID} cannot be read.`)).toBeTruthy();
-      expect(screen.getByText(/the set was re-exported after the overlay/)).toBeTruthy();
+      expect(screen.getByText(/has candidates 666666666666, the loaded sample/)).toBeTruthy();
       await waitFor(() => expect(lastOf(setTrainingPrior)?.flight.flightKey).toBe(VECTORED_KEY));
     });
   });

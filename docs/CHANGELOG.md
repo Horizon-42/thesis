@@ -1,5 +1,24 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-28 — Training 叠加层按内容绑定集合，不再按集合文件的字节和写出时刻
+
+- 起因（绑定审计，`docs/code-health-followups.md` 2026-09-28 的六条之一）：叠加层记下集合样本文件的 sha256 和写出时刻，
+  集合只要用同样的航班重新导出一次，每个机场 25 个叠加层全部被拒读，要约 1 小时重导。
+- 现在叠加层记下它和集合共有的东西：集合 id、规格 sha、候选跑道 sha（`candidatesSha256`，生成样本的跑道编号指向它）、
+  机场坐标系（`airportFrame`）；前端逐项核对，并逐架核对航班键、执行器的每条词、先验的步数，以及画出的每一行高度的
+  HAE − MSL 等于集合里这架航班的（0.02 m：两边各是两个写到 0.01 m 的高度之差，`training_files.DATUM_TOLERANCE_M` /
+  `TRAINING_DATUM_TOLERANCE_M`），从观测状态飞出的航迹第一点就是观测航迹那一行（执行器第 0 行、模型句子第 8 行；审查提出：
+  只比键，集合换了观测航迹而键不变时叠加层会画在旧航迹旁边；已发布的 12,292 条航迹差为 0）。导出器写之前同样核对（`open_base_set` 查候选跑道与坐标系是自己产物的，`require_set_datum`
+  查每架的高度基准）。`check-publication` 不再比对盘上文件的 sha256。
+- 格式名：清单 `aeroviz-training-overlays-v2`，执行器 / 先验 / 生成 v4，增强起点生成 v2（两边一起改，旧名按名字拒读）。
+  **已发布的叠加层要重导一次才能读**（用户同意后做）。
+- 真数据试跑（临时目录，KRDU + KSJC，v5 句子产物、v11 执行器）：执行器、base 生成、增强起点 base 生成、逐步预测四种叠加层
+  都导出、`check-publication` 0 错误；再从 v5 重新导出集合：KRDU（40 架同样的航班）4 个叠加层照读，KSJC（v5 多标注 1 架，
+  抽样换了 10 / 40 架）4 个按名字拒读。
+- 测试：ts `test_training_overlays` / `test_prior_generation_training_export` / `test_instruction_training_export`、后端
+  `test_autopilot_segment` 过（生成导出器端到端：高度基准差 0.1 m 时写之前拒绝）；前端 867 过。opus 审查：无必改，两条应改
+  （航迹起点、导出器端到端测试）与小项已改。
+
 ### 2026-09-28 — 多机 M4 第 6 步：多机后训练的 runner（R32）
 
 - `experiments/traffic_reward.py`（runner）：每轮训练日真实场景 200 + 扩充场景 200（每机场）× 8 句，奖励 = 落地（落地方向上）且没有被失去间隔结束，

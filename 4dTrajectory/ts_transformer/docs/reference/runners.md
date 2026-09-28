@@ -259,16 +259,21 @@ existing directory. Tests: `tests/test_autopilot.py` (every write into `tmp_path
 2026-09-24 (`aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §2.6, §4.6; the frontend side: `aeroviz-4d/docs/35-viewer-reference.md`
 AV24–AV25). Two runners write OVERLAYS beside a Training set (R11), never into it: a file of their own schema under
 `<root>/<ICAO>/training/<overlay-id>/`, listed in the airport's `training/overlays.json` (`OVERLAYS_SCHEMA`
-`aeroviz-training-overlays-v1`, one entry per overlay: its kind, the set it is drawn over, that set's sample sha256, the
-file). The index (`aeroviz-training-index-v1`) is not touched. The shared helpers live in `instructions/training_files.py`
-(`open_base_set`: the set must be a read-back of this reading rule and spec under this `SAMPLE_SCHEMA`, drawn from val;
+`aeroviz-training-overlays-v2`, one entry per overlay: its kind, the set it is drawn over, the file). The index
+(`aeroviz-training-index-v1`) is not touched. The shared helpers live in `instructions/training_files.py`
+(`open_base_set`: the set must be a read-back of this reading rule and spec under this `SAMPLE_SCHEMA`, drawn from val, its
+candidates and airport frame the exporter's own artefact's; `BaseSet.block`: what the payload records of its set — the set
+id, spec, `candidatesSha256` and `airportFrame`, never the sample file's sha256 or time of writing (2026-09-28: a set
+exported again with the same flights keeps its overlays; the frontend binds by these and flight by flight);
 `base_flights`: each of its flights found in the artefact, its stored sentence equal to the set's events;
+`require_set_datum`: an exporter that draws heights adds each flight's own HAE − MSL, the set's to `DATUM_TOLERANCE_M`;
 `read_overlays` / `write_overlay`: an id listed or a directory existing is refused; the payload is written compact).
 Every airport is built before any is written.
 
 `executor_training_export --executor <spec dir> --replay <spec dir>/replay-val --instructions <artefact>
 --airports-root <…/public/data/airports> --set instruction_v3 --airport ICAO [--airport …] [--overlay-id
-executor_<spec dir name>] [--device cpu]` (schema `aeroviz-training-executor-v3` since executor v11, 2026-09-27: a crossing names the runway crossed, and the outcomes `crossed_too_high` and `crossed_other_runway`; v2 since 2026-09-24, `instruction-v3`;
+executor_<spec dir name>] [--device cpu]` (schema `aeroviz-training-executor-v4` since 2026-09-28, the content binding; v3
+since executor v11, 2026-09-27: a crossing names the runway crossed, and the outcomes `crossed_too_high` and `crossed_other_runway`; v2 since 2026-09-24, `instruction-v3`;
 the replay `ts-executor-replay-v3`): opens the spec with
 `replay.open_executor` (refused unless this executor code measured it), rebuilds the set's flights, flies those the
 replay flies (own and stand-in dynamics) in one batch per airport and judges them. `replay.json` keeps each flight's
@@ -293,7 +298,7 @@ refused (`docs/code-health-followups.md`, 2026-09-24). ~7 s per airport of 40 fl
 `prior_generation_training_export --prior <prior dir, or one round of a post-training run> --instructions <artefact>
 --executor <spec dir> [--readout <its val free generation>] --airports-root … --set <a read-back set> --airport ICAO
 [--airport …] [--samples 4] [--temperature 1.0] [--seed 1337] [--overlay-id generation_<name>[_r<NN>]_<sha256, 8 digits>]`
-(2026-09-26, schema `aeroviz-training-generation-v3` since executor v11, 2026-09-27 — a crossing names the runway crossed, two more outcomes; v2 since the models were named on 2026-09-26 — v1 carried a free `--label`;
+(2026-09-26, schema `aeroviz-training-generation-v4` since 2026-09-28, the content binding; v3 since executor v11, 2026-09-27 — a crossing names the runway crossed, two more outcomes; v2 since the models were named on 2026-09-26 — v1 carried a free `--label`;
 kind `prior-generation`; the frontend side AV31, AV32): the model's OWN sentences over the set's
 flights — `prior_free_generation.speak_and_fly` on the flights its val readout flies (own dynamics; the rest listed with their
 group), `--samples` each, one CPU generator seeded once and drawn in the order the airports are named (so a re-run is
@@ -329,7 +334,7 @@ stage 2's own code (`prior_free_generation.augmented_starts` / `augmented_inputs
 plausible within the train split's 1st–99th percentile start altitude, ≤ `AUGMENT_TRIES` draws), one move a flyable flight
 drawn from `np.random.default_rng(N)` afresh at each airport in the set's order (apart from the samples' torch generator, so
 every model exported with one seed flies each flight from the same moved start), time limit × `augment.TIMEOUT_FACTOR`;
-written as kind `prior-generation-augmented`, schema `aeroviz-training-augmented-generation-v1` (the v3 kind untouched): no
+written as kind `prior-generation-augmented`, schema `aeroviz-training-augmented-generation-v2` (v2: the content binding): no
 `readout` (refused with `--readout`), `generation.augment` = the draw's rule, per flight `augmentDraws` (null: not drawn, not
 on its own dynamics), `augmentation` (null: no plausible draw — not flown) and `observed` (the moved rows 0 … `N_LOOK` − 1);
 default id `generation_augstart_<name>[_r<NN>]_<sha8>`; the move is written unrounded (the live backend re-flies from it).
@@ -338,8 +343,8 @@ draws other samples than cpu — the executor always on CPU (the live backend re
 `producedBy.device`.
 
 `prior_training_export --prior <prior dir> --instructions <artefact> --airports-root … --set instruction_v3 --airport
-ICAO [--airport …] [--overlay-id prior_<prior dir name>]` (schema `aeroviz-training-prior-v3` since the prior's third
-version: the per-step arrays cover the predicted steps only, from `firstPredictedRow` = `N_LOOK`; null change metrics for a
+ICAO [--airport …] [--overlay-id prior_<prior dir name>]` (schema `aeroviz-training-prior-v4` since 2026-09-28, the content binding; v3 since the prior's
+third version: the per-step arrays cover the predicted steps only, from `firstPredictedRow` = `N_LOOK`; null change metrics for a
 column that never changes after the first step; the first-step runway beside the airport frequency and the rules — older
 names are refused): the checkpoint is refused unless `prior_train.load_prior` opens it on the artefact (spec, labeller,
 day split, candidate table, a whole state), it is not a smoke run and — for a variant that reads the landing context —

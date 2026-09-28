@@ -10,20 +10,22 @@
  * `experiments/prior_generation_training_export.py`.
  *
  * AN OVERLAY IS A FILE BESIDE ITS SET, NEVER INSIDE IT. `training/overlays.json` lists them, each naming the set it
- * is drawn over (`base`) and that set's sample by its sha256; the payload repeats the set id, the sample's time of
- * writing and the spec, and holds one entry per flight of the set, in the set's order. The reader binds the two by
- * those fields and by the flights themselves — the same keys, and for the executor the same words, for the prior the
- * same number of steps — and refuses the payload whole if any differs: a verdict drawn on the wrong word is worse
- * than none.
+ * is drawn over (`base`); the payload records what it shares with that set — the set id, the spec, the candidate
+ * runways and the airport frame — and holds one entry per flight of the set, in the set's order. The reader binds the
+ * two by those fields and by the flights themselves — the same keys, for the executor the same words, for the prior
+ * the same number of steps, every height drawn on the set flight's own HAE − MSL, and a track flown from the set's
+ * observed state starting at that observed row — and refuses the payload whole if
+ * any differs: a verdict drawn on the wrong word is worse than none. It never binds by the set file's bytes or its
+ * time of writing: a set exported again with the same flights keeps its overlays.
  *
  * NOTHING HERE IS COMPUTED. Every verdict is the executor's judge's, re-flown and checked against its formal replay
  * in Python — a heading word's with its band and a verdict per row on the flown track the judge read — and every
  * probability is the prior's own. The reader checks bookkeeping — lengths, ranges, the binding — and hands numbers to
  * the views.
  *
- * NO COMPATIBILITY: the four schemas are pinned below and anything else is refused by name. A payload is bound to the
- * manifest entry that listed it (its id and set) and to the sample on screen (its set, time of writing, spec and
- * airport), or refused whole.
+ * NO COMPATIBILITY: the five schemas are pinned below and anything else is refused by name. A payload is bound to the
+ * manifest entry that listed it (its id and set) and to the sample on screen (its set, spec, candidates, frame, airport
+ * and flights), or refused whole.
  *
  * SI units only: metres, m/s, degrees, seconds.
  */
@@ -34,7 +36,6 @@ import {
   readHeadingBand,
   TRAINING_COLUMN_INDEX,
   TRAINING_COLUMNS,
-  TRAINING_SPEC_SHA256,
   TRAINING_STRATA,
   TRAINING_UNCHANGED,
   trainingClassCount,
@@ -53,16 +54,18 @@ import {
   type TrainingVocabulary,
 } from "./trainingSample";
 
-/** MIRROR of the exporter's `OVERLAYS_SCHEMA` (`ts_transformer/instructions/training_files.py`): the manifest of overlays. */
-export const TRAINING_OVERLAYS_SCHEMA = "aeroviz-training-overlays-v1";
+/** MIRROR of the exporter's `OVERLAYS_SCHEMA` (`ts_transformer/instructions/training_files.py`): the manifest of overlays;
+ *  v2 (2026-09-28) no longer names the set's sample by its file's sha256. */
+export const TRAINING_OVERLAYS_SCHEMA = "aeroviz-training-overlays-v2";
 /** MIRROR of `OVERLAY_KINDS`: what an overlay can be. */
 export const TRAINING_OVERLAY_KINDS = [
   "executor-replay", "prior-prediction", "prior-generation", "prior-generation-augmented",
 ] as const;
 export type TrainingOverlayKind = (typeof TRAINING_OVERLAY_KINDS)[number];
 /** MIRROR of `executor_training_export.SCHEMA`: v2 (instruction-v3) gives each heading word judged its band and a
- *  verdict per row, and each flight judged its flown track as the judge read it; v1 (turns and holds) is refused. */
-export const TRAINING_EXECUTOR_SCHEMA = "aeroviz-training-executor-v3";
+ *  verdict per row, and each flight judged its flown track as the judge read it; v1 (turns and holds) is refused. v4
+ *  (2026-09-28): `base` is what the overlay shares with its set (`TrainingOverlayBase`), as in every overlay schema. */
+export const TRAINING_EXECUTOR_SCHEMA = "aeroviz-training-executor-v4";
 /** MIRROR of `executor_training_export.STATUSES`: one per word. */
 export const TRAINING_EXECUTOR_STATUSES = [
   "inside", "outside", "not judged", "not reached", "superseded", "no check",
@@ -90,14 +93,24 @@ export const TRAINING_PROCEDURE_MASK_SETS = [TRAINING_PROCEDURE_ALTITUDES] as co
 /** MIRROR of `prior.readout.RULES`: the causal rules the first-step runway readout sets the prior beside (B0, B1, B3;
  *  pinned by the backend's `test_autopilot_segment.MirrorTest`). */
 export const TRAINING_PRIOR_RULES = ["B0_majority", "B1_active_config", "B3_same_sector_last"] as const;
-/** MIRROR of `prior_training_export.SCHEMA`. */
-export const TRAINING_PRIOR_SCHEMA = "aeroviz-training-prior-v3";
+/** MIRROR of `prior_training_export.SCHEMA`; v4 (2026-09-28): `base` as the executor's v4. */
+export const TRAINING_PRIOR_SCHEMA = "aeroviz-training-prior-v4";
 /** MIRROR of `prior_generation_training_export.SCHEMA`: the prior's own sentences, flown; v2 names the model (its name,
- *  round, run and start model) where v1 carried a free label. */
-export const TRAINING_GENERATION_SCHEMA = "aeroviz-training-generation-v3";
+ *  round, run and start model) where v1 carried a free label; v4 (2026-09-28): `base` as the executor's v4. */
+export const TRAINING_GENERATION_SCHEMA = "aeroviz-training-generation-v4";
 /** MIRROR of `prior_generation_training_export.AUGMENTED_SCHEMA`: the same sentences flown from AUGMENTED starts (kind
- *  `prior-generation-augmented`, the Training module §2.8) — each flight with its move and moved observed rows, no readout. */
-export const TRAINING_AUGMENTED_GENERATION_SCHEMA = "aeroviz-training-augmented-generation-v1";
+ *  `prior-generation-augmented`, the Training module §2.8) — each flight with its move and moved observed rows, no readout;
+ *  v2 (2026-09-28): `base` as the executor's v4. */
+export const TRAINING_AUGMENTED_GENERATION_SCHEMA = "aeroviz-training-augmented-generation-v2";
+/** MIRROR of `training_files.DATUM_TOLERANCE_M`: how far apart two readings of one flight's HAE − MSL may be, each read
+ *  off a pair of heights written to 0.01 m. */
+export const TRAINING_DATUM_TOLERANCE_M = 0.02;
+/** How far a written position and a written height may be from another writing of the same one: the exporters write
+ *  latitude and longitude to 7 decimals and heights to 2 (`training_files.rounded`). */
+const WRITTEN_DEG = 1e-7;
+const WRITTEN_M = 0.01;
+/** A difference of two written decimals is off by up to this in their binary form. */
+const BINARY_SLACK = 1e-9;
 /** The two kinds a model's own sentences come in: from the set's own starts, and from augmented ones. */
 export const TRAINING_GENERATION_KINDS = ["prior-generation", "prior-generation-augmented"] as const satisfies readonly TrainingOverlayKind[];
 /** MIRROR of `prior_generation_training_export.MODEL_NAMES`: the prior's models, in the order they are trained — base
@@ -118,8 +131,6 @@ export interface TrainingOverlayEntry {
   kind: TrainingOverlayKind;
   /** The set it is drawn over. */
   base: string;
-  /** The sha256 of that set's sample file when the overlay was written. */
-  baseSampleSha256: string;
   title: string;
   /** Relative to the airport's `training/` directory. */
   file: string;
@@ -132,12 +143,14 @@ export interface TrainingOverlays {
   rejected: Array<{ id: string; problem: string }>;
 }
 
-/** What an overlay says about the set it is drawn over. */
+/** What an overlay shares with the set it is drawn over, besides its flights — each matched against the loaded sample. */
 export interface TrainingOverlayBase {
   setId: string;
-  sampleWrittenUtc: string;
-  sampleSha256: string;
   specSha256: string;
+  /** The candidate runways a runway index points into, and the runway ends the landing rule reads. */
+  candidatesSha256: string;
+  /** The frame its metres are in. */
+  airportFrame: TrainingSample["airportFrame"];
 }
 
 export interface TrainingExecutorCheck {
@@ -698,7 +711,6 @@ function parseEntry(entry: Reader): TrainingOverlayEntry {
     id: entry.string("id"),
     kind: entry.oneOf("kind", TRAINING_OVERLAY_KINDS),
     base: entry.string("base"),
-    baseSampleSha256: entry.string("baseSampleSha256"),
     title: entry.string("title"),
     file: entry.string("file"),
     flights: entry.count("flights"),
@@ -727,24 +739,57 @@ function parseBase(reader: Reader, entry: TrainingOverlayEntry, sample: Training
   const airport = reader.string("airport");
   if (airport !== sample.airport) reader.fail(`is drawn at ${airport}, but the loaded sample is ${sample.airport}'s`);
   const base = reader.child("base");
+  const frame = base.child("airportFrame");
   const found = {
     setId: base.string("setId"),
-    sampleWrittenUtc: base.string("sampleWrittenUtc"),
-    sampleSha256: base.string("sampleSha256"),
     specSha256: base.string("specSha256"),
+    candidatesSha256: base.string("candidatesSha256"),
+    airportFrame: { code: frame.string("code"), lat: frame.number("lat"), lon: frame.number("lon"), elevationM: frame.number("elevationM") },
   };
-  if (found.specSha256 !== TRAINING_SPEC_SHA256) base.fail(`specSha256 is ${found.specSha256.slice(0, 12)}, not ${TRAINING_SPEC_SHA256.slice(0, 12)}`);
-  if (found.setId !== entry.base || found.sampleSha256 !== entry.baseSampleSha256) {
-    base.fail(`is set ${found.setId} (sample ${found.sampleSha256.slice(0, 12)}), but the manifest lists it over set ` +
-      `${entry.base} (sample ${entry.baseSampleSha256.slice(0, 12)})`);
+  if (found.setId !== entry.base) base.fail(`is set ${found.setId}, but the manifest lists it over set ${entry.base}`);
+  if (found.setId !== sample.setId) base.fail(`is drawn over set ${found.setId}, but the loaded sample is ${sample.setId}`);
+  if (found.specSha256 !== sample.vocabulary.specSha256) {
+    base.fail(`is of spec ${found.specSha256.slice(0, 12)}, the loaded sample of ${sample.vocabulary.specSha256.slice(0, 12)}`);
   }
-  if (found.setId !== sample.setId || found.sampleWrittenUtc !== sample.writtenUtc) {
-    base.fail(
-      `drawn over set ${found.setId} as written ${found.sampleWrittenUtc}, but the loaded sample is ${sample.setId} as ` +
-      `written ${sample.writtenUtc}: the set was re-exported after the overlay`,
-    );
+  if (found.candidatesSha256 !== sample.candidatesSha256) {
+    base.fail(`has candidates ${found.candidatesSha256.slice(0, 12)}, the loaded sample ${sample.candidatesSha256.slice(0, 12)}`);
+  }
+  const own = sample.airportFrame;
+  if ((Object.keys(own) as Array<keyof typeof own>).some((key) => found.airportFrame[key] !== own[key])) {
+    frame.fail(`is ${JSON.stringify(found.airportFrame)}, the loaded sample's ${JSON.stringify(own)}`);
   }
   return found;
+}
+
+/** A set flight's HAE − MSL: its first row's ellipsoid height less its reported height (MIRROR of
+ *  `training_files.set_flight_datum_m`). */
+function setFlightDatumM(flight: TrainingFlight): number {
+  return flight.signals.altitudeHaeM[0] - flight.signals.raw.altitudeM[0];
+}
+
+/** Heights an overlay draws beside a set flight stand on that flight's own datum: every row's HAE − MSL is the set
+ *  flight's, to two readings' rounding. */
+function requireSetDatum(reader: Reader, heights: { altitudeM: number[]; altitudeHaeM: number[] }, flight: TrainingFlight) {
+  const datum = setFlightDatumM(flight);
+  const off = heights.altitudeM.findIndex(
+    (msl, row) => Math.abs(heights.altitudeHaeM[row] - msl - datum) > TRAINING_DATUM_TOLERANCE_M + BINARY_SLACK);
+  if (off >= 0) {
+    reader.fail(`draws row ${off} ${(heights.altitudeHaeM[off] - heights.altitudeM[off]).toFixed(2)} m HAE − MSL, the set's ` +
+      `flight ${datum.toFixed(2)} m`);
+  }
+}
+
+/** A track an overlay flew from a set flight's observed state starts where the set's observed track is at ``row``: its
+ *  first point is that row's position and reported height, to the written rounding — the flights' keys alone would keep
+ *  an overlay over a set exported again from other tracks. (A start moved by an augmentation is not the set's.) */
+function requireSetStart(reader: Reader, track: { lon: number[]; lat: number[]; altitudeM: number[] }, flight: TrainingFlight,
+  row: number) {
+  const { lon, lat, raw } = flight.signals;
+  if (Math.abs(track.lon[0] - lon[row]) > WRITTEN_DEG + BINARY_SLACK || Math.abs(track.lat[0] - lat[row]) > WRITTEN_DEG + BINARY_SLACK
+    || Math.abs(track.altitudeM[0] - raw.altitudeM[row]) > WRITTEN_M + BINARY_SLACK) {
+    reader.fail(`starts at (${track.lat[0]}, ${track.lon[0]}, ${track.altitudeM[0]} m), but the set's flight is at ` +
+      `(${lat[row]}, ${lon[row]}, ${raw.altitudeM[row]} m) at row ${row}, where it was flown from`);
+  }
 }
 
 /** The payload's flights, one per flight of the sample, in its order. */
@@ -870,6 +915,8 @@ function parseExecutorFlight(item: Reader, flight: TrainingFlight, vocabulary: T
   const limits = item.child("limits");
   const counts = item.child("counts");
   const track = parseTrack(item.child("track"));
+  requireSetDatum(item.child("track"), track, flight);
+  requireSetStart(item.child("track"), track, flight, 0);
   const refused = item.nullableString("refused");
   const outcome = item.oneOf("outcome", TRAINING_EXECUTOR_OUTCOMES);
   // the judge's reading of the flown track is drawn exactly when the labeller's gate let it through and the dynamics
@@ -1148,7 +1195,8 @@ function parseGeneratedTrack(reader: Reader, firstS: number, stepS: number): Tra
  *  (a dynamics failure's to the row before the failed state), the runway pointed first and last the sentence's own. */
 /** ``stoppable``: its model spoke under the procedure's altitudes, whose sentences the glidepath lower edge stops. */
 function parseGeneratedSentence(
-  item: Reader, index: number, firstRow: number, stepS: number, cycleS: number, sample: TrainingSample, stoppable: boolean,
+  item: Reader, index: number, firstRow: number, stepS: number, cycleS: number, sample: TrainingSample, flight: TrainingFlight,
+  stoppable: boolean,
 ): TrainingGeneratedSentence {
   item.integer("sample", index, index);
   const rows = item.integer("rows", firstRow + 1, Number.MAX_SAFE_INTEGER);
@@ -1202,6 +1250,7 @@ function parseGeneratedSentence(
     item.fail(`is ${outcome} at ${endS} s, not at the end of its last step, ${rows * stepS} s`);
   }
   const track = parseGeneratedTrack(item.child("track"), firstS, stepS);
+  requireSetDatum(item.child("track"), track, flight);
   const trackEnd = track.tS[track.tS.length - 1];
   // the track stops at the outcome's state — a dynamics failure's at the state before it
   const expectedEnd = outcome === "dynamics_failure" ? endS - cycleS : endS;
@@ -1262,7 +1311,7 @@ function parseGenerationModel(model: Reader): TrainingGenerationModel {
  *  first predicted row, where every sample's track starts. */
 function parseAugmentedStart(
   item: Reader, augment: NonNullable<TrainingGenerationOverlay["generation"]["augment"]>, flown: boolean, firstRow: number,
-  stepS: number, samples: TrainingGeneratedSentence[],
+  stepS: number, samples: TrainingGeneratedSentence[], flight: TrainingFlight,
 ): TrainingAugmentedStart {
   const draws = item.nullableInteger("augmentDraws", 1, augment.tries);
   const moved = item.nullableChild("augmentation");
@@ -1288,6 +1337,7 @@ function parseAugmentedStart(
     if (offStep >= 0) rows.fail(`tS[${offStep}] is ${tS[offStep]} s, not the step at ${offStep * stepS} s`);
     observed = { tS, lon: rows.numbers("lon", firstRow), lat: rows.numbers("lat", firstRow),
       altitudeM: rows.numbers("altitudeM", firstRow), altitudeHaeM: rows.numbers("altitudeHaeM", firstRow) };
+    requireSetDatum(rows, observed, flight);
     // every sample flies from the one moved start
     const starts = new Set(samples.map((one) => `${one.track.lat[0]},${one.track.lon[0]},${one.track.altitudeM[0]}`));
     if (starts.size > 1) item.fail(`its samples start from ${starts.size} places, not one moved start`);
@@ -1360,10 +1410,14 @@ export function parseTrainingGenerationOverlay(
         }
         if (firstPredictedRow >= flight.rows) item.fail(`has ${flight.rows} rows: the prior speaks from row ${firstPredictedRow}`);
         const samplesRead = list.map((one, index) => parseGeneratedSentence(one, index, firstPredictedRow, stepS, cycleS, sample,
-          procedureMasks.some((item) => item.name === TRAINING_PROCEDURE_ALTITUDES)));
+          flight, procedureMasks.some((item) => item.name === TRAINING_PROCEDURE_ALTITUDES)));
+        // flown from the set's own start: each sample's track begins at the observed first predicted row
+        if (augment === null) {
+          samplesRead.forEach((one, index) => requireSetStart(list[index].child("track"), one.track, flight, firstPredictedRow));
+        }
         return {
           flightKey: flight.flightKey, datasetId: flight.datasetId, group: item.string("group"), flown, samples: samplesRead,
-          start: augment === null ? null : parseAugmentedStart(item, augment, flown, firstPredictedRow, stepS, samplesRead),
+          start: augment === null ? null : parseAugmentedStart(item, augment, flown, firstPredictedRow, stepS, samplesRead, flight),
         };
       }),
     };

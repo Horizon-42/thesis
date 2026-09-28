@@ -108,7 +108,7 @@ from ts_transformer.instructions.readout import STRATA
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.training_files import (
     KIND_AUGMENTED_GENERATION, KIND_GENERATION, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays,
-    require_overlays_unchanged, rounded, runway_hae_minus_msl_m, serialise, write_overlay,
+    require_overlays_unchanged, require_set_datum, rounded, runway_hae_minus_msl_m, serialise, write_overlay,
 )
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
 from ts_transformer.io_utils import utc_now
@@ -121,11 +121,13 @@ from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
 
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_GENERATION_SCHEMA`); the reader refuses anything else
-#: by name. A name changes with its file's shape or meaning, on both sides, in one change.
-SCHEMA = "aeroviz-training-generation-v3"
+#: by name. A name changes with its file's shape or meaning, on both sides, in one change. v4 (2026-09-28): ``base``
+#: records the set's spec, candidates and frame, no longer its sample file's sha256 or time of writing
+#: (`training_files.BaseSet.block`).
+SCHEMA = "aeroviz-training-generation-v4"
 #: MIRROR of `TRAINING_AUGMENTED_GENERATION_SCHEMA` in the same file: the same sentences flown from augmented starts, each
-#: flight with its augmentation and moved observed rows, no formal readout.
-AUGMENTED_SCHEMA = "aeroviz-training-augmented-generation-v1"
+#: flight with its augmentation and moved observed rows, no formal readout; v2 (2026-09-28): ``base`` as `SCHEMA`'s v4.
+AUGMENTED_SCHEMA = "aeroviz-training-augmented-generation-v2"
 PAYLOAD_FILE = "generation.json"
 RUNNER = "ts_transformer.experiments.prior_generation_training_export"
 #: The one tree every checkout's outputs are (a worktree links it): a readout's prior is known by its path from here on.
@@ -329,6 +331,7 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
     offsets = runway_hae_minus_msl_m(instructions, geometry.code, arrival_manifest_path(geometry.code))
     located = base_flights(base, flights, sentences)
     signals = [flight for flight, _ in located]
+    require_set_datum(base, signals, offsets)
     series = rebuild_series(instructions, signals)
     groups = [replay.group_of(item) for item in series]
     flyable = [j for j, group in enumerate(groups) if group == replay.OWN]
@@ -456,7 +459,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if (training / overlay_id).exists():
             parser.error(f"{training / overlay_id} exists; an overlay is never overwritten")
         existing[code] = read_overlays(training, code, overlay_id)
-        bases[code] = open_base_set(training, code, args.set, spec)
+        bases[code] = open_base_set(training, code, args.set, spec, geometries[code])
 
     source = {"runner": RUNNER, "prior": repo_relative(prior_dir), "executor": repo_relative(executor),
               "instructions": repo_relative(instructions),

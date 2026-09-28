@@ -23,6 +23,8 @@ import {
 
 /** The set the exporter names after the reading rule. */
 export const SET_ID = TRAINING_READING_RULE.replace("-", "_");
+/** The HAE − MSL the fixture's flights are drawn at: the runway offset the exporter adds to each reported height. */
+export const MOCK_DATUM_M = -33;
 
 export const MOCK_ROWS = 60;
 export const MOCK_STEP_S = 2;
@@ -142,6 +144,7 @@ export function mockFlight(key: string, vectored: boolean): Record<string, unkno
   const eM = range(rows, -20000, 300);
   const nM = range(rows).map((row) => (vectored && row < 25 ? 3000 - row * 100 : 0));
   const altitude = range(rows).map((row) => (row < 20 ? 1110 : 1110 - (row - 20) * 16));
+  const reported = altitude.map((h) => h + 3);
   // the turn to 180° flown from step 10; at step 12 the track is still 10° short of it: that row is outside its band
   const track = range(rows).map((row) => (vectored ? (row < 10 ? 270 : row < 12 ? 225 : row === 12 ? 190 : row < 25 ? 180 : 90) : 90));
   const speed = range(rows).map((row) => (row < 30 ? 110 : 110 - (row - 30) * 0.8));
@@ -161,8 +164,8 @@ export function mockFlight(key: string, vectored: boolean): Record<string, unkno
     captureRow, joinRow, unspecifiedRow: 30, captureBeforeThresholdM: 12500,
     signals: {
       tS: range(rows, 0, MOCK_STEP_S), eM, nM, lon: eM.map((e) => -78 + e / 90000), lat: nM.map((n) => 35 + n / 111000),
-      altitudeHaeM: altitude.map((h) => h - 33),
-      raw: { trackDeg: track.map((t) => t + 0.4), altitudeM: altitude.map((h) => h + 3), groundSpeedMps: speed.map((v) => v + 0.5),
+      altitudeHaeM: reported.map((h) => h + MOCK_DATUM_M),
+      raw: { trackDeg: track.map((t) => t + 0.4), altitudeM: reported, groundSpeedMps: speed.map((v) => v + 0.5),
              verticalRateMps: range(rows).map((row) => (row < 20 ? 0 : -4)) },
       smoothed: { trackDeg: track, altitudeM: altitude, groundSpeedMps: speed, distanceM: distance },
       beforeThresholdM: eM.map((e) => -e), rightOfCourseM: nM.map((n) => -n),

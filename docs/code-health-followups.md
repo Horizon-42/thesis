@@ -12,7 +12,7 @@ the entry itself is deleted.
 
 Checked entry by entry against `dev-two-tier` `1a7ac875` plus branch `dev-frontend-followups`, then updated after branch
 `dev-followups-no-training` (2026-09-25) fixed every entry whose fix touches neither the training nor the post-training
-(the right-hand column): **28 open, 7 partly, 66 resolved or dismissed, 5 obsolete** (recounted from the table 2026-09-28; one open row is blocked on a source). *open*: the problem is still in the
+(the right-hand column): **27 open, 7 partly, 67 resolved or dismissed, 5 obsolete** (recounted from the table 2026-09-28; one open row is blocked on a source). *open*: the problem is still in the
 code; *partly*: some of it is fixed (the note says what is left); *resolved*: fixed (the note says by what);
 *dismissed*: not a defect (the note says why); *obsolete*: the code is gone. A resolved, dismissed or obsolete entry's
 text is removed below (its row stays); rows follow the entries' order; note the two sets of numbers (§19–§21 each appear
@@ -129,7 +129,7 @@ added three entries (the rows after the performance index's).
 | The labeller sha is over bytes and checked against the running code: one edit deadlocks the chain (09-28) | open | new; see the entry | **yes — every artefact's and prior's identity record** (no retrain); the fix edits `autopilot/replay.py`, inside the executor hash — batch with the executor-identity entry |
 | The executor spec refuses any other code, over 28 modules including all of `config.py` and `data/dataset.py` (09-28) | open | new; see the entry; the rule is the user's (2026-09-27) | **yes — executor identity** (no behaviour change) |
 | Two-tier data are bound to each airport's whole arrival manifest by its bytes (09-28) | open | new; see the entry | **yes — executor identity**: `autopilot/flights.py` is hashed, so the fix moves the source hash — batch with the executor-identity entry |
-| A Training overlay is bound to its set's file sha256 and writing time (09-28) | open | new; see the entry | no: the Training view's files (one overlay re-export, the user's OK) |
+| A Training overlay is bound to its set's file sha256 and writing time (09-28) | resolved | bound by what it shares with the set — spec, candidates, frame, and flight by flight its keys, words / steps and every drawn height's HAE − MSL; overlays v2, executor / prior / generation v4, augmented generation v2 (branch `dev-overlay-content-binding`; every published overlay is re-exported once, the user's OK); entry removed | — |
 | The frontend pins the vocabulary spec's sha (09-28) | open | new; see the entry — low value while the superseded `instruction_v3` set stays listed | no: a frontend constant |
 | The single-flight executor's pin refuses at run time, not in the tests (09-28) | open | new; see the entry | no: the backend |
 
@@ -597,19 +597,6 @@ stored signals (1e-6). The same class as C26 (2026-09-07: a byte-bound roster id
 (judgement): drop the file comparison, keep the per-flight one, and compare the one runway offset a flight uses.
 `flights.py` is inside the executor hash, so under today's rule the fix itself needs a new spec: do it with the previous
 entry.
-
-## A Training overlay is bound to its set's file sha256 and writing time (2026-09-28)
-
-**Verified.** `instructions/training_files.py` (`BaseSet.block`, `overlay_entry`) records the set's sample sha256 and
-`writtenUtc` in every overlay; the frontend refuses an overlay whose set was written again
-(`aeroviz-4d/src/data/trainingOverlays.ts:737-745`) and `check_publication` compares the sha on disk. So re-exporting a
-set with the same flights and sentences refuses every overlay over it (25 an airport today, ~1 h to re-export). The
-reader already binds flight by flight: the keys, the executor's words one by one, the prior's steps. What the sha
-covered implicitly and nothing else checks: the candidate runways (a generated sample's runway indices point into
-them), the airport frame and the datum. Fix (judgement): an overlay's `base` records the set id, the spec, the sample's
-`candidatesSha256` and `airportFrame`, each compared with the sample's; per flight, the overlay's track HAE − MSL equals
-the set flight's; the sample sha and time go. A shape change: new names for the manifest and the four overlay schemas on
-both sides, and one re-export of every current overlay (the user's OK) — the last one a set re-export forces.
 
 ## The frontend pins the vocabulary spec's sha (2026-09-28)
 
