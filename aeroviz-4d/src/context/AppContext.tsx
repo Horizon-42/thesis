@@ -299,20 +299,15 @@ interface TrainingSessionState {
    */
   trainingAutopilot: TrainingAutopilotView | null;
   setTrainingAutopilot: (view: TrainingAutopilotView | null) => void;
-  /** Fly the answer out again in 3D (a new `playedAt`); nothing when there is no answer. */
-  replayTrainingAutopilot: () => void;
   /**
-   * THE WORD THE LIVE EXECUTOR FLIES: set only by a CLICK — the sentence bar's "Fly this segment" button, or a band
-   * clicked while `trainingAutopilotAuto` is on — and cleared by clicking the selected band again; never by the cursor,
-   * which the charts move on hover. It belongs to the flight on screen (`trainingSelectionKey`) and is reset with it, as
+   * THE WORD THE LIVE EXECUTOR FLIES: set only by a CLICK — the sentence bar's Fly button, or a band clicked — and
+   * cleared by clicking the selected band again; never by the cursor, which the charts move on hover. It belongs to
+   * the flight on screen (`trainingSelectionKey`) and is reset with it, as
    * the cursor is: another flight or another set starts with nothing picked. Leaving Training and coming back keeps
    * both, with the flight: the Training session outlives a task switch (`WorkbenchLeftDock`).
    */
   trainingPick: TrainingPick | null;
   setTrainingPick: (pick: TrainingPick | null) => void;
-  /** A band clicked flies its word at once (the panel's switch, on at first); off, only the button flies. */
-  trainingAutopilotAuto: boolean;
-  setTrainingAutopilotAuto: (on: boolean) => void;
 }
 
 export interface TrainingLayers {
@@ -458,10 +453,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [trainingGenerations, setTrainingGenerations] = useState<TrainingGenerationView[]>([]);
   const [trainingSource, setTrainingSource] = useState<TrainingSource | null>(null);
   const [trainingAutopilot, setTrainingAutopilot] = useState<TrainingAutopilotView | null>(null);
-  const replayTrainingAutopilot = useCallback(() => {
-    setTrainingAutopilot((view) => (view?.status === "ready" ? { ...view, playedAt: Date.now() } : view));
-  }, []);
-  const [trainingAutopilotAuto, setTrainingAutopilotAuto] = useState<boolean>(true);
   const [selectedRunway, setSelectedRunway] = useState<string | null>(null);
   const [trajectoryDataSource, setTrajectoryDataSource] =
     useState<Cesium.CzmlDataSource | null>(null);
@@ -706,14 +697,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrainingSource,
     trainingAutopilot,
     setTrainingAutopilot,
-    replayTrainingAutopilot,
     trainingPick,
     setTrainingPick,
-    trainingAutopilotAuto,
-    setTrainingAutopilotAuto,
   }), [trainingSelection, trainingColumn, trainingLayers, setTrainingLayer, trainingExecutor, trainingPrior,
-    trainingGenerations, trainingSource, trainingAutopilot, replayTrainingAutopilot, trainingPick, setTrainingPick,
-    trainingAutopilotAuto]);
+    trainingGenerations, trainingSource, trainingAutopilot, trainingPick, setTrainingPick]);
   const trainingCursorState: TrainingCursorState = useMemo(() => ({ trainingCursorS, setTrainingCursorS }),
     [trainingCursorS, setTrainingCursorS]);
   const workbenchUiState: WorkbenchUiState = useMemo(() => ({

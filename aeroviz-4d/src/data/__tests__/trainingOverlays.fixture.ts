@@ -264,7 +264,7 @@ export function mockGenerationEntry(id: string): TrainingOverlayEntry {
 
 /** Where every sample of these fixtures is at ``at`` seconds: one straight descending line from where the observed VECTORED
  *  flight is at the first predicted row (a generated track starts there). */
-export function mockGeneratedPoint(at: number): { lon: number; lat: number; altitudeM: number } {
+function mockGeneratedPoint(at: number): { lon: number; lat: number; altitudeM: number } {
   const observed = mockSetFlight(VECTORED_KEY).signals;
   const row = MOCK_GENERATION_FIRST_ROW;
   const since = at - row * MOCK_STEP_S;

@@ -151,14 +151,14 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   the executor's own stepper driven cycle by cycle and stopped there (never fly-then-cut); the answer is refused unless the
   words it told are the sentence bar's for that segment; a heading band is bounded by the FLOWN track its judge read, never
   by the sentence's stop (the executor may hear the next word late); started by the sentence bar's "▶ Fly" (or a band
-  click, "Fly on band click" on); the pick and the cursor belong to the flight on screen (`trainingSelectionKey`) and reset
+  click); the pick and the cursor belong to the flight on screen (`trainingSelectionKey`) and reset
   with it; one short unbroken status line (inside/outside · "N s flown · computed M ms"; the word only once the selection moves off it; the full reading in its tooltip); blue `#2563eb` inside its envelope, the
   whole line a loud red `#ff2d2d` outside (`autopilotColour`), never the replay's teal; each request names its page
   and its number there (`clientId`, `seq`): a later one from the same page supersedes the earlier still waiting or flying
   (409), so clicking through bands flies only the last; backend 400 / 404 / 409 / 422 / 500. A MODEL's word (the bar reading
   a sample) is asked WITH its sentence and flown as its free generation flew it — the whole sentence from the observed state at
   `firstRow`, each word at its own step (`TimeClock`), the generation's time limit, judged on the sentence's last runway — so it IS the
-  exported sample's flight (the card checks point by point: 0.000 m over 104 segments, 2026-09-26); `source` echoed, no observed
+  exported sample's flight (checked point by point: 0.000 m over 104 segments, 2026-09-26); `source` echoed, no observed
   time or offset (AV26).
 - **Training's code: one reader (`data/trainingReader.ts`) for every Training file; shared wording in `data/trainingText.ts`;
   the read-back is a pure model + four charts + a window shell (`components/training/`); the 3D scene is
@@ -208,6 +208,9 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   words out — the GATE's count, as the list's "43/45" — or its track refused) / not landed, coloured by `TRAINING_REPLAY_COLOR`
   (teal / amber `#f59e0b` / red) in the flight list's tag and a header chip "Replay · 2 words out" shown ONLY when not clean, on
   the truth's tab (`replayIssueText`; the words named in its tooltip and the ⓘ notes, `replayOutsideWords`) (AV37).
+- **The live executor has NO panel block** (2026-09-29, the user: redundant): its answer is the sentence bar's line
+  (`TrainingAutopilotStatus`), the cursor, 3D and the read-back window; a band click always flies; no "Replay in 3D" (↻ Fly
+  again asks anew); the payload reader still checks every field (`timing`, shas) — the backend contract, not the view (AV38).
 
 ## Comparison CZML colour contract
 

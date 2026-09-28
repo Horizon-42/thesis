@@ -1,5 +1,11 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-29 — Training 左栏的 "Autopilot (live)" 一栏删掉
+
+- 用户：这一栏的信息多余，删干净，包括相关测试（分支 `dev-training-no-autopilot-panel`）。删掉面板的这一栏（开关 "Fly on band click"
+  与结果卡），以及只为它存在的状态、函数、样式、测试夹具与测试（清单见 viewer 参考 AV38）；点色块总是直接飞（开关原来默认就开）；
+  实时执行器的答复留在句子条头部那一行、小游标、三维和读数核对窗口。答复格式与后端不变。设计文档 36 §4.1、§4.7。
+
 ### 2026-09-28 — Training 的句子条：藏起 Cesium 的时钟并贴底、下降角一行叫 Descent、实时执行器的小游标
 
 - 用户的三条（分支 `dev-training-bar-tweaks`）：① Training 里 Cesium 的时钟盘、时间轴（和全屏按钮）不起作用——藏起来，句子条贴着

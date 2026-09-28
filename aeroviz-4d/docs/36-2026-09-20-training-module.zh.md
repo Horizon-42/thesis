@@ -15,10 +15,10 @@
 |---|---|
 | 词表 | 读法 `instruction-v3`（航向词按步读，词表设计 §10.1）。前端钉住的规格 sha `TRAINING_SPEC_SHA256` 是 **`145d6911e75b`**（2026-09-25：按运行日划分后在新训练集上重新测量，产物 `4dTrajectory/outputs/POOLED/instruction_language/v4_20260924/`）——现在的执行器代码只飞这份产物（执行器规格 `v6_20260924`）。按航班划分的 `v3_20260924`（规格 `0b4ea75be36d`）上导出的 `instruction_v3` 集合和画在它上面的 `executor_v5_20260924` 叠加层从此按规格 sha 拒读 |
 | 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；包络全部来自 `instructions/display.py`。样本格式 `aeroviz-training-sample-v7`，执行器叠加层 `aeroviz-training-executor-v3`，先验叠加层 `aeroviz-training-prior-v3`，模型自己说的句子 `aeroviz-training-generation-v3`（`prior_generation_training_export`，§2.7；v2 起模型按名字认：base / landing / augmented 加轮次） |
-| 前端代码 | 数据：`src/data/trainingReader.ts`（三种文件共用的一个读取器：逐字段读，读不了就说出字段路径）、`trainingSample.ts`（集合与样本的契约）、`trainingOverlays.ts`（叠加层的契约）、`trainingAutopilot.ts`（实时执行器的契约、请求与三维回放的计算，§4.7）、`trainingText.ts`（各视图共用的措辞：结局、检查、越过入口、sha、时长）。视图：`src/components/Training{Panel,SentenceBar,ReadbackWindow,PriorWindow,Results,Legend,AutopilotCard,VocabularyNotes}.tsx`，读数窗口拆在 `src/components/training/`（`readbackModel.ts` 一次算好所有比例尺，四张图 `Readback{Plan,Heading,Altitude,Speed}.tsx`，画图小件 `chartKit.tsx`，两个浮动窗口共用的外壳 `TrainingWindow.tsx`，详情页的外壳 `TrainingDetails.tsx`（§4.9），`ProblemBox.tsx`）。三维：`src/scene/trainingEntities.ts`（实体 id、坐标展开、几种线与点）、`src/hooks/useTrainingTrackLayer.ts`（观测航班；由什么也不渲染的叶子组件 `src/components/TrainingScene.tsx` 调用，游标变了只有它重渲染，§4.5）、`useTrainingExecutorLayers.ts`（回放与实时执行器）、`useTrainingGenerationLayers.ts`（模型自己说的句子，§4.8）。另有 `useTrainingOverlays.ts`、`useTrainingAutopilot.ts`、`useMeasuredWidth.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
-| 分支 | 左栏停在句子条上面、模型自己说的句子（§2.7、§4.8）：`dev-training-sentences`，2026-09-26 合并进 `dev-two-tier`（`e87bfcf3`）。模型的词也交给实时执行器飞、模型的带不再画斜线、模型结束处写时间（§4.7、§4.8）：`dev-model-autopilot`，2026-09-26 合并进 `dev-two-tier`（`46af94fd`），后端与前端已重启。航向词多飞的那个提前量画成淡色虚线的尾巴（§4.7）：`dev-heading-lead-tail`，2026-09-26 合并进 `dev-two-tier`（`02c14001`），后端与前端已重启。 多轮后训练之间切换、模型按名字认，以及模型按自己的程序屏蔽说话（§2.7、§4.7、§4.8）：`dev-training-rounds`，2026-09-27 合并进 `dev-two-tier`（`aa190a92`）。详情页（§4.9）与全局统一的滚动条（AV34）：`dev-training-details`，2026-09-27 合并进 `dev-two-tier`（`2aa72431`）。执行器 v11 的两个新结局（过另一条跑道的入口、越过入口太高）与越过入口时的跑道：`dev-executor-v11`，2026-09-27 合并进 `dev-two-tier`。Training 里藏起 Cesium 的时钟、句子条贴底、下降角一行叫 Descent、实时执行器在句子条上的小游标（§4.2、§4.7、AV36），以及执行器回放在航班列表上的三种颜色与句子条头部出问题时的小块（§4.1、§4.2、AV37）：`dev-training-bar-tweaks`，2026-09-28，等用户合并（第一批：Vitest 99 个文件 870 条、`tsc` 无错；opus 审查没有必须改的，3 条应改——游标的说明只在无法悬停的提示里、外壳测试没测到 `forceResize`、游标测试没走帧循环——与几处小处，已改；浏览器 5176 核对过真值与 base 模型的词；第二批：Vitest 100 个文件 874 条、`tsc` 无错，opus 审查没有必须改的，3 条应改——头部注释、被算两次的词让出界数对不上、被拒的航迹算成干净——与几处小处，已改，浏览器 5176 核对过 KRDU 列表与 SWA4462） |
+| 前端代码 | 数据：`src/data/trainingReader.ts`（三种文件共用的一个读取器：逐字段读，读不了就说出字段路径）、`trainingSample.ts`（集合与样本的契约）、`trainingOverlays.ts`（叠加层的契约）、`trainingAutopilot.ts`（实时执行器的契约、请求与三维回放的计算，§4.7）、`trainingText.ts`（各视图共用的措辞：结局、检查、越过入口、sha、时长）。视图：`src/components/Training{Panel,SentenceBar,ReadbackWindow,PriorWindow,Results,Legend,AutopilotStatus,VocabularyNotes}.tsx`，读数窗口拆在 `src/components/training/`（`readbackModel.ts` 一次算好所有比例尺，四张图 `Readback{Plan,Heading,Altitude,Speed}.tsx`，画图小件 `chartKit.tsx`，两个浮动窗口共用的外壳 `TrainingWindow.tsx`，详情页的外壳 `TrainingDetails.tsx`（§4.9），`ProblemBox.tsx`）。三维：`src/scene/trainingEntities.ts`（实体 id、坐标展开、几种线与点）、`src/hooks/useTrainingTrackLayer.ts`（观测航班；由什么也不渲染的叶子组件 `src/components/TrainingScene.tsx` 调用，游标变了只有它重渲染，§4.5）、`useTrainingExecutorLayers.ts`（回放与实时执行器）、`useTrainingGenerationLayers.ts`（模型自己说的句子，§4.8）。另有 `useTrainingOverlays.ts`、`useTrainingAutopilot.ts`、`useMeasuredWidth.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
+| 分支 | 左栏停在句子条上面、模型自己说的句子（§2.7、§4.8）：`dev-training-sentences`，2026-09-26 合并进 `dev-two-tier`（`e87bfcf3`）。模型的词也交给实时执行器飞、模型的带不再画斜线、模型结束处写时间（§4.7、§4.8）：`dev-model-autopilot`，2026-09-26 合并进 `dev-two-tier`（`46af94fd`），后端与前端已重启。航向词多飞的那个提前量画成淡色虚线的尾巴（§4.7）：`dev-heading-lead-tail`，2026-09-26 合并进 `dev-two-tier`（`02c14001`），后端与前端已重启。 多轮后训练之间切换、模型按名字认，以及模型按自己的程序屏蔽说话（§2.7、§4.7、§4.8）：`dev-training-rounds`，2026-09-27 合并进 `dev-two-tier`（`aa190a92`）。详情页（§4.9）与全局统一的滚动条（AV34）：`dev-training-details`，2026-09-27 合并进 `dev-two-tier`（`2aa72431`）。执行器 v11 的两个新结局（过另一条跑道的入口、越过入口太高）与越过入口时的跑道：`dev-executor-v11`，2026-09-27 合并进 `dev-two-tier`。Training 里藏起 Cesium 的时钟、句子条贴底、下降角一行叫 Descent、实时执行器在句子条上的小游标（§4.2、§4.7、AV36），以及执行器回放在航班列表上的三种颜色与句子条头部出问题时的小块（§4.1、§4.2、AV37）：`dev-training-bar-tweaks`，2026-09-29 由用户合并进 `dev-two-tier`（`41c50339`），工作树与分支已删（第一批：Vitest 99 个文件 870 条、`tsc` 无错；opus 审查没有必须改的，3 条应改——游标的说明只在无法悬停的提示里、外壳测试没测到 `forceResize`、游标测试没走帧循环——与几处小处，已改；浏览器 5176 核对过真值与 base 模型的词；第二批：Vitest 100 个文件 874 条、`tsc` 无错，opus 审查没有必须改的，3 条应改——头部注释、被算两次的词让出界数对不上、被拒的航迹算成干净——与几处小处，已改，浏览器 5176 核对过 KRDU 列表与 SWA4462）。左栏的 Autopilot (live) 一栏（开关 Fly on band click 与结果卡）删掉，点色块总是直接飞（§4.1、§4.7、AV38）：`dev-training-no-autopilot-panel`，2026-09-29，等用户合并（Vitest 100 个文件 863 条——删掉结果卡的 9 条与样本核对 1 条等，`tsc` 与 `typecheck:scripts` 无错；opus 审查没有必须改的，留下的注释、无用的参数与导出、两个测试已改；浏览器 5176 核对过左栏与点色块现飞） |
 | 发布 | 现行集合 **`instruction_v3_day_split`**（2026-09-25，五个机场各 40 架新验证集航班，直线进近 / 被引导各 20，从 `v4_20260924` 导出）。**模型自己说的句子**（§2.7、§4.8）：base 模型（`prior/v3_step1_20260924/full_s1337`）和按落地奖励后训练的第 1 轮（`prior/v3_rl_20260925/grpo_s1337/round_01`）各一份，每架 4 个样本，执行器规格 `v7_20260925`；2026-09-26 经用户同意发布到 `public/data`（每个机场 `generation_v3_step1_20260924_full_s1337`、`generation_grpo_s1337_round_01`），`check-publication` 五个机场 0 错误。在这 40 × 5 架里按自己机型动力学能飞的 180 架 × 4 个样本上：base 模型落地 652/720（90.6 %），后训练 694/720（96.4 %）；两者正式 val 读数 90.2 % / 97.2 %。同时发布了先验第三版（base 模型）的教师强制预测 `prior_v3_step1_20260924_full_s1337` 和执行器 v6 的验证集回放 `executor_v6_20260924`（规格 v7 打开，每架重飞都与正式回放那一行相同，200 架飞 188 架全部落地）；实时执行器（§4.7）不需要叠加层。更早的集合与叠加层按名字拒读，发布记录见仓库 `docs/CHANGELOG.md` 。**2026-09-27 重新发布（v2，用户同意）**：两份 v1 模型句子从五个机场的 `overlays.json` 撤下，目录移到仓库 `data/retired_training_overlays/20260927/`（连同撤下前的清单）；新导出 base（`generation_base_fb81ccc9`）与 landing r1–r8（`generation_landing_rNN_<sha8>`），执行器规格 `v10_20260926`、产物 `v4_20260924`、每架 4 个样本、不带正式读数（盘上的读数是旧格式或另一份产物）；base 与 landing 的程序屏蔽都是"无"。`check-publication --server` 五个机场 0 错误、各 11 个叠加层对照集合读过；浏览器（5174 前端 + 8766 后端，合并后的代码）：landing r1–r8 按轮切换，r8 第 1 个样本的 "descend to land" 现飞 113.0 s、在包络内、与样本 0.00 m / 58 点。2026-09-27 又导出 augmented r1–r8（第二阶段 `v3_stage2_clip_20260926`，跑完补记屏蔽之后，`procedure-altitudes-v2`；保留的是第 7 轮）：五个机场各 19 个叠加层对照集合读过，0 错误。712 个样本（178 架 × 4）上落地：base 88.3 %，landing r1–r8 95.6–98.0 %，augmented r1–r8 94.5–96.3 %；augmented 被下滑道下边界截停的样本每轮 1–8 个，landing 与 base 没有（它们不带程序屏蔽）。截停的样本 KSTL SWA3316 augmented r1 第 4 个（414 s）在后端重飞：结局 `below_glidepath`、结束时刻与最后一点与样本逐位相同；句子条上写 "#4: below glidepath" |
-| 实时执行器 | 后端 `POST /autopilot/segment`（`aeroviz_backend/autopilot_segment/` 包）：在句子条上点一个词，执行器从观测飞机说这个词时的状态飞这个词的一段（到它的包络结束之处：同列下一个词说出的地方，航向词再往后一个提前量；到了句子末尾就飞到落地），只判这个词。执行器代码一行不改，用它的单步接口 `Executor` 一个控制周期一个周期地飞，到段尾就停；每次都重新飞，不读任何回放或叠加层（§4.7）。用哪份执行器规格由后端按"现在的执行器代码接受的那一份"自动找：现在是 `v7_20260925`。界面上并排给出模拟飞行时间与计算用时。2026-09-25 在五个机场 200 架航班上逐段试飞 3,032 段：无异常，1,904 段飞到段尾、1,128 段落地；唯一的拒绝是没有机型动力学的航班（252 段，正式回放同样不飞）；每段耗时中位数 0.39 s、最长 3.6 s。单步飞法与"飞满时限再截断"逐位相同（216 段，状态与结束周期一致）。同一页面的新请求取代它还在排队或正在飞的旧请求（409），连点几个色块只飞最后一个。整模块审查之后又在同样 200 架航班的全部 3,526 个航向词上试飞：3,230 段飞成（3,037 段在包络内飞到段尾、143 段在包络内落地、49 段不判、1 段出界），296 段机型没有动力学；"带被段尾截短"的拒绝一次也没有出现（§4.7）。**模型说的词也能飞**：把模型的句子从它开口的那一步重新飞一遍，就是导出的那个样本自己的飞行——2026-09-26 在 KRDU、KMSY 两个模型各 4 架航班 × 2 个样本上飞了 104 段（每个样本前 4 个航向词或许可、最后一个高度词），与导出的航迹逐点比，最大差 0.000 m（§4.7 "模型的词"） |
+| 实时执行器 | 后端 `POST /autopilot/segment`（`aeroviz_backend/autopilot_segment/` 包）：在句子条上点一个词，执行器从观测飞机说这个词时的状态飞这个词的一段（到它的包络结束之处：同列下一个词说出的地方，航向词再往后一个提前量；到了句子末尾就飞到落地），只判这个词。执行器代码一行不改，用它的单步接口 `Executor` 一个控制周期一个周期地飞，到段尾就停；每次都重新飞，不读任何回放或叠加层（§4.7）。用哪份执行器规格由后端按"现在的执行器代码接受的那一份"自动找：现在是 `v7_20260925`。句子条那一行写出模拟飞行时间与计算用时。2026-09-25 在五个机场 200 架航班上逐段试飞 3,032 段：无异常，1,904 段飞到段尾、1,128 段落地；唯一的拒绝是没有机型动力学的航班（252 段，正式回放同样不飞）；每段耗时中位数 0.39 s、最长 3.6 s。单步飞法与"飞满时限再截断"逐位相同（216 段，状态与结束周期一致）。同一页面的新请求取代它还在排队或正在飞的旧请求（409），连点几个色块只飞最后一个。整模块审查之后又在同样 200 架航班的全部 3,526 个航向词上试飞：3,230 段飞成（3,037 段在包络内飞到段尾、143 段在包络内落地、49 段不判、1 段出界），296 段机型没有动力学；"带被段尾截短"的拒绝一次也没有出现（§4.7）。**模型说的词也能飞**：把模型的句子从它开口的那一步重新飞一遍，就是导出的那个样本自己的飞行——2026-09-26 在 KRDU、KMSY 两个模型各 4 架航班 × 2 个样本上飞了 104 段（每个样本前 4 个航向词或许可、最后一个高度词），与导出的航迹逐点比，最大差 0.000 m（§4.7 "模型的词"） |
 | 增强起点 | 2026-09-27 用户要看模型从增强起点怎么飞（§2.8 数据、§4.10 界面）。**已合并、已发布**（2026-09-27）：分支 `dev-augmented-starts` 合并进 `dev-two-tier`（`84723237`），工作树与分支已删。① 导出器 `--augment-seed` + 新格式 + 测试 ② 前端读取器与各视图 ③ 一次 opus 审查（没有必须改的；3 条应改——没测到"抽不到合格起点"的航班、增强起点的落地比例没说漏掉了哪些航班、换起点只按名字和轮次对——都已改）；ts 全套 1,548、后端 192、前端 Vitest 99 个文件 863 条，`tsc` 与 `typecheck:scripts` 无错 ④ base、landing r1、augmented r7 × 五个机场导出到 scratchpad 的镜像目录（种子 1337，每个模型约 7 分钟），`check-publication` 五个机场 0 错误。落地（五个机场合计，每架 4 个样本；真实起点 712 条、增强起点 708 条——177 架能飞，KRDU 1 架抽 10 次没有合格起点）：真实起点 base 88.5 %、landing r1 96.3 %、augmented r7 95.2 %；增强起点（现在发布的，GPU 上抽的）base 80.9 %、landing r1 89.8 %、augmented r7 90.5 %（超时 72 / 52 / 33 条）。第一次在 CPU 上抽的是 81.8 / 90.0 / 92.1 %：两次是不同的抽样，landing r1 与 augmented r7 之差一次 2.1、一次 0.7 个百分点，都在 708 条样本的抽样误差（标准误约 1.1 个百分点）之内——这 40 架分不开这两个模型，要比用第二阶段的 val 读数。⑤ 发布：先按 CPU 导出过一次（`0a61b566`）；那一版把增强量取了整（转角到 0.0001°），现飞与样本差约 2 cm，用户说"删掉重导"——删掉那 15 份，用不取整的导出器、先验放 GPU（`--device cuda`，`9da173ae`，不脏）重新导出，五个机场各 25 个叠加层，`check-publication --server` 0 错误；从运行中的后端现飞 60 个词（三个模型 × 五个机场 × 4 架），与样本最大差 0.000 m。GPU 每个模型五个机场约 1.5–2 分钟（CPU 约 3.5–7 分钟）。增强起点上的实时执行器不在这次（§4.10）。 |
 | 测试 | 2026-09-26（模型的词交给实时执行器，分支 `dev-model-autopilot`）：前端 Vitest 98 个文件 834 条，`tsc` 与 `npm run typecheck:scripts` 无错；后端 `aeroviz_backend/tests` 171 条（`test_autopilot_segment.py` 64 条：`ModelSegmentTest` 14 条——句子的读法与按名字拒绝（开口一步钉在 `N_LOOK`）、步数上限等于 `rows_for`、从模型开口的那一步飞、最后一步的词飞到结局、判决读的词、判决用句子最后的跑道、时限与 `prior_free_generation.limits_s` 相同、判定落在词自己的那一步、下降角词的管子从它那一步起（另用标注器自己的 `tube_checks` 在"平飞五步再 3° 下降"上核对）、第二次许可不判、航向词从自己那一步读、航迹从词的那一步切出；`ModelFlightTest` 6 条——只飞自己机型动力学、时间词钟与时限、判决用的跑道、下降角词判决读的句子、结束的那一步起拒绝、门截断之后的词拒绝；`BackendTest` 一条走通模型请求（按时限读句子、交给飞行、答复写时间词钟）；`FreeGenerationTest`——`speak_and_fly` 自己的循环照稿说话，与后端的飞法在真实执行器上逐状态、逐周期的模式与限制都相同）。opus 审查两轮：第一轮 1 条必须改（下降角词的管子）、3 条应改、若干小处；第二轮没有必须改的，1 条应改（判决没读到的词）与几处小处；全部改掉；浏览器（5174 前端 + 8766 后端，都从工作树起）：KRDU CMP466 base 模型第 1 个样本的 heading 045°（步 91–150，在包络内，与样本 0.00 m / 62 点）、后训练第 1 个样本的 heading 230°（飞到落地，与样本 0.00 m / 61 点）。2026-09-26（左栏与模型自己说的句子，分支 `dev-training-sentences`）：前端 Vitest 98 个文件 822 条，`tsc` 与 `npm run typecheck:scripts` 无错；ts 全套 1,434 条通过（新导出器 `test_prior_generation_training_export.py` 16 条，含在合成产物上端到端跑 `main`：集合顺序、自己动力学的航班各飞 3 个样本且各自从自己第 8 行的状态起飞、不飞的航班、清单、重跑逐字相同、不覆盖）。两轮 opus 审查（第一轮 8 条应改 + 11 条小处全部改掉，第二轮确认并补了一个没有航班可数时的崩溃与一个未钉住的镜像）。`check-publication --airports-root` 对工作树的镜像目录：五个机场各 4 个叠加层对照集合读过，0 错误。浏览器（5174）核对过：左栏停在句子条上面、标签页与样本、模型不飞的航班、结束之后涂暗（KMSY DAL8784 后训练第 2 个样本：325 s 越过入口没截获，模型一直说到 650 s）、三维模型航迹、图例。2026-09-26（多轮后训练之间切换，分支 `dev-training-rounds`）：前端 Vitest 98 个文件 843 条，`tsc` 与 `npm run typecheck:scripts` 无错；ts `test_prior_generation_training_export.py` + `test_training_overlays.py` 33 条（名字按方法给、各版本同名、未知方法拒绝、起步模型从它自己的配置读、带程序屏蔽的读数拒绝、`MODEL_NAMES` 镜像、`model` 块字段逐个与 TS 接口比对）。opus 审查一轮 + 复核：2 条必须改（只有一轮的第二个 run 没写 run；同一轮导出两次会出现 "r"/"rnull" 按钮）、4 条应改，全部改掉。真实数据：KRDU 上用 v10 执行器导出了 6 份到工作树里的镜像目录（base、landing r1/r2、augmented r1 两个 run 各一份、restart 的 r2），`check-publication --airports-root` 0 错误。2026-09-27（模型按自己的程序屏蔽说话、截停一路显示到实时执行器，同一分支）：Vitest 98 个文件 845 条；后端 `aeroviz_backend/tests` 178 条（`test_autopilot_segment.py` 71 条：`GlidepathStopTest`——截停步与 `glidepath_stops` 逐架相同、截停后真实判决读到的最后状态就是导出样本航迹的最后一点；`ProcedureMasksTest`——无屏蔽不读数据、摘要不同或不认识的一套按名字拒绝；`ModelFlightTest`——截在截停步、判决先读到事件时拒绝；`PayloadTest`——结局 `below_glidepath`、没有越过入口）；ts 全套 1,514 条。opus 审查 1 条必须改（截停晚一个周期）、3 条应改、7 条小处，全部改掉。2026-09-27（详情页与全局滚动条，分支 `dev-training-details`）：Vitest 99 个文件 853 条（`TrainingDetails.test.tsx` 5 条：没有内容的节写原因、↑↓ 跳过灰掉的节、要的节没内容时回到第一节并告诉面板、打开时其余部分 inert 且关上后焦点回到打开的按钮、只有左键点背景才关；`TrainingPanel.test.tsx` 新增：详情页上的开关说明与词表、各读数一行并打开对应的节、关掉叠加层时写"switch on … under Draw"、隐藏面板时关掉且不再自己打开、没有正式读数时不出 "sentences of" 列），`tsc` 与 `npm run typecheck:scripts` 无错。opus 审查两轮：第一轮没有必须改的，6 条应改（新表的列义只在提示里、灰掉的原因没看清单状态、模态但焦点能 Tab 出去、Safari 点按钮不给焦点所以焦点回不去、读数窗口提示仍指向已删的 ⓘ、Mac 上有样式的滚动条要占 10 px）与十几处小处，除 Mac 占位这一条（用户要的就是有样式的滚动条）外全部改掉；复核 3 处小处，改了 2 处。浏览器（5174，从工作树起）：KRDU 五节都看过，打开时应用其余部分 inert、焦点在对话框上，Esc 关后焦点回到 Details |
 | 盘上的旧集合 | `box`、`box_v3`、`prior_s1337_val`、`prior_s2024_val`、`instruction_v1`、`instruction_v2`（五个机场都有），`v15_nomerge_noposition`（只有 KRDU）。它们属于别的词表，仍在 `index.json` 里列着，界面按名字拒读、不下载。删不删由用户决定 |
@@ -338,7 +338,7 @@ python run_ts.py prior_generation_training_export --augment-seed 1337 \
 
 ### 4.1 左侧面板
 
-从上到下：集合、航班列表、实时执行器、Draw、各个读数各一行。**左栏从不展开长内容**：要读一次就够的
+从上到下：集合、航班列表、Draw、各个读数各一行（实时执行器只在句子条上：§4.7）。**左栏从不展开长内容**：要读一次就够的
 东西（模块说明、每个开关的说明、词表的数值）和各读数的表格都在**详情页**上（§4.9），标题旁的 **ⓘ** 打开它（和模块里别处的 ⓘ 一样，表示"还有要读的"）；列表不被挤。
 
 **左栏停在句子条上面**（用户 2026-09-25：左栏原来一直伸到底，被全宽的句子条盖住下半截）：句子条量自己的高度，写到页面根元素的
@@ -357,7 +357,6 @@ python run_ts.py prior_generation_training_export --augment-seed 1337 \
   标签页重复，用户 2026-09-27 要求删掉，已删。左栏仍然下载集合上的模型句子（只留当前集合的，它们比别的叠加层大，换集合就丢掉）；
   读不了的一份在 Draw 下面写出原因（"Overlay … cannot be read."），旁边一个 **Retry** 重新下载；没有发布时，详情页的模型一节
   灰掉并写 "none published for this set"。
-- **Autopilot (live)**：一个开关 **Fly on band click** 和实时执行器的结果卡（§4.7）；没飞过时只有开关。
 - **Draw**，开关名字短，说明在提示里：**Heading bands**（每个航向词被判的那几行上的航向带、那一段地面投影、出界的行）、
   **Capture turn + corridor**（截获转弯、走廊、中线、截获后的航道带）、**Altitude tubes + speed bands**（管子，以及速度图上的
   过渡与速度带——出界的红行跟着一起开关）、**Other candidate runways**（所指的跑道总是画）。开关同时作用于三维、读数窗口的
@@ -515,7 +514,7 @@ context，`useApp` 不读它**：鼠标在图上移动时，只有句子条（�
 `endRow` 的话，每个航向词都少判最后几行，只持续一步的航向词（约占四成）根本没有行可判。多飞的这一个提前量里，下一个航向词
 照句子在 `endRow` 说出，执行器开始转向它，和整句回放里一样。`stopRow` 不超过句子末尾。**这一段在界面上画成淡色虚线的尾巴**
 （用户 2026-09-26：飞出的线比色块长一截，"段不对"）：从执行器听到下一个航向词的那个周期起，飞机已经在飞下一个词，只是评判还
-算在这个词头上；三维、读数核对的四张图、图例和结果卡都把它和这个词自己的一段分开画、分开写。听到的时刻按执行器自己的词钟：
+算在这个词头上；三维、读数核对的四张图和图例都把它和这个词自己的一段分开画、分开写。听到的时刻按执行器自己的词钟：
 模型的句子（时间词钟）正好是 `endRow`，真值（航迹词钟）可早可晚一两步——例如 AAL557 在步 7 说的航向词，下一个航向词按句子在
 76 s，执行器 74 s 就听到了。
 
@@ -556,8 +555,8 @@ context，`useApp` 不读它**：鼠标在图上移动时，只有句子条（�
    最后一步的词也飞**（飞到结局）——真值的最后一步是落地，没有可飞的；模型的最后一步是它的航班结束时还在飞的那一步。
 4. 判决按**模型的句子最后指的那条跑道**读飞出的航迹（观测的行写的是观测飞机落的那条）——导出样本的结局就是按它读的，所以
    一段在哪里结束、怎么结束，和样本相同。选中的词在它自己那一步判，航迹也从那一步切出来给前端
-   （从 `firstRow` 到词说出之前飞的那段不在答复里，它就是屏幕上已经画着的样本航迹）；Details 里"判了多少个周期、哪些限制起了
-   作用"是整段重飞的，卡片上写明。
+   （从 `firstRow` 到词说出之前飞的那段不在答复里，它就是屏幕上已经画着的样本航迹）；答复里"判了多少个周期、哪些限制起了
+   作用"是整段重飞的。
 5. 判决读的句子比执行器飞的多一个词：**模型的下降角词**说出时，那一步生效的高度词在判决读的句子里再说一次（"in force"，
    和标注器给管子定锚的写法一样；`segment.judged_reading`）。判决从高度词自己说出的那一步起数它的管子，而高度词多半在下降角词
    之前说出，那几行是前一个下降角词定锚的；真值的一段从词那一步开始、第 0 步重说六列生效的词，所以管子本来就从那一步起。
@@ -573,10 +572,8 @@ context，`useApp` 不读它**：鼠标在图上移动时，只有句子条（�
    每个周期读出的结局；词在截断之后，判决根本没读到它，也按名字拒绝（"cuts the model's flown track at a landing passage"）。
 
 答复的 `source` 写明飞的是哪一句（`{kind: "truth"}` 或 `{kind: "model", overlayId, sample, firstRow}`），前端核对它就是请求的
-那一句；模型的词没有观测对照：`observedS` 为 null，到段尾时与观测飞机的偏离也不给。结果卡上"模拟飞行时间"下面写
-"a model's word"，并多一行**一致性核对**：现飞的航迹与导出样本在两者都有点的时刻逐点比（水平与高度取大），"✓ the sample's
-own flight — 0.00 m at most from sample #1 over 62 points"；差到 0.5 m 以上写 "✗ not the sample's flight"——那说明后端的
-执行器不是飞出这个样本的那一个。
+那一句；模型的词没有观测对照：`observedS` 为 null，到段尾时与观测飞机的偏离也不给。现飞的就是导出样本自己的飞行：2026-09-26
+在两者都有点的时刻逐点比过（水平与高度取大），104 段最大差 0.000 m；后端的 `FreeGenerationTest` 钉住两种飞法相同。
 
 除此之外判定照执行器的判决原样读，所以有一种只在模型句子里出现的读法：**模型在自己许可进近之后又说了航向词**（真值的句子不这样说）。
 判决把一个航向词判到它之后的下一个许可或截获为止（`judge.py` 的 `ends`）；许可与截获都在它之前时，它一直判到航迹末尾，而
@@ -637,31 +634,25 @@ own flight — 0.00 m at most from sample #1 over 62 points"；差到 0.5 m 以�
 **界面**：
 
 - **怎么启动**：先在句子条上点一个色块选中一个词（真值的或模型的，读哪一句就是哪一句），再按句子条头部的蓝色按钮 **▶ Fly**
-  （没选词时它灰着，提示里写先选词；模型在航班结束之后说的词也灰着；飞行中写 "Flying …"；飞完变成 **↻ Fly again**）。面板 **Autopilot (live)** 一栏的开关 **Fly on band click**（默认开）：开着时
-  点色块就直接飞，不必再按按钮。只有点击才请求（按钮或色块，`trainingPick`），游标不请求——图表上悬停就会移动游标，而飞出的线
+  （没选词时它灰着，提示里写先选词；模型在航班结束之后说的词也灰着；飞行中写 "Flying …"；飞完或没飞成都变成 **↻ Fly again**）。
+  点色块本身就直接飞，不必再按按钮。只有点击才请求（按钮或色块，`trainingPick`），游标不请求——图表上悬停就会移动游标，而飞出的线
   正是要悬停着看的；同一段再飞一次是同一选择的新一次尝试；选择属于这架航班（§4.5），换了航班就清空。
 - **句子条头部一行，只写两样，且不换行**：**飞出的结果在不在它的包络内**（"in envelope" 蓝 / "out of envelope"
   红 / 不判 / 没有自己的包络）、"N s flown · computed M ms"（模拟飞行时间与计算用时）；只有飞得不好（没到段尾也没落地）时才加
   一个结束方式的短标签（"too high"、"timed out" 等，`TRAINING_OUTCOME_TAG`）。不写词——选中的色块就是它（选中移到别的词之后，这一行才在开头写出它飞的是哪个词，免得把旧判定读成新选中词的）；词与完整读法（判定、
   怎么结束、两个时间）在这一行的提示里；飞行中是 "Autopilot · flying …"，没飞成是红色 "Autopilot · not flown"，原因在提示里。
-  这样它和 Fly / Read-back / Prior 按钮同在一行（此前词与长的结束句把按钮挤到第二行，用户 2026-09-27）。其余的都在面板的结果卡里。
+  这样它和 Fly / Read-back / Prior 按钮同在一行（此前词与长的结束句把按钮挤到第二行，用户 2026-09-27）。实时执行器的答复在界面上
+  只有这一行、下面的小游标、三维和读数核对窗口：面板里不另写（用户 2026-09-29：多余）。
 - **句子条上的小游标**（用户 2026-09-28）：飞的那个词所在的行上一根带白边的短竖条，颜色同飞出的线（蓝 / 红）。后端还在算时它停在
   这个词说出的那一步、一闪一闪，表示已经开始；答复到了就和三维里的飞机一起走——两边读同一个时钟（`autopilotPlaybackS`：从开始
   "飞出来"起的实际时间 × 倍数），所以它在句子条上的位置就是飞机标签上"已飞"的那个时刻；过了听到下一个航向词的那一点（尾巴）
-  变淡；飞完停在段尾，和三维里停在终点的飞机一样；Replay in 3D 让它从头再走一遍。
-- **结果卡（面板最上面一栏）**：标题是词与步数（航向词写出多飞到哪一步）；第一行大字是判定，颜色同航迹；有尾巴时下面一行小字
-  写出它是什么（"最后 4 s：听到下一个航向词之后，已在转向那个词，仍按本词评判，它的带判到那之后一个提前量"）；然后并排两个数——
-  **模拟飞行时间**（下面是观测飞机飞同一段的时间）与**计算用时**（后端从开始处理到答复；下面是浏览器往返时间）；再是判定依据
-  的每一项检查（出界的一项红色）；其余收进可展开的 **Details**：怎么结束、到段尾时离观测飞机多远、判定读了多少个周期与哪些
-  限制起了作用、计算分项（执行器算了多少个周期、判定、重建航班或沿用、找集合与规格、准备这一段、写答复、排队、往返，不到 1 s
-  的写毫秒）、用的规格、代码 sha、词钟。后端没开、拒绝、答复对不上时说清楚原因。飞成了，卡片上是 **Replay in 3D**（同一个
-  答复重放，不请求）；没飞成，卡片上是 **Fly again**（重新请求卡片上写的那个词——句子条此时选中的也许已经是别的词）。
+  变淡；飞完停在段尾，和三维里停在终点的飞机一样；↻ Fly again 的新答复让它从头再走一遍。
 - **三维**：一架飞机从说这个词的地方把这一段"飞出来"（按实际时间加速，至少 8 倍、整段不超过 20 s），标签走一个模拟时钟
   "已飞 / 全段 s simulated"，并写出倍数、地速、高度、坡度；身后的线随之变长，飞过听到下一个航向词的那一点之后接着长的是淡色
   虚线的尾巴（透明度 0.45，地面投影也更淡）；飞完后整段保留，地面投影为虚线，航向词出界的
   行在地面投影上画红。飞完之后线、飞机和标签都换成静态的——动态的线每帧都要重建，而且只有静态的线才画得出被地形挡住的虚线
-  部分。"Replay in 3D" 重放同一个答复，不再请求。不用共享的 Cesium 时钟。
-- 动力学在第一个周期就失败的答复只有一个状态，没有线可画：三维、读数图和图例都不画它，结果卡和状态行照常写出结局，读数
+  部分。不用共享的 Cesium 时钟。
+- 动力学在第一个周期就失败的答复只有一个状态，没有线可画：三维、读数图和图例都不画它，状态行照常写出结局，读数
   窗口的说明写"no line to draw"。
 - **读数核对窗口**：平面图、航向图、高度图（对飞过的距离）、速度图各一条实线，从观测线上的那一点出发，尾巴接在后面画成淡色
   虚线（`components/training/AutopilotLine.tsx`，图例多一项 "autopilot tail"）；选中的是航向词时画出
@@ -670,7 +661,7 @@ own flight — 0.00 m at most from sample #1 over 62 points"；差到 0.5 m 以�
 **颜色按判定区分**：在包络内（或不判）是蓝 `#2563eb`（`TRAINING_AUTOPILOT_COLOR`），和执行器回放的青色分开——回放是事先
 算好的，这个是现飞的；**选中的词飞出了包络，整条飞出的线就换成醒目的红 `#ff2d2d`**（`TRAINING_AUTOPILOT_OUTSIDE_COLOR`，
 比标出界行的 `#f87171` 更响；配色校验：与蓝的色差 41.6、色觉异常下 29.0）——三维的航迹、地面投影、飞机与标签、读数图的线、
-结果卡的判定与左边框都一起变（`autopilotColour`）。
+句子条那一行的判定都一起变（`autopilotColour`）。
 
 ### 4.8 模型自己说的句子：和真值怎么区分
 
@@ -721,7 +712,7 @@ own flight — 0.00 m at most from sample #1 over 62 points"；差到 0.5 m 以�
 - **模态**的一页，盖在场景上、背景变暗（读数是拿来读的，不用对着场景看；对着场景看的是读数窗口与先验窗口，它们不是模态）。
   经 portal 挂到 `document.body`（AV7）。最宽 1180 px、最高 860 px；标题 "Training details" 旁写机场 · 集合 · 航班数。
 - 左边一列分节标签，右边是选中的那一节，单独滚动：
-  - **What this view shows**：模块读什么；每个 Draw 开关和 **Fly on band click** 画什么（前面一个它自己颜色的色块）；集合上
+  - **What this view shows**：模块读什么；每个 Draw 开关画什么（前面一个它自己颜色的色块；执行器回放的三种颜色，AV37）；集合上
     发布的每个叠加层（id 与标题）。
   - **Vocabulary**：`TrainingVocabularyNotes`——读法、sha、每列类别数、各项容差（航向的提前量与容差，截获转弯的开始判据、转弯率
     与坡度，每条跑道的落地横向界限）、下降角类、平滑窗口。这些数只在这里写一次；句子条、读数窗口和图例只给名字，数值指回这里。

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseTrainingSample, type TrainingSample } from "../trainingSample";
 import { parseTrainingExecutorOverlay, type TrainingExecutorFlown } from "../trainingOverlays";
-import { replayIssueText, replayOutsideWords } from "../trainingText";
+import { formatElapsed, replayIssueText, replayOutsideWords } from "../trainingText";
 import { mockSample } from "./trainingSample.fixture";
 import { EXECUTOR_ID, mockExecutorOverlay, mockOverlayEntry } from "./trainingOverlays.fixture";
 
@@ -43,5 +43,15 @@ describe("the replay's issue in words", () => {
       ? { ...word, checks: [{ ...word.checks[0], ok: bandOk }, intercept] } : word)) });
     expect(name(withIntercept(false))[0]).toBe("heading 180° at step 10 (counted twice: its band and the intercept)");
     expect(name(withIntercept(true))[0]).toBe("heading 180° at step 10");
+  });
+});
+
+describe("the times written out", () => {
+  it("chooses the unit after rounding", () => {
+    expect(formatElapsed(0.0004)).toBe("0 ms");
+    expect(formatElapsed(0.305)).toBe("305 ms");
+    expect(formatElapsed(0.9996)).toBe("1.00 s");
+    expect(formatElapsed(9.996)).toBe("10.0 s");
+    expect(formatElapsed(64)).toBe("64.0 s");
   });
 });

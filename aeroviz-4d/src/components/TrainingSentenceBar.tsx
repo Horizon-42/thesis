@@ -28,7 +28,7 @@
  * timed out runs on to 1.5× the observed time): the truth is never squeezed by a sample it is not showing. Choosing a
  * model starts at its first sample. A model that does not fly the flight on screen leaves the truth drawn, with its whole
  * header, and says so. The Read-back and Prior windows read the truth, so they are offered only while it is read.
- * A model's words are flown live like the truth's (Fly, or a band click with the panel's switch on): the backend flies
+ * A model's words are flown live like the truth's (Fly, or a band click): the backend flies
  * the model's sentence again from its first step (`trainingAutopilot.ts`), which lands on the sample's own track.
  *
  * THE HEADER IS SHORT: the tabs, the callsign (its type, stratum and counts in its tooltip), the runway, the replay's chip
@@ -51,8 +51,8 @@
  * its own); the PRIOR's window behind its button (`TrainingPriorWindow`). One window is open at a time.
  *
  * THE EXECUTOR, LIVE (`trainingAutopilot`): the Fly button PICKS the selected word of the sentence read for the live
- * executor (`trainingPick`, with its source; "↻ Fly again" once it has flown), and so does clicking a band while the
- * panel's switch is on (`trainingAutopilotAuto`; clicking the selected band again clears the pick) — never the cursor. Its
+ * executor (`trainingPick`, with its source; "↻ Fly again" once it has flown), and so does clicking a band (clicking the
+ * selected band again clears the pick) — never the cursor. Its
  * line (`TrainingAutopilotStatus`) says whether the word stayed inside its envelope and the two times — the word itself
  * only once the selection has moved off it, so the line leaves the header's buttons on their row. A
  * model's word said after its flight ended has no flight to fly: its Fly button is off. On the flown word's row a small
@@ -70,7 +70,7 @@ import { useApp, useTrainingCursor } from "../context/AppContext";
 import TrainingLegend from "./TrainingLegend";
 import TrainingPriorWindow from "./TrainingPriorWindow";
 import TrainingReadbackWindow from "./TrainingReadbackWindow";
-import { TrainingAutopilotStatus } from "./TrainingAutopilotCard";
+import { TrainingAutopilotStatus } from "./TrainingAutopilotStatus";
 import useMeasuredWidth from "../hooks/useMeasuredWidth";
 import {
   TRAINING_AUTOPILOT_COLOR,
@@ -354,7 +354,7 @@ export default function TrainingSentenceBar() {
   const {
     mode, trainingSelection: selection, trainingLayers,
     trainingColumn: focusColumn, setTrainingColumn: setFocusColumn,
-    trainingExecutor, trainingPrior, trainingAutopilot, trainingPick, setTrainingPick, trainingAutopilotAuto,
+    trainingExecutor, trainingPrior, trainingAutopilot, trainingPick, setTrainingPick,
     trainingGenerations, trainingSource, setTrainingSource,
   } = useApp();
   const { trainingCursorS: cursorS, setTrainingCursorS: setCursorS } = useTrainingCursor();
@@ -704,7 +704,7 @@ export default function TrainingSentenceBar() {
                     }
                     setFocusColumn(column);
                     setCursorS(timeOf(run.row));
-                    if (trainingAutopilotAuto && flyable(run.row)) setTrainingPick(nextPick(trainingPick, readSource, column, run.row));
+                    if (flyable(run.row)) setTrainingPick(nextPick(trainingPick, readSource, column, run.row));
                   };
                   return (
                     <g key={`${column}-${run.row}`} role="button" tabIndex={0} aria-label={title} aria-pressed={selected}
@@ -823,9 +823,9 @@ export default function TrainingSentenceBar() {
           <span>
             A band is a word in force, from the tick where it was issued to the next word of its column; step 0 gives all
             six. Click a band to select its word — here, in the read-back check and in 3D — and again to clear it; ▶ Fly
-            flies the selected word's segment live (a band click does too, with the panel's "Fly on band click" on): a short
-            bar on that word's row says where the executor is — pulsing at the word's step while the backend flies it, then
-            moving with the 3D aircraft, faded past where it heard the next word of the column, left at the segment's end.
+            flies the selected word's segment live (a band click does too): a short bar on that word's row says where the
+            executor is — pulsing at the word's step while the backend flies it, then moving with the 3D aircraft, faded
+            past where it heard the next word of the column, left at the segment's end.
             The dashed lines: the clearance, the capture of the final, the speed left to the pilot.
           </span>
           {models.length > 0 ? (

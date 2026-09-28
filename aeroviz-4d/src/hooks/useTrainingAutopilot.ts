@@ -2,9 +2,9 @@
  * useTrainingAutopilot.ts
  * -----------------------
  * The Training panel's live executor (`data/trainingAutopilot.ts`): the PICKED word's segment of the flight on screen —
- * `trainingPick`, set by the sentence bar's "Fly this segment" button or by a band clicked while the panel's switch is on,
- * and reset with the flight (`AppContext`) — is flown by the backend the moment it is picked, and the answer is published
- * as `trainingAutopilot` for the sentence bar, the read-back window and 3D.
+ * `trainingPick`, set by the sentence bar's Fly button or by a band clicked, and reset with the flight (`AppContext`) —
+ * is flown by the backend the moment it is picked, and the answer is published as `trainingAutopilot` for the sentence
+ * bar, the read-back window and 3D.
  *
  * EVERY PICK IS FLOWN AGAIN: nothing is cached here — the point is to see what the executor does now. A MODEL's word
  * (`TrainingPick.source`) is asked with the model's words as the view read them (its sample's sentence): the backend flies
@@ -52,7 +52,6 @@ export default function useTrainingAutopilot(backendUrl: string = AEROVIZ_BACKEN
     }
     const { request } = JSON.parse(key) as { request: TrainingAutopilotRequest };
     const controller = new AbortController();
-    const sent = performance.now();
     setTrainingAutopilot({ status: "flying", request });
     requestTrainingAutopilot(backendUrl, request, controller.signal)
       .then((raw) => {
@@ -60,7 +59,7 @@ export default function useTrainingAutopilot(backendUrl: string = AEROVIZ_BACKEN
         // not aborted: the pick, and so the flight on screen, is the one asked about
         const parsed = parseTrainingAutopilot(raw, request, selection.current!);
         setTrainingAutopilot(parsed.ok
-          ? { status: "ready", request, segment: parsed.value, playedAt: Date.now(), roundTripS: (performance.now() - sent) / 1000 }
+          ? { status: "ready", request, segment: parsed.value, playedAt: Date.now() }
           : { status: "failed", request, problem: parsed.problem });
       })
       .catch((error: unknown) => {

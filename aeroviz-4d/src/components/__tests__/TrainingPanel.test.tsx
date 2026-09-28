@@ -8,15 +8,15 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 
 const {
   appState, setTrainingSelection, setTrainingLayer, setTrainingExecutor, setTrainingPrior, setTrainingAutopilot,
-  setTrainingAutopilotAuto, setTrainingGenerations, fetchMock,
+  setTrainingGenerations, fetchMock,
 } = vi.hoisted(() => ({
   appState: {
     activeAirportCode: "KXXX" as string,
     trainingLayers: { headingBands: true, corridor: true, vertical: true, candidates: true },
     // no word selected: the live executor asks for nothing
-    trainingSelection: null, trainingColumn: null, trainingAutopilot: null, trainingPick: null,
-    trainingAutopilotAuto: true, trainingSource: null as unknown,
-    // the models' sentences the panel publishes go to the mocked setter: the card reads none
+    trainingSelection: null, trainingColumn: null, trainingPick: null,
+    trainingSource: null as unknown,
+    // the models' sentences the panel publishes go to the mocked setter
     trainingGenerations: [] as unknown[],
   },
   setTrainingGenerations: vi.fn(),
@@ -25,14 +25,13 @@ const {
   setTrainingExecutor: vi.fn(),
   setTrainingPrior: vi.fn(),
   setTrainingAutopilot: vi.fn(),
-  setTrainingAutopilotAuto: vi.fn(),
   fetchMock: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     ...appState, setTrainingSelection, setTrainingLayer, setTrainingExecutor, setTrainingPrior, setTrainingAutopilot,
-    setTrainingAutopilotAuto, setTrainingGenerations,
+    setTrainingGenerations,
   }),
 }));
 
@@ -196,7 +195,7 @@ describe("TrainingPanel", () => {
       const page = screen.getByRole("dialog", { name: "Training details" });
       const about = page.querySelector(".training-notes-list")!.textContent!;
       expect(about).toMatch(/Altitude tubes \+ speed bandseach altitude word's tube, and on the speed chart each speed word's/);
-      expect(about).toMatch(/Fly on band clickOn: clicking a word's band in the sentence bar flies its segment at once/);
+      expect(about).toMatch(/Executor replayThe executor's replay of the truth sentence\. In the flight list, its outcome/);
       // the sections this set has nothing for stay listed, disabled, and say why
       expect((within(page).getByRole("tab", { name: /The executor's replay gate/ }) as HTMLButtonElement).disabled).toBe(true);
       expect(within(page).getByRole("tab", { name: /The executor's replay gate/ }).textContent).toMatch(/none published for this set/);

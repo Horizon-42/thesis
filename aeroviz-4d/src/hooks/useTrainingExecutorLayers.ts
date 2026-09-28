@@ -8,7 +8,7 @@
  *    told, red on its ground trace (its judge's own row verdicts).
  *  • THE EXECUTOR, LIVE (`trainingAutopilot`, ready): the picked word's segment as the backend flew it — an aircraft flies
  *    it out from where the word was said (`autopilotPlaybackSpeedup` × real time — at least 8×, faster for a segment
- *    that would take more than 20 s — from the moment the answer arrived or "Replay in 3D" was pressed), in blue, or a
+ *    that would take more than 20 s — from the moment the answer arrived), in blue, or a
  *    loud red when the word flew outside its envelope (`autopilotColour`), its line growing behind it and labelled with
  *    the speed-up, its ground speed, height and bank — past where it heard the next word of the column (a heading word's
  *    lead into the next heading word, `autopilotRunAndTail`) its line and ground trace go on faded and dashed, the TAIL.
@@ -189,7 +189,7 @@ export default function useTrainingExecutorLayers(): void {
   const flown = replay?.flown ? replay : null;
   // the live answer of the sentence read: the truth's word, or the model's sample on screen
   const live = autopilotOnScreen(trainingAutopilot, selection, sourceOnScreen(trainingGenerations, trainingSource, selection).source);
-  // a segment of one state (a dynamics failure in its first cycle) has no line to fly out: the card and the status say so
+  // a segment of one state (a dynamics failure in its first cycle) has no line to fly out: the bar's status says so
   const ready = live?.status === "ready" && autopilotHasLine(live.segment) ? live : null;
   const { headingBands } = trainingLayers;
   // the rows outside a heading word, the replay's and the live executor's, shown with the bands' switch

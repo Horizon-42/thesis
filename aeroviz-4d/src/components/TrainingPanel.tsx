@@ -15,7 +15,7 @@
  *   ③ a readable set that fails to parse → THAT set alone, with the field
  *   ④ an entry that is not a set entry  → greyed out on its own; the others still load (AV6)
  *
- * KEPT SHORT, TOP TO BOTTOM: the set, the flight list, the live executor, the Draw switches (short labels, the full
+ * KEPT SHORT, TOP TO BOTTOM: the set, the flight list, the Draw switches (short labels, the full
  * reading in each tooltip), then "Details": one line per readout behind the overlays, its conclusion. Everything longer —
  * what the module is, the vocabulary's numbers, the readouts' tables — is on the DETAILS PAGE (`TrainingDetails`), opened
  * by the header's ⓘ (as every ⓘ in the module opens its notes) or by a readout's line, on its section; the dock never
@@ -30,22 +30,20 @@
  * THE DOCK ENDS ABOVE THE SENTENCE BAR (the bar measures itself, `--training-bar-height`): the flight list takes the
  * height left over — never less than a few rows, the dock scrolling below that — so the switches under it are never
  * covered.
- * And THE EXECUTOR, LIVE (`useTrainingAutopilot`): a word picked — the sentence bar's Fly button, or a band clicked
- * while its switch is on — is flown by the backend now, never read from an overlay (`TrainingAutopilotCard`).
+ * And THE EXECUTOR, LIVE (`useTrainingAutopilot`, run here): a word picked in the sentence bar — its Fly button, or a band
+ * clicked — is flown by the backend now, never read from an overlay; the bar says the answer (`TrainingAutopilotStatus`).
  */
 
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useApp, type TrainingLayers } from "../context/AppContext";
 import useTrainingOverlays, { type OverlayKindState, type OverlaysManifestState } from "../hooks/useTrainingOverlays";
 import useTrainingAutopilot from "../hooks/useTrainingAutopilot";
-import TrainingAutopilotCard from "./TrainingAutopilotCard";
 import TrainingVocabularyNotes from "./TrainingVocabularyNotes";
 import ProblemBox from "./training/ProblemBox";
 import TrainingDetails, { type TrainingDetailsSection } from "./training/TrainingDetails";
 import { NotesList } from "./training/NotesToggle";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import {
-  TRAINING_AUTOPILOT_COLOR,
   TRAINING_CANDIDATE_COLOR,
   TRAINING_CORRIDOR_COLOR,
   TRAINING_EXECUTOR_COLOR,
@@ -99,9 +97,6 @@ const LAYER_SWITCHES: Array<{ layer: keyof TrainingLayers; colour: string; text:
 /** The overlay switches' names, as the Draw box and the details page's reasons say them. */
 const EXECUTOR_SWITCH = "Executor replay";
 const PRIOR_SWITCH = "Prior predictions";
-
-/** What the live executor's switch does. */
-const FLY_ON_CLICK = "On: clicking a word's band in the sentence bar flies its segment at once. Off: only the bar's Fly button does.";
 
 type IndexState =
   | { status: "loading" }
@@ -266,8 +261,7 @@ function EmptyState({ airport }: { airport: string }) {
 
 export default function TrainingPanel({ hidden }: { hidden: boolean }) {
   const {
-    activeAirportCode, setTrainingSelection, trainingLayers, setTrainingLayer, trainingAutopilotAuto, setTrainingAutopilotAuto,
-    trainingSource,
+    activeAirportCode, setTrainingSelection, trainingLayers, setTrainingLayer, trainingSource,
   } = useApp();
   const airport = activeAirportCode || "—";
 
@@ -401,8 +395,6 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
         <NotesList items={[
           ...LAYER_SWITCHES.map(({ layer, colour, text, title }) => ({ key: layer, text: title, name: (
             <><span className="training-model-swatch" style={{ background: colour }} />{text}</>) })),
-          { key: "autopilot", text: FLY_ON_CLICK, name: (
-            <><span className="training-model-swatch" style={{ background: TRAINING_AUTOPILOT_COLOR }} />Fly on band click</>) },
           { key: "executor", text: `The executor's replay of the truth sentence. In the flight list, its outcome and its ` +
             `words inside of those judged — ${REPLAY_COLOURS_TEXT}; in the sentence bar, a dot at each word's band and, ` +
             "when it did not land or flew words outside, a short note in the header.", name: (
@@ -511,17 +503,6 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
                   );
                 })}
               </ul>
-
-              {/* THE EXECUTOR, LIVE: flown by the backend when a word is picked, never read from an overlay */}
-              <fieldset className="training-layers training-autopilot-section" aria-label="Autopilot (live)">
-                <legend style={{ color: TRAINING_AUTOPILOT_COLOR }}>Autopilot (live)</legend>
-                <label style={{ color: TRAINING_AUTOPILOT_COLOR }}
-                  title={FLY_ON_CLICK}>
-                  <input type="checkbox" checked={trainingAutopilotAuto} onChange={(event) => setTrainingAutopilotAuto(event.target.checked)} />
-                  Fly on band click
-                </label>
-                <TrainingAutopilotCard />
-              </fieldset>
             </>
           ) : null}
 

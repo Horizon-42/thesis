@@ -274,8 +274,7 @@ describe("Training envelopes in the 3D scene", () => {
       raw.word.heading.inside[1] = 0;
       const answer = parseTrainingAutopilot(raw, request, scene.selection);
       if (!answer.ok) throw new Error(answer.problem);
-      act(() => scene.app().setTrainingAutopilot({ status: "ready", request, segment: answer.value, playedAt: Date.now(),
-        roundTripS: 0.2 }));
+      act(() => scene.app().setTrainingAutopilot({ status: "ready", request, segment: answer.value, playedAt: Date.now() }));
       const line = scene.entities.getById(TRAINING_ENTITY.autopilotTrack)!.polyline!;
       expect(line.positions).toBeInstanceOf(Cesium.CallbackProperty);
       expect(scene.entities.getById(TRAINING_ENTITY.autopilotAircraft)).toBeDefined();
@@ -304,10 +303,13 @@ describe("Training envelopes in the 3D scene", () => {
       expect(scene.entities.getById(TRAINING_ENTITY.autopilotGround)).toBeDefined();
       expect(scene.entities.getById(TRAINING_ENTITY.autopilotTailGround)).toBeDefined();
       expect(scene.colourOf(TRAINING_ENTITY.autopilotOutside(0))).toEqual(scene.css(TRAINING_OUTSIDE_COLOR));
-      // "Replay in 3D": the same answer flown out anew — what the landing drew goes, and nothing is added twice
+      // "↻ Fly again": the word flies anew — nothing of the last answer stays drawn while the backend flies it — and its
+      // answer is flown out anew: what the landing drew goes, and nothing is added twice
       const ids = () => scene.entities.values.map((entity) => entity.id).filter((id) => id.startsWith("training-autopilot")).sort();
       const landed = ids();
-      act(() => scene.app().replayTrainingAutopilot());
+      act(() => scene.app().setTrainingAutopilot({ status: "flying", request }));
+      expect(ids()).toEqual([]);
+      act(() => scene.app().setTrainingAutopilot({ status: "ready", request, segment: answer.value, playedAt: Date.now() }));
       const replayed = scene.entities.getById(TRAINING_ENTITY.autopilotTrack)!.polyline!;
       expect(replayed.positions).toBeInstanceOf(Cesium.CallbackProperty);
       expect(scene.entities.getById(TRAINING_ENTITY.autopilotGround)).toBeUndefined();
@@ -331,8 +333,7 @@ describe("Training envelopes in the 3D scene", () => {
     const request = mockAutopilotRequest(scene.sample, VECTORED_KEY, "heading", 8);
     const answer = parseTrainingAutopilot(failedAnswer(mockAutopilotAnswer(scene.sample, request), 1), request, scene.selection);
     if (!answer.ok) throw new Error(answer.problem);
-    act(() => scene.app().setTrainingAutopilot({ status: "ready", request, segment: answer.value, playedAt: Date.now(),
-      roundTripS: 0.2 }));
+    act(() => scene.app().setTrainingAutopilot({ status: "ready", request, segment: answer.value, playedAt: Date.now() }));
     expect(scene.entities.values.filter((entity) => entity.id.startsWith("training-autopilot"))).toHaveLength(0);
     scene.unmount();
   });
@@ -345,8 +346,7 @@ describe("Training envelopes in the 3D scene", () => {
       const request = mockAutopilotRequest(scene.sample, VECTORED_KEY, "heading", 8);
       const answer = parseTrainingAutopilot(mockAutopilotAnswer(scene.sample, request), request, scene.selection);
       if (!answer.ok) throw new Error(answer.problem);
-      act(() => scene.app().setTrainingAutopilot({ status: "ready", request, segment: answer.value, playedAt: Date.now(),
-        roundTripS: 0.2 }));
+      act(() => scene.app().setTrainingAutopilot({ status: "ready", request, segment: answer.value, playedAt: Date.now() }));
       expect(scene.entities.getById(TRAINING_ENTITY.autopilotTrack)).toBeDefined();
       act(() => scene.app().setTrainingSelection(trainingSelectionOf(scene.sample, scene.sample.flights[1])));
       act(() => vi.advanceTimersByTime(2000));

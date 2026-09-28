@@ -16,7 +16,7 @@ const { appState, DEFAULT_LAYERS, setTrainingPick, setTrainingSource } = vi.hois
     appState: {
       mode: "training", trainingSelection: null as unknown, trainingLayers: { ...DEFAULT_LAYERS },
       trainingExecutor: null as unknown, trainingPrior: null as unknown, trainingAutopilot: null as unknown,
-      trainingPick: null as unknown, trainingAutopilotAuto: true,
+      trainingPick: null as unknown,
       trainingGenerations: [] as unknown[], trainingSource: null as unknown,
     },
   };
@@ -87,7 +87,6 @@ describe("TrainingSentenceBar", () => {
     appState.trainingPrior = null;
     appState.trainingAutopilot = null;
     appState.trainingPick = null;
-    appState.trainingAutopilotAuto = true;
     appState.trainingGenerations = [];
     appState.trainingSource = null;
     setTrainingPick.mockClear();
@@ -338,15 +337,14 @@ describe("TrainingSentenceBar", () => {
     expect(setTrainingPick).toHaveBeenLastCalledWith(null);
   });
 
-  it("flies the selected word from its Fly button — the only way with the panel's switch off", () => {
+  it("flies the selected word from its Fly button too, which waits for a word to be selected", () => {
     select();
-    appState.trainingAutopilotAuto = false;
     render(<TrainingSentenceBar />);
     const fly = screen.getByRole("button", { name: "▶ Fly" }) as HTMLButtonElement;
     expect(fly.disabled).toBe(true);
     expect(fly.title).toMatch(/^Select a word/);
     fireEvent.click(screen.getByLabelText(/^heading 225° .* issued at step 8 /));
-    expect(setTrainingPick).not.toHaveBeenCalled();
+    setTrainingPick.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "▶ Fly" }));
     expect(setTrainingPick).toHaveBeenLastCalledWith({ source: null, column: "heading", row: 8, attempt: 0 });
   });
@@ -364,7 +362,7 @@ describe("TrainingSentenceBar", () => {
     unmount();
     const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, mockSelection(parsed.value, request));
     if (!answer.ok) throw new Error(answer.problem);
-    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 0, roundTripS: 0.5 };
+    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 0 };
     render(<TrainingSentenceBar />);
     fireEvent.click(screen.getByLabelText(/^heading 225° .* issued at step 8 /));
     setTrainingPick.mockClear();
@@ -384,7 +382,7 @@ describe("TrainingSentenceBar", () => {
     unmount();
     const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, mockSelection(parsed.value, request));
     if (!answer.ok) throw new Error(answer.problem);
-    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 0, roundTripS: 0.5 };
+    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 0 };
     const { unmount: done } = render(<TrainingSentenceBar />);
     // its band selected: the band names it, the line does not
     fireEvent.click(screen.getByLabelText(/^heading 225° .* issued at step 8 /));
@@ -401,7 +399,7 @@ describe("TrainingSentenceBar", () => {
     outside.word.heading.inside[1] = 0;
     const flown = parseTrainingAutopilot(outside, request, mockSelection(parsed.value, request));
     if (!flown.ok) throw new Error(flown.problem);
-    appState.trainingAutopilot = { status: "ready", request, segment: flown.value, playedAt: 0, roundTripS: 0.5 };
+    appState.trainingAutopilot = { status: "ready", request, segment: flown.value, playedAt: 0 };
     render(<TrainingSentenceBar />);
     const red = document.querySelector(".training-sentence-autopilot strong") as HTMLElement;
     expect(red.textContent).toBe("out of envelope");
@@ -439,7 +437,7 @@ describe("TrainingSentenceBar", () => {
     // the answer arrives: the same cursor flies it out from the word's step
     const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, mockSelection(parsed.value, request));
     if (!answer.ok) throw new Error(answer.problem);
-    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 1_000_000, roundTripS: 0.5 };
+    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 1_000_000 };
     rerender(<TrainingSentenceBar />);
     expect(cursor()!.classList.contains("waiting")).toBe(false);
     expect(at()).toBeCloseTo(x16, 6);
@@ -455,8 +453,14 @@ describe("TrainingSentenceBar", () => {
     nextFrame(realMs(60));
     expect(at()).toBeCloseTo(x16 + 2 * (x20 - x16), 6);
     expect(frames).toHaveLength(0);
-    // Replay in 3D: a new start, from the word's step again, unfaded
-    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 1_000_000 + realMs(60), roundTripS: 0.5 };
+    // flown again (↻ Fly again): back at the word's step, pulsing, while the backend flies it; its answer a new start,
+    // from the word's step again, unfaded
+    appState.trainingAutopilot = { status: "flying", request };
+    rerender(<TrainingSentenceBar />);
+    expect(cursor()!.classList.contains("waiting")).toBe(true);
+    expect(at()).toBeCloseTo(x16, 6);
+    expect(cursor()!.style.opacity).toBe("");
+    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 1_000_000 + realMs(60) };
     rerender(<TrainingSentenceBar />);
     expect(at()).toBeCloseTo(x16, 6);
     expect(cursor()!.style.opacity).toBe("");
@@ -471,7 +475,7 @@ describe("TrainingSentenceBar", () => {
     const one = parseTrainingAutopilot(failedAnswer(mockAutopilotAnswer(parsed.value, request), 1), request,
       mockSelection(parsed.value, request));
     if (!one.ok) throw new Error(one.problem);
-    appState.trainingAutopilot = { status: "ready", request, segment: one.value, playedAt: 1, roundTripS: 0.5 };
+    appState.trainingAutopilot = { status: "ready", request, segment: one.value, playedAt: 1 };
     render(<TrainingSentenceBar />);
     expect(cursor()).toBeNull();
   });

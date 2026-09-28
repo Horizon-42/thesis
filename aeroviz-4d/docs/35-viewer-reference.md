@@ -520,7 +520,7 @@ that divergence is a known open item (see the README's "Future Improvements").
 - 实时执行器在飞的时候（文档 36 §4.7），句子条上它飞的那个词所在的行有一根带白边的短竖条（`AutopilotCursor`），颜色同飞出的线：后端还
   在算时停在这个词说出的那一步、一闪一闪（`prefers-reduced-motion` 时不闪）；答复到了就与三维里的飞机一起走——两边读同一个时钟
   `autopilotPlaybackS(track, playedAt, now)`（实际时间 × 倍数，飞完停在段尾），过了听到下一个同列词的那一点（尾巴）变淡 0.45，
-  飞完停在段尾；Replay in 3D 换一个 `playedAt`，它从头再走。它自己用 `requestAnimationFrame` 改自己的 `transform`，句子条不因它
+  飞完停在段尾；再飞一次（↻ Fly again）的新答复带新的 `playedAt`，它从头再走。它自己用 `requestAnimationFrame` 改自己的 `transform`，句子条不因它
   每帧重画（AV29）；飞完就停掉循环，轴的宽度或长度变了在绘制之前重新放。浏览器核对（KRDU AAL557）：真值的 heading 170°（64 s，×8）
   与 base 模型第 1 个样本的 heading 225°（74 s）——游标与三维标签的"已飞"同步，停在尾巴末端、变淡。
 
@@ -544,6 +544,24 @@ that divergence is a known open item (see the README's "Future Improvements").
   被拒的航迹不再算干净、头部注释补上这个小块。浏览器（5176）：KRDU 列表里 "landed · 43/45" 等为琥珀、"landed · 5/5" 等为青；
   SWA4462 头部 "Replay · 2 words out"。
 
+### AV38 · 左栏的 "Autopilot (live)" 一栏删掉；点色块总是直接飞（2026-09-29）
+
+- 用户（2026-09-29）："左边栏里 AUTOPILOT (LIVE) 这个面板中的信息也是多余的 把这块儿也删了……删干净，包括相关测试"。删掉的：
+  面板的这一栏（开关 "Fly on band click" 与结果卡 `TrainingAutopilotCard`：词与步数、判定、尾巴的说明、模拟飞行与计算两个时间、
+  检查项、Details 里的计算分项 / 规格与代码 sha / 词钟、模型词与导出样本的逐点核对、"Replay in 3D"、没飞成时的 "Fly again"），
+  以及只为它存在的：`AppContext` 的 `replayTrainingAutopilot`、`trainingAutopilotAuto` / `setTrainingAutopilotAuto`，
+  `trainingAutopilot.autopilotSampleGap`，答复视图的 `roundTripS`（浏览器往返时间），`trainingText.formatUtc`，详情页 "What each
+  switch draws" 里的 "Fly on band click" 一条，`index.css` 里结果卡的样式，`ProblemBox` 的 `children`（只有结果卡的 "Fly again" 用），
+  测试夹具 `onSampleLine`，以及它们的测试；`requestSource` 与夹具的 `mockGeneratedPoint` 只剩文件内使用，不再导出。
+- 留下的：句子条头部那一行（`TrainingAutopilotStatus`，从 `TrainingAutopilotCard.tsx` 挪到自己的文件，测试同样挪到
+  `TrainingAutopilotStatus.test.tsx`；时间写法的测试挪到 `trainingText.test.ts`）、小游标（AV36）、三维与读数核对窗口。点色块总是
+  直接飞（原来开关默认就开）；没飞成时按 ↻ Fly again 再飞（再点一次选中的色块是取消选中，不是再飞）。答复的格式（`aeroviz-training-autopilot-segment-v7`，含
+  `timing` 各项、规格与代码 sha）不变，读取器照样逐项核对——那是与后端的约定，不是界面。原来的 3D "Replay in 3D" 测试改成同一个
+  词的再飞一次（↻ Fly again 的路径：先 flying 再 ready）：后端在飞的那段时间里三维不画上一次的答复（原来的 "Replay in 3D" 不请求，
+  一直画着——这是删掉它之后唯一的行为差别），新答复到了照样飞出来，落地时画的撤掉、不重复添加。审查（opus，2026-09-29）：没有必须
+  改的；留下的注释、`ProblemBox` 的 `children`、两个只剩文件内使用的导出、AV38 里"再点一次"的说法（点选中的色块是取消选中）、
+  两个没走 flying 这一步的测试，都已改。
+
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
 
 - 根目录的发布器 `--executor-replay` 把执行器的 val 回放记录（和 ts 预测同一个记录契约）发布成 Experiments 类别，每个机场
@@ -566,26 +584,28 @@ that divergence is a known open item (see the README's "Future Improvements").
   （`MIRRORED_SOURCE_SHA256`：执行器规格的文件加它照写的动力学模块，按 `spec.logic` 算），后端选规格时核对，对不上就拒绝飞。
   按 `executor.fly` 的方式一个周期一个周期地飞（`fly_until`），在词钟把一个开始一步的周期放到段尾之前停下，段尾之后
   什么也不飞。
-- 启动：选中一个词后按句子条头部的 **▶ Fly**（飞完变 **↻ Fly again**，同一选择的新一次尝试），或在面板 "Autopilot (live)"
-  一栏的 **Fly on band click** 开着时直接点色块；只有点击才请求（`trainingPick`），游标不触发，图表悬停会移动游标。
+- 启动：选中一个词后按句子条头部的 **▶ Fly**（飞完变 **↻ Fly again**，同一选择的新一次尝试），或直接点色块（2026-09-29 起总是
+  如此：面板的 "Autopilot (live)" 一栏连同开关 "Fly on band click" 删掉，AV38）；只有点击才请求（`trainingPick`），游标不触发，
+  图表悬停会移动游标。
 - **模型的词**（句子条读模型的样本时）：请求带上这句话（`sentence`：`overlayId`、`sample`、`firstRow`、`rows`、`events`，
   `trainingAutopilotRequest` 从屏幕上的样本取，`useTrainingAutopilot`），后端把整句从观测飞机在 `firstRow` 的状态照自由生成的
   飞法重飞（`segment.model_segment` / `fly.fly_segment`）：每个词在它说出的那一步听到（`TimeClock`）、时限 = 观测从 `firstRow`
   起剩下的时间 × 超时倍数（`fly.model_time_limit_s`，`prior_free_generation.limits_s` 的镜像，测试钉住）、判决按模型指的跑道；
-  答复只给从词那一步起的航迹与判定。执行器是确定的，所以这就是导出样本自己的飞行：结果卡逐点比（`autopilotSampleGap`，两者都
-  有点的时刻，水平与高度取大），2026-09-26 KRDU / KMSY 两个模型各 4 架 × 2 个样本、104 段最大差 0.000 m；测试
+  答复只给从词那一步起的航迹与判定。执行器是确定的，所以这就是导出样本自己的飞行：逐点比过（两者都有点的时刻，水平与高度取大；
+  比较用的 `autopilotSampleGap` 随结果卡在 2026-09-29 删掉，AV38），2026-09-26 KRDU / KMSY 两个模型各 4 架 × 2 个样本、104 段
+  最大差 0.000 m；测试
   `FreeGenerationTest` 让 `speak_and_fly` 自己的循环（照稿说话的说话者代替先验）和后端的飞法在真实执行器上逐状态比。只飞自己机型
   动力学的航班；词说出时或之前航班已结束的按名字拒绝（400，与前端 `row·step < endS` 同一个条件），标注器的门把航迹截在词之前的
   也拒绝；说在句子最后一步的词飞到结局（模型的最后一步不是落地）；句子从 `N_LOOK` 开口，步数不超过时限下能说的
   （`model_steps_max` = `rows_for`）；判决按句子最后指的跑道（与导出样本的结局相同）。下降角词：判决读的句子在它那一步
   重说生效的高度词（`judged_reading`），管子从它那一步起判，与真值相同；第二次许可不判（判决读第一次的截获）。答复 `source`
-  写明飞的哪一句，前端核对；`observedS` 为 null，`offsetFromObserved` 只有真值有；`limits` 是整段重飞的，卡片写明。
+  写明飞的哪一句，前端核对；`observedS` 为 null，`offsetFromObserved` 只有真值有；`limits` 是整段重飞的。
   模型许可之后又说的航向词照判决原样判到航迹末尾（执行器在飞航道），读作出界——模型句子的读法，判决不改。
 - 一段 = 被选中的那个色块：从词说出的一步飞到它的包络结束的
   `stopRow`——同列下一个词说出的一步，航向词再加一个提前量（它的带判到下一个航向词说出后一个提前量，下一个航向词照句子说出）；
   到了句子末尾就飞到落地，句子最后一步说的词按名字拒绝。**航向词多飞的那一截画成尾巴**：从执行器听到同列下一个词的周期
   （答复的 `segment.nextWordHeardS`，按判决的 `words_said`；前端 `tailFrom` 是它在航迹上的下标，`autopilotRunAndTail` 切开）起，
-  三维与四张读数图都画淡色虚线（`AUTOPILOT_TAIL_OPACITY` 0.45、`AUTOPILOT_TAIL_DASH`），图例与结果卡写出它是什么——飞机已在飞下一个
+  三维与四张读数图都画淡色虚线（`AUTOPILOT_TAIL_OPACITY` 0.45、`AUTOPILOT_TAIL_DASH`），图例写出它是什么——飞机已在飞下一个
   词，评判还算这个词（用户 2026-09-26 看成"多飞了一段"）。初态是观测飞机在那一步的状态（`flight_inputs(anchor=row)`），第 0 步是那一步
   六列生效的词，之后是段内的词，每条在执行器到了观测飞机听到它的位置时说。
 - 规格：`outputs/POOLED/executor/*/spec.json` 里恰好一份由现在的执行器代码、为这个集合所属产物的词表写的
@@ -612,16 +632,15 @@ that divergence is a known open item (see the README's "Future Improvements").
   飞完按自由生成的规则 `fly.glidepath_stop` 截在下滑道下边界的那一步，结局 `below_glidepath`；`GlidepathStopTest` 逐架钉住它与
   `glidepath_stops` 相同）（`SCHEMA` / `TRAINING_AUTOPILOT_SCHEMA`，判定状态与结局
   名也是镜像）；它带 `timing`（后端墙钟：等待；加起来等于总计的各项——集合与规格、重建航班或沿用、准备这一段、执行器与算了的周期数、判定、
-  写答复；`flyS` 只是执行器的周期，装配物理量算在"准备"里），前端加上浏览器往返时间。单步飞法由
+  写答复；`flyS` 只是执行器的周期，装配物理量算在"准备"里）。单步飞法由
   `test_autopilot_segment.StepperTest` 钉住：单条执行器在后端的飞法下，不设段尾时就是 torch 执行器的 `executor.fly`（周期、词钟时刻、
   模式与限制相同，状态只差舍入），设了段尾时等于它在词钟首次把一个开始一步的周期放到段尾处截断；装配由 `SetupTest` 钉住（与
   `replay.fly_sentences` 的输入、跑道、图、进近速度、时限、词钟相同）；前端的四个镜像名由 `MirrorTest` 钉住。
 - 显示：句子条一行只写**在不在包络内**、"N s flown · computed M ms"（飞得不好时加一个结束方式的短标签），不写词（选中的色块就是它；选中已移到别的词时才写出飞的是哪个词），
-  词与完整读法在它的提示里，这一行不换行——头部的按钮不再被它挤到第二行（2026-09-27）；结果卡第一行是判定，然后并排
-  "模拟飞行时间"（对照观测）与"计算用时"（往返），检查项，其余收进 Details；飞成了卡片上是 "Replay in 3D"（不请求），没飞成是
-  "Fly again"（重新请求卡片上的那个词，不管句子条此时选中的是什么）；三维飞机标签走模拟时钟"已飞 / 全段 s simulated"。
+  词与完整读法在它的提示里，这一行不换行——头部的按钮不再被它挤到第二行（2026-09-27）；没飞成时这一行红色 "not flown"，原因在
+  提示里，按钮变 ↻ Fly again；三维飞机标签走模拟时钟"已飞 / 全段 s simulated"。面板里原来的结果卡 2026-09-29 删掉（AV38）。
 - **颜色按判定**：在包络内蓝 `#2563eb`，飞出包络整条换成醒目的红 `#ff2d2d`（`autopilotColour`：三维航迹、地面投影、飞机与
-  标签、读数图的线、结果卡）。
+  标签、读数图的线、句子条那一行的判定）。
 - 画法：与执行器回放的青色分开；三维里飞机按加速的实际时间把这一段飞出来（至少 8 倍、不超过 20 s，
   CallbackProperty，不碰 `viewer.clock`；飞完换成静态属性，不再每帧重建，被地形挡住的部分也画成虚线），读数窗口里四张图
   各一条蓝线，从观测线上说词的那一点出发。只有一个状态的答复（第一个周期就动力学失败）没有线可画（`autopilotHasLine`）。

@@ -1,8 +1,8 @@
 /**
  * trainingText.ts
  * ---------------
- * The Training views' words for what the files hold — one spelling of each, shared by the panel, the sentence bar, the
- * read-back and prior windows, the live executor's card and the 3D labels, so the replay and the live executor never
+ * The Training views' words for what the files hold — one spelling of each, shared by the panel, the sentence bar (and
+ * its live-executor line), the read-back and prior windows and the 3D labels, so the replay and the live executor never
  * word one judge's outcome two ways.
  */
 
@@ -101,11 +101,6 @@ export function checkText(check: TrainingExecutorCheck): string {
 export function crossingText(crossing: TrainingCrossing): string {
   return `${Math.abs(crossing.crossM).toFixed(1)} m ${crossing.crossM >= 0 ? "right" : "left"} of the centreline, ` +
     `${crossing.heightM.toFixed(1)} m above the threshold`;
-}
-
-/** An ISO time in UTC as the views show it, to the second: "2026-09-25 14:13:59 UTC". */
-export function formatUtc(iso: string): string {
-  return `${iso.slice(0, 19).replace("T", " ")} UTC`;
 }
 
 /** A sha as the views show it: its first 12 characters. */

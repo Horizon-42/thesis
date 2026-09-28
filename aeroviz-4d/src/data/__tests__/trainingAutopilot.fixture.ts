@@ -20,7 +20,6 @@ import {
 } from "../trainingAutopilot";
 import { sentenceColumnRuns, trainingSelectionOf, type TrainingSample, type TrainingSelection } from "../trainingSample";
 import type { TrainingAugmentation, TrainingGeneratedSentence, TrainingProcedureMask } from "../trainingOverlays";
-import { mockGeneratedPoint } from "./trainingOverlays.fixture";
 
 export function mockAutopilotRequest(sample: TrainingSample, flightKey: string, column: TrainingAutopilotRequest["column"],
   row: number): TrainingAutopilotRequest {
@@ -114,16 +113,6 @@ export function mockAutopilotAnswer(sample: TrainingSample, request: TrainingAut
     },
     judgedTrackDeg: judged ? Array.from({ length: judgedSteps }, () => 225) : null,
   };
-}
-
-/** ``answer`` (a model word's) flown on its sample's own line (`mockGeneratedPoint`), as the deterministic executor
- *  flies a model's sentence again. */
-export function onSampleLine(answer: Record<string, any>): Record<string, any> {
-  const points = answer.track.tS.map(mockGeneratedPoint);
-  answer.track.lon = points.map((point: { lon: number }) => point.lon);
-  answer.track.lat = points.map((point: { lat: number }) => point.lat);
-  answer.track.altitudeM = points.map((point: { altitudeM: number }) => point.altitudeM);
-  return answer;
 }
 
 /** ``answer`` (a heading word's, `mockAutopilotAnswer`) as a dynamics failure after ``states`` − 1 cycles: the failed
