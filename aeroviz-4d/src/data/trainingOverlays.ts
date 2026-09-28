@@ -692,6 +692,27 @@ export function generatedTrackRows(sentence: TrainingGeneratedSentence, firstRow
   return { first, last: Math.min(endRow - firstRow, last) };
 }
 
+/** The heading word the judge left to intercept the final on its own, when its band also had rows judged: the one word
+ *  with two checks, its band's and the intercept's — the replay gate counts it twice, and inside once when its band's
+ *  check passed. */
+export function countedTwice(word: TrainingExecutorWord): boolean {
+  return word.column === TRAINING_COLUMN_INDEX.heading && word.checks.length === 2;
+}
+
+/** How the executor's replay of a flight went, in one of three — one rule for every view that says it, in a word or a
+ *  colour: it landed and every judged word was inside its envelope; it landed, but words were outside, or the labeller's
+ *  gate refused its track (then no word is judged); it did not land. */
+export type TrainingReplayKind = "clean" | "flawed" | "not landed";
+
+/** The replay's verdict on a flight: its kind, the words out as the gate counts them (judged − inside: the list's
+ *  "43/45" says 2), and whether the gate refused its track. */
+export function replayVerdict(flight: TrainingExecutorFlown): { kind: TrainingReplayKind; wordsOut: number; refused: boolean } {
+  const wordsOut = flight.counts.wordsJudged - flight.counts.wordsInside;
+  const refused = flight.refused !== null;
+  const kind = flight.outcome !== "landed" ? "not landed" : wordsOut > 0 || refused ? "flawed" : "clean";
+  return { kind, wordsOut, refused };
+}
+
 /** The flight's words the executor judged, and how many of them it flew inside their envelopes. */
 export function executorWordCounts(flight: TrainingExecutorFlown) {
   const statuses = flight.words.map((word) => word.status);
@@ -934,10 +955,8 @@ function parseExecutorFlight(item: Reader, flight: TrainingFlight, vocabulary: T
     }
   }
   const words = parseExecutorWords(item, flight, vocabulary, judgedTrackDeg === null ? null : judgedTrackDeg.length, refused);
-  // The judge's counts, from the words' own verdicts. It counts the heading word left to intercept the final on its own
-  // once more when its band also had rows judged — the one word with two checks, its band's and that one — and inside
-  // once when the band's check passed.
-  const twice = words.filter((word) => word.column === TRAINING_COLUMN_INDEX.heading && word.checks.length === 2);
+  // The judge's counts, from the words' own verdicts — one word counted twice (`countedTwice`).
+  const twice = words.filter(countedTwice);
   const judged = words.filter((word) => word.status === "inside" || word.status === "outside").length + twice.length;
   const inside = words.filter((word) => word.status === "inside").length + twice.filter((word) => word.checks[0].ok).length;
   const wordsJudged = counts.count("wordsJudged");

@@ -31,11 +31,12 @@
  * A model's words are flown live like the truth's (Fly, or a band click with the panel's switch on): the backend flies
  * the model's sentence again from its first step (`trainingAutopilot.ts`), which lands on the sample's own track.
  *
- * THE HEADER IS SHORT: the tabs, the callsign (its type, stratum and counts in its tooltip), the runway, a model's chip (how
- * its sample ended), the live executor's line, the cursor, and the buttons — Fly, Read-back and Prior (the truth's), and ⓘ
- * for the notes. Every chip carries its full reading in its tooltip; the executor's replay of the flight is read in the
- * notes (its words' dots say it). The labeller's own verdicts are TALLIED AT EACH ROW'S END (`rowTally`, the truth's only),
- * lined up on the slash.
+ * THE HEADER IS SHORT: the tabs, the callsign (its type, stratum and counts in its tooltip), the runway, the replay's chip
+ * ONLY when it went wrong ("Replay · 2 words out", `replayIssueText` — the truth's; its words' dots say the rest), a
+ * model's chip (how its sample ended), the live executor's line, the cursor, and the buttons — Fly, Read-back and Prior
+ * (the truth's), and ⓘ for the notes. Every chip carries its full reading in its tooltip; the executor's replay of the
+ * flight is read in full in the notes. The labeller's own verdicts are TALLIED AT EACH ROW'S END (`rowTally`, the truth's
+ * only), lined up on the slash.
  *
  * The cursor is in flight time and is moved by clicking a band or a step number: what it reports is the artefact's own
  * step, never a rounded pixel. It does NOT drive `viewer.clock`: Training loads no CZML, and the clock belongs to
@@ -81,6 +82,7 @@ import {
   TRAINING_SURFACE_COLOR,
   TRAINING_TRACE_COLOR,
   TRAINING_WORD_COLOR,
+  TRAINING_REPLAY_COLOR,
   trainingModelColour,
 } from "../utils/trainingWordColors";
 import {
@@ -103,6 +105,7 @@ import {
   isAugmentedStart,
   sourceOf,
   overlayOnScreen,
+  replayVerdict,
   trainingModelGroups,
   type TrainingExecutorFlight,
   type TrainingExecutorWord,
@@ -129,7 +132,8 @@ import {
   type TrainingWordEvent,
 } from "../data/trainingSample";
 import {
-  checkMark, checkText, crossingText, TRAINING_COLUMN_LABEL, TRAINING_OUTCOME_TAG, TRAINING_OUTCOME_TEXT, trainingModelText,
+  checkMark, checkText, crossingText, replayIssueText, replayOutsideWords, TRAINING_COLUMN_LABEL, TRAINING_OUTCOME_TAG,
+  TRAINING_OUTCOME_TEXT, trainingModelText,
 } from "../data/trainingText";
 
 // One SVG unit is one pixel: the bar is as wide as the dock and always VIEW_H tall.
@@ -189,8 +193,9 @@ function executorVerdictText(word: TrainingExecutorWord): string {
   return `the executor: ${word.status}${told}${checks ? ` — ${checks}` : ""}${word.reason ? ` — ${word.reason}` : ""}`;
 }
 
-/** The replay of this flight in words, for the notes: its outcome and its words inside of those judged. */
-function replayText(flight: TrainingExecutorFlight): string {
+/** The replay of this flight in words, for the notes: its outcome and its words inside of those judged, and the words it
+ *  flew outside their envelopes (``outside``, as `replayOutsideWords` names them). */
+function replayText(flight: TrainingExecutorFlight, outside: string[]): string {
   if (!flight.flown) return `The executor's replay does not fly it: ${flight.group}.`;
   const counts = executorWordCounts(flight);
   // the judge's own tally, as the replay gate counts it (the word left to intercept the final on its own counts twice)
@@ -201,6 +206,7 @@ function replayText(flight: TrainingExecutorFlight): string {
     ` · ${wordsInside}/${wordsJudged} words inside their envelopes, each re-drawn from where the executor was told it` +
     (counts.notJudged ? `, ${counts.notJudged} not judged` : "") + (counts.notReached ? `, ${counts.notReached} not reached` : "") +
     (counts.superseded ? `, ${counts.superseded} superseded` : "") +
+    (outside.length === 0 ? "" : ` · outside: ${outside.join(", ")}`) +
     ` · evaluation ${flight.evaluation.replay} (observed ${flight.evaluation.observed})` +
     (flight.refused === null ? "" : ` · its track refused by the labeller's gate: ${flight.refused}`) + ".";
 }
@@ -435,6 +441,10 @@ export default function TrainingSentenceBar() {
   const landing = flight.envelopes.approach.landing;
   // the overlays and the live executor, when they are of the flight on screen (not the last one's, in flight)
   const executor = overlayOnScreen(trainingExecutor, selection)?.flight ?? null;
+  // what went wrong in it, said in the header in the fewest words (the truth's tab only: it flew the truth's sentence)
+  const replayFlown = executor !== null && executor.flown && generated === null ? executor : null;
+  const replayIssue = replayFlown === null ? null : replayIssueText(replayFlown);
+  const replayOutside = replayFlown === null ? [] : replayOutsideWords(replayFlown, vocabulary, candidates);
   const prior = overlayOnScreen(trainingPrior, selection);
   // the sentence read, as the live executor's source: its answer is drawn only over the sentence it flew
   const readSource = sourceOf(read);
@@ -567,6 +577,15 @@ export default function TrainingSentenceBar() {
             {chip!.text}
           </span>
         )}
+        {replayFlown !== null && replayIssue !== null ? (
+          <span className="training-chip" style={{ color: TRAINING_REPLAY_COLOR[replayVerdict(replayFlown).kind],
+            borderColor: "currentColor" }}
+            title={`The executor's replay of this sentence: ${TRAINING_OUTCOME_TAG[replayFlown.outcome]}` +
+              (replayOutside.length === 0 ? "" : `; outside their envelopes: ${replayOutside.join(", ")} (a red dot at the band's left)`) +
+              ". The full reading is behind ⓘ."}>
+            Replay · {replayIssue}
+          </span>
+        ) : null}
         {autopilot ? <TrainingAutopilotStatus view={autopilot} selection={selection}
           named={focusRun === null || autopilot.request.column !== focusColumn || autopilot.request.row !== focusRun.row} /> : null}
         <span className="training-sentence-cursor-readout">t = {formatSeconds(cursorS)} s · step {cursorRow}</span>
@@ -799,7 +818,7 @@ export default function TrainingSentenceBar() {
               mark on the approach row.
             </span>
           ) : null}
-          {executor !== null && generated === null ? <span>{replayText(executor)}</span> : null}
+          {executor !== null && generated === null ? <span>{replayText(executor, replayOutside)}</span> : null}
           {chip !== null ? <span>{chip.title}</span> : null}
           <span>
             A band is a word in force, from the tick where it was issued to the next word of its column; step 0 gives all

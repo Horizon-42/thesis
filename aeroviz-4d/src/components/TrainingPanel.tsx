@@ -50,12 +50,13 @@ import {
   TRAINING_CORRIDOR_COLOR,
   TRAINING_EXECUTOR_COLOR,
   TRAINING_HEADING_BAND_COLOR,
-  TRAINING_OUTSIDE_COLOR,
+  TRAINING_REPLAY_COLOR,
   TRAINING_TUBE_COLOR,
   trainingModelColour,
 } from "../utils/trainingWordColors";
 import {
   generationUnflownReason,
+  replayVerdict,
   trainingOverlaysPath,
   type TrainingExecutorFlight,
   type TrainingGenerationFlight,
@@ -163,17 +164,22 @@ function OverlaySwitch<T>({ state, colour, text, setId, airport }: {
   );
 }
 
-/** What the flight list says of a flight's replay: its outcome, and its words inside of those judged. */
+/** How the flight list colours a flight's replay (`replayVerdict`), for its tooltip and the details page. */
+const REPLAY_COLOURS_TEXT = "teal: landed, every judged word inside its envelope; amber: landed, but words outside (or " +
+  "its track refused by the labeller's gate); red: did not land";
+
+/** What the flight list says of a flight's replay: its outcome, and its words inside of those judged — in the colour of
+ *  its verdict: landed with every word inside, landed with words outside, not landed. */
 function ExecutorTag({ flight }: { flight: TrainingExecutorFlight }) {
   if (!flight.flown) {
     return <span className="training-flight-executor" title={`the replay does not fly it: ${flight.group}`}>not flown</span>;
   }
   const { wordsInside, wordsJudged } = flight.counts;
-  const ok = flight.outcome === "landed" && wordsInside === wordsJudged;
   return (
-    <span className="training-flight-executor" style={{ color: ok ? TRAINING_EXECUTOR_COLOR : TRAINING_OUTSIDE_COLOR }}
+    <span className="training-flight-executor" style={{ color: TRAINING_REPLAY_COLOR[replayVerdict(flight).kind] }}
       title={`the executor on ${flight.group}: ${TRAINING_OUTCOME_TAG[flight.outcome]}; ${wordsInside} of ${wordsJudged} words ` +
-        `inside their envelopes, as the replay gate counts them${flight.flewTheSentence ? " — it flew the sentence" : ""}`}>
+        `inside their envelopes, as the replay gate counts them${flight.flewTheSentence ? " — it flew the sentence" : ""} ` +
+        `(${REPLAY_COLOURS_TEXT})`}>
       {TRAINING_OUTCOME_TAG[flight.outcome]} · {wordsInside}/{wordsJudged}
     </span>
   );
@@ -397,6 +403,11 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
             <><span className="training-model-swatch" style={{ background: colour }} />{text}</>) })),
           { key: "autopilot", text: FLY_ON_CLICK, name: (
             <><span className="training-model-swatch" style={{ background: TRAINING_AUTOPILOT_COLOR }} />Fly on band click</>) },
+          { key: "executor", text: `The executor's replay of the truth sentence. In the flight list, its outcome and its ` +
+            `words inside of those judged — ${REPLAY_COLOURS_TEXT}; in the sentence bar, a dot at each word's band and, ` +
+            "when it did not land or flew words outside, a short note in the header.", name: (
+            <>{Object.values(TRAINING_REPLAY_COLOR).map((colour) => (
+              <span key={colour} className="training-model-swatch" style={{ background: colour }} />))}{EXECUTOR_SWITCH}</>) },
         ]} />
         <h4 className="training-details-subhead">The overlays published over this set</h4>
         {overlays.executor.entries.length + overlays.prior.entries.length + overlays.generations.length === 0 ? (

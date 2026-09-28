@@ -524,6 +524,26 @@ that divergence is a known open item (see the README's "Future Improvements").
   每帧重画（AV29）；飞完就停掉循环，轴的宽度或长度变了在绘制之前重新放。浏览器核对（KRDU AAL557）：真值的 heading 170°（64 s，×8）
   与 base 模型第 1 个样本的 heading 225°（74 s）——游标与三维标签的"已飞"同步，停在尾巴末端、变淡。
 
+### AV37 · 执行器回放对一架航班的判定：三种颜色；出问题时句子条头部一个小块（2026-09-28）
+
+- 用户（2026-09-28，看 KRDU SWA4462 的 "landed · 43/45" 为什么是红的）：落地了、45 个判了的词里 2 个出界，和没落地用同一种
+  红色分不开。现在一个规则、一处定义（`replayVerdict`，`data/trainingOverlays.ts`，挨着 `executorWordCounts`）：**clean**——落地、
+  判的词全在包络里；**flawed**——落地，但有词出界，或者标注器的门拒了它的航迹（那样一个词也不判，不能算干净）；**not landed**。
+  出界的词数用回放门自己的计数（判的 − 包络内），与航班列表的 "43/45" 一致——门把"留给截获的航向词"算两次（`countedTwice`，
+  AV24），按词的判定数会少一个。颜色表 `TRAINING_REPLAY_COLOR`（`utils/trainingWordColors.ts`，调色板里只有颜色、没有判定）：
+  clean 用回放的青、not landed 用出界红、flawed 用琥珀 `#f59e0b`（OKLab ΔE 在句子条底色上离出界红 14.6、色觉异常下 ≥ 8.6，离青
+  24.9，离选中的黄 11.2，对比度 8.6:1；离截获转弯的橙只有 4.2，那个颜色只画在图和三维里、不做文字）。
+- 航班列表那一行（`ExecutorTag`）用这个颜色，提示里写出三种颜色的含义；详情页 Draw 一节多一条 "Executor replay"，三个色样
+  与同样的说明。
+- 句子条头部：读真值、回放飞了这架航班、且不是 clean 时，跑道之后多一个小块，字越少越好（`replayIssueText`，`data/trainingText.ts`）：
+  "Replay · 2 words out"、"Replay · timed out · 1 word out"、"Replay · track refused"，颜色同上；出界的词逐个
+  （"heading 095° at step 164"，被算两次且两项都没过的那个写 "counted twice: its band and the intercept"，名字加起来就是出界数；
+  `replayOutsideWords`）写在它的提示里，也接在 ⓘ 说明里回放那一句之后。clean 时不出现——2026-09-27 删掉的回放小块（"冗余"）是一直
+  在的那种，这个只在出问题时出现。
+- 审查（opus，2026-09-29）：没有必须改的；按它改了——判定合成一处（原来颜色和文字各推一遍）、出界数改用门的计数并标出算两次的词、
+  被拒的航迹不再算干净、头部注释补上这个小块。浏览器（5176）：KRDU 列表里 "landed · 43/45" 等为琥珀、"landed · 5/5" 等为青；
+  SWA4462 头部 "Replay · 2 words out"。
+
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
 
 - 根目录的发布器 `--executor-replay` 把执行器的 val 回放记录（和 ts 预测同一个记录契约）发布成 Experiments 类别，每个机场

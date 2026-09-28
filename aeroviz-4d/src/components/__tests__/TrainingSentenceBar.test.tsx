@@ -48,7 +48,7 @@ import {
   AUTOPILOT_PLAYBACK_MIN_SPEEDUP, AUTOPILOT_TAIL_OPACITY, parseTrainingAutopilot,
 } from "../../data/trainingAutopilot";
 import { VECTORED_KEY, WORD } from "../../data/__tests__/trainingSample.fixture";
-import { TRAINING_MODEL_COLOR, TRAINING_OUTSIDE_COLOR } from "../../utils/trainingWordColors";
+import { TRAINING_MODEL_COLOR, TRAINING_OUTSIDE_COLOR, TRAINING_REPLAY_COLOR } from "../../utils/trainingWordColors";
 import {
   failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockSelection,
 } from "../../data/__tests__/trainingAutopilot.fixture";
@@ -488,12 +488,37 @@ describe("TrainingSentenceBar", () => {
     // a heading word's verdict: its band's rows on the flown track, from where it was told plus the lead
     expect(screen.getByLabelText(/^heading 180° .* issued at step 10 /).textContent).toMatch(
       /the executor: outside, told at its step 10 — ✗ track within ±4\.5° of the word, 4 s after it was told, to the next word's \(7\/8 rows\)/);
-    // the replay is no chip of the header (its words' dots say it): its reading is in the notes
-    expect(document.querySelector(".training-sentence-head")!.textContent).not.toMatch(/replay/);
+    // the header says only what went wrong, in the fewest words, in the replay's verdict colour; which words, in its
+    // tooltip and in the notes
+    const chip = screen.getByText("Replay · 2 words out");
+    const amber = document.createElement("span");
+    amber.style.color = TRAINING_REPLAY_COLOR.flawed;
+    expect(chip.style.color).toBe(amber.style.color);
+    expect(chip.title).toBe("The executor's replay of this sentence: landed; outside their envelopes: heading 180° at step 10, " +
+      "approach cleared at step 20 (a red dot at the band's left). The full reading is behind ⓘ.");
     fireEvent.click(screen.getByRole("button", { name: "How to read the bar" }));
     const notes = document.querySelector(".training-sentence-legend")!.textContent!;
     expect(notes).toMatch(/The executor \(own dynamics\) flew this sentence from row 0.*: landed, 1\.5 m right of the centreline, 20\.8 m above the threshold/);
-    expect(notes).toMatch(/5\/7 words inside their envelopes.* · evaluation pass \(observed pass\)\./);
+    expect(notes).toMatch(/5\/7 words inside their envelopes.* · outside: heading 180° at step 10, approach cleared at step 20 · evaluation pass \(observed pass\)\./);
+  });
+
+  it("says nothing of the replay in the header when it landed with every word inside, nor over a model's sentence", () => {
+    select();
+    overlays();
+    // every word inside, as its words and the gate's counts both say
+    const flown = appState.trainingExecutor as { flight: { words: Array<{ status: string }>; counts: { wordsJudged: number } } };
+    flown.flight = {
+      ...flown.flight, words: flown.flight.words.map((word) => (word.status === "outside" ? { ...word, status: "inside" } : word)),
+      counts: { ...flown.flight.counts, wordsInside: flown.flight.counts.wordsJudged },
+    } as typeof flown.flight;
+    const { unmount } = render(<TrainingSentenceBar />);
+    expect(document.querySelector(".training-sentence-head")!.textContent).not.toMatch(/Replay/);
+    unmount();
+    overlays();
+    generations();
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
+    render(<TrainingSentenceBar />);
+    expect(document.querySelector(".training-sentence-head")!.textContent).not.toMatch(/Replay/);
   });
 
   it("says why a flight the replay does not fly has no verdicts", () => {

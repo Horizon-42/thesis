@@ -13,6 +13,7 @@ import {
   parseTrainingPriorOverlay,
   priorStep,
   priorTruthAt,
+  replayVerdict,
   trainingOverlaysOf,
   truthAt,
   TRAINING_EXECUTOR_SCHEMA,
@@ -78,6 +79,24 @@ describe("parseTrainingOverlays", () => {
     expect(parsed.value.overlays.map((entry) => entry.id)).toEqual([PRIOR_ID]);
     expect(parsed.value.rejected[0]).toMatchObject({ id: EXECUTOR_ID });
     expect(parsed.value.rejected[0].problem).toMatch(/kind is "free-generation"/);
+  });
+});
+
+describe("the replay's verdict on a flight", () => {
+  it("is clean, flawed or not landed — the words out as the gate counts them, a refused track flawed", () => {
+    const parsed = parseTrainingExecutorOverlay(mockExecutorOverlay(), entry(EXECUTOR_ID), sample());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    const flown = flownOf(parsed.value.flights[0]);
+    // the fixture's flight landed with two words outside their envelopes (5 of 7 inside)
+    expect(replayVerdict(flown)).toEqual({ kind: "flawed", wordsOut: 2, refused: false });
+    const clean = { ...flown, counts: { ...flown.counts, wordsInside: 7 } };
+    expect(replayVerdict(clean)).toEqual({ kind: "clean", wordsOut: 0, refused: false });
+    // not landed, whatever its words did
+    expect(replayVerdict({ ...flown, outcome: "timeout" }).kind).toBe("not landed");
+    expect(replayVerdict({ ...clean, outcome: "crossed_too_high" }).kind).toBe("not landed");
+    // landed on a track the labeller's gate refused: no word judged, and not clean
+    const refused = { ...flown, refused: "the flown track is too short to judge", counts: { ...flown.counts, wordsJudged: 0, wordsInside: 0 } };
+    expect(replayVerdict(refused)).toEqual({ kind: "flawed", wordsOut: 0, refused: true });
   });
 });
 

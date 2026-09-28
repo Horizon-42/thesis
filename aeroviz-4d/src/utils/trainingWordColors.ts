@@ -10,7 +10,7 @@
  */
 
 import type { TrainingColumn } from "../data/trainingSample";
-import type { TrainingModelName } from "../data/trainingOverlays";
+import type { TrainingModelName, TrainingReplayKind } from "../data/trainingOverlays";
 
 /** The sentence bar's surface — every colour here is validated against it; `index.css` draws `.training-sentence-bar` in it
  *  at 0.94 opacity (MIRROR: CSS cannot import it). The bar shades with it. */
@@ -73,6 +73,18 @@ export const TRAINING_OUTSIDE_COLOR = "#f87171";
  *  the heading band's blue 12.3, the corridor green 13.8) and 53 from the bar's surface (#0f131e); every candidate hue
  *  between them sat under 10 from one of the columns. */
 export const TRAINING_EXECUTOR_COLOR = "#14b8a6";
+
+/** THE REPLAY'S VERDICT ON A FLIGHT (`replayVerdict`) where it is said in one colour — the flight list, the sentence bar's
+ *  header: the replay's teal when it landed clean, amber when it landed flawed (words outside, or its track refused), the
+ *  outside red when it did not land (the user, 2026-09-28: a landing with two words out is not a flight that failed).
+ *  The amber #f59e0b, OKLab ΔE on the bar's surface (#0f131e): 14.6 from the outside red (≥ 8.6 under simulated colour
+ *  blindness), 24.9 from the teal (≥ 14.1), 11.2 from the selection's yellow (≥ 9.1); contrast 8.6:1, so it carries
+ *  text. 4.2 from the capture turn's orange, which is only drawn — in the charts and in 3D — never text. */
+export const TRAINING_REPLAY_COLOR: Record<TrainingReplayKind, string> = {
+  clean: TRAINING_EXECUTOR_COLOR,
+  flawed: "#f59e0b",
+  "not landed": TRAINING_OUTSIDE_COLOR,
+};
 
 /** THE EXECUTOR FLOWN LIVE: the selected word's segment, flown by the backend when it is selected
  *  (`trainingAutopilot.ts`) — the replay's teal would read as the precomputed replay. Royal blue (2026-09-25): the dataviz

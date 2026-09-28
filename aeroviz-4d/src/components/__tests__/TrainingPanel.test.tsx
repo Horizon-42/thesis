@@ -37,6 +37,7 @@ vi.mock("../../context/AppContext", () => ({
 }));
 
 import TrainingPanel from "../TrainingPanel";
+import { TRAINING_REPLAY_COLOR } from "../../utils/trainingWordColors";
 import { SET_ID, STRAIGHT_KEY, VECTORED_KEY, mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import {
   AUGSTART_BASE_ID, AUGSTART_POST_ID, BASE_MODEL_ID, EXECUTOR_ID, POST_TRAINED_ID, PRIOR_ID, mockExecutorOverlay, mockGenerationOverlay, mockOverlays,
@@ -229,9 +230,14 @@ describe("TrainingPanel", () => {
       expect(lastOf(setTrainingExecutor).flight.flown).toBe(false);
     });
 
-    it("says under each flight what the executor made of it", async () => {
+    it("says under each flight what the executor made of it, in the colour of its verdict", async () => {
       render(<TrainingPanel hidden={false} />);
-      expect(await screen.findByText("landed · 5/7")).toBeTruthy();
+      // landed with two words outside their envelopes: amber, neither the teal of a clean landing nor the red of none
+      const tag = await screen.findByText("landed · 5/7");
+      const shown = document.createElement("span");
+      shown.style.color = TRAINING_REPLAY_COLOR.flawed;
+      expect(tag.style.color).toBe(shown.style.color);
+      expect(tag.title).toMatch(/amber: landed, but words outside/);
       expect(screen.getByText("not flown")).toBeTruthy();
     });
 

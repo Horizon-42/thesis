@@ -7,15 +7,20 @@
  */
 
 import {
+  countedTwice,
+  replayVerdict,
   trainingModelLabel,
   trainingRunName,
   type TrainingCrossing,
+  type TrainingExecutorFlown,
   type TrainingExecutorCheck,
   type TrainingFreeOutcome,
   type TrainingGenerationModel,
 } from "./trainingOverlays";
 import type { TrainingAutopilotStatus } from "./trainingAutopilot";
-import type { TrainingColumn } from "./trainingSample";
+import {
+  trainingWordLabel, TRAINING_COLUMNS, type TrainingCandidate, type TrainingColumn, type TrainingVocabulary,
+} from "./trainingSample";
 
 /** The six columns as the views name them — the angle column as "Descent": its classes are descent angles (and level,
  *  and the climb). */
@@ -48,6 +53,32 @@ export const TRAINING_OUTCOME_TAG: Record<TrainingFreeOutcome, string> = {
   dynamics_failure: "dynamics failure",
   below_glidepath: "below glidepath",
 };
+
+/** What went wrong in the executor's replay of a flight (`replayVerdict`), in the fewest words — "2 words out", "timed
+ *  out · 1 word out", "track refused" — or null when it landed clean: the sentence bar's header says it only then (the
+ *  user, 2026-09-28). The words out are the gate's count, as the flight list's "43/45" says them. */
+export function replayIssueText(flight: TrainingExecutorFlown): string | null {
+  const { kind, wordsOut, refused } = replayVerdict(flight);
+  if (kind === "clean") return null;
+  return [
+    ...(flight.outcome === "landed" ? [] : [TRAINING_OUTCOME_TAG[flight.outcome]]),
+    ...(refused ? ["track refused"] : []),
+    ...(wordsOut === 0 ? [] : [`${wordsOut} word${wordsOut === 1 ? "" : "s"} out`]),
+  ].join(" · ");
+}
+
+/** The words the replay flew outside their envelopes, named: "heading 095° at step 164" — the word the gate counts twice
+ *  (`countedTwice`) says so when both its checks failed, so the names add up to the words out. */
+export function replayOutsideWords(
+  flight: TrainingExecutorFlown, vocabulary: TrainingVocabulary, candidates: TrainingCandidate[],
+): string[] {
+  return flight.words.filter((word) => word.status === "outside").map((word) => {
+    const column = TRAINING_COLUMNS[word.column];
+    const twice = countedTwice(word) && !word.checks[0].ok;
+    return `${column} ${trainingWordLabel(vocabulary, candidates, column, word.value)} at step ${word.row}` +
+      (twice ? " (counted twice: its band and the intercept)" : "");
+  });
+}
 
 /** The live executor's verdict on its word, as it is read first. */
 export const TRAINING_VERDICT_TEXT: Record<TrainingAutopilotStatus, string> = {

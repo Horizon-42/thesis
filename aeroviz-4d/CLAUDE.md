@@ -204,6 +204,10 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   lifted above it right of the left dock (`!important` over the viewer's inline position; `--overlay-left-width` on `:root`); the
   angle row is named "Descent", its bands "1: 0.92°" (`trainingBandLabel`); the live executor's cursor on its word's row reads the
   3D fly-out's clock (`autopilotPlaybackS`), a leaf moving itself per frame (AV36).
+- **The replay's verdict on a flight is ONE rule** (`replayVerdict`, beside `executorWordCounts`): clean / flawed (landed with
+  words out — the GATE's count, as the list's "43/45" — or its track refused) / not landed, coloured by `TRAINING_REPLAY_COLOR`
+  (teal / amber `#f59e0b` / red) in the flight list's tag and a header chip "Replay · 2 words out" shown ONLY when not clean, on
+  the truth's tab (`replayIssueText`; the words named in its tooltip and the ⓘ notes, `replayOutsideWords`) (AV37).
 
 ## Comparison CZML colour contract
 
