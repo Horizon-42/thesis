@@ -248,3 +248,40 @@ def test_layers_recomputed_in_the_backward_give_the_same_logits_and_gradients(tm
     assert kept_grad.keys() == again_grad.keys() and any(".traffic." in name for name in kept_grad)
     for name, grad in kept_grad.items():
         assert torch.allclose(grad, again_grad[name], rtol=1e-5, atol=1e-8), name
+
+
+def test_a_pass_continued_from_the_saved_state_updates_as_one_run_does(tmp_path, monkeypatch):
+    """Round by round (design §6.6 step 6 item 11): two passes in one tuner, each from its round's own stream, against a
+    first pass, its weights and `SceneRewardTuner.state` saved and read back into a new model and tuner, then the
+    second pass — the same weights, bit for bit."""
+    from ts_transformer.experiments.traffic_tuner import SceneRewardTuner
+
+    _, words, sentences, data, spec = _round(tmp_path, monkeypatch, reads=True)
+    advantages = [np.array([0.5, -0.5, 0.25, -0.25]), np.array([-0.5, 0.5, -0.25, 0.25])]
+
+    def tuner(model):
+        return SceneRewardTuner(model, _model(words), RewardConfig(warmup_steps=3), CPU, seed=0,
+                                traffic_learning_rate=3e-4, step_s=spec.step_s)
+
+    def one_pass(t, round_number):
+        t.restart(np.random.default_rng([0, round_number, 2]))
+        t.one_pass(sentences, advantages[round_number - 1], data, slots=1)
+
+    continuous = _traffic_model(words)
+    whole = tuner(continuous)
+    one_pass(whole, 1)
+    one_pass(whole, 2)
+
+    first = _traffic_model(words)
+    early = tuner(first)
+    one_pass(early, 1)
+    torch.save({"weights": first.state_dict(), "state": early.state()}, tmp_path / "round_01.pt")
+    saved = torch.load(tmp_path / "round_01.pt", weights_only=True)
+    later_model = _traffic_model(words)
+    later_model.load_state_dict(saved["weights"])
+    later = tuner(later_model)
+    later.load_state(saved["state"])
+    assert later.passes == 1 and later.schedule.last_epoch == early.schedule.last_epoch
+    one_pass(later, 2)
+    assert all(torch.equal(value, later_model.state_dict()[name]) for name, value in continuous.state_dict().items())
+    assert any(not torch.equal(value, first.state_dict()[name]) for name, value in continuous.state_dict().items())

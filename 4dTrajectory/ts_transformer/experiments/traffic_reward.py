@@ -37,16 +37,27 @@ augmented scenes, the words a flight says after its first step no farther from t
 `GUARD_WORD_GROWTH` (stage 2's) — the highest augmented-scene reward, the earliest within `TIE_SHARE`. Round 0 kept means
 the start (augmented) is. Val is not read here.
 
-Writes into ``--out`` (a new directory, from a clean tree unless ``--smoke``): ``config.json``, ``round_00/readout.json``,
-``round_<k>/{sentences.npz, sentences.json, checkpoint.pt (`prior_train.TRAFFIC_CHECKPOINT_SCHEMA`), config.json,
-procedure_masks.json, readout.json}``, ``history.json``, ``choice.json``.
+**Round by round** (design §6.6 step 6 item 11): every stream a round draws from is its own — the pool (``seed`` + the
+round), the augmentations ([``seed``, round]), the sentences said and the pass's batches and data ([``seed``, round,
+`SAMPLING_STREAM` / `PASS_STREAM`]) — and each round leaves beside its weights the optimiser's state (`OPTIMISER_FILE`:
+AdamW's moments, the warm-up's step), so ``--resume`` continues a run from its last finished round up to ``--rounds`` as
+one invocation would have: refused when the run was made with another configuration or code (its ``config.json``, the git
+commit included, apart from `RESUMABLE`) or a round did not finish (its directory without ``readout.json``, written last —
+move it aside as ``round_<k>.aborted-<UTC>``; nothing is deleted). Round 0 and the start's ordering check are the first
+invocation's; ``choice.json`` is written over the rounds finished at the end of each.
+
+Writes into ``--out`` (a new directory, from a clean tree unless ``--smoke``; the same one with ``--resume``):
+``config.json``, ``round_00/readout.json``, ``round_<k>/{sentences.npz, sentences.json, checkpoint.pt
+(`prior_train.TRAFFIC_CHECKPOINT_SCHEMA`), optimiser.pt, config.json, procedure_masks.json, readout.json}``,
+``history.json``, ``choice.json``.
 
     python run_ts.py traffic_reward \\
         --prior 4dTrajectory/outputs/POOLED/prior/v3_stage2_clip_20260926/aug_s1337/round_07 \\
         --base 4dTrajectory/outputs/POOLED/prior/v3_step1_20260924/full_s1337 \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/v5_20260926 \\
         --executor 4dTrajectory/outputs/POOLED/executor/v11_20260927 \\
-        --out 4dTrajectory/outputs/POOLED/prior/<campaign>/traffic_s1337
+        --out 4dTrajectory/outputs/POOLED/prior/<campaign>/traffic_s1337 --rounds 1
+    # … then, the same command with --resume --rounds 2, and so on
 """
 
 from __future__ import annotations
@@ -54,6 +65,7 @@ from __future__ import annotations
 import argparse
 import copy
 import dataclasses
+import json
 import math
 import time
 from collections import Counter
@@ -109,6 +121,14 @@ GUARD_ORDER_GROWTH = 1.2
 #: (the landed guard's margin; about 1.4 binomial standard deviations over 2,000 select sentences at 11.5 %). The
 #: recorded share × `GUARD_ORDER_GROWTH` is the target line, reported (round 0 is four times the record).
 GUARD_LOSS_RISE = 0.01
+#: A round's own random streams beyond its pool and its augmentations (module docstring): the sentences said, and the
+#: pass's batches and data.
+SAMPLING_STREAM = 1
+PASS_STREAM = 2
+#: Beside a round's weights: what its pass leaves for the next (`traffic_tuner.SceneRewardTuner.state`).
+OPTIMISER_FILE = "optimiser.pt"
+#: What a resumed run's ``config.json`` may differ in: when it was written, how far it was asked to go and its resumptions.
+RESUMABLE = ("written_utc", "rounds", "resumed")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -387,6 +407,33 @@ def guarded_choice(history: Sequence[Mapping[str, Any]], labelled: Mapping[str, 
     return next(row["round"] for row in candidates if row["augmented"]["reward"] >= best - TIE_SHARE), excluded
 
 
+def round_seed(seed: int, round_number: int, stream: int) -> int:
+    """A torch generator's seed for one of a round's streams (module docstring)."""
+    return int(np.random.SeedSequence([seed, round_number, stream]).generate_state(1)[0])
+
+
+def completed_rounds(out: Path) -> int:
+    """The last round the run at ``out`` finished (``readout.json``, written last); refused when a round's directory
+    holds none (cut short: move it aside as ``round_<k>.aborted-<UTC>``) or the rounds are not 0 … k."""
+    numbers = sorted(int(path.name[len("round_"):]) for path in out.glob("round_*")
+                     if path.name[len("round_"):].isdigit())
+    unfinished = [n for n in numbers if not (out / f"round_{n:02d}" / "readout.json").exists()]
+    if unfinished:
+        raise SystemExit(f"{out}: round(s) {unfinished} did not finish — move each aside as round_<k>.aborted-<UTC> "
+                         f"and resume")
+    if not numbers or numbers != list(range(len(numbers))):
+        raise SystemExit(f"{out} holds rounds {numbers}, not 0 … k")
+    return numbers[-1]
+
+
+def run_differences(stored: Mapping[str, Any], record: Mapping[str, Any]) -> list[str]:
+    """The keys in which a run's stored ``config.json`` and the one this invocation would write differ, apart from
+    `RESUMABLE`."""
+    now = json.loads(json.dumps(record))
+    return sorted(key for key in (set(stored) | set(now)) - set(RESUMABLE)
+                  if key not in stored or key not in now or stored[key] != now[key])
+
+
 def write_traffic_prior(directory: Path, model: Prior, start_dir: Path, start: LoadedPrior, spec_sha256: str, *,
                         git: Mapping[str, Any], smoke: bool, fine_tuning: Mapping[str, Any]) -> None:
     """``model`` as a prior run `prior_train.load_prior` reads (`prior_train.TRAFFIC_CHECKPOINT_SCHEMA`): its checkpoint
@@ -413,7 +460,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--instructions", type=Path, required=True)
     parser.add_argument("--executor", type=Path, required=True, help="the executor spec directory")
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
-    parser.add_argument("--rounds", type=int, default=8)
+    parser.add_argument("--rounds", type=int, default=8, help="the last round to run (0: round 0 alone)")
+    parser.add_argument("--resume", action="store_true",
+                        help="continue the run at --out from its last finished round (module docstring)")
     parser.add_argument("--real-per-airport", type=int, default=200, help="real scenes an airport a round")
     parser.add_argument("--augmented-per-airport", type=int, default=200, help="augmented scenes an airport a round")
     parser.add_argument("--samples", type=int, default=8, help="sentences a scene")
@@ -434,8 +483,12 @@ def main(argv: list[str] | None = None) -> int:
 
     prior_dir, base_dir, instructions, executor_dir, out = map(
         resolved, (args.prior, args.base, args.instructions, args.executor, args.out))
-    if out.exists():
-        parser.error(f"{out} exists; a fine-tuning run is never overwritten")
+    if args.resume and not (out / "config.json").exists():
+        parser.error(f"--resume: {out} holds no run")
+    if not args.resume and out.exists():
+        parser.error(f"{out} exists; a fine-tuning run is never overwritten (--resume continues it)")
+    if args.rounds < 0:
+        parser.error("--rounds is the last round to run, 0 or more")
     if args.samples < 2:
         parser.error("a scene's sentences are compared with each other: --samples ≥ 2")
     if args.data_weight <= 0.0:
@@ -483,8 +536,7 @@ def main(argv: list[str] | None = None) -> int:
                                                         args.seed + SELECT_AUGMENT_OFFSET, windows, step_s)
     labelled = {"real": labelled_words(select_batch), "augmented": labelled_words(select_augmented.batch)}
     recorded = summary(recorded_rows(select_batch, select_real.scenes, words))["recorded"]
-    out.mkdir(parents=True)
-    write_json_atomic(out / "config.json", {
+    record = {
         "schema": TRAFFIC_REWARD_SCHEMA, "written_utc": utc_now(), "git": git, "smoke": args.smoke,
         "prior": {"directory": str(prior_dir), "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"),
                   "procedure_masks": list(start_masks.names)},
@@ -504,12 +556,32 @@ def main(argv: list[str] | None = None) -> int:
                    "order_growth": GUARD_ORDER_GROWTH, "word_columns": list(GUARD_WORD_COLUMNS),
                    "word_margin_ln": math.log(GUARD_WORD_GROWTH),
                    "lost_separation_target": recorded["lost_separation"] * GUARD_ORDER_GROWTH},
-        "n_look": N_LOOK})
+        "streams": {"pool": "seed + round", "augmentations": "[seed, round]", "sampling": [SAMPLING_STREAM],
+                    "pass": [PASS_STREAM]},
+        "n_look": N_LOOK, "resumed": []}
+    if args.resume:
+        stored = json.loads((out / "config.json").read_text(encoding="utf-8"))
+        differences = run_differences(stored, record)
+        if differences:
+            raise SystemExit(f"{out} was run with another configuration or code: {differences} differ")
+        last = completed_rounds(out)
+        if args.rounds <= last:
+            parser.error(f"{out} has finished round {last}; --rounds {args.rounds} asks for nothing more")
+        history = [row for row in json.loads((out / "history.json").read_text(encoding="utf-8"))["rounds"]
+                   if row["round"] <= last]
+        if [row["round"] for row in history] != list(range(last + 1)):
+            raise SystemExit(f"{out}/history.json does not hold rounds 0 … {last}")
+        record = {**stored, "rounds": args.rounds,
+                  "resumed": [*stored["resumed"], {"utc": utc_now(), "from_round": last, "to": args.rounds}]}
+    else:
+        out.mkdir(parents=True)
+        last, history = -1, []
+    write_json_atomic(out / "config.json", record)
 
     def log(line: str) -> None:
         print(f"{line}  [{time.perf_counter() - started:.0f}s]", flush=True)
 
-    log(f"train days: {len(data)} scene samples ({data_counts}); select: {len(select_batch.readings)} flights, "
+    log(f"{f'resumed after round {last}; ' if args.resume else ''}train days: {len(data)} scene samples ({data_counts}); select: {len(select_batch.readings)} flights, "
         f"{len(select_augmented.scenes)} augmented ({dict(Counter(select_augmented.kinds))}, {select_left_out} left out); "
         f"recorded lost separation {recorded['lost_separation']:.3f}")
 
@@ -538,21 +610,33 @@ def main(argv: list[str] | None = None) -> int:
                 **{side: {k: v for k, v in readout[side].items() if k != "flights"} for side in ("real", "augmented")},
                 "traffic": readout["traffic"], **more}
 
-    directory = out / "round_00"
-    directory.mkdir()
-    readout = read_select(0)
-    write_json_atomic(directory / "readout.json", readout)
-    history = [history_row(0, readout)]
-    failing = ordering_failures(history[0])
-    if failing:
-        raise SystemExit(f"the start fails the ordering guards {failing} against the record "
-                         f"({history[0]['real']['ordering']}): no round could be chosen — not training")
+    if last < 0:
+        directory = out / "round_00"
+        directory.mkdir()
+        readout = read_select(0)
+        history = [history_row(0, readout)]
+        write_json_atomic(out / "history.json", {"rounds": history})
+        write_json_atomic(directory / "readout.json", readout)                       # last: the round finished
+        failing = ordering_failures(history[0])
+        if failing:
+            raise SystemExit(f"the start fails the ordering guards {failing} against the record "
+                             f"({history[0]['real']['ordering']}): no round could be chosen — not training")
+        last = 0
+    elif last > 0:
+        resumed = load_prior(out / f"round_{last:02d}", instructions)
+        grown_from = {"directory": str(prior_dir), "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt")}
+        if resumed.payload["start"] != grown_from:
+            raise SystemExit(f"{out}/round_{last:02d} grew from {resumed.payload['start']}, not {grown_from}")
+        model = resumed.model.to(device)
     tuner = SceneRewardTuner(model, base, config, device, seed=args.seed,
                              traffic_learning_rate=args.traffic_learning_rate, step_s=step_s)
-    generator = torch.Generator(device=device).manual_seed(args.seed)
-    for round_number in range(1, args.rounds + 1):
+    if last > 0:
+        tuner.load_state(torch.load(out / f"round_{last:02d}" / OPTIMISER_FILE, map_location=device,
+                                    weights_only=True))
+    for round_number in range(last + 1, args.rounds + 1):
         directory = out / f"round_{round_number:02d}"
         directory.mkdir()
+        generator = torch.Generator(device=device).manual_seed(round_seed(args.seed, round_number, SAMPLING_STREAM))
         pool = replay.draw(instructions, "train", spec, words,
                            per_airport=round((args.real_per_airport + args.augmented_per_airport) * POOL_FACTOR),
                            seed=args.seed + round_number)
@@ -592,6 +676,7 @@ def main(argv: list[str] | None = None) -> int:
             measured_on[side] = len(members)
             start_distance[side] = (tuner.distance(sentences.subset(members), [allowed[i] for i in members])
                                     if len(members) else None)
+        tuner.restart(np.random.default_rng([args.seed, round_number, PASS_STREAM]))
         passed = {**tuner.one_pass(sentences, advantages[keep], data, allowed, slots=slots),
                   "distance_at_start": start_distance, "distance_sentences": measured_on}
         if device.type == "cuda":
@@ -607,11 +692,12 @@ def main(argv: list[str] | None = None) -> int:
                                          "round": round_number, "optimiser": asdict(config),
                                          "traffic_learning_rate": args.traffic_learning_rate,
                                          "samples": args.samples})
+        torch.save(tuner.state(), directory / OPTIMISER_FILE)
         readout = read_select(round_number)
-        write_json_atomic(directory / "readout.json", readout)
         history.append(history_row(round_number, readout, train_pass=passed,
                                    sentences={k: v for k, v in described.items() if k != "drawn"}))
         write_json_atomic(out / "history.json", {"rounds": history})
+        write_json_atomic(directory / "readout.json", readout)                       # last: the round finished
     kept_round, excluded = guarded_choice(history, labelled)
     write_json_atomic(out / "choice.json", {
         "rule": f"within round 0's guards (real scenes: landed ≥ − {GUARD_LANDED_DROP}, on the observed runway ≥ − "

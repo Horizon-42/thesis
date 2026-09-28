@@ -277,3 +277,32 @@ def test_the_ordering_guards_read_the_record_and_an_unreadable_ratio_fails():
     assert ordering_failures(row(1.0, 1.19)) == []
     assert ordering_failures(row(1.21, 1.0)) == ["time to land"]
     assert ordering_failures(row(None, 1.3)) == ["time to land", "landing gap"]
+
+
+def test_a_resumed_run_continues_only_from_finished_rounds_of_the_same_configuration(tmp_path):
+    from ts_transformer.experiments.traffic_reward import completed_rounds, round_seed, run_differences
+
+    out = tmp_path / "run"
+    for k in range(3):
+        (out / f"round_{k:02d}").mkdir(parents=True)
+        (out / f"round_{k:02d}" / "readout.json").write_text("{}")
+    assert completed_rounds(out) == 2
+    (out / "round_03").mkdir()                                     # cut short: no readout
+    with pytest.raises(SystemExit, match=r"round\(s\) \[3\] did not finish"):
+        completed_rounds(out)
+    (out / "round_03").rename(out / "round_03.aborted-20260928T2000Z")
+    assert completed_rounds(out) == 2
+    (out / "round_01" / "readout.json").unlink()
+    with pytest.raises(SystemExit, match="did not finish"):
+        completed_rounds(out)
+    with pytest.raises(SystemExit, match="not 0"):
+        completed_rounds(tmp_path / "empty")
+    stored = {"written_utc": "a", "rounds": 1, "resumed": [], "seed": 1337, "git": {"head": "x", "dirty": False},
+              "select": {"per_airport": 200}}
+    record = {**stored, "written_utc": "b", "rounds": 3, "git": {"head": "y", "dirty": False}}
+    assert run_differences(stored, record) == ["git"]
+    assert run_differences(stored, {**stored, "rounds": 8, "extra": 1}) == ["extra"]
+    assert run_differences(stored, {**stored, "select": {"per_airport": 100}}) == ["select"]
+    # each round's streams are its own
+    seeds = {round_seed(1337, r, s) for r in (1, 2) for s in (1, 2)}
+    assert len(seeds) == 4 and round_seed(1337, 1, 1) == round_seed(1337, 1, 1)
