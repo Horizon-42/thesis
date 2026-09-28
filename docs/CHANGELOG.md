@@ -34,6 +34,18 @@
   按原文过不了第 0 步第二条通过线（≤ 3 %）；用户 2026-09-28 定按执行器多加的部分判（五个机场都在线内，最多 KSTL +2.62），
   间隔照设计作硬检查（多机设计 §9 第 17 项）。runner 的通过线随之改判"执行器多加的"，格式 `ts-traffic-labelled-v2`，重跑为
   `labelled_v2_20260928`。第 6 步：屏蔽算法放 `inference/`，由场景闭环算好允许的词交给说话器（§9 第 18 项）。
+### 2026-09-28 — `start_aeroviz_fullstack.sh` 在 macOS 上也能跑
+
+- 用户在 Mac 上启动报 `Missing required command: flock`。原因：`de82a481`（2026-08-13，`--replace` 的进程身份校验）起脚本
+  只能在 Linux 上跑——util-linux `flock`/`setsid`、`/proc/<pid>/stat`、`/proc/<pid>/fd`、GNU `stat -c`；单装 flock 也会在
+  `/proc` 处失败。
+- 改法（用户选"改成双平台，且不影响 Linux"）：五个平台相关操作（`file_stat`、`lock_fd`、`process_start_ticks`、
+  `process_holds_lock`、`exec_in_new_session`，外加只用于显示的 `local_addresses`）集中定义在脚本的一个平台块里；Linux 分支
+  执行的命令与原来相同，macOS 用 perl flock(2)/setsid(2)、BSD `stat -f`、`ps -o lstart=`、`lsof`。`chmod 700 --` 改成
+  `chmod -- 700`（BSD chmod 把 mode 之后的 `--` 当文件名）。加 bash ≥ 4.1 检查（macOS 的 /bin/bash 3.2 会明确报错）。
+- 新测试 `test_replace_refuses_a_supervisor_record_that_fails_identity`（伪造 start_ticks / lock_fd → `--replace` 拒绝，原实例
+  不受影响）：原来的测试在身份校验恒真时也能过。Mac 3/3；SP-AI 上旧脚本、新脚本各 3/3，且新脚本 `--replace` 能接管旧脚本
+  启动的实例（状态文件格式未变）。`docs/environment.md` E13。
 
 ### 2026-09-28 — 实时执行器启动时预热：第一次点不再等 2 秒以上
 

@@ -6,6 +6,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = REPOSITORY_ROOT / "start_aeroviz_fullstack.sh"
@@ -131,3 +133,47 @@ def test_replace_stops_only_the_recorded_previous_supervisor(tmp_path: Path) -> 
         for line in service_log.read_text(encoding="utf-8").splitlines()
     ]
     _wait_until(lambda: not any(_pid_exists(pid) for pid in service_pids))
+
+
+@pytest.mark.parametrize(
+    ("field", "forged_value"),
+    [("start_ticks", "123"), ("lock_fd", "2")],
+    ids=["wrong-start-time", "wrong-lock-fd"],
+)
+def test_replace_refuses_a_supervisor_record_that_fails_identity(
+    tmp_path: Path, field: str, forged_value: str
+) -> None:
+    launcher, env, service_log = _make_launcher_fixture(tmp_path)
+    first = subprocess.Popen(
+        [str(launcher)],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        _wait_until(
+            lambda: service_log.exists()
+            and len(service_log.read_text(encoding="utf-8").splitlines()) >= 2
+        )
+        (state_path,) = (tmp_path / "runtime").glob("*/*.state")
+        state_path.write_text(
+            "".join(
+                f"{field}={forged_value}\n" if line.startswith(f"{field}=") else line
+                for line in state_path.read_text(encoding="utf-8").splitlines(keepends=True)
+            ),
+            encoding="utf-8",
+        )
+
+        replacer = subprocess.run(
+            [str(launcher), "--replace"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert replacer.returncode != 0
+        assert "identity could not be validated" in replacer.stderr
+        assert first.poll() is None
+    finally:
+        _stop(first)

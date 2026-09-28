@@ -15,10 +15,22 @@
 #
 # Pass --replace to gracefully stop an earlier managed launcher for this same
 # repository/backend-port/frontend-port tuple before starting. The identity is
-# proven with a private runtime record, Linux process start time, and the open
+# proven with a private runtime record, the process start time, and the open
 # supervisor lock descriptor; the launcher never kills a process by name or by
 # port alone.
+#
+# Runs on Linux and macOS. The five OS-specific primitives (file stat, fd lock,
+# process start time, "does pid hold this lock fd", new-session exec) are defined
+# once in the platform block below: Linux uses util-linux flock/setsid and /proc
+# exactly as before; macOS has none of those, so it uses perl flock(2)/setsid(2),
+# BSD stat, ps and lsof. Needs bash >= 4.1 ({fd}> redirection) — macOS /bin/bash
+# is 3.2, so a Homebrew/MacPorts bash must come first on PATH.
 set -uo pipefail
+
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 1) )); then
+  echo "bash >= 4.1 required (this is $BASH_VERSION); on macOS install bash via Homebrew or MacPorts." >&2
+  exit 1
+fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AEROVIZ_APP_DIR="${AEROVIZ_APP_DIR:-$ROOT_DIR/aeroviz-4d}"
@@ -58,14 +70,99 @@ if [[ ! "$VITE_PORT" =~ ^[0-9]+$ ]] || (( VITE_PORT < 1 || VITE_PORT > 65535 ));
   exit 2
 fi
 
-command -v flock >/dev/null 2>&1 || {
-  echo "Missing required command: flock" >&2
-  exit 1
-}
-command -v setsid >/dev/null 2>&1 || {
-  echo "Missing required command: setsid" >&2
-  exit 1
-}
+case "$(uname -s)" in
+  Linux) PLATFORM=linux; REQUIRED_COMMANDS=(flock setsid) ;;
+  Darwin) PLATFORM=darwin; REQUIRED_COMMANDS=(perl ps lsof) ;;
+  *)
+    echo "Unsupported platform: $(uname -s) (the launcher supports Linux and macOS)." >&2
+    exit 1
+    ;;
+esac
+for required_command in "${REQUIRED_COMMANDS[@]}"; do
+  command -v "$required_command" >/dev/null 2>&1 || {
+    echo "Missing required command: $required_command" >&2
+    exit 1
+  }
+done
+
+# --- Platform primitives ---------------------------------------------------------
+# file_stat FORMAT PATH — FORMAT uses the %-codes GNU and BSD stat share (%u, %d, %i).
+# lock_fd FD WAIT_S     — exclusive flock(2) on an open fd; WAIT_S=0 means non-blocking.
+#                         The lock belongs to the open file description, so it outlives
+#                         the helper process on both platforms.
+# process_start_ticks PID — a start-time token that, with the pid, identifies one process
+#                         (Linux: /proc starttime in clock ticks; macOS: epoch seconds).
+# process_holds_lock PID FD — PID's descriptor FD is open on $LOCK_PATH.
+# exec_in_new_session CMD... — replace this (sub)shell with CMD as a session/group leader.
+# local_addresses       — this host's addresses, whitespace-separated (display only).
+if [[ "$PLATFORM" == linux ]]; then
+  file_stat() { stat -Lc "$1" "$2"; }
+
+  lock_fd() {
+    if (( $2 == 0 )); then
+      flock -n "$1"
+    else
+      flock -w "$2" "$1"
+    fi
+  }
+
+  process_start_ticks() {
+    local pid="$1" stat_line rest
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    IFS= read -r stat_line < "/proc/$pid/stat" || return 1
+    rest="${stat_line##*) }"
+    # After removing pid/comm, token 1 is field 3; starttime is field 22.
+    set -- $rest
+    [[ $# -ge 20 ]] || return 1
+    printf '%s\n' "${20}"
+  }
+
+  process_holds_lock() {
+    [[ "$(readlink -f "/proc/$1/fd/$2" 2>/dev/null)" == "$LOCK_PATH" ]]
+  }
+
+  exec_in_new_session() { exec setsid "$@"; }
+
+  local_addresses() { hostname -I 2>/dev/null; }
+else
+  file_stat() { stat -Lf "$1" "$2"; }
+
+  lock_fd() {
+    perl -MFcntl=:flock -e '
+      open(my $fh, ">&=", $ARGV[0]) or die "lock fd $ARGV[0]: $!\n";
+      my $deadline = time + $ARGV[1];
+      until (flock($fh, LOCK_EX | LOCK_NB)) {
+        exit 1 if time >= $deadline;
+        select(undef, undef, undef, 0.05);
+      }' "$1" "$2"
+  }
+
+  process_start_ticks() {
+    local pid="$1" lstart
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    lstart="$(LC_ALL=C ps -o lstart= -p "$pid")" || return 1
+    set -- $lstart  # e.g. "Mon Sep 28 00:49:54 2026", padding collapsed
+    [[ $# -eq 5 ]] || return 1
+    LC_ALL=C date -j -f '%a %b %e %T %Y' "$*" +%s
+  }
+
+  process_holds_lock() {
+    # lsof reports the resolved path (/tmp -> /private/tmp), so compare resolved.
+    local line open_path=""
+    while IFS= read -r line; do
+      [[ "$line" == n* ]] && open_path="${line#n}"
+    done < <(lsof -a -p "$1" -d "$2" -Fn 2>/dev/null)
+    [[ -n "$open_path" && "$open_path" == "$(readlink -f "$LOCK_PATH")" ]]
+  }
+
+  exec_in_new_session() {
+    exec perl -MPOSIX -e '
+      POSIX::setsid() == $$ or die "setsid: $!\n";
+      exec { $ARGV[0] } @ARGV or die "exec $ARGV[0]: $!\n";' "$@"
+  }
+
+  local_addresses() { ifconfig 2>/dev/null | awk '$1 == "inet" { print $2 }'; }
+fi
 
 RUNTIME_BASE="${AEROVIZ_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-/tmp}/aeroviz-4d-${UID}}"
 if [[ -L "$RUNTIME_BASE" ]]; then
@@ -73,29 +170,18 @@ if [[ -L "$RUNTIME_BASE" ]]; then
   exit 1
 fi
 mkdir -p -- "$RUNTIME_BASE" || exit 1
-if [[ "$(stat -Lc '%u' "$RUNTIME_BASE" 2>/dev/null)" != "$UID" ]]; then
+if [[ "$(file_stat '%u' "$RUNTIME_BASE" 2>/dev/null)" != "$UID" ]]; then
   echo "AeroViz runtime directory is not owned by uid $UID: $RUNTIME_BASE" >&2
   exit 1
 fi
-chmod 700 -- "$RUNTIME_BASE" || exit 1
-ROOT_ID="$(stat -Lc '%d-%i' "$ROOT_DIR")"
+chmod -- 700 "$RUNTIME_BASE" || exit 1
+ROOT_ID="$(file_stat '%d-%i' "$ROOT_DIR")"
 INSTANCE_ID="${ROOT_ID}-${AEROVIZ_BACKEND_PORT}-${VITE_PORT}"
 LOCK_PATH="$RUNTIME_BASE/$INSTANCE_ID.lock"
 STATE_PATH="$RUNTIME_BASE/$INSTANCE_ID.state"
 SUPERVISOR_LOCK_FD=""
 SUPERVISOR_START_TICKS=""
 STATE_OWNED=0
-
-process_start_ticks() {
-  local pid="$1" stat_line rest
-  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
-  IFS= read -r stat_line < "/proc/$pid/stat" || return 1
-  rest="${stat_line##*) }"
-  # After removing pid/comm, token 1 is field 3; starttime is field 22.
-  set -- $rest
-  [[ $# -ge 20 ]] || return 1
-  printf '%s\n' "${20}"
-}
 
 read_previous_supervisor() {
   local line recorded_fd="" recorded_root=""
@@ -115,7 +201,7 @@ read_previous_supervisor() {
   [[ "$recorded_fd" =~ ^[0-9]+$ ]] || return 1
   [[ "$recorded_root" == "$ROOT_DIR" ]] || return 1
   [[ "$(process_start_ticks "$PREVIOUS_PID" 2>/dev/null)" == "$PREVIOUS_START_TICKS" ]] || return 1
-  [[ "$(readlink -f "/proc/$PREVIOUS_PID/fd/$recorded_fd" 2>/dev/null)" == "$LOCK_PATH" ]] || return 1
+  process_holds_lock "$PREVIOUS_PID" "$recorded_fd" || return 1
 }
 
 write_supervisor_state() {
@@ -132,7 +218,7 @@ write_supervisor_state() {
 }
 
 exec {SUPERVISOR_LOCK_FD}>"$LOCK_PATH" || exit 1
-if ! flock -n "$SUPERVISOR_LOCK_FD"; then
+if ! lock_fd "$SUPERVISOR_LOCK_FD" 0; then
   if (( ! REPLACE_EXISTING )); then
     echo "AeroViz is already running for backend $AEROVIZ_BACKEND_PORT and frontend $VITE_PORT." >&2
     echo "Use $0 --replace to stop that managed instance first." >&2
@@ -153,7 +239,7 @@ if ! flock -n "$SUPERVISOR_LOCK_FD"; then
     echo "Failed to signal previous AeroViz supervisor pid $PREVIOUS_PID." >&2
     exit 1
   }
-  if ! flock -w 15 "$SUPERVISOR_LOCK_FD"; then
+  if ! lock_fd "$SUPERVISOR_LOCK_FD" 15; then
     echo "Previous AeroViz supervisor did not shut down within 15 seconds; refusing to force-kill it." >&2
     exit 1
   fi
@@ -229,7 +315,7 @@ trap cleanup EXIT
 
 start_backend() {
   ( exec {SUPERVISOR_LOCK_FD}>&-
-    exec setsid "$PYTHON_BIN" "$ROOT_DIR/aeroviz_backend/http_server.py" \
+    exec_in_new_session "$PYTHON_BIN" "$ROOT_DIR/aeroviz_backend/http_server.py" \
       --host "$AEROVIZ_BACKEND_HOST" \
       --port "$AEROVIZ_BACKEND_PORT"
   ) &
@@ -242,7 +328,7 @@ start_frontend() {
   ( cd "$AEROVIZ_APP_DIR" || exit 1
     export VITE_AEROVIZ_BACKEND_PORT="${VITE_AEROVIZ_BACKEND_PORT:-$AEROVIZ_BACKEND_PORT}"
     exec {SUPERVISOR_LOCK_FD}>&-
-    exec setsid npm run dev -- --host "$VITE_HOST" --port "$VITE_PORT"
+    exec_in_new_session npm run dev -- --host "$VITE_HOST" --port "$VITE_PORT"
   ) &
   VITE_PID=$!
   VITE_STARTED_AT=$SECONDS
@@ -287,7 +373,7 @@ echo "AeroViz backend listener: http://${AEROVIZ_BACKEND_HOST}:${AEROVIZ_BACKEND
 if [[ "$VITE_HOST" == "0.0.0.0" || "$VITE_HOST" == "::" ]]; then
   echo "Frontend (this computer): http://127.0.0.1:${VITE_PORT}"
   if command -v hostname >/dev/null 2>&1; then
-    for address in $(hostname -I 2>/dev/null); do
+    for address in $(local_addresses); do
       if [[ "$address" == *.* && "$address" != 127.* ]]; then
         echo "Frontend (local network): http://${address}:${VITE_PORT}"
       fi
