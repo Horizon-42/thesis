@@ -16,11 +16,17 @@ its scene replayed (`traffic_speaking.judged`: the VISUAL reading ends it; IFR b
 
 Per source, pooled and per airport: the outcomes (the executor's judge's; `below_glidepath` under the procedure's
 altitudes; `lost_separation` where a loss it answered for ended it first), the losses it was in per flight and per hour
-flown (by relation), and for the model's sources the separation masks: the share of its steps where they took a word away, per
+flown — flown to its judged end (a loss that ends it ends what is counted) — by relation, and for the model's sources,
+over its steps to that end, the separation masks. A flight already in a loss it answers for at its first predicted step
+(the record's: every reading starts from the same state) is counted and left out of the summaries, as an augmented scene
+starting in one is redrawn (design §5.3) — no reading can be blamed for it. The separation masks: the share of its steps where they took a word away, per
 column, and the probability the model put on what the masks removed (the approach column's counts the vocabulary's own
 rule too: a runway changed under a clearance takes the approach with it). The procedure's masks are the prior's own.
 
-Writes ``free_generation.json`` into a NEW directory; ``--per-airport`` is the sample's size (the readout says so).
+Writes into a NEW directory ``flights.jsonl`` (every flight's rows, appended as each batch ends, so a run cut short
+keeps what it read) and ``free_generation.json`` (the readout); ``--per-airport`` is the sample's size (the readout says
+so). A batch holds at most ``--aircraft-steps`` scenes × their most aircraft × (their longest pre-roll + rows): the past
+the model keeps is 6 KB an aircraft-step.
 
     python run_ts.py traffic_free_generation \\
         --prior 4dTrajectory/outputs/POOLED/prior/v3_stage2_clip_20260926/aug_s1337/round_07 \\
@@ -33,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -47,6 +54,7 @@ from ts_transformer.autopilot.judge import outcome_of
 from ts_transformer.experiments.prior_free_generation import (
     _physics, fly_reference, flight_rows, glidepath_stops, limits_s, reference_grid, said_rows,
 )
+from ts_transformer.prior.generate import rows_for
 from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, load_prior, rosters
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION, Controlled, recorded
 from ts_transformer.experiments.traffic_speaking import (
@@ -59,22 +67,27 @@ from ts_transformer.instructions.words import COLUMNS, RUNWAY, UNCHANGED, Words
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.prior.data import VARIANTS, airport_landings
 from ts_transformer.prior.model import Prior, with_traffic
-from ts_transformer.prior.scene import N_LOOK, presence
+from ts_transformer.prior.scene import N_LOOK, hang, presence
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 SCHEMA = "ts-traffic-free-generation-v1"
 SOURCES = ("scene", "alone", "labelled", "recorded")
+#: A batch's most aircraft-steps (module docstring): about 1.8 GB of the model's past on its d and layers.
+AIRCRAFT_STEPS = 300_000
 
 
 def separation_fields(scene: Scene, aircraft: Controlled, step_s: float) -> dict[str, Any]:
     """How the flight fared with the others of ``scene``, under each reading: its outcome, the loss that ended it, and
     the loss episodes it was in (per relation; how many it answered for; the least distance over the required)."""
-    out: dict[str, Any] = {"flown_s": float(aircraft.last_step_s - aircraft.first_step_s)}
+    out: dict[str, Any] = {}
     for reading in (VISUAL, IFR):
         outcome, end, run = judged(scene, aircraft, step_s, reading)
         mine = [e for e in run.episodes if aircraft.key in e["pair"]]
+        last = end["t_s"] if end is not None else aircraft.last_step_s
+        if reading == VISUAL:
+            out["starts_in_a_loss"] = end is not None and end["t_s"] <= aircraft.first_step_s
         out[reading] = {
-            "outcome": outcome, "end": end, "episodes": len(mine),
+            "outcome": outcome, "end": end, "episodes": len(mine), "flown_s": float(last - aircraft.first_step_s),
             "relations": dict(Counter(e["relation"] for e in mine)),
             "answered": sum(any(r["key"] == aircraft.key for r in e["responsible"]) for e in mine),
             "min_ratio": min((e["min_ratio"] for e in mine), default=None)}
@@ -85,6 +98,14 @@ def _mask_steps(masked: dict[int, list[np.ndarray]], j: int, steps: int) -> dict
     """Of flight ``j``'s first ``steps`` steps, how many had a separation mask take a word away, per column
     (`traffic_speaking.SceneLoop.separation_masked`)."""
     return {COLUMNS[c]: int(sum(bool(masked[c][k][j]) for k in range(steps))) for c in MASK_COLUMNS}
+
+
+def judged_steps(fields: dict[str, Any], aircraft: Controlled, steps_said: int, step_s: float) -> int:
+    """The steps said up to the judged end under VISUAL: to the step whose state a loss ended it at, else every one."""
+    end = fields[VISUAL]["end"]
+    if end is None:
+        return steps_said
+    return min(steps_said, int(round((end["t_s"] - aircraft.first_step_s) / step_s)))
 
 
 def model_rows(model: Prior, batch: replay.Batch, scenes: Sequence[Scene], judge_scenes: Sequence[Scene], source: str,
@@ -113,10 +134,14 @@ def model_rows(model: Prior, batch: replay.Batch, scenes: Sequence[Scene], judge
         scene = judge_scenes[index[j]]
         aircraft = speaking_aircraft(scene, flown, j, grid, ended.outcome, ended.end_row, ended.crossing,
                                      -1 if stops is None else int(stops.step[j]), step_s)
+        fields = separation_fields(scene, aircraft, step_s)
+        counted = judged_steps(fields, aircraft, row["steps_said"], step_s)
         row.update(source=source, others=len(scene.others), speaking_with=len(scenes[index[j]].others),
                    history_cut=sum(o.first_step < -loop.speaker.pre for o in loop.speaker.others[j]),
-                   mask_steps=_mask_steps(loop.separation_masked, j, row["steps_said"]),
-                   **separation_fields(scene, aircraft, step_s))
+                   judged_steps=counted, mask_steps=_mask_steps(loop.separation_masked, j, counted),
+                   masked_mass={COLUMNS[c]: float(forbidden[c][j, :counted].mean()) if counted else 0.0
+                                for c in MASK_COLUMNS},
+                   **fields)
     return rows
 
 
@@ -160,16 +185,17 @@ def recorded_rows(batch: replay.Batch, scenes: Sequence[Scene], words: Words) ->
 
 
 def summary(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    """Per source: flights, the outcomes under VISUAL (and the lost-separation share under IFR), the losses per flight
+    """Per source, the flights not starting in a loss (those counted): flights, the outcomes under VISUAL (and the lost-separation share under IFR), the losses per flight
     and per hour flown, their relations, and — the model's sources — the separation masks."""
     out: dict[str, Any] = {}
     for source in SOURCES:
-        part = [r for r in rows if r["source"] == source]
+        every = [r for r in rows if r["source"] == source]
+        part = [r for r in every if not r["starts_in_a_loss"]]
         if not part:
             continue
-        hours = sum(r["flown_s"] for r in part) / 3600.0
+        hours = sum(r[VISUAL]["flown_s"] for r in part) / 3600.0
         entry: dict[str, Any] = {
-            "flights": len(part),
+            "flights": len(part), "left_out_starting_in_a_loss": len(every) - len(part),
             "outcomes": {k: v / len(part) for k, v in Counter(r[VISUAL]["outcome"] for r in part).most_common()},
             "lost_separation": sum(r[VISUAL]["outcome"] == LOST_SEPARATION for r in part) / len(part),
             "lost_separation_ifr": sum(r[IFR]["outcome"] == LOST_SEPARATION for r in part) / len(part),
@@ -178,11 +204,12 @@ def summary(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
             "relations": dict(sum((Counter(r[VISUAL]["relations"]) for r in part), Counter())),
             "others_per_flight": sum(r["others"] for r in part) / len(part)}
         if "mask_steps" in part[0]:
-            steps = sum(r["steps_said"] for r in part)
+            steps = sum(r["judged_steps"] for r in part)
             entry["mask_steps_share"] = {COLUMNS[c]: sum(r["mask_steps"][COLUMNS[c]] for r in part) / steps
                                          for c in MASK_COLUMNS}
-            entry["forbidden_mass_per_step"] = {COLUMNS[c]: float(np.mean([r["forbidden_mass"][COLUMNS[c]] for r in part]))
-                                                for c in MASK_COLUMNS}
+            entry["masked_mass_per_step"] = {
+                COLUMNS[c]: sum(r["masked_mass"][COLUMNS[c]] * r["judged_steps"] for r in part) / steps
+                for c in MASK_COLUMNS}
             entry["history_cut"] = sum(r["history_cut"] for r in part)
         out[source] = entry
     return out
@@ -198,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--samples", type=int, default=4)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=1337)
-    parser.add_argument("--chunk", type=int, default=16, help="flights a batch (× samples closed loops)")
+    parser.add_argument("--aircraft-steps", type=int, default=AIRCRAFT_STEPS, help="a batch's most (module docstring)")
     parser.add_argument("--device", default="cuda", help="the prior's; the executor flies on CPU")
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     args = parser.parse_args(argv)
@@ -229,25 +256,48 @@ def main(argv: list[str] | None = None) -> int:
           f"({built}), {time.perf_counter() - started:.0f}s", flush=True)
 
     generator = torch.Generator(device=torch.device(args.device)).manual_seed(args.seed)
-    # like scenes together: the aircraft axis and the pre-roll are the batch's largest
-    order = sorted(range(len(scenes)), key=lambda j: (len(scenes[j].others), len(batch.readings[j].words)))
+    step_s = words.spec.step_s
+    history = int(HISTORY_S // step_s)
+
+    def size(j: int) -> tuple[int, int]:
+        """A flight's scene: its aircraft and its steps (its pre-roll, as the speaker caps it, and its rows)."""
+        scene = scenes[j]
+        pre = max([0] + [int(round((scene.first_step_s - hang(scene.airport.flights.flights[k].presence.start_s, step_s))
+                                   / step_s)) for k in scene.others])
+        return 1 + len(scene.others), min(pre, history) + rows_for(limits[j] + step_s, step_s)
+
+    order = sorted(range(len(scenes)), key=lambda j: (size(j), len(batch.readings[j].words)))
+    batches: list[list[int]] = [[]]
+    for j in order:
+        grown = batches[-1] + [j]
+        if batches[-1] and (len(grown) * args.samples * max(size(k)[0] for k in grown)
+                            * max(size(k)[1] for k in grown)) > args.aircraft_steps:
+            batches.append([j])
+        else:
+            batches[-1] = grown
+    out.mkdir(parents=True)
     rows: list[dict[str, Any]] = []
-    for start in range(0, len(order), args.chunk):
-        chunk = order[start: start + args.chunk]
+    done = 0
+    for chunk in batches:
         part, here = replay.subset(batch, chunk), [scenes[j] for j in chunk]
         alone = [dataclasses.replace(s, others=()) for s in here]
+        new: list[dict[str, Any]] = []
         for source, speaking in (("scene", here), ("alone", alone)):
-            rows += model_rows(model, part, speaking, here, source, words, params, landings, args.samples,
-                               generator=generator, temperature=args.temperature, procedure_masks=own_masks)
-        rows += labelled_rows(part, here, words, params, own_masks)
-        rows += recorded_rows(part, here, words)
-        print(f"  {start + len(chunk)}/{len(order)} flights, {time.perf_counter() - started:.0f}s", flush=True)
+            new += model_rows(model, part, speaking, here, source, words, params, landings, args.samples,
+                              generator=generator, temperature=args.temperature, procedure_masks=own_masks)
+        new += labelled_rows(part, here, words, params, own_masks)
+        new += recorded_rows(part, here, words)
+        with (out / "flights.jsonl").open("a", encoding="utf-8") as stream:
+            for row in new:
+                stream.write(json.dumps(row) + "\n")
+        rows += new
+        done += len(chunk)
+        print(f"  {done}/{len(order)} flights ({len(batches)} batches), {time.perf_counter() - started:.0f}s", flush=True)
 
     by_airport: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         by_airport[row["airport"]].append(row)
     readout = {"pooled": summary(rows), "airports": {code: summary(part) for code, part in sorted(by_airport.items())}}
-    out.mkdir(parents=True)
     write_json_atomic(out / "free_generation.json", {
         "schema": SCHEMA, "written_utc": utc_now(), "git": git, "split": args.split, "drawn": batch.drawn,
         "per_airport": args.per_airport, "samples": args.samples, "temperature": args.temperature, "seed": args.seed,
@@ -255,14 +305,14 @@ def main(argv: list[str] | None = None) -> int:
         "traffic_attention": "zero (with_traffic): the prior's answers to rounding",
         "executor": {"directory": repo_relative(executor_dir), "sha256": record["sha256"]},
         "instructions": repo_relative(instructions), "scenes": built, "history_s": HISTORY_S,
-        "readings": {"ends": VISUAL, "beside": IFR}, "readout": readout, "flights": rows,
-        "elapsed_s": time.perf_counter() - started})
+        "readings": {"ends": VISUAL, "beside": IFR}, "aircraft_steps": args.aircraft_steps, "batches": len(batches),
+        "readout": readout, "flights_file": "flights.jsonl", "elapsed_s": time.perf_counter() - started})
     for source, entry in readout["pooled"].items():
         shares = "  ".join(f"{name} {share:.3f}" for name, share in entry["outcomes"].items())
         print(f"{source:9s} n={entry['flights']:5d}  lost separation {entry['lost_separation']:.3f} "
               f"(IFR {entry['lost_separation_ifr']:.3f})  episodes/h {entry['episodes_per_hour']}  {shares}")
         if "mask_steps_share" in entry:
-            print(f"          masks: steps {entry['mask_steps_share']}  mass {entry['forbidden_mass_per_step']}")
+            print(f"          masks: steps {entry['mask_steps_share']}  mass {entry['masked_mass_per_step']}")
     print(f"→ {out}")
     return 0
 

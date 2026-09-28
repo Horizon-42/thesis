@@ -119,6 +119,9 @@ def test_the_speed_and_clearance_masks_read_the_leader_ahead_on_the_final(tmp_pa
                               False)[APPROACH_CLEARED + 1]
     assert speaking_masks(scene, APPROACH, approach_classes, t_s, behind(8_000.0), 0, None, False, 70.0, words,
                           False).all()
+    # an aircraft already cleared has nothing to be masked
+    assert speaking_masks(scene, APPROACH, approach_classes, t_s, behind(4_000.0), 0, None, True, 70.0, words,
+                          False).all()
 
 
 def test_the_judge_ends_the_speaking_aircraft_at_a_loss_it_answers_for(tmp_path, monkeypatch):
@@ -218,7 +221,10 @@ def test_the_runner_reads_the_model_alone_and_in_its_scene_and_the_record(tmp_pa
     assert [r["others"] for r in rows] == [2, 2, 0, 0] and all(r["source"] == "scene" for r in rows)
     for r in rows:
         assert set(r["mask_steps"]) == {"approach", "speed"} and r[VISUAL]["outcome"] and r[IFR]["outcome"]
-        assert r["flown_s"] > 0.0 and 0 <= r["mask_steps"]["speed"] <= r["steps_said"]
+        assert 0 <= r["mask_steps"]["speed"] <= r["judged_steps"] <= r["steps_said"]
+    # f1 follows f0 by 30 s on its path: already in a loss it answers for at its first predicted step, ended there
+    assert [r["starts_in_a_loss"] for r in rows] == [True, True, False, False]
+    assert rows[0][VISUAL]["flown_s"] == 0.0 and rows[0]["judged_steps"] == 0 and rows[2][VISUAL]["flown_s"] > 0.0
     alone = runner.model_rows(model, batch, [replace(s, others=()) for s in scenes], scenes, "alone", Words(spec),
                               _params(), None, samples, generator=torch.Generator().manual_seed(4), temperature=1.0,
                               procedure_masks=ProcedureMasks.none())
@@ -229,5 +235,6 @@ def test_the_runner_reads_the_model_alone_and_in_its_scene_and_the_record(tmp_pa
     recorded = runner.recorded_rows(batch, scenes, Words(spec))
     assert [r["outcome"] for r in recorded] == ["landed", "landed"] or recorded[0][VISUAL]["outcome"] == "lost_separation"
     readout = runner.summary(rows + alone + recorded)
-    assert set(readout) == {"scene", "alone", "recorded"} and readout["scene"]["flights"] == 4
+    assert set(readout) == {"scene", "alone", "recorded"} and readout["scene"]["flights"] == 2
+    assert readout["scene"]["left_out_starting_in_a_loss"] == 2 and readout["recorded"]["left_out_starting_in_a_loss"] == 1
     assert readout["alone"]["mask_steps_share"] == {"approach": 0.0, "speed": 0.0}

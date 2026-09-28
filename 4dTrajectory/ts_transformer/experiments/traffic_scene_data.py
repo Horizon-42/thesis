@@ -48,13 +48,14 @@ from ts_transformer.repo_layout import CWT_SUPPLEMENT, CWT_TABLE, arrival_manife
 PACKAGE = Path(__file__).resolve().parents[1]
 #: What decides a scene prior's edge features, as package paths: the features and the separation rules they read
 #: (`runway_schedule`), the clock position (`instructions.airport.relative_to_runway`), the runway in force
-#: (`prior.data.sentence_steps`), the steps and row times (`prior.scene.hang`, `presence`), what the samples hand them and
-#: how a batch lays them out — and the CWT tables the categories are read from (`EDGE_TABLES`). A scene prior's checkpoint
+#: (`prior.data.sentence_steps`), the steps and row times (`prior.scene.hang`, `presence`), what the samples hand them, how
+#: a batch lays them out and how the closed loop builds them (`traffic_speaking`) — and the CWT tables the categories are read from (`EDGE_TABLES`). A scene prior's checkpoint
 #: records their hash (`edge_source_sha256`) and `prior_train.load_prior` reads it only on the same: a code change in any
 #: of these files — the scheduler's in `runway_schedule` too — refuses every scene prior, as the executor's hash refuses
 #: its specs.
 EDGE_SOURCES = ("inference/scene_edges.py", "inference/runway_schedule.py", "instructions/airport.py", "prior/data.py",
-                "prior/scene.py", "prior/scene_data.py", "experiments/traffic_scene_data.py")
+                "prior/scene.py", "prior/scene_data.py", "experiments/traffic_scene_data.py",
+                "experiments/traffic_speaking.py")
 EDGE_TABLES = (CWT_TABLE, CWT_SUPPLEMENT)
 
 
@@ -84,6 +85,7 @@ class FlightRows:
     runway: list[str | None]
     along_m: np.ndarray
     category: str | None
+    typecode: str | None
 
 
 @dataclass(frozen=True)
@@ -143,7 +145,7 @@ def _flight(signals: FlightSignals, grid: np.ndarray | None, capture_row: int | 
         along[on] = separation.along_nm[ident] * NM_M - relative_rows.before_threshold_m
     category = None if signals.typecode is None else wake_category(signals.typecode)
     return FlightRows(seen, arrays, signals.e_m[:rows], signals.n_m[:rows], signals.altitude_m[:rows], runway, along,
-                      category)
+                      category, signals.typecode)
 
 
 def _sample(members: Sequence[FlightRows], first_s: float, steps: int, loss_from: int, loss_to: int, step_s: float,

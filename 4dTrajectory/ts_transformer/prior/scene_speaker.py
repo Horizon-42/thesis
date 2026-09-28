@@ -41,6 +41,11 @@ from ts_transformer.prior.scene import Landings
 from ts_transformer.prior.scene_data import Node
 
 
+#: The most steps encoded in one `Prior.extend`: the pre-roll is encoded in blocks — the edge networks' tensors grow with
+#: steps × aircraft², and a scene of 9 aircraft with a 600-step pre-roll filled the GPU in one (the step 3–4 review).
+BLOCK_STEPS = 64
+
+
 class SceneSpeaker(Speaker):
     """A `Speaker` of one aircraft per scene, with the scene's other aircraft replayed (module docstring)."""
 
@@ -74,9 +79,17 @@ class SceneSpeaker(Speaker):
         return self.mask_columns
 
     def _newest(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Every scene's steps not encoded yet, encoded (the speaking aircraft's rows, the others' at theirs, the
-        caller's edge features of those steps): the speaking aircraft's newest row's ``(h, tokens, valid)``."""
-        first, last = self.steps_encoded, self.pre + self.rows
+        """Every scene's steps not encoded yet, encoded `BLOCK_STEPS` at a time: the speaking aircraft's newest row's
+        ``(h, tokens, valid)``."""
+        last = self.pre + self.rows
+        while self.steps_encoded < last:
+            h, tokens, valid = self._encode(self.steps_encoded, min(last, self.steps_encoded + BLOCK_STEPS))
+        self.encoded = self.rows
+        return h[:, :1, -1:], tokens[:, :1, -1:], valid
+
+    def _encode(self, first: int, last: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Batch steps ``first … last − 1`` encoded (the speaking aircraft's rows, the others' at theirs, the caller's
+        edge features of those steps): ``(h, tokens, valid)`` of every aircraft on them."""
         count, aircraft, steps, device = len(self.geometries), self.aircraft, last - first, self.features.device
         features = torch.zeros((count, aircraft, steps, self.features.shape[-1]), device=device)
         relative = torch.zeros((count, aircraft, steps) + tuple(self.relative.shape[3:]), device=device)
@@ -114,8 +127,8 @@ class SceneSpeaker(Speaker):
             raise ValueError(f"edge features {tuple(edges.shape)}, the steps encoded need {expected}")
         h, tokens, valid, self.past = self.model.extend(features, relative, static, in_force, since, self.airport,
                                                         present, rows, edges, self.past)
-        self.steps_encoded, self.encoded = last, self.rows
-        return h[:, :1, -1:], tokens[:, :1, -1:], valid
+        self.steps_encoded = last
+        return h, tokens, valid
 
     def _allowed(self, column: int, chosen: np.ndarray, opening: bool, classes: int,
                  runway_locked: np.ndarray) -> np.ndarray:

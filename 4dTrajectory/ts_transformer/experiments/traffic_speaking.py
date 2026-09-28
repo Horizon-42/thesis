@@ -18,8 +18,15 @@ What the prior package does not reach is computed here, step by step, and handed
   approach clearance, against the others replayed at the step's instant (`traffic_census.traffic_at`) and the speaking
   aircraft's executor state — its speed along its course, its capture (established), the runway said at the step if it
   says one (else the one in force), its speed target in force (its speed word's; "unspecified" its own approach speed,
-  the one its executor flies; before any speed word its present speed). A replayed aircraft's target is its present
-  speed; it is cleared once established.
+  the one its executor flies; before any speed word its present speed). A replayed flight with a sentence reads its
+  labelled words as M0 step 6 did (`traffic_masks`): cleared under its approach word, its target its speed word's
+  ("unspecified" its type's published approach speed, else its present speed); a background one is cleared once
+  established, its target its present speed. The clearance mask applies to an aircraft not yet cleared. **Stated
+  approximations**: the masks' own (`separation_masks`), and an "unspecified" speed is an indicated airspeed taken as the
+  speed along the course while the executor flies it as true airspeed — about 5 % faster at 1 km, so the speed mask is
+  optimistic for a follower flying "unspecified" (as in M0 step 6). The speaking aircraft's edge features read its rows at
+  the loop's step times (its flown rows have no other), the others' at their recorded times — up to a second apart, as the
+  scene samples read every flight's at its recorded times.
 
 **Judged afterwards** (`judged`, `traffic_loop.Loop`): the speaking aircraft from its first predicted step to its own end
 (`speaking_aircraft`), the others replayed. Ending it at the first loss it answers for afterwards is ending it then: the
@@ -39,7 +46,7 @@ from geokit import NM_M
 
 from ts_transformer.autopilot.executor import Flown
 from ts_transformer.autopilot.judge import flown_track
-from ts_transformer.autopilot.speed import speed_change_mps2
+from ts_transformer.autopilot.speed import approach_speed_ias_mps, speed_change_mps2
 from ts_transformer.experiments.prior_free_generation import ClosedLoop, in_force
 from ts_transformer.experiments.traffic_census import Track, track, traffic_at
 from ts_transformer.experiments.traffic_labelled import own_end
@@ -153,33 +160,62 @@ def speaking_masks(scene: Scene, column: int, classes: int, t_s: float, aircraft
     relative = relative_to_runway(np.array([aircraft.e_m]), np.array([aircraft.n_m]), np.array([aircraft.track_deg]),
                                   np.array([aircraft.height_m]), candidate)
     angle = float(relative.track_minus_course_deg[0])
-    here = [airport.tracks[k] for k in scene.others if airport.tracks[k].on_step(t_s)]
+    keys = [k for k in scene.others if airport.tracks[k].on_step(t_s)]
+    here = [airport.tracks[k] for k in keys]
     traffic = join(Traffic(np.array([aircraft.e_m]), np.array([aircraft.n_m]), np.array([aircraft.height_m]),
                            (candidate.ident,),
                            np.array([separation.along_nm[candidate.ident] * NM_M - float(relative.before_threshold_m[0])]),
                            np.array([angle]), np.array([float(relative.right_of_course_m[0])]),
                            np.array([aircraft.captured]), (scene.speaking.category,)),
                    traffic_at(here, t_s))
+    levels = [words.speed_mps(i) for i in range(words.speed_unspecified)]
+    said = [_labelled(airport.flights.flights[k], t_s) for k in keys]
     if column == SPEED:
         speeds = np.array([aircraft.ground_speed_mps * math.cos(math.radians(angle)),
                            *(float(np.interp(t_s, t.presence.times_s, t.along_rate_mps)) for t in here)])
-        candidates = np.append([words.speed_mps(i) for i in range(words.speed_unspecified)], approach_mps)
+        candidates = np.append(levels, approach_mps)
         if len(candidates) != classes - 1:
             raise ValueError(f"{len(candidates)} speed words, the column has {classes} classes")
-        targets = np.append(candidates[speed_word] if speed_word is not None else speeds[0], speeds[1:])
+        targets = np.array([candidates[speed_word] if speed_word is not None else speeds[0],
+                            *(_target(airport.flights.flights[k], force, levels, words, float(speeds[m]))
+                              for m, (k, force) in enumerate(zip(keys, said), start=1))])
         check = speed_check(traffic, 0, separation, speeds, targets, candidates, 0 if speed_word is None else speed_word,
                             speed_change_mps2(words.spec), ATC_NO_SPEED_ASSIGNMENT_DISTANCE_M)
         if check is not None:
             out[1:] = check.allowed
             out[0] = opening or speed_word is None or check.unchanged_allowed
     elif column == APPROACH:
-        others_cleared = [t_s >= t.captured_s for t in here]
-        gate = clearance_check(traffic, 0, separation, np.array([cleared, *others_cleared], dtype=bool))
-        if gate is not None and not gate.allowed:
-            out[APPROACH_CLEARED + 1] = False
+        if not cleared:
+            others_cleared = [int(force[APPROACH]) - 1 == APPROACH_CLEARED if force is not None else t_s >= t.captured_s
+                              for t, force in zip(here, said)]
+            gate = clearance_check(traffic, 0, separation, np.array([False, *others_cleared], dtype=bool))
+            if gate is not None and not gate.allowed:
+                out[APPROACH_CLEARED + 1] = False
     else:
         raise ValueError(f"column {column} is not masked by separation")
     return out
+
+
+def _labelled(other: FlightRows, t_s: float) -> np.ndarray | None:
+    """A replayed flight's classes in force at ``t_s`` — its labelled words said at its rows up to then — or None for a
+    background flight (no words)."""
+    if not other.presence.speaking:
+        return None
+    force = other.node_rows["in_force"]
+    row = int(np.searchsorted(other.presence.times_s, t_s, side="right")) - 1
+    return force[min(max(row, 0) + 1, len(force) - 1)]
+
+
+def _target(other: FlightRows, force: np.ndarray | None, levels: Sequence[float], words: Words, speed_mps: float) -> float:
+    """A replayed flight's speed target: its speed word's ("unspecified" its type's published approach speed), else its
+    present speed along its course."""
+    if force is None or int(force[SPEED]) == 0:
+        return speed_mps
+    word = int(force[SPEED]) - 1
+    if word < words.speed_unspecified:
+        return float(levels[word])
+    own = approach_speed_ias_mps(other.typecode, None) if other.typecode is not None else math.nan
+    return speed_mps if math.isnan(own) else own
 
 
 class SceneLoop(ClosedLoop):
