@@ -55,11 +55,11 @@ def _drive(speaker, signals, steps=STEPS):
     return np.concatenate(said)
 
 
-def _scene_speaker(model, one, geometry, signals, others, calls, masks=None, mask_columns=()):
+def _scene_speaker(model, one, geometry, signals, others, calls, masks=None, mask_columns=(), history=100):
     reference = [None]
     speaker = SceneSpeaker(model, [signals], [geometry], None, Words(one), others=[others],
                            edges=_edges(reference, calls), masks=masks or (lambda column, chosen: None),
-                           mask_columns=mask_columns, max_rows=N_LOOK + STEPS + 1,
+                           mask_columns=mask_columns, history=history, max_rows=N_LOOK + STEPS + 1,
                            generator=torch.Generator().manual_seed(4), procedure_masks=ProcedureMasks.none())
     reference[0] = speaker
     return speaker
@@ -106,6 +106,14 @@ def test_the_others_are_placed_at_their_own_rows_from_a_pre_roll_and_read_throug
     # the late one enters at the speaking aircraft's row 3 and leaves after 4 rows
     assert first["present"][0, 2].tolist() == [False] * 8 + [True] * 4 + [False] * (5 + N_LOOK + 1 - 12)
     assert calls[0] == (0, 5 + N_LOOK + 1)
+    # a history of 2 steps: the early one is read from 2 steps before the speaking aircraft's row 0, at its own rows 3, 4, …
+    capped = []
+    traffic.extend = lambda *args: (capped.append(args[7].clone()), extend(*args))[1]
+    short = _scene_speaker(traffic, one, geometry, signals, [early, late], [], history=2)
+    assert short.pre == 2
+    _drive(short, signals, steps=1)
+    assert capped[0][0, 1, :4].tolist() == [3, 4, 5, 6] and capped[0][0, 0, 2:4].tolist() == [0, 1]
+    traffic.extend = spy
     # at zero the others change the speaking aircraft's encoding only to rounding; with weights they move it
     traffic.extend = extend
     alone = _newest_h(_scene_speaker(traffic, one, geometry, signals, [], []), signals)

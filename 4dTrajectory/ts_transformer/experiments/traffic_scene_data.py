@@ -165,22 +165,33 @@ def airport_separation(airport: str, recorded_sha256: Mapping[str, str]) -> Sepa
                           speed_mps=APPROACH_SPEED_MPS)
 
 
-def build_split(directory: Path, split: str, spec: VocabularySpec, airports: Sequence[str],
-                landings: Mapping[str, Landings] | None, max_rows: int) -> tuple[list[Built], dict[str, Any]]:
-    """Every sample of ``split`` at ``airports`` (the model's, in its order: a sample's airport is its index there), and
-    what was built: flights with a sentence and background, the background left out for more rows than ``max_rows``
-    (the model's positions), those without a type, samples, the most aircraft in one. ``landings``: each airport's
-    landing context, None for a variant without it (`prior.data.airport_landings`)."""
+@dataclass(frozen=True)
+class AirportFlights:
+    """One airport's flights of a split as the samples place them (`FlightRows`, by dataset id), its index among the
+    model's airports, its geometry and its separation rules."""
+
+    code: str
+    index: int
+    geometry: AirportGeometry
+    separation: Separation
+    flights: dict[str, FlightRows]
+
+
+def airport_flights(directory: Path, split: str, spec: VocabularySpec, airports: Sequence[str],
+                    landings: Mapping[str, Landings] | None, max_rows: int) -> tuple[list[AirportFlights], Counter]:
+    """Every flight of ``split`` at ``airports`` (the model's, in its order), airport by airport, and what was built:
+    flights with a sentence and background, the background left out for more rows than ``max_rows`` (the model's
+    positions; a sentence that long is refused), those without a type. ``landings``: each airport's landing context,
+    None for a variant without it (`prior.data.airport_landings`)."""
     geometries = load_candidates(directory)
     signals = load_signals(directory, split)
     sentences = load_sentences(directory, split, spec)
     offsets = sentences["offsets"]
     spoken = {int(i): k for k, i in enumerate(sentences["signal_index"])}
     recorded = arrival_manifest_sha256s(directory)
-    step_s = spec.step_s
-    built: list[Built] = []
     counts: Counter = Counter(dict.fromkeys(("with_a_sentence", "background", "background_left_out_for_its_length",
-                                             "without_a_type", "samples", "most_aircraft"), 0))
+                                             "without_a_type"), 0))
+    out = []
     for code in sorted({f.airport for f in signals}):
         airport = airports.index(code)
         geometry, separation = geometries[code], airport_separation(code, recorded)
@@ -204,7 +215,21 @@ def build_split(directory: Path, split: str, spec: VocabularySpec, airports: Seq
         by_key = {f.presence.dataset_id: f for f in flights}
         if len(by_key) != len(flights):
             raise ValueError(f"{code}: {len(flights) - len(by_key)} flights share a dataset id with another")
-        for segment in SceneIndex([f.presence for f in flights]).segments(step_s):
+        out.append(AirportFlights(code, airport, geometry, separation, by_key))
+    return out, counts
+
+
+def build_split(directory: Path, split: str, spec: VocabularySpec, airports: Sequence[str],
+                landings: Mapping[str, Landings] | None, max_rows: int) -> tuple[list[Built], dict[str, Any]]:
+    """Every sample of ``split`` at ``airports`` (`airport_flights`), and what was built: its counts, the samples, the
+    most aircraft in one."""
+    per_airport, counts = airport_flights(directory, split, spec, airports, landings, max_rows)
+    counts.update(dict.fromkeys(("samples", "most_aircraft"), 0))
+    step_s = spec.step_s
+    built: list[Built] = []
+    for airport in per_airport:
+        by_key = airport.flights
+        for segment in SceneIndex([f.presence for f in by_key.values()]).segments(step_s):
             cuts = samples(segment, step_s)
             for number, cut in enumerate(cuts):
                 members = [by_key[p.dataset_id] for p in cut.flights]
@@ -212,7 +237,8 @@ def build_split(directory: Path, split: str, spec: VocabularySpec, airports: Seq
                 end_s = cut.loss_end_s + (step_s if number == len(cuts) - 1 else 0.0)    # the last sample: its end included
                 steps = int(round((end_s - first_s) / step_s))
                 loss_from = int(round((cut.loss_start_s - first_s) / step_s))
-                built.append(_sample(members, first_s, steps, loss_from, steps, step_s, airport, separation))
+                built.append(_sample(members, first_s, steps, loss_from, steps, step_s, airport.index,
+                                     airport.separation))
                 counts["samples"] += 1
                 counts["most_aircraft"] = max(counts["most_aircraft"], len(members))
     return built, dict(counts)

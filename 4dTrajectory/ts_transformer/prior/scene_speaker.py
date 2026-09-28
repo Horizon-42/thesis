@@ -7,9 +7,10 @@ attention; everything the speaking aircraft's rows, words and masks are is the `
 
 **Steps.** The speaking aircraft of every scene are at the same row, as a `Speaker`'s flights are. The batch's steps start
 ``pre`` steps before their row 0 — the most any replayed aircraft of any scene is in the air before it (`Node.first_step`
-counts from the speaking aircraft's row 0, negative before it) — so a replayed aircraft arrives with its history, as a
-flight carried into a sample does: batch step ``s`` is the speaking aircraft's row ``s − pre``. A scene holds nothing
-before its own aircraft enter.
+counts from the speaking aircraft's row 0, negative before it), at most ``history`` — so a replayed aircraft arrives with
+its history, as a flight carried into a sample does: batch step ``s`` is the speaking aircraft's row ``s − pre``. An
+aircraft in the air longer before it is read from ``history`` steps before, at its own rows there (the caller counts
+them). A scene holds nothing before its own aircraft enter.
 
 **What the prior package does not reach is asked of the caller** (the separation rules are `inference`'s, design §9
 item 18):
@@ -46,10 +47,11 @@ class SceneSpeaker(Speaker):
     def __init__(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
                  landings: Mapping[str, Landings] | None, words: Words, *, others: Sequence[Sequence[Node]],
                  edges: Callable[[int, int], np.ndarray], masks: Callable[[int, np.ndarray], np.ndarray],
-                 mask_columns: Sequence[int], max_rows: int, generator: torch.Generator,
+                 mask_columns: Sequence[int], history: int, max_rows: int, generator: torch.Generator,
                  procedure_masks: ProcedureMasks, temperature: float = 1.0) -> None:
-        """``others``: per scene, its replayed aircraft (`Node.first_step` from the speaking aircraft's row 0); the rest
-        is `Speaker`'s (module docstring for ``edges``, ``masks``, ``mask_columns``)."""
+        """``others``: per scene, its replayed aircraft (`Node.first_step` from the speaking aircraft's row 0);
+        ``history``: the most steps read before the speaking aircraft's row 0; the rest is `Speaker`'s (module docstring
+        for ``edges``, ``masks``, ``mask_columns``)."""
         if len(others) != len(flights):
             raise ValueError(f"{len(others)} scenes' other aircraft for {len(flights)} speaking aircraft")
         self.mask_columns = tuple(mask_columns)
@@ -58,7 +60,7 @@ class SceneSpeaker(Speaker):
         self.others = [tuple(scene) for scene in others]
         self.edges_of, self.masks_of = edges, masks
         #: the steps before the speaking aircraft's row 0 (module docstring)
-        self.pre = max([0] + [-node.first_step for scene in self.others for node in scene])
+        self.pre = min(history, max([0] + [-node.first_step for scene in self.others for node in scene]))
         self.aircraft = 1 + max(len(scene) for scene in self.others)
         self.steps_encoded = 0
         self.past = model.no_past(len(flights) * self.aircraft, self.pre + max_rows)
