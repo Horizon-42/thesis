@@ -33,8 +33,8 @@ def _controlled(key: str, t0: float, along, *, runway: str = "R", n: float = 0.0
     times = t0 + STEP_S * np.arange(count)
     seen = Presence(key, "KXXX", runway, math.inf if landing_s is None else landing_s, True, times, np.abs(along))
     return Controlled(seen, times, along.copy(), np.full(count, n), np.full(count, 500.0), (runway,) * count, along,
-                      np.full(count, angle), np.zeros(count), np.broadcast_to(np.asarray(established), (count,)).copy(),
-                      category, outcome, landing_s)
+                      np.full(count, angle), np.zeros(count), np.full(count, 70.0),
+                      np.broadcast_to(np.asarray(established), (count,)).copy(), category, outcome, landing_s)
 
 
 def _replayed(key: str, times, along, *, landing_s: float, runway: str = "R", captured_s: float = 0.0,
@@ -248,13 +248,14 @@ def test_a_flown_aircraft_starts_at_the_step_its_first_row_hangs_on_and_lands_on
     seen = presence(flight, 30, geometry)
     e = np.array([-5_000.0, -4_860.0, -4_720.0])
     aircraft = flown(seen, STEP_S, e, np.array([10.0, 5.0, 0.0]), np.full(3, 400.0), np.array([95.0, 92.0, 90.0]),
-                     np.array([False, False, True]), "09", geometry, SEPARATION_09, "F", "landed", 67.4)
+                     np.full(3, 70.0), np.array([False, False, True]), "09", geometry, SEPARATION_09, "F", "landed", 67.4)
     start = utc_s("2026-06-01T11:00:00Z")
     assert (aircraft.times_s - start).tolist() == pytest.approx([0.0, 2.0, 4.0])
     assert aircraft.landing_s - start == pytest.approx(67.4)
     assert np.allclose(aircraft.along_m, e) and np.allclose(aircraft.right_of_course_m, [-10.0, -5.0, 0.0])
     assert np.allclose(aircraft.track_minus_course_deg, [5.0, 2.0, 0.0])
     assert aircraft.established.tolist() == [False, False, True]
+    assert np.allclose(aircraft.along_speed_mps, 70.0 * np.cos(np.radians([5.0, 2.0, 0.0])))
 
 
 def _flown_states(cycles: int, captured_from: int):

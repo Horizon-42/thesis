@@ -391,7 +391,10 @@ formal replay first; words inside compare neither across L nor across the bank l
 (`ts-traffic-census-v3`; formal `census_20260927`: 0.98 vs 0.60 pairs/h) (R24); `traffic_separation_examples` draws five
 typical recorded losses for the readout (R25); `traffic_labelled` flies every labelled flight on its labelled words together
 in the scene closed loop (`experiments/traffic_loop.py`, shared with M3/M4) beside the same flights along their records
-(formal `labelled_v2_20260928`: 3.93 vs 2.76 % ended under VISUAL; the pass line gates the executor's addition) (R26).
+(formal `labelled_v2_20260928`: 3.93 vs 2.76 % ended under VISUAL; the pass line gates the executor's addition) (R26);
+`traffic_masks` measures the loop's two separation masks (`inference/separation_masks.py`: speed words, approach
+clearance; computed by the loop and handed to the speaker, the prior never imports them; a fallback masks nothing) on
+the labelled words (formal `masks_v2_20260928`: 0.32 % masked) (R27).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 

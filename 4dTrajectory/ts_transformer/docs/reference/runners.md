@@ -671,3 +671,23 @@ first step in both runs, who ended it in each run and reading. Writes `labelled.
 the raw share) into a NEW directory; about 20 minutes over the five airports, CPU. Formal: `outputs/POOLED/traffic/`
 `labelled_v2_20260928/`: 3.93 % of the own-dynamics flights ended under VISUAL against 2.76 % along their recorded rows —
 the executor adds 1.17 points (KSTL 2.62, the most): passes (readout `2026-09-28_labelled_traffic.zh.md`).
+
+### R27 · `run_ts.py traffic_masks` — the closed loop's two separation masks measured on the training days' labelled words (multi-aircraft design §6.4 step 6)
+
+2026-09-28. `traffic_masks --instructions <sentence artefact> --out <new dir> [--airports ...]`. The masks live in
+`inference/separation_masks.py` (the scene closed loop computes them and hands the speaker the words they leave; the
+prior's import rule is unchanged — design §9 item 18): **speed words** — only while the aircraft and the one next ahead
+on the approach clock (one runway, or a pair separated as one) are both established and the aircraft is more than 5 NM
+out; both predicted along their courses toward their targets at the executor's pace (0.25 m/s², no turn, descent or
+wind — a stated approximation) to the leader's threshold crossing; a word leaving less than `Separation.distance_nm`
+there is masked, "unchanged" with the word in force; when every word falls short (a fallback, 2.4 % of the checks)
+nothing is masked (user 2026-09-28, design §9 item 20: the largest gap is always the vocabulary's slowest word, 20 m/s);
+**clearance** —
+masked while the nearest cleared aircraft ahead is under the in-trail minimum (`separation.in_trail_m`). The runner
+walks the recorded scene on the loop's steps (every labelled flight along its rows, background replayed) and counts as
+`prior_procedure_check` counts: the word in force at row `N_LOOK` and every word said after it; forced steps (no speed
+word said while the one in force is masked) apart; the speed prediction's gap against the recorded gap at the leader's
+crossing. Pass line (design §3.4 step 0): ≤ 1 % of the labelled speed words and clearances together. Writes `masks.json`
+(`ts-traffic-masks-v2`; v1 left the slowest words in a fallback) into a NEW directory; about 6 minutes, CPU. Formal:
+`outputs/POOLED/traffic/masks_v2_20260928/` (`13097a09`): 0.32 % masked (speed words 0.18 %, clearances 0.71 %; KSJC
+0.98 % the most, half of its clearances across the close pair 30L/30R) — passes, read pooled (§9 item 19).

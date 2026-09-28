@@ -100,8 +100,8 @@ def flown_aircraft(states: Flown, j: int, ended: Outcome, stop_step: int, seen: 
     track_at = flown_track(states.states[j, at_rows].cpu().numpy(), geometry)
     captured = np.concatenate(([False], states.modes["captured"][j, at_rows[1:] - 1].cpu().numpy()))
     landing = ended.crossing["at_row"] * states.cycle_s if outcome == "landed" else None
-    return flown(seen, step_s, track_at["e"], track_at["n"], track_at["height"], track_at["track"], captured, runway,
-                 geometry, separation, category, outcome, landing)
+    return flown(seen, step_s, track_at["e"], track_at["n"], track_at["height"], track_at["track"],
+                 track_at["ground_speed"], captured, runway, geometry, separation, category, outcome, landing)
 
 
 def fly_airport(directory: Path, airport: str, members: list[int], signals: list,

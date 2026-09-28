@@ -139,6 +139,14 @@ def _wake_m(table: dict[tuple[str, str], float], leader: str | None, follower: s
     return table.get((leader, follower), 0.0) * NM_M, True     # a blank cell of the table sets no wake minimum
 
 
+def in_trail_m(separation: Separation, ahead: str | None, behind: str | None) -> tuple[float, bool]:
+    """In trail on one final (both established on one runway, or a pair separated as one): the horizontal minimum — the
+    one-runway radar minimum or the directly-behind wake minimum (TBL 5-5-1, 5-5-4 g), whichever is larger — and whether
+    both categories are known (unknown: the radar minimum alone)."""
+    wake, known = _wake_m(CWT_DIRECTLY_BEHIND_NM, ahead, behind)
+    return max(separation.same_nm * NM_M, wake), known
+
+
 def _turned_in(traffic: Traffic, k: int, other: str, separation: Separation) -> bool:
     """7-4-4 c2 (a)(1) / c3 (a)(1), beside the final of the parallel runway ``other``: aircraft ``k``'s track is within
     `FAA_VISUAL_INTERCEPT_MAX_DEG` of its course, and it is on its own side of the midline between the two centrelines
@@ -153,7 +161,7 @@ def losses(traffic: Traffic, separation: Separation, reading: str) -> list[Loss]
     """Every pair that has lost separation at this instant under ``reading`` (module docstring)."""
     if reading not in READINGS:
         raise ValueError(f"reading {reading!r} is not one of {READINGS}")
-    one_runway_m, radar_m, vertical_min_m = separation.same_nm * NM_M, FAA_RADAR_NM * NM_M, FAA_VERTICAL_FT * FT_M
+    radar_m, vertical_min_m = FAA_RADAR_NM * NM_M, FAA_VERTICAL_FT * FT_M
     out = []
     count = len(traffic.e_m)
     for i in range(count):
@@ -171,8 +179,7 @@ def losses(traffic: Traffic, separation: Separation, reading: str) -> list[Loss]
                 if relation == UNRELATED and both:
                     continue            # established on finals of other directions: 3-10-4 not modelled
             if both and separation.one_runway(ri, rj):
-                wake, known = _wake_m(CWT_DIRECTLY_BEHIND_NM, traffic.category[ahead], traffic.category[behind])
-                required = max(one_runway_m, wake)
+                required, known = in_trail_m(separation, traffic.category[ahead], traffic.category[behind])
                 if horizontal < required:
                     out.append(Loss(i, j, IN_TRAIL, relation, required, horizontal, vertical, (behind,), known))
                 continue
