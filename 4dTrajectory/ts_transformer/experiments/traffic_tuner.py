@@ -15,7 +15,8 @@ of sentences grouped as the second stage groups them (their own rows, ``tokens_p
 update) — with two differences:
 
 - a batch laid out in its scenes can be far larger than the aircraft alone, so it is scored in parts of at most
-  `SCORE_AIRCRAFT_STEPS` padded aircraft-steps (M2's batch), each part's share of the batch's mean backpropagated as it
+  `SCORE_BUDGET` (the GPU memory measured, `PAIR_COST`), the model's layers recomputed in the backward (`Prior.encode`)
+  and its heads read only on the speaking aircraft's rows, each part's share of the batch's mean backpropagated as it
   goes: the gradients add up to the batch's;
 - the data term is the scene samples' (M2's, `traffic_scene_data.build_split` of the training days: the traffic
   attention reads the others there too), `DATA_BATCHES` of M2's batches an update (together about as many asked steps
@@ -37,22 +38,30 @@ import numpy as np
 import torch
 from torch import nn
 
-from ts_transformer.experiments.traffic_prior_train import asked_steps, scene_batch, scene_batches, scene_nll
+from ts_transformer.experiments.traffic_prior_train import asked_steps, scene_batch, scene_batches
 from ts_transformer.experiments.traffic_scene_data import Built
 from ts_transformer.experiments.traffic_speaking import HISTORY_S, Scene, other_node, speaking_edges
 from ts_transformer.instructions.words import RUNWAY
 from ts_transformer.prior.data import Split, batches
 from ts_transformer.prior.model import Prior, asked_entries
+from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.prior.scene_speaker import scene_inputs
 from ts_transformer.prior.train import (
-    RewardConfig, RewardTuner, TrainConfig, allowed_tensors, batch_logits, flight_kl, flight_surrogate, masked,
-    to_batch,
+    RewardConfig, RewardTuner, TrainConfig, allowed_tensors, batch_logits, column_nll, flight_kl, flight_surrogate,
+    masked, to_batch,
 )
 
 #: M2's training batch, padded aircraft-steps (`traffic_prior_train`: pretraining's token budget).
 M2_BATCH = TrainConfig().tokens_per_batch
-#: The most padded aircraft-steps a part of a batch is scored in at once, with gradients: M2's batch.
-SCORE_AIRCRAFT_STEPS = M2_BATCH
+#: What a part scored with gradients holds on the GPU, measured (RTX 4060, 8 GB; the traffic model on augmented: d 192,
+#: 4 layers, each recomputed in the backward — `Prior.encode`; the heads on the speaking aircraft's rows only): about
+#: 64 KB an aircraft-step and 8 KB an ordered pair of aircraft a step (the edge layers' [B, T, A, A, d]; without the
+#: recomputation 145 KB and 31 KB, and one 16-aircraft scene of 900 steps did not fit). A part costs its padded
+#: aircraft-steps plus its pairs × `PAIR_COST`.
+PAIR_COST = 1 / 8
+#: The most a part costs, about 3 GB (a sentence costing more is a part of its own: the training days' largest scene,
+#: 16 aircraft × 1,400 steps, measured 4.5 GB alone).
+SCORE_BUDGET = 48 * 1024
 #: M2's scene batches an update's data term reads: two hold about 8,800 asked steps (M2's ratio, 3.7 padded to one
 #: asked), about the second stage's data batch (8,192 rows of single flights).
 DATA_BATCHES = 2
@@ -135,13 +144,16 @@ def scene_layout(sentences: SceneSplit, indices: Sequence[int], single: Mapping[
     return SceneBatch(inputs, torch.as_tensor(out, device=device), single["airport"], pre, rows)
 
 
-def scene_logits(model: Prior, layout: SceneBatch) -> list[torch.Tensor]:
+def scene_logits(model: Prior, layout: SceneBatch, *, checkpoint: bool = False) -> list[torch.Tensor]:
     """The speaking aircraft's logits of its own words in its scene (teacher forcing), ``[B, 1, rows, classes]`` as
-    `train.batch_logits` gives them for the aircraft alone."""
+    `train.batch_logits` gives them for the aircraft alone: `Prior.forward`'s, its heads read only on the speaking
+    aircraft's rows (a head reads its own aircraft-step alone); ``checkpoint``: the layers recomputed in the backward
+    (`Prior.encode`)."""
     x = layout.inputs
-    logits = model(x["features"], x["relative"], x["static"], x["in_force"], x["since"], layout.airport, x["present"],
-                   x["rows"], layout.edges, x["targets"])
-    return [logit[:, :1, layout.pre: layout.pre + layout.rows] for logit in logits]
+    h, tokens, valid = model.encode(x["features"], x["relative"], x["static"], x["in_force"], x["since"],
+                                    layout.airport, x["present"], x["rows"], layout.edges, checkpoint)
+    own = (slice(None), slice(0, 1), slice(layout.pre, layout.pre + layout.rows))
+    return model.logits(h[own], tokens[own], valid, x["targets"][own], x["rows"][own] == N_LOOK)
 
 
 def scene_size(sentences: SceneSplit, i: int, step_s: float) -> tuple[int, int, int]:
@@ -150,15 +162,20 @@ def scene_size(sentences: SceneSplit, i: int, step_s: float) -> tuple[int, int, 
     return 1 + len(others), pre, sentences.flights[i].rows
 
 
-def parts(sentences: SceneSplit, indices: Sequence[int], step_s: float, budget: int) -> list[list[int]]:
-    """``indices`` in parts of at most ``budget`` padded aircraft-steps as `scene_layout` lays them out together — the
-    most aircraft × (the longest pre-roll + the most rows) each — a larger sentence a part of its own; by size."""
+def part_cost(count: int, aircraft: int, steps: int) -> float:
+    """What ``count`` sentences laid out together on ``aircraft`` × ``steps`` cost (`PAIR_COST`)."""
+    return count * aircraft * steps * (1 + aircraft * PAIR_COST)
+
+
+def parts(sentences: SceneSplit, indices: Sequence[int], step_s: float, budget: float) -> list[list[int]]:
+    """``indices`` in parts costing at most ``budget`` (`part_cost`) as `scene_layout` lays them out together — the most
+    aircraft, the longest pre-roll plus the most rows — a costlier sentence a part of its own; by size."""
     sizes = {i: scene_size(sentences, i, step_s) for i in indices}
     out: list[list[int]] = [[]]
     aircraft = pre = rows = 0
-    for i in sorted(indices, key=lambda i: (sizes[i][0] * (sizes[i][1] + sizes[i][2]), i)):
+    for i in sorted(indices, key=lambda i: (part_cost(1, sizes[i][0], sizes[i][1] + sizes[i][2]), i)):
         a, p, r = sizes[i]
-        if out[-1] and (len(out[-1]) + 1) * max(aircraft, a) * (max(pre, p) + max(rows, r)) > budget:
+        if out[-1] and part_cost(len(out[-1]) + 1, max(aircraft, a), max(pre, p) + max(rows, r)) > budget:
             out.append([])
             aircraft = pre = rows = 0
         out[-1].append(i)
@@ -200,10 +217,10 @@ class SceneRewardTuner(RewardTuner):
         steps."""
         batch = to_batch(sentences.split, part, self.device)
         layout = scene_layout(sentences, part, batch, self.step_s)
-        logits = scene_logits(self.model, layout)
-        with torch.no_grad():
+        with torch.no_grad():                   # first: their memory is freed before the model's is held
             started = None if start is None else scene_logits(start, layout)
             reference = batch_logits(self.reference, batch)
+        logits = scene_logits(self.model, layout, checkpoint=torch.is_grad_enabled())
         if allowed is not None:
             masks = allowed_tensors([allowed[i] for i in part], batch["targets"].shape[2],
                                     [logit.shape[-1] for logit in logits], self.device)
@@ -213,7 +230,7 @@ class SceneRewardTuner(RewardTuner):
         return batch, logits, started, reference, speaks.sum(dim=(1, 2)).to(logits[0].dtype)
 
     def _parts(self, sentences: SceneSplit, indices: Sequence[int]) -> list[list[int]]:
-        return parts(sentences, indices, self.step_s, SCORE_AIRCRAFT_STEPS)
+        return parts(sentences, indices, self.step_s, SCORE_BUDGET)
 
     def distance(self, sentences: SceneSplit, allowed: Sequence[Mapping[int, np.ndarray]] | None = None) -> float:
         """`RewardTuner.distance` with the model in the sentences' scenes."""
@@ -244,7 +261,11 @@ class SceneRewardTuner(RewardTuner):
         asked = sum(asked_steps(data[i]) for indices in groups for i in indices)
         total = 0.0
         for indices in groups:
-            nll, _ = scene_nll(self.model, scene_batch(data, indices, slots, self.device))
+            batch = scene_batch(data, indices, slots, self.device)
+            logits = self.model(batch["features"], batch["relative"], batch["static"], batch["in_force"],
+                                batch["since"], batch["airport"], batch["present"], batch["rows"], batch["edges"],
+                                batch["targets"], checkpoint=True)
+            nll = column_nll(logits, batch["targets"], batch["present"], batch["asked"])
             part = self.config.data_weight * nll.sum() / asked
             if not torch.isfinite(part):
                 raise FloatingPointError(f"pass {self.passes}: the data term is {float(part)}")

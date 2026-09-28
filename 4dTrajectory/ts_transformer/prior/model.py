@@ -61,6 +61,7 @@ from typing import NamedTuple
 import torch
 from torch import nn
 from torch.nn import functional
+from torch.utils.checkpoint import checkpoint as recomputed
 
 from ts_transformer.instructions.words import COLUMNS, RUNWAY
 from ts_transformer.prior.data import CANDIDATE_FEATURES, STATIC_FEATURES, STEP_FEATURES, VARIANTS
@@ -281,11 +282,14 @@ class Prior(nn.Module):
 
     def encode(self, features: torch.Tensor, relative: torch.Tensor, static: torch.Tensor, in_force: torch.Tensor,
                since: torch.Tensor, airport: torch.Tensor, present: torch.Tensor, rows: torch.Tensor,
-               edges: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """``(h [B, A, T, d], tokens [B, A, T, slots, d], valid [B, slots])``."""
+               edges: torch.Tensor, checkpoint: bool = False) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """``(h [B, A, T, d], tokens [B, A, T, slots, d], valid [B, slots])``; ``checkpoint``: each layer's activations
+        recomputed in the backward pass instead of kept (`torch.utils.checkpoint`, the random state kept: the same
+        values and gradients) — a scene's edge layers keep [B, T, A, A, d] tensors, which filled the GPU scoring a
+        16-aircraft scene with gradients (multi-aircraft M4)."""
         x, tokens, valid = self._rows(features, relative, static, in_force, since, airport, rows)
         for layer in self.layers:
-            x = layer(x, present, edges)
+            x = recomputed(layer, x, present, edges, use_reentrant=False) if checkpoint else layer(x, present, edges)
         return self.norm(x), tokens, valid
 
     def no_past(self, scenes: int, capacity: int) -> list[Past]:
@@ -362,12 +366,13 @@ class Prior(nn.Module):
 
     def forward(self, features: torch.Tensor, relative: torch.Tensor, static: torch.Tensor, in_force: torch.Tensor,
                 since: torch.Tensor, airport: torch.Tensor, present: torch.Tensor, rows: torch.Tensor,
-                edges: torch.Tensor, chosen: torch.Tensor) -> list[torch.Tensor]:
+                edges: torch.Tensor, chosen: torch.Tensor, checkpoint: bool = False) -> list[torch.Tensor]:
         """``features`` [B, A, T, step], ``relative`` [B, A, T, slots, relative], ``static`` [B, A, static],
         ``in_force`` / ``chosen`` [B, A, T, 6] long, ``since`` [B, A, T, 6], ``airport`` [B] long, ``present``
         [B, A, T] bool, ``rows`` [B, A, T] long (each aircraft-step's own row), ``edges`` [B, T, A, A, E] → six
         logits tensors [B, A, T, classes]."""
-        h, tokens, valid = self.encode(features, relative, static, in_force, since, airport, present, rows, edges)
+        h, tokens, valid = self.encode(features, relative, static, in_force, since, airport, present, rows, edges,
+                                       checkpoint)
         return self.logits(h, tokens, valid, chosen, rows == N_LOOK)
 
 

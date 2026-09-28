@@ -193,7 +193,7 @@ def test_a_batch_scored_in_parts_has_the_gradient_of_one_piece(tmp_path, monkeyp
     advantages = np.array([0.5, -0.5, 0.25, -0.25])
     gradients = []
     for budget in (10 ** 9, 1):
-        monkeypatch.setattr(traffic_tuner, "SCORE_AIRCRAFT_STEPS", budget)
+        monkeypatch.setattr(traffic_tuner, "SCORE_BUDGET", budget)
         trained = _traffic_model(words, reads=True)
         tuner = SceneRewardTuner(trained, _model(words), RewardConfig(), CPU, seed=0, traffic_learning_rate=3e-4,
                                  step_s=spec.step_s)
@@ -223,3 +223,28 @@ def test_the_traffic_attention_trains_at_its_own_learning_rate(tmp_path, monkeyp
     assert {id(p) for p in traffic["params"]} == {id(p) for p in traffic_parameters(model)}
     with pytest.raises(ValueError, match="reads the aircraft alone"):
         SceneRewardTuner(model, model, RewardConfig(), CPU, seed=0, traffic_learning_rate=3e-4, step_s=spec.step_s)
+
+
+def test_layers_recomputed_in_the_backward_give_the_same_logits_and_gradients(tmp_path, monkeypatch):
+    """`Prior.encode(checkpoint=True)` (the scorer's, for memory) against the layers kept: the same forward and the same
+    gradients, in a scene whose traffic attention reads the others."""
+    from ts_transformer.experiments.traffic_tuner import SceneSplit, scene_layout, scene_logits
+    from ts_transformer.prior.train import to_batch
+
+    airport, signals, spec = _airport(tmp_path, monkeypatch, (0.7, 30.0, 10.7, 3_600.0))
+    words = Words(spec)
+    flight, scene, positions, _ = _spoken(_traffic_model(words), airport, signals, spec, "KXXX:f1")
+    sentences = SceneSplit(_split([flight], words, airport.flights.geometry), [scene], [positions])
+    results = []
+    for checkpoint in (False, True):
+        model = _traffic_model(words)
+        layout = scene_layout(sentences, [0], to_batch(sentences.split, [0], CPU), spec.step_s)
+        logits = scene_logits(model, layout, checkpoint=checkpoint)
+        sum((logit.clamp(min=-1e4) * torch.linspace(0.1, 1.0, logit.shape[-1])).sum() for logit in logits).backward()
+        results.append(([logit.detach() for logit in logits],
+                        {name: p.grad.clone() for name, p in model.named_parameters() if p.grad is not None}))
+    (kept, kept_grad), (again, again_grad) = results
+    assert all(torch.equal(a, b) for a, b in zip(kept, again))
+    assert kept_grad.keys() == again_grad.keys() and any(".traffic." in name for name in kept_grad)
+    for name, grad in kept_grad.items():
+        assert torch.allclose(grad, again_grad[name], rtol=1e-5, atol=1e-8), name
