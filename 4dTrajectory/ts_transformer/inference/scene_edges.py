@@ -130,9 +130,11 @@ def _scaled(distance_m: np.ndarray) -> np.ndarray:
     return np.arcsinh(np.asarray(distance_m) / SCALE_M)
 
 
-def scene_edges(rows: SceneRows, separation: Separation) -> np.ndarray:
-    """``[T, A, A, len(EDGE_FEATURES)]`` float32 (module docstring); 0 wherever i or j is absent. Each ordered pair over
-    all its steps at once."""
+def scene_edges(rows: SceneRows, separation: Separation, scenes: Sequence[int] | None = None) -> np.ndarray:
+    """``[T, A, A, len(EDGE_FEATURES)]`` float32 (module docstring); 0 wherever i or j is absent. ``scenes``: which scene
+    each aircraft is in, several scenes of one airport stacked on ``rows``' aircraft axis (None: one) — only pairs within
+    a scene are read, a pair across two stays 0. Every ordered pair over all its steps at once, all pairs together (each
+    value is the per-pair formula's, element for element)."""
     aircraft, steps = rows.time_s.shape
     out = np.zeros((steps, aircraft, aircraft, len(EDGE_FEATURES)), dtype=np.float32)
     present = rows.present
@@ -144,63 +146,70 @@ def scene_edges(rows: SceneRows, separation: Separation) -> np.ndarray:
     position = np.stack((np.nan_to_num(rows.e_m), np.nan_to_num(rows.n_m)), axis=-1)
     height = np.nan_to_num(rows.height_m)
     index = {name: k for k, name in enumerate(EDGE_FEATURES)}
-    column = np.arange(steps)
-    for i in range(aircraft):
-        out[present[i], i, i, index["self"]] = 1.0
-        for j in range(aircraft):
-            both = np.flatnonzero(present[i] & present[j]) if j != i else np.zeros(0, dtype=np.int64)
-            if not len(both):
-                continue
-            earlier = np.zeros(steps, dtype=bool)
-            earlier[1:] = present[j, :-1]
-            # j's last row at or before i's instant; its first row, when after it, carried back
-            source = np.where((rows.time_s[j] <= rows.time_s[i]) | ~earlier, column, column - 1)[both]
-            dt = rows.time_s[i, both] - rows.time_s[j, source]
-            framed = moving.known[i, both] & (np.hypot(velocity[i, both, 0], velocity[i, both, 1]) > 0.0)
-            known = moving.known[i, both] & moving.known[j, source]
-            forward = np.stack((np.sin(direction[i, both]), np.cos(direction[i, both])), axis=-1) * framed[:, None]
-            left = np.stack((-forward[:, 1], forward[:, 0]), axis=-1)
-            offset = position[j, source] + velocity[j, source] * dt[:, None] - position[i, both]
-            dh = height[j, source] + climb[j, source] * dt - height[i, both]
-            relative = velocity[j, source] - velocity[i, both]
-            edge = out[both, i, j]
-            edge[:, index["front"]] = _scaled((offset * forward).sum(axis=1))
-            edge[:, index["left"]] = _scaled((offset * left).sum(axis=1))
-            edge[:, index["height"]] = dh / HEIGHT_SCALE_M
-            distance = np.hypot(offset[:, 0], offset[:, 1])
-            approach = -(offset * relative).sum(axis=1)
-            edge[:, index["closing"]] = np.where(distance > 0.0, approach / np.where(distance > 0.0, distance, 1.0),
-                                                 0.0) / SPEED_SCALE_MPS
-            speed2 = (relative * relative).sum(axis=1)
-            cpa = np.where(speed2 > 0.0, np.clip(approach / np.where(speed2 > 0.0, speed2, 1.0), 0.0, CPA_HORIZON_S),
-                           CPA_HORIZON_S)
-            edge[:, index["cpa_time"]] = cpa / CPA_HORIZON_S
-            closest = offset + relative * cpa[:, None]
-            edge[:, index["cpa_horizontal"]] = _scaled(np.hypot(closest[:, 0], closest[:, 1]))
-            edge[:, index["cpa_vertical"]] = (dh + (climb[j, source] - climb[i, both]) * cpa) / HEIGHT_SCALE_M
-            for name in ("closing", "cpa_time", "cpa_horizontal", "cpa_vertical"):
-                edge[~known, index[name]] = 0.0
-            edge[:, index["motion_unknown"]] = ~known
-            along = rows.along_m[j, source] + moving.along_rate_mps[j, source] * dt - rows.along_m[i, both]
-            _runways(edge, rows, separation, codes, i, j, runway[i, both], runway[j, source], along, index)
-            out[both, i, j] = edge
+    step_of, own = np.nonzero(present.T)
+    out[step_of, own, own, index["self"]] = 1.0
+    group = np.zeros(aircraft, dtype=np.int64) if scenes is None else np.asarray(scenes, dtype=np.int64)
+    first_of, second_of = np.nonzero((group[:, None] == group[None, :]) & ~np.eye(aircraft, dtype=bool))
+    pair, t = np.nonzero(present[first_of] & present[second_of])
+    if not len(pair):
+        return out
+    i, j = first_of[pair], second_of[pair]
+    earlier = np.zeros_like(present)
+    earlier[:, 1:] = present[:, :-1]
+    # j's last row at or before i's instant; its first row, when after it, carried back
+    source = np.where((rows.time_s[j, t] <= rows.time_s[i, t]) | ~earlier[j, t], t, t - 1)
+    dt = rows.time_s[i, t] - rows.time_s[j, source]
+    framed = moving.known[i, t] & (np.hypot(velocity[i, t, 0], velocity[i, t, 1]) > 0.0)
+    known = moving.known[i, t] & moving.known[j, source]
+    forward = np.stack((np.sin(direction[i, t]), np.cos(direction[i, t])), axis=-1) * framed[:, None]
+    left = np.stack((-forward[:, 1], forward[:, 0]), axis=-1)
+    offset = position[j, source] + velocity[j, source] * dt[:, None] - position[i, t]
+    dh = height[j, source] + climb[j, source] * dt - height[i, t]
+    relative = velocity[j, source] - velocity[i, t]
+    edge = np.zeros((len(pair), len(EDGE_FEATURES)), dtype=np.float32)
+    edge[:, index["front"]] = _scaled((offset * forward).sum(axis=1))
+    edge[:, index["left"]] = _scaled((offset * left).sum(axis=1))
+    edge[:, index["height"]] = dh / HEIGHT_SCALE_M
+    distance = np.hypot(offset[:, 0], offset[:, 1])
+    approach = -(offset * relative).sum(axis=1)
+    edge[:, index["closing"]] = np.where(distance > 0.0, approach / np.where(distance > 0.0, distance, 1.0),
+                                         0.0) / SPEED_SCALE_MPS
+    speed2 = (relative * relative).sum(axis=1)
+    cpa = np.where(speed2 > 0.0, np.clip(approach / np.where(speed2 > 0.0, speed2, 1.0), 0.0, CPA_HORIZON_S),
+                   CPA_HORIZON_S)
+    edge[:, index["cpa_time"]] = cpa / CPA_HORIZON_S
+    closest = offset + relative * cpa[:, None]
+    edge[:, index["cpa_horizontal"]] = _scaled(np.hypot(closest[:, 0], closest[:, 1]))
+    edge[:, index["cpa_vertical"]] = (dh + (climb[j, source] - climb[i, t]) * cpa) / HEIGHT_SCALE_M
+    for name in ("closing", "cpa_time", "cpa_horizontal", "cpa_vertical"):
+        edge[~known, index[name]] = 0.0
+    edge[:, index["motion_unknown"]] = ~known
+    along = rows.along_m[j, source] + moving.along_rate_mps[j, source] * dt - rows.along_m[i, t]
+    _runways(edge, rows, separation, codes, i, j, runway[i, t], runway[j, source], along, index)
+    out[t, i, j] = edge
     return out
 
 
-def _runways(edge: np.ndarray, rows: SceneRows, separation: Separation, codes: list[str], i: int, j: int,
+def _runways(edge: np.ndarray, rows: SceneRows, separation: Separation, codes: list[str], i: np.ndarray, j: np.ndarray,
              mine: np.ndarray, theirs: np.ndarray, along: np.ndarray, index: dict[str, int]) -> None:
-    """The features that read the runways in force (module docstring), into ``edge``: ``mine`` / ``theirs`` the runway
-    indices on its rows, ``along`` j's position on the clock less i's (NaN where either has no runway)."""
+    """The features that read the runways in force (module docstring), into ``edge`` (one row per pair-step: ``i`` →
+    ``j``): ``mine`` / ``theirs`` the runway indices on their rows, ``along`` j's position on the clock less i's (NaN
+    where either has no runway)."""
     edge[:, index["clock_incomparable"]] = 1.0
+    kinds = sorted({c for c in rows.category if c is not None}) + [None]
+    kind = np.array([kinds.index(c) for c in rows.category], dtype=np.int64)
     for a, b in {(int(x), int(y)) for x, y in zip(mine, theirs) if x >= 0 and y >= 0}:
-        rows_ab = (mine == a) & (theirs == b)
+        on = (mine == a) & (theirs == b)
         relation = separation.relation(codes[a], codes[b])
-        edge[rows_ab, index[relation]] = 1.0
+        edge[on, index[relation]] = 1.0
         if relation == UNRELATED:
             continue
-        edge[rows_ab, index["clock_incomparable"]] = 0.0
-        ahead = along[rows_ab]
-        edge[rows_ab, index["clock_ahead"]] = _scaled(ahead)
-        j_leads = separation.distance_nm(codes[b], rows.category[j], codes[a], rows.category[i]) * NM_M
-        i_leads = separation.distance_nm(codes[a], rows.category[i], codes[b], rows.category[j]) * NM_M
-        edge[rows_ab, index["required"]] = _scaled(np.where(ahead >= 0.0, j_leads, i_leads))
+        edge[on, index["clock_incomparable"]] = 0.0
+        edge[on, index["clock_ahead"]] = _scaled(along[on])
+        # the required distance reads the two runways and the two categories only
+        for mine_kind, their_kind in {(int(x), int(y)) for x, y in zip(kind[i[on]], kind[j[on]])}:
+            rows_ab = on & (kind[i] == mine_kind) & (kind[j] == their_kind)
+            ahead = along[rows_ab]
+            j_leads = separation.distance_nm(codes[b], kinds[their_kind], codes[a], kinds[mine_kind]) * NM_M
+            i_leads = separation.distance_nm(codes[a], kinds[mine_kind], codes[b], kinds[their_kind]) * NM_M
+            edge[rows_ab, index["required"]] = _scaled(np.where(ahead >= 0.0, j_leads, i_leads))

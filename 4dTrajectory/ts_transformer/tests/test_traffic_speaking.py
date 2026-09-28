@@ -89,7 +89,7 @@ def test_the_others_enter_the_edge_features_and_the_masks_are_asked_every_step(t
 
 
 def test_the_speed_and_clearance_masks_read_the_leader_ahead_on_the_final(tmp_path, monkeypatch):
-    from ts_transformer.experiments.traffic_speaking import Aircraft, Scene, speaking_masks
+    from ts_transformer.experiments.traffic_speaking import Aircraft, Scene, others_at, speaking_masks
 
     airport, signals, spec = _airport(tmp_path, monkeypatch)
     words = Words(spec)
@@ -105,23 +105,24 @@ def test_the_speed_and_clearance_masks_read_the_leader_ahead_on_the_final(tmp_pa
         return Aircraft(float(leader.e_m[row]) - gap_m, float(leader.n_m[row]), 600.0, 90.0, 75.0, captured)
 
     classes = words.speed_unspecified + 2
+    others = others_at(scene, t_s, words)
     close = speaking_masks(scene, SPEED, classes, t_s, behind(6_000.0), 0, words.speed_unspecified, False, 70.0,
-                           words, False)
+                           words, False, others)
     fastest, slowest = int(np.argmax([words.speed_mps(i) for i in range(words.speed_unspecified)])), \
         int(np.argmin([words.speed_mps(i) for i in range(words.speed_unspecified)]))
     assert not close[1 + fastest] and close[1 + slowest]         # too fast closes under the minimum, slow keeps it
     assert close[0] == close[1 + words.speed_unspecified]        # "unchanged" is the word in force ("unspecified")
     # not established: no speed mask; a clearance behind the cleared leader is masked inside the in-trail minimum
     assert speaking_masks(scene, SPEED, classes, t_s, behind(6_000.0, captured=False), 0, None, False, 70.0, words,
-                          False).all()
+                          False, others).all()
     approach_classes = 1 + 3
     assert not speaking_masks(scene, APPROACH, approach_classes, t_s, behind(4_000.0), 0, None, False, 70.0, words,
-                              False)[APPROACH_CLEARED + 1]
+                              False, others)[APPROACH_CLEARED + 1]
     assert speaking_masks(scene, APPROACH, approach_classes, t_s, behind(8_000.0), 0, None, False, 70.0, words,
-                          False).all()
+                          False, others).all()
     # an aircraft already cleared has nothing to be masked
     assert speaking_masks(scene, APPROACH, approach_classes, t_s, behind(4_000.0), 0, None, True, 70.0, words,
-                          False).all()
+                          False, others).all()
 
 
 def test_the_judge_ends_the_speaking_aircraft_at_a_loss_it_answers_for(tmp_path, monkeypatch):

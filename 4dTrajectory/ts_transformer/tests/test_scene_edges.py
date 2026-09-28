@@ -152,3 +152,20 @@ def test_an_absent_aircraft_has_no_edges_and_a_crossing_pair_closes_to_its_close
     assert crossing[K["cpa_time"]] == pytest.approx(4_000.0 / 70.0 / 120.0)
     assert crossing[K["cpa_horizontal"]] == pytest.approx(0.0, abs=1e-6)
     assert crossing[K["left"]] == pytest.approx(math.asinh(4_000.0 / 5_556.0))
+
+
+def test_scenes_stacked_on_one_axis_read_each_scene_as_alone_and_no_pair_across():
+    """`scene_edges`' ``scenes`` (the loop stacks the scenes of one airport in one call): each scene's block is its
+    features alone, value for value, and a pair across two scenes stays 0."""
+    first = rows(_aircraft(-4_000.0), _aircraft(-9_000.0, time=0.7, category="C"),
+                 _aircraft(-6_000.0, runway="P", n=-1_100.0), steps=4)
+    second = rows(_aircraft(-12_000.0, runway="X", track=270.0), _aircraft(-3_000.0, speed=65.0), steps=4)
+    stacked = SceneRows(np.concatenate([first.time_s, second.time_s]), np.concatenate([first.e_m, second.e_m]),
+                        np.concatenate([first.n_m, second.n_m]), np.concatenate([first.height_m, second.height_m]),
+                        np.concatenate([first.along_m, second.along_m]), [*first.runway, *second.runway],
+                        [*first.category, *second.category])
+    together = scene_edges(stacked, SEPARATION, [0, 0, 0, 1, 1])
+    assert np.array_equal(together[:, :3, :3], scene_edges(first, SEPARATION))
+    assert np.array_equal(together[:, 3:, 3:], scene_edges(second, SEPARATION))
+    assert not together[:, :3, 3:].any() and not together[:, 3:, :3].any()
+    assert together[:, :3, :3].any() and together[:, 3:, 3:].any()

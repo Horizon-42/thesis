@@ -37,6 +37,7 @@ the record's, not the prior's, and are not judged.
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -166,12 +167,39 @@ class Aircraft:
     captured: bool
 
 
+@dataclass(frozen=True)
+class OthersAt:
+    """A scene's others on a step at an instant as the separation masks read them (module docstring), in the scene's
+    order: their traffic (`traffic_census.traffic_at`), their speed along their course, their speed targets and whether
+    they are cleared — the same for every sentence said in the scene and both masked columns (`others_at`)."""
+
+    traffic: Traffic
+    speeds: np.ndarray
+    targets: np.ndarray
+    cleared: np.ndarray
+
+
+def others_at(scene: Scene, t_s: float, words: Words) -> OthersAt:
+    """``scene``'s others on a step at ``t_s`` (`OthersAt`)."""
+    keys = [k for k in scene.others if scene.track(k).on_step(t_s)]
+    here = [scene.track(k) for k in keys]
+    levels = [words.speed_mps(i) for i in range(words.speed_unspecified)]
+    said = [_labelled(scene.rows(k), t_s) for k in keys]
+    speeds = np.array([float(np.interp(t_s, t.presence.times_s, t.along_rate_mps)) for t in here])
+    targets = np.array([_target(scene.rows(k), force, levels, words, float(speeds[m]))
+                        for m, (k, force) in enumerate(zip(keys, said))])
+    cleared = np.array([int(force[APPROACH]) - 1 == APPROACH_CLEARED if force is not None else t_s >= t.captured_s
+                        for t, force in zip(here, said)], dtype=bool)
+    return OthersAt(traffic_at(here, t_s), speeds, targets, cleared)
+
+
 def speaking_masks(scene: Scene, column: int, classes: int, t_s: float, aircraft: Aircraft, runway: int,
-                   speed_word: int | None, cleared: bool, approach_mps: float, words: Words, opening: bool) -> np.ndarray:
+                   speed_word: int | None, cleared: bool, approach_mps: float, words: Words, opening: bool,
+                   others: OthersAt) -> np.ndarray:
     """``[classes]``: the classes of ``column`` (one of `MASK_COLUMNS`) the separation masks leave the speaking
     aircraft at ``t_s`` (module docstring): on candidate ``runway``, its speed word in force (None: none yet) and whether
     it is cleared; ``approach_mps`` the speed its "unspecified" word flies; at the ``opening`` step "unchanged" is the
-    model's to mask."""
+    model's to mask; ``others``: the scene's others then (`others_at`)."""
     out = np.ones(classes, dtype=bool)
     airport = scene.airport
     geometry, separation = airport.flights.geometry, airport.flights.separation
@@ -179,25 +207,19 @@ def speaking_masks(scene: Scene, column: int, classes: int, t_s: float, aircraft
     relative = relative_to_runway(np.array([aircraft.e_m]), np.array([aircraft.n_m]), np.array([aircraft.track_deg]),
                                   np.array([aircraft.height_m]), candidate)
     angle = float(relative.track_minus_course_deg[0])
-    keys = [k for k in scene.others if scene.track(k).on_step(t_s)]
-    here = [scene.track(k) for k in keys]
     traffic = join(Traffic(np.array([aircraft.e_m]), np.array([aircraft.n_m]), np.array([aircraft.height_m]),
                            (candidate.ident,),
                            np.array([separation.along_nm[candidate.ident] * NM_M - float(relative.before_threshold_m[0])]),
                            np.array([angle]), np.array([float(relative.right_of_course_m[0])]),
                            np.array([aircraft.captured]), (scene.speaking.category,)),
-                   traffic_at(here, t_s))
+                   others.traffic)
     levels = [words.speed_mps(i) for i in range(words.speed_unspecified)]
-    said = [_labelled(scene.rows(k), t_s) for k in keys]
     if column == SPEED:
-        speeds = np.array([aircraft.ground_speed_mps * math.cos(math.radians(angle)),
-                           *(float(np.interp(t_s, t.presence.times_s, t.along_rate_mps)) for t in here)])
+        speeds = np.concatenate(([aircraft.ground_speed_mps * math.cos(math.radians(angle))], others.speeds))
         candidates = np.append(levels, approach_mps)
         if len(candidates) != classes - 1:
             raise ValueError(f"{len(candidates)} speed words, the column has {classes} classes")
-        targets = np.array([candidates[speed_word] if speed_word is not None else speeds[0],
-                            *(_target(scene.rows(k), force, levels, words, float(speeds[m]))
-                              for m, (k, force) in enumerate(zip(keys, said), start=1))])
+        targets = np.concatenate(([candidates[speed_word] if speed_word is not None else speeds[0]], others.targets))
         check = speed_check(traffic, 0, separation, speeds, targets, candidates, 0 if speed_word is None else speed_word,
                             speed_change_mps2(words.spec), ATC_NO_SPEED_ASSIGNMENT_DISTANCE_M)
         if check is not None:
@@ -205,9 +227,7 @@ def speaking_masks(scene: Scene, column: int, classes: int, t_s: float, aircraft
             out[0] = opening or speed_word is None or check.unchanged_allowed
     elif column == APPROACH:
         if not cleared:
-            others_cleared = [int(force[APPROACH]) - 1 == APPROACH_CLEARED if force is not None else t_s >= t.captured_s
-                              for t, force in zip(here, said)]
-            gate = clearance_check(traffic, 0, separation, np.array([False, *others_cleared], dtype=bool))
+            gate = clearance_check(traffic, 0, separation, np.concatenate(([False], others.cleared)))
             if gate is not None and not gate.allowed:
                 out[APPROACH_CLEARED + 1] = False
     else:
@@ -259,6 +279,12 @@ def edge_rows(scene: Scene, e: np.ndarray, n: np.ndarray, h: np.ndarray, pointer
     loop's speaker and for a trainer scoring a sentence in its scene: the speaking aircraft from batch step ``pre`` over its
     first ``rows`` rows (its positions ``e``, ``n``, ``h`` and the runway class in force before each row, ``pointers``,
     0: none), on the loop's steps; the others at their recorded rows."""
+    return SceneRows(*_edge_arrays(scene, e, n, h, pointers, rows, pre, low, last, step_s))
+
+
+def _edge_arrays(scene: Scene, e: np.ndarray, n: np.ndarray, h: np.ndarray, pointers: np.ndarray, rows: int, pre: int,
+                 low: int, last: int, step_s: float) -> tuple[Any, ...]:
+    """`edge_rows`' fields, unchecked (the loop stacks a batch's scenes and checks them once)."""
     airport = scene.airport
     geometry, separation = airport.flights.geometry, airport.flights.separation
     members = [scene.speaking, *(scene.rows(k) for k in scene.others)]
@@ -289,7 +315,7 @@ def edge_rows(scene: Scene, e: np.ndarray, n: np.ndarray, h: np.ndarray, pointer
         east[m, cols], north[m, cols], height[m, cols] = other.e_m[own], other.n_m[own], other.height_m[own]
         along[m, cols] = other.along_m[own]
         runway[m][cols] = other.runway[own]
-    return SceneRows(time_s, east, north, height, along, runway, [f.category for f in members])
+    return time_s, east, north, height, along, runway, [f.category for f in members]
 
 
 def speaking_edges(scene: Scene, e: np.ndarray, n: np.ndarray, h: np.ndarray, pointers: np.ndarray, pre: int,
@@ -316,6 +342,8 @@ class SceneLoop(ClosedLoop):
         #: per masked column, per step: which flights the separation masks took a word from ([B] bool)
         self.separation_masked: dict[int, list[np.ndarray]] = {column: [] for column in MASK_COLUMNS}
         self._state: tuple[int, list[Aircraft] | None] = (-1, None)
+        #: the scenes' others at the newest row, by scene (a scene's sentences share one object): (row, {id: OthersAt})
+        self._others: tuple[int, dict[int, OthersAt]] = (-1, {})
         super().__init__(model, flights, geometries, inputs, runways, charts, approach_ias_mps, limits, words, params,
                          landings, generator=generator, temperature=temperature, procedure_masks=procedure_masks)
 
@@ -340,11 +368,22 @@ class SceneLoop(ClosedLoop):
         out = np.zeros((len(self.scenes), last - first, speaker.aircraft, speaker.aircraft,
                         len(speaker.model.traffic_features)), dtype=np.float32)
         pointers = speaker.in_force[:, 0, : speaker.rows, RUNWAY].cpu().numpy()
+        # the scenes of one airport stacked on one aircraft axis, one call (`scene_edges`' ``scenes``: pairs within each)
+        by_airport: dict[str, list[int]] = defaultdict(list)
         for b, scene in enumerate(self.scenes):
-            members = 1 + len(scene.others)
-            rows = edge_rows(scene, speaker.e[b], speaker.n[b], speaker.h[b], pointers[b], speaker.rows, speaker.pre,
-                             low, last, self.step_s)
-            out[b, :, :members, :members] = scene_edges(rows, scene.airport.flights.separation)[first - low:]
+            by_airport[scene.airport.flights.code].append(b)
+        for members in by_airport.values():
+            parts = [_edge_arrays(self.scenes[b], speaker.e[b], speaker.n[b], speaker.h[b], pointers[b], speaker.rows,
+                                  speaker.pre, low, last, self.step_s) for b in members]
+            sizes = [len(part[-1]) for part in parts]
+            stacked = SceneRows(*(np.concatenate([part[k] for part in parts]) for k in range(5)),
+                                [row for part in parts for row in part[5]], [c for part in parts for c in part[6]])
+            edges = scene_edges(stacked, self.scenes[members[0]].airport.flights.separation,
+                                np.repeat(np.arange(len(parts)), sizes))[first - low:]
+            offset = 0
+            for b, size in zip(members, sizes):
+                out[b, :, :size, :size] = edges[:, offset: offset + size, offset: offset + size]
+                offset += size
         return out
 
     def close(self) -> None:
@@ -378,10 +417,14 @@ class SceneLoop(ClosedLoop):
             if done[b] or not pointer:
                 continue
             speed = int(speaker.value[b, SPEED]) - 1
-            out[b] = speaking_masks(scene, column, classes, scene.first_step_s + row * self.step_s, state[b],
-                                    pointer - 1, speed if speed >= 0 else None,
+            t_s = scene.first_step_s + row * self.step_s
+            if self._others[0] != row:
+                self._others = (row, {})
+            if id(scene) not in self._others[1]:
+                self._others[1][id(scene)] = others_at(scene, t_s, self.words)
+            out[b] = speaking_masks(scene, column, classes, t_s, state[b], pointer - 1, speed if speed >= 0 else None,
                                     int(speaker.value[b, APPROACH]) - 1 == APPROACH_CLEARED, float(self.approach_mps[b]),
-                                    self.words, row == N_LOOK)
+                                    self.words, row == N_LOOK, self._others[1][id(scene)])
         self.separation_masked[column].append(~out.all(axis=1))
         return out
 
