@@ -238,3 +238,23 @@ def test_the_runner_reads_the_model_alone_and_in_its_scene_and_the_record(tmp_pa
     assert set(readout) == {"scene", "alone", "recorded"} and readout["scene"]["flights"] == 2
     assert readout["scene"]["left_out_starting_in_a_loss"] == 2 and readout["recorded"]["left_out_starting_in_a_loss"] == 1
     assert readout["alone"]["mask_steps_share"] == {"approach": 0.0, "speed": 0.0}
+
+
+def test_a_closed_loop_lets_its_speaker_go_without_the_cyclic_collector(tmp_path, monkeypatch):
+    """The speaker holds the loop's callbacks and the loop holds it: `close` breaks the cycle, so the speaker's past (the
+    model's keys and values of every step) is freed as soon as the loop is dropped."""
+    import gc
+    import weakref
+
+    airport, signals, spec = _airport(tmp_path, monkeypatch)
+    torch.manual_seed(1)
+    loop, _, _ = _loop(with_traffic(_model(Words(spec)), EDGE_FEATURES).eval(), airport, signals, spec, "KXXX:f1")
+    loop.step()
+    speaker = weakref.ref(loop.speaker)
+    gc.disable()
+    try:
+        loop.close()
+        del loop
+        assert speaker() is None
+    finally:
+        gc.enable()

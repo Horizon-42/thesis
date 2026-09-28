@@ -297,6 +297,13 @@ class SceneLoop(ClosedLoop):
             out[b, :, : len(members), : len(members)] = scene_edges(rows_here, separation)[first - low:]
         return out
 
+    def close(self) -> None:
+        """Let the speaker go: it holds the loop's callbacks and the loop holds it — a cycle only the cyclic collector
+        frees, which does not watch the GPU, so the model's past of every batch piled up until it filled the GPU (the
+        first formal run). Read what is wanted first."""
+        self.speaker.edges_of = self.speaker.masks_of = None
+        self.speaker = None
+
     def _now(self, row: int) -> list[Aircraft]:
         """Every flight's executor state at the start of the step at ``row`` (read once a step)."""
         if self._state[0] != row:

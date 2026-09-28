@@ -138,6 +138,8 @@ def model_rows(model: Prior, batch: replay.Batch, scenes: Sequence[Scene], judge
         loop.step()
     flown, said = loop.executor.flown(), loop.spoken.sentences()
     forbidden = {c: np.stack(masses, axis=1) for c, masses in loop.speaker.forbidden.items()}
+    pre, placed = loop.speaker.pre, loop.speaker.others
+    loop.close()
     rows, grids, stops = said_rows(repeated, flown, said, forbidden, words, [j % samples for j in range(len(said))],
                                    procedure_masks)
     for j, row in enumerate(rows):
@@ -150,7 +152,7 @@ def model_rows(model: Prior, batch: replay.Batch, scenes: Sequence[Scene], judge
         fields = separation_fields(scene, aircraft, step_s)
         counted = judged_steps(fields, aircraft, row["steps_said"], step_s)
         row.update(source=source, others=len(scene.others), speaking_with=len(scenes[index[j]].others),
-                   history_cut=sum(o.first_step < -loop.speaker.pre for o in loop.speaker.others[j]),
+                   history_cut=sum(o.first_step < -pre for o in placed[j]),
                    judged_steps=counted, mask_steps=_mask_steps(loop.separation_masked, j, counted),
                    masked_mass={COLUMNS[c]: float(forbidden[c][j, :counted].mean()) if counted else 0.0
                                 for c in MASK_COLUMNS},
@@ -342,7 +344,10 @@ def main(argv: list[str] | None = None) -> int:
                 stream.write(json.dumps(row) + "\n")
         rows += new
         done += len(chunk)
-        print(f"  {done}/{len(order)} flights ({len(batches)} batches), {time.perf_counter() - started:.0f}s", flush=True)
+        held = (f", GPU {torch.cuda.memory_allocated() / 1e9:.2f} GB held" if torch.device(args.device).type == "cuda"
+                else "")
+        print(f"  {done}/{len(order)} flights ({len(batches)} batches), {time.perf_counter() - started:.0f}s{held}",
+              flush=True)
 
     by_airport: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
