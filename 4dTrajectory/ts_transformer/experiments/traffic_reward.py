@@ -222,30 +222,30 @@ def ordering(rows: Sequence[Mapping[str, Any]], round_: Round, samples: int, ste
     """On real scenes (design §4.3, one aircraft commanded): the sentences that landed with no loss ending them first
     (VISUAL) — their median time from the first predicted step to the landing and median gap to the landing before on
     the runway (`landing_gap_s`: the landing at its first predicted step's time — its scene step, within a second — plus
-    its flight time) — each over the same flights' recorded ones."""
-    times, gaps = [], []
+    its flight time) — each against the same sentences' flights as recorded (a flight counted once a landed sentence;
+    a gap where both have one)."""
+    times, recorded_times, gaps, recorded_gaps = [], [], [], []
     for s, row in enumerate(rows):
         if row[VISUAL]["outcome"] != LANDED:
             continue
         scene = round_.scenes[s // samples]
+        own = scene.track(scene.key).presence
         times.append(row["end_s"])
+        recorded_times.append(row["observed_remaining_s"])
         ident = scene.airport.flights.geometry.candidates[row["last_runway"]].ident
         gap = landing_gap_s(scene, ident, scene.first_step_s + N_LOOK * step_s + row["end_s"])
-        if gap is not None:
+        recorded = landing_gap_s(scene, own.runway, own.landing_s)
+        if gap is not None and recorded is not None:
             gaps.append(gap)
-    recorded_times = [rows[j * samples]["observed_remaining_s"] for j in range(len(round_.scenes))]
-    recorded_gaps = [g for g in (landing_gap_s(scene, scene.track(scene.key).presence.runway,
-                                               scene.track(scene.key).presence.landing_s)
-                                 for scene in round_.scenes) if g is not None]
+            recorded_gaps.append(recorded)
 
     def median(values: Sequence[float]) -> float | None:
         return float(np.median(values)) if values else None
 
     out = {"time_to_land_s": median(times), "recorded_time_to_land_s": median(recorded_times),
            "gap_s": median(gaps), "recorded_gap_s": median(recorded_gaps), "landed_with_a_gap": len(gaps)}
-    out["time_ratio"] = (out["time_to_land_s"] / out["recorded_time_to_land_s"]
-                         if out["time_to_land_s"] is not None else None)
-    out["gap_ratio"] = out["gap_s"] / out["recorded_gap_s"] if gaps and recorded_gaps else None
+    out["time_ratio"] = out["time_to_land_s"] / out["recorded_time_to_land_s"] if times else None
+    out["gap_ratio"] = out["gap_s"] / out["recorded_gap_s"] if gaps else None
     return out
 
 
@@ -401,6 +401,7 @@ def write_traffic_prior(directory: Path, model: Prior, start_dir: Path, start: L
                 "spec_sha256": spec_sha256, **features, "start": grown_from}, directory / "checkpoint.pt")
     write_json_atomic(directory / "config.json", {**start.config, "schema": TRAFFIC_CHECKPOINT_SCHEMA,
                                                   "written_utc": utc_now(), "git": dict(git), "smoke": smoke, **features,
+                                                  "parameters": sum(p.numel() for p in model.parameters()),
                                                   "start": grown_from, "fine_tuning": dict(fine_tuning)})
     write_masks(directory, start.procedure_masks, writer=RUNNER, git=dict(git))
 
@@ -568,6 +569,8 @@ def main(argv: list[str] | None = None) -> int:
         round_ = join_rounds([real_round(replay.subset(pool, real), train_airports, params, every_landing, step_s),
                               augmented])
         model.eval()
+        if device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(device)
         spoken = speak(model, round_, args.samples, words, params, landings, start_masks, generator=generator,
                        budget=args.aircraft_steps, source="train")
         earned = np.array([r["reward"] for r in spoken.rows])
@@ -593,7 +596,6 @@ def main(argv: list[str] | None = None) -> int:
                   "distance_at_start": start_distance, "distance_sentences": measured_on}
         if device.type == "cuda":
             passed["gpu_peak_gb"] = torch.cuda.max_memory_allocated(device) / 1e9
-            torch.cuda.reset_peak_memory_stats(device)
         log(f"round {round_number}: one pass over {len(keep)} sentences ({passed['batches']} updates), reward term "
             f"{passed['reward_mean']:.4f}, KL to the base at the start {start_distance}, {passed['kl_mean']:.4f} in the "
             f"pass (max {passed['kl_max']:.4f}), data NLL {passed['data_mean']:.4f}, words outside the clip "

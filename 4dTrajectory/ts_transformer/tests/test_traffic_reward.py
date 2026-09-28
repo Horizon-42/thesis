@@ -55,7 +55,8 @@ def _patch_physics(monkeypatch, airport, signals, keys, samples):
 @pytest.mark.parametrize("moved", [False, True])
 def test_a_round_s_sentences_train_on_what_their_words_were_sampled_from(tmp_path, monkeypatch, moved):
     """f1 follows f0 by 120 s on its approach (in its scene, not in a loss; f0's rows 0.7 s off f1's steps), f2 an hour
-    later alone; ``moved``: f0 moved 37.3 s closer (augmentation D) and the prior reads the landing context — the scene's."""
+    later alone; ``moved``: f0 moved 37 s closer (augmentation D; its rows still 0.7 s off the steps) and the prior reads
+    the landing context — the scene's."""
     from ts_transformer.experiments.traffic_augment import moved as moved_flight
     from ts_transformer.experiments.traffic_free_generation import speaking_batches
     from ts_transformer.experiments.traffic_reward import Round, round_summary, sentence_split, speak
@@ -73,7 +74,7 @@ def test_a_round_s_sentences_train_on_what_their_words_were_sampled_from(tmp_pat
     landings, variant = None, "no-context"
     if moved:
         leader = scenes[0]
-        scenes[0] = replace(leader, moved=(moved_flight(leader.rows("KXXX:f0"), leader.track("KXXX:f0"), 37.3, "KXXX:f0",
+        scenes[0] = replace(leader, moved=(moved_flight(leader.rows("KXXX:f0"), leader.track("KXXX:f0"), 37.0, "KXXX:f0",
                                                         spec.step_s),))
         (landings,), variant = context, "full"
     round_ = Round(batch, scenes, [None, None], ["D" if moved else "real", "A"],
@@ -177,7 +178,9 @@ def test_the_guards_exclude_a_round_by_name_and_the_choice_takes_the_earliest_wi
 
 def test_a_scene_starting_in_a_loss_is_not_trained_on_and_the_readouts_read_the_rest(tmp_path, monkeypatch):
     """f1 follows f0 by 30 s (in a loss it answers for at its first predicted step), f3 an hour later alone."""
-    from ts_transformer.experiments.traffic_reward import Round, ordering, round_summary, speak, trained_scenes
+    from ts_transformer.experiments.traffic_reward import (
+        Round, ordering, ordering_failures, round_summary, side_readout, speak, trained_scenes,
+    )
     from ts_transformer.experiments.traffic_speaking import scene_of
 
     airport, signals, spec = _airport(tmp_path, monkeypatch)
@@ -197,11 +200,18 @@ def test_a_scene_starting_in_a_loss_is_not_trained_on_and_the_readouts_read_the_
     assert np.allclose(advantages[2:], [0.5, -0.5])
     described = round_summary(round_, spoken, samples)
     assert described["scenes_starting_in_a_loss"] == 1 and described["scenes_with_contrast"] == 1
-    # the ordering: f3 has no landing before it in its scene; f1 lands 20 s after f2 (background, entering 10 s after f0)
+    # the ordering reads the landed sentences against their own flights' records: f1 never lands (a loss ends it at
+    # its first step), f3 has no landing before it in its scene — no gap to read, which fails the gap guard
     order = ordering(spoken.rows, round_, samples, spec.step_s)
-    assert order["recorded_gap_s"] == pytest.approx(20.0, abs=1.0)
     landed = [r for r in spoken.rows if r["visual"]["outcome"] == "landed"]
-    assert order["time_to_land_s"] == (float(np.median([r["end_s"] for r in landed])) if landed else None)
+    assert all(r["dataset_id"] == "KXXX:f3" for r in landed)
+    assert order["gap_s"] is None and order["recorded_gap_s"] is None and order["landed_with_a_gap"] == 0
+    if landed:
+        assert order["recorded_time_to_land_s"] == landed[0]["observed_remaining_s"]
+    assert "landing gap" in ordering_failures({"real": {"ordering": order}})
+    # the select readout leaves out the flights starting in a loss, as the separation summary does
+    readout = side_readout(spoken.rows, round_, samples, spec.step_s, real=True)
+    assert readout["reward"] == pytest.approx(0.5) and readout["separation"]["left_out_starting_in_a_loss"] == 2
 
 
 def test_the_traffic_readout_is_zero_at_the_start_and_reads_the_layer_once_it_moves(tmp_path, monkeypatch):
@@ -256,3 +266,14 @@ def test_a_traffic_prior_the_runner_writes_is_read_back_by_load_prior(tmp_path, 
     assert loaded.model.traffic_features == EDGE_FEATURES and loaded.config["fine_tuning"] == {"round": 1}
     assert all(torch.equal(value, loaded.model.state_dict()[name]) for name, value in model.state_dict().items())
     assert loaded.procedure_masks.names == start.procedure_masks.names
+
+
+def test_the_ordering_guards_read_the_record_and_an_unreadable_ratio_fails():
+    from ts_transformer.experiments.traffic_reward import ordering_failures
+
+    def row(time_ratio, gap_ratio):
+        return {"real": {"ordering": {"time_ratio": time_ratio, "gap_ratio": gap_ratio}}}
+
+    assert ordering_failures(row(1.0, 1.19)) == []
+    assert ordering_failures(row(1.21, 1.0)) == ["time to land"]
+    assert ordering_failures(row(None, 1.3)) == ["time to land", "landing gap"]

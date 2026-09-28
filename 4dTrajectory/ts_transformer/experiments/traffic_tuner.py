@@ -106,11 +106,6 @@ class SceneBatch:
     pre: int
     rows: int
 
-    @property
-    def aircraft_steps(self) -> int:
-        count, aircraft, steps = self.inputs["present"].shape
-        return count * aircraft * steps
-
 
 def _pre(scene: Scene, step_s: float) -> tuple[int, list[Any]]:
     """A scene's others as the speaker places them and its pre-roll (the speaker's rule: the most steps an other is in
