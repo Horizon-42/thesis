@@ -397,7 +397,8 @@ clearance; computed by the loop and handed to the speaker, the prior never impor
 the labelled words (formal `masks_v2_20260928`: 0.32 % masked) (R27); `traffic_interaction` is M1 — the base prior's NLL
 on steps with a leader / busy, matched on phase and airport (formal `interaction_20260928`: speed +0.0077 with a leader) (R28). `traffic_prior_train` is M2 — base's recipe on scene samples with 17 edge features
 (`inference/scene_edges.py`: motion from the row before, never the fitted velocities), checkpoint `ts-prior-checkpoint-v4`
-pinned to the edge code by `edge_source_sha256` (R29).
+pinned to the edge code by `edge_source_sha256` (R29). `traffic_scene_readout` reads it against base on the select days — scene
+− base and scene − alone (attention between aircraft cut) on leader / busy steps (R30).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 

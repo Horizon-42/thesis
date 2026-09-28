@@ -376,7 +376,7 @@ def test_the_frontend_reader_mirrors_the_exporters_names():
 
 
 # ---- the prior's runner end to end, on a synthetic artefact and an untrained checkpoint (every write in tmp_path)
-def _prior_dir(directory, artefact, roster):
+def _prior_dir(directory, artefact, roster, variant="full"):
     """A prior directory as `prior_train` writes one, holding a small untrained network of ``artefact``'s spec, trained
     with the tracks roster ``roster``."""
     from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, roster_record
@@ -388,7 +388,7 @@ def _prior_dir(directory, artefact, roster):
     airports = tuple(sorted(geometries))
     slots = max(len(g.candidates) for g in geometries.values())
     config = PriorConfig(classes=column_classes(Words(one), slots), airports=airports, candidate_slots=slots,
-                         variant="full", d_model=32, layers=2, heads=4, feedforward=64, dropout=0.0)
+                         variant=variant, d_model=32, layers=2, heads=4, feedforward=64, dropout=0.0)
     torch.manual_seed(0)
     model = Prior(config, torch.as_tensor(prior_data.candidate_table(geometries, airports, slots)))
     directory.mkdir()

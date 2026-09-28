@@ -729,3 +729,20 @@ flight's asked rows), so the val NLL per step reads against base's 0.2643.
 - Writes `checkpoint.pt`, `config.json`, `procedure_masks.json` (none: teacher forcing) and `history.json` into a NEW
   directory, from a clean tree unless `--limit` (SMOKE: the first N samples of each split). Train 15,812 samples (45
   asking nothing, left out), val 3,800; about 5–6 minutes per epoch on the RTX 4060.
+
+### R30 · `run_ts.py traffic_scene_readout` — multi-aircraft M2's readout: what the scene prior gains from seeing traffic (design §6.1, §7)
+
+2026-09-28. `traffic_scene_readout --scene <scene prior> --base <base prior> --instructions <artefact> --out <new dir>
+[--device]`. On the select days every labelled flight's asked cells are read three ways, teacher-forced: **base**
+(single aircraft), **scene** (in its scene samples, with edge features) and **alone** (the scene prior with each aircraft
+in a sample of its own: the attention between aircraft cut). Refused unless the scene samples ask exactly base's cells,
+each once, and the two priors read the same artefact, variant, airports and tracks rosters (and the scene prior's edge
+code is today's, `load_prior`). Records, pooled (strata airport × phase) and per airport: each reading's NLL per step
+over every asked cell (the training runners' measure); per read column (speed, heading, clearance) and M1's flags
+(leader, busy), from row N_LOOK + 1, the paired means of scene − base, scene − alone and KL(scene ‖ alone) on the
+flagged and the other steps, each with a 95 % interval from 200 airport × UTC-hour cluster resamples (resamples without
+a step counted); and for every reading and paired quantity M1's matched gap (flagged less the others within phase
+strata). Every quantity is drawn with the same resamples — a generator of its own, airport by airport then the pool, as
+M1 drew — so base's matched gap reproduces M1's `interaction_20260928` to the bit, intervals included (tested). A smoke
+prior is read and recorded as one. A readout only (design §6.1: recorded; a leader-step gain within seed noise asks for
+a second seed). Writes `scene_readout.json` (`ts-traffic-scene-readout-v1`).
