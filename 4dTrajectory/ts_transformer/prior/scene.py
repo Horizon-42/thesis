@@ -162,6 +162,19 @@ def presence(flight: FlightSignals, sentence_rows: int | None, geometry: Airport
                     sentence_rows is not None, utc_s(flight.entry_time_utc) + flight.time_s[:rows], distance)
 
 
+def leader_gap_m(ego: Presence, near: Sequence[Presence], rows_s: np.ndarray, present: np.ndarray) -> np.ndarray:
+    """At each of ``ego``'s rows at ``rows_s`` (epoch seconds), how far ahead its LEADER is (§8): among the ``near``
+    aircraft present there (``present``: ``[len(near), len(rows_s)]`` bool), one landing earlier on the same observed
+    runway and at most `LEADER_RANGE_M` closer to its threshold (straight-line distances), the nearest; inf without one."""
+    ego_to_go = np.interp(rows_s, ego.times_s, ego.to_threshold_m)
+    gap = np.full(len(rows_s), np.inf)
+    for other, here in zip(near, present):
+        if other.runway == ego.runway and other.landing_s < ego.landing_s and here.any():
+            ahead = np.where(here, ego_to_go - other.to_threshold_at(rows_s), np.inf)
+            gap = np.minimum(gap, np.where((ahead > 0.0) & (ahead <= LEADER_RANGE_M), ahead, np.inf))
+    return gap
+
+
 class SceneIndex:
     """One airport's flights by time: who is in the scene at time t."""
 

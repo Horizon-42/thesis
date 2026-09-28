@@ -394,7 +394,8 @@ in the scene closed loop (`experiments/traffic_loop.py`, shared with M3/M4) besi
 (formal `labelled_v2_20260928`: 3.93 vs 2.76 % ended under VISUAL; the pass line gates the executor's addition) (R26);
 `traffic_masks` measures the loop's two separation masks (`inference/separation_masks.py`: speed words, approach
 clearance; computed by the loop and handed to the speaker, the prior never imports them; a fallback masks nothing) on
-the labelled words (formal `masks_v2_20260928`: 0.32 % masked) (R27).
+the labelled words (formal `masks_v2_20260928`: 0.32 % masked) (R27); `traffic_interaction` is M1 — the base prior's NLL
+on steps with a leader / busy, matched on phase and airport (formal `interaction_20260928`: speed +0.0077 with a leader) (R28).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 

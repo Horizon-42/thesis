@@ -691,3 +691,16 @@ crossing. Pass line (design §3.4 step 0): ≤ 1 % of the labelled speed words a
 (`ts-traffic-masks-v2`; v1 left the slowest words in a fallback) into a NEW directory; about 6 minutes, CPU. Formal:
 `outputs/POOLED/traffic/masks_v2_20260928/` (`13097a09`): 0.32 % masked (speed words 0.18 %, clearances 0.71 %; KSJC
 0.98 % the most, half of its clearances across the close pair 30L/30R) — passes, read pooled (§9 item 19).
+
+### R28 · `run_ts.py traffic_interaction` — multi-aircraft M1: does the single-aircraft base prior's word choice depend on traffic it cannot see (design §6.1, prior design §8)
+
+2026-09-28. `traffic_interaction --prior <prior run> --instructions <its artefact> --out <new dir> [--device]`. The prior
+teacher-forced on the select days; at every step after the first predicted one (row N_LOOK + 1 on: at N_LOOK every column
+is said from scratch, a change certain) the speed, heading and approach columns' NLL and change probability. Steps flagged
+**leader** (`prior.scene.leader_gap_m`, the scene census's definition) and **busy** (≥ 3 aircraft, background counted);
+compared raw and within phase strata (established from the capture row × 5 km distance bins, the last open) — the pool's
+strata airport × phase — weighted by the flagged steps; 95 % interval from 200 resamples of airport × UTC-hour clusters.
+A readout only (design §9 item 12). Writes `interaction.json` (`ts-traffic-interaction-v1`) into a NEW directory; about a
+minute on the GPU. Formal: `outputs/POOLED/traffic/interaction_20260928/` (`cba749cc`, base): speed words with a leader
++0.0077 NLL per step (0.0035–0.0122), heading words when busy +0.0104, clearances with a leader −0.0082; KSJC and KSMF the
+most, KMSY and KRDU about none.

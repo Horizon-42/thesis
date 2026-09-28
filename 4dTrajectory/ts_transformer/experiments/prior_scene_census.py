@@ -38,7 +38,7 @@ from ts_transformer.data.day_split import operating_day_span_s
 from ts_transformer.instructions.artefact import load_candidates, load_day_split, load_sentences, load_signals, load_spec
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.scene import (
-    CONTEXT_WINDOW_S, LEADER_RANGE_M, N_LOOK, Landings, Presence, SceneIndex, context_landings, presence,
+    CONTEXT_WINDOW_S, LEADER_RANGE_M, N_LOOK, Landings, Presence, SceneIndex, context_landings, leader_gap_m, presence,
 )
 from ts_transformer.repo_layout import REPO_ROOT, git_state, tracks_manifest_path
 
@@ -67,7 +67,7 @@ def census_airport(speaking: list[Presence], background: list[Presence], landing
     index = SceneIndex(speaking + background)
     others_speaking, others_background, leader, gaps, with_landing, into_test = [], [], [], [], [], []
     for ego in speaking:
-        rows_s, ego_to_go = ego.times_s[N_LOOK:], ego.to_threshold_m[N_LOOK:]
+        rows_s = ego.times_s[N_LOOK:]
         if not len(rows_s):
             continue
         near = [p for p in index.overlapping(float(rows_s[0]), float(rows_s[-1])) if p.dataset_id != ego.dataset_id]
@@ -75,12 +75,7 @@ def census_airport(speaking: list[Presence], background: list[Presence], landing
         is_speaking = np.array([p.speaking for p in near], dtype=bool)
         others_speaking.append(present[is_speaking].sum(axis=0))
         others_background.append(present[~is_speaking].sum(axis=0))
-        # the leaders: earlier on the same runway, present, and 0 < (ego's distance − theirs) ≤ the range
-        gap = np.full(len(rows_s), np.inf)
-        for p, here in zip(near, present):
-            if p.runway == ego.runway and p.landing_s < ego.landing_s and here.any():
-                ahead = np.where(here, ego_to_go - p.to_threshold_at(rows_s), np.inf)
-                gap = np.minimum(gap, np.where((ahead > 0.0) & (ahead <= LEADER_RANGE_M), ahead, np.inf))
+        gap = leader_gap_m(ego, near, rows_s, present)
         leader.append(np.isfinite(gap))
         gaps.append(gap[np.isfinite(gap)])
         with_landing.append(landings.count_before(rows_s, CONTEXT_WINDOW_S) > 0)
