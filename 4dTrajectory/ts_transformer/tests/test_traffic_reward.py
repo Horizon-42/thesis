@@ -212,6 +212,22 @@ def test_paired_differences_read_the_sentences_both_rounds_count(tmp_path):
         (tmp_path / f"round_{number:02d}" / "readout.json").write_text(
             json.dumps({"augmented": {"flights": rows}, "real": {"flights": []}}))
     assert select_rewards(tmp_path, 1) == [{("a", "A", 0): 1.0}, {("a", "A", 0): 0.0}]
+    with pytest.raises(ValueError, match="nothing to pair"):
+        paired_difference({("a", "A", 0): 1.0}, {("a", "A", 1): 1.0})
+
+
+def test_the_highest_candidate_is_the_highest_on_the_paired_sentences():
+    """Round 3's own reward (over what it counts: 100 sentences more, all rewarded) is the highest, but on the sentences
+    it pairs with round 0 round 2 is: ranked on its own reward round 3 would not beat round 1 (+0.03 against 2 × √3 /
+    100), keeping 1; ranked on the pairs, as the candidates were found, round 2 beats round 1 and is kept."""
+    from ts_transformer.experiments.traffic_reward import guarded_choice
+
+    labelled = {side: {"approach": 1.0, "heading": 3.0, "altitude": 1.0, "angle": 1.0, "speed": 1.0}
+                for side in ("real", "augmented")}
+    history = [_row(0, reward=0.50), _row(1, reward=0.60), _row(2, reward=0.80), _row(3, reward=0.815)]
+    third = _rewards(63)
+    third.update({("KXXX:f", "A", k): 1.0 for k in range(100, 200)})     # counted only in round 3
+    assert guarded_choice(history, labelled, [_rewards(50), _rewards(60), _rewards(80), third]) == (2, {})
 
 
 def test_a_scene_starting_in_a_loss_is_not_trained_on_and_the_readouts_read_the_rest(tmp_path, monkeypatch):

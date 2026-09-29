@@ -7,6 +7,8 @@ the scene-data fixture (a tmp artefact)."""
 
 from __future__ import annotations
 
+import copy
+
 import numpy as np
 import pytest
 import torch
@@ -325,7 +327,55 @@ def test_several_passes_sweep_in_new_orders_against_the_model_frozen_once(tmp_pa
     assert any(not torch.equal(before[name], value) for name, value in model.state_dict().items())
     sweeps = [order[k:k + 4] for k in (0, 4, 8)]
     assert all(sorted(s) == [(0,), (1,), (2,), (3,)] for s in sweeps) and len(set(map(tuple, sweeps))) > 1
-    # the later sweeps start away from the frozen model: their words fall outside the clip more often than none
-    assert record["sweeps"][0]["clipped_share"] <= max(s["clipped_share"] for s in record["sweeps"][1:])
     with pytest.raises(ValueError, match="0 passes"):
         tuner.one_pass(sentences, np.zeros(4), data, slots=1, passes=0)
+
+
+@pytest.mark.filterwarnings("ignore:Seems like `optimizer.step\\(\\)` has been overridden")
+def test_two_passes_are_two_sweeps_against_one_frozen_model_and_one_stream(tmp_path, monkeypatch):
+    """Two passes in one call against two one-pass calls whose second reuses the first's frozen model: the same weights,
+    optimiser moments, warm-up schedule, random stream and traces — nothing is reset between sweeps (the data term reads
+    on, a batch at a time and part-way through its order)."""
+    from ts_transformer.experiments import traffic_tuner
+    from ts_transformer.experiments.traffic_tuner import SceneRewardTuner
+
+    _, words, sentences, data, spec = _round(tmp_path, monkeypatch, reads=True)
+    monkeypatch.setattr(traffic_tuner, "M2_BATCH", 1)
+    monkeypatch.setattr(traffic_tuner, "DATA_BATCHES", 1)
+    rows = max(f.rows for f in sentences.flights)
+    advantages = np.array([0.5, -0.5, 0.25, -0.25])
+
+    def tuner(model):
+        t = SceneRewardTuner(model, _model(words), RewardConfig(warmup_steps=3, tokens_per_batch=2 * rows), CPU,
+                             seed=0, traffic_learning_rate=3e-4, step_s=spec.step_s)
+        t.restart(np.random.default_rng([0, 1, 2]))
+        return t
+
+    together = _traffic_model(words)
+    one = tuner(together)
+    record = one.one_pass(sentences, advantages, data, slots=1, passes=2)
+
+    apart = _traffic_model(words)
+    two = tuner(apart)
+    frozen, deepcopy = [], copy.deepcopy
+
+    def frozen_once(value, memo=None):
+        if value is apart:
+            frozen.append(frozen[0] if frozen else deepcopy(value))
+            return frozen[-1]
+        return deepcopy(value, memo)
+
+    monkeypatch.setattr(traffic_tuner.copy, "deepcopy", frozen_once)
+    first = two.one_pass(sentences, advantages, data, slots=1)
+    second = two.one_pass(sentences, advantages, data, slots=1)
+    monkeypatch.setattr(traffic_tuner.copy, "deepcopy", deepcopy)
+    assert len(frozen) == 2 and frozen[0] is frozen[1]
+    assert all(torch.equal(value, apart.state_dict()[name]) for name, value in together.state_dict().items())
+    a, b = one.optimiser.state_dict(), two.optimiser.state_dict()
+    assert a["param_groups"] == b["param_groups"] and one.schedule.state_dict() == two.schedule.state_dict()
+    assert all(torch.equal(value, b["state"][key][name]) for key, moments in a["state"].items()
+               for name, value in moments.items())
+    assert one.rng.bit_generator.state == two.rng.bit_generator.state and one.passes == two.passes == 2
+    assert record["kl_trace"] == first["kl_trace"] + second["kl_trace"]
+    assert record["clipped_trace"] == first["clipped_trace"] + second["clipped_trace"]
+    assert [s["batches"] for s in record["sweeps"]] == [first["batches"], second["batches"]]

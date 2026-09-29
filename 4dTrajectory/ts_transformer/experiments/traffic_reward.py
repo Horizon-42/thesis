@@ -626,7 +626,6 @@ def guarded_choice(history: Sequence[Mapping[str, Any]], labelled: Mapping[str, 
             failed += [f"{side} {c} words" for c in GUARD_WORD_COLUMNS if now[c] > then[c] + margin]
         if failed:
             excluded[row["round"]] = failed
-    reward = [row["augmented"]["reward"] for row in history]
 
     def beats(k: int, j: int) -> bool:
         difference, error = paired_difference(rewards[j], rewards[k])
@@ -636,7 +635,8 @@ def guarded_choice(history: Sequence[Mapping[str, Any]], labelled: Mapping[str, 
                   if row["round"] > 0 and row["round"] not in excluded and beats(row["round"], 0)]
     if not candidates:
         return 0, excluded
-    best = max(candidates, key=lambda k: (reward[k], -k))
+    # the highest by its paired difference from round 0 (the sentences both count), as the candidates were found
+    best = max(candidates, key=lambda k: (paired_difference(rewards[0], rewards[k])[0], -k))
     return min(k for k in candidates if not beats(best, k)), excluded
 
 
@@ -644,6 +644,8 @@ def paired_difference(first: Mapping[Any, float], then: Mapping[Any, float]) -> 
     """``(then − first, its standard error)`` over the sentences both count, read as pairs: the mean difference and
     √(sentences whose reward differs) / sentences (the rewards are 0 or 1)."""
     keys = sorted(first.keys() & then.keys())
+    if not keys:
+        raise ValueError("no sentence is counted in both rounds: nothing to pair")
     a, b = np.array([first[k] for k in keys]), np.array([then[k] for k in keys])
     return float(np.mean(b - a)), math.sqrt(float(np.sum(a != b))) / len(keys)
 
@@ -770,6 +772,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--rounds is the last round to run, 0 or more")
     if args.samples < 2:
         parser.error("a scene's sentences are compared with each other: --samples ≥ 2")
+    if args.passes < 1:
+        parser.error("--passes is the sweeps over a round's sentences, 1 or more")
     if args.data_weight <= 0.0:
         parser.error("the post-training trains beside the data (design §6.2): --data-weight > 0")
     git = git_state()

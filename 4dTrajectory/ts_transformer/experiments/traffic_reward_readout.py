@@ -12,10 +12,11 @@ finished: every round it asked for (``config.rounds``) read, ``history.json`` an
   run's own numbers); lost separation by approach type (real) and by kind (augmented) from the sentences — a sentence
   starting in a loss it answers for left out, as the run's separation readout leaves it out; the sentences with a
   go-around (said anywhere to the executor's end); the traffic attention's output over the residual stream, per layer;
-- **training, per round ≥ 1**: the round's sentence summary and pass (the run's own numbers, traces left out), and where
-  the reward term's signal comes from — each scene's ``K`` sentences in one of `CLASSES`, per kind, and each class's
-  share of the summed |advantage| over all scenes. A scene starting in a loss is not trained on and the npz does not
-  mark it: it is counted in its class, and ``differing_scenes`` beside the run's ``scenes_with_contrast`` shows how many;
+- **training, per round ≥ 1**: the round's sentence summary and pass (the run's own numbers, traces left out, each
+  sweep's kept), and where the reward term's signal comes from — each scene's ``K`` sentences in one of `CLASSES`, per
+  kind, and each class's share of the summed |advantage| over all scenes. A scene starting in a loss is not trained on
+  and the npz does not mark it: it is counted in its class, and ``differing_scenes`` beside the run's
+  ``scenes_with_contrast`` shows how many;
 - **the select flights, first round against last**: every round speaks the select scenes with the SAME random streams
   (`traffic_reward`: the select generator is seeded alike every round), so a flight's samples are the same draws each
   round and differ only as the model has moved — rounds are paired, not repeated tries. Reported: the share of (flight,
@@ -263,7 +264,8 @@ def main(argv: list[str] | None = None) -> int:
         if number > 0:
             with np.load(directory / "sentences.npz") as sentences:
                 row["training"] = {"sentences": summary["sentences"],
-                                   "pass": {k: v for k, v in summary["train_pass"].items() if not isinstance(v, list)},
+                                   "pass": {k: v for k, v in summary["train_pass"].items()
+                                            if k == "sweeps" or not isinstance(v, list)},
                                    "signal": training_signal(sentences, config["samples"])}
         rounds.append(row)
         for side in SIDES:
