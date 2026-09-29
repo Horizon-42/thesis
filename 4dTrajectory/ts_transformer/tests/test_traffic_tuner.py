@@ -294,3 +294,38 @@ def test_a_pass_continued_from_the_saved_state_updates_as_one_run_does(tmp_path,
     assert whole.passes == later.passes == 2 and whole.schedule.last_epoch == later.schedule.last_epoch == 6
     assert all(torch.equal(value, later_model.state_dict()[name]) for name, value in continuous.state_dict().items())
     assert any(not torch.equal(value, first.state_dict()[name]) for name, value in continuous.state_dict().items())
+
+
+@pytest.mark.filterwarnings("ignore:Seems like `optimizer.step\\(\\)` has been overridden")
+def test_several_passes_sweep_in_new_orders_against_the_model_frozen_once(tmp_path, monkeypatch):
+    """Design §6.6 step 6 item 14: every sweep scores against the one model frozen at the start (the clipped ratio's
+    denominator: the model the sentences were said by), not one frozen again at each sweep; each sweep a new order."""
+    from ts_transformer.experiments.traffic_tuner import SceneRewardTuner
+
+    _, words, sentences, data, spec = _round(tmp_path, monkeypatch, reads=True)
+    rows = max(f.rows for f in sentences.flights)
+    model = _traffic_model(words, reads=True)
+    tuner = SceneRewardTuner(model, _model(words), RewardConfig(tokens_per_batch=2 * rows), CPU, seed=0,
+                             traffic_learning_rate=3e-4, step_s=spec.step_s)
+    frozen, order, scored = [], [], tuner._scene_scored
+
+    def spy(split, part, allowed, start):
+        frozen.append(start)
+        order.append(tuple(part))
+        return scored(split, part, allowed, start)
+
+    monkeypatch.setattr(tuner, "_scene_scored", spy)
+    before = {name: value.clone() for name, value in model.state_dict().items()}
+    record = tuner.one_pass(sentences, np.array([0.5, -0.5, 0.25, -0.25]), data, slots=1, passes=3)
+    assert record["batches"] == 12 and len(record["sweeps"]) == 3 and tuner.passes == 3
+    assert [s["batches"] for s in record["sweeps"]] == [4, 4, 4]
+    assert all(start is frozen[0] for start in frozen) and frozen[0] is not model
+    # the frozen model is the one before the first update; the trained one moved away from it
+    assert all(torch.equal(before[name], value) for name, value in frozen[0].state_dict().items())
+    assert any(not torch.equal(before[name], value) for name, value in model.state_dict().items())
+    sweeps = [order[k:k + 4] for k in (0, 4, 8)]
+    assert all(sorted(s) == [(0,), (1,), (2,), (3,)] for s in sweeps) and len(set(map(tuple, sweeps))) > 1
+    # the later sweeps start away from the frozen model: their words fall outside the clip more often than none
+    assert record["sweeps"][0]["clipped_share"] <= max(s["clipped_share"] for s in record["sweeps"][1:])
+    with pytest.raises(ValueError, match="0 passes"):
+        tuner.one_pass(sentences, np.zeros(4), data, slots=1, passes=0)

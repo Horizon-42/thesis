@@ -22,6 +22,10 @@ update) — with two differences:
   attention reads the others there too), `DATA_BATCHES` of M2's batches an update (together about as many asked steps
   as the second stage's data batch), their NLL per asked step.
 
+**Several passes** (design §6.6 step 6 item 14): ``passes`` sweeps over a round's sentences, each in a new order of
+batches, every one against the model frozen once at the start — the one the sentences were sampled from, so the clip
+bounds how far the sweeps go together (PPO's epochs); one pass is the one pass it always was.
+
 The traffic attention has its own learning rate (design §8: from zero, at the others' 1e-5 it would take ten thousand
 updates to move); the warm-up and the clipping are the second stage's. `RewardTuner.one_pass` itself is untouched: the
 single-aircraft runners stay bit for bit (design §1.2), so the loop below mirrors it rather than sharing it.
@@ -286,16 +290,21 @@ class SceneRewardTuner(RewardTuner):
         return total / self.config.data_weight
 
     def one_pass(self, sentences: SceneSplit, advantages: np.ndarray, data: Sequence[Built],
-                 allowed: Sequence[Mapping[int, np.ndarray]] | None = None, *, slots: int) -> dict[str, Any]:
+                 allowed: Sequence[Mapping[int, np.ndarray]] | None = None, *, slots: int,
+                 passes: int = 1) -> dict[str, Any]:
         """`RewardTuner.one_pass` over ``sentences`` in their scenes beside the scene samples ``data`` (module
-        docstring; ``slots``: the model's candidate slots); the same record."""
+        docstring; ``slots``: the model's candidate slots), ``passes`` times — each sweep in a new order of batches, every
+        one against the model the sentences were sampled from, frozen once (the clipped ratio's denominator: PPO's
+        several epochs, the clip bounding how far they go together). The same record over all updates, and each sweep's
+        own under ``sweeps``; one pass is the one pass it always was."""
         if len(advantages) != len(sentences.flights):
             raise ValueError(f"{len(advantages)} advantages for {len(sentences.flights)} sentences")
         if allowed is not None and len(allowed) != len(sentences.flights):
             raise ValueError(f"{len(allowed)} sentences' masks for {len(sentences.flights)} sentences")
         if not sentences.flights:
             raise ValueError("no sentence to train on: no scene's sentences differ in reward")
-        self.passes += 1
+        if passes < 1:
+            raise ValueError(f"{passes} passes")
         self.model.eval()
         started = time.perf_counter()
         # the model the pass's sentences were sampled from, frozen: the clipped ratio's denominator
@@ -303,35 +312,42 @@ class SceneRewardTuner(RewardTuner):
         for parameter in start.parameters():
             parameter.requires_grad_(False)
         sums = {"reward": 0.0, "kl": 0.0, "data": 0.0}
-        count, trace, clipped_trace, clipped, words = 0, [], [], 0, 0
-        for indices in batches(sentences.flights, self.config.tokens_per_batch // 2, self.rng):
-            self.optimiser.zero_grad(set_to_none=True)
-            reward, kl, batch_clipped, batch_words = 0.0, 0.0, 0, 0
-            for part in self._parts(sentences, indices):
-                batch, logits, sampled_from, reference, steps = self._scene_scored(sentences, part, allowed, start)
-                advantage = torch.as_tensor(advantages[part], dtype=logits[0].dtype, device=self.device)
-                surrogate, part_clipped, part_words = flight_surrogate(logits, sampled_from, batch["targets"],
-                                                                       batch["present"], batch["asked"], advantage,
-                                                                       self.config.clip_ratio)
-                distance = flight_kl(logits, reference, batch["targets"], batch["present"], batch["asked"])
-                part_reward = (surrogate / steps).sum() / len(indices)
-                part_kl = (distance / steps).sum() / len(indices)
-                loss = part_reward + self.config.kl_weight * part_kl
-                if not torch.isfinite(loss):
-                    raise FloatingPointError(f"pass {self.passes}: the loss is {float(loss)}")
-                loss.backward()
-                reward, kl = reward + float(part_reward.detach()), kl + float(part_kl.detach())
-                batch_clipped, batch_words = batch_clipped + part_clipped, batch_words + part_words
-            data_loss = self._data_backward(data, slots)
-            nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip_norm)
-            self.optimiser.step()
-            self.schedule.step()
-            clipped, words = clipped + batch_clipped, words + batch_words
-            clipped_trace.append(batch_clipped / batch_words)
-            for name, value in (("reward", reward), ("kl", kl), ("data", data_loss)):
-                sums[name] += value
-            count += 1
-            trace.append(kl)
+        count, trace, clipped_trace, clipped, words, sweeps = 0, [], [], 0, 0, []
+        for _ in range(passes):
+            self.passes += 1
+            sweep_started, first, sweep_clipped, sweep_words = time.perf_counter(), count, 0, 0
+            for indices in batches(sentences.flights, self.config.tokens_per_batch // 2, self.rng):
+                self.optimiser.zero_grad(set_to_none=True)
+                reward, kl, batch_clipped, batch_words = 0.0, 0.0, 0, 0
+                for part in self._parts(sentences, indices):
+                    batch, logits, sampled_from, reference, steps = self._scene_scored(sentences, part, allowed, start)
+                    advantage = torch.as_tensor(advantages[part], dtype=logits[0].dtype, device=self.device)
+                    surrogate, part_clipped, part_words = flight_surrogate(logits, sampled_from, batch["targets"],
+                                                                           batch["present"], batch["asked"], advantage,
+                                                                           self.config.clip_ratio)
+                    distance = flight_kl(logits, reference, batch["targets"], batch["present"], batch["asked"])
+                    part_reward = (surrogate / steps).sum() / len(indices)
+                    part_kl = (distance / steps).sum() / len(indices)
+                    loss = part_reward + self.config.kl_weight * part_kl
+                    if not torch.isfinite(loss):
+                        raise FloatingPointError(f"pass {self.passes}: the loss is {float(loss)}")
+                    loss.backward()
+                    reward, kl = reward + float(part_reward.detach()), kl + float(part_kl.detach())
+                    batch_clipped, batch_words = batch_clipped + part_clipped, batch_words + part_words
+                data_loss = self._data_backward(data, slots)
+                nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip_norm)
+                self.optimiser.step()
+                self.schedule.step()
+                clipped, words = clipped + batch_clipped, words + batch_words
+                sweep_clipped, sweep_words = sweep_clipped + batch_clipped, sweep_words + batch_words
+                clipped_trace.append(batch_clipped / batch_words)
+                for name, value in (("reward", reward), ("kl", kl), ("data", data_loss)):
+                    sums[name] += value
+                count += 1
+                trace.append(kl)
+            sweeps.append({"batches": count - first, "kl_mean": float(np.mean(trace[first:])),
+                           "kl_max": max(trace[first:]), "clipped_share": sweep_clipped / sweep_words,
+                           "seconds": time.perf_counter() - sweep_started})
         return {**{f"{name}_mean": value / count for name, value in sums.items()}, "kl_max": max(trace),
                 "batches": count, "sentences": len(sentences.flights), "seconds": time.perf_counter() - started,
-                "kl_trace": trace, "clipped_share": clipped / words, "clipped_trace": clipped_trace}
+                "kl_trace": trace, "clipped_share": clipped / words, "clipped_trace": clipped_trace, "sweeps": sweeps}
