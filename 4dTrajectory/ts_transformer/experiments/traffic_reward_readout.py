@@ -1,23 +1,28 @@
 """Read a finished M4 run (`traffic_reward`, R32) round by round for its readout (multi-aircraft design §7).
 
-Everything comes from the run's own files — ``history.json``, ``choice.json``, each round's ``readout.json`` (the select
-flights) and ``sentences.npz`` (the training sentences) — plus, for the real select flights, the M3 real-scene
-free-generation directory (`traffic_free_generation`, R31) that flew the same flights on their labelled words and along
-their records:
+Everything comes from the run's own files — ``config.json``, ``history.json``, ``choice.json``, each round's
+``readout.json`` (the select flights) and ``sentences.npz`` (the training sentences) — plus, for the real select flights,
+the M3 real-scene free-generation directory (`traffic_free_generation`, R31) that flew the same flights on their labelled
+words and along their records with the same executor and instruction artefact (refused otherwise, and its records must
+reproduce the run's own recorded reading of the select flights):
 
 - **select, per round**: each side's reward, lost separation (both readings), landed and observed-runway shares (the
-  run's own numbers), and lost separation by approach type (real) and by kind (augmented) from the flights — a flight
-  starting in a loss it answers for is left out, as the run's separation readout leaves it out; sentences with a
-  go-around; the traffic attention's output over the residual stream, per layer;
-- **training, per round ≥ 1**: the round's sentence summary and pass (the run's own numbers), and where the reward
-  term's signal comes from — each scene's ``K`` sentences in one of five classes (all rewarded; all lost separation;
-  all failed otherwise or mixed failures; rewards differing with a sentence that lost separation; rewards differing
-  with none that did), per kind, with each class's share of the summed |advantage|. The scenes starting in a loss (not
-  trained on; the npz does not mark them) are counted in their class; their number is printed beside;
-- **the select flights over all rounds**: how many of a flight's tries (rounds × samples) lost separation — never,
-  sometimes, or in at least `ALMOST_ALWAYS` of them — and, per group, its share of vectored approaches; for the real
-  flights also how often the same flight lost it on its labelled words and along its record (M3). The augmented
-  scenes are drawn once, the same every round.
+  run's own numbers); lost separation by approach type (real) and by kind (augmented) from the sentences — a sentence
+  starting in a loss it answers for left out, as the run's separation readout leaves it out; the sentences with a
+  go-around (said anywhere to the executor's end); the traffic attention's output over the residual stream, per layer;
+- **training, per round ≥ 1**: the round's sentence summary and pass (the run's own numbers, traces left out), and where
+  the reward term's signal comes from — each scene's ``K`` sentences in one of `CLASSES`, per kind, and each class's
+  share of the summed |advantage| over all scenes. A scene starting in a loss is not trained on and the npz does not
+  mark it: it is counted in its class, and ``differing_scenes`` beside the run's ``scenes_with_contrast`` shows how many;
+- **the select flights, first round against last**: every round speaks the select scenes with the SAME random streams
+  (`traffic_reward`: the select generator is seeded alike every round), so a flight's samples are the same draws each
+  round and differ only as the model has moved — rounds are paired, not repeated tries. Reported: the share of (flight,
+  sample) pairs whose outcome is the same in every round; the paired change in lost separation from round 0 to the last
+  (sentences fixed, newly lost, the net and its standard error ``√(fixed + newly lost) / n``); and in round 0 and in the
+  last round the flights grouped by how many of their samples lost separation, each group's share of flights and of
+  losses, and on the real side its share of vectored approaches and how often the same flights lost it on their labelled
+  words and along their records. A flight with any sentence starting in a loss in any round (the first step's runway word
+  decides the runway it is judged against, so it can differ by sample) is left out of this part and counted.
 
 Writes ``traffic_reward_readout.json`` into a NEW ``--out``.
 
@@ -29,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 from collections import Counter
 from pathlib import Path
@@ -37,24 +43,30 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from ts_transformer.experiments.traffic_free_generation import SCHEMA as FREE_GENERATION_SCHEMA
+from ts_transformer.experiments.traffic_free_generation import SOURCES
+from ts_transformer.experiments.traffic_loop import LOST_SEPARATION
 from ts_transformer.experiments.traffic_reward import TRAFFIC_REWARD_SCHEMA, completed_rounds
 from ts_transformer.inference.separation import VISUAL
+from ts_transformer.instructions.readout import STRATA
 from ts_transformer.instructions.words import APPROACH_GO_AROUND, COLUMNS
 from ts_transformer.io_utils import utc_now, write_json_atomic
-from ts_transformer.repo_layout import git_state, repo_relative
+from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 SCHEMA = "ts-traffic-reward-readout-v1"
-LOST = "lost_separation"
 SIDES = ("real", "augmented")
-#: A flight losing separation in at least this share of its tries is "almost always" lost.
-ALMOST_ALWAYS = 5 / 6
-CLASSES = ("all rewarded", "all lost separation", "all failed otherwise", "differing, one lost separation",
+RECORDED, LABELLED = SOURCES[3], SOURCES[2]
+VECTORED = STRATA[1]
+CLASSES = ("all rewarded", "all lost separation", "all failed otherwise", "differing, at least one lost separation",
            "differing, none lost separation")
+
+
+def _lost(row: Mapping[str, Any]) -> bool:
+    return row[VISUAL]["outcome"] == LOST_SEPARATION
 
 
 def scene_class(outcome: np.ndarray, reward: np.ndarray) -> str:
     """One scene's ``K`` sentences in one of `CLASSES`."""
-    lost = outcome == LOST
+    lost = outcome == LOST_SEPARATION
     if reward.min() != reward.max():
         return CLASSES[3] if lost.any() else CLASSES[4]
     if reward.min() == 1.0:
@@ -62,12 +74,12 @@ def scene_class(outcome: np.ndarray, reward: np.ndarray) -> str:
     return CLASSES[1] if lost.all() else CLASSES[2]
 
 
-def training_signal(sentences: Mapping[str, np.ndarray]) -> dict[str, Any]:
-    """Where a round's reward-term signal comes from (module docstring), from its ``sentences.npz``."""
+def training_signal(sentences: Mapping[str, np.ndarray], samples: int) -> dict[str, Any]:
+    """Where a round's reward-term signal comes from (module docstring), from its ``sentences.npz``; ``samples`` the
+    run's sentences per scene."""
     kind, outcome, reward, advantage = (sentences[k] for k in ("kind", "outcome", "reward", "advantage"))
-    samples, rest = divmod(len(outcome), len(kind))
-    if rest:
-        raise ValueError(f"{len(outcome)} sentences over {len(kind)} scenes")
+    if len(outcome) != len(kind) * samples:
+        raise ValueError(f"{len(outcome)} sentences, not {samples} for each of {len(kind)} scenes")
     counts = {k: Counter() for k in (*sorted(set(kind.tolist())), "all")}
     weight = Counter()
     for j, scene_kind in enumerate(kind.tolist()):
@@ -77,12 +89,12 @@ def training_signal(sentences: Mapping[str, np.ndarray]) -> dict[str, Any]:
         counts["all"][name] += 1
         weight[name] += float(np.abs(advantage[span]).sum())
     steps = np.diff(sentences["step_offsets"])
-    lost = outcome == LOST
+    lost = outcome == LOST_SEPARATION
     total = sum(weight.values())
-    return {"samples": samples,
-            "scenes": {k: {"scenes": sum(c.values()), **{name: c[name] / sum(c.values()) for name in CLASSES}}
+    return {"scenes": {k: {"scenes": sum(c.values()), **{name: c[name] / sum(c.values()) for name in CLASSES}}
                        for k, c in counts.items()},
-            "advantage_share": {name: (weight[name] / total if total else 0.0) for name in CLASSES},
+            "differing_scenes": counts["all"][CLASSES[3]] + counts["all"][CLASSES[4]],
+            "advantage_share": {name: weight[name] / total for name in CLASSES} if total else None,
             "steps_per_sentence": {"lost_separation": float(steps[lost].mean()) if lost.any() else None,
                                    "other": float(steps[~lost].mean())},
             "go_around_steps": int((sentences["said"][:, COLUMNS.index("approach")] == APPROACH_GO_AROUND).sum()),
@@ -92,13 +104,13 @@ def training_signal(sentences: Mapping[str, np.ndarray]) -> dict[str, Any]:
 def _share_lost(rows: Sequence[Mapping[str, Any]], key: str) -> dict[str, dict[str, float]]:
     groups: dict[str, list[bool]] = {}
     for row in rows:
-        groups.setdefault(row[key], []).append(row[VISUAL]["outcome"] == LOST)
-    return {name: {"flights": len(v), "lost_separation": sum(v) / len(v)} for name, v in sorted(groups.items())}
+        groups.setdefault(row[key], []).append(_lost(row))
+    return {name: {"sentences": len(v), "lost_separation": sum(v) / len(v)} for name, v in sorted(groups.items())}
 
 
 def select_round(summary: Mapping[str, Any], flights: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[str, Any]:
     """One round's select readout (module docstring): ``summary`` its ``history.json`` row, ``flights`` its
-    ``readout.json`` flights per side."""
+    ``readout.json`` rows per side."""
     out: dict[str, Any] = {}
     for side in SIDES:
         rows = [r for r in flights[side] if not r["starts_in_a_loss"]]
@@ -108,73 +120,121 @@ def select_round(summary: Mapping[str, Any], flights: Mapping[str, Sequence[Mapp
                      "lost_separation_ifr": summary[side]["separation"]["lost_separation_ifr"],
                      "landed": every["outcomes"]["landed"],
                      "landed_on_observed_runway": every["landed_on_observed_runway"],
-                     "by_stratum": _share_lost(rows, "stratum"),
-                     "go_around_sentences": sum(r["go_arounds"] > 0 for r in flights[side])}
-        if side == "augmented":
-            out[side]["by_kind"] = _share_lost(rows, "kind")
+                     "go_around_sentences": sum(r["go_arounds"] > 0 for r in rows)}
+        out[side].update({"by_stratum": _share_lost(rows, "stratum")} if side == "real"
+                         else {"by_kind": _share_lost(rows, "kind")})
     out["traffic_output_over_residual"] = summary["traffic"]["traffic_output_over_residual"]
     out["teacher_forced_nll"] = summary["traffic"]["teacher_forced"]["nll_per_step"]
     return out
 
 
-def concentration(tries: Mapping[str, Sequence[bool]], facts: Mapping[str, Mapping[str, bool]]) -> dict[str, Any]:
-    """How the losses spread over flights (module docstring): ``tries`` each flight's lost/not per try, in round order;
+def groups_by_samples_lost(lost: Mapping[str, Sequence[bool]], facts: Mapping[str, Mapping[str, bool]]
+                           ) -> dict[str, Any]:
+    """One round's flights grouped by how many of their samples lost separation: ``lost`` each flight's per sample,
     ``facts`` each flight's yes/no facts (the same names for every flight), each group's share of which is reported."""
-    per_flight = {key: (sum(v), len(v)) for key, v in tries.items()}
-    if len({n for _, n in per_flight.values()}) != 1:
-        raise ValueError("the flights were not tried equally often")
-    n_tries = next(iter(per_flight.values()))[1]
-    groups = {"never": lambda k: k == 0, "sometimes": lambda k: 0 < k < ALMOST_ALWAYS * n_tries,
-              "almost_always": lambda k: k >= ALMOST_ALWAYS * n_tries}
-    total = sum(k for k, _ in per_flight.values())
-    out: dict[str, Any] = {"flights": len(per_flight), "tries": n_tries, "losses": total,
-                           "histogram": dict(sorted(Counter(k for k, _ in per_flight.values()).items()))}
-    for name, test in groups.items():
-        keys = [key for key, (k, _) in per_flight.items() if test(k)]
-        row = {"flights": len(keys), "flight_share": len(keys) / len(per_flight),
-               "loss_share": sum(per_flight[key][0] for key in keys) / total if total else 0.0}
+    samples = {len(v) for v in lost.values()}
+    if len(samples) != 1:
+        raise ValueError(f"the flights have {sorted(samples)} samples, not one number")
+    n_samples = samples.pop()
+    total = sum(sum(v) for v in lost.values())
+    out = {}
+    for k in range(n_samples + 1):
+        keys = [key for key, v in lost.items() if sum(v) == k]
+        row = {"flights": len(keys), "flight_share": len(keys) / len(lost),
+               "loss_share": k * len(keys) / total if total else None}
         if keys:
             row.update({field: sum(facts[key][field] for key in keys) / len(keys) for field in facts[keys[0]]})
-        out[name] = row
+        out[f"{k}/{n_samples}"] = row
     return out
 
 
-def reference_outcomes(directory: Path) -> dict[str, dict[str, bool]]:
+def paired_change(first: Mapping[str, Sequence[bool]], last: Mapping[str, Sequence[bool]]) -> dict[str, Any]:
+    """Round 0 against the last round on the same draws: sentences fixed, newly lost, the net change of the lost share
+    and its paired standard error."""
+    pairs = [(a, b) for key in first for a, b in zip(first[key], last[key], strict=True)]
+    fixed = sum(a and not b for a, b in pairs)
+    newly = sum(b and not a for a, b in pairs)
+    return {"sentences": len(pairs), "fixed": fixed, "newly_lost": newly, "net": (newly - fixed) / len(pairs),
+            "standard_error": math.sqrt(fixed + newly) / len(pairs)}
+
+
+def spread(per_round: Sequence[Mapping[str, Sequence[bool]]], starts: set[str],
+           facts: Mapping[str, Mapping[str, bool]]) -> dict[str, Any]:
+    """The select flights first round against last (module docstring): ``per_round`` each round's lost/not per flight
+    and sample, ``starts`` the flights with a sentence starting in a loss in some round (left out)."""
+    kept = [{key: v for key, v in lost.items() if key not in starts} for lost in per_round]
+    same = [all(lost[key][s] == kept[0][key][s] for lost in kept)
+            for key in kept[0] for s in range(len(kept[0][key]))]
+    return {"left_out_starting_in_a_loss": len(starts), "flights": len(kept[0]),
+            "same_in_every_round": sum(same) / len(same), "paired_change": paired_change(kept[0], kept[-1]),
+            "first_round": groups_by_samples_lost(kept[0], facts), "last_round": groups_by_samples_lost(kept[-1], facts)}
+
+
+def _path(path: str) -> Path:
+    """A path as the writers take it: relative to the repository unless absolute."""
+    return Path(path) if Path(path).is_absolute() else REPO_ROOT / path
+
+
+def reference_outcomes(directory: Path, config: Mapping[str, Any], real_keys: set[str]) -> dict[str, dict[str, bool]]:
     """Each real select flight's loss along its record and on its labelled words, from an M3 real-scene
-    free-generation directory."""
+    free-generation directory flown by the run's executor on its instruction artefact; its records must reproduce the
+    run's recorded reading of these flights."""
     header = json.loads((directory / "free_generation.json").read_text())
     if header["schema"] != FREE_GENERATION_SCHEMA or header["augment_seed"] is not None or header["split"] != "select":
         raise SystemExit(f"--reference takes a {FREE_GENERATION_SCHEMA} directory of real select scenes, not "
                          f"{header['schema']} / augment seed {header['augment_seed']} / {header['split']}")
+    if header["executor"]["sha256"] != config["executor"]["sha256"] or \
+            _path(header["instructions"]).resolve() != _path(config["instructions"]).resolve():
+        raise SystemExit("--reference was flown by another executor or on another instruction artefact than --run")
     out: dict[str, dict[str, bool]] = {}
+    recorded: list[bool] = []
     with (directory / header["flights_file"]).open(encoding="utf-8") as stream:
         for line in stream:
             row = json.loads(line)
-            if row["source"] in ("recorded", "labelled"):
-                out.setdefault(row["dataset_id"], {})[row["source"]] = row[VISUAL]["outcome"] == LOST
-    return out
+            if row["source"] not in (RECORDED, LABELLED):
+                continue
+            entry = out.setdefault(row["dataset_id"], {})
+            if row["source"] in entry:
+                raise SystemExit(f"--reference holds {row['dataset_id']} {row['source']} twice")
+            entry[row["source"]] = _lost(row)
+            if row["source"] == RECORDED and row["dataset_id"] in real_keys and not row["starts_in_a_loss"]:
+                recorded.append(_lost(row))
+    missing = sorted(key for key in real_keys if key not in out or set(out[key]) != {RECORDED, LABELLED})
+    if missing:
+        raise SystemExit(f"{len(missing)} real select flights have no record / labelled reading in --reference, "
+                         f"e.g. {missing[:3]}")
+    stored = config["select"]["recorded"]
+    if len(recorded) != stored["flights"] or not math.isclose(sum(recorded) / len(recorded),
+                                                              stored["lost_separation"], rel_tol=0.0, abs_tol=1e-12):
+        raise SystemExit(f"--reference's records give {sum(recorded)} / {len(recorded)} lost, the run's recorded reading "
+                         f"{stored['lost_separation']:.6f} of {stored['flights']}")
+    return {key: out[key] for key in real_keys}
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], allow_abbrev=False)
-    parser.add_argument("--run", type=Path, required=True, help="a finished traffic_reward run directory")
-    parser.add_argument("--reference", type=Path, required=True,
+    parser.add_argument("--run", type=_path, required=True, help="a finished traffic_reward run directory")
+    parser.add_argument("--reference", type=_path, required=True,
                         help="the M3 real-scene free-generation directory of the same select flights")
-    parser.add_argument("--out", type=Path, required=True, help="a NEW directory")
+    parser.add_argument("--out", type=_path, required=True, help="a NEW directory")
     args = parser.parse_args(argv)
     if args.out.exists():
         parser.error(f"{args.out} exists; a readout is never overwritten")
     started = time.perf_counter()
     config = json.loads((args.run / "config.json").read_text())
-    if config["schema"] != TRAFFIC_REWARD_SCHEMA:
-        raise SystemExit(f"--run takes a {TRAFFIC_REWARD_SCHEMA} run, not {config['schema']}")
+    if config["schema"] != TRAFFIC_REWARD_SCHEMA or config["smoke"]:
+        raise SystemExit(f"--run takes a formal {TRAFFIC_REWARD_SCHEMA} run, not {config['schema']} "
+                         f"(smoke {config['smoke']})")
     last = completed_rounds(args.run)
     history = json.loads((args.run / "history.json").read_text())["rounds"]
-    if [row["round"] for row in history] != list(range(last + 1)):
-        raise SystemExit(f"history.json holds rounds {[row['round'] for row in history]}, the run finished 0 … {last}")
-    references = reference_outcomes(args.reference)
+    choice = json.loads((args.run / "choice.json").read_text())
+    if [row["round"] for row in history] != list(range(last + 1)) or len(choice["augmented_reward"]) != last + 1:
+        raise SystemExit(f"history.json / choice.json cover rounds other than the run's finished 0 … {last}")
 
-    rounds, tries, vectored = [], {side: {} for side in SIDES}, {side: {} for side in SIDES}
+    rounds: list[dict[str, Any]] = []
+    lost: dict[str, list[dict[str, list[bool]]]] = {side: [] for side in SIDES}
+    starts: dict[str, set[str]] = {side: set() for side in SIDES}
+    vectored: dict[str, bool] = {}
     for number, summary in enumerate(history):
         directory = args.run / f"round_{number:02d}"
         readout = json.loads((directory / "readout.json").read_text())
@@ -182,40 +242,41 @@ def main(argv: list[str] | None = None) -> int:
         row = {"round": number, "select": select_round(summary, flights)}
         if number > 0:
             with np.load(directory / "sentences.npz") as sentences:
-                row["training"] = {"sentences": summary["sentences"], "pass": {
-                    k: v for k, v in summary["train_pass"].items() if k != "kl_trace"},
-                    "signal": training_signal(sentences)}
+                row["training"] = {"sentences": summary["sentences"],
+                                   "pass": {k: v for k, v in summary["train_pass"].items() if not isinstance(v, list)},
+                                   "signal": training_signal(sentences, config["samples"])}
         rounds.append(row)
         for side in SIDES:
-            for flight in flights[side]:
-                if not flight["starts_in_a_loss"]:
-                    key = f"{flight['dataset_id']}|{flight['kind']}"
-                    tries[side].setdefault(key, []).append(flight[VISUAL]["outcome"] == LOST)
-                    vectored[side][key] = flight["stratum"] == "vectored"
+            this: dict[str, list[bool]] = {}
+            for flight in sorted(flights[side], key=lambda r: r["sample"]):
+                key = f"{flight['dataset_id']}|{flight['kind']}"
+                this.setdefault(key, []).append(_lost(flight))
+                if flight["starts_in_a_loss"]:
+                    starts[side].add(key)
+                if side == "real":
+                    vectored[key] = flight["stratum"] == VECTORED
+            lost[side].append(this)
         print(f"round {number}: real reward {summary['real']['reward']:.3f} lost "
               f"{summary['real']['separation']['lost_separation']:.3f}, augmented reward "
               f"{summary['augmented']['reward']:.3f} lost {summary['augmented']['separation']['lost_separation']:.3f}",
               flush=True)
 
-    real_keys = {key.split("|")[0] for key in tries["real"]}
-    missing = sorted(real_keys - {k for k, v in references.items() if set(v) == {"recorded", "labelled"}})
-    if missing:
-        raise SystemExit(f"{len(missing)} real select flights have no record / labelled reading in --reference, "
-                         f"e.g. {missing[:3]}")
-    spread = {"real": concentration(tries["real"], {key: {"vectored": vectored["real"][key],
-                                                           **references[key.split("|")[0]]} for key in tries["real"]}),
-              "augmented": concentration(tries["augmented"], {key: {"vectored": v}
-                                                              for key, v in vectored["augmented"].items()})}
+    real_keys = {key.split("|")[0] for key in lost["real"][0]}
+    references = reference_outcomes(args.reference, config, real_keys)
+    spreads = {"real": spread(lost["real"], starts["real"],
+                              {key: {"vectored": vectored[key], **references[key.split("|")[0]]}
+                               for key in lost["real"][0]}),
+               "augmented": spread(lost["augmented"], starts["augmented"], {key: {} for key in lost["augmented"][0]})}
     for side in SIDES:
-        print(f"{side}: " + ", ".join(f"{g} {spread[side][g]['flight_share']:.1%} of flights hold "
-                                      f"{spread[side][g]['loss_share']:.1%} of losses"
-                                      for g in ("never", "sometimes", "almost_always")), flush=True)
+        change = spreads[side]["paired_change"]
+        print(f"{side}: {spreads[side]['same_in_every_round']:.1%} of sentences the same in every round; round 0 → "
+              f"{last}: {change['fixed']} fixed, {change['newly_lost']} newly lost, net {change['net']:+.2%} ± "
+              f"{change['standard_error']:.2%}", flush=True)
     args.out.mkdir(parents=True)
     write_json_atomic(args.out / "traffic_reward_readout.json", {
         "schema": SCHEMA, "written_utc": utc_now(), "git": git_state(), "run": repo_relative(args.run),
-        "reference": repo_relative(args.reference), "choice": json.loads((args.run / "choice.json").read_text()),
-        "almost_always": ALMOST_ALWAYS, "rounds": rounds, "spread": spread,
-        "seconds": time.perf_counter() - started})
+        "reference": repo_relative(args.reference), "rounds_finished": last, "rounds_asked": config["rounds"],
+        "choice": choice, "rounds": rounds, "spread": spreads, "seconds": time.perf_counter() - started})
     return 0
 
 

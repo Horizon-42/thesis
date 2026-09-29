@@ -850,19 +850,23 @@ finished>` writes it alone.
 
 ### R33 · `run_ts.py traffic_reward_readout` — multi-aircraft M4's readout, round by round (design §7)
 
-2026-09-29. `traffic_reward_readout --run <a finished traffic_reward run> --reference <M3's real-scene free generation>
---out <new dir>`. Reads only files: the run's `history.json`, `choice.json`, each round's `readout.json` (the select
-flights) and `sentences.npz` (the training sentences), and M3's `flights.jsonl` (`free_generation.json` of schema
-`ts-traffic-free-generation-v1`, real select scenes: no augment seed) for each real select flight's loss on its labelled
-words and along its record — every real select flight of the run must have both, or it refuses. A run with a round cut
-short is refused (`traffic_reward.completed_rounds`). Per round: each side's reward, lost separation (VISUAL and IFR),
-landed and observed-runway shares (the run's numbers), lost separation by approach type and, on the augmented side, by
-kind (from the flights, a flight starting in a loss it answers for left out, as the run's own separation readout does),
-sentences with a go-around, the traffic attention's output over the residual stream; from round 1 the round's sentence
-summary and pass, and where the reward term's signal comes from: each scene's `K` sentences in one of five classes (all
-rewarded / all lost separation / all failed otherwise / rewards differing with a lost sentence / differing with none),
-per kind, with each class's share of the summed |advantage| (the scenes starting in a loss — not trained on, unmarked in
-the npz — counted in their class; their number is in the sentence summary). Over all rounds: each select flight's tries
-(rounds × samples) that lost separation, grouped never / sometimes / at least `ALMOST_ALWAYS` = 5/6 of them, each group's
-share of flights, of losses and of vectored approaches, and on the real side how often the same flights lost it on their
-labelled words and along their records. Writes `traffic_reward_readout.json`.
+2026-09-29. `traffic_reward_readout --run <a finished, formal traffic_reward run> --reference <M3's real-scene free
+generation> --out <new dir>`. Reads only files: the run's `config.json`, `history.json`, `choice.json` (both must cover
+every finished round; a smoke run, or a round cut short, is refused), each round's `readout.json` (the select flights) and
+`sentences.npz` (the training sentences); M3's `flights.jsonl` (`ts-traffic-free-generation-v1`, real select scenes, the
+run's executor sha256 and instruction artefact — refused otherwise, as is a flight/source row twice) for each real select
+flight's loss on its labelled words and along its record: every real select flight must have both, and M3's records over
+them must reproduce the run's own recorded reading (`config.select.recorded`) exactly. Per round: each side's reward, lost
+separation (VISUAL and IFR), landed and observed-runway shares (the run's numbers); lost separation by approach type
+(real) and by kind (augmented), over sentences, a sentence starting in a loss it answers for left out as the run's own
+separation readout does; sentences with a go-around; the traffic attention's output over the residual stream; from round 1
+the round's sentence summary and pass (traces left out) and where the reward term's signal comes from — each scene's `K`
+sentences in one of five classes per kind, each class's share of the summed |advantage|, and `differing_scenes` beside the
+run's `scenes_with_contrast` (the difference: scenes starting in a loss, not trained on, unmarked in the npz).
+**The select readout speaks the same random draws every round** (the select generator is seeded alike), so rounds are
+paired, not repeated tries (on the formal run 88 % of real (flight, sample) outcomes are the same in rounds 0–7): the
+readout gives that share, the paired change of lost separation from round 0 to the last (fixed, newly lost, net, standard
+error √(fixed + newly lost) / n), and in round 0 and the last round the flights grouped by how many of their samples lost
+separation, with each group's share of losses, of vectored approaches (real) and of the same flights' losses on their
+labelled words and along their records. A flight with a sentence starting in a loss in any round (the first step's runway
+word decides the runway it is judged against) is left out of this part and counted. Writes `traffic_reward_readout.json`.
