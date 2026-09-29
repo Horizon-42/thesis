@@ -860,8 +860,8 @@ with the parent. A speaking process's batch is 100,000 aircraft-steps (four with
 logged beside the pass's. The loop's edge features are computed for all pairs at once and one airport's scenes in one
 call (`inference.scene_edges.scene_edge_blocks`), the separation masks share the others' state per scene and step
 (`traffic_speaking.others_at`) — identical to e76ca5ff on every select sample and on 20 real scenes spoken end to end.
-The edge code's hash moved with it (`038df9ab…` → new): the run begun at e76ca5ff (`m4_traffic_20260928`) is read by its
-own checkout only.
+The edge code's hash moved with it (`038df9ab…` → new): the run begun at e76ca5ff (`m4_traffic_20260928`, paused after
+round 2 for the restart) was deleted on 2026-09-29.
 
 ### R33 · `run_ts.py traffic_reward_readout` — multi-aircraft M4's readout, round by round (design §7)
 
