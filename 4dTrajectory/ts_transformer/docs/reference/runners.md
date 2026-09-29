@@ -851,10 +851,11 @@ finished>` writes it alone.
 ### R33 · `run_ts.py traffic_reward_readout` — multi-aircraft M4's readout, round by round (design §7)
 
 2026-09-29. `traffic_reward_readout --run <a finished, formal traffic_reward run> --reference <M3's real-scene free
-generation> --out <new dir>`. Reads only files: the run's `config.json`, `history.json`, `choice.json` (both must cover
-every finished round; a smoke run, or a round cut short, is refused), each round's `readout.json` (the select flights) and
+generation> --out <new dir>`. Reads only files: the run's `config.json`, `history.json`, `choice.json` (the run must be
+finished — every round it asked for, `config.rounds`, read and covered by both files; a smoke run is refused), each round's `readout.json` (the select flights) and
 `sentences.npz` (the training sentences); M3's `flights.jsonl` (`ts-traffic-free-generation-v1`, real select scenes, the
-run's executor sha256 and instruction artefact — refused otherwise, as is a flight/source row twice) for each real select
+run's executor sha256 and instruction artefact, named by its place under `4dTrajectory/outputs` so a path through a removed
+worktree still names it — refused otherwise, as is a flight/source row twice) for each real select
 flight's loss on its labelled words and along its record: every real select flight must have both, and M3's records over
 them must reproduce the run's own recorded reading (`config.select.recorded`) exactly. Per round: each side's reward, lost
 separation (VISUAL and IFR), landed and observed-runway shares (the run's numbers); lost separation by approach type
@@ -869,4 +870,5 @@ readout gives that share, the paired change of lost separation from round 0 to t
 error √(fixed + newly lost) / n), and in round 0 and the last round the flights grouped by how many of their samples lost
 separation, with each group's share of losses, of vectored approaches (real) and of the same flights' losses on their
 labelled words and along their records. A flight with a sentence starting in a loss in any round (the first step's runway
-word decides the runway it is judged against) is left out of this part and counted. Writes `traffic_reward_readout.json`.
+word decides the runway it is judged against), or whose record or labelled reading starts in one, is left out of this part
+and counted. The last round is not necessarily the kept one (`choice.round`). Writes `traffic_reward_readout.json`.

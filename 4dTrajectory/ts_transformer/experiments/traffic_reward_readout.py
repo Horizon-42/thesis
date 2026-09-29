@@ -3,8 +3,10 @@
 Everything comes from the run's own files — ``config.json``, ``history.json``, ``choice.json``, each round's
 ``readout.json`` (the select flights) and ``sentences.npz`` (the training sentences) — plus, for the real select flights,
 the M3 real-scene free-generation directory (`traffic_free_generation`, R31) that flew the same flights on their labelled
-words and along their records with the same executor and instruction artefact (refused otherwise, and its records must
-reproduce the run's own recorded reading of the select flights):
+words and along their records with the same executor (its sha256) and instruction artefact (its place under
+`4dTrajectory/outputs`, where directories are never renamed — a path through a removed worktree still names it) —
+refused otherwise, and its records must reproduce the run's own recorded reading of the select flights. The run must be
+finished: every round it asked for (``config.rounds``) read, ``history.json`` and ``choice.json`` covering them all.
 
 - **select, per round**: each side's reward, lost separation (both readings), landed and observed-runway shares (the
   run's own numbers); lost separation by approach type (real) and by kind (augmented) from the sentences — a sentence
@@ -22,7 +24,8 @@ reproduce the run's own recorded reading of the select flights):
   last round the flights grouped by how many of their samples lost separation, each group's share of flights and of
   losses, and on the real side its share of vectored approaches and how often the same flights lost it on their labelled
   words and along their records. A flight with any sentence starting in a loss in any round (the first step's runway word
-  decides the runway it is judged against, so it can differ by sample) is left out of this part and counted.
+  decides the runway it is judged against, so it can differ by sample and by round), or whose record or labelled reading
+  starts in one, is left out of this part and counted. The last round is not necessarily the kept one (``choice.round``).
 
 Writes ``traffic_reward_readout.json`` into a NEW ``--out``.
 
@@ -158,14 +161,16 @@ def paired_change(first: Mapping[str, Sequence[bool]], last: Mapping[str, Sequen
             "standard_error": math.sqrt(fixed + newly) / len(pairs)}
 
 
-def spread(per_round: Sequence[Mapping[str, Sequence[bool]]], starts: set[str],
+def spread(per_round: Sequence[Mapping[str, Sequence[bool]]], starts: set[str], reference_starts: set[str],
            facts: Mapping[str, Mapping[str, bool]]) -> dict[str, Any]:
     """The select flights first round against last (module docstring): ``per_round`` each round's lost/not per flight
-    and sample, ``starts`` the flights with a sentence starting in a loss in some round (left out)."""
-    kept = [{key: v for key, v in lost.items() if key not in starts} for lost in per_round]
+    and sample; left out: ``starts`` the flights with a sentence starting in a loss in some round, ``reference_starts``
+    those whose record or labelled reading starts in one."""
+    kept = [{key: v for key, v in lost.items() if key not in starts | reference_starts} for lost in per_round]
     same = [all(lost[key][s] == kept[0][key][s] for lost in kept)
             for key in kept[0] for s in range(len(kept[0][key]))]
-    return {"left_out_starting_in_a_loss": len(starts), "flights": len(kept[0]),
+    return {"left_out_starting_in_a_loss": len(starts),
+            "left_out_reference_starting_in_a_loss": len(reference_starts - starts), "flights": len(kept[0]),
             "same_in_every_round": sum(same) / len(same), "paired_change": paired_change(kept[0], kept[-1]),
             "first_round": groups_by_samples_lost(kept[0], facts), "last_round": groups_by_samples_lost(kept[-1], facts)}
 
@@ -175,19 +180,30 @@ def _path(path: str) -> Path:
     return Path(path) if Path(path).is_absolute() else REPO_ROOT / path
 
 
-def reference_outcomes(directory: Path, config: Mapping[str, Any], real_keys: set[str]) -> dict[str, dict[str, bool]]:
-    """Each real select flight's loss along its record and on its labelled words, from an M3 real-scene
-    free-generation directory flown by the run's executor on its instruction artefact; its records must reproduce the
-    run's recorded reading of these flights."""
+def artefact_name(path: str) -> str:
+    """An artefact's name: its place under the last ``4dTrajectory/outputs`` of its path (module docstring)."""
+    parts = Path(path).parts
+    at = [i for i in range(len(parts) - 1) if parts[i:i + 2] == ("4dTrajectory", "outputs")]
+    if not at:
+        raise SystemExit(f"{path} is not under 4dTrajectory/outputs")
+    return Path(*parts[at[-1] + 2:]).as_posix()
+
+
+def reference_outcomes(directory: Path, config: Mapping[str, Any], real_keys: set[str]
+                       ) -> tuple[dict[str, dict[str, bool]], set[str]]:
+    """``(each real select flight's loss along its record and on its labelled words, the flights one of whose two
+    readings starts in a loss)``, from an M3 real-scene free-generation directory flown by the run's executor on its
+    instruction artefact; its records must reproduce the run's recorded reading of these flights."""
     header = json.loads((directory / "free_generation.json").read_text())
     if header["schema"] != FREE_GENERATION_SCHEMA or header["augment_seed"] is not None or header["split"] != "select":
         raise SystemExit(f"--reference takes a {FREE_GENERATION_SCHEMA} directory of real select scenes, not "
                          f"{header['schema']} / augment seed {header['augment_seed']} / {header['split']}")
     if header["executor"]["sha256"] != config["executor"]["sha256"] or \
-            _path(header["instructions"]).resolve() != _path(config["instructions"]).resolve():
+            artefact_name(header["instructions"]) != artefact_name(config["instructions"]):
         raise SystemExit("--reference was flown by another executor or on another instruction artefact than --run")
     out: dict[str, dict[str, bool]] = {}
     recorded: list[bool] = []
+    starting: set[str] = set()
     with (directory / header["flights_file"]).open(encoding="utf-8") as stream:
         for line in stream:
             row = json.loads(line)
@@ -197,7 +213,9 @@ def reference_outcomes(directory: Path, config: Mapping[str, Any], real_keys: se
             if row["source"] in entry:
                 raise SystemExit(f"--reference holds {row['dataset_id']} {row['source']} twice")
             entry[row["source"]] = _lost(row)
-            if row["source"] == RECORDED and row["dataset_id"] in real_keys and not row["starts_in_a_loss"]:
+            if row["starts_in_a_loss"]:
+                starting.add(row["dataset_id"])
+            elif row["source"] == RECORDED and row["dataset_id"] in real_keys:
                 recorded.append(_lost(row))
     missing = sorted(key for key in real_keys if key not in out or set(out[key]) != {RECORDED, LABELLED})
     if missing:
@@ -208,7 +226,7 @@ def reference_outcomes(directory: Path, config: Mapping[str, Any], real_keys: se
                                                               stored["lost_separation"], rel_tol=0.0, abs_tol=1e-12):
         raise SystemExit(f"--reference's records give {sum(recorded)} / {len(recorded)} lost, the run's recorded reading "
                          f"{stored['lost_separation']:.6f} of {stored['flights']}")
-    return {key: out[key] for key in real_keys}
+    return {key: out[key] for key in real_keys}, starting & real_keys
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -228,6 +246,8 @@ def main(argv: list[str] | None = None) -> int:
     last = completed_rounds(args.run)
     history = json.loads((args.run / "history.json").read_text())["rounds"]
     choice = json.loads((args.run / "choice.json").read_text())
+    if config["rounds"] != last:
+        raise SystemExit(f"the run asked for rounds 0 … {config['rounds']} and finished 0 … {last}: not finished")
     if [row["round"] for row in history] != list(range(last + 1)) or len(choice["augmented_reward"]) != last + 1:
         raise SystemExit(f"history.json / choice.json cover rounds other than the run's finished 0 … {last}")
 
@@ -262,11 +282,12 @@ def main(argv: list[str] | None = None) -> int:
               flush=True)
 
     real_keys = {key.split("|")[0] for key in lost["real"][0]}
-    references = reference_outcomes(args.reference, config, real_keys)
-    spreads = {"real": spread(lost["real"], starts["real"],
+    references, reference_starts = reference_outcomes(args.reference, config, real_keys)
+    spreads = {"real": spread(lost["real"], starts["real"], {f"{key}|real" for key in reference_starts},
                               {key: {"vectored": vectored[key], **references[key.split("|")[0]]}
                                for key in lost["real"][0]}),
-               "augmented": spread(lost["augmented"], starts["augmented"], {key: {} for key in lost["augmented"][0]})}
+               "augmented": spread(lost["augmented"], starts["augmented"], set(),
+                                   {key: {} for key in lost["augmented"][0]})}
     for side in SIDES:
         change = spreads[side]["paired_change"]
         print(f"{side}: {spreads[side]['same_in_every_round']:.1%} of sentences the same in every round; round 0 → "
@@ -275,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
     args.out.mkdir(parents=True)
     write_json_atomic(args.out / "traffic_reward_readout.json", {
         "schema": SCHEMA, "written_utc": utc_now(), "git": git_state(), "run": repo_relative(args.run),
-        "reference": repo_relative(args.reference), "rounds_finished": last, "rounds_asked": config["rounds"],
+        "reference": repo_relative(args.reference), "last_round": last,
         "choice": choice, "rounds": rounds, "spread": spreads, "seconds": time.perf_counter() - started})
     return 0
 
