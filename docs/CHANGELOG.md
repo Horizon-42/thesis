@@ -1,5 +1,13 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-29 — 多机 M4 的读数程序 `traffic_reward_readout`（R33）
+
+- M4 的读数要按轮、按航班拆开看（真实场景失去间隔为什么不怎么动、训练信号从哪来），原来是临时脚本算的；按"测量代码是代码"（L20）写成
+  runner：只读一次跑完的 M4 运行的文件（`history.json`、`choice.json`、每轮的 `readout.json` 与 `sentences.npz`）和 M3 真实场景的
+  `flights.jsonl`（同一批选择集航班照标注的词飞、照记录走的结局），写 `traffic_reward_readout.json`。每轮的选择集数（分进近方式、分扩充
+  种类）、训练信号按场景分五类及各类占 |优势| 的比例、复飞的句子数；全部轮次合起来每架航班失去间隔的次数分"从不 / 有时 / 几乎每次
+  （≥ 5/6）"三组，各组照标注的词飞、照记录走也失去间隔的比例。测试 8 个（`tests/test_traffic_reward_readout.py`）。
+
 ### 2026-09-29 — Training 左栏的 "Autopilot (live)" 一栏删掉
 
 - 用户：这一栏的信息多余，删干净，包括相关测试（分支 `dev-training-no-autopilot-panel`）。删掉面板的这一栏（开关 "Fly on band click"
