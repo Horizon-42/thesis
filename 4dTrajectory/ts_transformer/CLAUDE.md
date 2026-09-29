@@ -411,7 +411,9 @@ from augmented + a zero traffic attention, real and augmented training scenes, r
 each sentence scored in its scene by the speaker's own layout and edge code (`experiments/traffic_tuner.py`), base alone,
 M2's scene samples as the data term; runs round by round (`--rounds k`, then `--resume`: per-round streams, the optimiser's
 state saved per round, refused on another config or commit), spoken by `--speakers` forked processes (each loop batch its own
-stream: the sentences do not depend on their number) (R32).
+stream: the sentences do not depend on their number) (R32). `traffic_reward_readout` reads a finished M4 run round by round from its files — select numbers per side, kind and approach type,
+where the reward term's signal comes from, round 0 against the last on the same draws (the select readout is seeded alike every round:
+paired, not repeated tries) beside M3's labelled and recorded readings (R33).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 
