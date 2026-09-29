@@ -342,23 +342,42 @@ def test_the_sentences_do_not_depend_on_how_many_processes_speak_them(tmp_path, 
     for count in (1, 2):
         speakers = Speakers(count, lambda n: round_, {}, model, "cpu", speaking)
         try:
-            there = speakers.speak("train", 1, round_, model, samples, seed=7, source="train")
+            there, peaks = speakers.speak("train", 1, round_, model, samples, seed=7, source="train")
         finally:
             speakers.close()
+        assert peaks == [0.0] * count                  # on the CPU: no GPU peak
         assert [r["dataset_id"] for r in there.rows] == [r["dataset_id"] for r in here.rows]
         different = [(k, a[k], b[k]) for a, b in zip(there.rows, here.rows) for k in a if json.dumps(a[k], default=str)
                      != json.dumps(b[k], default=str)]
         assert not different, different[:3]
         assert all(np.array_equal(a, b) for a, b in zip(there.said, here.said))
         assert all(np.array_equal(a, b) for a, b in zip(there.positions, here.positions))
+        assert all(a.keys() == b.keys() and all(np.array_equal(a[c], b[c]) for c in a)
+                   for a, b in zip(there.allowed, here.allowed))
     # another seed says other words somewhere (the stream is read)
     other = speak(model, round_, samples, words, _params(), None, ProcedureMasks.none(), seed=8, budget=budget,
                   source="train")
     assert any(not np.array_equal(a, b) for a, b in zip(other.said, here.said))
+    # a process that fails says why; one that rebuilt another round, or is gone, ends the call
     failing = Speakers(1, lambda n: (_ for _ in ()).throw(RuntimeError("no round")), {}, model, "cpu", speaking)
     try:
         with pytest.raises(SystemExit, match="no round"):
             failing.speak("train", 1, round_, model, samples, seed=7, source="train")
     finally:
-        for process in failing.processes:
-            process.join(timeout=10)
+        failing.close()
+    other = Round(replace(batch, signals=batch.signals[::-1]), scenes[::-1], [None, None], ["A", "real"],
+                  round_.directions)
+    wrong = Speakers(1, lambda n: other, {}, model, "cpu", speaking)
+    try:
+        with pytest.raises(SystemExit, match="rebuilt another round"):
+            wrong.speak("train", 1, round_, model, samples, seed=7, source="train")
+    finally:
+        wrong.close()
+    gone = Speakers(2, lambda n: round_, {}, model, "cpu", speaking)
+    gone.processes[1].kill()
+    gone.processes[1].join(timeout=10)
+    try:
+        with pytest.raises(SystemExit, match="speaking process 1 is gone"):
+            gone.speak("train", 1, round_, model, samples, seed=7, source="train")
+    finally:
+        gone.close()

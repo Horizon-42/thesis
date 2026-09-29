@@ -73,10 +73,14 @@ from __future__ import annotations
 
 import argparse
 import copy
+import ctypes
 import dataclasses
+import gc
 import json
 import math
 import multiprocessing
+import os
+import signal
 import traceback
 import time
 from collections import Counter
@@ -144,8 +148,9 @@ SELECT_STREAMS = {"real": 3, "augmented": 4}
 OPTIMISER_FILE = "optimiser.pt"
 #: What a resumed run's ``config.json`` may differ in: when it was written, how far it was asked to go and its resumptions.
 RESUMABLE = ("written_utc", "rounds", "resumed", "speakers")
-#: A speaking process's loop batch, its most aircraft-steps (`traffic_free_generation.speaking_batches`): four processes'
-#: pasts and blocks, with the parent's models, within the 8 GB GPU (measured in the smoke, design §6.6 step 6 item 13).
+#: A speaking process's loop batch, its most aircraft-steps (`traffic_free_generation.speaking_batches`): chosen for four
+#: processes' pasts and blocks beside the parent's models within the 8 GB GPU (a third of M3's one-process batch; each
+#: process's peak is logged, design §6.6 step 6 item 13).
 SPEAKER_AIRCRAFT_STEPS = 100_000
 
 
@@ -290,20 +295,39 @@ class Speaking:
     budget: int
 
 
-def _speaker(pipe: Any, rounds: Callable[[int], Round], select: Mapping[str, Round], model: Prior, device: str,
-             speaking: Speaking) -> None:
-    """A speaking process (`Speakers`): one thread (the processes are the parallelism), the model on ``device``
-    (the GPU started here, after the fork), then each task — (kind, key, weights, batch numbers, samples, seed,
-    source) — answered with its batches' sentences, or the traceback that ended it."""
+def round_fingerprint(round_: Round) -> list[tuple[Any, ...]]:
+    """What must be the same in a round rebuilt by a speaking process and the parent's: each flight, its kind and its
+    moved start."""
+    return [(signals.dataset_id, kind, None if move is None else dataclasses.asdict(move))
+            for signals, kind, move in zip(round_.batch.signals, round_.kinds, round_.moves)]
+
+
+#: `prctl` option: the signal a process gets when its parent dies (linux/prctl.h).
+PR_SET_PDEATHSIG = 1
+
+
+def _speaker(pipe: Any, parent_ends: Sequence[Any], parent_pid: int, rounds: Callable[[int], Round],
+             select: Mapping[str, Round], model: Prior, device: str, speaking: Speaking) -> None:
+    """A speaking process (`Speakers`): it dies with the parent (a killed parent leaves none holding the GPU), keeps
+    none of the other processes' pipes, runs one thread (the processes are the parallelism) and starts the GPU here,
+    after the fork; then answers each task — (kind, key, weights, (its index, the processes), samples, seed, source) —
+    with the batches of the plan its index deals it, the round's fingerprint and its GPU peak, or the traceback that ended
+    it (also printed)."""
+    ctypes.CDLL("libc.so.6", use_errno=True).prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
+    if os.getppid() != parent_pid:
+        os._exit(1)
+    for end in parent_ends:
+        end.close()
     torch.set_num_threads(1)
     try:
-        model = model.to(torch.device(device)).eval()
+        device_ = torch.device(device)
+        model = model.to(device_).eval()
         built: dict[int, Round] = {}
         while True:
             task = pipe.recv()
             if task is None:
                 return
-            kind, key, state, numbers, samples, seed, source = task
+            kind, key, state, (index, count), samples, seed, source = task
             model.load_state_dict(state)
             if kind == "select":
                 round_ = select[key]
@@ -313,21 +337,28 @@ def _speaker(pipe: Any, rounds: Callable[[int], Round], select: Mapping[str, Rou
                     built[key] = rounds(key)
                 round_ = built[key]
             plan = speaking_plan(round_, samples, speaking.params, speaking.budget, speaking.words.spec.step_s)
-            pipe.send(("ok", {n: speak_batch(model, round_, plan[n], n, samples, speaking.words, speaking.params,
-                                             speaking.landings, speaking.procedures, seed=seed, source=source)
-                              for n in numbers}))
-            if model.candidates.device.type == "cuda":
-                torch.cuda.empty_cache()                    # the parent's pass needs the GPU next
+            parts = {n: speak_batch(model, round_, plan[n], n, samples, speaking.words, speaking.params,
+                                    speaking.landings, speaking.procedures, seed=seed, source=source)
+                     for n in range(index, len(plan), count)}
+            peak = 0.0
+            if device_.type == "cuda":
+                peak = torch.cuda.max_memory_reserved(device_) / 1e9
+                torch.cuda.reset_peak_memory_stats(device_)
+                torch.cuda.empty_cache()                        # the parent's pass needs the GPU next
+            pipe.send(("ok", parts, round_fingerprint(round_), peak))
     except BaseException:
+        traceback.print_exc()
         pipe.send(("failed", traceback.format_exc()))
 
 
 class Speakers:
     """``count`` processes speaking a round's loop batches in parallel (design §6.6 step 6 item 13), forked from the
-    parent once its data are built and BEFORE it starts the GPU: each holds the parent's data (shared, not copied),
-    rebuilds a training round from its number with the parent's own ``rounds`` (a scene holds its airport's whole data:
-    it is rebuilt, not sent), reads the select rounds (``select``, by side) as built, and speaks the batches it is given
-    (every batch its own stream: the sentences do not depend on ``count``). A process that fails or dies ends the run."""
+    parent once its data are built and BEFORE it starts the GPU: each holds the parent's data (shared, not copied — the
+    caller freezes the collector's view of it first), rebuilds a training round from its number with the parent's own
+    ``rounds`` (a scene holds its airport's whole data: rebuilt, not sent), reads the select rounds (``select``, by side)
+    as built, and speaks the batches its index deals it (every batch its own stream: the sentences do not depend on
+    ``count``). `send` starts them, `receive` assembles the round in the parent's order after checking each process
+    rebuilt the parent's round; a process that fails, or is gone, ends the run with what it said."""
 
     def __init__(self, count: int, rounds: Callable[[int], Round], select: Mapping[str, Round], model: Prior,
                  device: str, speaking: Speaking) -> None:
@@ -337,37 +368,71 @@ class Speakers:
         self.speaking, self.pipes, self.processes = speaking, [], []
         for _ in range(count):
             parent, child = context.Pipe()
-            process = context.Process(target=_speaker, args=(child, rounds, select, model, device, speaking),
-                                      daemon=True)
+            process = context.Process(target=_speaker, args=(child, list(self.pipes), os.getpid(), rounds, select,
+                                                             model, device, speaking), daemon=True)
             process.start()
             child.close()
             self.pipes.append(parent)
             self.processes.append(process)
 
-    def speak(self, kind: str, key: Any, round_: Round, model: Prior, samples: int, *, seed: int, source: str
-              ) -> SceneSentences:
-        """``round_`` (the parent's own: training round ``key``, or select side ``key``) spoken to with ``model``'s
-        weights: its batches dealt round-robin (by size), assembled as `speak` does."""
-        plan = speaking_plan(round_, samples, self.speaking.params, self.speaking.budget, self.speaking.words.spec.step_s)
+    def _gone(self, w: int) -> SystemExit:
+        """Speaking process ``w`` is gone: what it said last, or its exit code."""
+        pipe, process = self.pipes[w], self.processes[w]
+        try:
+            said = pipe.recv() if pipe.poll() else None             # a closed pipe polls readable and has nothing
+        except (EOFError, OSError):
+            said = None
+        if said is not None and said[0] == "failed":
+            return SystemExit(f"speaking process {w} failed:\n{said[1]}")
+        process.join(timeout=5)
+        return SystemExit(f"speaking process {w} is gone (exit code {process.exitcode})")
+
+    def send(self, kind: str, key: Any, model: Prior, samples: int, *, seed: int, source: str) -> None:
+        """Start the processes on training round ``key`` (``kind`` "train") or select side ``key`` ("select") with
+        ``model``'s weights."""
         state = {name: value.detach().cpu() for name, value in model.state_dict().items()}
-        count = len(self.pipes)
         for w, pipe in enumerate(self.pipes):
-            pipe.send((kind, key, state, list(range(w, len(plan), count)), samples, seed, source))
-        parts: dict[int, SceneSentences] = {}
-        for w, (pipe, process) in enumerate(zip(self.pipes, self.processes)):
             try:
-                status, payload = pipe.recv()
-            except EOFError:
-                process.join(timeout=5)
-                raise SystemExit(f"speaking process {w} died (exit code {process.exitcode})") from None
+                pipe.send((kind, key, state, (w, len(self.pipes)), samples, seed, source))
+            except OSError:
+                raise self._gone(w) from None
+
+    def receive(self, round_: Round, samples: int) -> tuple[SceneSentences, list[float]]:
+        """The sentences of `send`'s round (``round_``: the parent's own), assembled as `speak` does, and each
+        process's GPU peak (GB reserved)."""
+        fingerprint = round_fingerprint(round_)
+        parts: dict[int, SceneSentences] = {}
+        peaks = []
+        for w, pipe in enumerate(self.pipes):
+            try:
+                status, *payload = pipe.recv()
+            except (EOFError, OSError):
+                raise self._gone(w) from None
             if status != "ok":
-                raise SystemExit(f"speaking process {w} failed:\n{payload}")
-            parts.update(payload)
-        return assemble(round_, samples, plan, parts)
+                raise SystemExit(f"speaking process {w} failed:\n{payload[0]}")
+            got, rebuilt, peak = payload
+            if rebuilt != fingerprint:
+                raise SystemExit(f"speaking process {w} rebuilt another round than this process's")
+            parts.update(got)
+            peaks.append(peak)
+        plan = speaking_plan(round_, samples, self.speaking.params, self.speaking.budget,
+                             self.speaking.words.spec.step_s)
+        if sorted(parts) != list(range(len(plan))):
+            raise SystemExit(f"the speaking processes returned batches {sorted(parts)} of {len(plan)}")
+        return assemble(round_, samples, plan, parts), peaks
+
+    def speak(self, kind: str, key: Any, round_: Round, model: Prior, samples: int, *, seed: int, source: str
+              ) -> tuple[SceneSentences, list[float]]:
+        """`send` then `receive`."""
+        self.send(kind, key, model, samples, seed=seed, source=source)
+        return self.receive(round_, samples)
 
     def close(self) -> None:
         for pipe in self.pipes:
-            pipe.send(None)
+            try:
+                pipe.send(None)
+            except OSError:
+                pass                                            # gone already: nothing to stop
         for process in self.processes:
             process.join(timeout=60)
 
@@ -599,6 +664,23 @@ def write_traffic_prior(directory: Path, model: Prior, start_dir: Path, start: L
     write_masks(directory, start.procedure_masks, writer=RUNNER, git=dict(git))
 
 
+def write_choice(out: Path, history: Sequence[Mapping[str, Any]], labelled: Mapping[str, Mapping[str, float]],
+                 prior_dir: Path, log: Callable[[str], None]) -> None:
+    """``choice.json`` over the rounds finished (`guarded_choice`; round 0 kept: the start)."""
+    kept_round, excluded = guarded_choice(history, labelled)
+    write_json_atomic(out / "choice.json", {
+        "rule": f"within round 0's guards (real scenes: landed ≥ − {GUARD_LANDED_DROP}, on the observed runway ≥ − "
+                f"{GUARD_RUNWAY_DROP}, lost separation ≤ + {GUARD_LOSS_RISE}, median time to land and landing gap ≤ "
+                f"{GUARD_ORDER_GROWTH} × recorded; real and augmented: each of {', '.join(GUARD_WORD_COLUMNS)} words per "
+                f"flight off the labelled ≤ round 0's + ln {GUARD_WORD_GROWTH}), the highest augmented-scene reward; "
+                f"within {TIE_SHARE} the earliest",
+        "augmented_reward": [row["augmented"]["reward"] for row in history],
+        "real_reward": [row["real"]["reward"] for row in history], "excluded_by_the_guards": excluded,
+        "round": kept_round,
+        "directory": str(out / f"round_{kept_round:02d}") if kept_round else str(prior_dir)})
+    log(f"kept round {kept_round} (the guards excluded {excluded}) → {out}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--prior", type=Path, required=True, help="the start: augmented (a single-aircraft prior)")
@@ -724,7 +806,8 @@ def main(argv: list[str] | None = None) -> int:
         if failing:
             raise SystemExit(f"the start failed the ordering guards {failing} (round 0): no round could be chosen")
         record = {**stored, "rounds": args.rounds,
-                  "resumed": [*stored["resumed"], {"utc": utc_now(), "from_round": last, "to": args.rounds}]}
+                  "resumed": [*stored["resumed"], {"utc": utc_now(), "from_round": last, "to": args.rounds,
+                                                   "speakers": args.speakers}]}
     else:
         out.mkdir(parents=True)
         last, history = -1, []
@@ -737,13 +820,20 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(select_augmented.scenes)} augmented ({dict(Counter(select_augmented.kinds))}, {select_left_out} left out); "
         f"recorded lost separation {recorded['lost_separation']:.3f}")
 
+    def free_gpu() -> None:
+        """The speaking processes need the GPU next: this process gives back what its cache holds."""
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
     def read_select(round_number: int) -> dict[str, Any]:
         model.eval()
         readout: dict[str, Any] = {}
         for side, round_ in (("real", select_real), ("augmented", select_augmented)):
-            spoken = speakers.speak("select", side, round_, model, args.select_samples,
-                                    seed=round_seed(args.seed, 0, SELECT_STREAMS[side]), source="scene")
+            free_gpu()
+            spoken, peaks = speakers.speak("select", side, round_, model, args.select_samples,
+                                           seed=round_seed(args.seed, 0, SELECT_STREAMS[side]), source="scene")
             readout[side] = side_readout(spoken.rows, round_, args.select_samples, step_s, real=side == "real")
+            readout[side]["speaking_gpu_peak_gb"] = peaks
             readout[side]["flights"] = spoken.rows
         readout["traffic"] = traffic_readout(model, select_built, slots, device)
         real, augmented = readout["real"], readout["augmented"]
@@ -787,7 +877,14 @@ def main(argv: list[str] | None = None) -> int:
         return (join_rounds([real_round(replay.subset(pool, real), train_airports, params, every_landing, step_s),
                              augmented]), left_out, pool.drawn)
 
-    # forked before this process starts the GPU (item 13); the model is the template each process loads weights into
+    if args.resume and args.rounds == last:                 # the choice alone: nothing to speak
+        write_json_atomic(out / "config.json", record)
+        write_choice(out, history, labelled, prior_dir, log)
+        return 0
+    # forked before this process starts the GPU (item 13); the model is the template each process loads weights into; the
+    # collector's view of the data frozen first, so that no process's collector writes to (and so copies) the shared heap
+    gc.collect()
+    gc.freeze()
     speakers = Speakers(args.speakers, lambda n: train_round(n)[0],
                         {"real": select_real, "augmented": select_augmented}, model, args.device,
                         Speaking(words, params, landings, start_masks, args.aircraft_steps))
@@ -815,12 +912,14 @@ def main(argv: list[str] | None = None) -> int:
     for round_number in range(last + 1, args.rounds + 1):
         directory = out / f"round_{round_number:02d}"
         directory.mkdir()
-        round_, left_out, drawn = train_round(round_number)
         model.eval()
+        free_gpu()
+        speakers.send("train", round_number, model, args.samples,
+                      seed=round_seed(args.seed, round_number, SAMPLING_STREAM), source="train")
+        round_, left_out, drawn = train_round(round_number)          # while the processes speak it
+        spoken, speaking_peaks = speakers.receive(round_, args.samples)
         if device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(device)
-        spoken = speakers.speak("train", round_number, round_, model, args.samples,
-                                seed=round_seed(args.seed, round_number, SAMPLING_STREAM), source="train")
         earned = np.array([r["reward"] for r in spoken.rows])
         advantages, _, keep = trained_scenes(spoken, args.samples)
         write_sentences(directory / "sentences.npz", round_, spoken, advantages)
@@ -843,14 +942,15 @@ def main(argv: list[str] | None = None) -> int:
         tuner.restart(np.random.default_rng([args.seed, round_number, PASS_STREAM]))
         passed = {**tuner.one_pass(sentences, advantages[keep], data, allowed, slots=slots),
                   "distance_at_start": start_distance, "distance_sentences": measured_on}
+        passed["speaking_gpu_peak_gb"] = speaking_peaks
         if device.type == "cuda":
-            passed["gpu_peak_gb"] = torch.cuda.max_memory_allocated(device) / 1e9
+            passed["pass_gpu_peak_gb"] = torch.cuda.max_memory_allocated(device) / 1e9
         log(f"round {round_number}: one pass over {len(keep)} sentences ({passed['batches']} updates), reward term "
             f"{passed['reward_mean']:.4f}, KL to the base at the start {start_distance}, {passed['kl_mean']:.4f} in the "
             f"pass (max {passed['kl_max']:.4f}), data NLL {passed['data_mean']:.4f}, words outside the clip "
-            f"{passed['clipped_share']:.4f}, {passed['seconds']:.0f}s"
-            + (f", GPU peak {passed['gpu_peak_gb']:.2f} GB (the round's speaking and pass)" if "gpu_peak_gb" in passed
-               else ""))
+            f"{passed['clipped_share']:.4f}, {passed['seconds']:.0f}s; GPU peak: speaking processes "
+            + " ".join(f"{p:.2f}" for p in speaking_peaks) + " GB reserved each"
+            + (f", the pass {passed['pass_gpu_peak_gb']:.2f} GB allocated" if "pass_gpu_peak_gb" in passed else ""))
         write_traffic_prior(directory, model, prior_dir, start, spec.sha256, git=git, smoke=args.smoke,
                             fine_tuning={"schema": TRAFFIC_REWARD_SCHEMA, "from": str(prior_dir), "base": str(base_dir),
                                          "round": round_number, "optimiser": asdict(config),
@@ -862,19 +962,8 @@ def main(argv: list[str] | None = None) -> int:
                                    sentences={k: v for k, v in described.items() if k != "drawn"}))
         write_json_atomic(out / "history.json", {"rounds": history})
         write_json_atomic(directory / "readout.json", readout)                       # last: the round finished
+    write_choice(out, history, labelled, prior_dir, log)
     speakers.close()
-    kept_round, excluded = guarded_choice(history, labelled)
-    write_json_atomic(out / "choice.json", {
-        "rule": f"within round 0's guards (real scenes: landed ≥ − {GUARD_LANDED_DROP}, on the observed runway ≥ − "
-                f"{GUARD_RUNWAY_DROP}, lost separation ≤ + {GUARD_LOSS_RISE}, median time to land and landing gap ≤ "
-                f"{GUARD_ORDER_GROWTH} × recorded; real and augmented: each of {', '.join(GUARD_WORD_COLUMNS)} words per "
-                f"flight off the labelled ≤ round 0's + ln {GUARD_WORD_GROWTH}), the highest augmented-scene reward; "
-                f"within {TIE_SHARE} the earliest",
-        "augmented_reward": [row["augmented"]["reward"] for row in history],
-        "real_reward": [row["real"]["reward"] for row in history], "excluded_by_the_guards": excluded,
-        "round": kept_round,
-        "directory": str(out / f"round_{kept_round:02d}") if kept_round else str(prior_dir)})
-    log(f"kept round {kept_round} (the guards excluded {excluded}) → {out}")
     return 0
 
 

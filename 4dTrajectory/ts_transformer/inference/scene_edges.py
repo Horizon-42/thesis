@@ -130,14 +130,31 @@ def _scaled(distance_m: np.ndarray) -> np.ndarray:
     return np.arcsinh(np.asarray(distance_m) / SCALE_M)
 
 
-def scene_edges(rows: SceneRows, separation: Separation, scenes: Sequence[int] | None = None) -> np.ndarray:
-    """``[T, A, A, len(EDGE_FEATURES)]`` float32 (module docstring); 0 wherever i or j is absent. ``scenes``: which scene
-    each aircraft is in, several scenes of one airport stacked on ``rows``' aircraft axis (None: one) — only pairs within
-    a scene are read, a pair across two stays 0. Every ordered pair over all its steps at once, all pairs together (each
-    value is the per-pair formula's, element for element)."""
+def scene_edges(rows: SceneRows, separation: Separation) -> np.ndarray:
+    """``[T, A, A, len(EDGE_FEATURES)]`` float32 (module docstring); 0 wherever i or j is absent."""
+    return scene_edge_blocks(rows, separation, [len(rows.category)])[0]
+
+
+def scene_edge_blocks(rows: SceneRows, separation: Separation, sizes: Sequence[int]) -> list[np.ndarray]:
+    """Several scenes of one airport stacked on ``rows``' aircraft axis (``sizes``: each scene's aircraft, in order): each
+    scene's `scene_edges`, ``[T, A_s, A_s, len(EDGE_FEATURES)]`` — only pairs within a scene are read. Every ordered pair
+    over all its steps at once, all pairs together (each value is the per-pair formula's, element for element)."""
     aircraft, steps = rows.time_s.shape
-    out = np.zeros((steps, aircraft, aircraft, len(EDGE_FEATURES)), dtype=np.float32)
+    if sum(sizes) != aircraft:
+        raise ValueError(f"scenes of {list(sizes)} aircraft stacked on {aircraft}")
+    offsets = np.concatenate(([0], np.cumsum(sizes)))
+    group = np.repeat(np.arange(len(sizes)), sizes)
+    blocks = [np.zeros((steps, size, size, len(EDGE_FEATURES)), dtype=np.float32) for size in sizes]
     present = rows.present
+    index = {name: k for k, name in enumerate(EDGE_FEATURES)}
+    step_of, own = np.nonzero(present.T)
+    for s, (low, high) in enumerate(zip(offsets[:-1], offsets[1:])):
+        mine = (own >= low) & (own < high)
+        blocks[s][step_of[mine], own[mine] - low, own[mine] - low, index["self"]] = 1.0
+    first_of, second_of = np.nonzero((group[:, None] == group[None, :]) & ~np.eye(aircraft, dtype=bool))
+    pair, t = np.nonzero(present[first_of] & present[second_of])
+    if not len(pair):
+        return blocks
     codes = sorted({r for steps in rows.runway for r in steps if r is not None})
     runway = np.array([[codes.index(r) if r is not None else -1 for r in steps] for steps in rows.runway], dtype=np.int64)
     moving = motion(rows, runway)
@@ -145,14 +162,6 @@ def scene_edges(rows: SceneRows, separation: Separation, scenes: Sequence[int] |
     direction = np.arctan2(velocity[..., 0], velocity[..., 1])
     position = np.stack((np.nan_to_num(rows.e_m), np.nan_to_num(rows.n_m)), axis=-1)
     height = np.nan_to_num(rows.height_m)
-    index = {name: k for k, name in enumerate(EDGE_FEATURES)}
-    step_of, own = np.nonzero(present.T)
-    out[step_of, own, own, index["self"]] = 1.0
-    group = np.zeros(aircraft, dtype=np.int64) if scenes is None else np.asarray(scenes, dtype=np.int64)
-    first_of, second_of = np.nonzero((group[:, None] == group[None, :]) & ~np.eye(aircraft, dtype=bool))
-    pair, t = np.nonzero(present[first_of] & present[second_of])
-    if not len(pair):
-        return out
     i, j = first_of[pair], second_of[pair]
     earlier = np.zeros_like(present)
     earlier[:, 1:] = present[:, :-1]
@@ -186,8 +195,12 @@ def scene_edges(rows: SceneRows, separation: Separation, scenes: Sequence[int] |
     edge[:, index["motion_unknown"]] = ~known
     along = rows.along_m[j, source] + moving.along_rate_mps[j, source] * dt - rows.along_m[i, t]
     _runways(edge, rows, separation, codes, i, j, runway[i, t], runway[j, source], along, index)
-    out[t, i, j] = edge
-    return out
+    # each pair-step into its scene's block (the pairs come ordered by i, so by scene)
+    bounds = np.searchsorted(group[i], np.arange(len(sizes) + 1))
+    for s, low in enumerate(offsets[:-1]):
+        part = slice(bounds[s], bounds[s + 1])
+        blocks[s][t[part], i[part] - low, j[part] - low] = edge[part]
+    return blocks
 
 
 def _runways(edge: np.ndarray, rows: SceneRows, separation: Separation, codes: list[str], i: np.ndarray, j: np.ndarray,
@@ -198,7 +211,10 @@ def _runways(edge: np.ndarray, rows: SceneRows, separation: Separation, codes: l
     edge[:, index["clock_incomparable"]] = 1.0
     kinds = sorted({c for c in rows.category if c is not None}) + [None]
     kind = np.array([kinds.index(c) for c in rows.category], dtype=np.int64)
-    for a, b in {(int(x), int(y)) for x, y in zip(mine, theirs) if x >= 0 and y >= 0}:
+    both = (mine >= 0) & (theirs >= 0)
+    if not both.any():
+        return
+    for a, b in np.unique(np.stack((mine[both], theirs[both]), axis=1), axis=0):
         on = (mine == a) & (theirs == b)
         relation = separation.relation(codes[a], codes[b])
         edge[on, index[relation]] = 1.0
@@ -207,7 +223,7 @@ def _runways(edge: np.ndarray, rows: SceneRows, separation: Separation, codes: l
         edge[on, index["clock_incomparable"]] = 0.0
         edge[on, index["clock_ahead"]] = _scaled(along[on])
         # the required distance reads the two runways and the two categories only
-        for mine_kind, their_kind in {(int(x), int(y)) for x, y in zip(kind[i[on]], kind[j[on]])}:
+        for mine_kind, their_kind in np.unique(np.stack((kind[i[on]], kind[j[on]]), axis=1), axis=0):
             rows_ab = on & (kind[i] == mine_kind) & (kind[j] == their_kind)
             ahead = along[rows_ab]
             j_leads = separation.distance_nm(codes[b], kinds[their_kind], codes[a], kinds[mine_kind]) * NM_M

@@ -53,7 +53,7 @@ from ts_transformer.experiments.traffic_census import Track, track, traffic_at
 from ts_transformer.experiments.traffic_labelled import own_end
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION, Controlled, Loop, Run, join
 from ts_transformer.experiments.traffic_scene_data import AirportFlights, FlightRows, airport_flights
-from ts_transformer.inference.scene_edges import SceneRows, scene_edges
+from ts_transformer.inference.scene_edges import SceneRows, scene_edge_blocks, scene_edges
 from ts_transformer.inference.separation import VISUAL, Traffic
 from ts_transformer.inference.separation_masks import clearance_check, speed_check
 from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
@@ -378,12 +378,9 @@ class SceneLoop(ClosedLoop):
             sizes = [len(part[-1]) for part in parts]
             stacked = SceneRows(*(np.concatenate([part[k] for part in parts]) for k in range(5)),
                                 [row for part in parts for row in part[5]], [c for part in parts for c in part[6]])
-            edges = scene_edges(stacked, self.scenes[members[0]].airport.flights.separation,
-                                np.repeat(np.arange(len(parts)), sizes))[first - low:]
-            offset = 0
-            for b, size in zip(members, sizes):
-                out[b, :, :size, :size] = edges[:, offset: offset + size, offset: offset + size]
-                offset += size
+            blocks = scene_edge_blocks(stacked, self.scenes[members[0]].airport.flights.separation, sizes)
+            for b, size, block in zip(members, sizes, blocks):
+                out[b, :, :size, :size] = block[first - low:]
         return out
 
     def close(self) -> None:
