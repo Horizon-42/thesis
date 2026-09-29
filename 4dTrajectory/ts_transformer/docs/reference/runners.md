@@ -804,8 +804,8 @@ D 346, none left out).
 ### R32 · `run_ts.py traffic_reward` — multi-aircraft M4: the traffic post-training (design §6.2, §6.6 step 6)
 
 2026-09-28. `traffic_reward --prior <augmented> --base <base> --instructions <artefact> --executor <spec> --out <new dir>
-[--rounds 8] [--resume] [--real-per-airport 200] [--augmented-per-airport 200] [--samples 8] [--select-per-airport 200]
-[--select-samples 2] [--traffic-learning-rate 3e-4] [--aircraft-steps 300000] [--seed 1337] [--device] [--smoke]` plus
+[--rounds 8] [--resume] [--speakers 4] [--real-per-airport 200] [--augmented-per-airport 200] [--samples 8] [--select-per-airport 200]
+[--select-samples 2] [--traffic-learning-rate 3e-4] [--aircraft-steps 100000] [--seed 1337] [--device] [--smoke]` plus
 `RewardConfig`'s flags (stage 2's recipe). The start is `with_traffic(augmented)` (C37: augmented's answers to rounding).
 Each round: a pool of 1.25 × 400 training-day flights per airport (the round's seed); the first 200 speak in their real
 scenes, the rest in pool order in augmented ones (`traffic_augment`, D / B / A) until 200 qualify (refused when an airport
@@ -846,4 +846,20 @@ it), when a round did not finish (its directory without `readout.json`, written 
 `round_<k>.aborted-<UTC>`; a run that did not finish round 0 is started again) or when the start failed the ordering
 guards. `choice.json` is written over the rounds finished at the end of each invocation; `--resume --rounds <the last
 finished>` writes it alone.
+
+**In several processes** (design §6.6 step 6 items 12–13, 2026-09-29): the loop's Python ran on one core while the GPU
+waited (20–30 % busy). The sentences — a round's and the select readouts' — are spoken by `--speakers` processes
+(`Speakers`), forked once the data are built (the collector frozen first: the data stay shared) and before the parent
+starts the GPU; each rebuilds a training round from its number with the parent's own `train_round` (a scene holds its
+airport's whole data — rebuilt, not sent; the parent checks each process's round fingerprint) and speaks the loop batches
+its index deals it, each batch from its own stream (`batch_seed`), so the sentences do not depend on `--speakers` (tested:
+one and two processes = one process, bit for bit, on one thread; `--speakers` is not part of the run). The parent frees
+its GPU cache before every speaking, builds its round while the processes speak, and runs the pass, the distances and
+the teacher-forced readout; a speaking process that fails or is gone ends the run with what it said; the processes die
+with the parent. A speaking process's batch is 100,000 aircraft-steps (four within 8 GB); each process's GPU peak is
+logged beside the pass's. The loop's edge features are computed for all pairs at once and one airport's scenes in one
+call (`inference.scene_edges.scene_edge_blocks`), the separation masks share the others' state per scene and step
+(`traffic_speaking.others_at`) — identical to e76ca5ff on every select sample and on 20 real scenes spoken end to end.
+The edge code's hash moved with it (`038df9ab…` → new): the run begun at e76ca5ff (`m4_traffic_20260928`) is read by its
+own checkout only.
 

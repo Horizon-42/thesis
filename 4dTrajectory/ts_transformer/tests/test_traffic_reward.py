@@ -8,6 +8,7 @@ earliest within the tie. On the scene-data fixture (a tmp artefact)."""
 from __future__ import annotations
 
 import dataclasses
+import json
 from dataclasses import replace
 
 import numpy as np
@@ -26,28 +27,28 @@ CPU = torch.device("cpu")
 
 
 def _patch_physics(monkeypatch, airport, signals, keys, samples):
-    """The runner's executor inputs for ``keys`` (each ``samples`` times, flight-major): the test aircraft's."""
+    """The runner's executor inputs for the flights at ``keys``: the test aircraft's, looked up by the flights each loop
+    batch holds (`_batch` puts a flight's key where its series would be)."""
     from ts_transformer.experiments import traffic_free_generation, traffic_reward
 
-    physics = []
+    physics = {}
     for key in keys:
         flight = signals[key]
         start = replace(flight, **{name: getattr(flight, name)[N_LOOK:] for name in
                                    ("time_s", "e_m", "n_m", "altitude_m", "track_deg", "ground_speed_mps",
                                     "vertical_rate_mps")})
-        physics.append(_physics(start, airport.flights.geometry))
-    index = torch.tensor([j for j in range(len(keys)) for _ in range(samples)])
+        physics[key] = _physics(start, airport.flights.geometry)
 
-    def stacked(k):
-        tables = [p[k] for p in physics]
+    def stacked(order, k):
+        tables = [physics[key][k] for key in order]
         if isinstance(tables[0], torch.Tensor):
-            return torch.cat(tables)[index]
-        joined = type(tables[0])(**{f.name: torch.cat([getattr(t, f.name) for t in tables])
-                                    for f in dataclasses.fields(tables[0])})
-        return _repeated(joined, index)
+            return torch.cat(tables)
+        return type(tables[0])(**{f.name: torch.cat([getattr(t, f.name) for t in tables])
+                                  for f in dataclasses.fields(tables[0])})
 
-    monkeypatch.setattr(traffic_free_generation, "flight_inputs", lambda series, device, anchor: stacked(0))
-    monkeypatch.setattr(traffic_free_generation, "_physics", lambda batch, device: (stacked(1), stacked(2), stacked(3)))
+    monkeypatch.setattr(traffic_free_generation, "flight_inputs", lambda series, device, anchor: stacked(series, 0))
+    monkeypatch.setattr(traffic_free_generation, "_physics", lambda batch, device: tuple(
+        stacked([s.dataset_id for s in batch.signals], k) for k in (1, 2, 3)))
     for module in (traffic_free_generation, traffic_reward):
         monkeypatch.setattr(module, "limits_s", lambda batch, params, step_s, augmented: [LIMIT_S] * len(batch.readings))
 
@@ -90,7 +91,7 @@ def test_a_round_s_sentences_train_on_what_their_words_were_sampled_from(tmp_pat
     model.logits = spy
     try:
         spoken = speak(model, round_, samples, words, _params(), landings, ProcedureMasks.none(),
-                       generator=torch.Generator().manual_seed(4), budget=10 ** 9, source="train")
+                       seed=4, budget=10 ** 9, source="train")
     finally:
         del model.logits
     assert [r["dataset_id"] for r in spoken.rows] == [k for k in keys for _ in range(samples)]
@@ -191,7 +192,7 @@ def test_a_scene_starting_in_a_loss_is_not_trained_on_and_the_readouts_read_the_
     geometry = airport.flights.geometry
     round_ = Round(batch, scenes, [None, None], ["real", "real"], [np.ones(len(geometry.candidates), dtype=bool)] * 2)
     spoken = speak(_traffic_model(words), round_, samples, words, _params(), None, ProcedureMasks.none(),
-                   generator=torch.Generator().manual_seed(4), budget=10 ** 9, source="scene")
+                   seed=4, budget=10 ** 9, source="scene")
     assert [r["starts_in_a_loss"] for r in spoken.rows] == [True, True, False, False]
     for r in spoken.rows[2:]:
         r["reward"] = float(r is spoken.rows[2])                   # f3's two sentences differ
@@ -311,3 +312,72 @@ def test_a_resumed_run_continues_only_from_finished_rounds_of_the_same_configura
     # each round's streams are its own
     seeds = {round_seed(1337, r, s) for r in (1, 2) for s in (1, 2)}
     assert len(seeds) == 4 and round_seed(1337, 1, 1) == round_seed(1337, 1, 1)
+
+
+def test_the_sentences_do_not_depend_on_how_many_processes_speak_them(tmp_path, monkeypatch):
+    """`Speakers` (design §6.6 step 6 item 13): one and two forked processes say what this process says, bit for bit —
+    every loop batch from its own stream — and a process that fails ends the call with its traceback. The reference is
+    spoken on one thread as the speaking processes are (a CPU sum over several threads rounds otherwise: the words are
+    the same, a probability read beside them differs in its eighth digit)."""
+    from ts_transformer.experiments.traffic_reward import Round, Speakers, Speaking, speak
+    from ts_transformer.experiments.traffic_speaking import scene_of
+
+    airport, signals, spec = _airport(tmp_path, monkeypatch, [0.7, 120.0, 3_600.0], [0, 1, 2])
+    words, samples, keys = Words(spec), 2, ["KXXX:f1", "KXXX:f2"]
+    _patch_physics(monkeypatch, airport, signals, keys, samples)
+    batch = _batch(airport, signals, spec, keys)
+    scenes = [scene_of(airport, key, LIMIT_S, spec.step_s) for key in keys]
+    geometry = airport.flights.geometry
+    round_ = Round(batch, scenes, [None, None], ["real", "A"], [np.ones(len(geometry.candidates), dtype=bool)] * 2)
+    model = _traffic_model(words)
+    budget = 1                                        # a flight a batch: two batches to deal
+    threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        here = speak(model, round_, samples, words, _params(), None, ProcedureMasks.none(), seed=7, budget=budget,
+                     source="train")
+    finally:
+        torch.set_num_threads(threads)
+    speaking = Speaking(words, _params(), None, ProcedureMasks.none(), budget)
+    for count in (1, 2):
+        speakers = Speakers(count, lambda n: round_, {}, model, "cpu", speaking)
+        try:
+            there, peaks = speakers.speak("train", 1, round_, model, samples, seed=7, source="train")
+        finally:
+            speakers.close()
+        assert peaks == [0.0] * count                  # on the CPU: no GPU peak
+        assert [r["dataset_id"] for r in there.rows] == [r["dataset_id"] for r in here.rows]
+        different = [(k, a[k], b[k]) for a, b in zip(there.rows, here.rows) for k in a if json.dumps(a[k], default=str)
+                     != json.dumps(b[k], default=str)]
+        assert not different, different[:3]
+        assert all(np.array_equal(a, b) for a, b in zip(there.said, here.said))
+        assert all(np.array_equal(a, b) for a, b in zip(there.positions, here.positions))
+        assert all(a.keys() == b.keys() and all(np.array_equal(a[c], b[c]) for c in a)
+                   for a, b in zip(there.allowed, here.allowed))
+    # another seed says other words somewhere (the stream is read)
+    other = speak(model, round_, samples, words, _params(), None, ProcedureMasks.none(), seed=8, budget=budget,
+                  source="train")
+    assert any(not np.array_equal(a, b) for a, b in zip(other.said, here.said))
+    # a process that fails says why; one that rebuilt another round, or is gone, ends the call
+    failing = Speakers(1, lambda n: (_ for _ in ()).throw(RuntimeError("no round")), {}, model, "cpu", speaking)
+    try:
+        with pytest.raises(SystemExit, match="no round"):
+            failing.speak("train", 1, round_, model, samples, seed=7, source="train")
+    finally:
+        failing.close()
+    other = Round(replace(batch, signals=batch.signals[::-1]), scenes[::-1], [None, None], ["A", "real"],
+                  round_.directions)
+    wrong = Speakers(1, lambda n: other, {}, model, "cpu", speaking)
+    try:
+        with pytest.raises(SystemExit, match="rebuilt another round"):
+            wrong.speak("train", 1, round_, model, samples, seed=7, source="train")
+    finally:
+        wrong.close()
+    gone = Speakers(2, lambda n: round_, {}, model, "cpu", speaking)
+    gone.processes[1].kill()
+    gone.processes[1].join(timeout=10)
+    try:
+        with pytest.raises(SystemExit, match="speaking process 1 is gone"):
+            gone.speak("train", 1, round_, model, samples, seed=7, source="train")
+    finally:
+        gone.close()

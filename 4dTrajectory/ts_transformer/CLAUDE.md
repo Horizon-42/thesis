@@ -410,7 +410,8 @@ separation vs 4.9 % labelled, 2.6 % recorded; vectored 21.6 %) (R31). `traffic_r
 from augmented + a zero traffic attention, real and augmented training scenes, reward = landed without losing separation,
 each sentence scored in its scene by the speaker's own layout and edge code (`experiments/traffic_tuner.py`), base alone,
 M2's scene samples as the data term; runs round by round (`--rounds k`, then `--resume`: per-round streams, the optimiser's
-state saved per round, refused on another config or commit) (R32).
+state saved per round, refused on another config or commit), spoken by `--speakers` forked processes (each loop batch its own
+stream: the sentences do not depend on their number) (R32).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 
