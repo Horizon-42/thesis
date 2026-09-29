@@ -81,6 +81,7 @@ import math
 import multiprocessing
 import os
 import signal
+import sys
 import traceback
 import time
 from collections import Counter
@@ -296,10 +297,11 @@ class Speaking:
 
 
 def round_fingerprint(round_: Round) -> list[tuple[Any, ...]]:
-    """What must be the same in a round rebuilt by a speaking process and the parent's: each flight, its kind and its
-    moved start."""
-    return [(signals.dataset_id, kind, None if move is None else dataclasses.asdict(move))
-            for signals, kind, move in zip(round_.batch.signals, round_.kinds, round_.moves)]
+    """What must be the same in a round rebuilt by a speaking process and the parent's: each flight, its kind, its moved
+    start, its scene's others and the flights moved or inserted in it (their keys and first row times)."""
+    return [(signals.dataset_id, kind, None if move is None else dataclasses.asdict(move), tuple(scene.others),
+             tuple((rows.presence.dataset_id, float(rows.presence.times_s[0])) for rows, _ in scene.moved))
+            for signals, kind, move, scene in zip(round_.batch.signals, round_.kinds, round_.moves, round_.scenes)]
 
 
 #: `prctl` option: the signal a process gets when its parent dies (linux/prctl.h).
@@ -308,14 +310,17 @@ PR_SET_PDEATHSIG = 1
 
 def _speaker(pipe: Any, parent_ends: Sequence[Any], parent_pid: int, rounds: Callable[[int], Round],
              select: Mapping[str, Round], model: Prior, device: str, speaking: Speaking) -> None:
-    """A speaking process (`Speakers`): it dies with the parent (a killed parent leaves none holding the GPU), keeps
+    """A speaking process (`Speakers`): on Linux it dies with the parent (a killed parent leaves none holding the GPU), keeps
     none of the other processes' pipes, runs one thread (the processes are the parallelism) and starts the GPU here,
     after the fork; then answers each task — (kind, key, weights, (its index, the processes), samples, seed, source) —
     with the batches of the plan its index deals it, the round's fingerprint and its GPU peak, or the traceback that ended
     it (also printed)."""
-    ctypes.CDLL("libc.so.6", use_errno=True).prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
-    if os.getppid() != parent_pid:
-        os._exit(1)
+    if sys.platform == "linux":                                 # the death signal is Linux's; elsewhere none is asked for
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        if libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL) != 0:
+            raise OSError(ctypes.get_errno(), "prctl(PR_SET_PDEATHSIG)")
+        if os.getppid() != parent_pid:
+            os._exit(1)
     for end in parent_ends:
         end.close()
     torch.set_num_threads(1)
@@ -343,8 +348,8 @@ def _speaker(pipe: Any, parent_ends: Sequence[Any], parent_pid: int, rounds: Cal
             peak = 0.0
             if device_.type == "cuda":
                 peak = torch.cuda.max_memory_reserved(device_) / 1e9
-                torch.cuda.reset_peak_memory_stats(device_)
                 torch.cuda.empty_cache()                        # the parent's pass needs the GPU next
+                torch.cuda.reset_peak_memory_stats(device_)     # after: the next task's peak starts from the emptied cache
             pipe.send(("ok", parts, round_fingerprint(round_), peak))
     except BaseException:
         traceback.print_exc()

@@ -368,7 +368,7 @@ class SceneLoop(ClosedLoop):
         out = np.zeros((len(self.scenes), last - first, speaker.aircraft, speaker.aircraft,
                         len(speaker.model.traffic_features)), dtype=np.float32)
         pointers = speaker.in_force[:, 0, : speaker.rows, RUNWAY].cpu().numpy()
-        # the scenes of one airport stacked on one aircraft axis, one call (`scene_edges`' ``scenes``: pairs within each)
+        # the scenes of one airport stacked on one aircraft axis, one call (`scene_edge_blocks`: pairs within each)
         by_airport: dict[str, list[int]] = defaultdict(list)
         for b, scene in enumerate(self.scenes):
             by_airport[scene.airport.flights.code].append(b)
