@@ -898,3 +898,27 @@ separation, with each group's share of losses, of vectored approaches (real) and
 labelled words and along their records. A flight with a sentence starting in a loss in any round (the first step's runway
 word decides the runway it is judged against), or whose record or labelled reading starts in one, is left out of this part
 and counted. The last round is not necessarily the kept one (`choice.round`). Writes `traffic_reward_readout.json`.
+
+### R34 · `run_ts.py traffic_window_generation` — multi-aircraft M3's second pass: the post-training's start commanding every aircraft of a window (design §6.6 step 7 item 4)
+
+2026-09-30. `traffic_window_generation --prior <single-aircraft prior (augmented)> --executor <spec> --instructions
+<artefact> --split select --out <new dir> [--windows-per-airport 200] [--samples 4] [--aircraft-steps 300000] [--device]`.
+The windows (`experiments/traffic_window.py`, design §6.6 step 7 item 1): each airport's segments tiled by 20-minute windows
+opening every 10 minutes; a window commands its flights with a sentence entering in it that fly on their own dynamics, the
+rest replayed; drawn per airport in a seeded permutation of the tiles, a tile with no flight that flies passed over and
+counted. The loop (`WindowLoop`): the prior (`prior/window_speaker.py`) speaks to every commanded aircraft at once — one
+encoding a step, the words picked round by round from the front of the approach clock, a later round's separation masks
+reading an earlier round's words — the executors grouped by the step aircraft first speak at (the executor's cycle count is
+batch-wide; its code untouched), the judge run as it flies (`traffic_loop.Judging`): an aircraft ended there flies on
+silent, still in the scene (design §9 item 29); an own end the executor flies past (a stall, an uncaptured crossing,
+another runway's) is found as it happens with the runway in force; each commanded aircraft's landing context is its
+window's landings less the other commanded aircraft's recorded ones, theirs added as they land in the loop. With one
+commanded aircraft a window it says, flies and ends exactly as R31's loop (tests). Every commanded aircraft is read four
+ways, all judged in its window: **scene**, **alone** (each aircraft hearing no other, no separation mask, flown and judged
+together), **labelled**, **recorded** (the last two judged afterwards by `traffic_loop.Loop(keep_ended=True)`); IFR beside
+VISUAL as every source's paths judged again afterwards. Per source — pooled, per airport, per window size (1, 2, 3+
+commanded) — outcomes, lost separation (ended with a commanded aircraft or a replayed one), episodes per aircraft and per
+hour, M4's reward, the landing time against the record, how often two commanded aircraft of a window land the other way
+round, the masks, and how one window's rewards go together over its samples (the pooled correlation of each aircraft's
+reward less its mean). Each loop batch draws from its own stream. Writes `aircraft.jsonl` (appended per batch) and
+`window_generation.json` (`ts-traffic-window-generation-v1`).

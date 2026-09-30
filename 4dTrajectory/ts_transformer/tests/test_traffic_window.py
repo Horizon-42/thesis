@@ -497,3 +497,79 @@ def test_a_crossing_of_any_threshold_plane_in_a_step_is_asked_of_the_judge(tmp_p
     assert loop._crossed(0, 0)
     loop.states[0][1] = dc.replace(after, e_m=threshold.threshold_e_m - 10.0, n_m=threshold.threshold_n_m)
     assert not loop._crossed(0, 0)
+
+
+# ---- the M3 second-pass runner (step 7.4)
+
+def test_the_window_runner_reads_every_commanded_aircraft_four_ways_judged_in_its_window(tmp_path, monkeypatch):
+    import numpy as np
+    import torch
+
+    from ts_transformer.experiments import prior_free_generation
+    from ts_transformer.experiments import traffic_window_generation as runner
+    from ts_transformer.experiments.traffic_window import window_of
+    from ts_transformer.instructions.artefact import load_signals
+    from ts_transformer.prior.masks import ProcedureMasks
+    from ts_transformer.prior.scene import Landings
+    from ts_transformer.tests.test_autopilot import _params
+    from ts_transformer.tests.test_traffic_speaking import _batch
+
+    _, airports, spec = _airport(tmp_path, monkeypatch, [0.0, 40.0, 3_600.0], (0, 1, 2))
+    airport = airports["KXXX"]
+    geometry = airport.flights.geometry
+    signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
+    commanded = [("KXXX:f0", "KXXX:f1"), ("KXXX:f2",)]
+    keys = [k for keys in commanded for k in keys]
+    batch = _batch(airport, signals, spec, keys)
+    windows = [window_of(airport, 0.0, c, [LIMIT_S] * len(c), STEP_S) for c in commanded]
+    drawn = runner.Drawn(windows, [range(0, 2), range(2, 3)], batch, [LIMIT_S] * 3)
+    physics = {k: _physics_of([signals[k]], geometry) for k in keys}
+
+    def stacked(part, k):
+        tables = [physics[key][k] for key in part.series]           # (the fixture's series are the keys)
+        if k == 3:
+            return torch.cat(tables)
+        return type(tables[0])(**{f.name: torch.cat([getattr(t, f.name) for t in tables])
+                                  for f in __import__("dataclasses").fields(tables[0])})
+
+    for module in (runner, prior_free_generation):
+        monkeypatch.setattr(module, "flight_inputs", lambda series, device, anchor: stacked(
+            type("P", (), {"series": list(series)})(), 0))
+        monkeypatch.setattr(module, "_physics", lambda part, device: (stacked(part, 1), stacked(part, 2),
+                                                                      stacked(part, 3)))
+    times = np.sort([f.presence.landing_s for f in airport.flights.flights.values()])
+    every = {"KXXX": Landings(times, {c.ident: times if c.ident == "09" else np.zeros(0) for c in geometry.candidates})}
+    model = _traffic_model(spec)
+    rows = []
+    for source in ("scene", "alone"):
+        rows += runner.model_rows(model, drawn, [0, 1], source, Words(spec), _params(), None, every, 2,
+                                  generator=torch.Generator().manual_seed(4), temperature=1.0,
+                                  procedure_masks=ProcedureMasks.none())
+    for source in ("labelled", "recorded"):
+        rows += runner.fixed_rows(drawn, [0, 1], source, Words(spec), _params(), every, ProcedureMasks.none())
+    by_source = {s: [r for r in rows if r["source"] == s] for s in runner.SOURCES}
+    # a row per commanded aircraft and sample (the model's), per commanded aircraft (the fixed paths)
+    assert [(r["dataset_id"], r["sample"]) for r in by_source["scene"]] == \
+        [("KXXX:f0", 0), ("KXXX:f1", 0), ("KXXX:f0", 1), ("KXXX:f1", 1), ("KXXX:f2", 0), ("KXXX:f2", 1)]
+    assert [r["dataset_id"] for r in by_source["recorded"]] == keys and [r["commanded"] for r in by_source["labelled"]] == [2, 2, 1]
+    for r in rows:
+        assert r["reward"] in (0.0, 1.0) and r["outcome"] and r["ifr_outcome"] and r["flown_s"] >= 0.0
+        assert r["with_commanded"] + r["with_replayed"] == r["episodes"]
+    assert all(r["mask_steps"] == {"approach": 0, "speed": 0} for r in by_source["alone"])
+    # the record lands where it landed; its landing is the one the others' landing times are read against
+    assert all(r["outcome"] in ("landed", "lost_separation") for r in by_source["recorded"])
+    readout = runner.summaries(rows)
+    assert set(readout["pooled"]) == set(runner.SOURCES) and set(readout["window_sizes"]) == {"1", "2"}
+    assert readout["pooled"]["scene"]["reward_together"]["pairs"] in (0, 1)
+    assert readout["window_sizes"]["1"]["scene"]["reward_together"] == {"pairs": 0, "correlation": None}
+
+
+def test_rewards_that_go_together_correlate():
+    from ts_transformer.experiments.traffic_window_generation import together
+
+    rows = [{"window": 0, "dataset_id": key, "sample": s, "reward": reward}
+            for key, rewards in (("a", [1, 0, 1, 0]), ("b", [1, 0, 1, 0]), ("c", [0, 1, 0, 1]))
+            for s, reward in enumerate(rewards)]
+    got = together(rows)
+    # a–b +1, a–c −1, b–c −1 on equal variances: (1 − 1 − 1) / 3
+    assert got["pairs"] == 3 and abs(got["correlation"] + 1 / 3) < 1e-12

@@ -302,10 +302,11 @@ class Judging:
 
 class Loop:
     """The loop's judge over one airport (module docstring): `run` walks every segment of ``controlled`` and
-    ``replayed`` (`Judging`), an aircraft ended there leaving the scene."""
+    ``replayed`` (`Judging`), an aircraft ended there leaving the scene — or, ``keep_ended``, flying on along its own
+    path as a passive one (paths that react to nothing, judged as the window loop judges, `traffic_window`)."""
 
-    def __init__(self, separation: Separation, reading: str, step_s: float) -> None:
-        self.separation, self.reading, self.step_s = separation, reading, step_s
+    def __init__(self, separation: Separation, reading: str, step_s: float, *, keep_ended: bool = False) -> None:
+        self.separation, self.reading, self.step_s, self.keep_ended = separation, reading, step_s, keep_ended
 
     def run(self, controlled: Sequence[Controlled], replayed: Sequence[Track]) -> Run:
         keys = [a.key for a in (*controlled, *replayed)]
@@ -332,12 +333,14 @@ class Loop:
             t_s = float(t_s)
             while pending < len(landings) and landings[pending][0] <= t_s:
                 at, _, leader = landings[pending]
-                if leader.key not in out.ended:
-                    judging.landing(at, leader,
-                                    [a for a in flown_here
-                                     if a.key != leader.key and a.on_step(at) and a.key not in out.ended],
+                if leader.key not in out.ended or self.keep_ended:
+                    here = [a for a in flown_here if a.key != leader.key and a.on_step(at)]
+                    judging.landing(at, leader, [a for a in here if a.key not in out.ended],
                                     [a for a in replayed_here
-                                     if a.key != leader.key and a.presence.times_s[0] <= at <= a.presence.times_s[-1]])
+                                     if a.key != leader.key and a.presence.times_s[0] <= at <= a.presence.times_s[-1]],
+                                    [a for a in here if a.key in out.ended] if self.keep_ended else (),
+                                    leader_passive=leader.key in out.ended)
                 pending += 1
-            judging.step(t_s, [a for a in flown_here if a.on_step(t_s) and a.key not in out.ended],
-                         [a for a in replayed_here if a.on_step(t_s)])
+            here = [a for a in flown_here if a.on_step(t_s)]
+            judging.step(t_s, [a for a in here if a.key not in out.ended], [a for a in replayed_here if a.on_step(t_s)],
+                         [a for a in here if a.key in out.ended] if self.keep_ended else ())

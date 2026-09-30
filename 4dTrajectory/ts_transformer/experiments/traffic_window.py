@@ -273,7 +273,8 @@ class Commanded:
     own end, or `traffic_loop.LOST_SEPARATION` when the judge ended it first — then ``end`` is that end), its own end
     (the executor judge's or the glidepath edge's, whatever the judge did), the steps said up to its judged end
     (``counted``: what it is trained on; `traffic_free_generation.judged_steps`' count), its first state's time, its
-    crossing (None: it did not land), and where its executor's states are (``group``, ``place``)."""
+    crossing (None: it did not land), the runway in force at its end (a candidate's index) and where its executor's
+    states are (``group``, ``place``)."""
 
     key: str
     window: int
@@ -284,6 +285,7 @@ class Commanded:
     counted: int
     first_s: float
     landing_s: float | None
+    runway: int
     group: int
     place: int
 
@@ -404,18 +406,9 @@ class WindowLoop:
         self._now: tuple[int, list[Aircraft] | None] = (-1, None)
 
     def _contexts(self, landings: Mapping[str, Landings]) -> list[Landings]:
-        """Each commanded aircraft's landings before its own is taken out (`WindowSpeaker`: `data.own_context`): its
-        window's, less every other commanded aircraft's recorded landing (class docstring)."""
-        out = []
-        for key, w in zip(self.keys, self.window_of):
-            window = self.windows[w]
-            base = scene_landings(landings[window.airport.flights.code], window.scene(key, self.step_s))
-            for other in window.commanded:
-                if other != key:
-                    seen = window.rows(other).presence
-                    base = base.without(seen.landing_s, seen.runway)
-            out.append(base)
-        return out
+        """Each commanded aircraft's landings before its own is taken out (`WindowSpeaker`: `data.own_context`):
+        `window_landings`."""
+        return [window_landings(self.windows[w], key, landings, self.step_s) for key, w in zip(self.keys, self.window_of)]
 
     # -- the clock
     def window_time_s(self, w: int, step: int) -> float:
@@ -837,13 +830,25 @@ class WindowLoop:
             counted = len(said) if end is None else min(len(said), int(round((end["t_s"] - first_s) / self.step_s)))
             out.append(Commanded(key, w, said, LOST_SEPARATION if end is not None else self.own[i], self.own[i], end,
                                  counted, first_s, None if math.isnan(self.landing_s[i]) else float(self.landing_s[i]),
-                                 int(self.group[i]), int(self.place[i])))
+                                 int(self.speaker.value[i, RUNWAY]) - 1, int(self.group[i]), int(self.place[i])))
         return out
 
     def close(self) -> None:
         """Let the speaker go (`traffic_speaking.SceneLoop.close`: the loop and the speaker hold each other)."""
         self.speaker.edges_of = self.speaker.masks_of = None
         self.speaker = None
+
+
+def window_landings(window: Window, key: str, landings: Mapping[str, Landings], step_s: float) -> Landings:
+    """Commanded aircraft ``key``'s landings of its window before any lands in the loop (`WindowLoop`'s landing
+    context): the airport's, less every OTHER commanded aircraft's recorded landing — its own stays, for
+    `data.own_context` to take out."""
+    out = scene_landings(landings[window.airport.flights.code], window.scene(key, step_s))
+    for other in window.commanded:
+        if other != key:
+            seen = window.rows(other).presence
+            out = out.without(seen.landing_s, seen.runway)
+    return out
 
 
 def _with_landing(landings: Landings, time_s: float, runway: str) -> Landings:
