@@ -287,7 +287,7 @@ def fixed_rows(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, pa
                 context = _loop_context(window, key, landings,
                                         [(other.landing_s, part.geometries[at + n].candidates[runways[n]].ident)
                                          for n, other in enumerate(paths)
-                                         if n != m and owns[n] == "landed"], step_s)
+                                         if n != m and other.landing_s is not None], step_s)
             else:
                 context = scene_landings(landings[window.airport.flights.code], window.scene(key, step_s))
             row["reward"] = _reward(row, landing_direction(part.signals[j], part.geometries[j], context))
@@ -318,8 +318,8 @@ def summary(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
     afterwards; ended with a commanded aircraft or a replayed one), losses per aircraft and per hour flown, their
     relations, the reward, the landing time against the record, the order of a window's landings against the record's,
     and — the model's sources — the separation masks and how one window's rewards go together."""
-    recorded_landing = {(r["window"], r["dataset_id"]): r["landing_s"] for r in rows
-                        if r["source"] == "recorded" and r["outcome"] == "landed"}
+    # the record's landing, whatever the judge made of the record's path: a fact to read the others against
+    recorded_landing = {(r["window"], r["dataset_id"]): r["landing_s"] for r in rows if r["source"] == "recorded"}
     out: dict[str, Any] = {}
     for source in SOURCES:
         every = [r for r in rows if r["source"] == source]
@@ -358,15 +358,17 @@ def summary(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _order(rows: Sequence[dict[str, Any]], recorded_landing: Mapping[tuple[int, str], float | None]) -> dict[str, int]:
-    """Pairs of one window's commanded aircraft that both landed (not ended by the judge), in a sample and in the
-    record: how many, and how many landed the other way round."""
+    """Pairs of one window's commanded aircraft that both landed (not ended by the judge) in a sample and both have a
+    recorded landing (the record's, whatever the judge made of its paths): how many, and how many landed the other way
+    round."""
     pairs = swapped = 0
     by_sample: dict[tuple[int, Any], list[dict[str, Any]]] = defaultdict(list)
     for r in rows:
         by_sample[(r["window"], r["sample"])].append(r)
     for (w, _), members in by_sample.items():
         landed = [(r["landing_s"], recorded_landing.get((w, r["dataset_id"]))) for r in members
-                  if r["outcome"] == "landed" and recorded_landing.get((w, r["dataset_id"])) is not None]
+                  if (r["outcome"] == "landed" or r["source"] == "recorded")
+                  and recorded_landing.get((w, r["dataset_id"])) is not None]
         for a in range(len(landed)):
             for b in range(a + 1, len(landed)):
                 pairs += 1

@@ -161,7 +161,10 @@ def draw_windows(directory: Path, split: str, spec: VocabularySpec, words: Words
     short."""
     sentences = load_sentences(directory, split, spec)
     stored = {int(index): k for k, index in enumerate(sentences["signal_index"])}
-    index = {s.dataset_id: i for i, s in enumerate(load_signals(directory, split))}
+    # the split's signals, loaded once: a flight's arrays are views of the whole split's, and every `draw_flights`
+    # loads its own — the batch keeps these, never those (each would pin a copy of the split)
+    every = load_signals(directory, split)
+    index = {s.dataset_id: i for i, s in enumerate(every)}
     rng = np.random.default_rng(seed)
     openings: list[tuple[str, float, tuple[str, ...]]] = []
     rebuilt: dict[str, tuple[Any, Any, str, Any] | None] = {}   # key → (signals, series, group, reading); None: no
@@ -182,13 +185,15 @@ def draw_windows(directory: Path, split: str, spec: VocabularySpec, words: Words
             if new:
                 drawn = replay.draw_flights(directory, split, [index[k] for k in new], per_airport=0, seed=0)
                 geometries, paths = drawn.geometries, drawn.vertical_paths
-                flies = dict(zip((s.dataset_id for s in drawn.signals), zip(drawn.signals, drawn.series, drawn.groups)))
+                flies = dict(zip((s.dataset_id for s in drawn.signals), zip(drawn.series, drawn.groups)))
+                del drawn
                 for k in new:
                     rebuilt[k] = None
                     if k in flies:
-                        signals, series, group = flies[k]
+                        series, group = flies[k]
+                        signals = every[index[k]]
                         rebuilt[k] = (signals, series, group,
-                                      _reading(signals, index[k], drawn.geometries, sentences, stored, spec, words))
+                                      _reading(signals, index[k], geometries, sentences, stored, spec, words))
             for opens, keys in chunk:
                 if taken == per_airport:
                     break

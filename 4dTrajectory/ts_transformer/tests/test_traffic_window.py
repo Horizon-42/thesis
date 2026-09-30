@@ -800,18 +800,21 @@ def test_the_order_of_a_window_s_landings_and_a_flight_in_two_windows():
     def row(source, window, key, landing, outcome="landed", sample=None):
         return {"source": source, "window": window, "dataset_id": key, "sample": sample, "landing_s": landing,
                 "outcome": outcome, "starts_in_a_loss": False, "flown_s": 100.0, "episodes": 0, "relations": {},
-                "with_commanded": 0, "with_replayed": 0, "ended_with": None, "ifr_outcome": outcome, "reward": 1.0}
+                "with_commanded": 0, "with_replayed": 0, "ended_with": None, "ifr_outcome": outcome, "reward": 1.0,
+                "counted": 10, "mask_steps": {"approach": 0, "speed": 0}, "masked_mass": {"approach": 0.0, "speed": 0.0}}
 
     # a and b land in the record a first; the labelled words swap them in window 0; c is in two windows
+    # the record of c in window 1 is judged a loss (its landing still the one to read against)
     rows = [row("recorded", 0, "a", 100.0), row("recorded", 0, "b", 200.0), row("recorded", 1, "b", 200.0),
-            row("recorded", 1, "c", 300.0),
+            row("recorded", 1, "c", 300.0, outcome="lost_separation"),
             row("labelled", 0, "a", 250.0), row("labelled", 0, "b", 210.0), row("labelled", 1, "b", 190.0),
-            row("labelled", 1, "c", 320.0, outcome="lost_separation")]
+            row("labelled", 1, "c", 320.0), row("alone", 1, "b", 180.0, sample=0),
+            row("alone", 1, "c", 170.0, outcome="lost_separation", sample=0)]
     got = summary(rows)
     assert got["recorded"]["order"] == {"pairs": 2, "swapped": 0}
-    # window 0 swapped; window 1's c was ended by the judge: not a landing read
-    assert got["labelled"]["order"] == {"pairs": 1, "swapped": 1}
-    assert got["labelled"]["landing_vs_recorded_s"]["n"] == 3
+    # window 0 swapped, window 1 kept; alone, c was ended by the judge: not a landing read
+    assert got["labelled"]["order"] == {"pairs": 2, "swapped": 1} and got["alone"]["order"] == {"pairs": 0, "swapped": 0}
+    assert got["labelled"]["landing_vs_recorded_s"]["n"] == 4 and got["alone"]["landing_vs_recorded_s"]["n"] == 1
 
 
 def test_a_loop_landing_enters_the_reward_s_landing_context(monkeypatch):
