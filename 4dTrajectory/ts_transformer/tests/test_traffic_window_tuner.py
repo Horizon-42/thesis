@@ -228,3 +228,54 @@ def test_each_row_is_rebuilt_with_the_landing_context_it_was_encoded_with(tmp_pa
     width = whole.relative.shape[1]
     assert not torch.equal(torch.as_tensor(whole.relative[before]), speaker.relative[1, before, :width])
     assert torch.equal(torch.as_tensor(whole.relative[switch:]), speaker.relative[1, switch: flights[1].rows, :width])
+
+
+# ---- 7.6.2: a round's window sentences
+
+def test_window_sentences_are_the_readout_s_rows_with_what_each_aircraft_read_and_the_masks_it_said_under(tmp_path,
+                                                                                                         monkeypatch):
+    from ts_transformer.experiments import traffic_window_generation as runner
+    from ts_transformer.experiments.traffic_window import window_of
+    from ts_transformer.instructions.artefact import load_signals
+    from ts_transformer.prior.masks import ProcedureMasks
+    from ts_transformer.tests.test_autopilot import _params
+    from ts_transformer.tests.test_traffic_speaking import _batch
+    from ts_transformer.tests.test_traffic_window import LIMIT_S, _as_drawn, _patch_runner_physics
+
+    _, airports, spec = _airport(tmp_path, monkeypatch, [0.0, 40.0, 3_600.0], (0, 1, 2))
+    airport = airports["KXXX"]
+    signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
+    commanded = [("KXXX:f0", "KXXX:f1"), ("KXXX:f2",)]
+    keys = [k for keys in commanded for k in keys]
+    windows = [window_of(airport, 0.0, c, [LIMIT_S] * len(c), STEP_S) for c in commanded]
+    drawn = _as_drawn(windows, [range(0, 2), range(2, 3)], _batch(airport, signals, spec, keys), [LIMIT_S] * 3)
+    _patch_runner_physics(monkeypatch, signals, airport.flights.geometry, keys)
+    every = {"KXXX": _pool(airport)}
+    model = _reading_model(spec)
+
+    def spoken(read):
+        return read(model, drawn, [0, 1], "scene", Words(spec), _params(), None, every, 2,
+                    generator=torch.Generator().manual_seed(4), temperature=1.0, procedure_masks=ProcedureMasks.none())
+
+    got = spoken(runner.window_sentences)
+    assert got.rows == spoken(runner.model_rows)
+    assert [r.key for r in got.records] == [row["dataset_id"] for row in got.rows]
+    masked = next(iter(got.allowed[0]))
+    for row, record, allowed in zip(got.rows, got.records, got.allowed):
+        assert len(record.grid) >= row["counted"] and len(record.e) == N_LOOK + len(record.grid)
+        assert all(len(bits) == row["counted"] for bits in allowed.values()) and masked in allowed
+
+
+def test_an_aircraft_s_advantage_is_against_its_own_samples_and_it_trains_only_on_a_contrast():
+    from ts_transformer.experiments.traffic_window_tuner import window_advantages
+
+    def row(window, key, reward, lost=False):
+        return {"window": window, "dataset_id": key, "reward": reward, "starts_in_a_loss": lost}
+
+    rows = [row(0, "a", 1.0), row(0, "b", 1.0), row(0, "c", 1.0, lost=True),     # window 0, sample 0
+            row(0, "a", 0.0), row(0, "b", 1.0), row(0, "c", 0.0),                # window 0, sample 1
+            row(1, "a", 0.0), row(1, "a", 1.0)]                                  # "a" again, in another window
+    advantages, trained = window_advantages(rows)
+    assert advantages.tolist() == [0.5, 0.0, 0.5, -0.5, 0.0, -0.5, -0.5, 0.5]
+    # b has no contrast; c's first sample started in a loss it answers for: neither is trained on
+    assert trained.tolist() == [0, 3, 6, 7]

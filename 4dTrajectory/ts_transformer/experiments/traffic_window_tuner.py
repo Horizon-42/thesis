@@ -139,3 +139,22 @@ def window_logits(model: Prior, layout: WindowLayout, *, checkpoint: bool = Fals
     targets = x["targets"][scene, slot, steps][:, None]
     first = (torch.arange(width, device=device) == N_LOOK)[None, None, :]
     return model.logits(own_h, own_tokens, valid[scene[:, 0]], targets, first)
+
+
+def window_advantages(rows: Sequence[Mapping[str, object]]) -> tuple[np.ndarray, np.ndarray]:
+    """``(each row's advantage, the rows trained on)`` of a round's window sentences (`traffic_window_generation.
+    WindowSentences.rows`: an aircraft of a window over its samples): its reward less the mean of the same aircraft of
+    the same window over its samples (`landing_reward.group_advantages`' rule: not divided by the spread), and the rows of
+    each aircraft whose samples' rewards differ and none of which starts in a loss it answers for (no word of it made
+    that one)."""
+    groups: dict[tuple[object, object], list[int]] = {}
+    for k, row in enumerate(rows):
+        groups.setdefault((row["window"], row["dataset_id"]), []).append(k)
+    advantages = np.zeros(len(rows))
+    trained = []
+    for members in groups.values():
+        rewards = np.array([float(rows[k]["reward"]) for k in members])
+        advantages[members] = rewards - rewards.mean()
+        if rewards.min() != rewards.max() and not any(rows[k]["starts_in_a_loss"] for k in members):
+            trained += members
+    return advantages, np.array(sorted(trained), dtype=np.int64)
