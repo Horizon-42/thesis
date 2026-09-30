@@ -573,3 +573,156 @@ def test_rewards_that_go_together_correlate():
     got = together(rows)
     # a–b +1, a–c −1, b–c −1 on equal variances: (1 − 1 − 1) / 3
     assert got["pairs"] == 3 and abs(got["correlation"] + 1 / 3) < 1e-12
+
+
+# ---- the re-review of 7.3 (landing context, landings, own ends, several aircraft a window)
+
+def _pool(airport):
+    """Every flight of the fixture's airport landing where it landed: its landing context."""
+    import numpy as np
+
+    from ts_transformer.prior.scene import Landings
+
+    presences = [f.presence for f in airport.flights.flights.values()]
+    return Landings(np.sort(np.array([p.landing_s for p in presences])),
+                    {c.ident: np.sort(np.array([p.landing_s for p in presences if p.runway == c.ident]))
+                     for c in airport.flights.geometry.candidates})
+
+
+def test_a_loop_landing_reaches_a_later_aircraft_s_rows_not_encoded_yet(tmp_path, monkeypatch):
+    """The landing context (variant "full"): each commanded aircraft's lacks the other commanded ones' recorded
+    landings, and a landing in the loop reaches the rows another reads later — its observed rows too."""
+    import torch
+
+    from ts_transformer.experiments.traffic_window import WindowLoop, window_of
+    from ts_transformer.inference.scene_edges import EDGE_FEATURES
+    from ts_transformer.instructions.artefact import load_signals
+    from ts_transformer.prior.data import rows_inputs
+    from ts_transformer.prior.masks import ProcedureMasks
+    from ts_transformer.prior.model import with_traffic
+    from ts_transformer.prior.scene import N_LOOK
+    from ts_transformer.tests.test_autopilot import _params
+    from ts_transformer.tests.test_prior_speaker import _model
+
+    _, airports, spec = _airport(tmp_path, monkeypatch)
+    airport = airports["KXXX"]
+    geometry = airport.flights.geometry
+    pool = _pool(airport)
+    torch.manual_seed(1)
+    model = with_traffic(_model(Words(spec), variant="full"), EDGE_FEATURES).eval()
+    signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
+    keys = ("KXXX:f0", "KXXX:f1", "KXXX:f2")                 # 0, 200, 400 s apart
+    window = window_of(airport, 0.0, keys, [120.0] * 3, STEP_S)
+    flights = [signals[k] for k in keys]
+    loop = WindowLoop(model, [window], flights, [geometry] * 3, *_physics_of(flights, geometry), [120.0] * 3,
+                      Words(spec), _params(), {"KXXX": pool}, generator=torch.Generator().manual_seed(3),
+                      temperature=1.0, procedure_masks=ProcedureMasks.none())
+    speaker = loop.speaker
+    # each context: the pool less the other two's recorded landings and its own
+    assert [len(c.times_s) for c in speaker.contexts] == [len(pool.times_s) - 3] * 3
+    loop.step()
+    # f0 lands in the loop 100 s after its first predicted step, long before f2 enters
+    loop.landing_s[0] = loop.window_time_s(0, int(loop.start[0]) + N_LOOK) + 100.0
+    loop.speaker.value[0, 0] = 1                              # (its runway in force: the fixture's only one)
+    before = speaker.relative[2, : N_LOOK + 1].clone()
+    loop._landed(0, 0)
+    assert float(loop.landing_s[0]) in speaker.contexts[2].times_s
+    f2 = flights[2]
+    _, relative = rows_inputs(f2.e_m[None, : N_LOOK + 1], f2.n_m[None, : N_LOOK + 1], f2.altitude_m[None, : N_LOOK + 1],
+                              speaker.time_s[: N_LOOK + 1], speaker.entry_s[2:3], 0, geometry, [speaker.contexts[2]])
+    assert not torch.equal(before, speaker.relative[2, : N_LOOK + 1])
+    assert torch.equal(speaker.relative[2, : N_LOOK + 1, : relative.shape[2]],
+                       torch.as_tensor(relative[0], dtype=torch.float32))
+
+
+def test_a_follower_ended_at_one_landing_is_passive_at_the_next_and_a_passive_leader_is_marked():
+    """Paths judged afterwards keeping the ended ones (`Loop(keep_ended=True)`, the window's fixed paths): L1 and L2
+    land 0.5 s apart in one step with I 3.5 NM behind both (TBL 5-5-2: 4 NM) — I ended at the first, passive at the
+    second; and a passive leader recorded as not controlled."""
+    import numpy as np
+    from geokit import NM_M
+
+    from ts_transformer.experiments.traffic_loop import Judging, Loop, Run
+    from ts_transformer.tests.test_traffic_loop import SEPARATION, _controlled
+
+    gap = 3.5 * NM_M
+    t = np.arange(0.0, 100.0 + 1e-9, STEP_S)
+    first = _controlled("L1", 0.0, -70.0 * (100.5 - t), landing_s=100.5)
+    second = _controlled("L2", 0.0, -70.0 * (101.0 - t), landing_s=101.0, n=1.0)
+    t_follower = np.arange(0.0, 160.0 + 1e-9, STEP_S)
+    follower = _controlled("I", 0.0, -gap - 70.0 * (101.0 - t_follower), category="I", outcome="timeout")
+    run = Loop(SEPARATION, "visual", STEP_S, keep_ended=True).run([first, second, follower], [])
+    assert run.ended["I"]["t_s"] == 100.5 and run.ended["I"]["with"] == "L1"
+    assert [(a["leader"], a["follower_controlled"]) for a in run.at_threshold] == [("L1", True), ("L2", False)]
+    judging = Judging(SEPARATION, "visual", STEP_S, Run("visual"))
+    judging.landing(100.5, first, [follower], [], leader_passive=True)
+    out = judging.out
+    assert out.at_threshold[0]["leader_controlled"] is False and out.ended["I"]["with_controlled"] is False
+
+
+def test_the_steps_counted_run_to_the_judge_s_end_time_and_an_end_the_executor_flies_past_is_found(tmp_path,
+                                                                                                    monkeypatch):
+    import dataclasses as dc
+
+    from ts_transformer.experiments import traffic_window
+
+    airport, signals, spec = _scene_airport(tmp_path, monkeypatch)
+    loop = _window_loop(_traffic_model(spec), airport, signals, spec, [("KXXX:f3",)])
+    for _ in range(4):
+        loop.step()
+    # nothing ended it: asked, it flies on
+    loop._own_ends(0, [0], loop.speaker.step - 1)
+    assert not loop.left[0]
+    # an uncaptured crossing found in the step just flown: it leaves at the state before it, silent, not appended
+    real = traffic_window.outcome_of
+    monkeypatch.setattr(traffic_window, "outcome_of", lambda flown, p, geometry, runway, spec: dc.replace(
+        real(flown, p, geometry, runway, spec), outcome="crossed_without_capture", end_row=7))
+    loop._own_ends(0, [0], loop.speaker.step - 1)
+    monkeypatch.setattr(traffic_window, "outcome_of", real)
+    assert loop.left[0] and loop.own[0] == "crossed_without_capture" and loop.in_scene_to[0] == 3
+    rows = int(loop.speaker.rows[0])
+    while loop.running:
+        loop.step()
+    assert int(loop.speaker.rows[0]) == rows and loop.results()[0].outcome == "crossed_without_capture"
+    # the steps counted: the judge's end time on the steps from the first state, as `judged_steps` rounds it
+    first_s = loop.states[0][0].t_s
+    loop.runs[0].ended["KXXX:f3"] = {"t_s": first_s + 3.4, "kind": "at_threshold", "relation": "same", "with": "x",
+                                     "with_controlled": False}
+    loop.ended_at[0] = 2
+    assert loop.results()[0].counted == 2
+
+
+def test_several_commanded_aircraft_a_window_keep_the_loop_s_books(tmp_path, monkeypatch):
+    """The review's stress probe: windows of one to three commanded aircraft with mixed limits under a raised
+    glidepath — the loop ends; every aircraft leaves with an own end, every state it is in the scene at is judged on a
+    runway, the speaker holds its rows through its last, it is silent after the judge ends it and every landing is
+    checked."""
+    from ts_transformer.instructions.artefact import load_signals
+    from ts_transformer.instructions.words import UNCHANGED
+    from ts_transformer.prior.masks import PROCEDURE_ALTITUDES, ProcedureMasks
+    from ts_transformer.prior.scene import N_LOOK
+    from ts_transformer.tests.test_prior_procedure import _final
+
+    _, airports, spec = _airport(tmp_path, monkeypatch, [0.0, 40.0, 80.0, 200.0, 230.0, 400.0, 600.0, 610.0],
+                                 tuple(range(8)))
+    airport = airports["KXXX"]
+    signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
+    masks = ProcedureMasks((PROCEDURE_ALTITUDES,), {"KXXX": tuple(_final(candidate=c, crossing_m=1_200.0,
+                                                                         faf_d_m=40_000.0)
+                                                                  for c in airport.flights.geometry.candidates)})
+    groups = [("KXXX:f0", "KXXX:f1", "KXXX:f2"), ("KXXX:f3", "KXXX:f4"), ("KXXX:f5",), ("KXXX:f6", "KXXX:f7")]
+    loop = _window_loop(_traffic_model(spec), airport, signals, spec, groups, seed=0,
+                        limits=[100.0, 160.0, 60.0, 130.0], procedure_masks=masks)
+    steps = 0
+    while loop.running:
+        loop.step()
+        steps += 1
+        assert steps < 2_000
+    for i, got in enumerate(loop.results()):
+        last = min(int(loop.in_scene_to[i]), len(loop.states[i]) - 1)
+        assert loop.left[i] and loop.own[i] is not None and int(loop.judged_state[i]) == last
+        assert all(s.runway is not None for s in loop.states[i][: last + 1])
+        assert got.counted <= len(got.said) and int(loop.speaker.rows[i]) >= N_LOOK + 1 + last
+        assert got.end is None or (got.said[int(loop.ended_at[i]) + 1:] == UNCHANGED).all()
+        assert got.landing_s is None or loop.landing_checked[i]
+    assert all(run.scene_seconds > 0.0 for run in loop.runs)

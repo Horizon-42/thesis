@@ -195,6 +195,15 @@ class WindowSpeaker:
         self.since[where, rows] = torch.as_tensor(np.log1p(row[:, None] - self.said_row[index]) / SINCE_SCALE,
                                                   dtype=torch.float32, device=self.features.device)
 
+    def set_context(self, i: int, context: Landings) -> None:
+        """Aircraft ``i``'s landing context from here on (its own landing already out, `data.own_context`): its rows the
+        model has not encoded yet read it again — a later aircraft's observed rows too, computed when the speaker was
+        built."""
+        self.contexts[i] = context
+        first = max(0, self.steps_encoded - int(self.start[i]))
+        if first < self.rows[i]:
+            self._inputs(np.array([i]), first)
+
     @torch.no_grad()
     def speak(self, rank: np.ndarray, runway_locked: np.ndarray) -> np.ndarray:
         """``[N, 6]``: the classes said at the step (0: unchanged, else the word + 1) — by the aircraft ranked (``rank``

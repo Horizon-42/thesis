@@ -316,7 +316,9 @@ class WindowLoop:
        executor is done with, and one that stalled or crossed a threshold plane in it, whose end `autopilot.judge.
        outcome_of` finds then — the executor flies on past a stall, an uncaptured crossing or another runway's, which
        `outcome_of` reads afterwards (**stated difference**: read as it happens, with the runway in force then; the
-       one-aircraft judge reads it once the sentence is over, with the last runway it said). Under the procedure's
+       one-aircraft judge reads it once the sentence is over, with the last runway it said — and one that only a later
+       runway makes an end, a lined-up pass over runway A read once the aircraft is pointed at B, is found then, at its
+       own earlier row, after the loop has judged past it). Under the procedure's
        altitudes one whose next state sank below the glidepath lower edge stops speaking there and is judged at that
        state for the last time (`prior_free_generation.glidepath_stops`' reading), then flies on passive. The rest append
        the state they reached, as does one whose own last state is the one reached (a time limit's).
@@ -327,7 +329,9 @@ class WindowLoop:
 
     **The landing context** (the prior design's rule: the inputs are what is known before the step): a commanded
     aircraft's context is the airport's landings less every commanded aircraft of its window's recorded one, and each
-    of theirs added as it lands in the loop.
+    of theirs added as it lands in the loop (the rows not encoded yet read it again: `WindowSpeaker.set_context`).
+    **Stated approximation**: a replayed aircraft's inputs are the samples' (`traffic_scene_data`, in the edge features'
+    source hash), its landing context the recorded one, the commanded aircraft's recorded landings included.
 
     With one commanded aircraft a window it says and flies, to its judged end, what `traffic_speaking.SceneLoop` says
     and flies, and ends where `traffic_speaking.judged` ends it (tests).
@@ -447,6 +451,7 @@ class WindowLoop:
                 self._landings(w, step)
                 self._judge(w, step)
                 self.last_step[w] = step
+                self.runs[w].scene_seconds = float(step - self.first_step) * self.step_s
         self._fly(step, said)
 
     # -- 2.–4. the judge
@@ -461,20 +466,24 @@ class WindowLoop:
 
     def _landings(self, w: int, step: int) -> None:
         t_s = self.window_time_s(w, step)
-        leaders: list[tuple[float, str, Controlled | Track, bool]] = []
+        leaders: list[tuple[float, str, Controlled | Track, int]] = []
         for i in self.members[w]:
             if t_s - self.step_s < self.landing_s[i] <= t_s:
                 leaders.append((float(self.landing_s[i]), self.keys[i], self._controlled(i, int(self.in_scene_to[i])),
-                                bool(self.ended_at[i] >= 0)))
+                                int(i)))
                 self.landing_checked[i] = True
         for track in self.replayed[w]:
             if t_s - self.step_s < track.presence.landing_s <= t_s:
-                leaders.append((track.presence.landing_s, track.key, track, False))
-        for at, key, leader, passive_leader in sorted(leaders, key=lambda x: (x[0], x[1])):
+                leaders.append((track.presence.landing_s, track.key, track, -1))
+        for at, key, leader, i in sorted(leaders, key=lambda x: (x[0], x[1])):
             controlled, passive = self._here(w, step, at, exclude=key)
             replayed = [a for a in self.replayed[w]
                         if a.key != key and a.presence.times_s[0] <= at <= a.presence.times_s[-1]]
-            self.judging[w].landing(at, leader, controlled, replayed, passive, leader_passive=passive_leader)
+            # a commanded leader is passive when the judge ended it or it flew past its last judged step (a glidepath
+            # stop), as `_here` reads it
+            self.judging[w].landing(at, leader, controlled, replayed, passive,
+                                    leader_passive=i >= 0 and (self.ended_at[i] >= 0
+                                                               or self.in_scene_to[i] > self.judged_to[i]))
             self._mark_ended(w, step)                          # a follower ended here is passive at the next landing
 
     def _judge(self, w: int, step: int) -> None:
@@ -678,7 +687,8 @@ class WindowLoop:
         runway = self.geometries[i].candidates[int(self.speaker.value[i, RUNWAY]) - 1].ident
         for j in self.members[w]:
             if j != i:
-                self.speaker.contexts[j] = _with_landing(self.speaker.contexts[j], float(self.landing_s[i]), runway)
+                self.speaker.set_context(int(j), _with_landing(self.speaker.contexts[j], float(self.landing_s[i]),
+                                                               runway))
 
     def _glidepath(self, i: int, step: int) -> None:
         """Under the procedure's altitudes: aircraft ``i`` (flying step ``step``'s words) stopped where the state it
@@ -815,10 +825,8 @@ class WindowLoop:
 
     # -- the end
     def results(self) -> list[Commanded]:
-        """What became of each commanded aircraft (`Commanded`) once the loop has run; each window's `Run` gets its
-        scene time (its judged steps' span)."""
-        for w, run in enumerate(self.runs):
-            run.scene_seconds = float(self.last_step[w] - self.first_step) * self.step_s
+        """What became of each commanded aircraft (`Commanded`) once the loop has run (each window's `Run` holds its
+        scene time: its judged steps' span)."""
         out = []
         for i, key in enumerate(self.keys):
             spoken = self.executors[self.group[i]][3]
