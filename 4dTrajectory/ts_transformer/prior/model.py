@@ -50,13 +50,20 @@ airport's candidates (padded slots −inf). **The first predicted step** (row `s
 step keeps each layer's keys and values of the rows it has (`Past`, allocated once for every row it will hold and
 written in place) and encodes only the new row — the same arithmetic as encoding every row again (`encode` is `extend`
 from nothing), to about 1e-6 in the attention's summation order.
+
+**Blocks of steps** (`Prior.encode`'s ``pairs_per_block``): after its time attention nothing in a layer reads another
+step — the aircraft attention, the traffic attention and the feed-forward are each step's own — so that part can be
+computed a block of steps at a time, with the layers recomputed each block its own region: the pair tensors
+[B, T, A, A, d] (ten a layer, the whole memory of a busy window: 26 aircraft × 1,019 steps is 5.3 GB a layer) are then
+held a block at a time. The same values and gradients to rounding (a block's matrix products are other shapes) —
+without dropout (in eval): with it, the blocks draw their masks in another order.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass
-from typing import NamedTuple
+from typing import NamedTuple, Sequence
 
 import torch
 from torch import nn
@@ -164,6 +171,13 @@ class TrafficAttention(nn.Module):
         return self.out(read.reshape(batch, rows, aircraft, d)).transpose(1, 2)
 
 
+def step_blocks(batch: int, aircraft: int, steps: int, pairs: int) -> list[slice]:
+    """``steps`` in blocks of at most ``pairs`` aircraft pairs (``batch`` · ``aircraft``² a step; one step at least),
+    in order."""
+    size = max(1, pairs // (batch * aircraft * aircraft))
+    return [slice(k, min(k + size, steps)) for k in range(0, steps, size)]
+
+
 class SceneLayer(nn.Module):
     """Time attention → aircraft attention (edge bias + edge value) → traffic attention, when the model has one →
     feed-forward."""
@@ -190,13 +204,36 @@ class SceneLayer(nn.Module):
 
     def forward(self, x: torch.Tensor, present: torch.Tensor, edges: torch.Tensor) -> torch.Tensor:
         """``x`` [B, A, T, d], ``present`` [B, A, T] bool, ``edges`` [B, T, A, A, E]."""
-        batch, aircraft, rows, d = x.shape
-        return self.extend(x, present, edges, Past.nothing(batch * aircraft, self.heads, d // self.heads, rows, x))[0]
+        return self.at_each_step(self.along_time(x, present), present, edges)
 
     def extend(self, x: torch.Tensor, present: torch.Tensor, edges: torch.Tensor, past: Past
                ) -> tuple[torch.Tensor, Past]:
         """The rows ``x`` [B, A, R, d] that follow the ``past`` ones (``present`` [B, A, R], ``edges``
         [B, R, A, A, E]), written into the past in place: ``(the rows out, the past with them)``."""
+        x, past = self.extend_along_time(x, present, past)
+        return self.at_each_step(x, present, edges), past
+
+    def blocked(self, x: torch.Tensor, present: torch.Tensor, edges: torch.Tensor, blocks: Sequence[slice],
+                checkpoint: bool) -> torch.Tensor:
+        """`forward` with the step-wise part a block of steps at a time (``blocks``, in order, covering every step;
+        module docstring, "Blocks of steps"); ``checkpoint``: the time attention and each block recomputed in the
+        backward, each its own region."""
+        def run(part, *inputs):
+            return recomputed(part, *inputs, use_reentrant=False) if checkpoint else part(*inputs)
+
+        x = run(self.along_time, x, present)
+        return torch.cat([run(self.at_each_step, x[:, :, block], present[:, :, block], edges[:, block])
+                          for block in blocks], dim=2)
+
+    def along_time(self, x: torch.Tensor, present: torch.Tensor) -> torch.Tensor:
+        """The time attention of every row ``x`` [B, A, T, d] from nothing."""
+        batch, aircraft, rows, d = x.shape
+        return self.extend_along_time(x, present, Past.nothing(batch * aircraft, self.heads, d // self.heads, rows,
+                                                               x))[0]
+
+    def extend_along_time(self, x: torch.Tensor, present: torch.Tensor, past: Past) -> tuple[torch.Tensor, Past]:
+        """The time attention of the rows ``x`` [B, A, R, d] that follow the ``past`` ones, written into the past in
+        place: ``(the rows out, the past with them)``."""
         batch, aircraft, rows, d = x.shape
         head = d // self.heads
         start, end = past.rows, past.rows + rows
@@ -216,7 +253,13 @@ class SceneLayer(nn.Module):
                                                     attn_mask=allowed[:, None],
                                                     dropout_p=self.attention_dropout if self.training else 0.0)
         y = self.time_out(y.transpose(1, 2).reshape(batch, aircraft, rows, d))
-        x = x + self.dropout(y.masked_fill(~present[..., None], 0.0))
+        return x + self.dropout(y.masked_fill(~present[..., None], 0.0)), past
+
+    def at_each_step(self, x: torch.Tensor, present: torch.Tensor, edges: torch.Tensor) -> torch.Tensor:
+        """What follows the time attention, each step on its own (``x`` [B, A, R, d], ``present`` [B, A, R],
+        ``edges`` [B, R, A, A, E]): the aircraft attention, the traffic attention, the feed-forward."""
+        batch, aircraft, rows, d = x.shape
+        head = d // self.heads
         # among aircraft at one step: [B, T, A, ...]; with a traffic attention, the aircraft itself only
         own = edges[..., : self.edges] if self.traffic is not None else edges
         y = self.aircraft_norm(x).transpose(1, 2)
@@ -234,7 +277,7 @@ class SceneLayer(nn.Module):
         x = x + self.dropout(self.out(read.reshape(batch, rows, aircraft, d)).transpose(1, 2))
         if self.traffic is not None:
             x = x + self.dropout(self.traffic(x, present, edges))
-        return x + self.dropout(self.feedforward(self.feedforward_norm(x))), past
+        return x + self.dropout(self.feedforward(self.feedforward_norm(x)))
 
 
 class Prior(nn.Module):
@@ -282,14 +325,22 @@ class Prior(nn.Module):
 
     def encode(self, features: torch.Tensor, relative: torch.Tensor, static: torch.Tensor, in_force: torch.Tensor,
                since: torch.Tensor, airport: torch.Tensor, present: torch.Tensor, rows: torch.Tensor,
-               edges: torch.Tensor, checkpoint: bool = False) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+               edges: torch.Tensor, checkpoint: bool = False, pairs_per_block: int | None = None
+               ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """``(h [B, A, T, d], tokens [B, A, T, slots, d], valid [B, slots])``; ``checkpoint``: each layer's activations
         recomputed in the backward pass instead of kept (`torch.utils.checkpoint`, the random state kept: the same
         values and gradients) — a scene's edge layers keep [B, T, A, A, d] tensors, which filled the GPU scoring a
-        16-aircraft scene with gradients (multi-aircraft M4)."""
+        16-aircraft scene with gradients (multi-aircraft M4); ``pairs_per_block``: each layer's step-wise part a block
+        of steps at a time, at most this many aircraft pairs (B·A²·steps; one step at least) a block (`step_blocks`,
+        module docstring "Blocks of steps") — with ``checkpoint``, each block recomputed on its own."""
         x, tokens, valid = self._rows(features, relative, static, in_force, since, airport, rows)
-        for layer in self.layers:
-            x = recomputed(layer, x, present, edges, use_reentrant=False) if checkpoint else layer(x, present, edges)
+        if pairs_per_block is not None:
+            blocks = step_blocks(x.shape[0], x.shape[1], x.shape[2], pairs_per_block)
+            for layer in self.layers:
+                x = layer.blocked(x, present, edges, blocks, checkpoint)
+        else:
+            for layer in self.layers:
+                x = recomputed(layer, x, present, edges, use_reentrant=False) if checkpoint else layer(x, present, edges)
         return self.norm(x), tokens, valid
 
     def no_past(self, scenes: int, capacity: int) -> list[Past]:

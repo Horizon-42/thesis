@@ -103,6 +103,22 @@ def _same(sampled, got, index=None):
     return compared
 
 
+def _in_four_blocks(monkeypatch):
+    """Every encoding in four blocks of steps (`prior.model.step_blocks` asked for the pairs that give four): the blocks
+    each encoding ran in, recorded."""
+    from ts_transformer.prior import model as prior_model
+
+    whole, ran = prior_model.step_blocks, []
+
+    def four(batch, aircraft, steps, pairs):
+        blocks = whole(batch, aircraft, steps, batch * aircraft * aircraft * -(-steps // 4))
+        ran.append(len(blocks))
+        return blocks
+
+    monkeypatch.setattr(prior_model, "step_blocks", four)
+    return ran
+
+
 def test_a_window_scored_whole_gives_back_what_each_of_its_words_was_sampled_from(tmp_path, monkeypatch):
     from ts_transformer.experiments.traffic_window import window_places
     from ts_transformer.experiments.traffic_window_tuner import window_layout, window_logits
@@ -128,6 +144,14 @@ def test_a_window_scored_whole_gives_back_what_each_of_its_words_was_sampled_fro
     assert {i for i, _ in compared} == {0, 1, 2} and len(compared) > 150
     # f0's window scored on its own — another pre-roll — gives back the same
     assert len(_same(sampled, alone, index={2: 0})) > 10
+    # in blocks of steps (two windows, replayed aircraft, absent steps, each aircraft at its own rows): the same
+    ran = _in_four_blocks(monkeypatch)
+    with torch.no_grad():
+        blocked = window_logits(model, window_layout(model, loop.windows, flights, records, spec.step_s, CPU))
+    assert ran == [4]
+    for x, y in zip(blocked, got):
+        assert torch.equal(torch.isinf(x), torch.isinf(y))
+        torch.testing.assert_close(x[torch.isfinite(y)], y[torch.isfinite(y)], rtol=0, atol=1e-5)
     # the others did change the words: the same layout read with the traffic attention at zero
     for layer in model.layers:
         torch.nn.init.zeros_(layer.traffic.out.weight)
@@ -394,7 +418,10 @@ def test_window_samples_scored_in_parts_have_the_gradient_of_one_piece(tmp_path,
 
     model, spec, window_split, _, _, _, data = _one_commanded_round(tmp_path, monkeypatch)
     gradients = []
-    for budget in (10 ** 9, 1):
+    for budget in (10 ** 9, 1, "in blocks"):
+        if budget == "in blocks":                  # one part of the four samples, each encoding in four blocks of steps
+            ran = _in_four_blocks(monkeypatch)
+            budget = 10 ** 9
         monkeypatch.setattr(traffic_window_tuner, "SCORE_BUDGET", budget)
         tuner = WindowRewardTuner(copy.deepcopy(model), _model(Words(spec), slots=2), RewardConfig(), CPU, seed=0,
                                   traffic_learning_rate=3e-4, step_s=spec.step_s)
@@ -402,8 +429,10 @@ def test_window_samples_scored_in_parts_have_the_gradient_of_one_piece(tmp_path,
         seen = _gradients(tuner)
         tuner.window_pass(window_split, data, slots=2)
         gradients.append(seen[0])
+    assert ran and set(ran) == {4}
     for name, g in gradients[0].items():
         assert torch.allclose(gradients[1][name], g, rtol=1e-4, atol=1e-7), name
+        assert torch.allclose(gradients[2][name], g, rtol=1e-4, atol=1e-7), name
 
 
 def test_an_aircraft_not_trained_on_is_read_by_the_others_and_adds_no_word(tmp_path, monkeypatch):

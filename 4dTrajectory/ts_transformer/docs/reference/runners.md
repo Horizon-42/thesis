@@ -1026,9 +1026,14 @@ each commanded aircraft rewarded as R34, its advantage against its own samples i
 contrast and never when it starts in a loss (`traffic_window_tuner.window_advantages`); the pass
 (`traffic_window_tuner.WindowRewardTuner`): each window sample scored whole as the speaker read it (the one layout,
 `window_speaker.window_inputs`, `traffic_window.window_edges`; each aircraft's rows rebuilt with its landing context
-switched where the speaker switched it — tested to give back the sampling distributions to 1e-4), the loss on the
+switched where the speaker switched it — tested to give back the sampling distributions to 1e-4), encoded a block of
+steps at a time (`Prior.encode`'s ``pairs_per_block``, `traffic_window_tuner.PAIRS_PER_BLOCK` = 32,768 pairs: after the
+time attention nothing in a layer reads another step; the busiest window sample, 23 aircraft, 1.51 GB instead of more
+than the 8 GB whole — every window sample is trained on, none left out for size), the loss on the
 trained aircraft's words, base reading each alone, M2's scene samples as the data term; with one commanded aircraft a
-window it trains as R32's tuner does (loss and gradients, tested). Fixed select windows (as drawn and augmented) read
+window it trains as R32's tuner does (loss and gradients, tested). Before anything is spoken it checks the formal size
+(`preflight`, `preflight.json`): the host's free memory against the speaking processes, and round 1's costliest window
+sample scored with gradients on the GPU. Fixed select windows (as drawn and augmented) read
 every round in the shape `traffic_reward.guarded_choice` reads (landed, observed runway, words, lost separation, the
 ordering against the record with the other commanded aircraft's landings of the same sample, reward by kind), the round
 chosen by paired standard errors on the augmented windows' reward. Writes `config.json`, `round_<k>/{sentences.json,

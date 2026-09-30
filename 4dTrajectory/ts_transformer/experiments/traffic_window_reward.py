@@ -44,8 +44,7 @@ checkpoint.pt, optimiser.pt, config.json, procedure_masks.json, readout.json}``,
 
 **Checked at the formal size before anything is spoken** (the first chain failed twice where a smoke could not reach):
 the host's free memory against ``--speakers`` × `SPEAKER_HOST_GB` + `PARENT_GROWTH_GB`, and — on a fresh run — round
-1's costliest window sample within `traffic_window_tuner.WINDOW_SCORE_LIMIT` spoken and scored with gradients on the GPU
-beside the speaking processes (`preflight`). A sample costlier than the limit is not trained on, counted each round.
+1's costliest window sample spoken and scored with gradients on the GPU beside the speaking processes (`preflight`).
 
     python run_ts.py traffic_window_reward \\
         --prior 4dTrajectory/outputs/POOLED/prior/m4_passes_20260929/traffic_s1337/round_05 \\
@@ -98,7 +97,7 @@ from ts_transformer.experiments.traffic_window_generation import (
     Drawn, WindowSentences, augmented_windows, drawn_windows, fixed_rows, window_batches, window_sentences,
 )
 from ts_transformer.experiments.traffic_window_tuner import (
-    WINDOW_SCORE_LIMIT, WindowRewardTuner, WindowSplit, scoring_cost, window_advantages, window_flight,
+    PAIRS_PER_BLOCK, WindowRewardTuner, WindowSplit, scoring_cost, window_advantages, window_flight,
 )
 from ts_transformer.inference.scene_edges import EDGE_FEATURES
 from ts_transformer.instructions.artefact import load_candidates, load_spec
@@ -216,20 +215,17 @@ class WindowSpeaking(Speaking):
 
 
 def window_split(round_: WindowRound, spoken: WindowSentences, advantages: np.ndarray, trained: np.ndarray,
-                 table: Split, landings: Mapping[str, Landings] | None, step_s: float
-                 ) -> tuple[WindowSplit, list[str], dict[str, int]]:
+                 table: Split, landings: Mapping[str, Landings] | None, step_s: float) -> tuple[WindowSplit, list[str]]:
     """The window samples with an aircraft trained on (`window_advantages`), as the tuner reads them — each one's
     window, every commanded aircraft's rows as the speaker read them (`window_flight`: the trained ones' words asked over
-    their counted steps, the others' over none), records, the trained ones' places, advantages and masks — each sample's
-    window's kind, and what was left out: a sample costlier to score than `WINDOW_SCORE_LIMIT` (the GPU's) is not trained
-    on, its window samples and aircraft sentences counted."""
+    their counted steps, the others' over none), records, the trained ones' places, advantages and masks — and each
+    sample's window's kind."""
     drawn = round_.drawn
     samples: dict[tuple[int, int], list[int]] = defaultdict(list)
     for k, row in enumerate(spoken.rows):
         samples[(row["window"], row["sample"])].append(k)
     chosen = set(trained.tolist())
     windows, flights, records, places, gains, masks, kinds = [], [], [], [], [], [], []
-    too_large = {"window_samples": 0, "aircraft_sentences": 0}
     for (w, _), rows in samples.items():
         if not chosen & set(rows):
             continue
@@ -245,10 +241,6 @@ def window_split(round_: WindowRound, spoken: WindowSentences, advantages: np.nd
                                        table.airports.index(signals.airport), drawn.batch.readings[j].capture_row,
                                        counted, step_s))
         own = [m for m, k in enumerate(rows) if k in chosen]
-        if scoring_cost(window, built, step_s) > WINDOW_SCORE_LIMIT:
-            too_large["window_samples"] += 1
-            too_large["aircraft_sentences"] += len(own)
-            continue
         windows.append(window)
         flights.append(built)
         records.append([spoken.records[k] for k in rows])
@@ -256,15 +248,17 @@ def window_split(round_: WindowRound, spoken: WindowSentences, advantages: np.nd
         gains.append(advantages[[rows[m] for m in own]])
         masks.append([spoken.allowed[rows[m]] for m in own])
         kinds.append(round_.kinds[w])
-    return WindowSplit(table, windows, flights, records, places, gains, masks), kinds, too_large
+    return WindowSplit(table, windows, flights, records, places, gains, masks), kinds
 
 
 def preflight(model: Prior, base: Prior, round_: WindowRound, speaking: WindowSpeaking, table: Split,
               config: RewardConfig, device: torch.device, step_s: float, log: Any) -> dict[str, Any]:
     """Before anything is spoken (the formal run's size, not a smoke's): round 1's `PREFLIGHT_WINDOWS` costliest windows
-    (by their time limits) spoken twice in this process, and the costliest sample within `WINDOW_SCORE_LIMIT` scored as
-    the pass scores it — every aircraft trained, the layers recomputed in the backward — beside the speaking processes on
-    the GPU: its peak. Refused (the run does not start) when it does not fit."""
+    (by their time limits) spoken twice in this process, and the costliest sample scored as the pass scores it — every
+    aircraft trained, in blocks of steps, the layers recomputed in the backward — beside the speaking processes on the
+    GPU: its peak. Refused (the run does not start) when it does not fit. "Costliest" is `part_cost`'s, the whole
+    encoding's (pairs weigh most); in blocks the time attention's share grows, so the pick is the likely largest, and
+    its peak (1.5 GB for round 1's largest) far under the 8 GB."""
     drawn = round_.drawn
 
     def bound(w: int) -> float:
@@ -282,9 +276,7 @@ def preflight(model: Prior, base: Prior, round_: WindowRound, speaking: WindowSp
     for row in spoken.rows:                              # a contrast for every aircraft: every one trained
         row["reward"], row["starts_in_a_loss"] = float(row["sample"]), False
     advantages, trained = window_advantages(spoken.rows, 2)
-    split, _, too_large = window_split(part, spoken, advantages, trained, table, speaking.landings, step_s)
-    if not split.windows:
-        return {"windows": costliest, "scored": None, "too_large_to_score": too_large}
+    split, _ = window_split(part, spoken, advantages, trained, table, speaking.landings, step_s)
     costs = [scoring_cost(w, f, step_s) for w, f in zip(split.windows, split.flights)]
     s = int(np.argmax(costs))
     one = WindowSplit(split.table, [split.windows[s]], [split.flights[s]], [split.records[s]], [split.trained[s]],
@@ -299,17 +291,17 @@ def preflight(model: Prior, base: Prior, round_: WindowRound, speaking: WindowSp
         _, logits, _, _, _, _ = tuner._window_scored(one, [0], frozen)
         sum(x.float().logsumexp(-1).sum() for x in logits).backward()
     except torch.OutOfMemoryError as error:
-        raise SystemExit(f"preflight: the costliest window sample within the scoring limit (cost {costs[s]:.0f}) does "
-                         f"not fit the GPU beside the speaking processes — lower WINDOW_SCORE_LIMIT: {error}") from None
+        raise SystemExit(f"preflight: the costliest window sample (cost {costs[s]:.0f}) does not fit the GPU beside "
+                         f"the speaking processes — smaller blocks (traffic_window_tuner.PAIRS_PER_BLOCK) or fewer "
+                         f"--speakers: {error}") from None
     peak = torch.cuda.max_memory_allocated(device) / 1e9 if device.type == "cuda" else None
     del tuner, frozen, logits
     if device.type == "cuda":
         torch.cuda.empty_cache()
     out = {"windows": costliest, "scored_cost": costs[s], "scored_aircraft": len(split.windows[s].commanded),
-           "gpu_peak_gb": peak, "too_large_to_score": too_large}
-    log(f"preflight: round 1's costliest window sample within the limit (cost {costs[s]:.0f}, "
-        f"{len(split.windows[s].commanded)} commanded) scored with gradients, GPU peak {peak} GB; "
-        f"{too_large['window_samples']} of {2 * len(costliest)} samples above the limit")
+           "pairs_per_block": PAIRS_PER_BLOCK, "gpu_peak_gb": peak}
+    log(f"preflight: round 1's costliest window sample (cost {costs[s]:.0f}, {len(split.windows[s].commanded)} "
+        f"commanded) scored with gradients, GPU peak {peak} GB")
     return out
 
 
@@ -736,7 +728,7 @@ def main(argv: list[str] | None = None) -> int:
             + " ".join(f"{k} {v['reward']:.3f}" for k, v in described["by_kind"].items())
             + f"), lost separation {described['all']['lost_separation']:.3f}, {len(trained)} trained on, "
               f"{described['starting_in_a_loss']} starting in a loss")
-        split, sample_kinds, too_large = window_split(round_, spoken, advantages, trained, table, landings, step_s)
+        split, sample_kinds = window_split(round_, spoken, advantages, trained, table, landings, step_s)
         start_distance, measured_on = {}, {}
         for side, of in (("real", (True,)), ("augmented", (False,))):
             part = split_of_kinds(split, sample_kinds, of)
@@ -745,14 +737,11 @@ def main(argv: list[str] | None = None) -> int:
         tuner.restart(np.random.default_rng([args.seed, round_number, PASS_STREAM]))
         passed = {**tuner.window_pass(split, data, slots=slots, passes=args.passes),
                   "distance_at_start": start_distance, "distance_sentences": measured_on,
-                  "too_large_to_score": too_large,
                   "speaking_gpu_peak_gb": speaking_peaks}
         if device.type == "cuda":
             passed["pass_gpu_peak_gb"] = torch.cuda.max_memory_allocated(device) / 1e9
         log(f"round {round_number}: {args.passes} pass(es) over {split.sentences} aircraft sentences in "
-            f"{len(split.windows)} window samples ({passed['batches']} updates; too large to score, not trained on: "
-            f"{too_large['window_samples']} window samples, {too_large['aircraft_sentences']} aircraft sentences), "
-            f"reward term {passed['reward_mean']:.4f}, "
+            f"{len(split.windows)} window samples ({passed['batches']} updates), reward term {passed['reward_mean']:.4f}, "
             f"KL to the base at the start {start_distance}, {passed['kl_mean']:.4f} in the pass (max "
             f"{passed['kl_max']:.4f}), data NLL {passed['data_mean']:.4f}, words outside the clip "
             f"{passed['clipped_share']:.4f}, {passed['seconds']:.0f}s; GPU peak: speaking processes "

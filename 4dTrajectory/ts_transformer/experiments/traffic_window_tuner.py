@@ -12,7 +12,8 @@ loop placed them (`traffic_window.window_places`), every commanded aircraft at i
 own (`window_speaker.window_inputs` — the speaker's one layout), the edge features by the loop's code
 (`traffic_window.window_edges`); one encoding, the heads read on each commanded aircraft's rows: ``[N, 1, rows,
 classes]`` per column, as `train.batch_logits` gives them for aircraft alone — so the words' distributions are the
-ones they were sampled from, to rounding (tests).
+ones they were sampled from, to rounding (tests). Encoded a block of steps at a time (`PAIRS_PER_BLOCK`): a busy
+window's pair tensors do not fit the GPU whole.
 """
 
 from __future__ import annotations
@@ -37,6 +38,13 @@ from ts_transformer.prior.model import Prior
 from ts_transformer.prior.scene import N_LOOK, Landings
 from ts_transformer.prior.train import allowed_tensors, batch_logits, flight_kl, masked, to_batch
 from ts_transformer.prior.window_speaker import window_inputs
+
+#: The aircraft pairs a block of steps holds in the encoding (`Prior.encode`'s ``pairs_per_block``). Measured on the RTX
+#: 4060 (2026-09-30, round 1's windows of the formal run, every commanded aircraft trained, the layers recomputed): the
+#: largest window sample, 23 aircraft (cost 112,654), ran out of the 8 GB whole and peaks at 1.51 GB above the models in
+#: blocks of 32,768 pairs (131,072: 2.27 GB, 16,384: 1.51 GB); 19 aircraft whole 4.61 GB, in blocks 1.06 GB; no slower;
+#: the gradients equal the whole encoding's to 1e-6 of the largest.
+PAIRS_PER_BLOCK = 32_768
 
 
 def window_flight(record: WindowRecord, window: Window, signals: FlightSignals, geometry: AirportGeometry,
@@ -132,7 +140,8 @@ def window_logits(model: Prior, layout: WindowLayout, *, checkpoint: bool = Fals
     aircraft's last with its last step's place, never read)."""
     x = layout.inputs
     h, tokens, valid = model.encode(x["features"], x["relative"], x["static"], x["in_force"], x["since"],
-                                    layout.airport, x["present"], x["rows"], layout.edges, checkpoint)
+                                    layout.airport, x["present"], x["rows"], layout.edges, checkpoint,
+                                    pairs_per_block=PAIRS_PER_BLOCK)
     device = h.device
     read = np.arange(len(layout.rows)) if aircraft is None else np.asarray(aircraft, dtype=np.int64)
     width = int(layout.rows[read].max()) if rows is None else rows
@@ -202,14 +211,6 @@ class WindowSplit:
     @property
     def sentences(self) -> int:
         return sum(len(t) for t in self.trained)
-
-
-#: The costliest window sample the tuner scores (`traffic_tuner.part_cost` of it alone): measured on the RTX 4060 (8 GB)
-#: with gradients, the layers recomputed, every commanded aircraft trained — 67 KB a unit (2.70 GB at 40,600, 4.28 GB at
-#: 63,900; 2026-09-30, the formal run's round 1 windows), so about 5.0 GB, beside the parent's three models and the
-#: speaking processes' emptied caches (0.2 GB each). Round 1's windows: 3 of 700 above it (the largest, 112,654, ran the
-#: GPU out); a sample above it is not trained on, counted (`traffic_window_reward.window_split`).
-WINDOW_SCORE_LIMIT = 75_000
 
 
 def scoring_cost(window: Window, flights: Sequence[Flight], step_s: float) -> float:
@@ -312,6 +313,9 @@ class WindowRewardTuner(SceneRewardTuner):
         return batch, logits, started, reference, steps, advantages
 
     def _window_parts(self, split: WindowSplit, indices: Sequence[int]) -> list[list[int]]:
+        """Parts by the scene tuner's budget (`SCORE_BUDGET`, `PAIR_COST`: the WHOLE encoding's cost, measured on
+        scenes) — in blocks of steps a part holds about a fifth of that (the largest window sample: 13 KB a cost unit
+        against 67 KB whole), so the parts are smaller than the GPU allows: slower, never larger."""
         return window_parts(split, indices, self.step_s, SCORE_BUDGET)
 
     def window_distance(self, split: WindowSplit) -> float:
