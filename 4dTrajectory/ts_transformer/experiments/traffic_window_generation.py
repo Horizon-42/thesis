@@ -136,26 +136,26 @@ def drawn_windows(draw: Any, airports: Mapping[str, Any], params: Any, step_s: f
     return Drawn(windows, [None] * len(windows), members, draw.batch, limits, [None] * count, [None] * count)
 
 
-def augmented_windows(drawn: Drawn, params: Any, most: Mapping[str, int], seed: int,
+def augmented_windows(drawn: Drawn, params: Any, most: Mapping[str, int], max_rows: int, seed: int,
                       windows: dict[str, tuple[float, float]], spec: Any, kinds: Sequence[str] = KINDS
                       ) -> tuple[Drawn, dict[str, Any]]:
     """Every window of ``drawn`` augmented (`traffic_window_augment.augment_window` over ``kinds``, one generator from
     ``seed`` in the windows' order; an insertion drawn from the draw's flights at the window's airport, ``most`` each
-    airport's busiest step on the training days): the windows kept, and the count of the kinds, of the windows left out
-    and of the draws refused, by why."""
+    airport's busiest step on the training days, ``max_rows`` the model's positions): the windows kept, and the count of
+    the kinds kept, of the windows left out (by airport and kind) and of the draws refused, by why."""
     rng = np.random.default_rng(seed)
     moved_limits = limits_s(drawn.batch, params, spec.step_s, augmented=True)
     pools: dict[str, dict[str, int]] = defaultdict(dict)
     for j, signals in enumerate(drawn.batch.signals):
         pools[signals.airport].setdefault(signals.dataset_id, j)
-    kept, left_out, refused = [], Counter(), Counter()
+    kept, left_out, refused = [], defaultdict(Counter), Counter()
     for window, part in zip(drawn.windows, drawn.members):
         code = window.airport.flights.code
-        got, why = augment_window(window, drawn.batch, list(part), pools[code], drawn.limits, moved_limits, most[code],
-                                  rng, windows, spec, kinds)
+        got, kind, why = augment_window(window, drawn.batch, list(part), pools[code], drawn.limits, moved_limits,
+                                        most[code], max_rows, rng, windows, spec, kinds)
         refused.update(why)
         if got is None:
-            left_out[code] += 1
+            left_out[code][kind] += 1
         else:
             kept.append(got)
     batch = dataclasses.replace(replay.subset(drawn.batch, [j for a in kept for j in a.places]),
@@ -165,7 +165,8 @@ def augmented_windows(drawn: Drawn, params: Any, most: Mapping[str, int], seed: 
         members.append(range(at, at + len(a.places)))
         at += len(a.places)
     counts = {"kinds": {kind: sum(a.kind == kind for a in kept) for kind in KINDS},
-              "left_out": dict(left_out), "refused": {why: refused[why] for why in REFUSALS},
+              "left_out": {code: dict(by_kind) for code, by_kind in sorted(left_out.items())},
+              "refused": {why: refused[why] for why in REFUSALS},
               "cap_most_at_once": dict(most)}
     return Drawn([a.window for a in kept], [{"kind": a.kind, "draws": a.draws, **a.drawn} for a in kept], members,
                  batch, [x for a in kept for x in a.limits], [m for a in kept for m in a.moves],
@@ -315,6 +316,9 @@ def fixed_rows(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, pa
     executor's end and is passive past a glidepath stop, as a model aircraft flies on past one (design §9 item 29). The
     landing direction reads the path's own world: the recorded landings for the record, the labelled paths' landings in
     place of the commanded aircraft's recorded ones for the labelled words."""
+    if any(drawn.augmented[w] is not None for w in chunk):
+        raise ValueError("an augmented window is read by the model's sources only: a moved start has no record, and "
+                         "the scene of an inserted aircraft is its source's")
     step_s = words.spec.step_s
     index = [j for w in chunk for j in drawn.members[w]]
     part = replay.subset(drawn.batch, index)
@@ -493,15 +497,16 @@ def summaries(rows: Sequence[dict[str, Any]], augmented: bool) -> dict[str, Any]
 
 def batch_rows(model: Prior, drawn: Drawn, number: int, chunk: Sequence[int], words: Words, params: Any,
                landings: Any, every_landing: Mapping[str, Landings], samples: int, *, seed: int, temperature: float,
-               procedure_masks: Any, device: torch.device, fixed: bool) -> list[dict[str, Any]]:
+               procedure_masks: Any, device: torch.device) -> list[dict[str, Any]]:
     """Loop batch ``number`` (the windows at ``chunk``) read by the model's sources, each from its own stream
-    (`batch_seed`), and — ``fixed`` — the labelled words and the records: its rows, each marked with the batch."""
+    (`batch_seed`), and — windows as drawn — the labelled words and the records: its rows, each marked with the
+    batch."""
     rows: list[dict[str, Any]] = []
     for source in ("scene", "alone"):
         generator = torch.Generator(device=device).manual_seed(batch_seed(seed, source, number))
         rows += model_rows(model, drawn, chunk, source, words, params, landings, every_landing, samples,
                            generator=generator, temperature=temperature, procedure_masks=procedure_masks)
-    for source in ("labelled", "recorded") if fixed else ():
+    for source in ("labelled", "recorded") if drawn.augmented[chunk[0]] is None else ():
         rows += fixed_rows(drawn, chunk, source, words, params, every_landing, procedure_masks)
     for row in rows:
         row["batch"] = number
@@ -623,9 +628,9 @@ def main(argv: list[str] | None = None) -> int:
     augmented = args.augment_seed is not None
     augmenting = None
     if augmented:
-        drawn, augmenting = augmented_windows(drawn, params, busiest(instructions, words.spec, model.config.airports,
-                                                                     step_s),
-                                              args.augment_seed, start_altitude_windows(instructions), words.spec)
+        most = busiest(instructions, words.spec, model.config.airports, step_s)
+        drawn, augmenting = augmented_windows(drawn, params, most, model.config.max_rows, args.augment_seed,
+                                              start_altitude_windows(instructions), words.spec)
         print(f"augmented windows: {augmenting}", flush=True)
     print(f"{len(drawn.windows)} {args.split} windows, {len(drawn.batch.readings)} commanded aircraft "
           f"({draw.counts}), scenes built ({built}), {time.perf_counter() - started:.0f}s", flush=True)
@@ -638,7 +643,7 @@ def main(argv: list[str] | None = None) -> int:
         speaking = model.to(device)
         return batch_rows(speaking, drawn, number, batches[number], words, params, landings, every_landing,
                           args.samples, seed=args.seed, temperature=args.temperature, procedure_masks=own_masks,
-                          device=device, fixed=not augmented)
+                          device=device)
 
     gc.collect()
     gc.freeze()                                         # the reading processes share the parent's data, not copy it
@@ -665,8 +670,9 @@ def main(argv: list[str] | None = None) -> int:
     write_json_atomic(out / "window_generation.json", {
         "schema": SCHEMA, "written_utc": utc_now(), "git": git, "split": args.split, "drawn": draw.counts,
         "windows_per_airport": args.windows_per_airport, "samples": args.samples, "temperature": args.temperature,
-        "seed": args.seed, "augment_seed": args.augment_seed, "augmenting": augmenting, "prior": {"directory": repo_relative(prior_dir), "procedure_masks": list(own_masks.names),
-                                     "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt")},
+        "seed": args.seed, "augment_seed": args.augment_seed, "augmenting": augmenting,
+        "prior": {"directory": repo_relative(prior_dir), "procedure_masks": list(own_masks.names),
+                  "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt")},
         "traffic_attention": "zero (with_traffic): the prior's answers to rounding",
         "executor": {"directory": repo_relative(executor_dir), "sha256": record["sha256"]},
         "instructions": repo_relative(instructions), "scenes": built, "history_s": HISTORY_S,

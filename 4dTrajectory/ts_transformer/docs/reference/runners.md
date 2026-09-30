@@ -928,12 +928,15 @@ one process, GPU 2.3 GB, 8–41 % busy; 30 windows in 3 min with 4 or 6, 0.88 GB
 `window_generation.json` (`ts-traffic-window-generation-v2`: v1 before the augmentation, the formal
 `window_generation_20260930`).
 **`--augment-seed`** (design §6.6 step 7 item 6, `experiments/traffic_window_augment.py`): every window augmented, a third
-each — **C** the commanded aircraft moved whole toward the window's opening (their first row's time after it × c,
+each (a window's kind drawn once, only its parameters drawn again) — **C** the commanded aircraft moved whole toward the window's opening (their first row's time after it × c,
 c ~ U[0.6, 1.0]), **B** one commanded aircraft's start moved as stage 2 moves it (its time limit stage 2's; what the others
 read of it before it flies is its moved rows, never established), **A** a flight of the draw at the airport inserted and
 commanded, g × the required gap ahead of a drawn commanded aircraft on the approach clock (g ~ U[0.5, 2.0], R31's timing),
 its source no longer replayed. Every shift whole seconds (a flight's own landing leaves its landing context by its exact
-time). Qualified: no commanded aircraft answers for a loss through its observed rows against the others' records, and
-never more aircraft on one step than the airport's busiest step on the training days (`busiest`, computed at the start);
-ten draws a window at most, else it is left out; the refusals are counted by why. Read by the model's sources only (a
+time). Qualified: no commanded aircraft answers for a loss through its observed rows against the others' records
+(stricter than the loop: a refusal drops the whole window), never more aircraft on one step than the data has had — the
+airport's busiest step on the training days (`busiest`, computed at the start) or the window's own as drawn where that
+is busier: only what the augmentation adds is capped — and every time limit within the model's positions (a stage-2 limit
+can pass them); ten draws a window at most, else it is left out (counted by airport and kind); the refusals are counted
+by why. Read by the model's sources only (a
 moved start has no record); the readout adds each kind and each aircraft's part (shifted, moved, inserted, as drawn).

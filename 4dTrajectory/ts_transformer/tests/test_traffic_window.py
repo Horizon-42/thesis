@@ -876,7 +876,7 @@ def test_a_batch_reads_the_same_whatever_else_is_read_and_in_whichever_process(t
 
     def read(number):
         return runner.batch_rows(model, drawn, number, [number], Words(spec), _params(), None, every, 2, seed=5,
-                                 temperature=1.0, procedure_masks=ProcedureMasks.none(), device=cpu, fixed=True)
+                                 temperature=1.0, procedure_masks=ProcedureMasks.none(), device=cpu)
 
     alone = read(1)
     after = (read(0), read(1))[1]
