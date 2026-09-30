@@ -236,33 +236,43 @@ class Speaker:
 
     def _vocabulary_allowed(self, column: int, chosen: np.ndarray, opening: bool, classes: int,
                             runway_locked: np.ndarray) -> np.ndarray:
-        """The vocabulary's rules on ``column`` (one of `VOCABULARY_COLUMNS`): the runway — another runway, or none
-        where locked; the approach and the angle — what the grammar allows. At the first predicted step every column
-        is said, so "unchanged" (class 0) is not asked about (the model already masks it)."""
-        spec = self.words.spec
-        out = np.ones((len(chosen), classes), dtype=bool)
-        if column == RUNWAY:
-            if not opening:
-                # the runway in force is not said again (the labeller drops a word equal to the one in force, and a
-                # runway said again would ask the approach to change under a clearance); a locked one stays
-                out[np.arange(len(chosen)), self.value[:, RUNWAY]] = False
-                out[runway_locked, 1:] = False
-            return out
-        for b in range(len(chosen)):
-            if column == APPROACH and (opening or chosen[b, RUNWAY] == 0):
-                continue                                     # the runway rule asks only of a later step that changes it
-            step = np.where(chosen[b] > 0, chosen[b] - 1, UNCHANGED)
-            # the columns after this one are not sampled yet; at the first step (every column said) the speed, the
-            # only one after the angle, stands in with any word: it enters no rule
-            step[column + 1:] = 0 if opening else UNCHANGED
-            in_force = None if opening else self.value[b] - 1
-            height = float(self.h[b, self.rows - 1])
-            for k in range(1 if opening else 0, classes):
-                step[column] = k - 1 if k else UNCHANGED
-                if column == ANGLE and not opening and step[ALTITUDE] == UNCHANGED and k == 0:
-                    continue                                 # nothing said in either column: nothing to check
-                out[b, k] = step_allowed(in_force, step, height, spec, self.words)
+        """The vocabulary's rules on ``column`` (`vocabulary_allowed`), every flight at the same row."""
+        return vocabulary_allowed(column, chosen, np.full(len(chosen), opening), classes, runway_locked, self.value,
+                                  self.h[:, self.rows - 1], self.words)
+
+
+def vocabulary_allowed(column: int, chosen: np.ndarray, opening: np.ndarray, classes: int, runway_locked: np.ndarray,
+                       value: np.ndarray, height: np.ndarray, words: Words, rows: np.ndarray | None = None
+                       ) -> np.ndarray:
+    """``[B, classes]``: the vocabulary's rules on ``column`` (one of `VOCABULARY_COLUMNS`) for flights whose classes in
+    force are ``value`` and height ``height`` at their newest row, ``opening`` there ([B] bool: their first predicted
+    step): the runway — another runway, or none where locked; the approach and the angle — what the grammar allows. At
+    the first predicted step every column is said, so "unchanged" (class 0) is not asked about (the model already masks
+    it). ``rows``: the flights asked about (the rest allow everything); None: every one."""
+    spec = words.spec
+    out = np.ones((len(chosen), classes), dtype=bool)
+    if column == RUNWAY:
+        # the runway in force is not said again (the labeller drops a word equal to the one in force, and a runway said
+        # again would ask the approach to change under a clearance); a locked one stays
+        closed = ~opening if rows is None else ~opening & np.isin(np.arange(len(chosen)), rows)
+        out[np.flatnonzero(closed), value[closed, RUNWAY]] = False
+        out[closed & runway_locked, 1:] = False
         return out
+    for b in range(len(chosen)) if rows is None else rows:
+        first = bool(opening[b])
+        if column == APPROACH and (first or chosen[b, RUNWAY] == 0):
+            continue                                     # the runway rule asks only of a later step that changes it
+        step = np.where(chosen[b] > 0, chosen[b] - 1, UNCHANGED)
+        # the columns after this one are not sampled yet; at the first step (every column said) the speed, the only one
+        # after the angle, stands in with any word: it enters no rule
+        step[column + 1:] = 0 if first else UNCHANGED
+        in_force = None if first else value[b] - 1
+        for k in range(1 if first else 0, classes):
+            step[column] = k - 1 if k else UNCHANGED
+            if column == ANGLE and not first and step[ALTITUDE] == UNCHANGED and k == 0:
+                continue                                 # nothing said in either column: nothing to check
+            out[b, k] = step_allowed(in_force, step, float(height[b]), spec, words)
+    return out
 
 
 def allowed_classes(packed: np.ndarray, classes: int) -> np.ndarray:
