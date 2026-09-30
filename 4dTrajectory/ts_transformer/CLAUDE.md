@@ -425,6 +425,10 @@ sentence must reproduce its readout row) and writes them as evaluation records p
 against the observed flight, the evaluation's pass rate over every sentence, best of the samples; an augmented start has no
 truth, so its readout carries the pass rate only; the root publisher's `--generation-records` files each kind × airport as
 one Experiments category (R35).
+`prior_generation_grading` grades such a run on the runway each sentence last pointed at and CROSSED (a graded copy of
+each such other-runway record against that runway's own threshold point; the evaluation grades `source.runway`, the observed flight's) and splits
+FDE into time and place over the landed sentences — FDE is the distance at the observed landing TIME, so a late arrival
+scores its lateness × speed; the arrival endpoint error is where it landed (R38).
 `window_training_export` writes R34's windows for the frontend's Training
 module — a model-free window set (`traffic-windows`: 20 select windows an airport of the readouts' draw, by size) and a
 `window-generation` overlay per prior on its OWN draws (no readout re-run; `--readout` only copies summaries); the landings

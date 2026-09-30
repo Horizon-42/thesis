@@ -39,7 +39,8 @@ smallest FDE of its recorded samples) and whether any of its samples passes.
         --out 4dTrajectory/outputs/POOLED/prior/v3_reread_v11_20260927/records_val_base_400x4
 
 Writes into ``--out`` (a new directory; from a clean tree unless ``--chunks`` limits the run to the readout's first
-chunks, which the readout then records as partial).
+chunks, which the readout then records as partial); a whole run then grades itself (`prior_generation_grading`, R38:
+the pass rate on the landed runway, FDE's time and place) into ``--out/grading``.
 """
 
 from __future__ import annotations
@@ -440,6 +441,10 @@ def main(argv: list[str] | None = None) -> int:
                     line += (f"  minADE p50 {best['min_ade_m']['median']:7.0f} m"
                              f"  minFDE p50 {best['min_fde_m']['median']:7.0f} m")
             print(line)
+    # graded beyond the pass rate (R38) — imported here: that runner reads this one's schema
+    from ts_transformer.experiments.prior_generation_grading import grade, print_readout
+    if not args.chunks:
+        print_readout(grade(out, instructions))
     print(f"→ {out}")
     return 0
 

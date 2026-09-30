@@ -978,6 +978,7 @@ over the samples each flight's best — whether any sample passes, the smallest 
 pass rate is the start's, but ADE / FDE would be a distance to a moved track — `records.json` leaves them out and each record
 directory's summary says so. **Size**: ~0.1–0.2 MB a record, ~10,000 records (2,000 flights × 4 samples + the labelled
 words) a real-start readout — about 1.5–2 GB each; the one-chunk smoke run of `val_base_masked_400x4` took 72 s.
+A whole run ends with `prior_generation_grading` (R38): the pass rate on the landed runway and FDE's time and place.
 
 **Publishing** (2026-09-30): the root publisher's `--generation-records DIR --generation-campaign CAMPAIGN [--kind K]`
 files each kind × airport as one Experiments category (`experiment_generation_<readout campaign>_<readout>_<kind>_<split>`,
@@ -1011,4 +1012,30 @@ artefact, split, draw, samples and temperature. Every refusal about the disk bef
 (`write_export`); refactors it rests on, behaviour-preserving (reviewed): `window_prior`, `fly_windows` / `Flown`,
 `fixed_paths` / `FixedWindow`, `sentence_counts`, `generation_block`, `head_block` / `flights_block`, `check_set` by kind. The
 model trained by `ts-traffic-reward` is named **traffic** (`MODEL_NAMES`, user 2026-09-30).
+
+### R38 · `run_ts.py prior_generation_grading` — a generation-records run graded beyond its pass rate: the landed runway, and FDE's time and place (2026-09-30)
+
+Reads a whole `prior_generation_records` run (R35: `records.json` + its record directories; a partial run is refused) and
+writes `<records>/grading/` (new, never overwritten): `landed_runway/<kind>/<ICAO>/` and `grading.json`
+(`ts-prior-generation-grading-v1`), built in `grading.partial` and renamed when whole; every runway to grade on must have
+its assessment context and every recorded sentence its record row before anything is written. `prior_generation_records` runs it at its end (a whole run only).
+
+**The landed runway.** The evaluation grades a record against its `source.runway` — the observed flight's — so a sentence
+flown to another runway fails there however it flew (on v11 val, augmented r7, real starts: 14.5 % of the prior's
+sentences landed on another runway, 84.5 % of them the parallel). Every recorded sentence whose last pointed runway is not
+the observed one and that CROSSED it (`POINTED_CROSSINGS`: the judge's crossings but `crossed_other_runway`, which crossed
+another runway and keeps its verdict; a sentence that crossed nothing fails anywhere and keeps its verdict) gets a graded COPY of its evaluation record: `source.runway` the runway it pointed at
+(`source.landedRunwayGrading` names both), the target that runway's threshold point as the evaluation's own assessment
+context has it (`landed_target`: threshold lat/lon, published LTP + TCH, ψ its course; speed, path angle and mass kept; a
+runway with no published height keeps the target's and grades the vertical indeterminate), the flown states read from the
+original states file by a relative `states_ref` (never copied), no `reference_file`. The pass rate on the landed runway =
+the sentences ending on the observed runway passing there + the others passing on theirs, over EVERY sentence.
+
+**FDE's time and place** (real starts only, over the LANDED sentences: a timeout has no arrival to be late with). FDE is the distance at the observed landing TIME (the prediction sampled
+at the truth's final time; an early arrival is held at its end), so a sentence landing later than the observed aircraft
+is still short of the threshold then — the labelled words on v11 val: FDE p95 1,638 m while the arrival endpoint error
+(the prediction's own end against the observed end) is p95 69 m; 28 % land late, and 99 % of the FDEs over 500 m are late
+arrivals (median 16 s). So `grading.json` gives FDE, the arrival endpoint error, the final time error, the late share and
+FDE over the late and the early apart, per kind / pooled over the samples, in all / per airport / per approach kind / per
+airport × kind.
 
