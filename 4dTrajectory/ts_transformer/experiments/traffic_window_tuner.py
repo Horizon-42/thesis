@@ -123,20 +123,24 @@ def window_layout(model: Prior, windows: Sequence[Window], flights: Sequence[Fli
     return WindowLayout(inputs, torch.as_tensor(edges, device=device), airport, scene, slot, places.start, rows)
 
 
-def window_logits(model: Prior, layout: WindowLayout, *, checkpoint: bool = False) -> list[torch.Tensor]:
-    """Each commanded aircraft's logits of its own words in its window (teacher forcing), ``[N, 1, rows, classes]`` per
+def window_logits(model: Prior, layout: WindowLayout, *, checkpoint: bool = False,
+                  aircraft: Sequence[int] | None = None, rows: int | None = None) -> list[torch.Tensor]:
+    """Commanded aircraft's logits of their own words in their windows (teacher forcing), ``[N, 1, rows, classes]`` per
     column as `train.batch_logits` gives them for aircraft alone: one encoding of the windows (`Prior.encode`;
-    ``checkpoint``: the layers recomputed in the backward), the heads read on each commanded aircraft's rows (padded past
-    its last with its last step's place, never read)."""
+    ``checkpoint``: the layers recomputed in the backward), the heads read on each aircraft's rows — ``aircraft`` (the
+    commanded ones' places; every one by default) over their first ``rows`` (their longest by default; padded past an
+    aircraft's last with its last step's place, never read)."""
     x = layout.inputs
     h, tokens, valid = model.encode(x["features"], x["relative"], x["static"], x["in_force"], x["since"],
                                     layout.airport, x["present"], x["rows"], layout.edges, checkpoint)
     device = h.device
-    width = int(layout.rows.max())
-    steps = torch.as_tensor(np.minimum(layout.start[:, None] + np.arange(width)[None, :],
-                                       (layout.start + layout.rows - 1)[:, None]), device=device)
-    scene = torch.as_tensor(layout.scene, device=device)[:, None]
-    slot = torch.as_tensor(layout.slot, device=device)[:, None]
+    read = np.arange(len(layout.rows)) if aircraft is None else np.asarray(aircraft, dtype=np.int64)
+    width = int(layout.rows[read].max()) if rows is None else rows
+    start, own_rows = layout.start[read], layout.rows[read]
+    steps = torch.as_tensor(np.minimum(start[:, None] + np.arange(width)[None, :], (start + own_rows - 1)[:, None]),
+                            device=device)
+    scene = torch.as_tensor(layout.scene[read], device=device)[:, None]
+    slot = torch.as_tensor(layout.slot[read], device=device)[:, None]
     own_h = h[scene, slot, steps][:, None]
     own_tokens = tokens[scene, slot, steps][:, None]
     targets = x["targets"][scene, slot, steps][:, None]
@@ -144,18 +148,21 @@ def window_logits(model: Prior, layout: WindowLayout, *, checkpoint: bool = Fals
     return model.logits(own_h, own_tokens, valid[scene[:, 0]], targets, first)
 
 
-def window_advantages(rows: Sequence[Mapping[str, object]]) -> tuple[np.ndarray, np.ndarray]:
+def window_advantages(rows: Sequence[Mapping[str, object]], samples: int) -> tuple[np.ndarray, np.ndarray]:
     """``(each row's advantage, the rows trained on)`` of a round's window sentences (`traffic_window_generation.
-    WindowSentences.rows`: an aircraft of a window over its samples): its reward less the mean of the same aircraft of
-    the same window over its samples (`landing_reward.group_advantages`' rule: not divided by the spread), and the rows of
-    each aircraft whose samples' rewards differ and none of which starts in a loss it answers for (no word of it made
-    that one)."""
+    WindowSentences.rows`, one draw's: an aircraft of a window over its ``samples`` samples — refused otherwise): its
+    reward less the mean of the same aircraft of the same window over its samples (`landing_reward.group_advantages`'
+    rule: not divided by the spread), and the rows of each aircraft whose samples' rewards differ and none of which starts
+    in a loss it answers for (no word of it made that one)."""
     groups: dict[tuple[object, object], list[int]] = {}
     for k, row in enumerate(rows):
         groups.setdefault((row["window"], row["dataset_id"]), []).append(k)
     advantages = np.zeros(len(rows))
     trained = []
-    for members in groups.values():
+    for (window, key), members in groups.items():
+        if sorted(rows[k]["sample"] for k in members) != list(range(samples)):
+            raise ValueError(f"window {window}, {key}: samples {[rows[k]['sample'] for k in members]}, not 0 … "
+                             f"{samples - 1} once each")
         rewards = np.array([float(rows[k]["reward"]) for k in members])
         advantages[members] = rewards - rewards.mean()
         if rewards.min() != rewards.max() and not any(rows[k]["starts_in_a_loss"] for k in members):
@@ -182,13 +189,32 @@ class WindowSplit:
         for window, flights, records, trained, advantages, allowed in zip(
                 self.windows, self.flights, self.records, self.trained, self.advantages, self.allowed, strict=True):
             if not (len(window.commanded) == len(flights) == len(records)) or not trained \
-                    or not (len(trained) == len(advantages) == len(allowed)) or max(trained) >= len(flights):
-                raise ValueError("a window sample: a flight and a record per commanded aircraft, one or more trained, "
-                                 "an advantage and masks each")
+                    or not (len(trained) == len(advantages) == len(allowed)) \
+                    or sorted(set(trained)) != list(trained) or not 0 <= trained[0] <= trained[-1] < len(flights):
+                raise ValueError("a window sample: a flight and a record per commanded aircraft, one or more trained "
+                                 "(each once, in order), an advantage and masks each")
+            for k, masks in zip(trained, allowed):
+                steps = counted_rows(flights[k]) - N_LOOK
+                if any(len(bits) != steps for bits in masks.values()):
+                    raise ValueError(f"{records[k].key}: masks over {[len(b) for b in masks.values()]} steps, "
+                                     f"{steps} counted")
 
     @property
     def sentences(self) -> int:
         return sum(len(t) for t in self.trained)
+
+
+def counted_rows(flight: Flight) -> int:
+    """A trained aircraft's rows to its last counted step (`window_flight` asks every column of those)."""
+    return N_LOOK + int(flight.asked.any(axis=-1).sum())
+
+
+def counted_flight(flight: Flight) -> Flight:
+    """A trained aircraft's rows cut at its last counted step — the sentence as R32 trains it (the model is causal: its
+    later rows, read by the others, change none of these)."""
+    rows = counted_rows(flight)
+    return dataclasses.replace(flight, **{name: getattr(flight, name)[:rows] for name in
+                                          ("features", "relative", "in_force", "since", "targets", "asked")})
 
 
 def window_size(window: Window, flights: Sequence[Flight], step_s: float) -> tuple[int, int, int]:
@@ -216,10 +242,10 @@ def window_parts(split: WindowSplit, indices: Sequence[int], step_s: float, budg
 
 
 def update_batches(split: WindowSplit, tokens: int, rng: np.random.Generator | None) -> list[list[int]]:
-    """Window samples in update batches as `data.batches` groups sentences: by their trained aircraft's longest rows,
-    each batch at most ``tokens`` padded trained steps (a sample holding more is a batch of its own); shuffled when
-    ``rng`` is given."""
-    longest = {s: max(split.flights[s][k].rows for k in trained) for s, trained in enumerate(split.trained)}
+    """Window samples in update batches as `data.batches` groups sentences: by their trained aircraft's longest rows to
+    their counted steps (`counted_rows`: a sentence as R32 cuts it), each batch at most ``tokens`` padded trained steps (a
+    sample holding more is a batch of its own); shuffled when ``rng`` is given."""
+    longest = {s: max(counted_rows(split.flights[s][k]) for k in trained) for s, trained in enumerate(split.trained)}
     groups: list[list[int]] = []
     current: list[int] = []
     rows = count = 0
@@ -255,18 +281,14 @@ class WindowRewardTuner(SceneRewardTuner):
                                self.device)
         offsets = np.cumsum([0] + [len(split.flights[s]) for s in part])
         chosen = [int(offsets[n] + k) for n, s in enumerate(part) for k in split.trained[s]]
-        trained = dataclasses.replace(split.table, flights=[flights[i] for i in chosen])
+        # the trained sentences as R32 cuts them; the layout keeps every row, the others read them
+        trained = dataclasses.replace(split.table, flights=[counted_flight(flights[i]) for i in chosen])
         batch = to_batch(trained, range(len(chosen)), self.device)
         rows = batch["targets"].shape[2]
-        index = torch.as_tensor(chosen, device=self.device)
-
-        def own(logits: list[torch.Tensor]) -> list[torch.Tensor]:
-            return [logit[index, :, :rows] for logit in logits]
-
         with torch.no_grad():                   # first: their memory is freed before the model's is held
-            started = None if start is None else own(window_logits(start, layout))
+            started = None if start is None else window_logits(start, layout, aircraft=chosen, rows=rows)
             reference = batch_logits(self.reference, batch)
-        logits = own(window_logits(self.model, layout, checkpoint=torch.is_grad_enabled()))
+        logits = window_logits(self.model, layout, checkpoint=torch.is_grad_enabled(), aircraft=chosen, rows=rows)
         masks = allowed_tensors([a for s in part for a in split.allowed[s]], rows, [x.shape[-1] for x in logits],
                                 self.device)
         logits, reference = masked(logits, masks), masked(reference, masks)

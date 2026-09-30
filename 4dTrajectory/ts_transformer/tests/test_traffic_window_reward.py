@@ -76,7 +76,7 @@ def test_a_window_round_is_spoken_by_its_plan_and_its_trained_samples_are_what_t
     for k, row in enumerate(rows):                              # a contrast for f0 and f2, none for f1
         row["reward"] = float(row["dataset_id"] != "KXXX:f1" and row["sample"] == 0)
         row["starts_in_a_loss"] = False
-    advantages, trained = window_advantages(rows)
+    advantages, trained = window_advantages(rows, 2)
     geometry = airport.flights.geometry
     table = Split([], ("KXXX",), prior_data.candidate_table({"KXXX": geometry}, ("KXXX",), 2), (("09",),), ((90.0,),),
                   column_classes(Words(spec), 2), "no-context")

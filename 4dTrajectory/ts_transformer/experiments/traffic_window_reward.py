@@ -615,7 +615,7 @@ def main(argv: list[str] | None = None) -> int:
         spoken, speaking_peaks = speakers.receive(round_, args.samples)
         if device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(device)
-        advantages, trained = window_advantages(spoken.rows)
+        advantages, trained = window_advantages(spoken.rows, args.samples)
         described = {**round_summary(round_, spoken, trained), **drawn_counts}
         write_json_atomic(directory / "sentences.json", {
             **described, "aircraft": [{k: r[k] for k in ("window", "dataset_id", "sample", "kind", "role", "reward",
