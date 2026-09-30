@@ -42,6 +42,13 @@ from ts_transformer.instructions.labeller.records import Instruction
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, HEADING, RUNWAY, SPEED, UNCHANGED
 from ts_transformer.prior.masks import PROCEDURE_ALTITUDES, ProcedureMasks
+from aircraft.aero_params import aero_params_for_aircraft
+from aircraft.aircraft_sets import A320
+
+
+_A320 = aero_params_for_aircraft(A320)
+#: An airframe's aero row (`FlightContext.aero_params`): what a track's attack reading reads.
+AERO_ROW = np.array([_A320.S, _A320.Cl_max, _A320.Cd0, _A320.k, _A320.stall_threshold, _A320.k_stall])
 
 U = UNCHANGED
 #: No newer request ever comes in.
@@ -469,7 +476,7 @@ class TrackTest(unittest.TestCase):
         context = FlightContext(signals=None, series=None, reading=reading(), geometry=geometry(), vertical_paths=(VerticalPath(15.0, 3.0),),
                                 group="own dynamics", approach_ias_mps=70.0,
                                 observed_track_deg=np.full(10, 450.0), observed_distance_m=400.0 * np.arange(10),
-                                hae_minus_msl_m=-32.0)
+                                hae_minus_msl_m=-32.0, aero_params=AERO_ROW)
         return track_payload(result, context, 2.0)
 
     def test_the_flown_segment_reads_on_the_flights_own_clock_distance_and_heading_branch(self):
@@ -483,6 +490,9 @@ class TrackTest(unittest.TestCase):
         # the commands: one per cycle, the dynamics' left bank read as a negative right bank
         self.assertEqual(track["bankRightDeg"], [-10.0] * 4)
         self.assertEqual(len(track["loadFactor"]), 4)
+        # the attitude it is drawn in, at each state: the bank of the cycle starting there (the last: its last cycle's)
+        self.assertEqual(track["attitude"]["bankRightDeg"], [-10.0] * 5)
+        self.assertEqual(track["attitude"]["headingDeg"], [90.0] * 5)
 
     def test_a_dynamics_failure_leaves_the_failed_state_out(self):
         track, _ = self.payload("dynamics_failure")
@@ -520,7 +530,7 @@ class PayloadTest(unittest.TestCase):
         context = FlightContext(signals=signals10(), series=None, reading=reading(), geometry=geometry(),
                                 vertical_paths=(VerticalPath(15.0, 3.0),), group="own dynamics", approach_ias_mps=70.0,
                                 observed_track_deg=np.full(10, 90.0), observed_distance_m=200.0 * np.arange(10),
-                                hae_minus_msl_m=-32.0)
+                                hae_minus_msl_m=-32.0, aero_params=AERO_ROW)
         words = SimpleNamespace(spec=SPEC, speed_mps=WORDS.speed_mps)
         return segment_payload(result, context, words)
 
@@ -561,7 +571,7 @@ class PayloadTest(unittest.TestCase):
         context = FlightContext(signals=signals10(), series=None, reading=reading(), geometry=geometry(),
                                 vertical_paths=(VerticalPath(15.0, 3.0),), group="own dynamics", approach_ias_mps=70.0,
                                 observed_track_deg=np.full(10, 90.0), observed_distance_m=200.0 * np.arange(10),
-                                hae_minus_msl_m=-32.0)
+                                hae_minus_msl_m=-32.0, aero_params=AERO_ROW)
         # the flown track as its judge read it: seven steps, all on the word's 60°
         admitted = SimpleNamespace(smoothed=SimpleNamespace(track_deg=np.full(7, 60.0)))
         with mock.patch.object(payload_module, "read_flown", lambda *args, **kwargs: admitted):
@@ -790,7 +800,7 @@ class BackendTest(unittest.TestCase):
             def open_set(artefact, split, sample, words, files):
                 self.assertTrue(backend._lock.locked())
                 opened.append((artefact.name, files()))
-                return {"K:1": FlightContext(*[None] * 10), "K:2": NotFlyable("no dynamics")}, False
+                return {"K:1": FlightContext(*[None] * 11), "K:2": NotFlyable("no dynamics")}, False
 
             with mock.patch.object(backend, "training_set", training_set), mock.patch.object(backend, "executor_for", executor_for), \
                     mock.patch.object(backend, "open_set", open_set), \
@@ -1032,7 +1042,7 @@ class GlidepathStopTest(unittest.TestCase):
                              geometries=[geometry], vertical_paths=[], approach_ias_mps=[], groups=[], drawn={})
         rows, grids, _ = generation.said_rows(batch, flown, np.asarray([grid]), forbidden, words, [0],
                                               _altitudes(geometry, final))
-        sample = export.sample_payload(flown, 0, rows[0], grids[0], geometry, words, 0.0, stop)
+        sample = export.sample_payload(flown, 0, rows[0], grids[0], geometry, words, 0.0, AERO_ROW, stop)
         last = cut.states[0, outcome.end_row].numpy()
         self.assertAlmostEqual(sample["track"]["lat"][-1], float(last[LAT]), places=7)
         self.assertAlmostEqual(sample["track"]["lon"][-1], float(last[LON]), places=7)
@@ -1172,7 +1182,7 @@ class ModelSegmentTest(unittest.TestCase):
         for observed_rows, first in ((20, 8), (121, 8), (57, 8)):
             context = FlightContext(signals=None, series=None, reading=SimpleNamespace(words=np.zeros((observed_rows, 6))),
                                     geometry=None, vertical_paths=(), group="own dynamics", approach_ias_mps=70.0,
-                                    observed_track_deg=None, observed_distance_m=None, hae_minus_msl_m=-32.0)
+                                    observed_track_deg=None, observed_distance_m=None, hae_minus_msl_m=-32.0, aero_params=AERO_ROW)
             limit = fly_module.model_time_limit_s(context, first, params, 2.0)
             self.assertEqual(model_steps_max(observed_rows, first, 1.5), rows_for(limit, 2.0) - N_LOOK)
 
@@ -1251,7 +1261,7 @@ class ModelSegmentTest(unittest.TestCase):
         batch = SimpleNamespace(readings=[truth])
         context = FlightContext(signals=None, series=None, reading=truth, geometry=None, vertical_paths=(), group="own dynamics",
                                 approach_ias_mps=70.0, observed_track_deg=None, observed_distance_m=None,
-                                hae_minus_msl_m=-32.0)
+                                hae_minus_msl_m=-32.0, aero_params=AERO_ROW)
         self.assertEqual(fly_module.model_time_limit_s(context, N_LOOK, params, 2.0),
                          limits_s(batch, params, 2.0, augmented=False)[0])
         self.assertEqual(fly_module.model_time_limit_s(context, N_LOOK, params, 2.0, augmented=True),
@@ -1376,7 +1386,7 @@ class ModelSegmentTest(unittest.TestCase):
         context = FlightContext(signals=None, series=None, reading=reading(), geometry=geometry(), vertical_paths=(VerticalPath(15.0, 3.0),),
                                 group="own dynamics", approach_ias_mps=70.0,
                                 observed_track_deg=np.full(20, 90.0), observed_distance_m=400.0 * np.arange(20),
-                                hae_minus_msl_m=-32.0)
+                                hae_minus_msl_m=-32.0, aero_params=AERO_ROW)
         track, _ = track_payload(result, context, 2.0)
         self.assertEqual(track["tS"], [20.0, 21.0, 22.0, 23.0, 24.0])
         # cycles 4..8, at the observed track's height: MSL plus the flight's runway's HAE − MSL offset
@@ -1401,7 +1411,7 @@ class ModelFlightTest(unittest.TestCase):
                                 vertical_rate_mps=0.0 * rows)
         return FlightContext(signals=signals, series=None, reading=SimpleNamespace(words=np.zeros((20, 6))),
                              geometry=geometry2(), vertical_paths=(VerticalPath(15.0, 3.0), VerticalPath(15.0, 3.0)), group=group, approach_ias_mps=70.0,
-                             observed_track_deg=np.full(20, 90.0), observed_distance_m=200.0 * rows, hae_minus_msl_m=-32.0)
+                             observed_track_deg=np.full(20, 90.0), observed_distance_m=200.0 * rows, hae_minus_msl_m=-32.0, aero_params=AERO_ROW)
 
     def fly(self, column: int, row: int, end_row: int, group: str = "own dynamics", events: list | None = None,
             read_rows: int | None = None, stop: int | None = None, augmentation: dict | None = None):

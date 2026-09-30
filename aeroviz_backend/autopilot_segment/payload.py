@@ -20,6 +20,7 @@ import numpy as np
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.frame import ALT, LAT, LON
 from ts_transformer.autopilot.judge import Verdict, flown_track, read_flown, words_said
+from ts_transformer.experiments.training_attitude import attitude_payload, executor_attitude
 from ts_transformer.instructions import display
 from ts_transformer.instructions.labeller.read import Admitted
 from ts_transformer.instructions.training_files import band_payload, rounded
@@ -30,8 +31,9 @@ from aeroviz_backend.autopilot_segment.segment import told_words
 from aeroviz_backend.autopilot_segment.verdict import HeadingFacts, selected_heading, word_verdict
 
 #: MIRROR of `aeroviz-4d/src/data/trainingAutopilot.ts` (`TRAINING_AUTOPILOT_SCHEMA`); the reader refuses anything
-#: else by name. A name changes with the payload's shape, on both sides, in one change.
-SCHEMA = "aeroviz-autopilot-segment-v7"
+#: else by name. A name changes with the payload's shape, on both sides, in one change. v8 (2026-09-30): the track
+#: carries the attitude the aircraft is drawn in at each state (``track.attitude``, `training_attitude`).
+SCHEMA = "aeroviz-autopilot-segment-v8"
 #: The end of a segment flown to its ``stopRow``: the executor reached it. Otherwise the end is the judge's outcome
 #: (`judge.OUTCOMES`, mirrored by `trainingOverlays.ts`'s `TRAINING_EXECUTOR_OUTCOMES`), or — a model's sentence spoken
 #: under the procedure's altitudes — `fly.BELOW_GLIDEPATH` (v5: the request names the masks, the answer this end). MIRROR of `trainingAutopilot.ts`
@@ -76,7 +78,8 @@ def track_payload(result: FlownSegment, context: FlightContext, step_s: float) -
     """The flown segment every control cycle, from the selected word on, on the flight's own clock and axes: its time
     from the flight's first row, its distance flown from the observed flight's at the step the executor started at, and
     its track moved by whole turns onto the observed smoothed track's branch there, so each reads on the chart beside the
-    observed one. Returned with that shift, in degrees."""
+    observed one; and the attitude it is drawn in at each state (`training_attitude.executor_attitude`, the flight's
+    airframe). Returned with that shift, in degrees."""
     flown, start = result.flown, result.segment.start_row
     first, last = word_cycle(result, step_s), end_state_row(result.verdict)
     states = flown.states[0, : last + 1].cpu().numpy()
@@ -97,6 +100,7 @@ def track_payload(result: FlownSegment, context: FlightContext, step_s: float) -
         # the commands each cycle flew (one fewer than the states): the dynamics' bank turns left when positive
         "thrustFraction": rounded(commands[shown, 0], 4), "bankRightDeg": rounded(-np.degrees(commands[shown, 1]), 3),
         "loadFactor": rounded(commands[shown, 2], 4),
+        "attitude": attitude_payload(executor_attitude(flown, 0, np.arange(first, last + 1), context.aero_params)),
     }, shift
 
 
