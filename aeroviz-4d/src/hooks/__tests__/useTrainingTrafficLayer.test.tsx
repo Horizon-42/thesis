@@ -65,6 +65,25 @@ describe("useTrainingTrafficLayer", () => {
     expect([at(STRAIGHT_ID).show, at(BACKGROUND_ID).show]).toEqual([true, true]);
   });
 
+  it("draws each aircraft by its role: the one on screen told from the commanded, the replayed faded — and swaps them", async () => {
+    const { set, window, entities, at, app } = await setup();
+    const now = Cesium.JulianDate.now();
+    const labelOf = (id: string) => at(id).label!.text!.getValue(now) as string;
+    const widthOf = (id: string) => entities.getById(`training-traffic-track-${id}`)!.polyline!.width!.getValue(now) as number;
+    expect(labelOf(VECTORED_ID).startsWith("▶ ")).toBe(true);
+    expect(at(VECTORED_ID).label!.showBackground!.getValue(now)).toBe(true);
+    expect(labelOf(STRAIGHT_ID).startsWith("▶ ")).toBe(false);
+    expect([STRAIGHT_ID, REPLAYED_ID, BACKGROUND_ID].map((id) => at(id).name))
+      .toEqual([expect.stringMatching(/\(commanded\)$/), expect.stringMatching(/\(replayed\)$/), expect.stringMatching(/\(background\)$/)]);
+    expect([widthOf(STRAIGHT_ID), widthOf(REPLAYED_ID), widthOf(BACKGROUND_ID)]).toEqual([2.5, 1.2, 1]);
+    // the other commanded aircraft on screen: the roles swap, and the first is drawn as commanded
+    act(() => app().setTrainingSelection(trainingWindowSelection(set, window, window.commanded[1])));
+    expect(labelOf(STRAIGHT_ID).startsWith("▶ ")).toBe(true);
+    expect(at(VECTORED_ID).name).toMatch(/\(commanded\)$/);
+    expect(widthOf(VECTORED_ID)).toBe(2.5);
+    expect(entities.getById(`training-traffic-track-${STRAIGHT_ID}`)).toBeUndefined();
+  });
+
   it("joins the pair under its minimum while it is, and marks where the judge ended an aircraft — of the sentence read", async () => {
     const { entities, app, cursor } = await setup();
     const loss = `training-traffic-loss-visual-${[VECTORED_ID, STRAIGHT_ID].sort().join("|")}`;

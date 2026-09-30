@@ -591,12 +591,29 @@ that divergence is a known open item (see the README's "Future Improvements").
   读数与先验窗口、三维都不画游标、不亮游标处的词，读数写 "outside this aircraft"。
 - 左栏按集合的**种类**各留一个会话（`TrainingFlightSession` / `TrainingWindowSession`），同种集合加载时不卸下：开关与每个集合选中的叠加层
   切回时恢复。
-- **三维**（`useTrainingTrafficLayer.ts`，由 `useTrainingTrackLayer` 调用，读游标，只在叶子组件里）：焦点之外每架飞机的航迹（被指挥
-  的用模型的颜色，记录时用观测航迹的近白色；回放的石板灰，背景的更暗），游标时刻每架一个点加呼号（焦点更大、白色），正处在
-  失去间隔里的一对连红线并标"最近 / 要求"米数（目视实线，只有 IFR 有的虚线），被结束处一个固定的红叉。**取景**：一个时钟取景
+- **三维**（`useTrainingTrafficLayer.ts`，由 `useTrainingTrackLayer` 调用，读游标，只在叶子组件里）：每架飞机按它的**角色**画
+  （`TrainingAircraftRole`：`onScreen` / `commanded` / `replayed` / `background`，一张表 `ROLE_DRAW`；用户 2026-09-30：分不出哪条
+  是正被控制的）。焦点（句子条读的那架）的航迹由单机图层画，游标处一个大白点、外圈是当前读法的颜色，呼号 "▶ …" 写在该颜色的
+  底块上；**被指挥的是一个集合**（以后多架同时现飞，只是这个集合里放更多，没有地方假定只有一架）：航迹 2.5 px 不透明、点与呼号用
+  当前读法的颜色（模型色，记录时观测航迹的近白色）；回放的石板灰 1.2 px、透明 0.6，背景的更暗更淡（`TRAINING_OTHER_AIRCRAFT_ALPHA`）。
+  正处在失去间隔里的一对连红线并标"最近 / 要求"米数（目视实线，只有 IFR 有的虚线），被结束处一个固定的大红叉。时间条上焦点那一行
+  的呼号前也有 ▶；图例在窗口时多五行（焦点、被指挥、回放、背景、失去间隔）。**取景**：一个时钟取景
   一次——单机是这架航班，窗口是整个窗口的全部航迹，换一架不再取景。
-- 颜色：模型 `traffic`（M4，用户 2026-09-30 定名）橄榄金 `#9c8116`（对已有颜色 OKLab ΔE ≥ 17.3，对底色 4.9:1）；窗口判定三色
-  沿用回放的青 / 琥珀 / 红（`TRAINING_WINDOW_VERDICT_COLOR`）；其他飞机 `TRAINING_OTHER_AIRCRAFT_COLOR`。
+- 颜色：模型 `traffic`（M4，用户 2026-09-30 定名）天蓝 `#2b93ee`（用户同日嫌原来的橄榄金 `#9c8116` 不清新，换掉；对已有颜色
+  OKLab ΔE ≥ 11.5，最近是航向带的蓝，对底色 5.8:1）；窗口判定三色沿用回放的青 / 琥珀 / 红（`TRAINING_WINDOW_VERDICT_COLOR`）；
+  其他飞机 `TRAINING_OTHER_AIRCRAFT_COLOR`；失去间隔与被结束用失败大红（AV40）。
+
+### AV40 · 失败一律大红；SVG 文字的颜色写在 style 里（2026-09-30）
+
+- 用户（2026-09-30）：降落失败的航迹，看板上的粉红虚线不够醒目，换大红。**一个失败色** `TRAINING_FAILURE_COLOR = #ff2d2d`
+  （`trainingWordColors.ts`；对底色 5.0:1）：实时执行器飞出包络的整段（`TRAINING_AUTOPILOT_OUTSIDE_COLOR` 就是它）、句子条上模型
+  航班**没落地**时的结束线（3.5 px，落地的仍是模型色 2 px）与轴下的时刻、样本小块的文字、失去间隔（`TRAINING_LOSS_COLOR`，时间条
+  上目视实心不透明 0.85、IFR 3–2 虚线，线宽 1.5）、被结束的 ✕（时间条上 14 px、黑描边、画在失去间隔段之上；三维 26 px）。逐行的
+  "包络之外"仍是浅红 `TRAINING_OUTSIDE_COLOR`。
+- **坑：SVG 元素上的 `fill` 属性会被样式表里的 `fill` 盖掉**（属性的优先级低于任何 CSS 规则）。时间条的 ✕ 原来被
+  `.training-traffic-row text { fill: … }` 盖成灰色，句子条轴下模型航班的结束时刻被 `.training-sentence-tick` 盖成灰色——都从来没
+  显示成设计的颜色。颜色随数据变的 SVG 文字写 `style={{ fill }}`，或让样式表的规则只选不带颜色的那几个元素（时间条的呼号现在是
+  `.training-traffic-callsign`）。
 
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
 

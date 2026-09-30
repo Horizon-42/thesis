@@ -37,7 +37,9 @@ vi.mock("../../context/AppContext", async () => {
 });
 
 import TrainingSentenceBar, { spacedLabels } from "../TrainingSentenceBar";
-import { parseTrainingSample, trainingSelectionOf, TRAINING_COLUMNS } from "../../data/trainingSample";
+import TrainingLegend from "../TrainingLegend";
+import type { TrainingLayers } from "../../context/AppContext";
+import { parseTrainingSample, trainingSelectionOf, TRAINING_COLUMNS, type TrainingVocabulary } from "../../data/trainingSample";
 import { MOCK_ROWS, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import { EXECUTOR_ID, PRIOR_ID, mockExecutorOverlay, mockOverlayEntry, mockPriorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
 import { parseTrainingExecutorOverlay, parseTrainingPriorOverlay, type TrainingGenerationView } from "../../data/trainingOverlays";
@@ -48,7 +50,7 @@ import {
   AUTOPILOT_PLAYBACK_MIN_SPEEDUP, AUTOPILOT_TAIL_OPACITY, parseTrainingAutopilot,
 } from "../../data/trainingAutopilot";
 import { VECTORED_KEY, WORD } from "../../data/__tests__/trainingSample.fixture";
-import { TRAINING_MODEL_COLOR, TRAINING_OUTSIDE_COLOR, TRAINING_REPLAY_COLOR } from "../../utils/trainingWordColors";
+import { TRAINING_FAILURE_COLOR, TRAINING_MODEL_COLOR, TRAINING_OUTSIDE_COLOR, TRAINING_REPLAY_COLOR } from "../../utils/trainingWordColors";
 import {
   failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockSelection,
 } from "../../data/__tests__/trainingAutopilot.fixture";
@@ -185,6 +187,11 @@ describe("TrainingSentenceBar", () => {
     appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 1 };
     const { unmount } = render(<TrainingSentenceBar />);
     expect(screen.getByLabelText("after 150 s: the flight had ended; the model spoke on to where the executor stopped")).toBeTruthy();
+    // a flight that did not land ends in the failure red, heavier — its line and its time on the axis
+    const failed = document.querySelector(".training-sentence-model-end") as SVGTextElement;
+    expect(failed.style.fill).toBe(TRAINING_FAILURE_COLOR);
+    const failedLine = [...document.querySelectorAll(".training-sentence-marker")].find((line) => line.getAttribute("stroke") === TRAINING_FAILURE_COLOR)!;
+    expect(failedLine.getAttribute("stroke-width")).toBe("3.5");
     unmount();
     appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
     render(<TrainingSentenceBar />);
@@ -214,7 +221,9 @@ describe("TrainingSentenceBar", () => {
     expect(screen.getByLabelText("the observed flight's sentence ends at 120 s")).toBeTruthy();
     // where its flight ended, its time written on the axis under it, in its colour
     const end = screen.getByLabelText("base's flight ended at 110 s");
-    expect([end.textContent, end.getAttribute("fill")]).toEqual(["110 s", TRAINING_MODEL_COLOR.base]);
+    expect([end.textContent, end.style.fill]).toEqual(["110 s", TRAINING_MODEL_COLOR.base]);
+    const endLine = screen.getByLabelText("base's flight landed at 110 s").querySelector("line")!;
+    expect([endLine.getAttribute("stroke"), endLine.getAttribute("stroke-width")]).toEqual([TRAINING_MODEL_COLOR.base, "2"]);
     // how the sample ended, and no truth-only chip; its words fly like the truth's
     expect(screen.getByText("#1: landed on 09 at 110 s (observed 120 s)")).toBeTruthy();
     expect(screen.queryByText(/^heading \d+\/\d+ · capture/)).toBeNull();
@@ -759,6 +768,25 @@ describe("TrainingSentenceBar", () => {
     const other = screen.getAllByLabelText("What the 3D scene shows")[1];
     fireEvent.click(other.querySelector("button")!);
     expect(other.textContent).not.toMatch(/judged rows/);
+  });
+
+  it("names the roles of a multi-aircraft window's aircraft in the legend — only when a window is on screen", () => {
+    select();
+    const vocabulary = (appState.trainingSelection as { vocabulary: TrainingVocabulary }).vocabulary;
+    const layers = appState.trainingLayers as TrainingLayers;
+    const { unmount } = render(<TrainingLegend layers={layers} vocabulary={vocabulary} executorTrack={false} autopilotColour={null}
+      model={null} window={null} />);
+    fireEvent.click(screen.getByText("Legend ▸"));
+    expect(screen.getByLabelText("What the 3D scene shows").textContent).not.toMatch(/commanded aircraft|on screen/);
+    unmount();
+    render(<TrainingLegend layers={layers} vocabulary={vocabulary} executorTrack={false} autopilotColour={null}
+      model={null} window={{ colour: TRAINING_MODEL_COLOR.traffic }} />);
+    fireEvent.click(screen.getByText("Legend ▸"));
+    const rows = [...screen.getByLabelText("What the 3D scene shows").querySelectorAll("li")].map((row) => row.textContent);
+    expect(rows).toEqual(expect.arrayContaining(["▶ the aircraft on screen", "commanded aircraft", "replayed arrivals",
+      "background arrivals", "loss of separation"]));
+    const ring = screen.getByText("▶ the aircraft on screen").closest("li")!.querySelector("circle")!;
+    expect(ring.getAttribute("stroke")).toBe(TRAINING_MODEL_COLOR.traffic);
   });
 
   it("opens the read-back check, and puts the notes behind ⓘ", () => {

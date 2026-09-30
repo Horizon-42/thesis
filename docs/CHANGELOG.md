@@ -1,5 +1,17 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-30 — Training: who is commanded, failures in one red, traffic in azure (branch `dev-training-roles`)
+
+- **What** (the user, 2026-09-30): in a window's 3D scene each aircraft is drawn by its role — the one on screen (white point
+  ringed in the reading's colour, "▶ callsign" on a chip), the commanded ones (a set, opaque, the reading's colour), replayed
+  and background ones faded; the strip marks the on-screen row with ▶; the legend gains the window's five rows. A failure is
+  one red `#ff2d2d` (`TRAINING_FAILURE_COLOR`): a model's flight that did not land ends on the bar in a heavier red line and
+  time, losses of separation and judge ends are drawn in it, heavier. traffic is azure `#2b93ee` (was olive `#9c8116`).
+- **Found on the way**: an SVG `fill` attribute loses to any stylesheet `fill` rule — the strip's ✕ and the bar's model end
+  time had never shown their colours (AV40).
+- **Next, to be discussed** (doc 36 §4.11 step 7): aircraft models with real heading / bank / path angle, which needs the
+  exports to carry attitude and every published set and overlay re-exported.
+
 ### 2026-09-30 — Training: multi-aircraft windows (branch `dev-training-traffic`, merged)
 
 - **What**: the Training module shows multi-aircraft windows (user 2026-09-30: plan reviewed; 20 windows an airport, the rest as

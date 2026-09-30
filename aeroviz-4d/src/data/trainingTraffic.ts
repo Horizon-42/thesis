@@ -65,6 +65,11 @@ export type TrainingSeparationReading = (typeof TRAINING_SEPARATION_READINGS)[nu
  *  replayed as recorded — an arrival with a sentence, or a background one without. */
 export const TRAINING_OTHER_ROLES = ["replayed", "background"] as const;
 export type TrainingOtherRole = (typeof TRAINING_OTHER_ROLES)[number];
+/** What an aircraft of a window is to the view, which says how it is drawn: the one ON SCREEN (the sentence bar reads it),
+ *  one the model COMMANDS, or one replayed as recorded. The commanded are a SET — every aircraft spoken to at once, as a
+ *  live run of several will be — and the one on screen is one of them: nothing here assumes a single commanded aircraft. */
+export const TRAINING_AIRCRAFT_ROLES = ["onScreen", "commanded", ...TRAINING_OTHER_ROLES] as const;
+export type TrainingAircraftRole = (typeof TRAINING_AIRCRAFT_ROLES)[number];
 /** How a window sentence may end: a free sentence's outcomes, or ended by the judge. */
 export const TRAINING_WINDOW_OUTCOMES = [...TRAINING_FREE_OUTCOMES, TRAINING_LOST_SEPARATION] as const;
 
@@ -467,6 +472,11 @@ export function windowOpening(window: TrainingWindow): string {
 /** A window as one identity: the cursor keeps its time while it is on screen. */
 export function trainingWindowKey(set: TrainingSetHead, window: TrainingWindow): string {
   return `${set.airport}/${set.setId}/window ${window.index}`;
+}
+
+/** The window whose aircraft is on screen, or null: the flight on screen is read on that window's clock. */
+export function windowOnScreen(view: TrainingWindowView | null, selection: TrainingSelection | null): TrainingWindowView | null {
+  return view !== null && selection !== null && trainingWindowKey(view.set, view.window) === selection.clock.scope ? view : null;
 }
 
 /** An aircraft of a window on screen: its set flight, read on the window's clock (its own 0 s at its row 0 there). The

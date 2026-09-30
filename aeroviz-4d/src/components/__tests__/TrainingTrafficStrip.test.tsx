@@ -68,7 +68,7 @@ describe("TrainingTrafficStrip", () => {
     setUp(null);
     render(<TrainingTrafficStrip />);
     expect(screen.getByText("as recorded")).toBeTruthy();
-    expect(screen.getByText("TST1")).toBeTruthy();
+    expect(screen.getByText("▶ TST1")).toBeTruthy();             // the aircraft on screen
     expect(screen.getByText("TST2")).toBeTruthy();
     expect(screen.getByText("others")).toBeTruthy();
     expect(screen.getByText(/t = 2:01/)).toBeTruthy();

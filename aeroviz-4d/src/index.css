@@ -997,7 +997,7 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   touch-action: none;
 }
 
-.training-traffic-row text,
+.training-traffic-callsign,
 .training-traffic-others {
   font-size: 9.5px;
   fill: rgba(224, 230, 240, 0.7);
@@ -1007,17 +1007,23 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   cursor: pointer;
 }
 
-.training-traffic-row.active text {
+.training-traffic-row.active .training-traffic-callsign {
   fill: #fff;
   font-weight: 600;
 }
 
 .training-traffic-row .training-traffic-landing {
+  font-size: 9.5px;
   fill: #e2e8f0;
 }
 
-.training-traffic-row .training-traffic-ended {
+/* where the judge ended an aircraft: large, in the failure red its `fill` gives, outlined to read over its bar */
+.training-traffic-ended {
+  font-size: 14px;
   font-weight: 700;
+  stroke: #000;
+  stroke-width: 2px;
+  paint-order: stroke;
 }
 
 .training-traffic-bracket {

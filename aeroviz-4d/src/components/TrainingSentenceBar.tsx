@@ -21,8 +21,8 @@
  * once had made the bar hard to read, the user 2026-09-26). The rows it only observed (before its first predicted step)
  * are shaded; under each row a white tick wherever the truth says a word of that column, so where the two sentences part
  * is read at a glance; a dashed line where the model cleared the flight, a solid one in its colour where its flight
- * ended — its time written on the axis under it, in its colour — a dashed white one where the observed flight's sentence
- * ends. Words a model said after its flight ended (the executor flies on after three outcomes its judge reads earlier) sit
+ * landed — a heavier one in the failure red where it did not (the user, 2026-09-30) — its time written on the axis under
+ * it in the same colour, a dashed white one where the observed flight's sentence ends. Words a model said after its flight ended (the executor flies on after three outcomes its judge reads earlier) sit
  * under a grey shade. The
  * time axis is the observed flight's, stretched to the sentence read when that one runs longer (a model's flight that
  * timed out runs on to 1.5× the observed time): the truth is never squeezed by a sample it is not showing. Choosing a
@@ -69,7 +69,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { useApp, useTrainingCursor } from "../context/AppContext";
 import TrainingLegend from "./TrainingLegend";
 import TrainingTrafficStrip from "./TrainingTrafficStrip";
-import { isWindowSentence } from "../data/trainingTraffic";
+import { isWindowSentence, windowOnScreen } from "../data/trainingTraffic";
 import TrainingPriorWindow from "./TrainingPriorWindow";
 import TrainingReadbackWindow from "./TrainingReadbackWindow";
 import { TrainingAutopilotStatus } from "./TrainingAutopilotStatus";
@@ -79,6 +79,7 @@ import {
   TRAINING_COLUMN_COLOR,
   TRAINING_CORRIDOR_COLOR,
   TRAINING_EXECUTOR_COLOR,
+  TRAINING_FAILURE_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_RAW_COLOR,
   TRAINING_SURFACE_COLOR,
@@ -161,6 +162,9 @@ const TICK_LABEL_GAP = 34;
 const OBSERVED_LABEL_MIN_W = 52;
 /** The strip down the left edge of a model's rows, in its colour (px). */
 const MODEL_STRIP_W = 4;
+/** Where a model's flight ended (px): landed, and — heavier, in the failure red — did not. */
+const MODEL_END_W = 2;
+const FAILED_END_W = 3.5;
 
 /**
  * Which of these ascending x positions may carry a text label: greedy from the left, keeping one only when it clears the
@@ -370,7 +374,7 @@ export default function TrainingSentenceBar() {
     mode, trainingSelection: selection, trainingLayers,
     trainingColumn: focusColumn, setTrainingColumn: setFocusColumn,
     trainingExecutor, trainingPrior, trainingAutopilot, trainingPick, setTrainingPick,
-    trainingGenerations, trainingSource, setTrainingSource,
+    trainingGenerations, trainingSource, setTrainingSource, trainingWindow,
   } = useApp();
   const { trainingCursorS: cursorS, setTrainingCursorS: setCursorS } = useTrainingCursor();
   const [frame, frameW] = useMeasuredWidth(MIN_PLOT_W + GUTTER + PAD_R, DEFAULT_PLOT_W + GUTTER + PAD_R);
@@ -435,23 +439,26 @@ export default function TrainingSentenceBar() {
     .map((shown, index) => shown && (endLabelX === null
       || Math.abs(middle(xFor(timeOf(tickRows[index])), index === tickRows.length - 1) - middle(endLabelX, endAnchoredEnd))
         >= TICK_LABEL_GAP));
+  // where a model's flight ended: in its colour when it landed, heavier in the failure red when it did not
+  const endColour = generated === null ? null : generated.outcome === "landed" ? modelColour! : TRAINING_FAILURE_COLOR;
   const cleared = trainingClearedValue(vocabulary);
   const modelClearance = generated === null ? null
     : generated.events.find((event) => event.column === TRAINING_COLUMN_INDEX.approach && event.value === cleared && event.row > generated.firstRow) ?? null;
   const markers = generated === null ? [
-    { at: timeOf(flight.joinRow), key: "cleared", colour: TRAINING_COLUMN_COLOR.approach, dash: "3 3",
+    { at: timeOf(flight.joinRow), key: "cleared", colour: TRAINING_COLUMN_COLOR.approach, dash: "3 3", width: 1,
       title: `cleared to join the final at ${formatSeconds(timeOf(flight.joinRow))} s` },
-    { at: timeOf(flight.captureRow), key: "captured", colour: TRAINING_CORRIDOR_COLOR, dash: "3 3",
+    { at: timeOf(flight.captureRow), key: "captured", colour: TRAINING_CORRIDOR_COLOR, dash: "3 3", width: 1,
       title: `the final captured at ${formatSeconds(timeOf(flight.captureRow))} s, ` +
         `${(flight.captureBeforeThresholdM / 1000).toFixed(1)} km before the threshold` },
-    { at: timeOf(flight.unspecifiedRow), key: "unspecified", colour: TRAINING_COLUMN_COLOR.speed, dash: "3 3",
+    { at: timeOf(flight.unspecifiedRow), key: "unspecified", colour: TRAINING_COLUMN_COLOR.speed, dash: "3 3", width: 1,
       title: `speed left to the pilot from ${formatSeconds(timeOf(flight.unspecifiedRow))} s` },
   ] : [
     ...(modelClearance === null ? [] : [{ at: timeOf(modelClearance.row), key: "model-cleared", colour: TRAINING_COLUMN_COLOR.approach,
-      dash: "3 3", title: `${modelName!} cleared the flight to join the final at ${formatSeconds(timeOf(modelClearance.row))} s` }]),
-    ...(movedRead ? [] : [{ at: flight.rows * stepS, key: "observed-end", colour: TRAINING_TRACE_COLOR, dash: "2 3",
+      dash: "3 3", width: 1, title: `${modelName!} cleared the flight to join the final at ${formatSeconds(timeOf(modelClearance.row))} s` }]),
+    ...(movedRead ? [] : [{ at: flight.rows * stepS, key: "observed-end", colour: TRAINING_TRACE_COLOR, dash: "2 3", width: 1,
       title: `the observed flight's sentence ends at ${formatSeconds(flight.rows * stepS)} s` }]),
-    { at: generated.endS, key: "model-end", colour: modelColour!, dash: undefined,
+    { at: generated.endS, key: "model-end", colour: endColour!, dash: undefined,
+      width: generated.outcome === "landed" ? MODEL_END_W : FAILED_END_W,
       title: `${modelName!}'s flight ${TRAINING_OUTCOME_TEXT[generated.outcome]} at ${formatSeconds(generated.endS)} s` },
   ];
   const landing = flight.envelopes.approach.landing;
@@ -513,7 +520,8 @@ export default function TrainingSentenceBar() {
       <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} executorTrack={executor?.flown === true}
         autopilotColour={autopilot?.status === "ready" && autopilotHasLine(autopilot.segment) ? autopilotColour(autopilot.segment) : null}
         model={model === null || generated === null ? null
-          : { label: modelName!, colour: modelColour!, samples: model.flight.samples.length, moved: movedRead }} />
+          : { label: modelName!, colour: modelColour!, samples: model.flight.samples.length, moved: movedRead }}
+        window={windowOnScreen(trainingWindow, selection) === null ? null : { colour: modelColour ?? TRAINING_TRACE_COLOR }} />
       <TrainingTrafficStrip />
       <header className="training-sentence-head">
         {startsOffered ? (
@@ -591,7 +599,7 @@ export default function TrainingSentenceBar() {
         ) : null}
         {generated === null ? null : (
           <span className="training-chip training-sample-chip" title={chip!.title}
-            style={{ borderColor: modelColour!, color: generated.outcome === "landed" ? undefined : TRAINING_OUTSIDE_COLOR }}>
+            style={{ borderColor: modelColour!, color: generated.outcome === "landed" ? undefined : TRAINING_FAILURE_COLOR }}>
             {chip!.text}
           </span>
         )}
@@ -795,7 +803,7 @@ export default function TrainingSentenceBar() {
             <g key={marker.key} aria-label={marker.title}>
               <title>{marker.title}</title>
               <line x1={xFor(marker.at)} x2={xFor(marker.at)} y1={HEAD_H} y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H}
-                stroke={marker.colour} strokeDasharray={marker.dash} strokeWidth={marker.dash === undefined ? 2 : 1}
+                stroke={marker.colour} strokeDasharray={marker.dash} strokeWidth={marker.width}
                 className="training-sentence-marker" />
             </g>
           ))}
@@ -805,7 +813,7 @@ export default function TrainingSentenceBar() {
           {endLabelX !== null ? (
             <text x={endLabelX} y={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 15}
               textAnchor={endAnchoredEnd ? "end" : "middle"}
-              className="training-sentence-tick training-sentence-model-end" fill={modelColour!}
+              className="training-sentence-tick training-sentence-model-end" style={{ fill: endColour! }}
               aria-label={`${modelName!}'s flight ended at ${formatSeconds(generated!.endS)} s`}>
               {formatSeconds(generated!.endS)} s
             </text>
@@ -857,7 +865,7 @@ export default function TrainingSentenceBar() {
               not land). Its words are drawn like the truth's; the frame in the model's colour — the bar's border, the strip
               down the rows — says whose they are; the grey before its first step is what it only observed; a white tick under
               a row is where the truth says a word of that column; the solid line in the model's colour is where its flight
-              ended, its time written under it on the axis, the dashed white one where the observed flight's sentence ends; its
+              landed (a heavier red one: where it did not), its time written under it on the axis, the dashed white one where the observed flight's sentence ends; its
               words fly live like the truth's: the executor flies its sentence again from its first step — the sample's own
               flight — except a word said after its flight ended; words under the
               dark shade after it were said to a flight already over (the executor flies on after crossing the threshold

@@ -183,7 +183,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   grouping — by name in training order, then run, a run's rounds in order; a run named when its stage has two, a round exported
   twice named by overlay id — and every view prints its `title` / `memberLabel`, never a name of its own; the bar: a tab per
   model, the read model's rounds as `r1 r2 …` chips (a round keeps the sample number); colour by NAME (`TRAINING_MODEL_COLOR`:
-  base `#d946ef`, landing `#a3e635`, augmented `#b82e7a` — 3.3:1, a mark colour, not for running text — traffic `#9c8116`); **a model speaks under
+  base `#d946ef`, landing `#a3e635`, augmented `#b82e7a` — 3.3:1, a mark colour, not for running text — traffic `#2b93ee`); **a model speaks under
   its OWN procedure's masks** (`generation.procedureMasks`); under the procedure's altitudes a sentence may end
   `below_glidepath` (`TRAINING_FREE_OUTCOMES`), and the live executor sends the masks back and is cut at the same step (AV32).
 - **The Training dock never unfolds long content**: what is read once (the module, the switches, the vocabulary) and every
@@ -217,7 +217,12 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   (`windowGenerationView`); the cursor is ONE time on the selection's clock (`TrainingSelection.clock`: the flight's own, or the
   window's — `trainingCursorS` own, `trainingSceneS` the clock's); the window strip above the bar and the 3D traffic layer draw
   every aircraft; the frontend judges nothing (losses, ends, landings are the exporter's, only their books checked); a window's
-  aircraft is never flown live (`liveExecutor`); the camera frames once per clock (AV39).
+  aircraft is never flown live (`liveExecutor`); the camera frames once per clock; in 3D each aircraft is drawn by its ROLE
+  (`TrainingAircraftRole`: on screen — "▶" chip, white ringed point — / commanded, a SET / replayed / background; one table
+  `ROLE_DRAW`), `windowOnScreen` is the one "is a window on screen" test (AV39).
+- **A failure is ONE red, `TRAINING_FAILURE_COLOR` `#ff2d2d`** (a model's flight that did not land on the bar, losses of
+  separation and judge ends, the live executor outside its envelope); **an SVG `fill` attribute loses to any stylesheet `fill`
+  rule** — colour data-driven SVG text with `style={{ fill }}` (two marks were grey for that reason) (AV40).
 
 ## Comparison CZML colour contract
 

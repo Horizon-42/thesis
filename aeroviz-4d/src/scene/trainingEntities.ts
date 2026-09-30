@@ -190,15 +190,15 @@ export function trainingFocusStretch(flight: TrainingFlight, word: TrainingWordR
 // ── the shapes every layer draws ─────────────────────────────────────────────
 
 /** A line in the air: solid, and dashed where terrain hides it (a track that runs into a hill is a reading, not a
- *  rendering accident). */
+ *  rendering accident); `alpha` fades both. */
 export function airLine(
-  id: string, name: string, positions: Cesium.Cartesian3[] | Cesium.Property, css: string, width: number,
+  id: string, name: string, positions: Cesium.Cartesian3[] | Cesium.Property, css: string, width: number, alpha = 1,
 ): EntityOptions {
   return {
     id, name,
     polyline: {
-      positions, width, material: colour(css),
-      depthFailMaterial: new Cesium.PolylineDashMaterialProperty({ color: colour(css, 0.55) }),
+      positions, width, material: colour(css, alpha),
+      depthFailMaterial: new Cesium.PolylineDashMaterialProperty({ color: colour(css, 0.55 * alpha) }),
     },
   };
 }

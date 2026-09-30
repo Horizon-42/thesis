@@ -18,7 +18,7 @@ import { useApp, useTrainingCursor } from "../context/AppContext";
 import useMeasuredWidth from "../hooks/useMeasuredWidth";
 import {
   episodesAt,
-  trainingWindowKey,
+  windowOnScreen,
   windowReading,
   windowOpening,
   windowSpanS,
@@ -38,6 +38,11 @@ const GUTTER = 70;
 const PAD_R = 12;
 const ROW_H = 12;
 const HEAD_H = 14;
+/** A loss of separation: VISUAL filled near-opaque, IFR outlined dashed — both in the failure red, heavy enough to be
+ *  seen at a glance (the user, 2026-09-30: the pale dashed outline was not). */
+const LOSS_FILL_OPACITY = 0.85;
+const LOSS_STROKE_W = 1.5;
+const IFR_DASH = "3 2";
 /** Playback speeds: × real time. */
 const SPEEDS = [1, 10, 30] as const;
 /** The cursor moves at most this often while playing (ms): each move re-renders the bar and the 3D points. */
@@ -162,13 +167,13 @@ function Strip({ view, reading, onScreen }: { view: TrainingWindowView; reading:
           const track = reading.tracks[at];
           const y = HEAD_H + at * ROW_H;
           const landing = reading.landings.find((item) => item.datasetId === one.flight.datasetId);
-          const ended = reading.losses.visual.ended.find((item) => item.datasetId === one.flight.datasetId);
           return (
             // a press on a row — its bar or its callsign — puts it on screen: on PRESS, since a press on the plot captures the
             // pointer and the click after it goes to the capture's target, never the row
             <g key={one.flight.datasetId} className={`training-traffic-row${one === focused ? " active" : ""}`}
               onPointerDown={() => view.focus(one.flight.datasetId)}>
-              <text x={GUTTER - 6} y={y + ROW_H - 3} textAnchor="end">{one.flight.callsign}</text>
+              <text x={GUTTER - 6} y={y + ROW_H - 3} textAnchor="end" className="training-traffic-callsign">
+                {one === focused ? `▶ ${one.flight.callsign}` : one.flight.callsign}</text>
               <rect x={xFor(track.tS[0])} y={y + 3} width={Math.max(xFor(track.tS[track.tS.length - 1]) - xFor(track.tS[0]), 1)}
                 height={ROW_H - 6} rx={2} fill={modelCss} opacity={one === focused ? 1 : 0.7}>
                 <title>{one.flight.callsign}: from {clockText(track.tS[0])} to {clockText(track.tS[track.tS.length - 1])} — click to put it on screen</title>
@@ -176,10 +181,6 @@ function Strip({ view, reading, onScreen }: { view: TrainingWindowView; reading:
               {landing ? (
                 <text x={xFor(landing.atS)} y={y + ROW_H - 2} textAnchor="middle" className="training-traffic-landing">▼
                   <title>landed at {clockText(landing.atS)}</title></text>
-              ) : null}
-              {ended ? (
-                <text x={xFor(ended.atS)} y={y + ROW_H - 2} textAnchor="middle" fill={TRAINING_LOSS_COLOR} className="training-traffic-ended">✕
-                  <title>ended at {clockText(ended.atS)}: lost separation with {callsign(ended.with)} ({ended.kind}, {ended.relation})</title></text>
               ) : null}
             </g>
           );
@@ -206,16 +207,23 @@ function Strip({ view, reading, onScreen }: { view: TrainingWindowView; reading:
           return [
             ...rowsIn.map((row) => (
               <rect key={`${key}-${row}`} x={x0} y={HEAD_H + row * ROW_H + 1} width={w} height={ROW_H - 2}
-                fill={name === "VISUAL" ? TRAINING_LOSS_COLOR : "none"} fillOpacity={0.55} stroke={TRAINING_LOSS_COLOR}
-                strokeDasharray={name === "VISUAL" ? undefined : "2 2"}><title>{title}</title></rect>
+                fill={name === "VISUAL" ? TRAINING_LOSS_COLOR : "none"} fillOpacity={LOSS_FILL_OPACITY} stroke={TRAINING_LOSS_COLOR}
+                strokeWidth={LOSS_STROKE_W} strokeDasharray={name === "VISUAL" ? undefined : IFR_DASH}><title>{title}</title></rect>
             )),
             ...(rowsIn.length === 2 ? [
               <line key={`${key}-join`} x1={x0 + w / 2} x2={x0 + w / 2} y1={HEAD_H + Math.min(...rowsIn) * ROW_H + ROW_H / 2}
-                y2={HEAD_H + Math.max(...rowsIn) * ROW_H + ROW_H / 2} stroke={TRAINING_LOSS_COLOR}
-                strokeDasharray={name === "VISUAL" ? undefined : "2 2"}><title>{title}</title></line>,
+                y2={HEAD_H + Math.max(...rowsIn) * ROW_H + ROW_H / 2} stroke={TRAINING_LOSS_COLOR} strokeWidth={LOSS_STROKE_W}
+                strokeDasharray={name === "VISUAL" ? undefined : IFR_DASH}><title>{title}</title></line>,
             ] : []),
           ];
         })}
+        {/* where the judge ended an aircraft (always a commanded one): over the losses that ended it */}
+        {reading.losses.visual.ended.map((ended) => (
+          <text key={`ended-${ended.datasetId}`} x={xFor(ended.atS)} y={HEAD_H + (rowOf(ended.datasetId) + 1) * ROW_H}
+            textAnchor="middle" fill={TRAINING_LOSS_COLOR} className="training-traffic-ended">✕
+            <title>{callsign(ended.datasetId)} ended at {clockText(ended.atS)}: lost separation with {callsign(ended.with)}
+              {" "}({ended.kind}, {ended.relation})</title></text>
+        ))}
         <line x1={xFor(atS)} x2={xFor(atS)}
           y1={0} y2={height} className="training-sentence-cursor" />
       </svg>
@@ -225,10 +233,10 @@ function Strip({ view, reading, onScreen }: { view: TrainingWindowView; reading:
 
 export default function TrainingTrafficStrip() {
   const { trainingWindow, trainingSelection, trainingSource } = useApp();
-  if (trainingWindow === null || trainingSelection === null
-    || trainingWindowKey(trainingWindow.set, trainingWindow.window) !== trainingSelection.clock.scope) return null;
+  const view = windowOnScreen(trainingWindow, trainingSelection);
+  if (view === null) return null;
   // a strip (and its playback) per window
-  return <Strip key={trainingSelection.clock.scope} view={trainingWindow} reading={windowReading(trainingWindow, trainingSource)}
-    onScreen={trainingSelection.flight.datasetId} />;
+  return <Strip key={trainingSelection!.clock.scope} view={view} reading={windowReading(view, trainingSource)}
+    onScreen={trainingSelection!.flight.datasetId} />;
 }
 

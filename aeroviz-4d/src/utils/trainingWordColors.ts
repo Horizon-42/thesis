@@ -93,10 +93,14 @@ export const TRAINING_REPLAY_COLOR: Record<TrainingReplayKind, string> = {
  *  the speed purple) and ≥ 9.3 under simulated colour blindness, contrast ≥ 3:1; the violet #7c3aed passed too (17.3 /
  *  12.5) but sits in the speed column's hue. */
 export const TRAINING_AUTOPILOT_COLOR = "#2563eb";
-/** The live executor's segment when the selected word flew OUTSIDE its envelope: the whole flown line turns this red —
- *  louder than the per-row `TRAINING_OUTSIDE_COLOR`, because it is the answer to the question the flight was flown for
- *  (the user, 2026-09-25). The validator puts it ΔE 41.6 from the autopilot blue (29.0 under CVD), contrast ≥ 3:1. */
-export const TRAINING_AUTOPILOT_OUTSIDE_COLOR = "#ff2d2d";
+/** A FAILURE: where a flight failed, drawn as the answer to the question it was flown or read for — louder than the
+ *  per-row `TRAINING_OUTSIDE_COLOR`: the live executor's segment whose word flew outside its envelope (the user,
+ *  2026-09-25), a model's flight that did not land (its end on the sentence bar), a loss of separation and where the judge
+ *  ended an aircraft (the user, 2026-09-30: the window strip's pale red was not seen). The validator puts it ΔE 41.6 from
+ *  the autopilot blue (29.0 under CVD); contrast 5.0:1. */
+export const TRAINING_FAILURE_COLOR = "#ff2d2d";
+/** The live executor's segment when the selected word flew OUTSIDE its envelope: the whole flown line turns red. */
+export const TRAINING_AUTOPILOT_OUTSIDE_COLOR = TRAINING_FAILURE_COLOR;
 
 /** THE PRIOR'S OWN SENTENCES (`trainingOverlays.TrainingGenerationOverlay`): each model in one colour — its tab in the
  *  sentence bar, its flown tracks in 3D, its samples in the flight list — by NAME (`TRAINING_MODEL_NAMES`): every round
@@ -110,14 +114,15 @@ export const TRAINING_AUTOPILOT_OUTSIDE_COLOR = "#ff2d2d";
  *  normal vision (nearest: the live executor's outside red; 18.5 from base's fuchsia) and ≥ 11.6 under simulated colour
  *  blindness, but its contrast is only 3.3:1 — enough for a mark (lines, swatches, borders, the flight's end time on the
  *  bar's axis, which the user asked to see in the model's colour), too little for running text: names and counts stay in
- *  the text colour beside a swatch. traffic's olive gold (2026-09-30, the best of a search over hue × saturation ×
- *  lightness at contrast ≥ 4.5:1 against every colour above) is ≥ 17.3 OKLab ΔE from every one of them (nearest: the
- *  replay's amber), contrast 4.9:1. Two models are never drawn together (the bar reads one at a time). */
+ *  the text colour beside a swatch. traffic's azure (the user, 2026-09-30: fresher than the olive gold it replaces; the
+ *  best of a search over the green-to-blue hues at contrast ≥ 4.5:1 against every colour above) is ≥ 11.5 OKLab ΔE from
+ *  every one of them (nearest: the heading band's blue 11.5, the autopilot blue 12.4), contrast 5.8:1. Two models are never
+ *  drawn together (the bar reads one at a time). */
 export const TRAINING_MODEL_COLOR: Record<TrainingModelName, string> = {
   base: "#d946ef",
   landing: "#a3e635",
   augmented: "#b82e7a",
-  traffic: "#9c8116",
+  traffic: "#2b93ee",
 };
 
 /** How opaque a model's samples other than the one read are drawn in 3D (thin), and in the legend. */
@@ -143,6 +148,12 @@ export const TRAINING_OTHER_AIRCRAFT_COLOR = {
   replayed: "#94a3b8",
   background: "#64748b",
 } as const satisfies Record<TrainingOtherRole, string>;
+/** …and how opaque their tracks are in 3D (and in the legend): faded under the commanded aircraft's, which are opaque. */
+export const TRAINING_OTHER_AIRCRAFT_ALPHA = {
+  replayed: 0.6,
+  background: 0.45,
+} as const satisfies Record<TrainingOtherRole, number>;
 
-/** The pair of aircraft under their minimum at the cursor, drawn between them in 3D and on the window strip. */
-export const TRAINING_LOSS_COLOR = TRAINING_OUTSIDE_COLOR;
+/** The pair of aircraft under their minimum at the cursor, drawn between them in 3D and on the window strip, and where
+ *  the judge ended an aircraft for it. */
+export const TRAINING_LOSS_COLOR = TRAINING_FAILURE_COLOR;
