@@ -20,6 +20,14 @@ import type { ComparisonKind } from "../context/AppContext";
 import type { ComparisonStatusLegend } from "./comparisonLegend";
 import { OBSERVED_VERDICT_COLORS } from "./observedVerdictColors";
 
+/**
+ * A prediction that passed the gates on ANOTHER runway than the observed flight's (status `otherRunway`: the
+ * two-tier generation records graded on the runway each sentence landed on, ts runner R38) — a light sky blue,
+ * set apart from the same-runway pass green on the user's word (2026-09-30). MIRROR in `index.css`
+ * (`.flight-table-otherrunway`).
+ */
+export const PREDICTION_OTHER_RUNWAY_COLOR = "rgb(110, 200, 235)";
+
 /** Uniform path width for every trajectory (observed + comparison), in px. */
 export const TRAJECTORY_PATH_WIDTH = 2;
 
@@ -68,8 +76,8 @@ export const COMPARISON_KIND_ALPHA: Record<ComparisonKind, number> = {
  */
 export function comparisonKindSwatch(kind: ComparisonKind): string {
   if (kind !== "predicted" && kind !== "lookback") return COMPARISON_KIND_COLORS[kind];
-  return `linear-gradient(90deg, ${OBSERVED_VERDICT_COLORS.pass} 0 46%, ` +
-    `${OBSERVED_VERDICT_COLORS.fail} 46% 92%, ${OBSERVED_VERDICT_COLORS.undecided} 92% 100%)`;
+  return `linear-gradient(90deg, ${OBSERVED_VERDICT_COLORS.pass} 0 36%, ${PREDICTION_OTHER_RUNWAY_COLOR} 36% 50%, ` +
+    `${OBSERVED_VERDICT_COLORS.fail} 50% 92%, ${OBSERVED_VERDICT_COLORS.undecided} 92% 100%)`;
 }
 
 /**
@@ -92,6 +100,11 @@ export const COMPARISON_STATUS_STYLES: Record<
   predictionPass: {
     label: "Prediction pass",
     color: OBSERVED_VERDICT_COLORS.pass,
+    alpha: COMPARISON_KIND_ALPHA.predicted,
+  },
+  predictionOtherRunway: {
+    label: "Prediction pass on another runway",
+    color: PREDICTION_OTHER_RUNWAY_COLOR,
     alpha: COMPARISON_KIND_ALPHA.predicted,
   },
   predictionFail: {

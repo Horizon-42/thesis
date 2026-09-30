@@ -46,6 +46,7 @@ from typing import Any
 
 import numpy as np
 
+from ts_transformer.experiments.training_attitude import attitude_payload, observed_attitudes
 from ts_transformer.instructions import display
 from ts_transformer.instructions.airport import AirportGeometry, landing_cross_limit_m
 from ts_transformer.instructions.artefact import (
@@ -164,9 +165,14 @@ def heading_payload(item: display.HeadingEnvelope) -> dict[str, Any]:
 
 
 def flight_payload(original: FlightSignals, flight: Admitted, reading: Reading, stratum: str,
-                   envelopes: display.FlightEnvelopes, globe: Globe, words: Words) -> dict[str, Any]:
+                   envelopes: display.FlightEnvelopes, globe: Globe, words: Words,
+                   attitude: dict[str, np.ndarray | None]) -> dict[str, Any]:
+    """``attitude``: the flight's observed attitude over all its rows (`training_attitude.observed_attitudes`); the
+    signals written are the admitted ones — the first rows of the flight's."""
     signals, smoothed, relative = flight.signals, flight.smoothed, flight.relative
     rows = signals.n_rows
+    if not (np.array_equal(signals.e_m, original.e_m[:rows]) and np.array_equal(signals.n_m, original.n_m[:rows])):
+        raise ValueError(f"{signals.dataset_id}: the admitted rows are not the flight's first {rows}")
     lat, lon = globe.latlon(signals.e_m, signals.n_m)
     key = signals.dataset_id.split(":", 1)[1]
     callsign, runway, _icao24, _landing = key.rsplit("_", 3)
@@ -203,6 +209,7 @@ def flight_payload(original: FlightSignals, flight: Admitted, reading: Reading, 
             "smoothed": {"trackDeg": rounded(smoothed.track_deg, 3), "altitudeM": rounded(smoothed.altitude_m, 2),
                          "groundSpeedMps": rounded(smoothed.ground_speed_mps, 3), "distanceM": rounded(smoothed.distance_m, 1)},
             "beforeThresholdM": rounded(relative.before_threshold_m, 1), "rightOfCourseM": rounded(relative.right_of_course_m, 1),
+            "attitude": attitude_payload(attitude, slice(0, rows)),
         },
         "words": {"events": events, "inForce": [[int(v) for v in in_force[:, c]] for c in range(len(COLUMNS))]},
         "envelopes": {
@@ -295,15 +302,18 @@ def vocabulary_block(spec: VocabularySpec, words: Words, labeller_sha256: str) -
 
 
 def flights_block(chosen: list[tuple[str, FlightSignals, Reading]], geometry: AirportGeometry, spec: VocabularySpec,
-                  words: Words, globe: Globe) -> tuple[list[dict[str, Any]], float]:
-    """Each chosen flight (its stratum, signals and re-read sentence) as a set shows it — its words and every word's
-    envelope (`flight_payload`) — and the length the drawn centrelines need to reach every one of them (rounded up to
-    `CENTRELINE_ROUND_M`). A read-back set's flights, and a window set's commanded ones (`window_training_export`)."""
+                  words: Words, globe: Globe, observed: dict[str, dict[str, np.ndarray | None]]
+                  ) -> tuple[list[dict[str, Any]], float]:
+    """Each chosen flight (its stratum, signals and re-read sentence) as a set shows it — its words, every word's
+    envelope and its attitude (``observed``, by dataset id: `training_attitude.observed_attitudes`) (`flight_payload`) —
+    and the length the drawn centrelines need to reach every one of them (rounded up to `CENTRELINE_ROUND_M`). A
+    read-back set's flights, and a window set's commanded ones (`window_training_export`)."""
     payloads, reach = [], 0.0
     for stratum, flight, reading in chosen:
         admitted = admit(flight, geometry, spec)
         envelopes = display.flight_envelopes(admitted, reading, spec, words)
-        payloads.append(flight_payload(flight, admitted, reading, stratum, envelopes, globe, words))
+        payloads.append(flight_payload(flight, admitted, reading, stratum, envelopes, globe, words,
+                                       observed[flight.dataset_id]))
         reach = max(reach, float(admitted.relative.before_threshold_m.max()))
     return payloads, math.ceil(reach / CENTRELINE_ROUND_M) * CENTRELINE_ROUND_M
 
@@ -385,7 +395,8 @@ def export(directory: Path, root: Path, airports: list[str], per_stratum: int, s
         geometry = geometries[code]
         globe = Globe(geometry, runway_hae_minus_msl_m(directory, code, arrival_manifest_path(code)))
         chosen, counts = draw(code, flights, sentences, geometry, spec, words, per_stratum, seed)
-        payloads, centreline_m = flights_block(chosen, geometry, spec, words, globe)
+        payloads, centreline_m = flights_block(chosen, geometry, spec, words, globe,
+                                               observed_attitudes(directory, [flight for _, flight, _ in chosen]))
         cohort = {"split": SPLIT, "perStratum": per_stratum, "seed": seed,
                   "drawnFrom": (f"a permutation seeded {seed} of the {counts['pool']:,} labelled {SPLIT} flights "
                                 f"at {code} in {artefact_name}, read in that order until {per_stratum} "

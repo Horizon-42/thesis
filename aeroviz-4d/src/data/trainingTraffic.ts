@@ -18,9 +18,10 @@
  * THE SINGLE-FLIGHT VIEWS ARE REUSED AS THEY ARE: an aircraft on screen is a set flight (`trainingWindowSelection`, on the
  * window's clock), and a model's sentences for it are a `TrainingGenerationView` (`windowGenerationView`) — the sentence
  * bar, the read-back window and the flight's 3D layers draw it as any model sentence. Only the scene — every aircraft at
- * one time — is drawn here (`sceneTrackAt`, `episodesAt`).
+ * one time — is drawn here (`sceneTrackOf`, `episodesAt`; where each aircraft is: `trainingAttitude.poseAt`).
  */
 
+import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
 import { attempt, Reader, type Parsed } from "./trainingReader";
 import {
   parseGeneratedTrack,
@@ -44,7 +45,6 @@ import {
 } from "./trainingOverlays";
 import {
   readSetHead,
-  rowAtTime,
   trainingFilePath,
   type TrainingFlight,
   type TrainingSelection,
@@ -54,9 +54,9 @@ import {
 import { fetchJson } from "../utils/fetchJson";
 
 /** MIRROR of `training_files.TRAFFIC_SCHEMA`: a window set. */
-export const TRAINING_TRAFFIC_SCHEMA = "aeroviz-training-traffic-v1";
+export const TRAINING_TRAFFIC_SCHEMA = "aeroviz-training-traffic-v2";
 /** MIRROR of `window_training_export.SCHEMA`: a model's sentences in a window set's windows. */
-export const TRAINING_WINDOW_GENERATION_SCHEMA = "aeroviz-training-window-generation-v1";
+export const TRAINING_WINDOW_GENERATION_SCHEMA = "aeroviz-training-window-generation-v2";
 /** The two readings of the separation judge a window carries (`inference/separation.py`): VISUAL — the loop's, whose
  *  losses end aircraft — and IFR, the same paths judged afterwards, beside it. */
 export const TRAINING_SEPARATION_READINGS = ["visual", "ifr"] as const;
@@ -65,6 +65,11 @@ export type TrainingSeparationReading = (typeof TRAINING_SEPARATION_READINGS)[nu
  *  replayed as recorded — an arrival with a sentence, or a background one without. */
 export const TRAINING_OTHER_ROLES = ["replayed", "background"] as const;
 export type TrainingOtherRole = (typeof TRAINING_OTHER_ROLES)[number];
+/** What an aircraft of a window is to the view, which says how it is drawn: the one ON SCREEN (the sentence bar reads it),
+ *  one the model COMMANDS, or one replayed as recorded. The commanded are a SET — every aircraft spoken to at once, as a
+ *  live run of several will be — and the one on screen is one of them: nothing here assumes a single commanded aircraft. */
+export const TRAINING_AIRCRAFT_ROLES = ["onScreen", "commanded", ...TRAINING_OTHER_ROLES] as const;
+export type TrainingAircraftRole = (typeof TRAINING_AIRCRAFT_ROLES)[number];
 /** How a window sentence may end: a free sentence's outcomes, or ended by the judge. */
 export const TRAINING_WINDOW_OUTCOMES = [...TRAINING_FREE_OUTCOMES, TRAINING_LOST_SEPARATION] as const;
 
@@ -77,6 +82,8 @@ export interface TrainingSceneTrack {
   lat: number[];
   altitudeM: number[];
   altitudeHaeM: number[];
+  /** The attitude its aircraft is drawn in at each point (`trainingAttitude.ts`). */
+  attitude: TrainingAttitude;
 }
 
 /** A pair under its minimum on consecutive steps of the window, as the judge recorded it (`traffic_loop.Judging`): their
@@ -224,7 +231,7 @@ function readSceneTrack(reader: Reader): TrainingSceneTrack {
   if (tS.some((value, at) => at > 0 && value <= tS[at - 1])) reader.fail("tS does not run forward");
   const n = tS.length;
   return { tS, lon: reader.numbers("lon", n), lat: reader.numbers("lat", n), altitudeM: reader.numbers("altitudeM", n),
-    altitudeHaeM: reader.numbers("altitudeHaeM", n) };
+    altitudeHaeM: reader.numbers("altitudeHaeM", n), attitude: readAttitude(reader.child("attitude"), n) };
 }
 
 /** A window's losses under one reading, bound to who is in it: every aircraft they name is the window's, an episode runs
@@ -469,6 +476,11 @@ export function trainingWindowKey(set: TrainingSetHead, window: TrainingWindow):
   return `${set.airport}/${set.setId}/window ${window.index}`;
 }
 
+/** The window whose aircraft is on screen, or null: the flight on screen is read on that window's clock. */
+export function windowOnScreen(view: TrainingWindowView | null, selection: TrainingSelection | null): TrainingWindowView | null {
+  return view !== null && selection !== null && trainingWindowKey(view.set, view.window) === selection.clock.scope ? view : null;
+}
+
 /** An aircraft of a window on screen: its set flight, read on the window's clock (its own 0 s at its row 0 there). The
  *  live executor does not fly it: the backend opens read-back sets only. */
 export function trainingWindowSelection(set: TrainingSetHead, window: TrainingWindow, aircraft: TrainingWindowCommanded): TrainingSelection {
@@ -492,18 +504,6 @@ export function windowGenerationView(overlay: TrainingWindowGenerationOverlay, w
 /** A sentence's track on the window's clock (its own clock shifted by its row 0 there). */
 export function sceneTrackOf(sentence: TrainingWindowSentence, aircraft: TrainingWindowCommanded): TrainingSceneTrack {
   return { ...sentence.track, tS: sentence.track.tS.map((value) => value + aircraft.rowZeroS) };
-}
-
-/** Where a track is at scene time ``atS`` — linear between its points — or null outside its span. */
-export function sceneTrackAt(track: TrainingSceneTrack, atS: number): { lon: number; lat: number; heightHaeM: number } | null {
-  const { tS } = track;
-  if (atS < tS[0] || atS > tS[tS.length - 1]) return null;
-  // the point at or before it (`rowAtTime`'s search), and the one after — the last point's own when it is the last
-  const k = Math.min(rowAtTime(tS, atS), tS.length - 2);
-  const span = k < 0 ? 0 : tS[k + 1] - tS[k];
-  const f = span > 0 ? (atS - tS[k]) / span : 0;
-  const at = (values: number[]) => (span > 0 ? values[k] + f * (values[k + 1] - values[k]) : values[Math.max(k, 0)]);
-  return { lon: at(track.lon), lat: at(track.lat), heightHaeM: at(track.altitudeHaeM) };
 }
 
 /** The episodes going on at scene time ``atS``: a pair under its minimum from its first step until the step after its

@@ -56,6 +56,7 @@ from ts_transformer.instructions.labeller.read import Reading, admit, read_fligh
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.training_files import require_stored_sentence, runway_hae_minus_msl_m, stored_sentence
 from ts_transformer.instructions.words import RUNWAY, UNCHANGED, Words
+from ts_transformer.outputs.dynamics.context import rollout_context
 from ts_transformer.prior.augment import TIMEOUT_FACTOR, Augmentation, augment_signals, augment_state
 from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.procedure import RunwayProcedure, below_floor
@@ -82,6 +83,8 @@ class FlightContext:
     observed_track_deg: np.ndarray     # the labeller's smoothed track of the observed flight (the heading chart's)
     observed_distance_m: np.ndarray    # and its smoothed distance flown (the altitude chart's axis)
     hae_minus_msl_m: float             # its runway's HAE − MSL offset (`training_files.runway_hae_minus_msl_m`)
+    aero_params: np.ndarray            # its airframe's aero row as the executor flies it (`rollout_context`, as
+                                       # `flight_inputs` reads it): what the attitude's attack reading reads
 
 
 @dataclass(frozen=True)
@@ -160,7 +163,7 @@ def open_flights(artefact: Path, files: SplitFiles, dataset_ids: Sequence[str], 
             signals=flight, series=rebuilt, reading=reading, geometry=geometry, vertical_paths=paths[flight.airport],
             group=group, approach_ias_mps=replay.flight_approach_ias_mps(rebuilt, group),
             observed_track_deg=observed.smoothed.track_deg, observed_distance_m=observed.smoothed.distance_m,
-            hae_minus_msl_m=offsets[flight.airport][flight.runway])
+            hae_minus_msl_m=offsets[flight.airport][flight.runway], aero_params=rollout_context(rebuilt, 0)["aero_params"])
     return contexts
 
 

@@ -386,10 +386,17 @@ export interface ComparisonGroup {
    * `offTarget` = optimized but the terminal verdict failed;
    * `indeterminate` = solved, but the evaluation cannot support pass or fail.
    * (yellow reference; added 2026-07 — absent in older indexes);
-   * `failed` = no solution (dark-red reference only).
+   * `failed` = no solution (dark-red reference only);
+   * `otherRunway` = a two-tier generation sentence that landed on ANOTHER runway than the observed
+   * flight's and passed the gates there (graded again on it, ts runner R38; added 2026-09-30) — its
+   * own colour, never the same-runway pass green.
    */
-  status: "solved" | "offTarget" | "indeterminate" | "failed";
+  status: "solved" | "offTarget" | "indeterminate" | "failed" | "otherRunway";
   terminalVerdict?: "pass" | "fail" | "indeterminate" | null;
+  /** The runway a flight graded again on its landed runway landed on (with `observedRunwayVerdict`, its
+   * verdict on the observed flight's runway); absent for every other flight. */
+  landedRunway?: string;
+  observedRunwayVerdict?: "pass" | "fail" | "indeterminate" | null;
   finalTimeS: number | null;
   initialState: ComparisonInitialState | null;
   /**
@@ -515,7 +522,15 @@ export function isComparisonGroup(value: unknown): value is ComparisonGroup {
     (candidate.status === "solved" ||
       candidate.status === "offTarget" ||
       candidate.status === "indeterminate" ||
-      candidate.status === "failed") &&
+      candidate.status === "failed" ||
+      candidate.status === "otherRunway") &&
+    // a pass on another runway names that runway; a flight graded there names both runways' verdicts
+    (candidate.status === "otherRunway"
+      ? typeof candidate.landedRunway === "string"
+      : candidate.landedRunway === undefined || typeof candidate.landedRunway === "string") &&
+    (candidate.observedRunwayVerdict === undefined || candidate.observedRunwayVerdict === null ||
+      candidate.observedRunwayVerdict === "pass" || candidate.observedRunwayVerdict === "fail" ||
+      candidate.observedRunwayVerdict === "indeterminate") &&
     Array.isArray(candidate.entities) &&
     candidate.entities.every((entity) => typeof entity === "string")
   );

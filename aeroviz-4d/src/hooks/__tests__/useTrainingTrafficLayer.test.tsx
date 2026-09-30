@@ -13,6 +13,7 @@ vi.mock("../../utils/fetchJson", () => ({
 }));
 
 import { AppProvider, useApp, useTrainingCursor } from "../../context/AppContext";
+import { TRAINING_ON_SCREEN_COLOR, TRAINING_TRACE_COLOR } from "../../utils/trainingWordColors";
 import useTrainingTrackLayer from "../useTrainingTrackLayer";
 import { parseTrainingOverlays } from "../../data/trainingOverlays";
 import { parseTrainingTrafficSet, parseTrainingWindowGenerationOverlay, trainingWindowSelection } from "../../data/trainingTraffic";
@@ -63,6 +64,34 @@ describe("useTrainingTrafficLayer", () => {
     expect([at(VECTORED_ID).show, at(STRAIGHT_ID).show, at(REPLAYED_ID).show, at(BACKGROUND_ID).show]).toEqual([true, false, true, false]);
     act(() => cursor().setTrainingSceneS(210));
     expect([at(STRAIGHT_ID).show, at(BACKGROUND_ID).show]).toEqual([true, true]);
+  });
+
+  it("draws each aircraft by its role: the one on screen told from the commanded, the replayed faded — and swaps them", async () => {
+    const { set, window, entities, at, app } = await setup();
+    const now = Cesium.JulianDate.now();
+    const labelOf = (id: string) => at(id).label!.text!.getValue(now) as string;
+    const widthOf = (id: string) => entities.getById(`training-traffic-track-${id}`)!.polyline!.width!.getValue(now) as number;
+    expect(labelOf(VECTORED_ID).startsWith("▶ ")).toBe(true);
+    // the one on screen in the selection's yellow, whatever the reading's colour — here the record's near-white — and its
+    // attitude on its chip; each aircraft the model, turned to its attitude
+    const yellow = Cesium.Color.fromCssColorString(TRAINING_ON_SCREEN_COLOR);
+    expect(at(VECTORED_ID).model!.silhouetteColor!.getValue(now)).toEqual(yellow);
+    expect(at(VECTORED_ID).label!.backgroundColor!.getValue(now)).toEqual(yellow.withAlpha(0.9));
+    expect(at(VECTORED_ID).label!.showBackground!.getValue(now)).toBe(true);
+    expect(labelOf(VECTORED_ID)).toMatch(/\nhdg 90° · bank 0° · path -3\.0° · α 6° \(reading\)$/);
+    expect(at(STRAIGHT_ID).model!.color!.getValue(now)).toEqual(Cesium.Color.fromCssColorString(TRAINING_TRACE_COLOR));
+    expect(at(STRAIGHT_ID).model!.uri!.getValue(now).toString()).toMatch(/aircraft\.glb$/);
+    expect(at(STRAIGHT_ID).orientation).toBeDefined();
+    expect(labelOf(STRAIGHT_ID).startsWith("▶ ")).toBe(false);
+    expect([STRAIGHT_ID, REPLAYED_ID, BACKGROUND_ID].map((id) => at(id).name))
+      .toEqual([expect.stringMatching(/\(commanded\)$/), expect.stringMatching(/\(replayed\)$/), expect.stringMatching(/\(background\)$/)]);
+    expect([widthOf(STRAIGHT_ID), widthOf(REPLAYED_ID), widthOf(BACKGROUND_ID)]).toEqual([2.5, 1.2, 1]);
+    // the other commanded aircraft on screen: the roles swap, and the first is drawn as commanded
+    act(() => app().setTrainingSelection(trainingWindowSelection(set, window, window.commanded[1])));
+    expect(labelOf(STRAIGHT_ID).startsWith("▶ ")).toBe(true);
+    expect(at(VECTORED_ID).name).toMatch(/\(commanded\)$/);
+    expect(widthOf(VECTORED_ID)).toBe(2.5);
+    expect(entities.getById(`training-traffic-track-${STRAIGHT_ID}`)).toBeUndefined();
   });
 
   it("joins the pair under its minimum while it is, and marks where the judge ended an aircraft — of the sentence read", async () => {

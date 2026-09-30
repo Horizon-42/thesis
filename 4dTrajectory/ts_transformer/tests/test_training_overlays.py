@@ -40,6 +40,7 @@ from ts_transformer.tests.support import (
     fly_legs, instruction_airport, instruction_flight, instruction_spec as spec, landing_on,
 )
 from ts_transformer.tests.test_autopilot import DOWNWIND_BASE_FINAL, _fly_sentence, _params
+from ts_transformer.tests.test_training_attitude import AERO_ROW
 
 TRAINING_OVERLAYS_TS = REPO_ROOT / "aeroviz-4d" / "src" / "data" / "trainingOverlays.ts"
 
@@ -86,9 +87,11 @@ def test_the_flown_track_is_drawn_at_the_height_the_observed_one_is_drawn_at():
     signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
     flown, verdict, _ = _fly_sentence(signals)
     shift = executor_export.chart_shift_deg(flown, 0, instruction_airport(), float(signals.track_deg[0]))
-    track = executor_export.track_payload(flown, 0, verdict, instruction_airport(), spec(), shift, -32.0)
+    track = executor_export.track_payload(flown, 0, verdict, instruction_airport(), spec(), shift, -32.0, AERO_ROW)
     assert len(track["altitudeHaeM"]) == len(track["tS"]) > 1
     assert np.allclose(np.asarray(track["altitudeHaeM"]) - np.asarray(track["altitudeM"]), -32.0, atol=0.011)
+    # and the attitude it is drawn in, point for point
+    assert all(len(values) == len(track["tS"]) for values in track["attitude"].values())
 
 
 def test_the_verdicts_give_back_the_judges_count_on_every_clock():

@@ -1,5 +1,31 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-30 — Training: aircraft models in the executor's attitude (branch `dev-training-attitude`, not merged)
+
+- **What** (the user, 2026-09-30: aircraft as a model, bound to the real bank, heading and angle of attack, the whole Training
+  module; option b — the pitch is the path angle, the attack only in the label, because the project's lift curve has no flaps
+  and reads ~15° on final): the attitude is computed ONCE in Python (`experiments/training_attitude.py`) and written beside every
+  exported track; the viewer interpolates (`trainingAttitude.ts`) and draws `/models/aircraft.glb` at the cursor, the live Fly
+  aircraft and every window aircraft; one orientation for Fly, Optimize and Training (`utils/aircraftOrientation.ts`).
+- **Formats**: sample v8, traffic v2, executor v5, generation v5, augmented v3, window-generation v2, autopilot segment v8 — the
+  published data are the old names, so merging needs the re-export (after the 7.6 formal run) and restarts at the same time.
+- **Training untouched**: `autopilot/`, `outputs/dynamics/`, `geometry/flyability.py`, `traffic_window*.py` read only; the
+  executor, labeller and scene-edge source hashes unchanged. KRDU trial export (CPU, a scratch directory): the set and the
+  replay identical to the published ones apart from the attitude; `check-publication` 0 errors.
+- Docs: doc 36 §4.12, AV42 (and the second AV40 of 2026-09-30 renumbered AV41), ts index.
+
+### 2026-09-30 — Training: who is commanded, failures in one red, traffic in azure (branch `dev-training-roles`)
+
+- **What** (the user, 2026-09-30): in a window's 3D scene each aircraft is drawn by its role — the one on screen (white point
+  ringed in the reading's colour, "▶ callsign" on a chip), the commanded ones (a set, opaque, the reading's colour), replayed
+  and background ones faded; the strip marks the on-screen row with ▶; the legend gains the window's five rows. A failure is
+  one red `#ff2d2d` (`TRAINING_FAILURE_COLOR`): a model's flight that did not land ends on the bar in a heavier red line and
+  time, losses of separation and judge ends are drawn in it, heavier. traffic is azure `#2b93ee` (was olive `#9c8116`).
+- **Found on the way**: an SVG `fill` attribute loses to any stylesheet `fill` rule — the strip's ✕ and the bar's model end
+  time had never shown their colours (AV40).
+- **Next, to be discussed** (doc 36 §4.11 step 7): aircraft models with real heading / bank / path angle, which needs the
+  exports to carry attitude and every published set and overlay re-exported.
+
 ### 2026-09-30 — Training: multi-aircraft windows (branch `dev-training-traffic`, merged)
 
 - **What**: the Training module shows multi-aircraft windows (user 2026-09-30: plan reviewed; 20 windows an airport, the rest as

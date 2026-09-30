@@ -34,6 +34,7 @@
 
 import { fetchJson } from "../utils/fetchJson";
 import { attempt, parseManifest, Reader, type Parsed } from "./trainingReader";
+import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
 
 /** MIRROR of the exporter's `INDEX_SCHEMA`. The index keeps this shape across vocabularies:
  *  every set, current or superseded, is listed in it. */
@@ -44,7 +45,7 @@ export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v1";
  *  and its check, and there are no turn regions, hold funnels, split parts or inserted intercepts;
  *  a file under any other name — `v6` (instruction-v2's turns and holds) and every earlier one
  *  included, whatever vocabulary it carries — is refused. */
-export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v7";
+export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v8";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
 export const TRAINING_READING_RULE = "instruction-v3";
 /** MIRROR of the spec's sha: a new vocabulary is a new sha, and this reader is bound to the one it was written for
@@ -357,6 +358,8 @@ export interface TrainingSignals {
   smoothed: { trackDeg: number[]; altitudeM: number[]; groundSpeedMps: number[]; distanceM: number[] };
   beforeThresholdM: number[];
   rightOfCourseM: number[];
+  /** The attitude the observed aircraft is drawn in at each row (`trainingAttitude.ts`). */
+  attitude: TrainingAttitude;
 }
 
 export interface TrainingFlight {
@@ -871,6 +874,7 @@ function parseSignals(reader: Reader, rows: number, stepS: number): TrainingSign
     },
     beforeThresholdM: reader.numbers("beforeThresholdM", rows),
     rightOfCourseM: reader.numbers("rightOfCourseM", rows),
+    attitude: readAttitude(reader.child("attitude"), rows),
   };
 }
 

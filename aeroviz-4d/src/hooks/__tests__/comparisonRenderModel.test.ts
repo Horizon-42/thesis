@@ -7,7 +7,9 @@ import {
   isComparisonEntity,
   kindOfEntityId,
 } from "../useComparisonTrajectoryLayer";
-import { COMPARISON_KIND_COLORS, COMPARISON_KIND_ALPHA } from "../../utils/trajectoryRenderModel";
+import {
+  COMPARISON_KIND_COLORS, COMPARISON_KIND_ALPHA, PREDICTION_OTHER_RUNWAY_COLOR,
+} from "../../utils/trajectoryRenderModel";
 import { OBSERVED_VERDICT_COLORS } from "../../utils/observedVerdictColors";
 
 /**
@@ -61,6 +63,15 @@ describe("applyComparisonRenderModel path colouring", () => {
     const actual = renderedColor(e);
     expect([actual.red, actual.green, actual.blue])
       .toEqual([expected.red, expected.green, expected.blue]);
+  });
+
+  it("draws a prediction that passed on another runway in its own colour, not the pass green", () => {
+    for (const id of ["pred-AAL542_05L", "look-AAL542_05L"]) {
+      const e = entity(id, "otherRunway");
+      applyComparisonRenderModel(e, new Set());
+      expectVerdictColor(e, PREDICTION_OTHER_RUNWAY_COLOR);
+      expect(rgbOf(renderedColor(e))).not.toEqual(rgbOf(Cesium.Color.fromCssColorString(OBSERVED_VERDICT_COLORS.pass)));
+    }
   });
 
   it("draws a passing prediction green like a passing baseline", () => {

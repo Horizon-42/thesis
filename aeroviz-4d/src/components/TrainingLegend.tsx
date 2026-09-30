@@ -18,6 +18,10 @@ import {
   TRAINING_ENVELOPE_ALPHA,
   TRAINING_EXECUTOR_COLOR,
   TRAINING_HEADING_BAND_COLOR,
+  TRAINING_LOSS_COLOR,
+  TRAINING_OTHER_AIRCRAFT_ALPHA,
+  TRAINING_OTHER_AIRCRAFT_COLOR,
+  TRAINING_ON_SCREEN_COLOR,
   TRAINING_OTHER_SAMPLE_ALPHA,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_TRACE_COLOR,
@@ -27,7 +31,7 @@ import {
 import { SwatchIcon, type Swatch } from "./training/chartKit";
 import NotesToggle, { NotesList } from "./training/NotesToggle";
 
-export default function TrainingLegend({ layers, vocabulary, executorTrack, autopilotColour, model }: {
+export default function TrainingLegend({ layers, vocabulary, executorTrack, autopilotColour, model, traffic }: {
   layers: TrainingLayers;
   vocabulary: TrainingVocabulary;
   /** The executor's flown track is drawn (its overlay is on and the flight was flown). */
@@ -37,6 +41,9 @@ export default function TrainingLegend({ layers, vocabulary, executorTrack, auto
   /** The model whose own sentence is read (its name, colour, how many samples it said and whether from an augmented
    *  start), or null for the truth. */
   model: { label: string; colour: string; samples: number; moved: boolean } | null;
+  /** The multi-aircraft window the aircraft on screen is in — how many aircraft it commands, drawn in `colour`, the
+   *  reading's (`trainingWindowReadingColour`) — or null for a flight of its own. */
+  traffic: { colour: string; commanded: number } | null;
 }) {
   const [open, setOpen] = useState<boolean>(false);
   const rows: Array<{ key: string; swatch: Swatch; text: string; title: string; shown: boolean }> = [
@@ -70,6 +77,29 @@ export default function TrainingLegend({ layers, vocabulary, executorTrack, auto
     { key: "executor", swatch: { kind: "line", colour: TRAINING_EXECUTOR_COLOR }, shown: executorTrack, text: "executor replay",
       title: "teal: the executor's flown track (dashed on the ground), the truth sentence flown from row 0; red on its " +
         "ground trace: its rows outside the heading word it was told" },
+    ...(traffic === null ? [] : [
+      { key: "on-screen", swatch: { kind: "point", colour: "#ffffff", ring: TRAINING_ON_SCREEN_COLOR } satisfies Swatch, shown: true,
+        text: "▶ the aircraft on screen", title: "the aircraft the sentence bar reads: its tracks as above, where it is at the " +
+          "cursor the aircraft model, white, ringed in the selection's yellow, its callsign and attitude on a yellow chip" },
+      { key: "commanded", swatch: { kind: "line", colour: traffic.colour } satisfies Swatch, shown: traffic.commanded > 1,
+        text: "commanded aircraft",
+        title: "the window's other aircraft the sentence read commands — the model's samples, or the record: its track, " +
+          "aircraft model and callsign in the reading's colour" },
+      { key: "replayed", swatch: { kind: "line", colour: TRAINING_OTHER_AIRCRAFT_COLOR.replayed,
+        opacity: TRAINING_OTHER_AIRCRAFT_ALPHA.replayed } satisfies Swatch, shown: true, text: "replayed arrivals",
+        title: "arrivals with a sentence the model does not command, replayed as recorded" },
+      { key: "background", swatch: { kind: "line", colour: TRAINING_OTHER_AIRCRAFT_COLOR.background,
+        opacity: TRAINING_OTHER_AIRCRAFT_ALPHA.background } satisfies Swatch, shown: true, text: "background arrivals",
+        title: "arrivals without a sentence, replayed as recorded" },
+      { key: "loss", swatch: { kind: "line", colour: TRAINING_LOSS_COLOR } satisfies Swatch, shown: true, text: "loss of separation",
+        title: "a pair under its minimum at the cursor, joined — VISUAL solid, IFR dashed where only IFR has it — with the " +
+          "closest it came against its minimum; ✕ where the judge ended an aircraft" },
+    ]),
+    { key: "aircraft", swatch: { kind: "point", colour: model?.colour ?? TRAINING_TRACE_COLOR, ring: "#000000" } satisfies Swatch,
+      shown: traffic === null, text: "the aircraft at the cursor",
+      title: "the aircraft model where the sentence read has it at the cursor, turned to its exported attitude: heading, the " +
+        "path angle as its pitch and its bank (wings level for a flight the dynamics has no airframe for); the angle of " +
+        "attack is a reading through a clean-wing lift curve — high on a flapped final — written under it, never drawn" },
     ...(autopilotColour === null ? [] : [{ key: "autopilot", swatch: { kind: "line", colour: autopilotColour } as Swatch,
       shown: true, text: "autopilot segment",
       title: "the picked word's segment, flown live by the executor (dashed on the ground): blue inside the word's " +

@@ -12,7 +12,7 @@
 import { TRAINING_COLUMNS, TRAINING_SPEC_SHA256 } from "../trainingSample";
 import { TRAINING_OVERLAYS_SCHEMA } from "../trainingOverlays";
 import { TRAINING_TRAFFIC_SCHEMA, TRAINING_WINDOW_GENERATION_SCHEMA } from "../trainingTraffic";
-import { MOCK_DATUM_M, STRAIGHT_KEY, VECTORED_KEY, WORD, mockSample } from "./trainingSample.fixture";
+import { MOCK_DATUM_M, STRAIGHT_KEY, VECTORED_KEY, WORD, mockAttitude, mockSample } from "./trainingSample.fixture";
 
 export const TRAFFIC_SET_ID = "traffic_windows_select";
 export const WINDOW_MODEL_ID = "windows_base";
@@ -24,7 +24,8 @@ export const BACKGROUND_ID = "KXXX:BKG2_09_fff002_20260101T000600Z";
 export const WINDOW_FIRST_ROW = 4;
 export const ROW_ZERO_S: Record<string, number> = { [VECTORED_ID]: 100, [STRAIGHT_ID]: 110 };
 
-type SetFlight = { flightKey: string; signals: { tS: number[]; lon: number[]; lat: number[]; altitudeHaeM: number[]; raw: { altitudeM: number[] } } };
+type SetFlight = { flightKey: string; signals: { tS: number[]; lon: number[]; lat: number[]; altitudeHaeM: number[]; raw: { altitudeM: number[] };
+  attitude: ReturnType<typeof mockAttitude> } };
 
 function setFlight(key: string): SetFlight {
   return (mockSample() as unknown as { flights: SetFlight[] }).flights.find((flight) => flight.flightKey === key)!;
@@ -34,14 +35,14 @@ function setFlight(key: string): SetFlight {
 function recordedTrack(key: string, rowZeroS: number) {
   const { signals } = setFlight(key);
   return { tS: signals.tS.map((at) => at + rowZeroS), lon: [...signals.lon], lat: [...signals.lat],
-    altitudeM: [...signals.raw.altitudeM], altitudeHaeM: [...signals.altitudeHaeM] };
+    altitudeM: [...signals.raw.altitudeM], altitudeHaeM: [...signals.altitudeHaeM], attitude: structuredClone(signals.attitude) };
 }
 
 /** Another aircraft of the window, a straight line on the window's clock. */
 function otherTrack(fromS: number, toS: number, lat: number) {
   const tS = Array.from({ length: (toS - fromS) / 2 + 1 }, (_, k) => fromS + 2 * k);
   return { tS, lon: tS.map((at) => -78.9 + at * 1e-4), lat: tS.map(() => lat), altitudeM: tS.map(() => 1500),
-    altitudeHaeM: tS.map(() => 1500 + MOCK_DATUM_M) };
+    altitudeHaeM: tS.map(() => 1500 + MOCK_DATUM_M), attitude: mockAttitude(tS.length) };
 }
 
 /** A sample's flown track, own clock: from the flight's observed row at the first predicted row, a step apart, to ``toS``. */
@@ -52,7 +53,8 @@ function flownTrack(key: string, toS: number) {
   const since = (at: number) => at - row * 2;
   return { tS, lon: tS.map((at) => signals.lon[row] + since(at) * 1e-4), lat: tS.map(() => signals.lat[row]),
     altitudeM: tS.map((at) => signals.raw.altitudeM[row] - since(at) * 5),
-    altitudeHaeM: tS.map((at) => signals.raw.altitudeM[row] - since(at) * 5 + MOCK_DATUM_M), groundSpeedMps: tS.map(() => 70) };
+    altitudeHaeM: tS.map((at) => signals.raw.altitudeM[row] - since(at) * 5 + MOCK_DATUM_M), groundSpeedMps: tS.map(() => 70),
+    attitude: mockAttitude(tS.length) };
 }
 
 const opening = [

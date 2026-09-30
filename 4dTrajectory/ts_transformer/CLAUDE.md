@@ -425,6 +425,10 @@ sentence must reproduce its readout row) and writes them as evaluation records p
 against the observed flight, the evaluation's pass rate over every sentence, best of the samples; an augmented start has no
 truth, so its readout carries the pass rate only; the root publisher's `--generation-records` files each kind × airport as
 one Experiments category (R35).
+`prior_generation_grading` grades such a run on the runway each sentence last pointed at and CROSSED (a graded copy of
+each such other-runway record against that runway's own threshold point; the evaluation grades `source.runway`, the observed flight's) and splits
+FDE into time and place over the landed sentences — FDE is the distance at the observed landing TIME, so a late arrival
+scores its lateness × speed; the arrival endpoint error is where it landed (R38).
 `window_training_export` writes R34's windows for the frontend's Training
 module — a model-free window set (`traffic-windows`: 20 select windows an airport of the readouts' draw, by size) and a
 `window-generation` overlay per prior on its OWN draws (no readout re-run; `--readout` only copies summaries); the landings
@@ -433,6 +437,11 @@ are the aircraft whose own end is a landing; the M4 model is named `traffic` (R3
 against its own samples, each sample scored whole as the speaker read it (`experiments/traffic_window_tuner.py`, the one layout
 `window_inputs` / `window_edges`, encoded in blocks of steps so every window fits the GPU; one commanded aircraft a window trains
 as R32 does; checks the formal size before it speaks) (R37).
+**Every Training export writes the attitude each track is drawn in** (`experiments/training_attitude.py`, 2026-09-30): heading,
+path angle, right bank and an attack READING — executor tracks from its states and the command of the cycle starting at each row
+(the track's end: the cycle ending there), observed tracks from `rebuild_series` + the teacher's `actual_controls`, none for a flight
+without an airframe; read-only on `autopilot/`, `outputs/dynamics/`, `traffic_window*.py` (sample v8, traffic v2, executor v5,
+generation v5, augmented v3, window-generation v2; frontend AV42).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 

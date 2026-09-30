@@ -24,6 +24,7 @@ from ts_transformer.prior.augment import Augmentation, augment_signals, augment_
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.tests.test_instruction_training_export import HAE_MINUS_MSL_M, _offsets
 from ts_transformer.tests.test_prior_free_generation import _speak
+from ts_transformer.tests.test_training_attitude import AERO_ROW
 
 
 def _sample(seed: int):
@@ -41,7 +42,7 @@ def _sample(seed: int):
 def test_a_sample_is_the_words_said_on_the_flights_own_steps_and_the_track_on_its_own_clock(seed):
     flown, grid, geometry, words, row, inputs = _sample(seed)
     step_s, start_s = words.spec.step_s, N_LOOK * words.spec.step_s
-    payload = export.sample_payload(flown, 0, row, grid, geometry, words, HAE_MINUS_MSL_M)
+    payload = export.sample_payload(flown, 0, row, grid, geometry, words, HAE_MINUS_MSL_M, inputs.aero_params[0].numpy())
     assert payload["outcome"] == row["outcome"] and payload["sample"] == 0
     # the words said up to the flight's end, each on the flight's own step: the first predicted step says every column
     said = grid[: row["steps_said"]]
@@ -53,7 +54,14 @@ def test_a_sample_is_the_words_said_on_the_flights_own_steps_and_the_track_on_it
     # the track: from the observed state at row N_LOOK, every step, on the flight's clock, to the outcome's row
     track = payload["track"]
     n = len(track["tS"])
-    assert all(len(values) == n for values in track.values())
+    assert all(len(values) == n for name, values in track.items() if name != "attitude")
+    # the attitude it is drawn in, at each point: the executor's own bank there (the cycle starting at the point; at the
+    # track's end, the cycle ending there)
+    assert all(len(values) == n for values in track["attitude"].values())
+    rows = np.round((np.asarray(track["tS"]) - start_s) / flown.cycle_s).astype(int)
+    commands = flown.commands[0].numpy()
+    assert track["attitude"]["bankRightDeg"] == pytest.approx(
+        -np.degrees(commands[np.minimum(rows, rows[-1] - 1), 1]), abs=0.006)
     assert track["tS"][0] == start_s and np.all(np.diff(track["tS"]) > 0)
     assert np.allclose(np.diff(track["tS"])[:-1], step_s)
     outcome = outcome_of(flown, 0, geometry, row["last_runway"], words.spec)
@@ -72,8 +80,8 @@ def test_a_dynamics_failure_s_track_stops_before_the_failed_state():
     flown, _, geometry, words, _, _ = _sample(3)
     start_s = N_LOOK * words.spec.step_s
     step_s = words.spec.step_s
-    landed = export.track_payload(flown, 0, 5, "landed", geometry, step_s, start_s, HAE_MINUS_MSL_M)
-    failed = export.track_payload(flown, 0, 5, "dynamics_failure", geometry, step_s, start_s, HAE_MINUS_MSL_M)
+    landed = export.track_payload(flown, 0, 5, "landed", geometry, step_s, start_s, HAE_MINUS_MSL_M, AERO_ROW)
+    failed = export.track_payload(flown, 0, 5, "dynamics_failure", geometry, step_s, start_s, HAE_MINUS_MSL_M, AERO_ROW)
     assert landed["tS"] == [start_s, start_s + 2.0, start_s + 4.0, start_s + 5.0]
     assert failed["tS"] == [start_s, start_s + 2.0, start_s + 4.0]
 
@@ -83,7 +91,7 @@ def test_a_sentence_whose_first_predicted_step_leaves_a_column_unsaid_is_refused
     broken = grid.copy()
     broken[0, 2] = UNCHANGED
     with pytest.raises(ValueError, match="does not say every column"):
-        export.sample_payload(flown, 0, row, broken, geometry, words, HAE_MINUS_MSL_M)
+        export.sample_payload(flown, 0, row, broken, geometry, words, HAE_MINUS_MSL_M, AERO_ROW)
 
 
 # ---- the formal val readout, bound to this prior, executor spec, artefact and draw
@@ -178,7 +186,7 @@ def test_a_sentence_the_glidepath_edge_stopped_ends_at_its_stop_with_no_crossing
     rows, grids, stops = said_rows(batch, flown, np.asarray([grid]), forbidden, words, [0], masks)
     step = int(stops.step[0])
     assert step >= 0 and rows[0]["outcome"] == BELOW_GLIDEPATH
-    payload = export.sample_payload(flown, 0, rows[0], grids[0], geometry, words, HAE_MINUS_MSL_M, step)
+    payload = export.sample_payload(flown, 0, rows[0], grids[0], geometry, words, HAE_MINUS_MSL_M, AERO_ROW, step)
     start_s = N_LOOK * one.step_s
     assert payload["outcome"] == BELOW_GLIDEPATH and payload["crossing"] is None
     assert payload["endS"] == pytest.approx(start_s + (step + 1) * one.step_s)
@@ -186,7 +194,7 @@ def test_a_sentence_the_glidepath_edge_stopped_ends_at_its_stop_with_no_crossing
     assert payload["rows"] == N_LOOK + step + 1 and max(e["row"] for e in payload["events"]) <= N_LOOK + step
     assert "altitude" in payload["forbiddenMass"]                      # the procedure's altitudes mask the altitude words
     with pytest.raises(ValueError, match="outcome below_glidepath with the glidepath stop at step -1"):
-        export.sample_payload(flown, 0, rows[0], grids[0], geometry, words, HAE_MINUS_MSL_M)
+        export.sample_payload(flown, 0, rows[0], grids[0], geometry, words, HAE_MINUS_MSL_M, AERO_ROW)
 
 
 def test_a_readout_of_another_schema_is_refused_by_name_before_it_is_read():

@@ -1,12 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import type { FlightComparisonDatum } from "../../hooks/useFlightComparisonData";
 
-type Datum = {
-  initialVMps: number | null;
-  massKg: number | null;
-  resultTimeS: number | null;
-  status: "solved" | "offTarget" | "indeterminate" | "failed";
-};
+type Datum = Omit<FlightComparisonDatum, "landedRunway"> & Partial<Pick<FlightComparisonDatum, "landedRunway">>;
 
 const { appState, comparisonData } = vi.hoisted(() => ({
   appState: { viewer: null, selectedFlightId: null as string | null, setSelectedFlightId: vi.fn() },
@@ -168,5 +164,23 @@ describe("FlightTable", () => {
     expect(screen.getByText("UPS1276").getAttribute("title")).toContain("prediction passed");
     expect(screen.getByText("FDX1738").className).toContain("flight-table-failed");
     expect(screen.getByText("FDX1738").getAttribute("title")).toContain("prediction failed");
+  });
+
+  it("marks a prediction that passed on another runway in its own colour, naming the runway", () => {
+    comparisonData.comparisonActive = true;
+    comparisonData.resultKind = "prediction";
+    comparisonData.byFlightKey = new Map<string, Datum>([
+      [UPS, { initialVMps: 141.85, massKg: 66300, resultTimeS: 576, status: "otherRunway", landedRunway: "23L" }],
+      [FDX, { initialVMps: 148.7, massKg: 77800, resultTimeS: 309, status: "solved" }],
+    ]);
+
+    render(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
+    fireEvent.click(screen.getByRole("button", { name: /Flights/ }));
+
+    const other = screen.getByText("UPS1276");
+    expect(other.className).toContain("flight-table-otherrunway");
+    expect(other.className).not.toContain("flight-table-pass");
+    expect(other.getAttribute("title")).toContain("passed on runway 23L");
+    expect(screen.getByText("FDX1738").className).toContain("flight-table-pass");
   });
 });

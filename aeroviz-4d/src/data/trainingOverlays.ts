@@ -30,6 +30,7 @@
  * SI units only: metres, m/s, degrees, seconds.
  */
 
+import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
 import { fetchJson } from "../utils/fetchJson";
 import { asNumber, attempt, parseManifest, Reader, recordOf, Refusal, type Parsed } from "./trainingReader";
 import {
@@ -66,7 +67,7 @@ export type TrainingOverlayKind = (typeof TRAINING_OVERLAY_KINDS)[number];
 /** MIRROR of `executor_training_export.SCHEMA`: v2 (instruction-v3) gives each heading word judged its band and a
  *  verdict per row, and each flight judged its flown track as the judge read it; v1 (turns and holds) is refused. v4
  *  (2026-09-28): `base` is what the overlay shares with its set (`TrainingOverlayBase`), as in every overlay schema. */
-export const TRAINING_EXECUTOR_SCHEMA = "aeroviz-training-executor-v4";
+export const TRAINING_EXECUTOR_SCHEMA = "aeroviz-training-executor-v5";
 /** MIRROR of `executor_training_export.STATUSES`: one per word. */
 export const TRAINING_EXECUTOR_STATUSES = [
   "inside", "outside", "not judged", "not reached", "superseded", "no check",
@@ -104,11 +105,11 @@ export const TRAINING_PRIOR_RULES = ["B0_majority", "B1_active_config", "B3_same
 export const TRAINING_PRIOR_SCHEMA = "aeroviz-training-prior-v4";
 /** MIRROR of `prior_generation_training_export.SCHEMA`: the prior's own sentences, flown; v2 names the model (its name,
  *  round, run and start model) where v1 carried a free label; v4 (2026-09-28): `base` as the executor's v4. */
-export const TRAINING_GENERATION_SCHEMA = "aeroviz-training-generation-v4";
+export const TRAINING_GENERATION_SCHEMA = "aeroviz-training-generation-v5";
 /** MIRROR of `prior_generation_training_export.AUGMENTED_SCHEMA`: the same sentences flown from AUGMENTED starts (kind
  *  `prior-generation-augmented`, the Training module §2.8) — each flight with its move and moved observed rows, no readout;
  *  v2 (2026-09-28): `base` as the executor's v4. */
-export const TRAINING_AUGMENTED_GENERATION_SCHEMA = "aeroviz-training-augmented-generation-v2";
+export const TRAINING_AUGMENTED_GENERATION_SCHEMA = "aeroviz-training-augmented-generation-v3";
 /** MIRROR of `training_files.DATUM_TOLERANCE_M`: how far apart two readings of one flight's HAE − MSL may be, each read
  *  off a pair of heights written to 0.01 m. */
 export const TRAINING_DATUM_TOLERANCE_M = 0.02;
@@ -197,6 +198,8 @@ export interface TrainingExecutorTrack {
   groundSpeedMps: number[];
   /** Unwrapped, on the observed smoothed track's branch at row 0. */
   trackDeg: number[];
+  /** The attitude its aircraft is drawn in at each point (`trainingAttitude.ts`). */
+  attitude: TrainingAttitude;
   /** The horizontal distance the executor flew. */
   distanceM: number[];
 }
@@ -363,6 +366,8 @@ export interface TrainingGeneratedTrack {
   altitudeM: number[];
   altitudeHaeM: number[];
   groundSpeedMps: number[];
+  /** The attitude its aircraft is drawn in at each point (`trainingAttitude.ts`). */
+  attitude: TrainingAttitude;
 }
 
 /** ONE sentence the prior said over a flight (one sample), flown by the executor: its words from the first predicted row
@@ -907,7 +912,7 @@ function parseTrack(reader: Reader): TrainingExecutorTrack {
     tS, eM: reader.numbers("eM", n), nM: reader.numbers("nM", n), lon: reader.numbers("lon", n), lat: reader.numbers("lat", n),
     altitudeM: reader.numbers("altitudeM", n), altitudeHaeM: reader.numbers("altitudeHaeM", n),
     groundSpeedMps: reader.numbers("groundSpeedMps", n), trackDeg: reader.numbers("trackDeg", n),
-    distanceM: reader.numbers("distanceM", n),
+    distanceM: reader.numbers("distanceM", n), attitude: readAttitude(reader.child("attitude"), n),
   };
 }
 
@@ -1227,6 +1232,7 @@ export function parseGeneratedTrack(reader: Reader, firstS: number, stepS: numbe
   return {
     tS, lon: reader.numbers("lon", n), lat: reader.numbers("lat", n), altitudeM: reader.numbers("altitudeM", n),
     altitudeHaeM: reader.numbers("altitudeHaeM", n), groundSpeedMps: reader.numbers("groundSpeedMps", n),
+    attitude: readAttitude(reader.child("attitude"), n),
   };
 }
 

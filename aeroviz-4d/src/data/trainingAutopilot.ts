@@ -34,6 +34,7 @@
  * SI units only: metres, m/s, degrees, seconds.
  */
 
+import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
 import { asNumber, attempt, Reader, type Parsed } from "./trainingReader";
 import {
   readCrossing,
@@ -69,7 +70,7 @@ import {
 
 /** MIRROR of `aeroviz_backend/autopilot_segment/payload.py` `SCHEMA`: the backend's answer; anything else is refused by
  *  name (the backend's `MirrorTest` pins these four). */
-export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v7";
+export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v8";
 /** MIRROR of `autopilot_segment/verdict.py` `STATUSES`: the selected word's verdict. */
 export const TRAINING_AUTOPILOT_STATUSES = ["inside", "outside", "not judged", "no check"] as const;
 export type TrainingAutopilotStatus = (typeof TRAINING_AUTOPILOT_STATUSES)[number];
@@ -140,6 +141,8 @@ export interface TrainingAutopilotTrack {
   /** Positive: banked right (turning right). */
   bankRightDeg: number[];
   loadFactor: number[];
+  /** The attitude its aircraft is drawn in at each STATE (`trainingAttitude.ts`). */
+  attitude: TrainingAttitude;
 }
 
 export interface TrainingAutopilotSegment {
@@ -404,7 +407,7 @@ function parseTrack(reader: Reader, row: number, stepS: number): TrainingAutopil
     groundSpeedMps: reader.numbers("groundSpeedMps", n), verticalRateMps: reader.numbers("verticalRateMps", n),
     trackDeg: reader.numbers("trackDeg", n), distanceM: reader.numbers("distanceM", n),
     thrustFraction: reader.numbers("thrustFraction", n - 1), bankRightDeg: reader.numbers("bankRightDeg", n - 1),
-    loadFactor: reader.numbers("loadFactor", n - 1),
+    loadFactor: reader.numbers("loadFactor", n - 1), attitude: readAttitude(reader.child("attitude"), n),
   };
 }
 

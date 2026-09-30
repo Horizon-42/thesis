@@ -42,16 +42,18 @@ from ts_transformer.io_utils import utc_now
 #: next heading word's, `display.HeadingBand`) with each row's verdict — no turn region, turn end, hold funnel, split
 #: part or inserted intercept any more; the capture turn is its rows and the labeller's check; the vocabulary carries
 #: the lead. (v6 was `instruction-v2`'s: turns bounded by rate, judged holds; a flight's ``typecode`` its own ICAO
-#: type or null, as in v7.) The index keeps its v1 shape: sets of every vocabulary sit in it.
+#: type or null, as in v7.) v8 (2026-09-30): the signals carry the attitude the aircraft is drawn in at each row
+#: (`experiments/training_attitude.py`). The index keeps its v1 shape: sets of every vocabulary sit in it.
 INDEX_SCHEMA = "aeroviz-training-index-v1"
-SAMPLE_SCHEMA = "aeroviz-training-sample-v7"
+SAMPLE_SCHEMA = "aeroviz-training-sample-v8"
 KIND_READBACK = "vocabulary-readback"
 INDEX_FILE = "index.json"
 SAMPLE_FILE = "sample.json"
 #: MIRROR of `aeroviz-4d/src/data/trainingTraffic.ts` (`TRAINING_TRAFFIC_SCHEMA`, `TRAINING_TRAFFIC_SET_KIND`): a window
 #: set (the Training module §2.9) — multi-aircraft windows, the flights the prior commands in them as a read-back set's
-#: flights, every other aircraft of a window as the judge replays it, and the windows as recorded.
-TRAFFIC_SCHEMA = "aeroviz-training-traffic-v1"
+#: flights, every other aircraft of a window as the judge replays it, and the windows as recorded. v2 (2026-09-30): every
+#: flight's signals and every recorded track carry the attitude the aircraft is drawn in (`training_attitude`).
+TRAFFIC_SCHEMA = "aeroviz-training-traffic-v2"
 KIND_TRAFFIC = "traffic-windows"
 TRAFFIC_FILE = "traffic.json"
 

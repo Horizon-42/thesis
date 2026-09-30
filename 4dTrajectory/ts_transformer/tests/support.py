@@ -139,3 +139,14 @@ def instruction_flight(e, n, altitude, track, speed, dataset_id="KXXX:test", spl
     landing = landing_on(split)
     return FlightSignals(dataset_id, "KXXX", "09", "A320", landing.replace("T12:", "T11:"), landing, t, e, n,
                          altitude, track, speed, np.gradient(altitude, INSTRUCTION_STEP_S))
+
+
+def signal_attitudes(_directory, signals):
+    """`training_attitude.observed_attitudes` for synthetic flights, which have no arrival manifest to rebuild a series
+    from: each one's heading and path angle read off its signals, its bank and attack those of a flight with no airframe
+    (null) — the shape the exporters write, not the inversion (tested on its own in `test_training_attitude`)."""
+    import numpy as np
+
+    return {flight.dataset_id: {"headingDeg": np.mod(flight.track_deg, 360.0),
+                                "pathAngleDeg": np.degrees(np.arctan2(flight.vertical_rate_mps, flight.ground_speed_mps)),
+                                "bankRightDeg": None, "attackDeg": None} for flight in signals}

@@ -45,7 +45,8 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp, useTrainingCursor, type TrainingLayers } from "../context/AppContext";
 import useTrainingTrafficLayer from "./useTrainingTrafficLayer";
-import { trainingWindowKey } from "../data/trainingTraffic";
+import useTrainingAircraftLayer from "./useTrainingAircraftLayer";
+import { windowOnScreen } from "../data/trainingTraffic";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { frameTrajectoryCamera } from "../utils/frameTrajectoryCamera";
 import {
@@ -356,8 +357,8 @@ export default function useTrainingTrackLayer(): void {
     const { selection: shown, window } = framing.current;
     if (!isCesiumViewerUsable(viewer) || shown === null) return;
     // a window: its commanded aircraft (one replayed from long before the window would zoom far out)
-    const tracks = window !== null && trainingWindowKey(window.set, window.window) === shown.clock.scope
-      ? window.window.commanded.map((one) => one.recorded) : [shown.flight.signals];
+    const onScreen = windowOnScreen(window, shown);
+    const tracks = onScreen !== null ? onScreen.window.commanded.map((one) => one.recorded) : [shown.flight.signals];
     frameTrajectoryCamera(viewer, tracks.flatMap(({ lon, lat, altitudeHaeM }) =>
       lon.map((value, row) => ({ lon: value, lat: lat[row], altM: altitudeHaeM[row] }))), { margin: FRAME_MARGIN });
   }, [viewer, frameScope]);
@@ -379,5 +380,6 @@ export default function useTrainingTrackLayer(): void {
 
   useTrainingExecutorLayers();
   useTrainingGenerationLayers();
+  useTrainingAircraftLayer();
   useTrainingTrafficLayer();
 }

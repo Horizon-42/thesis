@@ -12,6 +12,7 @@ import type { ComparisonKind } from "../context/AppContext";
 export type ComparisonStatusLegend =
   | "offTargetResult"
   | "predictionPass"
+  | "predictionOtherRunway"
   | "predictionFail"
   | "predictionIndeterminate";
 
@@ -58,6 +59,7 @@ export function buildComparisonLegend(
   const availableKinds = new Set<ComparisonKind>();
   let hasOffTargetResult = false;
   let hasPredictionPass = false;
+  let hasPredictionOtherRunway = false;
   let hasPredictionFail = false;
   let hasPredictionIndeterminate = false;
 
@@ -75,6 +77,7 @@ export function buildComparisonLegend(
     }
     if (groupKinds.has("predicted")) {
       if (group.status === "solved") hasPredictionPass = true;
+      if (group.status === "otherRunway") hasPredictionOtherRunway = true;
       if (group.status === "offTarget") hasPredictionFail = true;
       if (group.status === "indeterminate") hasPredictionIndeterminate = true;
     }
@@ -83,6 +86,7 @@ export function buildComparisonLegend(
   const statuses: ComparisonStatusLegend[] = [];
   if (hasOffTargetResult) statuses.push("offTargetResult");
   if (hasPredictionPass) statuses.push("predictionPass");
+  if (hasPredictionOtherRunway) statuses.push("predictionOtherRunway");
   if (hasPredictionFail) statuses.push("predictionFail");
   if (hasPredictionIndeterminate) statuses.push("predictionIndeterminate");
 

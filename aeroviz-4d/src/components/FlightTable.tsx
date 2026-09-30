@@ -137,7 +137,7 @@ export default function FlightTable({ flightIds, flightSummaries }: FlightTableP
 }
 
 interface ComparisonOutcome {
-  style: "pass" | "failed" | "offtarget" | "indeterminate";
+  style: "pass" | "otherrunway" | "failed" | "offtarget" | "indeterminate";
   label: string;
 }
 
@@ -148,6 +148,9 @@ function comparisonOutcome(
   if (!datum) return null;
   if (kind === "prediction") {
     if (datum.status === "solved") return { style: "pass", label: "prediction passed" };
+    if (datum.status === "otherRunway") {
+      return { style: "otherrunway", label: `prediction passed on runway ${datum.landedRunway}, not the observed flight's` };
+    }
     if (datum.status === "indeterminate") {
       return { style: "indeterminate", label: "prediction verdict indeterminate" };
     }

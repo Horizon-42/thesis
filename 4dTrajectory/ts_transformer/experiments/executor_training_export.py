@@ -72,6 +72,7 @@ from ts_transformer.autopilot.frame import ALT, LAT, LON
 from ts_transformer.autopilot.judge import Verdict, flown_track, read_flown, words_said
 from ts_transformer.autopilot.runway_data import published_vertical_paths
 from ts_transformer.experiments.executor_replay import REPLAY_SCHEMA
+from ts_transformer.experiments.training_attitude import attitude_payload, executor_attitude
 from ts_transformer.instructions import display
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals
@@ -95,8 +96,9 @@ from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_sta
 #: (2026-09-24, instruction-v3) gives every heading word judged its band and per-row verdicts (``heading``) and every
 #: flight judged its flown track as the judge read it (``judgedTrackDeg``); v1's heading verdicts were turns and holds.
 #: v4 (2026-09-28): ``base`` records the set's spec, candidates and frame, no longer its sample file's sha256 or time
-#: of writing (`training_files.BaseSet.block`).
-SCHEMA = "aeroviz-training-executor-v4"
+#: of writing (`training_files.BaseSet.block`). v5 (2026-09-30): every flown track carries the attitude it is drawn in
+#: (``track.attitude``, `training_attitude`).
+SCHEMA = "aeroviz-training-executor-v5"
 PAYLOAD_FILE = "executor.json"
 RUNNER = "ts_transformer.experiments.executor_training_export"
 STATUSES = ("inside", "outside", "not judged", "not reached", "superseded", "no check")
@@ -310,11 +312,12 @@ def word_verdicts(flown: Flown, index: int, verdict: Verdict, reading: Reading, 
 
 
 def track_payload(flown: Flown, index: int, verdict: Verdict, geometry: AirportGeometry, spec: VocabularySpec,
-                  shift_deg: float, hae_minus_msl_m: float) -> dict[str, Any]:
+                  shift_deg: float, hae_minus_msl_m: float, aero_params: np.ndarray) -> dict[str, Any]:
     """The flown track every sentence step from row 0 to its outcome's row (a dynamics failure: to the row before
     it, as the records keep it), in the airport frame and on the globe (``hae_minus_msl_m``: the flight's runway's); its
     track unwrapped and moved by ``shift_deg`` (`chart_shift_deg`) onto the observed smoothed track's branch, so the two
-    read on one heading axis."""
+    read on one heading axis; and the attitude it is drawn in (``aero_params``: its airframe's as flown,
+    `training_attitude.executor_attitude`)."""
     end = verdict.end_row - 1 if verdict.outcome == "dynamics_failure" else verdict.end_row
     states = flown.states[index, : end + 1].cpu().numpy()
     track = flown_track(states, geometry)
@@ -328,7 +331,8 @@ def track_payload(flown: Flown, index: int, verdict: Verdict, geometry: AirportG
     return {"tS": rounded(np.asarray(rows) * flown.cycle_s, 3), "eM": rounded(track["e"][rows], 1), "nM": rounded(track["n"][rows], 1),
             "lon": rounded(lon, 7), "lat": rounded(lat, 7), "altitudeM": rounded(height, 2), "altitudeHaeM": rounded(height + hae_minus_msl_m, 2),
             "groundSpeedMps": rounded(track["ground_speed"][rows], 3), "trackDeg": rounded(heading, 3),
-            "distanceM": rounded(distance[rows], 1)}
+            "distanceM": rounded(distance[rows], 1),
+            "attitude": attitude_payload(executor_attitude(flown, index, rows, aero_params))}
 
 
 def gate_block(gates: dict[str, Any], airport: str) -> dict[str, Any]:
@@ -348,9 +352,11 @@ def gate_block(gates: dict[str, Any], airport: str) -> dict[str, Any]:
 
 def flight_payload(item: dict[str, Any], group: str, flown: Flown | None, index: int, verdict: Verdict | None,
                    reading: Reading | None, observed: FlightSignals, geometry: AirportGeometry, spec: VocabularySpec,
-                   words: Words, formal: dict[str, Any] | None, hae_minus_msl_m: dict[str, float]) -> dict[str, Any]:
+                   words: Words, formal: dict[str, Any] | None, hae_minus_msl_m: dict[str, float],
+                   aero_params: np.ndarray | None) -> dict[str, Any]:
     """One flight of the set: not flown (``group`` says why), or flown — re-flown here and checked against its
-    ``formal`` replay row (``hae_minus_msl_m``: `runway_hae_minus_msl_m` of its airport)."""
+    ``formal`` replay row (``hae_minus_msl_m``: `runway_hae_minus_msl_m` of its airport; ``aero_params``: its airframe
+    as flown)."""
     base = {"flightKey": item["flightKey"], "datasetId": item["datasetId"], "group": group}
     if flown is None:
         return {**base, "flown": False, "outcome": None, "flewTheSentence": None, "endS": None, "crossing": None,
@@ -402,7 +408,7 @@ def flight_payload(item: dict[str, Any], group: str, flown: Flown | None, index:
         "counts": {"wordsJudged": 0 if judged is None else len(judged),
                    "wordsInside": 0 if judged is None else sum(ok for _, ok in judged),
                    "headingWordsNotJudged": not_judged},
-        "track": track_payload(flown, index, verdict, geometry, spec, shift, hae_minus_msl_m[observed.runway]),
+        "track": track_payload(flown, index, verdict, geometry, spec, shift, hae_minus_msl_m[observed.runway], aero_params),
         "judgedTrackDeg": None if judged_track is None else rounded(judged_track, 3),
         "words": verdicts,
     }
@@ -439,16 +445,18 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
                          approach_ias_mps=[replay.flight_approach_ias_mps(series[j], groups[j]) for j in flyable],
                          groups=[groups[j] for j in flyable], drawn={})
     flown, verdicts = replay.fly_batch(batch, params, words, device=device) if flyable else (None, [])
+    # each flight's airframe as flown (its own or its stand-in's): what the attitude's attack reading reads
+    aero = batch.inputs(torch.device("cpu")).aero_params.numpy() if flyable else None
     position = {j: n for n, j in enumerate(flyable)}
     out = []
     for j, item in enumerate(base.sample["flights"]):
         if j in position:
             n = position[j]
             out.append(flight_payload(item, groups[j], flown, n, verdicts[n], readings[n], signals[j], geometry, spec,
-                                      words, formal[signals[j].dataset_id], offsets))
+                                      words, formal[signals[j].dataset_id], offsets, aero[n]))
         else:
             out.append(flight_payload(item, groups[j], None, 0, None, None, signals[j], geometry, spec, words, None,
-                                      offsets))
+                                      offsets, None))
     return out
 
 

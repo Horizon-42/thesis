@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from ts_transformer.instructions.words import Words
+from ts_transformer.tests.support import signal_attitudes
 from ts_transformer.tests.test_traffic_window import (
     LIMIT_S, STEP_S, _as_drawn, _patch_runner_physics, _scene_airport, _traffic_model,
 )
@@ -81,7 +82,7 @@ def _flown(tmp_path, monkeypatch, *, samples=2, seed=4):
                                generator=torch.Generator().manual_seed(seed), temperature=1.0,
                                procedure_masks=ProcedureMasks.none())
     offsets = {candidate.ident: 12.5 for candidate in geometry.candidates}
-    return flown, drawn, {"KXXX": Globe(geometry, offsets)}, spec, airport
+    return flown, drawn, {"KXXX": Globe(geometry, offsets)}, spec, airport, signals
 
 
 def test_every_window_sample_writes_each_commanded_aircraft_s_sentence_its_losses_and_its_landings(tmp_path, monkeypatch):
@@ -91,7 +92,7 @@ def test_every_window_sample_writes_each_commanded_aircraft_s_sentence_its_losse
     from ts_transformer.instructions.training_files import serialise
     from ts_transformer.prior.scene import N_LOOK
 
-    flown, drawn, globes, spec, _ = _flown(tmp_path, monkeypatch)
+    flown, drawn, globes, spec, _, _ = _flown(tmp_path, monkeypatch)
     try:
         payloads = batch_payloads(flown, drawn, 2, globes, Words(spec))
     finally:
@@ -112,6 +113,8 @@ def test_every_window_sample_writes_each_commanded_aircraft_s_sentence_its_losse
             assert np.allclose(np.diff(track["tS"]), STEP_S)
             assert track["tS"][-1] == sentence["ownEndS"] and sentence["endS"] <= sentence["ownEndS"]
             assert np.allclose(np.subtract(track["altitudeHaeM"], track["altitudeM"]), 12.5, atol=0.011)
+            # drawn in the executor's attitude at each of its states
+            assert all(len(values) == len(track["tS"]) for values in track["attitude"].values())
             # ended by the judge ⇔ lost separation, and then the end names whom with
             assert (sentence["outcome"] == LOST_SEPARATION) == (sentence["end"] is not None) \
                 == (sentence["datasetId"] in ended)
@@ -133,7 +136,7 @@ def test_the_same_seed_writes_the_same_samples(tmp_path, monkeypatch):
 
     def once(name, seed):
         (tmp_path / name).mkdir()
-        flown, drawn, globes, spec, _ = _flown(tmp_path / name, monkeypatch, seed=seed)
+        flown, drawn, globes, spec, _, _ = _flown(tmp_path / name, monkeypatch, seed=seed)
         try:
             return batch_payloads(flown, drawn, 2, globes, Words(spec))
         finally:
@@ -148,11 +151,13 @@ def test_a_set_window_lists_who_is_in_it_and_what_the_record_made_of_it(tmp_path
     from ts_transformer.prior.masks import ProcedureMasks
     from ts_transformer.tests.test_autopilot import _params
 
-    flown, drawn, globes, spec, airport = _flown(tmp_path, monkeypatch)
+    flown, drawn, globes, spec, _, signals = _flown(tmp_path, monkeypatch)
     flown.loop.close()
     _, _, recorded = fixed_paths(drawn, [0, 1], "recorded", Words(spec), _params(), ProcedureMasks.none())
     window = drawn.windows[0]
-    payload = window_payload(window, [LIMIT_S, LIMIT_S], recorded[0], globes["KXXX"], STEP_S)
+    by_id = signals                                                     # the fixture's signals, by dataset id
+    payload = window_payload(window, [LIMIT_S, LIMIT_S], recorded[0], globes["KXXX"], STEP_S, by_id,
+                             signal_attitudes(None, list(signals.values())))
     assert [c["datasetId"] for c in payload["commanded"]] == ["KXXX:f0", "KXXX:f1"]
     # each commanded aircraft's row 0 on the scene's steps, from the window's opening (f1 entered 30 s after f0)
     assert payload["commanded"][1]["rowZeroS"] - payload["commanded"][0]["rowZeroS"] == pytest.approx(30.0, abs=1.0)
@@ -160,6 +165,10 @@ def test_a_set_window_lists_who_is_in_it_and_what_the_record_made_of_it(tmp_path
     assert others["KXXX:f2"]["role"] == "background" and others["KXXX:f2"]["callsign"] == "f2"
     track = others["KXXX:f2"]["track"]
     assert len(track["tS"]) == len(track["lon"]) == len(track["altitudeHaeM"]) > 1
+    # drawn in its observed attitude, on its recorded rows: the first rows of its signals
+    assert all(values is None or len(values) == len(track["tS"]) for values in track["attitude"].values())
+    assert track["attitude"]["headingDeg"] == pytest.approx(
+        np.mod(by_id["KXXX:f2"].track_deg[: len(track["tS"])], 360.0), abs=0.006)
     assert payload["opensUtc"].endswith("Z")
     # the record's losses and landings are the recorded paths' judge's
     assert payload["recorded"]["visual"]["ended"] == [
@@ -228,7 +237,7 @@ def test_the_landings_are_the_aircraft_whose_own_end_is_a_landing(tmp_path, monk
     aircraft whose own end is a landing, as the record's are (the reader holds them to exactly those)."""
     from ts_transformer.experiments.window_training_export import batch_payloads
 
-    flown, drawn, globes, spec, _ = _flown(tmp_path, monkeypatch, samples=1)
+    flown, drawn, globes, spec, _, _ = _flown(tmp_path, monkeypatch, samples=1)
     try:
         stopped = flown.results[2]                          # f3, alone in its window
         stopped.own, stopped.outcome, stopped.landing_s = "below_glidepath", "below_glidepath", stopped.first_s + 40.0
