@@ -29,7 +29,10 @@ samples (the pooled correlation of each aircraft's reward less its mean over the
 
 Writes into a NEW directory ``aircraft.jsonl`` (a row per commanded aircraft, source and sample, appended as each batch
 ends) and ``window_generation.json`` (the readout). A batch holds at most ``--aircraft-steps`` window samples × their
-aircraft × their steps (the model's past, 6 KB an aircraft-step).
+aircraft × their steps (the model's past, 6 KB an aircraft-step). **In several processes** (``--workers``, forked once the
+data are built and before the GPU is started, as M4's speaking processes are): each reads the batches its index deals it,
+each batch — every source of it — from its own streams (`batch_seed`), so what is read does not depend on the number of
+processes; the parent writes each batch's rows as they arrive and the readout at the end.
 
     python run_ts.py traffic_window_generation \\
         --prior 4dTrajectory/outputs/POOLED/prior/v3_stage2_clip_20260926/aug_s1337/round_07 \\
@@ -41,12 +44,20 @@ aircraft × their steps (the model's past, 6 KB an aircraft-step).
 from __future__ import annotations
 
 import argparse
+import ctypes
 import dataclasses
+import gc
 import json
+import multiprocessing
+import multiprocessing.connection
+import os
+import signal
+import sys
 import time
+import traceback
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -80,8 +91,11 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 SCHEMA = "ts-traffic-window-generation-v1"
 SOURCES = ("scene", "alone", "labelled", "recorded")
-#: A batch's most aircraft-steps (module docstring): about 1.8 GB of the model's past on its d and layers.
-AIRCRAFT_STEPS = 300_000
+#: A batch's most aircraft-steps (module docstring): about 0.6 GB of the model's past on its d and layers — a process's,
+#: four beside each other in the 8 GB GPU (M4's speaking processes hold as much).
+AIRCRAFT_STEPS = 100_000
+#: Processes reading the batches (module docstring): the loop is bound by the CPU (the executors, the judge, the masks).
+WORKERS = 4
 #: Window sizes the readout is split by: the commanded aircraft of a window.
 SIZES = ("1", "2", "3+")
 
@@ -415,6 +429,92 @@ def summaries(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
             "window_sizes": {size: summary(by_size[size]) for size in SIZES if by_size[size]}}
 
 
+def batch_rows(model: Prior, drawn: Drawn, number: int, chunk: Sequence[int], words: Words, params: Any,
+               landings: Any, every_landing: Mapping[str, Landings], samples: int, *, seed: int, temperature: float,
+               procedure_masks: Any, device: torch.device) -> list[dict[str, Any]]:
+    """Loop batch ``number`` (the windows at ``chunk``) read every way, the model's sources each from its own stream
+    (`batch_seed`): its rows, each marked with the batch."""
+    rows: list[dict[str, Any]] = []
+    for source in ("scene", "alone"):
+        generator = torch.Generator(device=device).manual_seed(batch_seed(seed, source, number))
+        rows += model_rows(model, drawn, chunk, source, words, params, landings, every_landing, samples,
+                           generator=generator, temperature=temperature, procedure_masks=procedure_masks)
+    for source in ("labelled", "recorded"):
+        rows += fixed_rows(drawn, chunk, source, words, params, every_landing, procedure_masks)
+    for row in rows:
+        row["batch"] = number
+    return rows
+
+
+#: `prctl` option: the signal a process gets when its parent dies (linux/prctl.h).
+PR_SET_PDEATHSIG = 1
+
+
+def _worker(pipe: Any, parent_ends: Sequence[Any], parent_pid: int, index: int, count: int, numbers: Sequence[int],
+            read: Callable[[int], Any]) -> None:
+    """A reading process (`in_processes`): it dies with the parent, keeps none of the others' pipes and runs one thread;
+    it answers with ``read(number)`` of each of ``numbers`` its index deals it, its GPU peak beside, then "done" — or
+    the traceback that ended it (also printed)."""
+    if sys.platform == "linux":                                 # the death signal is Linux's; elsewhere none is asked for
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        if libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL) != 0:
+            raise OSError(ctypes.get_errno(), "prctl(PR_SET_PDEATHSIG)")
+        if os.getppid() != parent_pid:
+            os._exit(1)
+    for end in parent_ends:
+        end.close()
+    torch.set_num_threads(1)
+    try:
+        for number in numbers[index::count]:
+            got = read(number)
+            peak = torch.cuda.max_memory_reserved() / 1e9 if torch.cuda.is_initialized() else 0.0
+            pipe.send(("ok", number, got, peak))
+        pipe.send(("done",))
+    except BaseException:
+        traceback.print_exc()
+        pipe.send(("failed", traceback.format_exc()))
+
+
+def in_processes(count: int, numbers: Sequence[int], read: Callable[[int], Any]) -> Iterator[tuple[int, Any, float]]:
+    """``read(number)`` of every one of ``numbers`` in ``count`` forked processes (`_worker`), as each is read:
+    ``(number, what it read, its process's GPU peak GB)``; a process that fails, or is gone, ends the run with what it
+    said. Fork before the parent starts the GPU."""
+    if count < 1:
+        raise ValueError("at least one reading process")
+    context = multiprocessing.get_context("fork")
+    pipes, processes = [], []
+    for index in range(count):
+        parent, child = context.Pipe()
+        process = context.Process(target=_worker, args=(child, list(pipes), os.getpid(), index, count, list(numbers),
+                                                        read), daemon=True)
+        process.start()
+        child.close()
+        pipes.append(parent)
+        processes.append(process)
+    live = dict(enumerate(pipes))
+    try:
+        while live:
+            for pipe in multiprocessing.connection.wait(list(live.values())):
+                w = next(k for k, v in live.items() if v is pipe)
+                try:
+                    message = pipe.recv()
+                except (EOFError, OSError):
+                    processes[w].join(timeout=5)
+                    raise SystemExit(f"reading process {w} is gone (exit code {processes[w].exitcode})") from None
+                if message[0] == "failed":
+                    raise SystemExit(f"reading process {w} failed:\n{message[1]}")
+                if message[0] == "done":
+                    del live[w]
+                    continue
+                _, number, got, peak = message
+                yield number, got, peak
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.kill()
+            process.join(timeout=60)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--prior", type=Path, required=True, help="the single-aircraft prior it starts from (augmented)")
@@ -426,11 +526,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--aircraft-steps", type=int, default=AIRCRAFT_STEPS, help="a batch's most (module docstring)")
+    parser.add_argument("--workers", type=int, default=WORKERS, help="reading processes (what is read does not depend "
+                        "on it)")
     parser.add_argument("--device", default="cuda", help="the prior's; the executors fly on CPU")
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     args = parser.parse_args(argv)
-    if args.windows_per_airport < 1 or args.samples < 1:
-        parser.error("at least one window an airport and one sample")
+    if args.windows_per_airport < 1 or args.samples < 1 or args.workers < 1:
+        parser.error("at least one window an airport, one sample and one reading process")
 
     def resolved(path: Path) -> Path:
         return path if path.is_absolute() else REPO_ROOT / path
@@ -445,7 +547,7 @@ def main(argv: list[str] | None = None) -> int:
     if prior_config["smoke"] or payload["schema"] != PRIOR_CHECKPOINT_SCHEMA:
         parser.error(f"{prior_dir} is not a single-aircraft prior's formal run")
     torch.manual_seed(args.seed)                       # the traffic attention's weights: at zero it reads nothing
-    model = with_traffic(single, EDGE_FEATURES).to(torch.device(args.device)).eval()
+    model = with_traffic(single, EDGE_FEATURES).eval()   # on the CPU until the reading processes are forked
     every_landing = airport_landings(instructions, rosters(instructions))
     landings = every_landing if VARIANTS[model.config.variant].landing_context else None
     step_s = words.spec.step_s
@@ -459,26 +561,27 @@ def main(argv: list[str] | None = None) -> int:
 
     batches = window_batches(drawn, args.samples, args.aircraft_steps, step_s)
     out.mkdir(parents=True)
+    device = torch.device(args.device)
+
+    def read(number: int) -> list[dict[str, Any]]:
+        speaking = model.to(device)
+        return batch_rows(speaking, drawn, number, batches[number], words, params, landings, every_landing,
+                          args.samples, seed=args.seed, temperature=args.temperature, procedure_masks=own_masks,
+                          device=device)
+
+    gc.collect()
+    gc.freeze()                                         # the reading processes share the parent's data, not copy it
     rows: list[dict[str, Any]] = []
-    done = 0
-    for number, chunk in enumerate(batches):
-        new: list[dict[str, Any]] = []
-        for source in ("scene", "alone"):
-            generator = torch.Generator(device=torch.device(args.device)).manual_seed(
-                batch_seed(args.seed, source, number))
-            new += model_rows(model, drawn, chunk, source, words, params, landings, every_landing, args.samples,
-                              generator=generator, temperature=args.temperature, procedure_masks=own_masks)
-        for source in ("labelled", "recorded"):
-            new += fixed_rows(drawn, chunk, source, words, params, every_landing, own_masks)
+    done, peaks = 0, [0.0]
+    for number, new, peak in in_processes(args.workers, list(range(len(batches))), read):
         with (out / "aircraft.jsonl").open("a", encoding="utf-8") as stream:
             for row in new:
                 stream.write(json.dumps(row) + "\n")
         rows += new
-        done += len(chunk)
-        held = (f", GPU {torch.cuda.max_memory_allocated() / 1e9:.2f} GB peak" if torch.device(args.device).type == "cuda"
-                else "")
-        print(f"  {done}/{len(drawn.windows)} windows ({len(batches)} batches), {time.perf_counter() - started:.0f}s"
-              f"{held}", flush=True)
+        done += len(batches[number])
+        peaks.append(peak)
+        print(f"  batch {number}: {done}/{len(drawn.windows)} windows ({len(batches)} batches), "
+              f"{time.perf_counter() - started:.0f}s, GPU {max(peaks):.2f} GB a process at most", flush=True)
 
     readout = summaries(rows)
     write_json_atomic(out / "window_generation.json", {
@@ -490,6 +593,7 @@ def main(argv: list[str] | None = None) -> int:
         "executor": {"directory": repo_relative(executor_dir), "sha256": record["sha256"]},
         "instructions": repo_relative(instructions), "scenes": built, "history_s": HISTORY_S,
         "readings": {"ends": VISUAL, "beside": IFR}, "aircraft_steps": args.aircraft_steps, "batches": len(batches),
+        "workers": args.workers, "gpu_peak_gb_a_process": max(peaks),
         "readout": readout, "aircraft_file": "aircraft.jsonl", "elapsed_s": time.perf_counter() - started})
     for source, entry in readout["pooled"].items():
         shares = "  ".join(f"{name} {share:.3f}" for name, share in entry["outcomes"].items())

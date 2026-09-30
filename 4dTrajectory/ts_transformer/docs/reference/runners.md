@@ -902,7 +902,8 @@ and counted. The last round is not necessarily the kept one (`choice.round`). Wr
 ### R34 · `run_ts.py traffic_window_generation` — multi-aircraft M3's second pass: the post-training's start commanding every aircraft of a window (design §6.6 step 7 item 4)
 
 2026-09-30. `traffic_window_generation --prior <single-aircraft prior (augmented)> --executor <spec> --instructions
-<artefact> --split select --out <new dir> [--windows-per-airport 200] [--samples 4] [--aircraft-steps 300000] [--device]`.
+<artefact> --split select --out <new dir> [--windows-per-airport 200] [--samples 4] [--aircraft-steps 100000] [--workers 4]
+[--device]`.
 The windows (`experiments/traffic_window.py`, design §6.6 step 7 item 1): each airport's segments tiled by 20-minute windows
 opening every 10 minutes; a window commands its flights with a sentence entering in it that fly on their own dynamics, the
 rest replayed; drawn per airport in a seeded permutation of the tiles, a tile with no flight that flies passed over and
@@ -920,5 +921,8 @@ VISUAL as every source's paths judged again afterwards. Per source — pooled, p
 commanded) — outcomes, lost separation (ended with a commanded aircraft or a replayed one), episodes per aircraft and per
 hour, M4's reward, the landing time against the record, how often two commanded aircraft of a window land the other way
 round, the masks, and how one window's rewards go together over its samples (the pooled correlation of each aircraft's
-reward less its mean). Each loop batch draws from its own stream. Writes `aircraft.jsonl` (appended per batch) and
+reward less its mean). Each loop batch draws from its own streams, and `--workers` forked processes (after the data
+are built, before the GPU starts) read the batches their index deals them — what is read does not depend on their number
+(tests); the loop is bound by the CPU (the 2026-09-30 smoke: 15 windows in 4.5 min, one process, GPU 2.3 GB, 8–41 %
+busy). Writes `aircraft.jsonl` (appended per batch) and
 `window_generation.json` (`ts-traffic-window-generation-v1`).

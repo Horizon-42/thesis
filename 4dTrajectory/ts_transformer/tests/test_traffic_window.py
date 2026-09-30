@@ -826,3 +826,51 @@ def test_a_loop_landing_enters_the_reward_s_landing_context(monkeypatch):
     monkeypatch.setattr(runner, "window_landings", lambda window, key, landings, step_s: base)
     got = runner._loop_context(None, "x", {"KXXX": base}, [(15.0, "27")], 2.0)
     assert got.times_s.tolist() == [10.0, 15.0, 20.0] and got.by_runway["27"].tolist() == [15.0]
+
+
+def _square(number):
+    if number == 3:
+        raise RuntimeError("three")
+    return number * number
+
+
+def test_reading_processes_read_every_number_and_a_failure_ends_the_run():
+    from ts_transformer.experiments.traffic_window_generation import in_processes
+
+    got = sorted((n, v) for n, v, _ in in_processes(2, [0, 1, 2], _square))
+    assert got == [(0, 0), (1, 1), (2, 4)]
+    with pytest.raises(SystemExit, match="three"):
+        list(in_processes(2, [0, 1, 2, 3], _square))
+
+
+def test_a_batch_reads_the_same_whatever_else_is_read_and_in_whichever_process(tmp_path, monkeypatch):
+    """Two loop batches: batch 1 alone, after batch 0 and in the second of two processes reads the same rows."""
+    import torch
+
+    from ts_transformer.experiments import traffic_window_generation as runner
+    from ts_transformer.experiments.traffic_window import window_of
+    from ts_transformer.instructions.artefact import load_signals
+    from ts_transformer.prior.masks import ProcedureMasks
+    from ts_transformer.tests.test_autopilot import _params
+    from ts_transformer.tests.test_traffic_speaking import _batch
+
+    _, airports, spec = _airport(tmp_path, monkeypatch, [0.0, 40.0, 3_600.0], (0, 1, 2))
+    airport = airports["KXXX"]
+    geometry = airport.flights.geometry
+    signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
+    commanded = [("KXXX:f0", "KXXX:f1"), ("KXXX:f2",)]
+    keys = [k for keys in commanded for k in keys]
+    windows = [window_of(airport, 0.0, c, [LIMIT_S] * len(c), STEP_S) for c in commanded]
+    drawn = runner.Drawn(windows, [range(0, 2), range(2, 3)], _batch(airport, signals, spec, keys), [LIMIT_S] * 3)
+    _patch_runner_physics(monkeypatch, signals, geometry, keys)
+    model, every = _traffic_model(spec), {"KXXX": _pool(airport)}
+    cpu = torch.device("cpu")
+
+    def read(number):
+        return runner.batch_rows(model, drawn, number, [number], Words(spec), _params(), None, every, 2, seed=5,
+                                 temperature=1.0, procedure_masks=ProcedureMasks.none(), device=cpu)
+
+    alone = read(1)
+    after = (read(0), read(1))[1]
+    forked = {n: rows for n, rows, _ in runner.in_processes(2, [0, 1], read)}
+    assert alone == after == forked[1] and all(r["batch"] == 1 for r in alone)
