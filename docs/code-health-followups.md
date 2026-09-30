@@ -132,6 +132,7 @@ added three entries (the rows after the performance index's).
 | A Training overlay is bound to its set's file sha256 and writing time (09-28) | resolved | bound by what it shares with the set — spec, candidates, frame, and flight by flight its keys, words / steps and every drawn height's HAE − MSL; overlays v2, executor / prior / generation v4, augmented generation v2 (`2f557772`; every published overlay re-exported 2026-09-28, the user's OK); entry removed | — |
 | The frontend pins the vocabulary spec's sha (09-28) | open | new; see the entry — low value while the superseded `instruction_v3` set stays listed | no: a frontend constant |
 | The single-flight executor's pin refuses at run time, not in the tests (09-28) | open | new; see the entry | no: the backend |
+| A glidepath stop overrides a judged event that came before it (09-30) | open | new; see the entry | **yes — post-training**: stage 2's reward reads `said_rows` |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -613,3 +614,17 @@ picks its spec (`backend.py:148`): a logic change in any of the 32 files it mirr
 flight until `single.py` is ported and `MIRRORED_SOURCE_SHA256` moved. `tests/test_single_executor.py` compares the two
 executors through every mode and limit, and `check_single` over a fleet. Judgement: the pin belongs in the suite (a
 change not ported fails a test); at run time it only reports the same thing later, to the user.
+
+## A glidepath stop overrides a judged event that came before it (2026-09-30)
+
+**Verified by reading** (opus review of `prior_generation_records`, dev-generation-records). `prior_free_generation
+.flight_rows` (`:352-353`) makes a sentence's outcome `below_glidepath` and its end `(stop + 1) × step_s` whenever
+`glidepath_stops` found a stop, whatever `judge.outcome_of` read — even when the judge's event came at an EARLIER row.
+`glidepath_stops` scans the step boundaries up to the executor's `done_cycle`, and the executor flies on after three events
+the judge reads earlier (a crossing without the capture, another runway's threshold, the stall — the stall counts as
+`dynamics_failure` but does not end the flight). So such a sentence's outcome is `below_glidepath` although it ended
+before, and its end runs past the judged event — `prior_generation_records`' record then keeps states after it (for a stall,
+states of the failure, against `executor_replay.executor_forecast`'s own rule). Not counted how often. Judgement: a stop
+counts only before the judge's end row (`stops.step` boundary ≤ `outcome.end_row`). It moves free-generation outcomes and
+stage 2's reward (`prior_augmented_reward` reads `said_rows`), so it waits for a stage that re-reads them. Same family as
+"A free sentence is judged against the runway pointed at the executor's stop".
