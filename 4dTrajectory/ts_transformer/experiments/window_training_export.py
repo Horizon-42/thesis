@@ -31,7 +31,9 @@ chosen window spoken to ``--samples`` times (a sample is the whole window) by `t
 the formal readouts fly them — in batches of at most ``--aircraft-steps`` (`window_batches`), each batch on its own
 seeded stream (`batch_seed`, "scene"), in ``--workers`` forked processes (what is drawn does not depend on their number)
 — **on its own draws, not the readout's** (the user, 2026-09-30, as `prior_generation_training_export` draws its own):
-what is shown is this prior in these windows, never a readout's rows. Per window and sample: each commanded aircraft's
+what is shown is this prior in these windows, never a readout's rows. A batch's windows share its stream, so the sentences
+drawn depend on the windows flown together — the airports named, ``--windows``, ``--aircraft-steps`` — which the file
+records (``producedBy``); the windows chosen do not. Per window and sample: each commanded aircraft's
 sentence (`sentence_payload`), the window's losses under VISUAL (the loop's: they end aircraft) and IFR (its paths judged
 again afterwards), and its landings in order. ``--readout`` (optional): the prior's formal window readout's summaries
 copied beside (`readout_block`), refused unless it is this prior's, on this executor spec, artefact, split, draw,
@@ -246,7 +248,9 @@ def sentence_payload(flown: Flown, i: int, sample: int, executor_flown: Any, glo
         "firstRunway": counts["first_runway"], "lastRunway": counts["last_runway"],
         "runwayChanges": counts["runway_changes"], "goArounds": counts["go_arounds"],
         "clearedAtEnd": counts["cleared_at_end"],
-        "forbiddenMass": {COLUMNS[c]: round(float(mass[i, : len(said)].mean()), 6)
+        # over the steps it spoke to its judged end (after the judge ended it the speaker is silent), as the readout
+        # averages it; none spoken (ended at its first predicted step): 0
+        "forbiddenMass": {COLUMNS[c]: round(float(mass[i, : got.counted].mean()) if got.counted else 0.0, 6)
                           for c, mass in sorted(loop.speaker.forbidden.items())},
         "rows": N_LOOK + len(said),
         "events": [{"row": N_LOOK + int(step), "column": int(column), "value": int(said[step, column])}
@@ -279,8 +283,10 @@ def batch_payloads(flown: Flown, drawn: Drawn, samples: int, globes: Mapping[str
             "aircraft": [sentence_payload(flown, i, sample, executors[int(loop.group[i])], globe, words) for i in here],
             "visual": losses_payload(loop.runs[b], window.opens_s),
             "ifr": losses_payload(flown.judged_again(b, IFR, step_s, window), window.opens_s),
+            # the aircraft whose OWN end is a landing, as the record's are: the loop keeps a landing time for one the
+            # glidepath lower edge stopped first (its own end), which is not a landing here
             "landings": landings_payload([(flown.results[i].key, flown.results[i].landing_s) for i in here
-                                          if flown.results[i].landing_s is not None], window.opens_s)}))
+                                          if flown.results[i].own == "landed"], window.opens_s)}))
     return out
 
 
@@ -316,6 +322,8 @@ def readout_block(readout: dict[str, Any], directory: Path, *, prior_dir: Path, 
 
     summaries = readout["readout"]
     return {"directory": outputs_path(directory), "writtenUtc": readout["written_utc"],
+            # what the cells count: every sample of its draw's windows, not the export's few
+            "windowsPerAirport": readout["windows_per_airport"], "samples": readout["samples"],
             **{source: {"here": cell(summaries["airports"][airport][source]), "all": cell(summaries["pooled"][source])}
                for source in ("scene", "recorded")}}
 
@@ -331,15 +339,61 @@ def require_same_set(existing: dict[str, Any], built: dict[str, Any], path: Path
         raise ValueError(f"{path} is not the set this export builds (differs in {differ}); export into another --set")
 
 
-# ---- the run
+# ---- the disk
 @dataclasses.dataclass(frozen=True)
-class AirportSet:
-    """One airport's window set as built: its payload, its index entry, and whether it is written by this run (a set an
-    earlier export wrote is only checked, `require_same_set`)."""
+class OnDisk:
+    """What an export found at an airport before it built anything: the index as it stands when the set is to be written
+    (None: an earlier export wrote it — the one built is checked against it, `require_same_set`) and the overlays."""
 
-    payload: dict[str, Any]
-    entry: dict[str, Any]
-    new: bool
+    index: list[dict[str, Any]] | None
+    overlays: list[dict[str, Any]]
+
+
+def on_disk(root: Path, airports: Sequence[str], set_id: str, overlay_id: str) -> dict[str, OnDisk]:
+    """Every refusal about what is on disk, before the windows are drawn and flown: a set an earlier export wrote is a
+    window set listed as one (a directory without its file — a write that stopped half-way — is refused); a new one's
+    index must not list it; the overlay is new."""
+    found = {}
+    for code in airports:
+        training = root / code / "training"
+        path = training / set_id / TRAFFIC_FILE
+        if path.parent.exists() and not path.exists():
+            raise ValueError(f"{path.parent} exists without its {TRAFFIC_FILE}: an export stopped there; remove it")
+        if path.exists():
+            index = training / INDEX_FILE
+            listed = listed_set(json.loads(index.read_text(encoding="utf-8")), index, code, set_id)
+            check_set(listed, json.loads(path.read_text(encoding="utf-8")), path, code, KIND_TRAFFIC)
+        if (training / overlay_id).exists():
+            raise ValueError(f"{training / overlay_id} exists; an overlay is never overwritten")
+        found[code] = OnDisk(None if path.exists() else read_index(training, code, set_id),
+                             read_overlays(training, code, overlay_id))
+    return found
+
+
+def write_export(root: Path, found: Mapping[str, OnDisk], sets: Mapping[str, tuple[dict[str, Any], dict[str, Any]]],
+                 overlays: Mapping[str, tuple[str, dict[str, Any]]]) -> list[Path]:
+    """Each airport's set (``sets``: payload and index entry — written only where `on_disk` found none; one found is
+    checked to be it) and overlay (``overlays``: text and manifest entry); nothing is written while a manifest another run
+    wrote meanwhile would lose its entry. The files written."""
+    for code, (payload, entry) in sets.items():
+        training = root / code / "training"
+        if found[code].index is None:
+            path = training / entry["file"]
+            require_same_set(json.loads(path.read_text(encoding="utf-8")), payload, path)
+        else:
+            require_index_unchanged(training, code, entry["id"], found[code].index)
+        require_overlays_unchanged(training, code, overlays[code][1]["id"], found[code].overlays)
+    written = []
+    for code, (payload, entry) in sets.items():
+        training = root / code / "training"
+        if found[code].index is not None:
+            written.append(write_set(training, code, entry, serialise(payload), found[code].index))
+        text, overlay = overlays[code]
+        written.append(write_overlay(training, code, overlay, text, found[code].overlays))
+    return written
+
+
+# ---- the run
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -399,22 +453,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         executor_sha256=record["sha256"], instructions=instructions, samples=args.samples,
         temperature=args.temperature, seed=args.seed, airport=code) for code in airports}
 
-    # every refusal about what is on disk before the windows are drawn and flown: a set an earlier export wrote is a
-    # window set listed as one (and later checked to be the one built here); a new one's index must not list it
-    set_path = {code: root / code / "training" / args.set / TRAFFIC_FILE for code in airports}
-    existing_index: dict[str, list[dict[str, Any]]] = {}
-    existing_overlays = {}
-    for code in airports:
-        training = root / code / "training"
-        if set_path[code].exists():
-            index = training / INDEX_FILE
-            listed = listed_set(json.loads(index.read_text(encoding="utf-8")), index, code, args.set)
-            check_set(listed, json.loads(set_path[code].read_text(encoding="utf-8")), set_path[code], code, KIND_TRAFFIC)
-        else:
-            existing_index[code] = read_index(training, code, args.set)
-        if (training / overlay_id).exists():
-            parser.error(f"{training / overlay_id} exists; an overlay is never overwritten")
-        existing_overlays[code] = read_overlays(training, code, overlay_id)
+    try:                                               # every refusal about the disk before any work
+        found = on_disk(root, airports, args.set, overlay_id)
+    except ValueError as refusal:
+        parser.error(str(refusal))
 
     # the windows: the formal readouts' draw, of which --windows an airport
     landings = (airport_landings(instructions, rosters(instructions))
@@ -437,7 +479,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     artefact_name = repo_relative(instructions)
     labeller = spec_labeller_source(instructions)
     git = git_state()
-    sets: dict[str, AirportSet] = {}
+    sets: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     for code in airports:
         places = [w for w, window in enumerate(drawn.windows) if window.airport.flights.code == code]
         members = {drawn.batch.signals[j].dataset_id: j for w in places for j in drawn.members[w]}
@@ -466,9 +508,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                  "flights": len(flights), "cohort": cohort,
                  "source": {"artefact": artefact_name, "specSha256": spec.sha256, "labellerSourceSha256": labeller,
                             "exporter": RUNNER, "git": git}}
-        if code not in existing_index:
-            require_same_set(json.loads(set_path[code].read_text(encoding="utf-8")), payload, set_path[code])
-        sets[code] = AirportSet(payload, entry, code in existing_index)
+        sets[code] = (payload, entry)
     print(f"sets built, {time.perf_counter() - started:.0f}s", flush=True)
 
     # the prior in every window, --samples times
@@ -501,7 +541,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     source = {"runner": RUNNER, "prior": repo_relative(prior_dir), "executor": repo_relative(executor),
               "instructions": repo_relative(instructions),
               "readout": None if args.readout is None else repo_relative(resolved(args.readout)), "git": git_state(),
-              "device": args.device, "workers": args.workers, "aircraftSteps": args.aircraft_steps}
+              "device": args.device, "workers": args.workers, "aircraftSteps": args.aircraft_steps,
+              # the windows flown together (a batch's windows share its stream): every airport of this export
+              "airports": airports, "windows": args.windows}
     generation = {**generation_block(args.samples, args.temperature, args.seed, step_s, procedure_masks,
                                      record["sha256"], params), "trafficAttention": attention}
     built_overlays = {}
@@ -514,32 +556,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise ValueError(f"{code} window {w} was read {len(samples)} times, not {args.samples}")
             windows.append({"opensUtc": utc_text(drawn.windows[w].opens_s),
                             "commanded": list(drawn.windows[w].commanded), "samples": samples})
-        base = BaseSet(code, sets[code].entry, sets[code].payload)
+        base = BaseSet(code, sets[code][1], sets[code][0])
         payload = {"schema": SCHEMA, "overlayId": overlay_id, "airport": code, "writtenUtc": utc_now(),
                    "producedBy": source, "base": base.block, "model": model_part, "generation": generation,
                    "readout": readouts[code], "columns": list(COLUMNS), "windows": windows}
         entry = overlay_entry(overlay_id, KIND_WINDOW_GENERATION, base, title, PAYLOAD_FILE,
-                              len(sets[code].payload["flights"]), source)
+                              len(sets[code][0]["flights"]), source)
         built_overlays[code] = (serialise(payload), entry)
         said = [a for window in windows for s in window["samples"] for a in s["aircraft"]]
         print(f"  {code}: {len(windows)} windows, {len(said)} aircraft sentences — "
               f"{sum(a['outcome'] == 'landed' for a in said)} landed, "
               f"{sum(a['outcome'] == 'lost_separation' for a in said)} lost separation", flush=True)
 
-    # nothing is written while a manifest another run wrote meanwhile would lose its entry
-    for code in airports:
-        training = root / code / "training"
-        if sets[code].new:
-            require_index_unchanged(training, code, args.set, existing_index[code])
-        require_overlays_unchanged(training, code, overlay_id, existing_overlays[code])
-    for code in airports:
-        training = root / code / "training"
-        if sets[code].new:
-            out = write_set(training, code, sets[code].entry, serialise(sets[code].payload), existing_index[code])
-            print(f"  {code}: set {args.set}, {out.stat().st_size / 1e6:.1f} MB → {out}", flush=True)
-        text, entry = built_overlays[code]
-        out = write_overlay(training, code, entry, text, existing_overlays[code])
-        print(f"  {code}: {out.stat().st_size / 1e6:.1f} MB → {out}", flush=True)
+    for out in write_export(root, found, sets, built_overlays):
+        print(f"  {out.stat().st_size / 1e6:.1f} MB → {out}", flush=True)
     print(f"done in {time.perf_counter() - started:.0f}s", flush=True)
     return 0
 

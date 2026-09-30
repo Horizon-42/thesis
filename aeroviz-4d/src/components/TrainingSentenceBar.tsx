@@ -68,6 +68,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { useApp, useTrainingCursor } from "../context/AppContext";
 import TrainingLegend from "./TrainingLegend";
+import TrainingTrafficStrip from "./TrainingTrafficStrip";
 import TrainingPriorWindow from "./TrainingPriorWindow";
 import TrainingReadbackWindow from "./TrainingReadbackWindow";
 import { TrainingAutopilotStatus } from "./TrainingAutopilotStatus";
@@ -114,6 +115,7 @@ import {
 } from "../data/trainingOverlays";
 import {
   formatSeconds,
+  isOwnClock,
   rowAtTime,
   sentenceColumnRuns,
   sentenceWordAt,
@@ -498,6 +500,7 @@ export default function TrainingSentenceBar() {
         autopilotColour={autopilot?.status === "ready" && autopilotHasLine(autopilot.segment) ? autopilotColour(autopilot.segment) : null}
         model={model === null || generated === null ? null
           : { label: modelName!, colour: modelColour!, samples: model.flight.samples.length, moved: movedRead }} />
+      <TrainingTrafficStrip />
       <header className="training-sentence-head">
         {startsOffered ? (
           <span className="training-source-tabs training-start-tabs" role="group" aria-label="Where the models' sentences start">
@@ -803,9 +806,12 @@ export default function TrainingSentenceBar() {
             <AutopilotCursor view={autopilot} stepS={stepS} x0={GUTTER} plotW={plotW} endS={endS}
               y={HEAD_H + TRAINING_COLUMN_INDEX[autopilot.request.column] * ROW_H} />
           ) : null}
-          {/* the cursor, kept on the axis (it may have been put past the truth's end while a longer sentence was read) */}
-          <line x1={xFor(Math.min(cursorS, endS))} x2={xFor(Math.min(cursorS, endS))} y1={HEAD_H - 8}
-            y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 4} className="training-sentence-cursor" />
+          {/* the cursor, kept on the axis (it may have been put past the truth's end while a longer sentence was read) — on a
+              window's clock, none while the window's time is outside this aircraft's */}
+          {isOwnClock(selection) || (cursorS >= 0 && cursorS <= endS) ? (
+            <line x1={xFor(Math.min(cursorS, endS))} x2={xFor(Math.min(cursorS, endS))} y1={HEAD_H - 8}
+              y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 4} className="training-sentence-cursor" />
+          ) : null}
         </svg>
       </div>
 

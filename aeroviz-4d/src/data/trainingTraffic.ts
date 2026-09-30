@@ -190,6 +190,9 @@ export interface TrainingWindowGenerationOverlay extends TrainingGenerationHead 
   readout: {
     directory: string;
     writtenUtc: string;
+    /** What its cells count: every sample of its own draw's windows (not this overlay's few). */
+    windowsPerAirport: number;
+    samples: number;
     scene: { here: TrainingWindowReadoutCell; all: TrainingWindowReadoutCell };
     recorded: { here: TrainingWindowReadoutCell; all: TrainingWindowReadoutCell };
   } | null;
@@ -203,6 +206,8 @@ export interface TrainingWindowView {
   set: TrainingTrafficSet;
   window: TrainingWindow;
   overlays: TrainingWindowGenerationOverlay[];
+  /** Puts one of the window's commanded aircraft on screen (the panel's window session owns which). */
+  focus: (datasetId: string) => void;
 }
 
 // ── reading ──────────────────────────────────────────────────────────────────
@@ -411,6 +416,7 @@ export function parseTrainingWindowGenerationOverlay(
       ...head,
       readout: readout === null ? null : {
         directory: readout.string("directory"), writtenUtc: readout.string("writtenUtc"),
+        windowsPerAirport: readout.count("windowsPerAirport", 1), samples: readout.count("samples", 1),
         scene: readReadoutPlaces(readout.child("scene")), recorded: readReadoutPlaces(readout.child("recorded")),
       },
       windows: windows.map((item, index) => {
@@ -488,10 +494,11 @@ export function episodesAt(losses: TrainingLosses, atS: number, stepS: number): 
   return losses.episodes.filter((episode) => episode.fromS <= atS && atS < episode.toS + stepS);
 }
 
-/** The scene time a window's tracks span — every aircraft's recorded rows and ``sampled`` (a model sample's tracks) — for
- *  its time strip. */
-export function windowSpanS(window: TrainingWindow, sampled: TrainingSceneTrack[]): [number, number] {
-  const tracks = [...window.commanded.map((one) => one.recorded), ...window.others.map((one) => one.track), ...sampled];
+/** The scene time the commanded aircraft span — their recorded rows and ``read`` (their tracks as the sentence read has
+ *  them) — for the window's strip: the others are drawn inside it (one in the air since long before the window would
+ *  squeeze the aircraft the window is about into a corner). */
+export function windowSpanS(window: TrainingWindow, read: TrainingSceneTrack[]): [number, number] {
+  const tracks = [...window.commanded.map((one) => one.recorded), ...read];
   return [Math.min(...tracks.map((track) => track.tS[0])), Math.max(...tracks.map((track) => track.tS[track.tS.length - 1]))];
 }
 

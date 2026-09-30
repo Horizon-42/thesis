@@ -23,7 +23,7 @@ import TrainingDetails, { type TrainingDetailsSection } from "./TrainingDetails"
 import { NotesList } from "./NotesToggle";
 import { DetailsLink, LAYER_SWITCHES, LayerSwitches, manifestAbsence, noneReadable, type DetailsPage } from "./PanelParts";
 import { TRAINING_OTHER_AIRCRAFT_COLOR, TRAINING_WINDOW_VERDICT_COLOR, trainingModelColour } from "../../utils/trainingWordColors";
-import { trainingOverlaysPath } from "../../data/trainingOverlays";
+import { trainingModelLabel, trainingOverlaysPath } from "../../data/trainingOverlays";
 import { TRAINING_OUTCOME_TAG, trainingModelText } from "../../data/trainingText";
 import {
   aircraftFate,
@@ -133,7 +133,8 @@ function TrafficReadout({ set, overlays }: { set: TrainingTrafficSet; overlays: 
           <h4 className="training-details-subhead">The formal window readouts (other draws, the same windows' draw)</h4>
           <NotesList items={overlays.flatMap((overlay) => (overlay.readout === null ? [] : [{
             key: overlay.overlayId, name: <>{trainingModelText(overlay.model)}</>,
-            text: `${overlay.readout.directory}: in the model's scene ${share(overlay.readout.scene.all.lostSeparation, 1)} lost ` +
+            text: `${overlay.readout.directory} (${overlay.readout.windowsPerAirport} windows an airport, ${overlay.readout.samples} ` +
+              `samples each): in the model's scene ${share(overlay.readout.scene.all.lostSeparation, 1)} lost ` +
               `separation (IFR ${share(overlay.readout.scene.all.lostSeparationIfr, 1)}), ${share(overlay.readout.scene.all.landed, 1)} ` +
               `landed over ${overlay.readout.scene.all.aircraft} aircraft; recorded ${share(overlay.readout.recorded.all.lostSeparation, 1)}`,
           }]))} />
@@ -155,7 +156,7 @@ export default function TrainingWindowSession({ airport, traffic, entry, details
   const current = traffic.windows[Math.min(windowIndex, traffic.windows.length - 1)];
   const aircraft = current.commanded.find((one) => one.flight.datasetId === focus) ?? current.commanded[0];
   const readModel = loaded.find((overlay) => overlay.overlayId === trainingSource?.overlayId) ?? null;
-  const view = useMemo(() => ({ set: traffic, window: current, overlays: loaded }), [traffic, current, loaded]);
+  const view = useMemo(() => ({ set: traffic, window: current, overlays: loaded, focus: setFocus }), [traffic, current, loaded]);
   const reading = windowReading(view, trainingSource);
 
   // ── publish what the other views draw: the aircraft on screen, the models' sentences for it, the window ─────────
@@ -279,7 +280,7 @@ export default function TrainingWindowSession({ airport, traffic, entry, details
         <DetailsLink name="Windows" onOpen={details.open("traffic")}
           summary={[null, ...loaded].map((overlay) => {
             const counts = windowSetCounts(traffic, overlay);
-            return `${overlay === null ? "recorded" : trainingModelText(overlay.model)} ${((counts.lost / counts.aircraft) * 100).toFixed(1)} %`;
+            return `${overlay === null ? "recorded" : trainingModelLabel(overlay.model)} ${((counts.lost / counts.aircraft) * 100).toFixed(1)} %`;
           }).join(" · ") + ` lost separation${loaded.length > 0 ? "" : ` (models: ${modelsAbsence(overlays.manifest, overlays.windows)})`}`} />
       </ul>
     </>

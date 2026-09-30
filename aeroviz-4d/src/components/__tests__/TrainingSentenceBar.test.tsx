@@ -17,7 +17,7 @@ const { appState, DEFAULT_LAYERS, setTrainingPick, setTrainingSource } = vi.hois
       mode: "training", trainingSelection: null as unknown, trainingLayers: { ...DEFAULT_LAYERS },
       trainingExecutor: null as unknown, trainingPrior: null as unknown, trainingAutopilot: null as unknown,
       trainingPick: null as unknown,
-      trainingGenerations: [] as unknown[], trainingSource: null as unknown,
+      trainingGenerations: [] as unknown[], trainingSource: null as unknown, trainingWindow: null as unknown,
     },
   };
 });

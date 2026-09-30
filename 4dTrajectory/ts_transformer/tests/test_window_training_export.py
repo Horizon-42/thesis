@@ -201,3 +201,101 @@ def test_the_readout_is_copied_only_when_it_is_this_prior_s_over_these_windows(t
         readout_block(readout, tmp_path / "r", **{**kwargs, "samples": 2})
     with pytest.raises(ValueError, match="not ts-traffic-window-generation"):
         readout_block({**readout, "schema": "ts-traffic-window-generation-v1"}, tmp_path / "r", **kwargs)
+
+
+def _ts_constant(file: str, name: str) -> str:
+    import re
+
+    from ts_transformer.repo_layout import REPO_ROOT
+
+    source = (REPO_ROOT / "aeroviz-4d" / "src" / "data" / file).read_text(encoding="utf-8")
+    match = re.search(rf"export const {name}\b[^=]*=\s*(?P<value>[^;]+);", source)
+    assert match is not None, f"{name} not found in {file}"
+    return match.group("value").strip()
+
+
+def test_the_frontend_reader_mirrors_the_window_files_names():
+    from ts_transformer.experiments import window_training_export as export
+    from ts_transformer.instructions import training_files as files
+
+    assert json.loads(_ts_constant("trainingTraffic.ts", "TRAINING_TRAFFIC_SCHEMA")) == files.TRAFFIC_SCHEMA
+    assert json.loads(_ts_constant("trainingTraffic.ts", "TRAINING_WINDOW_GENERATION_SCHEMA")) == export.SCHEMA
+    assert json.loads(_ts_constant("trainingSample.ts", "TRAINING_TRAFFIC_SET_KIND")) == files.KIND_TRAFFIC
+
+
+def test_the_landings_are_the_aircraft_whose_own_end_is_a_landing(tmp_path, monkeypatch):
+    """The loop keeps a landing time for an aircraft the glidepath lower edge stopped first; the overlay's landings are the
+    aircraft whose own end is a landing, as the record's are (the reader holds them to exactly those)."""
+    from ts_transformer.experiments.window_training_export import batch_payloads
+
+    flown, drawn, globes, spec, _ = _flown(tmp_path, monkeypatch, samples=1)
+    try:
+        stopped = flown.results[2]                          # f3, alone in its window
+        stopped.own, stopped.outcome, stopped.landing_s = "below_glidepath", "below_glidepath", stopped.first_s + 40.0
+        payloads = batch_payloads(flown, drawn, 1, globes, Words(spec))
+        assert payloads[1][1]["landings"] == []
+    finally:
+        flown.loop.close()
+
+
+def _set_files(root, code="KXXX", set_id="windows", file_text=None):
+    """A training directory holding a window set ``set_id`` listed in its index (``file_text``: its file; None: none)."""
+    from ts_transformer.instructions.training_files import INDEX_SCHEMA, KIND_TRAFFIC, TRAFFIC_FILE, TRAFFIC_SCHEMA
+    from ts_transformer.instructions.spec import READING_RULE
+
+    training = root / code / "training"
+    (training / set_id).mkdir(parents=True)
+    entry = {"id": set_id, "kind": KIND_TRAFFIC, "readingRule": READING_RULE, "file": f"{set_id}/{TRAFFIC_FILE}"}
+    (training / "index.json").write_text(json.dumps({"schema": INDEX_SCHEMA, "airport": code, "sets": [entry]}))
+    payload = {"schema": TRAFFIC_SCHEMA, "setId": set_id, "airport": code, "writtenUtc": "then", "producedBy": {},
+               "cohort": {"split": "select"}, "vocabulary": {"readingRule": READING_RULE}, "windows": [1]}
+    if file_text is not False:
+        (training / set_id / TRAFFIC_FILE).write_text(json.dumps(payload))
+    return training, entry, payload
+
+
+def test_what_is_on_disk_is_refused_before_any_work_and_a_set_an_earlier_export_wrote_is_kept(tmp_path):
+    from ts_transformer.experiments.window_training_export import on_disk, write_export
+
+    # nothing yet: the set and the overlay are new, and both manifests are written
+    found = on_disk(tmp_path, ["KXXX"], "windows", "windows_base")
+    assert found["KXXX"].index == [] and found["KXXX"].overlays == []
+    overlay_entry = {"id": "windows_base", "kind": "window-generation", "base": "windows", "title": "t",
+                     "file": "windows_base/window_generation.json", "flights": 1, "source": {}}
+    from ts_transformer.instructions.training_files import TRAFFIC_SCHEMA
+    from ts_transformer.instructions.spec import READING_RULE
+    payload = {"schema": TRAFFIC_SCHEMA, "setId": "windows", "airport": "KXXX", "writtenUtc": "now", "producedBy": {},
+               "cohort": {"split": "select"}, "vocabulary": {"readingRule": READING_RULE}, "windows": [1]}
+    entry = {"id": "windows", "kind": "traffic-windows", "title": "w", "file": "windows/traffic.json", "readingRule": READING_RULE}
+    written = write_export(tmp_path, found, {"KXXX": (payload, entry)}, {"KXXX": ("{}", overlay_entry)})
+    assert [path.name for path in written] == ["traffic.json", "window_generation.json"]
+    index = json.loads((tmp_path / "KXXX/training/index.json").read_text())
+    assert [item["id"] for item in index["sets"]] == ["windows"]
+    # a second export names the set: kept, and its overlay added beside the first
+    again = on_disk(tmp_path, ["KXXX"], "windows", "windows_traffic")
+    assert again["KXXX"].index is None and [item["id"] for item in again["KXXX"].overlays] == ["windows_base"]
+    second = {**overlay_entry, "id": "windows_traffic", "file": "windows_traffic/window_generation.json"}
+    written = write_export(tmp_path, again, {"KXXX": ({**payload, "writtenUtc": "later"}, entry)}, {"KXXX": ("{}", second)})
+    assert [path.name for path in written] == ["window_generation.json"]
+    # ... but not a set that differs from the one it would write
+    third = {**overlay_entry, "id": "windows_other", "file": "windows_other/window_generation.json"}
+    with pytest.raises(ValueError, match=r"differs in \['windows'\]"):
+        write_export(tmp_path, on_disk(tmp_path, ["KXXX"], "windows", "windows_other"),
+                     {"KXXX": ({**payload, "windows": [2]}, entry)}, {"KXXX": ("{}", third)})
+    # an overlay already there, and a set directory a stopped export left without its file
+    with pytest.raises(ValueError, match="windows_base exists; an overlay is never overwritten"):
+        on_disk(tmp_path, ["KXXX"], "windows", "windows_base")
+    (tmp_path / "KXXX/training/half").mkdir()
+    with pytest.raises(ValueError, match="exists without its traffic.json"):
+        on_disk(tmp_path, ["KXXX"], "half", "windows_new")
+
+
+def test_a_set_listed_as_another_kind_is_refused_as_a_window_set(tmp_path):
+    from ts_transformer.experiments.window_training_export import on_disk
+
+    training, entry, _ = _set_files(tmp_path)
+    index = json.loads((training / "index.json").read_text())
+    index["sets"][0]["kind"] = "vocabulary-readback"
+    (training / "index.json").write_text(json.dumps(index))
+    with pytest.raises(ValueError, match="is a vocabulary-readback set of .*, not a traffic-windows set"):
+        on_disk(tmp_path, ["KXXX"], "windows", "windows_base")

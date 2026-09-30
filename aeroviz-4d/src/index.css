@@ -884,6 +884,148 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   color: rgba(255, 255, 255, 0.8);
 }
 
+/* A window set (multi-aircraft windows): the windows share the dock's leftover height with the window's aircraft. */
+.training-window-list {
+  min-height: 120px;
+}
+
+.training-window-list button {
+  grid-template-columns: auto 1fr auto;
+}
+
+.training-window-heading {
+  margin: 6px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(224, 230, 240, 0.75);
+}
+
+.training-window-aircraft {
+  list-style: none;
+  margin: 0;
+  padding: 0 2px 0 0;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.training-window-aircraft button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: rgba(23, 32, 58, 0.55);
+  color: #c8d8ec;
+  cursor: pointer;
+  font-size: 11.5px;
+  text-align: left;
+}
+
+.training-window-aircraft button:hover {
+  background: #2a3550;
+}
+
+.training-window-aircraft button.active {
+  border-color: #4a8fe8;
+  background: #1a5fb4;
+  color: #fff;
+}
+
+.training-window-fate {
+  justify-self: end;
+  font-size: 10.5px;
+}
+
+/* the aircraft the model does not command: listed, not clickable */
+.training-window-other {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px;
+  padding: 1px 7px;
+  font-size: 10.5px;
+}
+
+/* The window's clock above the sentence bar (TrainingTrafficStrip). */
+.training-traffic-strip {
+  margin: 0 0 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(103, 232, 249, 0.14);
+}
+
+.training-traffic-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: rgba(224, 230, 240, 0.8);
+}
+
+.training-traffic-play {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.training-traffic-play button,
+.training-traffic-play select {
+  padding: 0 6px;
+  border: 1px solid rgba(103, 232, 249, 0.3);
+  border-radius: 4px;
+  background: rgba(23, 32, 58, 0.8);
+  color: #e0e6f0;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.training-traffic-read {
+  font-weight: 600;
+}
+
+.training-traffic-alert {
+  font-weight: 600;
+}
+
+.training-traffic-strip svg {
+  display: block;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.training-traffic-row text,
+.training-traffic-others {
+  font-size: 9.5px;
+  fill: rgba(224, 230, 240, 0.7);
+}
+
+.training-traffic-row {
+  cursor: pointer;
+}
+
+.training-traffic-row.active text {
+  fill: #fff;
+  font-weight: 600;
+}
+
+.training-traffic-row .training-traffic-landing {
+  fill: #e2e8f0;
+}
+
+.training-traffic-row .training-traffic-ended {
+  font-weight: 700;
+}
+
+.training-traffic-bracket {
+  fill: rgba(250, 204, 21, 0.18);
+  stroke: rgba(250, 204, 21, 0.7);
+  stroke-width: 1;
+}
+
 /* The chosen model's samples of a flight: one mark each, filled where the flight landed. */
 .training-flight-samples {
   font-size: 10px;

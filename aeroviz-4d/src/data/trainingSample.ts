@@ -430,6 +430,12 @@ export function trainingSelectionKey(selection: TrainingSelection | null): strin
   return selection === null ? null : `${selection.airport}/${selection.setId}/${selection.flight.flightKey}`;
 }
 
+/** Whether the flight on screen is read on its own clock — not on a multi-aircraft window's, whose time can lie outside
+ *  the flight's. */
+export function isOwnClock(selection: TrainingSelection): boolean {
+  return selection.clock.scope === trainingSelectionKey(selection);
+}
+
 /** The selection of one flight of a read-back set: read on its own clock. */
 export function trainingSelectionOf(sample: TrainingSample, flight: TrainingFlight): TrainingSelection {
   const selection = { airport: sample.airport, setId: sample.setId, vocabulary: sample.vocabulary, candidates: sample.candidates,
