@@ -941,3 +941,25 @@ capped, each window's cap and count kept with it — and every time limit within
 can pass them); ten draws a window at most, else it is left out (counted by airport and kind); the refusals are counted
 by why. Read by the model's sources only (a
 moved start has no record); the readout adds each kind and each aircraft's part (shifted, moved, inserted, as drawn).
+
+
+### R36 · `run_ts.py traffic_window_reward` — multi-aircraft M4's second pass: the traffic post-training in windows (design §6.6 step 7 item 7, the 7.6 plan)
+
+2026-09-30. `traffic_window_reward --prior <single-aircraft prior (augmented) or traffic prior (an M4 round)> --base <base>
+--instructions <artefact> --executor <spec> --out <new dir> [--rounds 8] [--resume] [--real-per-airport 70]
+[--augmented-per-airport 70] [--samples 8] [--select-per-airport 70] [--select-samples 2] [--speakers 4] [--passes 1]
+[--smoke]`. R32's round protocol with a window sample as the unit: each round the training days' windows drawn with its
+seed (`traffic_window.draw_windows`), the first per airport as they are and the next `POOL_FACTOR` × as many augmented
+(`traffic_window_augment`, the first that qualify), spoken `--samples` times by R32's speaking processes (`Speaking`
+carries how a round is spoken: `WindowSpeaking` — `traffic_window_generation.window_batches`, `window_sentences`),
+each commanded aircraft rewarded as R34, its advantage against its own samples in its window, trained on only on a
+contrast and never when it starts in a loss (`traffic_window_tuner.window_advantages`); the pass
+(`traffic_window_tuner.WindowRewardTuner`): each window sample scored whole as the speaker read it (the one layout,
+`window_speaker.window_inputs`, `traffic_window.window_edges`; each aircraft's rows rebuilt with its landing context
+switched where the speaker switched it — tested to give back the sampling distributions to 1e-4), the loss on the
+trained aircraft's words, base reading each alone, M2's scene samples as the data term; with one commanded aircraft a
+window it trains as R32's tuner does (loss and gradients, tested). Fixed select windows (as drawn and augmented) read
+every round in the shape `traffic_reward.guarded_choice` reads (landed, observed runway, words, lost separation, the
+ordering against the record with the other commanded aircraft's landings of the same sample, reward by kind), the round
+chosen by paired standard errors on the augmented windows' reward. Writes `config.json`, `round_<k>/{sentences.json,
+checkpoint.pt, optimiser.pt, readout.json, …}`, `history.json`, `choice.json` (`ts-traffic-window-reward-v1`).

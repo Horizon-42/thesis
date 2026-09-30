@@ -420,6 +420,9 @@ paired, not repeated tries) beside M3's labelled and recorded readings (R33).
 executors grouped by first spoken step, the judge run as it flies, ended aircraft flying on silent), beside alone /
 labelled / recorded, all judged in the window; `--augment-seed` on augmented windows (`experiments/traffic_window_augment.py`:
 the flow compressed, a start moved, a flight inserted and commanded; capped at the airport's busiest training step) (R34).
+`traffic_window_reward` is M4 in windows — R32's rounds over window samples: every commanded aircraft rewarded, its advantage
+against its own samples, each sample scored whole as the speaker read it (`experiments/traffic_window_tuner.py`, the one layout
+`window_inputs` / `window_edges`; one commanded aircraft a window trains as R32 does) (R36).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 
