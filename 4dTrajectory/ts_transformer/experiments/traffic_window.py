@@ -843,12 +843,15 @@ class WindowLoop:
         speaker, out = self.speaker, []
         for i, key in enumerate(self.keys):
             rows = int(speaker.rows[i])
-            # its executor's steps: its group's, which may fly on past its own last (`results` cuts them so too)
+            # its executor's steps (its group's: they may fly on past its own last, "unchanged" said for it there); its
+            # last row is either a step it spoke at and ended in (an own end inside the step) or the state its last step
+            # reached, where it said nothing — one its executor may not have flown
             said = self.executors[self.group[i]][3].sentences()[self.place[i]]
-            if len(said) < rows - N_LOOK - 1:
+            steps = rows - N_LOOK
+            if len(said) < steps - 1:
                 raise ValueError(f"{key}: {rows} rows read, {len(said)} steps said")
-            # its last row — the state its last step reached — is read by the others with nothing said at it
-            grid = np.vstack((said[: rows - N_LOOK - 1], np.full((1, 6), UNCHANGED, dtype=said.dtype)))
+            grid = np.full((steps, 6), UNCHANGED, dtype=said.dtype)
+            grid[: min(steps, len(said))] = said[:steps]
             out.append(WindowRecord(key, int(self.window_of[i]), speaker.e[i, :rows].copy(), speaker.n[i, :rows].copy(),
                                     speaker.h[i, :rows].copy(), grid, list(self.context_changes[i])))
         return out
@@ -864,9 +867,10 @@ class WindowRecord:
     """What the speaker read of one commanded aircraft (`WindowLoop.records`), once it has flown: its key and window, its
     positions over every row it was in the scene (``e``, ``n``, ``h``; observed to its first predicted step, then
     flown), the words it said at each of its rows from its first predicted one (``grid`` ``[rows − N_LOOK, 6]``,
-    `UNCHANGED` where a column says nothing — silent steps too, and its last row, the state its last step reached: the
-    other aircraft read its words in force there) and its landing context's switches (the first row reading each, the
-    landing added, its runway: `WindowSpeaker.set_context`)."""
+    `UNCHANGED` where a column says nothing — silent steps too: the other aircraft read its words in force at every row;
+    its last row is a step it spoke at when its flight ended inside that step, else the state its last step reached,
+    silent) and its landing context's switches (the first row reading each, the landing added, its runway:
+    `WindowSpeaker.set_context`)."""
 
     key: str
     window: int

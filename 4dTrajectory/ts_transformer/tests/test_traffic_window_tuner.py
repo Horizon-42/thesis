@@ -1,9 +1,14 @@
 """The multi-aircraft post-training in windows (`experiments/traffic_window_tuner`, multi-aircraft design §6.6 step 7,
-the 7.6 plan): a window's words scored whole give back the distributions they were sampled from — several commanded
-aircraft, replayed ones, a traffic attention that reads the others — and each aircraft's rows are rebuilt with the landing
-context each was encoded with. On the scene-data fixture."""
+the 7.6 plan): a window's words scored whole give back the distributions they were sampled from — two commanded aircraft
+in the air together, replayed ones, a traffic attention that reads the others, more candidate slots than the airport has,
+a window scored with others of another pre-roll or on its own — an aircraft whose flight ends inside a step keeps the
+words it said there, and each aircraft's rows are rebuilt with the landing context each was encoded with. On the
+scene-data fixture."""
 
 from __future__ import annotations
+
+import dataclasses
+from types import SimpleNamespace
 
 import numpy as np
 import torch
@@ -15,14 +20,15 @@ from ts_transformer.tests.test_traffic_window import STEP_S, _airport, _keys, _p
 CPU = torch.device("cpu")
 
 
-def _reading_model(spec, variant="no-context"):
-    """A traffic prior whose traffic attention reads the others (its output layer off zero)."""
+def _reading_model(spec, variant="no-context", slots=2):
+    """A traffic prior whose traffic attention reads the others (its output layer off zero), with ``slots`` candidate
+    slots (the fixture's airport has one candidate: a pooled model has as many as its largest airport)."""
     from ts_transformer.inference.scene_edges import EDGE_FEATURES
     from ts_transformer.prior.model import with_traffic
     from ts_transformer.tests.test_prior_speaker import _model
 
     torch.manual_seed(1)
-    model = with_traffic(_model(Words(spec), variant=variant), EDGE_FEATURES).eval()
+    model = with_traffic(_model(Words(spec), slots=slots, variant=variant), EDGE_FEATURES).eval()
     for layer in model.layers:
         torch.nn.init.normal_(layer.traffic.out.weight, std=0.2)
     return model
@@ -42,26 +48,17 @@ def _loop(model, airport, signals, spec, commanded, limits, landings=None, seed=
                       procedure_masks=ProcedureMasks.none())
 
 
-def _flights(loop, signals, landings, spec):
+def _flights(loop, landings, spec, records):
     from ts_transformer.experiments.traffic_window_tuner import window_flight
 
-    return [window_flight(r, loop.windows[r.window], signals[r.key], loop.geometries[i], landings, 0, 0, len(r.grid),
-                          spec.step_s) for i, r in enumerate(loop.records())]
+    return [window_flight(r, loop.windows[r.window], loop.flights[i], loop.geometries[i], landings, 0, 0, len(r.grid),
+                          spec.step_s) for i, r in enumerate(records)]
 
 
-def test_a_window_scored_whole_gives_back_what_each_of_its_words_was_sampled_from(tmp_path, monkeypatch):
-    from ts_transformer.experiments.traffic_window_tuner import window_layout, window_logits
-    from ts_transformer.instructions.artefact import load_signals
+def _run_spied(loop, model, monkeypatch):
+    """The loop run to its end, each round's draw recorded: ``(now, row, the six columns' logits, chosen)``."""
     from ts_transformer.prior.window_speaker import WindowSpeaker
 
-    _, airports, spec = _airport(tmp_path, monkeypatch)
-    airport = airports["KXXX"]
-    signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
-    model = _reading_model(spec)
-    # f3 and f4 commanded with f1, f2 and f5 replayed around them; f7 alone at the end of the segment; batch-wide
-    # pre-roll longer than f7's own
-    loop = _loop(model, airport, signals, spec, [_keys(3, 4), _keys(7)], [60.0, 40.0])
-    assert loop.windows[0].others and loop.pre > 0
     calls, sampled = [], []
     logits, sample = model.logits, WindowSpeaker._sample
 
@@ -73,7 +70,7 @@ def test_a_window_scored_whole_gives_back_what_each_of_its_words_was_sampled_fro
     def spy_sample(speaker, h, tokens, valid, now, opening, row, runway_locked):
         first = len(calls)
         chosen = sample(speaker, h, tokens, valid, now, opening, row, runway_locked)
-        sampled.append((now.copy(), row.copy(), calls[first: first + 6]))
+        sampled.append((now.copy(), row.copy(), calls[first: first + 6], chosen.copy()))
         return chosen
 
     model.logits = spy_logits
@@ -83,32 +80,109 @@ def test_a_window_scored_whole_gives_back_what_each_of_its_words_was_sampled_fro
             loop.step()
     finally:
         del model.logits
-    flights = _flights(loop, signals, None, spec)
-    with torch.no_grad():
-        got = window_logits(model, window_layout(model, loop.windows, flights, loop.records(), spec.step_s, CPU))
+    return sampled
+
+
+def _same(sampled, got, index=None):
+    """Every word sampled (of the aircraft in ``index``, the batch's place → the scored place; all by default) scored as
+    its distribution was; the (aircraft, row) pairs compared."""
     compared = set()
-    for now, row, columns in sampled:
+    for now, row, columns, _ in sampled:
         for i in np.flatnonzero(now):
+            if index is not None and int(i) not in index:
+                continue
+            j = int(i) if index is None else index[int(i)]
             step = int(row[i])
             for c in range(6):
-                want, have = columns[c][c][i], got[c][i, 0, step]
+                want, have = columns[c][c][i], got[c][j, 0, step]
                 finite = torch.isfinite(want)
                 assert torch.equal(finite, torch.isfinite(have)), (i, step, c)
                 assert torch.allclose(have[finite], want[finite].to(have.dtype), atol=1e-4), (i, step, c)
             compared.add((int(i), step))
-    assert {i for i, _ in compared} == {0, 1, 2} and len(compared) > 40
+    return compared
+
+
+def test_a_window_scored_whole_gives_back_what_each_of_its_words_was_sampled_from(tmp_path, monkeypatch):
+    from ts_transformer.experiments.traffic_window import window_places
+    from ts_transformer.experiments.traffic_window_tuner import window_layout, window_logits
+    from ts_transformer.instructions.artefact import load_signals
+
+    _, airports, spec = _airport(tmp_path, monkeypatch)
+    airport = airports["KXXX"]
+    signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
+    model = _reading_model(spec)
+    # f3 and f4 (100 steps apart) commanded long enough to be in the air together, f1, f2 and f5 replayed around them;
+    # f0 alone at the start of the segment, needing no pre-roll: the batch's is f3's window's
+    loop = _loop(model, airport, signals, spec, [_keys(3, 4), _keys(0)], [240.0, 40.0])
+    assert loop.windows[0].others and window_places(loop.windows[1:], STEP_S).pre < loop.pre
+    sampled = _run_spied(loop, model, monkeypatch)
+    rows = loop.speaker.rows
+    assert loop.start[0] + rows[0] > loop.start[1] + N_LOOK + 10          # f3 still flying when f4 speaks
+    records = loop.records()
+    flights = _flights(loop, None, spec, records)
+    with torch.no_grad():
+        got = window_logits(model, window_layout(model, loop.windows, flights, records, spec.step_s, CPU))
+        alone = window_logits(model, window_layout(model, loop.windows[1:], flights[2:], records[2:], spec.step_s, CPU))
+    compared = _same(sampled, got)
+    assert {i for i, _ in compared} == {0, 1, 2} and len(compared) > 150
+    # f0's window scored on its own — another pre-roll — gives back the same
+    assert len(_same(sampled, alone, index={2: 0})) > 10
     # the others did change the words: the same layout read with the traffic attention at zero
     for layer in model.layers:
         torch.nn.init.zeros_(layer.traffic.out.weight)
     with torch.no_grad():
-        deaf = window_logits(model, window_layout(model, loop.windows, flights, loop.records(), spec.step_s, CPU))
+        deaf = window_logits(model, window_layout(model, loop.windows, flights, records, spec.step_s, CPU))
     finite = torch.isfinite(got[3][:2])
     assert float((got[3][:2][finite] - deaf[3][:2][finite]).abs().max()) > 1e-2
 
 
-def test_each_row_is_rebuilt_with_the_landing_context_it_was_encoded_with(tmp_path, monkeypatch):
-    import dataclasses
+def test_an_aircraft_whose_flight_ends_inside_a_step_keeps_the_words_it_said_there(tmp_path, monkeypatch):
+    """Own ends inside a step (not a time limit) — f3 at its sixth step, f4 at its first — forced through the loop's
+    crossing check: each one's last row holds the words it said there, as the results count them, and scores back."""
+    from ts_transformer.experiments import traffic_window
+    from ts_transformer.experiments.traffic_window_tuner import window_layout, window_logits
+    from ts_transformer.instructions.artefact import load_signals
 
+    _, airports, spec = _airport(tmp_path, monkeypatch)
+    airport = airports["KXXX"]
+    signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
+    model = _reading_model(spec)
+    loop = _loop(model, airport, signals, spec, [_keys(3, 4)], [240.0])
+    ends = {0: 5, 1: 0}                                        # aircraft → the step its flight ends in
+    crossed, outcome_of = traffic_window.WindowLoop._crossed, traffic_window.outcome_of
+    asked: dict[str, int] = {}
+
+    def forced_crossed(self, index, k):
+        out = crossed(self, index, k)
+        asked["k"] = k
+        for i, end in ends.items():
+            if k == end and i in index.tolist():
+                out[index.tolist().index(i)] = True
+        return out
+
+    def forced_outcome(flown, place, geometry, runway, words_spec):
+        for i, end in ends.items():
+            if asked["k"] == end and place == int(loop.place[i]) and not loop.left[i]:
+                return SimpleNamespace(outcome="ground_contact", end_row=end * int(round(STEP_S / flown.cycle_s)) + 1,
+                                       crossing=None)
+        return outcome_of(flown, place, geometry, runway, words_spec)
+
+    monkeypatch.setattr(traffic_window.WindowLoop, "_crossed", forced_crossed)
+    monkeypatch.setattr(traffic_window, "outcome_of", forced_outcome)
+    sampled = _run_spied(loop, model, monkeypatch)
+    records, results = loop.records(), loop.results()
+    for i, end in ends.items():
+        assert results[i].own == "ground_contact" and len(records[i].grid) == end + 1
+        last = [chosen[i] for now, row, _, chosen in sampled if now[i] and row[i] == N_LOOK + end]
+        assert last and np.array_equal(records[i].grid[-1], np.where(last[0] > 0, last[0] - 1, -1))
+        assert np.array_equal(records[i].grid[: results[i].counted], results[i].said[: results[i].counted])
+    flights = _flights(loop, None, spec, records)
+    with torch.no_grad():
+        got = window_logits(model, window_layout(model, loop.windows, flights, records, spec.step_s, CPU))
+    assert {(i, N_LOOK + end) for i, end in ends.items()} <= _same(sampled, got)
+
+
+def test_each_row_is_rebuilt_with_the_landing_context_it_was_encoded_with(tmp_path, monkeypatch):
     from ts_transformer.experiments.traffic_window_tuner import window_flight
     from ts_transformer.instructions.artefact import load_signals
 
@@ -119,10 +193,15 @@ def test_each_row_is_rebuilt_with_the_landing_context_it_was_encoded_with(tmp_pa
     landings = {"KXXX": _pool(airport)}
     loop = _loop(model, airport, signals, spec, [_keys(0, 1)], [400.0], landings)          # 200 s apart
     speaker = loop.speaker
+    # a landing in the loop before f1 is in the scene (it reads it from its row 0), then one after it is (a second
+    # before the last row encoded, as a landing found at a step comes after its row), and the loop runs on
+    for _ in range(3):
+        loop.step()
+    early = loop.window_time_s(0, speaker.steps_encoded - 1) - 1.0
+    loop.landing_s[0] = early
+    loop._landed(0, 0)
     while speaker.step < int(loop.start[1]) + N_LOOK + 6:
         loop.step()
-    # f0 lands in the loop a second before the last row encoded (as a landing found at a step comes after its row), and
-    # the loop runs on
     encoded = speaker.steps_encoded
     landing_s = loop.window_time_s(0, encoded - 1) - 1.0
     loop.landing_s[0] = landing_s
@@ -131,8 +210,9 @@ def test_each_row_is_rebuilt_with_the_landing_context_it_was_encoded_with(tmp_pa
         loop.step()
     records = loop.records()
     switch = encoded - int(loop.start[1])
-    assert not records[0].context_changes and records[1].context_changes == [(switch, landing_s, "09")]
-    flights = _flights(loop, signals, landings, spec)
+    assert not records[0].context_changes
+    assert records[1].context_changes == [(0, early, "09"), (switch, landing_s, "09")]
+    flights = _flights(loop, landings, spec, records)
     for i, flight in enumerate(flights):
         rows = int(speaker.rows[i])
         assert flight.rows == rows
@@ -140,10 +220,11 @@ def test_each_row_is_rebuilt_with_the_landing_context_it_was_encoded_with(tmp_pa
         assert torch.equal(torch.as_tensor(flight.relative), speaker.relative[i, :rows, : flight.relative.shape[1]]), i
         assert torch.equal(torch.as_tensor(flight.in_force, dtype=torch.long), speaker.in_force[i, :rows]), i
         assert torch.allclose(torch.as_tensor(flight.since), speaker.since[i, :rows]), i
-    # read with the landing from row 0, f1's last row encoded before it would read it: the switch row matters
-    whole = window_flight(dataclasses.replace(records[1], context_changes=[(0, landing_s, "09")]), loop.windows[0],
-                          signals["KXXX:f1"], loop.geometries[1], landings, 0, 0, len(records[1].grid), spec.step_s)
+    # read with both landings from row 0, f1's last row encoded before the second would read it: the switch row matters
+    whole = window_flight(dataclasses.replace(records[1], context_changes=[(0, early, "09"), (0, landing_s, "09")]),
+                          loop.windows[0], loop.flights[1], loop.geometries[1], landings, 0, 0, len(records[1].grid),
+                          spec.step_s)
     before = switch - 1
-    assert not torch.equal(torch.as_tensor(whole.relative[before]), speaker.relative[1, before, : whole.relative.shape[1]])
-    assert torch.equal(torch.as_tensor(whole.relative[switch:]), speaker.relative[1, switch: flights[1].rows,
-                                                                                  : whole.relative.shape[1]])
+    width = whole.relative.shape[1]
+    assert not torch.equal(torch.as_tensor(whole.relative[before]), speaker.relative[1, before, :width])
+    assert torch.equal(torch.as_tensor(whole.relative[switch:]), speaker.relative[1, switch: flights[1].rows, :width])

@@ -40,8 +40,9 @@ def window_flight(record: WindowRecord, window: Window, signals: FlightSignals, 
                   landings: Mapping[str, Landings] | None, airport: int, capture_row: int, counted: int, step_s: float
                   ) -> Flight:
     """One commanded aircraft's rows as the speaker read them (module docstring), its own words the targets of its first
-    ``counted`` steps (what it is trained on); ``landings``: each airport's landing context, None for a variant without
-    it."""
+    ``counted`` steps (what it is trained on); ``signals``: the loop's own (`WindowLoop.flights`: an augmented window's
+    moved or shifted — its entry time, its own landing and its first step are read off them); ``landings``: each
+    airport's landing context, None for a variant without it."""
     said = record.grid
     classes = np.where(said != UNCHANGED, said + 1, 0)
     asked = np.zeros(said.shape, dtype=bool)
@@ -94,9 +95,12 @@ def window_layout(model: Prior, windows: Sequence[Window], flights: Sequence[Fli
 
     def padded(name: str) -> torch.Tensor:
         values = [getattr(f, name) for f in flights]
-        out = np.zeros((len(values), width) + values[0].shape[1:], dtype=values[0].dtype)
+        tail = values[0].shape[1:]
+        if name == "relative":                             # an airport's candidates in the model's slots (`to_batch`)
+            tail = (model.config.candidate_slots, max(v.shape[2] for v in values))
+        out = np.zeros((len(values), width) + tail, dtype=values[0].dtype)
         for i, v in enumerate(values):
-            out[i, : len(v)] = v
+            out[(i, slice(0, len(v))) + tuple(slice(0, n) for n in v.shape[1:])] = v
         return torch.as_tensor(out, device=device)
 
     own = {name: padded(name) for name in ("features", "relative", "in_force", "since", "targets")}
