@@ -21,7 +21,7 @@
 | 实时执行器 | 后端 `POST /autopilot/segment`（`aeroviz_backend/autopilot_segment/` 包）：在句子条上点一个词，执行器从观测飞机说这个词时的状态飞这个词的一段（到它的包络结束之处：同列下一个词说出的地方，航向词再往后一个提前量；到了句子末尾就飞到落地），只判这个词。执行器代码一行不改，用它的单步接口 `Executor` 一个控制周期一个周期地飞，到段尾就停；每次都重新飞，不读任何回放或叠加层（§4.7）。用哪份执行器规格由后端按"现在的执行器代码接受的那一份"自动找：现在是 `v7_20260925`。句子条那一行写出模拟飞行时间与计算用时。2026-09-25 在五个机场 200 架航班上逐段试飞 3,032 段：无异常，1,904 段飞到段尾、1,128 段落地；唯一的拒绝是没有机型动力学的航班（252 段，正式回放同样不飞）；每段耗时中位数 0.39 s、最长 3.6 s。单步飞法与"飞满时限再截断"逐位相同（216 段，状态与结束周期一致）。同一页面的新请求取代它还在排队或正在飞的旧请求（409），连点几个色块只飞最后一个。整模块审查之后又在同样 200 架航班的全部 3,526 个航向词上试飞：3,230 段飞成（3,037 段在包络内飞到段尾、143 段在包络内落地、49 段不判、1 段出界），296 段机型没有动力学；"带被段尾截短"的拒绝一次也没有出现（§4.7）。**模型说的词也能飞**：把模型的句子从它开口的那一步重新飞一遍，就是导出的那个样本自己的飞行——2026-09-26 在 KRDU、KMSY 两个模型各 4 架航班 × 2 个样本上飞了 104 段（每个样本前 4 个航向词或许可、最后一个高度词），与导出的航迹逐点比，最大差 0.000 m（§4.7 "模型的词"） |
 | 增强起点 | 2026-09-27 用户要看模型从增强起点怎么飞（§2.8 数据、§4.10 界面）。**已合并、已发布**（2026-09-27）：分支 `dev-augmented-starts` 合并进 `dev-two-tier`（`84723237`），工作树与分支已删。① 导出器 `--augment-seed` + 新格式 + 测试 ② 前端读取器与各视图 ③ 一次 opus 审查（没有必须改的；3 条应改——没测到"抽不到合格起点"的航班、增强起点的落地比例没说漏掉了哪些航班、换起点只按名字和轮次对——都已改）；ts 全套 1,548、后端 192、前端 Vitest 99 个文件 863 条，`tsc` 与 `typecheck:scripts` 无错 ④ base、landing r1、augmented r7 × 五个机场导出到 scratchpad 的镜像目录（种子 1337，每个模型约 7 分钟），`check-publication` 五个机场 0 错误。落地（五个机场合计，每架 4 个样本；真实起点 712 条、增强起点 708 条——177 架能飞，KRDU 1 架抽 10 次没有合格起点）：真实起点 base 88.5 %、landing r1 96.3 %、augmented r7 95.2 %；增强起点（现在发布的，GPU 上抽的）base 80.9 %、landing r1 89.8 %、augmented r7 90.5 %（超时 72 / 52 / 33 条）。第一次在 CPU 上抽的是 81.8 / 90.0 / 92.1 %：两次是不同的抽样，landing r1 与 augmented r7 之差一次 2.1、一次 0.7 个百分点，都在 708 条样本的抽样误差（标准误约 1.1 个百分点）之内——这 40 架分不开这两个模型，要比用第二阶段的 val 读数。⑤ 发布：先按 CPU 导出过一次（`0a61b566`）；那一版把增强量取了整（转角到 0.0001°），现飞与样本差约 2 cm，用户说"删掉重导"——删掉那 15 份，用不取整的导出器、先验放 GPU（`--device cuda`，`9da173ae`，不脏）重新导出，五个机场各 25 个叠加层，`check-publication --server` 0 错误；从运行中的后端现飞 60 个词（三个模型 × 五个机场 × 4 架），与样本最大差 0.000 m。GPU 每个模型五个机场约 1.5–2 分钟（CPU 约 3.5–7 分钟）。增强起点上的实时执行器不在这次（§4.10）。 |
 | 测试 | 2026-09-26（模型的词交给实时执行器，分支 `dev-model-autopilot`）：前端 Vitest 98 个文件 834 条，`tsc` 与 `npm run typecheck:scripts` 无错；后端 `aeroviz_backend/tests` 171 条（`test_autopilot_segment.py` 64 条：`ModelSegmentTest` 14 条——句子的读法与按名字拒绝（开口一步钉在 `N_LOOK`）、步数上限等于 `rows_for`、从模型开口的那一步飞、最后一步的词飞到结局、判决读的词、判决用句子最后的跑道、时限与 `prior_free_generation.limits_s` 相同、判定落在词自己的那一步、下降角词的管子从它那一步起（另用标注器自己的 `tube_checks` 在"平飞五步再 3° 下降"上核对）、第二次许可不判、航向词从自己那一步读、航迹从词的那一步切出；`ModelFlightTest` 6 条——只飞自己机型动力学、时间词钟与时限、判决用的跑道、下降角词判决读的句子、结束的那一步起拒绝、门截断之后的词拒绝；`BackendTest` 一条走通模型请求（按时限读句子、交给飞行、答复写时间词钟）；`FreeGenerationTest`——`speak_and_fly` 自己的循环照稿说话，与后端的飞法在真实执行器上逐状态、逐周期的模式与限制都相同）。opus 审查两轮：第一轮 1 条必须改（下降角词的管子）、3 条应改、若干小处；第二轮没有必须改的，1 条应改（判决没读到的词）与几处小处；全部改掉；浏览器（5174 前端 + 8766 后端，都从工作树起）：KRDU CMP466 base 模型第 1 个样本的 heading 045°（步 91–150，在包络内，与样本 0.00 m / 62 点）、后训练第 1 个样本的 heading 230°（飞到落地，与样本 0.00 m / 61 点）。2026-09-26（左栏与模型自己说的句子，分支 `dev-training-sentences`）：前端 Vitest 98 个文件 822 条，`tsc` 与 `npm run typecheck:scripts` 无错；ts 全套 1,434 条通过（新导出器 `test_prior_generation_training_export.py` 16 条，含在合成产物上端到端跑 `main`：集合顺序、自己动力学的航班各飞 3 个样本且各自从自己第 8 行的状态起飞、不飞的航班、清单、重跑逐字相同、不覆盖）。两轮 opus 审查（第一轮 8 条应改 + 11 条小处全部改掉，第二轮确认并补了一个没有航班可数时的崩溃与一个未钉住的镜像）。`check-publication --airports-root` 对工作树的镜像目录：五个机场各 4 个叠加层对照集合读过，0 错误。浏览器（5174）核对过：左栏停在句子条上面、标签页与样本、模型不飞的航班、结束之后涂暗（KMSY DAL8784 后训练第 2 个样本：325 s 越过入口没截获，模型一直说到 650 s）、三维模型航迹、图例。2026-09-26（多轮后训练之间切换，分支 `dev-training-rounds`）：前端 Vitest 98 个文件 843 条，`tsc` 与 `npm run typecheck:scripts` 无错；ts `test_prior_generation_training_export.py` + `test_training_overlays.py` 33 条（名字按方法给、各版本同名、未知方法拒绝、起步模型从它自己的配置读、带程序屏蔽的读数拒绝、`MODEL_NAMES` 镜像、`model` 块字段逐个与 TS 接口比对）。opus 审查一轮 + 复核：2 条必须改（只有一轮的第二个 run 没写 run；同一轮导出两次会出现 "r"/"rnull" 按钮）、4 条应改，全部改掉。真实数据：KRDU 上用 v10 执行器导出了 6 份到工作树里的镜像目录（base、landing r1/r2、augmented r1 两个 run 各一份、restart 的 r2），`check-publication --airports-root` 0 错误。2026-09-27（模型按自己的程序屏蔽说话、截停一路显示到实时执行器，同一分支）：Vitest 98 个文件 845 条；后端 `aeroviz_backend/tests` 178 条（`test_autopilot_segment.py` 71 条：`GlidepathStopTest`——截停步与 `glidepath_stops` 逐架相同、截停后真实判决读到的最后状态就是导出样本航迹的最后一点；`ProcedureMasksTest`——无屏蔽不读数据、摘要不同或不认识的一套按名字拒绝；`ModelFlightTest`——截在截停步、判决先读到事件时拒绝；`PayloadTest`——结局 `below_glidepath`、没有越过入口）；ts 全套 1,514 条。opus 审查 1 条必须改（截停晚一个周期）、3 条应改、7 条小处，全部改掉。2026-09-27（详情页与全局滚动条，分支 `dev-training-details`）：Vitest 99 个文件 853 条（`TrainingDetails.test.tsx` 5 条：没有内容的节写原因、↑↓ 跳过灰掉的节、要的节没内容时回到第一节并告诉面板、打开时其余部分 inert 且关上后焦点回到打开的按钮、只有左键点背景才关；`TrainingPanel.test.tsx` 新增：详情页上的开关说明与词表、各读数一行并打开对应的节、关掉叠加层时写"switch on … under Draw"、隐藏面板时关掉且不再自己打开、没有正式读数时不出 "sentences of" 列），`tsc` 与 `npm run typecheck:scripts` 无错。opus 审查两轮：第一轮没有必须改的，6 条应改（新表的列义只在提示里、灰掉的原因没看清单状态、模态但焦点能 Tab 出去、Safari 点按钮不给焦点所以焦点回不去、读数窗口提示仍指向已删的 ⓘ、Mac 上有样式的滚动条要占 10 px）与十几处小处，除 Mac 占位这一条（用户要的就是有样式的滚动条）外全部改掉；复核 3 处小处，改了 2 处。浏览器（5174，从工作树起）：KRDU 五节都看过，打开时应用其余部分 inert、焦点在对话框上，Esc 关后焦点回到 Details |
-| 多机模式 | 用户 2026-09-30 审过方案（§2.9 定下的六件事，§4.11 结构与分步）：选择集的正式窗口读数里每个机场 20 个窗口、每个 4 个样本，augmented r7 与 traffic r5 两个模型，只有模型指挥的飞机能当焦点。分支 `dev-training-traffic`，第 1–5 步都未开始 |
+| 多机模式 | 用户 2026-09-30 审过方案（§2.9 定下的六件事，§4.11 结构与分步）：选择集里与正式窗口读数同一抽法的每个机场 20 个窗口、每个 4 个样本，augmented r7 与 traffic r5 两个模型，只有模型指挥的飞机能当焦点；导出照单机的做法自己抽样，不重跑、不逐行核对读数。分支 `dev-training-traffic`，第 1–5 步都未开始 |
 | 盘上的旧集合 | `box`、`box_v3`、`prior_s1337_val`、`prior_s2024_val`、`instruction_v1`、`instruction_v2`（五个机场都有），`v15_nomerge_noposition`（只有 KRDU）。它们属于别的词表，仍在 `index.json` 里列着，界面按名字拒读、不下载。删不删由用户决定 |
 
 ---
@@ -307,17 +307,20 @@ python run_ts.py prior_generation_training_export --augment-seed 1337 \
 ```bash
 python run_ts.py window_training_export \
     --prior 4dTrajectory/outputs/POOLED/prior/<augmented r7 或 M4 第 5 轮> \
-    --readout 4dTrajectory/outputs/POOLED/traffic/<这个模型在同一批窗口上的正式窗口读数> \
+    [--readout 4dTrajectory/outputs/POOLED/traffic/<这个模型在同一批窗口上的正式窗口读数，可选>] \
     --instructions 4dTrajectory/outputs/POOLED/instruction_language/v5_20260926 \
     --executor 4dTrajectory/outputs/POOLED/executor/v11_20260927 \
     --airports-root aeroviz-4d/public/data/airports --set traffic_windows_select \
     --airport KMSY --airport KRDU --airport KSJC --airport KSMF --airport KSTL
 ```
 
-- **窗口怎么来**：照正式读数重抽同一批窗口（`draw_windows`，同一划分、每机场个数、种子），按上表挑 20 个；再把读数的整批
-  （`window_batches`，同样的样本数与每批上限）里含有这些窗口的批按读数的随机数流（`batch_seed(种子, "scene", 批号)`，GPU）重飞。
-  **每一架的那一行必须与正式读数 `aircraft.jsonl` 里同一窗口、同一样本的那一行完全相同**（结局、自己的结局、结束、飞的时长、
-  说话步数、落地时刻、跑道、IFR 结局、失去间隔段数……），否则导出停下、说出是哪一架哪一项。读数不在就拒绝。
+- **窗口怎么来**：与正式窗口读数同一个抽法（`draw_windows`：选择集、每个机场 200 个、种子 1337），从中按上表挑 20 个。
+- **怎么飞——照单机的做法**（用户 2026-09-30）：导出器加载模型（原样，不训练），在这些窗口里重新说、重新飞（`WindowLoop`，与读数
+  同一套代码），**用自己的固定种子抽样**，写出前端要画的词和航迹——正式读数没有存词和航迹。**不重跑读数，也不和读数逐行核对**：
+  页面上的样本是这个模型在这些窗口里真实飞出来的，和读数表里的那几行不是同一次抽样，页面也不这样说。与 §2.7 相同，给了
+  `--readout` 时只把读数的汇总比例原样抄进文件、在详情页上并排读，并核对它确实是同一个模型、执行器规格、句子产物、划分、样本数与
+  温度，以及同一个窗口抽法（每机场个数、种子）；读数的格式必须是现在的 `ts-traffic-window-generation-v2`（上午那份 r7 窗口读数是
+  v1，不给 `--readout`）。
 - **集合 `traffic.json`**（`aeroviz-training-traffic-v1`，与模型无关，第一次导出时写；再导别的模型只加叠加层，集合已在就核对
   它是同一批窗口）。头部与 `sample.json` 相同（词表、候选跑道、坐标系，同一套写入代码），`cohort` 写窗口的抽法；
   `flights` 只放**模型指挥的飞机**，每架是与 `sample.json` 相同的航班对象（真值句子、信号、包络）；`windows[]` 每个窗口：
@@ -327,8 +330,8 @@ python run_ts.py window_training_export \
   - **记录里的样子**：所有指挥飞机照记录走（读数的 `recorded`），目视与 IFR 两种读法下的失去间隔段（见下）和落地顺序。
     所以句子条选 Truth 时，整个窗口就是记录里实际发生的。
 - **叠加层 `window_generation.json`**（种类 `window-generation`，`aeroviz-training-window-generation-v1`，默认 id
-  `windows_<名字>[_rNN]_<检查点 sha256 前 8 位>`）：`model`、`generation` 两块与 §2.7 相同（同一套写入代码）；外加读数的出处
-  （路径、sha256）。每个窗口每个样本：
+  `windows_<名字>[_rNN]_<检查点 sha256 前 8 位>`）：`model`、`generation` 两块与 §2.7 相同（同一套写入代码）；给了读数时外加它的
+  汇总（`readout` 块，否则为 null）。每个窗口每个样本：
   - 每架指挥飞机一句，字段同 §2.7 的样本（词、结局、结束时刻、越过入口、首末跑道……、航迹用它自己的时钟）；结局多一种
     `lost_separation`（被判定器因失去间隔结束：词写到结束为止，航迹写到它自己的结束——结束后它不说话、照最后的词接着飞，
     仍在场景里，多机设计 §9 第 29 项）；
