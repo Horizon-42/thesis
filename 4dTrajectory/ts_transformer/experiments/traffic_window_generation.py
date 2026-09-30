@@ -583,6 +583,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  batch {number}: {done}/{len(drawn.windows)} windows ({len(batches)} batches), "
               f"{time.perf_counter() - started:.0f}s, GPU {max(peaks):.2f} GB a process at most", flush=True)
 
+    # the batches in their order (they arrive in the processes' order): the readout, and the rows written again so, the
+    # same whatever the number of processes
+    rows = sorted(rows, key=lambda row: row["batch"])      # (stable: a batch's rows keep their order)
+    with (out / "aircraft.jsonl.sorted").open("w", encoding="utf-8") as stream:
+        for row in rows:
+            stream.write(json.dumps(row) + "\n")
+    (out / "aircraft.jsonl.sorted").replace(out / "aircraft.jsonl")
     readout = summaries(rows)
     write_json_atomic(out / "window_generation.json", {
         "schema": SCHEMA, "written_utc": utc_now(), "git": git, "split": args.split, "drawn": draw.counts,
