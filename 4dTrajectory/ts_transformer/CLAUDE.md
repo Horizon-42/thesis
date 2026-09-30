@@ -415,6 +415,10 @@ stream: the sentences do not depend on their number); `--passes` sweeps against 
 paired standard errors (R32). `traffic_reward_readout` reads a finished M4 run round by round from its files — select numbers per side, kind and approach type,
 where the reward term's signal comes from, round 0 against the last on the same draws (the select readout is seeded alike every round:
 paired, not repeated tries) beside M3's labelled and recorded readings (R33).
+`prior_generation_records` flies a free-generation readout's STORED sentences again (the readout's draw and chunks; every
+sentence must reproduce its readout row) and writes them as evaluation records per sample — ADE / FDE from row `N_LOOK`
+against the observed flight, the evaluation's pass rate over every sentence, best of the samples; an augmented start has no
+truth, so its readout carries the pass rate only (R35).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 
