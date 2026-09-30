@@ -415,6 +415,11 @@ stream: the sentences do not depend on their number); `--passes` sweeps against 
 paired standard errors (R32). `traffic_reward_readout` reads a finished M4 run round by round from its files — select numbers per side, kind and approach type,
 where the reward term's signal comes from, round 0 against the last on the same draws (the select readout is seeded alike every round:
 paired, not repeated tries) beside M3's labelled and recorded readings (R33).
+`traffic_window_generation` is M3's second pass — every aircraft of a 20-minute window commanded at once
+(`experiments/traffic_window.py` WindowLoop, `prior/window_speaker.py`: rounds from the front of the approach clock,
+executors grouped by first spoken step, the judge run as it flies, ended aircraft flying on silent), beside alone /
+labelled / recorded, all judged in the window; `--augment-seed` on augmented windows (`experiments/traffic_window_augment.py`:
+the flow compressed, a start moved, a flight inserted and commanded; capped at the airport's busiest training step) (R34).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 

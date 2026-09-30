@@ -898,3 +898,46 @@ separation, with each group's share of losses, of vectored approaches (real) and
 labelled words and along their records. A flight with a sentence starting in a loss in any round (the first step's runway
 word decides the runway it is judged against), or whose record or labelled reading starts in one, is left out of this part
 and counted. The last round is not necessarily the kept one (`choice.round`). Writes `traffic_reward_readout.json`.
+
+### R34 · `run_ts.py traffic_window_generation` — multi-aircraft M3's second pass: the post-training's start commanding every aircraft of a window (design §6.6 step 7 item 4)
+
+2026-09-30. `traffic_window_generation --prior <single-aircraft prior (augmented)> --executor <spec> --instructions
+<artefact> --split select --out <new dir> [--windows-per-airport 200] [--samples 4] [--aircraft-steps 100000] [--workers 6]
+[--augment-seed N] [--device]`.
+The windows (`experiments/traffic_window.py`, design §6.6 step 7 item 1): each airport's segments tiled by 20-minute windows
+opening every 10 minutes; a window commands its flights with a sentence entering in it that fly on their own dynamics, the
+rest replayed; drawn per airport in a seeded permutation of the tiles, a tile with no flight that flies passed over and
+counted. The loop (`WindowLoop`): the prior (`prior/window_speaker.py`) speaks to every commanded aircraft at once — one
+encoding a step, the words picked round by round from the front of the approach clock, a later round's separation masks
+reading an earlier round's words — the executors grouped by the step aircraft first speak at (the executor's cycle count is
+batch-wide; its code untouched), the judge run as it flies (`traffic_loop.Judging`): an aircraft ended there flies on
+silent, still in the scene (design §9 item 29); an own end the executor flies past (a stall, an uncaptured crossing,
+another runway's) is found as it happens with the runway in force; each commanded aircraft's landing context is its
+window's landings less the other commanded aircraft's recorded ones, theirs added as they land in the loop. With one
+commanded aircraft a window it says, flies and ends exactly as R31's loop (tests). Every commanded aircraft is read four
+ways, all judged in its window: **scene**, **alone** (each aircraft hearing no other, no separation mask, flown and judged
+together), **labelled**, **recorded** (the last two judged afterwards by `traffic_loop.Loop(keep_ended=True)`); IFR beside
+VISUAL as every source's paths judged again afterwards. Per source — pooled, per airport, per window size (1, 2, 3+
+commanded) — outcomes, lost separation (ended with a commanded aircraft or a replayed one), episodes per aircraft and per
+hour, M4's reward, the landing time against the record, how often two commanded aircraft of a window land the other way
+round, the masks, and how one window's rewards go together over its samples (the pooled correlation of each aircraft's
+reward less its mean). Each loop batch draws from its own streams, and `--workers` forked processes (after the data
+are built, before the GPU starts) read the batches their index deals them — what is read does not depend on their number
+(tests; the 2026-09-30 smokes wrote the same files with 4 and 6); the loop is bound by the CPU (15 windows in 4.5 min in
+one process, GPU 2.3 GB, 8–41 % busy; 30 windows in 3 min with 4 or 6, 0.88 GB of the GPU a process). Writes `aircraft.jsonl` (appended per batch) and
+`window_generation.json` (`ts-traffic-window-generation-v2`: v1 before the augmentation, the formal
+`window_generation_20260930`).
+**`--augment-seed`** (design §6.6 step 7 item 6, `experiments/traffic_window_augment.py`): every window augmented, a third
+each (a window's kind drawn once, only its parameters drawn again) — **C** the commanded aircraft moved whole toward the window's opening (their first row's time after it × c,
+c ~ U[0.6, 1.0]), **B** one commanded aircraft's start moved as stage 2 moves it (its time limit stage 2's; what the others
+read of it before it flies is its moved rows, never established), **A** a flight of the draw at the airport inserted and
+commanded, g × the required gap ahead of a drawn commanded aircraft on the approach clock (g ~ U[0.5, 2.0], R31's timing),
+its source no longer replayed. Every shift whole seconds (a flight's own landing leaves its landing context by its exact
+time). Qualified: no commanded aircraft answers for a loss through its observed rows against the others' records
+(stricter than the loop: a refusal drops the whole window), never more aircraft on one step than the data has had — the
+airport's busiest step on the training days (`busiest`, computed at the start) or, where busier, the same span as
+recorded (a longer time limit can bring in recorded traffic, which is not added): only what the augmentation adds is
+capped, each window's cap and count kept with it — and every time limit within the model's positions (a stage-2 limit
+can pass them); ten draws a window at most, else it is left out (counted by airport and kind); the refusals are counted
+by why. Read by the model's sources only (a
+moved start has no record); the readout adds each kind and each aircraft's part (shifted, moved, inserted, as drawn).
