@@ -27,6 +27,13 @@ record and how often two commanded aircraft of a window land in the other order 
 the separation masks, and — design §6.6 step 7 item 5 — how the rewards of one window's aircraft go together over its
 samples (the pooled correlation of each aircraft's reward less its mean over the samples, over the pairs of a window).
 
+With ``--augment-seed`` every window is augmented instead (`traffic_window_augment`: the flow compressed, a start moved,
+a flight inserted and commanded, a third each; qualified, and never more aircraft at once than the airport's busiest step
+on the training days), read by the model's sources only — as M3's first pass on augmented scenes: a moved start has no
+record, and its labelled words would fly from the recorded start. Each row carries its window's augmentation and its
+aircraft's part in it; the readout adds each kind and each part, and counts the windows left out and the draws refused,
+by why.
+
 Writes into a NEW directory ``aircraft.jsonl`` (a row per commanded aircraft, source and sample, appended as each batch
 ends) and ``window_generation.json`` (the readout). A batch holds at most ``--aircraft-steps`` window samples × their
 aircraft × their steps (the model's past, 6 KB an aircraft-step). **In several processes** (``--workers``, forked once the
@@ -66,7 +73,7 @@ from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.flights import flight_inputs
 from ts_transformer.autopilot.judge import outcome_of
 from ts_transformer.experiments.prior_free_generation import (
-    _physics, fly_reference, glidepath_stops, limits_s, reference_grid,
+    _physics, augmented_inputs, fly_reference, glidepath_stops, limits_s, reference_grid, start_altitude_windows,
 )
 from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, load_prior, rosters
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION, Controlled, Loop, Run, recorded
@@ -77,11 +84,13 @@ from ts_transformer.experiments.traffic_speaking import (
 from ts_transformer.experiments.traffic_window import (
     Window, WindowLoop, _with_landing, draw_windows, window_landings, window_of,
 )
+from ts_transformer.experiments.traffic_window_augment import KINDS, REFUSALS, ROLES, augment_window, busiest
 from ts_transformer.inference.scene_edges import EDGE_FEATURES
 from ts_transformer.inference.separation import IFR, VISUAL
 from ts_transformer.instructions.artefact import SPLITS
 from ts_transformer.instructions.words import COLUMNS, Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
+from ts_transformer.prior.augment import Augmentation
 from ts_transformer.prior.data import VARIANTS, airport_landings
 from ts_transformer.prior.generate import rows_for
 from ts_transformer.prior.landing_reward import landing_direction
@@ -89,7 +98,7 @@ from ts_transformer.prior.model import Prior, with_traffic
 from ts_transformer.prior.scene import N_LOOK, Landings, hang, presence
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
-SCHEMA = "ts-traffic-window-generation-v1"
+SCHEMA = "ts-traffic-window-generation-v2"
 SOURCES = ("scene", "alone", "labelled", "recorded")
 #: A batch's most aircraft-steps (module docstring): about 0.6 GB of the model's past on its d and layers — a process's,
 #: four beside each other in the 8 GB GPU (M4's speaking processes hold as much).
@@ -103,13 +112,18 @@ SIZES = ("1", "2", "3+")
 
 @dataclasses.dataclass(frozen=True)
 class Drawn:
-    """The windows read: each window (its commanded aircraft over their time limits) and its commanded aircraft's
-    places in ``batch`` (`traffic_window.WindowDraw.members`), with each one's time limit."""
+    """The windows read: each window (its commanded aircraft over their time limits), what augmented it
+    (`traffic_window_augment`: its kind, draws and what was drawn; None: as drawn) and its commanded aircraft's places
+    in ``batch`` (`traffic_window.WindowDraw.members`), with each one's time limit, moved start (None: its own) and part
+    in its window's augmentation (`traffic_window_augment.ROLES`; None: as drawn)."""
 
     windows: list[Window]
+    augmented: list[dict[str, Any] | None]
     members: list[range]
     batch: replay.Batch
     limits: list[float]
+    moves: list[Augmentation | None]
+    roles: list[str | None]
 
 
 def drawn_windows(draw: Any, airports: Mapping[str, Any], params: Any, step_s: float) -> Drawn:
@@ -118,7 +132,44 @@ def drawn_windows(draw: Any, airports: Mapping[str, Any], params: Any, step_s: f
     members = draw.members()
     windows = [window_of(airports[code], opens, commanded, [limits[j] for j in part], step_s)
                for (code, opens, commanded), part in zip(draw.openings, members)]
-    return Drawn(windows, members, draw.batch, limits)
+    count = len(draw.batch.signals)
+    return Drawn(windows, [None] * len(windows), members, draw.batch, limits, [None] * count, [None] * count)
+
+
+def augmented_windows(drawn: Drawn, params: Any, most: Mapping[str, int], seed: int,
+                      windows: dict[str, tuple[float, float]], spec: Any, kinds: Sequence[str] = KINDS
+                      ) -> tuple[Drawn, dict[str, Any]]:
+    """Every window of ``drawn`` augmented (`traffic_window_augment.augment_window` over ``kinds``, one generator from
+    ``seed`` in the windows' order; an insertion drawn from the draw's flights at the window's airport, ``most`` each
+    airport's busiest step on the training days): the windows kept, and the count of the kinds, of the windows left out
+    and of the draws refused, by why."""
+    rng = np.random.default_rng(seed)
+    moved_limits = limits_s(drawn.batch, params, spec.step_s, augmented=True)
+    pools: dict[str, dict[str, int]] = defaultdict(dict)
+    for j, signals in enumerate(drawn.batch.signals):
+        pools[signals.airport].setdefault(signals.dataset_id, j)
+    kept, left_out, refused = [], Counter(), Counter()
+    for window, part in zip(drawn.windows, drawn.members):
+        code = window.airport.flights.code
+        got, why = augment_window(window, drawn.batch, list(part), pools[code], drawn.limits, moved_limits, most[code],
+                                  rng, windows, spec, kinds)
+        refused.update(why)
+        if got is None:
+            left_out[code] += 1
+        else:
+            kept.append(got)
+    batch = dataclasses.replace(replay.subset(drawn.batch, [j for a in kept for j in a.places]),
+                                signals=[s for a in kept for s in a.signals])
+    members, at = [], 0
+    for a in kept:
+        members.append(range(at, at + len(a.places)))
+        at += len(a.places)
+    counts = {"kinds": {kind: sum(a.kind == kind for a in kept) for kind in KINDS},
+              "left_out": dict(left_out), "refused": {why: refused[why] for why in REFUSALS},
+              "cap_most_at_once": dict(most)}
+    return Drawn([a.window for a in kept], [{"kind": a.kind, "draws": a.draws, **a.drawn} for a in kept], members,
+                 batch, [x for a in kept for x in a.limits], [m for a in kept for m in a.moves],
+                 [r for a in kept for r in a.roles]), counts
 
 
 def window_size(window: Window, limits: Sequence[float], step_s: float) -> tuple[int, int, int, int]:
@@ -203,9 +254,10 @@ def model_rows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, wo
     index = [j for w in instances for j in drawn.members[w]]
     part = replay.subset(drawn.batch, index)
     runways, charts, approach = _physics(part, cpu)
-    loop = WindowLoop(model, [drawn.windows[w] for w in instances], part.signals, part.geometries,
-                      flight_inputs(part.series, device=cpu, anchor=N_LOOK), runways, charts, approach,
-                      [drawn.limits[j] for j in index], words, params, landings, generator=generator,
+    inputs = augmented_inputs(flight_inputs(part.series, device=cpu, anchor=N_LOOK), part.geometries,
+                              [drawn.moves[j] for j in index])
+    loop = WindowLoop(model, [drawn.windows[w] for w in instances], part.signals, part.geometries, inputs, runways,
+                      charts, approach, [drawn.limits[j] for j in index], words, params, landings, generator=generator,
                       temperature=temperature, procedure_masks=procedure_masks, alone=source == "alone")
     while loop.running:
         loop.step()
@@ -220,7 +272,7 @@ def model_rows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, wo
                          for i in here if results[i].landing_s is not None]
         for i in here:
             got = results[i]
-            row = _aircraft_row(part, i, w, window, source, b % samples)
+            row = _aircraft_row(drawn, part, i, index[i], w, source, b % samples)
             row.update(path_fields(loop.runs[b], again, got.key, loop.path(i), window.commanded, got.own,
                                    until[got.key]),
                        said_steps=len(got.said), counted=got.counted, landing_s=got.landing_s, runway=got.runway,
@@ -246,12 +298,13 @@ def _loop_context(window: Window, key: str, landings: Mapping[str, Landings],
     return out
 
 
-def _aircraft_row(batch: replay.Batch, j: int, w: int, window: Window, source: str, sample: int | None
+def _aircraft_row(drawn: Drawn, part: replay.Batch, i: int, j: int, w: int, source: str, sample: int | None
                   ) -> dict[str, Any]:
-    signals = batch.signals[j]
+    """Commanded aircraft ``i`` of ``part`` (``j`` of ``drawn``) in window ``w``: who it is and how it was read."""
+    signals = part.signals[i]
     return {"dataset_id": signals.dataset_id, "airport": signals.airport, "window": w,
-            "commanded": len(window.commanded), "source": source, "sample": sample,
-            "observed_runway": batch.readings[j].runway_index}
+            "commanded": len(drawn.windows[w].commanded), "source": source, "sample": sample,
+            "observed_runway": part.readings[i].runway_index, "augmented": drawn.augmented[w], "role": drawn.roles[j]}
 
 
 def fixed_rows(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, params: Any, landings: Any,
@@ -295,7 +348,7 @@ def fixed_rows(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, pa
         run, again = (_judged_again(window, paths, until, reading, step_s) for reading in (VISUAL, IFR))
         for m, (key, path) in enumerate(zip(window.commanded, paths)):
             j = at + m
-            row = _aircraft_row(part, j, w, window, source, None)
+            row = _aircraft_row(drawn, part, j, index[j], w, source, None)
             row.update(path_fields(run, again, key, path, window.commanded, owns[m], until[key]),
                        landing_s=path.landing_s if owns[m] == "landed" else None, runway=runways[m])
             if source == "labelled":
@@ -419,28 +472,36 @@ def together(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
     return {"pairs": pairs, "correlation": products / denominator if denominator else None}
 
 
-def summaries(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    """`summary` pooled, per airport and per window size."""
+def summaries(rows: Sequence[dict[str, Any]], augmented: bool) -> dict[str, Any]:
+    """`summary` pooled, per airport and per window size — and, on ``augmented`` windows, per kind and per commanded
+    aircraft's part in its window's augmentation (`traffic_window_augment.ROLES`; "as drawn": the others of a B or an
+    A window)."""
     by_airport: dict[str, list[dict[str, Any]]] = defaultdict(list)
     by_size: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         by_airport[row["airport"]].append(row)
         by_size[SIZES[min(row["commanded"], 3) - 1]].append(row)
-    return {"pooled": summary(rows), "airports": {code: summary(part) for code, part in sorted(by_airport.items())},
-            "window_sizes": {size: summary(by_size[size]) for size in SIZES if by_size[size]}}
+    out = {"pooled": summary(rows), "airports": {code: summary(part) for code, part in sorted(by_airport.items())},
+           "window_sizes": {size: summary(by_size[size]) for size in SIZES if by_size[size]}}
+    if augmented:
+        kinds = {kind: [r for r in rows if r["augmented"]["kind"] == kind] for kind in KINDS}
+        roles = {role or "as drawn": [r for r in rows if r["role"] == role] for role in (*ROLES, None)}
+        out["kinds"] = {kind: summary(part) for kind, part in kinds.items() if part}
+        out["roles"] = {role: summary(part) for role, part in roles.items() if part}
+    return out
 
 
 def batch_rows(model: Prior, drawn: Drawn, number: int, chunk: Sequence[int], words: Words, params: Any,
                landings: Any, every_landing: Mapping[str, Landings], samples: int, *, seed: int, temperature: float,
-               procedure_masks: Any, device: torch.device) -> list[dict[str, Any]]:
-    """Loop batch ``number`` (the windows at ``chunk``) read every way, the model's sources each from its own stream
-    (`batch_seed`): its rows, each marked with the batch."""
+               procedure_masks: Any, device: torch.device, fixed: bool) -> list[dict[str, Any]]:
+    """Loop batch ``number`` (the windows at ``chunk``) read by the model's sources, each from its own stream
+    (`batch_seed`), and — ``fixed`` — the labelled words and the records: its rows, each marked with the batch."""
     rows: list[dict[str, Any]] = []
     for source in ("scene", "alone"):
         generator = torch.Generator(device=device).manual_seed(batch_seed(seed, source, number))
         rows += model_rows(model, drawn, chunk, source, words, params, landings, every_landing, samples,
                            generator=generator, temperature=temperature, procedure_masks=procedure_masks)
-    for source in ("labelled", "recorded"):
+    for source in ("labelled", "recorded") if fixed else ():
         rows += fixed_rows(drawn, chunk, source, words, params, every_landing, procedure_masks)
     for row in rows:
         row["batch"] = number
@@ -529,6 +590,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--aircraft-steps", type=int, default=AIRCRAFT_STEPS, help="a batch's most (module docstring)")
     parser.add_argument("--workers", type=int, default=WORKERS, help="reading processes (what is read does not depend "
                         "on it)")
+    parser.add_argument("--augment-seed", type=int, default=None, help="every window augmented with this seed "
+                        "(`traffic_window_augment`; the model's sources only)")
     parser.add_argument("--device", default="cuda", help="the prior's; the executors fly on CPU")
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     args = parser.parse_args(argv)
@@ -557,6 +620,13 @@ def main(argv: list[str] | None = None) -> int:
     draw = draw_windows(instructions, args.split, words.spec, words, airports, per_airport=args.windows_per_airport,
                         seed=args.seed, step_s=step_s)
     drawn = drawn_windows(draw, airports, params, step_s)
+    augmented = args.augment_seed is not None
+    augmenting = None
+    if augmented:
+        drawn, augmenting = augmented_windows(drawn, params, busiest(instructions, words.spec, model.config.airports,
+                                                                     step_s),
+                                              args.augment_seed, start_altitude_windows(instructions), words.spec)
+        print(f"augmented windows: {augmenting}", flush=True)
     print(f"{len(drawn.windows)} {args.split} windows, {len(drawn.batch.readings)} commanded aircraft "
           f"({draw.counts}), scenes built ({built}), {time.perf_counter() - started:.0f}s", flush=True)
 
@@ -568,7 +638,7 @@ def main(argv: list[str] | None = None) -> int:
         speaking = model.to(device)
         return batch_rows(speaking, drawn, number, batches[number], words, params, landings, every_landing,
                           args.samples, seed=args.seed, temperature=args.temperature, procedure_masks=own_masks,
-                          device=device)
+                          device=device, fixed=not augmented)
 
     gc.collect()
     gc.freeze()                                         # the reading processes share the parent's data, not copy it
@@ -591,11 +661,11 @@ def main(argv: list[str] | None = None) -> int:
         for row in rows:
             stream.write(json.dumps(row) + "\n")
     (out / "aircraft.jsonl.sorted").replace(out / "aircraft.jsonl")
-    readout = summaries(rows)
+    readout = summaries(rows, augmented)
     write_json_atomic(out / "window_generation.json", {
         "schema": SCHEMA, "written_utc": utc_now(), "git": git, "split": args.split, "drawn": draw.counts,
         "windows_per_airport": args.windows_per_airport, "samples": args.samples, "temperature": args.temperature,
-        "seed": args.seed, "prior": {"directory": repo_relative(prior_dir), "procedure_masks": list(own_masks.names),
+        "seed": args.seed, "augment_seed": args.augment_seed, "augmenting": augmenting, "prior": {"directory": repo_relative(prior_dir), "procedure_masks": list(own_masks.names),
                                      "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt")},
         "traffic_attention": "zero (with_traffic): the prior's answers to rounding",
         "executor": {"directory": repo_relative(executor_dir), "sha256": record["sha256"]},
@@ -610,6 +680,10 @@ def main(argv: list[str] | None = None) -> int:
               f"  order {entry['order']}  {shares}")
         if "reward_together" in entry:
             print(f"          masks: steps {entry['mask_steps_share']}  rewards together {entry['reward_together']}")
+    for group in ("kinds", "roles") if augmented else ():
+        for name, part in readout[group].items():
+            print(f"{name:9s} " + "  ".join(f"{source} n={entry['aircraft']} reward {entry['reward']:.3f} lost "
+                                            f"{entry['lost_separation']:.3f}" for source, entry in part.items()))
     print(f"→ {out}")
     return 0
 

@@ -526,6 +526,14 @@ def _patch_runner_physics(monkeypatch, signals, geometry, keys):
                                                                       stacked(part.series, 3)))
 
 
+def _as_drawn(windows, members, batch, limits):
+    """The runner's windows as drawn (none augmented)."""
+    from ts_transformer.experiments import traffic_window_generation as runner
+
+    count = len(batch.signals)
+    return runner.Drawn(windows, [None] * len(windows), members, batch, limits, [None] * count, [None] * count)
+
+
 def test_the_window_runner_reads_every_commanded_aircraft_four_ways_judged_in_its_window(tmp_path, monkeypatch):
     import numpy as np
     import torch
@@ -546,7 +554,7 @@ def test_the_window_runner_reads_every_commanded_aircraft_four_ways_judged_in_it
     keys = [k for keys in commanded for k in keys]
     batch = _batch(airport, signals, spec, keys)
     windows = [window_of(airport, 0.0, c, [LIMIT_S] * len(c), STEP_S) for c in commanded]
-    drawn = runner.Drawn(windows, [range(0, 2), range(2, 3)], batch, [LIMIT_S] * 3)
+    drawn = _as_drawn(windows, [range(0, 2), range(2, 3)], batch, [LIMIT_S] * 3)
     _patch_runner_physics(monkeypatch, signals, geometry, keys)
     times = np.sort([f.presence.landing_s for f in airport.flights.flights.values()])
     every = {"KXXX": Landings(times, {c.ident: times if c.ident == "09" else np.zeros(0) for c in geometry.candidates})}
@@ -569,7 +577,7 @@ def test_the_window_runner_reads_every_commanded_aircraft_four_ways_judged_in_it
     assert all(r["mask_steps"] == {"approach": 0, "speed": 0} for r in by_source["alone"])
     # the record lands where it landed; its landing is the one the others' landing times are read against
     assert all(r["outcome"] in ("landed", "lost_separation") for r in by_source["recorded"])
-    readout = runner.summaries(rows)
+    readout = runner.summaries(rows, augmented=False)
     assert set(readout["pooled"]) == set(runner.SOURCES) and set(readout["window_sizes"]) == {"1", "2"}
     assert readout["pooled"]["scene"]["reward_together"]["pairs"] in (0, 1)
     assert readout["window_sizes"]["1"]["scene"]["reward_together"] == {"pairs": 0, "correlation": None}
@@ -782,7 +790,7 @@ def test_a_glidepath_stop_is_read_to_its_judged_end_through_the_runner(tmp_path,
                                                                   for c in geometry.candidates)})
     keys, limit = ["KXXX:f2", "KXXX:f3", "KXXX:f5", "KXXX:f3"], 200.0
     windows = [window_of(airport, 0.0, (k,), [limit], STEP_S) for k in keys]
-    drawn = runner.Drawn(windows, [range(j, j + 1) for j in range(4)], _batch(airport, signals, spec, keys), [limit] * 4)
+    drawn = _as_drawn(windows, [range(j, j + 1) for j in range(4)], _batch(airport, signals, spec, keys), [limit] * 4)
     _patch_runner_physics(monkeypatch, signals, geometry, keys)
     every = {"KXXX": _pool(airport)}
     rows = runner.model_rows(_traffic_model(spec), drawn, [0, 1, 2, 3], "scene", Words(spec), _params(), None, every, 1,
@@ -861,14 +869,14 @@ def test_a_batch_reads_the_same_whatever_else_is_read_and_in_whichever_process(t
     commanded = [("KXXX:f0", "KXXX:f1"), ("KXXX:f2",)]
     keys = [k for keys in commanded for k in keys]
     windows = [window_of(airport, 0.0, c, [LIMIT_S] * len(c), STEP_S) for c in commanded]
-    drawn = runner.Drawn(windows, [range(0, 2), range(2, 3)], _batch(airport, signals, spec, keys), [LIMIT_S] * 3)
+    drawn = _as_drawn(windows, [range(0, 2), range(2, 3)], _batch(airport, signals, spec, keys), [LIMIT_S] * 3)
     _patch_runner_physics(monkeypatch, signals, geometry, keys)
     model, every = _traffic_model(spec), {"KXXX": _pool(airport)}
     cpu = torch.device("cpu")
 
     def read(number):
         return runner.batch_rows(model, drawn, number, [number], Words(spec), _params(), None, every, 2, seed=5,
-                                 temperature=1.0, procedure_masks=ProcedureMasks.none(), device=cpu)
+                                 temperature=1.0, procedure_masks=ProcedureMasks.none(), device=cpu, fixed=True)
 
     alone = read(1)
     after = (read(0), read(1))[1]

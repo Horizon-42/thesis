@@ -41,7 +41,7 @@ from ts_transformer.experiments.traffic_labelled import own_end
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION, Controlled, Judging, Run, join
 from ts_transformer.experiments.traffic_scene_data import FlightRows
 from ts_transformer.experiments.traffic_speaking import (
-    HISTORY_S, MASK_COLUMNS, Aircraft, OthersAt, Scene, SceneAirport, edge_rows, others_at, scene_landings,
+    HISTORY_S, INSERTED, MASK_COLUMNS, Aircraft, OthersAt, Scene, SceneAirport, edge_rows, others_at, scene_landings,
     speaking_masks,
 )
 from ts_transformer.inference.scene_edges import SceneRows, scene_edge_blocks
@@ -96,12 +96,16 @@ class Window:
         return float(hang(self.rows(key).presence.start_s, step_s))
 
     def scene(self, key: str, step_s: float) -> Scene:
-        """Commanded aircraft ``key``'s view of the window as a one-speaking scene: it speaking, every other aircraft of
-        the window among the others — the other commanded ones first, in the window's order, then the replayed."""
-        if self.moved:
-            raise NotImplementedError("an augmented window's scene view (design §6.6 step 7.5)")
-        others = tuple(k for k in self.commanded if k != key) + self.others
-        return Scene(self.airport, key, self.first_step_s(key, step_s), others)
+        """Commanded aircraft ``key``'s view of the window as a one-speaking scene (`view`): every other aircraft of the
+        window among the others — the other commanded ones first, in the window's order, then the replayed."""
+        return self.view(key, self.first_step_s(key, step_s),
+                         tuple(k for k in self.commanded if k != key) + self.others)
+
+    def view(self, key: str, first_step_s: float, others: tuple[str, ...]) -> Scene:
+        """Commanded aircraft ``key`` speaking from ``first_step_s`` in a scene of this window with ``others``, the
+        window's moved flights found by their keys. An inserted aircraft speaks as the flight it was inserted from: what
+        a scene reads of its speaking flight is its category, the same."""
+        return Scene(self.airport, key.removesuffix(INSERTED), first_step_s, others, self.moved)
 
 
 def window_tiles(airport: SceneAirport, step_s: float) -> list[tuple[float, tuple[str, ...]]]:
@@ -122,16 +126,19 @@ def window_tiles(airport: SceneAirport, step_s: float) -> list[tuple[float, tupl
 
 
 def window_of(airport: SceneAirport, opens_s: float, commanded: Sequence[str], limits_s: Sequence[float],
-              step_s: float) -> Window:
-    """The window opening at ``opens_s`` with ``commanded`` (each flying ``limits_s`` from its first predicted step):
-    everything else in the air from the first one's first row to the end of the last one's time limit replayed."""
-    firsts = [float(hang(airport.flights.flights[k].presence.start_s, step_s)) for k in commanded]
+              step_s: float, moved: Sequence[tuple[FlightRows, Track]] = (), left_out: Sequence[str] = ()) -> Window:
+    """The window opening at ``opens_s`` with ``commanded`` (each flying ``limits_s`` from its first predicted step;
+    ``moved``: flights moved in time or inserted, an augmented window's): everything else in the air from the first one's
+    first row to the end of the last one's time limit replayed — but ``left_out`` (an inserted flight's source)."""
+    window = Window(airport, opens_s, tuple(commanded), (), tuple(moved))
+    firsts = [window.first_step_s(k, step_s) for k in commanded]
     start = min(firsts)
     end = max(first + N_LOOK * step_s + limit for first, limit in zip(firsts, limits_s))
-    taken = set(commanded)
-    others = tuple(k for k, t in airport.tracks.items()
-                   if k not in taken and t.first_step_s <= end and t.last_step_s >= start)
-    return Window(airport, opens_s, tuple(commanded), others)
+    taken = set(commanded) | set(left_out)
+    tracks = [window.track(k) for k in airport.tracks if k not in taken] + \
+        [track for _, track in moved if track.key not in taken]
+    others = tuple(t.key for t in tracks if t.first_step_s <= end and t.last_step_s >= start)
+    return dataclasses.replace(window, others=others)
 
 
 @dataclass(frozen=True)
@@ -757,7 +764,7 @@ class WindowLoop:
             for m, i in enumerate(members):
                 window = self.windows[self.window_of[i]]
                 others = window.others if m == 0 and not self.alone else ()
-                scene = Scene(window.airport, self.keys[i], window.first_step_s(self.keys[i], self.step_s), others)
+                scene = window.view(self.keys[i], window.first_step_s(self.keys[i], self.step_s), others)
                 parts.append(edge_rows(scene, speaker.e[i], speaker.n[i], speaker.h[i], pointers[i],
                                        int(speaker.rows[i]), int(self.start[i]), low, last, self.step_s))
             head = parts[0]                                   # the first commanded one, then its replayed ones
@@ -814,7 +821,7 @@ class WindowLoop:
         key = (w, step, tuple(waiting))
         if key not in self._others:
             self._others = {k: v for k, v in self._others.items() if k[1] == step}
-            self._others[key] = others_at(Scene(window.airport, self.keys[i], 0.0, tuple(waiting) + window.others),
+            self._others[key] = others_at(window.view(self.keys[i], 0.0, tuple(waiting) + window.others),
                                           t_s, self.words)
         replayed = self._others[key]
         if not commanded:

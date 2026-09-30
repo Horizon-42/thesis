@@ -418,7 +418,8 @@ paired, not repeated tries) beside M3's labelled and recorded readings (R33).
 `traffic_window_generation` is M3's second pass — every aircraft of a 20-minute window commanded at once
 (`experiments/traffic_window.py` WindowLoop, `prior/window_speaker.py`: rounds from the front of the approach clock,
 executors grouped by first spoken step, the judge run as it flies, ended aircraft flying on silent), beside alone /
-labelled / recorded, all judged in the window (R34).
+labelled / recorded, all judged in the window; `--augment-seed` on augmented windows (`experiments/traffic_window_augment.py`:
+the flow compressed, a start moved, a flight inserted and commanded; capped at the airport's busiest training step) (R34).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 
