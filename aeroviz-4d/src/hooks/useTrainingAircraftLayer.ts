@@ -25,7 +25,7 @@ import { TRAINING_TRACE_COLOR, trainingModelColour } from "../utils/trainingWord
 
 const ID = "training-aircraft";
 /** The model's least size on screen (px). */
-const AIRCRAFT_PX = 44;
+const AIRCRAFT_PX = 64;
 
 export default function useTrainingAircraftLayer(): void {
   const { viewer, mode, trainingSelection, trainingGenerations, trainingSource, trainingWindow } = useApp();
@@ -50,7 +50,7 @@ export default function useTrainingAircraftLayer(): void {
     const first = poseAt(drawn.track, drawn.track.tS[0])!;
     entity.current = group.add({
       ...aircraftModel(ID, drawn.who, first, { css: drawn.css, blend: 0.4, alpha: 1, minimumPixelSize: AIRCRAFT_PX,
-        ringCss: "#000000", ringPx: 1 }),
+        ringCss: "#000000", ringPx: 2 }),
       label: { text: poseText(first), font: "600 12px sans-serif", fillColor: colour(drawn.css), outlineColor: Cesium.Color.BLACK,
         outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, 30),
         verticalOrigin: Cesium.VerticalOrigin.TOP, disableDepthTestDistance: Number.POSITIVE_INFINITY },

@@ -64,7 +64,7 @@ type Ready = Extract<TrainingAutopilotView, { status: "ready" }>;
 /** The tail's dash in 3D, pixels: half Cesium's default (16), which an occluded line is drawn with. */
 const TAIL_DASH_PX = 8;
 /** The live aircraft model's least size on screen (px). */
-const AUTOPILOT_AIRCRAFT_PX = 40;
+const AUTOPILOT_AIRCRAFT_PX = 56;
 
 /** Show or hide the entities of ``ids`` that are there. */
 function showEntities(viewer: Cesium.Viewer, ids: string[], shown: boolean): void {

@@ -61,12 +61,12 @@ const ROLE_DRAW: Record<TrainingAircraftRole, {
   labelFont: string;
   labelAlpha: number;
 }> = {
-  onScreen: { track: null, modelPx: 46, blend: 0.2, alpha: 1, ringPx: 3, labelFont: "700 13px sans-serif", labelAlpha: 1 },
-  commanded: { track: { width: 2.5, alpha: 1 }, modelPx: 34, blend: 0.6, alpha: 1, ringPx: 1, labelFont: "600 12px sans-serif",
+  onScreen: { track: null, modelPx: 64, blend: 0.2, alpha: 1, ringPx: 3, labelFont: "700 13px sans-serif", labelAlpha: 1 },
+  commanded: { track: { width: 2.5, alpha: 1 }, modelPx: 46, blend: 0.6, alpha: 1, ringPx: 2, labelFont: "600 12px sans-serif",
     labelAlpha: 1 },
-  replayed: { track: { width: 1.2, alpha: TRAINING_OTHER_AIRCRAFT_ALPHA.replayed }, modelPx: 26, blend: 0.7, alpha: 0.85, ringPx: 0,
+  replayed: { track: { width: 1.2, alpha: TRAINING_OTHER_AIRCRAFT_ALPHA.replayed }, modelPx: 34, blend: 0.7, alpha: 0.85, ringPx: 0,
     labelFont: "500 11px sans-serif", labelAlpha: 0.8 },
-  background: { track: { width: 1, alpha: TRAINING_OTHER_AIRCRAFT_ALPHA.background }, modelPx: 22, blend: 0.7, alpha: 0.7,
+  background: { track: { width: 1, alpha: TRAINING_OTHER_AIRCRAFT_ALPHA.background }, modelPx: 28, blend: 0.7, alpha: 0.7,
     ringPx: 0, labelFont: "500 10px sans-serif", labelAlpha: 0.65 },
 };
 
