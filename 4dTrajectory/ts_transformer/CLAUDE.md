@@ -433,6 +433,11 @@ scores its lateness × speed; the arrival endpoint error is where it landed (R38
 module — a model-free window set (`traffic-windows`: 20 select windows an airport of the readouts' draw, by size) and a
 `window-generation` overlay per prior on its OWN draws (no readout re-run; `--readout` only copies summaries); the landings
 are the aircraft whose own end is a landing; the M4 model is named `traffic` (R36).
+**Every Training export writes the attitude each track is drawn in** (`experiments/training_attitude.py`, 2026-09-30): heading,
+path angle, right bank and an attack READING — executor tracks from its states and the command of the cycle starting at each row
+(the track's end: the cycle ending there), observed tracks from `rebuild_series` + the teacher's `actual_controls`, none for a flight
+without an airframe; read-only on `autopilot/`, `outputs/dynamics/`, `traffic_window*.py` (sample v8, traffic v2, executor v5,
+generation v5, augmented v3, window-generation v2; frontend AV42).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 

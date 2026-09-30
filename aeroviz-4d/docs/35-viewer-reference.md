@@ -704,7 +704,41 @@ that divergence is a known open item (see the README's "Future Improvements").
   集合里每架航班的请求都是毫秒级（原来每架新航班重建 1.5–2 s）。
   后端不热更新：改了这部分要重启后端。
 
-### AV40 · a prediction that passed on another runway has its own status and colour (2026-09-30)
+### AV42 · 飞机用三维模型，姿态是导出器算好的（2026-09-30）
+
+- 用户（2026-09-30）：飞机不用点表示，用飞机模型，绑定真实的坡度、航向和迎角，整个 Training 模块都改。设计与分步在
+  `36-2026-09-20-training-module.zh.md` §4.12。**迎角选 b**：机头俯仰只取航迹角，迎角只写进标签——项目的升力线
+  `CL = 0.2 + 5.7·α`（`aerodynamic_model/simulator.py`）没有襟翼，最后进近 70 m/s 时读出 α ≈ 15°，画上去机头会抬 12°。
+- **姿态只在 Python 里算一次**（`4dTrajectory/ts_transformer/experiments/training_attitude.py`），写进每条导出航迹的
+  `attitude` 块（`headingDeg` 罗盘度、`pathAngleDeg`、`bankRightDeg` 右坡度为正、`attackDeg` 读数，与航迹逐点对齐）；
+  前端只读和插值（`data/trainingAttitude.ts`：`readAttitude`、`poseAt` 航向走短的一边、`poseText`）。
+  - 执行器飞出的航迹（回放、模型句子、增强起点、窗口里被指挥的飞机、实时 Fly）：执行器的状态行，坡度与载荷系数取从这一行
+    开始的那个周期的指令；航迹最后一行取在它结束的那个周期（批里执行器会在一架飞完后继续推它，之后的周期不是它的）。
+    气动参数是这架实际飞的机体（包括代用机型）。
+  - 观测航迹（真实句子集合、窗口集合的记录与其他飞机）：`rebuild_series` 重建 → `states_from_channels` → 训练 teacher
+    用的反解 `outputs/dynamics/inverse.actual_controls`（thrust-fraction 合同）。动力学查不到机体的航班（C31）只有航向与航迹角，
+    坡度与迎角为 null：画成机翼水平，标签写 "bank — (no airframe)"。
+  - 窗口导出从 `fly_windows` 返回的循环读每组执行器的 `flown()`，第 k 个记录对应执行器第 `min(k × 每步行数, 飞过的周期数)` 行，
+    逐点核对与循环自己的位置相同；`traffic_window*.py`、`autopilot/`、`outputs/dynamics/` 一行没改，执行器、标注器、场景边的
+    源码 sha256 不变。
+- **格式换名**（两边一起，旧名按名字拒读）：集合 `aeroviz-training-sample-v8`、`aeroviz-training-traffic-v2`；叠加层
+  `aeroviz-training-executor-v5`、`aeroviz-training-generation-v5`、`aeroviz-training-augmented-generation-v3`、
+  `aeroviz-training-window-generation-v2`；实时 Fly `aeroviz-autopilot-segment-v8`（后端 `FlightContext.aero_params`）。
+  **已发布的数据仍是旧名**：合并这些代码就必须同时重新导出并发布、重启 5173 与 8765（§4.12 第 e 步）。
+- **画在哪**（`scene/trainingEntities.ts`：`aircraftModel`、`placeAircraft`、`poseOrientation`；模型 `/models/aircraft.glb`）：
+  单机时光标处读的那条航迹上一架（`hooks/useTrainingAircraftLayer.ts`：真实句子在观测航迹上，模型句子从它第一个预测步起在
+  样本航迹上，航迹结束后停在结束处；窗口时不画，由交通层画）；实时 Fly 那架（方向随回放时钟）；窗口里每架按 AV39 的角色
+  （焦点白色加黄色轮廓、被指挥的按读法着色、回放与背景变淡）。
+- **一个方向约定**（`utils/aircraftOrientation.ts`）：glTF 机头朝 +x，所以 Cesium 航向 = 罗盘航向 − 90°，俯仰抬头为正，右坡度
+  为正；Fly、起始位置预览、Optimize 的回放都改用它（`compassFromPsiDeg` 把模拟器的数学航向换成罗盘），方向与原来逐位相同
+  （审查核对过）；`aircraftOrientation.test.ts` 钉住机头、俯仰与右坡度的符号。
+- 试导出（2026-09-30，KRDU，只用 CPU，写在临时目录，不碰 `public/data`）：真实句子集合与执行器回放除 `attitude` 外与已发布的
+  逐字节相同；观测坡度中位 0.4°、p95 19.8°、最大 35.9°，40 架里 4 架没有机体；`check-publication` 0 错误。
+
+### AV41 · a prediction that passed on another runway has its own status and colour (2026-09-30)
+
+(Numbered AV40 when written by the generation-grading session the same day, beside the failure-red AV40; renumbered
+2026-09-30 so each ID names one entry.)
 
 The two-tier generation records (ts runner R35) are graded against the OBSERVED flight's runway; the grading (R38) grades
 every sentence that crossed another runway again on that runway. The publisher hands that grading's evaluation report to

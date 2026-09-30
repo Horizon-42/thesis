@@ -110,7 +110,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - The comparison reference must be requested on the `arrival` track window — see
   `aeroviz_backend/CLAUDE.md` (AV12).
 
-- **Training reads ONE vocabulary: `instruction-v3`** — the sample schema (`aeroviz-training-sample-v7` since
+- **Training reads ONE vocabulary: `instruction-v3`** — the sample schema (`aeroviz-training-sample-v8` since 2026-09-30, the attitude beside the signals, AV42; v7 since
   2026-09-24: heading words as per-row bands, no turn regions / funnels; a format name changes with its file's shape, both
   sides in one change), the reading rule, the spec sha (`145d6911e75b` since 2026-09-25: the day-split `v4_20260924` artefact
   today's executor flies — the flight-split `instruction_v3` set is refused by it; current set `instruction_v3_day_split`), the six columns IN ORDER and the labeller's word kinds are pinned mirrors,
@@ -133,7 +133,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   clearance has no row of its own (not drawn, not judged); drawn as rectangles on the heading chart, its judged rows on the
   ground in 3D, rows outside red everywhere; the capture turn is its rows, clearance → capture (AV23).
 - **Training overlays sit BESIDE a set, never in it**: `training/overlays.json` (`aeroviz-training-overlays-v2`) lists the
-  executor's replay (`aeroviz-training-executor-v4`: a crossing names its runway; each judged heading word's band on the flown rows + `judgedTrackDeg`) and
+  executor's replay (`aeroviz-training-executor-v5`, v5 = the attitude, AV42: a crossing names its runway; each judged heading word's band on the flown rows + `judgedTrackDeg`) and
   the prior's predictions (`aeroviz-training-prior-v4`: from `firstPredictedRow` on; the rows before are observed only), each
   bound to its set BY CONTENT, never by the sample file's bytes or `writtenUtc` (2026-09-28): the set id, spec,
   `candidatesSha256` and `airportFrame`, and flight by flight (keys, the executor's words, the prior's steps, every drawn
@@ -145,7 +145,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **`EXPERIMENT_HORIZON_MODES` = `config.HORIZON_MODES` + the executor replay's `sentence`** — its records' horizon, stamped
   by the comparison builder; unlisted, one executor category would empty the airport's picker (AV25).
 - **Training's live executor flies the CLICKED word's segment on the backend, every time** (`POST /autopilot/segment`,
-  `aeroviz-autopilot-segment-v7`; `trainingPick`, never the hover cursor): from the observed state where the word is said to
+  `aeroviz-autopilot-segment-v8` — v8 the attitude, AV42; `trainingPick`, never the hover cursor): from the observed state where the word is said to
   where its envelope ends (the next word of its column; a heading word's a lead later — drawn as a faded, dashed TAIL from
   where the executor heard the next heading word, `nextWordHeardS` / `autopilotRunAndTail`; the sentence's end: to the landing),
   the executor's own stepper driven cycle by cycle and stopped there (never fly-then-cut); the answer is refused unless the
@@ -173,7 +173,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   the page's root (`document.documentElement`, 2026-09-28: Cesium's credits read it too), `.workbench:has(> .training-sentence-bar)`
   pads the overlay container by it; the flight list takes the leftover dock height (min ~5 two-line rows), the dock scrolls past
   that (AV30).
-- **Training reads the models' OWN sentences** (`prior-generation` overlays, `aeroviz-training-generation-v4`, written by ts
+- **Training reads the models' OWN sentences** (`prior-generation` overlays, `aeroviz-training-generation-v5`, written by ts
   `prior_generation_training_export`): `trainingSource` (null = truth, or `{overlayId, sample}`) picks the sentence the bar,
   the panel and 3D read; the truth is ALWAYS drawn in 3D; a model's bands are FLAT like the truth's (hatching cluttered the
   bar — the user, 2026-09-26): the frame says whose (border, a strip down the rows, tab, chip in its colour), the truth's issues
@@ -194,7 +194,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   Chromium/Safari, the standard properties only under `@supports not selector(::-webkit-scrollbar)` — Chromium 121+ lets them
   override the parts); a component never styles its own scrollbar, it changes the tokens (AV34).
 - **A model's sentences from AUGMENTED starts are a kind of their own** (`prior-generation-augmented`,
-  `aeroviz-training-augmented-generation-v2`, exporter `--augment-seed`): each flight's move and moved observed rows 0–7, the
+  `aeroviz-training-augmented-generation-v3`, exporter `--augment-seed`): each flight's move and moved observed rows 0–7, the
   same move for every model of one seed, no readout; the bar's `Real start | Augmented start` switch filters the model tabs by
   start (group per start family, never mixed); no truth marks over a moved sample; its words fly live FROM the moved start
   (the request's `augmentation`, `fly.moved_inputs` = the generation's `augmented_inputs`, limit ×2) (AV35).
@@ -224,6 +224,12 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **A failure is ONE red, `TRAINING_FAILURE_COLOR` `#ff2d2d`** (a model's flight that did not land on the bar, losses of
   separation and judge ends, the live executor outside its envelope); **an SVG `fill` attribute loses to any stylesheet `fill`
   rule** — colour data-driven SVG text with `style={{ fill }}` (two marks were grey for that reason) (AV40).
+- **Every Training aircraft is the 3D model in the attitude the Python exporters computed** (`experiments/training_attitude.py`:
+  heading, path angle, right bank, an attack READING; every track's `attitude` block — sample v8, traffic v2, executor v5,
+  generation v5, augmented v3, window-generation v2, live Fly v8); the viewer computes no attitude (`trainingAttitude.poseAt`
+  only interpolates); **the drawn pitch is the path angle, the attack only in the label** (user, 2026-09-30: the lift curve
+  has no flaps); a flight without an airframe has no bank/attack (null: wings level, said); ONE model orientation
+  (`utils/aircraftOrientation.ts`) for Fly, Optimize and Training (AV42).
 
 ## Comparison CZML colour contract
 
@@ -231,7 +237,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   skip is keyed on "a verdict colour was baked", NOT on `status` alone** (AV13).
 - **`otherRunway`** = a two-tier generation sentence that passed on ANOTHER runway than the observed flight's (the
   landed-runway grading, `--landed-runway-report`): light sky blue, never the pass green; the frontend must learn a status
-  before any index carries it (an unknown status refuses the whole index) (AV40).
+  before any index carries it (an unknown status refuses the whole index) (AV41).
 - `states_schema` dispatches on record keys: `opt-`/`sim-` entities, or `pred-` plus `look-` for
   predictions (AV14).
 - **Predictions never get the off-target bake** (`mark_off_target = off_target and schema ==

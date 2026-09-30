@@ -1,5 +1,19 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-30 — Training: aircraft models in the executor's attitude (branch `dev-training-attitude`, not merged)
+
+- **What** (the user, 2026-09-30: aircraft as a model, bound to the real bank, heading and angle of attack, the whole Training
+  module; option b — the pitch is the path angle, the attack only in the label, because the project's lift curve has no flaps
+  and reads ~15° on final): the attitude is computed ONCE in Python (`experiments/training_attitude.py`) and written beside every
+  exported track; the viewer interpolates (`trainingAttitude.ts`) and draws `/models/aircraft.glb` at the cursor, the live Fly
+  aircraft and every window aircraft; one orientation for Fly, Optimize and Training (`utils/aircraftOrientation.ts`).
+- **Formats**: sample v8, traffic v2, executor v5, generation v5, augmented v3, window-generation v2, autopilot segment v8 — the
+  published data are the old names, so merging needs the re-export (after the 7.6 formal run) and restarts at the same time.
+- **Training untouched**: `autopilot/`, `outputs/dynamics/`, `geometry/flyability.py`, `traffic_window*.py` read only; the
+  executor, labeller and scene-edge source hashes unchanged. KRDU trial export (CPU, a scratch directory): the set and the
+  replay identical to the published ones apart from the attitude; `check-publication` 0 errors.
+- Docs: doc 36 §4.12, AV42 (and the second AV40 of 2026-09-30 renumbered AV41), ts index.
+
 ### 2026-09-30 — Training: who is commanded, failures in one red, traffic in azure (branch `dev-training-roles`)
 
 - **What** (the user, 2026-09-30): in a window's 3D scene each aircraft is drawn by its role — the one on screen (white point
