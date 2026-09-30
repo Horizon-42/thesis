@@ -85,7 +85,7 @@ from ts_transformer.experiments.traffic_reward import (
 from ts_transformer.experiments.traffic_scene_data import airport_flights, edge_source_sha256, split_samples
 from ts_transformer.experiments.traffic_speaking import with_tracks
 from ts_transformer.experiments.traffic_window import draw_windows
-from ts_transformer.experiments.traffic_window_augment import KINDS, busiest
+from ts_transformer.experiments.traffic_window_augment import busiest
 from ts_transformer.experiments.traffic_window_generation import (
     Drawn, WindowSentences, augmented_windows, drawn_windows, fixed_rows, window_batches, window_sentences,
 )
@@ -145,8 +145,8 @@ def drawn_join(parts: Sequence[Drawn]) -> Drawn:
                  [r for part in parts for r in part.roles])
 
 
-def first_windows_per_airport(drawn: Drawn, per_airport: int) -> list[int]:
-    """The first ``per_airport`` windows of each airport, in the draw's order; refused when one has fewer."""
+def first_windows_per_airport(drawn: Drawn, per_airport: int, airports: Sequence[str]) -> list[int]:
+    """The first ``per_airport`` windows of each of ``airports``, in the draw's order; refused when one has fewer."""
     taken: Counter = Counter()
     keep = []
     for w, window in enumerate(drawn.windows):
@@ -154,7 +154,7 @@ def first_windows_per_airport(drawn: Drawn, per_airport: int) -> list[int]:
         if taken[code] < per_airport:
             taken[code] += 1
             keep.append(w)
-    short = {code: per_airport - n for code, n in taken.items() if n < per_airport}
+    short = {code: per_airport - taken[code] for code in airports if taken[code] < per_airport}
     if short:
         raise ValueError(f"{per_airport} windows an airport wanted: {short} short")
     return keep
@@ -183,10 +183,12 @@ class WindowSpeaking(Speaking):
 
     def fingerprint(self, round_: WindowRound) -> list[tuple[Any, ...]]:
         """Each window: its airport, opening, commanded and replayed aircraft, the flights moved in it (their keys and
-        first row times) and its kind."""
-        return [(w.airport.flights.code, w.opens_s, w.commanded, w.others,
-                 tuple((rows.presence.dataset_id, float(rows.presence.times_s[0])) for rows, _ in w.moved), kind)
-                for w, kind in zip(round_.drawn.windows, round_.kinds)]
+        first row times), its kind, and each commanded aircraft's moved start and time limit."""
+        drawn = round_.drawn
+        return [(window.airport.flights.code, window.opens_s, window.commanded, window.others,
+                 tuple((rows.presence.dataset_id, float(rows.presence.times_s[0])) for rows, _ in window.moved), kind,
+                 tuple((None if drawn.moves[j] is None else asdict(drawn.moves[j]), drawn.limits[j]) for j in members))
+                for window, kind, members in zip(drawn.windows, round_.kinds, drawn.members)]
 
     def assemble(self, round_: WindowRound, samples: int, plan: Sequence[Sequence[int]],
                  parts: Mapping[int, WindowSentences]) -> WindowSentences:
@@ -255,9 +257,11 @@ def landing_gap_s(window: Any, runway: str, landing_s: float, commanded: Sequenc
 
 def ordering(rows: Sequence[Mapping[str, Any]], round_: WindowRound, step_s: float) -> dict[str, Any]:
     """On the real windows (design §4.3 per commanded aircraft): the sentences that landed with no loss ending them first
-    — their median time from the first predicted step to the landing and median gap to the landing before on the runway
-    (`landing_gap_s`: the other commanded aircraft of the same sample as they landed) — each against the same aircraft's
-    record (the others' records too)."""
+    and not starting in one — their median time from the first predicted step to the landing and median gap to the
+    landing before on the runway (`landing_gap_s`) — each against the same aircraft's record. The landings before are
+    the replayed aircraft's and those of the other commanded aircraft that landed in the same sample (``rows``: every
+    row of it), at their times there and — the recorded side — the same aircraft's recorded ones: the two sides hold the
+    same leaders, so another aircraft's failure to land moves neither."""
     drawn = round_.drawn
     by_sample: dict[tuple[int, Any], list[Mapping[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -268,9 +272,9 @@ def ordering(rows: Sequence[Mapping[str, Any]], round_: WindowRound, step_s: flo
         geometry = window.airport.flights.geometry
         landed = {r["dataset_id"]: (r["landing_s"], geometry.candidates[r["runway"]].ident) for r in members
                   if r["landing_s"] is not None}
-        recorded = {k: (window.rows(k).presence.landing_s, window.rows(k).presence.runway) for k in window.commanded}
+        recorded = {k: (window.rows(k).presence.landing_s, window.rows(k).presence.runway) for k in landed}
         for row in members:
-            if row["outcome"] != LANDED:
+            if row["outcome"] != LANDED or row["starts_in_a_loss"]:
                 continue
             key = row["dataset_id"]
             first_s = window.first_step_s(key, step_s) + N_LOOK * step_s
@@ -295,18 +299,20 @@ def ordering(rows: Sequence[Mapping[str, Any]], round_: WindowRound, step_s: flo
 
 
 def side_readout(spoken: WindowSentences, round_: WindowRound, step_s: float, *, real: bool) -> dict[str, Any]:
-    """One side of the select readout (module docstring), in the shape `traffic_reward.guarded_choice` reads: the
-    aircraft sentences not starting in a loss they answer for — the executor's landed share (separation aside), landed on
-    the observed runway, the words said after the first step per sentence, lost separation, the reward (and per kind) —
-    and every sentence's row."""
-    counted = [(row, record) for row, record in zip(spoken.rows, spoken.records) if not row["starts_in_a_loss"]]
-    rows = [row for row, _ in counted]
-    landed = [row for row in rows if row["own"] == LANDED]
-    said = np.array([(record.grid[1: row["said_steps"]] != UNCHANGED).sum(axis=0) for row, record in counted])
+    """One side of the select readout (module docstring), in the shape `traffic_reward.guarded_choice` reads, R32's
+    counts: over every aircraft sentence (`prior_free_generation.grouped`'s) the executor's landed share (separation
+    aside), landed on the observed runway and the words said after the first step per sentence (to its own end — a
+    window aircraft ended by the judge says nothing after: its count stops there); over those not starting in a loss they
+    answer for (`traffic_free_generation.summary`'s) lost separation and the reward (and per kind); every sentence's
+    row."""
+    rows = [row for row in spoken.rows if not row["starts_in_a_loss"]]
+    landed = [row for row in spoken.rows if row["own"] == LANDED]
+    said = np.array([(record.grid[1: row["said_steps"]] != UNCHANGED).sum(axis=0)
+                     for row, record in zip(spoken.rows, spoken.records)])
     out: dict[str, Any] = {
         "free_generation": {"all": {
-            "sentences": len(rows),
-            "outcomes": {"landed": len(landed) / len(rows)},
+            "sentences": len(spoken.rows),
+            "outcomes": {"landed": len(landed) / len(spoken.rows)},
             "landed_on_observed_runway": (sum(r["runway"] == r["observed_runway"] for r in landed) / len(landed)
                                           if landed else None),
             "words_after_first_per_flight": {name: float(said[:, c].mean()) for c, name in enumerate(COLUMNS)}}},
@@ -316,7 +322,7 @@ def side_readout(spoken: WindowSentences, round_: WindowRound, step_s: float, *,
         "reward_by_kind": {kind: float(np.mean([r["reward"] for r in rows if r["kind"] == kind]))
                            for kind in sorted({r["kind"] for r in rows})}}
     if real:
-        out["ordering"] = ordering(rows, round_, step_s)
+        out["ordering"] = ordering(spoken.rows, round_, step_s)
     out["aircraft"] = spoken.rows
     return out
 
@@ -351,6 +357,20 @@ def write_choice(out: Path, history: Sequence[Mapping[str, Any]], labelled: Mapp
         "round": kept_round,
         "directory": str(out / f"round_{kept_round:02d}") if kept_round else str(prior_dir)})
     log(f"kept round {kept_round} (the guards excluded {excluded}) → {out}")
+
+
+def write_sentences(path: Path, spoken: WindowSentences, advantages: np.ndarray) -> None:
+    """A round's words kept (R32's ``sentences.npz``): per aircraft sentence its window, key, sample, the words it said to
+    its own end (``said`` over ``step_offsets``), its outcome, runway, reward and advantage."""
+    said = [record.grid[: row["said_steps"]] for row, record in zip(spoken.rows, spoken.records)]
+    np.savez_compressed(path, window=np.array([r["window"] for r in spoken.rows]),
+                        dataset_id=np.array([r["dataset_id"] for r in spoken.rows]),
+                        sample=np.array([r["sample"] for r in spoken.rows]),
+                        step_offsets=np.concatenate(([0], np.cumsum([len(g) for g in said]))),
+                        said=np.concatenate(said).astype(np.int16),
+                        outcome=np.array([r["outcome"] for r in spoken.rows]),
+                        runway=np.array([r["runway"] for r in spoken.rows]),
+                        reward=np.array([r["reward"] for r in spoken.rows]), advantage=advantages)
 
 
 def round_summary(round_: WindowRound, spoken: WindowSentences, trained: np.ndarray) -> dict[str, Any]:
@@ -468,7 +488,8 @@ def main(argv: list[str] | None = None) -> int:
                 "augmented": labelled_words(select_augmented.drawn.batch)}
     recorded_rows = fixed_rows(select_real.drawn, list(range(len(select_real.drawn.windows))), "recorded", words,
                                params, every_landing, start_masks)
-    recorded_lost = sum(r["outcome"] == LOST_SEPARATION for r in recorded_rows) / len(recorded_rows)
+    recorded_counted = [r for r in recorded_rows if not r["starts_in_a_loss"]]         # (the model's shares' basis)
+    recorded_lost = sum(r["outcome"] == LOST_SEPARATION for r in recorded_counted) / len(recorded_counted)
     record = {
         "schema": SCHEMA, "written_utc": utc_now(), "git": git, "smoke": args.smoke,
         "prior": {"directory": str(prior_dir), "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"),
@@ -566,11 +587,12 @@ def main(argv: list[str] | None = None) -> int:
         drawn = draw_windows(instructions, "train", spec, words, train_airports, per_airport=per_airport,
                              seed=args.seed + round_number, step_s=step_s)
         pool = drawn_windows(drawn, train_airports, params, step_s)
-        real = first_windows_per_airport(pool, args.real_per_airport)
+        real = first_windows_per_airport(pool, args.real_per_airport, airports)
         rest = [w for w in range(len(pool.windows)) if w not in set(real)]
         candidates, augmenting = augmented_windows(drawn_subset(pool, rest), params, most, max_rows,
                                                    [args.seed, round_number, AUGMENT_STREAM], windows_alt, spec)
-        augmented = drawn_subset(candidates, first_windows_per_airport(candidates, args.augmented_per_airport))
+        augmented = drawn_subset(candidates, first_windows_per_airport(candidates, args.augmented_per_airport,
+                                                                       airports))
         joined = drawn_join([drawn_subset(pool, real), augmented])
         kinds = ["real"] * len(real) + [a["kind"] for a in augmented.augmented]
         return WindowRound(joined, kinds), {"drawn": drawn.counts, "augmenting": augmenting}
@@ -617,6 +639,7 @@ def main(argv: list[str] | None = None) -> int:
             torch.cuda.reset_peak_memory_stats(device)
         advantages, trained = window_advantages(spoken.rows, args.samples)
         described = {**round_summary(round_, spoken, trained), **drawn_counts}
+        write_sentences(directory / "sentences.npz", spoken, advantages)
         write_json_atomic(directory / "sentences.json", {
             **described, "aircraft": [{k: r[k] for k in ("window", "dataset_id", "sample", "kind", "role", "reward",
                                                          "outcome", "own", "counted", "starts_in_a_loss")}
@@ -645,6 +668,7 @@ def main(argv: list[str] | None = None) -> int:
             f"{passed['clipped_share']:.4f}, {passed['seconds']:.0f}s; GPU peak: speaking processes "
             + " ".join(f"{p:.2f}" for p in speaking_peaks) + " GB reserved each"
             + (f", the pass {passed['pass_gpu_peak_gb']:.2f} GB allocated" if "pass_gpu_peak_gb" in passed else ""))
+        del split, part, spoken                         # the round's sentences go before the select readout's come
         write_traffic_prior(directory, model, prior_dir, start, spec.sha256, git=git, smoke=args.smoke,
                             fine_tuning={"schema": SCHEMA, "from": str(prior_dir), "base": str(base_dir),
                                          "round": round_number, "optimiser": asdict(config),

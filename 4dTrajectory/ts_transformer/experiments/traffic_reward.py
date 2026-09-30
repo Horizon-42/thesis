@@ -375,6 +375,7 @@ def _speaker(pipe: Any, parent_ends: Sequence[Any], parent_pid: int, rounds: Cal
                 torch.cuda.empty_cache()                        # the parent's pass needs the GPU next
                 torch.cuda.reset_peak_memory_stats(device_)     # after: the next task's peak starts from the emptied cache
             pipe.send(("ok", parts, speaking.fingerprint(round_), peak))
+            del parts, round_                                   # the next task builds its own
     except BaseException:
         traceback.print_exc()
         pipe.send(("failed", traceback.format_exc()))
