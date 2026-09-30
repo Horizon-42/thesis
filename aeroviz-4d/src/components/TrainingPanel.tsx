@@ -37,12 +37,14 @@ import type { DetailsPage } from "./training/PanelParts";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import {
   fetchTrainingIndex,
+  TRAINING_READBACK_SET_KIND,
+  TRAINING_TRAFFIC_SET_KIND,
   trainingIndexPath,
   trainingSetRefusal,
   type TrainingIndex,
   type TrainingSetEntry,
 } from "../data/trainingSample";
-import { fetchTrainingSet, readableKind, type TrainingOpenSet } from "../data/trainingSets";
+import { fetchTrainingSet, openable, type TrainingOpenSet } from "../data/trainingSets";
 
 type IndexState =
   | { status: "loading" }
@@ -146,10 +148,9 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
       setSetState({ status: "idle" });
       return;
     }
-    const refusal = trainingSetRefusal(entry);
-    const kind = readableKind(entry);
-    if (refusal !== null || kind === null) {
-      setSetState({ status: "refused", problem: refusal ?? `a ${entry.kind} set` });
+    const { kind, refusal } = openable(entry);
+    if (kind === null) {
+      setSetState({ status: "refused", problem: refusal });
       return;
     }
     let live = true;
@@ -170,6 +171,9 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
   }, [activeAirportCode, entry]);
 
   const open = setState.status === "ready" ? setState.open : null;
+  // the session of the KIND chosen stays mounted while another set of that kind loads (its switches and choices per set
+  // outlive a switch of sets); it reads nothing while none of its kind is open
+  const chosenKind = entry === null ? null : openable(entry).kind;
 
   return (
     <section className="training-panel" aria-label="Training" hidden={hidden}>
@@ -197,7 +201,7 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
               <select value={setId ?? ""} onChange={(event) => setSetId(event.target.value)}>
                 {indexState.index.sets.map((item) => (
                   <option key={item.id} value={item.id}>
-                    {item.id} · {item.kind === "traffic-windows" ? `${item.cohort.windows} windows` : `${item.flights} flights`}, {item.cohort.split}
+                    {item.id} · {item.kind === TRAINING_TRAFFIC_SET_KIND ? `${item.cohort.windows} windows` : `${item.flights} flights`}, {item.cohort.split}
                     {trainingSetRefusal(item) === null ? "" : ` · ${item.readingRule} — refused`}
                   </option>
                 ))}
@@ -215,13 +219,13 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
           {/* ③ a readable set that fails; the others are untouched */}
           {setState.status === "invalid" ? <ProblemBox title={`Set ${setId} cannot be read.`} detail={setState.problem} /> : null}
 
-          {open?.kind === "vocabulary-readback" && activeAirportCode ? (
-            <TrainingFlightSession airport={activeAirportCode} sample={open.sample}
-              entry={entry} details={details} />
+          {chosenKind === TRAINING_READBACK_SET_KIND && activeAirportCode ? (
+            <TrainingFlightSession airport={activeAirportCode}
+              sample={open?.kind === TRAINING_READBACK_SET_KIND ? open.sample : null} entry={entry} details={details} />
           ) : null}
-          {open?.kind === "traffic-windows" && activeAirportCode ? (
-            <TrainingWindowSession airport={activeAirportCode} traffic={open.traffic}
-              entry={entry} details={details} />
+          {chosenKind === TRAINING_TRAFFIC_SET_KIND && activeAirportCode ? (
+            <TrainingWindowSession airport={activeAirportCode}
+              traffic={open?.kind === TRAINING_TRAFFIC_SET_KIND ? open.traffic : null} entry={entry} details={details} />
           ) : null}
         </>
       ) : null}

@@ -562,6 +562,42 @@ that divergence is a known open item (see the README's "Future Improvements").
   改的；留下的注释、`ProblemBox` 的 `children`、两个只剩文件内使用的导出、AV38 里"再点一次"的说法（点选中的色块是取消选中）、
   两个没走 flying 这一步的测试，都已改。
 
+### AV39 · 多机模式：窗口集合与窗口里的模型句子（2026-09-30）
+
+- 用户（2026-09-30）要在 Training 里看多机：同一机场 20 分钟的一个**窗口**，模型同时指挥这段时间进场、有句子的几架，其余照记录
+  回放。方案用户审过（设计与定下的事在 `36-2026-09-20-training-module.zh.md` §2.9、§4.11）。数据由 ts `window_training_export`
+  写：集合 `traffic.json`（`aeroviz-training-traffic-v1`，种类 `traffic-windows`，与模型无关：指挥的飞机就是普通的集合航班，另有
+  每个窗口的其他飞机与"记录里的样子"）和每个模型一份叠加层 `window_generation.json`（`aeroviz-training-window-generation-v1`，
+  种类 `window-generation`：每个窗口每个样本里每架的句子、目视与 IFR 两种读法下的失去间隔、落地）。
+- **结构：一个场景层，加一架焦点飞机。** 窗口里被指挥的一架就是一架普通航班，模型对它说的就是一句普通的模型句子，所以句子条、
+  读数窗口、单机的三维图层原样使用。共用代码推广了四处，没有加分支：
+  - 游标存在选中项的时钟上（`TrainingSelection.clock = {scope, offsetS}`，`AppContext`：`trainingCursorS` 是这架自己的时间，
+    `trainingSceneS` 是时钟的时间）；单机时时钟就是这架航班、偏移 0，与原来逐位相同；窗口时时钟是整个窗口，换一架时刻不变。
+  - 模型叠加层拆出头部 `TrainingGenerationHead`（`readGenerationHead`、`readSaidWords`），窗口叠加层用 `windowGenerationView`
+    投影成原来的视图。
+  - 样本读取拆出集合头部 `readSetHead`。
+  - 左栏拆成 `TrainingFlightSession` 与 `TrainingWindowSession`（共用 `PanelParts`）。
+- **模式由集合的种类决定**（`data/trainingSets.ts`：`parseTrainingSet` 按种类打开，`TRAINING_OVERLAYS_OVER` 规定每种叠加层只画在
+  哪种集合上，`parseOverlayOver`；`check-publication` 走同一个门）。
+- **前端不判间隔、不排落地**：失去间隔段、被结束、落地都是导出器的判定器给的；读取器只核对账：点名的飞机在窗口里；被判定器结束的
+  飞机，它的句子写 `lost_separation`，结束时刻等于目视读法里结束它的那一刻、同一个对象；落地正好是自己的结局为落地的那几架，按先后。
+- **窗口里的飞机不现飞**（`TrainingSelection.liveExecutor` 为 false）：后端只打开读回集合，句子条不给 Fly 按钮，实时执行器的钩子
+  什么也不问。
+- 句子条上方的**窗口时间条**（`TrainingTrafficStrip.tsx`）：横轴是场景时间，跨度取被指挥的飞机（记录与当前读的句子），每架指挥的
+  飞机一行、其他飞机合成一行；失去间隔在牵涉的指挥飞机行上画红段（IFR 每段描边、目视实心画在上面），两架都被指挥时连一条竖线；
+  焦点那一段括起来。在图上按下或拖动移动场景时间；**按下**一行（飞机条或呼号）换焦点——按在图上会捕获指针，之后的点击到不了那一行，
+  按在呼号上不动时间；▶ 按 1× / 10× / 30× 播放（每 50 ms 推进一次，计时器只随"在放、速度"重建；每个窗口一条新的时间条）。
+- **游标在不在这架飞机上是一个判断**（`cursorOnFlight`）：单机时总在（越过轴的末端照旧夹住）；窗口时只在这架的轴上——之外时句子条、
+  读数与先验窗口、三维都不画游标、不亮游标处的词，读数写 "outside this aircraft"。
+- 左栏按集合的**种类**各留一个会话（`TrainingFlightSession` / `TrainingWindowSession`），同种集合加载时不卸下：开关与每个集合选中的叠加层
+  切回时恢复。
+- **三维**（`useTrainingTrafficLayer.ts`，由 `useTrainingTrackLayer` 调用，读游标，只在叶子组件里）：焦点之外每架飞机的航迹（被指挥
+  的用模型的颜色，记录时用观测航迹的近白色；回放的石板灰，背景的更暗），游标时刻每架一个点加呼号（焦点更大、白色），正处在
+  失去间隔里的一对连红线并标"最近 / 要求"米数（目视实线，只有 IFR 有的虚线），被结束处一个固定的红叉。**取景**：一个时钟取景
+  一次——单机是这架航班，窗口是整个窗口的全部航迹，换一架不再取景。
+- 颜色：模型 `traffic`（M4，用户 2026-09-30 定名）橄榄金 `#9c8116`（对已有颜色 OKLab ΔE ≥ 17.3，对底色 4.9:1）；窗口判定三色
+  沿用回放的青 / 琥珀 / 红（`TRAINING_WINDOW_VERDICT_COLOR`）；其他飞机 `TRAINING_OTHER_AIRCRAFT_COLOR`。
+
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
 
 - 根目录的发布器 `--executor-replay` 把执行器的 val 回放记录（和 ts 预测同一个记录契约）发布成 Experiments 类别，每个机场

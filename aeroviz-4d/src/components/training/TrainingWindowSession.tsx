@@ -14,7 +14,7 @@
  * land, red where one did. The frontend judges nothing: the losses and landings are the exporter's judge's.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApp } from "../../context/AppContext";
 import { useTrainingWindowOverlays, type OverlaysManifestState } from "../../hooks/useTrainingOverlays";
 import TrainingVocabularyNotes from "../TrainingVocabularyNotes";
@@ -29,6 +29,7 @@ import {
   aircraftFate,
   trainingWindowSelection,
   windowGenerationView,
+  windowOpening,
   windowReading,
   windowSetCounts,
   windowVerdict,
@@ -55,11 +56,6 @@ function modelsAbsence(manifest: OverlaysManifestState, items: Array<{ load: { s
   if (unread !== null) return unread;
   if (items.length === 0) return noneReadable(manifest);
   return items.every(({ load }) => load.status === "invalid") ? "cannot be read" : "loading …";
-}
-
-/** "08-26 13:40Z": a window's opening, as the list names it. */
-export function windowOpening(window: TrainingWindow): string {
-  return `${window.opensUtc.slice(5, 10)} ${window.opensUtc.slice(11, 16)}Z`;
 }
 
 /** "3rd": a place in a landing order. */
@@ -130,7 +126,7 @@ function TrafficReadout({ set, overlays }: { set: TrainingTrafficSet; overlays: 
       </table>
       {overlays.some((overlay) => overlay.readout !== null) ? (
         <>
-          <h4 className="training-details-subhead">The formal window readouts (other draws, the same windows' draw)</h4>
+          <h4 className="training-details-subhead">The model's formal window readout: its own samples of every window drawn</h4>
           <NotesList items={overlays.flatMap((overlay) => (overlay.readout === null ? [] : [{
             key: overlay.overlayId, name: <>{trainingModelText(overlay.model)}</>,
             text: `${overlay.readout.directory} (${overlay.readout.windowsPerAirport} windows an airport, ${overlay.readout.samples} ` +
@@ -144,27 +140,37 @@ function TrafficReadout({ set, overlays }: { set: TrainingTrafficSet; overlays: 
   );
 }
 
+/** ``traffic``: the window set open — null while the next one loads (the session is kept, as the flight session is, and
+ *  publishes nothing meanwhile). */
 export default function TrainingWindowSession({ airport, traffic, entry, details }: {
-  airport: string; traffic: TrainingTrafficSet; entry: TrainingSetEntry | null; details: DetailsPage;
+  airport: string; traffic: TrainingTrafficSet | null; entry: TrainingSetEntry | null; details: DetailsPage;
 }) {
   const { setTrainingSelection, setTrainingGenerations, setTrainingWindow, trainingSource } = useApp();
   const overlays = useTrainingWindowOverlays(airport, traffic);
   const loaded = useMemo(() => overlays.windows.flatMap(({ load }) => (load.status === "ready" ? [load.overlay] : [])),
     [overlays.windows]);
-  const [windowIndex, setWindowIndex] = useState<number>(0);
-  const [focus, setFocus] = useState<string | null>(null);
-  const current = traffic.windows[Math.min(windowIndex, traffic.windows.length - 1)];
-  const aircraft = current.commanded.find((one) => one.flight.datasetId === focus) ?? current.commanded[0];
+  // the window and the aircraft picked belong to the set they were picked in: another set starts at its first window
+  const setId = traffic === null ? null : traffic.setId;
+  const [picked, setPicked] = useState<{ setId: string | null; index: number; focus: string | null }>({ setId: null, index: 0, focus: null });
+  const mine = picked.setId === setId ? picked : { setId, index: 0, focus: null };
+  const pick = (index: number) => setPicked({ setId, index, focus: null });
+  const setFocus = useCallback((focus: string) => setPicked((now) => ({ ...(now.setId === setId ? now : { setId, index: 0 }), focus })),
+    [setId]);
+  const current = traffic === null ? null : traffic.windows[Math.min(mine.index, traffic.windows.length - 1)];
+  const aircraft = current === null ? null
+    : current.commanded.find((one) => one.flight.datasetId === mine.focus) ?? current.commanded[0];
   const readModel = loaded.find((overlay) => overlay.overlayId === trainingSource?.overlayId) ?? null;
-  const view = useMemo(() => ({ set: traffic, window: current, overlays: loaded, focus: setFocus }), [traffic, current, loaded]);
-  const reading = windowReading(view, trainingSource);
+  const view = useMemo(() => (traffic === null || current === null ? null
+    : { set: traffic, window: current, overlays: loaded, focus: setFocus }), [traffic, current, loaded, setFocus]);
 
   // ── publish what the other views draw: the aircraft on screen, the models' sentences for it, the window ─────────
   useEffect(() => {
-    setTrainingSelection(trainingWindowSelection(traffic, current, aircraft));
+    setTrainingSelection(traffic === null || current === null || aircraft === null ? null
+      : trainingWindowSelection(traffic, current, aircraft));
   }, [traffic, current, aircraft, setTrainingSelection]);
   useEffect(() => {
-    setTrainingGenerations(loaded.map((overlay) => windowGenerationView(overlay, current, aircraft)));
+    setTrainingGenerations(current === null || aircraft === null ? []
+      : loaded.map((overlay) => windowGenerationView(overlay, current, aircraft)));
   }, [loaded, current, aircraft, setTrainingGenerations]);
   useEffect(() => {
     setTrainingWindow(view);
@@ -175,10 +181,8 @@ export default function TrainingWindowSession({ airport, traffic, entry, details
     setTrainingWindow(null);
   }, [setTrainingSelection, setTrainingGenerations, setTrainingWindow]);
 
-  const pick = (index: number) => {
-    setWindowIndex(index);
-    setFocus(null);
-  };
+  if (traffic === null || current === null || aircraft === null || view === null) return null;
+  const reading = windowReading(view, trainingSource);
 
   const sections: TrainingDetailsSection[] = [
     { id: "overview", title: "What this view shows", body: (

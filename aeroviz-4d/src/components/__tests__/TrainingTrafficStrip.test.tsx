@@ -4,7 +4,7 @@
  * callsign, which puts that aircraft on screen.
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 
 const { appState, setSceneS, focus } = vi.hoisted(() => ({
   appState: { trainingWindow: null as unknown, trainingSelection: null as unknown, trainingSource: null as unknown },
@@ -90,10 +90,37 @@ describe("TrainingTrafficStrip", () => {
     const svg = container.querySelector("svg")!;
     fireEvent.pointerDown(svg, { clientX: 30, pointerId: 1, buttons: 1 });
     expect(setSceneS).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText("TST2"));
-    expect(focus).toHaveBeenCalledWith(STRAIGHT_ID);
+    fireEvent.pointerDown(screen.getByText("TST2"), { clientX: 30, pointerId: 1, buttons: 1 });
+    expect(focus).toHaveBeenLastCalledWith(STRAIGHT_ID);
+    expect(setSceneS).not.toHaveBeenCalled();
     fireEvent.pointerDown(svg, { clientX: 70, pointerId: 1, buttons: 1 });
     expect(setSceneS).toHaveBeenLastCalledWith(100);                // the plot's left edge: the window span's start
+  });
+
+  it("puts an aircraft on screen on a PRESS on its bar — the press the plot captures — and moves the time there too", () => {
+    setUp(null);
+    const { container } = render(<TrainingTrafficStrip />);
+    const bar = [...container.querySelectorAll("rect")].find((rect) => rect.querySelector("title")?.textContent?.startsWith("TST1: from"))!;
+    fireEvent.pointerDown(bar, { clientX: 400, pointerId: 1, buttons: 1 });
+    expect(focus).toHaveBeenLastCalledWith(expect.stringContaining("TST1"));
+    expect(setSceneS).toHaveBeenCalledTimes(1);
+  });
+
+  it("plays the window at the speed chosen, whatever the renders between its ticks, and stops at its end", () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "performance"] });
+    try {
+      setUp(null);
+      render(<TrainingTrafficStrip />);
+      fireEvent.click(screen.getByRole("button", { name: "▶" }));
+      act(() => vi.advanceTimersByTime(1000));
+      // 10× for a second, from 121 s
+      expect(setSceneS.mock.calls[setSceneS.mock.calls.length - 1][0]).toBeCloseTo(131, 0);
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(setSceneS.mock.calls[setSceneS.mock.calls.length - 1][0]).toBe(228);   // the span's end
+      expect(screen.getByRole("button", { name: "▶" })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("is drawn only while an aircraft of the window is on screen on its clock", () => {

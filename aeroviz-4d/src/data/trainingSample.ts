@@ -436,11 +436,20 @@ export function isOwnClock(selection: TrainingSelection): boolean {
   return selection.clock.scope === trainingSelectionKey(selection);
 }
 
+/** Whether the cursor — ``atS`` on the flight's own clock — is ON the flight on screen, for an axis ending at ``endS``:
+ *  always on the flight's own clock (a time past the axis is held at its end, as ever); on a multi-aircraft window's clock
+ *  only from its 0 s to the axis's end — outside that the aircraft is not flying yet, or not any more, and no view draws a
+ *  cursor, or a word in force, for it. */
+export function cursorOnFlight(selection: TrainingSelection, atS: number, endS: number): boolean {
+  return isOwnClock(selection) || (atS >= 0 && atS <= endS);
+}
+
 /** The selection of one flight of a read-back set: read on its own clock. */
 export function trainingSelectionOf(sample: TrainingSample, flight: TrainingFlight): TrainingSelection {
   const selection = { airport: sample.airport, setId: sample.setId, vocabulary: sample.vocabulary, candidates: sample.candidates,
-    flight, liveExecutor: true };
-  return { ...selection, clock: { scope: `${sample.airport}/${sample.setId}/${flight.flightKey}`, offsetS: 0 } };
+    flight, liveExecutor: true, clock: { scope: "", offsetS: 0 } };
+  // its own clock: the flight's own identity is the clock's scope (`isOwnClock`)
+  return { ...selection, clock: { scope: trainingSelectionKey(selection)!, offsetS: 0 } };
 }
 
 // ── reading a word ───────────────────────────────────────────────────────────

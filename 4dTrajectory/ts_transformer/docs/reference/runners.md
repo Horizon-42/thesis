@@ -941,3 +941,27 @@ capped, each window's cap and count kept with it — and every time limit within
 can pass them); ten draws a window at most, else it is left out (counted by airport and kind); the refusals are counted
 by why. Read by the model's sources only (a
 moved start has no record); the readout adds each kind and each aircraft's part (shifted, moved, inserted, as drawn).
+
+### R35 · `run_ts.py window_training_export` — multi-aircraft windows for the frontend's Training module (Training module §2.9)
+
+2026-09-30. `window_training_export --prior <augmented, or an M4 round> --instructions <artefact> --executor <spec>
+[--readout <this prior's formal window readout, v2>] --airports-root <…/public/data/airports> [--set traffic_windows_select]
+--airport … [--windows 20] [--samples 4] [--workers 6] [--device cuda]`. The windows are the formal window readouts' draw
+(`draw_windows`, `TRAFFIC_SPLIT` = select, `WINDOWS_PER_AIRPORT` = 200, seed), of which `--windows` an airport are chosen by
+their commanded aircraft (1 / 2 / 3+, shares as even as they divide, the larger sizes first: 20 → 6 / 7 / 7), seeded by the
+seed and the airport. Writes a window SET (`training_files.KIND_TRAFFIC`, `traffic.json`, `TRAFFIC_SCHEMA`; model-free: the
+read-back set's head and flights for the commanded aircraft, each window's others with their recorded rows, and the window as
+recorded — `traffic_window_generation.fixed_paths` "recorded", VISUAL + IFR, landings) once — a later export (another prior)
+checks the set it would write is the one there (`require_same_set`) — and one OVERLAY per prior (`KIND_WINDOW_GENERATION`,
+`window_generation.json`): every window flown `--samples` times by `fly_windows` (the formal readout's loop) on the export's
+OWN draws (the user, 2026-09-30: no readout re-run, no row check; a batch's windows share its stream, so the sentences depend
+on the windows flown together — the airports and batch size are recorded in `producedBy`). A sentence's outcome is the loop's
+(`lost_separation` when the judge ended it: its words stop there, its track runs on to its own end); the landings are the
+aircraft whose OWN end is a landing (the loop keeps a landing time for one the glidepath edge stopped first — not a landing
+here); the masks' mass over the steps spoken to the judged end. `--readout` copies the readout's summary cells (model scene and
+record, here and all airports, with the windows and samples they cover), refused unless it is this prior's, executor spec,
+artefact, split, draw, samples and temperature. Every refusal about the disk before any work (`on_disk`), every write after it
+(`write_export`); refactors it rests on, behaviour-preserving (reviewed): `window_prior`, `fly_windows` / `Flown`,
+`fixed_paths` / `FixedWindow`, `sentence_counts`, `generation_block`, `head_block` / `flights_block`, `check_set` by kind. The
+model trained by `ts-traffic-reward` is named **traffic** (`MODEL_NAMES`, user 2026-09-30).
+

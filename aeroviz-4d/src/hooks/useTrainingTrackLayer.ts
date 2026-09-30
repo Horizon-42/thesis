@@ -41,7 +41,7 @@
  * Observe's playback.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp, useTrainingCursor, type TrainingLayers } from "../context/AppContext";
 import useTrainingTrafficLayer from "./useTrainingTrafficLayer";
@@ -62,6 +62,7 @@ import {
   TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
 import {
+  cursorOnFlight,
   rowAtTime,
   trainingWordAt,
   trainingWordLabel,
@@ -92,7 +93,7 @@ import {
 } from "../scene/trainingEntities";
 import useTrainingExecutorLayers from "./useTrainingExecutorLayers";
 import useTrainingGenerationLayers from "./useTrainingGenerationLayers";
-import { generationOnScreen } from "../data/trainingOverlays";
+import { generationOnScreen, sentenceAxisEndS } from "../data/trainingOverlays";
 
 const ALPHA = TRAINING_ENVELOPE_ALPHA;
 /** An envelope's edge, at rest and when it is the selected word's (px). */
@@ -348,13 +349,15 @@ export default function useTrainingTrackLayer(): void {
   // on screen keeps the view. Coming back to Training frames it again (another task moved the camera).
   const frameScope = selection === null ? null : selection.clock.scope;
   const framing = useRef({ selection, window: trainingWindow });
-  framing.current = { selection, window: trainingWindow };
+  useLayoutEffect(() => {
+    framing.current = { selection, window: trainingWindow };
+  });
   useEffect(() => {
     const { selection: shown, window } = framing.current;
     if (!isCesiumViewerUsable(viewer) || shown === null) return;
+    // a window: its commanded aircraft (one replayed from long before the window would zoom far out)
     const tracks = window !== null && trainingWindowKey(window.set, window.window) === shown.clock.scope
-      ? [...window.window.commanded.map((one) => one.recorded), ...window.window.others.map((other) => other.track)]
-      : [shown.flight.signals];
+      ? window.window.commanded.map((one) => one.recorded) : [shown.flight.signals];
     frameTrajectoryCamera(viewer, tracks.flatMap(({ lon, lat, altitudeHaeM }) =>
       lon.map((value, row) => ({ lon: value, lat: lat[row], altM: altitudeHaeM[row] }))), { margin: FRAME_MARGIN });
   }, [viewer, frameScope]);
@@ -363,6 +366,7 @@ export default function useTrainingTrackLayer(): void {
   // one word repaints nothing. Only the truth's: a model's sentence read paints its own word on its own track.
   const modelRead = generationOnScreen(trainingGenerations, trainingSource, selection)?.sentence ?? null;
   const focusRow = selection !== null && trainingColumn !== null && modelRead === null
+    && cursorOnFlight(selection, trainingCursorS, sentenceAxisEndS(selection.flight, selection.vocabulary.stepS, null))
     ? trainingWordAt(selection.flight, trainingColumn, rowAtTime(selection.flight.signals.tS, trainingCursorS)).row
     : null;
   useEffect(() => {

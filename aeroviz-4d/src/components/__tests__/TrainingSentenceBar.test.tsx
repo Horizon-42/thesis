@@ -251,6 +251,17 @@ describe("TrainingSentenceBar", () => {
     expect(setTrainingPick).toHaveBeenLastCalledWith({ source, column: "heading", row: 12, attempt: 0 });
   });
 
+  it("offers nothing to fly for a flight the backend does not fly live — a window's aircraft: no Fly button, a band only selects", () => {
+    select();
+    appState.trainingSelection = { ...(appState.trainingSelection as object), liveExecutor: false };
+    generations();
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
+    render(<TrainingSentenceBar />);
+    expect(screen.queryByRole("button", { name: "▶ Fly" })).toBeNull();
+    fireEvent.click(screen.getByLabelText(/^heading 225° — said by base at step 12/));
+    expect(setTrainingPick).not.toHaveBeenCalled();
+  });
+
   it("offers nothing to fly for a word a model said as or after its flight ended — the backend refuses the same words", () => {
     select();
     // the first sample speaks on past its landing at 110 s: level at step 55 (110 s, the end itself), a speed word at

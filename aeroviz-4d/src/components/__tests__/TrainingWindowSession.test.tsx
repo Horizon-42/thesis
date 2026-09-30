@@ -107,7 +107,7 @@ describe("TrainingPanel over a window set", () => {
     expect(first.liveExecutor).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: /TST2/ }));
     await waitFor(() => expect(last(setTrainingSelection)?.flight.datasetId).toBe(STRAIGHT_ID));
-    expect(last(setTrainingSelection).clock).toEqual({ scope: first.clock.scope, offsetS: 160 });
+    expect(last(setTrainingSelection).clock).toEqual({ scope: first.clock.scope, offsetS: 110 });
     expect(last(setTrainingWindow).window.index).toBe(0);
   });
 

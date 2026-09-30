@@ -57,13 +57,15 @@ export interface ReadbackInputs {
   candidates: TrainingCandidate[];
   layers: TrainingLayers;
   cursorS: number;
+  /** The cursor is on the flight (`cursorOnFlight`): off it, no cursor is drawn and no word is the one at it. */
+  cursorOn: boolean;
   column: TrainingColumn | null;
   executor: TrainingExecutorFlight | null;
   autopilot: TrainingAutopilotSegment | null;
   width: number;
 }
 
-export function readbackModel({ flight, vocabulary, candidates, layers, cursorS, column, executor, autopilot, width }: ReadbackInputs) {
+export function readbackModel({ flight, vocabulary, candidates, layers, cursorS, cursorOn, column, executor, autopilot, width }: ReadbackInputs) {
   const { signals, envelopes } = flight;
   const { tS } = signals;
   const last = flight.rows - 1;
@@ -94,7 +96,7 @@ export function readbackModel({ flight, vocabulary, candidates, layers, cursorS,
     : [];
 
   // ── the selected word: one column's, never the step's ──
-  const focus = column === null ? null : trainingWordAt(flight, column, cursorRow);
+  const focus = column === null || !cursorOn ? null : trainingWordAt(flight, column, cursorRow);
   /** Is this the selected word — the `index`-th word (and envelope) of column `name`? */
   const focused = (name: TrainingColumn, index: number) => focus !== null && column === name && focus.index === index;
   // The clearance owns the approach's envelopes: the capture turn and the corridor.
@@ -171,7 +173,7 @@ export function readbackModel({ flight, vocabulary, candidates, layers, cursorS,
   ]);
 
   return {
-    flight, vocabulary, candidates, layers, cursorS, column, last, cursorRow, designated, label, inForce,
+    flight, vocabulary, candidates, layers, cursorS, cursorOn, column, last, cursorRow, designated, label, inForce,
     flown, flownTrack, judgedTrack, flownBands,
     live, liveColour, liveRun, liveTail, liveBand, liveJudged, liveOutside,
     focus, focused, approachFocused, recede, focusRows, capture, captureOk,

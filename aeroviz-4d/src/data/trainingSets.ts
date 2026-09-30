@@ -9,10 +9,10 @@
 import type { Parsed } from "./trainingReader";
 import {
   parseTrainingSample,
-  TRAINING_READABLE_SET_KINDS,
   TRAINING_READBACK_SET_KIND,
   TRAINING_TRAFFIC_SET_KIND,
   trainingFilePath,
+  trainingSetRefusal,
   type TrainingReadableSetKind,
   type TrainingSample,
   type TrainingSetEntry,
@@ -32,9 +32,11 @@ export type TrainingOpenSet =
   | { kind: typeof TRAINING_READBACK_SET_KIND; sample: TrainingSample }
   | { kind: typeof TRAINING_TRAFFIC_SET_KIND; traffic: TrainingTrafficSet };
 
-/** A listed set's kind when this reader opens it (`trainingSample.trainingSetRefusal` says why not otherwise). */
-export function readableKind(entry: TrainingSetEntry): TrainingReadableSetKind | null {
-  return (TRAINING_READABLE_SET_KINDS as readonly string[]).includes(entry.kind) ? entry.kind as TrainingReadableSetKind : null;
+/** A listed set as this reader takes it, from the manifest alone: the kind it opens it as, or why it refuses it
+ *  (`trainingSample.trainingSetRefusal`: another vocabulary or spec, a kind it does not open). */
+export function openable(entry: TrainingSetEntry): { kind: TrainingReadableSetKind; refusal: null } | { kind: null; refusal: string } {
+  const refusal = trainingSetRefusal(entry);
+  return refusal === null ? { kind: entry.kind as TrainingReadableSetKind, refusal } : { kind: null, refusal };
 }
 
 /** An opened set's head: what its flights and its overlays' binding are read from. */

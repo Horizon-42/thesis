@@ -680,6 +680,12 @@ export function sourceOnScreen(
   return { source: shown, sentence: shown === null ? null : read!.sentence };
 }
 
+/** Where the sentence bar's axis ends for a flight: its last step's end — or the sentence read's, when that runs longer
+ *  (its rows, or its end). */
+export function sentenceAxisEndS(flight: TrainingFlight, stepS: number, read: TrainingGeneratedSentence | null): number {
+  return Math.max(flight.rows * stepS, read === null ? 0 : Math.max(read.rows * stepS, read.endS));
+}
+
 /** The row of a model's sentence at a flight time — past its last row when the cursor is (the observed flight may last
  *  longer): no word is in force there. */
 export function generatedRowAt(stepS: number, seconds: number): number {

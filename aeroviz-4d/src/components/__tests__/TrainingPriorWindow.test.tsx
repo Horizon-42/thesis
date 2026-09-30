@@ -28,6 +28,7 @@ function open(cursorS = 0, column: TrainingColumn | null = null) {
       candidates={sample.value.candidates}
       prior={{ overlay: prior.value, flight: prior.value.flights[0] }}
       cursorS={cursorS}
+      cursorOn
       onCursorChange={onCursorChange}
       column={column}
       onColumnChange={onColumnChange}

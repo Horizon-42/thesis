@@ -167,7 +167,7 @@ export default function ReadbackHeading({ m, onCursorChange, onColumnChange }: {
       ))}
       <VLine x={rowX(flight.joinRow)} top={PLOT_TOP} bottom={bottom} stroke={TRAINING_COLUMN_COLOR.approach} dash="3 3"
         title={`cleared at step ${flight.joinRow}`} />
-      <VLine x={xTime(m.cursorS)} top={PLOT_TOP} bottom={bottom} className="training-readback-cursor-line" />
+      {m.cursorOn ? <VLine x={xTime(m.cursorS)} top={PLOT_TOP} bottom={bottom} className="training-readback-cursor-line" /> : null}
       <Axis left={GUTTER} right={GUTTER + m.plotW} y={bottom} ticks={timeTicks(m)} caption="s from the first step" />
     </ChartFrame>
   );

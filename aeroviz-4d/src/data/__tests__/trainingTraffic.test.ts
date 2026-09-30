@@ -23,9 +23,9 @@ import {
   type TrainingWindowView,
 } from "../trainingTraffic";
 import { generationOnScreen, parseTrainingOverlays, TRAINING_OVERLAY_KINDS, type TrainingOverlayEntry } from "../trainingOverlays";
-import { isOwnClock, trainingSelectionKey } from "../trainingSample";
+import { cursorOnFlight, isOwnClock, trainingSelectionKey } from "../trainingSample";
 import { parseOverlayOver, parseTrainingSet, TRAINING_OVERLAYS_OVER } from "../trainingSets";
-import { mockSample } from "./trainingSample.fixture";
+import { WORD, mockSample } from "./trainingSample.fixture";
 import {
   BACKGROUND_ID,
   REPLAYED_ID,
@@ -79,7 +79,7 @@ describe("a window set", () => {
     const [window] = set.windows;
     expect(set.setId).toBe(TRAFFIC_SET_ID);
     expect(set.cohort).toEqual({ split: "select", windows: 1, seed: 1337, drawnFrom: "a test draw" });
-    expect(window.commanded.map((one) => [one.flight.datasetId, one.rowZeroS])).toEqual([[VECTORED_ID, 100], [STRAIGHT_ID, 160]]);
+    expect(window.commanded.map((one) => [one.flight.datasetId, one.rowZeroS])).toEqual([[VECTORED_ID, 100], [STRAIGHT_ID, 110]]);
     expect(window.commanded[0].flight).toBe(set.flights.find((flight) => flight.datasetId === VECTORED_ID));
     expect(window.others.map((other) => [other.datasetId, other.role])).toEqual([[REPLAYED_ID, "replayed"], [BACKGROUND_ID, "background"]]);
     expect(window.recorded.losses.visual.ended).toEqual([]);
@@ -152,6 +152,11 @@ describe("a model's sentences in the windows", () => {
       .toContain("but the aircraft that landed are");
     expect(refusal(read, mockWindowOverlay(), (raw) => { raw.windows[0].samples[0].aircraft[0].track.lat[0] += 0.01; }))
       .toContain("where it was flown from");
+    // a word said after the judge ended it; an episode ending an aircraft the ends do not list
+    expect(refusal(read, mockWindowOverlay(), (raw) => { raw.windows[0].samples[0].aircraft[0].events.push({ row: 20, column: 2, value: WORD.heading225 }); }))
+      .toContain("says a word at 40 s, after the judge ended it at 20 s");
+    expect(refusal(read, mockWindowOverlay(), (raw) => { raw.windows[0].samples[0].visual.episodes[0].ended.push(STRAIGHT_ID); }))
+      .toContain("which the ended aircraft do not list");
   });
 
   it("is projected onto the aircraft on screen as a model's sentences over a flight — a sample per window sample", () => {
@@ -164,6 +169,11 @@ describe("a model's sentences in the windows", () => {
     expect(selection.clock).toEqual({ scope: trainingWindowKey(shown.set, window), offsetS: ROW_ZERO_S[STRAIGHT_ID] });
     expect(selection.liveExecutor).toBe(false);
     expect(isOwnClock(selection)).toBe(false);
+    // on a window's clock the cursor is on the aircraft only over its axis; on a flight's own, always (held at its ends)
+    expect([cursorOnFlight(selection, -1, 120), cursorOnFlight(selection, 0, 120), cursorOnFlight(selection, 121, 120)])
+      .toEqual([false, true, false]);
+    const own = { ...selection, clock: { scope: trainingSelectionKey(selection)!, offsetS: 0 } };
+    expect([cursorOnFlight(own, -1, 120), cursorOnFlight(own, 500, 120)]).toEqual([true, true]);
     expect(trainingSelectionKey(selection)).toBe(`KXXX/${TRAFFIC_SET_ID}/${window.commanded[1].flight.flightKey}`);
     // the sentence bar reads it as any model's: its sample by number
     expect(generationOnScreen([projected], { overlayId: WINDOW_MODEL_ID, sample: 1 }, selection)?.sentence?.outcome).toBe("timeout");
@@ -205,6 +215,6 @@ describe("a window as read", () => {
     expect(episodesAt(losses, 119, 2)).toEqual([]);
     expect(episodesAt(losses, 125.9, 2)).toHaveLength(1);
     expect(episodesAt(losses, 126, 2)).toEqual([]);
-    expect(windowSpanS(shown.window, [track])).toEqual([100, 278]);
+    expect(windowSpanS(shown.window, [track])).toEqual([100, 228]);
   });
 });

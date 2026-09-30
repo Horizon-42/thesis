@@ -58,6 +58,8 @@ export interface TrainingPriorWindowProps {
   candidates: TrainingCandidate[];
   prior: TrainingPriorView;
   cursorS: number;
+  /** The cursor is on the flight (`cursorOnFlight`). */
+  cursorOn: boolean;
   onCursorChange: (seconds: number) => void;
   column: TrainingColumn | null;
   onColumnChange: (column: TrainingColumn) => void;
@@ -67,7 +69,7 @@ export interface TrainingPriorWindowProps {
 const p3 = (value: number) => value.toFixed(3);
 
 export default function TrainingPriorWindow({
-  flight, vocabulary, candidates, prior, cursorS, onCursorChange, column, onColumnChange, onClose,
+  flight, vocabulary, candidates, prior, cursorS, cursorOn, onCursorChange, column, onColumnChange, onClose,
 }: TrainingPriorWindowProps) {
   const { overlay, flight: predicted } = prior;
   const { readout } = overlay;
@@ -98,7 +100,7 @@ export default function TrainingPriorWindow({
 
   return (
     <TrainingWindow title="Prior predictions" closeLabel="Close the prior predictions" className="training-prior-window"
-      cursorS={cursorS} cursorRow={row} onClose={onClose}
+      cursorS={cursorS} cursorRow={row} cursorOn={cursorOn} onClose={onClose}
       chips={<>
         <span>{flight.callsign}</span>
         <span>runway {flight.runway}</span>
@@ -199,7 +201,7 @@ export default function TrainingPriorWindow({
               </g>
             );
           })}
-          <line x1={x(cursorS)} x2={x(cursorS)} y1={0} y2={height - AXIS_H} className="training-readback-cursor-line" />
+          {cursorOn ? <line x1={x(cursorS)} x2={x(cursorS)} y1={0} y2={height - AXIS_H} className="training-readback-cursor-line" /> : null}
           {[0, 0.25, 0.5, 0.75, 1].map((fraction) => (
             <text key={fraction} x={x(fraction * endS)} y={height - 6} textAnchor="middle" className="training-readback-tick">
               {formatSeconds(Math.round(fraction * endS))}

@@ -147,8 +147,10 @@ function generationAbsence(manifest: OverlaysManifestState, items: GenerationIte
   return items.every(({ load }) => load.status === "invalid") ? "cannot be read" : "loading …";
 }
 
+/** ``sample``: the read-back set open — null while the next one loads (the session is kept: its switches and choices per
+ *  set outlive a switch of sets, and it publishes no flight meanwhile). */
 export default function TrainingFlightSession({ airport, sample, entry, details }: {
-  airport: string; sample: TrainingSample; entry: TrainingSetEntry | null; details: DetailsPage;
+  airport: string; sample: TrainingSample | null; entry: TrainingSetEntry | null; details: DetailsPage;
 }) {
   const { setTrainingSelection, trainingSource } = useApp();
   const [flightKey, setFlightKey] = useState<string | null>(null);
@@ -172,16 +174,21 @@ export default function TrainingFlightSession({ airport, sample, entry, details 
   // Keep the selection on the same flight across a reload when it is still there; otherwise the first, so the
   // sentence bar is never blank beside a list.
   useEffect(() => {
+    if (sample === null) {
+      setFlightKey(null);
+      return;
+    }
     setFlightKey((previous) =>
       previous && sample.flights.some((flight) => flight.flightKey === previous) ? previous : (sample.flights[0]?.flightKey ?? null));
   }, [sample]);
 
   // ── publish what the other views draw ─────────────────────────────────────
   useEffect(() => {
-    const flight = sample.flights.find((item) => item.flightKey === flightKey) ?? null;
-    setTrainingSelection(flight ? trainingSelectionOf(sample, flight) : null);
+    const flight = sample?.flights.find((item) => item.flightKey === flightKey) ?? null;
+    setTrainingSelection(flight && sample ? trainingSelectionOf(sample, flight) : null);
   }, [sample, flightKey, setTrainingSelection]);
   useEffect(() => () => setTrainingSelection(null), [setTrainingSelection]);
+  if (sample === null) return null;
 
   // ── the details page ──────────────────────────────────────────────────────
   const generations = overlays.generations.flatMap(({ load }) => (load.status === "ready" ? [load.overlay] : []));

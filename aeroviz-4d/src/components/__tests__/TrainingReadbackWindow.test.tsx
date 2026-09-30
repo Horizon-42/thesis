@@ -55,6 +55,7 @@ function open(layers: TrainingLayers = ALL, position = 0, cursorS = 0, column: T
       candidates={parsed.value.candidates}
       layers={layers}
       cursorS={cursorS}
+      cursorOn
       onCursorChange={onCursorChange}
       column={column}
       onColumnChange={onColumnChange}
@@ -328,7 +329,7 @@ describe("the live executor in the read-back check", () => {
     if (!parsed.ok) throw new Error(parsed.problem);
     const onClose = vi.fn();
     render(<TrainingReadbackWindow flight={parsed.value.flights[0]} vocabulary={parsed.value.vocabulary}
-      candidates={parsed.value.candidates} layers={ALL} cursorS={0} onCursorChange={() => undefined} column={null}
+      candidates={parsed.value.candidates} layers={ALL} cursorS={0} cursorOn onCursorChange={() => undefined} column={null}
       onColumnChange={() => undefined} onClose={onClose} executor={null} autopilot={null} />);
     const dialog = screen.getByRole("dialog", { name: "Read-back check" });
     expect(document.activeElement).toBe(dialog);

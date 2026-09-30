@@ -38,16 +38,16 @@ describe("the Training cursor", () => {
     expect([cursor.trainingCursorS, cursor.trainingSceneS]).toEqual([0, 100]);
     act(() => cursor.setTrainingCursorS(20));
     expect([cursor.trainingCursorS, cursor.trainingSceneS]).toEqual([20, 120]);
-    // another aircraft of the window, at the same moment: 40 s before its own row 0
+    // another aircraft of the window, at the same moment: 10 s after its own row 0
     act(() => app.setTrainingSelection(straight));
-    expect([cursor.trainingCursorS, cursor.trainingSceneS]).toEqual([-40, 120]);
-    act(() => cursor.setTrainingSceneS(200));
-    expect(cursor.trainingCursorS).toBe(40);
+    expect([cursor.trainingCursorS, cursor.trainingSceneS]).toEqual([10, 120]);
+    act(() => cursor.setTrainingSceneS(90));
+    expect(cursor.trainingCursorS).toBe(-20);
     // a read-back set's flight: its own clock, from its 0 s
     act(() => app.setTrainingSelection(trainingSelectionOf(sample.value, sample.value.flights[0])));
     expect([cursor.trainingCursorS, cursor.trainingSceneS]).toEqual([0, 0]);
     // back to the window: a new clock again, at the aircraft's own 0 s
     act(() => app.setTrainingSelection(straight));
-    expect([cursor.trainingCursorS, cursor.trainingSceneS]).toEqual([0, 160]);
+    expect([cursor.trainingCursorS, cursor.trainingSceneS]).toEqual([0, 110]);
   });
 });

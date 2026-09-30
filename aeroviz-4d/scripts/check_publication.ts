@@ -49,7 +49,7 @@ import {
   indexCzmlFiles,
   type PublicationFinding,
 } from "../src/utils/checkPublication";
-import { parseTrainingSet, readableKind, type TrainingOpenSet } from "../src/data/trainingSets";
+import { openable, parseTrainingSet, type TrainingOpenSet } from "../src/data/trainingSets";
 
 const FRONTEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PUBLISHED_ROOT = path.join(FRONTEND_ROOT, "public", "data", "airports");
@@ -214,9 +214,9 @@ async function checkTraining(root: string, airport: string, server: string | nul
     }
     // A set the panel refuses by name is never downloaded by it, so it is not parsed here either:
     // it is reported as what it is — listed, and refused on purpose.
-    const refusal = checkTrainingSetRefusal(entry);
-    if (refusal.length) {
-      findings.push(...refusal);
+    const { kind } = openable(entry);
+    if (kind === null) {
+      findings.push(...checkTrainingSetRefusal(entry));
       continue;
     }
     // A truncated file is the commonest shape of a half-written export: name the set and go on.
@@ -227,7 +227,6 @@ async function checkTraining(root: string, airport: string, server: string | nul
       findings.push({ level: "error", category: entry.id, message: `${entry.file} is not readable JSON: ${unreadable(error)}` });
       continue;
     }
-    const kind = readableKind(entry)!;                   // not refused: a kind this reader opens
     const read = checkTrainingSet(entry.id, kind, raw);
     findings.push(...read.findings);
     if (read.value !== null) {

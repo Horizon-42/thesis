@@ -3,10 +3,10 @@
  * shapes `window_training_export.py` writes, built by hand. Every contract literal is IMPORTED from the reader.
  *
  * One window opening at 2026-01-01T00:00Z: the VECTORED flight commanded from 100 s (its row 0 on the window's clock) and
- * the STRAIGHT-IN one from 160 s; a replayed arrival ABC1 and a background one BKG2. As recorded both land (VECTORED at
+ * the STRAIGHT-IN one from 110 s; a replayed arrival ABC1 and a background one BKG2. As recorded both land (VECTORED at
  * 220 s, STRAIGHT-IN at 270 s) and only IFR finds a pair under its minimum (VECTORED – ABC1). The base model's two samples:
  * #1 — VECTORED ended at 20 s of its own (120 s on the window's clock) for a loss behind STRAIGHT-IN, flying on silent to
- * its time limit (60 s), STRAIGHT-IN landing at 50 s (210 s); #2 — both time out, no loss.
+ * its time limit (60 s), STRAIGHT-IN landing at 50 s (160 s); #2 — both time out, no loss.
  */
 
 import { TRAINING_COLUMNS, TRAINING_SPEC_SHA256 } from "../trainingSample";
@@ -22,7 +22,7 @@ export const REPLAYED_ID = "KXXX:ABC1_09_fff001_20260101T000500Z";
 export const BACKGROUND_ID = "KXXX:BKG2_09_fff002_20260101T000600Z";
 /** The model's first predicted row; each sample's track starts there. */
 export const WINDOW_FIRST_ROW = 4;
-export const ROW_ZERO_S: Record<string, number> = { [VECTORED_ID]: 100, [STRAIGHT_ID]: 160 };
+export const ROW_ZERO_S: Record<string, number> = { [VECTORED_ID]: 100, [STRAIGHT_ID]: 110 };
 
 type SetFlight = { flightKey: string; signals: { tS: number[]; lon: number[]; lat: number[]; altitudeHaeM: number[]; raw: { altitudeM: number[] } } };
 
@@ -68,7 +68,7 @@ const opening = [
 function sentence(sample: number, datasetId: string, own: "landed" | "timeout", ownEndS: number,
   end: { atS: number; with: string } | null, cleared = false) {
   const key = datasetId.split(":")[1];
-  const events = cleared ? [...opening, { row: 10, column: 1, value: WORD.cleared }] : opening;
+  const events = cleared ? [...opening, { row: 10, column: 1, value: WORD.cleared }] : [...opening];
   return {
     datasetId, sample, outcome: end === null ? own : "lost_separation", own,
     end: end === null ? null : { kind: "in_trail", relation: "same", with: end.with },
@@ -145,7 +145,7 @@ export function mockWindowOverlay(): Record<string, any> {
             kinds: ["in_trail"], closestM: 3000, requiredM: 5556, wakeKnown: true, responsible: [VECTORED_ID], ended: [VECTORED_ID] }],
             atThreshold: [], ended: [{ datasetId: VECTORED_ID, atS: 120, kind: "in_trail", relation: "same", with: STRAIGHT_ID }] },
           ifr: noLosses(),
-          landings: [{ datasetId: STRAIGHT_ID, atS: 210 }],
+          landings: [{ datasetId: STRAIGHT_ID, atS: 160 }],
         },
         {
           sample: 1,

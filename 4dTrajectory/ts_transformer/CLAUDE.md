@@ -419,7 +419,10 @@ paired, not repeated tries) beside M3's labelled and recorded readings (R33).
 (`experiments/traffic_window.py` WindowLoop, `prior/window_speaker.py`: rounds from the front of the approach clock,
 executors grouped by first spoken step, the judge run as it flies, ended aircraft flying on silent), beside alone /
 labelled / recorded, all judged in the window; `--augment-seed` on augmented windows (`experiments/traffic_window_augment.py`:
-the flow compressed, a start moved, a flight inserted and commanded; capped at the airport's busiest training step) (R34).
+the flow compressed, a start moved, a flight inserted and commanded; capped at the airport's busiest training step) (R34). `window_training_export` writes those windows for the frontend's Training
+module — a model-free window set (`traffic-windows`: 20 select windows an airport of the readouts' draw, by size) and a
+`window-generation` overlay per prior on its OWN draws (no readout re-run; `--readout` only copies summaries); the landings
+are the aircraft whose own end is a landing; the M4 model is named `traffic` (R35).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 

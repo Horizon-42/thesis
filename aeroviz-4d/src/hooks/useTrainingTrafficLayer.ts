@@ -142,6 +142,9 @@ export default function useTrainingTrafficLayer(): void {
       });
     }
     viewer.scene.requestRender();
-    return () => group.remove();
+    return () => {
+      group.remove();
+      if (isCesiumViewerUsable(viewer)) viewer.scene.requestRender();
+    };
   }, [viewer, view, reading, aircraft, trainingSceneS]);
 }

@@ -31,6 +31,7 @@ import {
 import {
   parseTrainingIndex,
   TRAINING_READBACK_SET_KIND,
+  TRAINING_TRAFFIC_SET_KIND,
   trainingSetRefusal,
   type TrainingIndex,
   type TrainingReadableSetKind,
@@ -277,11 +278,11 @@ export function checkTrainingSetAgrees(
   const set = openSetHead(open);
   // each kind's cohort: a read-back set's flights per stratum, a window set's windows
   const cohort: Array<[string, string | number, string | number]> =
-    open.kind === TRAINING_READBACK_SET_KIND && entry.kind !== "traffic-windows" ? [
+    open.kind === TRAINING_READBACK_SET_KIND && entry.kind !== TRAINING_TRAFFIC_SET_KIND ? [
       ["cohort.split", entry.cohort.split, open.sample.cohort.split],
       ["cohort.perStratum", entry.cohort.perStratum, open.sample.cohort.perStratum],
       ["cohort.seed", entry.cohort.seed, open.sample.cohort.seed],
-    ] : open.kind === "traffic-windows" && entry.kind === "traffic-windows" ? [
+    ] : open.kind === TRAINING_TRAFFIC_SET_KIND && entry.kind === TRAINING_TRAFFIC_SET_KIND ? [
       ["cohort.split", entry.cohort.split, open.traffic.cohort.split],
       ["cohort.windows", entry.cohort.windows, open.traffic.cohort.windows],
       ["cohort.seed", entry.cohort.seed, open.traffic.cohort.seed],

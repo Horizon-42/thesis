@@ -44,6 +44,7 @@ import {
 } from "./trainingOverlays";
 import {
   readSetHead,
+  rowAtTime,
   trainingFilePath,
   type TrainingFlight,
   type TrainingSelection,
@@ -170,6 +171,11 @@ export interface TrainingWindowSentence extends TrainingGeneratedSentence {
   end: { kind: string; relation: string; with: string } | null;
 }
 
+/** Whether a model's sentence is one in a window (it carries its own end beside the window's). */
+export function isWindowSentence(sentence: TrainingGeneratedSentence): sentence is TrainingWindowSentence {
+  return "own" in sentence;
+}
+
 export interface TrainingWindowSample {
   sample: number;
   /** In the window's commanded order. */
@@ -254,6 +260,9 @@ function readLosses(reader: Reader, present: Set<string>, commanded: Set<string>
       with: known(item, "with", item.string("with")) };
   });
   if (new Set(ended.map((item) => item.datasetId)).size !== ended.length) reader.fail("ends an aircraft twice");
+  const endedIds = new Set(ended.map((item) => item.datasetId));
+  const unnamed = episodes.flatMap((episode) => episode.ended).filter((id) => !endedIds.has(id));
+  if (unnamed.length > 0) reader.fail(`episodes end [${unnamed.join(", ")}], which the ended aircraft do not list`);
   return { episodes, atThreshold, ended };
 }
 
@@ -335,6 +344,10 @@ function readWindowSentence(item: Reader, index: number, head: TrainingGeneratio
     item.fail(`is ${outcome} ${end === null ? "and names no end" : "but names the judge's end"}`);
   }
   if (end === null && outcome !== own) item.fail(`is ${outcome}, not its own end ${own}, and the judge did not end it`);
+  const lastWordS = said.events[said.events.length - 1].row * set.vocabulary.stepS;
+  if (end !== null && lastWordS > item.number("endS") + TIME_SLACK) {
+    item.fail(`says a word at ${lastWordS} s, after the judge ended it at ${item.number("endS")} s`);
+  }
   const crossingReader = item.nullableChild("crossing");
   const crossing = crossingReader === null ? null : readCrossing(crossingReader);
   if ((crossing !== null) !== TRAINING_CROSSING_OUTCOMES.includes(own)) {
@@ -446,6 +459,11 @@ export async function fetchTrainingWindowGenerationOverlay(
 
 // ── one window on screen ─────────────────────────────────────────────────────
 
+/** "08-26 13:40Z": a window's opening, as the views name it. */
+export function windowOpening(window: TrainingWindow): string {
+  return `${window.opensUtc.slice(5, 10)} ${window.opensUtc.slice(11, 16)}Z`;
+}
+
 /** A window as one identity: the cursor keeps its time while it is on screen. */
 export function trainingWindowKey(set: TrainingSetHead, window: TrainingWindow): string {
   return `${set.airport}/${set.setId}/window ${window.index}`;
@@ -480,11 +498,11 @@ export function sceneTrackOf(sentence: TrainingWindowSentence, aircraft: Trainin
 export function sceneTrackAt(track: TrainingSceneTrack, atS: number): { lon: number; lat: number; heightHaeM: number } | null {
   const { tS } = track;
   if (atS < tS[0] || atS > tS[tS.length - 1]) return null;
-  let k = 0;
-  while (k < tS.length - 2 && tS[k + 1] < atS) k += 1;
-  const span = tS[k + 1] === undefined ? 0 : tS[k + 1] - tS[k];
+  // the point at or before it (`rowAtTime`'s search), and the one after — the last point's own when it is the last
+  const k = Math.min(rowAtTime(tS, atS), tS.length - 2);
+  const span = k < 0 ? 0 : tS[k + 1] - tS[k];
   const f = span > 0 ? (atS - tS[k]) / span : 0;
-  const at = (values: number[]) => (span > 0 ? values[k] + f * (values[k + 1] - values[k]) : values[k]);
+  const at = (values: number[]) => (span > 0 ? values[k] + f * (values[k + 1] - values[k]) : values[Math.max(k, 0)]);
   return { lon: at(track.lon), lat: at(track.lat), heightHaeM: at(track.altitudeHaeM) };
 }
 

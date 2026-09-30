@@ -13,19 +13,20 @@
  * here.
  */
 
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
 import { useApp, useTrainingCursor } from "../context/AppContext";
 import useMeasuredWidth from "../hooks/useMeasuredWidth";
 import {
   episodesAt,
   trainingWindowKey,
   windowReading,
+  windowOpening,
   windowSpanS,
   type TrainingLossEpisode,
   type TrainingWindowReading,
   type TrainingWindowView,
 } from "../data/trainingTraffic";
-import { trainingModelLabel } from "../data/trainingOverlays";
+import { sentenceAxisEndS, trainingModelLabel } from "../data/trainingOverlays";
 import {
   TRAINING_LOSS_COLOR,
   TRAINING_OTHER_AIRCRAFT_COLOR,
@@ -49,28 +50,35 @@ function clockText(seconds: number): string {
 }
 
 /** The play button: advances the window's time from where it is, at the speed chosen, until the window's end. */
-function Playback({ spanS, atS, onTime }: { spanS: [number, number]; atS: number; onTime: (atS: number) => void }) {
+function Playback({ startS, endS, atS, onTime }: { startS: number; endS: number; atS: number; onTime: (atS: number) => void }) {
   const [playing, setPlaying] = useState<boolean>(false);
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(10);
+  // the time it is at and what moves it, as of the last render: the timer reads them, and outlives the renders
   const at = useRef(atS);
-  at.current = atS;
+  const move = useRef(onTime);
+  useLayoutEffect(() => {
+    at.current = atS;
+    move.current = onTime;
+  });
+  // one timer for as long as it plays at one speed: each tick adds the time since the last, whatever the renders between
   useEffect(() => {
     if (!playing) return;
     let last = performance.now();
     const timer = setInterval(() => {
       const now = performance.now();
-      const next = Math.min(at.current + ((now - last) / 1000) * speed, spanS[1]);
+      const next = Math.min(at.current + ((now - last) / 1000) * speed, endS);
       last = now;
-      onTime(next);
-      if (next >= spanS[1]) setPlaying(false);
+      at.current = next;
+      move.current(next);
+      if (next >= endS) setPlaying(false);
     }, PLAY_TICK_MS);
     return () => clearInterval(timer);
-  }, [playing, speed, spanS, onTime]);
+  }, [playing, speed, endS]);
   return (
     <span className="training-traffic-play">
       <button type="button" aria-pressed={playing} title={playing ? "pause the window" : `play the window at ${speed}×`}
         onClick={() => {
-          if (!playing && at.current >= spanS[1]) onTime(spanS[0]);
+          if (!playing && at.current >= endS) onTime(startS);
           setPlaying(!playing);
         }}>
         {playing ? "❚❚" : "▶"}
@@ -106,13 +114,13 @@ function Strip({ view, reading, onScreen }: { view: TrainingWindowView; reading:
   const rowOf = (id: string) => current.commanded.findIndex((one) => one.flight.datasetId === id);
   const modelCss = reading.model === null ? TRAINING_TRACE_COLOR : trainingModelColour(reading.model.overlay.model);
   const focused = current.commanded.find((one) => one.flight.datasetId === onScreen)!;
-  const focusedEndS = focused.rowZeroS + Math.max(focused.flight.rows * stepS,
-    reading.model === null ? 0 : reading.model.sample.aircraft[current.commanded.indexOf(focused)].rows * stepS);
-  const visualPairs = new Set(reading.losses.visual.episodes.map((episode) => episode.pair.join("|")));
+  const focusedEndS = focused.rowZeroS + sentenceAxisEndS(focused.flight, stepS,
+    reading.model === null ? null : reading.model.sample.aircraft[current.commanded.indexOf(focused)]);
+  // every IFR stretch outlined, under the VISUAL ones filled (a pair's IFR stretch outlasts its VISUAL one: IFR's minima are
+  // the larger)
   const losses = [
+    ...reading.losses.ifr.episodes.map((episode) => ({ episode, reading: "IFR" as const })),
     ...reading.losses.visual.episodes.map((episode) => ({ episode, reading: "VISUAL" as const })),
-    ...reading.losses.ifr.episodes.filter((episode) => !visualPairs.has(episode.pair.join("|")))
-      .map((episode) => ({ episode, reading: "IFR" as const })),
   ];
   const underNow = episodesAt(reading.losses.visual, atS, stepS).length;
   // the time follows a press on the plot, never one on the callsigns (those put an aircraft on screen)
@@ -125,9 +133,9 @@ function Strip({ view, reading, onScreen }: { view: TrainingWindowView; reading:
   return (
     <div className="training-traffic-strip" ref={frame}>
       <div className="training-traffic-head">
-        <Playback spanS={spanS} atS={atS} onTime={setTrainingSceneS} />
+        <Playback startS={spanS[0]} endS={spanS[1]} atS={atS} onTime={setTrainingSceneS} />
         <span title={`the window opens ${current.opensUtc}; its clock runs from its opening`}>
-          Window {current.opensUtc.slice(5, 16).replace("T", " ")}Z · t = {clockText(atS)}
+          Window {windowOpening(current)} · t = {clockText(atS)}
         </span>
         <span className="training-traffic-read" style={{ color: modelCss }}>
           {reading.model === null ? "as recorded" : `${trainingModelLabel(reading.model.overlay.model)} · sample ${reading.model.sample.sample + 1}`}
@@ -156,11 +164,10 @@ function Strip({ view, reading, onScreen }: { view: TrainingWindowView; reading:
           const landing = reading.landings.find((item) => item.datasetId === one.flight.datasetId);
           const ended = reading.losses.visual.ended.find((item) => item.datasetId === one.flight.datasetId);
           return (
+            // a press on a row — its bar or its callsign — puts it on screen: on PRESS, since a press on the plot captures the
+            // pointer and the click after it goes to the capture's target, never the row
             <g key={one.flight.datasetId} className={`training-traffic-row${one === focused ? " active" : ""}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                view.focus(one.flight.datasetId);
-              }}>
+              onPointerDown={() => view.focus(one.flight.datasetId)}>
               <text x={GUTTER - 6} y={y + ROW_H - 3} textAnchor="end">{one.flight.callsign}</text>
               <rect x={xFor(track.tS[0])} y={y + 3} width={Math.max(xFor(track.tS[track.tS.length - 1]) - xFor(track.tS[0]), 1)}
                 height={ROW_H - 6} rx={2} fill={modelCss} opacity={one === focused ? 1 : 0.7}>
@@ -220,6 +227,8 @@ export default function TrainingTrafficStrip() {
   const { trainingWindow, trainingSelection, trainingSource } = useApp();
   if (trainingWindow === null || trainingSelection === null
     || trainingWindowKey(trainingWindow.set, trainingWindow.window) !== trainingSelection.clock.scope) return null;
-  return <Strip view={trainingWindow} reading={windowReading(trainingWindow, trainingSource)} onScreen={trainingSelection.flight.datasetId} />;
+  // a strip (and its playback) per window
+  return <Strip key={trainingSelection.clock.scope} view={trainingWindow} reading={windowReading(trainingWindow, trainingSource)}
+    onScreen={trainingSelection.flight.datasetId} />;
 }
 
