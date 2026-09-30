@@ -8,7 +8,9 @@
  *
  * THE PRIOR'S OWN SENTENCES (`prior-generation`) have no switch: every one published for the set is downloaded — each
  * model is a tab of the sentence bar, which is what chooses the sentence read (`trainingSource`) — and the selected
- * flight's view of each loaded one is published together (`trainingGenerations`).
+ * flight's view of each loaded one is published together (`trainingGenerations`). A WINDOW SET's models
+ * (`window-generation`, `useTrainingWindowOverlays`) are downloaded the same way; the window session projects them onto
+ * the aircraft on screen.
  *
  * The states all name what failed, as the panel's own do: no manifest is "none published" (the command that writes
  * one is shown), a manifest that is not one or an overlay that does not bind to the set says why, and only that
@@ -34,7 +36,8 @@ import {
   type TrainingPriorOverlay,
 } from "../data/trainingOverlays";
 import type { Parsed } from "../data/trainingReader";
-import type { TrainingSample } from "../data/trainingSample";
+import type { TrainingSample, TrainingSetHead } from "../data/trainingSample";
+import { fetchTrainingWindowGenerationOverlay, type TrainingTrafficSet } from "../data/trainingTraffic";
 
 export type OverlaysManifestState =
   | { status: "loading" }
@@ -48,8 +51,9 @@ export type OverlayLoad<T> =
   | { status: "invalid"; problem: string }
   | { status: "ready"; overlay: T };
 
-/** The overlay kinds behind a switch of their own — a model's sentences are chosen in the sentence bar instead. */
-export type TrainingSwitchKind = Exclude<TrainingOverlayKind, (typeof TRAINING_GENERATION_KINDS)[number]>;
+/** The overlay kinds behind a switch of their own — over a read-back set's flights; a model's sentences (over flights or
+ *  in windows) are chosen in the sentence bar instead. */
+export type TrainingSwitchKind = Exclude<TrainingOverlayKind, (typeof TRAINING_GENERATION_KINDS)[number] | "window-generation">;
 
 export interface OverlayKindState<T> {
   kind: TrainingSwitchKind;
@@ -64,6 +68,30 @@ export interface OverlayKindState<T> {
 }
 
 type Fetcher<T> = (airport: string, entry: TrainingOverlayEntry, sample: TrainingSample) => Promise<Parsed<T>>;
+
+/** The airport's overlays manifest: none published is an answer (most sets have none), not an error. */
+export function useOverlaysManifest(airport: string | null): OverlaysManifestState {
+  const [manifest, setManifest] = useState<OverlaysManifestState>({ status: "loading" });
+  useEffect(() => {
+    if (!airport) return;
+    let live = true;
+    setManifest({ status: "loading" });
+    fetchTrainingOverlays(airport)
+      .then((parsed) => {
+        if (!live) return;
+        setManifest(parsed.ok ? { status: "ready", overlays: parsed.value } : { status: "invalid", problem: parsed.problem });
+      })
+      .catch((error: unknown) => {
+        if (!live) return;
+        if (isMissingJsonAsset(error)) setManifest({ status: "absent" });
+        else setManifest({ status: "invalid", problem: error instanceof Error ? error.message : String(error) });
+      });
+    return () => {
+      live = false;
+    };
+  }, [airport]);
+  return manifest;
+}
 
 function useOverlayKind<T extends { flights: Array<{ flightKey: string }> }>(
   kind: TrainingSwitchKind, manifest: OverlaysManifestState, airport: string | null, sample: TrainingSample | null,
@@ -109,22 +137,27 @@ function useOverlayKind<T extends { flights: Array<{ flightKey: string }> }>(
   return { kind, entries, entry, choose, shown, setShown, load };
 }
 
-/** One generation overlay published for the open set, its download, and — when that failed — a way to ask again. */
-export interface GenerationItem {
+/** One model overlay published for the open set, its download, and — when that failed — a way to ask again. */
+export interface ModelOverlayItem<T> {
   entry: TrainingOverlayEntry;
-  load: OverlayLoad<TrainingGenerationOverlay>;
+  load: OverlayLoad<T>;
   retry: () => void;
 }
 
-/** Every generation overlay drawn over the open set, each downloaded once per set and sample; a failed one says why and is
- *  asked again only by its `retry`. Only the open set's are kept: another set's are dropped (they are large). */
-function useGenerationOverlays(manifest: OverlaysManifestState, airport: string | null, sample: TrainingSample | null): GenerationItem[] {
+export type GenerationItem = ModelOverlayItem<TrainingGenerationOverlay>;
+
+/** Every model overlay of ``kinds`` drawn over the open set, each downloaded once per set and sample; a failed one says why
+ *  and is asked again only by its `retry`. Only the open set's are kept: another set's are dropped (they are large). */
+function useModelOverlays<S extends TrainingSetHead, T>(
+  manifest: OverlaysManifestState, airport: string | null, sample: S | null, kinds: readonly TrainingOverlayKind[],
+  fetcher: (airport: string, entry: TrainingOverlayEntry, set: S) => Promise<Parsed<T>>,
+): ModelOverlayItem<T>[] {
   const entries = useMemo(
     () => (manifest.status === "ready" && sample && manifest.overlays.airport === airport && sample.airport === airport
-      ? TRAINING_GENERATION_KINDS.flatMap((kind) => trainingOverlaysOf(manifest.overlays, sample.setId, kind)) : []),
-    [manifest, sample, airport],
+      ? kinds.flatMap((kind) => trainingOverlaysOf(manifest.overlays, sample.setId, kind)) : []),
+    [manifest, sample, airport, kinds],
   );
-  const [loads, setLoads] = useState<Record<string, OverlayLoad<TrainingGenerationOverlay>>>({});
+  const [loads, setLoads] = useState<Record<string, OverlayLoad<T>>>({});
   const requested = useRef<Set<string>>(new Set());
   const [attempt, setAttempt] = useState<number>(0);
   const keyOf = useCallback((entry: TrainingOverlayEntry) => `${airport}/${entry.id}@${sample?.writtenUtc}`, [airport, sample]);
@@ -138,18 +171,18 @@ function useGenerationOverlays(manifest: OverlaysManifestState, airport: string 
       const kept = Object.fromEntries(Object.entries(held).filter(([key]) => current.has(key)));
       return Object.keys(kept).length === Object.keys(held).length ? held : kept;
     });
-    const settle = (key: string, load: OverlayLoad<TrainingGenerationOverlay>) =>
+    const settle = (key: string, load: OverlayLoad<T>) =>
       setLoads((held) => (requested.current.has(key) ? { ...held, [key]: load } : held));
     for (const entry of entries) {
       const key = keyOf(entry);
       if (requested.current.has(key)) continue;
       requested.current.add(key);
       setLoads((current) => ({ ...current, [key]: { status: "loading" } }));
-      fetchTrainingGenerationOverlay(airport, entry, sample)
+      fetcher(airport, entry, sample)
         .then((parsed) => settle(key, parsed.ok ? { status: "ready", overlay: parsed.value } : { status: "invalid", problem: parsed.problem }))
         .catch((error: unknown) => settle(key, { status: "invalid", problem: error instanceof Error ? error.message : String(error) }));
     }
-  }, [entries, sample, airport, keyOf, attempt]);
+  }, [entries, sample, airport, keyOf, attempt, fetcher]);
 
   // not asked yet: the effect above asks for it after this render
   return useMemo(() => entries.map((entry) => ({
@@ -162,33 +195,24 @@ function useGenerationOverlays(manifest: OverlaysManifestState, airport: string 
   })), [entries, loads, keyOf]);
 }
 
+/** The kinds of a window set's model overlays. */
+const WINDOW_KINDS = ["window-generation"] as const;
+
+/** A window set's overlays: the manifest, and every model's sentences in its windows (`window-generation`), downloaded as
+ *  a read-back set's models are; nothing is published here — the window session projects them onto its aircraft. */
+export function useTrainingWindowOverlays(airport: string | null, traffic: TrainingTrafficSet | null) {
+  const manifest = useOverlaysManifest(airport);
+  const windows = useModelOverlays(manifest, airport, traffic, WINDOW_KINDS, fetchTrainingWindowGenerationOverlay);
+  return { manifest, windows };
+}
+
 export default function useTrainingOverlays(airport: string | null, sample: TrainingSample | null, flightKey: string | null) {
   const { setTrainingExecutor, setTrainingPrior, setTrainingGenerations } = useApp();
-  const [manifest, setManifest] = useState<OverlaysManifestState>({ status: "loading" });
-
-  useEffect(() => {
-    if (!airport) return;
-    let live = true;
-    setManifest({ status: "loading" });
-    fetchTrainingOverlays(airport)
-      .then((parsed) => {
-        if (!live) return;
-        setManifest(parsed.ok ? { status: "ready", overlays: parsed.value } : { status: "invalid", problem: parsed.problem });
-      })
-      .catch((error: unknown) => {
-        if (!live) return;
-        // None published is an answer, not an error: most sets have no overlay.
-        if (isMissingJsonAsset(error)) setManifest({ status: "absent" });
-        else setManifest({ status: "invalid", problem: error instanceof Error ? error.message : String(error) });
-      });
-    return () => {
-      live = false;
-    };
-  }, [airport]);
+  const manifest = useOverlaysManifest(airport);
 
   const executor = useOverlayKind<TrainingExecutorOverlay>("executor-replay", manifest, airport, sample, fetchTrainingExecutorOverlay);
   const prior = useOverlayKind<TrainingPriorOverlay>("prior-prediction", manifest, airport, sample, fetchTrainingPriorOverlay);
-  const generations = useGenerationOverlays(manifest, airport, sample);
+  const generations = useModelOverlays(manifest, airport, sample, TRAINING_GENERATION_KINDS, fetchTrainingGenerationOverlay);
 
   const executorOverlay = executor.shown && executor.load.status === "ready" ? executor.load.overlay : null;
   const priorOverlay = prior.shown && prior.load.status === "ready" ? prior.load.overlay : null;

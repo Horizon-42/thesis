@@ -43,13 +43,13 @@ import {
   checkTrainingIndex,
   checkTrainingOverlay,
   checkTrainingOverlays,
-  checkTrainingSample,
+  checkTrainingSet,
   checkTrainingSetAgrees,
   checkTrainingSetRefusal,
   indexCzmlFiles,
   type PublicationFinding,
 } from "../src/utils/checkPublication";
-import { parseTrainingSample, type TrainingSample } from "../src/data/trainingSample";
+import { openable, parseTrainingSet, type TrainingOpenSet } from "../src/data/trainingSets";
 
 const FRONTEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PUBLISHED_ROOT = path.join(FRONTEND_ROOT, "public", "data", "airports");
@@ -199,8 +199,8 @@ async function checkTraining(root: string, airport: string, server: string | nul
 
   const serverRoot = server ? `${server}/data/airports/${airport}/training` : null;
   let readable = 0;
-  // the readable sets' samples, for the overlays drawn over them
-  const samples = new Map<string, TrainingSample>();
+  // the readable sets, opened, for the overlays drawn over them
+  const samples = new Map<string, TrainingOpenSet>();
   if (serverRoot) {
     const problem = await served(`${serverRoot}/index.json`, "json");
     if (problem) findings.push({ level: "error", message: `server: training/index.json ${problem}` });
@@ -214,9 +214,9 @@ async function checkTraining(root: string, airport: string, server: string | nul
     }
     // A set the panel refuses by name is never downloaded by it, so it is not parsed here either:
     // it is reported as what it is — listed, and refused on purpose.
-    const refusal = checkTrainingSetRefusal(entry);
-    if (refusal.length) {
-      findings.push(...refusal);
+    const { kind } = openable(entry);
+    if (kind === null) {
+      findings.push(...checkTrainingSetRefusal(entry));
       continue;
     }
     // A truncated file is the commonest shape of a half-written export: name the set and go on.
@@ -227,7 +227,7 @@ async function checkTraining(root: string, airport: string, server: string | nul
       findings.push({ level: "error", category: entry.id, message: `${entry.file} is not readable JSON: ${unreadable(error)}` });
       continue;
     }
-    const read = checkTrainingSample(entry.id, raw);
+    const read = checkTrainingSet(entry.id, kind, raw);
     findings.push(...read.findings);
     if (read.value !== null) {
       readable += 1;
@@ -240,7 +240,7 @@ async function checkTraining(root: string, airport: string, server: string | nul
       else {
         // HTTP 200 is not "it loads": the SERVED body goes through the same reader.
         const body = await servedJson(`${serverRoot}/${entry.file}`);
-        const answered = body.ok ? parseTrainingSample(body.value) : body;
+        const answered = body.ok ? parseTrainingSet(kind, body.value) : body;
         if (!answered.ok) findings.push({ level: "error", category: entry.id, message: `server: ${entry.file}: ${answered.problem}` });
       }
     }
@@ -255,7 +255,7 @@ async function checkTraining(root: string, airport: string, server: string | nul
  * against its set is an ERROR, named with the field.
  */
 async function checkOverlays(
-  trainingDir: string, samples: Map<string, TrainingSample>, serverRoot: string | null,
+  trainingDir: string, samples: Map<string, TrainingOpenSet>, serverRoot: string | null,
   findings: PublicationFinding[],
 ): Promise<{ overlays: number; readableOverlays: number }> {
   const manifestFile = path.join(trainingDir, "overlays.json");

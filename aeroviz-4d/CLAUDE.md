@@ -178,12 +178,12 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   the panel and 3D read; the truth is ALWAYS drawn in 3D; a model's bands are FLAT like the truth's (hatching cluttered the
   bar — the user, 2026-09-26): the frame says whose (border, a strip down the rows, tab, chip in its colour), the truth's issues
   ticked under each row, its flight's end time written on the axis in its colour (AV31).
-- **A model is NAMED, never labelled: base / landing / augmented + round** (`TRAINING_MODEL_NAMES`, a mirror of the exporter's
+- **A model is NAMED, never labelled: base / landing / augmented / traffic + round** (`TRAINING_MODEL_NAMES`, a mirror of the exporter's
   `MODEL_NAMES`; the payload's `model` block, refused unless base ⇔ no round ⇔ no `fineTuning`); `trainingModelGroups` is the ONE
   grouping — by name in training order, then run, a run's rounds in order; a run named when its stage has two, a round exported
   twice named by overlay id — and every view prints its `title` / `memberLabel`, never a name of its own; the bar: a tab per
   model, the read model's rounds as `r1 r2 …` chips (a round keeps the sample number); colour by NAME (`TRAINING_MODEL_COLOR`:
-  base `#d946ef`, landing `#a3e635`, augmented `#b82e7a` — 3.3:1, a mark colour, not for running text); **a model speaks under
+  base `#d946ef`, landing `#a3e635`, augmented `#b82e7a` — 3.3:1, a mark colour, not for running text — traffic `#9c8116`); **a model speaks under
   its OWN procedure's masks** (`generation.procedureMasks`); under the procedure's altitudes a sentence may end
   `below_glidepath` (`TRAINING_FREE_OUTCOMES`), and the live executor sends the masks back and is cut at the same step (AV32).
 - **The Training dock never unfolds long content**: what is read once (the module, the switches, the vocabulary) and every
@@ -211,6 +211,13 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **The live executor has NO panel block** (2026-09-29, the user: redundant): its answer is the sentence bar's line
   (`TrainingAutopilotStatus`), the cursor, 3D and the read-back window; a band click always flies; no "Replay in 3D" (↻ Fly
   again asks anew); the payload reader still checks every field (`timing`, shas) — the backend contract, not the view (AV38).
+- **Training's MULTI-AIRCRAFT WINDOWS are a set kind of their own** (`traffic-windows`, `traffic.json` + per model a
+  `window-generation` overlay, ts `window_training_export`); the mode is the set's kind (`trainingSets.ts`); a window's
+  commanded aircraft is an ordinary set flight and a model's window sentences are projected onto the single-flight views
+  (`windowGenerationView`); the cursor is ONE time on the selection's clock (`TrainingSelection.clock`: the flight's own, or the
+  window's — `trainingCursorS` own, `trainingSceneS` the clock's); the window strip above the bar and the 3D traffic layer draw
+  every aircraft; the frontend judges nothing (losses, ends, landings are the exporter's, only their books checked); a window's
+  aircraft is never flown live (`liveExecutor`); the camera frames once per clock (AV39).
 
 ## Comparison CZML colour contract
 

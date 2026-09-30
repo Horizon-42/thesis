@@ -14,7 +14,7 @@
 import {
   TRAINING_COLUMNS,
   TRAINING_INDEX_SCHEMA,
-  TRAINING_READABLE_SET_KIND,
+  TRAINING_READBACK_SET_KIND,
   TRAINING_READING_RULE,
   TRAINING_SAMPLE_SCHEMA,
   TRAINING_SPEC_SHA256,
@@ -255,7 +255,7 @@ export function mockIndex(): Record<string, unknown> {
       { id: "instruction_v2", kind: "vocabulary-readback", title: "the vocabulary of turns and holds",
         file: "instruction_v2/sample.json", vocabularySha256: "1".repeat(64), runwaySha256: "b".repeat(64),
         readingRule: "instruction-v2", flights: 40, cohort: { ...cohort, perStratum: 20 } },
-      { id: SET_ID, kind: TRAINING_READABLE_SET_KIND, title: "Instruction vocabulary", file: `${SET_ID}/sample.json`,
+      { id: SET_ID, kind: TRAINING_READBACK_SET_KIND, title: "Instruction vocabulary", file: `${SET_ID}/sample.json`,
         vocabularySha256: TRAINING_SPEC_SHA256, runwaySha256: MOCK_CANDIDATES_SHA, readingRule: TRAINING_READING_RULE,
         flights: 2, cohort, source: { any: "extra keys are the exporter's provenance" } },
       { id: "prior_s1337_val", kind: "prior-generated", title: "an old prior", file: "prior_s1337_val/sample.json",

@@ -80,7 +80,7 @@ from ts_transformer.instructions.labeller.records import Instruction
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.training_files import (
-    KIND_EXECUTOR, SPLIT, BaseSet, band_payload, base_flights, open_base_set, overlay_entry, read_overlays,
+    KIND_EXECUTOR, KIND_READBACK, SPLIT, BaseSet, band_payload, base_flights, open_base_set, overlay_entry, read_overlays,
     require_overlays_unchanged, require_set_datum, require_stored_sentence, rounded, runway_hae_minus_msl_m, serialise,
     stored_sentence, write_overlay,
 )
@@ -514,7 +514,7 @@ def export(executor: Path, replay_dir: Path, instructions: Path, root: Path, air
         if (training / overlay_id).exists():
             raise ValueError(f"{training / overlay_id} exists; an overlay is never overwritten")
         existing[code] = read_overlays(training, code, overlay_id)
-        bases[code] = open_base_set(training, code, set_id, spec, geometries[code])
+        bases[code] = open_base_set(training, code, set_id, KIND_READBACK, spec, geometries[code])
 
     source = {"runner": RUNNER, "executor": repo_relative(executor), "replay": repo_relative(replay_dir),
               "instructions": repo_relative(instructions), "git": git_state()}

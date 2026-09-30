@@ -420,9 +420,18 @@ paired, not repeated tries) beside M3's labelled and recorded readings (R33).
 executors grouped by first spoken step, the judge run as it flies, ended aircraft flying on silent), beside alone /
 labelled / recorded, all judged in the window; `--augment-seed` on augmented windows (`experiments/traffic_window_augment.py`:
 the flow compressed, a start moved, a flight inserted and commanded; capped at the airport's busiest training step) (R34).
+`prior_generation_records` flies a free-generation readout's STORED sentences again (the readout's draw and chunks; every
+sentence must reproduce its readout row) and writes them as evaluation records per sample — ADE / FDE from row `N_LOOK`
+against the observed flight, the evaluation's pass rate over every sentence, best of the samples; an augmented start has no
+truth, so its readout carries the pass rate only; the root publisher's `--generation-records` files each kind × airport as
+one Experiments category (R35).
+`window_training_export` writes R34's windows for the frontend's Training
+module — a model-free window set (`traffic-windows`: 20 select windows an airport of the readouts' draw, by size) and a
+`window-generation` overlay per prior on its OWN draws (no readout re-run; `--readout` only copies summaries); the landings
+are the aircraft whose own end is a landing; the M4 model is named `traffic` (R36).
 `traffic_window_reward` is M4 in windows — R32's rounds over window samples: every commanded aircraft rewarded, its advantage
 against its own samples, each sample scored whole as the speaker read it (`experiments/traffic_window_tuner.py`, the one layout
-`window_inputs` / `window_edges`; one commanded aircraft a window trains as R32 does) (R36).
+`window_inputs` / `window_edges`; one commanded aircraft a window trains as R32 does) (R37).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 

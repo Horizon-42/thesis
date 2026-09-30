@@ -6,10 +6,10 @@
  * and the legend name the envelopes and point here). On the details page's "Vocabulary" section (`training/TrainingDetails`).
  */
 
-import { TRAINING_COLUMNS, TRAINING_SPEC_SHA256, type TrainingSample } from "../data/trainingSample";
+import { TRAINING_COLUMNS, TRAINING_SPEC_SHA256, type TrainingSetHead } from "../data/trainingSample";
 import { shortSha } from "../data/trainingText";
 
-export default function TrainingVocabularyNotes({ sample }: { sample: TrainingSample }) {
+export default function TrainingVocabularyNotes({ sample }: { sample: TrainingSetHead }) {
   const { vocabulary, candidates } = sample;
   const rows: Array<[string, string]> = [
     ["Vocabulary", `${vocabulary.readingRule} · spec ${shortSha(vocabulary.specSha256)}` +

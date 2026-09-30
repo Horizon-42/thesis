@@ -70,3 +70,26 @@ describe("the live executor's pick", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("a flight the backend does not fly live", () => {
+  it("is asked nothing, whatever is picked — a window's aircraft (`liveExecutor`)", async () => {
+    const parsed = parseTrainingSample(mockSample());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    const selection = { ...trainingSelectionOf(parsed.value, parsed.value.flights[0]), liveExecutor: false };
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    let app!: ReturnType<typeof useApp>;
+    function Harness() {
+      app = useApp();
+      useTrainingAutopilot("http://backend.test");
+      return null;
+    }
+    render(<AppProvider><Harness /></AppProvider>);
+    act(() => app.setTrainingSelection(selection));
+    act(() => app.setTrainingPick(nextPick(null, null, "heading", 8)));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("autopilot"))).toEqual([]);
+    expect(app.trainingAutopilot).toBeNull();
+    vi.unstubAllGlobals();
+  });
+});

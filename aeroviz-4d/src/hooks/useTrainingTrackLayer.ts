@@ -41,9 +41,11 @@
  * Observe's playback.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp, useTrainingCursor, type TrainingLayers } from "../context/AppContext";
+import useTrainingTrafficLayer from "./useTrainingTrafficLayer";
+import { trainingWindowKey } from "../data/trainingTraffic";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { frameTrajectoryCamera } from "../utils/frameTrajectoryCamera";
 import {
@@ -60,6 +62,7 @@ import {
   TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
 import {
+  cursorOnFlight,
   rowAtTime,
   trainingWordAt,
   trainingWordLabel,
@@ -90,7 +93,7 @@ import {
 } from "../scene/trainingEntities";
 import useTrainingExecutorLayers from "./useTrainingExecutorLayers";
 import useTrainingGenerationLayers from "./useTrainingGenerationLayers";
-import { generationOnScreen } from "../data/trainingOverlays";
+import { generationOnScreen, sentenceAxisEndS } from "../data/trainingOverlays";
 
 const ALPHA = TRAINING_ENVELOPE_ALPHA;
 /** An envelope's edge, at rest and when it is the selected word's (px). */
@@ -314,7 +317,7 @@ function paintFocus(viewer: Cesium.Viewer, selection: TrainingSelection, column:
 }
 
 export default function useTrainingTrackLayer(): void {
-  const { viewer, mode, trainingSelection, trainingLayers, trainingColumn, trainingGenerations, trainingSource } = useApp();
+  const { viewer, mode, trainingSelection, trainingLayers, trainingColumn, trainingGenerations, trainingSource, trainingWindow } = useApp();
   const { trainingCursorS } = useTrainingCursor();
   const selection = mode === "training" ? trainingSelection : null;
 
@@ -341,19 +344,29 @@ export default function useTrainingTrackLayer(): void {
     }
   }, [viewer, selection, trainingLayers]);
 
-  // A newly selected flight is framed ONCE: it can lie tens of kilometres from the airport view. The panel publishes a
-  // new selection only for a new flight or a reloaded set, never for a switch.
+  // A new CLOCK is framed ONCE — a flight can lie tens of kilometres from the airport view: the flight on screen, or — an
+  // aircraft of a multi-aircraft window, on the window's clock — every aircraft of the window, so putting another of them
+  // on screen keeps the view. Coming back to Training frames it again (another task moved the camera).
+  const frameScope = selection === null ? null : selection.clock.scope;
+  const framing = useRef({ selection, window: trainingWindow });
+  useLayoutEffect(() => {
+    framing.current = { selection, window: trainingWindow };
+  });
   useEffect(() => {
-    if (!isCesiumViewerUsable(viewer) || selection === null) return;
-    const { lon, lat, altitudeHaeM } = selection.flight.signals;
-    frameTrajectoryCamera(viewer, lon.map((value, row) => ({ lon: value, lat: lat[row], altM: altitudeHaeM[row] })),
-      { margin: FRAME_MARGIN });
-  }, [viewer, selection]);
+    const { selection: shown, window } = framing.current;
+    if (!isCesiumViewerUsable(viewer) || shown === null) return;
+    // a window: its commanded aircraft (one replayed from long before the window would zoom far out)
+    const tracks = window !== null && trainingWindowKey(window.set, window.window) === shown.clock.scope
+      ? window.window.commanded.map((one) => one.recorded) : [shown.flight.signals];
+    frameTrajectoryCamera(viewer, tracks.flatMap(({ lon, lat, altitudeHaeM }) =>
+      lon.map((value, row) => ({ lon: value, lat: lat[row], altM: altitudeHaeM[row] }))), { margin: FRAME_MARGIN });
+  }, [viewer, frameScope]);
 
   // THE SELECTED WORD: the column's word in force at the cursor. Keyed on the word's issue row, so a cursor moving inside
   // one word repaints nothing. Only the truth's: a model's sentence read paints its own word on its own track.
   const modelRead = generationOnScreen(trainingGenerations, trainingSource, selection)?.sentence ?? null;
   const focusRow = selection !== null && trainingColumn !== null && modelRead === null
+    && cursorOnFlight(selection, trainingCursorS, sentenceAxisEndS(selection.flight, selection.vocabulary.stepS, null))
     ? trainingWordAt(selection.flight, trainingColumn, rowAtTime(selection.flight.signals.tS, trainingCursorS)).row
     : null;
   useEffect(() => {
@@ -366,4 +379,5 @@ export default function useTrainingTrackLayer(): void {
 
   useTrainingExecutorLayers();
   useTrainingGenerationLayers();
+  useTrainingTrafficLayer();
 }

@@ -158,7 +158,7 @@ export default function ReadbackPlan({ m }: { m: ReadbackModel }) {
           <polygon fill={TRAINING_TRACE_COLOR}
             points={`${at(last).x},${at(last).y - 5} ${at(last).x - 4},${at(last).y + 3} ${at(last).x + 4},${at(last).y + 3}`} />
         </g>
-        <circle cx={at(m.cursorRow).x} cy={at(m.cursorRow).y} r={4.5} className="training-readback-cursor-dot" />
+        {m.cursorOn ? <circle cx={at(m.cursorRow).x} cy={at(m.cursorRow).y} r={4.5} className="training-readback-cursor-dot" /> : null}
       </g>
     </ChartFrame>
   );

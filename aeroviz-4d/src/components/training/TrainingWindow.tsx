@@ -23,13 +23,15 @@ export interface TrainingWindowProps {
   chips: ReactNode;
   cursorS: number;
   cursorRow: number;
+  /** The cursor is on the flight (`cursorOnFlight`): a window's clock can lie outside it. */
+  cursorOn: boolean;
   onClose: () => void;
   className?: string;
   children: ReactNode;
 }
 
 export default function TrainingWindow({
-  title, closeLabel, chips, cursorS, cursorRow, onClose, className, children,
+  title, closeLabel, chips, cursorS, cursorRow, cursorOn, onClose, className, children,
 }: TrainingWindowProps) {
   const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -45,7 +47,9 @@ export default function TrainingWindow({
         <header className="training-readback-head">
           <strong>{title}</strong>
           {chips}
-          <span className="training-readback-cursor">t = {formatSeconds(cursorS)} s · step {cursorRow}</span>
+          <span className="training-readback-cursor">
+            t = {formatSeconds(cursorS)} s · {cursorOn ? `step ${cursorRow}` : "outside this aircraft"}
+          </span>
           <button type="button" onClick={onClose} aria-label={closeLabel}>×</button>
         </header>
         {children}

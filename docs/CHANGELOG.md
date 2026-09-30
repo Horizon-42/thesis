@@ -1,5 +1,24 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-30 — Training: multi-aircraft windows (branch `dev-training-traffic`, merged)
+
+- **What**: the Training module shows multi-aircraft windows (user 2026-09-30: plan reviewed; 20 windows an airport, the rest as
+  proposed). A window set (`traffic-windows`, `traffic.json`) and one `window-generation` overlay per model, written by ts
+  `window_training_export` (R36); in the frontend the mode is the set's kind; a window's commanded aircraft is an ordinary
+  set flight, so the sentence bar, the read-back window and the single-flight 3D layers are reused as they are; new are the
+  window list, the window's clock above the bar (rows, losses VISUAL/IFR, landings, playback) and the 3D traffic layer.
+  Shared generalisations instead of branches: the cursor on the selection's clock, the model overlays' head, the set head,
+  the panel split into a flight and a window session, one opener of a set by kind (`trainingSets.ts`). A window's aircraft
+  is not flown live (`liveExecutor`). The M4 model is named **traffic** (colour `#9c8116`).
+- **Data choices** (doc 36 §2.9): select windows of the formal window readouts' draw, 20 an airport by commanded size
+  (6 / 7 / 7), 4 samples; the export draws its OWN samples (no readout re-run, no row check — the user: as the single-flight
+  export does); landings = the aircraft whose own end is a landing.
+- **Published** (the user, 2026-09-30) after a mirror export and check: augmented r7 and traffic r5, five airports, 100 windows, 263 commanded
+  aircraft, 1,052 aircraft-samples each: landed 888 for both; lost separation 123 (r7) and 109 (traffic r5). One draw of a
+  few windows — not a comparison of the two models (the formal window readouts are). `check-publication --server`: 0 errors.
+- **Reviews**: two opus reviews (exporter; frontend), every finding fixed. Tests: ts window export 12, frontend Vitest 105
+  files / 887. Docs: doc 36 §2.9 / §4.11, AV39, R36.
+
 ### 2026-09-29 — 多机 M4：每轮多过几遍、选轮按配对的标准误
 
 - M4 第一次运行选中的是第 0 轮：每轮离 base 只挪 0.008–0.01，截断只碰到约 0.1 % 的词（设计 §6.6 第 6 步细节第 14 条）。用户定先检验"每轮挪得

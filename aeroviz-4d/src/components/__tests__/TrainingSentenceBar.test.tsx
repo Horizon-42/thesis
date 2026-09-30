@@ -17,7 +17,7 @@ const { appState, DEFAULT_LAYERS, setTrainingPick, setTrainingSource } = vi.hois
       mode: "training", trainingSelection: null as unknown, trainingLayers: { ...DEFAULT_LAYERS },
       trainingExecutor: null as unknown, trainingPrior: null as unknown, trainingAutopilot: null as unknown,
       trainingPick: null as unknown,
-      trainingGenerations: [] as unknown[], trainingSource: null as unknown,
+      trainingGenerations: [] as unknown[], trainingSource: null as unknown, trainingWindow: null as unknown,
     },
   };
 });
@@ -249,6 +249,17 @@ describe("TrainingSentenceBar", () => {
     expect(fly.title).toMatch(/^The executor flies the model's sentence again from its first step \(4\)/);
     fireEvent.click(fly);
     expect(setTrainingPick).toHaveBeenLastCalledWith({ source, column: "heading", row: 12, attempt: 0 });
+  });
+
+  it("offers nothing to fly for a flight the backend does not fly live — a window's aircraft: no Fly button, a band only selects", () => {
+    select();
+    appState.trainingSelection = { ...(appState.trainingSelection as object), liveExecutor: false };
+    generations();
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
+    render(<TrainingSentenceBar />);
+    expect(screen.queryByRole("button", { name: "▶ Fly" })).toBeNull();
+    fireEvent.click(screen.getByLabelText(/^heading 225° — said by base at step 12/));
+    expect(setTrainingPick).not.toHaveBeenCalled();
   });
 
   it("offers nothing to fly for a word a model said as or after its flight ended — the backend refuses the same words", () => {

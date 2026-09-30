@@ -122,7 +122,7 @@ class AutopilotSegmentBackend:
 
     def training_set(self, airport: str, set_id: str) -> tuple[Path, str, dict[str, Any]]:
         """The set's artefact (absolute), the split its flights were drawn from, and its sample — refused by name
-        unless it is a read-back set the Training export writes (`training_files.check_readback`, the exporters' own
+        unless it is a read-back set the Training export writes (`training_files.check_set`, the exporters' own
         check, on this backend's cached copies of the files)."""
         if not AIRPORT_CODE.fullmatch(airport):
             raise RequestRefused(f"airport {airport!r} is not an airport code")
@@ -135,7 +135,7 @@ class AutopilotSegmentBackend:
         except training_files.NotListed as error:
             raise NotListed(str(error)) from None
         sample = self._json(training / entry["file"])
-        training_files.check_readback(entry, sample, training / entry["file"], airport)
+        training_files.check_set(entry, sample, training / entry["file"], airport, training_files.KIND_READBACK)
         return REPO_ROOT / sample["producedBy"]["artefact"], training_files.SPLIT, sample
 
     def executor_for(self, artefact: Path) -> tuple[Path, ExecutorParams, dict[str, Any], Words]:

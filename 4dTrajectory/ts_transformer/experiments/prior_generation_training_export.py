@@ -100,6 +100,7 @@ from ts_transformer.experiments.prior_free_generation import (
 )
 from ts_transformer.experiments.prior_landing_reward import LANDING_REWARD_SCHEMA
 from ts_transformer.experiments.prior_train import rosters
+from ts_transformer.experiments.traffic_reward import TRAFFIC_REWARD_SCHEMA
 from ts_transformer.experiments.prior_training_export import open_trained_prior
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals
@@ -107,7 +108,7 @@ from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.instructions.readout import STRATA
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.training_files import (
-    KIND_AUGMENTED_GENERATION, KIND_GENERATION, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays,
+    KIND_AUGMENTED_GENERATION, KIND_GENERATION, KIND_READBACK, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays,
     require_overlays_unchanged, require_set_datum, rounded, runway_hae_minus_msl_m, serialise, write_overlay,
 )
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
@@ -134,9 +135,10 @@ RUNNER = "ts_transformer.experiments.prior_generation_training_export"
 OUTPUTS_MARK = "4dTrajectory/outputs/"
 #: MIRROR of the phrase `replay.draw_flights` writes for ``per_airport`` 0 (every labelled flight of the split).
 EVERY_FLIGHT = "every labelled flight"
-#: The prior's models by name, in the order they are trained (the post-training design's table; the user, 2026-09-26):
+#: The prior's models by name, in the order they are trained (the post-training design's table; the user, 2026-09-26;
+#: ``traffic``, the multi-aircraft post-training M4, the user 2026-09-30):
 #: MIRROR of `TRAINING_MODEL_NAMES` in `aeroviz-4d/src/data/trainingOverlays.ts`, which orders the views by it.
-MODEL_NAMES = ("base", "landing", "augmented")
+MODEL_NAMES = ("base", "landing", "augmented", "traffic")
 
 
 def method_of(schema: str) -> str:
@@ -149,7 +151,8 @@ def method_of(schema: str) -> str:
 
 
 #: The model a post-training method makes (``base`` has none: it is trained on data alone).
-METHOD_MODELS = {method_of(LANDING_REWARD_SCHEMA): "landing", method_of(AUGMENTED_REWARD_SCHEMA): "augmented"}
+METHOD_MODELS = {method_of(LANDING_REWARD_SCHEMA): "landing", method_of(AUGMENTED_REWARD_SCHEMA): "augmented",
+                 method_of(TRAFFIC_REWARD_SCHEMA): "traffic"}
 
 
 def model_identity(config_file: dict[str, Any]) -> tuple[str, int | None]:
@@ -186,6 +189,19 @@ def model_block(prior_dir: Path, config_file: dict[str, Any], checkpoint_sha: st
             "run": outputs_path(prior_dir if round_number is None else prior_dir.parent),
             "checkpointSha256": checkpoint_sha, "variant": variant, "trainedAt": config_file["git"],
             "fineTuning": fine_tuning}
+
+
+def generation_block(samples: int, temperature: float, seed: int, step_s: float, procedure_masks: ProcedureMasks,
+                     executor_sha256: str, params: ExecutorParams) -> dict[str, Any]:
+    """How the prior's sentences were drawn, as an overlay of them records it (this runner's, and a window set's
+    `window_training_export`): the samples, temperature and seed, the first predicted row, the procedure's masks it
+    spoke under — its own (`prior.masks`), each set with the digest of the data it read — and the executor that flew
+    them."""
+    digests = procedure_masks.data_sha256()
+    return {"samples": samples, "temperature": temperature, "seed": seed, "firstPredictedRow": N_LOOK, "stepS": step_s,
+            "procedureMasks": [{"name": mask, "dataSha256": digests[mask]} for mask in procedure_masks.names],
+            "executor": {"specSha256": executor_sha256, "wordClock": params.word_clock, "cycleS": params.cycle_s,
+                         "timeoutFactor": params.timeout_factor}}
 
 
 def outputs_path(path: str | Path) -> str:
@@ -459,21 +475,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if (training / overlay_id).exists():
             parser.error(f"{training / overlay_id} exists; an overlay is never overwritten")
         existing[code] = read_overlays(training, code, overlay_id)
-        bases[code] = open_base_set(training, code, args.set, spec, geometries[code])
+        bases[code] = open_base_set(training, code, args.set, KIND_READBACK, spec, geometries[code])
 
     source = {"runner": RUNNER, "prior": repo_relative(prior_dir), "executor": repo_relative(executor),
               "instructions": repo_relative(instructions),
               "readout": None if args.readout is None else repo_relative(resolved(args.readout)), "git": git_state(),
               # the speaker's device: with the seed it names the samples drawn (the executor flies on CPU either way)
               "device": args.device}
-    digests = procedure_masks.data_sha256()
-    generation = {"samples": args.samples, "temperature": args.temperature, "seed": args.seed,
-                  "firstPredictedRow": N_LOOK, "stepS": spec.step_s,
-                  # the model's own (`prior.masks`), each set with the digest of the data it read here
-                  "procedureMasks": [{"name": mask, "dataSha256": digests[mask]} for mask in procedure_masks.names],
-                  "executor": {
-                      "specSha256": record["sha256"], "wordClock": params.word_clock, "cycleS": params.cycle_s,
-                      "timeoutFactor": params.timeout_factor}}
+    generation = generation_block(args.samples, args.temperature, args.seed, spec.step_s, procedure_masks,
+                                  record["sha256"], params)
     if augmented:
         limits = augment.LIMITS
         generation["augment"] = {"seed": args.augment_seed, "tries": AUGMENT_TRIES,

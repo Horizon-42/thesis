@@ -942,8 +942,78 @@ can pass them); ten draws a window at most, else it is left out (counted by airp
 by why. Read by the model's sources only (a
 moved start has no record); the readout adds each kind and each aircraft's part (shifted, moved, inserted, as drawn).
 
+### R35 · `run_ts.py prior_generation_records` — a free-generation readout's sentences as evaluation records: ADE / FDE and the evaluation's pass rate (2026-09-30)
 
-### R36 · `run_ts.py traffic_window_reward` — multi-aircraft M4's second pass: the traffic post-training in windows (design §6.6 step 7 item 7, the 7.6 plan)
+A `prior_free_generation` readout (`generation.json` schema `ts-prior-free-generation-v5`, `sentences.npz`) stores the
+words the prior said and each sentence's outcome, not the flown track. This runner flies the STORED words again
+(`fly_said`: step k heard from its first cycle, on the sentence's own clock, from the observed state at row `N_LOOK` — an
+augmented start moved by its recorded augmentation — to the readout's time limit), in the readout's own draw
+(`replay.draw` with its split, seed and per-airport count; `drawn` must match) and its own chunks (`--chunk`, required: the
+readout's, from its `run.sh` — the v11 re-reads used 32; a chunk whose stored sentences differ in length was not one closed
+loop and is refused by name), and refuses unless every re-flown sentence reproduces its
+readout row field for field (outcome, end, runways, words said, the glidepath stop; only the speaker's `forbidden_mass`
+and before-the-join readouts are not compared) — so the records are the readout's sentences, not new ones. The labelled
+words from the same row (the readout's reference, real starts only) are flown and checked the same way. The executor spec
+must be the readout's (sha256), the instruction artefact the one it names (by its place under `4dTrajectory/outputs`); a
+whole run must fly every row the readout has. Only the current schema is read: the v11
+re-reads of 2026-09-27 (`prior/v3_reread_v11_20260927/val_*`); older readouts are refused by name.
+
+Writes into `--out` (new; a clean tree unless `--chunks N` limits it to the readout's first N chunks, recorded as
+`partial`; `--chunks` at or above the readout's chunk count is refused): `records/<kind>/<ICAO>/` — `kind` = `labelled` or `sample_<k>` (one directory per sample: the record stem is
+the flight key) — each a `write_batch` directory graded by `python -m evaluation` (`evaluation_report.json`); each record's
+`source.freeGeneration` names the sentence, sample, outcome and augmentation. The flown states start at the first predicted
+step (`executor_replay.executor_forecast` at anchor `N_LOOK`) and end at the row the outcome is read at (a stopped sentence
+at its stopping step); a flight with no state past its start has no record, counted in `records.json` and in its
+directory's `summary.json` (`skipped`). `records.json`
+(`ts-prior-generation-records-v1`): one row per sentence (outcome, recorded, verdict, ADE, FDE) and per kind, pooled over
+the samples (`prior`), in all / per airport / per approach kind / per airport × kind: the pass rate = verdict `pass` over
+EVERY sentence (one not recorded does not pass), the verdicts, **the verdict judges the OBSERVED flight's runway** (the
+evaluation's context is the record's `source.runway`), so a sentence ending on another runway is graded against the
+observed one: the pass rate again over the sentences ending on the observed runway, and the others' verdicts apart, the outcomes, ADE / FDE (`observed_series_metrics`: against
+the observed track from row `N_LOOK`, its own common time grid) over the recorded sentences and over the landed ones, and
+over the samples each flight's best — whether any sample passes, the smallest ADE and, apart, the smallest FDE.
+
+**An augmented start has no truth**: its record's reference is the source flight's track moved by the same augmentation
+(`augmented_series`, so the record starts where the executor flew from); the verdict does not read the reference, so the
+pass rate is the start's, but ADE / FDE would be a distance to a moved track — `records.json` leaves them out and each record
+directory's summary says so. **Size**: ~0.1–0.2 MB a record, ~10,000 records (2,000 flights × 4 samples + the labelled
+words) a real-start readout — about 1.5–2 GB each; the one-chunk smoke run of `val_base_masked_400x4` took 72 s.
+
+**Publishing** (2026-09-30): the root publisher's `--generation-records DIR --generation-campaign CAMPAIGN [--kind K]`
+files each kind × airport as one Experiments category (`experiment_generation_<readout campaign>_<readout>_<kind>_<split>`,
+model `prior` or `executor`, horizon `sentence`), the runner's own evaluation report and `records.json` numbers as its
+rows, under CAMPAIGN's registry entry with the readout's name as the run (blocked without one); a partial run, another
+count of records than `records.json` says, or a category that exists is refused; `variantLabel` names the kind. **An
+augmented run's category** carries no ADE / FDE (the builder's `accuracy` is dropped) and says what its white track is:
+the viewer draws the observed flight by its key, i.e. the SOURCE flight where it flew, not the moved track the records
+hold (drawing that would need a builder + viewer change). The v11 records are registered as
+`generation_records_v11_20260930`.
+
+### R36 · `run_ts.py window_training_export` — multi-aircraft windows for the frontend's Training module (Training module §2.9)
+
+2026-09-30. `window_training_export --prior <augmented, or an M4 round> --instructions <artefact> --executor <spec>
+[--readout <this prior's formal window readout, v2>] --airports-root <…/public/data/airports> [--set traffic_windows_select]
+--airport … [--windows 20] [--samples 4] [--workers 6] [--device cuda]`. The windows are the formal window readouts' draw
+(`draw_windows`, `TRAFFIC_SPLIT` = select, `WINDOWS_PER_AIRPORT` = 200, seed), of which `--windows` an airport are chosen by
+their commanded aircraft (1 / 2 / 3+, shares as even as they divide, the larger sizes first: 20 → 6 / 7 / 7), seeded by the
+seed and the airport. Writes a window SET (`training_files.KIND_TRAFFIC`, `traffic.json`, `TRAFFIC_SCHEMA`; model-free: the
+read-back set's head and flights for the commanded aircraft, each window's others with their recorded rows, and the window as
+recorded — `traffic_window_generation.fixed_paths` "recorded", VISUAL + IFR, landings) once — a later export (another prior)
+checks the set it would write is the one there (`require_same_set`) — and one OVERLAY per prior (`KIND_WINDOW_GENERATION`,
+`window_generation.json`): every window flown `--samples` times by `fly_windows` (the formal readout's loop) on the export's
+OWN draws (the user, 2026-09-30: no readout re-run, no row check; a batch's windows share its stream, so the sentences depend
+on the windows flown together — the airports and batch size are recorded in `producedBy`). A sentence's outcome is the loop's
+(`lost_separation` when the judge ended it: its words stop there, its track runs on to its own end); the landings are the
+aircraft whose OWN end is a landing (the loop keeps a landing time for one the glidepath edge stopped first — not a landing
+here); the masks' mass over the steps spoken to the judged end. `--readout` copies the readout's summary cells (model scene and
+record, here and all airports, with the windows and samples they cover), refused unless it is this prior's, executor spec,
+artefact, split, draw, samples and temperature. Every refusal about the disk before any work (`on_disk`), every write after it
+(`write_export`); refactors it rests on, behaviour-preserving (reviewed): `window_prior`, `fly_windows` / `Flown`,
+`fixed_paths` / `FixedWindow`, `sentence_counts`, `generation_block`, `head_block` / `flights_block`, `check_set` by kind. The
+model trained by `ts-traffic-reward` is named **traffic** (`MODEL_NAMES`, user 2026-09-30).
+
+
+### R37 · `run_ts.py traffic_window_reward` — multi-aircraft M4's second pass: the traffic post-training in windows (design §6.6 step 7 item 7, the 7.6 plan)
 
 2026-09-30. `traffic_window_reward --prior <single-aircraft prior (augmented) or traffic prior (an M4 round)> --base <base>
 --instructions <artefact> --executor <spec> --out <new dir> [--rounds 8] [--resume] [--real-per-airport 70]

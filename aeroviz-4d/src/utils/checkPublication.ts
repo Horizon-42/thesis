@@ -30,22 +30,15 @@ import {
 } from "../data/airportData";
 import {
   parseTrainingIndex,
-  parseTrainingSample,
+  TRAINING_READBACK_SET_KIND,
+  TRAINING_TRAFFIC_SET_KIND,
   trainingSetRefusal,
   type TrainingIndex,
-  type TrainingSample,
+  type TrainingReadableSetKind,
   type TrainingSetEntry,
 } from "../data/trainingSample";
-import {
-  parseTrainingExecutorOverlay,
-  parseTrainingGenerationOverlay,
-  parseTrainingOverlays,
-  parseTrainingPriorOverlay,
-  type TrainingOverlayEntry,
-  type TrainingOverlayKind,
-  type TrainingOverlays,
-} from "../data/trainingOverlays";
-import type { Parsed } from "../data/trainingReader";
+import { parseTrainingOverlays, type TrainingOverlayEntry, type TrainingOverlays } from "../data/trainingOverlays";
+import { openSetHead, parseOverlayOver, parseTrainingSet, type TrainingOpenSet } from "../data/trainingSets";
 
 export interface PublicationFinding {
   level: "error" | "warn";
@@ -266,36 +259,46 @@ export function checkTrainingSetRefusal(entry: TrainingSetEntry): PublicationFin
     : [{ level: "warn", category: entry.id, message: `listed, and refused by name: ${refusal}` }];
 }
 
-/** One readable set's sample file, through the panel's own reader. */
-export function checkTrainingSample(setId: string, sample: unknown): TrainingChecked<TrainingSample> {
-  const parsed = parseTrainingSample(sample);
+/** One readable set's file, through the panel's own reader for its kind. */
+export function checkTrainingSet(setId: string, kind: TrainingReadableSetKind, raw: unknown): TrainingChecked<TrainingOpenSet> {
+  const parsed = parseTrainingSet(kind, raw);
   return parsed.ok
     ? { findings: [], value: parsed.value }
-    : { findings: [{ level: "error", category: setId, message: `sample.json: ${parsed.problem}` }], value: null };
+    : { findings: [{ level: "error", category: setId, message: `${kind} set: ${parsed.problem}` }], value: null };
 }
 
 /**
- * What the manifest promises against what the sample holds. The two files are written by one run
+ * What the manifest promises against what the set's file holds. The two files are written by one run
  * of the exporter, so a disagreement means they came from different runs.
  */
 export function checkTrainingSetAgrees(
-  entry: TrainingSetEntry, sample: TrainingSample, airport: string,
+  entry: TrainingSetEntry, open: TrainingOpenSet, airport: string,
 ): PublicationFinding[] {
   const findings: PublicationFinding[] = [];
+  const set = openSetHead(open);
+  // each kind's cohort: a read-back set's flights per stratum, a window set's windows
+  const cohort: Array<[string, string | number, string | number]> =
+    open.kind === TRAINING_READBACK_SET_KIND && entry.kind !== TRAINING_TRAFFIC_SET_KIND ? [
+      ["cohort.split", entry.cohort.split, open.sample.cohort.split],
+      ["cohort.perStratum", entry.cohort.perStratum, open.sample.cohort.perStratum],
+      ["cohort.seed", entry.cohort.seed, open.sample.cohort.seed],
+    ] : open.kind === TRAINING_TRAFFIC_SET_KIND && entry.kind === TRAINING_TRAFFIC_SET_KIND ? [
+      ["cohort.split", entry.cohort.split, open.traffic.cohort.split],
+      ["cohort.windows", entry.cohort.windows, open.traffic.cohort.windows],
+      ["cohort.seed", entry.cohort.seed, open.traffic.cohort.seed],
+    ] : [["kind", entry.kind, open.kind]];
   const pairs: Array<[string, string | number, string | number]> = [
-    ["airport", airport, sample.airport],
-    ["setId", entry.id, sample.setId],
-    ["flights", entry.flights, sample.flights.length],
-    ["vocabularySha256", entry.vocabularySha256, sample.vocabulary.specSha256],
-    ["runwaySha256", entry.runwaySha256, sample.candidatesSha256],
-    ["readingRule", entry.readingRule, sample.vocabulary.readingRule],
-    ["cohort.split", entry.cohort.split, sample.cohort.split],
-    ["cohort.perStratum", entry.cohort.perStratum, sample.cohort.perStratum],
-    ["cohort.seed", entry.cohort.seed, sample.cohort.seed],
+    ["airport", airport, set.airport],
+    ["setId", entry.id, set.setId],
+    ["flights", entry.flights, set.flights.length],
+    ["vocabularySha256", entry.vocabularySha256, set.vocabulary.specSha256],
+    ["runwaySha256", entry.runwaySha256, set.candidatesSha256],
+    ["readingRule", entry.readingRule, set.vocabulary.readingRule],
+    ...cohort,
   ];
   for (const [what, listed, held] of pairs) {
     if (listed !== held) {
-      findings.push({ level: "error", category: entry.id, message: `${what}: the manifest says ${listed}, sample.json says ${held}` });
+      findings.push({ level: "error", category: entry.id, message: `${what}: the manifest says ${listed}, ${entry.file} says ${held}` });
     }
   }
   return findings;
@@ -315,26 +318,17 @@ export function checkTrainingOverlays(manifest: unknown): TrainingChecked<Traini
   return { findings, value: parsed.value };
 }
 
-/** The panel's reader for each kind of overlay: a kind added to the list needs its reader here, or this does not
- *  compile. */
-const OVERLAY_READERS: Record<TrainingOverlayKind,
-  (payload: unknown, entry: TrainingOverlayEntry, sample: TrainingSample) => Parsed<{ flights: unknown[] }>> = {
-  "executor-replay": parseTrainingExecutorOverlay,
-  "prior-prediction": parseTrainingPriorOverlay,
-  "prior-generation": parseTrainingGenerationOverlay,
-  "prior-generation-augmented": parseTrainingGenerationOverlay,
-};
-
 /**
- * One overlay's file through the panel's own reader, against the sample of the set it is drawn over: the reader binds
- * the two by what they share — the set, spec, candidates, frame and every flight — never by the sample file's bytes.
+ * One overlay's file through the panel's own reader, against the set it is drawn over (`trainingSets.parseOverlayOver`):
+ * the reader binds the two by what they share — the set, spec, candidates, frame and every flight (a window overlay:
+ * every window) — never by the set file's bytes.
  */
-export function checkTrainingOverlay(entry: TrainingOverlayEntry, payload: unknown, sample: TrainingSample): PublicationFinding[] {
+export function checkTrainingOverlay(entry: TrainingOverlayEntry, payload: unknown, open: TrainingOpenSet): PublicationFinding[] {
   const findings: PublicationFinding[] = [];
-  const parsed = OVERLAY_READERS[entry.kind](payload, entry, sample);
+  const parsed = parseOverlayOver(entry, payload, open);
   if (!parsed.ok) findings.push({ level: "error", category: entry.id, message: `${entry.file}: ${parsed.problem}` });
-  else if (parsed.value.flights.length !== entry.flights) {
-    findings.push({ level: "error", category: entry.id, message: `the manifest says ${entry.flights} flights, ${entry.file} holds ${parsed.value.flights.length}` });
+  else if (parsed.value.flights !== entry.flights) {
+    findings.push({ level: "error", category: entry.id, message: `the manifest says ${entry.flights} flights, ${entry.file} holds ${parsed.value.flights}` });
   }
   return findings;
 }

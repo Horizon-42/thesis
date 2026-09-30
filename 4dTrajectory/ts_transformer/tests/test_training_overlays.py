@@ -289,13 +289,13 @@ def _base_files(training, *, kind=files.KIND_READBACK, rule=READING_RULE, schema
 def test_an_overlay_is_drawn_only_over_a_set_this_reader_reads(tmp_path):
     training = tmp_path / "KXXX" / "training"
     _base_files(training)
-    base = files.open_base_set(training, "KXXX", "set_a", spec(), instruction_airport())
+    base = files.open_base_set(training, "KXXX", "set_a", files.KIND_READBACK, spec(), instruction_airport())
     # what the overlay shares with its set, never the set file's bytes or time of writing
     assert base.block == {"setId": "set_a", "specSha256": spec().sha256,
                           "candidatesSha256": files.candidates_sha256(instruction_airport()),
                           "airportFrame": files.airport_frame(instruction_airport())}
     with pytest.raises(ValueError, match="lists no set other"):
-        files.open_base_set(training, "KXXX", "other", spec(), instruction_airport())
+        files.open_base_set(training, "KXXX", "other", files.KIND_READBACK, spec(), instruction_airport())
     moved = dict(files.airport_frame(instruction_airport()), lat=35.001)
     for change, message in ((dict(kind="prior-generated"), "prior-generated set"), (dict(rule="instruction-v1"), "instruction-v1"),
                             (dict(schema="aeroviz-training-sample-v4"), "re-export the set first"),
@@ -304,13 +304,13 @@ def test_an_overlay_is_drawn_only_over_a_set_this_reader_reads(tmp_path):
         shutil.rmtree(training)
         _base_files(training, **change)
         with pytest.raises(ValueError, match=message):
-            files.open_base_set(training, "KXXX", "set_a", spec(), instruction_airport())
+            files.open_base_set(training, "KXXX", "set_a", files.KIND_READBACK, spec(), instruction_airport())
 
 
 def test_an_overlay_drawing_heights_adds_the_set_flight_s_own_datum(tmp_path):
     training = tmp_path / "KXXX" / "training"
     _base_files(training)
-    base = files.open_base_set(training, "KXXX", "set_a", spec(), instruction_airport())
+    base = files.open_base_set(training, "KXXX", "set_a", files.KIND_READBACK, spec(), instruction_airport())
     signals = [instruction_flight(*fly_legs([(3, 0.0, 90.0, 0.0)], 270.0, 900.0, -5000.0, 300.0),
                                   dataset_id="KXXX:F_09_abc_20260101T000000Z")]
     assert abs(files.set_flight_datum_m(base.sample["flights"][0]) - SET_DATUM_M) <= 0.01    # two heights to 0.01 m
@@ -323,7 +323,7 @@ def test_an_overlay_drawing_heights_adds_the_set_flight_s_own_datum(tmp_path):
 def test_the_set_s_flights_must_carry_the_artefact_s_own_sentences(tmp_path):
     training = tmp_path / "KXXX" / "training"
     _base_files(training)
-    base = files.open_base_set(training, "KXXX", "set_a", spec(), instruction_airport())
+    base = files.open_base_set(training, "KXXX", "set_a", files.KIND_READBACK, spec(), instruction_airport())
     signals = [instruction_flight(*fly_legs([(3, 0.0, 90.0, 0.0)], 270.0, 900.0, -5000.0, 300.0),
                                   dataset_id="KXXX:F_09_abc_20260101T000000Z")]
     grid = np.full((3, 6), UNCHANGED, dtype=np.int64)
@@ -341,7 +341,7 @@ def test_the_set_s_flights_must_carry_the_artefact_s_own_sentences(tmp_path):
 def test_an_overlay_is_added_beside_its_set_and_never_overwritten(tmp_path):
     training = tmp_path / "KXXX" / "training"
     _base_files(training)
-    base = files.open_base_set(training, "KXXX", "set_a", spec(), instruction_airport())
+    base = files.open_base_set(training, "KXXX", "set_a", files.KIND_READBACK, spec(), instruction_airport())
     assert files.read_overlays(training, "KXXX", "ov_1") == []
     entry = files.overlay_entry("ov_1", files.KIND_EXECUTOR, base, "a title", "executor.json", 1, {"runner": "test"})
     with pytest.raises(ValueError):                                     # a payload that cannot be written stops the build

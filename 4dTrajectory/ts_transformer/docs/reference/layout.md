@@ -487,7 +487,7 @@ frontend (below). No `closed_loop/` or `constraints/` group exists: the closed l
 
 **Note (2026-09-25):** `instructions/training_files.py` holds the frontend's Training files — the index, the sets,
 the overlays manifest, their schemas (mirrored by `aeroviz-4d/src/data/training*.ts`) and the checks every writer and
-reader shares (`check_readback`, `open_base_set`, `require_stored_sentence`, `words_in_force`, `band_payload`,
+reader shares (`check_set`, `open_base_set`, `require_stored_sentence`, `words_in_force`, `band_payload`,
 `require_index_unchanged` / `require_overlays_unchanged`, and since 2026-09-26 `runway_hae_minus_msl_m`, the one MSL → HAE
 every writer of a Training height adds; its caller passes the arrival manifest path, because the instructions package
 may not import `repo_layout`). It was the runner `instruction_training_export`, which the other

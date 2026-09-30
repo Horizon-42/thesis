@@ -68,6 +68,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { useApp, useTrainingCursor } from "../context/AppContext";
 import TrainingLegend from "./TrainingLegend";
+import TrainingTrafficStrip from "./TrainingTrafficStrip";
+import { isWindowSentence } from "../data/trainingTraffic";
 import TrainingPriorWindow from "./TrainingPriorWindow";
 import TrainingReadbackWindow from "./TrainingReadbackWindow";
 import { TrainingAutopilotStatus } from "./TrainingAutopilotStatus";
@@ -101,6 +103,7 @@ import {
   generatedRowAt,
   augmentationText,
   generationOnScreen,
+  sentenceAxisEndS,
   generationUnflownReason,
   isAugmentedStart,
   sourceOf,
@@ -114,6 +117,7 @@ import {
 } from "../data/trainingOverlays";
 import {
   formatSeconds,
+  cursorOnFlight,
   rowAtTime,
   sentenceColumnRuns,
   sentenceWordAt,
@@ -256,8 +260,14 @@ function sampleChip(view: TrainingGenerationView, label: string, sentence: Train
   const said = later.filter((event) => event.row * stepS < sentence.endS).length;
   const where = sentence.crossing !== null
     ? ` on ${runwayName(sentence.crossing.runway)}` : `, pointing at ${runwayName(sentence.lastRunway)}`;
+  // in a window the judge may end it first: then it flew on silent to its own end, which the crossing is of
+  const judged = isWindowSentence(sentence) && sentence.end !== null ? sentence : null;
+  const ended = judged === null
+    ? `${TRAINING_OUTCOME_TAG[sentence.outcome]}${where} at ${formatSeconds(sentence.endS)} s`
+    : `${TRAINING_OUTCOME_TAG[sentence.outcome]} at ${formatSeconds(sentence.endS)} s · then ${TRAINING_OUTCOME_TAG[judged.own]}${where} ` +
+      `at ${formatSeconds(judged.ownEndS)} s`;
   return {
-    text: `#${sentence.sample + 1}: ${TRAINING_OUTCOME_TAG[sentence.outcome]}${where} at ${formatSeconds(sentence.endS)} s ` +
+    text: `#${sentence.sample + 1}: ${ended} ` +
       (move === null ? `(observed ${formatSeconds(flight.rows * stepS)} s)` : `· moved ${augmentationText(move)}`),
     title: (move === null ? "" : `From an augmented start: the flight's start rotated ${augmentationText(move)} (about the ` +
       `airport, raised, speed ×), drawn with seed ${generation.augment!.seed} in ${view.flight.start!.draws} ` +
@@ -267,8 +277,13 @@ function sampleChip(view: TrainingGenerationView, label: string, sentence: Train
       `${sentence.firstRow}, ${said} words after it before the flight ended` +
       (later.length > said ? ` (and ${later.length - said} after the end, to where the executor stopped)` : "") +
       `; the executor flew each step as it was said and the flight ` +
-      `${TRAINING_OUTCOME_TEXT[sentence.outcome]}${sentence.crossing === null ? "" : ` — ${crossingText(sentence.crossing)}`} at ` +
-      `${formatSeconds(sentence.endS)} s. Runway ${runwayName(sentence.firstRunway)} at its first step` +
+      (judged === null
+        ? `${TRAINING_OUTCOME_TEXT[sentence.outcome]}${sentence.crossing === null ? "" : ` — ${crossingText(sentence.crossing)}`} at ` +
+          `${formatSeconds(sentence.endS)} s`
+        : `${TRAINING_OUTCOME_TEXT[sentence.outcome]}: the judge ended it at ${formatSeconds(sentence.endS)} s (${judged.end!.kind}, ` +
+          `with ${judged.end!.with}); flying on, it ${TRAINING_OUTCOME_TEXT[judged.own]}` +
+          `${sentence.crossing === null ? "" : ` — ${crossingText(sentence.crossing)}`} at ${formatSeconds(judged.ownEndS)} s`) +
+      `. Runway ${runwayName(sentence.firstRunway)} at its first step` +
       (sentence.lastRunway === sentence.firstRunway ? "" : `, ${runwayName(sentence.lastRunway)} at its end`) +
       ` (${move === null ? "observed" : "the source flight landed on"} ${flight.runway})` + (sentence.runwayChanges ? `, ${sentence.runwayChanges} runway changes` : "") +
       (sentence.goArounds ? `, ${sentence.goArounds} go-around words` : "") +
@@ -395,7 +410,8 @@ export default function TrainingSentenceBar() {
   const sentence: TrainingSentence<TrainingSentenceEvent> = generated ?? trainingTruthSentence(flight);
   // Step r covers [r·step, (r+1)·step): the axis ends where the last step does — of the flight, or of the sentence read
   // when that runs longer.
-  const endS = Math.max(flight.rows * stepS, generated === null ? 0 : Math.max(generated.rows * stepS, generated.endS));
+  const endS = sentenceAxisEndS(flight, stepS, generated);
+  const cursorOn = cursorOnFlight(selection, cursorS, endS);
   const timeOf = (row: number) => row * stepS;
   const xFor = (seconds: number) => GUTTER + (seconds / endS) * plotW;
   const verdicts = trainingVerdicts(flight);
@@ -452,9 +468,10 @@ export default function TrainingSentenceBar() {
   const flightFacts = `${flight.typecode ?? "type unknown"} · ${flight.stratum} · ${flight.rows} steps · ` +
     `${verdicts.instructionsAfterStep0} words after step 0 · ${verdicts.silentSteps} of ${flight.rows - 1} later steps silent`;
   // the Fly button: the selected word's segment of the sentence read, and what the live executor is doing with it
-  const focusRun = focusColumn === null ? null : sentenceWordAt(sentence, focusColumn, cursorRow);
-  /** A model's word said after its flight ended has no flight to fly. */
-  const flyable = (row: number) => generated === null || timeOf(row) < generated.endS;
+  const focusRun = focusColumn === null || !cursorOn ? null : sentenceWordAt(sentence, focusColumn, cursorRow);
+  /** A model's word said after its flight ended has no flight to fly; a window's aircraft is not flown live at all (the
+   *  backend opens read-back sets only). */
+  const flyable = (row: number) => selection.liveExecutor && (generated === null || timeOf(row) < generated.endS);
   const pickedHere = focusRun !== null && trainingPick !== null && sameSource(trainingPick.source, readSource)
     && trainingPick.column === focusColumn && trainingPick.row === focusRun.row;
   const flyingHere = pickedHere && autopilot?.status === "flying";
@@ -497,6 +514,7 @@ export default function TrainingSentenceBar() {
         autopilotColour={autopilot?.status === "ready" && autopilotHasLine(autopilot.segment) ? autopilotColour(autopilot.segment) : null}
         model={model === null || generated === null ? null
           : { label: modelName!, colour: modelColour!, samples: model.flight.samples.length, moved: movedRead }} />
+      <TrainingTrafficStrip />
       <header className="training-sentence-head">
         {startsOffered ? (
           <span className="training-source-tabs training-start-tabs" role="group" aria-label="Where the models' sentences start">
@@ -588,8 +606,10 @@ export default function TrainingSentenceBar() {
         ) : null}
         {autopilot ? <TrainingAutopilotStatus view={autopilot} selection={selection}
           named={focusRun === null || autopilot.request.column !== focusColumn || autopilot.request.row !== focusRun.row} /> : null}
-        <span className="training-sentence-cursor-readout">t = {formatSeconds(cursorS)} s · step {cursorRow}</span>
-        <button type="button" className="training-autopilot-fly" disabled={focusRun === null || flyingHere || !flyable(focusRun.row)}
+        <span className="training-sentence-cursor-readout">
+          t = {formatSeconds(cursorS)} s · {cursorOn ? `step ${cursorRow}` : "outside this aircraft"}
+        </span>
+        {selection.liveExecutor ? <button type="button" className="training-autopilot-fly" disabled={focusRun === null || flyingHere || !flyable(focusRun.row)}
           title={focusRun === null
             ? "Select a word (click its band): the executor then flies that word's segment from where it was said."
             : !flyable(focusRun.row)
@@ -601,7 +621,7 @@ export default function TrainingSentenceBar() {
                   `${focusColumn} word's segment, on the backend — the sample's own flight — and judges the word.`}
           onClick={() => setTrainingPick(nextPick(trainingPick, readSource, focusColumn!, focusRun!.row))}>
           {flyLabel}
-        </button>
+        </button> : null}
         {generated === null ? (
           <button type="button" className="training-sentence-readback-button" aria-pressed={openWindow === "readback"}
             title="The truth sentence against its track, envelope by envelope" onClick={() => toggle("readback")}>
@@ -802,9 +822,12 @@ export default function TrainingSentenceBar() {
             <AutopilotCursor view={autopilot} stepS={stepS} x0={GUTTER} plotW={plotW} endS={endS}
               y={HEAD_H + TRAINING_COLUMN_INDEX[autopilot.request.column] * ROW_H} />
           ) : null}
-          {/* the cursor, kept on the axis (it may have been put past the truth's end while a longer sentence was read) */}
-          <line x1={xFor(Math.min(cursorS, endS))} x2={xFor(Math.min(cursorS, endS))} y1={HEAD_H - 8}
-            y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 4} className="training-sentence-cursor" />
+          {/* the cursor, kept on the axis (it may have been put past the truth's end while a longer sentence was read) — on a
+              window's clock, none while the window's time is outside this aircraft's */}
+          {cursorOn ? (
+            <line x1={xFor(Math.min(cursorS, endS))} x2={xFor(Math.min(cursorS, endS))} y1={HEAD_H - 8}
+              y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 4} className="training-sentence-cursor" />
+          ) : null}
         </svg>
       </div>
 
@@ -858,13 +881,13 @@ export default function TrainingSentenceBar() {
 
       {openWindow === "readback" && generated === null ? (
         <TrainingReadbackWindow flight={flight} vocabulary={vocabulary} candidates={candidates} layers={trainingLayers}
-          cursorS={cursorS} onCursorChange={setCursorS} column={focusColumn} onColumnChange={setFocusColumn}
+          cursorS={cursorS} cursorOn={cursorOn} onCursorChange={setCursorS} column={focusColumn} onColumnChange={setFocusColumn}
           onClose={() => setOpenWindow(null)} executor={executor}
           autopilot={autopilot?.status === "ready" ? autopilot.segment : null} />
       ) : null}
       {openWindow === "prior" && prior && generated === null ? (
         <TrainingPriorWindow flight={flight} vocabulary={vocabulary} candidates={candidates} prior={prior} cursorS={cursorS}
-          onCursorChange={setCursorS} column={focusColumn} onColumnChange={setFocusColumn} onClose={() => setOpenWindow(null)} />
+          cursorOn={cursorOn} onCursorChange={setCursorS} column={focusColumn} onColumnChange={setFocusColumn} onClose={() => setOpenWindow(null)} />
       ) : null}
     </section>
   );

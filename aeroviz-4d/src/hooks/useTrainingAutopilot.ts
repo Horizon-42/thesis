@@ -33,7 +33,8 @@ export default function useTrainingAutopilot(backendUrl: string = AEROVIZ_BACKEN
   // The segment picked and the attempt at it, as a key — a model's word with the sentence it is a word of (none, when
   // the model's overlay is no longer published for the flight: nothing is asked).
   const key = useMemo(() => {
-    if (trainingSelection === null || trainingPick === null) return null;
+    // a window's aircraft is not flown live: the backend opens read-back sets only (`TrainingSelection.liveExecutor`)
+    if (trainingSelection === null || trainingPick === null || !trainingSelection.liveExecutor) return null;
     const read = trainingPick.source === null ? null
       : generationOnScreen(trainingGenerations, trainingPick.source, trainingSelection);
     const sentence = read?.sentence ?? null;

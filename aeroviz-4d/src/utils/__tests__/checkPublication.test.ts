@@ -13,11 +13,12 @@ import {
   checkTrainingIndex,
   checkTrainingOverlay,
   checkTrainingOverlays,
-  checkTrainingSample,
+  checkTrainingSet,
   checkTrainingSetAgrees,
   checkTrainingSetRefusal,
 } from "../checkPublication";
-import { parseTrainingIndex, parseTrainingSample } from "../../data/trainingSample";
+import { parseTrainingIndex, parseTrainingSample, type TrainingSetEntry } from "../../data/trainingSample";
+import type { TrainingOpenSet } from "../../data/trainingSets";
 import { parseTrainingOverlays } from "../../data/trainingOverlays";
 import { SET_ID, mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import {
@@ -174,14 +175,15 @@ function readable() {
   const sample = parseTrainingSample(mockSample());
   if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
   const entry = index.value.sets.find((item) => item.id === SET_ID)!;
-  return { index: index.value, entry, sample: sample.value };
+  const open: TrainingOpenSet = { kind: "vocabulary-readback", sample: sample.value };
+  return { index: index.value, entry, sample: open };
 }
 
 describe("the Training export's checks", () => {
   it("passes a manifest and a readable sample that agree", () => {
     const { entry, sample } = readable();
     expect(checkTrainingIndex(mockIndex()).findings).toEqual([]);
-    expect(checkTrainingSample(SET_ID, mockSample()).findings).toEqual([]);
+    expect(checkTrainingSet(SET_ID, "vocabulary-readback", mockSample()).findings).toEqual([]);
     expect(checkTrainingSetRefusal(entry)).toEqual([]);
     expect(checkTrainingSetAgrees(entry, sample, "KXXX")).toEqual([]);
   });
@@ -208,7 +210,7 @@ describe("the Training export's checks", () => {
   it("names the field when a readable sample is wrong", () => {
     const sample = mockSample() as any;
     sample.flights[0].envelopes.speed[0].check.bandInside = 7;
-    const { findings, value } = checkTrainingSample(SET_ID, sample);
+    const { findings, value } = checkTrainingSet(SET_ID, "vocabulary-readback", sample);
     expect(value).toBeNull();
     expect(findings[0].category).toBe(SET_ID);
     expect(findings[0].message).toContain("says 7 band rows inside");
@@ -224,12 +226,12 @@ describe("the Training export's checks", () => {
       ["flights", 40],
       ["id", "another_set"],
     ] as const) {
-      const findings = checkTrainingSetAgrees({ ...entry, [field]: value }, sample, "KXXX");
+      const findings = checkTrainingSetAgrees({ ...entry, [field]: value } as TrainingSetEntry, sample, "KXXX");
       expect(findings, field).toHaveLength(1);
     }
-    const reseeded = checkTrainingSetAgrees({ ...entry, cohort: { ...entry.cohort, seed: 7 } }, sample, "KXXX");
+    const reseeded = checkTrainingSetAgrees({ ...entry, cohort: { ...entry.cohort, seed: 7 } } as TrainingSetEntry, sample, "KXXX");
     expect(reseeded[0].message).toContain("cohort.seed");
-    const resplit = checkTrainingSetAgrees({ ...entry, cohort: { ...entry.cohort, split: "test" } }, sample, "KXXX");
+    const resplit = checkTrainingSetAgrees({ ...entry, cohort: { ...entry.cohort, split: "test" } } as TrainingSetEntry, sample, "KXXX");
     expect(resplit[0].message).toContain("cohort.split");
     // a sample filed under another airport's directory
     expect(checkTrainingSetAgrees(entry, sample, "KYYY")[0].message).toContain("airport: the manifest says KYYY");
@@ -243,10 +245,10 @@ describe("the Training overlays' checks", () => {
     return parsed.value.overlays;
   }
 
-  function sample() {
+  function sample(): TrainingOpenSet {
     const parsed = parseTrainingSample(mockSample());
     if (!parsed.ok) throw new Error(parsed.problem);
-    return parsed.value;
+    return { kind: "vocabulary-readback", sample: parsed.value };
   }
 
   it("passes both overlays read against the sample of their set", () => {
