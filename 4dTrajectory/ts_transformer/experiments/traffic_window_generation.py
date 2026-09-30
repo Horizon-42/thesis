@@ -167,7 +167,10 @@ def augmented_windows(drawn: Drawn, params: Any, most: Mapping[str, int], max_ro
     counts = {"kinds": {kind: sum(a.kind == kind for a in kept) for kind in KINDS},
               "left_out": {code: dict(by_kind) for code, by_kind in sorted(left_out.items())},
               "refused": {why: refused[why] for why in REFUSALS},
-              "cap_most_at_once": dict(most)}
+              "busiest_training_step": dict(most),
+              "cap_raised_by_the_recorded_window": dict(Counter(a.window.airport.flights.code for a in kept
+                                                                if a.drawn["most_at_once"]["cap"]
+                                                                > most[a.window.airport.flights.code]))}
     return Drawn([a.window for a in kept], [{"kind": a.kind, "draws": a.draws, **a.drawn} for a in kept], members,
                  batch, [x for a in kept for x in a.limits], [m for a in kept for m in a.moves],
                  [r for a in kept for r in a.roles]), counts
@@ -632,6 +635,8 @@ def main(argv: list[str] | None = None) -> int:
         drawn, augmenting = augmented_windows(drawn, params, most, model.config.max_rows, args.augment_seed,
                                               start_altitude_windows(instructions), words.spec)
         print(f"augmented windows: {augmenting}", flush=True)
+        if not drawn.windows:
+            parser.error("every window was left out")
     print(f"{len(drawn.windows)} {args.split} windows, {len(drawn.batch.readings)} commanded aircraft "
           f"({draw.counts}), scenes built ({built}), {time.perf_counter() - started:.0f}s", flush=True)
 

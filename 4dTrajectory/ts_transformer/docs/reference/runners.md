@@ -935,8 +935,9 @@ commanded, g × the required gap ahead of a drawn commanded aircraft on the appr
 its source no longer replayed. Every shift whole seconds (a flight's own landing leaves its landing context by its exact
 time). Qualified: no commanded aircraft answers for a loss through its observed rows against the others' records
 (stricter than the loop: a refusal drops the whole window), never more aircraft on one step than the data has had — the
-airport's busiest step on the training days (`busiest`, computed at the start) or the window's own as drawn where that
-is busier: only what the augmentation adds is capped — and every time limit within the model's positions (a stage-2 limit
+airport's busiest step on the training days (`busiest`, computed at the start) or, where busier, the same span as
+recorded (a longer time limit can bring in recorded traffic, which is not added): only what the augmentation adds is
+capped, each window's cap and count kept with it — and every time limit within the model's positions (a stage-2 limit
 can pass them); ten draws a window at most, else it is left out (counted by airport and kind); the refusals are counted
 by why. Read by the model's sources only (a
 moved start has no record); the readout adds each kind and each aircraft's part (shifted, moved, inserted, as drawn).

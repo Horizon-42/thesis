@@ -104,7 +104,13 @@ def test_only_what_an_augmentation_adds_is_capped_and_a_window_lost_before_the_p
     # the window as drawn is busier than a cap of 1, and compressing one aircraft adds none: kept
     got, _, refused = augment_window(window, batch, [0], {}, [LIMIT_S] * 2, [LIMIT_S] * 2, 1, ROWS,
                                      np.random.default_rng(2), ANY_ALTITUDE, spec, kinds=("C",))
-    assert got is not None and not refused
+    assert got is not None and not refused and got.drawn["most_at_once"] == {"cap": 2, "window": 2}
+    # a moved start's longer time limit brings in f2 (entering 200 s after f1: three at once as recorded) — recorded
+    # traffic, not added: kept
+    got, _, _ = augment_window(window, batch, [0], {}, [LIMIT_S] * 2, [300.0] * 2, 1, ROWS,
+                               np.random.default_rng(2), ANY_ALTITUDE, spec, kinds=("B",))
+    assert got is not None and "KXXX:f2" in got.window.others and "KXXX:f2" not in window.others
+    assert got.drawn["most_at_once"] == {"cap": 3, "window": 3}
     # an inserted aircraft in the air with both is one more than the window has had
     got, kind, refused = augment_window(window, batch, [0], {"KXXX:f3": 1}, [LIMIT_S] * 2, [LIMIT_S] * 2, 1, ROWS,
                                         np.random.default_rng(2), ANY_ALTITUDE, spec, kinds=("A",))
@@ -116,6 +122,24 @@ def test_only_what_an_augmentation_adds_is_capped_and_a_window_lost_before_the_p
     got, _, refused = augment_window(close, batch, [0, 1], {}, [LIMIT_S] * 2, [LIMIT_S] * 2, MANY, ROWS,
                                      np.random.default_rng(2), ANY_ALTITUDE, spec, kinds=("C",))
     assert got is None and refused == {"lost_before_the_model_speaks": TRIES}
+
+
+def test_a_window_s_kind_is_drawn_once_and_a_refused_kind_never_passes_it_to_another(tmp_path, monkeypatch):
+    from ts_transformer.experiments.traffic_window_augment import augment_window
+
+    _, _, spec, window, batch, _ = _window_and_batch(
+        tmp_path, monkeypatch, [0.0, 200.0, 400.0, 600.0, 800.0], _keys(1, 2))
+    kinds = []
+    for seed in range(12):
+        got, kind, refused = augment_window(window, batch, [0, 1], {}, [LIMIT_S] * 2, [LIMIT_S] * 2, MANY, ROWS,
+                                            np.random.default_rng(seed), ANY_ALTITUDE, spec, kinds=("A", "C"))
+        kinds.append(kind)
+        # nothing to insert: a window drawn A is left out as A, never flown as C
+        if kind == "A":
+            assert got is None and refused == {"no_flight_to_insert": 10}
+        else:
+            assert got is not None and got.kind == "C"
+    assert set(kinds) == {"A", "C"}
 
 
 def test_the_busiest_training_step_counts_background_flights(tmp_path, monkeypatch):
@@ -286,6 +310,11 @@ def test_a_moved_start_flies_from_its_moved_state_through_the_window_runner(tmp_
     augmented, counts = runner.augmented_windows(drawn_at(airport), _params(), {"KXXX": MANY}, ROWS, 3, ANY_ALTITUDE,
                                                  spec, kinds=("B",))
     assert counts["kinds"]["B"] == 1 and counts["left_out"] == {}
+    # the draw's flights are both in the window: nothing to insert, the window left out as an A one
+    nothing, counts = runner.augmented_windows(drawn_at(airport), _params(), {"KXXX": MANY}, ROWS, 3, ANY_ALTITUDE,
+                                               spec, kinds=("A",))
+    assert not nothing.windows and counts["left_out"] == {"KXXX": {"A": 1}}
+    assert counts["refused"]["no_flight_to_insert"] == 10
     m = next(j for j, move in enumerate(augmented.moves) if move is not None)
     assert augmented.roles[m] == "moved" and augmented.limits[m] > LIMIT_S
     # the executor's first state is the moved start's (`augmented_inputs` over the fixture's physics)
@@ -296,11 +325,21 @@ def test_a_moved_start_flies_from_its_moved_state_through_the_window_runner(tmp_
     own = _physics_of([signals[keys[m]]], geometry)[0]
     moved = augmented_inputs(own, [geometry], [augmented.moves[m]])
     assert not torch.equal(moved.initial_state, own.initial_state)
+    passed = []
+
+    def recording(inputs, geometries, moves):
+        passed.append(list(moves))
+        return augmented_inputs(inputs, geometries, moves)
+
+    monkeypatch.setattr(runner, "augmented_inputs", recording)
     rows = []
     for source in ("scene", "alone"):
         rows += runner.model_rows(_traffic_model(spec), augmented, [0], source, Words(spec), _params(), None, every, 2,
                                   generator=torch.Generator().manual_seed(4), temperature=1.0,
                                   procedure_masks=ProcedureMasks.none())
+    # each sample of the window: the moved start at the moved aircraft's place, the other's own
+    expected = [augmented.moves[j] for _ in range(2) for j in range(2)]
+    assert passed == [expected, expected] and sum(move is not None for move in expected) == 2
     in_context, _ = runner.augmented_windows(drawn_at(context_airport), _params(), {"KXXX": MANY}, ROWS, 3,
                                              ANY_ALTITUDE, spec, kinds=("B",))
     rows += runner.model_rows(full, in_context, [0], "scene", Words(spec), _params(), every, every, 1,

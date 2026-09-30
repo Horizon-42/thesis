@@ -31,11 +31,13 @@ rows' inputs and words, as in `traffic_augment`.
 **Qualification** (§5.3): every commanded aircraft, through its observed rows (to its first predicted step) judged not
 established — as the loop judges its first step — against every other aircraft of the window along its record (a moved
 one's moved), answers for no loss under the loop's reading: a window already lost when the prior starts to speak is not
-the prior's. **Stated reading**: this is stricter than the loop — the other commanded aircraft are read along their
-records, past their own first predicted steps too and while the loop's judge does not see them yet — and a draw refused
-drops the whole window (a window as drawn only leaves out the aircraft starting in a loss). The window never holds more
-aircraft on one step, along the records, than the data has had (§5.2): its airport's busiest step on the training days
-(`busiest`), or the window's own as drawn where that is busier — only what the augmentation adds is capped. Every
+the prior's. **Stated reading**: this differs from the loop — the other commanded aircraft are read along their records,
+before their first predicted steps too, where the loop's judge does not see them yet (stricter there), and after them,
+where the loop reads the paths the model flies them on — and a draw refused drops the whole window (a window as drawn
+only leaves out the aircraft starting in a loss). The window never holds more aircraft on one step, along the records,
+than the data has had (§5.2): its airport's busiest step on the training days (`busiest`), or — where that is busier —
+the same span as recorded (the window's commanded aircraft unmoved, and every flight the augmented window replays: a
+longer time limit can bring in recorded traffic, which is not added): only what the augmentation adds is capped. Every
 commanded aircraft's time limit must fit the model's positions (a moved start's stage-2 limit can pass them). A draw
 that cannot apply (no plausible start, no flight to insert) or fails is drawn again, at most `traffic_augment.TRIES`
 draws, else the window is left out; the draws refused are counted by why.
@@ -167,7 +169,6 @@ def augment_window(window: Window, batch: replay.Batch, places: Sequence[int], p
     airport = window.airport
     geometry, separation = airport.flights.geometry, airport.flights.separation
     own = dict(zip(window.commanded, places))
-    most = max(most, at_once([window.track(k).presence for k in (*window.commanded, *window.others)], step_s))
     kind = kinds[int(rng.integers(len(kinds)))]
     refused: Counter = Counter()
     for draw in range(1, TRIES + 1):
@@ -234,9 +235,12 @@ def augment_window(window: Window, batch: replay.Batch, places: Sequence[int], p
         commanded = tuple(sorted(place, key=lambda k: (placed.first_step_s(k, step_s), k)))
         candidate = window_of(airport, window.opens_s, commanded, [limit[k] for k in commanded], step_s, parts,
                               left_out)
-        if at_once([candidate.track(k).presence for k in (*candidate.commanded, *candidate.others)], step_s) > most:
+        cap = max(most, at_once([airport.tracks[k].presence for k in (*window.commanded, *candidate.others)], step_s))
+        count = at_once([candidate.track(k).presence for k in (*candidate.commanded, *candidate.others)], step_s)
+        if count > cap:
             refused["busier_than_the_data"] += 1
             continue
+        drawn["most_at_once"] = {"cap": cap, "window": count}
         if not qualifies(candidate, signals, step_s):
             refused["lost_before_the_model_speaks"] += 1
             continue
