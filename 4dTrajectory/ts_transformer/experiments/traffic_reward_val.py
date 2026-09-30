@@ -12,8 +12,8 @@ attention's output against the residual (`traffic_reward.traffic_readout`); besi
 labelled words and along their records (`traffic_free_generation`: the real scenes).
 
 The run is read by content: its start (``--prior``: the checkpoint's sha256), executor spec (sha256), instruction
-artefact (its name under ``4dTrajectory/outputs``) and edge code (`traffic_scene_data.edge_source_sha256`) must be the
-run's; the run finished (every round it asked for) and kept a round (``choice.json``). ``--split select`` reads what the
+artefact (its name under ``4dTrajectory/outputs``), edge code (`traffic_scene_data.edge_source_sha256`) and landing pool
+(the tracks rosters the start recorded) must be the run's; the run finished (every round it asked for) and kept a round (``choice.json``). ``--split select`` reads what the
 run read: each model's sentences are checked against the run's round-0 and kept-round select readouts (the share said
 alike, written — on the GPU a kernel's sums may differ at rounding between two runs); ``--split val`` reads the
 validation days once, from a clean tree.
@@ -39,7 +39,9 @@ import torch
 from ts_transformer.autopilot import replay
 from ts_transformer.experiments.prior_augmented_reward import labelled_words
 from ts_transformer.experiments.prior_free_generation import start_altitude_windows
-from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, load_prior, rosters
+from ts_transformer.experiments.prior_train import (
+    PRIOR_CHECKPOINT_SCHEMA, load_prior, roster_digests, roster_record, rosters,
+)
 from ts_transformer.experiments.traffic_free_generation import labelled_rows, recorded_rows, summary
 from ts_transformer.experiments.traffic_reward import (
     SELECT_AUGMENT_OFFSET, SELECT_STREAMS, TRAFFIC_REWARD_SCHEMA, Round, Speakers, Speaking, augmented_round,
@@ -59,9 +61,14 @@ SCHEMA = "ts-traffic-reward-val-v1"
 SIDES = ("real", "augmented")
 
 
-def run_differences(config: Mapping[str, Any], prior_sha256: str, executor_sha256: str, instructions: Path) -> list[str]:
-    """What of the start, the executor, the instruction artefact and the edge code differs from the run's."""
+def run_differences(config: Mapping[str, Any], prior_sha256: str, executor_sha256: str, instructions: Path,
+                    pool: Mapping[str, str], start_pool: Mapping[str, str]) -> list[str]:
+    """What of the start, the executor, the instruction artefact, the edge code and the landing pool (``pool``: the
+    tracks rosters' digests read now, `prior_train.roster_digests`; ``start_pool``: the start's) differs from the
+    run's — the pool the landing context and the reward's landing direction read, which the run read as its start did."""
     out = []
+    if pool != start_pool:
+        out.append("the landing pool (the tracks rosters)")
     if prior_sha256 != config["prior"]["checkpoint_sha256"]:
         out.append("the start's checkpoint")
     if executor_sha256 != config["executor"]["sha256"]:
@@ -131,13 +138,15 @@ def main(argv: list[str] | None = None) -> int:
     kept_round = int(choice["round"])
     started = time.perf_counter()
     params, record, words = replay.open_executor(executor_dir, instructions)
-    differs = run_differences(config, file_sha256(prior_dir / "checkpoint.pt"), record["sha256"], instructions)
+    single, payload, start_config, masks = load_prior(prior_dir, instructions)
+    pool = roster_digests(roster_record(rosters(instructions)))
+    differs = run_differences(config, file_sha256(prior_dir / "checkpoint.pt"), record["sha256"], instructions, pool,
+                              roster_digests(start_config["tracks_rosters"]))
     if differs:
         parser.error(f"not the run's: {differs}")
     spec = load_spec(instructions)
     step_s, seed = spec.step_s, int(config["seed"])
     per_airport, samples = int(config["select"]["per_airport"]), int(config["select"]["samples"])
-    single, payload, start_config, masks = load_prior(prior_dir, instructions)
     if start_config["smoke"] or payload["schema"] != PRIOR_CHECKPOINT_SCHEMA:
         parser.error(f"{prior_dir} is not a single-aircraft prior's formal run")
     torch.manual_seed(seed)                              # the run's start: its traffic attention at zero
@@ -208,7 +217,8 @@ def main(argv: list[str] | None = None) -> int:
         "start": {"directory": repo_relative(prior_dir), "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"),
                   "procedure_masks": list(masks.names)},
         "executor": {"directory": repo_relative(executor_dir), "sha256": record["sha256"]},
-        "instructions": repo_relative(instructions), "per_airport": per_airport, "samples": samples, "seed": seed,
+        "instructions": repo_relative(instructions), "landing_pool": pool, "per_airport": per_airport,
+        "samples": samples, "seed": seed,
         "drawn": batch.drawn, "augment_seed": seed + SELECT_AUGMENT_OFFSET, "augmented_left_out": left_out,
         "scene_samples": len(built), "references": references, "models": readout, "paired": paired,
         "against_the_run": check, "elapsed_s": time.perf_counter() - started})

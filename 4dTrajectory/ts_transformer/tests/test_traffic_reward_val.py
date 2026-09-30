@@ -18,12 +18,16 @@ def test_the_run_is_read_by_content(monkeypatch):
     config = {"prior": {"checkpoint_sha256": "p" * 64}, "executor": {"sha256": "x" * 64}, "edge_source_sha256": "e" * 64,
               "instructions": "/somewhere/.claude/worktrees/gone/4dTrajectory/outputs/POOLED/instruction_language/v5"}
     here = runner.REPO_ROOT / "4dTrajectory/outputs/POOLED/instruction_language/v5"
-    assert runner.run_differences(config, "p" * 64, "x" * 64, here) == []
+    pool = {"KXXX": "r" * 64}
+    assert runner.run_differences(config, "p" * 64, "x" * 64, here, pool, pool) == []
     other = runner.REPO_ROOT / "4dTrajectory/outputs/POOLED/instruction_language/v4"
-    assert runner.run_differences(config, "q" * 64, "x" * 64, other) == ["the start's checkpoint",
-                                                                         "the instruction artefact"]
+    assert runner.run_differences(config, "q" * 64, "x" * 64, other, pool, pool) == ["the start's checkpoint",
+                                                                                     "the instruction artefact"]
     monkeypatch.setattr(runner, "edge_source_sha256", lambda: "f" * 64)
-    assert runner.run_differences(config, "p" * 64, "x" * 64, here) == ["the edge code"]
+    assert runner.run_differences(config, "p" * 64, "x" * 64, here, pool, pool) == ["the edge code"]
+    monkeypatch.setattr(runner, "edge_source_sha256", lambda: "e" * 64)
+    assert runner.run_differences(config, "p" * 64, "x" * 64, here, {"KXXX": "s" * 64}, pool) == [
+        "the landing pool (the tracks rosters)"]
 
 
 def test_the_sentences_are_checked_against_the_run_s_and_the_reward_reads_those_it_counts():
