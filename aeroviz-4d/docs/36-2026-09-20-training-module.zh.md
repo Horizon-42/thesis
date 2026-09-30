@@ -871,7 +871,7 @@ context，`useApp` 不读它**：鼠标在图上移动时，只有句子条（�
 | 4 | 导出（GPU，窗口读数跑完之后）到镜像目录，`check-publication`；发布到 `public/data` 前问用户 | 已发布（2026-09-30，用户同意），`check-publication` 0 错误 |
 | 5 | （可选）窗口里的实时执行器 | 未开始 |
 | 6 | 用户 2026-09-30 的修改（分支 `dev-training-roles`）：三维按角色区分焦点 / 被指挥 / 回放；失败一律大红 `#ff2d2d`（句子条上没落地的结束线、时间条与三维的失去间隔和 ✕）；traffic 换天蓝 `#2b93ee`；图例加窗口五行 | 做完，待审查与合并 |
-| 7 | 用户 2026-09-30：飞机用模型不用点，姿态绑定真实的航向、坡度、迎角，整个 Training 模块都改。已定：迎角只写进标签，机头俯仰取航迹角 γ（用户选 b：项目里的升力线 `CL = 0.2 + 5.7·α` 没有襟翼，最后进近 70 m/s 时读出 α ≈ 15°）；航向、γ、坡度来自执行器自己的状态与坡度指令，观测航迹用 `geometry/flyability.required_controls` 反解的读数。**要在 Python 里算、写进导出的航迹，各导出格式换新名、已发布的数据全部重新导出——用户：前端做完之后再仔细商量** | 待商量 |
+| 7 | 飞机用模型不用点，姿态绑定真实的航向、坡度与航迹角（整个 Training 模块）——见 §4.12 | 写代码中 |
 
 前端审查后的改动（2026-09-30）：左栏按**集合的种类**各留一个会话，另一个同种集合加载时它不卸下，开关与每个集合选中的叠加层照旧在切回时
 恢复（原来整块在面板里，拆开后一度会丢）；"游标在这架飞机上"是一个判断（`cursorOnFlight`）：窗口的时间落在焦点飞机之外时，句子条、
@@ -880,6 +880,59 @@ context，`useApp` 不读它**：鼠标在图上移动时，只有句子条（�
 速度"重建，换窗口换一条新的时间条；被判定器结束又接着飞到落地的样本，标签写 "lost separation at … s · then landed on 23L at … s"。
 
 以后可接、这次不做：扩充窗口（压紧流量、插入一架、挪一个起点）作另一个集合；"所有飞机照标注的词飞"作另一种叠加层。
+
+### 4.12 飞机模型与姿态
+
+用户 2026-09-30：飞机不用点表示，用飞机模型，绑定真实的坡度、航向和迎角，整个 Training 模块都改；2026-09-30 同意按
+"先写代码、正式实验跑完后再整批导出"的顺序开始。
+
+**状态**
+
+| 项 | 状态 |
+|---|---|
+| 定下的事 | 迎角用 b：机头俯仰只取航迹角 γ，迎角只作读数写进标签（项目的升力线 `CL = 0.2 + 5.7·α` 没有襟翼，最后进近 70 m/s 时读出 α ≈ 15°，画上去机头会抬 12°） |
+| 代码 | 分支 `dev-training-attitude`（工作树 `.claude/worktrees/training-attitude`），写代码中 |
+| 导出 | 未开始：GPU 部分等 7.6 正式实验跑完（约 2026-10-01 15:00Z）；先导出到镜像目录、逐点核对位置与已发布的相同、`check-publication`，发布前问用户 |
+
+**姿态从哪来**（全部在 Python 里算一次，写进导出的航迹；前端不算任何姿态）：一个函数 `instructions/attitude.py` 的
+`attitude(states, bank_rad, load_factor, aero_params)`，输入执行器的状态行 `(lat, lon, alt, V, ψ, γ, m)`、坡度与载荷系数
+（动力学的符号：坡度为正向左转），输出航向（罗盘度）、航迹角、右坡度、迎角读数：
+
+- 迎角读数：`torch_dynamics.aerodynamic_coefficients` 在该载荷系数下的升力系数（失速时封顶于 `Cl_max`，与执行器所飞相同），
+  按 `aerodynamic_model/simulator.Simulator` 的 `CL0`、`CL_alpha` 反算 α——只写进标签，不进机头俯仰；
+- **执行器飞出的航迹**（回放、模型句子、增强起点、窗口里的模型飞机、实时 Fly）：状态取执行器的状态行，坡度与载荷系数取它
+  **从这一行起那一个周期**下的指令（最后一行取最后一个周期的），气动参数取这架飞机的执行器输入 `FlightInputs.aero_params`；
+  窗口：导出器从 `fly_windows` 返回的 `Flown.loop.executors` 读每组的 `executor.flown()`，第 k 个记录对应执行器第
+  `min(k × 每步行数, 飞过的周期数)` 行，导出时逐点核对由此算出的位置与循环记下的相同，不同即报错——**不改
+  `traffic_window.py`、`traffic_window_generation.py`**；
+- **观测航迹**（真实句子集合的航班、窗口集合里记录的指挥飞机与其他飞机）：数据平面自己的读法——`rebuild_series` 重建
+  `FlightSeries`，`states_from_channels`（质量取 `scenario.initial.m`，与执行器起飞时相同）得到状态行，
+  `outputs/dynamics/inverse.actual_controls`（`thrust-fraction` 合同，训练的 teacher 用的同一个反解）得到坡度与载荷系数；
+  动力学查不到机型的飞机（C31）没有姿态，导出器按名字拒绝，不猜。
+
+**不碰训练**：`autopilot/`、`geometry/flyability.py`、`outputs/dynamics/*`、`torch_dynamics.py`、`traffic_window*.py` 只读不改；
+执行器与标注器源码的 sha256 不变；飞法、位置、判定不变，导出只多一组 `attitude`。
+
+**格式**（每条航迹多一个 `attitude` 块：`headingDeg`、`pathAngleDeg`、`bankRightDeg`、`attackDeg`，与航迹逐点对齐；格式名
+两边一起换，旧名按名字拒绝）：集合 `aeroviz-training-sample-v8`、`aeroviz-training-traffic-v2`；叠加层
+`aeroviz-training-executor-v5`、`aeroviz-training-generation-v5`、`aeroviz-training-augmented-generation-v3`、
+`aeroviz-training-window-generation-v2`；实时 Fly `aeroviz-autopilot-segment-v8`（后端 `payload.py` 加 `pathAngleDeg`、
+`attackDeg`，已有 `bankRightDeg`；改完重启 8765 前问用户）。先验预测（没有飞出的航迹）不变。
+
+**前端**：一个方向函数（glTF 机头朝 +x：`HeadingPitchRoll(航向 − 90°, 航迹角, 右坡度)`），Pilot、Optimize 与 Training 共用；
+飞机模型 `/models/aircraft.glb`。画在：单机时光标处读的那条航迹上（真实句子：观测航迹；模型句子：它的样本）；实时 Fly 飞出的
+那架；窗口里每架飞机（按 §4.11 的角色：焦点加黄圈与 ▶ 底块，被指挥的用读法的颜色染色，回放的淡灰）。标签写航向、坡度、
+航迹角与迎角读数。
+
+**分步**：
+
+| 步 | 内容 | 状态 |
+|---|---|---|
+| a | `instructions/attitude.py` + 测试（与执行器所飞一致；观测与 teacher 的反解一致） | 未开始 |
+| b | 各导出器写 `attitude`、格式换名；后端 Fly 返回值 | 未开始 |
+| c | 前端：读取器、共用方向函数、飞机模型画在三处 | 未开始 |
+| d | 一次 opus 审查、全部测试、浏览器；一个机场导出到镜像目录试跑（只用 CPU） | 未开始 |
+| e | 7.6 跑完后整批导出到镜像目录（125 个文件：每机场 23 个叠加层 + 2 个集合，约 1 小时），逐点核对、`check-publication`，问用户后发布、重启 | 未开始 |
 
 ## 5 核对
 
