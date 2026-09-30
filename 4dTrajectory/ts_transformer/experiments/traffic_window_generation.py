@@ -85,7 +85,7 @@ from ts_transformer.experiments.traffic_speaking import (
     HISTORY_S, MASK_COLUMNS, scene_airports, scene_landings, speaking_aircraft,
 )
 from ts_transformer.experiments.traffic_window import (
-    Window, WindowLoop, _with_landing, draw_windows, window_landings, window_of,
+    Commanded, Window, WindowLoop, _with_landing, draw_windows, window_landings, window_of,
 )
 from ts_transformer.experiments.traffic_window_augment import KINDS, REFUSALS, ROLES, augment_window, busiest
 from ts_transformer.inference.scene_edges import EDGE_FEATURES
@@ -111,6 +111,32 @@ AIRCRAFT_STEPS = 100_000
 WORKERS = 6
 #: Window sizes the readout is split by: the commanded aircraft of a window.
 SIZES = ("1", "2", "3+")
+#: Windows drawn an airport by default (`draw_windows`): the formal window readouts' draw, which the Training module's
+#: window sets are chosen from (`window_training_export`).
+WINDOWS_PER_AIRPORT = 200
+
+
+def size_of(commanded: int) -> str:
+    """A window's size (`SIZES`) by its commanded aircraft."""
+    return SIZES[min(commanded, 3) - 1]
+
+
+def window_prior(prior_dir: Path, instructions: Path, seed: int) -> tuple[Prior, str, dict[str, Any], Any]:
+    """The prior that commands a window's aircraft, on the CPU, in eval mode: a single-aircraft prior (augmented) with a
+    traffic attention at zero (`with_traffic`, its weights drawn under ``seed``: at zero it reads nothing, so it answers
+    as the prior does, to rounding), or a traffic prior (an M4 round) as it was trained — with how its traffic attention
+    reads, its config file and its own procedure's masks; refused unless it is either kind's formal run, a traffic prior
+    reading today's edge features."""
+    loaded, payload, config, own_masks = load_prior(prior_dir, instructions)
+    if config["smoke"] or payload["schema"] not in (PRIOR_CHECKPOINT_SCHEMA, TRAFFIC_CHECKPOINT_SCHEMA):
+        raise ValueError(f"{prior_dir} is not a single-aircraft or a traffic prior's formal run")
+    if payload["schema"] == PRIOR_CHECKPOINT_SCHEMA:
+        torch.manual_seed(seed)
+        return (with_traffic(loaded, EDGE_FEATURES).eval(), "zero (with_traffic): the prior's answers to rounding",
+                config, own_masks)
+    if tuple(loaded.traffic_features) != EDGE_FEATURES:
+        raise ValueError(f"{prior_dir}'s traffic attention reads other edge features than today's")
+    return loaded, "the traffic prior's own", config, own_masks
 
 
 @dataclasses.dataclass(frozen=True)
@@ -250,13 +276,37 @@ def _reward(row: dict[str, Any], direction: np.ndarray) -> float:
     return float(row["outcome"] == "landed" and bool(direction[row["runway"]]))
 
 
-def model_rows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, words: Words, params: Any,
-               landings: Any, every_landing: Mapping[str, Landings], samples: int, *, generator: torch.Generator,
-               temperature: float, procedure_masks: Any) -> list[dict[str, Any]]:
+@dataclasses.dataclass
+class Flown:
+    """Windows spoken to and flown (`fly_windows`): the loop once it has run, its results, the flights it flew (``part``,
+    each at ``index`` of the draw's batch) and each loop window's drawn window (``instances``: a window spoken to ``K``
+    times is there ``K`` times, its samples in order)."""
+
+    loop: WindowLoop
+    results: list[Commanded]
+    part: replay.Batch
+    index: list[int]
+    instances: list[int]
+
+    def members(self, b: int) -> list[int]:
+        """Loop window ``b``'s commanded aircraft: their places in the loop."""
+        return [i for i, r in enumerate(self.results) if r.window == b]
+
+    def judged_again(self, b: int, reading: str, step_s: float, window: Window) -> Run:
+        """Loop window ``b``'s commanded aircraft along the paths they flew, judged afterwards under ``reading``
+        (`_judged_again`: the IFR reading beside the loop's VISUAL one)."""
+        here = self.members(b)
+        until = {self.results[i].key: self.loop.judged_until_s(i) for i in here}
+        return _judged_again(window, [self.loop.path(i) for i in here], until, reading, step_s)
+
+
+def fly_windows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, words: Words, params: Any,
+                landings: Any, samples: int, *, generator: torch.Generator, temperature: float,
+                procedure_masks: Any) -> Flown:
     """The windows at ``chunk`` spoken to ``samples`` times each (`WindowLoop`; ``source`` "alone": each aircraft
-    hearing no other), a row per commanded aircraft and sample; ``landings``: the model's landing context (None for a
-    variant without one), ``every_landing``: the airports' landings the reward's landing direction reads."""
-    cpu, step_s = torch.device("cpu"), words.spec.step_s
+    hearing no other) and flown to their end; ``landings``: the model's landing context (None for a variant without
+    one). The caller closes the loop (`WindowLoop.close`)."""
+    cpu = torch.device("cpu")
     instances = [w for w in chunk for _ in range(samples)]
     index = [j for w in instances for j in drawn.members[w]]
     part = replay.subset(drawn.batch, index)
@@ -268,13 +318,24 @@ def model_rows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, wo
                       temperature=temperature, procedure_masks=procedure_masks, alone=source == "alone")
     while loop.running:
         loop.step()
-    results = loop.results()
+    return Flown(loop, loop.results(), part, index, instances)
+
+
+def model_rows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, words: Words, params: Any,
+               landings: Any, every_landing: Mapping[str, Landings], samples: int, *, generator: torch.Generator,
+               temperature: float, procedure_masks: Any) -> list[dict[str, Any]]:
+    """The windows at ``chunk`` spoken to ``samples`` times each (`fly_windows`), a row per commanded aircraft and
+    sample; ``every_landing``: the airports' landings the reward's landing direction reads."""
+    step_s = words.spec.step_s
+    flown = fly_windows(model, drawn, chunk, source, words, params, landings, samples, generator=generator,
+                        temperature=temperature, procedure_masks=procedure_masks)
+    loop, results, part, index, instances = flown.loop, flown.results, flown.part, flown.index, flown.instances
     rows = []
     for b, w in enumerate(instances):
         window = drawn.windows[w]
-        here = [i for i, r in enumerate(results) if r.window == b]
+        here = flown.members(b)
         until = {results[i].key: loop.judged_until_s(i) for i in here}
-        again = _judged_again(window, [loop.path(i) for i in here], until, IFR, step_s)
+        again = flown.judged_again(b, IFR, step_s, window)
         loop_landings = [(results[i].landing_s, part.geometries[i].candidates[results[i].runway].ident)
                          for i in here if results[i].landing_s is not None]
         for i in here:
@@ -314,14 +375,28 @@ def _aircraft_row(drawn: Drawn, part: replay.Batch, i: int, j: int, w: int, sour
             "observed_runway": part.readings[i].runway_index, "augmented": drawn.augmented[w], "role": drawn.roles[j]}
 
 
-def fixed_rows(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, params: Any, landings: Any,
-               procedure_masks: Any) -> list[dict[str, Any]]:
+@dataclasses.dataclass
+class FixedWindow:
+    """A window's commanded aircraft on paths that react to nothing (`fixed_paths`): each one's path, own end, runway
+    (a candidate's index) and last judged instant, in the window's order, judged under VISUAL (``run``) and IFR
+    (``again``)."""
+
+    w: int
+    paths: list[Controlled]
+    owns: list[str]
+    runways: list[int]
+    until: dict[str, float]
+    run: Run
+    again: Run
+
+
+def fixed_paths(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, params: Any, procedure_masks: Any
+                ) -> tuple[replay.Batch, list[int], list[FixedWindow]]:
     """The windows at ``chunk`` with every commanded aircraft on a path that reacts to nothing — its labelled words
     flown from its first predicted step (``labelled``) or its own record on the loop's steps (``recorded``) — judged
-    afterwards (`_judged_again`) under VISUAL and IFR, a row per commanded aircraft. A labelled path runs to its
-    executor's end and is passive past a glidepath stop, as a model aircraft flies on past one (design §9 item 29). The
-    landing direction reads the path's own world: the recorded landings for the record, the labelled paths' landings in
-    place of the commanded aircraft's recorded ones for the labelled words."""
+    afterwards (`_judged_again`) under VISUAL and IFR: the flights (``part``, each at ``index`` of the draw's batch) and
+    each window's `FixedWindow`. A labelled path runs to its executor's end and is passive past a glidepath stop, as a
+    model aircraft flies on past one (design §9 item 29)."""
     if any(drawn.augmented[w] is not None for w in chunk):
         raise ValueError("an augmented window is read by the model's sources only: a moved start has no record, and "
                          "the scene of an inserted aircraft is its source's")
@@ -335,7 +410,7 @@ def fixed_rows(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, pa
                                  [procedure_masks.finals[g.code] for g in part.geometries], words)
                  if procedure_masks.altitudes else None)
         step_rows = int(round(step_s / flown.cycle_s))
-    rows, at = [], 0
+    out, at = [], 0
     for w in chunk:
         window = drawn.windows[w]
         paths, owns, runways, until = [], [], [], {}
@@ -356,11 +431,26 @@ def fixed_rows(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, pa
             paths.append(path)
             owns.append(own)
         run, again = (_judged_again(window, paths, until, reading, step_s) for reading in (VISUAL, IFR))
+        out.append(FixedWindow(w, paths, owns, runways, until, run, again))
+        at += len(window.commanded)
+    return part, index, out
+
+
+def fixed_rows(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, params: Any, landings: Any,
+               procedure_masks: Any) -> list[dict[str, Any]]:
+    """`fixed_paths`' windows, a row per commanded aircraft. The landing direction reads the path's own world: the
+    recorded landings for the record, the labelled paths' landings in place of the commanded aircraft's recorded ones
+    for the labelled words."""
+    step_s = words.spec.step_s
+    part, index, fixed = fixed_paths(drawn, chunk, source, words, params, procedure_masks)
+    rows, at = [], 0
+    for item in fixed:
+        window, paths, runways = drawn.windows[item.w], item.paths, item.runways
         for m, (key, path) in enumerate(zip(window.commanded, paths)):
             j = at + m
-            row = _aircraft_row(drawn, part, j, index[j], w, source, None)
-            row.update(path_fields(run, again, key, path, window.commanded, owns[m], until[key]),
-                       landing_s=path.landing_s if owns[m] == "landed" else None, runway=runways[m])
+            row = _aircraft_row(drawn, part, j, index[j], item.w, source, None)
+            row.update(path_fields(item.run, item.again, key, path, window.commanded, item.owns[m], item.until[key]),
+                       landing_s=path.landing_s if item.owns[m] == "landed" else None, runway=runways[m])
             if source == "labelled":
                 context = _loop_context(window, key, landings,
                                         [(other.landing_s, part.geometries[at + n].candidates[runways[n]].ident)
@@ -490,7 +580,7 @@ def summaries(rows: Sequence[dict[str, Any]], augmented: bool) -> dict[str, Any]
     by_size: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         by_airport[row["airport"]].append(row)
-        by_size[SIZES[min(row["commanded"], 3) - 1]].append(row)
+        by_size[size_of(row["commanded"])].append(row)
     out = {"pooled": summary(rows), "airports": {code: summary(part) for code, part in sorted(by_airport.items())},
            "window_sizes": {size: summary(by_size[size]) for size in SIZES if by_size[size]}}
     if augmented:
@@ -595,7 +685,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--instructions", type=Path, required=True)
     parser.add_argument("--executor", type=Path, required=True, help="the executor spec directory")
     parser.add_argument("--split", choices=SPLITS, required=True)
-    parser.add_argument("--windows-per-airport", type=int, default=200)
+    parser.add_argument("--windows-per-airport", type=int, default=WINDOWS_PER_AIRPORT)
     parser.add_argument("--samples", type=int, default=4)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=1337)
@@ -619,17 +709,10 @@ def main(argv: list[str] | None = None) -> int:
     git = git_state()
     started = time.perf_counter()
     params, record, words = replay.open_executor(executor_dir, instructions)
-    loaded, payload, prior_config, own_masks = load_prior(prior_dir, instructions)
-    if prior_config["smoke"] or payload["schema"] not in (PRIOR_CHECKPOINT_SCHEMA, TRAFFIC_CHECKPOINT_SCHEMA):
-        parser.error(f"{prior_dir} is not a single-aircraft or a traffic prior's formal run")
-    if payload["schema"] == PRIOR_CHECKPOINT_SCHEMA:
-        torch.manual_seed(args.seed)                   # the traffic attention's weights: at zero it reads nothing
-        model = with_traffic(loaded, EDGE_FEATURES).eval()   # on the CPU until the reading processes are forked
-        attention = "zero (with_traffic): the prior's answers to rounding"
-    else:
-        if tuple(loaded.traffic_features) != EDGE_FEATURES:
-            parser.error(f"{prior_dir}'s traffic attention reads other edge features than today's")
-        model, attention = loaded, "the traffic prior's own"
+    try:                                               # on the CPU until the reading processes are forked
+        model, attention, _, own_masks = window_prior(prior_dir, instructions, args.seed)
+    except ValueError as refusal:
+        parser.error(str(refusal))
     every_landing = airport_landings(instructions, rosters(instructions))
     landings = every_landing if VARIANTS[model.config.variant].landing_context else None
     step_s = words.spec.step_s

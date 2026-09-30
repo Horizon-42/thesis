@@ -105,7 +105,7 @@ def test_the_contract_is_the_frontend_reader_s():
     assert json.loads(_ts_constant("TRAINING_INDEX_SCHEMA")) == files.INDEX_SCHEMA
     assert json.loads(_ts_constant("TRAINING_SAMPLE_SCHEMA")) == files.SAMPLE_SCHEMA
     assert json.loads(_ts_constant("TRAINING_READING_RULE")) == READING_RULE
-    assert json.loads(_ts_constant("TRAINING_READABLE_SET_KIND")) == files.KIND_READBACK
+    assert json.loads(_ts_constant("TRAINING_READBACK_SET_KIND")) == files.KIND_READBACK
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_COLUMNS"))) == COLUMNS
     assert int(_ts_constant("TRAINING_UNCHANGED")) == UNCHANGED
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_WORD_KINDS"))) == files.WORD_KINDS

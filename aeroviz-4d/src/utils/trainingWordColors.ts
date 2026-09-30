@@ -11,6 +11,7 @@
 
 import type { TrainingColumn } from "../data/trainingSample";
 import type { TrainingModelName, TrainingReplayKind } from "../data/trainingOverlays";
+import type { TrainingOtherRole, TrainingWindowVerdict } from "../data/trainingTraffic";
 
 /** The sentence bar's surface — every colour here is validated against it; `index.css` draws `.training-sentence-bar` in it
  *  at 0.94 opacity (MIRROR: CSS cannot import it). The bar shades with it. */
@@ -109,11 +110,14 @@ export const TRAINING_AUTOPILOT_OUTSIDE_COLOR = "#ff2d2d";
  *  normal vision (nearest: the live executor's outside red; 18.5 from base's fuchsia) and ≥ 11.6 under simulated colour
  *  blindness, but its contrast is only 3.3:1 — enough for a mark (lines, swatches, borders, the flight's end time on the
  *  bar's axis, which the user asked to see in the model's colour), too little for running text: names and counts stay in
- *  the text colour beside a swatch. Two models are never drawn together (the bar reads one at a time). */
+ *  the text colour beside a swatch. traffic's olive gold (2026-09-30, the best of a search over hue × saturation ×
+ *  lightness at contrast ≥ 4.5:1 against every colour above) is ≥ 17.3 OKLab ΔE from every one of them (nearest: the
+ *  replay's amber), contrast 4.9:1. Two models are never drawn together (the bar reads one at a time). */
 export const TRAINING_MODEL_COLOR: Record<TrainingModelName, string> = {
   base: "#d946ef",
   landing: "#a3e635",
   augmented: "#b82e7a",
+  traffic: "#9c8116",
 };
 
 /** How opaque a model's samples other than the one read are drawn in 3D (thin), and in the legend. */
@@ -123,3 +127,22 @@ export const TRAINING_OTHER_SAMPLE_ALPHA = 0.35;
 export function trainingModelColour(model: { name: TrainingModelName }): string {
   return TRAINING_MODEL_COLOR[model.name];
 }
+
+/** A multi-aircraft window's verdict (`trainingTraffic.windowVerdict`), in the replay's three colours — the same reading of
+ *  "clean / something wrong / did not get there": every commanded aircraft landed with no loss of separation, none lost
+ *  separation but one did not land, one lost separation. */
+export const TRAINING_WINDOW_VERDICT_COLOR = {
+  clean: TRAINING_REPLAY_COLOR.clean,
+  short: TRAINING_REPLAY_COLOR.flawed,
+  lost: TRAINING_REPLAY_COLOR["not landed"],
+} as const satisfies Record<TrainingWindowVerdict, string>;
+
+/** The aircraft of a window the model does not command, replayed as recorded: the raw track's slate for an arrival with a
+ *  sentence, darker for a background arrival without one — neither is a hue of the words, the models or the verdicts. */
+export const TRAINING_OTHER_AIRCRAFT_COLOR = {
+  replayed: "#94a3b8",
+  background: "#64748b",
+} as const satisfies Record<TrainingOtherRole, string>;
+
+/** The pair of aircraft under their minimum at the cursor, drawn between them in 3D and on the window strip. */
+export const TRAINING_LOSS_COLOR = TRAINING_OUTSIDE_COLOR;

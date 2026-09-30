@@ -6,8 +6,10 @@ Not a runner, and torch-free: everything here raises `ValueError` (a set that is
 them), never `SystemExit` — a server thread would let that escape its handler and drop the request
 unanswered. A runner lets it propagate, with its traceback.
 
-**A set** (`KIND_READBACK`): ``<airport>/training/<set-id>/sample.json`` (`SAMPLE_SCHEMA`), listed in
-``<airport>/training/index.json`` (`INDEX_SCHEMA`). **An overlay** — another model's output on a set's own flights —
+**A set** — a read-back set (`KIND_READBACK`): ``<airport>/training/<set-id>/sample.json`` (`SAMPLE_SCHEMA`), val
+flights; a window set (`KIND_TRAFFIC`, `window_training_export`): ``<airport>/training/<set-id>/traffic.json``
+(`TRAFFIC_SCHEMA`), multi-aircraft windows of `TRAFFIC_SPLIT` — each listed in ``<airport>/training/index.json``
+(`INDEX_SCHEMA`). **An overlay** — another model's output on a set's own flights —
 ``<airport>/training/<overlay-id>/<file>``, listed in ``<airport>/training/overlays.json`` (`OVERLAYS_SCHEMA`) with the
 set it is drawn over, and bound to that set by what it shares with it (`BaseSet.block`, `require_set_datum`) — never by
 the set file's bytes. A set or an overlay is never overwritten, and a manifest is
@@ -46,6 +48,12 @@ SAMPLE_SCHEMA = "aeroviz-training-sample-v7"
 KIND_READBACK = "vocabulary-readback"
 INDEX_FILE = "index.json"
 SAMPLE_FILE = "sample.json"
+#: MIRROR of `aeroviz-4d/src/data/trainingTraffic.ts` (`TRAINING_TRAFFIC_SCHEMA`, `TRAINING_TRAFFIC_SET_KIND`): a window
+#: set (the Training module §2.9) — multi-aircraft windows, the flights the prior commands in them as a read-back set's
+#: flights, every other aircraft of a window as the judge replays it, and the windows as recorded.
+TRAFFIC_SCHEMA = "aeroviz-training-traffic-v1"
+KIND_TRAFFIC = "traffic-windows"
+TRAFFIC_FILE = "traffic.json"
 
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_OVERLAYS_SCHEMA`, `TRAINING_OVERLAY_KINDS`): the
 #: manifest of what is drawn OVER this airport's sets — another model's output on a set's own flights, each in a
@@ -61,10 +69,16 @@ KIND_EXECUTOR = "executor-replay"
 KIND_PRIOR = "prior-prediction"
 KIND_GENERATION = "prior-generation"
 KIND_AUGMENTED_GENERATION = "prior-generation-augmented"
-OVERLAY_KINDS = (KIND_EXECUTOR, KIND_PRIOR, KIND_GENERATION, KIND_AUGMENTED_GENERATION)
+KIND_WINDOW_GENERATION = "window-generation"
+OVERLAY_KINDS = (KIND_EXECUTOR, KIND_PRIOR, KIND_GENERATION, KIND_AUGMENTED_GENERATION, KIND_WINDOW_GENERATION)
 
-#: Only validation flights are drawn: train is what a prior will be fitted on, and test stays shut.
+#: Only validation flights are drawn into a read-back set: train is what a prior will be fitted on, and test stays shut.
 SPLIT = "val"
+#: A window set's windows are the formal window readouts' (`traffic_window_generation`): the prior's internal selection
+#: split, so val stays unread until the multi-aircraft stage is settled (multi-aircraft design §1.3; user 2026-09-30).
+TRAFFIC_SPLIT = "select"
+#: Each set kind's file schema and split.
+SET_KINDS = {KIND_READBACK: (SAMPLE_SCHEMA, SPLIT), KIND_TRAFFIC: (TRAFFIC_SCHEMA, TRAFFIC_SPLIT)}
 
 #: How far apart two readings of one flight's HAE − MSL may be, each read off a pair of heights written to 0.01 m
 #: (`rounded(..., 2)`): 0.01 m a reading. MIRROR of `TRAINING_DATUM_TOLERANCE_M` in the frontend's overlay reader.
@@ -148,19 +162,20 @@ def listed_set(payload: dict[str, Any], path: Path, airport: str, set_id: str) -
     return listed[0]
 
 
-def check_readback(entry: dict[str, Any], sample: dict[str, Any], file: Path, airport: str) -> None:
-    """A set the Training exporters write and the frontend reads: a read-back of this reading rule, its sample under
-    `SAMPLE_SCHEMA`, the set and airport it is listed as, drawn from `SPLIT`. Anything else is refused by name — an
-    overlay drawn over (or a flight flown from) a set the frontend refuses would never be seen."""
-    if (entry["kind"], entry["readingRule"]) != (KIND_READBACK, READING_RULE):
+def check_set(entry: dict[str, Any], payload: dict[str, Any], file: Path, airport: str, kind: str) -> None:
+    """A set the Training exporters write and the frontend reads, of ``kind`` (`SET_KINDS`): of this reading rule, its
+    file under the kind's schema, the set and airport it is listed as, drawn from the kind's split. Anything else is
+    refused by name — an overlay drawn over (or a flight flown from) a set the frontend refuses would never be seen."""
+    if (entry["kind"], entry["readingRule"]) != (kind, READING_RULE):
         raise ValueError(f"set {entry['id']} at {airport} is a {entry['kind']} set of {entry['readingRule']}, not a "
-                         f"{KIND_READBACK} set of {READING_RULE}")
-    if sample["schema"] != SAMPLE_SCHEMA:
-        raise ValueError(f"{file} is a {sample['schema']} file, not {SAMPLE_SCHEMA}: re-export the set first")
-    found = (sample["setId"], sample["airport"], sample["cohort"]["split"], sample["vocabulary"]["readingRule"])
-    if found != (entry["id"], airport, SPLIT, READING_RULE):
+                         f"{kind} set of {READING_RULE}")
+    schema, split = SET_KINDS[kind]
+    if payload["schema"] != schema:
+        raise ValueError(f"{file} is a {payload['schema']} file, not {schema}: re-export the set first")
+    found = (payload["setId"], payload["airport"], payload["cohort"]["split"], payload["vocabulary"]["readingRule"])
+    if found != (entry["id"], airport, split, READING_RULE):
         raise ValueError(f"{file} holds set {found[0]} at {found[1]}, split {found[2]}, read under {found[3]}; expected "
-                         f"{entry['id']} at {airport}, split {SPLIT}, {READING_RULE}")
+                         f"{entry['id']} at {airport}, split {split}, {READING_RULE}")
 
 
 def read_index(training: Path, airport: str, set_id: str) -> list[dict[str, Any]]:
@@ -192,7 +207,8 @@ def airport_frame(geometry: AirportGeometry) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class BaseSet:
-    """An exported set an overlay is drawn over: its index entry and its sample."""
+    """An exported set an overlay is drawn over: its index entry and its file (a read-back set's sample, a window set's
+    windows — both carry the vocabulary, the candidates and the frame)."""
 
     airport: str
     entry: dict[str, Any]
@@ -208,14 +224,15 @@ class BaseSet:
                 "candidatesSha256": self.sample["candidatesSha256"], "airportFrame": self.sample["airportFrame"]}
 
 
-def open_base_set(training: Path, airport: str, set_id: str, spec: VocabularySpec, geometry: AirportGeometry) -> BaseSet:
-    """Set ``set_id`` for an overlay of a model of ``spec`` flown on ``geometry`` (the overlay's own artefact's airport):
-    `check_readback`'s set, of that spec, whose candidates and frame are that geometry's."""
+def open_base_set(training: Path, airport: str, set_id: str, kind: str, spec: VocabularySpec,
+                  geometry: AirportGeometry) -> BaseSet:
+    """Set ``set_id`` of ``kind`` for an overlay of a model of ``spec`` flown on ``geometry`` (the overlay's own
+    artefact's airport): `check_set`'s set, of that spec, whose candidates and frame are that geometry's."""
     path = training / INDEX_FILE
     entry = listed_set(json.loads(path.read_text(encoding="utf-8")), path, airport, set_id)
     file = training / entry["file"]
     sample = json.loads(file.read_text(encoding="utf-8"))
-    check_readback(entry, sample, file, airport)
+    check_set(entry, sample, file, airport, kind)
     if (entry["vocabularySha256"], sample["vocabulary"]["specSha256"]) != (spec.sha256, spec.sha256):
         raise ValueError(f"set {set_id} at {airport} is of spec {entry['vocabularySha256'][:12]} (its sample "
                          f"{sample['vocabulary']['specSha256'][:12]}), not {spec.sha256[:12]}")

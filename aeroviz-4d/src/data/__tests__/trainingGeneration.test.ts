@@ -17,6 +17,7 @@ import {
   parseTrainingGenerationOverlay,
   parseTrainingOverlays,
   trainingModelGroups,
+  TRAINING_MODEL_NAMES,
   trainingModelLabel,
   trainingOverlaysOf,
   trainingRunName,
@@ -102,7 +103,7 @@ describe("a generation overlay", () => {
       "augmented r2 (v3_stage2/aug_s1, post-trained from landing r1 by ts-prior-augmented-reward-v5)");
     expect(trainingModelText(read().model)).toBe("base (v3_step1/full_s1, trained on data alone)");
     // every name its own colour
-    expect(new Set(Object.values(TRAINING_MODEL_COLOR)).size).toBe(3);
+    expect(new Set(Object.values(TRAINING_MODEL_COLOR)).size).toBe(TRAINING_MODEL_NAMES.length);
   });
 
   it("reads a sentence the glidepath lower edge stopped only from a model that spoke under the procedure's altitudes", () => {

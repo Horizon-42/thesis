@@ -453,8 +453,9 @@ export default function TrainingSentenceBar() {
     `${verdicts.instructionsAfterStep0} words after step 0 · ${verdicts.silentSteps} of ${flight.rows - 1} later steps silent`;
   // the Fly button: the selected word's segment of the sentence read, and what the live executor is doing with it
   const focusRun = focusColumn === null ? null : sentenceWordAt(sentence, focusColumn, cursorRow);
-  /** A model's word said after its flight ended has no flight to fly. */
-  const flyable = (row: number) => generated === null || timeOf(row) < generated.endS;
+  /** A model's word said after its flight ended has no flight to fly; a window's aircraft is not flown live at all (the
+   *  backend opens read-back sets only). */
+  const flyable = (row: number) => selection.liveExecutor && (generated === null || timeOf(row) < generated.endS);
   const pickedHere = focusRun !== null && trainingPick !== null && sameSource(trainingPick.source, readSource)
     && trainingPick.column === focusColumn && trainingPick.row === focusRun.row;
   const flyingHere = pickedHere && autopilot?.status === "flying";
@@ -589,7 +590,7 @@ export default function TrainingSentenceBar() {
         {autopilot ? <TrainingAutopilotStatus view={autopilot} selection={selection}
           named={focusRun === null || autopilot.request.column !== focusColumn || autopilot.request.row !== focusRun.row} /> : null}
         <span className="training-sentence-cursor-readout">t = {formatSeconds(cursorS)} s · step {cursorRow}</span>
-        <button type="button" className="training-autopilot-fly" disabled={focusRun === null || flyingHere || !flyable(focusRun.row)}
+        {selection.liveExecutor ? <button type="button" className="training-autopilot-fly" disabled={focusRun === null || flyingHere || !flyable(focusRun.row)}
           title={focusRun === null
             ? "Select a word (click its band): the executor then flies that word's segment from where it was said."
             : !flyable(focusRun.row)
@@ -601,7 +602,7 @@ export default function TrainingSentenceBar() {
                   `${focusColumn} word's segment, on the backend — the sample's own flight — and judges the word.`}
           onClick={() => setTrainingPick(nextPick(trainingPick, readSource, focusColumn!, focusRun!.row))}>
           {flyLabel}
-        </button>
+        </button> : null}
         {generated === null ? (
           <button type="button" className="training-sentence-readback-button" aria-pressed={openWindow === "readback"}
             title="The truth sentence against its track, envelope by envelope" onClick={() => toggle("readback")}>

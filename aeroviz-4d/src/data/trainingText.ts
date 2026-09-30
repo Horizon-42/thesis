@@ -14,8 +14,8 @@ import {
   type TrainingCrossing,
   type TrainingExecutorFlown,
   type TrainingExecutorCheck,
-  type TrainingFreeOutcome,
   type TrainingGenerationModel,
+  type TrainingSentenceOutcome,
 } from "./trainingOverlays";
 import type { TrainingAutopilotStatus } from "./trainingAutopilot";
 import {
@@ -28,8 +28,9 @@ export const TRAINING_COLUMN_LABEL: Record<TrainingColumn, string> = {
   runway: "Runway", approach: "Approach", heading: "Heading", altitude: "Altitude", angle: "Descent", speed: "Speed",
 };
 
-/** How the executor's flight ended (the judge's outcomes, and a model's sentence stopped below the glidepath), in words. */
-export const TRAINING_OUTCOME_TEXT: Record<TrainingFreeOutcome, string> = {
+/** How the executor's flight ended (the judge's outcomes, a model's sentence stopped below the glidepath, and in a window
+ *  one the judge ended for a loss of separation), in words. */
+export const TRAINING_OUTCOME_TEXT: Record<TrainingSentenceOutcome, string> = {
   landed: "landed",
   crossed_too_high: "crossed the threshold on the runway's centreline, too high to land",
   crossed_off_runway: "crossed the threshold wide of the runway",
@@ -39,10 +40,11 @@ export const TRAINING_OUTCOME_TEXT: Record<TrainingFreeOutcome, string> = {
   timeout: "did not get there within its time limit",
   dynamics_failure: "left the dynamics (a non-finite state, no airspeed or a stall)",
   below_glidepath: "sank below the glidepath's lower edge (the procedure's altitudes stop the sentence there)",
+  lost_separation: "lost separation from another aircraft it answers for (the window's judge ends it there; it flies on, silent)",
 };
 
 /** The same, as a short tag: the flight list, the 3D label. */
-export const TRAINING_OUTCOME_TAG: Record<TrainingFreeOutcome, string> = {
+export const TRAINING_OUTCOME_TAG: Record<TrainingSentenceOutcome, string> = {
   landed: "landed",
   crossed_too_high: "too high",
   crossed_off_runway: "off the runway",
@@ -52,6 +54,7 @@ export const TRAINING_OUTCOME_TAG: Record<TrainingFreeOutcome, string> = {
   timeout: "timed out",
   dynamics_failure: "dynamics failure",
   below_glidepath: "below glidepath",
+  lost_separation: "lost separation",
 };
 
 /** What went wrong in the executor's replay of a flight (`replayVerdict`), in the fewest words — "2 words out", "timed

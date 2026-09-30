@@ -21,6 +21,7 @@ import {
   TRAINING_SAMPLE_SCHEMA,
   TRAINING_SPEC_SHA256,
   type TrainingSample,
+  type TrainingSetEntry,
 } from "../trainingSample";
 import { MOCK_ROWS, SET_ID, STRAIGHT_KEY, VECTORED_KEY, WORD, mockIndex, mockSample } from "./trainingSample.fixture";
 
@@ -69,7 +70,7 @@ describe("parseTrainingSample", () => {
     for (const schema of ["aeroviz-training-sample-v2", "aeroviz-training-sample-v3", "aeroviz-training-sample-v4",
                           "aeroviz-training-sample-v5", "aeroviz-training-sample-v6"]) {
       expect(refusal((raw) => { raw.schema = schema; })).toContain(
-        `schema is "${schema}", expected "${TRAINING_SAMPLE_SCHEMA}" — a sample of another format is not read`);
+        `schema is "${schema}", expected "${TRAINING_SAMPLE_SCHEMA}" — a file of another format is not read`);
     }
   });
 
@@ -308,8 +309,8 @@ describe("the index", () => {
     expect(trainingSetRefusal(prior)).toMatch(/read under segment-v13/);
     expect(trainingSetRefusal({ ...current, vocabularySha256: "9".repeat(64) }))
       .toContain(`spec 999999999999 is not the ${TRAINING_READING_RULE} spec`);
-    expect(trainingSetRefusal({ ...current, kind: "prior-generated" }))
-      .toContain("this reader opens only vocabulary-readback sets");
+    expect(trainingSetRefusal({ ...current, kind: "prior-generated" } as TrainingSetEntry))
+      .toContain("this reader opens only vocabulary-readback and traffic-windows sets");
   });
 
   it("greys out one malformed entry without emptying the manifest", () => {
