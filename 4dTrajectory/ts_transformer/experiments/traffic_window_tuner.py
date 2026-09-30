@@ -215,7 +215,7 @@ def window_parts(split: WindowSplit, indices: Sequence[int], step_s: float, budg
     return out
 
 
-def window_batches(split: WindowSplit, tokens: int, rng: np.random.Generator | None) -> list[list[int]]:
+def update_batches(split: WindowSplit, tokens: int, rng: np.random.Generator | None) -> list[list[int]]:
     """Window samples in update batches as `data.batches` groups sentences: by their trained aircraft's longest rows,
     each batch at most ``tokens`` padded trained steps (a sample holding more is a batch of its own); shuffled when
     ``rng`` is given."""
@@ -286,7 +286,7 @@ class WindowRewardTuner(SceneRewardTuner):
         self.model.eval()
         means = []
         with torch.no_grad():
-            for indices in window_batches(split, self.config.tokens_per_batch // 2, None):
+            for indices in update_batches(split, self.config.tokens_per_batch // 2, None):
                 total = 0.0
                 for part in self._window_parts(split, indices):
                     batch, logits, _, reference, steps, _ = self._window_scored(split, part, None)
@@ -296,11 +296,11 @@ class WindowRewardTuner(SceneRewardTuner):
         return float(np.mean(means))
 
     def window_pass(self, split: WindowSplit, data: Sequence[Built], *, slots: int, passes: int = 1) -> dict[str, Any]:
-        """`SceneRewardTuner.one_pass` over window samples (`sweeps`): the update batches `window_batches`', each
+        """`SceneRewardTuner.one_pass` over window samples (`sweeps`): the update batches `update_batches`', each
         sentence its trained aircraft's."""
         if not split.windows:
             raise ValueError("no window sample to train on: no aircraft's sentences differ in reward")
-        return self.sweeps(lambda: iter(window_batches(split, self.config.tokens_per_batch // 2, self.rng)),
+        return self.sweeps(lambda: iter(update_batches(split, self.config.tokens_per_batch // 2, self.rng)),
                            lambda indices: self._window_parts(split, indices),
                            lambda part, start: self._window_scored(split, part, start),
                            lambda indices: sum(len(split.trained[s]) for s in indices), data, slots=slots,
