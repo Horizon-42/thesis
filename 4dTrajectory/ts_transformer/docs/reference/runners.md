@@ -935,3 +935,13 @@ over the samples each flight's best — whether any sample passes, the smallest 
 pass rate is the start's, but ADE / FDE would be a distance to a moved track — `records.json` leaves them out and each record
 directory's summary says so. **Size**: ~0.1–0.2 MB a record, ~10,000 records (2,000 flights × 4 samples + the labelled
 words) a real-start readout — about 1.5–2 GB each; the one-chunk smoke run of `val_base_masked_400x4` took 72 s.
+
+**Publishing** (2026-09-30): the root publisher's `--generation-records DIR --generation-campaign CAMPAIGN [--kind K]`
+files each kind × airport as one Experiments category (`experiment_generation_<readout campaign>_<readout>_<kind>_<split>`,
+model `prior` or `executor`, horizon `sentence`), the runner's own evaluation report and `records.json` numbers as its
+rows, under CAMPAIGN's registry entry with the readout's name as the run (blocked without one); a partial run, another
+count of records than `records.json` says, or a category that exists is refused; `variantLabel` names the kind. **An
+augmented run's category** carries no ADE / FDE (the builder's `accuracy` is dropped) and says what its white track is:
+the viewer draws the observed flight by its key, i.e. the SOURCE flight where it flew, not the moved track the records
+hold (drawing that would need a builder + viewer change). The v11 records are registered as
+`generation_records_v11_20260930`.

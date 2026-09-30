@@ -1533,6 +1533,15 @@
       "runs": {
         "v2_20260924": "正式执行器规格 2674ab8c71a9（在 train 上量出，代码 1c63eb3e；说词延迟：航向 1 s、垂直 0 s、速度 0 s；按航迹说词），飞 val 全部可飞的 10,366 架：用自己机型动力学的 7,773 架进门——落地 98.6 %、evaluation 与观测配对 96.7 %、词在包络里 94.2 %；用 A320 代替动力学的 2,593 架只报。"
       }
+    },
+    "generation_records_v11_20260930": {
+      "title": "两层模型 · 词模型自己说的句子由执行器飞出的航迹（v11 val 重读）",
+      "intent": "词模型自己说的句子飞出来离真实航迹有多远、按 evaluation 能不能过？把 2026-09-27 v11 val 重读里存下的句子原样交给执行器 v11 重飞（每句必须逐行复现原读数的结局），写成 evaluation 记录：ADE / FDE 从第 8 行（模型第一个预测步）起对观测航迹算，通过率按全部句子算（没有记录的句子不算通过）；evaluation 按观测航班的跑道判定，落在另一条跑道上的句子另计。每个机场、每种句子一个类别：labelled = 同一行起飞的真实词（参照），sample_k = 模型对每架航班说的第 k 句。",
+      "design": "ts_transformer runner R35（experiments/prior_generation_records.py）；读数 4dTrajectory/outputs/POOLED/prior/v3_reread_v11_20260927/records_<读数>/records.json",
+      "runs": {
+        "val_augmented_400x4": "augmented 模型（post-training 第 2 阶段第 7 轮）在自己的 procedure masks 下、真实起点：val 每机场 400 架 × 4 句，加同一行起的真实词。",
+        "val_augmented_aug_400x4": "同一个 augmented 模型从增广起点说（旋转、抬高、加速，种子 1337）：没有真实的后续航迹，所以只看 evaluation 通过率，不给 ADE / FDE；前端画的白色航迹是原航班在真实位置飞的，不是模型起飞的那个移动后的起点。"
+      }
     }
   }
 }

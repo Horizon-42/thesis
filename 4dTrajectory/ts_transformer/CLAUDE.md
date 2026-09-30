@@ -418,7 +418,8 @@ paired, not repeated tries) beside M3's labelled and recorded readings (R33).
 `prior_generation_records` flies a free-generation readout's STORED sentences again (the readout's draw and chunks; every
 sentence must reproduce its readout row) and writes them as evaluation records per sample — ADE / FDE from row `N_LOOK`
 against the observed flight, the evaluation's pass rate over every sentence, best of the samples; an augmented start has no
-truth, so its readout carries the pass rate only (R35).
+truth, so its readout carries the pass rate only; the root publisher's `--generation-records` files each kind × airport as
+one Experiments category (R35).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 

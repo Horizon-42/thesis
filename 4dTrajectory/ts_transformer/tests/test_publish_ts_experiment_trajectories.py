@@ -1423,7 +1423,8 @@ def _builder(calls: list[list[str]]):
                            "constrained": False, "datasetSplit": "val", "resultSource": "experiment",
                            "experiment": {"id": value["--experiment-id"], "group": value["--experiment-group"],
                                           "checkpoint": value["--experiment-checkpoint"], "model": "executor",
-                                          "predictionOutput": "control", "horizonMode": "sentence", "seed": None}})
+                                          "predictionOutput": "control", "horizonMode": "sentence", "seed": None},
+                           "accuracy": {"adeM": {"mean": 700.0, "p95": 1500.0}}})
         _write_json(manifest, {"categories": categories})
     return run
 
@@ -1495,3 +1496,141 @@ def test_the_executor_mode_refuses_the_checkpoint_flags(tmp_path, intent_registr
     with pytest.raises(SystemExit):
         publisher.main(["--executor-replay", str(replay)])
     assert "needs --executor-campaign" in capsys.readouterr().err
+
+
+# ── a free-generation readout's records ─────────────────────────────────────────
+
+def _generation_records(tmp_path: Path, intent_registry: Path, *, partial=None, augment_seed=None) -> Path:
+    """A `prior_generation_records` directory as the runner writes it: KXXX's labelled and sample_0 records (two
+    sentences each, one of sample_0's with no record); the registry gains the campaign it is published under."""
+    readout = str(tmp_path / "wt" / "4dTrajectory" / "outputs" / "POOLED" / "prior" / "reread" / "val_base_400x4")
+    run = tmp_path / "outputs" / "prior" / "reread" / "records_val_base_400x4"
+    block = {"sentences": 2, "recorded": 2, "pass_rate": 0.5, "ending_on_observed_runway": {"sentences": 2},
+             "ade_m": {"median": 480.0}, "fde_m": {"median": 60.0}}
+    sentences = []
+    for kind, predictor in (("labelled", "executor"), ("sample_0", "prior")):
+        recorded = (True, kind == "labelled")
+        sentences += [{"kind": kind, "airport": "KXXX", "recorded": flag} for flag in recorded]
+        records = run / "records" / kind / "KXXX"
+        _write_json(records / "summary.json", {
+            "config": {"model": predictor, "horizon_mode": "sentence", "prediction_output": "control"},
+            "executor_spec_sha256": _EXECUTOR_SHA, "split": "val", "free_generation": {"readout": readout},
+            "accuracy": {}, "results": [{"arr_airport": "KXXX"}] * sum(recorded)})
+        _write_json(records / "evaluation_report.json", {"schema_version": "v9", "trajectories": []})
+    _write_json(run / "records.json", {
+        "schema": publisher.GENERATION_RECORDS_SCHEMA, "partial": partial,
+        "readout": {"directory": readout, "split": "val", "samples": 4, "procedure_masks": False,
+                    "augment_seed": augment_seed,
+                    "prior": {"directory": str(tmp_path / "wt" / "4dTrajectory" / "outputs" / "POOLED" / "prior" / "base")}},
+        "executor": {"directory": "/x/4dTrajectory/outputs/POOLED/executor/v11", "sha256": _EXECUTOR_SHA},
+        "verdict": "the observed flight's runway", "reference": "the observed flight",
+        "readouts": {kind: {"KXXX": {**block, "recorded": 2 if kind == "labelled" else 1}}
+                     for kind in ("labelled", "sample_0")},
+        "sentences": sentences})
+    registry = json.loads(intent_registry.read_text())
+    registry["campaigns"]["generation_campaign"] = {
+        "title": "The prior's own sentences", "intent": "How far and how well do they fly?",
+        "runs": {"val_base_400x4": "base on val, 4 sentences a flight."}}
+    _write_json(intent_registry, registry)
+    return run
+
+
+def test_the_generation_names_mirror_the_runner():
+    from ts_transformer.experiments.prior_generation_records import HORIZON, PREDICTORS, RECORDS_SCHEMA
+
+    assert publisher.GENERATION_RECORDS_SCHEMA == RECORDS_SCHEMA
+    assert (publisher.GENERATION_PREDICTORS, publisher.GENERATION_HORIZON) == (PREDICTORS, HORIZON)
+
+
+def test_generation_records_publish_one_category_per_kind_and_airport(monkeypatch, tmp_path, intent_registry):
+    run = _generation_records(tmp_path, intent_registry)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(publisher.subprocess, "run", _builder(calls))
+    frontend, published = tmp_path / "frontend", tmp_path / "published"
+    roots = ["--output-root", str(published), "--frontend-airports-root", str(frontend)]
+    code = publisher.main(["--generation-records", str(run), "--generation-campaign", "generation_campaign", *roots])
+    assert code == 0 and len(calls) == 2
+    # the runner's own grading, never re-run; the producer named by its place under the outputs tree
+    assert calls[1][calls[1].index("--evaluation-report") + 1] == str(run / "records" / "sample_0" / "KXXX" / "evaluation_report.json")
+    assert calls[1][calls[1].index("--experiment-checkpoint") + 1] == "4dTrajectory/outputs/POOLED/prior/base"
+    categories = {c["key"]: c for c in json.loads((frontend / "KXXX" / "comparison" / "categories.json").read_text())["categories"]}
+    assert set(categories) == {"experiment_generation_reread_val_base_400x4_labelled_val",
+                               "experiment_generation_reread_val_base_400x4_sample_0_val"}
+    experiment = categories["experiment_generation_reread_val_base_400x4_sample_0_val"]["experiment"]
+    assert (experiment["id"], experiment["runName"]) == ("generation/reread/val_base_400x4/sample_0", "val_base_400x4")
+    assert (experiment["model"], experiment["horizonMode"]) == ("prior", "sentence")
+    assert experiment["variantLabel"] == "sample 0"          # the picker tells the kinds apart by it
+    assert "accuracy" in categories["experiment_generation_reread_val_base_400x4_sample_0_val"]
+    assert experiment["intent"]["run"] == "base on val, 4 sentences a flight."
+    rows = {(row["section"], row["name"]): row["value"] for row in experiment["parameters"]}
+    assert rows[("Sentences", "pass rate (every sentence)")] == "0.500" and rows[("Sentences", "ADE median (m)")] == "480"
+    manifest = json.loads((published / "generation" / "reread" / "val_base_400x4" / "sample_0" / "KXXX" / "val"
+                           / "publication.json").read_text())
+    assert manifest["schemaVersion"] == publisher.GENERATION_PUBLICATION_SCHEMA and manifest["kind"] == "sample_0"
+    assert publisher.refresh_labels_from_manifests(published, frontend) == (0, 0)
+    # never overwritten
+    assert publisher.main(["--generation-records", str(run), "--generation-campaign", "generation_campaign", *roots]) == 1
+    assert len(calls) == 2
+
+
+def test_an_augmented_run_names_no_error_and_a_kind_is_chosen(monkeypatch, tmp_path, intent_registry):
+    run = _generation_records(tmp_path, intent_registry, augment_seed=1337)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(publisher.subprocess, "run", _builder(calls))
+    frontend = tmp_path / "frontend"
+    assert publisher.main(["--generation-records", str(run), "--generation-campaign", "generation_campaign",
+                           "--kind", "sample_0", "--output-root", str(tmp_path / "published"),
+                           "--frontend-airports-root", str(frontend)]) == 0
+    (category,) = json.loads((frontend / "KXXX" / "comparison" / "categories.json").read_text())["categories"]
+    rows = {(row["section"], row["name"]): row["value"] for row in category["experiment"]["parameters"]}
+    assert ("Sentences", "ADE median (m)") not in rows and "from augmented starts" in category["label"]
+    # the builder's ADE / FDE (to a moved track) are dropped; the viewer's white track is named for what it is
+    assert "accuracy" not in category
+    assert rows[("Sentences", "reference")] == publisher.GENERATION_AUGMENTED_VIEW
+
+
+def test_generation_records_of_another_count_partial_or_unregistered_are_refused(
+    monkeypatch, tmp_path, intent_registry, capsys,
+):
+    run = _generation_records(tmp_path, intent_registry)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(publisher.subprocess, "run", _builder(calls))
+    roots = ["--output-root", str(tmp_path / "published"), "--frontend-airports-root", str(tmp_path / "frontend")]
+    assert publisher.main(["--generation-records", str(run), "--generation-campaign", "unregistered", *roots]) == 1
+    document = json.loads((run / "records.json").read_text())
+    document["sentences"][3]["recorded"] = True          # sample_0: two recorded in records.json, one record
+    _write_json(run / "records.json", document)
+    assert publisher.main(["--generation-records", str(run), "--generation-campaign", "generation_campaign",
+                           "--kind", "sample_0", *roots]) == 1
+    assert calls == []
+    partial = _generation_records(tmp_path / "p", intent_registry, partial={"chunks": 1, "of": 63})
+    with pytest.raises(SystemExit):
+        publisher.main(["--generation-records", str(partial), "--generation-campaign", "generation_campaign", *roots])
+    assert "a partial run is not published" in capsys.readouterr().err
+
+
+def test_the_generation_mode_refuses_the_checkpoint_flags_and_the_other_modes(tmp_path, intent_registry, capsys):
+    run = _generation_records(tmp_path, intent_registry)
+    base = ["--generation-records", str(run), "--generation-campaign", "generation_campaign"]
+    for extra, message in ((["--checkpoint", "x"], "not checkpoints: drop ['--checkpoint']"),
+                           (["--executor-replay", str(run)], "two publications"),
+                           (["--kind", "sample_9"], "holds no ['sample_9']")):
+        with pytest.raises(SystemExit):
+            publisher.main([*base, *extra])
+        assert message in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        publisher.main(["--generation-records", str(run)])
+    assert "needs --generation-campaign" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        publisher.main(["--kind", "sample_0"])
+    assert "belong to --generation-records" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        publisher.main(["--executor-campaign", "executor_campaign"])
+    assert "files an --executor-replay" in capsys.readouterr().err
+    # a producer outside an outputs tree is refused by name, before any plan
+    document = json.loads((run / "records.json").read_text())
+    document["executor"]["directory"] = "/elsewhere/executor/v11"
+    _write_json(run / "records.json", document)
+    with pytest.raises(SystemExit):
+        publisher.main(base)
+    assert "is not under a 4dTrajectory/outputs/ tree" in capsys.readouterr().err
