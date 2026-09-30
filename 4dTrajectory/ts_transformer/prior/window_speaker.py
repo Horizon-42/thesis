@@ -195,14 +195,15 @@ class WindowSpeaker:
         self.since[where, rows] = torch.as_tensor(np.log1p(row[:, None] - self.said_row[index]) / SINCE_SCALE,
                                                   dtype=torch.float32, device=self.features.device)
 
-    def set_context(self, i: int, context: Landings) -> None:
+    def set_context(self, i: int, context: Landings) -> int:
         """Aircraft ``i``'s landing context from here on (its own landing already out, `data.own_context`): its rows the
         model has not encoded yet read it again — a later aircraft's observed rows too, computed when the speaker was
-        built."""
+        built. Returns the first of its rows that reads it (a trainer rebuilds its rows so)."""
         self.contexts[i] = context
         first = max(0, self.steps_encoded - int(self.start[i]))
         if first < self.rows[i]:
             self._inputs(np.array([i]), first)
+        return first
 
     @torch.no_grad()
     def speak(self, rank: np.ndarray, runway_locked: np.ndarray) -> np.ndarray:
@@ -242,43 +243,12 @@ class WindowSpeaker:
         return h[scene, slot, -1][:, None, None], tokens[scene, slot, -1][:, None, None], valid[scene]
 
     def _encode(self, first: int, last: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Batch steps ``first … last − 1`` encoded (module docstring: every scene's commanded aircraft at their rows,
-        then its replayed ones at theirs, as `scene_speaker.scene_inputs` places them): ``(h, tokens, valid)`` of every
-        aircraft on them."""
+        """Batch steps ``first … last − 1`` encoded (`window_inputs`): ``(h, tokens, valid)`` of every aircraft on
+        them."""
         scenes, steps, device = len(self.others), last - first, self.features.device
-        shape = (scenes, self.aircraft, steps)
-        inputs = {"features": torch.zeros(shape + (self.features.shape[-1],), device=device),
-                  "relative": torch.zeros(shape + tuple(self.relative.shape[2:]), device=device),
-                  "in_force": torch.zeros(shape + (6,), dtype=torch.long, device=device),
-                  "since": torch.zeros(shape + (6,), device=device),
-                  "static": torch.zeros((scenes, self.aircraft, len(STATIC_FEATURES)), device=device),
-                  "present": torch.zeros(shape, dtype=torch.bool, device=device),
-                  "rows": torch.zeros(shape, dtype=torch.long, device=device)}
-        # the commanded aircraft, at their rows
-        rows = np.arange(first, last)[None, :] - self.start[:, None]
-        i, t = np.nonzero((rows >= 0) & (rows < self.rows[:, None]))
-        if len(i):
-            a, r = torch.as_tensor(i, device=device), torch.as_tensor(rows[i, t], device=device)
-            w, s, t = (torch.as_tensor(v, device=device) for v in (self.scene[i], self.slot[i], t))
-            for name in ("features", "relative", "in_force", "since"):
-                inputs[name][w, s, t] = getattr(self, name)[a, r]
-            inputs["present"][w, s, t] = True
-            inputs["rows"][w, s, t] = r
-        # the replayed ones, at theirs (one in the air before the batch's first step enters there at a later row)
-        for b, nodes in enumerate(self.others):
-            for k, node in enumerate(nodes, start=self.commanded[b]):
-                low, high = max(first, node.first_step), min(last, node.first_step + node.rows)
-                if low >= high:
-                    continue
-                span, own = slice(low - first, high - first), slice(low - node.first_step, high - node.first_step)
-                inputs["features"][b, k, span] = torch.as_tensor(node.features[own], device=device)
-                inputs["relative"][b, k, span, : node.relative.shape[1]] = torch.as_tensor(node.relative[own],
-                                                                                          device=device)
-                inputs["in_force"][b, k, span] = torch.as_tensor(node.in_force[own], device=device)
-                inputs["since"][b, k, span] = torch.as_tensor(node.since[own], device=device)
-                inputs["static"][b, k] = torch.as_tensor(node.static, device=device)
-                inputs["present"][b, k, span] = True
-                inputs["rows"][b, k, span] = torch.arange(low - node.first_step, high - node.first_step, device=device)
+        inputs = window_inputs({"features": self.features, "relative": self.relative, "in_force": self.in_force,
+                                "since": self.since}, self.rows, self.start, self.scene, self.slot, self.others,
+                               self.commanded, self.aircraft, first, last)
         edges = torch.as_tensor(self.edges_of(first, last), dtype=inputs["features"].dtype, device=device)
         expected = (scenes, steps, self.aircraft, self.aircraft, len(self.model.traffic_features))
         if tuple(edges.shape) != expected:
@@ -338,3 +308,56 @@ class WindowSpeaker:
             out &= self.masks_of(column, chosen, now)
         out[~now] = True
         return out
+
+
+
+def window_inputs(own: Mapping[str, torch.Tensor], rows: np.ndarray, start: np.ndarray, scene: np.ndarray,
+                  slot: np.ndarray, others: Sequence[Sequence[Node]], commanded: Sequence[int], aircraft: int, first: int,
+                  last: int) -> dict[str, torch.Tensor]:
+    """Batch steps ``first … last − 1`` of window scenes as the speaker lays them out (module docstring) — the one layout,
+    for the speaker and for a trainer scoring a window's words: commanded aircraft ``i`` at ``(scene[i], slot[i])`` from
+    batch step ``start[i]`` over its first ``rows[i]`` rows (``own``: their rows' ``features`` ``[N, R, F]``,
+    ``relative`` ``[N, R, K, W]``, ``in_force`` and ``since`` ``[N, R, 6]`` and, to score them, ``targets``), each
+    scene's replayed aircraft (`Node`) after its ``commanded[b]`` commanded ones, at their own rows (one in the air
+    before step 0 enters there, its rows counted on). Returns ``features``, ``relative``, ``static``, ``in_force``,
+    ``since``, ``present``, ``rows`` (and ``targets`` when ``own`` has them; the replayed ones' are 0)
+    ``[S, A, steps, …]`` on ``own``'s device."""
+    base = own["features"]
+    scenes, steps, device = len(others), last - first, base.device
+    shape = (scenes, aircraft, steps)
+    inputs = {"features": torch.zeros(shape + (base.shape[-1],), device=device),
+              "relative": torch.zeros(shape + tuple(own["relative"].shape[2:]), device=device),
+              "in_force": torch.zeros(shape + (6,), dtype=torch.long, device=device),
+              "since": torch.zeros(shape + (6,), device=device),
+              "static": torch.zeros((scenes, aircraft, len(STATIC_FEATURES)), device=device),
+              "present": torch.zeros(shape, dtype=torch.bool, device=device),
+              "rows": torch.zeros(shape, dtype=torch.long, device=device)}
+    names = ["features", "relative", "in_force", "since"]
+    if "targets" in own:
+        inputs["targets"] = torch.zeros(shape + (6,), dtype=torch.long, device=device)
+        names.append("targets")
+    # the commanded aircraft, at their rows
+    at = np.arange(first, last)[None, :] - np.asarray(start)[:, None]
+    i, t = np.nonzero((at >= 0) & (at < np.asarray(rows)[:, None]))
+    if len(i):
+        a, r = torch.as_tensor(i, device=device), torch.as_tensor(at[i, t], device=device)
+        w, s, t = (torch.as_tensor(v, device=device) for v in (np.asarray(scene)[i], np.asarray(slot)[i], t))
+        for name in names:
+            inputs[name][w, s, t] = own[name][a, r].to(inputs[name].dtype)
+        inputs["present"][w, s, t] = True
+        inputs["rows"][w, s, t] = r
+    # the replayed ones, at theirs
+    for b, nodes in enumerate(others):
+        for k, node in enumerate(nodes, start=commanded[b]):
+            low, high = max(first, node.first_step), min(last, node.first_step + node.rows)
+            if low >= high:
+                continue
+            span, part = slice(low - first, high - first), slice(low - node.first_step, high - node.first_step)
+            inputs["features"][b, k, span] = torch.as_tensor(node.features[part], device=device)
+            inputs["relative"][b, k, span, : node.relative.shape[1]] = torch.as_tensor(node.relative[part], device=device)
+            inputs["in_force"][b, k, span] = torch.as_tensor(node.in_force[part], device=device)
+            inputs["since"][b, k, span] = torch.as_tensor(node.since[part], device=device)
+            inputs["static"][b, k] = torch.as_tensor(node.static, device=device)
+            inputs["present"][b, k, span] = True
+            inputs["rows"][b, k, span] = torch.arange(low - node.first_step, high - node.first_step, device=device)
+    return inputs

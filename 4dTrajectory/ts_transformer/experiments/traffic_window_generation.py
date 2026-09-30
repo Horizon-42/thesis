@@ -85,7 +85,7 @@ from ts_transformer.experiments.traffic_speaking import (
     HISTORY_S, MASK_COLUMNS, scene_airports, scene_landings, speaking_aircraft,
 )
 from ts_transformer.experiments.traffic_window import (
-    Commanded, Window, WindowLoop, _with_landing, draw_windows, window_landings, window_of,
+    Commanded, Window, WindowLoop, WindowRecord, _with_landing, draw_windows, window_landings, window_of,
 )
 from ts_transformer.experiments.traffic_window_augment import KINDS, REFUSALS, ROLES, augment_window, busiest
 from ts_transformer.inference.scene_edges import EDGE_FEATURES
@@ -321,16 +321,37 @@ def fly_windows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, w
     return Flown(loop, loop.results(), part, index, instances)
 
 
+@dataclasses.dataclass(frozen=True)
+class WindowSentences:
+    """What windows said (`window_sentences`): a row per commanded aircraft and sample (`model_rows`'), window sample
+    after window sample, and beside each what the speaker read of it (`traffic_window.WindowRecord`) and what the masks
+    let it say over its counted steps (per masked column, its bit-packed classes a step: `WindowSpeaker.allowed`)."""
+
+    rows: list[dict[str, Any]]
+    records: list[WindowRecord]
+    allowed: list[dict[int, np.ndarray]]
+
+
 def model_rows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, words: Words, params: Any,
                landings: Any, every_landing: Mapping[str, Landings], samples: int, *, generator: torch.Generator,
                temperature: float, procedure_masks: Any) -> list[dict[str, Any]]:
     """The windows at ``chunk`` spoken to ``samples`` times each (`fly_windows`), a row per commanded aircraft and
     sample; ``every_landing``: the airports' landings the reward's landing direction reads."""
+    return window_sentences(model, drawn, chunk, source, words, params, landings, every_landing, samples,
+                            generator=generator, temperature=temperature, procedure_masks=procedure_masks).rows
+
+
+def window_sentences(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, words: Words, params: Any,
+                     landings: Any, every_landing: Mapping[str, Landings], samples: int, *, generator: torch.Generator,
+                     temperature: float, procedure_masks: Any) -> WindowSentences:
+    """`model_rows` with what the speaker read of each aircraft and what its masks allowed (`WindowSentences`: what a
+    trainer scores the words with)."""
     step_s = words.spec.step_s
     flown = fly_windows(model, drawn, chunk, source, words, params, landings, samples, generator=generator,
                         temperature=temperature, procedure_masks=procedure_masks)
     loop, results, part, index, instances = flown.loop, flown.results, flown.part, flown.index, flown.instances
-    rows = []
+    records = loop.records()
+    rows, read, allowed = [], [], []
     for b, w in enumerate(instances):
         window = drawn.windows[w]
         here = flown.members(b)
@@ -352,8 +373,10 @@ def model_rows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, wo
                                           _loop_context(window, got.key, every_landing, loop_landings, step_s))
             row["reward"] = _reward(row, direction)
             rows.append(row)
+            read.append(records[i])
+            allowed.append({c: masks[i, : got.counted].copy() for c, masks in loop.speaker.allowed.items()})
     loop.close()
-    return rows
+    return WindowSentences(rows, read, allowed)
 
 
 def _loop_context(window: Window, key: str, landings: Mapping[str, Landings],
