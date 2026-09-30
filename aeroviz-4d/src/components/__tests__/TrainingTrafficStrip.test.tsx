@@ -24,6 +24,7 @@ vi.mock("../../context/AppContext", async () => {
 });
 
 import TrainingTrafficStrip from "../TrainingTrafficStrip";
+import { TRAINING_FAILURE_COLOR } from "../../utils/trainingWordColors";
 import { parseTrainingTrafficSet, parseTrainingWindowGenerationOverlay, trainingWindowSelection } from "../../data/trainingTraffic";
 import { parseTrainingOverlays } from "../../data/trainingOverlays";
 import { trainingSelectionOf } from "../../data/trainingSample";
@@ -81,7 +82,7 @@ describe("TrainingTrafficStrip", () => {
     render(<TrainingTrafficStrip />);
     expect(screen.getByText("base · sample 1")).toBeTruthy();
     expect(screen.getByRole("status").textContent).toBe("1 pair under the minimum");
-    expect(screen.getAllByText("✕")).toHaveLength(1);
+    expect(screen.getAllByText("✕").map((mark) => mark.getAttribute("fill"))).toEqual([TRAINING_FAILURE_COLOR]);
   });
 
   it("moves the window's time on a press on the plot, and puts an aircraft on screen on one on its callsign", () => {

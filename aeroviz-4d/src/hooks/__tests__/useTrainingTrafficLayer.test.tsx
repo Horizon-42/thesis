@@ -13,6 +13,7 @@ vi.mock("../../utils/fetchJson", () => ({
 }));
 
 import { AppProvider, useApp, useTrainingCursor } from "../../context/AppContext";
+import { TRAINING_ON_SCREEN_COLOR, TRAINING_TRACE_COLOR } from "../../utils/trainingWordColors";
 import useTrainingTrackLayer from "../useTrainingTrackLayer";
 import { parseTrainingOverlays } from "../../data/trainingOverlays";
 import { parseTrainingTrafficSet, parseTrainingWindowGenerationOverlay, trainingWindowSelection } from "../../data/trainingTraffic";
@@ -71,7 +72,12 @@ describe("useTrainingTrafficLayer", () => {
     const labelOf = (id: string) => at(id).label!.text!.getValue(now) as string;
     const widthOf = (id: string) => entities.getById(`training-traffic-track-${id}`)!.polyline!.width!.getValue(now) as number;
     expect(labelOf(VECTORED_ID).startsWith("▶ ")).toBe(true);
+    // the one on screen in the selection's yellow, whatever the reading's colour — here the record's near-white
+    const yellow = Cesium.Color.fromCssColorString(TRAINING_ON_SCREEN_COLOR);
+    expect(at(VECTORED_ID).point!.outlineColor!.getValue(now)).toEqual(yellow);
+    expect(at(VECTORED_ID).label!.backgroundColor!.getValue(now)).toEqual(yellow.withAlpha(0.9));
     expect(at(VECTORED_ID).label!.showBackground!.getValue(now)).toBe(true);
+    expect(at(STRAIGHT_ID).point!.color!.getValue(now)).toEqual(Cesium.Color.fromCssColorString(TRAINING_TRACE_COLOR));
     expect(labelOf(STRAIGHT_ID).startsWith("▶ ")).toBe(false);
     expect([STRAIGHT_ID, REPLAYED_ID, BACKGROUND_ID].map((id) => at(id).name))
       .toEqual([expect.stringMatching(/\(commanded\)$/), expect.stringMatching(/\(replayed\)$/), expect.stringMatching(/\(background\)$/)]);

@@ -50,7 +50,9 @@ import {
   AUTOPILOT_PLAYBACK_MIN_SPEEDUP, AUTOPILOT_TAIL_OPACITY, parseTrainingAutopilot,
 } from "../../data/trainingAutopilot";
 import { VECTORED_KEY, WORD } from "../../data/__tests__/trainingSample.fixture";
-import { TRAINING_FAILURE_COLOR, TRAINING_MODEL_COLOR, TRAINING_OUTSIDE_COLOR, TRAINING_REPLAY_COLOR } from "../../utils/trainingWordColors";
+import {
+  TRAINING_FAILURE_COLOR, TRAINING_MODEL_COLOR, TRAINING_ON_SCREEN_COLOR, TRAINING_OUTSIDE_COLOR, TRAINING_REPLAY_COLOR,
+} from "../../utils/trainingWordColors";
 import {
   failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockSelection,
 } from "../../data/__tests__/trainingAutopilot.fixture";
@@ -775,18 +777,27 @@ describe("TrainingSentenceBar", () => {
     const vocabulary = (appState.trainingSelection as { vocabulary: TrainingVocabulary }).vocabulary;
     const layers = appState.trainingLayers as TrainingLayers;
     const { unmount } = render(<TrainingLegend layers={layers} vocabulary={vocabulary} executorTrack={false} autopilotColour={null}
-      model={null} window={null} />);
+      model={null} traffic={null} />);
     fireEvent.click(screen.getByText("Legend ▸"));
     expect(screen.getByLabelText("What the 3D scene shows").textContent).not.toMatch(/commanded aircraft|on screen/);
     unmount();
+    // one commanded aircraft: it is the one on screen, nothing is drawn as "commanded"
+    const one = render(<TrainingLegend layers={layers} vocabulary={vocabulary} executorTrack={false} autopilotColour={null}
+      model={null} traffic={{ colour: TRAINING_MODEL_COLOR.traffic, commanded: 1 }} />);
+    fireEvent.click(screen.getByText("Legend ▸"));
+    expect(screen.getByLabelText("What the 3D scene shows").textContent).toMatch(/the aircraft on screen/);
+    expect(screen.getByLabelText("What the 3D scene shows").textContent).not.toMatch(/commanded aircraft/);
+    one.unmount();
     render(<TrainingLegend layers={layers} vocabulary={vocabulary} executorTrack={false} autopilotColour={null}
-      model={null} window={{ colour: TRAINING_MODEL_COLOR.traffic }} />);
+      model={null} traffic={{ colour: TRAINING_MODEL_COLOR.traffic, commanded: 3 }} />);
     fireEvent.click(screen.getByText("Legend ▸"));
     const rows = [...screen.getByLabelText("What the 3D scene shows").querySelectorAll("li")].map((row) => row.textContent);
     expect(rows).toEqual(expect.arrayContaining(["▶ the aircraft on screen", "commanded aircraft", "replayed arrivals",
       "background arrivals", "loss of separation"]));
     const ring = screen.getByText("▶ the aircraft on screen").closest("li")!.querySelector("circle")!;
-    expect(ring.getAttribute("stroke")).toBe(TRAINING_MODEL_COLOR.traffic);
+    expect(ring.getAttribute("stroke")).toBe(TRAINING_ON_SCREEN_COLOR);
+    const commanded = screen.getByText("commanded aircraft").closest("li")!.querySelector("line")!;
+    expect(commanded.getAttribute("stroke")).toBe(TRAINING_MODEL_COLOR.traffic);
   });
 
   it("opens the read-back check, and puts the notes behind ⓘ", () => {

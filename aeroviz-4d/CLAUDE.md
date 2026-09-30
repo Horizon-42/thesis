@@ -218,8 +218,9 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   window's — `trainingCursorS` own, `trainingSceneS` the clock's); the window strip above the bar and the 3D traffic layer draw
   every aircraft; the frontend judges nothing (losses, ends, landings are the exporter's, only their books checked); a window's
   aircraft is never flown live (`liveExecutor`); the camera frames once per clock; in 3D each aircraft is drawn by its ROLE
-  (`TrainingAircraftRole`: on screen — "▶" chip, white ringed point — / commanded, a SET / replayed / background; one table
-  `ROLE_DRAW`), `windowOnScreen` is the one "is a window on screen" test (AV39).
+  (`TrainingAircraftRole`: on screen — "▶" chip and ring in the selection yellow, never the reading's colour — / commanded, a
+  SET, in `trainingWindowReadingColour` / replayed / background; one table `ROLE_DRAW`), `windowOnScreen` is the one "is a
+  window on screen" test (AV39).
 - **A failure is ONE red, `TRAINING_FAILURE_COLOR` `#ff2d2d`** (a model's flight that did not land on the bar, losses of
   separation and judge ends, the live executor outside its envelope); **an SVG `fill` attribute loses to any stylesheet `fill`
   rule** — colour data-driven SVG text with `style={{ fill }}` (two marks were grey for that reason) (AV40).

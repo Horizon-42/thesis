@@ -7,7 +7,7 @@
  *
  *  • EACH AIRCRAFT BY ITS ROLE (`TrainingAircraftRole`, one table: `ROLE_DRAW`), so the aircraft the view is about is
  *    told from the rest at a glance (the user, 2026-09-30): the one ON SCREEN — its track drawn by the single-flight
- *    layers — a large white point ringed in the reading's colour, its callsign "▶ …" on a chip of that colour; every
+ *    layers — a large white point ringed in the selection's yellow, its callsign "▶ …" on a yellow chip; every
  *    COMMANDED aircraft its track in the model's colour (the record's: the observed track's near-white), a point and
  *    callsign in it; a REPLAYED aircraft thin and faded in slate, a BACKGROUND arrival fainter and darker
  *    (`TRAINING_OTHER_AIRCRAFT_COLOR`). The commanded are a set: several drawn as commanded at once is the ordinary case.
@@ -40,8 +40,9 @@ import {
   TRAINING_LOSS_COLOR,
   TRAINING_OTHER_AIRCRAFT_ALPHA,
   TRAINING_OTHER_AIRCRAFT_COLOR,
-  TRAINING_TRACE_COLOR,
-  trainingModelColour,
+  TRAINING_ON_SCREEN_COLOR,
+  TRAINING_SURFACE_COLOR,
+  trainingWindowReadingColour,
 } from "../utils/trainingWordColors";
 
 const ID = "training-traffic";
@@ -60,7 +61,7 @@ const ROLE_DRAW: Record<TrainingAircraftRole, {
   background: { track: { width: 1, alpha: TRAINING_OTHER_AIRCRAFT_ALPHA.background }, pointPx: 6, labelFont: "500 10px sans-serif",
     labelAlpha: 0.65 },
 };
-/** The on-screen aircraft's ring, in the reading's colour (px). */
+/** The on-screen aircraft's ring (px). */
 const ON_SCREEN_RING_PX = 3;
 
 /** Every aircraft of the window as the reading draws it: its id, name, role, colour, track on the window's clock. */
@@ -73,7 +74,7 @@ interface SceneAircraft {
 }
 
 function sceneAircraft(view: TrainingWindowView, reading: TrainingWindowReading, onScreen: string | null): SceneAircraft[] {
-  const commandedCss = reading.model === null ? TRAINING_TRACE_COLOR : trainingModelColour(reading.model.overlay.model);
+  const commandedCss = trainingWindowReadingColour(reading);
   return [
     ...view.window.commanded.map((one, at) => ({ datasetId: one.flight.datasetId, callsign: one.flight.callsign,
       role: one.flight.datasetId === onScreen ? "onScreen" as const : "commanded" as const, css: commandedCss, track: reading.tracks[at] })),
@@ -90,14 +91,15 @@ function aircraftMark(one: SceneAircraft, position: Cesium.Cartesian3): EntityOp
     id: `${ID}-at-${one.datasetId}`, name: onScreen ? `${one.callsign} (on screen)` : `${one.callsign} (${one.role})`, position,
     point: {
       pixelSize: draw.pointPx, color: onScreen ? Cesium.Color.WHITE : colour(one.css),
-      outlineColor: onScreen ? colour(one.css) : Cesium.Color.BLACK.withAlpha(0.6), outlineWidth: onScreen ? ON_SCREEN_RING_PX : 2,
+      outlineColor: onScreen ? colour(TRAINING_ON_SCREEN_COLOR) : Cesium.Color.BLACK.withAlpha(0.6),
+      outlineWidth: onScreen ? ON_SCREEN_RING_PX : 2,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
     label: {
       text: onScreen ? `▶ ${one.callsign}` : one.callsign, font: draw.labelFont,
-      fillColor: onScreen ? Cesium.Color.WHITE : colour(one.css, draw.labelAlpha),
+      fillColor: onScreen ? colour(TRAINING_SURFACE_COLOR) : colour(one.css, draw.labelAlpha),
       ...(onScreen
-        ? { showBackground: true, backgroundColor: colour(one.css, 0.85), style: Cesium.LabelStyle.FILL }
+        ? { showBackground: true, backgroundColor: colour(TRAINING_ON_SCREEN_COLOR, 0.9), style: Cesium.LabelStyle.FILL }
         : { outlineColor: Cesium.Color.BLACK, outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE }),
       pixelOffset: new Cesium.Cartesian2(0, 20), disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },

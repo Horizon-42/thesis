@@ -11,7 +11,7 @@
 
 import type { TrainingColumn } from "../data/trainingSample";
 import type { TrainingModelName, TrainingReplayKind } from "../data/trainingOverlays";
-import type { TrainingOtherRole, TrainingWindowVerdict } from "../data/trainingTraffic";
+import type { TrainingOtherRole, TrainingWindowReading, TrainingWindowVerdict } from "../data/trainingTraffic";
 
 /** The sentence bar's surface — every colour here is validated against it; `index.css` draws `.training-sentence-bar` in it
  *  at 0.94 opacity (MIRROR: CSS cannot import it). The bar shades with it. */
@@ -141,6 +141,18 @@ export const TRAINING_WINDOW_VERDICT_COLOR = {
   short: TRAINING_REPLAY_COLOR.flawed,
   lost: TRAINING_REPLAY_COLOR["not landed"],
 } as const satisfies Record<TrainingWindowVerdict, string>;
+
+/** The colour a window's commanded aircraft are drawn in: the reading's — the model's, or for the record the observed
+ *  track's near-white. The one rule, for the strip, the 3D scene and the legend. */
+export function trainingWindowReadingColour(reading: TrainingWindowReading): string {
+  return reading.model === null ? TRAINING_TRACE_COLOR : trainingModelColour(reading.model.overlay.model);
+}
+
+/** THE AIRCRAFT ON SCREEN in a window — the one the sentence bar reads — in the selection's yellow, whatever the reading's
+ *  colour (a light one, the record's near-white or landing's lime, would hide a ring or a chip in it): its point's ring and
+ *  its callsign's chip in 3D, its legend row; the window strip brackets its stretch in the same yellow (`index.css`
+ *  `.training-traffic-bracket`, MIRROR: CSS cannot import it). Text on the chip is the bar's surface colour. */
+export const TRAINING_ON_SCREEN_COLOR = TRAINING_WORD_COLOR;
 
 /** The aircraft of a window the model does not command, replayed as recorded: the raw track's slate for an arrival with a
  *  sentence, darker for a background arrival without one — neither is a hue of the words, the models or the verdicts. */

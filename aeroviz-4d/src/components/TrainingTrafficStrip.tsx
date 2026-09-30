@@ -30,8 +30,7 @@ import { sentenceAxisEndS, trainingModelLabel } from "../data/trainingOverlays";
 import {
   TRAINING_LOSS_COLOR,
   TRAINING_OTHER_AIRCRAFT_COLOR,
-  TRAINING_TRACE_COLOR,
-  trainingModelColour,
+  trainingWindowReadingColour,
 } from "../utils/trainingWordColors";
 
 const GUTTER = 70;
@@ -117,7 +116,7 @@ function Strip({ view, reading, onScreen }: { view: TrainingWindowView; reading:
   const callsign = (id: string) => current.commanded.find((one) => one.flight.datasetId === id)?.flight.callsign
     ?? current.others.find((other) => other.datasetId === id)?.callsign ?? id;
   const rowOf = (id: string) => current.commanded.findIndex((one) => one.flight.datasetId === id);
-  const modelCss = reading.model === null ? TRAINING_TRACE_COLOR : trainingModelColour(reading.model.overlay.model);
+  const modelCss = trainingWindowReadingColour(reading);
   const focused = current.commanded.find((one) => one.flight.datasetId === onScreen)!;
   const focusedEndS = focused.rowZeroS + sentenceAxisEndS(focused.flight, stepS,
     reading.model === null ? null : reading.model.sample.aircraft[current.commanded.indexOf(focused)]);

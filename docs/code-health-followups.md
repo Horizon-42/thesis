@@ -133,6 +133,7 @@ added three entries (the rows after the performance index's).
 | The frontend pins the vocabulary spec's sha (09-28) | open | new; see the entry — low value while the superseded `instruction_v3` set stays listed | no: a frontend constant |
 | The single-flight executor's pin refuses at run time, not in the tests (09-28) | open | new; see the entry | no: the backend |
 | A glidepath stop overrides a judged event that came before it (09-30) | open | new; see the entry | **yes — post-training**: stage 2's reward reads `said_rows` |
+| The read-back altitude chart's coloured labels are grey (09-30) | open | new; see the entry | no: the Training view |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -628,3 +629,11 @@ states of the failure, against `executor_replay.executor_forecast`'s own rule). 
 counts only before the judge's end row (`stops.step` boundary ≤ `outcome.end_row`). It moves free-generation outcomes and
 stage 2's reward (`prior_augmented_reward` reads `said_rows`), so it waits for a stage that re-reads them. Same family as
 "A free sentence is judged against the runway pointed at the executor's stop".
+
+## The read-back altitude chart's coloured labels are grey (2026-09-30)
+
+**Verified by reading** (opus review of `dev-training-roles`). `components/training/ReadbackAltitude.tsx:66-67` and `:78` draw
+`<text className="training-readback-tick" fill={…}>` — the threshold label in `TRAINING_DESIGNATED_COLOR`, the angle words'
+labels in their column's colour — and `index.css`'s `.training-readback-tick { fill: … }` overrides the attribute (an SVG
+presentation attribute loses to any stylesheet rule, AV40), so they render in the tick grey. Fix as `dev-training-roles` did
+for the window strip's ✕ and the sentence bar's model end time: `style={{ fill }}`. Not checked in the browser.

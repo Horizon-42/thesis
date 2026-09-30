@@ -21,6 +21,7 @@ import {
   TRAINING_LOSS_COLOR,
   TRAINING_OTHER_AIRCRAFT_ALPHA,
   TRAINING_OTHER_AIRCRAFT_COLOR,
+  TRAINING_ON_SCREEN_COLOR,
   TRAINING_OTHER_SAMPLE_ALPHA,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_TRACE_COLOR,
@@ -30,7 +31,7 @@ import {
 import { SwatchIcon, type Swatch } from "./training/chartKit";
 import NotesToggle, { NotesList } from "./training/NotesToggle";
 
-export default function TrainingLegend({ layers, vocabulary, executorTrack, autopilotColour, model, window }: {
+export default function TrainingLegend({ layers, vocabulary, executorTrack, autopilotColour, model, traffic }: {
   layers: TrainingLayers;
   vocabulary: TrainingVocabulary;
   /** The executor's flown track is drawn (its overlay is on and the flight was flown). */
@@ -40,9 +41,9 @@ export default function TrainingLegend({ layers, vocabulary, executorTrack, auto
   /** The model whose own sentence is read (its name, colour, how many samples it said and whether from an augmented
    *  start), or null for the truth. */
   model: { label: string; colour: string; samples: number; moved: boolean } | null;
-  /** The multi-aircraft window the aircraft on screen is in — its commanded aircraft drawn in `colour`, the reading's — or
-   *  null for a flight of its own. */
-  window: { colour: string } | null;
+  /** The multi-aircraft window the aircraft on screen is in — how many aircraft it commands, drawn in `colour`, the
+   *  reading's (`trainingWindowReadingColour`) — or null for a flight of its own. */
+  traffic: { colour: string; commanded: number } | null;
 }) {
   const [open, setOpen] = useState<boolean>(false);
   const rows: Array<{ key: string; swatch: Swatch; text: string; title: string; shown: boolean }> = [
@@ -76,11 +77,12 @@ export default function TrainingLegend({ layers, vocabulary, executorTrack, auto
     { key: "executor", swatch: { kind: "line", colour: TRAINING_EXECUTOR_COLOR }, shown: executorTrack, text: "executor replay",
       title: "teal: the executor's flown track (dashed on the ground), the truth sentence flown from row 0; red on its " +
         "ground trace: its rows outside the heading word it was told" },
-    ...(window === null ? [] : [
-      { key: "on-screen", swatch: { kind: "point", colour: "#ffffff", ring: window.colour } satisfies Swatch, shown: true,
+    ...(traffic === null ? [] : [
+      { key: "on-screen", swatch: { kind: "point", colour: "#ffffff", ring: TRAINING_ON_SCREEN_COLOR } satisfies Swatch, shown: true,
         text: "▶ the aircraft on screen", title: "the aircraft the sentence bar reads: its tracks as above, where it is at the " +
-          "cursor a white point ringed in the reading's colour, its callsign on a chip of that colour" },
-      { key: "commanded", swatch: { kind: "line", colour: window.colour } satisfies Swatch, shown: true, text: "commanded aircraft",
+          "cursor a white point ringed in the selection's yellow, its callsign on a yellow chip" },
+      { key: "commanded", swatch: { kind: "line", colour: traffic.colour } satisfies Swatch, shown: traffic.commanded > 1,
+        text: "commanded aircraft",
         title: "the window's other aircraft the sentence read commands — the model's samples, or the record: its track, point " +
           "and callsign in the reading's colour" },
       { key: "replayed", swatch: { kind: "line", colour: TRAINING_OTHER_AIRCRAFT_COLOR.replayed,

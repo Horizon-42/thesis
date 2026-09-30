@@ -69,7 +69,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { useApp, useTrainingCursor } from "../context/AppContext";
 import TrainingLegend from "./TrainingLegend";
 import TrainingTrafficStrip from "./TrainingTrafficStrip";
-import { isWindowSentence, windowOnScreen } from "../data/trainingTraffic";
+import { isWindowSentence, windowOnScreen, windowReading } from "../data/trainingTraffic";
 import TrainingPriorWindow from "./TrainingPriorWindow";
 import TrainingReadbackWindow from "./TrainingReadbackWindow";
 import { TrainingAutopilotStatus } from "./TrainingAutopilotStatus";
@@ -87,6 +87,7 @@ import {
   TRAINING_WORD_COLOR,
   TRAINING_REPLAY_COLOR,
   trainingModelColour,
+  trainingWindowReadingColour,
 } from "../utils/trainingWordColors";
 import {
   AUTOPILOT_TAIL_OPACITY,
@@ -439,6 +440,8 @@ export default function TrainingSentenceBar() {
     .map((shown, index) => shown && (endLabelX === null
       || Math.abs(middle(xFor(timeOf(tickRows[index])), index === tickRows.length - 1) - middle(endLabelX, endAnchoredEnd))
         >= TICK_LABEL_GAP));
+  // the multi-aircraft window the flight on screen is in, if any
+  const traffic = windowOnScreen(trainingWindow, selection);
   // where a model's flight ended: in its colour when it landed, heavier in the failure red when it did not
   const endColour = generated === null ? null : generated.outcome === "landed" ? modelColour! : TRAINING_FAILURE_COLOR;
   const cleared = trainingClearedValue(vocabulary);
@@ -521,7 +524,8 @@ export default function TrainingSentenceBar() {
         autopilotColour={autopilot?.status === "ready" && autopilotHasLine(autopilot.segment) ? autopilotColour(autopilot.segment) : null}
         model={model === null || generated === null ? null
           : { label: modelName!, colour: modelColour!, samples: model.flight.samples.length, moved: movedRead }}
-        window={windowOnScreen(trainingWindow, selection) === null ? null : { colour: modelColour ?? TRAINING_TRACE_COLOR }} />
+        traffic={traffic === null ? null
+          : { colour: trainingWindowReadingColour(windowReading(traffic, trainingSource)), commanded: traffic.window.commanded.length }} />
       <TrainingTrafficStrip />
       <header className="training-sentence-head">
         {startsOffered ? (
