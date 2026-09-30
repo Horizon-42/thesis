@@ -16,8 +16,9 @@ scene once a step; the caller ranks the aircraft that speak at the step (``rank`
 first; −1 silent) and the words are picked round by round — a round's aircraft, one a scene, their six columns in order
 as `generate.Speaker` picks them — so the caller's masks in a later round read the words an earlier one just said
 (`value`: the classes in force, this step's so far). Every round samples EVERY commanded aircraft of the batch, the
-ones not in it from a distribution that picks "unchanged": a round's draw has one shape, and each aircraft's draw reads
-only its own row, whatever else the batch holds or has left.
+ones not in it from a distribution that picks "unchanged": a round's draw has one shape, and within it each aircraft's
+draw reads only its own row, whatever else the batch holds or has left. How many rounds a step takes is its largest
+window's, so a batch's draws follow from the whole batch (a runner draws each batch from its own stream).
 
 **Per aircraft**: its rows, its words in force, the vocabulary's rules and the procedure's masks at its own row, and what
 the masks removed at each of its steps (``forbidden``, ``allowed``: ``[N, steps]``, indexed by its step after its first

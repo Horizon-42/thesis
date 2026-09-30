@@ -58,7 +58,7 @@ from ts_transformer.prior.generate import rows_for
 from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import below_floor
-from ts_transformer.prior.scene import N_LOOK, SceneIndex, hang, hung_span
+from ts_transformer.prior.scene import N_LOOK, Landings, SceneIndex, hang, hung_span
 from ts_transformer.prior.scene_data import Node
 from ts_transformer.prior.window_speaker import WindowSpeaker
 
@@ -268,11 +268,12 @@ def _rows_of(batch: Any, index: np.ndarray) -> Any:
 
 @dataclass
 class Commanded:
-    """What became of one commanded aircraft (`WindowLoop.results`): the words it said (``[steps, 6]``, `UNCHANGED`
-    where a column says nothing), its outcome under the loop's reading (the executor judge's, `BELOW_GLIDEPATH`, or
-    `traffic_loop.LOST_SEPARATION` when the judge ended it — then ``end`` is that end), its own end (the executor's or the
-    glidepath edge's, whatever the judge did), the steps said up to its judged end (``counted``: what it is trained on),
-    and where its executor's states are (``group``, ``place``)."""
+    """What became of one commanded aircraft (`WindowLoop.results`): the words it said to its own end (``[steps, 6]``,
+    `UNCHANGED` where a column says nothing; nothing after the judge ended it), its outcome under the loop's reading (its
+    own end, or `traffic_loop.LOST_SEPARATION` when the judge ended it first — then ``end`` is that end), its own end
+    (the executor judge's or the glidepath edge's, whatever the judge did), the steps said up to its judged end
+    (``counted``: what it is trained on; `traffic_free_generation.judged_steps`' count), its first state's time, its
+    crossing (None: it did not land), and where its executor's states are (``group``, ``place``)."""
 
     key: str
     window: int
@@ -281,8 +282,13 @@ class Commanded:
     own: str
     end: dict[str, Any] | None
     counted: int
+    first_s: float
+    landing_s: float | None
     group: int
     place: int
+
+
+_NEVER = np.iinfo(np.int64).max
 
 
 class WindowLoop:
@@ -295,17 +301,31 @@ class WindowLoop:
 
     **A step** (`step`), at the batch step every speaking aircraft's rows reach:
 
-    1. every landing in ``(t − step, t]`` of each window (a commanded aircraft's crossing, a replayed one's roster time) is
-       checked against the aircraft behind it (`traffic_loop.Judging.landing`) — an ended aircraft still flying lands too;
-    2. the aircraft still spoken to speak, round by round from the front of the approach clock (`WindowSpeaker`);
-    3. each window's aircraft on the step are judged (`Judging.step`), their runway the one in force after this step's
-       words (`speaking_aircraft`'s reading); one ended here flies this step's words and then nothing more — passive;
-    4. each executor flies the step: the aircraft that first spoke at one step share one (`Executor`'s cycles count from
+    1. the aircraft still spoken to speak, round by round from the front of the approach clock (`WindowSpeaker`);
+    2. every aircraft of a window in the scene is put on the runway in force after this step's words
+       (`speaking_aircraft`'s reading of a state's runway);
+    3. every landing in ``(t − step, t]`` of the window (a commanded aircraft's crossing, a replayed one's roster time) is
+       checked against the aircraft behind it (`traffic_loop.Judging.landing`) — a passive one lands too;
+    4. the window's aircraft on the step are judged (`Judging.step`); one ended here (or at 3) flies this step's words,
+       said before the judge read the step, and then nothing more — passive: in the scene, never ended again;
+    5. each executor flies the step: the aircraft that first spoke at one step share one (`Executor`'s cycles count from
        its first, so a later aircraft cannot join an earlier one's), the executor's code untouched;
-    5. an aircraft its executor is done with leaves after its own last state (`traffic_labelled.own_end`); under the
-       procedure's altitudes one whose next state sank below the glidepath lower edge stops speaking there and is judged
-       at that state for the last time (`prior_free_generation.glidepath_stops`' reading); the rest append the state
-       they reached.
+    6. an aircraft whose flight ended in the step leaves after its own last state (`traffic_labelled.own_end`): one its
+       executor is done with, and one that stalled or crossed a threshold plane in it, whose end `autopilot.judge.
+       outcome_of` finds then — the executor flies on past a stall, an uncaptured crossing or another runway's, which
+       `outcome_of` reads afterwards (**stated difference**: read as it happens, with the runway in force then; the
+       one-aircraft judge reads it once the sentence is over, with the last runway it said). Under the procedure's
+       altitudes one whose next state sank below the glidepath lower edge stops speaking there and is judged at that
+       state for the last time (`prior_free_generation.glidepath_stops`' reading), then flies on passive. The rest append
+       the state they reached, as does one whose own last state is the one reached (a time limit's).
+
+    A window is judged from its first commanded aircraft's first predicted step while one of its commanded aircraft is
+    still to be read (every state it is in the scene at judged, its landing checked); the loop runs on, judging only,
+    once the executors are done, until every window is read.
+
+    **The landing context** (the prior design's rule: the inputs are what is known before the step): a commanded
+    aircraft's context is the airport's landings less every commanded aircraft of its window's recorded one, and each
+    of theirs added as it lands in the loop.
 
     With one commanded aircraft a window it says and flies, to its judged end, what `traffic_speaking.SceneLoop` says
     and flies, and ends where `traffic_speaking.judged` ends it (tests).
@@ -324,6 +344,7 @@ class WindowLoop:
         if [k for window in windows for k in window.commanded] != self.keys:
             raise ValueError("the flights are the windows' commanded aircraft, window after window, each in its order")
         count = len(flights)
+        self.members = [np.flatnonzero(self.window_of == w) for w in range(len(windows))]
         # the batch's steps: each window's first commanded aircraft's row 0 at the pre-roll's end
         origin = np.array([window.first_step_s(window.commanded[0], step_s) for window in windows])
         firsts = np.array([windows[w].first_step_s(k, step_s) for k, w in zip(self.keys, self.window_of)])
@@ -335,18 +356,15 @@ class WindowLoop:
         nodes = [[Node(k, window.rows(k).presence.speaking, int(round((s - self.origin[w]) / step_s)),
                        **window.rows(k).node_rows) for k, s in zip(window.others, entered[w])]
                  for w, window in enumerate(windows)]
-        per_aircraft = (None if landings is None else
-                        [scene_landings(landings[windows[w].airport.flights.code], windows[w].scene(k, step_s))
-                         for k, w in zip(self.keys, self.window_of)])
+        max_rows = rows_for(max(limits) + step_s, step_s)
         self.speaker = WindowSpeaker(
             model, flights, geometries, landings, words, scenes=np.arange(count) if alone else self.window_of,
             starts=self.start, others=[[] for _ in range(count)] if alone else nodes, edges=self._edges,
-            masks=self._masks, mask_columns=() if alone else MASK_COLUMNS,
-            max_rows=rows_for(max(limits) + step_s, step_s), generator=generator, procedure_masks=procedure_masks,
-            temperature=temperature, scene_landings=per_aircraft)
+            masks=self._masks, mask_columns=() if alone else MASK_COLUMNS, max_rows=max_rows, generator=generator,
+            procedure_masks=procedure_masks, temperature=temperature,
+            scene_landings=None if landings is None else self._contexts(landings))
         #: per masked column, each aircraft's step: whether the separation masks took a word away there
-        self.separation_masked = {c: np.zeros((count, rows_for(max(limits) + step_s, step_s) - N_LOOK), dtype=bool)
-                                  for c in MASK_COLUMNS}
+        self.separation_masked = {c: np.zeros((count, max_rows - N_LOOK), dtype=bool) for c in MASK_COLUMNS}
         # the executors, one per step aircraft first speak at
         device = inputs.initial_state.device
         self.approach_mps = approach_ias_mps.cpu().numpy()
@@ -366,19 +384,38 @@ class WindowLoop:
         self.judging = [Judging(window.airport.flights.separation, reading, step_s, run)
                         for window, run in zip(windows, self.runs)]
         self.replayed = [[window.track(k) for k in window.others] for window in windows]
+        self.first_step = self.pre + N_LOOK                      # every window's first judged step
+        self.last_step = np.full(len(windows), self.first_step)  # each window's last judged step
         self.finals = ([procedure_masks.finals[g.code] for g in geometries] if procedure_masks.altitudes else None)
-        # each aircraft (`_State` per step it has reached; its own end and the judge's)
+        # each aircraft: a `_State` per step it has reached, its own end and the judge's
         self.states: list[list[_State]] = [[] for _ in range(count)]
         self.unwrapped: list[_Unwrapped | None] = [None] * count
-        self.ended_at = np.full(count, -1, dtype=np.int64)       # the judge's end (a step), −1: none
-        self.judged_to = np.full(count, np.iinfo(np.int64).max)  # the last step judged (its own end)
-        self.in_scene_to = np.full(count, np.iinfo(np.int64).max)  # the last step in the scene
-        self.sentence_end = np.full(count, np.iinfo(np.int64).max)  # steps said: the glidepath edge stops it
+        self.ended_at = np.full(count, -1, dtype=np.int64)       # the step the judge ended it at, −1: none
+        self.judged_to = np.full(count, _NEVER)                  # the last step it is judged at (its own end's)
+        self.in_scene_to = np.full(count, _NEVER)                # the last step it is in the scene at
+        self.sentence_end = np.full(count, _NEVER)               # its steps: the glidepath edge stops it
+        self.judged_state = np.full(count, -1, dtype=np.int64)   # the last of its steps read
+        self.steps_flown = np.zeros(count, dtype=np.int64)       # its steps to its own end
         self.own: list[str | None] = [None] * count
         self.landing_s = np.full(count, math.nan)
-        self.done = np.zeros(count, dtype=bool)                  # its executor is done with it
-        self._others: tuple[int, dict[int, OthersAt]] = (-1, {})
+        self.landing_checked = np.zeros(count, dtype=bool)
+        self.left = np.zeros(count, dtype=bool)                  # its flight is over
+        self._others: dict[tuple[int, int, tuple[str, ...]], OthersAt] = {}
         self._now: tuple[int, list[Aircraft] | None] = (-1, None)
+
+    def _contexts(self, landings: Mapping[str, Landings]) -> list[Landings]:
+        """Each commanded aircraft's landings before its own is taken out (`WindowSpeaker`: `data.own_context`): its
+        window's, less every other commanded aircraft's recorded landing (class docstring)."""
+        out = []
+        for key, w in zip(self.keys, self.window_of):
+            window = self.windows[w]
+            base = scene_landings(landings[window.airport.flights.code], window.scene(key, self.step_s))
+            for other in window.commanded:
+                if other != key:
+                    seen = window.rows(other).presence
+                    base = base.without(seen.landing_s, seen.runway)
+            out.append(base)
+        return out
 
     # -- the clock
     def window_time_s(self, w: int, step: int) -> float:
@@ -388,52 +425,81 @@ class WindowLoop:
         """Aircraft ``i``'s own step (0: its first predicted one) at batch step ``step``."""
         return int(step - self.start[i] - N_LOOK)
 
+    def _to_read(self, i: int) -> bool:
+        """Whether aircraft ``i`` still has a state in the scene to judge or a landing to check."""
+        if not self.left[i]:
+            return True
+        last = min(int(self.in_scene_to[i]), len(self.states[i]) - 1)
+        return self.judged_state[i] < last or (not math.isnan(self.landing_s[i]) and not self.landing_checked[i])
+
+    def _live(self, w: int) -> bool:
+        return any(self._to_read(i) for i in self.members[w])
+
     @property
     def running(self) -> bool:
-        return not all(bool(executor.done.all()) or executor.count == executor.cycles
-                       for _, _, executor, _ in self.executors)
+        return any(self._live(w) for w in range(len(self.windows)))
 
     def step(self) -> None:
-        """One batch step (the class docstring's 1–5; the landings are checked once this step's words have put each
-        aircraft's state on its runway, as `speaking_aircraft` reads a state's runway from its step's words)."""
+        """One batch step (the class docstring's 1–6)."""
         speaker, step = self.speaker, self.speaker.step
         for first, index, executor, _ in self.executors:
             if first == step:                                  # its first predicted step: the state flown from
                 self._record(index, executor, step, captured=np.zeros(len(index), dtype=bool))
         k = step - self.start - N_LOOK
-        speaking = (k >= 0) & (self.ended_at < 0) & ~self.done & (k < self.sentence_end)
+        speaking = (k >= 0) & (self.ended_at < 0) & ~self.left & (k < self.sentence_end)
         said = speaker.speak(self._rank(speaking, step), self._locked())
         for w in range(len(self.windows)):
-            self._runways(w, step)
-            self._landings(w, step)
-            self._judge(w, step)
+            if self._live(w):
+                self._runways(w, step)
+                self._landings(w, step)
+                self._judge(w, step)
+                self.last_step[w] = step
         self._fly(step, said)
 
-    # -- 1. landings
+    # -- 2.–4. the judge
+    def _runways(self, w: int, step: int) -> None:
+        """Window ``w``'s commanded aircraft in the scene at the step: the runway in force after this step's words."""
+        value = self.speaker.value
+        for i in self.members[w]:
+            k = self._step_of(i, step)
+            if 0 <= k <= min(int(self.in_scene_to[i]), len(self.states[i]) - 1):
+                self._on_runway(i, self.states[i][k], int(value[i, RUNWAY]))
+                self.judged_state[i] = k
+
     def _landings(self, w: int, step: int) -> None:
         t_s = self.window_time_s(w, step)
-        members = np.flatnonzero(self.window_of == w)
-        leaders: list[tuple[float, str, Controlled | Track]] = []
-        for i in members:
+        leaders: list[tuple[float, str, Controlled | Track, bool]] = []
+        for i in self.members[w]:
             if t_s - self.step_s < self.landing_s[i] <= t_s:
-                leaders.append((float(self.landing_s[i]), self.keys[i], self._controlled(i, self.in_scene_to[i])))
+                leaders.append((float(self.landing_s[i]), self.keys[i], self._controlled(i, int(self.in_scene_to[i])),
+                                bool(self.ended_at[i] >= 0)))
+                self.landing_checked[i] = True
         for track in self.replayed[w]:
             if t_s - self.step_s < track.presence.landing_s <= t_s:
-                leaders.append((track.presence.landing_s, track.key, track))
-        for at, key, leader in sorted(leaders, key=lambda x: (x[0], x[1])):
+                leaders.append((track.presence.landing_s, track.key, track, False))
+        for at, key, leader, passive_leader in sorted(leaders, key=lambda x: (x[0], x[1])):
             controlled, passive = self._here(w, step, at, exclude=key)
             replayed = [a for a in self.replayed[w]
                         if a.key != key and a.presence.times_s[0] <= at <= a.presence.times_s[-1]]
-            self.judging[w].landing(at, leader, controlled, replayed, passive)
-        for i in members:
-            if self.runs[w].ended.get(self.keys[i]) is not None and self.ended_at[i] < 0:
-                self.ended_at[i] = self._step_of(i, step)       # a wake shortfall at a landing ends it at this step
+            self.judging[w].landing(at, leader, controlled, replayed, passive, leader_passive=passive_leader)
+            self._mark_ended(w, step)                          # a follower ended here is passive at the next landing
+
+    def _judge(self, w: int, step: int) -> None:
+        t_s = self.window_time_s(w, step)
+        controlled, passive = self._here(w, step, t_s)
+        self.judging[w].step(t_s, controlled, [a for a in self.replayed[w] if a.on_step(t_s)], passive)
+        self._mark_ended(w, step)
+
+    def _mark_ended(self, w: int, step: int) -> None:
+        for i in self.members[w]:
+            if self.ended_at[i] < 0 and self.keys[i] in self.runs[w].ended:
+                self.ended_at[i] = self._step_of(i, step)
 
     def _here(self, w: int, step: int, at: float, exclude: str = "") -> tuple[list[Controlled], list[Controlled]]:
         """Window ``w``'s commanded aircraft in the scene at instant ``at`` of batch step ``step`` (on their steps up to
         this one): the judged ones and the passive ones."""
         controlled, passive = [], []
-        for i in np.flatnonzero(self.window_of == w):
+        for i in self.members[w]:
             k = self._step_of(i, step)
             if self.keys[i] == exclude or k < 0 or k > self.in_scene_to[i]:
                 continue
@@ -445,17 +511,36 @@ class WindowLoop:
 
     def _controlled(self, i: int, last: int) -> Controlled:
         """Aircraft ``i`` on its steps ``last − 1`` and ``last`` (as many of them as it has)."""
-        states = self.states[i][max(0, last - 1): last + 1]
+        return self._path(i, max(0, last - 1), last + 1)
+
+    def path(self, i: int) -> Controlled:
+        """Aircraft ``i`` on every step it was read at in the scene (a readout judging it again afterwards)."""
+        return self._path(i, 0, int(self.judged_state[i]) + 1)
+
+    def _path(self, i: int, first: int, last: int) -> Controlled:
+        states = self.states[i][first:last]
         rows = self.windows[self.window_of[i]].rows(self.keys[i])
+        angle = np.array([s.angle_deg for s in states])
         return Controlled(rows.presence, np.array([s.t_s for s in states]), np.array([s.e_m for s in states]),
                           np.array([s.n_m for s in states]), np.array([s.height_m for s in states]),
-                          tuple(s.runway for s in states), np.array([s.along_m for s in states]),
-                          np.array([s.angle_deg for s in states]), np.array([s.right_m for s in states]),
-                          np.array([s.ground_speed_mps for s in states])
-                          * np.cos(np.radians(np.array([s.angle_deg for s in states]))),
-                          np.array([s.captured for s in states], dtype=bool), rows.category, "flying", None)
+                          tuple(s.runway for s in states), np.array([s.along_m for s in states]), angle,
+                          np.array([s.right_m for s in states]),
+                          np.array([s.ground_speed_mps for s in states]) * np.cos(np.radians(angle)),
+                          np.array([s.captured for s in states], dtype=bool), rows.category,
+                          self.own[i] or "flying", None if math.isnan(self.landing_s[i]) else float(self.landing_s[i]))
 
-    # -- 2. speaking
+    def _on_runway(self, i: int, state: _State, pointer: int) -> None:
+        window = self.windows[self.window_of[i]]
+        geometry, separation = window.airport.flights.geometry, window.airport.flights.separation
+        candidate = geometry.candidates[pointer - 1]
+        relative = relative_to_runway(np.array([state.e_m]), np.array([state.n_m]), np.array([state.track_deg]),
+                                      np.array([state.height_m]), candidate)
+        state.runway = candidate.ident
+        state.along_m = separation.along_nm[candidate.ident] * NM_M - float(relative.before_threshold_m[0])
+        state.angle_deg = float(relative.track_minus_course_deg[0])
+        state.right_m = float(relative.right_of_course_m[0])
+
+    # -- 1. speaking
     def _aircraft_now(self, step: int) -> list[Aircraft | None]:
         """Every aircraft's executor state at the start of the step (read once a step; None before it flies)."""
         if self._now[0] != step:
@@ -492,11 +577,11 @@ class WindowLoop:
             return rank
         now = self._aircraft_now(step)
         value = self.speaker.value
-        for w in range(len(self.windows)):
-            members = [i for i in np.flatnonzero(self.window_of == w) if speaking[i]]
-            order = sorted(members, key=lambda i: (value[i, RUNWAY] == 0,
-                                                   -self._clock(i, now[i], int(value[i, RUNWAY]))
-                                                   if value[i, RUNWAY] else 0.0, i))
+        for members in self.members:
+            order = sorted((i for i in members if speaking[i]),
+                           key=lambda i: (value[i, RUNWAY] == 0,
+                                          -self._clock(i, now[i], int(value[i, RUNWAY])) if value[i, RUNWAY] else 0.0,
+                                          i))
             for r, i in enumerate(order):
                 rank[i] = r
         return rank
@@ -507,71 +592,41 @@ class WindowLoop:
             out[index] = executor.runway_locked.cpu().numpy()
         return out
 
-    # -- 3. the judge
-    def _runways(self, w: int, step: int) -> None:
-        """Window ``w``'s commanded aircraft in the scene at the step: the runway in force after this step's words."""
-        value = self.speaker.value
-        for i in np.flatnonzero(self.window_of == w):
-            k = self._step_of(i, step)
-            if 0 <= k <= self.in_scene_to[i]:
-                self._on_runway(i, self.states[i][k], int(value[i, RUNWAY]))
-
-    def _judge(self, w: int, step: int) -> None:
-        """Window ``w``'s aircraft on the step judged (the class docstring's 3)."""
-        t_s = self.window_time_s(w, step)
-        controlled, passive = self._here(w, step, t_s)
-        replayed = [a for a in self.replayed[w] if a.on_step(t_s)]
-        ended = self.judging[w].step(t_s, controlled, replayed, passive)
-        for i in np.flatnonzero(self.window_of == w):
-            if self.keys[i] in ended and self.ended_at[i] < 0:
-                self.ended_at[i] = self._step_of(i, step)
-
-    def _on_runway(self, i: int, state: _State, pointer: int) -> None:
-        window = self.windows[self.window_of[i]]
-        geometry, separation = window.airport.flights.geometry, window.airport.flights.separation
-        candidate = geometry.candidates[pointer - 1]
-        relative = relative_to_runway(np.array([state.e_m]), np.array([state.n_m]), np.array([state.track_deg]),
-                                      np.array([state.height_m]), candidate)
-        state.runway = candidate.ident
-        state.along_m = separation.along_nm[candidate.ident] * NM_M - float(relative.before_threshold_m[0])
-        state.angle_deg = float(relative.track_minus_course_deg[0])
-        state.right_m = float(relative.right_of_course_m[0])
-
-    # -- 4., 5. flying
+    # -- 5., 6. flying
     def _fly(self, step: int, said: np.ndarray) -> None:
         cycle_s = self.params.cycle_s
-        flying: list[int] = []
+        appended: list[int] = []
         for g, (first, index, executor, spoken) in enumerate(self.executors):
             if first > step or bool(executor.done.all()) or executor.count == executor.cycles:
                 continue
-            was_done = executor.done.cpu().numpy().copy()
             heard = torch.full((len(index),), spoken.steps * self.step_s, dtype=torch.float64,
                                device=executor.done.device)
             spoken.say(np.where(said[index] > 0, said[index] - 1, UNCHANGED))
+            stalled = torch.zeros(len(index), dtype=torch.bool, device=executor.done.device)
             for _ in range(executor.step_rows):
                 if executor.count == executor.cycles:
                     break
                 executor.cycle(spoken.at(heard), torch.full((len(index),), executor.count * cycle_s,
                                                             dtype=torch.float64, device=executor.done.device))
+                stalled |= executor.limits["stall"][-1]
             self._record(index, executor, step + 1, captured=executor.lateral.captured.cpu().numpy())
-            done = executor.done.cpu().numpy()
-            newly = done & ~was_done
-            if newly.any():
-                self._own_ends(g, index[newly], step)
-            for p, i in enumerate(index):
-                if not done[p]:
-                    if self.finals is not None:
-                        self._glidepath(i, step)
-                    flying.append(int(i))
-        self.speaker.advance(np.array(flying, dtype=np.int64),
-                             *self._positions(np.array(flying, dtype=np.int64)))
+            done, stalled = executor.done.cpu().numpy(), stalled.cpu().numpy()
+            ending = [p for p, i in enumerate(index) if not self.left[i]
+                      and (done[p] or stalled[p] or self._crossed(i, self._step_of(i, step)))]
+            if ending:
+                self._own_ends(g, ending, step)
+            for i in index:
+                if not self.left[i] and self.finals is not None:
+                    self._glidepath(i, step)
+                if self._step_of(i, step) + 1 <= self.in_scene_to[i]:
+                    appended.append(int(i))                   # still in the scene (one's own last state included)
+        index = np.array(appended, dtype=np.int64)
+        self.speaker.advance(index, *self._positions(index))
 
     def _record(self, index: np.ndarray, executor: Executor, step: int, captured: np.ndarray) -> None:
         """Every aircraft of ``index`` at batch step ``step``: its executor state (`flown_track`'s reading)."""
         states = executor.state.cpu().numpy()
         for p, i in enumerate(index):
-            if step - self.start[i] - N_LOOK != len(self.states[i]):
-                continue                                         # (none past its executor's last cycle)
             read = flown_track(states[p: p + 1], self.geometries[i])
             rad = float(np.radians(compass_from_math_rad(states[p: p + 1, PSI]))[0])
             if self.unwrapped[i] is None:
@@ -579,33 +634,58 @@ class WindowLoop:
                 track = np.float64(rad)
             else:
                 track = self.unwrapped[i].next(rad)
-            w = self.window_of[i]
-            self.states[i].append(_State(self.window_time_s(w, step), float(read["e"][0]), float(read["n"][0]),
-                                         float(read["height"][0]), float(np.degrees(track)),
+            self.states[i].append(_State(self.window_time_s(int(self.window_of[i]), step), float(read["e"][0]),
+                                         float(read["n"][0]), float(read["height"][0]), float(np.degrees(track)),
                                          float(read["ground_speed"][0]), bool(captured[p])))
 
-    def _own_ends(self, g: int, index: np.ndarray, step: int) -> None:
-        """Aircraft its executor is done with in step ``step``: its own end (`traffic_labelled.own_end`) — the step it
-        is last in the scene and, while the judge has not ended it, last judged — and its crossing when it landed."""
-        _, members, executor, _ = self.executors[g]
+    def _crossed(self, i: int, k: int) -> bool:
+        """Whether aircraft ``i`` passed a candidate runway's threshold plane in its step ``k`` (a crossing the judge may
+        read as an end the executor does not stop at)."""
+        before, after = self.states[i][k], self.states[i][k + 1]
+        for candidate in self.geometries[i].candidates:
+            d = relative_to_runway(np.array([before.e_m, after.e_m]), np.array([before.n_m, after.n_m]), np.zeros(2),
+                                   np.zeros(2), candidate).before_threshold_m
+            if d[0] > 0.0 and d[1] <= 0.0:
+                return True
+        return False
+
+    def _own_ends(self, g: int, ending: Sequence[int], step: int) -> None:
+        """The aircraft at places ``ending`` of executor ``g`` whose flight may have ended in step ``step``: its own end
+        (`outcome_of` with the runway in force, `traffic_labelled.own_end`) — the step it is last in the scene at and,
+        while the judge has not ended it, last judged at; its crossing when it landed. One the executor flies on with
+        no end found (a crossing that is none) flies on."""
+        _, index, executor, _ = self.executors[g]
         flown = executor.flown()
         step_rows = executor.step_rows
-        for i in index:
-            p = int(self.place[i])
-            pointer = int(self.speaker.value[i, RUNWAY]) - 1
-            ended = outcome_of(flown, p, self.geometries[i], pointer, self.words.spec)
+        done = executor.done.cpu().numpy()
+        for p in ending:
+            i = int(index[p])
+            ended = outcome_of(flown, p, self.geometries[i], int(self.speaker.value[i, RUNWAY]) - 1, self.words.spec)
+            if not done[p] and ended.outcome == "timeout":
+                continue                                        # nothing ended it yet
             outcome, last_row = own_end(ended.outcome, ended.end_row, -1, step_rows)
             last = last_row // step_rows
-            self.done[i] = True
+            self.left[i] = True
+            self.steps_flown[i] = self._step_of(i, step) + 1
             self.in_scene_to[i] = min(self.in_scene_to[i], last)
-            if self.own[i] is None:                            # (the glidepath edge's stop comes first)
+            if self.own[i] is None:                             # (the glidepath edge's stop comes first)
                 self.own[i] = outcome
                 if self.ended_at[i] < 0:
-                    self.judged_to[i] = last
+                    self.judged_to[i] = min(self.judged_to[i], last)
             if outcome == "landed":
-                w = self.window_of[i]
-                self.landing_s[i] = self.window_time_s(w, int(self.start[i]) + N_LOOK) + ended.crossing["at_row"] * \
-                    flown.cycle_s
+                w = int(self.window_of[i])
+                self.landing_s[i] = self.states[i][0].t_s + ended.crossing["at_row"] * flown.cycle_s
+                self._landed(i, w)
+
+    def _landed(self, i: int, w: int) -> None:
+        """Aircraft ``i``'s landing in the loop, added to the landing context of its window's other commanded
+        aircraft (class docstring)."""
+        if self.speaker.contexts[i] is None:
+            return
+        runway = self.geometries[i].candidates[int(self.speaker.value[i, RUNWAY]) - 1].ident
+        for j in self.members[w]:
+            if j != i:
+                self.speaker.contexts[j] = _with_landing(self.speaker.contexts[j], float(self.landing_s[i]), runway)
 
     def _glidepath(self, i: int, step: int) -> None:
         """Under the procedure's altitudes: aircraft ``i`` (flying step ``step``'s words) stopped where the state it
@@ -669,10 +749,8 @@ class WindowLoop:
         return out
 
     def _masks(self, column: int, chosen: np.ndarray, now: np.ndarray) -> np.ndarray:
-        """``[N, classes]``: `traffic_speaking.speaking_masks` of each aircraft of the round (``now``) at the step, its
-        window's others there — the replayed ones and the commanded ones not yet flying at their records
-        (`traffic_speaking.others_at`), the commanded ones flying (or passive) at their executor states with their words
-        in force, this step's so far (`WindowSpeaker.value`); one with no runway in force or said keeps every word."""
+        """``[N, classes]``: `traffic_speaking.speaking_masks` of each aircraft of the round (``now``) at the step, among
+        its window's others (`_others_at`); one with no runway in force or said keeps every word."""
         speaker = self.speaker
         step = speaker.step
         classes = speaker.model.config.classes[column]
@@ -684,30 +762,37 @@ class WindowLoop:
             if not pointer:
                 continue
             w = int(self.window_of[i])
-            t_s = self.window_time_s(w, step)
             speed = int(value[i, SPEED]) - 1
-            out[i] = speaking_masks(self.windows[w].scene(self.keys[i], self.step_s), column, classes, t_s, state[i],
-                                    pointer - 1, speed if speed >= 0 else None,
+            out[i] = speaking_masks(self.windows[w].scene(self.keys[i], self.step_s), column, classes,
+                                    self.window_time_s(w, step), state[i], pointer - 1, speed if speed >= 0 else None,
                                     int(value[i, APPROACH]) - 1 == APPROACH_CLEARED, float(self.approach_mps[i]),
                                     self.words, self._step_of(i, step) == 0, self._others_at(i, step))
             self.separation_masked[column][i, self._step_of(i, step)] |= not out[i].all()
         return out
 
     def _others_at(self, i: int, step: int) -> OthersAt:
-        """Aircraft ``i``'s others at the step as the masks read them (`_masks`)."""
+        """Aircraft ``i``'s others at the step as the masks read them: the replayed ones, and the commanded ones not
+        speaking yet — before their first predicted step, or at it before their round — at their records with their
+        labelled words, as the one-aircraft loop reads a replayed flight (`traffic_speaking.others_at`); the commanded
+        ones in the scene past that at their executor states with their words in force, this step's so far
+        (`WindowSpeaker.value`)."""
         w = int(self.window_of[i])
-        t_s = self.window_time_s(w, step)
-        window = self.windows[w]
-        if self._others[0] != step:
-            self._others = (step, {})
-        members = np.flatnonzero(self.window_of == w)
-        flying = [j for j in members if j != i and self._step_of(j, step) >= 0 and not self.done[j]]
-        waiting = [self.keys[j] for j in members if j != i and self._step_of(j, step) < 0]
-        if w not in self._others[1]:
-            self._others[1][w] = others_at(Scene(window.airport, self.keys[i], 0.0, tuple(waiting) + window.others),
-                                           t_s, self.words)
-        replayed = self._others[1][w]
-        commanded = [j for j in flying if self.speaker.value[j, RUNWAY]]
+        window, t_s, value = self.windows[w], self.window_time_s(w, step), self.speaker.value
+        waiting, commanded = [], []
+        for j in self.members[w]:
+            k = self._step_of(j, step)
+            if j == i:
+                continue
+            if k < 0 or (k == 0 and not value[j, RUNWAY]):
+                waiting.append(self.keys[j])
+            elif k <= self.in_scene_to[j]:
+                commanded.append(int(j))
+        key = (w, step, tuple(waiting))
+        if key not in self._others:
+            self._others = {k: v for k, v in self._others.items() if k[1] == step}
+            self._others[key] = others_at(Scene(window.airport, self.keys[i], 0.0, tuple(waiting) + window.others),
+                                          t_s, self.words)
+        replayed = self._others[key]
         if not commanded:
             return replayed
         state = self._aircraft_now(step)
@@ -715,8 +800,8 @@ class WindowLoop:
         traffic, speeds, targets, cleared = [], [], [], []
         geometry, separation = window.airport.flights.geometry, window.airport.flights.separation
         for j in commanded:
-            now, value = state[j], self.speaker.value[j]
-            candidate = geometry.candidates[int(value[RUNWAY]) - 1]
+            now, force = state[j], value[j]
+            candidate = geometry.candidates[int(force[RUNWAY]) - 1]
             relative = relative_to_runway(np.array([now.e_m]), np.array([now.n_m]), np.array([now.track_deg]),
                                           np.array([now.height_m]), candidate)
             angle = float(relative.track_minus_course_deg[0])
@@ -727,34 +812,44 @@ class WindowLoop:
                                    np.array([angle]), np.array([float(relative.right_of_course_m[0])]),
                                    np.array([now.captured]), (window.rows(self.keys[j]).category,)))
             speed = now.ground_speed_mps * math.cos(math.radians(angle))
-            word = int(value[SPEED]) - 1
+            word = int(force[SPEED]) - 1
             speeds.append(speed)
             targets.append(speed if word < 0 else levels[word] if word < self.words.speed_unspecified
                            else float(self.approach_mps[j]))
-            cleared.append(int(value[APPROACH]) - 1 == APPROACH_CLEARED)
+            cleared.append(int(force[APPROACH]) - 1 == APPROACH_CLEARED)
         return OthersAt(join(replayed.traffic, *traffic), np.concatenate((replayed.speeds, speeds)),
                         np.concatenate((replayed.targets, targets)), np.concatenate((replayed.cleared, cleared)))
 
     # -- the end
     def results(self) -> list[Commanded]:
-        """What became of each commanded aircraft (`Commanded`), once the loop has run."""
+        """What became of each commanded aircraft (`Commanded`) once the loop has run; each window's `Run` gets its
+        scene time (its judged steps' span)."""
+        for w, run in enumerate(self.runs):
+            run.scene_seconds = float(self.last_step[w] - self.first_step) * self.step_s
         out = []
         for i, key in enumerate(self.keys):
-            _, members, executor, spoken = self.executors[self.group[i]]
+            spoken = self.executors[self.group[i]][3]
             grid = spoken.sentences()[self.place[i]]
-            said_steps = int(min(len(grid), self.sentence_end[i],
-                                 int(executor.done_cycle[self.place[i]]) // executor.step_rows + 1))
+            said = grid[: int(min(len(grid), self.sentence_end[i], self.steps_flown[i]))]
             w = int(self.window_of[i])
             end = self.runs[w].ended.get(key)
-            counted = said_steps if end is None else min(said_steps, int(self.ended_at[i]))
-            out.append(Commanded(key, w, grid[:said_steps], LOST_SEPARATION if end is not None else self.own[i],
-                                 self.own[i], end, counted, int(self.group[i]), int(self.place[i])))
+            first_s = self.states[i][0].t_s
+            counted = len(said) if end is None else min(len(said), int(round((end["t_s"] - first_s) / self.step_s)))
+            out.append(Commanded(key, w, said, LOST_SEPARATION if end is not None else self.own[i], self.own[i], end,
+                                 counted, first_s, None if math.isnan(self.landing_s[i]) else float(self.landing_s[i]),
+                                 int(self.group[i]), int(self.place[i])))
         return out
 
     def close(self) -> None:
         """Let the speaker go (`traffic_speaking.SceneLoop.close`: the loop and the speaker hold each other)."""
         self.speaker.edges_of = self.speaker.masks_of = None
         self.speaker = None
+
+
+def _with_landing(landings: Landings, time_s: float, runway: str) -> Landings:
+    """``landings`` and one more (a commanded aircraft's landing in the loop)."""
+    return Landings(np.sort(np.append(landings.times_s, time_s)),
+                    {**landings.by_runway, runway: np.sort(np.append(landings.by_runway[runway], time_s))})
 
 
 def _aircraft(rows: SceneRows, part: slice) -> SceneRows:

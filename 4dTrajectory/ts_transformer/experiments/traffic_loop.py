@@ -277,9 +277,10 @@ class Judging:
         return ended_now
 
     def landing(self, t_s: float, leader: Controlled | Track, controlled: Sequence[Controlled],
-                replayed: Sequence[Track], passive: Sequence[Controlled] = ()) -> None:
+                replayed: Sequence[Track], passive: Sequence[Controlled] = (), *, leader_passive: bool = False) -> None:
         """``leader`` landing at ``t_s``, checked against the established aircraft next behind it among the others there
-        (none the leader): a controlled follower under the minimum is ended at the landing."""
+        (none the leader): a controlled follower under the minimum is ended at the landing. ``leader_passive``: the
+        leader is a passive aircraft (recorded as not controlled, as a passive partner is in `step`)."""
         out = self.out
         out.landings_checked += 1
         scene = join(between([*controlled, *passive], t_s, self.step_s), traffic_at(replayed, t_s),
@@ -290,12 +291,13 @@ class Judging:
         others: list[Controlled | Track] = [*controlled, *passive, *replayed]
         follower = others[loss.j]
         judged = loss.j < len(controlled)
-        out.at_threshold.append({"t_s": t_s, "leader": leader.key, "leader_controlled": isinstance(leader, Controlled),
+        leader_judged = isinstance(leader, Controlled) and not leader_passive
+        out.at_threshold.append({"t_s": t_s, "leader": leader.key, "leader_controlled": leader_judged,
                                  "follower": follower.key, "follower_controlled": judged, "gap_m": loss.distance_m,
                                  "required_m": loss.required_m, "relation": loss.relation})
         if judged:
             out.ended[follower.key] = {"t_s": t_s, "kind": AT_THRESHOLD, "relation": loss.relation,
-                                       "with": leader.key, "with_controlled": isinstance(leader, Controlled)}
+                                       "with": leader.key, "with_controlled": leader_judged}
 
 
 class Loop:
