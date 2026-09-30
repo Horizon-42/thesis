@@ -5,6 +5,8 @@ the words an earlier round just said."""
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
 import torch
@@ -34,13 +36,13 @@ def _self_edges(speaker_ref, calls=None):
     return edges
 
 
-def _window_speaker(model, one, geometry, flights, scenes, offsets, others, *, masks=None, mask_columns=(),
-                    history=100, steps=STEPS, seed=4, calls=None):
+def _window_speaker(model, one, geometry, flights, scenes, starts, others, *, masks=None, mask_columns=(),
+                    steps=STEPS, seed=4, calls=None):
     reference = [None]
     speaker = WindowSpeaker(model, flights, [geometry] * len(flights), None, Words(one), scenes=scenes,
-                            offsets=offsets, others=others, edges=_self_edges(reference, calls),
+                            starts=starts, others=others, edges=_self_edges(reference, calls),
                             masks=masks or (lambda column, chosen, now: np.ones((len(chosen), 1), dtype=bool)),
-                            mask_columns=mask_columns, history=history, max_rows=N_LOOK + max(offsets) + steps + 1,
+                            mask_columns=mask_columns, max_rows=N_LOOK + max(starts) - min(starts) + steps + 1,
                             generator=torch.Generator().manual_seed(seed), procedure_masks=ProcedureMasks.none())
     reference[0] = speaker
     return speaker
@@ -64,8 +66,12 @@ def test_one_commanded_aircraft_a_scene_says_what_the_scene_speaker_says_and_its
                          history=100, max_rows=N_LOOK + STEPS + 1, generator=torch.Generator().manual_seed(4),
                          procedure_masks=ProcedureMasks.none())
     reference[0] = scene
-    window = _window_speaker(traffic, one, geometry, [signals, signals], [0, 1], [0, 0], others)
-    assert (window.pre, window.aircraft) == (scene.pre, scene.aircraft) == (5, 2)
+    # the same places on the batch's steps: the speaking aircraft's row 0 at the pre-roll's end, the others from there
+    pre = scene.pre
+    window = _window_speaker(traffic, one, geometry, [signals, signals], [0, 1], [pre, pre],
+                             [[dataclasses.replace(node, first_step=pre + node.first_step) for node in nodes]
+                              for nodes in others])
+    assert (pre, window.aircraft) == (5, scene.aircraft) == (5, 2)
     scene_said, window_said = [], []
     for step in range(STEPS):
         active = np.array([True, step < leaves])
@@ -97,10 +103,10 @@ def test_a_later_aircraft_enters_at_its_offset_and_speaks_from_its_own_first_pre
                                     extend(*args))[1]
     later = 3
     calls = []
-    window = _window_speaker(traffic, one, geometry, [signals, signals], [0, 0], [0, later],
-                             [[_other(-2, rows=30, width=width)]], steps=STEPS, calls=calls)
-    # the reference, the replayed one, then the later commanded aircraft
-    assert (window.pre, window.aircraft, window.slot.tolist(), window.start.tolist()) == (2, 3, [0, 2], [2, 2 + later])
+    window = _window_speaker(traffic, one, geometry, [signals, signals], [0, 0], [2, 2 + later],
+                             [[_other(0, rows=30, width=width)]], steps=STEPS, calls=calls)
+    # the two commanded aircraft, then the replayed one
+    assert (window.aircraft, window.slot.tolist(), window.step) == (3, [0, 1], 2 + N_LOOK)
     said = []
     for step in range(STEPS + later):
         if step:
@@ -117,9 +123,9 @@ def test_a_later_aircraft_enters_at_its_offset_and_speaks_from_its_own_first_pre
     assert (said[0, 0] > 0).all()
     first = seen[0]
     present, rows = first["present"][0], first["rows"][0]
-    # the first block: the replayed one from step 0, the reference from step 2, the later one from step 5
-    assert present[1, :].all() and not present[0, :2].any() and present[0, 2:].all()
-    assert not present[2, :2 + later].any() and rows[2, 2 + later:].tolist() == list(range(N_LOOK + 1 - later))
+    # the first block: the replayed one from step 0, the first commanded one from step 2, the later one from step 5
+    assert present[2, :].all() and not present[0, :2].any() and present[0, 2:].all()
+    assert not present[1, :2 + later].any() and rows[1, 2 + later:].tolist() == list(range(N_LOOK + 1 - later))
     assert calls[0] == (0, 2 + N_LOOK + 1)
     # its words are recorded at its own steps
     assert window.allowed[next(iter(window.allowed))][1, :STEPS].any()
@@ -169,7 +175,7 @@ def test_the_rounds_are_one_aircraft_a_scene_and_only_there_from_the_first_predi
     later = _window_speaker(traffic, one, geometry, [signals, signals], [0, 0], [0, 2], [[]])
     with pytest.raises(ValueError, match="from its first predicted step"):
         later.speak(np.array([0, 1]), np.zeros(2, dtype=bool))
-    with pytest.raises(ValueError, match="its first at offset 0"):
-        _window_speaker(traffic, one, geometry, [signals, signals], [0, 0], [1, 2], [[]])
+    with pytest.raises(ValueError, match="every scene commands an aircraft"):
+        _window_speaker(traffic, one, geometry, [signals, signals], [0, 2], [0, 0], [[], []])
     with pytest.raises(ValueError, match="traffic attention"):
         _window_speaker(_model(Words(one)), one, geometry, [signals], [0], [0], [[]])

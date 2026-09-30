@@ -4,12 +4,12 @@ its first `N_LOOK` rows observed, then the caller's — and the scene's other ai
 `scene_speaker`. With one commanded aircraft a scene it says what `scene_speaker.SceneSpeaker` says, word for word, up to
 each aircraft's end (tests).
 
-**Steps and places.** A scene's first commanded aircraft is its reference: batch step ``pre`` is the references' row 0
-(``pre`` the most any replayed aircraft of any scene is in the air before its reference, at most ``history``, as in
-`scene_speaker`), and each other commanded aircraft enters its ``offset`` in steps after its reference. On the model's
-aircraft axis a scene holds its reference first, its replayed aircraft next — laid out by `scene_speaker.scene_inputs`,
-the one layout — then its other commanded aircraft. A commanded aircraft is there from its row 0 over the rows it has:
-the caller appends one a step while it flies (`advance`); one no longer appended — its flight over — has left.
+**Steps and places.** The caller places everything on the batch's steps: each commanded aircraft's row 0 at its
+``start`` (a batch step, ≥ 0), each replayed aircraft's at its `Node.first_step` (negative when it is in the air before
+the batch's first step: it enters there at its own later row, as `scene_speaker.scene_inputs` places one). On the model's
+aircraft axis a scene holds its commanded aircraft first, in its order, then its replayed ones. A commanded aircraft is
+there from its row 0 over the rows it has: the caller appends one a step while it flies (`advance`); one no longer
+appended — its flight over — has left. The first step spoken at is the earliest first predicted step.
 
 **One encoding a step, the words picked in rounds** (design §2.6, §9 item 24): the model encodes every aircraft of every
 scene once a step; the caller ranks the aircraft that speak at the step (``rank``: its approach clock's order, front
@@ -41,13 +41,15 @@ import torch
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import Words
-from ts_transformer.prior.data import SINCE_SCALE, STEP_FEATURES, VARIANTS, own_context, rows_inputs
+from ts_transformer.prior.data import (
+    SINCE_SCALE, STATIC_FEATURES, STEP_FEATURES, VARIANTS, own_context, rows_inputs,
+)
 from ts_transformer.prior.generate import VOCABULARY_COLUMNS, vocabulary_allowed
 from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.scene import N_LOOK, Landings, utc_s
 from ts_transformer.prior.scene_data import Node
-from ts_transformer.prior.scene_speaker import BLOCK_STEPS, scene_inputs
+from ts_transformer.prior.scene_speaker import BLOCK_STEPS
 
 
 class WindowSpeaker:
@@ -55,16 +57,15 @@ class WindowSpeaker:
 
     def __init__(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
                  landings: Mapping[str, Landings] | None, words: Words, *, scenes: Sequence[int],
-                 offsets: Sequence[int], others: Sequence[Sequence[Node]], edges: Callable[[int, int], np.ndarray],
-                 masks: Callable[[int, np.ndarray, np.ndarray], np.ndarray], mask_columns: Sequence[int], history: int,
+                 starts: Sequence[int], others: Sequence[Sequence[Node]], edges: Callable[[int, int], np.ndarray],
+                 masks: Callable[[int, np.ndarray, np.ndarray], np.ndarray], mask_columns: Sequence[int],
                  max_rows: int, generator: torch.Generator, procedure_masks: ProcedureMasks, temperature: float = 1.0,
                  scene_landings: Sequence[Landings] | None = None) -> None:
-        """``flights`` (with ``geometries``): the commanded aircraft; ``scenes``: each one's scene (0 … S − 1, a scene's
-        first one its reference); ``offsets``: each one's row 0 in steps after its reference's (the reference's 0);
-        ``others``: per scene, its replayed aircraft (`Node.first_step` from its reference's row 0); ``history``: the most
-        steps read before the references' row 0; ``max_rows``: the most rows any aircraft will have; ``landings``: each
-        airport's landing context, None for a variant without it; ``scene_landings``: each AIRCRAFT's scene's landings
-        (an augmented scene moves or adds some; None: the airport's)."""
+        """``flights`` (with ``geometries``): the commanded aircraft; ``scenes``: each one's scene (0 … S − 1, in its
+        scene's order); ``starts``: the batch step each one's row 0 is at; ``others``: per scene, its replayed aircraft
+        (`Node.first_step`: the batch step its row 0 is at); ``max_rows``: the most rows any aircraft will have;
+        ``landings``: each airport's landing context, None for a variant without it; ``scene_landings``: each AIRCRAFT's
+        scene's landings (an augmented scene moves or adds some; None: the airport's)."""
         if not model.traffic_features:
             raise ValueError("a scene is spoken to through a traffic prior's traffic attention (`model.with_traffic`)")
         if VARIANTS[model.config.variant].landing_context != (landings is not None):
@@ -72,12 +73,11 @@ class WindowSpeaker:
         if max_rows > model.config.max_rows:
             raise ValueError(f"{max_rows} rows, the model's positions end at {model.config.max_rows}")
         count = len(flights)
-        scene, offset = np.asarray(scenes, dtype=np.int64), np.asarray(offsets, dtype=np.int64)
-        if len(scene) != count or len(offset) != count or len(geometries) != count:
-            raise ValueError("a scene, an offset and a geometry per commanded aircraft")
-        members = [np.flatnonzero(scene == w) for w in range(len(others))]
-        if len(set(scene.tolist())) != len(others) or any(offset[m[0]] != 0 for m in members) or (offset < 0).any():
-            raise ValueError("every scene commands an aircraft, its first at offset 0, the rest at or after it")
+        scene, start = np.asarray(scenes, dtype=np.int64), np.asarray(starts, dtype=np.int64)
+        if len(scene) != count or len(start) != count or len(geometries) != count:
+            raise ValueError("a scene, a start and a geometry per commanded aircraft")
+        if sorted(set(scene.tolist())) != list(range(len(others))) or (start < 0).any():
+            raise ValueError("every scene commands an aircraft, each from a batch step at or after the first")
         self.model, self.geometries, self.generator, self.temperature = model, list(geometries), generator, temperature
         self.words, self.edges_of, self.masks_of = words, edges, masks
         self.mask_columns = tuple(mask_columns)
@@ -116,21 +116,20 @@ class WindowSpeaker:
         self.value = np.zeros((count, 6), dtype=np.int64)
         self.said_row = np.zeros((count, 6), dtype=np.int64)
         # places (module docstring)
-        self.scene, self.offset = scene, offset
+        self.scene, self.start = scene, start
         self.others = [tuple(nodes) for nodes in others]
-        self.references = np.array([m[0] for m in members])
-        self.pre = min(history, max([0] + [-node.first_step for nodes in self.others for node in nodes]))
-        self.start = self.pre + offset
         self.slot = np.zeros(count, dtype=np.int64)
-        for w, m in enumerate(members):
-            self.slot[m[1:]] = 1 + len(self.others[w]) + np.arange(len(m) - 1)
-        self.aircraft = max(len(m) + len(nodes) for m, nodes in zip(members, self.others))
-        self.airport = torch.tensor([model.config.airports.index(flights[i].airport) for i in self.references],
+        commanded = [np.flatnonzero(scene == w) for w in range(len(others))]
+        for m in commanded:
+            self.slot[m] = np.arange(len(m))
+        self.commanded = [len(m) for m in commanded]
+        self.aircraft = max(len(m) + len(nodes) for m, nodes in zip(commanded, self.others))
+        self.airport = torch.tensor([model.config.airports.index(flights[m[0]].airport) for m in commanded],
                                     device=device)
-        self.past = model.no_past(len(others) * self.aircraft, self.pre + int(offset.max()) + max_rows)
+        self.past = model.no_past(len(others) * self.aircraft, int(start.max()) + max_rows)
         self.steps_encoded = 0
-        #: the batch step spoken at: the references' first predicted step first
-        self.step = self.pre + N_LOOK
+        #: the batch step spoken at: the earliest first predicted step first
+        self.step = int(start.min()) + N_LOOK
         steps = max_rows - N_LOOK
         #: per masked column, each aircraft's step: the probability the model put on what the masks removed, and the
         #: classes they allowed, bit-packed (`generate.allowed_classes` unpacks them)
@@ -233,28 +232,45 @@ class WindowSpeaker:
         return h[scene, slot, -1][:, None, None], tokens[scene, slot, -1][:, None, None], valid[scene]
 
     def _encode(self, first: int, last: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Batch steps ``first … last − 1`` encoded (module docstring: the references and the replayed as
-        `scene_inputs` lays them out, the other commanded aircraft after them): ``(h, tokens, valid)`` of every aircraft
-        on them."""
-        refs = self.references
-        own = {"features": self.features[refs], "relative": self.relative[refs], "in_force": self.in_force[refs],
-               "since": self.since[refs]}
-        inputs = scene_inputs(own, self.rows[refs].tolist(), self.others, self.pre, self.aircraft, first, last)
-        extra = np.flatnonzero(self.slot > 0)
-        rows = np.arange(first, last)[None, :] - self.start[extra, None]
-        k, t = np.nonzero((rows >= 0) & (rows < self.rows[extra, None]))
-        if len(k):
-            device = inputs["features"].device
-            a = torch.as_tensor(extra[k], device=device)
-            r = torch.as_tensor(rows[k, t], device=device)
-            w, s, t = (torch.as_tensor(v, device=device) for v in (self.scene[extra[k]], self.slot[extra[k]], t))
+        """Batch steps ``first … last − 1`` encoded (module docstring: every scene's commanded aircraft at their rows,
+        then its replayed ones at theirs, as `scene_speaker.scene_inputs` places them): ``(h, tokens, valid)`` of every
+        aircraft on them."""
+        scenes, steps, device = len(self.others), last - first, self.features.device
+        shape = (scenes, self.aircraft, steps)
+        inputs = {"features": torch.zeros(shape + (self.features.shape[-1],), device=device),
+                  "relative": torch.zeros(shape + tuple(self.relative.shape[2:]), device=device),
+                  "in_force": torch.zeros(shape + (6,), dtype=torch.long, device=device),
+                  "since": torch.zeros(shape + (6,), device=device),
+                  "static": torch.zeros((scenes, self.aircraft, len(STATIC_FEATURES)), device=device),
+                  "present": torch.zeros(shape, dtype=torch.bool, device=device),
+                  "rows": torch.zeros(shape, dtype=torch.long, device=device)}
+        # the commanded aircraft, at their rows
+        rows = np.arange(first, last)[None, :] - self.start[:, None]
+        i, t = np.nonzero((rows >= 0) & (rows < self.rows[:, None]))
+        if len(i):
+            a, r = torch.as_tensor(i, device=device), torch.as_tensor(rows[i, t], device=device)
+            w, s, t = (torch.as_tensor(v, device=device) for v in (self.scene[i], self.slot[i], t))
             for name in ("features", "relative", "in_force", "since"):
                 inputs[name][w, s, t] = getattr(self, name)[a, r]
             inputs["present"][w, s, t] = True
             inputs["rows"][w, s, t] = r
-        edges = torch.as_tensor(self.edges_of(first, last), dtype=inputs["features"].dtype,
-                                device=inputs["features"].device)
-        expected = (len(self.others), last - first, self.aircraft, self.aircraft, len(self.model.traffic_features))
+        # the replayed ones, at theirs (one in the air before the batch's first step enters there at a later row)
+        for b, nodes in enumerate(self.others):
+            for k, node in enumerate(nodes, start=self.commanded[b]):
+                low, high = max(first, node.first_step), min(last, node.first_step + node.rows)
+                if low >= high:
+                    continue
+                span, own = slice(low - first, high - first), slice(low - node.first_step, high - node.first_step)
+                inputs["features"][b, k, span] = torch.as_tensor(node.features[own], device=device)
+                inputs["relative"][b, k, span, : node.relative.shape[1]] = torch.as_tensor(node.relative[own],
+                                                                                          device=device)
+                inputs["in_force"][b, k, span] = torch.as_tensor(node.in_force[own], device=device)
+                inputs["since"][b, k, span] = torch.as_tensor(node.since[own], device=device)
+                inputs["static"][b, k] = torch.as_tensor(node.static, device=device)
+                inputs["present"][b, k, span] = True
+                inputs["rows"][b, k, span] = torch.arange(low - node.first_step, high - node.first_step, device=device)
+        edges = torch.as_tensor(self.edges_of(first, last), dtype=inputs["features"].dtype, device=device)
+        expected = (scenes, steps, self.aircraft, self.aircraft, len(self.model.traffic_features))
         if tuple(edges.shape) != expected:
             raise ValueError(f"edge features {tuple(edges.shape)}, the steps encoded need {expected}")
         h, tokens, valid, self.past = self.model.extend(inputs["features"], inputs["relative"], inputs["static"],
