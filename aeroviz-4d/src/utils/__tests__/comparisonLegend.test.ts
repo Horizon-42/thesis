@@ -34,6 +34,14 @@ function index(groups: ComparisonGroup[]): ComparisonIndex {
 }
 
 describe("buildComparisonLegend", () => {
+  it("names a pass on another runway apart from the same-runway pass", () => {
+    const result = buildComparisonLegend(index([
+      group("pass", "05L", "solved", ["ref-pass", "look-pass", "pred-pass"]),
+      group("other", "05L", "otherRunway", ["ref-other", "look-other", "pred-other"]),
+    ]), null);
+    expect(result.statuses).toEqual(["predictionPass", "predictionOtherRunway"]);
+  });
+
   it("describes only the displayed optimizer-category paths and all verdict colours", () => {
     const result = buildComparisonLegend(index([
       group("solved", "05L", "solved", ["ref-solved", "opt-solved", "sim-solved"]),

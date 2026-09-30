@@ -703,3 +703,20 @@ that divergence is a known open item (see the README's "Future Improvements").
   时一起重建**（`open_flights`：一次 `rebuild_series`，划分的信号、程序文件和到达清单各读一次；约 3 s，只一次），之后留在进程里，
   集合里每架航班的请求都是毫秒级（原来每架新航班重建 1.5–2 s）。
   后端不热更新：改了这部分要重启后端。
+
+### AV40 · a prediction that passed on another runway has its own status and colour (2026-09-30)
+
+The two-tier generation records (ts runner R35) are graded against the OBSERVED flight's runway; the grading (R38) grades
+every sentence that crossed another runway again on that runway. The publisher hands that grading's evaluation report to
+`build_scenario_comparison_czml.py --landed-runway-report`: such a flight takes the landed-runway verdict and its
+deviations; passing there is **status `otherRunway`**, failing there `offTarget`; its index record names `landedRunway` and
+`observedRunwayVerdict`. The frontend paints `otherRunway` in `PREDICTION_OTHER_RUNWAY_COLOR` (light sky blue
+`rgb(110, 200, 235)`) — never the same-runway pass green, on the user's word — for both prediction halves (the lookback
+faded, as AV16), names it in the legend ("Prediction pass on another runway") and in the flight list
+(`flight-table-otherrunway`, its title naming the landed runway). `isComparisonGroup` accepts the status; an index with an
+unknown status is still refused whole (and `otherRunway` without a `landedRunway`), so **the frontend must know a
+status before any index carries it**. The category's evaluation report, its `evaluation` block and the Details window
+stay graded on the OBSERVED flight's runway; the summary's terminal-compliance section counts the `otherRunway` flights
+apart ("not counted as a pass below"), and the builder refuses a landed verdict that is not a solved pass / fail /
+indeterminate on another runway.
+

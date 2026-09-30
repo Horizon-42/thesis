@@ -989,6 +989,14 @@ augmented run's category** carries no ADE / FDE (the builder's `accuracy` is dro
 the viewer draws the observed flight by its key, i.e. the SOURCE flight where it flew, not the moved track the records
 hold (drawing that would need a builder + viewer change). The v11 records are registered as
 `generation_records_v11_20260930`.
+**With the grading (R38, 2026-09-30)**: a run is published only graded (`grading/grading.json`); its rows add the pass
+rate on the landed runway, the sentences graded again there, and on real starts the arrival endpoint error, the final time
+error and the late share (over the landed sentences); the label shows both pass rates; the builder takes the landed-runway
+report (`--landed-runway-report`), so a sentence that passed on another runway is drawn in its own colour (status
+`otherRunway`, viewer AV40). Publication record `ts-generation-records-publication-v2`. `--refresh-published` brings the
+categories these records published before the grading (record v1) up to date IN PLACE — the CZML built again (a new
+generation, the old pruned), label / rows / record replaced; refused for a category never published, published from other
+records, or already current.
 
 ### R36 · `run_ts.py window_training_export` — multi-aircraft windows for the frontend's Training module (Training module §2.9)
 

@@ -528,6 +528,7 @@ def build_runway_comparison(
     scenario_initial: dict[tuple[str, str], dict[str, float]] | None = None,
     verdicts: dict[str, dict[str, Any]] | None = None,
     include_reference_entities: bool = True,
+    landed_verdicts: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Combined CZML for one runway **plus** its index records (every flight on one map).
 
@@ -543,6 +544,12 @@ def build_runway_comparison(
     off-target; ``indeterminate`` remains distinct. Final deviations are copied onto the
     index record (``lateralErrM``/``verticalErrM``). ``None`` (no report) keeps every solved
     flight plain "solved".
+
+    ``landed_verdicts`` (the same keys): the verdicts of the flights graded again on the runway
+    they LANDED on rather than the observed flight's (the two-tier generation records' grading,
+    ts runner R38). Such a flight takes that verdict and its deviations; one that passes there is
+    ``otherRunway`` — passed, but on another runway than the observed flight's, drawn in its own
+    colour — and its record names the ``landedRunway`` and the ``observedRunwayVerdict``.
 
     Every entity gets a globally-unique id ``{kind}-{group}`` where ``group`` is the
     flight_key stem of the record filename, and a ``properties`` bag (``group``/``kind``/…).
@@ -605,13 +612,25 @@ def build_runway_comparison(
             # The evaluation verdict for this flight (joined by the summary row's eval_file):
             # solved-but-outside-the-gates renders as "off target" (yellow reference).
             verdict = (verdicts or {}).get(result.get("eval_file") or "")
+            # graded again on the runway it landed on: that verdict stands (its own status if it passes)
+            landed = (landed_verdicts or {}).get(result.get("eval_file") or "")
+            observed_verdict = verdict.get("verdict") if verdict is not None else None
+            if landed is not None:
+                # graded again only where the sentence crossed the runway it pointed at — another one than this
+                # group's, a solved record with a verdict (ts runner R38); anything else is refused, never read as a pass
+                if (not landed["solved"] or landed["verdict"] not in ("pass", "fail", "indeterminate")
+                        or landed["runway"] == runway):
+                    raise ValueError(f"{group}: the landed-runway verdict {landed['verdict']!r} on {landed['runway']} "
+                                     f"(solved {landed['solved']}) is not one of another runway's graded verdicts")
+                verdict = landed
             terminal_verdict = verdict.get("verdict") if verdict is not None else None
             off_target = verdict is not None and verdict.get("solved") \
                 and terminal_verdict == "fail"
             indeterminate = verdict is not None and verdict.get("solved") \
                 and terminal_verdict == "indeterminate"
             status = "offTarget" if off_target else (
-                "indeterminate" if indeterminate else "solved"
+                "indeterminate" if indeterminate else
+                "otherRunway" if landed is not None and terminal_verdict == "pass" else "solved"
             )
             offset = _record_offset(state_data)
             # Terminal-verdict colouring is reserved for optimizer results. Learned
@@ -700,6 +719,9 @@ def build_runway_comparison(
                 record["lateralErrM"] = verdict.get("lateral_m")
                 record["verticalErrM"] = verdict.get("vertical_m")
                 record["terminalVerdict"] = terminal_verdict
+            if landed is not None:
+                record["landedRunway"] = landed["runway"]
+                record["observedRunwayVerdict"] = observed_verdict
             index_records.append(record)
         else:
             if include_reference_entities:
@@ -1008,8 +1030,11 @@ def publish_comparison_batch(
     evaluation_report: dict[str, Any] | None,
     generation: str | None = None,
     max_groups_per_czml: int | None = None,
+    landed_runway_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build and atomically publish one complete comparison generation.
+    """Build and atomically publish one complete comparison generation. ``landed_runway_report``:
+    the evaluation report of the flights graded again on the runway they landed on
+    (`build_runway_comparison`'s ``landed_verdicts``); the published report stays the category's.
 
     Every CZML and the report receive an immutable generation suffix. They are
     written first; ``comparison_index.json`` is atomically replaced last and is therefore
@@ -1031,6 +1056,10 @@ def publish_comparison_batch(
         )
 
     verdicts = load_verdicts(evaluation_report)
+    landed_verdicts = None if landed_runway_report is None else load_verdicts(landed_runway_report)
+    unknown = sorted(set(landed_verdicts or ()) - set(verdicts))
+    if unknown:
+        raise ValueError(f"the landed-runway report grades flights the category does not hold: {unknown[:3]}")
     groups = group_results_by_runway(summary, fallback_airport=airport)
     index: dict[str, Any] = {
         "schemaVersion": "comparison-v2-generation",
@@ -1057,6 +1086,7 @@ def publish_comparison_batch(
                     scenario_initial=scenario_initial,
                     verdicts=verdicts,
                     include_reference_entities=False,
+                    landed_verdicts=landed_verdicts,
                 )
                 suffix = f"_p{part_index + 1:03d}" if len(parts) > 1 else ""
                 out_path = (
@@ -1072,10 +1102,11 @@ def publish_comparison_batch(
                 off_target = sum(
                     1 for record in records if record["status"] == "offTarget"
                 )
+                other_runway = sum(1 for record in records if record["status"] == "otherRunway")
                 print(
                     f"✓ staged {out_path.name}: {len(records)} group(s), "
-                    f"{failed} unsolved (red), {off_target} off-target (yellow) "
-                    f"-> {len(czml)} packets"
+                    f"{failed} unsolved (red), {off_target} off-target (yellow), "
+                    f"{other_runway} passed on another runway -> {len(czml)} packets"
                 )
 
         index["optimization"] = optimization_stats(summary, evaluation_report)
@@ -1241,6 +1272,12 @@ def main() -> None:
         help="repository-relative checkpoint path shown in experiment metadata",
     )
     parser.add_argument(
+        "--landed-runway-report", default=None,
+        help="batch mode: the evaluation report of the flights graded again on the runway they LANDED on (the "
+             "two-tier generation records' grading, ts runner R38); such a flight takes that verdict, and one "
+             "passing there is status otherRunway",
+    )
+    parser.add_argument(
         "--constrained", action="store_true",
         help="mark --category as a constrained-optimization category (its solves enforce "
              "the runway's RNAV procedure); stamped into the manifest as an explicit field "
@@ -1261,6 +1298,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.state_file and args.landed_runway_report:
+        parser.error("--landed-runway-report grades a --summary batch, not one --state-file")
     if args.state_file:
         if not args.output:
             parser.error("--state-file requires --output")
@@ -1312,6 +1351,8 @@ def main() -> None:
         scenario_initial=scenario_initial,
         evaluation_report=evaluation_report,
         max_groups_per_czml=args.max_groups_per_czml,
+        landed_runway_report=(json.loads(Path(args.landed_runway_report).read_text(encoding="utf-8"))
+                              if args.landed_runway_report else None),
     )
     groups = group_results_by_runway(summary, fallback_airport=args.airport)
     files = len({

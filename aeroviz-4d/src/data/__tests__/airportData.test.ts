@@ -201,6 +201,19 @@ describe("airportData helpers", () => {
     expect(isComparisonIndex({ ...current, referenceSource: undefined })).toBe(false);
     expect(isComparisonIndex({ ...current, evaluationReport: undefined })).toBe(false);
   });
+
+  it("accepts a group that passed on another runway, naming the runway it landed on", () => {
+    const group = { group: "X_05L", flightId: "X", runway: "05L", airport: "KRDU", czml: "c.czml", entities: ["pred-X_05L"],
+                    status: "otherRunway", landedRunway: "05R", observedRunwayVerdict: "fail" };
+    const index = { schemaVersion: "comparison-v2-generation", generation: "g", epoch: "2026-09-30T00:00:00Z",
+                    startHidden: true, referenceSource: "canonicalObserved", evaluationReport: "r.json", groups: [group] };
+    expect(isComparisonIndex(index)).toBe(true);
+    expect(isComparisonIndex({ ...index, groups: [{ ...group, landedRunway: 5 }] })).toBe(false);
+    expect(isComparisonIndex({ ...index, groups: [{ ...group, status: "elsewhere" }] })).toBe(false);
+    const { landedRunway: _landed, ...unnamed } = group;
+    expect(isComparisonIndex({ ...index, groups: [unnamed] })).toBe(false);          // which runway, then?
+    expect(isComparisonIndex({ ...index, groups: [{ ...group, observedRunwayVerdict: "maybe" }] })).toBe(false);
+  });
 });
 
 describe("experiment intent and parameter rows", () => {

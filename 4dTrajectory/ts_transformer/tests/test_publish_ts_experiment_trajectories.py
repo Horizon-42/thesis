@@ -1419,6 +1419,8 @@ def _builder(calls: list[list[str]]):
         _write_json(out / "comparison_index.json", {"groups": []})
         manifest = out.parent / "categories.json"
         categories = json.loads(manifest.read_text())["categories"] if manifest.exists() else []
+        # the builder upserts: a category built again replaces its entry (`_upsert_category`)
+        categories = [category for category in categories if category["key"] != value["--category"]]
         categories.append({"key": value["--category"], "label": value["--category-label"], "dir": out.name, "groups": 2,
                            "constrained": False, "datasetSplit": "val", "resultSource": "experiment",
                            "experiment": {"id": value["--experiment-id"], "group": value["--experiment-group"],
@@ -1527,6 +1529,16 @@ def _generation_records(tmp_path: Path, intent_registry: Path, *, partial=None, 
         "readouts": {kind: {"KXXX": {**block, "recorded": 2 if kind == "labelled" else 1}}
                      for kind in ("labelled", "sample_0")},
         "sentences": sentences})
+    grading = {kind: {"KXXX": {"pass_rate_landed_runway": 0.75, "ending_on_another_runway": 1,
+                               "graded_again": {"sentences": 3 if kind == "sample_0" else 0,
+                                                "verdicts": {"pass": 2, "fail": 1} if kind == "sample_0" else {}},
+                               "arrival_endpoint_error_m": {"median": 38.0, "p95": 69.0},
+                               "final_time_error_s": {"median": -9.0, "p95": 23.0}, "late_share": 0.28}}
+               for kind in ("labelled", "sample_0")}
+    _write_json(run / "grading" / "grading.json", {"schema": publisher.GENERATION_GRADING_SCHEMA,
+                                                   "timing_read": augment_seed is None, "readouts": grading})
+    _write_json(run / "grading" / "landed_runway" / "sample_0" / "KXXX" / "evaluation_report.json",
+                {"schema_version": "v9", "trajectories": []})
     registry = json.loads(intent_registry.read_text())
     registry["campaigns"]["generation_campaign"] = {
         "title": "The prior's own sentences", "intent": "How far and how well do they fly?",
@@ -1536,9 +1548,11 @@ def _generation_records(tmp_path: Path, intent_registry: Path, *, partial=None, 
 
 
 def test_the_generation_names_mirror_the_runner():
+    from ts_transformer.experiments.prior_generation_grading import GRADING_SCHEMA
     from ts_transformer.experiments.prior_generation_records import HORIZON, PREDICTORS, RECORDS_SCHEMA
 
     assert publisher.GENERATION_RECORDS_SCHEMA == RECORDS_SCHEMA
+    assert publisher.GENERATION_GRADING_SCHEMA == GRADING_SCHEMA
     assert (publisher.GENERATION_PREDICTORS, publisher.GENERATION_HORIZON) == (PREDICTORS, HORIZON)
 
 
@@ -1553,6 +1567,10 @@ def test_generation_records_publish_one_category_per_kind_and_airport(monkeypatc
     # the runner's own grading, never re-run; the producer named by its place under the outputs tree
     assert calls[1][calls[1].index("--evaluation-report") + 1] == str(run / "records" / "sample_0" / "KXXX" / "evaluation_report.json")
     assert calls[1][calls[1].index("--experiment-checkpoint") + 1] == "4dTrajectory/outputs/POOLED/prior/base"
+    # the landed-runway grading's verdicts go to the builder where the grading graded a sentence again, nowhere else
+    assert calls[1][calls[1].index("--landed-runway-report") + 1] == str(
+        run / "grading" / "landed_runway" / "sample_0" / "KXXX" / "evaluation_report.json")
+    assert "--landed-runway-report" not in calls[0]
     categories = {c["key"]: c for c in json.loads((frontend / "KXXX" / "comparison" / "categories.json").read_text())["categories"]}
     assert set(categories) == {"experiment_generation_reread_val_base_400x4_labelled_val",
                                "experiment_generation_reread_val_base_400x4_sample_0_val"}
@@ -1564,6 +1582,10 @@ def test_generation_records_publish_one_category_per_kind_and_airport(monkeypatc
     assert experiment["intent"]["run"] == "base on val, 4 sentences a flight."
     rows = {(row["section"], row["name"]): row["value"] for row in experiment["parameters"]}
     assert rows[("Sentences", "pass rate (every sentence)")] == "0.500" and rows[("Sentences", "ADE median (m)")] == "480"
+    assert rows[("Landed runway", "pass rate on the runway it landed on")] == "0.750"
+    assert rows[("Landed runway", "graded again there (passed)")] == "3 (2)"
+    assert rows[("Time and place (landed)", "arrival endpoint error p50 / p95 (m)")] == "38 / 69"
+    assert "75.0% on the landed runway" in categories["experiment_generation_reread_val_base_400x4_sample_0_val"]["label"]
     manifest = json.loads((published / "generation" / "reread" / "val_base_400x4" / "sample_0" / "KXXX" / "val"
                            / "publication.json").read_text())
     assert manifest["schemaVersion"] == publisher.GENERATION_PUBLICATION_SCHEMA and manifest["kind"] == "sample_0"
@@ -1634,3 +1656,54 @@ def test_the_generation_mode_refuses_the_checkpoint_flags_and_the_other_modes(tm
     with pytest.raises(SystemExit):
         publisher.main(base)
     assert "is not under a 4dTrajectory/outputs/ tree" in capsys.readouterr().err
+
+
+def test_a_category_published_before_the_grading_is_refreshed_in_place(monkeypatch, tmp_path, intent_registry):
+    run = _generation_records(tmp_path, intent_registry)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(publisher.subprocess, "run", _builder(calls))
+    frontend, published = tmp_path / "frontend", tmp_path / "published"
+    roots = ["--output-root", str(published), "--frontend-airports-root", str(frontend)]
+    base = ["--generation-records", str(run), "--generation-campaign", "generation_campaign", "--kind", "sample_0", *roots]
+    # never published: nothing to refresh
+    assert publisher.main([*base, "--refresh-published"]) == 1 and calls == []
+    assert publisher.main(base) == 0
+    manifest = published / "generation" / "reread" / "val_base_400x4" / "sample_0" / "KXXX" / "val" / "publication.json"
+    # as the code before the grading wrote it
+    document = json.loads(manifest.read_text())
+    _write_json(manifest, {**document, "schemaVersion": publisher.GENERATION_PUBLICATION_SCHEMA_REFRESHED})
+    assert publisher.main([*base, "--refresh-published"]) == 0 and len(calls) == 2
+    assert "--landed-runway-report" in calls[1]
+    assert json.loads(manifest.read_text())["schemaVersion"] == publisher.GENERATION_PUBLICATION_SCHEMA
+    (category,) = json.loads((frontend / "KXXX" / "comparison" / "categories.json").read_text())["categories"]
+    assert "on the landed runway" in category["label"]
+    # a current record is not refreshed again; nor one published from other records
+    assert publisher.main([*base, "--refresh-published"]) == 1
+    _write_json(manifest, {**document, "schemaVersion": publisher.GENERATION_PUBLICATION_SCHEMA_REFRESHED,
+                           "recordsRun": "elsewhere"})
+    assert publisher.main([*base, "--refresh-published"]) == 1 and len(calls) == 2
+
+
+def test_a_grading_that_does_not_match_its_landed_runway_reports_or_schema_is_refused(tmp_path, intent_registry, capsys):
+    run = _generation_records(tmp_path, intent_registry)
+    base = ["--generation-records", str(run), "--generation-campaign", "generation_campaign",
+            "--output-root", str(tmp_path / "published"), "--frontend-airports-root", str(tmp_path / "frontend")]
+    report = run / "grading" / "landed_runway" / "sample_0" / "KXXX" / "evaluation_report.json"
+    # sentences graded again, no report
+    report.rename(tmp_path / "moved.json")
+    with pytest.raises(SystemExit):
+        publisher.main([*base, "--dry-run"])
+    assert "is missing" in capsys.readouterr().err
+    # a report where nothing was graded again
+    (tmp_path / "moved.json").rename(report)
+    _write_json(run / "grading" / "landed_runway" / "labelled" / "KXXX" / "evaluation_report.json", {"trajectories": []})
+    with pytest.raises(SystemExit):
+        publisher.main([*base, "--dry-run"])
+    assert "exists" in capsys.readouterr().err
+    # another grading schema
+    grading = json.loads((run / "grading" / "grading.json").read_text())
+    _write_json(run / "grading" / "grading.json", {**grading, "schema": "ts-prior-generation-grading-v0"})
+    with pytest.raises(SystemExit):
+        publisher.main(base)
+    assert "ts-prior-generation-grading-v0" in capsys.readouterr().err
+

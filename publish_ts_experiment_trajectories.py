@@ -59,7 +59,9 @@ like the executor's replay, not a checkpoint. `GenerationRecords` / `GenerationP
 kind (``labelled``, ``sample_<k>``) of each airport as one Experiments category, named from the readout (the run = the
 readout's name, registered under CAMPAIGN), with the runner's own evaluation report and its ``records.json`` numbers as
 parameter rows; a partial run is refused; a category that exists is refused, never overwritten. Its manifest has its
-own schema (`GENERATION_PUBLICATION_SCHEMA`).
+own schema (`GENERATION_PUBLICATION_SCHEMA`). A run is published graded (ts runner R38: the pass rate on the landed
+runway; the builder draws a pass on another runway in its own colour), and ``--refresh-published`` brings a category
+these records published before the grading up to date in place — the one exception to "never overwritten".
 
 Outer-test is not a valid option here.  This command is for development train/validation
 inspection (and a day partition's held-out days) only.
@@ -1780,8 +1782,15 @@ def run_executor_publication(plan: ExecutorPublicationPlan, *, dry_run: bool) ->
 GENERATION_RECORDS_SCHEMA = "ts-prior-generation-records-v1"
 GENERATION_PREDICTORS = {"labelled": "executor", "prior": "prior"}
 GENERATION_HORIZON = "sentence"
-#: Its own publication record, passed by the checkpoint refresh and the publication index like the executor's.
-GENERATION_PUBLICATION_SCHEMA = "ts-generation-records-publication-v1"
+#: MIRROR of the grading runner's schema (`experiments.prior_generation_grading.GRADING_SCHEMA`, ts runner R38): every
+#: published run carries its grading — the pass rate on the runway each sentence landed on, FDE's time and place.
+GENERATION_GRADING_SCHEMA = "ts-prior-generation-grading-v1"
+#: Its own publication record, passed by the checkpoint refresh and the publication index like the executor's. v2
+#: (2026-09-30): the grading is published with it (the landed-runway verdicts, `status: otherRunway`).
+GENERATION_PUBLICATION_SCHEMA = "ts-generation-records-publication-v2"
+#: The record a category published by the code before the grading carries; only `--refresh-published` reads it, to
+#: find the categories it brings to v2 in place.
+GENERATION_PUBLICATION_SCHEMA_REFRESHED = "ts-generation-records-publication-v1"
 #: What an augmented run's category shows as its reference: the viewer draws the observed flight by its key
 #: (`referenceSource: canonicalObserved`), i.e. the SOURCE flight where it flew — not the moved track the records hold.
 GENERATION_AUGMENTED_VIEW = ("the white track is the source flight where it really flew; the model flew from its start "
@@ -1800,13 +1809,18 @@ class GenerationRecords:
 
     directory: Path
     document: dict[str, Any]
+    grading: dict[str, Any]
 
     @classmethod
     def open(cls, directory: Path) -> "GenerationRecords":
-        """Refused unless it is this schema, a whole run (not ``--chunks``) and a development split. A relative
-        ``directory`` is the repository's, kept lexical (`ExecutorReplay.open`)."""
+        """Refused unless it is this schema, a whole run (not ``--chunks``), graded (``grading/grading.json``, R38)
+        and a development split. A relative ``directory`` is the repository's, kept lexical (`ExecutorReplay.open`)."""
         directory = directory if directory.is_absolute() else REPO_ROOT / directory
         document = _load_object(directory / "records.json")
+        grading = _load_object(directory / "grading" / "grading.json")
+        if grading["schema"] != GENERATION_GRADING_SCHEMA:
+            raise ValueError(f"{directory / 'grading' / 'grading.json'} is a {grading['schema']} file, not "
+                             f"{GENERATION_GRADING_SCHEMA}")
         if document["schema"] != GENERATION_RECORDS_SCHEMA:
             raise ValueError(f"{directory / 'records.json'} is a {document['schema']} file, not {GENERATION_RECORDS_SCHEMA}")
         if document["partial"] is not None:
@@ -1815,9 +1829,12 @@ class GenerationRecords:
         if document["readout"]["split"] not in DEVELOPMENT_SPLITS:
             raise ValueError(f"{directory} is of the {document['readout']['split']!r} readout; only "
                              f"{DEVELOPMENT_SPLITS} are published")
-        records = cls(directory, document)
+        records = cls(directory, document, grading)
         for kind in ("labelled", "sample_0"):      # each producer named under the outputs tree, or refused here
             records.producer(kind)
+        for kind in records.kinds:                 # the grading's reports agree with its counts, before any plan runs
+            for airport in records.airports(kind):
+                records.landed_runway_report(kind, airport)
         return records
 
     @property
@@ -1862,6 +1879,16 @@ class GenerationRecords:
             raise ValueError(f"{path} is not under a {mark} tree")
         return path[path.rindex(mark):]
 
+    def landed_runway_report(self, kind: str, airport: str) -> Path | None:
+        """The evaluation report of this kind's sentences at ``airport`` graded again on the runway they landed on
+        (R38), or None when none was: the grading writes that directory exactly when it graded one."""
+        again = self.grading["readouts"][kind][airport]["graded_again"]["sentences"]
+        report = self.directory / "grading" / "landed_runway" / kind / airport / "evaluation_report.json"
+        if (again > 0) != report.is_file():
+            raise ValueError(f"{self.directory}: the grading graded {again} {kind} sentences at {airport} again, but "
+                             f"{report} {'is missing' if again else 'exists'}")
+        return report if again else None
+
     def kind_label(self, kind: str) -> str:
         return "labelled words" if kind == "labelled" else f"sample {kind.removeprefix('sample_')}"
 
@@ -1889,6 +1916,25 @@ class GenerationRecords:
         if not self.augmented:
             rows += [{"section": "Sentences", "name": f"{name} median (m)", "value": f"{block[key]['median']:.0f}"}
                      for name, key in (("ADE", "ade_m"), ("FDE", "fde_m")) if block[key] is not None]
+        graded = self.grading["readouts"][kind][airport]
+        again = graded["graded_again"]
+        rows += [{"section": "Landed runway", "name": "pass rate on the runway it landed on",
+                  "value": f"{graded['pass_rate_landed_runway']:.3f}"},
+                 {"section": "Landed runway", "name": "ended on another runway", "value": str(graded["ending_on_another_runway"])},
+                 # the grading's verdict counts are sparse (only the verdicts that occurred): no "pass" is 0 passed
+                 {"section": "Landed runway", "name": "graded again there (passed)",
+                  "value": f"{again['sentences']} ({again['verdicts'].get('pass', 0)})"},
+                 {"section": "Landed runway", "name": "colour",
+                  "value": "passed on another runway than the observed flight's: its own colour (see the legend)"}]
+        if self.grading["timing_read"] and graded["arrival_endpoint_error_m"] is not None:
+            rows += [{"section": "Time and place (landed)", "name": "arrival endpoint error p50 / p95 (m)",
+                      "value": f"{graded['arrival_endpoint_error_m']['median']:.0f} / {graded['arrival_endpoint_error_m']['p95']:.0f}"},
+                     {"section": "Time and place (landed)", "name": "final time error p50 / p95 (s)",
+                      "value": f"{graded['final_time_error_s']['median']:.0f} / {graded['final_time_error_s']['p95']:.0f}"},
+                     {"section": "Time and place (landed)", "name": "landed later than the observed aircraft",
+                      "value": f"{graded['late_share']:.3f}"},
+                     {"section": "Time and place (landed)", "name": "FDE",
+                      "value": "at the observed landing TIME: a late arrival is still short of the threshold then"}]
         return rows
 
 
@@ -1948,8 +1994,9 @@ class GenerationPublicationPlan:
         starts = (" from augmented starts (white: the source flight, unmoved)" if self.records.augmented else "")
         words = ("the labelled words from the first predicted step" if self.kind == "labelled"
                  else f"the prior's sample {self.kind.removeprefix('sample_')}")
+        landed = self.records.grading["readouts"][self.kind][self.airport]["pass_rate_landed_runway"]
         return (f"{self.records.readout} · {words}{starts}, executor {self.records.token} "
-                f"({block['recorded']} flights, pass {block['pass_rate']:.1%})")
+                f"({block['recorded']} flights, pass {block['pass_rate']:.1%}, {landed:.1%} on the landed runway)")
 
     @property
     def label(self) -> str:
@@ -2016,7 +2063,26 @@ class GenerationPublicationPlan:
             "--experiment-group", self.campaign,
             "--experiment-checkpoint", self.checkpoint,
             "--max-groups-per-czml", str(EXECUTOR_GROUPS_PER_CZML),
+            *(["--landed-runway-report", str(self.landed_runway_report)] if self.landed_runway_report else []),
         ]
+
+    @cached_property
+    def landed_runway_report(self) -> Path | None:
+        return self.records.landed_runway_report(self.kind, self.airport)
+
+    def refresh_error(self) -> str | None:
+        """For ``--refresh-published``: refuse anything but this category published from THIS records directory by
+        the code before the grading (`GENERATION_PUBLICATION_SCHEMA_REFRESHED`), still listed where it was."""
+        if not self.publication_manifest.is_file():
+            return f"{self.category} was never published at {self.airport}: nothing to refresh"
+        manifest = _load_object(self.publication_manifest)
+        if manifest["schemaVersion"] != GENERATION_PUBLICATION_SCHEMA_REFRESHED:
+            return f"{self.publication_manifest} is a {manifest['schemaVersion']} record, not the one a refresh updates"
+        if manifest["recordsRun"] != _path_for_manifest(self.records.directory) or manifest["category"] != self.category:
+            return f"{self.category} at {self.airport} was published from {manifest['recordsRun']}, not these records"
+        if self.category not in _listed_category_keys(self.frontend_airports_root, self.airport):
+            return f"{self.category} is not listed at {self.airport}'s categories.json"
+        return None
 
     def manifest(self) -> dict[str, Any]:
         report = _load_object(self.evaluation_report)
@@ -2039,19 +2105,23 @@ class GenerationPublicationPlan:
             "frontendDir": _path_for_manifest(self.comparison_dir),
             "groupsPerCzml": EXECUTOR_GROUPS_PER_CZML,
             "readout": self.records.document["readouts"][self.kind][self.airport],
+            "grading": self.records.grading["readouts"][self.kind][self.airport],
+            "landedRunwayReport": None if self.landed_runway_report is None else _path_for_manifest(self.landed_runway_report),
             "evaluation": {key: value for key, value in report.items() if key not in {"trajectories", "reference"}},
         }
 
 
-def run_generation_publication(plan: GenerationPublicationPlan, *, dry_run: bool) -> str:
-    """As `run_executor_publication`: intent, preflight, the comparison CZML, the category's metadata, the manifest."""
+def run_generation_publication(plan: GenerationPublicationPlan, *, dry_run: bool, refresh: bool = False) -> str:
+    """As `run_executor_publication`: intent, preflight, the comparison CZML, the category's metadata, the manifest.
+    ``refresh``: the category exists, published from these records before the grading (`refresh_error`); its CZML is
+    built again in place (a new generation, the old pruned) and its metadata and manifest replaced."""
     context = f"{plan.experiment_id} · {plan.airport} · {plan.records.split}"
     try:
         metadata = plan.experiment_metadata
     except MissingIntentError as error:
         print(f"  ⚠ blocked {context}: {error}")
         return "blocked"
-    error = plan.preflight_error()
+    error = plan.refresh_error() if refresh else plan.preflight_error()
     if error:
         print(f"  ⚠ blocked {context}: {error}")
         return "blocked"
@@ -2232,6 +2302,15 @@ def main(argv: list[str] | None = None) -> int:
         help="the intent registry's campaign --generation-records are filed under",
     )
     parser.add_argument(
+        "--refresh-published",
+        action="store_true",
+        help=(
+            "with --generation-records: bring categories these records already published (before the grading, R38) "
+            "up to date in place — their CZML built again with the landed-runway verdicts (status otherRunway), their "
+            "label, rows and manifest replaced; refused for a category published from other records or never published"
+        ),
+    )
+    parser.add_argument(
         "--kind",
         action="append",
         default=None,
@@ -2253,8 +2332,8 @@ def main(argv: list[str] | None = None) -> int:
     given = [flag for flag, value in checkpoint_flags.items() if value]
     if args.executor_replay is None and args.executor_campaign:
         parser.error("--executor-campaign files an --executor-replay; give one")
-    if args.generation_records is None and (args.generation_campaign or args.kind):
-        parser.error("--generation-campaign and --kind belong to --generation-records; give one")
+    if args.generation_records is None and (args.generation_campaign or args.kind or args.refresh_published):
+        parser.error("--generation-campaign, --kind and --refresh-published belong to --generation-records; give one")
 
     if args.generation_records is not None:
         if args.executor_replay is not None:
@@ -2290,7 +2369,7 @@ def main(argv: list[str] | None = None) -> int:
                       for airport in airports]
         counts = {}
         for plan in plans:
-            status = run_generation_publication(plan, dry_run=args.dry_run)
+            status = run_generation_publication(plan, dry_run=args.dry_run, refresh=args.refresh_published)
             counts[status] = counts.get(status, 0) + 1
         print(f"\n✓ generation publication finished: {counts}")
         return 1 if counts.get("blocked", 0) else 0

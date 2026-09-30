@@ -4964,6 +4964,11 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   color: #989da6;
 }
 
+/* Prediction passed on ANOTHER runway than the observed flight's — MIRROR of PREDICTION_OTHER_RUNWAY_COLOR. */
+.flight-table td.flight-table-otherrunway {
+  color: rgb(110, 200, 235);
+}
+
 .flight-table th:nth-child(n + 2),
 .flight-table td:nth-child(n + 2) {
   text-align: right;

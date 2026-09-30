@@ -229,6 +229,9 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 
 - Group status is entity `properties.status` ∈ solved/offTarget/failed; **the frontend repaint
   skip is keyed on "a verdict colour was baked", NOT on `status` alone** (AV13).
+- **`otherRunway`** = a two-tier generation sentence that passed on ANOTHER runway than the observed flight's (the
+  landed-runway grading, `--landed-runway-report`): light sky blue, never the pass green; the frontend must learn a status
+  before any index carries it (an unknown status refuses the whole index) (AV40).
 - `states_schema` dispatches on record keys: `opt-`/`sim-` entities, or `pred-` plus `look-` for
   predictions (AV14).
 - **Predictions never get the off-target bake** (`mark_off_target = off_target and schema ==

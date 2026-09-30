@@ -348,6 +348,28 @@ describe("EvaluationSummary", () => {
     expect(screen.queryByRole("button", { name: "Details" })).toBeNull();
   });
 
+  it("counts the flights that passed on another runway beside the observed-runway verdicts", async () => {
+    appState.trajectoryComparison = true;
+    appState.trajectoryComparisonCategory = EXPERIMENT.dir;
+    const group = (name: string, status: ComparisonIndex["groups"][number]["status"]) => ({
+      group: `${name}_17L`, flightId: name, runway: "17L", airport: "KSMF", status, finalTimeS: 200,
+      initialState: null, entities: [`pred-${name}_17L`], czml: "c.czml",
+      ...(status === "otherRunway" ? { landedRunway: "17R", observedRunwayVerdict: "fail" as const } : {}),
+    });
+    fetchJsonMock.mockResolvedValue({
+      ...INDEX,
+      groups: [group("A", "otherRunway"), group("B", "otherRunway"), group("C", "solved")],
+      evaluation: { solved: 3, successful: 1, successRate: 1 / 3, indeterminate: 0, lateralM: { mean: 12, p95: 30 },
+                    verticalM: { mean_abs: 4, p95_abs: 7 }, finalTimeS: { mean: 300 } },
+    } satisfies ComparisonIndex);
+
+    render(<EvaluationSummary />);
+
+    expect(await screen.findByRole("region", { name: "Experiment Evaluation" })).toBeTruthy();
+    expect(within(metric("Passed on another runway than the observed flight's (not counted as a pass below)"))
+      .getByText("2")).toBeTruthy();
+  });
+
   it("opens observed Details from its fixed report with a subject-aware title", async () => {
     fetchJsonMock.mockResolvedValue(OBSERVED_REPORT);
     render(<EvaluationSummary observedEvaluation={OBSERVED_SUMMARY} />);
