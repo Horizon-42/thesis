@@ -36,7 +36,7 @@ from __future__ import annotations
 import copy
 import time
 from dataclasses import dataclass
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -303,6 +303,19 @@ class SceneRewardTuner(RewardTuner):
             raise ValueError(f"{len(allowed)} sentences' masks for {len(sentences.flights)} sentences")
         if not sentences.flights:
             raise ValueError("no sentence to train on: no scene's sentences differ in reward")
+        return self.sweeps(lambda: batches(sentences.flights, self.config.tokens_per_batch // 2, self.rng),
+                           lambda indices: self._parts(sentences, indices),
+                           lambda part, start: self._scene_scored(sentences, part, allowed, start) + (advantages[part],),
+                           len, data, slots=slots, passes=passes, sentences=len(sentences.flights))
+
+    def sweeps(self, groups: Callable[[], Iterator[list[int]]], parts: Callable[[list[int]], list[list[int]]],
+               scored: Callable[[list[int], Prior], tuple[Any, ...]], counted: Callable[[list[int]], int],
+               data: Sequence[Built], *, slots: int, passes: int, sentences: int) -> dict[str, Any]:
+        """`one_pass`' sweeps over units a caller lays out (the scene's sentences, or a window's samples: `traffic_window_
+        tuner`): each sweep's update batches (``groups``, drawn when it starts), each batch's parts (``parts``), a part
+        scored (``scored``: its `to_batch`, the model's logits, the start's, the reference's, each sentence's asked steps
+        and its advantages, as `_scene_scored` gives them), and the sentences a batch counts (``counted``: each one's
+        mean over the batch)."""
         if passes < 1:
             raise ValueError(f"{passes} passes")
         self.model.eval()
@@ -316,18 +329,19 @@ class SceneRewardTuner(RewardTuner):
         for _ in range(passes):
             self.passes += 1
             sweep_started, first, sweep_clipped, sweep_words = time.perf_counter(), count, 0, 0
-            for indices in batches(sentences.flights, self.config.tokens_per_batch // 2, self.rng):
+            for indices in groups():
                 self.optimiser.zero_grad(set_to_none=True)
                 reward, kl, batch_clipped, batch_words = 0.0, 0.0, 0, 0
-                for part in self._parts(sentences, indices):
-                    batch, logits, sampled_from, reference, steps = self._scene_scored(sentences, part, allowed, start)
-                    advantage = torch.as_tensor(advantages[part], dtype=logits[0].dtype, device=self.device)
+                size = counted(indices)
+                for part in parts(indices):
+                    batch, logits, sampled_from, reference, steps, advantages = scored(part, start)
+                    advantage = torch.as_tensor(advantages, dtype=logits[0].dtype, device=self.device)
                     surrogate, part_clipped, part_words = flight_surrogate(logits, sampled_from, batch["targets"],
                                                                            batch["present"], batch["asked"], advantage,
                                                                            self.config.clip_ratio)
                     distance = flight_kl(logits, reference, batch["targets"], batch["present"], batch["asked"])
-                    part_reward = (surrogate / steps).sum() / len(indices)
-                    part_kl = (distance / steps).sum() / len(indices)
+                    part_reward = (surrogate / steps).sum() / size
+                    part_kl = (distance / steps).sum() / size
                     loss = part_reward + self.config.kl_weight * part_kl
                     if not torch.isfinite(loss):
                         raise FloatingPointError(f"pass {self.passes}: the loss is {float(loss)}")
@@ -349,5 +363,5 @@ class SceneRewardTuner(RewardTuner):
                            "kl_max": max(trace[first:]), "clipped_share": sweep_clipped / sweep_words,
                            "seconds": time.perf_counter() - sweep_started})
         return {**{f"{name}_mean": value / count for name, value in sums.items()}, "kl_max": max(trace),
-                "batches": count, "sentences": len(sentences.flights), "seconds": time.perf_counter() - started,
+                "batches": count, "sentences": sentences, "seconds": time.perf_counter() - started,
                 "kl_trace": trace, "clipped_share": clipped / words, "clipped_trace": clipped_trace, "sweeps": sweeps}

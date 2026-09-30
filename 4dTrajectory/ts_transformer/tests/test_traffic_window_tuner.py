@@ -11,6 +11,7 @@ import dataclasses
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 import torch
 
 from ts_transformer.instructions.words import Words
@@ -279,3 +280,162 @@ def test_an_aircraft_s_advantage_is_against_its_own_samples_and_it_trains_only_o
     assert advantages.tolist() == [0.5, 0.0, 0.5, -0.5, 0.0, -0.5, -0.5, 0.5]
     # b has no contrast; c's first sample started in a loss it answers for: neither is trained on
     assert trained.tolist() == [0, 3, 6, 7]
+
+
+# ---- 7.6.3: the window tuner
+
+def _one_commanded_round(tmp_path, monkeypatch):
+    """Windows of one commanded aircraft each (f3 twice, with replayed ones around it; f7 twice), spoken by a reading
+    model, as the window tuner and the scene tuner read them: ``(model, spec, window split, scene split, advantages,
+    masks, data)``."""
+    from ts_transformer.experiments.traffic_scene_data import build_split
+    from ts_transformer.experiments.traffic_speaking import scene_of
+    from ts_transformer.experiments.traffic_tuner import SceneSplit
+    from ts_transformer.experiments.traffic_window_tuner import WindowSplit, window_flight
+    from ts_transformer.instructions.artefact import load_signals
+    from ts_transformer.instructions.words import UNCHANGED
+    from ts_transformer.prior import data as prior_data
+    from ts_transformer.prior.data import Split, chain_record, column_classes
+
+    _, airports, spec = _airport(tmp_path, monkeypatch)
+    airport = airports["KXXX"]
+    signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
+    model = _reading_model(spec)
+    loop = _loop(model, airport, signals, spec, [_keys(3), _keys(3), _keys(7), _keys(7)], [60.0] * 4)
+    while loop.running:
+        loop.step()
+    records, results = loop.records(), loop.results()
+    counted = [r.counted for r in results]
+    assert min(counted) > 5
+    geometry = airport.flights.geometry
+    words = Words(spec)
+    table = Split([], ("KXXX",), prior_data.candidate_table({"KXXX": geometry}, ("KXXX",), 2), (("09",),), ((90.0,),),
+                  column_classes(words, 2), "no-context")
+    allowed = [{c: masks[i, : counted[i]].copy() for c, masks in loop.speaker.allowed.items()} for i in range(4)]
+    advantages = np.array([0.5, -0.5, 0.25, -0.25])
+    window_split = WindowSplit(
+        table, list(loop.windows),
+        [[window_flight(r, loop.windows[i], loop.flights[i], geometry, None, 0, 0, counted[i], spec.step_s)]
+         for i, r in enumerate(records)],
+        [[r] for r in records], [[0]] * 4, [advantages[i: i + 1] for i in range(4)], [[a] for a in allowed])
+    scene_flights, positions = [], []
+    for i, r in enumerate(records):
+        said = r.grid[: counted[i]]
+        rows = N_LOOK + counted[i]
+        flight = chain_record(loop.flights[i], r.e[:rows], r.n[:rows], r.h[:rows], said,
+                              np.where(said != UNCHANGED, said + 1, 0), np.ones(said.shape, dtype=bool), geometry, None,
+                              0, 0, spec.step_s)
+        scene_flights.append(flight)
+        positions.append(np.column_stack((r.e[:rows], r.n[:rows], r.h[:rows])))
+    scenes = [scene_of(airport, r.key, 60.0, spec.step_s) for r in records]
+    assert all(scene.others == window.others for scene, window in zip(scenes, loop.windows))
+    scene_split = SceneSplit(dataclasses.replace(table, flights=scene_flights), scenes, positions)
+    data, _ = build_split(tmp_path / "artefact", "train", spec, ("KXXX",), None, 2_048)
+    return model, spec, window_split, scene_split, advantages, allowed, data
+
+
+def _gradients(tuner):
+    """The tuner's optimiser steps, each step's gradients recorded."""
+    seen, step = [], tuner.optimiser.step
+    tuner.optimiser.step = lambda: (seen.append({name: p.grad.clone() for name, p in tuner.model.named_parameters()
+                                                 if p.grad is not None}), step())[1]
+    return seen
+
+
+def test_with_one_commanded_aircraft_a_window_trains_as_its_scene_does(tmp_path, monkeypatch):
+    import copy
+
+    from ts_transformer.experiments.traffic_tuner import SceneRewardTuner
+    from ts_transformer.experiments.traffic_window_tuner import WindowRewardTuner
+    from ts_transformer.prior.train import RewardConfig
+    from ts_transformer.tests.test_prior_speaker import _model
+
+    model, spec, window_split, scene_split, advantages, allowed, data = _one_commanded_round(tmp_path, monkeypatch)
+    reference = _model(Words(spec), slots=2)
+    records, gradients = [], []
+    for kind in ("scene", "window"):
+        tuner = (SceneRewardTuner if kind == "scene" else WindowRewardTuner)(
+            copy.deepcopy(model), reference, RewardConfig(), CPU, seed=0, traffic_learning_rate=3e-4, step_s=spec.step_s)
+        seen = _gradients(tuner)
+        if kind == "scene":
+            distance = tuner.distance(scene_split, allowed)
+            records.append(tuner.one_pass(scene_split, advantages, data, allowed, slots=2))
+        else:
+            assert tuner.window_distance(window_split) == pytest.approx(distance, rel=1e-5)
+            records.append(tuner.window_pass(window_split, data, slots=2))
+        assert len(seen) == 1
+        gradients.append(seen[0])
+    for name in ("reward_mean", "kl_mean", "data_mean"):
+        assert records[1][name] == pytest.approx(records[0][name], rel=1e-5, abs=1e-9), name
+    assert records[0]["sentences"] == records[1]["sentences"] == 4
+    assert gradients[0].keys() == gradients[1].keys()
+    assert max(float(g.abs().max()) for name, g in gradients[0].items() if ".traffic." in name) > 0.0
+    for name, g in gradients[0].items():
+        assert torch.allclose(gradients[1][name], g, rtol=1e-4, atol=1e-7), name
+
+
+def test_window_samples_scored_in_parts_have_the_gradient_of_one_piece(tmp_path, monkeypatch):
+    import copy
+
+    from ts_transformer.experiments import traffic_window_tuner
+    from ts_transformer.experiments.traffic_window_tuner import WindowRewardTuner
+    from ts_transformer.prior.train import RewardConfig
+    from ts_transformer.tests.test_prior_speaker import _model
+
+    model, spec, window_split, _, _, _, data = _one_commanded_round(tmp_path, monkeypatch)
+    gradients = []
+    for budget in (10 ** 9, 1):
+        monkeypatch.setattr(traffic_window_tuner, "SCORE_BUDGET", budget)
+        tuner = WindowRewardTuner(copy.deepcopy(model), _model(Words(spec), slots=2), RewardConfig(), CPU, seed=0,
+                                  traffic_learning_rate=3e-4, step_s=spec.step_s)
+        assert len(tuner._window_parts(window_split, [0, 1, 2, 3])) == (1 if budget > 1 else 4)
+        seen = _gradients(tuner)
+        tuner.window_pass(window_split, data, slots=2)
+        gradients.append(seen[0])
+    for name, g in gradients[0].items():
+        assert torch.allclose(gradients[1][name], g, rtol=1e-4, atol=1e-7), name
+
+
+def test_an_aircraft_not_trained_on_is_read_by_the_others_and_adds_no_word(tmp_path, monkeypatch):
+    """Two commanded aircraft in the air together, only the first trained on: its window sample counts one sentence,
+    and the second's words move the first's gradient only through what the first reads."""
+    import copy
+
+    from ts_transformer.experiments.traffic_window_tuner import WindowRewardTuner, WindowSplit, window_flight
+    from ts_transformer.instructions.artefact import load_signals
+    from ts_transformer.prior import data as prior_data
+    from ts_transformer.prior.data import Split, column_classes
+    from ts_transformer.prior.train import RewardConfig
+    from ts_transformer.experiments.traffic_scene_data import build_split
+    from ts_transformer.tests.test_prior_speaker import _model
+
+    _, airports, spec = _airport(tmp_path, monkeypatch)
+    airport = airports["KXXX"]
+    signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
+    model = _reading_model(spec)
+    loop = _loop(model, airport, signals, spec, [_keys(3, 4)], [240.0])
+    while loop.running:
+        loop.step()
+    records, results = loop.records(), loop.results()
+    geometry = airport.flights.geometry
+    table = Split([], ("KXXX",), prior_data.candidate_table({"KXXX": geometry}, ("KXXX",), 2), (("09",),), ((90.0,),),
+                  column_classes(Words(spec), 2), "no-context")
+    data, _ = build_split(tmp_path / "artefact", "train", spec, ("KXXX",), None, 2_048)
+
+    def split(trained):
+        counted = [results[i].counted if i in trained else 0 for i in range(2)]
+        return WindowSplit(table, list(loop.windows),
+                           [[window_flight(r, loop.windows[0], loop.flights[i], geometry, None, 0, 0, counted[i],
+                                           spec.step_s) for i, r in enumerate(records)]],
+                           [records], [list(trained)], [np.full(len(trained), 0.5)],
+                           [[{c: m[i, : counted[i]].copy() for c, m in loop.speaker.allowed.items()} for i in trained]])
+
+    one = split([0])
+    assert one.sentences == 1
+    tuner = WindowRewardTuner(copy.deepcopy(model), _model(Words(spec), slots=2), RewardConfig(), CPU, seed=0,
+                              traffic_learning_rate=3e-4, step_s=spec.step_s)
+    record = tuner.window_pass(one, data, slots=2)
+    assert record["sentences"] == 1 and record["batches"] == 1 and np.isfinite(record["reward_mean"])
+    assert split([0, 1]).sentences == 2
+    with pytest.raises(ValueError, match="one or more trained"):
+        WindowSplit(table, list(loop.windows), one.flights, one.records, [[]], [np.zeros(0)], [[]])

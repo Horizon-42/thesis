@@ -19,20 +19,23 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import torch
 
+from ts_transformer.experiments.traffic_scene_data import Built
+from ts_transformer.experiments.traffic_tuner import SCORE_BUDGET, SceneRewardTuner, part_cost
 from ts_transformer.experiments.traffic_window import (
     Window, WindowRecord, _with_landing, window_edges, window_landings, window_places,
 )
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import RUNWAY, UNCHANGED
-from ts_transformer.prior.data import Flight, chain_record
+from ts_transformer.prior.data import Flight, Split, chain_record
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.scene import N_LOOK, Landings
+from ts_transformer.prior.train import allowed_tensors, batch_logits, flight_kl, masked, to_batch
 from ts_transformer.prior.window_speaker import window_inputs
 
 
@@ -158,3 +161,147 @@ def window_advantages(rows: Sequence[Mapping[str, object]]) -> tuple[np.ndarray,
         if rewards.min() != rewards.max() and not any(rows[k]["starts_in_a_loss"] for k in members):
             trained += members
     return advantages, np.array(sorted(trained), dtype=np.int64)
+
+
+@dataclass(frozen=True)
+class WindowSplit:
+    """A round's window samples trained on, as the tuner reads them: the candidate table (``table``, a `Split` whose own
+    flights are not read), and per window sample its window, its commanded aircraft's rows as the speaker read them
+    (`window_flight`: the trained ones' own words asked over their counted steps, the others' over none) and records,
+    which of them are trained (their places in the sample) with their advantages and the masks they spoke under."""
+
+    table: Split
+    windows: list[Window]
+    flights: list[list[Flight]]
+    records: list[list[WindowRecord]]
+    trained: list[list[int]]
+    advantages: list[np.ndarray]
+    allowed: list[list[Mapping[int, np.ndarray]]]
+
+    def __post_init__(self) -> None:
+        for window, flights, records, trained, advantages, allowed in zip(
+                self.windows, self.flights, self.records, self.trained, self.advantages, self.allowed, strict=True):
+            if not (len(window.commanded) == len(flights) == len(records)) or not trained \
+                    or not (len(trained) == len(advantages) == len(allowed)) or max(trained) >= len(flights):
+                raise ValueError("a window sample: a flight and a record per commanded aircraft, one or more trained, "
+                                 "an advantage and masks each")
+
+    @property
+    def sentences(self) -> int:
+        return sum(len(t) for t in self.trained)
+
+
+def window_size(window: Window, flights: Sequence[Flight], step_s: float) -> tuple[int, int, int]:
+    """A window sample laid out alone: its aircraft, its pre-roll and its steps after it."""
+    places = window_places([window], step_s)
+    rows = np.array([f.rows for f in flights])
+    return (len(window.commanded) + len(window.others), places.pre,
+            int((places.start + rows).max()) - places.pre)
+
+
+def window_parts(split: WindowSplit, indices: Sequence[int], step_s: float, budget: float) -> list[list[int]]:
+    """``indices`` (window samples) in parts costing at most ``budget`` scored together (`traffic_tuner.part_cost`: the
+    most aircraft, the longest pre-roll plus the longest span), a costlier one a part of its own; by size."""
+    sizes = {s: window_size(split.windows[s], split.flights[s], step_s) for s in indices}
+    out: list[list[int]] = [[]]
+    aircraft = pre = span = 0
+    for s in sorted(indices, key=lambda s: (part_cost(1, sizes[s][0], sizes[s][1] + sizes[s][2]), s)):
+        a, p, r = sizes[s]
+        if out[-1] and part_cost(len(out[-1]) + 1, max(aircraft, a), max(pre, p) + max(span, r)) > budget:
+            out.append([])
+            aircraft = pre = span = 0
+        out[-1].append(s)
+        aircraft, pre, span = max(aircraft, a), max(pre, p), max(span, r)
+    return out
+
+
+def window_batches(split: WindowSplit, tokens: int, rng: np.random.Generator | None) -> list[list[int]]:
+    """Window samples in update batches as `data.batches` groups sentences: by their trained aircraft's longest rows,
+    each batch at most ``tokens`` padded trained steps (a sample holding more is a batch of its own); shuffled when
+    ``rng`` is given."""
+    longest = {s: max(split.flights[s][k].rows for k in trained) for s, trained in enumerate(split.trained)}
+    groups: list[list[int]] = []
+    current: list[int] = []
+    rows = count = 0
+    for s in sorted(longest, key=lambda s: (longest[s], s)):
+        grown_rows, grown = max(rows, longest[s]), count + len(split.trained[s])
+        if current and grown_rows * grown > tokens:
+            groups.append(current)
+            current, grown_rows, grown = [], longest[s], len(split.trained[s])
+        current.append(s)
+        rows, count = grown_rows, grown
+    if current:
+        groups.append(current)
+    if rng is not None:
+        rng.shuffle(groups)
+    return groups
+
+
+class WindowRewardTuner(SceneRewardTuner):
+    """`traffic_tuner.SceneRewardTuner` over window samples (module docstring, the 7.6 plan): each part's samples scored
+    whole (`window_layout`, `window_logits`), the loss on its trained aircraft's own words — the clipped ratio against
+    the model frozen at the pass's start, the pull to the reference reading each aircraft alone, each over the masks it
+    spoke under — each sentence's mean over its counted steps, averaged over the update batch's trained sentences; the
+    data term, the optimiser and the passes the scene tuner's."""
+
+    def _window_scored(self, split: WindowSplit, part: Sequence[int], start: Prior | None
+                       ) -> tuple[dict[str, torch.Tensor], list[torch.Tensor], list[torch.Tensor] | None,
+                                  list[torch.Tensor], torch.Tensor, np.ndarray]:
+        """A part's window samples: the trained aircraft's `to_batch`, their logits in their windows (the model's, the
+        start's — None: not asked — and the reference's alone) under their masks, their asked steps and advantages."""
+        flights = [f for s in part for f in split.flights[s]]
+        records = [r for s in part for r in split.records[s]]
+        layout = window_layout(self.model, [split.windows[s] for s in part], flights, records, self.step_s,
+                               self.device)
+        offsets = np.cumsum([0] + [len(split.flights[s]) for s in part])
+        chosen = [int(offsets[n] + k) for n, s in enumerate(part) for k in split.trained[s]]
+        trained = dataclasses.replace(split.table, flights=[flights[i] for i in chosen])
+        batch = to_batch(trained, range(len(chosen)), self.device)
+        rows = batch["targets"].shape[2]
+        index = torch.as_tensor(chosen, device=self.device)
+
+        def own(logits: list[torch.Tensor]) -> list[torch.Tensor]:
+            return [logit[index, :, :rows] for logit in logits]
+
+        with torch.no_grad():                   # first: their memory is freed before the model's is held
+            started = None if start is None else own(window_logits(start, layout))
+            reference = batch_logits(self.reference, batch)
+        logits = own(window_logits(self.model, layout, checkpoint=torch.is_grad_enabled()))
+        masks = allowed_tensors([a for s in part for a in split.allowed[s]], rows, [x.shape[-1] for x in logits],
+                                self.device)
+        logits, reference = masked(logits, masks), masked(reference, masks)
+        started = None if started is None else masked(started, masks)
+        steps = batch["asked"].any(dim=-1).sum(dim=(1, 2)).to(logits[0].dtype)
+        advantages = np.concatenate([split.advantages[s] for s in part])
+        return batch, logits, started, reference, steps, advantages
+
+    def _window_parts(self, split: WindowSplit, indices: Sequence[int]) -> list[list[int]]:
+        return window_parts(split, indices, self.step_s, SCORE_BUDGET)
+
+    def window_distance(self, split: WindowSplit) -> float:
+        """`RewardTuner.distance` with each trained aircraft in its window: the mean over update batches of the mean
+        over their trained sentences of the KL to the reference per counted step."""
+        if not split.windows:
+            raise ValueError("no window sample to measure the distance on")
+        self.model.eval()
+        means = []
+        with torch.no_grad():
+            for indices in window_batches(split, self.config.tokens_per_batch // 2, None):
+                total = 0.0
+                for part in self._window_parts(split, indices):
+                    batch, logits, _, reference, steps, _ = self._window_scored(split, part, None)
+                    total += float((flight_kl(logits, reference, batch["targets"], batch["present"], batch["asked"])
+                                    / steps).sum())
+                means.append(total / sum(len(split.trained[s]) for s in indices))
+        return float(np.mean(means))
+
+    def window_pass(self, split: WindowSplit, data: Sequence[Built], *, slots: int, passes: int = 1) -> dict[str, Any]:
+        """`SceneRewardTuner.one_pass` over window samples (`sweeps`): the update batches `window_batches`', each
+        sentence its trained aircraft's."""
+        if not split.windows:
+            raise ValueError("no window sample to train on: no aircraft's sentences differ in reward")
+        return self.sweeps(lambda: iter(window_batches(split, self.config.tokens_per_batch // 2, self.rng)),
+                           lambda indices: self._window_parts(split, indices),
+                           lambda part, start: self._window_scored(split, part, start),
+                           lambda indices: sum(len(split.trained[s]) for s in indices), data, slots=slots,
+                           passes=passes, sentences=split.sentences)
