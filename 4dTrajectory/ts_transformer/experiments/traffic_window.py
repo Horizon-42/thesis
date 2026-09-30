@@ -370,17 +370,8 @@ class WindowLoop:
             raise ValueError("the flights are the windows' commanded aircraft, window after window, each in its order")
         count = len(flights)
         self.members = [np.flatnonzero(self.window_of == w) for w in range(len(windows))]
-        # the batch's steps: each window's first commanded aircraft's row 0 at the pre-roll's end
-        origin = np.array([window.first_step_s(window.commanded[0], step_s) for window in windows])
-        firsts = np.array([windows[w].first_step_s(k, step_s) for k, w in zip(self.keys, self.window_of)])
-        entered = [[float(hang(window.rows(k).presence.start_s, step_s)) for k in window.others] for window in windows]
-        before = max([0] + [int(round((o - s) / step_s)) for o, starts in zip(origin, entered) for s in starts])
-        self.pre = min(int(HISTORY_S // step_s), before)
-        self.origin = origin - self.pre * step_s               # each window's time at batch step 0
-        self.start = np.rint((firsts - self.origin[self.window_of]) / step_s).astype(np.int64)
-        nodes = [[Node(k, window.rows(k).presence.speaking, int(round((s - self.origin[w]) / step_s)),
-                       **window.rows(k).node_rows) for k, s in zip(window.others, entered[w])]
-                 for w, window in enumerate(windows)]
+        places = window_places(windows, step_s)
+        self.pre, self.origin, self.start, nodes = places.pre, places.origin, places.start, places.nodes
         max_rows = rows_for(max(limits) + step_s, step_s)
         self.speaker = WindowSpeaker(
             model, flights, geometries, landings, words, scenes=np.arange(count) if alone else self.window_of,
@@ -427,6 +418,8 @@ class WindowLoop:
         self.left = np.zeros(count, dtype=bool)                  # its flight is over
         self._others: dict[tuple[int, int, tuple[str, ...]], OthersAt] = {}
         self._now: tuple[int, list[Aircraft] | None] = (-1, None)
+        #: each aircraft's landing context switches: (its first row reading the new one, the landing added, its runway)
+        self.context_changes: list[list[tuple[int, float, str]]] = [[] for _ in range(count)]
 
     def _contexts(self, landings: Mapping[str, Landings]) -> list[Landings]:
         """Each commanded aircraft's landings before its own is taken out (`WindowSpeaker`: `data.own_context`):
@@ -715,8 +708,9 @@ class WindowLoop:
         runway = self.geometries[i].candidates[int(self.speaker.value[i, RUNWAY]) - 1].ident
         for j in self.members[w]:
             if j != i:
-                self.speaker.set_context(int(j), _with_landing(self.speaker.contexts[j], float(self.landing_s[i]),
-                                                               runway))
+                first = self.speaker.set_context(int(j), _with_landing(self.speaker.contexts[j],
+                                                                       float(self.landing_s[i]), runway))
+                self.context_changes[j].append((first, float(self.landing_s[i]), runway))
 
     def _glidepath(self, i: int, step: int) -> None:
         """Under the procedure's altitudes: aircraft ``i`` (flying step ``step``'s words) stopped where the state it
@@ -747,37 +741,12 @@ class WindowLoop:
 
     # -- what the speaker asks
     def _edges(self, first: int, last: int) -> np.ndarray:
-        """Every speaking scene's edge features on batch steps ``first … last − 1``, read from two steps before (as
-        `SceneLoop._edges`): each commanded aircraft's rows placed by `traffic_speaking.edge_rows` from its row 0, the
-        replayed ones by the same call over the scene's first commanded aircraft — the one placement of the edge code's
-        source hash — stacked in the speaker's places."""
+        """Every speaking scene's edge features on batch steps ``first … last − 1`` (`window_edges` of the speaker's
+        rows)."""
         speaker = self.speaker
-        low = max(first - 2, 0)
-        out = np.zeros((len(speaker.others), last - first, speaker.aircraft, speaker.aircraft,
-                        len(speaker.model.traffic_features)), dtype=np.float32)
-        pointers = speaker.in_force[:, :, RUNWAY].cpu().numpy()
-        by_airport: dict[str, list[tuple[int, SceneRows]]] = defaultdict(list)
-        scenes = np.arange(len(self.keys)) if self.alone else self.window_of
-        for b in range(len(speaker.others)):
-            members = np.flatnonzero(scenes == b)
-            parts = []
-            for m, i in enumerate(members):
-                window = self.windows[self.window_of[i]]
-                others = window.others if m == 0 and not self.alone else ()
-                scene = window.view(self.keys[i], window.first_step_s(self.keys[i], self.step_s), others)
-                parts.append(edge_rows(scene, speaker.e[i], speaker.n[i], speaker.h[i], pointers[i],
-                                       int(speaker.rows[i]), int(self.start[i]), low, last, self.step_s))
-            head = parts[0]                                   # the first commanded one, then its replayed ones
-            rows = parts if len(parts) == 1 else [_aircraft(head, slice(0, 1)), *parts[1:]] + (
-                [_aircraft(head, slice(1, None))] if len(head.category) > 1 else [])
-            by_airport[self.windows[self.window_of[members[0]]].airport.flights.code].append((b, _stacked(rows)))
-        for code, blocks in by_airport.items():
-            stacked = _stacked([rows for _, rows in blocks])
-            separation = next(w.airport.flights.separation for w in self.windows if w.airport.flights.code == code)
-            sizes = [len(rows.category) for _, rows in blocks]
-            for (b, _), size, block in zip(blocks, sizes, scene_edge_blocks(stacked, separation, sizes)):
-                out[b, :, :size, :size] = block[first - low:]
-        return out
+        return window_edges(self.windows, self.keys, self.window_of, self.alone, speaker.e, speaker.n, speaker.h,
+                            speaker.in_force[:, :, RUNWAY].cpu().numpy(), speaker.rows, self.start, first, last,
+                            self.step_s, speaker.aircraft, len(speaker.model.traffic_features))
 
     def _masks(self, column: int, chosen: np.ndarray, now: np.ndarray) -> np.ndarray:
         """``[N, classes]``: `traffic_speaking.speaking_masks` of each aircraft of the round (``now``) at the step, among
@@ -869,10 +838,108 @@ class WindowLoop:
                                  int(self.speaker.value[i, RUNWAY]) - 1, int(self.group[i]), int(self.place[i])))
         return out
 
+    def records(self) -> list[WindowRecord]:
+        """What the speaker read of each commanded aircraft (`WindowRecord`), once the loop has run."""
+        speaker, out = self.speaker, []
+        for i, key in enumerate(self.keys):
+            rows = int(speaker.rows[i])
+            # its executor's steps: its group's, which may fly on past its own last (`results` cuts them so too)
+            said = self.executors[self.group[i]][3].sentences()[self.place[i]]
+            if len(said) < rows - N_LOOK - 1:
+                raise ValueError(f"{key}: {rows} rows read, {len(said)} steps said")
+            # its last row — the state its last step reached — is read by the others with nothing said at it
+            grid = np.vstack((said[: rows - N_LOOK - 1], np.full((1, 6), UNCHANGED, dtype=said.dtype)))
+            out.append(WindowRecord(key, int(self.window_of[i]), speaker.e[i, :rows].copy(), speaker.n[i, :rows].copy(),
+                                    speaker.h[i, :rows].copy(), grid, list(self.context_changes[i])))
+        return out
+
     def close(self) -> None:
         """Let the speaker go (`traffic_speaking.SceneLoop.close`: the loop and the speaker hold each other)."""
         self.speaker.edges_of = self.speaker.masks_of = None
         self.speaker = None
+
+
+@dataclass(frozen=True)
+class WindowRecord:
+    """What the speaker read of one commanded aircraft (`WindowLoop.records`), once it has flown: its key and window, its
+    positions over every row it was in the scene (``e``, ``n``, ``h``; observed to its first predicted step, then
+    flown), the words it said at each of its rows from its first predicted one (``grid`` ``[rows − N_LOOK, 6]``,
+    `UNCHANGED` where a column says nothing — silent steps too, and its last row, the state its last step reached: the
+    other aircraft read its words in force there) and its landing context's switches (the first row reading each, the
+    landing added, its runway: `WindowSpeaker.set_context`)."""
+
+    key: str
+    window: int
+    e: np.ndarray
+    n: np.ndarray
+    h: np.ndarray
+    grid: np.ndarray
+    context_changes: list[tuple[int, float, str]]
+
+
+@dataclass(frozen=True)
+class WindowPlaces:
+    """Windows placed on one batch's steps (`window_places`): the pre-roll, each window's time at step 0, each commanded
+    aircraft's step of its row 0 (window after window, each window's in its order) and each window's replayed
+    aircraft as the speaker reads them (`Node.first_step`: the step of its row 0)."""
+
+    pre: int
+    origin: np.ndarray
+    start: np.ndarray
+    nodes: list[list[Node]]
+
+
+def window_places(windows: Sequence[Window], step_s: float) -> WindowPlaces:
+    """``windows`` on one batch's steps — the loop's and a trainer's (`WindowPlaces`): each window's first commanded
+    aircraft's row 0 at the pre-roll's end, the pre-roll the longest any replayed aircraft is in the air before it, at
+    most `HISTORY_S`."""
+    origin = np.array([window.first_step_s(window.commanded[0], step_s) for window in windows])
+    window_of = np.array([w for w, window in enumerate(windows) for _ in window.commanded], dtype=np.int64)
+    firsts = np.array([window.first_step_s(k, step_s) for window in windows for k in window.commanded])
+    entered = [[float(hang(window.rows(k).presence.start_s, step_s)) for k in window.others] for window in windows]
+    before = max([0] + [int(round((o - s) / step_s)) for o, starts in zip(origin, entered) for s in starts])
+    pre = min(int(HISTORY_S // step_s), before)
+    origin = origin - pre * step_s
+    start = np.rint((firsts - origin[window_of]) / step_s).astype(np.int64)
+    nodes = [[Node(k, window.rows(k).presence.speaking, int(round((s - origin[w]) / step_s)), **window.rows(k).node_rows)
+              for k, s in zip(window.others, entered[w])] for w, window in enumerate(windows)]
+    return WindowPlaces(pre, origin, start, nodes)
+
+
+def window_edges(windows: Sequence[Window], keys: Sequence[str], window_of: np.ndarray, alone: bool, e: np.ndarray,
+                 n: np.ndarray, h: np.ndarray, pointers: np.ndarray, rows: np.ndarray, start: np.ndarray, first: int,
+                 last: int, step_s: float, aircraft: int, width: int) -> np.ndarray:
+    """``[S, last − first, aircraft, aircraft, width]``: every speaking scene's edge features on batch steps ``first … last
+    − 1``, read from two steps before (as `SceneLoop._edges`) — the loop's and a trainer's: each commanded aircraft
+    ``i`` (``keys``, of window ``window_of[i]``; ``alone``: each its own scene) from its row 0 at step ``start[i]`` over
+    its first ``rows[i]`` rows at ``e``, ``n``, ``h`` with the runway class in force before each (``pointers``), placed
+    by `traffic_speaking.edge_rows`, the replayed ones by the same call over the scene's first commanded aircraft — the
+    one placement of the edge code's source hash — stacked in the speaker's places."""
+    low = max(first - 2, 0)
+    scenes = np.arange(len(keys)) if alone else np.asarray(window_of)
+    count = int(scenes.max()) + 1
+    out = np.zeros((count, last - first, aircraft, aircraft, width), dtype=np.float32)
+    by_airport: dict[str, list[tuple[int, SceneRows]]] = defaultdict(list)
+    for b in range(count):
+        members = np.flatnonzero(scenes == b)
+        parts = []
+        for m, i in enumerate(members):
+            window = windows[window_of[i]]
+            others = window.others if m == 0 and not alone else ()
+            scene = window.view(keys[i], window.first_step_s(keys[i], step_s), others)
+            parts.append(edge_rows(scene, e[i], n[i], h[i], pointers[i], int(rows[i]), int(start[i]), low, last,
+                                   step_s))
+        head = parts[0]                                   # the first commanded one, then its replayed ones
+        stacked = parts if len(parts) == 1 else [_aircraft(head, slice(0, 1)), *parts[1:]] + (
+            [_aircraft(head, slice(1, None))] if len(head.category) > 1 else [])
+        by_airport[windows[window_of[members[0]]].airport.flights.code].append((b, _stacked(stacked)))
+    for code, blocks in by_airport.items():
+        together = _stacked([block for _, block in blocks])
+        separation = next(w.airport.flights.separation for w in windows if w.airport.flights.code == code)
+        sizes = [len(block.category) for _, block in blocks]
+        for (b, _), size, block in zip(blocks, sizes, scene_edge_blocks(together, separation, sizes)):
+            out[b, :, :size, :size] = block[first - low:]
+    return out
 
 
 def window_landings(window: Window, key: str, landings: Mapping[str, Landings], step_s: float) -> Landings:
