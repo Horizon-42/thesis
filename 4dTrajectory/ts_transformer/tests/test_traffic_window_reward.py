@@ -84,8 +84,17 @@ def test_a_window_round_is_spoken_by_its_plan_and_its_trained_samples_are_what_t
     geometry = airport.flights.geometry
     table = Split([], ("KXXX",), prior_data.candidate_table({"KXXX": geometry}, ("KXXX",), 2), (("09",),), ((90.0,),),
                   column_classes(Words(spec), 2), "no-context")
-    split, kinds = window_split(round_, spoken, advantages, trained, table, None, spec.step_s)
+    split, kinds, too_large = window_split(round_, spoken, advantages, trained, table, None, spec.step_s)
     assert len(split.windows) == 4 and kinds == ["real"] * 4           # both windows, both samples
+    assert too_large == {"window_samples": 0, "aircraft_sentences": 0}
+    # a sample costlier than the GPU's limit is not trained on, counted
+    from ts_transformer.experiments import traffic_window_reward
+    from ts_transformer.experiments.traffic_window_tuner import scoring_cost
+    costs = sorted({scoring_cost(w, f, spec.step_s) for w, f in zip(split.windows, split.flights)})
+    monkeypatch.setattr(traffic_window_reward, "WINDOW_SCORE_LIMIT", costs[0])
+    smaller, _, too_large = window_split(round_, spoken, advantages, trained, table, None, spec.step_s)
+    assert len(smaller.windows) == 2 and too_large == {"window_samples": 2, "aircraft_sentences": 2}
+    assert all(scoring_cost(w, f, spec.step_s) <= costs[0] for w, f in zip(smaller.windows, smaller.flights))
     assert split.sentences == len(trained) == 4
     for window, flights, places, gains in zip(split.windows, split.flights, split.trained, split.advantages):
         assert len(flights) == len(window.commanded)
@@ -177,3 +186,28 @@ def test_a_window_round_speaks_the_same_in_one_process_or_two(tmp_path, monkeypa
     one, two = got
     assert one.rows == two.rows and len(one.rows) == 6
     assert all(np.array_equal(a.grid, b.grid) and np.array_equal(a.e, b.e) for a, b in zip(one.records, two.records))
+
+
+def test_the_preflight_scores_the_costliest_window_sample_the_pass_would_train_on(tmp_path, monkeypatch):
+    from ts_transformer.experiments import traffic_window_reward
+    from ts_transformer.experiments.traffic_window_reward import preflight
+    from ts_transformer.prior import data as prior_data
+    from ts_transformer.prior.data import Split, column_classes
+    from ts_transformer.prior.train import RewardConfig
+    from ts_transformer.tests.test_prior_speaker import _model
+
+    round_, airport, spec = _round(tmp_path, monkeypatch)
+    geometry = airport.flights.geometry
+    table = Split([], ("KXXX",), prior_data.candidate_table({"KXXX": geometry}, ("KXXX",), 2), (("09",),), ((90.0,),),
+                  column_classes(Words(spec), 2), "no-context")
+    lines = []
+    checked = preflight(_reading_model(spec), _model(Words(spec), slots=2), round_, _speaking(spec, airport), table,
+                        RewardConfig(), torch.device("cpu"), spec.step_s, lines.append)
+    # the two windows, both scorable: the costlier one (f0 and f1 together) scored, every aircraft trained
+    assert sorted(checked["windows"]) == [0, 1] and checked["scored_aircraft"] == 2 and checked["gpu_peak_gb"] is None
+    assert checked["too_large_to_score"] == {"window_samples": 0, "aircraft_sentences": 0} and lines
+    # none within the limit: nothing scored, the samples counted
+    monkeypatch.setattr(traffic_window_reward, "WINDOW_SCORE_LIMIT", 0.0)
+    nothing = preflight(_reading_model(spec), _model(Words(spec), slots=2), round_, _speaking(spec, airport), table,
+                        RewardConfig(), torch.device("cpu"), spec.step_s, lines.append)
+    assert nothing["scored"] is None and nothing["too_large_to_score"]["window_samples"] == 4

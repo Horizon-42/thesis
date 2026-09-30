@@ -204,6 +204,20 @@ class WindowSplit:
         return sum(len(t) for t in self.trained)
 
 
+#: The costliest window sample the tuner scores (`traffic_tuner.part_cost` of it alone): measured on the RTX 4060 (8 GB)
+#: with gradients, the layers recomputed, every commanded aircraft trained — 67 KB a unit (2.70 GB at 40,600, 4.28 GB at
+#: 63,900; 2026-09-30, the formal run's round 1 windows), so about 5.0 GB, beside the parent's three models and the
+#: speaking processes' emptied caches (0.2 GB each). Round 1's windows: 3 of 700 above it (the largest, 112,654, ran the
+#: GPU out); a sample above it is not trained on, counted (`traffic_window_reward.window_split`).
+WINDOW_SCORE_LIMIT = 75_000
+
+
+def scoring_cost(window: Window, flights: Sequence[Flight], step_s: float) -> float:
+    """A window sample's scoring cost alone (`part_cost`: its aircraft, its pre-roll and span)."""
+    aircraft, pre, span = window_size(window, flights, step_s)
+    return part_cost(1, aircraft, pre + span)
+
+
 def counted_rows(flight: Flight) -> int:
     """A trained aircraft's rows to its last counted step (`window_flight` asks every column of those)."""
     return N_LOOK + int(flight.asked.any(axis=-1).sum())
