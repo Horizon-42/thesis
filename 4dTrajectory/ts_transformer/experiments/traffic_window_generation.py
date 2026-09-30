@@ -94,8 +94,9 @@ SOURCES = ("scene", "alone", "labelled", "recorded")
 #: A batch's most aircraft-steps (module docstring): about 0.6 GB of the model's past on its d and layers — a process's,
 #: four beside each other in the 8 GB GPU (M4's speaking processes hold as much).
 AIRCRAFT_STEPS = 100_000
-#: Processes reading the batches (module docstring): the loop is bound by the CPU (the executors, the judge, the masks).
-WORKERS = 4
+#: Processes reading the batches (module docstring): the loop is bound by the CPU (the executors, the judge, the masks);
+#: the 2026-09-30 smoke held 0.88 GB of the GPU a process, and read the same with 4 and 6.
+WORKERS = 6
 #: Window sizes the readout is split by: the commanded aircraft of a window.
 SIZES = ("1", "2", "3+")
 
