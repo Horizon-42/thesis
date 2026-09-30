@@ -6,7 +6,8 @@ One reading, :func:`attitude`, of a state row ``(lat, lon, alt, V, ψ, γ, m)`` 
 (the dynamics' sign: a positive bank turns LEFT), fed from two sources:
 
 - a flight the EXECUTOR flew (`executor_attitude`): its state rows and the commands of the cycle that starts at each
-  row — what it flies from there (the last row: its last cycle's) — with its own aero row (`FlightInputs.aero_params`);
+  row — what it flies from there; the track's last row, the cycle that ended there (a later one is another flight's
+  of the batch, stepped on after this one was done, or none) — with its own aero row (`FlightInputs.aero_params`);
 - an OBSERVED flight (`observed_attitude`): the data plane's own reading of it — `states_from_channels` of its
   `FlightSeries` at the scenario's mass, as the executor starts from and `signals_from_series` reads, and the controls
   `outputs.dynamics.inverse.actual_controls` recovers under the thrust-fraction contract (the teacher's inversion,
@@ -71,11 +72,12 @@ def attitude_payload(values: dict[str, np.ndarray | None], rows: slice = slice(N
 
 
 def executor_attitude(flown: Any, index: int, rows: Sequence[int], aero_params: np.ndarray) -> dict[str, np.ndarray]:
-    """Flight ``index`` of an executor's ``flown`` (`autopilot.executor.Flown`) at its state ``rows``: each row's state and
-    the commands of the cycle that starts there (the last row, which no cycle starts at: its last cycle's)."""
+    """Flight ``index`` of an executor's ``flown`` (`autopilot.executor.Flown`) at its state ``rows`` (ascending, the track
+    written): each row's state and the commands of the cycle that starts there; the last row — the track's end — the
+    cycle that ended there, never one after it (in a batch the executor steps a flight on after it is done)."""
     rows = np.asarray(rows, dtype=np.int64)
     commands = flown.commands[index].cpu().numpy()
-    cycles = np.minimum(rows, len(commands) - 1)
+    cycles = np.minimum(rows, max(int(rows[-1]) - 1, 0))
     return attitude(flown.states[index].cpu().numpy()[rows], commands[cycles, 1], commands[cycles, 2], aero_params)
 
 

@@ -55,12 +55,13 @@ def test_a_sample_is_the_words_said_on_the_flights_own_steps_and_the_track_on_it
     track = payload["track"]
     n = len(track["tS"])
     assert all(len(values) == n for name, values in track.items() if name != "attitude")
-    # the attitude it is drawn in, at each point: the executor's own bank there (the cycle starting at the point)
+    # the attitude it is drawn in, at each point: the executor's own bank there (the cycle starting at the point; at the
+    # track's end, the cycle ending there)
     assert all(len(values) == n for values in track["attitude"].values())
     rows = np.round((np.asarray(track["tS"]) - start_s) / flown.cycle_s).astype(int)
     commands = flown.commands[0].numpy()
     assert track["attitude"]["bankRightDeg"] == pytest.approx(
-        -np.degrees(commands[np.minimum(rows, len(commands) - 1), 1]), abs=0.006)
+        -np.degrees(commands[np.minimum(rows, rows[-1] - 1), 1]), abs=0.006)
     assert track["tS"][0] == start_s and np.all(np.diff(track["tS"]) > 0)
     assert np.allclose(np.diff(track["tS"])[:-1], step_s)
     outcome = outcome_of(flown, 0, geometry, row["last_runway"], words.spec)

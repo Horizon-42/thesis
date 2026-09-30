@@ -171,7 +171,7 @@ def flight_payload(original: FlightSignals, flight: Admitted, reading: Reading, 
     signals written are the admitted ones — the first rows of the flight's."""
     signals, smoothed, relative = flight.signals, flight.smoothed, flight.relative
     rows = signals.n_rows
-    if not np.array_equal(signals.e_m, original.e_m[:rows]):
+    if not (np.array_equal(signals.e_m, original.e_m[:rows]) and np.array_equal(signals.n_m, original.n_m[:rows])):
         raise ValueError(f"{signals.dataset_id}: the admitted rows are not the flight's first {rows}")
     lat, lon = globe.latlon(signals.e_m, signals.n_m)
     key = signals.dataset_id.split(":", 1)[1]

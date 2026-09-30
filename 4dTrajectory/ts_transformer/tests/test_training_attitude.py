@@ -54,13 +54,15 @@ def test_a_payload_carries_every_field_at_its_points():
     assert got["bankRightDeg"] == [0.0, 0.0] and str(got["bankRightDeg"][0]) == "0.0"   # never a "-0.0"
 
 
-def test_an_executor_row_reads_the_commands_of_the_cycle_that_starts_there_and_the_last_row_its_last_cycle():
-    states = torch.tensor([[_row(psi=0.1 * k) for k in range(4)]], dtype=torch.float64)       # 3 cycles: 4 rows
-    commands = torch.tensor([[[0.3, math.radians(b), 1.0] for b in (5.0, 10.0, 15.0)]], dtype=torch.float64)
+def test_an_executor_row_reads_the_commands_of_the_cycle_that_starts_there_and_the_track_s_end_the_one_ending_there():
+    states = torch.tensor([[_row(psi=0.1 * k) for k in range(6)]], dtype=torch.float64)       # 5 cycles: 6 rows
+    commands = torch.tensor([[[0.3, math.radians(b), 1.0] for b in (5.0, 10.0, 15.0, 20.0, 25.0)]], dtype=torch.float64)
     flown = SimpleNamespace(states=states, commands=commands)
     got = executor_attitude(flown, 0, [0, 2, 3], AERO_ROW)
+    # the flight ended at row 3: its cycles 3 and 4 are the batch stepping it on after it was done
     assert got["bankRightDeg"] == pytest.approx([-5.0, -15.0, -15.0])
     assert got["headingDeg"] == pytest.approx([(90.0 - math.degrees(0.1 * k)) % 360.0 for k in (0, 2, 3)])
+    assert executor_attitude(flown, 0, [0], AERO_ROW)["bankRightDeg"] == pytest.approx([-5.0])   # one state: its first cycle
 
 
 def _turning_series(bank_left_deg: float, speed=80.0, gamma_deg=-2.0, step_s=2.0, rows=40) -> FlightSeries:
@@ -103,3 +105,15 @@ def test_a_flight_without_an_airframe_has_its_heading_and_path_angle_and_no_bank
     assert got["pathAngleDeg"] == pytest.approx(-2.0, abs=1e-6) and len(got["headingDeg"]) == 40
     written = attitude_payload(got, slice(0, 3))
     assert written["bankRightDeg"] is None and len(written["headingDeg"]) == 3
+
+
+def test_every_flight_is_read_on_its_rebuilt_series_and_one_whose_rows_differ_is_refused(monkeypatch):
+    """`observed_attitudes`: each flight's attitude from its series rebuilt as the executor's exports rebuild it, its rows
+    the signals' rows — a series with another row count is not the flight's."""
+    series = _turning_series(bank_left_deg=20.0)
+    flight = SimpleNamespace(dataset_id="KXXX:turn", n_rows=40)
+    monkeypatch.setattr(training_attitude, "rebuild_series", lambda directory, signals: [series for _ in signals])
+    got = training_attitude.observed_attitudes(None, [flight])
+    assert list(got) == ["KXXX:turn"] and got["KXXX:turn"]["bankRightDeg"][2:-2] == pytest.approx(-20.0, abs=0.3)
+    with pytest.raises(ValueError, match="KXXX:turn: 40 attitude rows for 41 signal rows"):
+        training_attitude.observed_attitudes(None, [SimpleNamespace(dataset_id="KXXX:turn", n_rows=41)])

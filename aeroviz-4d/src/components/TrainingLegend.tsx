@@ -96,7 +96,7 @@ export default function TrainingLegend({ layers, vocabulary, executorTrack, auto
           "closest it came against its minimum; ✕ where the judge ended an aircraft" },
     ]),
     { key: "aircraft", swatch: { kind: "point", colour: model?.colour ?? TRAINING_TRACE_COLOR, ring: "#000000" } satisfies Swatch,
-      shown: true, text: "the aircraft at the cursor",
+      shown: traffic === null, text: "the aircraft at the cursor",
       title: "the aircraft model where the sentence read has it at the cursor, turned to its exported attitude: heading, the " +
         "path angle as its pitch and its bank (wings level for a flight the dynamics has no airframe for); the angle of " +
         "attack is a reading through a clean-wing lift curve — high on a flapped final — written under it, never drawn" },

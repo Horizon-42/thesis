@@ -13,9 +13,8 @@
 
 import type { Reader } from "./trainingReader";
 
-/** MIRROR of `training_attitude.ATTITUDE_FIELDS`: one value per point of the track it sits beside. */
-export const TRAINING_ATTITUDE_FIELDS = ["headingDeg", "pathAngleDeg", "bankRightDeg", "attackDeg"] as const;
-
+/** A track's attitude, one value per point of the track it sits beside (`training_attitude.ATTITUDE_FIELDS`: the reader
+ *  refuses a field missing by name). */
 export interface TrainingAttitude {
   /** Compass degrees. */
   headingDeg: number[];

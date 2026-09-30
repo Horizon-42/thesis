@@ -18,7 +18,7 @@
  * THE SINGLE-FLIGHT VIEWS ARE REUSED AS THEY ARE: an aircraft on screen is a set flight (`trainingWindowSelection`, on the
  * window's clock), and a model's sentences for it are a `TrainingGenerationView` (`windowGenerationView`) — the sentence
  * bar, the read-back window and the flight's 3D layers draw it as any model sentence. Only the scene — every aircraft at
- * one time — is drawn here (`sceneTrackAt`, `episodesAt`).
+ * one time — is drawn here (`sceneTrackOf`, `episodesAt`; where each aircraft is: `trainingAttitude.poseAt`).
  */
 
 import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
