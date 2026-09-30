@@ -66,7 +66,7 @@ import time
 from collections import Counter, defaultdict
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 import psutil
@@ -397,14 +397,20 @@ def side_readout(spoken: WindowSentences, round_: WindowRound, step_s: float, *,
     return out
 
 
+def select_counted(rows: Sequence[Mapping[str, Any]], value: Callable[[Mapping[str, Any]], float]
+                   ) -> dict[tuple[int, str, int], float]:
+    """``value`` of each select sentence the reward counts (not starting in a loss it answers for), keyed by window,
+    aircraft and sample: every round speaks the select windows with the same streams, so a key is the same draw in
+    every round — the round choice's pairs (`select_rewards`) and its readout's (R39)."""
+    return {(r["window"], r["dataset_id"], r["sample"]): value(r) for r in rows if not r["starts_in_a_loss"]}
+
+
 def select_rewards(out: Path, rounds: int) -> list[dict[tuple[int, str, int], float]]:
-    """Each round's augmented select sentences' rewards (0 … ``rounds``), keyed by window, aircraft and sample, those
-    the reward counts (not starting in a loss they answer for)."""
+    """Each round's augmented select sentences' rewards (0 … ``rounds``), those the reward counts (`select_counted`)."""
     rewards = []
     for number in range(rounds + 1):
         readout = json.loads((out / f"round_{number:02d}" / "readout.json").read_text(encoding="utf-8"))
-        rewards.append({(r["window"], r["dataset_id"], r["sample"]): r["reward"]
-                        for r in readout["augmented"]["aircraft"] if not r["starts_in_a_loss"]})
+        rewards.append(select_counted(readout["augmented"]["aircraft"], lambda r: r["reward"]))
     return rewards
 
 
@@ -441,6 +447,14 @@ def write_sentences(path: Path, spoken: WindowSentences, advantages: np.ndarray)
                         outcome=np.array([r["outcome"] for r in spoken.rows]),
                         runway=np.array([r["runway"] for r in spoken.rows]),
                         reward=np.array([r["reward"] for r in spoken.rows]), advantage=advantages)
+
+
+def history_row(round_number: int, readout: Mapping[str, Any], **more: Any) -> dict[str, Any]:
+    """A round's ``history.json`` row: its select readout without the aircraft sentences (those stay in the round's
+    ``readout.json``), and ``more`` (the training round's sentences and pass)."""
+    return {"round": round_number,
+            **{side: {k: v for k, v in readout[side].items() if k != "aircraft"} for side in ("real", "augmented")},
+            "traffic": readout["traffic"], **more}
 
 
 def round_summary(round_: WindowRound, spoken: WindowSentences, trained: np.ndarray) -> dict[str, Any]:
@@ -637,11 +651,6 @@ def main(argv: list[str] | None = None) -> int:
               f"{real['ordering']['time_ratio']} gap {real['ordering']['gap_ratio']}; TF NLL "
               f"{readout['traffic']['teacher_forced']['nll_per_step']:.4f}")
         return readout
-
-    def history_row(round_number: int, readout: Mapping[str, Any], **more: Any) -> dict[str, Any]:
-        return {"round": round_number,
-                **{side: {k: v for k, v in readout[side].items() if k != "aircraft"} for side in ("real", "augmented")},
-                "traffic": readout["traffic"], **more}
 
     if last > 0:
         resumed = load_prior(out / f"round_{last:02d}", instructions)

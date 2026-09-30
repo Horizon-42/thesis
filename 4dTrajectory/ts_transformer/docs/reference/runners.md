@@ -1074,3 +1074,25 @@ arrivals (median 16 s). So `grading.json` gives FDE, the arrival endpoint error,
 FDE over the late and the early apart, per kind / pooled over the samples, in all / per airport / per approach kind / per
 airport × kind.
 
+### R39 · `run_ts.py traffic_window_reward_readout` — an M4-in-windows run (R37) read round by round, while it runs or after it ends
+
+Reads only the run's own files: each finished round's `readout.json` (a round is finished once it is written — the runner
+writes it last; a round directory after the finished ones without one is running or was cut short, named and not read),
+the training rounds' `history.json` rows and `choice.json` (written when an invocation of R37 ends — `run.sh` runs one
+round an invocation — so none before the first ends, and a choice covering fewer rounds than are finished is said to be
+behind). Prints per round and side the
+select reward, lost separation, landed and observed-runway shares, the ordering against the record (real windows);
+against round 0, paired per aircraft sentence (window, aircraft, sample — every round speaks the select windows with the
+same streams, so the pairs are the same draws), the change in reward and in lost separation over the sentences both rounds
+count and its standard error — the round choice's own pairs (`traffic_window_reward.select_counted`) and difference
+(`traffic_reward.paired_difference`), so on the augmented reward these are `choice.json`'s numbers — per kind on the
+augmented windows (reward per kind beside it); of the losses, the shares ended by another commanded aircraft and by a
+replayed one (`ended_with`); per training round its sentences (trained on, starting in a loss) and pass (updates, KL mean /
+largest, clipped share, data NLL, KL to base at the start); the traffic attention's output over the residual per layer and
+the teacher-forced NLL; the choice. Tested on a run written by R37's own pieces whose rounds differ (a wrong pair, round or
+kind fails it). `--out` (a new directory) also writes `traffic_window_reward_readout.json`
+(`ts-traffic-window-reward-readout-v1`). Replaces the ad-hoc script the first readout used (user 2026-09-30: a readout
+used every run is a runner).
+
+    python run_ts.py traffic_window_reward_readout \
+        --run 4dTrajectory/outputs/POOLED/prior/m4_window_20260930/window_s1337 [--out <new directory>]

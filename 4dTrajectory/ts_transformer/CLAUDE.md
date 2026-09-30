@@ -437,6 +437,8 @@ are the aircraft whose own end is a landing; the M4 model is named `traffic` (R3
 against its own samples, each sample scored whole as the speaker read it (`experiments/traffic_window_tuner.py`, the one layout
 `window_inputs` / `window_edges`, encoded in blocks of steps so every window fits the GPU; one commanded aircraft a window trains
 as R32 does; checks the formal size before it speaks) (R37).
+`traffic_window_reward_readout` reads such a run round by round, running or ended, from its files — paired against round 0
+as the round choice pairs (R39).
 **Every Training export writes the attitude each track is drawn in** (`experiments/training_attitude.py`, 2026-09-30): heading,
 path angle, right bank and an attack READING — executor tracks from its states and the command of the cycle starting at each row
 (the track's end: the cycle ending there), observed tracks from `rebuild_series` + the teacher's `actual_controls`, none for a flight
