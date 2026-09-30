@@ -863,6 +863,17 @@ call (`inference.scene_edges.scene_edge_blocks`), the separation masks share the
 The edge code's hash moved with it (`038df9ab…` → new): the run begun at e76ca5ff (`m4_traffic_20260928`, paused after
 round 2 for the restart) was deleted on 2026-09-29.
 
+**Several passes and the paired choice** (design §6.6 step 6 item 14, §6.2, §9 items 27–28, 2026-09-29): `--passes N`
+sweeps a round's sentences N times (default 1, the first run's), each sweep a new order of batches from the round's pass
+stream, every one scored against the model frozen once at the round's start — the one the sentences were said by, so the
+clip bounds how far the sweeps go together (PPO's epochs); `passes` is part of the run, and the pass record carries each
+sweep's KL and share of words outside the clip (`sweeps`). The round kept: within the guards, a round beating round 0 on
+the augmented scenes by at least `TIE_STANDARD_ERRORS` = 2 paired standard errors (the select readouts speak the same
+draws every round: √(sentences whose reward flipped) / sentences, over the sentences both count — `paired_difference`,
+`select_rewards` from each round's `readout.json`), of those the highest and the earliest it does not beat by as much;
+none: round 0. `choice.json` carries each round's difference and standard error against round 0 (`against_round_0`).
+The first run (`m4_traffic_20260929`) was chosen by the old tie (0.015) and is not re-chosen.
+
 ### R33 · `run_ts.py traffic_reward_readout` — multi-aircraft M4's readout, round by round (design §7)
 
 2026-09-29. `traffic_reward_readout --run <a finished, formal traffic_reward run> --reference <M3's real-scene free

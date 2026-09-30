@@ -17,10 +17,11 @@ Each round:
    scene's landings) with no loss of separation ending it first, else 0; each sentence's advantage is its reward less its
    scene's mean. A scene is trained on only when its sentences differ and it does not start in a loss the speaking
    aircraft answers for (no word of it made that one — counted);
-4. **one pass** (`traffic_tuner.SceneRewardTuner`): the second stage's loss, each sentence scored in its scene, the pull
-   to base reading the aircraft alone, the data term on the training days' scene samples (M2's: each flight's rows the
-   ones the loop's scenes read), the traffic attention at ``--traffic-learning-rate``; the distance to base on the fresh
-   sentences before the pass, the real scenes' and the augmented ones' apart;
+4. **``--passes`` passes** (`traffic_tuner.SceneRewardTuner`; design §6.6 step 6 item 14: each sweep a new order of
+   batches, all against the model the sentences were said by): the second stage's loss, each sentence scored in its
+   scene, the pull to base reading the aircraft alone, the data term on the training days' scene samples (M2's: each
+   flight's rows the ones the loop's scenes read), the traffic attention at ``--traffic-learning-rate``; the distance to
+   base on the fresh sentences before the pass, the real scenes' and the augmented ones' apart;
 5. **the select readouts** (every round, round 0 the start): the select days' ``--select-per-airport`` flights ×
    ``--select-samples`` sentences in their real scenes and in one fixed augmentation each (``seed`` +
    `SELECT_AUGMENT_OFFSET`), the same flights, seed and batches every round — the executor's outcomes and the words
@@ -34,8 +35,12 @@ scenes, landed (the executor's: separation aside) at most `GUARD_LANDED_DROP` be
 `GUARD_RUNWAY_DROP` below, lost separation at most `GUARD_LOSS_RISE` above, the median time to land and the median gap to
 the landing before on the runway both at most `GUARD_ORDER_GROWTH` × the same flights' recorded ones; on the real and the
 augmented scenes, the words a flight says after its first step no farther from the labelled ones than round 0 plus ln
-`GUARD_WORD_GROWTH` (stage 2's) — the highest augmented-scene reward, the earliest within `TIE_SHARE`. Round 0 kept means
-the start (augmented) is. Val is not read here.
+`GUARD_WORD_GROWTH` (stage 2's) — the augmented-scene reward, its ties read against paired standard errors (design
+§6.2, §9 item 27): the select readouts speak the same draws every round, so two rounds compare sentence by sentence
+and their difference's standard error is √(sentences whose reward flipped) / sentences (`paired_difference`, over the
+sentences counted in both). A candidate beats round 0 by at least `TIE_STANDARD_ERRORS` of them; of the candidates,
+the earliest the highest does not beat by as much; none: round 0. Round 0 kept means the start (augmented) is. Val is
+not read here.
 
 **Round by round** (design §6.6 step 6 item 11): every stream a round draws from is its own — the pool (``seed`` + the
 round), the augmentations, the sentences said and the pass's batches and data ([``seed``, round, `AUGMENT_STREAM` /
@@ -98,7 +103,7 @@ from ts_transformer.experiments.prior_augmented_reward import (
     real_starts, word_distance,
 )
 from ts_transformer.experiments.prior_free_generation import grouped, limits_s, start_altitude_windows
-from ts_transformer.experiments.prior_landing_reward import GUARD_RUNWAY_DROP, TIE_SHARE
+from ts_transformer.experiments.prior_landing_reward import GUARD_RUNWAY_DROP
 from ts_transformer.experiments.prior_train import (
     PRIOR_CHECKPOINT_SCHEMA, TRAFFIC_CHECKPOINT_SCHEMA, LoadedPrior, load_prior, rosters,
 )
@@ -137,6 +142,10 @@ GUARD_ORDER_GROWTH = 1.2
 #: (the landed guard's margin; about 1.4 binomial standard deviations over 2,000 select sentences at 11.5 %). The
 #: recorded share × `GUARD_ORDER_GROWTH` is the target line, reported (round 0 is four times the record).
 GUARD_LOSS_RISE = 0.01
+#: A round must beat round 0 on the augmented scenes by this many paired standard errors to be chosen, and the highest
+#: such round the earliest by as many (design §6.2, §9 item 27: the old tie, stage 2's 0.015, knew nothing of the
+#: noise).
+TIE_STANDARD_ERRORS = 2.0
 #: A round's own random streams beyond its pool (``seed`` + the round), each [``seed``, round, stream] (module docstring):
 #: the augmentations, the sentences said, the pass's batches and data. (A seed list is padded with zeros: [seed, round]
 #: is the augmentations' stream.)
@@ -591,9 +600,10 @@ def ordering_failures(row: Mapping[str, Any]) -> list[str]:
             if ratio is None or ratio > GUARD_ORDER_GROWTH]
 
 
-def guarded_choice(history: Sequence[Mapping[str, Any]], labelled: Mapping[str, Mapping[str, float]]
-                   ) -> tuple[int, dict[int, list[str]]]:
-    """``(the round kept, each excluded round's failed guards)`` (module docstring)."""
+def guarded_choice(history: Sequence[Mapping[str, Any]], labelled: Mapping[str, Mapping[str, float]],
+                   rewards: Sequence[Mapping[Any, float]]) -> tuple[int, dict[int, list[str]]]:
+    """``(the round kept, each excluded round's failed guards)`` (module docstring); ``rewards`` each round's augmented
+    select sentences' (`select_rewards`)."""
     start = history[0]
     margin = math.log(GUARD_WORD_GROWTH)
     excluded: dict[int, list[str]] = {}
@@ -616,9 +626,39 @@ def guarded_choice(history: Sequence[Mapping[str, Any]], labelled: Mapping[str, 
             failed += [f"{side} {c} words" for c in GUARD_WORD_COLUMNS if now[c] > then[c] + margin]
         if failed:
             excluded[row["round"]] = failed
-    candidates = [row for row in history if row["round"] not in excluded]
-    best = max(row["augmented"]["reward"] for row in candidates)
-    return next(row["round"] for row in candidates if row["augmented"]["reward"] >= best - TIE_SHARE), excluded
+
+    def beats(k: int, j: int) -> bool:
+        difference, error = paired_difference(rewards[j], rewards[k])
+        return difference > 0.0 and difference >= TIE_STANDARD_ERRORS * error
+
+    candidates = [row["round"] for row in history
+                  if row["round"] > 0 and row["round"] not in excluded and beats(row["round"], 0)]
+    if not candidates:
+        return 0, excluded
+    # the highest by its paired difference from round 0 (the sentences both count), as the candidates were found
+    best = max(candidates, key=lambda k: (paired_difference(rewards[0], rewards[k])[0], -k))
+    return min(k for k in candidates if not beats(best, k)), excluded
+
+
+def paired_difference(first: Mapping[Any, float], then: Mapping[Any, float]) -> tuple[float, float]:
+    """``(then − first, its standard error)`` over the sentences both count, read as pairs: the mean difference and
+    √(sentences whose reward differs) / sentences (the rewards are 0 or 1)."""
+    keys = sorted(first.keys() & then.keys())
+    if not keys:
+        raise ValueError("no sentence is counted in both rounds: nothing to pair")
+    a, b = np.array([first[k] for k in keys]), np.array([then[k] for k in keys])
+    return float(np.mean(b - a)), math.sqrt(float(np.sum(a != b))) / len(keys)
+
+
+def select_rewards(out: Path, rounds: int) -> list[dict[tuple[str, str, int], float]]:
+    """Each round's augmented select sentences' rewards (0 … ``rounds``, from their ``readout.json``), keyed by
+    flight, kind and sample, those the reward counts (not starting in a loss the speaking aircraft answers for)."""
+    rewards = []
+    for number in range(rounds + 1):
+        readout = json.loads((out / f"round_{number:02d}" / "readout.json").read_text(encoding="utf-8"))
+        rewards.append({(r["dataset_id"], r["kind"], r["sample"]): r["reward"]
+                        for r in readout["augmented"]["flights"] if not r["starts_in_a_loss"]})
+    return rewards
 
 
 def round_seed(seed: int, round_number: int, stream: int) -> int:
@@ -672,13 +712,17 @@ def write_traffic_prior(directory: Path, model: Prior, start_dir: Path, start: L
 def write_choice(out: Path, history: Sequence[Mapping[str, Any]], labelled: Mapping[str, Mapping[str, float]],
                  prior_dir: Path, log: Callable[[str], None]) -> None:
     """``choice.json`` over the rounds finished (`guarded_choice`; round 0 kept: the start)."""
-    kept_round, excluded = guarded_choice(history, labelled)
+    rewards = select_rewards(out, len(history) - 1)
+    kept_round, excluded = guarded_choice(history, labelled, rewards)
     write_json_atomic(out / "choice.json", {
         "rule": f"within round 0's guards (real scenes: landed ≥ − {GUARD_LANDED_DROP}, on the observed runway ≥ − "
                 f"{GUARD_RUNWAY_DROP}, lost separation ≤ + {GUARD_LOSS_RISE}, median time to land and landing gap ≤ "
                 f"{GUARD_ORDER_GROWTH} × recorded; real and augmented: each of {', '.join(GUARD_WORD_COLUMNS)} words per "
-                f"flight off the labelled ≤ round 0's + ln {GUARD_WORD_GROWTH}), the highest augmented-scene reward; "
-                f"within {TIE_SHARE} the earliest",
+                f"flight off the labelled ≤ round 0's + ln {GUARD_WORD_GROWTH}), the augmented-scene reward: beating "
+                f"round 0 by ≥ {TIE_STANDARD_ERRORS} paired standard errors, of those the highest and the earliest it "
+                f"does not beat by as much; none: round 0",
+        "against_round_0": [dict(zip(("difference", "standard_error"), paired_difference(rewards[0], r)))
+                            for r in rewards],
         "augmented_reward": [row["augmented"]["reward"] for row in history],
         "real_reward": [row["real"]["reward"] for row in history], "excluded_by_the_guards": excluded,
         "round": kept_round,
@@ -707,6 +751,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--aircraft-steps", type=int, default=SPEAKER_AIRCRAFT_STEPS, help="a loop batch's most "
                         "(`traffic_free_generation.speaking_batches`)")
     parser.add_argument("--traffic-learning-rate", type=float, default=TRAFFIC_LEARNING_RATE)
+    parser.add_argument("--passes", type=int, default=1, help="sweeps over a round's sentences (design §6.6 step 6 "
+                        "item 14)")
     parser.add_argument("--device", default="cuda", help="the prior's; the executor flies on CPU")
     parser.add_argument("--smoke", action="store_true", help="a dirty tree allowed; the runs are marked smoke")
     for field, default in asdict(RewardConfig()).items():
@@ -726,6 +772,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--rounds is the last round to run, 0 or more")
     if args.samples < 2:
         parser.error("a scene's sentences are compared with each other: --samples ≥ 2")
+    if args.passes < 1:
+        parser.error("--passes is the sweeps over a round's sentences, 1 or more")
     if args.data_weight <= 0.0:
         parser.error("the post-training trains beside the data (design §6.2): --data-weight > 0")
     git = git_state()
@@ -786,7 +834,7 @@ def main(argv: list[str] | None = None) -> int:
                    "augment_seed": args.seed + SELECT_AUGMENT_OFFSET, "augmented_left_out": select_left_out,
                    "augmented_kinds": dict(Counter(select_augmented.kinds)), "scene_samples": len(select_built),
                    "labelled_words_after_first_per_flight": labelled, "recorded": recorded},
-        "seed": args.seed, "tie_share": TIE_SHARE,
+        "seed": args.seed, "tie_standard_errors": TIE_STANDARD_ERRORS, "passes": args.passes,
         "guards": {"landed_drop": GUARD_LANDED_DROP, "runway_drop": GUARD_RUNWAY_DROP, "loss_rise": GUARD_LOSS_RISE,
                    "order_growth": GUARD_ORDER_GROWTH, "word_columns": list(GUARD_WORD_COLUMNS),
                    "word_margin_ln": math.log(GUARD_WORD_GROWTH),
@@ -945,12 +993,14 @@ def main(argv: list[str] | None = None) -> int:
             start_distance[side] = (tuner.distance(sentences.subset(members), [allowed[i] for i in members])
                                     if len(members) else None)
         tuner.restart(np.random.default_rng([args.seed, round_number, PASS_STREAM]))
-        passed = {**tuner.one_pass(sentences, advantages[keep], data, allowed, slots=slots),
+        passed = {**tuner.one_pass(sentences, advantages[keep], data, allowed, slots=slots, passes=args.passes),
                   "distance_at_start": start_distance, "distance_sentences": measured_on}
         passed["speaking_gpu_peak_gb"] = speaking_peaks
         if device.type == "cuda":
             passed["pass_gpu_peak_gb"] = torch.cuda.max_memory_allocated(device) / 1e9
-        log(f"round {round_number}: one pass over {len(keep)} sentences ({passed['batches']} updates), reward term "
+        sweeps = ", ".join(f"{p['kl_mean']:.4f} / {p['clipped_share']:.4f}" for p in passed["sweeps"])
+        log(f"round {round_number}: {args.passes} pass(es) over {len(keep)} sentences ({passed['batches']} updates; "
+            f"per pass KL / outside the clip {sweeps}), reward term "
             f"{passed['reward_mean']:.4f}, KL to the base at the start {start_distance}, {passed['kl_mean']:.4f} in the "
             f"pass (max {passed['kl_max']:.4f}), data NLL {passed['data_mean']:.4f}, words outside the clip "
             f"{passed['clipped_share']:.4f}, {passed['seconds']:.0f}s; GPU peak: speaking processes "
@@ -960,7 +1010,7 @@ def main(argv: list[str] | None = None) -> int:
                             fine_tuning={"schema": TRAFFIC_REWARD_SCHEMA, "from": str(prior_dir), "base": str(base_dir),
                                          "round": round_number, "optimiser": asdict(config),
                                          "traffic_learning_rate": args.traffic_learning_rate,
-                                         "samples": args.samples})
+                                         "samples": args.samples, "passes": args.passes})
         torch.save(tuner.state(), directory / OPTIMISER_FILE)
         readout = read_select(round_number)
         history.append(history_row(round_number, readout, train_pass=passed,

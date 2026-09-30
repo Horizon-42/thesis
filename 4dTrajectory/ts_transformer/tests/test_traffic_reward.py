@@ -162,7 +162,13 @@ def _row(number, *, reward, landed=0.9, runway=0.95, lost=0.1, time_ratio=1.0, g
     return {"round": number, "real": side(True), "augmented": side(False)}
 
 
-def test_the_guards_exclude_a_round_by_name_and_the_choice_takes_the_earliest_within_the_tie():
+def _rewards(ones, flips_down=0, n=100):
+    """An augmented select readout's rewards: sentences 0 … ones − 1 rewarded, and of those the first ``flips_down`` not
+    (keyed as `select_rewards` keys them)."""
+    return {("KXXX:f", "A", k): float(flips_down <= k < ones) for k in range(n)}
+
+
+def test_the_guards_exclude_a_round_by_name_and_the_choice_reads_paired_standard_errors():
     from ts_transformer.experiments.traffic_reward import guarded_choice
 
     labelled = {side: {"approach": 1.0, "heading": 3.0, "altitude": 1.0, "angle": 1.0, "speed": 1.0}
@@ -170,11 +176,58 @@ def test_the_guards_exclude_a_round_by_name_and_the_choice_takes_the_earliest_wi
     history = [_row(0, reward=0.50), _row(1, reward=0.60), _row(2, reward=0.61), _row(3, reward=0.90, lost=0.12),
                _row(4, reward=0.90, landed=0.85), _row(5, reward=0.90, gap_ratio=1.3), _row(6, reward=0.90, heading=4.0),
                _row(7, reward=0.90, time_ratio=None)]
-    kept, excluded = guarded_choice(history, labelled)
-    assert kept == 1                                              # 0.61 is within 0.015 of 0.60: the earlier one
+    rewards = [_rewards(50), _rewards(60), _rewards(61)] + [_rewards(90)] * 5
+    kept, excluded = guarded_choice(history, labelled, rewards)
+    # round 1 beats round 0 by 0.10 against 2 × √10 / 100 = 0.063; round 2 (the highest) beats round 1 by only
+    # 0.01 against 2 × √1 / 100: the earlier one
+    assert kept == 1
     assert excluded == {3: ["lost separation"], 4: ["landed"], 5: ["landing gap"],
                         6: ["real heading words", "augmented heading words"], 7: ["time to land"]}
-    assert guarded_choice([_row(0, reward=0.5), _row(1, reward=0.4)], labelled) == (0, {})
+    # clearly above the earlier candidate: the later one
+    assert guarded_choice(history[:3], labelled, [_rewards(50), _rewards(60), _rewards(80)])[0] == 2
+    # +0.05 over round 0 but 55 sentences flipped (30 up, 25 down): 2 × √55 / 100 = 0.148 — noise, round 0 kept
+    noisy = {k: v for k, v in _rewards(50).items()}
+    noisy.update({("KXXX:f", "A", k): 0.0 for k in range(25)})
+    noisy.update({("KXXX:f", "A", k): 1.0 for k in range(50, 80)})
+    assert guarded_choice(history[:2], labelled, [_rewards(50), noisy]) == (0, {})
+    assert guarded_choice(history[:2], labelled, [_rewards(50), _rewards(50)]) == (0, {})
+    assert guarded_choice([_row(0, reward=0.5), _row(1, reward=0.4)], labelled, [_rewards(50), _rewards(40)]) == (0, {})
+
+
+def test_paired_differences_read_the_sentences_both_rounds_count(tmp_path):
+    from ts_transformer.experiments.traffic_reward import paired_difference, select_rewards
+
+    first, then = _rewards(4, n=6), _rewards(6, flips_down=1, n=6)
+    del then[("KXXX:f", "A", 5)]                                # not counted in the later round: not paired
+    difference, error = paired_difference(first, then)
+    # pairs 0 … 4: 1→0, 1→1, 1→1, 1→1, 0→1
+    assert difference == 0.0 and error == pytest.approx(np.sqrt(2) / 5)
+    for number, rows in enumerate(([{"dataset_id": "a", "kind": "A", "sample": 0, "reward": 1.0,
+                                      "starts_in_a_loss": False},
+                                     {"dataset_id": "a", "kind": "A", "sample": 1, "reward": 0.0,
+                                      "starts_in_a_loss": True}],
+                                    [{"dataset_id": "a", "kind": "A", "sample": 0, "reward": 0.0,
+                                      "starts_in_a_loss": False}])):
+        (tmp_path / f"round_{number:02d}").mkdir()
+        (tmp_path / f"round_{number:02d}" / "readout.json").write_text(
+            json.dumps({"augmented": {"flights": rows}, "real": {"flights": []}}))
+    assert select_rewards(tmp_path, 1) == [{("a", "A", 0): 1.0}, {("a", "A", 0): 0.0}]
+    with pytest.raises(ValueError, match="nothing to pair"):
+        paired_difference({("a", "A", 0): 1.0}, {("a", "A", 1): 1.0})
+
+
+def test_the_highest_candidate_is_the_highest_on_the_paired_sentences():
+    """Round 3's own reward (over what it counts: 100 sentences more, all rewarded) is the highest, but on the sentences
+    it pairs with round 0 round 2 is: ranked on its own reward round 3 would not beat round 1 (+0.03 against 2 × √3 /
+    100), keeping 1; ranked on the pairs, as the candidates were found, round 2 beats round 1 and is kept."""
+    from ts_transformer.experiments.traffic_reward import guarded_choice
+
+    labelled = {side: {"approach": 1.0, "heading": 3.0, "altitude": 1.0, "angle": 1.0, "speed": 1.0}
+                for side in ("real", "augmented")}
+    history = [_row(0, reward=0.50), _row(1, reward=0.60), _row(2, reward=0.80), _row(3, reward=0.815)]
+    third = _rewards(63)
+    third.update({("KXXX:f", "A", k): 1.0 for k in range(100, 200)})     # counted only in round 3
+    assert guarded_choice(history, labelled, [_rewards(50), _rewards(60), _rewards(80), third]) == (2, {})
 
 
 def test_a_scene_starting_in_a_loss_is_not_trained_on_and_the_readouts_read_the_rest(tmp_path, monkeypatch):

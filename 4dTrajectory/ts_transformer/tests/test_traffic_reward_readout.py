@@ -115,7 +115,8 @@ def _summary(number):
                        "teacher_forced": {"nll_per_step": 0.28 + number / 1000}}}
     if number:
         row.update({"sentences": {"all": {"sentences": 4}, "scenes_with_contrast": 1},
-                    "train_pass": {"kl_mean": 0.01, "kl_trace": [0.01], "clipped_trace": [0.0]}})
+                    "train_pass": {"kl_mean": 0.01, "kl_trace": [0.01], "clipped_trace": [0.0],
+                                   "sweeps": [{"kl_mean": 0.01, "clipped_share": 0.0}]}})
     return row
 
 
@@ -196,7 +197,8 @@ def test_runner_reads_every_round(tmp_path):
     assert last["by_stratum"][VECTORED] == {"sentences": 5, "lost_separation": 0.4}
     assert first["real"]["go_around_sentences"] == 1 and last["go_around_sentences"] == 0
     training = readout["rounds"][1]["training"]
-    assert training["pass"] == {"kl_mean": 0.01} and training["sentences"]["scenes_with_contrast"] == 1
+    assert training["pass"] == {"kl_mean": 0.01, "sweeps": [{"kl_mean": 0.01, "clipped_share": 0.0}]}
+    assert training["sentences"]["scenes_with_contrast"] == 1
     assert training["signal"]["differing_scenes"] == 1
     real = readout["spread"]["real"]
     # f3 starts in a loss in the last round only, f4's labelled reading starts in one: both left out
