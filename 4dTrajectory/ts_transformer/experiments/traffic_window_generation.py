@@ -1,7 +1,8 @@
 """Multi-aircraft M3's second pass (design §6.6 step 7 item 4): the start of the post-training — augmented with a traffic
 attention at zero (`prior.model.with_traffic`: it answers as the prior does, to rounding) — commanding every aircraft of
 a window at once (`traffic_window`), read beside the same model alone, the labelled words and the records, every one
-judged in its window. A readout only.
+judged in its window. A readout only. ``--prior`` may instead be a traffic prior (an M4 round,
+`prior_train.TRAFFIC_CHECKPOINT_SCHEMA`), read as it was trained.
 
 ``--windows-per-airport`` windows of the split are drawn (`traffic_window.draw_windows`: seeded, a window without a flight
 that flies on its own dynamics passed over and counted), and every commanded aircraft is read four ways:
@@ -75,7 +76,9 @@ from ts_transformer.autopilot.judge import outcome_of
 from ts_transformer.experiments.prior_free_generation import (
     _physics, augmented_inputs, fly_reference, glidepath_stops, limits_s, reference_grid, start_altitude_windows,
 )
-from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, load_prior, rosters
+from ts_transformer.experiments.prior_train import (
+    PRIOR_CHECKPOINT_SCHEMA, TRAFFIC_CHECKPOINT_SCHEMA, load_prior, rosters,
+)
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION, Controlled, Loop, Run, recorded
 from ts_transformer.experiments.traffic_labelled import own_end
 from ts_transformer.experiments.traffic_speaking import (
@@ -587,7 +590,8 @@ def in_processes(count: int, numbers: Sequence[int], read: Callable[[int], Any])
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
-    parser.add_argument("--prior", type=Path, required=True, help="the single-aircraft prior it starts from (augmented)")
+    parser.add_argument("--prior", type=Path, required=True, help="the single-aircraft prior it starts from (augmented), "
+                        "or a traffic prior (an M4 round)")
     parser.add_argument("--instructions", type=Path, required=True)
     parser.add_argument("--executor", type=Path, required=True, help="the executor spec directory")
     parser.add_argument("--split", choices=SPLITS, required=True)
@@ -615,11 +619,17 @@ def main(argv: list[str] | None = None) -> int:
     git = git_state()
     started = time.perf_counter()
     params, record, words = replay.open_executor(executor_dir, instructions)
-    single, payload, prior_config, own_masks = load_prior(prior_dir, instructions)
-    if prior_config["smoke"] or payload["schema"] != PRIOR_CHECKPOINT_SCHEMA:
-        parser.error(f"{prior_dir} is not a single-aircraft prior's formal run")
-    torch.manual_seed(args.seed)                       # the traffic attention's weights: at zero it reads nothing
-    model = with_traffic(single, EDGE_FEATURES).eval()   # on the CPU until the reading processes are forked
+    loaded, payload, prior_config, own_masks = load_prior(prior_dir, instructions)
+    if prior_config["smoke"] or payload["schema"] not in (PRIOR_CHECKPOINT_SCHEMA, TRAFFIC_CHECKPOINT_SCHEMA):
+        parser.error(f"{prior_dir} is not a single-aircraft or a traffic prior's formal run")
+    if payload["schema"] == PRIOR_CHECKPOINT_SCHEMA:
+        torch.manual_seed(args.seed)                   # the traffic attention's weights: at zero it reads nothing
+        model = with_traffic(loaded, EDGE_FEATURES).eval()   # on the CPU until the reading processes are forked
+        attention = "zero (with_traffic): the prior's answers to rounding"
+    else:
+        if tuple(loaded.traffic_features) != EDGE_FEATURES:
+            parser.error(f"{prior_dir}'s traffic attention reads other edge features than today's")
+        model, attention = loaded, "the traffic prior's own"
     every_landing = airport_landings(instructions, rosters(instructions))
     landings = every_landing if VARIANTS[model.config.variant].landing_context else None
     step_s = words.spec.step_s
@@ -678,7 +688,7 @@ def main(argv: list[str] | None = None) -> int:
         "seed": args.seed, "augment_seed": args.augment_seed, "augmenting": augmenting,
         "prior": {"directory": repo_relative(prior_dir), "procedure_masks": list(own_masks.names),
                   "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt")},
-        "traffic_attention": "zero (with_traffic): the prior's answers to rounding",
+        "traffic_attention": attention,
         "executor": {"directory": repo_relative(executor_dir), "sha256": record["sha256"]},
         "instructions": repo_relative(instructions), "scenes": built, "history_s": HISTORY_S,
         "readings": {"ends": VISUAL, "beside": IFR}, "aircraft_steps": args.aircraft_steps, "batches": len(batches),
