@@ -1,6 +1,6 @@
 # AeroViz-4D Development Changelog
 
-### 2026-09-30 — Training: multi-aircraft windows (branch `dev-training-traffic`, awaiting the user's merge)
+### 2026-09-30 — Training: multi-aircraft windows (branch `dev-training-traffic`, merged)
 
 - **What**: the Training module shows multi-aircraft windows (user 2026-09-30: plan reviewed; 20 windows an airport, the rest as
   proposed). A window set (`traffic-windows`, `traffic.json`) and one `window-generation` overlay per model, written by ts
@@ -13,7 +13,7 @@
 - **Data choices** (doc 36 §2.9): select windows of the formal window readouts' draw, 20 an airport by commanded size
   (6 / 7 / 7), 4 samples; the export draws its OWN samples (no readout re-run, no row check — the user: as the single-flight
   export does); landings = the aircraft whose own end is a landing.
-- **Exported to a mirror** (not yet `public/data`): augmented r7 and traffic r5, five airports, 100 windows, 263 commanded
+- **Published** (the user, 2026-09-30) after a mirror export and check: augmented r7 and traffic r5, five airports, 100 windows, 263 commanded
   aircraft, 1,052 aircraft-samples each: landed 888 for both; lost separation 123 (r7) and 109 (traffic r5). One draw of a
   few windows — not a comparison of the two models (the formal window readouts are). `check-publication --server`: 0 errors.
 - **Reviews**: two opus reviews (exporter; frontend), every finding fixed. Tests: ts window export 12, frontend Vitest 105
