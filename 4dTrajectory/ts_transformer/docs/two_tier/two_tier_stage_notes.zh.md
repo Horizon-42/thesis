@@ -250,7 +250,8 @@
 
 ## 6 代码、分支、工作树（2026-09-26 21:30 UTC；多机第 7 步的一条 2026-09-30）
 
-- **多机第 7 步**：分支 **`dev-m4-window`**（`cbfdc5f2`，从 `dev-m4-passes` 起，已并入过 dev-two-tier `b6655f38`，能干净合回；**等用户合并**），
+- **多机第 7 步**：分支 **`dev-m4-window`**（头 `4ab15733`：7.6 的代码 `cbfdc5f2` 之后并入 dev-two-tier `4dd4a76b`、加读数 runner R39；
+  从 `dev-m4-passes` 起，能干净合回；**等用户合并**），
   开发在工作树 `.claude/worktrees/m4-window`。7.1–7.6 全部写完、每步 opus 审查；ts 全套 1,813 通过。**工作树 `.claude/worktrees/m3-window-run`
   分离在 `cbfdc5f2`，7.6 正式运行从它跑——运行期间不要在那里提交、切换或改文件**（`--resume` 比对提交）；跑完、用户同意后先 unlink 数据软链接再删。
 
@@ -360,7 +361,7 @@
   每个窗口 2 次）上读一遍。8 轮；按 R32 的护栏和配对标准误选轮。**第 0 轮不训练**：起点模型在选择集上的读数，作基线。
   窗口编码按步分块（`Prior.encode` 的 `pairs_per_block`，每块 32,768 对），每个窗口都训练，没有大小上限（用户 2026-09-30：不许漏掉最密的窗口）。
 - **在哪**：运行目录 `outputs/POOLED/prior/m4_window_20260930/`——`run.sh`（逐轮调 runner：第 1 轮新开，之后 `--resume`）、`run.pid`
-  （run.sh 的进程号，按它盯）、`run.log`、`mem.log`（每分钟主机内存）、`readout_aid.py`（读数辅助，见下）。运行产物 `window_s1337/`：`config.json`、
+  （run.sh 的进程号，按它盯）、`run.log`、`mem.log`（每分钟主机内存）。运行产物 `window_s1337/`：`config.json`、
   `preflight.json`、`round_00/readout.json`、`round_0k/`（`sentences.json`、`sentences.npz`、`checkpoint.pt`、`optimiser.pt`、`config.json`、
   `procedure_masks.json`、`readout.json`——readout 最后写，有它才算这轮做完）、`history.json`、跑完才有的 `choice.json`。
   旁边是失败的开跑，只作记录、不要用也不要删：`window_s1337.aborted-20260930T2053Z`（第二次，里面有旧代码的第 0 轮和第一次的
@@ -369,8 +370,11 @@
 - **代码**：runner `traffic_window_reward`（R37），分支 `dev-m4-window` `cbfdc5f2`（§6）。运行从工作树 `m3-window-run`（分离在 `cbfdc5f2`）跑，
   **运行期间绝不动它**；`dev-m4-window` 可以继续开发（运行不读它）。
 - **时间表**：2026-09-30 22:33Z 开跑；数据准备 3 分钟；开跑前自检通过（第 1 轮最贵的一次说话——打分代价 108,376，8 架由模型指挥——带梯度打分，GPU 峰值
-  1.47 GB，显卡 8 GB；主机空闲 13.8 GB，要求 9.5 GB）；第 0 轮读数 22:40Z 起（另一个会话的导出任务抢过 CPU，比上次的 32 分钟慢）。之后每轮：
+  1.47 GB，显卡 8 GB；主机空闲 13.8 GB，要求 9.5 GB）；**第 0 轮读完**（23:24Z，43 分钟：另一个会话的导出任务抢过 CPU）：选择集奖励真实 0.813、
+  扩充 0.743（插一架 A 0.729、挪起点 B 0.776、压缩 C 0.723），失去间隔真实 13.4 %、扩充 19.1 %，真实落地 85.1 %，落地时间 / 间隔对记录 1.00 / 1.09，
+  教师强制 NLL 0.2814——与第二次开跑的第 0 轮逐架逐位相同（真实 2,104、扩充 2,248 句），分块编码和自检没有改变说话。第 1 轮 23:24Z 起说话。之后每轮：
   训练窗口说话约 1 小时 → 训练 1 遍 → 选择集读数约 35 分钟，一轮约 2.5–3 小时；8 轮预计 2026-10-01 22:00Z 前后跑完。
+- **跑着的时候看数字**：R39 `traffic_window_reward_readout`（命令见下"跑完之后"第 2 条）随时读已完成的轮，不打扰运行（只读文件、不用 GPU）。
 - **log 里每轮该有的行**：`round k: select reward real … augmented … (…)`（选择集读数，从 k = 0 起）、`round k: N aircraft sentences in 700 windows,
   reward …`（训练窗口说话）、`round k: 1 pass(es) over … window samples (… updates), reward term …`（训练）、`=== round k exit 0`；最后
   `kept round K (the guards excluded …)` 和 `=== all rounds done`。
@@ -397,8 +401,11 @@
   1. 发 PushNotification。
   2. 写读数 `docs/two_tier/readouts/2026-10-01_m4_window.zh.md`：逐轮选择集的真实 / 扩充奖励、失去间隔、落地、按扩充种类（插一架 / 压缩 / 挪起点），
      对第 0 轮逐架配对的差和标准误，护栏排除了哪几轮，选中哪一轮（`choice.json`）；训练那一遍的 KL、截断比例、交通注意力输出 / 主干；和第 5 轮
-     在窗口里的读数（`readouts/2026-09-30_m3_window.zh.md` §5）对照。辅助：`python3 outputs/POOLED/prior/m4_window_20260930/readout_aid.py`
-     （只读 history / readout / choice，打印逐轮表和配对差；在冒烟运行上核过，与 `choice.json` 的配对差一致）。然后在多机设计 §6.6 第 7 步、本文件
+     在窗口里的读数（`readouts/2026-09-30_m3_window.zh.md` §5）对照。数字用读数 runner **R39 `traffic_window_reward_readout`**（只读运行自己的
+     文件，打印逐轮表、对第 0 轮的逐架配对差，扩充窗口奖励的配对差与 `choice.json` 相同——有测试；跑着的时候也能读已完成的轮）：它在分支
+     `dev-m4-window` 上（`4ab15733`，opus 审查过；运行用的检出 `m3-window-run` 里没有），从工作树 `.claude/worktrees/m4-window` 跑：
+     `python run_ts.py traffic_window_reward_readout --run /home/supercomputing/studys/thesis/4dTrajectory/outputs/POOLED/prior/m4_window_20260930/window_s1337`
+     （加 `--out <新目录>` 写 JSON）。不要再临时写读数脚本（用户 2026-09-30：常用的读数写成正式 runner）。然后在多机设计 §6.6 第 7 步、本文件
      §0 和这一节更新状态。
   3. 按"每个实验跑完都发布"的规矩，把选中轮的窗口轨迹发布到前端（R36 `window_training_export`，意图写进 `docs/experiments/intents.json`），交给 opus agent 做。
   4. 问用户：选中轮读不读验证集窗口（R34 `traffic_window_generation --split val`）；合并 `dev-m4-window`（用户合并）；删工作树 `m3-window-run`
