@@ -176,6 +176,47 @@ def test_a_landing_on_a_step_is_checked_before_that_steps_pairs():
     assert run.episodes == []
 
 
+def _judging(reading: str = "visual"):
+    from ts_transformer.experiments.traffic_loop import Judging, Run
+
+    run = Run(reading)
+    return Judging(SEPARATION, reading, STEP_S, run), run
+
+
+def test_an_ended_aircraft_still_in_the_scene_is_avoided_and_never_ended_again():
+    """Design §9 item 29: P, ended earlier, flies on as a passive aircraft — F 4 km behind it is ended for it (as behind a
+    replayed one), and P answering for a loss with L ahead of it is recorded, not ended."""
+    ahead = _controlled("L", 0.0, -4_000.0 + 70.0 * T)
+    passive = _controlled("P", 0.0, -8_000.0 + 70.0 * T)
+    behind = _controlled("F", 0.0, -12_000.0 + 70.0 * T)
+    judging, run = _judging()
+    ended = judging.step(0.0, [ahead, behind], [], passive=[passive])
+    assert ended == run.ended == {"F": {"t_s": 0.0, "kind": "in_trail", "relation": "same", "with": "P",
+                                       "with_controlled": False}}
+    by_pair = {tuple(e["pair"]): e for e in run.episodes}
+    assert by_pair[("L", "P")]["responsible"] == [{"key": "P", "controlled": False}]
+    assert by_pair[("L", "P")]["ended"] == [] and by_pair[("F", "P")]["ended"] == ["F"]
+    # a step with fewer than two aircraft is not judged
+    assert judging.step(2.0, [], [], passive=[passive]) == {} and run.steps_judged == 1
+
+
+def test_a_passive_aircraft_landing_checks_the_wake_behind_it_and_is_not_ended_as_a_follower():
+    """The landing test's geometry: a passive L's landing ends the controlled I behind it; with I passive and L
+    controlled, the shortfall is recorded and nobody is ended."""
+    gap = 3.5 * NM_M
+    t_leader = np.arange(0.0, 100.0 + 1e-9, STEP_S)
+    leader = _controlled("L", 0.0, -70.0 * (101.0 - t_leader), landing_s=101.0)
+    t_follower = np.arange(0.0, 160.0 + 1e-9, STEP_S)
+    follower = _controlled("I", 0.0, -gap - 70.0 * (101.0 - t_follower), category="I", outcome="timeout")
+    judging, run = _judging()
+    judging.landing(101.0, leader, [follower], [])
+    assert run.ended["I"]["kind"] == "at_threshold" and run.at_threshold[0]["follower_controlled"]
+    judging, run = _judging()
+    judging.landing(101.0, leader, [], [], passive=[follower])
+    assert run.ended == {} and [(a["follower"], a["follower_controlled"]) for a in run.at_threshold] == [("I", False)]
+    assert run.landings_checked == 1
+
+
 def test_segments_chain_by_span_and_the_scene_time_is_theirs():
     from ts_transformer.experiments.traffic_loop import segments
 
