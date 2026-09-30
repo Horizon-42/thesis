@@ -156,14 +156,17 @@ def draw_windows(directory: Path, split: str, spec: VocabularySpec, words: Words
                  *, per_airport: int, seed: int, step_s: float) -> WindowDraw:
     """``per_airport`` windows of each airport of ``airports`` (in order), drawn from its tiles (`window_tiles`) in a
     permutation of one generator seeded ``seed``: in each, the flights that fly on their own dynamics are commanded (each
-    re-read and checked against its stored sentence, as `replay.draw` does); a tile none of whose flights flies is passed
-    over and counted; refused when an airport runs short."""
+    rebuilt once — `replay.draw_flights`, a chunk of tiles at a time — re-read and checked against its stored sentence,
+    as `replay.draw` does); a tile none of whose flights flies is passed over and counted; refused when an airport runs
+    short."""
     sentences = load_sentences(directory, split, spec)
     stored = {int(index): k for k, index in enumerate(sentences["signal_index"])}
     index = {s.dataset_id: i for i, s in enumerate(load_signals(directory, split))}
     rng = np.random.default_rng(seed)
     openings: list[tuple[str, float, tuple[str, ...]]] = []
-    parts: list[replay.Batch] = []
+    rebuilt: dict[str, tuple[Any, Any, str, Any] | None] = {}   # key → (signals, series, group, reading); None: no
+    geometries: Mapping[str, Any] = {}
+    paths: Mapping[str, Any] = {}
     counts: dict[str, Any] = {"split": split, "seed": seed, "per_airport": per_airport, "airports": {}}
     for code, airport in airports.items():
         tiles = window_tiles(airport, step_s)
@@ -175,36 +178,40 @@ def draw_windows(directory: Path, split: str, spec: VocabularySpec, words: Words
             if taken == per_airport:
                 break
             chunk = [tiles[int(i)] for i in order[start: start + DRAW_CHUNK]]
-            candidates = sorted({index[k] for _, keys in chunk for k in keys})
-            drawn = replay.draw_flights(directory, split, candidates, per_airport=0, seed=0)
-            flies = {s.dataset_id: n for n, s in enumerate(drawn.signals)}
-            readings: dict[str, Any] = {}
-            keep: list[int] = []
+            new = sorted({k for _, keys in chunk for k in keys if k not in rebuilt})
+            if new:
+                drawn = replay.draw_flights(directory, split, [index[k] for k in new], per_airport=0, seed=0)
+                geometries, paths = drawn.geometries, drawn.vertical_paths
+                flies = dict(zip((s.dataset_id for s in drawn.signals), zip(drawn.signals, drawn.series, drawn.groups)))
+                for k in new:
+                    rebuilt[k] = None
+                    if k in flies:
+                        signals, series, group = flies[k]
+                        rebuilt[k] = (signals, series, group,
+                                      _reading(signals, index[k], drawn.geometries, sentences, stored, spec, words))
             for opens, keys in chunk:
                 if taken == per_airport:
                     break
                 read += 1
-                commanded = tuple(k for k in keys if k in flies)
+                commanded = tuple(k for k in keys if rebuilt[k] is not None)
                 if not commanded:
                     passed += 1
                     continue
                 entering_unflown.update({"entering": len(keys), "not_flown": len(keys) - len(commanded)})
-                for k in commanded:
-                    if k not in readings:
-                        readings[k] = _reading(drawn.signals[flies[k]], index[k], drawn.geometries, sentences, stored,
-                                               spec, words)
-                    keep.append(flies[k])
                 openings.append((code, opens, commanded))
                 taken += 1
-            if keep:
-                parts.append(replay.batch_of(drawn, keep, [readings[drawn.signals[n].dataset_id] for n in keep]))
         if taken < per_airport:
             raise ValueError(f"{code}: {taken} windows with a flight that flies, {per_airport} wanted")
         counts["airports"][code] = {"tiles": len(tiles), "read": read, "passed_over": passed, "windows": taken,
                                     "commanded": sum(len(c) for a, _, c in openings if a == code),
                                     **dict(entering_unflown)}
-    batch = replay.Batch(**{f.name: [item for part in parts for item in getattr(part, f.name)]
-                            for f in dataclasses.fields(replay.Batch) if f.name != "drawn"}, drawn=counts)
+    counts["rebuilt"] = len(rebuilt)
+    members = [rebuilt[k] for _, _, commanded in openings for k in commanded]
+    batch = replay.Batch(signals=[m[0] for m in members], series=[m[1] for m in members],
+                         readings=[m[3] for m in members], geometries=[geometries[m[0].airport] for m in members],
+                         vertical_paths=[paths[m[0].airport] for m in members],
+                         approach_ias_mps=[replay.flight_approach_ias_mps(m[1], m[2]) for m in members],
+                         groups=[m[2] for m in members], drawn=counts)
     return WindowDraw(openings, batch, counts)
 
 
@@ -519,6 +526,10 @@ class WindowLoop:
         """Aircraft ``i`` on every step it was read at in the scene (a readout judging it again afterwards)."""
         return self._path(i, 0, int(self.judged_state[i]) + 1)
 
+    def judged_until_s(self, i: int) -> float:
+        """The last instant aircraft ``i`` was judged at (its own end's; past it, passive — a glidepath stop — or out)."""
+        return self.states[i][int(min(self.judged_to[i], self.judged_state[i]))].t_s
+
     def _path(self, i: int, first: int, last: int) -> Controlled:
         states = self.states[i][first:last]
         rows = self.windows[self.window_of[i]].rows(self.keys[i])
@@ -613,8 +624,8 @@ class WindowLoop:
                 stalled |= executor.limits["stall"][-1]
             self._record(index, executor, step + 1, captured=executor.lateral.captured.cpu().numpy())
             done, stalled = executor.done.cpu().numpy(), stalled.cpu().numpy()
-            ending = [p for p, i in enumerate(index) if not self.left[i]
-                      and (done[p] or stalled[p] or self._crossed(i, self._step_of(i, step)))]
+            crossed = self._crossed(index, self._step_of(int(index[0]), step))
+            ending = [p for p, i in enumerate(index) if not self.left[i] and (done[p] or stalled[p] or crossed[p])]
             if ending:
                 self._own_ends(g, ending, step)
             for i in index:
@@ -640,16 +651,21 @@ class WindowLoop:
                                          float(read["n"][0]), float(read["height"][0]), float(np.degrees(track)),
                                          float(read["ground_speed"][0]), bool(captured[p])))
 
-    def _crossed(self, i: int, k: int) -> bool:
-        """Whether aircraft ``i`` passed a candidate runway's threshold plane in its step ``k`` (a crossing the judge may
-        read as an end the executor does not stop at)."""
-        before, after = self.states[i][k], self.states[i][k + 1]
-        for candidate in self.geometries[i].candidates:
-            d = relative_to_runway(np.array([before.e_m, after.e_m]), np.array([before.n_m, after.n_m]), np.zeros(2),
-                                   np.zeros(2), candidate).before_threshold_m
-            if d[0] > 0.0 and d[1] <= 0.0:
-                return True
-        return False
+    def _crossed(self, index: np.ndarray, k: int) -> np.ndarray:
+        """``[len(index)]`` bool: which aircraft of ``index`` (one executor: at one step ``k``) passed a candidate
+        runway's threshold plane in step ``k`` (a crossing the judge may read as an end the executor does not stop at)."""
+        out = np.zeros(len(index), dtype=bool)
+        by_geometry: dict[int, list[int]] = defaultdict(list)
+        for p, i in enumerate(index):
+            by_geometry[id(self.geometries[i])].append(p)
+        for places in by_geometry.values():
+            members = [int(index[p]) for p in places]
+            e = np.array([[self.states[i][k].e_m, self.states[i][k + 1].e_m] for i in members])
+            n = np.array([[self.states[i][k].n_m, self.states[i][k + 1].n_m] for i in members])
+            for candidate in self.geometries[members[0]].candidates:
+                d = relative_to_runway(e, n, np.zeros_like(e), np.zeros_like(e), candidate).before_threshold_m
+                out[places] |= (d[:, 0] > 0.0) & (d[:, 1] <= 0.0)
+        return out
 
     def _own_ends(self, g: int, ending: Sequence[int], step: int) -> None:
         """The aircraft at places ``ending`` of executor ``g`` whose flight may have ended in step ``step``: its own end

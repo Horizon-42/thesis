@@ -485,6 +485,8 @@ def test_a_crossing_of_any_threshold_plane_in_a_step_is_asked_of_the_judge(tmp_p
     """The steps an own end the executor flies past may lie in (the review of 7.3): a threshold plane crossed."""
     import dataclasses as dc
 
+    import numpy as np
+
     airport, signals, spec = _scene_airport(tmp_path, monkeypatch)
     loop = _window_loop(_traffic_model(spec), airport, signals, spec, [("KXXX:f3",)])
     loop.step()
@@ -494,18 +496,40 @@ def test_a_crossing_of_any_threshold_plane_in_a_step_is_asked_of_the_judge(tmp_p
     # runway 09 lands east from its threshold: west of it is before it
     loop.states[0][0] = dc.replace(before, e_m=threshold.threshold_e_m - 50.0, n_m=threshold.threshold_n_m)
     loop.states[0][1] = dc.replace(after, e_m=threshold.threshold_e_m + 50.0, n_m=threshold.threshold_n_m)
-    assert loop._crossed(0, 0)
+    assert loop._crossed(np.array([0]), 0).tolist() == [True]
     loop.states[0][1] = dc.replace(after, e_m=threshold.threshold_e_m - 10.0, n_m=threshold.threshold_n_m)
-    assert not loop._crossed(0, 0)
+    assert loop._crossed(np.array([0]), 0).tolist() == [False]
 
 
 # ---- the M3 second-pass runner (step 7.4)
+
+def _patch_runner_physics(monkeypatch, signals, geometry, keys):
+    """The runner's executor inputs from the fixture's flights (a replay batch's series are the keys here)."""
+    import dataclasses as dc
+
+    import torch
+
+    from ts_transformer.experiments import prior_free_generation
+    from ts_transformer.experiments import traffic_window_generation as runner
+
+    physics = {k: _physics_of([signals[k]], geometry) for k in keys}
+
+    def stacked(series, k):
+        tables = [physics[key][k] for key in series]
+        if k == 3:
+            return torch.cat(tables)
+        return type(tables[0])(**{f.name: torch.cat([getattr(t, f.name) for t in tables]) for f in dc.fields(tables[0])})
+
+    for module in (runner, prior_free_generation):
+        monkeypatch.setattr(module, "flight_inputs", lambda series, device, anchor: stacked(list(series), 0))
+        monkeypatch.setattr(module, "_physics", lambda part, device: (stacked(part.series, 1), stacked(part.series, 2),
+                                                                      stacked(part.series, 3)))
+
 
 def test_the_window_runner_reads_every_commanded_aircraft_four_ways_judged_in_its_window(tmp_path, monkeypatch):
     import numpy as np
     import torch
 
-    from ts_transformer.experiments import prior_free_generation
     from ts_transformer.experiments import traffic_window_generation as runner
     from ts_transformer.experiments.traffic_window import window_of
     from ts_transformer.instructions.artefact import load_signals
@@ -523,20 +547,7 @@ def test_the_window_runner_reads_every_commanded_aircraft_four_ways_judged_in_it
     batch = _batch(airport, signals, spec, keys)
     windows = [window_of(airport, 0.0, c, [LIMIT_S] * len(c), STEP_S) for c in commanded]
     drawn = runner.Drawn(windows, [range(0, 2), range(2, 3)], batch, [LIMIT_S] * 3)
-    physics = {k: _physics_of([signals[k]], geometry) for k in keys}
-
-    def stacked(part, k):
-        tables = [physics[key][k] for key in part.series]           # (the fixture's series are the keys)
-        if k == 3:
-            return torch.cat(tables)
-        return type(tables[0])(**{f.name: torch.cat([getattr(t, f.name) for t in tables])
-                                  for f in __import__("dataclasses").fields(tables[0])})
-
-    for module in (runner, prior_free_generation):
-        monkeypatch.setattr(module, "flight_inputs", lambda series, device, anchor: stacked(
-            type("P", (), {"series": list(series)})(), 0))
-        monkeypatch.setattr(module, "_physics", lambda part, device: (stacked(part, 1), stacked(part, 2),
-                                                                      stacked(part, 3)))
+    _patch_runner_physics(monkeypatch, signals, geometry, keys)
     times = np.sort([f.presence.landing_s for f in airport.flights.flights.values()])
     every = {"KXXX": Landings(times, {c.ident: times if c.ident == "09" else np.zeros(0) for c in geometry.candidates})}
     model = _traffic_model(spec)
@@ -726,3 +737,89 @@ def test_several_commanded_aircraft_a_window_keep_the_loop_s_books(tmp_path, mon
         assert got.end is None or (got.said[int(loop.ended_at[i]) + 1:] == UNCHANGED).all()
         assert got.landing_s is None or loop.landing_checked[i]
     assert all(run.scene_seconds > 0.0 for run in loop.runs)
+
+
+def test_a_batch_s_budget_is_what_the_speaker_holds(tmp_path, monkeypatch):
+    """One window with a pre-roll (f3: f1, f2 in the air before it), one with a late commanded aircraft (f0 and f4,
+    800 s apart): the batch's steps are the longest pre-roll, the latest entry and the rows together (the review of
+    7.4: the budget took each window's own sum)."""
+    from ts_transformer.experiments.traffic_window_generation import batch_cost, window_size
+    from ts_transformer.instructions.artefact import load_signals
+    from ts_transformer.prior.generate import rows_for
+    from ts_transformer.prior.scene import N_LOOK
+
+    _, airports, spec = _airport(tmp_path, monkeypatch)
+    airport = airports["KXXX"]
+    signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
+    commanded, samples = [("KXXX:f3",), ("KXXX:f0", "KXXX:f4")], 2
+    loop = _window_loop(_traffic_model(spec), airport, signals, spec, commanded, samples=samples)
+    sizes = [window_size(window, [LIMIT_S] * len(window.commanded), STEP_S) for window in loop.windows[::samples]]
+    held = len(loop.windows) * loop.speaker.aircraft * (int(loop.speaker.start.max()) + rows_for(LIMIT_S + STEP_S,
+                                                                                                  STEP_S))
+    assert batch_cost(sizes, samples) == held and loop.speaker.step == int(loop.speaker.start.min()) + N_LOOK
+    assert sizes[0][1] > 0 and sizes[1][2] == 400 and sum(sizes[0][1:]) < held / len(loop.windows)
+
+
+def test_a_glidepath_stop_is_read_to_its_judged_end_through_the_runner(tmp_path, monkeypatch):
+    """Under a raised glidepath (seed 1: f3 stops at 122 s of its 200): the runner reads the model's aircraft to the
+    stop, passive after it, and the labelled paths the same way."""
+    import torch
+
+    from ts_transformer.experiments import traffic_window_generation as runner
+    from ts_transformer.experiments.traffic_window import window_of
+    from ts_transformer.instructions.artefact import load_signals
+    from ts_transformer.prior.masks import PROCEDURE_ALTITUDES, ProcedureMasks
+    from ts_transformer.tests.test_autopilot import _params
+    from ts_transformer.tests.test_prior_procedure import _final
+    from ts_transformer.tests.test_traffic_speaking import _batch
+
+    _, airports, spec = _airport(tmp_path, monkeypatch)
+    airport = airports["KXXX"]
+    geometry = airport.flights.geometry
+    signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
+    masks = ProcedureMasks((PROCEDURE_ALTITUDES,), {"KXXX": tuple(_final(candidate=c, crossing_m=1_200.0,
+                                                                         faf_d_m=40_000.0)
+                                                                  for c in geometry.candidates)})
+    keys, limit = ["KXXX:f2", "KXXX:f3", "KXXX:f5", "KXXX:f3"], 200.0
+    windows = [window_of(airport, 0.0, (k,), [limit], STEP_S) for k in keys]
+    drawn = runner.Drawn(windows, [range(j, j + 1) for j in range(4)], _batch(airport, signals, spec, keys), [limit] * 4)
+    _patch_runner_physics(monkeypatch, signals, geometry, keys)
+    every = {"KXXX": _pool(airport)}
+    rows = runner.model_rows(_traffic_model(spec), drawn, [0, 1, 2, 3], "scene", Words(spec), _params(), None, every, 1,
+                             generator=torch.Generator().manual_seed(1), temperature=1.0, procedure_masks=masks)
+    stopped = [r for r in rows if r["own"] == "below_glidepath"]
+    assert stopped and all(r["outcome"] == "below_glidepath" and r["flown_s"] < limit for r in stopped)
+    labelled = runner.fixed_rows(drawn, [0, 1, 2, 3], "labelled", Words(spec), _params(), every, masks)
+    for r in labelled:
+        assert r["flown_s"] <= limit and (r["own"] != "below_glidepath" or r["landing_s"] is None)
+
+
+def test_the_order_of_a_window_s_landings_and_a_flight_in_two_windows():
+    from ts_transformer.experiments.traffic_window_generation import summary
+
+    def row(source, window, key, landing, outcome="landed", sample=None):
+        return {"source": source, "window": window, "dataset_id": key, "sample": sample, "landing_s": landing,
+                "outcome": outcome, "starts_in_a_loss": False, "flown_s": 100.0, "episodes": 0, "relations": {},
+                "with_commanded": 0, "with_replayed": 0, "ended_with": None, "ifr_outcome": outcome, "reward": 1.0}
+
+    # a and b land in the record a first; the labelled words swap them in window 0; c is in two windows
+    rows = [row("recorded", 0, "a", 100.0), row("recorded", 0, "b", 200.0), row("recorded", 1, "b", 200.0),
+            row("recorded", 1, "c", 300.0),
+            row("labelled", 0, "a", 250.0), row("labelled", 0, "b", 210.0), row("labelled", 1, "b", 190.0),
+            row("labelled", 1, "c", 320.0, outcome="lost_separation")]
+    got = summary(rows)
+    assert got["recorded"]["order"] == {"pairs": 2, "swapped": 0}
+    # window 0 swapped; window 1's c was ended by the judge: not a landing read
+    assert got["labelled"]["order"] == {"pairs": 1, "swapped": 1}
+    assert got["labelled"]["landing_vs_recorded_s"]["n"] == 3
+
+
+def test_a_loop_landing_enters_the_reward_s_landing_context(monkeypatch):
+    import numpy as np
+
+    from ts_transformer.experiments import traffic_window_generation as runner
+
+    base = runner.Landings(np.array([10.0, 20.0]), {"09": np.array([10.0, 20.0]), "27": np.zeros(0)})
+    monkeypatch.setattr(runner, "window_landings", lambda window, key, landings, step_s: base)
+    got = runner._loop_context(None, "x", {"KXXX": base}, [(15.0, "27")], 2.0)
+    assert got.times_s.tolist() == [10.0, 15.0, 20.0] and got.by_runway["27"].tolist() == [15.0]

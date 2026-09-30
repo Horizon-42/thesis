@@ -59,7 +59,10 @@ from ts_transformer.experiments.prior_free_generation import (
 )
 from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, load_prior, rosters
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION, Controlled, Loop, Run, recorded
-from ts_transformer.experiments.traffic_speaking import HISTORY_S, MASK_COLUMNS, scene_airports, speaking_aircraft
+from ts_transformer.experiments.traffic_labelled import own_end
+from ts_transformer.experiments.traffic_speaking import (
+    HISTORY_S, MASK_COLUMNS, scene_airports, scene_landings, speaking_aircraft,
+)
 from ts_transformer.experiments.traffic_window import (
     Window, WindowLoop, _with_landing, draw_windows, window_landings, window_of,
 )
@@ -67,7 +70,7 @@ from ts_transformer.inference.scene_edges import EDGE_FEATURES
 from ts_transformer.inference.separation import IFR, VISUAL
 from ts_transformer.instructions.artefact import SPLITS
 from ts_transformer.instructions.words import COLUMNS, Words
-from ts_transformer.io_utils import utc_now, write_json_atomic
+from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.data import VARIANTS, airport_landings
 from ts_transformer.prior.generate import rows_for
 from ts_transformer.prior.landing_reward import landing_direction
@@ -103,44 +106,52 @@ def drawn_windows(draw: Any, airports: Mapping[str, Any], params: Any, step_s: f
     return Drawn(windows, members, draw.batch, limits)
 
 
-def window_size(window: Window, limits: Sequence[float], step_s: float) -> tuple[int, int]:
-    """A window's aircraft and steps as the speaker holds them: its pre-roll (as it caps one), its later commanded
-    aircraft's entries and the rows."""
+def window_size(window: Window, limits: Sequence[float], step_s: float) -> tuple[int, int, int, int]:
+    """A window's aircraft, pre-roll (before its first commanded aircraft's row 0, as the speaker caps it), latest
+    entry after it and rows (its longest time limit's), in steps."""
     first = window.first_step_s(window.commanded[0], step_s)
     pre = max([0] + [int(round((first - float(hang(window.rows(k).presence.start_s, step_s))) / step_s))
                      for k in window.others])
     late = max(int(round((window.first_step_s(k, step_s) - first) / step_s)) for k in window.commanded)
-    return (len(window.commanded) + len(window.others),
-            min(pre, int(HISTORY_S // step_s)) + late + rows_for(max(limits) + step_s, step_s))
+    return (len(window.commanded) + len(window.others), min(pre, int(HISTORY_S // step_s)), late,
+            rows_for(max(limits) + step_s, step_s))
+
+
+def batch_cost(sizes: Sequence[tuple[int, int, int, int]], samples: int) -> int:
+    """The aircraft-steps a batch of windows (`window_size` each) holds in the speaker's past: every window sample on
+    the most aircraft, over the batch's steps — its longest pre-roll, latest entry and rows together, as the loop lays
+    them out (`WindowLoop`: one pre-roll for the batch)."""
+    return (len(sizes) * samples * max(s[0] for s in sizes)
+            * (max(s[1] for s in sizes) + max(s[2] for s in sizes) + max(s[3] for s in sizes)))
 
 
 def window_batches(drawn: Drawn, samples: int, budget: int, step_s: float) -> list[list[int]]:
-    """The windows in batches of the loop, by their size (`window_size`), each at most ``budget`` aircraft-steps over its
-    ``samples`` loops a window (a larger window is a batch of its own)."""
+    """The windows in batches of the loop, by their size (`window_size`), each at most ``budget`` aircraft-steps
+    (`batch_cost`; a larger window is a batch of its own)."""
     sizes = [window_size(w, [drawn.limits[j] for j in part], step_s) for w, part in zip(drawn.windows, drawn.members)]
     batches: list[list[int]] = [[]]
-    for w in sorted(range(len(sizes)), key=lambda w: (sizes[w], w)):
+    for w in sorted(range(len(sizes)), key=lambda w: (sizes[w][1] + sizes[w][2] + sizes[w][3], sizes[w][0], w)):
         grown = batches[-1] + [w]
-        if batches[-1] and (len(grown) * samples * max(sizes[k][0] for k in grown)
-                            * max(sizes[k][1] for k in grown)) > budget:
+        if batches[-1] and batch_cost([sizes[k] for k in grown], samples) > budget:
             batches.append([w])
         else:
             batches[-1] = grown
     return batches
 
 
-def batch_seed(seed: int, number: int) -> int:
-    """A torch generator's seed for loop batch ``number``: each batch its own stream."""
-    return int(np.random.SeedSequence([seed, number]).generate_state(1)[0])
+def batch_seed(seed: int, source: str, number: int) -> int:
+    """A torch generator's seed for loop batch ``number`` of ``source``: each its own stream."""
+    return int(np.random.SeedSequence([seed, SOURCES.index(source), number]).generate_state(1)[0])
 
 
 def path_fields(run: Run, again: Run, key: str, path: Controlled, commanded: Sequence[str], own: str,
-                step_s: float) -> dict[str, Any]:
+                until_s: float) -> dict[str, Any]:
     """How a commanded aircraft fared in its window: its outcome under VISUAL (the loop's ``run``) and under IFR
-    (``again``, its paths as flown judged afterwards), the losses it was in to its judged end — by relation, how many it
-    answered for, with a commanded aircraft or a replayed one — and the time flown to that end."""
+    (``again``, its paths as flown judged afterwards), the losses it was in to its judged end — the judge's, else its own
+    end (``until_s``: a glidepath stop comes before its path's end) — by relation, how many it answered for, with a
+    commanded aircraft or a replayed one — and the time flown to that end."""
     end = run.ended.get(key)
-    last = end["t_s"] if end is not None else path.last_step_s
+    last = end["t_s"] if end is not None else until_s
     mine = [e for e in run.episodes if key in e["pair"] and e["first_s"] <= last]
     others = [next(k for k in e["pair"] if k != key) for e in mine]
     return {"outcome": LOST_SEPARATION if end is not None else own, "own": own, "end": end,
@@ -153,11 +164,12 @@ def path_fields(run: Run, again: Run, key: str, path: Controlled, commanded: Seq
             "flown_s": float(last - path.first_step_s)}
 
 
-def _judged_again(window: Window, paths: Sequence[Controlled], reading: str, step_s: float) -> Run:
-    """A window's commanded aircraft along their paths judged afterwards (`Loop` keeping the ended ones on their
-    paths, as the window loop keeps them)."""
+def _judged_again(window: Window, paths: Sequence[Controlled], until: Mapping[str, float], reading: str,
+                  step_s: float) -> Run:
+    """A window's commanded aircraft along their paths judged afterwards (`Loop` keeping the ended ones on their paths,
+    and each one past ``until`` — its own end, a glidepath stop — passive, as the window loop keeps them)."""
     return Loop(window.airport.flights.separation, reading, step_s, keep_ended=True).run(
-        list(paths), [window.track(k) for k in window.others])
+        list(paths), [window.track(k) for k in window.others], until)
 
 
 def _reward(row: dict[str, Any], direction: np.ndarray) -> float:
@@ -187,13 +199,15 @@ def model_rows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, wo
     for b, w in enumerate(instances):
         window = drawn.windows[w]
         here = [i for i, r in enumerate(results) if r.window == b]
-        again = _judged_again(window, [loop.path(i) for i in here], IFR, step_s)
+        until = {results[i].key: loop.judged_until_s(i) for i in here}
+        again = _judged_again(window, [loop.path(i) for i in here], until, IFR, step_s)
         loop_landings = [(results[i].landing_s, part.geometries[i].candidates[results[i].runway].ident)
                          for i in here if results[i].landing_s is not None]
         for i in here:
             got = results[i]
             row = _aircraft_row(part, i, w, window, source, b % samples)
-            row.update(path_fields(loop.runs[b], again, got.key, loop.path(i), window.commanded, got.own, step_s),
+            row.update(path_fields(loop.runs[b], again, got.key, loop.path(i), window.commanded, got.own,
+                                   until[got.key]),
                        said_steps=len(got.said), counted=got.counted, landing_s=got.landing_s, runway=got.runway,
                        mask_steps={COLUMNS[c]: int(loop.separation_masked[c][i, : got.counted].sum())
                                    for c in MASK_COLUMNS},
@@ -229,7 +243,10 @@ def fixed_rows(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, pa
                procedure_masks: Any) -> list[dict[str, Any]]:
     """The windows at ``chunk`` with every commanded aircraft on a path that reacts to nothing — its labelled words
     flown from its first predicted step (``labelled``) or its own record on the loop's steps (``recorded``) — judged
-    afterwards (`_judged_again`) under VISUAL and IFR, a row per commanded aircraft."""
+    afterwards (`_judged_again`) under VISUAL and IFR, a row per commanded aircraft. A labelled path runs to its
+    executor's end and is passive past a glidepath stop, as a model aircraft flies on past one (design §9 item 29). The
+    landing direction reads the path's own world: the recorded landings for the record, the labelled paths' landings in
+    place of the commanded aircraft's recorded ones for the labelled words."""
     step_s = words.spec.step_s
     index = [j for w in chunk for j in drawn.members[w]]
     part = replay.subset(drawn.batch, index)
@@ -239,31 +256,41 @@ def fixed_rows(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, pa
         stops = (glidepath_stops(flown, grids, part.geometries,
                                  [procedure_masks.finals[g.code] for g in part.geometries], words)
                  if procedure_masks.altitudes else None)
+        step_rows = int(round(step_s / flown.cycle_s))
     rows, at = [], 0
     for w in chunk:
         window = drawn.windows[w]
-        paths, owns, runways = [], [], []
+        paths, owns, runways, until = [], [], [], {}
         for m, key in enumerate(window.commanded):
             j = at + m
             geometry = part.geometries[j]
+            runways.append(part.readings[j].runway_index)
             if source == "labelled":
                 ended = outcome_of(flown, j, geometry, part.readings[j].runway_index, words.spec)
                 path = speaking_aircraft(window.scene(key, step_s), flown, j, grids[j], ended.outcome, ended.end_row,
-                                         ended.crossing, -1 if stops is None else int(stops.step[j]), step_s)
+                                         ended.crossing, -1, step_s)
+                stop = -1 if stops is None else int(stops.step[j])
+                own, last_row = own_end(ended.outcome, ended.end_row, stop, step_rows)
+                until[key] = float(path.times_s[min(last_row // step_rows, len(path.times_s) - 1)])
             else:
                 path = _recorded_path(part, j, window, key, step_s)
+                own, until[key] = path.outcome, path.last_step_s
             paths.append(path)
-            owns.append(path.outcome)
-            runways.append(part.readings[j].runway_index)
-        run, again = (_judged_again(window, paths, reading, step_s) for reading in (VISUAL, IFR))
+            owns.append(own)
+        run, again = (_judged_again(window, paths, until, reading, step_s) for reading in (VISUAL, IFR))
         for m, (key, path) in enumerate(zip(window.commanded, paths)):
             j = at + m
             row = _aircraft_row(part, j, w, window, source, None)
-            row.update(path_fields(run, again, key, path, window.commanded, owns[m], step_s),
-                       landing_s=path.landing_s, runway=runways[m])
-            direction = landing_direction(part.signals[j], part.geometries[j],
-                                          window_landings(window, key, landings, step_s))
-            row["reward"] = _reward(row, direction)
+            row.update(path_fields(run, again, key, path, window.commanded, owns[m], until[key]),
+                       landing_s=path.landing_s if owns[m] == "landed" else None, runway=runways[m])
+            if source == "labelled":
+                context = _loop_context(window, key, landings,
+                                        [(other.landing_s, part.geometries[at + n].candidates[runways[n]].ident)
+                                         for n, other in enumerate(paths)
+                                         if n != m and owns[n] == "landed"], step_s)
+            else:
+                context = scene_landings(landings[window.airport.flights.code], window.scene(key, step_s))
+            row["reward"] = _reward(row, landing_direction(part.signals[j], part.geometries[j], context))
             rows.append(row)
         at += len(window.commanded)
     return rows
@@ -291,7 +318,8 @@ def summary(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
     afterwards; ended with a commanded aircraft or a replayed one), losses per aircraft and per hour flown, their
     relations, the reward, the landing time against the record, the order of a window's landings against the record's,
     and — the model's sources — the separation masks and how one window's rewards go together."""
-    recorded_landing = {(r["window"], r["dataset_id"]): r["landing_s"] for r in rows if r["source"] == "recorded"}
+    recorded_landing = {(r["window"], r["dataset_id"]): r["landing_s"] for r in rows
+                        if r["source"] == "recorded" and r["outcome"] == "landed"}
     out: dict[str, Any] = {}
     for source in SOURCES:
         every = [r for r in rows if r["source"] == source]
@@ -301,7 +329,7 @@ def summary(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
         hours = sum(r["flown_s"] for r in part) / 3600.0
         lost = [r for r in part if r["outcome"] == LOST_SEPARATION]
         deltas = [r["landing_s"] - recorded_landing[(r["window"], r["dataset_id"])] for r in part
-                  if r["landing_s"] is not None and recorded_landing.get((r["window"], r["dataset_id"])) is not None]
+                  if r["outcome"] == "landed" and recorded_landing.get((r["window"], r["dataset_id"])) is not None]
         entry: dict[str, Any] = {
             "aircraft": len(part), "left_out_starting_in_a_loss": len(every) - len(part),
             "outcomes": {k: v / len(part) for k, v in Counter(r["outcome"] for r in part).most_common()},
@@ -330,15 +358,15 @@ def summary(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _order(rows: Sequence[dict[str, Any]], recorded_landing: Mapping[tuple[int, str], float | None]) -> dict[str, int]:
-    """Pairs of one window's commanded aircraft that both landed, in a sample and in the record: how many, and how many
-    landed the other way round."""
+    """Pairs of one window's commanded aircraft that both landed (not ended by the judge), in a sample and in the
+    record: how many, and how many landed the other way round."""
     pairs = swapped = 0
     by_sample: dict[tuple[int, Any], list[dict[str, Any]]] = defaultdict(list)
     for r in rows:
         by_sample[(r["window"], r["sample"])].append(r)
     for (w, _), members in by_sample.items():
         landed = [(r["landing_s"], recorded_landing.get((w, r["dataset_id"]))) for r in members
-                  if r["landing_s"] is not None and recorded_landing.get((w, r["dataset_id"])) is not None]
+                  if r["outcome"] == "landed" and recorded_landing.get((w, r["dataset_id"])) is not None]
         for a in range(len(landed)):
             for b in range(a + 1, len(landed)):
                 pairs += 1
@@ -435,7 +463,7 @@ def main(argv: list[str] | None = None) -> int:
         new: list[dict[str, Any]] = []
         for source in ("scene", "alone"):
             generator = torch.Generator(device=torch.device(args.device)).manual_seed(
-                batch_seed(args.seed + SOURCES.index(source), number))
+                batch_seed(args.seed, source, number))
             new += model_rows(model, drawn, chunk, source, words, params, landings, every_landing, args.samples,
                               generator=generator, temperature=args.temperature, procedure_masks=own_masks)
         for source in ("labelled", "recorded"):
@@ -454,7 +482,8 @@ def main(argv: list[str] | None = None) -> int:
     write_json_atomic(out / "window_generation.json", {
         "schema": SCHEMA, "written_utc": utc_now(), "git": git, "split": args.split, "drawn": draw.counts,
         "windows_per_airport": args.windows_per_airport, "samples": args.samples, "temperature": args.temperature,
-        "seed": args.seed, "prior": {"directory": repo_relative(prior_dir), "procedure_masks": list(own_masks.names)},
+        "seed": args.seed, "prior": {"directory": repo_relative(prior_dir), "procedure_masks": list(own_masks.names),
+                                     "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt")},
         "traffic_attention": "zero (with_traffic): the prior's answers to rounding",
         "executor": {"directory": repo_relative(executor_dir), "sha256": record["sha256"]},
         "instructions": repo_relative(instructions), "scenes": built, "history_s": HISTORY_S,

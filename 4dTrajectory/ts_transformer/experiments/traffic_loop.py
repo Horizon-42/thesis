@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 from geokit import NM_M
@@ -308,16 +308,21 @@ class Loop:
     def __init__(self, separation: Separation, reading: str, step_s: float, *, keep_ended: bool = False) -> None:
         self.separation, self.reading, self.step_s, self.keep_ended = separation, reading, step_s, keep_ended
 
-    def run(self, controlled: Sequence[Controlled], replayed: Sequence[Track]) -> Run:
+    def run(self, controlled: Sequence[Controlled], replayed: Sequence[Track],
+            judged_until: Mapping[str, float] | None = None) -> Run:
+        """``judged_until`` (only with ``keep_ended``): a controlled aircraft's last judged instant, by key — past it,
+        passive on its path (its own end came first: the glidepath edge's stop); every one to its path's end without."""
         keys = [a.key for a in (*controlled, *replayed)]
         if len(set(keys)) != len(keys):
             raise ValueError("an aircraft is in the loop twice")
+        if judged_until is not None and not self.keep_ended:
+            raise ValueError("an aircraft judged until an instant flies on past it: a loop keeping the ended ones")
         out = Run(self.reading)
         for segment in segments([*controlled, *replayed]):
-            self._segment(segment, out)
+            self._segment(segment, out, judged_until or {})
         return out
 
-    def _segment(self, segment: list[Controlled | Track], out: Run) -> None:
+    def _segment(self, segment: list[Controlled | Track], out: Run, until: Mapping[str, float]) -> None:
         step = self.step_s
         flown_here = [a for a in segment if isinstance(a, Controlled)]
         replayed_here = [a for a in segment if not isinstance(a, Controlled)]
@@ -328,19 +333,23 @@ class Loop:
         # a landing after the segment's last step (its last row is before the crossing) is still checked
         last = max(end, math.ceil(landings[-1][0] / step) * step) if landings else end
         judging = Judging(self.separation, self.reading, step, out)
+
+        def judged(a: Controlled | Track, t: float) -> bool:
+            return a.key not in out.ended and t <= until.get(a.key, math.inf)
+
         pending = 0
         for t_s in scene_steps(start, last, step):
             t_s = float(t_s)
             while pending < len(landings) and landings[pending][0] <= t_s:
                 at, _, leader = landings[pending]
-                if leader.key not in out.ended or self.keep_ended:
+                if judged(leader, at) or self.keep_ended:
                     here = [a for a in flown_here if a.key != leader.key and a.on_step(at)]
-                    judging.landing(at, leader, [a for a in here if a.key not in out.ended],
+                    judging.landing(at, leader, [a for a in here if judged(a, at)],
                                     [a for a in replayed_here
                                      if a.key != leader.key and a.presence.times_s[0] <= at <= a.presence.times_s[-1]],
-                                    [a for a in here if a.key in out.ended] if self.keep_ended else (),
-                                    leader_passive=leader.key in out.ended)
+                                    [a for a in here if not judged(a, at)] if self.keep_ended else (),
+                                    leader_passive=isinstance(leader, Controlled) and not judged(leader, at))
                 pending += 1
             here = [a for a in flown_here if a.on_step(t_s)]
-            judging.step(t_s, [a for a in here if a.key not in out.ended], [a for a in replayed_here if a.on_step(t_s)],
-                         [a for a in here if a.key in out.ended] if self.keep_ended else ())
+            judging.step(t_s, [a for a in here if judged(a, t_s)], [a for a in replayed_here if a.on_step(t_s)],
+                         [a for a in here if not judged(a, t_s)] if self.keep_ended else ())
