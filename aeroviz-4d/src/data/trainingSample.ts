@@ -44,7 +44,7 @@ export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v1";
  *  and its check, and there are no turn regions, hold funnels, split parts or inserted intercepts;
  *  a file under any other name — `v6` (instruction-v2's turns and holds) and every earlier one
  *  included, whatever vocabulary it carries — is refused. */
-export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v7";
+export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v8";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
 export const TRAINING_READING_RULE = "instruction-v3";
 /** MIRROR of the spec's sha: a new vocabulary is a new sha, and this reader is bound to the one it was written for

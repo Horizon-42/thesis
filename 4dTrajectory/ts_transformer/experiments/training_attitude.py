@@ -10,7 +10,9 @@ One reading, :func:`attitude`, of a state row ``(lat, lon, alt, V, ψ, γ, m)`` 
 - an OBSERVED flight (`observed_attitude`): the data plane's own reading of it — `states_from_channels` of its
   `FlightSeries` at the scenario's mass, as the executor starts from and `signals_from_series` reads, and the controls
   `outputs.dynamics.inverse.actual_controls` recovers under the thrust-fraction contract (the teacher's inversion,
-  whose bank and load factor are the executor's command columns).
+  whose bank and load factor are the executor's command columns). A flight the dynamics has no airframe for (C31:
+  kept, mass NaN) has its heading and path angle — its states say them — and NO bank or attack: the inversion reads an
+  airframe (its drag), and none is guessed; those two fields are null for it.
 
 The angle of attack is a READING: the point-mass dynamics carries a load factor, not an angle. The lift coefficient the
 dynamics asks for at that load factor (`torch_dynamics.aerodynamic_coefficients`, capped at ``Cl_max`` as it flies) is
@@ -21,6 +23,7 @@ the drawn pitch (the user, 2026-09-30).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
@@ -28,8 +31,10 @@ import torch
 
 from aerodynamic_model.simulator import Simulator
 from aerodynamic_model.torch_dynamics import aerodynamic_coefficients, isa_density
+from ts_transformer.autopilot.flights import rebuild_series
 from ts_transformer.config import CONTROL_THRUST_FRACTION
 from ts_transformer.data.channels import states_from_channels
+from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.training_files import rounded
 from ts_transformer.instructions.words import compass_from_math_rad
 from ts_transformer.outputs.dynamics.context import rollout_context
@@ -59,9 +64,10 @@ def attitude(states: np.ndarray, bank_rad: np.ndarray, load_factor: np.ndarray, 
             "bankRightDeg": 0.0 - np.degrees(bank_rad), "attackDeg": np.degrees(attack_rad)}
 
 
-def attitude_payload(values: dict[str, np.ndarray]) -> dict[str, list[float]]:
-    """:func:`attitude` as a Training file writes it, beside its track's points (0.01°)."""
-    return {name: rounded(values[name], 2) for name in ATTITUDE_FIELDS}
+def attitude_payload(values: dict[str, np.ndarray | None], rows: slice = slice(None)) -> dict[str, list[float] | None]:
+    """:func:`attitude` (or `observed_attitude`) at ``rows`` as a Training file writes it, beside its track's points
+    (0.01°); a field the flight has none of (no airframe) is null."""
+    return {name: None if values[name] is None else rounded(values[name][rows], 2) for name in ATTITUDE_FIELDS}
 
 
 def executor_attitude(flown: Any, index: int, rows: Sequence[int], aero_params: np.ndarray) -> dict[str, np.ndarray]:
@@ -73,13 +79,30 @@ def executor_attitude(flown: Any, index: int, rows: Sequence[int], aero_params: 
     return attitude(flown.states[index].cpu().numpy()[rows], commands[cycles, 1], commands[cycles, 2], aero_params)
 
 
-def observed_attitude(series: Any) -> dict[str, np.ndarray]:
-    """An observed flight (a `data.dataset.FlightSeries`) at every one of its rows — the rows `signals_from_series` reads."""
+def observed_attitude(series: Any) -> dict[str, np.ndarray | None]:
+    """An observed flight (a `data.dataset.FlightSeries`) at every one of its rows — the rows `signals_from_series` reads;
+    one without an airframe: its heading and path angle only (the module docstring)."""
     states = np.array([[s.latitude, s.longitude, s.altitude, s.V, s.psi, s.gamma, s.m]
                        for _t, s in states_from_channels(series.times, series.values, series.frame,
                                                          mass_kg=float(series.scenario.initial.m))], dtype=np.float64)
+    if not series.scenario.has_dynamics:
+        return {"headingDeg": compass_from_math_rad(states[:, _PSI]), "pathAngleDeg": np.degrees(states[:, _GAMMA]),
+                "bankRightDeg": None, "attackDeg": None}
     context = rollout_context(series, 0)
     controls = actual_controls(states, np.asarray(series.times, dtype=np.float64), aero_params=context["aero_params"],
                                max_thrust_n=float(context["max_thrust_n"]), parameterization=CONTROL_THRUST_FRACTION)
     return attitude(states, controls[:, CONTROL_NAMES.index("bank_rad")], controls[:, CONTROL_NAMES.index("load_factor")],
                     context["aero_params"])
+
+
+def observed_attitudes(directory: Path, signals: Sequence[FlightSignals]) -> dict[str, dict[str, np.ndarray | None]]:
+    """Every flight of ``signals`` (the instruction artefact ``directory``'s) by dataset id: `observed_attitude` of its
+    series, rebuilt as the executor's exports rebuild it (`autopilot.flights.rebuild_series`: the same flight, row for
+    row, or refused) — its rows are the signals' rows."""
+    out = {}
+    for flight, series in zip(signals, rebuild_series(directory, signals), strict=True):
+        got = observed_attitude(series)
+        if len(got["headingDeg"]) != flight.n_rows:
+            raise ValueError(f"{flight.dataset_id}: {len(got['headingDeg'])} attitude rows for {flight.n_rows} signal rows")
+        out[flight.dataset_id] = got
+    return out

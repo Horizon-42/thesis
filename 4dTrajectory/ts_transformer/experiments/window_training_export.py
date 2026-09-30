@@ -63,7 +63,8 @@ import numpy as np
 import torch
 
 from ts_transformer.autopilot import replay
-from ts_transformer.autopilot.judge import CROSSINGS, outcome_of
+from ts_transformer.autopilot.executor import Executor
+from ts_transformer.autopilot.judge import CROSSINGS, flown_track, outcome_of
 from ts_transformer.experiments.instruction_training_export import Globe, flights_block, head_block
 from ts_transformer.experiments.prior_free_generation import sentence_counts
 from ts_transformer.experiments.prior_generation_training_export import (
@@ -73,12 +74,14 @@ from ts_transformer.experiments.prior_train import rosters
 from ts_transformer.experiments.traffic_loop import Run
 from ts_transformer.experiments.traffic_speaking import scene_airports
 from ts_transformer.experiments.traffic_window import Window, draw_windows
+from ts_transformer.experiments.training_attitude import attitude_payload, executor_attitude, observed_attitudes
 from ts_transformer.experiments.traffic_window_generation import (
     AIRCRAFT_STEPS, SCHEMA as READOUT_SCHEMA, SIZES, WINDOWS_PER_AIRPORT, WORKERS, Drawn, FixedWindow, Flown,
     batch_seed, drawn_windows, fixed_paths, fly_windows, in_processes, size_of, window_batches, window_prior,
 )
 from ts_transformer.inference.separation import IFR
-from ts_transformer.instructions.artefact import load_candidates, spec_labeller_source
+from ts_transformer.instructions.artefact import load_candidates, load_signals, spec_labeller_source
+from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.readout import flight_record
 from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.training_files import (
@@ -93,8 +96,9 @@ from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
 
 #: MIRROR of `aeroviz-4d/src/data/trainingTraffic.ts` (`TRAINING_WINDOW_GENERATION_SCHEMA`); the reader refuses anything
-#: else by name. A name changes with its file's shape or meaning, on both sides, in one change.
-SCHEMA = "aeroviz-training-window-generation-v1"
+#: else by name. A name changes with its file's shape or meaning, on both sides, in one change. v2 (2026-09-30): every
+#: aircraft's track carries the attitude it is drawn in (``track.attitude``, `training_attitude`).
+SCHEMA = "aeroviz-training-window-generation-v2"
 PAYLOAD_FILE = "window_generation.json"
 RUNNER = "ts_transformer.experiments.window_training_export"
 #: Windows chosen an airport (the user, 2026-09-30: 20, not the 12 first proposed).
@@ -161,13 +165,20 @@ def utc_text(epoch_s: float) -> str:
     return datetime.datetime.fromtimestamp(epoch_s, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def recorded_track(window: Window, key: str, globe: Globe) -> dict[str, list[float]]:
-    """An aircraft of ``window`` on its recorded rows (`Window.track`: the rows the judge replays it on), scene time."""
+def recorded_track(window: Window, key: str, globe: Globe, flight: FlightSignals,
+                   attitude: dict[str, np.ndarray | None]) -> dict[str, Any]:
+    """An aircraft of ``window`` on its recorded rows (`Window.track`: the rows the judge replays it on — its signals'
+    first rows, checked), scene time, with the attitude it is drawn in there (``attitude``: its observed attitude over
+    all its rows, `training_attitude.observed_attitudes`)."""
     track = window.track(key)
+    rows = len(track.presence.times_s)
+    if not (np.array_equal(track.e_m, flight.e_m[:rows]) and np.array_equal(track.n_m, flight.n_m[:rows])):
+        raise ValueError(f"{key}: the window's recorded rows are not its signals' first {rows}")
     lat, lon = globe.latlon(track.e_m, track.n_m)
     return {"tS": rounded(track.presence.times_s - window.opens_s, 3), "lon": rounded(lon, 7), "lat": rounded(lat, 7),
             "altitudeM": rounded(track.height_m, 2),
-            "altitudeHaeM": rounded(globe.hae_m(track.height_m, track.presence.runway), 2)}
+            "altitudeHaeM": rounded(globe.hae_m(track.height_m, track.presence.runway), 2),
+            "attitude": attitude_payload(attitude, slice(0, rows))}
 
 
 def losses_payload(run: Run, opens_s: float) -> dict[str, Any]:
@@ -192,32 +203,41 @@ def landings_payload(landings: Sequence[tuple[str, float]], opens_s: float) -> l
     return [{"datasetId": key, "atS": round(at - opens_s, 3)} for key, at in sorted(landings, key=lambda x: (x[1], x[0]))]
 
 
-def window_payload(window: Window, limits: Sequence[float], recorded: FixedWindow, globe: Globe,
-                   step_s: float) -> dict[str, Any]:
-    """One window of the set (module docstring): who is in it, where, and what the record made of it."""
+def window_payload(window: Window, limits: Sequence[float], recorded: FixedWindow, globe: Globe, step_s: float,
+                   flights: Mapping[str, FlightSignals], observed: Mapping[str, dict[str, np.ndarray | None]]
+                   ) -> dict[str, Any]:
+    """One window of the set (module docstring): who is in it, where, and what the record made of it (``flights`` and
+    ``observed``: each aircraft's signals and observed attitude, by dataset id)."""
     opens = window.opens_s
+
+    def track(key: str) -> dict[str, Any]:
+        return recorded_track(window, key, globe, flights[key], observed[key])
+
     return {
         "opensUtc": utc_text(opens),
         "commanded": [{"datasetId": key, "rowZeroS": round(window.first_step_s(key, step_s) - opens, 3),
-                       "limitS": round(limit, 3), "recorded": recorded_track(window, key, globe)}
+                       "limitS": round(limit, 3), "recorded": track(key)}
                       for key, limit in zip(window.commanded, limits, strict=True)],
         "others": [{"datasetId": key, "callsign": callsign_of(key), "category": window.rows(key).category,
                     "role": "replayed" if window.rows(key).presence.speaking else "background",
-                    "track": recorded_track(window, key, globe)} for key in window.others],
+                    "track": track(key)} for key in window.others],
         "recorded": {"visual": losses_payload(recorded.run, opens), "ifr": losses_payload(recorded.again, opens),
                      "landings": landings_payload([(path.key, path.landing_s) for path, own in
                                                    zip(recorded.paths, recorded.owns) if own == "landed"], opens)},
     }
 
 
-def sentence_payload(flown: Flown, i: int, sample: int, executor_flown: Any, globe: Globe,
+def sentence_payload(flown: Flown, i: int, sample: int, executor: Executor, executor_flown: Any, globe: Globe,
                      words: Words) -> dict[str, Any]:
     """Commanded aircraft ``i`` of a flown batch, one sample (module docstring): the words it said as events on its own
     steps (step 0 is row `N_LOOK`; nothing after the judge ended it), its outcome under the loop's reading and its own
     end, when each came (``endS``: the judge's end, else its last judged instant; ``ownEndS``: its last state), the
     crossing (its own end's, read on the runway in force then, `autopilot.judge.outcome_of`), what the sentence did with
     its runway and approach, the probability the prior put on what the masks removed, and its states to its own end
-    (the loop's: what the judge read), on its own clock. ``executor_flown``: its executor's `Flown`."""
+    (the loop's: what the judge read), on its own clock, with the attitude it is drawn in (the executor's states at the
+    rows the loop recorded — one a step from its first, `WindowLoop._record`: checked to be the loop's own positions —
+    and its commands there, `training_attitude.executor_attitude`). ``executor``: its executor, ``executor_flown`` its
+    `Flown`."""
     loop, got = flown.loop, flown.results[i]
     step_s = words.spec.step_s
     said = np.asarray(got.said)
@@ -240,6 +260,12 @@ def sentence_payload(flown: Flown, i: int, sample: int, executor_flown: Any, glo
     n = np.array([s.n_m for s in states])
     height = np.array([s.height_m for s in states])
     lat, lon = globe.latlon(e, n)
+    place = int(loop.place[i])
+    rows = np.minimum(np.arange(len(states)) * executor.step_rows, executor_flown.commands.shape[1])
+    read = flown_track(executor_flown.states[place].cpu().numpy()[rows], geometry)
+    if not (np.array_equal(read["e"], e) and np.array_equal(read["n"], n)):
+        raise ValueError(f"{got.key}: its executor's states at the rows a step apart are not the loop's")
+    attitude = executor_attitude(executor_flown, place, rows, executor.inputs.aero_params[place].cpu().numpy())
     return {
         "datasetId": got.key, "sample": sample, "outcome": got.outcome, "own": got.own,
         "end": None if got.end is None else {"kind": got.end["kind"], "relation": got.end["relation"],
@@ -258,7 +284,8 @@ def sentence_payload(flown: Flown, i: int, sample: int, executor_flown: Any, glo
         "track": {"tS": rounded(np.array([s.t_s for s in states]) - row_zero_s, 3), "lon": rounded(lon, 7),
                   "lat": rounded(lat, 7), "altitudeM": rounded(height, 2),
                   "altitudeHaeM": rounded(globe.hae_m(height, signals.runway), 2),
-                  "groundSpeedMps": rounded(np.array([s.ground_speed_mps for s in states]), 3)},
+                  "groundSpeedMps": rounded(np.array([s.ground_speed_mps for s in states]), 3),
+                  "attitude": attitude_payload(attitude)},
     }
 
 
@@ -269,7 +296,7 @@ def batch_payloads(flown: Flown, drawn: Drawn, samples: int, globes: Mapping[str
     (a window's samples in order)."""
     step_s = words.spec.step_s
     loop = flown.loop
-    executors = [executor.flown() for _, _, executor, _ in loop.executors]
+    executors = [(executor, executor.flown()) for _, _, executor, _ in loop.executors]
     out = []
     for b, w in enumerate(flown.instances):
         window = drawn.windows[w]
@@ -280,7 +307,7 @@ def batch_payloads(flown: Flown, drawn: Drawn, samples: int, globes: Mapping[str
         sample = b % samples
         out.append((w, {
             "sample": sample,
-            "aircraft": [sentence_payload(flown, i, sample, executors[int(loop.group[i])], globe, words) for i in here],
+            "aircraft": [sentence_payload(flown, i, sample, *executors[int(loop.group[i])], globe, words) for i in here],
             "visual": losses_payload(loop.runs[b], window.opens_s),
             "ifr": losses_payload(flown.judged_again(b, IFR, step_s, window), window.opens_s),
             # the aircraft whose OWN end is a landing, as the record's are: the loop keeps a landing time for one the
@@ -478,6 +505,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     _, _, recorded = fixed_paths(drawn, range(len(drawn.windows)), "recorded", words, params, procedure_masks)
     artefact_name = repo_relative(instructions)
     labeller = spec_labeller_source(instructions)
+    split_signals = {flight.dataset_id: flight for flight in load_signals(instructions, TRAFFIC_SPLIT)}
     git = git_state()
     sets: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     for code in airports:
@@ -485,7 +513,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         members = {drawn.batch.signals[j].dataset_id: j for w in places for j in drawn.members[w]}
         chosen_flights = [(flight_record(drawn.batch.readings[j])["stratum"], drawn.batch.signals[j],
                            drawn.batch.readings[j]) for j in members.values()]
-        flights, centreline_m = flights_block(chosen_flights, geometries[code], spec, words, globes[code])
+        # every aircraft of its windows, commanded or not: its signals and observed attitude (one rebuild an airport)
+        keys = sorted({key for w in places for key in (*drawn.windows[w].commanded, *drawn.windows[w].others)})
+        observed = observed_attitudes(instructions, [split_signals[key] for key in keys])
+        flights, centreline_m = flights_block(chosen_flights, geometries[code], spec, words, globes[code], observed)
         drawn_from = (f"the formal window readouts' draw — {WINDOWS_PER_AIRPORT} windows an airport of the "
                       f"{TRAFFIC_SPLIT} split, seed {args.seed} (traffic_window.draw_windows) — of which "
                       f"{args.windows} at {code}: split by their commanded aircraft {dict(zip(SIZES, shares(args.windows).values()))}, "
@@ -499,7 +530,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             **head_block(geometries[code], spec, words, labeller, globes[code], centreline_m),
             "flights": flights,
             "windows": [window_payload(drawn.windows[w], [drawn.limits[j] for j in drawn.members[w]], recorded[w],
-                                       globes[code], step_s) for w in places],
+                                       globes[code], step_s, split_signals, observed) for w in places],
         }
         entry = {"id": args.set, "kind": KIND_TRAFFIC,
                  "title": f"Multi-aircraft windows · {TRAFFIC_SPLIT} · {args.windows} an airport",

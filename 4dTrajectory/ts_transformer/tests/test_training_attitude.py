@@ -79,7 +79,8 @@ def _turning_series(bank_left_deg: float, speed=80.0, gamma_deg=-2.0, step_s=2.0
         n += -speed * math.cos(gamma) * (math.cos(psi + rate * step_s) - math.cos(psi)) / rate
         height += speed * math.sin(gamma) * step_s
     times, values = channels_from_states(samples, frame)
-    scenario = SimpleNamespace(initial=SimpleNamespace(m=64000.0), dynamics=lambda _purpose: (A320, AERO))
+    scenario = SimpleNamespace(initial=SimpleNamespace(m=64000.0), has_dynamics=True,
+                               dynamics=lambda _purpose: (A320, AERO))
     return FlightSeries(flight_id="TURN", scenario=scenario, frame=frame, times=times, values=values)
 
 
@@ -90,3 +91,15 @@ def test_an_observed_flight_reads_the_bank_it_turned_at_through_the_teachers_inv
     assert got["pathAngleDeg"] == pytest.approx(-2.0, abs=1e-6)
     right = training_attitude.observed_attitude(_turning_series(bank_left_deg=-10.0))
     assert right["bankRightDeg"][inner] == pytest.approx(10.0, abs=0.3)
+
+
+def test_a_flight_without_an_airframe_has_its_heading_and_path_angle_and_no_bank_or_attack():
+    """C31: the dynamics has no airframe for it — the inversion reads one (its drag), and none is guessed."""
+    series = _turning_series(bank_left_deg=20.0)
+    series.scenario.has_dynamics = False
+    series.scenario.dynamics = None                                    # never asked
+    got = training_attitude.observed_attitude(series)
+    assert got["bankRightDeg"] is None and got["attackDeg"] is None
+    assert got["pathAngleDeg"] == pytest.approx(-2.0, abs=1e-6) and len(got["headingDeg"]) == 40
+    written = attitude_payload(got, slice(0, 3))
+    assert written["bankRightDeg"] is None and len(written["headingDeg"]) == 3

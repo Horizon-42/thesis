@@ -54,9 +54,9 @@ import {
 import { fetchJson } from "../utils/fetchJson";
 
 /** MIRROR of `training_files.TRAFFIC_SCHEMA`: a window set. */
-export const TRAINING_TRAFFIC_SCHEMA = "aeroviz-training-traffic-v1";
+export const TRAINING_TRAFFIC_SCHEMA = "aeroviz-training-traffic-v2";
 /** MIRROR of `window_training_export.SCHEMA`: a model's sentences in a window set's windows. */
-export const TRAINING_WINDOW_GENERATION_SCHEMA = "aeroviz-training-window-generation-v1";
+export const TRAINING_WINDOW_GENERATION_SCHEMA = "aeroviz-training-window-generation-v2";
 /** The two readings of the separation judge a window carries (`inference/separation.py`): VISUAL — the loop's, whose
  *  losses end aircraft — and IFR, the same paths judged afterwards, beside it. */
 export const TRAINING_SEPARATION_READINGS = ["visual", "ifr"] as const;
