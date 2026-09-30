@@ -21,6 +21,7 @@
  * one time — is drawn here (`sceneTrackAt`, `episodesAt`).
  */
 
+import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
 import { attempt, Reader, type Parsed } from "./trainingReader";
 import {
   parseGeneratedTrack,
@@ -44,7 +45,6 @@ import {
 } from "./trainingOverlays";
 import {
   readSetHead,
-  rowAtTime,
   trainingFilePath,
   type TrainingFlight,
   type TrainingSelection,
@@ -82,6 +82,8 @@ export interface TrainingSceneTrack {
   lat: number[];
   altitudeM: number[];
   altitudeHaeM: number[];
+  /** The attitude its aircraft is drawn in at each point (`trainingAttitude.ts`). */
+  attitude: TrainingAttitude;
 }
 
 /** A pair under its minimum on consecutive steps of the window, as the judge recorded it (`traffic_loop.Judging`): their
@@ -229,7 +231,7 @@ function readSceneTrack(reader: Reader): TrainingSceneTrack {
   if (tS.some((value, at) => at > 0 && value <= tS[at - 1])) reader.fail("tS does not run forward");
   const n = tS.length;
   return { tS, lon: reader.numbers("lon", n), lat: reader.numbers("lat", n), altitudeM: reader.numbers("altitudeM", n),
-    altitudeHaeM: reader.numbers("altitudeHaeM", n) };
+    altitudeHaeM: reader.numbers("altitudeHaeM", n), attitude: readAttitude(reader.child("attitude"), n) };
 }
 
 /** A window's losses under one reading, bound to who is in it: every aircraft they name is the window's, an episode runs
@@ -502,18 +504,6 @@ export function windowGenerationView(overlay: TrainingWindowGenerationOverlay, w
 /** A sentence's track on the window's clock (its own clock shifted by its row 0 there). */
 export function sceneTrackOf(sentence: TrainingWindowSentence, aircraft: TrainingWindowCommanded): TrainingSceneTrack {
   return { ...sentence.track, tS: sentence.track.tS.map((value) => value + aircraft.rowZeroS) };
-}
-
-/** Where a track is at scene time ``atS`` — linear between its points — or null outside its span. */
-export function sceneTrackAt(track: TrainingSceneTrack, atS: number): { lon: number; lat: number; heightHaeM: number } | null {
-  const { tS } = track;
-  if (atS < tS[0] || atS > tS[tS.length - 1]) return null;
-  // the point at or before it (`rowAtTime`'s search), and the one after — the last point's own when it is the last
-  const k = Math.min(rowAtTime(tS, atS), tS.length - 2);
-  const span = k < 0 ? 0 : tS[k + 1] - tS[k];
-  const f = span > 0 ? (atS - tS[k]) / span : 0;
-  const at = (values: number[]) => (span > 0 ? values[k] + f * (values[k + 1] - values[k]) : values[Math.max(k, 0)]);
-  return { lon: at(track.lon), lat: at(track.lat), heightHaeM: at(track.altitudeHaeM) };
 }
 
 /** The episodes going on at scene time ``atS``: a pair under its minimum from its first step until the step after its

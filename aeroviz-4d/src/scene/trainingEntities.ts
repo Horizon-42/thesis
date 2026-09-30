@@ -11,6 +11,8 @@
 
 import * as Cesium from "cesium";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
+import { AIRCRAFT_MODEL_URI, aircraftOrientation } from "../utils/aircraftOrientation";
+import type { TrainingAircraftPose } from "../data/trainingAttitude";
 import {
   outsideSpans,
   type TrainingAltitudeTube,
@@ -212,6 +214,50 @@ export function groundLine(
 
 /** A dashed line's material. */
 export const dash = (css: string, alpha = 0.85) => new Cesium.PolylineDashMaterialProperty({ color: colour(css, alpha) });
+
+/** How an aircraft model is drawn: its tint (blended into the model's own colours by ``blend``), its least size on screen,
+ *  a silhouette ``ring`` (px, in ``ringCss``) and how opaque it is. */
+export interface AircraftLook {
+  css: string;
+  blend: number;
+  minimumPixelSize: number;
+  ringCss: string;
+  ringPx: number;
+  alpha: number;
+}
+
+/** The aircraft model's orientation at ``pose``: its heading, its PATH ANGLE as the pitch — the angle of attack is a
+ *  reading written in the label, never drawn (a clean-wing lift curve, ~15° high on a flapped final: the user,
+ *  2026-09-30) — and its right bank, wings level for a flight without an airframe (its label says so). */
+export function poseOrientation(position: Cesium.Cartesian3, pose: TrainingAircraftPose): Cesium.Quaternion {
+  return aircraftOrientation(position, pose.headingDeg, pose.pathAngleDeg, pose.bankRightDeg ?? 0);
+}
+
+/** The aircraft model drawn in ``look``. */
+export function aircraftGraphics(look: AircraftLook): Cesium.ModelGraphics.ConstructorOptions {
+  return {
+    uri: AIRCRAFT_MODEL_URI, scale: 3.0, minimumPixelSize: look.minimumPixelSize, maximumScale: 20_000,
+    color: colour(look.css, look.alpha), colorBlendMode: Cesium.ColorBlendMode.MIX, colorBlendAmount: look.blend,
+    silhouetteColor: colour(look.ringCss), silhouetteSize: look.ringPx,
+  };
+}
+
+/** An aircraft where ``pose`` has it, drawn as the aircraft model in ``look``; its position and orientation are
+ *  replaced as it moves (`placeAircraft`). */
+export function aircraftModel(id: string, name: string, pose: TrainingAircraftPose, look: AircraftLook): EntityOptions {
+  const position = Cesium.Cartesian3.fromDegrees(pose.lon, pose.lat, pose.heightHaeM);
+  return {
+    id, name, position: new Cesium.ConstantPositionProperty(position),
+    orientation: new Cesium.ConstantProperty(poseOrientation(position, pose)), model: aircraftGraphics(look),
+  };
+}
+
+/** Moves an aircraft drawn by `aircraftModel` to ``pose``. */
+export function placeAircraft(entity: Cesium.Entity, pose: TrainingAircraftPose): void {
+  const position = Cesium.Cartesian3.fromDegrees(pose.lon, pose.lat, pose.heightHaeM);
+  entity.position = new Cesium.ConstantPositionProperty(position);
+  entity.orientation = new Cesium.ConstantProperty(poseOrientation(position, pose));
+}
 
 /** A point that stays visible through terrain, with an optional label under it. */
 export function marker(

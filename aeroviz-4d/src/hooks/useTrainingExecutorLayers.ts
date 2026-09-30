@@ -44,6 +44,7 @@ import {
 } from "../data/trainingAutopilot";
 import { TRAINING_OUTCOME_TAG } from "../data/trainingText";
 import {
+  aircraftGraphics,
   airLine,
   colour,
   entityGroup,
@@ -52,14 +53,18 @@ import {
   lonLatHeights,
   marker,
   planDegrees,
+  poseOrientation,
   TRAINING_ENTITY,
   trainingBandOutsideGround,
 } from "../scene/trainingEntities";
+import { poseAt } from "../data/trainingAttitude";
 
 type Ready = Extract<TrainingAutopilotView, { status: "ready" }>;
 
 /** The tail's dash in 3D, pixels: half Cesium's default (16), which an occluded line is drawn with. */
 const TAIL_DASH_PX = 8;
+/** The live aircraft model's least size on screen (px). */
+const AUTOPILOT_AIRCRAFT_PX = 40;
 
 /** Show or hide the entities of ``ids`` that are there. */
 function showEntities(viewer: Cesium.Viewer, ids: string[], shown: boolean): void {
@@ -135,11 +140,14 @@ function flyOut(viewer: Cesium.Viewer, view: Ready, bandsShown: () => boolean, o
     point: { pixelSize: 8, color: colour(hue), outlineColor: Cesium.Color.WHITE, outlineWidth: 1.5,
       disableDepthTestDistance: Number.POSITIVE_INFINITY },
   });
+  // the aircraft model in the executor's attitude where it is (`poseAt` at the same instant)
+  const orientationAt = (at: { index: number; fraction: number }) => poseOrientation(aircraftAt(at),
+    poseAt(track, at.index === last ? track.tS[last] : track.tS[at.index] + at.fraction * (track.tS[at.index + 1] - track.tS[at.index]))!);
   const aircraft = group.add({
     id: TRAINING_ENTITY.autopilotAircraft, name: "The autopilot's aircraft",
     position: new Cesium.CallbackPositionProperty(() => aircraftAt(now()), false),
-    point: { pixelSize: 12, color: colour(hue), outlineColor: Cesium.Color.WHITE, outlineWidth: 2,
-      disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    orientation: new Cesium.CallbackProperty(() => orientationAt(now()), false),
+    model: aircraftGraphics({ css: hue, blend: 0.5, alpha: 1, minimumPixelSize: AUTOPILOT_AIRCRAFT_PX, ringCss: "#ffffff", ringPx: 1.5 }),
     label: {
       text: new Cesium.CallbackProperty(() => autopilotAircraftLabel(track, now().index, speedup), false),
       font: "600 12px sans-serif",
@@ -153,6 +161,7 @@ function flyOut(viewer: Cesium.Viewer, view: Ready, bandsShown: () => boolean, o
     line.polyline!.positions = new Cesium.ConstantProperty(positions.slice(0, runLast + 1));
     if (tailLine !== null) tailLine.polyline!.positions = new Cesium.ConstantProperty(positions.slice(runLast));
     aircraft.position = new Cesium.ConstantPositionProperty(positions[last]);
+    aircraft.orientation = new Cesium.ConstantProperty(orientationAt({ index: last, fraction: 0 }));
     aircraft.label!.text = new Cesium.ConstantProperty(autopilotAircraftLabel(track, last, speedup));
     const on = (points: number[]) => ({ lon: points.map((index) => track.lon[index]), lat: points.map((index) => track.lat[index]) });
     group.add(groundLine(TRAINING_ENTITY.autopilotGround, "The autopilot's ground trace", planDegrees(on(run)), 2,

@@ -22,7 +22,9 @@ import {
   type TrainingGenerationView,
   type TrainingOverlayEntry,
 } from "../trainingOverlays";
-import { MOCK_DATUM_M, MOCK_ROWS, MOCK_STEP_S, SET_ID, STRAIGHT_KEY, VECTORED_KEY, WORD, mockSample } from "./trainingSample.fixture";
+import {
+  MOCK_DATUM_M, MOCK_ROWS, MOCK_STEP_S, SET_ID, STRAIGHT_KEY, VECTORED_KEY, WORD, mockAttitude, mockSample,
+} from "./trainingSample.fixture";
 
 export const EXECUTOR_ID = "executor_test";
 export const PRIOR_ID = "prior_test";
@@ -111,7 +113,7 @@ export function mockExecutorOverlay(): Record<string, unknown> {
           lon: eM.map((e) => -78 + e / 90000), lat: range(rows).map(() => observed.lat[0]),
           altitudeM: range(rows).map((row) => observed.raw.altitudeM[0] - row * 10),
           altitudeHaeM: range(rows).map((row) => observed.raw.altitudeM[0] - row * 10 + MOCK_DATUM_M), groundSpeedMps: range(rows).map(() => 100),
-          trackDeg: flownTrack, distanceM: range(rows, 0, 200),
+          trackDeg: flownTrack, distanceM: range(rows, 0, 200), attitude: mockAttitude(rows),
         },
         judgedTrackDeg: flownTrack.slice(0, rows - 1),
         words: [
@@ -285,7 +287,7 @@ function generatedTrack(endS: number) {
   return {
     tS, lon: points.map((point) => point.lon), lat: points.map((point) => point.lat),
     altitudeM: points.map((point) => point.altitudeM), altitudeHaeM: points.map((point) => point.altitudeM + MOCK_DATUM_M),
-    groundSpeedMps: tS.map(() => 70),
+    groundSpeedMps: tS.map(() => 70), attitude: mockAttitude(tS.length),
   };
 }
 

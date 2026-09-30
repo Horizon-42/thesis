@@ -30,6 +30,7 @@
  * SI units only: metres, m/s, degrees, seconds.
  */
 
+import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
 import { fetchJson } from "../utils/fetchJson";
 import { asNumber, attempt, parseManifest, Reader, recordOf, Refusal, type Parsed } from "./trainingReader";
 import {
@@ -197,6 +198,8 @@ export interface TrainingExecutorTrack {
   groundSpeedMps: number[];
   /** Unwrapped, on the observed smoothed track's branch at row 0. */
   trackDeg: number[];
+  /** The attitude its aircraft is drawn in at each point (`trainingAttitude.ts`). */
+  attitude: TrainingAttitude;
   /** The horizontal distance the executor flew. */
   distanceM: number[];
 }
@@ -363,6 +366,8 @@ export interface TrainingGeneratedTrack {
   altitudeM: number[];
   altitudeHaeM: number[];
   groundSpeedMps: number[];
+  /** The attitude its aircraft is drawn in at each point (`trainingAttitude.ts`). */
+  attitude: TrainingAttitude;
 }
 
 /** ONE sentence the prior said over a flight (one sample), flown by the executor: its words from the first predicted row
@@ -907,7 +912,7 @@ function parseTrack(reader: Reader): TrainingExecutorTrack {
     tS, eM: reader.numbers("eM", n), nM: reader.numbers("nM", n), lon: reader.numbers("lon", n), lat: reader.numbers("lat", n),
     altitudeM: reader.numbers("altitudeM", n), altitudeHaeM: reader.numbers("altitudeHaeM", n),
     groundSpeedMps: reader.numbers("groundSpeedMps", n), trackDeg: reader.numbers("trackDeg", n),
-    distanceM: reader.numbers("distanceM", n),
+    distanceM: reader.numbers("distanceM", n), attitude: readAttitude(reader.child("attitude"), n),
   };
 }
 
@@ -1227,6 +1232,7 @@ export function parseGeneratedTrack(reader: Reader, firstS: number, stepS: numbe
   return {
     tS, lon: reader.numbers("lon", n), lat: reader.numbers("lat", n), altitudeM: reader.numbers("altitudeM", n),
     altitudeHaeM: reader.numbers("altitudeHaeM", n), groundSpeedMps: reader.numbers("groundSpeedMps", n),
+    attitude: readAttitude(reader.child("attitude"), n),
   };
 }
 

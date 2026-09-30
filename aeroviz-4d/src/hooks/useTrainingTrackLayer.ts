@@ -45,6 +45,7 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp, useTrainingCursor, type TrainingLayers } from "../context/AppContext";
 import useTrainingTrafficLayer from "./useTrainingTrafficLayer";
+import useTrainingAircraftLayer from "./useTrainingAircraftLayer";
 import { windowOnScreen } from "../data/trainingTraffic";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { frameTrajectoryCamera } from "../utils/frameTrajectoryCamera";
@@ -379,5 +380,6 @@ export default function useTrainingTrackLayer(): void {
 
   useTrainingExecutorLayers();
   useTrainingGenerationLayers();
+  useTrainingAircraftLayer();
   useTrainingTrafficLayer();
 }

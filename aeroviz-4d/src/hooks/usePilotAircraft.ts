@@ -1,4 +1,5 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
+import { AIRCRAFT_MODEL_URI, aircraftOrientation, compassFromPsiDeg } from "../utils/aircraftOrientation";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
@@ -66,14 +67,9 @@ export function usePilotAircraft({
     }
 
     const position = Cesium.Cartesian3.fromDegrees(pose.lon, pose.lat, pose.altM);
-    const orientation = Cesium.Transforms.headingPitchRollQuaternion(
-      position,
-      new Cesium.HeadingPitchRoll(
-        Cesium.Math.toRadians(-pose.headingDeg),
-        Cesium.Math.toRadians(pose.flightPathDeg + pose.attackDeg),
-        Cesium.Math.toRadians(-pose.bankDeg),
-      ),
-    );
+    // the simulator's bank turns left when positive
+    const orientation = aircraftOrientation(
+      position, compassFromPsiDeg(pose.headingDeg), pose.flightPathDeg + pose.attackDeg, -pose.bankDeg);
 
     if (!aircraftRef.current) {
       aircraftPositionPropertyRef.current = new Cesium.ConstantPositionProperty(position);
@@ -84,7 +80,7 @@ export function usePilotAircraft({
         position: aircraftPositionPropertyRef.current,
         orientation: aircraftOrientationPropertyRef.current,
         model: {
-          uri: "/models/aircraft.glb",
+          uri: AIRCRAFT_MODEL_URI,
           scale: 3.0,
           minimumPixelSize: 36,
           maximumScale: 20_000,

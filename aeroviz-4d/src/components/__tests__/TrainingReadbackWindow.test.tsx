@@ -206,7 +206,9 @@ describe("TrainingReadbackWindow", () => {
   it("says so when the executor's flight ended within its first step", () => {
     const flown = executorFlight(0);
     if (!flown.flown) throw new Error("the fixture's first flight is flown");
-    const point = Object.fromEntries(Object.entries(flown.track).map(([key, values]) => [key, (values as number[]).slice(0, 1)]));
+    const { attitude, ...arrays } = flown.track;
+    const point = { ...Object.fromEntries(Object.entries(arrays).map(([key, values]) => [key, (values as number[]).slice(0, 1)])),
+      attitude: Object.fromEntries(Object.entries(attitude).map(([key, values]) => [key, values?.slice(0, 1) ?? null])) };
     open(ALL, 0, 0, null, { ...flown, outcome: "dynamics_failure", track: point as unknown as typeof flown.track });
     expect(screen.getByLabelText("Executor replay").textContent).toMatch(/dynamics failure on own dynamics within its first step/);
     expect(document.body.querySelectorAll(".training-readback-executor")).toHaveLength(0);

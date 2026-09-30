@@ -28,6 +28,14 @@ export const MOCK_DATUM_M = -33;
 
 export const MOCK_ROWS = 60;
 export const MOCK_STEP_S = 2;
+
+/** A track's attitude block, ``n`` points (`trainingAttitude.readAttitude`): heading ``headingDeg``, descending at 3°,
+ *  banked ``bankRightDeg`` with a 6° attack reading — or, null, a flight without an airframe (no bank, no attack). */
+export function mockAttitude(n: number, headingDeg = 90, bankRightDeg: number | null = 0) {
+  const fill = (value: number) => Array.from({ length: n }, () => value);
+  return { headingDeg: fill(headingDeg), pathAngleDeg: fill(-3), bankRightDeg: bankRightDeg === null ? null : fill(bankRightDeg),
+    attackDeg: bankRightDeg === null ? null : fill(6) };
+}
 export const MOCK_CANDIDATES_SHA = "c".repeat(64);
 export const MOCK_LABELLER_SHA = "d".repeat(64);
 
@@ -169,6 +177,7 @@ export function mockFlight(key: string, vectored: boolean): Record<string, unkno
              verticalRateMps: range(rows).map((row) => (row < 20 ? 0 : -4)) },
       smoothed: { trackDeg: track, altitudeM: altitude, groundSpeedMps: speed, distanceM: distance },
       beforeThresholdM: eM.map((e) => -e), rightOfCourseM: nM.map((n) => -n),
+      attitude: mockAttitude(rows),
     },
     words: { events, inForce: inForce(events) },
     envelopes: {

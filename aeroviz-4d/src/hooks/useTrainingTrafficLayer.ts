@@ -7,17 +7,18 @@
  *
  *  • EACH AIRCRAFT BY ITS ROLE (`TrainingAircraftRole`, one table: `ROLE_DRAW`), so the aircraft the view is about is
  *    told from the rest at a glance (the user, 2026-09-30): the one ON SCREEN — its track drawn by the single-flight
- *    layers — a large white point ringed in the selection's yellow, its callsign "▶ …" on a yellow chip; every
- *    COMMANDED aircraft its track in the model's colour (the record's: the observed track's near-white), a point and
- *    callsign in it; a REPLAYED aircraft thin and faded in slate, a BACKGROUND arrival fainter and darker
+ *    layers — the aircraft model large and white, ringed in the selection's yellow, its callsign "▶ …" and its attitude
+ *    on a yellow chip; every COMMANDED aircraft its track in the model's colour (the record's: the observed track's
+ *    near-white), its model tinted and its callsign in it; a REPLAYED aircraft thin and faded in slate, a BACKGROUND arrival fainter and darker
  *    (`TRAINING_OTHER_AIRCRAFT_COLOR`). The commanded are a set: several drawn as commanded at once is the ordinary case.
- *  • WHERE EACH IS AT THE CURSOR (the window's clock, `trainingSceneS`): its point, hidden outside its span. Positions are
- *    the exported tracks read at that time (`sceneTrackAt`): drawn, never flown here.
+ *  • WHERE EACH IS AT THE CURSOR (the window's clock, `trainingSceneS`): the aircraft model in its exported attitude
+ *    (`trainingAttitude.poseAt`: heading, path angle as the pitch, right bank), hidden outside its span — drawn, never
+ *    flown here.
  *  • LOSSES OF SEPARATION: a pair under its minimum at the cursor joined by a red line with the closest it came against
  *    its minimum (the judge's numbers); VISUAL solid — the reading that ends an aircraft — IFR dashed where only IFR has
  *    it; and a red cross, fixed, where the judge ended an aircraft.
  *
- * Built once per window and reading; the cursor moves only the points and the loss lines. STATIC ENTITIES, as every
+ * Built once per window and reading; the cursor moves only the aircraft and the loss lines. STATIC ENTITIES, as every
  * Training layer: the shared `viewer.clock` belongs to Observe. Call it from the leaf (`TrainingScene`): it reads the
  * cursor.
  */
@@ -26,10 +27,12 @@ import { useEffect, useMemo, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp, useTrainingCursor } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
-import { airLine, colour, entityGroup, lonLatHeights, type EntityOptions } from "../scene/trainingEntities";
+import {
+  aircraftModel, airLine, colour, entityGroup, lonLatHeights, placeAircraft, type EntityOptions,
+} from "../scene/trainingEntities";
+import { poseAt, poseText, type TrainingAircraftPose } from "../data/trainingAttitude";
 import {
   episodesAt,
-  sceneTrackAt,
   windowReading,
   type TrainingAircraftRole,
   type TrainingSceneTrack,
@@ -47,22 +50,25 @@ import {
 
 const ID = "training-traffic";
 
-/** How each role is drawn: its track (null: the single-flight layers draw it), its point and its callsign. */
+/** How each role is drawn: its track (null: the single-flight layers draw it), its model — least size on screen (px),
+ *  how much of its tint shows, how opaque, its ring (px) — and its callsign. */
 const ROLE_DRAW: Record<TrainingAircraftRole, {
   track: { width: number; alpha: number } | null;
-  pointPx: number;
+  modelPx: number;
+  blend: number;
+  alpha: number;
+  ringPx: number;
   labelFont: string;
   labelAlpha: number;
 }> = {
-  onScreen: { track: null, pointPx: 15, labelFont: "700 13px sans-serif", labelAlpha: 1 },
-  commanded: { track: { width: 2.5, alpha: 1 }, pointPx: 10, labelFont: "600 12px sans-serif", labelAlpha: 1 },
-  replayed: { track: { width: 1.2, alpha: TRAINING_OTHER_AIRCRAFT_ALPHA.replayed }, pointPx: 7, labelFont: "500 11px sans-serif",
-    labelAlpha: 0.8 },
-  background: { track: { width: 1, alpha: TRAINING_OTHER_AIRCRAFT_ALPHA.background }, pointPx: 6, labelFont: "500 10px sans-serif",
-    labelAlpha: 0.65 },
+  onScreen: { track: null, modelPx: 46, blend: 0.2, alpha: 1, ringPx: 3, labelFont: "700 13px sans-serif", labelAlpha: 1 },
+  commanded: { track: { width: 2.5, alpha: 1 }, modelPx: 34, blend: 0.6, alpha: 1, ringPx: 1, labelFont: "600 12px sans-serif",
+    labelAlpha: 1 },
+  replayed: { track: { width: 1.2, alpha: TRAINING_OTHER_AIRCRAFT_ALPHA.replayed }, modelPx: 26, blend: 0.7, alpha: 0.85, ringPx: 0,
+    labelFont: "500 11px sans-serif", labelAlpha: 0.8 },
+  background: { track: { width: 1, alpha: TRAINING_OTHER_AIRCRAFT_ALPHA.background }, modelPx: 22, blend: 0.7, alpha: 0.7,
+    ringPx: 0, labelFont: "500 10px sans-serif", labelAlpha: 0.65 },
 };
-/** The on-screen aircraft's ring (px). */
-const ON_SCREEN_RING_PX = 3;
 
 /** Every aircraft of the window as the reading draws it: its id, name, role, colour, track on the window's clock. */
 interface SceneAircraft {
@@ -83,25 +89,27 @@ function sceneAircraft(view: TrainingWindowView, reading: TrainingWindowReading,
   ];
 }
 
-/** An aircraft where it is: its point and callsign, drawn by its role; always visible through terrain. */
-function aircraftMark(one: SceneAircraft, position: Cesium.Cartesian3): EntityOptions {
+/** An aircraft's label: its callsign — the one on screen's "▶ …" and its attitude there. */
+function labelText(one: SceneAircraft, pose: TrainingAircraftPose): string {
+  return one.role === "onScreen" ? `▶ ${one.callsign}\n${poseText(pose)}` : one.callsign;
+}
+
+/** An aircraft where ``pose`` has it: its model and callsign, drawn by its role; the label visible through terrain. */
+function aircraftMark(one: SceneAircraft, pose: TrainingAircraftPose): EntityOptions {
   const draw = ROLE_DRAW[one.role];
   const onScreen = one.role === "onScreen";
   return {
-    id: `${ID}-at-${one.datasetId}`, name: onScreen ? `${one.callsign} (on screen)` : `${one.callsign} (${one.role})`, position,
-    point: {
-      pixelSize: draw.pointPx, color: onScreen ? Cesium.Color.WHITE : colour(one.css),
-      outlineColor: onScreen ? colour(TRAINING_ON_SCREEN_COLOR) : Cesium.Color.BLACK.withAlpha(0.6),
-      outlineWidth: onScreen ? ON_SCREEN_RING_PX : 2,
-      disableDepthTestDistance: Number.POSITIVE_INFINITY,
-    },
+    ...aircraftModel(`${ID}-at-${one.datasetId}`, onScreen ? `${one.callsign} (on screen)` : `${one.callsign} (${one.role})`, pose,
+      { css: onScreen ? "#ffffff" : one.css, blend: draw.blend, alpha: draw.alpha, minimumPixelSize: draw.modelPx,
+        ringCss: onScreen ? TRAINING_ON_SCREEN_COLOR : "#000000", ringPx: draw.ringPx }),
     label: {
-      text: onScreen ? `▶ ${one.callsign}` : one.callsign, font: draw.labelFont,
+      text: labelText(one, pose), font: draw.labelFont,
       fillColor: onScreen ? colour(TRAINING_SURFACE_COLOR) : colour(one.css, draw.labelAlpha),
       ...(onScreen
         ? { showBackground: true, backgroundColor: colour(TRAINING_ON_SCREEN_COLOR, 0.9), style: Cesium.LabelStyle.FILL }
         : { outlineColor: Cesium.Color.BLACK, outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE }),
-      pixelOffset: new Cesium.Cartesian2(0, 20), disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      pixelOffset: new Cesium.Cartesian2(0, 30), verticalOrigin: Cesium.VerticalOrigin.TOP,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
   };
 }
@@ -118,9 +126,9 @@ export default function useTrainingTrafficLayer(): void {
   const reading = useMemo(() => (view === null ? null : windowReading(view, trainingSource)), [view, trainingSource]);
   const aircraft = useMemo(() => (view === null || reading === null ? [] : sceneAircraft(view, reading, onScreen)),
     [view, reading, onScreen]);
-  const points = useRef<Map<string, Cesium.Entity>>(new Map());
+  const models = useRef<Map<string, Cesium.Entity>>(new Map());
 
-  // THE TRACKS, the points and the judge's ends: built once per window, reading and aircraft on screen
+  // THE TRACKS, the aircraft and the judge's ends: built once per window, reading and aircraft on screen
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || view === null || reading === null) return;
     const group = entityGroup(viewer);
@@ -131,36 +139,35 @@ export default function useTrainingTrafficLayer(): void {
         group.add(airLine(`${ID}-track-${one.datasetId}`, `${one.callsign} (${one.role})`,
           Cesium.Cartesian3.fromDegreesArrayHeights(lonLatHeights(one.track)), one.css, track.width, track.alpha));
       }
-      made.set(one.datasetId, group.add(aircraftMark(one, cartesian(sceneTrackAt(one.track, one.track.tS[0])!))));
+      made.set(one.datasetId, group.add(aircraftMark(one, poseAt(one.track, one.track.tS[0])!)));
     }
     for (const end of reading.losses.visual.ended) {
       const one = aircraft.find((item) => item.datasetId === end.datasetId)!;
-      const at = sceneTrackAt(one.track, end.atS);
+      const at = poseAt(one.track, end.atS);
       if (at === null) continue;                            // ended before its track starts: nothing to mark there
       group.add({ id: `${ID}-ended-${end.datasetId}`, name: `${one.callsign}: lost separation (${end.kind})`, position: cartesian(at),
         label: { text: "✕", font: "700 26px sans-serif", fillColor: colour(TRAINING_LOSS_COLOR), outlineColor: Cesium.Color.BLACK,
           outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
     }
-    points.current = made;
+    models.current = made;
     return () => {
-      points.current = new Map();
+      models.current = new Map();
       group.remove();
     };
   }, [viewer, view, reading, aircraft]);
 
-  // AT THE CURSOR: each point where its aircraft is, the pairs under their minimum joined
+  // AT THE CURSOR: each aircraft where it is and how it sits, the pairs under their minimum joined
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || view === null || reading === null) return;
     const where = new Map<string, Cesium.Cartesian3>();
     for (const one of aircraft) {
-      const at = sceneTrackAt(one.track, trainingSceneS);
-      const entity = points.current.get(one.datasetId);
-      if (entity === undefined) continue;
-      entity.show = at !== null;
-      if (at !== null) {
-        const position = cartesian(at);
-        entity.position = new Cesium.ConstantPositionProperty(position);
-        where.set(one.datasetId, position);
+      const pose = poseAt(one.track, trainingSceneS);
+      const entity = models.current.get(one.datasetId)!;
+      entity.show = pose !== null;
+      if (pose !== null) {
+        placeAircraft(entity, pose);
+        entity.label!.text = new Cesium.ConstantProperty(labelText(one, pose));
+        where.set(one.datasetId, cartesian(pose));
       }
     }
     const group = entityGroup(viewer);

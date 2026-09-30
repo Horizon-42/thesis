@@ -190,7 +190,10 @@ describe("a generation overlay", () => {
     expect(refusal((raw) => { landedSample(raw).track.tS[5] = 18.5; })).toMatch("tS[5] is 18.5 s, not the step at 18 s");
     expect(refusal((raw) => {
       const track = landedSample(raw).track;
-      for (const key of Object.keys(track)) track[key].splice(-2, 1);          // a point missing before the last
+      for (const key of Object.keys(track)) {                                  // a point missing before the last
+        if (key === "attitude") for (const field of Object.keys(track.attitude)) track.attitude[field].splice(-2, 1);
+        else track[key].splice(-2, 1);
+      }
     })).toMatch("its last point is more than a step after the one before");
   });
 

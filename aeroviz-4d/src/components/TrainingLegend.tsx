@@ -80,11 +80,11 @@ export default function TrainingLegend({ layers, vocabulary, executorTrack, auto
     ...(traffic === null ? [] : [
       { key: "on-screen", swatch: { kind: "point", colour: "#ffffff", ring: TRAINING_ON_SCREEN_COLOR } satisfies Swatch, shown: true,
         text: "▶ the aircraft on screen", title: "the aircraft the sentence bar reads: its tracks as above, where it is at the " +
-          "cursor a white point ringed in the selection's yellow, its callsign on a yellow chip" },
+          "cursor the aircraft model, white, ringed in the selection's yellow, its callsign and attitude on a yellow chip" },
       { key: "commanded", swatch: { kind: "line", colour: traffic.colour } satisfies Swatch, shown: traffic.commanded > 1,
         text: "commanded aircraft",
-        title: "the window's other aircraft the sentence read commands — the model's samples, or the record: its track, point " +
-          "and callsign in the reading's colour" },
+        title: "the window's other aircraft the sentence read commands — the model's samples, or the record: its track, " +
+          "aircraft model and callsign in the reading's colour" },
       { key: "replayed", swatch: { kind: "line", colour: TRAINING_OTHER_AIRCRAFT_COLOR.replayed,
         opacity: TRAINING_OTHER_AIRCRAFT_ALPHA.replayed } satisfies Swatch, shown: true, text: "replayed arrivals",
         title: "arrivals with a sentence the model does not command, replayed as recorded" },
@@ -95,6 +95,11 @@ export default function TrainingLegend({ layers, vocabulary, executorTrack, auto
         title: "a pair under its minimum at the cursor, joined — VISUAL solid, IFR dashed where only IFR has it — with the " +
           "closest it came against its minimum; ✕ where the judge ended an aircraft" },
     ]),
+    { key: "aircraft", swatch: { kind: "point", colour: model?.colour ?? TRAINING_TRACE_COLOR, ring: "#000000" } satisfies Swatch,
+      shown: true, text: "the aircraft at the cursor",
+      title: "the aircraft model where the sentence read has it at the cursor, turned to its exported attitude: heading, the " +
+        "path angle as its pitch and its bank (wings level for a flight the dynamics has no airframe for); the angle of " +
+        "attack is a reading through a clean-wing lift curve — high on a flapped final — written under it, never drawn" },
     ...(autopilotColour === null ? [] : [{ key: "autopilot", swatch: { kind: "line", colour: autopilotColour } as Swatch,
       shown: true, text: "autopilot segment",
       title: "the picked word's segment, flown live by the executor (dashed on the ground): blue inside the word's " +

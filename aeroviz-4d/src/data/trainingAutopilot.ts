@@ -34,6 +34,7 @@
  * SI units only: metres, m/s, degrees, seconds.
  */
 
+import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
 import { asNumber, attempt, Reader, type Parsed } from "./trainingReader";
 import {
   readCrossing,
@@ -140,6 +141,8 @@ export interface TrainingAutopilotTrack {
   /** Positive: banked right (turning right). */
   bankRightDeg: number[];
   loadFactor: number[];
+  /** The attitude its aircraft is drawn in at each STATE (`trainingAttitude.ts`). */
+  attitude: TrainingAttitude;
 }
 
 export interface TrainingAutopilotSegment {
@@ -404,7 +407,7 @@ function parseTrack(reader: Reader, row: number, stepS: number): TrainingAutopil
     groundSpeedMps: reader.numbers("groundSpeedMps", n), verticalRateMps: reader.numbers("verticalRateMps", n),
     trackDeg: reader.numbers("trackDeg", n), distanceM: reader.numbers("distanceM", n),
     thrustFraction: reader.numbers("thrustFraction", n - 1), bankRightDeg: reader.numbers("bankRightDeg", n - 1),
-    loadFactor: reader.numbers("loadFactor", n - 1),
+    loadFactor: reader.numbers("loadFactor", n - 1), attitude: readAttitude(reader.child("attitude"), n),
   };
 }
 

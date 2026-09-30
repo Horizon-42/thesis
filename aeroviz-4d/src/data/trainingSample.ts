@@ -34,6 +34,7 @@
 
 import { fetchJson } from "../utils/fetchJson";
 import { attempt, parseManifest, Reader, type Parsed } from "./trainingReader";
+import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
 
 /** MIRROR of the exporter's `INDEX_SCHEMA`. The index keeps this shape across vocabularies:
  *  every set, current or superseded, is listed in it. */
@@ -357,6 +358,8 @@ export interface TrainingSignals {
   smoothed: { trackDeg: number[]; altitudeM: number[]; groundSpeedMps: number[]; distanceM: number[] };
   beforeThresholdM: number[];
   rightOfCourseM: number[];
+  /** The attitude the observed aircraft is drawn in at each row (`trainingAttitude.ts`). */
+  attitude: TrainingAttitude;
 }
 
 export interface TrainingFlight {
@@ -871,6 +874,7 @@ function parseSignals(reader: Reader, rows: number, stepS: number): TrainingSign
     },
     beforeThresholdM: reader.numbers("beforeThresholdM", rows),
     rightOfCourseM: reader.numbers("rightOfCourseM", rows),
+    attitude: readAttitude(reader.child("attitude"), rows),
   };
 }
 

@@ -3,13 +3,14 @@
  * other, projected onto the single-flight views, and read as the sentence bar's source reads a window.
  */
 
+import { poseAt } from "../trainingAttitude";
 import { describe, expect, it } from "vitest";
 import {
   aircraftFate,
   episodesAt,
   parseTrainingTrafficSet,
   parseTrainingWindowGenerationOverlay,
-  sceneTrackAt,
+  TRAINING_TRAFFIC_SCHEMA,
   sceneTrackOf,
   trainingWindowKey,
   trainingWindowSelection,
@@ -90,7 +91,7 @@ describe("a window set", () => {
   it("is refused by name when it holds what the judge could not have written", () => {
     const read = parseTrainingTrafficSet;
     expect(refusal(read, mockTrafficSet(), (raw) => { raw.schema = "aeroviz-training-traffic-v0"; }))
-      .toContain('expected "aeroviz-training-traffic-v1"');
+      .toContain(`expected "${TRAINING_TRAFFIC_SCHEMA}"`);
     expect(refusal(read, mockTrafficSet(), (raw) => { raw.windows[0].commanded[0].datasetId = "KXXX:NOPE"; }))
       .toContain("not a flight of the set");
     expect(refusal(read, mockTrafficSet(), (raw) => { raw.windows[0].recorded.ifr.episodes[0].pair = ["KXXX:A", VECTORED_ID]; }))
@@ -208,8 +209,8 @@ describe("a window as read", () => {
   it("puts an aircraft where its track is at a time, and the pairs under their minimum until the step after their last", () => {
     const shown = view();
     const track = sceneTrackOf(shown.overlays[0].windows[0].samples[0].aircraft[0], shown.window.commanded[0]);
-    expect(sceneTrackAt(track, track.tS[0] - 1)).toBeNull();
-    const halfway = sceneTrackAt(track, (track.tS[0] + track.tS[1]) / 2)!;
+    expect(poseAt(track, track.tS[0] - 1)).toBeNull();
+    const halfway = poseAt(track, (track.tS[0] + track.tS[1]) / 2)!;
     expect(halfway.lon).toBeCloseTo((track.lon[0] + track.lon[1]) / 2, 12);
     const losses = shown.overlays[0].windows[0].samples[0].losses.visual;
     expect(episodesAt(losses, 119, 2)).toEqual([]);
