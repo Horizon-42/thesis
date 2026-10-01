@@ -54,11 +54,11 @@ LABELS = {
         "stages": [
             ("① Pre-training", "teacher forcing", "on sentences"),
             ("② Post-training", "landing reward in loop,", "procedure masks"),
-            ("③ Multi-aircraft", "traffic attention,", "separation (ongoing)"),
+            ("③ Multi-aircraft", "traffic attention,", "separation"),
         ],
         "trains": "trains",
         "outcome": "landing outcome",
-        "legend": ["Data / language", "Learned", "Rules / physics", "Decode-time check", "In progress"],
+        "legend": ["Data / language", "Learned", "Rules / physics", "Decode-time check"],
     },
     "zh": {
         "offline": "离线：数据 → 语言",
@@ -78,11 +78,11 @@ LABELS = {
         "stages": [
             ("① 预训练", "teacher forcing", "在句子产物上"),
             ("② 后训练", "闭环落地奖励、", "程序屏蔽"),
-            ("③ 多机", "交通注意力、", "间隔（进行中）"),
+            ("③ 多机", "交通注意力、", "间隔"),
         ],
         "trains": "训练",
         "outcome": "落地结果",
-        "legend": ["数据 / 语言", "学习得到", "规则 / 物理", "解码时检查", "进行中"],
+        "legend": ["数据 / 语言", "学习得到", "规则 / 物理", "解码时检查"],
     },
 }
 
@@ -182,7 +182,7 @@ def draw(lang):
     for i, lines in enumerate(t["stages"]):
         x = 215 + i * 192
         g.box(x, 430, 170, 76, PALETTE["train"], list(lines), title_size=13, size=11.5, line_h=16,
-              dash=(i == 2))
+)
     g.arrow([(385, 468), (407, 468)], sw=1.5)
     g.arrow([(577, 468), (599, 468)], sw=1.5)
     g.arrow([(175, 468), (215, 468)])                       # sentences -> pre-training
@@ -192,10 +192,10 @@ def draw(lang):
     g.text(573, 384, t["outcome"], size=11.5, italic=True, anchor="start", fill=PALETTE["mute"])
 
     # ---- legend -----------------------------------------------------------------------------
-    swatches = [PALETTE["data"], PALETTE["prior"], PALETTE["exec"], PALETTE["mask"], PALETTE["train"]]
+    swatches = [PALETTE["data"], PALETTE["prior"], PALETTE["exec"], PALETTE["mask"]]
     x = 15
     for i, (name, colours) in enumerate(zip(t["legend"], swatches)):
-        g.rect(x, 538, 16, 12, colours[0], colours[1], dash=(i == 4), r=3, sw=1.2)
+        g.rect(x, 538, 16, 12, colours[0], colours[1], r=3, sw=1.2)
         g.text(x + 22, 548, name, size=11.5, anchor="start", fill=PALETTE["mute"])
         x += 22 + (6.4 if lang == "en" else 12) * len(name) + 22
     return g.render()
