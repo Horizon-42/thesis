@@ -101,6 +101,7 @@ from ts_transformer.experiments.prior_free_generation import (
 from ts_transformer.experiments.prior_landing_reward import LANDING_REWARD_SCHEMA
 from ts_transformer.experiments.prior_train import rosters
 from ts_transformer.experiments.traffic_reward import TRAFFIC_REWARD_SCHEMA
+from ts_transformer.experiments.traffic_window_reward import SCHEMA as TRAFFIC_WINDOW_REWARD_SCHEMA
 from ts_transformer.experiments.training_attitude import attitude_payload, executor_attitude
 from ts_transformer.experiments.prior_training_export import open_trained_prior
 from ts_transformer.instructions.airport import AirportGeometry
@@ -139,9 +140,10 @@ OUTPUTS_MARK = "4dTrajectory/outputs/"
 #: MIRROR of the phrase `replay.draw_flights` writes for ``per_airport`` 0 (every labelled flight of the split).
 EVERY_FLIGHT = "every labelled flight"
 #: The prior's models by name, in the order they are trained (the post-training design's table; the user, 2026-09-26;
-#: ``traffic``, the multi-aircraft post-training M4, the user 2026-09-30):
+#: ``traffic``, the multi-aircraft post-training M4, the user 2026-09-30; ``window``, M4 in windows — every aircraft of a
+#: window commanded — the user 2026-10-01):
 #: MIRROR of `TRAINING_MODEL_NAMES` in `aeroviz-4d/src/data/trainingOverlays.ts`, which orders the views by it.
-MODEL_NAMES = ("base", "landing", "augmented", "traffic")
+MODEL_NAMES = ("base", "landing", "augmented", "traffic", "window")
 
 
 def method_of(schema: str) -> str:
@@ -155,7 +157,7 @@ def method_of(schema: str) -> str:
 
 #: The model a post-training method makes (``base`` has none: it is trained on data alone).
 METHOD_MODELS = {method_of(LANDING_REWARD_SCHEMA): "landing", method_of(AUGMENTED_REWARD_SCHEMA): "augmented",
-                 method_of(TRAFFIC_REWARD_SCHEMA): "traffic"}
+                 method_of(TRAFFIC_REWARD_SCHEMA): "traffic", method_of(TRAFFIC_WINDOW_REWARD_SCHEMA): "window"}
 
 
 def model_identity(config_file: dict[str, Any]) -> tuple[str, int | None]:

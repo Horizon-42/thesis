@@ -1019,7 +1019,35 @@ record, here and all airports, with the windows and samples they cover), refused
 artefact, split, draw, samples and temperature. Every refusal about the disk before any work (`on_disk`), every write after it
 (`write_export`); refactors it rests on, behaviour-preserving (reviewed): `window_prior`, `fly_windows` / `Flown`,
 `fixed_paths` / `FixedWindow`, `sentence_counts`, `generation_block`, `head_block` / `flights_block`, `check_set` by kind. The
-model trained by `ts-traffic-reward` is named **traffic** (`MODEL_NAMES`, user 2026-09-30).
+model trained by `ts-traffic-reward` is named **traffic** (`MODEL_NAMES`, user 2026-09-30), the one trained by
+`ts-traffic-window-reward` (R37, M4 in windows) **window** (user 2026-10-01).
+
+
+### R37 · `run_ts.py traffic_window_reward` — multi-aircraft M4's second pass: the traffic post-training in windows (design §6.6 step 7 item 7, the 7.6 plan)
+
+2026-09-30. `traffic_window_reward --prior <single-aircraft prior (augmented) or traffic prior (an M4 round)> --base <base>
+--instructions <artefact> --executor <spec> --out <new dir> [--rounds 8] [--resume] [--real-per-airport 70]
+[--augmented-per-airport 70] [--samples 8] [--select-per-airport 70] [--select-samples 2] [--speakers 4] [--passes 1]
+[--smoke]`. R32's round protocol with a window sample as the unit: each round the training days' windows drawn with its
+seed (`traffic_window.draw_windows`), the first per airport as they are and the next `POOL_FACTOR` × as many augmented
+(`traffic_window_augment`, the first that qualify), spoken `--samples` times by R32's speaking processes (`Speaking`
+carries how a round is spoken: `WindowSpeaking` — `traffic_window_generation.window_batches`, `window_sentences`),
+each commanded aircraft rewarded as R34, its advantage against its own samples in its window, trained on only on a
+contrast and never when it starts in a loss (`traffic_window_tuner.window_advantages`); the pass
+(`traffic_window_tuner.WindowRewardTuner`): each window sample scored whole as the speaker read it (the one layout,
+`window_speaker.window_inputs`, `traffic_window.window_edges`; each aircraft's rows rebuilt with its landing context
+switched where the speaker switched it — tested to give back the sampling distributions to 1e-4), encoded a block of
+steps at a time (`Prior.encode`'s ``pairs_per_block``, `traffic_window_tuner.PAIRS_PER_BLOCK` = 32,768 pairs: after the
+time attention nothing in a layer reads another step; the busiest window sample, 23 aircraft, 1.51 GB instead of more
+than the 8 GB whole — every window sample is trained on, none left out for size), the loss on the
+trained aircraft's words, base reading each alone, M2's scene samples as the data term; with one commanded aircraft a
+window it trains as R32's tuner does (loss and gradients, tested). Before anything is spoken it checks the formal size
+(`preflight`, `preflight.json`): the host's free memory against the speaking processes, and round 1's costliest window
+sample scored with gradients on the GPU. Fixed select windows (as drawn and augmented) read
+every round in the shape `traffic_reward.guarded_choice` reads (landed, observed runway, words, lost separation, the
+ordering against the record with the other commanded aircraft's landings of the same sample, reward by kind), the round
+chosen by paired standard errors on the augmented windows' reward. Writes `config.json`, `round_<k>/{sentences.json,
+checkpoint.pt, optimiser.pt, readout.json, …}`, `history.json`, `choice.json` (`ts-traffic-window-reward-v1`).
 
 ### R38 · `run_ts.py prior_generation_grading` — a generation-records run graded beyond its pass rate: the landed runway, and FDE's time and place (2026-09-30)
 
@@ -1047,3 +1075,25 @@ arrivals (median 16 s). So `grading.json` gives FDE, the arrival endpoint error,
 FDE over the late and the early apart, per kind / pooled over the samples, in all / per airport / per approach kind / per
 airport × kind.
 
+### R39 · `run_ts.py traffic_window_reward_readout` — an M4-in-windows run (R37) read round by round, while it runs or after it ends
+
+Reads only the run's own files: each finished round's `readout.json` (a round is finished once it is written — the runner
+writes it last; a round directory after the finished ones without one is running or was cut short, named and not read),
+the training rounds' `history.json` rows and `choice.json` (written when an invocation of R37 ends — `run.sh` runs one
+round an invocation — so none before the first ends, and a choice covering fewer rounds than are finished is said to be
+behind). Prints per round and side the
+select reward, lost separation, landed and observed-runway shares, the ordering against the record (real windows);
+against round 0, paired per aircraft sentence (window, aircraft, sample — every round speaks the select windows with the
+same streams, so the pairs are the same draws), the change in reward and in lost separation over the sentences both rounds
+count and its standard error — the round choice's own pairs (`traffic_window_reward.select_counted`) and difference
+(`traffic_reward.paired_difference`), so on the augmented reward these are `choice.json`'s numbers — per kind on the
+augmented windows (reward per kind beside it); of the losses, the shares ended by another commanded aircraft and by a
+replayed one (`ended_with`); per training round its sentences (trained on, starting in a loss) and pass (updates, KL mean /
+largest, clipped share, data NLL, KL to base at the start); the traffic attention's output over the residual per layer and
+the teacher-forced NLL; the choice. Tested on a run written by R37's own pieces whose rounds differ (a wrong pair, round or
+kind fails it). `--out` (a new directory) also writes `traffic_window_reward_readout.json`
+(`ts-traffic-window-reward-readout-v1`). Replaces the ad-hoc script the first readout used (user 2026-09-30: a readout
+used every run is a runner).
+
+    python run_ts.py traffic_window_reward_readout \
+        --run 4dTrajectory/outputs/POOLED/prior/m4_window_20260930/window_s1337 [--out <new directory>]

@@ -219,10 +219,15 @@ def _tuned(schema, start, round_number):
 def test_the_models_are_named_by_the_method_that_trained_them_every_version_alike():
     from ts_transformer.experiments.prior_augmented_reward import AUGMENTED_REWARD_SCHEMA
     from ts_transformer.experiments.prior_landing_reward import LANDING_REWARD_SCHEMA
+    from ts_transformer.experiments.traffic_reward import TRAFFIC_REWARD_SCHEMA
+    from ts_transformer.experiments.traffic_window_reward import SCHEMA as TRAFFIC_WINDOW_REWARD_SCHEMA
 
     assert export.model_identity({"git": {}}) == ("base", None)
     assert export.model_identity(_tuned(LANDING_REWARD_SCHEMA, PRIOR, 3)) == ("landing", 3)
     assert export.model_identity(_tuned(AUGMENTED_REWARD_SCHEMA, PRIOR, 2)) == ("augmented", 2)
+    assert export.model_identity(_tuned(TRAFFIC_REWARD_SCHEMA, PRIOR, 5)) == ("traffic", 5)
+    # M4 in windows trains its own model, never another traffic round ("traffic r5" is its start)
+    assert export.model_identity(_tuned(TRAFFIC_WINDOW_REWARD_SCHEMA, PRIOR, 5)) == ("window", 5)
     # the adopted landing model was written by the method's first version: the same model
     assert export.model_identity(_tuned("ts-prior-landing-reward-v1", PRIOR, 1)) == ("landing", 1)
     with pytest.raises(ValueError, match="no model is named for ts-prior-closed-loop-sft-v1"):

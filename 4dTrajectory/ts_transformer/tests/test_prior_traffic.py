@@ -121,6 +121,43 @@ def test_row_by_row_is_the_whole_scene_with_a_traffic_attention():
     torch.testing.assert_close(torch.cat(rows, dim=2) * present, whole * present, rtol=0, atol=1e-10)
 
 
+def test_blocks_of_steps_are_the_whole_encoding_values_and_gradients():
+    """`Prior.encode`'s ``pairs_per_block``: the step-wise part a block of steps at a time — one step, blocks that do not
+    divide the steps, one block — with and without the layers recomputed: the whole encoding's values and gradients to
+    rounding (1e-12 in double; a block's products are other shapes)."""
+    traffic = with_traffic(_model().double(), EDGE_FEATURES).eval()
+    generator = torch.Generator().manual_seed(9)
+    for layer in traffic.layers:
+        for parameter in layer.traffic.parameters():
+            parameter.data += 0.1 * torch.randn(parameter.shape, generator=generator, dtype=torch.float64)
+    batch = _scene(traffic)
+    steps = batch["present"].shape[2]
+    assert steps % 5 != 0
+
+    def encoded(**options):
+        traffic.zero_grad(set_to_none=True)
+        h = traffic.encode(*(batch[name] for name in NAMES[:-1]), **options)[0]
+        (h * batch["present"][..., None]).square().sum().backward()
+        return h.detach(), {name: p.grad.clone() for name, p in traffic.named_parameters() if p.grad is not None}
+
+    whole, gradients = encoded()
+    for pairs in (1, 5 * 9, 10 ** 6):                            # 1 step a block; 5 (3 aircraft: 9 pairs a step); one
+        for checkpoint in (False, True):
+            h, grads = encoded(checkpoint=checkpoint, pairs_per_block=pairs)
+            torch.testing.assert_close(h, whole, rtol=0, atol=1e-12)
+            assert grads.keys() == gradients.keys() and any(".traffic." in name for name in grads)
+            for name, g in grads.items():
+                torch.testing.assert_close(g, gradients[name], rtol=0, atol=1e-12)
+
+
+def test_step_blocks_cover_every_step_in_order_at_most_the_pairs_given():
+    from ts_transformer.prior.model import step_blocks
+
+    assert step_blocks(1, 3, 23, 5 * 9) == [slice(0, 5), slice(5, 10), slice(10, 15), slice(15, 20), slice(20, 23)]
+    assert step_blocks(2, 3, 4, 1) == [slice(k, k + 1) for k in range(4)]           # one step at least
+    assert step_blocks(1, 3, 23, 10 ** 6) == [slice(0, 23)]
+
+
 def test_every_weight_of_the_single_prior_is_kept_and_misfits_are_refused():
     single = _model()
     traffic = with_traffic(single, EDGE_FEATURES)

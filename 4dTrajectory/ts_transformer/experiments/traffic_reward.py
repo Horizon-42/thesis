@@ -295,14 +295,30 @@ def speak(model: Prior, round_: Round, samples: int, words: Words, params: Any, 
 
 @dataclasses.dataclass(frozen=True)
 class Speaking:
-    """What every speaking process speaks with: the vocabulary, the executor's parameters, the landing context, the
-    procedure's masks and the loop batch's most aircraft-steps."""
+    """What every speaking process speaks with — the vocabulary, the executor's parameters, the landing context, the
+    procedure's masks and the loop batch's most aircraft-steps — and how a round is spoken (a window runner speaks its
+    own: `traffic_window_reward.WindowSpeaking`): its plan of loop batches, one batch spoken, the round's fingerprint
+    and the batches assembled."""
 
     words: Words
     params: Any
     landings: Any
     procedures: ProcedureMasks
     budget: int
+
+    def plan(self, round_: Any, samples: int) -> list[list[int]]:
+        return speaking_plan(round_, samples, self.params, self.budget, self.words.spec.step_s)
+
+    def speak(self, model: Prior, round_: Any, chunk: Sequence[int], number: int, samples: int, *, seed: int,
+              source: str) -> Any:
+        return speak_batch(model, round_, chunk, number, samples, self.words, self.params, self.landings,
+                           self.procedures, seed=seed, source=source)
+
+    def fingerprint(self, round_: Any) -> Any:
+        return round_fingerprint(round_)
+
+    def assemble(self, round_: Any, samples: int, plan: Sequence[Sequence[int]], parts: Mapping[int, Any]) -> Any:
+        return assemble(round_, samples, plan, parts)
 
 
 def round_fingerprint(round_: Round) -> list[tuple[Any, ...]]:
@@ -350,16 +366,16 @@ def _speaker(pipe: Any, parent_ends: Sequence[Any], parent_pid: int, rounds: Cal
                     built.clear()
                     built[key] = rounds(key)
                 round_ = built[key]
-            plan = speaking_plan(round_, samples, speaking.params, speaking.budget, speaking.words.spec.step_s)
-            parts = {n: speak_batch(model, round_, plan[n], n, samples, speaking.words, speaking.params,
-                                    speaking.landings, speaking.procedures, seed=seed, source=source)
+            plan = speaking.plan(round_, samples)
+            parts = {n: speaking.speak(model, round_, plan[n], n, samples, seed=seed, source=source)
                      for n in range(index, len(plan), count)}
             peak = 0.0
             if device_.type == "cuda":
                 peak = torch.cuda.max_memory_reserved(device_) / 1e9
                 torch.cuda.empty_cache()                        # the parent's pass needs the GPU next
                 torch.cuda.reset_peak_memory_stats(device_)     # after: the next task's peak starts from the emptied cache
-            pipe.send(("ok", parts, round_fingerprint(round_), peak))
+            pipe.send(("ok", parts, speaking.fingerprint(round_), peak))
+            del parts, round_                                   # the next task builds its own
     except BaseException:
         traceback.print_exc()
         pipe.send(("failed", traceback.format_exc()))
@@ -374,7 +390,7 @@ class Speakers:
     ``count``). `send` starts them, `receive` assembles the round in the parent's order after checking each process
     rebuilt the parent's round; a process that fails, or is gone, ends the run with what it said."""
 
-    def __init__(self, count: int, rounds: Callable[[int], Round], select: Mapping[str, Round], model: Prior,
+    def __init__(self, count: int, rounds: Callable[[int], Any], select: Mapping[str, Any], model: Prior,
                  device: str, speaking: Speaking) -> None:
         if count < 1:
             raise ValueError("at least one speaking process")
@@ -411,10 +427,10 @@ class Speakers:
             except OSError:
                 raise self._gone(w) from None
 
-    def receive(self, round_: Round, samples: int) -> tuple[SceneSentences, list[float]]:
+    def receive(self, round_: Any, samples: int) -> tuple[Any, list[float]]:
         """The sentences of `send`'s round (``round_``: the parent's own), assembled as `speak` does, and each
         process's GPU peak (GB reserved)."""
-        fingerprint = round_fingerprint(round_)
+        fingerprint = self.speaking.fingerprint(round_)
         parts: dict[int, SceneSentences] = {}
         peaks = []
         for w, pipe in enumerate(self.pipes):
@@ -429,14 +445,13 @@ class Speakers:
                 raise SystemExit(f"speaking process {w} rebuilt another round than this process's")
             parts.update(got)
             peaks.append(peak)
-        plan = speaking_plan(round_, samples, self.speaking.params, self.speaking.budget,
-                             self.speaking.words.spec.step_s)
+        plan = self.speaking.plan(round_, samples)
         if sorted(parts) != list(range(len(plan))):
             raise SystemExit(f"the speaking processes returned batches {sorted(parts)} of {len(plan)}")
-        return assemble(round_, samples, plan, parts), peaks
+        return self.speaking.assemble(round_, samples, plan, parts), peaks
 
-    def speak(self, kind: str, key: Any, round_: Round, model: Prior, samples: int, *, seed: int, source: str
-              ) -> tuple[SceneSentences, list[float]]:
+    def speak(self, kind: str, key: Any, round_: Any, model: Prior, samples: int, *, seed: int, source: str
+              ) -> tuple[Any, list[float]]:
         """`send` then `receive`."""
         self.send(kind, key, model, samples, seed=seed, source=source)
         return self.receive(round_, samples)
