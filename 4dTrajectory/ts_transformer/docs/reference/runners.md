@@ -905,7 +905,7 @@ and counted. The last round is not necessarily the kept one (`choice.round`). Wr
 <artefact> --split select --out <new dir> [--windows-per-airport 200] [--samples 4] [--aircraft-steps 100000] [--workers 6]
 [--augment-seed N] [--device] [--model-sources scene alone]`. `--model-sources` (2026-10-01): the model's sources to read —
 a pair of priors on the same windows needs only `scene`, half the model's time; each source reads from its own streams,
-so the rows of the source read do not change (tested); which were read is what the rows hold.
+so the rows of the source read do not change (tested both ways); the header names them (`model_sources`, schema v3).
 The windows (`experiments/traffic_window.py`, design §6.6 step 7 item 1): each airport's segments tiled by 20-minute windows
 opening every 10 minutes; a window commands its flights with a sentence entering in it that fly on their own dynamics, the
 rest replayed; drawn per airport in a seeded permutation of the tiles, a tile with no flight that flies passed over and
@@ -1103,16 +1103,19 @@ used every run is a runner).
 ### R41 · `run_ts.py traffic_window_pair` — two window readouts (R34) of the same windows, aircraft by aircraft
 
 2026-10-01 (the user: the kept M4-in-windows round against its start on the val windows). `traffic_window_pair --first
-<R34 dir> --second <R34 dir> [--out <new dir>]`. Refused unless the two read the SAME windows the SAME way: every field of
-`window_generation.json` that decides the draw and the reading (`SAME`: split, draw, windows an airport, samples,
-temperature, seed, augmentation, executor spec, artefact, scenes, history, readings, batches and their size) equal, the same
-(window, aircraft, sample, source) rows, `starts_in_a_loss` equal row by row, and the model-free sources (labelled,
-recorded) equal row for row — each batch reads from its own streams, so the two use the same random numbers and pair.
-Per model source (scene, alone) and group (pooled, airport, window size; augmented: kind and part), over the rows R34
-counts: each of `MEASURES` (reward, lost separation VISUAL / IFR, landed, landed on the observed runway) in both and
-second − first, the difference taken per aircraft (its samples averaged) with the standard error clustered by window, the
-reward's per-sentence error beside it as the M4 round choice reads pairs (`traffic_reward.paired_difference`), and the
-losses avoided / added counted per sentence. `--out` writes `traffic_window_pair.json` (`ts-traffic-window-pair-v1`).
+<R34 dir> --second <R34 dir> [--out <new dir>]`. Refused unless the two read the SAME windows the SAME way with the SAME
+code: every field of `window_generation.json` that decides the draw and the reading (`SAME`: the commit, split, draw,
+windows an airport, samples, temperature, seed, augmentation, executor spec, artefact, scenes, history, readings, batches
+and their size, the model's sources read) equal, the same (window, aircraft, sample, source) rows with their model-free
+fields (`MODEL_FREE`) equal, and the model-free sources (labelled, recorded) equal row for row (they read the prior's
+procedure masks too). A row STARTING IN A LOSS depends on the model (the aircraft ahead is model-flown): as the M4 round
+choice pairs rounds, a sentence is counted only where it starts in a loss in neither readout, and each side's count is
+reported. Per model source and group (pooled, airport, window size; augmented: kind and part): each of `MEASURES`
+(reward, lost separation VISUAL / IFR, landed, landed on the observed runway) in both and second − first over the
+sentences counted in both, its standard error clustered by AIRPORT × OPERATING DAY (windows overlap and share flights and
+traffic; a window's day is its earliest-landing commanded aircraft's, read from the identity's landing stamp), the
+reward's per-sentence error beside it (`traffic_reward.paired_difference`), and the losses avoided / added. `--out` writes
+`traffic_window_pair.json` (`ts-traffic-window-pair-v1`; no NaN: an error under two clusters is null).
 
     python run_ts.py traffic_window_pair --first 4dTrajectory/outputs/POOLED/traffic/window_val_traffic_r5_20261001 \
         --second 4dTrajectory/outputs/POOLED/traffic/window_val_window_r5_20261001 \

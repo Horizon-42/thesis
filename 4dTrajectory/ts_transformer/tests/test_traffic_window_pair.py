@@ -23,7 +23,8 @@ def _header(**changes):
     header = {"schema": READOUT_SCHEMA, "git": {"head": "h", "dirty": False}, "split": "val", "drawn": {"seed": 1337}, "windows_per_airport": 2, "samples": 2,
               "temperature": 1.0, "seed": 1337, "augment_seed": None, "augmenting": None,
               "executor": {"sha256": "e"}, "instructions": "i", "scenes": {"n": 1}, "history_s": 1200.0,
-              "readings": {"ends": "visual"}, "aircraft_steps": 100000, "batches": 1, "prior": {"directory": "p"},
+              "readings": {"ends": "visual"}, "aircraft_steps": 100000, "batches": 1, "model_sources": ["scene", "alone"],
+              "prior": {"directory": "p"},
               "aircraft_file": "aircraft.jsonl"}
     return {**header, **changes}
 
@@ -87,7 +88,7 @@ def test_the_difference_is_second_less_first_and_its_error_clustered_by_airport_
 def test_readouts_that_did_not_read_the_same_windows_the_same_way_are_refused(tmp_path):
     first, second = _readouts(tmp_path, set())
     for name, value in (("samples", 4), ("seed", 7), ("augment_seed", 7919), ("executor", {"sha256": "f"}),
-                        ("git", {"head": "other", "dirty": False})):
+                        ("git", {"head": "other", "dirty": False}), ("model_sources", ["scene"])):
         header = json.loads((second / "window_generation.json").read_text())
         (second / "window_generation.json").write_text(json.dumps({**header, name: value}))
         with pytest.raises(ValueError, match=f"\\['{name}'\\] differ"):

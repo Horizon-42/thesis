@@ -887,3 +887,8 @@ def test_a_batch_reads_the_same_whatever_else_is_read_and_in_whichever_process(t
     scene_only = runner.batch_rows(model, drawn, 1, [1], Words(spec), _params(), None, every, 2, seed=5, temperature=1.0,
                                    procedure_masks=ProcedureMasks.none(), device=cpu, model_sources=("scene",))
     assert scene_only == [r for r in alone if r["source"] != "alone"]
+    # and the other way: the alone source alone, read first in a process of its own
+    alone_only = {n: rows for n, rows, _ in runner.in_processes(1, [1], lambda number: runner.batch_rows(
+        model, drawn, number, [number], Words(spec), _params(), None, every, 2, seed=5, temperature=1.0,
+        procedure_masks=ProcedureMasks.none(), device=cpu, model_sources=("alone",)))}[1]
+    assert alone_only == [r for r in alone if r["source"] != "scene"]

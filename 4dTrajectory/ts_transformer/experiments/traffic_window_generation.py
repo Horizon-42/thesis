@@ -101,7 +101,8 @@ from ts_transformer.prior.model import Prior, with_traffic
 from ts_transformer.prior.scene import N_LOOK, Landings, hang, presence
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
-SCHEMA = "ts-traffic-window-generation-v2"
+#: v3 (2026-10-01): the model's sources read (`model_sources`) in the header.
+SCHEMA = "ts-traffic-window-generation-v3"
 SOURCES = ("scene", "alone", "labelled", "recorded")
 #: The sources the model speaks in (`--model-sources`: a read that needs only one — a pair of priors on the same windows
 #: reads "scene" — skips the other, half the model's time; each source from its own streams, so the rows of the one read
@@ -805,6 +806,7 @@ def main(argv: list[str] | None = None) -> int:
         "executor": {"directory": repo_relative(executor_dir), "sha256": record["sha256"]},
         "instructions": repo_relative(instructions), "scenes": built, "history_s": HISTORY_S,
         "readings": {"ends": VISUAL, "beside": IFR}, "aircraft_steps": args.aircraft_steps, "batches": len(batches),
+        "model_sources": [s for s in MODEL_SOURCES if s in args.model_sources],
         "workers": args.workers, "gpu_peak_gb_a_process": max(peaks),
         "readout": readout, "aircraft_file": "aircraft.jsonl", "elapsed_s": time.perf_counter() - started})
     for source, entry in readout["pooled"].items():

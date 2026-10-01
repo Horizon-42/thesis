@@ -5,7 +5,7 @@ Reads two `traffic_window_generation` (R34) outputs — ``--first`` and ``--seco
 them unless they read the SAME windows the SAME way with the SAME code: every field of their ``window_generation.json``
 that decides what is drawn and how it is read (`SAME`: the code's commit, the split, the draw, the windows an airport, the
 samples, the temperature, the seed, the augmentation, the executor spec, the sentence artefact, the scenes, the history,
-the readings, the batches and their size) equal; the same rows (window, aircraft, sample, source) in both, whose fields no
+the readings, the batches and their size, the model's sources read) equal; the same rows (window, aircraft, sample, source) in both, whose fields no
 model decides (`MODEL_FREE`) are equal; and the sources no model reads — the labelled words and the record — equal row for
 row (they also read the prior's procedure masks: two priors under other masks differ there). Each batch draws from its
 own streams, so the two read every window from the same random numbers as far as their words agree.
@@ -45,19 +45,21 @@ from ts_transformer.data.day_split import operational_day
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION
 from ts_transformer.experiments.traffic_reward import paired_difference
 from ts_transformer.experiments.traffic_window_augment import KINDS, ROLES
-from ts_transformer.experiments.traffic_window_generation import SCHEMA as READOUT_SCHEMA, SIZES, size_of
+from ts_transformer.experiments.traffic_window_generation import (
+    MODEL_SOURCES, SCHEMA as READOUT_SCHEMA, SIZES, size_of,
+)
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, repo_relative
 
 SCHEMA = "ts-traffic-window-pair-v1"
 #: What decides which windows are read and how: equal in both readouts, or they do not pair.
 SAME = ("schema", "git", "split", "drawn", "windows_per_airport", "samples", "temperature", "seed", "augment_seed",
-        "augmenting", "executor", "instructions", "scenes", "history_s", "readings", "aircraft_steps", "batches")
+        "augmenting", "executor", "instructions", "scenes", "history_s", "readings", "aircraft_steps", "batches",
+        "model_sources")
 #: A model row's fields no model decides: equal in both readouts.
 MODEL_FREE = ("airport", "commanded", "observed_runway", "augmented", "role", "batch")
 #: A flight's identity ends in its landing time (`flight_scenarios.identity.flight_key`): what its operating day is read from.
 LANDING_STAMP = re.compile(r"(\d{8}T\d{6}Z)$")
-MODEL_SOURCES = ("scene", "alone")
 FIXED_SOURCES = ("labelled", "recorded")
 #: Each sentence's 0 / 1 readings (R34's own: `traffic_window_generation.summary`, M4's reward).
 MEASURES: dict[str, Callable[[Mapping[str, Any]], float]] = {
