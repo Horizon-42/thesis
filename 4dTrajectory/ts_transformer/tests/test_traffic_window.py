@@ -135,7 +135,7 @@ def _scene_airport(tmp_path, monkeypatch):
 
 
 def _window_loop(model, airport, signals, spec, commanded, *, alone=False, seed=4, samples=1, limits=None,
-                 procedure_masks=None):
+                 procedure_masks=None, given=None):
     """A `WindowLoop` of ``commanded`` (the keys of each window, ``samples`` times each; ``limits``: each window's time
     limit, `LIMIT_S` by default)."""
     import torch
@@ -153,7 +153,7 @@ def _window_loop(model, airport, signals, spec, commanded, *, alone=False, seed=
     physics = _physics_of(flights, geometry)
     return WindowLoop(model, windows, flights, [geometry] * len(flights), *physics, per_aircraft, Words(spec),
                       _params(), None, generator=torch.Generator().manual_seed(seed), temperature=1.0,
-                      procedure_masks=procedure_masks or ProcedureMasks.none(), alone=alone)
+                      procedure_masks=procedure_masks or ProcedureMasks.none(), alone=alone, given=given)
 
 
 def _one_aircraft_reference(model, airport, signals, spec, keys, limits, seed, procedure_masks=None, alone=False):
@@ -892,3 +892,136 @@ def test_a_batch_reads_the_same_whatever_else_is_read_and_in_whichever_process(t
         model, drawn, number, [number], Words(spec), _params(), None, every, 2, seed=5, temperature=1.0,
         procedure_masks=ProcedureMasks.none(), device=cpu, model_sources=("alone",)))}[1]
     assert alone_only == [r for r in alone if r["source"] != "scene"]
+
+
+def _busy_windows(tmp_path, monkeypatch):
+    """`test_several_commanded_aircraft_a_window_keep_the_loop_s_books`' windows: one to three commanded aircraft a
+    window, mixed limits, a raised glidepath — ``(airport, signals, spec, groups, limits, masks)``."""
+    from ts_transformer.instructions.artefact import load_signals
+    from ts_transformer.prior.masks import PROCEDURE_ALTITUDES, ProcedureMasks
+    from ts_transformer.tests.test_prior_procedure import _final
+
+    _, airports, spec = _airport(tmp_path, monkeypatch, [0.0, 40.0, 80.0, 200.0, 230.0, 400.0, 600.0, 610.0],
+                                 tuple(range(8)))
+    airport = airports["KXXX"]
+    signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
+    masks = ProcedureMasks((PROCEDURE_ALTITUDES,), {"KXXX": tuple(_final(candidate=c, crossing_m=1_200.0,
+                                                                         faf_d_m=40_000.0)
+                                                                  for c in airport.flights.geometry.candidates)})
+    groups = [("KXXX:f0", "KXXX:f1", "KXXX:f2"), ("KXXX:f3", "KXXX:f4"), ("KXXX:f5",), ("KXXX:f6", "KXXX:f7")]
+    return airport, signals, spec, groups, [100.0, 160.0, 60.0, 130.0], masks
+
+
+def _flown(loop):
+    while loop.running:
+        loop.step()
+    return loop
+
+
+def _same_loops(a, b, *, to_step=None):
+    """Two loops over the same windows: every aircraft's words, outcome, ends and states the same — to its own step
+    ``to_step[i]`` only (words before it, states to its start), when given — and every window's judge's books."""
+    import torch
+
+    rows = int(round(STEP_S / a.params.cycle_s))                 # executor rows a step
+    for i, (x, y) in enumerate(zip(a.results(), b.results())):
+        flown_x = a.executors[x.group][2].flown().states[x.place]
+        flown_y = b.executors[y.group][2].flown().states[y.place]
+        if to_step is None:
+            assert (x.outcome, x.own, x.end, x.counted, x.landing_s, x.runway) == \
+                   (y.outcome, y.own, y.end, y.counted, y.landing_s, y.runway)
+            assert x.said.shape == y.said.shape and (x.said == y.said).all()
+            assert torch.equal(flown_x, flown_y)
+        else:
+            k = int(to_step[i])
+            assert (x.said[:k] == y.said[:k]).all()
+            assert torch.equal(flown_x[: rows * k + 1], flown_y[: rows * k + 1])
+    if to_step is None:
+        assert [r.ended for r in a.runs] == [r.ended for r in b.runs]
+        assert [r.episodes for r in a.runs] == [r.episodes for r in b.runs]
+
+
+def test_every_aircraft_given_the_words_it_said_flies_and_is_judged_as_it_was_whatever_the_draws(tmp_path,
+                                                                                                    monkeypatch):
+    """Design §6.6 step 7.7 item 9: words given in full replay a loop bit for bit, under another stream, never sampled
+    nor masked."""
+    from ts_transformer.experiments.traffic_window import Given
+
+    airport, signals, spec, groups, limits, masks = _busy_windows(tmp_path, monkeypatch)
+    model = _traffic_model(spec)
+    spoken = _flown(_window_loop(model, airport, signals, spec, groups, seed=0, limits=limits, procedure_masks=masks))
+    assert any(r.end is not None for r in spoken.results()), "the probe should hold a loss of separation"
+    given = [Given(r.said, len(r.said)) for r in spoken.results()]
+    again = _window_loop(model, airport, signals, spec, groups, seed=99, limits=limits, procedure_masks=masks,
+                         given=given)
+    asked = []
+    masks_of = again.speaker.masks_of
+
+    def spy(column, chosen, now):
+        asked.append(now.copy())
+        return masks_of(column, chosen, now)
+
+    again.speaker.masks_of = spy
+    _same_loops(spoken, _flown(again))
+    assert not any(now.any() for now in asked)
+
+
+def test_a_given_aircraft_leaves_the_others_draws_as_they_were(tmp_path, monkeypatch):
+    """The stream: an aircraft given the words it said changes no other aircraft's draw — under the same seed the
+    loop is the one where it spoke."""
+    from ts_transformer.experiments.traffic_window import Given
+
+    airport, signals, spec, groups, limits, masks = _busy_windows(tmp_path, monkeypatch)
+    model = _traffic_model(spec)
+    spoken = _flown(_window_loop(model, airport, signals, spec, groups, seed=0, limits=limits, procedure_masks=masks))
+    results = spoken.results()
+    given = [None] * len(results)
+    given[1] = Given(results[1].said, len(results[1].said))
+    _same_loops(spoken, _flown(_window_loop(model, airport, signals, spec, groups, seed=0, limits=limits,
+                                            procedure_masks=masks, given=given)))
+
+
+def test_words_given_to_a_step_then_spoken_keep_everything_before_it(tmp_path, monkeypatch):
+    """Rewinding one aircraft (design §6.6 step 7.7 items 7–8): it is given its words to own step ``s`` and speaks from
+    there, the others are given theirs in full — everything before ``s`` is as it was; past their words' end the prior
+    speaks for them."""
+    from ts_transformer.experiments.traffic_window import Given
+
+    airport, signals, spec, groups, limits, masks = _busy_windows(tmp_path, monkeypatch)
+    model = _traffic_model(spec)
+    spoken = _flown(_window_loop(model, airport, signals, spec, groups, seed=0, limits=limits, procedure_masks=masks))
+    results = spoken.results()
+    changer, s = 0, 5
+    given = [Given(r.said, s if i == changer else len(r.said)) for i, r in enumerate(results)]
+    again = _window_loop(model, airport, signals, spec, groups, seed=7, limits=limits, procedure_masks=masks,
+                         given=given)
+    sampled = []
+    masks_of = again.speaker.masks_of
+
+    def spy(column, chosen, now):
+        if now[changer]:
+            sampled.append(again._step_of(changer, again.speaker.step))
+        return masks_of(column, chosen, now)
+
+    again.speaker.masks_of = spy
+    _flown(again)
+    # the changer is sampled (masked) from its own step s on, never before
+    assert sampled and min(sampled) == s
+    # before the changer's own step s every aircraft of its window is where it was (each at its own step then)
+    w = results[changer].window
+    at = int(spoken.start[changer] + s)
+    to_step = [max(0, min(len(r.said), at - int(spoken.start[i]))) if r.window == w else len(r.said)
+               for i, r in enumerate(results)]
+    _same_loops(spoken, again, to_step=to_step)
+
+
+def test_a_line_is_given_to_an_own_step_inside_its_words():
+    import numpy as np
+    import pytest
+
+    from ts_transformer.experiments.traffic_window import Given
+
+    words = np.zeros((4, 6), dtype=np.int64)
+    assert Given(words, 4).until == 4 and Given(words, 0).until == 0
+    with pytest.raises(ValueError, match="own step 5 of 4"):
+        Given(words, 5)

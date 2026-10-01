@@ -21,6 +21,11 @@ VECTORED_TURN_DEG = 90.0
 STRATA = ("straight-in", "vectored")
 
 
+def stratum(reading: Reading) -> str:
+    """The flight's stratum (module docstring)."""
+    return "vectored" if reading.checks["turning_deg"] >= VECTORED_TURN_DEG else "straight-in"
+
+
 def flight_record(reading: Reading) -> dict[str, Any]:
     """The compact per-flight record the summary pools (and `labels.json` keeps)."""
     after = reading.words[1:] != UNCHANGED
@@ -30,7 +35,7 @@ def flight_record(reading: Reading) -> dict[str, Any]:
     return {
         "dataset_id": reading.dataset_id, "airport": reading.airport, "status": "labelled",
         "rows": int(len(reading.words)),
-        "stratum": "vectored" if checks["turning_deg"] >= VECTORED_TURN_DEG else "straight-in",
+        "stratum": stratum(reading),
         "turning_deg": checks["turning_deg"],
         "words_after_step0": {COLUMNS[c]: int(after[:, c].sum()) for c in range(len(COLUMNS))},
         "silent_steps": int((~after.any(axis=1)).sum()),

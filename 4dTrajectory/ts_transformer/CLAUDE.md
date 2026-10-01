@@ -446,6 +446,9 @@ as the round choice pairs (R39).
 `traffic_window_pair` pairs two window readouts of the same windows read the same way (refused otherwise, the model-free
 rows equal row for row) aircraft by aircraft: second − first per measure over the sentences counted in both, errors clustered by airport ×
 operating day (R41).
+`traffic_window_rewind` asks whether a window's losses of separation can be undone by rewinding ONE aircraft — each loss's
+aircraft speaks again from 10–120 s before it (or its start), the others given the words they said (`traffic_window.Given`:
+not sampled, not masked), 8 branches an offset, a control that must replay the original pass to the last field (R43).
 `executor_conformance` flies a spec's reference tracks again with the code on disk in every way the executor flies and
 writes the passed record `replay.open_executor` asks for; `--write-reference` writes a spec's reference first, from a clean
 checkout with the code that measured it (`autopilot/conformance.py`; executor design §12.3) (R42).

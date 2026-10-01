@@ -44,6 +44,7 @@ import numpy as np
 from ts_transformer.data.day_split import operational_day
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION
 from ts_transformer.experiments.traffic_reward import paired_difference
+from ts_transformer.experiments.traffic_speaking import INSERTED
 from ts_transformer.experiments.traffic_window_augment import KINDS, ROLES
 from ts_transformer.experiments.traffic_window_generation import (
     MODEL_SOURCES, SCHEMA as READOUT_SCHEMA, SIZES, size_of,
@@ -118,16 +119,20 @@ def operating_day_of(dataset_id: str) -> str:
 
 
 def cluster_of(pairs: Mapping[tuple, tuple[dict, dict]]) -> dict[int, tuple[str, str]]:
-    """Each window's cluster: its airport and the operating day of its earliest-landing commanded aircraft."""
+    """Each window's cluster: its airport and the operating day of its earliest-landing commanded aircraft of its own —
+    an inserted one (`traffic_speaking.INSERTED`, augmentation A) is another day's flight put into it, its stamp not
+    the window's."""
     first_landing: dict[int, str] = {}
     airport: dict[int, str] = {}
     for (window, key, _, _), (a, _) in pairs.items():
+        airport[window] = a["airport"]
+        if key.endswith(INSERTED):
+            continue
         stamp = LANDING_STAMP.search(key)
         if stamp is None:
             raise ValueError(f"{key!r} does not end in a landing stamp")
         if window not in first_landing or stamp.group(1) < LANDING_STAMP.search(first_landing[window]).group(1):
             first_landing[window] = key
-        airport[window] = a["airport"]
     return {w: (airport[w], operating_day_of(key)) for w, key in first_landing.items()}
 
 
