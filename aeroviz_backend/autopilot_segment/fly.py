@@ -4,8 +4,9 @@ NOTHING IS PRECOMPUTED. A Training set's flights are rebuilt together from the a
 (`flights.rebuild_series` refuses a moved manifest or a rebuilt flight that differs from the stored signals) the first
 time the set is asked for — or when the backend warms up (`backend.AutopilotSegmentBackend.warm_up`) — each re-read with
 the labeller (it must give the stored sentence), from the artefact split's stored files (`read_split`). A segment is flown by
-`single.SingleExecutor` — the executor's cycle for one flight in plain floats, pinned to the executor's code
-(`single.require_mirrored_source`, checked when the spec is chosen), checked against `executor.Executor` by result —
+`single.SingleExecutor` — the executor's single-flight way to fly, its cycle for one flight in plain floats (the spec
+opens only for executor code that flies the spec's reference tracks within the bounds in every way, this one included:
+`spec.require_conforming_executor`) —
 one control cycle at a time, driven exactly as `executor.fly` drives it: the spec's word clock read before each cycle, a
 step's words heard on the cycle that starts it (`sentence.row_at`, as `judge.words_said` reads the clock), and stopped at
 the segment's stop: nothing past it is flown. The executor starts from the observed aircraft's state at the segment's
@@ -62,7 +63,7 @@ from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.procedure import RunwayProcedure, below_floor
 from ts_transformer.repo_layout import arrival_manifest_path
 
-from aeroviz_backend.autopilot_segment import single
+from ts_transformer.autopilot import single
 from aeroviz_backend.autopilot_segment.errors import NotFlyable, RequestRefused, Superseded
 from aeroviz_backend.autopilot_segment.segment import (
     ModelSentence, Segment, judged_reading, model_reading, model_segment, segment_of, segment_reading, segment_signals,

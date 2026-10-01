@@ -15,7 +15,7 @@ import pytest
 
 from geokit import METRES_PER_DEG_LAT
 from ts_transformer.autopilot.frame import ALT, LAT, LON, PSI
-from ts_transformer.experiments import executor_conformance as conformance
+from ts_transformer.autopilot import conformance
 from ts_transformer.tests.support import fly_legs, instruction_flight
 from ts_transformer.tests.test_autopilot import DOWNWIND_BASE_FINAL, _fly_sentence, _params
 
@@ -144,8 +144,8 @@ def test_a_changed_law_is_found():
 
 
 def _spec_dir(tmp_path, monkeypatch, results, *, keys=("KXXX:f1",)):
-    record = {"sha256": "s" * 64, "vocabulary_spec_sha256": "v" * 64}
-    monkeypatch.setattr(conformance.replay, "open_executor", lambda executor, instructions: (_params(), record, None))
+    record = {"sha256": "s" * 64, "vocabulary_spec_sha256": "v" * 64, "source": {"executor_source_sha256": "c" * 64}}
+    monkeypatch.setattr(conformance.replay, "open_spec", lambda executor, instructions: (_params(), record, None))
     monkeypatch.setattr(conformance, "git_state", lambda: {"head": "h", "dirty": False})
     monkeypatch.setattr(conformance, "executor_source_sha256", lambda: "c" * 64)
     monkeypatch.setattr(conformance, "MODES", {"batch": lambda batch, params, words: results})
@@ -195,10 +195,14 @@ def test_the_reference_is_written_once_from_a_clean_checkout_and_checked_against
         conformance.check(executor, instructions, batch=batch)
 
 
-def test_a_dirty_checkout_writes_no_reference(tmp_path, monkeypatch):
-    executor, _, batch = _spec_dir(tmp_path, monkeypatch, [_flown()])
+def test_a_reference_is_written_only_from_a_clean_checkout_by_the_code_that_measured_the_spec(tmp_path, monkeypatch):
+    executor, record, batch = _spec_dir(tmp_path, monkeypatch, [_flown()])
     monkeypatch.setattr(conformance, "git_state", lambda: {"head": "h", "dirty": True})
     with pytest.raises(RuntimeError, match="clean checkout"):
+        conformance.write_reference(executor, tmp_path / "instructions", batch=batch)
+    monkeypatch.setattr(conformance, "git_state", lambda: {"head": "h", "dirty": False})
+    record["source"]["executor_source_sha256"] = "d" * 64
+    with pytest.raises(ValueError, match="measured by other executor code"):
         conformance.write_reference(executor, tmp_path / "instructions", batch=batch)
     assert not (executor / conformance.DIRECTORY).exists()
 

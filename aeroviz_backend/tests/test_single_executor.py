@@ -1,20 +1,19 @@
-"""The single-flight executor (`aeroviz_backend.autopilot_segment.single`) against the batched torch executor it mirrors
+"""The single-flight executor (`ts_transformer.autopilot.single`) against the batched torch executor it mirrors
 (`ts_transformer.autopilot`): the executor tests' own synthetic flights flown by both — the same cycles, sentence times,
 modes and limits, the same verdict for every word, the states apart by round-off only — and the pieces one at a time:
-the word lookup, the clocks, torch's semantics on floats, a dynamics failure, the pin to the mirrored code. Synthetic
-flights only — nothing here opens an artefact, a spec or the frontend's data."""
+the word lookup, the clocks, torch's semantics on floats, a dynamics failure. Synthetic flights only — nothing here opens
+an artefact, a spec or the frontend's data (the spec's reference tracks check it on real flights:
+`autopilot.conformance`)."""
 
 import dataclasses
-import importlib.util
 import math
 import random
 import unittest
-from unittest import mock
 
 import numpy as np
 import torch
 
-from aeroviz_backend.autopilot_segment import single
+from ts_transformer.autopilot import single
 from aeroviz_backend.autopilot_segment.check_single import same
 from aeroviz_backend.autopilot_segment.fly import fly_until
 from ts_transformer.autopilot import replay
@@ -300,40 +299,6 @@ class PiecesTest(unittest.TestCase):
         self.assertEqual(failed[6], stopped[6])             # the mass, whose rate is zero, as torch carries it
         moving = plant.step(inputs.initial_state[0].tolist(), (0.5, 0.0, 1.0), 1.0)
         self.assertTrue(all(math.isfinite(value) for value in moving))
-
-
-class PinTest(unittest.TestCase):
-    def test_the_pin_is_the_mirrored_code_on_disk(self):
-        """A code change in any file the module mirrors fails here: port it, then update `MIRRORED_SOURCE_SHA256`."""
-        self.assertEqual(single.mirrored_source_sha256(), single.MIRRORED_SOURCE_SHA256)
-        single.require_mirrored_source()
-
-    def test_other_mirrored_code_is_refused(self):
-        with mock.patch.object(single, "MIRRORED_SOURCE_SHA256", "0" * 64), \
-                self.assertRaisesRegex(RuntimeError, "mirrors executor and dynamics code 000000000000; this checkout's is"):
-            single.require_mirrored_source()
-
-    def test_the_pin_covers_every_module_the_port_mirrors(self):
-        from pathlib import Path
-
-        from ts_transformer.autopilot.spec import executor_source_files
-        covered = {path.resolve() for _, path in single.mirrored_source_files()}
-        self.assertLessEqual({path.resolve() for _, path in executor_source_files()}, covered)
-        for name in single.MIRRORED_MODULES:
-            self.assertIn(Path(importlib.util.find_spec(name).origin).resolve(), covered, name)
-        # the laws, the cycle and the dynamics the rollout reaches are all named, whoever imports them
-        for name in ("ts_transformer.autopilot.lateral", "ts_transformer.autopilot.executor",
-                     "aerodynamic_model.torch_transport_chart_dynamics", "aerodynamic_model.torch_dynamics"):
-            self.assertIn(name, single.MIRRORED_MODULES)
-        # each named module outside the spec's files is read into the digest
-        original = single.mirrored_source_sha256()
-        spec_files = {path.resolve() for _, path in executor_source_files()}
-        names = single.MIRRORED_MODULES
-        for index, name in enumerate(names):
-            if Path(importlib.util.find_spec(name).origin).resolve() in spec_files:
-                continue
-            with mock.patch.object(single, "MIRRORED_MODULES", names[:index] + names[index + 1:]):
-                self.assertNotEqual(single.mirrored_source_sha256(), original, name)
 
 
 if __name__ == "__main__":

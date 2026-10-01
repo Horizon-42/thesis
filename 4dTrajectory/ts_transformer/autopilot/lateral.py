@@ -192,6 +192,10 @@ class Lateral:
     """The batch's lateral state — the heading word in force measured from its own predecessors, cleared,
     captured, tracking — and law."""
 
+    #: what a cycle changes, per flight (a multi-aircraft batch holds it for a flight that has not started)
+    PER_FLIGHT = ("captured", "tracking", "cleared", "runway", "word_deg", "word_step", "heard_s", "track_unwrapped",
+                  "target_unwrapped", "last_track")
+
     def __init__(self, batch: int, params: ExecutorParams, spec: VocabularySpec, device: torch.device) -> None:
         self.params, self.spec = params, spec
         self.captured = torch.zeros(batch, dtype=torch.bool, device=device)
@@ -211,7 +215,7 @@ class Lateral:
         return GRAVITY_MPS2 * math.tan(math.radians(self.spec.turn_bank_max_deg)) / state.ground_speed_mps
 
     def capture_lead(self, state: Kinematics, off_course_deg: torch.Tensor, bank_rad: torch.Tensor,
-                     bank_rate_rad_s: float) -> torch.Tensor:
+                     bank_rate_rad_s: float | torch.Tensor) -> torch.Tensor:
         """How far from the line the capture turn must begin (§4.4), metres."""
         params = self.params
         rate = math.radians(capture_planning_rate_deg_s(self.spec))
@@ -224,14 +228,17 @@ class Lateral:
                 + speed * rate * params.heading_time_constant_s ** 2 / 2.0)
 
     def word_error(self, state: Kinematics, heading_deg: torch.Tensor, issued: torch.Tensor,
-                   go_around: torch.Tensor, time_s: float) -> torch.Tensor:
+                   go_around: torch.Tensor, time_s: float | torch.Tensor,
+                   fresh: torch.Tensor | None = None) -> torch.Tensor:
         """The heading word's error, degrees: its target unwrapped from the words before it (§4.1); a new word's
         hearing time is ``time_s``. A go-around flies the course, not the word, so the word's target is anchored
-        again at the track meanwhile: a word after it is measured from where the aircraft is."""
+        again at the track meanwhile: a word after it is measured from where the aircraft is. ``fresh`` (a
+        multi-aircraft batch): the flights at their own first cycle, anchored as the batch's first cycle anchors."""
         if self.word_deg is None:
             self.track_unwrapped = state.track_deg.clone()
             self.target_unwrapped = state.track_deg + wrap180(heading_deg - state.track_deg)
         else:
+            heard_before = self.heard_s
             self.track_unwrapped = self.track_unwrapped + wrap180(state.track_deg - self.last_track)
             new = issued != self.word_step
             self.heard_s = torch.where(new | go_around, time_s, self.heard_s)
@@ -239,12 +246,18 @@ class Lateral:
                                                 self.target_unwrapped)
             self.target_unwrapped = torch.where(go_around, self.track_unwrapped + wrap180(heading_deg - state.track_deg),
                                                 self.target_unwrapped)
+            if fresh is not None and bool(fresh.any()):
+                self.track_unwrapped = torch.where(fresh, state.track_deg, self.track_unwrapped)
+                self.target_unwrapped = torch.where(fresh, state.track_deg + wrap180(heading_deg - state.track_deg),
+                                                    self.target_unwrapped)
+                self.heard_s = torch.where(fresh, heard_before, self.heard_s)
         self.word_deg, self.word_step, self.last_track = heading_deg.clone(), issued.clone(), state.track_deg.clone()
         return self.target_unwrapped - self.track_unwrapped
 
     def rate(self, state: Kinematics, heading_deg: torch.Tensor, issued: torch.Tensor, approach: torch.Tensor,
-             runway: torch.Tensor, runways: Runways, bank_rad: torch.Tensor, bank_rate_rad_s: float,
-             time_s: float) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+             runway: torch.Tensor, runways: Runways, bank_rad: torch.Tensor, bank_rate_rad_s: float | torch.Tensor,
+             time_s: float | torch.Tensor, *, fresh: torch.Tensor | None = None
+             ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """The track rate for this cycle, and what the law did (``captured``, ``tracking`` the line, ``bent``,
         ``go_around``); ``issued`` is the step the heading word in force was written at, ``bank_rad`` the bank
         in force (the dynamics' sign), which the capture turn rolls from at ``bank_rate_rad_s``; ``time_s`` the
@@ -274,7 +287,7 @@ class Lateral:
         bend = waiting & misses & bent_reaches
         intercept = waiting & ~bent_reaches
         side = torch.where(right >= 0.0, -1.0, 1.0).to(right.dtype)
-        error = self.word_error(state, heading_deg, issued, go_around, time_s) + torch.where(
+        error = self.word_error(state, heading_deg, issued, go_around, time_s, fresh) + torch.where(
             bend, side * spec.heading_tolerance_deg, 0.0)
         error = torch.where(intercept, wrap180(course + side * spec.intercept_angle_deg - state.track_deg), error)
         # tracking: the line's own target, critically damped, steering inside the corridor's course tolerance

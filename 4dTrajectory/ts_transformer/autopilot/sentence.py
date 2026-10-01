@@ -144,39 +144,72 @@ class Sentences:
 class Spoken:
     """Sentences said a step at a time (a closed loop: the speaker says a step, the executor flies it). `say` writes
     the next step's words — the first step every column, each later one a word or `UNCHANGED` per column — and `at`
-    reads the words in force as `Sentences.at` does: the executor always hears the step just said."""
+    reads the words in force as `Sentences.at` does: the executor always hears the step just said.
 
-    def __init__(self, batch: int, words: Words, *, device: torch.device) -> None:
+    A multi-aircraft batch (``start_step``, the executor's ``start_cycle`` in steps) gives each flight its own first
+    step: before it nothing said for the flight counts, at it every column must be written, and its words are issued at
+    its own steps; `sentences` hands each flight's steps from its own first."""
+
+    def __init__(self, batch: int, words: Words, *, device: torch.device, start_step: np.ndarray | None = None) -> None:
         self.step_s, self.device = words.spec.step_s, device
         self.tables = WordTables(words, device=device)
         self.value = torch.zeros((batch, 6), dtype=torch.long, device=device)
         self.issued = torch.zeros((batch, 6), dtype=torch.long, device=device)
+        self.start = (np.zeros(batch, dtype=np.int64) if start_step is None
+                      else np.asarray(start_step, dtype=np.int64))
+        if (self.start < 0).any():
+            raise ValueError("a flight's start step is negative")
+        self.staggered = bool((self.start != 0).any())
         self.grid: list[np.ndarray] = []             # the steps said, each [B, 6] (UNCHANGED where nothing)
 
     @property
     def steps(self) -> int:
+        """Steps said, from the batch's first."""
         return len(self.grid)
 
     def say(self, row: np.ndarray) -> None:
-        """The next step's words, ``[B, 6]``; the first step must write every column."""
+        """The next step's words, ``[B, 6]``; a flight's first step must write every column, and before it what is
+        said for the flight is not its own."""
         row = np.asarray(row, dtype=np.int64)
-        written = torch.as_tensor(row != UNCHANGED, device=self.device)
-        if not self.grid and not bool(written.all()):
+        if self.staggered:
+            row = np.where((self.start <= self.steps)[:, None], row, UNCHANGED)
+            first = self.start == self.steps
+            if not (row[first] != UNCHANGED).all():
+                raise ValueError("a sentence's step 0 must write every column")
+            own = torch.as_tensor(self.steps - self.start, device=self.device)[:, None].expand_as(self.issued)
+        elif not self.grid and not (row != UNCHANGED).all():
             raise ValueError("a sentence's step 0 must write every column")
+        written = torch.as_tensor(row != UNCHANGED, device=self.device)
         words = torch.as_tensor(row, device=self.device)
         self.value = torch.where(written, words, self.value)
-        self.issued = torch.where(written, torch.full_like(self.issued, self.steps), self.issued)
+        self.issued = torch.where(written, own if self.staggered else torch.full_like(self.issued, self.steps),
+                                  self.issued)
         self.grid.append(row)
 
     def at(self, heard_s: torch.Tensor) -> WordsNow:
+        """The words in force; ``heard_s`` each flight's own sentence time (a flight that has not started: anything)."""
         rows = row_at(heard_s, self.step_s)
-        if bool((rows != self.steps - 1).any()):
-            raise ValueError(f"heard at rows {sorted(set(rows.tolist()))}, but the step just said is {self.steps - 1}")
+        if not self.staggered:
+            if bool((rows != self.steps - 1).any()):
+                raise ValueError(f"heard at rows {sorted(set(rows.tolist()))}, but the step just said is {self.steps - 1}")
+            return self.tables.now(self.value, self.issued)
+        expected = torch.as_tensor(self.steps - 1 - self.start, device=rows.device)
+        started = expected >= 0
+        if bool((rows != expected)[started].any()):
+            raise ValueError(f"heard at rows {sorted(set(rows[started].tolist()))}, but the steps just said are "
+                             f"{sorted(set(expected[started].tolist()))}")
         return self.tables.now(self.value, self.issued)
 
     def sentences(self) -> np.ndarray:
-        """``[B, steps, 6]``: every step said."""
-        return np.stack(self.grid, axis=1)
+        """``[B, steps, 6]``: every step said, each flight's from its own first (a later starter's last steps
+        `UNCHANGED`)."""
+        grid = np.stack(self.grid, axis=1)
+        if not self.staggered:
+            return grid
+        out = np.full_like(grid, UNCHANGED)
+        for flight, start in enumerate(self.start):
+            out[flight, : grid.shape[1] - start] = grid[flight, start:]
+        return out
 
 
 class TimeClock:

@@ -1,17 +1,19 @@
-"""The executor spec on disk (executor design §10, the E7 plan in §9): the parameters, with a sha, written
-once — the vocabulary's rule for its own spec.
+"""The executor spec on disk (executor design §10, §12): the parameters, with a sha, written once — the vocabulary's rule
+for its own spec.
 
-``spec.json`` carries the parameters (`ExecutorParams`), their sha, the vocabulary spec they were derived
-from, the labeller that reads the flights and the executor's source hash (`executor_source_files`: the code
-that flies a sentence and derives the values — a spec written by other code is refused at replay,
-`require_current_executor`), and the git state; ``measurements.json`` where every value comes from. Nothing
-here is ever overwritten.
+``spec.json`` carries the parameters (`ExecutorParams`), their sha, the vocabulary spec they were derived from, the
+labeller that reads the flights, the logic hash of the executor code that measured it (`executor_source_sha256`: where
+the spec came from) and the git state; ``measurements.json`` where every value comes from. Nothing here is ever
+overwritten.
 
-The source hash covers the code's LOGIC, not its wording (`logic`): each file's syntax tree with every docstring
-removed, written back as normalised source (`ast.unparse`) — comments never reach the tree, so a comment, a docstring
-or a line break is free, and any change to what the code does moves the hash (the user's rule, 2026-09-27: a spec and
-every readout flown with it describe the code that runs). The normalised text is the running Python's; another
-Python version may write it differently, and is refused like other code.
+THE EXECUTOR IS CHECKED BY WHAT IT FLIES, NOT BY ITS SOURCE (executor design §12.2–§12.3, the user 2026-10-01): beside
+the spec, ``conformance/`` holds its reference tracks — labelled flights flown by the spec's own code — and a
+``passed-<code>.json`` for every executor code that flew them again within the bounds in every way the executor flies
+(`autopilot.conformance`, runner `executor_conformance`). `require_conforming_executor` opens a spec only for executor
+code with such a record: a code change whose tracks stay within the bounds needs one check, and no spec, training or
+readout is redone. The code is named by `executor_source_sha256` — the logic of `autopilot/` and the repository modules
+it imports directly (`logic`: docstrings and comments are free) — which here only names the record ("this code was
+checked"); the normalised text is the running Python's, so another Python version is another code and is checked again.
 """
 
 from __future__ import annotations
@@ -153,12 +155,34 @@ def load_spec(directory: Path) -> tuple[ExecutorParams, dict[str, Any]]:
     return params, record
 
 
-def require_current_executor(record: dict[str, Any]) -> None:
-    """A spec written by other executor code is refused: its values belong to other laws. The refusal names the Python
-    version the spec was written under when it is not this one (`logic` is that version's written-back text)."""
-    source = record["source"]
-    if source["executor_source_sha256"] != executor_source_sha256():
-        python = ("" if source["python"] == platform.python_version()
-                  else f"; written under Python {source['python']}, this is {platform.python_version()}")
-        raise ValueError("the executor spec was written by other executor code "
-                         f"({source['executor_source_sha256'][:12]}, now {executor_source_sha256()[:12]}{python})")
+#: Beside a spec: its reference tracks and the records of the code that flew them within the bounds.
+CONFORMANCE_DIRECTORY = "conformance"
+PASSED_SCHEMA = "ts-executor-conformance-passed-v1"
+
+
+def reference_sha256(directory: Path) -> str:
+    """sha256 over a spec's reference tracks (``reference.json``, ``reference.npz``: name and bytes)."""
+    digest = hashlib.sha256()
+    for name in ("reference.json", "reference.npz"):
+        digest.update(name.encode("utf-8") + b"\0" + (directory / name).read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
+def passed_path(spec_dir: Path, code_sha256: str) -> Path:
+    return spec_dir / CONFORMANCE_DIRECTORY / f"passed-{code_sha256[:12]}.json"
+
+
+def require_conforming_executor(spec_dir: Path) -> None:
+    """Refused unless the executor code on disk has flown ``spec_dir``'s reference tracks within the bounds in every way
+    it flies: a passed record for this code against this reference (module docstring)."""
+    code = executor_source_sha256()
+    path = passed_path(spec_dir, code)
+    command = (f"python run_ts.py executor_conformance --executor {spec_dir} --instructions <the artefact it flies>"
+               f" (Python {platform.python_version()})")
+    if not path.exists():
+        raise ValueError(f"the executor code on disk ({code[:12]}) has not been checked against {spec_dir.name}'s "
+                         f"reference tracks: {command}")
+    record = json.loads(path.read_text(encoding="utf-8"))
+    if (record["schema"] != PASSED_SCHEMA or record["executor_source_sha256"] != code
+            or record["reference_sha256"] != reference_sha256(spec_dir / CONFORMANCE_DIRECTORY)):
+        raise ValueError(f"{path} is not a passed record of this code against {spec_dir.name}'s reference: {command}")

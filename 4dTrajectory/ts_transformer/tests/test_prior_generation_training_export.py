@@ -283,7 +283,7 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
     from ts_transformer.tests.test_autopilot import _params, _physics
     from ts_transformer.tests.test_instruction_training_export import SET_ID, _artefact, _run, _straight, _vectored
     from ts_transformer.tests.test_training_overlays import _prior_dir
-    from ts_transformer.tests.support import instruction_airport, landing_on
+    from ts_transformer.tests.support import instruction_airport, landing_on, passed_executor
 
     vectored, straight = _vectored("KXXX:V1_09_abc123_20260101T000000Z"), _straight("KXXX:S1_09_abc124_20260101T000100Z")
     one = _artefact(tmp_path / "artefact", [vectored, straight])
@@ -298,6 +298,7 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
     executor_spec.write_spec(tmp_path / "executor", _params(), one.sha256, {}, {
         "executor_source_sha256": executor_spec.executor_source_sha256(), "python": "3", "labeller_source_sha256": labeller_source_sha256(),
         "git": {"head": "test", "dirty": False}})
+    passed_executor(tmp_path / "executor")
 
     unflown = {straight.dataset_id}
 
