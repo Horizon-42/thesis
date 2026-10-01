@@ -1143,3 +1143,33 @@ that flies fewer flights fails. All pass → `passed-<executor_source_sha256[:12
 
     python run_ts.py executor_conformance --executor 4dTrajectory/outputs/POOLED/executor/v11_20260927 \
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/v5_20260926
+
+### R43 · `run_ts.py traffic_window_rewind` — can a loss of separation be undone by rewinding one aircraft? (multi-aircraft design §6.6 step 7.7)
+
+2026-10-01 (the user: measure before choosing the next post-training method; nothing is trained). `traffic_window_rewind
+--prior <traffic prior> --executor <spec> --instructions <artefact> --split select [--augment-seed 7919] [--offsets-s 10 30
+60 120] [--branches 8] --out <new dir>`. **The original pass**: the drawn windows spoken to once, every commanded aircraft
+together — R34's "scene" reading at `--samples 1`, from its streams (`batch_seed`), so `original.jsonl` is R34's rows.
+**Events**: each loss there that ended a commanded aircraft (a wake shortfall at a landing included), not one it started
+in; one pair ended together is one event. **Who speaks again**: the ended one (`answered`), the other of the pair when
+commanded (`partner`); ended for each other at one step, each once (`both`). **From where**: the loss's step less each
+offset, and `start` (its first predicted step: the one-aircraft credit's ceiling); an offset before the first predicted
+step, or at an own step it said nothing at, is skipped and counted. **A branch** flies the window again from its start with
+every word GIVEN (`traffic_window.Given`: `WindowSpeaker.speak(given=)` writes a given line in its round, neither sampled
+nor masked; its draw is "unchanged", so the others' draws do not depend on who is given): the speaking aircraft's to its
+step, then the prior speaks for it; every other commanded aircraft's in full, the prior speaking for one still flying past
+its words. Each offset `--branches` times, each batch from its own stream (`rewind_seed`). **The control**, one an event,
+gives every word and must replay the original pass to the last field (`REPLAYED_FIELDS`, the said words, the judge's
+episodes, ends and wake shortfalls) or the run stops. **Rescued** = the pair loses no separation from the branch's step on
+AND the speaking aircraft lands in the landing direction, not ended (M4's reward 1) AND no aircraft is ended that the
+original pass did not end; each kept beside. Per role × offset, pooled and per airport, the speaking aircraft's stratum
+(`instructions.readout.stratum`), kind and relation of the loss, window size and augmented kind: cells, the share with
+at least one branch rescued, the mean share rescued, `TALLIES`, the three conditions' shares and the words changed between
+the branch's step and the loss (rescued and not). Writes `original.jsonl`, `events.jsonl` (an event a row, its branches
+beside) and `window_rewind.json` (`ts-traffic-window-rewind-v1`, with R34's pooled summary of the original pass).
+
+    python run_ts.py traffic_window_rewind \
+        --prior 4dTrajectory/outputs/POOLED/prior/m4_passes_20260929/traffic_s1337/round_05 \
+        --executor 4dTrajectory/outputs/POOLED/executor/v11_20260927 \
+        --instructions 4dTrajectory/outputs/POOLED/instruction_language/v5_20260926 \
+        --split select --out 4dTrajectory/outputs/POOLED/traffic/window_rewind_<date>

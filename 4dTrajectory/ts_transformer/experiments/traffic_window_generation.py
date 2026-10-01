@@ -85,7 +85,7 @@ from ts_transformer.experiments.traffic_speaking import (
     HISTORY_S, MASK_COLUMNS, scene_airports, scene_landings, speaking_aircraft,
 )
 from ts_transformer.experiments.traffic_window import (
-    Commanded, Window, WindowLoop, WindowRecord, _with_landing, draw_windows, window_landings, window_of,
+    Commanded, Given, Window, WindowLoop, WindowRecord, _with_landing, draw_windows, window_landings, window_of,
 )
 from ts_transformer.experiments.traffic_window_augment import KINDS, REFUSALS, ROLES, augment_window, busiest
 from ts_transformer.inference.scene_edges import EDGE_FEATURES
@@ -233,6 +233,12 @@ def window_batches(drawn: Drawn, samples: int, budget: int, step_s: float) -> li
     """The windows in batches of the loop, by their size (`window_size`), each at most ``budget`` aircraft-steps
     (`batch_cost`; a larger window is a batch of its own)."""
     sizes = [window_size(w, [drawn.limits[j] for j in part], step_s) for w, part in zip(drawn.windows, drawn.members)]
+    return packed(sizes, samples, budget)
+
+
+def packed(sizes: Sequence[tuple[int, int, int, int]], samples: int, budget: int) -> list[list[int]]:
+    """Windows of ``sizes`` (`window_size` each; a window may be there more than once) in batches of the loop, smallest
+    first, each at most ``budget`` aircraft-steps (`batch_cost`; a larger one is a batch of its own): their indices."""
     batches: list[list[int]] = [[]]
     for w in sorted(range(len(sizes)), key=lambda w: (sizes[w][1] + sizes[w][2] + sizes[w][3], sizes[w][0], w)):
         grown = batches[-1] + [w]
@@ -307,10 +313,11 @@ class Flown:
 
 def fly_windows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, words: Words, params: Any,
                 landings: Any, samples: int, *, generator: torch.Generator, temperature: float,
-                procedure_masks: Any) -> Flown:
+                procedure_masks: Any, given: Sequence[Given | None] | None = None) -> Flown:
     """The windows at ``chunk`` spoken to ``samples`` times each (`WindowLoop`; ``source`` "alone": each aircraft
     hearing no other) and flown to their end; ``landings``: the model's landing context (None for a variant without
-    one). The caller closes the loop (`WindowLoop.close`)."""
+    one); ``given``: each loop aircraft's given words (`traffic_window.Given`, None: spoken), in the loop's order. The
+    caller closes the loop (`WindowLoop.close`)."""
     cpu = torch.device("cpu")
     instances = [w for w in chunk for _ in range(samples)]
     index = [j for w in instances for j in drawn.members[w]]
@@ -320,7 +327,7 @@ def fly_windows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, w
                               [drawn.moves[j] for j in index])
     loop = WindowLoop(model, [drawn.windows[w] for w in instances], part.signals, part.geometries, inputs, runways,
                       charts, approach, [drawn.limits[j] for j in index], words, params, landings, generator=generator,
-                      temperature=temperature, procedure_masks=procedure_masks, alone=source == "alone")
+                      temperature=temperature, procedure_masks=procedure_masks, alone=source == "alone", given=given)
     while loop.running:
         loop.step()
     return Flown(loop, loop.results(), part, index, instances)
@@ -351,9 +358,17 @@ def window_sentences(model: Prior, drawn: Drawn, chunk: Sequence[int], source: s
                      temperature: float, procedure_masks: Any) -> WindowSentences:
     """`model_rows` with what the speaker read of each aircraft and what its masks allowed (`WindowSentences`: what a
     trainer scores the words with)."""
-    step_s = words.spec.step_s
     flown = fly_windows(model, drawn, chunk, source, words, params, landings, samples, generator=generator,
                         temperature=temperature, procedure_masks=procedure_masks)
+    out = flown_sentences(flown, drawn, source, words, every_landing, samples)
+    flown.loop.close()
+    return out
+
+
+def flown_sentences(flown: Flown, drawn: Drawn, source: str, words: Words, every_landing: Mapping[str, Landings],
+                    samples: int) -> WindowSentences:
+    """`window_sentences` of windows already flown (`fly_windows`; the loop is left open)."""
+    step_s = words.spec.step_s
     loop, results, part, index, instances = flown.loop, flown.results, flown.part, flown.index, flown.instances
     records = loop.records()
     rows, read, allowed = [], [], []
@@ -380,7 +395,6 @@ def window_sentences(model: Prior, drawn: Drawn, chunk: Sequence[int], source: s
             rows.append(row)
             read.append(records[i])
             allowed.append({c: masks[i, : got.counted].copy() for c, masks in loop.speaker.allowed.items()})
-    loop.close()
     return WindowSentences(rows, read, allowed)
 
 
