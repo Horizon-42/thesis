@@ -15,8 +15,8 @@ No new files. The documents sit in `../runway_assignment/official/` (not tracked
 
 | Document | Edition | Paragraphs used |
 |---|---|---|
-| FAA Order JO 7110.65BB *Air Traffic Control* (`FAA_Order_JO_7110.65BB_Air_Traffic_Control_w_Chg1-3_2026-07-09.pdf`) | Change 3, effective 2026-07-09 | 3-8-1, 4-8-1, 4-8-9, 5-7-1 b.4; Pilot/Controller Glossary *GO AROUND*, *MISSED APPROACH* |
-| FAA *Aeronautical Information Manual* (`FAA_AIM_Aeronautical_Information_Manual_w_Chg1-3_2026-07-09.pdf`) | Change 3, effective 2026-07-09 | 5-4-21 a, d, f, g, h; 5-5-5 a.1, a.3, a.4 |
+| FAA Order JO 7110.65BB *Air Traffic Control* (`FAA_Order_JO_7110.65BB_Air_Traffic_Control_w_Chg1-3_2026-07-09.pdf`) | Change 3, effective 2026-07-09 | 3-8-1, 4-8-1, 4-8-9, 5-7-1 b.4; Pilot/Controller Glossary *BREAKOUT*, *GO AROUND*, *MISSED APPROACH* |
+| FAA *Aeronautical Information Manual* (`FAA_AIM_Aeronautical_Information_Manual_w_Chg1-3_2026-07-09.pdf`) | Change 3, effective 2026-07-09 | 5-4-6 j; 5-4-21 a, d, f, g, h; 5-5-5 a.1, a.3, a.4 |
 
 Quotes are copied from `pdftotext -layout` of those PDFs.
 
@@ -41,6 +41,12 @@ Quotes are copied from `pdftotext -layout` of those PDFs.
 **Cancelling an approach clearance.**
 - 7110.65 4-8-1 *Approach Clearance*, phraseology: "CANCEL APPROACH CLEARANCE (additional instructions as
   necessary) (When it is necessary to cancel a previously issued approach clearance)".
+- AIM 5-4-6 j: "When necessary to cancel a previously issued approach clearance, the controller will advise
+  the pilot "Cancel Approach Clearance" followed by any additional instructions when applicable." Neither
+  text limits where on the approach it is said.
+- P/CG *BREAKOUT*: "A technique to direct aircraft out of the approach stream. In the context of simultaneous
+  (independent) parallel operations, a breakout is used to direct threatened aircraft away from a deviating
+  aircraft."
 
 **After a go-around / missed approach: the published procedure is the default, radar vectors replace it.**
 - 7110.65 4-8-9 *Missed Approach*: "Except in the case of a VFR aircraft practicing an instrument
@@ -72,12 +78,15 @@ Quotes are copied from `pdftotext -layout` of those PDFs.
 
 ## Readings for the vocabulary (mine)
 
+- **Cancelling an approach and going around are different instructions.** A cancel withdraws the clearance;
+  the aircraft flies the headings and altitudes that follow, does not climb by itself, and is re-sequenced. It
+  can be said anywhere the clearance is in force, on final too. A go-around abandons the landing and climbs.
 - A go-around abandons an *approach to landing*: it is said to an aircraft on the approach. In the
   vocabulary that is "cleared" in force (the labeller says "cleared" at the row the capture turn starts).
   A visual-pattern aircraft can be told to go around without an approach clearance, but it too is on
-  final. Before that, the controller cancels the approach clearance and vectors.
-- After a go-around or a cancelled approach the aircraft does **not** have to fly to the missed-approach
-  holding fix: the published missed approach is the default, and in radar airspace vectors at or above
+  final.
+- After a cancelled approach the missed approach does not come into it at all. After a go-around the
+  aircraft does **not** have to fly to the missed-approach holding fix: the published missed approach is the default, and in radar airspace vectors at or above
   the MVA replace it, followed by another approach. The executor's go-around (climb along the runway
   course until a new approach word) matches "continue along the final approach to the MAP"; the model
   then vectors with heading and altitude words, as the step-8 design already planned.
