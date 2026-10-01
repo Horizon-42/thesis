@@ -371,18 +371,25 @@
   - 运行用的检出 `m3-window-run`（分离在 `cbfdc5f2`）现在可以删，先 unlink 数据软链接，待用户同意。
   - 读数随时能重读：在 `.claude/worktrees/m4-window` 里跑（单行）
     `python run_ts.py traffic_window_reward_readout --run /home/supercomputing/studys/thesis/4dTrajectory/outputs/POOLED/prior/m4_window_20260930/window_s1337`。
+- **用户 2026-10-01 定**：名字叫 **window**（显示 "window r5"）；读验证集，命令给用户、用户自己跑；合并由我做。配方改不改没有回答（等验证集）。
 - **接下来**（按顺序）：
-  1. **待用户定**（读数 §5）：
-     - 读不读验证集窗口（R34 `traffic_window_generation --split val`，第 5 轮与起点在同一批窗口上用同一串随机数各读一遍、逐架配对；约 3 小时 GPU；我建议读）；
-     - 发布用的名字：方法 `ts-traffic-window-reward` 不在 `prior_generation_training_export.MODEL_NAMES` 里，发布器（R36）会拒绝；我建议叫 window，
-       不能沿用 traffic，前端已有的 "traffic r5" 就是这次的起点；
-     - 配方改不改（多机设计 §8 新的一行：每架单独记功 / 按间隔余量逐步给分 / 放大选择集；我建议先读验证集，站得住就转第 8 步）。
-  2. **发布**（名字定了之后）：在 `dev-m4-window` 上把名字加进 `MODEL_NAMES` / `METHOD_MODELS` 和前端的镜像 `TRAINING_MODEL_NAMES`
-     （`aeroviz-4d/src/data/trainingOverlays.ts`，测试 `test_training_overlays` 钉住两边一致），测试 + opus 审查；再按"每个实验跑完都发布"
-     交给 opus agent 用 R36 `window_training_export` 发布第 5 轮的窗口轨迹。窗口集 `traffic_windows_select` 已在，只多一个叠加层；
-     意图写进 `docs/experiments/intents.json`。
-  3. 用户合并 `dev-m4-window`，删工作树 `m3-window-run`（先 unlink 数据软链接）。
-  4. 然后是第 8 步复飞（多机设计 §6.6 第 8 步、§8）。**第 7 条"先量"已做**（运行期间做的，只读、不用 GPU；2026-10-01，R40
+  1. **验证集读数（用户在跑）**：脚本 `outputs/POOLED/traffic/window_val_20261001.run/run.sh`（从固定在 `cbfdc5f2` 的检出 `m3-window-run` 跑，
+     所以在它跑完前不删那个工作树；`run.pid` 是脚本的进程号，`run.log`）。R34 读四次，每次约 80 分钟：真实窗口上起点 traffic r5、第 5 轮
+     window r5，再同一批窗口扩充（`--augment-seed 7919`）各一次；都是 `--split val --windows-per-airport 200 --samples 4 --workers 6`、
+     种子 1337，所以两个模型逐架配对。产物 `outputs/POOLED/traffic/window_val_{,aug_}{traffic,window}_r5_20261001/`。
+  2. **配对 runner R41 `traffic_window_pair`**（用户在跑验证集时写，新分支，测试 + opus 审查）：读同一批窗口上两个模型的 R34 产物，配对后算差。
+     - 拒绝：两份的划分、抽样（`drawn` 整块）、窗口数、样本数、温度、种子、扩充（种子与 `augmenting` 整块）、执行器、句子产物、场景、
+       批的大小有任何不同；配对的键（窗口、飞机、样本、来源）集合不同；同一键的 `starts_in_a_loss` 不同（它与模型无关）。
+     - 核对同一抽样：不经模型的来源（照标注的词、照记录）两份逐行相同。
+     - 每架对样本取平均，再算第二个减第一个，± 按窗口聚类，同 M3 窗口读数 §5；旁边给逐句配对的标准误（选轮用的那种）。
+       算奖励、失去间隔（目视 / IFR）、落地、落在观测跑道；另数改好的和新失去的（架 × 样本）。
+     - 分组：合计、机场、窗口大小（1 / 2 / 3+ 架）、扩充种类（插一架 / 挪起点 / 压紧流量）和角色。只读模型的两种来源（场景里、单独）。
+     - 用它把验证集读数写进 `readouts/2026-10-01_m4_window.zh.md` 新的一节。
+  3. 合并 `dev-m4-window` 进 dev-two-tier（我做，用户 2026-10-01），之后删 `m4-window` 工作树和分支；`m3-window-run` 等验证集读完再删（都先 unlink 数据软链接）。
+  4. **发布**：名字已加上（`dev-m4-window` `d26b4bd0`：`MODEL_NAMES` / `METHOD_MODELS`、前端镜像 `TRAINING_MODEL_NAMES`、颜色深绿 `#009437`，
+     测试过，opus 审查无正确性问题，`5c6b8fb4`），合并后交给 opus agent 用 R36 `window_training_export` 发布 window r5 的窗口轨迹（窗口集 `traffic_windows_select`
+     已在，只多一个叠加层；R36 不经实验发布器，不需要 `intents.json` 的条目，报告时说明这次实验的意图）。
+  5. 然后是第 8 步复飞（多机设计 §6.6 第 8 步、§8）。**第 7 条"先量"已做**（运行期间做的，只读、不用 GPU；2026-10-01，R40
      `go_around_census`，分支 `dev-go-around` `c5c7742f`，opus 审查两轮，待合并；产物 `outputs/POOLED/traffic/go_arounds_20261001/`，
      [读数](readouts/2026-10-01_go_arounds.zh.md)）：训练日 45,075 架落地里 109 次复飞；复飞到落地 p50 623 s、p95 910 s（长尾偏短，飞出 30 km
      的看不到）；现行时限的余量 p95 只有 321 s，说了复飞几乎一定超时；73 句标注了的句子里含真实复飞、按引导标注；harvest 有 15 架把低空复飞
