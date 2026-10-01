@@ -156,12 +156,21 @@ def flown_originals(flown: Any, sentences: Any, chunk: Sequence[int]) -> list[Or
     return out
 
 
-def spoken_steps(original: Original, i: int) -> int:
+def own_step_at(original: Original, i: int, t_s: float, step_s: float) -> int:
+    """Aircraft ``i``'s own step at which the judge reads time ``t_s``: the step whose time reaches it — on the grid that
+    step itself; a wake shortfall's landing time, off the grid, is read at the step after it (`WindowLoop.step`:
+    the landings of ``(t − step, t]``)."""
+    return math.ceil((t_s - original.first_s[i]) / step_s)
+
+
+def spoken_steps(original: Original, i: int, step_s: float) -> int:
     """The own steps aircraft ``i`` spoke at in the original pass: to the step the judge ended it at, that one included
     (an aircraft speaks before the judge reads the step), else every line of its words (`Commanded.said` runs on, silent,
     past a judge's end to the aircraft's own)."""
-    row = original.rows[i]
-    return len(original.said[i]) if row["end"] is None else min(len(original.said[i]), row["counted"] + 1)
+    end = original.rows[i]["end"]
+    if end is None:
+        return len(original.said[i])
+    return min(len(original.said[i]), own_step_at(original, i, end["t_s"], step_s) + 1)
 
 
 def loss_start_s(original: Original, pair: tuple[str, str], end: dict[str, Any]) -> float:
@@ -211,12 +220,12 @@ def branches_of(event: Event, original: Original, offsets_s: Sequence[float], br
         i = original.keys.index(key)
         for offset in (*offsets_s, None):
             name = START if offset is None else f"{offset:g}"
-            step = 0 if offset is None else int(round((event.t_s - offset - original.first_s[i]) / step_s))
+            step = 0 if offset is None else own_step_at(original, i, event.t_s, step_s) - int(round(offset / step_s))
             if step < 0:
                 skipped[(role, name, BEFORE_FIRST_STEP)] += 1
             elif original.first_s[i] + step * step_s >= event.t_s:
                 skipped[(role, name, AT_THE_LOSS)] += 1
-            elif step >= spoken_steps(original, i):
+            elif step >= spoken_steps(original, i, step_s):
                 skipped[(role, name, SILENT_THEN)] += 1
             else:
                 out += [Branch(event.number, key, role, name, step, copy) for copy in range(branches)]
@@ -224,10 +233,10 @@ def branches_of(event: Event, original: Original, offsets_s: Sequence[float], br
     return out, skipped
 
 
-def given_of(branch: Branch, original: Original) -> list[Given]:
+def given_of(branch: Branch, original: Original, step_s: float) -> list[Given]:
     """Every commanded aircraft's words in a branch, in the window's order (module docstring): the speaking one's to its
     step, every other one's as far as it spoke (`spoken_steps`) — the control's every one's so."""
-    return [Given(said, branch.step if key == branch.speaker else spoken_steps(original, i))
+    return [Given(said, branch.step if key == branch.speaker else spoken_steps(original, i, step_s))
             for i, (key, said) in enumerate(zip(original.keys, original.said))]
 
 
@@ -262,7 +271,7 @@ def branch_result(branch: Branch, event: Event, original: Original, keys: Sequen
     landed = rows[i]["reward"] == 1.0
     new = sorted(key for key, end in run.ended.items()
                  if key not in original.ended or original.ended[key]["with"] != end["with"])
-    loss_step = int(round((event.t_s - original.first_s[i]) / step_s))
+    loss_step = own_step_at(original, i, event.t_s, step_s)
     return {"speaker": branch.speaker, "role": branch.role, "offset": branch.offset, "step": branch.step,
             "copy": branch.copy, "pair_cleared": cleared, "landed": landed, "new_losses": new,
             "rescued": cleared and landed and not new, "outcome": rows[i]["outcome"],
@@ -277,7 +286,7 @@ def float_difference(a: Any, b: Any) -> float:
             return math.inf
         if math.isnan(a) or math.isnan(b):
             return 0.0 if math.isnan(a) and math.isnan(b) else math.inf
-        return abs(a - b)
+        return 0.0 if a == b else abs(a - b)
     if isinstance(a, dict):
         if not isinstance(b, dict) or a.keys() != b.keys():
             return math.inf
@@ -491,7 +500,7 @@ def main(argv: list[str] | None = None) -> int:
     def read_branches(number: int) -> list[tuple[int, dict[str, Any] | float]]:
         chunk = branch_batches[number]
         windows = [events[branches[b].event].window for b in chunk]
-        given = [g for b in chunk for g in given_of(branches[b], originals[events[branches[b].event].window])]
+        given = [g for b in chunk for g in given_of(branches[b], originals[events[branches[b].event].window], step_s)]
         generator = torch.Generator(device=device).manual_seed(rewind_seed(args.seed, number))
         flown = fly_windows(model.to(device), drawn, windows, "scene", words, params, landings, 1,
                             generator=generator, given=given, **common)

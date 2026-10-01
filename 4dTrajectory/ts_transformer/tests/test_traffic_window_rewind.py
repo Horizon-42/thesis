@@ -67,7 +67,7 @@ def _fly_branches(branches, events, originals, drawn, words, params, every, mode
     from ts_transformer.experiments import traffic_window_rewind as rewind
 
     windows = [events[b.event].window for b in branches]
-    given = [g for b in branches for g in rewind.given_of(b, originals[events[b.event].window])]
+    given = [g for b in branches for g in rewind.given_of(b, originals[events[b.event].window], STEP_S)]
     flown = runner.fly_windows(model, drawn, windows, "scene", words, params, None, 1,
                                generator=torch.Generator().manual_seed(seed), temperature=1.0, procedure_masks=masks,
                                given=given)
@@ -196,7 +196,7 @@ def test_branches_start_at_their_offsets_and_skip_what_cannot_speak_again():
                                          "b": {"t_s": 24.0, "with": "r", **loss}},
                   first_s=[0.0, 20.0], episodes=[_episode("a", "b", 40.0, 40.0), _episode("b", "r", 24.0, 24.0)])
     (event,) = [e for e in rewind.events_of(o, 0) if e.pair == ("a", "b")]
-    assert rewind.spoken_steps(o, 1) == 3 and rewind.spoken_steps(o, 0) == 21
+    assert rewind.spoken_steps(o, 1, 2.0) == 3 and rewind.spoken_steps(o, 0, 2.0) == 21
     branches, skipped = rewind.branches_of(event, o, (10.0, 30.0, 60.0), 2, 2.0)
     steps = {(b.speaker, b.offset): b.step for b in branches if b.speaker}
     assert steps == {("a", "10"): 15, ("a", "30"): 5, ("a", "start"): 0, ("b", "start"): 0}
@@ -206,13 +206,28 @@ def test_branches_start_at_their_offsets_and_skip_what_cannot_speak_again():
                                ("partner", "30", rewind.BEFORE_FIRST_STEP): 1,
                                ("partner", "60", rewind.BEFORE_FIRST_STEP): 1})
     # the speaking aircraft given to its step, the other as far as it spoke
-    assert [g.until for g in rewind.given_of(branches[0], o)] == [15, 3]
+    assert [g.until for g in rewind.given_of(branches[0], o, 2.0)] == [15, 3]
     # an aircraft whose first state is the loss's step cannot avoid it from its start
     o = _original(["a", "c"], [30, 30], {"a": {"t_s": 40.0, "with": "c", **loss}}, first_s=[0.0, 40.0],
                   episodes=[_episode("a", "c", 40.0, 40.0)])
     (event,) = rewind.events_of(o, 0)
     _, skipped = rewind.branches_of(event, o, (), 2, 2.0)
     assert skipped == Counter({("partner", "start", rewind.AT_THE_LOSS): 1})
+
+
+def test_a_wake_shortfall_off_the_grid_is_read_at_the_step_after_it():
+    """A follower ended at a landing 1.5 s after its step 19 (t 38 s) was judged — and had spoken — at step 20: it
+    spoke 21 lines, and the loss's step is 20; offsets count from there."""
+    from ts_transformer.experiments import traffic_window_rewind as rewind
+
+    end = {"t_s": 38.5, "with": "r", "kind": "at_threshold", "relation": "same"}
+    o = _original(["a"], [30], {"a": end})
+    assert rewind.own_step_at(o, 0, 38.5, 2.0) == 20 and rewind.own_step_at(o, 0, 40.0, 2.0) == 20
+    assert rewind.spoken_steps(o, 0, 2.0) == 21
+    (event,) = rewind.events_of(o, 0)
+    assert event.t_s == 38.5
+    branches, skipped = rewind.branches_of(event, o, (2.0, 10.0), 1, 2.0)
+    assert {b.offset: b.step for b in branches if b.speaker} == {"2": 19, "10": 15, "start": 0} and not skipped
 
 
 def test_a_branch_is_rescued_only_with_no_new_loss_an_aircraft_ended_with_another_one_counting():
@@ -245,6 +260,7 @@ def test_floats_alike_to_round_off_and_anything_else_differing():
     assert float_difference([1.0], [1.0, 2.0]) == float("inf")
     assert float_difference("landed", "timeout") == float("inf") and float_difference(None, 1.0) == float("inf")
     assert float_difference(True, 1.0) == float("inf")
+    assert float_difference(float("inf"), float("inf")) == 0.0
 
 
 def test_a_pair_lost_again_from_a_step_on_counts_a_wake_shortfall_at_a_landing():
