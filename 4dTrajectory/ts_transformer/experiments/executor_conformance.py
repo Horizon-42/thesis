@@ -14,9 +14,15 @@ compares each flight with its reference up to the cycle it was done at:
   apart than `ROUNDOFF`;
 - every limit and mode each cycle, the done cycle, the outcome, the end row and every word's verdict the same.
 
-A check that passes writes ``passed-<code>.json`` beside the reference: which code it was (`spec.executor_source_sha256`
-— here only the record's name, "this code was checked"), each way's largest differences, when and from which commit.
-One that fails names every flight and what differs.
+Before flying, the check compares each flight's INPUTS with the reference's digests (`input_digests`: the state it
+starts from, its airframe, frame, thrust and approach speed, its time limit, its words and runway, the runways' geometry
+and vertical paths, the observed rows its word clock reads): inputs that moved are refused by name — the data under
+the reference changed, which says nothing about the executor.
+
+A check that passes writes ``passed-<code>.json`` beside the reference, only from a clean checkout: which code it was
+(`spec.executor_source_sha256` — here only the record's name, "this code was checked") and which checker
+(`checker_sha256`, this module's logic), each way's largest differences, when and from which commit. One that fails
+names every flight and what differs.
 
     python run_ts.py executor_conformance --executor 4dTrajectory/outputs/POOLED/executor/<spec> \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> [--write-reference]
@@ -29,6 +35,7 @@ import dataclasses
 import hashlib
 import json
 import math
+import os
 import platform
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -39,10 +46,10 @@ import torch
 from geokit import METRES_PER_DEG_LAT
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.executor import LIMITS, MODES as EXECUTOR_MODES, Flown
-from ts_transformer.autopilot.frame import ALT, LAT, LON
+from ts_transformer.autopilot.frame import ALT, LAT, LON, PSI
 from ts_transformer.autopilot.judge import Verdict
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.autopilot.spec import executor_source_sha256
+from ts_transformer.autopilot.spec import executor_source_sha256, logic
 from ts_transformer.instructions.words import Words
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
@@ -149,6 +156,10 @@ def save_results(path: Path, results: Sequence[FlightResult]) -> None:
 def load_results(path: Path, verdicts: Sequence[dict[str, Any]]) -> list[FlightResult]:
     with np.load(path) as data:
         arrays = {key: data[key] for key in data.files}
+    keys = {"done", "states", "commands", "wanted", "sentence_s", *(f"limit_{n}" for n in LIMITS),
+            *(f"mode_{n}" for n in EXECUTOR_MODES)}
+    if set(arrays) != keys or any(len(v) != len(verdicts) for v in arrays.values()):
+        raise ValueError(f"{path} does not hold one row of every limit and mode for each of its {len(verdicts)} flights")
     out = []
     for j, verdict in enumerate(verdicts):
         done = int(arrays["done"][j])
@@ -171,11 +182,22 @@ def reference_sha256(directory: Path) -> str:
 
 # ---- comparing a flight with its reference
 
+def checker_sha256() -> str:
+    """This module's logic (`spec.logic`): the checker a reference and a passed record were made by."""
+    return hashlib.sha256(logic(Path(__file__).read_text(encoding="utf-8")).encode("utf-8")).hexdigest()
+
+
+def bounds() -> dict[str, float]:
+    return {"state_m": STATE_BOUND_M, "roundoff": ROUNDOFF}
+
+
 @dataclasses.dataclass
 class Difference:
     """How far one way of flying lies from the reference over its flights: the largest differences, and every flight
-    that differs beyond the bounds (`mismatches`: flight → what)."""
+    that differs beyond the bounds (`mismatches`: flight → what). It passes only over every flight of the reference
+    (``expected``)."""
 
+    expected: int
     flights: int = 0
     horizontal_m: float = 0.0
     vertical_m: float = 0.0
@@ -184,19 +206,24 @@ class Difference:
 
     @property
     def passed(self) -> bool:
-        return not self.mismatches
+        return not self.mismatches and self.flights == self.expected
 
     def summary(self) -> dict[str, Any]:
-        return {"flights": self.flights, "horizontal_m": self.horizontal_m, "vertical_m": self.vertical_m,
-                "other": self.other, "mismatched_flights": len(self.mismatches)}
+        return {"expected": self.expected, "flights": self.flights, "horizontal_m": self.horizontal_m,
+                "vertical_m": self.vertical_m, "other": self.other, "mismatched_flights": len(self.mismatches)}
 
 
-def _max_abs(a: np.ndarray, b: np.ndarray) -> tuple[float, bool]:
-    """The largest |a − b| over the entries finite in both, and whether a NaN stands where the other has a number."""
-    finite_a, finite_b = np.isfinite(a), np.isfinite(b)
-    both = finite_a & finite_b
-    gap = float(np.abs(a[both] - b[both]).max()) if both.any() else 0.0
-    return gap, bool((finite_a != finite_b).any())
+def _max_abs(a: np.ndarray, b: np.ndarray, *, angle: bool = False) -> tuple[float, bool]:
+    """The largest |a − b| over the entries finite in both (an angle's difference wrapped to ±π), and whether the two
+    differ where either is not finite (a NaN against a number, an infinity against anything but itself)."""
+    nan_a, nan_b = np.isnan(a), np.isnan(b)
+    infinite = np.isinf(a) | np.isinf(b)
+    apart = bool((nan_a != nan_b).any() or (infinite & ~(nan_a | nan_b) & (a != b)).any())
+    both = np.isfinite(a) & np.isfinite(b)
+    gap = a[both] - b[both]
+    if angle:
+        gap = np.remainder(gap + math.pi, 2.0 * math.pi) - math.pi
+    return (float(np.abs(gap).max()) if gap.size else 0.0), apart
 
 
 def _verdict_differences(a: Any, b: Any, where: str, out: list[str]) -> None:
@@ -212,8 +239,8 @@ def _verdict_differences(a: Any, b: Any, where: str, out: list[str]) -> None:
             out.append(f"verdict {where}: {len(a)} entries, {len(b)}")
         for i, (x, y) in enumerate(zip(a, b)):
             _verdict_differences(x, y, f"{where}[{i}]", out)
-    elif isinstance(a, float) and isinstance(b, float) and not (isinstance(a, bool) or isinstance(b, bool)):
-        if not ((math.isnan(a) and math.isnan(b)) or abs(a - b) <= ROUNDOFF):
+    elif isinstance(a, float) and isinstance(b, float):
+        if not (a == b or (math.isnan(a) and math.isnan(b)) or abs(a - b) <= ROUNDOFF):
             out.append(f"verdict {where}: {a!r}, {b!r}")
     elif a != b or type(a) is not type(b):
         out.append(f"verdict {where}: {a!r}, {b!r}")
@@ -222,21 +249,29 @@ def _verdict_differences(a: Any, b: Any, where: str, out: list[str]) -> None:
 def compare(reference: FlightResult, flown: FlightResult, difference: Difference, name: str) -> None:
     """Add flight ``name``'s comparison to ``difference``."""
     problems: list[str] = []
+    for result in (reference, flown):
+        rows = {"states": len(result.states), **{f: len(getattr(result, f)) for f in ("commands", "wanted", "sentence_s")},
+                **{f"limit {k}": len(v) for k, v in result.limits.items()},
+                **{f"mode {k}": len(v) for k, v in result.modes.items()}}
+        wrong = {k: n for k, n in rows.items() if n != result.done + (2 if k == "states" else 1)}
+        if wrong or set(result.limits) != set(LIMITS) or set(result.modes) != set(EXECUTOR_MODES):
+            raise ValueError(f"{name}: a flight result not cut at its done cycle {result.done}, or without every limit "
+                             f"and mode ({wrong})")
     if flown.done != reference.done:
         problems.append(f"done at cycle {flown.done}, the reference at {reference.done}")
     cycles = min(flown.done, reference.done) + 1
     a, b = reference.states[:cycles + 1], flown.states[:cycles + 1]
-    nan_h = bool((np.isfinite(a[:, [LAT, LON]]) != np.isfinite(b[:, [LAT, LON]])).any())
-    horizontal = np.hypot((a[:, LAT] - b[:, LAT]) * METRES_PER_DEG_LAT,
-                          (a[:, LON] - b[:, LON]) * METRES_PER_DEG_LAT * np.cos(np.radians(a[:, LAT])))
-    horizontal_m = float(np.nanmax(horizontal)) if np.isfinite(horizontal).any() else 0.0
-    vertical_m, nan_v = _max_abs(a[:, ALT], b[:, ALT])
-    others = [_max_abs(np.delete(a, [LAT, LON, ALT], axis=1), np.delete(b, [LAT, LON, ALT], axis=1))]
+    lat_m, apart_lat = _max_abs(a[:, LAT] * METRES_PER_DEG_LAT, b[:, LAT] * METRES_PER_DEG_LAT)
+    scale = METRES_PER_DEG_LAT * np.cos(np.radians(np.where(np.isfinite(a[:, LAT]), a[:, LAT], 0.0)))
+    lon_m, apart_lon = _max_abs(a[:, LON] * scale, b[:, LON] * scale)
+    horizontal_m = math.hypot(lat_m, lon_m)
+    vertical_m, apart_alt = _max_abs(a[:, ALT], b[:, ALT])
+    others = [_max_abs(a[:, c], b[:, c], angle=c == PSI) for c in range(a.shape[1]) if c not in (LAT, LON, ALT)]
     for field in ("commands", "wanted", "sentence_s"):
         others.append(_max_abs(getattr(reference, field)[:cycles], getattr(flown, field)[:cycles]))
     other = max(gap for gap, _ in others)
-    if nan_h or nan_v or any(nan for _, nan in others):
-        problems.append("a NaN where the reference has a number, or the other way round")
+    if apart_lat or apart_lon or apart_alt or any(apart for _, apart in others):
+        problems.append("a NaN or an infinity where the reference has another value")
     if horizontal_m > STATE_BOUND_M or vertical_m > STATE_BOUND_M:
         problems.append(f"states {horizontal_m:.3g} m apart horizontally, {vertical_m:.3g} m vertically")
     if other > ROUNDOFF:
@@ -253,6 +288,31 @@ def compare(reference: FlightResult, flown: FlightResult, difference: Difference
     difference.other = max(difference.other, other)
     if problems:
         difference.mismatches[name] = problems
+
+
+# ---- what each flight is flown from
+
+def input_digests(batch: replay.Batch, params: ExecutorParams, words: Words) -> list[str]:
+    """Each flight's inputs as one sha256 (module docstring): what `replay.fly_sentences` flies it from and its word
+    clock reads, and what the judge reads it against."""
+    spec = words.spec
+    inputs = batch.inputs(DEVICE)
+    out = []
+    for j, reading in enumerate(batch.readings):
+        rows = len(reading.words)
+        geometry = batch.geometries[j]
+        parts = [inputs.initial_state[j], inputs.aero_params[j], inputs.frame_params[j], inputs.max_thrust_n[j],
+                 np.array([batch.approach_ias_mps[j], rows * spec.step_s * params.timeout_factor, reading.runway_index]),
+                 np.asarray(reading.words), batch.signals[j].e_m[:rows], batch.signals[j].n_m[:rows],
+                 np.array([[c.threshold_e_m, c.threshold_n_m, c.course_deg, c.elevation_m] for c in geometry.candidates]),
+                 np.array([[float(getattr(path, f.name)) for f in dataclasses.fields(path)]
+                           for path in batch.vertical_paths[j]], dtype=np.float64)]
+        digest = hashlib.sha256()
+        for part in parts:
+            array = np.ascontiguousarray(part.cpu().numpy() if isinstance(part, torch.Tensor) else part)
+            digest.update(str(array.dtype).encode() + str(array.shape).encode() + array.tobytes())
+        out.append(digest.hexdigest())
+    return out
 
 
 # ---- the reference and the check
@@ -278,19 +338,23 @@ def write_reference(executor_dir: Path, instructions: Path, *, batch: replay.Bat
     git = git_state()
     if git["dirty"]:
         raise RuntimeError("the reference is written from a clean checkout only (it records the commit)")
+    directory = executor_dir / DIRECTORY
+    if directory.exists():
+        raise FileExistsError(f"{directory} exists: a spec's reference is written once")
     draw = {"split": SPLIT, "per_airport": PER_AIRPORT, "seed": SEED, "groups": list(GROUPS)}
     batch = draw_reference_batch(instructions, words, draw) if batch is None else batch
     results = MODES["batch"](batch, params, words)
-    directory = executor_dir / DIRECTORY
-    directory.mkdir()
-    save_results(directory / "reference.npz", results)
     payload = {"schema": REFERENCE_SCHEMA, "written_utc": utc_now(), "git": git, "python": platform.python_version(),
                **spec_identity(executor_dir, record, instructions), "draw": draw, "drawn": batch.drawn,
                "flown_by": {"executor_source_sha256": executor_source_sha256(), "mode": "batch"},
-               "bounds": {"state_m": STATE_BOUND_M, "roundoff": ROUNDOFF},
-               "flights": keys_of(batch), "verdicts": [r.verdict for r in results]}
-    with (directory / "reference.json").open("x", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, allow_nan=True)
+               "checker_sha256": checker_sha256(), "bounds": bounds(), "flights": keys_of(batch),
+               "inputs": input_digests(batch, params, words), "verdicts": [r.verdict for r in results]}
+    text = json.dumps(payload, indent=2, allow_nan=True)
+    staging = executor_dir / f".{DIRECTORY}.writing-{os.getpid()}"
+    staging.mkdir()
+    save_results(staging / "reference.npz", results)
+    (staging / "reference.json").write_text(text, encoding="utf-8")
+    staging.rename(directory)
     return directory
 
 
@@ -305,15 +369,25 @@ def check(executor_dir: Path, instructions: Path, *, modes: Sequence[str] = tupl
     identity = spec_identity(executor_dir, record, instructions)
     if {k: payload[k] for k in identity} != identity:
         raise ValueError(f"the reference was flown for {({k: payload[k] for k in identity})}, not {identity}")
+    if payload["bounds"] != bounds():
+        raise ValueError(f"the reference was made under the bounds {payload['bounds']}, this checker's are {bounds()}")
     batch = draw_reference_batch(instructions, words, payload["draw"]) if batch is None else batch
     if keys_of(batch) != payload["flights"]:
         raise ValueError("the reference's draw no longer gives its flights (the data under it moved)")
+    moved = [name for name, ours, theirs in zip(payload["flights"], input_digests(batch, params, words),
+                                                payload["inputs"], strict=True) if ours != theirs]
+    if moved:
+        raise ValueError(f"the inputs of {len(moved)} reference flights moved (the data under the reference changed, not "
+                         f"the executor): {moved[:5]}")
     reference = load_results(directory / "reference.npz", payload["verdicts"])
     out = {}
     for mode in modes:
-        difference = Difference()
-        for name, ref, flown in zip(payload["flights"], reference, MODES[mode](batch, params, words)):
-            compare(ref, flown, difference, name)
+        difference = Difference(expected=len(payload["flights"]))
+        flown = MODES[mode](batch, params, words)
+        if len(flown) != len(reference):
+            raise ValueError(f"{mode} flew {len(flown)} of the reference's {len(reference)} flights")
+        for name, ref, result in zip(payload["flights"], reference, flown, strict=True):
+            compare(ref, result, difference, name)
         out[mode] = difference
     return out
 
@@ -326,12 +400,15 @@ def write_passed(executor_dir: Path, differences: Mapping[str, Difference]) -> P
     """The record that the code on disk flies the reference within the bounds in every way (refused otherwise)."""
     if set(differences) != set(MODES) or not all(d.passed for d in differences.values()):
         raise ValueError("a passed record needs every way of flying checked and within the bounds")
+    git = git_state()
+    if git["dirty"]:
+        raise RuntimeError("a passed record is written from a clean checkout only (it names the code it checked)")
     code = executor_source_sha256()
     path = passed_path(executor_dir, code)
-    write_json_atomic(path, {"schema": PASSED_SCHEMA, "written_utc": utc_now(), "git": git_state(),
+    write_json_atomic(path, {"schema": PASSED_SCHEMA, "written_utc": utc_now(), "git": git,
                              "python": platform.python_version(), "executor_source_sha256": code,
-                             "reference_sha256": reference_sha256(executor_dir / DIRECTORY),
-                             "bounds": {"state_m": STATE_BOUND_M, "roundoff": ROUNDOFF},
+                             "checker_sha256": checker_sha256(),
+                             "reference_sha256": reference_sha256(executor_dir / DIRECTORY), "bounds": bounds(),
                              "modes": {mode: d.summary() for mode, d in differences.items()}})
     return path
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -13,7 +14,7 @@ import numpy as np
 import pytest
 
 from geokit import METRES_PER_DEG_LAT
-from ts_transformer.autopilot.frame import ALT, LAT
+from ts_transformer.autopilot.frame import ALT, LAT, LON, PSI
 from ts_transformer.experiments import executor_conformance as conformance
 from ts_transformer.tests.support import fly_legs, instruction_flight
 from ts_transformer.tests.test_autopilot import DOWNWIND_BASE_FINAL, _fly_sentence, _params
@@ -26,7 +27,7 @@ def _flown(params=None):
 
 
 def _compare(reference, flown):
-    difference = conformance.Difference()
+    difference = conformance.Difference(expected=1)
     conformance.compare(reference, flown, difference, "KXXX:f1")
     return difference
 
@@ -79,7 +80,10 @@ def test_every_discrete_difference_is_named():
     modes["captured"][k] = ~modes["captured"][k]
     assert _compare(reference, _with(reference, modes=modes)).mismatches["KXXX:f1"] == [
         f"mode captured differs at cycle {k} (1 cycles)"]
-    shorter = _with(reference, done=reference.done - 1, states=reference.states[:-1])
+    shorter = _with(reference, done=reference.done - 1, states=reference.states[:-1],
+                    **{f: getattr(reference, f)[:-1] for f in ("commands", "wanted", "sentence_s")},
+                    limits={k: v[:-1] for k, v in reference.limits.items()},
+                    modes={k: v[:-1] for k, v in reference.modes.items()})
     assert any("done at cycle" in p for p in _compare(reference, shorter).mismatches["KXXX:f1"])
     verdict = json.loads(json.dumps(reference.verdict))
     verdict["end_row"] += 1
@@ -99,13 +103,37 @@ def test_a_verdict_s_floats_carry_the_roundoff_and_its_other_entries_none():
                      "verdict .w[0]: True, False", f"verdict .x: 1.0, {1.0 + 2 * conformance.ROUNDOFF!r}"]
 
 
-def test_a_nan_counts_where_both_have_one_and_fails_where_one_has_a_number():
+def test_a_nan_counts_where_both_have_one_and_fails_where_one_has_another_value():
     reference = _flown()
     states = reference.states.copy()
     states[-1, :] = np.nan
     both = _with(reference, states=states)
     assert _compare(both, both).passed
     assert any("NaN" in p for p in _compare(reference, both).mismatches["KXXX:f1"])
+    infinite = states.copy()
+    infinite[-1, ALT] = np.inf
+    assert not _compare(both, _with(reference, states=infinite)).passed          # NaN against inf
+    nan_lon = reference.states.copy()
+    nan_lon[-1, LON] = np.nan
+    moved = nan_lon.copy()
+    moved[-1, LAT] += 1.0                                                      # a latitude apart beside a NaN longitude
+    assert not _compare(_with(reference, states=nan_lon), _with(reference, states=moved)).passed
+
+
+def test_a_heading_is_compared_round_the_circle():
+    reference = _flown()
+    states = reference.states.copy()
+    states[1, PSI] = math.pi - 1e-12
+    across = states.copy()
+    across[1, PSI] = -math.pi + 1e-12
+    assert _compare(_with(reference, states=states), _with(reference, states=across)).passed
+
+
+def test_a_way_of_flying_that_drops_flights_or_cuts_them_short_does_not_pass():
+    reference = _flown()
+    assert not conformance.Difference(expected=2, flights=1).passed
+    with pytest.raises(ValueError, match="not cut at its done cycle"):
+        _compare(reference, _with(reference, states=reference.states[:-1]))
 
 
 def test_a_changed_law_is_found():
@@ -121,6 +149,8 @@ def _spec_dir(tmp_path, monkeypatch, results, *, keys=("KXXX:f1",)):
     monkeypatch.setattr(conformance, "git_state", lambda: {"head": "h", "dirty": False})
     monkeypatch.setattr(conformance, "executor_source_sha256", lambda: "c" * 64)
     monkeypatch.setattr(conformance, "MODES", {"batch": lambda batch, params, words: results})
+    monkeypatch.setattr(conformance, "input_digests", lambda batch, params, words: [f"in-{s.dataset_id}"
+                                                                                     for s in batch.signals])
     batch = SimpleNamespace(signals=[SimpleNamespace(dataset_id=k) for k in keys], drawn={"split": "train"})
     executor = tmp_path / "executor"
     executor.mkdir()
@@ -148,8 +178,20 @@ def test_the_reference_is_written_once_from_a_clean_checkout_and_checked_against
     other = SimpleNamespace(signals=[SimpleNamespace(dataset_id="KXXX:f2")], drawn={})
     with pytest.raises(ValueError, match="no longer gives its flights"):
         conformance.check(executor, instructions, batch=other)
+    monkeypatch.setattr(conformance, "input_digests", lambda batch, params, words: ["moved"])
+    with pytest.raises(ValueError, match="the inputs of 1 reference flights moved"):
+        conformance.check(executor, instructions, batch=batch)
+    monkeypatch.setattr(conformance, "STATE_BOUND_M", 1e-3)
+    with pytest.raises(ValueError, match="made under the bounds"):
+        conformance.check(executor, instructions, batch=batch)
     record["sha256"] = "t" * 64
     with pytest.raises(ValueError, match="the reference was flown for"):
+        conformance.check(executor, instructions, batch=batch)
+    monkeypatch.setattr(conformance, "MODES", {"batch": lambda batch, params, words: []})
+    record["sha256"] = "s" * 64
+    monkeypatch.setattr(conformance, "STATE_BOUND_M", 1e-6)
+    monkeypatch.setattr(conformance, "input_digests", lambda batch, params, words: ["in-KXXX:f1"])
+    with pytest.raises(ValueError, match="flew 0 of the reference's 1 flights"):
         conformance.check(executor, instructions, batch=batch)
 
 
@@ -164,14 +206,17 @@ def test_a_dirty_checkout_writes_no_reference(tmp_path, monkeypatch):
 def test_a_passed_record_needs_every_way_of_flying_within_the_bounds(tmp_path, monkeypatch):
     executor, _, _ = _spec_dir(tmp_path, monkeypatch, [])
     (executor / conformance.DIRECTORY).mkdir()
-    failing = conformance.Difference(flights=1, mismatches={"KXXX:f1": ["done at cycle 3, the reference at 4"]})
+    failing = conformance.Difference(expected=1, flights=1,
+                                     mismatches={"KXXX:f1": ["done at cycle 3, the reference at 4"]})
     with pytest.raises(ValueError, match="every way of flying"):
         conformance.write_passed(executor, {"batch": failing})
     with pytest.raises(ValueError, match="every way of flying"):
         conformance.write_passed(executor, {})
+    monkeypatch.setattr(conformance, "git_state", lambda: {"head": "h", "dirty": True})
+    with pytest.raises(RuntimeError, match="clean checkout"):
+        conformance.write_passed(executor, {"batch": conformance.Difference(expected=1, flights=1)})
 
 
 def test_the_verdict_json_is_the_verdict_s_fields():
     reference = _flown()
     assert set(reference.verdict) == {f.name for f in dataclasses.fields(conformance.Verdict)}
-    assert json.loads(json.dumps(reference.verdict)) == reference.verdict
