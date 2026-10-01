@@ -136,6 +136,7 @@ added three entries (the rows after the performance index's).
 | The read-back altitude chart's coloured labels are grey (09-30) | open | new; see the entry | no: the Training view |
 | A low go-around is stored as the landing: the best-aligned crossing, not the last (10-01) | open | new; see the entry | **yes**: flight identity, arrival slices and every sentence of the 15 flights; a harvest reclassification moves every downstream artefact |
 | Stored tracks carry other aircraft's samples; no read-time position repair (10-01) | open | new; see the entry | **yes**: the arrival slices every model reads (if repaired in the harvest view) |
+| A wake shortfall's end rounds `counted` a step short in the window loop (10-01) | open | new; see the entry | **yes**: the steps M4-in-windows (R37) trains a wake-shortfall follower on |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -663,3 +664,15 @@ from the median position of the 5 samples either side): 206 samples over the 45,
 how many fall inside arrival slices, nor what they do to the labeller or the evaluation's observed baseline. Judgement: a
 position repair beside the altitude one in the derived view (`store.read_track_view`) — it would change arrival slices every
 model reads, so it waits for a rebuild.
+
+## A wake shortfall's end rounds `counted` a step short in the window loop (2026-10-01)
+
+**Verified** (the 7.7 review, `dev-window-rewind`). `WindowLoop.results` (`experiments/traffic_window.py`) counts a judged
+aircraft's steps as `round((end["t_s"] − first_s) / step_s)`. A loss in an episode ends on the grid, so that is the step the
+judge ended it at. A wake shortfall at a landing (`Judging.landing`) stamps the landing's time instead — off the grid,
+inside `(t − step, t]` of the step whose landing check ended it — and the aircraft had spoken at that step. When the landing
+falls in the first half of the step, `round` gives one step fewer. **Judgement** (not measured): `counted` is what R34
+reports as the steps counted and what R37 trains on, so a wake-shortfall follower trains on one step fewer than it said
+before its end — at most one step of one sentence a shortfall, a small and one-sided bias. R43 reads that step as the step
+whose time reaches the end (`traffic_window_rewind.own_step_at`). The fix in the loop (the same `ceil`) changes R37's
+training rows: it waits for the next window training.
