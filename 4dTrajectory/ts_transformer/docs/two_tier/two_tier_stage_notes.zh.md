@@ -377,10 +377,10 @@
   未合并（与 dev-two-tier 只差文档提交，没有冲突）。
 - **回溯的算法待与用户讨论**（7.8）：候选用"一架从某一步起说到底的一整段"、只在出事处倒回（S1）还是定时分叉（S2）、挑定后别的飞机怎样、A1 挑哪条，
   2026-10-01 已把问题发给用户。
-- **发布 window r5**（opus agent 准备，脚本 `outputs/POOLED/training_publish/attitude_20260930/run_gpu_export.sh`，验证集读完后 20:44Z 自动开始）：
-  补做"姿态"那次没做完的 GPU 部分（三个扩充起点叠加层、窗口集和两个窗口叠加层）加新的 `windows_window_r05_1307c144`；完成后核对、
-  `npm run check-publication`、带备份复制进 `aeroviz-4d/public/data/airports/<ICAO>/training/`。说明：traffic r5 窗口叠加层的"读数摘要"这次没有
-  （原选择集读数是旧格式），两个窗口叠加层的样本会与 9 月 30 日发布的不同（窗口闭环之后改过），浏览器验证用户自己做。
+- **window r5 已发布**（2026-10-01 21:08Z；`aeroviz-4d/docs/37-training-attitude-publish.zh.md` 状态表）：同时补做了"姿态"那次的 GPU 部分
+  （窗口集合、三个扩充起点叠加层、两个窗口叠加层），加新叠加层 `windows_window_r05_1307c144`。核对：除姿态等外与已发布的逐字段相同；traffic r5 窗口叠加层的
+  读数摘要这次为空（原选择集读数是旧格式）。备份 `training.bak-20261001T210804Z`（连同 CPU 部分的 `training.bak-20260930T231655Z`，删不删问用户）；
+  重启了 5173，`check-publication --server` 五个机场 0 错误。浏览器验证用户自己做。这是 7.6（M4 在窗口里训练）的轨迹；实验意图见多机设计 §6.6 第 7 步。
 - **还在等用户**：复飞的几项（复飞读数 §6）、`dev-go-around` 合并。
 
 ### 以前的条目
