@@ -116,13 +116,16 @@ export const TRAINING_AUTOPILOT_OUTSIDE_COLOR = TRAINING_FAILURE_COLOR;
  *  bar's axis, which the user asked to see in the model's colour), too little for running text: names and counts stay in
  *  the text colour beside a swatch. traffic's azure (the user, 2026-09-30: fresher than the olive gold it replaces; the
  *  best of a search over the green-to-blue hues at contrast ≥ 4.5:1 against every colour above) is ≥ 11.5 OKLab ΔE from
- *  every one of them (nearest: the heading band's blue 11.5, the autopilot blue 12.4), contrast 5.8:1. Two models are never
+ *  every one of them (nearest: the heading band's blue 11.5, the autopilot blue 12.4), contrast 5.8:1. window's deep green
+ *  (2026-10-01, M4 in windows; the best of the same search with the olive golds left out) is ≥ 15.8 from every one of
+ *  them (nearest: the executor's teal) and ≥ 6.5 under simulated colour blindness, contrast 4.7:1. Two models are never
  *  drawn together (the bar reads one at a time). */
 export const TRAINING_MODEL_COLOR: Record<TrainingModelName, string> = {
   base: "#d946ef",
   landing: "#a3e635",
   augmented: "#b82e7a",
   traffic: "#2b93ee",
+  window: "#009437",
 };
 
 /** How opaque a model's samples other than the one read are drawn in 3D (thin), and in the legend. */

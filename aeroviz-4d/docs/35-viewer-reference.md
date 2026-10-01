@@ -428,7 +428,8 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 - 用户 2026-09-26：Training 里只能在 base 和"后训练"之间切换，多轮后训练的各个模型分不开。先验的模型名字是用户定的
   （后训练设计开头的表）：**base**（只用数据训练）、**landing**（base 按落地奖励后训练，第一阶段）、**augmented**（landing
-  在增广起点上再后训练，第二阶段）；某一轮写成 "augmented r3"。
+  在增广起点上再后训练，第二阶段）；某一轮写成 "augmented r3"。之后加了 **traffic**（多机 M4，一个场景里由模型指挥一架，
+  用户 2026-09-30）和 **window**（M4 在窗口里训练，窗口里每一架都由模型指挥，用户 2026-10-01；颜色深绿 `#009437`）。
 - 导出器不再收 `--label`，名字从检查点的配置读出（`model_identity`）：没有 `fine_tuning` 就是 base；有的话，按训练它的方法
   （`fine_tuning.schema` 去掉版本号 `-vN`，`METHOD_MODELS`）给名字，同一方法的各版本是同一个模型（采纳的 landing 第 1 轮是 v1 写的）；
   没有名字的方法拒绝，新阶段的名字先和用户商定。载荷的 `model` 块：`name`、`round`（base 为 null）、`run`（放各轮的目录，

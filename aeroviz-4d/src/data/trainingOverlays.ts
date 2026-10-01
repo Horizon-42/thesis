@@ -125,7 +125,7 @@ export const TRAINING_GENERATION_KINDS = ["prior-generation", "prior-generation-
  *  (data alone), landing (post-trained on the landing reward), augmented (landing post-trained again on augmented
  *  starts), traffic (augmented post-trained in multi-aircraft scenes, M4; the user 2026-09-30). The views order them
  *  so. */
-export const TRAINING_MODEL_NAMES = ["base", "landing", "augmented", "traffic"] as const;
+export const TRAINING_MODEL_NAMES = ["base", "landing", "augmented", "traffic", "window"] as const;
 export type TrainingModelName = (typeof TRAINING_MODEL_NAMES)[number];
 /** MIRROR of `ts_transformer.autopilot.judge.CROSSINGS`: the outcomes read at a crossing of a threshold (the pointed
  *  runway's, or another's for `crossed_other_runway`), which carry where it was crossed; no other outcome does. */

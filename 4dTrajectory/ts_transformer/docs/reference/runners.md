@@ -1019,7 +1019,8 @@ record, here and all airports, with the windows and samples they cover), refused
 artefact, split, draw, samples and temperature. Every refusal about the disk before any work (`on_disk`), every write after it
 (`write_export`); refactors it rests on, behaviour-preserving (reviewed): `window_prior`, `fly_windows` / `Flown`,
 `fixed_paths` / `FixedWindow`, `sentence_counts`, `generation_block`, `head_block` / `flights_block`, `check_set` by kind. The
-model trained by `ts-traffic-reward` is named **traffic** (`MODEL_NAMES`, user 2026-09-30).
+model trained by `ts-traffic-reward` is named **traffic** (`MODEL_NAMES`, user 2026-09-30), the one trained by
+`ts-traffic-window-reward` (R37, M4 in windows) **window** (user 2026-10-01).
 
 
 ### R37 · `run_ts.py traffic_window_reward` — multi-aircraft M4's second pass: the traffic post-training in windows (design §6.6 step 7 item 7, the 7.6 plan)
