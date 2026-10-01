@@ -433,6 +433,11 @@ scores its lateness × speed; the arrival endpoint error is where it landed (R38
 module — a model-free window set (`traffic-windows`: 20 select windows an airport of the readouts' draw, by size) and a
 `window-generation` overlay per prior on its OWN draws (no readout re-run; `--readout` only copies summaries); the landings
 are the aircraft whose own end is a landing; the M4 model is named `traffic` (R36).
+`go_around_census` is multi-aircraft step 8's first measurement — every go-around in the training days' stored landing tracks
+(stray samples of other aircraft set aside first; a low pass on any runway end's final, came down to it and climbed away,
+each level HELD 20 s), timed to its landing, placed against the arrival slice and the labelled sentence, beside today's
+time-limit slack; touch-and-goes and landings that were not the last (a low go-around stored as the landing) set aside and
+listed; a loop that left the 30 km crop is unseen (R40).
 **Every Training export writes the attitude each track is drawn in** (`experiments/training_attitude.py`, 2026-09-30): heading,
 path angle, right bank and an attack READING — executor tracks from its states and the command of the cycle starting at each row
 (the track's end: the cycle ending there), observed tracks from `rebuild_series` + the teacher's `actual_controls`, none for a flight
