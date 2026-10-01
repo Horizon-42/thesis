@@ -176,9 +176,10 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
   const chosenKind = entry === null ? null : openable(entry).kind;
 
   return (
-    <section className="training-panel" aria-label="Training" hidden={hidden}>
+    <section className="training-panel" aria-label="Learning" hidden={hidden}>
       <header className="training-panel-header">
-        <h2>Training</h2>
+        {/* the module's name (its tab's); what it shows is still training — "Training details" below */}
+        <h2>Learning</h2>
         {/* Everything read ONCE — what the module is, the vocabulary, the readouts — is on the details page, so the
             list keeps the dock's height. */}
         <button type="button" className="training-details-open" aria-haspopup="dialog" aria-label="Training details"

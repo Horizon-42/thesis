@@ -67,7 +67,7 @@ describe("WorkbenchTopBar", () => {
   it("renders the four exclusive task tabs and switches mode on click", () => {
     render(<WorkbenchTopBar />);
 
-    for (const label of ["Evaluation", "Training", "Fly", "Optimize"]) {
+    for (const label of ["Evaluation", "Learning", "Fly", "Optimize"]) {
       expect(screen.getByRole("button", { name: label })).toBeTruthy();
     }
 
@@ -78,7 +78,7 @@ describe("WorkbenchTopBar", () => {
   // Training reads the same observed arrivals as Evaluation (what the track was read
   // as, rather than how it was flown), so it sits immediately right of it — not at
   // the end of the row next to the solver tasks.
-  it("places Training immediately right of Evaluation and switches to it", () => {
+  it("places Learning (the training task) immediately right of Evaluation and switches to it", () => {
     render(<WorkbenchTopBar />);
 
     const labels = Array.from(
@@ -86,13 +86,13 @@ describe("WorkbenchTopBar", () => {
     ).map((node) => node.textContent);
     expect(labels).toEqual([
       "Evaluation",
-      "Training",
+      "Learning",
       "Fly",
       "Optimize",
       "Procedures",
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Training" }));
+    fireEvent.click(screen.getByRole("button", { name: "Learning" }));
     expect(setMode).toHaveBeenCalledWith("training");
   });
 

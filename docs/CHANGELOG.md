@@ -1,5 +1,12 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-01 — Frontend: the Training module is named Learning; Fly's control labels readable
+
+- **What** (the user): the Training tab and its dock heading read **Learning** — only the module's name; what it shows is
+  still the models' training, so the mode id `training`, "Training details", the code and the data contract keep the name.
+- Fly's Controls labels were dark on the dark dock (no colour of their own, inheriting the page default): `.pilot-panel` now
+  sets its text colour once (`#e0e6f0`, as `.training-panel`) and one rule colours the field names of every row kind. AV43.
+
 ### 2026-10-01 — Frontend: Observe → Evaluation, Baseline → Ground Truth, Compare merged into Fly (branch `dev-eval-fly-merge`)
 
 - **What** (the user, 2026-10-01): the Observe task is named **Evaluation**; its Baseline result source is **Ground Truth**

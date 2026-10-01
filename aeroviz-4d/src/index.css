@@ -3924,7 +3924,10 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   overflow-y: auto;
 }
 
+/* The panel's text colour is set once here (like .training-panel's): a label without a rule of its own
+   inherits it, never the page's dark default over the dark dock. */
 .pilot-panel {
+  color: #e0e6f0;
   font-family: "Inter", "Segoe UI", sans-serif;
   font-size: 12px;
   min-width: 0;
@@ -4300,9 +4303,15 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
 }
 
 .pilot-optimization-row label span {
-  color: #cbd5e1;
   font-size: 9px;
   line-height: 1.1;
+}
+
+/* Field names, one colour in every row kind (settings, steppers, options). */
+.pilot-optimization-row label span,
+.pilot-stepper-row label span,
+.pilot-options-row label span {
+  color: #cbd5e1;
 }
 
 .pilot-stepper-row {

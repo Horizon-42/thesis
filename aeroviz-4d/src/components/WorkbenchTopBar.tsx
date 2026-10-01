@@ -3,7 +3,7 @@
  * -------------------
  * The persistent top context bar of the workbench shell. It holds the app's
  * orthogonal global context — Active Airport + Landing Runway — and the single
- * task switcher (Evaluation / Training / Fly / Optimize, plus the Procedures toggle) that replaces the
+ * task switcher (Evaluation / Learning / Fly / Optimize, plus the Procedures toggle) that replaces the
  * app's former two competing "mode" systems. It also exposes the on-demand Layers
  * drawer and the Presentation-mode toggle.
  *
@@ -15,9 +15,11 @@ import { useLandingsManifest } from "../hooks/useLandingsManifest";
 
 const TASK_TABS: Array<{ mode: WorkbenchMode; label: string }> = [
   { mode: "evaluation", label: "Evaluation" },
-  // Training sits next to Evaluation on purpose: both read the same observed arrivals,
-  // Evaluation asking how the aircraft flew and Training what that track was read as.
-  { mode: "training", label: "Training" },
+  // Learning sits next to Evaluation on purpose: both read the same observed arrivals,
+  // Evaluation asking how the aircraft flew and Learning what that track was read as.
+  // Only the tab is named Learning: what it shows is still the training of the models
+  // (its sets, rounds and details), so its mode and code keep the name `training`.
+  { mode: "training", label: "Learning" },
   { mode: "fly", label: "Fly" },
   { mode: "optimize", label: "Optimize" },
 ];
