@@ -24,6 +24,8 @@ MULTI-AIRCRAFT BATCH gives each flight its own start cycle (``start_cycle``) —
 its bank and every law's state are held, its rows are not its own), its first cycle is its own cycle 0 (the bank
 unlimited, the heading word anchored afresh, its time and time limit counted from it), and `flown` hands each flight's
 rows from its own cycle 0, so it reads as the flight flown alone; the SINGLE FLIGHT is `autopilot.single`, plain Python.
+A flight can also be HALTED (`halt`): from then on it is held as a waiting flight is, its command row repeating the last
+one it flew — where a closed loop that once flew it in an executor of its own would have stopped that executor.
 """
 
 from __future__ import annotations
@@ -107,6 +109,12 @@ class Executor:
         # the flight's own cycle (from its start) at whose end it was done; never done: its last
         self.done_cycle = self.cycles - 1 - self.start
         self.count = 0                                   # cycles flown
+        self.halted = torch.zeros(batch, dtype=torch.bool, device=device)
+        self.last_command = torch.zeros((batch, 3), dtype=self.state.dtype, device=device)
+
+    def halt(self, flights: torch.Tensor) -> None:
+        """Hold the flights ``flights`` (``[B]`` bool) from the next cycle on (module docstring)."""
+        self.halted = self.halted | flights.to(self.halted.device)
 
     def own_cycle(self) -> torch.Tensor:
         """``[B]`` long: each flight's own cycle about to be flown (negative: it has not started)."""
@@ -136,17 +144,21 @@ class Executor:
         params, cycle = self.params, self.count
         now = self.now()
         self.sentence_times.append(sentence_s)
+        frozen: torch.Tensor | None = None
         if self.staggered:
             own = self.own_cycle()
             waiting, fresh = own < 0, own == 0
-            held = self._held()
+            frozen = waiting | self.halted
             limited = torch.full_like(self.bank, math.radians(params.bank_rate_deg_s))
             bank_rate: float | torch.Tensor = torch.where(fresh, torch.full_like(self.bank, math.inf), limited)
             time_s: float | torch.Tensor = own.to(self.state.dtype) * params.cycle_s
         else:
             waiting = fresh = None
+            if bool(self.halted.any()):
+                frozen = self.halted
             bank_rate = math.inf if cycle == 0 else math.radians(params.bank_rate_deg_s)
             time_s = cycle * params.cycle_s
+        held = self._held() if frozen is not None else []
         track_rate, lateral_modes = self.lateral.rate(now, force.heading_deg, force.issued_step[:, HEADING],
                                                       force.approach, force.runway, self.runways, self.bank, bank_rate,
                                                       time_s, fresh=fresh)
@@ -171,14 +183,16 @@ class Executor:
         limits = {**attitude.binds, **thrust.binds, **speed_modes, "path_rate_limited": vertical_modes["path_rate_limited"]}
         modes = {**lateral_modes, "level_captured": vertical_modes["level_captured"],
                  "aim_left_tube": vertical_modes["aim_left_tube"], "glidepath_floor": vertical_modes["glidepath_floor"]}
-        if waiting is not None and bool(waiting.any()):
+        if frozen is not None and bool(frozen.any()):
             for owner, name, before in held:
                 after = getattr(owner, name)
                 if before is not None:
-                    keep = waiting.view(-1, *([1] * (after.dim() - 1)))
+                    keep = frozen.view(-1, *([1] * (after.dim() - 1)))
                     setattr(owner, name, torch.where(keep, before, after))
-            limits = {name: value & ~waiting for name, value in limits.items()}
-            modes = {name: value & ~waiting for name, value in modes.items()}
+            command = torch.where(self.halted[:, None], self.last_command, command)
+            limits = {name: value & ~frozen for name, value in limits.items()}
+            modes = {name: value & ~frozen for name, value in modes.items()}
+        self.last_command = command
 
         self.states.append(self.state)
         self.commands.append(command)
@@ -193,12 +207,14 @@ class Executor:
         if self.staggered:
             finished = ((self.lateral.captured & (before <= 0.0)) | ((before > 0.0) & (after.height_m < elevation))
                         | ~torch.isfinite(self.state).all(dim=1) | (after.speed_mps <= 0.0)
-                        | ((own + 1) * params.cycle_s >= self.time_limit_s)) & ~waiting
+                        | ((own + 1) * params.cycle_s >= self.time_limit_s)) & ~frozen
             self.done_cycle = torch.where(finished & ~self.done, own, self.done_cycle)
         else:
             finished = ((self.lateral.captured & (before <= 0.0)) | ((before > 0.0) & (after.height_m < elevation))
                         | ~torch.isfinite(self.state).all(dim=1) | (after.speed_mps <= 0.0)
                         | ((cycle + 1) * params.cycle_s >= self.time_limit_s))
+            if frozen is not None:
+                finished = finished & ~frozen
             self.done_cycle = torch.where(finished & ~self.done, cycle, self.done_cycle)
         self.done = self.done | finished
         self.count += 1

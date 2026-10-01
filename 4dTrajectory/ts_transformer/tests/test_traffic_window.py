@@ -282,8 +282,9 @@ def test_two_commanded_aircraft_are_judged_together_ended_ones_fly_on_silent_and
 
     airport, signals, spec = _scene_airport(tmp_path, monkeypatch)
     loop = _window_loop(_traffic_model(spec), airport, signals, spec, [("KXXX:f0", "KXXX:f1")])
-    # f1 first speaks 15 steps after f0: an executor each
-    assert loop.pre == 0 and loop.start.tolist() == [0, 15] and len(loop.executors) == 2
+    # f1 first speaks 15 steps after f0: one executor, f1 starting 15 steps in — two cohorts
+    assert loop.pre == 0 and loop.start.tolist() == [0, 15] and len(loop.executors) == 1
+    assert loop.cohort.tolist() == [0, 1] and loop.executors[0][2].start.tolist() == [0, 15 * 2]
     while loop.running:
         loop.step()
     f0, f1 = loop.results()
@@ -435,7 +436,7 @@ def test_an_executor_a_first_step_flies_each_aircraft_as_its_own_executor_would(
     loop = _window_loop(_traffic_model(spec), airport, signals, spec, [("KXXX:f0", "KXXX:f1")])
     while loop.running:
         loop.step()
-    assert len(loop.executors) == 2
+    assert len(loop.executors) == 1 and len(loop.cohorts) == 2         # one executor; each from its own start
     params, geometry = _params(), airport.flights.geometry
     for got, key in zip(loop.results(), ("KXXX:f0", "KXXX:f1")):
         inputs, runways, charts, approach = _physics_of([signals[key]], geometry)
@@ -496,9 +497,9 @@ def test_a_crossing_of_any_threshold_plane_in_a_step_is_asked_of_the_judge(tmp_p
     # runway 09 lands east from its threshold: west of it is before it
     loop.states[0][0] = dc.replace(before, e_m=threshold.threshold_e_m - 50.0, n_m=threshold.threshold_n_m)
     loop.states[0][1] = dc.replace(after, e_m=threshold.threshold_e_m + 50.0, n_m=threshold.threshold_n_m)
-    assert loop._crossed(np.array([0]), 0).tolist() == [True]
+    assert loop._crossed(np.array([0]), np.array([0])).tolist() == [True]
     loop.states[0][1] = dc.replace(after, e_m=threshold.threshold_e_m - 10.0, n_m=threshold.threshold_n_m)
-    assert loop._crossed(np.array([0]), 0).tolist() == [False]
+    assert loop._crossed(np.array([0]), np.array([0])).tolist() == [False]
 
 
 # ---- the M3 second-pass runner (step 7.4)
@@ -690,13 +691,13 @@ def test_the_steps_counted_run_to_the_judge_s_end_time_and_an_end_the_executor_f
     for _ in range(4):
         loop.step()
     # nothing ended it: asked, it flies on
-    loop._own_ends(0, [0], loop.speaker.step - 1)
+    loop._own_ends([0], loop.speaker.step - 1)
     assert not loop.left[0]
     # an uncaptured crossing found in the step just flown: it leaves at the state before it, silent, not appended
     real = traffic_window.outcome_of
     monkeypatch.setattr(traffic_window, "outcome_of", lambda flown, p, geometry, runway, spec: dc.replace(
         real(flown, p, geometry, runway, spec), outcome="crossed_without_capture", end_row=7))
-    loop._own_ends(0, [0], loop.speaker.step - 1)
+    loop._own_ends([0], loop.speaker.step - 1)
     monkeypatch.setattr(traffic_window, "outcome_of", real)
     assert loop.left[0] and loop.own[0] == "crossed_without_capture" and loop.in_scene_to[0] == 3
     rows = int(loop.speaker.rows[0])

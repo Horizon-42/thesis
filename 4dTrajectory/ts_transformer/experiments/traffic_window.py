@@ -329,8 +329,11 @@ class WindowLoop:
        checked against the aircraft behind it (`traffic_loop.Judging.landing`) — a passive one lands too;
     4. the window's aircraft on the step are judged (`Judging.step`); one ended here (or at 3) flies this step's words,
        said before the judge read the step, and then nothing more — passive: in the scene, never ended again;
-    5. each executor flies the step: the aircraft that first spoke at one step share one (`Executor`'s cycles count from
-       its first, so a later aircraft cannot join an earlier one's), the executor's code untouched;
+    5. the executor flies the step: ONE executor for the batch, each aircraft from its own first spoken step
+       (`Executor`'s ``start_cycle``: a multi-aircraft batch, executor design §12.4). The aircraft that first spoke at
+       one step are a COHORT and fly as the executor once given to each cohort flew them: a cohort whose aircraft are
+       all done at a step's start, or that has flown its own cycles (its longest time limit, also within a step), is
+       halted where that executor stopped (`Executor.halt`) and from then on is neither recorded nor flown;
     6. an aircraft whose flight ended in the step leaves after its own last state (`traffic_labelled.own_end`): one its
        executor is done with, and one that stalled or crossed a threshold plane in it, whose end `autopilot.judge.
        outcome_of` finds then — the executor flies on past a stall, an uncaptured crossing or another runway's, which
@@ -381,20 +384,26 @@ class WindowLoop:
             scene_landings=None if landings is None else self._contexts(landings))
         #: per masked column, each aircraft's step: whether the separation masks took a word away there
         self.separation_masked = {c: np.zeros((count, max_rows - N_LOOK), dtype=bool) for c in MASK_COLUMNS}
-        # the executors, one per step aircraft first speak at
+        # one executor for the batch, each aircraft from its first spoken step; its groups (module docstring, 5.)
         device = inputs.initial_state.device
         self.approach_mps = approach_ias_mps.cpu().numpy()
+        self.first_spoken = self.start + N_LOOK                    # each aircraft's first spoken batch step
+        first = int(self.first_spoken.min())
+        step_rows = int(round(step_s / params.cycle_s))
+        limit_s = torch.tensor(list(limits), dtype=torch.float64, device=device)
+        executor = Executor(inputs, runways, charts, approach_ias_mps, params, words, time_limit_s=limit_s,
+                            start_cycle=torch.as_tensor((self.first_spoken - first) * step_rows, device=device))
+        #: each aircraft's executor (one: 0) and its place there
         self.group = np.zeros(count, dtype=np.int64)
-        self.place = np.zeros(count, dtype=np.int64)
-        self.executors: list[tuple[int, np.ndarray, Executor, Spoken]] = []
-        for g, first in enumerate(sorted(set((self.start + N_LOOK).tolist()))):
-            index = np.flatnonzero(self.start + N_LOOK == first)
-            self.group[index], self.place[index] = g, np.arange(len(index))
-            executor = Executor(_rows_of(inputs, index), _rows_of(runways, index), _rows_of(charts, index),
-                                approach_ias_mps[torch.as_tensor(index)], params, words,
-                                time_limit_s=torch.tensor([limits[i] for i in index], dtype=torch.float64,
-                                                          device=device))
-            self.executors.append((first, index, executor, Spoken(len(index), words, device=device)))
+        self.place = np.arange(count, dtype=np.int64)
+        #: each aircraft's cohort (module docstring, 5.), its members, and each cohort's own cycles: its longest time
+        #: limit's — the cycles its own executor had
+        self.cohort = np.unique(self.first_spoken, return_inverse=True)[1].astype(np.int64)
+        self.cohorts = [np.flatnonzero(self.cohort == c) for c in range(int(self.cohort.max()) + 1)]
+        own_cycles = torch.ceil(limit_s / params.cycle_s).long().cpu().numpy()
+        self.cohort_cycles = np.array([own_cycles[members].max() for members in self.cohorts])
+        self.executors: list[tuple[int, np.ndarray, Executor, Spoken]] = [
+            (first, self.place, executor, Spoken(count, words, device=device, start_step=self.first_spoken - first))]
         # the judge, a window at a time
         self.runs = [Run(reading) for _ in windows]
         self.judging = [Judging(window.airport.flights.separation, reading, step_s, run)
@@ -451,9 +460,9 @@ class WindowLoop:
     def step(self) -> None:
         """One batch step (the class docstring's 1–6)."""
         speaker, step = self.speaker, self.speaker.step
-        for first, index, executor, _ in self.executors:
-            if first == step:                                  # its first predicted step: the state flown from
-                self._record(index, executor, step, captured=np.zeros(len(index), dtype=bool))
+        starting = np.flatnonzero(self.first_spoken == step)    # their first predicted step: the state flown from
+        if len(starting):
+            self._record(starting, self.executors[0][2], step, captured=np.zeros(len(starting), dtype=bool))
         k = step - self.start - N_LOOK
         speaking = (k >= 0) & (self.ended_at < 0) & ~self.left & (k < self.sentence_end)
         said = speaker.speak(self._rank(speaking, step), self._locked())
@@ -563,14 +572,13 @@ class WindowLoop:
         """Every aircraft's executor state at the start of the step (read once a step; None before it flies)."""
         if self._now[0] != step:
             now: list[Aircraft | None] = [None] * len(self.keys)
-            for first, index, executor, _ in self.executors:
-                if first > step:
-                    continue
-                state = executor.now()
-                e, n, h = state.e_m.cpu().numpy(), state.n_m.cpu().numpy(), state.height_m.cpu().numpy()
-                track, ground = state.track_deg.cpu().numpy(), state.ground_speed_mps.cpu().numpy()
-                captured = executor.lateral.captured.cpu().numpy()
-                for p, i in enumerate(index):
+            _, index, executor, _ = self.executors[0]
+            state = executor.now()
+            e, n, h = state.e_m.cpu().numpy(), state.n_m.cpu().numpy(), state.height_m.cpu().numpy()
+            track, ground = state.track_deg.cpu().numpy(), state.ground_speed_mps.cpu().numpy()
+            captured = executor.lateral.captured.cpu().numpy()
+            for p, i in enumerate(index):
+                if self.first_spoken[i] <= step:
                     now[i] = Aircraft(float(e[p]), float(n[p]), float(h[p]), float(track[p]), float(ground[p]),
                                       bool(captured[p]))
             self._now = (step, now)
@@ -611,39 +619,58 @@ class WindowLoop:
         return out
 
     # -- 5., 6. flying
+    def _cohorts_halted(self, executor: Executor, *, at_step_start: bool) -> np.ndarray:
+        """``[aircraft]`` bool: the aircraft whose cohort's own executor would have stopped by now — its own cycles flown,
+        or, at a step's start, every aircraft of it done (module docstring, 5.)."""
+        own = executor.own_cycle().cpu().numpy()
+        stopped = np.array([own[members[0]] >= cycles for members, cycles in zip(self.cohorts, self.cohort_cycles)])
+        if at_step_start:
+            done = executor.done.cpu().numpy()
+            stopped |= np.array([bool(done[members].all()) for members in self.cohorts])
+        return stopped[self.cohort]
+
     def _fly(self, step: int, said: np.ndarray) -> None:
         cycle_s = self.params.cycle_s
+        first, index, executor, spoken = self.executors[0]
+        if first > step or executor.count == executor.cycles:
+            self.speaker.advance(np.zeros(0, dtype=np.int64), *self._positions(np.zeros(0, dtype=np.int64)))
+            return
+        device = executor.done.device
+        halted = self._cohorts_halted(executor, at_step_start=True)
+        executor.halt(torch.as_tensor(halted, device=device))
+        # the aircraft that fly this step: started, their cohort not halted
+        flying = (self.first_spoken <= step) & ~halted
+        heard = torch.as_tensor((spoken.steps - spoken.start) * self.step_s, dtype=torch.float64, device=device)
+        spoken.say(np.where(said > 0, said - 1, UNCHANGED))
+        stalled = torch.zeros(len(index), dtype=torch.bool, device=device)
+        for _ in range(executor.step_rows):
+            if executor.count == executor.cycles:
+                break
+            executor.halt(torch.as_tensor(self._cohorts_halted(executor, at_step_start=False), device=device))
+            executor.cycle(spoken.at(heard), executor.own_cycle().clamp(min=0).to(torch.float64) * cycle_s)
+            stalled |= executor.limits["stall"][-1]
+        members = np.flatnonzero(flying)
         appended: list[int] = []
-        for g, (first, index, executor, spoken) in enumerate(self.executors):
-            if first > step or bool(executor.done.all()) or executor.count == executor.cycles:
-                continue
-            heard = torch.full((len(index),), spoken.steps * self.step_s, dtype=torch.float64,
-                               device=executor.done.device)
-            spoken.say(np.where(said[index] > 0, said[index] - 1, UNCHANGED))
-            stalled = torch.zeros(len(index), dtype=torch.bool, device=executor.done.device)
-            for _ in range(executor.step_rows):
-                if executor.count == executor.cycles:
-                    break
-                executor.cycle(spoken.at(heard), torch.full((len(index),), executor.count * cycle_s,
-                                                            dtype=torch.float64, device=executor.done.device))
-                stalled |= executor.limits["stall"][-1]
-            self._record(index, executor, step + 1, captured=executor.lateral.captured.cpu().numpy())
+        if len(members):
+            self._record(members, executor, step + 1, captured=executor.lateral.captured.cpu().numpy()[members])
             done, stalled = executor.done.cpu().numpy(), stalled.cpu().numpy()
-            crossed = self._crossed(index, self._step_of(int(index[0]), step))
-            ending = [p for p, i in enumerate(index) if not self.left[i] and (done[p] or stalled[p] or crossed[p])]
+            crossed = self._crossed(members, np.array([self._step_of(int(i), step) for i in members]))
+            ending = [int(i) for i, cross in zip(members, crossed)
+                      if not self.left[i] and (done[i] or stalled[i] or cross)]
             if ending:
-                self._own_ends(g, ending, step)
-            for i in index:
+                self._own_ends(ending, step)
+            for i in members:
                 if not self.left[i] and self.finals is not None:
                     self._glidepath(i, step)
                 if self._step_of(i, step) + 1 <= self.in_scene_to[i]:
                     appended.append(int(i))                   # still in the scene (one's own last state included)
-        index = np.array(appended, dtype=np.int64)
-        self.speaker.advance(index, *self._positions(index))
+        index_appended = np.array(appended, dtype=np.int64)
+        self.speaker.advance(index_appended, *self._positions(index_appended))
 
     def _record(self, index: np.ndarray, executor: Executor, step: int, captured: np.ndarray) -> None:
-        """Every aircraft of ``index`` at batch step ``step``: its executor state (`flown_track`'s reading)."""
-        states = executor.state.cpu().numpy()
+        """Every aircraft of ``index`` at batch step ``step``: its executor state (`flown_track`'s reading);
+        ``captured`` in the order of ``index``."""
+        states = executor.state.cpu().numpy()[self.place[index]]
         for p, i in enumerate(index):
             read = flown_track(states[p: p + 1], self.geometries[i])
             rad = float(np.radians(compass_from_math_rad(states[p: p + 1, PSI]))[0])
@@ -656,33 +683,34 @@ class WindowLoop:
                                          float(read["n"][0]), float(read["height"][0]), float(np.degrees(track)),
                                          float(read["ground_speed"][0]), bool(captured[p])))
 
-    def _crossed(self, index: np.ndarray, k: int) -> np.ndarray:
-        """``[len(index)]`` bool: which aircraft of ``index`` (one executor: at one step ``k``) passed a candidate
-        runway's threshold plane in step ``k`` (a crossing the judge may read as an end the executor does not stop at)."""
+    def _crossed(self, index: np.ndarray, own: np.ndarray) -> np.ndarray:
+        """``[len(index)]`` bool: which aircraft of ``index`` passed a candidate runway's threshold plane in its own step
+        ``own`` (each aircraft's, `_step_of`) — a crossing the judge may read as an end the executor does not stop at."""
         out = np.zeros(len(index), dtype=bool)
         by_geometry: dict[int, list[int]] = defaultdict(list)
         for p, i in enumerate(index):
             by_geometry[id(self.geometries[i])].append(p)
         for places in by_geometry.values():
             members = [int(index[p]) for p in places]
-            e = np.array([[self.states[i][k].e_m, self.states[i][k + 1].e_m] for i in members])
-            n = np.array([[self.states[i][k].n_m, self.states[i][k + 1].n_m] for i in members])
+            steps = [int(own[p]) for p in places]
+            e = np.array([[self.states[i][k].e_m, self.states[i][k + 1].e_m] for i, k in zip(members, steps)])
+            n = np.array([[self.states[i][k].n_m, self.states[i][k + 1].n_m] for i, k in zip(members, steps)])
             for candidate in self.geometries[members[0]].candidates:
                 d = relative_to_runway(e, n, np.zeros_like(e), np.zeros_like(e), candidate).before_threshold_m
                 out[places] |= (d[:, 0] > 0.0) & (d[:, 1] <= 0.0)
         return out
 
-    def _own_ends(self, g: int, ending: Sequence[int], step: int) -> None:
-        """The aircraft at places ``ending`` of executor ``g`` whose flight may have ended in step ``step``: its own end
+    def _own_ends(self, ending: Sequence[int], step: int) -> None:
+        """The aircraft ``ending`` whose flight may have ended in step ``step``: its own end
         (`outcome_of` with the runway in force, `traffic_labelled.own_end`) — the step it is last in the scene at and,
         while the judge has not ended it, last judged at; its crossing when it landed. One the executor flies on with
         no end found (a crossing that is none) flies on."""
-        _, index, executor, _ = self.executors[g]
+        _, _, executor, _ = self.executors[0]
         flown = executor.flown()
         step_rows = executor.step_rows
         done = executor.done.cpu().numpy()
-        for p in ending:
-            i = int(index[p])
+        for i in ending:
+            p = int(self.place[i])
             ended = outcome_of(flown, p, self.geometries[i], int(self.speaker.value[i, RUNWAY]) - 1, self.words.spec)
             if not done[p] and ended.outcome == "timeout":
                 continue                                        # nothing ended it yet
@@ -727,17 +755,11 @@ class WindowLoop:
 
     def _positions(self, index: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Where each aircraft of ``index`` is (its executor's state, as the speaker reads a flown row)."""
-        e, n, h = np.zeros(len(index)), np.zeros(len(index)), np.zeros(len(index))
-        for first, members, executor, _ in self.executors:
-            here = np.isin(index, members)
-            if not here.any():
-                continue
-            state = executor.now()
-            at = self.place[index[here]]
-            e[here] = state.e_m.cpu().numpy()[at]
-            n[here] = state.n_m.cpu().numpy()[at]
-            h[here] = state.height_m.cpu().numpy()[at]
-        return e, n, h
+        if not len(index):
+            return np.zeros(0), np.zeros(0), np.zeros(0)
+        state = self.executors[0][2].now()
+        at = self.place[index]
+        return state.e_m.cpu().numpy()[at], state.n_m.cpu().numpy()[at], state.height_m.cpu().numpy()[at]
 
     # -- what the speaker asks
     def _edges(self, first: int, last: int) -> np.ndarray:
