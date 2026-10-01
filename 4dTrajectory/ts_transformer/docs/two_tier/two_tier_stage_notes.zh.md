@@ -1,4 +1,4 @@
-# 两层模型：阶段记录（更新于 2026-10-01 00:40 UTC）
+# 两层模型：阶段记录（更新于 2026-10-01 15:45 UTC）
 
 **用途**：压缩上下文之前的交接文档。写明此刻每个阶段做到了哪里、产物在哪、关键数字、用户做过的决定、接下来按什么顺序做。
 设计本身在各自的设计文档里，这里只给结论和指路；历史看 git 和 `docs/CHANGELOG.md`。**阶段小结与按优先级的待办**：
@@ -16,8 +16,8 @@
 真实起点掉的是退回 base 的"下降晚、太高"（先验读数 §17）。**用户 2026-09-27 定：直接用第 7 轮 = augmented**；每轮多放真实起点（400 + 200）留给
 下一次第二阶段（后训练设计 §5、§8）。代码都已合并进 dev-two-tier（第二阶段 `4b2521c6`，文档整理 `60cf127f`）。
 
-**正在跑（接手先看 §9 开头"正在跑"）**：多机第 7 步 7.6——M4 在 20 分钟窗口里训练，正式运行 2026-09-30 22:33Z 开跑，约 24 小时，
-`outputs/POOLED/prior/m4_window_20260930/`，从固定在 `cbfdc5f2` 的工作树 `m3-window-run` 跑（运行期间不要动那个工作树）。
+**刚跑完（接手先看 §9 开头）**：多机第 7 步 7.6——M4 在 20 分钟窗口里训练，2026-10-01 15:04Z 跑完，选中第 5 轮
+（[读数](readouts/2026-10-01_m4_window.zh.md)）；读不读验证集、发布用的名字、配方改不改待用户定。
 
 ---
 
@@ -31,7 +31,7 @@
 | 4 回放门 | v11 训练集、验证集每格都过：训练集落地 99.63 %、词在包络内 97.54 %、evaluation 98.30 %；验证集 99.90 / 97.50 / 98.46 % | 执行器设计 §11，[v11 读数](readouts/2026-09-27_executor_v11_readout.zh.md) |
 | 5 先验 | 第三版第 0 步、第 1 步（单机）、单机自由生成完成；**base 模型** `prior/v3_step1_20260924/full_s1337`（§3） | `docs/two_tier/prior_design.zh.md`、`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md` §3–§5 |
 | 6 后训练 | 第一阶段**采用**（landing，`prior/v3_rl_20260925/grpo_s1337/round_01`）；闭环监督微调（CAT-K）不采用；第二阶段上一版不采用（§4.3），**第二阶段完成，采用第 7 轮 = augmented**（用户 2026-09-27；§4.4、§9） | `docs/two_tier/post_training_design.zh.md`；读数文档（`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md`）§6–§16 |
-| 7 多机 | **设计已确认**（用户 2026-09-27 回答多机设计 §9 第 1–16 项，2026-09-28 又定第 17–20 项）。**M0 完成**：第 1–4 步已合并（`852b395f`：CWT 表、失去间隔的判定——IFR 照原文、目视 = 7-4-4 c 只默认目视进近许可，检查和奖励用它——场景的步、观测航迹普查）；第 5 步已合并（`6165c52a`：场景闭环 `experiments/traffic_loop.py`，所有航班一起照标注的词飞，被结束 3.93 % 对记录 2.76 %，按执行器多加的 1.17 个百分点判过线，间隔作硬检查）；第 6 步已合并（`bd016193`：两条间隔屏蔽 `inference/separation_masks.py`，拿掉 0.32 % 的标注速度词和许可词，按合计判过线，处处硬用，兜底不屏蔽）。**M1 完成**、已合并（`fecac5b2`：base 在有前机的步上速度词每步负对数似然多 0.0077、忙的步上航向词多 0.0104，对齐阶段与机场后，集中在 KSJC、KSMF；只记录）。**M2 完成**、待合并（分支 `dev-multi-aircraft` `31814869`：先验按每架自己的行号读、单机逐位不变；17 维边特征，速度取相邻两行的位置差；场景样本；训练与读数 runner，检查点 v4 记下边特征代码的哈希）。场景模型**没有学会用别的飞机**：第一次（`outputs/POOLED/prior/m2_scene_20260928/scene_s1337`）选择集每步 0.2880 对 base 0.2839；按 base 的批大小再训一次（`scene_acc4_s1337`，设计 §9 第 21 项）0.2868，有前机的步上仍没有一处比 base 好，速度词的差距原样还在。**下一步**（§9 第 22 项，设计 §2.5、§6.2、§6.6 已改）：不再做场景预训练，交互交给后训练——起点是单机模型加上每层一个初始为零的交通注意力（开始时与单机模型相同到舍入）；M3 就是这个起点在多机闭环里的表现，然后 M4。起点用 augmented（用户 2026-09-28 定，§9 第 23 项）。**M3 真实场景读完**（§6.6 第 1–5 步完成，分支 `dev-multi-aircraft` `de9a539a`，待合并）：起点模型指挥一架、其余照记录回放，目视读法下 11.5 % 的样本失去间隔（被引导 21.6 %、直线 4.0 %），照标注的词飞 4.9 %，记录 2.6 %；扩充场景上 23.9 %（插一架 37.6 %）。M4 的代码写完、审查过（`traffic_reward`，R32，一轮一轮跑）；第一次正式运行（`e76ca5ff`）跑完第 2 轮后停下，换多进程说话的新代码（设计 §6.6 第 12–13 项，一轮约 2.7 → 1.4 小时）从第 0 轮重跑：`outputs/POOLED/prior/m4_traffic_20260929/`，选中的仍是第 0 轮（读数 `readouts/2026-09-29_m4_traffic.zh.md`）。**第二次运行**（每轮过 3 遍、按配对标准误选轮，§6.6 第 6 步细节第 14 条）`m4_passes_20260929/` 跑完（2026-09-30 10:48Z，读数 `readouts/2026-09-30_m4_passes.zh.md`）：选中第 5 轮（扩充奖励 +0.0155 ± 0.0072，2.14 倍），但与第一次运行逐句比第 1–7 轮分不出差别——挪得更多、奖励没跟上，遍数不再加。**第 7 步（窗口内由模型指挥）在写**：分支 `dev-m4-window`，7.1–7.5 写完、opus 审查过（设计 §6.6 第 7 步）。**M3 第二遍读完**（2026-09-30，`window_generation_20260930`，读数 `readouts/2026-09-30_m3_window.zh.md`）：起点模型同时指挥窗口里的每一架，失去间隔 13.4 %（标注的词 4.9 %，记录 3.8 %）；同样的航班比只指挥一架多 1.7 ± 0.7 个百分点，四分之三与另一架由模型指挥的飞机；同一窗口各架奖励相关 0.05。扩充窗口（7.5）读完：失去间隔 19.8 %（插一架 24.0 %、压缩 20.2 %、挪起点 13.7 %）；第 5 轮放进窗口读：奖励 +0.0120 ± 0.0034、失去间隔 −1.49 ± 0.33 个百分点（读数 §4–§5）。用户 2026-09-30 定 7.6 从第 5 轮起、取值按建议。**7.6（M4 在窗口里训练）代码写完、审查过**（分支 `dev-m4-window` `cbfdc5f2`，待合并），**正式运行在跑**（2026-09-30 22:33Z 起，约 24 小时；前两次开跑内存 / 显存不够，第三次的应急上限漏训最密的窗口、被用户否掉，改成按步分块编码后每个窗口都训练；接手看 §9 开头）。**第 8 步复飞**：第 7 条（真实复飞到再落地要多久）做完（2026-10-01，R40，读数 `readouts/2026-10-01_go_arounds.zh.md`），时限、奖励、怎样说出复飞待用户定 | `docs/two_tier/multi_aircraft_design.zh.md`（§6.4–§6.6 开发顺序与进度，§8 取值，§9 已定的事）；读数 `readouts/2026-09-27_parallel_runway_separation.md`（英文）、`readouts/2026-09-28_labelled_traffic.zh.md`、`readouts/2026-09-28_separation_masks.zh.md`、`readouts/2026-09-28_m1_interaction.zh.md`、`readouts/2026-09-28_m2_scene_prior.zh.md`、`readouts/2026-09-28_m3_free_generation.zh.md`、`readouts/2026-09-30_m3_window.zh.md` |
+| 7 多机 | **设计已确认**（用户 2026-09-27 回答多机设计 §9 第 1–16 项，2026-09-28 又定第 17–20 项）。**M0 完成**：第 1–4 步已合并（`852b395f`：CWT 表、失去间隔的判定——IFR 照原文、目视 = 7-4-4 c 只默认目视进近许可，检查和奖励用它——场景的步、观测航迹普查）；第 5 步已合并（`6165c52a`：场景闭环 `experiments/traffic_loop.py`，所有航班一起照标注的词飞，被结束 3.93 % 对记录 2.76 %，按执行器多加的 1.17 个百分点判过线，间隔作硬检查）；第 6 步已合并（`bd016193`：两条间隔屏蔽 `inference/separation_masks.py`，拿掉 0.32 % 的标注速度词和许可词，按合计判过线，处处硬用，兜底不屏蔽）。**M1 完成**、已合并（`fecac5b2`：base 在有前机的步上速度词每步负对数似然多 0.0077、忙的步上航向词多 0.0104，对齐阶段与机场后，集中在 KSJC、KSMF；只记录）。**M2 完成**、待合并（分支 `dev-multi-aircraft` `31814869`：先验按每架自己的行号读、单机逐位不变；17 维边特征，速度取相邻两行的位置差；场景样本；训练与读数 runner，检查点 v4 记下边特征代码的哈希）。场景模型**没有学会用别的飞机**：第一次（`outputs/POOLED/prior/m2_scene_20260928/scene_s1337`）选择集每步 0.2880 对 base 0.2839；按 base 的批大小再训一次（`scene_acc4_s1337`，设计 §9 第 21 项）0.2868，有前机的步上仍没有一处比 base 好，速度词的差距原样还在。**下一步**（§9 第 22 项，设计 §2.5、§6.2、§6.6 已改）：不再做场景预训练，交互交给后训练——起点是单机模型加上每层一个初始为零的交通注意力（开始时与单机模型相同到舍入）；M3 就是这个起点在多机闭环里的表现，然后 M4。起点用 augmented（用户 2026-09-28 定，§9 第 23 项）。**M3 真实场景读完**（§6.6 第 1–5 步完成，分支 `dev-multi-aircraft` `de9a539a`，待合并）：起点模型指挥一架、其余照记录回放，目视读法下 11.5 % 的样本失去间隔（被引导 21.6 %、直线 4.0 %），照标注的词飞 4.9 %，记录 2.6 %；扩充场景上 23.9 %（插一架 37.6 %）。M4 的代码写完、审查过（`traffic_reward`，R32，一轮一轮跑）；第一次正式运行（`e76ca5ff`）跑完第 2 轮后停下，换多进程说话的新代码（设计 §6.6 第 12–13 项，一轮约 2.7 → 1.4 小时）从第 0 轮重跑：`outputs/POOLED/prior/m4_traffic_20260929/`，选中的仍是第 0 轮（读数 `readouts/2026-09-29_m4_traffic.zh.md`）。**第二次运行**（每轮过 3 遍、按配对标准误选轮，§6.6 第 6 步细节第 14 条）`m4_passes_20260929/` 跑完（2026-09-30 10:48Z，读数 `readouts/2026-09-30_m4_passes.zh.md`）：选中第 5 轮（扩充奖励 +0.0155 ± 0.0072，2.14 倍），但与第一次运行逐句比第 1–7 轮分不出差别——挪得更多、奖励没跟上，遍数不再加。**第 7 步（窗口内由模型指挥）在写**：分支 `dev-m4-window`，7.1–7.5 写完、opus 审查过（设计 §6.6 第 7 步）。**M3 第二遍读完**（2026-09-30，`window_generation_20260930`，读数 `readouts/2026-09-30_m3_window.zh.md`）：起点模型同时指挥窗口里的每一架，失去间隔 13.4 %（标注的词 4.9 %，记录 3.8 %）；同样的航班比只指挥一架多 1.7 ± 0.7 个百分点，四分之三与另一架由模型指挥的飞机；同一窗口各架奖励相关 0.05。扩充窗口（7.5）读完：失去间隔 19.8 %（插一架 24.0 %、压缩 20.2 %、挪起点 13.7 %）；第 5 轮放进窗口读：奖励 +0.0120 ± 0.0034、失去间隔 −1.49 ± 0.33 个百分点（读数 §4–§5）。用户 2026-09-30 定 7.6 从第 5 轮起、取值按建议。**7.6（M4 在窗口里训练）跑完**（分支 `dev-m4-window` `cbfdc5f2` + 读数 runner R39 `4ab15733`，待合并；2026-09-30 22:33Z → 10-01 15:04Z，读数 `readouts/2026-10-01_m4_window.zh.md`）：选中第 5 轮，扩充窗口奖励比起点 +0.0252 ± 0.0087（2.9 倍），好处主要在压紧流量的窗口；真实窗口 8 轮都没有变化；选中轮的数偏高（8 轮里挑最高的，各轮平均 +0.013），选择集也分辨不出 +0.012 那样的好处——读不读验证集、发布用的名字、配方改不改待用户定（接手看 §9 开头）。**第 8 步复飞**：第 7 条（真实复飞到再落地要多久）做完（2026-10-01，R40，读数 `readouts/2026-10-01_go_arounds.zh.md`），时限、奖励、怎样说出复飞待用户定 | `docs/two_tier/multi_aircraft_design.zh.md`（§6.4–§6.6 开发顺序与进度，§8 取值，§9 已定的事）；读数 `readouts/2026-09-27_parallel_runway_separation.md`（英文）、`readouts/2026-09-28_labelled_traffic.zh.md`、`readouts/2026-09-28_separation_masks.zh.md`、`readouts/2026-09-28_m1_interaction.zh.md`、`readouts/2026-09-28_m2_scene_prior.zh.md`、`readouts/2026-09-28_m3_free_generation.zh.md`、`readouts/2026-09-30_m3_window.zh.md` |
 | 前端 / 后端 | Training 视图有按运行日划分的集和叠加层，各轮模型可切换、按模型自己的程序屏蔽导出，详情页；叠加层在 v11 上重新导出（§7） | §7 |
 
 ---
@@ -253,7 +253,7 @@
 - **多机第 7 步**：分支 **`dev-m4-window`**（头 `4ab15733`：7.6 的代码 `cbfdc5f2` 之后并入 dev-two-tier `4dd4a76b`、加读数 runner R39；
   从 `dev-m4-passes` 起，能干净合回；**等用户合并**），
   开发在工作树 `.claude/worktrees/m4-window`。7.1–7.6 全部写完、每步 opus 审查；ts 全套 1,813 通过。**工作树 `.claude/worktrees/m3-window-run`
-  分离在 `cbfdc5f2`，7.6 正式运行从它跑——运行期间不要在那里提交、切换或改文件**（`--resume` 比对提交）；跑完、用户同意后先 unlink 数据软链接再删。
+  分离在 `cbfdc5f2`，7.6 正式运行从它跑过（2026-10-01 15:04Z 跑完）**；用户同意后先 unlink 数据软链接再删。
 
 - **`dev-two-tier`**（主检出 `/home/supercomputing/studys/thesis`）：两层模型的全部代码都在这里。关键合并：
   `7e1e2df0`（先验第三版、按落地强化、闭环提速、CAT-K 归档）、`acb93b55`（第二阶段代码 + 会影响训练的代码健康修复 + 落地质量）。
@@ -351,66 +351,38 @@
 
 ## 9 下一步
 
-### 正在跑（接手从这里开始）：多机 7.6 正式运行——M4 在窗口里训练
+### 刚跑完（接手从这里开始）：多机 7.6——M4 在窗口里训练
 
 多机设计 §6.6 第 7 步 7.6；用户 2026-09-30 定：起点 = M4 第二次运行的第 5 轮（`prior/m4_passes_20260929/traffic_s1337/round_05`），取值"按建议"。
+**读数**：[2026-10-01_m4_window](readouts/2026-10-01_m4_window.zh.md)（量法、逐轮表、读法、待定的事都在那里）。
 
-- **在做什么**：每轮在训练日的窗口上（每机场 70 个真实 + 70 个扩充窗口，每个窗口说 8 次）让窗口里每一架由模型指挥的飞机一起说话、执行器飞，
-  奖励 = 落地且不失去间隔（目视读法）；每架的优势 = 它的奖励 − 同一窗口里同一架 8 次的平均，8 次奖励不全相同、且没有一次一开始就失去间隔的才训练；
-  过 1 遍更新（交通注意力学习率 3e-4、其余 1e-5，拉回 base 的 KL 0.04，数据项 1.0，截断 0.2）；然后在固定的选择集窗口（每机场 70 + 70，
-  每个窗口 2 次）上读一遍。8 轮；按 R32 的护栏和配对标准误选轮。**第 0 轮不训练**：起点模型在选择集上的读数，作基线。
-  窗口编码按步分块（`Prior.encode` 的 `pairs_per_block`，每块 32,768 对），每个窗口都训练，没有大小上限（用户 2026-09-30：不许漏掉最密的窗口）。
-- **在哪**：运行目录 `outputs/POOLED/prior/m4_window_20260930/`——`run.sh`（逐轮调 runner：第 1 轮新开，之后 `--resume`）、`run.pid`
-  （run.sh 的进程号，按它盯）、`run.log`、`mem.log`（每分钟主机内存）。运行产物 `window_s1337/`：`config.json`、
-  `preflight.json`、`round_00/readout.json`、`round_0k/`（`sentences.json`、`sentences.npz`、`checkpoint.pt`、`optimiser.pt`、`config.json`、
-  `procedure_masks.json`、`readout.json`——readout 最后写，有它才算这轮做完）、`history.json`、跑完才有的 `choice.json`。
-  旁边是失败的开跑，只作记录、不要用也不要删：`window_s1337.aborted-20260930T2053Z`（第二次，里面有旧代码的第 0 轮和第一次的
-  `round_01.aborted-20260930T1936Z`）、`window_s1337.aborted-20260930T2116Z`（第三次，只有 config）、`run.log.1-oom`、`run.log.2-gpu-oom`、
-  `run.log.3-stopped`、`mem.log.2`、`mem.log.3`。
-- **代码**：runner `traffic_window_reward`（R37），分支 `dev-m4-window` `cbfdc5f2`（§6）。运行从工作树 `m3-window-run`（分离在 `cbfdc5f2`）跑，
-  **运行期间绝不动它**；`dev-m4-window` 可以继续开发（运行不读它）。
-- **时间表**：2026-09-30 22:33Z 开跑；数据准备 3 分钟；开跑前自检通过（第 1 轮最贵的一次说话——打分代价 108,376，8 架由模型指挥——带梯度打分，GPU 峰值
-  1.47 GB，显卡 8 GB；主机空闲 13.8 GB，要求 9.5 GB）；**第 0 轮读完**（23:24Z，43 分钟：另一个会话的导出任务抢过 CPU）：选择集奖励真实 0.813、
-  扩充 0.743（插一架 A 0.729、挪起点 B 0.776、压缩 C 0.723），失去间隔真实 13.4 %、扩充 19.1 %，真实落地 85.1 %，落地时间 / 间隔对记录 1.00 / 1.09，
-  教师强制 NLL 0.2814——与第二次开跑的第 0 轮逐架逐位相同（真实 2,104、扩充 2,248 句），分块编码和自检没有改变说话。第 1 轮 23:24Z 起说话。之后每轮：
-  训练窗口说话约 1 小时 → 训练 1 遍 → 选择集读数约 35 分钟，一轮约 2.5–3 小时；8 轮预计 2026-10-01 22:00Z 前后跑完。
-- **跑着的时候看数字**：R39 `traffic_window_reward_readout`（命令见下"跑完之后"第 2 条）随时读已完成的轮，不打扰运行（只读文件、不用 GPU）。
-- **log 里每轮该有的行**：`round k: select reward real … augmented … (…)`（选择集读数，从 k = 0 起）、`round k: N aircraft sentences in 700 windows,
-  reward …`（训练窗口说话）、`round k: 1 pass(es) over … window samples (… updates), reward term …`（训练）、`=== round k exit 0`；最后
-  `kept round K (the guards excluded …)` 和 `=== all rounds done`。
-- **怎么盯**：用 Monitor 跑下面的命令（只在读数、训练、报错、结束时出声；30 分钟或 1 小时到期就重开，用 `tail -n 0` 免得重报旧行）：
-
-  ```bash
-  L=/home/supercomputing/studys/thesis/4dTrajectory/outputs/POOLED/prior/m4_window_20260930/run.log
-  P=/home/supercomputing/studys/thesis/4dTrajectory/outputs/POOLED/prior/m4_window_20260930/run.pid
-  tail -n 0 -F $L 2>/dev/null | grep --line-buffered -E "Traceback|Error|error:|differ|out of memory|Killed|PAUSED|refus|needed for|=== round [0-9]+ exit [1-9]|=== all rounds|select reward|kept round|pass\(es\)|^round [0-9]+:" &
-  while kill -0 $(cat $P) 2>/dev/null; do sleep 30; done; sleep 3; echo "run chain gone: $(tail -1 $L)"; kill %1 2>/dev/null; exit 0
-  ```
-
-  看进程：`ps -eo pid,etime,pcpu,cmd | command grep traffic_window_reward`（一个父进程 + 3 个说话进程）；按 `run.pid` 认，不用 `pgrep -f`。
-  开 GPU 任务或跑测试前先看 `free -g`、`nvidia-smi`，不要挤运行（说话进程和训练都用 GPU）。
-- **出错怎么办**：
-  1. 读 `run.log` 的 Traceback 找原因；要改代码就在 `dev-m4-window` 改（测试 + opus 审查），不在 `m3-window-run` 里改。
-  2. 没做完的轮（目录里没有 `readout.json`）移到一边：`mv round_0k round_0k.aborted-<UTC>`，什么都不删。
-  3. 代码不用改（比如内存被别的任务挤爆）：旧 `run.log` 改名，把 `run.sh` 的循环改成从 k 开始、每轮都带 `--resume`，再
-     `cd <运行目录> && nohup setsid ./run.sh > run.log 2>&1 < /dev/null &`。`--speakers` 在 resume 时可以改小（不属于运行的配置，句子与进程数无关）。
-     若连第 0 轮都没做完（`round_00` 里没有 `readout.json`），只能把 `window_s1337` 整个移开从头跑（第 1 轮不带 `--resume`）。
-  4. 代码改了：`m3-window-run` 换到新提交后 `--resume` 会拒绝（提交不同，`['git'] differ`），只能从头跑——这会丢掉已跑的轮，**先问用户**。
-  5. 暂停：在运行目录放一个 `PAUSE` 文件，当前这轮结束后停下；继续时删掉它，按第 3 条从下一轮 `--resume`。
-- **跑完之后**：
-  1. 发 PushNotification。
-  2. 写读数 `docs/two_tier/readouts/2026-10-01_m4_window.zh.md`：逐轮选择集的真实 / 扩充奖励、失去间隔、落地、按扩充种类（插一架 / 压缩 / 挪起点），
-     对第 0 轮逐架配对的差和标准误，护栏排除了哪几轮，选中哪一轮（`choice.json`）；训练那一遍的 KL、截断比例、交通注意力输出 / 主干；和第 5 轮
-     在窗口里的读数（`readouts/2026-09-30_m3_window.zh.md` §5）对照。数字用读数 runner **R39 `traffic_window_reward_readout`**（只读运行自己的
-     文件，打印逐轮表、对第 0 轮的逐架配对差，扩充窗口奖励的配对差与 `choice.json` 相同——有测试；跑着的时候也能读已完成的轮）：它在分支
-     `dev-m4-window` 上（`4ab15733`，opus 审查过；运行用的检出 `m3-window-run` 里没有），从工作树 `.claude/worktrees/m4-window` 跑：
-     `python run_ts.py traffic_window_reward_readout --run /home/supercomputing/studys/thesis/4dTrajectory/outputs/POOLED/prior/m4_window_20260930/window_s1337`
-     （加 `--out <新目录>` 写 JSON）。不要再临时写读数脚本（用户 2026-09-30：常用的读数写成正式 runner）。然后在多机设计 §6.6 第 7 步、本文件
-     §0 和这一节更新状态。
-  3. 按"每个实验跑完都发布"的规矩，把选中轮的窗口轨迹发布到前端（R36 `window_training_export`，意图写进 `docs/experiments/intents.json`），交给 opus agent 做。
-  4. 问用户：选中轮读不读验证集窗口（R34 `traffic_window_generation --split val`）；合并 `dev-m4-window`（用户合并）；删工作树 `m3-window-run`
-     （先 unlink 数据软链接）。
-  5. 然后是第 8 步复飞（多机设计 §6.6 第 8 步、§8）。**第 7 条"先量"已做**（运行期间做的，只读、不用 GPU；2026-10-01，R40
+- **结果**：2026-09-30 22:33Z → 10-01 15:04Z，8 轮，16 小时 31 分钟，没出错。选中**第 5 轮**（`window_s1337/round_05`）：
+  - 扩充窗口奖励 0.767，比第 0 轮 +0.0252 ± 0.0087，是 2.9 倍配对标准误，护栏内。
+  - 第 3、7 轮因真实窗口落地率掉 1 个多点被排除；其余各轮只有第 5 轮过 2 倍。
+  - 好处主要在压紧流量的窗口，每轮 +0.021 到 +0.037；真实窗口 8 轮对第 0 轮都在 ±1.3 倍标准误内。
+  - 第 5 轮的数偏高：它是 8 次比较里最高的，各轮平均 +0.013。
+  - 选择集真实窗口的配对标准误约 0.0085，分辨不出 M3 窗口读数 §5 那样 +0.012 的好处。
+- **在哪**：
+  - 运行目录 `outputs/POOLED/prior/m4_window_20260930/`：`run.sh`、`run.log`、`mem.log`、运行产物 `window_s1337/`（`round_00`–`round_08`、
+    `history.json`、`choice.json`）、R39 的读数 `readout_r39/traffic_window_reward_readout.json`。
+  - 旁边是失败的开跑，只作记录、不要用也不要删：`window_s1337.aborted-20260930T2053Z`、`window_s1337.aborted-20260930T2116Z`、
+    `run.log.1-oom`、`run.log.2-gpu-oom`、`run.log.3-stopped`、`mem.log.2`、`mem.log.3`。
+- **代码**：runner R37 `traffic_window_reward` 和读数 runner R39 `traffic_window_reward_readout`，都在分支 `dev-m4-window`（`cbfdc5f2`、`4ab15733`，待用户合并）。
+  - 运行用的检出 `m3-window-run`（分离在 `cbfdc5f2`）现在可以删，先 unlink 数据软链接，待用户同意。
+  - 读数随时能重读：在 `.claude/worktrees/m4-window` 里跑（单行）
+    `python run_ts.py traffic_window_reward_readout --run /home/supercomputing/studys/thesis/4dTrajectory/outputs/POOLED/prior/m4_window_20260930/window_s1337`。
+- **接下来**（按顺序）：
+  1. **待用户定**（读数 §5）：
+     - 读不读验证集窗口（R34 `traffic_window_generation --split val`，第 5 轮与起点在同一批窗口上用同一串随机数各读一遍、逐架配对；约 3 小时 GPU；我建议读）；
+     - 发布用的名字：方法 `ts-traffic-window-reward` 不在 `prior_generation_training_export.MODEL_NAMES` 里，发布器（R36）会拒绝；我建议叫 window，
+       不能沿用 traffic，前端已有的 "traffic r5" 就是这次的起点；
+     - 配方改不改（多机设计 §8 新的一行：每架单独记功 / 按间隔余量逐步给分 / 放大选择集；我建议先读验证集，站得住就转第 8 步）。
+  2. **发布**（名字定了之后）：在 `dev-m4-window` 上把名字加进 `MODEL_NAMES` / `METHOD_MODELS` 和前端的镜像 `TRAINING_MODEL_NAMES`
+     （`aeroviz-4d/src/data/trainingOverlays.ts`，测试 `test_training_overlays` 钉住两边一致），测试 + opus 审查；再按"每个实验跑完都发布"
+     交给 opus agent 用 R36 `window_training_export` 发布第 5 轮的窗口轨迹。窗口集 `traffic_windows_select` 已在，只多一个叠加层；
+     意图写进 `docs/experiments/intents.json`。
+  3. 用户合并 `dev-m4-window`，删工作树 `m3-window-run`（先 unlink 数据软链接）。
+  4. 然后是第 8 步复飞（多机设计 §6.6 第 8 步、§8）。**第 7 条"先量"已做**（运行期间做的，只读、不用 GPU；2026-10-01，R40
      `go_around_census`，分支 `dev-go-around` `c5c7742f`，opus 审查两轮，待合并；产物 `outputs/POOLED/traffic/go_arounds_20261001/`，
      [读数](readouts/2026-10-01_go_arounds.zh.md)）：训练日 45,075 架落地里 109 次复飞；复飞到落地 p50 623 s、p95 910 s（长尾偏短，飞出 30 km
      的看不到）；现行时限的余量 p95 只有 321 s，说了复飞几乎一定超时；73 句标注了的句子里含真实复飞、按引导标注；harvest 有 15 架把低空复飞
