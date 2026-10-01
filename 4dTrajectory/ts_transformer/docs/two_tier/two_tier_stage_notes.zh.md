@@ -373,11 +373,14 @@
     `python run_ts.py traffic_window_reward_readout --run /home/supercomputing/studys/thesis/4dTrajectory/outputs/POOLED/prior/m4_window_20260930/window_s1337`。
 - **用户 2026-10-01 定**：名字叫 **window**（显示 "window r5"）；读验证集，命令给用户、用户自己跑；合并由我做。配方改不改没有回答（等验证集）。
 - **接下来**（按顺序）：
-  1. **验证集读数（用户来跑；每窗口说 2 次还是 4 次待用户定，2026-10-01 问过；用户还没启动）**：脚本 `outputs/POOLED/traffic/window_val_20261001.run/run.sh`（从固定在 `cbfdc5f2` 的检出 `m3-window-run` 跑，
+  1. **验证集读数（用户来跑；每窗口说 2 次还是 4 次待用户定，2026-10-01 问过；用户还没启动）**。**建议改用合并后的新代码读**：
+     一批一个执行器加程序屏蔽成组，正式批次快 22–48 %、与旧代码逐行相同；R34 加了 `--model-sources scene`，配对只读"窗口里一起"，模型那部分时间减半。
+     四次估计约 2 小时，原来要 5.5 小时。R41 只认 R34 的 v3 读数，所以要么全用新代码，要么全用旧代码。合并 `dev-executor-modes` 后，
+     在合并提交上开一个固定的检出，改脚本。下面是原来那份脚本的写法：脚本 `outputs/POOLED/traffic/window_val_20261001.run/run.sh`（从固定在 `cbfdc5f2` 的检出 `m3-window-run` 跑，
      所以在它跑完前不删那个工作树；`run.pid` 是脚本的进程号，`run.log`）。R34 读四次，每次约 80 分钟：真实窗口上起点 traffic r5、第 5 轮
      window r5，再同一批窗口扩充（`--augment-seed 7919`）各一次；都是 `--split val --windows-per-airport 200 --samples 4 --workers 6`、
      种子 1337，所以两个模型逐架配对。产物 `outputs/POOLED/traffic/window_val_{,aug_}{traffic,window}_r5_20261001/`。
-  2. **配对 runner R41 `traffic_window_pair`**（**写完**，分支 `dev-window-pair` `994852ca`，opus 审查后修：开口前已失去间隔也随模型而变，只配两边都计数的句子、两边各报多少；
+  2. **配对 runner R41 `traffic_window_pair`**（**写完**，已并入分支 `dev-executor-modes`（`dev-window-pair` 已删），opus 审查后修：开口前已失去间隔也随模型而变，只配两边都计数的句子、两边各报多少；
      差 = 第二个 − 第一个，按机场 × 运行日聚类算标准误；要求同一份代码读的）：读同一批窗口上两个模型的 R34 产物，配对后算差。
      - 拒绝：两份的划分、抽样（`drawn` 整块）、窗口数、样本数、温度、种子、扩充（种子与 `augmenting` 整块）、执行器、句子产物、场景、
        批的大小有任何不同；配对的键（窗口、飞机、样本、来源）集合不同；同一键的 `starts_in_a_loss` 不同（它与模型无关）。
