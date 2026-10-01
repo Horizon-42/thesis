@@ -903,7 +903,9 @@ and counted. The last round is not necessarily the kept one (`choice.round`). Wr
 
 2026-09-30. `traffic_window_generation --prior <single-aircraft prior (augmented)> --executor <spec> --instructions
 <artefact> --split select --out <new dir> [--windows-per-airport 200] [--samples 4] [--aircraft-steps 100000] [--workers 6]
-[--augment-seed N] [--device]`.
+[--augment-seed N] [--device] [--model-sources scene alone]`. `--model-sources` (2026-10-01): the model's sources to read —
+a pair of priors on the same windows needs only `scene`, half the model's time; each source reads from its own streams,
+so the rows of the source read do not change (tested); which were read is what the rows hold.
 The windows (`experiments/traffic_window.py`, design §6.6 step 7 item 1): each airport's segments tiled by 20-minute windows
 opening every 10 minutes; a window commands its flights with a sentence entering in it that fly on their own dynamics, the
 rest replayed; drawn per airport in a seeded permutation of the tiles, a tile with no flight that flies passed over and
