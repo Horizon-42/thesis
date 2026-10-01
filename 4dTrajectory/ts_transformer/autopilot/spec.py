@@ -42,6 +42,20 @@ PACKAGE = Path(__file__).resolve().parent
 #: evaluation CLI (it only names the runway data's files; a replay records the crossing heights it flew to).
 UNHASHED_IMPORTS = ("ts_transformer.instructions", "ts_transformer.io_utils", "ts_transformer.repo_layout",
                     "evaluation.cli")
+#: What the executor's integration reaches beyond its direct imports — the plant's rollout down to the right-hand side
+#: (`Plant.step` → `outputs.dynamics.rollout` → `backends` → `aerodynamic_model`'s scaled transport-chart RK4) — named
+#: whoever imports them: the code a passed record names must hold every module whose change moves a flown track (the
+#: single-flight executor once pinned these itself). Not every transitive import: that reaches the harvest, evaluation
+#: and training (100 modules), and any change there would ask for a check that cannot change an answer.
+REACHED_MODULES = (
+    "ts_transformer.outputs.constraints.speed_floor",
+    "ts_transformer.outputs.dynamics.rollout",
+    "ts_transformer.outputs.dynamics.backends",
+    "aerodynamic_model.torch_piecewise_rollout",
+    "aerodynamic_model.torch_scaled_transport_chart_dynamics",
+    "aerodynamic_model.torch_transport_chart_dynamics",
+    "aerodynamic_model.torch_dynamics",
+)
 
 
 def _imported_modules(path: Path) -> dict[str, Path]:
@@ -75,9 +89,10 @@ def _installed(file: Path) -> bool:
 
 def executor_source_files() -> list[tuple[str, Path]]:
     """What the hash covers, as ``(label, file)``: every module of the package except this file (labelled by its path in
-    the package), and every module they import directly that is the repository's code rather than the environment's
-    (labelled by its module name: the dynamics, the envelope, the approach-speed table, geokit…), except `UNHASHED_IMPORTS`. Labels, not paths, so the hash is the same from any checkout — geokit
-    is installed editable from the main checkout, outside a worktree. Direct imports only, as the labeller's hash."""
+    the package), every module they import directly that is the repository's code rather than the environment's
+    (labelled by its module name: the dynamics, the envelope, the approach-speed table, geokit…), except `UNHASHED_IMPORTS`,
+    and `REACHED_MODULES`; each file once. Labels, not paths, so the hash is the same from any checkout — geokit is
+    installed editable from the main checkout, outside a worktree."""
     own = sorted(path.resolve() for path in PACKAGE.glob("*.py") if path.name != "spec.py")
     external: dict[str, Path] = {}
     for path in own:
@@ -85,8 +100,15 @@ def executor_source_files() -> list[tuple[str, Path]]:
             if (file.parent != PACKAGE.resolve() and not _installed(file)
                     and not any(name == unhashed or name.startswith(unhashed + ".") for unhashed in UNHASHED_IMPORTS)):
                 external[name] = file
-    return ([(f"{PACKAGE.name}/{path.name}", path) for path in own]
-            + [(name, external[name]) for name in sorted(external)])
+    for name in REACHED_MODULES:
+        external[name] = Path(importlib.util.find_spec(name).origin).resolve()
+    held = set()
+    named = []
+    for name in sorted(external):
+        if external[name] not in held:
+            held.add(external[name])
+            named.append((name, external[name]))
+    return [(f"{PACKAGE.name}/{path.name}", path) for path in own] + named
 
 
 def params_to_dict(params: ExecutorParams) -> dict[str, Any]:

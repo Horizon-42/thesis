@@ -1114,6 +1114,9 @@ def test_the_executor_hash_covers_the_package_and_what_it_imports_from_the_repos
                    "ts_transformer.outputs.dynamics.rollout", "ts_transformer.outputs.envelope", "geokit",
                    "trajectory_data_process.harvest.airports"):
         assert needed in labels
+    # what the plant's integration reaches beyond them: a change there moves every flown track (review 2026-10-01)
+    assert set(executor_spec.REACHED_MODULES) <= set(labels)
+    assert len({path.resolve() for _, path in executor_spec.executor_source_files()}) == len(labels)
     assert not any(label.startswith(("ts_transformer.instructions", "ts_transformer.io_utils", "ts_transformer.repo_layout",
                                       "evaluation.cli", "torch", "numpy", "math")) for label in labels)
 

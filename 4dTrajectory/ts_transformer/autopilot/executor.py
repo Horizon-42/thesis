@@ -207,7 +207,7 @@ class Executor:
         if self.staggered:
             finished = ((self.lateral.captured & (before <= 0.0)) | ((before > 0.0) & (after.height_m < elevation))
                         | ~torch.isfinite(self.state).all(dim=1) | (after.speed_mps <= 0.0)
-                        | ((own + 1) * params.cycle_s >= self.time_limit_s)) & ~frozen
+                        | ((own + 1).to(self.state.dtype) * params.cycle_s >= self.time_limit_s)) & ~frozen
             self.done_cycle = torch.where(finished & ~self.done, own, self.done_cycle)
         else:
             finished = ((self.lateral.captured & (before <= 0.0)) | ((before > 0.0) & (after.height_m < elevation))

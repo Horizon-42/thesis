@@ -166,9 +166,9 @@ def test_the_reference_is_written_once_from_a_clean_checkout_and_checked_against
     payload = json.loads((directory / "reference.json").read_text())
     assert payload["schema"] == conformance.REFERENCE_SCHEMA and payload["flights"] == ["KXXX:f1"]
     assert payload["flown_by"] == {"executor_source_sha256": "c" * 64, "mode": "batch"}
-    differences = conformance.check(executor, instructions, batch=batch)
-    assert differences["batch"].passed
-    passed = conformance.write_passed(executor, differences)
+    checked = conformance.check(executor, instructions, batch=batch)
+    assert checked.differences["batch"].passed and checked.executor_source_sha256 == "c" * 64
+    passed = conformance.write_passed(executor, checked)
     assert passed.name == f"passed-{'c' * 12}.json"
     record_ = json.loads(passed.read_text())
     assert record_["reference_sha256"] == conformance.reference_sha256(directory)
@@ -213,12 +213,19 @@ def test_a_passed_record_needs_every_way_of_flying_within_the_bounds(tmp_path, m
     failing = conformance.Difference(expected=1, flights=1,
                                      mismatches={"KXXX:f1": ["done at cycle 3, the reference at 4"]})
     with pytest.raises(ValueError, match="every way of flying"):
-        conformance.write_passed(executor, {"batch": failing})
+        conformance.write_passed(executor, conformance.Checked({"batch": failing}, "c" * 64, {"head": "h", "dirty": False}))
     with pytest.raises(ValueError, match="every way of flying"):
-        conformance.write_passed(executor, {})
+        conformance.write_passed(executor, conformance.Checked({}, "c" * 64, {"head": "h", "dirty": False}))
     monkeypatch.setattr(conformance, "git_state", lambda: {"head": "h", "dirty": True})
     with pytest.raises(RuntimeError, match="clean checkout"):
-        conformance.write_passed(executor, {"batch": conformance.Difference(expected=1, flights=1)})
+        conformance.write_passed(executor, conformance.Checked({"batch": conformance.Difference(expected=1, flights=1)},
+                                                               "c" * 64, {"head": "h", "dirty": False}))
+    monkeypatch.setattr(conformance, "git_state", lambda: {"head": "h", "dirty": False})
+    passing = {"batch": conformance.Difference(expected=1, flights=1)}
+    # the code or the commit moved while the check flew: the record would name code that was not flown
+    for code, git in (("d" * 64, {"head": "h", "dirty": False}), ("c" * 64, {"head": "g", "dirty": False})):
+        with pytest.raises(RuntimeError, match="the code the check flew"):
+            conformance.write_passed(executor, conformance.Checked(passing, code, git))
 
 
 def test_the_verdict_json_is_the_verdict_s_fields():

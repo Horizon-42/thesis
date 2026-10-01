@@ -27,7 +27,8 @@ def main(argv: list[str] | None = None) -> int:
     instructions = args.instructions if args.instructions.is_absolute() else REPO_ROOT / args.instructions
     if args.write_reference:
         print(f"reference written → {conformance.write_reference(executor, instructions)}", flush=True)
-    differences = conformance.check(executor, instructions)
+    checked = conformance.check(executor, instructions)
+    differences = checked.differences
     for mode, difference in differences.items():
         summary = difference.summary()
         print(f"{mode}: {summary['flights']} flights, states {summary['horizontal_m']:.3g} m / {summary['vertical_m']:.3g} m "
@@ -37,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     if not all(d.passed for d in differences.values()):
         print("NOT conforming: no passed record written")
         return 1
-    print(f"conforming → {conformance.write_passed(executor, differences)}")
+    print(f"conforming → {conformance.write_passed(executor, checked)}")
     return 0
 
 

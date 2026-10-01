@@ -127,11 +127,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {name:26s} {value}")
     # its reference tracks, flown by the code that measured it, and the record that this code flies them in every way
     print(f"reference tracks → {conformance.write_reference(directory, instructions)}", flush=True)
-    differences = conformance.check(directory, instructions)
-    if not all(d.passed for d in differences.values()):
+    checked = conformance.check(directory, instructions)
+    if not all(d.passed for d in checked.differences.values()):
         raise SystemExit(f"the code that measured the spec does not fly its own reference alike in every way: "
-                         f"{ {mode: d.summary() for mode, d in differences.items()} }")
-    print(f"passed → {conformance.write_passed(directory, differences)}")
+                         f"{ {mode: d.summary() for mode, d in checked.differences.items()} }")
+    print(f"passed → {conformance.write_passed(directory, checked)}")
     return 0
 
 

@@ -208,7 +208,8 @@ class Spoken:
             return grid
         out = np.full_like(grid, UNCHANGED)
         for flight, start in enumerate(self.start):
-            out[flight, : grid.shape[1] - start] = grid[flight, start:]
+            own = max(grid.shape[1] - int(start), 0)               # none yet for a flight still to start
+            out[flight, :own] = grid[flight, grid.shape[1] - own:]
         return out
 
 

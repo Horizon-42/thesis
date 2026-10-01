@@ -143,7 +143,9 @@ def _held_clock(clock: Any, before: dict[str, Any], waiting: torch.Tensor) -> No
 def fly_staggered(batch: replay.Batch, params: ExecutorParams, words: Words) -> list[FlightResult]:
     """Multi-aircraft batch: the same flights in one executor, each from its own seeded start
     (`Executor`'s ``start_cycle``), its words on its own clock from its own first cycle (`replay.fly_sentences`'s
-    clock and limits)."""
+    clock and limits), each halted (`Executor.halt`) from the cycle after it is done while the others fly on. (The
+    words said a step at a time to such a batch, `Spoken`'s ``start_step``, are the window loop's: checked there, each
+    aircraft against the same flight flown alone — `tests/test_traffic_window.py`.)"""
     spec = words.spec
     f64 = torch.float64
     step_rows = int(round(spec.step_s / params.cycle_s))
@@ -171,6 +173,7 @@ def fly_staggered(batch: replay.Batch, params: ExecutorParams, words: Words) -> 
         executor.cycle(sentences.at(step_start_s), sentence_s)
         if bool(executor.done.all()):
             break
+        executor.halt(executor.done)          # held from the cycle after it is done, as the window loop halts a cohort
     flown = executor.flown()
     verdicts = [judge(flown, j, batch.geometries[j], batch.readings[j].runway_index, batch.readings[j],
                       batch.signals[j], spec, words) for j in range(len(batch.readings))]
@@ -434,10 +437,20 @@ def write_reference(executor_dir: Path, instructions: Path, *, batch: replay.Bat
     return directory
 
 
+@dataclasses.dataclass(frozen=True)
+class Checked:
+    """A check's differences, way by way, and the executor code and commit it flew — taken before it flew."""
+
+    differences: dict[str, Difference]
+    executor_source_sha256: str
+    git: dict[str, Any]
+
+
 def check(executor_dir: Path, instructions: Path, *, modes: Sequence[str] | None = None,
-          batch: replay.Batch | None = None) -> dict[str, Difference]:
+          batch: replay.Batch | None = None) -> Checked:
     """Fly the reference's flights in every way of ``modes`` (every one of `MODES` by default) and compare each with the
     reference."""
+    code, git = executor_source_sha256(), git_state()
     params, record, words = replay.open_spec(executor_dir, instructions)
     directory = executor_dir / DIRECTORY
     payload = json.loads((directory / "reference.json").read_text(encoding="utf-8"))
@@ -466,17 +479,19 @@ def check(executor_dir: Path, instructions: Path, *, modes: Sequence[str] | None
         for name, ref, result in zip(payload["flights"], reference, flown, strict=True):
             compare(ref, result, difference, name)
         out[mode] = difference
-    return out
+    return Checked(out, code, git)
 
 
-def write_passed(executor_dir: Path, differences: Mapping[str, Difference]) -> Path:
-    """The record that the code on disk flies the reference within the bounds in every way (refused otherwise)."""
+def write_passed(executor_dir: Path, checked: Checked) -> Path:
+    """The record that the code on disk flies the reference within the bounds in every way (refused otherwise, and
+    when the code or the commit is not the one the check flew)."""
+    differences = checked.differences
     if set(differences) != set(MODES) or not all(d.passed for d in differences.values()):
         raise ValueError("a passed record needs every way of flying checked and within the bounds")
-    git = git_state()
-    if git["dirty"]:
-        raise RuntimeError("a passed record is written from a clean checkout only (it names the code it checked)")
-    code = executor_source_sha256()
+    git, code = git_state(), executor_source_sha256()
+    if checked.git["dirty"] or git != checked.git or code != checked.executor_source_sha256:
+        raise RuntimeError("a passed record is written from a clean checkout only, for the code the check flew (the "
+                           "code or the commit changed while it flew)")
     path = passed_path(executor_dir, code)
     write_json_atomic(path, {"schema": PASSED_SCHEMA, "written_utc": utc_now(), "git": git,
                              "python": platform.python_version(), "executor_source_sha256": code,
