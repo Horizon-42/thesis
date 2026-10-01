@@ -134,6 +134,8 @@ added three entries (the rows after the performance index's).
 | The single-flight executor's pin refuses at run time, not in the tests (09-28) | open | new; see the entry | no: the backend |
 | A glidepath stop overrides a judged event that came before it (09-30) | open | new; see the entry | **yes — post-training**: stage 2's reward reads `said_rows` |
 | The read-back altitude chart's coloured labels are grey (09-30) | open | new; see the entry | no: the Training view |
+| A low go-around is stored as the landing: the best-aligned crossing, not the last (10-01) | open | new; see the entry | **yes**: flight identity, arrival slices and every sentence of the 15 flights; a harvest reclassification moves every downstream artefact |
+| Stored tracks carry other aircraft's samples; no read-time position repair (10-01) | open | new; see the entry | **yes**: the arrival slices every model reads (if repaired in the harvest view) |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -637,3 +639,27 @@ stage 2's reward (`prior_augmented_reward` reads `said_rows`), so it waits for a
 labels in their column's colour — and `index.css`'s `.training-readback-tick { fill: … }` overrides the attribute (an SVG
 presentation attribute loses to any stylesheet rule, AV40), so they render in the tick grey. Fix as `dev-training-roles` did
 for the window strip's ✕ and the sentence bar's model end time: `style={{ fill }}`. Not checked in the browser.
+
+## A low go-around is stored as the landing: the best-aligned crossing, not the last (2026-10-01)
+
+**Verified** (opus review of R40 `go_around_census`, and its formal run `outputs/POOLED/traffic/go_arounds_20261001/`).
+`trajectory_data_process/harvest/threshold_event.py:113-119` takes as the landing the threshold crossing under 100 m with the
+smallest |cross|, not the last one. When a low go-around crossed better aligned than the landing that followed, it becomes
+`landing_sample_index` — so the flight's `landing_time_utc` (part of its `flight_key`), its arrival slice and its sentence
+end at a go-around. On the training days 15 flights hold a level 150 m above their stored landing and end back on a final
+(`landings_not_the_last` → "landed later"; 9 labelled: KRDU UAL2485, RPA9931, KSTL DAL1371, SWA3286, BOE57A, UAL214, N320TS,
+KSMF SWA1521, KMSY GJS4412); the real landing comes a median 669 s later. 73 more land then leave (touch-and-go circuits,
+38 labelled) — their stored landing is a touch-and-go, which the landing rule reads as a landing anyway. Judgement: take the
+LAST qualifying crossing (or the last before the sustained ground run). It changes identities and slices of those flights and
+needs `--reclassify-existing` and a rebuild of everything downstream — the user's call.
+
+## Stored tracks carry other aircraft's samples; no read-time position repair (2026-10-01)
+
+**Verified** (R40 `go_around_census`). Stored tracks hold the odd run of another aircraft's samples — a position 5–40 km off
+with that aircraft's altitude (KRDU RPA5593 sample 570: 15 km away and 400 m up between two samples on its final; MXY1067
+samples near 6, 36, 39; N48CL 36–38; ASA2625 633). `harvest/altitude_filter.py` repairs altitude needles only, and a run of
+three is the median of its own five-sample window, so the view passes them through. R40 sets them aside locally (over 1 km
+from the median position of the 5 samples either side): 206 samples over the 45,075 training-day landing tracks. Not counted
+how many fall inside arrival slices, nor what they do to the labeller or the evaluation's observed baseline. Judgement: a
+position repair beside the altitude one in the derived view (`store.read_track_view`) — it would change arrival slices every
+model reads, so it waits for a rebuild.
