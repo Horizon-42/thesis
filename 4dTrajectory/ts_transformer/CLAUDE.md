@@ -432,7 +432,7 @@ scores its lateness × speed; the arrival endpoint error is where it landed (R38
 `window_training_export` writes R34's windows for the frontend's Training
 module — a model-free window set (`traffic-windows`: 20 select windows an airport of the readouts' draw, by size) and a
 `window-generation` overlay per prior on its OWN draws (no readout re-run; `--readout` only copies summaries); the landings
-are the aircraft whose own end is a landing; the M4 model is named `traffic` (R36).
+are the aircraft whose own end is a landing; the M4 model is named `traffic`, M4 in windows (R37) `window` (R36).
 `traffic_window_reward` is M4 in windows — R32's rounds over window samples: every commanded aircraft rewarded, its advantage
 against its own samples, each sample scored whole as the speaker read it (`experiments/traffic_window_tuner.py`, the one layout
 `window_inputs` / `window_edges`, encoded in blocks of steps so every window fits the GPU; one commanded aircraft a window trains

@@ -123,8 +123,8 @@ const BINARY_SLACK = 1e-9;
 export const TRAINING_GENERATION_KINDS = ["prior-generation", "prior-generation-augmented"] as const satisfies readonly TrainingOverlayKind[];
 /** MIRROR of `prior_generation_training_export.MODEL_NAMES`: the prior's models, in the order they are trained — base
  *  (data alone), landing (post-trained on the landing reward), augmented (landing post-trained again on augmented
- *  starts), traffic (augmented post-trained in multi-aircraft scenes, M4; the user 2026-09-30). The views order them
- *  so. */
+ *  starts), traffic (augmented post-trained in multi-aircraft scenes, M4; the user 2026-09-30), window (a traffic round
+ *  post-trained again in windows whose every aircraft it commands; the user 2026-10-01). The views order them so. */
 export const TRAINING_MODEL_NAMES = ["base", "landing", "augmented", "traffic", "window"] as const;
 export type TrainingModelName = (typeof TRAINING_MODEL_NAMES)[number];
 /** MIRROR of `ts_transformer.autopilot.judge.CROSSINGS`: the outcomes read at a crossing of a threshold (the pointed
