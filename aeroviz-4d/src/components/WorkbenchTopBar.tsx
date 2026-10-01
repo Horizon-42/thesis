@@ -3,7 +3,7 @@
  * -------------------
  * The persistent top context bar of the workbench shell. It holds the app's
  * orthogonal global context — Active Airport + Landing Runway — and the single
- * task switcher (Evaluate / Learning / Fly / Optimize, plus the Procedures toggle) that replaces the
+ * task switcher (Fly | Optimize / Learning / Evaluate, plus the Procedures toggle) that replaces the
  * app's former two competing "mode" systems. It also exposes the on-demand Layers
  * drawer and the Presentation-mode toggle.
  *
@@ -13,16 +13,26 @@
 import { useApp, type WorkbenchMode } from "../context/AppContext";
 import { useLandingsManifest } from "../hooks/useLandingsManifest";
 
-const TASK_TABS: Array<{ mode: WorkbenchMode; label: string }> = [
-  // Only the tab reads "Evaluate"; the task (mode `evaluation`) and its summaries keep "Evaluation".
-  { mode: "evaluation", label: "Evaluate" },
-  // Learning sits next to Evaluation on purpose: both read the same observed arrivals,
-  // Evaluation asking how the aircraft flew and Learning what that track was read as.
-  // Only the tab is named Learning: what it shows is still the training of the models
-  // (its sets, rounds and details), so its mode and code keep the name `training`.
-  { mode: "training", label: "Learning" },
-  { mode: "fly", label: "Fly" },
-  { mode: "optimize", label: "Optimize" },
+interface TaskTab {
+  mode: WorkbenchMode;
+  label: string;
+}
+
+/**
+ * The tasks in GROUPS, left to right (the user's order, 2026-10-01): Fly on its own, then
+ * Optimize, Learning, Evaluate. A gap sets each group apart (`workbench-task-group-start`,
+ * the same gap that sets the Procedures toggle apart).
+ */
+const TASK_GROUPS: TaskTab[][] = [
+  [{ mode: "fly", label: "Fly" }],
+  [
+    { mode: "optimize", label: "Optimize" },
+    // Only the tab is named Learning: what it shows is still the training of the models
+    // (its sets, rounds and details), so its mode and code keep the name `training`.
+    { mode: "training", label: "Learning" },
+    // Only the tab reads "Evaluate"; the task (mode `evaluation`) and its summaries keep "Evaluation".
+    { mode: "evaluation", label: "Evaluate" },
+  ],
 ];
 
 export default function WorkbenchTopBar() {
@@ -83,22 +93,23 @@ export default function WorkbenchTopBar() {
       </div>
 
       <nav className="workbench-task-switcher" role="group" aria-label="Task">
-        {TASK_TABS.map((tab) => (
+        {TASK_GROUPS.flatMap((group, groupIndex) => group.map((tab, index) => (
           <button
             key={tab.mode}
             type="button"
-            className={`workbench-task-tab${mode === tab.mode ? " active" : ""}`}
+            className={`workbench-task-tab${groupIndex > 0 && index === 0 ? " workbench-task-group-start" : ""}${
+              mode === tab.mode ? " active" : ""}`}
             aria-pressed={mode === tab.mode}
             onClick={() => setMode(tab.mode)}
           >
             {tab.label}
           </button>
-        ))}
+        )))}
         {/* Procedures is an independent toggle, not a task — it coexists with the
             active task above (separated here to signal that). */}
         <button
           type="button"
-          className={`workbench-task-tab workbench-task-tab-toggle${proceduresOpen ? " active" : ""}`}
+          className={`workbench-task-tab workbench-task-group-start workbench-task-tab-toggle${proceduresOpen ? " active" : ""}`}
           aria-pressed={proceduresOpen}
           onClick={() => setProceduresOpen(!proceduresOpen)}
         >

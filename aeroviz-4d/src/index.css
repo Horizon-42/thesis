@@ -335,7 +335,8 @@ body,
 
 /* Procedures is an independent toggle, not an exclusive task — set it apart with a
    gap and a distinct (teal) active state matching the Layers/Present toggles. */
-.workbench-task-tab-toggle {
+/* The gap that sets a group of tabs apart: each task group after the first, and the Procedures toggle. */
+.workbench-task-group-start {
   margin-left: 14px;
 }
 

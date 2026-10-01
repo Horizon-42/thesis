@@ -230,7 +230,8 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   only interpolates); **the drawn pitch is the path angle, the attack only in the label** (user, 2026-09-30: the lift curve
   has no flaps); a flight without an airframe has no bank/attack (null: wings level, said); ONE model orientation
   (`utils/aircraftOrientation.ts`) for Fly, Optimize and Training (AV42).
-- **Four tasks: Evaluation (was Observe; tab label "Evaluate" — name only, mode `evaluation`; its observed source is
+- **Four tasks, tabs in the user's order Fly ‖ Optimize · Learning · Evaluate ‖ Procedures (`TASK_GROUPS`, one gap
+  rule): Evaluation (was Observe; tab label "Evaluate" — name only, mode `evaluation`; its observed source is
   Ground Truth, id `groundTruth`), Learning (only the
   module's NAME — tab and dock heading; it still shows training, so mode `training` and every code/data name stay), Fly,
   Optimize — Compare is part of Fly.** `PilotPanel` takes the workbench task as its mode (no tabs of its own). Fly is one

@@ -75,22 +75,22 @@ describe("WorkbenchTopBar", () => {
     expect(setMode).toHaveBeenCalledWith("optimize");
   });
 
-  // Training reads the same observed arrivals as Evaluation (what the track was read
-  // as, rather than how it was flown), so it sits immediately right of it — not at
-  // the end of the row next to the solver tasks.
-  it("places Learning (the training task) immediately right of Evaluation and switches to it", () => {
+  // The user's order (2026-10-01): Fly on its own, a gap, then Optimize, Learning, Evaluate;
+  // the Procedures toggle after another gap.
+  it("orders the tabs Fly | Optimize, Learning, Evaluate | Procedures and switches to Learning", () => {
     render(<WorkbenchTopBar />);
 
-    const labels = Array.from(
-      document.querySelectorAll(".workbench-task-switcher .workbench-task-tab"),
-    ).map((node) => node.textContent);
-    expect(labels).toEqual([
-      "Evaluate",
-      "Learning",
+    const tabs = Array.from(document.querySelectorAll(".workbench-task-switcher .workbench-task-tab"));
+    expect(tabs.map((node) => node.textContent)).toEqual([
       "Fly",
       "Optimize",
+      "Learning",
+      "Evaluate",
       "Procedures",
     ]);
+    // a gap starts each group after the first
+    expect(tabs.map((node) => node.classList.contains("workbench-task-group-start")))
+      .toEqual([false, true, false, false, true]);
 
     fireEvent.click(screen.getByRole("button", { name: "Learning" }));
     expect(setMode).toHaveBeenCalledWith("training");

@@ -765,7 +765,9 @@ indeterminate on another runway.
   已发布数据里的字段名不改：比较索引 `rawKinematics.observedBaseline` 是 Python 构建器写的契约，改名要重新发布。
 - 同日用户又把 Training 这个模块改名 **Learning**——只改模块的名字（顶栏标签、左栏标题），里面讲的仍是模型的训练（集合、轮次、
   "Training details"），所以模式名 `training`、代码和数据格式里的 training 都不改。随后 Evaluation 的标签也只改名为 **Evaluate**
-  （模式名 `evaluation`、"Ground Truth Evaluation" 等摘要不变）。顶栏读作 Evaluate / Learning / Fly / Optimize。
+  （模式名 `evaluation`、"Ground Truth Evaluation" 等摘要不变）。同日用户定了顶栏顺序：**Fly ‖ Optimize · Learning · Evaluate
+  ‖ Procedures**——任务分组（`TASK_GROUPS`），每组（第一组除外）和 Procedures 开关前面空一格，同一条
+  `.workbench-task-group-start` 规则。
 - Fly / Optimize 面板的文字颜色定在 `.pilot-panel` 根上（`#e0e6f0`，同 `.training-panel`），三种行（设置、步进、选项）的字段名
   一条规则 `#cbd5e1`：原来 Controls 的标签没有自己的颜色，继承了页面默认的深色，压在深色左栏上看不见。
 - **`PilotPanel` 直接拿工作台的任务当模式**（`mode: "fly" | "optimize"`，必填）；面板自己的标签行、`onRequestMode` 和左栏的

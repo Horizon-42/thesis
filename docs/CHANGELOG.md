@@ -1,5 +1,10 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-01 — Frontend: task tabs ordered Fly | Optimize, Learning, Evaluate
+
+- The user's order: Fly on its own, a gap, then Optimize, Learning, Evaluate; the tabs are task GROUPS (`TASK_GROUPS`) and
+  one rule (`.workbench-task-group-start`) makes every gap, the Procedures toggle's too. AV43.
+
 ### 2026-10-01 — Frontend: the Evaluation tab reads Evaluate (name only)
 
 - The user: the tab label only; the mode id `evaluation` and the "Ground Truth Evaluation" summaries keep their names. AV43.
