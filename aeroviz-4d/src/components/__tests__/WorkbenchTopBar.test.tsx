@@ -67,7 +67,7 @@ describe("WorkbenchTopBar", () => {
   it("renders the four exclusive task tabs and switches mode on click", () => {
     render(<WorkbenchTopBar />);
 
-    for (const label of ["Evaluation", "Learning", "Fly", "Optimize"]) {
+    for (const label of ["Evaluate", "Learning", "Fly", "Optimize"]) {
       expect(screen.getByRole("button", { name: label })).toBeTruthy();
     }
 
@@ -85,7 +85,7 @@ describe("WorkbenchTopBar", () => {
       document.querySelectorAll(".workbench-task-switcher .workbench-task-tab"),
     ).map((node) => node.textContent);
     expect(labels).toEqual([
-      "Evaluation",
+      "Evaluate",
       "Learning",
       "Fly",
       "Optimize",
@@ -112,7 +112,7 @@ describe("WorkbenchTopBar", () => {
     appState.mode = "fly";
     render(<WorkbenchTopBar />);
     expect(screen.getByRole("button", { name: "Fly" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "Evaluation" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "Evaluate" }).getAttribute("aria-pressed")).toBe("false");
   });
 
   it("switches the active airport from the selector", () => {
