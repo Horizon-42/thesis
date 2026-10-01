@@ -72,6 +72,8 @@ export interface TrainingReadbackWindowProps {
   candidates: TrainingCandidate[];
   layers: TrainingLayers;
   cursorS: number;
+  /** The cursor is on the flight (`cursorOnFlight`). */
+  cursorOn: boolean;
   onCursorChange: (seconds: number) => void;
   /** The selected word class; its word in force at the cursor is the one drawn yellow. */
   column: TrainingColumn | null;
@@ -148,6 +150,7 @@ export default function TrainingReadbackWindow(props: TrainingReadbackWindowProp
 
   return (
     <TrainingWindow title="Read-back check" closeLabel="Close the read-back check" cursorS={cursorS} cursorRow={m.cursorRow}
+      cursorOn={m.cursorOn}
       onClose={onClose}
       chips={<>
         <span>{flight.callsign}</span>

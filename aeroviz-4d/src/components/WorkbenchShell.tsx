@@ -14,6 +14,7 @@
 
 import { useEffect, type ReactNode } from "react";
 import { useApp } from "../context/AppContext";
+import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import WorkbenchTopBar from "./WorkbenchTopBar";
 import LayersDrawer from "./LayersDrawer";
 
@@ -28,7 +29,7 @@ export default function WorkbenchShell({
   bottom?: ReactNode;
   children: ReactNode;
 }) {
-  const { presentationMode, setPresentationMode } = useApp();
+  const { presentationMode, setPresentationMode, mode, viewer } = useApp();
 
   // Presentation mode hides all chrome (including the top bar that toggled it), so
   // Esc is the always-available way back out, alongside the floating exit button.
@@ -47,6 +48,16 @@ export default function WorkbenchShell({
     document.body.classList.toggle("workbench-presentation-active", presentationMode);
     return () => document.body.classList.remove("workbench-presentation-active");
   }, [presentationMode]);
+
+  // Training runs no clock (it loads no CZML; the sentence bar keeps its own time), so Cesium's clock dial, timeline and
+  // full-screen button are hidden there and the sentence bar takes the bottom edge (`index.css`). Hidden by `visibility`,
+  // which the viewer's layout reads: a forced resize then lays the credits out without them, and lays the timeline out
+  // again on the way back.
+  useEffect(() => {
+    document.body.classList.toggle("workbench-training-active", mode === "training");
+    if (isCesiumViewerUsable(viewer)) viewer.forceResize();
+    return () => document.body.classList.remove("workbench-training-active");
+  }, [mode, viewer]);
 
   return (
     <div className={`workbench${presentationMode ? " workbench--presentation" : ""}`}>

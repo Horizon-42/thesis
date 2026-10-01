@@ -1,7 +1,7 @@
 /**
  * EvaluationSummary.tsx
  * ---------------------
- * Subject-aware evaluation summary for the active Observe comparison category.
+ * Subject-aware evaluation summary for the active Evaluation comparison category.
  *
  * The three producers answer different questions, so they deliberately do not share
  * one generic set of "solve/success" labels:
@@ -45,6 +45,8 @@ interface LoadedSummary {
   prediction: PredictionAccuracyStats | null;
   evaluation: EvaluationBatchStats | null;
   report: EvaluationReport | null;
+  /** Groups that passed on another runway than the observed flight's (status `otherRunway`, AV40). */
+  otherRunway: number;
 }
 
 interface SummaryRow {
@@ -167,7 +169,7 @@ function observedPresentation(report: ObservedEvaluationSummary | null): Present
   const verticalMeanAbs = report?.vertical_m?.mean_abs;
 
   return {
-    title: "Observed Baseline Evaluation",
+    title: "Ground Truth Evaluation",
     context: "Observed ADS-B trajectories",
     note:
       "Runway assignment produces one policy-free threshold-event estimate by direct " +
@@ -268,6 +270,7 @@ function predictionPresentation(
   prediction: PredictionAccuracyStats | null,
   stats: OptimizationStats | null,
   evaluation: EvaluationBatchStats | null,
+  otherRunway: number,
 ): Presentation {
   const targetPassRate = evaluation?.successRate ?? passRateAmongSolved(stats);
   const formatCount = (value: number | null | undefined) =>
@@ -320,6 +323,12 @@ function predictionPresentation(
     ),
   ];
   const terminalComplianceRows = [
+    // the verdicts below are on the observed flight's runway; a flight that passed on the runway it landed on instead
+    // is counted here (and drawn in its own colour)
+    ...(otherRunway > 0
+      ? [row("Passed on another runway than the observed flight's (not counted as a pass below)",
+          formatCount(otherRunway), true)]
+      : []),
     ...optionalRow(
       "Successful terminal verdicts",
       evaluation?.successful,
@@ -492,6 +501,7 @@ export default function EvaluationSummary({
         prediction: null,
         evaluation: null,
         report: null,
+        otherRunway: 0,
       });
     } else {
       setLoading(true);
@@ -511,6 +521,7 @@ export default function EvaluationSummary({
             prediction: data.prediction ?? null,
             evaluation: data.evaluation ?? null,
             report: null,
+            otherRunway: data.groups.filter((group) => group.status === "otherRunway").length,
           });
         })
         .catch((fetchError) => {
@@ -550,6 +561,7 @@ export default function EvaluationSummary({
         loaded?.key === sourceKey ? loaded.prediction : null,
         loaded?.key === sourceKey ? loaded.stats : null,
         loaded?.key === sourceKey ? loaded.evaluation : null,
+        loaded?.key === sourceKey ? loaded.otherRunway : 0,
       );
     }
     return optimizationPresentation(

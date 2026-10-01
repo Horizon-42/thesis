@@ -6,10 +6,10 @@
  * and the legend name the envelopes and point here). On the details page's "Vocabulary" section (`training/TrainingDetails`).
  */
 
-import { TRAINING_COLUMNS, TRAINING_SPEC_SHA256, type TrainingSample } from "../data/trainingSample";
+import { TRAINING_COLUMNS, TRAINING_SPEC_SHA256, type TrainingSetHead } from "../data/trainingSample";
 import { shortSha } from "../data/trainingText";
 
-export default function TrainingVocabularyNotes({ sample }: { sample: TrainingSample }) {
+export default function TrainingVocabularyNotes({ sample }: { sample: TrainingSetHead }) {
   const { vocabulary, candidates } = sample;
   const rows: Array<[string, string]> = [
     ["Vocabulary", `${vocabulary.readingRule} · spec ${shortSha(vocabulary.specSha256)}` +
@@ -31,7 +31,7 @@ export default function TrainingVocabularyNotes({ sample }: { sample: TrainingSa
     ["Altitude", `${vocabulary.altitudeTargetsM[1] - vocabulary.altitudeTargetsM[0]} m MSL grid to ` +
       `${vocabulary.altitudeTargetsM[vocabulary.altitudeTargetsM.length - 1]} m, or "descend to land"; tube ` +
       `±${vocabulary.altitudeToleranceM} m`],
-    ["Angle", vocabulary.angleClasses.map((angle) => (angle.value === vocabulary.angleLevelValue ? angle.name
+    ["Descent", vocabulary.angleClasses.map((angle) => (angle.value === vocabulary.angleLevelValue ? angle.name
       : `${angle.name} ${angle.nominalDeg}° (${angle.lowDeg}…${angle.steepDeg}°)`)).join(" · ")],
     ["Speed", `ground speed ${vocabulary.speedTargetsMps[0]}…${vocabulary.speedTargetsMps[vocabulary.speedTargetsMps.length - 1]} ` +
       `m/s or "unspecified"; band ±${vocabulary.speedToleranceMps} m/s, at most ${vocabulary.speedAccelMaxMps2} m/s² between`],

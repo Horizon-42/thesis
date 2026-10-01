@@ -208,8 +208,8 @@ change you are making go in `docs/code-health-followups.md` instead.
     `vertical: "Source GeoTIFF elevation values, used directly as metres"` — no datum handling —
     while Cesium expects ellipsoidal heights and the aircraft CZML correctly supplies them. Found
     while chasing the datum bug; not investigated further.
-  - Approach view: the Observe 3-colour comparison overlay is a separate datasource not yet fed to
-    the view (Observe-with-comparison plots neither source); the pre-existing `useCzmlLoader` clock
-    write is still ungated for the Observe+comparison two-writer case.
+  - Approach view: the Evaluation 3-colour comparison overlay is a separate datasource not yet fed to
+    the view (Evaluation-with-comparison plots neither source); the pre-existing `useCzmlLoader` clock
+    write is still ungated for the Evaluation+comparison two-writer case.
   - Approach-view interior-gap `break` is latent (current CZMLs are single-interval); the 07-07
     approach-view changes were verified via tests/tsc/build but not re-checked in-browser.

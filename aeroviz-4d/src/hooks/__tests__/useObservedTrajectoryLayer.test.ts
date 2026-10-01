@@ -17,7 +17,7 @@ function observedResponse(
   verdicts: unknown = null,
   evaluation: unknown = null,
 ) {
-  // The baseline layer shows the complete recorded track; only the comparison overlay's
+  // The ground-truth layer shows the complete recorded track; only the comparison overlay's
   // reference asks for the arrival window.
   return {
     schemaVersion: "observed-trajectories-v2",

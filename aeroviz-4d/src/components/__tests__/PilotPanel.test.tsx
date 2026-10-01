@@ -80,7 +80,7 @@ vi.mock("../../hooks/useDynamicsComparisonPlayback", () => ({
 
 vi.mock("../../pilot/dynamicsComparisonClient", () => ({
   runDynamicsComparison: mocks.runDynamicsComparison,
-  // the Compare tab asks how many comparisons are kept when it opens
+  // Fly asks how many comparisons are kept when it opens
   fetchDynamicsComparisonHistoryCount: async () => 0,
 }));
 
@@ -117,7 +117,7 @@ vi.mock("../../pilot/trajectoryOptimizationClient", async (importOriginal) => ({
   runTrajectoryOptimization: mocks.runTrajectoryOptimization,
 }));
 
-describe("PilotPanel trajectory play mode", () => {
+describe("PilotPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.fetchPilotAircraftConfigs.mockResolvedValue([
@@ -262,7 +262,7 @@ describe("PilotPanel trajectory play mode", () => {
     mocks.openWorkerSession.mockResolvedValue(undefined);
     mocks.closeWorkerSession.mockResolvedValue(undefined);
 
-    const optimize = render(<PilotPanel mode="trajectory" />);
+    const optimize = render(<PilotPanel mode="optimize" />);
     await waitFor(() => {
       expect(mocks.openWorkerSession).toHaveBeenCalledWith("optimizer");
     });
@@ -272,7 +272,7 @@ describe("PilotPanel trajectory play mode", () => {
   });
 
   it("hides backend URL and switches pilot controls between alpha and load factor", async () => {
-    render(<PilotPanel />);
+    render(<PilotPanel mode="fly" />);
 
     expect(await screen.findByText("A320")).toBeTruthy();
     expect(screen.queryByText("http://127.0.0.1:8765")).toBeNull();
@@ -303,7 +303,7 @@ describe("PilotPanel trajectory play mode", () => {
 
     fireEvent.change(loadFactorInput, { target: { value: "1.25" } });
     fireEvent.blur(loadFactorInput);
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    fireEvent.click(within(screen.getByLabelText("Live flight")).getByRole("button", { name: "Reset" }));
 
     await waitFor(() => {
       expect(mocks.resetPilotSimulation).toHaveBeenCalledWith(
@@ -320,7 +320,7 @@ describe("PilotPanel trajectory play mode", () => {
   });
 
   it("switches pilot controls to load factor for casadi simulation", async () => {
-    render(<PilotPanel />);
+    render(<PilotPanel mode="fly" />);
 
     expect(await screen.findByText("A320")).toBeTruthy();
     const simulationSelect = screen.getByRole("combobox", {
@@ -338,7 +338,7 @@ describe("PilotPanel trajectory play mode", () => {
 
     fireEvent.change(loadFactorInput, { target: { value: "1.15" } });
     fireEvent.blur(loadFactorInput);
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    fireEvent.click(within(screen.getByLabelText("Live flight")).getByRole("button", { name: "Reset" }));
 
     await waitFor(() => {
       expect(mocks.resetPilotSimulation).toHaveBeenCalledWith(
@@ -354,13 +354,12 @@ describe("PilotPanel trajectory play mode", () => {
     });
   });
 
-  it("opens trajectory play from pilot mode and submits runway-target optimization", async () => {
+  it("submits runway-target optimization in Optimize", async () => {
     // a range preset: its target (the speeds below) is not its range's lower end, so neither can stand in for the other
     mocks.fetchPilotAircraftConfigs.mockResolvedValue([A320_RANGE_CONFIG]);
-    render(<PilotPanel />);
+    render(<PilotPanel mode="optimize" />);
 
     expect(await screen.findByText("A320")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
 
     expect(screen.getByText("Trajectory Play")).toBeTruthy();
     expect(await screen.findByText("Target State")).toBeTruthy();
@@ -479,10 +478,9 @@ describe("PilotPanel trajectory play mode", () => {
   });
 
   it("chooses the optimizer via frame × fitting; ENU frame forces shooting", async () => {
-    render(<PilotPanel />);
+    render(<PilotPanel mode="optimize" />);
 
     expect(await screen.findByText("A320")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
     await waitFor(() => {
       expect(mocks.fetchRnavInitialFixCandidates).toHaveBeenCalledWith(
         "KRDU",
@@ -538,9 +536,8 @@ describe("PilotPanel trajectory play mode", () => {
     // REGRESSION: the panel holds the optimizer AXES as state (not the composed wire string, which
     // can't encode frame/transport/normalized in constrained mode). So picking a non-default frame,
     // flipping Constraints to procedure and back, must return the SAME frame — not silently reset.
-    render(<PilotPanel />);
+    render(<PilotPanel mode="optimize" />);
     expect(await screen.findByText("A320")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
 
     const constraintsSelect = screen.getByRole("combobox", { name: "Constraints" }) as HTMLSelectElement;
     const frameSelect = screen.getByRole("combobox", { name: "Frame" }) as HTMLSelectElement;
@@ -555,9 +552,8 @@ describe("PilotPanel trajectory play mode", () => {
   });
 
   it("drives the target runway's procedure display in Optimize+constrained, and restores on exit", async () => {
-    render(<PilotPanel />);
+    render(<PilotPanel mode="optimize" />);
     expect(await screen.findByText("A320")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
 
     // Reactive (not a one-shot): entering Optimize with the DEFAULT constrained mode
     // drives the target runway's procedures on — no manual switch needed. Scopes to
@@ -582,9 +578,8 @@ describe("PilotPanel trajectory play mode", () => {
   });
 
   it("opens the target runway's approach view from the Approach-view toggle", async () => {
-    render(<PilotPanel />);
+    render(<PilotPanel mode="optimize" />);
     expect(await screen.findByText("A320")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
 
     // The target summary carries a Approach-view toggle for the target runway (RW05L → "05L").
     const profileButton = await screen.findByRole("button", { name: "View" });
@@ -596,13 +591,13 @@ describe("PilotPanel trajectory play mode", () => {
 
   it("says why when the aircraft catalog does not load — in every mode — and offers no target speed to edit or optimize", async () => {
     mocks.fetchPilotAircraftConfigs.mockRejectedValue(new Error("the backend at http://backend.test did not answer"));
-    render(<PilotPanel />);
+    const view = render(<PilotPanel mode="fly" />);
 
     const why = /The aircraft catalog did not load: the backend at http:\/\/backend\.test did not answer/;
     expect((await screen.findByRole("alert")).textContent).toMatch(why);
-    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+    view.rerender(<PilotPanel mode="optimize" />);
     const targetSummary = await screen.findByLabelText("Target aircraft state summary");
-    // entering Trajectory — and the RNAV candidates loading there — clear the panel's one-shot error, never why there
+    // entering Optimize — and the RNAV candidates loading there — clear the panel's one-shot error, never why there
     // is no aircraft
     await waitFor(() => expect(mocks.fetchRnavInitialFixCandidates).toHaveBeenCalled());
     await act(async () => undefined);
@@ -618,25 +613,27 @@ describe("PilotPanel trajectory play mode", () => {
     expect(optimize.disabled).toBe(true);
     fireEvent.click(optimize);
     expect(mocks.runTrajectoryOptimization).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+    view.rerender(<PilotPanel mode="fly" />);
     expect(shown()).toBe(true);
+    // no aircraft: neither run of Fly can start
+    expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Compute" }) as HTMLButtonElement).disabled).toBe(true);
 
     // the backend is up now: Retry asks again, and the aircraft is there
     mocks.fetchPilotAircraftConfigs.mockResolvedValue([a320Config]);
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(screen.queryAllByRole("alert").some((alert) => why.test(alert.textContent ?? ""))).toBe(false));
     expect(mocks.fetchPilotAircraftConfigs).toHaveBeenCalledTimes(2);
-    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+    view.rerender(<PilotPanel mode="optimize" />);
     const loaded = await screen.findByLabelText("Target aircraft state summary");
     await waitFor(() => expect(within(loaded).queryByText("— (no aircraft)")).toBeNull());
     expect(within(loaded).getByText(/ m\/s$/)).toBeTruthy();
   });
 
   it("clamps trajectory target speed and heading to threshold constraints", async () => {
-    render(<PilotPanel />);
+    render(<PilotPanel mode="optimize" />);
 
     expect(await screen.findByText("A320")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
 
     const targetSummary = await screen.findByLabelText("Target aircraft state summary");
     fireEvent.click(within(targetSummary).getByRole("button", { name: "Edit" }));
@@ -674,10 +671,9 @@ describe("PilotPanel trajectory play mode", () => {
     // elsewhere) — NOT the runway.geojson pavement midpoint, which sits hundreds of metres off
     // on displaced-threshold runways. The mocked runway target here is deliberately offset from
     // the CIFP threshold so the assertion discriminates the two sources.
-    render(<PilotPanel />);
+    render(<PilotPanel mode="optimize" />);
 
     expect(await screen.findByText("A320")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
     await waitFor(() => {
       expect(mocks.fetchRnavInitialFixCandidates).toHaveBeenCalled();
     });
@@ -719,10 +715,9 @@ describe("PilotPanel trajectory play mode", () => {
     // custom-start constrained optimize impossible (the panel demanded a selection, and
     // re-selecting snapped the start back onto the fix). The selector names the PROCEDURE; the
     // start is independent — the backend adds a transition phase + the fix-passage disc.
-    render(<PilotPanel />);
+    render(<PilotPanel mode="optimize" />);
 
     expect(await screen.findByText("A320")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
     await waitFor(() => {
       expect(mocks.fetchRnavInitialFixCandidates).toHaveBeenCalled();
     });
@@ -763,7 +758,7 @@ describe("PilotPanel trajectory play mode", () => {
   });
 
   it("keeps the initial aircraft editor open after placing the aircraft", async () => {
-    render(<PilotPanel />);
+    render(<PilotPanel mode="fly" />);
 
     expect(await screen.findByText("A320")).toBeTruthy();
     const initialSummary = screen.getByLabelText("Initial aircraft state summary");
@@ -803,10 +798,10 @@ describe("PilotPanel trajectory play mode", () => {
   });
 
   it("keeps the initial placement preview visible while replacing an existing snapshot", async () => {
-    render(<PilotPanel />);
+    render(<PilotPanel mode="fly" />);
 
     expect(await screen.findByText("A320")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    fireEvent.click(within(screen.getByLabelText("Live flight")).getByRole("button", { name: "Reset" }));
 
     await waitFor(() => {
       expect(mocks.resetPilotSimulation).toHaveBeenCalled();
@@ -829,10 +824,9 @@ describe("PilotPanel trajectory play mode", () => {
 
   it("plays the optimized trajectory on the Cesium clock and shows the sampled control", async () => {
     document.body.innerHTML = '<div class="cesium-overlay-container"></div>';
-    render(<PilotPanel />);
+    render(<PilotPanel mode="optimize" />);
 
     expect(await screen.findByText("A320")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
     // Default is the procedure-constrained mode; this test plays a plain (unconstrained) run.
     fireEvent.change(screen.getByRole("combobox", { name: "Constraints" }), {
       target: { value: "none" },
@@ -917,10 +911,9 @@ describe("PilotPanel trajectory play mode", () => {
       },
     });
 
-    render(<PilotPanel />);
+    render(<PilotPanel mode="optimize" />);
 
     expect(await screen.findByText("A320")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
     // Default is the procedure-constrained mode; this test exercises a plain optimized run.
     fireEvent.change(screen.getByRole("combobox", { name: "Constraints" }), {
       target: { value: "none" },
@@ -948,9 +941,8 @@ describe("PilotPanel trajectory play mode", () => {
   });
 
   it("surfaces the per-leg constraint hint when Constraints = procedure", async () => {
-    render(<PilotPanel />);
+    render(<PilotPanel mode="optimize" />);
     expect(await screen.findByText("A320")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
     expect(await screen.findByText("Target State")).toBeTruthy();
 
     const hint = "Per-leg constraints from the selected RNAV approach";
@@ -968,5 +960,159 @@ describe("PilotPanel trajectory play mode", () => {
       target: { value: "procedure" },
     });
     expect(screen.getByText(hint)).toBeTruthy();
+  });
+
+  // ── Fly: one aircraft, one control set, two runs (the live flight, the dynamics comparison) ──
+  const COMPARISON_RESULT = {
+    ok: true,
+    durationS: 240,
+    requestedDurationS: 240,
+    dtS: 0.1,
+    aircraftType: "A320",
+    historyCount: 1,
+    systems: [
+      { key: "A", label: "A · fixed tangent ENU", colorRgba: [244, 114, 22, 240], isReference: false },
+      { key: "B", label: "B · re-anchored ENU", colorRgba: [226, 232, 240, 245], isReference: true },
+    ],
+    playback: { epochIso: "2026-01-01T00:00:00Z", multiplier: 10, czml: [{ id: "document" }], samples: [] },
+    chart: {
+      distanceKm: [0, 1],
+      timeS: [0, 8],
+      series: { A: { horiz: [0, 5], alt: [0, -1], head: [0, 0.01], speed: [0, 0.1], fpa: [0, 0.02] } },
+      final: { A: { horiz: 5, alt: -1, head: 0.01, speed: 0.1, fpa: 0.02 } },
+    },
+  };
+  const liveFlight = () => within(screen.getByLabelText("Live flight"));
+  const comparison = () => within(screen.getByLabelText("Dynamics comparison"));
+  const button = (scope: ReturnType<typeof within>, name: string) =>
+    scope.getByRole("button", { name }) as HTMLButtonElement;
+  const lastCall = (mock: { mock: { calls: unknown[][] } }) => mock.mock.calls[mock.mock.calls.length - 1];
+
+  it("flies the panel's own controls, held fixed, in the dynamics comparison — never under Alpha", async () => {
+    mocks.runDynamicsComparison.mockResolvedValue(COMPARISON_RESULT);
+    render(<PilotPanel mode="fly" />);
+    expect(await screen.findByText("A320")).toBeTruthy();
+    await waitFor(() => expect(mocks.openWorkerSession).toHaveBeenCalledWith("comparison"));
+
+    // Alpha (the default) flies attack, which no compared system can: said, and Compute is off
+    expect(comparison().getByText(/flies a load-factor control/)).toBeTruthy();
+    expect(button(comparison(), "Compute").disabled).toBe(true);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Simulation" }), { target: { value: "loadFactor" } });
+    expect(comparison().queryByText(/flies a load-factor control/)).toBeNull();
+    fireEvent.click(button(comparison(), "Compute"));
+
+    await waitFor(() => expect(mocks.runDynamicsComparison).toHaveBeenCalledTimes(1));
+    expect(mocks.runDynamicsComparison).toHaveBeenCalledWith(expect.objectContaining({
+      control: { thrustN: Math.min(67000, a320Config.maxThrustN), bankDeg: 45, loadFactor: 1.414214 },
+      durationS: 240,
+      dtS: 0.1,
+    }));
+    await waitFor(() => expect(button(comparison(), "Play").disabled).toBe(false));
+
+    // a computed comparison flew the controls as they were: editing one drops it
+    const bank = screen.getByLabelText("Bank") as HTMLInputElement;
+    fireEvent.change(bank, { target: { value: "10" } });
+    fireEvent.blur(bank);
+    expect(button(comparison(), "Play").disabled).toBe(true);
+    expect(button(comparison(), "Show charts").disabled).toBe(true);
+  });
+
+  it("hands the screen between Fly's two runs: a comparison ends the live flight, Start flies afresh", async () => {
+    mocks.runDynamicsComparison.mockResolvedValue(COMPARISON_RESULT);
+    render(<PilotPanel mode="fly" />);
+    expect(await screen.findByText("A320")).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: "Simulation" }), { target: { value: "loadFactor" } });
+
+    fireEvent.click(button(liveFlight(), "Reset"));
+    await waitFor(() => expect(lastCall(mocks.usePilotAircraft)[0]).toMatchObject({ enabled: true }));
+    expect(lastCall(mocks.setPilotTransport)[0]).not.toBeNull();   // the bottom bar drives the live sim
+
+    fireEvent.click(button(comparison(), "Compute"));
+    await waitFor(() => expect(button(comparison(), "Play").disabled).toBe(false));
+    expect(lastCall(mocks.usePilotAircraft)[0]).toMatchObject({ enabled: false });
+    expect(button(liveFlight(), "Start")).toBeTruthy();            // the live session ended: Start, not Resume
+    expect(lastCall(mocks.setPilotTransport)[0]).toBeNull();       // a clock playback: the bar drives the clock
+    expect(lastCall(mocks.useDynamicsComparisonPlayback)[0]).toMatchObject({ enabled: true });
+
+    mocks.resetPilotSimulation.mockClear();
+    fireEvent.click(button(liveFlight(), "Start"));
+    await waitFor(() => expect(mocks.resetPilotSimulation).toHaveBeenCalledTimes(1));
+    expect(lastCall(mocks.useDynamicsComparisonPlayback)[0]).toMatchObject({ enabled: false });
+    await waitFor(() => expect(lastCall(mocks.setPilotTransport)[0]).not.toBeNull());
+  });
+
+  const optimizeUnconstrained = async () => {
+    fireEvent.change(screen.getByRole("combobox", { name: "Constraints" }), { target: { value: "none" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Optimize" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Play" }) as HTMLButtonElement).disabled).toBe(false));
+  };
+  const status = () => document.querySelector(".pilot-status")?.textContent;
+
+  it("keeps a paused live flight across a trip to Optimize, never reading the playback's state as its own", async () => {
+    const view = render(<PilotPanel mode="fly" />);
+    expect(await screen.findByText("A320")).toBeTruthy();
+    fireEvent.click(button(liveFlight(), "Reset"));
+    await waitFor(() => expect(button(liveFlight(), "Resume")).toBeTruthy());
+
+    view.rerender(<PilotPanel mode="optimize" />);
+    await optimizeUnconstrained();       // its playback samples a state of its own
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+
+    view.rerender(<PilotPanel mode="fly" />);
+    expect(button(liveFlight(), "Resume")).toBeTruthy();
+    expect(status()).toBe("Paused");
+    expect(lastCall(mocks.usePilotAircraft)[0]).toMatchObject({ enabled: true, pose: expect.objectContaining({ altM: 1000 }) });
+  });
+
+  it("starts a fresh live flight after an optimized playback — the playback's state is not a session", async () => {
+    const view = render(<PilotPanel mode="optimize" />);
+    expect(await screen.findByText("A320")).toBeTruthy();
+    await optimizeUnconstrained();
+
+    view.rerender(<PilotPanel mode="fly" />);
+    expect(status()).toBe("Standby");
+    mocks.resetPilotSimulation.mockClear();
+    fireEvent.click(button(liveFlight(), "Start"));
+    await waitFor(() => expect(mocks.resetPilotSimulation).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the RNAV fix picked in Fly when switching to Optimize", async () => {
+    const view = render(<PilotPanel mode="fly" />);
+    expect(await screen.findByText("A320")).toBeTruthy();
+    await waitFor(() => expect(mocks.fetchRnavInitialFixCandidates).toHaveBeenCalledTimes(1));
+    fireEvent.click(within(screen.getByLabelText("Initial aircraft state summary")).getByRole("button", { name: "Edit" }));
+    const initialEditor = await screen.findByLabelText("Initial aircraft setup");
+    fireEvent.change(within(initialEditor).getByLabelText("RNAV IF"), {
+      target: { value: "KRDU-R05LY-RW05L|branch:R|fix:SCHOO|fix:WEPAS|914.4" },
+    });
+
+    view.rerender(<PilotPanel mode="optimize" />);
+    // procedure-constrained (the default) needs the picked fix: it is still there, nothing read again
+    fireEvent.click(await screen.findByRole("button", { name: "Optimize" }));
+    await waitFor(() => expect(mocks.runTrajectoryOptimization).toHaveBeenCalledTimes(1));
+    expect(mocks.fetchRnavInitialFixCandidates).toHaveBeenCalledTimes(1);
+  });
+
+  it("freezes the controls while Compute runs, and drops the comparison on a Simulation change", async () => {
+    let answer: (result: typeof COMPARISON_RESULT) => void = () => undefined;
+    mocks.runDynamicsComparison.mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+    render(<PilotPanel mode="fly" />);
+    expect(await screen.findByText("A320")).toBeTruthy();
+    const simulation = screen.getByRole("combobox", { name: "Simulation" }) as HTMLSelectElement;
+    fireEvent.change(simulation, { target: { value: "loadFactor" } });
+    fireEvent.click(button(comparison(), "Compute"));
+
+    // the reply answers the controls on screen: none can change before it comes
+    await waitFor(() => expect((screen.getByLabelText("Bank") as HTMLInputElement).disabled).toBe(true));
+    expect(simulation.disabled).toBe(true);
+    expect(button(within(screen.getByLabelText("Pilot controls")), "<").disabled).toBe(true);
+
+    await act(async () => answer(COMPARISON_RESULT));
+    await waitFor(() => expect(button(comparison(), "Play").disabled).toBe(false));
+    expect((screen.getByLabelText("Bank") as HTMLInputElement).disabled).toBe(false);
+
+    fireEvent.change(simulation, { target: { value: "casadi" } });
+    expect(button(comparison(), "Play").disabled).toBe(true);
   });
 });

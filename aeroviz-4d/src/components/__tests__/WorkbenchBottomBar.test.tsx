@@ -18,7 +18,7 @@ const { appState, setPlaybackSpeed, setAutoReplay, makeClock } = vi.hoisted(() =
     };
   }
   const appState: any = {
-    mode: "observe",
+    mode: "evaluation",
     viewer: { clock: makeClock() },
     playbackSpeed: 60,
     autoReplay: true,
@@ -40,7 +40,7 @@ import WorkbenchBottomBar from "../WorkbenchBottomBar";
 
 describe("WorkbenchBottomBar", () => {
   beforeEach(() => {
-    appState.mode = "observe";
+    appState.mode = "evaluation";
     appState.viewer = { clock: makeClock() };
     appState.playbackSpeed = 60;
     appState.autoReplay = true;
@@ -91,8 +91,8 @@ describe("WorkbenchBottomBar", () => {
     expect(appState.viewer.clock.clockRange).toBe("CLAMPED");
   });
 
-  // ── Fly (pilot) mode: the aircraft runs on a manual sim loop, NOT viewer.clock,
-  // so the bar drives the published pilot transport instead of the clock. ────────
+  // ── Fly's live flight runs on a manual sim loop, NOT viewer.clock, so the bar
+  // drives the published pilot transport instead of the clock. ────────────────────
   it("in Fly mode, drives the pilot sim transport (Play/Reset), not the clock", () => {
     const togglePlay = vi.fn();
     const reset = vi.fn();
@@ -119,11 +119,14 @@ describe("WorkbenchBottomBar", () => {
     expect(screen.getByRole("button", { name: /Pause/ })).toBeTruthy();
   });
 
-  it("in Fly mode, disables the transport until PilotPanel publishes it", () => {
+  // Fly's dynamics comparison is a clock playback: PilotPanel withdraws the sim
+  // transport while one is loaded, and the bar drives the clock.
+  it("in Fly mode without a published sim transport, drives the clock", () => {
     appState.mode = "fly";
     appState.pilotTransport = null;
     render(<WorkbenchBottomBar />);
-    expect((screen.getByRole("button", { name: /Play/ }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: /Reset/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "120×" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Play/ }));
+    expect(appState.viewer.clock.shouldAnimate).toBe(true);
   });
 });

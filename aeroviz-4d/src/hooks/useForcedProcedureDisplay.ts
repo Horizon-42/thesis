@@ -10,13 +10,13 @@
  * own switch. It is reactive (not a one-shot), so entering a caller already in the
  * forced state drives it on mount too.
  *
- * The optimize-vs-observe asymmetry is captured in the single nullable `forceRunway`:
+ * The optimize-vs-evaluation asymmetry is captured in the single nullable `forceRunway`:
  *   • Optimize passes the target runway (INDEPENDENT of the global selection) → the hook
  *     OWNS selectedRunway: it saves, forces, and restores it. Owning the runway also
  *     means owning the 2D approach view keyed on it (isApproachViewOpen): reverting the
  *     runway under an open profile would silently retarget (or blank) that page, so the
  *     profile open-state is saved and restored together with the runway.
- *   • Observe passes `null` (the scoped runway IS the user-owned global selectedRunway)
+ *   • Evaluation passes `null` (the scoped runway IS the user-owned global selectedRunway)
  *     → the hook never reads or writes selectedRunway or the approach view state, so it can
  *     neither fight the user changing the top-bar runway nor revert it on exit; only the
  *     panel + layer are driven.
@@ -24,7 +24,7 @@
  * Extracted from PilotPanel's original inline effect so both docks share one save/restore.
  * The two dock branches are mutually exclusive (WorkbenchLeftDock), so at most one hook
  * instance is ever active at a time — but a task switch between two FORCING docks (e.g. a
- * constrained Optimize → a constrained-comparison Observe) hands off across an unmount/mount
+ * constrained Optimize → a constrained-comparison Evaluation) hands off across an unmount/mount
  * seam: React runs the outgoing dock's cleanup (its restore `setState`) and the incoming
  * dock's mount effect in the SAME passive flush, so the incoming effect would read the
  * outgoing dock's STILL-FORCED display before the restore commits — capturing a polluted
@@ -45,7 +45,7 @@ interface ForcedProcedureDisplayOptions {
   /**
    * The (already-BARED) runway ident to scope selectedRunway to while active, or `null`
    * to leave selectedRunway untouched (the caller relies on the global selection already
-   * being the runway). See the module note on the optimize-vs-observe asymmetry.
+   * being the runway). See the module note on the optimize-vs-evaluation asymmetry.
    */
   forceRunway: string | null;
 }

@@ -53,12 +53,13 @@ class Attitude:
 
 
 def attitude(state: Kinematics, track_rate_deg_s: torch.Tensor, gamma_rate_rad_s: torch.Tensor,
-             previous_bank_rad: torch.Tensor, *, bank_cap_rad: float, bank_rate_rad_s: float,
+             previous_bank_rad: torch.Tensor, *, bank_cap_rad: float, bank_rate_rad_s: float | torch.Tensor,
              cycle_s: float) -> Attitude:
-    """Bank and load factor for the wanted track and path-angle rates (limits 1 and 2)."""
+    """Bank and load factor for the wanted track and path-angle rates (limits 1 and 2); ``bank_rate_rad_s`` one rate or
+    each flight's (a multi-aircraft batch: unlimited at a flight's own first cycle)."""
     if not 0.0 < bank_cap_rad <= BANK_MAX_RAD:
         raise ValueError(f"bank cap {math.degrees(bank_cap_rad):.1f}° outside (0, {math.degrees(BANK_MAX_RAD):.0f}°]")
-    if not (bank_rate_rad_s > 0.0 and cycle_s > 0.0):
+    if not (bool(torch.as_tensor(bank_rate_rad_s > 0.0).all()) and cycle_s > 0.0):
         raise ValueError(f"the bank rate ({bank_rate_rad_s}) and the cycle ({cycle_s}) must be positive")
     speed, gamma = state.speed_mps, state.gamma_rad
     a = -torch.deg2rad(track_rate_deg_s) * speed * torch.cos(gamma) / GRAVITY_MPS2

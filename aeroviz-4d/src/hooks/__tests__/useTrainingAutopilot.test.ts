@@ -1,5 +1,5 @@
 /**
- * useTrainingAutopilot: a PICKED word (the Fly button, or a band clicked with the switch on) of the flight on screen is
+ * useTrainingAutopilot: a PICKED word (the Fly button, or a band clicked) of the flight on screen is
  * flown by the backend when it is picked — once per pick and attempt, never for the cursor — and only the current pick's
  * answer is ever published — a model's word asked with its sample's sentence, or not at all when that sentence is not
  * published. (That a pick is reset with the flight is `useTrainingAutopilotScope.test.tsx`'s.)
@@ -75,8 +75,6 @@ describe("useTrainingAutopilot", () => {
     await waitFor(() => expect(last().status).toBe("ready"));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(last().segment.segment).toMatchObject({ row: 8, endRow: 10, stopRow: 12 });
-    // the browser's own wait, beside the backend's timing
-    expect(last().roundTripS).toBeGreaterThanOrEqual(0);
   });
 
   it("asks again for another pick and for a new attempt at the same one, never for the cursor moving", async () => {

@@ -16,12 +16,12 @@
  *  • A MODEL's word (its own sentence, one sample): the request carries the model's words, and the backend flies them as
  *    the model's free generation flew them — from the observed state at the sentence's first step, each word heard at its
  *    own step — to the word's stop, answering the flight from the word on. The executor is deterministic, so that is the
- *    exported sample's own flight: `autopilotSampleGap` measures how closely it lands on it.
+ *    exported sample's own flight.
  *
  * NOTHING IS PRECOMPUTED: no replay record, no overlay. Every request is flown again by the executor code the backend
  * runs — its stepper, one control cycle at a time, stopped at the segment's stop — under the executor spec written by
  * that code for the set's vocabulary; the answer says which spec, which code, how many cycles were flown and how long
- * each part took (`timing`), and the view adds the browser's round trip.
+ * each part took (`timing`).
  *
  * THE ANSWER IS BOUND TO THE FLIGHT ON SCREEN, or refused whole: the same set, flight and segment (its end is the
  * run's, its stop the word's envelope's), the same vocabulary spec, and the words the executor was told are the words the
@@ -34,6 +34,7 @@
  * SI units only: metres, m/s, degrees, seconds.
  */
 
+import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
 import { asNumber, attempt, Reader, type Parsed } from "./trainingReader";
 import {
   readCrossing,
@@ -51,7 +52,6 @@ import {
   type TrainingGeneratedSentence,
   type TrainingSource,
 } from "./trainingOverlays";
-import { haversineDistanceM } from "../utils/procedureGeoMath";
 import { TRAINING_AUTOPILOT_COLOR, TRAINING_AUTOPILOT_OUTSIDE_COLOR } from "../utils/trainingWordColors";
 import {
   sentenceColumnRuns,
@@ -70,7 +70,7 @@ import {
 
 /** MIRROR of `aeroviz_backend/autopilot_segment/payload.py` `SCHEMA`: the backend's answer; anything else is refused by
  *  name (the backend's `MirrorTest` pins these four). */
-export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v7";
+export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v8";
 /** MIRROR of `autopilot_segment/verdict.py` `STATUSES`: the selected word's verdict. */
 export const TRAINING_AUTOPILOT_STATUSES = ["inside", "outside", "not judged", "no check"] as const;
 export type TrainingAutopilotStatus = (typeof TRAINING_AUTOPILOT_STATUSES)[number];
@@ -141,6 +141,8 @@ export interface TrainingAutopilotTrack {
   /** Positive: banked right (turning right). */
   bankRightDeg: number[];
   loadFactor: number[];
+  /** The attitude its aircraft is drawn in at each STATE (`trainingAttitude.ts`). */
+  attitude: TrainingAttitude;
 }
 
 export interface TrainingAutopilotSegment {
@@ -244,10 +246,8 @@ export interface TrainingAutopilotSegment {
 export type TrainingAutopilotView =
   | { status: "flying"; request: TrainingAutopilotRequest }
   | { status: "failed"; request: TrainingAutopilotRequest; problem: string }
-  /** `playedAt`: when the 3D scene last began flying it out (a replay sets a new one); `roundTripS`: the browser's wait,
-   *  from the request sent to the answer read. */
-  | { status: "ready"; request: TrainingAutopilotRequest; segment: TrainingAutopilotSegment; playedAt: number;
-      roundTripS: number };
+  /** `playedAt`: when the answer arrived, and the 3D scene began flying it out. */
+  | { status: "ready"; request: TrainingAutopilotRequest; segment: TrainingAutopilotSegment; playedAt: number };
 
 /** Where a word's segment stops: where its own envelope ends — the step the next word of its column is said, and for a
  *  heading word a lead later (it is judged from a lead after it is said to a lead after the next heading word is) —
@@ -279,7 +279,7 @@ export function nextPick(current: TrainingPick | null, source: TrainingSource | 
 }
 
 /** The source a request flew. */
-export function requestSource(request: TrainingAutopilotRequest): TrainingSource | null {
+function requestSource(request: TrainingAutopilotRequest): TrainingSource | null {
   return request.sentence === null ? null : { overlayId: request.sentence.overlayId, sample: request.sentence.sample };
 }
 
@@ -302,29 +302,8 @@ export function autopilotWord(request: TrainingAutopilotRequest, selection: Trai
   return `${request.column} ${trainingWordLabel(selection.vocabulary, selection.candidates, request.column, value)}`;
 }
 
-/** How closely a model word's live flight lands on the exported sample it re-flies: the largest distance between the
- *  two at the times both hold a point (horizontal and vertical, metres), and how many they share — null when they share
- *  none. The executor is deterministic and the backend's single-flight executor flies the torch executor's flight to
- *  round-off (nanometres), so this is 0 up to the export's rounding; anything else means the backend's executor is not
- *  the one that flew the sample. */
-export function autopilotSampleGap(segment: TrainingAutopilotSegment, sample: TrainingGeneratedSentence): { gapM: number; points: number } | null {
-  const at = new Map(segment.track.tS.map((time, index) => [time.toFixed(3), index]));
-  let gapM = 0;
-  let points = 0;
-  sample.track.tS.forEach((time, index) => {
-    const live = at.get(time.toFixed(3));
-    if (live === undefined) return;
-    points += 1;
-    const horizontal = haversineDistanceM(
-      { lonDeg: segment.track.lon[live], latDeg: segment.track.lat[live], altM: 0 },
-      { lonDeg: sample.track.lon[index], latDeg: sample.track.lat[index], altM: 0 });
-    gapM = Math.max(gapM, horizontal, Math.abs(segment.track.altitudeM[live] - sample.track.altitudeM[index]));
-  });
-  return points === 0 ? null : { gapM, points };
-}
-
 /** The flown segment has a line to draw: two states or more (a dynamics failure in its first cycle keeps one — the
- *  card and the status still say what happened; the charts and 3D have nothing to draw). */
+ *  bar's status line says what happened; the charts and 3D have nothing to draw). */
 export function autopilotHasLine(segment: TrainingAutopilotSegment): boolean {
   return segment.track.tS.length >= 2;
 }
@@ -358,6 +337,14 @@ export const AUTOPILOT_PLAYBACK_MAX_S = 20;
 
 export function autopilotPlaybackSpeedup(flownS: number): number {
   return Math.max(AUTOPILOT_PLAYBACK_MIN_SPEEDUP, flownS / AUTOPILOT_PLAYBACK_MAX_S);
+}
+
+/** How far into its segment the live executor's aircraft is at ``nowMs``, in simulated seconds: the fly-out's clock — the
+ *  real time since ``playedAt`` times the speed-up, held at the segment's end once flown out. The 3D aircraft and the
+ *  sentence bar's cursor both read it, so the two move together. */
+export function autopilotPlaybackS(track: TrainingAutopilotTrack, playedAt: number, nowMs: number): number {
+  const flownS = track.tS[track.tS.length - 1] - track.tS[0];
+  return Math.min(Math.max(nowMs - playedAt, 0) / 1000 * autopilotPlaybackSpeedup(flownS), flownS);
 }
 
 /** Where the live executor is ``flownS`` seconds into its segment: the last point at or before it and the fraction of
@@ -420,7 +407,7 @@ function parseTrack(reader: Reader, row: number, stepS: number): TrainingAutopil
     groundSpeedMps: reader.numbers("groundSpeedMps", n), verticalRateMps: reader.numbers("verticalRateMps", n),
     trackDeg: reader.numbers("trackDeg", n), distanceM: reader.numbers("distanceM", n),
     thrustFraction: reader.numbers("thrustFraction", n - 1), bankRightDeg: reader.numbers("bankRightDeg", n - 1),
-    loadFactor: reader.numbers("loadFactor", n - 1),
+    loadFactor: reader.numbers("loadFactor", n - 1), attitude: readAttitude(reader.child("attitude"), n),
   };
 }
 

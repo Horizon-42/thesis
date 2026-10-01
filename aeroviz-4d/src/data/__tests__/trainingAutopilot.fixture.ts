@@ -20,7 +20,7 @@ import {
 } from "../trainingAutopilot";
 import { sentenceColumnRuns, trainingSelectionOf, type TrainingSample, type TrainingSelection } from "../trainingSample";
 import type { TrainingAugmentation, TrainingGeneratedSentence, TrainingProcedureMask } from "../trainingOverlays";
-import { mockGeneratedPoint } from "./trainingOverlays.fixture";
+import { mockAttitude } from "./trainingSample.fixture";
 
 export function mockAutopilotRequest(sample: TrainingSample, flightKey: string, column: TrainingAutopilotRequest["column"],
   row: number): TrainingAutopilotRequest {
@@ -111,19 +111,10 @@ export function mockAutopilotAnswer(sample: TrainingSample, request: TrainingAut
       altitudeM: along.map(() => 1110), altitudeHaeM: along.map(() => 1077), groundSpeedMps: along.map(() => 110),
       verticalRateMps: along.map(() => 0), trackDeg: along.map(() => 225), distanceM: along.map((index) => 1760 + index * 110),
       thrustFraction: along.slice(1).map(() => 0.3), bankRightDeg: along.slice(1).map(() => -12), loadFactor: along.slice(1).map(() => 1.02),
+      attitude: mockAttitude(along.length, 225, -12),
     },
     judgedTrackDeg: judged ? Array.from({ length: judgedSteps }, () => 225) : null,
   };
-}
-
-/** ``answer`` (a model word's) flown on its sample's own line (`mockGeneratedPoint`), as the deterministic executor
- *  flies a model's sentence again. */
-export function onSampleLine(answer: Record<string, any>): Record<string, any> {
-  const points = answer.track.tS.map(mockGeneratedPoint);
-  answer.track.lon = points.map((point: { lon: number }) => point.lon);
-  answer.track.lat = points.map((point: { lat: number }) => point.lat);
-  answer.track.altitudeM = points.map((point: { altitudeM: number }) => point.altitudeM);
-  return answer;
 }
 
 /** ``answer`` (a heading word's, `mockAutopilotAnswer`) as a dynamics failure after ``states`` − 1 cycles: the failed
@@ -135,9 +126,11 @@ export function failedAnswer(answer: Record<string, any>, states: number): Recor
   // the judged steps are every `stepCycles`-th point of the track, from its first
   const stepCycles = answer.judgedTrackDeg === null ? null : cycles / (answer.judgedTrackDeg.length - 1);
   for (const key of Object.keys(track)) {
+    if (key === "attitude") continue;
     // a state per point, or a command per cycle between them
     track[key] = track[key].slice(0, track[key].length === cycles ? states - 1 : states);
   }
+  for (const key of Object.keys(track.attitude)) track.attitude[key] = track.attitude[key].slice(0, states);  // a state each
   answer.timing.cycles = states;                     // the failed cycle is counted
   answer.limits.cycles = states;
   // a next word heard at or after the failure has nothing flown past it

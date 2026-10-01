@@ -82,7 +82,7 @@ class AeroVizBackendApp:
                 limit = _query_int(query, "limit", default=200)
                 seed = _query_int(query, "seed", default=0)
                 flight_keys = query.get("flight_key")
-                # Absent = the complete recorded track (the Observe/Baseline window).
+                # Absent = the complete recorded track (the Evaluation/Ground Truth window).
                 # The comparison overlay asks for "arrival" so its reference shares the
                 # modeling time origin; see observed_trajectories for why that matters.
                 window = _query_value(query, "window")

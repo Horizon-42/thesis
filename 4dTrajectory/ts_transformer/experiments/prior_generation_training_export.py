@@ -100,6 +100,9 @@ from ts_transformer.experiments.prior_free_generation import (
 )
 from ts_transformer.experiments.prior_landing_reward import LANDING_REWARD_SCHEMA
 from ts_transformer.experiments.prior_train import rosters
+from ts_transformer.experiments.traffic_reward import TRAFFIC_REWARD_SCHEMA
+from ts_transformer.experiments.traffic_window_reward import SCHEMA as TRAFFIC_WINDOW_REWARD_SCHEMA
+from ts_transformer.experiments.training_attitude import attitude_payload, executor_attitude
 from ts_transformer.experiments.prior_training_export import open_trained_prior
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals
@@ -107,8 +110,8 @@ from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.instructions.readout import STRATA
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.training_files import (
-    KIND_AUGMENTED_GENERATION, KIND_GENERATION, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays,
-    require_overlays_unchanged, rounded, runway_hae_minus_msl_m, serialise, write_overlay,
+    KIND_AUGMENTED_GENERATION, KIND_GENERATION, KIND_READBACK, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays,
+    require_overlays_unchanged, require_set_datum, rounded, runway_hae_minus_msl_m, serialise, write_overlay,
 )
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
 from ts_transformer.io_utils import utc_now
@@ -121,20 +124,26 @@ from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
 
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_GENERATION_SCHEMA`); the reader refuses anything else
-#: by name. A name changes with its file's shape or meaning, on both sides, in one change.
-SCHEMA = "aeroviz-training-generation-v3"
+#: by name. A name changes with its file's shape or meaning, on both sides, in one change. v4 (2026-09-28): ``base``
+#: records the set's spec, candidates and frame, no longer its sample file's sha256 or time of writing
+#: (`training_files.BaseSet.block`). v5 (2026-09-30): every sample's flown track carries the attitude it is drawn in
+#: (``track.attitude``, `training_attitude`).
+SCHEMA = "aeroviz-training-generation-v5"
 #: MIRROR of `TRAINING_AUGMENTED_GENERATION_SCHEMA` in the same file: the same sentences flown from augmented starts, each
-#: flight with its augmentation and moved observed rows, no formal readout.
-AUGMENTED_SCHEMA = "aeroviz-training-augmented-generation-v1"
+#: flight with its augmentation and moved observed rows, no formal readout; v2 (2026-09-28): ``base`` as `SCHEMA`'s v4;
+#: v3 (2026-09-30): the attitude as `SCHEMA`'s v5.
+AUGMENTED_SCHEMA = "aeroviz-training-augmented-generation-v3"
 PAYLOAD_FILE = "generation.json"
 RUNNER = "ts_transformer.experiments.prior_generation_training_export"
 #: The one tree every checkout's outputs are (a worktree links it): a readout's prior is known by its path from here on.
 OUTPUTS_MARK = "4dTrajectory/outputs/"
 #: MIRROR of the phrase `replay.draw_flights` writes for ``per_airport`` 0 (every labelled flight of the split).
 EVERY_FLIGHT = "every labelled flight"
-#: The prior's models by name, in the order they are trained (the post-training design's table; the user, 2026-09-26):
+#: The prior's models by name, in the order they are trained (the post-training design's table; the user, 2026-09-26;
+#: ``traffic``, the multi-aircraft post-training M4, the user 2026-09-30; ``window``, M4 in windows — every aircraft of a
+#: window commanded — the user 2026-10-01):
 #: MIRROR of `TRAINING_MODEL_NAMES` in `aeroviz-4d/src/data/trainingOverlays.ts`, which orders the views by it.
-MODEL_NAMES = ("base", "landing", "augmented")
+MODEL_NAMES = ("base", "landing", "augmented", "traffic", "window")
 
 
 def method_of(schema: str) -> str:
@@ -147,7 +156,8 @@ def method_of(schema: str) -> str:
 
 
 #: The model a post-training method makes (``base`` has none: it is trained on data alone).
-METHOD_MODELS = {method_of(LANDING_REWARD_SCHEMA): "landing", method_of(AUGMENTED_REWARD_SCHEMA): "augmented"}
+METHOD_MODELS = {method_of(LANDING_REWARD_SCHEMA): "landing", method_of(AUGMENTED_REWARD_SCHEMA): "augmented",
+                 method_of(TRAFFIC_REWARD_SCHEMA): "traffic", method_of(TRAFFIC_WINDOW_REWARD_SCHEMA): "window"}
 
 
 def model_identity(config_file: dict[str, Any]) -> tuple[str, int | None]:
@@ -184,6 +194,19 @@ def model_block(prior_dir: Path, config_file: dict[str, Any], checkpoint_sha: st
             "run": outputs_path(prior_dir if round_number is None else prior_dir.parent),
             "checkpointSha256": checkpoint_sha, "variant": variant, "trainedAt": config_file["git"],
             "fineTuning": fine_tuning}
+
+
+def generation_block(samples: int, temperature: float, seed: int, step_s: float, procedure_masks: ProcedureMasks,
+                     executor_sha256: str, params: ExecutorParams) -> dict[str, Any]:
+    """How the prior's sentences were drawn, as an overlay of them records it (this runner's, and a window set's
+    `window_training_export`): the samples, temperature and seed, the first predicted row, the procedure's masks it
+    spoke under — its own (`prior.masks`), each set with the digest of the data it read — and the executor that flew
+    them."""
+    digests = procedure_masks.data_sha256()
+    return {"samples": samples, "temperature": temperature, "seed": seed, "firstPredictedRow": N_LOOK, "stepS": step_s,
+            "procedureMasks": [{"name": mask, "dataSha256": digests[mask]} for mask in procedure_masks.names],
+            "executor": {"specSha256": executor_sha256, "wordClock": params.word_clock, "cycleS": params.cycle_s,
+                         "timeoutFactor": params.timeout_factor}}
 
 
 def outputs_path(path: str | Path) -> str:
@@ -248,10 +271,11 @@ def readout_block(generation: dict[str, Any], prior_dir: Path, executor_sha256: 
 
 
 def track_payload(flown: Flown, index: int, end_row: int, outcome: str, geometry: AirportGeometry, step_s: float,
-                  start_s: float, hae_minus_msl_m: float) -> dict[str, Any]:
+                  start_s: float, hae_minus_msl_m: float, aero_params: np.ndarray) -> dict[str, Any]:
     """The flown track every sentence step from its first state to its outcome's row (a dynamics failure: to the row
     before, as the replay export keeps it — the failed state may not be finite), on the flight's own clock
-    (``start_s``: the time of the row the executor started at); ``hae_minus_msl_m``: the flight's runway's."""
+    (``start_s``: the time of the row the executor started at); ``hae_minus_msl_m``: the flight's runway's; and the
+    attitude it is drawn in (``aero_params``: its airframe's, `training_attitude.executor_attitude`)."""
     end = end_row - 1 if outcome == "dynamics_failure" else end_row
     states = flown.states[index, : end + 1].cpu().numpy()
     step_rows = int(round(step_s / flown.cycle_s))
@@ -262,11 +286,12 @@ def track_payload(flown: Flown, index: int, end_row: int, outcome: str, geometry
     lat, lon, height = states[rows, LAT], states[rows, LON], states[rows, ALT]
     return {"tS": rounded(start_s + np.asarray(rows) * flown.cycle_s, 3), "lon": rounded(lon, 7), "lat": rounded(lat, 7),
             "altitudeM": rounded(height, 2), "altitudeHaeM": rounded(height + hae_minus_msl_m, 2),
-            "groundSpeedMps": rounded(track["ground_speed"], 3)}
+            "groundSpeedMps": rounded(track["ground_speed"], 3),
+            "attitude": attitude_payload(executor_attitude(flown, index, rows, aero_params))}
 
 
 def sample_payload(flown: Flown, index: int, row: dict[str, Any], grid: np.ndarray, geometry: AirportGeometry,
-                   words: Words, hae_minus_msl_m: float, stop: int = -1) -> dict[str, Any]:
+                   words: Words, hae_minus_msl_m: float, aero_params: np.ndarray, stop: int = -1) -> dict[str, Any]:
     """One sample as the frontend reads it: `flight_rows`'s ``row`` of it (its outcome and bookkeeping), the words
     it said up to its end as events on the flight's own steps (``grid``: [steps, 6], UNCHANGED where a column says
     nothing; step 0 is row `N_LOOK`), the crossing and the flown track (``hae_minus_msl_m``: the flight's runway's).
@@ -295,7 +320,8 @@ def sample_payload(flown: Flown, index: int, row: dict[str, Any], grid: np.ndarr
         "rows": N_LOOK + len(said),
         "events": [{"row": N_LOOK + int(step), "column": int(column), "value": int(said[step, column])}
                    for step, column in zip(*np.nonzero(said != UNCHANGED))],
-        "track": track_payload(flown, index, end_row, row["outcome"], geometry, step_s, start_s, hae_minus_msl_m),
+        "track": track_payload(flown, index, end_row, row["outcome"], geometry, step_s, start_s, hae_minus_msl_m,
+                               aero_params),
     }
 
 
@@ -329,6 +355,7 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
     offsets = runway_hae_minus_msl_m(instructions, geometry.code, arrival_manifest_path(geometry.code))
     located = base_flights(base, flights, sentences)
     signals = [flight for flight, _ in located]
+    require_set_datum(base, signals, offsets)
     series = rebuild_series(instructions, signals)
     groups = [replay.group_of(item) for item in series]
     flyable = [j for j, group in enumerate(groups) if group == replay.OWN]
@@ -372,7 +399,7 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
         for i, row in enumerate(rows):
             j = flyable[index[i]]
             by_flight[j].append(sample_payload(flown, i, row, grids[i], geometry, words, offsets[signals[j].runway],
-                                               -1 if stops is None else int(stops.step[i])))
+                                               inputs.aero_params[i].numpy(), -1 if stops is None else int(stops.step[i])))
     payloads = [{"flightKey": item["flightKey"], "datasetId": item["datasetId"], "group": groups[j],
                  "flown": j in by_flight, "samples": by_flight.get(j, [])}
                 for j, item in enumerate(base.sample["flights"])]
@@ -456,21 +483,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if (training / overlay_id).exists():
             parser.error(f"{training / overlay_id} exists; an overlay is never overwritten")
         existing[code] = read_overlays(training, code, overlay_id)
-        bases[code] = open_base_set(training, code, args.set, spec)
+        bases[code] = open_base_set(training, code, args.set, KIND_READBACK, spec, geometries[code])
 
     source = {"runner": RUNNER, "prior": repo_relative(prior_dir), "executor": repo_relative(executor),
               "instructions": repo_relative(instructions),
               "readout": None if args.readout is None else repo_relative(resolved(args.readout)), "git": git_state(),
               # the speaker's device: with the seed it names the samples drawn (the executor flies on CPU either way)
               "device": args.device}
-    digests = procedure_masks.data_sha256()
-    generation = {"samples": args.samples, "temperature": args.temperature, "seed": args.seed,
-                  "firstPredictedRow": N_LOOK, "stepS": spec.step_s,
-                  # the model's own (`prior.masks`), each set with the digest of the data it read here
-                  "procedureMasks": [{"name": mask, "dataSha256": digests[mask]} for mask in procedure_masks.names],
-                  "executor": {
-                      "specSha256": record["sha256"], "wordClock": params.word_clock, "cycleS": params.cycle_s,
-                      "timeoutFactor": params.timeout_factor}}
+    generation = generation_block(args.samples, args.temperature, args.seed, spec.step_s, procedure_masks,
+                                  record["sha256"], params)
     if augmented:
         limits = augment.LIMITS
         generation["augment"] = {"seed": args.augment_seed, "tries": AUGMENT_TRIES,

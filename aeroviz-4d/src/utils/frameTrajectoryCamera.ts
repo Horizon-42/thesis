@@ -6,8 +6,8 @@
  *
  * Why: the viewer renders continuously (no requestRenderMode), so a freshly
  * loaded trajectory IS rendered — but the camera is left where `flyToAirport`
- * put it: locked ~1 km over the airport (a very tight view). Fly & Compare
- * trajectories can start far from that view (Compare begins ~30 km from the
+ * put it: locked ~1 km over the airport (a very tight view). Fly's
+ * trajectories can start far from that view (a comparison begins ~30 km from the
  * target; an optimize run can start at a distant initial fix), so the aircraft
  * and its growing trail sit OFF-SCREEN until the user toggles "Follow camera".
  * Framing the whole path on load removes that manual step — compute → see it —

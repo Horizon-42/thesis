@@ -10,7 +10,6 @@ import {
   autopilotHasLine,
   autopilotOnScreen,
   autopilotRunAndTail,
-  autopilotSampleGap,
   parseTrainingAutopilot,
   requestTrainingAutopilot,
   segmentWords,
@@ -23,7 +22,7 @@ import {
 } from "../trainingAutopilot";
 import { VECTORED_KEY, WORD, mockSample } from "./trainingSample.fixture";
 import {
-  failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockModelAutopilotRequest, mockSelection, onSampleLine,
+  failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockModelAutopilotRequest, mockSelection,
 } from "./trainingAutopilot.fixture";
 import { BASE_MODEL_ID, MOCK_GENERATION_FIRST_ROW, mockGenerationViews } from "./trainingOverlays.fixture";
 import { TRAINING_BELOW_GLIDEPATH, TRAINING_PROCEDURE_ALTITUDES, type TrainingGeneratedSentence } from "../trainingOverlays";
@@ -181,24 +180,6 @@ describe("a model's word", () => {
     expect(autopilotOnScreen(view, selection, { overlayId: BASE_MODEL_ID, sample: 0 })).toBe(view);
     expect(autopilotOnScreen(view, selection, { overlayId: BASE_MODEL_ID, sample: 1 })).toBeNull();
     expect(autopilotOnScreen(view, selection, null)).toBeNull();
-  });
-
-  it("says how closely the live flight lands on the sample it re-flies, at the times both hold a point", () => {
-    const set = sample();
-    const { request, sentence } = modelAsk(set);
-    const read = (raw: Record<string, any>) => {
-      const parsed = parseTrainingAutopilot(raw, request, mockSelection(set, request));
-      if (!parsed.ok) throw new Error(parsed.problem);
-      return parsed.value;
-    };
-    // flown 24–36 s every second; the sample holds a point every 2 s: seven shared
-    expect(autopilotSampleGap(read(onSampleLine(mockAutopilotAnswer(set, request))), sentence)).toEqual({ gapM: 0, points: 7 });
-    const moved = onSampleLine(mockAutopilotAnswer(set, request));
-    moved.track.altitudeM[4] += 3;                                     // 28 s, a shared time
-    moved.track.altitudeM[5] += 50;                                    // 29 s, the sample has no point there
-    expect(autopilotSampleGap(read(moved), sentence)!.gapM).toBeCloseTo(3, 9);
-    expect(autopilotSampleGap(read(onSampleLine(mockAutopilotAnswer(set, request))),
-      { ...sentence, track: { ...sentence.track, tS: sentence.track.tS.map((at) => at + 0.5) } })).toBeNull();
   });
 });
 

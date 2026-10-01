@@ -10,7 +10,7 @@ Two windows of the same measurement are served, chosen by ``window``:
 
 ``full``
     The complete reconstructed track, from the first received state vector.
-    This is what the Observe/Baseline layer shows and what ``trajectories.czml``
+    This is what the Evaluation/Ground Truth layer shows and what ``trajectories.czml``
     contains.
 ``arrival``
     The model arrival slice only — terminal-ring entry to the landing anchor (the
@@ -28,7 +28,7 @@ derived artifact is written: the comparison reference is served live from here.
 
 The observed evaluation report is large too. It is parsed and cached server-side;
 the response carries only the selected flights' verdicts and the small aggregate
-needed by the baseline UI. The browser downloads the full report only on an
+needed by the Ground Truth UI. The browser downloads the full report only on an
 explicit Details request.
 """
 

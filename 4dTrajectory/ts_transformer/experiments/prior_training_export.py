@@ -47,7 +47,7 @@ from ts_transformer.experiments.prior_train import (
 )
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals, load_spec
 from ts_transformer.instructions.training_files import (
-    KIND_PRIOR, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays, require_overlays_unchanged,
+    KIND_PRIOR, KIND_READBACK, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays, require_overlays_unchanged,
     serialise, stored_sentence, write_overlay,
 )
 from ts_transformer.instructions.words import COLUMNS
@@ -63,7 +63,9 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 #: name. A name changes with its file's shape or meaning, on both sides, in one change. v3 (2026-09-24, the prior's
 #: third version): the per-step arrays cover the predicted steps only (``firstPredictedRow`` on); a column that never
 #: changes after the first step has no change metrics (null); the first step's runway is read against the rules.
-SCHEMA = "aeroviz-training-prior-v3"
+#: v4 (2026-09-28): ``base`` records the set's spec, candidates and frame, no longer its sample file's sha256 or time
+#: of writing (`training_files.BaseSet.block`).
+SCHEMA = "aeroviz-training-prior-v4"
 PAYLOAD_FILE = "prior.json"
 RUNNER = "ts_transformer.experiments.prior_training_export"
 TOP_K = 3
@@ -199,7 +201,7 @@ def export(prior_dir: Path, instructions: Path, root: Path, airports: list[str],
         if (training / overlay_id).exists():
             raise ValueError(f"{training / overlay_id} exists; an overlay is never overwritten")
         existing[code] = read_overlays(training, code, overlay_id)
-        bases[code] = open_base_set(training, code, set_id, spec)
+        bases[code] = open_base_set(training, code, set_id, KIND_READBACK, spec, geometries[code])
 
     source = {"runner": RUNNER, "prior": repo_relative(prior_dir), "instructions": repo_relative(instructions),
               "git": git_state()}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
+import { AIRCRAFT_MODEL_URI, aircraftOrientation, compassFromPsiDeg } from "../utils/aircraftOrientation";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import type { RunwayThresholdTarget } from "../data/runwayThresholdTargets";
@@ -221,14 +222,7 @@ function updatePlacementPreview(
 ): void {
   const aircraftPosition = Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.altM);
   const groundPosition = Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 0);
-  const orientation = Cesium.Transforms.headingPitchRollQuaternion(
-    aircraftPosition,
-    new Cesium.HeadingPitchRoll(
-      Cesium.Math.toRadians(-state.headingDeg),
-      Cesium.Math.toRadians(state.flightPathDeg),
-      0,
-    ),
-  );
+  const orientation = aircraftOrientation(aircraftPosition, compassFromPsiDeg(state.headingDeg), state.flightPathDeg, 0);
 
   if (!aircraftRef.current) {
     aircraftRef.current = viewer.entities.add({
@@ -237,7 +231,7 @@ function updatePlacementPreview(
       position: new Cesium.ConstantPositionProperty(aircraftPosition),
       orientation: new Cesium.ConstantProperty(orientation),
       model: {
-        uri: "/models/aircraft.glb",
+        uri: AIRCRAFT_MODEL_URI,
         scale: 3.0,
         minimumPixelSize: 54,
         maximumScale: 20_000,

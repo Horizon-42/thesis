@@ -1,7 +1,7 @@
 /**
  * EvaluationReportWindow.tsx
  * --------------------------
- * The detailed evaluation view behind the Observe evaluation block's "Details" button:
+ * The detailed evaluation view behind the "Details" button of the Evaluation task's summary block:
  * a draggable floating window (same shell/pattern as the Dynamics-Comparison
  * charts) rendering the backend evaluation report — summary cards, gate note,
  * aggregate table, per-flight deviation charts and the full verdict table.
@@ -43,7 +43,7 @@ import {
 
 interface Props {
   report: EvaluationReport;
-  /** Subject-aware heading, e.g. "Observed Baseline Evaluation Report". */
+  /** Subject-aware heading, e.g. "Ground Truth Evaluation Report". */
   title: string;
   /** e.g. "KRDU · Runway target (constrained)" */
   subtitle: string;
@@ -910,11 +910,11 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
             ? " Speed is the published-V_ref crossing window [V_ref,lo·√n, V_ref,hi + 20 kt]:" +
               " the type's FAA-published approach speed at its maximum landing weight," +
               " scaled by √(m/MALW) — at the record's crossing mass for computed subjects," +
-              " over the type's published mass range for observed baselines (their mass" +
+              " over the type's published mass range for ground-truth tracks (their mass" +
               " is unmeasured) — and lifted on the lower edge by the crossing load factor n" +
               " (the last control's, or inverted from an observed flight's own kinematics)." +
               " Computed subjects are judged on the crossing model airspeed; observed" +
-              " baselines on the fitted crossing GROUND speed corrected by the field's" +
+              " ground-truth tracks on the fitted crossing GROUND speed corrected by the field's" +
               " METAR headwind when a report is usable, else on the raw ground speed as a" +
               " stated proxy — each under its own criterion id."
             : ""}

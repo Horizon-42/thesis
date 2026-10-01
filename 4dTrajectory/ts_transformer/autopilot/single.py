@@ -1,4 +1,5 @@
-"""The executor, one flight at a time, in plain Python floats (executor design §13, the user's request of 2026-09-27).
+"""The executor, one flight at a time, in plain Python floats — the executor's SINGLE-FLIGHT way to fly (executor design
+§12.4, §13; the user's request of 2026-09-27; moved here from the backend 2026-10-01).
 
 The batched executor (`ts_transformer.autopilot`) spends ~2.7 ms a 1 s cycle on a flight flown alone: every law and
 every RK4 stage is a few hundred torch calls on one-element tensors, each paying the call's overhead. This module is
@@ -15,12 +16,9 @@ torch executor on the Training sets' flights, every segment ends with the same o
 and the same crossing, and the flown tracks agree to the round-off the comparison reports
 (`aeroviz_backend/tests/test_single_executor.py`; the fleet check `check_single`).
 
-PINNED TO ITS SOURCE. The executor spec's hash does not cover this module (it would make every stored spec refuse);
-instead this module records the logic of every file it mirrors (`MIRRORED_SOURCE_SHA256` over `mirrored_source_files`:
-the executor spec's files — `autopilot/` and its direct imports, `spec.executor_source_files` — and every module named in
-`MIRRORED_MODULES`), and `require_mirrored_source` refuses to fly when the code on disk is another: a change to any of
-them is a change here too, and the pin is updated with it. ``spec.logic`` reads each file, so a comment or docstring
-never moves the pin.
+CHECKED BY WHAT IT FLIES (executor design §12.3, the user 2026-10-01): it is one of the ways the spec's reference tracks
+are flown again (`autopilot.conformance`, ``single``), so a change here or in the laws it mirrors is found by the check,
+never by a pin on its source.
 
 A flight whose dynamics leave the real numbers (a division by zero or a domain error in the RK4 stages: a zero speed, a
 vertical path) gets a non-finite state, as the torch rollout writes NaN, and is done at that cycle (`Plant.step`).
@@ -29,11 +27,8 @@ vertical path) gets a non-finite state, as the torch rollout writes NaN, and is 
 from __future__ import annotations
 
 import bisect
-import hashlib
-import importlib.util
 import math
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Sequence
 
 import numpy as np
@@ -53,7 +48,6 @@ from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
 from ts_transformer.autopilot.runway_data import VerticalPath
 from ts_transformer.autopilot.sentence import ROW_ROUNDING, TRACK_MAX_ROWS_PER_CYCLE, TRACK_WINDOW_S, _filled
-from ts_transformer.autopilot.spec import executor_source_files, logic
 from ts_transformer.autopilot.speed import speed_change_mps2
 from ts_transformer.autopilot.vertical import GLIDEPATH_BELOW_M, TUBE_MARGIN_SHARE
 from ts_transformer.instructions.airport import AirportGeometry
@@ -62,66 +56,8 @@ from ts_transformer.instructions.words import (
 )
 from ts_transformer.outputs.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION
 
-#: Every module whose logic this one re-implements, named whether or not the executor spec's files already hold it (a
-#: module the laws stop importing directly would otherwise leave the pin unnoticed): the cycle, the laws, the inverse,
-#: the frame, the words and clocks, the stall floor, and the dynamics the rollout reaches (`Plant`). Constants are
-#: imported, not mirrored: a module read only for one (`aerodynamic_model.common`) is not pinned.
-MIRRORED_MODULES = (
-    "ts_transformer.autopilot.executor",
-    "ts_transformer.autopilot.lateral",
-    "ts_transformer.autopilot.vertical",
-    "ts_transformer.autopilot.speed",
-    "ts_transformer.autopilot.inverse",
-    "ts_transformer.autopilot.frame",
-    "ts_transformer.autopilot.sentence",
-    "ts_transformer.autopilot.replay",
-    "ts_transformer.autopilot.plant",
-    "ts_transformer.outputs.constraints.speed_floor",
-    "ts_transformer.outputs.dynamics.rollout",
-    "ts_transformer.outputs.dynamics.backends",
-    "aerodynamic_model.torch_piecewise_rollout",
-    "aerodynamic_model.torch_scaled_transport_chart_dynamics",
-    "aerodynamic_model.torch_transport_chart_dynamics",
-    "aerodynamic_model.torch_dynamics",
-)
-#: The logic of every file this module mirrors, when it was written (`mirrored_source_sha256`).
-MIRRORED_SOURCE_SHA256 = "23e5a02ad41293044aeeb327b8b926e1a195a0633839ea414286a2005e41c422"
-
 _UNITS = SCALED_TRANSPORT_CHART_REFERENCE_UNITS
 _DT_CAP = EXECUTOR_DYNAMICS.control_rollout_integrator_dt_s
-
-
-def mirrored_source_files() -> list[tuple[str, Path]]:
-    """What the pin covers, as ``(label, file)``: the executor spec's files (`spec.executor_source_files`: `autopilot/`
-    and every repository module it imports directly — any change there is a new executor), then every one of
-    `MIRRORED_MODULES` not among them, by module name."""
-    files = list(executor_source_files())
-    held = {path.resolve() for _, path in files}
-    for name in MIRRORED_MODULES:
-        path = Path(importlib.util.find_spec(name).origin).resolve()
-        if path not in held:
-            files.append((name, path))
-            held.add(path)
-    return files
-
-
-def mirrored_source_sha256() -> str:
-    """sha256 over the logic (`spec.logic`) of `mirrored_source_files`, in order — the digest
-    `spec.executor_source_sha256` takes, over more files."""
-    digest = hashlib.sha256()
-    for label, path in mirrored_source_files():
-        with open(path, encoding="utf-8") as handle:
-            digest.update(label.encode("utf-8") + b"\0" + logic(handle.read()).encode("utf-8") + b"\0")
-    return digest.hexdigest()
-
-
-def require_mirrored_source() -> None:
-    """Refuse to fly when the code this module mirrors is not the code it was written against."""
-    found = mirrored_source_sha256()
-    if found != MIRRORED_SOURCE_SHA256:
-        raise RuntimeError(f"the single-flight executor mirrors executor and dynamics code {MIRRORED_SOURCE_SHA256[:12]}; "
-                           f"this checkout's is {found[:12]}: port the change to aeroviz_backend/autopilot_segment/single.py "
-                           f"and update its pin")
 
 
 # ---- torch's semantics on floats: NaN passes through minimum / maximum / clamp, sign(0) is 0, remainder is floored

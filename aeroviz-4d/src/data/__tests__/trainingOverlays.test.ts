@@ -13,6 +13,7 @@ import {
   parseTrainingPriorOverlay,
   priorStep,
   priorTruthAt,
+  replayVerdict,
   trainingOverlaysOf,
   truthAt,
   TRAINING_EXECUTOR_SCHEMA,
@@ -78,6 +79,24 @@ describe("parseTrainingOverlays", () => {
     expect(parsed.value.overlays.map((entry) => entry.id)).toEqual([PRIOR_ID]);
     expect(parsed.value.rejected[0]).toMatchObject({ id: EXECUTOR_ID });
     expect(parsed.value.rejected[0].problem).toMatch(/kind is "free-generation"/);
+  });
+});
+
+describe("the replay's verdict on a flight", () => {
+  it("is clean, flawed or not landed — the words out as the gate counts them, a refused track flawed", () => {
+    const parsed = parseTrainingExecutorOverlay(mockExecutorOverlay(), entry(EXECUTOR_ID), sample());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    const flown = flownOf(parsed.value.flights[0]);
+    // the fixture's flight landed with two words outside their envelopes (5 of 7 inside)
+    expect(replayVerdict(flown)).toEqual({ kind: "flawed", wordsOut: 2, refused: false });
+    const clean = { ...flown, counts: { ...flown.counts, wordsInside: 7 } };
+    expect(replayVerdict(clean)).toEqual({ kind: "clean", wordsOut: 0, refused: false });
+    // not landed, whatever its words did
+    expect(replayVerdict({ ...flown, outcome: "timeout" }).kind).toBe("not landed");
+    expect(replayVerdict({ ...clean, outcome: "crossed_too_high" }).kind).toBe("not landed");
+    // landed on a track the labeller's gate refused: no word judged, and not clean
+    const refused = { ...flown, refused: "the flown track is too short to judge", counts: { ...flown.counts, wordsJudged: 0, wordsInside: 0 } };
+    expect(replayVerdict(refused)).toEqual({ kind: "flawed", wordsOut: 0, refused: true });
   });
 });
 
@@ -224,9 +243,41 @@ describe("parseTrainingExecutorOverlay", () => {
     if (!parsed.ok) throw new Error(parsed.problem);
   });
 
-  it("refuses an overlay drawn over the set as it was before a re-export", () => {
-    expect(executorRefusal((raw) => { raw.base.sampleWrittenUtc = "2026-09-01T00:00:00+00:00"; }))
-      .toMatch(/the set was re-exported after the overlay/);
+  it("keeps an overlay over a set exported again with the same flights, never binding the sample's time of writing", () => {
+    const again = { ...(mockSample() as object), writtenUtc: "2026-10-01T00:00:00+00:00" };
+    const read = parseTrainingSample(again);
+    if (!read.ok) throw new Error(read.problem);
+    const parsed = parseTrainingExecutorOverlay(mockExecutorOverlay(), entry(EXECUTOR_ID), read.value);
+    if (!parsed.ok) throw new Error(parsed.problem);
+  });
+
+  it("refuses an overlay that shares another spec, other candidates or another frame with the set", () => {
+    expect(executorRefusal((raw) => { raw.base.specSha256 = "7".repeat(64); })).toMatch(/is of spec 777777777777, the loaded sample of/);
+    expect(executorRefusal((raw) => { raw.base.candidatesSha256 = "8".repeat(64); }))
+      .toMatch(/has candidates 888888888888, the loaded sample/);
+    expect(executorRefusal((raw) => { raw.base.airportFrame.lat += 0.001; })).toMatch(/airportFrame: is .* the loaded sample's/);
+  });
+
+  it("refuses an overlay drawn over another set than the loaded sample, and a flown track that does not start at its row 0", () => {
+    const other = { ...(mockSample() as object), setId: "other_set" };
+    const read = parseTrainingSample(other);
+    if (!read.ok) throw new Error(read.problem);
+    const parsed = parseTrainingExecutorOverlay(mockExecutorOverlay(), entry(EXECUTOR_ID), read.value);
+    expect(parsed.ok ? "" : parsed.problem).toMatch(/is drawn over set instruction_v3, but the loaded sample is other_set/);
+    expect(executorRefusal((raw) => { raw.flights[0].track.lat[0] += 1e-6; }))
+      .toMatch(/track: starts at .* but the set's flight is at .* at row 0, where it was flown from/);
+    expect(executorRefusal((raw) => { raw.flights[0].track.altitudeM[0] += 0.5; raw.flights[0].track.altitudeHaeM[0] += 0.5; }))
+      .toMatch(/at row 0, where it was flown from/);
+  });
+
+  it("refuses a flown track drawn on another datum than the set flight's", () => {
+    expect(executorRefusal((raw) => { raw.flights[0].track.altitudeHaeM[3] += 0.03; }))
+      .toMatch(/draws row 3 -32\.97 m HAE − MSL, the set's flight -33\.00 m/);
+    // two readings' rounding is not a datum
+    const rounded: any = mockExecutorOverlay();
+    rounded.flights[0].track.altitudeHaeM[3] += 0.02;
+    const parsed = parseTrainingExecutorOverlay(rounded, entry(EXECUTOR_ID), sample());
+    if (!parsed.ok) throw new Error(parsed.problem);
   });
 
   it("refuses flights out of the set's order", () => {
@@ -266,7 +317,7 @@ describe("parseTrainingExecutorOverlay", () => {
 
   it("refuses an overlay the manifest lists under another id or set, or drawn at another airport", () => {
     expect(executorRefusal((raw) => { raw.overlayId = "another"; })).toMatch(/overlayId is another, but the manifest lists it as executor_test/);
-    expect(executorRefusal((raw) => { raw.base.sampleSha256 = "6".repeat(64); })).toMatch(/but the manifest lists it over set/);
+    expect(executorRefusal((raw) => { raw.base.setId = "another"; })).toMatch(/is set another, but the manifest lists it over set/);
     expect(executorRefusal((raw) => { raw.airport = "KYYY"; })).toMatch(/is drawn at KYYY, but the loaded sample is KXXX's/);
   });
 });

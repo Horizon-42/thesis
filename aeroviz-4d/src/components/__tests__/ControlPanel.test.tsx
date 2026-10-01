@@ -159,7 +159,7 @@ describe("ControlPanel", () => {
   });
 
   // Airport + landing-runway selection moved to the top bar (see WorkbenchTopBar.test);
-  // ControlPanel is now the Observe-mode trajectory controls.
+  // ControlPanel is now the Evaluation-mode trajectory controls.
   it("toggles the trajectories layer", () => {
     appState.layers.trajectories = false;
     render(<ControlPanel />);
@@ -393,7 +393,7 @@ describe("ControlPanel", () => {
     render(<ControlPanel />);
 
     const source = screen.getByLabelText("Result source") as HTMLSelectElement;
-    expect(source.value).toBe("baseline");
+    expect(source.value).toBe("groundTruth");
     expect(screen.queryByLabelText("Prediction comparison")).toBeNull();
     fireEvent.change(source, { target: { value: "experiment" } });
     expect(setTrajectoryComparisonCategory).toHaveBeenCalledWith("experiment_run_val");
@@ -411,7 +411,7 @@ describe("ControlPanel", () => {
 
     const source = screen.getByLabelText("Result source") as HTMLSelectElement;
     const optionValues = [...source.options].map((option) => option.value);
-    expect(optionValues).toEqual(["baseline", "optimization", "prediction", "experiment"]);
+    expect(optionValues).toEqual(["groundTruth", "optimization", "prediction", "experiment"]);
     const optimizationOption = source.options[optionValues.indexOf("optimization")];
     expect(optimizationOption.disabled).toBe(false);
 
@@ -433,7 +433,7 @@ describe("ControlPanel", () => {
     expect(optimizationOption?.disabled).toBe(true);
   });
 
-  it("explains that each baseline verdict is sampled independently", () => {
+  it("explains that each ground-truth verdict is sampled independently", () => {
     render(
       <ControlPanel
         observedVerdicts={{
@@ -444,7 +444,7 @@ describe("ControlPanel", () => {
       />,
     );
 
-    const filter = screen.getByLabelText("Baseline verdict") as HTMLSelectElement;
+    const filter = screen.getByLabelText("Ground Truth verdict") as HTMLSelectElement;
     expect([...filter.options].map((option) => option.textContent)).toEqual([
       "All verdicts",
       "Pass only",

@@ -152,13 +152,18 @@ of the package, not a migration in progress.
   signals (it ends before the landing — since `instruction-v2` the harvest's condition, parallel runways
   from every runway end the harvest builds; the labeller, the judge and the display share one heading-word check,
   `envelope.heading_words_inside`, since `instruction-v3`) (C30).
-- **An executor spec is bound to the executor's source** (`executor_source_sha256` over `autopilot/` and every repository
-  module it imports directly — `config`, `data.dataset`, `outputs.envelope`, …), the vocabulary and the labeller: since v11
-  the hash is over each file's LOGIC (`spec.logic`: docstrings stripped, comments never parsed) — wording is free, a code
-  change in a hashed file makes the current code refuse every stored spec (C33). **A prior belongs to
+- **An executor spec opens only for executor code that flies its reference tracks within the bounds** (2026-10-01, the
+  user: checked by what it flies, not by its source): `conformance/` beside the spec — 250 labelled train flights flown by
+  the spec's code — and a `passed-<code>.json` per executor code that flew them again in every way (single-aircraft batch,
+  multi-aircraft batch, single flight) within 1e-6 m (`spec.require_conforming_executor`, runner `executor_conformance`);
+  a code change that stays within the bounds needs one ~30 s check and nothing is retrained; the vocabulary and the
+  labeller still bind by sha (C33). **A prior belongs to
   one sentence artefact**: spec, labeller, day split and candidate table must match (`ts-prior-checkpoint-v3`, C34).
   **A prior speaks under the procedure's masks it was trained under**: named sets, recorded beside its checkpoint
   (`procedure_masks.json`, `prior/masks.py`), read by `load_prior`; the vocabulary's rules apart, always on (C35).
+  **A traffic prior** (`ts-prior-checkpoint-v5`, `prior.model.with_traffic`) is a single-aircraft prior plus a traffic
+  attention reading only the other aircraft, its output layer at zero: it answers as the single prior does alone, to
+  rounding, until it learns (C37).
 - **Loss of separation has ONE judge, two readings** (`inference/separation.py`, 2026-09-27): `IFR` (7110.65BB as written)
   and `VISUAL` — the closed loop's checks and reward — = 7-4-4 c with visual approach clearances and NEVER visual
   separation: parallels ≥ 2,500 ft free once both are turned in (≤ 30°, own side of the midline), close pairs one runway,
@@ -304,7 +309,9 @@ of the package, not a migration in progress.
   layer's language — vocabulary, signals, envelopes, labeller, artefact; torch-free, below every
   model, consumed by the runners and the executor (L30). **`autopilot/`** (2026-09-24): the executor —
   flies the words through the control path's point-mass dynamics one 1 s cycle at a time (that backend
-  runs no hooks), exact inverse, limits in order; imports no model, training or path package (L31). **`prior/`**
+  runs no hooks), exact inverse, limits in order; three ways to fly (a single-aircraft batch, a multi-aircraft batch —
+  `Executor(start_cycle=…)`, each flight from its own cycle, `halt` — and the single flight, `single.py`, plain floats);
+  imports no model, training or path package (L31). **`prior/`**
   (2026-09-24): the prior — data, scenes, model, training, the speaker, the glidepath edge; reads only the instruction
   language, the day split and `data.runway_context`, never the executor; only the runners join the two (L32).
 - Every CLI flag is named after the `TSConfig` field it sets, parsers use `allow_abbrev=False`;
@@ -395,7 +402,61 @@ in the scene closed loop (`experiments/traffic_loop.py`, shared with M3/M4) besi
 `traffic_masks` measures the loop's two separation masks (`inference/separation_masks.py`: speed words, approach
 clearance; computed by the loop and handed to the speaker, the prior never imports them; a fallback masks nothing) on
 the labelled words (formal `masks_v2_20260928`: 0.32 % masked) (R27); `traffic_interaction` is M1 — the base prior's NLL
-on steps with a leader / busy, matched on phase and airport (formal `interaction_20260928`: speed +0.0077 with a leader) (R28).
+on steps with a leader / busy, matched on phase and airport (formal `interaction_20260928`: speed +0.0077 with a leader) (R28). `traffic_prior_train` is M2 — base's recipe on scene samples with 17 edge features
+(`inference/scene_edges.py`: motion from the row before, never the fitted velocities), checkpoint `ts-prior-checkpoint-v4`
+pinned to the edge code by `edge_source_sha256` (R29). `traffic_scene_readout` reads it against base on the select days — scene
+− base and scene − alone (attention between aircraft cut) on leader / busy steps (formal `scene_readout_20260928` and, with 4 batches
+per update, `scene_readout_acc4_20260928`: better nowhere, 0.2880 / 0.2868 vs 0.2839; the M1 gap stays) (R30). `traffic_free_generation` is M3 — augmented with a zero traffic attention
+speaking to one aircraft of each scene (`experiments/traffic_speaking.py`, `prior/scene_speaker.py`), read beside the
+same model alone, the labelled words and the record, all judged in the scene; `--augment-seed` on augmented scenes
+(`experiments/traffic_augment.py`: leader moved, start moved, flight inserted) (formal `free_generation_20260928`: 11.5 % lost
+separation vs 4.9 % labelled, 2.6 % recorded; vectored 21.6 %) (R31). `traffic_reward` is M4 — the traffic post-training
+from augmented + a zero traffic attention, real and augmented training scenes, reward = landed without losing separation,
+each sentence scored in its scene by the speaker's own layout and edge code (`experiments/traffic_tuner.py`), base alone,
+M2's scene samples as the data term; runs round by round (`--rounds k`, then `--resume`: per-round streams, the optimiser's
+state saved per round, refused on another config or commit), spoken by `--speakers` forked processes (each loop batch its own
+stream: the sentences do not depend on their number); `--passes` sweeps against the model frozen once, the round chosen against
+paired standard errors (R32). `traffic_reward_readout` reads a finished M4 run round by round from its files — select numbers per side, kind and approach type,
+where the reward term's signal comes from, round 0 against the last on the same draws (the select readout is seeded alike every round:
+paired, not repeated tries) beside M3's labelled and recorded readings (R33).
+`traffic_window_generation` is M3's second pass — every aircraft of a 20-minute window commanded at once
+(`experiments/traffic_window.py` WindowLoop, `prior/window_speaker.py`: rounds from the front of the approach clock,
+executors grouped by first spoken step, the judge run as it flies, ended aircraft flying on silent), beside alone /
+labelled / recorded, all judged in the window; `--augment-seed` on augmented windows (`experiments/traffic_window_augment.py`:
+the flow compressed, a start moved, a flight inserted and commanded; capped at the airport's busiest training step) (R34).
+`prior_generation_records` flies a free-generation readout's STORED sentences again (the readout's draw and chunks; every
+sentence must reproduce its readout row) and writes them as evaluation records per sample — ADE / FDE from row `N_LOOK`
+against the observed flight, the evaluation's pass rate over every sentence, best of the samples; an augmented start has no
+truth, so its readout carries the pass rate only; the root publisher's `--generation-records` files each kind × airport as
+one Experiments category (R35).
+`prior_generation_grading` grades such a run on the runway each sentence last pointed at and CROSSED (a graded copy of
+each such other-runway record against that runway's own threshold point; the evaluation grades `source.runway`, the observed flight's) and splits
+FDE into time and place over the landed sentences — FDE is the distance at the observed landing TIME, so a late arrival
+scores its lateness × speed; the arrival endpoint error is where it landed (R38).
+`window_training_export` writes R34's windows for the frontend's Training
+module — a model-free window set (`traffic-windows`: 20 select windows an airport of the readouts' draw, by size) and a
+`window-generation` overlay per prior on its OWN draws (no readout re-run; `--readout` only copies summaries); the landings
+are the aircraft whose own end is a landing; the M4 model is named `traffic`, M4 in windows (R37) `window` (R36).
+`traffic_window_reward` is M4 in windows — R32's rounds over window samples: every commanded aircraft rewarded, its advantage
+against its own samples, each sample scored whole as the speaker read it (`experiments/traffic_window_tuner.py`, the one layout
+`window_inputs` / `window_edges`, encoded in blocks of steps so every window fits the GPU; one commanded aircraft a window trains
+as R32 does; checks the formal size before it speaks) (R37).
+`traffic_window_reward_readout` reads such a run round by round, running or ended, from its files — paired against round 0
+as the round choice pairs (R39).
+`traffic_window_pair` pairs two window readouts of the same windows read the same way (refused otherwise, the model-free
+rows equal row for row) aircraft by aircraft: second − first per measure over the sentences counted in both, errors clustered by airport ×
+operating day (R41).
+`traffic_window_rewind` asks whether a window's losses of separation can be undone by rewinding ONE aircraft — each loss's
+aircraft speaks again from 10–120 s before it (or its start), the others given the words they said (`traffic_window.Given`:
+not sampled, not masked), 8 branches an offset, a control that must replay the original pass to the last field (R43).
+`executor_conformance` flies a spec's reference tracks again with the code on disk in every way the executor flies and
+writes the passed record `replay.open_executor` asks for; `--write-reference` writes a spec's reference first, from a clean
+checkout with the code that measured it (`autopilot/conformance.py`; executor design §12.3) (R42).
+**Every Training export writes the attitude each track is drawn in** (`experiments/training_attitude.py`, 2026-09-30): heading,
+path angle, right bank and an attack READING — executor tracks from its states and the command of the cycle starting at each row
+(the track's end: the cycle ending there), observed tracks from `rebuild_series` + the teacher's `actual_controls`, none for a flight
+without an airframe; read-only on `autopilot/`, `outputs/dynamics/`, `traffic_window*.py` (sample v8, traffic v2, executor v5,
+generation v5, augmented v3, window-generation v2; frontend AV42).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 

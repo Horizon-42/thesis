@@ -6,7 +6,7 @@
  * row key / selection / lookup identity) plus facts read off its track (initial ground
  * speed V, total flight time) and its scenario aircraft mass. Comparison mode adds the
  * selected result's final time and paints Prediction outcomes with the same green/red/gray
- * pass/fail/undecided language as Baseline.
+ * pass/fail/undecided language as Ground Truth.
  * Clicking a row tracks that flight in the Cesium viewer.
  */
 
@@ -23,7 +23,7 @@ import { formatDuration, formatSpeed, formatMass } from "../utils/flightListForm
 import { COMPARISON_KIND_COLORS } from "../utils/trajectoryRenderModel";
 
 interface FlightTableProps {
-  /** Flight IDs from the active Baseline or Comparison trajectory layer. */
+  /** Flight IDs from the active Ground Truth or Comparison trajectory layer. */
   flightIds: string[];
   /** Per-flight duration and callsign from the active reference CZML. */
   flightSummaries: Record<string, ObservedFlightSummary>;
@@ -137,7 +137,7 @@ export default function FlightTable({ flightIds, flightSummaries }: FlightTableP
 }
 
 interface ComparisonOutcome {
-  style: "pass" | "failed" | "offtarget" | "indeterminate";
+  style: "pass" | "otherrunway" | "failed" | "offtarget" | "indeterminate";
   label: string;
 }
 
@@ -148,6 +148,9 @@ function comparisonOutcome(
   if (!datum) return null;
   if (kind === "prediction") {
     if (datum.status === "solved") return { style: "pass", label: "prediction passed" };
+    if (datum.status === "otherRunway") {
+      return { style: "otherrunway", label: `prediction passed on runway ${datum.landedRunway}, not the observed flight's` };
+    }
     if (datum.status === "indeterminate") {
       return { style: "indeterminate", label: "prediction verdict indeterminate" };
     }

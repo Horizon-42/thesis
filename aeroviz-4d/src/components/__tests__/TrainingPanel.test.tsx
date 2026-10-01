@@ -8,15 +8,15 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 
 const {
   appState, setTrainingSelection, setTrainingLayer, setTrainingExecutor, setTrainingPrior, setTrainingAutopilot,
-  setTrainingAutopilotAuto, setTrainingGenerations, fetchMock,
+  setTrainingGenerations, fetchMock,
 } = vi.hoisted(() => ({
   appState: {
     activeAirportCode: "KXXX" as string,
     trainingLayers: { headingBands: true, corridor: true, vertical: true, candidates: true },
     // no word selected: the live executor asks for nothing
-    trainingSelection: null, trainingColumn: null, trainingAutopilot: null, trainingPick: null,
-    trainingAutopilotAuto: true, trainingSource: null as unknown,
-    // the models' sentences the panel publishes go to the mocked setter: the card reads none
+    trainingSelection: null, trainingColumn: null, trainingPick: null,
+    trainingSource: null as unknown,
+    // the models' sentences the panel publishes go to the mocked setter
     trainingGenerations: [] as unknown[],
   },
   setTrainingGenerations: vi.fn(),
@@ -25,18 +25,18 @@ const {
   setTrainingExecutor: vi.fn(),
   setTrainingPrior: vi.fn(),
   setTrainingAutopilot: vi.fn(),
-  setTrainingAutopilotAuto: vi.fn(),
   fetchMock: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     ...appState, setTrainingSelection, setTrainingLayer, setTrainingExecutor, setTrainingPrior, setTrainingAutopilot,
-    setTrainingAutopilotAuto, setTrainingGenerations,
+    setTrainingGenerations,
   }),
 }));
 
 import TrainingPanel from "../TrainingPanel";
+import { TRAINING_REPLAY_COLOR } from "../../utils/trainingWordColors";
 import { SET_ID, STRAIGHT_KEY, VECTORED_KEY, mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import {
   AUGSTART_BASE_ID, AUGSTART_POST_ID, BASE_MODEL_ID, EXECUTOR_ID, POST_TRAINED_ID, PRIOR_ID, mockExecutorOverlay, mockGenerationOverlay, mockOverlays,
@@ -195,7 +195,7 @@ describe("TrainingPanel", () => {
       const page = screen.getByRole("dialog", { name: "Training details" });
       const about = page.querySelector(".training-notes-list")!.textContent!;
       expect(about).toMatch(/Altitude tubes \+ speed bandseach altitude word's tube, and on the speed chart each speed word's/);
-      expect(about).toMatch(/Fly on band clickOn: clicking a word's band in the sentence bar flies its segment at once/);
+      expect(about).toMatch(/Executor replayThe executor's replay of the truth sentence\. In the flight list, its outcome/);
       // the sections this set has nothing for stay listed, disabled, and say why
       expect((within(page).getByRole("tab", { name: /The executor's replay gate/ }) as HTMLButtonElement).disabled).toBe(true);
       expect(within(page).getByRole("tab", { name: /The executor's replay gate/ }).textContent).toMatch(/none published for this set/);
@@ -229,9 +229,14 @@ describe("TrainingPanel", () => {
       expect(lastOf(setTrainingExecutor).flight.flown).toBe(false);
     });
 
-    it("says under each flight what the executor made of it", async () => {
+    it("says under each flight what the executor made of it, in the colour of its verdict", async () => {
       render(<TrainingPanel hidden={false} />);
-      expect(await screen.findByText("landed · 5/7")).toBeTruthy();
+      // landed with two words outside their envelopes: amber, neither the teal of a clean landing nor the red of none
+      const tag = await screen.findByText("landed · 5/7");
+      const shown = document.createElement("span");
+      shown.style.color = TRAINING_REPLAY_COLOR.flawed;
+      expect(tag.style.color).toBe(shown.style.color);
+      expect(tag.title).toMatch(/amber: landed, but words outside/);
       expect(screen.getByText("not flown")).toBeTruthy();
     });
 
@@ -300,14 +305,14 @@ describe("TrainingPanel", () => {
       expect(fetched.filter((url) => url.startsWith("data/airports/KYYY/training/prior_test"))).toEqual([]);
     });
 
-    it("refuses an overlay drawn over the set before it was re-exported, and says why", async () => {
+    it("refuses an overlay drawn over other candidate runways than the set's, and says why", async () => {
       const stale: any = mockExecutorOverlay();
-      stale.base.sampleWrittenUtc = "2026-09-01T00:00:00+00:00";
+      stale.base.candidatesSha256 = "6".repeat(64);
       serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(), [OVERLAYS_PATH]: mockOverlays(), [EXECUTOR_PATH]: stale,
               [PRIOR_PATH]: mockPriorOverlay() });
       render(<TrainingPanel hidden={false} />);
       expect(await screen.findByText(`Overlay ${EXECUTOR_ID} cannot be read.`)).toBeTruthy();
-      expect(screen.getByText(/the set was re-exported after the overlay/)).toBeTruthy();
+      expect(screen.getByText(/has candidates 666666666666, the loaded sample/)).toBeTruthy();
       await waitFor(() => expect(lastOf(setTrainingPrior)?.flight.flightKey).toBe(VECTORED_KEY));
     });
   });

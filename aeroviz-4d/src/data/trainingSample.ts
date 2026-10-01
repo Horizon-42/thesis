@@ -34,6 +34,7 @@
 
 import { fetchJson } from "../utils/fetchJson";
 import { attempt, parseManifest, Reader, type Parsed } from "./trainingReader";
+import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
 
 /** MIRROR of the exporter's `INDEX_SCHEMA`. The index keeps this shape across vocabularies:
  *  every set, current or superseded, is listed in it. */
@@ -44,20 +45,25 @@ export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v1";
  *  and its check, and there are no turn regions, hold funnels, split parts or inserted intercepts;
  *  a file under any other name — `v6` (instruction-v2's turns and holds) and every earlier one
  *  included, whatever vocabulary it carries — is refused. */
-export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v7";
+export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v8";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
 export const TRAINING_READING_RULE = "instruction-v3";
 /** MIRROR of the spec's sha: a new vocabulary is a new sha, and this reader is bound to the one it was written for
  *  (`v4_20260924/spec.json`, instruction-v3 re-measured on the operating-day split's training days, 2026-09-25 — the
  *  artefact today's executor code flies; the flight-split `v3_20260924` spec `0b4ea75be36d` is refused by name). */
 export const TRAINING_SPEC_SHA256 = "145d6911e75b02f61697cda79f7a5b9fe7de948e55c12199c5a1df081a2d5bd5";
-/** MIRROR of the exporter's `KIND_READBACK`: the one kind of set this reader opens. */
-export const TRAINING_READABLE_SET_KIND = "vocabulary-readback";
+/** MIRROR of the exporter's `KIND_READBACK`: a read-back set — val flights, each read as its sentence. */
+export const TRAINING_READBACK_SET_KIND = "vocabulary-readback";
+/** MIRROR of the exporter's `KIND_TRAFFIC`: a window set — multi-aircraft windows (`trainingTraffic.ts`). */
+export const TRAINING_TRAFFIC_SET_KIND = "traffic-windows";
 /** The set kinds the manifest may list. A `prior-generated` set (the segment prior's generated sentences) has no
  *  contract under this vocabulary — the instruction prior is drawn as an overlay over a read-back set
  *  (`trainingOverlays.ts`) — so it is listed and refused by name. */
-export const TRAINING_SET_KINDS = ["vocabulary-readback", "prior-generated"] as const;
+export const TRAINING_SET_KINDS = [TRAINING_READBACK_SET_KIND, "prior-generated", TRAINING_TRAFFIC_SET_KIND] as const;
 export type TrainingSetKind = (typeof TRAINING_SET_KINDS)[number];
+/** The kinds this reader opens: a read-back set shows its flights one at a time, a window set its windows. */
+export const TRAINING_READABLE_SET_KINDS = [TRAINING_READBACK_SET_KIND, TRAINING_TRAFFIC_SET_KIND] as const;
+export type TrainingReadableSetKind = (typeof TRAINING_READABLE_SET_KINDS)[number];
 
 /** MIRROR of `instructions.words.COLUMNS`. The columns are POSITIONAL: this order is the
  *  order of every `inForce` table and of the six rows the sentence bar draws. */
@@ -89,11 +95,18 @@ export interface TrainingCohort {
   drawnFrom: string;
 }
 
-export interface TrainingSetEntry {
+/** How a window set's windows were drawn (`window_training_export`): of the split's windows, ``windows`` an airport. */
+export interface TrainingWindowCohort {
+  split: string;
+  windows: number;
+  seed: number;
+  drawnFrom: string;
+}
+
+interface TrainingSetEntryFields {
   id: string;
-  kind: TrainingSetKind;
   title: string;
-  /** Path of the sample file, relative to the airport's `training/` directory. */
+  /** Path of the set's file (a sample, a window set), relative to the airport's `training/` directory. */
   file: string;
   /** The vocabulary spec's sha. */
   vocabularySha256: string;
@@ -102,8 +115,13 @@ export interface TrainingSetEntry {
   runwaySha256: string;
   readingRule: string;
   flights: number;
-  cohort: TrainingCohort;
 }
+
+/** A set as the index lists it; its cohort is its kind's — a read-back set's flights per stratum, a window set's windows. */
+export type TrainingSetEntry = TrainingSetEntryFields & (
+  | { kind: typeof TRAINING_READBACK_SET_KIND | "prior-generated"; cohort: TrainingCohort }
+  | { kind: typeof TRAINING_TRAFFIC_SET_KIND; cohort: TrainingWindowCohort }
+);
 
 export interface TrainingIndex {
   airport: string;
@@ -340,6 +358,8 @@ export interface TrainingSignals {
   smoothed: { trackDeg: number[]; altitudeM: number[]; groundSpeedMps: number[]; distanceM: number[] };
   beforeThresholdM: number[];
   rightOfCourseM: number[];
+  /** The attitude the observed aircraft is drawn in at each row (`trainingAttitude.ts`). */
+  attitude: TrainingAttitude;
 }
 
 export interface TrainingFlight {
@@ -368,18 +388,31 @@ export interface TrainingFlight {
   };
 }
 
-export interface TrainingSample {
+/** What every set file carries besides its cohort: the vocabulary, the frame, the candidate runways and its flights (a
+ *  read-back set's sample, a window set's commanded aircraft) — what an overlay binds to and a selection is read from. */
+export interface TrainingSetHead {
   setId: string;
   airport: string;
   /** When the exporter wrote it: an overlay drawn over the set names the sample it was drawn over by it. */
   writtenUtc: string;
-  cohort: TrainingCohort & { pool: number; read: number };
   vocabulary: TrainingVocabulary;
   airportFrame: { code: string; lat: number; lon: number; elevationM: number };
   candidatesSha256: string;
   centrelineLengthM: number;
   candidates: TrainingCandidate[];
   flights: TrainingFlight[];
+}
+
+export interface TrainingSample extends TrainingSetHead {
+  cohort: TrainingCohort & { pool: number; read: number };
+}
+
+/** The clock the flight on screen is read on (`useTrainingCursor`): the cursor is kept in the time of ``scope`` — the
+ *  flight itself, or the multi-aircraft window it is in — and the flight's own time 0 is ``offsetS`` there. A window keeps
+ *  its time when another of its aircraft is put on screen. */
+export interface TrainingClock {
+  scope: string;
+  offsetS: number;
 }
 
 /** What the panel publishes for the sentence bar, the read-back window and the 3D layer: the flight on screen, with the
@@ -390,16 +423,36 @@ export interface TrainingSelection {
   vocabulary: TrainingVocabulary;
   candidates: TrainingCandidate[];
   flight: TrainingFlight;
+  clock: TrainingClock;
+  /** Whether the backend flies this flight's words live (`trainingAutopilot.ts`): it opens read-back sets only. */
+  liveExecutor: boolean;
 }
 
-/** The flight on screen as one identity — the cursor and the live executor's pick belong to it and reset with it. */
+/** The flight on screen as one identity — the live executor's pick belongs to it and resets with it. */
 export function trainingSelectionKey(selection: TrainingSelection | null): string | null {
   return selection === null ? null : `${selection.airport}/${selection.setId}/${selection.flight.flightKey}`;
 }
 
-/** The selection of one flight of a sample. */
+/** Whether the flight on screen is read on its own clock — not on a multi-aircraft window's, whose time can lie outside
+ *  the flight's. */
+export function isOwnClock(selection: TrainingSelection): boolean {
+  return selection.clock.scope === trainingSelectionKey(selection);
+}
+
+/** Whether the cursor — ``atS`` on the flight's own clock — is ON the flight on screen, for an axis ending at ``endS``:
+ *  always on the flight's own clock (a time past the axis is held at its end, as ever); on a multi-aircraft window's clock
+ *  only from its 0 s to the axis's end — outside that the aircraft is not flying yet, or not any more, and no view draws a
+ *  cursor, or a word in force, for it. */
+export function cursorOnFlight(selection: TrainingSelection, atS: number, endS: number): boolean {
+  return isOwnClock(selection) || (atS >= 0 && atS <= endS);
+}
+
+/** The selection of one flight of a read-back set: read on its own clock. */
 export function trainingSelectionOf(sample: TrainingSample, flight: TrainingFlight): TrainingSelection {
-  return { airport: sample.airport, setId: sample.setId, vocabulary: sample.vocabulary, candidates: sample.candidates, flight };
+  const selection = { airport: sample.airport, setId: sample.setId, vocabulary: sample.vocabulary, candidates: sample.candidates,
+    flight, liveExecutor: true, clock: { scope: "", offsetS: 0 } };
+  // its own clock: the flight's own identity is the clock's scope (`isOwnClock`)
+  return { ...selection, clock: { scope: trainingSelectionKey(selection)!, offsetS: 0 } };
 }
 
 // ── reading a word ───────────────────────────────────────────────────────────
@@ -454,6 +507,18 @@ export function trainingWordLabel(
         ? "unspecified"
         : `${vocabulary.speedTargetsMps[value].toFixed(0)} m/s`;
   }
+}
+
+/** A word as its band in the sentence bar reads it, under its row's name: a descent class by its number and angle
+ *  ("1: 0.92°" — the row is named "Descent", so the class's own "descent " is not repeated; the names are the pinned
+ *  vocabulary's, AV19), the climb as "climb: …"; every other word as `trainingWordLabel` (its tooltip keeps that full
+ *  label). */
+export function trainingBandLabel(
+  vocabulary: TrainingVocabulary, candidates: TrainingCandidate[], column: TrainingColumn, value: number,
+): string {
+  if (column !== "angle" || value === vocabulary.angleLevelValue) return trainingWordLabel(vocabulary, candidates, column, value);
+  const angle = vocabulary.angleClasses[value];
+  return `${angle.name.replace(/^descent /, "")}: ${angle.nominalDeg.toFixed(2)}°`;
 }
 
 /** Why a word was issued, in words — one for every kind the labeller writes. */
@@ -583,18 +648,25 @@ function parseCohort(cohort: Reader): TrainingCohort {
   };
 }
 
+function parseWindowCohort(cohort: Reader): TrainingWindowCohort {
+  return { split: cohort.string("split"), windows: cohort.count("windows", 1), seed: cohort.number("seed"),
+    drawnFrom: cohort.string("drawnFrom") };
+}
+
 function parseSetEntry(entry: Reader): TrainingSetEntry {
-  return {
+  const fields = {
     id: entry.string("id"),
-    kind: entry.oneOf("kind", TRAINING_SET_KINDS),
     title: entry.string("title"),
     file: entry.string("file"),
     vocabularySha256: entry.string("vocabularySha256"),
     runwaySha256: entry.string("runwaySha256"),
     readingRule: entry.string("readingRule"),
     flights: entry.count("flights"),
-    cohort: parseCohort(entry.child("cohort")),
   };
+  const kind = entry.oneOf("kind", TRAINING_SET_KINDS);
+  return kind === TRAINING_TRAFFIC_SET_KIND
+    ? { ...fields, kind, cohort: parseWindowCohort(entry.child("cohort")) }
+    : { ...fields, kind, cohort: parseCohort(entry.child("cohort")) };
 }
 
 /** Parse the manifest. A bad entry is rejected on its own; only a manifest that is not a
@@ -623,9 +695,9 @@ export function trainingSetRefusal(entry: TrainingSetEntry): string | null {
       `${TRAINING_SPEC_SHA256.slice(0, 12)} this reader is written for`
     );
   }
-  if (entry.kind !== TRAINING_READABLE_SET_KIND) {
-    return `a ${entry.kind} set: this reader opens only ${TRAINING_READABLE_SET_KIND} sets (the prior is drawn over one, ` +
-      "as an overlay)";
+  if (!(TRAINING_READABLE_SET_KINDS as readonly string[]).includes(entry.kind)) {
+    return `a ${entry.kind} set: this reader opens only ${TRAINING_READABLE_SET_KINDS.join(" and ")} sets (the prior is ` +
+      "drawn over one, as an overlay)";
   }
   return null;
 }
@@ -802,6 +874,7 @@ function parseSignals(reader: Reader, rows: number, stepS: number): TrainingSign
     },
     beforeThresholdM: reader.numbers("beforeThresholdM", rows),
     rightOfCourseM: reader.numbers("rightOfCourseM", rows),
+    attitude: readAttitude(reader.child("attitude"), rows),
   };
 }
 
@@ -1178,43 +1251,49 @@ function parseFlight(flight: Reader, vocabulary: TrainingVocabulary, candidates:
   };
 }
 
+/** A set file's head (`TrainingSetHead`) under ``schema`` — refused by name under any other: its vocabulary, frame,
+ *  candidates and flights, each flight once (a flight is its key everywhere — the picker, the overlays, the live
+ *  executor's request). */
+export function readSetHead(set: Reader, schema: string): TrainingSetHead {
+  if (set.raw("schema") !== schema) {
+    set.fail(`schema is ${JSON.stringify(set.raw("schema"))}, expected ${JSON.stringify(schema)} — ` +
+      "a file of another format is not read: re-export the set");
+  }
+  const vocabulary = parseVocabulary(set.child("vocabulary"));
+  const candidates = parseCandidates(set, vocabulary);
+  const airport = set.string("airport");
+  const frame = set.child("airportFrame");
+  if (frame.string("code") !== airport) frame.fail(`code is ${frame.raw("code")}, but the set is ${airport}'s`);
+  const flights = set.list("flights").map((item, position) => {
+    const key = Reader.of(item, `${set.where}.flights[${position}]`).string("flightKey");
+    return parseFlight(Reader.of(item, `flight ${key}`), vocabulary, candidates);
+  });
+  const seen = new Set<string>();
+  for (const flight of flights) {
+    if (seen.has(flight.flightKey)) set.fail(`flight ${flight.flightKey} is listed twice`);
+    seen.add(flight.flightKey);
+  }
+  return {
+    setId: set.string("setId"),
+    airport,
+    writtenUtc: set.string("writtenUtc"),
+    vocabulary,
+    airportFrame: { code: airport, lat: frame.number("lat"), lon: frame.number("lon"), elevationM: frame.number("elevationM") },
+    candidatesSha256: set.string("candidatesSha256"),
+    centrelineLengthM: set.number("centrelineLengthM"),
+    candidates,
+    flights,
+  };
+}
+
 /** Parse one sample set — all or nothing: a flight the reader cannot trust would be drawn
  *  beside real ones with no way to tell. */
 export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
   return attempt(() => {
     const sample = Reader.of(raw, "sample");
-    if (sample.raw("schema") !== TRAINING_SAMPLE_SCHEMA) {
-      sample.fail(`schema is ${JSON.stringify(sample.raw("schema"))}, expected ${JSON.stringify(TRAINING_SAMPLE_SCHEMA)} — ` +
-        "a sample of another format is not read: re-export the set");
-    }
-    const vocabulary = parseVocabulary(sample.child("vocabulary"));
-    const candidates = parseCandidates(sample, vocabulary);
-    const airport = sample.string("airport");
+    const head = readSetHead(sample, TRAINING_SAMPLE_SCHEMA);
     const cohort = sample.child("cohort");
-    const frame = sample.child("airportFrame");
-    if (frame.string("code") !== airport) frame.fail(`code is ${frame.raw("code")}, but the sample is ${airport}'s`);
-    const flights = sample.list("flights").map((item, position) => {
-      const key = Reader.of(item, `sample.flights[${position}]`).string("flightKey");
-      return parseFlight(Reader.of(item, `flight ${key}`), vocabulary, candidates);
-    });
-    // a flight is its key everywhere — the picker, the overlays, the live executor's request
-    const seen = new Set<string>();
-    for (const flight of flights) {
-      if (seen.has(flight.flightKey)) sample.fail(`flight ${flight.flightKey} is listed twice`);
-      seen.add(flight.flightKey);
-    }
-    return {
-      setId: sample.string("setId"),
-      airport,
-      writtenUtc: sample.string("writtenUtc"),
-      cohort: { ...parseCohort(cohort), pool: cohort.count("pool"), read: cohort.count("read") },
-      vocabulary,
-      airportFrame: { code: airport, lat: frame.number("lat"), lon: frame.number("lon"), elevationM: frame.number("elevationM") },
-      candidatesSha256: sample.string("candidatesSha256"),
-      centrelineLengthM: sample.number("centrelineLengthM"),
-      candidates,
-      flights,
-    };
+    return { ...head, cohort: { ...parseCohort(cohort), pool: cohort.count("pool"), read: cohort.count("read") } };
   });
 }
 

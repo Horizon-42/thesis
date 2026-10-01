@@ -10,7 +10,8 @@
  */
 
 import type { TrainingColumn } from "../data/trainingSample";
-import type { TrainingModelName } from "../data/trainingOverlays";
+import type { TrainingModelName, TrainingReplayKind } from "../data/trainingOverlays";
+import type { TrainingOtherRole, TrainingWindowReading, TrainingWindowVerdict } from "../data/trainingTraffic";
 
 /** The sentence bar's surface — every colour here is validated against it; `index.css` draws `.training-sentence-bar` in it
  *  at 0.94 opacity (MIRROR: CSS cannot import it). The bar shades with it. */
@@ -74,16 +75,32 @@ export const TRAINING_OUTSIDE_COLOR = "#f87171";
  *  between them sat under 10 from one of the columns. */
 export const TRAINING_EXECUTOR_COLOR = "#14b8a6";
 
+/** THE REPLAY'S VERDICT ON A FLIGHT (`replayVerdict`) where it is said in one colour — the flight list, the sentence bar's
+ *  header: the replay's teal when it landed clean, amber when it landed flawed (words outside, or its track refused), the
+ *  outside red when it did not land (the user, 2026-09-28: a landing with two words out is not a flight that failed).
+ *  The amber #f59e0b, OKLab ΔE on the bar's surface (#0f131e): 14.6 from the outside red (≥ 8.6 under simulated colour
+ *  blindness), 24.9 from the teal (≥ 14.1), 11.2 from the selection's yellow (≥ 9.1); contrast 8.6:1, so it carries
+ *  text. 4.2 from the capture turn's orange, which is only drawn — in the charts and in 3D — never text. */
+export const TRAINING_REPLAY_COLOR: Record<TrainingReplayKind, string> = {
+  clean: TRAINING_EXECUTOR_COLOR,
+  flawed: "#f59e0b",
+  "not landed": TRAINING_OUTSIDE_COLOR,
+};
+
 /** THE EXECUTOR FLOWN LIVE: the selected word's segment, flown by the backend when it is selected
  *  (`trainingAutopilot.ts`) — the replay's teal would read as the precomputed replay. Royal blue (2026-09-25): the dataviz
  *  validator on the bar's surface (#0f131e) puts it ≥ 21.8 OKLab ΔE from every colour above under normal vision (nearest:
  *  the speed purple) and ≥ 9.3 under simulated colour blindness, contrast ≥ 3:1; the violet #7c3aed passed too (17.3 /
  *  12.5) but sits in the speed column's hue. */
 export const TRAINING_AUTOPILOT_COLOR = "#2563eb";
-/** The live executor's segment when the selected word flew OUTSIDE its envelope: the whole flown line turns this red —
- *  louder than the per-row `TRAINING_OUTSIDE_COLOR`, because it is the answer to the question the flight was flown for
- *  (the user, 2026-09-25). The validator puts it ΔE 41.6 from the autopilot blue (29.0 under CVD), contrast ≥ 3:1. */
-export const TRAINING_AUTOPILOT_OUTSIDE_COLOR = "#ff2d2d";
+/** A FAILURE: where a flight failed, drawn as the answer to the question it was flown or read for — louder than the
+ *  per-row `TRAINING_OUTSIDE_COLOR`: the live executor's segment whose word flew outside its envelope (the user,
+ *  2026-09-25), a model's flight that did not land (its end on the sentence bar), a loss of separation and where the judge
+ *  ended an aircraft (the user, 2026-09-30: the window strip's pale red was not seen). The validator puts it ΔE 41.6 from
+ *  the autopilot blue (29.0 under CVD); contrast 5.0:1. */
+export const TRAINING_FAILURE_COLOR = "#ff2d2d";
+/** The live executor's segment when the selected word flew OUTSIDE its envelope: the whole flown line turns red. */
+export const TRAINING_AUTOPILOT_OUTSIDE_COLOR = TRAINING_FAILURE_COLOR;
 
 /** THE PRIOR'S OWN SENTENCES (`trainingOverlays.TrainingGenerationOverlay`): each model in one colour — its tab in the
  *  sentence bar, its flown tracks in 3D, its samples in the flight list — by NAME (`TRAINING_MODEL_NAMES`): every round
@@ -97,11 +114,18 @@ export const TRAINING_AUTOPILOT_OUTSIDE_COLOR = "#ff2d2d";
  *  normal vision (nearest: the live executor's outside red; 18.5 from base's fuchsia) and ≥ 11.6 under simulated colour
  *  blindness, but its contrast is only 3.3:1 — enough for a mark (lines, swatches, borders, the flight's end time on the
  *  bar's axis, which the user asked to see in the model's colour), too little for running text: names and counts stay in
- *  the text colour beside a swatch. Two models are never drawn together (the bar reads one at a time). */
+ *  the text colour beside a swatch. traffic's azure (the user, 2026-09-30: fresher than the olive gold it replaces; the
+ *  best of a search over the green-to-blue hues at contrast ≥ 4.5:1 against every colour above) is ≥ 11.5 OKLab ΔE from
+ *  every one of them (nearest: the heading band's blue 11.5, the autopilot blue 12.4), contrast 5.8:1. window's deep green
+ *  (2026-10-01, M4 in windows; the best of the same search with the olive golds left out) is ≥ 15.8 from every one of
+ *  them (nearest: the executor's teal) and ≥ 6.5 under simulated colour blindness, contrast 4.7:1. Two models are never
+ *  drawn together (the bar reads one at a time). */
 export const TRAINING_MODEL_COLOR: Record<TrainingModelName, string> = {
   base: "#d946ef",
   landing: "#a3e635",
   augmented: "#b82e7a",
+  traffic: "#2b93ee",
+  window: "#009437",
 };
 
 /** How opaque a model's samples other than the one read are drawn in 3D (thin), and in the legend. */
@@ -111,3 +135,40 @@ export const TRAINING_OTHER_SAMPLE_ALPHA = 0.35;
 export function trainingModelColour(model: { name: TrainingModelName }): string {
   return TRAINING_MODEL_COLOR[model.name];
 }
+
+/** A multi-aircraft window's verdict (`trainingTraffic.windowVerdict`), in the replay's three colours — the same reading of
+ *  "clean / something wrong / did not get there": every commanded aircraft landed with no loss of separation, none lost
+ *  separation but one did not land, one lost separation. */
+export const TRAINING_WINDOW_VERDICT_COLOR = {
+  clean: TRAINING_REPLAY_COLOR.clean,
+  short: TRAINING_REPLAY_COLOR.flawed,
+  lost: TRAINING_REPLAY_COLOR["not landed"],
+} as const satisfies Record<TrainingWindowVerdict, string>;
+
+/** The colour a window's commanded aircraft are drawn in: the reading's — the model's, or for the record the observed
+ *  track's near-white. The one rule, for the strip, the 3D scene and the legend. */
+export function trainingWindowReadingColour(reading: TrainingWindowReading): string {
+  return reading.model === null ? TRAINING_TRACE_COLOR : trainingModelColour(reading.model.overlay.model);
+}
+
+/** THE AIRCRAFT ON SCREEN in a window — the one the sentence bar reads — in the selection's yellow, whatever the reading's
+ *  colour (a light one, the record's near-white or landing's lime, would hide a ring or a chip in it): its point's ring and
+ *  its callsign's chip in 3D, its legend row; the window strip brackets its stretch in the same yellow (`index.css`
+ *  `.training-traffic-bracket`, MIRROR: CSS cannot import it). Text on the chip is the bar's surface colour. */
+export const TRAINING_ON_SCREEN_COLOR = TRAINING_WORD_COLOR;
+
+/** The aircraft of a window the model does not command, replayed as recorded: the raw track's slate for an arrival with a
+ *  sentence, darker for a background arrival without one — neither is a hue of the words, the models or the verdicts. */
+export const TRAINING_OTHER_AIRCRAFT_COLOR = {
+  replayed: "#94a3b8",
+  background: "#64748b",
+} as const satisfies Record<TrainingOtherRole, string>;
+/** …and how opaque their tracks are in 3D (and in the legend): faded under the commanded aircraft's, which are opaque. */
+export const TRAINING_OTHER_AIRCRAFT_ALPHA = {
+  replayed: 0.6,
+  background: 0.45,
+} as const satisfies Record<TrainingOtherRole, number>;
+
+/** The pair of aircraft under their minimum at the cursor, drawn between them in 3D and on the window strip, and where
+ *  the judge ended an aircraft for it. */
+export const TRAINING_LOSS_COLOR = TRAINING_FAILURE_COLOR;

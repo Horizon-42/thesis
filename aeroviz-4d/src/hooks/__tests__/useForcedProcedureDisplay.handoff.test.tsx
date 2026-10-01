@@ -32,7 +32,7 @@ function OptimizeDock() {
   useForcedProcedureDisplay({ active: true, forceRunway: "05L" });
   return <span>opt</span>;
 }
-// Observe-style dock: never touches the runway (forceRunway null).
+// Evaluation-style dock: never touches the runway (forceRunway null).
 function ObserveDock() {
   useForcedProcedureDisplay({ active: true, forceRunway: null });
   return <span>obs</span>;
@@ -63,7 +63,7 @@ describe("useForcedProcedureDisplay — forcing→forcing dock handoff", () => {
     expect(getByTestId("open").textContent).toBe("true");
     expect(getByTestId("layer").textContent).toBe("true");
 
-    // Hand off directly to the (also forcing) Observe dock: the outgoing restore and the
+    // Hand off directly to the (also forcing) Evaluation dock: the outgoing restore and the
     // incoming force race across one flush — procedures must STAY open (the regression).
     rerender(<Harness dock="obs" />);
     await act(async () => {});

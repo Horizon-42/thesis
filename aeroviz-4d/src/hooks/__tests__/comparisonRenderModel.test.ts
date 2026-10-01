@@ -7,7 +7,9 @@ import {
   isComparisonEntity,
   kindOfEntityId,
 } from "../useComparisonTrajectoryLayer";
-import { COMPARISON_KIND_COLORS, COMPARISON_KIND_ALPHA } from "../../utils/trajectoryRenderModel";
+import {
+  COMPARISON_KIND_COLORS, COMPARISON_KIND_ALPHA, PREDICTION_OTHER_RUNWAY_COLOR,
+} from "../../utils/trajectoryRenderModel";
 import { OBSERVED_VERDICT_COLORS } from "../../utils/observedVerdictColors";
 
 /**
@@ -48,13 +50,13 @@ function expectLegendColor(e: Cesium.Entity, kind: keyof typeof COMPARISON_KIND_
     .toEqual(rgbOf(Cesium.Color.fromCssColorString(COMPARISON_KIND_COLORS[kind])));
 }
 
-/** A verdict hue from the shared Baseline palette, whatever alpha the kind renders at. */
+/** A verdict hue from the shared Ground Truth palette, whatever alpha the kind renders at. */
 function expectVerdictColor(e: Cesium.Entity, css: string): void {
   expect(rgbOf(renderedColor(e))).toEqual(rgbOf(Cesium.Color.fromCssColorString(css)));
 }
 
 describe("applyComparisonRenderModel path colouring", () => {
-  it("draws a failed prediction red like a failed baseline", () => {
+  it("draws a failed prediction red like failed ground truth", () => {
     const e = entity("pred-AAL542_05L", "offTarget");
     applyComparisonRenderModel(e, new Set());
     const expected = Cesium.Color.fromCssColorString(OBSERVED_VERDICT_COLORS.fail);
@@ -63,7 +65,16 @@ describe("applyComparisonRenderModel path colouring", () => {
       .toEqual([expected.red, expected.green, expected.blue]);
   });
 
-  it("draws a passing prediction green like a passing baseline", () => {
+  it("draws a prediction that passed on another runway in its own colour, not the pass green", () => {
+    for (const id of ["pred-AAL542_05L", "look-AAL542_05L"]) {
+      const e = entity(id, "otherRunway");
+      applyComparisonRenderModel(e, new Set());
+      expectVerdictColor(e, PREDICTION_OTHER_RUNWAY_COLOR);
+      expect(rgbOf(renderedColor(e))).not.toEqual(rgbOf(Cesium.Color.fromCssColorString(OBSERVED_VERDICT_COLORS.pass)));
+    }
+  });
+
+  it("draws a passing prediction green like passing ground truth", () => {
     const e = entity("pred-AAL542_05L", "solved");
     applyComparisonRenderModel(e, new Set());
     const expected = Cesium.Color.fromCssColorString(OBSERVED_VERDICT_COLORS.pass);
@@ -72,7 +83,7 @@ describe("applyComparisonRenderModel path colouring", () => {
       .toEqual([expected.red, expected.green, expected.blue]);
   });
 
-  it("draws an indeterminate prediction gray like an undecided baseline", () => {
+  it("draws an indeterminate prediction gray like undecided ground truth", () => {
     const e = entity("pred-AAL542_05L", "indeterminate");
     applyComparisonRenderModel(e, new Set());
     const expected = Cesium.Color.fromCssColorString(OBSERVED_VERDICT_COLORS.undecided);

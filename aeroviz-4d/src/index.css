@@ -199,6 +199,13 @@ body,
   background: linear-gradient(90deg, #1e56a8 0%, #22ad7e 35%, #f5c447 66%, #c63734 100%);
 }
 
+/* On the root, as Cesium's credits sit outside the workbench and read them in Training: the left dock's width (they
+   stand clear of it) and how far the sentence bar sits from the bottom edge (they stand above it). */
+:root {
+  --overlay-left-width: clamp(220px, 17vw, 280px);
+  --training-bar-bottom: 8px;
+}
+
 /* ── Overlay grid container ───────────────────────────────────────────────── */
 /*
  *  Stretches over the Cesium canvas; panels sit in named grid areas.
@@ -206,7 +213,6 @@ body,
  *  each panel re-enables them individually.
  */
 .cesium-overlay-container {
-  --overlay-left-width: clamp(220px, 17vw, 280px);
   --overlay-panel-gap: 8px;
   position: absolute;
   inset: 0;
@@ -329,7 +335,8 @@ body,
 
 /* Procedures is an independent toggle, not an exclusive task — set it apart with a
    gap and a distinct (teal) active state matching the Layers/Present toggles. */
-.workbench-task-tab-toggle {
+/* The gap that sets a group of tabs apart: each task group after the first, and the Procedures toggle. */
+.workbench-task-group-start {
   margin-left: 14px;
 }
 
@@ -551,6 +558,22 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   display: none;
 }
 
+/* Training runs no clock: the native console and the full-screen button are hidden (WorkbenchShell) and the sentence bar
+   takes the bottom edge. `visibility`, which the viewer's forced resize reads, so the credits are laid out without them. */
+body.workbench-training-active .cesium-viewer-timelineContainer,
+body.workbench-training-active .cesium-viewer-animationContainer,
+body.workbench-training-active .cesium-viewer-fullscreenContainer {
+  visibility: hidden;
+}
+
+/* ... and Cesium's credits, which the viewer lays out at the bottom edge then, stand just above the sentence bar, right of
+   the left dock (the viewer writes their position inline, on every resize); in presentation mode, with no bar and no
+   dock, they stay where the viewer puts them. */
+body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewer-bottom {
+  left: calc(16px + var(--overlay-left-width) + 16px) !important;
+  bottom: calc(var(--training-bar-bottom) + var(--training-bar-height, 0px) + 4px) !important;
+}
+
 /* The way out of presentation mode (the top-bar toggle is hidden in this mode). */
 .workbench-presentation-exit {
   position: absolute;
@@ -632,10 +655,11 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 }
 
 /* While the sentence bar is up, the docks end ABOVE it — the bar spans the full width, so they would otherwise run under
-   it. Its height is its own measure (`--training-bar-height`, set by the bar as it resizes); the bottom padding that
-   cleared Cesium's clock dial is the bar's to cover now. */
+   it. Its height is its own measure (`--training-bar-height`, set on the page's root by the bar as it resizes); it sits
+   at the bottom edge, as far from it as the docks are from the top bar (Training hides Cesium's clock dial and
+   timeline). */
 .workbench:has(> .training-sentence-bar) > .cesium-overlay-container {
-  padding-bottom: calc(36px + var(--training-bar-height, 200px) + 8px);
+  padding-bottom: calc(var(--training-bar-bottom) + var(--training-bar-height, 200px) + 8px);
 }
 
 .workbench:has(> .training-sentence-bar) .left-overlay-panel-stack {
@@ -861,6 +885,154 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   color: rgba(255, 255, 255, 0.8);
 }
 
+/* A window set (multi-aircraft windows): the windows share the dock's leftover height with the window's aircraft. */
+.training-window-list {
+  min-height: 120px;
+}
+
+.training-window-list button {
+  grid-template-columns: auto 1fr auto;
+}
+
+.training-window-heading {
+  margin: 6px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(224, 230, 240, 0.75);
+}
+
+.training-window-aircraft {
+  list-style: none;
+  margin: 0;
+  padding: 0 2px 0 0;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.training-window-aircraft button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: rgba(23, 32, 58, 0.55);
+  color: #c8d8ec;
+  cursor: pointer;
+  font-size: 11.5px;
+  text-align: left;
+}
+
+.training-window-aircraft button:hover {
+  background: #2a3550;
+}
+
+.training-window-aircraft button.active {
+  border-color: #4a8fe8;
+  background: #1a5fb4;
+  color: #fff;
+}
+
+.training-window-fate {
+  justify-self: end;
+  font-size: 10.5px;
+}
+
+/* the aircraft the model does not command: listed, not clickable */
+.training-window-other {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px;
+  padding: 1px 7px;
+  font-size: 10.5px;
+}
+
+/* The window's clock above the sentence bar (TrainingTrafficStrip). */
+.training-traffic-strip {
+  margin: 0 0 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(103, 232, 249, 0.14);
+}
+
+.training-traffic-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: rgba(224, 230, 240, 0.8);
+}
+
+.training-traffic-play {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.training-traffic-play button,
+.training-traffic-play select {
+  padding: 0 6px;
+  border: 1px solid rgba(103, 232, 249, 0.3);
+  border-radius: 4px;
+  background: rgba(23, 32, 58, 0.8);
+  color: #e0e6f0;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.training-traffic-read {
+  font-weight: 600;
+}
+
+.training-traffic-alert {
+  font-weight: 600;
+}
+
+.training-traffic-strip svg {
+  display: block;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.training-traffic-callsign,
+.training-traffic-others {
+  font-size: 9.5px;
+  fill: rgba(224, 230, 240, 0.7);
+}
+
+.training-traffic-row {
+  cursor: pointer;
+}
+
+.training-traffic-row.active .training-traffic-callsign {
+  fill: #fff;
+  font-weight: 600;
+}
+
+.training-traffic-row .training-traffic-landing {
+  font-size: 9.5px;
+  fill: #e2e8f0;
+}
+
+/* where the judge ended an aircraft: large, in the failure red its `fill` gives, outlined to read over its bar */
+.training-traffic-ended {
+  font-size: 14px;
+  font-weight: 700;
+  stroke: #000;
+  stroke-width: 2px;
+  paint-order: stroke;
+}
+
+.training-traffic-bracket {
+  fill: rgba(250, 204, 21, 0.18);
+  stroke: rgba(250, 204, 21, 0.7);
+  stroke-width: 1;
+}
+
 /* The chosen model's samples of a flight: one mark each, filled where the flight landed. */
 .training-flight-samples {
   font-size: 10px;
@@ -908,115 +1080,7 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   cursor: pointer;
 }
 
-/* The live executor: the selected word's segment, flown by the backend when it is selected. */
-.training-autopilot-note {
-  margin: 0 0 0 20px;
-  font-size: 10.5px;
-  line-height: 1.4;
-  color: rgba(224, 230, 240, 0.55);
-}
-
-.training-autopilot-card {
-  margin: 2px 0 0 20px;
-  padding: 4px 8px;
-  border-left: 2px solid #2563eb;
-  font-size: 11px;
-  line-height: 1.45;
-  color: #d6deea;
-  overflow-wrap: anywhere;
-}
-
-.training-autopilot-card p {
-  margin: 0 0 3px;
-}
-
-.training-autopilot-title {
-  font-weight: 600;
-  color: #c8d8ec;
-}
-
-/* The verdict: the answer the flight was flown for, read first. */
-.training-autopilot-verdict {
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.training-autopilot-tail {
-  font-size: 11px;
-  opacity: 0.75;
-}
-
-.training-autopilot-reason {
-  font-size: 10.5px;
-  font-weight: 400;
-  color: rgba(224, 230, 240, 0.6);
-}
-
-.training-autopilot-details summary {
-  cursor: pointer;
-  font-size: 10.5px;
-  color: rgba(224, 230, 240, 0.6);
-}
-
-.training-autopilot-details p {
-  font-size: 10.5px;
-  color: rgba(224, 230, 240, 0.7);
-}
-
-/* The two times the live executor is read by: the simulated flight and the computation, side by side. */
-.training-autopilot-times {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  margin: 2px 0 4px;
-}
-
-.training-autopilot-time {
-  display: flex;
-  flex-direction: column;
-  padding: 3px 6px;
-  border: 1px solid #2a3552;
-  border-radius: 4px;
-  background: rgba(37, 99, 235, 0.08);
-}
-
-.training-autopilot-time-label {
-  font-size: 10px;
-  color: rgba(224, 230, 240, 0.6);
-}
-
-.training-autopilot-time-value {
-  font-size: 16px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: #e0e6f0;
-}
-
-.training-autopilot-time-note {
-  font-size: 10px;
-  color: rgba(224, 230, 240, 0.55);
-}
-
-.training-autopilot-checks {
-  margin: 0 0 3px;
-  padding-left: 14px;
-}
-
-.training-autopilot-button {
-  background: #2a3550;
-  border: 1px solid #3a4a6a;
-  border-radius: 4px;
-  color: #c8d8ec;
-  cursor: pointer;
-  font-size: 11px;
-  padding: 2px 8px;
-}
-
-.training-autopilot-button:hover {
-  background: #3a4f78;
-}
-
-/* The sentence bar's "Fly this segment": the live executor's start, in its own blue. */
+/* The sentence bar's Fly button: the live executor's start, in its own blue. */
 .training-autopilot-fly {
   background: #2563eb;
   border: 1px solid #3b82f6;
@@ -1447,14 +1511,14 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   color: rgba(224, 230, 240, 0.6);
 }
 
-/* The bar spans the whole width above the transport: the sentence is read left to
+/* The bar spans the whole width at the bottom edge: the sentence is read left to
    right against real time, so a narrow dock would compress the long gaps that are
    the most informative thing in it. */
 .training-sentence-bar {
   position: absolute;
   left: 16px;
   right: 16px;
-  bottom: 36px;
+  bottom: var(--training-bar-bottom);
   z-index: 109;
   pointer-events: auto;
   box-sizing: border-box;
@@ -1569,6 +1633,28 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 .training-sentence-cursor {
   stroke: #67e8f9;
   stroke-width: 1.5;
+}
+
+/* The live executor on its word's row (TrainingSentenceBar's AutopilotCursor): pulsing while the backend flies it. */
+.training-sentence-autopilot-cursor {
+  stroke: #ffffff;
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+.training-sentence-autopilot-cursor.waiting {
+  animation: training-autopilot-waiting 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes training-autopilot-waiting {
+  from { opacity: 1; }
+  to { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .training-sentence-autopilot-cursor.waiting {
+    animation: none;
+  }
 }
 
 .training-sentence-marker {
@@ -3839,7 +3925,10 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   overflow-y: auto;
 }
 
+/* The panel's text colour is set once here (like .training-panel's): a label without a rule of its own
+   inherits it, never the page's dark default over the dark dock. */
 .pilot-panel {
+  color: #e0e6f0;
   font-family: "Inter", "Segoe UI", sans-serif;
   font-size: 12px;
   min-width: 0;
@@ -3863,17 +3952,6 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 .pilot-panel-title-block {
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.pilot-panel-mode-row {
-  display: flex;
-  min-width: 0;
-}
-
-.pilot-mode-toggle {
-  width: 100%;
-  padding: 4px 6px;
-  white-space: nowrap;
 }
 
 .pilot-panel h3 {
@@ -4200,6 +4278,16 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   margin-bottom: 6px;
 }
 
+/* Fly's sections (Controls / Live flight / Compare dynamics): the summary blocks' h4 look. */
+.pilot-panel-section-title {
+  margin: 0;
+  color: #c7d2fe;
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
 .pilot-optimization-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
@@ -4216,9 +4304,15 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 }
 
 .pilot-optimization-row label span {
-  color: #cbd5e1;
   font-size: 9px;
   line-height: 1.1;
+}
+
+/* Field names, one colour in every row kind (settings, steppers, options). */
+.pilot-optimization-row label span,
+.pilot-stepper-row label span,
+.pilot-options-row label span {
+  color: #cbd5e1;
 }
 
 .pilot-stepper-row {
@@ -4463,7 +4557,7 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   white-space: nowrap;
 }
 
-/* Compare mode: colored A/C/D deviation chips appended under the B value. */
+/* Dynamics comparison: colored A/C/D deviation chips appended under the B value. */
 .pilot-realtime-deltas {
   display: flex;
   flex-wrap: wrap;
@@ -4877,6 +4971,11 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 
 .flight-table td.flight-table-indeterminate {
   color: #989da6;
+}
+
+/* Prediction passed on ANOTHER runway than the observed flight's — MIRROR of PREDICTION_OTHER_RUNWAY_COLOR. */
+.flight-table td.flight-table-otherrunway {
+  color: rgb(110, 200, 235);
 }
 
 .flight-table th:nth-child(n + 2),
@@ -6560,23 +6659,6 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   .procedure-details-leg-meta {
     justify-items: start;
   }
-}
-
-/* ── Pilot panel: 3-way mode switch (Pilot / Trajectory / Compare) ───────────── */
-.pilot-panel-mode-switch {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-}
-
-.pilot-panel-mode-switch .pilot-mode-toggle {
-  width: 100%;
-}
-
-.pilot-mode-toggle.active {
-  border-color: rgba(125, 211, 252, 0.6);
-  background: rgba(14, 116, 144, 0.55);
-  color: #e0f2fe;
 }
 
 /* ── Dynamics comparison: in-panel legend + hide toggles ─────────────────────── */

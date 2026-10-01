@@ -29,6 +29,7 @@ import {
   type ObservedFlightSummary,
 } from "../utils/observedFlightSummary";
 import { OBSERVED_VERDICT_COLORS } from "../utils/observedVerdictColors";
+import { PREDICTION_OTHER_RUNWAY_COLOR } from "../utils/trajectoryRenderModel";
 import { selectComparisonGroups } from "../utils/sampleTrajectories";
 import {
   COMPARISON_KIND_ALPHA,
@@ -103,6 +104,9 @@ function predictionOutcomeColor(
   if (status === "solved") {
     return cssColor(OBSERVED_VERDICT_COLORS.pass, alpha);
   }
+  if (status === "otherRunway") {
+    return cssColor(PREDICTION_OTHER_RUNWAY_COLOR, alpha);
+  }
   if (status === "offTarget" || status === "failed") {
     return cssColor(OBSERVED_VERDICT_COLORS.fail, alpha);
   }
@@ -120,7 +124,8 @@ function entityStatus(
   const indexed = group ? statusByGroup?.get(group) : undefined;
   if (indexed) return indexed;
   const raw = entity.properties?.status?.getValue(Cesium.JulianDate.now());
-  return raw === "solved" || raw === "offTarget" || raw === "indeterminate" || raw === "failed"
+  return raw === "solved" || raw === "offTarget" || raw === "indeterminate" || raw === "failed" ||
+    raw === "otherRunway"
     ? raw
     : undefined;
 }
@@ -282,7 +287,7 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
   } = useApp();
   const enabled =
     !!viewer &&
-    mode === "observe" &&
+    mode === "evaluation" &&
     trajectoryComparison &&
     !!activeAirportCode &&
     !!trajectoryComparisonCategory;

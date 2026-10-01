@@ -200,11 +200,16 @@ class ClosedLoop:
         self.step_s, self.params, self.device = step_s, params, device
         self.executor = Executor(inputs, runways, charts, approach_ias_mps, params, words,
                                  time_limit_s=torch.tensor(limits, dtype=torch.float64, device=device))
-        self.speaker = Speaker(model, flights, geometries, landings, words,
-                               max_rows=rows_for(max(limits) + step_s, step_s), generator=generator,
-                               procedure_masks=procedure_masks, temperature=temperature)
+        self.speaker = self._make_speaker(model, flights, geometries, landings, words,
+                                          max_rows=rows_for(max(limits) + step_s, step_s), generator=generator,
+                                          procedure_masks=procedure_masks, temperature=temperature)
         self.spoken = Spoken(len(limits), words, device=device)
         self.max_steps = rows_for(max(limits), step_s) - N_LOOK
+
+    def _make_speaker(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
+                      landings: Any, words: Words, **options: Any) -> Speaker:
+        """The speaker of the loop's flights (a scene's loop speaks through a `SceneSpeaker`)."""
+        return Speaker(model, flights, geometries, landings, words, **options)
 
     @property
     def steps(self) -> int:
@@ -321,6 +326,18 @@ def glidepath_stops(flown: Flown, grids: Sequence[np.ndarray], geometries: Seque
     return stops
 
 
+def sentence_counts(grid: np.ndarray) -> dict[str, Any]:
+    """What a said sentence (``grid``: [steps, 6], `UNCHANGED` where a column says nothing, the first step saying
+    every column) did with its runway and its approach: the runway pointed first and last, how often it changed, the
+    go-arounds said and whether it was cleared at its last step."""
+    runway = grid[:, RUNWAY][grid[:, RUNWAY] != UNCHANGED]
+    approach = grid[:, APPROACH][grid[:, APPROACH] != UNCHANGED]
+    return {"first_runway": int(runway[0]), "last_runway": int(runway[-1]),
+            "runway_changes": int((np.diff(runway) != 0).sum()),
+            "go_arounds": int((grid[:, APPROACH] == APPROACH_GO_AROUND).sum()),
+            "cleared_at_end": bool(approach[-1] == APPROACH_CLEARED)}
+
+
 def flight_rows(batch: replay.Batch, flown: Flown, grids: Sequence[np.ndarray], words: Words, source: str,
                 samples: Sequence[int | None], forbidden: dict[int, np.ndarray] | None,
                 stops: GlidepathStops | None = None) -> list[dict[str, Any]]:
@@ -337,20 +354,18 @@ def flight_rows(batch: replay.Batch, flown: Flown, grids: Sequence[np.ndarray], 
         # its stopping step flew
         steps = steps_said(flown, j, len(grid), step_rows) if stop < 0 else min(len(grid), int(stops.row[j]) + 1)
         grid = np.asarray(grid)[:steps]
-        runway = grid[:, RUNWAY][grid[:, RUNWAY] != UNCHANGED]
-        outcome = outcome_of(flown, j, batch.geometries[j], int(runway[-1]), words.spec)
+        counts = sentence_counts(grid)
+        outcome = outcome_of(flown, j, batch.geometries[j], counts["last_runway"], words.spec)
         said_after_first = (grid[1:] != UNCHANGED).sum(axis=0)
-        approach = grid[:, APPROACH][grid[:, APPROACH] != UNCHANGED]
         rows.append({
             "dataset_id": batch.signals[j].dataset_id, "airport": batch.signals[j].airport,
             "stratum": flight_record(reading)["stratum"], "source": source, "sample": sample,
             "outcome": outcome.outcome if stop < 0 else BELOW_GLIDEPATH,
             "end_s": outcome.end_row * flown.cycle_s if stop < 0 else (stop + 1) * words.spec.step_s,
             "observed_remaining_s": observed_remaining_s(reading, words.spec.step_s),
-            "observed_runway": reading.runway_index, "first_runway": int(runway[0]), "last_runway": int(runway[-1]),
-            "runway_changes": int((np.diff(runway) != 0).sum()), "steps_said": len(grid),
-            "go_arounds": int((grid[:, APPROACH] == APPROACH_GO_AROUND).sum()),
-            "cleared_at_end": bool(approach[-1] == APPROACH_CLEARED),
+            "observed_runway": reading.runway_index, "first_runway": counts["first_runway"],
+            "last_runway": counts["last_runway"], "runway_changes": counts["runway_changes"], "steps_said": len(grid),
+            "go_arounds": counts["go_arounds"], "cleared_at_end": counts["cleared_at_end"],
             "forbidden_mass": ({COLUMNS[c]: float(mass[j, :steps].mean()) for c, mass in forbidden.items()}
                                if forbidden is not None else None),
             "words_after_first": {name: int(said_after_first[c]) for c, name in enumerate(COLUMNS)},

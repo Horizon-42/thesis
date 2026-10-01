@@ -7,14 +7,14 @@
  * VISIBILITY are kept independent — you can hold a source in memory without
  * painting it, and re-show it instantly without re-parsing:
  *
- *   • LOADED only in Observe — the observed tracks are Observe's content, and the
- *     runway profile samples them only in Observe (planApproachViewSources),
- *     so no other task needs them in memory. Outside Observe `fileUrl` is "" so the
+ *   • LOADED only in Evaluation — the observed tracks are Evaluation's content, and the
+ *     runway profile samples them only in Evaluation (planApproachViewSources),
+ *     so no other task needs them in memory. Outside Evaluation `fileUrl` is "" so the
  *     caller releases the source. (This also matters because useObservedTrajectoryLayer drives
  *     the shared viewer clock from the observed CZML's span; loading it behind a
  *     profile in Optimize/Fly would hijack the optimized playback's clock and make
  *     that track vanish — so we simply don't load it there.)
- *   • baseline styling is painted only in Observe with no comparison. Comparison owns
+ *   • ground-truth styling is painted only in Evaluation with no comparison. Comparison owns
  *     a separate exact reference roster selected by its committed index.
  *   • sampled ONCE by the backend, after runway + terminal-verdict filtering. The
  *     browser therefore receives no discarded entities and never repeats selection.
@@ -58,7 +58,7 @@ interface ObservedVerdictPayload {
 /**
  * Which window of the measurement the backend returned.
  *
- * `full` is the complete reconstructed track (Observe/Baseline). `arrival` is the model
+ * `full` is the complete reconstructed track (Evaluation/Ground Truth). `arrival` is the model
  * arrival slice — terminal-ring entry to the landing anchor, time rebased so t=0 is the
  * entry — which is the window every optimizer/prediction record lives in. The comparison
  * overlay must use `arrival`: a full track's t=0 is the first reception, a median 45 s and
@@ -111,7 +111,7 @@ export function planObservedTracks({
   landingsManifest,
   landingsStatus,
 }: ObservedTrackInputs): ObservedTrackPlan {
-  const relevant = !!activeAirportCode && mode === "observe" && !trajectoryComparison;
+  const relevant = !!activeAirportCode && mode === "evaluation" && !trajectoryComparison;
   let fileUrl = "";
   const publicationReady =
     landingsStatus === undefined || (landingsStatus === "ready" && !!landingsManifest);
@@ -163,7 +163,7 @@ export function observedTracksVisible({
   mode,
   trajectoryComparison,
 }: ObservedTrackVisibilityInputs): boolean {
-  return mode === "observe" && !trajectoryComparison;
+  return mode === "evaluation" && !trajectoryComparison;
 }
 
 export function isObservedTrajectoryResponse(value: unknown): value is ObservedTrajectoryResponse {

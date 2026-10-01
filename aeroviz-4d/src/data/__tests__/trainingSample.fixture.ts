@@ -14,7 +14,7 @@
 import {
   TRAINING_COLUMNS,
   TRAINING_INDEX_SCHEMA,
-  TRAINING_READABLE_SET_KIND,
+  TRAINING_READBACK_SET_KIND,
   TRAINING_READING_RULE,
   TRAINING_SAMPLE_SCHEMA,
   TRAINING_SPEC_SHA256,
@@ -23,9 +23,19 @@ import {
 
 /** The set the exporter names after the reading rule. */
 export const SET_ID = TRAINING_READING_RULE.replace("-", "_");
+/** The HAE − MSL the fixture's flights are drawn at: the runway offset the exporter adds to each reported height. */
+export const MOCK_DATUM_M = -33;
 
 export const MOCK_ROWS = 60;
 export const MOCK_STEP_S = 2;
+
+/** A track's attitude block, ``n`` points (`trainingAttitude.readAttitude`): heading ``headingDeg``, descending at 3°,
+ *  banked ``bankRightDeg`` with a 6° attack reading — or, null, a flight without an airframe (no bank, no attack). */
+export function mockAttitude(n: number, headingDeg = 90, bankRightDeg: number | null = 0) {
+  const fill = (value: number) => Array.from({ length: n }, () => value);
+  return { headingDeg: fill(headingDeg), pathAngleDeg: fill(-3), bankRightDeg: bankRightDeg === null ? null : fill(bankRightDeg),
+    attackDeg: bankRightDeg === null ? null : fill(6) };
+}
 export const MOCK_CANDIDATES_SHA = "c".repeat(64);
 export const MOCK_LABELLER_SHA = "d".repeat(64);
 
@@ -142,6 +152,7 @@ export function mockFlight(key: string, vectored: boolean): Record<string, unkno
   const eM = range(rows, -20000, 300);
   const nM = range(rows).map((row) => (vectored && row < 25 ? 3000 - row * 100 : 0));
   const altitude = range(rows).map((row) => (row < 20 ? 1110 : 1110 - (row - 20) * 16));
+  const reported = altitude.map((h) => h + 3);
   // the turn to 180° flown from step 10; at step 12 the track is still 10° short of it: that row is outside its band
   const track = range(rows).map((row) => (vectored ? (row < 10 ? 270 : row < 12 ? 225 : row === 12 ? 190 : row < 25 ? 180 : 90) : 90));
   const speed = range(rows).map((row) => (row < 30 ? 110 : 110 - (row - 30) * 0.8));
@@ -161,11 +172,12 @@ export function mockFlight(key: string, vectored: boolean): Record<string, unkno
     captureRow, joinRow, unspecifiedRow: 30, captureBeforeThresholdM: 12500,
     signals: {
       tS: range(rows, 0, MOCK_STEP_S), eM, nM, lon: eM.map((e) => -78 + e / 90000), lat: nM.map((n) => 35 + n / 111000),
-      altitudeHaeM: altitude.map((h) => h - 33),
-      raw: { trackDeg: track.map((t) => t + 0.4), altitudeM: altitude.map((h) => h + 3), groundSpeedMps: speed.map((v) => v + 0.5),
+      altitudeHaeM: reported.map((h) => h + MOCK_DATUM_M),
+      raw: { trackDeg: track.map((t) => t + 0.4), altitudeM: reported, groundSpeedMps: speed.map((v) => v + 0.5),
              verticalRateMps: range(rows).map((row) => (row < 20 ? 0 : -4)) },
       smoothed: { trackDeg: track, altitudeM: altitude, groundSpeedMps: speed, distanceM: distance },
       beforeThresholdM: eM.map((e) => -e), rightOfCourseM: nM.map((n) => -n),
+      attitude: mockAttitude(rows),
     },
     words: { events, inForce: inForce(events) },
     envelopes: {
@@ -252,7 +264,7 @@ export function mockIndex(): Record<string, unknown> {
       { id: "instruction_v2", kind: "vocabulary-readback", title: "the vocabulary of turns and holds",
         file: "instruction_v2/sample.json", vocabularySha256: "1".repeat(64), runwaySha256: "b".repeat(64),
         readingRule: "instruction-v2", flights: 40, cohort: { ...cohort, perStratum: 20 } },
-      { id: SET_ID, kind: TRAINING_READABLE_SET_KIND, title: "Instruction vocabulary", file: `${SET_ID}/sample.json`,
+      { id: SET_ID, kind: TRAINING_READBACK_SET_KIND, title: "Instruction vocabulary", file: `${SET_ID}/sample.json`,
         vocabularySha256: TRAINING_SPEC_SHA256, runwaySha256: MOCK_CANDIDATES_SHA, readingRule: TRAINING_READING_RULE,
         flights: 2, cohort, source: { any: "extra keys are the exporter's provenance" } },
       { id: "prior_s1337_val", kind: "prior-generated", title: "an old prior", file: "prior_s1337_val/sample.json",

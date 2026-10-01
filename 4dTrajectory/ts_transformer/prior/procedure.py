@@ -203,26 +203,38 @@ class AltitudeMasks:
                 self.dipped[index, r] |= (h[index] < final.entry_m - tolerance) & ~self.joined[index, r]
 
     def allowed(self, column: int, chosen: np.ndarray, value: np.ndarray, at: tuple[np.ndarray, np.ndarray, np.ndarray],
-                opening: bool, classes: int) -> np.ndarray:
+                opening: bool, classes: int, *, flights: np.ndarray | None = None) -> np.ndarray:
         """``[B, classes]``: the classes of ``column`` (one of `columns`) each flight may say at its newest row
         (``at``: its position and height there, [B] each), for the runway and approach in force after this step's
         columns so far (``chosen``: this step's classes, [B, 6], 0 unchanged; ``value``: the classes in force before the
         step, 0 none yet). The altitude: rules 1–4 on every word, and "unchanged" (class 0) only where the word in force
         still passes them (rule 5; at the first predicted step it is not asked about — the model already masks it). The
-        angle: the climb class not where the climb is barred (rule 4)."""
+        angle: the climb class not where the climb is barred (rule 4). ``flights`` ([B] bool): the flights asked about
+        (every one by default); the others' rows allow every class."""
         out = np.ones((len(chosen), classes), dtype=bool)
+        asked = range(len(chosen)) if flights is None else np.flatnonzero(flights).tolist()
+        states = {b: self._final_state(chosen, value, b) for b in asked}
         if column == ANGLE:
-            barred = np.array([self._final_state(chosen, value, b)[3] for b in range(len(chosen))])
-            out[:, 1:] = angle_word_allowed(np.arange(classes - 1)[None, :], barred[:, None], self.words)
+            index = np.array(list(states), dtype=np.int64)
+            barred = np.array([state[3] for state in states.values()], dtype=bool)
+            out[index, 1:] = angle_word_allowed(np.arange(classes - 1)[None, :], barred[:, None], self.words)
             return out
-        every = np.arange(classes - 1)
-        for b in range(len(chosen)):
-            final, joined, _, barred = self._final_state(chosen, value, b)
-            here = (at[0][b], at[1][b], at[2][b])
-            out[b, 1:] = altitude_word_allowed(final, every, *here, self.words, joined=joined, barred=barred)
+        # the flights pointed at one final together: their positions against it once, every word broadcast over them
+        by_final: dict[int, list[int]] = defaultdict(list)
+        for b, state in states.items():
+            by_final[id(state[0])].append(b)
+        every = np.arange(classes - 1)[None, :]
+        for members in by_final.values():
+            index = np.array(members)
+            final = states[members[0]][0]
+            joined = np.array([states[b][1] for b in members])
+            barred = np.array([states[b][3] for b in members])
+            e, n, h = at[0][index], at[1][index], at[2][index]
+            out[index, 1:] = altitude_word_allowed(final, every, e[:, None], n[:, None], h[:, None], self.words,
+                                                   joined=joined[:, None], barred=barred[:, None])
             if not opening:
-                out[b, 0] = bool(altitude_word_allowed(final, np.array([value[b, ALTITUDE] - 1]), *here, self.words,
-                                                       joined=joined, barred=barred)[0])
+                out[index, 0] = altitude_word_allowed(final, value[index, ALTITUDE] - 1, e, n, h, self.words,
+                                                      joined=joined, barred=barred)
         return out
 
     def _final_state(self, chosen: np.ndarray, value: np.ndarray, b: int) -> tuple[RunwayProcedure, bool, bool, bool]:

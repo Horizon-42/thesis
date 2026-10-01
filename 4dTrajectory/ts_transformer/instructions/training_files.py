@@ -6,10 +6,13 @@ Not a runner, and torch-free: everything here raises `ValueError` (a set that is
 them), never `SystemExit` — a server thread would let that escape its handler and drop the request
 unanswered. A runner lets it propagate, with its traceback.
 
-**A set** (`KIND_READBACK`): ``<airport>/training/<set-id>/sample.json`` (`SAMPLE_SCHEMA`), listed in
-``<airport>/training/index.json`` (`INDEX_SCHEMA`). **An overlay** — another model's output on a set's own flights —
+**A set** — a read-back set (`KIND_READBACK`): ``<airport>/training/<set-id>/sample.json`` (`SAMPLE_SCHEMA`), val
+flights; a window set (`KIND_TRAFFIC`, `window_training_export`): ``<airport>/training/<set-id>/traffic.json``
+(`TRAFFIC_SCHEMA`), multi-aircraft windows of `TRAFFIC_SPLIT` — each listed in ``<airport>/training/index.json``
+(`INDEX_SCHEMA`). **An overlay** — another model's output on a set's own flights —
 ``<airport>/training/<overlay-id>/<file>``, listed in ``<airport>/training/overlays.json`` (`OVERLAYS_SCHEMA`) with the
-set it is drawn over and that set's sample sha256. A set or an overlay is never overwritten, and a manifest is
+set it is drawn over, and bound to that set by what it shares with it (`BaseSet.block`, `require_set_datum`) — never by
+the set file's bytes. A set or an overlay is never overwritten, and a manifest is
 rewritten only when it is still what the run read at its start (`require_index_unchanged`,
 `require_overlays_unchanged`): another export that wrote it
 meanwhile would otherwise lose its entry.
@@ -26,6 +29,7 @@ from typing import Any
 import numpy as np
 
 from ts_transformer.instructions import display
+from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import arrival_manifest_sha256s
 from ts_transformer.instructions.spec import READING_RULE, VocabularySpec
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED
@@ -38,30 +42,49 @@ from ts_transformer.io_utils import utc_now
 #: next heading word's, `display.HeadingBand`) with each row's verdict — no turn region, turn end, hold funnel, split
 #: part or inserted intercept any more; the capture turn is its rows and the labeller's check; the vocabulary carries
 #: the lead. (v6 was `instruction-v2`'s: turns bounded by rate, judged holds; a flight's ``typecode`` its own ICAO
-#: type or null, as in v7.) The index keeps its v1 shape: sets of every vocabulary sit in it.
+#: type or null, as in v7.) v8 (2026-09-30): the signals carry the attitude the aircraft is drawn in at each row
+#: (`experiments/training_attitude.py`). The index keeps its v1 shape: sets of every vocabulary sit in it.
 INDEX_SCHEMA = "aeroviz-training-index-v1"
-SAMPLE_SCHEMA = "aeroviz-training-sample-v7"
+SAMPLE_SCHEMA = "aeroviz-training-sample-v8"
 KIND_READBACK = "vocabulary-readback"
 INDEX_FILE = "index.json"
 SAMPLE_FILE = "sample.json"
+#: MIRROR of `aeroviz-4d/src/data/trainingTraffic.ts` (`TRAINING_TRAFFIC_SCHEMA`, `TRAINING_TRAFFIC_SET_KIND`): a window
+#: set (the Training module §2.9) — multi-aircraft windows, the flights the prior commands in them as a read-back set's
+#: flights, every other aircraft of a window as the judge replays it, and the windows as recorded. v2 (2026-09-30): every
+#: flight's signals and every recorded track carry the attitude the aircraft is drawn in (`training_attitude`).
+TRAFFIC_SCHEMA = "aeroviz-training-traffic-v2"
+KIND_TRAFFIC = "traffic-windows"
+TRAFFIC_FILE = "traffic.json"
 
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_OVERLAYS_SCHEMA`, `TRAINING_OVERLAY_KINDS`): the
 #: manifest of what is drawn OVER this airport's sets — another model's output on a set's own flights, each in a
 #: file of its own schema (`executor_training_export`: the executor's replay; `prior_training_export`: the prior's
 #: predictions; `prior_generation_training_export`: the prior's own sentences, flown — from the set's own starts, or with
 #: ``--augment-seed`` from augmented ones, a kind of its own). The index lists sets and keeps
-#: its shape; this file lists overlays, each naming the set it is drawn over and that set's sample by its sha256, so a
-#: set re-exported under the same id is not mistaken for it. A kind the reader does not know rejects that entry alone.
-OVERLAYS_SCHEMA = "aeroviz-training-overlays-v1"
+#: its shape; this file lists overlays, each naming the set it is drawn over. A kind the reader does not know rejects
+#: that entry alone. v2 (2026-09-28): an entry no longer names its set's sample by the file's sha256 — a set re-exported
+#: with the same flights keeps its overlays; what an overlay shares with its set is in its payload (`BaseSet.block`).
+OVERLAYS_SCHEMA = "aeroviz-training-overlays-v2"
 OVERLAYS_FILE = "overlays.json"
 KIND_EXECUTOR = "executor-replay"
 KIND_PRIOR = "prior-prediction"
 KIND_GENERATION = "prior-generation"
 KIND_AUGMENTED_GENERATION = "prior-generation-augmented"
-OVERLAY_KINDS = (KIND_EXECUTOR, KIND_PRIOR, KIND_GENERATION, KIND_AUGMENTED_GENERATION)
+KIND_WINDOW_GENERATION = "window-generation"
+OVERLAY_KINDS = (KIND_EXECUTOR, KIND_PRIOR, KIND_GENERATION, KIND_AUGMENTED_GENERATION, KIND_WINDOW_GENERATION)
 
-#: Only validation flights are drawn: train is what a prior will be fitted on, and test stays shut.
+#: Only validation flights are drawn into a read-back set: train is what a prior will be fitted on, and test stays shut.
 SPLIT = "val"
+#: A window set's windows are the formal window readouts' (`traffic_window_generation`): the prior's internal selection
+#: split, so val stays unread until the multi-aircraft stage is settled (multi-aircraft design §1.3; user 2026-09-30).
+TRAFFIC_SPLIT = "select"
+#: Each set kind's file schema and split.
+SET_KINDS = {KIND_READBACK: (SAMPLE_SCHEMA, SPLIT), KIND_TRAFFIC: (TRAFFIC_SCHEMA, TRAFFIC_SPLIT)}
+
+#: How far apart two readings of one flight's HAE − MSL may be, each read off a pair of heights written to 0.01 m
+#: (`rounded(..., 2)`): 0.01 m a reading. MIRROR of `TRAINING_DATUM_TOLERANCE_M` in the frontend's overlay reader.
+DATUM_TOLERANCE_M = 0.02
 
 #: Why a word was issued — every `Instruction.kind` the labeller (`instructions/labeller/*`) writes into a kept
 #: sentence. MIRROR of `TRAINING_WORD_KINDS` in the frontend reader, which names each one; a kind outside this list
@@ -141,19 +164,20 @@ def listed_set(payload: dict[str, Any], path: Path, airport: str, set_id: str) -
     return listed[0]
 
 
-def check_readback(entry: dict[str, Any], sample: dict[str, Any], file: Path, airport: str) -> None:
-    """A set the Training exporters write and the frontend reads: a read-back of this reading rule, its sample under
-    `SAMPLE_SCHEMA`, the set and airport it is listed as, drawn from `SPLIT`. Anything else is refused by name — an
-    overlay drawn over (or a flight flown from) a set the frontend refuses would never be seen."""
-    if (entry["kind"], entry["readingRule"]) != (KIND_READBACK, READING_RULE):
+def check_set(entry: dict[str, Any], payload: dict[str, Any], file: Path, airport: str, kind: str) -> None:
+    """A set the Training exporters write and the frontend reads, of ``kind`` (`SET_KINDS`): of this reading rule, its
+    file under the kind's schema, the set and airport it is listed as, drawn from the kind's split. Anything else is
+    refused by name — an overlay drawn over (or a flight flown from) a set the frontend refuses would never be seen."""
+    if (entry["kind"], entry["readingRule"]) != (kind, READING_RULE):
         raise ValueError(f"set {entry['id']} at {airport} is a {entry['kind']} set of {entry['readingRule']}, not a "
-                         f"{KIND_READBACK} set of {READING_RULE}")
-    if sample["schema"] != SAMPLE_SCHEMA:
-        raise ValueError(f"{file} is a {sample['schema']} file, not {SAMPLE_SCHEMA}: re-export the set first")
-    found = (sample["setId"], sample["airport"], sample["cohort"]["split"], sample["vocabulary"]["readingRule"])
-    if found != (entry["id"], airport, SPLIT, READING_RULE):
+                         f"{kind} set of {READING_RULE}")
+    schema, split = SET_KINDS[kind]
+    if payload["schema"] != schema:
+        raise ValueError(f"{file} is a {payload['schema']} file, not {schema}: re-export the set first")
+    found = (payload["setId"], payload["airport"], payload["cohort"]["split"], payload["vocabulary"]["readingRule"])
+    if found != (entry["id"], airport, split, READING_RULE):
         raise ValueError(f"{file} holds set {found[0]} at {found[1]}, split {found[2]}, read under {found[3]}; expected "
-                         f"{entry['id']} at {airport}, split {SPLIT}, {READING_RULE}")
+                         f"{entry['id']} at {airport}, split {split}, {READING_RULE}")
 
 
 def read_index(training: Path, airport: str, set_id: str) -> list[dict[str, Any]]:
@@ -168,35 +192,59 @@ def read_index(training: Path, airport: str, set_id: str) -> list[dict[str, Any]
     return sets
 
 
+def candidates_sha256(geometry: AirportGeometry) -> str:
+    """The runway pointer's classes ARE the airport's candidates (vocabulary design §4.1), and the
+    landing rule reads every runway end of the airport (§2.2), so the identity of both is the sha of
+    the airport geometry — candidates and runway ends — a sample's ``candidatesSha256`` and the index's
+    ``runwaySha256``."""
+    canonical = json.dumps(geometry.to_dict(), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def airport_frame(geometry: AirportGeometry) -> dict[str, Any]:
+    """The airport frame a sample's metres are in (its ``airportFrame``)."""
+    return {"code": geometry.code, "lat": geometry.frame.lat0, "lon": geometry.frame.lon0,
+            "elevationM": geometry.frame.alt0}
+
+
 @dataclass(frozen=True)
 class BaseSet:
-    """An exported set an overlay is drawn over: its index entry, its sample, and the sample file's sha256."""
+    """An exported set an overlay is drawn over: its index entry and its file (a read-back set's sample, a window set's
+    windows — both carry the vocabulary, the candidates and the frame)."""
 
     airport: str
     entry: dict[str, Any]
     sample: dict[str, Any]
-    sha256: str
 
     @property
     def block(self) -> dict[str, Any]:
-        """What an overlay records of its set: the frontend matches the set id, the sample's time of writing and
-        the spec against the sample it loaded; `check-publication` matches the sha256 of the file on disk."""
-        return {"setId": self.entry["id"], "sampleWrittenUtc": self.sample["writtenUtc"], "sampleSha256": self.sha256,
-                "specSha256": self.sample["vocabulary"]["specSha256"]}
+        """What an overlay records of its set — what the two share besides their flights: the set id, the vocabulary
+        spec, the candidate runways (a runway index points into them) and the airport frame (the metres). The frontend
+        matches each against the sample it loaded, and the flights one by one; never the sample file's bytes or its
+        time of writing, so a set exported again with the same flights keeps its overlays."""
+        return {"setId": self.entry["id"], "specSha256": self.sample["vocabulary"]["specSha256"],
+                "candidatesSha256": self.sample["candidatesSha256"], "airportFrame": self.sample["airportFrame"]}
 
 
-def open_base_set(training: Path, airport: str, set_id: str, spec: VocabularySpec) -> BaseSet:
-    """Set ``set_id`` for an overlay of a model of ``spec``: `check_readback`'s set, of that spec."""
+def open_base_set(training: Path, airport: str, set_id: str, kind: str, spec: VocabularySpec,
+                  geometry: AirportGeometry) -> BaseSet:
+    """Set ``set_id`` of ``kind`` for an overlay of a model of ``spec`` flown on ``geometry`` (the overlay's own
+    artefact's airport): `check_set`'s set, of that spec, whose candidates and frame are that geometry's."""
     path = training / INDEX_FILE
     entry = listed_set(json.loads(path.read_text(encoding="utf-8")), path, airport, set_id)
     file = training / entry["file"]
-    raw = file.read_bytes()
-    sample = json.loads(raw)
-    check_readback(entry, sample, file, airport)
+    sample = json.loads(file.read_text(encoding="utf-8"))
+    check_set(entry, sample, file, airport, kind)
     if (entry["vocabularySha256"], sample["vocabulary"]["specSha256"]) != (spec.sha256, spec.sha256):
         raise ValueError(f"set {set_id} at {airport} is of spec {entry['vocabularySha256'][:12]} (its sample "
                          f"{sample['vocabulary']['specSha256'][:12]}), not {spec.sha256[:12]}")
-    return BaseSet(airport, entry, sample, hashlib.sha256(raw).hexdigest())
+    if sample["candidatesSha256"] != candidates_sha256(geometry):
+        raise ValueError(f"set {set_id} at {airport} has candidates {sample['candidatesSha256'][:12]}, the overlay's "
+                         f"artefact {candidates_sha256(geometry)[:12]}")
+    if sample["airportFrame"] != airport_frame(geometry):
+        raise ValueError(f"set {set_id} at {airport} is in the frame {sample['airportFrame']}, the overlay's artefact "
+                         f"in {airport_frame(geometry)}")
+    return BaseSet(airport, entry, sample)
 
 
 def base_flights(base: BaseSet, flights: list[Any], sentences: dict[str, np.ndarray]) -> list[tuple[Any, int]]:
@@ -221,6 +269,24 @@ def base_flights(base: BaseSet, flights: list[Any], sentences: dict[str, np.ndar
     return out
 
 
+def set_flight_datum_m(item: dict[str, Any]) -> float:
+    """A set flight's HAE − MSL (``item``: one of its sample's flights): its first row's ellipsoid height less its reported
+    height — the one runway offset its exporter added (`runway_hae_minus_msl_m`), to `DATUM_TOLERANCE_M` / 2."""
+    signals = item["signals"]
+    return float(signals["altitudeHaeM"][0]) - float(signals["raw"]["altitudeM"][0])
+
+
+def require_set_datum(base: BaseSet, flights: list[Any], hae_minus_msl_m: dict[str, float]) -> None:
+    """Each of the set's flights (``flights``: `base_flights`' signals, in the set's order) has the HAE − MSL an overlay
+    that draws heights adds to it (``hae_minus_msl_m``: `runway_hae_minus_msl_m` of the overlay's artefact, by runway) —
+    or the overlay's tracks would stand beside the set's on another datum; refused by name."""
+    for item, flight in zip(base.sample["flights"], flights, strict=True):
+        found, own = set_flight_datum_m(item), hae_minus_msl_m[flight.runway]
+        if abs(found - own) > DATUM_TOLERANCE_M:
+            raise ValueError(f"{item['datasetId']}: set {base.entry['id']} draws it {found:+.2f} m HAE − MSL, the overlay "
+                             f"{own:+.2f} m")
+
+
 # ---- the overlays
 def read_overlays(training: Path, airport: str, overlay_id: str) -> list[dict[str, Any]]:
     """The airport's overlays as they stand (none yet: an empty list); refused when the manifest is another
@@ -243,7 +309,7 @@ def overlay_entry(overlay_id: str, kind: str, base: BaseSet, title: str, file_na
     """One overlay as the manifest lists it: what it is, the set it is drawn over, and where its file is."""
     if kind not in OVERLAY_KINDS:
         raise ValueError(f"unknown overlay kind {kind!r}")
-    return {"id": overlay_id, "kind": kind, "base": base.entry["id"], "baseSampleSha256": base.sha256, "title": title,
+    return {"id": overlay_id, "kind": kind, "base": base.entry["id"], "title": title,
             "file": f"{overlay_id}/{file_name}", "flights": flights, "source": source}
 
 

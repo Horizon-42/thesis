@@ -1,5 +1,224 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-01 — Frontend: task tabs ordered Fly | Optimize, Learning, Evaluate
+
+- The user's order: Fly on its own, a gap, then Optimize, Learning, Evaluate; the tabs are task GROUPS (`TASK_GROUPS`) and
+  one rule (`.workbench-task-group-start`) makes every gap, the Procedures toggle's too. AV43.
+
+### 2026-10-01 — Frontend: the Evaluation tab reads Evaluate (name only)
+
+- The user: the tab label only; the mode id `evaluation` and the "Ground Truth Evaluation" summaries keep their names. AV43.
+
+### 2026-10-01 — Frontend: the Training module is named Learning; Fly's control labels readable
+
+- **What** (the user): the Training tab and its dock heading read **Learning** — only the module's name; what it shows is
+  still the models' training, so the mode id `training`, "Training details", the code and the data contract keep the name.
+- Fly's Controls labels were dark on the dark dock (no colour of their own, inheriting the page default): `.pilot-panel` now
+  sets its text colour once (`#e0e6f0`, as `.training-panel`) and one rule colours the field names of every row kind. AV43.
+
+### 2026-10-01 — Frontend: Observe → Evaluation, Baseline → Ground Truth, Compare merged into Fly (branch `dev-eval-fly-merge`)
+
+- **What** (the user, 2026-10-01): the Observe task is named **Evaluation**; its Baseline result source is **Ground Truth**
+  (id `groundTruth`, "Ground Truth verdict", "Ground Truth Evaluation"); the Compare task is part of **Fly**. The top bar has
+  four tasks (`evaluation | training | fly | optimize`).
+- **Fly = one aircraft, one control set, two runs** (the user chose this over two side-by-side sections): the live flight, and
+  the dynamics comparison flying the SAME controls held fixed (load factor only — Compute is off under Alpha, said in the
+  panel; Compare's own thrust/bank/load-factor fields are gone; bank ±45° for both). A control edit drops a computed
+  comparison; Compute ends the live flight, Start/Reset drop the comparison; Start resumes only a live session (`isEnabled`),
+  never a playback's state (`liveSnapshot` apart from `playbackSnapshot`). The controls are frozen while a backend request
+  runs. The bottom bar drives the live sim, or the clock while a comparison is loaded; a playback that unloads stops the
+  clock it drove. The RNAV fix list is read per runway, not per task (a fix picked in Fly survives the switch to Optimize).
+- **Structure**: `PilotPanel` takes the workbench task as its mode (`fly | optimize`, required); its own tab row,
+  `onRequestMode` and the dock's two mode-mapping tables are deleted, with the tab-row CSS.
+- **Not renamed**: the published comparison-index key `rawKinematics.observedBaseline` (a Python builder contract — renaming
+  means republishing); the evaluation package's own wording ("observed baselines") in its Python/HTML report.
+- Docs: AV43, `aeroviz-4d/CLAUDE.md`, backend comments, open items / follow-ups naming the view. Vitest 107 files / 905 tests; Opus review + Sonnet browser check.
+
+### 2026-09-30 — Training: aircraft models in the executor's attitude (branch `dev-training-attitude`, not merged)
+
+- **What** (the user, 2026-09-30: aircraft as a model, bound to the real bank, heading and angle of attack, the whole Training
+  module; option b — the pitch is the path angle, the attack only in the label, because the project's lift curve has no flaps
+  and reads ~15° on final): the attitude is computed ONCE in Python (`experiments/training_attitude.py`) and written beside every
+  exported track; the viewer interpolates (`trainingAttitude.ts`) and draws `/models/aircraft.glb` at the cursor, the live Fly
+  aircraft and every window aircraft; one orientation for Fly, Optimize and Training (`utils/aircraftOrientation.ts`).
+- **Formats**: sample v8, traffic v2, executor v5, generation v5, augmented v3, window-generation v2, autopilot segment v8 — the
+  published data are the old names, so merging needs the re-export (after the 7.6 formal run) and restarts at the same time.
+- **Training untouched**: `autopilot/`, `outputs/dynamics/`, `geometry/flyability.py`, `traffic_window*.py` read only; the
+  executor, labeller and scene-edge source hashes unchanged. KRDU trial export (CPU, a scratch directory): the set and the
+  replay identical to the published ones apart from the attitude; `check-publication` 0 errors.
+- Docs: doc 36 §4.12, AV42 (and the second AV40 of 2026-09-30 renumbered AV41), ts index.
+
+### 2026-09-30 — Training: who is commanded, failures in one red, traffic in azure (branch `dev-training-roles`)
+
+- **What** (the user, 2026-09-30): in a window's 3D scene each aircraft is drawn by its role — the one on screen (white point
+  ringed in the reading's colour, "▶ callsign" on a chip), the commanded ones (a set, opaque, the reading's colour), replayed
+  and background ones faded; the strip marks the on-screen row with ▶; the legend gains the window's five rows. A failure is
+  one red `#ff2d2d` (`TRAINING_FAILURE_COLOR`): a model's flight that did not land ends on the bar in a heavier red line and
+  time, losses of separation and judge ends are drawn in it, heavier. traffic is azure `#2b93ee` (was olive `#9c8116`).
+- **Found on the way**: an SVG `fill` attribute loses to any stylesheet `fill` rule — the strip's ✕ and the bar's model end
+  time had never shown their colours (AV40).
+- **Next, to be discussed** (doc 36 §4.11 step 7): aircraft models with real heading / bank / path angle, which needs the
+  exports to carry attitude and every published set and overlay re-exported.
+
+### 2026-09-30 — Training: multi-aircraft windows (branch `dev-training-traffic`, merged)
+
+- **What**: the Training module shows multi-aircraft windows (user 2026-09-30: plan reviewed; 20 windows an airport, the rest as
+  proposed). A window set (`traffic-windows`, `traffic.json`) and one `window-generation` overlay per model, written by ts
+  `window_training_export` (R36); in the frontend the mode is the set's kind; a window's commanded aircraft is an ordinary
+  set flight, so the sentence bar, the read-back window and the single-flight 3D layers are reused as they are; new are the
+  window list, the window's clock above the bar (rows, losses VISUAL/IFR, landings, playback) and the 3D traffic layer.
+  Shared generalisations instead of branches: the cursor on the selection's clock, the model overlays' head, the set head,
+  the panel split into a flight and a window session, one opener of a set by kind (`trainingSets.ts`). A window's aircraft
+  is not flown live (`liveExecutor`). The M4 model is named **traffic** (colour `#9c8116`).
+- **Data choices** (doc 36 §2.9): select windows of the formal window readouts' draw, 20 an airport by commanded size
+  (6 / 7 / 7), 4 samples; the export draws its OWN samples (no readout re-run, no row check — the user: as the single-flight
+  export does); landings = the aircraft whose own end is a landing.
+- **Published** (the user, 2026-09-30) after a mirror export and check: augmented r7 and traffic r5, five airports, 100 windows, 263 commanded
+  aircraft, 1,052 aircraft-samples each: landed 888 for both; lost separation 123 (r7) and 109 (traffic r5). One draw of a
+  few windows — not a comparison of the two models (the formal window readouts are). `check-publication --server`: 0 errors.
+- **Reviews**: two opus reviews (exporter; frontend), every finding fixed. Tests: ts window export 12, frontend Vitest 105
+  files / 887. Docs: doc 36 §2.9 / §4.11, AV39, R36.
+
+### 2026-09-29 — 多机 M4：每轮多过几遍、选轮按配对的标准误
+
+- M4 第一次运行选中的是第 0 轮：每轮离 base 只挪 0.008–0.01，截断只碰到约 0.1 % 的词（设计 §6.6 第 6 步细节第 14 条）。用户定先检验"每轮挪得
+  太少"：`traffic_reward --passes N` 把一轮的句子过 N 遍，每遍新的批次次序，截断的比的分母始终是这一轮开始时冻结的、说出这些句子的模型
+  （PPO 的多遍）；默认 1 遍即原来的一遍。每遍记下离 base 的差别和碰到截断的比例。
+- 选轮（设计 §6.2，§9 第 27 项）：选择集每轮用同一串随机数说，轮与轮逐句配对；一轮要比第 0 轮高出至少 2 倍配对标准误（√翻转的句数 / 句数）
+  才是候选，候选里取最高的、与它差不到 2 倍配对标准误的取最早的，没有候选留第 0 轮（原来是"差 0.015 以内取更早的"，从单机第二阶段照搬）。
+  `choice.json` 记每轮对第 0 轮的差和标准误。第一次运行不按新规则重选。
+
+### 2026-09-29 — 多机 M4 的读数程序 `traffic_reward_readout`（R33）
+
+- M4 的读数要按轮、按航班拆开看（真实场景失去间隔为什么不怎么动、训练信号从哪来），原来是临时脚本算的；按"测量代码是代码"（L20）写成
+  runner：只读一次跑完的 M4 运行的文件（`history.json`、`choice.json`、每轮的 `readout.json` 与 `sentences.npz`）和 M3 真实场景的
+  `flights.jsonl`（同一批选择集航班照标注的词飞、照记录走的结局），写 `traffic_reward_readout.json`。每轮的选择集数（分进近方式、分扩充
+  种类）、训练信号按场景分五类及各类占 |优势| 的比例、复飞的句子数；选择集每轮用同一串随机数说（轮与轮之间是配对的，
+  不是重复抽样：正式运行里真实场景 88 % 的"航班 × 样本"在第 0–7 轮结局相同），所以按第 0 轮和最后一轮分别把航班按"几个样本失去间隔"
+  分组，并给出第 0 轮到最后一轮的配对变化（改好的、新失去的、净变化和它的标准误）；各组照标注的词飞、照记录走也失去间隔的比例。参照
+  （M3）要与运行同一个执行器和指令产物、记录的读数要与运行自己的记录读数一致，否则拒绝。opus 审查后改：某个样本开局就失去间隔的航班
+  整架拿掉（第一步说的跑道决定按哪条跑道判，样本之间会不同，原来的写法在正式运行上报错）；第二次审查后：指令产物按它在 `4dTrajectory/outputs` 下的位置认（运行的工作树删了也认得）、没跑完的运行（`config.rounds` 之前停下）拒绝、参照读数开局就失去间隔的航班也拿掉。测试 16 个（`tests/test_traffic_reward_readout.py`）。
+
+### 2026-09-29 — 多机 M4 提速：多进程说话、边特征成批算
+
+- 用户问 GPU 利用率为什么不高：瓶颈是单核上的 Python（每个场景、每步的相容规则、间隔屏蔽、边特征、执行器、判定），GPU 在等 CPU。
+- 不改任何数的提速（设计 §6.6 第 6 步细节第 12 条）：边特征一次算所有飞机对、一个机场的场景一次调用（`scene_edge_blocks`），间隔屏蔽里别的飞机的状态
+  同一场景共用（`others_at`）。与 e76ca5ff 逐位相同（选择集 2,396 个样本的边特征；20 个真实场景 × 8 句的判定、词、位置、每步允许的词）。只快约 1.35 倍——
+  相容规则（标注器冻结）、执行器（冻结）不能动；原来"快一倍"的估计是没分清哪些能动（我的错）。
+- 多进程说话（第 13 条）：`--speakers` 个 fork 出来的子进程分着说一轮的闭环批，每批一串自己的随机数，结果与进程数无关（测试：1 个 = 2 个 = 本进程，
+  逐位）；主进程在说话前释放 GPU 缓存、说话时建自己的轮次，并核对子进程重建的轮次；子进程出错或被杀，整次运行报错停下，主进程死了子进程跟着死。
+  两轮 opus 审查。边特征代码的指纹变了：开始于 e76ca5ff 的运行只能由它自己的检出读。
+
+### 2026-09-29 — Training 左栏的 "Autopilot (live)" 一栏删掉
+
+- 用户：这一栏的信息多余，删干净，包括相关测试（分支 `dev-training-no-autopilot-panel`）。删掉面板的这一栏（开关 "Fly on band click"
+  与结果卡），以及只为它存在的状态、函数、样式、测试夹具与测试（清单见 viewer 参考 AV38）；点色块总是直接飞（开关原来默认就开）；
+  实时执行器的答复留在句子条头部那一行、小游标、三维和读数核对窗口。答复格式与后端不变。设计文档 36 §4.1、§4.7。
+
+### 2026-09-28 — Training 的句子条：藏起 Cesium 的时钟并贴底、下降角一行叫 Descent、实时执行器的小游标
+
+- 用户的三条（分支 `dev-training-bar-tweaks`）：① Training 里 Cesium 的时钟盘、时间轴（和全屏按钮）不起作用——藏起来，句子条贴着
+  屏幕底边（离底 8 px），Cesium 的署名挪到句子条上方、左栏右边；回到别的模式时原样出现。② 下降角一行 "Angle" 改叫 "Descent"，带上
+  写 "1: 0.92°" 而不是 "descent 1 (0.92°)"。③ 实时执行器飞的时候，它飞的那个词所在的行上有一根小游标：后端在算时停在词的那一步
+  闪，答复到了与三维的飞机同一个时钟走（`autopilotPlaybackS`），尾巴里变淡，飞完停在段尾。viewer 参考 AV36（AV30 的
+  `--training-bar-height` 改写到根元素上），设计文档 36 §4.2、§4.7。
+- 同一分支，用户接着问 KRDU SWA4462 的 "landed · 43/45" 为什么是红的（执行器回放落地了，45 个判了的词里 2 个出界：一段 180°→80°
+  的连续转弯里 095° 与 090° 两个词，执行器比词晚了一两度）：④ 回放对一架航班的判定分三种颜色——落地且词全在包络里青色、落地但
+  有词出界（或航迹被拒）琥珀色、没落地红色（一处规则 `replayVerdict`，出界数用回放门的计数，与列表的 "43/45" 一致）；⑤ 出问题时句子
+  条头部多一个小块 "Replay · 2 words out"，出界的是哪几个词在提示里和 ⓘ 里。viewer 参考 AV37，设计文档 36 §4.1、§4.2。
+
+### 2026-09-28 — 多机 M4 一轮一轮地跑（`--resume`）
+
+- 用户问为什么 8 轮要一次跑完（约 21 小时）：没有方法上的原因，是照搬了第一、二阶段的写法。改为（设计 §6.6 第 6 步细节第 11 条）：每轮用的随机数都由
+  （种子，轮号）决定，每轮在检查点旁存优化器的状态（`optimiser.pt`：AdamW 的动量、预热的步数），`--resume` 从最后一轮完整的接着跑到 `--rounds`；
+  配置或代码提交不同、有一轮没跑完就拒绝（没跑完的由人挪开，不自动删）。测试：从存下的状态接着做一遍更新，与一口气做两遍的权重逐位相同。
+
+### 2026-09-28 — Training 叠加层按内容绑定集合，不再按集合文件的字节和写出时刻
+
+- 起因（绑定审计，`docs/code-health-followups.md` 2026-09-28 的六条之一）：叠加层记下集合样本文件的 sha256 和写出时刻，
+  集合只要用同样的航班重新导出一次，每个机场 25 个叠加层全部被拒读，要约 1 小时重导。
+- 现在叠加层记下它和集合共有的东西：集合 id、规格 sha、候选跑道 sha（`candidatesSha256`，生成样本的跑道编号指向它）、
+  机场坐标系（`airportFrame`）；前端逐项核对，并逐架核对航班键、执行器的每条词、先验的步数，以及画出的每一行高度的
+  HAE − MSL 等于集合里这架航班的（0.02 m：两边各是两个写到 0.01 m 的高度之差，`training_files.DATUM_TOLERANCE_M` /
+  `TRAINING_DATUM_TOLERANCE_M`），从观测状态飞出的航迹第一点就是观测航迹那一行（执行器第 0 行、模型句子第 8 行；审查提出：
+  只比键，集合换了观测航迹而键不变时叠加层会画在旧航迹旁边；已发布的 12,292 条航迹差为 0）。导出器写之前同样核对（`open_base_set` 查候选跑道与坐标系是自己产物的，`require_set_datum`
+  查每架的高度基准）。`check-publication` 不再比对盘上文件的 sha256。
+- 格式名：清单 `aeroviz-training-overlays-v2`，执行器 / 先验 / 生成 v4，增强起点生成 v2（两边一起改，旧名按名字拒读）。
+  **合并（`2f557772`）后全部重导一次**（用户同意，"合并并重导 第三步也做"；`4dTrajectory/outputs/POOLED/training_export_content_binding_20260928/`，
+  39 分钟）：旧清单、每机场 25 个叠加层和集合 `instruction_v3_day_split` 移到 `data/retired_training_overlays/20260928_content_binding/`
+  （`retire.py`，没删）；集合从 v5 重新导出（KSJC 换 10 / 40 架），再按上次的参数和设备导出每机场 22 个叠加层。`check-publication --server`
+  五个机场 0 错误、各 22 个叠加层读过。与退役的比：执行器回放在航班没变的机场逐架相同；逐步预测只差显示的最后一位（0.0001）；模型句子在
+  KMSY、KRDU 逐字相同，KSJC 之后的机场是同一模型的另一组样本（随机数按机场顺序接着用），落地占比变化在 ±1.5 个百分点内。
+- 真数据试跑（临时目录，KRDU + KSJC，v5 句子产物、v11 执行器）：执行器、base 生成、增强起点 base 生成、逐步预测四种叠加层
+  都导出、`check-publication` 0 错误；再从 v5 重新导出集合：KRDU（40 架同样的航班）4 个叠加层照读，KSJC（v5 多标注 1 架，
+  抽样换了 10 / 40 架）4 个按名字拒读。
+- 测试：ts `test_training_overlays` / `test_prior_generation_training_export` / `test_instruction_training_export`、后端
+  `test_autopilot_segment` 过（生成导出器端到端：高度基准差 0.1 m 时写之前拒绝）；前端 867 过。opus 审查：无必改，两条应改
+  （航迹起点、导出器端到端测试）与小项已改。
+
+### 2026-09-28 — 多机 M4 第 6 步：多机后训练的 runner（R32）
+
+- `experiments/traffic_reward.py`（runner）：每轮训练日真实场景 200 + 扩充场景 200（每机场）× 8 句，奖励 = 落地（落地方向上）且没有被失去间隔结束，
+  按同一场景比优势；一开始就失去间隔、或 8 句奖励相同的场景不训练；每轮选择集读数（真实 + 扩充场景、场景样本上的 teacher forcing、交通注意力输出的大小）、
+  护栏与选轮（设计 §6.6 第 6 步细节第 8 条），检查点 v5（带起点模型的出处）。
+- `experiments/traffic_tuner.py`（不是 runner）：第二阶段的一遍更新，句子在场景里打分——排法和边特征与说话器用同一段代码
+  （`scene_speaker.scene_inputs`、`traffic_speaking.speaking_edges`，测试：打分给出的就是采样时的分布）；base 只看单独一架；数据项用 M2 的场景样本；
+  交通注意力 3e-4、其余 1e-5；一批分块打分、梯度相加。
+- 审查找出（opus）：闭环逐步算边特征时只往回看一行，别的飞机的记录时间不在整数步上时它的运动读成"未知"，与一次算完的打分、数据项不一致——改为往回看
+  两行，测试里让别的飞机偏离整数步 0.7 s；v5 检查点缺起点模型的出处；起点模型过不了排序护栏时要到最后才发现——改为训练前先查、过不了就不训练。
+  M3 的正式数不受影响（交通注意力输出为零，边特征进不了 logit）。
+- M3 的 `model_rows` 拆出 `scene_sentences`、`speaking_batches`（行为不变）；`traffic_augment` 从 runner 列表里拿掉（它不是 runner）。
+- CPU 冒烟（1 轮，每机场 2 + 2 个场景 × 2 句）跑通，17 分钟；训练日数据约 4.4 GB。
+
+### 2026-09-28 — 多机 M3 第 5 步与正式读数：扩充场景；起点模型在真实场景里失去间隔 11.5 %
+
+- 第 5 步：`experiments/traffic_augment.py`（不是 runner），"一架由模型指挥"用的三种扩充：D 挪前机（按落地顺序，±60 s）、B 起点扩充（第二阶段的做法，
+  只有它的时限 × 2.0）、A 插入一架（同一跑道 / 单跑道对 / 相关平行，放在进近时钟上 g × 要求的间隔之前）；合格 = 到第一个预测步为止不负责任何失去间隔，
+  最多抽 10 次。说话那架的落地上下文用扩充后的场景（`SceneSpeaker.scene_landings`，`Speaker._contexts` 钩子，单机说话器不变）。R31 加 `--augment-seed`。
+  审查找出插入原来按落地时间放、时限三种都放宽、合格检查读错"已建立"、落地上下文没跟着变，都已改。
+- 修：闭环和说话器互相引用，每批的说话器不释放，第一次正式运行在 476 / 2000 架时内存不够（`SceneLoop.close`）。
+- `RewardTuner` 加两个不改行为的钩子（`_parameter_groups`、`_data_loss`），给 M4 用。
+- **M3 正式**（`outputs/POOLED/traffic/free_generation_20260928/`，读数 `docs/two_tier/readouts/2026-09-28_m3_free_generation.zh.md`）：
+  目视读法下失去间隔——场景里的模型 11.5 %、单独 12.3 %、照标注的词飞 4.9 %、记录 2.6 %；被引导的进近 21.6 %、直线 4.0 %。
+
+### 2026-09-28 — 多机 M3 第 1–4 步：交通注意力、多机说话器、一架由模型指挥的闭环、M3 的程序
+
+- 第 1 步：单机模型加上每层一个"交通注意力"（`prior.model.with_traffic`），只读别的飞机，输出层没有偏置、权重从 0 起：开始时与单机模型相同到舍入；
+  检查点 `ts-prior-checkpoint-v5`（C37）。审查找出输出层原来的偏置从第一步起就有梯度（只有自己时读到的会是偏置），已去掉。
+- 第 2 步：`prior/scene_speaker.py`，每个场景一架由模型说话、其余照记录回放；边特征和间隔屏蔽由调用方按步给（先验包不导入 `inference`）。
+  `Speaker.speak` 拆成编码和采样两步，运算与顺序不变。
+- 第 3 步：`experiments/traffic_speaking.py`（不是 runner）：单机闭环换上场景说话器，每步给这一步的边特征和两条屏蔽，飞完再按场景判失去间隔。
+  `traffic_scene_data` 抽出 `airport_flights`（`build_split` 输出不变）；这是边特征代码哈希里的文件，所以 M2 的两个场景模型在新代码上读不了（不再用）。
+- 第 4 步：`experiments/traffic_free_generation.py`（R31）：M3 = M4 的第 0 轮，每架航班读四种：场景里的模型、单独的模型（按场景判：间隔有多少是白来的）、
+  标注的词、记录。
+
+### 2026-09-28 — 多机 M2 第 6 步：场景模型按 base 的批大小再训一次
+
+- 用户选了读数 §4 的第 1 条（设计 §9 第 21 项）：`traffic_prior_train` 加 `--accumulate`（默认 4），每 4 批累积一次梯度再更新，
+  损失按 4 批合起来被问到的步平均；每轮 494 次更新、每次约 1.67 万步，base 531 次、约 1.56 万步。预热按更新数。测试核对：两批累积的梯度
+  与一批装下两个样本的梯度相同（双精度）。不动边特征那七个文件，第一次训出的场景模型照样能读。
+- 正式结果：`outputs/POOLED/prior/m2_scene_20260928/scene_acc4_s1337`（第 19 轮，val 0.2667）；读数 `outputs/POOLED/traffic/scene_readout_acc4_20260928/`：
+  选择集 0.2868（第一次 0.2880，base 0.2839），有前机的步上速度 +0.0005、航向 +0.0013，M1 的差距原样还在——批的大小解释了一部分整体差距，
+  交互仍然没学到。按设计 §9 第 21 项，下一步不再做场景预训练，交互交给后训练（等用户确认）。
+
+### 2026-09-28 — 多机 M2 第 1–5 步：场景模型的数据、边特征、训练程序和读数程序
+
+- 第 1 步：先验按每架飞机自己的行号读位置和第一个预测步（`rows [B, A, T]`），单机时广播成 `[1, 1, T]`，前向、梯度、说话器与改动前逐位相同；
+  边特征成为构造参数，场景模型存 `ts-prior-checkpoint-v4`（v3 的内容加边特征），按名字读；单机说话器拒绝场景模型。
+- 第 2 步：`inference/scene_edges.py`，每对飞机每一步 17 个边特征（设计 §2.5，加"运动未知"一维）。
+- 第 3 步：`prior/scene_data.py` + `experiments/traffic_scene_data.py`，按 §2.3 切场景样本；每个航班的行只存一份，组批时才摊开。
+- 第 4 步：`experiments/traffic_prior_train.py`（R29），base 的配方加边特征，早停看 val。
+- opus 审查（第 3–4 步）找出的都已改：边特征原来用信号里拟合的速度、航迹和升降率（以该行为中心的拟合，含 7.5 s 未来），改成"从上一行到这一行的位移"，
+  和先验自己的节点输入一致；训练集建样本从约 13 GB 降到 4.0 GB；检查点记录决定边特征的代码和 CWT 表的哈希，`load_prior` 对不上就拒绝；
+  同一个航班编号出现两次时拒绝。场景模型一批里被问到的步比 base 少（每轮 1,976 批对 531 批），写明，不去对齐。
+- 第 5 步的读数程序 `experiments/traffic_scene_readout.py`（R30）：内部选择集上每个被问到的格读三遍（base、场景模型、场景模型但每架单独放——
+  切掉飞机之间的注意力），按 M1 的"有前机""忙"分开记"场景 − base""场景 − 单独"和两种分布的 KL，并给每个量算 M1 的对齐差。M1 的抽样顺序照搬，
+  base 的对齐差与 M1 的正式结果逐位相同（测试核对）。M1 的 runner 抽出 `flight_context`，输出不变。opus 审查找出一处（三种读数共用一个随机数
+  发生器，区间不可比、base 的区间对不上 M1），已改；审查的三条建议（数出没抽到步的重抽、每个量也给对齐差、记下冒烟模型）也照做。
+- 正式结果：场景模型 `outputs/POOLED/prior/m2_scene_20260928/scene_s1337`（第 14 轮，val 0.2681 对 base 0.2643）；读数
+  `outputs/POOLED/traffic/scene_readout_20260928/`：选择集上哪里都没有比 base 好（0.2880 对 0.2839），M1 的差距原样还在，切掉飞机之间的注意力
+  词几乎不变——没有学会用别的飞机。读数 `readouts/2026-09-28_m2_scene_prior.zh.md`；下一步要用户定。
+
 ### 2026-09-28 — 多机 M1：单机模型看不看得到交互
 
 - `experiments/traffic_interaction.py`（R28）：base 在内部选择集上 teacher forcing，第一个预测步之后每一步的速度、航向、许可词负对数似然与换词概率，

@@ -49,7 +49,7 @@ function FlightApp() {
     status: landingsStatus,
     error: landingsError,
   } = useLandingsManifest(activeAirportCode ?? "");
-  // The independently sampled Baseline source exists only in Observe/Baseline. Comparison
+  // The independently sampled Ground Truth source exists only in Evaluation/Ground Truth. Comparison
   // loads its exact index-selected references in useComparisonTrajectoryLayer instead.
   const {
     fileUrl: observedFileUrl,
@@ -103,8 +103,8 @@ function FlightApp() {
         }
         bottom={
           <>
-            {/* The sentence bar spans the full width above the transport, and
-                draws itself only when Training has published a flight. */}
+            {/* The sentence bar spans the full width at the bottom edge (Training has no
+                transport), and draws itself only when Training has published a flight. */}
             <TrainingSentenceBar />
             <WorkbenchBottomBar />
           </>

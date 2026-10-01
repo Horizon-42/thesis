@@ -44,7 +44,6 @@ from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.prior.masks import SETS, ProcedureMasks
 from ts_transformer.repo_layout import COMPARISON_AIRPORTS_ROOT, OPT_OUTPUTS_ROOT, REPO_ROOT
 
-from aeroviz_backend.autopilot_segment import single
 from aeroviz_backend.autopilot_segment.errors import NotFlyable, NotListed, RequestRefused, Superseded
 from aeroviz_backend.autopilot_segment.fly import (
     MODEL_WORD_CLOCK, FlightContext, SplitFiles, fly_segment, open_flights, read_split,
@@ -122,7 +121,7 @@ class AutopilotSegmentBackend:
 
     def training_set(self, airport: str, set_id: str) -> tuple[Path, str, dict[str, Any]]:
         """The set's artefact (absolute), the split its flights were drawn from, and its sample — refused by name
-        unless it is a read-back set the Training export writes (`training_files.check_readback`, the exporters' own
+        unless it is a read-back set the Training export writes (`training_files.check_set`, the exporters' own
         check, on this backend's cached copies of the files)."""
         if not AIRPORT_CODE.fullmatch(airport):
             raise RequestRefused(f"airport {airport!r} is not an airport code")
@@ -135,17 +134,16 @@ class AutopilotSegmentBackend:
         except training_files.NotListed as error:
             raise NotListed(str(error)) from None
         sample = self._json(training / entry["file"])
-        training_files.check_readback(entry, sample, training / entry["file"], airport)
+        training_files.check_set(entry, sample, training / entry["file"], airport, training_files.KIND_READBACK)
         return REPO_ROOT / sample["producedBy"]["artefact"], training_files.SPLIT, sample
 
     def executor_for(self, artefact: Path) -> tuple[Path, ExecutorParams, dict[str, Any], Words]:
         """The one executor spec written by this code for ``artefact``'s vocabulary (`replay.open_executor`); refused,
         naming every spec and why, when there is none or more than one. Chosen again when a spec is added, moved or
-        rewritten — and only while the single-flight executor that flies it mirrors this code
-        (`single.require_mirrored_source`)."""
+        rewritten. `replay.open_executor` opens a spec only for executor code that flies its reference tracks within the
+        bounds in every way, the single-flight executor this backend flies included."""
         listing = tuple((path.parent, path.stat().st_mtime_ns) for path in sorted(self.executor_root.glob("*/spec.json")))
         if artefact not in self._executors or self._executors[artefact][0] != listing:
-            single.require_mirrored_source()
             usable, refused = [], []
             for directory, _ in listing:
                 try:

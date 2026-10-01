@@ -50,6 +50,7 @@ import type {
   TrainingExecutorView, TrainingGenerationView, TrainingPriorView, TrainingSource,
 } from "../data/trainingOverlays";
 import type { TrainingAutopilotView, TrainingPick } from "../data/trainingAutopilot";
+import type { TrainingWindowView } from "../data/trainingTraffic";
 
 // ── Layer names ──────────────────────────────────────────────────────────────
 // Extend this union if you add new data layers.
@@ -199,11 +200,11 @@ interface FlightSessionState {
   trajectoryComparisonKinds: Record<ComparisonKind, boolean>;
   setTrajectoryComparisonKind: (kind: ComparisonKind, visible: boolean) => void;
 
-  /** How many trajectories to render (0 = all); baseline applies it inside the active verdict. */
+  /** How many trajectories to render (0 = all); Ground Truth applies it inside the active verdict. */
   trajectorySampleCount: number;
   setTrajectorySampleCount: (count: number) => void;
 
-  /** Verdict pool from which the observed baseline sample is chosen. */
+  /** Verdict pool from which the Ground Truth sample is chosen. */
   observedVerdictFilter: ObservedVerdictFilter;
   setObservedVerdictFilter: (filter: ObservedVerdictFilter) => void;
 }
@@ -299,20 +300,22 @@ interface TrainingSessionState {
    */
   trainingAutopilot: TrainingAutopilotView | null;
   setTrainingAutopilot: (view: TrainingAutopilotView | null) => void;
-  /** Fly the answer out again in 3D (a new `playedAt`); nothing when there is no answer. */
-  replayTrainingAutopilot: () => void;
   /**
-   * THE WORD THE LIVE EXECUTOR FLIES: set only by a CLICK — the sentence bar's "Fly this segment" button, or a band
-   * clicked while `trainingAutopilotAuto` is on — and cleared by clicking the selected band again; never by the cursor,
-   * which the charts move on hover. It belongs to the flight on screen (`trainingSelectionKey`) and is reset with it, as
+   * THE WORD THE LIVE EXECUTOR FLIES: set only by a CLICK — the sentence bar's Fly button, or a band clicked — and
+   * cleared by clicking the selected band again; never by the cursor, which the charts move on hover. It belongs to
+   * the flight on screen (`trainingSelectionKey`) and is reset with it, as
    * the cursor is: another flight or another set starts with nothing picked. Leaving Training and coming back keeps
    * both, with the flight: the Training session outlives a task switch (`WorkbenchLeftDock`).
    */
   trainingPick: TrainingPick | null;
   setTrainingPick: (pick: TrainingPick | null) => void;
-  /** A band clicked flies its word at once (the panel's switch, on at first); off, only the button flies. */
-  trainingAutopilotAuto: boolean;
-  setTrainingAutopilotAuto: (on: boolean) => void;
+  /**
+   * THE MULTI-AIRCRAFT WINDOW on screen (`data/trainingTraffic.ts`), published by the panel's window session: the window
+   * set, the window and the models' sentences in its windows — what the window strip and the 3D scene draw of every
+   * aircraft; null outside a window set. The aircraft on screen is `trainingSelection`, on the window's clock.
+   */
+  trainingWindow: TrainingWindowView | null;
+  setTrainingWindow: (view: TrainingWindowView | null) => void;
 }
 
 export interface TrainingLayers {
@@ -330,19 +333,21 @@ export interface TrainingLayers {
 
 /**
  * The active top-level task. These four are mutually exclusive — one drives the
- * left dock at a time. `fly`/`optimize`/`compare` map onto the PilotPanel's
- * pilot/trajectory/comparison sub-modes. Procedures is intentionally NOT a mode:
- * it is an independent panel (`proceduresOpen`) that coexists with any task.
+ * left dock at a time. `fly` and `optimize` are served by the PilotPanel, which takes
+ * the task itself as its mode (Fly holds both the live flight and the dynamics
+ * comparison). Procedures is intentionally NOT a mode: it is an independent panel
+ * (`proceduresOpen`) that coexists with any task.
  */
-export type WorkbenchMode = "observe" | "training" | "fly" | "optimize" | "compare";
+export type WorkbenchMode = "evaluation" | "training" | "fly" | "optimize";
 
 /**
- * Fly (pilot) mode's transport, published by PilotPanel so the shared bottom bar
- * can drive the MANUAL simulation loop (`isFlying`) — which, unlike the
- * optimize/compare CZML playback, does NOT run on `viewer.clock`, so the generic
- * clock transport can't touch it. `null` unless the pilot panel is active in fly
- * mode. The callbacks are stable (ref-backed); the booleans reflect live sim
- * state so the bar's Play/Pause icon and disabled states track it.
+ * Fly's live-flight transport, published by PilotPanel so the shared bottom bar
+ * can drive the MANUAL simulation loop (`isFlying`) — which, unlike the CZML
+ * playbacks (Optimize's, Fly's dynamics comparison), does NOT run on `viewer.clock`,
+ * so the generic clock transport can't touch it. Published exactly while the live
+ * flight is Fly's run on screen; `null` otherwise (a loaded comparison: the bar
+ * drives the clock). The callbacks are stable (ref-backed); the booleans reflect
+ * live sim state so the bar's Play/Pause icon and disabled states track it.
  */
 export interface PilotTransport {
   /** The sim loop is running (show Pause) vs paused (show Play). */
@@ -378,22 +383,28 @@ interface WorkbenchUiState {
   rightInspectorCollapsed: boolean;
   setRightInspectorCollapsed: (collapsed: boolean) => void;
   /**
-   * Fly-mode manual-sim transport (see PilotTransport). Published by PilotPanel
-   * while in fly mode so the shared bottom bar drives the sim; `null` otherwise.
+   * Fly's live-flight transport (see PilotTransport). Published by PilotPanel while
+   * the live flight is on screen so the shared bottom bar drives the sim; `null` otherwise.
    */
   pilotTransport: PilotTransport | null;
   setPilotTransport: (transport: PilotTransport | null) => void;
 }
 
 /**
- * THE TRAINING CURSOR: flight-relative time shared by the sentence bar, the read-back charts and the 3D scene. It moves
- * on every mousemove over a chart, so it is a context of its own that `useApp` does NOT read: only what draws the cursor
- * (`useTrainingCursor`) re-renders when it moves, never the ~50 other consumers of `useApp` or the app shell. It belongs
- * to the flight on screen and is reset with it (`trainingSelectionKey`).
+ * THE TRAINING CURSOR: the time shared by the sentence bar, the read-back charts, the window strip and the 3D scene. It
+ * moves on every mousemove over a chart, so it is a context of its own that `useApp` does NOT read: only what draws the
+ * cursor (`useTrainingCursor`) re-renders when it moves, never the ~50 other consumers of `useApp` or the app shell. It is
+ * ONE time, kept on the selection's clock (`TrainingSelection.clock`): the flight on screen's own, or — a multi-aircraft
+ * window's aircraft — the window's, so another aircraft of the window is put on screen at the same moment. A new clock
+ * starts at the flight's own 0 s.
  */
 interface TrainingCursorState {
+  /** On the flight's own clock (0 s: its row 0). */
   trainingCursorS: number;
   setTrainingCursorS: (atS: number) => void;
+  /** On the clock's scope — the window's, for an aircraft of one; the flight's own otherwise. */
+  trainingSceneS: number;
+  setTrainingSceneS: (atS: number) => void;
 }
 
 interface AppState extends
@@ -428,16 +439,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [airport, setAirport] = useState<AirportConfig | null>(null);
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(null);
   const [trainingSelection, setTrainingSelection] = useState<TrainingSelection | null>(null);
-  // The cursor and the pick belong to the flight on screen, and are reset with it before any consumer paints the new
-  // flight with the last one's time or flies the last one's word.
+  // The cursor belongs to the selection's clock and the pick to the flight on screen: each is reset with its own before
+  // any consumer paints the new flight with the last one's time or flies the last one's word.
   const trainingScope = trainingSelectionKey(trainingSelection);
+  const cursorScope = trainingSelection === null ? null : trainingSelection.clock.scope;
+  const cursorOffsetS = trainingSelection === null ? 0 : trainingSelection.clock.offsetS;
   const [trainingCursor, setTrainingCursor] = useState<{ scope: string | null; atS: number }>({ scope: null, atS: 0 });
-  if (trainingCursor.scope !== trainingScope) setTrainingCursor({ scope: trainingScope, atS: 0 });
-  const trainingCursorS = trainingCursor.scope === trainingScope ? trainingCursor.atS : 0;
-  // a setter captured before the flight changed is of the last flight: it writes nothing
-  const setTrainingCursorS = useCallback((atS: number) => {
-    setTrainingCursor((current) => (current.scope === trainingScope ? { scope: trainingScope, atS } : current));
-  }, [trainingScope]);
+  if (trainingCursor.scope !== cursorScope) setTrainingCursor({ scope: cursorScope, atS: cursorOffsetS });
+  const trainingSceneS = trainingCursor.scope === cursorScope ? trainingCursor.atS : cursorOffsetS;
+  const trainingCursorS = trainingSceneS - cursorOffsetS;
+  // a setter captured before the clock changed is of the last one: it writes nothing
+  const setTrainingSceneS = useCallback((atS: number) => {
+    setTrainingCursor((current) => (current.scope === cursorScope ? { scope: cursorScope, atS } : current));
+  }, [cursorScope]);
+  const setTrainingCursorS = useCallback((atS: number) => setTrainingSceneS(atS + cursorOffsetS), [setTrainingSceneS, cursorOffsetS]);
   const [trainingPicked, setTrainingPicked] = useState<{ scope: string | null; pick: TrainingPick | null }>({
     scope: null, pick: null,
   });
@@ -458,10 +473,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [trainingGenerations, setTrainingGenerations] = useState<TrainingGenerationView[]>([]);
   const [trainingSource, setTrainingSource] = useState<TrainingSource | null>(null);
   const [trainingAutopilot, setTrainingAutopilot] = useState<TrainingAutopilotView | null>(null);
-  const replayTrainingAutopilot = useCallback(() => {
-    setTrainingAutopilot((view) => (view?.status === "ready" ? { ...view, playedAt: Date.now() } : view));
-  }, []);
-  const [trainingAutopilotAuto, setTrainingAutopilotAuto] = useState<boolean>(true);
+  const [trainingWindow, setTrainingWindow] = useState<TrainingWindowView | null>(null);
   const [selectedRunway, setSelectedRunway] = useState<string | null>(null);
   const [trajectoryDataSource, setTrajectoryDataSource] =
     useState<Cesium.CzmlDataSource | null>(null);
@@ -492,7 +504,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [approachViewMode, setApproachViewMode] =
     useState<ApproachViewMode>("split");
   const [rangeRingRadiusKm, setRangeRingRadiusKm] = useState<number>(5);
-  const [mode, setMode] = useState<WorkbenchMode>("observe");
+  const [mode, setMode] = useState<WorkbenchMode>("evaluation");
   const [proceduresOpen, setProceduresOpen] = useState<boolean>(false);
   const [pilotTransport, setPilotTransport] = useState<PilotTransport | null>(null);
   const [presentationMode, setPresentationMode] = useState<boolean>(false);
@@ -706,16 +718,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrainingSource,
     trainingAutopilot,
     setTrainingAutopilot,
-    replayTrainingAutopilot,
     trainingPick,
     setTrainingPick,
-    trainingAutopilotAuto,
-    setTrainingAutopilotAuto,
+    trainingWindow,
+    setTrainingWindow,
   }), [trainingSelection, trainingColumn, trainingLayers, setTrainingLayer, trainingExecutor, trainingPrior,
-    trainingGenerations, trainingSource, trainingAutopilot, replayTrainingAutopilot, trainingPick, setTrainingPick,
-    trainingAutopilotAuto]);
-  const trainingCursorState: TrainingCursorState = useMemo(() => ({ trainingCursorS, setTrainingCursorS }),
-    [trainingCursorS, setTrainingCursorS]);
+    trainingGenerations, trainingSource, trainingAutopilot, trainingPick, setTrainingPick, trainingWindow]);
+  const trainingCursorState: TrainingCursorState = useMemo(
+    () => ({ trainingCursorS, setTrainingCursorS, trainingSceneS, setTrainingSceneS }),
+    [trainingCursorS, setTrainingCursorS, trainingSceneS, setTrainingSceneS]);
   const workbenchUiState: WorkbenchUiState = useMemo(() => ({
     mode,
     setMode,

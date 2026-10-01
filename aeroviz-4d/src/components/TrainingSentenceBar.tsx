@@ -1,8 +1,8 @@
 /**
  * TrainingSentenceBar.tsx
  * -----------------------
- * The sentence as a picture: the six columns as six rows — runway pointer, approach, heading, altitude, angle, speed, in
- * the vocabulary's order — against the flight's own time. Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`.
+ * The sentence as a picture: the six columns as six rows — runway pointer, approach, heading, altitude, descent angle,
+ * speed, in the vocabulary's order — against the flight's own time. Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`.
  *
  * A BAND IS A WORD IN FORCE, from the step it was issued to the step the next word of its column replaces it. Step 0
  * carries all six columns, so every row opens with a band at 0; after that a column is "unchanged" until its next word,
@@ -21,25 +21,26 @@
  * once had made the bar hard to read, the user 2026-09-26). The rows it only observed (before its first predicted step)
  * are shaded; under each row a white tick wherever the truth says a word of that column, so where the two sentences part
  * is read at a glance; a dashed line where the model cleared the flight, a solid one in its colour where its flight
- * ended — its time written on the axis under it, in its colour — a dashed white one where the observed flight's sentence
- * ends. Words a model said after its flight ended (the executor flies on after three outcomes its judge reads earlier) sit
+ * landed — a heavier one in the failure red where it did not (the user, 2026-09-30) — its time written on the axis under
+ * it in the same colour, a dashed white one where the observed flight's sentence ends. Words a model said after its flight ended (the executor flies on after three outcomes its judge reads earlier) sit
  * under a grey shade. The
  * time axis is the observed flight's, stretched to the sentence read when that one runs longer (a model's flight that
  * timed out runs on to 1.5× the observed time): the truth is never squeezed by a sample it is not showing. Choosing a
  * model starts at its first sample. A model that does not fly the flight on screen leaves the truth drawn, with its whole
  * header, and says so. The Read-back and Prior windows read the truth, so they are offered only while it is read.
- * A model's words are flown live like the truth's (Fly, or a band click with the panel's switch on): the backend flies
+ * A model's words are flown live like the truth's (Fly, or a band click): the backend flies
  * the model's sentence again from its first step (`trainingAutopilot.ts`), which lands on the sample's own track.
  *
- * THE HEADER IS SHORT: the tabs, the callsign (its type, stratum and counts in its tooltip), the runway, a model's chip (how
- * its sample ended), the live executor's line, the cursor, and the buttons — Fly, Read-back and Prior (the truth's), and ⓘ
- * for the notes. Every chip carries its full reading in its tooltip; the executor's replay of the flight is read in the
- * notes (its words' dots say it). The labeller's own verdicts are TALLIED AT EACH ROW'S END (`rowTally`, the truth's only),
- * lined up on the slash.
+ * THE HEADER IS SHORT: the tabs, the callsign (its type, stratum and counts in its tooltip), the runway, the replay's chip
+ * ONLY when it went wrong ("Replay · 2 words out", `replayIssueText` — the truth's; its words' dots say the rest), a
+ * model's chip (how its sample ended), the live executor's line, the cursor, and the buttons — Fly, Read-back and Prior
+ * (the truth's), and ⓘ for the notes. Every chip carries its full reading in its tooltip; the executor's replay of the
+ * flight is read in full in the notes. The labeller's own verdicts are TALLIED AT EACH ROW'S END (`rowTally`, the truth's
+ * only), lined up on the slash.
  *
  * The cursor is in flight time and is moved by clicking a band or a step number: what it reports is the artefact's own
  * step, never a rounded pixel. It does NOT drive `viewer.clock`: Training loads no CZML, and the clock belongs to
- * Observe's playback.
+ * Evaluation's playback.
  *
  * ONE COLUMN IS HIGHLIGHTED, NEVER A STEP. Clicking a band selects its word class (`trainingColumn`) and puts the cursor
  * at its issue; every view then highlights that column's word in force at the cursor, and only it — of the sentence read.
@@ -50,45 +51,66 @@
  * its own); the PRIOR's window behind its button (`TrainingPriorWindow`). One window is open at a time.
  *
  * THE EXECUTOR, LIVE (`trainingAutopilot`): the Fly button PICKS the selected word of the sentence read for the live
- * executor (`trainingPick`, with its source; "↻ Fly again" once it has flown), and so does clicking a band while the
- * panel's switch is on (`trainingAutopilotAuto`; clicking the selected band again clears the pick) — never the cursor. Its
+ * executor (`trainingPick`, with its source; "↻ Fly again" once it has flown), and so does clicking a band (clicking the
+ * selected band again clears the pick) — never the cursor. Its
  * line (`TrainingAutopilotStatus`) says whether the word stayed inside its envelope and the two times — the word itself
  * only once the selection has moved off it, so the line leaves the header's buttons on their row. A
- * model's word said after its flight ended has no flight to fly: its Fly button is off.
+ * model's word said after its flight ended has no flight to fly: its Fly button is off. On the flown word's row a small
+ * CURSOR says where the executor is (`AutopilotCursor`): at the word's step, pulsing, while the backend flies it; then
+ * with the 3D aircraft as it flies the segment out — the same clock, `autopilotPlaybackS` — faded past where the next
+ * word of the column was heard (the tail); left at the segment's end, as the aircraft is.
  *
- * THE BAR MEASURES ITSELF: its height is published on the workbench as `--training-bar-height`, so the docks end above it
- * (`index.css`) instead of under it.
+ * THE BAR MEASURES ITSELF: its height is published on the page's root as `--training-bar-height`, so the docks — and
+ * Cesium's credits — end above it (`index.css`) instead of under it; the bar itself sits at the bottom edge (Training
+ * hides Cesium's clock dial and timeline).
  */
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { useApp, useTrainingCursor } from "../context/AppContext";
 import TrainingLegend from "./TrainingLegend";
+import TrainingTrafficStrip from "./TrainingTrafficStrip";
+import { isWindowSentence, windowOnScreen, windowReading } from "../data/trainingTraffic";
 import TrainingPriorWindow from "./TrainingPriorWindow";
 import TrainingReadbackWindow from "./TrainingReadbackWindow";
-import { TrainingAutopilotStatus } from "./TrainingAutopilotCard";
+import { TrainingAutopilotStatus } from "./TrainingAutopilotStatus";
 import useMeasuredWidth from "../hooks/useMeasuredWidth";
 import {
+  TRAINING_AUTOPILOT_COLOR,
   TRAINING_COLUMN_COLOR,
   TRAINING_CORRIDOR_COLOR,
   TRAINING_EXECUTOR_COLOR,
+  TRAINING_FAILURE_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_RAW_COLOR,
   TRAINING_SURFACE_COLOR,
   TRAINING_TRACE_COLOR,
   TRAINING_WORD_COLOR,
+  TRAINING_REPLAY_COLOR,
   trainingModelColour,
+  trainingWindowReadingColour,
 } from "../utils/trainingWordColors";
-import { autopilotColour, autopilotHasLine, autopilotOnScreen, nextPick, sameSource } from "../data/trainingAutopilot";
+import {
+  AUTOPILOT_TAIL_OPACITY,
+  autopilotColour,
+  autopilotHasLine,
+  autopilotOnScreen,
+  autopilotPlaybackS,
+  nextPick,
+  sameSource,
+  type TrainingAutopilotView,
+} from "../data/trainingAutopilot";
 import {
   executorWordAt,
   executorWordCounts,
   generatedRowAt,
   augmentationText,
   generationOnScreen,
+  sentenceAxisEndS,
   generationUnflownReason,
   isAugmentedStart,
   sourceOf,
   overlayOnScreen,
+  replayVerdict,
   trainingModelGroups,
   type TrainingExecutorFlight,
   type TrainingExecutorWord,
@@ -97,9 +119,11 @@ import {
 } from "../data/trainingOverlays";
 import {
   formatSeconds,
+  cursorOnFlight,
   rowAtTime,
   sentenceColumnRuns,
   sentenceWordAt,
+  trainingBandLabel,
   trainingClearedValue,
   trainingKindLabel,
   trainingTruthSentence,
@@ -114,7 +138,8 @@ import {
   type TrainingWordEvent,
 } from "../data/trainingSample";
 import {
-  checkMark, checkText, crossingText, TRAINING_COLUMN_LABEL, TRAINING_OUTCOME_TAG, TRAINING_OUTCOME_TEXT, trainingModelText,
+  checkMark, checkText, crossingText, replayIssueText, replayOutsideWords, TRAINING_COLUMN_LABEL, TRAINING_OUTCOME_TAG,
+  TRAINING_OUTCOME_TEXT, trainingModelText,
 } from "../data/trainingText";
 
 // One SVG unit is one pixel: the bar is as wide as the dock and always VIEW_H tall.
@@ -138,6 +163,9 @@ const TICK_LABEL_GAP = 34;
 const OBSERVED_LABEL_MIN_W = 52;
 /** The strip down the left edge of a model's rows, in its colour (px). */
 const MODEL_STRIP_W = 4;
+/** Where a model's flight ended (px): landed, and — heavier, in the failure red — did not. */
+const MODEL_END_W = 2;
+const FAILED_END_W = 3.5;
 
 /**
  * Which of these ascending x positions may carry a text label: greedy from the left, keeping one only when it clears the
@@ -174,8 +202,9 @@ function executorVerdictText(word: TrainingExecutorWord): string {
   return `the executor: ${word.status}${told}${checks ? ` — ${checks}` : ""}${word.reason ? ` — ${word.reason}` : ""}`;
 }
 
-/** The replay of this flight in words, for the notes: its outcome and its words inside of those judged. */
-function replayText(flight: TrainingExecutorFlight): string {
+/** The replay of this flight in words, for the notes: its outcome and its words inside of those judged, and the words it
+ *  flew outside their envelopes (``outside``, as `replayOutsideWords` names them). */
+function replayText(flight: TrainingExecutorFlight, outside: string[]): string {
   if (!flight.flown) return `The executor's replay does not fly it: ${flight.group}.`;
   const counts = executorWordCounts(flight);
   // the judge's own tally, as the replay gate counts it (the word left to intercept the final on its own counts twice)
@@ -186,6 +215,7 @@ function replayText(flight: TrainingExecutorFlight): string {
     ` · ${wordsInside}/${wordsJudged} words inside their envelopes, each re-drawn from where the executor was told it` +
     (counts.notJudged ? `, ${counts.notJudged} not judged` : "") + (counts.notReached ? `, ${counts.notReached} not reached` : "") +
     (counts.superseded ? `, ${counts.superseded} superseded` : "") +
+    (outside.length === 0 ? "" : ` · outside: ${outside.join(", ")}`) +
     ` · evaluation ${flight.evaluation.replay} (observed ${flight.evaluation.observed})` +
     (flight.refused === null ? "" : ` · its track refused by the labeller's gate: ${flight.refused}`) + ".";
 }
@@ -235,8 +265,14 @@ function sampleChip(view: TrainingGenerationView, label: string, sentence: Train
   const said = later.filter((event) => event.row * stepS < sentence.endS).length;
   const where = sentence.crossing !== null
     ? ` on ${runwayName(sentence.crossing.runway)}` : `, pointing at ${runwayName(sentence.lastRunway)}`;
+  // in a window the judge may end it first: then it flew on silent to its own end, which the crossing is of
+  const judged = isWindowSentence(sentence) && sentence.end !== null ? sentence : null;
+  const ended = judged === null
+    ? `${TRAINING_OUTCOME_TAG[sentence.outcome]}${where} at ${formatSeconds(sentence.endS)} s`
+    : `${TRAINING_OUTCOME_TAG[sentence.outcome]} at ${formatSeconds(sentence.endS)} s · then ${TRAINING_OUTCOME_TAG[judged.own]}${where} ` +
+      `at ${formatSeconds(judged.ownEndS)} s`;
   return {
-    text: `#${sentence.sample + 1}: ${TRAINING_OUTCOME_TAG[sentence.outcome]}${where} at ${formatSeconds(sentence.endS)} s ` +
+    text: `#${sentence.sample + 1}: ${ended} ` +
       (move === null ? `(observed ${formatSeconds(flight.rows * stepS)} s)` : `· moved ${augmentationText(move)}`),
     title: (move === null ? "" : `From an augmented start: the flight's start rotated ${augmentationText(move)} (about the ` +
       `airport, raised, speed ×), drawn with seed ${generation.augment!.seed} in ${view.flight.start!.draws} ` +
@@ -246,8 +282,13 @@ function sampleChip(view: TrainingGenerationView, label: string, sentence: Train
       `${sentence.firstRow}, ${said} words after it before the flight ended` +
       (later.length > said ? ` (and ${later.length - said} after the end, to where the executor stopped)` : "") +
       `; the executor flew each step as it was said and the flight ` +
-      `${TRAINING_OUTCOME_TEXT[sentence.outcome]}${sentence.crossing === null ? "" : ` — ${crossingText(sentence.crossing)}`} at ` +
-      `${formatSeconds(sentence.endS)} s. Runway ${runwayName(sentence.firstRunway)} at its first step` +
+      (judged === null
+        ? `${TRAINING_OUTCOME_TEXT[sentence.outcome]}${sentence.crossing === null ? "" : ` — ${crossingText(sentence.crossing)}`} at ` +
+          `${formatSeconds(sentence.endS)} s`
+        : `${TRAINING_OUTCOME_TEXT[sentence.outcome]}: the judge ended it at ${formatSeconds(sentence.endS)} s (${judged.end!.kind}, ` +
+          `with ${judged.end!.with}); flying on, it ${TRAINING_OUTCOME_TEXT[judged.own]}` +
+          `${sentence.crossing === null ? "" : ` — ${crossingText(sentence.crossing)}`} at ${formatSeconds(judged.ownEndS)} s`) +
+      `. Runway ${runwayName(sentence.firstRunway)} at its first step` +
       (sentence.lastRunway === sentence.firstRunway ? "" : `, ${runwayName(sentence.lastRunway)} at its end`) +
       ` (${move === null ? "observed" : "the source flight landed on"} ${flight.runway})` + (sentence.runwayChanges ? `, ${sentence.runwayChanges} runway changes` : "") +
       (sentence.goArounds ? `, ${sentence.goArounds} go-around words` : "") +
@@ -257,19 +298,73 @@ function sampleChip(view: TrainingGenerationView, label: string, sentence: Train
   };
 }
 
-/** The bar's own height on the workbench (`--training-bar-height`): the docks end above it. */
+/** The live executor on the flown word's row, in the flight's time: at the word's step, pulsing, while the backend
+ *  flies it; then where the 3D aircraft is as it flies the segment out (`autopilotPlaybackS`: the same clock), faded in
+ *  the tail; left at the segment's end. A leaf that moves itself each frame, so the bar never re-renders for it. */
+function AutopilotCursor({ view, stepS, y, x0, plotW, endS }: {
+  view: Extract<TrainingAutopilotView, { status: "flying" | "ready" }>;
+  stepS: number;
+  /** The top of the flown word's row. */
+  y: number;
+  /** The bar's time axis: where it starts, how wide it is (px) and the time it ends at (s). A flight flown past the axis's
+   *  end (the truth's last word flown on to a landing later than the observed one) holds the cursor there, and its title
+   *  says so. */
+  x0: number;
+  plotW: number;
+  endS: number;
+}) {
+  const node = useRef<SVGRectElement>(null);
+  // placed before paint (never a frame at the axis's origin), and again whenever the axis is laid out anew
+  useLayoutEffect(() => {
+    const rect = node.current!;
+    // the bar's xFor, clamped to the axis's end (primitives, so the effect runs again only when the axis changes)
+    const put = (seconds: number, faded: boolean) => {
+      rect.setAttribute("transform", `translate(${x0 + (Math.min(seconds, endS) / endS) * plotW} 0)`);
+      rect.style.opacity = faded ? String(AUTOPILOT_TAIL_OPACITY) : "";
+    };
+    if (view.status === "flying") {
+      put(view.request.row * stepS, false);
+      return undefined;
+    }
+    const { track, tailFrom } = view.segment;
+    const totalS = track.tS[track.tS.length - 1] - track.tS[0];
+    const tailS = tailFrom === null ? Infinity : track.tS[tailFrom];
+    let frame = 0;
+    const draw = () => {
+      const flownS = autopilotPlaybackS(track, view.playedAt, Date.now());
+      put(track.tS[0] + flownS, track.tS[0] + flownS > tailS);
+      if (flownS < totalS) frame = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(frame);
+  }, [view, stepS, x0, plotW, endS]);
+  const colour = view.status === "flying" ? TRAINING_AUTOPILOT_COLOR : autopilotColour(view.segment);
+  return (
+    <rect ref={node} x={-1.5} y={y + 1} width={3} height={ROW_H - 2} rx={1.5} fill={colour}
+      className={`training-sentence-autopilot-cursor${view.status === "flying" ? " waiting" : ""}`}>
+      <title>{view.status === "flying" ? "the executor flies this word on the backend"
+        : "the autopilot's aircraft, flying this word's segment out in 3D" +
+          (view.segment.track.tS[view.segment.track.tS.length - 1] > endS
+            ? ` (held at the axis's end, ${formatSeconds(endS)} s, while it flies on to ` +
+              `${formatSeconds(view.segment.track.tS[view.segment.track.tS.length - 1])} s)` : "")}</title>
+    </rect>
+  );
+}
+
+/** The bar's own height on the page's root (`--training-bar-height`): the docks end above it, and so do Cesium's credits,
+ *  which sit outside the workbench. */
 function useBarHeight(): (node: HTMLElement | null) => void {
   const [node, setNode] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => {
-    const shell = node?.closest<HTMLElement>(".workbench") ?? null;
-    if (node === null || shell === null) return;
-    const publish = () => shell.style.setProperty("--training-bar-height", `${node.offsetHeight}px`);
+    if (node === null) return;
+    const page = document.documentElement;
+    const publish = () => page.style.setProperty("--training-bar-height", `${node.offsetHeight}px`);
     publish();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
     observer?.observe(node);
     return () => {
       observer?.disconnect();
-      shell.style.removeProperty("--training-bar-height");
+      page.style.removeProperty("--training-bar-height");
     };
   }, [node]);
   return setNode;
@@ -279,8 +374,8 @@ export default function TrainingSentenceBar() {
   const {
     mode, trainingSelection: selection, trainingLayers,
     trainingColumn: focusColumn, setTrainingColumn: setFocusColumn,
-    trainingExecutor, trainingPrior, trainingAutopilot, trainingPick, setTrainingPick, trainingAutopilotAuto,
-    trainingGenerations, trainingSource, setTrainingSource,
+    trainingExecutor, trainingPrior, trainingAutopilot, trainingPick, setTrainingPick,
+    trainingGenerations, trainingSource, setTrainingSource, trainingWindow,
   } = useApp();
   const { trainingCursorS: cursorS, setTrainingCursorS: setCursorS } = useTrainingCursor();
   const [frame, frameW] = useMeasuredWidth(MIN_PLOT_W + GUTTER + PAD_R, DEFAULT_PLOT_W + GUTTER + PAD_R);
@@ -320,7 +415,8 @@ export default function TrainingSentenceBar() {
   const sentence: TrainingSentence<TrainingSentenceEvent> = generated ?? trainingTruthSentence(flight);
   // Step r covers [r·step, (r+1)·step): the axis ends where the last step does — of the flight, or of the sentence read
   // when that runs longer.
-  const endS = Math.max(flight.rows * stepS, generated === null ? 0 : Math.max(generated.rows * stepS, generated.endS));
+  const endS = sentenceAxisEndS(flight, stepS, generated);
+  const cursorOn = cursorOnFlight(selection, cursorS, endS);
   const timeOf = (row: number) => row * stepS;
   const xFor = (seconds: number) => GUTTER + (seconds / endS) * plotW;
   const verdicts = trainingVerdicts(flight);
@@ -344,28 +440,37 @@ export default function TrainingSentenceBar() {
     .map((shown, index) => shown && (endLabelX === null
       || Math.abs(middle(xFor(timeOf(tickRows[index])), index === tickRows.length - 1) - middle(endLabelX, endAnchoredEnd))
         >= TICK_LABEL_GAP));
+  // the multi-aircraft window the flight on screen is in, if any
+  const traffic = windowOnScreen(trainingWindow, selection);
+  // where a model's flight ended: in its colour when it landed, heavier in the failure red when it did not
+  const endColour = generated === null ? null : generated.outcome === "landed" ? modelColour! : TRAINING_FAILURE_COLOR;
   const cleared = trainingClearedValue(vocabulary);
   const modelClearance = generated === null ? null
     : generated.events.find((event) => event.column === TRAINING_COLUMN_INDEX.approach && event.value === cleared && event.row > generated.firstRow) ?? null;
   const markers = generated === null ? [
-    { at: timeOf(flight.joinRow), key: "cleared", colour: TRAINING_COLUMN_COLOR.approach, dash: "3 3",
+    { at: timeOf(flight.joinRow), key: "cleared", colour: TRAINING_COLUMN_COLOR.approach, dash: "3 3", width: 1,
       title: `cleared to join the final at ${formatSeconds(timeOf(flight.joinRow))} s` },
-    { at: timeOf(flight.captureRow), key: "captured", colour: TRAINING_CORRIDOR_COLOR, dash: "3 3",
+    { at: timeOf(flight.captureRow), key: "captured", colour: TRAINING_CORRIDOR_COLOR, dash: "3 3", width: 1,
       title: `the final captured at ${formatSeconds(timeOf(flight.captureRow))} s, ` +
         `${(flight.captureBeforeThresholdM / 1000).toFixed(1)} km before the threshold` },
-    { at: timeOf(flight.unspecifiedRow), key: "unspecified", colour: TRAINING_COLUMN_COLOR.speed, dash: "3 3",
+    { at: timeOf(flight.unspecifiedRow), key: "unspecified", colour: TRAINING_COLUMN_COLOR.speed, dash: "3 3", width: 1,
       title: `speed left to the pilot from ${formatSeconds(timeOf(flight.unspecifiedRow))} s` },
   ] : [
     ...(modelClearance === null ? [] : [{ at: timeOf(modelClearance.row), key: "model-cleared", colour: TRAINING_COLUMN_COLOR.approach,
-      dash: "3 3", title: `${modelName!} cleared the flight to join the final at ${formatSeconds(timeOf(modelClearance.row))} s` }]),
-    ...(movedRead ? [] : [{ at: flight.rows * stepS, key: "observed-end", colour: TRAINING_TRACE_COLOR, dash: "2 3",
+      dash: "3 3", width: 1, title: `${modelName!} cleared the flight to join the final at ${formatSeconds(timeOf(modelClearance.row))} s` }]),
+    ...(movedRead ? [] : [{ at: flight.rows * stepS, key: "observed-end", colour: TRAINING_TRACE_COLOR, dash: "2 3", width: 1,
       title: `the observed flight's sentence ends at ${formatSeconds(flight.rows * stepS)} s` }]),
-    { at: generated.endS, key: "model-end", colour: modelColour!, dash: undefined,
+    { at: generated.endS, key: "model-end", colour: endColour!, dash: undefined,
+      width: generated.outcome === "landed" ? MODEL_END_W : FAILED_END_W,
       title: `${modelName!}'s flight ${TRAINING_OUTCOME_TEXT[generated.outcome]} at ${formatSeconds(generated.endS)} s` },
   ];
   const landing = flight.envelopes.approach.landing;
   // the overlays and the live executor, when they are of the flight on screen (not the last one's, in flight)
   const executor = overlayOnScreen(trainingExecutor, selection)?.flight ?? null;
+  // what went wrong in it, said in the header in the fewest words (the truth's tab only: it flew the truth's sentence)
+  const replayFlown = executor !== null && executor.flown && generated === null ? executor : null;
+  const replayIssue = replayFlown === null ? null : replayIssueText(replayFlown);
+  const replayOutside = replayFlown === null ? [] : replayOutsideWords(replayFlown, vocabulary, candidates);
   const prior = overlayOnScreen(trainingPrior, selection);
   // the sentence read, as the live executor's source: its answer is drawn only over the sentence it flew
   const readSource = sourceOf(read);
@@ -373,9 +478,10 @@ export default function TrainingSentenceBar() {
   const flightFacts = `${flight.typecode ?? "type unknown"} · ${flight.stratum} · ${flight.rows} steps · ` +
     `${verdicts.instructionsAfterStep0} words after step 0 · ${verdicts.silentSteps} of ${flight.rows - 1} later steps silent`;
   // the Fly button: the selected word's segment of the sentence read, and what the live executor is doing with it
-  const focusRun = focusColumn === null ? null : sentenceWordAt(sentence, focusColumn, cursorRow);
-  /** A model's word said after its flight ended has no flight to fly. */
-  const flyable = (row: number) => generated === null || timeOf(row) < generated.endS;
+  const focusRun = focusColumn === null || !cursorOn ? null : sentenceWordAt(sentence, focusColumn, cursorRow);
+  /** A model's word said after its flight ended has no flight to fly; a window's aircraft is not flown live at all (the
+   *  backend opens read-back sets only). */
+  const flyable = (row: number) => selection.liveExecutor && (generated === null || timeOf(row) < generated.endS);
   const pickedHere = focusRun !== null && trainingPick !== null && sameSource(trainingPick.source, readSource)
     && trainingPick.column === focusColumn && trainingPick.row === focusRun.row;
   const flyingHere = pickedHere && autopilot?.status === "flying";
@@ -417,7 +523,10 @@ export default function TrainingSentenceBar() {
       <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} executorTrack={executor?.flown === true}
         autopilotColour={autopilot?.status === "ready" && autopilotHasLine(autopilot.segment) ? autopilotColour(autopilot.segment) : null}
         model={model === null || generated === null ? null
-          : { label: modelName!, colour: modelColour!, samples: model.flight.samples.length, moved: movedRead }} />
+          : { label: modelName!, colour: modelColour!, samples: model.flight.samples.length, moved: movedRead }}
+        traffic={traffic === null ? null
+          : { colour: trainingWindowReadingColour(windowReading(traffic, trainingSource)), commanded: traffic.window.commanded.length }} />
+      <TrainingTrafficStrip />
       <header className="training-sentence-head">
         {startsOffered ? (
           <span className="training-source-tabs training-start-tabs" role="group" aria-label="Where the models' sentences start">
@@ -494,14 +603,25 @@ export default function TrainingSentenceBar() {
         ) : null}
         {generated === null ? null : (
           <span className="training-chip training-sample-chip" title={chip!.title}
-            style={{ borderColor: modelColour!, color: generated.outcome === "landed" ? undefined : TRAINING_OUTSIDE_COLOR }}>
+            style={{ borderColor: modelColour!, color: generated.outcome === "landed" ? undefined : TRAINING_FAILURE_COLOR }}>
             {chip!.text}
           </span>
         )}
+        {replayFlown !== null && replayIssue !== null ? (
+          <span className="training-chip" style={{ color: TRAINING_REPLAY_COLOR[replayVerdict(replayFlown).kind],
+            borderColor: "currentColor" }}
+            title={`The executor's replay of this sentence: ${TRAINING_OUTCOME_TAG[replayFlown.outcome]}` +
+              (replayOutside.length === 0 ? "" : `; outside their envelopes: ${replayOutside.join(", ")} (a red dot at the band's left)`) +
+              ". The full reading is behind ⓘ."}>
+            Replay · {replayIssue}
+          </span>
+        ) : null}
         {autopilot ? <TrainingAutopilotStatus view={autopilot} selection={selection}
           named={focusRun === null || autopilot.request.column !== focusColumn || autopilot.request.row !== focusRun.row} /> : null}
-        <span className="training-sentence-cursor-readout">t = {formatSeconds(cursorS)} s · step {cursorRow}</span>
-        <button type="button" className="training-autopilot-fly" disabled={focusRun === null || flyingHere || !flyable(focusRun.row)}
+        <span className="training-sentence-cursor-readout">
+          t = {formatSeconds(cursorS)} s · {cursorOn ? `step ${cursorRow}` : "outside this aircraft"}
+        </span>
+        {selection.liveExecutor ? <button type="button" className="training-autopilot-fly" disabled={focusRun === null || flyingHere || !flyable(focusRun.row)}
           title={focusRun === null
             ? "Select a word (click its band): the executor then flies that word's segment from where it was said."
             : !flyable(focusRun.row)
@@ -513,7 +633,7 @@ export default function TrainingSentenceBar() {
                   `${focusColumn} word's segment, on the backend — the sample's own flight — and judges the word.`}
           onClick={() => setTrainingPick(nextPick(trainingPick, readSource, focusColumn!, focusRun!.row))}>
           {flyLabel}
-        </button>
+        </button> : null}
         {generated === null ? (
           <button type="button" className="training-sentence-readback-button" aria-pressed={openWindow === "readback"}
             title="The truth sentence against its track, envelope by envelope" onClick={() => toggle("readback")}>
@@ -616,7 +736,7 @@ export default function TrainingSentenceBar() {
                     }
                     setFocusColumn(column);
                     setCursorS(timeOf(run.row));
-                    if (trainingAutopilotAuto && flyable(run.row)) setTrainingPick(nextPick(trainingPick, readSource, column, run.row));
+                    if (flyable(run.row)) setTrainingPick(nextPick(trainingPick, readSource, column, run.row));
                   };
                   return (
                     <g key={`${column}-${run.row}`} role="button" tabIndex={0} aria-label={title} aria-pressed={selected}
@@ -637,7 +757,7 @@ export default function TrainingSentenceBar() {
                       ) : null}
                       {width >= LABEL_MIN_W ? (
                         <text x={x + width / 2} y={y + ROW_H / 2 + 4} textAnchor="middle" className="training-sentence-word" fill={colour}>
-                          {label}
+                          {trainingBandLabel(vocabulary, candidates, column, run.value)}
                         </text>
                       ) : null}
                     </g>
@@ -687,7 +807,7 @@ export default function TrainingSentenceBar() {
             <g key={marker.key} aria-label={marker.title}>
               <title>{marker.title}</title>
               <line x1={xFor(marker.at)} x2={xFor(marker.at)} y1={HEAD_H} y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H}
-                stroke={marker.colour} strokeDasharray={marker.dash} strokeWidth={marker.dash === undefined ? 2 : 1}
+                stroke={marker.colour} strokeDasharray={marker.dash} strokeWidth={marker.width}
                 className="training-sentence-marker" />
             </g>
           ))}
@@ -697,7 +817,7 @@ export default function TrainingSentenceBar() {
           {endLabelX !== null ? (
             <text x={endLabelX} y={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 15}
               textAnchor={endAnchoredEnd ? "end" : "middle"}
-              className="training-sentence-tick training-sentence-model-end" fill={modelColour!}
+              className="training-sentence-tick training-sentence-model-end" style={{ fill: endColour! }}
               aria-label={`${modelName!}'s flight ended at ${formatSeconds(generated!.endS)} s`}>
               {formatSeconds(generated!.endS)} s
             </text>
@@ -708,9 +828,18 @@ export default function TrainingSentenceBar() {
               {index === tickRows.length - 1 ? `${formatSeconds(timeOf(row))} s` : formatSeconds(timeOf(row))}
             </text>
           ) : null))}
-          {/* the cursor, kept on the axis (it may have been put past the truth's end while a longer sentence was read) */}
-          <line x1={xFor(Math.min(cursorS, endS))} x2={xFor(Math.min(cursorS, endS))} y1={HEAD_H - 8}
-            y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 4} className="training-sentence-cursor" />
+          {/* the live executor on its word's row, in the flight's time (none for a segment with no line: 3D flies nothing) */}
+          {autopilot !== null && (autopilot.status === "flying"
+            || (autopilot.status === "ready" && autopilotHasLine(autopilot.segment))) ? (
+            <AutopilotCursor view={autopilot} stepS={stepS} x0={GUTTER} plotW={plotW} endS={endS}
+              y={HEAD_H + TRAINING_COLUMN_INDEX[autopilot.request.column] * ROW_H} />
+          ) : null}
+          {/* the cursor, kept on the axis (it may have been put past the truth's end while a longer sentence was read) — on a
+              window's clock, none while the window's time is outside this aircraft's */}
+          {cursorOn ? (
+            <line x1={xFor(Math.min(cursorS, endS))} x2={xFor(Math.min(cursorS, endS))} y1={HEAD_H - 8}
+              y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 4} className="training-sentence-cursor" />
+          ) : null}
         </svg>
       </div>
 
@@ -724,13 +853,15 @@ export default function TrainingSentenceBar() {
               mark on the approach row.
             </span>
           ) : null}
-          {executor !== null && generated === null ? <span>{replayText(executor)}</span> : null}
+          {executor !== null && generated === null ? <span>{replayText(executor, replayOutside)}</span> : null}
           {chip !== null ? <span>{chip.title}</span> : null}
           <span>
             A band is a word in force, from the tick where it was issued to the next word of its column; step 0 gives all
             six. Click a band to select its word — here, in the read-back check and in 3D — and again to clear it; ▶ Fly
-            flies the selected word's segment live (a band click does too, with the panel's "Fly on band click" on). The
-            dashed lines: the clearance, the capture of the final, the speed left to the pilot.
+            flies the selected word's segment live (a band click does too): a short bar on that word's row says where the
+            executor is — pulsing at the word's step while the backend flies it, then moving with the 3D aircraft, faded
+            past where it heard the next word of the column, left at the segment's end.
+            The dashed lines: the clearance, the capture of the final, the speed left to the pilot.
           </span>
           {models.length > 0 ? (
             <span>
@@ -738,7 +869,7 @@ export default function TrainingSentenceBar() {
               not land). Its words are drawn like the truth's; the frame in the model's colour — the bar's border, the strip
               down the rows — says whose they are; the grey before its first step is what it only observed; a white tick under
               a row is where the truth says a word of that column; the solid line in the model's colour is where its flight
-              ended, its time written under it on the axis, the dashed white one where the observed flight's sentence ends; its
+              landed (a heavier red one: where it did not), its time written under it on the axis, the dashed white one where the observed flight's sentence ends; its
               words fly live like the truth's: the executor flies its sentence again from its first step — the sample's own
               flight — except a word said after its flight ended; words under the
               dark shade after it were said to a flight already over (the executor flies on after crossing the threshold
@@ -762,13 +893,13 @@ export default function TrainingSentenceBar() {
 
       {openWindow === "readback" && generated === null ? (
         <TrainingReadbackWindow flight={flight} vocabulary={vocabulary} candidates={candidates} layers={trainingLayers}
-          cursorS={cursorS} onCursorChange={setCursorS} column={focusColumn} onColumnChange={setFocusColumn}
+          cursorS={cursorS} cursorOn={cursorOn} onCursorChange={setCursorS} column={focusColumn} onColumnChange={setFocusColumn}
           onClose={() => setOpenWindow(null)} executor={executor}
           autopilot={autopilot?.status === "ready" ? autopilot.segment : null} />
       ) : null}
       {openWindow === "prior" && prior && generated === null ? (
         <TrainingPriorWindow flight={flight} vocabulary={vocabulary} candidates={candidates} prior={prior} cursorS={cursorS}
-          onCursorChange={setCursorS} column={focusColumn} onColumnChange={setFocusColumn} onClose={() => setOpenWindow(null)} />
+          cursorOn={cursorOn} onCursorChange={setCursorS} column={focusColumn} onColumnChange={setFocusColumn} onClose={() => setOpenWindow(null)} />
       ) : null}
     </section>
   );

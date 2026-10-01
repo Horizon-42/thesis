@@ -29,7 +29,7 @@ from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.words import APPROACH_CLEARED, APPROACH_GO_AROUND, COLUMNS, HEADING, UNCHANGED, Words, wrap180
 from ts_transformer.repo_layout import REPO_ROOT
 from ts_transformer.tests.support import (
-    fixture_days, fly_legs, instruction_airport, instruction_flight, instruction_spec as spec,
+    fixture_days, fly_legs, instruction_airport, instruction_flight, instruction_spec as spec, signal_attitudes,
 )
 
 #: The set the exporter names after the reading rule by default.
@@ -86,7 +86,8 @@ def _offsets(artefact, airport, manifest):
 
 
 def _run(tmp_path, *extra: str) -> int:
-    with mock.patch.object(export, "runway_hae_minus_msl_m", _offsets):
+    with mock.patch.object(export, "runway_hae_minus_msl_m", _offsets), \
+            mock.patch.object(export, "observed_attitudes", signal_attitudes):
         return export.main(["--dir", str(tmp_path / "artefact"), "--airports-root", str(tmp_path / "airports"),
                             "--airport", "KXXX", "--per-stratum", "1", *extra])
 
@@ -105,7 +106,7 @@ def test_the_contract_is_the_frontend_reader_s():
     assert json.loads(_ts_constant("TRAINING_INDEX_SCHEMA")) == files.INDEX_SCHEMA
     assert json.loads(_ts_constant("TRAINING_SAMPLE_SCHEMA")) == files.SAMPLE_SCHEMA
     assert json.loads(_ts_constant("TRAINING_READING_RULE")) == READING_RULE
-    assert json.loads(_ts_constant("TRAINING_READABLE_SET_KIND")) == files.KIND_READBACK
+    assert json.loads(_ts_constant("TRAINING_READBACK_SET_KIND")) == files.KIND_READBACK
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_COLUMNS"))) == COLUMNS
     assert int(_ts_constant("TRAINING_UNCHANGED")) == UNCHANGED
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_WORD_KINDS"))) == files.WORD_KINDS
@@ -250,6 +251,9 @@ def test_one_flight_s_file_holds_its_words_its_envelopes_and_the_geodesy(tmp_pat
     assert flight["callsign"] == "V1" and flight["runway"] == "09" and flight["runwayIndex"] == 0
     signals = flight["signals"]
     assert all(len(signals[k]) == rows for k in ("tS", "eM", "nM", "lon", "lat", "altitudeHaeM"))
+    # the attitude it is drawn in, one per row: the observed attitude's first rows (here the stand-in's: no airframe)
+    assert list(signals["attitude"]) == ["headingDeg", "pathAngleDeg", "bankRightDeg", "attackDeg"]
+    assert len(signals["attitude"]["headingDeg"]) == rows and signals["attitude"]["bankRightDeg"] is None
     # the lon/lat are the airport frame's own projection of the metres
     frame = instruction_airport().frame
     e, n = frame.horizontal_from_latlon(np.array(signals["lat"]), np.array(signals["lon"]))
@@ -348,6 +352,7 @@ def test_a_refusal_at_a_later_airport_writes_nothing_at_an_earlier_one(tmp_path,
     real = export.draw
     monkeypatch.setattr(export, "draw", refuse_on_second)
     monkeypatch.setattr(export, "runway_hae_minus_msl_m", _offsets)
+    monkeypatch.setattr(export, "observed_attitudes", signal_attitudes)
     with pytest.raises(ValueError, match="stopped at the second airport"):
         export.main(["--dir", str(tmp_path / "artefact"), "--airports-root", str(tmp_path / "airports"),
                      "--airport", "KXXX", "--airport", "KYYY", "--per-stratum", "1"])
@@ -385,6 +390,7 @@ def test_a_set_is_written_only_while_every_airport_s_index_is_what_the_run_read(
 
     monkeypatch.setattr(export, "draw", another_export_meanwhile)
     monkeypatch.setattr(export, "runway_hae_minus_msl_m", _offsets)
+    monkeypatch.setattr(export, "observed_attitudes", signal_attitudes)
     with pytest.raises(ValueError, match="changed since this run read it"):
         export.main(["--dir", str(tmp_path / "artefact"), "--airports-root", str(tmp_path / "airports"),
                      "--airport", "KXXX", "--airport", "KYYY", "--per-stratum", "1"])

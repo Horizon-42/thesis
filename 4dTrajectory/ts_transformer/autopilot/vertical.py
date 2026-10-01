@@ -94,6 +94,9 @@ class Vertical:
         self.anchor_m = torch.zeros(batch, dtype=torch.float64, device=device)
         self.anchor_height_m = torch.full((batch,), math.nan, dtype=torch.float64, device=device)
 
+    #: what a cycle changes, per flight (a multi-aircraft batch holds it for a flight that has not started)
+    PER_FLIGHT = ("captured", "issued", "left_tube", "flown_m", "anchor_m", "anchor_height_m")
+
     def rate_limit(self, state: Kinematics) -> torch.Tensor:
         """γ̇_max, rad/s, at each flight's airspeed."""
         return self.params.path_rate_factor * state.speed_mps * self.steepest_low_rad ** 2 / (2.0 * self.tolerance_m)

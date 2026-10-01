@@ -12,7 +12,7 @@ the entry itself is deleted.
 
 Checked entry by entry against `dev-two-tier` `1a7ac875` plus branch `dev-frontend-followups`, then updated after branch
 `dev-followups-no-training` (2026-09-25) fixed every entry whose fix touches neither the training nor the post-training
-(the right-hand column): **21 open, 7 partly, 65 resolved or dismissed, 5 obsolete** (recounted from the table 2026-09-27; one open row is blocked on a source). *open*: the problem is still in the
+(the right-hand column): **27 open, 7 partly, 67 resolved or dismissed, 5 obsolete** (recounted from the table 2026-09-28; one open row is blocked on a source). *open*: the problem is still in the
 code; *partly*: some of it is fixed (the note says what is left); *resolved*: fixed (the note says by what);
 *dismissed*: not a defect (the note says why); *obsolete*: the code is gone. A resolved, dismissed or obsolete entry's
 text is removed below (its row stays); rows follow the entries' order; note the two sets of numbers (§19–§21 each appear
@@ -69,7 +69,7 @@ added three entries (the rows after the performance index's).
 | ts: the auto-batch probe measures a smaller graph than a latent run | resolved | the probe hands a latent model the future, as training does (`b10b1d68`); entry removed | — |
 | scene data plane: review leftovers (09-07) | resolved | (7)–(9), (12), (14) and the three test gaps fixed, (11) documented, a landed-before-t₀ neighbour no longer a lead (`96d299d1`, `50412e71`); (10), (13) obsolete; entry removed | — |
 | ts: T2 leftovers (09-07) | resolved | `chart_scale` required (`6c363ef9`); the transport-chart rollouts kept as the scaled chart's test reference; the pointers demoted (`06801fe7`); entry removed | — |
-| 15. KRDU 14's arrivals render as "indeterminate" | open | needs the backend and a UX decision | no: the Observe view |
+| 15. KRDU 14's arrivals render as "indeterminate" | open | needs the backend and a UX decision | no: the Evaluation view |
 | 16. observed record without `landing_aero` cannot say why | resolved | removed with the v9 gate; entry removed | — |
 | 17. `require_matching_runway_data` has no production caller | open | still dead code; `harvest/airports.py` is frozen by the executor's code identity | no: dead code (but its file is frozen) |
 | 18. `runway`-mode solves pile up at the window's upper edge | resolved | targets published V_ref (`88893126`); entry removed | — |
@@ -126,6 +126,17 @@ added three entries (the rows after the performance index's).
 | `ExecutorParams.check` lets a NaN rate or factor through (09-27) | resolved | every value finite and positive (branch `dev-executor-v11`, v11 milestone 1); entry removed | — |
 | A free sentence is judged against the runway pointed at the executor's stop, not at its end (09-27) | open | new; see the entry | **yes — post-training**: the landing reward reads the outcome |
 | `faa_separation(visual_parallels=True)` is a second, different "visual" (09-27) | open | new; see the entry | no: only the archived runway-intent runner and one test call it |
+| The labeller sha is over bytes and checked against the running code: one edit deadlocks the chain (09-28) | open | new; see the entry | **yes — every artefact's and prior's identity record** (no retrain); the fix edits `autopilot/replay.py`, inside the executor hash — batch with the executor-identity entry |
+| The executor spec refuses any other code, over 28 modules including all of `config.py` and `data/dataset.py` (09-28) | open | new; see the entry; the rule is the user's (2026-09-27) | **yes — executor identity** (no behaviour change) |
+| Two-tier data are bound to each airport's whole arrival manifest by its bytes (09-28) | open | new; see the entry | **yes — executor identity**: `autopilot/flights.py` is hashed, so the fix moves the source hash — batch with the executor-identity entry |
+| A Training overlay is bound to its set's file sha256 and writing time (09-28) | resolved | bound by what it shares with the set — spec, candidates, frame, and flight by flight its keys, words / steps and every drawn height's HAE − MSL; overlays v2, executor / prior / generation v4, augmented generation v2 (`2f557772`; every published overlay re-exported 2026-09-28, the user's OK); entry removed | — |
+| The frontend pins the vocabulary spec's sha (09-28) | open | new; see the entry — low value while the superseded `instruction_v3` set stays listed | no: a frontend constant |
+| The single-flight executor's pin refuses at run time, not in the tests (09-28) | open | new; see the entry | no: the backend |
+| A glidepath stop overrides a judged event that came before it (09-30) | open | new; see the entry | **yes — post-training**: stage 2's reward reads `said_rows` |
+| The read-back altitude chart's coloured labels are grey (09-30) | open | new; see the entry | no: the Training view |
+| A low go-around is stored as the landing: the best-aligned crossing, not the last (10-01) | open | new; see the entry | **yes**: flight identity, arrival slices and every sentence of the 15 flights; a harvest reclassification moves every downstream artefact |
+| Stored tracks carry other aircraft's samples; no read-time position repair (10-01) | open | new; see the entry | **yes**: the arrival slices every model reads (if repaired in the harvest view) |
+| A wake shortfall's end rounds `counted` a step short in the window loop (10-01) | open | new; see the entry | **yes**: the steps M4-in-windows (R37) trains a wake-shortfall follower on |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -198,7 +209,7 @@ drop test-hash rows (the checkpoint's `split_name_for_dataset_id`) from the lead
 changes the lead of every flight whose true leader was a test flight, i.e. the stored truth-intent
 arms' inputs, so it is the owner's call.
 
-## 15. KRDU 14's 13 arrivals still render as "indeterminate" in the Observe view
+## 15. KRDU 14's 13 arrivals still render as "indeterminate" in the Evaluation view
 
 **Judgement.** `evaluation/docs/UNJUDGED_RUNWAY_VERDICT_GAP.md`: the evaluation half is fixed
 (KRDU 32 / KSMF 35R now carry an LNAV/VNAV vertical path), so the "never judged" bucket is
@@ -544,3 +555,124 @@ parallel final by radar or vertical. Only the archived `runway_intent_r3` and `t
 because "pilots maintain visual separation", which the multi-aircraft reading rules out (design §9 item 16). Fix
 (judgement): delete the flag and its test once nothing live needs the runway-intent reading, or name it after what it
 does (parallels as independent).
+
+## The labeller sha is over bytes and checked against the running code: one edit deadlocks the chain (2026-09-28)
+
+From the audit of the two-tier chain's identity checks (2026-09-28, `dev-two-tier` `97c579bd`), like the next five
+entries. **Verified.** `instructions/artefact.py` `labeller_source_sha256` hashes the BYTES of `LABELLER_MODULES` (14
+files) and `final_approach/crossing.py`, so a comment moves it (the executor's hash stopped doing that on 2026-09-27).
+`autopilot/replay.py` `open_executor` refuses an artefact unless its recorded labeller is the running code
+(`require_current_labeller`) and the spec's labeller is too (`replay.py:79-84`); `experiments/prior_train.py`
+`load_prior` refuses a prior whose recorded labeller is not the artefact's (`:107`). Together: after any edit to one of
+those 15 files the executor refuses artefact v5, and an artefact rebuilt by the new code refuses base, landing and
+augmented — retrain, or revert. This is why those files are on the frozen list and the training-affecting fixes waited
+on `dev-training-followups`. What the check guards is already checked by result: every exporter and the backend re-read
+each flight they show or fly and demand the stored sentence (`training_files.require_stored_sentence`, backend
+`fly.py:137`). Fix (judgement): hash the logic (`autopilot.spec.logic`); keep the running-code refusal only where one
+artefact is written (`instruction_labels`); record the labeller elsewhere as provenance; bind a prior to an artefact by
+a digest of the arrays it trained on (`sentences_*` and `signals_*` of train / select / val) instead of the code that
+wrote them — C26's rule (identity is the data, not its producer). Existing priors need the digest recorded once beside
+them (writes next to published models: the user's call). Makes the `grammar.py` entry moot.
+
+## The executor spec refuses any other code, over 28 modules including all of `config.py` and `data/dataset.py` (2026-09-28)
+
+**Verified.** `autopilot/spec.py` `executor_source_files` covers `autopilot/`'s 15 files and the 13 repository modules
+they import directly, among them `ts_transformer.config` (2,989 lines, the whole ts line's), `ts_transformer.data.dataset`
+(1,691 lines), `geokit` and `trajectory_data_process.harvest.airports`; `require_current_executor` refuses a spec written
+by other code — in the replay, every exporter and the backend's spec choice. `outputs/POOLED/executor/v5`–`v10` are six
+specs with the same params sha `0d6a68a92c6f`, differing only in the source hash; v8 was refused because its hash covered
+the archived CAT-K code. A full spec with its replays is ~2 GB, and each new one forced the val re-reads
+(`prior/v3_reread_v9`, `_v10`, `_v11`) and an overlay re-export. It did catch a real change once: with `dataset.py` in
+the hash, a change moved 711 of 1,000 select flights' mass or approach speed (CHANGELOG 2026-09-26). The rule is the
+user's (2026-09-27: a spec and every readout flown with it describe the code that runs). Fix (judgement, the user's
+decision): decide by result — re-fly a fixed sample (the stored train replay's flights, some per airport) and compare
+row by row, as `aeroviz_backend/autopilot_segment/check_single.py` does for the single-flight executor; equal → the spec
+stands for the new code (the new code identity recorded beside it), different → a new spec; and extend
+`autopilot/flights.require_same_flight` to what the executor reads from a series (type, mass, approach speed), so
+`config.py` and `dataset.py` can leave the hash.
+
+## Two-tier data are bound to each airport's whole arrival manifest by its bytes (2026-09-28)
+
+**Verified.** `autopilot/flights.py` `rebuild_series` (`:55`) and `instructions/training_files.py`
+`runway_hae_minus_msl_m` (`:251`) refuse unless each airport's `arrivals/manifest.json` has the sha256 the artefact
+recorded. The file holds every record of the airport (KRDU 24,202), and `--evaluate-only` / `--merge-source` rewrite it
+(root Open Items): any such rewrite refuses the replay, the exports, the live flights and the traffic loop, even when
+not one flight they use changed — though `require_same_flight`, right after, compares every rebuilt flight with its
+stored signals (1e-6). The same class as C26 (2026-09-07: a byte-bound roster identity refused every checkpoint). Fix
+(judgement): drop the file comparison, keep the per-flight one, and compare the one runway offset a flight uses.
+`flights.py` is inside the executor hash, so under today's rule the fix itself needs a new spec: do it with the previous
+entry.
+
+## The frontend pins the vocabulary spec's sha (2026-09-28)
+
+**Verified.** `aeroviz-4d/src/data/trainingSample.ts` `TRAINING_SPEC_SHA256` (`:53`) is compared at `:620`, `:641` and
+`trainingOverlays.ts:736`, although the sample carries the vocabulary's tables and the reader checks them. Its cost is a
+one-line edit when the spec is re-measured, never a re-export. It is also the only thing that hides the superseded
+flight-split set `instruction_v3` (sample v7, spec `0b4ea75be36d`), still listed in every airport's index (older sets
+kept as they are, the user 2026-09-26). Judgement: low value; remove it only once that set leaves the index.
+
+## The single-flight executor's pin refuses at run time, not in the tests (2026-09-28)
+
+**Verified.** `aeroviz_backend/autopilot_segment/single.py` `require_mirrored_source` (`:118`) runs when the backend
+picks its spec (`backend.py:148`): a logic change in any of the 32 files it mirrors makes the backend refuse every live
+flight until `single.py` is ported and `MIRRORED_SOURCE_SHA256` moved. `tests/test_single_executor.py` compares the two
+executors through every mode and limit, and `check_single` over a fleet. Judgement: the pin belongs in the suite (a
+change not ported fails a test); at run time it only reports the same thing later, to the user.
+
+## A glidepath stop overrides a judged event that came before it (2026-09-30)
+
+**Verified by reading** (opus review of `prior_generation_records`, dev-generation-records). `prior_free_generation
+.flight_rows` (`:352-353`) makes a sentence's outcome `below_glidepath` and its end `(stop + 1) × step_s` whenever
+`glidepath_stops` found a stop, whatever `judge.outcome_of` read — even when the judge's event came at an EARLIER row.
+`glidepath_stops` scans the step boundaries up to the executor's `done_cycle`, and the executor flies on after three events
+the judge reads earlier (a crossing without the capture, another runway's threshold, the stall — the stall counts as
+`dynamics_failure` but does not end the flight). So such a sentence's outcome is `below_glidepath` although it ended
+before, and its end runs past the judged event — `prior_generation_records`' record then keeps states after it (for a stall,
+states of the failure, against `executor_replay.executor_forecast`'s own rule). Not counted how often. Judgement: a stop
+counts only before the judge's end row (`stops.step` boundary ≤ `outcome.end_row`). It moves free-generation outcomes and
+stage 2's reward (`prior_augmented_reward` reads `said_rows`), so it waits for a stage that re-reads them. Same family as
+"A free sentence is judged against the runway pointed at the executor's stop".
+
+## The read-back altitude chart's coloured labels are grey (2026-09-30)
+
+**Verified by reading** (opus review of `dev-training-roles`). `components/training/ReadbackAltitude.tsx:66-67` and `:78` draw
+`<text className="training-readback-tick" fill={…}>` — the threshold label in `TRAINING_DESIGNATED_COLOR`, the angle words'
+labels in their column's colour — and `index.css`'s `.training-readback-tick { fill: … }` overrides the attribute (an SVG
+presentation attribute loses to any stylesheet rule, AV40), so they render in the tick grey. Fix as `dev-training-roles` did
+for the window strip's ✕ and the sentence bar's model end time: `style={{ fill }}`. Not checked in the browser.
+
+## A low go-around is stored as the landing: the best-aligned crossing, not the last (2026-10-01)
+
+**Verified** (opus review of R40 `go_around_census`, and its formal run `outputs/POOLED/traffic/go_arounds_20261001/`).
+`trajectory_data_process/harvest/threshold_event.py:113-119` takes as the landing the threshold crossing under 100 m with the
+smallest |cross|, not the last one. When a low go-around crossed better aligned than the landing that followed, it becomes
+`landing_sample_index` — so the flight's `landing_time_utc` (part of its `flight_key`), its arrival slice and its sentence
+end at a go-around. On the training days 15 flights hold a level 150 m above their stored landing and end back on a final
+(`landings_not_the_last` → "landed later"; 9 labelled: KRDU UAL2485, RPA9931, KSTL DAL1371, SWA3286, BOE57A, UAL214, N320TS,
+KSMF SWA1521, KMSY GJS4412); the real landing comes a median 669 s later. 73 more land then leave (touch-and-go circuits,
+38 labelled) — their stored landing is a touch-and-go, which the landing rule reads as a landing anyway. Judgement: take the
+LAST qualifying crossing (or the last before the sustained ground run). It changes identities and slices of those flights and
+needs `--reclassify-existing` and a rebuild of everything downstream — the user's call.
+
+## Stored tracks carry other aircraft's samples; no read-time position repair (2026-10-01)
+
+**Verified** (R40 `go_around_census`). Stored tracks hold the odd run of another aircraft's samples — a position 5–40 km off
+with that aircraft's altitude (KRDU RPA5593 sample 570: 15 km away and 400 m up between two samples on its final; MXY1067
+samples near 6, 36, 39; N48CL 36–38; ASA2625 633). `harvest/altitude_filter.py` repairs altitude needles only, and a run of
+three is the median of its own five-sample window, so the view passes them through. R40 sets them aside locally (over 1 km
+from the median position of the 5 samples either side): 206 samples over the 45,075 training-day landing tracks. Not counted
+how many fall inside arrival slices, nor what they do to the labeller or the evaluation's observed baseline. Judgement: a
+position repair beside the altitude one in the derived view (`store.read_track_view`) — it would change arrival slices every
+model reads, so it waits for a rebuild.
+
+## A wake shortfall's end rounds `counted` a step short in the window loop (2026-10-01)
+
+**Verified** (the 7.7 review, `dev-window-rewind`). `WindowLoop.results` (`experiments/traffic_window.py`) counts a judged
+aircraft's steps as `round((end["t_s"] − first_s) / step_s)`. A loss in an episode ends on the grid, so that is the step the
+judge ended it at. A wake shortfall at a landing (`Judging.landing`) stamps the landing's time instead — off the grid,
+inside `(t − step, t]` of the step whose landing check ended it — and the aircraft had spoken at that step. When the landing
+falls in the first half of the step, `round` gives one step fewer. **Judgement** (not measured): `counted` is what R34
+reports as the steps counted and what R37 trains on, so a wake-shortfall follower trains on one step fewer than it said
+before its end — at most one step of one sentence a shortfall, a small and one-sided bias. R43 reads that step as the step
+whose time reaches the end (`traffic_window_rewind.own_step_at`). The fix in the loop (the same `ceil`) changes R37's
+training rows: it waits for the next window training.

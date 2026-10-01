@@ -16,8 +16,8 @@ const { appState, DEFAULT_LAYERS, setTrainingPick, setTrainingSource } = vi.hois
     appState: {
       mode: "training", trainingSelection: null as unknown, trainingLayers: { ...DEFAULT_LAYERS },
       trainingExecutor: null as unknown, trainingPrior: null as unknown, trainingAutopilot: null as unknown,
-      trainingPick: null as unknown, trainingAutopilotAuto: true,
-      trainingGenerations: [] as unknown[], trainingSource: null as unknown,
+      trainingPick: null as unknown,
+      trainingGenerations: [] as unknown[], trainingSource: null as unknown, trainingWindow: null as unknown,
     },
   };
 });
@@ -37,17 +37,25 @@ vi.mock("../../context/AppContext", async () => {
 });
 
 import TrainingSentenceBar, { spacedLabels } from "../TrainingSentenceBar";
-import { parseTrainingSample, trainingSelectionOf, TRAINING_COLUMNS } from "../../data/trainingSample";
+import TrainingLegend from "../TrainingLegend";
+import type { TrainingLayers } from "../../context/AppContext";
+import { parseTrainingSample, trainingSelectionOf, TRAINING_COLUMNS, type TrainingVocabulary } from "../../data/trainingSample";
 import { MOCK_ROWS, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import { EXECUTOR_ID, PRIOR_ID, mockExecutorOverlay, mockOverlayEntry, mockPriorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
 import { parseTrainingExecutorOverlay, parseTrainingPriorOverlay, type TrainingGenerationView } from "../../data/trainingOverlays";
 import {
   AUGMENTED_R1_ID, AUGMENTED_R2_ID, AUGSTART_BASE_ID, AUGSTART_POST_ID, BASE_MODEL_ID, POST_TRAINED_ID, mockGenerationViews,
 } from "../../data/__tests__/trainingOverlays.fixture";
-import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
+import {
+  AUTOPILOT_PLAYBACK_MIN_SPEEDUP, AUTOPILOT_TAIL_OPACITY, parseTrainingAutopilot,
+} from "../../data/trainingAutopilot";
 import { VECTORED_KEY, WORD } from "../../data/__tests__/trainingSample.fixture";
-import { TRAINING_MODEL_COLOR, TRAINING_OUTSIDE_COLOR } from "../../utils/trainingWordColors";
-import { mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "../../data/__tests__/trainingAutopilot.fixture";
+import {
+  TRAINING_FAILURE_COLOR, TRAINING_MODEL_COLOR, TRAINING_ON_SCREEN_COLOR, TRAINING_OUTSIDE_COLOR, TRAINING_REPLAY_COLOR,
+} from "../../utils/trainingWordColors";
+import {
+  failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockSelection,
+} from "../../data/__tests__/trainingAutopilot.fixture";
 
 /** Publish the fixture's overlays for the selected flight, as the panel does. */
 function overlays(position = 0) {
@@ -83,7 +91,6 @@ describe("TrainingSentenceBar", () => {
     appState.trainingPrior = null;
     appState.trainingAutopilot = null;
     appState.trainingPick = null;
-    appState.trainingAutopilotAuto = true;
     appState.trainingGenerations = [];
     appState.trainingSource = null;
     setTrainingPick.mockClear();
@@ -182,6 +189,11 @@ describe("TrainingSentenceBar", () => {
     appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 1 };
     const { unmount } = render(<TrainingSentenceBar />);
     expect(screen.getByLabelText("after 150 s: the flight had ended; the model spoke on to where the executor stopped")).toBeTruthy();
+    // a flight that did not land ends in the failure red, heavier — its line and its time on the axis
+    const failed = document.querySelector(".training-sentence-model-end") as SVGTextElement;
+    expect(failed.style.fill).toBe(TRAINING_FAILURE_COLOR);
+    const failedLine = [...document.querySelectorAll(".training-sentence-marker")].find((line) => line.getAttribute("stroke") === TRAINING_FAILURE_COLOR)!;
+    expect(failedLine.getAttribute("stroke-width")).toBe("3.5");
     unmount();
     appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
     render(<TrainingSentenceBar />);
@@ -211,7 +223,9 @@ describe("TrainingSentenceBar", () => {
     expect(screen.getByLabelText("the observed flight's sentence ends at 120 s")).toBeTruthy();
     // where its flight ended, its time written on the axis under it, in its colour
     const end = screen.getByLabelText("base's flight ended at 110 s");
-    expect([end.textContent, end.getAttribute("fill")]).toEqual(["110 s", TRAINING_MODEL_COLOR.base]);
+    expect([end.textContent, end.style.fill]).toEqual(["110 s", TRAINING_MODEL_COLOR.base]);
+    const endLine = screen.getByLabelText("base's flight landed at 110 s").querySelector("line")!;
+    expect([endLine.getAttribute("stroke"), endLine.getAttribute("stroke-width")]).toEqual([TRAINING_MODEL_COLOR.base, "2"]);
     // how the sample ended, and no truth-only chip; its words fly like the truth's
     expect(screen.getByText("#1: landed on 09 at 110 s (observed 120 s)")).toBeTruthy();
     expect(screen.queryByText(/^heading \d+\/\d+ · capture/)).toBeNull();
@@ -246,6 +260,17 @@ describe("TrainingSentenceBar", () => {
     expect(fly.title).toMatch(/^The executor flies the model's sentence again from its first step \(4\)/);
     fireEvent.click(fly);
     expect(setTrainingPick).toHaveBeenLastCalledWith({ source, column: "heading", row: 12, attempt: 0 });
+  });
+
+  it("offers nothing to fly for a flight the backend does not fly live — a window's aircraft: no Fly button, a band only selects", () => {
+    select();
+    appState.trainingSelection = { ...(appState.trainingSelection as object), liveExecutor: false };
+    generations();
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
+    render(<TrainingSentenceBar />);
+    expect(screen.queryByRole("button", { name: "▶ Fly" })).toBeNull();
+    fireEvent.click(screen.getByLabelText(/^heading 225° — said by base at step 12/));
+    expect(setTrainingPick).not.toHaveBeenCalled();
   });
 
   it("offers nothing to fly for a word a model said as or after its flight ended — the backend refuses the same words", () => {
@@ -334,15 +359,14 @@ describe("TrainingSentenceBar", () => {
     expect(setTrainingPick).toHaveBeenLastCalledWith(null);
   });
 
-  it("flies the selected word from its Fly button — the only way with the panel's switch off", () => {
+  it("flies the selected word from its Fly button too, which waits for a word to be selected", () => {
     select();
-    appState.trainingAutopilotAuto = false;
     render(<TrainingSentenceBar />);
     const fly = screen.getByRole("button", { name: "▶ Fly" }) as HTMLButtonElement;
     expect(fly.disabled).toBe(true);
     expect(fly.title).toMatch(/^Select a word/);
     fireEvent.click(screen.getByLabelText(/^heading 225° .* issued at step 8 /));
-    expect(setTrainingPick).not.toHaveBeenCalled();
+    setTrainingPick.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "▶ Fly" }));
     expect(setTrainingPick).toHaveBeenLastCalledWith({ source: null, column: "heading", row: 8, attempt: 0 });
   });
@@ -360,7 +384,7 @@ describe("TrainingSentenceBar", () => {
     unmount();
     const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, mockSelection(parsed.value, request));
     if (!answer.ok) throw new Error(answer.problem);
-    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 0, roundTripS: 0.5 };
+    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 0 };
     render(<TrainingSentenceBar />);
     fireEvent.click(screen.getByLabelText(/^heading 225° .* issued at step 8 /));
     setTrainingPick.mockClear();
@@ -380,7 +404,7 @@ describe("TrainingSentenceBar", () => {
     unmount();
     const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, mockSelection(parsed.value, request));
     if (!answer.ok) throw new Error(answer.problem);
-    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 0, roundTripS: 0.5 };
+    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 0 };
     const { unmount: done } = render(<TrainingSentenceBar />);
     // its band selected: the band names it, the line does not
     fireEvent.click(screen.getByLabelText(/^heading 225° .* issued at step 8 /));
@@ -397,11 +421,85 @@ describe("TrainingSentenceBar", () => {
     outside.word.heading.inside[1] = 0;
     const flown = parseTrainingAutopilot(outside, request, mockSelection(parsed.value, request));
     if (!flown.ok) throw new Error(flown.problem);
-    appState.trainingAutopilot = { status: "ready", request, segment: flown.value, playedAt: 0, roundTripS: 0.5 };
+    appState.trainingAutopilot = { status: "ready", request, segment: flown.value, playedAt: 0 };
     render(<TrainingSentenceBar />);
     const red = document.querySelector(".training-sentence-autopilot strong") as HTMLElement;
     expect(red.textContent).toBe("out of envelope");
     expect(red.style.color).toBe("rgb(255, 45, 45)");
+  });
+
+  it("puts a cursor on the flown word's row: at its step while it flies on the backend, then with the 3D aircraft, faded in the tail, left at the end", () => {
+    select();
+    const parsed = parseTrainingSample(mockSample());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    // heading 225° said at step 8 (16 s), the next heading word at step 10 (20 s): flown 16–24 s, the tail from 20 s — 8 s,
+    // flown out at the least speed-up
+    const request = mockAutopilotRequest(parsed.value, VECTORED_KEY, "heading", 8);
+    const realMs = (flownS: number) => (flownS / AUTOPILOT_PLAYBACK_MIN_SPEEDUP) * 1000;
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => frames.push(callback));
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    const nextFrame = (ms: number) => {
+      now.mockReturnValue(1_000_000 + ms);
+      frames.shift()!(0);
+    };
+    const issue = (pattern: RegExp) => screen.getByLabelText(pattern).querySelector(".training-sentence-issue")!;
+    const cursor = () => document.querySelector(".training-sentence-autopilot-cursor") as SVGRectElement | null;
+    const at = () => Number(/^translate\(([-\d.]+) 0\)$/.exec(cursor()!.getAttribute("transform")!)![1]);
+    appState.trainingAutopilot = { status: "flying", request };
+    const { rerender, unmount } = render(<TrainingSentenceBar />);
+    const said = issue(/^heading 225° .* issued at step 8 /);
+    const x16 = Number(said.getAttribute("x"));
+    const x20 = Number(issue(/^heading 180° .* issued at step 10 /).getAttribute("x"));
+    // on the heading word's row, at its step, pulsing, no frame loop
+    expect(Number(cursor()!.getAttribute("y"))).toBe(Number(said.getAttribute("y")) - 1);
+    expect(cursor()!.classList.contains("waiting")).toBe(true);
+    expect(at()).toBeCloseTo(x16, 6);
+    expect(frames).toHaveLength(0);
+    // the answer arrives: the same cursor flies it out from the word's step
+    const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, mockSelection(parsed.value, request));
+    if (!answer.ok) throw new Error(answer.problem);
+    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 1_000_000 };
+    rerender(<TrainingSentenceBar />);
+    expect(cursor()!.classList.contains("waiting")).toBe(false);
+    expect(at()).toBeCloseTo(x16, 6);
+    // 4 s along: where the next heading word is heard, not yet faded
+    nextFrame(realMs(4));
+    expect(at()).toBeCloseTo(x20, 6);
+    expect(cursor()!.style.opacity).toBe("");
+    // in the tail, faded as the 3D tail is
+    nextFrame(realMs(6));
+    expect(at()).toBeCloseTo(x16 + 1.5 * (x20 - x16), 6);
+    expect(cursor()!.style.opacity).toBe(String(AUTOPILOT_TAIL_OPACITY));
+    // flown out: left at the segment's end (24 s), and the loop stops
+    nextFrame(realMs(60));
+    expect(at()).toBeCloseTo(x16 + 2 * (x20 - x16), 6);
+    expect(frames).toHaveLength(0);
+    // flown again (↻ Fly again): back at the word's step, pulsing, while the backend flies it; its answer a new start,
+    // from the word's step again, unfaded
+    appState.trainingAutopilot = { status: "flying", request };
+    rerender(<TrainingSentenceBar />);
+    expect(cursor()!.classList.contains("waiting")).toBe(true);
+    expect(at()).toBeCloseTo(x16, 6);
+    expect(cursor()!.style.opacity).toBe("");
+    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 1_000_000 + realMs(60) };
+    rerender(<TrainingSentenceBar />);
+    expect(at()).toBeCloseTo(x16, 6);
+    expect(cursor()!.style.opacity).toBe("");
+    unmount();
+    raf.mockRestore();
+    now.mockRestore();
+    // a refusal flew nothing; nor did a flight that failed in its first cycle (one state: 3D flies nothing either)
+    appState.trainingAutopilot = { status: "failed", request, problem: "the backend did not answer" };
+    const refused = render(<TrainingSentenceBar />);
+    expect(cursor()).toBeNull();
+    refused.unmount();
+    const one = parseTrainingAutopilot(failedAnswer(mockAutopilotAnswer(parsed.value, request), 1), request,
+      mockSelection(parsed.value, request));
+    if (!one.ok) throw new Error(one.problem);
+    appState.trainingAutopilot = { status: "ready", request, segment: one.value, playedAt: 1 };
+    render(<TrainingSentenceBar />);
+    expect(cursor()).toBeNull();
   });
 
   it("marks each word with the executor's verdict, and none where a word has no check of its own", () => {
@@ -416,12 +514,37 @@ describe("TrainingSentenceBar", () => {
     // a heading word's verdict: its band's rows on the flown track, from where it was told plus the lead
     expect(screen.getByLabelText(/^heading 180° .* issued at step 10 /).textContent).toMatch(
       /the executor: outside, told at its step 10 — ✗ track within ±4\.5° of the word, 4 s after it was told, to the next word's \(7\/8 rows\)/);
-    // the replay is no chip of the header (its words' dots say it): its reading is in the notes
-    expect(document.querySelector(".training-sentence-head")!.textContent).not.toMatch(/replay/);
+    // the header says only what went wrong, in the fewest words, in the replay's verdict colour; which words, in its
+    // tooltip and in the notes
+    const chip = screen.getByText("Replay · 2 words out");
+    const amber = document.createElement("span");
+    amber.style.color = TRAINING_REPLAY_COLOR.flawed;
+    expect(chip.style.color).toBe(amber.style.color);
+    expect(chip.title).toBe("The executor's replay of this sentence: landed; outside their envelopes: heading 180° at step 10, " +
+      "approach cleared at step 20 (a red dot at the band's left). The full reading is behind ⓘ.");
     fireEvent.click(screen.getByRole("button", { name: "How to read the bar" }));
     const notes = document.querySelector(".training-sentence-legend")!.textContent!;
     expect(notes).toMatch(/The executor \(own dynamics\) flew this sentence from row 0.*: landed, 1\.5 m right of the centreline, 20\.8 m above the threshold/);
-    expect(notes).toMatch(/5\/7 words inside their envelopes.* · evaluation pass \(observed pass\)\./);
+    expect(notes).toMatch(/5\/7 words inside their envelopes.* · outside: heading 180° at step 10, approach cleared at step 20 · evaluation pass \(observed pass\)\./);
+  });
+
+  it("says nothing of the replay in the header when it landed with every word inside, nor over a model's sentence", () => {
+    select();
+    overlays();
+    // every word inside, as its words and the gate's counts both say
+    const flown = appState.trainingExecutor as { flight: { words: Array<{ status: string }>; counts: { wordsJudged: number } } };
+    flown.flight = {
+      ...flown.flight, words: flown.flight.words.map((word) => (word.status === "outside" ? { ...word, status: "inside" } : word)),
+      counts: { ...flown.flight.counts, wordsInside: flown.flight.counts.wordsJudged },
+    } as typeof flown.flight;
+    const { unmount } = render(<TrainingSentenceBar />);
+    expect(document.querySelector(".training-sentence-head")!.textContent).not.toMatch(/Replay/);
+    unmount();
+    overlays();
+    generations();
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
+    render(<TrainingSentenceBar />);
+    expect(document.querySelector(".training-sentence-head")!.textContent).not.toMatch(/Replay/);
   });
 
   it("says why a flight the replay does not fly has no verdicts", () => {
@@ -462,7 +585,7 @@ describe("TrainingSentenceBar", () => {
 
   it("draws nothing outside Training, though the flight stays selected (the session outlives a task switch)", () => {
     select();
-    appState.mode = "observe";
+    appState.mode = "evaluation";
     const { container, rerender } = render(<TrainingSentenceBar />);
     expect(container.innerHTML).toBe("");
     appState.mode = "training";
@@ -647,6 +770,34 @@ describe("TrainingSentenceBar", () => {
     const other = screen.getAllByLabelText("What the 3D scene shows")[1];
     fireEvent.click(other.querySelector("button")!);
     expect(other.textContent).not.toMatch(/judged rows/);
+  });
+
+  it("names the roles of a multi-aircraft window's aircraft in the legend — only when a window is on screen", () => {
+    select();
+    const vocabulary = (appState.trainingSelection as { vocabulary: TrainingVocabulary }).vocabulary;
+    const layers = appState.trainingLayers as TrainingLayers;
+    const { unmount } = render(<TrainingLegend layers={layers} vocabulary={vocabulary} executorTrack={false} autopilotColour={null}
+      model={null} traffic={null} />);
+    fireEvent.click(screen.getByText("Legend ▸"));
+    expect(screen.getByLabelText("What the 3D scene shows").textContent).not.toMatch(/commanded aircraft|on screen/);
+    unmount();
+    // one commanded aircraft: it is the one on screen, nothing is drawn as "commanded"
+    const one = render(<TrainingLegend layers={layers} vocabulary={vocabulary} executorTrack={false} autopilotColour={null}
+      model={null} traffic={{ colour: TRAINING_MODEL_COLOR.traffic, commanded: 1 }} />);
+    fireEvent.click(screen.getByText("Legend ▸"));
+    expect(screen.getByLabelText("What the 3D scene shows").textContent).toMatch(/the aircraft on screen/);
+    expect(screen.getByLabelText("What the 3D scene shows").textContent).not.toMatch(/commanded aircraft/);
+    one.unmount();
+    render(<TrainingLegend layers={layers} vocabulary={vocabulary} executorTrack={false} autopilotColour={null}
+      model={null} traffic={{ colour: TRAINING_MODEL_COLOR.traffic, commanded: 3 }} />);
+    fireEvent.click(screen.getByText("Legend ▸"));
+    const rows = [...screen.getByLabelText("What the 3D scene shows").querySelectorAll("li")].map((row) => row.textContent);
+    expect(rows).toEqual(expect.arrayContaining(["▶ the aircraft on screen", "commanded aircraft", "replayed arrivals",
+      "background arrivals", "loss of separation"]));
+    const ring = screen.getByText("▶ the aircraft on screen").closest("li")!.querySelector("circle")!;
+    expect(ring.getAttribute("stroke")).toBe(TRAINING_ON_SCREEN_COLOR);
+    const commanded = screen.getByText("commanded aircraft").closest("li")!.querySelector("line")!;
+    expect(commanded.getAttribute("stroke")).toBe(TRAINING_MODEL_COLOR.traffic);
   });
 
   it("opens the read-back check, and puts the notes behind ⓘ", () => {

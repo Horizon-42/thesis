@@ -26,7 +26,7 @@ gets a new ID here and ONE new line in the index.**
 ### AV2 · `categoryResultSource` is the one result-source classifier
 
 - `utils/trajectoryResultSources.ts` → `categoryResultSource` is the ONE classifier
-  splitting comparison categories into `optimization | prediction | experiment` (Observe's
+  splitting comparison categories into `optimization | prediction | experiment` (Evaluation's
   "Result source" selector and `EvaluationSummary`'s presentation both key off it).
   Optimizer publishes never stamp `resultSource` — absent field + non-`ts_` key ⇒
   optimization; the `ts_` prefix is the legacy marker for pre-`resultSource` data-driven
@@ -301,15 +301,19 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 ### AV24 · Training 的叠加层：执行器的回放与先验的预测，画在一个集合的航班上
 
-- **叠加层在集合旁边，不在集合里面。** 每个机场的 `training/overlays.json`（`aeroviz-training-overlays-v1`）列出叠加层：
-  种类（`executor-replay` / `prior-prediction`）、画在哪个集合上（`base`）、那个集合的样本文件的 sha256、文件位置
+- **叠加层在集合旁边，不在集合里面。** 每个机场的 `training/overlays.json`（`aeroviz-training-overlays-v2`）列出叠加层：
+  种类（`executor-replay` / `prior-prediction`）、画在哪个集合上（`base`）、文件位置
   （`training/<叠加层 id>/executor.json` 或 `prior.json`）。集合的索引 `index.json` 不动。写它们的是
   `run_ts.py executor_training_export` 和 `prior_training_export`（ts 的 R13）。
-- **绑定**：叠加层文件（`aeroviz-training-executor-v3` / `aeroviz-training-prior-v3`）自己写出所画集合的 id、样本的写出
-  时刻和规格 sha，每架航班按集合的顺序一架一条；执行器的每条词与句子的词逐条对应（步、列、值），先验每架的步数等于
-  句子的步数。`trainingOverlays.ts` 逐项核对，对不上就整份拒读、说出是哪一项——例如集合按同一个 id 重新导出过，
-  样本的写出时刻就不同，叠加层被拒读（"the set was re-exported after the overlay"）。`check-publication` 另外核对
-  盘上样本文件的 sha256。执行器的格式 v2（2026-09-24，`instruction-v3`）：每个被判的航向词带上它在飞出航迹上的航向带和
+- **绑定按内容，不按文件**（2026-09-28）：叠加层文件（`aeroviz-training-executor-v4` / `aeroviz-training-prior-v4`）
+  自己写出它和所画集合共有的东西——集合 id、规格 sha、候选跑道 sha（`candidatesSha256`：跑道编号指向它）和机场坐标系
+  （`airportFrame`），每架航班按集合的顺序一架一条；执行器的每条词与句子的词逐条对应（步、列、值），先验每架的步数等于
+  句子的步数，画高度的叠加层每一行的 HAE − MSL 等于集合里这架航班的（`TRAINING_DATUM_TOLERANCE_M` = 0.02 m：两边各是
+  两个写到 0.01 m 的高度之差），从集合的观测状态飞出的航迹第一点就是观测航迹那一行（执行器第 0 行，模型自己的句子第
+  `firstPredictedRow` 行；位置差不超过写出的 1e-7°、高度 0.01 m；增强起点是挪过的，不比）。`trainingOverlays.ts` 逐项核对，对不上就整份拒读、说出是哪一项；`check-publication` 用同一个
+  读取函数。**从不按集合文件的字节或写出时刻绑定**：集合用同样的航班重新导出，叠加层照读；航班、句子、规格、跑道、坐标系或
+  高度基准有一样变了才拒读。导出时同样核对（`training_files.open_base_set`：候选跑道与坐标系是导出器自己产物的；
+  `require_set_datum`：每架航班的高度基准）。执行器的格式 v2（2026-09-24，`instruction-v3`）：每个被判的航向词带上它在飞出航迹上的航向带和
   逐行判定（`heading`），每架被判的航班带上判决读到的飞出航迹（`judgedTrackDeg`：平滑、切到落地前，与 `track.trackDeg`
   同一分支，第 k 步就是 `track` 的第 k 个点，读取时核对）；动力学失败的航班没有这两样（判决读到了导出航迹有意不含的失败状态），
   词的状态与检查照旧。读取器要求：判决判过的每个航向词都带带子、别的词都不带；判定数 = 有判定的词数，离开航向词自己切入的
@@ -383,8 +387,10 @@ that divergence is a known open item (see the README's "Future Improvements").
 ### AV30 · Training 的左栏停在句子条上面；航班列表占剩下的高度（2026-09-26）
 
 - 句子条横跨整个宽度，原来左栏一直伸到底，下半截（Draw 的开关、叠加层）被它盖住。现在句子条用 `ResizeObserver` 量自己的高度，
-  写到它所在的 `.workbench` 上（`--training-bar-height`，句子条卸下时删掉）；`index.css` 里
-  `.workbench:has(> .training-sentence-bar) > .cesium-overlay-container` 的底边距改成 36 px（句子条离底的距离）+ 句子条高 + 8 px，
+  写到页面的根元素上（`--training-bar-height`，句子条卸下时删掉；2026-09-28 之前写在 `.workbench` 上，Cesium 的署名在
+  工作台之外也要读它，AV36）；`index.css` 里
+  `.workbench:has(> .training-sentence-bar) > .cesium-overlay-container` 的底边距是句子条离底的距离（`--training-bar-bottom`，
+  8 px；2026-09-28 之前 36 px，给 Cesium 的时间轴让位）+ 句子条高 + 8 px，
   左右两侧的面板因此都在它上面结束；原来给 Cesium 时钟盘留的底边距（`left-overlay-panel-stack` 的 92 px）这时归零——那一块本来就被
   句子条盖着。
 - 左栏里 `TrainingPanel` 是 `flex: 1 0 auto`（填满左栏、不比内容矮），航班列表 `flex: 1 1 0; min-height: 176px`：列表拿剩下的高度，
@@ -395,8 +401,8 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 - 导出：`python run_ts.py prior_generation_training_export`（ts R13）——先验说、执行器飞，和正式自由生成读数同一条路径
   （`prior_free_generation.speak_and_fly`）；每架航班 `--samples` 个样本；只飞自己机型有动力学的航班。文件
-  `training/<叠加层 id>/generation.json`，格式 `aeroviz-training-generation-v3`（Python `SCHEMA` 与 `TRAINING_GENERATION_SCHEMA`
-  由 `test_training_overlays.py` 逐字比对），清单里的种类 `prior-generation`（清单格式不变，还是 v1：不认识的种类只拒这一条）。
+  `training/<叠加层 id>/generation.json`，格式 `aeroviz-training-generation-v4`（Python `SCHEMA` 与 `TRAINING_GENERATION_SCHEMA`
+  由 `test_training_overlays.py` 逐字比对），清单里的种类 `prior-generation`（不认识的种类只拒这一条）；与集合的绑定同 AV24。
 - 每个样本：事件（行、列、值，行是航班自己的步号，从 `firstPredictedRow` = 8 起、第一步六列都说）、结局、结束时刻、越过入口
   （只随 `TRAINING_CROSSING_OUTCOMES` = `judge.CROSSINGS` 出现）、首末跑道、换跑道与复飞词数、结束时是否许可、屏蔽拿掉的概率
   （按列名的记录，列只能是六列之一——不镜像哪几列被屏蔽，后训练在加高度列的屏蔽）、航迹（航班自己的时钟，每点一步、最后一点
@@ -422,7 +428,8 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 - 用户 2026-09-26：Training 里只能在 base 和"后训练"之间切换，多轮后训练的各个模型分不开。先验的模型名字是用户定的
   （后训练设计开头的表）：**base**（只用数据训练）、**landing**（base 按落地奖励后训练，第一阶段）、**augmented**（landing
-  在增广起点上再后训练，第二阶段）；某一轮写成 "augmented r3"。
+  在增广起点上再后训练，第二阶段）；某一轮写成 "augmented r3"。之后加了 **traffic**（多机 M4，一个场景里由模型指挥一架，
+  用户 2026-09-30）和 **window**（M4 在窗口里训练，窗口里每一架都由模型指挥，用户 2026-10-01；颜色深绿 `#009437`）。
 - 导出器不再收 `--label`，名字从检查点的配置读出（`model_identity`）：没有 `fine_tuning` 就是 base；有的话，按训练它的方法
   （`fine_tuning.schema` 去掉版本号 `-vN`，`METHOD_MODELS`）给名字，同一方法的各版本是同一个模型（采纳的 landing 第 1 轮是 v1 写的）；
   没有名字的方法拒绝，新阶段的名字先和用户商定。载荷的 `model` 块：`name`、`round`（base 为 null）、`run`（放各轮的目录，
@@ -486,7 +493,7 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 - 用户（2026-09-27）：前端 40 架都是真实 val 航班，想看模型从第二阶段后训练用的**增强起点**怎么飞。导出器
   `prior_generation_training_export --augment-seed 1337`（ts R13）写另一种叠加层：种类 `prior-generation-augmented`，格式
-  `aeroviz-training-augmented-generation-v1`，§2.7 的 v3 不动。每架航班多 `augmentDraws`、`augmentation`（转角、抬高、速度倍数）、
+  `aeroviz-training-augmented-generation-v2`（与集合的绑定同 AV24，增强后的第 0–7 行也核对高度基准）。每架航班多 `augmentDraws`、`augmentation`（转角、抬高、速度倍数）、
   `observed`（增强后的第 0–7 行）；同一个种子下每个模型的增强起点相同；没有正式读数。设计：文档 36 §2.8、§4.10。
 - 读取器（`parseAugmentedStart`）核对：抽了几次在 1–`tries` 之间且只有自己动力学的航班才抽；有增强 ⇔ 飞了 ⇔ 有 `observed`；
   增强在上下限以内；`observed` 正好 `firstPredictedRow` 个点、从 0 起每点一步；一架航班的样本都从同一个起点起飞。
@@ -495,6 +502,121 @@ that divergence is a known open item (see the README's "Future Improvements").
   moved"，样本小块写增强量；▶ Fly 照样能用：请求带上增强量，后端按 `augment_state` 挪执行器的起点（`fly.moved_inputs`，
   与第二阶段的 `augmented_inputs` 逐位相同）、按 `augment_signals` 挪观测行、时限 ×2，飞出来就是那个样本（导出的增强量
   取整到 0.0001° 时差约 2 cm，此后导出不取整）；详情页的模型一节多一张表；三维把增强后的前 8 行用模型颜色虚线画出，接到样本航迹起点。
+
+### AV36 · Training 藏起 Cesium 的时钟；句子条贴底；下降角一行叫 Descent；实时执行器的小游标（2026-09-28）
+
+- 用户（2026-09-28）：Training 里 Cesium 的控制台（时钟盘、时间轴）不起作用，藏起来让句子条沉底。Training 不载 CZML，句子条
+  有自己的时间，`viewer.clock` 属于 Evaluation 的回放。`WorkbenchShell` 按 `mode` 给 `body` 加 `workbench-training-active`，
+  `index.css` 把时钟盘、时间轴和全屏按钮设成 `visibility: hidden`，再 `viewer.forceResize()`：Cesium 排版时只看 `visibility`
+  （`display: none` 它看不出，演示模式用的就是那种，署名不动），所以署名随之排到最底下；回到别的模式时同一个 effect 再强制排一次，
+  时间轴重新排好。浏览器核对：Observe 的时钟盘、时间轴、全屏按钮照旧，Training 里都不见。
+- 句子条离底 `--training-bar-bottom`（8 px，同左栏离顶栏的距离，定义在 `:root`）。Cesium 的署名（ion 标志与 "Data attribution"）
+  必须看得见，而它们会落在句子条下面：Training 里用 `!important` 盖过 Cesium 每次排版写在行内的位置，放到句子条上方 4 px、左栏
+  右边（`calc(16px + var(--overlay-left-width) + 16px)`）；为此 `--training-bar-height`（AV30）写到根元素上，
+  `--overlay-left-width` 从 `.cesium-overlay-container` 挪到 `:root`（其余读它的地方都在根元素之下，值不变）。没选航班时没有
+  句子条，署名离底 12 px。
+- 下降角一行（`TRAINING_COLUMN_LABEL.angle`）的行名从 "Angle" 改成 "Descent"（用户：含糊），详情页词表的那一行也一样；带上的字
+  （`trainingBandLabel`）写成 "编号: 标称角"——"1: 0.92°"（类名去掉开头的 "descent "，行名已经说了），爬升 "climb: -1.32°"，平飞
+  "level"；带的提示、三维标签、读数与先验窗口仍用完整的词（`trainingWordLabel`）。
+- 实时执行器在飞的时候（文档 36 §4.7），句子条上它飞的那个词所在的行有一根带白边的短竖条（`AutopilotCursor`），颜色同飞出的线：后端还
+  在算时停在这个词说出的那一步、一闪一闪（`prefers-reduced-motion` 时不闪）；答复到了就与三维里的飞机一起走——两边读同一个时钟
+  `autopilotPlaybackS(track, playedAt, now)`（实际时间 × 倍数，飞完停在段尾），过了听到下一个同列词的那一点（尾巴）变淡 0.45，
+  飞完停在段尾；再飞一次（↻ Fly again）的新答复带新的 `playedAt`，它从头再走。它自己用 `requestAnimationFrame` 改自己的 `transform`，句子条不因它
+  每帧重画（AV29）；飞完就停掉循环，轴的宽度或长度变了在绘制之前重新放。浏览器核对（KRDU AAL557）：真值的 heading 170°（64 s，×8）
+  与 base 模型第 1 个样本的 heading 225°（74 s）——游标与三维标签的"已飞"同步，停在尾巴末端、变淡。
+
+### AV37 · 执行器回放对一架航班的判定：三种颜色；出问题时句子条头部一个小块（2026-09-28）
+
+- 用户（2026-09-28，看 KRDU SWA4462 的 "landed · 43/45" 为什么是红的）：落地了、45 个判了的词里 2 个出界，和没落地用同一种
+  红色分不开。现在一个规则、一处定义（`replayVerdict`，`data/trainingOverlays.ts`，挨着 `executorWordCounts`）：**clean**——落地、
+  判的词全在包络里；**flawed**——落地，但有词出界，或者标注器的门拒了它的航迹（那样一个词也不判，不能算干净）；**not landed**。
+  出界的词数用回放门自己的计数（判的 − 包络内），与航班列表的 "43/45" 一致——门把"留给截获的航向词"算两次（`countedTwice`，
+  AV24），按词的判定数会少一个。颜色表 `TRAINING_REPLAY_COLOR`（`utils/trainingWordColors.ts`，调色板里只有颜色、没有判定）：
+  clean 用回放的青、not landed 用出界红、flawed 用琥珀 `#f59e0b`（OKLab ΔE 在句子条底色上离出界红 14.6、色觉异常下 ≥ 8.6，离青
+  24.9，离选中的黄 11.2，对比度 8.6:1；离截获转弯的橙只有 4.2，那个颜色只画在图和三维里、不做文字）。
+- 航班列表那一行（`ExecutorTag`）用这个颜色，提示里写出三种颜色的含义；详情页 Draw 一节多一条 "Executor replay"，三个色样
+  与同样的说明。
+- 句子条头部：读真值、回放飞了这架航班、且不是 clean 时，跑道之后多一个小块，字越少越好（`replayIssueText`，`data/trainingText.ts`）：
+  "Replay · 2 words out"、"Replay · timed out · 1 word out"、"Replay · track refused"，颜色同上；出界的词逐个
+  （"heading 095° at step 164"，被算两次且两项都没过的那个写 "counted twice: its band and the intercept"，名字加起来就是出界数；
+  `replayOutsideWords`）写在它的提示里，也接在 ⓘ 说明里回放那一句之后。clean 时不出现——2026-09-27 删掉的回放小块（"冗余"）是一直
+  在的那种，这个只在出问题时出现。
+- 审查（opus，2026-09-29）：没有必须改的；按它改了——判定合成一处（原来颜色和文字各推一遍）、出界数改用门的计数并标出算两次的词、
+  被拒的航迹不再算干净、头部注释补上这个小块。浏览器（5176）：KRDU 列表里 "landed · 43/45" 等为琥珀、"landed · 5/5" 等为青；
+  SWA4462 头部 "Replay · 2 words out"。
+
+### AV38 · 左栏的 "Autopilot (live)" 一栏删掉；点色块总是直接飞（2026-09-29）
+
+- 用户（2026-09-29）："左边栏里 AUTOPILOT (LIVE) 这个面板中的信息也是多余的 把这块儿也删了……删干净，包括相关测试"。删掉的：
+  面板的这一栏（开关 "Fly on band click" 与结果卡 `TrainingAutopilotCard`：词与步数、判定、尾巴的说明、模拟飞行与计算两个时间、
+  检查项、Details 里的计算分项 / 规格与代码 sha / 词钟、模型词与导出样本的逐点核对、"Replay in 3D"、没飞成时的 "Fly again"），
+  以及只为它存在的：`AppContext` 的 `replayTrainingAutopilot`、`trainingAutopilotAuto` / `setTrainingAutopilotAuto`，
+  `trainingAutopilot.autopilotSampleGap`，答复视图的 `roundTripS`（浏览器往返时间），`trainingText.formatUtc`，详情页 "What each
+  switch draws" 里的 "Fly on band click" 一条，`index.css` 里结果卡的样式，`ProblemBox` 的 `children`（只有结果卡的 "Fly again" 用），
+  测试夹具 `onSampleLine`，以及它们的测试；`requestSource` 与夹具的 `mockGeneratedPoint` 只剩文件内使用，不再导出。
+- 留下的：句子条头部那一行（`TrainingAutopilotStatus`，从 `TrainingAutopilotCard.tsx` 挪到自己的文件，测试同样挪到
+  `TrainingAutopilotStatus.test.tsx`；时间写法的测试挪到 `trainingText.test.ts`）、小游标（AV36）、三维与读数核对窗口。点色块总是
+  直接飞（原来开关默认就开）；没飞成时按 ↻ Fly again 再飞（再点一次选中的色块是取消选中，不是再飞）。答复的格式（`aeroviz-training-autopilot-segment-v7`，含
+  `timing` 各项、规格与代码 sha）不变，读取器照样逐项核对——那是与后端的约定，不是界面。原来的 3D "Replay in 3D" 测试改成同一个
+  词的再飞一次（↻ Fly again 的路径：先 flying 再 ready）：后端在飞的那段时间里三维不画上一次的答复（原来的 "Replay in 3D" 不请求，
+  一直画着——这是删掉它之后唯一的行为差别），新答复到了照样飞出来，落地时画的撤掉、不重复添加。审查（opus，2026-09-29）：没有必须
+  改的；留下的注释、`ProblemBox` 的 `children`、两个只剩文件内使用的导出、AV38 里"再点一次"的说法（点选中的色块是取消选中）、
+  两个没走 flying 这一步的测试，都已改。
+
+### AV39 · 多机模式：窗口集合与窗口里的模型句子（2026-09-30）
+
+- 用户（2026-09-30）要在 Training 里看多机：同一机场 20 分钟的一个**窗口**，模型同时指挥这段时间进场、有句子的几架，其余照记录
+  回放。方案用户审过（设计与定下的事在 `36-2026-09-20-training-module.zh.md` §2.9、§4.11）。数据由 ts `window_training_export`
+  写：集合 `traffic.json`（`aeroviz-training-traffic-v1`，种类 `traffic-windows`，与模型无关：指挥的飞机就是普通的集合航班，另有
+  每个窗口的其他飞机与"记录里的样子"）和每个模型一份叠加层 `window_generation.json`（`aeroviz-training-window-generation-v1`，
+  种类 `window-generation`：每个窗口每个样本里每架的句子、目视与 IFR 两种读法下的失去间隔、落地）。
+- **结构：一个场景层，加一架焦点飞机。** 窗口里被指挥的一架就是一架普通航班，模型对它说的就是一句普通的模型句子，所以句子条、
+  读数窗口、单机的三维图层原样使用。共用代码推广了四处，没有加分支：
+  - 游标存在选中项的时钟上（`TrainingSelection.clock = {scope, offsetS}`，`AppContext`：`trainingCursorS` 是这架自己的时间，
+    `trainingSceneS` 是时钟的时间）；单机时时钟就是这架航班、偏移 0，与原来逐位相同；窗口时时钟是整个窗口，换一架时刻不变。
+  - 模型叠加层拆出头部 `TrainingGenerationHead`（`readGenerationHead`、`readSaidWords`），窗口叠加层用 `windowGenerationView`
+    投影成原来的视图。
+  - 样本读取拆出集合头部 `readSetHead`。
+  - 左栏拆成 `TrainingFlightSession` 与 `TrainingWindowSession`（共用 `PanelParts`）。
+- **模式由集合的种类决定**（`data/trainingSets.ts`：`parseTrainingSet` 按种类打开，`TRAINING_OVERLAYS_OVER` 规定每种叠加层只画在
+  哪种集合上，`parseOverlayOver`；`check-publication` 走同一个门）。
+- **前端不判间隔、不排落地**：失去间隔段、被结束、落地都是导出器的判定器给的；读取器只核对账：点名的飞机在窗口里；被判定器结束的
+  飞机，它的句子写 `lost_separation`，结束时刻等于目视读法里结束它的那一刻、同一个对象；落地正好是自己的结局为落地的那几架，按先后。
+- **窗口里的飞机不现飞**（`TrainingSelection.liveExecutor` 为 false）：后端只打开读回集合，句子条不给 Fly 按钮，实时执行器的钩子
+  什么也不问。
+- 句子条上方的**窗口时间条**（`TrainingTrafficStrip.tsx`）：横轴是场景时间，跨度取被指挥的飞机（记录与当前读的句子），每架指挥的
+  飞机一行、其他飞机合成一行；失去间隔在牵涉的指挥飞机行上画红段（IFR 每段描边、目视实心画在上面），两架都被指挥时连一条竖线；
+  焦点那一段括起来。在图上按下或拖动移动场景时间；**按下**一行（飞机条或呼号）换焦点——按在图上会捕获指针，之后的点击到不了那一行，
+  按在呼号上不动时间；▶ 按 1× / 10× / 30× 播放（每 50 ms 推进一次，计时器只随"在放、速度"重建；每个窗口一条新的时间条）。
+- **游标在不在这架飞机上是一个判断**（`cursorOnFlight`）：单机时总在（越过轴的末端照旧夹住）；窗口时只在这架的轴上——之外时句子条、
+  读数与先验窗口、三维都不画游标、不亮游标处的词，读数写 "outside this aircraft"。
+- 左栏按集合的**种类**各留一个会话（`TrainingFlightSession` / `TrainingWindowSession`），同种集合加载时不卸下：开关与每个集合选中的叠加层
+  切回时恢复。
+- **三维**（`useTrainingTrafficLayer.ts`，由 `useTrainingTrackLayer` 调用，读游标，只在叶子组件里）：每架飞机按它的**角色**画
+  （`TrainingAircraftRole`：`onScreen` / `commanded` / `replayed` / `background`，一张表 `ROLE_DRAW`；用户 2026-09-30：分不出哪条
+  是正被控制的）。焦点（句子条读的那架）的航迹由单机图层画，游标处一个大白点、外圈是选中项的黄色，呼号 "▶ …" 写在黄色底块上
+  （`TRAINING_ON_SCREEN_COLOR`，与时间条上框住焦点那一段的黄色相同；不用当前读法的颜色——记录的近白色、landing 的青柠色上，白圈
+  与白字看不见，审查指出）；**被指挥的是一个集合**（以后多架同时现飞，只是这个集合里放更多，没有地方假定只有一架）：航迹 2.5 px 不透明、点与呼号用
+  当前读法的颜色（模型色，记录时观测航迹的近白色）；回放的石板灰 1.2 px、透明 0.6，背景的更暗更淡（`TRAINING_OTHER_AIRCRAFT_ALPHA`）。
+  正处在失去间隔里的一对连红线并标"最近 / 要求"米数（目视实线，只有 IFR 有的虚线），被结束处一个固定的大红叉。时间条上焦点那一行
+  的呼号前也有 ▶；图例在窗口时多五行（焦点、被指挥——窗口只有一架被指挥时不列、回放、背景、失去间隔）。"被指挥的飞机用什么颜色"
+  只有一处：`trainingWindowReadingColour(windowReading(…))`，时间条、三维、图例都用它。**取景**：一个时钟取景
+  一次——单机是这架航班，窗口是整个窗口的全部航迹，换一架不再取景。
+- 颜色：模型 `traffic`（M4，用户 2026-09-30 定名）天蓝 `#2b93ee`（用户同日嫌原来的橄榄金 `#9c8116` 不清新，换掉；对已有颜色
+  OKLab ΔE ≥ 11.5，最近是航向带的蓝，对底色 5.8:1）；窗口判定三色沿用回放的青 / 琥珀 / 红（`TRAINING_WINDOW_VERDICT_COLOR`）；
+  其他飞机 `TRAINING_OTHER_AIRCRAFT_COLOR`；失去间隔与被结束用失败大红（AV40）。
+
+### AV40 · 失败一律大红；SVG 文字的颜色写在 style 里（2026-09-30）
+
+- 用户（2026-09-30）：降落失败的航迹，看板上的粉红虚线不够醒目，换大红。**一个失败色** `TRAINING_FAILURE_COLOR = #ff2d2d`
+  （`trainingWordColors.ts`；对底色 5.0:1）：实时执行器飞出包络的整段（`TRAINING_AUTOPILOT_OUTSIDE_COLOR` 就是它）、句子条上模型
+  航班**没落地**时的结束线（3.5 px，落地的仍是模型色 2 px）与轴下的时刻、样本小块的文字、失去间隔（`TRAINING_LOSS_COLOR`，时间条
+  上目视实心不透明 0.85、IFR 3–2 虚线，线宽 1.5）、被结束的 ✕（时间条上 14 px、黑描边、画在失去间隔段之上；三维 26 px）。逐行的
+  "包络之外"仍是浅红 `TRAINING_OUTSIDE_COLOR`。
+- **坑：SVG 元素上的 `fill` 属性会被样式表里的 `fill` 盖掉**（属性的优先级低于任何 CSS 规则）。时间条的 ✕ 原来被
+  `.training-traffic-row text { fill: … }` 盖成灰色，句子条轴下模型航班的结束时刻被 `.training-sentence-tick` 盖成灰色——都从来没
+  显示成设计的颜色。颜色随数据变的 SVG 文字写 `style={{ fill }}`，或让样式表的规则只选不带颜色的那几个元素（时间条的呼号现在是
+  `.training-traffic-callsign`）。
 
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
 
@@ -518,26 +640,28 @@ that divergence is a known open item (see the README's "Future Improvements").
   （`MIRRORED_SOURCE_SHA256`：执行器规格的文件加它照写的动力学模块，按 `spec.logic` 算），后端选规格时核对，对不上就拒绝飞。
   按 `executor.fly` 的方式一个周期一个周期地飞（`fly_until`），在词钟把一个开始一步的周期放到段尾之前停下，段尾之后
   什么也不飞。
-- 启动：选中一个词后按句子条头部的 **▶ Fly**（飞完变 **↻ Fly again**，同一选择的新一次尝试），或在面板 "Autopilot (live)"
-  一栏的 **Fly on band click** 开着时直接点色块；只有点击才请求（`trainingPick`），游标不触发，图表悬停会移动游标。
+- 启动：选中一个词后按句子条头部的 **▶ Fly**（飞完变 **↻ Fly again**，同一选择的新一次尝试），或直接点色块（2026-09-29 起总是
+  如此：面板的 "Autopilot (live)" 一栏连同开关 "Fly on band click" 删掉，AV38）；只有点击才请求（`trainingPick`），游标不触发，
+  图表悬停会移动游标。
 - **模型的词**（句子条读模型的样本时）：请求带上这句话（`sentence`：`overlayId`、`sample`、`firstRow`、`rows`、`events`，
   `trainingAutopilotRequest` 从屏幕上的样本取，`useTrainingAutopilot`），后端把整句从观测飞机在 `firstRow` 的状态照自由生成的
   飞法重飞（`segment.model_segment` / `fly.fly_segment`）：每个词在它说出的那一步听到（`TimeClock`）、时限 = 观测从 `firstRow`
   起剩下的时间 × 超时倍数（`fly.model_time_limit_s`，`prior_free_generation.limits_s` 的镜像，测试钉住）、判决按模型指的跑道；
-  答复只给从词那一步起的航迹与判定。执行器是确定的，所以这就是导出样本自己的飞行：结果卡逐点比（`autopilotSampleGap`，两者都
-  有点的时刻，水平与高度取大），2026-09-26 KRDU / KMSY 两个模型各 4 架 × 2 个样本、104 段最大差 0.000 m；测试
+  答复只给从词那一步起的航迹与判定。执行器是确定的，所以这就是导出样本自己的飞行：逐点比过（两者都有点的时刻，水平与高度取大；
+  比较用的 `autopilotSampleGap` 随结果卡在 2026-09-29 删掉，AV38），2026-09-26 KRDU / KMSY 两个模型各 4 架 × 2 个样本、104 段
+  最大差 0.000 m；测试
   `FreeGenerationTest` 让 `speak_and_fly` 自己的循环（照稿说话的说话者代替先验）和后端的飞法在真实执行器上逐状态比。只飞自己机型
   动力学的航班；词说出时或之前航班已结束的按名字拒绝（400，与前端 `row·step < endS` 同一个条件），标注器的门把航迹截在词之前的
   也拒绝；说在句子最后一步的词飞到结局（模型的最后一步不是落地）；句子从 `N_LOOK` 开口，步数不超过时限下能说的
   （`model_steps_max` = `rows_for`）；判决按句子最后指的跑道（与导出样本的结局相同）。下降角词：判决读的句子在它那一步
   重说生效的高度词（`judged_reading`），管子从它那一步起判，与真值相同；第二次许可不判（判决读第一次的截获）。答复 `source`
-  写明飞的哪一句，前端核对；`observedS` 为 null，`offsetFromObserved` 只有真值有；`limits` 是整段重飞的，卡片写明。
+  写明飞的哪一句，前端核对；`observedS` 为 null，`offsetFromObserved` 只有真值有；`limits` 是整段重飞的。
   模型许可之后又说的航向词照判决原样判到航迹末尾（执行器在飞航道），读作出界——模型句子的读法，判决不改。
 - 一段 = 被选中的那个色块：从词说出的一步飞到它的包络结束的
   `stopRow`——同列下一个词说出的一步，航向词再加一个提前量（它的带判到下一个航向词说出后一个提前量，下一个航向词照句子说出）；
   到了句子末尾就飞到落地，句子最后一步说的词按名字拒绝。**航向词多飞的那一截画成尾巴**：从执行器听到同列下一个词的周期
   （答复的 `segment.nextWordHeardS`，按判决的 `words_said`；前端 `tailFrom` 是它在航迹上的下标，`autopilotRunAndTail` 切开）起，
-  三维与四张读数图都画淡色虚线（`AUTOPILOT_TAIL_OPACITY` 0.45、`AUTOPILOT_TAIL_DASH`），图例与结果卡写出它是什么——飞机已在飞下一个
+  三维与四张读数图都画淡色虚线（`AUTOPILOT_TAIL_OPACITY` 0.45、`AUTOPILOT_TAIL_DASH`），图例写出它是什么——飞机已在飞下一个
   词，评判还算这个词（用户 2026-09-26 看成"多飞了一段"）。初态是观测飞机在那一步的状态（`flight_inputs(anchor=row)`），第 0 步是那一步
   六列生效的词，之后是段内的词，每条在执行器到了观测飞机听到它的位置时说。
 - 规格：`outputs/POOLED/executor/*/spec.json` 里恰好一份由现在的执行器代码、为这个集合所属产物的词表写的
@@ -564,16 +688,15 @@ that divergence is a known open item (see the README's "Future Improvements").
   飞完按自由生成的规则 `fly.glidepath_stop` 截在下滑道下边界的那一步，结局 `below_glidepath`；`GlidepathStopTest` 逐架钉住它与
   `glidepath_stops` 相同）（`SCHEMA` / `TRAINING_AUTOPILOT_SCHEMA`，判定状态与结局
   名也是镜像）；它带 `timing`（后端墙钟：等待；加起来等于总计的各项——集合与规格、重建航班或沿用、准备这一段、执行器与算了的周期数、判定、
-  写答复；`flyS` 只是执行器的周期，装配物理量算在"准备"里），前端加上浏览器往返时间。单步飞法由
+  写答复；`flyS` 只是执行器的周期，装配物理量算在"准备"里）。单步飞法由
   `test_autopilot_segment.StepperTest` 钉住：单条执行器在后端的飞法下，不设段尾时就是 torch 执行器的 `executor.fly`（周期、词钟时刻、
   模式与限制相同，状态只差舍入），设了段尾时等于它在词钟首次把一个开始一步的周期放到段尾处截断；装配由 `SetupTest` 钉住（与
   `replay.fly_sentences` 的输入、跑道、图、进近速度、时限、词钟相同）；前端的四个镜像名由 `MirrorTest` 钉住。
 - 显示：句子条一行只写**在不在包络内**、"N s flown · computed M ms"（飞得不好时加一个结束方式的短标签），不写词（选中的色块就是它；选中已移到别的词时才写出飞的是哪个词），
-  词与完整读法在它的提示里，这一行不换行——头部的按钮不再被它挤到第二行（2026-09-27）；结果卡第一行是判定，然后并排
-  "模拟飞行时间"（对照观测）与"计算用时"（往返），检查项，其余收进 Details；飞成了卡片上是 "Replay in 3D"（不请求），没飞成是
-  "Fly again"（重新请求卡片上的那个词，不管句子条此时选中的是什么）；三维飞机标签走模拟时钟"已飞 / 全段 s simulated"。
+  词与完整读法在它的提示里，这一行不换行——头部的按钮不再被它挤到第二行（2026-09-27）；没飞成时这一行红色 "not flown"，原因在
+  提示里，按钮变 ↻ Fly again；三维飞机标签走模拟时钟"已飞 / 全段 s simulated"。面板里原来的结果卡 2026-09-29 删掉（AV38）。
 - **颜色按判定**：在包络内蓝 `#2563eb`，飞出包络整条换成醒目的红 `#ff2d2d`（`autopilotColour`：三维航迹、地面投影、飞机与
-  标签、读数图的线、结果卡）。
+  标签、读数图的线、句子条那一行的判定）。
 - 画法：与执行器回放的青色分开；三维里飞机按加速的实际时间把这一段飞出来（至少 8 倍、不超过 20 s，
   CallbackProperty，不碰 `viewer.clock`；飞完换成静态属性，不再每帧重建，被地形挡住的部分也画成虚线），读数窗口里四张图
   各一条蓝线，从观测线上说词的那一点出发。只有一个状态的答复（第一个周期就动力学失败）没有线可画（`autopilotHasLine`）。
@@ -581,3 +704,96 @@ that divergence is a known open item (see the README's "Future Improvements").
   时一起重建**（`open_flights`：一次 `rebuild_series`，划分的信号、程序文件和到达清单各读一次；约 3 s，只一次），之后留在进程里，
   集合里每架航班的请求都是毫秒级（原来每架新航班重建 1.5–2 s）。
   后端不热更新：改了这部分要重启后端。
+
+### AV42 · 飞机用三维模型，姿态是导出器算好的（2026-09-30）
+
+- 用户（2026-09-30）：飞机不用点表示，用飞机模型，绑定真实的坡度、航向和迎角，整个 Training 模块都改。设计与分步在
+  `36-2026-09-20-training-module.zh.md` §4.12。**迎角选 b**：机头俯仰只取航迹角，迎角只写进标签——项目的升力线
+  `CL = 0.2 + 5.7·α`（`aerodynamic_model/simulator.py`）没有襟翼，最后进近 70 m/s 时读出 α ≈ 15°，画上去机头会抬 12°。
+- **姿态只在 Python 里算一次**（`4dTrajectory/ts_transformer/experiments/training_attitude.py`），写进每条导出航迹的
+  `attitude` 块（`headingDeg` 罗盘度、`pathAngleDeg`、`bankRightDeg` 右坡度为正、`attackDeg` 读数，与航迹逐点对齐）；
+  前端只读和插值（`data/trainingAttitude.ts`：`readAttitude`、`poseAt` 航向走短的一边、`poseText`）。
+  - 执行器飞出的航迹（回放、模型句子、增强起点、窗口里被指挥的飞机、实时 Fly）：执行器的状态行，坡度与载荷系数取从这一行
+    开始的那个周期的指令；航迹最后一行取在它结束的那个周期（批里执行器会在一架飞完后继续推它，之后的周期不是它的）。
+    气动参数是这架实际飞的机体（包括代用机型）。
+  - 观测航迹（真实句子集合、窗口集合的记录与其他飞机）：`rebuild_series` 重建 → `states_from_channels` → 训练 teacher
+    用的反解 `outputs/dynamics/inverse.actual_controls`（thrust-fraction 合同）。动力学查不到机体的航班（C31）只有航向与航迹角，
+    坡度与迎角为 null：画成机翼水平，标签写 "bank — (no airframe)"。
+  - 窗口导出从 `fly_windows` 返回的循环读每组执行器的 `flown()`，第 k 个记录对应执行器第 `min(k × 每步行数, 飞过的周期数)` 行，
+    逐点核对与循环自己的位置相同；`traffic_window*.py`、`autopilot/`、`outputs/dynamics/` 一行没改，执行器、标注器、场景边的
+    源码 sha256 不变。
+- **格式换名**（两边一起，旧名按名字拒读）：集合 `aeroviz-training-sample-v8`、`aeroviz-training-traffic-v2`；叠加层
+  `aeroviz-training-executor-v5`、`aeroviz-training-generation-v5`、`aeroviz-training-augmented-generation-v3`、
+  `aeroviz-training-window-generation-v2`；实时 Fly `aeroviz-autopilot-segment-v8`（后端 `FlightContext.aero_params`）。
+  **已发布的数据仍是旧名**：合并这些代码就必须同时重新导出并发布、重启 5173 与 8765（§4.12 第 e 步）。
+- **画在哪**（`scene/trainingEntities.ts`：`aircraftModel`、`placeAircraft`、`poseOrientation`；模型 `/models/aircraft.glb`）：
+  单机时光标处读的那条航迹上一架（`hooks/useTrainingAircraftLayer.ts`：真实句子在观测航迹上，模型句子从它第一个预测步起在
+  样本航迹上，航迹结束后停在结束处；窗口时不画，由交通层画）；实时 Fly 那架（方向随回放时钟）；窗口里每架按 AV39 的角色
+  （焦点白色加黄色轮廓、被指挥的按读法着色、回放与背景变淡）。
+- **一个方向约定**（`utils/aircraftOrientation.ts`）：glTF 机头朝 +x，所以 Cesium 航向 = 罗盘航向 − 90°，俯仰抬头为正，右坡度
+  为正；Fly、起始位置预览、Optimize 的回放都改用它（`compassFromPsiDeg` 把模拟器的数学航向换成罗盘），方向与原来逐位相同
+  （审查核对过）；`aircraftOrientation.test.ts` 钉住机头、俯仰与右坡度的符号。
+- 试导出（2026-09-30，KRDU，只用 CPU，写在临时目录，不碰 `public/data`）：真实句子集合与执行器回放除 `attitude` 外与已发布的
+  逐字节相同；观测坡度中位 0.4°、p95 19.8°、最大 35.9°，40 架里 4 架没有机体；`check-publication` 0 错误。
+
+### AV41 · a prediction that passed on another runway has its own status and colour (2026-09-30)
+
+(Numbered AV40 when written by the generation-grading session the same day, beside the failure-red AV40; renumbered
+2026-09-30 so each ID names one entry.)
+
+The two-tier generation records (ts runner R35) are graded against the OBSERVED flight's runway; the grading (R38) grades
+every sentence that crossed another runway again on that runway. The publisher hands that grading's evaluation report to
+`build_scenario_comparison_czml.py --landed-runway-report`: such a flight takes the landed-runway verdict and its
+deviations; passing there is **status `otherRunway`**, failing there `offTarget`; its index record names `landedRunway` and
+`observedRunwayVerdict`. The frontend paints `otherRunway` in `PREDICTION_OTHER_RUNWAY_COLOR` (light sky blue
+`rgb(110, 200, 235)`) — never the same-runway pass green, on the user's word — for both prediction halves (the lookback
+faded, as AV16), names it in the legend ("Prediction pass on another runway") and in the flight list
+(`flight-table-otherrunway`, its title naming the landed runway). `isComparisonGroup` accepts the status; an index with an
+unknown status is still refused whole (and `otherRunway` without a `landedRunway`), so **the frontend must know a
+status before any index carries it**. The category's evaluation report, its `evaluation` block and the Details window
+stay graded on the OBSERVED flight's runway; the summary's terminal-compliance section counts the `otherRunway` flights
+apart ("not counted as a pass below"), and the builder refuses a landed verdict that is not a solved pass / fail /
+indeterminate on another runway.
+
+
+### AV43 · 四个任务：Evaluation、Training、Fly、Optimize；Compare 并进 Fly（2026-10-01）
+
+- 用户（2026-10-01）：Observe 这个名字不对，改叫 **Evaluation**；它里面的 Baseline 改叫 **Ground Truth**；Compare 并进 Fly，
+  要系统地改。顶栏的任务从五个变成四个：`WorkbenchMode` = `evaluation | training | fly | optimize`。
+- **Ground Truth** 就是观测到的 ADS-B 航迹本身。结果来源下拉框里它的值是 `groundTruth`（`TrajectoryResultSource`），筛选框叫
+  "Ground Truth verdict"，评估块的标题是 "Ground Truth Evaluation"（详情窗口 "Ground Truth Evaluation Report"）。
+  已发布数据里的字段名不改：比较索引 `rawKinematics.observedBaseline` 是 Python 构建器写的契约，改名要重新发布。
+- 同日用户又把 Training 这个模块改名 **Learning**——只改模块的名字（顶栏标签、左栏标题），里面讲的仍是模型的训练（集合、轮次、
+  "Training details"），所以模式名 `training`、代码和数据格式里的 training 都不改。随后 Evaluation 的标签也只改名为 **Evaluate**
+  （模式名 `evaluation`、"Ground Truth Evaluation" 等摘要不变）。同日用户定了顶栏顺序：**Fly ‖ Optimize · Learning · Evaluate
+  ‖ Procedures**——任务分组（`TASK_GROUPS`），每组（第一组除外）和 Procedures 开关前面空一格，同一条
+  `.workbench-task-group-start` 规则。
+- Fly / Optimize 面板的文字颜色定在 `.pilot-panel` 根上（`#e0e6f0`，同 `.training-panel`），三种行（设置、步进、选项）的字段名
+  一条规则 `#cbd5e1`：原来 Controls 的标签没有自己的颜色，继承了页面默认的深色，压在深色左栏上看不见。
+- **`PilotPanel` 直接拿工作台的任务当模式**（`mode: "fly" | "optimize"`，必填）；面板自己的标签行、`onRequestMode` 和左栏的
+  两张映射表都删了。
+- **Fly 是一架飞机、一套操纵量、两种飞法**：同一个起点（Edit 设定，或 RNAV 跑道的公布 RNAV 点）和同一套操纵量（坡度、载荷
+  因数或迎角、推力，`PanelControls` = `Required<PilotControls>`，两种参数化的字段都在），
+  1. **Live flight**：Start / Pause / Reset / End，键盘实时改操纵量（原来的 Fly）；
+  2. **Compare dynamics**：把这套操纵量**固定住**飞一段时长，四种动力学写法各飞一遍比漂移（原来的 Compare）。四种写法共用
+     载荷因数参数化，所以 Simulation 选 Alpha 时 Compute 不可用，面板写明原因。Compare 原来自己的推力/坡度/载荷因数输入框删了；
+     坡度范围统一为 ±45°（原 Compare 是 ±60°）。
+- **两种飞法轮流占屏幕**：Compute 结束实时飞行（`stopPilot`）；Start / Reset 清掉比较结果。改任何操纵量或 Simulation 都会清掉
+  已算好的比较（`changeControls` 是用户改操纵量的唯一入口）——那次比较飞的是改之前的操纵量；被清掉的只是这次的结果和它的图，
+  历史平均图不受影响。后端请求进行中（Compute、Start、Reset，`isBusy`）操纵量和 Simulation 都锁住，回来的结果一定对应屏幕上的
+  操纵量。
+- **两份状态，不混用**：`liveSnapshot` 是后端实时模拟的状态，`playbackSnapshot` 是 CZML 回放（Optimize 的、Fly 的比较）按时钟
+  采样的状态；屏幕上读数用的 `snapshot` = Fly 且没有载入比较时取前者，否则取后者。所以去 Optimize 播一次再回来，暂停着的实时
+  飞行仍是"Resume / Paused"、飞机还在；Start 只在实时会话还在时（`isEnabled`）才接着飞。
+- **回放卸载时停掉它驱动的时钟**（`useDynamicsComparisonPlayback` / `useOptimizedTrajectoryPlayback` 的清理里
+  `shouldAnimate = false`）：否则正在播的比较被 Start、改操纵量或换任务卸掉后，时钟还在空转（浏览器核对时发现）。
+- **RNAV 跑道是面板唯一的一条跑道**：Fly 用它列出可选的起点 RNAV 点，Optimize 用它作目标跑道——一架飞机一套设定，所以在 Fly
+  换跑道也会换掉 Optimize 的目标并清掉已算的优化结果。RNAV 点按跑道读取（`rnavFixes`），与当前任务无关：在 Fly 选的起点 RNAV
+  点切到 Optimize 后仍在；Optimize 下这条跑道没有 RNAV 点时的提示在渲染时推出来，不走 `setError`。
+- **底栏**：实时飞行在屏幕上时，`PilotPanel` 发布 `pilotTransport`，底栏驱动模拟循环；比较已载入时撤回（`null`），底栏驱动
+  Cesium 时钟（比较是时钟回放）。后端的比较 worker 在 Fly 打开期间常驻（`openWorkerSession("comparison")`），Optimize 期间是
+  优化器的。
+- 底栏的实时传输在 `useLayoutEffect` 里发布：进入 Fly 的第一帧就是模拟按钮，不会先闪一帧时钟按钮。
+- 测试：`PilotPanel.test.tsx` 新增六条（比较飞的是面板自己的操纵量、Alpha 下不可用、改操纵量清掉结果；两种飞法的交接与底栏；
+  暂停的实时飞行跨 Optimize 保持；Optimize 回放后 Start 重新开始；Fly 选的 RNAV 点切到 Optimize 仍在；Compute 期间锁住操纵量、
+  改 Simulation 清掉比较），`WorkbenchBottomBar.test.tsx` 的 Fly 无传输用例改成"驱动时钟"。

@@ -1,6 +1,8 @@
 """Tests for the scenario-comparison CZML builder (single + per-runway batch)."""
 
 import json
+
+import pytest
 from pathlib import Path
 
 import build_scenario_comparison_czml as comparison_builder
@@ -1273,3 +1275,54 @@ def test_czml_precision_mirrors_the_record_contract():
     assert (comparison_builder._DEG_DECIMALS
             == STATE_DECIMALS["lat"] == STATE_DECIMALS["lon"])
     assert comparison_builder._ALT_DECIMALS == STATE_DECIMALS["alt"]
+
+
+def test_a_flight_graded_on_the_runway_it_landed_on_takes_that_verdict(tmp_path):
+    # The two-tier generation records' grading (ts runner R38): a sentence that landed on another runway than the
+    # observed flight's is graded again there. Passing there is its own status, `otherRunway` (drawn in its own
+    # colour), and the record names both runways' verdicts; failing there is plain offTarget; a flight not graded
+    # again keeps the category's verdict.
+    for flight in ("AFR074", "DAL1312", "UPS22"):
+        (tmp_path / f"{flight}_05L_states.json").write_text(json.dumps(PREDICTION_STATE_DATA), encoding="utf-8")
+    results = [{"id": flight, "runway": "05L", "status": "solved", "states_file": f"{flight}_05L_states.json",
+                "eval_file": f"{flight}_05L_eval.json"} for flight in ("AFR074", "DAL1312", "UPS22")]
+    verdicts = load_verdicts({"trajectories": [
+        {"file": f"{flight}_05L_eval.json", "solved": True, "verdict": verdict, "lateral_m": 1400.0,
+         "vertical_m": 3.0} for flight, verdict in (("AFR074", "fail"), ("DAL1312", "fail"), ("UPS22", "pass"))]})
+    landed = load_verdicts({"trajectories": [
+        {"file": "AFR074_05L_eval.json", "runway": "05R", "solved": True, "verdict": "pass", "lateral_m": 2.5,
+         "vertical_m": 1.0},
+        {"file": "DAL1312_05L_eval.json", "runway": "05R", "solved": True, "verdict": "fail", "lateral_m": 30.0,
+         "vertical_m": 1.0}]})
+    _czml, index = build_runway_comparison(results, tmp_path, ARRIVAL_WINDOW_CZML, airport="KRDU",
+                                           verdicts=verdicts, landed_verdicts=landed)
+    by_flight = {record["flightId"]: record for record in index}
+    assert by_flight["AFR074"]["status"] == "otherRunway"
+    assert (by_flight["AFR074"]["landedRunway"], by_flight["AFR074"]["observedRunwayVerdict"]) == ("05R", "fail")
+    assert (by_flight["AFR074"]["terminalVerdict"], by_flight["AFR074"]["lateralErrM"]) == ("pass", 2.5)
+    assert by_flight["DAL1312"]["status"] == "offTarget" and by_flight["DAL1312"]["landedRunway"] == "05R"
+    assert by_flight["UPS22"]["status"] == "solved" and "landedRunway" not in by_flight["UPS22"]
+
+
+def test_a_landed_runway_verdict_that_is_not_another_runways_graded_verdict_is_refused(tmp_path):
+    (tmp_path / "AFR074_05L_states.json").write_text(json.dumps(PREDICTION_STATE_DATA), encoding="utf-8")
+    results = [{"id": "AFR074", "runway": "05L", "status": "solved", "states_file": "AFR074_05L_states.json",
+                "eval_file": "AFR074_05L_eval.json"}]
+    verdicts = load_verdicts({"trajectories": [{"file": "AFR074_05L_eval.json", "solved": True, "verdict": "fail"}]})
+    for landed in ({"runway": "05R", "solved": False, "verdict": "fail"},      # unsolved: never "passed there"
+                   {"runway": "05R", "solved": True, "verdict": None},         # no verdict
+                   {"runway": "05L", "solved": True, "verdict": "pass"}):      # its own runway is not another
+        with pytest.raises(ValueError, match="not one of another runway's graded verdicts"):
+            build_runway_comparison(results, tmp_path, ARRIVAL_WINDOW_CZML, airport="KRDU", verdicts=verdicts,
+                                    landed_verdicts={"AFR074_05L_eval.json": {"file": "AFR074_05L_eval.json", **landed}})
+
+
+def test_a_landed_runway_report_grading_a_flight_the_category_lacks_is_refused(tmp_path):
+    summary = {"results": [], "split": "val"}
+    with pytest.raises(ValueError, match="grades flights the category does not hold"):
+        comparison_builder.publish_comparison_batch(
+            summary=summary, states_dir=tmp_path, out_dir=tmp_path / "out", airport="KRDU", category=None,
+            start_hidden=True, scenario_initial=None, evaluation_report={"trajectories": []},
+            landed_runway_report={"trajectories": [{"file": "X_05L_eval.json", "runway": "05R", "solved": True,
+                                                    "verdict": "pass"}]})
+

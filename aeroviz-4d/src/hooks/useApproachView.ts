@@ -309,7 +309,7 @@ export function useApproachView(): ApproachViewState {
 
   const aircraftTracks = useMemo<ApproachViewTrack[]>(() => {
     // Sample only the sources that are the CURRENT tab's globe content (sourceSelection):
-    // the observed ADS-B tracks in Observe, the optimized playback in Optimize. This is
+    // the observed ADS-B tracks in Evaluation, the optimized playback in Optimize. This is
     // what keeps the approach view in step with the active task — the observed tracks stay
     // loaded behind an approach view opened in another tab, but are NOT plotted there.
     const sources = [

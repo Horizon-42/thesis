@@ -35,7 +35,7 @@ from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.runway_data import VerticalPath, published_vertical_paths
 from ts_transformer.autopilot.sentence import DistanceClock, Sentences, TimeClock, TrackClock
-from ts_transformer.autopilot.spec import load_spec, require_current_executor
+from ts_transformer.autopilot.spec import load_spec, require_conforming_executor
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
 from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.instructions import artefact
@@ -67,11 +67,18 @@ class Batch:
 
 
 def open_executor(executor_dir: Path, instructions_dir: Path) -> tuple[ExecutorParams, dict[str, Any], Words]:
-    """An executor spec and the instruction artefact it flies, refused unless the spec was measured by this
-    executor code against this artefact's vocabulary, and the artefact's labeller is this code (the judge
-    reads with it)."""
+    """An executor spec and the instruction artefact it flies (`open_spec`), refused unless the executor code on disk
+    flies the spec's reference tracks within the bounds (`spec.require_conforming_executor`, executor design §12.3)."""
+    opened = open_spec(executor_dir, instructions_dir)
+    require_conforming_executor(executor_dir)
+    return opened
+
+
+def open_spec(executor_dir: Path, instructions_dir: Path) -> tuple[ExecutorParams, dict[str, Any], Words]:
+    """An executor spec and the instruction artefact it flies, refused unless the spec was measured against this
+    artefact's vocabulary and the artefact's labeller is this code (the judge reads with it) — whatever executor code is
+    on disk: what flies the spec's reference tracks again (`autopilot.conformance`) opens it so."""
     params, record = load_spec(executor_dir)
-    require_current_executor(record)
     spec = artefact.load_spec(instructions_dir)
     if record["vocabulary_spec_sha256"] != spec.sha256:
         raise ValueError(f"the executor spec was measured against vocabulary {record['vocabulary_spec_sha256'][:12]}, "

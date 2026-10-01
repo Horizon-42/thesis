@@ -253,7 +253,7 @@ describe("EvaluationReportWindow", () => {
     expect(legacyHeaders).not.toContain("V crossing (m/s)");
   });
 
-  it("shows the graded ground-speed proxy for observed baselines, card included", () => {
+  it("shows the graded ground-speed proxy for ground-truth tracks, card included", () => {
     const observedSpeeds: EvaluationReport = {
       ...REPORT,
       subject: "observed",
@@ -272,13 +272,13 @@ describe("EvaluationReportWindow", () => {
     render(
       <EvaluationReportWindow
         report={observedSpeeds}
-        title="Observed Baseline Evaluation Report"
+        title="Ground Truth Evaluation Report"
         subtitle="x"
         onClose={vi.fn()}
       />,
     );
 
-    // The baseline is speed-graded now: the card is a real pass rate.
+    // Ground truth is speed-graded now: the card is a real pass rate.
     expect(screen.getByText("speed gate pass 100.0% · 1 ungraded")).toBeTruthy();
     // Aggregate row from the batch spread, explicitly labeled as ground speed.
     const aggregates = screen.getByRole("table", { name: /Aggregates/ });
@@ -323,7 +323,7 @@ describe("EvaluationReportWindow", () => {
     render(
       <EvaluationReportWindow
         report={withWind}
-        title="Observed Baseline Evaluation Report"
+        title="Ground Truth Evaluation Report"
         subtitle="x"
         onClose={() => undefined}
       />,
@@ -567,7 +567,7 @@ describe("EvaluationReportWindow", () => {
     render(
       <EvaluationReportWindow
         report={observed}
-        title="Observed Baseline Evaluation Report"
+        title="Ground Truth Evaluation Report"
         subtitle="KRDU"
         onClose={vi.fn()}
       />,
@@ -576,7 +576,7 @@ describe("EvaluationReportWindow", () => {
     expect(screen.getByText(/2 solved flights excluded from deviation charts/i).textContent)
       .toContain("1 not measured; 1 invalid/non-finite");
 
-    // Observed baselines are speed-graded (ground-speed proxy), so the card shows
+    // Ground-truth tracks are speed-graded (ground-speed proxy), so the card shows
     // for them too, and the per-row speed column carries the results.
     expect(screen.getByText(/speed gate pass/)).toBeTruthy();
     const verdictHeaders = Array.from(

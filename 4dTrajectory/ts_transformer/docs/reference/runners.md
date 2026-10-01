@@ -259,16 +259,21 @@ existing directory. Tests: `tests/test_autopilot.py` (every write into `tmp_path
 2026-09-24 (`aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §2.6, §4.6; the frontend side: `aeroviz-4d/docs/35-viewer-reference.md`
 AV24–AV25). Two runners write OVERLAYS beside a Training set (R11), never into it: a file of their own schema under
 `<root>/<ICAO>/training/<overlay-id>/`, listed in the airport's `training/overlays.json` (`OVERLAYS_SCHEMA`
-`aeroviz-training-overlays-v1`, one entry per overlay: its kind, the set it is drawn over, that set's sample sha256, the
-file). The index (`aeroviz-training-index-v1`) is not touched. The shared helpers live in `instructions/training_files.py`
-(`open_base_set`: the set must be a read-back of this reading rule and spec under this `SAMPLE_SCHEMA`, drawn from val;
+`aeroviz-training-overlays-v2`, one entry per overlay: its kind, the set it is drawn over, the file). The index
+(`aeroviz-training-index-v1`) is not touched. The shared helpers live in `instructions/training_files.py`
+(`open_base_set`: the set must be a read-back of this reading rule and spec under this `SAMPLE_SCHEMA`, drawn from val, its
+candidates and airport frame the exporter's own artefact's; `BaseSet.block`: what the payload records of its set — the set
+id, spec, `candidatesSha256` and `airportFrame`, never the sample file's sha256 or time of writing (2026-09-28: a set
+exported again with the same flights keeps its overlays; the frontend binds by these and flight by flight);
 `base_flights`: each of its flights found in the artefact, its stored sentence equal to the set's events;
+`require_set_datum`: an exporter that draws heights adds each flight's own HAE − MSL, the set's to `DATUM_TOLERANCE_M`;
 `read_overlays` / `write_overlay`: an id listed or a directory existing is refused; the payload is written compact).
 Every airport is built before any is written.
 
 `executor_training_export --executor <spec dir> --replay <spec dir>/replay-val --instructions <artefact>
 --airports-root <…/public/data/airports> --set instruction_v3 --airport ICAO [--airport …] [--overlay-id
-executor_<spec dir name>] [--device cpu]` (schema `aeroviz-training-executor-v3` since executor v11, 2026-09-27: a crossing names the runway crossed, and the outcomes `crossed_too_high` and `crossed_other_runway`; v2 since 2026-09-24, `instruction-v3`;
+executor_<spec dir name>] [--device cpu]` (schema `aeroviz-training-executor-v4` since 2026-09-28, the content binding; v3
+since executor v11, 2026-09-27: a crossing names the runway crossed, and the outcomes `crossed_too_high` and `crossed_other_runway`; v2 since 2026-09-24, `instruction-v3`;
 the replay `ts-executor-replay-v3`): opens the spec with
 `replay.open_executor` (refused unless this executor code measured it), rebuilds the set's flights, flies those the
 replay flies (own and stand-in dynamics) in one batch per airport and judges them. `replay.json` keeps each flight's
@@ -293,7 +298,7 @@ refused (`docs/code-health-followups.md`, 2026-09-24). ~7 s per airport of 40 fl
 `prior_generation_training_export --prior <prior dir, or one round of a post-training run> --instructions <artefact>
 --executor <spec dir> [--readout <its val free generation>] --airports-root … --set <a read-back set> --airport ICAO
 [--airport …] [--samples 4] [--temperature 1.0] [--seed 1337] [--overlay-id generation_<name>[_r<NN>]_<sha256, 8 digits>]`
-(2026-09-26, schema `aeroviz-training-generation-v3` since executor v11, 2026-09-27 — a crossing names the runway crossed, two more outcomes; v2 since the models were named on 2026-09-26 — v1 carried a free `--label`;
+(2026-09-26, schema `aeroviz-training-generation-v4` since 2026-09-28, the content binding; v3 since executor v11, 2026-09-27 — a crossing names the runway crossed, two more outcomes; v2 since the models were named on 2026-09-26 — v1 carried a free `--label`;
 kind `prior-generation`; the frontend side AV31, AV32): the model's OWN sentences over the set's
 flights — `prior_free_generation.speak_and_fly` on the flights its val readout flies (own dynamics; the rest listed with their
 group), `--samples` each, one CPU generator seeded once and drawn in the order the airports are named (so a re-run is
@@ -329,7 +334,7 @@ stage 2's own code (`prior_free_generation.augmented_starts` / `augmented_inputs
 plausible within the train split's 1st–99th percentile start altitude, ≤ `AUGMENT_TRIES` draws), one move a flyable flight
 drawn from `np.random.default_rng(N)` afresh at each airport in the set's order (apart from the samples' torch generator, so
 every model exported with one seed flies each flight from the same moved start), time limit × `augment.TIMEOUT_FACTOR`;
-written as kind `prior-generation-augmented`, schema `aeroviz-training-augmented-generation-v1` (the v3 kind untouched): no
+written as kind `prior-generation-augmented`, schema `aeroviz-training-augmented-generation-v2` (v2: the content binding): no
 `readout` (refused with `--readout`), `generation.augment` = the draw's rule, per flight `augmentDraws` (null: not drawn, not
 on its own dynamics), `augmentation` (null: no plausible draw — not flown) and `observed` (the moved rows 0 … `N_LOOK` − 1);
 default id `generation_augstart_<name>[_r<NN>]_<sha8>`; the move is written unrounded (the live backend re-flies from it).
@@ -338,8 +343,8 @@ draws other samples than cpu — the executor always on CPU (the live backend re
 `producedBy.device`.
 
 `prior_training_export --prior <prior dir> --instructions <artefact> --airports-root … --set instruction_v3 --airport
-ICAO [--airport …] [--overlay-id prior_<prior dir name>]` (schema `aeroviz-training-prior-v3` since the prior's third
-version: the per-step arrays cover the predicted steps only, from `firstPredictedRow` = `N_LOOK`; null change metrics for a
+ICAO [--airport …] [--overlay-id prior_<prior dir name>]` (schema `aeroviz-training-prior-v4` since 2026-09-28, the content binding; v3 since the prior's
+third version: the per-step arrays cover the predicted steps only, from `firstPredictedRow` = `N_LOOK`; null change metrics for a
 column that never changes after the first step; the first-step runway beside the airport frequency and the rules — older
 names are refused): the checkpoint is refused unless `prior_train.load_prior` opens it on the artefact (spec, labeller,
 day split, candidate table, a whole state), it is not a smoke run and — for a variant that reads the landing context —
@@ -704,3 +709,473 @@ A readout only (design §9 item 12). Writes `interaction.json` (`ts-traffic-inte
 minute on the GPU. Formal: `outputs/POOLED/traffic/interaction_20260928/` (`cba749cc`, base): speed words with a leader
 +0.0077 NLL per step (0.0035–0.0122), heading words when busy +0.0104, clearances with a leader −0.0082; KSJC and KSMF the
 most, KMSY and KRDU about none.
+
+### R29 · `run_ts.py traffic_prior_train` — multi-aircraft M2: the scene prior "scene", base's recipe on scene samples with edge features (design §6.1, §6.5)
+
+2026-09-28. `traffic_prior_train --variant full --instructions <artefact> --out <new dir> [--device] [--limit N]
+[TrainConfig flags]`. Base's network and training configuration (`PriorConfig` / `TrainConfig` defaults) teacher-forced on
+the training days' scene samples (`experiments/traffic_scene_data.build_split`: every flight of the split in its segment,
+a flight the labeller refused as background with the words "none", segments cut by design §2.3's rule), each aircraft at
+its own rows, with the 17 edge features of `inference/scene_edges.py` computed as each batch is formed; early stopping
+on the val days as base. The loss is per aircraft-step asked — the same cells as base's (the loss windows partition each
+flight's asked rows), so the val NLL per step reads against base's 0.2643.
+
+- **Motion in the edges** is each row's displacement since its row before (the prior's own node convention), never the
+  signals' fitted velocities (centred fits, 7.5 s of the future; the step 3–4 review, 2026-09-28): a first row has none
+  (`motion_unknown`), an aircraft that did not move has no frame (89 of 12.1 million row pairs).
+- **Batches**: at most 16,384 padded aircraft-steps, samples of similar size together: 1,976 batches per epoch on the
+  training days against base's 531 (a scene sample also holds background, context before the cut and padding). Since
+  2026-09-28 (design §6.5 step 6, §9 item 21) `--accumulate` (default 4) sums the gradients of 4 batches per update, the
+  loss per aircraft-step asked over all of them: 494 updates of about 16,700 asked steps per epoch against base's 531 of
+  about 15,600; the warm-up counts updates. The first formal run (`scene_s1337`) updated after every batch.
+  `history.json` records each epoch's batches, updates and asked steps.
+- **Memory**: each flight's rows are held once and laid out per batch (`prior.scene_data.placed`): 4.0 GB peak to build
+  the training days (13 GB when every sample held dense arrays).
+- **Pinned edge semantics**: the checkpoint (`ts-prior-checkpoint-v4`) carries `edge_features` and `edge_source_sha256`
+  (`traffic_scene_data.EDGE_SOURCES`' logic + the CWT tables' bytes); `load_prior` refuses a scene prior whose hash is not
+  today's — a code change in any of those files, the scheduler in `runway_schedule` included, refuses every scene prior.
+- Writes `checkpoint.pt`, `config.json`, `procedure_masks.json` (none: teacher forcing) and `history.json` into a NEW
+  directory, from a clean tree unless `--limit` (SMOKE: the first N samples of each split). Train 15,812 samples (45
+  asking nothing, left out), val 3,800; 423 s per epoch on the RTX 4060.
+- Formal: `outputs/POOLED/prior/m2_scene_20260928/scene_s1337` (`17719c20`, clean, an update after every batch): best at
+  epoch 14 of 17, val 0.2681 per step against base's 0.2643 (its second seed 0.2644); 2.0 h. `scene_acc4_s1337`
+  (`a7abbe86`, clean, `--accumulate 4`): best at epoch 19 of 22, val 0.2667; 2.6 h. Both read by R30.
+
+### R30 · `run_ts.py traffic_scene_readout` — multi-aircraft M2's readout: what the scene prior gains from seeing traffic (design §6.1, §7)
+
+2026-09-28. `traffic_scene_readout --scene <scene prior> --base <base prior> --instructions <artefact> --out <new dir>
+[--device]`. On the select days every labelled flight's asked cells are read three ways, teacher-forced: **base**
+(single aircraft), **scene** (in its scene samples, with edge features) and **alone** (the scene prior with each aircraft
+in a sample of its own: the attention between aircraft cut). Refused unless the scene samples ask exactly base's cells,
+each once, and the two priors read the same artefact, variant, airports and tracks rosters (and the scene prior's edge
+code is today's, `load_prior`). Records, pooled (strata airport × phase) and per airport: each reading's NLL per step
+over every asked cell (the training runners' measure); per read column (speed, heading, clearance) and M1's flags
+(leader, busy), from row N_LOOK + 1, the paired means of scene − base, scene − alone and KL(scene ‖ alone) on the
+flagged and the other steps, each with a 95 % interval from 200 airport × UTC-hour cluster resamples (resamples without
+a step counted); and for every reading and paired quantity M1's matched gap (flagged less the others within phase
+strata). Every quantity is drawn with the same resamples — a generator of its own, airport by airport then the pool, as
+M1 drew — so base's matched gap reproduces M1's `interaction_20260928` to the bit, intervals included (tested). A smoke
+prior is read and recorded as one. A readout only (design §6.1: recorded; a leader-step gain within seed noise asks for
+a second seed). Writes `scene_readout.json` (`ts-traffic-scene-readout-v1`); about a minute on the GPU. Formal:
+`outputs/POOLED/traffic/scene_readout_20260928/` (`31814869`): the scene prior is better than base nowhere — 0.2880 per
+step against 0.2839 (alone 0.2872), speed with a leader +0.0008, heading +0.0020; M1's gap stays (speed · leader +0.0080
+against base's +0.0077); cutting the attention between aircraft barely moves its words (KL ≤ 0.008).
+`scene_readout_acc4_20260928/` (`a7abbe86`, the `--accumulate 4` prior): 0.2868 (alone 0.2867), speed with a leader
++0.0005, heading +0.0013, M1's gap +0.0079 — the batch size explains part of the overall gap, the traffic is still
+unused. Readout `docs/two_tier/readouts/2026-09-28_m2_scene_prior.zh.md` §2, §5.
+
+### R31 · `run_ts.py traffic_free_generation` — multi-aircraft M3: the post-training's start speaking to one aircraft of each scene (design §6.1, §6.6 step 4)
+
+2026-09-28. `traffic_free_generation --prior <single-aircraft prior (augmented)> --executor <spec> --instructions <artefact>
+--split select --out <new dir> [--per-airport 400] [--samples 4] [--aircraft-steps 300000] [--augment-seed N] [--device]`. The start of M4: the prior with a
+traffic attention at zero (`prior.model.with_traffic`, C37 — it answers as the prior does, to rounding) speaking in the
+closed loop of `experiments/traffic_speaking.py` ("one aircraft commanded": its scene's other flights replayed, the edge
+features of the steps encoded and the two separation masks computed each step and handed to `prior.scene_speaker.
+SceneSpeaker`, the speaking aircraft judged afterwards from its first predicted step by `traffic_loop.Loop`; an other in the
+air more than 20 min before is read from there, counted). Each drawn flight read four ways, all judged the same way in its
+scene (VISUAL ends it, IFR beside): **scene** (the model, `--samples` times), **alone** (the same model with no other in its
+scene — the prior's single-aircraft free generation — judged against the scene: how much separation comes for free),
+**labelled** (its labelled words flown), **recorded** (its record). Per source, pooled and per airport: outcomes with
+`lost_separation`, loss episodes per flight and per hour flown, relations; for the model's sources, the share of steps the
+separation masks took a word away (recorded by the loop) and the probability on what the masks removed. The procedure's
+masks are the prior's own. A flight already in a loss it answers for at its first predicted step is counted and left out.
+Batches are bounded by `--aircraft-steps` (scenes × their most aircraft × (longest pre-roll + rows)); the pre-roll is
+encoded 64 steps at a time (`scene_speaker.BLOCK_STEPS`); each batch's rows are appended to `flights.jsonl` as it ends, and
+each batch's loop is closed (`SceneLoop.close`: the loop and its speaker hold each other, and the first formal run ran out of
+memory at 476 / 2,000 flights before it — kept as `free_generation_20260928.aborted-20260928T1330Z`). Writes
+`free_generation.json` (`ts-traffic-free-generation-v1`).
+
+**`--augment-seed`** (§6.6 step 5, `experiments/traffic_augment.py`): every flight's scene augmented one of three ways, a
+third each — **D** the leader (by landing order, same runway or a pair separated as one) moved whole by U[−60, 60] s, **B**
+the speaking flight's start moved as stage 2 moves it (the only kind with stage 2's × 2.0 time limit), **A** a flight with a
+sentence inserted `g` × the required gap before the speaking one on the approach clock (`g` ~ U[0.5, 2]; same runway, single
+pair, dependent parallel only) — drawn until no loss it answers for through its observed rows (judged not established),
+at most 10 draws, else left out and counted; the speaking flight's landing context is the scene's. Read as scene and alone
+only (a moved start has no record).
+
+**Formal** (2026-09-28, `a0c31f3c`, `outputs/POOLED/traffic/free_generation_20260928/`, select, 400 per airport × 4,
+79 min; readout `docs/two_tier/readouts/2026-09-28_m3_free_generation.zh.md`): lost separation under VISUAL — scene 11.5 %
+(IFR 13.2 %), alone 12.3 %, labelled 4.9 %, recorded 2.6 %; landed 84.9 / 84.2 / 94.9 / 97.4 %. Vectored 21.6 % against
+straight-in 4.0 %; a vectored landing is −111 s / +121 s (p10 / p90) off the record's time against the labelled words'
+−36 s / +21 s. The masks acted on 2.7 % (approach) and 1.05 % (speed) of the steps. 8 scene / alone samples (2 flights)
+started in a loss. The augmented run: `free_generation_aug_20260928/` (augment seed 7919, `de9a539a`; B 815, A 839,
+D 346, none left out).
+
+### R32 · `run_ts.py traffic_reward` — multi-aircraft M4: the traffic post-training (design §6.2, §6.6 step 6)
+
+2026-09-28. `traffic_reward --prior <augmented> --base <base> --instructions <artefact> --executor <spec> --out <new dir>
+[--rounds 8] [--resume] [--speakers 4] [--real-per-airport 200] [--augmented-per-airport 200] [--samples 8] [--select-per-airport 200]
+[--select-samples 2] [--traffic-learning-rate 3e-4] [--aircraft-steps 100000] [--seed 1337] [--device] [--smoke]` plus
+`RewardConfig`'s flags (stage 2's recipe). The start is `with_traffic(augmented)` (C37: augmented's answers to rounding).
+Each round: a pool of 1.25 × 400 training-day flights per airport (the round's seed); the first 200 speak in their real
+scenes, the rest in pool order in augmented ones (`traffic_augment`, D / B / A) until 200 qualify (refused when an airport
+runs short); each scene spoken to 8 times in the scene loop (`traffic_free_generation.scene_sentences`: the start's
+procedure's masks and the two separation masks), judged under VISUAL, each sentence kept to its judged end; reward 1 =
+landed in the landing direction (the scene's landings) with no loss ending it first; advantages per scene; a scene
+starting in a loss it answers for, or whose sentences agree, is not trained on. One pass (`traffic_tuner.SceneRewardTuner`):
+stage 2's loss with each sentence scored in its scene by the speaker's own layout and edge code
+(`scene_speaker.scene_inputs`, `traffic_speaking.speaking_edges` — the start's distribution is the sampling one, tested
+with a traffic attention that reads the others and the others off the steps), base scoring the aircraft alone, the data
+term on M2's scene samples of the training days (2 of M2's batches an update, ≈ stage 2's asked steps), the traffic
+attention at 3e-4, the rest at 1e-5; a batch (stage 2's grouping, its own rows) is scored in parts of ≤ 16,384 padded
+aircraft-steps with the gradients summed. The loop reads each step's edge features from two steps back (an other off the
+step is carried forward at its row-before's motion; one step back read it "unknown" — the review of step 6). Select
+readouts every round (round 0 = the start): 200 select flights per airport × 2 in their real scenes and one fixed
+augmentation each (seed + 7919); the teacher-forced NLL on the select scene samples and the traffic attention's output
+over the residual stream per layer; the select flights' record once. Guards and choice: design §6.6 step 6 item 8 (the
+start is checked against the ordering guards before training and refused if it fails them). Writes `config.json`,
+`round_00/readout.json`, `round_<k>/{sentences.npz, sentences.json, checkpoint.pt (v5, with its start), config.json,
+procedure_masks.json, readout.json}`, `history.json`, `choice.json`. The training days are built once (≈ 4.4 GB host
+memory, the loop's scenes and the data term's samples share each flight's rows). The pass scores in parts sized by the
+GPU memory measured (`traffic_tuner.PAIR_COST`, `SCORE_BUDGET`: 64 KB an aircraft-step + 8 KB a pair-step with the
+layers recomputed in the backward — `Prior.encode(checkpoint=True)`; kept, 145 KB + 31 KB, and the first GPU smoke ran
+out of memory). GPU smoke (1 round, 20 + 20 scenes an airport × 8, select 20 × 2; `4d2c9c77`…`f3a8f4eb`): 24 min, host
+peak 7.5 GB, GPU peak 4.0 GB; 1,600 training sentences in 13 min, the pass over 680 (18 updates) 72 s, a select
+readout of 400 sentences ≈ 4 min. At the formal size (16,000 + 4,000 sentences a round) about 2.5 h a round, about 21 h
+for round 0 and 8 rounds (the loop's batches are fuller at size: M3 spoke 8,000 scene sentences in about 45 min).
+
+**Round by round** (design §6.6 step 6 item 11, user 2026-09-28): `--rounds k` is the last round an invocation runs
+(0: round 0 alone) and `--resume` continues the run at `--out` from its last finished round. Every stream a round draws
+from is its own — the pool (seed + round), the augmentations ([seed, round]), the sentences said and the pass's batches and
+data ([seed, round, 1 / 2]) — and each round saves `optimiser.pt` (AdamW's moments, the warm-up's step) beside its v5
+checkpoint, so rounds run one per invocation are the computation of one invocation (bit for bit on the CPU, tested on the
+pass; on the GPU the same streams, the kernels' sums differing at rounding as between any two runs). A resume is refused
+when `config.json` differs apart from `written_utc`, `rounds`, `resumed` (the git commit and the device are in it: run
+from a checkout fixed at one commit — a commit made in it under a run refuses the resume, the first resume smoke showed
+it), when a round did not finish (its directory without `readout.json`, written last — move it aside as
+`round_<k>.aborted-<UTC>`; a run that did not finish round 0 is started again) or when the start failed the ordering
+guards. `choice.json` is written over the rounds finished at the end of each invocation; `--resume --rounds <the last
+finished>` writes it alone.
+
+**In several processes** (design §6.6 step 6 items 12–13, 2026-09-29): the loop's Python ran on one core while the GPU
+waited (20–30 % busy). The sentences — a round's and the select readouts' — are spoken by `--speakers` processes
+(`Speakers`), forked once the data are built (the collector frozen first: the data stay shared) and before the parent
+starts the GPU; each rebuilds a training round from its number with the parent's own `train_round` (a scene holds its
+airport's whole data — rebuilt, not sent; the parent checks each process's round fingerprint) and speaks the loop batches
+its index deals it, each batch from its own stream (`batch_seed`), so the sentences do not depend on `--speakers` (tested:
+one and two processes = one process, bit for bit, on one thread; `--speakers` is not part of the run). The parent frees
+its GPU cache before every speaking, builds its round while the processes speak, and runs the pass, the distances and
+the teacher-forced readout; a speaking process that fails or is gone ends the run with what it said; the processes die
+with the parent. A speaking process's batch is 100,000 aircraft-steps (four within 8 GB); each process's GPU peak is
+logged beside the pass's. The loop's edge features are computed for all pairs at once and one airport's scenes in one
+call (`inference.scene_edges.scene_edge_blocks`), the separation masks share the others' state per scene and step
+(`traffic_speaking.others_at`) — identical to e76ca5ff on every select sample and on 20 real scenes spoken end to end.
+The edge code's hash moved with it (`038df9ab…` → new): the run begun at e76ca5ff (`m4_traffic_20260928`, paused after
+round 2 for the restart) was deleted on 2026-09-29.
+
+**Several passes and the paired choice** (design §6.6 step 6 item 14, §6.2, §9 items 27–28, 2026-09-29): `--passes N`
+sweeps a round's sentences N times (default 1, the first run's), each sweep a new order of batches from the round's pass
+stream, every one scored against the model frozen once at the round's start — the one the sentences were said by, so the
+clip bounds how far the sweeps go together (PPO's epochs); `passes` is part of the run, and the pass record carries each
+sweep's KL and share of words outside the clip (`sweeps`). The round kept: within the guards, a round beating round 0 on
+the augmented scenes by at least `TIE_STANDARD_ERRORS` = 2 paired standard errors (the select readouts speak the same
+draws every round: √(sentences whose reward flipped) / sentences, over the sentences both count — `paired_difference`,
+`select_rewards` from each round's `readout.json`), of those the highest and the earliest it does not beat by as much;
+none: round 0. `choice.json` carries each round's difference and standard error against round 0 (`against_round_0`).
+The first run (`m4_traffic_20260929`) was chosen by the old tie (0.015) and is not re-chosen.
+
+### R33 · `run_ts.py traffic_reward_readout` — multi-aircraft M4's readout, round by round (design §7)
+
+2026-09-29. `traffic_reward_readout --run <a finished, formal traffic_reward run> --reference <M3's real-scene free
+generation> --out <new dir>`. Reads only files: the run's `config.json`, `history.json`, `choice.json` (the run must be
+finished — every round it asked for, `config.rounds`, read and covered by both files; a smoke run is refused), each round's `readout.json` (the select flights) and
+`sentences.npz` (the training sentences); M3's `flights.jsonl` (`ts-traffic-free-generation-v1`, real select scenes, the
+run's executor sha256 and instruction artefact, named by its place under `4dTrajectory/outputs` so a path through a removed
+worktree still names it — refused otherwise, as is a flight/source row twice) for each real select
+flight's loss on its labelled words and along its record: every real select flight must have both, and M3's records over
+them must reproduce the run's own recorded reading (`config.select.recorded`) exactly. Per round: each side's reward, lost
+separation (VISUAL and IFR), landed and observed-runway shares (the run's numbers); lost separation by approach type
+(real) and by kind (augmented), over sentences, a sentence starting in a loss it answers for left out as the run's own
+separation readout does; sentences with a go-around; the traffic attention's output over the residual stream; from round 1
+the round's sentence summary and pass (traces left out) and where the reward term's signal comes from — each scene's `K`
+sentences in one of five classes per kind, each class's share of the summed |advantage|, and `differing_scenes` beside the
+run's `scenes_with_contrast` (the difference: scenes starting in a loss, not trained on, unmarked in the npz).
+**The select readout speaks the same random draws every round** (the select generator is seeded alike), so rounds are
+paired, not repeated tries (on the formal run 88 % of real (flight, sample) outcomes are the same in rounds 0–7): the
+readout gives that share, the paired change of lost separation from round 0 to the last (fixed, newly lost, net, standard
+error √(fixed + newly lost) / n), and in round 0 and the last round the flights grouped by how many of their samples lost
+separation, with each group's share of losses, of vectored approaches (real) and of the same flights' losses on their
+labelled words and along their records. A flight with a sentence starting in a loss in any round (the first step's runway
+word decides the runway it is judged against), or whose record or labelled reading starts in one, is left out of this part
+and counted. The last round is not necessarily the kept one (`choice.round`). Writes `traffic_reward_readout.json`.
+
+### R34 · `run_ts.py traffic_window_generation` — multi-aircraft M3's second pass: the post-training's start commanding every aircraft of a window (design §6.6 step 7 item 4)
+
+2026-09-30. `traffic_window_generation --prior <single-aircraft prior (augmented)> --executor <spec> --instructions
+<artefact> --split select --out <new dir> [--windows-per-airport 200] [--samples 4] [--aircraft-steps 100000] [--workers 6]
+[--augment-seed N] [--device] [--model-sources scene alone]`. `--model-sources` (2026-10-01): the model's sources to read —
+a pair of priors on the same windows needs only `scene`, half the model's time; each source reads from its own streams,
+so the rows of the source read do not change (tested both ways); the header names them (`model_sources`, schema v3).
+The windows (`experiments/traffic_window.py`, design §6.6 step 7 item 1): each airport's segments tiled by 20-minute windows
+opening every 10 minutes; a window commands its flights with a sentence entering in it that fly on their own dynamics, the
+rest replayed; drawn per airport in a seeded permutation of the tiles, a tile with no flight that flies passed over and
+counted. The loop (`WindowLoop`): the prior (`prior/window_speaker.py`) speaks to every commanded aircraft at once — one
+encoding a step, the words picked round by round from the front of the approach clock, a later round's separation masks
+reading an earlier round's words — the executors grouped by the step aircraft first speak at (the executor's cycle count is
+batch-wide; its code untouched), the judge run as it flies (`traffic_loop.Judging`): an aircraft ended there flies on
+silent, still in the scene (design §9 item 29); an own end the executor flies past (a stall, an uncaptured crossing,
+another runway's) is found as it happens with the runway in force; each commanded aircraft's landing context is its
+window's landings less the other commanded aircraft's recorded ones, theirs added as they land in the loop. With one
+commanded aircraft a window it says, flies and ends exactly as R31's loop (tests). Every commanded aircraft is read four
+ways, all judged in its window: **scene**, **alone** (each aircraft hearing no other, no separation mask, flown and judged
+together), **labelled**, **recorded** (the last two judged afterwards by `traffic_loop.Loop(keep_ended=True)`); IFR beside
+VISUAL as every source's paths judged again afterwards. Per source — pooled, per airport, per window size (1, 2, 3+
+commanded) — outcomes, lost separation (ended with a commanded aircraft or a replayed one), episodes per aircraft and per
+hour, M4's reward, the landing time against the record, how often two commanded aircraft of a window land the other way
+round, the masks, and how one window's rewards go together over its samples (the pooled correlation of each aircraft's
+reward less its mean). Each loop batch draws from its own streams, and `--workers` forked processes (after the data
+are built, before the GPU starts) read the batches their index deals them — what is read does not depend on their number
+(tests; the 2026-09-30 smokes wrote the same files with 4 and 6); the loop is bound by the CPU (15 windows in 4.5 min in
+one process, GPU 2.3 GB, 8–41 % busy; 30 windows in 3 min with 4 or 6, 0.88 GB of the GPU a process). Writes `aircraft.jsonl` (appended per batch) and
+`window_generation.json` (`ts-traffic-window-generation-v2`: v1 before the augmentation, the formal
+`window_generation_20260930`).
+**`--augment-seed`** (design §6.6 step 7 item 6, `experiments/traffic_window_augment.py`): every window augmented, a third
+each (a window's kind drawn once, only its parameters drawn again) — **C** the commanded aircraft moved whole toward the window's opening (their first row's time after it × c,
+c ~ U[0.6, 1.0]), **B** one commanded aircraft's start moved as stage 2 moves it (its time limit stage 2's; what the others
+read of it before it flies is its moved rows, never established), **A** a flight of the draw at the airport inserted and
+commanded, g × the required gap ahead of a drawn commanded aircraft on the approach clock (g ~ U[0.5, 2.0], R31's timing),
+its source no longer replayed. Every shift whole seconds (a flight's own landing leaves its landing context by its exact
+time). Qualified: no commanded aircraft answers for a loss through its observed rows against the others' records
+(stricter than the loop: a refusal drops the whole window), never more aircraft on one step than the data has had — the
+airport's busiest step on the training days (`busiest`, computed at the start) or, where busier, the same span as
+recorded (a longer time limit can bring in recorded traffic, which is not added): only what the augmentation adds is
+capped, each window's cap and count kept with it — and every time limit within the model's positions (a stage-2 limit
+can pass them); ten draws a window at most, else it is left out (counted by airport and kind); the refusals are counted
+by why. Read by the model's sources only (a
+moved start has no record); the readout adds each kind and each aircraft's part (shifted, moved, inserted, as drawn).
+
+### R35 · `run_ts.py prior_generation_records` — a free-generation readout's sentences as evaluation records: ADE / FDE and the evaluation's pass rate (2026-09-30)
+
+A `prior_free_generation` readout (`generation.json` schema `ts-prior-free-generation-v5`, `sentences.npz`) stores the
+words the prior said and each sentence's outcome, not the flown track. This runner flies the STORED words again
+(`fly_said`: step k heard from its first cycle, on the sentence's own clock, from the observed state at row `N_LOOK` — an
+augmented start moved by its recorded augmentation — to the readout's time limit), in the readout's own draw
+(`replay.draw` with its split, seed and per-airport count; `drawn` must match) and its own chunks (`--chunk`, required: the
+readout's, from its `run.sh` — the v11 re-reads used 32; a chunk whose stored sentences differ in length was not one closed
+loop and is refused by name), and refuses unless every re-flown sentence reproduces its
+readout row field for field (outcome, end, runways, words said, the glidepath stop; only the speaker's `forbidden_mass`
+and before-the-join readouts are not compared) — so the records are the readout's sentences, not new ones. The labelled
+words from the same row (the readout's reference, real starts only) are flown and checked the same way. The executor spec
+must be the readout's (sha256), the instruction artefact the one it names (by its place under `4dTrajectory/outputs`); a
+whole run must fly every row the readout has. Only the current schema is read: the v11
+re-reads of 2026-09-27 (`prior/v3_reread_v11_20260927/val_*`); older readouts are refused by name.
+
+Writes into `--out` (new; a clean tree unless `--chunks N` limits it to the readout's first N chunks, recorded as
+`partial`; `--chunks` at or above the readout's chunk count is refused): `records/<kind>/<ICAO>/` — `kind` = `labelled` or `sample_<k>` (one directory per sample: the record stem is
+the flight key) — each a `write_batch` directory graded by `python -m evaluation` (`evaluation_report.json`); each record's
+`source.freeGeneration` names the sentence, sample, outcome and augmentation. The flown states start at the first predicted
+step (`executor_replay.executor_forecast` at anchor `N_LOOK`) and end at the row the outcome is read at (a stopped sentence
+at its stopping step); a flight with no state past its start has no record, counted in `records.json` and in its
+directory's `summary.json` (`skipped`). `records.json`
+(`ts-prior-generation-records-v1`): one row per sentence (outcome, recorded, verdict, ADE, FDE) and per kind, pooled over
+the samples (`prior`), in all / per airport / per approach kind / per airport × kind: the pass rate = verdict `pass` over
+EVERY sentence (one not recorded does not pass), the verdicts, **the verdict judges the OBSERVED flight's runway** (the
+evaluation's context is the record's `source.runway`), so a sentence ending on another runway is graded against the
+observed one: the pass rate again over the sentences ending on the observed runway, and the others' verdicts apart, the outcomes, ADE / FDE (`observed_series_metrics`: against
+the observed track from row `N_LOOK`, its own common time grid) over the recorded sentences and over the landed ones, and
+over the samples each flight's best — whether any sample passes, the smallest ADE and, apart, the smallest FDE.
+
+**An augmented start has no truth**: its record's reference is the source flight's track moved by the same augmentation
+(`augmented_series`, so the record starts where the executor flew from); the verdict does not read the reference, so the
+pass rate is the start's, but ADE / FDE would be a distance to a moved track — `records.json` leaves them out and each record
+directory's summary says so. **Size**: ~0.1–0.2 MB a record, ~10,000 records (2,000 flights × 4 samples + the labelled
+words) a real-start readout — about 1.5–2 GB each; the one-chunk smoke run of `val_base_masked_400x4` took 72 s.
+A whole run ends with `prior_generation_grading` (R38): the pass rate on the landed runway and FDE's time and place.
+
+**Publishing** (2026-09-30): the root publisher's `--generation-records DIR --generation-campaign CAMPAIGN [--kind K]`
+files each kind × airport as one Experiments category (`experiment_generation_<readout campaign>_<readout>_<kind>_<split>`,
+model `prior` or `executor`, horizon `sentence`), the runner's own evaluation report and `records.json` numbers as its
+rows, under CAMPAIGN's registry entry with the readout's name as the run (blocked without one); a partial run, another
+count of records than `records.json` says, or a category that exists is refused; `variantLabel` names the kind. **An
+augmented run's category** carries no ADE / FDE (the builder's `accuracy` is dropped) and says what its white track is:
+the viewer draws the observed flight by its key, i.e. the SOURCE flight where it flew, not the moved track the records
+hold (drawing that would need a builder + viewer change). The v11 records are registered as
+`generation_records_v11_20260930`.
+**With the grading (R38, 2026-09-30)**: a run is published only graded (`grading/grading.json`); its rows add the pass
+rate on the landed runway, the sentences graded again there, and on real starts the arrival endpoint error, the final time
+error and the late share (over the landed sentences); the label shows both pass rates; the builder takes the landed-runway
+report (`--landed-runway-report`), so a sentence that passed on another runway is drawn in its own colour (status
+`otherRunway`, viewer AV40). Publication record `ts-generation-records-publication-v2`. `--refresh-published` brings the
+categories these records published before the grading (record v1) up to date IN PLACE — the CZML built again (a new
+generation, the old pruned), label / rows / record replaced; refused for a category never published, published from other
+records, or already current.
+
+### R36 · `run_ts.py window_training_export` — multi-aircraft windows for the frontend's Training module (Training module §2.9)
+
+2026-09-30. `window_training_export --prior <augmented, or an M4 round> --instructions <artefact> --executor <spec>
+[--readout <this prior's formal window readout, v2>] --airports-root <…/public/data/airports> [--set traffic_windows_select]
+--airport … [--windows 20] [--samples 4] [--workers 6] [--device cuda]`. The windows are the formal window readouts' draw
+(`draw_windows`, `TRAFFIC_SPLIT` = select, `WINDOWS_PER_AIRPORT` = 200, seed), of which `--windows` an airport are chosen by
+their commanded aircraft (1 / 2 / 3+, shares as even as they divide, the larger sizes first: 20 → 6 / 7 / 7), seeded by the
+seed and the airport. Writes a window SET (`training_files.KIND_TRAFFIC`, `traffic.json`, `TRAFFIC_SCHEMA`; model-free: the
+read-back set's head and flights for the commanded aircraft, each window's others with their recorded rows, and the window as
+recorded — `traffic_window_generation.fixed_paths` "recorded", VISUAL + IFR, landings) once — a later export (another prior)
+checks the set it would write is the one there (`require_same_set`) — and one OVERLAY per prior (`KIND_WINDOW_GENERATION`,
+`window_generation.json`): every window flown `--samples` times by `fly_windows` (the formal readout's loop) on the export's
+OWN draws (the user, 2026-09-30: no readout re-run, no row check; a batch's windows share its stream, so the sentences depend
+on the windows flown together — the airports and batch size are recorded in `producedBy`). A sentence's outcome is the loop's
+(`lost_separation` when the judge ended it: its words stop there, its track runs on to its own end); the landings are the
+aircraft whose OWN end is a landing (the loop keeps a landing time for one the glidepath edge stopped first — not a landing
+here); the masks' mass over the steps spoken to the judged end. `--readout` copies the readout's summary cells (model scene and
+record, here and all airports, with the windows and samples they cover), refused unless it is this prior's, executor spec,
+artefact, split, draw, samples and temperature. Every refusal about the disk before any work (`on_disk`), every write after it
+(`write_export`); refactors it rests on, behaviour-preserving (reviewed): `window_prior`, `fly_windows` / `Flown`,
+`fixed_paths` / `FixedWindow`, `sentence_counts`, `generation_block`, `head_block` / `flights_block`, `check_set` by kind. The
+model trained by `ts-traffic-reward` is named **traffic** (`MODEL_NAMES`, user 2026-09-30), the one trained by
+`ts-traffic-window-reward` (R37, M4 in windows) **window** (user 2026-10-01).
+
+
+### R37 · `run_ts.py traffic_window_reward` — multi-aircraft M4's second pass: the traffic post-training in windows (design §6.6 step 7 item 7, the 7.6 plan)
+
+2026-09-30. `traffic_window_reward --prior <single-aircraft prior (augmented) or traffic prior (an M4 round)> --base <base>
+--instructions <artefact> --executor <spec> --out <new dir> [--rounds 8] [--resume] [--real-per-airport 70]
+[--augmented-per-airport 70] [--samples 8] [--select-per-airport 70] [--select-samples 2] [--speakers 4] [--passes 1]
+[--smoke]`. R32's round protocol with a window sample as the unit: each round the training days' windows drawn with its
+seed (`traffic_window.draw_windows`), the first per airport as they are and the next `POOL_FACTOR` × as many augmented
+(`traffic_window_augment`, the first that qualify), spoken `--samples` times by R32's speaking processes (`Speaking`
+carries how a round is spoken: `WindowSpeaking` — `traffic_window_generation.window_batches`, `window_sentences`),
+each commanded aircraft rewarded as R34, its advantage against its own samples in its window, trained on only on a
+contrast and never when it starts in a loss (`traffic_window_tuner.window_advantages`); the pass
+(`traffic_window_tuner.WindowRewardTuner`): each window sample scored whole as the speaker read it (the one layout,
+`window_speaker.window_inputs`, `traffic_window.window_edges`; each aircraft's rows rebuilt with its landing context
+switched where the speaker switched it — tested to give back the sampling distributions to 1e-4), encoded a block of
+steps at a time (`Prior.encode`'s ``pairs_per_block``, `traffic_window_tuner.PAIRS_PER_BLOCK` = 32,768 pairs: after the
+time attention nothing in a layer reads another step; the busiest window sample, 23 aircraft, 1.51 GB instead of more
+than the 8 GB whole — every window sample is trained on, none left out for size), the loss on the
+trained aircraft's words, base reading each alone, M2's scene samples as the data term; with one commanded aircraft a
+window it trains as R32's tuner does (loss and gradients, tested). Before anything is spoken it checks the formal size
+(`preflight`, `preflight.json`): the host's free memory against the speaking processes, and round 1's costliest window
+sample scored with gradients on the GPU. Fixed select windows (as drawn and augmented) read
+every round in the shape `traffic_reward.guarded_choice` reads (landed, observed runway, words, lost separation, the
+ordering against the record with the other commanded aircraft's landings of the same sample, reward by kind), the round
+chosen by paired standard errors on the augmented windows' reward. Writes `config.json`, `round_<k>/{sentences.json,
+checkpoint.pt, optimiser.pt, readout.json, …}`, `history.json`, `choice.json` (`ts-traffic-window-reward-v1`).
+
+### R38 · `run_ts.py prior_generation_grading` — a generation-records run graded beyond its pass rate: the landed runway, and FDE's time and place (2026-09-30)
+
+Reads a whole `prior_generation_records` run (R35: `records.json` + its record directories; a partial run is refused) and
+writes `<records>/grading/` (new, never overwritten): `landed_runway/<kind>/<ICAO>/` and `grading.json`
+(`ts-prior-generation-grading-v1`), built in `grading.partial` and renamed when whole; every runway to grade on must have
+its assessment context and every recorded sentence its record row before anything is written. `prior_generation_records` runs it at its end (a whole run only).
+
+**The landed runway.** The evaluation grades a record against its `source.runway` — the observed flight's — so a sentence
+flown to another runway fails there however it flew (on v11 val, augmented r7, real starts: 14.5 % of the prior's
+sentences landed on another runway, 84.5 % of them the parallel). Every recorded sentence whose last pointed runway is not
+the observed one and that CROSSED it (`POINTED_CROSSINGS`: the judge's crossings but `crossed_other_runway`, which crossed
+another runway and keeps its verdict; a sentence that crossed nothing fails anywhere and keeps its verdict) gets a graded COPY of its evaluation record: `source.runway` the runway it pointed at
+(`source.landedRunwayGrading` names both), the target that runway's threshold point as the evaluation's own assessment
+context has it (`landed_target`: threshold lat/lon, published LTP + TCH, ψ its course; speed, path angle and mass kept; a
+runway with no published height keeps the target's and grades the vertical indeterminate), the flown states read from the
+original states file by a relative `states_ref` (never copied), no `reference_file`. The pass rate on the landed runway =
+the sentences ending on the observed runway passing there + the others passing on theirs, over EVERY sentence.
+
+**FDE's time and place** (real starts only, over the LANDED sentences: a timeout has no arrival to be late with). FDE is the distance at the observed landing TIME (the prediction sampled
+at the truth's final time; an early arrival is held at its end), so a sentence landing later than the observed aircraft
+is still short of the threshold then — the labelled words on v11 val: FDE p95 1,638 m while the arrival endpoint error
+(the prediction's own end against the observed end) is p95 69 m; 28 % land late, and 99 % of the FDEs over 500 m are late
+arrivals (median 16 s). So `grading.json` gives FDE, the arrival endpoint error, the final time error, the late share and
+FDE over the late and the early apart, per kind / pooled over the samples, in all / per airport / per approach kind / per
+airport × kind.
+
+### R39 · `run_ts.py traffic_window_reward_readout` — an M4-in-windows run (R37) read round by round, while it runs or after it ends
+
+Reads only the run's own files: each finished round's `readout.json` (a round is finished once it is written — the runner
+writes it last; a round directory after the finished ones without one is running or was cut short, named and not read),
+the training rounds' `history.json` rows and `choice.json` (written when an invocation of R37 ends — `run.sh` runs one
+round an invocation — so none before the first ends, and a choice covering fewer rounds than are finished is said to be
+behind). Prints per round and side the
+select reward, lost separation, landed and observed-runway shares, the ordering against the record (real windows);
+against round 0, paired per aircraft sentence (window, aircraft, sample — every round speaks the select windows with the
+same streams, so the pairs are the same draws), the change in reward and in lost separation over the sentences both rounds
+count and its standard error — the round choice's own pairs (`traffic_window_reward.select_counted`) and difference
+(`traffic_reward.paired_difference`), so on the augmented reward these are `choice.json`'s numbers — per kind on the
+augmented windows (reward per kind beside it); of the losses, the shares ended by another commanded aircraft and by a
+replayed one (`ended_with`); per training round its sentences (trained on, starting in a loss) and pass (updates, KL mean /
+largest, clipped share, data NLL, KL to base at the start); the traffic attention's output over the residual per layer and
+the teacher-forced NLL; the choice. Tested on a run written by R37's own pieces whose rounds differ (a wrong pair, round or
+kind fails it). `--out` (a new directory) also writes `traffic_window_reward_readout.json`
+(`ts-traffic-window-reward-readout-v1`). Replaces the ad-hoc script the first readout used (user 2026-09-30: a readout
+used every run is a runner).
+
+    python run_ts.py traffic_window_reward_readout \
+        --run 4dTrajectory/outputs/POOLED/prior/m4_window_20260930/window_s1337 [--out <new directory>]
+
+### R41 · `run_ts.py traffic_window_pair` — two window readouts (R34) of the same windows, aircraft by aircraft
+
+2026-10-01 (the user: the kept M4-in-windows round against its start on the val windows). `traffic_window_pair --first
+<R34 dir> --second <R34 dir> [--out <new dir>]`. Refused unless the two read the SAME windows the SAME way with the SAME
+code: every field of `window_generation.json` that decides the draw and the reading (`SAME`: the commit, split, draw,
+windows an airport, samples, temperature, seed, augmentation, executor spec, artefact, scenes, history, readings, batches
+and their size, the model's sources read) equal, the same (window, aircraft, sample, source) rows with their model-free
+fields (`MODEL_FREE`) equal, and the model-free sources (labelled, recorded) equal row for row (they read the prior's
+procedure masks too). A row STARTING IN A LOSS depends on the model (the aircraft ahead is model-flown): as the M4 round
+choice pairs rounds, a sentence is counted only where it starts in a loss in neither readout, and each side's count is
+reported. Per model source and group (pooled, airport, window size; augmented: kind and part): each of `MEASURES`
+(reward, lost separation VISUAL / IFR, landed, landed on the observed runway) in both and second − first over the
+sentences counted in both, its standard error clustered by AIRPORT × OPERATING DAY (windows overlap and share flights and
+traffic; a window's day is its earliest-landing commanded aircraft's, read from the identity's landing stamp), the
+reward's per-sentence error beside it (`traffic_reward.paired_difference`), and the losses avoided / added. `--out` writes
+`traffic_window_pair.json` (`ts-traffic-window-pair-v1`; no NaN: an error under two clusters is null).
+
+    python run_ts.py traffic_window_pair --first 4dTrajectory/outputs/POOLED/traffic/window_val_traffic_r5_20261001 \
+        --second 4dTrajectory/outputs/POOLED/traffic/window_val_window_r5_20261001 \
+        --out 4dTrajectory/outputs/POOLED/traffic/window_val_pair_20261001
+
+### R42 · `run_ts.py executor_conformance` — the executor checked by what it flies: a spec's reference tracks flown again in every way, within the bounds (executor design §12.3)
+
+2026-10-01 (the user: the executor is checked by its tracks, not its source). `executor_conformance --executor <spec dir>
+--instructions <artefact> [--write-reference]`; the core is `autopilot/conformance.py` (inside the executor's code identity,
+so the checker is checked with it). **The reference** (`--write-reference`, or `executor_spec` with every new spec): 50
+labelled train flights an airport — the replay's draw (`replay.draw`, seed 1337, own dynamics; 250) — flown from row 0 on
+their labelled words by the code that measured the spec (refused otherwise, and from a dirty checkout): every cycle's states,
+commands, wanted rates, sentence times, limits and modes, the done cycle, and each flight's verdict (`judge`) into
+`<spec>/conformance/reference.{json,npz}`, with each flight's input digest (start state, airframe, frame, thrust, approach
+speed, time limit, words, runway, the runways' geometry and vertical paths, the observed rows the word clock reads), the
+bounds and the checker's logic hash; written atomically, once. **The check**: the same flights rebuilt (inputs that moved
+are refused by name — the data changed, not the executor) and flown in every way of `conformance.MODES` — `batch`
+(`replay.fly_batch`), `staggered` (one executor, each flight from a seeded start in 0–30 steps, its words on its own clock),
+`single` (`autopilot.single`, one flight at a time, driven as `fly` drives a batch) — each flight compared with its reference
+up to its done cycle: states ≤ `STATE_BOUND_M` (1e-6 m) horizontally and vertically, every other float ≤ `ROUNDOFF` (1e-6;
+ψ round the circle; NaN only against NaN), every limit, mode, done cycle, outcome, end row and word verdict equal; a way
+that flies fewer flights fails. All pass → `passed-<executor_source_sha256[:12]>.json` (clean checkout only), which
+`spec.require_conforming_executor` — and so `replay.open_executor` — asks for. v11 (2026-10-01, 27 s): batch and staggered
+0 m apart, single 1.3e-8 m / 5.5e-10 m.
+
+    python run_ts.py executor_conformance --executor 4dTrajectory/outputs/POOLED/executor/v11_20260927 \
+        --instructions 4dTrajectory/outputs/POOLED/instruction_language/v5_20260926
+
+### R43 · `run_ts.py traffic_window_rewind` — can a loss of separation be undone by rewinding one aircraft? (multi-aircraft design §6.6 step 7.7)
+
+2026-10-01 (the user: measure before choosing the next post-training method; nothing is trained). `traffic_window_rewind
+--prior <traffic prior> --executor <spec> --instructions <artefact> --split select [--augment-seed 7919] [--offsets-s 10 30
+60 120] [--branches 8] --out <new dir>`. **The original pass**: the drawn windows spoken to once, every commanded aircraft
+together — R34's "scene" reading at `--samples 1`, from its streams (`batch_seed`), so `original.jsonl` is R34's rows.
+**Events**: each loss there that ended a commanded aircraft (a wake shortfall at a landing included), not one it started
+in; one episode of a pair is one event, whoever of the two it ended and when; its time `t_L` is the episode's first step
+(`loss_start_s`; a wake shortfall: its landing's time). **Who speaks again**: the ended one (`answered`), the other of the
+pair when commanded (`partner`); an episode that ended both, each once (`both`). **From where**: `t_L` less each offset (whole
+steps, checked by `spec.rows_exact`), and `start` (its first predicted step: the one-aircraft credit's ceiling); skipped and
+counted: before its first predicted step, at or after `t_L` (the state judged at `t_L` was flown before it), or at an own
+step it did not speak at (`spoken_steps`: to the step the judge ended it at, that one included — `Commanded.said` runs on
+silent past a judge's end). **A branch** flies the window again from its start with every word GIVEN
+(`traffic_window.Given`: `WindowSpeaker.speak(given=)` writes a given line in its round, neither sampled nor masked; its
+draw is "unchanged", so the others' draws do not depend on who is given): the speaking aircraft's to its step, then the
+prior speaks for it; every other commanded aircraft's as far as it spoke, the prior speaking for one still flying past
+them. Each offset `--branches` times, each batch from its own stream (`rewind_seed`). **The control**, one an event, gives
+every word and must replay the original pass — the words and every discrete field (`REPLAYED_FIELDS`, the judge's ends,
+episodes and wake shortfalls) exactly, every float within `conformance.ROUNDOFF` (the executor's atan2 / hypot round
+differently by an aircraft's place in a batch) — or the run stops; the header records how many replayed and their
+largest float difference. **Rescued** = the pair loses no separation from the branch's step on AND the speaking aircraft
+lands in the landing direction, not ended (M4's reward 1) AND no new loss (every aircraft ended in the branch was ended in
+the original, with the same other aircraft); each kept beside. Per role × offset, pooled and per airport, the speaking
+aircraft's stratum (`instructions.readout.stratum`), kind and relation of the loss, window size and augmented kind: cells,
+the share with at least one branch rescued, the mean share rescued, `TALLIES`, the three conditions' shares and the words
+changed between the branch's step and the loss (rescued and not). Writes, at the end, `original.jsonl`, `events.jsonl`
+(an event a row, its branches beside) and `window_rewind.json` (`ts-traffic-window-rewind-v1`, with R34's pooled summary
+of the original pass).
+
+    python run_ts.py traffic_window_rewind \
+        --prior 4dTrajectory/outputs/POOLED/prior/m4_passes_20260929/traffic_s1337/round_05 \
+        --executor 4dTrajectory/outputs/POOLED/executor/v11_20260927 \
+        --instructions 4dTrajectory/outputs/POOLED/instruction_language/v5_20260926 \
+        --split select --out 4dTrajectory/outputs/POOLED/traffic/window_rewind_<date>

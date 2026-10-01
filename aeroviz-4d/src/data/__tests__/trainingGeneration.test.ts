@@ -17,6 +17,7 @@ import {
   parseTrainingGenerationOverlay,
   parseTrainingOverlays,
   trainingModelGroups,
+  TRAINING_MODEL_NAMES,
   trainingModelLabel,
   trainingOverlaysOf,
   trainingRunName,
@@ -102,7 +103,7 @@ describe("a generation overlay", () => {
       "augmented r2 (v3_stage2/aug_s1, post-trained from landing r1 by ts-prior-augmented-reward-v5)");
     expect(trainingModelText(read().model)).toBe("base (v3_step1/full_s1, trained on data alone)");
     // every name its own colour
-    expect(new Set(Object.values(TRAINING_MODEL_COLOR)).size).toBe(3);
+    expect(new Set(Object.values(TRAINING_MODEL_COLOR)).size).toBe(TRAINING_MODEL_NAMES.length);
   });
 
   it("reads a sentence the glidepath lower edge stopped only from a model that spoke under the procedure's altitudes", () => {
@@ -189,8 +190,20 @@ describe("a generation overlay", () => {
     expect(refusal((raw) => { landedSample(raw).track.tS[5] = 18.5; })).toMatch("tS[5] is 18.5 s, not the step at 18 s");
     expect(refusal((raw) => {
       const track = landedSample(raw).track;
-      for (const key of Object.keys(track)) track[key].splice(-2, 1);          // a point missing before the last
+      for (const key of Object.keys(track)) {                                  // a point missing before the last
+        if (key === "attitude") for (const field of Object.keys(track.attitude)) track.attitude[field].splice(-2, 1);
+        else track[key].splice(-2, 1);
+      }
     })).toMatch("its last point is more than a step after the one before");
+  });
+
+  it("refuses a track drawn on another datum than the set flight's", () => {
+    expect(refusal((raw) => { landedSample(raw).track.altitudeHaeM[2] -= 0.5; })).toMatch(/draws row 2 -33\.50 m HAE − MSL/);
+  });
+
+  it("refuses a track that does not start where the set's flight is at the first predicted row", () => {
+    expect(refusal((raw) => { landedSample(raw).track.lon[0] += 1e-5; }))
+      .toMatch(/samples\[0\]\.track: starts at .* at row 4, where it was flown from/);
   });
 
   it("refuses a readout cell counted over no flight", () => {
@@ -367,5 +380,9 @@ describe("a generation overlay from augmented starts", () => {
     expect(movedRefusal((raw) => { raw.flights[0].observed.tS[2] = 5; })).toMatch("tS[2] is 5 s, not the step at 4 s");
     expect(movedRefusal((raw) => { raw.flights[0].observed.lat.pop(); })).toMatch("lat");
     expect(movedRefusal((raw) => { raw.flights[0].samples[1].track.lat[0] += 0.01; })).toMatch("start from 2 places");
+    expect(movedRefusal((raw) => { raw.flights[0].observed.altitudeHaeM[1] += 1; })).toMatch(/observed: draws row 1 -32\.00 m HAE − MSL/);
+    // a moved start is not the set's: every sample starts elsewhere, on the flight's own datum, and reads
+    const elsewhere = moved((raw) => raw.flights[0].samples.forEach((one: any) => { one.track.lat[0] += 0.01; }));
+    if (!elsewhere.ok) throw new Error(elsewhere.problem);
   });
 });

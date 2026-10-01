@@ -18,7 +18,7 @@ const {
     ],
     activeAirportCode: "KRDU",
     selectedRunway: null,
-    mode: "observe",
+    mode: "evaluation",
     proceduresOpen: false,
     layersDrawerOpen: false,
     presentationMode: false,
@@ -56,7 +56,7 @@ import WorkbenchTopBar from "../WorkbenchTopBar";
 describe("WorkbenchTopBar", () => {
   beforeEach(() => {
     landingsRef.current = { manifest: null, status: "empty" };
-    appState.mode = "observe";
+    appState.mode = "evaluation";
     appState.proceduresOpen = false;
     appState.selectedRunway = null;
     appState.layersDrawerOpen = false;
@@ -64,10 +64,10 @@ describe("WorkbenchTopBar", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the five exclusive task tabs and switches mode on click", () => {
+  it("renders the four exclusive task tabs and switches mode on click", () => {
     render(<WorkbenchTopBar />);
 
-    for (const label of ["Observe", "Training", "Fly", "Optimize", "Compare"]) {
+    for (const label of ["Evaluate", "Learning", "Fly", "Optimize"]) {
       expect(screen.getByRole("button", { name: label })).toBeTruthy();
     }
 
@@ -75,30 +75,29 @@ describe("WorkbenchTopBar", () => {
     expect(setMode).toHaveBeenCalledWith("optimize");
   });
 
-  // Training reads the same observed arrivals as Observe (what the track was read
-  // as, rather than how it was flown), so it sits immediately right of it — not at
-  // the end of the row next to the solver tasks.
-  it("places Training immediately right of Observe and switches to it", () => {
+  // The user's order (2026-10-01): Fly on its own, a gap, then Optimize, Learning, Evaluate;
+  // the Procedures toggle after another gap.
+  it("orders the tabs Fly | Optimize, Learning, Evaluate | Procedures and switches to Learning", () => {
     render(<WorkbenchTopBar />);
 
-    const labels = Array.from(
-      document.querySelectorAll(".workbench-task-switcher .workbench-task-tab"),
-    ).map((node) => node.textContent);
-    expect(labels).toEqual([
-      "Observe",
-      "Training",
+    const tabs = Array.from(document.querySelectorAll(".workbench-task-switcher .workbench-task-tab"));
+    expect(tabs.map((node) => node.textContent)).toEqual([
       "Fly",
       "Optimize",
-      "Compare",
+      "Learning",
+      "Evaluate",
       "Procedures",
     ]);
+    // a gap starts each group after the first
+    expect(tabs.map((node) => node.classList.contains("workbench-task-group-start")))
+      .toEqual([false, true, false, false, true]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Training" }));
+    fireEvent.click(screen.getByRole("button", { name: "Learning" }));
     expect(setMode).toHaveBeenCalledWith("training");
   });
 
   it("toggles the procedures panel independently of the active task", () => {
-    appState.mode = "observe";
+    appState.mode = "evaluation";
     render(<WorkbenchTopBar />);
 
     const procedures = screen.getByRole("button", { name: "Procedures" });
@@ -110,10 +109,10 @@ describe("WorkbenchTopBar", () => {
   });
 
   it("marks the active task tab pressed", () => {
-    appState.mode = "compare";
+    appState.mode = "fly";
     render(<WorkbenchTopBar />);
-    expect(screen.getByRole("button", { name: "Compare" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "Observe" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "Fly" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Evaluate" }).getAttribute("aria-pressed")).toBe("false");
   });
 
   it("switches the active airport from the selector", () => {

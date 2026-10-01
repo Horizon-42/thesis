@@ -19,6 +19,7 @@
  * CZML; this hook only manages its lifecycle, the clock, and readout sampling.
  */
 
+import { aircraftOrientation, compassFromPsiDeg } from "../utils/aircraftOrientation";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
@@ -160,6 +161,9 @@ export function useOptimizedTrajectoryPlayback({
           viewer.trackedEntity = undefined;
         }
         viewer.dataSources.remove(dataSource, true);
+        // The clock was this playback's: unloaded, it stops (nothing of this CZML is left
+        // to animate on it).
+        viewer.clock.shouldAnimate = false;
       }
       setStatus("idle");
     };
@@ -330,11 +334,8 @@ function attachOrientation(
     const elapsedS = Cesium.JulianDate.secondsDifference(time, start);
     const sample = sampleTrajectoryAt(samplesRef.current, elapsedS);
     if (!sample) return undefined;
-    const hpr = new Cesium.HeadingPitchRoll(
-      Cesium.Math.toRadians(-sample.headingDeg),
-      Cesium.Math.toRadians(sample.flightPathDeg + (sample.attackDeg ?? 0)),
-      Cesium.Math.toRadians(-sample.bankDeg),
-    );
-    return Cesium.Transforms.headingPitchRollQuaternion(position, hpr);
+    // the simulator's bank turns left when positive
+    return aircraftOrientation(position, compassFromPsiDeg(sample.headingDeg),
+      sample.flightPathDeg + (sample.attackDeg ?? 0), -sample.bankDeg);
   }, false);
 }

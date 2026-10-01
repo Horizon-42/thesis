@@ -20,11 +20,12 @@ frontend reads. Solver internals and defaults live in `4dTrajectory/CLAUDE.md`.
 - **`POST /autopilot/segment`** (the `autopilot_segment/` package, the Training view's live executor): flies one word's segment
   of a Training flight (to where the word's envelope ends: a heading word's a lead past the next heading word — the answer's
   `segment.nextWordHeardS`, from the judge's `words_said`, says where the executor heard it: the views draw the rest as a tail) with
-  the SINGLE-FLIGHT executor (`single.py`, 2026-09-27: the executor's cycle for one flight in plain floats, ~9 ms for 200 cycles
-  where the torch `Executor` on a batch of one took ~0.55 s; the same result, not bitwise — torch's own atan2 / hypot differ
-  between a batch and one flight — checked by `test_single_executor.py` and the fleet check `check_single`; PINNED to the code it
-  mirrors, `MIRRORED_SOURCE_SHA256`: a code change in `autopilot/` or the dynamics it reaches makes the backend refuse to fly
-  until it is ported and the pin updated), driven as `executor.fly` drives it and stopped at the segment's stop (`fly_until`);
+  the SINGLE-FLIGHT executor (`ts_transformer/autopilot/single.py`, 2026-09-27, moved into the executor package 2026-10-01:
+  the executor's cycle for one flight in plain floats, ~9 ms for 200 cycles where the torch `Executor` on a batch of one took
+  ~0.55 s; the same result, not bitwise — torch's own atan2 / hypot differ between a batch and one flight — checked by
+  `test_single_executor.py`, the fleet check `check_single` and the spec's reference tracks: `replay.open_executor` opens a
+  spec only for executor code that flies them within 1e-6 m in every way, this one included; no source pin), driven as
+  `executor.fly` drives it and stopped at the segment's stop (`fly_until`);
   never a replay record or overlay; the answer carries per-part wall-clock `timing`. The spec is the ONE under
   `4dTrajectory/outputs/POOLED/executor/` that `replay.open_executor` accepts for the set's artefact, or it is refused
   naming each (looked up again when a spec is added, moved or rewritten). A bad request is 400 (`errors.RequestRefused`), a set
@@ -56,7 +57,7 @@ and the group renders that far early: median **5055 m** apart at group start ove
 05L prediction groups (p95 47.1 km). Undetectable downstream — both start at `t = 0`, both name
 the right flight, the schema is satisfied — and it reads as model error, not a publication bug.
 
-Hence `aeroviz_backend.observed_trajectories` takes `window` ∈ `full` (default; Observe/Baseline;
+Hence `aeroviz_backend.observed_trajectories` takes `window` ∈ `full` (default; Evaluation/Ground Truth;
 rostered by `tracks/manifest.json`) | `arrival` (the comparison reference; rostered by
 `arrivals/manifest.json`), and the arrival window is built by **`load_arrival_flights` itself** —
 the same loader the scenario/optimizer/training paths use, so there is no second slicer to drift

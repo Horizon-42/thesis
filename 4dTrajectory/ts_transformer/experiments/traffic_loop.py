@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 from geokit import NM_M
@@ -220,23 +220,109 @@ def segments(aircraft: Sequence[Controlled | Track]) -> list[list[Controlled | T
     return out
 
 
+class Judging:
+    """One segment judged a step at a time into ``out`` (module docstring, 1–3): at each step ``t``, `landing` for every
+    landing in ``(t − step, t]``, then `step`. `Loop` walks whole flights with it; a closed loop whose aircraft react to
+    one another steps it as it flies (`traffic_window`: an aircraft ended there flies on, and stops speaking).
+
+    Three kinds of aircraft are handed to it: **controlled** ones still judged (a loss or wake shortfall they answer for
+    ends them), **replayed** ones (`Track`, at their records) and **passive** ones — controlled aircraft already ended that
+    are still in the scene (multi-aircraft design §6.6 step 7 item 3, §9 item 29): on their states like a controlled
+    one, judged like a replayed one (a loss they answer for is recorded, nothing more)."""
+
+    def __init__(self, separation: Separation, reading: str, step_s: float, out: Run) -> None:
+        self.separation, self.reading, self.step_s, self.out = separation, reading, step_s, out
+        self.open_episodes: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def step(self, t_s: float, controlled: Sequence[Controlled], replayed: Sequence[Track],
+             passive: Sequence[Controlled] = ()) -> dict[str, dict[str, Any]]:
+        """The aircraft on step ``t_s`` judged pairwise (fewer than two: nothing): each controlled one answering for a loss
+        there is ended (recorded in ``out.ended`` and returned)."""
+        if len(controlled) + len(passive) + len(replayed) < 2:
+            return {}
+        out, step = self.out, self.step_s
+        out.steps_judged += 1
+        here: list[Controlled | Track] = [*controlled, *passive, *replayed]
+        found = losses(join(at_steps([*controlled, *passive], t_s, step), traffic_at(replayed, t_s)), self.separation,
+                       self.reading)
+        ended_now: dict[str, dict[str, Any]] = {}
+        judged = len(controlled)
+        for loss in found:
+            pair = tuple(sorted((here[loss.i].key, here[loss.j].key)))
+            episode = self.open_episodes.get(pair)
+            if episode is None or episode["last_s"] != t_s - step:
+                episode = {"pair": list(pair), "relation": loss.relation, "first_s": t_s, "steps": 0, "kinds": [],
+                           "min_ratio": math.inf, "closest_m": None, "required_m": None, "wake_known": True,
+                           "responsible": [], "ended": []}
+                self.open_episodes[pair] = episode
+                out.episodes.append(episode)
+            episode["steps"] += 1
+            episode["last_s"] = t_s
+            if loss.distance_m / loss.required_m < episode["min_ratio"]:
+                episode["min_ratio"] = loss.distance_m / loss.required_m
+                episode["closest_m"], episode["required_m"] = loss.distance_m, loss.required_m
+            episode["wake_known"] = episode["wake_known"] and loss.wake_known
+            if loss.kind not in episode["kinds"]:
+                episode["kinds"].append(loss.kind)
+            for k in loss.responsible:
+                answer = {"key": here[k].key, "controlled": k < judged}
+                if answer not in episode["responsible"]:
+                    episode["responsible"].append(answer)
+                if k < judged and here[k].key not in ended_now:
+                    other = loss.j if k == loss.i else loss.i
+                    ended_now[here[k].key] = {"t_s": t_s, "kind": loss.kind, "relation": loss.relation,
+                                              "with": here[other].key, "with_controlled": other < judged}
+                    episode["ended"].append(here[k].key)
+        out.ended.update(ended_now)
+        return ended_now
+
+    def landing(self, t_s: float, leader: Controlled | Track, controlled: Sequence[Controlled],
+                replayed: Sequence[Track], passive: Sequence[Controlled] = (), *, leader_passive: bool = False) -> None:
+        """``leader`` landing at ``t_s``, checked against the established aircraft next behind it among the others there
+        (none the leader): a controlled follower under the minimum is ended at the landing. ``leader_passive``: the
+        leader is a passive aircraft (recorded as not controlled, as a passive partner is in `step`)."""
+        out = self.out
+        out.landings_checked += 1
+        scene = join(between([*controlled, *passive], t_s, self.step_s), traffic_at(replayed, t_s),
+                     over_threshold(leader, self.separation))
+        loss = wake_at_threshold(scene, len(controlled) + len(passive) + len(replayed), self.separation)
+        if loss is None:
+            return
+        others: list[Controlled | Track] = [*controlled, *passive, *replayed]
+        follower = others[loss.j]
+        judged = loss.j < len(controlled)
+        leader_judged = isinstance(leader, Controlled) and not leader_passive
+        out.at_threshold.append({"t_s": t_s, "leader": leader.key, "leader_controlled": leader_judged,
+                                 "follower": follower.key, "follower_controlled": judged, "gap_m": loss.distance_m,
+                                 "required_m": loss.required_m, "relation": loss.relation})
+        if judged:
+            out.ended[follower.key] = {"t_s": t_s, "kind": AT_THRESHOLD, "relation": loss.relation,
+                                       "with": leader.key, "with_controlled": leader_judged}
+
+
 class Loop:
     """The loop's judge over one airport (module docstring): `run` walks every segment of ``controlled`` and
-    ``replayed``."""
+    ``replayed`` (`Judging`), an aircraft ended there leaving the scene — or, ``keep_ended``, flying on along its own
+    path as a passive one (paths that react to nothing, judged as the window loop judges, `traffic_window`)."""
 
-    def __init__(self, separation: Separation, reading: str, step_s: float) -> None:
-        self.separation, self.reading, self.step_s = separation, reading, step_s
+    def __init__(self, separation: Separation, reading: str, step_s: float, *, keep_ended: bool = False) -> None:
+        self.separation, self.reading, self.step_s, self.keep_ended = separation, reading, step_s, keep_ended
 
-    def run(self, controlled: Sequence[Controlled], replayed: Sequence[Track]) -> Run:
+    def run(self, controlled: Sequence[Controlled], replayed: Sequence[Track],
+            judged_until: Mapping[str, float] | None = None) -> Run:
+        """``judged_until`` (only with ``keep_ended``): a controlled aircraft's last judged instant, by key — past it,
+        passive on its path (its own end came first: the glidepath edge's stop); every one to its path's end without."""
         keys = [a.key for a in (*controlled, *replayed)]
         if len(set(keys)) != len(keys):
             raise ValueError("an aircraft is in the loop twice")
+        if judged_until is not None and not self.keep_ended:
+            raise ValueError("an aircraft judged until an instant flies on past it: a loop keeping the ended ones")
         out = Run(self.reading)
         for segment in segments([*controlled, *replayed]):
-            self._segment(segment, out)
+            self._segment(segment, out, judged_until or {})
         return out
 
-    def _segment(self, segment: list[Controlled | Track], out: Run) -> None:
+    def _segment(self, segment: list[Controlled | Track], out: Run, until: Mapping[str, float]) -> None:
         step = self.step_s
         flown_here = [a for a in segment if isinstance(a, Controlled)]
         replayed_here = [a for a in segment if not isinstance(a, Controlled)]
@@ -246,68 +332,24 @@ class Loop:
                           + [(a.presence.landing_s, a.key, a) for a in replayed_here], key=lambda x: (x[0], x[1]))
         # a landing after the segment's last step (its last row is before the crossing) is still checked
         last = max(end, math.ceil(landings[-1][0] / step) * step) if landings else end
-        open_episodes: dict[tuple[str, str], dict[str, Any]] = {}
+        judging = Judging(self.separation, self.reading, step, out)
+
+        def judged(a: Controlled | Track, t: float) -> bool:
+            return a.key not in out.ended and t <= until.get(a.key, math.inf)
+
         pending = 0
         for t_s in scene_steps(start, last, step):
             t_s = float(t_s)
             while pending < len(landings) and landings[pending][0] <= t_s:
-                self._landing(landings[pending][0], landings[pending][2], flown_here, replayed_here, out)
+                at, _, leader = landings[pending]
+                if judged(leader, at) or self.keep_ended:
+                    here = [a for a in flown_here if a.key != leader.key and a.on_step(at)]
+                    judging.landing(at, leader, [a for a in here if judged(a, at)],
+                                    [a for a in replayed_here
+                                     if a.key != leader.key and a.presence.times_s[0] <= at <= a.presence.times_s[-1]],
+                                    [a for a in here if not judged(a, at)] if self.keep_ended else (),
+                                    leader_passive=isinstance(leader, Controlled) and not judged(leader, at))
                 pending += 1
-            here_c = [a for a in flown_here if a.on_step(t_s) and a.key not in out.ended]
-            here_r = [a for a in replayed_here if a.on_step(t_s)]
-            if len(here_c) + len(here_r) < 2:
-                continue
-            out.steps_judged += 1
-            here: list[Controlled | Track] = [*here_c, *here_r]
-            found = losses(join(at_steps(here_c, t_s, step), traffic_at(here_r, t_s)), self.separation, self.reading)
-            ended_now: dict[str, dict[str, Any]] = {}
-            for loss in found:
-                pair = tuple(sorted((here[loss.i].key, here[loss.j].key)))
-                episode = open_episodes.get(pair)
-                if episode is None or episode["last_s"] != t_s - step:
-                    episode = {"pair": list(pair), "relation": loss.relation, "first_s": t_s, "steps": 0, "kinds": [],
-                               "min_ratio": math.inf, "closest_m": None, "required_m": None, "wake_known": True,
-                               "responsible": [], "ended": []}
-                    open_episodes[pair] = episode
-                    out.episodes.append(episode)
-                episode["steps"] += 1
-                episode["last_s"] = t_s
-                if loss.distance_m / loss.required_m < episode["min_ratio"]:
-                    episode["min_ratio"] = loss.distance_m / loss.required_m
-                    episode["closest_m"], episode["required_m"] = loss.distance_m, loss.required_m
-                episode["wake_known"] = episode["wake_known"] and loss.wake_known
-                if loss.kind not in episode["kinds"]:
-                    episode["kinds"].append(loss.kind)
-                for k in loss.responsible:
-                    answer = {"key": here[k].key, "controlled": k < len(here_c)}
-                    if answer not in episode["responsible"]:
-                        episode["responsible"].append(answer)
-                    if k < len(here_c) and here[k].key not in ended_now:
-                        other = loss.j if k == loss.i else loss.i
-                        ended_now[here[k].key] = {"t_s": t_s, "kind": loss.kind, "relation": loss.relation,
-                                                  "with": here[other].key, "with_controlled": other < len(here_c)}
-                        episode["ended"].append(here[k].key)
-            out.ended.update(ended_now)
-
-    def _landing(self, t_s: float, leader: Controlled | Track, flown_here: list[Controlled],
-                 replayed_here: list[Track], out: Run) -> None:
-        if leader.key in out.ended:
-            return
-        others_c = [a for a in flown_here if a.key != leader.key and a.on_step(t_s) and a.key not in out.ended]
-        others_r = [a for a in replayed_here
-                    if a.key != leader.key and a.presence.times_s[0] <= t_s <= a.presence.times_s[-1]]
-        out.landings_checked += 1
-        scene = join(between(others_c, t_s, self.step_s), traffic_at(others_r, t_s),
-                     over_threshold(leader, self.separation))
-        loss = wake_at_threshold(scene, len(others_c) + len(others_r), self.separation)
-        if loss is None:
-            return
-        others: list[Controlled | Track] = [*others_c, *others_r]
-        follower = others[loss.j]
-        controlled = loss.j < len(others_c)
-        out.at_threshold.append({"t_s": t_s, "leader": leader.key, "leader_controlled": isinstance(leader, Controlled),
-                                 "follower": follower.key, "follower_controlled": controlled, "gap_m": loss.distance_m,
-                                 "required_m": loss.required_m, "relation": loss.relation})
-        if controlled:
-            out.ended[follower.key] = {"t_s": t_s, "kind": AT_THRESHOLD, "relation": loss.relation,
-                                       "with": leader.key, "with_controlled": isinstance(leader, Controlled)}
+            here = [a for a in flown_here if a.on_step(t_s)]
+            judging.step(t_s, [a for a in here if judged(a, t_s)], [a for a in replayed_here if a.on_step(t_s)],
+                         [a for a in here if not judged(a, t_s)] if self.keep_ended else ())

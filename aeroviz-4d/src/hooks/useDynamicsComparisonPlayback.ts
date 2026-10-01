@@ -143,7 +143,7 @@ export function useDynamicsComparisonPlayback({
               ? Cesium.ClockRange.LOOP_STOP
               : Cesium.ClockRange.CLAMPED;
             viewer.clock.multiplier = multiplier;
-            // Load PAUSED — the CZML is loaded whenever you're in Compare with a
+            // Load PAUSED — the CZML is loaded whenever you're in Fly with a
             // result (so the shared clock transport is bound to it), but it animates
             // only when the user presses Play (panel button or bottom bar/native dial).
             viewer.clock.shouldAnimate = false;
@@ -178,6 +178,9 @@ export function useDynamicsComparisonPlayback({
           viewer.trackedEntity = undefined;
         }
         viewer.dataSources.remove(dataSource, true);
+        // The clock was this playback's: unloaded, it stops (a live flight or another
+        // task's content takes the screen, and nothing of this CZML is left to animate).
+        viewer.clock.shouldAnimate = false;
       }
       setStatus("idle");
     };

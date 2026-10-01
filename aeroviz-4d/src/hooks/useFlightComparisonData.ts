@@ -18,6 +18,8 @@ export interface FlightComparisonDatum {
   massKg: number | null;
   resultTimeS: number | null;
   status: ComparisonGroup["status"];
+  /** The runway it landed on when that is not the observed flight's (status `otherRunway`, or a fail there). */
+  landedRunway: string | null;
 }
 
 export interface FlightComparisonData {
@@ -45,7 +47,7 @@ export function useFlightComparisonData(): FlightComparisonData {
   const selectedCategory = drawableCategories.find(
     (category) => category.dir === trajectoryComparisonCategory,
   );
-  // V and mass are useful in Baseline too, so keep reading the first published index when
+  // V and mass are useful in Ground Truth too, so keep reading the first published index when
   // comparison is off. Outcome styling remains gated by comparisonActive in FlightTable.
   const categoryDir = trajectoryComparison
     ? selectedCategory?.dir ?? null
@@ -76,6 +78,7 @@ export function useFlightComparisonData(): FlightComparisonData {
             massKg: group.massKg ?? group.initialState?.m ?? null,
             resultTimeS: group.status !== "failed" ? group.finalTimeS : null,
             status: group.status,
+            landedRunway: group.landedRunway ?? null,
           });
         }
         setByFlightKey(map);

@@ -24,6 +24,7 @@ from ts_transformer.prior.augment import Augmentation, augment_signals, augment_
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.tests.test_instruction_training_export import HAE_MINUS_MSL_M, _offsets
 from ts_transformer.tests.test_prior_free_generation import _speak
+from ts_transformer.tests.test_training_attitude import AERO_ROW
 
 
 def _sample(seed: int):
@@ -41,7 +42,7 @@ def _sample(seed: int):
 def test_a_sample_is_the_words_said_on_the_flights_own_steps_and_the_track_on_its_own_clock(seed):
     flown, grid, geometry, words, row, inputs = _sample(seed)
     step_s, start_s = words.spec.step_s, N_LOOK * words.spec.step_s
-    payload = export.sample_payload(flown, 0, row, grid, geometry, words, HAE_MINUS_MSL_M)
+    payload = export.sample_payload(flown, 0, row, grid, geometry, words, HAE_MINUS_MSL_M, inputs.aero_params[0].numpy())
     assert payload["outcome"] == row["outcome"] and payload["sample"] == 0
     # the words said up to the flight's end, each on the flight's own step: the first predicted step says every column
     said = grid[: row["steps_said"]]
@@ -53,7 +54,14 @@ def test_a_sample_is_the_words_said_on_the_flights_own_steps_and_the_track_on_it
     # the track: from the observed state at row N_LOOK, every step, on the flight's clock, to the outcome's row
     track = payload["track"]
     n = len(track["tS"])
-    assert all(len(values) == n for values in track.values())
+    assert all(len(values) == n for name, values in track.items() if name != "attitude")
+    # the attitude it is drawn in, at each point: the executor's own bank there (the cycle starting at the point; at the
+    # track's end, the cycle ending there)
+    assert all(len(values) == n for values in track["attitude"].values())
+    rows = np.round((np.asarray(track["tS"]) - start_s) / flown.cycle_s).astype(int)
+    commands = flown.commands[0].numpy()
+    assert track["attitude"]["bankRightDeg"] == pytest.approx(
+        -np.degrees(commands[np.minimum(rows, rows[-1] - 1), 1]), abs=0.006)
     assert track["tS"][0] == start_s and np.all(np.diff(track["tS"]) > 0)
     assert np.allclose(np.diff(track["tS"])[:-1], step_s)
     outcome = outcome_of(flown, 0, geometry, row["last_runway"], words.spec)
@@ -72,8 +80,8 @@ def test_a_dynamics_failure_s_track_stops_before_the_failed_state():
     flown, _, geometry, words, _, _ = _sample(3)
     start_s = N_LOOK * words.spec.step_s
     step_s = words.spec.step_s
-    landed = export.track_payload(flown, 0, 5, "landed", geometry, step_s, start_s, HAE_MINUS_MSL_M)
-    failed = export.track_payload(flown, 0, 5, "dynamics_failure", geometry, step_s, start_s, HAE_MINUS_MSL_M)
+    landed = export.track_payload(flown, 0, 5, "landed", geometry, step_s, start_s, HAE_MINUS_MSL_M, AERO_ROW)
+    failed = export.track_payload(flown, 0, 5, "dynamics_failure", geometry, step_s, start_s, HAE_MINUS_MSL_M, AERO_ROW)
     assert landed["tS"] == [start_s, start_s + 2.0, start_s + 4.0, start_s + 5.0]
     assert failed["tS"] == [start_s, start_s + 2.0, start_s + 4.0]
 
@@ -83,7 +91,7 @@ def test_a_sentence_whose_first_predicted_step_leaves_a_column_unsaid_is_refused
     broken = grid.copy()
     broken[0, 2] = UNCHANGED
     with pytest.raises(ValueError, match="does not say every column"):
-        export.sample_payload(flown, 0, row, broken, geometry, words, HAE_MINUS_MSL_M)
+        export.sample_payload(flown, 0, row, broken, geometry, words, HAE_MINUS_MSL_M, AERO_ROW)
 
 
 # ---- the formal val readout, bound to this prior, executor spec, artefact and draw
@@ -178,7 +186,7 @@ def test_a_sentence_the_glidepath_edge_stopped_ends_at_its_stop_with_no_crossing
     rows, grids, stops = said_rows(batch, flown, np.asarray([grid]), forbidden, words, [0], masks)
     step = int(stops.step[0])
     assert step >= 0 and rows[0]["outcome"] == BELOW_GLIDEPATH
-    payload = export.sample_payload(flown, 0, rows[0], grids[0], geometry, words, HAE_MINUS_MSL_M, step)
+    payload = export.sample_payload(flown, 0, rows[0], grids[0], geometry, words, HAE_MINUS_MSL_M, AERO_ROW, step)
     start_s = N_LOOK * one.step_s
     assert payload["outcome"] == BELOW_GLIDEPATH and payload["crossing"] is None
     assert payload["endS"] == pytest.approx(start_s + (step + 1) * one.step_s)
@@ -186,7 +194,7 @@ def test_a_sentence_the_glidepath_edge_stopped_ends_at_its_stop_with_no_crossing
     assert payload["rows"] == N_LOOK + step + 1 and max(e["row"] for e in payload["events"]) <= N_LOOK + step
     assert "altitude" in payload["forbiddenMass"]                      # the procedure's altitudes mask the altitude words
     with pytest.raises(ValueError, match="outcome below_glidepath with the glidepath stop at step -1"):
-        export.sample_payload(flown, 0, rows[0], grids[0], geometry, words, HAE_MINUS_MSL_M)
+        export.sample_payload(flown, 0, rows[0], grids[0], geometry, words, HAE_MINUS_MSL_M, AERO_ROW)
 
 
 def test_a_readout_of_another_schema_is_refused_by_name_before_it_is_read():
@@ -211,10 +219,15 @@ def _tuned(schema, start, round_number):
 def test_the_models_are_named_by_the_method_that_trained_them_every_version_alike():
     from ts_transformer.experiments.prior_augmented_reward import AUGMENTED_REWARD_SCHEMA
     from ts_transformer.experiments.prior_landing_reward import LANDING_REWARD_SCHEMA
+    from ts_transformer.experiments.traffic_reward import TRAFFIC_REWARD_SCHEMA
+    from ts_transformer.experiments.traffic_window_reward import SCHEMA as TRAFFIC_WINDOW_REWARD_SCHEMA
 
     assert export.model_identity({"git": {}}) == ("base", None)
     assert export.model_identity(_tuned(LANDING_REWARD_SCHEMA, PRIOR, 3)) == ("landing", 3)
     assert export.model_identity(_tuned(AUGMENTED_REWARD_SCHEMA, PRIOR, 2)) == ("augmented", 2)
+    assert export.model_identity(_tuned(TRAFFIC_REWARD_SCHEMA, PRIOR, 5)) == ("traffic", 5)
+    # M4 in windows trains its own model, never another traffic round ("traffic r5" is its start)
+    assert export.model_identity(_tuned(TRAFFIC_WINDOW_REWARD_SCHEMA, PRIOR, 5)) == ("window", 5)
     # the adopted landing model was written by the method's first version: the same model
     assert export.model_identity(_tuned("ts-prior-landing-reward-v1", PRIOR, 1)) == ("landing", 1)
     with pytest.raises(ValueError, match="no model is named for ts-prior-closed-loop-sft-v1"):
@@ -270,7 +283,7 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
     from ts_transformer.tests.test_autopilot import _params, _physics
     from ts_transformer.tests.test_instruction_training_export import SET_ID, _artefact, _run, _straight, _vectored
     from ts_transformer.tests.test_training_overlays import _prior_dir
-    from ts_transformer.tests.support import instruction_airport, landing_on
+    from ts_transformer.tests.support import instruction_airport, landing_on, passed_executor
 
     vectored, straight = _vectored("KXXX:V1_09_abc123_20260101T000000Z"), _straight("KXXX:S1_09_abc124_20260101T000100Z")
     one = _artefact(tmp_path / "artefact", [vectored, straight])
@@ -285,6 +298,7 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
     executor_spec.write_spec(tmp_path / "executor", _params(), one.sha256, {}, {
         "executor_source_sha256": executor_spec.executor_source_sha256(), "python": "3", "labeller_source_sha256": labeller_source_sha256(),
         "git": {"head": "test", "dirty": False}})
+    passed_executor(tmp_path / "executor")
 
     unflown = {straight.dataset_id}
 
@@ -316,7 +330,9 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
     overlay_id = f"generation_base_{checkpoint[:8]}"                   # the default: its name and checkpoint
     payload = json.loads((training / overlay_id / export.PAYLOAD_FILE).read_text(encoding="utf-8"))
     sample = json.loads((training / SET_ID / "sample.json").read_text(encoding="utf-8"))
-    assert payload["schema"] == export.SCHEMA and payload["base"]["setId"] == SET_ID and payload["readout"] is None
+    assert payload["schema"] == export.SCHEMA and payload["readout"] is None
+    assert payload["base"] == {"setId": SET_ID, "specSha256": sample["vocabulary"]["specSha256"],
+                               "candidatesSha256": sample["candidatesSha256"], "airportFrame": sample["airportFrame"]}
     assert payload["producedBy"]["device"] == "cpu"                     # the speaker's; the executor is always on CPU
     assert payload["model"] == {"name": "base", "round": None, "run": "4dTrajectory/outputs/POOLED/prior/v_test/full_s1",
                                 "checkpointSha256": checkpoint, "variant": "full",
@@ -342,6 +358,13 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
     assert again["flights"] == payload["flights"]
     with pytest.raises(SystemExit):                                     # never overwritten
         export.main(args)
+    # heights on another datum than the set's flights: refused before anything is written
+    monkeypatch.setattr(export, "runway_hae_minus_msl_m",
+                        lambda *given: {ident: offset + 0.1 for ident, offset in _offsets(*given).items()})
+    with pytest.raises(ValueError, match="draws it -32.00 m HAE − MSL, the overlay -31.90 m"):
+        export.main([*args, "--overlay-id", "datum"])
+    assert not (training / "datum").exists()
+    monkeypatch.setattr(export, "runway_hae_minus_msl_m", _offsets)
     # both flights on their own dynamics: each flight's samples are its own, flown from its own state at N_LOOK
     unflown.clear()
     assert export.main([*args, "--overlay-id", "both"]) == 0

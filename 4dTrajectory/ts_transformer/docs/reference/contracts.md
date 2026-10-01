@@ -489,22 +489,27 @@ landing context (`prior.scene.context_landings`) or put in a scene. The per-flig
 other ts models'; a cross-model comparison uses the flights both hold out (1,458: on a test day AND in the flight
 split's test).
 
-### C33 · the executor spec: written once, bound to the executor code, the vocabulary and the labeller
+### C33 · the executor spec: written once, opened for executor code that flies its reference tracks within the bounds
 
-2026-09-24 (`autopilot/spec.py`, `autopilot/replay.py`; executor design §12). An executor spec is a directory written once
-(`spec.json` + `measurements.json`, an existing file refuses): the parameters under their own sha, the vocabulary spec sha
-it was measured against, and `source`: `executor_source_sha256` over `executor_source_files` (every `autopilot/` module
-but `spec.py`, plus every repository module they import directly — `ts_transformer.config`, `data.dataset`,
-`outputs.envelope`, `outputs.dynamics.*`, `outputs.constraints.speed_floor`, `geometry.flyability`, `geokit`, …, labelled
-by module name so the hash is the same from any checkout) and the labeller's source sha. `replay.open_executor` refuses a
-spec of another schema (`ts-executor-spec-v6`), of other executor code, of another vocabulary, or of another labeller.
-**Since executor v11 (2026-09-27, the user's rule) the hash is over each file's LOGIC, not its bytes** (`spec.logic`: the
-syntax tree without the docstrings of the module, its classes and functions, written back by `ast.unparse`; comments
-never reach the tree): a docstring, a comment or a line break is free, **any change to the code makes the current code
-refuse every stored spec** — a new spec is written and the train replay gate re-run (v7 → v9 and v9 → v10 on 2026-09-26
-came that way, and v11 does; up to v10 the hash was over bytes, comments included, and held ten dated records in
-`docs/`). The written-back text is the running Python's: another Python version may differ and is refused as other code
-— the spec records `source.python` and the refusal names it.
+2026-09-24 (`autopilot/spec.py`, `autopilot/replay.py`; executor design §12), **changed 2026-10-01 (the user): the
+executor is checked by what it flies, not by its source**. An executor spec is a directory written once (`spec.json` +
+`measurements.json`, an existing file refuses): the parameters under their own sha, the vocabulary spec sha it was
+measured against, and `source`: the logic hash of the executor code that measured it (`executor_source_sha256` over
+`executor_source_files`: every `autopilot/` module but `spec.py` plus the repository modules they import directly, by
+module name; each file's LOGIC — `spec.logic`, docstrings and comments free) and the labeller's source sha.
+Beside it, `conformance/` (`autopilot/conformance.py`, runner `executor_conformance`, R42): the REFERENCE TRACKS — 50
+labelled train flights an airport (the replay's draw, seed 1337, own dynamics) flown on their labelled words by the
+code that measured the spec, every cycle and every verdict, with each flight's input digest — and one
+`passed-<code12>.json` for each executor code that flew them again within the bounds in EVERY way the executor flies
+(single-aircraft batch, multi-aircraft batch with staggered starts, the single-flight executor): states ≤ 1e-6 m
+horizontally and vertically, other floats ≤ 1e-6, every limit, mode, done cycle, outcome and word verdict equal.
+`replay.open_executor` refuses a spec of another schema, vocabulary or labeller, and opens it only for executor code
+with a passed record against its reference (`spec.require_conforming_executor`); `replay.open_spec` opens it without,
+for the check itself. **A code change whose tracks stay within the bounds needs one check (~30 s), and no spec,
+training or readout is redone; one that leaves them needs a new spec.** v11's reference was written 2026-10-01 from
+`a7a32324` (the executor code that measured it, `a0a6e20bdd84`); `executor_spec` writes a new spec's reference and passed
+record with it. Before 2026-10-01 the spec was bound to the source hash itself (any code change refused every spec: v7 → v11
+came that way); the single-flight executor carried its own source pin (`MIRRORED_SOURCE_SHA256`), now gone.
 
 ### C34 · a prior checkpoint belongs to one sentence artefact
 
@@ -546,4 +551,24 @@ needs visual separation). `Traffic` holds its contract: along, signed track − 
 distance right of the centreline are finite exactly when a runway is in force; an established aircraft has a runway.
 `Separation.right_nm` (from `parallel_relations`) carries each parallel centreline's signed offset, both orders. The
 package does not reach `instructions` (architecture test): the caller measures capture, clock position and the angles.
+
+### C37 · a traffic prior is a single-aircraft prior with a traffic attention that starts at zero (`ts-prior-checkpoint-v5`)
+
+2026-09-28 (multi-aircraft design §2.5, §6.2, §9 items 22–23). `prior.model.with_traffic(model, EDGE_FEATURES)` keeps every
+weight of a single-aircraft prior (augmented, for the multi-aircraft post-training) and adds, in every layer after the
+aircraft attention, a `TrafficAttention`: each aircraft reads only the OTHER aircraft present at its step, the edge
+features into a bias per head and into the value read, its output layer without a bias and its weight at zero. The model's own
+aircraft attention then reads only the aircraft itself, as it did alone. So the traffic attention adds exactly 0 until it
+learns, and the model answers as the single prior does for each aircraft alone — to rounding only (a batch holding
+several aircraft sums in another order than one holding one: 1e-15 in double, 1.2e-5 on augmented's logits in float32;
+the single prior itself differs as much between the two layouts). Zeroing the edge layers of a scene prior's attention
+would not do this — the softmax over all present aircraft gives another aircraft weight whatever its edges. An aircraft
+with no other present at a step reads 0 there, however the layer has learned — the output layer has no bias (the
+first review found a bias there learning from the first step) — and no softmax row is fully masked (no NaN forward or
+backward). Only a single-aircraft prior gains one (`with_traffic` and `Prior` refuse other edge features). At zero only
+the output layer has a gradient; the layers inside follow once it moves. `edges` holds the traffic features, whose first
+columns are the model's own edge features (`SINGLE_EDGE_FEATURES`). The checkpoint `ts-prior-checkpoint-v5` is v3's payload
+plus `edge_features`, `traffic_features`, `edge_source_sha256` and `start` (the single prior's directory and checkpoint
+sha256); `load_prior` reads v3, v4 and v5 by name and checks the edge code of v4 and v5; the single-aircraft `Speaker`
+refuses both.
 

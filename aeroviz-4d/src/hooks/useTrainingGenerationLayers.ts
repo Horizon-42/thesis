@@ -33,11 +33,13 @@ import {
   generationOnScreen,
   isAugmentedStart,
   overlayOnScreen,
+  sentenceAxisEndS,
   trainingModelGroups,
   type TrainingGeneratedSentence,
   type TrainingGenerationView,
 } from "../data/trainingOverlays";
 import {
+  cursorOnFlight,
   sentenceWordAt,
   trainingClearedValue,
   trainingWordLabel,
@@ -146,6 +148,7 @@ export default function useTrainingGenerationLayers(): void {
   }, [viewer, view, label, read, selection]);
 
   const word = read !== null && selection !== null && trainingColumn !== null
+    && cursorOnFlight(selection, trainingCursorS, sentenceAxisEndS(selection.flight, selection.vocabulary.stepS, read))
     ? sentenceWordAt(read, trainingColumn, generatedRowAt(selection.vocabulary.stepS, trainingCursorS)) : null;
   const wordRow = word?.row ?? null;
   const wordEnd = word?.endRow ?? null;

@@ -43,6 +43,7 @@ import torch
 
 from ts_transformer.experiments.prior_train import load_prior, roster_digests, roster_record, rosters, splits
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals, load_spec
+from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import APPROACH, COLUMNS, HEADING, SPEED, Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.data import Split, batches
@@ -168,6 +169,35 @@ def read_group(flights: list[dict[str, Any]], strata: int, rng: np.random.Genera
     return out
 
 
+def flight_context(instructions: Path, spec: VocabularySpec, split: str, dataset_ids: Sequence[str]
+                   ) -> dict[str, list[tuple[int, dict[str, Any]]]]:
+    """Per airport, each labelled flight of ``split`` (its index in the artefact's sentences, which must be
+    ``dataset_ids``) with its rows' flags (`step_flags`, the split's arrivals in the scene), phase strata and bootstrap
+    cluster (its airport's UTC hour)."""
+    geometries = load_candidates(instructions)
+    signals = load_signals(instructions, split)
+    sentences = load_sentences(instructions, split, spec)
+    offsets = sentences["offsets"]
+    spoken = [int(i) for i in sentences["signal_index"]]
+    if [signals[i].dataset_id for i in spoken] != list(dataset_ids):
+        raise ValueError("the split's flights are not the artefact's sentences in order")
+    by_airport: dict[str, list[int]] = defaultdict(list)
+    for k, i in enumerate(spoken):
+        by_airport[signals[i].airport].append(k)
+    background = defaultdict(list)
+    for i in sorted(set(range(len(signals))) - set(spoken)):
+        flight = signals[i]
+        background[flight.airport].append(presence(flight, None, geometries[flight.airport]))
+    out: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for airport, members in sorted(by_airport.items()):
+        speaking = [presence(signals[spoken[k]], int(offsets[k + 1] - offsets[k]), geometries[airport]) for k in members]
+        flags = step_flags(speaking, background[airport])
+        out[airport] = [(k, {**flag, "stratum": phase_strata(ego, int(sentences["capture_row"][k])),
+                             "cluster": (airport, int(ego.start_s // CLUSTER_S))})
+                        for k, ego, flag in zip(members, speaking, flags)]
+    return out
+
+
 def pooled_flights(rows: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     """Every airport's flights as one group whose strata are airport × phase (airport ``a``'s phase stratum
     + ``a`` × `STRATA`)."""
@@ -198,27 +228,8 @@ def main(argv: list[str] | None = None) -> int:
     readings = step_readings(model, split, TrainConfig(**payload["train_config"]).tokens_per_batch, device)
     print(f"{len(split.flights)} {SPLIT} flights read, {time.perf_counter() - started:.0f}s", flush=True)
 
-    geometries = load_candidates(instructions)
-    signals = load_signals(instructions, SPLIT)
-    sentences = load_sentences(instructions, SPLIT, spec)
-    offsets = sentences["offsets"]
-    spoken = [int(i) for i in sentences["signal_index"]]
-    if [signals[i].dataset_id for i in spoken] != [f.dataset_id for f in split.flights]:
-        raise ValueError("the split's flights are not the artefact's sentences in order")
-    by_airport: dict[str, list[int]] = defaultdict(list)
-    for k, i in enumerate(spoken):
-        by_airport[signals[i].airport].append(k)
-    background = defaultdict(list)
-    for i in sorted(set(range(len(signals))) - set(spoken)):
-        flight = signals[i]
-        background[flight.airport].append(presence(flight, None, geometries[flight.airport]))
-    rows: dict[str, list[dict[str, Any]]] = {}
-    for airport, members in sorted(by_airport.items()):
-        speaking = [presence(signals[spoken[k]], int(offsets[k + 1] - offsets[k]), geometries[airport]) for k in members]
-        flags = step_flags(speaking, background[airport])
-        rows[airport] = [{**readings[k], **flag, "stratum": phase_strata(ego, int(sentences["capture_row"][k])),
-                          "cluster": (airport, int(ego.start_s // CLUSTER_S))}
-                         for k, ego, flag in zip(members, speaking, flags)]
+    context = flight_context(instructions, spec, SPLIT, [f.dataset_id for f in split.flights])
+    rows = {airport: [{**readings[k], **c} for k, c in members] for airport, members in context.items()}
     rng = np.random.default_rng(BOOTSTRAP_SEED)
     report = {airport: read_group(group, STRATA, rng) for airport, group in rows.items()}
     pooled = read_group(pooled_flights(rows), STRATA * len(rows), rng)

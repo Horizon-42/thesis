@@ -102,7 +102,7 @@ describe("AppContext", () => {
     const { result } = renderHook(() => useApp(), { wrapper });
 
     await waitFor(() => expect(result.current.activeAirportCode).toBe("KRDU"));
-    expect(result.current.mode).toBe("observe");
+    expect(result.current.mode).toBe("evaluation");
     expect(result.current.proceduresOpen).toBe(false);
     expect(result.current.presentationMode).toBe(false);
     expect(result.current.layersDrawerOpen).toBe(false);

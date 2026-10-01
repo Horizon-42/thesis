@@ -69,10 +69,11 @@ REPLAY_SCHEMA = "ts-executor-replay-v5"
 
 
 def executor_forecast(flown: Flown, index: int, verdict: Outcome | Verdict, inputs: Any,
-                      series: FlightSeries) -> Forecast:
-    """Flight ``index``'s flown track as a control-path forecast from row 0: the states at every cycle to the
-    one its outcome is read at (before it, for a dynamics failure: no state of the failure enters the record),
-    the schedule in the plant's contract, and its newtons resolved by that contract's own law."""
+                      series: FlightSeries, *, anchor: int = 0) -> Forecast:
+    """Flight ``index``'s flown track as a control-path forecast from the series row ``anchor`` it was flown from (a
+    replay: row 0; free generation: the first predicted step): the states at every cycle to the one its outcome is
+    read at (before it, for a dynamics failure: no state of the failure enters the record), the schedule in the
+    plant's contract, and its newtons resolved by that contract's own law."""
     end = verdict.end_row - 1 if verdict.outcome == "dynamics_failure" else verdict.end_row
     dt = flown.cycle_s
     states = flown.states[index, : end + 1]
@@ -86,7 +87,8 @@ def executor_forecast(flown: Flown, index: int, verdict: Outcome | Verdict, inpu
     _, values = channels_from_states([(float(t), GeodeticState(*map(float, row))) for t, row in zip(offsets, geodetic)],
                                      series.frame)
     return Forecast(
-        times=float(series.times[0]) + offsets, values=values, normalized_progress=offsets / offsets[-1], anchor=0,
+        times=float(series.times[anchor]) + offsets, values=values, normalized_progress=offsets / offsets[-1],
+        anchor=anchor,
         final_time_s=float(offsets[-1]), predicted_final_time_s=float(offsets[-1]), horizon_mode=HORIZON, passes=1,
         truncated_at_threshold=verdict.outcome in CROSSINGS, horizon_capped=verdict.outcome == "timeout",
         sample_durations_s=np.full(end, dt), segment_durations_s=np.full(end, dt),

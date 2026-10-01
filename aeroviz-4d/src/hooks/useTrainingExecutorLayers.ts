@@ -8,7 +8,7 @@
  *    told, red on its ground trace (its judge's own row verdicts).
  *  • THE EXECUTOR, LIVE (`trainingAutopilot`, ready): the picked word's segment as the backend flew it — an aircraft flies
  *    it out from where the word was said (`autopilotPlaybackSpeedup` × real time — at least 8×, faster for a segment
- *    that would take more than 20 s — from the moment the answer arrived or "Replay in 3D" was pressed), in blue, or a
+ *    that would take more than 20 s — from the moment the answer arrived), in blue, or a
  *    loud red when the word flew outside its envelope (`autopilotColour`), its line growing behind it and labelled with
  *    the speed-up, its ground speed, height and bank — past where it heard the next word of the column (a heading word's
  *    lead into the next heading word, `autopilotRunAndTail`) its line and ground trace go on faded and dashed, the TAIL.
@@ -20,7 +20,7 @@
  *
  * The rows outside a heading word, the replay's and the live executor's, show with the heading bands' switch; neither
  * layer is rebuilt by a switch, and neither ever moves the camera. The aircraft is read on each frame (the viewer
- * renders continuously), not time-sampled: `viewer.clock` belongs to Observe.
+ * renders continuously), not time-sampled: `viewer.clock` belongs to Evaluation.
  */
 
 import { useEffect, useRef } from "react";
@@ -36,6 +36,7 @@ import {
   autopilotHasLine,
   autopilotJudgedPoints,
   autopilotOnScreen,
+  autopilotPlaybackS,
   autopilotPlaybackSpeedup,
   autopilotRunAndTail,
   AUTOPILOT_TAIL_OPACITY,
@@ -43,6 +44,7 @@ import {
 } from "../data/trainingAutopilot";
 import { TRAINING_OUTCOME_TAG } from "../data/trainingText";
 import {
+  aircraftGraphics,
   airLine,
   colour,
   entityGroup,
@@ -51,14 +53,18 @@ import {
   lonLatHeights,
   marker,
   planDegrees,
+  poseOrientation,
   TRAINING_ENTITY,
   trainingBandOutsideGround,
 } from "../scene/trainingEntities";
+import { poseAt } from "../data/trainingAttitude";
 
 type Ready = Extract<TrainingAutopilotView, { status: "ready" }>;
 
 /** The tail's dash in 3D, pixels: half Cesium's default (16), which an occluded line is drawn with. */
 const TAIL_DASH_PX = 8;
+/** The live aircraft model's least size on screen (px). */
+const AUTOPILOT_AIRCRAFT_PX = 56;
 
 /** Show or hide the entities of ``ids`` that are there. */
 function showEntities(viewer: Cesium.Viewer, ids: string[], shown: boolean): void {
@@ -105,7 +111,7 @@ function flyOut(viewer: Cesium.Viewer, view: Ready, bandsShown: () => boolean, o
   const last = positions.length - 1;
   const flownS = track.tS[last] - track.tS[0];
   const speedup = autopilotPlaybackSpeedup(flownS);
-  const now = () => autopilotFlownAt(track, ((Date.now() - playedAt) / 1000) * speedup);
+  const now = () => autopilotFlownAt(track, autopilotPlaybackS(track, playedAt, Date.now()));
   const aircraftAt = ({ index, fraction }: { index: number; fraction: number }) => (index === last
     ? positions[last] : Cesium.Cartesian3.lerp(positions[index], positions[index + 1], fraction, new Cesium.Cartesian3()));
   // the run solid to where the next word of the column was heard, the tail past it faded and dashed
@@ -134,11 +140,14 @@ function flyOut(viewer: Cesium.Viewer, view: Ready, bandsShown: () => boolean, o
     point: { pixelSize: 8, color: colour(hue), outlineColor: Cesium.Color.WHITE, outlineWidth: 1.5,
       disableDepthTestDistance: Number.POSITIVE_INFINITY },
   });
+  // the aircraft model in the executor's attitude where it is (`poseAt` at the same instant)
+  const orientationAt = (at: { index: number; fraction: number }) => poseOrientation(aircraftAt(at),
+    poseAt(track, at.index === last ? track.tS[last] : track.tS[at.index] + at.fraction * (track.tS[at.index + 1] - track.tS[at.index]))!);
   const aircraft = group.add({
     id: TRAINING_ENTITY.autopilotAircraft, name: "The autopilot's aircraft",
     position: new Cesium.CallbackPositionProperty(() => aircraftAt(now()), false),
-    point: { pixelSize: 12, color: colour(hue), outlineColor: Cesium.Color.WHITE, outlineWidth: 2,
-      disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    orientation: new Cesium.CallbackProperty(() => orientationAt(now()), false),
+    model: aircraftGraphics({ css: hue, blend: 0.5, alpha: 1, minimumPixelSize: AUTOPILOT_AIRCRAFT_PX, ringCss: "#ffffff", ringPx: 1.5 }),
     label: {
       text: new Cesium.CallbackProperty(() => autopilotAircraftLabel(track, now().index, speedup), false),
       font: "600 12px sans-serif",
@@ -152,6 +161,7 @@ function flyOut(viewer: Cesium.Viewer, view: Ready, bandsShown: () => boolean, o
     line.polyline!.positions = new Cesium.ConstantProperty(positions.slice(0, runLast + 1));
     if (tailLine !== null) tailLine.polyline!.positions = new Cesium.ConstantProperty(positions.slice(runLast));
     aircraft.position = new Cesium.ConstantPositionProperty(positions[last]);
+    aircraft.orientation = new Cesium.ConstantProperty(orientationAt({ index: last, fraction: 0 }));
     aircraft.label!.text = new Cesium.ConstantProperty(autopilotAircraftLabel(track, last, speedup));
     const on = (points: number[]) => ({ lon: points.map((index) => track.lon[index]), lat: points.map((index) => track.lat[index]) });
     group.add(groundLine(TRAINING_ENTITY.autopilotGround, "The autopilot's ground trace", planDegrees(on(run)), 2,
@@ -188,7 +198,7 @@ export default function useTrainingExecutorLayers(): void {
   const flown = replay?.flown ? replay : null;
   // the live answer of the sentence read: the truth's word, or the model's sample on screen
   const live = autopilotOnScreen(trainingAutopilot, selection, sourceOnScreen(trainingGenerations, trainingSource, selection).source);
-  // a segment of one state (a dynamics failure in its first cycle) has no line to fly out: the card and the status say so
+  // a segment of one state (a dynamics failure in its first cycle) has no line to fly out: the bar's status says so
   const ready = live?.status === "ready" && autopilotHasLine(live.segment) ? live : null;
   const { headingBands } = trainingLayers;
   // the rows outside a heading word, the replay's and the live executor's, shown with the bands' switch

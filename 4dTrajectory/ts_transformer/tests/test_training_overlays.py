@@ -12,7 +12,6 @@ The tests that ran both runners on the formal `v2_20260924` artefacts (the publi
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import re
@@ -41,6 +40,7 @@ from ts_transformer.tests.support import (
     fly_legs, instruction_airport, instruction_flight, instruction_spec as spec, landing_on,
 )
 from ts_transformer.tests.test_autopilot import DOWNWIND_BASE_FINAL, _fly_sentence, _params
+from ts_transformer.tests.test_training_attitude import AERO_ROW
 
 TRAINING_OVERLAYS_TS = REPO_ROOT / "aeroviz-4d" / "src" / "data" / "trainingOverlays.ts"
 
@@ -87,9 +87,11 @@ def test_the_flown_track_is_drawn_at_the_height_the_observed_one_is_drawn_at():
     signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
     flown, verdict, _ = _fly_sentence(signals)
     shift = executor_export.chart_shift_deg(flown, 0, instruction_airport(), float(signals.track_deg[0]))
-    track = executor_export.track_payload(flown, 0, verdict, instruction_airport(), spec(), shift, -32.0)
+    track = executor_export.track_payload(flown, 0, verdict, instruction_airport(), spec(), shift, -32.0, AERO_ROW)
     assert len(track["altitudeHaeM"]) == len(track["tS"]) > 1
     assert np.allclose(np.asarray(track["altitudeHaeM"]) - np.asarray(track["altitudeM"]), -32.0, atol=0.011)
+    # and the attitude it is drawn in, point for point
+    assert all(len(values) == len(track["tS"]) for values in track["attitude"].values())
 
 
 def test_the_verdicts_give_back_the_judges_count_on_every_clock():
@@ -261,13 +263,23 @@ def test_the_prior_s_first_predicted_truth_is_the_word_in_force_the_sample_shows
 
 
 # ---- the manifest and the set an overlay is drawn over
-def _base_files(training, *, kind=files.KIND_READBACK, rule=READING_RULE, schema=files.SAMPLE_SCHEMA):
+#: The HAE − MSL the synthetic set's flight is drawn at (the runway offset its exporter added).
+SET_DATUM_M = -32.0
+
+
+def _base_files(training, *, kind=files.KIND_READBACK, rule=READING_RULE, schema=files.SAMPLE_SCHEMA, candidates=None,
+                frame=None):
     one = spec()
+    msl = [1200.0, 1190.37, 1181.12]
     sample = {"schema": schema, "setId": "set_a", "airport": "KXXX", "writtenUtc": "2026-09-24T00:00:00+00:00",
               "vocabulary": {"specSha256": one.sha256, "readingRule": rule}, "cohort": {"split": files.SPLIT},
+              "candidatesSha256": candidates or files.candidates_sha256(instruction_airport()),
+              "airportFrame": frame or files.airport_frame(instruction_airport()),
               "flights": [{"datasetId": "KXXX:F_09_abc_20260101T000000Z", "flightKey": "F_09_abc_20260101T000000Z",
                            "rows": 3, "words": {"events": [{"row": 0, "column": 0, "value": 0},
-                                                           {"row": 2, "column": 2, "value": 18}]}}]}
+                                                           {"row": 2, "column": 2, "value": 18}]},
+                           "signals": {"altitudeHaeM": files.rounded(np.array(msl) + SET_DATUM_M, 2),
+                                       "raw": {"altitudeM": msl}}}]}
     index = {"schema": files.INDEX_SCHEMA, "airport": "KXXX",
              "sets": [{"id": "set_a", "kind": kind, "readingRule": rule, "vocabularySha256": one.sha256,
                        "file": "set_a/sample.json"}]}
@@ -280,24 +292,41 @@ def _base_files(training, *, kind=files.KIND_READBACK, rule=READING_RULE, schema
 def test_an_overlay_is_drawn_only_over_a_set_this_reader_reads(tmp_path):
     training = tmp_path / "KXXX" / "training"
     _base_files(training)
-    base = files.open_base_set(training, "KXXX", "set_a", spec())
-    raw = (training / "set_a" / "sample.json").read_bytes()
-    assert base.block["sampleSha256"] == hashlib.sha256(raw).hexdigest()
-    assert base.block["sampleWrittenUtc"] == "2026-09-24T00:00:00+00:00"
+    base = files.open_base_set(training, "KXXX", "set_a", files.KIND_READBACK, spec(), instruction_airport())
+    # what the overlay shares with its set, never the set file's bytes or time of writing
+    assert base.block == {"setId": "set_a", "specSha256": spec().sha256,
+                          "candidatesSha256": files.candidates_sha256(instruction_airport()),
+                          "airportFrame": files.airport_frame(instruction_airport())}
     with pytest.raises(ValueError, match="lists no set other"):
-        files.open_base_set(training, "KXXX", "other", spec())
+        files.open_base_set(training, "KXXX", "other", files.KIND_READBACK, spec(), instruction_airport())
+    moved = dict(files.airport_frame(instruction_airport()), lat=35.001)
     for change, message in ((dict(kind="prior-generated"), "prior-generated set"), (dict(rule="instruction-v1"), "instruction-v1"),
-                            (dict(schema="aeroviz-training-sample-v4"), "re-export the set first")):
+                            (dict(schema="aeroviz-training-sample-v4"), "re-export the set first"),
+                            (dict(candidates="0" * 64), "has candidates 000000000000, the overlay's artefact"),
+                            (dict(frame=moved), "is in the frame .* the overlay's artefact in")):
         shutil.rmtree(training)
         _base_files(training, **change)
         with pytest.raises(ValueError, match=message):
-            files.open_base_set(training, "KXXX", "set_a", spec())
+            files.open_base_set(training, "KXXX", "set_a", files.KIND_READBACK, spec(), instruction_airport())
+
+
+def test_an_overlay_drawing_heights_adds_the_set_flight_s_own_datum(tmp_path):
+    training = tmp_path / "KXXX" / "training"
+    _base_files(training)
+    base = files.open_base_set(training, "KXXX", "set_a", files.KIND_READBACK, spec(), instruction_airport())
+    signals = [instruction_flight(*fly_legs([(3, 0.0, 90.0, 0.0)], 270.0, 900.0, -5000.0, 300.0),
+                                  dataset_id="KXXX:F_09_abc_20260101T000000Z")]
+    assert abs(files.set_flight_datum_m(base.sample["flights"][0]) - SET_DATUM_M) <= 0.01    # two heights to 0.01 m
+    files.require_set_datum(base, signals, {"09": SET_DATUM_M})
+    files.require_set_datum(base, signals, {"09": SET_DATUM_M + 0.015})                       # within two roundings
+    with pytest.raises(ValueError, match=r"draws it -32\.00 m HAE − MSL, the overlay -31\.90 m"):
+        files.require_set_datum(base, signals, {"09": SET_DATUM_M + 0.1})
 
 
 def test_the_set_s_flights_must_carry_the_artefact_s_own_sentences(tmp_path):
     training = tmp_path / "KXXX" / "training"
     _base_files(training)
-    base = files.open_base_set(training, "KXXX", "set_a", spec())
+    base = files.open_base_set(training, "KXXX", "set_a", files.KIND_READBACK, spec(), instruction_airport())
     signals = [instruction_flight(*fly_legs([(3, 0.0, 90.0, 0.0)], 270.0, 900.0, -5000.0, 300.0),
                                   dataset_id="KXXX:F_09_abc_20260101T000000Z")]
     grid = np.full((3, 6), UNCHANGED, dtype=np.int64)
@@ -315,7 +344,7 @@ def test_the_set_s_flights_must_carry_the_artefact_s_own_sentences(tmp_path):
 def test_an_overlay_is_added_beside_its_set_and_never_overwritten(tmp_path):
     training = tmp_path / "KXXX" / "training"
     _base_files(training)
-    base = files.open_base_set(training, "KXXX", "set_a", spec())
+    base = files.open_base_set(training, "KXXX", "set_a", files.KIND_READBACK, spec(), instruction_airport())
     assert files.read_overlays(training, "KXXX", "ov_1") == []
     entry = files.overlay_entry("ov_1", files.KIND_EXECUTOR, base, "a title", "executor.json", 1, {"runner": "test"})
     with pytest.raises(ValueError):                                     # a payload that cannot be written stops the build
@@ -325,7 +354,7 @@ def test_an_overlay_is_added_beside_its_set_and_never_overwritten(tmp_path):
     assert "\n" not in out.read_text(encoding="utf-8")                    # compact: its arrays are long
     manifest = json.loads((training / files.OVERLAYS_FILE).read_text(encoding="utf-8"))
     assert manifest["schema"] == files.OVERLAYS_SCHEMA and [item["id"] for item in manifest["overlays"]] == ["ov_1"]
-    assert manifest["overlays"][0]["baseSampleSha256"] == base.sha256 and manifest["overlays"][0]["base"] == "set_a"
+    assert manifest["overlays"][0]["base"] == "set_a" and "baseSampleSha256" not in manifest["overlays"][0]
     with pytest.raises(ValueError, match="already lists overlay ov_1"):
         files.read_overlays(training, "KXXX", "ov_1")
     (training / "ov_9").mkdir()                                            # an overlay's directory is never reused
@@ -360,6 +389,7 @@ def test_the_frontend_reader_mirrors_the_exporters_names():
     assert json.loads(_ts_constant("TRAINING_GENERATION_SCHEMA")) == generation_export.SCHEMA
     assert json.loads(_ts_constant("TRAINING_AUGMENTED_GENERATION_SCHEMA")) == generation_export.AUGMENTED_SCHEMA
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_MODEL_NAMES"))) == generation_export.MODEL_NAMES
+    assert float(_ts_constant("TRAINING_DATUM_TOLERANCE_M")) == files.DATUM_TOLERANCE_M
     # a free sentence's outcomes: the judge's (the executor's list, pinned by the backend's MirrorTest) and the glidepath stop
     from ts_transformer.experiments.prior_free_generation import BELOW_GLIDEPATH, FREE_OUTCOMES
     from ts_transformer.prior.masks import PROCEDURE_ALTITUDES
@@ -376,7 +406,7 @@ def test_the_frontend_reader_mirrors_the_exporters_names():
 
 
 # ---- the prior's runner end to end, on a synthetic artefact and an untrained checkpoint (every write in tmp_path)
-def _prior_dir(directory, artefact, roster):
+def _prior_dir(directory, artefact, roster, variant="full"):
     """A prior directory as `prior_train` writes one, holding a small untrained network of ``artefact``'s spec, trained
     with the tracks roster ``roster``."""
     from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, roster_record
@@ -388,7 +418,7 @@ def _prior_dir(directory, artefact, roster):
     airports = tuple(sorted(geometries))
     slots = max(len(g.candidates) for g in geometries.values())
     config = PriorConfig(classes=column_classes(Words(one), slots), airports=airports, candidate_slots=slots,
-                         variant="full", d_model=32, layers=2, heads=4, feedforward=64, dropout=0.0)
+                         variant=variant, d_model=32, layers=2, heads=4, feedforward=64, dropout=0.0)
     torch.manual_seed(0)
     model = Prior(config, torch.as_tensor(prior_data.candidate_table(geometries, airports, slots)))
     directory.mkdir()
@@ -435,7 +465,8 @@ def test_the_prior_export_writes_a_set_s_predictions_beside_it_and_refuses_a_sec
     payload = json.loads((training / "prior_prior" / "prior.json").read_text(encoding="utf-8"))
     sample = json.loads((training / SET_ID / "sample.json").read_text(encoding="utf-8"))
     assert payload["schema"] == prior_export.SCHEMA and payload["base"]["setId"] == SET_ID
-    assert payload["base"]["sampleWrittenUtc"] == sample["writtenUtc"]
+    assert payload["base"] == {"setId": SET_ID, "specSha256": sample["vocabulary"]["specSha256"],
+                               "candidatesSha256": sample["candidatesSha256"], "airportFrame": sample["airportFrame"]}
     assert [f["flightKey"] for f in payload["flights"]] == [f["flightKey"] for f in sample["flights"]]
     assert [f["rows"] for f in payload["flights"]] == [f["rows"] for f in sample["flights"]]
     assert all(f["firstPredictedRow"] == N_LOOK and len(f["columns"][0]["changeP"]) == f["rows"] - N_LOOK
@@ -477,3 +508,97 @@ def test_the_frontend_reads_the_model_block_the_exporter_writes(tmp_path):
     block = generation_export.model_block(prior / "rl" / "round_01", config, "a" * 64, "full")
     assert read == set(block) - {"trainedAt"}
     assert set(re.findall(r"(\w+):", tuning)) == set(block["fineTuning"])
+
+
+def test_a_scene_prior_is_read_by_its_own_schema_with_its_edge_features_and_the_single_speaker_refuses_it(
+        tmp_path, monkeypatch):
+    """v4 (multi-aircraft design §9 item 10): the v3 payload plus the edge features, read by name; v3 reads as a
+    single-aircraft prior. A scene prior never speaks to single aircraft."""
+    from ts_transformer.experiments import prior_train
+    from ts_transformer.experiments.prior_train import SCENE_CHECKPOINT_SCHEMA, load_prior
+    from ts_transformer.experiments.traffic_scene_data import edge_source_sha256
+    from ts_transformer.prior.generate import Speaker
+    from ts_transformer.prior.masks import ProcedureMasks
+    from ts_transformer.prior.model import SINGLE_EDGE_FEATURES
+    from ts_transformer.tests.test_instruction_training_export import _artefact
+
+    flights = [instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0), dataset_id="KXXX:own",
+                                  split="val")]
+    _artefact(tmp_path / "artefact", flights)
+    roster = tmp_path / "tracks.json"
+    roster.write_text(json.dumps({"records": []}), encoding="utf-8")
+    monkeypatch.setattr(prior_train, "tracks_manifest_path", lambda code: roster)
+    _prior_dir(tmp_path / "prior", tmp_path / "artefact", roster)
+    single = load_prior(tmp_path / "prior", tmp_path / "artefact").model
+    assert single.edge_features == SINGLE_EDGE_FEATURES
+    # the same directory as a scene prior: its network reads three edge features
+    edges = ("self", "relative_front", "relative_left")
+    payload = torch.load(tmp_path / "prior" / "checkpoint.pt", weights_only=True)
+    torch.manual_seed(0)
+    scene = Prior(single.config, payload["state"]["candidates"], edges)
+    scene_payload = {**payload, "schema": SCENE_CHECKPOINT_SCHEMA, "edge_features": list(edges), "state": scene.state_dict(),
+                     "edge_source_sha256": edge_source_sha256()}
+    torch.save(scene_payload, tmp_path / "prior" / "checkpoint.pt")
+    from ts_transformer.prior.masks import MASKS_FILE, write_masks
+    (tmp_path / "prior" / MASKS_FILE).unlink()
+    write_masks(tmp_path / "prior", ProcedureMasks.none(), writer="test", git={"head": "test", "dirty": False})
+    record = json.loads((tmp_path / "prior" / "config.json").read_text(encoding="utf-8"))
+    (tmp_path / "prior" / "config.json").write_text(json.dumps({**record, "schema": SCENE_CHECKPOINT_SCHEMA}))
+    loaded = load_prior(tmp_path / "prior", tmp_path / "artefact").model
+    assert loaded.edge_features == edges
+    assert loaded.layers[0].edge_bias[0].in_features == 3
+    with pytest.raises(ValueError, match="scene prior"):
+        Speaker(loaded, flights, [], None, Words(spec()), max_rows=10, generator=torch.Generator(),
+                procedure_masks=ProcedureMasks.none())
+    # a mixed record (a v4 checkpoint beside a v3 config) is refused
+    (tmp_path / "prior" / "config.json").write_text(json.dumps(record))
+    with pytest.raises(SystemExit, match="is not a"):
+        load_prior(tmp_path / "prior", tmp_path / "artefact")
+    # edge features computed by other code are refused
+    (tmp_path / "prior" / "config.json").write_text(json.dumps({**record, "schema": SCENE_CHECKPOINT_SCHEMA}))
+    torch.save({**scene_payload, "edge_source_sha256": "0" * 64}, tmp_path / "prior" / "checkpoint.pt")
+    with pytest.raises(SystemExit, match="other code"):
+        load_prior(tmp_path / "prior", tmp_path / "artefact")
+
+
+def test_a_traffic_prior_is_read_by_its_own_schema_with_its_traffic_attention_and_the_single_speaker_refuses_it(
+        tmp_path, monkeypatch):
+    """v5 (multi-aircraft design §2.5, §6.2): a single-aircraft prior with a traffic attention — its own edge features
+    "self", the traffic attention's `EDGE_FEATURES` — read by name, its edge code checked as a scene prior's."""
+    from ts_transformer.experiments import prior_train
+    from ts_transformer.experiments.prior_train import TRAFFIC_CHECKPOINT_SCHEMA, load_prior
+    from ts_transformer.experiments.traffic_scene_data import edge_source_sha256
+    from ts_transformer.inference.scene_edges import EDGE_FEATURES
+    from ts_transformer.prior.generate import Speaker
+    from ts_transformer.prior.masks import ProcedureMasks
+    from ts_transformer.prior.model import SINGLE_EDGE_FEATURES, with_traffic
+    from ts_transformer.tests.test_instruction_training_export import _artefact
+
+    flights = [instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0), dataset_id="KXXX:own",
+                                  split="val")]
+    _artefact(tmp_path / "artefact", flights)
+    roster = tmp_path / "tracks.json"
+    roster.write_text(json.dumps({"records": []}), encoding="utf-8")
+    monkeypatch.setattr(prior_train, "tracks_manifest_path", lambda code: roster)
+    _prior_dir(tmp_path / "prior", tmp_path / "artefact", roster)
+    single = load_prior(tmp_path / "prior", tmp_path / "artefact")
+    torch.manual_seed(0)
+    traffic = with_traffic(single.model, EDGE_FEATURES)
+    payload = {**single.payload, "schema": TRAFFIC_CHECKPOINT_SCHEMA, "state": traffic.state_dict(),
+               "edge_features": list(SINGLE_EDGE_FEATURES), "traffic_features": list(EDGE_FEATURES),
+               "edge_source_sha256": edge_source_sha256(),
+               "start": {"directory": "prior", "checkpoint_sha256": "0" * 64}}
+    torch.save(payload, tmp_path / "prior" / "checkpoint.pt")
+    from ts_transformer.prior.masks import MASKS_FILE, write_masks
+    (tmp_path / "prior" / MASKS_FILE).unlink()
+    write_masks(tmp_path / "prior", ProcedureMasks.none(), writer="test", git={"head": "test", "dirty": False})
+    (tmp_path / "prior" / "config.json").write_text(json.dumps({**single.config, "schema": TRAFFIC_CHECKPOINT_SCHEMA}))
+    loaded = load_prior(tmp_path / "prior", tmp_path / "artefact").model
+    assert loaded.traffic_features == EDGE_FEATURES and loaded.edge_features == SINGLE_EDGE_FEATURES
+    assert all(torch.equal(value, loaded.state_dict()[name]) for name, value in traffic.state_dict().items())
+    with pytest.raises(ValueError, match="scene prior"):
+        Speaker(loaded, flights, [], None, Words(spec()), max_rows=10, generator=torch.Generator(),
+                procedure_masks=ProcedureMasks.none())
+    torch.save({**payload, "edge_source_sha256": "0" * 64}, tmp_path / "prior" / "checkpoint.pt")
+    with pytest.raises(SystemExit, match="other code"):
+        load_prior(tmp_path / "prior", tmp_path / "artefact")

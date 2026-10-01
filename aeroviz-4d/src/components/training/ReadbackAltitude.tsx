@@ -103,7 +103,7 @@ export default function ReadbackAltitude({ m, onCursorChange, onColumnChange }: 
           <Line key={`altitude-out-${index}-${first}`} className="training-readback-outside" stroke={TRAINING_OUTSIDE_COLOR} width={2}
             xs={m.rows(first, lastRow).map(rowXDistance)} ys={m.rows(first, lastRow).map((row) => yAltitude(signals.smoothed.altitudeM[row]))} />
         ))) : null}
-      <VLine x={rowXDistance(m.cursorRow)} top={PLOT_TOP} bottom={bottom} className="training-readback-cursor-line" />
+      {m.cursorOn ? <VLine x={rowXDistance(m.cursorRow)} top={PLOT_TOP} bottom={bottom} className="training-readback-cursor-line" /> : null}
       <Axis left={GUTTER} right={GUTTER + m.plotW} y={bottom} ticks={distanceTicks(m)}
         caption="km flown (the smoothed ground speed, integrated)" />
     </ChartFrame>

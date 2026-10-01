@@ -13,6 +13,7 @@ import {
   trainingWordAt,
   trainingSetRefusal,
   trainingVerdicts,
+  trainingBandLabel,
   trainingWordLabel,
   TRAINING_COLUMNS,
   TRAINING_INDEX_SCHEMA,
@@ -20,6 +21,7 @@ import {
   TRAINING_SAMPLE_SCHEMA,
   TRAINING_SPEC_SHA256,
   type TrainingSample,
+  type TrainingSetEntry,
 } from "../trainingSample";
 import { MOCK_ROWS, SET_ID, STRAIGHT_KEY, VECTORED_KEY, WORD, mockIndex, mockSample } from "./trainingSample.fixture";
 
@@ -68,7 +70,7 @@ describe("parseTrainingSample", () => {
     for (const schema of ["aeroviz-training-sample-v2", "aeroviz-training-sample-v3", "aeroviz-training-sample-v4",
                           "aeroviz-training-sample-v5", "aeroviz-training-sample-v6"]) {
       expect(refusal((raw) => { raw.schema = schema; })).toContain(
-        `schema is "${schema}", expected "${TRAINING_SAMPLE_SCHEMA}" — a sample of another format is not read`);
+        `schema is "${schema}", expected "${TRAINING_SAMPLE_SCHEMA}" — a file of another format is not read`);
     }
   });
 
@@ -307,8 +309,8 @@ describe("the index", () => {
     expect(trainingSetRefusal(prior)).toMatch(/read under segment-v13/);
     expect(trainingSetRefusal({ ...current, vocabularySha256: "9".repeat(64) }))
       .toContain(`spec 999999999999 is not the ${TRAINING_READING_RULE} spec`);
-    expect(trainingSetRefusal({ ...current, kind: "prior-generated" }))
-      .toContain("this reader opens only vocabulary-readback sets");
+    expect(trainingSetRefusal({ ...current, kind: "prior-generated" } as TrainingSetEntry))
+      .toContain("this reader opens only vocabulary-readback and traffic-windows sets");
   });
 
   it("greys out one malformed entry without emptying the manifest", () => {
@@ -341,6 +343,18 @@ describe("reading a sentence", () => {
     expect(label("angle", WORD.descent3)).toBe("descent 3 (3.06°)");
     expect(label("speed", WORD.speed110)).toBe("110 m/s");
     expect(label("speed", WORD.unspecified)).toBe("unspecified");
+  });
+
+  it("writes a descent class on its band by its number and angle, under the row named Descent", () => {
+    const { vocabulary, candidates } = parsed();
+    const band = (column: (typeof TRAINING_COLUMNS)[number], value: number) =>
+      trainingBandLabel(vocabulary, candidates, column, value);
+    expect(band("angle", WORD.descent3)).toBe("3: 3.06°");
+    expect(band("angle", WORD.level)).toBe("level");
+    expect(band("angle", vocabulary.angleClasses.findIndex((angle) => angle.name === "climb"))).toBe("climb: -1.22°");
+    // every other column's band reads its word in full
+    expect(band("heading", WORD.heading090)).toBe("090°");
+    expect(band("altitude", WORD.land)).toBe("descend to land");
   });
 
   it("runs a column from each issue to the next, the last to the end", () => {

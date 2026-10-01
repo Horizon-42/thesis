@@ -53,6 +53,16 @@ report (never re-run) and the CZML split every `EXECUTOR_GROUPS_PER_CZML` flight
 refused, never overwritten. Its manifest has its own schema (`EXECUTOR_PUBLICATION_SCHEMA`), which the checkpoint
 refresh and the publication index pass by.
 
+**A free-generation readout's records (``--generation-records DIR --generation-campaign CAMPAIGN``).** The two-tier
+prior's own sentences, flown again by the executor and graded (`run_ts.py prior_generation_records`, ts runner R35):
+like the executor's replay, not a checkpoint. `GenerationRecords` / `GenerationPublicationPlan` publish each sentence
+kind (``labelled``, ``sample_<k>``) of each airport as one Experiments category, named from the readout (the run = the
+readout's name, registered under CAMPAIGN), with the runner's own evaluation report and its ``records.json`` numbers as
+parameter rows; a partial run is refused; a category that exists is refused, never overwritten. Its manifest has its
+own schema (`GENERATION_PUBLICATION_SCHEMA`). A run is published graded (ts runner R38: the pass rate on the landed
+runway; the builder draws a pass on another runway in its own colour), and ``--refresh-published`` brings a category
+these records published before the grading up to date in place — the one exception to "never overwritten".
+
 Outer-test is not a valid option here.  This command is for development train/validation
 inspection (and a day partition's held-out days) only.
 """
@@ -1765,6 +1775,381 @@ def run_executor_publication(plan: ExecutorPublicationPlan, *, dry_run: bool) ->
     return "completed"
 
 
+# ── a free-generation readout's records (two-tier: the prior speaks, the executor flies) ─────────────────────
+
+#: MIRRORS of the records runner's names (`experiments.prior_generation_records.RECORDS_SCHEMA`, `PREDICTORS`,
+#: `HORIZON`) — not imported, as the executor's above; `test_the_generation_names_mirror_the_runner` pins them.
+GENERATION_RECORDS_SCHEMA = "ts-prior-generation-records-v1"
+GENERATION_PREDICTORS = {"labelled": "executor", "prior": "prior"}
+GENERATION_HORIZON = "sentence"
+#: MIRROR of the grading runner's schema (`experiments.prior_generation_grading.GRADING_SCHEMA`, ts runner R38): every
+#: published run carries its grading — the pass rate on the runway each sentence landed on, FDE's time and place.
+GENERATION_GRADING_SCHEMA = "ts-prior-generation-grading-v1"
+#: Its own publication record, passed by the checkpoint refresh and the publication index like the executor's. v2
+#: (2026-09-30): the grading is published with it (the landed-runway verdicts, `status: otherRunway`).
+GENERATION_PUBLICATION_SCHEMA = "ts-generation-records-publication-v2"
+#: The record a category published by the code before the grading carries; only `--refresh-published` reads it, to
+#: find the categories it brings to v2 in place.
+GENERATION_PUBLICATION_SCHEMA_REFRESHED = "ts-generation-records-publication-v1"
+#: What an augmented run's category shows as its reference: the viewer draws the observed flight by its key
+#: (`referenceSource: canonicalObserved`), i.e. the SOURCE flight where it flew — not the moved track the records hold.
+GENERATION_AUGMENTED_VIEW = ("the white track is the source flight where it really flew; the model flew from its start "
+                             "moved by the augmentation (rotated, raised, sped up), which no aircraft flew on from — no "
+                             "truth, so no ADE / FDE")
+
+
+@dataclass(frozen=True)
+class GenerationRecords:
+    """A whole `run_ts.py prior_generation_records` directory: ``records.json`` and ``records/<kind>/<ICAO>/``, a
+    free-generation readout's sentences flown again and graded — ``labelled`` (the labelled words from the prior's
+    first predicted step) and ``sample_<k>`` (the prior's k-th sentence of each flight).
+
+    Not a checkpoint: named from the readout (the run is the readout's name, e.g. ``val_augmented_400x4``; the
+    experiment id ``generation/<readout campaign>/<readout>/<kind>``), filed under a registry campaign."""
+
+    directory: Path
+    document: dict[str, Any]
+    grading: dict[str, Any]
+
+    @classmethod
+    def open(cls, directory: Path) -> "GenerationRecords":
+        """Refused unless it is this schema, a whole run (not ``--chunks``), graded (``grading/grading.json``, R38)
+        and a development split. A relative ``directory`` is the repository's, kept lexical (`ExecutorReplay.open`)."""
+        directory = directory if directory.is_absolute() else REPO_ROOT / directory
+        document = _load_object(directory / "records.json")
+        grading = _load_object(directory / "grading" / "grading.json")
+        if grading["schema"] != GENERATION_GRADING_SCHEMA:
+            raise ValueError(f"{directory / 'grading' / 'grading.json'} is a {grading['schema']} file, not "
+                             f"{GENERATION_GRADING_SCHEMA}")
+        if document["schema"] != GENERATION_RECORDS_SCHEMA:
+            raise ValueError(f"{directory / 'records.json'} is a {document['schema']} file, not {GENERATION_RECORDS_SCHEMA}")
+        if document["partial"] is not None:
+            raise ValueError(f"{directory} flew {document['partial']['chunks']} of the readout's "
+                             f"{document['partial']['of']} chunks: a partial run is not published")
+        if document["readout"]["split"] not in DEVELOPMENT_SPLITS:
+            raise ValueError(f"{directory} is of the {document['readout']['split']!r} readout; only "
+                             f"{DEVELOPMENT_SPLITS} are published")
+        records = cls(directory, document, grading)
+        for kind in ("labelled", "sample_0"):      # each producer named under the outputs tree, or refused here
+            records.producer(kind)
+        for kind in records.kinds:                 # the grading's reports agree with its counts, before any plan runs
+            for airport in records.airports(kind):
+                records.landed_runway_report(kind, airport)
+        return records
+
+    @property
+    def readout(self) -> str:
+        return Path(self.document["readout"]["directory"]).name
+
+    @property
+    def readout_campaign(self) -> str:
+        return Path(self.document["readout"]["directory"]).parent.name
+
+    @property
+    def split(self) -> str:
+        return self.document["readout"]["split"]
+
+    @property
+    def token(self) -> str:
+        return self.document["executor"]["sha256"][:12]
+
+    @property
+    def augmented(self) -> bool:
+        return self.document["readout"]["augment_seed"] is not None
+
+    @property
+    def kinds(self) -> list[str]:
+        return sorted(path.name for path in (self.directory / "records").iterdir() if path.is_dir())
+
+    def airports(self, kind: str) -> list[str]:
+        return sorted(path.name for path in (self.directory / "records" / kind).iterdir() if path.is_dir())
+
+    def sentences(self, kind: str, airport: str) -> list[dict[str, Any]]:
+        return [row for row in self.document["sentences"] if row["kind"] == kind and row["airport"] == airport]
+
+    def predictor(self, kind: str) -> str:
+        return GENERATION_PREDICTORS["labelled" if kind == "labelled" else "prior"]
+
+    def producer(self, kind: str) -> str:
+        """What flew the kind's words: the prior's directory, or the executor spec (the labelled words), as the
+        repository's path under ``4dTrajectory/outputs`` (a readout run from a removed worktree still names it)."""
+        path = self.document["executor"]["directory"] if kind == "labelled" else self.document["readout"]["prior"]["directory"]
+        mark = "4dTrajectory/outputs/"
+        if mark not in path:
+            raise ValueError(f"{path} is not under a {mark} tree")
+        return path[path.rindex(mark):]
+
+    def landed_runway_report(self, kind: str, airport: str) -> Path | None:
+        """The evaluation report of this kind's sentences at ``airport`` graded again on the runway they landed on
+        (R38), or None when none was: the grading writes that directory exactly when it graded one."""
+        again = self.grading["readouts"][kind][airport]["graded_again"]["sentences"]
+        report = self.directory / "grading" / "landed_runway" / kind / airport / "evaluation_report.json"
+        if (again > 0) != report.is_file():
+            raise ValueError(f"{self.directory}: the grading graded {again} {kind} sentences at {airport} again, but "
+                             f"{report} {'is missing' if again else 'exists'}")
+        return report if again else None
+
+    def kind_label(self, kind: str) -> str:
+        return "labelled words" if kind == "labelled" else f"sample {kind.removeprefix('sample_')}"
+
+    def parameter_rows(self, kind: str, airport: str) -> list[dict[str, str]]:
+        """The readout and this category's sentences as the picker's named rows — its own numbers from
+        ``records.json``."""
+        readout, block = self.document["readout"], self.document["readouts"][kind][airport]
+        rows = [{"section": "Readout", "name": "free generation", "value": f"{self.readout_campaign}/{self.readout}"},
+                {"section": "Readout", "name": "prior", "value": self.producer("sample_0")},
+                {"section": "Readout", "name": "split", "value": self.split},
+                {"section": "Readout", "name": "sentences a flight", "value": str(readout["samples"])},
+                {"section": "Readout", "name": "procedure's altitudes", "value": str(readout["procedure_masks"])},
+                {"section": "Readout", "name": "augmented starts",
+                 "value": f"seed {readout['augment_seed']}" if self.augmented else "no"},
+                {"section": "Readout", "name": "executor spec", "value": self.token},
+                {"section": "Sentences", "name": "kind", "value": self.kind_label(kind)},
+                {"section": "Sentences", "name": "sentences", "value": str(block["sentences"])},
+                {"section": "Sentences", "name": "recorded", "value": str(block["recorded"])},
+                {"section": "Sentences", "name": "pass rate (every sentence)", "value": f"{block['pass_rate']:.3f}"},
+                {"section": "Sentences", "name": "ending on the observed runway",
+                 "value": str(block["ending_on_observed_runway"]["sentences"])},
+                {"section": "Sentences", "name": "verdict judges", "value": self.document["verdict"]},
+                {"section": "Sentences", "name": "reference",
+                 "value": GENERATION_AUGMENTED_VIEW if self.augmented else self.document["reference"]}]
+        if not self.augmented:
+            rows += [{"section": "Sentences", "name": f"{name} median (m)", "value": f"{block[key]['median']:.0f}"}
+                     for name, key in (("ADE", "ade_m"), ("FDE", "fde_m")) if block[key] is not None]
+        graded = self.grading["readouts"][kind][airport]
+        again = graded["graded_again"]
+        rows += [{"section": "Landed runway", "name": "pass rate on the runway it landed on",
+                  "value": f"{graded['pass_rate_landed_runway']:.3f}"},
+                 {"section": "Landed runway", "name": "ended on another runway", "value": str(graded["ending_on_another_runway"])},
+                 # the grading's verdict counts are sparse (only the verdicts that occurred): no "pass" is 0 passed
+                 {"section": "Landed runway", "name": "graded again there (passed)",
+                  "value": f"{again['sentences']} ({again['verdicts'].get('pass', 0)})"},
+                 {"section": "Landed runway", "name": "colour",
+                  "value": "passed on another runway than the observed flight's: its own colour (see the legend)"}]
+        if self.grading["timing_read"] and graded["arrival_endpoint_error_m"] is not None:
+            rows += [{"section": "Time and place (landed)", "name": "arrival endpoint error p50 / p95 (m)",
+                      "value": f"{graded['arrival_endpoint_error_m']['median']:.0f} / {graded['arrival_endpoint_error_m']['p95']:.0f}"},
+                     {"section": "Time and place (landed)", "name": "final time error p50 / p95 (s)",
+                      "value": f"{graded['final_time_error_s']['median']:.0f} / {graded['final_time_error_s']['p95']:.0f}"},
+                     {"section": "Time and place (landed)", "name": "landed later than the observed aircraft",
+                      "value": f"{graded['late_share']:.3f}"},
+                     {"section": "Time and place (landed)", "name": "FDE",
+                      "value": "at the observed landing TIME: a late arrival is still short of the threshold then"}]
+        return rows
+
+
+@dataclass(frozen=True)
+class GenerationPublicationPlan:
+    """One kind's records of one airport of a generation-records directory, as one Experiments category."""
+
+    records: GenerationRecords
+    kind: str
+    airport: str
+    campaign: str
+    raw_output_root: Path = RAW_OUTPUT_ROOT
+    frontend_airports_root: Path = FRONTEND_AIRPORTS_ROOT
+
+    @property
+    def records_dir(self) -> Path:
+        return self.records.directory / "records" / self.kind / self.airport
+
+    @property
+    def summary(self) -> Path:
+        return self.records_dir / "summary.json"
+
+    @property
+    def evaluation_report(self) -> Path:
+        """The runner's own grading of these records — read, never re-run."""
+        return self.records_dir / "evaluation_report.json"
+
+    @property
+    def experiment_id(self) -> str:
+        return f"generation/{self.records.readout_campaign}/{self.records.readout}/{self.kind}"
+
+    @property
+    def category(self) -> str:
+        name = f"{self.records.readout_campaign}_{self.records.readout}"
+        return f"experiment_generation_{_safe_stem(name, limit=len(name)).lower()}_{self.kind}_{self.records.split}"
+
+    @property
+    def comparison_dir(self) -> Path:
+        return self.frontend_airports_root / self.airport / "comparison" / self.category
+
+    @property
+    def output_dir(self) -> Path:
+        return (self.raw_output_root / "generation" / self.records.readout_campaign / self.records.readout / self.kind
+                / self.airport / self.records.split)
+
+    @property
+    def publication_manifest(self) -> Path:
+        return self.output_dir / PUBLICATION_MANIFEST
+
+    @property
+    def checkpoint(self) -> str:
+        return self.records.producer(self.kind)
+
+    @cached_property
+    def display_name(self) -> str:
+        block = self.records.document["readouts"][self.kind][self.airport]
+        starts = (" from augmented starts (white: the source flight, unmoved)" if self.records.augmented else "")
+        words = ("the labelled words from the first predicted step" if self.kind == "labelled"
+                 else f"the prior's sample {self.kind.removeprefix('sample_')}")
+        landed = self.records.grading["readouts"][self.kind][self.airport]["pass_rate_landed_runway"]
+        return (f"{self.records.readout} · {words}{starts}, executor {self.records.token} "
+                f"({block['recorded']} flights, pass {block['pass_rate']:.1%}, {landed:.1%} on the landed runway)")
+
+    @property
+    def label(self) -> str:
+        return category_display_label(self.records.split, self.display_name, kind="Experiment")
+
+    @property
+    def experiment_metadata(self) -> dict[str, Any]:
+        """The category's ``experiment`` block. Raises ``MissingIntentError``: published only with its campaign's
+        question and the readout's line in the registry."""
+        return {
+            "id": self.experiment_id,
+            "group": self.campaign,
+            "checkpoint": self.checkpoint,
+            "label": self.display_name,
+            "runName": self.records.readout,
+            "variantLabel": self.records.kind_label(self.kind),
+            "parameters": self.records.parameter_rows(self.kind, self.airport),
+            "intent": experiment_intent(group=self.campaign, training_campaign=self.campaign,
+                                        run_id=self.records.readout, variant=None),
+            "model": self.records.predictor(self.kind),
+            "predictionOutput": "control",
+            "horizonMode": GENERATION_HORIZON,
+            "seed": None,
+        }
+
+    def preflight_error(self) -> str | None:
+        """Refuse anything but this directory's own records of this kind and airport, graded, onto a category nobody
+        holds."""
+        if not self.summary.is_file() or not self.evaluation_report.is_file():
+            return f"{self.records_dir} holds no summary.json and evaluation_report.json"
+        summary = _load_object(self.summary)
+        config = summary["config"]
+        if (config["model"], config["horizon_mode"]) != (self.records.predictor(self.kind), GENERATION_HORIZON):
+            return f"{self.summary} is not a {self.kind} records summary (model {config['model']!r})"
+        if (summary["executor_spec_sha256"] != self.records.document["executor"]["sha256"]
+                or summary["split"] != self.records.split
+                or summary["free_generation"]["readout"] != self.records.document["readout"]["directory"]):
+            return f"{self.summary} holds records of another readout, executor or split than {self.records.directory}'s"
+        airports = {str(row["arr_airport"]).upper() for row in summary["results"]}
+        if airports != {self.airport}:
+            return f"{self.summary} holds flights of {sorted(airports)}, not only {self.airport}"
+        recorded = sum(row["recorded"] for row in self.records.sentences(self.kind, self.airport))
+        if len(summary["results"]) != recorded:
+            return (f"{self.summary} holds {len(summary['results'])} records, records.json {recorded} recorded "
+                    f"{self.kind} sentences at {self.airport}: not one run")
+        listed = _listed_category_keys(self.frontend_airports_root, self.airport)
+        if self.category in listed or self.comparison_dir.exists() or self.publication_manifest.exists():
+            return (f"category {self.category!r} is already published at {self.airport}; a publication is never "
+                    "overwritten")
+        return None
+
+    def publish_command(self) -> list[str]:
+        return [
+            sys.executable, str(CZML_SCRIPT),
+            "--summary", str(self.summary),
+            "--output-dir", str(self.comparison_dir),
+            "--airport", self.airport,
+            "--category", self.category,
+            "--category-label", self.label,
+            "--dataset-split", self.records.split,
+            "--evaluation-report", str(self.evaluation_report),
+            "--result-source", "experiment",
+            "--experiment-id", self.experiment_id,
+            "--experiment-group", self.campaign,
+            "--experiment-checkpoint", self.checkpoint,
+            "--max-groups-per-czml", str(EXECUTOR_GROUPS_PER_CZML),
+            *(["--landed-runway-report", str(self.landed_runway_report)] if self.landed_runway_report else []),
+        ]
+
+    @cached_property
+    def landed_runway_report(self) -> Path | None:
+        return self.records.landed_runway_report(self.kind, self.airport)
+
+    def refresh_error(self) -> str | None:
+        """For ``--refresh-published``: refuse anything but this category published from THIS records directory by
+        the code before the grading (`GENERATION_PUBLICATION_SCHEMA_REFRESHED`), still listed where it was."""
+        if not self.publication_manifest.is_file():
+            return f"{self.category} was never published at {self.airport}: nothing to refresh"
+        manifest = _load_object(self.publication_manifest)
+        if manifest["schemaVersion"] != GENERATION_PUBLICATION_SCHEMA_REFRESHED:
+            return f"{self.publication_manifest} is a {manifest['schemaVersion']} record, not the one a refresh updates"
+        if manifest["recordsRun"] != _path_for_manifest(self.records.directory) or manifest["category"] != self.category:
+            return f"{self.category} at {self.airport} was published from {manifest['recordsRun']}, not these records"
+        if self.category not in _listed_category_keys(self.frontend_airports_root, self.airport):
+            return f"{self.category} is not listed at {self.airport}'s categories.json"
+        return None
+
+    def manifest(self) -> dict[str, Any]:
+        report = _load_object(self.evaluation_report)
+        return {
+            "schemaVersion": GENERATION_PUBLICATION_SCHEMA,
+            "updatedAtUtc": _utc_now(),
+            "status": "completed",
+            "experimentId": self.experiment_id,
+            "campaign": self.campaign,
+            "runId": self.records.readout,
+            "kind": self.kind,
+            "executorSha256": self.records.document["executor"]["sha256"],
+            "producer": self.checkpoint,
+            "recordsRun": _path_for_manifest(self.records.directory),
+            "recordsDir": _path_for_manifest(self.records_dir),
+            "airport": self.airport,
+            "split": self.records.split,
+            "resultSource": "experiment",
+            "category": self.category,
+            "frontendDir": _path_for_manifest(self.comparison_dir),
+            "groupsPerCzml": EXECUTOR_GROUPS_PER_CZML,
+            "readout": self.records.document["readouts"][self.kind][self.airport],
+            "grading": self.records.grading["readouts"][self.kind][self.airport],
+            "landedRunwayReport": None if self.landed_runway_report is None else _path_for_manifest(self.landed_runway_report),
+            "evaluation": {key: value for key, value in report.items() if key not in {"trajectories", "reference"}},
+        }
+
+
+def run_generation_publication(plan: GenerationPublicationPlan, *, dry_run: bool, refresh: bool = False) -> str:
+    """As `run_executor_publication`: intent, preflight, the comparison CZML, the category's metadata, the manifest.
+    ``refresh``: the category exists, published from these records before the grading (`refresh_error`); its CZML is
+    built again in place (a new generation, the old pruned) and its metadata and manifest replaced."""
+    context = f"{plan.experiment_id} · {plan.airport} · {plan.records.split}"
+    try:
+        metadata = plan.experiment_metadata
+    except MissingIntentError as error:
+        print(f"  ⚠ blocked {context}: {error}")
+        return "blocked"
+    error = plan.refresh_error() if refresh else plan.preflight_error()
+    if error:
+        print(f"  ⚠ blocked {context}: {error}")
+        return "blocked"
+    command = plan.publish_command()
+    if dry_run:
+        print(f"\n━━ {context}\n  [publish-czml] {' '.join(command)}")
+        return "planned"
+    print(f"\n=== [{context} · publish-czml] ===\n{' '.join(command)}", flush=True)
+    subprocess.run(command, cwd=REPO_ROOT, check=True)
+    if not _apply_category_refresh(plan.comparison_dir.parent / "categories.json", plan.category, plan.label,
+                                   "experiment", metadata):
+        raise RuntimeError(f"the CZML builder did not register {plan.category} at {plan.airport}")
+    if plan.records.augmented:
+        _drop_category_accuracy(plan.comparison_dir.parent / "categories.json", plan.category)
+    _write_json_atomic(plan.publication_manifest, plan.manifest())
+    print(f"  ✓ published {context} → {plan.category}")
+    return "completed"
+
+
+def _drop_category_accuracy(manifest_path: Path, category_key: str) -> None:
+    """Remove the ADE / FDE the CZML builder stamps from a category's records (``summary.accuracy``): an augmented
+    start's are the distance to a moved track, not an error (`GENERATION_AUGMENTED_VIEW`)."""
+    document = _load_object(manifest_path)
+    (category,) = [value for value in document["categories"] if value["key"] == category_key]
+    category.pop("accuracy", None)
+    _write_json_atomic(manifest_path, document)
+
+
 def _experiment_root(index_path: Path) -> Path:
     document = _load_object(index_path)
     return Path(document.get("root") or index_path.parent).resolve()
@@ -1897,21 +2282,99 @@ def main(argv: list[str] | None = None) -> int:
         metavar="CAMPAIGN",
         help="the intent registry's campaign an --executor-replay is filed under (its run: the spec directory's name)",
     )
+    parser.add_argument(
+        "--generation-records",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help=(
+            "publish a free-generation readout's records instead of checkpoints: DIR is a `run_ts.py "
+            "prior_generation_records --out` directory (a whole run), one Experiments category per sentence kind "
+            "(labelled, sample_<k>) and airport, under --generation-campaign's registry entry (its run: the "
+            "readout's name); its own grading is published, never re-run. Takes --kind, --airport, --output-root, "
+            "--frontend-airports-root and --dry-run; refuses every checkpoint flag"
+        ),
+    )
+    parser.add_argument(
+        "--generation-campaign",
+        default=None,
+        metavar="CAMPAIGN",
+        help="the intent registry's campaign --generation-records are filed under",
+    )
+    parser.add_argument(
+        "--refresh-published",
+        action="store_true",
+        help=(
+            "with --generation-records: bring categories these records already published (before the grading, R38) "
+            "up to date in place — their CZML built again with the landed-runway verdicts (status otherRunway), their "
+            "label, rows and manifest replaced; refused for a category published from other records or never published"
+        ),
+    )
+    parser.add_argument(
+        "--kind",
+        action="append",
+        default=None,
+        help="with --generation-records: the sentence kinds to publish (labelled, sample_<k>; default every one)",
+    )
     args = parser.parse_args(argv)
 
+    # every flag of the checkpoint mode, refused in the executor and generation modes rather than silently ignored
+    checkpoint_flags = {
+        "--checkpoint": args.checkpoint, "--campaign": args.campaign,
+        "--reuse-prediction-dir": args.reuse_prediction_dir, "--category-variant": args.category_variant,
+        "--category-group": args.category_group, "--split": args.split,
+        "--refresh-labels-only": args.refresh_labels_only, "--max-checkpoints": args.max_checkpoints,
+        "--force": args.force, "--fail-fast": args.fail_fast,
+        "--result-source": args.result_source != "experiment", "--record-retention": args.record_retention != "archive",
+        "--device": args.device != "auto", "--experiment-index": args.experiment_index != EXPERIMENT_INDEX,
+        "--harvest-root": args.harvest_root != HARVEST_ROOT,
+    }
+    given = [flag for flag, value in checkpoint_flags.items() if value]
+    if args.executor_replay is None and args.executor_campaign:
+        parser.error("--executor-campaign files an --executor-replay; give one")
+    if args.generation_records is None and (args.generation_campaign or args.kind or args.refresh_published):
+        parser.error("--generation-campaign, --kind and --refresh-published belong to --generation-records; give one")
+
+    if args.generation_records is not None:
+        if args.executor_replay is not None:
+            parser.error("--generation-records and --executor-replay are two publications: run them apart")
+        if given:
+            parser.error(f"--generation-records publishes a readout's records, not checkpoints: drop {given}")
+        if not args.generation_campaign:
+            parser.error("--generation-records needs --generation-campaign: the registry entry its categories are "
+                         "filed under")
+        try:
+            records = GenerationRecords.open(args.generation_records)
+        except (OSError, ValueError, KeyError) as error:
+            parser.error(f"--generation-records {args.generation_records}: {error}")
+        kinds = records.kinds
+        if args.kind:
+            unknown = set(args.kind) - set(kinds)
+            if unknown:
+                parser.error(f"--generation-records {records.directory} holds no {sorted(unknown)} (it holds {kinds})")
+            kinds = [kind for kind in kinds if kind in args.kind]
+        requested = {value.strip().upper() for value in args.airport} if args.airport else None
+        plans = []
+        for kind in kinds:           # every plan checked before any is published
+            airports = records.airports(kind)
+            if requested is not None:
+                unknown = requested - set(airports)
+                if unknown:
+                    parser.error(f"--generation-records {records.directory} holds no {kind} records of {sorted(unknown)}")
+                airports = [airport for airport in airports if airport in requested]
+            # the roots LEXICAL, as the executor mode's
+            plans += [GenerationPublicationPlan(records, kind, airport, args.generation_campaign,
+                                                raw_output_root=args.output_root.absolute(),
+                                                frontend_airports_root=args.frontend_airports_root.absolute())
+                      for airport in airports]
+        counts = {}
+        for plan in plans:
+            status = run_generation_publication(plan, dry_run=args.dry_run, refresh=args.refresh_published)
+            counts[status] = counts.get(status, 0) + 1
+        print(f"\n✓ generation publication finished: {counts}")
+        return 1 if counts.get("blocked", 0) else 0
+
     if args.executor_replay is not None:
-        # every flag of the checkpoint mode, refused rather than silently ignored
-        checkpoint_flags = {
-            "--checkpoint": args.checkpoint, "--campaign": args.campaign,
-            "--reuse-prediction-dir": args.reuse_prediction_dir, "--category-variant": args.category_variant,
-            "--category-group": args.category_group, "--split": args.split,
-            "--refresh-labels-only": args.refresh_labels_only, "--max-checkpoints": args.max_checkpoints,
-            "--force": args.force, "--fail-fast": args.fail_fast,
-            "--result-source": args.result_source != "experiment", "--record-retention": args.record_retention != "archive",
-            "--device": args.device != "auto", "--experiment-index": args.experiment_index != EXPERIMENT_INDEX,
-            "--harvest-root": args.harvest_root != HARVEST_ROOT,
-        }
-        given = [flag for flag, value in checkpoint_flags.items() if value]
         if given:
             parser.error(f"--executor-replay publishes an executor replay, not checkpoints: drop {given}")
         if not args.executor_campaign:

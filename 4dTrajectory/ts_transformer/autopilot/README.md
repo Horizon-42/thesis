@@ -21,11 +21,13 @@
 | `judge.py` | 三层判定：限制、每个词、结局 | §8 |
 | `replay.py` | 回放：抽样、谁进门、飞、判；打开规格时的核对 | §11、§12 |
 | `params.py` / `derive.py` | 执行器的参数与约束；τ_ψ 从词表推出（p 是规格 runner 里引用标准的固定值） | §9、§10 |
-| `spec.py` | 执行器规格与源码指纹 | §12 |
+| `spec.py` | 执行器规格；规格只给飞得出它参照航迹的代码打开（通过记录） | §12 |
+| `conformance.py` | 按航迹核对：参照航迹的写出、三种方式各飞一遍、按容差比、写通过记录 | §12.3 |
+| `single.py` | 单机单条：一架航班、纯 Python 标量（后端现飞用） | §12.4、§13 |
 
-**改代码之前**：执行器规格的源码指纹覆盖本包所有 `.py`（`spec.py` 除外）和它们直接 import 的仓库模块，算的是代码逻辑
-（去掉文档字符串的语法树，注释不算；v11 起）。改其中任何一处代码，现行代码就拒绝已有的规格，要重写规格
-（`run_ts.py executor_spec`）并重跑训练集回放门（`run_ts.py executor_replay`），见设计文档 §12；只改说明文字和注释不用。
-本文件不在指纹里。
+**改代码之前**：执行器按航迹核对，不按源码指纹（用户 2026-10-01，设计文档 §12.2–§12.5）。改了本包或它直接 import 的仓库模块的代码之后，
+在干净的检出上跑一次 `python run_ts.py executor_conformance --executor <规格目录> --instructions <句子产物>`（约 30 s）：参照航迹按三种方式
+（单机批量、多机批量、单机单条）各飞一遍，全在容差内（状态 1e-6 m）就写通过记录，规格、训练、读数都不用重跑；超出容差说明行为变了，
+要按新代码写新规格（`run_ts.py executor_spec`，它会连参照一起写）。只改说明文字和注释不用核对。
 
-测试：`tests/test_autopilot.py`。
+测试：`tests/test_autopilot.py`、`tests/test_executor_conformance.py`；单条执行器 `aeroviz_backend/tests/test_single_executor.py`。

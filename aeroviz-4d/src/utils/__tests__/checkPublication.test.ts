@@ -13,15 +13,16 @@ import {
   checkTrainingIndex,
   checkTrainingOverlay,
   checkTrainingOverlays,
-  checkTrainingSample,
+  checkTrainingSet,
   checkTrainingSetAgrees,
   checkTrainingSetRefusal,
 } from "../checkPublication";
-import { parseTrainingIndex, parseTrainingSample } from "../../data/trainingSample";
+import { parseTrainingIndex, parseTrainingSample, type TrainingSetEntry } from "../../data/trainingSample";
+import type { TrainingOpenSet } from "../../data/trainingSets";
 import { parseTrainingOverlays } from "../../data/trainingOverlays";
 import { SET_ID, mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import {
-  MOCK_SAMPLE_SHA, mockExecutorOverlay, mockOverlays, mockPriorOverlay,
+  mockExecutorOverlay, mockOverlays, mockPriorOverlay,
 } from "../../data/__tests__/trainingOverlays.fixture";
 
 const observed: ComparisonCategory = {
@@ -174,14 +175,15 @@ function readable() {
   const sample = parseTrainingSample(mockSample());
   if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
   const entry = index.value.sets.find((item) => item.id === SET_ID)!;
-  return { index: index.value, entry, sample: sample.value };
+  const open: TrainingOpenSet = { kind: "vocabulary-readback", sample: sample.value };
+  return { index: index.value, entry, sample: open };
 }
 
 describe("the Training export's checks", () => {
   it("passes a manifest and a readable sample that agree", () => {
     const { entry, sample } = readable();
     expect(checkTrainingIndex(mockIndex()).findings).toEqual([]);
-    expect(checkTrainingSample(SET_ID, mockSample()).findings).toEqual([]);
+    expect(checkTrainingSet(SET_ID, "vocabulary-readback", mockSample()).findings).toEqual([]);
     expect(checkTrainingSetRefusal(entry)).toEqual([]);
     expect(checkTrainingSetAgrees(entry, sample, "KXXX")).toEqual([]);
   });
@@ -208,7 +210,7 @@ describe("the Training export's checks", () => {
   it("names the field when a readable sample is wrong", () => {
     const sample = mockSample() as any;
     sample.flights[0].envelopes.speed[0].check.bandInside = 7;
-    const { findings, value } = checkTrainingSample(SET_ID, sample);
+    const { findings, value } = checkTrainingSet(SET_ID, "vocabulary-readback", sample);
     expect(value).toBeNull();
     expect(findings[0].category).toBe(SET_ID);
     expect(findings[0].message).toContain("says 7 band rows inside");
@@ -224,12 +226,12 @@ describe("the Training export's checks", () => {
       ["flights", 40],
       ["id", "another_set"],
     ] as const) {
-      const findings = checkTrainingSetAgrees({ ...entry, [field]: value }, sample, "KXXX");
+      const findings = checkTrainingSetAgrees({ ...entry, [field]: value } as TrainingSetEntry, sample, "KXXX");
       expect(findings, field).toHaveLength(1);
     }
-    const reseeded = checkTrainingSetAgrees({ ...entry, cohort: { ...entry.cohort, seed: 7 } }, sample, "KXXX");
+    const reseeded = checkTrainingSetAgrees({ ...entry, cohort: { ...entry.cohort, seed: 7 } } as TrainingSetEntry, sample, "KXXX");
     expect(reseeded[0].message).toContain("cohort.seed");
-    const resplit = checkTrainingSetAgrees({ ...entry, cohort: { ...entry.cohort, split: "test" } }, sample, "KXXX");
+    const resplit = checkTrainingSetAgrees({ ...entry, cohort: { ...entry.cohort, split: "test" } } as TrainingSetEntry, sample, "KXXX");
     expect(resplit[0].message).toContain("cohort.split");
     // a sample filed under another airport's directory
     expect(checkTrainingSetAgrees(entry, sample, "KYYY")[0].message).toContain("airport: the manifest says KYYY");
@@ -243,17 +245,17 @@ describe("the Training overlays' checks", () => {
     return parsed.value.overlays;
   }
 
-  function sample() {
+  function sample(): TrainingOpenSet {
     const parsed = parseTrainingSample(mockSample());
     if (!parsed.ok) throw new Error(parsed.problem);
-    return parsed.value;
+    return { kind: "vocabulary-readback", sample: parsed.value };
   }
 
-  it("passes both overlays read against the sample whose sha they recorded", () => {
+  it("passes both overlays read against the sample of their set", () => {
     const [executor, prior] = entries();
     expect(checkTrainingOverlays(mockOverlays()).findings).toEqual([]);
-    expect(checkTrainingOverlay(executor, mockExecutorOverlay(), sample(), MOCK_SAMPLE_SHA)).toEqual([]);
-    expect(checkTrainingOverlay(prior, mockPriorOverlay(), sample(), MOCK_SAMPLE_SHA)).toEqual([]);
+    expect(checkTrainingOverlay(executor, mockExecutorOverlay(), sample())).toEqual([]);
+    expect(checkTrainingOverlay(prior, mockPriorOverlay(), sample())).toEqual([]);
   });
 
   it("names an overlay the panel would reject", () => {
@@ -262,19 +264,21 @@ describe("the Training overlays' checks", () => {
     expect(checkTrainingOverlays(raw).findings).toEqual([expect.objectContaining({ level: "error", category: "prior_test" })]);
   });
 
-  it("is an error when the set's sample on disk is not the one the overlay was drawn over", () => {
+  it("is an error when the overlay shares other candidate runways with the set than the sample on disk", () => {
     const [executor] = entries();
-    const findings = checkTrainingOverlay(executor, mockExecutorOverlay(), sample(), "6".repeat(64));
+    const stale: any = mockExecutorOverlay();
+    stale.base.candidatesSha256 = "6".repeat(64);
+    const findings = checkTrainingOverlay(executor, stale, sample());
     expect(findings).toEqual([expect.objectContaining({ level: "error", category: "executor_test" })]);
-    expect(findings[0].message).toMatch(/the file on disk is 666666666666/);
+    expect(findings[0].message).toMatch(/has candidates 666666666666, the loaded sample/);
   });
 
   it("names the field when an overlay does not read, and a flight count the manifest does not match", () => {
     const [executor, prior] = entries();
     const broken: any = mockPriorOverlay();
     broken.flights[0].columns[3].truthP[0] = -0.1;
-    expect(checkTrainingOverlay(prior, broken, sample(), MOCK_SAMPLE_SHA)[0].message).toMatch(/truthP\[0\] is -0.1/);
-    expect(checkTrainingOverlay({ ...executor, flights: 40 }, mockExecutorOverlay(), sample(), MOCK_SAMPLE_SHA)[0].message)
+    expect(checkTrainingOverlay(prior, broken, sample())[0].message).toMatch(/truthP\[0\] is -0.1/);
+    expect(checkTrainingOverlay({ ...executor, flights: 40 }, mockExecutorOverlay(), sample())[0].message)
       .toMatch(/the manifest says 40 flights/);
   });
 });
