@@ -1097,3 +1097,26 @@ used every run is a runner).
 
     python run_ts.py traffic_window_reward_readout \
         --run 4dTrajectory/outputs/POOLED/prior/m4_window_20260930/window_s1337 [--out <new directory>]
+
+### R42 · `run_ts.py executor_conformance` — the executor checked by what it flies: a spec's reference tracks flown again in every way, within the bounds (executor design §12.3)
+
+2026-10-01 (the user: the executor is checked by its tracks, not its source). `executor_conformance --executor <spec dir>
+--instructions <artefact> [--write-reference]`; the core is `autopilot/conformance.py` (inside the executor's code identity,
+so the checker is checked with it). **The reference** (`--write-reference`, or `executor_spec` with every new spec): 50
+labelled train flights an airport — the replay's draw (`replay.draw`, seed 1337, own dynamics; 250) — flown from row 0 on
+their labelled words by the code that measured the spec (refused otherwise, and from a dirty checkout): every cycle's states,
+commands, wanted rates, sentence times, limits and modes, the done cycle, and each flight's verdict (`judge`) into
+`<spec>/conformance/reference.{json,npz}`, with each flight's input digest (start state, airframe, frame, thrust, approach
+speed, time limit, words, runway, the runways' geometry and vertical paths, the observed rows the word clock reads), the
+bounds and the checker's logic hash; written atomically, once. **The check**: the same flights rebuilt (inputs that moved
+are refused by name — the data changed, not the executor) and flown in every way of `conformance.MODES` — `batch`
+(`replay.fly_batch`), `staggered` (one executor, each flight from a seeded start in 0–30 steps, its words on its own clock),
+`single` (`autopilot.single`, one flight at a time, driven as `fly` drives a batch) — each flight compared with its reference
+up to its done cycle: states ≤ `STATE_BOUND_M` (1e-6 m) horizontally and vertically, every other float ≤ `ROUNDOFF` (1e-6;
+ψ round the circle; NaN only against NaN), every limit, mode, done cycle, outcome, end row and word verdict equal; a way
+that flies fewer flights fails. All pass → `passed-<executor_source_sha256[:12]>.json` (clean checkout only), which
+`spec.require_conforming_executor` — and so `replay.open_executor` — asks for. v11 (2026-10-01, 27 s): batch and staggered
+0 m apart, single 1.3e-8 m / 5.5e-10 m.
+
+    python run_ts.py executor_conformance --executor 4dTrajectory/outputs/POOLED/executor/v11_20260927 \
+        --instructions 4dTrajectory/outputs/POOLED/instruction_language/v5_20260926

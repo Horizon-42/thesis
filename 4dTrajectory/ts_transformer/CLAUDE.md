@@ -152,10 +152,12 @@ of the package, not a migration in progress.
   signals (it ends before the landing — since `instruction-v2` the harvest's condition, parallel runways
   from every runway end the harvest builds; the labeller, the judge and the display share one heading-word check,
   `envelope.heading_words_inside`, since `instruction-v3`) (C30).
-- **An executor spec is bound to the executor's source** (`executor_source_sha256` over `autopilot/` and every repository
-  module it imports directly — `config`, `data.dataset`, `outputs.envelope`, …), the vocabulary and the labeller: since v11
-  the hash is over each file's LOGIC (`spec.logic`: docstrings stripped, comments never parsed) — wording is free, a code
-  change in a hashed file makes the current code refuse every stored spec (C33). **A prior belongs to
+- **An executor spec opens only for executor code that flies its reference tracks within the bounds** (2026-10-01, the
+  user: checked by what it flies, not by its source): `conformance/` beside the spec — 250 labelled train flights flown by
+  the spec's code — and a `passed-<code>.json` per executor code that flew them again in every way (single-aircraft batch,
+  multi-aircraft batch, single flight) within 1e-6 m (`spec.require_conforming_executor`, runner `executor_conformance`);
+  a code change that stays within the bounds needs one ~30 s check and nothing is retrained; the vocabulary and the
+  labeller still bind by sha (C33). **A prior belongs to
   one sentence artefact**: spec, labeller, day split and candidate table must match (`ts-prior-checkpoint-v3`, C34).
   **A prior speaks under the procedure's masks it was trained under**: named sets, recorded beside its checkpoint
   (`procedure_masks.json`, `prior/masks.py`), read by `load_prior`; the vocabulary's rules apart, always on (C35).
@@ -307,7 +309,9 @@ of the package, not a migration in progress.
   layer's language — vocabulary, signals, envelopes, labeller, artefact; torch-free, below every
   model, consumed by the runners and the executor (L30). **`autopilot/`** (2026-09-24): the executor —
   flies the words through the control path's point-mass dynamics one 1 s cycle at a time (that backend
-  runs no hooks), exact inverse, limits in order; imports no model, training or path package (L31). **`prior/`**
+  runs no hooks), exact inverse, limits in order; three ways to fly (a single-aircraft batch, a multi-aircraft batch —
+  `Executor(start_cycle=…)`, each flight from its own cycle, `halt` — and the single flight, `single.py`, plain floats);
+  imports no model, training or path package (L31). **`prior/`**
   (2026-09-24): the prior — data, scenes, model, training, the speaker, the glidepath edge; reads only the instruction
   language, the day split and `data.runway_context`, never the executor; only the runners join the two (L32).
 - Every CLI flag is named after the `TSConfig` field it sets, parsers use `allow_abbrev=False`;
@@ -439,6 +443,9 @@ against its own samples, each sample scored whole as the speaker read it (`exper
 as R32 does; checks the formal size before it speaks) (R37).
 `traffic_window_reward_readout` reads such a run round by round, running or ended, from its files — paired against round 0
 as the round choice pairs (R39).
+`executor_conformance` flies a spec's reference tracks again with the code on disk in every way the executor flies and
+writes the passed record `replay.open_executor` asks for; `--write-reference` writes a spec's reference first, from a clean
+checkout with the code that measured it (`autopilot/conformance.py`; executor design §12.3) (R42).
 **Every Training export writes the attitude each track is drawn in** (`experiments/training_attitude.py`, 2026-09-30): heading,
 path angle, right bank and an attack READING — executor tracks from its states and the command of the cycle starting at each row
 (the track's end: the cycle ending there), observed tracks from `rebuild_series` + the teacher's `actual_controls`, none for a flight
