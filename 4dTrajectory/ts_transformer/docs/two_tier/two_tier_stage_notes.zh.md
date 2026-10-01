@@ -1,4 +1,4 @@
-# 两层模型：阶段记录（更新于 2026-10-01 15:45 UTC）
+# 两层模型：阶段记录（更新于 2026-10-01 21:30 UTC）
 
 **用途**：压缩上下文之前的交接文档。写明此刻每个阶段做到了哪里、产物在哪、关键数字、用户做过的决定、接下来按什么顺序做。
 设计本身在各自的设计文档里，这里只给结论和指路；历史看 git 和 `docs/CHANGELOG.md`。**阶段小结与按优先级的待办**：
@@ -27,7 +27,7 @@
 |---|---|---|
 | 1 词表 | **定稿**：读法 `instruction-v3`（航向词逐行标注、5° 一档、提前 4 s 说）；规格 `145d6911e75b`，在按运行日划分的训练集上测量 | `docs/two_tier/instruction_vocabulary_design.zh.md` |
 | 2 标注器 | **完成**：现行句子产物 `outputs/POOLED/instruction_language/v5_20260926/`（§5；标注器源码指纹 `55f6f0bcd6ee`）；测试日不打开 | 包 `instructions/` |
-| 3 执行器 | **完成，只用词表**，词表以外只读被指跑道公布的 TCH 和下滑角（"下降至落地"入口前不低于下滑道下沿，截获后在下滑道下方平飞）；每种机型按公布的最大着陆重量飞（§2）。现行规格 `outputs/POOLED/executor/v11_20260927/`（p = 5°/s，落地按跑道本身判，两个新结局） | `docs/two_tier/executor_design.zh.md`（2026-09-26 按实现重写，§14 关键代码索引）；包 `autopilot/`（`README.md`） |
+| 3 执行器 | **2026-10-01 改成按航迹核对、三种执行方式**（用户定；执行器设计 §12.2–§12.5，分支 `dev-executor-modes` `6fa89c57`，两次 opus 审查已修，待用户合并；v11 的参照航迹已写在规格旁边 `conformance/`，现行代码与新代码都核对通过）。**完成，只用词表**，词表以外只读被指跑道公布的 TCH 和下滑角（"下降至落地"入口前不低于下滑道下沿，截获后在下滑道下方平飞）；每种机型按公布的最大着陆重量飞（§2）。现行规格 `outputs/POOLED/executor/v11_20260927/`（p = 5°/s，落地按跑道本身判，两个新结局） | `docs/two_tier/executor_design.zh.md`（2026-09-26 按实现重写，§14 关键代码索引）；包 `autopilot/`（`README.md`） |
 | 4 回放门 | v11 训练集、验证集每格都过：训练集落地 99.63 %、词在包络内 97.54 %、evaluation 98.30 %；验证集 99.90 / 97.50 / 98.46 % | 执行器设计 §11，[v11 读数](readouts/2026-09-27_executor_v11_readout.zh.md) |
 | 5 先验 | 第三版第 0 步、第 1 步（单机）、单机自由生成完成；**base 模型** `prior/v3_step1_20260924/full_s1337`（§3） | `docs/two_tier/prior_design.zh.md`、`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md` §3–§5 |
 | 6 后训练 | 第一阶段**采用**（landing，`prior/v3_rl_20260925/grpo_s1337/round_01`）；闭环监督微调（CAT-K）不采用；第二阶段上一版不采用（§4.3），**第二阶段完成，采用第 7 轮 = augmented**（用户 2026-09-27；§4.4、§9） | `docs/two_tier/post_training_design.zh.md`；读数文档（`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md`）§6–§16 |
@@ -373,11 +373,12 @@
     `python run_ts.py traffic_window_reward_readout --run /home/supercomputing/studys/thesis/4dTrajectory/outputs/POOLED/prior/m4_window_20260930/window_s1337`。
 - **用户 2026-10-01 定**：名字叫 **window**（显示 "window r5"）；读验证集，命令给用户、用户自己跑；合并由我做。配方改不改没有回答（等验证集）。
 - **接下来**（按顺序）：
-  1. **验证集读数（用户在跑）**：脚本 `outputs/POOLED/traffic/window_val_20261001.run/run.sh`（从固定在 `cbfdc5f2` 的检出 `m3-window-run` 跑，
+  1. **验证集读数（用户来跑；每窗口说 2 次还是 4 次待用户定，2026-10-01 问过；用户还没启动）**：脚本 `outputs/POOLED/traffic/window_val_20261001.run/run.sh`（从固定在 `cbfdc5f2` 的检出 `m3-window-run` 跑，
      所以在它跑完前不删那个工作树；`run.pid` 是脚本的进程号，`run.log`）。R34 读四次，每次约 80 分钟：真实窗口上起点 traffic r5、第 5 轮
      window r5，再同一批窗口扩充（`--augment-seed 7919`）各一次；都是 `--split val --windows-per-airport 200 --samples 4 --workers 6`、
      种子 1337，所以两个模型逐架配对。产物 `outputs/POOLED/traffic/window_val_{,aug_}{traffic,window}_r5_20261001/`。
-  2. **配对 runner R41 `traffic_window_pair`**（用户在跑验证集时写，新分支，测试 + opus 审查）：读同一批窗口上两个模型的 R34 产物，配对后算差。
+  2. **配对 runner R41 `traffic_window_pair`**（**写完**，分支 `dev-window-pair` `994852ca`，opus 审查后修：开口前已失去间隔也随模型而变，只配两边都计数的句子、两边各报多少；
+     差 = 第二个 − 第一个，按机场 × 运行日聚类算标准误；要求同一份代码读的）：读同一批窗口上两个模型的 R34 产物，配对后算差。
      - 拒绝：两份的划分、抽样（`drawn` 整块）、窗口数、样本数、温度、种子、扩充（种子与 `augmenting` 整块）、执行器、句子产物、场景、
        批的大小有任何不同；配对的键（窗口、飞机、样本、来源）集合不同；同一键的 `starts_in_a_loss` 不同（它与模型无关）。
      - 核对同一抽样：不经模型的来源（照标注的词、照记录）两份逐行相同。
