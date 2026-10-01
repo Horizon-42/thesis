@@ -153,3 +153,15 @@ def test_a_window_s_operating_day_is_its_earliest_landing_s():
     assert pair.operating_day_of(A) == "2026-06-01" and pair.operating_day_of("KXXX:Z_09_z_20260602T080000Z") == "2026-06-01"
     with pytest.raises(ValueError, match="landing stamp"):
         pair.operating_day_of("KXXX:no_stamp")
+
+
+def test_a_window_s_day_is_its_own_aircraft_s_never_an_inserted_one():
+    """Augmentation A inserts another day's flight (keyed `INSERTED` after its own key): the window's cluster is the
+    day of its own earliest-landing aircraft, even when the inserted one landed earlier."""
+    from ts_transformer.experiments.traffic_speaking import INSERTED
+
+    inserted = "KXXX:Z1_09_zzz_20260531T080000Z" + INSERTED
+    pairs = {(0, inserted, 0, "scene"): (_row(0, inserted, 0, "scene"), None),
+             (0, B, 0, "scene"): (_row(0, B, 0, "scene"), None),
+             (1, C, 0, "scene"): (_row(1, C, 0, "scene"), None)}
+    assert pair.cluster_of(pairs) == {0: ("KXXX", pair.operating_day_of(B)), 1: ("KXXX", pair.operating_day_of(C))}
