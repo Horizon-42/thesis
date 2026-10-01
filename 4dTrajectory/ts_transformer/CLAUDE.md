@@ -443,6 +443,8 @@ against its own samples, each sample scored whole as the speaker read it (`exper
 as R32 does; checks the formal size before it speaks) (R37).
 `traffic_window_reward_readout` reads such a run round by round, running or ended, from its files — paired against round 0
 as the round choice pairs (R39).
+`traffic_window_pair` pairs two window readouts of the same windows read the same way (refused otherwise, the model-free
+rows equal row for row) aircraft by aircraft: second − first per measure, errors clustered by window (R41).
 `executor_conformance` flies a spec's reference tracks again with the code on disk in every way the executor flies and
 writes the passed record `replay.open_executor` asks for; `--write-reference` writes a spec's reference first, from a clean
 checkout with the code that measured it (`autopilot/conformance.py`; executor design §12.3) (R42).

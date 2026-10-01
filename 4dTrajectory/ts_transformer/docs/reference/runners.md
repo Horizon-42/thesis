@@ -1100,6 +1100,24 @@ used every run is a runner).
     python run_ts.py traffic_window_reward_readout \
         --run 4dTrajectory/outputs/POOLED/prior/m4_window_20260930/window_s1337 [--out <new directory>]
 
+### R41 · `run_ts.py traffic_window_pair` — two window readouts (R34) of the same windows, aircraft by aircraft
+
+2026-10-01 (the user: the kept M4-in-windows round against its start on the val windows). `traffic_window_pair --first
+<R34 dir> --second <R34 dir> [--out <new dir>]`. Refused unless the two read the SAME windows the SAME way: every field of
+`window_generation.json` that decides the draw and the reading (`SAME`: split, draw, windows an airport, samples,
+temperature, seed, augmentation, executor spec, artefact, scenes, history, readings, batches and their size) equal, the same
+(window, aircraft, sample, source) rows, `starts_in_a_loss` equal row by row, and the model-free sources (labelled,
+recorded) equal row for row — each batch reads from its own streams, so the two use the same random numbers and pair.
+Per model source (scene, alone) and group (pooled, airport, window size; augmented: kind and part), over the rows R34
+counts: each of `MEASURES` (reward, lost separation VISUAL / IFR, landed, landed on the observed runway) in both and
+second − first, the difference taken per aircraft (its samples averaged) with the standard error clustered by window, the
+reward's per-sentence error beside it as the M4 round choice reads pairs (`traffic_reward.paired_difference`), and the
+losses avoided / added counted per sentence. `--out` writes `traffic_window_pair.json` (`ts-traffic-window-pair-v1`).
+
+    python run_ts.py traffic_window_pair --first 4dTrajectory/outputs/POOLED/traffic/window_val_traffic_r5_20261001 \
+        --second 4dTrajectory/outputs/POOLED/traffic/window_val_window_r5_20261001 \
+        --out 4dTrajectory/outputs/POOLED/traffic/window_val_pair_20261001
+
 ### R42 · `run_ts.py executor_conformance` — the executor checked by what it flies: a spec's reference tracks flown again in every way, within the bounds (executor design §12.3)
 
 2026-10-01 (the user: the executor is checked by its tracks, not its source). `executor_conformance --executor <spec dir>
