@@ -29,6 +29,7 @@ import numpy as np
 import torch
 
 from ts_transformer.autopilot import replay
+from ts_transformer.autopilot.conformance import ROUNDOFF, STATE_BOUND_M
 from ts_transformer.autopilot.executor import Executor, Flown
 from ts_transformer.autopilot.frame import AirportCharts
 from ts_transformer.autopilot.lateral import Runways
@@ -46,10 +47,6 @@ from aeroviz_backend.autopilot_segment.segment import model_sentence
 CPU = torch.device("cpu")
 AIRPORTS = ("KMSY", "KRDU", "KSJC", "KSMF", "KSTL")
 MODELS = ("base", "landing_r01", "augmented_r07", "augstart_base", "augstart_landing_r01", "augstart_augmented_r07")
-#: Round-off: how far apart two floats of the two executors may be (wanted rates, a verdict's check numbers).
-ROUNDOFF = 1e-6
-#: How far apart two flown states may be, metres, horizontally or vertically.
-STATE_BOUND_M = 1e-6
 
 
 def never() -> bool:

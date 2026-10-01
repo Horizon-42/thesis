@@ -903,7 +903,9 @@ and counted. The last round is not necessarily the kept one (`choice.round`). Wr
 
 2026-09-30. `traffic_window_generation --prior <single-aircraft prior (augmented)> --executor <spec> --instructions
 <artefact> --split select --out <new dir> [--windows-per-airport 200] [--samples 4] [--aircraft-steps 100000] [--workers 6]
-[--augment-seed N] [--device]`.
+[--augment-seed N] [--device] [--model-sources scene alone]`. `--model-sources` (2026-10-01): the model's sources to read —
+a pair of priors on the same windows needs only `scene`, half the model's time; each source reads from its own streams,
+so the rows of the source read do not change (tested both ways); the header names them (`model_sources`, schema v3).
 The windows (`experiments/traffic_window.py`, design §6.6 step 7 item 1): each airport's segments tiled by 20-minute windows
 opening every 10 minutes; a window commands its flights with a sentence entering in it that fly on their own dynamics, the
 rest replayed; drawn per airport in a seeded permutation of the tiles, a tile with no flight that flies passed over and
@@ -1097,3 +1099,47 @@ used every run is a runner).
 
     python run_ts.py traffic_window_reward_readout \
         --run 4dTrajectory/outputs/POOLED/prior/m4_window_20260930/window_s1337 [--out <new directory>]
+
+### R41 · `run_ts.py traffic_window_pair` — two window readouts (R34) of the same windows, aircraft by aircraft
+
+2026-10-01 (the user: the kept M4-in-windows round against its start on the val windows). `traffic_window_pair --first
+<R34 dir> --second <R34 dir> [--out <new dir>]`. Refused unless the two read the SAME windows the SAME way with the SAME
+code: every field of `window_generation.json` that decides the draw and the reading (`SAME`: the commit, split, draw,
+windows an airport, samples, temperature, seed, augmentation, executor spec, artefact, scenes, history, readings, batches
+and their size, the model's sources read) equal, the same (window, aircraft, sample, source) rows with their model-free
+fields (`MODEL_FREE`) equal, and the model-free sources (labelled, recorded) equal row for row (they read the prior's
+procedure masks too). A row STARTING IN A LOSS depends on the model (the aircraft ahead is model-flown): as the M4 round
+choice pairs rounds, a sentence is counted only where it starts in a loss in neither readout, and each side's count is
+reported. Per model source and group (pooled, airport, window size; augmented: kind and part): each of `MEASURES`
+(reward, lost separation VISUAL / IFR, landed, landed on the observed runway) in both and second − first over the
+sentences counted in both, its standard error clustered by AIRPORT × OPERATING DAY (windows overlap and share flights and
+traffic; a window's day is its earliest-landing commanded aircraft's, read from the identity's landing stamp), the
+reward's per-sentence error beside it (`traffic_reward.paired_difference`), and the losses avoided / added. `--out` writes
+`traffic_window_pair.json` (`ts-traffic-window-pair-v1`; no NaN: an error under two clusters is null).
+
+    python run_ts.py traffic_window_pair --first 4dTrajectory/outputs/POOLED/traffic/window_val_traffic_r5_20261001 \
+        --second 4dTrajectory/outputs/POOLED/traffic/window_val_window_r5_20261001 \
+        --out 4dTrajectory/outputs/POOLED/traffic/window_val_pair_20261001
+
+### R42 · `run_ts.py executor_conformance` — the executor checked by what it flies: a spec's reference tracks flown again in every way, within the bounds (executor design §12.3)
+
+2026-10-01 (the user: the executor is checked by its tracks, not its source). `executor_conformance --executor <spec dir>
+--instructions <artefact> [--write-reference]`; the core is `autopilot/conformance.py` (inside the executor's code identity,
+so the checker is checked with it). **The reference** (`--write-reference`, or `executor_spec` with every new spec): 50
+labelled train flights an airport — the replay's draw (`replay.draw`, seed 1337, own dynamics; 250) — flown from row 0 on
+their labelled words by the code that measured the spec (refused otherwise, and from a dirty checkout): every cycle's states,
+commands, wanted rates, sentence times, limits and modes, the done cycle, and each flight's verdict (`judge`) into
+`<spec>/conformance/reference.{json,npz}`, with each flight's input digest (start state, airframe, frame, thrust, approach
+speed, time limit, words, runway, the runways' geometry and vertical paths, the observed rows the word clock reads), the
+bounds and the checker's logic hash; written atomically, once. **The check**: the same flights rebuilt (inputs that moved
+are refused by name — the data changed, not the executor) and flown in every way of `conformance.MODES` — `batch`
+(`replay.fly_batch`), `staggered` (one executor, each flight from a seeded start in 0–30 steps, its words on its own clock),
+`single` (`autopilot.single`, one flight at a time, driven as `fly` drives a batch) — each flight compared with its reference
+up to its done cycle: states ≤ `STATE_BOUND_M` (1e-6 m) horizontally and vertically, every other float ≤ `ROUNDOFF` (1e-6;
+ψ round the circle; NaN only against NaN), every limit, mode, done cycle, outcome, end row and word verdict equal; a way
+that flies fewer flights fails. All pass → `passed-<executor_source_sha256[:12]>.json` (clean checkout only), which
+`spec.require_conforming_executor` — and so `replay.open_executor` — asks for. v11 (2026-10-01, 27 s): batch and staggered
+0 m apart, single 1.3e-8 m / 5.5e-10 m.
+
+    python run_ts.py executor_conformance --executor 4dTrajectory/outputs/POOLED/executor/v11_20260927 \
+        --instructions 4dTrajectory/outputs/POOLED/instruction_language/v5_20260926

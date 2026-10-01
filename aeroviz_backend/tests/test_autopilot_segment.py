@@ -17,7 +17,8 @@ from unittest import mock
 import numpy as np
 import torch
 
-from aeroviz_backend.autopilot_segment import fly as fly_module, payload as payload_module, single
+from aeroviz_backend.autopilot_segment import fly as fly_module, payload as payload_module
+from ts_transformer.autopilot import single
 from aeroviz_backend.autopilot_segment.backend import AutopilotSegmentBackend
 from aeroviz_backend.autopilot_segment.errors import NotFlyable, NotListed, RequestRefused, Superseded
 from aeroviz_backend.autopilot_segment.fly import FlightContext, FlownSegment, fly_one_until, fly_until

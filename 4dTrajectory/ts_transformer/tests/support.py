@@ -150,3 +150,21 @@ def signal_attitudes(_directory, signals):
     return {flight.dataset_id: {"headingDeg": np.mod(flight.track_deg, 360.0),
                                 "pathAngleDeg": np.degrees(np.arctan2(flight.vertical_rate_mps, flight.ground_speed_mps)),
                                 "bankRightDeg": None, "attackDeg": None} for flight in signals}
+
+
+def passed_executor(spec_dir):
+    """Mark a test's executor spec at ``spec_dir`` as flown within the bounds by the code on disk: placeholder reference
+    files and a passed record for this code — what `replay.open_executor` asks for (`spec.require_conforming_executor`).
+    The check itself is tested in `test_executor_conformance.py`."""
+    import json
+
+    from ts_transformer.autopilot import spec as executor_spec
+
+    directory = spec_dir / executor_spec.CONFORMANCE_DIRECTORY
+    directory.mkdir()
+    (directory / "reference.json").write_text("{}", encoding="utf-8")
+    (directory / "reference.npz").write_bytes(b"")
+    code = executor_spec.executor_source_sha256()
+    executor_spec.passed_path(spec_dir, code).write_text(json.dumps({
+        "schema": executor_spec.PASSED_SCHEMA, "executor_source_sha256": code,
+        "reference_sha256": executor_spec.reference_sha256(directory)}), encoding="utf-8")

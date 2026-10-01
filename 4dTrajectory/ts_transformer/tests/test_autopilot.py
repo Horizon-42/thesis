@@ -649,11 +649,12 @@ def _observed_series(geometry):
                         times=np.zeros(1), values=np.zeros((1, 6)))
 
 
-def test_the_executor_spec_is_written_once_and_refused_unless_it_is_the_current_executors(tmp_path):
+def test_the_executor_spec_is_written_once_and_opened_only_for_code_that_flew_its_reference(tmp_path, monkeypatch):
     import json
     from dataclasses import replace
 
     from ts_transformer.autopilot import spec as executor_spec
+    from ts_transformer.tests.support import passed_executor
 
     import platform
 
@@ -663,16 +664,21 @@ def test_the_executor_spec_is_written_once_and_refused_unless_it_is_the_current_
     executor_spec.write_spec(tmp_path, params, "vocabulary", {"data": {}}, source)
     loaded, record = executor_spec.load_spec(tmp_path)
     assert loaded == params and record["sha256"] == executor_spec.params_sha256(params)
-    executor_spec.require_current_executor(record)
     with pytest.raises(FileExistsError):
         executor_spec.write_spec(tmp_path, params, "vocabulary", {}, source)
     assert executor_spec.params_sha256(replace(params, bank_rate_deg_s=3.0)) != record["sha256"]
-    with pytest.raises(ValueError, match=r"other executor code \(000000000000, now [0-9a-f]{12}\)$"):
-        executor_spec.require_current_executor({**record, "source": {**source, "executor_source_sha256": "0" * 64}})
-    # the written-back logic is the running Python's: a spec written under another names it
-    with pytest.raises(ValueError, match="written under Python 2.7.0, this is"):
-        executor_spec.require_current_executor({**record, "source": {**source, "executor_source_sha256": "0" * 64,
-                                                                      "python": "2.7.0"}})
+    # opened only for executor code with a passed record against this spec's reference tracks
+    with pytest.raises(ValueError, match=r"has not been checked against .* reference tracks: python run_ts.py executor_conformance"):
+        executor_spec.require_conforming_executor(tmp_path)
+    passed_executor(tmp_path)
+    executor_spec.require_conforming_executor(tmp_path)
+    monkeypatch.setattr(executor_spec, "executor_source_sha256", lambda: "0" * 64)    # other code: checked again
+    with pytest.raises(ValueError, match="000000000000"):
+        executor_spec.require_conforming_executor(tmp_path)
+    monkeypatch.undo()
+    (tmp_path / executor_spec.CONFORMANCE_DIRECTORY / "reference.json").write_text("{ }")  # another reference
+    with pytest.raises(ValueError, match="is not a passed record of this code"):
+        executor_spec.require_conforming_executor(tmp_path)
     stored = json.loads((tmp_path / "spec.json").read_text())
     for broken, message in (({**stored, "params": {**stored["params"], "bank_rate_deg_s": 9.0}}, "do not hash"),
                             ({**stored, "params": {**stored["params"], "extra_s": 1.0}}, "extra"),
@@ -1108,6 +1114,9 @@ def test_the_executor_hash_covers_the_package_and_what_it_imports_from_the_repos
                    "ts_transformer.outputs.dynamics.rollout", "ts_transformer.outputs.envelope", "geokit",
                    "trajectory_data_process.harvest.airports"):
         assert needed in labels
+    # what the plant's integration reaches beyond them: a change there moves every flown track (review 2026-10-01)
+    assert set(executor_spec.REACHED_MODULES) <= set(labels)
+    assert len({path.resolve() for _, path in executor_spec.executor_source_files()}) == len(labels)
     assert not any(label.startswith(("ts_transformer.instructions", "ts_transformer.io_utils", "ts_transformer.repo_layout",
                                       "evaluation.cli", "torch", "numpy", "math")) for label in labels)
 
@@ -1116,11 +1125,13 @@ def test_an_executor_spec_is_opened_only_against_its_own_vocabulary_and_labeller
     """Review M3: the vocabulary sha, the artefact's labeller and the spec's recorded labeller must all agree."""
     from ts_transformer.autopilot import replay
     from ts_transformer.autopilot import spec as executor_spec
+    from ts_transformer.tests.support import passed_executor
 
     one = spec()
     source = {"executor_source_sha256": executor_spec.executor_source_sha256(), "python": "3", "labeller_source_sha256": "a" * 64,
               "git": {"head": "x", "dirty": False}}
     executor_spec.write_spec(tmp_path / "spec", _params(), one.sha256, {}, source)
+    passed_executor(tmp_path / "spec")
     monkeypatch.setattr(replay.artefact, "load_spec", lambda directory: one)
     monkeypatch.setattr(replay.artefact, "require_current_labeller", lambda directory: None)
     monkeypatch.setattr(replay.artefact, "labeller_source_sha256", lambda: "a" * 64)
@@ -1470,3 +1481,73 @@ def test_a_word_the_clock_never_reached_is_not_reached():
     _, verdict, _ = _fly_sentence(signals, params=params)
     later = [i for i in reading.instructions if i.row * 2.0 >= verdict.end_row]
     assert later and verdict.words["not_reached"] == len(later)
+
+
+def test_a_multi_aircraft_batch_flies_each_flight_from_its_own_start_as_it_flies_alone():
+    """Executor design §12.4: two flights in one executor, the second starting 7 steps after the first, each heard on its
+    own clock — each flies what it flies alone, state for state; before its start the later one waits, unchanged, in no
+    mode and not done; `flown` hands each from its own cycle 0."""
+    from ts_transformer.autopilot.executor import Executor, fly
+    from ts_transformer.autopilot.flights import FlightInputs
+    from ts_transformer.autopilot.lateral import Runways
+    from ts_transformer.instructions.labeller.read import read_flight
+
+    one, geometry = spec(), instruction_airport()
+    words, params = Words(one), _params()
+    flights = [instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0)),
+               instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1180.0, -900.0, 0.0))]
+    grids = [read_flight(f, geometry, one, words).words for f in flights]
+    physics = [_physics(f, geometry) for f in flights]
+    limits = [len(g) * one.step_s * params.timeout_factor for g in grids]
+    alone = [fly(inputs, Sentences([grid], words, device=CPU), TimeClock(params.cycle_s), runways, charts, approach,
+                 params, words, time_limit_s=torch.tensor([limit], dtype=F64))
+             for (inputs, runways, charts, approach), grid, limit in zip(physics, grids, limits)]
+    step_rows = int(round(one.step_s / params.cycle_s))
+    start = torch.tensor([0, 7 * step_rows])
+    inputs = FlightInputs(*(torch.cat([getattr(p[0], name) for p in physics]) for name in (
+        "initial_state", "aero_params", "frame_params", "max_thrust_n")))
+    executor = Executor(inputs, Runways.of([geometry] * 2, [vertical_paths(geometry)] * 2, dtype=F64, device=CPU),
+                        AirportCharts.of([geometry] * 2, dtype=F64, device=CPU), torch.cat([p[3] for p in physics]),
+                        params, words, time_limit_s=torch.tensor(limits, dtype=F64), start_cycle=start)
+    sentences = Sentences(grids, words, device=CPU)
+    first = inputs.initial_state[1].clone()
+    heard = torch.zeros(2, dtype=F64)
+    while executor.count < executor.cycles and not bool(executor.done.all()):
+        own = executor.own_cycle()
+        now_s = own.clamp(min=0).to(F64) * params.cycle_s
+        heard = torch.where((own % step_rows == 0) & (own >= 0), now_s, heard)
+        executor.cycle(sentences.at(heard), now_s)
+        if executor.count <= start[1]:
+            assert torch.equal(executor.state[1], first) and not bool(executor.done[1])
+            assert not any(bool(rows[-1][1]) for rows in executor.modes.values())
+    together = executor.flown()
+    for j, solo in enumerate(alone):
+        done = int(solo.done_cycle[0])
+        assert int(together.done_cycle[j]) == done
+        assert torch.equal(together.states[j, :done + 2], solo.states[0, :done + 2])
+        assert torch.equal(together.commands[j, :done + 1], solo.commands[0, :done + 1])
+        for name in solo.modes:
+            assert torch.equal(together.modes[name][j, :done + 1], solo.modes[name][0, :done + 1]), name
+
+
+def test_words_spoken_to_a_multi_aircraft_batch_count_from_each_flights_first_step():
+    from ts_transformer.autopilot.sentence import Spoken
+
+    words = Words(spec())
+    every = np.zeros((2, 6), dtype=np.int64)
+    spoken = Spoken(2, words, device=CPU, start_step=np.array([0, 2]))
+    half = every.copy()
+    half[1, :] = UNCHANGED                                   # nothing yet for the later flight: it has not started
+    spoken.say(half)
+    spoken.say(half)
+    with pytest.raises(ValueError, match="step 0 must write every column"):
+        spoken.say(half)                                     # the later flight's first step says nothing
+    later = every.copy()
+    later[0, :] = UNCHANGED
+    spoken.say(later)
+    spoken.at(torch.tensor([2 * 2.0, 0.0], dtype=F64))       # each heard at its own step: 2 and 0
+    with pytest.raises(ValueError, match="the steps just said"):
+        spoken.at(torch.tensor([2 * 2.0, 2.0], dtype=F64))
+    said = spoken.sentences()
+    assert said.shape == (2, 3, 6) and (said[1, 1:] == UNCHANGED).all() and (said[1, 0] == 0).all()
+    assert spoken.issued[1].tolist() == [0] * 6                # issued at its own step 0

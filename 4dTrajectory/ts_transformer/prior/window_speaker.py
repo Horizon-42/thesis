@@ -303,7 +303,8 @@ class WindowSpeaker:
                 for flag in (True, False):
                     part = now & (opening == flag)
                     if part.any():
-                        out[part] &= rules.allowed(column, chosen, self.value, position, flag, classes)[part]
+                        out[part] &= rules.allowed(column, chosen, self.value, position, flag, classes,
+                                                   flights=part)[part]
         if column in self.mask_columns:
             out &= self.masks_of(column, chosen, now)
         out[~now] = True

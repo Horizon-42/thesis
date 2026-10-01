@@ -177,17 +177,17 @@ def test_an_aircraft_whose_flight_ends_inside_a_step_keeps_the_words_it_said_the
     crossed, outcome_of = traffic_window.WindowLoop._crossed, traffic_window.outcome_of
     asked: dict[str, int] = {}
 
-    def forced_crossed(self, index, k):
-        out = crossed(self, index, k)
-        asked["k"] = k
-        for i, end in ends.items():
-            if k == end and i in index.tolist():
-                out[index.tolist().index(i)] = True
+    def forced_crossed(self, index, own):
+        out = crossed(self, index, own)
+        for p, i in enumerate(index.tolist()):
+            asked[i] = int(own[p])                               # each aircraft's own step
+            if i in ends and own[p] == ends[i]:
+                out[p] = True
         return out
 
     def forced_outcome(flown, place, geometry, runway, words_spec):
         for i, end in ends.items():
-            if asked["k"] == end and place == int(loop.place[i]) and not loop.left[i]:
+            if asked.get(i) == end and place == int(loop.place[i]) and not loop.left[i]:
                 return SimpleNamespace(outcome="ground_contact", end_row=end * int(round(STEP_S / flown.cycle_s)) + 1,
                                        crossing=None)
         return outcome_of(flown, place, geometry, runway, words_spec)

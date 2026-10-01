@@ -101,8 +101,13 @@ from ts_transformer.prior.model import Prior, with_traffic
 from ts_transformer.prior.scene import N_LOOK, Landings, hang, presence
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
-SCHEMA = "ts-traffic-window-generation-v2"
+#: v3 (2026-10-01): the model's sources read (`model_sources`) in the header.
+SCHEMA = "ts-traffic-window-generation-v3"
 SOURCES = ("scene", "alone", "labelled", "recorded")
+#: The sources the model speaks in (`--model-sources`: a read that needs only one — a pair of priors on the same windows
+#: reads "scene" — skips the other, half the model's time; each source from its own streams, so the rows of the one read
+#: do not change).
+MODEL_SOURCES = ("scene", "alone")
 #: A batch's most aircraft-steps (module docstring): about 0.6 GB of the model's past on its d and layers — a process's,
 #: four beside each other in the 8 GB GPU (M4's speaking processes hold as much).
 AIRCRAFT_STEPS = 100_000
@@ -616,12 +621,13 @@ def summaries(rows: Sequence[dict[str, Any]], augmented: bool) -> dict[str, Any]
 
 def batch_rows(model: Prior, drawn: Drawn, number: int, chunk: Sequence[int], words: Words, params: Any,
                landings: Any, every_landing: Mapping[str, Landings], samples: int, *, seed: int, temperature: float,
-               procedure_masks: Any, device: torch.device) -> list[dict[str, Any]]:
-    """Loop batch ``number`` (the windows at ``chunk``) read by the model's sources, each from its own stream
-    (`batch_seed`), and — windows as drawn — the labelled words and the records: its rows, each marked with the
-    batch."""
+               procedure_masks: Any, device: torch.device, model_sources: Sequence[str] = MODEL_SOURCES
+               ) -> list[dict[str, Any]]:
+    """Loop batch ``number`` (the windows at ``chunk``) read by the model's sources (``model_sources``), each from its
+    own stream (`batch_seed`), and — windows as drawn — the labelled words and the records: its rows, each marked with
+    the batch."""
     rows: list[dict[str, Any]] = []
-    for source in ("scene", "alone"):
+    for source in model_sources:
         generator = torch.Generator(device=device).manual_seed(batch_seed(seed, source, number))
         rows += model_rows(model, drawn, chunk, source, words, params, landings, every_landing, samples,
                            generator=generator, temperature=temperature, procedure_masks=procedure_masks)
@@ -718,6 +724,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--augment-seed", type=int, default=None, help="every window augmented with this seed "
                         "(`traffic_window_augment`; the model's sources only)")
     parser.add_argument("--device", default="cuda", help="the prior's; the executors fly on CPU")
+    parser.add_argument("--model-sources", nargs="+", choices=MODEL_SOURCES, default=list(MODEL_SOURCES),
+                        help="the model's sources to read (`MODEL_SOURCES`; the rows show which were read)")
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     args = parser.parse_args(argv)
     if args.windows_per_airport < 1 or args.samples < 1 or args.workers < 1:
@@ -764,7 +772,7 @@ def main(argv: list[str] | None = None) -> int:
         speaking = model.to(device)
         return batch_rows(speaking, drawn, number, batches[number], words, params, landings, every_landing,
                           args.samples, seed=args.seed, temperature=args.temperature, procedure_masks=own_masks,
-                          device=device)
+                          device=device, model_sources=tuple(s for s in MODEL_SOURCES if s in args.model_sources))
 
     gc.collect()
     gc.freeze()                                         # the reading processes share the parent's data, not copy it
@@ -798,6 +806,7 @@ def main(argv: list[str] | None = None) -> int:
         "executor": {"directory": repo_relative(executor_dir), "sha256": record["sha256"]},
         "instructions": repo_relative(instructions), "scenes": built, "history_s": HISTORY_S,
         "readings": {"ends": VISUAL, "beside": IFR}, "aircraft_steps": args.aircraft_steps, "batches": len(batches),
+        "model_sources": [s for s in MODEL_SOURCES if s in args.model_sources],
         "workers": args.workers, "gpu_peak_gb_a_process": max(peaks),
         "readout": readout, "aircraft_file": "aircraft.jsonl", "elapsed_s": time.perf_counter() - started})
     for source, entry in readout["pooled"].items():
