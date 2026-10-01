@@ -206,12 +206,20 @@ class WindowSpeaker:
         return first
 
     @torch.no_grad()
-    def speak(self, rank: np.ndarray, runway_locked: np.ndarray) -> np.ndarray:
+    def speak(self, rank: np.ndarray, runway_locked: np.ndarray, given: np.ndarray | None = None) -> np.ndarray:
         """``[N, 6]``: the classes said at the step (0: unchanged, else the word + 1) — by the aircraft ranked (``rank``
         ≥ 0: there, at or past its first predicted step; one a scene a rank), round by round in their ranks, each column
-        given the ones before it; the others say nothing. One whose runway is locked says no other runway."""
+        given the ones before it; the others say nothing. One whose runway is locked says no other runway.
+
+        ``given`` (``[N, 6]``, −1 where an aircraft's line is not given): a ranked aircraft whose line is given says it,
+        in its round as one sampled would — neither sampled nor masked (its draw is "unchanged", so the others' draws do
+        not depend on who is given), the later rounds' masks reading it (multi-aircraft design §6.6 step 7.7)."""
         rank = np.asarray(rank, dtype=np.int64)
         speaking = rank >= 0
+        given = np.full((len(rank), 6), -1, dtype=np.int64) if given is None else np.asarray(given, dtype=np.int64)
+        fixed = given[:, 0] >= 0
+        if (given[fixed] < 0).any():
+            raise ValueError("a given line gives all six columns")
         row = self.row
         if (speaking & ~(self.there & (row >= N_LOOK))).any():
             raise ValueError("an aircraft speaks while it is there, from its first predicted step")
@@ -225,7 +233,8 @@ class WindowSpeaker:
         opening = row == N_LOOK
         for p in range(int(rank.max()) + 1):
             now = rank == p
-            chosen = self._sample(h, tokens, valid, now, opening, row, runway_locked)
+            chosen = self._sample(h, tokens, valid, now & ~fixed, opening, row, runway_locked)
+            chosen[now & fixed] = given[now & fixed]
             said[now] = chosen[now]
             written = now[:, None] & (chosen > 0)
             self.value = np.where(written, chosen, self.value)

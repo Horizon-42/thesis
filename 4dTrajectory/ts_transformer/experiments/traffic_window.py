@@ -312,13 +312,28 @@ class Commanded:
 _NEVER = np.iinfo(np.int64).max
 
 
+@dataclass(frozen=True)
+class Given:
+    """A commanded aircraft's words given instead of spoken (multi-aircraft design §6.6 step 7.7): ``said`` (``[steps,
+    6]``, its own steps from its first predicted one, as `Commanded.said`) up to its own step ``until`` — never past
+    ``said``'s end; from there the prior speaks for it."""
+
+    said: np.ndarray
+    until: int
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.until <= len(self.said):
+            raise ValueError(f"a line given to own step {self.until} of {len(self.said)} said")
+
+
 class WindowLoop:
     """Every commanded aircraft of a batch of windows flown with the prior speaking, judged as it flies (module
     docstring and design §6.6 step 7 item 3). ``windows``: one per sample (a window spoken to `K` times is here `K`
     times); ``flights``: their commanded aircraft window after window, each window's in its order, with each one's
     executor inputs (``inputs``, ``runways``, ``charts``, ``approach_ias_mps`` over ``flights``, from its first predicted
     step), time limit and geometry; ``alone``: each aircraft speaks seeing no other (its edge features its own, no
-    separation mask) and is still judged in its window.
+    separation mask) and is still judged in its window; ``given``: an aircraft's words given up to an own step
+    (`Given`; None: spoken throughout) — said in its round, neither sampled nor masked.
 
     **A step** (`step`), at the batch step every speaking aircraft's rows reach:
 
@@ -363,11 +378,14 @@ class WindowLoop:
                  geometries: Sequence[AirportGeometry], inputs: FlightInputs, runways: Runways, charts: AirportCharts,
                  approach_ias_mps: torch.Tensor, limits: Sequence[float], words: Words, params: ExecutorParams,
                  landings: Any, *, generator: torch.Generator, temperature: float, procedure_masks: ProcedureMasks,
-                 alone: bool = False, reading: str = VISUAL) -> None:
+                 alone: bool = False, reading: str = VISUAL, given: Sequence[Given | None] | None = None) -> None:
         step_s = words.spec.step_s
         self.windows, self.words, self.params, self.step_s, self.alone = list(windows), words, params, step_s, alone
         self.flights, self.geometries = list(flights), list(geometries)
         self.keys = [f.dataset_id for f in flights]
+        self.given = [None] * len(flights) if given is None else list(given)
+        if len(self.given) != len(flights):
+            raise ValueError("a given line or None for every commanded aircraft")
         self.window_of = np.array([w for w, window in enumerate(windows) for _ in window.commanded], dtype=np.int64)
         if [k for window in windows for k in window.commanded] != self.keys:
             raise ValueError("the flights are the windows' commanded aircraft, window after window, each in its order")
@@ -465,7 +483,7 @@ class WindowLoop:
             self._record(starting, self.executors[0][2], step, captured=np.zeros(len(starting), dtype=bool))
         k = step - self.start - N_LOOK
         speaking = (k >= 0) & (self.ended_at < 0) & ~self.left & (k < self.sentence_end)
-        said = speaker.speak(self._rank(speaking, step), self._locked())
+        said = speaker.speak(self._rank(speaking, step), self._locked(), self._given(k, speaking))
         for w in range(len(self.windows)):
             if self._live(w):
                 self._runways(w, step)
@@ -474,6 +492,15 @@ class WindowLoop:
                 self.last_step[w] = step
                 self.runs[w].scene_seconds = float(step - self.first_step) * self.step_s
         self._fly(step, said)
+
+    def _given(self, k: np.ndarray, speaking: np.ndarray) -> np.ndarray | None:
+        """``[N, 6]``: the speaking aircraft's given lines at their own steps ``k`` (`Given`) as the speaker's classes
+        (0: unchanged, else the word + 1), −1 for the others; None when none is given."""
+        out = np.full((len(k), 6), -1, dtype=np.int64)
+        for i, line in enumerate(self.given):
+            if line is not None and speaking[i] and k[i] < line.until:
+                out[i] = np.where(line.said[k[i]] == UNCHANGED, 0, line.said[k[i]] + 1)
+        return out if (out[:, 0] >= 0).any() else None
 
     # -- 2.–4. the judge
     def _runways(self, w: int, step: int) -> None:
