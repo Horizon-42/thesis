@@ -2,19 +2,25 @@
 the kept M4-in-windows round against its start on the val windows).
 
 Reads two `traffic_window_generation` (R34) outputs — ``--first`` and ``--second``, typically two priors — and refuses
-them unless they read the SAME windows the SAME way: every field of their ``window_generation.json`` that decides what
-is drawn and how it is read (`SAME`: the split, the draw, the windows an airport, the samples, the temperature, the seed,
-the augmentation, the executor spec, the sentence artefact, the scenes, the history, the readings, the batches and their
-size) equal; the same rows (window, aircraft, sample, source) in both; every row's ``starts_in_a_loss`` equal (it reads
-only the observed rows); and the sources no model reads — the labelled words and the record — equal row for row. Each
-batch draws from its own streams, so the two read every window with the same random numbers: their rows pair.
+them unless they read the SAME windows the SAME way with the SAME code: every field of their ``window_generation.json``
+that decides what is drawn and how it is read (`SAME`: the code's commit, the split, the draw, the windows an airport, the
+samples, the temperature, the seed, the augmentation, the executor spec, the sentence artefact, the scenes, the history,
+the readings, the batches and their size) equal; the same rows (window, aircraft, sample, source) in both, whose fields no
+model decides (`MODEL_FREE`) are equal; and the sources no model reads — the labelled words and the record — equal row for
+row (they also read the prior's procedure masks: two priors under other masks differ there). Each batch draws from its
+own streams, so the two read every window from the same random numbers as far as their words agree.
+
+A row STARTING IN A LOSS depends on the model too: an aircraft that enters later is judged through its observed rows
+against the commanded aircraft ahead of it, flown by the model. As the M4 round choice pairs its rounds
+(`traffic_window_reward.select_counted`, `traffic_reward.paired_difference`), a sentence is counted only where it starts
+in a loss in neither readout; how many start in a loss in each is reported beside.
 
 For each model source (`MODEL_SOURCES`) and each group (pooled, airport, window size and — augmented windows — kind and
-part in the augmentation), over the rows the readout counts (not starting in a loss): the share of each `MEASURES` in
-both, and second − first. The difference is taken per aircraft — its samples averaged — and its standard error is
-clustered by window (one window's aircraft fly together); beside it, the reward's error read per sentence as the M4
-round choice reads its pairs (`traffic_reward.paired_difference`). Counted per sentence: the losses of separation the
-second avoids and the ones it adds.
+part in the augmentation), over the sentences counted in both: the share of each `MEASURES` in both and second − first,
+with its standard error CLUSTERED BY AIRPORT AND OPERATING DAY (`cluster_of`): windows overlap (one opens every 10
+minutes, 20 minutes long), share flights and replayed traffic, and a day's runway configuration and weather reach them
+all; beside it, the reward's error read per sentence as the M4 round choice reads its pairs. Counted per sentence: the
+losses of separation the second avoids and the ones it adds.
 
     python run_ts.py traffic_window_pair --first 4dTrajectory/outputs/POOLED/traffic/<readout> \\
         --second 4dTrajectory/outputs/POOLED/traffic/<readout> [--out <new directory>]
@@ -27,12 +33,15 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 
+from ts_transformer.data.day_split import operational_day
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION
 from ts_transformer.experiments.traffic_reward import paired_difference
 from ts_transformer.experiments.traffic_window_augment import KINDS, ROLES
@@ -42,8 +51,12 @@ from ts_transformer.repo_layout import REPO_ROOT, repo_relative
 
 SCHEMA = "ts-traffic-window-pair-v1"
 #: What decides which windows are read and how: equal in both readouts, or they do not pair.
-SAME = ("schema", "split", "drawn", "windows_per_airport", "samples", "temperature", "seed", "augment_seed", "augmenting",
-        "executor", "instructions", "scenes", "history_s", "readings", "aircraft_steps", "batches")
+SAME = ("schema", "git", "split", "drawn", "windows_per_airport", "samples", "temperature", "seed", "augment_seed",
+        "augmenting", "executor", "instructions", "scenes", "history_s", "readings", "aircraft_steps", "batches")
+#: A model row's fields no model decides: equal in both readouts.
+MODEL_FREE = ("airport", "commanded", "observed_runway", "augmented", "role", "batch")
+#: A flight's identity ends in its landing time (`flight_scenarios.identity.flight_key`): what its operating day is read from.
+LANDING_STAMP = re.compile(r"(\d{8}T\d{6}Z)$")
 MODEL_SOURCES = ("scene", "alone")
 FIXED_SOURCES = ("labelled", "recorded")
 #: Each sentence's 0 / 1 readings (R34's own: `traffic_window_generation.summary`, M4's reward).
@@ -82,47 +95,75 @@ def require_pairs(first: tuple[dict[str, Any], list[dict[str, Any]]],
     if by_a.keys() != by_b.keys():
         raise ValueError(f"the readouts hold other rows: {len(by_a.keys() - by_b.keys())} only in the first, "
                          f"{len(by_b.keys() - by_a.keys())} only in the second")
-    moved = [k for k in by_a if by_a[k]["starts_in_a_loss"] != by_b[k]["starts_in_a_loss"]]
+    model = [k for k in by_a if k[3] in MODEL_SOURCES]
+    moved = [k for k in model if any(by_a[k][f] != by_b[k][f] for f in MODEL_FREE)]
     if moved:
-        raise ValueError(f"{len(moved)} rows start in a loss in one readout and not the other (e.g. {moved[0]})")
+        raise ValueError(f"{len(moved)} model rows differ in what no model decides ({MODEL_FREE}; e.g. {moved[0]}): not "
+                         f"the same windows")
     fixed = [k for k in by_a if k[3] in FIXED_SOURCES and by_a[k] != by_b[k]]
     if fixed:
         raise ValueError(f"{len(fixed)} rows no model reads differ between the readouts (e.g. {fixed[0]}): not the same "
-                         f"draws")
-    counted = [k for k in by_a if k[3] in MODEL_SOURCES and not by_a[k]["starts_in_a_loss"]]
-    return {k: (by_a[k], by_b[k]) for k in sorted(counted)}
+                         f"draws, or the two priors' procedure masks differ")
+    return {k: (by_a[k], by_b[k]) for k in sorted(model)}
 
 
-def clustered(per_aircraft: Mapping[tuple[int, str], float]) -> tuple[float, float, int]:
-    """The mean of the per-aircraft differences and its standard error clustered by window, with the aircraft counted."""
-    sums: dict[int, float] = defaultdict(float)
-    counts: dict[int, int] = defaultdict(int)
-    for (window, _), value in per_aircraft.items():
-        sums[window] += value
-        counts[window] += 1
+def operating_day_of(dataset_id: str) -> str:
+    """The operating day a flight landed on, read from its identity's landing stamp."""
+    found = LANDING_STAMP.search(dataset_id)
+    if found is None:
+        raise ValueError(f"{dataset_id!r} does not end in a landing stamp")
+    return operational_day(datetime.strptime(found.group(1), "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc))
+
+
+def cluster_of(pairs: Mapping[tuple, tuple[dict, dict]]) -> dict[int, tuple[str, str]]:
+    """Each window's cluster: its airport and the operating day of its earliest-landing commanded aircraft."""
+    first_landing: dict[int, str] = {}
+    airport: dict[int, str] = {}
+    for (window, key, _, _), (a, _) in pairs.items():
+        stamp = LANDING_STAMP.search(key)
+        if stamp is None:
+            raise ValueError(f"{key!r} does not end in a landing stamp")
+        if window not in first_landing or stamp.group(1) < LANDING_STAMP.search(first_landing[window]).group(1):
+            first_landing[window] = key
+        airport[window] = a["airport"]
+    return {w: (airport[w], operating_day_of(key)) for w, key in first_landing.items()}
+
+
+def clustered(differences: Sequence[tuple[Any, float]]) -> tuple[float, float | None]:
+    """The mean of sentence differences ``(cluster, value)`` and its cluster-robust standard error (None under two
+    clusters): each cluster's sum against its sentences times the mean."""
+    sums: dict[Any, float] = defaultdict(float)
+    counts: dict[Any, int] = defaultdict(int)
+    for cluster, value in differences:
+        sums[cluster] += value
+        counts[cluster] += 1
     n = sum(counts.values())
     mean = sum(sums.values()) / n
     k = len(sums)
     if k < 2:
-        return mean, math.nan, n
-    spread = sum((sums[w] - mean * counts[w]) ** 2 for w in sums)
-    return mean, math.sqrt(k / (k - 1) * spread) / n, n
+        return mean, None
+    spread = sum((sums[c] - mean * counts[c]) ** 2 for c in sums)
+    return mean, math.sqrt(k / (k - 1) * spread) / n
 
 
-def compare(pairs: Mapping[tuple, tuple[dict, dict]]) -> dict[str, Any]:
-    """Each measure in both readouts and second − first over ``pairs`` (one source, one group)."""
-    out: dict[str, Any] = {"sentences": len(pairs)}
+def compare(rows: Mapping[tuple, tuple[dict, dict]], clusters: Mapping[int, tuple[str, str]]) -> dict[str, Any]:
+    """Each measure in both readouts and second − first over the sentences of ``rows`` counted in both (one source, one
+    group), with how many start in a loss in each."""
+    pairs = {k: p for k, p in rows.items() if not (p[0]["starts_in_a_loss"] or p[1]["starts_in_a_loss"])}
+    if not pairs:
+        raise ValueError("a group whose every sentence starts in a loss in one readout or the other")
+    out: dict[str, Any] = {
+        "sentences": len(pairs), "aircraft": len({(k[0], k[1]) for k in pairs}),
+        "clusters": len({clusters[k[0]] for k in pairs}),
+        "starting_in_a_loss": {"first": sum(a["starts_in_a_loss"] for a, _ in rows.values()),
+                               "second": sum(b["starts_in_a_loss"] for _, b in rows.values()),
+                               "both": sum(a["starts_in_a_loss"] and b["starts_in_a_loss"] for a, b in rows.values())}}
     for name, value in MEASURES.items():
-        aircraft: dict[tuple[int, str], list[float]] = defaultdict(list)
-        first, second = [], []
-        for key, (a, b) in pairs.items():
-            first.append(value(a))
-            second.append(value(b))
-            aircraft[(key[0], key[1])].append(value(b) - value(a))
-        mean, error, n = clustered({k: float(np.mean(v)) for k, v in aircraft.items()})
+        first = [value(a) for a, _ in pairs.values()]
+        second = [value(b) for _, b in pairs.values()]
+        mean, error = clustered([(clusters[k[0]], value(b) - value(a)) for k, (a, b) in pairs.items()])
         out[name] = {"first": float(np.mean(first)), "second": float(np.mean(second)), "difference": mean,
                      "standard_error": error}
-        out["aircraft"] = n
     reward_first = {key: MEASURES["reward"](a) for key, (a, _) in pairs.items()}
     reward_second = {key: MEASURES["reward"](b) for key, (_, b) in pairs.items()}
     out["reward"]["per_sentence"] = dict(zip(("difference", "standard_error"),
@@ -154,12 +195,13 @@ def groups(pairs: Mapping[tuple, tuple[dict, dict]], augmented: bool) -> dict[st
 def pair(first_dir: Path, second_dir: Path) -> dict[str, Any]:
     first, second = read(first_dir), read(second_dir)
     pairs = require_pairs(first, second)
+    clusters = cluster_of(pairs)
     augmented = first[0]["augment_seed"] is not None
     report: dict[str, Any] = {}
     for source in MODEL_SOURCES:
         mine = {k: p for k, p in pairs.items() if k[3] == source}
         if mine:
-            report[source] = {group: {name: compare(part) for name, part in parts.items()}
+            report[source] = {group: {name: compare(part, clusters) for name, part in parts.items()}
                               for group, parts in groups(mine, augmented).items()}
     return {"schema": SCHEMA, "written_utc": utc_now(),
             "first": {"directory": repo_relative(first_dir), "prior": first[0]["prior"]},
@@ -170,14 +212,19 @@ def pair(first_dir: Path, second_dir: Path) -> dict[str, Any]:
 
 
 def _line(name: str, entry: Mapping[str, Any]) -> str:
+    def error(value: float | None, scale: float, digits: int) -> str:
+        return "n/a" if value is None else f"{scale * value:.{digits}f}"
+
     def cell(m: str, scale: float, unit: str) -> str:
         e = entry[m]
         return (f"{m} {scale * e['first']:.2f}{unit} → {scale * e['second']:.2f}{unit} "
-                f"({scale * e['difference']:+.2f} ± {scale * e['standard_error']:.2f})")
-    reward = entry["reward"]
-    return (f"  {name:10s} {entry['aircraft']:5d} aircraft {entry['sentences']:6d} sentences | reward "
-            f"{reward['first']:.4f} → {reward['second']:.4f} ({reward['difference']:+.4f} ± {reward['standard_error']:.4f}; "
-            f"per sentence ± {reward['per_sentence']['standard_error']:.4f}) | {cell('lost_separation', 100, ' %')} "
+                f"({scale * e['difference']:+.2f} ± {error(e['standard_error'], scale, 2)})")
+    reward, loss = entry["reward"], entry["starting_in_a_loss"]
+    return (f"  {name:10s} {entry['aircraft']:5d} aircraft {entry['sentences']:6d} sentences {entry['clusters']:3d} days "
+            f"(start in a loss {loss['first']} / {loss['second']}) | reward "
+            f"{reward['first']:.4f} → {reward['second']:.4f} ({reward['difference']:+.4f} ± "
+            f"{error(reward['standard_error'], 1, 4)}; per sentence ± {reward['per_sentence']['standard_error']:.4f}) | "
+            f"{cell('lost_separation', 100, ' %')} "
             f"avoided {entry['lost_separation']['avoided']} added {entry['lost_separation']['added']} | "
             f"{cell('lost_separation_ifr', 100, ' %')} | {cell('landed', 100, ' %')} | "
             f"{cell('landed_on_observed_runway', 100, ' %')}")
@@ -203,7 +250,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(_line(name if group == "pooled" else f"{group[:4]} {name}", entry))
     if out is not None:
         out.mkdir(parents=True)
-        write_json_atomic(out / "traffic_window_pair.json", result)
+        write_json_atomic(out / "traffic_window_pair.json", result, allow_nan=False)
         print(f"→ {out / 'traffic_window_pair.json'}")
     return 0
 

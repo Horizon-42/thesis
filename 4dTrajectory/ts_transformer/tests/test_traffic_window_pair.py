@@ -14,8 +14,13 @@ from ts_transformer.experiments.traffic_loop import LOST_SEPARATION
 from ts_transformer.experiments.traffic_window_generation import SCHEMA as READOUT_SCHEMA
 
 
+#: flight identities ending in their landing stamps (`flight_scenarios.identity.flight_key`): window 0 on one operating
+#: day, window 1 on the next
+A, B, C = "KXXX:A1_09_aaa_20260601T120000Z", "KXXX:B1_09_bbb_20260601T121000Z", "KXXX:C1_09_ccc_20260602T120000Z"
+
+
 def _header(**changes):
-    header = {"schema": READOUT_SCHEMA, "split": "val", "drawn": {"seed": 1337}, "windows_per_airport": 2, "samples": 2,
+    header = {"schema": READOUT_SCHEMA, "git": {"head": "h", "dirty": False}, "split": "val", "drawn": {"seed": 1337}, "windows_per_airport": 2, "samples": 2,
               "temperature": 1.0, "seed": 1337, "augment_seed": None, "augmenting": None,
               "executor": {"sha256": "e"}, "instructions": "i", "scenes": {"n": 1}, "history_s": 1200.0,
               "readings": {"ends": "visual"}, "aircraft_steps": 100000, "batches": 1, "prior": {"directory": "p"},
@@ -29,7 +34,7 @@ def _row(window, key, sample, source, *, lost=False, landed=True, airport="KXXX"
     return {"window": window, "dataset_id": key, "sample": sample, "source": source, "airport": airport,
             "commanded": commanded, "starts_in_a_loss": start_lost, "outcome": outcome,
             "ifr_outcome": outcome, "reward": float(outcome == "landed"), "runway": 0, "observed_runway": 0,
-            "augmented": augmented, "role": role}
+            "augmented": augmented, "role": role, "batch": 0}
 
 
 def _write(directory, rows, **header):
@@ -46,7 +51,7 @@ def _fixed(window, key):
 def _readouts(tmp_path, second_lost):
     """Windows 0 (two aircraft) and 1 (one), two samples each; the first readout loses nothing, the second loses the
     sentences in ``second_lost``."""
-    keys = [(0, "KXXX:a", 2), (0, "KXXX:b", 2), (1, "KXXX:c", 1)]
+    keys = [(0, A, 2), (0, B, 2), (1, C, 1)]
     first, second = [], []
     for window, key, commanded in keys:
         for sample in (0, 1):
@@ -59,17 +64,16 @@ def _readouts(tmp_path, second_lost):
     return _write(tmp_path / "first", first), _write(tmp_path / "second", second, prior={"directory": "q"})
 
 
-def test_the_difference_is_per_aircraft_and_its_error_clustered_by_window(tmp_path):
-    first, second = _readouts(tmp_path, {(0, "KXXX:a", 0, "scene"), (0, "KXXX:a", 1, "scene"),
-                                         (1, "KXXX:c", 0, "scene")})
+def test_the_difference_is_second_less_first_and_its_error_clustered_by_airport_and_day(tmp_path):
+    first, second = _readouts(tmp_path, {(0, A, 0, "scene"), (0, A, 1, "scene"), (1, C, 0, "scene")})
     result = pair.pair(first, second)
     scene = result["report"]["scene"]["pooled"]["all"]
-    assert (scene["aircraft"], scene["sentences"]) == (3, 6)
-    # per aircraft: a −1 (both samples), b 0, c −0.5 → mean −0.5; windows: 0 sums −1 (2 aircraft), 1 sums −0.5 (1)
+    assert (scene["aircraft"], scene["sentences"], scene["clusters"]) == (3, 6, 2)
+    # per sentence: window 0 (day 1) −1, −1, 0, 0; window 1 (day 2) −1, 0 → mean −0.5 = 0.5 − 1.0
     reward = scene["reward"]
-    assert reward["difference"] == pytest.approx(-0.5)
-    spread = (-1.0 - (-0.5) * 2) ** 2 + (-0.5 - (-0.5) * 1) ** 2
-    assert reward["standard_error"] == pytest.approx(math.sqrt(2 / 1 * spread) / 3)
+    assert reward["difference"] == pytest.approx(reward["second"] - reward["first"]) == pytest.approx(-0.5)
+    spread = (-2.0 - (-0.5) * 4) ** 2 + (-1.0 - (-0.5) * 2) ** 2
+    assert reward["standard_error"] == pytest.approx(math.sqrt(2 / 1 * spread) / 6)
     assert reward["first"] == 1.0 and reward["second"] == pytest.approx(0.5)
     assert reward["per_sentence"]["difference"] == pytest.approx(-0.5)
     assert reward["per_sentence"]["standard_error"] == pytest.approx(math.sqrt(3) / 6)
@@ -82,7 +86,8 @@ def test_the_difference_is_per_aircraft_and_its_error_clustered_by_window(tmp_pa
 
 def test_readouts_that_did_not_read_the_same_windows_the_same_way_are_refused(tmp_path):
     first, second = _readouts(tmp_path, set())
-    for name, value in (("samples", 4), ("seed", 7), ("augment_seed", 7919), ("executor", {"sha256": "f"})):
+    for name, value in (("samples", 4), ("seed", 7), ("augment_seed", 7919), ("executor", {"sha256": "f"}),
+                        ("git", {"head": "other", "dirty": False})):
         header = json.loads((second / "window_generation.json").read_text())
         (second / "window_generation.json").write_text(json.dumps({**header, name: value}))
         with pytest.raises(ValueError, match=f"\\['{name}'\\] differ"):
@@ -93,9 +98,9 @@ def test_readouts_that_did_not_read_the_same_windows_the_same_way_are_refused(tm
     with pytest.raises(ValueError, match="other rows: 1 only in the first"):
         pair.pair(first, second)
     edited = [json.loads(line) for line in rows]
-    edited[0]["starts_in_a_loss"] = True
+    edited[0]["observed_runway"] = 1
     (second / "aircraft.jsonl").write_text("".join(json.dumps(r) + "\n" for r in edited))
-    with pytest.raises(ValueError, match="start in a loss in one readout"):
+    with pytest.raises(ValueError, match="differ in what no model decides"):
         pair.pair(first, second)
     edited = [json.loads(line) for line in rows]
     labelled = next(i for i, r in enumerate(edited) if r["source"] == "labelled")
@@ -105,21 +110,23 @@ def test_readouts_that_did_not_read_the_same_windows_the_same_way_are_refused(tm
         pair.pair(first, second)
 
 
-def test_a_sentence_starting_in_a_loss_is_not_counted(tmp_path):
+def test_a_sentence_starting_in_a_loss_in_either_readout_is_not_counted_and_is_reported(tmp_path):
+    """The model flies the aircraft ahead of a later one, so a later one can start in a loss under one model only."""
     first, second = _readouts(tmp_path, set())
-    for directory in (first, second):
+    for directory, starting in ((first, {(C, 0)}), (second, {(C, 0), (B, 1)})):
         rows = [json.loads(line) for line in (directory / "aircraft.jsonl").read_text().splitlines()]
         for r in rows:
-            r["starts_in_a_loss"] = r["dataset_id"] == "KXXX:c"
+            r["starts_in_a_loss"] = (r["dataset_id"], r["sample"]) in starting
         (directory / "aircraft.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     scene = pair.pair(first, second)["report"]["scene"]["pooled"]["all"]
-    assert (scene["aircraft"], scene["sentences"]) == (2, 4)
+    assert (scene["aircraft"], scene["sentences"]) == (3, 4)
+    assert scene["starting_in_a_loss"] == {"first": 1, "second": 2, "both": 1}
 
 
 def test_augmented_windows_are_split_by_kind_and_part(tmp_path):
     kinds = {0: {"kind": "C"}, 1: {"kind": "A"}}
     rows = []
-    for window, key, role in ((0, "KXXX:a", "shifted"), (1, "KXXX:b", "inserted"), (1, "KXXX:c", None)):
+    for window, key, role in ((0, A, "shifted"), (1, B, "inserted"), (1, C, None)):
         for sample in (0, 1):
             rows.append(_row(window, key, sample, "scene", augmented=kinds[window], role=role))
     first = _write(tmp_path / "first", rows, augment_seed=7919, augmenting={"kinds": {"C": 1, "A": 1}})
@@ -131,7 +138,7 @@ def test_augmented_windows_are_split_by_kind_and_part(tmp_path):
 
 
 def test_the_pair_is_written_into_a_new_directory(tmp_path, capsys):
-    first, second = _readouts(tmp_path, {(0, "KXXX:a", 0, "scene")})
+    first, second = _readouts(tmp_path, {(0, A, 0, "scene")})
     out = tmp_path / "pair"
     assert pair.main(["--first", str(first), "--second", str(second), "--out", str(out)]) == 0
     written = json.loads((out / "traffic_window_pair.json").read_text())
@@ -139,3 +146,9 @@ def test_the_pair_is_written_into_a_new_directory(tmp_path, capsys):
     assert "reward 1.0000 → 0.8333" in capsys.readouterr().out
     with pytest.raises(SystemExit):
         pair.main(["--first", str(first), "--second", str(second), "--out", str(out)])
+
+
+def test_a_window_s_operating_day_is_its_earliest_landing_s():
+    assert pair.operating_day_of(A) == "2026-06-01" and pair.operating_day_of("KXXX:Z_09_z_20260602T080000Z") == "2026-06-01"
+    with pytest.raises(ValueError, match="landing stamp"):
+        pair.operating_day_of("KXXX:no_stamp")
