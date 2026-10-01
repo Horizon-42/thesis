@@ -6,24 +6,27 @@ to once by the model, every commanded aircraft together (R34's "scene" reading a
 `traffic_window_generation.batch_seed`), its words and the judge's books kept.
 
 **Events**: each loss of separation there that ended a commanded aircraft (a wake shortfall at a landing included), not
-one it started in; a pair ended together at one step is one event. Its time ``t_L`` is the step the judge ended it at.
+one it started in; one episode of a pair is one event, whoever of the two it ended and when. Its time ``t_L`` is the
+episode's first step — when the pair first lost separation (a wake shortfall: its landing's time).
 
 **Who speaks again** (a role each): the aircraft the judge ended (``answered``) and the other of the pair when it is
-commanded (``partner``); when both were ended for each other at that step, each is done once (``both``).
+commanded (``partner``); when the episode ended both, each is done once (``both``).
 
-**From where** (an offset each): ``t_L`` less each of ``--offsets-s`` (in steps), and ``start`` — the aircraft's first
-predicted step (design: the one-aircraft credit, candidate B). An offset before its first predicted step, or at an own
-step it said nothing at (ended or stopped before it), is skipped and counted.
+**From where** (an offset each): ``t_L`` less each of ``--offsets-s`` (whole steps), and ``start`` — the aircraft's first
+predicted step (design: the one-aircraft credit, candidate B). Skipped and counted: an offset before its first predicted
+step; a step at or after ``t_L`` (the state judged at ``t_L`` was flown before it); an own step it said nothing at — ended
+by the judge, or its words over, before it (`spoken_steps`).
 
 **A branch**: the window flown again from its start with every word given (`traffic_window.Given`) — the speaking
 aircraft's to its own step, from where the prior speaks for it; every other commanded aircraft's in full, past their end
 the prior speaking for one still flying (design item 7) — ``--branches`` times an offset, each from a stream of its own
 (`rewind_seed`). Given words are neither sampled nor masked. **The control**: one more, every word given; it must replay
-the original pass to the last field, or the run stops (design item 9).
+the original pass — words, outcomes and every discrete field exactly, every float within `ROUNDOFF` (the executor's
+atan2 / hypot round differently by an aircraft's place in a batch: `autopilot.single`) — or the run stops (design item 9).
 
 **Rescued** (design item 10): (i) the pair loses no separation from the branch's step on; (ii) the speaking aircraft
-lands in the airport's landing direction, not ended (M4's reward 1); (iii) no aircraft is ended that the original pass
-did not end. Each is kept beside.
+lands in the airport's landing direction, not ended (M4's reward 1); (iii) no new loss: every aircraft ended in the branch
+was ended in the original pass, with the same other aircraft. Each is kept beside.
 
 **The readout**, per role and offset, pooled and per airport, stratum of the speaking aircraft (`instructions.readout.
 stratum`), kind and relation of the loss, window size and — augmented — kind: the cells (an event's role and offset),
@@ -31,8 +34,9 @@ the share with at least one branch rescued, the mean share of branches rescued, 
 (`TALLIES`), the three conditions' shares, and the words the speaking aircraft changed between its step and ``t_L``
 (steps per column differing from the original), rescued and not.
 
-Writes into a NEW directory ``original.jsonl`` (the original pass's rows, R34's), ``events.jsonl`` (an event a row with
-its branches) and ``window_rewind.json`` (the header and the readout). Both passes run in ``--workers`` forked processes
+Writes into a NEW directory, at the end, ``original.jsonl`` (the original pass's rows, R34's), ``events.jsonl`` (an event
+a row with its branches) and ``window_rewind.json`` (the header — with the controls replayed and their largest float
+difference — and the readout). Both passes run in ``--workers`` forked processes
 (`traffic_window_generation.in_processes`); what is read does not depend on their number.
 
     python run_ts.py traffic_window_rewind \\
@@ -48,28 +52,30 @@ import argparse
 import dataclasses
 import gc
 import json
+import math
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Sequence
 
 import numpy as np
 import torch
 
 from ts_transformer.autopilot import replay
+from ts_transformer.autopilot.conformance import ROUNDOFF
 from ts_transformer.experiments.prior_free_generation import start_altitude_windows
 from ts_transformer.experiments.prior_train import rosters
 from ts_transformer.experiments.traffic_speaking import HISTORY_S, scene_airports
 from ts_transformer.experiments.traffic_window import Given, draw_windows
 from ts_transformer.experiments.traffic_window_augment import busiest
 from ts_transformer.experiments.traffic_window_generation import (
-    AIRCRAFT_STEPS, WINDOWS_PER_AIRPORT, WORKERS, Drawn, augmented_windows, batch_seed, drawn_windows, flown_sentences,
+    AIRCRAFT_STEPS, WINDOWS_PER_AIRPORT, WORKERS, augmented_windows, batch_seed, drawn_windows, flown_sentences,
     fly_windows, in_processes, packed, size_of, summaries, window_batches, window_prior, window_size,
 )
-from ts_transformer.inference.separation import VISUAL
+from ts_transformer.inference.separation import AT_THRESHOLD, VISUAL
 from ts_transformer.instructions.artefact import SPLITS
 from ts_transformer.instructions.readout import stratum
-from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
+from ts_transformer.instructions.words import COLUMNS, UNCHANGED
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.data import VARIANTS, airport_landings
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
@@ -82,7 +88,7 @@ START = "start"
 BRANCHES = 8
 ANSWERED, PARTNER, BOTH = "answered", "partner", "both"
 ROLES = (ANSWERED, PARTNER, BOTH)
-BEFORE_FIRST_STEP, SILENT_THEN = "before_its_first_step", "silent_then"
+BEFORE_FIRST_STEP, AT_THE_LOSS, SILENT_THEN = "before_its_first_step", "at_or_after_the_loss", "silent_then"
 #: How many of a cell's branches were rescued, binned.
 TALLIES = ("0", "1-2", "3-5", "6+")
 #: The branches' streams' key beside the seed (R34's sources use 0–3).
@@ -150,6 +156,25 @@ def flown_originals(flown: Any, sentences: Any, chunk: Sequence[int]) -> list[Or
     return out
 
 
+def spoken_steps(original: Original, i: int) -> int:
+    """The own steps aircraft ``i`` spoke at in the original pass: to the step the judge ended it at, that one included
+    (an aircraft speaks before the judge reads the step), else every line of its words (`Commanded.said` runs on, silent,
+    past a judge's end to the aircraft's own)."""
+    row = original.rows[i]
+    return len(original.said[i]) if row["end"] is None else min(len(original.said[i]), row["counted"] + 1)
+
+
+def loss_start_s(original: Original, pair: tuple[str, str], end: dict[str, Any]) -> float:
+    """When ``pair`` first lost separation in the episode that ended one of them (``end``): the episode's first step; a
+    wake shortfall at a landing is its own time."""
+    if end["kind"] == AT_THRESHOLD:
+        return float(end["t_s"])
+    found = [e for e in original.episodes if tuple(sorted(e["pair"])) == pair and e["first_s"] <= end["t_s"] <= e["last_s"]]
+    if len(found) != 1:
+        raise ValueError(f"{pair}: {len(found)} episodes hold the end at {end['t_s']}")
+    return float(found[0]["first_s"])
+
+
 def events_of(original: Original, first: int) -> list[Event]:
     """The original window's events (module docstring), numbered from ``first``."""
     out: list[Event] = []
@@ -160,18 +185,19 @@ def events_of(original: Original, first: int) -> list[Event]:
             continue
         other = end["with"]
         pair = tuple(sorted((key, other)))
-        if (pair, end["t_s"]) in seen:
+        t_s = loss_start_s(original, pair, end)
+        if (pair, t_s) in seen:
             continue
-        seen.add((pair, end["t_s"]))
+        seen.add((pair, t_s))
         theirs = original.ended.get(other)
-        if other in original.keys and theirs is not None and theirs["with"] == key and theirs["t_s"] == end["t_s"]:
+        if other in original.keys and theirs is not None and theirs["with"] == key \
+                and loss_start_s(original, pair, theirs) == t_s:
             speakers = ((key, BOTH), (other, BOTH))
         elif other in original.keys:
             speakers = ((key, ANSWERED), (other, PARTNER))
         else:
             speakers = ((key, ANSWERED),)
-        out.append(Event(first + len(out), original.window, float(end["t_s"]), pair, end["kind"], end["relation"],
-                         speakers))
+        out.append(Event(first + len(out), original.window, t_s, pair, end["kind"], end["relation"], speakers))
     return out
 
 
@@ -188,7 +214,9 @@ def branches_of(event: Event, original: Original, offsets_s: Sequence[float], br
             step = 0 if offset is None else int(round((event.t_s - offset - original.first_s[i]) / step_s))
             if step < 0:
                 skipped[(role, name, BEFORE_FIRST_STEP)] += 1
-            elif step >= len(original.said[i]):
+            elif original.first_s[i] + step * step_s >= event.t_s:
+                skipped[(role, name, AT_THE_LOSS)] += 1
+            elif step >= spoken_steps(original, i):
                 skipped[(role, name, SILENT_THEN)] += 1
             else:
                 out += [Branch(event.number, key, role, name, step, copy) for copy in range(branches)]
@@ -197,9 +225,10 @@ def branches_of(event: Event, original: Original, offsets_s: Sequence[float], br
 
 
 def given_of(branch: Branch, original: Original) -> list[Given]:
-    """Every commanded aircraft's words in a branch, in the window's order (module docstring)."""
-    return [Given(said, branch.step if key == branch.speaker else len(said))
-            for key, said in zip(original.keys, original.said)]
+    """Every commanded aircraft's words in a branch, in the window's order (module docstring): the speaking one's to its
+    step, every other one's as far as it spoke (`spoken_steps`) — the control's every one's so."""
+    return [Given(said, branch.step if key == branch.speaker else spoken_steps(original, i))
+            for i, (key, said) in enumerate(zip(original.keys, original.said))]
 
 
 def _pair_again(run: Any, pair: tuple[str, str], from_s: float) -> bool:
@@ -231,7 +260,8 @@ def branch_result(branch: Branch, event: Event, original: Original, keys: Sequen
     from_s = original.first_s[i] + branch.step * step_s
     cleared = not _pair_again(run, event.pair, from_s)
     landed = rows[i]["reward"] == 1.0
-    new = sorted(set(run.ended) - set(original.ended))
+    new = sorted(key for key, end in run.ended.items()
+                 if key not in original.ended or original.ended[key]["with"] != end["with"])
     loss_step = int(round((event.t_s - original.first_s[i]) / step_s))
     return {"speaker": branch.speaker, "role": branch.role, "offset": branch.offset, "step": branch.step,
             "copy": branch.copy, "pair_cleared": cleared, "landed": landed, "new_losses": new,
@@ -239,23 +269,51 @@ def branch_result(branch: Branch, event: Event, original: Original, keys: Sequen
             "changed": _changed(original.said[i], said[i], branch.step, loss_step)}
 
 
+def float_difference(a: Any, b: Any) -> float:
+    """The largest difference between the floats of two JSON-like values alike in everything else (NaN only against
+    NaN); inf when anything else differs."""
+    if isinstance(a, float) or isinstance(b, float):
+        if isinstance(a, bool) or isinstance(b, bool) or not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
+            return math.inf
+        if math.isnan(a) or math.isnan(b):
+            return 0.0 if math.isnan(a) and math.isnan(b) else math.inf
+        return abs(a - b)
+    if isinstance(a, dict):
+        if not isinstance(b, dict) or a.keys() != b.keys():
+            return math.inf
+        return max((float_difference(a[k], b[k]) for k in a), default=0.0)
+    if isinstance(a, (list, tuple)):
+        if not isinstance(b, (list, tuple)) or len(a) != len(b):
+            return math.inf
+        return max((float_difference(x, y) for x, y in zip(a, b)), default=0.0)
+    return 0.0 if a == b else math.inf
+
+
 def check_control(event: Event, original: Original, keys: Sequence[str], said: Sequence[np.ndarray],
-                  rows: Sequence[dict[str, Any]], run: Any) -> None:
-    """The control replays the original pass to the last field (design item 9), or the run stops."""
+                  rows: Sequence[dict[str, Any]], run: Any) -> float:
+    """The control replays the original pass (design item 9): the words and every discrete field exactly, every float
+    within `ROUNDOFF` (module docstring) — or the run stops. Returns the largest float difference."""
     def fail(what: str) -> None:
         raise ValueError(f"event {event.number} (window {event.window}): the control did not replay the original "
                          f"pass — {what}")
     if list(keys) != original.keys:
         fail("other aircraft")
+    largest = 0.0
     for key, a, b, x, y in zip(keys, original.said, said, original.rows, rows):
         if a.shape != b.shape or not (a == b).all():
             fail(f"{key}'s words")
         for field in REPLAYED_FIELDS:
-            if x[field] != y[field]:
+            difference = float_difference(x[field], y[field])
+            if difference > ROUNDOFF:
                 fail(f"{key}'s {field}: {x[field]!r} then, {y[field]!r} now")
-    if dict(run.ended) != original.ended or list(run.episodes) != original.episodes \
-            or list(run.at_threshold) != original.at_threshold:
-        fail("the judge's books")
+            largest = max(largest, difference)
+    for name, then, now in (("ends", original.ended, dict(run.ended)), ("episodes", original.episodes, run.episodes),
+                            ("wake shortfalls", original.at_threshold, run.at_threshold)):
+        difference = float_difference(then, now)
+        if difference > ROUNDOFF:
+            fail(f"the judge's {name}")
+        largest = max(largest, difference)
+    return largest
 
 
 def tally(rescued: int) -> str:
@@ -367,6 +425,11 @@ def main(argv: list[str] | None = None) -> int:
     every_landing = airport_landings(instructions, rosters(instructions))
     landings = every_landing if VARIANTS[model.config.variant].landing_context else None
     step_s = words.spec.step_s
+    try:
+        for offset in args.offsets_s:
+            words.spec.rows_exact(offset)
+    except ValueError as refusal:
+        parser.error(f"--offsets-s: {refusal}")
     airports, built = scene_airports(instructions, args.split, words.spec, model.config.airports, landings,
                                      model.config.max_rows)
     draw = draw_windows(instructions, args.split, words.spec, words, airports, per_airport=args.windows_per_airport,
@@ -381,7 +444,6 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("every window was left out")
     print(f"{len(drawn.windows)} {args.split} windows, {len(drawn.batch.readings)} commanded aircraft "
           f"({draw.counts}), scenes built ({built}), {time.perf_counter() - started:.0f}s", flush=True)
-    out.mkdir(parents=True)
     device = torch.device(args.device)
     common = dict(temperature=args.temperature, procedure_masks=own_masks)
 
@@ -407,10 +469,7 @@ def main(argv: list[str] | None = None) -> int:
     for number, got, peak in in_processes(args.workers, list(range(len(batches))), read_original):
         originals.update((o.window, o) for o in got)
         peaks.append(peak)
-    rows = [row for w in sorted(originals) for row in originals[w].rows]
-    with (out / "original.jsonl").open("w", encoding="utf-8") as stream:
-        for row in sorted(rows, key=lambda row: row["batch"]):
-            stream.write(json.dumps(row) + "\n")
+    rows = sorted((row for w in sorted(originals) for row in originals[w].rows), key=lambda row: row["batch"])
     print(f"original pass: {len(batches)} batches, {time.perf_counter() - started:.0f}s", flush=True)
 
     # -- events and their branches
@@ -429,7 +488,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(events)} events, {len(branches)} window flights in {len(branch_batches)} batches "
           f"(skipped {sum(skipped.values())}), {time.perf_counter() - started:.0f}s", flush=True)
 
-    def read_branches(number: int) -> list[tuple[int, dict[str, Any] | None]]:
+    def read_branches(number: int) -> list[tuple[int, dict[str, Any] | float]]:
         chunk = branch_batches[number]
         windows = [events[branches[b].event].window for b in chunk]
         given = [g for b in chunk for g in given_of(branches[b], originals[events[branches[b].event].window])]
@@ -442,8 +501,7 @@ def main(argv: list[str] | None = None) -> int:
             branch, event = branches[b], events[branches[b].event]
             original, run = originals[event.window], flown.loop.runs[k]
             if branch.speaker is None:
-                check_control(event, original, again.keys, again.said, again.rows, run)
-                got.append((b, None))
+                got.append((b, check_control(event, original, again.keys, again.said, again.rows, run)))
             else:
                 got.append((b, branch_result(branch, event, original, again.keys, again.said, again.rows, run,
                                              step_s)))
@@ -451,9 +509,11 @@ def main(argv: list[str] | None = None) -> int:
         return got
 
     results: dict[int, dict[str, Any]] = {}
+    controls: list[float] = []
     done = 0
     for number, got, peak in in_processes(args.workers, list(range(len(branch_batches))), read_branches):
-        results.update((b, r) for b, r in got if r is not None)
+        results.update((b, r) for b, r in got if isinstance(r, dict))
+        controls += [r for _, r in got if not isinstance(r, dict)]
         done += len(branch_batches[number])
         peaks.append(peak)
         print(f"  branch batch {number}: {done}/{len(branches)} flights ({len(branch_batches)} batches), "
@@ -474,6 +534,10 @@ def main(argv: list[str] | None = None) -> int:
                         "kind": event.kind, "relation": event.relation,
                         "speakers": [list(s) for s in event.speakers], "strata": strata,
                         "branches": by_event[event.number]})
+    out.mkdir(parents=True)
+    with (out / "original.jsonl").open("w", encoding="utf-8") as stream:
+        for row in rows:
+            stream.write(json.dumps(row) + "\n")
     with (out / "events.jsonl").open("w", encoding="utf-8") as stream:
         for record in records:
             stream.write(json.dumps(record) + "\n")
@@ -491,6 +555,8 @@ def main(argv: list[str] | None = None) -> int:
         "reading": VISUAL, "offsets_s": list(args.offsets_s), "branches": args.branches,
         "aircraft_steps": args.aircraft_steps, "batches": {"original": len(batches), "branches": len(branch_batches)},
         "workers": args.workers, "gpu_peak_gb_a_process": max(peaks),
+        "controls": {"replayed": len(controls), "largest_float_difference": max(controls, default=0.0),
+                     "bound": ROUNDOFF},
         "original": summaries(rows, args.augment_seed is not None)["pooled"],
         "readout": rewound, "files": {"original": "original.jsonl", "events": "events.jsonl"},
         "elapsed_s": time.perf_counter() - started})

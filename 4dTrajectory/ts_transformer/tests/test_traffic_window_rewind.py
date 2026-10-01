@@ -100,7 +100,7 @@ def test_a_rewound_window_s_control_replays_it_and_its_branches_keep_everything_
     for branch, (keys, said, rows, run) in flown:
         event, original = events[branch.event], originals[events[branch.event].window]
         if branch.speaker is None:
-            rewind.check_control(event, original, keys, said, rows, run)
+            assert rewind.check_control(event, original, keys, said, rows, run) <= rewind.ROUNDOFF
             controls += 1
             continue
         got = rewind.branch_result(branch, event, original, keys, said, rows, run, STEP_S)
@@ -125,7 +125,10 @@ def test_a_control_that_differs_stops_the_run(tmp_path, monkeypatch):
     control = rewind.Branch(event.number, None, None, "control", -1, 0)
     (_, (keys, said, rows, run)), = _fly_branches([control], events, originals, drawn, words, params, every, model,
                                                   masks, seed=3)
-    rewind.check_control(event, original, keys, said, rows, run)
+    assert rewind.check_control(event, original, keys, said, rows, run) <= rewind.ROUNDOFF
+    nudged = [dict(r) for r in rows]
+    nudged[0]["flown_s"] += 1e-9                                       # round-off: replayed
+    rewind.check_control(event, original, keys, said, nudged, run)
     moved = [dict(r) for r in rows]
     moved[0]["landing_s"] = None if moved[0]["landing_s"] is not None else 1.0
     with pytest.raises(ValueError, match="the control did not replay"):
@@ -134,55 +137,114 @@ def test_a_control_that_differs_stops_the_run(tmp_path, monkeypatch):
     other[0][0, 0] = other[0][0, 0] + 1
     with pytest.raises(ValueError, match="words"):
         rewind.check_control(event, original, keys, other, rows, run)
-    with pytest.raises(ValueError, match="the judge's books"):
+    with pytest.raises(ValueError, match="the judge's ends"):
         rewind.check_control(event, dc.replace(original, ended={}), keys, said, rows, run)
 
 
-def _original(keys, said_lengths, ended, first_s=None, starts=None):
+def _original(keys, said_lengths, ended, first_s=None, starts=None, episodes=(), step_s=2.0):
+    """An original window: each aircraft's words (``said_lengths`` lines), first state's time and row — an ended one
+    counted to its end — the judge's ends and episodes."""
     from ts_transformer.experiments.traffic_window_rewind import Original
 
-    rows = [{"starts_in_a_loss": bool(starts and k in starts), "airport": "KXXX"} for k in keys]
-    return Original(0, list(keys), [np.zeros((n, 6), dtype=np.int64) for n in said_lengths],
-                    list(first_s or [0.0] * len(keys)), rows, ended, [], [])
+    first_s = list(first_s or [0.0] * len(keys))
+    rows = [{"starts_in_a_loss": bool(starts and k in starts), "airport": "KXXX", "end": ended.get(k),
+             "counted": n if k not in ended else int(round((ended[k]["t_s"] - f) / step_s))}
+            for k, n, f in zip(keys, said_lengths, first_s)]
+    return Original(0, list(keys), [np.zeros((n, 6), dtype=np.int64) for n in said_lengths], first_s, rows, ended,
+                    list(episodes), [])
 
 
-def test_events_one_a_loss_with_their_speakers_roles():
+def _episode(a, b, first_s, last_s):
+    return {"pair": sorted([a, b]), "first_s": first_s, "last_s": last_s}
+
+
+def test_events_one_an_episode_from_its_first_step_with_their_speakers_roles():
     from ts_transformer.experiments import traffic_window_rewind as rewind
 
     loss = {"kind": "in_trail", "relation": "same"}
-    # a ended for b (both commanded, b not ended): answered + partner
-    o = _original(["a", "b"], [10, 10], {"a": {"t_s": 40.0, "with": "b", **loss}})
+    # a ended for b at 40 s in an episode from 36 s (b answered nothing): answered + partner, t_L the episode's start
+    o = _original(["a", "b"], [30, 30], {"a": {"t_s": 40.0, "with": "b", **loss}},
+                  episodes=[_episode("a", "b", 36.0, 44.0)])
     (e,) = rewind.events_of(o, 0)
-    assert e.speakers == (("a", rewind.ANSWERED), ("b", rewind.PARTNER)) and e.t_s == 40.0 and e.pair == ("a", "b")
-    # ended for each other at one step: one event, both
-    o = _original(["a", "b"], [10, 10], {"a": {"t_s": 40.0, "with": "b", **loss},
-                                         "b": {"t_s": 40.0, "with": "a", **loss}})
-    (e,) = rewind.events_of(o, 7)
-    assert e.number == 7 and e.speakers == (("a", rewind.BOTH), ("b", rewind.BOTH))
-    # with a replayed aircraft: the answered one only; one that started in its loss is no event
-    o = _original(["a", "c"], [10, 10], {"a": {"t_s": 40.0, "with": "r", **loss},
-                                         "c": {"t_s": 0.0, "with": "r", **loss}}, starts={"c"})
-    (e,) = rewind.events_of(o, 0)
-    assert e.speakers == (("a", rewind.ANSWERED),) and e.pair == ("a", "r")
+    assert e.speakers == (("a", rewind.ANSWERED), ("b", rewind.PARTNER)) and e.t_s == 36.0 and e.pair == ("a", "b")
+    # one episode ending both — at one step or one after the other — is one event, both
+    for later in (40.0, 42.0):
+        o = _original(["a", "b"], [30, 30], {"a": {"t_s": 40.0, "with": "b", **loss},
+                                             "b": {"t_s": later, "with": "a", **loss}},
+                      episodes=[_episode("a", "b", 38.0, 44.0)])
+        (e,) = rewind.events_of(o, 7)
+        assert e.number == 7 and e.t_s == 38.0 and e.speakers == (("a", rewind.BOTH), ("b", rewind.BOTH))
+    # with a replayed aircraft: the answered one only; one that started in its loss is no event; a wake shortfall at a
+    # landing has no episode: its own time
+    o = _original(["a", "c", "d"], [30, 30, 30],
+                  {"a": {"t_s": 40.0, "with": "r", **loss}, "c": {"t_s": 0.0, "with": "r", **loss},
+                   "d": {"t_s": 50.0, "with": "a", "kind": "at_threshold", "relation": "same"}},
+                  starts={"c"}, episodes=[_episode("a", "r", 40.0, 40.0), _episode("c", "r", 0.0, 0.0)])
+    first, second = rewind.events_of(o, 0)
+    assert first.speakers == (("a", rewind.ANSWERED),) and first.pair == ("a", "r")
+    assert second.pair == ("a", "d") and second.t_s == 50.0 and second.kind == "at_threshold"
+    assert second.speakers == (("d", rewind.ANSWERED), ("a", rewind.PARTNER))
 
 
 def test_branches_start_at_their_offsets_and_skip_what_cannot_speak_again():
     from ts_transformer.experiments import traffic_window_rewind as rewind
 
     loss = {"kind": "in_trail", "relation": "same"}
-    # a: first state at 0 s, ended at 40 s (step 20, 21 lines said); b: first at 20 s, silent past its 3 lines
-    o = _original(["a", "b"], [21, 3], {"a": {"t_s": 40.0, "with": "b", **loss}}, first_s=[0.0, 20.0])
-    (event,) = rewind.events_of(o, 0)
+    # a: first state at 0 s, ended at 40 s for b in an episode from 40 s; b: first at 20 s, ended at 24 s (it spoke 3
+    # lines, its words run on silent); c: first at 40 s, the loss's own step
+    o = _original(["a", "b"], [30, 30], {"a": {"t_s": 40.0, "with": "b", **loss},
+                                         "b": {"t_s": 24.0, "with": "r", **loss}},
+                  first_s=[0.0, 20.0], episodes=[_episode("a", "b", 40.0, 40.0), _episode("b", "r", 24.0, 24.0)])
+    (event,) = [e for e in rewind.events_of(o, 0) if e.pair == ("a", "b")]
+    assert rewind.spoken_steps(o, 1) == 3 and rewind.spoken_steps(o, 0) == 21
     branches, skipped = rewind.branches_of(event, o, (10.0, 30.0, 60.0), 2, 2.0)
     steps = {(b.speaker, b.offset): b.step for b in branches if b.speaker}
     assert steps == {("a", "10"): 15, ("a", "30"): 5, ("a", "start"): 0, ("b", "start"): 0}
     assert Counter(b.speaker for b in branches) == Counter({"a": 6, "b": 2, None: 1}) and branches[-1].speaker is None
     assert skipped == Counter({("answered", "60", rewind.BEFORE_FIRST_STEP): 1,
-                               ("partner", "10", rewind.SILENT_THEN): 1,            # own step 5 of its 3 lines
+                               ("partner", "10", rewind.SILENT_THEN): 1,            # own step 5 of its 3 spoken
                                ("partner", "30", rewind.BEFORE_FIRST_STEP): 1,
                                ("partner", "60", rewind.BEFORE_FIRST_STEP): 1})
-    given = rewind.given_of(branches[0], o)
-    assert [g.until for g in given] == [15, 3]
+    # the speaking aircraft given to its step, the other as far as it spoke
+    assert [g.until for g in rewind.given_of(branches[0], o)] == [15, 3]
+    # an aircraft whose first state is the loss's step cannot avoid it from its start
+    o = _original(["a", "c"], [30, 30], {"a": {"t_s": 40.0, "with": "c", **loss}}, first_s=[0.0, 40.0],
+                  episodes=[_episode("a", "c", 40.0, 40.0)])
+    (event,) = rewind.events_of(o, 0)
+    _, skipped = rewind.branches_of(event, o, (), 2, 2.0)
+    assert skipped == Counter({("partner", "start", rewind.AT_THE_LOSS): 1})
+
+
+def test_a_branch_is_rescued_only_with_no_new_loss_an_aircraft_ended_with_another_one_counting():
+    from types import SimpleNamespace
+
+    from ts_transformer.experiments import traffic_window_rewind as rewind
+
+    loss = {"kind": "in_trail", "relation": "same"}
+    o = _original(["a", "b"], [30, 30], {"a": {"t_s": 40.0, "with": "b", **loss}},
+                  episodes=[_episode("a", "b", 40.0, 40.0)])
+    (event,) = rewind.events_of(o, 0)
+    branch = rewind.Branch(event.number, "b", rewind.PARTNER, "start", 0, 0)
+    rows = [{"reward": 0.0, "outcome": "lost_separation"}, {"reward": 1.0, "outcome": "landed"}]
+    said = [np.zeros((30, 6), dtype=np.int64)] * 2
+    # b lands, the pair is clear — but a is now ended with a replayed aircraft: not rescued
+    run = SimpleNamespace(ended={"a": {"t_s": 60.0, "with": "r", **loss}}, episodes=[_episode("a", "r", 60.0, 60.0)],
+                          at_threshold=[])
+    got = rewind.branch_result(branch, event, o, ["a", "b"], said, rows, run, 2.0)
+    assert (got["pair_cleared"], got["landed"], got["new_losses"], got["rescued"]) == (True, True, ["a"], False)
+    run = SimpleNamespace(ended={}, episodes=[], at_threshold=[])
+    assert rewind.branch_result(branch, event, o, ["a", "b"], said, rows, run, 2.0)["rescued"]
+
+
+def test_floats_alike_to_round_off_and_anything_else_differing():
+    from ts_transformer.experiments.traffic_window_rewind import float_difference
+
+    assert float_difference({"a": [1.0, "x", None]}, {"a": [1.0 + 1e-9, "x", None]}) == pytest.approx(1e-9)
+    assert float_difference(float("nan"), float("nan")) == 0.0
+    assert float_difference({"a": 1.0}, {"b": 1.0}) == float("inf")
+    assert float_difference([1.0], [1.0, 2.0]) == float("inf")
+    assert float_difference("landed", "timeout") == float("inf") and float_difference(None, 1.0) == float("inf")
+    assert float_difference(True, 1.0) == float("inf")
 
 
 def test_a_pair_lost_again_from_a_step_on_counts_a_wake_shortfall_at_a_landing():

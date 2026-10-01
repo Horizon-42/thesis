@@ -923,6 +923,7 @@ def _same_loops(a, b, *, to_step=None):
     ``to_step[i]`` only (words before it, states to its start), when given — and every window's judge's books."""
     import torch
 
+    rows = int(round(STEP_S / a.params.cycle_s))                 # executor rows a step
     for i, (x, y) in enumerate(zip(a.results(), b.results())):
         flown_x = a.executors[x.group][2].flown().states[x.place]
         flown_y = b.executors[y.group][2].flown().states[y.place]
@@ -934,7 +935,7 @@ def _same_loops(a, b, *, to_step=None):
         else:
             k = int(to_step[i])
             assert (x.said[:k] == y.said[:k]).all()
-            assert torch.equal(flown_x[: 2 * k + 1], flown_y[: 2 * k + 1])
+            assert torch.equal(flown_x[: rows * k + 1], flown_y[: rows * k + 1])
     if to_step is None:
         assert [r.ended for r in a.runs] == [r.ended for r in b.runs]
         assert [r.episodes for r in a.runs] == [r.episodes for r in b.runs]
