@@ -47,7 +47,7 @@ export function useFlightComparisonData(): FlightComparisonData {
   const selectedCategory = drawableCategories.find(
     (category) => category.dir === trajectoryComparisonCategory,
   );
-  // V and mass are useful in Baseline too, so keep reading the first published index when
+  // V and mass are useful in Ground Truth too, so keep reading the first published index when
   // comparison is off. Outcome styling remains gated by comparisonActive in FlightTable.
   const categoryDir = trajectoryComparison
     ? selectedCategory?.dir ?? null

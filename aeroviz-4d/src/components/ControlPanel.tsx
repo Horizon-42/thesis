@@ -1,7 +1,7 @@
 /**
  * ControlPanel.tsx
  * ----------------
- * Observe-mode trajectory controls: the Trajectories layer toggle and its options
+ * Evaluation-mode trajectory controls: the Trajectories layer toggle and its options
  * (category-aware comparison legend + sample count). Playback transport lives
  * in the bottom bar and airport/runway selection in the top bar; this panel only
  * owns the trajectory-view options.
@@ -189,7 +189,7 @@ export default function ControlPanel({
   });
 
   function selectResultSource(source: TrajectoryResultSource): void {
-    if (source === "baseline") {
+    if (source === "groundTruth") {
       setTrajectoryComparison(false);
       return;
     }
@@ -241,7 +241,7 @@ export default function ControlPanel({
                 onChange={(event) =>
                   selectResultSource(event.target.value as TrajectoryResultSource)}
               >
-                <option value="baseline">Baseline</option>
+                <option value="groundTruth">Ground Truth</option>
                 <option value="optimization" disabled={optimizationCategories.length === 0}>
                   Optimization
                 </option>
@@ -273,13 +273,13 @@ export default function ControlPanel({
                 </select>
               </label>
             ) : null}
-            {resultSource === "baseline" && observedVerdicts.counts ? (
+            {resultSource === "groundTruth" && observedVerdicts.counts ? (
               <div className="control-panel-verdict-legend" aria-label="Approach verdict legend">
                 <div className="control-panel-verdict-title">
                   Terminal approach verdict (procedure and runway bounds)
                 </div>
                 <label className="control-panel-verdict-filter">
-                  <span>Baseline verdict</span>
+                  <span>Ground Truth verdict</span>
                   <select
                     className="control-panel-airport-selector-input"
                     value={observedVerdictFilter}

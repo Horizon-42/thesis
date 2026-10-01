@@ -11,7 +11,7 @@ const { appState, canonicalEntities } = vi.hoisted(() => {
     appState: {
       viewer: {},
       layers: { trajectories: true },
-      mode: "observe",
+      mode: "evaluation",
       trajectoryComparison: false,
       trajectoryComparisonCategory: null,
       trajectoryComparisonKinds: {

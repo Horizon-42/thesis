@@ -200,11 +200,11 @@ interface FlightSessionState {
   trajectoryComparisonKinds: Record<ComparisonKind, boolean>;
   setTrajectoryComparisonKind: (kind: ComparisonKind, visible: boolean) => void;
 
-  /** How many trajectories to render (0 = all); baseline applies it inside the active verdict. */
+  /** How many trajectories to render (0 = all); Ground Truth applies it inside the active verdict. */
   trajectorySampleCount: number;
   setTrajectorySampleCount: (count: number) => void;
 
-  /** Verdict pool from which the observed baseline sample is chosen. */
+  /** Verdict pool from which the Ground Truth sample is chosen. */
   observedVerdictFilter: ObservedVerdictFilter;
   setObservedVerdictFilter: (filter: ObservedVerdictFilter) => void;
 }
@@ -333,19 +333,21 @@ export interface TrainingLayers {
 
 /**
  * The active top-level task. These four are mutually exclusive — one drives the
- * left dock at a time. `fly`/`optimize`/`compare` map onto the PilotPanel's
- * pilot/trajectory/comparison sub-modes. Procedures is intentionally NOT a mode:
- * it is an independent panel (`proceduresOpen`) that coexists with any task.
+ * left dock at a time. `fly` and `optimize` are served by the PilotPanel, which takes
+ * the task itself as its mode (Fly holds both the live flight and the dynamics
+ * comparison). Procedures is intentionally NOT a mode: it is an independent panel
+ * (`proceduresOpen`) that coexists with any task.
  */
-export type WorkbenchMode = "observe" | "training" | "fly" | "optimize" | "compare";
+export type WorkbenchMode = "evaluation" | "training" | "fly" | "optimize";
 
 /**
- * Fly (pilot) mode's transport, published by PilotPanel so the shared bottom bar
- * can drive the MANUAL simulation loop (`isFlying`) — which, unlike the
- * optimize/compare CZML playback, does NOT run on `viewer.clock`, so the generic
- * clock transport can't touch it. `null` unless the pilot panel is active in fly
- * mode. The callbacks are stable (ref-backed); the booleans reflect live sim
- * state so the bar's Play/Pause icon and disabled states track it.
+ * Fly's live-flight transport, published by PilotPanel so the shared bottom bar
+ * can drive the MANUAL simulation loop (`isFlying`) — which, unlike the CZML
+ * playbacks (Optimize's, Fly's dynamics comparison), does NOT run on `viewer.clock`,
+ * so the generic clock transport can't touch it. Published exactly while the live
+ * flight is Fly's run on screen; `null` otherwise (a loaded comparison: the bar
+ * drives the clock). The callbacks are stable (ref-backed); the booleans reflect
+ * live sim state so the bar's Play/Pause icon and disabled states track it.
  */
 export interface PilotTransport {
   /** The sim loop is running (show Pause) vs paused (show Play). */
@@ -381,8 +383,8 @@ interface WorkbenchUiState {
   rightInspectorCollapsed: boolean;
   setRightInspectorCollapsed: (collapsed: boolean) => void;
   /**
-   * Fly-mode manual-sim transport (see PilotTransport). Published by PilotPanel
-   * while in fly mode so the shared bottom bar drives the sim; `null` otherwise.
+   * Fly's live-flight transport (see PilotTransport). Published by PilotPanel while
+   * the live flight is on screen so the shared bottom bar drives the sim; `null` otherwise.
    */
   pilotTransport: PilotTransport | null;
   setPilotTransport: (transport: PilotTransport | null) => void;
@@ -502,7 +504,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [approachViewMode, setApproachViewMode] =
     useState<ApproachViewMode>("split");
   const [rangeRingRadiusKm, setRangeRingRadiusKm] = useState<number>(5);
-  const [mode, setMode] = useState<WorkbenchMode>("observe");
+  const [mode, setMode] = useState<WorkbenchMode>("evaluation");
   const [proceduresOpen, setProceduresOpen] = useState<boolean>(false);
   const [pilotTransport, setPilotTransport] = useState<PilotTransport | null>(null);
   const [presentationMode, setPresentationMode] = useState<boolean>(false);

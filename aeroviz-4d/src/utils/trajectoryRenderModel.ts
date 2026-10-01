@@ -33,7 +33,7 @@ export const TRAJECTORY_PATH_WIDTH = 2;
 
 /**
  * The single source of truth for the prediction-comparison kind colours. Both the legend
- * base colours. Prediction outcomes override the purple fallback with the shared Baseline
+ * base colours. Prediction outcomes override the purple fallback with the shared Ground Truth
  * verdict palette; its checkbox uses a green/red/gray split swatch. The CZML bakes its own
  * colours in, but they vary by category, so the frontend owns the final contract.
  * References are always white. Optimizer paths keep the CZML-baked verdict
@@ -82,7 +82,7 @@ export function comparisonKindSwatch(kind: ComparisonKind): string {
 
 /**
  * Outcome colours that override a kind's normal colour. Prediction uses the exact same
- * pass/fail/undecided palette as Baseline; optimizer replay keeps its established yellow
+ * pass/fail/undecided palette as Ground Truth; optimizer replay keeps its established yellow
  * off-target result colour.
  *
  * Keep the optimizer result entry in sync with build_scenario_comparison_czml.py's

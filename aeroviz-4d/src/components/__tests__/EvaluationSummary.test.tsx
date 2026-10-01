@@ -176,11 +176,11 @@ describe("EvaluationSummary", () => {
     fetchJsonMock.mockReset();
   });
 
-  it("renders the report-only observed category with baseline-specific metrics", async () => {
+  it("renders the report-only observed category with ground-truth metrics", async () => {
     render(<EvaluationSummary observedEvaluation={OBSERVED_SUMMARY} />);
 
     expect(
-      screen.getByRole("region", { name: "Observed Baseline Evaluation" }),
+      screen.getByRole("region", { name: "Ground Truth Evaluation" }),
     ).toBeTruthy();
     expect(await within(metric("Threshold-event availability")).findByText("80.0%")).toBeTruthy();
     expect(within(metric("Terminal-verdict pass rate (3-gate)")).getByText("60.0%")).toBeTruthy();
@@ -198,13 +198,13 @@ describe("EvaluationSummary", () => {
     expect(fetchJsonMock).not.toHaveBeenCalled();
   });
 
-  it("returns to the observed baseline when comparison is off", async () => {
+  it("returns to the ground truth when comparison is off", async () => {
     appState.trajectoryComparison = false;
     appState.trajectoryComparisonCategory = FITTED.dir;
     render(<EvaluationSummary observedEvaluation={OBSERVED_SUMMARY} />);
 
     expect(
-      await screen.findByRole("region", { name: "Observed Baseline Evaluation" }),
+      await screen.findByRole("region", { name: "Ground Truth Evaluation" }),
     ).toBeTruthy();
     expect(fetchJsonMock).not.toHaveBeenCalled();
     expect(fetchJsonMock).not.toHaveBeenCalledWith(
@@ -212,7 +212,7 @@ describe("EvaluationSummary", () => {
     );
   });
 
-  it("labels fitted ADS-B as an optimization target, not as an observed baseline", async () => {
+  it("labels fitted ADS-B as an optimization target, not as ground truth", async () => {
     appState.trajectoryComparison = true;
     appState.trajectoryComparisonCategory = FITTED.dir;
     fetchJsonMock.mockResolvedValue(INDEX);
@@ -377,7 +377,7 @@ describe("EvaluationSummary", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Details" }));
     expect(
       await screen.findByRole("dialog", {
-        name: "Observed Baseline Evaluation Report",
+        name: "Ground Truth Evaluation Report",
       }),
     ).toBeTruthy();
     expect(fetchJsonMock).toHaveBeenCalledTimes(1);

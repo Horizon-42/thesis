@@ -161,6 +161,9 @@ export function useOptimizedTrajectoryPlayback({
           viewer.trackedEntity = undefined;
         }
         viewer.dataSources.remove(dataSource, true);
+        // The clock was this playback's: unloaded, it stops (nothing of this CZML is left
+        // to animate on it).
+        viewer.clock.shouldAnimate = false;
       }
       setStatus("idle");
     };

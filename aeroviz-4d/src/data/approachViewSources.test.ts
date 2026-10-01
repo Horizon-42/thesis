@@ -5,13 +5,13 @@ import {
 } from "./approachViewSources";
 
 const base: ApproachViewSourceInputs = {
-  mode: "observe",
+  mode: "evaluation",
   trajectoryComparison: false,
   hasOptimizedSource: false,
 };
 
 describe("planApproachViewSources", () => {
-  it("plots the observed tracks in Observe (their globe content)", () => {
+  it("plots the observed tracks in Evaluation (their globe content)", () => {
     expect(planApproachViewSources(base)).toEqual({ observed: true, optimized: false });
   });
 
@@ -23,14 +23,14 @@ describe("planApproachViewSources", () => {
     ).toEqual({ observed: false, optimized: true });
   });
 
-  it.each(["fly", "optimize", "compare"] as const)(
+  it.each(["fly", "optimize"] as const)(
     "never plots the observed tracks in %s",
     (mode) => {
       expect(planApproachViewSources({ ...base, mode }).observed).toBe(false);
     },
   );
 
-  it("hides the observed tracks in Observe while the 3-colour comparison is on", () => {
+  it("hides the observed tracks in Evaluation while the 3-colour comparison is on", () => {
     // Matches planObservedTracks: the plain observed source is hidden on the globe when
     // the comparison overlay is shown, so the approach view must not plot it either.
     expect(
@@ -49,7 +49,7 @@ describe("planApproachViewSources", () => {
     ).toBe(true);
     // A source lingering while the tab is not Optimize is never plotted.
     expect(
-      planApproachViewSources({ ...base, mode: "observe", hasOptimizedSource: true })
+      planApproachViewSources({ ...base, mode: "evaluation", hasOptimizedSource: true })
         .optimized,
     ).toBe(false);
   });

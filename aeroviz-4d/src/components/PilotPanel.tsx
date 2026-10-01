@@ -1,12 +1,13 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { useApp } from "../context/AppContext";
+import { useApp, type WorkbenchMode } from "../context/AppContext";
 import {
   fetchRunwayThresholdTargets,
   type RunwayThresholdTarget,
@@ -107,7 +108,7 @@ const DEFAULT_LOAD_FACTOR = 1.414214;
 const DEFAULT_THRUST_N = 67000;
 const MIN_LOAD_FACTOR = 0;
 const MAX_LOAD_FACTOR = 3;
-const DEFAULT_CONTROLS: PilotControls = makeDefaultControls(null);
+const DEFAULT_CONTROLS: PanelControls = makeDefaultControls(null);
 const DEFAULT_INTEGRATOR_DT_S = 0.2;
 const DEFAULT_TRAJECTORY_DT_S = 0.5;
 const PLAYBACK_FRAME_DT_S = 0.2;
@@ -123,11 +124,6 @@ const DEFAULT_N_SEG_PER_PHASE = 3;
 const DEFAULT_ARRIVAL_TIME_S = 600;
 const DEFAULT_COMPARISON_DURATION_S = 240;
 const DEFAULT_COMPARISON_DT_S = 0.1;
-const DEFAULT_COMPARISON_CONTROL: DynamicsComparisonControl = {
-  thrustN: 70000,
-  bankDeg: 0,
-  loadFactor: 1,
-};
 // Hermite-Simpson default: with the ψ corridor both fittings converge everywhere, and the
 // measured playback fidelity is ~0.7-0.9 m (HS, 4th order) vs 227-296 m (trapezoidal, 2nd
 // order) on doglegged approaches for ~2x the solve time — see CLAUDE.md 2026-07-05.
@@ -156,7 +152,7 @@ const FALLBACK_MAX_THRUST_N = 240000;
 /** Stable empty-samples reference so the playback hook deps don't churn. */
 const EMPTY_SAMPLES: TrajectorySample[] = [];
 /** The single pseudo-"system" backing the Trajectory-Play target-deviation delta
- * chips — reuses the Compare-mode delta strip with one amber chip per row. */
+ * chips — reuses the dynamics comparison's delta strip with one amber chip per row. */
 const TARGET_DELTA_KEY = "Δ";
 const TARGET_DELTA_SYSTEMS: DynamicsComparisonSystem[] = [
   { key: TARGET_DELTA_KEY, label: "final − target", colorRgba: [251, 191, 36, 255], isReference: false },
@@ -179,36 +175,37 @@ function trajectoryOptimizerSimulationMode(
     : "alpha";
 }
 
-type PilotPanelMode = "pilot" | "trajectory" | "comparison";
+/** The panel serves two workbench tasks and takes the task itself as its mode. */
+type PilotPanelMode = Extract<WorkbenchMode, "fly" | "optimize">;
+
+/**
+ * The panel's controls carry BOTH parameterisations' fields (alpha and load factor): the
+ * Simulation select decides which one is flown, and the dynamics comparison always flies the
+ * load-factor one.
+ */
+type PanelControls = Required<PilotControls>;
 
 interface PlacementBackup {
   initialState: PilotResetState;
   isInitialPreviewVisible: boolean;
   isEnabled: boolean;
   isFlying: boolean;
-  snapshot: PilotSnapshot | null;
+  liveSnapshot: PilotSnapshot | null;
   trail: PilotAircraftPose[];
 }
 
 interface PilotPanelProps {
-  /**
-   * When provided, the panel's mode is controlled by the workbench shell (the global
-   * task switcher) and the panel's own tab row is hidden. Omitted → the panel keeps its
-   * own internal tab switching (used standalone / in tests).
-   */
-  mode?: PilotPanelMode;
-  onRequestMode?: (mode: PilotPanelMode) => void;
+  /** The workbench task the panel serves — the top bar's task switcher owns it. */
+  mode: PilotPanelMode;
 }
 
-export default function PilotPanel({ mode: controlledMode, onRequestMode }: PilotPanelProps = {}) {
+export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
   const {
     activeAirportCode,
     airport,
     viewer,
     setPilotTransport,
   } = useApp();
-  const [internalActiveMode, setActiveMode] = useState<PilotPanelMode>("pilot");
-  const activeMode = controlledMode ?? internalActiveMode;
   const [isEnabled, setIsEnabled] = useState(false);
   const [isFlying, setIsFlying] = useState(false);
   // Optimized-trajectory playback runs on Cesium's own clock from a backend CZML.
@@ -232,9 +229,12 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   const [aircraftConfigs, setAircraftConfigs] = useState<PilotAircraftConfig[]>([]);
   const [simulationMode, setSimulationMode] =
     useState<PilotSimulationMode>(DEFAULT_SIMULATION_MODE);
-  const [controls, setControls] = useState<PilotControls>(DEFAULT_CONTROLS);
+  const [controls, setControls] = useState<PanelControls>(DEFAULT_CONTROLS);
   const [integratorDtS, setIntegratorDtS] = useState(DEFAULT_INTEGRATOR_DT_S);
-  const [snapshot, setSnapshot] = useState<PilotSnapshot | null>(null);
+  // The live flight's state (the backend sim's), and apart from it the state a CZML playback
+  // (Optimize's, Fly's comparison) samples at the clock time — one is never read as the other.
+  const [liveSnapshot, setLiveSnapshot] = useState<PilotSnapshot | null>(null);
+  const [playbackSnapshot, setPlaybackSnapshot] = useState<PilotSnapshot | null>(null);
   const [trail, setTrail] = useState<PilotAircraftPose[]>([]);
   const [runwayTargets, setRunwayTargets] = useState<RunwayThresholdTarget[]>([]);
   const [targetState, setTargetState] = useState<PilotTargetState>(() =>
@@ -264,10 +264,8 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   const [optimizedTrajectory, setOptimizedTrajectory] =
     useState<TrajectoryOptimizationResult | null>(null);
 
-  // Dynamics Comparison mode: one trajectory flown four ways under one constant
-  // control, replayed as a multi-system CZML with a pop-up deviation chart.
-  const [comparisonControl, setComparisonControl] =
-    useState<DynamicsComparisonControl>(DEFAULT_COMPARISON_CONTROL);
+  // Fly's second run, the dynamics comparison: the panel's controls held fixed and the start
+  // flown four ways, replayed as a multi-system CZML with a pop-up deviation chart.
   const [comparisonDurationS, setComparisonDurationS] = useState(
     DEFAULT_COMPARISON_DURATION_S,
   );
@@ -282,11 +280,13 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   // + native clock dial bound to the current mode's trajectory the moment you
   // enter it (the playback hooks load it paused; Play animates).
   const isTrajectoryPlaybackActive =
-    activeMode === "trajectory" && optimizedTrajectory?.playback != null;
+    activeMode === "optimize" && optimizedTrajectory?.playback != null;
   const isComparisonPlaybackActive =
-    activeMode === "comparison" && comparisonResult != null;
+    activeMode === "fly" && comparisonResult != null;
+  // The state of the run on screen: Fly's live flight, or a loaded playback's sample.
+  const snapshot = activeMode === "fly" && !isComparisonPlaybackActive ? liveSnapshot : playbackSnapshot;
   // A/C/D deviations vs the reference B at the current clock time, overlaid on
-  // the Live-State readout during a Compare playback.
+  // the Live-State readout during a comparison playback.
   const [comparisonDeltas, setComparisonDeltas] =
     useState<DynamicsComparisonDeltas | null>(null);
   const [isChartsOpen, setIsChartsOpen] = useState(false);
@@ -306,12 +306,15 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   const [initialState, setInitialState] = useState<PilotResetState>(() =>
     makeDefaultInitialState(null, null),
   );
-  const [rnavInitialFixCandidates, setRnavInitialFixCandidates] = useState<
-    RnavInitialFixCandidate[]
-  >([]);
+  // The runway's published RNAV fixes and the runway they were read for (null: none read).
+  const [rnavFixes, setRnavFixes] = useState<{
+    runwayIdent: string;
+    candidates: RnavInitialFixCandidate[];
+  } | null>(null);
+  const rnavInitialFixCandidates = rnavFixes?.candidates ?? [];
   const [selectedRnavInitialFixKey, setSelectedRnavInitialFixKey] = useState("");
 
-  const pose = snapshotToPose(snapshot);
+  const pose = snapshotToPose(liveSnapshot);
   const selectedAircraft = aircraftConfigs.find(
     (config) => config.code === initialState.aircraftType,
   ) ?? aircraftConfigs[0] ?? null;
@@ -361,22 +364,21 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
 
   // Invalidate any computed/loaded dynamics comparison. Used whenever an input
   // feeding the comparison changes, so a stale CZML/chart never stays on screen.
+  // The run's chart is drawn only beside its result, so it goes with it; the averaged
+  // history chart does not depend on the panel's inputs and stays.
   const clearComparisonPlayback = useCallback(() => {
     setComparisonResult(null);
     setIsComparisonPlaying(false);
-    setIsChartsOpen(false);
-    setHiddenComparisonKeys([]);
-    setChartMode("run");
   }, []);
 
   const clearSnapshotForInitialEdit = useCallback(() => {
     clearOptimizedPlayback();
     clearComparisonPlayback();
-    if (!snapshot && !isEnabled && !isFlying && !isTrajectoryPlaying) return;
+    if (!liveSnapshot && !isEnabled && !isFlying && !isTrajectoryPlaying) return;
 
     setIsFlying(false);
     setIsEnabled(false);
-    setSnapshot(null);
+    setLiveSnapshot(null);
     setTrail([]);
   }, [
     clearOptimizedPlayback,
@@ -384,7 +386,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     isEnabled,
     isFlying,
     isTrajectoryPlaying,
-    snapshot,
+    liveSnapshot,
   ]);
 
   const updateInitialPosition = useCallback(
@@ -422,7 +424,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
       setIsInitialPreviewVisible(backup.isInitialPreviewVisible);
       setIsEnabled(backup.isEnabled);
       setIsFlying(backup.isFlying);
-      setSnapshot(backup.snapshot);
+      setLiveSnapshot(backup.liveSnapshot);
       setTrail(backup.trail);
     }
 
@@ -468,7 +470,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
       isInitialPreviewVisible,
       isEnabled,
       isFlying,
-      snapshot,
+      liveSnapshot,
       trail,
     };
     setIsFlying(false);
@@ -486,7 +488,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     isFlying,
     isTrajectoryPlaying,
     isPlacingInitialPosition,
-    snapshot,
+    liveSnapshot,
     trail,
     aircraftConfigs.length,
   ]);
@@ -494,13 +496,14 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   usePilotInitialPlacement({
     enabled: isPlacingInitialPosition,
     // The static "START" preview marks the chosen start state while setting up.
-    // Hide it once a comparison is loaded/playing (Compare never sets `snapshot`,
-    // so without this guard the START aircraft would sit at the origin while the
-    // per-system models fly away).
+    // Hide it once a live flight or a playback holds the screen (a loaded comparison
+    // samples its state only while it plays, so without its own guard the START aircraft
+    // would sit at the origin while the per-system models fly away).
     previewVisible: isPlacingInitialPosition ||
       ((isInitialEditorOpen || isInitialPreviewVisible) &&
         !isEnabled &&
-        !snapshot &&
+        !liveSnapshot &&
+        !playbackSnapshot &&
         !isComparisonPlaybackActive),
     initialState,
     placementGuidance,
@@ -509,17 +512,17 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     onCancel: cancelInitialPlacement,
   });
 
-  // The hand-built aircraft + trail are only for live Pilot mode. In Trajectory
-  // Play the aircraft and the colored trajectory come from the CZML instead.
+  // The hand-built aircraft + trail are only for the live flight. The comparison and
+  // Trajectory Play draw their aircraft and colored trajectories from a CZML instead.
   usePilotAircraft({
-    enabled: isEnabled && activeMode === "pilot",
+    enabled: isEnabled && activeMode === "fly",
     pose,
     trail,
     follow: isFollowing,
   });
 
   usePilotTargetGate({
-    enabled: activeMode === "trajectory",
+    enabled: activeMode === "optimize",
     target: targetGateState,
   });
 
@@ -528,10 +531,10 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   const handlePlaybackSample = useCallback(
     (sample: TrajectorySample | null) => {
       if (!sample) {
-        setSnapshot(null);
+        setPlaybackSnapshot(null);
         return;
       }
-      setSnapshot(
+      setPlaybackSnapshot(
         trajectorySampleToSnapshot(
           sample,
           trajectoryOptimizerSimulationMode(playbackOptimizer),
@@ -556,10 +559,10 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   const handleComparisonSample = useCallback(
     (sample: TrajectorySample | null) => {
       if (!sample) {
-        setSnapshot(null);
+        setPlaybackSnapshot(null);
         return;
       }
-      setSnapshot(
+      setPlaybackSnapshot(
         trajectorySampleToSnapshot(
           sample,
           "casadi",
@@ -575,7 +578,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     enabled: isComparisonPlaybackActive,
     czml: comparisonResult?.playback.czml ?? null,
     hiddenKeys: hiddenComparisonKeys,
-    follow: isFollowing && activeMode === "comparison",
+    follow: isFollowing,
     samples: comparisonResult?.playback.samples ?? EMPTY_SAMPLES,
     onSample: handleComparisonSample,
     chart: comparisonResult?.chart ?? null,
@@ -583,11 +586,11 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   });
 
   // Trajectory Play: the aircraft's live deviation from the requested target,
-  // shown as one amber delta chip per state row (the same style as the Compare
+  // shown as one amber delta chip per state row (the same style as the comparison's
   // deviations) instead of separate "X Error" rows. It tracks the sampled state,
   // so it converges to the final-vs-target error as playback reaches the end.
   const trajectoryTargetDeltas = useMemo<DynamicsComparisonDeltas | null>(() => {
-    if (activeMode !== "trajectory" || !snapshot) return null;
+    if (activeMode !== "optimize" || !snapshot) return null;
     const s = snapshot.state;
     return {
       [TARGET_DELTA_KEY]: {
@@ -612,21 +615,13 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     targetState.flightPathDeg,
   ]);
 
-  // Keep the backend's casadi solver worker resident (warm) while the Optimize
-  // (trajectory) or Compare (comparison) tab is open, and decommission it when
-  // the tab closes — so repeated solves are fast but the worker's memory is
-  // reclaimed once the user leaves. A `pagehide` beacon also releases it when
-  // the whole tab/window closes, where this cleanup would not run.
+  // Keep the backend's casadi worker resident (warm) while the panel's task is open —
+  // Optimize's solver, Fly's dynamics comparison — and decommission it when the task
+  // closes, so repeated runs are fast but the worker's memory is reclaimed once the
+  // user leaves. A `pagehide` beacon also releases it when the whole tab/window
+  // closes, where this cleanup would not run.
   useEffect(() => {
-    const kind: WorkerSessionKind | null =
-      activeMode === "trajectory"
-        ? "optimizer"
-        : activeMode === "comparison"
-          ? "comparison"
-          : null;
-    if (kind === null) {
-      return undefined;
-    }
+    const kind: WorkerSessionKind = activeMode === "optimize" ? "optimizer" : "comparison";
     void openWorkerSession(kind);
     const releaseOnUnload = () => beaconCloseWorkerSession(kind);
     window.addEventListener("pagehide", releaseOnUnload);
@@ -640,11 +635,10 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     const aircraft = aircraftConfigs[0] ?? null;
     placementBackupRef.current = null;
     setInitialState(makeDefaultInitialState(airport, aircraft));
-    setRnavInitialFixCandidates([]);
+    setRnavFixes(null);
     setSelectedRnavInitialFixKey("");
     setSimulationMode(DEFAULT_SIMULATION_MODE);
     setControls(makeDefaultControls(aircraft));
-    setActiveMode("pilot");
     setIsInitialEditorOpen(false);
     setIsTargetEditorOpen(false);
     setIsPlacingInitialPosition(false);
@@ -652,10 +646,9 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     setIsFlying(false);
     setIsTrajectoryPlaying(false);
     setIsEnabled(false);
-    setSnapshot(null);
+    setLiveSnapshot(null);
     setTrail([]);
     setOptimizedTrajectory(null);
-    setComparisonControl(DEFAULT_COMPARISON_CONTROL);
     setComparisonDurationS(DEFAULT_COMPARISON_DURATION_S);
     setComparisonDtS(DEFAULT_COMPARISON_DT_S);
     setAveragedComparison(null);
@@ -726,57 +719,39 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     };
   }, [activeAirportCode]);
 
+  // Read per runway, whichever task is open: a switch between Fly and Optimize keeps the
+  // list and the picked fix (the start may sit on it).
   useEffect(() => {
-    if (
-      (activeMode !== "trajectory" && activeMode !== "comparison") ||
-      !activeAirportCode ||
-      !selectedTargetRunway
-    ) {
-      setRnavInitialFixCandidates([]);
+    if (!activeAirportCode || !selectedTargetRunway) {
+      setRnavFixes(null);
       setSelectedRnavInitialFixKey("");
       return;
     }
 
     let cancelled = false;
-    setRnavInitialFixCandidates([]);
+    const runwayIdent = selectedTargetRunway.runwayIdent;
+    setRnavFixes(null);
     setSelectedRnavInitialFixKey("");
 
-    void fetchRnavInitialFixCandidates(
-      activeAirportCode,
-      selectedTargetRunway.runwayIdent,
-    )
+    void fetchRnavInitialFixCandidates(activeAirportCode, runwayIdent)
       .then((candidates) => {
         if (cancelled) return;
-        setRnavInitialFixCandidates(candidates);
-        // In Compare mode an RNAV fix is an optional convenience (the start can
-        // also be edited / placed), so an empty list is not an error there.
-        if (candidates.length === 0 && activeMode === "trajectory") {
-          setError(
-            `No RNAV IF points are available for ${activeAirportCode} ${selectedTargetRunway.runwayIdent}.`,
-          );
-          return;
-        }
-        setError(null);
+        setRnavFixes({ runwayIdent, candidates });
       })
       .catch((initialError: unknown) => {
         if (cancelled) return;
-        setRnavInitialFixCandidates([]);
         setError(toErrorMessage(initialError));
       });
 
     return () => {
       cancelled = true;
     };
-  }, [
-    activeAirportCode,
-    activeMode,
-    selectedTargetRunway,
-  ]);
+  }, [activeAirportCode, selectedTargetRunway]);
 
-  // Refresh the stored-run count when entering Compare mode, so the Average
-  // button reflects history from earlier sessions too (count is server-side).
+  // Refresh the stored-run count when entering Fly, so the Average button
+  // reflects history from earlier sessions too (count is server-side).
   useEffect(() => {
-    if (activeMode !== "comparison") return;
+    if (activeMode !== "fly") return;
     let cancelled = false;
     void fetchDynamicsComparisonHistoryCount()
       .then((count) => {
@@ -826,7 +801,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
       )
         .then((nextSnapshot) => {
           if (cancelled) return;
-          setSnapshot(nextSnapshot);
+          setLiveSnapshot(nextSnapshot);
           appendTrailPoint(nextSnapshot);
           setError(null);
         })
@@ -849,7 +824,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   }, [appendTrailPoint, isEnabled, isFlying]);
 
   useEffect(() => {
-    if (!isEnabled || activeMode !== "pilot") return;
+    if (!isEnabled || activeMode !== "fly") return;
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) return;
@@ -879,7 +854,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
           nudgeControl("thrustN", 500, 0, selectedMaxThrustN);
           break;
         case " ":
-          setControls((current) =>
+          changeControls((current) =>
             usesLoadFactorControl(simulationModeRef.current)
               ? { ...current, bankDeg: 0, loadFactor: DEFAULT_LOAD_FACTOR }
               : { ...current, bankDeg: 0, attackDeg: 0 }
@@ -903,16 +878,18 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     setIsInitialEditorOpen(false);
     setIsPlacingInitialPosition(false);
     setIsTrajectoryPlaying(false);
+    clearComparisonPlayback();
     setIsBusy(true);
     setError(null);
     try {
-      if (!snapshot) {
+      // Resume only a live session the backend holds (`isEnabled`); otherwise start afresh.
+      if (!isEnabled) {
         const nextSnapshot = await resetPilotSimulation(
           initialState,
           controls,
           simulationMode,
         );
-        setSnapshot(nextSnapshot);
+        setLiveSnapshot(nextSnapshot);
         const nextPose = snapshotToPose(nextSnapshot);
         setTrail(nextPose ? [nextPose] : []);
       }
@@ -931,6 +908,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     setIsInitialEditorOpen(false);
     setIsPlacingInitialPosition(false);
     setIsTrajectoryPlaying(false);
+    clearComparisonPlayback();
     setIsBusy(true);
     setError(null);
     try {
@@ -939,7 +917,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
         controls,
         simulationMode,
       );
-      setSnapshot(nextSnapshot);
+      setLiveSnapshot(nextSnapshot);
       const nextPose = snapshotToPose(nextSnapshot);
       setTrail(nextPose ? [nextPose] : []);
       setIsEnabled(true);
@@ -958,30 +936,31 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     setIsFlying(false);
     setIsTrajectoryPlaying(false);
     setIsEnabled(false);
-    setSnapshot(null);
+    setLiveSnapshot(null);
     setTrail([]);
     setError(null);
   }
 
+  // Every edit of the controls goes through here: a computed comparison flew the controls
+  // as they were, so it no longer describes the panel once they change.
+  function changeControls(update: (current: PanelControls) => PanelControls) {
+    setControls(update);
+    clearComparisonPlayback();
+  }
+
   function updateControl(
-    key: keyof PilotControls,
+    key: keyof PanelControls,
     value: number,
     min: number,
     max: number,
   ) {
     if (!Number.isFinite(value)) return;
-    setControls((current) => ({ ...current, [key]: clamp(value, min, max) }));
+    changeControls((current) => ({ ...current, [key]: clamp(value, min, max) }));
   }
 
   function updateSimulationMode(value: PilotSimulationMode) {
     setSimulationMode(value);
-    if (!usesLoadFactorControl(value)) return;
-
-    setControls((current) =>
-      current.loadFactor === undefined
-        ? { ...current, loadFactor: DEFAULT_LOAD_FACTOR }
-        : current
-    );
+    clearComparisonPlayback();
   }
 
   function handleSimulationSelectKeyDown(
@@ -1045,56 +1024,18 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     setIsChartsOpen(false);
   }
 
-  // When the panel is shell-controlled, mode changes are requested upward (the shell
-  // updates the global mode → controlledMode flows back in); otherwise switch locally.
-  function applyMode(next: PilotPanelMode) {
-    if (onRequestMode) onRequestMode(next);
-    else setActiveMode(next);
-  }
-
-  function openTrajectoryMode() {
-    if (isPlacingInitialPosition) return;
-    setIsFlying(false);
-    suspendPlaybacks();
-    setIsInitialEditorOpen(false);
-    applyMode("trajectory");
-    setError(null);
-  }
-
-  function openPilotMode() {
-    if (isPlacingInitialPosition) return;
-    suspendPlaybacks();
-    setIsTargetEditorOpen(false);
-    applyMode("pilot");
-    setError(null);
-  }
-
-  function openComparisonMode() {
-    if (isPlacingInitialPosition) return;
-    setIsFlying(false);
-    suspendPlaybacks();
-    setIsTargetEditorOpen(false);
-    setIsInitialEditorOpen(false);
-    applyMode("comparison");
-    setError(null);
-  }
-
-  // When the shell drives the mode, run the same side-effects the internal tab handlers
-  // would (release the clock, close editors) on each external mode change.
-  const previousControlledModeRef = useRef(controlledMode);
+  // On each task switch (the top bar's): release the clock and close the editors.
+  const previousModeRef = useRef(activeMode);
   useEffect(() => {
-    if (controlledMode === undefined || previousControlledModeRef.current === controlledMode) {
-      previousControlledModeRef.current = controlledMode;
-      return;
-    }
-    previousControlledModeRef.current = controlledMode;
+    if (previousModeRef.current === activeMode) return;
+    previousModeRef.current = activeMode;
     if (isPlacingInitialPosition) return;
     suspendPlaybacks();
     setIsInitialEditorOpen(false);
     setIsTargetEditorOpen(false);
-    if (controlledMode !== "pilot") setIsFlying(false);
+    if (activeMode !== "fly") setIsFlying(false);
     setError(null);
-  }, [controlledMode]);
+  }, [activeMode]);
 
   function openTargetEditor() {
     if (isBusy || isTrajectoryPlaying || runwayTargets.length === 0) return;
@@ -1290,12 +1231,12 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     }
   }
 
+  // Optimize's playback leaves Fly's live session as it is (paused: a task switch stopped
+  // it; its aircraft is drawn only in Fly).
   function playOptimizedTrajectory() {
     if (!optimizedTrajectory?.playback) return;
 
     setError(null);
-    setIsFlying(false);
-    setIsEnabled(false);
     setIsTrajectoryPlaying(true);
     if (isCesiumViewerUsable(viewer)) {
       viewer.clock.shouldAnimate = true;
@@ -1319,17 +1260,6 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   }
 
   // ── Dynamics comparison handlers ──────────────────────────────────────────
-  function updateComparisonControl(
-    key: keyof DynamicsComparisonControl,
-    value: number,
-    min: number,
-    max: number,
-  ) {
-    if (!Number.isFinite(value)) return;
-    setComparisonControl((current) => ({ ...current, [key]: clamp(value, min, max) }));
-    clearComparisonPlayback();
-  }
-
   function updateComparisonDuration(value: number) {
     if (!Number.isFinite(value)) return;
     setComparisonDurationS(clamp(value, 5, 600));
@@ -1343,10 +1273,11 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   }
 
   async function computeComparison() {
-    if (!hasAircraftConfigs) return;
+    if (!hasAircraftConfigs || comparisonControl === null) return;
 
+    // The comparison takes the screen from the live flight, which ends.
+    stopPilot();
     setIsBusy(true);
-    setIsFlying(false);
     clearComparisonPlayback();
     setError(null);
     try {
@@ -1400,7 +1331,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   }
 
   function toggleRunCharts() {
-    if (isChartsOpen && chartMode === "run") {
+    if (runChartOpen) {
       setIsChartsOpen(false);
       return;
     }
@@ -1408,12 +1339,11 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     setIsChartsOpen(true);
   }
 
+  // Compute already ended the live flight: a loaded comparison and a live session never coexist.
   function playComparison() {
     if (!comparisonResult) return;
 
     setError(null);
-    setIsFlying(false);
-    setIsEnabled(false);
     setIsComparisonPlaying(true);
     if (isCesiumViewerUsable(viewer)) {
       viewer.clock.shouldAnimate = true;
@@ -1448,14 +1378,14 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   }
 
   function nudgeControl(
-    key: keyof PilotControls,
+    key: keyof PanelControls,
     delta: number,
     min: number,
     max: number,
   ) {
-    setControls((current) => ({
+    changeControls((current) => ({
       ...current,
-      [key]: clamp((current[key] ?? defaultControlValue(key)) + delta, min, max),
+      [key]: clamp(current[key] + delta, min, max),
     }));
   }
 
@@ -1478,7 +1408,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
 
   const statusLabel = isPlacingInitialPosition
     ? "Placing"
-    : isBusy && (activeMode === "trajectory" || activeMode === "comparison")
+    : isBusy
       ? "Computing"
       : isTrajectoryPlaying || isComparisonPlaying
         ? "Playing"
@@ -1486,8 +1416,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
           ? "Flying"
           : isTrajectoryPlaybackActive || isComparisonPlaybackActive
             ? "Paused"
-            : (optimizedTrajectory && activeMode === "trajectory") ||
-                (comparisonResult && activeMode === "comparison")
+            : optimizedTrajectory && activeMode === "optimize"
               ? "Ready"
               : snapshot
                 ? "Paused"
@@ -1497,6 +1426,20 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   const initialControlsDisabled = isFlying || isAnyPlaying || isBusy || !hasAircraftConfigs;
   const targetControlsDisabled = isBusy || isTrajectoryPlaying || runwayTargets.length === 0;
   const comparisonControlsDisabled = isBusy || isComparisonPlaying || !hasAircraftConfigs;
+  // The controls are frozen while a backend request runs (Compute, Start, Reset): the
+  // reply then always answers the controls on screen.
+  const controlsDisabled = isBusy;
+  const runChartOpen = isChartsOpen && chartMode === "run" && comparisonResult !== null;
+  // An Optimize start needs the runway's RNAV fixes; Fly can start anywhere (Edit / place).
+  const missingRnavFixesRunway =
+    activeMode === "optimize" && rnavFixes !== null && rnavFixes.candidates.length === 0
+      ? rnavFixes.runwayIdent
+      : null;
+  // The comparison flies the panel's controls held fixed, on the load-factor
+  // parameterisation every compared system shares — so not under Alpha simulation.
+  const comparisonControl: DynamicsComparisonControl | null = usesLoadFactorControl(simulationMode)
+    ? { thrustN: controls.thrustN, bankDeg: controls.bankDeg, loadFactor: controls.loadFactor }
+    : null;
   // ``optimizerParts`` is the axes state (above); the fittings a frame allows drive the Fitting
   // dropdown (re-anchored ENU is shooting-only).
   const allowedFittings = validFittingsForFrame(
@@ -1506,12 +1449,14 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     ? optimizedTrajectory.finalTimeS / Math.max(1, optimizedTrajectory.controls.length)
     : null;
 
-  // ── Fly-mode transport for the shared bottom bar ─────────────────────────────
-  // The Fly (pilot) aircraft runs on the manual sim loop (`isFlying`), NOT
-  // viewer.clock, so the bottom bar's generic clock Play/Reset can't drive it.
-  // Publish the sim transport to context — via stable, ref-backed callbacks so
-  // the effect doesn't churn — and WorkbenchBottomBar renders Play/Pause/Reset
-  // for it in fly mode. Cleared (null) whenever the panel leaves pilot mode.
+  // ── Fly's live-flight transport for the shared bottom bar ────────────────────
+  // The live aircraft runs on the manual sim loop (`isFlying`), NOT viewer.clock,
+  // so the bottom bar's generic clock Play/Reset can't drive it. Publish the sim
+  // transport to context — via stable, ref-backed callbacks so the effect doesn't
+  // churn — while the live flight is Fly's run on screen; a loaded comparison is a
+  // clock playback, so the transport is withdrawn (null) and the bar drives the clock.
+  // A layout effect: published before the first paint of Fly, so the bar never shows a
+  // frame of the clock transport on entering it.
   const pilotTransportImplRef = useRef({ startPilot, resetPilot, isFlying });
   pilotTransportImplRef.current = { startPilot, resetPilot, isFlying };
   const bottomTogglePilotPlay = useCallback(() => {
@@ -1522,8 +1467,8 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   const bottomResetPilot = useCallback(() => {
     void pilotTransportImplRef.current.resetPilot();
   }, []);
-  useEffect(() => {
-    if (activeMode !== "pilot") return undefined;
+  useLayoutEffect(() => {
+    if (activeMode !== "fly" || isComparisonPlaybackActive) return undefined;
     setPilotTransport({
       running: isFlying,
       playPauseDisabled: isBusy || isPlacingInitialPosition || (!isFlying && !hasAircraftConfigs),
@@ -1534,6 +1479,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     return () => setPilotTransport(null);
   }, [
     activeMode,
+    isComparisonPlaybackActive,
     isFlying,
     isBusy,
     isPlacingInitialPosition,
@@ -1550,12 +1496,12 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   // glidepath / step-down floors the solve enforces (the hook saves the user's prior
   // display and restores it when the force ends or this panel unmounts). The target
   // runway is INDEPENDENT of the global selection, so we hand the hook a non-null
-  // forceRunway — it then owns selectedRunway; Observe passes null (see ControlPanel).
+  // forceRunway — it then owns selectedRunway; Evaluation passes null (see ControlPanel).
   const forcedRunwayIdent = selectedTargetRunway
     ? bareRunwayIdent(selectedTargetRunway.runwayIdent)
     : null;
   useForcedProcedureDisplay({
-    active: activeMode === "trajectory" && optimizerParts.constrained && forcedRunwayIdent !== null,
+    active: activeMode === "optimize" && optimizerParts.constrained && forcedRunwayIdent !== null,
     forceRunway: forcedRunwayIdent,
   });
 
@@ -1566,63 +1512,37 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
         visible={
           isFlying ||
           isTrajectoryPlaying ||
-          (activeMode === "trajectory" && snapshot !== null) ||
-          (activeMode === "comparison" && isComparisonPlaybackActive && snapshot !== null)
+          (activeMode === "optimize" && snapshot !== null) ||
+          (isComparisonPlaybackActive && snapshot !== null)
         }
-        showControlReadout={activeMode === "trajectory" || activeMode === "comparison"}
+        showControlReadout={activeMode === "optimize" || isComparisonPlaybackActive}
         simulationMode={snapshot?.simulationMode ?? simulationMode}
         comparisonDeltas={
-          activeMode === "comparison"
+          isComparisonPlaybackActive
             ? comparisonDeltas
-            : activeMode === "trajectory"
+            : activeMode === "optimize"
               ? trajectoryTargetDeltas
               : null
         }
         comparisonSystems={
-          activeMode === "comparison"
+          isComparisonPlaybackActive
             ? comparisonResult?.systems ?? null
-            : activeMode === "trajectory" && trajectoryTargetDeltas
+            : activeMode === "optimize" && trajectoryTargetDeltas
               ? TARGET_DELTA_SYSTEMS
               : null
         }
-        deltaReferenceLabel={activeMode === "trajectory" ? "target" : "B"}
+        deltaReferenceLabel={activeMode === "optimize" ? "target" : "B"}
       />
 
       <header className="pilot-panel-header">
         <div className="pilot-panel-header-main">
           <div className="pilot-panel-title-block">
-            <h3>
-              {activeMode === "comparison"
-                ? "Dynamics Compare"
-                : activeMode === "trajectory"
-                  ? "Trajectory Play"
-                  : "Pilot Mode"}
-            </h3>
+            <h3>{activeMode === "optimize" ? "Trajectory Play" : "Fly"}</h3>
           </div>
           <span className={`pilot-status pilot-status-${statusLabel.toLowerCase()}`}>
             {statusLabel}
           </span>
         </div>
-        {controlledMode === undefined ? (
-          <div className="pilot-panel-mode-row pilot-panel-mode-switch" role="group" aria-label="Panel mode">
-            {([
-              { mode: "pilot", label: "Pilot", onClick: openPilotMode },
-              { mode: "trajectory", label: "Trajectory", onClick: openTrajectoryMode },
-              { mode: "comparison", label: "Compare", onClick: openComparisonMode },
-            ] as const).map((entry) => (
-              <button
-                key={entry.mode}
-                type="button"
-                className={`pilot-mode-toggle${activeMode === entry.mode ? " active" : ""}`}
-                onClick={entry.onClick}
-                disabled={isPlacingInitialPosition}
-                aria-pressed={activeMode === entry.mode}
-              >
-                {entry.label}
-              </button>
-            ))}
-          </div>
-        ) : null}
       </header>
 
       <section className="pilot-initial-summary" aria-label="Initial aircraft state summary">
@@ -1681,11 +1601,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
         isPlacing={isPlacingInitialPosition}
         state={initialState}
         aircraftConfigs={aircraftConfigs}
-        rnavInitialFixCandidates={
-          activeMode === "trajectory" || activeMode === "comparison"
-            ? rnavInitialFixCandidates
-            : []
-        }
+        rnavInitialFixCandidates={rnavInitialFixCandidates}
         selectedRnavInitialFixKey={selectedRnavInitialFixKey}
         disabled={initialControlsDisabled}
         onClose={closeInitialEditor}
@@ -1695,7 +1611,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
         onRnavInitialFixChange={updateRnavInitialFix}
       />
 
-      {activeMode === "trajectory" ? (
+      {activeMode === "optimize" ? (
         <>
           <section className="pilot-initial-summary" aria-label="Target aircraft state summary">
             <div className="pilot-initial-summary-header">
@@ -2034,22 +1950,15 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
             ) : null}
           </section>
         </>
-      ) : activeMode === "comparison" ? (
+      ) : (
         <>
-          <p className="dyncmp-hint">
-            Set the start state via <strong>Edit</strong> above (fields / place on
-            map) or pick a published RNAV fix from a runway below.
-          </p>
-          <section
-            className="pilot-optimization-row"
-            aria-label="Dynamics comparison settings"
-          >
+          <section className="pilot-optimization-row" aria-label="Start fix runway">
             <label>
               <span>RNAV runway</span>
               <select
                 className="pilot-select-input"
                 value={targetState.runwayThresholdId}
-                disabled={comparisonControlsDisabled || runwayTargets.length === 0}
+                disabled={initialControlsDisabled || runwayTargets.length === 0}
                 onChange={(event) => updateTargetRunway(event.target.value)}
               >
                 {runwayTargets.length === 0 ? <option value="">—</option> : null}
@@ -2060,121 +1969,302 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
                 ))}
               </select>
             </label>
-            <label>
-              <span>Thrust</span>
-              <EnglishNumberInput
-                value={comparisonControl.thrustN}
-                min={0}
-                max={selectedMaxThrustN}
-                step="500"
-                disabled={comparisonControlsDisabled}
-                onCommit={(value) =>
-                  updateComparisonControl("thrustN", value, 0, selectedMaxThrustN)
-                }
-              />
-            </label>
-            <label>
-              <span>Bank</span>
-              <EnglishNumberInput
-                value={comparisonControl.bankDeg}
-                min={-60}
-                max={60}
-                step="1"
-                disabled={comparisonControlsDisabled}
-                onCommit={(value) => updateComparisonControl("bankDeg", value, -60, 60)}
-              />
-            </label>
-            <label>
-              <span>Load factor</span>
-              <EnglishNumberInput
-                value={comparisonControl.loadFactor}
-                min={MIN_LOAD_FACTOR}
-                max={MAX_LOAD_FACTOR}
-                step="0.05"
-                disabled={comparisonControlsDisabled}
-                onCommit={(value) =>
-                  updateComparisonControl("loadFactor", value, MIN_LOAD_FACTOR, MAX_LOAD_FACTOR)
-                }
-              />
-            </label>
-            <label>
-              <span>Duration</span>
-              <EnglishNumberInput
-                value={comparisonDurationS}
-                min={5}
-                max={600}
-                step="10"
-                disabled={comparisonControlsDisabled}
-                onCommit={updateComparisonDuration}
-              />
-            </label>
-            <label>
-              <span>dt</span>
-              <EnglishNumberInput
-                value={comparisonDtS}
-                min={0.05}
-                max={1}
-                step="0.05"
-                disabled={comparisonControlsDisabled}
-                onCommit={updateComparisonDt}
-              />
-            </label>
           </section>
+          <p className="dyncmp-hint">
+            Set the start via <strong>Edit</strong> above (fields / place on map); the
+            runway&apos;s published RNAV fixes are offered there as starts.
+          </p>
 
-          <div className="pilot-actions">
-            <button
-              className="pilot-primary-button"
-              onClick={computeComparison}
-              disabled={
-                isBusy ||
-                isComparisonPlaying ||
-                isPlacingInitialPosition ||
-                !hasAircraftConfigs
-              }
-            >
-              Compute
-            </button>
-            <button
-              onClick={playComparison}
-              disabled={
-                isBusy ||
-                isComparisonPlaying ||
-                isPlacingInitialPosition ||
-                !comparisonResult
-              }
-            >
-              Play
-            </button>
-            <button
-              onClick={pauseComparison}
-              disabled={!isComparisonPlaying || isBusy || isPlacingInitialPosition}
-            >
-              Pause
-            </button>
-            <button
-              onClick={resetComparisonReplay}
-              disabled={isBusy || isPlacingInitialPosition || !isComparisonPlaybackActive}
-            >
-              Reset
-            </button>
-          </div>
+          <section className="pilot-control-zone" aria-label="Pilot controls">
+            <h4 className="pilot-panel-section-title">Controls</h4>
+            <div className="pilot-stepper-row">
+              <button
+                disabled={controlsDisabled}
+                onClick={() => nudgeControl("bankDeg", 5, -45, 45)}
+                title="Bank left"
+              >
+                &lt;
+              </button>
+              <label>
+                <span>Bank</span>
+                <EnglishNumberInput
+                  value={controls.bankDeg}
+                  min={-45}
+                  max={45}
+                  step="1"
+                  disabled={controlsDisabled}
+                  onCommit={(value) => updateControl("bankDeg", value, -45, 45)}
+                />
+              </label>
+              <button
+                disabled={controlsDisabled}
+                onClick={() => nudgeControl("bankDeg", -5, -45, 45)}
+                title="Bank right"
+              >
+                &gt;
+              </button>
+            </div>
 
-          <section className="pilot-control-zone" aria-label="Dynamics comparison playback">
+            {usesLoadFactorControl(simulationMode) ? (
+              <div className="pilot-stepper-row">
+                <button
+                  disabled={controlsDisabled}
+                  onClick={() =>
+                    nudgeControl(
+                      "loadFactor",
+                      -0.05,
+                      MIN_LOAD_FACTOR,
+                      MAX_LOAD_FACTOR,
+                    )
+                  }
+                  title="Reduce load factor"
+                >
+                  -
+                </button>
+                <label>
+                  <span>Load factor</span>
+                  <EnglishNumberInput
+                    value={controls.loadFactor}
+                    min={MIN_LOAD_FACTOR}
+                    max={MAX_LOAD_FACTOR}
+                    step="0.05"
+                    disabled={controlsDisabled}
+                    onCommit={(value) =>
+                      updateControl(
+                        "loadFactor",
+                        value,
+                        MIN_LOAD_FACTOR,
+                        MAX_LOAD_FACTOR,
+                      )
+                    }
+                  />
+                </label>
+                <button
+                  disabled={controlsDisabled}
+                  onClick={() =>
+                    nudgeControl(
+                      "loadFactor",
+                      0.05,
+                      MIN_LOAD_FACTOR,
+                      MAX_LOAD_FACTOR,
+                    )
+                  }
+                  title="Increase load factor"
+                >
+                  +
+                </button>
+              </div>
+            ) : (
+              <div className="pilot-stepper-row">
+                <button
+                  disabled={controlsDisabled}
+                  onClick={() => nudgeControl("attackDeg", -0.5, -10, 18)}
+                  title="Reduce alpha"
+                >
+                  -
+                </button>
+                <label>
+                  <span>Alpha</span>
+                  <EnglishNumberInput
+                    value={controls.attackDeg}
+                    min={-10}
+                    max={18}
+                    step="0.5"
+                    disabled={controlsDisabled}
+                    onCommit={(value) => updateControl("attackDeg", value, -10, 18)}
+                  />
+                </label>
+                <button
+                  disabled={controlsDisabled}
+                  onClick={() => nudgeControl("attackDeg", 0.5, -10, 18)}
+                  title="Increase alpha"
+                >
+                  +
+                </button>
+              </div>
+            )}
+
+            <div className="pilot-stepper-row">
+              <button
+                disabled={controlsDisabled}
+                onClick={() => nudgeControl("thrustN", -1000, 0, selectedMaxThrustN)}
+                title="Reduce thrust"
+              >
+                -
+              </button>
+              <label>
+                <span>Thrust</span>
+                <EnglishNumberInput
+                  value={controls.thrustN}
+                  min={0}
+                  max={selectedMaxThrustN}
+                  step="500"
+                  disabled={controlsDisabled}
+                  onCommit={(value) =>
+                    updateControl("thrustN", value, 0, selectedMaxThrustN)
+                  }
+                />
+              </label>
+              <button
+                disabled={controlsDisabled}
+                onClick={() => nudgeControl("thrustN", 1000, 0, selectedMaxThrustN)}
+                title="Increase thrust"
+              >
+                +
+              </button>
+            </div>
+
             <div className="pilot-options-row">
+              <label>
+                <span>Simulation</span>
+                <select
+                  className="pilot-select-input"
+                  value={simulationMode}
+                  disabled={isPlacingInitialPosition || controlsDisabled}
+                  onKeyDown={handleSimulationSelectKeyDown}
+                  onChange={(event) =>
+                    updateSimulationMode(event.target.value as PilotSimulationMode)
+                  }
+                >
+                  <option value="alpha">Alpha</option>
+                  <option value="loadFactor">Load factor</option>
+                  <option value="casadi">CasADi</option>
+                </select>
+              </label>
               <label className="pilot-checkbox-label">
                 <input
                   type="checkbox"
                   checked={isFollowing}
                   onChange={(event) => setIsFollowing(event.target.checked)}
                 />
-                Follow B
+                Follow camera
               </label>
+            </div>
+          </section>
+
+          <section className="pilot-control-zone" aria-label="Live flight">
+            <h4 className="pilot-panel-section-title">Live flight</h4>
+            <div className="pilot-actions">
+              <button
+                className="pilot-primary-button"
+                onClick={startPilot}
+                disabled={isBusy || isFlying || isPlacingInitialPosition || !hasAircraftConfigs}
+              >
+                {isEnabled ? "Resume" : "Start"}
+              </button>
+              <button
+                onClick={() => setIsFlying(false)}
+                disabled={!isFlying || isBusy || isPlacingInitialPosition}
+              >
+                Pause
+              </button>
+              <button
+                onClick={resetPilot}
+                disabled={isBusy || isPlacingInitialPosition || !hasAircraftConfigs}
+              >
+                Reset
+              </button>
+              <button
+                onClick={stopPilot}
+                disabled={!isEnabled || isPlacingInitialPosition}
+              >
+                End
+              </button>
+            </div>
+            <div className="pilot-options-row">
+              <label>
+                <span>dt</span>
+                <EnglishNumberInput
+                  value={integratorDtS}
+                  min={0.02}
+                  max={0.5}
+                  step="0.02"
+                  disabled={false}
+                  onCommit={updateIntegratorDt}
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="pilot-control-zone" aria-label="Dynamics comparison">
+            <h4 className="pilot-panel-section-title">Compare dynamics</h4>
+            {comparisonControl === null ? (
+              <p className="dyncmp-hint">
+                The comparison flies a load-factor control: set Simulation to Load factor or
+                CasADi.
+              </p>
+            ) : null}
+            <div className="pilot-optimization-row">
+              <label>
+                <span>Duration</span>
+                <EnglishNumberInput
+                  value={comparisonDurationS}
+                  min={5}
+                  max={600}
+                  step="10"
+                  disabled={comparisonControlsDisabled}
+                  onCommit={updateComparisonDuration}
+                />
+              </label>
+              <label>
+                <span>dt</span>
+                <EnglishNumberInput
+                  value={comparisonDtS}
+                  min={0.05}
+                  max={1}
+                  step="0.05"
+                  disabled={comparisonControlsDisabled}
+                  onCommit={updateComparisonDt}
+                />
+              </label>
+            </div>
+
+            <div className="pilot-actions">
+              <button
+                className="pilot-primary-button"
+                onClick={computeComparison}
+                disabled={
+                  isBusy ||
+                  isComparisonPlaying ||
+                  isPlacingInitialPosition ||
+                  !hasAircraftConfigs ||
+                  comparisonControl === null
+                }
+              >
+                Compute
+              </button>
+              <button
+                onClick={playComparison}
+                disabled={
+                  isBusy ||
+                  isComparisonPlaying ||
+                  isPlacingInitialPosition ||
+                  !comparisonResult
+                }
+              >
+                Play
+              </button>
+              <button
+                onClick={pauseComparison}
+                disabled={!isComparisonPlaying || isBusy || isPlacingInitialPosition}
+              >
+                Pause
+              </button>
+              <button
+                onClick={resetComparisonReplay}
+                disabled={isBusy || isPlacingInitialPosition || !isComparisonPlaybackActive}
+              >
+                Reset
+              </button>
+            </div>
+
+            <div className="pilot-options-row">
               <button
                 type="button"
                 onClick={toggleRunCharts}
                 disabled={!comparisonResult}
               >
-                {isChartsOpen && chartMode === "run" ? "Hide charts" : "Show charts"}
+                {runChartOpen ? "Hide charts" : "Show charts"}
               </button>
             </div>
 
@@ -2243,210 +2333,11 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
               </>
             ) : (
               <p className="dyncmp-hint">
-                Set a constant control + horizon, then Compute to fly the start state
-                four ways (fixed tangent, re-anchored, geodetic ±transport) and compare
-                the drift.
+                Compute holds the controls above fixed for the duration and flies the start
+                four ways (fixed tangent, re-anchored, geodetic ±transport) to compare the
+                drift. It ends a live flight; editing a control clears the result.
               </p>
             )}
-          </section>
-        </>
-      ) : (
-        <>
-          <div className="pilot-actions">
-            <button
-              className="pilot-primary-button"
-              onClick={startPilot}
-              disabled={isBusy || isFlying || isPlacingInitialPosition || !hasAircraftConfigs}
-            >
-              {snapshot ? "Resume" : "Start"}
-            </button>
-            <button
-              onClick={() => setIsFlying(false)}
-              disabled={!isFlying || isBusy || isPlacingInitialPosition}
-            >
-              Pause
-            </button>
-            <button
-              onClick={resetPilot}
-              disabled={isBusy || isPlacingInitialPosition || !hasAircraftConfigs}
-            >
-              Reset
-            </button>
-            <button
-              onClick={stopPilot}
-              disabled={(!isEnabled && !snapshot) || isPlacingInitialPosition}
-            >
-              End
-            </button>
-          </div>
-
-          <section className="pilot-control-zone" aria-label="Pilot controls">
-            <div className="pilot-stepper-row">
-              <button
-                onClick={() => nudgeControl("bankDeg", 5, -45, 45)}
-                title="Bank left"
-              >
-                &lt;
-              </button>
-              <label>
-                <span>Bank</span>
-                <EnglishNumberInput
-                  value={controls.bankDeg}
-                  min={-45}
-                  max={45}
-                  step="1"
-                  disabled={false}
-                  onCommit={(value) => updateControl("bankDeg", value, -45, 45)}
-                />
-              </label>
-              <button
-                onClick={() => nudgeControl("bankDeg", -5, -45, 45)}
-                title="Bank right"
-              >
-                &gt;
-              </button>
-            </div>
-
-            {usesLoadFactorControl(simulationMode) ? (
-              <div className="pilot-stepper-row">
-                <button
-                  onClick={() =>
-                    nudgeControl(
-                      "loadFactor",
-                      -0.05,
-                      MIN_LOAD_FACTOR,
-                      MAX_LOAD_FACTOR,
-                    )
-                  }
-                  title="Reduce load factor"
-                >
-                  -
-                </button>
-                <label>
-                  <span>Load factor</span>
-                  <EnglishNumberInput
-                    value={controls.loadFactor ?? DEFAULT_LOAD_FACTOR}
-                    min={MIN_LOAD_FACTOR}
-                    max={MAX_LOAD_FACTOR}
-                    step="0.05"
-                    disabled={false}
-                    onCommit={(value) =>
-                      updateControl(
-                        "loadFactor",
-                        value,
-                        MIN_LOAD_FACTOR,
-                        MAX_LOAD_FACTOR,
-                      )
-                    }
-                  />
-                </label>
-                <button
-                  onClick={() =>
-                    nudgeControl(
-                      "loadFactor",
-                      0.05,
-                      MIN_LOAD_FACTOR,
-                      MAX_LOAD_FACTOR,
-                    )
-                  }
-                  title="Increase load factor"
-                >
-                  +
-                </button>
-              </div>
-            ) : (
-              <div className="pilot-stepper-row">
-                <button
-                  onClick={() => nudgeControl("attackDeg", -0.5, -10, 18)}
-                  title="Reduce alpha"
-                >
-                  -
-                </button>
-                <label>
-                  <span>Alpha</span>
-                  <EnglishNumberInput
-                    value={controls.attackDeg}
-                    min={-10}
-                    max={18}
-                    step="0.5"
-                    disabled={false}
-                    onCommit={(value) => updateControl("attackDeg", value, -10, 18)}
-                  />
-                </label>
-                <button
-                  onClick={() => nudgeControl("attackDeg", 0.5, -10, 18)}
-                  title="Increase alpha"
-                >
-                  +
-                </button>
-              </div>
-            )}
-
-            <div className="pilot-stepper-row">
-              <button
-                onClick={() => nudgeControl("thrustN", -1000, 0, selectedMaxThrustN)}
-                title="Reduce thrust"
-              >
-                -
-              </button>
-              <label>
-                <span>Thrust</span>
-                <EnglishNumberInput
-                  value={controls.thrustN}
-                  min={0}
-                  max={selectedMaxThrustN}
-                  step="500"
-                  disabled={false}
-                  onCommit={(value) =>
-                    updateControl("thrustN", value, 0, selectedMaxThrustN)
-                  }
-                />
-              </label>
-              <button
-                onClick={() => nudgeControl("thrustN", 1000, 0, selectedMaxThrustN)}
-                title="Increase thrust"
-              >
-                +
-              </button>
-            </div>
-
-            <div className="pilot-options-row">
-              <label>
-                <span>Simulation</span>
-                <select
-                  className="pilot-select-input"
-                  value={simulationMode}
-                  disabled={isPlacingInitialPosition}
-                  onKeyDown={handleSimulationSelectKeyDown}
-                  onChange={(event) =>
-                    updateSimulationMode(event.target.value as PilotSimulationMode)
-                  }
-                >
-                  <option value="alpha">Alpha</option>
-                  <option value="loadFactor">Load factor</option>
-                  <option value="casadi">CasADi</option>
-                </select>
-              </label>
-              <label className="pilot-checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={isFollowing}
-                  onChange={(event) => setIsFollowing(event.target.checked)}
-                />
-                Follow camera
-              </label>
-              <label>
-                <span>dt</span>
-                <EnglishNumberInput
-                  value={integratorDtS}
-                  min={0.02}
-                  max={0.5}
-                  step="0.02"
-                  disabled={false}
-                  onCommit={updateIntegratorDt}
-                />
-              </label>
-            </div>
           </section>
         </>
       )}
@@ -2457,9 +2348,14 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
           <button type="button" onClick={() => setCatalogAttempt((attempt) => attempt + 1)}>Retry</button>
         </div>
       ) : null}
+      {missingRnavFixesRunway !== null ? (
+        <div className="pilot-error" role="alert">
+          No RNAV IF points are available for {activeAirportCode} {missingRnavFixesRunway}.
+        </div>
+      ) : null}
       {error ? <div className="pilot-error" role="alert">{error}</div> : null}
 
-      {activeMode === "comparison" && isChartsOpen && chartMode === "average" && averagedComparison ? (
+      {activeMode === "fly" && isChartsOpen && chartMode === "average" && averagedComparison ? (
         <DynamicsComparisonCharts
           chart={averagedComparison.chart}
           systems={averagedComparison.systems}
@@ -2470,7 +2366,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
             averagedComparison.runCount === 1 ? "" : "s"
           }, resampled onto a common distance grid (backend-averaged).`}
         />
-      ) : activeMode === "comparison" && isChartsOpen && chartMode === "run" && comparisonResult ? (
+      ) : activeMode === "fly" && runChartOpen && comparisonResult ? (
         <DynamicsComparisonCharts
           chart={comparisonResult.chart}
           systems={comparisonResult.systems}
@@ -2499,7 +2395,7 @@ function makeDefaultInitialState(
   };
 }
 
-function makeDefaultControls(aircraft: PilotAircraftConfig | null): PilotControls {
+function makeDefaultControls(aircraft: PilotAircraftConfig | null): PanelControls {
   return {
     thrustN: Math.min(DEFAULT_THRUST_N, aircraft?.maxThrustN ?? DEFAULT_THRUST_N),
     bankDeg: DEFAULT_BANK_DEG,
@@ -2648,10 +2544,6 @@ function toErrorMessage(error: unknown): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
-}
-
-function defaultControlValue(key: keyof PilotControls): number {
-  return key === "loadFactor" ? DEFAULT_LOAD_FACTOR : 0;
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {

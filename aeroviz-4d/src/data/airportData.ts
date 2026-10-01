@@ -108,9 +108,9 @@ export function airportComparisonCzmlUrl(
 }
 
 /**
- * The measured-baseline category (`trajectory_data_process/harvest/publish.py`).
+ * The measured ground-truth category (`trajectory_data_process/harvest/publish.py`).
  * Report-only — it ships no CZML, because the flown track it describes is already the
- * observed layer on screen. Named here so the frontend's baseline report readers and
+ * observed layer on screen. Named here so the frontend's ground-truth report readers and
  * the publisher cannot drift.
  */
 export const OBSERVED_CATEGORY_KEY = "observed";
@@ -288,7 +288,7 @@ export interface ComparisonCategory {
    * naming convention, not a contract.
    */
   constrained: boolean;
-  /** Dataset partition for learned prediction categories; absent for optimization/baselines. */
+  /** Dataset partition for learned prediction categories; absent for optimization/ground truth. */
   datasetSplit?: DatasetSplit;
   /** Existing entries omit this and remain ordinary Prediction results. */
   resultSource?: ComparisonResultSource;

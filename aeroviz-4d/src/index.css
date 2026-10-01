@@ -3950,17 +3950,6 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   min-width: 0;
 }
 
-.pilot-panel-mode-row {
-  display: flex;
-  min-width: 0;
-}
-
-.pilot-mode-toggle {
-  width: 100%;
-  padding: 4px 6px;
-  white-space: nowrap;
-}
-
 .pilot-panel h3 {
   margin: 0 0 3px;
   color: #7dd3fc;
@@ -4285,6 +4274,16 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   margin-bottom: 6px;
 }
 
+/* Fly's sections (Controls / Live flight / Compare dynamics): the summary blocks' h4 look. */
+.pilot-panel-section-title {
+  margin: 0;
+  color: #c7d2fe;
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
 .pilot-optimization-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
@@ -4548,7 +4547,7 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   white-space: nowrap;
 }
 
-/* Compare mode: colored A/C/D deviation chips appended under the B value. */
+/* Dynamics comparison: colored A/C/D deviation chips appended under the B value. */
 .pilot-realtime-deltas {
   display: flex;
   flex-wrap: wrap;
@@ -6650,23 +6649,6 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   .procedure-details-leg-meta {
     justify-items: start;
   }
-}
-
-/* ── Pilot panel: 3-way mode switch (Pilot / Trajectory / Compare) ───────────── */
-.pilot-panel-mode-switch {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-}
-
-.pilot-panel-mode-switch .pilot-mode-toggle {
-  width: 100%;
-}
-
-.pilot-mode-toggle.active {
-  border-color: rgba(125, 211, 252, 0.6);
-  background: rgba(14, 116, 144, 0.55);
-  color: #e0f2fe;
 }
 
 /* ── Dynamics comparison: in-panel legend + hide toggles ─────────────────────── */

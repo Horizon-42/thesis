@@ -19,7 +19,7 @@
  *    it; and a red cross, fixed, where the judge ended an aircraft.
  *
  * Built once per window and reading; the cursor moves only the aircraft and the loss lines. STATIC ENTITIES, as every
- * Training layer: the shared `viewer.clock` belongs to Observe. Call it from the leaf (`TrainingScene`): it reads the
+ * Training layer: the shared `viewer.clock` belongs to Evaluation. Call it from the leaf (`TrainingScene`): it reads the
  * cursor.
  */
 

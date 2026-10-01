@@ -29,9 +29,9 @@ solves) but holds hundreds of MB of casadi + numpy resident — dead weight on a
 memory-constrained machine once the user leaves the optimizer. So the worker is
 tied to the frontend tab's lifecycle:
 
-* ``open_session()``  — the Optimize/Compare tab opened: ref-count up, spawn the
+* ``open_session()``  — the Optimize/Fly task opened: ref-count up, spawn the
   resident worker if needed (warm).
-* ``close_session()`` — the tab closed: ref-count down; at zero, shut the worker
+* ``close_session()`` — the task closed: ref-count down; at zero, shut the worker
   down and reclaim ALL its memory.
 * a call with no session open falls back to an **ephemeral** worker (spawned for
   that one call, torn down after), so the endpoint still works.

@@ -122,7 +122,7 @@ export interface EvaluationRow {
   lateral_result: EvaluationComponentResult;
   vertical_result: EvaluationComponentResult;
   /** v6: composes into `verdict` for every subject. Computed subjects are judged on
-   *  the crossing model airspeed; observed baselines on the fitted crossing GROUND
+   *  the crossing model airspeed; ground-truth tracks on the fitted crossing GROUND
    *  speed as a stated proxy (bounds carry the `_ground_speed_proxy` criterion id).
    *  Indeterminate when the airframe is unresolvable or no crossing speed exists.
    *  Absent in legacy v5 reports, whose verdicts never graded speed. */
@@ -142,7 +142,7 @@ export interface EvaluationRow {
    *  absent in legacy v5 reports. */
   crossing_speed_ms?: number | null;
   /** v6-additive (2026-08-24): the event's ADS-B GROUND speed at the crossing
-   *  (observed subjects) — the value the speed gate judges for baselines, as a
+   *  (observed subjects) — the value the speed gate judges for ground truth, as a
    *  stated proxy for airspeed (wind unmodelled). Null on rows whose event predates
    *  the field or could not fit a speed. */
   crossing_ground_speed_ms?: number | null;

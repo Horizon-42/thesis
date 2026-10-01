@@ -308,7 +308,7 @@ function parseErrorSeries(value: unknown): DynamicsComparisonErrorSeries {
 /**
  * Sample every compared system's error (vs the reference B) at ``elapsedS`` by
  * linearly interpolating the chart's per-sample series over its ascending time
- * grid. Used to drive the Live-State readout during a Compare playback, so each
+ * grid. Used to drive the Live-State readout during a comparison playback, so each
  * state row can show B's value plus A/C/D's live deviation. Clamps at both ends;
  * returns null only when the chart has no samples.
  */

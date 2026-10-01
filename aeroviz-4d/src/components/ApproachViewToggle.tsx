@@ -3,7 +3,7 @@
  * -----------------------
  * A small toggle button that opens/closes the 2D approach PROFILE page
  * (ApproachViewPanel) for a given runway. It is the one source for this
- * control, used from every dock that needs it — the Observe dock (governing the global
+ * control, used from every dock that needs it — the Evaluation dock (governing the global
  * landing runway), the Optimize dock (governing the target runway), and the bottom-right
  * Procedures panel (per runway group).
  *
@@ -18,7 +18,7 @@
  *
  * `borrowSelection` (unconstrained Optimize's Target-State toggle): opening from a dock
  * whose governed runway is INDEPENDENT of the global selection would otherwise permanently
- * clobber the user's landing-runway scoping (leaking the Optimize target into Observe).
+ * clobber the user's landing-runway scoping (leaking the Optimize target into Evaluation).
  * With it set, the toggle saves the pre-open {selectedRunway, isApproachViewOpen} once —
  * only when opening actually CHANGES the selection — and restores it when the approach view is
  * closed from this toggle or the toggle unmounts (leaving the dock). Constrained Optimize

@@ -18,7 +18,7 @@ import type {
  */
 export type ComparisonCategoryKind = ComparisonResultSource | "optimization";
 
-export type TrajectoryResultSource = "baseline" | ComparisonCategoryKind;
+export type TrajectoryResultSource = "groundTruth" | ComparisonCategoryKind;
 
 export function isExperimentCategory(category: ComparisonCategory): boolean {
   return category.resultSource === "experiment" && category.experiment !== undefined;
@@ -45,7 +45,7 @@ export function activeTrajectoryResultSource(
   comparisonEnabled: boolean,
   category: ComparisonCategory | null,
 ): TrajectoryResultSource {
-  if (!comparisonEnabled) return "baseline";
+  if (!comparisonEnabled) return "groundTruth";
   return category ? categoryResultSource(category) : "prediction";
 }
 

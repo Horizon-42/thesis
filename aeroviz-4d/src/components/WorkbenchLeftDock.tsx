@@ -3,9 +3,9 @@
  * ---------------------
  * The left working dock. It shows only the controls for the active task, switching
  * on the global workbench `mode` (the four mutually-exclusive tasks):
- *   • observe                  → trajectory playback/options + the flight list
- *   • training                 → the TrainingPanel (stage B's intermediate results)
- *   • fly / optimize / compare → the PilotPanel, driven in the matching sub-mode
+ *   • evaluation     → trajectory playback/options + the flight list
+ *   • training       → the TrainingPanel (stage B's intermediate results)
+ *   • fly / optimize → the PilotPanel, which takes the task as its mode
  *
  * Procedures is NOT a task — the procedure panel is rendered separately (gated on
  * `proceduresOpen`) so it can coexist with whichever task is active.
@@ -19,7 +19,7 @@
  */
 
 import { useState, type ReactNode } from "react";
-import { useApp, type WorkbenchMode } from "../context/AppContext";
+import { useApp } from "../context/AppContext";
 import ControlPanel from "./ControlPanel";
 import type {
   ObservedEvaluationSummary,
@@ -31,22 +31,8 @@ import PilotPanel from "./PilotPanel";
 import TrainingPanel from "./TrainingPanel";
 import type { ObservedFlightSummary } from "../utils/observedFlightSummary";
 
-type PilotPanelMode = "pilot" | "trajectory" | "comparison";
-
-const MODE_TO_PILOT: Record<"fly" | "optimize" | "compare", PilotPanelMode> = {
-  fly: "pilot",
-  optimize: "trajectory",
-  compare: "comparison",
-};
-
-const PILOT_TO_MODE: Record<PilotPanelMode, WorkbenchMode> = {
-  pilot: "fly",
-  trajectory: "optimize",
-  comparison: "compare",
-};
-
 interface WorkbenchLeftDockProps {
-  /** Observed-flight ids for the Observe-mode flight list. */
+  /** Observed-flight ids for the Evaluation-mode flight list. */
   flightIds: string[];
   /** Per-flight duration + initial ground speed for the flight list. */
   flightSummaries: Record<string, ObservedFlightSummary>;
@@ -62,21 +48,16 @@ export default function WorkbenchLeftDock({
   observedVerdicts,
   observedEvaluation,
 }: WorkbenchLeftDockProps) {
-  const { mode, setMode, activeAirportCode } = useApp();
+  const { mode, activeAirportCode } = useApp();
   // the airport whose Training session is kept: taken on entering Training, dropped when another airport is opened
   const [trainingAirport, setTrainingAirport] = useState<string | null>(null);
   if (mode === "training" && trainingAirport !== activeAirportCode) setTrainingAirport(activeAirportCode);
   if (mode !== "training" && trainingAirport !== null && trainingAirport !== activeAirportCode) setTrainingAirport(null);
 
   let task: ReactNode = null;
-  if (mode === "fly" || mode === "optimize" || mode === "compare") {
-    task = (
-      <PilotPanel
-        mode={MODE_TO_PILOT[mode]}
-        onRequestMode={(next) => setMode(PILOT_TO_MODE[next])}
-      />
-    );
-  } else if (mode === "observe") {
+  if (mode === "fly" || mode === "optimize") {
+    task = <PilotPanel mode={mode} />;
+  } else if (mode === "evaluation") {
     task = (
       <>
         <ControlPanel observedVerdicts={observedVerdicts} />

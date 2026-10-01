@@ -1,7 +1,7 @@
 /**
  * flightListFormat.ts
  * -------------------
- * Small pure formatters for the Observe-mode flight list columns.
+ * Small pure formatters for the Evaluation-mode flight list columns.
  */
 
 /** Seconds → "m:ss" (or "h:mm:ss" past an hour). Returns "—" for null/negative/non-finite. */

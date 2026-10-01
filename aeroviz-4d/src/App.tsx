@@ -49,7 +49,7 @@ function FlightApp() {
     status: landingsStatus,
     error: landingsError,
   } = useLandingsManifest(activeAirportCode ?? "");
-  // The independently sampled Baseline source exists only in Observe/Baseline. Comparison
+  // The independently sampled Ground Truth source exists only in Evaluation/Ground Truth. Comparison
   // loads its exact index-selected references in useComparisonTrajectoryLayer instead.
   const {
     fileUrl: observedFileUrl,

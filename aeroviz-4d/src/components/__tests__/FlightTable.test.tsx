@@ -148,7 +148,7 @@ describe("FlightTable", () => {
     expect(rows.filter((el) => el.className.includes("flight-table-failed")).length).toBe(1);
   });
 
-  it("uses Pred plus baseline green/red for prediction pass and fail", () => {
+  it("uses Pred plus ground-truth green/red for prediction pass and fail", () => {
     comparisonData.comparisonActive = true;
     comparisonData.resultKind = "prediction";
     comparisonData.byFlightKey = new Map<string, Datum>([

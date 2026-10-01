@@ -57,7 +57,7 @@ and the group renders that far early: median **5055 m** apart at group start ove
 05L prediction groups (p95 47.1 km). Undetectable downstream — both start at `t = 0`, both name
 the right flight, the schema is satisfied — and it reads as model error, not a publication bug.
 
-Hence `aeroviz_backend.observed_trajectories` takes `window` ∈ `full` (default; Observe/Baseline;
+Hence `aeroviz_backend.observed_trajectories` takes `window` ∈ `full` (default; Evaluation/Ground Truth;
 rostered by `tracks/manifest.json`) | `arrival` (the comparison reference; rostered by
 `arrivals/manifest.json`), and the arrival window is built by **`load_arrival_flights` itself** —
 the same loader the scenario/optimizer/training paths use, so there is no second slicer to drift

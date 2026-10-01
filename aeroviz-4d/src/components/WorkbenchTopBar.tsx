@@ -3,7 +3,7 @@
  * -------------------
  * The persistent top context bar of the workbench shell. It holds the app's
  * orthogonal global context — Active Airport + Landing Runway — and the single
- * task switcher (Observe / Procedures / Fly / Optimize / Compare) that replaces the
+ * task switcher (Evaluation / Training / Fly / Optimize, plus the Procedures toggle) that replaces the
  * app's former two competing "mode" systems. It also exposes the on-demand Layers
  * drawer and the Presentation-mode toggle.
  *
@@ -14,13 +14,12 @@ import { useApp, type WorkbenchMode } from "../context/AppContext";
 import { useLandingsManifest } from "../hooks/useLandingsManifest";
 
 const TASK_TABS: Array<{ mode: WorkbenchMode; label: string }> = [
-  { mode: "observe", label: "Observe" },
-  // Training sits next to Observe on purpose: both read the same observed arrivals,
-  // Observe asking how the aircraft flew and Training what that track was read as.
+  { mode: "evaluation", label: "Evaluation" },
+  // Training sits next to Evaluation on purpose: both read the same observed arrivals,
+  // Evaluation asking how the aircraft flew and Training what that track was read as.
   { mode: "training", label: "Training" },
   { mode: "fly", label: "Fly" },
   { mode: "optimize", label: "Optimize" },
-  { mode: "compare", label: "Compare" },
 ];
 
 export default function WorkbenchTopBar() {

@@ -133,7 +133,7 @@ describe("airportData helpers", () => {
   it.each([...EXPERIMENT_PREDICTION_OUTPUTS])(
     "accepts %s experiment metadata without rejecting sibling categories",
     (predictionOutput) => {
-      const baseline = {
+      const groundTruth = {
         key: "observed",
         label: "Observed ADS-B",
         dir: "observed",
@@ -159,7 +159,7 @@ describe("airportData helpers", () => {
         },
       };
 
-      expect(isComparisonCategoriesManifest({ categories: [baseline, arm] })).toBe(true);
+      expect(isComparisonCategoriesManifest({ categories: [groundTruth, arm] })).toBe(true);
     },
   );
 

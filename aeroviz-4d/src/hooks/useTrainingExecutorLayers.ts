@@ -20,7 +20,7 @@
  *
  * The rows outside a heading word, the replay's and the live executor's, show with the heading bands' switch; neither
  * layer is rebuilt by a switch, and neither ever moves the camera. The aircraft is read on each frame (the viewer
- * renders continuously), not time-sampled: `viewer.clock` belongs to Observe.
+ * renders continuously), not time-sampled: `viewer.clock` belongs to Evaluation.
  */
 
 import { useEffect, useRef } from "react";

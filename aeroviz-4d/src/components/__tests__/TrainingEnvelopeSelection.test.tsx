@@ -270,7 +270,7 @@ describe("Training envelopes in the 3D scene", () => {
     // nothing was rebuilt, and the camera did not move
     original.forEach((entity) => expect(scene.entities.getById(entity.id)).toBe(entity));
     expect(scene.camera.flyToBoundingSphere).toHaveBeenCalledTimes(1);
-    act(() => scene.app().setMode("observe"));
+    act(() => scene.app().setMode("evaluation"));
     expect(scene.entities.values).toHaveLength(0);
     scene.unmount();
   });
@@ -337,7 +337,7 @@ describe("Training envelopes in the 3D scene", () => {
       // its rows outside go with the bands' switch
       act(() => scene.app().setTrainingLayer("headingBands", false));
       expect(scene.shown(TRAINING_ENTITY.autopilotOutside(0))).toBe(false);
-      act(() => scene.app().setMode("observe"));
+      act(() => scene.app().setMode("evaluation"));
       expect(scene.entities.values).toHaveLength(0);
       scene.unmount();
     } finally {

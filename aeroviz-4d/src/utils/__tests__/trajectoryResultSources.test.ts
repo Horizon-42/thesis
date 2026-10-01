@@ -57,7 +57,7 @@ describe("trajectory result sources", () => {
     expect(categoriesForResultSource(categories, "optimization")).toEqual([optimization]);
     expect(categoriesForResultSource(categories, "prediction")).toEqual([prediction]);
     expect(categoriesForResultSource(categories, "experiment")).toHaveLength(2);
-    expect(activeTrajectoryResultSource(false, experiment("val"))).toBe("baseline");
+    expect(activeTrajectoryResultSource(false, experiment("val"))).toBe("groundTruth");
     expect(activeTrajectoryResultSource(true, optimization)).toBe("optimization");
     expect(activeTrajectoryResultSource(true, prediction)).toBe("prediction");
     expect(activeTrajectoryResultSource(true, experiment("val"))).toBe("experiment");

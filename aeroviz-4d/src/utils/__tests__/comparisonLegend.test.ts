@@ -54,7 +54,7 @@ describe("buildComparisonLegend", () => {
     expect(result.kinds).not.toContain("optimizer");
   });
 
-  it("uses baseline-style prediction outcome colours without recolouring references", () => {
+  it("uses ground-truth-style prediction outcome colours without recolouring references", () => {
     const result = buildComparisonLegend(index([
       group("pass", "05L", "solved", [
         "ref-pass",

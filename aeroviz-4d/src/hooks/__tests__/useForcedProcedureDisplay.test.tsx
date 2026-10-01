@@ -83,7 +83,7 @@ describe("useForcedProcedureDisplay", () => {
     expect(setSelectedRunway).toHaveBeenCalledWith(null);
   });
 
-  it("NEVER touches selectedRunway (nor the approach view) when forceRunway is null (Observe)", () => {
+  it("NEVER touches selectedRunway (nor the approach view) when forceRunway is null (Evaluation)", () => {
     appState.selectedRunway = "05L"; // the user-owned global selection
     appState.isApproachViewOpen = true; // a user-opened profile — also user-owned here
     const { rerender } = render(<Harness active forceRunway={null} />);

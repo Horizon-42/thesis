@@ -4,7 +4,7 @@ import { AEROVIZ_BACKEND_URL } from "./pilotClient";
  * Worker-session lifecycle client.
  *
  * The backend keeps its casadi solver worker resident (warm) while the Optimize
- * or Compare tab is open, and decommissions it (freeing hundreds of MB) when the
+ * or Fly task (its dynamics comparison) is open, and decommissions it (freeing hundreds of MB) when the
  * tab closes. The frontend signals that lifecycle: open on tab enter, close on
  * tab leave, plus a `sendBeacon` close on page unload (which fires even when the
  * tab/window is closed and React's unmount cleanup would not run).

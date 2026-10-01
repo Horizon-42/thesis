@@ -585,7 +585,7 @@ describe("TrainingSentenceBar", () => {
 
   it("draws nothing outside Training, though the flight stays selected (the session outlives a task switch)", () => {
     select();
-    appState.mode = "observe";
+    appState.mode = "evaluation";
     const { container, rerender } = render(<TrainingSentenceBar />);
     expect(container.innerHTML).toBe("");
     appState.mode = "training";

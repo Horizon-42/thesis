@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 const { appState, setPresentationMode } = vi.hoisted(() => ({
-  appState: { presentationMode: false, mode: "observe", viewer: null as unknown },
+  appState: { presentationMode: false, mode: "evaluation", viewer: null as unknown },
   setPresentationMode: vi.fn(),
 }));
 
@@ -28,7 +28,7 @@ function renderShell() {
 describe("WorkbenchShell", () => {
   beforeEach(() => {
     appState.presentationMode = false;
-    appState.mode = "observe";
+    appState.mode = "evaluation";
     appState.viewer = null;
     vi.clearAllMocks();
   });
@@ -71,7 +71,7 @@ describe("WorkbenchShell", () => {
     appState.mode = "training";
     rerender(shell());
     expect(laidOut).toEqual([false, true]);
-    appState.mode = "observe";
+    appState.mode = "evaluation";
     rerender(shell());
     expect(laidOut).toEqual([false, true, false]);
     appState.mode = "training";

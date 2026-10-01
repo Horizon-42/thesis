@@ -10,7 +10,7 @@ import {
 const BACKEND_URL = "http://backend.test";
 
 const base: ObservedTrackInputs = {
-  mode: "observe",
+  mode: "evaluation",
   activeAirportCode: "KRDU",
   selectedRunway: null,
   trajectoryComparison: false,
@@ -20,7 +20,7 @@ const base: ObservedTrackInputs = {
 };
 
 describe("planObservedTracks", () => {
-  it("loads and shows the airport-wide tracks in Observe", () => {
+  it("loads and shows the airport-wide tracks in Evaluation", () => {
     expect(planObservedTracks(base)).toEqual({
       fileUrl: `${BACKEND_URL}/trajectories?airport=KRDU&limit=200&seed=0`,
       visible: true,
@@ -71,7 +71,7 @@ describe("planObservedTracks", () => {
     });
   });
 
-  it.each(["fly", "optimize", "compare"] as const)(
+  it.each(["fly", "optimize"] as const)(
     "releases the tracks (no load, hidden) in %s",
     (mode) => {
       expect(planObservedTracks({ ...base, mode })).toEqual({
@@ -81,10 +81,10 @@ describe("planObservedTracks", () => {
     },
   );
 
-  it.each(["fly", "optimize", "compare"] as const)(
+  it.each(["fly", "optimize"] as const)(
     "does NOT load the observed tracks in %s even with a runway profile open",
     (mode) => {
-      // The profile samples observed tracks only in Observe, so no other task needs them
+      // The profile samples observed tracks only in Evaluation, so no other task needs them
       // loaded. Loading them here previously let the observed layer hijack the shared clock and
       // made the optimized playback vanish — so they must stay released.
       expect(planObservedTracks({ ...base, mode, selectedRunway: "05L" })).toEqual({
@@ -94,7 +94,7 @@ describe("planObservedTracks", () => {
     },
   );
 
-  it("releases the independently sampled baseline while comparison owns exact references", () => {
+  it("releases the independently sampled ground truth while comparison owns exact references", () => {
     const plan = planObservedTracks({ ...base, trajectoryComparison: true });
     expect(plan).toEqual({ fileUrl: "", visible: false });
   });
@@ -105,13 +105,13 @@ describe("planObservedTracks", () => {
     );
   });
 
-  it("puts the baseline verdict in the request so the backend filters before sampling", () => {
+  it("puts the ground-truth verdict in the request so the backend filters before sampling", () => {
     expect(planObservedTracks({ ...base, observedVerdictFilter: "fail" }).fileUrl).toBe(
       `${BACKEND_URL}/trajectories?airport=KRDU&limit=200&seed=0&verdict=fail`,
     );
   });
 
-  it("does not keep a hidden verdict-filtered baseline behind comparison", () => {
+  it("does not keep a hidden verdict-filtered ground truth behind comparison", () => {
     expect(planObservedTracks({
       ...base,
       trajectoryComparison: true,

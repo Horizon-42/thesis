@@ -24,7 +24,7 @@ interface PilotRealtimeStatePanelProps {
   showControlReadout?: boolean;
   simulationMode?: PilotSimulationMode;
   /**
-   * Per-row deviations appended as coloured chips. Compare mode passes the A/C/D
+   * Per-row deviations appended as coloured chips. Fly's dynamics comparison passes the A/C/D
    * errors vs the reference B; Trajectory Play passes the single live error vs the
    * target. The main rows keep showing the subject's state and each chip is its
    * keyed deviation.
@@ -60,8 +60,8 @@ export default function PilotRealtimeStatePanel({
     snapshot.control.loadFactor !== undefined;
   const loadFactor = snapshot.control.loadFactor ?? 0;
 
-  // In Compare mode, build the colored A/C/D deviation strip for a given error
-  // field; returns null outside Compare so the rows render exactly as before.
+  // During a dynamics comparison, build the colored A/C/D deviation strip for a given
+  // error field; returns null otherwise so the rows render exactly as before.
   const showDeltas = comparisonDeltas !== null && comparisonSystems !== null;
   const compareExtra = (
     field: keyof DynamicsComparisonDelta,
@@ -183,7 +183,7 @@ function RealtimeReadout({
   );
 }
 
-/** Compare mode: one colored chip per compared system (A/C/D) showing its error
+/** Dynamics comparison: one colored chip per compared system (A/C/D) showing its error
  * vs the reference B for a single field, appended under the B value. */
 function ComparisonDeltaStrip({
   systems,

@@ -24,7 +24,7 @@ const SPEED_OPTIONS: Array<{ label: string; value: number }> = [
   { label: "120×", value: 120 },
 ];
 
-const TIME_MODES = new Set(["observe", "fly", "optimize", "compare"]);
+const TIME_MODES = new Set(["evaluation", "fly", "optimize"]);
 
 export default function WorkbenchBottomBar() {
   const { viewer, mode, setPlaybackSpeed, autoReplay, setAutoReplay, pilotTransport } = useApp();
@@ -51,22 +51,24 @@ export default function WorkbenchBottomBar() {
 
   if (!TIME_MODES.has(mode)) return null;
 
-  // Fly (pilot) mode runs a MANUAL sim loop, not viewer.clock — so the transport
-  // drives the simulation here (Play/Pause/Reset only; the speed presets + loop
-  // toggle are clock concepts that don't apply). PilotPanel publishes the sim
-  // transport as `pilotTransport`; it is briefly null while the panel mounts.
-  if (mode === "fly") {
+  // Fly's live flight runs a MANUAL sim loop, not viewer.clock — so while it is the
+  // run on screen the transport drives the simulation here (Play/Pause/Reset only; the
+  // speed presets + loop toggle are clock concepts that don't apply). PilotPanel
+  // publishes the sim transport as `pilotTransport` exactly then (before Fly's first
+  // paint); Fly's dynamics comparison is a clock playback, so without it the bar drives
+  // the clock below.
+  if (mode === "fly" && pilotTransport) {
     return (
       <div className="workbench-bottom-bar" aria-label="Flight simulation transport">
         <button
-          onClick={() => pilotTransport?.togglePlay()}
-          disabled={!pilotTransport || pilotTransport.playPauseDisabled}
+          onClick={() => pilotTransport.togglePlay()}
+          disabled={pilotTransport.playPauseDisabled}
         >
-          {pilotTransport?.running ? "⏸ Pause" : "▶ Play"}
+          {pilotTransport.running ? "⏸ Pause" : "▶ Play"}
         </button>
         <button
-          onClick={() => pilotTransport?.reset()}
-          disabled={!pilotTransport || pilotTransport.resetDisabled}
+          onClick={() => pilotTransport.reset()}
+          disabled={pilotTransport.resetDisabled}
         >
           ⏮ Reset
         </button>

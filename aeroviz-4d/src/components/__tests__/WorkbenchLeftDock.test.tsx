@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 const { appState, setMode, trainingMounts } = vi.hoisted(() => ({
-  appState: { mode: "observe" as string, activeAirportCode: "KRDU" },
+  appState: { mode: "evaluation" as string, activeAirportCode: "KRDU" },
   setMode: vi.fn(),
   trainingMounts: { count: 0 },
 }));
@@ -40,21 +40,21 @@ function renderDock() {
 
 describe("WorkbenchLeftDock", () => {
   beforeEach(() => {
-    appState.mode = "observe";
+    appState.mode = "evaluation";
     appState.activeAirportCode = "KRDU";
     trainingMounts.count = 0;
     vi.clearAllMocks();
   });
 
-  it("shows the trajectory controls + flight list in observe mode", () => {
+  it("shows the trajectory controls + flight list in evaluation mode", () => {
     renderDock();
     expect(screen.getByText("CONTROL_PANEL")).toBeTruthy();
     expect(screen.getByText("FLIGHTS:3")).toBeTruthy();
     expect(screen.queryByText(/PILOT:/)).toBeNull();
   });
 
-  // Training must NOT pull in Observe's panels: the observed CZML is loaded only in
-  // Observe (it drives the shared Cesium clock), and Training reads its own sample
+  // Training must NOT pull in Evaluation's panels: the observed CZML is loaded only in
+  // Evaluation (it drives the shared Cesium clock), and Training reads its own sample
   // file instead. A dock that rendered ControlPanel here would reintroduce that load.
   it("shows only the TrainingPanel in training mode", () => {
     appState.mode = "training";
@@ -75,11 +75,11 @@ describe("WorkbenchLeftDock", () => {
     };
     show("training");
     expect(screen.getByText("TRAINING_PANEL").hidden).toBe(false);
-    for (const mode of ["observe", "fly", "compare"]) {
+    for (const mode of ["evaluation", "fly", "optimize"]) {
       show(mode);
       expect(screen.getByText("TRAINING_PANEL").hidden).toBe(true);
     }
-    expect(screen.getByText("PILOT:comparison")).toBeTruthy();
+    expect(screen.getByText("PILOT:optimize")).toBeTruthy();
     show("training");
     expect(screen.getByText("TRAINING_PANEL").hidden).toBe(false);
     expect(screen.queryByText("CONTROL_PANEL")).toBeNull();
@@ -95,13 +95,13 @@ describe("WorkbenchLeftDock", () => {
       rerender(<WorkbenchLeftDock flightIds={["a", "b", "c"]} flightSummaries={{}} />);
     };
     show("training");
-    show("observe");
+    show("evaluation");
     expect(screen.getByText("TRAINING_PANEL").hidden).toBe(true);
     // another airport opened in another task: the session is dropped — nothing of Training loads in the background
-    show("observe", "KSMF");
+    show("evaluation", "KSMF");
     expect(screen.queryByText("TRAINING_PANEL")).toBeNull();
     // ... and not picked up again on returning to the first airport outside Training
-    show("observe", "KRDU");
+    show("evaluation", "KRDU");
     expect(screen.queryByText("TRAINING_PANEL")).toBeNull();
     expect(trainingMounts.count).toBe(1);
     // the next visit opens the airport's session afresh
@@ -114,17 +114,13 @@ describe("WorkbenchLeftDock", () => {
     expect(trainingMounts.count).toBe(3);
   });
 
-  it("drives the PilotPanel sub-mode for fly / optimize / compare", () => {
+  it("hands the task itself to the PilotPanel for fly / optimize", () => {
     appState.mode = "fly";
     const { rerender } = renderDock();
-    expect(screen.getByText("PILOT:pilot")).toBeTruthy();
+    expect(screen.getByText("PILOT:fly")).toBeTruthy();
 
     appState.mode = "optimize";
     rerender(<WorkbenchLeftDock flightIds={[]} flightSummaries={{}} />);
-    expect(screen.getByText("PILOT:trajectory")).toBeTruthy();
-
-    appState.mode = "compare";
-    rerender(<WorkbenchLeftDock flightIds={[]} flightSummaries={{}} />);
-    expect(screen.getByText("PILOT:comparison")).toBeTruthy();
+    expect(screen.getByText("PILOT:optimize")).toBeTruthy();
   });
 });

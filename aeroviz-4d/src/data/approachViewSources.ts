@@ -5,8 +5,8 @@
  * mirrors the ACTIVE TASK — it samples a source only when that source is the
  * current tab's content on the globe.
  *
- * Observed ADS-B tracks exist only in Observe and are visible only for Baseline
- * (see planObservedTracks). A profile opened in Fly / Optimize / Compare must
+ * Observed ADS-B tracks exist only in Evaluation and are visible only for Ground Truth
+ * (see planObservedTracks). A profile opened in Fly / Optimize must
  * therefore never plot that source; it would disagree with the globe and could
  * also let the observed clock interfere with optimized playback.
  * The optimized playback is the Optimize tab's content: it exists only while a
@@ -17,8 +17,8 @@
  * globe content", reused by both the approach view hook (what it samples) and the
  * panel (its CZML-linked indicator) — never re-derived per call site.
  *
- * KNOWN GAP: the Observe 3-colour comparison overlay is a separate datasource
- * not yet fed to the approach view; in Observe-with-comparison the approach view plots
+ * KNOWN GAP: the Evaluation 3-colour comparison overlay is a separate datasource
+ * not yet fed to the approach view; in Evaluation-with-comparison the approach view plots
  * neither source (the plain observed tracks are hidden, the comparison is not
  * wired in). Wiring the comparison overlay into the approach view is a follow-up.
  */
@@ -44,7 +44,7 @@ export function planApproachViewSources(
   inputs: ApproachViewSourceInputs,
 ): ApproachViewSourceSelection {
   return {
-    // Observed tracks are painted only in Observe — mirror that exact decision so
+    // Observed tracks are painted only in Evaluation — mirror that exact decision so
     // the approach view never plots them in a tab that hides them on the globe.
     observed: observedTracksVisible(inputs),
     // The optimized playback belongs to the Optimize tab. It only ever exists there

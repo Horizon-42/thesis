@@ -40,7 +40,7 @@
  *
  * The cursor is in flight time and is moved by clicking a band or a step number: what it reports is the artefact's own
  * step, never a rounded pixel. It does NOT drive `viewer.clock`: Training loads no CZML, and the clock belongs to
- * Observe's playback.
+ * Evaluation's playback.
  *
  * ONE COLUMN IS HIGHLIGHTED, NEVER A STEP. Clicking a band selects its word class (`trainingColumn`) and puts the cursor
  * at its issue; every view then highlights that column's word in force at the cursor, and only it — of the sentence read.

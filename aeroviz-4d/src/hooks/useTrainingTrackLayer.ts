@@ -38,7 +38,7 @@
  * app shell, or every hover re-renders the whole workbench.
  *
  * STATIC ENTITIES, NOT TIME-SAMPLED ONES: a time-dynamic entity would drive the shared `viewer.clock`, which belongs to
- * Observe's playback.
+ * Evaluation's playback.
  */
 
 import { useEffect, useLayoutEffect, useRef } from "react";

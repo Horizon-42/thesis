@@ -287,7 +287,7 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
   } = useApp();
   const enabled =
     !!viewer &&
-    mode === "observe" &&
+    mode === "evaluation" &&
     trajectoryComparison &&
     !!activeAirportCode &&
     !!trajectoryComparisonCategory;

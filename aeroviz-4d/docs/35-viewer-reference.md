@@ -26,7 +26,7 @@ gets a new ID here and ONE new line in the index.**
 ### AV2 · `categoryResultSource` is the one result-source classifier
 
 - `utils/trajectoryResultSources.ts` → `categoryResultSource` is the ONE classifier
-  splitting comparison categories into `optimization | prediction | experiment` (Observe's
+  splitting comparison categories into `optimization | prediction | experiment` (Evaluation's
   "Result source" selector and `EvaluationSummary`'s presentation both key off it).
   Optimizer publishes never stamp `resultSource` — absent field + non-`ts_` key ⇒
   optimization; the `ts_` prefix is the legacy marker for pre-`resultSource` data-driven
@@ -506,7 +506,7 @@ that divergence is a known open item (see the README's "Future Improvements").
 ### AV36 · Training 藏起 Cesium 的时钟；句子条贴底；下降角一行叫 Descent；实时执行器的小游标（2026-09-28）
 
 - 用户（2026-09-28）：Training 里 Cesium 的控制台（时钟盘、时间轴）不起作用，藏起来让句子条沉底。Training 不载 CZML，句子条
-  有自己的时间，`viewer.clock` 属于 Observe 的回放。`WorkbenchShell` 按 `mode` 给 `body` 加 `workbench-training-active`，
+  有自己的时间，`viewer.clock` 属于 Evaluation 的回放。`WorkbenchShell` 按 `mode` 给 `body` 加 `workbench-training-active`，
   `index.css` 把时钟盘、时间轴和全屏按钮设成 `visibility: hidden`，再 `viewer.forceResize()`：Cesium 排版时只看 `visibility`
   （`display: none` 它看不出，演示模式用的就是那种，署名不动），所以署名随之排到最底下；回到别的模式时同一个 effect 再强制排一次，
   时间轴重新排好。浏览器核对：Observe 的时钟盘、时间轴、全屏按钮照旧，Training 里都不见。
@@ -755,3 +755,38 @@ stay graded on the OBSERVED flight's runway; the summary's terminal-compliance s
 apart ("not counted as a pass below"), and the builder refuses a landed verdict that is not a solved pass / fail /
 indeterminate on another runway.
 
+
+### AV43 · 四个任务：Evaluation、Training、Fly、Optimize；Compare 并进 Fly（2026-10-01）
+
+- 用户（2026-10-01）：Observe 这个名字不对，改叫 **Evaluation**；它里面的 Baseline 改叫 **Ground Truth**；Compare 并进 Fly，
+  要系统地改。顶栏的任务从五个变成四个：`WorkbenchMode` = `evaluation | training | fly | optimize`。
+- **Ground Truth** 就是观测到的 ADS-B 航迹本身。结果来源下拉框里它的值是 `groundTruth`（`TrajectoryResultSource`），筛选框叫
+  "Ground Truth verdict"，评估块的标题是 "Ground Truth Evaluation"（详情窗口 "Ground Truth Evaluation Report"）。
+  已发布数据里的字段名不改：比较索引 `rawKinematics.observedBaseline` 是 Python 构建器写的契约，改名要重新发布。
+- **`PilotPanel` 直接拿工作台的任务当模式**（`mode: "fly" | "optimize"`，必填）；面板自己的标签行、`onRequestMode` 和左栏的
+  两张映射表都删了。
+- **Fly 是一架飞机、一套操纵量、两种飞法**：同一个起点（Edit 设定，或 RNAV 跑道的公布 RNAV 点）和同一套操纵量（坡度、载荷
+  因数或迎角、推力，`PanelControls` = `Required<PilotControls>`，两种参数化的字段都在），
+  1. **Live flight**：Start / Pause / Reset / End，键盘实时改操纵量（原来的 Fly）；
+  2. **Compare dynamics**：把这套操纵量**固定住**飞一段时长，四种动力学写法各飞一遍比漂移（原来的 Compare）。四种写法共用
+     载荷因数参数化，所以 Simulation 选 Alpha 时 Compute 不可用，面板写明原因。Compare 原来自己的推力/坡度/载荷因数输入框删了；
+     坡度范围统一为 ±45°（原 Compare 是 ±60°）。
+- **两种飞法轮流占屏幕**：Compute 结束实时飞行（`stopPilot`）；Start / Reset 清掉比较结果。改任何操纵量或 Simulation 都会清掉
+  已算好的比较（`changeControls` 是用户改操纵量的唯一入口）——那次比较飞的是改之前的操纵量；被清掉的只是这次的结果和它的图，
+  历史平均图不受影响。后端请求进行中（Compute、Start、Reset，`isBusy`）操纵量和 Simulation 都锁住，回来的结果一定对应屏幕上的
+  操纵量。
+- **两份状态，不混用**：`liveSnapshot` 是后端实时模拟的状态，`playbackSnapshot` 是 CZML 回放（Optimize 的、Fly 的比较）按时钟
+  采样的状态；屏幕上读数用的 `snapshot` = Fly 且没有载入比较时取前者，否则取后者。所以去 Optimize 播一次再回来，暂停着的实时
+  飞行仍是"Resume / Paused"、飞机还在；Start 只在实时会话还在时（`isEnabled`）才接着飞。
+- **回放卸载时停掉它驱动的时钟**（`useDynamicsComparisonPlayback` / `useOptimizedTrajectoryPlayback` 的清理里
+  `shouldAnimate = false`）：否则正在播的比较被 Start、改操纵量或换任务卸掉后，时钟还在空转（浏览器核对时发现）。
+- **RNAV 跑道是面板唯一的一条跑道**：Fly 用它列出可选的起点 RNAV 点，Optimize 用它作目标跑道——一架飞机一套设定，所以在 Fly
+  换跑道也会换掉 Optimize 的目标并清掉已算的优化结果。RNAV 点按跑道读取（`rnavFixes`），与当前任务无关：在 Fly 选的起点 RNAV
+  点切到 Optimize 后仍在；Optimize 下这条跑道没有 RNAV 点时的提示在渲染时推出来，不走 `setError`。
+- **底栏**：实时飞行在屏幕上时，`PilotPanel` 发布 `pilotTransport`，底栏驱动模拟循环；比较已载入时撤回（`null`），底栏驱动
+  Cesium 时钟（比较是时钟回放）。后端的比较 worker 在 Fly 打开期间常驻（`openWorkerSession("comparison")`），Optimize 期间是
+  优化器的。
+- 底栏的实时传输在 `useLayoutEffect` 里发布：进入 Fly 的第一帧就是模拟按钮，不会先闪一帧时钟按钮。
+- 测试：`PilotPanel.test.tsx` 新增六条（比较飞的是面板自己的操纵量、Alpha 下不可用、改操纵量清掉结果；两种飞法的交接与底栏；
+  暂停的实时飞行跨 Optimize 保持；Optimize 回放后 Start 重新开始；Fly 选的 RNAV 点切到 Optimize 仍在；Compute 期间锁住操纵量、
+  改 Simulation 清掉比较），`WorkbenchBottomBar.test.tsx` 的 Fly 无传输用例改成"驱动时钟"。

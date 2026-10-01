@@ -69,7 +69,7 @@ added three entries (the rows after the performance index's).
 | ts: the auto-batch probe measures a smaller graph than a latent run | resolved | the probe hands a latent model the future, as training does (`b10b1d68`); entry removed | — |
 | scene data plane: review leftovers (09-07) | resolved | (7)–(9), (12), (14) and the three test gaps fixed, (11) documented, a landed-before-t₀ neighbour no longer a lead (`96d299d1`, `50412e71`); (10), (13) obsolete; entry removed | — |
 | ts: T2 leftovers (09-07) | resolved | `chart_scale` required (`6c363ef9`); the transport-chart rollouts kept as the scaled chart's test reference; the pointers demoted (`06801fe7`); entry removed | — |
-| 15. KRDU 14's arrivals render as "indeterminate" | open | needs the backend and a UX decision | no: the Observe view |
+| 15. KRDU 14's arrivals render as "indeterminate" | open | needs the backend and a UX decision | no: the Evaluation view |
 | 16. observed record without `landing_aero` cannot say why | resolved | removed with the v9 gate; entry removed | — |
 | 17. `require_matching_runway_data` has no production caller | open | still dead code; `harvest/airports.py` is frozen by the executor's code identity | no: dead code (but its file is frozen) |
 | 18. `runway`-mode solves pile up at the window's upper edge | resolved | targets published V_ref (`88893126`); entry removed | — |
@@ -208,7 +208,7 @@ drop test-hash rows (the checkpoint's `split_name_for_dataset_id`) from the lead
 changes the lead of every flight whose true leader was a test flight, i.e. the stored truth-intent
 arms' inputs, so it is the owner's call.
 
-## 15. KRDU 14's 13 arrivals still render as "indeterminate" in the Observe view
+## 15. KRDU 14's 13 arrivals still render as "indeterminate" in the Evaluation view
 
 **Judgement.** `evaluation/docs/UNJUDGED_RUNWAY_VERDICT_GAP.md`: the evaluation half is fixed
 (KRDU 32 / KSMF 35R now carry an LNAV/VNAV vertical path), so the "never judged" bucket is

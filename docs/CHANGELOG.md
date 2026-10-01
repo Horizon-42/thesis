@@ -1,5 +1,23 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-01 — Frontend: Observe → Evaluation, Baseline → Ground Truth, Compare merged into Fly (branch `dev-eval-fly-merge`)
+
+- **What** (the user, 2026-10-01): the Observe task is named **Evaluation**; its Baseline result source is **Ground Truth**
+  (id `groundTruth`, "Ground Truth verdict", "Ground Truth Evaluation"); the Compare task is part of **Fly**. The top bar has
+  four tasks (`evaluation | training | fly | optimize`).
+- **Fly = one aircraft, one control set, two runs** (the user chose this over two side-by-side sections): the live flight, and
+  the dynamics comparison flying the SAME controls held fixed (load factor only — Compute is off under Alpha, said in the
+  panel; Compare's own thrust/bank/load-factor fields are gone; bank ±45° for both). A control edit drops a computed
+  comparison; Compute ends the live flight, Start/Reset drop the comparison; Start resumes only a live session (`isEnabled`),
+  never a playback's state (`liveSnapshot` apart from `playbackSnapshot`). The controls are frozen while a backend request
+  runs. The bottom bar drives the live sim, or the clock while a comparison is loaded; a playback that unloads stops the
+  clock it drove. The RNAV fix list is read per runway, not per task (a fix picked in Fly survives the switch to Optimize).
+- **Structure**: `PilotPanel` takes the workbench task as its mode (`fly | optimize`, required); its own tab row,
+  `onRequestMode` and the dock's two mode-mapping tables are deleted, with the tab-row CSS.
+- **Not renamed**: the published comparison-index key `rawKinematics.observedBaseline` (a Python builder contract — renaming
+  means republishing); the evaluation package's own wording ("observed baselines") in its Python/HTML report.
+- Docs: AV43, `aeroviz-4d/CLAUDE.md`, backend comments, open items / follow-ups naming the view. Vitest 107 files / 905 tests; Opus review + Sonnet browser check.
+
 ### 2026-09-30 — Training: aircraft models in the executor's attitude (branch `dev-training-attitude`, not merged)
 
 - **What** (the user, 2026-09-30: aircraft as a model, bound to the real bank, heading and angle of attack, the whole Training

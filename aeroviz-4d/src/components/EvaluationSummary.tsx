@@ -1,7 +1,7 @@
 /**
  * EvaluationSummary.tsx
  * ---------------------
- * Subject-aware evaluation summary for the active Observe comparison category.
+ * Subject-aware evaluation summary for the active Evaluation comparison category.
  *
  * The three producers answer different questions, so they deliberately do not share
  * one generic set of "solve/success" labels:
@@ -169,7 +169,7 @@ function observedPresentation(report: ObservedEvaluationSummary | null): Present
   const verticalMeanAbs = report?.vertical_m?.mean_abs;
 
   return {
-    title: "Observed Baseline Evaluation",
+    title: "Ground Truth Evaluation",
     context: "Observed ADS-B trajectories",
     note:
       "Runway assignment produces one policy-free threshold-event estimate by direct " +
