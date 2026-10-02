@@ -25,7 +25,8 @@ the original pass — words, outcomes and every discrete field exactly, every fl
 atan2 / hypot round differently by an aircraft's place in a batch: `autopilot.single`) — or the run stops (design item 9).
 
 **Rescued** (design item 10): (i) the pair loses no separation from the branch's step on; (ii) the speaking aircraft
-lands in the airport's landing direction, not ended (M4's reward 1); (iii) no new loss: every aircraft ended in the branch
+lands in the airport's landing direction, not ended (the row's ``landed_here``: a landing after a go-around
+counts too, multi-aircraft design §6.6 step 8); (iii) no new loss: every aircraft ended in the branch
 was ended in the original pass, with the same other aircraft. Each is kept beside.
 
 **The readout**, per role and offset, pooled and per airport, stratum of the speaking aircraft (`instructions.readout.
@@ -80,7 +81,7 @@ from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.data import VARIANTS, airport_landings
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
-SCHEMA = "ts-traffic-window-rewind-v1"
+SCHEMA = "ts-traffic-window-rewind-v2"
 #: Design §6.6 step 7.7 item 6: how long before the loss an aircraft speaks again, beside its first predicted step.
 OFFSETS_S = (10.0, 30.0, 60.0, 120.0)
 START = "start"
@@ -268,7 +269,7 @@ def branch_result(branch: Branch, event: Event, original: Original, keys: Sequen
     i = original.keys.index(branch.speaker)
     from_s = original.first_s[i] + branch.step * step_s
     cleared = not _pair_again(run, event.pair, from_s)
-    landed = rows[i]["reward"] == 1.0
+    landed = rows[i]["landed_here"]
     new = sorted(key for key, end in run.ended.items()
                  if key not in original.ended or original.ended[key]["with"] != end["with"])
     loss_step = own_step_at(original, i, event.t_s, step_s)

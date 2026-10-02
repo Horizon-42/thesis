@@ -15,7 +15,8 @@ of 2026-09-24):
   envelope; the time left alone, without the stopping limit, passes a turn's last word by up to 10° (§4.1, the
   reviews of 2026-09-24). The error ``e`` is measured from the word in force: a new word turns ``wrap180(θ_new −
   θ_old)`` further than the old one, so a turn said word by word keeps its way even while the aircraft lags it; a
-  go-around starts its clock again;
+  go-around starts its clock again, and a word said at or after the go-around is measured from the track then (the
+  shortest way round);
 - cleared, not yet captured (§4.3): when θ itself cannot reach the pointed runway's line but a track
   within the heading tolerance can (the labeller's own test, `instructions.envelope.heading_converges`),
   θ is flown bent by the tolerance toward the line — still inside the word's envelope; when not even that
@@ -47,8 +48,10 @@ of 2026-09-24):
   corridor's course tolerance inside it: the corridor holds the track within that tolerance of the
   course, and the heading law's own lag keeps the other half. The executor's own heading law flies it
   (`rate_for_error`);
-- a go-around (§4.6) cancels the clearance and the capture and flies the pointed runway's course. A change
-  of the runway pointer once cleared is refused (§4.6), as the labeller refuses it.
+- a go-around (§4.6) cancels the clearance and the capture and flies the pointed runway's course until a heading word
+  is said at or after the go-around's step; from then on it flies the words (multi-aircraft design §6.6 step 8 item 7,
+  the user's 2026-10-02 decision: no word "not cleared" is needed to vector after a go-around). A change of the runway
+  pointer once cleared is refused (§4.6), as the labeller refuses it.
 
 Positions are the airport frame's (`autopilot.frame`), the runway geometry the artefact's candidates.
 """
@@ -227,12 +230,13 @@ class Lateral:
         return (speed / rate * (1.0 - torch.cos(off.abs())) + speed * torch.sin(off.abs()) * roll_s / 2.0
                 + speed * rate * params.heading_time_constant_s ** 2 / 2.0)
 
-    def word_error(self, state: Kinematics, heading_deg: torch.Tensor, issued: torch.Tensor,
+    def word_error(self, state: Kinematics, heading_deg: torch.Tensor, issued: torch.Tensor, flying_course: torch.Tensor,
                    go_around: torch.Tensor, time_s: float | torch.Tensor,
                    fresh: torch.Tensor | None = None) -> torch.Tensor:
         """The heading word's error, degrees: its target unwrapped from the words before it (§4.1); a new word's
-        hearing time is ``time_s``. A go-around flies the course, not the word, so the word's target is anchored
-        again at the track meanwhile: a word after it is measured from where the aircraft is. ``fresh`` (a
+        hearing time is ``time_s``. A go-around flying the course (``flying_course``), not the word, anchors the word's
+        target again at the track meanwhile, and a word said once ``go_around`` is in force is anchored at the track
+        when it is heard: a word after the go-around is measured from where the aircraft is. ``fresh`` (a
         multi-aircraft batch): the flights at their own first cycle, anchored as the batch's first cycle anchors."""
         if self.word_deg is None:
             self.track_unwrapped = state.track_deg.clone()
@@ -241,10 +245,11 @@ class Lateral:
             heard_before = self.heard_s
             self.track_unwrapped = self.track_unwrapped + wrap180(state.track_deg - self.last_track)
             new = issued != self.word_step
-            self.heard_s = torch.where(new | go_around, time_s, self.heard_s)
+            self.heard_s = torch.where(new | flying_course, time_s, self.heard_s)
             self.target_unwrapped = torch.where(new, self.target_unwrapped + wrap180(heading_deg - self.word_deg),
                                                 self.target_unwrapped)
-            self.target_unwrapped = torch.where(go_around, self.track_unwrapped + wrap180(heading_deg - state.track_deg),
+            self.target_unwrapped = torch.where(flying_course | (go_around & new),
+                                                self.track_unwrapped + wrap180(heading_deg - state.track_deg),
                                                 self.target_unwrapped)
             if fresh is not None and bool(fresh.any()):
                 self.track_unwrapped = torch.where(fresh, state.track_deg, self.track_unwrapped)
@@ -255,13 +260,13 @@ class Lateral:
         return self.target_unwrapped - self.track_unwrapped
 
     def rate(self, state: Kinematics, heading_deg: torch.Tensor, issued: torch.Tensor, approach: torch.Tensor,
-             runway: torch.Tensor, runways: Runways, bank_rad: torch.Tensor, bank_rate_rad_s: float | torch.Tensor,
-             time_s: float | torch.Tensor, *, fresh: torch.Tensor | None = None
+             approach_issued: torch.Tensor, runway: torch.Tensor, runways: Runways, bank_rad: torch.Tensor,
+             bank_rate_rad_s: float | torch.Tensor, time_s: float | torch.Tensor, *, fresh: torch.Tensor | None = None
              ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """The track rate for this cycle, and what the law did (``captured``, ``tracking`` the line, ``bent``,
-        ``go_around``); ``issued`` is the step the heading word in force was written at, ``bank_rad`` the bank
-        in force (the dynamics' sign), which the capture turn rolls from at ``bank_rate_rad_s``; ``time_s`` the
-        time flown."""
+        ``go_around``); ``issued`` is the step the heading word in force was written at and ``approach_issued`` the
+        approach word's, ``bank_rad`` the bank in force (the dynamics' sign), which the capture turn rolls from at
+        ``bank_rate_rad_s``; ``time_s`` the time flown."""
         params, spec = self.params, self.spec
         if self.runway is not None and bool(((runway != self.runway) & (self.cleared | self.captured)).any()):
             raise ValueError("the runway pointer changed after the clearance (executor design §4.6)")
@@ -269,6 +274,8 @@ class Lateral:
         e0, n0, course, _elevation, _crossing, _glidepath = runways.pointed(runway)
         before, right, off_course = relative(state, e0, n0, course)
         go_around = approach == APPROACH_GO_AROUND
+        # a go-around flies the course until a heading word is said at or after its step (module docstring)
+        flying_course = go_around & (issued < approach_issued)
         cleared = approach == APPROACH_CLEARED
         self.cleared = (self.cleared | cleared) & ~go_around
         toward_line = right * torch.sin(torch.deg2rad(off_course)) < 0.0
@@ -287,7 +294,7 @@ class Lateral:
         bend = waiting & misses & bent_reaches
         intercept = waiting & ~bent_reaches
         side = torch.where(right >= 0.0, -1.0, 1.0).to(right.dtype)
-        error = self.word_error(state, heading_deg, issued, go_around, time_s, fresh) + torch.where(
+        error = self.word_error(state, heading_deg, issued, flying_course, go_around, time_s, fresh) + torch.where(
             bend, side * spec.heading_tolerance_deg, 0.0)
         error = torch.where(intercept, wrap180(course + side * spec.intercept_angle_deg - state.track_deg), error)
         # tracking: the line's own target, critically damped, steering inside the corridor's course tolerance
@@ -296,7 +303,7 @@ class Lateral:
                             torch.full_like(right, spec.intercept_angle_deg))
         line = course - torch.maximum(torch.minimum(torch.rad2deg(gain * right), steer), -steer)
         error = torch.where(self.tracking, wrap180(line - state.track_deg), error)
-        error = torch.where(go_around, wrap180(course - state.track_deg), error)
+        error = torch.where(flying_course, wrap180(course - state.track_deg), error)
         # the capture turn: the arc to the line from here, toward the course, as fast as the bank allows
         off = torch.deg2rad(off_course).abs()
         arc = state.ground_speed_mps * (1.0 - torch.cos(off)) / right.abs().clamp(min=1e-9)
@@ -305,9 +312,9 @@ class Lateral:
         capture = -torch.sign(off_course) * torch.minimum(torch.rad2deg(capture_rad_s),
                                                           off_course.abs() / params.heading_time_constant_s)
         line_rate = rate_for_error(error, params, spec)
-        # the words set the pace of a turn they describe; the executor's own intercept and a go-around are its own
+        # the words set the pace of a turn they describe; the executor's own intercept and a go-around's course are its own
         to_go = self.heard_s + spec.heading_lead_s - time_s
-        free = torch.where(intercept | go_around, rate_for_error(error, params, spec),
+        free = torch.where(intercept | flying_course, rate_for_error(error, params, spec),
                            word_rate(error, to_go, state.ground_speed_mps, params, spec))
         rate = torch.where(self.captured & ~self.tracking, capture, torch.where(self.tracking, line_rate, free))
         intercept_target = course + side * spec.intercept_angle_deg

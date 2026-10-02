@@ -80,11 +80,11 @@ def test_a_window_round_is_spoken_by_its_plan_and_its_trained_samples_are_what_t
     for k, row in enumerate(rows):                              # a contrast for f0 and f2, none for f1
         row["reward"] = float(row["dataset_id"] != "KXXX:f1" and row["sample"] == 0)
         row["starts_in_a_loss"] = False
-    advantages, trained = window_advantages(rows, 2)
+    advantages, gains, trained = window_advantages(rows, 2)
     geometry = airport.flights.geometry
     table = Split([], ("KXXX",), prior_data.candidate_table({"KXXX": geometry}, ("KXXX",), 2), (("09",),), ((90.0,),),
                   column_classes(Words(spec), 2), "no-context")
-    split, kinds = window_split(round_, spoken, advantages, trained, table, None, spec.step_s)
+    split, kinds = window_split(round_, spoken, advantages, gains, trained, table, None, spec.step_s)
     assert len(split.windows) == 4 and kinds == ["real"] * 4           # both windows, both samples
     assert split.sentences == len(trained) == 4
     for window, flights, places, gains in zip(split.windows, split.flights, split.trained, split.advantages):
@@ -196,3 +196,41 @@ def test_the_preflight_scores_the_costliest_window_sample_the_pass_would_train_o
     # the two windows: the costlier sample (f0 and f1 together) scored, every aircraft trained
     assert sorted(checked["windows"]) == [0, 1] and checked["scored_aircraft"] == 2 and checked["gpu_peak_gb"] is None
     assert lines
+
+
+def test_probes_need_two_samples_and_two_unprobed_ones(tmp_path):
+    """Multi-aircraft design §6.6 step 8 item 10: the probes and the unprobed samples are each compared among themselves
+    (`window_advantages`), so each needs two of a window's samples — refused before anything is opened."""
+    from ts_transformer.experiments.traffic_window_reward import main
+
+    paths = ["--prior", "p", "--base", "b", "--instructions", "i", "--executor", "e", "--out", str(tmp_path / "run")]
+    for samples, probes in ((8, 1), (8, 7), (3, 2), (2, 1)):
+        with pytest.raises(SystemExit):
+            main(paths + ["--samples", str(samples), "--probe-samples", str(probes)])
+    assert not (tmp_path / "run").exists()
+
+
+def test_only_a_training_round_is_probed(monkeypatch):
+    """Multi-aircraft design §6.6 step 8 item 10: a training round's windows are probed in their last samples; the
+    select readouts never are."""
+    from types import SimpleNamespace
+
+    import torch
+
+    from ts_transformer.experiments import traffic_window_reward as runner
+    from ts_transformer.experiments.traffic_window_generation import WindowSentences
+
+    asked = []
+
+    def spoken(*args, probe_samples, probe_margin, **kwargs):
+        asked.append((probe_samples, probe_margin))
+        return WindowSentences([], [], [])
+
+    monkeypatch.setattr(runner, "window_sentences", spoken)
+    speaking = runner.WindowSpeaking(None, None, None, None, 1, None, 2, 1.25)
+    model = torch.nn.Linear(1, 1)
+    round_ = SimpleNamespace(drawn=None, kinds=[])
+    for source in ("train", "scene"):
+        speaking.speak(model, round_, [0], 0, 8, seed=0, source=source)
+    assert asked == [(2, 1.25), (0, 1.25)]
+

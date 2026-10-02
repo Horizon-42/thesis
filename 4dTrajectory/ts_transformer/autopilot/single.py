@@ -49,7 +49,7 @@ from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
 from ts_transformer.autopilot.runway_data import VerticalPath
 from ts_transformer.autopilot.sentence import ROW_ROUNDING, TRACK_MAX_ROWS_PER_CYCLE, TRACK_WINDOW_S, _filled
 from ts_transformer.autopilot.speed import speed_change_mps2
-from ts_transformer.autopilot.vertical import GLIDEPATH_BELOW_M, TUBE_MARGIN_SHARE
+from ts_transformer.autopilot.vertical import GLIDEPATH_BELOW_M, GO_AROUND_CLIMB_RAD, TUBE_MARGIN_SHARE
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, ANGLE_LEVEL, APPROACH, APPROACH_CLEARED, APPROACH_GO_AROUND, HEADING, RUNWAY, SPEED, Words,
@@ -396,18 +396,19 @@ class Lateral:
         return (speed / rate * (1.0 - math.cos(abs(off))) + speed * math.sin(abs(off)) * roll_s / 2.0
                 + speed * rate * self.params.heading_time_constant_s ** 2 / 2.0)
 
-    def _word_error(self, state: Kin, heading: float, issued: int, go_around: bool, time_s: float) -> float:
+    def _word_error(self, state: Kin, heading: float, issued: int, flying_course: bool, go_around: bool,
+                    time_s: float) -> float:
         if self.word_deg is None:
             self.track_unwrapped = state.track_deg
             self.target_unwrapped = state.track_deg + _wrap180(heading - state.track_deg)
         else:
             self.track_unwrapped = self.track_unwrapped + _wrap180(state.track_deg - self.last_track)
             new = issued != self.word_step
-            if new or go_around:
+            if new or flying_course:
                 self.heard_s = time_s
             if new:
                 self.target_unwrapped = self.target_unwrapped + _wrap180(heading - self.word_deg)
-            if go_around:
+            if flying_course or (go_around and new):
                 self.target_unwrapped = self.track_unwrapped + _wrap180(heading - state.track_deg)
         self.word_deg, self.word_step, self.last_track = heading, issued, state.track_deg
         return self.target_unwrapped - self.track_unwrapped
@@ -431,6 +432,7 @@ class Lateral:
         course = runway.course_deg
         before, right, off_course = relative(state, runway)
         go_around = force.approach == APPROACH_GO_AROUND
+        flying_course = go_around and force.issued_step[HEADING] < force.issued_step[APPROACH]
         cleared = force.approach == APPROACH_CLEARED
         self.cleared = (self.cleared or cleared) and not go_around
         toward_line = right * math.sin(math.radians(off_course)) < 0.0
@@ -448,7 +450,7 @@ class Lateral:
         bend = waiting and misses and bent_reaches
         intercept = waiting and not bent_reaches
         side = -1.0 if right >= 0.0 else 1.0
-        error = self._word_error(state, heading, force.issued_step[HEADING], go_around, time_s) + (
+        error = self._word_error(state, heading, force.issued_step[HEADING], flying_course, go_around, time_s) + (
             side * spec.heading_tolerance_deg if bend else 0.0)
         if intercept:
             error = _wrap180(course + side * spec.intercept_angle_deg - state.track_deg)
@@ -457,7 +459,7 @@ class Lateral:
         line = course - _max(_min(math.degrees(gain * right), steer), -steer)
         if self.tracking:
             error = _wrap180(line - state.track_deg)
-        if go_around:
+        if flying_course:
             error = _wrap180(course - state.track_deg)
         off = abs(math.radians(off_course))
         arc = state.ground_speed_mps * (1.0 - math.cos(off)) / _clamp(abs(right), 1e-9)
@@ -469,7 +471,7 @@ class Lateral:
             rate = capture
         elif self.tracking:
             rate = self._rate_for_error(error)
-        elif intercept or go_around:
+        elif intercept or flying_course:
             rate = self._rate_for_error(error)
         else:
             rate = self._word_rate(error, self.heard_s + spec.heading_lead_s - time_s, state.ground_speed_mps)
@@ -514,7 +516,8 @@ class Vertical:
 
         params, speed = self.params, state.speed_mps
         rate_max = params.path_rate_factor * speed * self.steepest_low_rad ** 2 / (2.0 * self.tolerance_m)
-        nominal = math.radians(force.angle_deg)
+        nominal = -GO_AROUND_CLIMB_RAD if go_around and angle_class == self.words.angle_climb else math.radians(force.angle_deg)
+        climb_rad = GO_AROUND_CLIMB_RAD if go_around else self.climb_rad
         height_to_go = state.height_m - force.altitude_m
         level_off = speed * (nominal * nominal) / (2.0 * rate_max)
         moving = not land and angle_class != ANGLE_LEVEL and not self.captured
@@ -522,7 +525,7 @@ class Vertical:
         self.captured = self.captured or reached or (not land and angle_class == ANGLE_LEVEL)
 
         hold_tau = 4.0 * params.path_time_constant_s
-        hold = _clamp(-height_to_go / (speed * hold_tau), -self.descent_max_rad, self.climb_rad)
+        hold = _clamp(-height_to_go / (speed * hold_tau), -self.descent_max_rad, climb_rad)
         tolerance = self.tolerance_m
         margin = TUBE_MARGIN_SHARE * tolerance
         steep_tan, shallow_tan = self.steep_tan[angle_class], self.shallow_tan[angle_class]
@@ -559,7 +562,7 @@ class Vertical:
         aim = _clamp(_min(wanted_aim, floor), 0.0, self.steepest_rad)
         glidepath_floor = land and not go_around and aim < _clamp(_min(wanted_aim, crossing_floor), 0.0, self.steepest_rad)
         if land:
-            reference = self.climb_rad if go_around else -aim
+            reference = climb_rad if go_around else -aim
         else:
             reference = hold if self.captured else -nominal
         wanted = (reference - state.gamma_rad) / params.path_time_constant_s

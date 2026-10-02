@@ -91,6 +91,14 @@ def load_signals(directory: Path, split: str) -> list[FlightSignals]:
     return flights
 
 
+def signals_flights(directory: Path, split: str) -> list[dict[str, Any]]:
+    """One split's flight records — identity, airport, runway, type, entry and landing times — in signal order, without
+    the signal arrays (a sentence's ``signal_index`` indexes this list)."""
+    if split not in SPLITS:
+        raise ValueError(f"an instruction artefact holds the splits {SPLITS}, not {split!r}")
+    return _signals_record(directory)["splits"][split]["flights"]
+
+
 def arrival_manifest_sha256s(directory: Path) -> dict[str, str]:
     """The sha256 of each airport's arrival manifest the signals were read from, by airport."""
     return {source["airport"]: source["arrival_manifest_sha256"] for source in _signals_record(directory)["sources"]}

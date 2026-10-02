@@ -131,6 +131,29 @@ def test_a_later_aircraft_enters_at_its_offset_and_speaks_from_its_own_first_pre
     assert window.allowed[next(iter(window.allowed))][1, :STEPS].any()
 
 
+def test_a_forced_column_is_said_in_place_of_its_draw_where_allowed_and_moves_nobody_elses():
+    """Multi-aircraft design §6.6 step 8 item 10: a probe's word is said in place of the aircraft's draw, the draw still
+    made — the others' words do not move; a word the masks forbid there is not forced."""
+    from ts_transformer.instructions.words import APPROACH, APPROACH_CLEARED, APPROACH_GO_AROUND
+
+    one, geometry, signals, _ = _flight()
+    traffic = _traffic(one)
+
+    def first_step(forced):
+        window = _window_speaker(traffic, one, geometry, [signals, signals], [0, 1], [2, 2], [[], []])
+        return window.speak(np.array([0, 0]), np.zeros(2, dtype=bool), None, forced)
+
+    plain = first_step(None)
+    cleared = np.full((2, 6), -1)
+    cleared[0, APPROACH] = APPROACH_CLEARED + 1
+    got = first_step(cleared)
+    assert got[0, APPROACH] == APPROACH_CLEARED + 1 and (got[1] == plain[1]).all()
+    # a go-around at the first step: forbidden there (nothing in force), so the draw stands
+    around = np.full((2, 6), -1)
+    around[0, APPROACH] = APPROACH_GO_AROUND + 1
+    assert (first_step(around) == plain).all()
+
+
 def test_a_later_round_s_masks_read_the_words_an_earlier_round_just_said():
     one, geometry, signals, _ = _flight()
     traffic = _traffic(one)

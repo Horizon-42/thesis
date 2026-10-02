@@ -47,7 +47,7 @@ import numpy as np
 import torch
 
 from ts_transformer.instructions.airport import AirportGeometry
-from ts_transformer.instructions.grammar import step_allowed
+from ts_transformer.instructions.grammar import approach_words_allowed, step_allowed
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, RUNWAY, UNCHANGED, Words
 from ts_transformer.prior.data import SINCE_SCALE, STEP_FEATURES, VARIANTS, own_context, rows_inputs
@@ -246,9 +246,10 @@ def vocabulary_allowed(column: int, chosen: np.ndarray, opening: np.ndarray, cla
                        ) -> np.ndarray:
     """``[B, classes]``: the vocabulary's rules on ``column`` (one of `VOCABULARY_COLUMNS`) for flights whose classes in
     force are ``value`` and height ``height`` at their newest row, ``opening`` there ([B] bool: their first predicted
-    step): the runway — another runway, or none where locked; the approach and the angle — what the grammar allows. At
-    the first predicted step every column is said, so "unchanged" (class 0) is not asked about (the model already masks
-    it). ``rows``: the flights asked about (the rest allow everything); None: every one."""
+    step): the runway — another runway, or none where locked; the approach — its transitions
+    (`grammar.approach_words_allowed`) and what the grammar allows; the angle — what the grammar allows. At the first
+    predicted step every column is said, so "unchanged" (class 0) is not asked about (the model already masks it).
+    ``rows``: the flights asked about (the rest allow everything); None: every one."""
     spec = words.spec
     out = np.ones((len(chosen), classes), dtype=bool)
     if column == RUNWAY:
@@ -260,6 +261,8 @@ def vocabulary_allowed(column: int, chosen: np.ndarray, opening: np.ndarray, cla
         return out
     for b in range(len(chosen)) if rows is None else rows:
         first = bool(opening[b])
+        if column == APPROACH:
+            out[b, 1:] = approach_words_allowed(None if first else int(value[b, APPROACH]) - 1)
         if column == APPROACH and (first or chosen[b, RUNWAY] == 0):
             continue                                     # the runway rule asks only of a later step that changes it
         step = np.where(chosen[b] > 0, chosen[b] - 1, UNCHANGED)
@@ -271,7 +274,8 @@ def vocabulary_allowed(column: int, chosen: np.ndarray, opening: np.ndarray, cla
             step[column] = k - 1 if k else UNCHANGED
             if column == ANGLE and not first and step[ALTITUDE] == UNCHANGED and k == 0:
                 continue                                 # nothing said in either column: nothing to check
-            out[b, k] = step_allowed(in_force, step, float(height[b]), spec, words)
+            if out[b, k]:                                # what the approach's transitions forbid stays forbidden
+                out[b, k] = step_allowed(in_force, step, float(height[b]), spec, words)
     return out
 
 

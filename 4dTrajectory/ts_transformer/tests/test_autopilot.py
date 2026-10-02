@@ -268,8 +268,8 @@ def test_a_heading_word_is_flown_to_arrive_when_its_lead_runs_out_no_faster_than
     lateral = Lateral(1, params, one, CPU)
     state = SimpleNamespace(track_deg=torch.tensor([90.0], dtype=F64))
     issued, heading = torch.tensor([0]), torch.tensor([90.0], dtype=F64)
-    lateral.word_error(state, heading, issued, torch.tensor([False]), 0.0)
-    lateral.word_error(state, heading, issued, torch.tensor([True]), 30.0)
+    lateral.word_error(state, heading, issued, torch.tensor([False]), torch.tensor([False]), 0.0)
+    lateral.word_error(state, heading, issued, torch.tensor([True]), torch.tensor([True]), 30.0)
     assert float(lateral.heard_s[0]) == 30.0
 
 
@@ -974,6 +974,88 @@ def test_a_go_around_cancels_the_capture_climbs_and_holds_its_speed():
     assert verdict.outcome == "timeout"
 
 
+def test_a_heading_word_said_at_or_after_a_go_around_is_flown():
+    """Multi-aircraft design §6.6 step 8 item 7 (the user's 2026-10-02 decision): a go-around flies the runway's course
+    until a heading word is said at or after its step — then the word, the shortest way from the track; a word said
+    before the go-around, still in force, is not flown."""
+    from ts_transformer.instructions.words import APPROACH_GO_AROUND
+
+    words = Words(spec())
+    signals, reading = _downwind()
+
+    def track_deg(grid):
+        flown, _, _ = _fly_sentence(signals, grid)
+        return compass_from_math_rad(flown.states[0, 1:, 4].numpy())
+
+    def off(track, target):
+        return np.abs((track - target + 180.0) % 360.0 - 180.0)
+
+    after = reading.words.copy()
+    after[150, APPROACH] = APPROACH_GO_AROUND
+    after[165, HEADING] = words.heading_index(0.0)              # 15 steps later: left onto 360°
+    track = track_deg(after)
+    assert off(track[150 * 2 + 10: 165 * 2], 90.0).max() < 2.0   # the course meanwhile
+    assert off(track[165 * 2 + 60: 165 * 2 + 80], 0.0).max() < 2.0
+    assert track[165 * 2 + 20] < 90.0 and track[165 * 2 + 20] > 0.0   # turned left, the shortest way
+    same = reading.words.copy()
+    same[150, APPROACH], same[150, HEADING] = APPROACH_GO_AROUND, words.heading_index(0.0)
+    assert off(track_deg(same)[150 * 2 + 60: 150 * 2 + 80], 0.0).max() < 2.0
+    before = reading.words.copy()
+    before[140, HEADING] = words.heading_index(0.0)             # said on the final, under the line law: not flown
+    before[150, APPROACH] = APPROACH_GO_AROUND
+    assert off(track_deg(before)[150 * 2 + 10: 150 * 2 + 120], 90.0).max() < 2.0
+
+
+def test_the_vertical_law_knows_how_long_its_own_go_around_climb_takes():
+    """Multi-aircraft design §6.6 step 8 item 9 (the user's 2026-10-02 floor on H): `Vertical.go_around_climb_s` is the
+    climb the executor flies after a go-around with nothing else said — measured against the executor itself, and for a
+    flight just under the target, the turn from its descent dominates."""
+    from ts_transformer.autopilot.vertical import GO_AROUND_CLIMB_GRADIENT, Vertical
+    from ts_transformer.instructions.words import APPROACH_GO_AROUND
+
+    words, params = Words(spec()), _params()
+    vertical = Vertical(1, params, words, CPU)
+    signals, reading = _downwind()
+    grid = reading.words.copy()
+    grid[150, APPROACH] = APPROACH_GO_AROUND
+    flown, _, _ = _fly_sentence(signals, grid)
+    start = 150 * 2                                              # the go-around's cycle
+    height, speed, gamma = (flown.states[0, start:, c].numpy() for c in (2, 3, 5))
+    for climb_m in (5.0, 50.0, 150.0):
+        flew_s = float(np.argmax(height >= height[0] + climb_m)) * params.cycle_s
+        reference = vertical.go_around_climb_s(float(height[0]), float(gamma[0]), float(speed[0]), height[0] + climb_m)
+        assert abs(reference - flew_s) <= 2.0 * params.cycle_s
+    assert vertical.go_around_climb_s(500.0, -0.05, 70.0, 500.0) == 0.0
+    for bad in ((400.0, -0.05, 0.0, 500.0), (math.nan, -0.05, 70.0, 500.0), (400.0, math.nan, 70.0, 500.0)):
+        with pytest.raises(ValueError, match="flying forward"):           # never a loop that cannot end
+            vertical.go_around_climb_s(*bad)
+    # 7 m under, descending at 3°: the climb at the gradient alone is 3 s; turning the descent round costs far more
+    alone = 7.0 / (70.0 * GO_AROUND_CLIMB_GRADIENT)
+    assert vertical.go_around_climb_s(493.0, -math.radians(3.0), 70.0, 500.0) > 3.0 * alone
+
+
+def test_every_climb_during_a_go_around_is_flown_at_200_ft_per_nm():
+    """Multi-aircraft design §6.6 step 8 item 7: the go-around's own climb and a climb word said during it fly the
+    published minimum missed-approach gradient (AIM 5-4-21 b), not the climb class's centre; after the go-around (cleared
+    again) the climb class flies its centre."""
+    from ts_transformer.autopilot.vertical import GO_AROUND_CLIMB_RAD
+    from ts_transformer.instructions.words import APPROACH_GO_AROUND
+
+    words = Words(spec())
+    signals, reading = _downwind()
+    grid = reading.words.copy()
+    grid[150, APPROACH] = APPROACH_GO_AROUND
+    grid[175, ALTITUDE], grid[175, ANGLE] = words.altitude_index(1200.0), words.angle_climb
+    flown, _, _ = _fly_sentence(signals, grid)
+    gamma = flown.states[0, 1:, 5].numpy()
+    height = flown.states[0, 1:, 2].numpy()
+    # the go-around's own climb ("descend to land" in force), then the climb word's, both at 1.885°
+    assert gamma[150 * 2 + 20: 175 * 2] == pytest.approx(GO_AROUND_CLIMB_RAD, abs=1e-3)
+    climbing = (height < 1200.0 - 60.0) & (np.arange(len(height)) > 175 * 2 + 20)
+    assert climbing.sum() > 20 and gamma[climbing] == pytest.approx(GO_AROUND_CLIMB_RAD, abs=1e-3)
+    assert math.degrees(GO_AROUND_CLIMB_RAD) > words.spec.climb_angle_centre_deg
+
+
 def test_a_cleared_heading_that_misses_the_line_is_bent_by_its_tolerance():
     """§4.3: cleared on a heading that just misses the line, the executor flies it bent toward the line."""
     # 2 km north of an eastbound final, 41 km out, flying the course: parallel, it never reaches the line;
@@ -1015,9 +1097,9 @@ def test_the_words_the_executor_refuses():
                        AirportCharts.of([geometry], dtype=F64, device=CPU))
     heading, issued, bank = torch.tensor([90.0], dtype=F64), torch.tensor([0]), torch.zeros(1, dtype=F64)
     cleared = torch.tensor([APPROACH_CLEARED])
-    lateral.rate(state, heading, issued, cleared, torch.tensor([0]), runways, bank, 0.05, 0.0)
+    lateral.rate(state, heading, issued, cleared, issued, torch.tensor([0]), runways, bank, 0.05, 0.0)
     with pytest.raises(ValueError, match="runway pointer changed after the clearance"):
-        lateral.rate(state, heading, issued, cleared, torch.tensor([1]), runways, bank, 0.05, 1.0)
+        lateral.rate(state, heading, issued, cleared, issued, torch.tensor([1]), runways, bank, 0.05, 1.0)
 
 
 def test_a_stall_is_a_dynamics_failure_and_wins_a_row_it_shares_with_a_crossing():
@@ -1227,7 +1309,7 @@ def test_each_candidate_reads_its_runways_published_vertical_path(monkeypatch):
 def test_descend_to_land_never_goes_under_the_published_glidepaths_lower_edge_before_the_threshold():
     """Prior readouts §12: under "descend to land", below the pointed runway's published glidepath's lower edge, the
     aircraft levels off until the glidepath comes down to it — captured or not; on the glidepath the law is the one
-    without it; past the threshold it does not bind; a go-around climbs as before. Off the course the edge falls at the
+    without it; past the threshold it does not bind; a go-around climbs at 200 ft per NM. Off the course the edge falls at the
     glidepath's slope times the share of the speed along the course: on it, that is the most the law descends; flying
     away from the runway, it stays level."""
     from ts_transformer.autopilot.frame import Kinematics
@@ -1260,7 +1342,10 @@ def test_descend_to_land_never_goes_under_the_published_glidepaths_lower_edge_be
         assert aim_deg(under, 8000.0, captured, glidepath_tan=0.0) > 0.5           # the tube alone descends
         assert aim_deg(on, 8000.0, captured) == pytest.approx(aim_deg(on, 8000.0, captured, glidepath_tan=0.0))
     assert aim_deg(30.0, -200.0, True) == pytest.approx(aim_deg(30.0, -200.0, True, glidepath_tan=0.0))
-    assert aim_deg(under, 8000.0, True, go_around=True) == pytest.approx(-words.spec.climb_angle_centre_deg)
+    # a go-around climbs at the published minimum missed-approach gradient, 200 ft per NM (not the climb class's centre)
+    from ts_transformer.autopilot.vertical import GO_AROUND_CLIMB_RAD
+    assert aim_deg(under, 8000.0, True, go_around=True) == pytest.approx(-math.degrees(GO_AROUND_CLIMB_RAD))
+    assert math.degrees(GO_AROUND_CLIMB_RAD) == pytest.approx(math.degrees(math.atan(60.96 / 1852.0)))
     # v11: between the edge and the glidepath, after the capture, the shallowest class waits level for the glidepath
     # (the approach joined from below); before the capture it flies the class as before
     between = on - 30.0

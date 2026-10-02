@@ -151,6 +151,11 @@ class BothExecutorsTest(unittest.TestCase):
         away[1:, HEADING] = UNCHANGED
         around = self.reading(downwind).words.copy()
         around[150, APPROACH] = APPROACH_GO_AROUND
+        vectored = around.copy()                                  # step 8: vectored and climbing after it, cleared again
+        vectored[165, HEADING] = words.heading_index(0.0)
+        vectored[175, ALTITUDE], vectored[175, ANGLE] = words.altitude_index(1200.0), words.angle_climb
+        vectored[200, HEADING] = words.heading_index(180.0)
+        vectored[240, APPROACH] = APPROACH_CLEARED
         steep = grid.copy()                                       # "descend to land" from row 0 at the steepest class
         steep[:, [ALTITUDE, ANGLE]] = UNCHANGED
         steep[0, ALTITUDE], steep[0, ANGLE] = words.altitude_land, words.n_descent
@@ -160,7 +165,9 @@ class BothExecutorsTest(unittest.TestCase):
         pointed = grid.copy()
         pointed[:, RUNWAY] = UNCHANGED
         return [("bent", {"signals": parallel, "grid": bent}), ("intercepting off its word", {"signals": parallel, "grid": away}),
-                ("go-around", {"signals": downwind, "grid": around}), ("steepest class to land", {"signals": straight, "grid": steep}),
+                ("go-around", {"signals": downwind, "grid": around}),
+                ("go-around, vectored, climbing, cleared again", {"signals": downwind, "grid": vectored}),
+                ("steepest class to land", {"signals": straight, "grid": steep}),
                 ("slowest speed", {"signals": straight, "grid": slow}), ("fast turns", {"signals": all_flights["fast_turns"]}),
                 ("40 m/s start", {"signals": straight, "start": {3: 40.0}}),
                 ("5 m/s start, a dynamics failure", {"signals": straight, "start": {3: 5.0}}),

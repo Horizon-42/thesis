@@ -45,7 +45,7 @@ from ts_transformer.autopilot.plant import Plant
 from ts_transformer.autopilot.sentence import DistanceClock, Sentences, TimeClock, TrackClock, WordsNow
 from ts_transformer.autopilot.speed import Speed
 from ts_transformer.autopilot.vertical import Vertical
-from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, Words
+from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, HEADING, Words
 
 #: Every limit the cycle can meet (§8.1), in the order they are applied.
 LIMITS = ("bank_cap", "bank_rate", "load_factor", "path_rate_limited", "stall_floor", "thrust_max", "thrust_min",
@@ -78,11 +78,14 @@ class Executor:
 
     def __init__(self, inputs: FlightInputs, runways: Runways, charts: AirportCharts, approach_ias_mps: torch.Tensor,
                  params: ExecutorParams, words: Words, *, time_limit_s: torch.Tensor,
-                 start_cycle: torch.Tensor | None = None) -> None:
+                 start_cycle: torch.Tensor | None = None, reserve_s: float = 0.0) -> None:
         spec = words.spec
         params.check(spec)
         self.params, self.words, self.runways, self.charts = params, words, runways, charts
         self.inputs, self.time_limit_s = inputs, time_limit_s
+        #: the time a flight's limit may still be extended by (`extend_time_limit`): the cycles are laid out for it
+        self.reserve_s = reserve_s
+        self.most_s = time_limit_s + reserve_s
         batch = len(time_limit_s)
         device = inputs.initial_state.device
         #: each flight's first cycle (module docstring: a multi-aircraft batch); every flight's 0 when not given
@@ -91,9 +94,9 @@ class Executor:
         if bool((self.start < 0).any()):
             raise ValueError("a flight's start cycle is negative")
         self.staggered = bool((self.start != 0).any())
-        own_cycles = torch.ceil(time_limit_s / params.cycle_s).long()
+        own_cycles = torch.ceil(self.most_s / params.cycle_s).long()
         self.cycles = (int((self.start + own_cycles).max()) if self.staggered
-                       else int(math.ceil(float(time_limit_s.max()) / params.cycle_s)))
+                       else int(math.ceil(float(self.most_s.max()) / params.cycle_s)))
         self.plant = Plant(inputs)
         self.lateral = Lateral(batch, params, spec, device)
         self.vertical = Vertical(batch, params, words, device)
@@ -111,6 +114,17 @@ class Executor:
         self.count = 0                                   # cycles flown
         self.halted = torch.zeros(batch, dtype=torch.bool, device=device)
         self.last_command = torch.zeros((batch, 3), dtype=self.state.dtype, device=device)
+
+    def extend_time_limit(self, seconds: torch.Tensor) -> None:
+        """Give each flight ``seconds`` (``[B]``, 0 for most) more time (a go-around's, multi-aircraft design §6.6 step 8
+        item 9) — never past the reserve the executor was laid out for, and never once a flight is done."""
+        seconds = seconds.to(device=self.time_limit_s.device, dtype=self.time_limit_s.dtype)
+        extended = self.time_limit_s + seconds
+        if bool((extended > self.most_s).any()):
+            raise ValueError("a time limit extended past the executor's reserve")
+        if bool(((seconds != 0.0) & self.done).any()):
+            raise ValueError("a time limit extended for a flight already done")
+        self.time_limit_s = extended
 
     def halt(self, flights: torch.Tensor) -> None:
         """Hold the flights ``flights`` (``[B]`` bool) from the next cycle on (module docstring)."""
@@ -160,8 +174,8 @@ class Executor:
             time_s = cycle * params.cycle_s
         held = self._held() if frozen is not None else []
         track_rate, lateral_modes = self.lateral.rate(now, force.heading_deg, force.issued_step[:, HEADING],
-                                                      force.approach, force.runway, self.runways, self.bank, bank_rate,
-                                                      time_s, fresh=fresh)
+                                                      force.approach, force.issued_step[:, APPROACH], force.runway,
+                                                      self.runways, self.bank, bank_rate, time_s, fresh=fresh)
         e0, n0, course, elevation, crossing, glidepath_tan = self.runways.pointed(force.runway)
         before, right, off_course = relative(now, e0, n0, course)
         gamma_rate, gamma_wanted, vertical_modes = self.vertical.rate(now, force.altitude_m, force.land,

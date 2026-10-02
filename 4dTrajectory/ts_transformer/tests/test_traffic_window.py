@@ -4,6 +4,7 @@ fixture (a tmp artefact)."""
 
 from __future__ import annotations
 
+import math
 from types import SimpleNamespace
 
 import pytest
@@ -20,9 +21,14 @@ def _airport(tmp_path, monkeypatch, entries=CHAINED, labelled=tuple(range(len(CH
     from ts_transformer.experiments import traffic_scene_data
     from ts_transformer.experiments.traffic_speaking import scene_airports
 
+    from ts_transformer.experiments import traffic_go_around
+
     directory, manifest, spec, _ = _artefact(tmp_path, entries, list(labelled))
     monkeypatch.setattr(traffic_scene_data, "arrival_manifest_path", lambda code: manifest)
     airports, _ = scene_airports(directory, "train", spec, ("KXXX",), None, 2_048)
+    # KXXX publishes no procedure: its approach altitude (a go-around's reward reads it) 500 m over each threshold
+    geometry = airports["KXXX"].flights.geometry
+    monkeypatch.setitem(traffic_go_around._APPROACH_M, "KXXX", tuple(c.elevation_m + 500.0 for c in geometry.candidates))
     return directory, airports, spec
 
 
@@ -135,9 +141,10 @@ def _scene_airport(tmp_path, monkeypatch):
 
 
 def _window_loop(model, airport, signals, spec, commanded, *, alone=False, seed=4, samples=1, limits=None,
-                 procedure_masks=None, given=None):
+                 procedure_masks=None, given=None, go_around_extra_s=0.0, probing=None, probe_margin=1.5):
     """A `WindowLoop` of ``commanded`` (the keys of each window, ``samples`` times each; ``limits``: each window's time
-    limit, `LIMIT_S` by default)."""
+    limit, `LIMIT_S` by default). No time for a go-around by default: these tests compare the window loop with the
+    one-aircraft scene loop, which gives none (the untrained model says go-arounds)."""
     import torch
 
     from ts_transformer.experiments.traffic_window import WindowLoop, window_of
@@ -153,7 +160,8 @@ def _window_loop(model, airport, signals, spec, commanded, *, alone=False, seed=
     physics = _physics_of(flights, geometry)
     return WindowLoop(model, windows, flights, [geometry] * len(flights), *physics, per_aircraft, Words(spec),
                       _params(), None, generator=torch.Generator().manual_seed(seed), temperature=1.0,
-                      procedure_masks=procedure_masks or ProcedureMasks.none(), alone=alone, given=given)
+                      procedure_masks=procedure_masks or ProcedureMasks.none(), alone=alone, given=given,
+                      go_around_extra_s=go_around_extra_s, probing=probing, probe_margin=probe_margin)
 
 
 def _one_aircraft_reference(model, airport, signals, spec, keys, limits, seed, procedure_masks=None, alone=False):
@@ -362,8 +370,8 @@ def test_a_track_unwrapped_a_state_at_a_time_is_numpy_s_unwrap():
 
 def test_one_commanded_aircraft_a_window_over_chained_traffic_ends_as_its_scene_does_to_the_last_step(tmp_path,
                                                                                                        monkeypatch):
-    """Replayed traffic in the air the whole flight, several windows with different limits in one batch; seeds 16 and
-    25 lose separation at the time limit's own state (the review of 7.3: the last step was not judged)."""
+    """Replayed traffic in the air the whole flight, several windows with different limits in one batch; seeds 1 and
+    11 lose separation at the time limit's own state (the review of 7.3: the last step was not judged)."""
     from ts_transformer.instructions.artefact import load_signals
 
     _, airports, spec = _airport(tmp_path, monkeypatch)
@@ -372,7 +380,7 @@ def test_one_commanded_aircraft_a_window_over_chained_traffic_ends_as_its_scene_
     model = _traffic_model(spec)
     keys, limits = ["KXXX:f2", "KXXX:f3", "KXXX:f5", "KXXX:f3"], [60.0, 60.0, 60.0, 90.0]
     ends = 0
-    for seed in (16, 25):
+    for seed in (1, 11):
         loop = _window_loop(model, airport, signals, spec, [(k,) for k in keys], seed=seed, limits=limits)
         while loop.running:
             loop.step()
@@ -573,7 +581,9 @@ def test_the_window_runner_reads_every_commanded_aircraft_four_ways_judged_in_it
         [("KXXX:f0", 0), ("KXXX:f1", 0), ("KXXX:f0", 1), ("KXXX:f1", 1), ("KXXX:f2", 0), ("KXXX:f2", 1)]
     assert [r["dataset_id"] for r in by_source["recorded"]] == keys and [r["commanded"] for r in by_source["labelled"]] == [2, 2, 1]
     for r in rows:
-        assert r["reward"] in (0.0, 1.0) and r["outcome"] and r["ifr_outcome"] and r["flown_s"] >= 0.0
+        # a sentence with a go-around (the untrained model says some) is scored on it: at most 0.9
+        assert (r["reward"] in (0.0, 1.0) if r["go_around"] is None else 0.0 <= r["reward"] <= 0.9 + 1e-12)
+        assert r["outcome"] and r["ifr_outcome"] and r["flown_s"] >= 0.0
         assert r["with_commanded"] + r["with_replayed"] == r["episodes"]
     assert all(r["mask_steps"] == {"approach": 0, "speed": 0} for r in by_source["alone"])
     # the record lands where it landed; its landing is the one the others' landing times are read against
@@ -761,10 +771,13 @@ def test_a_batch_s_budget_is_what_the_speaker_holds(tmp_path, monkeypatch):
     airport = airports["KXXX"]
     signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
     commanded, samples = [("KXXX:f3",), ("KXXX:f0", "KXXX:f4")], 2
-    loop = _window_loop(_traffic_model(spec), airport, signals, spec, commanded, samples=samples)
+    from ts_transformer.experiments.traffic_go_around import GO_AROUND_EXTRA_S
+
+    loop = _window_loop(_traffic_model(spec), airport, signals, spec, commanded, samples=samples,
+                        go_around_extra_s=GO_AROUND_EXTRA_S)
     sizes = [window_size(window, [LIMIT_S] * len(window.commanded), STEP_S) for window in loop.windows[::samples]]
-    held = len(loop.windows) * loop.speaker.aircraft * (int(loop.speaker.start.max()) + rows_for(LIMIT_S + STEP_S,
-                                                                                                  STEP_S))
+    rows = rows_for(LIMIT_S + GO_AROUND_EXTRA_S + STEP_S, STEP_S)     # a go-around's time laid out for every aircraft
+    held = len(loop.windows) * loop.speaker.aircraft * (int(loop.speaker.start.max()) + rows)
     assert batch_cost(sizes, samples) == held and loop.speaker.step == int(loop.speaker.start.min()) + N_LOOK
     assert sizes[0][1] > 0 and sizes[1][2] == 400 and sum(sizes[0][1:]) < held / len(loop.windows)
 
@@ -810,7 +823,8 @@ def test_the_order_of_a_window_s_landings_and_a_flight_in_two_windows():
         return {"source": source, "window": window, "dataset_id": key, "sample": sample, "landing_s": landing,
                 "outcome": outcome, "starts_in_a_loss": False, "flown_s": 100.0, "episodes": 0, "relations": {},
                 "with_commanded": 0, "with_replayed": 0, "ended_with": None, "ifr_outcome": outcome, "reward": 1.0,
-                "counted": 10, "mask_steps": {"approach": 0, "speed": 0}, "masked_mass": {"approach": 0.0, "speed": 0.0}}
+                "counted": 10, "mask_steps": {"approach": 0, "speed": 0}, "masked_mass": {"approach": 0.0, "speed": 0.0},
+                "landed_here": outcome == "landed", "go_around": None}
 
     # a and b land in the record a first; the labelled words swap them in window 0; c is in two windows
     # the record of c in window 1 is judged a loss (its landing still the one to read against)
@@ -1013,6 +1027,151 @@ def test_words_given_to_a_step_then_spoken_keep_everything_before_it(tmp_path, m
     to_step = [max(0, min(len(r.said), at - int(spoken.start[i]))) if r.window == w else len(r.said)
                for i, r in enumerate(results)]
     _same_loops(spoken, again, to_step=to_step)
+
+
+def test_a_go_around_gives_its_sentence_more_time_and_its_margins_are_kept(tmp_path, monkeypatch):
+    """Multi-aircraft design §6.6 step 8 item 9: the first go-around word extends the aircraft's time limit by the
+    go-around's time (its executor's and its cohort's), once; the loop keeps each aircraft's tightest margin a step."""
+    import numpy as np
+
+    from ts_transformer.experiments.traffic_go_around import GO_AROUND_EXTRA_S
+    from ts_transformer.experiments.traffic_window import Given
+    from ts_transformer.instructions.words import APPROACH, APPROACH_CLEARED, APPROACH_GO_AROUND, HEADING
+
+    airport, signals, spec, groups, limits, masks = _busy_windows(tmp_path, monkeypatch)
+    model = _traffic_model(spec)
+    spoken = _flown(_window_loop(model, airport, signals, spec, groups, seed=0, limits=limits, procedure_masks=masks))
+    words = spoken.results()[0].said.copy()
+    words[3, APPROACH], words[5, APPROACH] = APPROACH_CLEARED, APPROACH_GO_AROUND
+    words[6, HEADING] = Words(spec).heading_index(0.0)
+    words[7, APPROACH] = APPROACH_GO_AROUND                     # said again: still the first go-around's time only
+    given = [Given(words, 8)] + [None] * (len(spoken.results()) - 1)
+    loop = _window_loop(model, airport, signals, spec, groups, seed=0, limits=limits, procedure_masks=masks,
+                        given=given, go_around_extra_s=GO_AROUND_EXTRA_S)
+    base = float(loop.limit_s[0])
+    executor = loop.executors[0][2]
+    while loop.speaker.step <= int(loop.first_spoken[0]) + 6:
+        loop.step()
+    assert loop.go_around_step[0] == 5 and loop.extra_s[0] == GO_AROUND_EXTRA_S
+    assert loop.limit_s[0] == base + GO_AROUND_EXTRA_S
+    assert float(executor.time_limit_s[loop.place[0]]) == base + GO_AROUND_EXTRA_S
+    per_aircraft = np.array([limit for keys, limit in zip(groups, limits) for _ in keys])
+    others = np.flatnonzero(loop.go_around_step < 0)
+    assert (loop.limit_s[others] == per_aircraft[others]).all() and base == per_aircraft[0]
+    cohort = loop.cohort[0]
+    assert loop.cohort_cycles[cohort] >= int(np.ceil((base + GO_AROUND_EXTRA_S) / loop.params.cycle_s))
+    _flown(loop)
+    got = loop.results()[0]
+    assert got.go_around == 5 and loop.limit_s[0] == base + GO_AROUND_EXTRA_S
+    # its flight is not cut at the old limit: a time limit's end comes at the new one
+    assert got.own != "timeout" or (len(loop.states[0]) - 1) * STEP_S > base
+    assert np.isfinite(loop.margin).any() and (loop.margin >= 0.0).all()
+
+
+def test_a_probe_watches_an_established_aircraft_speaking_its_own_words_until_its_margin_is_under_the_trigger(
+        tmp_path, monkeypatch):
+    """Multi-aircraft design §6.6 step 8 item 10: a probe says a go-around for an aircraft it watches — speaking its own
+    words, cleared, established on its final (its executor's capture) and under its approach altitude, no go-around said
+    yet — at the first step its tightest margin at its step before was under the trigger (an infinite one: at once);
+    never for one not probed."""
+    import numpy as np
+
+    from ts_transformer.experiments.traffic_window import Given
+    from ts_transformer.instructions.words import APPROACH, APPROACH_CLEARED, APPROACH_GO_AROUND, APPROACH_NOT_CLEARED
+
+    airport, signals, spec, groups, limits, masks = _busy_windows(tmp_path, monkeypatch)
+    model = _traffic_model(spec)
+    count = sum(len(g) for g in groups)
+    loop = _window_loop(model, airport, signals, spec, groups, seed=0, limits=limits, procedure_masks=masks,
+                        probing=np.arange(count) < count - 1, probe_margin=1.5)
+    while loop.speaker.step < int(loop.first_spoken.max()) + 3:
+        loop.step()
+    k = loop.speaker.step - loop.start - 9                      # each aircraft's own step about to be said (N_LOOK 8)
+    speaking = k >= 1
+    for i in range(count):                  # every one cleared, established, under the approach altitude, margin 1.2
+        loop.speaker.value[i, APPROACH] = APPROACH_CLEARED + 1
+        loop.states[i][-1].captured = True
+        loop.states[i][-1].height_m = 0.0
+        loop.margin[i, max(int(k[i]) - 1, 0)] = 1.2
+    loop.go_around_step[:] = -1
+    expected = np.where(speaking & (np.arange(count) < count - 1), APPROACH_GO_AROUND + 1, -1)
+    assert (loop._probes(k, speaking, None)[:, APPROACH] == expected).all()
+    # each condition alone stops it
+    loop.margin[0, int(k[0]) - 1] = 1.6
+    loop.states[1][-1].captured = False
+    loop.speaker.value[2, APPROACH] = APPROACH_NOT_CLEARED + 1
+    loop.go_around_step[3] = 0
+    given = np.full((count, 6), -1)
+    given[4] = 0                                                # its line given this step: its own words are not
+    loop.states[5][-1].height_m = 1e5                           # above its approach altitude: before the FAF
+    got = loop._probes(k, speaking, given)[:, APPROACH]
+    assert (got[:6] == -1).all() and (got[6:] == expected[6:]).all()
+    # an infinite trigger: whatever the margin
+    loop.probe_margin = math.inf
+    assert loop._probes(k, speaking, None)[0, APPROACH] == APPROACH_GO_AROUND + 1
+
+
+def test_probes_change_nothing_for_the_aircraft_they_do_not_fire_for(tmp_path, monkeypatch):
+    """With no probe's go-around said, a probed loop is the unprobed one."""
+    import numpy as np
+
+    airport, signals, spec, groups, limits, masks = _busy_windows(tmp_path, monkeypatch)
+    model = _traffic_model(spec)
+    count = sum(len(g) for g in groups)
+    plain = _flown(_window_loop(model, airport, signals, spec, groups, seed=0, limits=limits, procedure_masks=masks))
+    probed = _flown(_window_loop(model, airport, signals, spec, groups, seed=0, limits=limits, procedure_masks=masks,
+                                 probing=np.ones(count, dtype=bool), probe_margin=1e-9))
+    assert all(r.forced is None for r in probed.results())
+    _same_loops(plain, probed)
+
+
+def test_the_margins_kept_are_the_judges_at_each_aircrafts_own_step(tmp_path, monkeypatch):
+    """Where the judge found a loss of separation an aircraft was in, its margin at that own step is under 1."""
+    airport, signals, spec, groups, limits, masks = _busy_windows(tmp_path, monkeypatch)
+    loop = _flown(_window_loop(_traffic_model(spec), airport, signals, spec, groups, seed=0, limits=limits,
+                               procedure_masks=masks))
+    found = 0
+    for i, got in enumerate(loop.results()):
+        for episode in loop.runs[got.window].episodes:
+            if got.key in episode["pair"]:
+                own = int(round((episode["first_s"] - got.first_s) / STEP_S))
+                assert loop.margin[i, own] < 1.0
+                found += 1
+    assert found
+
+
+def test_a_go_arounds_time_changes_nothing_for_flights_without_one(tmp_path, monkeypatch):
+    """The production loop lays a go-around's time out for every aircraft: every aircraft given words with no go-around
+    flies, says and is judged as it does with none laid out."""
+    import torch
+
+    from ts_transformer.experiments.traffic_go_around import GO_AROUND_EXTRA_S
+    from ts_transformer.experiments.traffic_window import Given
+    from ts_transformer.instructions.words import APPROACH, APPROACH_GO_AROUND, UNCHANGED
+
+    airport, signals, spec, groups, limits, masks = _busy_windows(tmp_path, monkeypatch)
+    model = _traffic_model(spec)
+    spoken = _flown(_window_loop(model, airport, signals, spec, groups, seed=0, limits=limits, procedure_masks=masks))
+    given = []
+    for r in spoken.results():
+        words = r.said.copy()
+        words[words[:, APPROACH] == APPROACH_GO_AROUND, APPROACH] = UNCHANGED
+        given.append(Given(words, len(words)))
+    none, laid_out = (_flown(_window_loop(model, airport, signals, spec, groups, seed=3, limits=limits,
+                                          procedure_masks=masks, given=given, go_around_extra_s=extra))
+                      for extra in (0.0, GO_AROUND_EXTRA_S))
+    assert not any(r.go_around is not None for r in laid_out.results())
+    for x, y in zip(none.results(), laid_out.results()):
+        assert (x.outcome, x.own, x.end, x.counted, x.landing_s, x.runway) == \
+               (y.outcome, y.own, y.end, y.counted, y.landing_s, y.runway)
+        assert x.said.shape == y.said.shape and (x.said == y.said).all()
+        # the same states; the laid-out executor's cycles past every halt repeat the last one
+        flown_x = none.executors[x.group][2].flown().states[x.place]
+        flown_y = laid_out.executors[y.group][2].flown().states[y.place]
+        assert len(flown_y) >= len(flown_x) and torch.equal(flown_x, flown_y[: len(flown_x)])
+        assert (flown_y[len(flown_x):] == flown_x[-1]).all()
+    assert [r.ended for r in none.runs] == [r.ended for r in laid_out.runs]
+    assert [r.episodes for r in none.runs] == [r.episodes for r in laid_out.runs]
 
 
 def test_a_line_is_given_to_an_own_step_inside_its_words():
