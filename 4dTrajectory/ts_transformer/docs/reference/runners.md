@@ -954,6 +954,17 @@ they read); a go-around's sentence is rewarded 0.48·L + 0.14·(S + H + Q), at m
 landing or a time limit. The summary's `go_arounds` (model sources) counts them and averages the parts; `masked_mass`
 on the approach column includes the transitions' mask.
 
+**Probes** (step 8 item 10; `--probe-samples K --probe-margin m`, R34 to read what they do, R37 to train): the last K
+samples of each window are probed — a probed aircraft speaking its own words, cleared, established on its final (its
+executor's capture) and with no go-around said is made to say one at the first step its tightest margin at its step before
+was under m (`WindowSpeaker.speak`'s ``forced``: said in place of its draw where the masks allow it). Rows carry
+`probed` and `forced`. In R37 only the training rounds are probed (never the select readouts); the probe's word is not
+asked (`window_flight(forced=…)`: out of the clipped ratio and the KL) and is learned by `--imitation-weight` × its
+advantage × its cross-entropy where the advantage is above 0 (`WindowRewardTuner._window_scored`; one pass only:
+`--passes 1`); the round's `sentences.json` / `.npz` keep `probed`, `forced`, and its summary the unprobed and probed
+samples apart and the go-arounds said by the model, by a probe and learned; the preflight probes at an infinite margin
+(every established aircraft at once: the longest sentences). R41 pairs only readouts probed alike.
+
 ### R35 · `run_ts.py prior_generation_records` — a free-generation readout's sentences as evaluation records: ADE / FDE and the evaluation's pass rate (2026-09-30)
 
 A `prior_free_generation` readout (`generation.json` schema `ts-prior-free-generation-v5`, `sentences.npz`) stores the
@@ -1040,6 +1051,7 @@ model trained by `ts-traffic-reward` is named **traffic** (`MODEL_NAMES`, user 2
 2026-09-30. `traffic_window_reward --prior <single-aircraft prior (augmented) or traffic prior (an M4 round)> --base <base>
 --instructions <artefact> --executor <spec> --out <new dir> [--rounds 8] [--resume] [--real-per-airport 70]
 [--augmented-per-airport 70] [--samples 8] [--select-per-airport 70] [--select-samples 2] [--speakers 4] [--passes 1]
+[--probe-samples 0] [--probe-margin 1.5] [--imitation-weight 1.0]
 [--smoke]`. R32's round protocol with a window sample as the unit: each round the training days' windows drawn with its
 seed (`traffic_window.draw_windows`), the first per airport as they are and the next `POOL_FACTOR` × as many augmented
 (`traffic_window_augment`, the first that qualify), spoken `--samples` times by R32's speaking processes (`Speaking`

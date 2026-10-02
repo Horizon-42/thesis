@@ -56,7 +56,7 @@ SCHEMA = "ts-traffic-window-pair-v1"
 #: What decides which windows are read and how: equal in both readouts, or they do not pair.
 SAME = ("schema", "git", "split", "drawn", "windows_per_airport", "samples", "temperature", "seed", "augment_seed",
         "augmenting", "executor", "instructions", "scenes", "history_s", "readings", "aircraft_steps", "batches",
-        "model_sources")
+        "model_sources", "probes")
 #: A model row's fields no model decides: equal in both readouts.
 MODEL_FREE = ("airport", "commanded", "observed_runway", "augmented", "role", "batch")
 #: A flight's identity ends in its landing time (`flight_scenarios.identity.flight_key`): what its operating day is read from.

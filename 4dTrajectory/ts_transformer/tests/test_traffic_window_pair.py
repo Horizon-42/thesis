@@ -24,6 +24,7 @@ def _header(**changes):
               "temperature": 1.0, "seed": 1337, "augment_seed": None, "augmenting": None,
               "executor": {"sha256": "e"}, "instructions": "i", "scenes": {"n": 1}, "history_s": 1200.0,
               "readings": {"ends": "visual"}, "aircraft_steps": 100000, "batches": 1, "model_sources": ["scene", "alone"],
+              "probes": {"samples": 0, "margin": 1.5},
               "prior": {"directory": "p"},
               "aircraft_file": "aircraft.jsonl"}
     return {**header, **changes}
@@ -88,7 +89,8 @@ def test_the_difference_is_second_less_first_and_its_error_clustered_by_airport_
 def test_readouts_that_did_not_read_the_same_windows_the_same_way_are_refused(tmp_path):
     first, second = _readouts(tmp_path, set())
     for name, value in (("samples", 4), ("seed", 7), ("augment_seed", 7919), ("executor", {"sha256": "f"}),
-                        ("git", {"head": "other", "dirty": False}), ("model_sources", ["scene"])):
+                        ("git", {"head": "other", "dirty": False}), ("model_sources", ["scene"]),
+                        ("probes", {"samples": 2, "margin": 1.5})):
         header = json.loads((second / "window_generation.json").read_text())
         (second / "window_generation.json").write_text(json.dumps({**header, name: value}))
         with pytest.raises(ValueError, match=f"\\['{name}'\\] differ"):

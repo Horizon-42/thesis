@@ -305,7 +305,8 @@ class SceneRewardTuner(RewardTuner):
             raise ValueError("no sentence to train on: no scene's sentences differ in reward")
         return self.sweeps(lambda: batches(sentences.flights, self.config.tokens_per_batch // 2, self.rng),
                            lambda indices: self._parts(sentences, indices),
-                           lambda part, start: self._scene_scored(sentences, part, allowed, start) + (advantages[part],),
+                           lambda part, start: self._scene_scored(sentences, part, allowed, start)
+                           + (advantages[part], None),
                            len, data, slots=slots, passes=passes, sentences=len(sentences.flights))
 
     def sweeps(self, groups: Callable[[], Iterator[list[int]]], parts: Callable[[list[int]], list[list[int]]],
@@ -313,9 +314,9 @@ class SceneRewardTuner(RewardTuner):
                data: Sequence[Built], *, slots: int, passes: int, sentences: int) -> dict[str, Any]:
         """`one_pass`' sweeps over units a caller lays out (the scene's sentences, or a window's samples: `traffic_window_
         tuner`): each sweep's update batches (``groups``, drawn when it starts), each batch's parts (``parts``), a part
-        scored (``scored``: its `to_batch`, the model's logits, the start's, the reference's, each sentence's asked steps
-        and its advantages, as `_scene_scored` gives them), and the sentences a batch counts (``counted``: each one's
-        mean over the batch)."""
+        scored (``scored``: its `to_batch`, the model's logits, the start's, the reference's, each sentence's asked steps,
+        its advantages, as `_scene_scored` gives them, and each sentence's own extra loss — a probe's word learned, `traffic_
+        window_tuner`; None: none), and the sentences a batch counts (``counted``: each one's mean over the batch)."""
         if passes < 1:
             raise ValueError(f"{passes} passes")
         self.model.eval()
@@ -324,17 +325,17 @@ class SceneRewardTuner(RewardTuner):
         start = copy.deepcopy(self.model).eval()
         for parameter in start.parameters():
             parameter.requires_grad_(False)
-        sums = {"reward": 0.0, "kl": 0.0, "data": 0.0}
+        sums = {"reward": 0.0, "kl": 0.0, "data": 0.0, "imitation": 0.0}
         count, trace, clipped_trace, clipped, words, sweeps = 0, [], [], 0, 0, []
         for _ in range(passes):
             self.passes += 1
             sweep_started, first, sweep_clipped, sweep_words = time.perf_counter(), count, 0, 0
             for indices in groups():
                 self.optimiser.zero_grad(set_to_none=True)
-                reward, kl, batch_clipped, batch_words = 0.0, 0.0, 0, 0
+                reward, kl, imitated, batch_clipped, batch_words = 0.0, 0.0, 0.0, 0, 0
                 size = counted(indices)
                 for part in parts(indices):
-                    batch, logits, sampled_from, reference, steps, advantages = scored(part, start)
+                    batch, logits, sampled_from, reference, steps, advantages, imitation = scored(part, start)
                     advantage = torch.as_tensor(advantages, dtype=logits[0].dtype, device=self.device)
                     surrogate, part_clipped, part_words = flight_surrogate(logits, sampled_from, batch["targets"],
                                                                            batch["present"], batch["asked"], advantage,
@@ -343,6 +344,10 @@ class SceneRewardTuner(RewardTuner):
                     part_reward = (surrogate / steps).sum() / size
                     part_kl = (distance / steps).sum() / size
                     loss = part_reward + self.config.kl_weight * part_kl
+                    if imitation is not None:
+                        part_imitation = (imitation / steps).sum() / size
+                        loss = loss + part_imitation
+                        imitated += float(part_imitation.detach())
                     if not torch.isfinite(loss):
                         raise FloatingPointError(f"pass {self.passes}: the loss is {float(loss)}")
                     loss.backward()
@@ -355,7 +360,7 @@ class SceneRewardTuner(RewardTuner):
                 clipped, words = clipped + batch_clipped, words + batch_words
                 sweep_clipped, sweep_words = sweep_clipped + batch_clipped, sweep_words + batch_words
                 clipped_trace.append(batch_clipped / batch_words)
-                for name, value in (("reward", reward), ("kl", kl), ("data", data_loss)):
+                for name, value in (("reward", reward), ("kl", kl), ("data", data_loss), ("imitation", imitated)):
                     sums[name] += value
                 count += 1
                 trace.append(kl)

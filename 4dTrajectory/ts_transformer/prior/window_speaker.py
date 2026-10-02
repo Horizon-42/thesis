@@ -206,17 +206,24 @@ class WindowSpeaker:
         return first
 
     @torch.no_grad()
-    def speak(self, rank: np.ndarray, runway_locked: np.ndarray, given: np.ndarray | None = None) -> np.ndarray:
+    def speak(self, rank: np.ndarray, runway_locked: np.ndarray, given: np.ndarray | None = None,
+              forced: np.ndarray | None = None) -> np.ndarray:
         """``[N, 6]``: the classes said at the step (0: unchanged, else the word + 1) — by the aircraft ranked (``rank``
         ≥ 0: there, at or past its first predicted step; one a scene a rank), round by round in their ranks, each column
         given the ones before it; the others say nothing. One whose runway is locked says no other runway.
 
         ``given`` (``[N, 6]``, −1 where an aircraft's line is not given): a ranked aircraft whose line is given says it,
         in its round as one sampled would — neither sampled nor masked (its draw is "unchanged", so the others' draws do
-        not depend on who is given), the later rounds' masks reading it (multi-aircraft design §6.6 step 7.7)."""
+        not depend on who is given), the later rounds' masks reading it (multi-aircraft design §6.6 step 7.7).
+
+        ``forced`` (``[N, 6]``, −1 where a column is not forced): a sampled aircraft's column said as given in place of
+        its draw where the masks allow it (the draw still made, so nobody's draws move within the step — a forced word
+        that changes what follows changes later steps' draws, as any word does), the columns after it reading it — a
+        probe's go-around (multi-aircraft design §6.6 step 8 item 10)."""
         rank = np.asarray(rank, dtype=np.int64)
         speaking = rank >= 0
         given = np.full((len(rank), 6), -1, dtype=np.int64) if given is None else np.asarray(given, dtype=np.int64)
+        forced = np.full((len(rank), 6), -1, dtype=np.int64) if forced is None else np.asarray(forced, dtype=np.int64)
         fixed = given[:, 0] >= 0
         if (given[fixed] < 0).any():
             raise ValueError("a given line gives all six columns")
@@ -233,7 +240,7 @@ class WindowSpeaker:
         opening = row == N_LOOK
         for p in range(int(rank.max()) + 1):
             now = rank == p
-            chosen = self._sample(h, tokens, valid, now & ~fixed, opening, row, runway_locked)
+            chosen = self._sample(h, tokens, valid, now & ~fixed, opening, row, runway_locked, forced)
             chosen[now & fixed] = given[now & fixed]
             said[now] = chosen[now]
             written = now[:, None] & (chosen > 0)
@@ -269,9 +276,9 @@ class WindowSpeaker:
         return h, tokens, valid
 
     def _sample(self, h: torch.Tensor, tokens: torch.Tensor, valid: torch.Tensor, now: np.ndarray, opening: np.ndarray,
-                row: np.ndarray, runway_locked: np.ndarray) -> np.ndarray:
+                row: np.ndarray, runway_locked: np.ndarray, forced: np.ndarray) -> np.ndarray:
         """``[N, 6]``: one round's classes (module docstring) — the aircraft ``now`` sampled as `generate.Speaker`
-        samples, every other one "unchanged"."""
+        samples, a column ``forced`` said in place of its draw where allowed (`speak`), every other one "unchanged"."""
         model, device = self.model, self.features.device
         count = len(now)
         first = torch.as_tensor(opening, device=device)[:, None, None]
@@ -293,6 +300,12 @@ class WindowSpeaker:
             unchanged[:, 0] = 1.0
             probability = torch.where(silent, unchanged, probability)
             chosen[:, 0, 0, c] = torch.multinomial(probability, 1, generator=self.generator)[:, 0]
+            force = now & (forced[:, c] >= 0)
+            if force.any():
+                said = torch.as_tensor(forced[:, c], device=device)
+                force &= (probability.gather(1, said.clamp(min=0)[:, None])[:, 0] > 0.0).cpu().numpy()
+                at_force = torch.as_tensor(force, device=device)
+                chosen[:, 0, 0, c] = torch.where(at_force, said, chosen[:, 0, 0, c])
         return chosen[:, 0, 0].cpu().numpy()
 
     def _allowed(self, column: int, chosen: np.ndarray, opening: np.ndarray, classes: int, runway_locked: np.ndarray,

@@ -196,3 +196,29 @@ def test_the_preflight_scores_the_costliest_window_sample_the_pass_would_train_o
     # the two windows: the costlier sample (f0 and f1 together) scored, every aircraft trained
     assert sorted(checked["windows"]) == [0, 1] and checked["scored_aircraft"] == 2 and checked["gpu_peak_gb"] is None
     assert lines
+
+
+def test_only_a_training_round_is_probed(monkeypatch):
+    """Multi-aircraft design §6.6 step 8 item 10: a training round's windows are probed in their last samples; the
+    select readouts never are."""
+    from types import SimpleNamespace
+
+    import torch
+
+    from ts_transformer.experiments import traffic_window_reward as runner
+    from ts_transformer.experiments.traffic_window_generation import WindowSentences
+
+    asked = []
+
+    def spoken(*args, probe_samples, probe_margin, **kwargs):
+        asked.append((probe_samples, probe_margin))
+        return WindowSentences([], [], [])
+
+    monkeypatch.setattr(runner, "window_sentences", spoken)
+    speaking = runner.WindowSpeaking(None, None, None, None, 1, None, 2, 1.25)
+    model = torch.nn.Linear(1, 1)
+    round_ = SimpleNamespace(drawn=None, kinds=[])
+    for source in ("train", "scene"):
+        speaking.speak(model, round_, [0], 0, 8, seed=0, source=source)
+    assert asked == [(2, 1.25), (0, 1.25)]
+

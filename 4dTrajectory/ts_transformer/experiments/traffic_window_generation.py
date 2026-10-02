@@ -83,7 +83,7 @@ from ts_transformer.experiments.prior_train import (
     PRIOR_CHECKPOINT_SCHEMA, TRAFFIC_CHECKPOINT_SCHEMA, load_prior, rosters,
 )
 from ts_transformer.experiments.traffic_go_around import (
-    GO_AROUND_EXTRA_S, AfterGoAround, after_go_around, approach_altitude_m, runway_at,
+    GO_AROUND_EXTRA_S, PROBE_MARGIN, AfterGoAround, after_go_around, approach_altitude_m, runway_at,
 )
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION, Controlled, Loop, Run, recorded
 from ts_transformer.experiments.traffic_labelled import own_end
@@ -334,11 +334,15 @@ class Flown:
 
 def fly_windows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, words: Words, params: Any,
                 landings: Any, samples: int, *, generator: torch.Generator, temperature: float,
-                procedure_masks: Any, given: Sequence[Given | None] | None = None) -> Flown:
+                procedure_masks: Any, given: Sequence[Given | None] | None = None, probe_samples: int = 0,
+                probe_margin: float = PROBE_MARGIN) -> Flown:
     """The windows at ``chunk`` spoken to ``samples`` times each (`WindowLoop`; ``source`` "alone": each aircraft
     hearing no other) and flown to their end; ``landings``: the model's landing context (None for a variant without
-    one); ``given``: each loop aircraft's given words (`traffic_window.Given`, None: spoken), in the loop's order. The
-    caller closes the loop (`WindowLoop.close`)."""
+    one); ``given``: each loop aircraft's given words (`traffic_window.Given`, None: spoken), in the loop's order;
+    ``probe_samples``: the last that many samples of each window probed (`WindowLoop`'s ``probing``, multi-aircraft design
+    §6.6 step 8 item 10). The caller closes the loop (`WindowLoop.close`)."""
+    if not 0 <= probe_samples <= samples:
+        raise ValueError(f"{probe_samples} probed samples of {samples}")
     cpu = torch.device("cpu")
     instances = [w for w in chunk for _ in range(samples)]
     index = [j for w in instances for j in drawn.members[w]]
@@ -346,9 +350,11 @@ def fly_windows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, w
     runways, charts, approach = _physics(part, cpu)
     inputs = augmented_inputs(flight_inputs(part.series, device=cpu, anchor=N_LOOK), part.geometries,
                               [drawn.moves[j] for j in index])
+    probing = [b % samples >= samples - probe_samples for b, w in enumerate(instances) for _ in drawn.members[w]]
     loop = WindowLoop(model, [drawn.windows[w] for w in instances], part.signals, part.geometries, inputs, runways,
                       charts, approach, [drawn.limits[j] for j in index], words, params, landings, generator=generator,
-                      temperature=temperature, procedure_masks=procedure_masks, alone=source == "alone", given=given)
+                      temperature=temperature, procedure_masks=procedure_masks, alone=source == "alone", given=given,
+                      probing=probing, probe_margin=probe_margin)
     while loop.running:
         loop.step()
     return Flown(loop, loop.results(), part, index, instances)
@@ -367,20 +373,25 @@ class WindowSentences:
 
 def model_rows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, words: Words, params: Any,
                landings: Any, every_landing: Mapping[str, Landings], samples: int, *, generator: torch.Generator,
-               temperature: float, procedure_masks: Any) -> list[dict[str, Any]]:
+               temperature: float, procedure_masks: Any, probe_samples: int = 0,
+               probe_margin: float = PROBE_MARGIN) -> list[dict[str, Any]]:
     """The windows at ``chunk`` spoken to ``samples`` times each (`fly_windows`), a row per commanded aircraft and
-    sample; ``every_landing``: the airports' landings the reward's landing direction reads."""
+    sample; ``every_landing``: the airports' landings the reward's landing direction reads; ``probe_samples``,
+    ``probe_margin``: `fly_windows`'."""
     return window_sentences(model, drawn, chunk, source, words, params, landings, every_landing, samples,
-                            generator=generator, temperature=temperature, procedure_masks=procedure_masks).rows
+                            generator=generator, temperature=temperature, procedure_masks=procedure_masks,
+                            probe_samples=probe_samples, probe_margin=probe_margin).rows
 
 
 def window_sentences(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, words: Words, params: Any,
                      landings: Any, every_landing: Mapping[str, Landings], samples: int, *, generator: torch.Generator,
-                     temperature: float, procedure_masks: Any) -> WindowSentences:
+                     temperature: float, procedure_masks: Any, probe_samples: int = 0,
+                     probe_margin: float = PROBE_MARGIN) -> WindowSentences:
     """`model_rows` with what the speaker read of each aircraft and what its masks allowed (`WindowSentences`: what a
-    trainer scores the words with)."""
+    trainer scores the words with); ``probe_samples``, ``probe_margin``: `fly_windows`'."""
     flown = fly_windows(model, drawn, chunk, source, words, params, landings, samples, generator=generator,
-                        temperature=temperature, procedure_masks=procedure_masks)
+                        temperature=temperature, procedure_masks=procedure_masks, probe_samples=probe_samples,
+                        probe_margin=probe_margin)
     out = flown_sentences(flown, drawn, source, words, every_landing, samples)
     flown.loop.close()
     return out
@@ -414,6 +425,7 @@ def flown_sentences(flown: Flown, drawn: Drawn, source: str, words: Words, every
                                           _loop_context(window, got.key, every_landing, loop_landings, step_s))
             row["reward"] = _reward(row, direction)
             row["landed_here"] = bool(row["outcome"] == "landed" and direction[row["runway"]])
+            row["probed"], row["forced"] = bool(loop.probing[i]), got.forced
             row["go_around"] = None
             if got.go_around is not None:                   # multi-aircraft design §6.6 step 8 item 9
                 scored = go_around_fields(loop, i, got, row, direction)
@@ -529,6 +541,7 @@ def fixed_rows(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, pa
             direction = landing_direction(part.signals[j], part.geometries[j], context)
             row["reward"] = _reward(row, direction)
             row["landed_here"] = bool(row["outcome"] == "landed" and direction[row["runway"]])
+            row["probed"], row["forced"] = False, None
             row["go_around"] = None                         # the labelled words and the record say none
             rows.append(row)
         at += len(window.commanded)
@@ -608,6 +621,7 @@ def go_arounds(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
     parts = ("separation", "climb", "back", "landed", "reward")
     return {"sentences": len(said), "share": len(said) / len(rows),
             "outcomes": dict(Counter(r["outcome"] for r in said).most_common()),
+            "said_by_a_probe": sum(r["forced"] is not None and r["forced"] == r["go_around"]["step"] for r in said),
             "mean": {name: sum(r["go_around"][name] for r in said) / len(said) for name in parts},
             "short_of_the_extra_time": sum(r["go_around"]["extra_s"] < r["go_around"]["extra_wanted_s"] for r in said)}
 
@@ -680,8 +694,8 @@ def summaries(rows: Sequence[dict[str, Any]], augmented: bool) -> dict[str, Any]
 
 def batch_rows(model: Prior, drawn: Drawn, number: int, chunk: Sequence[int], words: Words, params: Any,
                landings: Any, every_landing: Mapping[str, Landings], samples: int, *, seed: int, temperature: float,
-               procedure_masks: Any, device: torch.device, model_sources: Sequence[str] = MODEL_SOURCES
-               ) -> list[dict[str, Any]]:
+               procedure_masks: Any, device: torch.device, model_sources: Sequence[str] = MODEL_SOURCES,
+               probe_samples: int = 0, probe_margin: float = PROBE_MARGIN) -> list[dict[str, Any]]:
     """Loop batch ``number`` (the windows at ``chunk``) read by the model's sources (``model_sources``), each from its
     own stream (`batch_seed`), and — windows as drawn — the labelled words and the records: its rows, each marked with
     the batch."""
@@ -689,7 +703,8 @@ def batch_rows(model: Prior, drawn: Drawn, number: int, chunk: Sequence[int], wo
     for source in model_sources:
         generator = torch.Generator(device=device).manual_seed(batch_seed(seed, source, number))
         rows += model_rows(model, drawn, chunk, source, words, params, landings, every_landing, samples,
-                           generator=generator, temperature=temperature, procedure_masks=procedure_masks)
+                           generator=generator, temperature=temperature, procedure_masks=procedure_masks,
+                           probe_samples=probe_samples, probe_margin=probe_margin)
     for source in ("labelled", "recorded") if drawn.augmented[chunk[0]] is None else ():
         rows += fixed_rows(drawn, chunk, source, words, params, every_landing, procedure_masks)
     for row in rows:
@@ -785,10 +800,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", default="cuda", help="the prior's; the executors fly on CPU")
     parser.add_argument("--model-sources", nargs="+", choices=MODEL_SOURCES, default=list(MODEL_SOURCES),
                         help="the model's sources to read (`MODEL_SOURCES`; the rows show which were read)")
+    parser.add_argument("--probe-samples", type=int, default=0, help="the last that many samples of each window probed "
+                        "for a go-around (multi-aircraft design §6.6 step 8 item 10: what a training round's probes do; "
+                        "0: none)")
+    parser.add_argument("--probe-margin", type=float, default=PROBE_MARGIN, help="a probe's trigger: the tightest margin")
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     args = parser.parse_args(argv)
     if args.windows_per_airport < 1 or args.samples < 1 or args.workers < 1:
         parser.error("at least one window an airport, one sample and one reading process")
+    if not 0 <= args.probe_samples <= args.samples:
+        parser.error(f"--probe-samples {args.probe_samples} of {args.samples} samples")
 
     def resolved(path: Path) -> Path:
         return path if path.is_absolute() else REPO_ROOT / path
@@ -831,7 +852,8 @@ def main(argv: list[str] | None = None) -> int:
         speaking = model.to(device)
         return batch_rows(speaking, drawn, number, batches[number], words, params, landings, every_landing,
                           args.samples, seed=args.seed, temperature=args.temperature, procedure_masks=own_masks,
-                          device=device, model_sources=tuple(s for s in MODEL_SOURCES if s in args.model_sources))
+                          device=device, model_sources=tuple(s for s in MODEL_SOURCES if s in args.model_sources),
+                          probe_samples=args.probe_samples, probe_margin=args.probe_margin)
 
     gc.collect()
     gc.freeze()                                         # the reading processes share the parent's data, not copy it
@@ -858,6 +880,7 @@ def main(argv: list[str] | None = None) -> int:
     write_json_atomic(out / "window_generation.json", {
         "schema": SCHEMA, "written_utc": utc_now(), "git": git, "split": args.split, "drawn": draw.counts,
         "windows_per_airport": args.windows_per_airport, "samples": args.samples, "temperature": args.temperature,
+        "probes": {"samples": args.probe_samples, "margin": args.probe_margin},
         "seed": args.seed, "augment_seed": args.augment_seed, "augmenting": augmenting,
         "prior": {"directory": repo_relative(prior_dir), "procedure_masks": list(own_masks.names),
                   "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt")},

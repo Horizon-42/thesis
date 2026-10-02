@@ -94,7 +94,7 @@ from ts_transformer.experiments.traffic_speaking import with_tracks
 from ts_transformer.experiments.traffic_tuner import part_cost
 from ts_transformer.experiments.traffic_window import draw_windows, window_places
 from ts_transformer.experiments.traffic_window_augment import busiest
-from ts_transformer.experiments.traffic_go_around import GO_AROUND_EXTRA_S
+from ts_transformer.experiments.traffic_go_around import GO_AROUND_EXTRA_S, IMITATION_WEIGHT, PROBE_MARGIN
 from ts_transformer.experiments.traffic_window_generation import (
     Drawn, WindowSentences, augmented_windows, drawn_windows, fixed_rows, window_batches, window_sentences,
 )
@@ -182,9 +182,13 @@ def first_windows_per_airport(drawn: Drawn, per_airport: int, airports: Sequence
 class WindowSpeaking(Speaking):
     """`traffic_reward.Speaking` for window rounds: a round's loop batches are its windows' (`traffic_window_generation.
     window_batches`), each spoken by `window_sentences` from its own stream, each row marked with its window's kind;
-    ``every_landing`` the airports' landings the reward's landing direction reads."""
+    ``every_landing`` the airports' landings the reward's landing direction reads; a training round's windows probed in
+    their last ``probe_samples`` samples under ``probe_margin`` (multi-aircraft design §6.6 step 8 item 10; the select
+    readouts never)."""
 
     every_landing: Any
+    probe_samples: int = 0
+    probe_margin: float = PROBE_MARGIN
 
     def plan(self, round_: WindowRound, samples: int) -> list[list[int]]:
         return window_batches(round_.drawn, samples, self.budget, self.words.spec.step_s)
@@ -194,7 +198,9 @@ class WindowSpeaking(Speaking):
         generator = torch.Generator(device=next(model.parameters()).device).manual_seed(batch_seed(seed, number))
         got = window_sentences(model, round_.drawn, chunk, "scene", self.words, self.params, self.landings,
                                self.every_landing, samples, generator=generator, temperature=1.0,
-                               procedure_masks=self.procedures)
+                               procedure_masks=self.procedures,
+                               probe_samples=self.probe_samples if source == "train" else 0,
+                               probe_margin=self.probe_margin)
         for row in got.rows:
             row["kind"] = round_.kinds[row["window"]]
         return got
@@ -227,7 +233,7 @@ def window_split(round_: WindowRound, spoken: WindowSentences, advantages: np.nd
     for k, row in enumerate(spoken.rows):
         samples[(row["window"], row["sample"])].append(k)
     chosen = set(trained.tolist())
-    windows, flights, records, places, gains, masks, kinds = [], [], [], [], [], [], []
+    windows, flights, records, places, gains, masks, probes, kinds = [], [], [], [], [], [], [], []
     for (w, _), rows in samples.items():
         if not chosen & set(rows):
             continue
@@ -241,7 +247,7 @@ def window_split(round_: WindowRound, spoken: WindowSentences, advantages: np.nd
             counted = spoken.rows[k]["counted"] if k in chosen else 0
             built.append(window_flight(spoken.records[k], window, signals, drawn.batch.geometries[j], landings,
                                        table.airports.index(signals.airport), drawn.batch.readings[j].capture_row,
-                                       counted, step_s))
+                                       counted, step_s, probed_at(spoken.rows[k], counted)))
         own = [m for m, k in enumerate(rows) if k in chosen]
         windows.append(window)
         flights.append(built)
@@ -249,14 +255,22 @@ def window_split(round_: WindowRound, spoken: WindowSentences, advantages: np.nd
         places.append(own)
         gains.append(advantages[[rows[m] for m in own]])
         masks.append([spoken.allowed[rows[m]] for m in own])
+        at = [probed_at(spoken.rows[rows[m]], spoken.rows[rows[m]]["counted"]) for m in own]
+        probes.append([-1 if step is None else step for step in at])
         kinds.append(round_.kinds[w])
-    return WindowSplit(table, windows, flights, records, places, gains, masks), kinds
+    return WindowSplit(table, windows, flights, records, places, gains, masks, probes), kinds
+
+
+def probed_at(row: Mapping[str, Any], counted: int) -> int | None:
+    """The own step a probe said a row's go-around at, when inside its counted steps (None: none there)."""
+    return row["forced"] if row["forced"] is not None and row["forced"] < counted else None
 
 
 def preflight(model: Prior, base: Prior, round_: WindowRound, speaking: WindowSpeaking, table: Split,
               config: RewardConfig, device: torch.device, step_s: float, log: Any) -> dict[str, Any]:
     """Before anything is spoken (the formal run's size, not a smoke's): round 1's `PREFLIGHT_WINDOWS` costliest windows
-    (by their time limits) spoken twice in this process, and the costliest sample scored as the pass scores it — every
+    (by their time limits with a go-around's time) spoken twice in this process — with probes, every cleared aircraft
+    made to go around at once (a go-around's sentence is the longest to score) — and the costliest sample scored as the pass scores it — every
     aircraft trained, in blocks of steps, the layers recomputed in the backward — beside the speaking processes on the
     GPU: its peak. Refused (the run does not start) when it does not fit. "Costliest" is `part_cost`'s, the whole
     encoding's (pairs weigh most); in blocks the time attention's share grows, so the pick is the likely largest, and
@@ -271,10 +285,12 @@ def preflight(model: Prior, base: Prior, round_: WindowRound, speaking: WindowSp
 
     costliest = sorted(range(len(drawn.windows)), key=bound)[-PREFLIGHT_WINDOWS:]
     part = WindowRound(drawn_subset(drawn, costliest), [round_.kinds[w] for w in costliest])
+    # with probes, every cleared aircraft goes around at once: a go-around's sentences are the longest to score
+    probed = 2 if speaking.probe_samples else 0
     spoken = window_sentences(model, part.drawn, list(range(len(costliest))), "scene", speaking.words, speaking.params,
                               speaking.landings, speaking.every_landing, 2,
                               generator=torch.Generator(device=device).manual_seed(0), temperature=1.0,
-                              procedure_masks=speaking.procedures)
+                              procedure_masks=speaking.procedures, probe_samples=probed, probe_margin=math.inf)
     for row in spoken.rows:                              # a contrast for every aircraft: every one trained
         row["reward"], row["starts_in_a_loss"] = float(row["sample"]), False
     advantages, trained = window_advantages(spoken.rows, 2)
@@ -282,7 +298,7 @@ def preflight(model: Prior, base: Prior, round_: WindowRound, speaking: WindowSp
     costs = [scoring_cost(w, f, step_s) for w, f in zip(split.windows, split.flights)]
     s = int(np.argmax(costs))
     one = WindowSplit(split.table, [split.windows[s]], [split.flights[s]], [split.records[s]], [split.trained[s]],
-                      [split.advantages[s]], [split.allowed[s]])
+                      [split.advantages[s]], [split.allowed[s]], [split.forced[s]])
     tuner = WindowRewardTuner(copy.deepcopy(model), base, config, device, seed=0, traffic_learning_rate=0.0,
                               step_s=step_s)
     frozen = copy.deepcopy(model).eval()
@@ -290,7 +306,7 @@ def preflight(model: Prior, base: Prior, round_: WindowRound, speaking: WindowSp
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats(device)
     try:
-        _, logits, _, _, _, _ = tuner._window_scored(one, [0], frozen)
+        _, logits, _, _, _, _, _ = tuner._window_scored(one, [0], frozen)
         sum(x.float().logsumexp(-1).sum() for x in logits).backward()
     except torch.OutOfMemoryError as error:
         raise SystemExit(f"preflight: the costliest window sample (cost {costs[s]:.0f}) does not fit the GPU beside "
@@ -312,7 +328,8 @@ def split_of_kinds(split: WindowSplit, kinds: Sequence[str], of: Sequence[bool])
     keep = [s for s, kind in enumerate(kinds) if (kind == "real") in of]
     return WindowSplit(split.table, [split.windows[s] for s in keep], [split.flights[s] for s in keep],
                        [split.records[s] for s in keep], [split.trained[s] for s in keep],
-                       [split.advantages[s] for s in keep], [split.allowed[s] for s in keep])
+                       [split.advantages[s] for s in keep], [split.allowed[s] for s in keep],
+                       [split.forced[s] for s in keep])
 
 
 def landing_gap_s(window: Any, runway: str, landing_s: float, commanded: Sequence[tuple[float, str]]) -> float | None:
@@ -439,7 +456,8 @@ def write_choice(out: Path, history: Sequence[Mapping[str, Any]], labelled: Mapp
 
 def write_sentences(path: Path, spoken: WindowSentences, advantages: np.ndarray) -> None:
     """A round's words kept (R32's ``sentences.npz``): per aircraft sentence its window, key, sample, the words it said to
-    its own end (``said`` over ``step_offsets``), its outcome, runway, reward and advantage."""
+    its own end (``said`` over ``step_offsets``), its outcome, runway, reward and advantage, whether a probe watched it
+    and the own step a probe said a go-around for it at (``forced``, −1: none)."""
     said = [record.grid[: row["said_steps"]] for row, record in zip(spoken.rows, spoken.records)]
     np.savez_compressed(path, window=np.array([r["window"] for r in spoken.rows]),
                         dataset_id=np.array([r["dataset_id"] for r in spoken.rows]),
@@ -448,7 +466,9 @@ def write_sentences(path: Path, spoken: WindowSentences, advantages: np.ndarray)
                         said=np.concatenate(said).astype(np.int16),
                         outcome=np.array([r["outcome"] for r in spoken.rows]),
                         runway=np.array([r["runway"] for r in spoken.rows]),
-                        reward=np.array([r["reward"] for r in spoken.rows]), advantage=advantages)
+                        reward=np.array([r["reward"] for r in spoken.rows]), advantage=advantages,
+                        probed=np.array([r["probed"] for r in spoken.rows]),
+                        forced=np.array([-1 if r["forced"] is None else r["forced"] for r in spoken.rows]))
 
 
 def history_row(round_number: int, readout: Mapping[str, Any], **more: Any) -> dict[str, Any]:
@@ -459,10 +479,14 @@ def history_row(round_number: int, readout: Mapping[str, Any], **more: Any) -> d
             "traffic": readout["traffic"], **more}
 
 
-def round_summary(round_: WindowRound, spoken: WindowSentences, trained: np.ndarray) -> dict[str, Any]:
-    """How a round's sentences did: the reward, lost separation and the executor's landed share, in all and per kind;
-    the aircraft sentences trained on, those starting in a loss."""
+def round_summary(round_: WindowRound, spoken: WindowSentences, trained: np.ndarray,
+                  advantages: np.ndarray) -> dict[str, Any]:
+    """How a round's sentences did: the reward, lost separation and the executor's landed share, in all, per kind and
+    for the unprobed and the probed samples apart; the aircraft sentences trained on, those starting in a loss; and the
+    go-arounds (multi-aircraft design §6.6 step 8): said by the model, said by a probe, and a probe's learned (its
+    sentence trained on, its advantage above 0)."""
     rows = spoken.rows
+    taught = set(trained.tolist())
 
     def shares(members: Sequence[Mapping[str, Any]]) -> dict[str, float]:
         return {"sentences": len(members), "reward": float(np.mean([r["reward"] for r in members])),
@@ -473,7 +497,13 @@ def round_summary(round_: WindowRound, spoken: WindowSentences, trained: np.ndar
             "by_kind": {kind: shares([r for r in rows if r["kind"] == kind]) for kind in sorted({r["kind"] for r in rows})},
             "windows": len(round_.drawn.windows), "kinds": dict(Counter(round_.kinds)),
             "aircraft_sentences": len(rows), "trained_on": int(len(trained)),
-            "starting_in_a_loss": sum(r["starts_in_a_loss"] for r in rows)}
+            "starting_in_a_loss": sum(r["starts_in_a_loss"] for r in rows),
+            "unprobed": shares([r for r in rows if not r["probed"]]),
+            "probed": shares([r for r in rows if r["probed"]]) if any(r["probed"] for r in rows) else None,
+            "go_arounds": {"said_by_the_model": sum(r["go_around"] is not None and r["forced"] is None for r in rows),
+                           "said_by_a_probe": sum(r["forced"] is not None for r in rows),
+                           "probes_learned": sum(r["forced"] is not None and k in taught and advantages[k] > 0.0
+                                                 for k, r in enumerate(rows))}}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -497,6 +527,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--aircraft-steps", type=int, default=SPEAKER_AIRCRAFT_STEPS, help="a loop batch's most")
     parser.add_argument("--traffic-learning-rate", type=float, default=TRAFFIC_LEARNING_RATE)
     parser.add_argument("--passes", type=int, default=1, help="sweeps over a round's sentences")
+    parser.add_argument("--probe-samples", type=int, default=0, help="a training round's samples a window probed for "
+                        "a go-around (multi-aircraft design §6.6 step 8 item 10; 0: none)")
+    parser.add_argument("--probe-margin", type=float, default=PROBE_MARGIN, help="a probe's go-around: the first step "
+                        "a cleared aircraft's tightest margin was under this")
+    parser.add_argument("--imitation-weight", type=float, default=IMITATION_WEIGHT, help="a probe's word learned: "
+                        "this × its advantage × its cross-entropy, where the advantage is above 0")
     parser.add_argument("--device", default="cuda", help="the prior's; the executor flies on CPU")
     parser.add_argument("--smoke", action="store_true", help="a dirty tree allowed; the runs are marked smoke")
     for field, default in asdict(RewardConfig()).items():
@@ -516,6 +552,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--rounds is the last round to run, 0 or more")
     if args.samples < 2:
         parser.error("an aircraft's sentences are compared with each other: --samples ≥ 2")
+    if not 0 <= args.probe_samples < args.samples:
+        parser.error(f"--probe-samples {args.probe_samples}: some of a window's {args.samples} samples unprobed")
+    if args.probe_samples and args.passes != 1:
+        parser.error("a probe's word is learned outside the clipped ratio, with no bound across sweeps: --passes 1")
+    if not args.probe_margin > 0.0 or not args.imitation_weight >= 0.0:
+        parser.error("--probe-margin above 0, --imitation-weight at least 0")
     if args.passes < 1:
         parser.error("--passes is the sweeps over a round's sentences, 1 or more")
     if args.data_weight <= 0.0:
@@ -586,6 +628,7 @@ def main(argv: list[str] | None = None) -> int:
         "optimiser": asdict(config), "traffic_learning_rate": args.traffic_learning_rate, "rounds": args.rounds,
         "real_per_airport": args.real_per_airport, "augmented_per_airport": args.augmented_per_airport,
         "samples": args.samples, "pool_factor": POOL_FACTOR, "aircraft_steps": args.aircraft_steps,
+        "probes": {"samples": args.probe_samples, "margin": args.probe_margin, "imitation_weight": args.imitation_weight},
         "speakers": args.speakers, "busiest_training_step": most,
         "data": {"split": "train", "scene_samples": len(data), "built": data_counts},
         "select": {"per_airport": args.select_per_airport, "samples": args.select_samples, "drawn": select_draw.counts,
@@ -690,7 +733,8 @@ def main(argv: list[str] | None = None) -> int:
                          f"wait for the other jobs")
     gc.collect()
     gc.freeze()
-    speaking = WindowSpeaking(words, params, landings, start_masks, args.aircraft_steps, every_landing)
+    speaking = WindowSpeaking(words, params, landings, start_masks, args.aircraft_steps, every_landing,
+                              args.probe_samples, args.probe_margin)
     speakers = Speakers(args.speakers, lambda n: train_round(n)[0],
                         {"real": select_real, "augmented": select_augmented}, model, args.device, speaking)
     model.to(device)
@@ -711,7 +755,8 @@ def main(argv: list[str] | None = None) -> int:
                              f"({history[0]['real']['ordering']}): no round could be chosen — not training")
         last = 0
     tuner = WindowRewardTuner(model, base, config, device, seed=args.seed,
-                              traffic_learning_rate=args.traffic_learning_rate, step_s=step_s)
+                              traffic_learning_rate=args.traffic_learning_rate, step_s=step_s,
+                              imitation_weight=args.imitation_weight)
     if last > 0:
         tuner.load_state(torch.load(out / f"round_{last:02d}" / OPTIMISER_FILE, map_location="cpu", weights_only=True))
     if args.resume:
@@ -728,17 +773,18 @@ def main(argv: list[str] | None = None) -> int:
         if device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(device)
         advantages, trained = window_advantages(spoken.rows, args.samples)
-        described = {**round_summary(round_, spoken, trained), **drawn_counts}
+        described = {**round_summary(round_, spoken, trained, advantages), **drawn_counts}
         write_sentences(directory / "sentences.npz", spoken, advantages)
         write_json_atomic(directory / "sentences.json", {
             **described, "aircraft": [{k: r[k] for k in ("window", "dataset_id", "sample", "kind", "role", "reward",
-                                                         "outcome", "own", "counted", "starts_in_a_loss")}
+                                                         "outcome", "own", "counted", "starts_in_a_loss", "probed",
+                                                         "forced", "go_around")}
                                       | {"advantage": float(a)} for r, a in zip(spoken.rows, advantages)]})
         log(f"round {round_number}: {len(spoken.rows)} aircraft sentences in {len(round_.drawn.windows)} windows, "
             f"reward {described['all']['reward']:.3f} ("
             + " ".join(f"{k} {v['reward']:.3f}" for k, v in described["by_kind"].items())
             + f"), lost separation {described['all']['lost_separation']:.3f}, {len(trained)} trained on, "
-              f"{described['starting_in_a_loss']} starting in a loss")
+              f"{described['starting_in_a_loss']} starting in a loss; go-arounds {described['go_arounds']}")
         split, sample_kinds = window_split(round_, spoken, advantages, trained, table, landings, step_s)
         start_distance, measured_on = {}, {}
         for side, of in (("real", (True,)), ("augmented", (False,))):

@@ -117,9 +117,10 @@ def training_round(row: Mapping[str, Any]) -> dict[str, Any]:
     """A training round's sentences and pass (its ``history.json`` row)."""
     sentences, passed = row["sentences"], row["train_pass"]
     return {"sentences": {k: sentences[k] for k in ("windows", "kinds", "aircraft_sentences", "trained_on",
-                                                    "starting_in_a_loss", "all", "by_kind")},
+                                                    "starting_in_a_loss", "all", "by_kind", "unprobed", "probed",
+                                                    "go_arounds")},
             "pass": {k: passed[k] for k in ("batches", "sentences", "reward_mean", "kl_mean", "kl_max", "clipped_share",
-                                            "data_mean", "distance_at_start")}}
+                                            "data_mean", "imitation_mean", "distance_at_start")}}
 
 
 def read_run(run: Path) -> dict[str, Any]:

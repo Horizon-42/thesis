@@ -4,6 +4,7 @@ fixture (a tmp artefact)."""
 
 from __future__ import annotations
 
+import math
 from types import SimpleNamespace
 
 import pytest
@@ -140,7 +141,7 @@ def _scene_airport(tmp_path, monkeypatch):
 
 
 def _window_loop(model, airport, signals, spec, commanded, *, alone=False, seed=4, samples=1, limits=None,
-                 procedure_masks=None, given=None, go_around_extra_s=0.0):
+                 procedure_masks=None, given=None, go_around_extra_s=0.0, probing=None, probe_margin=1.5):
     """A `WindowLoop` of ``commanded`` (the keys of each window, ``samples`` times each; ``limits``: each window's time
     limit, `LIMIT_S` by default). No time for a go-around by default: these tests compare the window loop with the
     one-aircraft scene loop, which gives none (the untrained model says go-arounds)."""
@@ -160,7 +161,7 @@ def _window_loop(model, airport, signals, spec, commanded, *, alone=False, seed=
     return WindowLoop(model, windows, flights, [geometry] * len(flights), *physics, per_aircraft, Words(spec),
                       _params(), None, generator=torch.Generator().manual_seed(seed), temperature=1.0,
                       procedure_masks=procedure_masks or ProcedureMasks.none(), alone=alone, given=given,
-                      go_around_extra_s=go_around_extra_s)
+                      go_around_extra_s=go_around_extra_s, probing=probing, probe_margin=probe_margin)
 
 
 def _one_aircraft_reference(model, airport, signals, spec, keys, limits, seed, procedure_masks=None, alone=False):
@@ -1065,6 +1066,60 @@ def test_a_go_around_gives_its_sentence_more_time_and_its_margins_are_kept(tmp_p
     # its flight is not cut at the old limit: a time limit's end comes at the new one
     assert got.own != "timeout" or (len(loop.states[0]) - 1) * STEP_S > base
     assert np.isfinite(loop.margin).any() and (loop.margin >= 0.0).all()
+
+
+def test_a_probe_watches_an_established_aircraft_speaking_its_own_words_until_its_margin_is_under_the_trigger(
+        tmp_path, monkeypatch):
+    """Multi-aircraft design §6.6 step 8 item 10: a probe says a go-around for an aircraft it watches — speaking its own
+    words, cleared, established on its final (its executor's capture), no go-around said yet — at the first step its
+    tightest margin at its step before was under the trigger (an infinite one: at once); never for one not probed."""
+    import numpy as np
+
+    from ts_transformer.experiments.traffic_window import Given
+    from ts_transformer.instructions.words import APPROACH, APPROACH_CLEARED, APPROACH_GO_AROUND, APPROACH_NOT_CLEARED
+
+    airport, signals, spec, groups, limits, masks = _busy_windows(tmp_path, monkeypatch)
+    model = _traffic_model(spec)
+    count = sum(len(g) for g in groups)
+    loop = _window_loop(model, airport, signals, spec, groups, seed=0, limits=limits, procedure_masks=masks,
+                        probing=np.arange(count) < count - 1, probe_margin=1.5)
+    while loop.speaker.step < int(loop.first_spoken.max()) + 3:
+        loop.step()
+    k = loop.speaker.step - loop.start - 9                      # each aircraft's own step about to be said (N_LOOK 8)
+    speaking = k >= 1
+    for i in range(count):                                      # every one cleared, established, its margin 1.2 before
+        loop.speaker.value[i, APPROACH] = APPROACH_CLEARED + 1
+        loop.states[i][-1].captured = True
+        loop.margin[i, max(int(k[i]) - 1, 0)] = 1.2
+    loop.go_around_step[:] = -1
+    expected = np.where(speaking & (np.arange(count) < count - 1), APPROACH_GO_AROUND + 1, -1)
+    assert (loop._probes(k, speaking, None)[:, APPROACH] == expected).all()
+    # each condition alone stops it
+    loop.margin[0, int(k[0]) - 1] = 1.6
+    loop.states[1][-1].captured = False
+    loop.speaker.value[2, APPROACH] = APPROACH_NOT_CLEARED + 1
+    loop.go_around_step[3] = 0
+    given = np.full((count, 6), -1)
+    given[4] = 0                                                # its line given this step: its own words are not
+    got = loop._probes(k, speaking, given)[:, APPROACH]
+    assert (got[:5] == -1).all() and (got[5:] == expected[5:]).all()
+    # an infinite trigger: whatever the margin
+    loop.probe_margin = math.inf
+    assert loop._probes(k, speaking, None)[0, APPROACH] == APPROACH_GO_AROUND + 1
+
+
+def test_probes_change_nothing_for_the_aircraft_they_do_not_fire_for(tmp_path, monkeypatch):
+    """With no probe's go-around said, a probed loop is the unprobed one."""
+    import numpy as np
+
+    airport, signals, spec, groups, limits, masks = _busy_windows(tmp_path, monkeypatch)
+    model = _traffic_model(spec)
+    count = sum(len(g) for g in groups)
+    plain = _flown(_window_loop(model, airport, signals, spec, groups, seed=0, limits=limits, procedure_masks=masks))
+    probed = _flown(_window_loop(model, airport, signals, spec, groups, seed=0, limits=limits, procedure_masks=masks,
+                                 probing=np.ones(count, dtype=bool), probe_margin=1e-9))
+    assert all(r.forced is None for r in probed.results())
+    _same_loops(plain, probed)
 
 
 def test_the_margins_kept_are_the_judges_at_each_aircrafts_own_step(tmp_path, monkeypatch):

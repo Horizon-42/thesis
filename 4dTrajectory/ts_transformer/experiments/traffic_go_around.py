@@ -56,6 +56,12 @@ CLIMB_ZERO_SHARE = 2.0
 #: Q: full within, nothing from (R40 v2: 420.9 s and 597.6 s)
 RETURN_FULL_S = 421.0
 RETURN_ZERO_S = 598.0
+#: the probes (multi-aircraft design §6.6 step 8 item 10, my provisional choice): a probe says a go-around for a cleared
+#: aircraft established on its final at the first step its tightest margin went under this; a probe's go-around that did
+#: better than its aircraft's samples is learned by a cross-entropy of this weight times its advantage (its own word: the
+#: probe, not the model, said it)
+PROBE_MARGIN = 1.5
+IMITATION_WEIGHT = 1.0
 #: the ends a go-around's sentence is scored on: landed (with its direction), a time limit (safe, not landed)
 LANDED, TIMEOUT = "landed", "timeout"
 
