@@ -11,7 +11,7 @@
 | 两层模型的读数 | [`two_tier/readouts/2026-09-24_prior_readouts.zh.md`](two_tier/readouts/2026-09-24_prior_readouts.zh.md)（先验、后训练、重建后的重读）；词表第一版的读数 `two_tier/readouts/2026-09-23_instruction_labels_readout.zh.md`（记录）；多机：平行跑道与交叉跑道上的间隔（英文，附航迹实例）[`two_tier/readouts/2026-09-27_parallel_runway_separation.md`](two_tier/readouts/2026-09-27_parallel_runway_separation.md)；新颖性评估与投稿建议（与自动驾驶的异同）[`two_tier/readouts/2026-09-28_novelty_assessment.zh.md`](two_tier/readouts/2026-09-28_novelty_assessment.zh.md) |
 | 包的契约、默认值、布局、runner、陷阱的全文 | [`reference/`](reference/)，按编号查（`grep -n '^### C7 ·' reference/*.md`）；单模型路径 2026-09-10 以前的证据在 [`reference/ENGINEERING_NOTES.md`](reference/ENGINEERING_NOTES.md) |
 | 发布一次实验 | [`experiments/intents.json`](experiments/intents.json)（没有条目，发布脚本拒绝）和代码仍在的实验的配置（`experiments/*_arms.json`） |
-| 两个骨干网络怎么工作 | [`tutorials/`](tutorials/)：iTransformer / PatchTST 教程（机制准确，文中的项目路径是 2026-07 的）、条件化综述、多机终止调研 |
+| 两个骨干网络怎么工作 | [`tutorials/`](tutorials/)：iTransformer / PatchTST 教程（机制准确，文中的项目路径是 2026-07 的）、条件化综述、多机终止调研、`einsum` 交互教程（`einsum_tutorial.zh.html`，读 `prior/model.py` 的注意力时用） |
 | 查一次已经做完的实验 | [`history/README.md`](history/README.md)（按研究线，一份一行：问的什么、结论、现在在哪） |
 
 ## 目录

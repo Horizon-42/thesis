@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>einsum 交互教程</title>
+<style>
+:root{
+  --bg:#fafaf7; --card:#ffffff; --ink:#1d2430; --muted:#5d6675; --line:#dfe2e8;
+  --kept:#1f6fd1; --kept-bg:#e3eefb; --sum:#c25b00; --sum-bg:#fdeedd;
+  --hl:#fff3b8; --sel:#b9e6c4; --ok:#1c7a3e; --bad:#b3261e; --code:#f1f3f6;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#14171c; --card:#1c2027; --ink:#e6e9ef; --muted:#9aa4b2; --line:#303744;
+    --kept:#6aa8f5; --kept-bg:#1d3150; --sum:#f0a45a; --sum-bg:#4a3118;
+    --hl:#5a4c12; --sel:#1f5a33; --ok:#5fd18a; --bad:#ff8a80; --code:#262b34;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 -apple-system,"Segoe UI","PingFang SC","Noto Sans CJK SC",sans-serif}
+main{max-width:980px;margin:0 auto;padding:24px 16px 80px}
+h1{font-size:1.7rem;margin:.2em 0}
+h2{font-size:1.3rem;margin:2.2em 0 .5em;padding-top:.4em;border-top:1px solid var(--line)}
+h3{font-size:1.05rem;margin:1.4em 0 .4em}
+p{margin:.5em 0}
+.lead{color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0}
+code,.mono{font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace}
+code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:.92em}
+pre{background:var(--code);padding:12px;border-radius:8px;overflow:auto;font-size:.88rem;line-height:1.5;margin:.6em 0}
+.rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.rules .card{margin:0}
+.L{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:700;padding:0 3px;border-radius:3px}
+.L.kept{color:var(--kept);background:var(--kept-bg)}
+.L.sum{color:var(--sum);background:var(--sum-bg)}
+.L.none{background:var(--code)}
+button,input,select{font:inherit;color:inherit}
+button{background:var(--card);border:1px solid var(--line);border-radius:7px;padding:5px 11px;cursor:pointer}
+button:hover{border-color:var(--kept)}
+button.on{background:var(--kept-bg);border-color:var(--kept);color:var(--kept)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
+#spec{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.15rem;padding:7px 10px;border:1px solid var(--line);border-radius:7px;background:var(--card);min-width:min(100%,340px)}
+.err{color:var(--bad);min-height:1.4em;font-size:.92rem}
+.sizes{display:flex;flex-wrap:wrap;gap:10px}
+.stepper{display:flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:7px;padding:2px 6px;background:var(--card)}
+.stepper button{padding:0 8px;line-height:1.4}
+table.roles{border-collapse:collapse;width:100%;font-size:.92rem}
+table.roles th,table.roles td{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}
+.tensors{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
+.tbox{min-width:120px}
+.tname{font-weight:600;margin-bottom:4px}
+.tshape{font-weight:400;color:var(--muted);margin-left:6px;font-size:.88rem}
+.slice{margin:0 0 8px}
+.slabel{font-size:.78rem;color:var(--muted);margin-bottom:2px}
+table.t{border-collapse:separate;border-spacing:2px}
+td.cell{min-width:34px;height:30px;text-align:center;border:1px solid var(--line);border-radius:4px;background:var(--card);font-family:ui-monospace,Menlo,Consolas,monospace}
+td.cell.hl{background:var(--hl);border-color:var(--sum)}
+td.cell.sel{background:var(--sel);border-color:var(--ok);font-weight:700}
+td.cell.click{cursor:pointer}
+td.cell.click:hover{border-color:var(--kept)}
+.op{font-size:1.6rem;align-self:center;color:var(--muted)}
+.terms{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.88rem;line-height:1.7}
+.sentence{font-size:1.02rem}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.chip{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.1rem;padding:3px 9px;border:1px solid var(--line);border-radius:7px;background:var(--card);cursor:pointer}
+.chip.on{background:var(--kept-bg);border-color:var(--kept)}
+.cmp{width:100%;border-collapse:collapse;font-size:.92rem}
+.cmp th,.cmp td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}
+.yes{color:var(--ok);font-weight:700}.no{color:var(--bad);font-weight:700}
+.q{margin:14px 0}
+.opt{display:block;width:100%;text-align:left;margin:5px 0}
+.opt.right{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 15%,var(--card))}
+.opt.wrong{border-color:var(--bad);background:color-mix(in srgb,var(--bad) 15%,var(--card))}
+.fb{font-size:.92rem;margin-top:4px}
+nav{position:sticky;top:0;background:var(--bg);padding:8px 0;border-bottom:1px solid var(--line);z-index:5;display:flex;gap:14px;flex-wrap:wrap;font-size:.92rem}
+nav a{color:var(--kept);text-decoration:none}
+.small{font-size:.88rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+<h1>einsum 交互教程</h1>
+<p class="lead">目标：看到 <code>torch.einsum("btihc,btjhc-&gt;bthij", q, k)</code> 这样的一行，能读懂它在算什么，会自己写，并知道它和 <code>matmul</code> 的区别。页面里所有数字都是现场用 JavaScript 按 einsum 的定义算出来的，可以随便改。</p>
+
+<nav>
+  <a href="#s0">1 三条规则</a><a href="#s1">2 实验台</a><a href="#s2">3 读项目里的一行</a>
+  <a href="#s3">4 和 matmul 的区别</a><a href="#s4">5 自测</a>
+</nav>
+
+<h2 id="s0">1　三条规则</h2>
+<div class="rules">
+  <div class="card"><b>① 字符串是在给每一维起名字</b><br>
+  <code>"ij,jk-&gt;ik"</code> 的意思是：第一个张量有两维，叫 <span class="L kept">i</span>、<span class="L sum">j</span>；第二个也有两维，叫 <span class="L sum">j</span>、<span class="L kept">k</span>；结果有两维，叫 <span class="L kept">i</span>、<span class="L kept">k</span>。传字符串，是因为这里的"名字"本来就不是数据，是在声明每一维的含义。</div>
+  <div class="card"><b>② 同名的维，对齐后逐元素相乘</b><br>
+  同一个字母出现在多个输入里，这些维的下标要一致。比如 <span class="L sum">j</span> 取 0 时，第一个张量的 j=0 那一列，只和第二个张量的 j=0 那一行相乘。</div>
+  <div class="card"><b>③ 不在箭头右边的字母，被求和消掉</b><br>
+  出现在输入里、却没有出现在输出里的字母（橙色），沿它把乘积加起来。出现在输出里的字母（蓝色）则每个取值各算一份，保留下来。</div>
+</div>
+<p class="small">一句话：<b>蓝色的字母是"保留下来的下标"，橙色的字母是"被加掉的下标"。</b>输出里的每个元素 = 固定蓝色下标，把橙色下标的所有取值对应的乘积加起来。</p>
+
+<h2 id="s1">2　实验台：改字符串，看它怎么算</h2>
+<div class="card">
+  <div class="row">
+    <input id="spec" value="ik,kj->ij" spellcheck="false" autocomplete="off" aria-label="einsum 字符串">
+    <button id="reseed">换一批数字</button>
+  </div>
+  <div class="row" id="presets"></div>
+  <div class="err" id="err"></div>
+  <p class="sentence" id="reading"></p>
+  <div class="sizes" id="sizes"></div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">每个字母的角色</h3>
+  <table class="roles" id="roles"></table>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">张量（点击右边结果里的任一格）</h3>
+  <div class="tensors" id="tensors"></div>
+  <p class="small">黄色 = 参与所选结果格的输入元素；绿色 = 所选的结果格。</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">所选结果格是怎么加出来的</h3>
+  <div class="terms" id="terms"></div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">等价的循环写法</h3>
+  <pre id="loops"></pre>
+  <p class="small">einsum 的全部语义就是这几层循环：先为"保留的字母"各开一层循环，再为"被求和的字母"开内层循环，把各输入在这些下标处的值相乘，累加进结果。框架做的只是把它算得很快。</p>
+</div>
+
+<h2 id="s2">3　读项目里的那一行</h2>
+<div class="card">
+  <pre style="font-size:1rem">scores = torch.einsum("btihc,btjhc-&gt;bthij", q, k) / math.sqrt(head)</pre>
+  <p>点下面的字母，看它在 <code>prior/model.py</code> 的交通注意力里指什么：</p>
+  <div class="chips" id="chips"></div>
+  <div id="chipText" class="sentence"></div>
+  <hr style="border:none;border-top:1px solid var(--line)">
+  <p><b>读法：</b>先看箭头右边，输出是 <code>b t h i j</code>，所以这五个字母保留。左边多出来的只有 <span class="L sum">c</span>（每头 32 维里的通道），所以沿 c 求和。同名的 <code>b t h</code> 在 q 和 k 里对齐：同一个场景、同一步、同一个头才互相配对。<span class="L kept">i</span> 只在 q 里、<span class="L kept">j</span> 只在 k 里，各自保留，于是对每一对 (i, j) 都得到一个点积，也就是 A×A 的分数表。</p>
+  <p><b>等价的数学式：</b><br><span class="mono">scores[b,t,h,i,j] = Σ<sub>c</sub> q[b,t,i,h,c] · k[b,t,j,h,c]</span></p>
+  <div class="row"><button id="loadLine">把它放进上面的实验台（b=1, t=1, i=3, j=3, h=2, c=2）</button>
+  <button id="loadLine2">再看同一个函数里的第二处：加权求和</button></div>
+</div>
+
+<h2 id="s3">4　和 matmul 的区别</h2>
+<div class="card">
+  <p><code>matmul</code> 只会做<b>一种</b>运算，规则是固定的：</p>
+  <p class="mono" style="font-size:.95rem">matmul(A, B)　≡　einsum("...ik,...kj-&gt;...ij", A, B)</p>
+  <p>也就是：A 的<b>最后一维</b>和 B 的<b>倒数第二维</b>相乘求和；前面所有的维当作"批"，按广播对齐。哪一维求和、哪一维当批，位置是死的，不由你选。</p>
+  <p><code>einsum</code> 则是<b>你自己说</b>：哪些维对齐、哪些求和、结果怎么排。因此：</p>
+  <ul>
+    <li>维度不在 matmul 要求的位置时，用 matmul 要先 <code>permute</code>/<code>transpose</code>/<code>reshape</code>，einsum 直接写字母。</li>
+    <li>matmul 做不到的（外积、迹、对角线、把两个张量逐元素乘再沿任意维求和）einsum 一行就行。</li>
+    <li>反过来，只是普通的矩阵乘时，两者等价，<code>@</code> 更短也更直接。einsum 在做求和型运算时通常会在内部整理成批量矩阵乘，所以速度不必然更慢，但这一点取决于具体情况，我没有在这个项目上测过。</li>
+  </ul>
+  <p class="small">点下面表格里的"试一试"，会把那个 einsum 放进上面的实验台。</p>
+  <div style="overflow:auto"><table class="cmp" id="cmp"></table></div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">亲手验证：用 matmul 复现项目里那一行</h3>
+  <p>先把 q 排成 <code>[b,t,h,i,c]</code>，把 k 排成 <code>[b,t,h,c,j]</code>（把 h 提到批维，c 放到 matmul 要求的位置），再做批量矩阵乘；结果的下标顺序恰好就是 <code>b t h i j</code>。下面用两种方法各算一遍，比较是否相同。</p>
+<pre>q2 = q.permute(0, 1, 3, 2, 4)      # [b,t,i,h,c] → [b,t,h,i,c]
+k2 = k.permute(0, 1, 3, 4, 2)      # [b,t,j,h,c] → [b,t,h,c,j]
+scores = q2 @ k2                   # [b,t,h,i,j]
+# 等价于 torch.einsum("btihc,btjhc-&gt;bthij", q, k)</pre>
+  <div class="row"><button id="verify">运行两种算法并比较</button></div>
+  <pre id="verifyOut" class="small">（点上面的按钮）</pre>
+</div>
+
+<h2 id="s4">5　自测</h2>
+<div id="quiz"></div>
+<div class="card" id="score" style="display:none"></div>
+
+</main>
+
+<script>
+/* ===== 引擎：einsum 的定义，直接实现 ===== */
+function parseSpec(spec){
+  spec = spec.replace(/\s+/g,'');
+  const m = spec.match(/^([a-z,]+)->([a-z]*)$/);
+  if(!m) throw new Error('格式应为 "ij,jk->ik"：小写字母，用 -> 分隔输入和输出，输入之间用逗号');
+  const ins = m[1].split(',');
+  if(ins.some(s=>s.length===0)) throw new Error('每个输入至少要有一个字母（标量请单独写成别的写法，这里不支持）');
+  const out = m[2];
+  if(new Set(out).size !== out.length) throw new Error('输出里的字母不能重复');
+  const inLetters = new Set(ins.join(''));
+  for(const l of out) if(!inLetters.has(l)) throw new Error('输出里的字母 "'+l+'" 没有出现在任何输入里');
+  if(ins.length>3) throw new Error('这个页面最多支持 3 个输入');
+  return {ins, out, letters:[...inLetters]};
+}
+function prod(a){ return a.reduce((x,y)=>x*y,1); }
+function makeTensor(letters, sizes, opIdx, seed){
+  const shape = [...letters].map(l=>sizes[l]);
+  const n = prod(shape), data = new Array(n);
+  for(let f=0; f<n; f++) data[f] = ((f*7 + opIdx*3 + seed*5) % 3) + 1;
+  return {letters, shape, data};
+}
+function flatIndex(t, assign){
+  let f = 0;
+  for(let d=0; d<t.letters.length; d++) f = f*t.shape[d] + assign[t.letters[d]];
+  return f;
+}
+function einsum(spec, tensors, sizes){
+  const outShape = [...spec.out].map(l=>sizes[l]);
+  const out = {letters:spec.out, shape:outShape, data:new Array(prod(outShape)).fill(0)};
+  const assign = {};
+  const rec = d => {
+    if(d === spec.letters.length){
+      let p = 1;
+      for(const t of tensors) p *= t.data[flatIndex(t, assign)];
+      out.data[flatIndex(out, assign)] += p;
+      return;
+    }
+    const l = spec.letters[d];
+    for(let v=0; v<sizes[l]; v++){ assign[l] = v; rec(d+1); }
+  };
+  rec(0);
+  return out;
+}
+/* ===== 引擎结束 ===== */
+
+const NAMES = ['A','B','C'];
+const PRESETS = [
+  {s:'i,i->',        n:'点积',        z:{i:3}},
+  {s:'ik,kj->ij',    n:'矩阵乘',      z:{i:2,k:3,j:2}},
+  {s:'bik,bkj->bij', n:'批量矩阵乘',  z:{b:2,i:2,k:2,j:2}},
+  {s:'ij->ji',       n:'转置',        z:{i:2,j:3}},
+  {s:'ij->i',        n:'沿 j 求和',   z:{i:3,j:3}},
+  {s:'i,j->ij',      n:'外积',        z:{i:3,j:3}},
+  {s:'ii->',         n:'迹（对角线求和）', z:{i:3}},
+  {s:'ij,ij->i',     n:'逐元素乘再沿 j 求和', z:{i:3,j:3}},
+  {s:'btihc,btjhc->bthij', n:'项目里的一行', z:{b:1,t:1,i:3,j:3,h:2,c:2}},
+];
+const sizes = {};
+let seed = 0, selection = {}, spec = null, tensors = [], result = null;
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const kind = l => (spec && spec.out.includes(l)) ? 'kept' : 'sum';
+const letterHTML = l => '<b class="L '+kind(l)+'">'+l+'</b>';
+
+function reading(){
+  const kept = [...spec.out], summed = spec.letters.filter(l=>!spec.out.includes(l));
+  const opnames = spec.ins.map((s,i)=>NAMES[i]+'['+[...s].map(letterHTML).join(',')+']').join(' · ');
+  const left = kept.length ? '对每一组 ('+kept.map(letterHTML).join(', ')+')' : '结果是一个单独的数';
+  const right = summed.length
+    ? '，把 '+opnames+' 乘起来，再沿 '+summed.map(letterHTML).join('、')+' 求和'
+    : '，把 '+opnames+' 乘起来（没有要求和的字母，所以只是逐元素相乘）';
+  const shared = spec.letters.filter(l => spec.ins.filter(s=>s.includes(l)).length>1);
+  const extra = shared.length ? ' 同名字母 '+shared.map(letterHTML).join('、')+' 在各输入里按下标对齐。' : '';
+  return left+right+'。'+extra;
+}
+function rolesTable(){
+  let h = '<tr><th>字母</th><th>大小</th><th>出现在</th><th>在输出里？</th><th>角色</th></tr>';
+  for(const l of spec.letters){
+    const where = spec.ins.map((s,i)=>s.includes(l)?NAMES[i]:null).filter(Boolean);
+    const inOut = spec.out.includes(l);
+    let role;
+    if(inOut && where.length>1) role = '各输入对齐，每个取值各算一份（批维）';
+    else if(inOut) role = '直接保留';
+    else if(where.length>1) role = '各输入对齐相乘，然后沿它求和（收缩）';
+    else role = '只在一个输入里，沿它求和';
+    h += '<tr><td>'+letterHTML(l)+'</td><td>'+sizes[l]+'</td><td>'+where.join('、')+'</td><td>'+(inOut?'是':'否')+'</td><td>'+role+'</td></tr>';
+  }
+  return h;
+}
+function loopsText(){
+  const kept = [...spec.out], summed = spec.letters.filter(l=>!spec.out.includes(l));
+  let s = '', ind = '';
+  for(const l of kept){ s += ind+'for '+l+' in range('+sizes[l]+'):\n'; ind += '    '; }
+  const outIdx = kept.length ? '['+kept.join(', ')+']' : '';
+  s += ind+'acc = 0\n';
+  let ind2 = ind;
+  for(const l of summed){ s += ind2+'for '+l+' in range('+sizes[l]+'):\n'; ind2 += '    '; }
+  const factors = spec.ins.map((x,i)=>NAMES[i]+'['+[...x].join(', ')+']').join(' * ');
+  s += ind2+'acc += '+factors+'\n';
+  s += ind+'out'+outIdx+' = acc';
+  return s;
+}
+function cellOK(t, assign, sel){
+  for(const l of t.letters) if(l in sel && sel[l] !== assign[l]) return false;
+  return true;
+}
+function renderTensor(t, name, sel, clickable){
+  const nd = t.letters.length;
+  const sh = '['+[...t.letters].map((l,i)=>letterHTML(l)+'='+t.shape[i]).join(', ')+']';
+  if(prod(t.shape) > 300) return '<div class="tbox"><div class="tname">'+name+'<span class="tshape">'+sh+'</span></div><span class="small">太大，不展示数值（把上面的大小调小）</span></div>';
+  let h = '<div class="tbox"><div class="tname">'+name+'<span class="tshape">'+sh+'</span></div>';
+  const lead = nd>=3 ? [...t.letters].slice(0, nd-2) : [];
+  const leadShape = lead.map(l=>sizes[l]);
+  const nSlices = prod(leadShape);
+  const rowL = nd>=2 ? t.letters[nd-2] : null, colL = nd>=1 ? t.letters[nd-1] : null;
+  const rows = rowL ? sizes[rowL] : 1, cols = colL ? sizes[colL] : 1;
+  for(let s=0; s<nSlices; s++){
+    const assign = {};
+    let rem = s;
+    for(let d=lead.length-1; d>=0; d--){ assign[lead[d]] = rem % leadShape[d]; rem = Math.floor(rem/leadShape[d]); }
+    if(lead.length) h += '<div class="slice"><div class="slabel">'+lead.map(l=>l+'='+assign[l]).join(', ')+'</div>';
+    else h += '<div class="slice">';
+    h += '<table class="t">';
+    for(let r=0; r<rows; r++){
+      h += '<tr>';
+      for(let c=0; c<cols; c++){
+        const a = Object.assign({}, assign);
+        if(rowL) a[rowL] = r;
+        if(colL) a[colL] = c;
+        // position in the flat array is positional; a letter repeated in one operand ("ii") only
+        // takes part where its indices are equal, so off-diagonal cells are shown but never highlighted
+        const f = (s*rows + r)*cols + c;
+        const ok = (rowL !== colL || r === c) && cellOK(t, a, sel);
+        const isSel = clickable && t.letters.length === Object.keys(sel).length && cellOK(t, a, sel);
+        const key = clickable ? ' data-a="'+[...t.letters].map(l=>l+'='+a[l]).join(',')+'"' : '';
+        h += '<td class="cell'+(clickable?' click':'')+(isSel?' sel':(!clickable&&ok?' hl':''))+'"'+key+'>'+t.data[f]+'</td>';
+      }
+      h += '</tr>';
+    }
+    h += '</table></div>';
+  }
+  return h+'</div>';
+}
+function termsHTML(){
+  const summed = spec.letters.filter(l=>!spec.out.includes(l));
+  const outDesc = spec.out ? [...spec.out].map(l=>l+'='+selection[l]).join(', ') : '（标量）';
+  const list = [];
+  const assign = Object.assign({}, selection);
+  const rec = d => {
+    if(d === summed.length){
+      const vals = tensors.map(t=>t.data[flatIndex(t, assign)]);
+      list.push({a:Object.assign({}, assign), vals, p:vals.reduce((x,y)=>x*y,1)});
+      return;
+    }
+    const l = summed[d];
+    for(let v=0; v<sizes[l]; v++){ assign[l] = v; rec(d+1); }
+  };
+  rec(0);
+  const total = list.reduce((x,y)=>x+y.p,0);
+  const cap = 24;
+  let h = '<div>结果格 ['+esc(outDesc)+'] = ';
+  h += summed.length ? '沿 '+summed.map(letterHTML).join('、')+' 的 '+list.length+' 个取值求和：' : '各输入对应元素相乘：';
+  h += '</div>';
+  for(const t of list.slice(0, cap)){
+    const pos = summed.length ? '（'+summed.map(l=>l+'='+t.a[l]).join(', ')+'）' : '';
+    h += '<div>'+pos+' '+spec.ins.map((s,i)=>NAMES[i]+'['+[...s].map(l=>t.a[l]).join(',')+']').join(' × ')
+      +' = '+t.vals.join(' × ')+' = <b>'+t.p+'</b></div>';
+  }
+  if(list.length > cap) h += '<div class="small">（共 '+list.length+' 项，只显示前 '+cap+' 项；合计是对全部 '+list.length+' 项求和）</div>';
+  h += '<div style="margin-top:6px">合计 = <b>'+total+'</b></div>';
+  return h;
+}
+function sizesUI(){
+  const box = $('#sizes'); box.innerHTML = '';
+  for(const l of spec.letters){
+    const d = document.createElement('div'); d.className = 'stepper';
+    d.innerHTML = letterHTML(l)+' = <button data-l="'+l+'" data-d="-1">−</button><b>'+sizes[l]+'</b><button data-l="'+l+'" data-d="1">+</button>';
+    box.appendChild(d);
+  }
+  box.querySelectorAll('button').forEach(b=>b.onclick = ()=>{
+    const l = b.dataset.l, d = +b.dataset.d;
+    sizes[l] = Math.min(4, Math.max(1, sizes[l]+d));
+    selection = {};
+    render(false);
+  });
+}
+function render(rebuildSizes=true){
+  $('#err').textContent = '';
+  try{ spec = parseSpec($('#spec').value); }
+  catch(e){ $('#err').textContent = e.message; return; }
+  for(const l of spec.letters) if(!(l in sizes)) sizes[l] = 2;
+  tensors = spec.ins.map((s,i)=>makeTensor(s, sizes, i, seed));
+  result = einsum(spec, tensors, sizes);
+  const outKeys = [...spec.out];
+  if(Object.keys(selection).length !== outKeys.length || outKeys.some(l=>!(l in selection))){
+    selection = {}; outKeys.forEach(l=>selection[l]=0);
+  }
+  $('#reading').innerHTML = reading();
+  $('#roles').innerHTML = rolesTable();
+  if(rebuildSizes) sizesUI(); else sizesUI();
+  let h = '';
+  tensors.forEach((t,i)=>{
+    if(i) h += '<div class="op">×</div>';
+    h += renderTensor(t, NAMES[i], selection, false);
+  });
+  h += '<div class="op">=</div>' + renderTensor(result, '结果', selection, true);
+  $('#tensors').innerHTML = h;
+  $('#tensors').querySelectorAll('td.click').forEach(td=>td.onclick = ()=>{
+    const sel = {};
+    td.dataset.a.split(',').filter(Boolean).forEach(p=>{ const [l,v] = p.split('='); sel[l] = +v; });
+    selection = sel; render(false);
+  });
+  $('#terms').innerHTML = termsHTML();
+  $('#loops').textContent = loopsText();
+}
+function loadSpec(s, z){
+  $('#spec').value = s;
+  if(z) Object.assign(sizes, z);
+  selection = {};
+  render();
+  document.getElementById('s1').scrollIntoView({behavior:'smooth'});
+}
+$('#spec').addEventListener('input', ()=>{ selection = {}; render(); });
+$('#reseed').onclick = ()=>{ seed++; render(false); };
+PRESETS.forEach(p=>{
+  const b = document.createElement('button'); b.textContent = p.n+'  '+p.s;
+  b.onclick = ()=>{ $('#spec').value = p.s; Object.assign(sizes, p.z); selection = {}; render(); };
+  $('#presets').appendChild(b);
+});
+
+/* ---- 第 3 节：项目里的那一行 ---- */
+const CHIPS = {
+  b:'批：一个场景。不同场景互不相干，所以 q、k 里同为 b 的才配对。',
+  t:'步：沿时间的第几步。交通注意力不跨步，每一步各算各的，所以 t 同名对齐、不求和。这也是它能按步分块计算的原因。',
+  i:'提问的飞机（query）。只出现在 q 里，保留。',
+  j:'被读的飞机（key）。只出现在 k 里，保留。i 与 j 合起来就是"飞机 i 看飞机 j"的 A×A 分数表。',
+  h:'注意力头（共 6 个）。q、k 里同为 h 才配对，每个头各出一张分数表。',
+  c:'每头里的通道（192/6 = 32 维）。<b>只有它不在箭头右边，所以被求和</b>：这就是 q·k 点积里"对应维相乘再相加"的那一步。'
+};
+(function(){
+  const box = $('#chips');
+  [...'btihc'].forEach(l=>{
+    const b = document.createElement('button'); b.className = 'chip'; b.textContent = l;
+    b.onclick = ()=>{
+      box.querySelectorAll('.chip').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+      $('#chipText').innerHTML = '<b>'+l+'</b>：'+CHIPS[l];
+    };
+    box.appendChild(b);
+  });
+  $('#chipText').textContent = '（点一个字母）';
+})();
+$('#loadLine').onclick = ()=>loadSpec('btihc,btjhc->bthij', {b:1,t:1,i:3,j:3,h:2,c:2});
+$('#loadLine2').onclick = ()=>loadSpec('bthij,btjhc->btihc', {b:1,t:1,i:3,j:3,h:2,c:2});
+
+/* ---- 第 4 节：对比表 ---- */
+const CMP = [
+  {n:'矩阵乘', e:'ik,kj->ij', z:{i:2,k:3,j:2}, ok:true,  m:'A @ B', note:'两者相同'},
+  {n:'批量矩阵乘', e:'bik,bkj->bij', z:{b:2,i:2,k:2,j:2}, ok:true, m:'torch.matmul(A, B)', note:'批维必须在最前，两者相同'},
+  {n:'点积', e:'i,i->', z:{i:3}, ok:true, m:'a @ b', note:'一维时 matmul 就是点积'},
+  {n:'q·k 打分（项目里这一行）', e:'btihc,btjhc->bthij', z:{b:1,t:1,i:3,j:3,h:2,c:2}, ok:false,
+   m:'q.permute(0,1,3,2,4) @ k.permute(0,1,3,4,2)', note:'要先把 h 提到批维、c 摆到 matmul 规定的位置'},
+  {n:'外积', e:'i,j->ij', z:{i:3,j:3}, ok:false, m:'a[:, None] * b[None, :]（或 torch.outer）', note:'没有求和，matmul 的形式用不上'},
+  {n:'迹', e:'ii->', z:{i:3}, ok:false, m:'torch.trace(A)', note:'同一个字母在一个输入里出现两次，matmul 无法表达'},
+  {n:'逐元素乘再沿一维求和', e:'ij,ij->i', z:{i:3,j:3}, ok:false, m:'(A * B).sum(-1)', note:'两个输入同形、对齐，而不是 matmul 的"最后一维配倒数第二维"'},
+  {n:'每对飞机各有一个向量再加权求和（边值）', e:'bthij,btijhc->btihc', z:{b:1,t:1,i:3,j:3,h:2,c:2}, ok:false, m:'没有直接对应，需要手动展开批维', note:'第二个输入同时带 i 和 j，不是"矩阵"形状'},
+];
+(function(){
+  let h = '<tr><th>要做的事</th><th>einsum</th><th>matmul 能直接做吗</th><th>matmul / 其它写法</th><th></th></tr>';
+  CMP.forEach((r,idx)=>{
+    h += '<tr><td>'+r.n+'</td><td><code>"'+r.e+'"</code></td><td class="'+(r.ok?'yes':'no')+'">'+(r.ok?'能':'不能直接')+'</td><td><code>'+esc(r.m)+'</code><br><span class="small">'+r.note+'</span></td><td><button data-i="'+idx+'">试一试</button></td></tr>';
+  });
+  $('#cmp').innerHTML = h;
+  $('#cmp').querySelectorAll('button').forEach(b=>b.onclick = ()=>{ const r = CMP[+b.dataset.i]; loadSpec(r.e, r.z); });
+})();
+
+/* ---- 验证：einsum 引擎 vs 手写的 permute + 批量 matmul ---- */
+$('#verify').onclick = ()=>{
+  const Z = {b:1,t:2,i:3,j:3,h:2,c:4};
+  const qt = makeTensor('btihc', Z, 0, seed), kt = makeTensor('btjhc', Z, 1, seed);
+  const sp = parseSpec('btihc,btjhc->bthij');
+  const e = einsum(sp, [qt, kt], Z);
+  // 手动路径：permute 成 [b,t,h,i,c] 和 [b,t,h,c,j]，对每个 (b,t,h) 做 [i,c]@[c,j]
+  const at = (t, b, tt, i, h, c) => t.data[flatIndex(t, {b, t:tt, i, j:i, h, c})];
+  const q2 = [], k2 = [];
+  for(let b=0;b<Z.b;b++){ q2[b]=[]; k2[b]=[];
+    for(let t=0;t<Z.t;t++){ q2[b][t]=[]; k2[b][t]=[];
+      for(let h=0;h<Z.h;h++){
+        q2[b][t][h] = Array.from({length:Z.i}, (_,i)=>Array.from({length:Z.c}, (_,c)=>at(qt,b,t,i,h,c)));
+        k2[b][t][h] = Array.from({length:Z.c}, (_,c)=>Array.from({length:Z.j}, (_,j)=>at(kt,b,t,j,h,c)));
+      } } }
+  let maxDiff = 0;
+  for(let b=0;b<Z.b;b++) for(let t=0;t<Z.t;t++) for(let h=0;h<Z.h;h++)
+    for(let i=0;i<Z.i;i++) for(let j=0;j<Z.j;j++){
+      let s = 0; for(let c=0;c<Z.c;c++) s += q2[b][t][h][i][c]*k2[b][t][h][c][j];
+      const d = Math.abs(s - e.data[flatIndex(e, {b,t,h,i,j})]);
+      if(d > maxDiff) maxDiff = d;
+    }
+  $('#verifyOut').textContent =
+    'q: [b,t,i,h,c] = ['+[Z.b,Z.t,Z.i,Z.h,Z.c]+']   k: [b,t,j,h,c] = ['+[Z.b,Z.t,Z.j,Z.h,Z.c]+']\n'+
+    'permute 之后  q2: [b,t,h,i,c] = ['+[Z.b,Z.t,Z.h,Z.i,Z.c]+']   k2: [b,t,h,c,j] = ['+[Z.b,Z.t,Z.h,Z.c,Z.j]+']\n'+
+    'matmul 之后   scores: [b,t,h,i,j] = ['+[Z.b,Z.t,Z.h,Z.i,Z.j]+']（共 '+e.data.length+' 个数）\n'+
+    '两种算法逐元素的最大差 = '+maxDiff+(maxDiff===0 ? '　→ 完全相同' : '　→ 不同，说明哪里写错了');
+};
+
+/* ---- 第 5 节：自测 ---- */
+const QUIZ = [
+  {q:'<code>"ij,jk->ik"</code>，A 是 [2,3]，B 是 [3,4]，输出形状是？', o:['[2,4]','[3,3]','[2,3]','[4,2]'], a:0,
+   w:'输出是 i、k：i 取自 A 的第一维 = 2，k 取自 B 的第二维 = 4；j 被求和消掉。'},
+  {q:'<code>"bi,bi->b"</code>，两个输入都是 [5,3]。哪个字母被求和？输出形状是？', o:['i 被求和，输出 [5]','b 被求和，输出 [3]','没有求和，输出 [5,3]','i 被求和，输出 [3]'], a:0,
+   w:'i 不在箭头右边，所以被求和；b 在两边，保留。结果是每个 b 一个数：[5]。'},
+  {q:'<code>"btihc,btjhc->bthij"</code>：哪个字母被求和？', o:['c','h','t','i'], a:0,
+   w:'只有 c 出现在输入里而不在输出里。它就是 q·k 点积里"对应通道相乘再相加"的那一维。'},
+  {q:'<code>"bti,btj->btij"</code>，b=2, t=3, i=4, j=5。输出形状是？有字母被求和吗？', o:['[2,3,4,5]，没有字母被求和','[2,3]，i 和 j 被求和','[4,5]，b 和 t 被求和','[2,3,4,5]，b 和 t 被求和'], a:0,
+   w:'每个输入里的字母都出现在输出里，所以没有求和，只是对每个 (b,t) 做 i×j 的外积。'},
+  {q:'下面哪件事 <b>matmul 不能直接做</b>，需要先 permute 或换写法？', o:['<code>"ik,kj->ij"</code> 普通矩阵乘','<code>"bik,bkj->bij"</code> 批量矩阵乘','<code>"btihc,btjhc->bthij"</code> 里 h 夹在中间的打分','<code>"i,i->"</code> 一维点积'], a:2,
+   w:'matmul 要求求和的维在 A 的最后、B 的倒数第二，批维在最前。这一行里 h 在 i 与 c 之间，必须先 permute；einsum 直接写字母即可。'},
+];
+let answered = 0, correct = 0;
+(function(){
+  const box = $('#quiz');
+  QUIZ.forEach((Q, qi)=>{
+    const d = document.createElement('div'); d.className = 'card q';
+    d.innerHTML = '<div><b>第 '+(qi+1)+' 题</b>　'+Q.q+'</div>';
+    const fb = document.createElement('div'); fb.className = 'fb';
+    Q.o.forEach((o, oi)=>{
+      const b = document.createElement('button'); b.className = 'opt'; b.innerHTML = o;
+      b.onclick = ()=>{
+        if(d.dataset.done) return;
+        d.dataset.done = '1'; answered++;
+        const ok = oi === Q.a; if(ok) correct++;
+        b.classList.add(ok?'right':'wrong');
+        if(!ok) d.querySelectorAll('.opt')[Q.a].classList.add('right');
+        fb.innerHTML = (ok?'<span class="yes">答对了。</span> ':'<span class="no">不对。</span> ')+Q.w;
+        if(answered === QUIZ.length){
+          const s = $('#score'); s.style.display = 'block';
+          s.innerHTML = '<b>得分 '+correct+' / '+QUIZ.length+'</b>。'+(correct===QUIZ.length?'每一题都对，可以去读项目里别的 einsum 了。':'回到第 2 节的实验台，把做错的那个字符串输进去看一遍。');
+        }
+      };
+      d.appendChild(b);
+    });
+    d.appendChild(fb); box.appendChild(d);
+  });
+})();
+
+render();
+</script>
+</body>
+</html>
