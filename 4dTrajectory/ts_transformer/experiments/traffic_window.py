@@ -899,7 +899,7 @@ class WindowLoop:
                 continue
             w = int(self.window_of[i])
             speed = int(value[i, SPEED]) - 1
-            out[i] = speaking_masks(self.windows[w].scene(self.keys[i], self.step_s), column, classes,
+            out[i] = speaking_masks(self.windows[w].scene(self.keys[i]), column, classes,
                                     self.window_time_s(w, step), state[i], pointer - 1, speed if speed >= 0 else None,
                                     int(value[i, APPROACH]) - 1 == APPROACH_CLEARED, float(self.approach_mps[i]),
                                     self.words, self._step_of(i, step) == 0, self._others_at(i, step))
