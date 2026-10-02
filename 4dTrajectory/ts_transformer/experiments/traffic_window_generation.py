@@ -23,10 +23,13 @@ M3's first pass.
 
 Per source, pooled, per airport and per window size (the commanded aircraft of the window): the outcomes, lost
 separation (and with whom: a commanded aircraft or a replayed one), the losses per aircraft and per hour flown to the
-judged end, the reward M4 gives (landed in the airport's landing direction, not ended), the landing time against the
-record and how often two commanded aircraft of a window land in the other order than recorded; for the model's sources
-the separation masks, and — design §6.6 step 7 item 5 — how the rewards of one window's aircraft go together over its
-samples (the pooled correlation of each aircraft's reward less its mean over the samples, over the pairs of a window).
+judged end, the reward M4 gives (landed in the airport's landing direction, not ended; a sentence with a go-around
+scored on it, `traffic_go_around`), the landing time against the record and how often two commanded aircraft of a window
+land in the other order than recorded; for the model's sources the masks on the masked columns (the probability every
+mask took away there — the separation masks, and on the approach column the vocabulary's transitions too: multi-aircraft
+design §6.6 step 8 item 6), the go-arounds said, and — design §6.6 step 7 item 5 — how the rewards of one window's
+aircraft go together over its samples (the pooled correlation of each aircraft's reward less its mean over the samples,
+over the pairs of a window).
 
 With ``--augment-seed`` every window is augmented instead (`traffic_window_augment`: the flow compressed, a start moved,
 a flight inserted and commanded, a third each; qualified, and never more aircraft at once than the airport's busiest step
@@ -79,6 +82,9 @@ from ts_transformer.experiments.prior_free_generation import (
 from ts_transformer.experiments.prior_train import (
     PRIOR_CHECKPOINT_SCHEMA, TRAFFIC_CHECKPOINT_SCHEMA, load_prior, rosters,
 )
+from ts_transformer.experiments.traffic_go_around import (
+    GO_AROUND_EXTRA_S, AfterGoAround, after_go_around, approach_altitude_m, runway_at,
+)
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION, Controlled, Loop, Run, recorded
 from ts_transformer.experiments.traffic_labelled import own_end
 from ts_transformer.experiments.traffic_speaking import (
@@ -102,7 +108,7 @@ from ts_transformer.prior.scene import N_LOOK, Landings, hang, presence
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 #: v3 (2026-10-01): the model's sources read (`model_sources`) in the header.
-SCHEMA = "ts-traffic-window-generation-v3"
+SCHEMA = "ts-traffic-window-generation-v4"
 SOURCES = ("scene", "alone", "labelled", "recorded")
 #: The sources the model speaks in (`--model-sources`: a read that needs only one — a pair of priors on the same windows
 #: reads "scene" — skips the other, half the model's time; each source from its own streams, so the rows of the one read
@@ -212,13 +218,14 @@ def augmented_windows(drawn: Drawn, params: Any, most: Mapping[str, int], max_ro
 
 def window_size(window: Window, limits: Sequence[float], step_s: float) -> tuple[int, int, int, int]:
     """A window's aircraft, pre-roll (before its first commanded aircraft's row 0, as the speaker caps it), latest
-    entry after it and rows (its longest time limit's), in steps."""
+    entry after it and rows (its longest time limit's with a go-around's `GO_AROUND_EXTRA_S`, as the loop lays it out),
+    in steps."""
     first = window.first_step_s(window.commanded[0], step_s)
     pre = max([0] + [int(round((first - float(hang(window.rows(k).presence.start_s, step_s))) / step_s))
                      for k in window.others])
     late = max(int(round((window.first_step_s(k, step_s) - first) / step_s)) for k in window.commanded)
     return (len(window.commanded) + len(window.others), min(pre, int(HISTORY_S // step_s)), late,
-            rows_for(max(limits) + step_s, step_s))
+            rows_for(max(limits) + GO_AROUND_EXTRA_S + step_s, step_s))
 
 
 def batch_cost(sizes: Sequence[tuple[int, int, int, int]], samples: int) -> int:
@@ -285,6 +292,20 @@ def _judged_again(window: Window, paths: Sequence[Controlled], until: Mapping[st
 def _reward(row: dict[str, Any], direction: np.ndarray) -> float:
     """M4's reward: landed (the executor's judge) on a runway in the airport's landing direction, not ended."""
     return float(row["outcome"] == "landed" and bool(direction[row["runway"]]))
+
+
+def go_around_fields(loop: WindowLoop, i: int, got: Commanded, row: Mapping[str, Any],
+                     direction: np.ndarray) -> AfterGoAround:
+    """Commanded aircraft ``i``'s first go-around scored (`traffic_go_around.after_go_around`) from what the loop kept of
+    it: its margins, its states a step, its last judged step and the approach altitude of the runway in force then
+    (`traffic_go_around.approach_altitude_m`)."""
+    states = loop.states[i]
+    entry = approach_altitude_m(loop.geometries[i], runway_at(got.said, got.go_around))
+    judged_to = int(min(loop.judged_to[i], len(states) - 1))
+    return after_go_around(got.said, got.go_around, row["outcome"], bool(direction[row["runway"]]), loop.margin[i],
+                           [s.height_m for s in states], [s.ground_speed_mps for s in states],
+                           [s.captured for s in states], judged_to, entry, loop.step_s, float(loop.extra_s[i]),
+                           loop.go_around_extra_s)
 
 
 @dataclasses.dataclass
@@ -392,6 +413,11 @@ def flown_sentences(flown: Flown, drawn: Drawn, source: str, words: Words, every
             direction = landing_direction(part.signals[i], part.geometries[i],
                                           _loop_context(window, got.key, every_landing, loop_landings, step_s))
             row["reward"] = _reward(row, direction)
+            row["landed_here"] = bool(row["outcome"] == "landed" and direction[row["runway"]])
+            row["go_around"] = None
+            if got.go_around is not None:                   # multi-aircraft design §6.6 step 8 item 9
+                scored = go_around_fields(loop, i, got, row, direction)
+                row["go_around"], row["reward"] = scored.fields(), scored.reward
             rows.append(row)
             read.append(records[i])
             allowed.append({c: masks[i, : got.counted].copy() for c, masks in loop.speaker.allowed.items()})
@@ -500,7 +526,10 @@ def fixed_rows(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, pa
                                          if n != m and other.landing_s is not None], step_s)
             else:
                 context = scene_landings(landings[window.airport.flights.code], window.scene(key, step_s))
-            row["reward"] = _reward(row, landing_direction(part.signals[j], part.geometries[j], context))
+            direction = landing_direction(part.signals[j], part.geometries[j], context)
+            row["reward"] = _reward(row, direction)
+            row["landed_here"] = bool(row["outcome"] == "landed" and direction[row["runway"]])
+            row["go_around"] = None                         # the labelled words and the record say none
             rows.append(row)
         at += len(window.commanded)
     return rows
@@ -527,7 +556,8 @@ def summary(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """Per source, the aircraft not starting in a loss (those counted): outcomes, lost separation (VISUAL, IFR
     afterwards; ended with a commanded aircraft or a replayed one), losses per aircraft and per hour flown, their
     relations, the reward, the landing time against the record, the order of a window's landings against the record's,
-    and — the model's sources — the separation masks and how one window's rewards go together."""
+    and — the model's sources — the separation masks, how one window's rewards go together and the go-arounds said
+    (`go_arounds`)."""
     # the record's landing, whatever the judge made of the record's path: a fact to read the others against
     recorded_landing = {(r["window"], r["dataset_id"]): r["landing_s"] for r in rows if r["source"] == "recorded"}
     out: dict[str, Any] = {}
@@ -563,8 +593,23 @@ def summary(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
                 name: sum(r["masked_mass"][name] * r["counted"] for r in part) / steps if steps else None
                 for name in (COLUMNS[c] for c in MASK_COLUMNS)}
             entry["reward_together"] = together(every)
+            entry["go_arounds"] = go_arounds(part)
         out[source] = entry
     return out
+
+
+def go_arounds(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """The sentences of ``rows`` that said a go-around (multi-aircraft design §6.6 step 8): how many, their outcomes,
+    the mean of each of their reward's parts and of the reward, and how many got less than the time a go-around gives
+    (the model's positions ended first)."""
+    said = [r for r in rows if r["go_around"] is not None]
+    if not said:
+        return {"sentences": 0, "share": 0.0}
+    parts = ("separation", "climb", "back", "landed", "reward")
+    return {"sentences": len(said), "share": len(said) / len(rows),
+            "outcomes": dict(Counter(r["outcome"] for r in said).most_common()),
+            "mean": {name: sum(r["go_around"][name] for r in said) / len(said) for name in parts},
+            "short_of_the_extra_time": sum(r["go_around"]["extra_s"] < r["go_around"]["extra_wanted_s"] for r in said)}
 
 
 def _order(rows: Sequence[dict[str, Any]], recorded_landing: Mapping[tuple[int, str], float | None]) -> dict[str, int]:

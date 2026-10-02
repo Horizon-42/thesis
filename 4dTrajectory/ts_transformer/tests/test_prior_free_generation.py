@@ -90,6 +90,34 @@ def test_the_reference_starts_from_the_words_in_force_at_the_first_predicted_ste
     assert np.array_equal(out[1:], grid[N_LOOK + 1:])
 
 
+def test_the_approach_column_says_only_its_transitions():
+    """Multi-aircraft design §6.6 step 8 item 6 (the user's 2026-10-02 decision): not cleared → cleared → go-around →
+    cleared; no clearance withdrawn, no go-around from "not cleared" nor at the first step, no word said again — a
+    decoding rule beside the labeller's (a runway changed under a clearance still takes the approach with it)."""
+    from ts_transformer.instructions.grammar import approach_words_allowed
+    from ts_transformer.instructions.words import APPROACH_CLEARED, APPROACH_GO_AROUND, APPROACH_NOT_CLEARED
+    from ts_transformer.prior.generate import vocabulary_allowed
+
+    one = spec()
+    words = Words(one)
+    assert approach_words_allowed(None).tolist() == [True, True, False]
+    assert approach_words_allowed(APPROACH_NOT_CLEARED).tolist() == [False, True, False]
+    assert approach_words_allowed(APPROACH_CLEARED).tolist() == [False, False, True]
+    assert approach_words_allowed(APPROACH_GO_AROUND).tolist() == [False, True, False]
+    in_force = np.array([0, APPROACH_CLEARED, 10, words.altitude_land, 3, 5])
+    value = np.tile(in_force + 1, (5, 1))                       # classes in force: the word + 1
+    value[1, APPROACH], value[3, APPROACH] = APPROACH_NOT_CLEARED + 1, APPROACH_GO_AROUND + 1
+    chosen = np.zeros((5, 6), dtype=np.int64)                   # nothing said yet this step
+    chosen[4, RUNWAY] = 2                                       # the last: another runway, under the clearance
+    opening = np.array([True, False, False, False, False])
+    out = vocabulary_allowed(APPROACH, chosen, opening, 4, np.zeros(5, dtype=bool), value, np.full(5, 400.0), words)
+    assert out[0, 1:].tolist() == [True, True, False]           # the first step: not cleared or cleared
+    assert out[1:4].tolist() == [[True, False, True, False],    # unchanged, or the one transition
+                                 [True, False, False, True],
+                                 [True, False, True, False]]
+    assert out[4].tolist() == [False, False, False, True]       # a runway changed under a clearance: only a go-around
+
+
 def test_the_grammar_asks_the_labellers_own_rules_of_one_step():
     one = spec()
     words = Words(one)

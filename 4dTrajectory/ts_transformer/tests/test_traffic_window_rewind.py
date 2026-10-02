@@ -240,7 +240,8 @@ def test_a_branch_is_rescued_only_with_no_new_loss_an_aircraft_ended_with_anothe
                   episodes=[_episode("a", "b", 40.0, 40.0)])
     (event,) = rewind.events_of(o, 0)
     branch = rewind.Branch(event.number, "b", rewind.PARTNER, "start", 0, 0)
-    rows = [{"reward": 0.0, "outcome": "lost_separation"}, {"reward": 1.0, "outcome": "landed"}]
+    rows = [{"reward": 0.0, "outcome": "lost_separation", "landed_here": False},
+            {"reward": 0.83, "outcome": "landed", "landed_here": True}]          # b landed after a go-around
     said = [np.zeros((30, 6), dtype=np.int64)] * 2
     # b lands, the pair is clear — but a is now ended with a replayed aircraft: not rescued
     run = SimpleNamespace(ended={"a": {"t_s": 60.0, "with": "r", **loss}}, episodes=[_episode("a", "r", 60.0, 60.0)],

@@ -47,6 +47,12 @@ steepest class's open upper edge, 10°, left the tube too late — 19 crossings 
 captured the flight holds it until a new altitude or angle word arrives, so the mode does not chatter
 at the capture height. The hold law's reference is kept inside the vocabulary's own nominal angles —
 the steepest descent class's and the climb's — the ways the words know to change height.
+
+While a go-around is in force every climb — the go-around's own (§4.6, "descend to land" in force) and one toward an
+altitude word above — is flown at the published minimum missed-approach climb gradient, `GO_AROUND_CLIMB_GRADIENT`,
+not the climb class's centre: the climb class has no angle of its own to say, and its centre (1.32° on the current
+spec, measured on arrivals that seldom climb) is under the regulation's floor (multi-aircraft design §6.6 step 8 item 7,
+the user's 2026-10-02 decision). Elsewhere the climb class flies its centre as before.
 """
 
 from __future__ import annotations
@@ -54,6 +60,8 @@ from __future__ import annotations
 import math
 
 import torch
+
+from geokit import FT_M, NM_M
 
 from ts_transformer.autopilot.frame import Kinematics
 from ts_transformer.autopilot.params import ExecutorParams
@@ -67,6 +75,10 @@ GLIDEPATH_BELOW_M = 60.0
 #: at the threshold (the tube is judged on the smoothed altitude, and the path-angle loop tracks its reference within
 #: metres; at the full tolerance about the TCH, 17 of 500 train crossings fell outside evaluation's ±22 m, none at half).
 TUBE_MARGIN_SHARE = 0.5
+#: The published minimum missed-approach climb gradient, 200 ft per NM (AIM 5-4-21 b, repo docs/literature/go_around) —
+#: a regulation value, not a measurement; climbs during a go-around are flown at its path angle (module docstring).
+GO_AROUND_CLIMB_GRADIENT = 200.0 * FT_M / NM_M
+GO_AROUND_CLIMB_RAD = math.atan(GO_AROUND_CLIMB_GRADIENT)
 
 
 class Vertical:
@@ -128,6 +140,11 @@ class Vertical:
         params = self.params
         rate_max = self.rate_limit(state)
         nominal = torch.deg2rad(angle_deg)                          # descending positive; a climb negative
+        # a go-around climbs at the published gradient (module docstring)
+        climb_class = angle_class == self.words.angle_climb
+        nominal = torch.where(go_around & climb_class, torch.full_like(nominal, -GO_AROUND_CLIMB_RAD), nominal)
+        climb_rad = torch.where(go_around, torch.full_like(nominal, GO_AROUND_CLIMB_RAD),
+                                torch.full_like(nominal, self.climb_rad))
         height_to_go = state.height_m - altitude_m                  # NaN where "land": never compared then
         level_off = state.speed_mps * nominal.square() / (2.0 * rate_max)
         moving = ~land & (angle_class != ANGLE_LEVEL) & ~self.captured
@@ -135,7 +152,7 @@ class Vertical:
         self.captured = self.captured | reached | (~land & (angle_class == ANGLE_LEVEL))
 
         hold_tau = 4.0 * params.path_time_constant_s
-        hold = (-height_to_go / (state.speed_mps * hold_tau)).clamp(-self.descent_max_rad, self.climb_rad)
+        hold = torch.minimum((-height_to_go / (state.speed_mps * hold_tau)).clamp(min=-self.descent_max_rad), climb_rad)
         # "descend to land" (module docstring): the crossing point, the published TCH moved into the tube in force
         # extended to the threshold, within the heights admitted there (the TCH ± the altitude tolerance's inner half,
         # within the landing condition), or the admitted edge nearer that tube where the two do not meet
@@ -185,7 +202,7 @@ class Vertical:
         aim = torch.minimum(wanted_aim, floor).clamp(0.0, self.steepest_rad)
         # the glidepath's lower edge set the aim this cycle: it held a "descend to land" above where the word would fly
         glidepath_floor = land & ~go_around & (aim < torch.minimum(wanted_aim, crossing_floor).clamp(0.0, self.steepest_rad))
-        reference = torch.where(land, torch.where(go_around, torch.full_like(aim, self.climb_rad), -aim),
+        reference = torch.where(land, torch.where(go_around, climb_rad, -aim),
                                 torch.where(self.captured, hold, -nominal))
         wanted = (reference - state.gamma_rad) / params.path_time_constant_s
         gamma_rate = wanted.clamp(-rate_max, rate_max)

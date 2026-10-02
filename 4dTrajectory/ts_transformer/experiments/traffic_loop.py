@@ -40,7 +40,7 @@ from geokit import NM_M
 
 from ts_transformer.experiments.traffic_census import Track, traffic_at
 from ts_transformer.inference.runway_schedule import Separation
-from ts_transformer.inference.separation import AT_THRESHOLD, Traffic, losses, wake_at_threshold
+from ts_transformer.inference.separation import AT_THRESHOLD, Traffic, judged_pairs, margins, wake_at_threshold
 from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import wrap180
@@ -233,18 +233,23 @@ class Judging:
     def __init__(self, separation: Separation, reading: str, step_s: float, out: Run) -> None:
         self.separation, self.reading, self.step_s, self.out = separation, reading, step_s, out
         self.open_episodes: dict[tuple[str, str], dict[str, Any]] = {}
+        #: the last step's margins (`separation.margins`) by key: every aircraft judged there (none alone: absent)
+        self.margins: dict[str, float] = {}
 
     def step(self, t_s: float, controlled: Sequence[Controlled], replayed: Sequence[Track],
              passive: Sequence[Controlled] = ()) -> dict[str, dict[str, Any]]:
         """The aircraft on step ``t_s`` judged pairwise (fewer than two: nothing): each controlled one answering for a loss
         there is ended (recorded in ``out.ended`` and returned)."""
+        self.margins = {}
         if len(controlled) + len(passive) + len(replayed) < 2:
             return {}
         out, step = self.out, self.step_s
         out.steps_judged += 1
         here: list[Controlled | Track] = [*controlled, *passive, *replayed]
-        found = losses(join(at_steps([*controlled, *passive], t_s, step), traffic_at(replayed, t_s)), self.separation,
-                       self.reading)
+        pairs = judged_pairs(join(at_steps([*controlled, *passive], t_s, step), traffic_at(replayed, t_s)),
+                             self.separation, self.reading)
+        self.margins = dict(zip((a.key for a in here), margins(pairs, len(here)).tolist()))
+        found = [pair.loss() for pair in pairs if pair.lost]
         ended_now: dict[str, dict[str, Any]] = {}
         judged = len(controlled)
         for loss in found:

@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Sequence
 
 import numpy as np
 from geokit import FT_M, NM_M
@@ -157,8 +158,34 @@ def _turned_in(traffic: Traffic, k: int, other: str, separation: Separation) -> 
             and toward_other_m < 0.5 * abs(other_right_m))
 
 
-def losses(traffic: Traffic, separation: Separation, reading: str) -> list[Loss]:
-    """Every pair that has lost separation at this instant under ``reading`` (module docstring)."""
+@dataclass(frozen=True)
+class Judged:
+    """One pair a reading judges at an instant (`judged_pairs`), lost or not: `Loss`'s fields, whether the pair has lost
+    separation (decided by the comparisons `losses` has always made) and its MARGIN — the larger of the horizontal
+    distance over the horizontal minimum and, where vertical separation counts, the vertical distance over the vertical
+    minimum: lost exactly when under 1, to rounding (multi-aircraft design §6.6 step 8 item 9, the go-around's reward)."""
+
+    i: int
+    j: int
+    kind: str
+    relation: str
+    required_m: float
+    distance_m: float
+    vertical_m: float
+    responsible: tuple[int, ...]
+    wake_known: bool
+    lost: bool
+    margin: float
+
+    def loss(self) -> Loss:
+        return Loss(self.i, self.j, self.kind, self.relation, self.required_m, self.distance_m, self.vertical_m,
+                    self.responsible, self.wake_known)
+
+
+def judged_pairs(traffic: Traffic, separation: Separation, reading: str) -> list[Judged]:
+    """Every pair ``reading`` judges at this instant (module docstring), lost or not; a pair it leaves alone (parallels
+    both turned in, crossing finals both established under `VISUAL`; independent parallels both established) is not
+    here."""
     if reading not in READINGS:
         raise ValueError(f"reading {reading!r} is not one of {READINGS}")
     radar_m, vertical_min_m = FAA_RADAR_NM * NM_M, FAA_VERTICAL_FT * FT_M
@@ -180,22 +207,39 @@ def losses(traffic: Traffic, separation: Separation, reading: str) -> list[Loss]
                     continue            # established on finals of other directions: 3-10-4 not modelled
             if both and separation.one_runway(ri, rj):
                 required, known = in_trail_m(separation, traffic.category[ahead], traffic.category[behind])
-                if horizontal < required:
-                    out.append(Loss(i, j, IN_TRAIL, relation, required, horizontal, vertical, (behind,), known))
+                out.append(Judged(i, j, IN_TRAIL, relation, required, horizontal, vertical, (behind,), known,
+                                  horizontal < required, horizontal / required))
                 continue
             if both and relation == INDEPENDENT:
                 continue
             if both and relation == DEPENDENT:
                 required = separation.diagonal_nm[frozenset((ri, rj))] * NM_M
-                if horizontal < required and vertical < vertical_min_m:
-                    out.append(Loss(i, j, DIAGONAL, relation, required, horizontal, vertical, (behind,), True))
+                out.append(Judged(i, j, DIAGONAL, relation, required, horizontal, vertical, (behind,), True,
+                                  horizontal < required and vertical < vertical_min_m,
+                                  max(horizontal / required, vertical / vertical_min_m)))
                 continue
-            if horizontal < radar_m and vertical < vertical_min_m:
-                if traffic.established[i] != traffic.established[j]:
-                    responsible = (j,) if traffic.established[i] else (i,)
-                else:
-                    responsible = (i, j)
-                out.append(Loss(i, j, RADAR_OR_VERTICAL, relation, radar_m, horizontal, vertical, responsible, True))
+            if traffic.established[i] != traffic.established[j]:
+                responsible = (j,) if traffic.established[i] else (i,)
+            else:
+                responsible = (i, j)
+            out.append(Judged(i, j, RADAR_OR_VERTICAL, relation, radar_m, horizontal, vertical, responsible, True,
+                              horizontal < radar_m and vertical < vertical_min_m,
+                              max(horizontal / radar_m, vertical / vertical_min_m)))
+    return out
+
+
+def losses(traffic: Traffic, separation: Separation, reading: str) -> list[Loss]:
+    """Every pair that has lost separation at this instant under ``reading`` (module docstring)."""
+    return [pair.loss() for pair in judged_pairs(traffic, separation, reading) if pair.lost]
+
+
+def margins(pairs: Sequence[Judged], count: int) -> np.ndarray:
+    """``[count]``: each aircraft's tightest margin over the judged ``pairs`` it is in (`Judged.margin`), inf where it is
+    in none."""
+    out = np.full(count, math.inf)
+    for pair in pairs:
+        out[pair.i] = min(out[pair.i], pair.margin)
+        out[pair.j] = min(out[pair.j], pair.margin)
     return out
 
 

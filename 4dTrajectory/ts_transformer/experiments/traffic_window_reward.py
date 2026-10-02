@@ -14,8 +14,9 @@ Each round:
    commanded aircraft together, the vocabulary's rules, the start's procedure's masks, the two separation masks, judged
    as it flies under VISUAL), by ``--speakers`` processes (`traffic_reward.Speakers`, each loop batch its own stream);
 3. **rewards** — per commanded aircraft: 1 for landing on a runway in the airport's landing direction (against its
-   window's landings as the loop had them) with no loss of separation ending it first, else 0; its advantage its reward
-   less its mean over its window's samples; an aircraft is trained on only when its samples differ and none starts in a
+   window's landings as the loop had them) with no loss of separation ending it first, else 0; a sentence that says a
+   go-around is scored on what it did, at most 0.9 (`traffic_go_around`, multi-aircraft design §6.6 step 8 item 9); its
+   advantage its reward less its mean over its window's samples; an aircraft is trained on only when its samples differ and none starts in a
    loss it answers for (`traffic_window_tuner.window_advantages`);
 4. **``--passes`` passes** (`traffic_window_tuner.WindowRewardTuner`): M4's loss, each window sample scored whole as the
    speaker read it (the other commanded aircraft at the rows they flew with the words they were said), the loss on its
@@ -93,6 +94,7 @@ from ts_transformer.experiments.traffic_speaking import with_tracks
 from ts_transformer.experiments.traffic_tuner import part_cost
 from ts_transformer.experiments.traffic_window import draw_windows, window_places
 from ts_transformer.experiments.traffic_window_augment import busiest
+from ts_transformer.experiments.traffic_go_around import GO_AROUND_EXTRA_S
 from ts_transformer.experiments.traffic_window_generation import (
     Drawn, WindowSentences, augmented_windows, drawn_windows, fixed_rows, window_batches, window_sentences,
 )
@@ -113,7 +115,7 @@ from ts_transformer.prior.scene import N_LOOK, Landings
 from ts_transformer.prior.train import RewardConfig
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-SCHEMA = "ts-traffic-window-reward-v1"
+SCHEMA = "ts-traffic-window-reward-v2"
 RUNNER = "ts_transformer.experiments.traffic_window_reward"
 #: Host memory a speaking process holds beyond what it shares with the parent, and what the parent grows by in a round
 #: (a round's windows built, the pass), GB — measured on the formal run (2026-09-30: a speaking process's own memory for a
@@ -262,7 +264,7 @@ def preflight(model: Prior, base: Prior, round_: WindowRound, speaking: WindowSp
     drawn = round_.drawn
 
     def bound(w: int) -> float:
-        rows = [rows_for(drawn.limits[j] + step_s, step_s) for j in drawn.members[w]]
+        rows = [rows_for(drawn.limits[j] + GO_AROUND_EXTRA_S + step_s, step_s) for j in drawn.members[w]]
         places = window_places([drawn.windows[w]], step_s)
         aircraft = len(drawn.windows[w].commanded) + len(drawn.windows[w].others)
         return part_cost(1, aircraft, int((places.start + np.array(rows)).max()))

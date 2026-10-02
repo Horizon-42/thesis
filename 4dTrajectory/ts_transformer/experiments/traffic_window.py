@@ -37,6 +37,7 @@ from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import Spoken
 from ts_transformer.experiments.prior_free_generation import BELOW_GLIDEPATH
 from ts_transformer.experiments.traffic_census import Track
+from ts_transformer.experiments.traffic_go_around import GO_AROUND_EXTRA_S
 from ts_transformer.experiments.traffic_labelled import own_end
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION, Controlled, Judging, Run, join
 from ts_transformer.experiments.traffic_scene_data import FlightRows
@@ -52,7 +53,7 @@ from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import (
-    APPROACH, APPROACH_CLEARED, RUNWAY, SPEED, UNCHANGED, Words, compass_from_math_rad,
+    APPROACH, APPROACH_CLEARED, APPROACH_GO_AROUND, RUNWAY, SPEED, UNCHANGED, Words, compass_from_math_rad,
 )
 from ts_transformer.prior.generate import rows_for
 from ts_transformer.prior.masks import ProcedureMasks
@@ -292,8 +293,9 @@ class Commanded:
     own end, or `traffic_loop.LOST_SEPARATION` when the judge ended it first — then ``end`` is that end), its own end
     (the executor judge's or the glidepath edge's, whatever the judge did), the steps said up to its judged end
     (``counted``: what it is trained on; `traffic_free_generation.judged_steps`' count), its first state's time, its
-    crossing (None: it did not land), the runway in force at its end (a candidate's index) and where its executor's
-    states are (``group``, ``place``)."""
+    crossing (None: it did not land), the runway in force at its end (a candidate's index), where its executor's
+    states are (``group``, ``place``) and the own step of its first go-around word (None: it said none; multi-aircraft
+    design §6.6 step 8)."""
 
     key: str
     window: int
@@ -307,6 +309,7 @@ class Commanded:
     runway: int
     group: int
     place: int
+    go_around: int | None
 
 
 _NEVER = np.iinfo(np.int64).max
@@ -333,7 +336,9 @@ class WindowLoop:
     executor inputs (``inputs``, ``runways``, ``charts``, ``approach_ias_mps`` over ``flights``, from its first predicted
     step), time limit and geometry; ``alone``: each aircraft speaks seeing no other (its edge features its own, no
     separation mask) and is still judged in its window; ``given``: an aircraft's words given up to an own step
-    (`Given`; None: spoken throughout) — said in its round, neither sampled nor masked.
+    (`Given`; None: spoken throughout) — said in its round, neither sampled nor masked; ``go_around_extra_s``: the time a
+    go-around adds to its sentence (0: none — as the one-aircraft scene loop, whose module the traffic prior's edge-source
+    hash holds, flies it).
 
     **A step** (`step`), at the batch step every speaking aircraft's rows reach:
 
@@ -378,7 +383,8 @@ class WindowLoop:
                  geometries: Sequence[AirportGeometry], inputs: FlightInputs, runways: Runways, charts: AirportCharts,
                  approach_ias_mps: torch.Tensor, limits: Sequence[float], words: Words, params: ExecutorParams,
                  landings: Any, *, generator: torch.Generator, temperature: float, procedure_masks: ProcedureMasks,
-                 alone: bool = False, reading: str = VISUAL, given: Sequence[Given | None] | None = None) -> None:
+                 alone: bool = False, reading: str = VISUAL, given: Sequence[Given | None] | None = None,
+                 go_around_extra_s: float = GO_AROUND_EXTRA_S) -> None:
         step_s = words.spec.step_s
         self.windows, self.words, self.params, self.step_s, self.alone = list(windows), words, params, step_s, alone
         self.flights, self.geometries = list(flights), list(geometries)
@@ -393,7 +399,15 @@ class WindowLoop:
         self.members = [np.flatnonzero(self.window_of == w) for w in range(len(windows))]
         places = window_places(windows, step_s)
         self.pre, self.origin, self.start, nodes = places.pre, places.origin, places.start, places.nodes
-        max_rows = rows_for(max(limits) + step_s, step_s)
+        # a go-around gives its sentence ``go_around_extra_s`` more (`GO_AROUND_EXTRA_S`, multi-aircraft design §6.6 step
+        # 8 item 9), as much of it as the model's positions hold after its own time limit (`extra_s`, stated in each
+        # go-around's row)
+        room_s = np.array([(model.config.max_rows - rows_for(limit + step_s, step_s)) * step_s for limit in limits])
+        if bool((room_s < 0.0).any()):
+            raise ValueError("a commanded aircraft's time limit is longer than the model's positions")
+        self.go_around_extra_s = go_around_extra_s
+        self.extra_s = np.minimum(go_around_extra_s, room_s)
+        max_rows = rows_for(float(max(np.array(limits) + self.extra_s)) + step_s, step_s)
         self.speaker = WindowSpeaker(
             model, flights, geometries, landings, words, scenes=np.arange(count) if alone else self.window_of,
             starts=self.start, others=[[] for _ in range(count)] if alone else nodes, edges=self._edges,
@@ -410,7 +424,13 @@ class WindowLoop:
         step_rows = int(round(step_s / params.cycle_s))
         limit_s = torch.tensor(list(limits), dtype=torch.float64, device=device)
         executor = Executor(inputs, runways, charts, approach_ias_mps, params, words, time_limit_s=limit_s,
-                            start_cycle=torch.as_tensor((self.first_spoken - first) * step_rows, device=device))
+                            start_cycle=torch.as_tensor((self.first_spoken - first) * step_rows, device=device),
+                            reserve_s=go_around_extra_s)
+        #: each aircraft's time limit (a go-around's extended) and the own step of its first go-around word (−1: none)
+        self.limit_s = np.array(list(limits), dtype=np.float64)
+        self.go_around_step = np.full(count, -1, dtype=np.int64)
+        #: each aircraft's tightest separation margin at each of its own steps judged (`separation.margins`; inf: none)
+        self.margin = np.full((count, max_rows - N_LOOK), np.inf)
         #: each aircraft's executor (one: 0) and its place there
         self.group = np.zeros(count, dtype=np.int64)
         self.place = np.arange(count, dtype=np.int64)
@@ -484,6 +504,9 @@ class WindowLoop:
         k = step - self.start - N_LOOK
         speaking = (k >= 0) & (self.ended_at < 0) & ~self.left & (k < self.sentence_end)
         said = speaker.speak(self._rank(speaking, step), self._locked(), self._given(k, speaking))
+        going = np.flatnonzero(speaking & (said[:, APPROACH] == APPROACH_GO_AROUND + 1) & (self.go_around_step < 0))
+        if len(going):
+            self._go_around(going, k)
         for w in range(len(self.windows)):
             if self._live(w):
                 self._runways(w, step)
@@ -492,6 +515,19 @@ class WindowLoop:
                 self.last_step[w] = step
                 self.runs[w].scene_seconds = float(step - self.first_step) * self.step_s
         self._fly(step, said)
+
+    def _go_around(self, going: np.ndarray, k: np.ndarray) -> None:
+        """The aircraft ``going`` said their first go-around at own steps ``k[going]``: their `extra_s` more time, on their
+        executor and their cohort's own cycles (module docstring, 5.)."""
+        self.go_around_step[going] = k[going]
+        self.limit_s[going] += self.extra_s[going]
+        executor = self.executors[0][2]
+        seconds = np.zeros(len(self.place))
+        seconds[self.place[going]] = self.extra_s[going]
+        executor.extend_time_limit(torch.as_tensor(seconds))
+        for c in np.unique(self.cohort[going]):
+            members = self.cohorts[int(c)]
+            self.cohort_cycles[c] = int(np.ceil(self.limit_s[members] / self.params.cycle_s).max())
 
     def _given(self, k: np.ndarray, speaking: np.ndarray) -> np.ndarray | None:
         """``[N, 6]``: the speaking aircraft's given lines at their own steps ``k`` (`Given`) as the speaker's classes
@@ -538,6 +574,11 @@ class WindowLoop:
         t_s = self.window_time_s(w, step)
         controlled, passive = self._here(w, step, t_s)
         self.judging[w].step(t_s, controlled, [a for a in self.replayed[w] if a.on_step(t_s)], passive)
+        margins = self.judging[w].margins
+        for i in self.members[w]:
+            own = self._step_of(i, step)
+            if self.keys[i] in margins and 0 <= own < self.margin.shape[1]:
+                self.margin[i, own] = margins[self.keys[i]]
         self._mark_ended(w, step)
 
     def _mark_ended(self, w: int, step: int) -> None:
@@ -884,7 +925,8 @@ class WindowLoop:
             counted = len(said) if end is None else min(len(said), int(round((end["t_s"] - first_s) / self.step_s)))
             out.append(Commanded(key, w, said, LOST_SEPARATION if end is not None else self.own[i], self.own[i], end,
                                  counted, first_s, None if math.isnan(self.landing_s[i]) else float(self.landing_s[i]),
-                                 int(self.speaker.value[i, RUNWAY]) - 1, int(self.group[i]), int(self.place[i])))
+                                 int(self.speaker.value[i, RUNWAY]) - 1, int(self.group[i]), int(self.place[i]),
+                                 None if self.go_around_step[i] < 0 else int(self.go_around_step[i])))
         return out
 
     def records(self) -> list[WindowRecord]:

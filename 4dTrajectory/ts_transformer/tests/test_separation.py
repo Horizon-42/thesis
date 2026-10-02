@@ -27,7 +27,9 @@ from ts_transformer.inference.separation import (
     RADAR_OR_VERTICAL,
     VISUAL,
     Traffic,
+    judged_pairs,
     losses,
+    margins,
     next_behind,
     wake_at_threshold,
 )
@@ -278,3 +280,36 @@ def test_next_behind_finds_the_established_one_on_the_runway_or_its_close_pair()
     scene = traffic((0, 0, 50, "S1", True, "F"), (-4_000, 150, 250, "S2", True, "F"), (-3_000, 0, 200, "S1", False, "F"),
                     (-2_000, 1_800, 150, "I1", True, "F"))
     assert next_behind(scene, 0, SEPARATION) == 1
+
+
+def test_a_pairs_margin_is_under_1_exactly_where_it_has_lost_separation():
+    """Multi-aircraft design §6.6 step 8 item 9: the go-around's reward reads each aircraft's tightest margin — the
+    horizontal distance over its minimum and, where vertical separation counts, the vertical over 1,000 ft, the larger;
+    a pair a reading leaves alone has none."""
+    random = np.random.default_rng(11)
+    runways = [None, "R", "S1", "S2", "L1", "L2", "I1", "I2", "X"]
+    for _ in range(2_000):
+        aircraft = []
+        for _ in range(3):
+            runway = runways[random.integers(len(runways))]
+            aircraft.append((random.uniform(-12_000, 0), random.uniform(-3_000, 3_000), random.uniform(0, 900), runway,
+                             runway is not None and bool(random.integers(2)), "FDH"[random.integers(3)],
+                             random.uniform(-180, 180), random.uniform(-2_000, 2_000)))
+        scene = traffic(*aircraft)
+        for reading in (IFR, VISUAL):
+            pairs = judged_pairs(scene, SEPARATION, reading)
+            assert [p.loss() for p in pairs if p.lost] == losses(scene, SEPARATION, reading)
+            assert all(p.lost == (p.margin < 1.0) for p in pairs)
+            tightest = margins(pairs, 3)
+            for k in range(3):
+                mine = [p.margin for p in pairs if k in (p.i, p.j)]
+                assert tightest[k] == (min(mine) if mine else np.inf)
+    # in trail: horizontal only, against the wake minimum (F behind F: none, the radar minimum)
+    trail = judged_pairs(traffic((-5_000, 0, 700, "R", True, "F"), (-5_000 - 2 * RADAR_M, 0, 0, "R", True, "F")),
+                         SEPARATION, IFR)
+    assert [(p.kind, p.margin) for p in trail] == [(IN_TRAIL, pytest.approx(2.0))]
+    # radar or vertical: the larger of the two shares
+    apart = judged_pairs(traffic((-5_000, 0, 700, "R", True, "F"), (-5_000, RADAR_M / 2, 700 + 2 * VERTICAL_M, None,
+                                                                     False, "F")), SEPARATION, IFR)
+    assert [(p.kind, p.margin) for p in apart] == [(RADAR_OR_VERTICAL, pytest.approx(2.0))]
+

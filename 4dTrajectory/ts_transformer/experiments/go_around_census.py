@@ -88,7 +88,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
-from geokit import FT_M, NM_M, haversine_km
+from geokit import haversine_km
 
 from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG
 from final_approach import TrackPoint
@@ -96,6 +96,7 @@ from final_approach.frame import RunwayFrame
 from trajectory_data_process.harvest.airports import load_airport
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest, read_track_view
 from ts_transformer.autopilot.spec import load_spec as load_executor_spec
+from ts_transformer.autopilot.vertical import GO_AROUND_CLIMB_GRADIENT
 from ts_transformer.data.day_split import DaySplit, landing_day, parse_utc
 from ts_transformer.instructions.artefact import (
     arrival_manifest_sha256s, load_day_split, load_sentences, load_spec, signals_flights,
@@ -138,8 +139,9 @@ CLIMB_HELD_SAMPLES = 3
 #: go-around may fly first (an early missed approach flies level to the missed approach point, AIM 5-5-5 a.4) is
 #: reported apart, not read into the gradient (my reading: the band covers a level segment's spread)
 CLIMB_ONSET_M = 30.0
-#: the published minimum missed-approach climb gradient, 200 ft per NM (AIM 5-4-21 b, repo docs/literature/go_around)
-REGULATION_CLIMB_GRADIENT = 200.0 * FT_M / NM_M
+#: the published minimum missed-approach climb gradient, 200 ft per NM (AIM 5-4-21 b, repo docs/literature/go_around):
+#: the executor's own, which flies every climb of a go-around at it (multi-aircraft design §6.6 step 8 item 7)
+REGULATION_CLIMB_GRADIENT = GO_AROUND_CLIMB_GRADIENT
 #: what `initial_climb` reads, in a row's order (None on a row that is not a timed go-around)
 CLIMB_FIELDS = ("level_before_climb_s", "climb_read_s", "climb_read_flown_m", "climb_read_m", "climb_gradient",
                 "climb_angle_deg")

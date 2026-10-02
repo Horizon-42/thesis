@@ -944,6 +944,16 @@ can pass them); ten draws a window at most, else it is left out (counted by airp
 by why. Read by the model's sources only (a
 moved start has no record); the readout adds each kind and each aircraft's part (shifted, moved, inserted, as drawn).
 
+**Go-arounds** (multi-aircraft design §6.6 step 8; schema v4): the approach column says only not cleared → cleared →
+go-around → cleared (`instructions.grammar.approach_words_allowed`, a decoding mask); a commanded aircraft's first
+go-around word gives it `traffic_go_around.GO_AROUND_EXTRA_S` (900 s) more, as much as the model's positions allow
+(`WindowLoop.extra_s`, every loop laid out for it: `window_size` counts it); the loop keeps each aircraft's tightest
+separation margin a step (`inference.separation.margins`, the judge's own pairs). A row carries `landed_here` (landed in
+the airport's landing direction) and `go_around` (None, or `traffic_go_around.AfterGoAround`'s fields: S, H, Q, L and what
+they read); a go-around's sentence is rewarded 0.48·L + 0.14·(S + H + Q), at most 0.9, 0 for a loss or any end but a
+landing or a time limit. The summary's `go_arounds` (model sources) counts them and averages the parts; `masked_mass`
+on the approach column includes the transitions' mask.
+
 ### R35 · `run_ts.py prior_generation_records` — a free-generation readout's sentences as evaluation records: ADE / FDE and the evaluation's pass rate (2026-09-30)
 
 A `prior_free_generation` readout (`generation.json` schema `ts-prior-free-generation-v5`, `sentences.npz`) stores the
@@ -1049,7 +1059,7 @@ sample scored with gradients on the GPU. Fixed select windows (as drawn and augm
 every round in the shape `traffic_reward.guarded_choice` reads (landed, observed runway, words, lost separation, the
 ordering against the record with the other commanded aircraft's landings of the same sample, reward by kind), the round
 chosen by paired standard errors on the augmented windows' reward. Writes `config.json`, `round_<k>/{sentences.json,
-checkpoint.pt, optimiser.pt, readout.json, …}`, `history.json`, `choice.json` (`ts-traffic-window-reward-v1`).
+checkpoint.pt, optimiser.pt, readout.json, …}`, `history.json`, `choice.json` (`ts-traffic-window-reward-v2`).
 
 ### R38 · `run_ts.py prior_generation_grading` — a generation-records run graded beyond its pass rate: the landed runway, and FDE's time and place (2026-09-30)
 
@@ -1149,7 +1159,8 @@ sentence is timed to the sentence's `join_row` — the capture turn's start, whe
 counterpart of the executor's capture — (`to_capture_turn_s`) and to its `capture_row`, the first row of the final run in
 the corridor (`to_corridor_s`); rows are 2 s from the sentence's `entry_time_utc`, and a clearance row not after the
 go-around is refused (the sentence's capture must be the approach that followed). Every timed go-around's first 150 m of
-climb (`initial_climb`, `CLIMB_READ_M` = `MIN_CLIMB_M`: from the point to the first kept sample that high above it) gives
+climb (`initial_climb`: from its onset — the last sample within 30 m of the point, the level flight before it reported
+apart — to the first kept sample 150 m above the point that the next two stay above) gives
 seconds, ground distance (sample to sample, strays left out), the gradient and its angle, beside the published minimum
 missed-approach gradient 200 ft per NM (`REGULATION_CLIMB_GRADIENT`, AIM 5-4-21 b) and the share at or above it — a
 comparison, not a parameter.
@@ -1225,7 +1236,7 @@ the original, with the same other aircraft); each kept beside. Per role × offse
 aircraft's stratum (`instructions.readout.stratum`), kind and relation of the loss, window size and augmented kind: cells,
 the share with at least one branch rescued, the mean share rescued, `TALLIES`, the three conditions' shares and the words
 changed between the branch's step and the loss (rescued and not). Writes, at the end, `original.jsonl`, `events.jsonl`
-(an event a row, its branches beside) and `window_rewind.json` (`ts-traffic-window-rewind-v1`, with R34's pooled summary
+(an event a row, its branches beside) and `window_rewind.json` (`ts-traffic-window-rewind-v2`, with R34's pooled summary
 of the original pass).
 
     python run_ts.py traffic_window_rewind \
