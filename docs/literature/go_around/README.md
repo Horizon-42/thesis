@@ -16,7 +16,7 @@ No new files. The documents sit in `../runway_assignment/official/` (not tracked
 | Document | Edition | Paragraphs used |
 |---|---|---|
 | FAA Order JO 7110.65BB *Air Traffic Control* (`FAA_Order_JO_7110.65BB_Air_Traffic_Control_w_Chg1-3_2026-07-09.pdf`) | Change 3, effective 2026-07-09 | 3-8-1, 4-8-1, 4-8-9, 5-7-1 b.4; Pilot/Controller Glossary *BREAKOUT*, *GO AROUND*, *MISSED APPROACH* |
-| FAA *Aeronautical Information Manual* (`FAA_AIM_Aeronautical_Information_Manual_w_Chg1-3_2026-07-09.pdf`) | Change 3, effective 2026-07-09 | 5-4-6 j; 5-4-21 a, d, f, g, h; 5-5-5 a.1, a.3, a.4 |
+| FAA *Aeronautical Information Manual* (`FAA_AIM_Aeronautical_Information_Manual_w_Chg1-3_2026-07-09.pdf`) | Change 3, effective 2026-07-09 | 5-4-6 j; 5-4-21 a, b, d, f, g, h; 5-5-5 a.1, a.3, a.4 |
 
 Quotes are copied from `pdftotext -layout` of those PDFs.
 
@@ -59,6 +59,12 @@ Quotes are copied from `pdftotext -layout` of those PDFs.
 - AIM 5-4-21 a: "When a landing cannot be accomplished, advise ATC and, upon reaching the missed approach
   point defined on the approach procedure chart, the pilot must comply with the missed approach
   instructions for the procedure being used or with an alternate missed approach procedure specified by ATC."
+- AIM 5-4-21 b: "Obstacle protection for missed approach is predicated on the missed approach being initiated at the
+  decision altitude/decision height (DA/DH) or at the missed approach point and not lower than minimum descent altitude
+  (MDA). A climb gradient of at least 200 feet per nautical mile is required, (except for Copter approaches, where a climb
+  of at least 400 feet per nautical mile is required), unless a higher climb gradient is published in the notes section of
+  the approach procedure chart." (The executor climbs at this gradient while a go-around is in force — multi-aircraft
+  design §6.6 step 8 item 7; R40 v2 compares the recorded go-arounds with it: p50 9.3 %, 96 % at or above 3.29 %.)
 - AIM 5-4-21 d: "At locations where ATC radar service is provided, the pilot should conform to radar
   vectors when provided by ATC in lieu of the published missed approach procedure." (The same sentence is
   P/CG *MISSED APPROACH* c.)
