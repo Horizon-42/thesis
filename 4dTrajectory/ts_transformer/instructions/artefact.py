@@ -150,10 +150,11 @@ def write_spec(directory: Path, spec: VocabularySpec, measurements: dict[str, An
     write_json_atomic(_fresh(directory / "measurements.json"), {"spec_sha256": spec.sha256, **measurements})
 
 
-def keep_spec(source: Path, directory: Path, git: dict[str, Any]) -> VocabularySpec:
+def keep_spec(source: Path, directory: Path, provenance: dict[str, Any]) -> VocabularySpec:
     """``source``'s spec kept for ``directory`` (a spec is the vocabulary's format, not the data's: new rows under the same
     words keep it, never measure it again): its ``spec.json`` and ``measurements.json`` copied byte for byte — the spec,
-    the labeller and the git state that measured it, on ``source``'s train signals — and ``spec_from.json`` saying so.
+    the labeller and the git state that measured it, on ``source``'s train signals — and ``spec_from.json`` saying so
+    (``provenance``: the caller's name for ``source`` and the git state that kept it).
     Refused unless the code's labeller is the one that measured it (`require_current_labeller`) and the two artefacts'
     signals were built under one configuration."""
     spec = load_spec(source)
@@ -166,8 +167,8 @@ def keep_spec(source: Path, directory: Path, git: dict[str, Any]) -> VocabularyS
     for name, path in copies.items():
         write_bytes_atomic(path, (source / name).read_bytes())
     write_json_atomic(record,
-                      {"spec_from": str(source), "spec_sha256": spec.sha256,
-                       "labeller_source_sha256": spec_labeller_source(source), "git": git, "written_utc": utc_now()})
+                      {**provenance, "spec_sha256": spec.sha256, "labeller_source_sha256": spec_labeller_source(source),
+                       "written_utc": utc_now()})
     return spec
 
 

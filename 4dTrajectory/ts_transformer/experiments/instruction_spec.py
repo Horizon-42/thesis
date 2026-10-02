@@ -39,7 +39,7 @@ from ts_transformer.instructions.artefact import (
 from ts_transformer.instructions.labeller.read import admit
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.spec import VocabularySpec
-from ts_transformer.repo_layout import REPO_ROOT, git_state
+from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 CHUNK = 1000
 
@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"{directory / name} exists; an instruction artefact is never overwritten")
     if args.spec_from is not None:
         source = args.spec_from if args.spec_from.is_absolute() else REPO_ROOT / args.spec_from
-        spec = keep_spec(source, directory, git_state())
+        spec = keep_spec(source, directory, {"spec_from": repo_relative(source), "git": git_state()})
         print(f"kept spec {spec.sha256[:12]} from {source}")
         return 0
     started = time.perf_counter()

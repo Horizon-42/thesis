@@ -409,14 +409,13 @@ def test_a_spec_is_kept_for_new_rows_byte_for_byte_and_only_from_this_labeller(t
     one = spec()
     source = {"labeller_source_sha256": labeller_source_sha256(), "git": {"head": "measured", "dirty": False}}
     write_spec(tmp_path / "old", one, {"n": 1}, source)
-    assert keep_spec(tmp_path / "old", tmp_path / "new", {"head": "kept", "dirty": False}) == one
+    assert keep_spec(tmp_path / "old", tmp_path / "new", {"spec_from": "old", "git": {"head": "kept"}}) == one
     for name in ("spec.json", "measurements.json"):
         assert (tmp_path / "new" / name).read_bytes() == (tmp_path / "old" / name).read_bytes()
     assert load_spec(tmp_path / "new") == one
     require_current_labeller(tmp_path / "new")
     record = json.loads((tmp_path / "new" / "spec_from.json").read_text(encoding="utf-8"))
-    assert (record["spec_from"], record["spec_sha256"], record["git"]["head"]) == (str(tmp_path / "old"), one.sha256,
-                                                                                   "kept")
+    assert (record["spec_from"], record["spec_sha256"], record["git"]["head"]) == ("old", one.sha256, "kept")
     with pytest.raises(FileExistsError):
         keep_spec(tmp_path / "old", tmp_path / "new", {})
     # signals built under another configuration, or a spec another labeller measured, are refused
