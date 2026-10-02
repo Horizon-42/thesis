@@ -1,5 +1,5 @@
 """Augmented windows (`experiments/traffic_window_augment`, multi-aircraft design §6.6 step 7 item 6): a flight's times
-moved by whole seconds, the flow compressed, a start moved, a flight inserted and commanded, the qualification and the
+moved by whole steps, the flow compressed, a start moved, a flight inserted and commanded, the qualification and the
 cap on the aircraft at once — and the M3 window runner reading augmented windows. On the scene-data fixture."""
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def _window_and_batch(tmp_path, monkeypatch, entries, commanded, pool=()):
     return airport, signals, spec, window, batch, keys
 
 
-def test_a_flight_shifted_by_whole_seconds_keeps_its_rows_and_its_landing_leaves_its_context(tmp_path, monkeypatch):
+def test_a_flight_shifted_by_whole_steps_keeps_its_rows_and_its_landing_leaves_its_context(tmp_path, monkeypatch):
     from ts_transformer.experiments.traffic_augment import moved
     from ts_transformer.experiments.traffic_speaking import scene_landings, scene_of
     from ts_transformer.experiments.traffic_window_augment import shifted
@@ -53,20 +53,21 @@ def test_a_flight_shifted_by_whole_seconds_keeps_its_rows_and_its_landing_leaves
     _, airports, spec = _airport(tmp_path, monkeypatch, [0.0, 400.0], (0, 1))
     airport = airports["KXXX"]
     signals = _signals(tmp_path)["KXXX:f1"]
-    later = shifted(signals, -37, "KXXX:f1")
-    assert utc_s(later.entry_time_utc) == utc_s(signals.entry_time_utc) - 37.0
-    assert utc_s(later.landing_time_utc) == utc_s(signals.landing_time_utc) - 37.0
+    later = shifted(signals, -38, "KXXX:f1")
+    assert utc_s(later.entry_time_utc) == utc_s(signals.entry_time_utc) - 38.0
+    assert utc_s(later.landing_time_utc) == utc_s(signals.landing_time_utc) - 38.0
     assert later.e_m is signals.e_m and later.time_s is signals.time_s and later.dataset_id == "KXXX:f1"
     rows = airport.flights.flights["KXXX:f1"]
-    new_rows, new_track = moved(rows, airport.tracks["KXXX:f1"], -37.0, "KXXX:f1", STEP_S)
+    new_rows, new_track = moved(rows, airport.tracks["KXXX:f1"], -38.0, "KXXX:f1", STEP_S)
     geometry = airport.flights.geometry
-    assert np.array_equal(presence(later, len(rows.presence.times_s), geometry).times_s, new_rows.presence.times_s)
+    assert np.array_equal(presence(later, len(rows.presence.times_s), geometry, STEP_S).times_s,
+                          new_rows.presence.times_s)
     # its moved landing is in the scene's landings, and its own leaves them by its exact time
     scene = scene_of(airport, "KXXX:f1", LIMIT_S, STEP_S)
     context = scene_landings(_pool(airport), type(scene)(airport, "KXXX:f1", scene.first_step_s, scene.others,
                                                          ((new_rows, new_track),)))
     assert len(own_context(later, context).times_s) == len(context.times_s) - 1
-    assert shifted(signals, 5, "KXXX:f1+x").dataset_id == "KXXX:f1+x"
+    assert shifted(signals, 6, "KXXX:f1+x").dataset_id == "KXXX:f1+x"
 
 
 def test_the_flow_compressed_moves_the_commanded_toward_the_opening_and_the_replayed_stay(tmp_path, monkeypatch):
@@ -84,7 +85,7 @@ def test_the_flow_compressed_moves_the_commanded_toward_the_opening_and_the_repl
     for key, flight in zip(commanded, got.signals):
         start = airport.flights.flights[key].presence.start_s
         shift = got.drawn["shift_s"][key]
-        assert shift == round((c - 1.0) * (start - window.opens_s)) and shift <= 0
+        assert shift == STEP_S * round((c - 1.0) * (start - window.opens_s) / STEP_S) and shift <= 0
         assert got.window.rows(key).presence.start_s == start + shift and flight.dataset_id == key
     assert got.limits == (LIMIT_S,) * 3 and got.moves == (None,) * 3
     # the replayed ones as they were: none of them moved
@@ -179,8 +180,8 @@ def test_an_inserted_flight_is_commanded_the_gap_ahead_of_its_follower_and_its_s
     follower = airport.tracks["KXXX:f1"]
     inserted = got.window.track(key)
     gap_s = separation.gap_s("09", inserted.category, "09", follower.category)
-    assert abs((follower.presence.landing_s - inserted.presence.landing_s) - got.drawn["gap"] * gap_s) <= 0.5
-    assert got.drawn["shift_s"] == int(got.drawn["shift_s"])
+    assert abs((follower.presence.landing_s - inserted.presence.landing_s) - got.drawn["gap"] * gap_s) <= STEP_S / 2
+    assert got.drawn["shift_s"] % STEP_S == 0
     flight = got.signals[0]
     assert flight.dataset_id == key and utc_s(flight.landing_time_utc) == inserted.presence.landing_s
     # the flight it came from is not replayed beside it — it would be, left in
@@ -274,7 +275,8 @@ def test_the_window_runner_reads_augmented_windows_by_the_model_s_sources_with_t
     inserted = [r for r in rows if r["role"] == "inserted"]
     assert len(inserted) == 2 * 2 * 2 and all(r["dataset_id"].endswith(INSERTED) and r["augmented"]["kind"] == "A"
                                               for r in inserted)
-    assert all(r["reward"] in (0.0, 1.0) and r["outcome"] for r in rows)
+    # a sentence with a go-around scores between 0 and 1 (design §6.6 step 8)
+    assert all(0.0 <= r["reward"] <= 1.0 and r["outcome"] for r in rows)
     readout = runner.summaries(rows, augmented=True)
     assert set(readout["kinds"]) == {"A", "C"} and set(readout["roles"]) == {"inserted", "shifted", "as drawn"}
     with pytest.raises(ValueError, match="model's sources only"):

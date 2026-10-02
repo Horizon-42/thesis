@@ -148,7 +148,7 @@ def fly_airport(directory: Path, airport: str, members: list[int], signals: list
         stops = glidepath_stops(states, [r.words for r in readings], batch.geometries, [finals] * len(fly), words)
         for j, i in enumerate(fly):
             flight, reading = signals[i], readings[j]
-            seen = presence(flight, spoken[i][0], geometry)
+            seen = presence(flight, spoken[i][0], geometry, step_s)
             category = None if flight.typecode is None else wake_category(flight.typecode)
             aircraft = flown_aircraft(states, j, outcome_of(states, j, geometry, reading.runway_index, spec),
                                       int(stops.step[j]), seen, geometry.candidates[reading.runway_index].ident,

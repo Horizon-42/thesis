@@ -6,11 +6,11 @@ Two kinds of aircraft (design §2.2):
 
 - **controlled** (`Controlled`) — flown by the loop: by an executor (on the labelled words, or on the prior's), or, as
   the control an executor is compared with, along its own recorded rows (`recorded`). It lives on the scene's steps
-  (design §2.5: the executor's aircraft are on the steps): from the step its first row hangs on (`prior.scene.hang`),
-  one state a step, so its whole flight is moved by at most half a step from its recorded time. It is in the scene to
+  (design §2.5: the executor's aircraft are on the steps): from its first row's step (every row is on a step,
+  `prior.scene`), one state a step — at its recorded times. It is in the scene to
   its own end (``outcome``: the executor judge's, `autopilot.judge`, or the glidepath lower edge) unless a loss of
   separation it answers for ends it first (`LOST_SEPARATION`);
-- **replayed** (`traffic_census.Track`) — follows its record at its recorded times, interpolated at the step: the
+- **replayed** (`traffic_census.Track`) — follows its record at its recorded times, its rows at the steps: the
   background arrivals, and flights with a sentence the executor cannot fly (contract C31). Never ended: a loss it answers
   for is counted, nothing more.
 
@@ -44,7 +44,7 @@ from ts_transformer.inference.separation import AT_THRESHOLD, Traffic, judged_pa
 from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import wrap180
-from ts_transformer.prior.scene import Presence, hang, scene_steps
+from ts_transformer.prior.scene import Presence, scene_steps
 
 #: The outcome of a controlled aircraft ended for a loss of separation it answers for (design §3.4 layer 1).
 LOST_SEPARATION = "lost_separation"
@@ -52,8 +52,8 @@ LOST_SEPARATION = "lost_separation"
 
 @dataclass(frozen=True)
 class Controlled:
-    """A controlled aircraft: its state at each of its steps (``times_s``, one step apart from the step its first row
-    hangs on), its own end (``outcome``) after the last, and its threshold crossing on the loop's clock (None: it did
+    """A controlled aircraft: its state at each of its steps (``times_s``, one step apart from its first row's), its own
+    end (``outcome``) after the last, and its threshold crossing on the loop's clock (None: it did
     not land)."""
 
     presence: Presence                  # the recorded flight: its key and the runway it landed on. Its times are the
@@ -114,10 +114,10 @@ def flown(presence: Presence, step_s: float, e_m: np.ndarray, n_m: np.ndarray, h
           track_deg: np.ndarray, ground_speed_mps: np.ndarray, captured: np.ndarray, runway: str,
           geometry: AirportGeometry, separation: Separation, category: str | None, outcome: str,
           landing_from_first_s: float | None) -> Controlled:
-    """An aircraft flown from the step its first row hangs on, on one runway throughout (the labelled words say it once):
-    its states at its steps (``track_deg`` compass), the executor's capture at each (the established flag, design §3.2),
-    and its threshold crossing counted from its first step (None: it did not land)."""
-    first = float(hang(presence.start_s, step_s))
+    """An aircraft flown from its first row's step, on one runway throughout (the labelled words say it once): its states
+    at its steps (``track_deg`` compass), the executor's capture at each (the established flag, design §3.2), and its
+    threshold crossing counted from its first step (None: it did not land)."""
+    first = presence.start_s
     return _on_runway(presence, first, step_s, e_m, n_m, height_m, track_deg, ground_speed_mps, captured, runway,
                       geometry, separation, category, outcome,
                       None if landing_from_first_s is None else first + landing_from_first_s)
@@ -126,12 +126,12 @@ def flown(presence: Presence, step_s: float, e_m: np.ndarray, n_m: np.ndarray, h
 def recorded(presence: Presence, flight: FlightSignals, capture_row: int, landing_from_first_row_s: float,
              geometry: AirportGeometry, separation: Separation, category: str | None, step_s: float) -> Controlled:
     """The control: a flight with a sentence along its own recorded rows, on the loop's steps like a flown one — row r at
-    the step its first row hangs on plus r steps, established from the artefact's capture row, landed at its threshold
+    its first row's step plus r steps, established from the artefact's capture row, landed at its threshold
     crossing read off its own rows (``landing_from_first_row_s``, `autopilot.replay.observed_landing_s`: the last row
     carried to the threshold at its ground speed) — on the same clock as a flown aircraft's crossing, where the roster's
     landing time can fall seconds before the last row."""
     rows = len(presence.times_s)
-    first = float(hang(presence.start_s, step_s))
+    first = presence.start_s
     return _on_runway(presence, first, step_s, flight.e_m[:rows], flight.n_m[:rows], flight.altitude_m[:rows],
                       flight.track_deg[:rows], flight.ground_speed_mps[:rows], np.arange(rows) >= capture_row,
                       flight.runway, geometry, separation, category, "landed", first + landing_from_first_row_s)

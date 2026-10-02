@@ -181,8 +181,8 @@ def lead_eta_s(series: "FlightSeries", *, anchor_time_s: float) -> float:
     """``t_lead_landing − t_anchor`` in seconds, clipped to ±``LEAD_ETA_CLIP_S``.
 
     ``anchor_time_s`` is the anchor's time on the series' own clock (``series.times``,
-    zero at the first observed sample), whose absolute time is the arrival record's
-    ``entry_time_utc`` (that sample's own time to the millisecond since arrivals v7; v5
+    zero at the built flight's first row), whose absolute time is the source's
+    ``entry_time_utc`` (that row's own time to the millisecond since arrivals v7; v5
     rosters wrote it 0–2 s early — nothing against ``LEAD_ETA_SCALE_S``). No lead
     in the roster reads as the negative clip — the runway has been clear for as long as
     the channel can express.

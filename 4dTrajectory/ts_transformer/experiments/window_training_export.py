@@ -40,8 +40,8 @@ copied beside (`readout_block`), refused unless it is this prior's, on this exec
 samples and temperature.
 
 **Clocks.** Scene times are seconds from the window's opening; a sentence's are its flight's own (row 0 at 0 s), its
-row 0 on the scene's steps at its ``rowZeroS`` — a commanded aircraft's rows hang on the scene's even-second steps
-(multi-aircraft design §2.1), so its recorded rows (``recorded``, at their own times) are up to 1 s off its sentence's.
+row 0 on the scene's steps at its ``rowZeroS`` — every row is on the scene's even-second steps (multi-aircraft design
+§2.1), so its recorded rows (``recorded``) are at its sentence's times.
 An aircraft the judge ends (``lost_separation``) says nothing more and flies on, passive, in the scene (design §9 item
 29): its words end at ``endS``, its track at its own end (``ownEndS``). Units SI; heights MSL, and the ellipsoid height
 Cesium draws in (plus the flight's runway's HAE − MSL, `training_files.runway_hae_minus_msl_m`).
@@ -204,7 +204,7 @@ def window_payload(window: Window, limits: Sequence[float], recorded: FixedWindo
 
     return {
         "opensUtc": utc_text(opens),
-        "commanded": [{"datasetId": key, "rowZeroS": round(window.first_step_s(key, step_s) - opens, 3),
+        "commanded": [{"datasetId": key, "rowZeroS": round(window.first_step_s(key) - opens, 3),
                        "limitS": round(limit, 3), "recorded": track(key)}
                       for key, limit in zip(window.commanded, limits, strict=True)],
         "others": [{"datasetId": key, "callsign": callsign_of(key), "category": window.rows(key).category,

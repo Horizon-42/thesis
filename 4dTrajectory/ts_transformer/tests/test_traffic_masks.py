@@ -224,7 +224,7 @@ def test_the_runner_takes_a_background_aircraft_at_its_speed_and_as_cleared_once
     masked, B counting as cleared."""
     from ts_transformer.experiments.traffic_census import Track
     from ts_transformer.instructions.words import APPROACH, APPROACH_CLEARED, SPEED
-    from ts_transformer.prior.scene import Presence, hung_span
+    from ts_transformer.prior.scene import Presence
 
     t = STEP_S * np.arange(46)
     words = _spoken("F", -12_280.0 + 80.0 * t, 80.0, {}, landing_s=500.0)[1]
@@ -232,8 +232,7 @@ def test_the_runner_takes_a_background_aircraft_at_its_speed_and_as_cleared_once
                           {0: {SPEED: words.speed_index(80.0)}, 32: {APPROACH: APPROACH_CLEARED}}, landing_s=500.0)
     along = -6_120.0 + 70.0 * t
     seen = Presence("B", "KXXX", "R", 6_120.0 / 70.0, False, t, np.abs(along))
-    first, last = hung_span(seen, STEP_S)
-    background = Track(seen, first, last, along.copy(), np.zeros(len(t)), np.full(len(t), 300.0), along,
+    background = Track(seen, along.copy(), np.zeros(len(t)), np.full(len(t), 300.0), along,
                        np.zeros(len(t)), np.zeros(len(t)), np.full(len(t), 70.0), 0.0, "raw", "F")
     read = _measure([follower], [background])
     speed = [m for m in read["masked"] if m["column"] == "speed"]

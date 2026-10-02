@@ -185,7 +185,12 @@ The no-token executor's own axes — lookback L × segment Δ, `docs/experiments
 committed day split (C32; refused when the harvest's days are not its days), reads the train, select and val flights
 (process pool, 500 keys per chunk, spawn) — a test day's flight is only counted from the roster, with how many of
 them the per-flight split also holds out — and writes the signals (with the day split) and `candidates.json`;
-`--limit` is a SMOKE option recorded in `signals.json`. `instruction_spec --dir`
+`--limit` is a SMOKE option recorded in `signals.json`. Since 2026-10-02 the rows are on the UTC clock's even seconds
+(`data.dataset.on_utc_steps`: each flight's first row the first even second at or after its first kept sample, its
+`entry_time_utc` that row's; multi-aircraft design §2.1) — artefacts up to v5 have them at each flight's first sample.
+`instruction_spec --dir <new> --spec-from <artefact>` measures nothing: that artefact's `spec.json` and
+`measurements.json` are copied byte for byte with a `spec_from.json` (`artefact.keep_spec`; refused unless this code's
+labeller measured it and both artefacts' signals were built under one configuration). `instruction_spec --dir`
 measures on TRAIN only, and only on the flights and rows the labeller admits (`read.admit`; the
 refusals are counted in `measurements.json` `not_admitted`) — pass A with `measure.provisional_spec()`
 (the mean turn rate of turns ≥ `turn_rate_min_from_deg`, the rate and bank of their rows, speed transition accelerations, the course error on
@@ -633,8 +638,8 @@ checked before a cell is flown and before its result is written.
 ### R24 · `run_ts.py traffic_census` — the observed traffic of the training days judged as the multi-aircraft closed loop will be (multi-aircraft design §6.4 step 4)
 
 2026-09-27. `traffic_census --instructions <sentence artefact> --out <new dir> [--airports ...]`. Every arrival of the
-training days (with a sentence or background) in its airport's scene on the even-second steps its rows hang on
-(`prior.scene.hung_span`), judged at every step with two or more aircraft under both readings (C36): the aircraft's
+training days (with a sentence or background) in its airport's scene on its rows' even-second steps (every row is
+on one, `prior.scene.presence`; an artefact cut before 2026-10-02 is refused), judged at every step with two or more aircraft under both readings (C36): the aircraft's
 runway is the one it landed on, its capture the artefact's (or the labeller's rule on `admit`'s / the raw track for a
 background flight), the angle off its course stored UNWRAPPED along the rows and wrapped at the step. Per airport:
 loss episodes (a pair's consecutive steps; kinds, closest step) and pairs with a loss per hour with traffic, by

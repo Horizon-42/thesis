@@ -454,6 +454,43 @@ def test_resample_lands_on_a_regular_grid_without_extrapolating():
     assert len(resampled) == len(grid)
 
 
+def test_resample_keeps_the_clocks_whole_multiples_on_a_moved_clock():
+    """A clock zero 0.7 s after the first sample (`dataset.build_series`' ``row_start``): the grid starts at its zero,
+    never before the first sample."""
+    times = np.array([-0.7, 0.3, 2.3, 6.0])
+    values = np.tile(times[:, None], (1, len(ch.CHANNELS)))
+    grid, resampled = ch.resample_uniform(times, values, 2.0)
+    assert grid.tolist() == [0.0, 2.0, 4.0, 6.0]
+    assert np.allclose(resampled[:, 0], grid)
+
+
+def test_rows_on_the_utc_steps_start_at_the_first_even_second_and_take_the_entry_with_them():
+    """`dataset.on_utc_steps`: a flight entering 1.3 s before an even second has its first row there — its clock zero
+    and its source's entry moved to it, its rows the UTC clock's even seconds; one entering on an even second is built as
+    the models build it; a first row a whole step after the first sample is refused."""
+    from trajectory_data_process.harvest.utc import parse_iso_utc_s
+
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=3)
+    flights[0]["entry_time_utc"], flights[1]["entry_time_utc"] = "2026-06-01T11:00:00.700Z", "2026-06-01T11:00:04Z"
+    config = TSConfig()
+    models, _ = build_series(flights, config, airport=AIRPORT)
+    steps, _ = build_series(flights, config, airport=AIRPORT, row_start=dataset_module.on_utc_steps(2.0))
+    moved, same = steps
+    assert moved.scenario.source["entry_time_utc"] == "2026-06-01T11:00:02.000Z"
+    assert models[0].scenario.source["entry_time_utc"] == "2026-06-01T11:00:00.700Z"
+    assert np.array_equal(moved.times, 2.0 * np.arange(len(moved.times)))
+    assert parse_iso_utc_s(moved.scenario.source["entry_time_utc"]) % 2.0 == 0.0
+    # the same flight, 1.3 s later along its own track: its first row lies between the models' rows 0 and 1
+    assert len(moved.times) in (len(models[0].times) - 1, len(models[0].times))
+    for c in (0, 1, 2):
+        lo, hi = sorted((models[0].values[0, c], models[0].values[1, c]))
+        assert lo - 1.0 <= moved.values[0, c] <= hi + 1.0
+    assert same.scenario.source == models[1].scenario.source
+    assert np.array_equal(same.times, models[1].times) and np.array_equal(same.values, models[1].values)
+    with pytest.raises(ValueError, match="not within one 2 s step"):
+        build_series(flights, config, airport=AIRPORT, row_start=lambda dataset_id, source: 2.0)
+
+
 def test_resample_rejects_a_track_shorter_than_one_step():
     with pytest.raises(ValueError, match="too short"):
         ch.resample_uniform(np.array([0.0, 0.5]), np.zeros((2, len(ch.CHANNELS))), 4.0)

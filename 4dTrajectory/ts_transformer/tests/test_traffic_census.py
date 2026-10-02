@@ -19,11 +19,10 @@ def _track(key: str, times: np.ndarray, along: np.ndarray, rate: float, *, n: fl
            captured_s: float = 0.0, runway: str = "R", track_minus_course_deg: float = 0.0,
            right_of_course_m: float = 0.0):
     from ts_transformer.experiments.traffic_census import Track
-    from ts_transformer.prior.scene import Presence, hung_span
+    from ts_transformer.prior.scene import Presence
 
     seen = Presence(key, "KXXX", runway, landing_s, True, times, np.abs(along))
-    first, last = hung_span(seen, STEP_S)
-    return Track(seen, first, last, along.copy(), np.full(len(times), n), np.full(len(times), 500.0), along,
+    return Track(seen, along.copy(), np.full(len(times), n), np.full(len(times), 500.0), along,
                  np.full(len(times), track_minus_course_deg), np.full(len(times), right_of_course_m),
                  np.full(len(times), rate), captured_s, "artefact", "F")
 

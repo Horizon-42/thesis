@@ -104,7 +104,7 @@ from ts_transformer.prior.data import VARIANTS, airport_landings
 from ts_transformer.prior.generate import rows_for
 from ts_transformer.prior.landing_reward import landing_direction
 from ts_transformer.prior.model import Prior, with_traffic
-from ts_transformer.prior.scene import N_LOOK, Landings, hang, presence
+from ts_transformer.prior.scene import N_LOOK, Landings, presence
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 #: v3 (2026-10-01): the model's sources read (`model_sources`) in the header; v4–v5 (2026-10-02): multi-aircraft step 8
@@ -248,10 +248,10 @@ def window_size(window: Window, limits: Sequence[float], step_s: float) -> tuple
     """A window's aircraft, pre-roll (before its first commanded aircraft's row 0, as the speaker caps it), latest
     entry after it and rows (its longest time limit's with a go-around's `GO_AROUND_EXTRA_S`, as the loop lays it out),
     in steps."""
-    first = window.first_step_s(window.commanded[0], step_s)
-    pre = max([0] + [int(round((first - float(hang(window.rows(k).presence.start_s, step_s))) / step_s))
+    first = window.first_step_s(window.commanded[0])
+    pre = max([0] + [int(round((first - window.rows(k).presence.start_s) / step_s))
                      for k in window.others])
-    late = max(int(round((window.first_step_s(k, step_s) - first) / step_s)) for k in window.commanded)
+    late = max(int(round((window.first_step_s(k) - first) / step_s)) for k in window.commanded)
     return (len(window.commanded) + len(window.others), min(pre, int(HISTORY_S // step_s)), late,
             rows_for(max(limits) + GO_AROUND_EXTRA_S + step_s, step_s))
 
@@ -535,7 +535,7 @@ def fixed_paths(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, p
             runways.append(part.readings[j].runway_index)
             if source == "labelled":
                 ended = outcome_of(flown, j, geometry, part.readings[j].runway_index, words.spec)
-                path = speaking_aircraft(window.scene(key, step_s), flown, j, grids[j], ended.outcome, ended.end_row,
+                path = speaking_aircraft(window.scene(key), flown, j, grids[j], ended.outcome, ended.end_row,
                                          ended.crossing, -1, step_s)
                 stop = -1 if stops is None else int(stops.step[j])
                 own, last_row = own_end(ended.outcome, ended.end_row, stop, step_rows)
@@ -572,7 +572,7 @@ def fixed_rows(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, pa
                                          for n, other in enumerate(paths)
                                          if n != m and other.landing_s is not None], step_s)
             else:
-                context = scene_landings(landings[window.airport.flights.code], window.scene(key, step_s))
+                context = scene_landings(landings[window.airport.flights.code], window.scene(key))
             direction = landing_direction(part.signals[j], part.geometries[j], context)
             row["reward"] = _reward(row, direction)
             row["landed_here"] = bool(row["outcome"] == "landed" and direction[row["runway"]])
@@ -588,7 +588,7 @@ def _recorded_path(batch: replay.Batch, j: int, window: Window, key: str, step_s
     (`traffic_free_generation.recorded_rows`' path)."""
     flight, reading, geometry = batch.signals[j], batch.readings[j], batch.geometries[j]
     own = window.track(key)
-    seen = presence(flight, len(reading.words), geometry)
+    seen = presence(flight, len(reading.words), geometry, step_s)
     capture = int(np.searchsorted(seen.times_s, own.captured_s))
     whole = recorded(seen, flight, capture, replay.observed_landing_s(flight, reading, geometry), geometry,
                      window.airport.flights.separation, window.rows(key).category, step_s)

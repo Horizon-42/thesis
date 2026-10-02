@@ -91,26 +91,29 @@ def test_runways_of_other_directions_or_none_yet_are_not_on_one_clock():
     assert parallel[0, 1, K["required"]] == pytest.approx(math.asinh(math.sqrt(1.5 ** 2 - 0.6 ** 2) * 1_852.0 / 5_556.0))
 
 
-def test_a_neighbour_is_read_from_its_last_row_before_the_aircrafts_instant_and_carried_on_by_its_past_motion():
-    """Rows hang within half a step of their steps: i's at −0.9, 1.1 and 3.1 s, j's at 0.9, 2.9 and 4.9 s, both flying
-    east at 70 m/s. Step 2: j's row (4.9 s) is after i's (3.1 s) — j is read at step 1 (2.9 s), whose motion is its
-    displacement since its first row, and carried 0.2 s on. Step 1: j is read at its first row, which has no motion — it
-    is carried with none and the pair's motion is unknown. Step 0: i's first row has no motion — no frame."""
-    i = _aircraft([-12_000.0, -11_860.0, -11_720.0], time=[-0.9, 1.1, 3.1])
-    j = _aircraft([-6_000.0, -5_860.0, -5_720.0], time=[0.9, 2.9, 4.9])
+def test_a_neighbour_is_read_at_the_same_instant_and_a_first_row_has_no_motion():
+    """Every row is on a step: i's at 0, 2 and 4 s, j's at 2 and 4 s, both flying east at 70 m/s, 6 km apart. Step 2: j at
+    its row there, nothing carried, both motions known (no closing). Step 1: j's first row has no motion — the pair's
+    motion is unknown. Step 0: j is absent."""
+    i = _aircraft([-12_000.0, -11_860.0, -11_720.0], time=[0.0, 2.0, 4.0])
+    j = _aircraft([0.0, -5_860.0, -5_720.0], time=[np.nan, 2.0, 4.0])
     edges = scene_edges(rows(i, j, steps=3), SEPARATION)
-    at_step_2 = (-5_860.0 + 70.0 * 0.2) - (-11_720.0)
-    assert edges[2, 0, 1, K["front"]] == pytest.approx(math.asinh(at_step_2 / 5_556.0), abs=1e-6)
-    assert edges[2, 0, 1, K["clock_ahead"]] == pytest.approx(math.asinh(at_step_2 / 5_556.0), abs=1e-6)
+    ahead = math.asinh(6_000.0 / 5_556.0)
+    assert edges[2, 0, 1, K["front"]] == pytest.approx(ahead, abs=1e-6)
+    assert edges[2, 0, 1, K["clock_ahead"]] == pytest.approx(ahead, abs=1e-6)
     assert edges[2, 0, 1, K["motion_unknown"]] == 0.0 and edges[2, 0, 1, K["closing"]] == pytest.approx(0.0, abs=1e-6)
-    at_step_1 = -6_000.0 - (-11_860.0)
-    assert edges[1, 0, 1, K["front"]] == pytest.approx(math.asinh(at_step_1 / 5_556.0), abs=1e-6)
-    assert edges[1, 0, 1, K["clock_ahead"]] == pytest.approx(math.asinh(at_step_1 / 5_556.0), abs=1e-6)
+    assert edges[1, 0, 1, K["front"]] == pytest.approx(ahead, abs=1e-6)
     assert edges[1, 0, 1, K["motion_unknown"]] == 1.0
     assert all(edges[1, 0, 1, K[name]] == 0.0 for name in ("closing", "cpa_time", "cpa_horizontal", "cpa_vertical"))
-    first = edges[0, 0, 1]
-    assert first[K["motion_unknown"]] == 1.0 and first[K["front"]] == first[K["left"]] == 0.0
-    assert first[K["clock_ahead"]] == pytest.approx(math.asinh(6_000.0 / 5_556.0), abs=1e-6)
+    assert not edges[0, 0, 1].any() and not edges[0, 1].any()
+
+
+def test_a_scene_whose_aircraft_are_at_different_times_at_a_step_is_refused():
+    """A step is one time (rows on each flight's own first sample, the artefacts before 2026-10-02, are not)."""
+    i = _aircraft([-12_000.0, -11_860.0, -11_720.0], time=[0.0, 2.0, 4.0])
+    j = _aircraft([0.0, -5_860.0, -5_720.0], time=[np.nan, 2.9, 4.9])
+    with pytest.raises(ValueError, match="different times"):
+        scene_edges(rows(i, j, steps=3), SEPARATION)
 
 
 def test_the_frame_is_the_direction_of_the_displacement_since_the_row_before():
@@ -144,7 +147,7 @@ def test_a_non_finite_position_a_broken_run_or_a_runway_without_a_clock_is_refus
 
 def test_an_absent_aircraft_has_no_edges_and_a_crossing_pair_closes_to_its_closest_point():
     absent = _aircraft([-6_140.0, -6_000.0, 0.0], time=[0.0, 2.0, np.nan])
-    edges = scene_edges(rows(_aircraft(-12_000.0), absent, steps=3), SEPARATION)
+    edges = scene_edges(rows(_aircraft(-12_000.0, time=4.0), absent, steps=3), SEPARATION)
     assert not edges[2, 0, 1].any() and not edges[2, 1].any() and edges[2, 0, 0, K["self"]] == 1.0
     # j 4 km north of i's track, 4 km ahead, flying south at 70 m/s across it; i east at 70 m/s: closest at 57.1 s
     crossing = scene_edges(rows(_aircraft(-12_000.0), _aircraft(-8_000.0, n=4_000.0, track=180.0, runway=None)),
@@ -157,9 +160,11 @@ def test_an_absent_aircraft_has_no_edges_and_a_crossing_pair_closes_to_its_close
 def test_scenes_stacked_on_one_axis_read_each_scene_as_alone():
     """`scene_edge_blocks` (the loop stacks the scenes of one airport in one call): each scene's block is its features
     alone, value for value (no pair across two scenes is read)."""
-    first = rows(_aircraft(-4_000.0), _aircraft(-9_000.0, time=0.7, category="C"),
-                 _aircraft(-6_000.0, runway="P", n=-1_100.0), steps=4)
-    second = rows(_aircraft(-12_000.0, runway="X", track=270.0), _aircraft(-3_000.0, speed=65.0), steps=4)
+    first = rows(_aircraft(-4_000.0), _aircraft(-9_000.0, category="C"), _aircraft(-6_000.0, runway="P", n=-1_100.0),
+                 steps=4)
+    # the second scene at other times: each scene's steps are its own
+    second = rows(_aircraft(-12_000.0, runway="X", track=270.0, time=600.0), _aircraft(-3_000.0, speed=65.0, time=600.0),
+                  steps=4)
     stacked = SceneRows(np.concatenate([first.time_s, second.time_s]), np.concatenate([first.e_m, second.e_m]),
                         np.concatenate([first.n_m, second.n_m]), np.concatenate([first.height_m, second.height_m]),
                         np.concatenate([first.along_m, second.along_m]), [*first.runway, *second.runway],

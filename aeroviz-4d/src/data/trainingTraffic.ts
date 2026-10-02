@@ -138,7 +138,8 @@ export interface TrainingWindowLanding {
 export interface TrainingWindowCommanded {
   /** Its flight in the set (`TrainingSetHead.flights`). */
   flight: TrainingFlight;
-  /** Its row 0 on the window's steps (its rows hang on the scene's even-second steps: its recorded rows are up to 1 s off). */
+  /** Its row 0 on the window's steps (since sentence artefact v6 every row is on the scene's even-second steps; in a
+   * window exported from an earlier artefact its rows hang there and its recorded rows are up to 1 s off). */
   rowZeroS: number;
   limitS: number;
   /** Its recorded rows, the window's clock. */

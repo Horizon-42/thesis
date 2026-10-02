@@ -12,7 +12,11 @@ with the course tolerance, fits the capture corridor on the aligned final and co
 heading grids on the rows before it. Writes ``spec.json`` (with the labeller's source hash and
 git state) and ``measurements.json`` into the signals directory (never over an existing file).
 
+``--spec-from <artefact>`` measures nothing: that artefact's spec is kept unchanged (`artefact.keep_spec` — new rows
+under the same vocabulary, e.g. rows moved onto the UTC steps, keep the spec; every model trained under it still opens).
+
     python run_ts.py instruction_spec --dir 4dTrajectory/outputs/POOLED/instruction_language/<name>
+    python run_ts.py instruction_spec --dir <new> --spec-from 4dTrajectory/outputs/POOLED/instruction_language/<old>
 """
 
 from __future__ import annotations
@@ -29,7 +33,9 @@ import numpy as np
 
 from ts_transformer.instructions import measure
 from ts_transformer.instructions.airport import AirportGeometry
-from ts_transformer.instructions.artefact import labeller_source_sha256, load_candidates, load_signals, write_spec
+from ts_transformer.instructions.artefact import (
+    keep_spec, labeller_source_sha256, load_candidates, load_signals, write_spec,
+)
 from ts_transformer.instructions.labeller.read import admit
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.spec import VocabularySpec
@@ -91,11 +97,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--dir", type=Path, required=True, help="the directory instruction_signals wrote")
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--spec-from", type=Path, default=None,
+                        help="an artefact whose spec is kept unchanged instead of measuring one (module docstring)")
     args = parser.parse_args(argv)
     directory = args.dir if args.dir.is_absolute() else REPO_ROOT / args.dir
     for name in ("spec.json", "measurements.json"):
         if (directory / name).exists():
             parser.error(f"{directory / name} exists; an instruction artefact is never overwritten")
+    if args.spec_from is not None:
+        source = args.spec_from if args.spec_from.is_absolute() else REPO_ROOT / args.spec_from
+        spec = keep_spec(source, directory, git_state())
+        print(f"kept spec {spec.sha256[:12]} from {source}")
+        return 0
     started = time.perf_counter()
     labeller = labeller_source_sha256()          # the code the workers measure with
     flights = load_signals(directory, "train")

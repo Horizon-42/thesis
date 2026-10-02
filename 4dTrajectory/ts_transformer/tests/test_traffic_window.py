@@ -67,11 +67,11 @@ def test_one_commanded_aircraft_replays_what_its_one_aircraft_scene_does(tmp_pat
     scene = scene_of(airport, "KXXX:f3", 120.0, STEP_S)
     # f1 and f2 entered 400 and 200 s before f3 and are still in the air; f4 enters after f3's 136 s
     assert alone.others == scene.others == _keys(1, 2)
-    assert alone.scene("KXXX:f3", STEP_S) == scene
+    assert alone.scene("KXXX:f3") == scene
     # two commanded: each other's first among the others, the replayed spanning both time limits (f4's reaches f5)
     both = window_of(airport, 0.0, _keys(3, 4), [120.0, 300.0], STEP_S)
     assert both.others == _keys(1, 2, 5)
-    assert both.scene("KXXX:f4", STEP_S).others == _keys(3, 1, 2, 5)
+    assert both.scene("KXXX:f4").others == _keys(3, 1, 2, 5)
 
 
 def _fake_draw(flies):

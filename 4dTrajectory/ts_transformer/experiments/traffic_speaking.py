@@ -11,9 +11,9 @@ reads the others through its traffic attention (`prior.scene_speaker.SceneSpeake
 What the prior package does not reach is computed here, step by step, and handed to the speaker (design §9 item 18):
 
 - **edge features** (`inference.scene_edges`) of the steps being encoded: the speaking aircraft on the loop's steps (its
-  row r at the step its first row hangs on plus r steps: `prior.scene.hang`), at the loop's positions from its first
-  predicted step, with the runway in force before the step (its own words); the others at their recorded row times, with
-  the runway their labelled words have in force;
+  row r at its first row's step plus r steps — every row is on a step, `prior.scene`), at the loop's positions from its
+  first predicted step, with the runway in force before the step (its own words); the others at their recorded rows,
+  with the runway their labelled words have in force;
 - **separation masks** (`inference.separation_masks`, design §3.4 layer 2; `speaking_masks`): the speed words and the
   approach clearance, against the others replayed at the step's instant (`traffic_census.traffic_at`) and the speaking
   aircraft's executor state — its speed along its course, its capture (established), the runway said at the step if it
@@ -62,7 +62,7 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import ATC_NO_SPEED_ASSIGNMENT_DISTANCE_M, VocabularySpec
 from ts_transformer.instructions.words import APPROACH, APPROACH_CLEARED, RUNWAY, SPEED, Words
 from ts_transformer.prior.model import Prior
-from ts_transformer.prior.scene import N_LOOK, SAMPLE_MAX_S, Landings, hang
+from ts_transformer.prior.scene import N_LOOK, SAMPLE_MAX_S, Landings
 from ts_transformer.prior.scene_data import Node
 from ts_transformer.prior.scene_speaker import SceneSpeaker
 
@@ -115,7 +115,7 @@ def with_tracks(directory: Path, split: str, spec: VocabularySpec, per_airport: 
 
 @dataclass(frozen=True)
 class Scene:
-    """One speaking flight's scene: its airport, its key, the step its first row hangs on (epoch seconds), the others in
+    """One speaking flight's scene: its airport, its key, its first row's step (epoch seconds), the others in
     the air at a step from there to the end of its time limit, and — an augmented scene's (`traffic_augment`) — flights
     moved in time or inserted (their rows and tracks, by their keys in ``others``)."""
 
@@ -141,17 +141,17 @@ class Scene:
 
 def scene_of(airport: SceneAirport, key: str, limit_s: float, step_s: float) -> Scene:
     """``key``'s scene when it flies ``limit_s`` from its first predicted step (`Scene`)."""
-    first = float(hang(airport.flights.flights[key].presence.start_s, step_s))
+    first = airport.flights.flights[key].presence.start_s
     end = first + N_LOOK * step_s + limit_s
     others = tuple(k for k, t in airport.tracks.items() if k != key and t.first_step_s <= end and t.last_step_s >= first)
     return Scene(airport, key, first, others)
 
 
 def other_node(scene: Scene, key: str, step_s: float) -> Node:
-    """An other aircraft as the speaker places it: its rows from the step its first row hangs on, counted from the
-    speaking aircraft's row 0."""
+    """An other aircraft as the speaker places it: its rows from its first row's step, counted from the speaking
+    aircraft's row 0."""
     other = scene.rows(key)
-    first = int(round((float(hang(other.presence.start_s, step_s)) - scene.first_step_s) / step_s))
+    first = int(round((other.presence.start_s - scene.first_step_s) / step_s))
     return Node(key, other.presence.speaking, first, **other.node_rows)
 
 
@@ -306,7 +306,7 @@ def _edge_arrays(scene: Scene, e: np.ndarray, n: np.ndarray, h: np.ndarray, poin
                                             candidate).before_threshold_m
                 along[0, j] = separation.along_nm[candidate.ident] * NM_M - float(before[0])
     for m, other in enumerate(members[1:], start=1):
-        start = pre + int(round((float(hang(other.presence.start_s, step_s)) - scene.first_step_s) / step_s))
+        start = pre + int(round((other.presence.start_s - scene.first_step_s) / step_s))
         lo, hi = max(low, start), min(last, start + len(other.runway))
         if lo >= hi:
             continue

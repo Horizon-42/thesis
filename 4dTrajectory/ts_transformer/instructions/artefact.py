@@ -3,6 +3,8 @@
 ``signals_<split>.npz`` + ``signals.json``   the per-step signals, where they came from, and the day split
                                              (`data.day_split`) that dealt them — test days are never here
 ``spec.json`` + ``measurements.json``        the vocabulary spec (with its sha) and the numbers behind it
+``spec_from.json``                           only when the spec is another artefact's, kept unchanged (`keep_spec`):
+                                             where it came from
 ``candidates.json``                          every airport's candidate runways and runway ends (its geometry)
 ``sentences_<split>.npz`` + ``labels.json``  the sentences, and every flight's outcome
 
@@ -28,7 +30,7 @@ from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.labeller.read import Reading
 from ts_transformer.instructions.signals import SIGNALS_SCHEMA, FlightSignals, pack_signals, unpack_signals
 from ts_transformer.instructions.spec import SPEC_SCHEMA, VocabularySpec
-from ts_transformer.io_utils import write_json_atomic
+from ts_transformer.io_utils import utc_now, write_bytes_atomic, write_json_atomic
 
 SENTENCES_SCHEMA = "ts-instruction-sentences-v2"
 CANDIDATES_SCHEMA = "ts-instruction-candidates-v2"
@@ -146,6 +148,27 @@ def write_spec(directory: Path, spec: VocabularySpec, measurements: dict[str, An
     write_json_atomic(_fresh(directory / "spec.json"),
                       {"schema": SPEC_SCHEMA, "sha256": spec.sha256, "spec": spec.to_dict(), "source": source})
     write_json_atomic(_fresh(directory / "measurements.json"), {"spec_sha256": spec.sha256, **measurements})
+
+
+def keep_spec(source: Path, directory: Path, git: dict[str, Any]) -> VocabularySpec:
+    """``source``'s spec kept for ``directory`` (a spec is the vocabulary's format, not the data's: new rows under the same
+    words keep it, never measure it again): its ``spec.json`` and ``measurements.json`` copied byte for byte — the spec,
+    the labeller and the git state that measured it, on ``source``'s train signals — and ``spec_from.json`` saying so.
+    Refused unless the code's labeller is the one that measured it (`require_current_labeller`) and the two artefacts'
+    signals were built under one configuration."""
+    spec = load_spec(source)
+    require_current_labeller(source)
+    built = {path: _signals_record(path)["config"] for path in (source, directory)}
+    if built[source] != built[directory]:
+        raise ValueError(f"{source}'s signals were built under {built[source]}, {directory}'s under {built[directory]}")
+    copies = {name: _fresh(directory / name) for name in ("spec.json", "measurements.json")}
+    record = _fresh(directory / "spec_from.json")         # all three refused before any is written
+    for name, path in copies.items():
+        write_bytes_atomic(path, (source / name).read_bytes())
+    write_json_atomic(record,
+                      {"spec_from": str(source), "spec_sha256": spec.sha256,
+                       "labeller_source_sha256": spec_labeller_source(source), "git": git, "written_utc": utc_now()})
+    return spec
 
 
 def _spec_record(directory: Path) -> dict[str, Any]:

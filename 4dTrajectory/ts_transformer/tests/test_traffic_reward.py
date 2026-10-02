@@ -65,7 +65,7 @@ def test_a_round_s_sentences_train_on_what_their_words_were_sampled_from(tmp_pat
     from ts_transformer.experiments.traffic_tuner import scene_layout, scene_logits
     from ts_transformer.prior.train import to_batch
 
-    airport, signals, spec, *context = _airport(tmp_path, monkeypatch, [0.7, 120.0, 3_600.0], [0, 1, 2], context=moved)
+    airport, signals, spec, *context = _airport(tmp_path, monkeypatch, [2.0, 120.0, 3_600.0], [0, 1, 2], context=moved)
     words, samples, keys = Words(spec), 2, ["KXXX:f1", "KXXX:f2"]
     _patch_physics(monkeypatch, airport, signals, keys, samples)
     batch = _batch(airport, signals, spec, keys)
@@ -75,7 +75,7 @@ def test_a_round_s_sentences_train_on_what_their_words_were_sampled_from(tmp_pat
     landings, variant = None, "no-context"
     if moved:
         leader = scenes[0]
-        scenes[0] = replace(leader, moved=(moved_flight(leader.rows("KXXX:f0"), leader.track("KXXX:f0"), 37.0, "KXXX:f0",
+        scenes[0] = replace(leader, moved=(moved_flight(leader.rows("KXXX:f0"), leader.track("KXXX:f0"), 38.0, "KXXX:f0",
                                                         spec.step_s),))
         (landings,), variant = context, "full"
     round_ = Round(batch, scenes, [None, None], ["D" if moved else "real", "A"],
@@ -375,7 +375,7 @@ def test_the_sentences_do_not_depend_on_how_many_processes_speak_them(tmp_path, 
     from ts_transformer.experiments.traffic_reward import Round, Speakers, Speaking, speak
     from ts_transformer.experiments.traffic_speaking import scene_of
 
-    airport, signals, spec = _airport(tmp_path, monkeypatch, [0.7, 120.0, 3_600.0], [0, 1, 2])
+    airport, signals, spec = _airport(tmp_path, monkeypatch, [2.0, 120.0, 3_600.0], [0, 1, 2])
     words, samples, keys = Words(spec), 2, ["KXXX:f1", "KXXX:f2"]
     _patch_physics(monkeypatch, airport, signals, keys, samples)
     batch = _batch(airport, signals, spec, keys)

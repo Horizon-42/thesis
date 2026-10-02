@@ -2,8 +2,8 @@
 sample's steps, each at its own rows, which steps count toward the loss, and the tensors of a batch of samples.
 
 A sample's steps run from the first step of any of its aircraft (a flight carried in from before the cut starts at its
-row 0, so its earlier rows are context) to its last loss step. Each aircraft (`Node`) sits on the steps its rows hang on,
-consecutively from its first (`scene.hang`), and keeps its own row numbers (§2.1): the position embedding and the first
+row 0, so its earlier rows are context) to its last loss step. Each aircraft (`Node`) sits on its rows' steps,
+consecutively from its first (every row is on a step, `scene.presence`), and keeps its own row numbers (§2.1): the position embedding and the first
 predicted step read them. What counts toward the loss: a flight with a sentence, at the rows its own sentence asks
 (from its first predicted step) that fall on the sample's loss steps; a background aircraft never (its words are
 "none"). Rows past the sample's last step are left out (they belong to the next sample).
@@ -30,7 +30,7 @@ A_MAX = 18
 class Node:
     """One aircraft of a sample: its rows' inputs (as `data.Flight` holds them: ``features [R, …]``, ``relative
     [R, K, …]``, ``static``, ``in_force`` / ``since`` / ``targets`` / ``asked`` ``[R, 6]``), the sample step its row 0
-    hangs on, and whether it has a sentence."""
+    is on, and whether it has a sentence."""
 
     key: str
     speaking: bool

@@ -407,7 +407,7 @@ def ordering(rows: Sequence[Mapping[str, Any]], round_: WindowRound, step_s: flo
             if row["outcome"] != LANDED or row["starts_in_a_loss"]:
                 continue
             key = row["dataset_id"]
-            first_s = window.first_step_s(key, step_s) + N_LOOK * step_s
+            first_s = window.first_step_s(key) + N_LOOK * step_s
             times.append(row["landing_s"] - first_s)
             recorded_times.append(recorded[key][0] - first_s)
             gap = landing_gap_s(window, landed[key][1], row["landing_s"],

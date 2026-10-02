@@ -22,8 +22,9 @@ would read a different population):
   over its own time limit; the window no longer replays the flight it came from (its recorded landing stays in the
   landing contexts, as in `traffic_augment`).
 
-**Every shift is whole seconds**: the rosters' landing times are whole seconds, and a flight's own landing leaves its
-landing context by its exact time (`data.own_context`). A moved or inserted flight moves whole — its rows and record
+**Every shift is whole steps** (even seconds, so whole seconds too): a moved flight's rows stay on the scene's steps
+(`prior.scene`, `traffic_augment.moved`), the rosters' landing times are whole seconds, and a flight's own landing leaves
+its landing context by its exact time (`data.own_context`). A moved or inserted flight moves whole — its rows and record
 (`traffic_augment.moved`) and its signals (`shifted`: its entry and landing times, so its rows' times, its landing in the
 others' context and the landing direction at its first predicted step are the moved ones'). A moved flight keeps its
 rows' inputs and words, as in `traffic_augment`.
@@ -73,7 +74,7 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.prior.augment import Augmentation, augment_signals
 from ts_transformer.prior.generate import rows_for
-from ts_transformer.prior.scene import N_LOOK, SceneIndex, hang, in_scene, presence, scene_steps
+from ts_transformer.prior.scene import N_LOOK, SceneIndex, in_scene, presence, scene_steps
 
 KINDS = ("C", "B", "A")
 COMPRESSION = (0.6, 1.0)
@@ -112,9 +113,14 @@ def shifted(signals: FlightSignals, dt_s: int, key: str) -> FlightSignals:
                                landing_time_utc=later(signals.landing_time_utc, "seconds"))
 
 
+def whole_steps(dt_s: float, step_s: float) -> int:
+    """``dt_s`` rounded to the nearest whole step, in (whole) seconds."""
+    return int(round(dt_s / step_s) * step_s)
+
+
 def busiest(directory: Path, spec: VocabularySpec, airports: Sequence[str], step_s: float) -> dict[str, int]:
-    """Each airport's most aircraft on one step of the training days — every arrival, a background one too, from the
-    step its first row hangs on to its last's (`prior.scene.in_scene`; a flight with a sentence over its sentence's
+    """Each airport's most aircraft on one step of the training days — every arrival, a background one too, from its
+    first row's step to its last's (`prior.scene.in_scene`; a flight with a sentence over its sentence's
     rows): the cap on an augmented window (§5.2)."""
     geometries = load_candidates(directory)
     sentences = load_sentences(directory, "train", spec)
@@ -123,16 +129,16 @@ def busiest(directory: Path, spec: VocabularySpec, airports: Sequence[str], step
     flights: dict[str, list[Any]] = {code: [] for code in airports}
     for i, flight in enumerate(load_signals(directory, "train")):
         if flight.airport in flights:
-            flights[flight.airport].append(presence(flight, rows.get(i), geometries[flight.airport]))
-    return {code: max(at_once(segment, step_s) for segment in SceneIndex(part).segments(step_s))
+            flights[flight.airport].append(presence(flight, rows.get(i), geometries[flight.airport], step_s))
+    return {code: max(at_once(segment, step_s) for segment in SceneIndex(part).segments())
             for code, part in flights.items()}
 
 
 def at_once(flights: Sequence[Any], step_s: float) -> int:
     """The most of ``flights`` (their presences) in the scene on one step."""
-    first = min(float(hang(p.start_s, step_s)) for p in flights)
-    last = max(float(hang(p.end_s, step_s)) for p in flights)
-    return int(in_scene(flights, scene_steps(first, last, step_s), step_s).max())
+    first = min(p.start_s for p in flights)
+    last = max(p.end_s for p in flights)
+    return int(in_scene(flights, scene_steps(first, last, step_s)).max())
 
 
 def qualifies(window: Window, signals: Mapping[str, FlightSignals], step_s: float) -> bool:
@@ -142,7 +148,7 @@ def qualifies(window: Window, signals: Mapping[str, FlightSignals], step_s: floa
     cut = slice(0, N_LOOK + 1)
     for key in window.commanded:
         rows = window.rows(key)
-        seen = presence(signals[key], len(rows.presence.times_s), geometry)
+        seen = presence(signals[key], len(rows.presence.times_s), geometry, step_s)
         whole = recorded(seen, signals[key], len(seen.times_s), 0.0, geometry, separation, rows.category, step_s)
         observed = dataclasses.replace(
             whole, times_s=whole.times_s[cut], e_m=whole.e_m[cut], n_m=whole.n_m[cut], height_m=whole.height_m[cut],
@@ -150,7 +156,7 @@ def qualifies(window: Window, signals: Mapping[str, FlightSignals], step_s: floa
             track_minus_course_deg=whole.track_minus_course_deg[cut], right_of_course_m=whole.right_of_course_m[cut],
             along_speed_mps=whole.along_speed_mps[cut], established=whole.established[cut], outcome="timeout",
             landing_s=None)
-        if judged(window.scene(key, step_s), observed, step_s)[1] is not None:
+        if judged(window.scene(key), observed, step_s)[1] is not None:
             return False
     return True
 
@@ -180,7 +186,7 @@ def augment_window(window: Window, batch: replay.Batch, places: Sequence[int], p
         left_out: list[str] = []
         if kind == "C":
             c = float(rng.uniform(*COMPRESSION))
-            shift = {k: int(round((c - 1.0) * (window.rows(k).presence.start_s - window.opens_s)))
+            shift = {k: whole_steps((c - 1.0) * (window.rows(k).presence.start_s - window.opens_s), step_s)
                      for k in window.commanded}
             for k in window.commanded:
                 parts.append(moved(window.rows(k), window.track(k), float(shift[k]), k, step_s))
@@ -220,8 +226,8 @@ def augment_window(window: Window, batch: replay.Batch, places: Sequence[int], p
             clock = (separation.approach_time_s(behind.presence.runway, behind.presence.landing_s)
                      - gap * separation.gap_s(source.presence.runway, source.category, behind.presence.runway,
                                               behind.category))
-            dt = int(round(clock + separation.along_nm[source.presence.runway] * NM_M / separation.speed_mps
-                           - source.presence.landing_s))
+            dt = whole_steps(clock + separation.along_nm[source.presence.runway] * NM_M / separation.speed_mps
+                             - source.presence.landing_s, step_s)
             key = source_key + INSERTED
             j = pool[source_key]
             parts.append(moved(airport.flights.flights[source_key], source, float(dt), key, step_s))
@@ -232,7 +238,7 @@ def augment_window(window: Window, batch: replay.Batch, places: Sequence[int], p
             refused["longer_than_the_model"] += 1
             continue
         placed = Window(airport, window.opens_s, tuple(place), (), tuple(parts))
-        commanded = tuple(sorted(place, key=lambda k: (placed.first_step_s(k, step_s), k)))
+        commanded = tuple(sorted(place, key=lambda k: (placed.first_step_s(k), k)))
         candidate = window_of(airport, window.opens_s, commanded, [limit[k] for k in commanded], step_s, parts,
                               left_out)
         cap = max(most, at_once([airport.tracks[k].presence for k in (*window.commanded, *candidate.others)], step_s))

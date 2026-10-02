@@ -6,9 +6,11 @@ day split: a test day's landing is never counted, and its flights are never in t
 
 Times are UTC epoch seconds. A flight's row r happens at ``entry_time_utc + time_s[r]`` (`FlightSignals`).
 
-Several aircraft share the scene's steps (multi-aircraft design §2.1, user 2026-09-27): the UTC times that are whole
-multiples of the rows' step (even seconds for 2 s). A flight's rows hang on the nearest step (`hang`, at most half a step
-away); a flight keeps its own row numbers. A segment is cut into teacher-forcing samples by §2.3's rule (`samples`).
+Several aircraft share the scene's steps (multi-aircraft design §2.1): the UTC times that are whole multiples of the
+rows' step (even seconds for 2 s). Every row of the artefact is ON a step — the data plane cuts the rows there
+(`data.dataset.on_utc_steps`, user 2026-10-02) — so a step is one time for every aircraft in it; an artefact whose rows
+are elsewhere is refused (`presence`). A flight keeps its own row numbers. A segment is cut into teacher-forcing samples
+by §2.3's rule (`samples`).
 """
 
 from __future__ import annotations
@@ -30,6 +32,8 @@ from ts_transformer.instructions.signals import FlightSignals
 N_LOOK = 8
 #: The landing context's window, ``T_cfg`` (§4.2, §10: 30 minutes).
 CONTEXT_WINDOW_S = 1800.0
+#: How far a row may lie from its step and still be on it: an ISO time holds milliseconds, and a row time is a sum.
+ON_STEP_TOLERANCE_S = 1e-6
 #: A LEADER is an aircraft landing earlier on the same runway that is at most this much closer to the threshold
 #: (§8: "同一条跑道前方 10 km 内").
 LEADER_RANGE_M = 10_000.0
@@ -153,13 +157,20 @@ class Presence:
         return np.interp(t_s, self.times_s, self.to_threshold_m)
 
 
-def presence(flight: FlightSignals, sentence_rows: int | None, geometry: AirportGeometry) -> Presence:
-    """``sentence_rows``: the length of its sentence, or None for a flight without one."""
+def presence(flight: FlightSignals, sentence_rows: int | None, geometry: AirportGeometry, step_s: float) -> Presence:
+    """``sentence_rows``: the length of its sentence, or None for a flight without one. Refused unless its rows are on
+    the scene's steps of ``step_s``, one a step from its first (module docstring); its times are those steps."""
     rows = flight.n_rows if sentence_rows is None else sentence_rows
+    first = utc_s(flight.entry_time_utc)
+    steps = (round(first / step_s) + np.arange(rows)) * step_s
+    if np.abs(first + flight.time_s[:rows] - steps).max() > ON_STEP_TOLERANCE_S:
+        raise ValueError(f"{flight.dataset_id}: its rows from {flight.entry_time_utc} are not on the scene's {step_s:g} s "
+                         f"steps — an artefact whose rows start at each flight's first sample (cut before 2026-10-02); "
+                         f"a scene reads one cut on the UTC steps (`data.dataset.on_utc_steps`)")
     threshold = geometry.candidates[geometry.candidate_index(flight.runway)]
     distance = np.hypot(flight.e_m[:rows] - threshold.threshold_e_m, flight.n_m[:rows] - threshold.threshold_n_m)
     return Presence(flight.dataset_id, flight.airport, flight.runway, utc_s(flight.landing_time_utc),
-                    sentence_rows is not None, utc_s(flight.entry_time_utc) + flight.time_s[:rows], distance)
+                    sentence_rows is not None, steps, distance)
 
 
 def leader_gap_m(ego: Presence, near: Sequence[Presence], rows_s: np.ndarray, present: np.ndarray) -> np.ndarray:
@@ -189,44 +200,32 @@ class SceneIndex:
         hi = bisect.bisect_right(self._starts, end_s)
         return [item for item in self.flights[lo:hi] if item.end_s >= start_s]
 
-    def segments(self, step_s: float) -> list[list[Presence]]:
-        """The flights chained into segments on the steps their rows hang on (§3.2; multi-aircraft design §2.1): a flight
-        whose first step is no later than the segment's last step joins it, so no step is in two segments."""
+    def segments(self) -> list[list[Presence]]:
+        """The flights chained into segments on their steps (§3.2; multi-aircraft design §2.1): a flight whose first step
+        is no later than the segment's last step joins it, so no step is in two segments."""
         out: list[list[Presence]] = []
         end = -np.inf
         for item in self.flights:
-            first, last = hung_span(item, step_s)
-            if first > end:
+            if item.start_s > end:
                 out.append([])
             out[-1].append(item)
-            end = max(end, last)
+            end = max(end, item.end_s)
         return out
 
 
 # ---- several aircraft on the scene's steps (multi-aircraft design §2.1, §2.3)
-def hang(t_s: np.ndarray | float, step_s: float) -> np.ndarray:
-    """The scene step each time hangs on: the nearest whole multiple of ``step_s`` (half a step rounds up)."""
-    return np.floor(np.asarray(t_s, dtype=np.float64) / step_s + 0.5) * step_s
-
-
 def scene_steps(start_s: float, end_s: float, step_s: float) -> np.ndarray:
     """The scene's steps from ``start`` to ``end``, both included."""
     return np.arange(math.ceil(start_s / step_s), math.floor(end_s / step_s) + 1) * step_s
 
 
-def hung_span(flight: Presence, step_s: float) -> tuple[float, float]:
-    """The first and the last step a flight's rows hang on."""
-    return float(hang(flight.start_s, step_s)), float(hang(flight.end_s, step_s))
-
-
-def in_scene(flights: Sequence[Presence], steps_s: np.ndarray, step_s: float) -> np.ndarray:
-    """How many of ``flights`` (background aircraft too) are in the scene at each step: from the step their first row
-    hangs on to the step their last row hangs on."""
+def in_scene(flights: Sequence[Presence], steps_s: np.ndarray) -> np.ndarray:
+    """How many of ``flights`` (background aircraft too) are in the scene at each step: from their first row's step to
+    their last's."""
     steps = np.asarray(steps_s, dtype=np.float64)
     count = np.zeros(steps.shape, dtype=np.int64)
     for flight in flights:
-        first, last = hung_span(flight, step_s)
-        count += (steps >= first) & (steps <= last)
+        count += (steps >= flight.start_s) & (steps <= flight.end_s)
     return count
 
 
@@ -246,18 +245,16 @@ def samples(segment: Sequence[Presence], step_s: float) -> list[Sample]:
     """A segment cut by §2.3's rule: while what is left runs past `SAMPLE_MAX_S`, cut at the step from
     `SAMPLE_SEARCH_FROM_S` to `SAMPLE_MAX_S` after the sample's loss starts with the fewest aircraft in the scene, the
     earliest of equals."""
-    spans = [hung_span(flight, step_s) for flight in segment]
-    start, end = min(first for first, _ in spans), max(last for _, last in spans)
+    start, end = min(flight.start_s for flight in segment), max(flight.end_s for flight in segment)
     cuts = []
     loss_start = start
     while end - loss_start > SAMPLE_MAX_S:
         steps = scene_steps(loss_start + SAMPLE_SEARCH_FROM_S, loss_start + SAMPLE_MAX_S, step_s)
-        loss_start = float(steps[int(np.argmin(in_scene(segment, steps, step_s)))])
+        loss_start = float(steps[int(np.argmin(in_scene(segment, steps)))])
         cuts.append(loss_start)
     bounds = [start, *cuts, math.inf]
     out = []
     for lo, hi in zip(bounds[:-1], bounds[1:]):
-        inside = [(flight, first) for flight, (first, last) in zip(segment, spans) if last >= lo and first < hi]
-        out.append(Sample(lo, min(hi, end), tuple(flight for flight, _ in inside),
-                          tuple(flight for flight, first in inside if first < lo)))
+        inside = [flight for flight in segment if flight.end_s >= lo and flight.start_s < hi]
+        out.append(Sample(lo, min(hi, end), tuple(inside), tuple(flight for flight in inside if flight.start_s < lo)))
     return out

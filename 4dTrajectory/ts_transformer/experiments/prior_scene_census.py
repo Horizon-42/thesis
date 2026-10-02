@@ -61,7 +61,7 @@ def _histogram(counts: np.ndarray) -> dict[str, int]:
 
 
 def census_airport(speaking: list[Presence], background: list[Presence], landings: Landings,
-                   test_spans: np.ndarray, step_s: float) -> dict[str, Any]:
+                   test_spans: np.ndarray) -> dict[str, Any]:
     """One airport. ``speaking``: the flights with a sentence (their rows from `N_LOOK` on are the predicted steps);
     ``test_spans``: ``[M, 2]`` epoch seconds ``[start, end)`` of the sealed test days."""
     index = SceneIndex(speaking + background)
@@ -85,7 +85,7 @@ def census_airport(speaking: list[Presence], background: list[Presence], landing
     if not others_speaking:
         raise ValueError("no flight with a sentence longer than N_LOOK rows at this airport")
     spoken, silent = np.concatenate(others_speaking), np.concatenate(others_background)
-    segments = index.segments(step_s)
+    segments = index.segments()
     return {
         "predicted_steps": int(len(spoken)),
         "other_speaking": {**_quantiles(spoken), "histogram": _histogram(spoken)},
@@ -128,7 +128,8 @@ def main(argv: list[str] | None = None) -> int:
     lengths, established = [], defaultdict(Counter)
     for i, flight in enumerate(flights):
         kind = "speaking" if i in rows_of else "background"
-        by_airport[flight.airport][kind].append(presence(flight, rows_of.get(i), candidates[flight.airport]))
+        by_airport[flight.airport][kind].append(presence(flight, rows_of.get(i), candidates[flight.airport],
+                                                                    spec.step_s))
     for i, signal in enumerate(sentences["signal_index"]):
         rows = int(sentences["offsets"][i + 1] - sentences["offsets"][i])
         lengths.append(rows)
@@ -149,8 +150,8 @@ def main(argv: list[str] | None = None) -> int:
         landings = pool.landings()
         rosters[code] = {"tracks_manifest": str(roster), "sha256": file_sha256(roster), "landings_kept": len(landings.times_s),
                          "sealed_test_day_landings_left_out": pool.sealed}
-        airports[code] = census_airport(by_airport[code]["speaking"], by_airport[code]["background"], landings, test_spans,
-                                        spec.step_s)
+        airports[code] = census_airport(by_airport[code]["speaking"], by_airport[code]["background"], landings,
+                                        test_spans)
         airports[code]["flights"] = {"speaking": len(by_airport[code]["speaking"]),
                                      "background": len(by_airport[code]["background"])}
         print(f"  {code}: {airports[code]['predicted_steps']} predicted steps, {time.perf_counter() - started:.0f}s",

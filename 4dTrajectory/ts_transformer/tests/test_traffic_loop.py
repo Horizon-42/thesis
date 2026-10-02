@@ -40,13 +40,12 @@ def _controlled(key: str, t0: float, along, *, runway: str = "R", n: float = 0.0
 def _replayed(key: str, times, along, *, landing_s: float, runway: str = "R", captured_s: float = 0.0,
               category: str | None = "F"):
     from ts_transformer.experiments.traffic_census import Track
-    from ts_transformer.prior.scene import Presence, hung_span
+    from ts_transformer.prior.scene import Presence
 
     times, along = np.asarray(times, dtype=np.float64), np.asarray(along, dtype=np.float64)
     seen = Presence(key, "KXXX", runway, landing_s, False, times, np.abs(along))
-    first, last = hung_span(seen, STEP_S)
     count = len(times)
-    return Track(seen, first, last, along.copy(), np.zeros(count), np.full(count, 500.0), along, np.zeros(count),
+    return Track(seen, along.copy(), np.zeros(count), np.full(count, 500.0), along, np.zeros(count),
                  np.zeros(count), np.full(count, 70.0), captured_s, "raw", category)
 
 
@@ -148,13 +147,13 @@ def test_a_landing_never_takes_a_follower_already_ended():
     assert run.at_threshold == []
 
 
-def test_a_landing_after_the_segments_last_step_is_checked_against_a_replayed_aircraft_still_on_its_rows():
-    """L's last step is 100 s, its crossing 100.5 s; Q (replayed, I) has rows every 2 s from 0.9 s to 100.9 s, so it hangs
-    on the steps 0–100 s but its rows reach past the crossing: the landing is checked, and Q is its follower."""
+def test_a_landing_after_the_leaders_last_step_is_checked_against_a_replayed_aircraft_still_in_the_air():
+    """L's last step is 100 s, its crossing 100.5 s; Q (replayed, I) has rows on the steps 0–102 s, past the crossing: the
+    landing is checked at step 102 against Q between its rows, and Q is its follower."""
     gap = 3.5 * NM_M
     t = np.arange(0.0, 100.0 + 1e-9, STEP_S)
     leader = _controlled("L", 0.0, -70.0 * (100.5 - t), landing_s=100.5)
-    rows = t + 0.9
+    rows = np.arange(0.0, 102.0 + 1e-9, STEP_S)
     follower = _replayed("Q", rows, -gap - 70.0 * (100.5 - rows), landing_s=100.5 + gap / 70.0, category="I")
     run = _loop().run([leader], [follower])
     assert [(a["leader"], a["follower"], a["follower_controlled"]) for a in run.at_threshold] == [("L", "Q", False)]
@@ -255,15 +254,15 @@ def _fixture_flight(entry: str):
 
 
 def test_the_recorded_control_is_its_rows_on_the_loop_steps():
-    """Entered at 1.3 s past an even second: its row r sits at the step 2 s + 2r s, its landing (read off its rows) moved
-    as much, and it is established from the artefact's capture row."""
+    """Its rows on the steps from 11:00:02: row r at 2 s + 2r s, its landing read off its rows on that clock, and it is
+    established from the artefact's capture row."""
     from ts_transformer.experiments.traffic_loop import recorded
     from ts_transformer.prior.scene import presence, utc_s
     from ts_transformer.tests.support import instruction_airport
 
-    flight = _fixture_flight("2026-06-01T11:00:01.300Z")
+    flight = _fixture_flight("2026-06-01T11:00:02Z")
     geometry = instruction_airport()
-    seen = presence(flight, 30, geometry)
+    seen = presence(flight, 30, geometry, STEP_S)
     control = recorded(seen, flight, 12, 61.3, geometry, SEPARATION_09, "F", STEP_S)
     start = utc_s("2026-06-01T11:00:00Z")
     # epoch seconds: compared from the start (pytest.approx is relative: 1e-6 of 1.8e9 s is half an hour)
@@ -279,14 +278,14 @@ def test_the_recorded_control_is_its_rows_on_the_loop_steps():
 SEPARATION_09 = Separation(same_nm=3.0, speed_mps=70.0, along_nm={"09": 0.0}, wake_nm=CWT_ON_APPROACH_NM)
 
 
-def test_a_flown_aircraft_starts_at_the_step_its_first_row_hangs_on_and_lands_on_that_clock():
+def test_a_flown_aircraft_starts_at_its_first_rows_step_and_lands_on_that_clock():
     from ts_transformer.experiments.traffic_loop import flown
     from ts_transformer.prior.scene import presence, utc_s
     from ts_transformer.tests.support import instruction_airport
 
-    flight = _fixture_flight("2026-06-01T11:00:00.900Z")                 # hangs on 11:00:00
+    flight = _fixture_flight("2026-06-01T11:00:00Z")
     geometry = instruction_airport()
-    seen = presence(flight, 30, geometry)
+    seen = presence(flight, 30, geometry, STEP_S)
     e = np.array([-5_000.0, -4_860.0, -4_720.0])
     aircraft = flown(seen, STEP_S, e, np.array([10.0, 5.0, 0.0]), np.full(3, 400.0), np.array([95.0, 92.0, 90.0]),
                      np.full(3, 70.0), np.array([False, False, True]), "09", geometry, SEPARATION_09, "F", "landed", 67.4)
@@ -331,7 +330,7 @@ def test_a_flown_flight_goes_on_the_steps_to_its_own_end_with_the_capture_of_the
 
     geometry = instruction_airport()
     flight = _fixture_flight("2026-06-01T11:00:00Z")
-    seen = presence(flight, 30, geometry)
+    seen = presence(flight, 30, geometry, STEP_S)
     start = utc_s("2026-06-01T11:00:00Z")
     states, e = _flown_states(20, captured_from=6)          # captured from state row 7 on
     landed = flown_aircraft(states, 0, Outcome("landed", 11, {"at_row": 10.4}, {}), -1, seen, "09", geometry,

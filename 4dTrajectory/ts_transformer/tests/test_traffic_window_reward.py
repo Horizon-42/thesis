@@ -140,7 +140,7 @@ def test_the_ordering_guard_reads_the_same_leaders_on_both_sides():
     geometry = SimpleNamespace(candidates=[SimpleNamespace(ident="09")])
     recorded = {"a": presence(1_000.0), "b": presence(1_100.0)}
     window = SimpleNamespace(others=("c",), commanded=("a", "b"), track=lambda k: presence(900.0),
-                             rows=lambda k: recorded[k], first_step_s=lambda k, step_s: 0.0,
+                             rows=lambda k: recorded[k], first_step_s=lambda k: 0.0,
                              airport=SimpleNamespace(flights=SimpleNamespace(separation=separation,
                                                                              geometry=geometry)))
     round_ = WindowRound(SimpleNamespace(windows=[window]), ["real"], [None])

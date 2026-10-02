@@ -30,6 +30,14 @@ def write_json_atomic(path: Path, payload: dict[str, Any], *, allow_nan: bool = 
     temporary.replace(path)
 
 
+def write_bytes_atomic(path: Path, payload: bytes) -> None:
+    """`write_json_atomic` for bytes as they are (a file copied byte for byte)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_bytes(payload)
+    temporary.replace(path)
+
+
 def sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 

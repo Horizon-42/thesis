@@ -2,12 +2,12 @@
 
 From one instruction artefact split by operating day and each airport's arrivals manifest (its runway targets, for the
 separation rules; checked to be the manifest the artefact's signals were read from), every arrival of the training days
-— with a sentence or without (background) — is in its airport's scene on the steps its rows hang on (§2.1: even UTC
-seconds, `prior.scene.hung_span`), and at every step with two or more aircraft they are judged by `inference.separation`
+— with a sentence or without (background) — is in its airport's scene on its rows' steps (§2.1: even UTC seconds; every
+row is on one, `prior.scene.presence`), and at every step with two or more aircraft they are judged by `inference.separation`
 under both readings — `VISUAL`, which the closed loop's checks and the reward use, and `IFR`, reported beside it:
 
-- an aircraft's position is interpolated at the step from its rows (at most half a step past its first or last row, held
-  there); its runway is the one it landed on (the observed census is a measurement, not a model input); its position on
+- an aircraft's position at a step is its row there (`traffic_at` interpolates between rows, for instants between
+  steps); its runway is the one it landed on (the observed census is a measurement, not a model input); its position on
   the approach clock is its threshold's `Separation.along_nm` less its distance before that threshold along the course;
   its track less that runway's course and its distance right of the centreline are its raw track's (`relative_to_runway`;
   the angle unwrapped along the rows, so a step between two rows either side of ±180° interpolates across it, and
@@ -67,7 +67,7 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import wrap180
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.prior.scene import Presence, SceneIndex, hung_span, presence, samples, scene_steps
+from ts_transformer.prior.scene import Presence, SceneIndex, presence, samples, scene_steps
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
 
 SCHEMA = "ts-traffic-census-v3"
@@ -80,11 +80,9 @@ WINDOW_S, WINDOW_EVERY_S = 1_200.0, 600.0
 
 @dataclass(frozen=True)
 class Track:
-    """One arrival as the census judges it: its rows in the scene (epoch seconds) and the steps they hang on."""
+    """One arrival as the census judges it: its rows in the scene, on its steps (epoch seconds)."""
 
     presence: Presence
-    first_step_s: float
-    last_step_s: float
     e_m: np.ndarray
     n_m: np.ndarray
     height_m: np.ndarray
@@ -99,6 +97,14 @@ class Track:
     @property
     def key(self) -> str:
         return self.presence.dataset_id
+
+    @property
+    def first_step_s(self) -> float:
+        return self.presence.start_s
+
+    @property
+    def last_step_s(self) -> float:
+        return self.presence.end_s
 
     def on_step(self, t_s: float) -> bool:
         return self.first_step_s <= t_s <= self.last_step_s
@@ -117,7 +123,7 @@ def track(flight: FlightSignals, sentence_rows: int | None, capture: int | None,
           along_threshold_m: float, spec: VocabularySpec, step_s: float) -> Track:
     """``capture``: the artefact's capture row of a flight with a sentence; None for a background flight, whose capture
     the labeller's own rule finds (or not) on `admit`'s smoothed track, or on the raw track where `admit` refuses it."""
-    seen = presence(flight, sentence_rows, geometry)
+    seen = presence(flight, sentence_rows, geometry, step_s)
     rows = len(seen.times_s)
     candidate = geometry.candidates[geometry.candidate_index(flight.runway)]
     raw = relative_to_runway(flight.e_m[:rows], flight.n_m[:rows], flight.track_deg[:rows], flight.altitude_m[:rows],
@@ -133,8 +139,7 @@ def track(flight: FlightSignals, sentence_rows: int | None, capture: int | None,
         except Refused:             # never stays in the corridor to the end: never established
             capture = None
     rate = flight.ground_speed_mps[:rows] * np.cos(np.radians(flight.track_deg[:rows] - candidate.course_deg))
-    first, last = hung_span(seen, step_s)
-    return Track(seen, first, last, flight.e_m[:rows], flight.n_m[:rows], flight.altitude_m[:rows],
+    return Track(seen, flight.e_m[:rows], flight.n_m[:rows], flight.altitude_m[:rows],
                  along_threshold_m - raw.before_threshold_m,
                  np.degrees(np.unwrap(np.radians(raw.track_minus_course_deg))), raw.right_of_course_m, rate,
                  float(seen.times_s[capture]) if capture is not None else math.inf, source,
@@ -184,7 +189,7 @@ def _record(episodes: list[dict[str, Any]], open_episodes: dict[tuple[str, str],
 def census_airport(tracks: list[Track], separation: Separation, step_s: float) -> dict[str, Any]:
     by_key = {t.key: t for t in tracks}
     index = SceneIndex([t.presence for t in tracks])
-    segments = index.segments(step_s)
+    segments = index.segments()
     episodes: dict[str, list[dict[str, Any]]] = {reading: [] for reading in READINGS}
     open_episodes: dict[str, dict[tuple[str, str], dict[str, Any]]] = {reading: {} for reading in READINGS}
     together: set[tuple[str, str]] = set()

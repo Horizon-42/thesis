@@ -189,11 +189,13 @@ def states_from_channels(
 
 
 def resample_uniform(times: np.ndarray, values: np.ndarray, dt_s: float) -> tuple[np.ndarray, np.ndarray]:
-    """Linearly interpolate channels onto a uniform ``dt_s`` grid starting at ``times[0]``.
+    """Linearly interpolate channels onto the clock's whole multiples of ``dt_s`` inside the track.
 
     Transformers assume a regular grid; ADS-B does not provide one (nominally 1 Hz, in
-    practice ragged, with dropouts). The grid ends at the last sample at or before
-    ``times[-1]``, so this never extrapolates past the observed track.
+    practice ragged, with dropouts). The grid is the multiples of ``dt_s`` from the first at or
+    after ``times[0]`` to the last at or before ``times[-1]``, so this never extrapolates: on a
+    clock that is zero at the first sample it starts there; the caller that wants its rows
+    elsewhere moves the clock (`dataset.build_series`' ``row_start``).
 
     Interpolating in CHANNEL space rather than state space is the point: interpolating
     ``psi`` would average across the +/-pi branch cut, and interpolating ``lat``/``lon``
@@ -206,12 +208,13 @@ def resample_uniform(times: np.ndarray, values: np.ndarray, dt_s: float) -> tupl
         raise ValueError(f"dt_s must be positive, got {dt_s}")
 
     span = float(times[-1] - times[0])
-    n_steps = int(math.floor(span / dt_s)) + 1
+    first = math.ceil(float(times[0]) / dt_s)
+    n_steps = int(math.floor(float(times[-1]) / dt_s)) - first + 1
     if n_steps < 2:
         raise ValueError(
             f"track spans {span:.1f}s, too short for a {dt_s}s grid (would give {n_steps} step(s))"
         )
-    grid = times[0] + np.arange(n_steps, dtype=np.float64) * dt_s
+    grid = (first + np.arange(n_steps, dtype=np.float64)) * dt_s
     out = np.empty((n_steps, values.shape[1]), dtype=np.float64)
     for c in range(values.shape[1]):
         # One-dimensional linear interpolation

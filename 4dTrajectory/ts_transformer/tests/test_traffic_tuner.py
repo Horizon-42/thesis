@@ -98,11 +98,10 @@ def _split(flights, words, geometry):
     return Split(list(flights), ("KXXX",), table, (("09",),), ((90.0,),), column_classes(words, 1), "no-context")
 
 
-@pytest.mark.parametrize("off_s", [0.0, 0.7, -0.7])
+@pytest.mark.parametrize("off_s", [0.0, 2.0, -2.0])
 def test_the_loop_s_edge_features_step_by_step_are_the_scorer_s_all_at_once(tmp_path, monkeypatch, off_s):
-    """The others' rows sit at their recorded times, up to a second off the speaking aircraft's steps (here f0 and f2
-    ``off_s`` off f1's): another aircraft later than the step is then carried forward from its row before at that row's
-    motion, which the loop reads two steps back for."""
+    """The others' rows on the steps (here f0 and f2 ``off_s`` off f1's, whole steps): the loop's edge features, built a
+    few steps at a time, are the scorer's built at once."""
     from ts_transformer.experiments.traffic_speaking import speaking_edges
     from ts_transformer.inference.scene_edges import EDGE_FEATURES as FEATURES
     from ts_transformer.instructions.words import RUNWAY
@@ -123,7 +122,7 @@ def test_the_loop_s_edge_features_step_by_step_are_the_scorer_s_all_at_once(tmp_
     assert (whole[speaker.pre + N_LOOK:, 0, 1, FEATURES.index("motion_unknown")] == 0.0).all()
 
 
-@pytest.mark.parametrize("off_s", [0.0, 0.7, -0.7])
+@pytest.mark.parametrize("off_s", [0.0, 2.0, -2.0])
 def test_a_sentence_scored_in_its_scene_gives_back_what_its_words_were_sampled_from(tmp_path, monkeypatch, off_s):
     from ts_transformer.experiments.traffic_tuner import SceneSplit, scene_layout, scene_logits
     from ts_transformer.prior.train import to_batch
@@ -131,15 +130,15 @@ def test_a_sentence_scored_in_its_scene_gives_back_what_its_words_were_sampled_f
     airport, signals, spec = _airport(tmp_path, monkeypatch, (off_s, 30.0, 10.0 + off_s, 3_600.0))
     words = Words(spec)
     model = _traffic_model(words)
-    # f1 has two others in the air before it (a pre-roll of 15 steps); f3 is alone (none): scored together, f3's rows
-    # sit 15 steps later than they did when it spoke
+    # f1 has two others in the air before it (a pre-roll of (30 s − off_s) / 2 s steps, from f0); f3 is alone (none):
+    # scored together, f3's rows sit that many steps later than they did when it spoke
     spoken = [_spoken(model, airport, signals, spec, key) for key in ("KXXX:f1", "KXXX:f3")]
     assert len(spoken[0][1].others) == 2 and spoken[1][1].others == ()
     sentences = SceneSplit(_split([s[0] for s in spoken], words, airport.flights.geometry), [s[1] for s in spoken],
                            [s[2] for s in spoken])
     batch = to_batch(sentences.split, [0, 1], CPU)
     layout = scene_layout(sentences, [0, 1], batch, spec.step_s)
-    assert layout.pre == 15 and layout.inputs["present"].shape[1] == 3
+    assert layout.pre == round((30.0 - off_s) / 2.0) and layout.inputs["present"].shape[1] == 3
     with torch.no_grad():
         logits = scene_logits(model, layout)
         alone = scene_logits(with_traffic(_model(words), EDGE_FEATURES).eval(), layout)
@@ -233,7 +232,7 @@ def test_layers_recomputed_in_the_backward_give_the_same_logits_and_gradients(tm
     from ts_transformer.experiments.traffic_tuner import SceneSplit, scene_layout, scene_logits
     from ts_transformer.prior.train import to_batch
 
-    airport, signals, spec = _airport(tmp_path, monkeypatch, (0.7, 30.0, 10.7, 3_600.0))
+    airport, signals, spec = _airport(tmp_path, monkeypatch, (2.0, 30.0, 12.0, 3_600.0))
     words = Words(spec)
     flight, scene, positions, _ = _spoken(_traffic_model(words), airport, signals, spec, "KXXX:f1")
     sentences = SceneSplit(_split([flight], words, airport.flights.geometry), [scene], [positions])

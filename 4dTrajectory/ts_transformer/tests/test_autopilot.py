@@ -121,6 +121,19 @@ def test_a_rebuilt_flight_must_be_the_one_the_signals_were_read_from(monkeypatch
             flights.require_same_flight(object(), stored, instruction_airport())
 
 
+def test_a_flight_is_rebuilt_with_its_first_row_where_the_stored_signals_have_it():
+    """`flights.stored_rows`: row 0's UTC less the arrival record's first kept sample — 0 for an artefact cut at each
+    flight's first sample, up to a step for one cut on the UTC steps."""
+    from dataclasses import replace
+    from ts_transformer.autopilot import flights
+
+    stored = instruction_flight(*fly_legs([(20, 0.0, 90.0, 0.0)], 90.0, 900.0, -3000.0, 0.0), dataset_id="KXXX:a")
+    on_steps = replace(stored, dataset_id="KXXX:b", entry_time_utc="2026-06-01T11:00:02.000Z")
+    start = flights.stored_rows([stored, on_steps])
+    assert start("KXXX:a", {"entry_time_utc": stored.entry_time_utc}) == 0.0
+    assert start("KXXX:b", {"entry_time_utc": "2026-06-01T11:00:00.700Z"}) == pytest.approx(1.3, abs=1e-6)
+
+
 # ---- the plant and the inverse
 def _a320(states: list[list[float]]) -> tuple[FlightInputs, AirportCharts]:
     aircraft = aircraft_for_code("A320")

@@ -41,14 +41,14 @@ from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import RUNWAY
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.prior.data import STATIC_FEATURES, flight_record, own_context, step_inputs
-from ts_transformer.prior.scene import Landings, Presence, SceneIndex, hang, presence, samples
+from ts_transformer.prior.scene import Landings, Presence, SceneIndex, presence, samples
 from ts_transformer.prior.scene_data import Node, SceneSample
 from ts_transformer.repo_layout import CWT_SUPPLEMENT, CWT_TABLE, arrival_manifest_path
 
 PACKAGE = Path(__file__).resolve().parents[1]
 #: What decides a scene prior's edge features, as package paths: the features and the separation rules they read
 #: (`runway_schedule`), the clock position (`instructions.airport.relative_to_runway`), the runway in force
-#: (`prior.data.sentence_steps`), the steps and row times (`prior.scene.hang`, `presence`), what the samples hand them, how
+#: (`prior.data.sentence_steps`), the steps and row times (`prior.scene.presence`), what the samples hand them, how
 #: a batch lays them out and how the closed loop builds them (`traffic_speaking`) — and the CWT tables the categories are read from (`EDGE_TABLES`). A scene prior's checkpoint
 #: records their hash (`edge_source_sha256`) and `prior_train.load_prior` reads it only on the same: a code change in any
 #: of these files — the scheduler's in `runway_schedule` too — refuses every scene prior, as the executor's hash refuses
@@ -119,9 +119,9 @@ def edges(built: Built) -> np.ndarray:
 
 
 def _flight(signals: FlightSignals, grid: np.ndarray | None, capture_row: int | None, geometry: AirportGeometry,
-            separation: Separation, landings: Landings | None, airport: int) -> FlightRows:
+            separation: Separation, landings: Landings | None, airport: int, step_s: float) -> FlightRows:
     rows = signals.n_rows if grid is None else len(grid)
-    seen = presence(signals, None if grid is None else rows, geometry)
+    seen = presence(signals, None if grid is None else rows, geometry, step_s)
     if grid is None:
         context = own_context(signals, landings) if landings is not None else None
         features, relative = step_inputs(signals, rows, geometry, context)
@@ -151,7 +151,7 @@ def _flight(signals: FlightSignals, grid: np.ndarray | None, capture_row: int | 
 def _sample(members: Sequence[FlightRows], first_s: float, steps: int, loss_from: int, loss_to: int, step_s: float,
             airport: int, separation: Separation) -> Built:
     nodes = tuple(Node(f.presence.dataset_id, f.presence.speaking,
-                       int(round((float(hang(f.presence.start_s, step_s)) - first_s) / step_s)), **f.node_rows)
+                       int(round((f.presence.start_s - first_s) / step_s)), **f.node_rows)
                   for f in members)
     return Built(SceneSample(airport, nodes, steps, loss_from, loss_to), tuple(members), separation)
 
@@ -211,7 +211,7 @@ def airport_flights(directory: Path, split: str, spec: VocabularySpec, airports:
                 counts["background_left_out_for_its_length"] += 1
                 continue
             flights.append(_flight(s, grid, None if k is None else int(sentences["capture_row"][k]), geometry,
-                                   separation, context, airport))
+                                   separation, context, airport, spec.step_s))
             counts["with_a_sentence" if k is not None else "background"] += 1
             counts["without_a_type"] += s.typecode is None
         by_key = {f.presence.dataset_id: f for f in flights}
@@ -238,11 +238,11 @@ def split_samples(per_airport: Sequence[AirportFlights], counts: Mapping[str, in
     built: list[Built] = []
     for airport in per_airport:
         by_key = airport.flights
-        for segment in SceneIndex([f.presence for f in by_key.values()]).segments(step_s):
+        for segment in SceneIndex([f.presence for f in by_key.values()]).segments():
             cuts = samples(segment, step_s)
             for number, cut in enumerate(cuts):
                 members = [by_key[p.dataset_id] for p in cut.flights]
-                first_s = min(float(hang(f.presence.start_s, step_s)) for f in members)
+                first_s = min(f.presence.start_s for f in members)
                 end_s = cut.loss_end_s + (step_s if number == len(cuts) - 1 else 0.0)    # the last sample: its end included
                 steps = int(round((end_s - first_s) / step_s))
                 loss_from = int(round((cut.loss_start_s - first_s) / step_s))

@@ -137,6 +137,8 @@ added three entries (the rows after the performance index's).
 | A low go-around is stored as the landing: the best-aligned crossing, not the last (10-01) | open | new; see the entry | **yes**: flight identity, arrival slices and every sentence of the 15 flights; a harvest reclassification moves every downstream artefact |
 | Stored tracks carry other aircraft's samples; no read-time position repair (10-01) | open | new; see the entry | **yes**: the arrival slices every model reads (if repaired in the harvest view) |
 | A wake shortfall's end rounds `counted` a step short in the window loop (10-01) | open | new; see the entry | **yes**: the steps M4-in-windows (R37) trains a wake-shortfall follower on |
+| The labeller fingerprint hashes content code, not only the vocabulary's format (10-02) | open | new; see the entry | no: a check, not a training input — but the fix changes what the stored specs record |
+| The edge and executor fingerprints hash row-placement and data-plane code (10-02) | open | new; see the entry | no: a check — but the fix changes what the stored checkpoints and passed records name |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -676,3 +678,34 @@ reports as the steps counted and what R37 trains on, so a wake-shortfall followe
 before its end — at most one step of one sentence a shortfall, a small and one-sided bias. R43 reads that step as the step
 whose time reaches the end (`traffic_window_rewind.own_step_at`). The fix in the loop (the same `ceil`) changes R37's
 training rows: it waits for the next window training.
+
+## The labeller fingerprint hashes content code, not only the vocabulary's format (2026-10-02)
+
+**Verified** (branch `dev-scene-time-grid`). `instructions/artefact.py` `labeller_source_sha256` hashes the BYTES of
+`LABELLER_MODULES`, `signals.py` among them — the projection of a built flight into the airport frame, which decides the
+rows' content, not what a word means. The user's rule (2026-10-02): a fingerprint binds format only; code that only changes
+the data's content, or whose behaviour a test can pin, needs no hash (the data are iid draws of one process; C33 replaced
+the executor's source hash by a conformance check the same way). Because the hash is over bytes, the rows' re-cut onto the
+UTC steps had to live outside `signals.py` (`data.dataset.on_utc_steps`; artefact v6 keeps v5's spec), and two comments in
+`signals.py` are stale for v6 and cannot be fixed without changing the hash: `FlightSignals.entry_time_utc` says "the
+arrival slice's entry, its first kept sample" — since v6 it is row 0, the first even UTC second at or after that sample —
+and the module docstring's "2 s resampling" does not say where. **Judgement**: hash only the modules that define the
+vocabulary and the words' meaning (`spec.py`, `words.py`, the reading rules), and pin the rest by a behaviour check on
+fixed flights (golden sentences), as C33 does; fix the two comments in the same change. Every stored spec records the
+current hash, so the change needs a rule for the specs already measured (the user's decision, case by case). The same
+change can name the rows' grid in the signals' format (`SIGNALS_SCHEMA` lives in `signals.py`, so it could not be bumped
+for v6): today a v5 artefact is told from a v6 one by its data alone — `prior.scene.presence` refuses rows off the steps,
+by name (the 2026-10-02 review's point 6).
+
+## The edge and executor fingerprints hash row-placement and data-plane code (2026-10-02)
+
+**Verified** (branch `dev-scene-time-grid`). `experiments/traffic_scene_data.py` `EDGE_SOURCES` hashes `prior/scene.py`,
+`prior/scene_data.py`, `experiments/traffic_scene_data.py` and `experiments/traffic_speaking.py` beside the feature
+definitions (`inference/scene_edges.py`, `runway_schedule.py`, `instructions/airport.py`); the re-cut onto the UTC steps
+changed the first group and every stored scene / traffic prior now refuses (`prior_train.load_prior`) — wanted this time,
+since the traffic model is retrained on v6, but the refusal comes from where rows are placed, not from what an edge
+feature means. The executor's `spec.executor_source_files` takes every module `autopilot/*.py` imports directly, so
+`data/dataset.py` (through `autopilot/flights.py`) is in it: a data-plane change asks for a new conformance pass although
+the conformance check already compares each flight's inputs by digest. **Judgement**: hash the feature definitions only and
+pin the placement by tests; leave the data plane out of the executor's code and let the input digests carry it.
+

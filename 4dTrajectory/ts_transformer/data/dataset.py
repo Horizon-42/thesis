@@ -6,7 +6,7 @@ Pipeline per flight::
       -> flight_scenarios.build_scenario(..., target_from_threshold=True)   # target, aircraft, mass
       -> flight_scenarios.state_samples_from_track(...)                     # V/psi/gamma per sample
       -> channels.channels_from_states(...)                                 # ENU metres, threshold origin
-      -> channels.resample_uniform(...)                                     # regular dt grid
+      -> channels.resample_uniform(...)                                     # regular dt grid (`RowStart`)
       -> measured FlightSeries + position-only fitted-tail supervision
 
 Every one of those steps is an existing, tested seam except the last two. That is on
@@ -24,11 +24,12 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import math
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -52,6 +53,7 @@ from flight_scenarios import (
 )
 from flight_scenarios.datum import flight_to_msl
 from trajectory_data_process.harvest.arrivals import load_arrival_flights
+from trajectory_data_process.harvest.utc import iso_utc_ms, parse_iso_utc_s
 
 from ts_transformer.data.channels import (
     CHANNELS,
@@ -110,6 +112,27 @@ def dataset_flight_key(source: dict[str, Any], index: int) -> str:
     return f"{airport}:{key}" if airport else key
 
 
+#: Where a built flight's first row lies: seconds after its first kept sample (whose UTC is the arrival record's
+#: ``entry_time_utc``), from 0 to less than one step, given its dataset id and its scenario's source. The rows follow it
+#: every step (`build_series`).
+RowStart = Callable[[str, Mapping[str, Any]], float]
+
+
+def at_first_sample(dataset_id: str, source: Mapping[str, Any]) -> float:
+    """The models' rows: the first at the first kept sample."""
+    return 0.0
+
+
+def on_utc_steps(step_s: float) -> RowStart:
+    """Rows on the UTC clock's whole multiples of ``step_s`` (multi-aircraft design §2.1: a step of a scene is one time
+    for every aircraft): the first at the first multiple at or after the first kept sample, never before it — nothing is
+    extrapolated. The instruction artefact's rows (`experiments.instruction_signals`)."""
+    def start(dataset_id: str, source: Mapping[str, Any]) -> float:
+        entry = parse_iso_utc_s(source["entry_time_utc"])
+        return math.ceil(entry / step_s) * step_s - entry
+    return start
+
+
 
 @dataclass
 class FlightSeries:
@@ -118,8 +141,10 @@ class FlightSeries:
     flight_id: str
     scenario: FlightScenario
     frame: CoordinateFrame
-    times: np.ndarray        # [N] seconds, uniform dt, rebased to 0 at the first sample of the BUILT
-                             # flight (a `series_from_row` cut keeps this clock, so its first row is later)
+    times: np.ndarray        # [N] seconds, uniform dt, 0 at the BUILT flight's first row — its first kept
+                             # sample unless `build_series`' row_start placed it later, when the source's
+                             # entry_time_utc moved there too (a `series_from_row` cut keeps this clock, so
+                             # its first row is later)
     values: np.ndarray       # [N, C] channel space (see channels.CHANNELS)
     # The observed arrays above remain the only model INPUT and the only arrays exposed to
     # forecast/export.  These arrays extend them with a fitted tail for training TARGETS.
@@ -504,8 +529,13 @@ def build_series(
     config: TSConfig,
     *,
     airport: str | None = None,
+    row_start: RowStart = at_first_sample,
 ) -> tuple[list[FlightSeries], BuildReport]:
     """Flight dicts -> :class:`FlightSeries`, skipping what cannot be built.
+
+    ``row_start`` places each flight's first row (`RowStart`); the rows follow it every ``config.dt_s``. A built flight's
+    clock is zero at its first row: when that is after its first kept sample, its scenario source's ``entry_time_utc``
+    moves to it (the instants before it are only read to interpolate the first row).
 
     A flight is skipped when it has no published runway threshold (no ENU frame and no
     target to judge against), when the track is too short to resample onto the grid, or
@@ -603,7 +633,14 @@ def build_series(
         samples = state_samples_from_track(waypoints, mass_kg=scenario.initial.m)
         frame = _frame_for_scenario(scenario, config)
         target_chart = target_chart_position(scenario.target, frame)
+        dataset_id = dataset_flight_key(scenario.source, index)
+        start_s = row_start(dataset_id, scenario.source)
+        if not 0.0 <= start_s < config.dt_s:
+            raise ValueError(f"{dataset_id}: a first row {start_s} s after the first sample is not within one "
+                             f"{config.dt_s:g} s step of it")
+        # the built flight's clock: zero at its first row
         times, values = channels_from_states(samples, frame)
+        times = times - start_s
         grid, resampled = resample_uniform(times, values, config.dt_s)
         # Not redundant with the span pre-check: for a non-dyadic dt the multiply and
         # resample_uniform's floor-divide can round differently at the boundary.
@@ -611,7 +648,11 @@ def build_series(
             report.skip(too_short)
             continue
 
-        fitted = fit_flight_final_approach(flight)
+        fitted = _on_clock(fit_flight_final_approach(flight), start_s)
+        if start_s > 0.0:
+            # its entry, the arrival record's first kept sample, moves to its first row
+            scenario = replace(scenario, source={**scenario.source, "entry_time_utc": iso_utc_ms(
+                parse_iso_utc_s(scenario.source["entry_time_utc"]) + start_s)})
         observed_crossing = _observed_threshold_crossing(
             times,
             values,
@@ -666,6 +707,14 @@ def build_series(
             report.keep_without_dynamics(str(scenario.source["no_dynamics_reason"]))
 
     return series, report
+
+
+def _on_clock(fitted: FittedApproach | None, start_s: float) -> FittedApproach | None:
+    """``fitted`` (its times from the flight's first kept sample) on the built flight's clock, zero ``start_s`` later."""
+    if fitted is None:
+        return None
+    return replace(fitted, last_observed_time_s=fitted.last_observed_time_s - start_s,
+                   crossing_time_s=None if fitted.crossing_time_s is None else fitted.crossing_time_s - start_s)
 
 
 def _observed_threshold_crossing(

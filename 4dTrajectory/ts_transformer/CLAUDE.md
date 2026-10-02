@@ -151,7 +151,8 @@ of the package, not a migration in progress.
   labelling and measuring; a sentence's words align with the FIRST `len(words)` rows of its
   signals (it ends before the landing — since `instruction-v2` the harvest's condition, parallel runways
   from every runway end the harvest builds; the labeller, the judge and the display share one heading-word check,
-  `envelope.heading_words_inside`, since `instruction-v3`) (C30).
+  `envelope.heading_words_inside`, since `instruction-v3`); since v6 (2026-10-02) every row is on the UTC even
+  seconds — a scene refuses an artefact whose rows are not; `--spec-from` keeps another artefact's spec (C30).
 - **An executor spec opens only for executor code that flies its reference tracks within the bounds** (2026-10-01, the
   user: checked by what it flies, not by its source): `conformance/` beside the spec — 250 labelled train flights flown by
   the spec's code — and a `passed-<code>.json` per executor code that flew them again in every way (single-aircraft batch,

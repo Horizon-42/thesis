@@ -6,18 +6,15 @@ Computed here because it needs the separation rules (`runway_schedule`), which t
 same placement as the loop's masks, design §9 item 18); what needs the runway geometry (each aircraft's position on the
 approach clock) is handed in by the caller.
 
-**When** (§2.1, §2.5): at each step, at aircraft i's own row time. Aircraft j is taken from its last row at or before that
-instant and carried straight on to it (at most one step: rows hang within half a step of the step), so only the past is
-read — except for j's very first row, which may lie up to a step after i's instant and is carried back to it.
+**When** (§2.1, §2.5): at each step — one time for every aircraft in it (every row is on a step, `prior.scene`), so i and
+j are read at the same instant, each from its row there; nothing is carried along the clock.
 
 **Motion** is each aircraft's displacement from its row before, over the time between — the prior's own node inputs'
 motion (`prior.data`) and the design's "two rows' positions"; never the signals' fitted ground speed, track or vertical
 rate, least-squares fits over a window centred on the row that read 7.5 s of the future. An aircraft's first row has no
 row before it: its motion is unknown, the pair's ``motion_unknown`` is 1 and its motion features (``closing`` and the
-closest point of approach) are 0; an unknown j is carried with no motion, and an unknown i has no frame (``front`` and
-``left`` 0) — nor has an i that did not move since its row before (89 of the artefact's 12.1 million row pairs; the
-prior's node reads such a direction as north). The rate along the approach clock is the same displacement of the clock position, known where the runway
-in force is the same on both rows (at the step one changes, j is carried along the clock with none).
+closest point of approach) are 0; an unknown i has no frame (``front`` and ``left`` 0) — nor has an i that did not move
+since its row before (89 of the artefact's 12.1 million row pairs; the prior's node reads such a direction as north).
 
 **The features** (`EDGE_FEATURES`, in order; horizontal distances scaled by asinh(d / `SCALE_M`), heights by
 `HEIGHT_SCALE_M`, speeds by `SPEED_SCALE_MPS`, the time by `CPA_HORIZON_S`):
@@ -63,7 +60,7 @@ CPA_HORIZON_S = 120.0
 @dataclass(frozen=True)
 class SceneRows:
     """A scene's aircraft on its steps, ``[A, T]`` each (NaN where absent), each aircraft's rows on consecutive steps
-    from its first, one per step: the time of the row hung on the step (epoch seconds), position (airport frame) and
+    from its first, one per step: the step's time (epoch seconds; its row's), position (airport frame) and
     position on the approach clock (NaN without a runway in force). ``runway`` holds the runway in force per aircraft and
     step — in force BEFORE the step's words, as the prior reads its words (`prior.data.sentence_steps`' ``in_force``:
     said at an earlier row; the words of the step it predicts never leak into its edges) — None before any is said or
@@ -104,26 +101,23 @@ class Motion(NamedTuple):
 
     velocity_mps: np.ndarray       # [A, T, 2] east, north
     climb_mps: np.ndarray          # [A, T]
-    along_rate_mps: np.ndarray     # [A, T]
     known: np.ndarray              # [A, T] bool: a row before it
 
 
-def motion(rows: SceneRows, runway: np.ndarray) -> Motion:
-    """``rows``' motion; ``runway``: the runway in force as an index per aircraft and step, −1 for none."""
+def motion(rows: SceneRows) -> Motion:
+    """``rows``' motion."""
     present = rows.present
     known = np.zeros_like(present)
     known[:, 1:] = present[:, 1:] & present[:, :-1]
-    along_known = known.copy()
-    along_known[:, 1:] &= (runway[:, 1:] == runway[:, :-1]) & (runway[:, 1:] >= 0)
     dt = np.where(known[:, 1:], np.diff(rows.time_s, axis=1), 1.0)
 
-    def rate(values: np.ndarray, where: np.ndarray) -> np.ndarray:
+    def rate(values: np.ndarray) -> np.ndarray:
         out = np.zeros(values.shape)
-        out[:, 1:] = np.where(where[:, 1:], np.diff(values, axis=1) / dt, 0.0)
+        out[:, 1:] = np.where(known[:, 1:], np.diff(values, axis=1) / dt, 0.0)
         return out
 
-    velocity = np.stack((rate(rows.e_m, known), rate(rows.n_m, known)), axis=-1)
-    return Motion(velocity, rate(rows.height_m, known), rate(rows.along_m, along_known), known)
+    velocity = np.stack((rate(rows.e_m), rate(rows.n_m)), axis=-1)
+    return Motion(velocity, rate(rows.height_m), known)
 
 
 def _scaled(distance_m: np.ndarray) -> np.ndarray:
@@ -138,7 +132,8 @@ def scene_edges(rows: SceneRows, separation: Separation) -> np.ndarray:
 def scene_edge_blocks(rows: SceneRows, separation: Separation, sizes: Sequence[int]) -> list[np.ndarray]:
     """Several scenes of one airport stacked on ``rows``' aircraft axis (``sizes``: each scene's aircraft, in order): each
     scene's `scene_edges`, ``[T, A_s, A_s, len(EDGE_FEATURES)]`` — only pairs within a scene are read. Every ordered pair
-    over all its steps at once, all pairs together (each value is the per-pair formula's, element for element)."""
+    over all its steps at once, all pairs together (each value is the per-pair formula's, element for element). Refused
+    unless a scene's aircraft at a step are there at one time (module docstring)."""
     aircraft, steps = rows.time_s.shape
     if sum(sizes) != aircraft:
         raise ValueError(f"scenes of {list(sizes)} aircraft stacked on {aircraft}")
@@ -155,26 +150,23 @@ def scene_edge_blocks(rows: SceneRows, separation: Separation, sizes: Sequence[i
     pair, t = np.nonzero(present[first_of] & present[second_of])
     if not len(pair):
         return blocks
+    i, j = first_of[pair], second_of[pair]
+    if (rows.time_s[i, t] != rows.time_s[j, t]).any():
+        raise ValueError("a scene's aircraft at a step are there at different times: a step is one time")
     codes = sorted({r for steps in rows.runway for r in steps if r is not None})
     runway = np.array([[codes.index(r) if r is not None else -1 for r in steps] for steps in rows.runway], dtype=np.int64)
-    moving = motion(rows, runway)
+    moving = motion(rows)
     velocity, climb = moving.velocity_mps, moving.climb_mps
     direction = np.arctan2(velocity[..., 0], velocity[..., 1])
     position = np.stack((np.nan_to_num(rows.e_m), np.nan_to_num(rows.n_m)), axis=-1)
     height = np.nan_to_num(rows.height_m)
-    i, j = first_of[pair], second_of[pair]
-    earlier = np.zeros_like(present)
-    earlier[:, 1:] = present[:, :-1]
-    # j's last row at or before i's instant; its first row, when after it, carried back
-    source = np.where((rows.time_s[j, t] <= rows.time_s[i, t]) | ~earlier[j, t], t, t - 1)
-    dt = rows.time_s[i, t] - rows.time_s[j, source]
     framed = moving.known[i, t] & (np.hypot(velocity[i, t, 0], velocity[i, t, 1]) > 0.0)
-    known = moving.known[i, t] & moving.known[j, source]
+    known = moving.known[i, t] & moving.known[j, t]
     forward = np.stack((np.sin(direction[i, t]), np.cos(direction[i, t])), axis=-1) * framed[:, None]
     left = np.stack((-forward[:, 1], forward[:, 0]), axis=-1)
-    offset = position[j, source] + velocity[j, source] * dt[:, None] - position[i, t]
-    dh = height[j, source] + climb[j, source] * dt - height[i, t]
-    relative = velocity[j, source] - velocity[i, t]
+    offset = position[j, t] - position[i, t]
+    dh = height[j, t] - height[i, t]
+    relative = velocity[j, t] - velocity[i, t]
     edge = np.zeros((len(pair), len(EDGE_FEATURES)), dtype=np.float32)
     edge[:, index["front"]] = _scaled((offset * forward).sum(axis=1))
     edge[:, index["left"]] = _scaled((offset * left).sum(axis=1))
@@ -189,12 +181,12 @@ def scene_edge_blocks(rows: SceneRows, separation: Separation, sizes: Sequence[i
     edge[:, index["cpa_time"]] = cpa / CPA_HORIZON_S
     closest = offset + relative * cpa[:, None]
     edge[:, index["cpa_horizontal"]] = _scaled(np.hypot(closest[:, 0], closest[:, 1]))
-    edge[:, index["cpa_vertical"]] = (dh + (climb[j, source] - climb[i, t]) * cpa) / HEIGHT_SCALE_M
+    edge[:, index["cpa_vertical"]] = (dh + (climb[j, t] - climb[i, t]) * cpa) / HEIGHT_SCALE_M
     for name in ("closing", "cpa_time", "cpa_horizontal", "cpa_vertical"):
         edge[~known, index[name]] = 0.0
     edge[:, index["motion_unknown"]] = ~known
-    along = rows.along_m[j, source] + moving.along_rate_mps[j, source] * dt - rows.along_m[i, t]
-    _runways(edge, rows, separation, codes, i, j, runway[i, t], runway[j, source], along, index)
+    along = rows.along_m[j, t] - rows.along_m[i, t]
+    _runways(edge, rows, separation, codes, i, j, runway[i, t], runway[j, t], along, index)
     # each pair-step into its scene's block (the pairs come ordered by i, so by scene)
     bounds = np.searchsorted(group[i], np.arange(len(sizes) + 1))
     for s, low in enumerate(offsets[:-1]):

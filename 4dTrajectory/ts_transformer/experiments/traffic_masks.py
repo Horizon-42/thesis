@@ -234,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
             reading = read_flight(flight, geometry, spec, words)
             if not np.array_equal(reading.words, grid) or reading.runway_index != int(sentences["runway_index"][k]):
                 raise ValueError(f"{flight.dataset_id}: the re-read sentence differs from the stored one")
-            aircraft = recorded(presence(flight, rows, geometry), flight, capture,
+            aircraft = recorded(presence(flight, rows, geometry, spec.step_s), flight, capture,
                                 observed_landing_s(flight, reading, geometry), geometry, separation, category,
                                 spec.step_s)
             spoken.append(Spoken(aircraft, grid, words, flight.typecode))

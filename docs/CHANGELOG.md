@@ -1,5 +1,25 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-02 — Two-tier: every row of the sentence artefact on the UTC clock's even seconds (multi-aircraft design §2.1, decision 13)
+
+- The user: "same step" must be "same time" in a multi-aircraft scene. Rows used to start at each flight's first kept
+  sample and were "hung" on the nearest even second, the edge features pushing a neighbour ≤ 2 s to the own row's time —
+  while the traffic attention read the neighbours' hidden states at their own row times (up to 2 s off, sometimes in the
+  reader's future), and recorded scenes were unaligned where the window loop's executors were on the grid.
+- `data/dataset.py`: `build_series(..., row_start=)`, default `at_first_sample` (the one-tier models unchanged);
+  `on_utc_steps` puts row 0 on the first even UTC second at or after the first kept sample (no extrapolation), the built
+  flight's clock zero there and its source's `entry_time_utc` moved with it; `channels.resample_uniform` grids on the
+  clock's whole multiples. Only `instruction_signals` uses it. `autopilot/flights.rebuild_series` cuts rows where the
+  stored signals have row 0 (`stored_rows`), so v5 and v6 both rebuild row for row.
+- `instruction_spec --spec-from` (`artefact.keep_spec`): the new artefact keeps v5's spec byte for byte (the labeller's
+  fingerprint is unchanged — no `LABELLER_MODULES` file was touched); `spec_from.json` records it.
+- Scenes: `prior.scene.presence` refuses rows off the steps by name; `hang` / `hung_span` and the edge features' push and
+  first-row carry-back deleted; executor-flown aircraft start at row 0; augmentation moves are whole steps.
+- The scene-step figure merged in 648a0cd0 is deleted (it drew the superseded design).
+- Consequences: the edge-feature fingerprint changed (every stored scene / traffic prior refuses — the traffic model is
+  retrained on v6 in stage 2); the executor's code fingerprint changed (`data/dataset.py` is in it), so v11 needs a new
+  conformance pass. Two code-health follow-ups: the labeller, edge and executor fingerprints hash content code.
+
 ### 2026-10-01 — Frontend: task tabs ordered Fly | Optimize, Learning, Evaluate
 
 - The user's order: Fly on its own, a gap, then Optimize, Learning, Evaluate; the tabs are task GROUPS (`TASK_GROUPS`) and

@@ -18,8 +18,8 @@ from ts_transformer.data.channels import channels_from_states
 from ts_transformer.instructions import envelope, measure
 from ts_transformer.instructions.airport import AirportGeometry, airport_geometry, relative_to_runway
 from ts_transformer.instructions.artefact import (
-    CANDIDATES_SCHEMA, labeller_source_sha256, load_candidates, load_day_split, load_sentences, load_signals, load_spec,
-    require_current_labeller,
+    CANDIDATES_SCHEMA, keep_spec, labeller_source_sha256, load_candidates, load_day_split, load_sentences, load_signals,
+    load_spec, require_current_labeller,
     write_candidates, write_sentences, write_signals, write_spec,
 )
 from ts_transformer.instructions.labeller.read import admit, read_flight
@@ -397,6 +397,35 @@ def test_the_artefact_round_trips_and_refuses_overwrites_and_other_specs(tmp_pat
     (other / "sentences_train.npz").write_bytes((tmp_path / "sentences_train.npz").read_bytes())
     with pytest.raises(ValueError, match="not the one that measured the spec"):
         load_sentences(other, "train", one)
+
+
+def test_a_spec_is_kept_for_new_rows_byte_for_byte_and_only_from_this_labeller(tmp_path):
+    """`keep_spec`: new rows under the same vocabulary keep the spec (the instruction_spec runner's ``--spec-from``)."""
+    config = {"dt_s": 2.0, "seq_len": 60}
+    for name in ("old", "new", "other_rows", "foreign"):
+        (tmp_path / name).mkdir()
+        write_signals(tmp_path / name, {"train": [_signals("KXXX:a", 5)]},
+                      {"config": {**config, "dt_s": 1.0} if name == "other_rows" else config}, fixture_days())
+    one = spec()
+    source = {"labeller_source_sha256": labeller_source_sha256(), "git": {"head": "measured", "dirty": False}}
+    write_spec(tmp_path / "old", one, {"n": 1}, source)
+    assert keep_spec(tmp_path / "old", tmp_path / "new", {"head": "kept", "dirty": False}) == one
+    for name in ("spec.json", "measurements.json"):
+        assert (tmp_path / "new" / name).read_bytes() == (tmp_path / "old" / name).read_bytes()
+    assert load_spec(tmp_path / "new") == one
+    require_current_labeller(tmp_path / "new")
+    record = json.loads((tmp_path / "new" / "spec_from.json").read_text(encoding="utf-8"))
+    assert (record["spec_from"], record["spec_sha256"], record["git"]["head"]) == (str(tmp_path / "old"), one.sha256,
+                                                                                   "kept")
+    with pytest.raises(FileExistsError):
+        keep_spec(tmp_path / "old", tmp_path / "new", {})
+    # signals built under another configuration, or a spec another labeller measured, are refused
+    with pytest.raises(ValueError, match="built under"):
+        keep_spec(tmp_path / "old", tmp_path / "other_rows", {})
+    write_spec(tmp_path / "foreign", one, {"n": 1}, {**source, "labeller_source_sha256": "0" * 64})
+    with pytest.raises(ValueError, match="measured by labeller 000000000000"):
+        keep_spec(tmp_path / "foreign", tmp_path / "other_rows", {})
+    assert not (tmp_path / "other_rows" / "spec.json").exists()
 
 
 def test_the_artefact_holds_development_days_only_and_each_flight_on_its_own_split(tmp_path):

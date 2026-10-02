@@ -5,8 +5,8 @@ a speaking flight's scene changed so that it has traffic to deal with that the d
 The three ways of "one aircraft commanded" (§5.2, §9 item 7), a third each:
 
 - **D, the leader moved** — the replayed flight landing just before the speaking one on its runway or one separated as
-  one with it (`Separation.one_runway`), in the air at its first predicted step, moved whole by δ ~ U[−`SHIFT_S`,
-  `SHIFT_S`];
+  one with it (`Separation.one_runway`), in the air at its first predicted step, moved whole by δ drawn evenly from the
+  whole steps in [−`SHIFT_S`, `SHIFT_S`] but 0 (a leader not moved is not an augmentation);
 - **B, the start moved** — the speaking flight's own start moved as post-training stage 2 moves it (`prior.augment`:
   rotated about the airport, raised, sped up; drawn until plausible, `prior_free_generation.augmented_starts`), the
   others as they were;
@@ -14,7 +14,9 @@ The three ways of "one aircraft commanded" (§5.2, §9 item 7), a third each:
   runway that must be spaced from the speaking flight's (the same, a pair separated as one, a dependent parallel: a
   required distance above 0), moved whole to cross its threshold ``g`` × the required gap before the speaking flight's
   recorded crossing ON THE APPROACH CLOCK (`Separation.approach_time_s`, `gap_s`: staggered thresholds counted, trap T3),
-  g ~ U[`GAP_RANGE`]: its new leader.
+  g ~ U[`GAP_RANGE`] — the move rounded to the nearest whole step: its new leader.
+
+**Every move is whole steps** (`moved`): a moved flight's rows stay on the scene's steps (`prior.scene`).
 
 Leaders are by landing order (on the approach clock for A), not by where the approach clock has them before they turn
 final: on a downwind the clock does not say who lands first (design §2.5) — a reading of §5.2's "the leader", stated.
@@ -55,7 +57,7 @@ from ts_transformer.inference.runway_schedule import DEPENDENT, SAME, SINGLE
 from ts_transformer.inference.separation import VISUAL
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.prior.augment import Augmentation, augment_signals
-from ts_transformer.prior.scene import N_LOOK, hung_span, presence
+from ts_transformer.prior.scene import N_LOOK, presence
 
 KINDS = ("D", "B", "A")
 SHIFT_S = 60.0
@@ -77,13 +79,14 @@ class Augmented:
 
 
 def moved(rows: FlightRows, track: Track, dt_s: float, key: str, step_s: float) -> tuple[FlightRows, Track]:
-    """A flight moved ``dt_s`` in time and keyed ``key``: its rows, inputs and words as they were."""
+    """A flight moved ``dt_s`` in time — whole steps, or refused: its rows stay on the scene's steps — and keyed ``key``:
+    its rows, inputs and words as they were."""
+    if dt_s % step_s:
+        raise ValueError(f"{key}: a move of {dt_s} s is not whole {step_s:g} s steps")
     shifted = dataclasses.replace(rows.presence, dataset_id=key, times_s=rows.presence.times_s + dt_s,
                                   landing_s=rows.presence.landing_s + dt_s)
-    first, last = hung_span(shifted, step_s)
     return (dataclasses.replace(rows, presence=shifted),
-            dataclasses.replace(track, presence=shifted, first_step_s=first, last_step_s=last,
-                                captured_s=track.captured_s + dt_s))
+            dataclasses.replace(track, presence=shifted, captured_s=track.captured_s + dt_s))
 
 
 def leader(scene: Scene, step_s: float) -> str | None:
@@ -103,7 +106,7 @@ def qualifies(scene: Scene, signals: FlightSignals, step_s: float) -> bool:
     loop's reading: ``signals`` its rows (its own, or its moved start's)."""
     own = scene.track(scene.key)
     rows = N_LOOK + 1
-    seen = presence(signals, len(own.presence.times_s), scene.airport.flights.geometry)
+    seen = presence(signals, len(own.presence.times_s), scene.airport.flights.geometry, step_s)
     never = len(seen.times_s)                     # not established: as the loop's first step
     whole: Controlled = recorded(seen, signals, never, 0.0, scene.airport.flights.geometry,
                                  scene.airport.flights.separation, scene.speaking.category, step_s)
@@ -131,7 +134,9 @@ def augment(scene: Scene, signals: FlightSignals, inputs: FlightInputs, pool: Se
             key = leader(scene, step_s)
             if key is None:
                 continue
-            dt = float(rng.uniform(-SHIFT_S, SHIFT_S))
+            reach = int(SHIFT_S // step_s)
+            steps = int(rng.integers(-reach, reach))
+            dt = step_s * float(steps + 1 if steps >= 0 else steps)
             candidate = dataclasses.replace(scene, moved=(moved(scene.rows(key), scene.track(key), dt, key, step_s),))
             if qualifies(candidate, signals, step_s):
                 return Augmented(kind, candidate, signals, None, {"leader": key, "shift_s": dt}, draw)
@@ -156,8 +161,8 @@ def augment(scene: Scene, signals: FlightSignals, inputs: FlightInputs, pool: Se
                                               own.category) * NM_M
             clock = (separation.approach_time_s(own.presence.runway, own.presence.landing_s)
                      - gap * separation.gap_s(source.presence.runway, source.category, own.presence.runway, own.category))
-            dt = clock + separation.along_nm[source.presence.runway] * NM_M / separation.speed_mps \
-                - source.presence.landing_s
+            dt = step_s * round((clock + separation.along_nm[source.presence.runway] * NM_M / separation.speed_mps
+                                 - source.presence.landing_s) / step_s)
             inserted = moved(scene.airport.flights.flights[key], source, dt, key + INSERTED, step_s)
             candidate = dataclasses.replace(scene, others=(*scene.others, key + INSERTED), moved=(inserted,))
             if qualifies(candidate, signals, step_s):

@@ -425,7 +425,15 @@ first such crossing is the landing; a flight that comes back ahead of the thresh
 (2026-09-24) a flight's `typecode` is its OWN ICAO type (`source["resolved_typecode"]`) or null when its
 identity is unresolved — v1 carried the type the dynamics flew, an A320 for every type without dynamics
 — and the default `TSConfig` keeps flights without aircraft dynamics (C31); the frontend sample moved to
-`aeroviz-training-sample-v6` with it (v5's shape plus the nullable type).
+`aeroviz-training-sample-v6` with it (v5's shape plus the nullable type). **Since artefact v6 (2026-10-02, the user;
+multi-aircraft design §2.1) every row is on the UTC clock's even seconds**: `instruction_signals` builds with
+`data.dataset.on_utc_steps` — row 0 the first even second at or after the first kept sample, `entry_time_utc` row 0's
+(0–2 s after that sample), never extrapolated; the one-tier models keep their rows at the first sample. A scene refuses
+an artefact whose rows are elsewhere (`prior.scene.presence`, by name: v5 and earlier), and `autopilot.flights.rebuild_series`
+cuts each flight where its stored row 0 is, so both kinds rebuild row for row. A spec is the vocabulary's format, not the
+data's: `instruction_spec --spec-from <artefact>` (`artefact.keep_spec`) keeps another artefact's spec byte for byte —
+refused unless this code's labeller measured it and both were built under one configuration — and `spec_from.json`
+says so (v6 keeps v5's).
 
 ### C31 · the aircraft filter: drop a flight only where dynamics are used
 

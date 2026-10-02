@@ -77,7 +77,7 @@ from ts_transformer.instructions.words import COLUMNS, RUNWAY, UNCHANGED, Words
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.prior.data import VARIANTS, airport_landings
 from ts_transformer.prior.model import Prior, with_traffic
-from ts_transformer.prior.scene import N_LOOK, hang, presence
+from ts_transformer.prior.scene import N_LOOK, presence
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 SCHEMA = "ts-traffic-free-generation-v1"
@@ -206,7 +206,7 @@ def speaking_batches(scenes: Sequence[Scene], limits: Sequence[float], sentence_
 
     def size(j: int) -> tuple[int, int]:
         scene = scenes[j]
-        pre = max([0] + [int(round((scene.first_step_s - hang(scene.rows(k).presence.start_s, step_s))
+        pre = max([0] + [int(round((scene.first_step_s - scene.rows(k).presence.start_s)
                                    / step_s)) for k in scene.others])
         return 1 + len(scene.others), min(pre, history) + rows_for(limits[j] + step_s, step_s)
 
@@ -245,7 +245,7 @@ def recorded_rows(batch: replay.Batch, scenes: Sequence[Scene], words: Words) ->
     step_s, rows = words.spec.step_s, []
     for flight, reading, geometry, scene in zip(batch.signals, batch.readings, batch.geometries, scenes):
         own = scene.track(scene.key)
-        seen = presence(flight, len(reading.words), geometry)
+        seen = presence(flight, len(reading.words), geometry, step_s)
         capture = int(np.searchsorted(seen.times_s, own.captured_s))
         whole = recorded(seen, flight, capture, replay.observed_landing_s(flight, reading, geometry), geometry,
                          scene.airport.flights.separation, scene.speaking.category, step_s)

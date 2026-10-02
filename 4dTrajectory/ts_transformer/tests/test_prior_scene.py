@@ -26,7 +26,7 @@ def test_the_scene_index_finds_overlapping_flights_and_chains_segments():
     assert [p.dataset_id for p in index.overlapping(450.0, 450.0)] == ["c"]
     # a long flight that started well before the window is still found
     assert [p.dataset_id for p in index.overlapping(300.0, 300.0)] == ["b"]
-    assert [[p.dataset_id for p in s] for s in index.segments(2.0)] == [["a", "b", "c"], ["d"]]
+    assert [[p.dataset_id for p in s] for s in index.segments()] == [["a", "b", "c"], ["d"]]
 
 
 def _roster(tmp_path, rows):
@@ -63,9 +63,9 @@ def test_the_landing_context_leaves_out_test_days_other_runways_and_non_landings
 def test_a_flight_is_present_from_its_entry_to_its_last_sentence_row():
     flight = instruction_flight(*fly_legs([(30, 0.0, 70.0, 0.0)], 90.0, 500.0, -300.0, 0.0), dataset_id="KXXX:a")
     start = utc_s(flight.entry_time_utc)
-    spoken = presence(flight, 10, instruction_airport())
+    spoken = presence(flight, 10, instruction_airport(), 2.0)
     assert (spoken.start_s, spoken.end_s, spoken.speaking) == (start, start + flight.time_s[9], True)
-    silent = presence(flight, None, instruction_airport())
+    silent = presence(flight, None, instruction_airport(), 2.0)
     assert (silent.end_s, silent.speaking) == (start + flight.time_s[-1], False)
     assert silent.landing_s == utc_s(flight.landing_time_utc)
     # it ends 300 m before runway 09's threshold, flying east along the centreline (fly_legs' end point)
@@ -87,7 +87,7 @@ def test_the_census_counts_others_leaders_and_the_landing_window():
     ego_to_go = ego.to_threshold_m[N_LOOK:]
     landings = Landings(np.array([1016.0 - CONTEXT_WINDOW_S + 10.0]), {"09": np.array([1016.0 - CONTEXT_WINDOW_S + 10.0])})
     none = np.zeros((0, 2))
-    out = census_airport([ego], [ahead, far, behind, other_runway], landings, none, 2.0)
+    out = census_airport([ego], [ahead, far, behind, other_runway], landings, none)
     assert out["predicted_steps"] == len(rows)
     gaps = []
     for p in (ahead, far):
@@ -115,7 +115,7 @@ def test_the_census_sees_a_window_reach_back_into_a_test_day():
     start = test_end + 600.0                                           # ten minutes into the next day
     ego = _place("ego", start, start + 2000.0)
     landings = Landings(np.zeros(0), {"09": np.zeros(0)})
-    out = census_airport([ego], [], landings, np.array([[test_start, test_end]]), 2.0)
+    out = census_airport([ego], [], landings, np.array([[test_start, test_end]]))
     rows = ego.times_s[N_LOOK:]
     assert out["window_reaches_a_test_day_share"] == pytest.approx((rows - CONTEXT_WINDOW_S < test_end).mean())
     assert 0.0 < out["window_reaches_a_test_day_share"] < 1.0
@@ -166,11 +166,22 @@ def _minutes(name: str, start: float, end: float, speaking: bool = True):
     return Presence(name, "KXXX", "05", end * 60.0 + 30.0, speaking, times, np.zeros(len(times)))
 
 
-def test_rows_hang_on_the_nearest_step_and_the_steps_are_whole_multiples():
-    from ts_transformer.prior.scene import hang, scene_steps
+def test_the_steps_are_whole_multiples_and_a_flight_off_them_is_refused_by_name():
+    import dataclasses
 
-    assert list(hang(np.array([3.4, 4.99, 5.0, 6.2]), 2.0)) == [4.0, 4.0, 6.0, 6.0]
+    from ts_transformer.prior.scene import scene_steps
+
     assert list(scene_steps(3.4, 10.1, 2.0)) == [4.0, 6.0, 8.0, 10.0]
+    flight = instruction_flight(*fly_legs([(30, 0.0, 70.0, 0.0)], 90.0, 500.0, -300.0, 0.0), dataset_id="KXXX:a")
+    assert utc_s(flight.entry_time_utc) % 2.0 == 0.0          # the fixture's rows are on the steps
+    seen = presence(flight, None, instruction_airport(), 2.0)
+    assert np.array_equal(seen.times_s, utc_s(flight.entry_time_utc) + 2.0 * np.arange(flight.n_rows))
+    # rows cut at a flight's own first sample (an artefact before 2026-10-02), or not one step apart
+    late = dataclasses.replace(flight, entry_time_utc=flight.entry_time_utc.replace(":00Z", ":01.250Z"))
+    with pytest.raises(ValueError, match="not on the scene's 2 s steps"):
+        presence(late, None, instruction_airport(), 2.0)
+    with pytest.raises(ValueError, match="not on the scene's 2 s steps"):
+        presence(dataclasses.replace(flight, time_s=flight.time_s * 1.5), None, instruction_airport(), 2.0)
 
 
 def test_a_segment_is_cut_as_the_design_draws_it():
@@ -192,7 +203,7 @@ def test_a_short_segment_is_one_sample_and_the_cut_step_is_the_later_samples():
 
     assert len(samples([_minutes("A", 0.0, 20.0)], 2.0)) == 1
     # two aircraft through the whole window (one entering at minute 15): every step ties, the earliest is taken, and the
-    # one whose first row hangs on the cut is only in the later sample, not carried
+    # one whose first row is on the cut is only in the later sample, not carried
     cut = samples([_minutes("A", 0.0, 30.0), _minutes("E", 15.0, 30.0)], 2.0)
     assert [s.loss_start_s for s in cut] == [0.0, 900.0]
     assert [f.dataset_id for f in cut[0].flights] == ["A"]

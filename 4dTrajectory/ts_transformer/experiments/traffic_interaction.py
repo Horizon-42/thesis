@@ -187,10 +187,11 @@ def flight_context(instructions: Path, spec: VocabularySpec, split: str, dataset
     background = defaultdict(list)
     for i in sorted(set(range(len(signals))) - set(spoken)):
         flight = signals[i]
-        background[flight.airport].append(presence(flight, None, geometries[flight.airport]))
+        background[flight.airport].append(presence(flight, None, geometries[flight.airport], spec.step_s))
     out: dict[str, list[tuple[int, dict[str, Any]]]] = {}
     for airport, members in sorted(by_airport.items()):
-        speaking = [presence(signals[spoken[k]], int(offsets[k + 1] - offsets[k]), geometries[airport]) for k in members]
+        speaking = [presence(signals[spoken[k]], int(offsets[k + 1] - offsets[k]), geometries[airport], spec.step_s)
+                    for k in members]
         flags = step_flags(speaking, background[airport])
         out[airport] = [(k, {**flag, "stratum": phase_strata(ego, int(sentences["capture_row"][k])),
                              "cluster": (airport, int(ego.start_s // CLUSTER_S))})

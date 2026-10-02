@@ -3,7 +3,9 @@
 The artefact stores each flight's signals, not its dynamics. The aircraft's aero row, installed
 thrust, mass and the chart the rollout integrates in come from the data plane's own `FlightSeries`,
 rebuilt here with the call that built the signals (`data.dataset.build_series` under the default
-`TSConfig`, from the arrival manifest the artefact recorded — refused if the manifest moved since).
+`TSConfig`, from the arrival manifest the artefact recorded — refused if the manifest moved since),
+its first row where the stored signals have it (`stored_rows`: an artefact's rows are on the UTC
+steps since 2026-10-02, an older one's at each flight's first sample — both rebuild row for row).
 The rebuilt flight must reproduce the stored signals row for row and name the same runway and
 aircraft (`instructions.signals.signals_from_series`), and the build configuration must be the one the
 signals recorded, or it is refused: an executor flown from another flight — or another airframe — than
@@ -19,19 +21,20 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import torch
 
 from ts_transformer.config import TSConfig
-from ts_transformer.data.dataset import FlightSeries, build_series, load_flight_dicts
+from ts_transformer.data.dataset import FlightSeries, RowStart, build_series, load_flight_dicts
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import load_candidates
 from ts_transformer.instructions.signals import ROW_FIELDS, FlightSignals, signals_from_series
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.outputs.dynamics.context import rollout_context
 from ts_transformer.repo_layout import arrival_manifest_path
+from trajectory_data_process.harvest.utc import parse_iso_utc_s
 
 #: How closely a rebuilt flight must reproduce the stored signals (the same code on the same
 #: manifest reproduces them exactly; the tolerance absorbs only floating-point reassociation).
@@ -57,7 +60,7 @@ def rebuild_series(directory: Path, signals: Sequence[FlightSignals]) -> list[Fl
                              f"(sha256 {recorded[airport][:12]} recorded)")
         keys = {item.dataset_id for item in signals if item.airport == airport}
         flights = load_flight_dicts([manifest], include_flight_keys=keys, verbose=False)
-        series, _report = build_series(flights, config)
+        series, _report = build_series(flights, config, row_start=stored_rows(signals))
         built.update({item.dataset_id: item for item in series})
     missing = [item.dataset_id for item in signals if item.dataset_id not in built]
     if missing:
@@ -65,6 +68,16 @@ def rebuild_series(directory: Path, signals: Sequence[FlightSignals]) -> list[Fl
     for item in signals:
         require_same_flight(built[item.dataset_id], item, geometries[item.airport])
     return [built[item.dataset_id] for item in signals]
+
+
+def stored_rows(signals: Sequence[FlightSignals]) -> RowStart:
+    """The first row where ``signals`` has it: its row 0's UTC (``entry_time_utc``) after the flight's first kept sample
+    (the arrival record's ``entry_time_utc``)."""
+    row_zero = {item.dataset_id: parse_iso_utc_s(item.entry_time_utc) for item in signals}
+
+    def start(dataset_id: str, source: Mapping[str, Any]) -> float:
+        return row_zero[dataset_id] - parse_iso_utc_s(source["entry_time_utc"])
+    return start
 
 
 def require_same_flight(series: FlightSeries, signals: FlightSignals, geometry: AirportGeometry) -> None:

@@ -7,7 +7,10 @@ flights are never opened — only counted from the roster), built by the ts data
 + `usable_series` under the default `TSConfig`, so the population and preprocessing are the models'
 own; its state output keeps every flight, `all-flights`, those whose type has no aircraft dynamics
 included, since the labeller reads kinematics only) and projected into each airport's frame
-(`instructions.signals`). The candidates are each manifest's published runway geometry; beside them
+(`instructions.signals`). The rows are on the UTC clock's whole multiples of the step
+(`data.dataset.on_utc_steps`, multi-aircraft design §2.1; since 2026-10-02): every flight's first row is the
+first even second at or after its first kept sample, and its ``entry_time_utc`` is that row's — so a row
+of any two flights at the same step is at the same time. The candidates are each manifest's published runway geometry; beside them
 go every runway end the harvest builds, from the configuration and CIFP the harvest and the
 evaluator read by default (`evaluation.cli.DEFAULT_CONFIG`, `DEFAULT_CIFP`). Every candidate must
 publish a threshold crossing height and a glidepath there (the executor's crossing point and floor for "descend to
@@ -80,14 +83,14 @@ def _build(geometry_data: dict[str, Any], manifest: str, keys: list[str]) -> tup
     """One chunk of one airport: flight dicts → series → usable series → signals, with the
     types and the flights without aircraft dynamics counted over the USABLE series (the ones
     that become signals; the build report's counts include flights `usable_series` drops)."""
-    from ts_transformer.data.dataset import build_series, load_flight_dicts
+    from ts_transformer.data.dataset import build_series, load_flight_dicts, on_utc_steps
     from ts_transformer.instructions.signals import signals_from_series
     from ts_transformer.training.train import usable_series
 
     config = TSConfig()
     geometry = AirportGeometry.from_dict(geometry_data)
     flights = load_flight_dicts([manifest], include_flight_keys=set(keys), verbose=False)
-    built, report = build_series(flights, config)
+    built, report = build_series(flights, config, row_start=on_utc_steps(config.dt_s))
     usable = usable_series(built, config, verbose=False)
     typecodes = Counter(str(item.scenario.source["resolved_typecode"] or "unresolved") for item in usable)
     without_dynamics = Counter(str(item.scenario.source["no_dynamics_reason"])

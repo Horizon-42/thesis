@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
+import pytest
 
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.tests.test_autopilot import _physics
@@ -17,11 +18,14 @@ def test_a_moved_flight_keeps_its_rows_and_moves_its_times_steps_and_capture(tmp
 
     airport, _, spec = _airport(tmp_path, monkeypatch)
     rows, track = airport.flights.flights["KXXX:f0"], airport.tracks["KXXX:f0"]
-    new_rows, new_track = moved(rows, track, 37.0, "KXXX:f0+x", spec.step_s)
+    new_rows, new_track = moved(rows, track, 38.0, "KXXX:f0+x", spec.step_s)
     assert new_rows.presence.dataset_id == new_track.key == "KXXX:f0+x"
-    assert np.allclose(new_rows.presence.times_s - rows.presence.times_s, 37.0) and new_rows.node_rows is rows.node_rows
-    assert new_track.captured_s == track.captured_s + 37.0 and new_track.first_step_s % spec.step_s == 0.0
-    assert new_rows.presence.landing_s == rows.presence.landing_s + 37.0
+    assert np.allclose(new_rows.presence.times_s - rows.presence.times_s, 38.0) and new_rows.node_rows is rows.node_rows
+    assert new_track.captured_s == track.captured_s + 38.0 and new_track.first_step_s % spec.step_s == 0.0
+    assert new_rows.presence.landing_s == rows.presence.landing_s + 38.0
+    # a move off the steps would take its rows off them
+    with pytest.raises(ValueError, match="not whole 2 s steps"):
+        moved(rows, track, 37.0, "KXXX:f0+x", spec.step_s)
 
 
 def test_the_leader_is_next_ahead_and_a_scene_lost_before_the_prior_speaks_does_not_qualify(tmp_path, monkeypatch):
@@ -60,7 +64,9 @@ def test_an_insertion_lands_the_gap_ahead_on_the_clock_and_a_moved_start_moves_t
     from ts_transformer.experiments.traffic_census import APPROACH_SPEED_MPS
 
     gap_s = airport.tracks["KXXX:f3"].presence.landing_s - out.scene.track(key).presence.landing_s
-    assert abs(gap_s - out.drawn["gap"] * out.drawn["required_m"] / APPROACH_SPEED_MPS) < 1e-6
+    # the move rounded to the nearest whole step
+    assert out.drawn["shift_s"] % spec.step_s == 0.0
+    assert abs(gap_s - out.drawn["gap"] * out.drawn["required_m"] / APPROACH_SPEED_MPS) <= spec.step_s / 2 + 1e-6
     assert out.drawn["gap"] >= 0.5 and out.drawn["gap"] <= 2.0
     moved = augment(scene, signals["KXXX:f3"], inputs, [], np.random.default_rng(3), windows, spec.step_s,
                     kinds=("B",))

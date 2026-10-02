@@ -1,17 +1,16 @@
 """The prior commanding every aircraft of a time window (multi-aircraft design §2.2 "窗口内由模型指挥", §6.6 step 7) —
 shared by M3's and M4's second pass, not a runner.
 
-**Windows** (step 7 item 1): an airport's flights are chained into segments on the steps their rows hang on
-(`prior.scene.SceneIndex.segments`, design §2.3); from each segment's first step a window opens every `WINDOW_EVERY_S`
-up to its last step, `WINDOW_S` long. The prior commands the flights with a sentence whose first row hangs on a step
-inside the window and that fly on their own dynamics (the replay gate's group, `autopilot.replay`); everything else in
+**Windows** (step 7 item 1): an airport's flights are chained into segments on their rows' steps
+(`prior.scene.SceneIndex.segments`, design §2.3; every row is on a step); from each segment's first step a window opens
+every `WINDOW_EVERY_S` up to its last step, `WINDOW_S` long. The prior commands the flights with a sentence whose first
+row is on a step inside the window and that fly on their own dynamics (the replay gate's group, `autopilot.replay`); everything else in
 the air — before, after, the background, a flight the executor cannot fly — is replayed along its record. Windows
 overlap, so a flight is commanded in two of them, once in each. A window's scene runs from its first commanded aircraft's
 first row to the last one's time limit.
 
 What the loop reads is placed by the one-aircraft code (`traffic_speaking`, in the edge features' source hash): each
-commanded aircraft's view of its window is a one-speaking `traffic_speaking.Scene` (`Window.scene`) — none of the files
-in `traffic_scene_data.EDGE_SOURCES` is changed, so every traffic prior trained so far still loads.
+commanded aircraft's view of its window is a one-speaking `traffic_speaking.Scene` (`Window.scene`).
 """
 
 from __future__ import annotations
@@ -59,7 +58,7 @@ from ts_transformer.prior.generate import rows_for
 from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import below_floor
-from ts_transformer.prior.scene import N_LOOK, Landings, SceneIndex, hang, hung_span
+from ts_transformer.prior.scene import N_LOOK, Landings, SceneIndex
 from ts_transformer.prior.scene_data import Node
 from ts_transformer.prior.window_speaker import WindowSpeaker
 
@@ -72,8 +71,8 @@ DRAW_CHUNK = 64
 
 @dataclass(frozen=True)
 class Window:
-    """One window of an airport's scene: the step it opens on, the flights the prior commands (by the step their first
-    row hangs on, then key), the others replayed (in the air at a step from the first commanded aircraft's first row to
+    """One window of an airport's scene: the step it opens on, the flights the prior commands (by their first row's step,
+    then key), the others replayed (in the air at a step from the first commanded aircraft's first row to
     the end of the last one's time limit) and — an augmented window's — flights moved in time or inserted (their rows
     and tracks, by their keys among the commanded or the others)."""
 
@@ -92,14 +91,14 @@ class Window:
         """A flight of the window as the judge replays it (a moved one's own)."""
         return next((track for _, track in self.moved if track.key == key), None) or self.airport.tracks[key]
 
-    def first_step_s(self, key: str, step_s: float) -> float:
-        """The step a commanded aircraft's first row hangs on."""
-        return float(hang(self.rows(key).presence.start_s, step_s))
+    def first_step_s(self, key: str) -> float:
+        """A commanded aircraft's first row's step."""
+        return self.rows(key).presence.start_s
 
-    def scene(self, key: str, step_s: float) -> Scene:
+    def scene(self, key: str) -> Scene:
         """Commanded aircraft ``key``'s view of the window as a one-speaking scene (`view`): every other aircraft of the
         window among the others — the other commanded ones first, in the window's order, then the replayed."""
-        return self.view(key, self.first_step_s(key, step_s),
+        return self.view(key, self.first_step_s(key),
                          tuple(k for k in self.commanded if k != key) + self.others)
 
     def view(self, key: str, first_step_s: float, others: tuple[str, ...]) -> Scene:
@@ -111,12 +110,11 @@ class Window:
 
 def window_tiles(airport: SceneAirport, step_s: float) -> list[tuple[float, tuple[str, ...]]]:
     """Every window of ``airport``'s segments (module docstring) that holds a flight with a sentence: its opening step and
-    those flights, by the step their first row hangs on (then key) — which of them fly is the draw's to find."""
+    those flights, by their first row's step (then key) — which of them fly is the draw's to find."""
     out = []
-    for segment in SceneIndex(f.presence for f in airport.flights.flights.values()).segments(step_s):
-        spans = [hung_span(p, step_s) for p in segment]
-        first, last = min(s for s, _ in spans), max(e for _, e in spans)
-        entering = sorted((s, p.dataset_id) for p, (s, _) in zip(segment, spans) if p.speaking)
+    for segment in SceneIndex(f.presence for f in airport.flights.flights.values()).segments():
+        first, last = min(p.start_s for p in segment), max(p.end_s for p in segment)
+        entering = sorted((p.start_s, p.dataset_id) for p in segment if p.speaking)
         opens = first
         while opens <= last:
             keys = tuple(k for s, k in entering if opens <= s < opens + WINDOW_S)
@@ -132,7 +130,7 @@ def window_of(airport: SceneAirport, opens_s: float, commanded: Sequence[str], l
     ``moved``: flights moved in time or inserted, an augmented window's): everything else in the air from the first one's
     first row to the end of the last one's time limit replayed — but ``left_out`` (an inserted flight's source)."""
     window = Window(airport, opens_s, tuple(commanded), (), tuple(moved))
-    firsts = [window.first_step_s(k, step_s) for k in commanded]
+    firsts = [window.first_step_s(k) for k in commanded]
     start = min(firsts)
     end = max(first + N_LOOK * step_s + limit for first, limit in zip(firsts, limits_s))
     taken = set(commanded) | set(left_out)
@@ -1037,10 +1035,10 @@ def window_places(windows: Sequence[Window], step_s: float) -> WindowPlaces:
     """``windows`` on one batch's steps — the loop's and a trainer's (`WindowPlaces`): each window's first commanded
     aircraft's row 0 at the pre-roll's end, the pre-roll the longest any replayed aircraft is in the air before it, at
     most `HISTORY_S`."""
-    origin = np.array([window.first_step_s(window.commanded[0], step_s) for window in windows])
+    origin = np.array([window.first_step_s(window.commanded[0]) for window in windows])
     window_of = np.array([w for w, window in enumerate(windows) for _ in window.commanded], dtype=np.int64)
-    firsts = np.array([window.first_step_s(k, step_s) for window in windows for k in window.commanded])
-    entered = [[float(hang(window.rows(k).presence.start_s, step_s)) for k in window.others] for window in windows]
+    firsts = np.array([window.first_step_s(k) for window in windows for k in window.commanded])
+    entered = [[window.rows(k).presence.start_s for k in window.others] for window in windows]
     before = max([0] + [int(round((o - s) / step_s)) for o, starts in zip(origin, entered) for s in starts])
     pre = min(int(HISTORY_S // step_s), before)
     origin = origin - pre * step_s
@@ -1070,7 +1068,7 @@ def window_edges(windows: Sequence[Window], keys: Sequence[str], window_of: np.n
         for m, i in enumerate(members):
             window = windows[window_of[i]]
             others = window.others if m == 0 and not alone else ()
-            scene = window.view(keys[i], window.first_step_s(keys[i], step_s), others)
+            scene = window.view(keys[i], window.first_step_s(keys[i]), others)
             parts.append(edge_rows(scene, e[i], n[i], h[i], pointers[i], int(rows[i]), int(start[i]), low, last,
                                    step_s))
         head = parts[0]                                   # the first commanded one, then its replayed ones
@@ -1090,7 +1088,7 @@ def window_landings(window: Window, key: str, landings: Mapping[str, Landings], 
     """Commanded aircraft ``key``'s landings of its window before any lands in the loop (`WindowLoop`'s landing
     context): the airport's, less every OTHER commanded aircraft's recorded landing — its own stays, for
     `data.own_context` to take out."""
-    out = scene_landings(landings[window.airport.flights.code], window.scene(key, step_s))
+    out = scene_landings(landings[window.airport.flights.code], window.scene(key))
     for other in window.commanded:
         if other != key:
             seen = window.rows(other).presence
