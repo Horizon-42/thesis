@@ -1837,7 +1837,7 @@ runner R40 `go_around_census`（分支 `dev-go-around`）。读数 `readouts/202
    - 9.4 训出的模型会说复飞，以后读它要用有复飞代码的读法。按 9.4 建议的做法，那就是 R34 加同一种「每个窗口只指挥一架」的抽法。
    - 所以窗口一半（R34，验证集，真实 + 扩充）现在就能跑；「一架由模型指挥」一半等 9.4 的抽法写好、R34 能按它读，再跑。
 8. **配对的两份读数，代码要证明行为相同**（§9 第 38 项）：
-   - 原来配对程序要两份读数出自同一个提交，9.4 的重构一合并，已跑的窗口一半就配不上。这条要求是我引申出来的，不是用户定的；
+   - 原来模型对比程序（R41）要两份读数出自同一个提交，9.4 的重构一合并，已跑的窗口一半就配不上。这条要求是我引申出来的，不是用户定的；
      用户 2026-10-02 定改成按行为核对，2026-10-03 定读数分成配置、代码版本、数据（9.9）。
    - 已经跑的窗口一半（`90fc66c0`，`traffic/window_val_{,aug_}start_20261002`）：按新格式改造（9.9.6），再用核对程序核对（9.9.2），
      通过就作配对的起点一侧，不重跑。
@@ -1877,7 +1877,7 @@ runner R40 `go_around_census`（分支 `dev-go-around`）。读数 `readouts/202
    - B 挪起点：同窗口的 B；
    - D 挪前机：本机的前机——回放的、本机第一个预测步时在空中、同一条跑道或当作一条的、落地在本机之前的最后一架——整段挪 δ，
      δ 取 [−60, 60] s 里的整步、不为 0（同 R32）。
-4. R37 的训练轮和选择集都按它抽；R39 读它；R41 照旧，抽法进 `SAME`（两份读数要同一种抽法）。
+4. R37 的训练轮和选择集都按它抽；R39 读它；R41 只比配置相同的两份读数（抽法 `commanded` 是配置的一项）。
 
 **归档的**（模块和它们的测试原样搬进 `archive/one_commanded_scene_2026_10/`）：
 
@@ -1975,20 +1975,19 @@ runner R40 `go_around_census`（分支 `dev-go-around`）。读数 `readouts/202
 
 **9.9 读数分成配置、代码版本、数据；配对按行为核对代码**（用户 2026-10-02 选按行为核对，2026-10-03 定拆法和改造；§9 第 38 项）
 
-现状（2026-10-03 晚，分支 `dev-step9-one-commanded`，暂停等用户重启会话）：
+现状（2026-10-03，分支 `dev-step9-one-commanded`，worktree `.claude/worktrees/step9-one-commanded`）：
 
-1. 第 1、4 步已提交 `1e3bd470`：读数程序按 `--config` 跑、写五个文件；共用的 `experiments/code_version.py`；导出程序读新格式。
-   测试 `tests/test_traffic_window_readout.py`（新，31 个）、`tests/test_window_training_export.py` 通过。审查 A 未做（启动后被停下）。
-2. 第 2 步已写、未测试、未审查：`experiments/traffic_window_conformance.py`（WIP 提交 `1e6ca5a6`）。
-3. 第 3 步未开始。用户 2026-10-03 定：配对程序改名为 `experiments/traffic_window_compare.py`（模型对比程序；
-   输出 `traffic_window_compare.json`，`ts-traffic-window-compare-v1`），测试文件一并改名；盘上已有的 `window_val_pair_*` 目录不改名。
-   在此之前 `traffic_window_pair.py` 仍导入已删的 `SCHEMA`，导入会失败。
-4. 审查：用户要求关键步骤后由 opus 子代理以 xhigh 审查。定义在 `~/.claude/agents/opus-code-reviewer.md`（`effort: xhigh`），
-   本会话未加载；重启后先确认可用。审查分两次：A = `1e3bd470`（第 1、4 步），B = 第 2、3 步。
+1. 第 1–5 步完成：
+   - `1e3bd470`：第 1、4 步，读数程序按配置跑、写五个文件，导出程序读新格式；
+   - `5c9395ff`：按审查 A 改，路径必须从仓库根写起，种子不为负，导出程序拒绝试探过的、没读「在场景里」的读数；测试钉住 `prepare` 的参数和明细；
+   - `883a2d39`：第 2、3 步，核对程序 R44；配对程序改名为模型对比程序 `traffic_window_compare`（用户 2026-10-03：旧名误导，它比的是两个模型）；
+   - 第 5 步文档：本节、runners.md（R34、R41、R44）、ts `CLAUDE.md` 索引、§11.2。
+2. 审查 A（opus，xhigh）已做、已改；审查 B（第 2、3 步）进行中。
+3. 下一步：按审查 B 改 → 全套测试（后台）→ 第 7 步改造两份旧读数 → 第 8 步核对。
 
 为什么：
 
-1. 配对程序（`experiments/traffic_window_pair.py`，`R41`）原来要两份读数出自同一个提交。这条要求是我从 9-19 的规矩引申出来的，不是用户定的
+1. 模型对比程序（`R41`，原名 `traffic_window_pair`，2026-10-03 改为 `experiments/traffic_window_compare.py`）原来要两份读数出自同一个提交。这条要求是我从 9-19 的规矩引申出来的，不是用户定的
    （第 38 项）。它会误拒：9.4 的重构让窗口模式逐位不变，提交号一变，9.3 已跑的两份读数就配不上；它也拦不全：库的版本、显卡变了，提交号都不反映。
    用户定：与执行器的航迹核对（C33，执行器设计 §12.3）同一个思路，读数代码按它读出来的东西核对。
 2. 更深的原因：窗口读数程序（`experiments/traffic_window_generation.py`，`R34`）把三样东西写在一个头文件 `window_generation.json` 里，
@@ -1998,7 +1997,7 @@ runner R40 `go_around_census`（分支 `dev-go-around`）。读数 `readouts/202
    - 代码版本：提交号。
    9.4 只在头里加了一个配置项（抽法 `commanded`：每个窗口全部指挥还是只指挥一架），版本号就从 v6 升到 v7；读读数的程序只认当前版本号，于是
    明细（每架飞机一行，两版完全相同）一行没变，9.3 的两份读数整份都读不了。用户 2026-10-03：配置、数据、代码版本混在一起影响开发，要分清；
-   配对程序要通用，只按给定的配置跑、比对，不为某一次比较打补丁。
+   模型对比程序要通用，只按给定的配置跑、比对，不为某一次比较打补丁。
 
 **9.9.1 读数目录的新格式**
 
@@ -2006,7 +2005,7 @@ runner R40 `go_around_census`（分支 `dev-go-around`）。读数 `readouts/202
 
 | 文件 | 类别 | 内容 | 谁读 |
 |---|---|---|---|
-| `config.json` | 配置 | 补全后的完整配置（下表） | 核对程序、配对程序、导出程序 |
+| `config.json` | 配置 | 补全后的完整配置（下表） | 核对程序、模型对比程序、导出程序 |
 | `code.json` | 代码版本 | `commit` 提交号、`dirty` 检出是否干净、`python`、`torch`、`cuda`（torch 的 CUDA 版本，CPU 版为 null）、`gpu`（显卡型号，用 CPU 读时为 null）、`device`（cuda / cpu）、`constants`（代码里定死、决定读法的常数：`history_s` 1200，`readings` `{ends: visual, beside: ifr}`） | 配对程序、核对程序 |
 | `aircraft.jsonl` | 数据：明细 | 每架指挥的飞机、每个来源、每个样本一行（模型的行 34 个字段），与现在相同 | 核对程序、配对程序 |
 | `summary.json` | 数据：汇总 | `schema`（只是这个文件的格式名，`ts-traffic-window-summary-v1`）、`model`（模型的程序屏蔽名、交通注意力怎么读）、`drawn`（抽样计数）、`augmenting`（扩充计数，不扩充为 null）、`scenes`、`batches`（批数）、`readout`（按来源、机场、窗口大小、扩充类别的汇总，与现在相同） | 导出程序、人 |
@@ -2040,7 +2039,8 @@ runner R40 `go_around_census`（分支 `dev-go-around`）。读数 `readouts/202
    原来的 `--prior`、`--split` 等命令行参数全部去掉。`--workers` 不影响结果（每批有自己的随机数，进程数只决定谁读哪批），记在 `run.json`；
    `--device` 影响浮点，记在 `code.json`。
 2. 读配置只有一个函数（加载并补全）：不认识的键拒绝；必须的键缺了拒绝；有默认值的键缺了补默认值；检查取值（划分、抽法、来源在允许的范围，
-   样本 ≥ 1，0 ≤ 试探样本 ≤ 样本……）。写进读数目录的 `config.json` 是补全后的完整配置，每个键都在。
+   样本 ≥ 1，0 ≤ 试探样本 ≤ 样本，种子不为负……）。三个路径从仓库根写起：相对路径、不含 `..`，否则拒绝（审查 A：
+   绝对路径在主检出和 worktree 里写出来不一样，同样的数据会被模型对比程序当成不同配置）。写进读数目录的 `config.json` 是补全后的完整配置，每个键都在。
 3. 以后加新的配置项，必须给默认值，且默认值等于加之前的行为。是否真的等于，由核对程序（9.9.2）对旧读数的核对验证，不靠说明。
 4. 两个校验和：运行时按配置里的路径算出来写入；配置里已经写了（例如拿一份读数的 `config.json` 再跑）就核对，不同就拒绝并说出哪一项——
    那是数据变了，不是代码变了。
@@ -2076,7 +2076,8 @@ runner R40 `go_around_census`（分支 `dev-go-around`）。读数 `readouts/202
 2. 明细的字段将来若改了（比如加一个字段），核对报「字段集合不同」并失败。那时怎么办由那时决定，这里不预先放宽。
 3. torch / CUDA / 显卡不同，浮点可能不同，核对就失败，如实报告。
 
-**9.9.3 配对程序**（`experiments/traffic_window_pair.py`，`R41`）
+**9.9.3 模型对比程序**（`experiments/traffic_window_compare.py`，`R41`；原名 `traffic_window_pair`，用户 2026-10-03 改名：它比的是两个模型的读数，不核对代码。
+输出 `traffic_window_compare.json`，`ts-traffic-window-compare-v1`；盘上 2026-10-01 的 `window_val_pair_*` 是旧程序的结果，原样保留）
 
 对任何两份窗口读数都是同样三条，没有为某一次比较写的特例：
 
@@ -2090,7 +2091,7 @@ runner R40 `go_around_census`（分支 `dev-go-around`）。读数 `readouts/202
 5. 原来的 `SAME`（比格式名、提交号、计数、汇总）去掉。
 
 **9.9.4 导出程序**（`experiments/window_training_export.py` 的 `readout_block`）：从 `config.json` 读它要核对的配置（模型、检查点校验和、
-执行器校验和、句子数据、划分、抽法、每机场窗口数、种子、样本、温度、扩充种子），从 `summary.json` 读汇总，从 `run.json` 读时间。旧格式的读数
+执行器校验和、句子数据、划分、抽法、每机场窗口数、种子、样本、温度、扩充种子；另要求没有试探、读了「在场景里」，审查 A 加），从 `summary.json` 读汇总，从 `run.json` 读时间。旧格式的读数
 拒绝；已经发布到前端的不受影响。
 
 **9.9.5 读数程序内部怎么拆**（给写代码的人）：
@@ -2139,9 +2140,9 @@ runner R40 `go_around_census`（分支 `dev-go-around`）。读数 `readouts/202
 |---|---|---|
 | 1 | 读数程序拆分（9.9.5）：配置数据类和加载函数、`prepare`、`read_batches`、`--config`、写五个文件、共用的代码版本函数 | 加载函数：不认识的键、缺必须的键拒绝，缺有默认值的键补上，取值越界拒绝；校验和不符拒绝；同样的配置在 1 个和 2 个进程下明细逐位相同；五个文件的键 |
 | 2 | 核对程序（9.9.2） | 同一份代码上通过；换一种读法（比如另一个温度）或在测试里改一个判定常数，不通过并报出第一处不同；明细与抽样不符（删一行、改一行的批号）不通过；脏的检出不写记录；同一提交已有记录不覆盖 |
-| 3 | 配对程序（9.9.3） | 配置只差模型 → 配；还差别的键 → 拒绝并列出；代码版本相同 → 配；不同且没有记录 → 拒绝并说缺哪份；有记录（两个方向都试）→ 配，结果写明证据；原有的行检查照旧 |
+| 3 | 模型对比程序（9.9.3） | 配置只差模型 → 配；还差别的键 → 拒绝并列出；代码版本相同 → 配；不同且没有记录 → 拒绝并说缺哪份；有记录（两个方向都试）→ 配，结果写明证据；原有的行检查照旧 |
 | 4 | 导出程序读新格式（9.9.4） | 现有导出测试改成新格式 |
-| 5 | 文档：`docs/reference/runners.md`（读数程序改为 `--config`；核对程序新条目 `R44`；配对程序）、ts `CLAUDE.md` 索引、本节现状、§11.2 关键代码索引 | — |
+| 5 | 文档：`docs/reference/runners.md`（读数程序改为 `--config`；核对程序新条目 `R44`；模型对比程序）、ts `CLAUDE.md` 索引、本节现状、§11.2 关键代码索引 | — |
 | 6 | 审查、修；全套测试（约 1,890 个，后台跑，约 55 分钟） | — |
 | 7 | 改造两份旧读数（9.9.6） | — |
 | 8 | 核对两份（真实、扩充）：干净的检出，`--device cuda`；通过记录写在读数旁边 | — |
@@ -2596,6 +2597,9 @@ runner R40 `go_around_census`（分支 `dev-go-around`）。读数 `readouts/202
 | 扩充 | `experiments/traffic_window_augment.py:100` `KINDS`，`:101` `KINDS_OF`，`:138` `moved`，`:177` `leader`（D），`:209` `augment_window` |
 | 轮次做法：说话进程、选轮 | `experiments/traffic_rounds.py:98` `Speaking`，`:165` `Speakers`，`:285` `guarded_choice`，`:325` `paired_difference` |
 | M4 在窗口里：说话、打分、读数 | `experiments/traffic_window_reward.py:214` `WindowSpeaking`，`:579` `main`；`experiments/traffic_window_tuner.py:366` `WindowRewardTuner`，`:508` `sweeps`，`:65` `PAIRS_PER_BLOCK`，`:195` `window_advantages` |
+| 窗口读数 R34：配置、准备、读批、五个文件（步 9.9） | `experiments/traffic_window_generation.py:845` `ReadoutConfig`，`:879` `CONFIG_KEYS`，`:924` `load_config`，`:970` `readout_config`，`:1021` `prepare`，`:1059` `read_batches`，`:1093` `main`，`:841` `READING_CONSTANTS`；`experiments/code_version.py:20` `code_version` |
+| 核对程序 R44（步 9.9.2） | `experiments/traffic_window_conformance.py:85` `check_draw`，`:105` `check_rows`，`:76` `chosen_batches`，`:64` `record_path`，`:131` `check` |
+| 模型对比程序 R41（步 9.9.3） | `experiments/traffic_window_compare.py:69` `COMPARED`，`:93` `require_same_config`，`:100` `evidence`，`:125` `require_same_rows`，`:235` `compare_readouts` |
 | 倒回重说 R43 | `experiments/traffic_window_rewind.py:88` `SCHEMA`，`:90` `OFFSETS_S`，`:192` `events_of`，`:218` `branches_of` |
 | 难事件的事件池（步 8.11） | `experiments/traffic_window_events.py:73` `event_pool`，`:132` `pick` |
 | 复飞：进近列的转换（步 8.6） | `instructions/grammar.py:53` `approach_words_allowed`；`prior/generate.py:244` `vocabulary_allowed`（进近列在 `:265`） |

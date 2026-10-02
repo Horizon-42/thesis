@@ -141,7 +141,7 @@ added three entries (the rows after the performance index's).
 | The executor cannot fly a batch on CUDA past eight batch sizes: `torch.compile` recompile limit (10-02) | open | new; see the entry | no: every closed loop and readout flies the executor on CPU; only `traffic_labelled --device cuda` (and any other caller passing a CUDA device) fails |
 | Three shared ts modules are listed as runners: `traffic_go_around`, `traffic_window_events`, `training_attitude` (10-02) | open | new; see the entry | no: `run_ts.py --list` only |
 | The edge and executor fingerprints hash row-placement and data-plane code (10-02) | open | new; see the entry | no: a check — but the fix changes what the stored checkpoints and passed records name |
-| Readout headers mix configuration, data and code version in one file under one format version (10-03) | open | new; the window readout is split by multi-aircraft design 9.9; see the entry for the rest | no: readouts only |
+| Readout headers mix configuration, data and code version in one file under one format version (10-03) | partly | the window readout split (multi-aircraft design 9.9, branch `dev-step9-one-commanded` `1e3bd470`; shared `experiments/code_version.py`); the other readouts open, see the entry | no: readouts only |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -739,7 +739,7 @@ wrote what decides a readout (model, executor, data, split, seeds …), what it 
 ran (commit) into one `window_generation.json` under one schema version for the whole readout; adding one configuration
 key (9.4's `commanded`) bumped the version and every reader refused readouts whose rows had not changed. Design 9.9 splits
 the window readout into `config.json` / `code.json` / `aircraft.jsonl` + `summary.json` / `run.json`, run from a config
-file. **Judgement**: the other readout runners with the same single header — at least `traffic_window_rewind` (R43), M0 census, labelled-flight and mask readouts (R24,
+file — done (`1e3bd470`, with `experiments/code_version.py` for every readout to share). **Judgement**: the other readout runners with the same single header — at least `traffic_window_rewind` (R43), M0 census, labelled-flight and mask readouts (R24,
 R26, R27), `go_around_census` (R40) — should take the same layout and the shared
 code-version function when they are next changed; nothing pairs them today, so nothing is blocked.
 

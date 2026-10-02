@@ -412,9 +412,11 @@ per update, `scene_readout_acc4_20260928`: better nowhere, 0.2880 / 0.2868 vs 0.
 `traffic_window_generation` is M3's second pass — every aircraft of a 20-minute window commanded at once
 (`experiments/traffic_window.py` WindowLoop, `prior/window_speaker.py`: rounds from the front of the approach clock,
 executors grouped by first spoken step, the judge run as it flies, ended aircraft flying on silent), beside alone /
-labelled / recorded, all judged in the window; `--augment-seed` on augmented windows (`experiments/traffic_window_augment.py`:
+labelled / recorded, all judged in the window; **it reads only `--config`** (`ReadoutConfig`, one loader: unknown / missing
+required keys refused, defaults filled) and writes config.json / code.json / aircraft.jsonl / summary.json / run.json, no
+readout-wide schema (design §6.6 step 9.9, 2026-10-03); `augment_seed` on augmented windows (`experiments/traffic_window_augment.py`:
 the flow compressed, a start moved, a flight inserted and commanded; capped at the airport's busiest training step);
-`--commanded one` reads the setting "一架由模型指挥" there — a window a flight (`replay.draw`'s), the others replayed, augmented
+`commanded` `one` reads the setting "一架由模型指挥" there — a window a flight (`replay.draw`'s), the others replayed, augmented
 by its leader moved / its start moved / a flight inserted and replayed (`KINDS_OF`) (R34).
 `prior_generation_records` flies a free-generation readout's STORED sentences again (the readout's draw and chunks; every
 sentence must reproduce its readout row) and writes them as evaluation records per sample — ADE / FDE from row `N_LOOK`
@@ -440,9 +442,13 @@ aircraft given their original words, only the answered one trained — and `--se
 round, `experiments/traffic_window_events.py`) (R37).
 `traffic_window_reward_readout` reads such a run round by round, running or ended, from its files — paired against round 0
 as the round choice pairs (R39).
-`traffic_window_pair` pairs two window readouts of the same windows read the same way (refused otherwise, the model-free
-rows equal row for row) aircraft by aircraft: second − first per measure over the sentences counted in both, errors clustered by airport ×
-operating day (R41).
+`traffic_window_compare` (renamed from `traffic_window_pair` 2026-10-03) compares two MODELS' window readouts aircraft by
+aircraft: refused unless the configurations differ only in the model, the code versions are equal and clean or an R44 record
+shows one readout reads the same under the other's code, and the model-free rows are equal; second − first per measure over
+the sentences counted in both, errors clustered by airport × operating day (R41).
+`traffic_window_conformance` re-reads 24 batches of a window readout from its own config under today's code (after the whole
+draw) and compares the rows field by field; passed on a clean checkout → `<readout>.conformance/passed-<commit12>.json`, the
+evidence R41 accepts (design §6.6 step 9.9.2; same idea as R42) (R44).
 `traffic_window_rewind` asks whether a window's losses of separation can be undone by rewinding ONE aircraft — each loss's
 aircraft speaks again from 10–120 s before it (or its start), the others given the words they said (`traffic_window.Given`:
 not sampled, not masked), 8 branches an offset, a control that must replay the original pass to the last field; `--offsets-s`
