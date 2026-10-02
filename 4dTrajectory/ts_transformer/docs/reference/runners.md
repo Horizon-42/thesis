@@ -950,8 +950,10 @@ go-around word gives it `traffic_go_around.GO_AROUND_EXTRA_S` (900 s) more, as m
 (`WindowLoop.extra_s`, every loop laid out for it: `window_size` counts it); the loop keeps each aircraft's tightest
 separation margin a step (`inference.separation.margins`, the judge's own pairs). A row carries `landed_here` (landed in
 the airport's landing direction) and `go_around` (None, or `traffic_go_around.AfterGoAround`'s fields: S, H, Q, L and what
-they read); a go-around's sentence is rewarded 0.48·L + 0.14·(S + H + Q), at most 0.9, 0 for a loss or any end but a
-landing or a time limit. The summary's `go_arounds` (model sources) counts them and averages the parts; `masked_mass`
+they read); a go-around's sentence is rewarded 0.48·L + 0.14·(S + H + Q), at most 0.9 — 0 for a loss of separation, a
+ground contact or a dynamics failure, the three parts alone for any other end but a landing in the airport's direction
+(the user, 2026-10-02); H's time is the executor's own go-around climb to the approach altitude from its state at the
+go-around (`Vertical.go_around_climb_s`, the loop keeps that state: `WindowLoop.go_around_state`). The summary's `go_arounds` (model sources) counts them and averages the parts; `masked_mass`
 on the approach column includes the transitions' mask.
 
 **Probes** (step 8 item 10; `--probe-samples K --probe-margin m`, R34 to read what they do, R37 to train): the last K
@@ -1077,7 +1079,7 @@ sample scored with gradients on the GPU. Fixed select windows (as drawn and augm
 every round in the shape `traffic_reward.guarded_choice` reads (landed, observed runway, words, lost separation, the
 ordering against the record with the other commanded aircraft's landings of the same sample, reward by kind), the round
 chosen by paired standard errors on the augmented windows' reward. Writes `config.json`, `round_<k>/{sentences.json,
-checkpoint.pt, optimiser.pt, readout.json, …}`, `history.json`, `choice.json` (`ts-traffic-window-reward-v2`).
+checkpoint.pt, optimiser.pt, readout.json, …}`, `history.json`, `choice.json` (`ts-traffic-window-reward-v3`).
 
 ### R38 · `run_ts.py prior_generation_grading` — a generation-records run graded beyond its pass rate: the landed runway, and FDE's time and place (2026-09-30)
 

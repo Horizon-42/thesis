@@ -1006,6 +1006,34 @@ def test_a_heading_word_said_at_or_after_a_go_around_is_flown():
     assert off(track_deg(before)[150 * 2 + 10: 150 * 2 + 120], 90.0).max() < 2.0
 
 
+def test_the_vertical_law_knows_how_long_its_own_go_around_climb_takes():
+    """Multi-aircraft design §6.6 step 8 item 9 (the user's 2026-10-02 floor on H): `Vertical.go_around_climb_s` is the
+    climb the executor flies after a go-around with nothing else said — measured against the executor itself, and for a
+    flight just under the target, the turn from its descent dominates."""
+    from ts_transformer.autopilot.vertical import GO_AROUND_CLIMB_GRADIENT, Vertical
+    from ts_transformer.instructions.words import APPROACH_GO_AROUND
+
+    words, params = Words(spec()), _params()
+    vertical = Vertical(1, params, words, CPU)
+    signals, reading = _downwind()
+    grid = reading.words.copy()
+    grid[150, APPROACH] = APPROACH_GO_AROUND
+    flown, _, _ = _fly_sentence(signals, grid)
+    start = 150 * 2                                              # the go-around's cycle
+    height, speed, gamma = (flown.states[0, start:, c].numpy() for c in (2, 3, 5))
+    for climb_m in (5.0, 50.0, 150.0):
+        flew_s = float(np.argmax(height >= height[0] + climb_m)) * params.cycle_s
+        reference = vertical.go_around_climb_s(float(height[0]), float(gamma[0]), float(speed[0]), height[0] + climb_m)
+        assert abs(reference - flew_s) <= 2.0 * params.cycle_s
+    assert vertical.go_around_climb_s(500.0, -0.05, 70.0, 500.0) == 0.0
+    for bad in ((400.0, -0.05, 0.0, 500.0), (math.nan, -0.05, 70.0, 500.0), (400.0, math.nan, 70.0, 500.0)):
+        with pytest.raises(ValueError, match="flying forward"):           # never a loop that cannot end
+            vertical.go_around_climb_s(*bad)
+    # 7 m under, descending at 3°: the climb at the gradient alone is 3 s; turning the descent round costs far more
+    alone = 7.0 / (70.0 * GO_AROUND_CLIMB_GRADIENT)
+    assert vertical.go_around_climb_s(493.0, -math.radians(3.0), 70.0, 500.0) > 3.0 * alone
+
+
 def test_every_climb_during_a_go_around_is_flown_at_200_ft_per_nm():
     """Multi-aircraft design §6.6 step 8 item 7: the go-around's own climb and a climb word said during it fly the
     published minimum missed-approach gradient (AIM 5-4-21 b), not the climb class's centre; after the go-around (cleared

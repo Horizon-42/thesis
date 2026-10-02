@@ -83,7 +83,7 @@ from ts_transformer.experiments.prior_train import (
     PRIOR_CHECKPOINT_SCHEMA, TRAFFIC_CHECKPOINT_SCHEMA, load_prior, rosters,
 )
 from ts_transformer.experiments.traffic_go_around import (
-    GO_AROUND_EXTRA_S, PROBE_MARGIN, AfterGoAround, after_go_around, approach_altitude_m, runway_at,
+    GO_AROUND_EXTRA_S, PROBE_MARGIN, AfterGoAround, after_go_around, approach_altitude_m,
 )
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION, Controlled, Loop, Run, recorded
 from ts_transformer.experiments.traffic_labelled import own_end
@@ -108,7 +108,7 @@ from ts_transformer.prior.scene import N_LOOK, Landings, hang, presence
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 #: v3 (2026-10-01): the model's sources read (`model_sources`) in the header.
-SCHEMA = "ts-traffic-window-generation-v4"
+SCHEMA = "ts-traffic-window-generation-v5"
 SOURCES = ("scene", "alone", "labelled", "recorded")
 #: The sources the model speaks in (`--model-sources`: a read that needs only one — a pair of priors on the same windows
 #: reads "scene" — skips the other, half the model's time; each source from its own streams, so the rows of the one read
@@ -297,15 +297,17 @@ def _reward(row: dict[str, Any], direction: np.ndarray) -> float:
 def go_around_fields(loop: WindowLoop, i: int, got: Commanded, row: Mapping[str, Any],
                      direction: np.ndarray) -> AfterGoAround:
     """Commanded aircraft ``i``'s first go-around scored (`traffic_go_around.after_go_around`) from what the loop kept of
-    it: its margins, its states a step, its last judged step and the approach altitude of the runway in force then
-    (`traffic_go_around.approach_altitude_m`)."""
+    it: its margins, its states a step, its last judged step, the approach altitude of the runway in force then
+    (`traffic_go_around.approach_altitude_m`) and the executor's own climb up to it from its state there
+    (`Vertical.go_around_climb_s`, `WindowLoop.go_around_state`)."""
     states = loop.states[i]
-    entry = approach_altitude_m(loop.geometries[i], runway_at(got.said, got.go_around))
     judged_to = int(min(loop.judged_to[i], len(states) - 1))
-    return after_go_around(got.said, got.go_around, row["outcome"], bool(direction[row["runway"]]), loop.margin[i],
-                           [s.height_m for s in states], [s.ground_speed_mps for s in states],
-                           [s.captured for s in states], judged_to, entry, loop.step_s, float(loop.extra_s[i]),
-                           loop.go_around_extra_s)
+    entry = approach_altitude_m(loop.geometries[i], int(loop.go_around_runway[i]))
+    height, gamma, speed = (float(x) for x in loop.go_around_state[i])
+    need_s = loop.executors[0][2].vertical.go_around_climb_s(height, gamma, speed, entry)
+    return after_go_around(got.go_around, row["outcome"], bool(direction[row["runway"]]), loop.margin[i],
+                           [s.height_m for s in states], [s.captured for s in states], judged_to, entry, need_s,
+                           loop.step_s, float(loop.extra_s[i]), loop.go_around_extra_s)
 
 
 @dataclasses.dataclass

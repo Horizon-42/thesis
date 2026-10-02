@@ -1,5 +1,5 @@
 """The go-around's reward (`experiments/traffic_go_around`, multi-aircraft design §6.6 step 8 item 9) on hand-built
-sentences: what each of S, H, Q and the landing reads, and the ends it is not given on."""
+flights: what each of S, H, Q and the landing reads, and the ends it is not given on."""
 
 import math
 
@@ -8,25 +8,14 @@ import pytest
 
 from ts_transformer.experiments.traffic_go_around import (
     CLIMB_FULL_SHARE, CLIMB_ZERO_SHARE, GO_AROUND_EXTRA_S, LANDED_WEIGHT, PART_WEIGHT, RETURN_FULL_S, RETURN_ZERO_S,
-    after_go_around, linear, runway_at,
+    UNSCORED, after_go_around, linear,
 )
-from ts_transformer.autopilot.vertical import GO_AROUND_CLIMB_GRADIENT
-from ts_transformer.instructions.words import APPROACH, APPROACH_CLEARED, APPROACH_GO_AROUND, RUNWAY, UNCHANGED
 
 STEP_S = 2.0
 STEPS = 400
 AROUND = 10                       # the go-around's own step
-SPEED = 70.0
 ENTRY_M = 500.0
-
-
-def _said(runway_at_go_around=1):
-    said = np.full((STEPS, 6), UNCHANGED)
-    said[0] = [0, APPROACH_CLEARED, 0, 0, 0, 0]
-    said[5, RUNWAY] = runway_at_go_around
-    said[AROUND, APPROACH] = APPROACH_GO_AROUND
-    said[AROUND + 80, APPROACH] = APPROACH_CLEARED
-    return said
+NEED_S = 70.0                     # the executor's own climb from 300 m to the approach altitude (given here)
 
 
 def _flight(*, reach_step=AROUND + 40, capture_step=AROUND + 200, margin=1.5):
@@ -43,21 +32,15 @@ def _flight(*, reach_step=AROUND + 40, capture_step=AROUND + 200, margin=1.5):
     return heights, captured, margins
 
 
-def _score(outcome="landed", landed_here=True, judged_to=STEPS - 1, **flight):
+def _score(outcome="landed", landed_here=True, judged_to=STEPS - 1, need_s=NEED_S, **flight):
     heights, captured, margins = _flight(**flight)
-    return after_go_around(_said(), AROUND, outcome, landed_here, margins, heights, np.full(STEPS, SPEED), captured,
-                           judged_to, ENTRY_M, STEP_S, GO_AROUND_EXTRA_S, GO_AROUND_EXTRA_S)
-
-
-def test_the_runway_in_force_at_the_go_around_is_read_from_the_words():
-    said = _said(runway_at_go_around=3)
-    assert runway_at(said, AROUND) == 3 and runway_at(said, 4) == 0
+    return after_go_around(AROUND, outcome, landed_here, margins, heights, captured, judged_to, ENTRY_M, need_s, STEP_S,
+                           GO_AROUND_EXTRA_S, GO_AROUND_EXTRA_S)
 
 
 def test_a_landed_go_around_scores_the_landing_and_the_three_parts():
     scored = _score()
-    need = (ENTRY_M - 300.0) / (SPEED * GO_AROUND_CLIMB_GRADIENT)
-    assert scored.need_s == pytest.approx(need) and scored.climbed_s == 80.0 and 80.0 <= CLIMB_FULL_SHARE * need
+    assert scored.need_s == NEED_S and scored.climbed_s == 80.0 and 80.0 <= CLIMB_FULL_SHARE * NEED_S
     assert (scored.separation, scored.climb, scored.back, scored.landed) == (pytest.approx(0.5), 1.0, 1.0, 1.0)
     assert scored.margin_min == pytest.approx(1.5) and scored.back_s == 400.0
     assert scored.reward == pytest.approx(LANDED_WEIGHT + PART_WEIGHT * 2.5)
@@ -66,20 +49,32 @@ def test_a_landed_go_around_scores_the_landing_and_the_three_parts():
     assert best.reward == pytest.approx(0.9) and best.reward < 1.0
 
 
-def test_a_safe_timeout_scores_the_three_parts_and_any_other_end_nothing():
-    assert _score(outcome="timeout").reward == pytest.approx(PART_WEIGHT * 2.5)
-    for outcome, here in (("lost_separation", True), ("crossed_off_runway", True), ("below_glidepath", True),
+def test_a_go_around_that_did_not_land_scores_the_three_parts_but_a_loss_or_a_crash_nothing():
+    """The user, 2026-10-02: a go-around that did not land still helped the others land — S, H and Q as computed; a loss
+    of separation (the user's earlier rule) and a crash (my reading) get nothing."""
+    for outcome, here in (("timeout", True), ("crossed_too_high", True), ("crossed_off_runway", True),
+                          ("crossed_other_runway", True), ("crossed_without_capture", True), ("below_glidepath", True),
                           ("landed", False)):                     # landed, but not in the airport's landing direction
         scored = _score(outcome=outcome, landed_here=here)
+        assert scored.landed == 0.0 and scored.reward == pytest.approx(PART_WEIGHT * 2.5), outcome
+    # every end the loop gives is either scored or not: the executor's, the judge's loss and the glidepath stop
+    from ts_transformer.autopilot.judge import OUTCOMES
+    from ts_transformer.experiments.prior_free_generation import BELOW_GLIDEPATH
+    from ts_transformer.experiments.traffic_loop import LOST_SEPARATION
+    scored = {"landed", "timeout", "crossed_too_high", "crossed_off_runway", "crossed_other_runway",
+              "crossed_without_capture", BELOW_GLIDEPATH}
+    assert scored | set(UNSCORED) == set(OUTCOMES) | {LOST_SEPARATION, BELOW_GLIDEPATH}
+    assert not scored & set(UNSCORED) and set(UNSCORED) - {LOST_SEPARATION} <= set(OUTCOMES)
+    for outcome in UNSCORED:
+        scored = _score(outcome=outcome)
         assert scored.reward == 0.0 and scored.separation == scored.climb == scored.back == 0.0
 
 
 def test_the_climb_and_the_return_fall_off_linearly():
-    need = (ENTRY_M - 300.0) / (SPEED * GO_AROUND_CLIMB_GRADIENT)
-    late = AROUND + int(round(1.6 * need / STEP_S))
+    late = AROUND + int(round(1.6 * NEED_S / STEP_S))
     scored = _score(reach_step=late)
-    assert scored.climb == pytest.approx(linear((late - AROUND) * STEP_S, CLIMB_FULL_SHARE * need,
-                                                CLIMB_ZERO_SHARE * need))
+    assert scored.climb == pytest.approx(linear((late - AROUND) * STEP_S, CLIMB_FULL_SHARE * NEED_S,
+                                                CLIMB_ZERO_SHARE * NEED_S))
     assert 0.0 < scored.climb < 1.0
     assert _score(reach_step=STEPS).climb == 0.0                  # never up there
     back = _score(capture_step=AROUND + 250)                       # 500 s
@@ -100,11 +95,21 @@ def test_a_capture_before_tau_reads_the_one_step_at_tau():
     assert _score(outcome="timeout", judged_to=AROUND + 10).separation == 0.0
 
 
+def test_a_climb_as_fast_as_the_executor_s_is_full_on_the_step_grid():
+    """The climb is read on the 2 s step grid (the first step at the approach altitude); the executor's own time is put
+    on it too, so a climb exactly as fast as the executor's own scores 1 however few seconds it needs (review of the
+    floor, 2026-10-02: a 1 s need read as 2 s scored 0)."""
+    for need_s in (1.0, 3.0, 5.0):
+        reach = AROUND + int(math.ceil(need_s / STEP_S))
+        assert _score(need_s=need_s, reach_step=reach).climb == 1.0
+    assert _score(need_s=1.0, reach_step=AROUND + 3).climb == 0.0                 # 6 s against 2 s on the grid
+
+
 def test_already_up_there_at_the_go_around_is_a_full_climb():
     heights, captured, margins = _flight()
     heights[:] = ENTRY_M + 50.0
-    scored = after_go_around(_said(), AROUND, "landed", True, margins, heights, np.full(STEPS, SPEED), captured,
-                             STEPS - 1, ENTRY_M, STEP_S, GO_AROUND_EXTRA_S, GO_AROUND_EXTRA_S)
+    scored = after_go_around(AROUND, "landed", True, margins, heights, captured, STEPS - 1, ENTRY_M, 0.0, STEP_S,
+                             GO_AROUND_EXTRA_S, GO_AROUND_EXTRA_S)
     assert scored.need_s == 0.0 and scored.climb == 1.0 and scored.climbed_s == 0.0
     assert scored.margin_min == pytest.approx(1.5)
 
@@ -114,8 +119,8 @@ def test_nothing_read_is_none_never_a_nan():
     None, never inf or NaN."""
     heights, captured, margins = _flight()
     margins[:] = np.inf
-    alone = after_go_around(_said(), AROUND, "landed", True, margins, heights, np.full(STEPS, SPEED), captured,
-                            STEPS - 1, ENTRY_M, STEP_S, GO_AROUND_EXTRA_S, GO_AROUND_EXTRA_S)
+    alone = after_go_around(AROUND, "landed", True, margins, heights, captured, STEPS - 1, ENTRY_M, NEED_S, STEP_S,
+                            GO_AROUND_EXTRA_S, GO_AROUND_EXTRA_S)
     assert alone.separation == 1.0 and alone.margin_min is None
     assert _score(outcome="timeout", judged_to=AROUND + 10).margin_min is None
     lost = _score(outcome="lost_separation")

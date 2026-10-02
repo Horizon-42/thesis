@@ -52,7 +52,8 @@ While a go-around is in force every climb — the go-around's own (§4.6, "desce
 altitude word above — is flown at the published minimum missed-approach climb gradient, `GO_AROUND_CLIMB_GRADIENT`,
 not the climb class's centre: the climb class has no angle of its own to say, and its centre (1.32° on the current
 spec, measured on arrivals that seldom climb) is under the regulation's floor (multi-aircraft design §6.6 step 8 item 7,
-the user's 2026-10-02 decision). Elsewhere the climb class flies its centre as before.
+the user's 2026-10-02 decision). Elsewhere the climb class flies its centre as before. How long the go-around's own climb
+takes to a height (`Vertical.go_around_climb_s`) is the go-around reward's climb reference (step 8 item 9).
 """
 
 from __future__ import annotations
@@ -111,7 +112,30 @@ class Vertical:
 
     def rate_limit(self, state: Kinematics) -> torch.Tensor:
         """γ̇_max, rad/s, at each flight's airspeed."""
-        return self.params.path_rate_factor * state.speed_mps * self.steepest_low_rad ** 2 / (2.0 * self.tolerance_m)
+        return self.rate_max(state.speed_mps)
+
+    def rate_max(self, speed_mps: torch.Tensor | float) -> torch.Tensor | float:
+        """γ̇_max, rad/s, at airspeed ``speed_mps`` (§5.1)."""
+        return self.params.path_rate_factor * speed_mps * self.steepest_low_rad ** 2 / (2.0 * self.tolerance_m)
+
+    def go_around_climb_s(self, height_m: float, gamma_rad: float, speed_mps: float, target_m: float) -> float:
+        """How long this law's own go-around climb — "descend to land" in force under a go-around and nothing else said:
+        the reference `GO_AROUND_CLIMB_RAD`, followed at ``τ_γ`` within ``±γ̇_max`` — takes to bring a flight at
+        ``height_m`` with path angle ``gamma_rad`` (climbing positive) and airspeed ``speed_mps`` (held: a go-around
+        holds the speed) up to ``target_m``; 0 at or above it. The vertical law alone, cycle by cycle, the height over a
+        cycle at its mean path angle: the go-around reward's climb reference (multi-aircraft design §6.6 step 8 item 9:
+        a flight just under the target still has to stop descending first)."""
+        if not (speed_mps > 0.0 and all(math.isfinite(x) for x in (height_m, gamma_rad, speed_mps, target_m))):
+            raise ValueError(f"a go-around climb from height {height_m}, path angle {gamma_rad}, airspeed {speed_mps} to "
+                             f"{target_m}: a finite state flying forward")
+        rate_max, dt, tau = float(self.rate_max(speed_mps)), self.params.cycle_s, self.params.path_time_constant_s
+        seconds = 0.0
+        while height_m < target_m:
+            gamma_rate = min(rate_max, max(-rate_max, (GO_AROUND_CLIMB_RAD - gamma_rad) / tau))
+            height_m += speed_mps * math.sin(gamma_rad + 0.5 * gamma_rate * dt) * dt
+            gamma_rad += gamma_rate * dt
+            seconds += dt
+        return seconds
 
     def rate(self, state: Kinematics, altitude_m: torch.Tensor, land: torch.Tensor, angle_class: torch.Tensor,
              angle_deg: torch.Tensor, issued: torch.Tensor, to_go_m: torch.Tensor, threshold_elevation_m: torch.Tensor,

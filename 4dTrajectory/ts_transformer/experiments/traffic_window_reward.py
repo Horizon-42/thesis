@@ -119,7 +119,7 @@ from ts_transformer.prior.scene import N_LOOK, Landings
 from ts_transformer.prior.train import RewardConfig
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-SCHEMA = "ts-traffic-window-reward-v2"
+SCHEMA = "ts-traffic-window-reward-v3"
 RUNNER = "ts_transformer.experiments.traffic_window_reward"
 #: Host memory a speaking process holds beyond what it shares with the parent, and what the parent grows by in a round
 #: (a round's windows built, the pass), GB — measured on the formal run (2026-09-30: a speaking process's own memory for a

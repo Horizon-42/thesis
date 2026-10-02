@@ -441,6 +441,10 @@ class WindowLoop:
         #: each aircraft's time limit (a go-around's extended) and the own step of its first go-around word (−1: none)
         self.limit_s = np.array(list(limits), dtype=np.float64)
         self.go_around_step = np.full(count, -1, dtype=np.int64)
+        #: at its first go-around: the runway in force (−1: none) and the executor's height, path angle and airspeed —
+        #: what the reward's H reads (`traffic_window_generation.go_around_fields`)
+        self.go_around_runway = np.full(count, -1, dtype=np.int64)
+        self.go_around_state = np.full((count, 3), np.nan)
         #: each aircraft's tightest separation margin at each of its own steps judged (`separation.margins`; inf: none)
         self.margin = np.full((count, max_rows - N_LOOK), np.inf)
         #: each aircraft's executor (one: 0) and its place there
@@ -557,10 +561,15 @@ class WindowLoop:
 
     def _go_around(self, going: np.ndarray, k: np.ndarray) -> None:
         """The aircraft ``going`` said their first go-around at own steps ``k[going]``: their `extra_s` more time, on their
-        executor and their cohort's own cycles (module docstring, 5.)."""
+        executor and their cohort's own cycles (module docstring, 5.); the runway in force and the executor's state
+        there, for the reward's H (`traffic_go_around`)."""
         self.go_around_step[going] = k[going]
         self.limit_s[going] += self.extra_s[going]
         executor = self.executors[0][2]
+        now = executor.now()
+        state = np.stack([x.cpu().numpy() for x in (now.height_m, now.gamma_rad, now.speed_mps)], axis=1)
+        self.go_around_runway[going] = self.speaker.value[going, RUNWAY] - 1
+        self.go_around_state[going] = state[self.place[going]]
         seconds = np.zeros(len(self.place))
         seconds[self.place[going]] = self.extra_s[going]
         executor.extend_time_limit(torch.as_tensor(seconds))
