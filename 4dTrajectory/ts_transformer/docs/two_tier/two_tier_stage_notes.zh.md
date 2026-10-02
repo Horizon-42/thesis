@@ -26,7 +26,7 @@
 | 阶段 | 状态 | 在哪 |
 |---|---|---|
 | 1 词表 | **定稿**：读法 `instruction-v3`（航向词逐行标注、5° 一档、提前 4 s 说）；规格 `145d6911e75b`，在按运行日划分的训练集上测量 | `docs/two_tier/instruction_vocabulary_design.zh.md` |
-| 2 标注器 | **完成**：现行句子产物 `outputs/POOLED/instruction_language/v5_20260926/`（§5；标注器源码指纹 `55f6f0bcd6ee`）；测试日不打开 | 包 `instructions/` |
+| 2 标注器 | **完成**：现行句子产物 `outputs/POOLED/instruction_language/v6_20261002/`（行取在 UTC 偶数秒上，规格沿用 v5，§9；分支 `dev-scene-time-grid` 合并后现行）；v5 `v5_20260926/` 仍能打开（§5）；标注器源码指纹 `55f6f0bcd6ee`；测试日不打开 | 包 `instructions/` |
 | 3 执行器 | **2026-10-01 改成按航迹核对、三种执行方式，已合并**（`e2ec272b`，用户让我合并；执行器设计 §12.2–§12.5：一批单机、一批多机（各架从自己的周期起，`halt`）、单条（`autopilot/single.py`，前端 live 用）；规格旁边 `conformance/` 存 250 架参照航迹，代码改了跑 R42 `executor_conformance` 约 30 s，过了写 `passed-<代码指纹前 12 位>.json`，现行代码 `passed-a5b1a9a99a6d.json`；窗口闭环一批一个执行器，正式批次快 37 %、逐行相同）。**完成，只用词表**，词表以外只读被指跑道公布的 TCH 和下滑角（"下降至落地"入口前不低于下滑道下沿，截获后在下滑道下方平飞）；每种机型按公布的最大着陆重量飞（§2）。现行规格 `outputs/POOLED/executor/v11_20260927/`（p = 5°/s，落地按跑道本身判，两个新结局） | `docs/two_tier/executor_design.zh.md`（2026-09-26 按实现重写，§14 关键代码索引）；包 `autopilot/`（`README.md`） |
 | 4 回放门 | v11 训练集、验证集每格都过：训练集落地 99.63 %、词在包络内 97.54 %、evaluation 98.30 %；验证集 99.90 / 97.50 / 98.46 % | 执行器设计 §11，[v11 读数](readouts/2026-09-27_executor_v11_readout.zh.md) |
 | 5 先验 | 第三版第 0 步、第 1 步（单机）、单机自由生成完成；**base 模型** `prior/v3_step1_20260924/full_s1337`（§3） | `docs/two_tier/prior_design.zh.md`、`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md` §3–§5 |
@@ -43,7 +43,8 @@
 | 产物 | 路径 | 说明 |
 |---|---|---|
 | 运行日划分 | 仓库内 `4dTrajectory/ts_transformer/data/day_split_20260924.json` | 90 天：测试 14 / 验证 14 / 内部选择 9 / 训练 53，种子 1337；一架航班的运行日 = 落地日（UTC − 9 h） |
-| 句子产物 | `outputs/POOLED/instruction_language/v5_20260926/` | 2026-09-26 重建（§5）；与 v4 同一规格、同一标注器 |
+| 句子产物 | `outputs/POOLED/instruction_language/v6_20261002/` | 2026-10-02 建（`outputs/POOLED/rebuild_20261002/run.sh`，`36c7cf1d`，约 3 分钟）：每一行取在 UTC 偶数秒上（多机设计 §2.1）；规格 `145d6911e75b` 从 v5 原样沿用（`spec_from.json`）；航班数与 v5 相同（训练 44,703 / 选择 6,913 / 验证 10,746），第 0 行比 v5 晚平均 0.73 s（最多 2.0 s），约三分之一的航班少一行；标注：训练 44,375 / 拒绝 328（v5 44,363 / 340），选择 6,841 / 72，验证 10,640 / 106。执行器 v11 在 v6 上照常打开；同样 261 架训练航班照句子飞，v5、v6 落地 99.6 / 100 %，照句子飞完都是 77.8 %，词在包络内 97.50 / 97.43 % |
+| 句子产物 v5 | `outputs/POOLED/instruction_language/v5_20260926/` | 2026-09-26 重建（§5）；行从各架第一个记录点起。单机模型、执行器规格 v11、前端 Training 集都建在它上面，照样能打开、能逐行重建；场景拒绝它 |
 | 执行器规格 | `outputs/POOLED/executor/v11_20260927/`（`replay-train/`、`replay-val/`） | 规格指纹 `33300cd6983b`（p 改了，与 v5–v10 的 `0d6a68a92c6f` 不同），源码指纹 `a0a6e20bdd84`（按代码逻辑算，`7fedeb8e`）；现行代码拒绝 v10 及以前 |
 | base 模型 | `outputs/POOLED/prior/v3_step1_20260924/full_s1337/` | 只用数据训出，`ts-prior-checkpoint-v3`；对 v5 照样能加载（同一规格）。**不重训**（用户 2026-09-26） |
 | landing（第一阶段，采用） | `outputs/POOLED/prior/v3_rl_20260925/grpo_s1337/round_01/` | 第二阶段的起点 |
@@ -370,6 +371,9 @@
   （只给句子产物用）；重建按存储的第 0 行取（v5、v6 都逐行重建）；`instruction_spec --spec-from`（v6 沿用 v5 的规格，标注器指纹不变）；
   场景删掉挂和推，行不在时间步上的产物按名字拒绝；扩充只挪整数个时间步；删掉那张挂步图。然后建句子产物 v6
   （`outputs/POOLED/rebuild_20261002/run.sh`）并核对，执行器 v11 在新代码上重新核对（`data/dataset.py` 在执行器指纹里）。
+  **做完**（`52cfecbc` + `36c7cf1d`；opus 审查过：数据平面一条时钟、默认取行逐位不变、v5 / v6 都逐行重建、300 个对齐场景上边特征与旧代码
+  逐位相同）：执行器核对在 v5 上过了（`passed-88fdd76ce3e0.json`，批量 0 m、单条 1e-8 m）；v6 建好（数见 §1）；base / landing / augmented
+  在 v6 上能打开。第一次建 v6（`52cfecbc`）把工作树的绝对路径写进了 `spec_from.json`，删掉、在 `36c7cf1d` 重建（`rebuild_20261002/NOTE.txt`）。
 - **第 2 阶段**（先给用户计划和显卡时间，确认后再跑）：在 v6 上重建场景样本，重训多机模型（traffic，M4 窗口），重跑 M3、窗口读数、7.7、
   第 8 步的小规模测试和难事件。已存的 scene / traffic 先验在新代码上打不开（边特征指纹变了）；单机的 base / landing / augmented 照常打开。
 
