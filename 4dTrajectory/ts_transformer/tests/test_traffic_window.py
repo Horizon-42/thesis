@@ -1071,8 +1071,9 @@ def test_a_go_around_gives_its_sentence_more_time_and_its_margins_are_kept(tmp_p
 def test_a_probe_watches_an_established_aircraft_speaking_its_own_words_until_its_margin_is_under_the_trigger(
         tmp_path, monkeypatch):
     """Multi-aircraft design §6.6 step 8 item 10: a probe says a go-around for an aircraft it watches — speaking its own
-    words, cleared, established on its final (its executor's capture), no go-around said yet — at the first step its
-    tightest margin at its step before was under the trigger (an infinite one: at once); never for one not probed."""
+    words, cleared, established on its final (its executor's capture) and under its approach altitude, no go-around said
+    yet — at the first step its tightest margin at its step before was under the trigger (an infinite one: at once);
+    never for one not probed."""
     import numpy as np
 
     from ts_transformer.experiments.traffic_window import Given
@@ -1087,9 +1088,10 @@ def test_a_probe_watches_an_established_aircraft_speaking_its_own_words_until_it
         loop.step()
     k = loop.speaker.step - loop.start - 9                      # each aircraft's own step about to be said (N_LOOK 8)
     speaking = k >= 1
-    for i in range(count):                                      # every one cleared, established, its margin 1.2 before
+    for i in range(count):                  # every one cleared, established, under the approach altitude, margin 1.2
         loop.speaker.value[i, APPROACH] = APPROACH_CLEARED + 1
         loop.states[i][-1].captured = True
+        loop.states[i][-1].height_m = 0.0
         loop.margin[i, max(int(k[i]) - 1, 0)] = 1.2
     loop.go_around_step[:] = -1
     expected = np.where(speaking & (np.arange(count) < count - 1), APPROACH_GO_AROUND + 1, -1)
@@ -1101,8 +1103,9 @@ def test_a_probe_watches_an_established_aircraft_speaking_its_own_words_until_it
     loop.go_around_step[3] = 0
     given = np.full((count, 6), -1)
     given[4] = 0                                                # its line given this step: its own words are not
+    loop.states[5][-1].height_m = 1e5                           # above its approach altitude: before the FAF
     got = loop._probes(k, speaking, given)[:, APPROACH]
-    assert (got[:5] == -1).all() and (got[5:] == expected[5:]).all()
+    assert (got[:6] == -1).all() and (got[6:] == expected[6:]).all()
     # an infinite trigger: whatever the margin
     loop.probe_margin = math.inf
     assert loop._probes(k, speaking, None)[0, APPROACH] == APPROACH_GO_AROUND + 1

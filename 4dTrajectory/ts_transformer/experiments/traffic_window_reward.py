@@ -502,7 +502,7 @@ def round_summary(round_: WindowRound, spoken: WindowSentences, trained: np.ndar
             "probed": shares([r for r in rows if r["probed"]]) if any(r["probed"] for r in rows) else None,
             "go_arounds": {"said_by_the_model": sum(r["go_around"] is not None and r["forced"] is None for r in rows),
                            "said_by_a_probe": sum(r["forced"] is not None for r in rows),
-                           "probes_learned": sum(r["forced"] is not None and k in taught and advantages[k] > 0.0
+                           "probes_learned": sum(bool(r["forced"] is not None and k in taught and advantages[k] > 0.0)
                                                  for k, r in enumerate(rows))}}
 
 

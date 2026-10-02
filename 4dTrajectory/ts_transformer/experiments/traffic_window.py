@@ -37,7 +37,7 @@ from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import Spoken
 from ts_transformer.experiments.prior_free_generation import BELOW_GLIDEPATH
 from ts_transformer.experiments.traffic_census import Track
-from ts_transformer.experiments.traffic_go_around import GO_AROUND_EXTRA_S, PROBE_MARGIN
+from ts_transformer.experiments.traffic_go_around import GO_AROUND_EXTRA_S, PROBE_MARGIN, approach_altitude_m
 from ts_transformer.experiments.traffic_labelled import own_end
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION, Controlled, Judging, Run, join
 from ts_transformer.experiments.traffic_scene_data import FlightRows
@@ -340,8 +340,8 @@ class WindowLoop:
     (`Given`; None: spoken throughout) — said in its round, neither sampled nor masked; ``go_around_extra_s``: the time a
     go-around adds to its sentence (0: none — as the one-aircraft scene loop, whose module the traffic prior's edge-source
     hash holds, flies it); ``probing``: the aircraft a probe watches (multi-aircraft design §6.6 step 8 item 10; None:
-    none) — once cleared and established on its final, and while it has said no go-around, a go-around is said for it at
-    the first step its tightest margin at its step before was under ``probe_margin`` (`WindowSpeaker.speak`'s ``forced``:
+    none) — once cleared, established on its final and under its approach altitude, and while it has said no go-around,
+    a go-around is said for it at the first step its tightest margin at its step before was under ``probe_margin`` (`WindowSpeaker.speak`'s ``forced``:
     said in place of its draw; an infinite ``probe_margin``: at its first such step, alone or not — the longest sentences,
     a preflight's).
 
@@ -535,12 +535,19 @@ class WindowLoop:
 
     def _probes(self, k: np.ndarray, speaking: np.ndarray, given: np.ndarray | None) -> np.ndarray:
         """``[N, 6]``: the go-around a probe says this step for each aircraft it watches (class docstring), −1 elsewhere:
-        speaking its own words (not given), cleared and established on its final (the executor's capture: a go-around
-        abandons an approach to landing — one said before it is mostly flown straight back onto the line), no go-around
-        said yet, and its tightest margin at its own step before under ``probe_margin``."""
+        speaking its own words (not given), cleared, established on its final (the executor's capture) and under the
+        approach altitude of the runway in force (`traffic_go_around.approach_altitude_m`: inside the FAF on the
+        glidepath — a go-around abandons an approach to landing; one said before is flown straight back onto the line,
+        small tests ② / ②b), no go-around said yet, and its tightest margin at its own step before under
+        ``probe_margin``."""
         out = np.full((len(k), 6), -1, dtype=np.int64)
         before = np.clip(k - 1, 0, self.margin.shape[1] - 1)
         captured = np.array([bool(states[-1].captured) if states else False for states in self.states])
+        low = np.zeros(len(k), dtype=bool)
+        for i in np.flatnonzero(captured & self.probing):
+            pointer = int(self.speaker.value[i, RUNWAY]) - 1
+            low[i] = self.states[i][-1].height_m < approach_altitude_m(self.geometries[i], pointer)
+        captured &= low
         own = np.ones(len(k), dtype=bool) if given is None else given[:, 0] < 0
         watch = (self.probing & speaking & own & captured & (self.go_around_step < 0) & (k >= 1)
                  & (self.speaker.value[:, APPROACH] == APPROACH_CLEARED + 1)
