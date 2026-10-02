@@ -1,15 +1,22 @@
-"""Two window readouts of the same windows, aircraft by aircraft (multi-aircraft design §6.6 step 7; the user 2026-10-01:
-the kept M4-in-windows round against its start on the val windows).
+"""Two models' window readouts of the same windows, aircraft by aircraft (multi-aircraft design §6.6 step 7; the user
+2026-10-01: the kept M4-in-windows round against its start on the val windows; renamed from ``traffic_window_pair``
+2026-10-03: it compares two models, it does not check code).
 
-Reads two `traffic_window_generation` (R34) outputs — ``--first`` and ``--second``, typically two priors — and refuses
-them unless they read the SAME windows the SAME way with the SAME code: every field of their ``window_generation.json``
-that decides what is drawn and how it is read (`SAME`: the code's commit, the split, how a window's aircraft are commanded,
-the draw, the windows an airport, the
-samples, the temperature, the seed, the augmentation, the executor spec, the sentence artefact, the scenes, the history,
-the readings, the batches and their size, the model's sources read) equal; the same rows (window, aircraft, sample, source) in both, whose fields no
-model decides (`MODEL_FREE`) are equal; and the sources no model reads — the labelled words and the record — equal row for
-row (they also read the prior's procedure masks: two priors under other masks differ there). Each batch draws from its
-own streams, so the two read every window from the same random numbers as far as their words agree.
+Reads two `traffic_window_generation` (R34) readouts — ``--first`` and ``--second``, two priors — and compares them only
+when three things hold, the same for any two readouts (design §6.6 step 9.9.3):
+
+1. **the configuration**: both ``config.json`` read by the readouts' one loader (`traffic_window_generation.load_config`)
+   are equal in every key but the model's (`COMPARED`) — the windows, the draw, the samples, the seed, the
+   augmentation, the executor spec, the sentence artefact, the sources, the probes, the batch size;
+2. **the code version** (`evidence`): their ``code.json`` are equal and neither checkout was dirty, or a conformance
+   record (`traffic_window_conformance`) shows one readout read the same under the other's code version — its record
+   names that readout and its code version is the other's ``code.json``;
+3. **the rows**: the same rows (window, aircraft, sample, source) in both, whose fields no model decides
+   (`MODEL_FREE`) are equal, and the sources no model reads — the labelled words and the record — equal row for row
+   (they also read the prior's procedure masks: two priors under other masks differ there).
+
+Each batch draws from its own streams, so the two read every window from the same random numbers as far as their words
+agree. The result names the code version's evidence.
 
 A row STARTING IN A LOSS depends on the model too: an aircraft that enters later is judged through its observed rows
 against the commanded aircraft ahead of it, flown by the model. As the M4 round choice pairs its rounds
@@ -23,10 +30,10 @@ minutes, 20 minutes long), share flights and replayed traffic, and a day's runwa
 all; beside it, the reward's error read per sentence as the M4 round choice reads its pairs. Counted per sentence: the
 losses of separation the second avoids and the ones it adds.
 
-    python run_ts.py traffic_window_pair --first 4dTrajectory/outputs/POOLED/traffic/<readout> \\
+    python run_ts.py traffic_window_compare --first 4dTrajectory/outputs/POOLED/traffic/<readout> \\
         --second 4dTrajectory/outputs/POOLED/traffic/<readout> [--out <new directory>]
 
-``--out`` writes ``traffic_window_pair.json`` (`SCHEMA`).
+``--out`` writes ``traffic_window_compare.json`` (`SCHEMA`).
 """
 
 from __future__ import annotations
@@ -43,21 +50,23 @@ from typing import Any, Callable, Mapping, Sequence
 import numpy as np
 
 from ts_transformer.data.day_split import operational_day
+from ts_transformer.experiments.code_version import KEYS as CODE_KEYS
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION
 from ts_transformer.experiments.traffic_rounds import paired_difference
 from ts_transformer.experiments.traffic_speaking import INSERTED
 from ts_transformer.experiments.traffic_window_augment import KINDS, ROLES
+from ts_transformer.experiments.traffic_window_conformance import passed_records
 from ts_transformer.experiments.traffic_window_generation import (
-    MODEL_SOURCES, SCHEMA as READOUT_SCHEMA, SIZES, size_of,
+    CODE_FILE, CONFIG_KEYS, MODEL_SOURCES, SIZES, ReadoutConfig, read_aircraft, readout_config, size_of,
 )
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, repo_relative
 
-SCHEMA = "ts-traffic-window-pair-v1"
-#: What decides which windows are read and how: equal in both readouts, or they do not pair.
-SAME = ("schema", "git", "split", "commanded", "drawn", "windows_per_airport", "samples", "temperature", "seed",
-        "augment_seed", "augmenting", "executor", "instructions", "scenes", "history_s", "readings", "aircraft_steps",
-        "batches", "model_sources", "probes")
+SCHEMA = "ts-traffic-window-compare-v1"
+OUT_FILE = "traffic_window_compare.json"
+#: The configuration keys two compared readouts may differ in: the model's. Every other key is equal, or they do not
+#: compare.
+COMPARED = ("prior", "prior_checkpoint_sha256")
 #: A model row's fields no model decides: equal in both readouts.
 MODEL_FREE = ("airport", "commanded", "observed_runway", "augmented", "role", "batch")
 #: A flight's identity ends in its landing time (`flight_scenarios.identity.flight_key`): what its operating day is read from.
@@ -73,26 +82,49 @@ MEASURES: dict[str, Callable[[Mapping[str, Any]], float]] = {
 }
 
 
-def read(directory: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    header = json.loads((directory / "window_generation.json").read_text(encoding="utf-8"))
-    if header["schema"] != READOUT_SCHEMA:
-        raise ValueError(f"{directory} is {header['schema']!r}, not a {READOUT_SCHEMA} window readout")
-    with (directory / header["aircraft_file"]).open(encoding="utf-8") as handle:
-        rows = [json.loads(line) for line in handle]
-    return header, rows
+def read_code(directory: Path) -> dict[str, Any]:
+    """A readout's ``code.json``, refused unless it has exactly `code_version.KEYS`."""
+    code = json.loads((directory / CODE_FILE).read_text(encoding="utf-8"))
+    if list(code) != list(CODE_KEYS):
+        raise ValueError(f"{directory / CODE_FILE} has keys {list(code)}, not {list(CODE_KEYS)}")
+    return code
+
+
+def require_same_config(first: ReadoutConfig, second: ReadoutConfig) -> None:
+    """Rule 1 (module docstring): every key but `COMPARED` equal."""
+    differing = [name for name in CONFIG_KEYS if name not in COMPARED and getattr(first, name) != getattr(second, name)]
+    if differing:
+        raise ValueError(f"the two readouts' configurations differ in {differing}, not only in the model {list(COMPARED)}")
+
+
+def evidence(first_dir: Path, first_code: Mapping[str, Any], second_dir: Path, second_code: Mapping[str, Any]
+             ) -> dict[str, Any]:
+    """Rule 2 (module docstring): why the two readouts' code versions read the same — the same clean code version, or a
+    conformance record of one readout under the other's code version (the first's record tried first)."""
+    if first_code == second_code and not first_code["dirty"]:
+        return {"kind": "same code version", "commit": first_code["commit"]}
+    for readout, other_code in ((first_dir, second_code), (second_dir, first_code)):
+        for path, record in passed_records(readout):
+            if record["readout"] == repo_relative(readout) and record["code"] == other_code:
+                return {"kind": "conformance record", "record": repo_relative(path), "readout": record["readout"],
+                        "batches": record["batches"], "checked_batches": len(record["checked_batches"]),
+                        "rows_compared": record["rows_compared"]}
+    differing = [name for name in CODE_KEYS if first_code[name] != second_code[name]]
+    dirty = [name for name, code in (("first", first_code), ("second", second_code)) if code["dirty"]]
+    raise ValueError(
+        f"the two readouts' code versions differ in {differing}{f' (dirty: {dirty})' if dirty else ''} and no "
+        f"conformance record shows either reads the same under the other's: check {repo_relative(first_dir)} at the "
+        f"second's code ({second_code['commit'][:12]}) or {repo_relative(second_dir)} at the first's "
+        f"({first_code['commit'][:12]}) with `run_ts.py traffic_window_conformance` on a clean checkout")
 
 
 def key_of(row: Mapping[str, Any]) -> tuple[int, str, Any, str]:
     return row["window"], row["dataset_id"], row["sample"], row["source"]
 
 
-def require_pairs(first: tuple[dict[str, Any], list[dict[str, Any]]],
-                  second: tuple[dict[str, Any], list[dict[str, Any]]]) -> dict[tuple, tuple[dict, dict]]:
-    """The two readouts' rows paired by key, refused unless they read the same windows the same way (module docstring)."""
-    (head_a, rows_a), (head_b, rows_b) = first, second
-    differing = [name for name in SAME if head_a[name] != head_b[name]]
-    if differing:
-        raise ValueError(f"the two readouts did not read the same windows the same way: {differing} differ")
+def require_same_rows(rows_a: Sequence[dict[str, Any]], rows_b: Sequence[dict[str, Any]]
+                      ) -> dict[tuple, tuple[dict, dict]]:
+    """Rule 3 (module docstring): the two readouts' model rows paired by key."""
     by_a, by_b = {key_of(r): r for r in rows_a}, {key_of(r): r for r in rows_b}
     if len(by_a) != len(rows_a) or len(by_b) != len(rows_b):
         raise ValueError("a readout holds a (window, aircraft, sample, source) twice")
@@ -200,23 +232,27 @@ def groups(pairs: Mapping[tuple, tuple[dict, dict]], augmented: bool) -> dict[st
     return out
 
 
-def pair(first_dir: Path, second_dir: Path) -> dict[str, Any]:
-    first, second = read(first_dir), read(second_dir)
-    pairs = require_pairs(first, second)
+def compare_readouts(first_dir: Path, second_dir: Path) -> dict[str, Any]:
+    """The two readouts compared (module docstring), refused unless rules 1–3 hold."""
+    config_a, config_b = readout_config(first_dir), readout_config(second_dir)
+    require_same_config(config_a, config_b)
+    proof = evidence(first_dir, read_code(first_dir), second_dir, read_code(second_dir))
+    pairs = require_same_rows(read_aircraft(first_dir), read_aircraft(second_dir))
     clusters = cluster_of(pairs)
-    augmented = first[0]["augment_seed"] is not None
     report: dict[str, Any] = {}
     for source in MODEL_SOURCES:
         mine = {k: p for k, p in pairs.items() if k[3] == source}
         if mine:
             report[source] = {group: {name: compare(part, clusters) for name, part in parts.items()}
-                              for group, parts in groups(mine, augmented).items()}
+                              for group, parts in groups(mine, config_a.augment_seed is not None).items()}
     return {"schema": SCHEMA, "written_utc": utc_now(),
-            "first": {"directory": repo_relative(first_dir), "prior": first[0]["prior"]},
-            "second": {"directory": repo_relative(second_dir), "prior": second[0]["prior"]},
-            "same": {name: first[0][name] for name in ("split", "windows_per_airport", "samples", "seed",
-                                                        "augment_seed")},
-            "measures": list(MEASURES), "report": report}
+            "first": {"directory": repo_relative(first_dir), "prior": config_a.prior,
+                      "prior_checkpoint_sha256": config_a.prior_checkpoint_sha256},
+            "second": {"directory": repo_relative(second_dir), "prior": config_b.prior,
+                       "prior_checkpoint_sha256": config_b.prior_checkpoint_sha256},
+            "same": {name: getattr(config_a, name) for name in ("split", "commanded", "windows_per_airport", "samples",
+                                                                 "seed", "augment_seed")},
+            "code_evidence": proof, "measures": list(MEASURES), "report": report}
 
 
 def _line(name: str, entry: Mapping[str, Any]) -> str:
@@ -241,16 +277,17 @@ def _line(name: str, entry: Mapping[str, Any]) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--first", type=Path, required=True, help="a window readout (R34) directory")
-    parser.add_argument("--second", type=Path, required=True, help="another, of the same windows read the same way")
-    parser.add_argument("--out", type=Path, default=None, help="a new directory for traffic_window_pair.json")
+    parser.add_argument("--second", type=Path, required=True, help="another model's, of the same windows read the same "
+                        "way")
+    parser.add_argument("--out", type=Path, default=None, help=f"a new directory for {OUT_FILE}")
     args = parser.parse_args(argv)
     first, second = ((p if p.is_absolute() else REPO_ROOT / p) for p in (args.first, args.second))
     out = None if args.out is None else (args.out if args.out.is_absolute() else REPO_ROOT / args.out)
     if out is not None and out.exists():
-        parser.error(f"{out} exists: the pair is written into a new directory")
-    result = pair(first, second)
-    print(f"second − first: {result['second']['prior']['directory']} − {result['first']['prior']['directory']} "
-          f"({result['same']})")
+        parser.error(f"{out} exists: the comparison is written into a new directory")
+    result = compare_readouts(first, second)
+    print(f"second − first: {result['second']['prior']} − {result['first']['prior']} ({result['same']}); "
+          f"code: {result['code_evidence']}")
     for source, parts in result["report"].items():
         print(f"{source}:")
         for group, entries in parts.items():
@@ -258,8 +295,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(_line(name if group == "pooled" else f"{group[:4]} {name}", entry))
     if out is not None:
         out.mkdir(parents=True)
-        write_json_atomic(out / "traffic_window_pair.json", result, allow_nan=False)
-        print(f"→ {out / 'traffic_window_pair.json'}")
+        write_json_atomic(out / OUT_FILE, result, allow_nan=False)
+        print(f"→ {out / OUT_FILE}")
     return 0
 
 

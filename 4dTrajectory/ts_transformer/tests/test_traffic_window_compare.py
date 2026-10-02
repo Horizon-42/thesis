@@ -1,6 +1,7 @@
-"""Two window readouts of the same windows paired aircraft by aircraft (`experiments/traffic_window_pair.py`): the
-differences and their errors on rows whose answers are known, every refusal of readouts that did not read the same
-windows the same way, the groups, and the file."""
+"""Two models' window readouts of the same windows compared aircraft by aircraft (`experiments/traffic_window_compare.py`):
+the differences and their errors on rows whose answers are known; the three rules (multi-aircraft design §6.6 step
+9.9.3) — configurations equal but for the model, the code version's evidence (the same clean code version, or a
+conformance record either way), the same rows; the groups, and the file."""
 
 from __future__ import annotations
 
@@ -9,26 +10,24 @@ import math
 
 import pytest
 
-from ts_transformer.experiments import traffic_window_pair as pair
+from ts_transformer.experiments import traffic_window_compare as compare
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION
-from ts_transformer.experiments.traffic_window_generation import SCHEMA as READOUT_SCHEMA
 
 
 #: flight identities ending in their landing stamps (`flight_scenarios.identity.flight_key`): window 0 on one operating
 #: day, window 1 on the next
 A, B, C = "KXXX:A1_09_aaa_20260601T120000Z", "KXXX:B1_09_bbb_20260601T121000Z", "KXXX:C1_09_ccc_20260602T120000Z"
+CODE = {"commit": "c" * 40, "dirty": False, "python": "3.12.8", "torch": "2.7.1", "cuda": "12.8", "gpu": "RTX 4060",
+        "device": "cuda", "constants": {"history_s": 1200.0, "readings": {"ends": "visual", "beside": "ifr"}}}
 
 
-def _header(**changes):
-    header = {"schema": READOUT_SCHEMA, "git": {"head": "h", "dirty": False}, "split": "val", "commanded": "every",
-              "drawn": {"seed": 1337}, "windows_per_airport": 2, "samples": 2,
-              "temperature": 1.0, "seed": 1337, "augment_seed": None, "augmenting": None,
-              "executor": {"sha256": "e"}, "instructions": "i", "scenes": {"n": 1}, "history_s": 1200.0,
-              "readings": {"ends": "visual"}, "aircraft_steps": 100000, "batches": 1, "model_sources": ["scene", "alone"],
-              "probes": {"samples": 0, "margin": 1.5},
-              "prior": {"directory": "p"},
-              "aircraft_file": "aircraft.jsonl"}
-    return {**header, **changes}
+def _config(**changes):
+    from ts_transformer.experiments.traffic_window_generation import PROGRAM, load_config
+
+    return load_config({"program": PROGRAM, "prior": "4dTrajectory/outputs/POOLED/prior/p", "prior_checkpoint_sha256": "a",
+                        "executor": "4dTrajectory/outputs/POOLED/executor/e", "executor_sha256": "e",
+                        "instructions": "4dTrajectory/outputs/POOLED/instruction_language/i", "split": "val",
+                        "windows_per_airport": 2, "samples": 2, **changes}).as_json()
 
 
 def _row(window, key, sample, source, *, lost=False, landed=True, airport="KXXX", commanded=1, start_lost=False,
@@ -40,10 +39,15 @@ def _row(window, key, sample, source, *, lost=False, landed=True, airport="KXXX"
             "augmented": augmented, "role": role, "batch": 0}
 
 
-def _write(directory, rows, **header):
+def _write(directory, rows, code=None, **config):
+    """A readout directory of the new format: its configuration (`_config` with ``config``), code version (`CODE`, or
+    ``code``) and rows."""
+    from ts_transformer.experiments import traffic_window_generation as runner
+
     directory.mkdir()
-    (directory / "window_generation.json").write_text(json.dumps(_header(**header)))
-    (directory / "aircraft.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    (directory / runner.CONFIG_FILE).write_text(json.dumps(_config(**config)))
+    (directory / runner.CODE_FILE).write_text(json.dumps(CODE if code is None else code))
+    (directory / runner.AIRCRAFT_FILE).write_text("".join(json.dumps(r) + "\n" for r in rows))
     return directory
 
 
@@ -58,18 +62,20 @@ def _readouts(tmp_path, second_lost):
     first, second = [], []
     for window, key, commanded in keys:
         for sample in (0, 1):
-            for source in pair.MODEL_SOURCES:
+            for source in compare.MODEL_SOURCES:
                 first.append(_row(window, key, sample, source, commanded=commanded))
                 second.append(_row(window, key, sample, source, commanded=commanded,
                                    lost=(window, key, sample, source) in second_lost))
         first += _fixed(window, key)
         second += _fixed(window, key)
-    return _write(tmp_path / "first", first), _write(tmp_path / "second", second, prior={"directory": "q"})
+    return _write(tmp_path / "first", first), _write(tmp_path / "second", second,
+                                                     prior="4dTrajectory/outputs/POOLED/prior/q",
+                                                     prior_checkpoint_sha256="b")
 
 
 def test_the_difference_is_second_less_first_and_its_error_clustered_by_airport_and_day(tmp_path):
     first, second = _readouts(tmp_path, {(0, A, 0, "scene"), (0, A, 1, "scene"), (1, C, 0, "scene")})
-    result = pair.pair(first, second)
+    result = compare.compare_readouts(first, second)
     scene = result["report"]["scene"]["pooled"]["all"]
     assert (scene["aircraft"], scene["sentences"], scene["clusters"]) == (3, 6, 2)
     # per sentence: window 0 (day 1) −1, −1, 0, 0; window 1 (day 2) −1, 0 → mean −0.5 = 0.5 − 1.0
@@ -87,31 +93,99 @@ def test_the_difference_is_second_less_first_and_its_error_clustered_by_airport_
     assert set(sizes) == {"1", "2"} and sizes["1"]["aircraft"] == 1 and sizes["2"]["aircraft"] == 2
 
 
-def test_readouts_that_did_not_read_the_same_windows_the_same_way_are_refused(tmp_path):
+def test_readouts_whose_configurations_differ_in_more_than_the_model_are_refused(tmp_path):
+    from ts_transformer.experiments import traffic_window_generation as runner
+
     first, second = _readouts(tmp_path, set())
-    for name, value in (("samples", 4), ("seed", 7), ("augment_seed", 7919), ("executor", {"sha256": "f"}),
-                        ("git", {"head": "other", "dirty": False}), ("model_sources", ["scene"]),
-                        ("probes", {"samples": 2, "margin": 1.5}), ("commanded", "one")):
-        header = json.loads((second / "window_generation.json").read_text())
-        (second / "window_generation.json").write_text(json.dumps({**header, name: value}))
-        with pytest.raises(ValueError, match=f"\\['{name}'\\] differ"):
-            pair.pair(first, second)
-        (second / "window_generation.json").write_text(json.dumps(header))
-    rows = (second / "aircraft.jsonl").read_text().splitlines()
-    (second / "aircraft.jsonl").write_text("\n".join(rows[1:]) + "\n")
+    written = json.loads((second / runner.CONFIG_FILE).read_text())
+    for name, value in (("samples", 4), ("seed", 7), ("augment_seed", 7919), ("executor_sha256", "f"),
+                        ("model_sources", ["scene"]), ("probe_samples", 2), ("commanded", "one"),
+                        ("temperature", 0.5), ("aircraft_steps", 50_000), ("split", "select")):
+        (second / runner.CONFIG_FILE).write_text(json.dumps({**written, name: value}))
+        with pytest.raises(ValueError, match=f"configurations differ in \\['{name}'\\], not only in the model"):
+            compare.compare_readouts(first, second)
+    (second / runner.CONFIG_FILE).write_text(json.dumps(written))
+    # an old readout's single header is refused by name
+    (first / runner.CONFIG_FILE).unlink()
+    with pytest.raises(ValueError, match="holds no config.json"):
+        compare.compare_readouts(first, second)
+
+
+def test_the_rows_must_be_the_same_windows_read_the_same_way(tmp_path):
+    from ts_transformer.experiments import traffic_window_generation as runner
+
+    first, second = _readouts(tmp_path, set())
+    rows = (second / runner.AIRCRAFT_FILE).read_text().splitlines()
+    (second / runner.AIRCRAFT_FILE).write_text("\n".join(rows[1:]) + "\n")
     with pytest.raises(ValueError, match="other rows: 1 only in the first"):
-        pair.pair(first, second)
+        compare.compare_readouts(first, second)
     edited = [json.loads(line) for line in rows]
     edited[0]["observed_runway"] = 1
-    (second / "aircraft.jsonl").write_text("".join(json.dumps(r) + "\n" for r in edited))
+    (second / runner.AIRCRAFT_FILE).write_text("".join(json.dumps(r) + "\n" for r in edited))
     with pytest.raises(ValueError, match="differ in what no model decides"):
-        pair.pair(first, second)
+        compare.compare_readouts(first, second)
     edited = [json.loads(line) for line in rows]
     labelled = next(i for i, r in enumerate(edited) if r["source"] == "labelled")
     edited[labelled]["outcome"] = LOST_SEPARATION
-    (second / "aircraft.jsonl").write_text("".join(json.dumps(r) + "\n" for r in edited))
+    (second / runner.AIRCRAFT_FILE).write_text("".join(json.dumps(r) + "\n" for r in edited))
     with pytest.raises(ValueError, match="rows no model reads differ"):
-        pair.pair(first, second)
+        compare.compare_readouts(first, second)
+
+
+def _record(directory, code, **changes):
+    """A conformance record beside readout ``directory`` (`traffic_window_conformance.record_path`) passed under
+    ``code``."""
+    from ts_transformer.experiments.traffic_window_conformance import record_path
+    from ts_transformer.repo_layout import repo_relative
+
+    path = record_path(directory, code["commit"])
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps({"readout": repo_relative(directory), "code": code, "batches": 40,
+                                "checked_batches": list(range(24)), "rows_compared": 1000, "rows": 2000, **changes}))
+    return path
+
+
+def test_the_code_versions_are_the_same_clean_one_or_a_conformance_record_shows_one_reads_the_same_under_the_other(
+        tmp_path):
+    from ts_transformer.experiments import traffic_window_generation as runner
+    from ts_transformer.repo_layout import repo_relative
+
+    first, second = _readouts(tmp_path, set())
+    assert compare.compare_readouts(first, second)["code_evidence"] == {"kind": "same code version",
+                                                                         "commit": CODE["commit"]}
+    # the same code version, dirty: no evidence
+    dirty = {**CODE, "dirty": True}
+    for directory in (first, second):
+        (directory / runner.CODE_FILE).write_text(json.dumps(dirty))
+    with pytest.raises(ValueError, match=r"differ in \[\] \(dirty: \['first', 'second'\]\)"):
+        compare.compare_readouts(first, second)
+    # another commit and another torch for the second: refused, naming what is missing ...
+    later = {**CODE, "commit": "d" * 40, "torch": "2.8.0"}
+    (first / runner.CODE_FILE).write_text(json.dumps(CODE))
+    (second / runner.CODE_FILE).write_text(json.dumps(later))
+    with pytest.raises(ValueError, match=r"differ in \['commit', 'torch'\] and no conformance record.*"
+                                         r"at the second's code \(dddddddddddd\)"):
+        compare.compare_readouts(first, second)
+    # ... a record under another code version (another GPU), or naming another readout, is no evidence ...
+    for code, changes in (({**later, "gpu": "another"}, {}),
+                          (later, {"readout": "4dTrajectory/outputs/POOLED/traffic/another"})):
+        wrong = _record(first, code, **changes)
+        with pytest.raises(ValueError, match="no conformance record"):
+            compare.compare_readouts(first, second)
+        wrong.unlink()
+    # ... a record of the first passed under the second's code version is
+    record = _record(first, later)
+    got = compare.compare_readouts(first, second)["code_evidence"]
+    assert got == {"kind": "conformance record", "record": repo_relative(record), "readout": repo_relative(first),
+                   "batches": 40, "checked_batches": 24, "rows_compared": 1000}
+    # the other way round: the second checked under the first's code version
+    record.unlink()
+    reverse = _record(second, CODE)
+    assert compare.compare_readouts(first, second)["code_evidence"]["record"] == repo_relative(reverse)
+    # a code.json with other keys is refused
+    (first / runner.CODE_FILE).write_text(json.dumps({**CODE, "host": "x"}))
+    with pytest.raises(ValueError, match="has keys"):
+        compare.compare_readouts(first, second)
 
 
 def test_a_sentence_starting_in_a_loss_in_either_readout_is_not_counted_and_is_reported(tmp_path):
@@ -122,7 +196,7 @@ def test_a_sentence_starting_in_a_loss_in_either_readout_is_not_counted_and_is_r
         for r in rows:
             r["starts_in_a_loss"] = (r["dataset_id"], r["sample"]) in starting
         (directory / "aircraft.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-    scene = pair.pair(first, second)["report"]["scene"]["pooled"]["all"]
+    scene = compare.compare_readouts(first, second)["report"]["scene"]["pooled"]["all"]
     assert (scene["aircraft"], scene["sentences"]) == (3, 4)
     assert scene["starting_in_a_loss"] == {"first": 1, "second": 2, "both": 1}
 
@@ -133,29 +207,33 @@ def test_augmented_windows_are_split_by_kind_and_part(tmp_path):
     for window, key, role in ((0, A, "shifted"), (1, B, "inserted"), (1, C, None)):
         for sample in (0, 1):
             rows.append(_row(window, key, sample, "scene", augmented=kinds[window], role=role))
-    first = _write(tmp_path / "first", rows, augment_seed=7919, augmenting={"kinds": {"C": 1, "A": 1}})
-    second = _write(tmp_path / "second", rows, augment_seed=7919, augmenting={"kinds": {"C": 1, "A": 1}})
-    report = pair.pair(first, second)["report"]["scene"]
+    first = _write(tmp_path / "first", rows, augment_seed=7919)
+    second = _write(tmp_path / "second", rows, augment_seed=7919, prior="4dTrajectory/outputs/POOLED/prior/q")
+    report = compare.compare_readouts(first, second)["report"]["scene"]
     assert set(report["kinds"]) == {"C", "A"}
     assert {k: v["aircraft"] for k, v in report["kinds"].items()} == {"C": 1, "A": 2}
     assert {k: v["aircraft"] for k, v in report["roles"].items()} == {"shifted": 1, "inserted": 1, "as drawn": 1}
 
 
-def test_the_pair_is_written_into_a_new_directory(tmp_path, capsys):
+def test_the_comparison_is_written_into_a_new_directory(tmp_path, capsys):
     first, second = _readouts(tmp_path, {(0, A, 0, "scene")})
-    out = tmp_path / "pair"
-    assert pair.main(["--first", str(first), "--second", str(second), "--out", str(out)]) == 0
-    written = json.loads((out / "traffic_window_pair.json").read_text())
-    assert written["schema"] == pair.SCHEMA and written["second"]["prior"] == {"directory": "q"}
+    out = tmp_path / "compare"
+    assert compare.main(["--first", str(first), "--second", str(second), "--out", str(out)]) == 0
+    written = json.loads((out / compare.OUT_FILE).read_text())
+    assert compare.OUT_FILE == "traffic_window_compare.json"
+    assert written["schema"] == compare.SCHEMA == "ts-traffic-window-compare-v1"
+    assert written["second"] == {"directory": written["second"]["directory"],
+                                 "prior": "4dTrajectory/outputs/POOLED/prior/q", "prior_checkpoint_sha256": "b"}
+    assert written["code_evidence"]["kind"] == "same code version"
     assert "reward 1.0000 → 0.8333" in capsys.readouterr().out
     with pytest.raises(SystemExit):
-        pair.main(["--first", str(first), "--second", str(second), "--out", str(out)])
+        compare.main(["--first", str(first), "--second", str(second), "--out", str(out)])
 
 
 def test_a_window_s_operating_day_is_its_earliest_landing_s():
-    assert pair.operating_day_of(A) == "2026-06-01" and pair.operating_day_of("KXXX:Z_09_z_20260602T080000Z") == "2026-06-01"
+    assert compare.operating_day_of(A) == "2026-06-01" and compare.operating_day_of("KXXX:Z_09_z_20260602T080000Z") == "2026-06-01"
     with pytest.raises(ValueError, match="landing stamp"):
-        pair.operating_day_of("KXXX:no_stamp")
+        compare.operating_day_of("KXXX:no_stamp")
 
 
 def test_a_window_s_day_is_its_own_aircraft_s_never_an_inserted_one():
@@ -167,4 +245,4 @@ def test_a_window_s_day_is_its_own_aircraft_s_never_an_inserted_one():
     pairs = {(0, inserted, 0, "scene"): (_row(0, inserted, 0, "scene"), None),
              (0, B, 0, "scene"): (_row(0, B, 0, "scene"), None),
              (1, C, 0, "scene"): (_row(1, C, 0, "scene"), None)}
-    assert pair.cluster_of(pairs) == {0: ("KXXX", pair.operating_day_of(B)), 1: ("KXXX", pair.operating_day_of(C))}
+    assert compare.cluster_of(pairs) == {0: ("KXXX", compare.operating_day_of(B)), 1: ("KXXX", compare.operating_day_of(C))}
