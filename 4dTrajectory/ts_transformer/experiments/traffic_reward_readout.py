@@ -49,7 +49,8 @@ import numpy as np
 from ts_transformer.experiments.traffic_free_generation import SCHEMA as FREE_GENERATION_SCHEMA
 from ts_transformer.experiments.traffic_free_generation import SOURCES
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION
-from ts_transformer.experiments.traffic_reward import TRAFFIC_REWARD_SCHEMA, completed_rounds
+from ts_transformer.experiments.traffic_reward import TRAFFIC_REWARD_SCHEMA
+from ts_transformer.experiments.traffic_rounds import completed_rounds
 from ts_transformer.inference.separation import VISUAL
 from ts_transformer.instructions.readout import STRATA
 from ts_transformer.instructions.words import APPROACH_GO_AROUND, COLUMNS

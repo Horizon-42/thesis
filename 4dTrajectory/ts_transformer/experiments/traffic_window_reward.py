@@ -1,7 +1,7 @@
 """Multi-aircraft M4's second pass (design §6.6 step 7 item 7, the 7.6 plan): the traffic post-training in windows — the
 model commanding every aircraft of a window at once (`traffic_window.WindowLoop`), rewarded per aircraft for landing
-without losing separation, pulled back to base; the round protocol M4's (R32, `traffic_reward`), the unit a window
-sample instead of a scene's one aircraft.
+without losing separation, pulled back to base; the round protocol M4's (`traffic_rounds`, written for M4's first
+runner), the unit a window sample instead of a scene's one aircraft.
 
 Each round:
 
@@ -16,7 +16,7 @@ Each round:
    step 8 item 11);
 2. **sentences** — each window spoken to ``--samples`` times (`traffic_window_generation.window_sentences`: every
    commanded aircraft together, the vocabulary's rules, the start's procedure's masks, the two separation masks, judged
-   as it flies under VISUAL), by ``--speakers`` processes (`traffic_reward.Speakers`, each loop batch its own stream);
+   as it flies under VISUAL), by ``--speakers`` processes (`traffic_rounds.Speakers`, each loop batch its own stream);
    the last ``--probe-samples`` of them probes (multi-aircraft design §6.6 step 8 item 10: an established aircraft
    whose margin fell is made to go around once);
 3. **rewards** — per commanded aircraft: 1 for landing on a runway in the airport's landing direction (against its
@@ -35,12 +35,12 @@ Each round:
    ``--select-samples``, as drawn and augmented once (``seed`` + `SELECT_AUGMENT_OFFSET`), the same windows, streams and
    batches every round — per side the executor's landed share, landed on the observed runway, the words a sentence says
    after its first step, lost separation, the reward (and per kind), on the real windows the ordering (`ordering`); the
-   teacher-forced NLL on the select days' scene samples and the traffic attention's output (`traffic_reward.
+   teacher-forced NLL on the select days' scene samples and the traffic attention's output (`traffic_rounds.
    traffic_readout`); with ``--select-events``, every select-day hard event of those rewind runs too, as its window is
    flown for training (`event_readout`: the answered aircraft's reward, landing, loss and go-arounds) — read, never in the
    round's choice.
 
-The round kept (``choice.json``): `traffic_reward.guarded_choice` — within round 0's guards on these readouts, the
+The round kept (``choice.json``): `traffic_rounds.guarded_choice` — within round 0's guards on these readouts, the
 augmented-window reward beating round 0 by `TIE_STANDARD_ERRORS` paired standard errors (the select readouts speak the
 same draws every round: each aircraft sentence of a round is paired with its own in round 0), the earliest the highest
 does not beat by as much; none: round 0.
@@ -94,11 +94,11 @@ from ts_transformer.experiments.prior_train import (
     PRIOR_CHECKPOINT_SCHEMA, TRAFFIC_CHECKPOINT_SCHEMA, load_prior, rosters,
 )
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION
-from ts_transformer.experiments.traffic_reward import (
-    AUGMENT_STREAM, GUARD_LOSS_RISE, GUARD_ORDER_GROWTH, OPTIMISER_FILE, PASS_STREAM, RESUMABLE, SAMPLING_STREAM,
-    SELECT_STREAMS, SPEAKER_AIRCRAFT_STEPS, TIE_STANDARD_ERRORS, TRAFFIC_LEARNING_RATE, Speakers, Speaking, batch_seed,
-    completed_rounds, guarded_choice, ordering_failures, paired_difference, round_seed, run_differences,
-    traffic_readout, write_traffic_prior,
+from ts_transformer.experiments.traffic_rounds import (
+    AUGMENT_STREAM, GUARD_LOSS_RISE, GUARD_ORDER_GROWTH, OPTIMISER_FILE, PASS_STREAM, SAMPLING_STREAM, SELECT_STREAMS,
+    SPEAKER_AIRCRAFT_STEPS, TIE_STANDARD_ERRORS, TRAFFIC_LEARNING_RATE, Speakers, batch_seed, completed_rounds,
+    guarded_choice, ordering_failures, paired_difference, round_seed, run_differences, traffic_readout,
+    write_traffic_prior,
 )
 from ts_transformer.experiments.traffic_scene_data import airport_flights, edge_source_sha256, split_samples
 from ts_transformer.experiments.traffic_speaking import with_tracks
@@ -116,13 +116,14 @@ from ts_transformer.experiments.traffic_window_tuner import (
 )
 from ts_transformer.inference.scene_edges import EDGE_FEATURES
 from ts_transformer.instructions.artefact import load_candidates, load_spec
-from ts_transformer.instructions.words import COLUMNS, UNCHANGED
+from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.data import (
     VARIANTS, Split, airport_landings, candidate_table, column_classes, runway_names,
 )
 from ts_transformer.prior.generate import rows_for
 from ts_transformer.prior.landing_reward import LANDED
+from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.model import Prior, with_traffic
 from ts_transformer.prior.scene import N_LOOK, Landings
 from ts_transformer.prior.train import RewardConfig
@@ -139,7 +140,7 @@ PARENT_GROWTH_GB = 2.0
 #: The preflight's windows: the costliest of round 1's by their time limits, each spoken twice.
 PREFLIGHT_WINDOWS = 3
 #: Hard events (multi-aircraft design §6.6 step 8 item 11): a training round's pick, and the select side's speaking —
-#: streams beside `traffic_reward`'s 0–4.
+#: streams beside `traffic_rounds`' 0–4.
 EVENT_PICK_STREAM = 5
 SELECT_EVENT_STREAM = 6
 EVENT = "event"
@@ -207,13 +208,20 @@ def first_windows_per_airport(drawn: Drawn, per_airport: int, airports: Sequence
 
 
 @dataclasses.dataclass(frozen=True)
-class WindowSpeaking(Speaking):
-    """`traffic_reward.Speaking` for window rounds: a round's loop batches are its windows' (`traffic_window_generation.
-    window_batches`), each spoken by `window_sentences` from its own stream, each row marked with its window's kind;
+class WindowSpeaking:
+    """How a window round is spoken (`traffic_rounds.Speaking`), with the vocabulary, the executor's parameters, the
+    landing context, the procedure's masks and the loop batch's most aircraft-steps: a round's loop batches are its
+    windows' (`traffic_window_generation.window_batches`), each spoken by `window_sentences` from its own stream, each
+    row marked with its window's kind;
     ``every_landing`` the airports' landings the reward's landing direction reads; a training round's windows probed in
     their last ``probe_samples`` samples under ``probe_margin`` (multi-aircraft design §6.6 step 8 item 10; the select
     readouts never); a window's given lines (`WindowRound.given`) given in every one of its samples (`loop_given`)."""
 
+    words: Words
+    params: Any
+    landings: Any
+    procedures: ProcedureMasks
+    budget: int
     every_landing: Any
     probe_samples: int = 0
     probe_margin: float = PROBE_MARGIN
@@ -429,7 +437,7 @@ def ordering(rows: Sequence[Mapping[str, Any]], round_: WindowRound, step_s: flo
 
 
 def side_readout(spoken: WindowSentences, round_: WindowRound, step_s: float, *, real: bool) -> dict[str, Any]:
-    """One side of the select readout (module docstring), in the shape `traffic_reward.guarded_choice` reads, R32's
+    """One side of the select readout (module docstring), in the shape `traffic_rounds.guarded_choice` reads, R32's
     counts: over every aircraft sentence (`prior_free_generation.grouped`'s) the executor's landed share (separation
     aside), landed on the observed runway and the words said after the first step per sentence (to its own end — a
     window aircraft ended by the judge says nothing after: its count stops there); over those not starting in a loss they
@@ -489,7 +497,7 @@ def select_rewards(out: Path, rounds: int) -> list[dict[tuple[int, str, int], fl
 
 def write_choice(out: Path, history: Sequence[Mapping[str, Any]], labelled: Mapping[str, Mapping[str, float]],
                  prior_dir: Path, log: Any) -> None:
-    """``choice.json`` over the rounds finished (`traffic_reward.guarded_choice`; round 0 kept: the start)."""
+    """``choice.json`` over the rounds finished (`traffic_rounds.guarded_choice`; round 0 kept: the start)."""
     rewards = select_rewards(out, len(history) - 1)
     kept_round, excluded = guarded_choice(history, labelled, rewards)
     write_json_atomic(out / "choice.json", {
@@ -622,8 +630,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.probe_samples and not 2 <= args.probe_samples <= args.samples - 2:
         parser.error(f"--probe-samples {args.probe_samples}: probes and the unprobed samples are each compared among "
                      f"themselves (`window_advantages`) — at least 2 of each of a window's {args.samples} samples")
-    if args.probe_samples and args.passes != 1:
-        parser.error("a probe's word is learned outside the clipped ratio, with no bound across sweeps: --passes 1")
     if not args.probe_margin > 0.0 or not args.imitation_weight >= 0.0:
         parser.error("--probe-margin above 0, --imitation-weight at least 0")
     if args.passes < 1:
@@ -907,7 +913,7 @@ def main(argv: list[str] | None = None) -> int:
             + " ".join(f"{p:.2f}" for p in speaking_peaks) + " GB reserved each"
             + (f", the pass {passed['pass_gpu_peak_gb']:.2f} GB allocated" if "pass_gpu_peak_gb" in passed else ""))
         del split, part, spoken                         # the round's sentences go before the select readout's come
-        write_traffic_prior(directory, model, prior_dir, start, spec.sha256, git=git, smoke=args.smoke,
+        write_traffic_prior(directory, model, prior_dir, start, spec.sha256, git=git, smoke=args.smoke, writer=RUNNER,
                             fine_tuning={"schema": SCHEMA, "from": str(prior_dir), "base": str(base_dir),
                                          "round": round_number, "optimiser": asdict(config),
                                          "traffic_learning_rate": args.traffic_learning_rate,

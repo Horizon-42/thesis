@@ -44,8 +44,10 @@ from ts_transformer.experiments.prior_train import (
 )
 from ts_transformer.experiments.traffic_free_generation import labelled_rows, recorded_rows, summary
 from ts_transformer.experiments.traffic_reward import (
-    SELECT_AUGMENT_OFFSET, SELECT_STREAMS, TRAFFIC_REWARD_SCHEMA, Round, Speakers, Speaking, augmented_round,
-    completed_rounds, paired_difference, real_round, round_seed, side_readout, traffic_readout,
+    SELECT_AUGMENT_OFFSET, TRAFFIC_REWARD_SCHEMA, Round, Speaking, augmented_round, real_round, side_readout,
+)
+from ts_transformer.experiments.traffic_rounds import (
+    SELECT_STREAMS, Speakers, completed_rounds, paired_difference, round_seed, traffic_readout,
 )
 from ts_transformer.experiments.traffic_reward_readout import artefact_name
 from ts_transformer.experiments.traffic_scene_data import airport_flights, edge_source_sha256, split_samples

@@ -12,7 +12,7 @@ own streams, so the two read every window from the same random numbers as far as
 
 A row STARTING IN A LOSS depends on the model too: an aircraft that enters later is judged through its observed rows
 against the commanded aircraft ahead of it, flown by the model. As the M4 round choice pairs its rounds
-(`traffic_window_reward.select_counted`, `traffic_reward.paired_difference`), a sentence is counted only where it starts
+(`traffic_window_reward.select_counted`, `traffic_rounds.paired_difference`), a sentence is counted only where it starts
 in a loss in neither readout; how many start in a loss in each is reported beside.
 
 For each model source (`MODEL_SOURCES`) and each group (pooled, airport, window size and — augmented windows — kind and
@@ -43,7 +43,7 @@ import numpy as np
 
 from ts_transformer.data.day_split import operational_day
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION
-from ts_transformer.experiments.traffic_reward import paired_difference
+from ts_transformer.experiments.traffic_rounds import paired_difference
 from ts_transformer.experiments.traffic_speaking import INSERTED
 from ts_transformer.experiments.traffic_window_augment import KINDS, ROLES
 from ts_transformer.experiments.traffic_window_generation import (

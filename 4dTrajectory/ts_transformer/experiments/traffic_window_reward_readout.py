@@ -12,7 +12,7 @@ short — named, not read. Refused when the finished rounds are not 0 … k or o
   sentence (window, aircraft, sample) is the same draw in every round and differs only as the model has moved — per
   side, and per kind on the augmented side, the change in reward and in lost separation over the sentences both rounds
   count and its standard error — the round choice's pairs (`traffic_window_reward.select_counted`) and difference
-  (`traffic_reward.paired_difference`: √(sentences that changed) / sentences), so on the augmented reward these are
+  (`traffic_rounds.paired_difference`: √(sentences that changed) / sentences), so on the augmented reward these are
   ``choice.json``'s numbers;
 - **who the losses were with**: of the counted sentences that lost separation, the share ended by another commanded
   aircraft and by a replayed one (``ended_with``: the loss that ended it, not every episode it was in);
@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION
-from ts_transformer.experiments.traffic_reward import paired_difference
+from ts_transformer.experiments.traffic_rounds import paired_difference
 from ts_transformer.experiments.traffic_window_reward import SCHEMA as RUN_SCHEMA
 from ts_transformer.experiments.traffic_window_reward import select_counted
 from ts_transformer.io_utils import utc_now, write_json_atomic
