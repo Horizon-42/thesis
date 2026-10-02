@@ -43,10 +43,13 @@ def test_a_configuration_takes_the_defaults_of_the_keys_it_lacks_and_names_its_p
     assert list(written) == list(runner.CONFIG_KEYS) and written["model_sources"] == list(runner.MODEL_SOURCES)
     assert runner.load_config(json.loads(json.dumps(written))) == config
     assert runner.REQUIRED == ("program", "prior", "executor", "instructions", "split")
-    # a path given from the root is named from the repository; a whole-number temperature is a number
-    named = runner.load_config(_raw(prior=str(REPO_ROOT / "4dTrajectory/outputs/POOLED/prior/run/round_05"),
-                                    temperature=2))
+    # a path is named from the repository, written plainly; a whole-number temperature is a number
+    named = runner.load_config(_raw(prior="./4dTrajectory/outputs/POOLED/prior/run/round_05", temperature=2))
     assert named.prior == config.prior and named.temperature == 2.0 and isinstance(named.temperature, float)
+    for path in (str(REPO_ROOT / "4dTrajectory/outputs/POOLED/prior/run/round_05"),
+                 "4dTrajectory/outputs/POOLED/prior/../prior/run/round_05"):
+        with pytest.raises(ValueError, match="'prior' is .*: a path is named from the repository"):
+            runner.load_config(_raw(prior=path))
     assert runner.load_config(_raw(model_sources=["scene"], augment_seed=7919)).model_sources == ("scene",)
 
 
@@ -73,6 +76,8 @@ def test_a_configuration_takes_the_defaults_of_the_keys_it_lacks_and_names_its_p
     ({"temperature": 0.0}, r"temperature 0.0 is not finite and positive"),
     ({"temperature": math.inf}, r"temperature inf is not finite and positive"),
     ({"probe_margin": math.nan}, r"probe_margin nan is not finite"),
+    ({"seed": -1}, r"seed -1 and augment_seed None are not negative"),
+    ({"augment_seed": -7}, r"seed 1337 and augment_seed -7 are not negative"),
 ])
 def test_a_configuration_with_an_unknown_key_a_mistyped_value_or_one_out_of_range_is_refused(change, refusal):
     from ts_transformer.experiments import traffic_window_generation as runner
@@ -114,6 +119,66 @@ def test_a_checksum_the_configuration_names_must_be_the_disk_s(monkeypatch):
         runner.prepare(runner.load_config(_raw(executor_sha256="f")))
 
 
+def test_prepare_hands_every_configured_value_to_the_step_that_reads_it(monkeypatch):
+    """Each builder stood in for, its arguments recorded: the configuration reaches the draw, the augmentation and the
+    batches as the readout program always passed them, and the configuration prepared names the disk's checksums."""
+    from types import SimpleNamespace
+
+    from ts_transformer.experiments import traffic_window_generation as runner
+
+    calls = {}
+
+    def record(name, result):
+        def stand_in(*args, **kwargs):
+            calls[name] = (args, kwargs)
+            return result
+        return stand_in
+
+    spec = SimpleNamespace(step_s=2.0)
+    words = SimpleNamespace(spec=spec)
+    model = SimpleNamespace(config=SimpleNamespace(variant="full", airports=("KXXX",), max_rows=2_048))
+    masks = SimpleNamespace(names=("procedure-altitudes-v2",))
+    draw = SimpleNamespace(counts={"KXXX": 2})
+    drawn = SimpleNamespace(windows=[0, 1], batch=SimpleNamespace(readings=[0, 1, 2]))
+    augmented = SimpleNamespace(windows=[0], batch=SimpleNamespace(readings=[0]))
+    monkeypatch.setattr(runner.replay, "open_executor", record("open_executor", ("params", {"sha256": "e"}, words)))
+    monkeypatch.setattr(runner, "file_sha256", lambda path: "p")
+    monkeypatch.setattr(runner, "window_prior", record("window_prior", (model, "zero", None, masks)))
+    monkeypatch.setattr(runner, "rosters", lambda instructions: "rosters")
+    monkeypatch.setattr(runner, "airport_landings", record("airport_landings", "landings"))
+    monkeypatch.setattr(runner, "scene_airports", record("scene_airports", ("airports", {"KXXX": 3})))
+    monkeypatch.setattr(runner, "draw_windows", record("draw_windows", draw))
+    monkeypatch.setattr(runner, "drawn_windows", record("drawn_windows", drawn))
+    monkeypatch.setattr(runner, "busiest", record("busiest", {"KXXX": 9}))
+    monkeypatch.setattr(runner, "start_altitude_windows", lambda instructions: "starts")
+    monkeypatch.setattr(runner, "augmented_windows", record("augmented_windows", (augmented, {"kinds": {}})))
+    monkeypatch.setattr(runner, "window_batches", record("window_batches", [[0]]))
+
+    config = runner.load_config(_raw(split="select", commanded="one", windows_per_airport=7, samples=3, seed=11,
+                                     augment_seed=13, aircraft_steps=5_000))
+    got = runner.prepare(config)
+    instructions = runner.REPO_ROOT / config.instructions
+    assert got.config == runner.load_config({**config.as_json(), "prior_checkpoint_sha256": "p",
+                                             "executor_sha256": "e"})
+    assert calls["open_executor"] == ((runner.REPO_ROOT / config.executor, instructions), {})
+    assert calls["window_prior"] == ((runner.REPO_ROOT / config.prior, instructions, 11), {})
+    assert calls["scene_airports"] == ((instructions, "select", spec, ("KXXX",), "landings", 2_048), {})
+    assert calls["draw_windows"] == ((instructions, "select", spec, words, "airports"),
+                                     {"per_airport": 7, "seed": 11, "step_s": 2.0, "commanded": "one"})
+    assert calls["drawn_windows"] == ((draw, "airports", "params", 2.0), {})
+    assert calls["busiest"] == ((instructions, spec, ("KXXX",), 2.0), {})
+    assert calls["augmented_windows"] == ((drawn, "params", {"KXXX": 9}, 2_048, 13, "starts", spec,
+                                           runner.KINDS_OF["one"], "one"), {})
+    assert calls["window_batches"] == ((augmented, 3, 5_000, 2.0), {})
+    assert (got.drawn, got.augmenting, got.batches, got.landings, got.drawn_counts, got.scenes) == \
+        (augmented, {"kinds": {}}, [[0]], "landings", {"KXXX": 2}, {"KXXX": 3})
+    # as drawn: no augmentation asked for
+    calls.clear()
+    plain = runner.prepare(runner.load_config(_raw()))
+    assert "augmented_windows" not in calls and plain.drawn is drawn and plain.augmenting is None
+    assert calls["window_batches"] == ((drawn, 4, runner.AIRCRAFT_STEPS, 2.0), {})
+
+
 def prepared_fixture(tmp_path, monkeypatch, config):
     """A `Prepared` of ``config`` (its checksums "p" and "e") on the window loop's fixture: two windows — f0 and f1
     together, f2 alone an hour later — a batch each, read by the fixture's traffic model on the CPU."""
@@ -142,7 +207,11 @@ def test_a_readout_runs_from_its_configuration_reads_the_same_rows_in_one_and_tw
     from ts_transformer.experiments import traffic_window_generation as runner
     from ts_transformer.experiments.code_version import KEYS
 
-    config = runner.load_config(_raw(samples=2, seed=5))
+    import torch
+
+    # a reading off every default: the rows must be what `batch_rows` reads with the configuration's values
+    reading = dict(samples=2, seed=5, temperature=0.7, probe_samples=1, probe_margin=2.0, model_sources=["scene"])
+    config = runner.load_config(_raw(**reading))
     prepared = prepared_fixture(tmp_path, monkeypatch, config)
     asked = []
 
@@ -152,7 +221,7 @@ def test_a_readout_runs_from_its_configuration_reads_the_same_rows_in_one_and_tw
                                                                          executor_sha256="e"))
 
     monkeypatch.setattr(runner, "prepare", prepare)
-    (tmp_path / "config.json").write_text(json.dumps(_raw(samples=2, seed=5)))
+    (tmp_path / "config.json").write_text(json.dumps(_raw(**reading)))
     for workers in (1, 2):
         assert runner.main(["--config", str(tmp_path / "config.json"), "--out", str(tmp_path / f"r{workers}"),
                             "--workers", str(workers), "--device", "cpu"]) == 0
@@ -163,6 +232,13 @@ def test_a_readout_runs_from_its_configuration_reads_the_same_rows_in_one_and_tw
     assert (one / runner.AIRCRAFT_FILE).read_bytes() == (two / runner.AIRCRAFT_FILE).read_bytes()
     rows = runner.read_aircraft(one)
     assert [r["batch"] for r in rows] == sorted(r["batch"] for r in rows) and {r["batch"] for r in rows} == {0, 1}
+    # the old main's call, argument by argument, batch by batch in their order
+    expected = [row for number, chunk in enumerate(prepared.batches) for row in runner.batch_rows(
+        prepared.model, prepared.drawn, number, chunk, prepared.words, prepared.params, prepared.landings,
+        prepared.every_landing, 2, seed=5, temperature=0.7, procedure_masks=prepared.own_masks,
+        device=torch.device("cpu"), model_sources=("scene",), probe_samples=1, probe_margin=2.0)]
+    assert [json.dumps(r) for r in rows] == [json.dumps(r) for r in expected]
+    assert {r["source"] for r in rows} == {"scene", "labelled", "recorded"}
     # the configuration completed with both checksums
     written = json.loads((one / runner.CONFIG_FILE).read_text())
     assert list(written) == list(runner.CONFIG_KEYS)
@@ -179,10 +255,11 @@ def test_a_readout_runs_from_its_configuration_reads_the_same_rows_in_one_and_tw
     assert list(run) == ["finished_utc", "elapsed_s", "workers", "gpu_peak_gb_a_process"] and run["workers"] == 2
 
 
-def test_a_readout_is_never_written_over(tmp_path):
+def test_a_readout_is_never_written_over(tmp_path, capsys):
     from ts_transformer.experiments import traffic_window_generation as runner
 
     (tmp_path / "config.json").write_text(json.dumps(_raw()))
     (tmp_path / "out").mkdir()
     with pytest.raises(SystemExit):
         runner.main(["--config", str(tmp_path / "config.json"), "--out", str(tmp_path / "out")])
+    assert "exists; a readout is never overwritten" in capsys.readouterr().err

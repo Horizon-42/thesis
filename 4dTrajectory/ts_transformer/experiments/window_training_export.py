@@ -314,17 +314,18 @@ def readout_block(directory: Path, *, prior_dir: Path, checkpoint_sha256: str, e
     IFR, at ``airport`` and over every airport — refused unless it is this prior's (its directory from
     ``4dTrajectory/outputs/`` on, and its checkpoint), on this executor spec and artefact, over the windows these are
     chosen from (every aircraft of a window commanded), with these samples and this temperature, as drawn (not
-    augmented)."""
+    augmented), not probed, the model read in the scene."""
     config = readout_config(directory)
     wanted = {"prior": outputs_path(prior_dir), "checkpoint": checkpoint_sha256, "executor": executor_sha256,
               "instructions": outputs_path(instructions), "split": TRAFFIC_SPLIT, "commanded": "every",
               "windows_per_airport": WINDOWS_PER_AIRPORT, "seed": seed, "samples": samples, "temperature": temperature,
-              "augment_seed": None}
+              "augment_seed": None, "probe_samples": 0, "reads_the_scene": True}
     found = {"prior": outputs_path(config.prior), "checkpoint": config.prior_checkpoint_sha256,
              "executor": config.executor_sha256, "instructions": outputs_path(config.instructions),
              "split": config.split, "commanded": config.commanded, "windows_per_airport": config.windows_per_airport,
              "seed": config.seed, "samples": config.samples, "temperature": config.temperature,
-             "augment_seed": config.augment_seed}
+             "augment_seed": config.augment_seed, "probe_samples": config.probe_samples,
+             "reads_the_scene": "scene" in config.model_sources}
     differ = {key: (found[key], wanted[key]) for key in wanted if found[key] != wanted[key]}
     if differ:
         raise ValueError("the readout is not this prior's over these windows: " +

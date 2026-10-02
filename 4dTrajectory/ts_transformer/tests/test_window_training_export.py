@@ -5,6 +5,7 @@ flew them. On the scene-data fixture (a tmp artefact) the window runner's tests 
 from __future__ import annotations
 
 import json
+import re
 
 import numpy as np
 import pytest
@@ -199,9 +200,9 @@ def test_the_readout_is_copied_only_when_it_is_this_prior_s_over_these_windows(t
         """A readout directory of the new format: its configuration (``config``), summary and run record."""
         directory = tmp_path / "4dTrajectory/outputs/POOLED/traffic" / name
         directory.mkdir(parents=True)
-        written = runner.load_config({"program": runner.PROGRAM, "prior": str(prior), "split": "select",
-                                      "executor": "4dTrajectory/outputs/POOLED/executor/spec",
-                                      "instructions": str(tmp_path / "4dTrajectory/outputs/POOLED/instruction_language/v5"),
+        written = runner.load_config({"program": runner.PROGRAM, "prior": "4dTrajectory/outputs/POOLED/prior/run/round_05",
+                                      "split": "select", "executor": "4dTrajectory/outputs/POOLED/executor/spec",
+                                      "instructions": "4dTrajectory/outputs/POOLED/instruction_language/v5",
                                       "prior_checkpoint_sha256": "c", "executor_sha256": "e", **config})
         (directory / runner.CONFIG_FILE).write_text(json.dumps(written.as_json()))
         (directory / runner.SUMMARY_FILE).write_text(json.dumps({
@@ -228,6 +229,10 @@ def test_the_readout_is_copied_only_when_it_is_this_prior_s_over_these_windows(t
         readout_block(readout("other", prior_checkpoint_sha256="d"), **kwargs)
     with pytest.raises(ValueError, match="augment_seed 7919, expected None"):
         readout_block(readout("augmented", augment_seed=7919), **kwargs)
+    with pytest.raises(ValueError, match="probe_samples 2, expected 0"):
+        readout_block(readout("probed", probe_samples=2), **kwargs)
+    with pytest.raises(ValueError, match="reads_the_scene False, expected True"):
+        readout_block(readout("alone_only", model_sources=["alone"]), **kwargs)
     # a readout of the single header (before the split) is refused by name; so is a summary of another format
     old = tmp_path / "old"
     old.mkdir()
@@ -235,8 +240,8 @@ def test_the_readout_is_copied_only_when_it_is_this_prior_s_over_these_windows(t
     with pytest.raises(ValueError, match="holds no config.json: not a window readout split"):
         readout_block(old, **kwargs)
     other = readout("other_summary")
-    (other / runner.SUMMARY_FILE).write_text(json.dumps({"schema": "ts-traffic-window-summary-v0"}))
-    with pytest.raises(ValueError, match="not ts-traffic-window-summary-v1"):
+    (other / runner.SUMMARY_FILE).write_text(json.dumps({"schema": "another-summary"}))
+    with pytest.raises(ValueError, match=f"'another-summary', not {re.escape(runner.SUMMARY_SCHEMA)}"):
         readout_block(other, **kwargs)
 
 

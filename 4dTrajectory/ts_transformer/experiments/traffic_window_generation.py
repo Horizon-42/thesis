@@ -80,7 +80,7 @@ import sys
 import time
 import traceback
 from collections import Counter, defaultdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
 import numpy as np
@@ -121,7 +121,7 @@ from ts_transformer.prior.generate import rows_for
 from ts_transformer.prior.landing_reward import landing_direction
 from ts_transformer.prior.model import Prior, with_traffic
 from ts_transformer.prior.scene import N_LOOK, Landings, presence
-from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
+from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 SOURCES = ("scene", "alone", "labelled", "recorded")
 #: The sources the model speaks in (`model_sources`: a read that needs only one — two priors compared on the same windows
@@ -910,10 +910,15 @@ def _typed(name: str, value: Any) -> Any:
     raise ValueError(f"configuration key {name!r} is {value!r}, not a {kind}")
 
 
-def _repo_path(path: str) -> str:
-    """A configured path as a readout names it: from the repository when inside it (`repo_relative`)."""
-    given = Path(path)
-    return repo_relative(given if given.is_absolute() else REPO_ROOT / given)
+def _repo_path(name: str, path: str) -> str:
+    """A configured path, named from the repository — relative and without ``..``, so one configuration names the
+    same data from every checkout (a worktree's data directories are links into the main checkout's) — refused
+    otherwise."""
+    given = PurePosixPath(path)
+    if given.is_absolute() or ".." in given.parts:
+        raise ValueError(f"configuration key {name!r} is {path!r}: a path is named from the repository (relative, no "
+                         f"'..')")
+    return given.as_posix()
 
 
 def load_config(raw: Mapping[str, Any]) -> ReadoutConfig:
@@ -921,7 +926,7 @@ def load_config(raw: Mapping[str, Any]) -> ReadoutConfig:
     without a default missing, is refused; a key with a default missing takes it; every value is checked — its JSON
     type, the program, the split, how a window is commanded, the model's sources (named in `MODEL_SOURCES`' order,
     each once), at least one window and sample, the probes within the samples, a finite positive temperature, a finite
-    margin, a positive batch size. The paths are named from the repository."""
+    margin, a positive batch size, seeds that are not negative; the paths named from the repository (`_repo_path`)."""
     unknown = sorted(set(raw) - set(_KINDS))
     if unknown:
         raise ValueError(f"unknown configuration keys {unknown} (known: {list(CONFIG_KEYS)})")
@@ -930,7 +935,7 @@ def load_config(raw: Mapping[str, Any]) -> ReadoutConfig:
         raise ValueError(f"the configuration lacks {missing}")
     values = {name: _typed(name, value) for name, value in raw.items()}
     for name in ("prior", "executor", "instructions"):
-        values[name] = _repo_path(values[name])
+        values[name] = _repo_path(name, values[name])
     config = ReadoutConfig(**values)
     problems = []
     if config.program != PROGRAM:
@@ -944,6 +949,8 @@ def load_config(raw: Mapping[str, Any]) -> ReadoutConfig:
                         f"order, each once")
     if config.windows_per_airport < 1 or config.samples < 1 or config.aircraft_steps < 1:
         problems.append("windows_per_airport, samples and aircraft_steps are at least 1")
+    if config.seed < 0 or (config.augment_seed is not None and config.augment_seed < 0):
+        problems.append(f"seed {config.seed} and augment_seed {config.augment_seed} are not negative (numpy's seeds)")
     if not 0 <= config.probe_samples <= config.samples:
         problems.append(f"probe_samples {config.probe_samples} of {config.samples} samples")
     if not (math.isfinite(config.temperature) and config.temperature > 0.0):
