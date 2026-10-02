@@ -795,8 +795,9 @@ unused. Readout `docs/two_tier/readouts/2026-09-28_m2_scene_prior.zh.md` §2, §
 `--windows-per-airport` flights an airport drawn as `replay.draw` draws them, each the one commanded aircraft of its own
 window opening on its first row's step, every other aircraft replayed (`traffic_window.one_commanded_windows`); augmented
 by its leader moved (D: the replayed flight landing just before it on one runway, in the air at its first predicted step,
-by whole steps in [−60, 60] s but 0), its start moved (B) or a flight inserted and REPLAYED as its new leader (A)
-(`traffic_window_augment.KINDS_OF`); D and A fly the executor spec's time limit, B stage 2's. The header names it
+by whole steps in [−60, 60] s but 0 — drawn again among the others for a flight with no leader, about 45 % of the training
+days': D is about a fifth of the windows, as in R32), its start moved (B) or a flight inserted and REPLAYED as its new
+leader (A) (`traffic_window_augment.KINDS_OF`); D and A fly the executor spec's time limit, B stage 2's. The header names it
 (`commanded`, schema v7) and R41 pairs only readouts drawn alike. This replaced R31 (archived). `--model-sources` (2026-10-01): the model's sources to read —
 a pair of priors on the same windows needs only `scene`, half the model's time; each source reads from its own streams,
 so the rows of the source read do not change (tested both ways); the header names them (`model_sources`, schema v3).
