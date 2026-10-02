@@ -14,20 +14,34 @@ own (`window_speaker.window_inputs` — the speaker's one layout), the edge feat
 classes]`` per column, as `train.batch_logits` gives them for aircraft alone — so the words' distributions are the
 ones they were sampled from, to rounding (tests). Encoded a block of steps at a time (`PAIRS_PER_BLOCK`): a busy
 window's pair tensors do not fit the GPU whole.
+
+**One pass** (`WindowRewardTuner.window_pass`) is the second stage's (`prior.train.RewardTuner.one_pass`), term for term —
+the clipped-ratio surrogate against the pass's start, ``kl_weight`` × the pull to the reference, ``data_weight`` × the data
+term, one update per batch — with the window samples scored in parts of at most `SCORE_BUDGET` (`part_cost`), the model's
+layers recomputed in the backward, each part's share of the batch's mean backpropagated as it goes; the data term the
+training days' scene samples (M2's, `traffic_scene_data.build_split`: the traffic attention reads the others there too),
+`DATA_BATCHES` of M2's batches an update. **Several passes** (design §6.6 step 6 item 14): ``passes`` sweeps over a
+round's samples, each in a new order of batches, every one against the model frozen once at the start — the clip bounds how
+far the sweeps go together (PPO's epochs); a probe's go-around word, learned outside the clip, is learned in every sweep
+(the user, 2026-10-02: design §9 item 37). The traffic attention has its own learning rate (design §8). Written for M4's
+first runner's scene tuner (archived: `archive/one_commanded_scene_2026_10/`) and lifted here unchanged.
 """
 
 from __future__ import annotations
 
+import copy
 import dataclasses
+import time
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 import numpy as np
 import torch
+from torch import nn
 
 from ts_transformer.experiments.traffic_go_around import IMITATION_WEIGHT
+from ts_transformer.experiments.traffic_prior_train import asked_steps, scene_batch, scene_batches
 from ts_transformer.experiments.traffic_scene_data import Built
-from ts_transformer.experiments.traffic_tuner import SCORE_BUDGET, SceneRewardTuner, part_cost
 from ts_transformer.experiments.traffic_window import (
     Window, WindowRecord, _with_landing, window_edges, window_landings, window_places,
 )
@@ -37,7 +51,10 @@ from ts_transformer.instructions.words import APPROACH, APPROACH_GO_AROUND, RUNW
 from ts_transformer.prior.data import Flight, Split, chain_record
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.scene import N_LOOK, Landings
-from ts_transformer.prior.train import RewardConfig, allowed_tensors, batch_logits, flight_kl, masked, to_batch
+from ts_transformer.prior.train import (
+    RewardConfig, RewardTuner, TrainConfig, allowed_tensors, batch_logits, column_nll, flight_kl, flight_surrogate,
+    masked, to_batch,
+)
 from ts_transformer.prior.window_speaker import window_inputs
 
 #: The aircraft pairs a block of steps holds in the encoding (`Prior.encode`'s ``pairs_per_block``). Measured on the RTX
@@ -46,6 +63,20 @@ from ts_transformer.prior.window_speaker import window_inputs
 #: blocks of 32,768 pairs (131,072: 2.27 GB, 16,384: 1.51 GB); 19 aircraft whole 4.61 GB, in blocks 1.06 GB; no slower;
 #: the gradients equal the whole encoding's to 1e-6 of the largest.
 PAIRS_PER_BLOCK = 32_768
+#: M2's training batch, padded aircraft-steps (`traffic_prior_train`: pretraining's token budget).
+M2_BATCH = TrainConfig().tokens_per_batch
+#: What a part scored with gradients holds on the GPU, measured (RTX 4060, 8 GB; the traffic model on augmented: d 192,
+#: 4 layers, each recomputed in the backward — `Prior.encode`; the heads on the speaking aircraft's rows only): about
+#: 64 KB an aircraft-step and 8 KB an ordered pair of aircraft a step (the edge layers' [B, T, A, A, d]; without the
+#: recomputation 145 KB and 31 KB, and one 16-aircraft scene of 900 steps did not fit). A part costs its padded
+#: aircraft-steps plus its pairs × `PAIR_COST`.
+PAIR_COST = 1 / 8
+#: The most a part costs, about 3 GB (a sentence costing more is a part of its own: the training days' largest scene,
+#: 16 aircraft × 1,400 steps, measured 4.5 GB alone).
+SCORE_BUDGET = 48 * 1024
+#: M2's scene batches an update's data term reads: two hold about 8,800 asked steps (M2's ratio, 3.7 padded to one
+#: asked), about the second stage's data batch (8,192 rows of single flights).
+DATA_BATCHES = 2
 
 
 def window_flight(record: WindowRecord, window: Window, signals: FlightSignals, geometry: AirportGeometry,
@@ -283,7 +314,7 @@ def window_size(window: Window, flights: Sequence[Flight], step_s: float) -> tup
 
 
 def window_parts(split: WindowSplit, indices: Sequence[int], step_s: float, budget: float) -> list[list[int]]:
-    """``indices`` (window samples) in parts costing at most ``budget`` scored together (`traffic_tuner.part_cost`: the
+    """``indices`` (window samples) in parts costing at most ``budget`` scored together (`part_cost`: the
     most aircraft, the longest pre-roll plus the longest span), a costlier one a part of its own; by size."""
     sizes = {s: window_size(split.windows[s], split.flights[s], step_s) for s in indices}
     out: list[list[int]] = [[]]
@@ -320,19 +351,82 @@ def update_batches(split: WindowSplit, tokens: int, rng: np.random.Generator | N
     return groups
 
 
-class WindowRewardTuner(SceneRewardTuner):
-    """`traffic_tuner.SceneRewardTuner` over window samples (module docstring, the 7.6 plan): each part's samples scored
-    whole (`window_layout`, `window_logits`), the loss on its trained aircraft's own words — the clipped ratio against
-    the model frozen at the pass's start, the pull to the reference reading each aircraft alone, each over the masks it
+def part_cost(count: int, aircraft: int, steps: int) -> float:
+    """What ``count`` sentences laid out together on ``aircraft`` × ``steps`` cost (`PAIR_COST`)."""
+    return count * aircraft * steps * (1 + aircraft * PAIR_COST)
+
+
+def traffic_parameters(model: Prior) -> list[nn.Parameter]:
+    """The traffic attention's parameters, every layer's."""
+    if not model.traffic_features:
+        raise ValueError("the model has no traffic attention")
+    return [p for layer in model.layers for p in layer.traffic.parameters()]
+
+
+class WindowRewardTuner(RewardTuner):
+    """`prior.train.RewardTuner` over window samples (module docstring, the 7.6 plan): each part's samples scored whole
+    (`window_layout`, `window_logits`), the loss on its trained aircraft's own words — the clipped ratio against the
+    model frozen at the pass's start, the pull to the reference reading each aircraft alone, each over the masks it
     spoke under — each sentence's mean over its counted steps, averaged over the update batch's trained sentences; the
-    data term, the optimiser and the passes the scene tuner's; a probe's go-around word learned apart
-    (``imitation_weight``, `_window_scored`)."""
+    data term the scene samples; the traffic attention at ``traffic_learning_rate``; a probe's go-around word learned
+    apart (``imitation_weight``, `_window_scored`); ``step_s`` the vocabulary's step."""
 
     def __init__(self, model: Prior, reference: Prior, config: RewardConfig, device: torch.device, *, seed: int,
                  traffic_learning_rate: float, step_s: float, imitation_weight: float = IMITATION_WEIGHT) -> None:
         self.imitation_weight = imitation_weight
-        super().__init__(model, reference, config, device, seed=seed, traffic_learning_rate=traffic_learning_rate,
-                         step_s=step_s)
+        if reference.traffic_features:
+            raise ValueError("the pull's reference reads the aircraft alone: a single-aircraft prior")
+        self.traffic_learning_rate, self.step_s = traffic_learning_rate, step_s
+        self._scene_data: Iterator[list[int]] = iter(())
+        super().__init__(model, reference, config, device, seed=seed)
+
+    def restart(self, rng: np.random.Generator) -> None:
+        """The next pass draws from ``rng`` — its batches' order and its data term's from the start (a round's own
+        stream: a round run on its own draws what it would within one run)."""
+        self.rng = rng
+        self._scene_data = iter(())
+
+    def state(self) -> dict[str, Any]:
+        """What the next round's pass continues from beside the weights: the optimiser's state (AdamW's moments), the
+        warm-up's step and the passes made."""
+        return {"optimiser": self.optimiser.state_dict(), "schedule": self.schedule.state_dict(), "passes": self.passes}
+
+    def load_state(self, state: Mapping[str, Any]) -> None:
+        """`state` put back (the model already holding the weights it was saved with)."""
+        self.optimiser.load_state_dict(state["optimiser"])
+        self.schedule.load_state_dict(state["schedule"])
+        self.passes = state["passes"]
+
+    def _parameter_groups(self) -> Any:
+        traffic = traffic_parameters(self.model)
+        own = {id(p) for p in traffic}
+        return [{"params": traffic, "lr": self.traffic_learning_rate},
+                {"params": [p for p in self.model.parameters() if id(p) not in own]}]
+
+    def _data_backward(self, data: Sequence[Built], slots: int) -> float:
+        """The data term of one update, backpropagated: `DATA_BATCHES` scene batches' NLL per asked step, × the data
+        weight (the data reshuffled whenever it runs out)."""
+        groups = []
+        for _ in range(DATA_BATCHES):
+            indices = next(self._scene_data, None)
+            if indices is None:
+                self._scene_data = scene_batches(data, M2_BATCH, self.rng)
+                indices = next(self._scene_data)
+            groups.append(indices)
+        asked = sum(asked_steps(data[i]) for indices in groups for i in indices)
+        total = 0.0
+        for indices in groups:
+            batch = scene_batch(data, indices, slots, self.device)
+            logits = self.model(batch["features"], batch["relative"], batch["static"], batch["in_force"],
+                                batch["since"], batch["airport"], batch["present"], batch["rows"], batch["edges"],
+                                batch["targets"], checkpoint=True)
+            nll = column_nll(logits, batch["targets"], batch["present"], batch["asked"])
+            part = self.config.data_weight * nll.sum() / asked
+            if not torch.isfinite(part):
+                raise FloatingPointError(f"pass {self.passes}: the data term is {float(part)}")
+            part.backward()
+            total += float(part.detach())
+        return total / self.config.data_weight
 
     def _window_scored(self, split: WindowSplit, part: Sequence[int], start: Prior | None
                        ) -> tuple[dict[str, torch.Tensor], list[torch.Tensor], list[torch.Tensor] | None,
@@ -400,8 +494,8 @@ class WindowRewardTuner(SceneRewardTuner):
         return float(np.mean(means))
 
     def window_pass(self, split: WindowSplit, data: Sequence[Built], *, slots: int, passes: int = 1) -> dict[str, Any]:
-        """`SceneRewardTuner.one_pass` over window samples (`sweeps`): the update batches `update_batches`', each
-        sentence its trained aircraft's."""
+        """One pass (module docstring) over window samples, ``passes`` sweeps (`sweeps`): the update batches
+        `update_batches`', each sentence its trained aircraft's."""
         if not split.windows:
             raise ValueError("no window sample to train on: no aircraft's group of sentences differs in reward and no "
                              "probe's go-around did better than its unprobed samples")
@@ -410,3 +504,65 @@ class WindowRewardTuner(SceneRewardTuner):
                            lambda part, start: self._window_scored(split, part, start),
                            lambda indices: sum(len(split.trained[s]) for s in indices), data, slots=slots,
                            passes=passes, sentences=split.sentences)
+
+    def sweeps(self, groups: Callable[[], Iterator[list[int]]], parts: Callable[[list[int]], list[list[int]]],
+               scored: Callable[[list[int], Prior], tuple[Any, ...]], counted: Callable[[list[int]], int],
+               data: Sequence[Built], *, slots: int, passes: int, sentences: int) -> dict[str, Any]:
+        """A pass's sweeps (module docstring) over the units a caller lays out (`window_pass`: window samples): each
+        sweep's update batches (``groups``, drawn when it starts), each batch's parts (``parts``), a part scored
+        (``scored``: its `to_batch`, the model's logits, the start's, the reference's, each sentence's asked steps, its
+        advantages, as `_window_scored` gives them, and each sentence's own extra loss — a probe's word learned; None:
+        none), and the sentences a batch counts (``counted``: each one's mean over the batch)."""
+        if passes < 1:
+            raise ValueError(f"{passes} passes")
+        self.model.eval()
+        started = time.perf_counter()
+        # the model the pass's sentences were sampled from, frozen: the clipped ratio's denominator
+        start = copy.deepcopy(self.model).eval()
+        for parameter in start.parameters():
+            parameter.requires_grad_(False)
+        sums = {"reward": 0.0, "kl": 0.0, "data": 0.0, "imitation": 0.0}
+        count, trace, clipped_trace, clipped, words, sweeps = 0, [], [], 0, 0, []
+        for _ in range(passes):
+            self.passes += 1
+            sweep_started, first, sweep_clipped, sweep_words = time.perf_counter(), count, 0, 0
+            for indices in groups():
+                self.optimiser.zero_grad(set_to_none=True)
+                reward, kl, imitated, batch_clipped, batch_words = 0.0, 0.0, 0.0, 0, 0
+                size = counted(indices)
+                for part in parts(indices):
+                    batch, logits, sampled_from, reference, steps, advantages, imitation = scored(part, start)
+                    advantage = torch.as_tensor(advantages, dtype=logits[0].dtype, device=self.device)
+                    surrogate, part_clipped, part_words = flight_surrogate(logits, sampled_from, batch["targets"],
+                                                                           batch["present"], batch["asked"], advantage,
+                                                                           self.config.clip_ratio)
+                    distance = flight_kl(logits, reference, batch["targets"], batch["present"], batch["asked"])
+                    part_reward = (surrogate / steps).sum() / size
+                    part_kl = (distance / steps).sum() / size
+                    loss = part_reward + self.config.kl_weight * part_kl
+                    if imitation is not None:
+                        part_imitation = (imitation / steps).sum() / size
+                        loss = loss + part_imitation
+                        imitated += float(part_imitation.detach())
+                    if not torch.isfinite(loss):
+                        raise FloatingPointError(f"pass {self.passes}: the loss is {float(loss)}")
+                    loss.backward()
+                    reward, kl = reward + float(part_reward.detach()), kl + float(part_kl.detach())
+                    batch_clipped, batch_words = batch_clipped + part_clipped, batch_words + part_words
+                data_loss = self._data_backward(data, slots)
+                nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip_norm)
+                self.optimiser.step()
+                self.schedule.step()
+                clipped, words = clipped + batch_clipped, words + batch_words
+                sweep_clipped, sweep_words = sweep_clipped + batch_clipped, sweep_words + batch_words
+                clipped_trace.append(batch_clipped / batch_words)
+                for name, value in (("reward", reward), ("kl", kl), ("data", data_loss), ("imitation", imitated)):
+                    sums[name] += value
+                count += 1
+                trace.append(kl)
+            sweeps.append({"batches": count - first, "kl_mean": float(np.mean(trace[first:])),
+                           "kl_max": max(trace[first:]), "clipped_share": sweep_clipped / sweep_words,
+                           "seconds": time.perf_counter() - sweep_started})
+        return {**{f"{name}_mean": value / count for name, value in sums.items()}, "kl_max": max(trace),
+                "batches": count, "sentences": sentences, "seconds": time.perf_counter() - started,
+                "kl_trace": trace, "clipped_share": clipped / words, "clipped_trace": clipped_trace, "sweeps": sweeps}

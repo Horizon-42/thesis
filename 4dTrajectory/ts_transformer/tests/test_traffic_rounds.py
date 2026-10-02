@@ -11,10 +11,35 @@ import numpy as np
 import pytest
 import torch
 
+from ts_transformer.inference.scene_edges import EDGE_FEATURES
 from ts_transformer.instructions.words import Words
-from ts_transformer.tests.test_traffic_tuner import _airport, _traffic_model
+from ts_transformer.prior.model import with_traffic
+from ts_transformer.tests.test_prior_speaker import _model
 
 CPU = torch.device("cpu")
+
+
+def _airport(tmp_path, monkeypatch):
+    """The scene-data fixture: f0, f2 (background) and f1 entering 0, 10 and 30 s apart on one approach, f3 an hour
+    later, alone."""
+    from ts_transformer.experiments import traffic_scene_data
+    from ts_transformer.experiments.traffic_speaking import scene_airports
+    from ts_transformer.tests.test_traffic_scene_data import _artefact
+
+    directory, manifest, spec, _ = _artefact(tmp_path, [0.0, 30.0, 10.0, 3_600.0], [0, 1, 3])
+    monkeypatch.setattr(traffic_scene_data, "arrival_manifest_path", lambda code: manifest)
+    airports, _ = scene_airports(directory, "train", spec, ("KXXX",), None, 2_048)
+    return airports["KXXX"], spec
+
+
+def _traffic_model(words, seed=1, reads=True):
+    """A traffic prior; ``reads``: its traffic attention's output layer moved off zero, so the others change its words."""
+    torch.manual_seed(seed)
+    model = with_traffic(_model(words), EDGE_FEATURES).eval()
+    if reads:
+        for layer in model.layers:
+            torch.nn.init.normal_(layer.traffic.out.weight, std=0.2)
+    return model
 
 
 def _row(number, *, reward, landed=0.9, runway=0.95, lost=0.1, time_ratio=1.0, gap_ratio=1.0, heading=3.0):

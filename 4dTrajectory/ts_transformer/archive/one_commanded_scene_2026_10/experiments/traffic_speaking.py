@@ -1,12 +1,12 @@
-"""One commanded aircraft's view of its scene (multi-aircraft design §2.2 "一架由模型指挥", §2.6, §3.4) — what the window
-loop reads and judges of each commanded aircraft (`traffic_window.Window.scene`); shared, not a runner. Written for the
-one-aircraft scene loop of M3 and M4's first pass, archived 2026-10-02 when the window loop took that setting over as a
-window with one commanded aircraft (`archive/one_commanded_scene_2026_10/`, design §6.6 step 9).
+"""The prior commanding one aircraft of a scene in the closed loop (multi-aircraft design §2.2 "一架由模型指挥", §2.6, §3.4,
+§6.6 step 3) — shared by M3's readout and M4's post-training, not a runner.
 
-A scene: one flight with a sentence the prior speaks to and every other flight of its airport and split in the air in its
-time (`Scene`), replayed along its record. The others' rows and the words said to them are data
-(`traffic_scene_data.FlightRows`; a background flight's words "none"); the speaking aircraft's are the loop's. An other in
-the air more than `HISTORY_S` before the speaking aircraft's first row is read from there.
+A scene: one flight with a sentence the prior speaks to — its executor flies each step, as in single-aircraft free
+generation (`prior_free_generation.ClosedLoop`) — and every other flight of its airport and split in the air in its time,
+replayed along its record. The others' rows and the words said to them are data (`traffic_scene_data.FlightRows`; a
+background flight's words "none"); the speaking aircraft's are the loop's. A traffic prior (`prior.model.with_traffic`)
+reads the others through its traffic attention (`prior.scene_speaker.SceneSpeaker`); an other in the air more than
+`HISTORY_S` before the speaking aircraft's first row is read from there (counted by the caller).
 
 What the prior package does not reach is computed here, step by step, and handed to the speaker (design §9 item 18):
 
@@ -24,8 +24,9 @@ What the prior package does not reach is computed here, step by step, and handed
   established, its target its present speed. The clearance mask applies to an aircraft not yet cleared. **Stated
   approximations**: the masks' own (`separation_masks`), and an "unspecified" speed is an indicated airspeed taken as the
   speed along the course while the executor flies it as true airspeed — about 5 % faster at 1 km, so the speed mask is
-  optimistic for a follower flying "unspecified" (as in M0 step 6). Every row, flown or recorded, is on a step
-  (`prior.scene`).
+  optimistic for a follower flying "unspecified" (as in M0 step 6). The speaking aircraft's edge features read its rows at
+  the loop's step times (its flown rows have no other), the others' at their recorded times — up to a second apart, as the
+  scene samples read every flight's at its recorded times.
 
 **Judged afterwards** (`judged`, `traffic_loop.Loop`): the speaking aircraft from its first predicted step to its own end
 (`speaking_aircraft`), the others replayed. Ending it at the first loss it answers for afterwards is ending it then: the
@@ -36,6 +37,7 @@ the record's, not the prior's, and are not judged.
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -46,32 +48,36 @@ from geokit import NM_M
 from ts_transformer.autopilot.executor import Flown
 from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.autopilot.speed import approach_speed_ias_mps, speed_change_mps2
-from ts_transformer.experiments.prior_free_generation import in_force
+from ts_transformer.experiments.prior_free_generation import ClosedLoop, in_force
 from ts_transformer.experiments.traffic_census import Track, track, traffic_at
 from ts_transformer.experiments.traffic_labelled import own_end
 from ts_transformer.experiments.traffic_loop import LOST_SEPARATION, Controlled, Loop, Run, join
 from ts_transformer.experiments.traffic_scene_data import AirportFlights, FlightRows, airport_flights
-from ts_transformer.inference.scene_edges import SceneRows
+from ts_transformer.inference.scene_edges import SceneRows, scene_edge_blocks, scene_edges
 from ts_transformer.inference.separation import VISUAL, Traffic
 from ts_transformer.inference.separation_masks import clearance_check, speed_check
-from ts_transformer.instructions.airport import relative_to_runway
+from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
 from ts_transformer.instructions.artefact import load_sentences, load_signals
+from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import ATC_NO_SPEED_ASSIGNMENT_DISTANCE_M, VocabularySpec
 from ts_transformer.instructions.words import APPROACH, APPROACH_CLEARED, RUNWAY, SPEED, Words
+from ts_transformer.prior.model import Prior
 from ts_transformer.prior.scene import N_LOOK, SAMPLE_MAX_S, Landings
+from ts_transformer.prior.scene_data import Node
+from ts_transformer.prior.scene_speaker import SceneSpeaker
 
 #: The most of an other aircraft's history read before the speaking aircraft's first row: a training sample's longest span
 #: (`prior.scene.SAMPLE_MAX_S`).
 HISTORY_S = SAMPLE_MAX_S
 #: The columns the separation masks take words from (design §3.4 layer 2).
 MASK_COLUMNS = (APPROACH, SPEED)
-#: An inserted flight's key: its own, then this (`traffic_window_augment`).
+#: An inserted flight's key: its own, then this (`traffic_augment`).
 INSERTED = "+inserted"
 
 
 @dataclass(frozen=True)
 class SceneAirport:
-    """One airport's flights of a split for the window loop: as the samples place them (`FlightRows`: the model's inputs
+    """One airport's flights of a split for the scene loop: as the samples place them (`FlightRows`: the model's inputs
     and edge features) and as the judge replays them (`traffic_census.Track`), by dataset id."""
 
     flights: AirportFlights
@@ -110,8 +116,8 @@ def with_tracks(directory: Path, split: str, spec: VocabularySpec, per_airport: 
 @dataclass(frozen=True)
 class Scene:
     """One speaking flight's scene: its airport, its key, its first row's step (epoch seconds), the others in
-    the air at a step from there to the end of its time limit, and — an augmented scene's (`traffic_window_augment`) —
-    flights moved in time or inserted (their rows and tracks, by their keys in ``others``)."""
+    the air at a step from there to the end of its time limit, and — an augmented scene's (`traffic_augment`) — flights
+    moved in time or inserted (their rows and tracks, by their keys in ``others``)."""
 
     airport: SceneAirport
     key: str
@@ -131,6 +137,22 @@ class Scene:
     def track(self, key: str) -> Track:
         """A flight of the scene as the judge replays it (a moved one's own)."""
         return next((track for _, track in self.moved if track.key == key), None) or self.airport.tracks[key]
+
+
+def scene_of(airport: SceneAirport, key: str, limit_s: float, step_s: float) -> Scene:
+    """``key``'s scene when it flies ``limit_s`` from its first predicted step (`Scene`)."""
+    first = airport.flights.flights[key].presence.start_s
+    end = first + N_LOOK * step_s + limit_s
+    others = tuple(k for k, t in airport.tracks.items() if k != key and t.first_step_s <= end and t.last_step_s >= first)
+    return Scene(airport, key, first, others)
+
+
+def other_node(scene: Scene, key: str, step_s: float) -> Node:
+    """An other aircraft as the speaker places it: its rows from its first row's step, counted from the speaking
+    aircraft's row 0."""
+    other = scene.rows(key)
+    first = int(round((other.presence.start_s - scene.first_step_s) / step_s))
+    return Node(key, other.presence.speaking, first, **other.node_rows)
 
 
 @dataclass(frozen=True)
@@ -294,6 +316,114 @@ def _edge_arrays(scene: Scene, e: np.ndarray, n: np.ndarray, h: np.ndarray, poin
         along[m, cols] = other.along_m[own]
         runway[m][cols] = other.runway[own]
     return time_s, east, north, height, along, runway, [f.category for f in members]
+
+
+def speaking_edges(scene: Scene, e: np.ndarray, n: np.ndarray, h: np.ndarray, pointers: np.ndarray, pre: int,
+                   step_s: float) -> np.ndarray:
+    """``[pre + rows, A, A, E]``: ``scene``'s edge features on every step to its speaking aircraft's last row (`edge_rows`:
+    ``e``, ``n``, ``h``, ``pointers`` over its rows, from step ``pre``) — what the loop's speaker read, all at once."""
+    rows = len(e)
+    return scene_edges(edge_rows(scene, e, n, h, pointers, rows, pre, 0, pre + rows, step_s),
+                       scene.airport.flights.separation)
+
+
+class SceneLoop(ClosedLoop):
+    """`ClosedLoop` of flights, each speaking in its scene (module docstring): ``scenes`` one per flight, in its order;
+    ``approach_mps`` the speed each flight's "unspecified" word flies (its executor's)."""
+
+    def __init__(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
+                 inputs: Any, runways: Any, charts: Any, approach_ias_mps: Any, limits: Sequence[float], words: Words,
+                 params: Any, landings: Any, *, scenes: Sequence[Scene], generator: Any, temperature: float,
+                 procedure_masks: Any) -> None:
+        if len(scenes) != len(flights) or any(s.key != f.dataset_id for s, f in zip(scenes, flights)):
+            raise ValueError("a scene per flight, in the flights' order")
+        self.scenes, self.words = list(scenes), words
+        self.approach_mps = approach_ias_mps.cpu().numpy()
+        #: per masked column, per step: which flights the separation masks took a word from ([B] bool)
+        self.separation_masked: dict[int, list[np.ndarray]] = {column: [] for column in MASK_COLUMNS}
+        self._state: tuple[int, list[Aircraft] | None] = (-1, None)
+        #: the scenes' others at the newest row, by scene (a scene's sentences share one object): (row, {id: OthersAt})
+        self._others: tuple[int, dict[int, OthersAt]] = (-1, {})
+        super().__init__(model, flights, geometries, inputs, runways, charts, approach_ias_mps, limits, words, params,
+                         landings, generator=generator, temperature=temperature, procedure_masks=procedure_masks)
+
+    def _make_speaker(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
+                      landings: Any, words: Words, **options: Any) -> SceneSpeaker:
+        others = [[other_node(scene, key, self.step_s) for key in scene.others] for scene in self.scenes]
+        # an augmented scene's landings are its own (`scene_landings`); a real scene's the airport's
+        per_scene = (None if landings is None else
+                     [scene_landings(landings[scene.airport.flights.code], scene) for scene in self.scenes])
+        return SceneSpeaker(model, flights, geometries, landings, words, others=others, edges=self._edges,
+                            masks=self._masks, mask_columns=MASK_COLUMNS, history=int(HISTORY_S // self.step_s),
+                            scene_landings=per_scene, **options)
+
+    def _edges(self, first: int, last: int) -> np.ndarray:
+        """Every scene's edge features on batch steps ``first … last − 1`` (module docstring), read from two steps before:
+        an aircraft's motion is its displacement from its row before, and another aircraft whose row at a step is later
+        than this one's instant is carried forward from its row before at that row's motion (`inference.scene_edges`) —
+        so every step reads what all of them at once read (`speaking_edges`; with one step before, a replayed flight's
+        motion read "unknown" whenever its row was off the step, the review of step 6)."""
+        speaker = self.speaker
+        low = max(first - 2, 0)
+        out = np.zeros((len(self.scenes), last - first, speaker.aircraft, speaker.aircraft,
+                        len(speaker.model.traffic_features)), dtype=np.float32)
+        pointers = speaker.in_force[:, 0, : speaker.rows, RUNWAY].cpu().numpy()
+        # the scenes of one airport stacked on one aircraft axis, one call (`scene_edge_blocks`: pairs within each)
+        by_airport: dict[str, list[int]] = defaultdict(list)
+        for b, scene in enumerate(self.scenes):
+            by_airport[scene.airport.flights.code].append(b)
+        for members in by_airport.values():
+            parts = [_edge_arrays(self.scenes[b], speaker.e[b], speaker.n[b], speaker.h[b], pointers[b], speaker.rows,
+                                  speaker.pre, low, last, self.step_s) for b in members]
+            sizes = [len(part[-1]) for part in parts]
+            stacked = SceneRows(*(np.concatenate([part[k] for part in parts]) for k in range(5)),
+                                [row for part in parts for row in part[5]], [c for part in parts for c in part[6]])
+            blocks = scene_edge_blocks(stacked, self.scenes[members[0]].airport.flights.separation, sizes)
+            for b, size, block in zip(members, sizes, blocks):
+                out[b, :, :size, :size] = block[first - low:]
+        return out
+
+    def close(self) -> None:
+        """Let the speaker go: it holds the loop's callbacks and the loop holds it — a cycle only the cyclic collector
+        frees, which does not watch the GPU, so the model's past of every batch piled up until it filled the GPU (the
+        first formal run). Read what is wanted first."""
+        self.speaker.edges_of = self.speaker.masks_of = None
+        self.speaker = None
+
+    def _now(self, row: int) -> list[Aircraft]:
+        """Every flight's executor state at the start of the step at ``row`` (read once a step)."""
+        if self._state[0] != row:
+            now = self.executor.now()
+            e, n, h = now.e_m.cpu().numpy(), now.n_m.cpu().numpy(), now.height_m.cpu().numpy()
+            track_deg, ground = now.track_deg.cpu().numpy(), now.ground_speed_mps.cpu().numpy()
+            captured = self.executor.lateral.captured.cpu().numpy()
+            self._state = (row, [Aircraft(float(e[b]), float(n[b]), float(h[b]), float(track_deg[b]), float(ground[b]),
+                                          bool(captured[b])) for b in range(len(e))])
+        return self._state[1]
+
+    def _masks(self, column: int, chosen: np.ndarray) -> np.ndarray:
+        """``[B, classes]``: `speaking_masks` of every scene at the newest row; a flight the executor is done with, or
+        with no runway in force or said, keeps every word."""
+        speaker = self.speaker
+        row = speaker.rows - 1
+        classes = speaker.model.config.classes[column]
+        out = np.ones((len(self.scenes), classes), dtype=bool)
+        state, done = self._now(row), self.executor.done.cpu().numpy()
+        for b, scene in enumerate(self.scenes):
+            pointer = int(chosen[b, RUNWAY]) or int(speaker.value[b, RUNWAY])
+            if done[b] or not pointer:
+                continue
+            speed = int(speaker.value[b, SPEED]) - 1
+            t_s = scene.first_step_s + row * self.step_s
+            if self._others[0] != row:
+                self._others = (row, {})
+            if id(scene) not in self._others[1]:
+                self._others[1][id(scene)] = others_at(scene, t_s, self.words)
+            out[b] = speaking_masks(scene, column, classes, t_s, state[b], pointer - 1, speed if speed >= 0 else None,
+                                    int(speaker.value[b, APPROACH]) - 1 == APPROACH_CLEARED, float(self.approach_mps[b]),
+                                    self.words, row == N_LOOK, self._others[1][id(scene)])
+        self.separation_masked[column].append(~out.all(axis=1))
+        return out
 
 
 def speaking_aircraft(scene: Scene, flown: Flown, j: int, grid: np.ndarray, outcome: str, end_row: int,

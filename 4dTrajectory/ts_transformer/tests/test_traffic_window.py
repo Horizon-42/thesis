@@ -1,5 +1,8 @@
 """The prior commanding every aircraft of a window (`experiments/traffic_window`, multi-aircraft design §6.6 step 7): the
-windows over a segment, the others a window replays, and the draw of the flights it commands. On the scene-data
+windows over a segment, the others a window replays, and the draw of the flights it commands; the loop. With one
+commanded aircraft and nothing else in its window it says and flies what single-aircraft free generation does; a
+commanded aircraft ends where its path, read afterwards as the runners read a path no model drives, is judged to end
+(the one-aircraft scene loop these were first checked against is archived: design §6.6 step 9). On the scene-data
 fixture (a tmp artefact)."""
 
 from __future__ import annotations
@@ -57,17 +60,17 @@ def test_a_background_flight_is_never_commanded_and_a_window_without_a_sentence_
     assert [keys for _, keys in tiles] == [_keys(0), _keys(3)]
 
 
-def test_one_commanded_aircraft_replays_what_its_one_aircraft_scene_does(tmp_path, monkeypatch):
-    from ts_transformer.experiments.traffic_speaking import scene_of
+def test_one_commanded_aircraft_a_window_replays_every_other_aircraft_in_its_time(tmp_path, monkeypatch):
+    from ts_transformer.experiments.traffic_speaking import Scene
     from ts_transformer.experiments.traffic_window import window_of
 
     _, airports, _ = _airport(tmp_path, monkeypatch)
     airport = airports["KXXX"]
     alone = window_of(airport, 0.0, _keys(3), [120.0], STEP_S)
-    scene = scene_of(airport, "KXXX:f3", 120.0, STEP_S)
     # f1 and f2 entered 400 and 200 s before f3 and are still in the air; f4 enters after f3's 136 s
-    assert alone.others == scene.others == _keys(1, 2)
-    assert alone.scene("KXXX:f3") == scene
+    assert alone.others == _keys(1, 2)
+    assert alone.scene("KXXX:f3") == Scene(airport, "KXXX:f3", airport.flights.flights["KXXX:f3"].presence.start_s,
+                                           _keys(1, 2))
     # two commanded: each other's first among the others, the replayed spanning both time limits (f4's reaches f5)
     both = window_of(airport, 0.0, _keys(3, 4), [120.0, 300.0], STEP_S)
     assert both.others == _keys(1, 2, 5)
@@ -168,8 +171,8 @@ def _scene_airport(tmp_path, monkeypatch):
 def _window_loop(model, airport, signals, spec, commanded, *, alone=False, seed=4, samples=1, limits=None,
                  procedure_masks=None, given=None, go_around_extra_s=0.0, probing=None, probe_margin=1.5):
     """A `WindowLoop` of ``commanded`` (the keys of each window, ``samples`` times each; ``limits``: each window's time
-    limit, `LIMIT_S` by default). No time for a go-around by default: these tests compare the window loop with the
-    one-aircraft scene loop, which gives none (the untrained model says go-arounds)."""
+    limit, `LIMIT_S` by default). No time for a go-around by default: these tests compare the window loop with
+    single-aircraft free generation, which gives none (the untrained model says go-arounds)."""
     import torch
 
     from ts_transformer.experiments.traffic_window import WindowLoop, window_of
@@ -189,120 +192,117 @@ def _window_loop(model, airport, signals, spec, commanded, *, alone=False, seed=
                       go_around_extra_s=go_around_extra_s, probing=probing, probe_margin=probe_margin)
 
 
-def _one_aircraft_reference(model, airport, signals, spec, keys, limits, seed, procedure_masks=None, alone=False):
-    """The one-aircraft loop over ``keys`` (`SceneLoop`, the others replayed — none heard ``alone``), each read as
-    `traffic_free_generation.scene_sentences` reads it: ``[(words to its own end, judged outcome, end, counted,
-    states)]``."""
-    import dataclasses as dc
-
-    import torch
-
+def _read_afterwards(loop, airport, spec, procedure_masks=None):
+    """Each commanded aircraft of ``loop`` read afterwards from what it said and flew, as the window runner reads a path
+    no model drives: its own end (the executor judge's, `autopilot.judge.outcome_of`, or under the procedure's altitudes
+    the glidepath edge's, `prior_free_generation.glidepath_stops` — the single-aircraft runners' reading), its path on
+    the loop's steps (`traffic_speaking.speaking_aircraft`) judged with the others replayed (`traffic_speaking.judged`):
+    ``[(outcome, end, counted)]`` in the loop's order."""
     from ts_transformer.autopilot.judge import outcome_of
     from ts_transformer.experiments.prior_free_generation import glidepath_stops, steps_said
-    from ts_transformer.experiments.traffic_speaking import SceneLoop, judged, scene_of, speaking_aircraft
+    from ts_transformer.experiments.traffic_speaking import judged, speaking_aircraft
     from ts_transformer.instructions.words import RUNWAY, UNCHANGED
     from ts_transformer.prior.masks import ProcedureMasks
-    from ts_transformer.tests.test_autopilot import _params
 
     procedure_masks = procedure_masks or ProcedureMasks.none()
     geometry = airport.flights.geometry
-    flights = [signals[k] for k in keys]
-    scenes = [scene_of(airport, k, limit, STEP_S) for k, limit in zip(keys, limits)]
-    loop = SceneLoop(model, flights, [geometry] * len(keys), *_physics_of(flights, geometry), limits, Words(spec),
-                     _params(), None, scenes=[dc.replace(s, others=()) for s in scenes] if alone else scenes,
-                     generator=torch.Generator().manual_seed(seed), temperature=1.0, procedure_masks=procedure_masks)
-    while loop.running:
-        loop.step()
-    flown, said = loop.executor.flown(), loop.spoken.sentences()
-    step_rows = int(round(STEP_S / flown.cycle_s))
-    grids = [said[j].copy() for j in range(len(keys))]
-    stops = (glidepath_stops(flown, grids, [geometry] * len(keys),
-                             [procedure_masks.finals[geometry.code]] * len(keys), Words(spec))
-             if procedure_masks.altitudes else None)
+    results = loop.results()
     out = []
-    for j in range(len(keys)):
+    for got in results:
+        _, _, executor, spoken = loop.executors[got.group]
+        flown, grids = executor.flown(), [g.copy() for g in spoken.sentences()]
+        step_rows = int(round(STEP_S / flown.cycle_s))
+        stops = (glidepath_stops(flown, grids, [geometry] * len(grids), [procedure_masks.finals["KXXX"]] * len(grids),
+                                 Words(spec)) if procedure_masks.altitudes else None)
+        j = got.place
         stop = -1 if stops is None else int(stops.step[j])
         grid = grids[j]
-        if stop >= 0:
-            grid = grid[: min(len(grid), int(stops.row[j]) + 1)]
-        else:
-            grid = grid[: steps_said(flown, j, len(grid), step_rows)]
+        grid = (grid[: min(len(grid), int(stops.row[j]) + 1)] if stop >= 0
+                else grid[: steps_said(flown, j, len(grid), step_rows)])
         pointer = grid[:, RUNWAY][grid[:, RUNWAY] != UNCHANGED]
         ended = outcome_of(flown, j, geometry, int(pointer[-1]), spec)
-        aircraft = speaking_aircraft(scenes[j], flown, j, grid, ended.outcome, ended.end_row, ended.crossing, stop,
-                                     STEP_S)
-        outcome, end, _ = judged(scenes[j], aircraft, STEP_S)
+        scene = loop.windows[got.window].scene(got.key)
+        aircraft = speaking_aircraft(scene, flown, j, grid, ended.outcome, ended.end_row, ended.crossing, stop, STEP_S)
+        outcome, end, _ = judged(scene, aircraft, STEP_S)
         counted = len(grid) if end is None else min(len(grid), int(round((end["t_s"] - aircraft.first_step_s)
                                                                          / STEP_S)))
-        out.append((grid, outcome, end, counted, flown.states[j]))
+        out.append((outcome, end, counted))
     return out
 
 
-def _same_as_reference(loop, reference):
-    """Every commanded aircraft of ``loop`` (one a window) against the one-aircraft reading of it."""
+def _ends_as_read_afterwards(loop, airport, spec, procedure_masks=None):
+    """Every commanded aircraft of ``loop`` ended by its step-wise judge where its path read afterwards ends."""
+    for got, (outcome, end, counted) in zip(loop.results(), _read_afterwards(loop, airport, spec, procedure_masks)):
+        assert (got.outcome, got.end, got.counted) == (outcome, end, counted), got.key
+
+
+def _single_aircraft(airport, signals, spec, keys, limits, seed):
+    """Single-aircraft free generation (`prior_free_generation.speak_and_fly`) of ``keys`` with the prior the traffic
+    model grew from: ``(flown, said)``."""
     import torch
 
-    for got, (grid, outcome, end, counted, states) in zip(loop.results(), reference):
-        assert (got.outcome, got.end, got.counted) == (outcome, end, counted)
-        assert (got.said[:counted] == grid[:counted]).all()
-        flown = loop.executors[got.group][2].flown()
-        last = counted * 2 + 1
-        assert torch.equal(flown.states[got.place, :last], states[:last])
+    from ts_transformer.experiments.prior_free_generation import speak_and_fly
+    from ts_transformer.prior.masks import ProcedureMasks
+    from ts_transformer.tests.test_autopilot import _params
+    from ts_transformer.tests.test_prior_speaker import _model
+
+    flights = [signals[k] for k in keys]
+    geometry = airport.flights.geometry
+    flown, said, _, _ = speak_and_fly(_model(Words(spec)), flights, [geometry] * len(keys),
+                                      *_physics_of(flights, geometry), limits, Words(spec), _params(), None,
+                                      generator=torch.Generator().manual_seed(seed), temperature=1.0,
+                                      procedure_masks=ProcedureMasks.none())
+    return flown, said
 
 
 def _traffic_model(spec):
+    """`test_prior_speaker._model` (as `_single_aircraft` builds it) given a traffic attention at zero."""
     import torch
 
     from ts_transformer.inference.scene_edges import EDGE_FEATURES
     from ts_transformer.prior.model import with_traffic
     from ts_transformer.tests.test_prior_speaker import _model
 
+    single = _model(Words(spec))
     torch.manual_seed(1)
-    return with_traffic(_model(Words(spec)), EDGE_FEATURES).eval()
+    return with_traffic(single, EDGE_FEATURES).eval()
 
 
-def test_one_commanded_aircraft_a_window_says_flies_and_ends_as_its_one_aircraft_scene_does(tmp_path, monkeypatch):
+def test_one_commanded_aircraft_alone_in_its_window_says_and_flies_what_single_aircraft_free_generation_does(
+        tmp_path, monkeypatch):
+    """f3 has its window to itself; f1 hears no other (``alone``: f0 and f2 are only judged with it). Each says and flies,
+    word for word and state for state, what the prior it grew from says alone."""
     import numpy as np
     import torch
 
-    from ts_transformer.autopilot.judge import outcome_of
-    from ts_transformer.experiments.prior_free_generation import steps_said
-    from ts_transformer.experiments.traffic_speaking import SceneLoop, judged, scene_of, speaking_aircraft
-    from ts_transformer.instructions.words import RUNWAY, UNCHANGED
-    from ts_transformer.prior.masks import ProcedureMasks
-    from ts_transformer.tests.test_autopilot import _params
+    airport, signals, spec = _scene_airport(tmp_path, monkeypatch)
+    model = _traffic_model(spec)
+    for key, alone in (("KXXX:f3", False), ("KXXX:f1", True)):
+        loop = _window_loop(model, airport, signals, spec, [(key,)], alone=alone)
+        assert loop.windows[0].others == (() if key == "KXXX:f3" else ("KXXX:f0", "KXXX:f2"))
+        while loop.running:
+            loop.step()
+        flown, said = _single_aircraft(airport, signals, spec, [key], [LIMIT_S], 4)
+        got = loop.results()[0]
+        steps = got.counted
+        assert np.array_equal(got.said[:steps], said[0][:steps])
+        assert torch.equal(loop.executors[got.group][2].flown().states[got.place, : steps * 2 + 1],
+                           flown.states[0, : steps * 2 + 1])
+        if key == "KXXX:f3":
+            assert got.end is None and steps == len(got.said)
+
+
+def test_one_commanded_aircraft_a_window_ends_where_its_path_read_afterwards_ends(tmp_path, monkeypatch):
+    from ts_transformer.instructions.words import UNCHANGED
 
     airport, signals, spec = _scene_airport(tmp_path, monkeypatch)
     model = _traffic_model(spec)
     keys = ["KXXX:f1", "KXXX:f3", "KXXX:f1"]
     window = _window_loop(model, airport, signals, spec, [(k,) for k in keys])
-    geometry = airport.flights.geometry
-    scenes = [scene_of(airport, k, LIMIT_S, STEP_S) for k in keys]
-    scene = SceneLoop(model, [signals[k] for k in keys], [geometry] * 3, *_physics_of([signals[k] for k in keys], geometry),
-                      [LIMIT_S] * 3, Words(spec), _params(), None, scenes=scenes, generator=torch.Generator().manual_seed(4),
-                      temperature=1.0, procedure_masks=ProcedureMasks.none())
-    assert window.pre == scene.speaker.pre == 15 and len(window.executors) == 1
-    while scene.running:
-        scene.step()
+    assert window.pre == 15 and len(window.executors) == 1
     while window.running:
         window.step()
-    flown, said = scene.executor.flown(), scene.spoken.sentences()
-    _, _, executor, _ = window.executors[0]
-    window_flown = executor.flown()
-    step_rows = int(round(STEP_S / flown.cycle_s))
-    for j, got in enumerate(window.results()):
-        grid = said[j][: steps_said(flown, j, said.shape[1], step_rows)]
-        pointer = grid[:, RUNWAY][grid[:, RUNWAY] != UNCHANGED]
-        ended = outcome_of(flown, j, geometry, int(pointer[-1]), spec)
-        aircraft = speaking_aircraft(scenes[j], flown, j, grid, ended.outcome, ended.end_row, ended.crossing, -1, STEP_S)
-        outcome, end, _ = judged(scenes[j], aircraft, STEP_S)
-        assert (got.outcome, got.end) == (outcome, end)
-        counted = len(grid) if end is None else min(len(grid), int(round((end["t_s"] - aircraft.first_step_s) / STEP_S)))
-        assert got.counted == counted
-        assert np.array_equal(got.said[:counted], grid[:counted])
-        # the states flown to its judged end
-        last = counted * step_rows + 1
-        assert torch.equal(window_flown.states[j, :last], flown.states[j, :last])
+    _ends_as_read_afterwards(window, airport, spec)
     # f1 answers for a loss behind f0 at its first predicted step: ended there, it says nothing more and flies on
     first = window.results()[0]
     assert first.outcome == "lost_separation" and first.counted == 0 and (first.said[1:] == UNCHANGED).all()
@@ -393,8 +393,8 @@ def test_a_track_unwrapped_a_state_at_a_time_is_numpy_s_unwrap():
         assert np.array_equal(ours, np.unwrap(p))
 
 
-def test_one_commanded_aircraft_a_window_over_chained_traffic_ends_as_its_scene_does_to_the_last_step(tmp_path,
-                                                                                                       monkeypatch):
+def test_one_commanded_aircraft_a_window_over_chained_traffic_ends_as_read_afterwards_to_the_last_step(tmp_path,
+                                                                                                         monkeypatch):
     """Replayed traffic in the air the whole flight, several windows with different limits in one batch; seeds 1 and
     11 lose separation at the time limit's own state (the review of 7.3: the last step was not judged)."""
     from ts_transformer.instructions.artefact import load_signals
@@ -409,14 +409,12 @@ def test_one_commanded_aircraft_a_window_over_chained_traffic_ends_as_its_scene_
         loop = _window_loop(model, airport, signals, spec, [(k,) for k in keys], seed=seed, limits=limits)
         while loop.running:
             loop.step()
-        reference = _one_aircraft_reference(model, airport, signals, spec, keys, limits, seed)
-        _same_as_reference(loop, reference)
-        ends += sum(end is not None and end["t_s"] - got.first_s == 60.0
-                    for got, (_, _, end, _, _) in zip(loop.results(), reference))
+        _ends_as_read_afterwards(loop, airport, spec)
+        ends += sum(got.end is not None and got.end["t_s"] - got.first_s == 60.0 for got in loop.results())
     assert ends >= 2
 
 
-def test_under_the_procedure_s_altitudes_a_glidepath_stop_is_the_one_aircraft_loop_s(tmp_path, monkeypatch):
+def test_under_the_procedure_s_altitudes_a_glidepath_stop_is_the_single_aircraft_runners_one(tmp_path, monkeypatch):
     from ts_transformer.instructions.artefact import load_signals
     from ts_transformer.prior.masks import PROCEDURE_ALTITUDES, ProcedureMasks
     from ts_transformer.tests.test_prior_procedure import _final
@@ -435,11 +433,13 @@ def test_under_the_procedure_s_altitudes_a_glidepath_stop_is_the_one_aircraft_lo
                         procedure_masks=masks)
     while loop.running:
         loop.step()
-    _same_as_reference(loop, _one_aircraft_reference(model, airport, signals, spec, keys, limits, 1, masks))
+    _ends_as_read_afterwards(loop, airport, spec, masks)
     assert "below_glidepath" in [r.own for r in loop.results()]
 
 
-def test_alone_one_commanded_aircraft_a_window_is_the_one_aircraft_loop_hearing_no_other(tmp_path, monkeypatch):
+def test_alone_one_commanded_aircraft_a_window_hears_no_other_and_is_judged_with_them(tmp_path, monkeypatch):
+    import numpy as np
+
     from ts_transformer.instructions.artefact import load_signals
 
     _, airports, spec = _airport(tmp_path, monkeypatch)
@@ -450,7 +450,87 @@ def test_alone_one_commanded_aircraft_a_window_is_the_one_aircraft_loop_hearing_
     loop = _window_loop(model, airport, signals, spec, [(k,) for k in keys], seed=16, limits=limits, alone=True)
     while loop.running:
         loop.step()
-    _same_as_reference(loop, _one_aircraft_reference(model, airport, signals, spec, keys, limits, 16, alone=True))
+    _ends_as_read_afterwards(loop, airport, spec)
+    # what each says is what the prior it grew from says alone, to its judged end
+    _, said = _single_aircraft(airport, signals, spec, keys, limits, 16)
+    for got, words in zip(loop.results(), said):
+        assert np.array_equal(got.said[: got.counted], words[: got.counted])
+
+
+def test_the_others_enter_the_edge_features_and_the_masks_are_asked_at_a_step_spoken(tmp_path, monkeypatch):
+    import numpy as np
+
+    from ts_transformer.inference.scene_edges import EDGE_FEATURES
+    from ts_transformer.instructions.words import APPROACH, SPEED
+
+    airport, signals, spec = _scene_airport(tmp_path, monkeypatch)
+    loop = _window_loop(_traffic_model(spec), airport, signals, spec, [("KXXX:f1",)])
+    assert set(loop.windows[0].others) == {"KXXX:f0", "KXXX:f2"} and loop.speaker.aircraft == 3
+    edges, asked = [], []
+    original_edges, original_masks = loop.speaker.edges_of, loop.speaker.masks_of
+    loop.speaker.edges_of = lambda first, last: (edges.append(original_edges(first, last)), edges[-1])[1]
+    loop.speaker.masks_of = lambda column, chosen, speaking: (asked.append(column),
+                                                              original_masks(column, chosen, speaking))[1]
+    for _ in range(3):
+        loop.step()
+    first = edges[0]
+    # f0 entered 30 s (15 steps) before f1: the pre-roll holds it alone, then both
+    assert loop.pre == 15 and first.shape[2] == 3
+    both = first[0, 16:, 0, 1]                                  # f1 → f0 once f1 has moved since its first row
+    assert np.abs(both[:, EDGE_FEATURES.index("front")]).min() > 0.0
+    assert (both[:, EDGE_FEATURES.index("self")] == 0.0).all() and (first[0, :15, 0].sum() == 0.0)
+    # asked at the step it speaks; f1 answers for a loss behind f0 at its first predicted step, so the judge ends it
+    # there and it speaks no more
+    assert asked == [APPROACH, SPEED]
+
+
+def test_a_commanded_aircraft_s_path_is_read_from_its_first_predicted_step_on_its_steps(tmp_path, monkeypatch):
+    import numpy as np
+
+    from ts_transformer.autopilot.judge import OUTCOMES, outcome_of
+    from ts_transformer.experiments.traffic_loop import LOST_SEPARATION
+    from ts_transformer.experiments.traffic_speaking import judged, speaking_aircraft
+    from ts_transformer.instructions.words import RUNWAY
+    from ts_transformer.prior.scene import N_LOOK
+
+    airport, signals, spec = _scene_airport(tmp_path, monkeypatch)
+    loop = _window_loop(_traffic_model(spec), airport, signals, spec, [("KXXX:f1",)], alone=True)
+    while loop.running:
+        loop.step()
+    got = loop.results()[0]
+    _, _, executor, spoken = loop.executors[got.group]
+    flown, grid = executor.flown(), spoken.sentences()[got.place]
+    scene = loop.windows[0].scene("KXXX:f1")
+    ended = outcome_of(flown, got.place, airport.flights.geometry, int(grid[0, RUNWAY]), spec)
+    aircraft = speaking_aircraft(scene, flown, got.place, grid, ended.outcome, ended.end_row, ended.crossing, -1,
+                                 spec.step_s)
+    step_rows = int(round(spec.step_s / flown.cycle_s))
+    assert aircraft.times_s[0] == scene.first_step_s + N_LOOK * spec.step_s
+    assert np.allclose(np.diff(aircraft.times_s), spec.step_s) and aircraft.runway == ("09",) * len(aircraft.times_s)
+    last = ended.end_row if ended.outcome == "timeout" else ended.end_row - 1
+    assert len(aircraft.times_s) == last // step_rows + 1
+    assert not aircraft.established[0]                            # the executor starts uncaptured
+    outcome, end, _ = judged(scene, aircraft, spec.step_s)
+    assert outcome in (*OUTCOMES, LOST_SEPARATION) and (end is None) == (outcome != LOST_SEPARATION)
+
+
+def test_a_window_loop_lets_its_speaker_go_without_the_cyclic_collector(tmp_path, monkeypatch):
+    """The speaker holds the loop's callbacks and the loop holds it: `close` breaks the cycle, so the speaker's past (the
+    model's keys and values of every step) is freed as soon as the loop is dropped."""
+    import gc
+    import weakref
+
+    airport, signals, spec = _scene_airport(tmp_path, monkeypatch)
+    loop = _window_loop(_traffic_model(spec), airport, signals, spec, [("KXXX:f1",)])
+    loop.step()
+    speaker = weakref.ref(loop.speaker)
+    gc.disable()
+    try:
+        loop.close()
+        del loop
+        assert speaker() is None
+    finally:
+        gc.enable()
 
 
 def test_an_executor_a_first_step_flies_each_aircraft_as_its_own_executor_would(tmp_path, monkeypatch):

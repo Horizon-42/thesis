@@ -84,7 +84,8 @@ from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.data import VARIANTS, airport_landings
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
-SCHEMA = "ts-traffic-window-rewind-v3"
+#: v4 (multi-aircraft step 9): the draw names how it commanded (``drawn.commanded``); augmenting counts a D refusal.
+SCHEMA = "ts-traffic-window-rewind-v4"
 #: Design §6.6 step 7.7 item 6: how long before the loss an aircraft speaks again, beside its first predicted step.
 OFFSETS_S = (10.0, 30.0, 60.0, 120.0)
 START = "start"

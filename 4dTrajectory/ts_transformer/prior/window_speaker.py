@@ -1,12 +1,13 @@
 """The prior speaking to every commanded aircraft of a window (multi-aircraft design §2.2 "窗口内由模型指挥", §2.6,
 §6.6 step 7 item 2): each scene of the batch has one or more aircraft the prior speaks for, each from its own row 0 —
-its first `N_LOOK` rows observed, then the caller's — and the scene's other aircraft replayed along their records, as in
-`scene_speaker`. With one commanded aircraft a scene it says what `scene_speaker.SceneSpeaker` says, word for word, up to
-each aircraft's end (tests).
+its first `N_LOOK` rows observed, then the caller's — and the scene's other aircraft replayed along their records. With
+one commanded aircraft and no other in its scene it says what `generate.Speaker` says to that aircraft alone, word for
+word (tests). Written beside the one-aircraft scene speaker of M3 and M4's first pass (archived 2026-10-02:
+`archive/one_commanded_scene_2026_10/`), which said what this says with one commanded aircraft a scene.
 
 **Steps and places.** The caller places everything on the batch's steps: each commanded aircraft's row 0 at its
 ``start`` (a batch step, ≥ 0), each replayed aircraft's at its `Node.first_step` (negative when it is in the air before
-the batch's first step: it enters there at its own later row, as `scene_speaker.scene_inputs` places one). On the model's
+the batch's first step: it enters there at its own later row). On the model's
 aircraft axis a scene holds its commanded aircraft first, in its order, then its replayed ones. A commanded aircraft is
 there from its row 0 over the rows it has: the caller appends one a step while it flies (`advance`); one no longer
 appended — its flight over — has left. The first step spoken at is the earliest first predicted step.
@@ -24,7 +25,7 @@ window's, so a batch's draws follow from the whole batch (a runner draws each ba
 the masks removed at each of its steps (``forbidden``, ``allowed``: ``[N, steps]``, indexed by its step after its first
 predicted one).
 
-What the prior package does not reach is asked of the caller, as in `scene_speaker` (design §9 item 18):
+What the prior package does not reach is asked of the caller (design §9 item 18):
 ``edges(first, last)`` — every scene's edge features on batch steps ``first … last − 1``, ``[S, steps, A, A, E]`` in the
 places above; ``masks(column, chosen, speaking)`` — for each of ``mask_columns``, the classes each aircraft of the round
 (``speaking`` [N] bool) may say given this step's classes so far (``chosen`` [N, 6]; the separation masks), every class
@@ -50,7 +51,10 @@ from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.scene import N_LOOK, Landings, utc_s
 from ts_transformer.prior.scene_data import Node
-from ts_transformer.prior.scene_speaker import BLOCK_STEPS
+
+#: The most steps encoded in one `Prior.extend`: the pre-roll is encoded in blocks — the edge networks' tensors grow with
+#: steps × aircraft², and a scene of 9 aircraft with a 600-step pre-roll filled the GPU in one (the step 3–4 review).
+BLOCK_STEPS = 64
 
 
 class WindowSpeaker:

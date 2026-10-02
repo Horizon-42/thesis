@@ -313,16 +313,18 @@ def readout_block(readout: dict[str, Any], directory: Path, *, prior_dir: Path, 
     it — per source (the model in the scene, the record) the aircraft counted, the landed share and the lost separation
     under VISUAL and IFR, at ``airport`` and over every airport — refused unless it is this prior's (its directory from
     ``4dTrajectory/outputs/`` on, and its checkpoint), on this executor spec and artefact, over the windows these are
-    chosen from, with these samples and this temperature, as drawn (not augmented)."""
+    chosen from (every aircraft of a window commanded), with these samples and this temperature, as drawn (not
+    augmented)."""
     if readout["schema"] != READOUT_SCHEMA:
         raise ValueError(f"the readout is a {readout['schema']} file, not {READOUT_SCHEMA}")
     wanted = {"prior": outputs_path(prior_dir), "checkpoint": checkpoint_sha256, "executor": executor_sha256,
-              "instructions": outputs_path(instructions), "split": TRAFFIC_SPLIT,
+              "instructions": outputs_path(instructions), "split": TRAFFIC_SPLIT, "commanded": "every",
               "windows_per_airport": WINDOWS_PER_AIRPORT, "seed": seed, "samples": samples, "temperature": temperature,
               "augment_seed": None}
     found = {"prior": outputs_path(readout["prior"]["directory"]), "checkpoint": readout["prior"]["checkpoint_sha256"],
              "executor": readout["executor"]["sha256"], "instructions": outputs_path(readout["instructions"]),
-             "split": readout["split"], "windows_per_airport": readout["windows_per_airport"], "seed": readout["seed"],
+             "split": readout["split"], "commanded": readout["commanded"],
+             "windows_per_airport": readout["windows_per_airport"], "seed": readout["seed"],
              "samples": readout["samples"], "temperature": readout["temperature"],
              "augment_seed": readout["augment_seed"]}
     differ = {key: (found[key], wanted[key]) for key in wanted if found[key] != wanted[key]}

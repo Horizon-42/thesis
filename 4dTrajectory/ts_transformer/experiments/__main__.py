@@ -21,9 +21,8 @@ PACKAGE = "ts_transformer.experiments"
 #: Modules here that are not runners: shared code the runners import (the scene closed loop: M0 step 5, M3, M4; the
 #: scene samples: M2 on; augmented scenes: M3, M4; the scene tuner: M4; the window loop: step 7; the round protocol of
 #: the post-training: M4 on).
-NOT_RUNNERS = {"__main__", "support", "traffic_augment", "traffic_loop", "traffic_rounds", "traffic_scene_data",
-               "traffic_speaking", "traffic_tuner", "traffic_window", "traffic_window_augment",
-               "traffic_window_tuner"}
+NOT_RUNNERS = {"__main__", "support", "traffic_loop", "traffic_rounds", "traffic_scene_data", "traffic_speaking",
+               "traffic_window", "traffic_window_augment", "traffic_window_tuner"}
 
 
 def runner_names() -> list[str]:

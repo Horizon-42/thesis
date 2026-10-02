@@ -100,7 +100,6 @@ from ts_transformer.experiments.prior_free_generation import (
 )
 from ts_transformer.experiments.prior_landing_reward import LANDING_REWARD_SCHEMA
 from ts_transformer.experiments.prior_train import rosters
-from ts_transformer.experiments.traffic_reward import TRAFFIC_REWARD_SCHEMA
 from ts_transformer.experiments.traffic_window_reward import SCHEMA as TRAFFIC_WINDOW_REWARD_SCHEMA
 from ts_transformer.experiments.training_attitude import attitude_payload, executor_attitude
 from ts_transformer.experiments.prior_training_export import open_trained_prior
@@ -155,6 +154,9 @@ def method_of(schema: str) -> str:
     return match.group(1)
 
 
+#: MIRROR of the checkpoint schema of M4's first runner (R32, archived: `archive/one_commanded_scene_2026_10/experiments/
+#: traffic_reward.py`, nothing imports the archive), whose rounds are ``traffic``.
+TRAFFIC_REWARD_SCHEMA = "ts-traffic-reward-v1"
 #: The model a post-training method makes (``base`` has none: it is trained on data alone).
 METHOD_MODELS = {method_of(LANDING_REWARD_SCHEMA): "landing", method_of(AUGMENTED_REWARD_SCHEMA): "augmented",
                  method_of(TRAFFIC_REWARD_SCHEMA): "traffic", method_of(TRAFFIC_WINDOW_REWARD_SCHEMA): "window"}

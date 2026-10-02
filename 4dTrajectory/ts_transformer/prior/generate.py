@@ -121,10 +121,10 @@ class Speaker:
 
     @staticmethod
     def _check(model: Prior) -> None:
-        """A single-aircraft prior: the scene loop speaks for the others (`scene_speaker`)."""
+        """A single-aircraft prior: the window loop speaks for the others (`window_speaker`)."""
         if model.edge_features != SINGLE_EDGE_FEATURES or model.traffic_features:
             raise ValueError(f"a scene prior (edge features {list(model.edge_features)}, traffic features "
-                             f"{list(model.traffic_features)}) speaks in the scene loop, not to single aircraft")
+                             f"{list(model.traffic_features)}) speaks in the window loop, not to single aircraft")
 
     def _contexts(self, flights: Sequence[FlightSignals], landings: Mapping[str, Landings] | None
                   ) -> list[Landings | None]:

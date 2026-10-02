@@ -194,7 +194,7 @@ def test_the_readout_is_copied_only_when_it_is_this_prior_s_over_these_windows(t
     prior = tmp_path / "4dTrajectory/outputs/POOLED/prior/run/round_05"
     cell = {"aircraft": 10, "outcomes": {"landed": 0.8, "lost_separation": 0.2}, "lost_separation": 0.2,
             "lost_separation_ifr": 0.3}
-    readout = {"schema": SCHEMA, "written_utc": "2026-09-30T00:00:00Z", "split": "select",
+    readout = {"schema": SCHEMA, "written_utc": "2026-09-30T00:00:00Z", "split": "select", "commanded": "every",
                "windows_per_airport": WINDOWS_PER_AIRPORT, "seed": 1337, "samples": 4, "temperature": 1.0,
                "augment_seed": None, "instructions": "x/4dTrajectory/outputs/POOLED/instruction_language/v5",
                "prior": {"directory": str(prior), "checkpoint_sha256": "c"}, "executor": {"sha256": "e"},
@@ -208,6 +208,8 @@ def test_the_readout_is_copied_only_when_it_is_this_prior_s_over_these_windows(t
     assert got["recorded"]["all"]["landed"] == 0.0 and got["directory"] == "4dTrajectory/outputs/POOLED/traffic/r"
     with pytest.raises(ValueError, match="samples 4, expected 2"):
         readout_block(readout, tmp_path / "r", **{**kwargs, "samples": 2})
+    with pytest.raises(ValueError, match="commanded 'one', expected 'every'"):     # one commanded aircraft a window
+        readout_block({**readout, "commanded": "one"}, tmp_path / "r", **kwargs)
     with pytest.raises(ValueError, match="not ts-traffic-window-generation"):
         readout_block({**readout, "schema": "ts-traffic-window-generation-v1"}, tmp_path / "r", **kwargs)
 

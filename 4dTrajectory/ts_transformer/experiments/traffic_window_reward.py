@@ -105,7 +105,6 @@ from ts_transformer.experiments.traffic_rounds import (
 )
 from ts_transformer.experiments.traffic_scene_data import airport_flights, edge_source_sha256, split_samples
 from ts_transformer.experiments.traffic_speaking import with_tracks
-from ts_transformer.experiments.traffic_tuner import part_cost
 from ts_transformer.experiments.traffic_window import COMMANDED, Given, draw_windows, window_places
 from ts_transformer.experiments.traffic_window_augment import KINDS_OF, busiest
 from ts_transformer.experiments.traffic_window_events import EventPool, event_pool, pick
@@ -115,7 +114,7 @@ from ts_transformer.experiments.traffic_window_generation import (
     window_sentences,
 )
 from ts_transformer.experiments.traffic_window_tuner import (
-    PAIRS_PER_BLOCK, WindowRewardTuner, WindowSplit, scoring_cost, window_advantages, window_flight,
+    PAIRS_PER_BLOCK, WindowRewardTuner, WindowSplit, part_cost, scoring_cost, window_advantages, window_flight,
 )
 from ts_transformer.inference.scene_edges import EDGE_FEATURES
 from ts_transformer.instructions.artefact import load_candidates, load_spec
@@ -445,7 +444,7 @@ def side_readout(spoken: WindowSentences, round_: WindowRound, step_s: float, *,
     counts: over every aircraft sentence (`prior_free_generation.grouped`'s) the executor's landed share (separation
     aside), landed on the observed runway and the words said after the first step per sentence (to its own end — a
     window aircraft ended by the judge says nothing after: its count stops there); over those not starting in a loss they
-    answer for (`traffic_free_generation.summary`'s) lost separation and the reward (and per kind); every sentence's
+    answer for, lost separation and the reward (and per kind); every sentence's
     row."""
     rows = [row for row in spoken.rows if not row["starts_in_a_loss"]]
     landed = [row for row in spoken.rows if row["own"] == LANDED]
@@ -644,6 +643,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("the post-training trains beside the data (design §6.2): --data-weight > 0")
     if bool(args.events) != (args.events_per_airport > 0):
         parser.error("--events and --events-per-airport > 0 go together")
+    if args.commanded == "one" and (args.events or args.select_events):
+        parser.error("hard events are windows of every aircraft commanded (R43): not with --commanded one")
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("the tree has uncommitted changes; a fine-tuning run is made at a commit")

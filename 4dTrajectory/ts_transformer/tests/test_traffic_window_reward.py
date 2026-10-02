@@ -157,8 +157,8 @@ def test_the_ordering_guard_reads_the_same_leaders_on_both_sides():
 
 
 def test_a_window_round_speaks_the_same_in_one_process_or_two(tmp_path, monkeypatch):
-    """R32's speaking processes with the window speaking, a batch a window (budget 1): the same sentences and what the
-    speaker read, a training round's and a select side's, whatever the number of processes."""
+    """The speaking processes (`traffic_rounds.Speakers`) with the window speaking, a batch a window (budget 1): the same
+    sentences and what the speaker read, a training round's and a select side's, whatever the number of processes."""
     from ts_transformer.experiments.traffic_rounds import Speakers
 
     round_, airport, spec = _round(tmp_path, monkeypatch)
@@ -178,6 +178,39 @@ def test_a_window_round_speaks_the_same_in_one_process_or_two(tmp_path, monkeypa
     one, two = got
     assert one.rows == two.rows and len(one.rows) == 6
     assert all(np.array_equal(a.grid, b.grid) and np.array_equal(a.e, b.e) for a, b in zip(one.records, two.records))
+
+
+
+def test_a_speaking_process_that_fails_rebuilds_another_round_or_is_gone_ends_the_call(tmp_path, monkeypatch):
+    """`traffic_rounds.Speakers`: a process that fails says why; one that rebuilt another round than the parent's (its
+    fingerprint), or is gone, ends the call."""
+    from ts_transformer.experiments.traffic_rounds import Speakers
+    from ts_transformer.experiments.traffic_window_reward import WindowRound
+
+    round_, airport, spec = _round(tmp_path, monkeypatch)
+    speaking = _speaking(spec, airport)
+    model = _reading_model(spec)
+    failing = Speakers(1, lambda n: (_ for _ in ()).throw(RuntimeError("no round")), {}, model, "cpu", speaking)
+    try:
+        with pytest.raises(SystemExit, match="no round"):
+            failing.speak("train", 1, round_, model, 2, seed=11, source="train")
+    finally:
+        failing.close()
+    other = WindowRound(round_.drawn, [kind + "'" for kind in round_.kinds], round_.given)
+    wrong = Speakers(1, lambda n: other, {}, model, "cpu", speaking)
+    try:
+        with pytest.raises(SystemExit, match="rebuilt another round"):
+            wrong.speak("train", 1, round_, model, 2, seed=11, source="train")
+    finally:
+        wrong.close()
+    gone = Speakers(2, lambda n: round_, {}, model, "cpu", speaking)
+    gone.processes[1].kill()
+    gone.processes[1].join(timeout=10)
+    try:
+        with pytest.raises(SystemExit, match="speaking process 1 is gone"):
+            gone.speak("train", 1, round_, model, 2, seed=11, source="train")
+    finally:
+        gone.close()
 
 
 def test_the_preflight_scores_the_costliest_window_sample_the_pass_would_train_on(tmp_path, monkeypatch):
@@ -229,7 +262,10 @@ def test_hard_events_to_train_on_need_their_count_an_airport(tmp_path):
     from ts_transformer.experiments.traffic_window_reward import main
 
     paths = ["--prior", "p", "--base", "b", "--instructions", "i", "--executor", "e", "--out", str(tmp_path / "run")]
-    for more in (["--events", "r"], ["--events-per-airport", "3"]):
+    for more in (["--events", "r"], ["--events-per-airport", "3"],
+                 # hard events are windows of every aircraft commanded: not with one commanded aircraft a window
+                 ["--commanded", "one", "--events", "r", "--events-per-airport", "3"],
+                 ["--commanded", "one", "--select-events", "r"]):
         with pytest.raises(SystemExit):
             main(paths + more)
     assert not (tmp_path / "run").exists()

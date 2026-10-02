@@ -14,35 +14,35 @@ The ways of "every aircraft of a window commanded":
   after the opening × c, c ~ U[`COMPRESSION`] (the arrivals up to 1 / 0.6 ≈ 1.7 times as dense). The replayed ones stay
   as they were — among them the flights entering in the window that the executor cannot fly — so the commanded arrivals
   keep their order and directions among themselves and may pass a replayed one;
-- **B, a start moved** — one commanded aircraft (drawn) moved as post-training stage 2 moves a start (`prior.augment`,
-  as `traffic_augment` B: drawn until plausible), its time limit stage 2's; what the others read of it before it flies
+- **B, a start moved** — one commanded aircraft (drawn) moved as post-training stage 2 moves a start (`prior.augment`:
+  drawn until plausible), its time limit stage 2's; what the others read of it before it flies
   is its moved rows (`traffic_census.track` of them), never established there (the executor starts it uncaptured, as
   the qualification reads its own rows);
 - **A, a flight inserted** — a flight of the draw at the same airport and split (one the window does not hold: it flies
-  on its own dynamics, `traffic_window.draw_windows`; as `traffic_augment` A draws from the scene's split), landing on a runway that must be spaced from a commanded aircraft's
-  (drawn: its new follower; the same runway, a pair separated as one, a dependent parallel), moved whole to cross its
-  threshold g × the required gap before the follower's recorded crossing on the approach clock (`traffic_augment` A's
-  timing), g ~ U[`traffic_augment.GAP_RANGE`] — and commanded too, keyed `traffic_speaking.INSERTED` after its own key,
-  over its own time limit; the window no longer replays the flight it came from (its recorded landing stays in the
-  landing contexts, as in `traffic_augment`).
+  on its own dynamics, `traffic_window.draw_windows`), landing on a runway that must be spaced from a commanded
+  aircraft's (drawn: its new follower; the same runway, a pair separated as one, a dependent parallel), moved whole to
+  cross its threshold g × the required gap before the follower's recorded crossing ON THE APPROACH CLOCK
+  (`Separation.approach_time_s`, `gap_s`: staggered thresholds counted, trap T3), g ~ U[`GAP_RANGE`], the move rounded
+  to whole steps — and commanded too, keyed `traffic_speaking.INSERTED` after its own key, over its own time limit; the
+  window no longer replays the flight it came from (its recorded landing stays in the landing contexts).
 
 The ways of "one aircraft a window commanded" (design §5.2):
 
 - **D, the leader moved** — the replayed flight landing just before the commanded one on its runway or one separated as
   one with it, in the air at its first predicted step (`leader`: by landing order, not by where the approach clock has
   them before they turn final — design §2.5's reading), moved whole by δ drawn evenly from the whole steps in
-  [−`traffic_augment.SHIFT_S`, `traffic_augment.SHIFT_S`] but 0 (a leader not moved is not an augmentation); its moved
-  landing is the one in the commanded aircraft's landing context (`traffic_speaking.scene_landings`);
+  [−`SHIFT_S`, `SHIFT_S`] but 0 (a leader not moved is not an augmentation); its moved landing is the one in the
+  commanded aircraft's landing context (`traffic_speaking.scene_landings`);
 - **B, the start moved** — as above;
 - **A, a flight inserted** — as above, drawn and timed alike, but REPLAYED along its record: the commanded aircraft's new
   leader (one aircraft is commanded).
 
 **Every shift is whole steps** (even seconds, so whole seconds too): a moved flight's rows stay on the scene's steps
-(`prior.scene`, `traffic_augment.moved`), the rosters' landing times are whole seconds, and a flight's own landing leaves
+(`prior.scene`, `moved`), the rosters' landing times are whole seconds, and a flight's own landing leaves
 its landing context by its exact time (`data.own_context`). A moved or inserted flight moves whole — its rows and record
-(`traffic_augment.moved`) and its signals (`shifted`: its entry and landing times, so its rows' times, its landing in the
+(`moved`) and its signals (`shifted`: its entry and landing times, so its rows' times, its landing in the
 others' context and the landing direction at its first predicted step are the moved ones'). A moved flight keeps its
-rows' inputs and words, as in `traffic_augment`.
+rows' inputs and words.
 
 **Qualification** (§5.3): every commanded aircraft, through its observed rows (to its first predicted step) judged not
 established — as the loop judges its first step — against every other aircraft of the window along its record (a moved
@@ -55,7 +55,7 @@ than the data has had (§5.2): its airport's busiest step on the training days (
 the same span as recorded (the window's commanded aircraft unmoved, and every flight the augmented window replays: a
 longer time limit can bring in recorded traffic, which is not added): only what the augmentation adds is capped. Every
 commanded aircraft's time limit must fit the model's positions (a moved start's stage-2 limit can pass them). A draw
-that cannot apply (no plausible start, no flight to insert) or fails is drawn again, at most `traffic_augment.TRIES`
+that cannot apply (no plausible start, no flight to insert) or fails is drawn again, at most `TRIES`
 draws, else the window is left out; the draws refused are counted by why.
 """
 
@@ -77,8 +77,7 @@ from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.flights import flight_inputs
 from ts_transformer.data.day_split import parse_utc
 from ts_transformer.experiments.prior_free_generation import augmented_starts
-from ts_transformer.experiments.traffic_augment import GAP_RANGE, SHIFT_S, TRIES, moved
-from ts_transformer.experiments.traffic_census import track
+from ts_transformer.experiments.traffic_census import Track, track
 from ts_transformer.experiments.traffic_loop import recorded
 from ts_transformer.experiments.traffic_scene_data import FlightRows
 from ts_transformer.experiments.traffic_speaking import INSERTED, judged
@@ -91,8 +90,14 @@ from ts_transformer.prior.augment import Augmentation, augment_signals
 from ts_transformer.prior.generate import rows_for
 from ts_transformer.prior.scene import N_LOOK, SceneIndex, in_scene, presence, scene_steps
 
-#: The ways of augmenting (design §5.2), and each draw's (module docstring), in the order a kind is drawn from.
-KINDS = ("A", "B", "C", "D")
+#: D's move, at most (design §5.2: δ in [−60, 60] s), A's gap ahead of its follower in required gaps (§5.2), and the draws
+#: a window may take before it is left out (§5.3).
+SHIFT_S = 60.0
+GAP_RANGE = (0.5, 2.0)
+TRIES = 10
+#: The ways of augmenting (design §5.2) — a window draw's first, as readouts list them — and each draw's (module
+#: docstring), in the order a kind is drawn from.
+KINDS = ("C", "B", "A", "D")
 KINDS_OF = {"every": ("C", "B", "A"), "one": ("D", "B", "A")}
 COMPRESSION = (0.6, 1.0)
 #: A commanded aircraft's part in its window's augmentation: moved in time (C), its start moved (B), inserted (A).
@@ -128,6 +133,17 @@ def shifted(signals: FlightSignals, dt_s: int, key: str) -> FlightSignals:
 
     return dataclasses.replace(signals, dataset_id=key, entry_time_utc=later(signals.entry_time_utc, "microseconds"),
                                landing_time_utc=later(signals.landing_time_utc, "seconds"))
+
+
+def moved(rows: FlightRows, track: Track, dt_s: float, key: str, step_s: float) -> tuple[FlightRows, Track]:
+    """A flight moved ``dt_s`` in time — whole steps, or refused: its rows stay on the scene's steps — and keyed ``key``:
+    its rows, inputs and words as they were."""
+    if dt_s % step_s:
+        raise ValueError(f"{key}: a move of {dt_s} s is not whole {step_s:g} s steps")
+    shifted = dataclasses.replace(rows.presence, dataset_id=key, times_s=rows.presence.times_s + dt_s,
+                                  landing_s=rows.presence.landing_s + dt_s)
+    return (dataclasses.replace(rows, presence=shifted),
+            dataclasses.replace(track, presence=shifted, captured_s=track.captured_s + dt_s))
 
 
 def whole_steps(dt_s: float, step_s: float) -> int:

@@ -45,8 +45,8 @@ def _window_and_batch(tmp_path, monkeypatch, entries, commanded, pool=()):
 
 
 def test_a_flight_shifted_by_whole_steps_keeps_its_rows_and_its_landing_leaves_its_context(tmp_path, monkeypatch):
-    from ts_transformer.experiments.traffic_augment import moved
-    from ts_transformer.experiments.traffic_speaking import scene_landings, scene_of
+    from ts_transformer.experiments.traffic_window_augment import moved
+    from ts_transformer.experiments.traffic_speaking import Scene, scene_landings
     from ts_transformer.experiments.traffic_window_augment import shifted
     from ts_transformer.prior.data import own_context
     from ts_transformer.prior.scene import presence, utc_s
@@ -64,9 +64,8 @@ def test_a_flight_shifted_by_whole_steps_keeps_its_rows_and_its_landing_leaves_i
     assert np.array_equal(presence(later, len(rows.presence.times_s), geometry, STEP_S).times_s,
                           new_rows.presence.times_s)
     # its moved landing is in the scene's landings, and its own leaves them by its exact time
-    scene = scene_of(airport, "KXXX:f1", LIMIT_S, STEP_S)
-    context = scene_landings(_pool(airport), type(scene)(airport, "KXXX:f1", scene.first_step_s, scene.others,
-                                                         ((new_rows, new_track),)))
+    context = scene_landings(_pool(airport), Scene(airport, "KXXX:f1", rows.presence.start_s, ("KXXX:f0",),
+                                                   ((new_rows, new_track),)))
     assert len(own_context(later, context).times_s) == len(context.times_s) - 1
     assert shifted(signals, 6, "KXXX:f1+x").dataset_id == "KXXX:f1+x"
 
@@ -95,7 +94,7 @@ def test_the_flow_compressed_moves_the_commanded_toward_the_opening_and_the_repl
 
 def test_only_what_an_augmentation_adds_is_capped_and_a_window_lost_before_the_prior_speaks_is_left_out(
         tmp_path, monkeypatch):
-    from ts_transformer.experiments.traffic_augment import TRIES
+    from ts_transformer.experiments.traffic_window_augment import TRIES
     from ts_transformer.experiments.traffic_window_augment import at_once, augment_window, qualifies
 
     # f1 commanded with f0 in the air before it (two at once as drawn), f3 an hour later to insert
@@ -200,7 +199,7 @@ def test_an_inserted_flight_is_commanded_the_gap_ahead_of_its_follower_and_its_s
 def test_one_commanded_its_leader_moved_whole_steps_is_replayed_once_at_its_moved_time(tmp_path, monkeypatch):
     """D (one commanded aircraft a window): the replayed flight landing just before the commanded one, in the air at its
     first predicted step, moved by whole steps in [−60, 60] s but 0 — replayed once, at its moved time."""
-    from ts_transformer.experiments.traffic_augment import TRIES
+    from ts_transformer.experiments.traffic_window_augment import TRIES
     from ts_transformer.experiments.traffic_window_augment import augment_window, leader
 
     # f1 commanded, f0 landing before it and in the air at its first predicted step, f2 behind it
@@ -236,7 +235,7 @@ def test_one_commanded_an_inserted_flight_is_replayed_ahead_and_counted_as_what_
                                                                                                         monkeypatch):
     """A (one commanded aircraft a window): drawn and timed as a window's A, but replayed — the commanded aircraft's new
     leader; the cap counts it on the augmented window's side only."""
-    from ts_transformer.experiments.traffic_augment import TRIES
+    from ts_transformer.experiments.traffic_window_augment import TRIES
     from ts_transformer.experiments.traffic_speaking import INSERTED
     from ts_transformer.experiments.traffic_window_augment import augment_window, qualifies
 
@@ -347,6 +346,71 @@ def test_the_window_runner_reads_augmented_windows_by_the_model_s_sources_with_t
     assert set(readout["kinds"]) == {"A", "C"} and set(readout["roles"]) == {"inserted", "shifted", "as drawn"}
     with pytest.raises(ValueError, match="model's sources only"):
         runner.fixed_rows(augmented, chunk, "recorded", Words(spec), _params(), every, ProcedureMasks.none())
+
+
+
+def test_the_window_runner_reads_one_commanded_augmented_windows_with_a_model_reading_the_landing_context(tmp_path,
+                                                                                                            monkeypatch):
+    """One commanded aircraft a window (design §6.6 step 9): f1, its leader f0 moved (D) and f2 inserted ahead of it and
+    replayed (A), through the loop by the model's sources — a model reading the landing context too (the moved leader's
+    landing and the inserted one's in f1's context) — and the readout by kind."""
+    import torch
+
+    from ts_transformer.experiments import traffic_window_generation as runner
+    from ts_transformer.experiments.traffic_speaking import INSERTED, scene_airports
+    from ts_transformer.experiments.traffic_window import window_landings, window_of
+    from ts_transformer.experiments.traffic_window_augment import KINDS_OF
+    from ts_transformer.inference.scene_edges import EDGE_FEATURES
+    from ts_transformer.prior.masks import ProcedureMasks
+    from ts_transformer.prior.model import with_traffic
+    from ts_transformer.tests.test_autopilot import _params
+    from ts_transformer.tests.test_prior_speaker import _model
+    from ts_transformer.tests.test_traffic_window import _patch_runner_physics
+
+    airport, signals, spec, _, batch, keys = _window_and_batch(
+        tmp_path, monkeypatch, [0.0, 400.0, 3_600.0], _keys(1), pool=_keys(2))
+    _patch_runner_physics(monkeypatch, signals, airport.flights.geometry, keys)
+    every = {"KXXX": _pool(airport)}
+    context_airport = scene_airports(tmp_path / "artefact", "train", spec, ("KXXX",), every, 2_048)[0]["KXXX"]
+    torch.manual_seed(1)
+    full = with_traffic(_model(Words(spec), variant="full"), EDGE_FEATURES).eval()
+
+    def drawn_at(at):
+        """f1 alone commanded in its window, f0 replayed before it."""
+        window = window_of(at, at.tracks["KXXX:f1"].first_step_s, ("KXXX:f1",), [LIMIT_S], STEP_S)
+        assert window.others == ("KXXX:f0",)
+        return _as_drawn([window], [range(0, 1)], batch, [LIMIT_S] * 2)
+
+    rows = []
+    for kind in ("D", "A"):
+        augmented, counts = runner.augmented_windows(drawn_at(airport), _params(), {"KXXX": MANY}, ROWS, 1,
+                                                     ANY_ALTITUDE, spec, kinds=(kind,), commanded="one")
+        assert set(counts["kinds"]) == set(KINDS_OF["one"]) and counts["kinds"][kind] == len(augmented.windows) == 1
+        window = augmented.windows[0]
+        assert window.commanded == ("KXXX:f1",) and [s.dataset_id for s in augmented.batch.signals] == ["KXXX:f1"]
+        moved = window.moved[0][0].presence
+        landings = window_landings(window, "KXXX:f1", every, STEP_S)
+        if kind == "D":
+            assert moved.dataset_id == "KXXX:f0" and window.others == ("KXXX:f0",)
+            original = airport.flights.flights["KXXX:f0"].presence.landing_s
+            assert moved.landing_s in landings.times_s and original not in landings.times_s
+        else:
+            assert moved.dataset_id == "KXXX:f2" + INSERTED and moved.dataset_id in window.others
+            assert moved.landing_s in landings.times_s and len(landings.times_s) == len(every["KXXX"].times_s) + 1
+        for source in ("scene", "alone"):
+            rows += runner.model_rows(_traffic_model(spec), augmented, [0], source, Words(spec), _params(), None,
+                                      every, 2, generator=torch.Generator().manual_seed(4), temperature=1.0,
+                                      procedure_masks=ProcedureMasks.none())
+        in_context, _ = runner.augmented_windows(drawn_at(context_airport), _params(), {"KXXX": MANY}, ROWS, 1,
+                                                 ANY_ALTITUDE, spec, kinds=(kind,), commanded="one")
+        read = runner.model_rows(full, in_context, [0], "scene", Words(spec), _params(), every, every, 1,
+                                 generator=torch.Generator().manual_seed(4), temperature=1.0,
+                                 procedure_masks=ProcedureMasks.none())
+        assert len(read) == 1
+    assert len(rows) == 2 * 2 * 2 and all(r["dataset_id"] == "KXXX:f1" and r["role"] is None for r in rows)
+    assert all(0.0 <= r["reward"] <= 1.0 and r["outcome"] for r in rows)
+    readout = runner.summaries(rows, augmented=True)
+    assert set(readout["kinds"]) == {"D", "A"} and set(readout["roles"]) == {"as drawn"}
 
 
 def test_a_moved_start_flies_from_its_moved_state_through_the_window_runner(tmp_path, monkeypatch):

@@ -1,11 +1,10 @@
 """The prior speaking to every commanded aircraft of a window (`prior/window_speaker`, multi-aircraft design §6.6 step
-7.2): one commanded aircraft a scene says what `SceneSpeaker` says, word for word, and each one's words stay its own
-when another of the batch stops; a later aircraft is placed and speaks from its own rows; a later round's masks read
-the words an earlier round just said."""
+7.2): each commanded aircraft's words stay its own, word for word, when another of the batch stops; a later aircraft is
+placed and speaks from its own rows; a later round's masks read the words an earlier round just said. (With one commanded
+aircraft and no other it says what single-aircraft free generation says: the window loop's tests,
+`test_traffic_window.py`.)"""
 
 from __future__ import annotations
-
-import dataclasses
 
 import numpy as np
 import pytest
@@ -13,15 +12,25 @@ import torch
 
 from ts_transformer.inference.scene_edges import EDGE_FEATURES
 from ts_transformer.instructions.words import SPEED, Words
+from ts_transformer.prior.data import VARIANTS
 from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.model import with_traffic
 from ts_transformer.prior.scene import N_LOOK
+from ts_transformer.prior.scene_data import Node
 from ts_transformer.prior.window_speaker import WindowSpeaker
-from ts_transformer.prior.scene_speaker import SceneSpeaker
-from ts_transformer.tests.test_prior_scene_speaker import _other
 from ts_transformer.tests.test_prior_speaker import _flight, _model
 
 STEPS = 6
+
+
+def _other(first_step, rows=40, seed=3, width=None, slots=1):
+    """A replayed aircraft with random inputs, its first row at batch step ``first_step``."""
+    generator = np.random.default_rng(seed)
+    relative = len(VARIANTS["no-context"].relative_features)
+    return Node(f"other{seed}", False, first_step, generator.normal(size=(rows, width)).astype(np.float32),
+                generator.normal(size=(rows, slots, relative)).astype(np.float32), np.zeros(0, dtype=np.float32),
+                np.zeros((rows, 6), dtype=np.int64), np.zeros((rows, 6), dtype=np.float32),
+                np.zeros((rows, 6), dtype=np.int64), np.zeros((rows, 6), dtype=bool))
 
 
 def _self_edges(speaker_ref, calls=None):
@@ -53,44 +62,36 @@ def _traffic(one):
     return with_traffic(_model(Words(one)), EDGE_FEATURES).eval()
 
 
-def test_one_commanded_aircraft_a_scene_says_what_the_scene_speaker_says_and_its_words_outlive_another_leaving():
+def test_each_commanded_aircraft_s_words_stay_its_own_when_another_of_the_batch_leaves():
+    """Two scenes of one commanded aircraft each (the replayed ones in the air before the first and entering later
+    beside the second): the second leaves after its third step in one run and flies on in the other; the first says the
+    same words in both, the second the same up to its leaving and nothing after, and the masks of the first remove the
+    same."""
     one, geometry, signals, _ = _flight()
     traffic = _traffic(one)
     width = traffic.state.in_features - 6
-    others = [[_other(-5, width=width, seed=3)], [_other(2, rows=6, width=width, seed=5)]]
-    leaves = 3                                            # the second scene's aircraft stops after its third step
-    # the scene speaker: both flights to the end, the second frozen and silent from its step `leaves`
-    reference = [None]
-    scene = SceneSpeaker(traffic, [signals, signals], [geometry] * 2, None, Words(one), others=others,
-                         edges=_self_edges(reference), masks=lambda column, chosen: None, mask_columns=(),
-                         history=100, max_rows=N_LOOK + STEPS + 1, generator=torch.Generator().manual_seed(4),
-                         procedure_masks=ProcedureMasks.none())
-    reference[0] = scene
-    # the same places on the batch's steps: the speaking aircraft's row 0 at the pre-roll's end, the others from there
-    pre = scene.pre
-    window = _window_speaker(traffic, one, geometry, [signals, signals], [0, 1], [pre, pre],
-                             [[dataclasses.replace(node, first_step=pre + node.first_step) for node in nodes]
-                              for nodes in others])
-    assert (pre, window.aircraft) == (5, scene.aircraft) == (5, 2)
-    scene_said, window_said = [], []
-    for step in range(STEPS):
-        active = np.array([True, step < leaves])
-        if step:
-            row = N_LOOK + step
-            scene.append(signals.e_m[[row, row]], signals.n_m[[row, row]], signals.altitude_m[[row, row]],
-                         frozen=~active)
-            flying = np.flatnonzero(active)
-            window.advance(flying, np.full(len(flying), signals.e_m[row]), np.full(len(flying), signals.n_m[row]),
-                           np.full(len(flying), signals.altitude_m[row]))
-        scene_said.append(scene.speak(active=active, runway_locked=np.zeros(2, dtype=bool)))
-        window_said.append(window.speak(np.where(active, 0, -1), np.zeros(2, dtype=bool)))
-    scene_said, window_said = np.stack(scene_said), np.stack(window_said)
-    assert np.array_equal(window_said[:, 0], scene_said[:, 0])            # the one that flies on: every word
-    assert np.array_equal(window_said[:leaves, 1], scene_said[:leaves, 1])  # the one that left: to its end
-    assert (window_said[leaves:, 1] == 0).all()
-    # what the masks removed, by each aircraft's own step
-    for column, masses in scene.forbidden.items():
-        assert np.array_equal(window.forbidden[column][0, :STEPS], np.stack(masses)[:, 0])
+    pre, leaves = 5, 3
+    others = [[_other(pre - 5, width=width, seed=3)], [_other(pre + 2, rows=6, width=width, seed=5)]]
+    runs = []
+    for leaving in (False, True):
+        window = _window_speaker(traffic, one, geometry, [signals, signals], [0, 1], [pre, pre], others)
+        assert window.aircraft == 2
+        said = []
+        for step in range(STEPS):
+            active = np.array([True, not leaving or step < leaves])
+            if step:
+                row = N_LOOK + step
+                flying = np.flatnonzero(active)
+                window.advance(flying, np.full(len(flying), signals.e_m[row]), np.full(len(flying), signals.n_m[row]),
+                               np.full(len(flying), signals.altitude_m[row]))
+            said.append(window.speak(np.where(active, 0, -1), np.zeros(2, dtype=bool)))
+        runs.append((np.stack(said), window))
+    (stays, staying), (left, leaving) = runs
+    assert np.array_equal(left[:, 0], stays[:, 0])                  # the one that flies on: every word
+    assert np.array_equal(left[:leaves, 1], stays[:leaves, 1])      # the one that left: to its end
+    assert (left[leaves:, 1] == 0).all() and (stays[leaves:, 1] != 0).any()
+    for column, masses in staying.forbidden.items():                 # what the masks removed from the first
+        assert np.array_equal(leaving.forbidden[column][0, :STEPS], masses[0, :STEPS])
 
 
 def test_a_later_aircraft_enters_at_its_offset_and_speaks_from_its_own_first_predicted_step():

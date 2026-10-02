@@ -2,8 +2,9 @@
 the 7.6 plan): a window's words scored whole give back the distributions they were sampled from — two commanded aircraft
 in the air together, replayed ones, a traffic attention that reads the others, more candidate slots than the airport has,
 a window scored with others of another pre-roll or on its own — an aircraft whose flight ends inside a step keeps the
-words it said there, and each aircraft's rows are rebuilt with the landing context each was encoded with. On the
-scene-data fixture."""
+words it said there, and each aircraft's rows are rebuilt with the landing context each was encoded with; a window
+holding only its commanded aircraft is read as the single-aircraft tuner reads its sentence. On the scene-data
+fixture."""
 
 from __future__ import annotations
 
@@ -353,16 +354,12 @@ def test_probes_are_weighed_among_themselves_and_their_go_around_against_the_unp
 
 def _one_commanded_round(tmp_path, monkeypatch):
     """Windows of one commanded aircraft each (f3 twice, with replayed ones around it; f7 twice), spoken by a reading
-    model, as the window tuner and the scene tuner read them: ``(model, spec, window split, scene split, advantages,
-    masks, data)``."""
+    model, as the window tuner reads them: ``(model, spec, window split, advantages, masks, data)``."""
     from ts_transformer.experiments.traffic_scene_data import build_split
-    from ts_transformer.experiments.traffic_speaking import scene_of
-    from ts_transformer.experiments.traffic_tuner import SceneSplit
     from ts_transformer.experiments.traffic_window_tuner import WindowSplit, window_flight
     from ts_transformer.instructions.artefact import load_signals
-    from ts_transformer.instructions.words import UNCHANGED
     from ts_transformer.prior import data as prior_data
-    from ts_transformer.prior.data import Split, chain_record, column_classes
+    from ts_transformer.prior.data import Split, column_classes
 
     _, airports, spec = _airport(tmp_path, monkeypatch)
     airport = airports["KXXX"]
@@ -386,20 +383,8 @@ def _one_commanded_round(tmp_path, monkeypatch):
          for i, r in enumerate(records)],
         [[r] for r in records], [[0]] * 4, [advantages[i: i + 1] for i in range(4)], [[a] for a in allowed],
         [[-1]] * 4, [np.zeros(1)] * 4)
-    scene_flights, positions = [], []
-    for i, r in enumerate(records):
-        said = r.grid[: counted[i]]
-        rows = N_LOOK + counted[i]
-        flight = chain_record(loop.flights[i], r.e[:rows], r.n[:rows], r.h[:rows], said,
-                              np.where(said != UNCHANGED, said + 1, 0), np.ones(said.shape, dtype=bool), geometry, None,
-                              0, 0, spec.step_s)
-        scene_flights.append(flight)
-        positions.append(np.column_stack((r.e[:rows], r.n[:rows], r.h[:rows])))
-    scenes = [scene_of(airport, r.key, 60.0, spec.step_s) for r in records]
-    assert all(scene.others == window.others for scene, window in zip(scenes, loop.windows))
-    scene_split = SceneSplit(dataclasses.replace(table, flights=scene_flights), scenes, positions)
     data, _ = build_split(tmp_path / "artefact", "train", spec, ("KXXX",), None, 2_048)
-    return model, spec, window_split, scene_split, advantages, allowed, data
+    return model, spec, window_split, advantages, allowed, data
 
 
 def _gradients(tuner):
@@ -410,43 +395,63 @@ def _gradients(tuner):
     return seen
 
 
-@pytest.mark.parametrize("tokens, passes", [(16_384, 1), (80, 2)])
-def test_with_one_commanded_aircraft_a_window_trains_as_its_scene_does(tmp_path, monkeypatch, tokens, passes):
-    """One update of every sentence, and — a batch a sentence (R32's cut: a sentence's rows to its counted steps) — four
-    updates a pass over two passes, in the same order of batches: the same records and every update's gradients."""
+def test_a_window_holding_only_its_commanded_aircraft_is_read_as_the_single_aircraft_tuner_reads_it(tmp_path,
+                                                                                                      monkeypatch):
+    """Three flights an hour apart, each the only aircraft of its window, spoken by a prior given a traffic attention at
+    zero: the window tuner's distance to the reference — the model's and the reference's logits over each sentence's
+    counted steps under the masks it said them under — is the second stage's tuner's on the same sentences as single
+    flights (`prior.train.RewardTuner`, `data.chain_record`), to rounding."""
     import copy
 
-    from ts_transformer.experiments.traffic_tuner import SceneRewardTuner
-    from ts_transformer.experiments.traffic_window_tuner import WindowRewardTuner
-    from ts_transformer.prior.train import RewardConfig
+    from ts_transformer.experiments.traffic_window_tuner import WindowRewardTuner, WindowSplit, window_flight
+    from ts_transformer.inference.scene_edges import EDGE_FEATURES
+    from ts_transformer.instructions.artefact import load_signals
+    from ts_transformer.instructions.words import UNCHANGED
+    from ts_transformer.prior import data as prior_data
+    from ts_transformer.prior.data import Split, chain_record, column_classes
+    from ts_transformer.prior.model import with_traffic
+    from ts_transformer.prior.train import RewardConfig, RewardTuner
     from ts_transformer.tests.test_prior_speaker import _model
 
-    model, spec, window_split, scene_split, advantages, allowed, data = _one_commanded_round(tmp_path, monkeypatch)
-    reference = _model(Words(spec), slots=2)
-    records, gradients = [], []
-    for kind in ("scene", "window"):
-        tuner = (SceneRewardTuner if kind == "scene" else WindowRewardTuner)(
-            copy.deepcopy(model), reference, RewardConfig(tokens_per_batch=tokens), CPU, seed=0,
-            traffic_learning_rate=3e-4, step_s=spec.step_s)
-        seen = _gradients(tuner)
-        if kind == "scene":
-            distance = tuner.distance(scene_split, allowed)
-            records.append(tuner.one_pass(scene_split, advantages, data, allowed, slots=2, passes=passes))
-        else:
-            assert tuner.window_distance(window_split) == pytest.approx(distance, rel=1e-5)
-            records.append(tuner.window_pass(window_split, data, slots=2, passes=passes))
-        gradients.append(seen)
-    updates = 1 if tokens > 1_000 else 4 * passes
-    assert records[0]["batches"] == records[1]["batches"] == len(gradients[0]) == len(gradients[1]) == updates
-    for name in ("reward_mean", "kl_mean", "data_mean"):         # (the reward term's mean sits near 0: float rounding)
-        assert records[1][name] == pytest.approx(records[0][name], rel=1e-5, abs=1e-6), name
-    assert np.allclose(records[1]["kl_trace"], records[0]["kl_trace"], rtol=1e-5, atol=1e-9)
-    assert records[0]["sentences"] == records[1]["sentences"] == 4
-    assert max(float(g.abs().max()) for name, g in gradients[0][0].items() if ".traffic." in name) > 0.0
-    for scene, window in zip(*gradients):
-        assert scene.keys() == window.keys()
-        for name, g in scene.items():
-            assert torch.allclose(window[name], g, rtol=1e-4, atol=1e-7), name
+    _, airports, spec = _airport(tmp_path, monkeypatch, [0.0, 3_600.0, 7_200.0], (0, 1, 2))
+    airport = airports["KXXX"]
+    signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
+    words = Words(spec)
+    reference = _model(words, slots=2)
+    single = copy.deepcopy(reference)
+    torch.manual_seed(3)
+    with torch.no_grad():                               # off the reference: a distance to measure
+        for parameter in single.parameters():
+            parameter.add_(0.05 * torch.randn_like(parameter))
+    model = with_traffic(single, EDGE_FEATURES).eval()
+    loop = _loop(model, airport, signals, spec, [_keys(0), _keys(1), _keys(2)], [60.0] * 3)
+    assert all(window.others == () for window in loop.windows)
+    while loop.running:
+        loop.step()
+    records, results = loop.records(), loop.results()
+    counted = [r.counted for r in results]
+    assert min(counted) > 5
+    geometry = airport.flights.geometry
+    table = Split([], ("KXXX",), prior_data.candidate_table({"KXXX": geometry}, ("KXXX",), 2), (("09",),), ((90.0,),),
+                  column_classes(words, 2), "no-context")
+    allowed = [{c: masks[i, : counted[i]].copy() for c, masks in loop.speaker.allowed.items()} for i in range(3)]
+    window_split = WindowSplit(
+        table, list(loop.windows),
+        [[window_flight(r, loop.windows[i], loop.flights[i], geometry, None, 0, 0, counted[i], spec.step_s)]
+         for i, r in enumerate(records)],
+        [[r] for r in records], [[0]] * 3, [np.zeros(1)] * 3, [[a] for a in allowed], [[-1]] * 3, [np.zeros(1)] * 3)
+    flights = []
+    for i, r in enumerate(records):
+        said, rows = r.grid[: counted[i]], N_LOOK + counted[i]
+        flights.append(chain_record(loop.flights[i], r.e[:rows], r.n[:rows], r.h[:rows], said,
+                                    np.where(said != UNCHANGED, said + 1, 0), np.ones(said.shape, dtype=bool), geometry,
+                                    None, 0, 0, spec.step_s))
+    config = RewardConfig()
+    windowed = WindowRewardTuner(model, reference, config, CPU, seed=0, traffic_learning_rate=3e-4, step_s=spec.step_s)
+    alone = RewardTuner(single, reference, config, CPU, seed=0)
+    distance = alone.distance(dataclasses.replace(table, flights=flights), allowed)
+    assert distance > 1e-3
+    assert windowed.window_distance(window_split) == pytest.approx(distance, rel=1e-5)
 
 
 def test_window_samples_scored_in_parts_have_the_gradient_of_one_piece(tmp_path, monkeypatch):
@@ -457,7 +462,7 @@ def test_window_samples_scored_in_parts_have_the_gradient_of_one_piece(tmp_path,
     from ts_transformer.prior.train import RewardConfig
     from ts_transformer.tests.test_prior_speaker import _model
 
-    model, spec, window_split, _, _, _, data = _one_commanded_round(tmp_path, monkeypatch)
+    model, spec, window_split, _, _, data = _one_commanded_round(tmp_path, monkeypatch)
     gradients = []
     for budget in (10 ** 9, 1, "in blocks"):
         if budget == "in blocks":                  # one part of the four samples, each encoding in four blocks of steps
@@ -646,7 +651,7 @@ def test_a_probes_go_around_is_left_out_of_the_ratio_and_learned_where_its_probe
     from ts_transformer.prior.train import RewardConfig
     from ts_transformer.tests.test_prior_speaker import _model
 
-    model, spec, split, _, advantages, allowed, _ = _one_commanded_round(tmp_path, monkeypatch)
+    model, spec, split, advantages, allowed, _ = _one_commanded_round(tmp_path, monkeypatch)
     step = 3
     rebuilt, masks = [], []
     for s in range(4):

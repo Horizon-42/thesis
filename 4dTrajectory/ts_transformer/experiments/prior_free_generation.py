@@ -200,16 +200,11 @@ class ClosedLoop:
         self.step_s, self.params, self.device = step_s, params, device
         self.executor = Executor(inputs, runways, charts, approach_ias_mps, params, words,
                                  time_limit_s=torch.tensor(limits, dtype=torch.float64, device=device))
-        self.speaker = self._make_speaker(model, flights, geometries, landings, words,
-                                          max_rows=rows_for(max(limits) + step_s, step_s), generator=generator,
-                                          procedure_masks=procedure_masks, temperature=temperature)
+        self.speaker = Speaker(model, flights, geometries, landings, words,
+                               max_rows=rows_for(max(limits) + step_s, step_s), generator=generator,
+                               procedure_masks=procedure_masks, temperature=temperature)
         self.spoken = Spoken(len(limits), words, device=device)
         self.max_steps = rows_for(max(limits), step_s) - N_LOOK
-
-    def _make_speaker(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
-                      landings: Any, words: Words, **options: Any) -> Speaker:
-        """The speaker of the loop's flights (a scene's loop speaks through a `SceneSpeaker`)."""
-        return Speaker(model, flights, geometries, landings, words, **options)
 
     @property
     def steps(self) -> int:

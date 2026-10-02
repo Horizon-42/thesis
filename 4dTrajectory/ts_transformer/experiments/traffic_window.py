@@ -319,7 +319,7 @@ class Commanded:
     `UNCHANGED` where a column says nothing; nothing after the judge ended it), its outcome under the loop's reading (its
     own end, or `traffic_loop.LOST_SEPARATION` when the judge ended it first — then ``end`` is that end), its own end
     (the executor judge's or the glidepath edge's, whatever the judge did), the steps said up to its judged end
-    (``counted``: what it is trained on; `traffic_free_generation.judged_steps`' count), its first state's time, its
+    (``counted``: what it is trained on), its first state's time, its
     crossing (None: it did not land), the runway in force at its end (a candidate's index), where its executor's
     states are (``group``, ``place``), the own step of its first go-around word (None: it said none; multi-aircraft
     design §6.6 step 8) and of a go-around a probe said for it (None: none; step 8 item 10)."""
@@ -365,8 +365,7 @@ class WindowLoop:
     step), time limit and geometry; ``alone``: each aircraft speaks seeing no other (its edge features its own, no
     separation mask) and is still judged in its window; ``given``: an aircraft's words given up to an own step
     (`Given`; None: spoken throughout) — said in its round, neither sampled nor masked; ``go_around_extra_s``: the time a
-    go-around adds to its sentence (0: none — as the one-aircraft scene loop, whose module the traffic prior's edge-source
-    hash holds, flies it); ``probing``: the aircraft a probe watches (multi-aircraft design §6.6 step 8 item 10; None:
+    go-around adds to its sentence (0: none); ``probing``: the aircraft a probe watches (multi-aircraft design §6.6 step 8 item 10; None:
     none) — once cleared, established on its final and under its approach altitude, and while it has said no go-around,
     a go-around is said for it at the first step its tightest margin at its step before was under ``probe_margin`` (`WindowSpeaker.speak`'s ``forced``:
     said in place of its draw; an infinite ``probe_margin``: at its first such step, alone or not — the longest sentences,
@@ -407,8 +406,9 @@ class WindowLoop:
     **Stated approximation**: a replayed aircraft's inputs are the samples' (`traffic_scene_data`, in the edge features'
     source hash), its landing context the recorded one, the commanded aircraft's recorded landings included.
 
-    With one commanded aircraft a window it says and flies, to its judged end, what `traffic_speaking.SceneLoop` says
-    and flies, and ends where `traffic_speaking.judged` ends it (tests).
+    With one commanded aircraft and nothing else in its window it says and flies what single-aircraft free generation
+    does (`prior_free_generation.speak_and_fly`); a commanded aircraft ends where `traffic_speaking.judged`, reading its
+    path afterwards, ends it (tests).
     """
 
     def __init__(self, model: Prior, windows: Sequence[Window], flights: Sequence[FlightSignals],
@@ -1024,7 +1024,8 @@ class WindowLoop:
         return out
 
     def close(self) -> None:
-        """Let the speaker go (`traffic_speaking.SceneLoop.close`: the loop and the speaker hold each other)."""
+        """Let the speaker go: it holds the loop's callbacks and the loop holds it — a cycle only the cyclic collector
+        frees, which does not watch the GPU (M3's first formal run filled the GPU so). Read what is wanted first."""
         self.speaker.edges_of = self.speaker.masks_of = None
         self.speaker = None
 
@@ -1081,7 +1082,9 @@ def window_edges(windows: Sequence[Window], keys: Sequence[str], window_of: np.n
                  n: np.ndarray, h: np.ndarray, pointers: np.ndarray, rows: np.ndarray, start: np.ndarray, first: int,
                  last: int, step_s: float, aircraft: int, width: int) -> np.ndarray:
     """``[S, last − first, aircraft, aircraft, width]``: every speaking scene's edge features on batch steps ``first … last
-    − 1``, read from two steps before (as `SceneLoop._edges`) — the loop's and a trainer's: each commanded aircraft
+    − 1``, read from two steps before (an aircraft's motion is its displacement from its row before, and another
+    aircraft whose row is later than a step's instant is carried forward from its row before, `inference.scene_edges`)
+    — the loop's and a trainer's: each commanded aircraft
     ``i`` (``keys``, of window ``window_of[i]``; ``alone``: each its own scene) from its row 0 at step ``start[i]`` over
     its first ``rows[i]`` rows at ``e``, ``n``, ``h`` with the runway class in force before each (``pointers``), placed
     by `traffic_speaking.edge_rows`, the replayed ones by the same call over the scene's first commanded aircraft — the

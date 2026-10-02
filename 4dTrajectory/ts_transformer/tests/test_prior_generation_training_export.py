@@ -219,7 +219,7 @@ def _tuned(schema, start, round_number):
 def test_the_models_are_named_by_the_method_that_trained_them_every_version_alike():
     from ts_transformer.experiments.prior_augmented_reward import AUGMENTED_REWARD_SCHEMA
     from ts_transformer.experiments.prior_landing_reward import LANDING_REWARD_SCHEMA
-    from ts_transformer.experiments.traffic_reward import TRAFFIC_REWARD_SCHEMA
+    from ts_transformer.experiments.prior_generation_training_export import TRAFFIC_REWARD_SCHEMA
     from ts_transformer.experiments.traffic_window_reward import SCHEMA as TRAFFIC_WINDOW_REWARD_SCHEMA
 
     assert export.model_identity({"git": {}}) == ("base", None)

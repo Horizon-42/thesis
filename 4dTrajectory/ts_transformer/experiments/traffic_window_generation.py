@@ -591,8 +591,8 @@ def fixed_rows(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, pa
 
 
 def _recorded_path(batch: replay.Batch, j: int, window: Window, key: str, step_s: float) -> Controlled:
-    """A commanded aircraft along its own record on the loop's steps from its first predicted step
-    (`traffic_free_generation.recorded_rows`' path)."""
+    """A commanded aircraft along its own record on the loop's steps from its first predicted step (M0's recorded
+    control, `traffic_loop.recorded`)."""
     flight, reading, geometry = batch.signals[j], batch.readings[j], batch.geometries[j]
     own = window.track(key)
     seen = presence(flight, len(reading.words), geometry, step_s)
