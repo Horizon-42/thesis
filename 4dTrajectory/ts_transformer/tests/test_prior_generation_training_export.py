@@ -236,6 +236,12 @@ def test_the_models_are_named_by_the_method_that_trained_them_every_version_alik
         with pytest.raises(ValueError, match="not a versioned post-training schema"):
             export.method_of(schema)
     assert set(export.METHOD_MODELS.values()) | {"base"} == set(export.MODEL_NAMES)
+    # the archived runner's schema, mirrored (nothing imports the archive): read from its source
+    from ts_transformer.repo_layout import REPO_ROOT
+
+    archived = (REPO_ROOT / "4dTrajectory/ts_transformer/archive/one_commanded_scene_2026_10/experiments/"
+                "traffic_reward.py").read_text(encoding="utf-8")
+    assert f'TRAFFIC_REWARD_SCHEMA = "{export.TRAFFIC_REWARD_SCHEMA}"' in archived
     assert [export.display_name(*pair) for pair in (("base", None), ("augmented", 3))] == ["base", "augmented r3"]
 
 

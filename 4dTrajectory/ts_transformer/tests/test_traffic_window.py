@@ -270,26 +270,24 @@ def _traffic_model(spec):
 
 def test_one_commanded_aircraft_alone_in_its_window_says_and_flies_what_single_aircraft_free_generation_does(
         tmp_path, monkeypatch):
-    """f3 has its window to itself; f1 hears no other (``alone``: f0 and f2 are only judged with it). Each says and flies,
-    word for word and state for state, what the prior it grew from says alone."""
+    """f3 has its window to itself: it says and flies, word for word and state for state, what the prior it grew from
+    says alone (the aircraft that hear no other in a busy window: `test_alone_one_commanded_aircraft_a_window_hears_no_
+    other_and_is_judged_with_them`)."""
     import numpy as np
     import torch
 
     airport, signals, spec = _scene_airport(tmp_path, monkeypatch)
-    model = _traffic_model(spec)
-    for key, alone in (("KXXX:f3", False), ("KXXX:f1", True)):
-        loop = _window_loop(model, airport, signals, spec, [(key,)], alone=alone)
-        assert loop.windows[0].others == (() if key == "KXXX:f3" else ("KXXX:f0", "KXXX:f2"))
-        while loop.running:
-            loop.step()
-        flown, said = _single_aircraft(airport, signals, spec, [key], [LIMIT_S], 4)
-        got = loop.results()[0]
-        steps = got.counted
-        assert np.array_equal(got.said[:steps], said[0][:steps])
-        assert torch.equal(loop.executors[got.group][2].flown().states[got.place, : steps * 2 + 1],
-                           flown.states[0, : steps * 2 + 1])
-        if key == "KXXX:f3":
-            assert got.end is None and steps == len(got.said)
+    loop = _window_loop(_traffic_model(spec), airport, signals, spec, [("KXXX:f3",)])
+    assert loop.windows[0].others == ()
+    while loop.running:
+        loop.step()
+    flown, said = _single_aircraft(airport, signals, spec, ["KXXX:f3"], [LIMIT_S], 4)
+    got = loop.results()[0]
+    steps = got.counted
+    assert got.end is None and steps == len(got.said) > 5
+    assert np.array_equal(got.said, said[0][:steps])
+    assert torch.equal(loop.executors[got.group][2].flown().states[got.place, : steps * 2 + 1],
+                       flown.states[0, : steps * 2 + 1])
 
 
 def test_one_commanded_aircraft_a_window_ends_where_its_path_read_afterwards_ends(tmp_path, monkeypatch):
@@ -439,6 +437,7 @@ def test_under_the_procedure_s_altitudes_a_glidepath_stop_is_the_single_aircraft
 
 def test_alone_one_commanded_aircraft_a_window_hears_no_other_and_is_judged_with_them(tmp_path, monkeypatch):
     import numpy as np
+    import torch
 
     from ts_transformer.instructions.artefact import load_signals
 
@@ -451,10 +450,37 @@ def test_alone_one_commanded_aircraft_a_window_hears_no_other_and_is_judged_with
     while loop.running:
         loop.step()
     _ends_as_read_afterwards(loop, airport, spec)
-    # what each says is what the prior it grew from says alone, to its judged end
-    _, said = _single_aircraft(airport, signals, spec, keys, limits, 16)
-    for got, words in zip(loop.results(), said):
-        assert np.array_equal(got.said[: got.counted], words[: got.counted])
+    # what each says and flies is what the prior it grew from says alone, to its judged end
+    flown, said = _single_aircraft(airport, signals, spec, keys, limits, 16)
+    for j, (got, words) in enumerate(zip(loop.results(), said)):
+        assert got.counted > 5 and np.array_equal(got.said[: got.counted], words[: got.counted])
+        steps = got.counted * 2 + 1
+        assert torch.equal(loop.executors[got.group][2].flown().states[got.place, :steps], flown.states[j, :steps])
+
+
+
+def test_the_separation_masks_of_a_one_commanded_window_read_its_replayed_aircraft(tmp_path, monkeypatch):
+    """Chained traffic: the separation masks take words from the commanded aircraft at some steps; the same windows with
+    no replayed aircraft take none — what the masks read of the others is the replayed traffic."""
+    import dataclasses
+
+    from ts_transformer.experiments.traffic_speaking import MASK_COLUMNS
+    from ts_transformer.instructions.artefact import load_signals
+
+    _, airports, spec = _airport(tmp_path, monkeypatch)
+    airport = airports["KXXX"]
+    signals = {s.dataset_id: s for s in load_signals(tmp_path / "artefact", "train")}
+    keys, limits = ["KXXX:f2", "KXXX:f3", "KXXX:f5", "KXXX:f3"], [60.0, 60.0, 60.0, 90.0]
+    masked = []
+    for empty in (False, True):
+        loop = _window_loop(_traffic_model(spec), airport, signals, spec, [(k,) for k in keys], seed=1, limits=limits)
+        if empty:
+            loop.windows = [dataclasses.replace(window, others=()) for window in loop.windows]
+        assert all(len(window.others) > 0 for window in loop.windows) != empty
+        while loop.running:
+            loop.step()
+        masked.append(sum(int(loop.separation_masked[column].sum()) for column in MASK_COLUMNS))
+    assert masked[0] > 0 and masked[1] == 0
 
 
 def test_the_others_enter_the_edge_features_and_the_masks_are_asked_at_a_step_spoken(tmp_path, monkeypatch):
@@ -819,7 +845,7 @@ def test_the_steps_counted_run_to_the_judge_s_end_time_and_an_end_the_executor_f
     while loop.running:
         loop.step()
     assert int(loop.speaker.rows[0]) == rows and loop.results()[0].outcome == "crossed_without_capture"
-    # the steps counted: the judge's end time on the steps from the first state, as `judged_steps` rounds it
+    # the steps counted: the judge's end time on the steps from the first state, rounded to a step
     first_s = loop.states[0][0].t_s
     loop.runs[0].ended["KXXX:f3"] = {"t_s": first_s + 3.4, "kind": "at_threshold", "relation": "same", "with": "x",
                                      "with_controlled": False}

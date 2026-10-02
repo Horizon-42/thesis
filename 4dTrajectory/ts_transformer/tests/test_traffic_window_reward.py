@@ -256,18 +256,21 @@ def test_a_probe_run_may_sweep_its_round_several_times(tmp_path):
     assert not (tmp_path / "run").exists()
 
 
-def test_hard_events_to_train_on_need_their_count_an_airport(tmp_path):
+def test_hard_events_to_train_on_need_their_count_an_airport(tmp_path, capsys):
     """Multi-aircraft design §6.6 step 8 item 11: ``--events`` and ``--events-per-airport`` go together — refused before
     anything is opened."""
     from ts_transformer.experiments.traffic_window_reward import main
 
     paths = ["--prior", "p", "--base", "b", "--instructions", "i", "--executor", "e", "--out", str(tmp_path / "run")]
-    for more in (["--events", "r"], ["--events-per-airport", "3"],
-                 # hard events are windows of every aircraft commanded: not with one commanded aircraft a window
-                 ["--commanded", "one", "--events", "r", "--events-per-airport", "3"],
+    for more in (["--events", "r"], ["--events-per-airport", "3"]):
+        with pytest.raises(SystemExit):
+            main(paths + more)
+    # hard events are windows of every aircraft commanded: not with one commanded aircraft a window
+    for more in (["--commanded", "one", "--events", "r", "--events-per-airport", "3"],
                  ["--commanded", "one", "--select-events", "r"]):
         with pytest.raises(SystemExit):
             main(paths + more)
+        assert "hard events are windows of every aircraft commanded" in capsys.readouterr().err
     assert not (tmp_path / "run").exists()
 
 

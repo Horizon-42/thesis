@@ -60,6 +60,8 @@ def test_a_flight_shifted_by_whole_steps_keeps_its_rows_and_its_landing_leaves_i
     assert later.e_m is signals.e_m and later.time_s is signals.time_s and later.dataset_id == "KXXX:f1"
     rows = airport.flights.flights["KXXX:f1"]
     new_rows, new_track = moved(rows, airport.tracks["KXXX:f1"], -38.0, "KXXX:f1", STEP_S)
+    with pytest.raises(ValueError, match="not whole 2 s steps"):     # a move off the steps would take its rows off them
+        moved(rows, airport.tracks["KXXX:f1"], -37.0, "KXXX:f1", STEP_S)
     geometry = airport.flights.geometry
     assert np.array_equal(presence(later, len(rows.presence.times_s), geometry, STEP_S).times_s,
                           new_rows.presence.times_s)

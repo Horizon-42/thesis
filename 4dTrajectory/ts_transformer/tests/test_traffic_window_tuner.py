@@ -398,9 +398,10 @@ def _gradients(tuner):
 def test_a_window_holding_only_its_commanded_aircraft_is_read_as_the_single_aircraft_tuner_reads_it(tmp_path,
                                                                                                       monkeypatch):
     """Three flights an hour apart, each the only aircraft of its window, spoken by a prior given a traffic attention at
-    zero: the window tuner's distance to the reference — the model's and the reference's logits over each sentence's
-    counted steps under the masks it said them under — is the second stage's tuner's on the same sentences as single
-    flights (`prior.train.RewardTuner`, `data.chain_record`), to rounding."""
+    zero: the window tuner reads them as the second stage's tuner reads the same sentences as single flights
+    (`prior.train.RewardTuner`, `data.chain_record`) — the distance to the reference, and the model's, the frozen
+    start's and the reference's logits over each sentence's counted steps under the masks it said them under, with the
+    asked steps — to rounding."""
     import copy
 
     from ts_transformer.experiments.traffic_window_tuner import WindowRewardTuner, WindowSplit, window_flight
@@ -449,9 +450,121 @@ def test_a_window_holding_only_its_commanded_aircraft_is_read_as_the_single_airc
     config = RewardConfig()
     windowed = WindowRewardTuner(model, reference, config, CPU, seed=0, traffic_learning_rate=3e-4, step_s=spec.step_s)
     alone = RewardTuner(single, reference, config, CPU, seed=0)
-    distance = alone.distance(dataclasses.replace(table, flights=flights), allowed)
+    sentences = dataclasses.replace(table, flights=flights)
+    distance = alone.distance(sentences, allowed)
     assert distance > 1e-3
     assert windowed.window_distance(window_split) == pytest.approx(distance, rel=1e-5)
+    # what a pass is built from: the model's, the frozen start's and the reference's logits under the masks, and the
+    # asked steps (the clipped ratio, the pull and their gradients are the same functions of them: `prior.train`)
+    start = copy.deepcopy(model).eval()
+    batch, logits, started, pulled, steps, _, _ = windowed._window_scored(window_split, [0, 1, 2], start)
+    single_batch, single_logits, (single_pulled, single_started), single_steps = alone._scored(
+        sentences, [0, 1, 2], allowed, [reference, copy.deepcopy(single).eval()])
+    assert torch.equal(batch["targets"], single_batch["targets"]) and torch.equal(steps, single_steps)
+    for ours, theirs in ((logits, single_logits), (started, single_started), (pulled, single_pulled)):
+        for a, b in zip(ours, theirs):
+            assert torch.equal(torch.isfinite(a), torch.isfinite(b))
+            assert torch.allclose(a[torch.isfinite(a)], b[torch.isfinite(b)], rtol=1e-5, atol=1e-5)
+
+
+
+def test_the_traffic_attention_trains_at_its_own_learning_rate_and_the_reference_reads_alone(tmp_path, monkeypatch):
+    from ts_transformer.experiments.traffic_window_tuner import WindowRewardTuner, traffic_parameters
+    from ts_transformer.prior.train import RewardConfig
+    from ts_transformer.tests.test_prior_speaker import _model
+
+    model, spec, _, _, _, _ = _one_commanded_round(tmp_path, monkeypatch)
+    tuner = WindowRewardTuner(model, _model(Words(spec), slots=2), RewardConfig(), CPU, seed=0,
+                              traffic_learning_rate=3e-4, step_s=spec.step_s)
+    traffic, rest = tuner.optimiser.param_groups
+    assert traffic["lr"] * 20 == pytest.approx(3e-4) and rest["lr"] * 20 == pytest.approx(1e-5)     # warm-up step 1
+    ids = [id(p) for group in (traffic, rest) for p in group["params"]]
+    assert len(ids) == len(set(ids)) == len(list(model.parameters()))
+    assert {id(p) for p in traffic["params"]} == {id(p) for p in traffic_parameters(model)}
+    with pytest.raises(ValueError, match="reads the aircraft alone"):
+        WindowRewardTuner(model, model, RewardConfig(), CPU, seed=0, traffic_learning_rate=3e-4, step_s=spec.step_s)
+
+
+def test_a_pass_continued_from_the_saved_state_updates_as_one_run_does(tmp_path, monkeypatch):
+    """Round by round (design §6.6 step 6 item 11): two passes in one tuner, each from its round's own stream, against a
+    first pass, its weights and `WindowRewardTuner.state` saved and read back into a new model and tuner, then the
+    second pass — the same weights, bit for bit."""
+    import copy
+
+    from ts_transformer.experiments import traffic_window_tuner
+    from ts_transformer.experiments.traffic_window_tuner import WindowRewardTuner
+    from ts_transformer.prior.train import RewardConfig
+    from ts_transformer.tests.test_prior_speaker import _model
+
+    model, spec, split, _, _, data = _one_commanded_round(tmp_path, monkeypatch)
+    splits = [split, dataclasses.replace(split, advantages=[-a for a in split.advantages])]
+    # four updates a pass and one data batch an update, a scene sample each, three samples: a pass ends part-way through
+    # the data's order, so a round that did not start its own would read on from the last
+    data = [*data, data[0]]
+    monkeypatch.setattr(traffic_window_tuner, "M2_BATCH", 1)
+    monkeypatch.setattr(traffic_window_tuner, "DATA_BATCHES", 1)
+    assert 4 % len(data) != 0
+
+    def tuner(weights):
+        return WindowRewardTuner(weights, _model(Words(spec), slots=2), RewardConfig(warmup_steps=3, tokens_per_batch=80),
+                                 CPU, seed=0, traffic_learning_rate=3e-4, step_s=spec.step_s)
+
+    def one_pass(t, round_number):
+        t.restart(np.random.default_rng([0, round_number, 2]))
+        assert t.window_pass(splits[round_number - 1], data, slots=2)["batches"] == 4
+
+    continuous = copy.deepcopy(model)
+    whole = tuner(continuous)
+    one_pass(whole, 1)
+    one_pass(whole, 2)
+
+    first = copy.deepcopy(model)
+    early = tuner(first)
+    one_pass(early, 1)
+    torch.save({"weights": first.state_dict(), "state": early.state()}, tmp_path / "round_01.pt")
+    saved = torch.load(tmp_path / "round_01.pt", weights_only=True)
+    later_model = copy.deepcopy(model)
+    later_model.load_state_dict(saved["weights"])
+    later = tuner(later_model)
+    later.load_state(saved["state"])
+    assert later.passes == 1 and later.schedule.last_epoch == early.schedule.last_epoch
+    one_pass(later, 2)
+    assert whole.passes == later.passes == 2 and whole.schedule.last_epoch == later.schedule.last_epoch == 8
+    assert all(torch.equal(value, later_model.state_dict()[name]) for name, value in continuous.state_dict().items())
+    assert any(not torch.equal(value, first.state_dict()[name]) for name, value in continuous.state_dict().items())
+
+
+@pytest.mark.filterwarnings("ignore:Seems like `optimizer.step\\(\\)` has been overridden")
+def test_several_passes_sweep_in_new_orders_against_the_model_frozen_once(tmp_path, monkeypatch):
+    """Design §6.6 step 6 item 14: every sweep scores against the one model frozen at the start (the clipped ratio's
+    denominator: the model the sentences were said by), not one frozen again at each sweep; each sweep a new order."""
+    from ts_transformer.experiments.traffic_window_tuner import WindowRewardTuner
+    from ts_transformer.prior.train import RewardConfig
+    from ts_transformer.tests.test_prior_speaker import _model
+
+    model, spec, split, _, _, data = _one_commanded_round(tmp_path, monkeypatch)
+    tuner = WindowRewardTuner(model, _model(Words(spec), slots=2), RewardConfig(tokens_per_batch=80), CPU, seed=0,
+                              traffic_learning_rate=3e-4, step_s=spec.step_s)
+    frozen, order, scored = [], [], tuner._window_scored
+
+    def spy(window_split, part, start):
+        frozen.append(start)
+        order.append(tuple(part))
+        return scored(window_split, part, start)
+
+    monkeypatch.setattr(tuner, "_window_scored", spy)
+    before = {name: value.clone() for name, value in model.state_dict().items()}
+    record = tuner.window_pass(split, data, slots=2, passes=3)
+    assert record["batches"] == 12 and len(record["sweeps"]) == 3 and tuner.passes == 3
+    assert [s["batches"] for s in record["sweeps"]] == [4, 4, 4]
+    assert all(start is frozen[0] for start in frozen) and frozen[0] is not model
+    # the frozen model is the one before the first update; the trained one moved away from it
+    assert all(torch.equal(before[name], value) for name, value in frozen[0].state_dict().items())
+    assert any(not torch.equal(before[name], value) for name, value in model.state_dict().items())
+    sweeps = [order[k:k + 4] for k in (0, 4, 8)]
+    assert all(sorted(s) == [(0,), (1,), (2,), (3,)] for s in sweeps) and len(set(map(tuple, sweeps))) > 1
+    with pytest.raises(ValueError, match="0 passes"):
+        tuner.window_pass(split, data, slots=2, passes=0)
 
 
 def test_window_samples_scored_in_parts_have_the_gradient_of_one_piece(tmp_path, monkeypatch):
