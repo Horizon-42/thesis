@@ -956,14 +956,20 @@ on the approach column includes the transitions' mask.
 
 **Probes** (step 8 item 10; `--probe-samples K --probe-margin m`, R34 to read what they do, R37 to train): the last K
 samples of each window are probed — a probed aircraft speaking its own words, cleared, established on its final (its
-executor's capture) and with no go-around said is made to say one at the first step its tightest margin at its step before
-was under m (`WindowSpeaker.speak`'s ``forced``: said in place of its draw where the masks allow it). Rows carry
-`probed` and `forced`. In R37 only the training rounds are probed (never the select readouts); the probe's word is not
-asked (`window_flight(forced=…)`: out of the clipped ratio and the KL) and is learned by `--imitation-weight` × its
-advantage × its cross-entropy where the advantage is above 0 (`WindowRewardTuner._window_scored`; one pass only:
-`--passes 1`); the round's `sentences.json` / `.npz` keep `probed`, `forced`, and its summary the unprobed and probed
-samples apart and the go-arounds said by the model, by a probe and learned; the preflight probes at an infinite margin
-(every established aircraft at once: the longest sentences). R41 pairs only readouts probed alike.
+executor's capture), under the approach altitude (`traffic_go_around.approach_altitude_m`) and with no go-around said is
+made to say one at the first step its tightest margin at its step before was under m (`WindowSpeaker.speak`'s
+``forced``: said in place of its draw where the masks allow it). Rows carry `probed` and `forced`. In R37 only the
+training rounds are probed (never the select readouts); an aircraft's advantages are taken in three groups, each
+against its own mean — its unprobed samples, its probes that said no go-around, its probes that said one
+(`window_advantages`: weighed against the others, every word after a probe's go-around was pushed down, the better ones
+too — step 8 small tests, readout 2026-10-02) — so `--probe-samples` is at least 2 and leaves at least 2 unprobed; the
+probe's word is not asked (`window_flight(forced=…)`: out of the clipped ratio and the KL) and is learned by
+`--imitation-weight` × its probe gain (its reward less the aircraft's unprobed samples' mean) × its cross-entropy where
+the gain is above 0 (`WindowRewardTuner._window_scored`; one pass only: `--passes 1`); the round's `sentences.json` /
+`.npz` keep `probed`, `forced`, the advantage and the probe gain, and its summary the unprobed and probed samples apart and
+the go-arounds said by the model, by a probe and learned; the preflight probes both its samples at an infinite margin
+(every established aircraft at once: the longest sentences), every aircraft trained and every go-around word learned.
+R41 pairs only readouts probed alike.
 
 ### R35 · `run_ts.py prior_generation_records` — a free-generation readout's sentences as evaluation records: ADE / FDE and the evaluation's pass rate (2026-09-30)
 

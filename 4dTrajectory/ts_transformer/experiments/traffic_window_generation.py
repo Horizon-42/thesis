@@ -648,7 +648,7 @@ def _order(rows: Sequence[dict[str, Any]], recorded_landing: Mapping[tuple[int, 
 def together(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """How one window's rewards go together over its samples (design §6.6 step 7 item 5): each aircraft's reward less
     its mean over the samples, the pooled correlation over every pair of aircraft of a window and sample — the
-    advantages M4 trains on; windows of one aircraft have no pair."""
+    advantages M4 trains on without probes; windows of one aircraft have no pair."""
     by_window: dict[int, dict[str, dict[int, float]]] = defaultdict(lambda: defaultdict(dict))
     for r in rows:
         by_window[r["window"]][r["dataset_id"]][r["sample"]] = r["reward"]

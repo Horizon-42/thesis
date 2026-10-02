@@ -82,12 +82,12 @@ def _write_run(tmp_path, monkeypatch, rounds=2):
             sentences = spoken("train", 10 + number)
             for row in sentences.rows:     # a contrast for every aircraft the runner can train (f1 starts in a loss)
                 row["reward"] = float(row["sample"] == 0 and not row["starts_in_a_loss"])
-            advantages, trained = window_advantages(sentences.rows, 2)
-            split, _ = window_split(round_, sentences, advantages, trained, table, None, spec.step_s)
+            advantages, gains, trained = window_advantages(sentences.rows, 2)
+            split, _ = window_split(round_, sentences, advantages, gains, trained, table, None, spec.step_s)
             start = {"real": tuner.window_distance(split), "augmented": None}
             tuner.restart(np.random.default_rng([0, number]))
             more = {"train_pass": {**tuner.window_pass(split, data, slots=2), "distance_at_start": start},
-                    "sentences": round_summary(round_, sentences, trained)}
+                    "sentences": round_summary(round_, sentences, trained, gains)}
         model.eval()
         readout = {}
         for side in ("real", "augmented"):

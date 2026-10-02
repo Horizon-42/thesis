@@ -161,26 +161,52 @@ def window_logits(model: Prior, layout: WindowLayout, *, checkpoint: bool = Fals
     return model.logits(own_h, own_tokens, valid[scene[:, 0]], targets, first)
 
 
-def window_advantages(rows: Sequence[Mapping[str, object]], samples: int) -> tuple[np.ndarray, np.ndarray]:
-    """``(each row's advantage, the rows trained on)`` of a round's window sentences (`traffic_window_generation.
-    WindowSentences.rows`, one draw's: an aircraft of a window over its ``samples`` samples — refused otherwise): its
-    reward less the mean of the same aircraft of the same window over its samples (`landing_reward.group_advantages`'
-    rule: not divided by the spread), and the rows of each aircraft whose samples' rewards differ and none of which starts
-    in a loss it answers for (no word of it made that one)."""
+def window_advantages(rows: Sequence[Mapping[str, object]], samples: int
+                      ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(each row's advantage, each row's probe gain, the rows trained on)`` of a round's window sentences
+    (`traffic_window_generation.WindowSentences.rows`, one draw's: an aircraft of a window over its ``samples`` samples
+    — refused otherwise).
+
+    - The advantage: its reward less the mean of the same aircraft of the same window over the samples spoken the same
+      way — three groups: its unprobed samples, its probes that said no go-around (the model's words throughout, but
+      kept because its margin never fell) and its probes that did (`landing_reward.group_advantages`' rule: not divided
+      by the spread). A sentence with a probe's go-around is the model's words under a go-around it did not say; weighed
+      against the others, every word after the go-around was pushed down with it, the better ones too (step 8 small
+      tests, readout 2026-10-02 §3) — among themselves, the words after one go-around are weighed against those after
+      another.
+    - The probe gain (0 but for a sentence a probe said a go-around for): its reward less the mean of the aircraft's
+      unprobed samples — how much better the go-around did than the model's own words; the go-around word is learned
+      where it is above 0 (`WindowRewardTuner._window_scored`). An aircraft with a probe's go-around and no unprobed
+      sample is refused.
+    - Trained: of an aircraft none of whose samples starts in a loss it answers for (no word of it made that one), each
+      such group's rows whose rewards differ, and a probe's sentence whose gain is above 0."""
     groups: dict[tuple[object, object], list[int]] = {}
     for k, row in enumerate(rows):
         groups.setdefault((row["window"], row["dataset_id"]), []).append(k)
-    advantages = np.zeros(len(rows))
-    trained = []
+    advantages, gains = np.zeros(len(rows)), np.zeros(len(rows))
+    trained: set[int] = set()
     for (window, key), members in groups.items():
         if sorted(rows[k]["sample"] for k in members) != list(range(samples)):
             raise ValueError(f"window {window}, {key}: samples {[rows[k]['sample'] for k in members]}, not 0 … "
                              f"{samples - 1} once each")
-        rewards = np.array([float(rows[k]["reward"]) for k in members])
-        advantages[members] = rewards - rewards.mean()
-        if rewards.min() != rewards.max() and not any(rows[k]["starts_in_a_loss"] for k in members):
-            trained += members
-    return advantages, np.array(sorted(trained), dtype=np.int64)
+        rewards = {k: float(rows[k]["reward"]) for k in members}
+        unprobed = [k for k in members if not rows[k]["probed"]]
+        unfired = [k for k in members if rows[k]["probed"] and rows[k]["forced"] is None]
+        forced = [k for k in members if rows[k]["forced"] is not None]
+        if forced and not unprobed:
+            raise ValueError(f"window {window}, {key}: a probe's go-around and no unprobed sample to weigh it against")
+        answerable = not any(rows[k]["starts_in_a_loss"] for k in members)
+        for group in (unprobed, unfired, forced):
+            if group:
+                own = np.array([rewards[k] for k in group])
+                advantages[group] = own - own.mean()
+                if own.min() != own.max() and answerable:
+                    trained.update(group)
+        if forced:
+            gains[forced] = np.array([rewards[k] for k in forced]) - np.mean([rewards[k] for k in unprobed])
+            if answerable:
+                trained.update(k for k in forced if gains[k] > 0.0)
+    return advantages, gains, np.array(sorted(trained), dtype=np.int64)
 
 
 @dataclass(frozen=True)
@@ -188,8 +214,9 @@ class WindowSplit:
     """A round's window samples trained on, as the tuner reads them: the candidate table (``table``, a `Split` whose own
     flights are not read), and per window sample its window, its commanded aircraft's rows as the speaker read them
     (`window_flight`: the trained ones' own words asked over their counted steps, the others' over none) and records,
-    which of them are trained (their places in the sample) with their advantages, the masks they spoke under and the own
-    step a probe said a go-around for each at (−1: none; inside its counted steps, else −1)."""
+    which of them are trained (their places in the sample) with their advantages, the masks they spoke under, the own
+    step a probe said a go-around for each at (−1: none; inside its counted steps, else −1) and their probe gains
+    (`window_advantages`)."""
 
     table: Split
     windows: list[Window]
@@ -199,16 +226,17 @@ class WindowSplit:
     advantages: list[np.ndarray]
     allowed: list[list[Mapping[int, np.ndarray]]]
     forced: list[list[int]]
+    gains: list[np.ndarray]
 
     def __post_init__(self) -> None:
-        for window, flights, records, trained, advantages, allowed, forced in zip(
+        for window, flights, records, trained, advantages, allowed, forced, gains in zip(
                 self.windows, self.flights, self.records, self.trained, self.advantages, self.allowed, self.forced,
-                strict=True):
+                self.gains, strict=True):
             if not (len(window.commanded) == len(flights) == len(records)) or not trained \
-                    or not (len(trained) == len(advantages) == len(allowed) == len(forced)) \
+                    or not (len(trained) == len(advantages) == len(allowed) == len(forced) == len(gains)) \
                     or sorted(set(trained)) != list(trained) or not 0 <= trained[0] <= trained[-1] < len(flights):
                 raise ValueError("a window sample: a flight and a record per commanded aircraft, one or more trained "
-                                 "(each once, in order), an advantage, masks and a probe's step each")
+                                 "(each once, in order), an advantage, masks, a probe's step and a probe gain each")
             for k, masks, step in zip(trained, allowed, forced):
                 steps = counted_rows(flights[k]) - N_LOOK
                 if any(len(bits) != steps for bits in masks.values()):
@@ -306,10 +334,11 @@ class WindowRewardTuner(SceneRewardTuner):
                                   list[torch.Tensor], torch.Tensor, np.ndarray, torch.Tensor | None]:
         """A part's window samples: the trained aircraft's `to_batch`, their logits in their windows (the model's, the
         start's — None: not asked — and the reference's alone) under their masks, their asked steps, advantages, and
-        each sentence's probe term (None when no sentence of the part was probed): ``imitation_weight`` × its advantage
-        × the negative log-probability of the go-around a probe said for it, where its advantage is above 0 — the word
-        it did not sample, out of the clipped ratio (`window_flight`), learned as a cross-entropy weighted by how much
-        better the probe did (multi-aircraft design §6.6 step 8 item 10)."""
+        each sentence's probe term (None when no sentence of the part was probed): ``imitation_weight`` × its probe gain
+        × the negative log-probability of the go-around a probe said for it, where its gain is above 0 — the word it did
+        not sample, out of the clipped ratio (`window_flight`), learned as a cross-entropy weighted by how much better
+        the go-around did than the aircraft's unprobed samples (`window_advantages`; multi-aircraft design §6.6 step 8
+        item 10)."""
         flights = [f for s in part for f in split.flights[s]]
         records = [r for s in part for r in split.records[s]]
         layout = window_layout(self.model, [split.windows[s] for s in part], flights, records, self.step_s,
@@ -331,11 +360,12 @@ class WindowRewardTuner(SceneRewardTuner):
         steps = batch["asked"].any(dim=-1).sum(dim=(1, 2)).to(logits[0].dtype)
         advantages = np.concatenate([split.advantages[s] for s in part])
         forced = np.concatenate([np.asarray(split.forced[s], dtype=np.int64) for s in part])
-        learned = np.flatnonzero((forced >= 0) & (advantages > 0.0))
+        gains = np.concatenate([split.gains[s] for s in part])
+        learned = np.flatnonzero((forced >= 0) & (gains > 0.0))
         imitation = None
         if len(learned):
             log_p = torch.log_softmax(logits[APPROACH][learned, 0, N_LOOK + forced[learned]], dim=-1)
-            weight = torch.as_tensor(self.imitation_weight * advantages[learned], dtype=log_p.dtype, device=self.device)
+            weight = torch.as_tensor(self.imitation_weight * gains[learned], dtype=log_p.dtype, device=self.device)
             imitation = torch.zeros(len(advantages), dtype=log_p.dtype, device=self.device)
             imitation = imitation.index_put((torch.as_tensor(learned, device=self.device),),
                                             -weight * log_p[:, APPROACH_GO_AROUND + 1])
@@ -368,7 +398,8 @@ class WindowRewardTuner(SceneRewardTuner):
         """`SceneRewardTuner.one_pass` over window samples (`sweeps`): the update batches `update_batches`', each
         sentence its trained aircraft's."""
         if not split.windows:
-            raise ValueError("no window sample to train on: no aircraft's sentences differ in reward")
+            raise ValueError("no window sample to train on: no aircraft's group of sentences differs in reward and no "
+                             "probe's go-around did better than its unprobed samples")
         return self.sweeps(lambda: iter(update_batches(split, self.config.tokens_per_batch // 2, self.rng)),
                            lambda indices: self._window_parts(split, indices),
                            lambda part, start: self._window_scored(split, part, start),

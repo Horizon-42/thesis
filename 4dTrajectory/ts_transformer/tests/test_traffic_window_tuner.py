@@ -291,22 +291,62 @@ def test_window_sentences_are_the_readout_s_rows_with_what_each_aircraft_read_an
         assert all(len(bits) == row["counted"] for bits in allowed.values()) and masked in allowed
 
 
+def _advantage_row(window, key, sample, reward, lost=False, probed=False, forced=None):
+    return {"window": window, "dataset_id": key, "sample": sample, "reward": reward, "starts_in_a_loss": lost,
+            "probed": probed, "forced": forced}
+
+
 def test_an_aircraft_s_advantage_is_against_its_own_samples_and_it_trains_only_on_a_contrast():
     from ts_transformer.experiments.traffic_window_tuner import window_advantages
 
-    def row(window, key, sample, reward, lost=False):
-        return {"window": window, "dataset_id": key, "sample": sample, "reward": reward, "starts_in_a_loss": lost}
-
+    row = _advantage_row
     rows = [row(0, "a", 0, 1.0), row(0, "b", 0, 1.0), row(0, "c", 0, 1.0, lost=True),     # window 0, sample 0
             row(0, "a", 1, 0.0), row(0, "b", 1, 1.0), row(0, "c", 1, 0.0),                # window 0, sample 1
             row(1, "a", 0, 0.0), row(1, "a", 1, 1.0)]                                     # "a" again, in another window
-    advantages, trained = window_advantages(rows, 2)
+    advantages, gains, trained = window_advantages(rows, 2)
     assert advantages.tolist() == [0.5, 0.0, 0.5, -0.5, 0.0, -0.5, -0.5, 0.5]
+    assert not gains.any()                                                                # no probe
     # b has no contrast; c's first sample started in a loss it answers for: neither is trained on
     assert trained.tolist() == [0, 3, 6, 7]
     # two draws' rows mixed up (window 1's "a" twice as sample 1) would group 2K rows: refused
     with pytest.raises(ValueError, match="not 0 … 1 once each"):
         window_advantages(rows + [row(1, "a", 1, 0.0)], 2)
+
+
+def test_probes_are_weighed_among_themselves_and_their_go_around_against_the_unprobed_samples():
+    """Multi-aircraft design §6.6 step 8 item 10 (readout 2026-10-02 §3-§4): an aircraft's unprobed samples, its probes
+    that said no go-around and its probes that said one are three groups, each against its own mean (a go-around's
+    sentence never against one without); a probe's go-around word is learned by how much better its sentence did than
+    the unprobed samples' mean, and its sentence is trained on for that alone where its group has no contrast."""
+    from ts_transformer.experiments.traffic_window_tuner import window_advantages
+
+    row = _advantage_row
+    rows = [row(0, "a", 0, 1.0), row(0, "a", 1, 0.0),                                    # a: unprobed 1, 0
+            row(0, "a", 2, 0.9, probed=True, forced=5), row(0, "a", 3, 0.1, probed=True, forced=7),
+            row(0, "b", 0, 0.0), row(0, "b", 1, 0.0),                                    # b: unprobed 0, 0
+            row(0, "b", 2, 0.6, probed=True, forced=4), row(0, "b", 3, 0.0, probed=True),  # one fired, one did not
+            row(0, "c", 0, 1.0), row(0, "c", 1, 1.0),                                    # c: no contrast anywhere
+            row(0, "c", 2, 0.5, probed=True, forced=3), row(0, "c", 3, 0.5, probed=True, forced=3),
+            row(0, "f", 0, 1.0), row(0, "f", 1, 1.0),                                    # f: no probe fired
+            row(0, "f", 2, 1.0, probed=True), row(0, "f", 3, 0.0, probed=True)]
+    advantages, gains, trained = window_advantages(rows, 4)
+    assert advantages == pytest.approx([0.5, -0.5, 0.4, -0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                                        0.0, 0.0, 0.5, -0.5])
+    assert gains == pytest.approx([0.0, 0.0, 0.4, -0.4, 0.0, 0.0, 0.6, 0.0, 0.0, 0.0, -0.5, -0.5, 0.0, 0.0, 0.0, 0.0])
+    # a: both groups differ; b: its go-around (alone in its group) did better than the unprobed samples; c: nothing
+    # differs and no go-around did better; f: its probes that fired no go-around differ among themselves
+    assert trained.tolist() == [0, 1, 2, 3, 6, 14, 15]
+    # a go-around that beat the unprobed samples is trained for its word even where the probes tie
+    tie = [row(0, "d", 0, 0.0), row(0, "d", 1, 0.0), row(0, "d", 2, 0.5, probed=True, forced=2),
+           row(0, "d", 3, 0.5, probed=True, forced=6)]
+    advantages, gains, trained = window_advantages(tie, 4)
+    assert not advantages.any() and gains.tolist() == [0.0, 0.0, 0.5, 0.5] and trained.tolist() == [2, 3]
+    # ... but not where the aircraft started in a loss it answers for
+    _, _, trained = window_advantages([dict(r, starts_in_a_loss=r["sample"] == 0) for r in tie], 4)
+    assert trained.tolist() == []
+    # a probe's go-around with no unprobed sample to weigh it against: refused
+    with pytest.raises(ValueError, match="no unprobed sample"):
+        window_advantages([row(0, "e", 0, 0.0, probed=True, forced=1), row(0, "e", 1, 1.0, probed=True)], 2)
 
 
 # ---- 7.6.3: the window tuner
@@ -345,7 +385,7 @@ def _one_commanded_round(tmp_path, monkeypatch):
         [[window_flight(r, loop.windows[i], loop.flights[i], geometry, None, 0, 0, counted[i], spec.step_s)]
          for i, r in enumerate(records)],
         [[r] for r in records], [[0]] * 4, [advantages[i: i + 1] for i in range(4)], [[a] for a in allowed],
-        [[-1]] * 4)
+        [[-1]] * 4, [np.zeros(1)] * 4)
     scene_flights, positions = [], []
     for i, r in enumerate(records):
         said = r.grid[: counted[i]]
@@ -469,7 +509,7 @@ def test_an_aircraft_not_trained_on_is_read_by_the_others_and_adds_no_word(tmp_p
                                            spec.step_s) for i, r in enumerate(records)]],
                            [records], [list(trained)], [np.full(len(trained), 0.5)],
                            [[{c: m[i, : counted[i]].copy() for c, m in loop.speaker.allowed.items()} for i in trained]],
-                           [[-1] * len(trained)])
+                           [[-1] * len(trained)], [np.zeros(len(trained))])
 
     one = split([0])
     assert one.sentences == 1
@@ -479,7 +519,8 @@ def test_an_aircraft_not_trained_on_is_read_by_the_others_and_adds_no_word(tmp_p
     assert record["sentences"] == 1 and record["batches"] == 1 and np.isfinite(record["reward_mean"])
     assert split([0, 1]).sentences == 2
     with pytest.raises(ValueError, match="one or more trained"):
-        WindowSplit(table, list(loop.windows), one.flights, one.records, [[]], [np.zeros(0)], [[]], [[]])
+        WindowSplit(table, list(loop.windows), one.flights, one.records, [[]], [np.zeros(0)], [[]], [[]],
+                    [np.zeros(0)])
 
 
 
@@ -521,7 +562,8 @@ def _two_split(loop, records, results, table, spec, trained):
         gains.append(np.full(len(trained), 0.5))
         masks.append([{c: m[members[k], : counted[k]].copy() for c, m in loop.speaker.allowed.items()}
                       for k in trained])
-    return WindowSplit(table, windows, flights, read, places, gains, masks, [[-1] * len(trained)] * len(windows))
+    return WindowSplit(table, windows, flights, read, places, gains, masks, [[-1] * len(trained)] * len(windows),
+                       [np.zeros(len(trained))] * len(windows))
 
 
 def test_a_window_s_trained_sentences_add_as_sentences_do(tmp_path, monkeypatch):
@@ -591,10 +633,10 @@ def test_window_samples_are_batched_as_sentences_are_by_their_counted_rows():
         assert got == list(want)
 
 
-def test_a_probes_go_around_is_left_out_of_the_ratio_and_learned_where_its_advantage_is_positive(tmp_path, monkeypatch):
+def test_a_probes_go_around_is_left_out_of_the_ratio_and_learned_where_its_probe_gain_is_positive(tmp_path, monkeypatch):
     """Multi-aircraft design §6.6 step 8 item 10: the approach word a probe said for an aircraft is not asked (it did not
-    sample it) and is learned by a cross-entropy of the imitation weight times its advantage — only where that is above
-    0."""
+    sample it) and is learned by a cross-entropy of the imitation weight times its probe gain — only where that is above
+    0 — never its advantage (`window_advantages`)."""
     import copy
 
     import torch
@@ -616,17 +658,19 @@ def test_a_probes_go_around_is_left_out_of_the_ratio_and_learned_where_its_advan
         allows = {c: m.copy() for c, m in split.allowed[s][0].items()}
         allows[APPROACH][step] = np.packbits(np.ones(model.config.classes[APPROACH], dtype=bool), bitorder="little")
         masks.append([allows])
+    probe_gains = [-a for a in split.advantages]                     # of the other sign: the gain is what is read
     probed = WindowSplit(split.table, split.windows, rebuilt, split.records, split.trained, split.advantages, masks,
-                         [[step]] * 4)
+                         [[step]] * 4, probe_gains)
     with pytest.raises(ValueError, match="a probe's go-around"):
         WindowSplit(split.table, split.windows, split.flights, split.records, split.trained, split.advantages,
-                    split.allowed, [[step]] * 4)                     # its word still asked
+                    split.allowed, [[step]] * 4, probe_gains)        # its word still asked
     tuner = WindowRewardTuner(copy.deepcopy(model), _model(Words(spec), slots=2), RewardConfig(), CPU, seed=0,
                               traffic_learning_rate=3e-4, step_s=spec.step_s, imitation_weight=2.0)
-    batch, logits, _, _, _, gains, imitation = tuner._window_scored(probed, [0, 1, 2, 3], None)
+    batch, logits, _, _, _, scored, imitation = tuner._window_scored(probed, [0, 1, 2, 3], None)
+    assert scored.tolist() == np.concatenate(split.advantages).tolist()
     assert not batch["asked"][:, 0, N_LOOK + step, APPROACH].any()
     log_p = torch.log_softmax(logits[APPROACH][:, 0, N_LOOK + step], dim=-1)[:, APPROACH_GO_AROUND + 1]
-    gain = torch.as_tensor(gains, dtype=log_p.dtype)
+    gain = torch.as_tensor(np.concatenate(probe_gains), dtype=log_p.dtype)
     assert torch.isfinite(log_p).all()
     expected = torch.where(gain > 0, -2.0 * gain * log_p, torch.zeros_like(log_p))
     assert torch.allclose(imitation, expected) and (imitation[gain <= 0] == 0).all()
@@ -676,7 +720,7 @@ def test_window_flight_leaves_a_probes_word_unasked_and_a_pass_learns_it(tmp_pat
     table = Split([], ("KXXX",), prior_data.candidate_table({"KXXX": geometry}, ("KXXX",), 2), (("09",),), ((90.0,),),
                   column_classes(Words(spec), 2), "no-context")
     split = WindowSplit(table, list(loop.windows), [[f] for f in flights], [[r] for r in records], [[0]] * 2,
-                        [np.array([0.5]), np.array([-0.5])], masks, [[step]] * 2)
+                        [np.array([0.5]), np.array([-0.5])], masks, [[step]] * 2, [np.array([0.5]), np.array([-0.5])])
     data, _ = build_split(tmp_path / "artefact", "train", spec, ("KXXX",), None, 2_048)
     tuner = WindowRewardTuner(copy.deepcopy(model), _model(Words(spec), slots=2), RewardConfig(), CPU, seed=0,
                               traffic_learning_rate=3e-4, step_s=spec.step_s)
