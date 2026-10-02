@@ -76,8 +76,8 @@ from ts_transformer.experiments.traffic_speaking import scene_airports
 from ts_transformer.experiments.traffic_window import Window, draw_windows
 from ts_transformer.experiments.training_attitude import attitude_payload, executor_attitude, observed_attitudes
 from ts_transformer.experiments.traffic_window_generation import (
-    AIRCRAFT_STEPS, SCHEMA as READOUT_SCHEMA, SIZES, WINDOWS_PER_AIRPORT, WORKERS, Drawn, FixedWindow, Flown,
-    batch_seed, drawn_subset, drawn_windows, fixed_paths, fly_windows, in_processes, size_of, window_batches,
+    AIRCRAFT_STEPS, RUN_FILE, SIZES, WINDOWS_PER_AIRPORT, WORKERS, Drawn, FixedWindow, Flown, batch_seed, drawn_subset,
+    drawn_windows, fixed_paths, fly_windows, in_processes, read_summary, readout_config, size_of, window_batches,
     window_prior,
 )
 from ts_transformer.inference.separation import IFR
@@ -306,27 +306,25 @@ def batch_payloads(flown: Flown, drawn: Drawn, samples: int, globes: Mapping[str
     return out
 
 
-def readout_block(readout: dict[str, Any], directory: Path, *, prior_dir: Path, checkpoint_sha256: str,
-                  executor_sha256: str, instructions: Path, samples: int, temperature: float, seed: int,
-                  airport: str) -> dict[str, Any]:
-    """The prior's formal window readout (`traffic_window_generation`'s ``window_generation.json``) as the frontend reads
-    it — per source (the model in the scene, the record) the aircraft counted, the landed share and the lost separation
-    under VISUAL and IFR, at ``airport`` and over every airport — refused unless it is this prior's (its directory from
+def readout_block(directory: Path, *, prior_dir: Path, checkpoint_sha256: str, executor_sha256: str,
+                  instructions: Path, samples: int, temperature: float, seed: int, airport: str) -> dict[str, Any]:
+    """The prior's formal window readout (`traffic_window_generation`'s directory: its ``config.json`` checked, its
+    ``summary.json`` and the time in its ``run.json`` read; design §6.6 step 9.9.4) as the frontend reads it — per source
+    (the model in the scene, the record) the aircraft counted, the landed share and the lost separation under VISUAL and
+    IFR, at ``airport`` and over every airport — refused unless it is this prior's (its directory from
     ``4dTrajectory/outputs/`` on, and its checkpoint), on this executor spec and artefact, over the windows these are
     chosen from (every aircraft of a window commanded), with these samples and this temperature, as drawn (not
     augmented)."""
-    if readout["schema"] != READOUT_SCHEMA:
-        raise ValueError(f"the readout is a {readout['schema']} file, not {READOUT_SCHEMA}")
+    config = readout_config(directory)
     wanted = {"prior": outputs_path(prior_dir), "checkpoint": checkpoint_sha256, "executor": executor_sha256,
               "instructions": outputs_path(instructions), "split": TRAFFIC_SPLIT, "commanded": "every",
               "windows_per_airport": WINDOWS_PER_AIRPORT, "seed": seed, "samples": samples, "temperature": temperature,
               "augment_seed": None}
-    found = {"prior": outputs_path(readout["prior"]["directory"]), "checkpoint": readout["prior"]["checkpoint_sha256"],
-             "executor": readout["executor"]["sha256"], "instructions": outputs_path(readout["instructions"]),
-             "split": readout["split"], "commanded": readout["commanded"],
-             "windows_per_airport": readout["windows_per_airport"], "seed": readout["seed"],
-             "samples": readout["samples"], "temperature": readout["temperature"],
-             "augment_seed": readout["augment_seed"]}
+    found = {"prior": outputs_path(config.prior), "checkpoint": config.prior_checkpoint_sha256,
+             "executor": config.executor_sha256, "instructions": outputs_path(config.instructions),
+             "split": config.split, "commanded": config.commanded, "windows_per_airport": config.windows_per_airport,
+             "seed": config.seed, "samples": config.samples, "temperature": config.temperature,
+             "augment_seed": config.augment_seed}
     differ = {key: (found[key], wanted[key]) for key in wanted if found[key] != wanted[key]}
     if differ:
         raise ValueError("the readout is not this prior's over these windows: " +
@@ -338,10 +336,11 @@ def readout_block(readout: dict[str, Any], directory: Path, *, prior_dir: Path, 
                 "landed": entry["outcomes"]["landed"] if "landed" in entry["outcomes"] else 0.0,
                 "lostSeparation": entry["lost_separation"], "lostSeparationIfr": entry["lost_separation_ifr"]}
 
-    summaries = readout["readout"]
-    return {"directory": outputs_path(directory), "writtenUtc": readout["written_utc"],
+    summaries = read_summary(directory)["readout"]
+    run = json.loads((directory / RUN_FILE).read_text(encoding="utf-8"))
+    return {"directory": outputs_path(directory), "writtenUtc": run["finished_utc"],
             # what the cells count: every sample of its draw's windows, not the export's few
-            "windowsPerAirport": readout["windows_per_airport"], "samples": readout["samples"],
+            "windowsPerAirport": config.windows_per_airport, "samples": config.samples,
             **{source: {"here": cell(summaries["airports"][airport][source]), "all": cell(summaries["pooled"][source])}
                for source in ("scene", "recorded")}}
 
@@ -463,11 +462,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     missing = [code for code in airports if code not in model.config.airports]
     if missing:
         parser.error(f"the prior knows no airport {missing} ({list(model.config.airports)})")
-    formal = None
-    if args.readout is not None:
-        formal = json.loads((resolved(args.readout) / "window_generation.json").read_text(encoding="utf-8"))
-    readouts = {code: None if formal is None else readout_block(
-        formal, resolved(args.readout), prior_dir=prior_dir, checkpoint_sha256=checkpoint_sha,
+    readouts = {code: None if args.readout is None else readout_block(
+        resolved(args.readout), prior_dir=prior_dir, checkpoint_sha256=checkpoint_sha,
         executor_sha256=record["sha256"], instructions=instructions, samples=args.samples,
         temperature=args.temperature, seed=args.seed, airport=code) for code in airports}
 

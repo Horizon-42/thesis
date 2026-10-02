@@ -20,9 +20,9 @@ if __package__ in (None, ""):  # run by path: the package's parent goes on the p
 PACKAGE = "ts_transformer.experiments"
 #: Modules here that are not runners: shared code the runners import (the scene judge's closed loop: M0 step 5 on; the
 #: scene samples: M2 on; a commanded aircraft's view of its scene, the window loop, its augmentation and tuner: step 7
-#: on; the round protocol of the post-training: M4 on).
-NOT_RUNNERS = {"__main__", "support", "traffic_loop", "traffic_rounds", "traffic_scene_data", "traffic_speaking",
-               "traffic_window", "traffic_window_augment", "traffic_window_tuner"}
+#: on; the round protocol of the post-training: M4 on; a readout's code version: step 9.9 on).
+NOT_RUNNERS = {"__main__", "code_version", "support", "traffic_loop", "traffic_rounds", "traffic_scene_data",
+               "traffic_speaking", "traffic_window", "traffic_window_augment", "traffic_window_tuner"}
 
 
 def runner_names() -> list[str]:

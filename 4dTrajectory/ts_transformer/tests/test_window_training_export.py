@@ -188,30 +188,56 @@ def test_a_set_an_earlier_export_wrote_is_accepted_only_as_the_same_set():
 
 
 def test_the_readout_is_copied_only_when_it_is_this_prior_s_over_these_windows(tmp_path):
-    from ts_transformer.experiments.traffic_window_generation import SCHEMA, WINDOWS_PER_AIRPORT
+    from ts_transformer.experiments import traffic_window_generation as runner
     from ts_transformer.experiments.window_training_export import readout_block
 
     prior = tmp_path / "4dTrajectory/outputs/POOLED/prior/run/round_05"
     cell = {"aircraft": 10, "outcomes": {"landed": 0.8, "lost_separation": 0.2}, "lost_separation": 0.2,
             "lost_separation_ifr": 0.3}
-    readout = {"schema": SCHEMA, "written_utc": "2026-09-30T00:00:00Z", "split": "select", "commanded": "every",
-               "windows_per_airport": WINDOWS_PER_AIRPORT, "seed": 1337, "samples": 4, "temperature": 1.0,
-               "augment_seed": None, "instructions": "x/4dTrajectory/outputs/POOLED/instruction_language/v5",
-               "prior": {"directory": str(prior), "checkpoint_sha256": "c"}, "executor": {"sha256": "e"},
-               "readout": {"pooled": {"scene": cell, "recorded": {**cell, "outcomes": {"lost_separation": 1.0}}},
-                           "airports": {"KXXX": {"scene": cell, "recorded": cell}}}}
+
+    def readout(name, **config):
+        """A readout directory of the new format: its configuration (``config``), summary and run record."""
+        directory = tmp_path / "4dTrajectory/outputs/POOLED/traffic" / name
+        directory.mkdir(parents=True)
+        written = runner.load_config({"program": runner.PROGRAM, "prior": str(prior), "split": "select",
+                                      "executor": "4dTrajectory/outputs/POOLED/executor/spec",
+                                      "instructions": str(tmp_path / "4dTrajectory/outputs/POOLED/instruction_language/v5"),
+                                      "prior_checkpoint_sha256": "c", "executor_sha256": "e", **config})
+        (directory / runner.CONFIG_FILE).write_text(json.dumps(written.as_json()))
+        (directory / runner.SUMMARY_FILE).write_text(json.dumps({
+            "schema": runner.SUMMARY_SCHEMA, "readout": {
+                "pooled": {"scene": cell, "recorded": {**cell, "outcomes": {"lost_separation": 1.0}}},
+                "airports": {"KXXX": {"scene": cell, "recorded": cell}}}}))
+        (directory / runner.RUN_FILE).write_text(json.dumps({"finished_utc": "2026-09-30T00:00:00Z"}))
+        return directory
+
     kwargs = dict(prior_dir=prior, checkpoint_sha256="c", executor_sha256="e",
                   instructions=tmp_path / "4dTrajectory/outputs/POOLED/instruction_language/v5", samples=4,
                   temperature=1.0, seed=1337, airport="KXXX")
-    got = readout_block(readout, tmp_path / "4dTrajectory/outputs/POOLED/traffic/r", **kwargs)
+    this = readout("r")
+    got = readout_block(this, **kwargs)
     assert got["scene"]["here"] == {"aircraft": 10, "landed": 0.8, "lostSeparation": 0.2, "lostSeparationIfr": 0.3}
     assert got["recorded"]["all"]["landed"] == 0.0 and got["directory"] == "4dTrajectory/outputs/POOLED/traffic/r"
+    assert (got["writtenUtc"], got["windowsPerAirport"], got["samples"]) == \
+        ("2026-09-30T00:00:00Z", runner.WINDOWS_PER_AIRPORT, 4)
     with pytest.raises(ValueError, match="samples 4, expected 2"):
-        readout_block(readout, tmp_path / "r", **{**kwargs, "samples": 2})
+        readout_block(this, **{**kwargs, "samples": 2})
     with pytest.raises(ValueError, match="commanded 'one', expected 'every'"):     # one commanded aircraft a window
-        readout_block({**readout, "commanded": "one"}, tmp_path / "r", **kwargs)
-    with pytest.raises(ValueError, match="not ts-traffic-window-generation"):
-        readout_block({**readout, "schema": "ts-traffic-window-generation-v1"}, tmp_path / "r", **kwargs)
+        readout_block(readout("one", commanded="one"), **kwargs)
+    with pytest.raises(ValueError, match="checkpoint 'd', expected 'c'"):
+        readout_block(readout("other", prior_checkpoint_sha256="d"), **kwargs)
+    with pytest.raises(ValueError, match="augment_seed 7919, expected None"):
+        readout_block(readout("augmented", augment_seed=7919), **kwargs)
+    # a readout of the single header (before the split) is refused by name; so is a summary of another format
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "window_generation.json").write_text("{}")
+    with pytest.raises(ValueError, match="holds no config.json: not a window readout split"):
+        readout_block(old, **kwargs)
+    other = readout("other_summary")
+    (other / runner.SUMMARY_FILE).write_text(json.dumps({"schema": "ts-traffic-window-summary-v0"}))
+    with pytest.raises(ValueError, match="not ts-traffic-window-summary-v1"):
+        readout_block(other, **kwargs)
 
 
 def _ts_constant(file: str, name: str) -> str:

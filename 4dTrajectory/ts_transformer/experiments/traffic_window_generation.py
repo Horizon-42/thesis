@@ -1,17 +1,19 @@
 """Multi-aircraft M3's second pass (design §6.6 step 7 item 4): the start of the post-training — augmented with a traffic
 attention at zero (`prior.model.with_traffic`: it answers as the prior does, to rounding) — commanding every aircraft of
 a window at once (`traffic_window`), read beside the same model alone, the labelled words and the records, every one
-judged in its window. A readout only. ``--prior`` may instead be a traffic prior (an M4 round,
+judged in its window. A readout only. The configuration's ``prior`` may instead be a traffic prior (an M4 round,
 `prior_train.TRAFFIC_CHECKPOINT_SCHEMA`), read as it was trained.
 
-``--windows-per-airport`` windows of the split are drawn (`traffic_window.draw_windows`: seeded, a window without a flight
-that flies on its own dynamics passed over and counted) — or, ``--commanded one``, as many flights an airport, each the
+**What it reads is its configuration only** (`ReadoutConfig`, a JSON file read by `load_config`: unknown or missing
+required keys refused, the others' defaults filled in — design §6.6 step 9.9.1). ``windows_per_airport`` windows of the
+split are drawn (`traffic_window.draw_windows`: seeded, a window without a flight
+that flies on its own dynamics passed over and counted) — or, ``commanded`` ``one``, as many flights an airport, each the
 one commanded aircraft of its own window, the others replayed (design §6.6 step 9: the setting "一架由模型指挥" read in
 the window loop) — and every commanded aircraft is read four ways:
 
-- **scene** — the model speaking to every commanded aircraft of the window, ``--samples`` times (a sample is the whole
+- **scene** — the model speaking to every commanded aircraft of the window, ``samples`` times (a sample is the whole
   window: its aircraft's words said together, the separation masks on);
-- **alone** — the same model, each aircraft seeing no other and under no separation mask, ``--samples`` times: flown
+- **alone** — the same model, each aircraft seeing no other and under no separation mask, ``samples`` times: flown
   and judged together in the window all the same;
 - **labelled** — every commanded aircraft flying its labelled words from its first predicted step;
 - **recorded** — every commanded aircraft along its own record on the loop's steps.
@@ -33,7 +35,7 @@ design §6.6 step 8 item 6), the go-arounds said, and — design §6.6 step 7 it
 aircraft go together over its samples (the pooled correlation of each aircraft's reward less its mean over the samples,
 over the pairs of a window).
 
-With ``--augment-seed`` every window is augmented instead (`traffic_window_augment`: the flow compressed, a start moved,
+With an ``augment_seed`` every window is augmented instead (`traffic_window_augment`: the flow compressed, a start moved,
 a flight inserted and commanded, a third each — one commanded aircraft a window: its leader moved, its start moved, a
 flight inserted and replayed; qualified, and never more aircraft at once than the airport's busiest step on the training
 days), read by the model's sources only — as M3's first pass on augmented scenes: a moved start has no
@@ -41,18 +43,25 @@ record, and its labelled words would fly from the recorded start. Each row carri
 aircraft's part in it; the readout adds each kind and each part, and counts the windows left out and the draws refused,
 by why.
 
-Writes into a NEW directory ``aircraft.jsonl`` (a row per commanded aircraft, source and sample, appended as each batch
-ends) and ``window_generation.json`` (the readout). A batch holds at most ``--aircraft-steps`` window samples × their
+Writes into a NEW directory five files, one kind of content each (design §6.6 step 9.9.1): ``config.json`` (the
+configuration completed, the checksums of the prior's checkpoint and the executor spec taken from the disk — refused when
+the configuration names others), ``code.json`` (what read it: `code_version.code_version` with `READING_CONSTANTS`),
+``aircraft.jsonl`` (a row per commanded aircraft, source and sample, appended as each batch ends, written again in the
+batches' order at the end), ``summary.json`` (`SUMMARY_SCHEMA`: the readout and the counts it was read from) and
+``run.json`` (when, how long, the processes and their GPU peak: nothing that decides a row). No readout-wide format
+version: each reader checks the file it reads. A batch holds at most ``aircraft_steps`` window samples × their
 aircraft × their steps (the model's past, 6 KB an aircraft-step). **In several processes** (``--workers``, forked once the
 data are built and before the GPU is started, as M4's speaking processes are): each reads the batches its index deals it,
 each batch — every source of it — from its own streams (`batch_seed`), so what is read does not depend on the number of
-processes; the parent writes each batch's rows as they arrive and the readout at the end.
+processes; the parent writes each batch's rows as they arrive and the readout at the end. `prepare` and `read_batches`
+are what `traffic_window_conformance` reads a readout's batches again with.
 
-    python run_ts.py traffic_window_generation \\
-        --prior 4dTrajectory/outputs/POOLED/prior/v3_stage2_clip_20260926/aug_s1337/round_07 \\
-        --executor 4dTrajectory/outputs/POOLED/executor/<spec> \\
-        --instructions 4dTrajectory/outputs/POOLED/instruction_language/v5_20260926 \\
-        --split select --out 4dTrajectory/outputs/POOLED/traffic/window_generation_<date>
+    python run_ts.py traffic_window_generation --config <config.json> \\
+        --out 4dTrajectory/outputs/POOLED/traffic/window_generation_<date> [--workers 6] [--device cuda]
+
+with, at the least, ``{"program": "traffic_window_generation", "prior": "4dTrajectory/outputs/POOLED/prior/<run>",
+"executor": "4dTrajectory/outputs/POOLED/executor/<spec>", "instructions":
+"4dTrajectory/outputs/POOLED/instruction_language/<artefact>", "split": "select"}``.
 """
 
 from __future__ import annotations
@@ -62,6 +71,7 @@ import ctypes
 import dataclasses
 import gc
 import json
+import math
 import multiprocessing
 import multiprocessing.connection
 import os
@@ -79,6 +89,7 @@ import torch
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.flights import flight_inputs
 from ts_transformer.autopilot.judge import outcome_of
+from ts_transformer.experiments.code_version import code_version
 from ts_transformer.experiments.prior_free_generation import (
     _physics, augmented_inputs, fly_reference, glidepath_stops, limits_s, reference_grid, start_altitude_windows,
 )
@@ -112,12 +123,8 @@ from ts_transformer.prior.model import Prior, with_traffic
 from ts_transformer.prior.scene import N_LOOK, Landings, presence
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
-#: v3 (2026-10-01): the model's sources read (`model_sources`) in the header; v4–v5 (2026-10-02): multi-aircraft step 8
-#: (go-around fields, probes, the go-around reward); v6: a row says whether its words were given (``given``); v7
-#: (multi-aircraft step 9): how a window's aircraft were commanded (``commanded``, `traffic_window.COMMANDED`).
-SCHEMA = "ts-traffic-window-generation-v7"
 SOURCES = ("scene", "alone", "labelled", "recorded")
-#: The sources the model speaks in (`--model-sources`: a read that needs only one — a pair of priors on the same windows
+#: The sources the model speaks in (`model_sources`: a read that needs only one — two priors compared on the same windows
 #: reads "scene" — skips the other, half the model's time; each source from its own streams, so the rows of the one read
 #: do not change).
 MODEL_SOURCES = ("scene", "alone")
@@ -823,120 +830,305 @@ def in_processes(count: int, numbers: Sequence[int], read: Callable[[int], Any])
             process.join(timeout=60)
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
-    parser.add_argument("--prior", type=Path, required=True, help="the single-aircraft prior it starts from (augmented), "
-                        "or a traffic prior (an M4 round)")
-    parser.add_argument("--instructions", type=Path, required=True)
-    parser.add_argument("--executor", type=Path, required=True, help="the executor spec directory")
-    parser.add_argument("--split", choices=SPLITS, required=True)
-    parser.add_argument("--windows-per-airport", type=int, default=WINDOWS_PER_AIRPORT)
-    parser.add_argument("--commanded", choices=COMMANDED, default="every", help="every aircraft of a window commanded, "
-                        "or one a window (`traffic_window.draw_windows`)")
-    parser.add_argument("--samples", type=int, default=4)
-    parser.add_argument("--temperature", type=float, default=1.0)
-    parser.add_argument("--seed", type=int, default=1337)
-    parser.add_argument("--aircraft-steps", type=int, default=AIRCRAFT_STEPS, help="a batch's most (module docstring)")
-    parser.add_argument("--workers", type=int, default=WORKERS, help="reading processes (what is read does not depend "
-                        "on it)")
-    parser.add_argument("--augment-seed", type=int, default=None, help="every window augmented with this seed "
-                        "(`traffic_window_augment`; the model's sources only)")
-    parser.add_argument("--device", default="cuda", help="the prior's; the executors fly on CPU")
-    parser.add_argument("--model-sources", nargs="+", choices=MODEL_SOURCES, default=list(MODEL_SOURCES),
-                        help="the model's sources to read (`MODEL_SOURCES`; the rows show which were read)")
-    parser.add_argument("--probe-samples", type=int, default=0, help="the last that many samples of each window probed "
-                        "for a go-around (multi-aircraft design §6.6 step 8 item 10: what a training round's probes do; "
-                        "0: none)")
-    parser.add_argument("--probe-margin", type=float, default=PROBE_MARGIN, help="a probe's trigger: the tightest margin")
-    parser.add_argument("--out", type=Path, required=True, help="a new directory")
-    args = parser.parse_args(argv)
-    if args.windows_per_airport < 1 or args.samples < 1 or args.workers < 1:
-        parser.error("at least one window an airport, one sample and one reading process")
-    if not 0 <= args.probe_samples <= args.samples:
-        parser.error(f"--probe-samples {args.probe_samples} of {args.samples} samples")
+#: A window readout configuration's program (`ReadoutConfig.program`).
+PROGRAM = "traffic_window_generation"
+#: The readout's summary file's format (`summary.json`: its own, never the readout's whole).
+SUMMARY_SCHEMA = "ts-traffic-window-summary-v1"
+#: A readout directory's files, one kind of content each (design §6.6 step 9.9.1).
+CONFIG_FILE, CODE_FILE, AIRCRAFT_FILE, SUMMARY_FILE, RUN_FILE = (
+    "config.json", "code.json", "aircraft.jsonl", "summary.json", "run.json")
+#: The code's own constants that decide how a readout reads (`code.json`'s ``constants``).
+READING_CONSTANTS = {"history_s": HISTORY_S, "readings": {"ends": VISUAL, "beside": IFR}}
 
-    def resolved(path: Path) -> Path:
-        return path if path.is_absolute() else REPO_ROOT / path
 
-    prior_dir, instructions, executor_dir, out = map(resolved, (args.prior, args.instructions, args.executor, args.out))
-    if out.exists():
-        parser.error(f"{out} exists; a readout is never overwritten")
-    git = git_state()
+@dataclasses.dataclass(frozen=True)
+class ReadoutConfig:
+    """What a window readout reads (design §6.6 step 9.9.1) — everything that decides its rows but the code: the prior,
+    the executor spec and the sentence artefact (paths named from the repository, and the checksums of the prior's
+    checkpoint and the executor spec; None: taken from the disk when it runs), the split, how a window's aircraft are
+    commanded (`traffic_window.COMMANDED`), the windows an airport (``one``: flights), the samples, the temperature, the
+    seed, the augmentation's seed (None: as drawn), the model's sources read (`MODEL_SOURCES`), the probes (the last
+    ``probe_samples`` samples of a window, at ``probe_margin``) and a batch's most aircraft-steps (it decides which
+    windows share a batch, so each batch's random numbers). Built only by `load_config`."""
+
+    program: str
+    prior: str
+    executor: str
+    instructions: str
+    split: str
+    prior_checkpoint_sha256: str | None = None
+    executor_sha256: str | None = None
+    commanded: str = "every"
+    windows_per_airport: int = WINDOWS_PER_AIRPORT
+    samples: int = 4
+    temperature: float = 1.0
+    seed: int = 1337
+    augment_seed: int | None = None
+    model_sources: tuple[str, ...] = MODEL_SOURCES
+    probe_samples: int = 0
+    probe_margin: float = PROBE_MARGIN
+    aircraft_steps: int = AIRCRAFT_STEPS
+
+    def as_json(self) -> dict[str, Any]:
+        """Every key, in `CONFIG_KEYS`' order (``config.json``)."""
+        return {name: list(value) if isinstance(value, tuple) else value
+                for name, value in ((name, getattr(self, name)) for name in CONFIG_KEYS)}
+
+
+#: ``config.json``'s keys in the order written (the design's table).
+CONFIG_KEYS = ("program", "prior", "prior_checkpoint_sha256", "executor", "executor_sha256", "instructions", "split",
+               "commanded", "windows_per_airport", "samples", "temperature", "seed", "augment_seed", "model_sources",
+               "probe_samples", "probe_margin", "aircraft_steps")
+#: The keys without a default: a configuration lacking one is refused.
+REQUIRED = tuple(f.name for f in dataclasses.fields(ReadoutConfig) if f.default is dataclasses.MISSING)
+#: Each key's JSON type: a path / a name (str), a checksum (str or null), a count (int), a number (int or float), a seed
+#: or null (int or null), the model's sources (a list of names).
+_TEXT, _SHA, _COUNT, _NUMBER, _MAYBE_COUNT, _NAMES = "text", "sha", "count", "number", "count or null", "names"
+_KINDS = {"program": _TEXT, "prior": _TEXT, "executor": _TEXT, "instructions": _TEXT, "split": _TEXT,
+          "prior_checkpoint_sha256": _SHA, "executor_sha256": _SHA, "commanded": _TEXT,
+          "windows_per_airport": _COUNT, "samples": _COUNT, "temperature": _NUMBER, "seed": _COUNT,
+          "augment_seed": _MAYBE_COUNT, "model_sources": _NAMES, "probe_samples": _COUNT, "probe_margin": _NUMBER,
+          "aircraft_steps": _COUNT}
+
+
+def _typed(name: str, value: Any) -> Any:
+    """``value`` of key ``name`` as `ReadoutConfig` holds it, refused unless of its JSON type (`_KINDS`)."""
+    kind = _KINDS[name]
+    is_int = isinstance(value, int) and not isinstance(value, bool)
+    if kind == _TEXT and isinstance(value, str):
+        return value
+    if kind == _SHA and (value is None or isinstance(value, str)):
+        return value
+    if kind == _COUNT and is_int:
+        return value
+    if kind == _MAYBE_COUNT and (value is None or is_int):
+        return value
+    if kind == _NUMBER and (is_int or isinstance(value, float)):
+        return float(value)
+    if kind == _NAMES and isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return tuple(value)
+    raise ValueError(f"configuration key {name!r} is {value!r}, not a {kind}")
+
+
+def _repo_path(path: str) -> str:
+    """A configured path as a readout names it: from the repository when inside it (`repo_relative`)."""
+    given = Path(path)
+    return repo_relative(given if given.is_absolute() else REPO_ROOT / given)
+
+
+def load_config(raw: Mapping[str, Any]) -> ReadoutConfig:
+    """The one way a readout configuration is read (design §6.6 step 9.9.1 rule 2): a key it does not know, or a key
+    without a default missing, is refused; a key with a default missing takes it; every value is checked — its JSON
+    type, the program, the split, how a window is commanded, the model's sources (named in `MODEL_SOURCES`' order,
+    each once), at least one window and sample, the probes within the samples, a finite positive temperature, a finite
+    margin, a positive batch size. The paths are named from the repository."""
+    unknown = sorted(set(raw) - set(_KINDS))
+    if unknown:
+        raise ValueError(f"unknown configuration keys {unknown} (known: {list(CONFIG_KEYS)})")
+    missing = [name for name in REQUIRED if name not in raw]
+    if missing:
+        raise ValueError(f"the configuration lacks {missing}")
+    values = {name: _typed(name, value) for name, value in raw.items()}
+    for name in ("prior", "executor", "instructions"):
+        values[name] = _repo_path(values[name])
+    config = ReadoutConfig(**values)
+    problems = []
+    if config.program != PROGRAM:
+        problems.append(f"program {config.program!r} is not {PROGRAM!r}")
+    if config.split not in SPLITS:
+        problems.append(f"split {config.split!r} is not one of {list(SPLITS)}")
+    if config.commanded not in COMMANDED:
+        problems.append(f"commanded {config.commanded!r} is not one of {list(COMMANDED)}")
+    if not config.model_sources or config.model_sources != tuple(s for s in MODEL_SOURCES if s in config.model_sources):
+        problems.append(f"model_sources {list(config.model_sources)} are not some of {list(MODEL_SOURCES)}, in that "
+                        f"order, each once")
+    if config.windows_per_airport < 1 or config.samples < 1 or config.aircraft_steps < 1:
+        problems.append("windows_per_airport, samples and aircraft_steps are at least 1")
+    if not 0 <= config.probe_samples <= config.samples:
+        problems.append(f"probe_samples {config.probe_samples} of {config.samples} samples")
+    if not (math.isfinite(config.temperature) and config.temperature > 0.0):
+        problems.append(f"temperature {config.temperature} is not finite and positive")
+    if not math.isfinite(config.probe_margin):
+        problems.append(f"probe_margin {config.probe_margin} is not finite")
+    if problems:
+        raise ValueError("; ".join(problems))
+    return config
+
+
+def read_config(path: Path) -> ReadoutConfig:
+    """`load_config` of a JSON file."""
+    return load_config(json.loads(path.read_text(encoding="utf-8")))
+
+
+def readout_config(directory: Path) -> ReadoutConfig:
+    """A readout directory's configuration (``config.json``), refused by name when the directory has none — a readout
+    written before the configuration, code version and data were split (one ``window_generation.json``) is not read."""
+    if not (directory / CONFIG_FILE).is_file():
+        raise ValueError(f"{directory} holds no {CONFIG_FILE}: not a window readout split into configuration, code "
+                         f"version and data (design §6.6 step 9.9.1)")
+    return read_config(directory / CONFIG_FILE)
+
+
+def read_summary(directory: Path) -> dict[str, Any]:
+    """A readout directory's ``summary.json``, refused unless of `SUMMARY_SCHEMA`."""
+    summary = json.loads((directory / SUMMARY_FILE).read_text(encoding="utf-8"))
+    if summary["schema"] != SUMMARY_SCHEMA:
+        raise ValueError(f"{directory / SUMMARY_FILE} is {summary['schema']!r}, not {SUMMARY_SCHEMA}")
+    return summary
+
+
+def _resolved(path: str | Path) -> Path:
+    path = Path(path)
+    return path if path.is_absolute() else REPO_ROOT / path
+
+
+@dataclasses.dataclass
+class Prepared:
+    """Everything a readout reads its batches from (`prepare`): the configuration with both checksums, the prior (on the
+    CPU) with how its traffic attention reads and its own procedure's masks, the executor's parameters and words, the
+    landings (the model's context, None without it; every airport's), the scenes built, the draw's counts, the windows
+    drawn (and augmented: its counts, None as drawn) and their batches."""
+
+    config: ReadoutConfig
+    model: Prior
+    attention: str
+    own_masks: Any
+    params: Any
+    words: Words
+    landings: Any
+    every_landing: Mapping[str, Landings]
+    scenes: Any
+    drawn_counts: Any
+    drawn: Drawn
+    augmenting: dict[str, Any] | None
+    batches: list[list[int]]
+
+
+def _same_checksum(name: str, configured: str | None, on_disk: str) -> str:
+    if configured is not None and configured != on_disk:
+        raise ValueError(f"the configuration's {name} is {configured}, the disk's {on_disk}: the data changed, not the "
+                         f"code")
+    return on_disk
+
+
+def prepare(config: ReadoutConfig) -> Prepared:
+    """What ``config`` reads, built by today's code: the executor (`replay.open_executor`), the prior (`window_prior`,
+    on the CPU — the reading processes are forked before the GPU is started), the scenes, the windows drawn
+    (`draw_windows`, `drawn_windows`), augmented (`augmented_windows`) and batched (`window_batches`); each checksum
+    the configuration names must be the disk's (`_same_checksum`), and the configuration returned names both."""
     started = time.perf_counter()
+    prior_dir, instructions, executor_dir = map(_resolved, (config.prior, config.instructions, config.executor))
     params, record, words = replay.open_executor(executor_dir, instructions)
-    try:                                               # on the CPU until the reading processes are forked
-        model, attention, _, own_masks = window_prior(prior_dir, instructions, args.seed)
-    except ValueError as refusal:
-        parser.error(str(refusal))
+    config = dataclasses.replace(
+        config,
+        prior_checkpoint_sha256=_same_checksum("prior_checkpoint_sha256", config.prior_checkpoint_sha256,
+                                               file_sha256(prior_dir / "checkpoint.pt")),
+        executor_sha256=_same_checksum("executor_sha256", config.executor_sha256, record["sha256"]))
+    model, attention, _, own_masks = window_prior(prior_dir, instructions, config.seed)
     every_landing = airport_landings(instructions, rosters(instructions))
     landings = every_landing if VARIANTS[model.config.variant].landing_context else None
     step_s = words.spec.step_s
-    airports, built = scene_airports(instructions, args.split, words.spec, model.config.airports, landings,
+    airports, built = scene_airports(instructions, config.split, words.spec, model.config.airports, landings,
                                      model.config.max_rows)
-    draw = draw_windows(instructions, args.split, words.spec, words, airports, per_airport=args.windows_per_airport,
-                        seed=args.seed, step_s=step_s, commanded=args.commanded)
+    draw = draw_windows(instructions, config.split, words.spec, words, airports, per_airport=config.windows_per_airport,
+                        seed=config.seed, step_s=step_s, commanded=config.commanded)
     drawn = drawn_windows(draw, airports, params, step_s)
-    augmented = args.augment_seed is not None
     augmenting = None
-    if augmented:
+    if config.augment_seed is not None:
         most = busiest(instructions, words.spec, model.config.airports, step_s)
-        drawn, augmenting = augmented_windows(drawn, params, most, model.config.max_rows, args.augment_seed,
+        drawn, augmenting = augmented_windows(drawn, params, most, model.config.max_rows, config.augment_seed,
                                               start_altitude_windows(instructions), words.spec,
-                                              KINDS_OF[args.commanded], args.commanded)
+                                              KINDS_OF[config.commanded], config.commanded)
         print(f"augmented windows: {augmenting}", flush=True)
         if not drawn.windows:
-            parser.error("every window was left out")
-    print(f"{len(drawn.windows)} {args.split} windows, {len(drawn.batch.readings)} commanded aircraft "
+            raise ValueError("every window was left out")
+    print(f"{len(drawn.windows)} {config.split} windows, {len(drawn.batch.readings)} commanded aircraft "
           f"({draw.counts}), scenes built ({built}), {time.perf_counter() - started:.0f}s", flush=True)
+    batches = window_batches(drawn, config.samples, config.aircraft_steps, step_s)
+    return Prepared(config, model, attention, own_masks, params, words, landings, every_landing, built, draw.counts,
+                    drawn, augmenting, batches)
 
-    batches = window_batches(drawn, args.samples, args.aircraft_steps, step_s)
-    out.mkdir(parents=True)
-    device = torch.device(args.device)
+
+def read_batches(prepared: Prepared, numbers: Sequence[int], workers: int, device: torch.device
+                 ) -> Iterator[tuple[int, list[dict[str, Any]], float]]:
+    """The batches at ``numbers`` read as the configuration says (`batch_rows`), in ``workers`` forked processes
+    (`in_processes`; what is read does not depend on their number), as each ends: ``(number, its rows, its process's
+    GPU peak GB)``."""
+    config = prepared.config
 
     def read(number: int) -> list[dict[str, Any]]:
-        speaking = model.to(device)
-        return batch_rows(speaking, drawn, number, batches[number], words, params, landings, every_landing,
-                          args.samples, seed=args.seed, temperature=args.temperature, procedure_masks=own_masks,
-                          device=device, model_sources=tuple(s for s in MODEL_SOURCES if s in args.model_sources),
-                          probe_samples=args.probe_samples, probe_margin=args.probe_margin)
+        speaking = prepared.model.to(device)
+        return batch_rows(speaking, prepared.drawn, number, prepared.batches[number], prepared.words, prepared.params,
+                          prepared.landings, prepared.every_landing, config.samples, seed=config.seed,
+                          temperature=config.temperature, procedure_masks=prepared.own_masks, device=device,
+                          model_sources=config.model_sources, probe_samples=config.probe_samples,
+                          probe_margin=config.probe_margin)
 
     gc.collect()
     gc.freeze()                                         # the reading processes share the parent's data, not copy it
+    yield from in_processes(workers, list(numbers), read)
+
+
+def summary_payload(prepared: Prepared, rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """``summary.json``: the readout of ``rows`` (`summaries`) and the counts it was read from."""
+    return {"schema": SUMMARY_SCHEMA,
+            "model": {"procedure_masks": list(prepared.own_masks.names), "traffic_attention": prepared.attention},
+            "drawn": prepared.drawn_counts, "augmenting": prepared.augmenting, "scenes": prepared.scenes,
+            "batches": len(prepared.batches), "readout": summaries(rows, prepared.config.augment_seed is not None)}
+
+
+def read_aircraft(directory: Path) -> list[dict[str, Any]]:
+    """A readout's rows (``aircraft.jsonl``), in the order written."""
+    with (directory / AIRCRAFT_FILE).open(encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle]
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
+    parser.add_argument("--config", type=Path, required=True, help="what to read (`ReadoutConfig`, a JSON file)")
+    parser.add_argument("--out", type=Path, required=True, help="a new directory")
+    parser.add_argument("--workers", type=int, default=WORKERS, help="reading processes (what is read does not depend "
+                        "on it)")
+    parser.add_argument("--device", default="cuda", help="the prior's; the executors fly on CPU")
+    args = parser.parse_args(argv)
+    if args.workers < 1:
+        parser.error("at least one reading process")
+    out = _resolved(args.out)
+    if out.exists():
+        parser.error(f"{out} exists; a readout is never overwritten")
+    config = read_config(_resolved(args.config))
+    git = git_state()
+    device = torch.device(args.device)
+    started = time.perf_counter()
+    prepared = prepare(config)
+    out.mkdir(parents=True)
+    write_json_atomic(out / CONFIG_FILE, prepared.config.as_json(), allow_nan=False)
+
     rows: list[dict[str, Any]] = []
     done, peaks = 0, [0.0]
-    for number, new, peak in in_processes(args.workers, list(range(len(batches))), read):
-        with (out / "aircraft.jsonl").open("a", encoding="utf-8") as stream:
+    for number, new, peak in read_batches(prepared, range(len(prepared.batches)), args.workers, device):
+        with (out / AIRCRAFT_FILE).open("a", encoding="utf-8") as stream:
             for row in new:
                 stream.write(json.dumps(row) + "\n")
         rows += new
-        done += len(batches[number])
+        done += len(prepared.batches[number])
         peaks.append(peak)
-        print(f"  batch {number}: {done}/{len(drawn.windows)} windows ({len(batches)} batches), "
+        print(f"  batch {number}: {done}/{len(prepared.drawn.windows)} windows ({len(prepared.batches)} batches), "
               f"{time.perf_counter() - started:.0f}s, GPU {max(peaks):.2f} GB a process at most", flush=True)
 
     # the batches in their order (they arrive in the processes' order): the readout, and the rows written again so, the
     # same whatever the number of processes
     rows = sorted(rows, key=lambda row: row["batch"])      # (stable: a batch's rows keep their order)
-    with (out / "aircraft.jsonl.sorted").open("w", encoding="utf-8") as stream:
+    with (out / f"{AIRCRAFT_FILE}.sorted").open("w", encoding="utf-8") as stream:
         for row in rows:
             stream.write(json.dumps(row) + "\n")
-    (out / "aircraft.jsonl.sorted").replace(out / "aircraft.jsonl")
-    readout = summaries(rows, augmented)
-    write_json_atomic(out / "window_generation.json", {
-        "schema": SCHEMA, "written_utc": utc_now(), "git": git, "split": args.split, "commanded": args.commanded,
-        "drawn": draw.counts,
-        "windows_per_airport": args.windows_per_airport, "samples": args.samples, "temperature": args.temperature,
-        "probes": {"samples": args.probe_samples, "margin": args.probe_margin},
-        "seed": args.seed, "augment_seed": args.augment_seed, "augmenting": augmenting,
-        "prior": {"directory": repo_relative(prior_dir), "procedure_masks": list(own_masks.names),
-                  "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt")},
-        "traffic_attention": attention,
-        "executor": {"directory": repo_relative(executor_dir), "sha256": record["sha256"]},
-        "instructions": repo_relative(instructions), "scenes": built, "history_s": HISTORY_S,
-        "readings": {"ends": VISUAL, "beside": IFR}, "aircraft_steps": args.aircraft_steps, "batches": len(batches),
-        "model_sources": [s for s in MODEL_SOURCES if s in args.model_sources],
-        "workers": args.workers, "gpu_peak_gb_a_process": max(peaks),
-        "readout": readout, "aircraft_file": "aircraft.jsonl", "elapsed_s": time.perf_counter() - started})
+    (out / f"{AIRCRAFT_FILE}.sorted").replace(out / AIRCRAFT_FILE)
+    payload = summary_payload(prepared, rows)
+    write_json_atomic(out / SUMMARY_FILE, payload)
+    write_json_atomic(out / CODE_FILE, code_version(git, device, READING_CONSTANTS), allow_nan=False)
+    write_json_atomic(out / RUN_FILE, {"finished_utc": utc_now(), "elapsed_s": time.perf_counter() - started,
+                                       "workers": args.workers, "gpu_peak_gb_a_process": max(peaks)}, allow_nan=False)
+    readout = payload["readout"]
     for source, entry in readout["pooled"].items():
         shares = "  ".join(f"{name} {share:.3f}" for name, share in entry["outcomes"].items())
         print(f"{source:9s} n={entry['aircraft']:5d}  reward {entry['reward']:.3f}  lost separation "
@@ -944,7 +1136,7 @@ def main(argv: list[str] | None = None) -> int:
               f"  order {entry['order']}  {shares}")
         if "reward_together" in entry:
             print(f"          masks: steps {entry['mask_steps_share']}  rewards together {entry['reward_together']}")
-    for group in ("kinds", "roles") if augmented else ():
+    for group in ("kinds", "roles") if config.augment_seed is not None else ():
         for name, part in readout[group].items():
             print(f"{name:9s} " + "  ".join(f"{source} n={entry['aircraft']} reward {entry['reward']:.3f} lost "
                                             f"{entry['lost_separation']:.3f}" for source, entry in part.items()))
