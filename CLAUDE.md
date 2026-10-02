@@ -146,8 +146,16 @@ Full text, with the investigation behind each line: `docs/environment.md` (E1–
 - **兼容 (compatibility) is a FORBIDDEN word** (user, 2026-09-19): no `.get(key, default)` fallbacks, no schema-version
   branches, no "an older artefact reads as …" — refuse by name at the boundary. Every compatibility decision needs
   the user's explicit permission, case by case. **A class / payload / schema an experiment reads or writes is
-  settled BEFORE that experiment runs**; a campaign's gate compares only inputs its own queue produced under one
-  code version. An artefact produced by unfinished code is superseded and deleted, never kept beside the real one.
+  settled BEFORE that experiment runs**. An artefact produced by unfinished code is superseded and deleted, never kept
+  beside the real one.
+- **Results made by different code may be compared once the code is shown to behave the same — by a behaviour check
+  on fixed inputs, never by an equal commit or source hash** (user, 2026-10-02; the executor's conformance C33, window
+  readouts: multi-aircraft design §6.6 step 9.9). An equal commit refuses valid comparisons after any unrelated commit
+  and still misses environment and data changes. (Until 2026-10-02 this file said "a campaign's gate compares only
+  inputs its own queue produced under one code version": Claude's extension of the rule above, never the user's.)
+- **A CLAUDE.md or memory line holds what the user decided or what was verified** (user, 2026-10-02). Claude's own
+  extension of a user rule is labelled as Claude's reading, says what it extends, is checked against the user's later
+  decisions before it is applied — and is never quoted to the user as "the project's rule".
 - **`get(key, DEFAULT)` returns `None` for a key present with a null value** — use
   `get(key) or DEFAULT` when a null must read as "unspecified"; and a check comparing two
   optional fields to each other passes when BOTH are missing.
