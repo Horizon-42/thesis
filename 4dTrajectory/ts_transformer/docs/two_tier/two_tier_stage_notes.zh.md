@@ -26,7 +26,7 @@
 | 阶段 | 状态 | 在哪 |
 |---|---|---|
 | 1 词表 | **定稿**：读法 `instruction-v3`（航向词逐行标注、5° 一档、提前 4 s 说）；规格 `145d6911e75b`，在按运行日划分的训练集上测量 | `docs/two_tier/instruction_vocabulary_design.zh.md` |
-| 2 标注器 | **完成**：现行句子产物 `outputs/POOLED/instruction_language/v6_20261002/`（行取在 UTC 偶数秒上，规格沿用 v5，§9；分支 `dev-scene-time-grid` 合并后现行）；v5 `v5_20260926/` 仍能打开（§5）；标注器源码指纹 `55f6f0bcd6ee`；测试日不打开 | 包 `instructions/` |
+| 2 标注器 | **完成**：现行句子产物 `outputs/POOLED/instruction_language/v6_20261002/`（行取在 UTC 偶数秒上，规格沿用 v5，§9；`dev-scene-time-grid` 已合并 `2636022a`，2026-10-02）；v5 `v5_20260926/` 仍能打开（§5）；标注器源码指纹 `55f6f0bcd6ee`；测试日不打开 | 包 `instructions/` |
 | 3 执行器 | **2026-10-01 改成按航迹核对、三种执行方式，已合并**（`e2ec272b`，用户让我合并；执行器设计 §12.2–§12.5：一批单机、一批多机（各架从自己的周期起，`halt`）、单条（`autopilot/single.py`，前端 live 用）；规格旁边 `conformance/` 存 250 架参照航迹，代码改了跑 R42 `executor_conformance` 约 30 s，过了写 `passed-<代码指纹前 12 位>.json`，现行代码 `passed-a5b1a9a99a6d.json`；窗口闭环一批一个执行器，正式批次快 37 %、逐行相同）。**完成，只用词表**，词表以外只读被指跑道公布的 TCH 和下滑角（"下降至落地"入口前不低于下滑道下沿，截获后在下滑道下方平飞）；每种机型按公布的最大着陆重量飞（§2）。现行规格 `outputs/POOLED/executor/v11_20260927/`（p = 5°/s，落地按跑道本身判，两个新结局） | `docs/two_tier/executor_design.zh.md`（2026-09-26 按实现重写，§14 关键代码索引）；包 `autopilot/`（`README.md`） |
 | 4 回放门 | v11 训练集、验证集每格都过：训练集落地 99.63 %、词在包络内 97.54 %、evaluation 98.30 %；验证集 99.90 / 97.50 / 98.46 % | 执行器设计 §11，[v11 读数](readouts/2026-09-27_executor_v11_readout.zh.md) |
 | 5 先验 | 第三版第 0 步、第 1 步（单机）、单机自由生成完成；**base 模型** `prior/v3_step1_20260924/full_s1337`（§3） | `docs/two_tier/prior_design.zh.md`、`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md` §3–§5 |
@@ -367,7 +367,7 @@
 - **显卡队列已停**（2026-10-02 16:01Z，进程组 668131；两份 `run.log` 末尾写了原因）。旧时间轴上找到的难事件
   （`traffic/hard_events_train_{real,aug}_20261002`、选择集跑了一部分的 `hard_events_20261002.run`）和没跑的 `prior/step8_events_test_20261002.run`
   经用户同意删了（`prior/step8_queue_20261002.run/run.log` 末尾记了）。
-- **第 1 阶段**（分支 `dev-scene-time-grid`，工作树 `.claude/worktrees/scene-time-grid`，用户合并）：数据平面 `data/dataset.py` `on_utc_steps`
+- **第 1 阶段，完成、已合并**（`dev-scene-time-grid` → `dev-two-tier` `2636022a`，用户让我合并，2026-10-02；后端已重启，预热的 5 个 Training 集在新代码上照常打开，打不开的 13 架都是机型没有动力学或没有机型；工作树、分支已删）：数据平面 `data/dataset.py` `on_utc_steps`
   （只给句子产物用）；重建按存储的第 0 行取（v5、v6 都逐行重建）；`instruction_spec --spec-from`（v6 沿用 v5 的规格，标注器指纹不变）；
   场景删掉挂和推，行不在时间步上的产物按名字拒绝；扩充只挪整数个时间步；删掉那张挂步图。然后建句子产物 v6
   （`outputs/POOLED/rebuild_20261002/run.sh`）并核对，执行器 v11 在新代码上重新核对（`data/dataset.py` 在执行器指纹里）。
