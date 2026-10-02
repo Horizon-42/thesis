@@ -256,8 +256,15 @@ def _write_track(tracks, key, legs, start="2026-05-04T11:00:00Z", strays=None):
             "landing_time_utc": "2026-05-04T12:00:00Z"}, len(_go_around_then_land()[0])
 
 
-def test_the_airport_pass_places_each_go_around_against_the_slice_and_the_sentence(tmp_path):
-    from ts_transformer.experiments.go_around_census import AirportInputs, census_airport, summarise
+def _rows_taken_up(legs):
+    """The sentence rows (2 s each, from the track's first sample) just after the base leg starts and just after the
+    final begins: the clearance and the capture of the approach after the go-around."""
+    base = sum(len(leg) for leg in legs[:4])
+    return base // 2 + 1, (base + len(legs[4])) // 2 + 1
+
+
+def _airport_inputs(tmp_path, ga1_rows):
+    from ts_transformer.experiments.go_around_census import AirportInputs, Placement
 
     tracks = tmp_path / "KXXX" / "tracks"
     point = len(_go_around_then_land()[0])
@@ -269,15 +276,24 @@ def test_the_airport_pass_places_each_go_around_against_the_slice_and_the_senten
     circuit = _go_around_then_land(low_at=300.0)
     circuit[0] = _leg((-15_000.0, 0.0, 15.0 + GLIDE * 15_000.0), (300.0, 0.0, 2.0))   # down to the runway
     touch, _ = _write_track(tracks, "TG1", circuit)
-    inputs = AirportInputs(
+    return AirportInputs(
         "KXXX", tmp_path, (FRAME,), (FRAME.lat, FRAME.lon), (around, later, straight, touch),
         # GA1's slice starts before its go-around, GA2's after it
         {"GA1": 0, "GA2": point + 10, "SI1": 0},
         # GA1 labelled from the track's start for long enough; GA2 labelled from after the go-around; SI1 refused
-        {"GA1": ("labelled", "2026-05-04T11:00:00Z", 2_000), "GA2": ("labelled", "2026-05-04T11:10:00Z", 50),
-         "SI1": ("refused", "2026-05-04T11:00:00Z", None)},
+        {"GA1": Placement("labelled", "2026-05-04T11:00:00Z", 2_000, *ga1_rows),
+         "GA2": Placement("labelled", "2026-05-04T11:10:00Z", 50, 10, 20),
+         "SI1": Placement("refused", "2026-05-04T11:00:00Z", None, None, None)},
         2.0, 600.0)
-    result = census_airport(inputs)
+
+
+def test_the_airport_pass_places_each_go_around_against_the_slice_and_the_sentence(tmp_path):
+    from ts_transformer.experiments.go_around_census import CLIMB_ONSET_M, CLIMB_READ_M, census_airport, summarise
+
+    legs = _go_around_then_land()
+    point = len(legs[0])
+    join, capture = _rows_taken_up(legs)
+    result = census_airport(_airport_inputs(tmp_path, (join, capture)))
     assert result["landings"] == 4 and result["stray_samples"] == 5
     assert result["landings_not_the_last"] == {"landed later": [], "left": []}
     rows = {row["flight_key"]: row for row in result["go_arounds"]}
@@ -292,6 +308,22 @@ def test_the_airport_pass_places_each_go_around_against_the_slice_and_the_senten
     assert first["cost_s"] == pytest.approx(first["to_landing_s"] - first["still_needed_s"])
     assert first["farthest_km"] == pytest.approx(math.hypot(12.0, 4.0), abs=0.02)   # the downwind's far corner
     assert not rows["GA2"]["in_arrival_slice"] and not rows["GA2"]["in_sentence"]
+    # the approach taken up again, in the sentence's 2 s rows from 11:00:00 = the track's seconds
+    assert first["to_capture_turn_s"] == pytest.approx(2.0 * join - point)
+    assert first["to_corridor_s"] == pytest.approx(2.0 * capture - point)
+    assert rows["GA2"]["to_capture_turn_s"] is None and rows["GA2"]["to_corridor_s"] is None
+    # the straight climb to 700 m by 8 km past the threshold, from its onset (30 m up: no level flight first) to 150 m
+    # above the point; the strays on it (900 m up, three and more in a row) left out, or they would end the read
+    gradient = (700.0 - first["height_m"]) / 9_000.0
+    rise = SPEED * gradient                                                       # metres a sample
+    assert first["climb_gradient"] == pytest.approx(gradient, rel=0.01)
+    assert first["climb_angle_deg"] == pytest.approx(math.degrees(math.atan(gradient)), rel=0.01)
+    assert first["level_before_climb_s"] == pytest.approx(math.floor(CLIMB_ONSET_M / rise), abs=1.0)
+    assert CLIMB_READ_M - CLIMB_ONSET_M <= first["climb_read_m"] < CLIMB_READ_M - CLIMB_ONSET_M + 2.0 * rise
+    assert first["climb_read_flown_m"] == pytest.approx(first["climb_read_m"] / gradient, rel=0.01)
+    assert first["climb_read_s"] == pytest.approx(first["climb_read_flown_m"] / SPEED, abs=1.5)
+    assert rows["GA2"]["climb_gradient"] == pytest.approx(gradient, rel=0.01)
+    assert rows["TG1"]["climb_gradient"] is None and rows["TG1"]["to_capture_turn_s"] is None
 
     summary = summarise(result["go_arounds"], result["landings"], 600.0)
     assert summary["go_arounds"] == 2 and summary["per_1000_landings"] == pytest.approx(500.0)
@@ -301,6 +333,104 @@ def test_the_airport_pass_places_each_go_around_against_the_slice_and_the_senten
         "labelled, outside the sentence, outside the arrival slice": 1}
     assert summary["set_aside"] == {"on the runway: absent": 1}
     assert set(summary["by"]["height"]) == {"<=300 m"}
+    assert summary["to_capture_turn_s"]["n"] == 1 and summary["climb_gradient"]["n"] == 2
+    assert summary["at_least_the_regulation_gradient"] == 1.0                     # 7 % against 3.3 %
+
+
+def test_a_clearance_not_after_the_go_around_is_refused(tmp_path):
+    """The sentence's capture must be the approach after the go-around: a clearance row before it, or at its very
+    second, is not that one."""
+    from ts_transformer.experiments.go_around_census import census_airport
+
+    point = len(_go_around_then_land()[0])
+    assert point % 2 == 0                                       # row point / 2 is the go-around's second
+    for rows in ((1, 2), (point // 2, point // 2 + 1)):
+        with pytest.raises(ValueError, match="not after the go-around"):
+            census_airport(_airport_inputs(tmp_path / str(rows[0]), rows))
+
+
+def _twice_then_land():
+    """Down the 09 glidepath to 1 km out, around, back down to 1 km out, around again, and the landing."""
+    once = _go_around_then_land()
+    final_again = _leg((-12_000.0, 0.0, 15.0 + GLIDE * 12_000.0), (-1_000.0, 0.0, 15.0 + GLIDE * 1_000.0))
+    return [*once[:5], final_again, *_go_around_then_land(low_at=-1_000.0)[1:]]
+
+
+def test_only_a_flights_last_go_around_is_timed_to_the_approach_that_followed(tmp_path):
+    from ts_transformer.experiments.go_around_census import AirportInputs, Placement, census_airport
+
+    legs = _twice_then_land()
+    around, _ = _write_track(tmp_path / "KXXX" / "tracks", "GA2X", legs)
+    base = sum(len(leg) for leg in legs[:9])                    # the second circuit's base
+    inputs = AirportInputs("KXXX", tmp_path, (FRAME,), (FRAME.lat, FRAME.lon), (around,), {"GA2X": 0},
+                           {"GA2X": Placement("labelled", "2026-05-04T11:00:00Z", 5_000, base // 2 + 1, base // 2 + 60)},
+                           2.0, 600.0)
+    rows = census_airport(inputs)["go_arounds"]
+    assert [(r["number"], r["of"], r["kind"]) for r in rows] == [(0, 2, "go-around"), (1, 2, "go-around")]
+    assert rows[0]["to_capture_turn_s"] is None and rows[0]["to_corridor_s"] is None
+    second = sum(len(leg) for leg in legs[:6])                  # the second go-around's point
+    assert rows[1]["index"] == second and rows[1]["to_capture_turn_s"] == pytest.approx(2 * (base // 2 + 1) - second)
+
+
+def test_a_level_off_around_the_ceiling_after_a_go_around_is_not_a_second_one():
+    """Review 2026-10-02 (KRDU JIA5536): a go-around levelling off at the ceiling, its samples over and under it, splits
+    into two passes; the second has nothing to come down from since the first, and is not a go-around."""
+    from ts_transformer.experiments.go_around_census import go_arounds
+
+    low_h = 15.0 - GLIDE * -4_000.0
+    legs = [_leg((-25_000.0, 0.0, 900.0), (-15_000.0, 0.0, 900.0)),                  # level well before the final
+            _leg((-15_000.0, 0.0, 900.0), (-4_000.0, 0.0, low_h)),
+            _leg((-4_000.0, 0.0, low_h), (-1_000.0, 0.0, 590.0)),                  # around, up to just under 600 m
+            _leg((-1_000.0, 0.0, 590.0), (0.0, 0.0, 590.0)),
+            _leg((0.0, 0.0, 610.0), (1_000.0, 0.0, 610.0)),                        # over the ceiling for 1 km
+            _leg((1_000.0, 0.0, 590.0), (2_000.0, 0.0, 590.0)),                    # under it again: a second pass
+            _leg((2_000.0, 0.0, 590.0), (8_000.0, 0.0, 800.0)),
+            _leg((8_000.0, 0.0, 800.0), (8_000.0, 4_000.0, 800.0)),
+            _leg((8_000.0, 4_000.0, 800.0), (-12_000.0, 4_000.0, 800.0)),
+            _leg((-12_000.0, 4_000.0, 800.0), (-12_000.0, 0.0, 15.0 + GLIDE * 12_000.0)),
+            _approach(-12_000.0) + [(0.0, 0.0, 15.0)]]
+    points, times = _track(legs)
+    found = go_arounds(points, times, [FRAME], len(points) - 1, 600.0)
+    assert [event.index for event in found] == [sum(len(leg) for leg in legs[:2])]
+
+
+def _climb_samples(level=5, spikes=()):
+    """100 m a sample over the ground (0.0009° of latitude ≈ 100 m): ``level`` samples level (±5 m), then 10 m up a
+    sample (10 %); ``spikes``: samples 200 m up instead (another aircraft's altitude, or a bad one)."""
+    out = []
+    for i in range(40):
+        height = 100.0 + (5.0 * (i % 2) if i < level else 10.0 * (i - level + 1))
+        out.append([float(i), -78.0, 35.0 + 0.0009 * i, 300.0 if i in spikes else height])
+    return out
+
+
+def test_the_climb_is_read_from_its_onset_to_150_m_held_above_the_point():
+    from ts_transformer.experiments.go_around_census import REGULATION_CLIMB_GRADIENT, initial_climb
+
+    samples = _climb_samples()
+    # onset: the last sample within 30 m of the point (sample 7, 130 m); end: the first 150 m up (sample 19, 250 m),
+    # held by the next two
+    reading = initial_climb(samples, tuple(range(40)), 0)
+    assert reading["level_before_climb_s"] == pytest.approx(7.0) and reading["climb_read_s"] == pytest.approx(12.0)
+    assert reading["climb_read_m"] == pytest.approx(120.0)
+    assert reading["climb_read_flown_m"] == pytest.approx(1_200.0, rel=0.01)
+    assert reading["climb_gradient"] == pytest.approx(0.10, rel=0.01)
+    assert REGULATION_CLIMB_GRADIENT == pytest.approx(60.96 / 1852.0)            # 200 ft per NM
+    with pytest.raises(ValueError, match="never climbed"):
+        initial_climb(samples[:15], tuple(range(15)), 0)
+
+
+def test_the_climb_read_leaves_out_a_lone_high_sample_and_the_samples_not_kept():
+    from ts_transformer.experiments.go_around_census import initial_climb
+
+    plain = initial_climb(_climb_samples(), tuple(range(40)), 0)
+    # one sample 200 m up during the level flight is not the climb's end
+    assert initial_climb(_climb_samples(spikes=(3,)), tuple(range(40)), 0) == plain
+    # three in a row would be — unless they are not kept (strays)
+    spiked = _climb_samples(spikes=(3, 4, 5))
+    assert initial_climb(spiked, tuple(range(40)), 0)["climb_read_s"] < plain["climb_read_s"]
+    kept = tuple(i for i in range(40) if i not in (3, 4, 5))
+    assert initial_climb(spiked, kept, 0)["climb_read_m"] == pytest.approx(plain["climb_read_m"])
 
 
 def test_height_bands_stop_at_the_runs_ceiling():
@@ -323,9 +453,11 @@ def test_the_artefact_index_reads_labelled_and_refused_flights_per_airport(monke
     monkeypatch.setattr(census, "load_spec", lambda directory: object())
     monkeypatch.setattr(census, "signals_flights", lambda directory, split: meta)
     monkeypatch.setattr(census, "load_sentences", lambda directory, split, spec: {
-        "offsets": np.array([0, 7, 12]), "signal_index": np.array([1, 2])})
+        "offsets": np.array([0, 7, 12]), "signal_index": np.array([1, 2]), "join_row": np.array([2, 1]),
+        "capture_row": np.array([4, 3])})
     index = census.artefact_index(None, ["KXXX"])
-    assert index == {"KXXX": {"A": ("refused", "t0", None), "C": ("labelled", "t2", 5)}}
+    assert index == {"KXXX": {"A": census.Placement("refused", "t0", None, None, None),
+                              "C": census.Placement("labelled", "t2", 5, 1, 3)}}
 
 
 def test_the_slack_mirrors_the_free_generation_time_limit():
@@ -380,8 +512,10 @@ def test_main_writes_the_census_and_refuses_a_foreign_manifest_and_an_existing_d
     monkeypatch.setattr(census, "load_spec", lambda directory: SimpleNamespace(step_s=2.0))
     monkeypatch.setattr(census, "signals_flights", lambda directory, split: [
         {"dataset_id": "KRDU:GA1_05L", "airport": "KRDU", "entry_time_utc": "2026-05-04T11:00:00Z"}])
+    join, capture = _rows_taken_up(_go_around_then_land())
     monkeypatch.setattr(census, "load_sentences", lambda directory, split, spec: {
-        "offsets": np.array([0, 1_500]), "signal_index": np.array([0])})
+        "offsets": np.array([0, 1_500]), "signal_index": np.array([0]), "join_row": np.array([join]),
+        "capture_row": np.array([capture])})
     monkeypatch.setattr(census, "load_executor_spec", lambda directory: (SimpleNamespace(timeout_factor=1.5),
                                                                          {"sha256": "e" * 64}))
     argv = ["--instructions", str(tmp_path / "artefact"), "--executor", str(tmp_path / "executor"),
@@ -393,6 +527,10 @@ def test_main_writes_the_census_and_refuses_a_foreign_manifest_and_an_existing_d
         ("GA1_05L", "go-around", True)]
     assert payload["pooled"]["go_arounds"] == 1 and payload["pooled"]["time_limit"]["sentences"] == 1
     assert payload["criteria"]["max_height_m"] == census.MAX_HEIGHT_M
+    assert payload["criteria"]["regulation_climb_gradient"] == census.REGULATION_CLIMB_GRADIENT
+    point = len(_go_around_then_land()[0])
+    assert payload["go_arounds"][0]["to_capture_turn_s"] == pytest.approx(2.0 * join - point)
+    assert payload["pooled"]["to_capture_turn_s"]["n"] == 1 and payload["airports"]["KRDU"]["climb_gradient"]["n"] == 1
 
     with pytest.raises(SystemExit):
         census.main([*argv, "--out", str(tmp_path / "out")])                    # never overwritten

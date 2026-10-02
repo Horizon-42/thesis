@@ -1055,7 +1055,7 @@ Multi-aircraft step 8 item 7 (design §6.6): the time limit for a sentence that 
 day split (`training_landings`: decided from the roster, so a track of any other day is never opened; an unlisted day is
 refused), as the harvest's derived view (`store.read_track_view`, altitude outliers repaired); the artefact's train split
 only through its flight records and sentence offsets (`signals_flights`, `load_sentences`; no signal arrays); the executor
-spec for its `timeout_factor`. Writes `go_arounds.json` (`ts-go-around-census-v1`: every go-around row, per-airport and pooled
+spec for its `timeout_factor`. Writes `go_arounds.json` (`ts-go-around-census-v2`: every go-around row, per-airport and pooled
 summaries, the criteria, the manifests' sha256) into a NEW directory; refuses an artefact whose arrival manifests are not the
 live ones.
 
@@ -1091,3 +1091,13 @@ point. **The time limit's slack**: a real start's limit (`prior_free_generation.
 a test) less its observed time from the first predicted step (`observed_remaining_s`), over every labelled train sentence,
 with the share covering the go-around cost p50 / p95. **Unseen**: a go-around whose loop left 30 km (the stored track keeps
 only the last stretch inside it, so the first approach and the go-around are cropped) or whose aircraft did not land here.
+
+**The approach taken up again and the climb** (v2, 2026-10-02, for step 8's reward): a timed go-around inside its labelled
+sentence is timed to the sentence's `join_row` — the capture turn's start, where the labeller says the clearance: the data's
+counterpart of the executor's capture — (`to_capture_turn_s`) and to its `capture_row`, the first row of the final run in
+the corridor (`to_corridor_s`); rows are 2 s from the sentence's `entry_time_utc`, and a clearance row not after the
+go-around is refused (the sentence's capture must be the approach that followed). Every timed go-around's first 150 m of
+climb (`initial_climb`, `CLIMB_READ_M` = `MIN_CLIMB_M`: from the point to the first kept sample that high above it) gives
+seconds, ground distance (sample to sample, strays left out), the gradient and its angle, beside the published minimum
+missed-approach gradient 200 ft per NM (`REGULATION_CLIMB_GRADIENT`, AIM 5-4-21 b) and the share at or above it — a
+comparison, not a parameter.

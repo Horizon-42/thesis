@@ -51,6 +51,16 @@ contains the go-around point, and in the instruction artefact's train split — 
 contain the go-around point), refused, or absent. A go-around whose loop left 30 km, or whose aircraft did not land here,
 is not in any stored landing track: the tail of the times is short by those, and the report says so.
 
+A go-around inside its labelled sentence is also timed to where the approach was taken up again: the sentence's
+``join_row`` — the clearance, which the labeller puts at the capture turn's onset: the data's counterpart of the
+executor's clearance, whose capture starts there or later (`autopilot/lateral.py`), so a lower bound on it; the clock a
+post-trained model's return to the approach is read on (multi-aircraft design §6.6 step 8) — and its ``capture_row``, the
+first row of the final run in the corridor; only the flight's last go-around is (an earlier one's would run through the
+circuits after it). Every timed go-around's climb is read as a gradient (`initial_climb`: from its onset — the level
+flight first reported apart — to `CLIMB_READ_M` above the point, metres climbed over metres flown over the ground, sample
+to sample, strays left out) beside the published minimum missed-approach climb gradient, 200 ft per NM (AIM 5-4-21 b, which
+ties it to a missed approach begun at the DA / MAP): a comparison, not a parameter.
+
 The time limit a real start flies to today (`prior_free_generation.limits_s`: the sentence's rows from the first predicted
 step × the step × the executor spec's ``timeout_factor``) leaves a flight its SLACK — the limit less its observed time
 from the first predicted step to the landing (`observed_remaining_s`) — and a go-around fits in it only when its cost does.
@@ -67,6 +77,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import statistics
 import time
 from collections import Counter
@@ -77,7 +88,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
-from geokit import haversine_km
+from geokit import FT_M, NM_M, haversine_km
 
 from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG
 from final_approach import TrackPoint
@@ -93,7 +104,7 @@ from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.repo_layout import HARVEST_ROOT, REPO_ROOT, arrival_manifest_path, git_state, repo_relative
 
-SCHEMA = "ts-go-around-census-v1"
+SCHEMA = "ts-go-around-census-v2"
 SPLIT = "train"
 #: A low pass (design §6.6 step 8 item 7; my reading, not a regulation): on a runway end's extended centreline
 MAX_CROSS_M = 500.0
@@ -118,6 +129,20 @@ STRAY_DISTANCE_M = 1_000.0
 ON_RUNWAY_HEIGHT_M = 15.0
 #: the go-around point's height above its threshold, reported in these bands (up to the run's ceiling)
 HEIGHT_BAND_EDGES_M = (300.0, 600.0)
+#: a go-around's climb is read up to the first sample this much above its point that the next `CLIMB_HELD_SAMPLES` - 1
+#: samples stay above too (every go-around holds a level `MIN_CLIMB_M` above its point before its next pass, so it gets
+#: there; a lone sample up there is not the climb) ...
+CLIMB_READ_M = MIN_CLIMB_M
+CLIMB_HELD_SAMPLES = 3
+#: ... from its ONSET: the last sample before that still within this much of the point's height — the level flight a
+#: go-around may fly first (an early missed approach flies level to the missed approach point, AIM 5-5-5 a.4) is
+#: reported apart, not read into the gradient (my reading: the band covers a level segment's spread)
+CLIMB_ONSET_M = 30.0
+#: the published minimum missed-approach climb gradient, 200 ft per NM (AIM 5-4-21 b, repo docs/literature/go_around)
+REGULATION_CLIMB_GRADIENT = 200.0 * FT_M / NM_M
+#: what `initial_climb` reads, in a row's order (None on a row that is not a timed go-around)
+CLIMB_FIELDS = ("level_before_climb_s", "climb_read_s", "climb_read_flown_m", "climb_read_m", "climb_gradient",
+                "climb_angle_deg")
 #: what a row of the census is: a go-around (timed), or set aside (counted)
 GO_AROUND, ON_RUNWAY, LANDING_NOT_LAST = "go-around", "on the runway", "landing not the last"
 #: what follows a stored landing
@@ -214,7 +239,10 @@ def go_arounds(points: Sequence[TrackPoint], times: Sequence[float], frames: Seq
     for n, low in enumerate(passes):
         point = low.lowest
         end = passes[n + 1].first if n + 1 < len(passes) else landing_index
-        descent = held_level(times, altitude, 0, point) - altitude[point]
+        # came down to it since the pass before: a pass split by the ceiling (a level-off just above it after a
+        # go-around) has nothing to come down from, and is not a second go-around (review 2026-10-02)
+        since = passes[n - 1].last + 1 if n else 0
+        descent = held_level(times, altitude, since, point) - altitude[point]
         climb = held_level(times, altitude, point + 1, end) - altitude[point]
         if descent < MIN_DESCENT_M or climb < MIN_CLIMB_M:
             continue
@@ -256,6 +284,44 @@ def read_flight(points: Sequence[TrackPoint], times: Sequence[float], frames: Se
                          int(stray.sum()), after_landing, tuple(kept))
 
 
+def initial_climb(samples: Sequence[Sequence[float]], kept: Sequence[int], point: int) -> dict[str, float]:
+    """A go-around's climb out of its point (a stored sample index, one of ``kept``; ``samples`` the stored
+    ``[t, lon, lat, alt]`` rows), over the kept samples: its END is the first sample `CLIMB_READ_M` above the point that
+    the next `CLIMB_HELD_SAMPLES` - 1 stay above too, its ONSET the last sample before the end within `CLIMB_ONSET_M` of
+    the point's height. Gives the seconds from the point to the onset (level first), and from the onset to the end the
+    seconds, the metres flown over the ground (sample to sample), the metres climbed, their ratio (the gradient) and its
+    angle."""
+    after = list(kept[kept.index(point):])
+    base = samples[point][3]
+    high = [samples[i][3] - base >= CLIMB_READ_M for i in after]
+    end = next((k for k in range(len(after) - CLIMB_HELD_SAMPLES + 1) if all(high[k:k + CLIMB_HELD_SAMPLES])), None)
+    if end is None:
+        raise ValueError(f"sample {point} never climbed {CLIMB_READ_M:.0f} m and stayed: not a go-around point")
+    onset = max(k for k in range(end) if samples[after[k]][3] - base <= CLIMB_ONSET_M)
+    flown = sum(1000.0 * haversine_km(samples[a][2], samples[a][1], samples[b][2], samples[b][1])
+                for a, b in zip(after[onset:end], after[onset + 1:end + 1]))
+    climbed = samples[after[end]][3] - samples[after[onset]][3]
+    return dict(zip(CLIMB_FIELDS, (samples[after[onset]][0] - samples[point][0],
+                                   samples[after[end]][0] - samples[after[onset]][0], flown, climbed, climbed / flown,
+                                   math.degrees(math.atan2(climbed, flown)))))
+
+
+@dataclass(frozen=True)
+class Placement:
+    """A flight's standing in the artefact's train split: ``status`` labelled / refused / absent; a labelled one's sentence
+    rows and the rows the labeller put the clearance (``join_row``, the capture turn's start) and the capture
+    (``capture_row``, the first row of the final run in the corridor) at; rows count `step_s` from ``entry_utc``."""
+
+    status: str
+    entry_utc: str | None
+    words: int | None
+    join_row: int | None
+    capture_row: int | None
+
+
+ABSENT = Placement("absent", None, None, None, None)
+
+
 @dataclass(frozen=True)
 class AirportInputs:
     """What one airport's census reads, all of it resolved before a worker starts."""
@@ -267,8 +333,8 @@ class AirportInputs:
     train: tuple[dict[str, Any], ...]           # the tracks roster's `assigned` rows landing on a training day
     #: flight_key → the arrival roster's `first_sample_index`
     slice_start: Mapping[str, int]
-    #: flight_key → ("labelled", entry UTC, sentence rows) | ("refused", entry UTC, None)
-    artefact: Mapping[str, tuple[str, str, int | None]]
+    #: flight_key → its standing in the artefact's train split (absent: `ABSENT`)
+    artefact: Mapping[str, Placement]
     step_s: float
     max_height_m: float
 
@@ -288,10 +354,11 @@ def census_airport(inputs: AirportInputs) -> dict[str, Any]:
                               inputs.frames, landing, inputs.max_height_m)
         stray_samples += reading.strays
         key = record["flight_key"]
-        status, entry, words = inputs.artefact.get(key, ("absent", None, None))
+        placed = inputs.artefact.get(key, ABSENT)
+        entry = None if placed.entry_utc is None else parse_utc(placed.entry_utc)
         if reading.landing_not_last:
             not_last[reading.after_landing].append({
-                "flight_key": key, "artefact": status, "go_arounds_before": len(reading.go_arounds),
+                "flight_key": key, "artefact": placed.status, "go_arounds_before": len(reading.go_arounds),
                 "landing_to_track_end_s": float(samples[reading.kept[-1]][0]) - float(samples[landing][0])})
         start = parse_utc(track["start_time_utc"])
         for number, event in enumerate(reading.go_arounds):
@@ -300,11 +367,22 @@ def census_airport(inputs: AirportInputs) -> dict[str, Any]:
             to_landing = float(samples[landing][0]) - point_s
             still_needed = max(0.0, -event.along_m) / speed
             at = start + timedelta(seconds=point_s)
-            sentence_row = None if entry is None else (at - parse_utc(entry)).total_seconds() / inputs.step_s
+            into_sentence_s = None if entry is None else (at - entry).total_seconds()
+            in_sentence = placed.words is not None and 0.0 <= into_sentence_s / inputs.step_s < placed.words
             on_runway = event.along_m >= 0.0 and event.height_m <= ON_RUNWAY_HEIGHT_M
+            kind = LANDING_NOT_LAST if reading.landing_not_last else ON_RUNWAY if on_runway else GO_AROUND
+            taken_up = {"to_capture_turn_s": None, "to_corridor_s": None}
+            # the sentence's capture is the approach after the flight's LAST pass: an earlier go-around's would run
+            # through the circuits after it (review 2026-10-02)
+            if kind == GO_AROUND and in_sentence and number == len(reading.go_arounds) - 1:
+                taken_up = {"to_capture_turn_s": placed.join_row * inputs.step_s - into_sentence_s,
+                            "to_corridor_s": placed.capture_row * inputs.step_s - into_sentence_s}
+                if taken_up["to_capture_turn_s"] <= 0.0:
+                    raise ValueError(f"{inputs.code} {key}: the sentence's clearance (row {placed.join_row}) is not after "
+                                     f"the go-around at {at.isoformat()} — its capture is not the approach that followed")
+            climb = initial_climb(samples, reading.kept, event.index) if kind == GO_AROUND else dict.fromkeys(CLIMB_FIELDS)
             rows.append({
-                "airport": inputs.code, "flight_key": key, "landing_runway": record["runway"],
-                "kind": LANDING_NOT_LAST if reading.landing_not_last else ON_RUNWAY if on_runway else GO_AROUND,
+                "airport": inputs.code, "flight_key": key, "landing_runway": record["runway"], "kind": kind,
                 "number": number, "of": len(reading.go_arounds), **asdict(event),
                 "time_utc": at.isoformat().replace("+00:00", "Z"),
                 "ground_speed_mps": speed, "to_landing_s": to_landing, "still_needed_s": still_needed,
@@ -314,8 +392,7 @@ def census_airport(inputs: AirportInputs) -> dict[str, Any]:
                 "same_runway": event.runway == record["runway"],
                 "arrival_roster": key in inputs.slice_start,
                 "in_arrival_slice": key in inputs.slice_start and inputs.slice_start[key] <= event.index,
-                "artefact": status,
-                "in_sentence": words is not None and 0.0 <= sentence_row < words,
+                "artefact": placed.status, "in_sentence": in_sentence, **taken_up, **climb,
             })
     return {"airport": inputs.code, "landings": len(inputs.train), "stray_samples": stray_samples,
             "landings_not_the_last": not_last, "go_arounds": rows}
@@ -349,9 +426,19 @@ def summarise(rows: Sequence[dict[str, Any]], landings: int, max_height_m: float
     timed = [r for r in rows if r["kind"] == GO_AROUND]
 
     def times(group: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        taken_up = [r for r in group if r["to_capture_turn_s"] is not None]
         return {"go_arounds": len(group), "to_landing_s": distribution([r["to_landing_s"] for r in group]),
                 "cost_s": distribution([r["cost_s"] for r in group]),
-                "farthest_km": distribution([r["farthest_km"] for r in group])}
+                "farthest_km": distribution([r["farthest_km"] for r in group]),
+                # inside a labelled sentence only: the approach taken up again
+                "to_capture_turn_s": distribution([r["to_capture_turn_s"] for r in taken_up]),
+                "to_corridor_s": distribution([r["to_corridor_s"] for r in taken_up]),
+                "climb_gradient": distribution([r["climb_gradient"] for r in group]),
+                "climb_angle_deg": distribution([r["climb_angle_deg"] for r in group]),
+                "climb_read_s": distribution([r["climb_read_s"] for r in group]),
+                "level_before_climb_s": distribution([r["level_before_climb_s"] for r in group]),
+                "at_least_the_regulation_gradient": (float(np.mean([r["climb_gradient"] >= REGULATION_CLIMB_GRADIENT
+                                                                    for r in group])) if group else None)}
 
     groups = {
         "height": {band: [r for r in timed if height_band(r["height_m"], max_height_m) == band]
@@ -407,21 +494,23 @@ def slack(words: Sequence[int], step_s: float, timeout_factor: float,
     return {"sentences": len(spare), "slack_s": distribution(spare), "covers": covers}
 
 
-def artefact_index(directory: Path, airports: Sequence[str]) -> dict[str, dict[str, tuple[str, str, int | None]]]:
-    """Per airport, flight_key → its standing in the artefact's train split (labelled with its sentence rows, or
-    refused), from the signals' records and the sentences' row offsets — no signal arrays are read."""
+def artefact_index(directory: Path, airports: Sequence[str]) -> dict[str, dict[str, Placement]]:
+    """Per airport, flight_key → its standing in the artefact's train split (labelled with its sentence rows, clearance
+    row and capture row, or refused), from the signals' records and the sentences' row offsets and rows — no signal
+    arrays are read."""
     spec = load_spec(directory)
     meta = signals_flights(directory, SPLIT)
     sentences = load_sentences(directory, SPLIT, spec)
     offsets = sentences["offsets"]
-    words = {int(signal): int(offsets[i + 1] - offsets[i]) for i, signal in enumerate(sentences["signal_index"])}
-    index: dict[str, dict[str, tuple[str, str, int | None]]] = {code: {} for code in airports}
+    rows = {int(signal): (int(offsets[i + 1] - offsets[i]), int(sentences["join_row"][i]), int(sentences["capture_row"][i]))
+            for i, signal in enumerate(sentences["signal_index"])}
+    index: dict[str, dict[str, Placement]] = {code: {} for code in airports}
     for i, flight in enumerate(meta):
         if flight["airport"] not in index:
             continue
         key = flight["dataset_id"].split(":", 1)[1]
-        index[flight["airport"]][key] = (("labelled", flight["entry_time_utc"], words[i]) if i in words
-                                         else ("refused", flight["entry_time_utc"], None))
+        index[flight["airport"]][key] = (Placement("labelled", flight["entry_time_utc"], *rows[i]) if i in rows
+                                         else Placement("refused", flight["entry_time_utc"], None, None, None))
     return index
 
 
@@ -432,7 +521,7 @@ def training_landings(roster: Mapping[str, Any], days: DaySplit) -> tuple[dict[s
                  if r["outcome"] == "assigned" and days.split_of(landing_day(r["landing_time_utc"])) == SPLIT)
 
 
-def airport_inputs(code: str, harvest_root: Path, days: DaySplit, artefact: Mapping[str, tuple[str, str, int | None]],
+def airport_inputs(code: str, harvest_root: Path, days: DaySplit, artefact: Mapping[str, Placement],
                    step_s: float, max_height_m: float) -> tuple[AirportInputs, dict[str, Any]]:
     paths = HarvestPaths(root=harvest_root, code=code)
     roster = read_manifest(paths)
@@ -493,10 +582,13 @@ def main(argv: list[str] | None = None) -> int:
                         "stray_samples": result["stray_samples"],
                         "landings_not_the_last": not_the_last(result["landings_not_the_last"])}
         report[code]["time_limit"] = slack(
-            [n for status, _, n in placed[code].values() if status == "labelled"], step_s, params.timeout_factor,
+            [p.words for p in placed[code].values() if p.status == "labelled"], step_s, params.timeout_factor,
             {"airport": [r["cost_s"] for r in result["go_arounds"] if r["kind"] == GO_AROUND], "pooled": pooled_costs})
-        times = report[code]["to_landing_s"]
+        times, taken_up = report[code]["to_landing_s"], report[code]["to_capture_turn_s"]
         spread = f", to landing p50 / p95 {times['p50']:.0f} / {times['p95']:.0f} s" if times["n"] else ""
+        if taken_up["n"]:
+            spread += (f", to the capture turn p50 / p95 {taken_up['p50']:.0f} / {taken_up['p95']:.0f} s "
+                       f"({taken_up['n']} in a sentence)")
         print(f"{code}: {result['landings']} landings, {report[code]['go_arounds']} go-arounds "
               f"({report[code]['per_1000_landings']:.2f} per 1,000){spread}; set aside {report[code]['set_aside']}",
               flush=True)
@@ -504,7 +596,7 @@ def main(argv: list[str] | None = None) -> int:
     pooled["stray_samples"] = sum(r["stray_samples"] for r in results)
     pooled["landings_not_the_last"] = not_the_last(
         {kind: [f for r in results for f in r["landings_not_the_last"][kind]] for kind in (LANDED_LATER, LEFT)})
-    pooled["time_limit"] = slack([n for code in airports for status, _, n in placed[code].values() if status == "labelled"],
+    pooled["time_limit"] = slack([p.words for code in airports for p in placed[code].values() if p.status == "labelled"],
                                  step_s, params.timeout_factor, {"pooled": pooled_costs})
     payload = {
         "schema": SCHEMA, "written_utc": utc_now(), "split": SPLIT, "only_airports": args.airports,
@@ -517,7 +609,9 @@ def main(argv: list[str] | None = None) -> int:
                      "min_descent_m": MIN_DESCENT_M, "min_climb_m": MIN_CLIMB_M, "hold_s": HOLD_S,
                      "min_hold_samples": MIN_HOLD_SAMPLES, "stray_window": STRAY_WINDOW,
                      "stray_distance_m": STRAY_DISTANCE_M, "on_runway_height_m": ON_RUNWAY_HEIGHT_M,
-                     "height_band_edges_m": list(HEIGHT_BAND_EDGES_M)},
+                     "height_band_edges_m": list(HEIGHT_BAND_EDGES_M), "climb_read_m": CLIMB_READ_M,
+                     "climb_held_samples": CLIMB_HELD_SAMPLES, "climb_onset_m": CLIMB_ONSET_M,
+                     "regulation_climb_gradient": REGULATION_CLIMB_GRADIENT},
         "unseen": ["a go-around whose loop left 30 km: the stored track keeps only the last stretch inside it, so the first "
                    "approach and the go-around are cropped",
                    "a go-around whose aircraft did not land here",

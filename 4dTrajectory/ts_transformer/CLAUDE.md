@@ -437,7 +437,8 @@ are the aircraft whose own end is a landing; the M4 model is named `traffic` (R3
 (stray samples of other aircraft set aside first; a low pass on any runway end's final, came down to it and climbed away,
 each level HELD 20 s), timed to its landing, placed against the arrival slice and the labelled sentence, beside today's
 time-limit slack; touch-and-goes and landings that were not the last (a low go-around stored as the landing) set aside and
-listed; a loop that left the 30 km crop is unseen (R40).
+listed; a loop that left the 30 km crop is unseen; v2 adds, inside a labelled sentence, the time to the clearance /
+capture turn of the approach that followed, and every go-around's first 150 m of climb against 200 ft per NM (R40).
 **Every Training export writes the attitude each track is drawn in** (`experiments/training_attitude.py`, 2026-09-30): heading,
 path angle, right bank and an attack READING — executor tracks from its states and the command of the cycle starting at each row
 (the track's end: the cycle ending there), observed tracks from `rebuild_series` + the teacher's `actual_controls`, none for a flight
