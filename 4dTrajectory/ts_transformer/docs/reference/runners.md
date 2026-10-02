@@ -1100,6 +1100,60 @@ used every run is a runner).
     python run_ts.py traffic_window_reward_readout \
         --run 4dTrajectory/outputs/POOLED/prior/m4_window_20260930/window_s1337 [--out <new directory>]
 
+### R40 · `run_ts.py go_around_census` — how long a real go-around takes to land again, on the training days (2026-10-01)
+
+Multi-aircraft step 8 item 7 (design §6.6): the time limit for a sentence that says go-around is set from this. Reads every
+`assigned` track of each airport's live tracks roster whose landing falls on a TRAINING day of the instruction artefact's
+day split (`training_landings`: decided from the roster, so a track of any other day is never opened; an unlisted day is
+refused), as the harvest's derived view (`store.read_track_view`, altitude outliers repaired); the artefact's train split
+only through its flight records and sentence offsets (`signals_flights`, `load_sentences`; no signal arrays); the executor
+spec for its `timeout_factor`. Writes `go_arounds.json` (`ts-go-around-census-v2`: every go-around row, per-airport and pooled
+summaries, the criteria, the manifests' sha256) into a NEW directory; refuses an artefact whose arrival manifests are not the
+live ones.
+
+**Strays first.** A stored track carries the odd run of another aircraft's samples — a position kilometres off with that
+aircraft's altitude (KRDU RPA5593 sample 570: 15 km away, 400 m up, between two samples on the final) — which the altitude
+repair cannot see (a run of three is the median of its own five-sample window). `strays`: a sample over 1,000 m from the
+component-wise median position (runway frame) of the 5 samples either side is set aside and counted; everything after —
+distances included — reads the rest. Limits (review): a run of more than 5 is its own median, the first / last 5 samples are
+padded with themselves, the window counts samples not seconds; on 262 training-day tracks it flagged 5 samples, all 5–40 km
+jumps, none on a turn or across a gap.
+
+**A low pass** = a run of samples before the landing sample (≤ 3 between two) on one runway end's extended centreline —
+every runway end of the airport, HAE frames: |cross| ≤ 500 m, along −10 km … +3 km, ≤ `--max-height-m` (default 600 m) above
+the threshold — moving ≥ 1 km along the landing direction. Passes of two runway ends whose sample ranges overlap are one, on
+the end with the smaller median |cross|. Its lowest sample is the go-around point. **A go-around** = a pass whose point the
+aircraft came down to from a level ≥ 150 m higher HELD for 20 s over ≥ 5 samples, and from which it climbed to a level
+≥ 150 m higher held the same way before the next pass or the landing (`held_level`: held, not reached — a missed stray or two
+across a reception gap are not a climb).
+
+**Set aside, counted, not timed**: a point ON THE RUNWAY (past the threshold, ≤ 15 m up, under every published TCH: a
+touch-and-go or a landing balked in the flare — KSMF training circuits), and every go-around of a flight whose stored landing
+is NOT ITS LAST (a level 150 m above it held after it). Those landings are listed by flight key in two kinds: LANDED LATER —
+the track ends inside a low pass after that climb (back on a final; KRDU tracks mostly end on short final, 23–63 m up, not
+on the runway) — a low go-around the harvest took for the landing (`harvest/threshold_event.py` takes the best-aligned
+crossing under 100 m, not the last: KSMF SWA1521, KSTL UAL214 — their arrival slices and sentences end at a go-around), with
+the stored landing to the track's end; LEFT — a touch-and-go and away.
+
+Per timed go-around: the time to the landing sample, the time the aborted approach still needed (distance left to the
+threshold at the reported ground speed there), their difference (`cost_s`), the farthest kept sample from the field before
+landing (how close the loop came to the 30 km crop), same / other runway, and the flight's standing — arrival roster, arrival
+slice containing the point (`first_sample_index`), artefact labelled / refused / absent, the sentence's rows containing the
+point. **The time limit's slack**: a real start's limit (`prior_free_generation.limits_s`, mirrored by `limit_s` and pinned by
+a test) less its observed time from the first predicted step (`observed_remaining_s`), over every labelled train sentence,
+with the share covering the go-around cost p50 / p95. **Unseen**: a go-around whose loop left 30 km (the stored track keeps
+only the last stretch inside it, so the first approach and the go-around are cropped) or whose aircraft did not land here.
+
+**The approach taken up again and the climb** (v2, 2026-10-02, for step 8's reward): a timed go-around inside its labelled
+sentence is timed to the sentence's `join_row` — the capture turn's start, where the labeller says the clearance: the data's
+counterpart of the executor's capture — (`to_capture_turn_s`) and to its `capture_row`, the first row of the final run in
+the corridor (`to_corridor_s`); rows are 2 s from the sentence's `entry_time_utc`, and a clearance row not after the
+go-around is refused (the sentence's capture must be the approach that followed). Every timed go-around's first 150 m of
+climb (`initial_climb`, `CLIMB_READ_M` = `MIN_CLIMB_M`: from the point to the first kept sample that high above it) gives
+seconds, ground distance (sample to sample, strays left out), the gradient and its angle, beside the published minimum
+missed-approach gradient 200 ft per NM (`REGULATION_CLIMB_GRADIENT`, AIM 5-4-21 b) and the share at or above it — a
+comparison, not a parameter.
+
 ### R41 · `run_ts.py traffic_window_pair` — two window readouts (R34) of the same windows, aircraft by aircraft
 
 2026-10-01 (the user: the kept M4-in-windows round against its start on the val windows). `traffic_window_pair --first
