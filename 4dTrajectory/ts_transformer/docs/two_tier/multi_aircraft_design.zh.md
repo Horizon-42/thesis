@@ -1975,7 +1975,16 @@ runner R40 `go_around_census`（分支 `dev-go-around`）。读数 `readouts/202
 
 **9.9 读数分成配置、代码版本、数据；配对按行为核对代码**（用户 2026-10-02 选按行为核对，2026-10-03 定拆法和改造；§9 第 38 项）
 
-现状（2026-10-03）：设计定稿，代码未开始；用户让另一个 agent 接手开发，照 9.9.7 的顺序做。
+现状（2026-10-03 晚，分支 `dev-step9-one-commanded`，暂停等用户重启会话）：
+
+1. 第 1、4 步已提交 `1e3bd470`：读数程序按 `--config` 跑、写五个文件；共用的 `experiments/code_version.py`；导出程序读新格式。
+   测试 `tests/test_traffic_window_readout.py`（新，31 个）、`tests/test_window_training_export.py` 通过。审查 A 未做（启动后被停下）。
+2. 第 2 步已写、未测试、未审查：`experiments/traffic_window_conformance.py`（WIP 提交 `1e6ca5a6`）。
+3. 第 3 步未开始。用户 2026-10-03 定：配对程序改名为 `experiments/traffic_window_compare.py`（模型对比程序；
+   输出 `traffic_window_compare.json`，`ts-traffic-window-compare-v1`），测试文件一并改名；盘上已有的 `window_val_pair_*` 目录不改名。
+   在此之前 `traffic_window_pair.py` 仍导入已删的 `SCHEMA`，导入会失败。
+4. 审查：用户要求关键步骤后由 opus 子代理以 xhigh 审查。定义在 `~/.claude/agents/opus-code-reviewer.md`（`effort: xhigh`），
+   本会话未加载；重启后先确认可用。审查分两次：A = `1e3bd470`（第 1、4 步），B = 第 2、3 步。
 
 为什么：
 
