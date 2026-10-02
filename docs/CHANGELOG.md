@@ -1,5 +1,17 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-02 — Two-tier multi-aircraft step 9.2: M0 re-measured on sentence artefact v6
+
+- Census R24, labelled flight R26 and the two masks R27 re-run on `instruction_language/v6_20261002` (rows on the UTC
+  steps) from a pinned checkout at `90fc66c0`: `outputs/POOLED/traffic/{census,labelled,masks}_v6_20261002/` (read-only,
+  `SHA256SUMS`, scripts and logs beside them). Almost identical to v5: pairs with a loss per hour IFR 0.979 / VISUAL 0.606
+  (0.977 / 0.602); the executor adds 1.13 points (1.17) — passes; masks 0.32 % pooled (0.32 %) — passes, KSJC 1.01 % read
+  pooled (decision 19); `A_MAX` = 18 unchanged. Readout `ts_transformer/docs/two_tier/readouts/2026-10-02_m0_v6.zh.md`.
+- R26 runs on CPU only: on CUDA the executor (autograd on) recompiles its compiled step per batch size and fails at
+  torch's recompile limit — new code-health follow-up.
+- Found for 9.3: R31 (one aircraft commanded) has no step-8 go-around code, so the one-commanded baseline waits for 9.4's
+  one-commanded window draw and is read by R34; the window half can run now (design §6.6 step 9, 9.3 item 7, 9.8 item 6).
+
 ### 2026-10-02 — Two-tier: every row of the sentence artefact on the UTC clock's even seconds (multi-aircraft design §2.1, decision 13)
 
 - The user: "same step" must be "same time" in a multi-aircraft scene. Rows used to start at each flight's first kept

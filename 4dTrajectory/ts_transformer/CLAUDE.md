@@ -396,13 +396,14 @@ law run in-process (readouts §12). **The heading-lead ablation** (`heading_lead
 over the formal train replay's sample, relabelled and flown with no hashed code touched; the reference cell must reproduce the
 formal replay first; words inside compare neither across L nor across the bank limit. **Multi-aircraft M0**
 (2026-09-27): `traffic_census` judges the training days' observed traffic under both readings (C36) into a new directory
-(`ts-traffic-census-v3`; formal `census_20260927`: 0.98 vs 0.60 pairs/h) (R24); `traffic_separation_examples` draws five
+(`ts-traffic-census-v3`; formal `census_20260927`: 0.98 vs 0.60 pairs/h; on v6 `census_v6_20261002`: the same, `A_max` 18) (R24); `traffic_separation_examples` draws five
 typical recorded losses for the readout (R25); `traffic_labelled` flies every labelled flight on its labelled words together
 in the scene closed loop (`experiments/traffic_loop.py`, shared with M3/M4) beside the same flights along their records
-(formal `labelled_v2_20260928`: 3.93 vs 2.76 % ended under VISUAL; the pass line gates the executor's addition) (R26);
+(formal `labelled_v2_20260928`: 3.93 vs 2.76 % ended under VISUAL; the pass line gates the executor's addition; on v6
+`labelled_v6_20261002`: 3.90 vs 2.77 %; CPU only — `--device cuda` hits torch.compile's recompile limit) (R26);
 `traffic_masks` measures the loop's two separation masks (`inference/separation_masks.py`: speed words, approach
 clearance; computed by the loop and handed to the speaker, the prior never imports them; a fallback masks nothing) on
-the labelled words (formal `masks_v2_20260928`: 0.32 % masked) (R27); `traffic_interaction` is M1 — the base prior's NLL
+the labelled words (formal `masks_v2_20260928`: 0.32 % masked; on v6 `masks_v6_20261002`: 0.32 %) (R27); `traffic_interaction` is M1 — the base prior's NLL
 on steps with a leader / busy, matched on phase and airport (formal `interaction_20260928`: speed +0.0077 with a leader) (R28). `traffic_prior_train` is M2 — base's recipe on scene samples with 17 edge features
 (`inference/scene_edges.py`: motion from the row before, never the fitted velocities), checkpoint `ts-prior-checkpoint-v4`
 pinned to the edge code by `edge_source_sha256` (R29). `traffic_scene_readout` reads it against base on the select days — scene

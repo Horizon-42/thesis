@@ -138,6 +138,7 @@ added three entries (the rows after the performance index's).
 | Stored tracks carry other aircraft's samples; no read-time position repair (10-01) | open | new; see the entry | **yes**: the arrival slices every model reads (if repaired in the harvest view) |
 | A wake shortfall's end rounds `counted` a step short in the window loop (10-01) | open | new; see the entry | **yes**: the steps M4-in-windows (R37) trains a wake-shortfall follower on |
 | The labeller fingerprint hashes content code, not only the vocabulary's format (10-02) | open | new; see the entry | no: a check, not a training input — but the fix changes what the stored specs record |
+| The executor cannot fly a batch on CUDA past eight batch sizes: `torch.compile` recompile limit (10-02) | open | new; see the entry | no: every closed loop and readout flies the executor on CPU; only `traffic_labelled --device cuda` (and any other caller passing a CUDA device) fails |
 | The edge and executor fingerprints hash row-placement and data-plane code (10-02) | open | new; see the entry | no: a check — but the fix changes what the stored checkpoints and passed records name |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
@@ -709,3 +710,15 @@ feature means. The executor's `spec.executor_source_files` takes every module `a
 the conformance check already compares each flight's inputs by digest. **Judgement**: hash the feature definitions only and
 pin the placement by tests; leave the data plane out of the executor's code and let the input digests carry it.
 
+## The executor cannot fly a batch on CUDA past eight batch sizes: `torch.compile` recompile limit (2026-10-02)
+
+**Verified** (`dev-two-tier` `90fc66c0`, multi-aircraft design §6.6 step 9.2). `run_ts.py traffic_labelled --device cuda
+--airports KMSY` on artefact v6 died after 4,500 of 4,859 flights with `FailOnRecompileLimitHit: Hard failure due to
+fullgraph=True` in `aerodynamic_model/torch_scaled_transport_chart_dynamics.py` `_rollout_step` (last reason: `dt_s` size 296
+expected, 57 actual). The executor (`autopilot/executor.py` → `plant.step` → `rollout_control_endpoints`) flies with
+autograd ON (nothing in `autopilot/` enters `torch.no_grad`), so `_rollout_step` compiles `_cuda_autograd_step` with
+`dynamic=False`; every chunk has its own size (flights the executor cannot fly drop out of a chunk, the last chunk is short),
+each size is a recompile, and the ninth is refused. The same airport on CPU took 85 s to fly against > 99 s on the GPU for
+4,500 flights, so 9.2 ran on CPU. **Judgement**: the executor needs no gradients — fly under `torch.inference_mode()` (the
+inference step compiles with `dynamic=True`) or drop `--device` from runners that only ever fly on CPU. `autopilot/` is inside
+the executor's conformance identity (C33): the fix needs one conformance pass, nothing is retrained.

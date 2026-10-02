@@ -648,7 +648,8 @@ both readings); closing speeds between consecutive established aircraft with sen
 the §2.3 samples and the 20-minute windows (`A_max`). Refuses a manifest other than the one the signals were read from,
 and stops on a type neither CWT table lists (`types_not_listed.json`). Writes `census.json` (`ts-traffic-census-v3`)
 into a NEW directory; about two minutes. Formal: `outputs/POOLED/traffic/census_20260927/` (`8e788f9f`): 0.98 (IFR) vs
-0.60 (VISUAL) pairs with a loss per hour.
+0.60 (VISUAL) pairs with a loss per hour. On artefact v6 (rows on the UTC steps; design §6.6 step 9.2): `census_v6_20261002/` (`90fc66c0`): 0.979 vs 0.606, `A_max` 18
+(KRDU), unchanged (readout `2026-10-02_m0_v6.zh.md`).
 
 ### R25 · `run_ts.py traffic_separation_examples` — recorded examples of the losses the census finds (readout figures)
 
@@ -680,7 +681,10 @@ already breaks the check where its controllers kept visual separation. Per fligh
 first step in both runs, who ended it in each run and reading. Writes `labelled.json` (`ts-traffic-labelled-v2`; v1 gated
 the raw share) into a NEW directory; about 20 minutes over the five airports, CPU. Formal: `outputs/POOLED/traffic/`
 `labelled_v2_20260928/`: 3.93 % of the own-dynamics flights ended under VISUAL against 2.76 % along their recorded rows —
-the executor adds 1.17 points (KSTL 2.62, the most): passes (readout `2026-09-28_labelled_traffic.zh.md`).
+the executor adds 1.17 points (KSTL 2.62, the most): passes (readout `2026-09-28_labelled_traffic.zh.md`). On artefact v6:
+`labelled_v6_20261002/` (`90fc66c0`, CPU, 22 min): 3.90 % against 2.77 %, the executor adds 1.13 points (KSTL 2.42): passes. `--device cuda`
+fails — the executor flies with autograd on and the compiled step recompiles per batch size up to torch's limit (repo
+`docs/code-health-followups.md`); fly on CPU.
 
 ### R27 · `run_ts.py traffic_masks` — the closed loop's two separation masks measured on the training days' labelled words (multi-aircraft design §6.4 step 6)
 
@@ -700,7 +704,8 @@ word said while the one in force is masked) apart; the speed prediction's gap ag
 crossing. Pass line (design §3.4 step 0): ≤ 1 % of the labelled speed words and clearances together. Writes `masks.json`
 (`ts-traffic-masks-v2`; v1 left the slowest words in a fallback) into a NEW directory; about 6 minutes, CPU. Formal:
 `outputs/POOLED/traffic/masks_v2_20260928/` (`13097a09`): 0.32 % masked (speed words 0.18 %, clearances 0.71 %; KSJC
-0.98 % the most, half of its clearances across the close pair 30L/30R) — passes, read pooled (§9 item 19).
+0.98 % the most, half of its clearances across the close pair 30L/30R) — passes, read pooled (§9 item 19). On artefact v6:
+`masks_v6_20261002/` (`90fc66c0`): 0.32 % (KSJC 1.01 %, 81 of its 182 masked clearances across 30L/30R) — passes, read pooled.
 
 ### R28 · `run_ts.py traffic_interaction` — multi-aircraft M1: does the single-aircraft base prior's word choice depend on traffic it cannot see (design §6.1, prior design §8)
 
