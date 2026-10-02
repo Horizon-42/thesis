@@ -231,9 +231,16 @@ a      = 走廊外：切入角 30°；走廊内：走廊航向容差的一半（
 
 - 航线是跑道指针所指那条候选跑道的延长中线。许可之前换指针就换航线；许可或截获之后换指针，标注里已被拒绝，执行器
   同样拒绝（报错）。闭环里说话的一方用 `Executor.runway_locked` 知道此刻能不能换。
-- **复飞**（进近列）：取消"已许可"和"已截获"；横向飞所指跑道的航向（§4.2）；纵向有高度目标时用高度保持律去它（最多按
-  爬升类的角度爬），生效的是"下降至落地"时按爬升类的角度爬，直到来了新的高度词；速度保持当前空速。复飞时航向词的
-  目标重新以当前航迹为起点，之后的词从那里量。
+- **复飞**（进近列；多机设计 §6.6 第 8 步细节第 6、7 条，用户 2026-10-02 定）：取消"已许可"和"已截获"，跑道锁随之解开
+  （下一步起能换跑道）；进近列之后只能再说"许可加入"。
+  - 横向：先沿所指跑道的航向飞（§4.2）；复飞那一步或之后说了航向词，就照航向词飞——从当时的航迹起按最短的方向转，
+    词钟从那里重新起算；复飞之前说的、还在生效的航向词不飞（`autopilot/lateral.py` `Lateral.rate` 的 `flying_course`）。
+  - 纵向：复飞期间的爬升——"下降至落地"在生效时复飞自己的爬升，和往上的高度目标——都按每海里 200 ft
+    （`GO_AROUND_CLIMB_GRADIENT`，约 1.885°，AIM 5-4-21 b 的最低复飞爬升梯度），不按爬升类的中心 1.32°（它低于条文的下限）；
+    高度保持律的爬升也以它为上限。照标注的词飞时不会复飞，所以参照航迹逐位不变（§12.3 的核对 0 m）。
+  - 速度保持当前空速。
+  - 复飞自己的爬升从某个状态爬到某个高度要多久（`Vertical.go_around_climb_s`：按纵向律自己的时间常数和变化率上限，逐个周期）
+    是多机复飞奖励里 H 的参照（多机设计第 8 步细节第 9 条）。
 
 ---
 
@@ -256,9 +263,9 @@ a      = 走廊外：切入角 30°；走廊内：走廊航向容差的一半（
 |---|---|---|
 | 目标 T + 平飞 | 保持 | 高度保持律（§5.5） |
 | 目标 T + 下降档 k | 按角度下降，到了改平 | −γ_k（该档的名义角度：现行规格各档中心 0.92°、2.13°、3.06°、4.41°），离 T 还有改平距离时转入保持（§5.4） |
-| 目标 T + 爬升 | 按角度爬升，到了改平 | +1.32°（爬升类的名义角度），同样改平 |
+| 目标 T + 爬升 | 按角度爬升，到了改平 | +1.32°（爬升类的名义角度），同样改平；复飞期间 +1.885°（每海里 200 ft，§4.6） |
 | 下降至落地 + 下降档 k | 按角度下降到落地，入口前不低于下滑道下沿 | §5.3 |
-| 复飞 + 下降至落地 | 爬升 | +1.32°，直到来了新的高度词（§4.6） |
+| 复飞 + 下降至落地 | 爬升 | +1.885°（每海里 200 ft），直到来了新的高度词（§4.6） |
 
 来了新的高度词或角度词，已截获的目标就放开，按新词重来。方向与目标矛盾的组合在标注里已被拒绝，执行器遇到时同样
 拒绝；"下降至落地"配的不是下降档也拒绝。
@@ -744,25 +751,26 @@ val 只用来判门，不用来定参数。
 | 反解：坡度、载荷因子 | `autopilot/inverse.py:55` `attitude` |
 | 反解：推力 | `autopilot/inverse.py:82` `thrust` |
 | 积分一个周期、动力学配置 | `autopilot/plant.py:30` `EXECUTOR_DYNAMICS`、`:47` `Plant.step` |
-| 横向律总入口（许可、截获、跟踪、复飞） | `autopilot/lateral.py:243` `Lateral.rate` |
-| 航向词的律 | `autopilot/lateral.py:96` `word_rate`（"收得住" `:81` `stopping_rate_deg_s`） |
-| 执行器自己的转弯 | `autopilot/lateral.py:107` `rate_for_error` |
-| 航向词的误差（从生效的词量起） | `autopilot/lateral.py:224` `Lateral.word_error` |
-| 截获提前量与规划转弯率 | `autopilot/lateral.py:211` `Lateral.capture_lead`、`:87` `capture_planning_rate_deg_s` |
-| 开始截获 / 交给跟踪 | `autopilot/lateral.py:262`、`:265` |
-| 偏 4.5° 与自行切入 | `autopilot/lateral.py:269`–`:277` |
-| 沿线跟踪 | `autopilot/lateral.py:279`–`:283` |
-| 截获转弯率 | `autopilot/lateral.py:286`–`:291` |
-| 跑道表（入口、航向、高程、TCH、下滑角） | `autopilot/lateral.py:116` `Runways` |
-| 纵向律总入口（四种模式、落地） | `autopilot/vertical.py:98` `Vertical.rate` |
-| γ̇ 上限 | `autopilot/vertical.py:94` `Vertical.rate_limit` |
-| 改平、高度保持 | `autopilot/vertical.py:126`–`:132` |
-| 落地：越过点 | `autopilot/vertical.py:136`–`:148` |
-| 落地：朝越过点 | `autopilot/vertical.py:149`–`:151`（平缓档偏陡的来源：截获后取 `on_line`，`:151`） |
-| 落地：限在管子里、离开管子 | `autopilot/vertical.py:155`–`:161` |
-| 落地：不低于越过高度 | `autopilot/vertical.py:164` |
-| 落地：不低于下滑道下沿 | `autopilot/vertical.py:165`–`:172`；下沿 `:62` `GLIDEPATH_BELOW_M`（镜像） |
-| 落地：最终取值 | `autopilot/vertical.py:173` |
+| 横向律总入口（许可、截获、跟踪、复飞及复飞后的航向词） | `autopilot/lateral.py:262` `Lateral.rate` |
+| 航向词的律 | `autopilot/lateral.py:99` `word_rate`（"收得住" `:84` `stopping_rate_deg_s`） |
+| 执行器自己的转弯 | `autopilot/lateral.py:110` `rate_for_error` |
+| 航向词的误差（从生效的词量起） | `autopilot/lateral.py:233` `Lateral.word_error` |
+| 截获提前量与规划转弯率 | `autopilot/lateral.py:220` `Lateral.capture_lead`、`:90` `capture_planning_rate_deg_s` |
+| 开始截获 / 交给跟踪 | `autopilot/lateral.py:284`、`:287` |
+| 偏 4.5° 与自行切入 | `autopilot/lateral.py:291`–`:299` |
+| 沿线跟踪 | `autopilot/lateral.py:301`–`:305`；复飞后沿跑道航向 `:306` |
+| 截获转弯率 | `autopilot/lateral.py:308`–`:313` |
+| 跑道表（入口、航向、高程、TCH、下滑角） | `autopilot/lateral.py:121` `Runways` |
+| 纵向律总入口（四种模式、落地、复飞的爬升） | `autopilot/vertical.py:137` `Vertical.rate` |
+| γ̇ 上限 | `autopilot/vertical.py:113` `Vertical.rate_limit`、`:117` `rate_max` |
+| 复飞的爬升梯度；复飞爬升到某高度要多久 | `autopilot/vertical.py:81` `GO_AROUND_CLIMB_GRADIENT`、`:121` `Vertical.go_around_climb_s` |
+| 改平、高度保持 | `autopilot/vertical.py:170`–`:176` |
+| 落地：越过点 | `autopilot/vertical.py:180`–`:192` |
+| 落地：朝越过点 | `autopilot/vertical.py:193`–`:195`（平缓档偏陡的来源：截获后取 `on_line`，`:195`） |
+| 落地：限在管子里、离开管子 | `autopilot/vertical.py:199`–`:210` |
+| 落地：不低于越过高度 | `autopilot/vertical.py:213` |
+| 落地：不低于下滑道下沿 | `autopilot/vertical.py:218`–`:221`；下沿 `:74` `GLIDEPATH_BELOW_M`（镜像） |
+| 落地：最终取值 | `autopilot/vertical.py:223` |
 | 速度律、失速下限、落地减速 | `autopilot/speed.py:63` `Speed.rate` |
 | "未指定"的速度 | `autopilot/speed.py:37` `approach_speed_ias_mps` |
 | 速度变化的快慢 | `autopilot/speed.py:49` `speed_change_mps2` |
@@ -814,12 +822,11 @@ val 只用来判门，不用来定参数。
 1. **平缓档下"下降至落地"在下滑道上方仍比真实飞机陡**（§5.3.5）：v11 在下滑道下方平飞，最平一档 1.80° → 1.70°（真实 1.19°）；
    剩下的差距在执行器已在下滑道上方的段里。角度对得更好的"类中心 + 自己的高度判可达"把问题换成末段偏高（越过点 28.3 m、
    多数航班落地时离开词的管子），要用它先在正式回放门上量 evaluation。
-2. **复飞期间说的航向词不飞**：复飞时横向一直飞跑道航向，直到复飞结束（2026-09-24 审查记下）。
-3. **判定只给第一次截获定航向词的截止**：复飞后再次截获，不另起一段（2026-09-24 审查记下）。
-4. **回放别人的句子时转弯半径不同**：词只说转到哪个航向、不说多急，执行器与观测飞机的转弯半径不同，大转弯能在五边前
+2. **判定只给第一次截获定航向词的截止**：复飞后再次截获，不另起一段（2026-09-24 审查记下）。
+3. **回放别人的句子时转弯半径不同**：词只说转到哪个航向、不说多急，执行器与观测飞机的转弯半径不同，大转弯能在五边前
    差出几公里（例：KSMF 17R 的被引导航班落到中线西边 3–4 km，入口前几百米才截获）。这不是执行器能不看答案补上的；
    闭环里先验按执行器自己的状态说词。
-5. **多襟翼机型的进近速度**：E75L、B737、A319、E170、E190（占先验训练航班的 25 %）用单一的 FAA 进近速度，没有公开的
+4. **多襟翼机型的进近速度**：E75L、B737、A319、E170、E190（占先验训练航班的 25 %）用单一的 FAA 进近速度，没有公开的
    原始出处给减襟翼的 V_REF（`docs/code-health-followups.md` #21，卡在出处上）。
-6. **代码健康记录**（`docs/code-health-followups.md`）：个别剖面上落地词在最后一档平缓时卡在管子边上（新旧飞法一样，
+5. **代码健康记录**（`docs/code-health-followups.md`）：个别剖面上落地词在最后一档平缓时卡在管子边上（新旧飞法一样，
    比下滑道下限早）。v11 只改了下滑道下方那一段的飞法，没有专门处理这一条，也没有在这个合成剖面上重新量过；留给下一版执行器。
