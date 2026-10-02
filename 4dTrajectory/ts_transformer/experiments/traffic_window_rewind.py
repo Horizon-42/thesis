@@ -12,8 +12,9 @@ episode's first step — when the pair first lost separation (a wake shortfall: 
 **Who speaks again** (a role each): the aircraft the judge ended (``answered``) and the other of the pair when it is
 commanded (``partner``); when the episode ended both, each is done once (``both``).
 
-**From where** (an offset each): ``t_L`` less each of ``--offsets-s`` (whole steps), and ``start`` — the aircraft's first
-predicted step (design: the one-aircraft credit, candidate B). Skipped and counted: an offset before its first predicted
+**From where** (an offset each): ``t_L`` less each of ``--offsets-s`` (whole steps; none: ``start`` alone), and ``start``
+— the aircraft's first predicted step (design: the one-aircraft credit, candidate B). ``--roles`` speak again (the others
+not at all: multi-aircraft step 8's hard events are the answered aircraft's from ``start``). Skipped and counted: an offset before its first predicted
 step; a step at or after ``t_L`` (the state judged at ``t_L`` was flown before it); an own step it said nothing at — ended
 by the judge, or its words over, before it (`spoken_steps`).
 
@@ -36,8 +37,10 @@ the share with at least one branch rescued, the mean share of branches rescued, 
 (steps per column differing from the original), rescued and not.
 
 Writes into a NEW directory, at the end, ``original.jsonl`` (the original pass's rows, R34's), ``events.jsonl`` (an event
-a row with its branches) and ``window_rewind.json`` (the header — with the controls replayed and their largest float
-difference — and the readout). Both passes run in ``--workers`` forked processes
+a row with its branches), ``original_words.npz`` (every commanded aircraft's words in the original pass of each window
+holding an event and the own steps it spoke: an event's window flown again from them, `traffic_window_events` —
+multi-aircraft design §6.6 step 8 item 11) and ``window_rewind.json`` (the header — with the controls replayed and their
+largest float difference — and the readout). Both passes run in ``--workers`` forked processes
 (`traffic_window_generation.in_processes`); what is read does not depend on their number.
 
     python run_ts.py traffic_window_rewind \\
@@ -81,7 +84,7 @@ from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.data import VARIANTS, airport_landings
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
-SCHEMA = "ts-traffic-window-rewind-v2"
+SCHEMA = "ts-traffic-window-rewind-v3"
 #: Design §6.6 step 7.7 item 6: how long before the loss an aircraft speaks again, beside its first predicted step.
 OFFSETS_S = (10.0, 30.0, 60.0, 120.0)
 START = "start"
@@ -211,13 +214,15 @@ def events_of(original: Original, first: int) -> list[Event]:
     return out
 
 
-def branches_of(event: Event, original: Original, offsets_s: Sequence[float], branches: int, step_s: float
-                ) -> tuple[list[Branch], Counter]:
-    """The event's branches (module docstring), its control last, and the offsets skipped by ``(role, offset,
-    why)``."""
+def branches_of(event: Event, original: Original, offsets_s: Sequence[float], branches: int, step_s: float,
+                roles: Sequence[str] = ROLES) -> tuple[list[Branch], Counter]:
+    """The event's branches (module docstring) for its speakers of ``roles``, its control last, and the offsets skipped
+    by ``(role, offset, why)``."""
     out: list[Branch] = []
     skipped: Counter = Counter()
     for key, role in event.speakers:
+        if role not in roles:
+            continue
         i = original.keys.index(key)
         for offset in (*offsets_s, None):
             name = START if offset is None else f"{offset:g}"
@@ -232,6 +237,28 @@ def branches_of(event: Event, original: Original, offsets_s: Sequence[float], br
                 out += [Branch(event.number, key, role, name, step, copy) for copy in range(branches)]
     out.append(Branch(event.number, None, None, "control", -1, 0))
     return out, skipped
+
+
+def write_original_words(path: Path, originals: Sequence[Original], step_s: float) -> None:
+    """``original_words.npz`` (module docstring): per commanded aircraft of each of ``originals`` — its window, key, the
+    own steps it spoke (`spoken_steps`) and its words (``said`` over ``offsets``)."""
+    lines = [(o.window, key, spoken_steps(o, i, step_s), said) for o in originals
+             for i, (key, said) in enumerate(zip(o.keys, o.said))]
+    np.savez_compressed(path, window=np.array([w for w, _, _, _ in lines], dtype=np.int64),
+                        key=np.array([k for _, k, _, _ in lines]),
+                        spoken=np.array([n for _, _, n, _ in lines], dtype=np.int64),
+                        offsets=np.concatenate(([0], np.cumsum([len(s) for _, _, _, s in lines]))).astype(np.int64),
+                        said=np.concatenate([s for _, _, _, s in lines]).astype(np.int16))
+
+
+def read_original_words(path: Path) -> dict[int, list[tuple[str, int, np.ndarray]]]:
+    """`write_original_words`' file: per window, its commanded aircraft in order — key, own steps spoken, words."""
+    with np.load(path) as stored:                       # each array read once (an npz decompresses it at each read)
+        windows, keys, spoken, offsets, said = (stored[name] for name in ("window", "key", "spoken", "offsets", "said"))
+    out: dict[int, list[tuple[str, int, np.ndarray]]] = defaultdict(list)
+    for n, (w, key, steps) in enumerate(zip(windows, keys, spoken)):
+        out[int(w)].append((str(key), int(steps), said[offsets[n]: offsets[n + 1]].astype(np.int64)))
+    return dict(out)
 
 
 def given_of(branch: Branch, original: Original, step_s: float) -> list[Given]:
@@ -405,8 +432,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--augment-seed", type=int, default=None, help="every window augmented with this seed "
                         "(`traffic_window_augment`)")
-    parser.add_argument("--offsets-s", type=float, nargs="+", default=list(OFFSETS_S),
-                        help="how long before the loss an aircraft speaks again (beside its first predicted step)")
+    parser.add_argument("--offsets-s", type=float, nargs="*", default=list(OFFSETS_S),
+                        help="how long before the loss an aircraft speaks again (beside its first predicted step; none: "
+                             "that alone)")
+    parser.add_argument("--roles", nargs="+", choices=ROLES, default=list(ROLES),
+                        help="which of an event's aircraft speak again")
     parser.add_argument("--branches", type=int, default=BRANCHES, help="the branches an offset")
     parser.add_argument("--aircraft-steps", type=int, default=AIRCRAFT_STEPS, help="a loop batch's most")
     parser.add_argument("--workers", type=int, default=WORKERS, help="reading processes (what is read does not depend "
@@ -418,6 +448,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("at least one window an airport, one branch and one reading process")
     if any(o <= 0 for o in args.offsets_s) or len(set(args.offsets_s)) != len(args.offsets_s):
         parser.error("the offsets are distinct and positive")
+    if len(set(args.roles)) != len(args.roles):
+        parser.error("--roles: each once")
 
     def resolved(path: Path) -> Path:
         return path if path.is_absolute() else REPO_ROOT / path
@@ -489,7 +521,7 @@ def main(argv: list[str] | None = None) -> int:
     branches: list[Branch] = []
     skipped: Counter = Counter()
     for event in events:
-        got, why = branches_of(event, originals[event.window], args.offsets_s, args.branches, step_s)
+        got, why = branches_of(event, originals[event.window], args.offsets_s, args.branches, step_s, args.roles)
         branches += got
         skipped.update(why)
     sizes = {w: window_size(drawn.windows[w], [drawn.limits[j] for j in drawn.members[w]], step_s)
@@ -551,6 +583,7 @@ def main(argv: list[str] | None = None) -> int:
     with (out / "events.jsonl").open("w", encoding="utf-8") as stream:
         for record in records:
             stream.write(json.dumps(record) + "\n")
+    write_original_words(out / "original_words.npz", [originals[w] for w in sorted({e.window for e in events})], step_s)
     offsets = [*(f"{o:g}" for o in args.offsets_s), START]
     rewound = readout(records, skipped, offsets)
     write_json_atomic(out / "window_rewind.json", {
@@ -562,13 +595,14 @@ def main(argv: list[str] | None = None) -> int:
         "traffic_attention": attention,
         "executor": {"directory": repo_relative(executor_dir), "sha256": spec_record["sha256"]},
         "instructions": repo_relative(instructions), "scenes": built, "history_s": HISTORY_S,
-        "reading": VISUAL, "offsets_s": list(args.offsets_s), "branches": args.branches,
+        "reading": VISUAL, "offsets_s": list(args.offsets_s), "roles": list(args.roles), "branches": args.branches,
         "aircraft_steps": args.aircraft_steps, "batches": {"original": len(batches), "branches": len(branch_batches)},
         "workers": args.workers, "gpu_peak_gb_a_process": max(peaks),
         "controls": {"replayed": len(controls), "largest_float_difference": max(controls, default=0.0),
                      "bound": ROUNDOFF},
         "original": summaries(rows, args.augment_seed is not None)["pooled"],
-        "readout": rewound, "files": {"original": "original.jsonl", "events": "events.jsonl"},
+        "readout": rewound, "files": {"original": "original.jsonl", "events": "events.jsonl",
+                                      "original_words": "original_words.npz"},
         "elapsed_s": time.perf_counter() - started})
     for role, by_offset in rewound["pooled"].items():
         for offset, cell in by_offset.items():

@@ -293,7 +293,7 @@ def test_window_sentences_are_the_readout_s_rows_with_what_each_aircraft_read_an
 
 def _advantage_row(window, key, sample, reward, lost=False, probed=False, forced=None):
     return {"window": window, "dataset_id": key, "sample": sample, "reward": reward, "starts_in_a_loss": lost,
-            "probed": probed, "forced": forced}
+            "probed": probed, "forced": forced, "given": False}
 
 
 def test_an_aircraft_s_advantage_is_against_its_own_samples_and_it_trains_only_on_a_contrast():

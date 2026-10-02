@@ -16,6 +16,9 @@ short — named, not read. Refused when the finished rounds are not 0 … k or o
   ``choice.json``'s numbers;
 - **who the losses were with**: of the counted sentences that lost separation, the share ended by another commanded
   aircraft and by a replayed one (``ended_with``: the loss that ended it, not every episode it was in);
+- **select hard events** (a run with ``--select-events``, multi-aircraft step 8 item 11): the answered aircraft's
+  reward, landing in the landing direction, lost separation and go-arounds per round, and against round 0 paired as
+  above — read, never in the choice;
 - **training, per round ≥ 1** (``history.json``): the round's training sentences (windows, aircraft sentences, trained
   on, starting in a loss, reward and lost separation per kind) and its pass (updates, sentences, the reward term, the KL
   to the reference — mean and largest —, the words outside the clip, the data term, the KL to base at the start);
@@ -43,7 +46,7 @@ from ts_transformer.experiments.traffic_window_reward import select_counted
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
-SCHEMA = "ts-traffic-window-reward-readout-v1"
+SCHEMA = "ts-traffic-window-reward-readout-v2"
 SIDES = ("real", "augmented")
 
 
@@ -108,6 +111,10 @@ def select_round(readout: Mapping[str, Any], first: Mapping[str, Any]) -> dict[s
         else:
             kinds, kinds_0 = by_kind(rows), by_kind(rows_0)
             out[side]["against_round_0_by_kind"] = {kind: paired(kinds_0[kind], kinds[kind]) for kind in kinds}
+    if "events" in readout:                # the select days' hard events (R37 `--select-events`): read, never chosen on
+        part, rows, rows_0 = readout["events"], readout["events"]["aircraft"], first["events"]["aircraft"]
+        out["events"] = {k: part[k] for k in ("sentences", "reward", "landed_here", "lost_separation",
+                                              "said_a_go_around")} | {"against_round_0": paired(rows_0, rows)}
     out["traffic"] = {"teacher_forced_nll_per_step": readout["traffic"]["teacher_forced"]["nll_per_step"],
                       "traffic_output_over_residual": readout["traffic"]["traffic_output_over_residual"]}
     return out
@@ -116,7 +123,7 @@ def select_round(readout: Mapping[str, Any], first: Mapping[str, Any]) -> dict[s
 def training_round(row: Mapping[str, Any]) -> dict[str, Any]:
     """A training round's sentences and pass (its ``history.json`` row)."""
     sentences, passed = row["sentences"], row["train_pass"]
-    return {"sentences": {k: sentences[k] for k in ("windows", "kinds", "aircraft_sentences", "trained_on",
+    return {"sentences": {k: sentences[k] for k in ("windows", "kinds", "aircraft_sentences", "given", "trained_on",
                                                     "starting_in_a_loss", "all", "by_kind", "unprobed", "probed",
                                                     "go_arounds")},
             "pass": {k: passed[k] for k in ("batches", "sentences", "reward_mean", "kl_mean", "kl_max", "clipped_share",
@@ -182,6 +189,19 @@ def tables(read: Mapping[str, Any]) -> list[str]:
                     f"{kind} {part['reward_by_kind'][kind]:.4f}; {v['reward']['difference']:+.4f} ± "
                     f"{v['reward']['standard_error']:.4f} / {_pp(v['lost_separation']['difference'])}"
                     for kind, v in part["against_round_0_by_kind"].items()))
+        lines.append("")
+    if "events" in read["rounds"][0]["select"]:
+        lines.append("select hard events (the answered aircraft, the others given their words) — round: sentences, "
+                     "reward, landed here, lost separation, said a go-around; against round 0: reward, lost separation "
+                     "(pp), ± standard error")
+        for row in read["rounds"]:
+            part = row["select"]["events"]
+            change = part["against_round_0"]
+            lines.append(
+                f"  {row['round']:>2}  {part['sentences']}  {part['reward']:.4f}  {part['landed_here']:.4f}  "
+                f"{part['lost_separation']:.4f}  {part['said_a_go_around']:.4f}  |  "
+                f"{change['reward']['difference']:+.4f} ± {change['reward']['standard_error']:.4f}  "
+                f"{_pp(change['lost_separation']['difference'])} ± {100 * change['lost_separation']['standard_error']:.2f}")
         lines.append("")
     lines.append("training — round: windows, aircraft sentences, trained on, starting in a loss, reward; the pass: "
                  "updates, KL mean / max, clipped, data NLL, KL to base at the start (real, augmented); traffic "

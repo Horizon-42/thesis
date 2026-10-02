@@ -215,6 +215,38 @@ def test_branches_start_at_their_offsets_and_skip_what_cannot_speak_again():
     assert skipped == Counter({("partner", "start", rewind.AT_THE_LOSS): 1})
 
 
+def test_only_the_roles_asked_speak_again_and_no_offset_is_start_alone():
+    """Multi-aircraft design §6.6 step 8 item 11: the hard events' search runs the answered aircraft from its start
+    alone (`--offsets-s` empty, `--roles answered`)."""
+    from ts_transformer.experiments import traffic_window_rewind as rewind
+
+    loss = {"kind": "in_trail", "relation": "same"}
+    o = _original(["a", "b"], [30, 30], {"a": {"t_s": 40.0, "with": "b", **loss}}, first_s=[0.0, 20.0],
+                  episodes=[_episode("a", "b", 40.0, 40.0)])
+    (event,) = rewind.events_of(o, 0)
+    branches, skipped = rewind.branches_of(event, o, (), 3, 2.0, (rewind.ANSWERED,))
+    assert [(b.speaker, b.role, b.offset, b.step) for b in branches] == [("a", "answered", "start", 0)] * 3 + [
+        (None, None, "control", -1)]
+    assert not skipped
+
+
+def test_the_original_words_come_back_as_they_were_written(tmp_path, monkeypatch):
+    """`original_words.npz`: every commanded aircraft of the windows written — its key, the own steps it spoke and its
+    words — read back alike, window by window in the window's order."""
+    from ts_transformer.experiments import traffic_window_rewind as rewind
+
+    _, words, _, _, _, _, originals = _flown_windows(tmp_path, monkeypatch)
+    written = [originals[w] for w in sorted(originals)]
+    rewind.write_original_words(tmp_path / "words.npz", written, STEP_S)
+    back = rewind.read_original_words(tmp_path / "words.npz")
+    assert sorted(back) == sorted(originals)
+    for w, o in originals.items():
+        assert [key for key, _, _ in back[w]] == o.keys
+        assert [n for _, n, _ in back[w]] == [rewind.spoken_steps(o, i, STEP_S) for i in range(len(o.keys))]
+        for (_, _, said), then in zip(back[w], o.said):
+            assert said.dtype == np.int64 and (said == then).all()
+
+
 def test_a_wake_shortfall_off_the_grid_is_read_at_the_step_after_it():
     """A follower ended at a landing 1.5 s after its step 19 (t 38 s) was judged — and had spoken — at step 20: it
     spoke 21 lines, and the loss's step is 20; offsets count from there."""

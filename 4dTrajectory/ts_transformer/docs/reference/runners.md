@@ -927,8 +927,9 @@ reward less its mean). Each loop batch draws from its own streams, and `--worker
 are built, before the GPU starts) read the batches their index deals them — what is read does not depend on their number
 (tests; the 2026-09-30 smokes wrote the same files with 4 and 6); the loop is bound by the CPU (15 windows in 4.5 min in
 one process, GPU 2.3 GB, 8–41 % busy; 30 windows in 3 min with 4 or 6, 0.88 GB of the GPU a process). Writes `aircraft.jsonl` (appended per batch) and
-`window_generation.json` (`ts-traffic-window-generation-v2`: v1 before the augmentation, the formal
-`window_generation_20260930`).
+`window_generation.json` (`ts-traffic-window-generation-v6`: v1 before the augmentation, the formal
+`window_generation_20260930`; v2 its augmentation, v3 the model sources, v4–v5 step 8's go-around fields, probes and
+reward, v6 a row's ``given``).
 **`--augment-seed`** (design §6.6 step 7 item 6, `experiments/traffic_window_augment.py`): every window augmented, a third
 each (a window's kind drawn once, only its parameters drawn again) — **C** the commanded aircraft moved whole toward the window's opening (their first row's time after it × c,
 c ~ U[0.6, 1.0]), **B** one commanded aircraft's start moved as stage 2 moves it (its time limit stage 2's; what the others
@@ -1059,8 +1060,8 @@ model trained by `ts-traffic-reward` is named **traffic** (`MODEL_NAMES`, user 2
 2026-09-30. `traffic_window_reward --prior <single-aircraft prior (augmented) or traffic prior (an M4 round)> --base <base>
 --instructions <artefact> --executor <spec> --out <new dir> [--rounds 8] [--resume] [--real-per-airport 70]
 [--augmented-per-airport 70] [--samples 8] [--select-per-airport 70] [--select-samples 2] [--speakers 4] [--passes 1]
-[--probe-samples 0] [--probe-margin 1.5] [--imitation-weight 1.0]
-[--smoke]`. R32's round protocol with a window sample as the unit: each round the training days' windows drawn with its
+[--probe-samples 0] [--probe-margin 1.5] [--imitation-weight 1.0] [--events <R43 run> … --events-per-airport K]
+[--select-events <R43 run> …] [--smoke]`. R32's round protocol with a window sample as the unit: each round the training days' windows drawn with its
 seed (`traffic_window.draw_windows`), the first per airport as they are and the next `POOL_FACTOR` × as many augmented
 (`traffic_window_augment`, the first that qualify), spoken `--samples` times by R32's speaking processes (`Speaking`
 carries how a round is spoken: `WindowSpeaking` — `traffic_window_generation.window_batches`, `window_sentences`),
@@ -1078,8 +1079,16 @@ window it trains as R32's tuner does (loss and gradients, tested). Before anythi
 sample scored with gradients on the GPU. Fixed select windows (as drawn and augmented) read
 every round in the shape `traffic_reward.guarded_choice` reads (landed, observed runway, words, lost separation, the
 ordering against the record with the other commanded aircraft's landings of the same sample, reward by kind), the round
-chosen by paired standard errors on the augmented windows' reward. Writes `config.json`, `round_<k>/{sentences.json,
-checkpoint.pt, optimiser.pt, readout.json, …}`, `history.json`, `choice.json` (`ts-traffic-window-reward-v3`).
+chosen by paired standard errors on the augmented windows' reward. **Hard events** (multi-aircraft step 8 item 11,
+2026-10-02): `--events` takes training-day R43 runs (`--offsets-s --roles answered`), `traffic_window_events.event_pool`
+rebuilds each one's draw from the artefact and keeps the events whose answered aircraft no `start` branch rescued — the
+window flown again with every other commanded aircraft GIVEN its original words (`original_words.npz`, as far as it
+spoke), the answered one spoken; each round adds `--events-per-airport` of them an airport (fewer where the pools have
+fewer; the round's pick stream), kind `event`, its rows of given aircraft marked `given` and never trained
+(`window_advantages`). `--select-events` takes select-day R43 runs: every select readout also reads all their hard events
+the same way (`event_readout`: the answered aircraft's reward, landing in the landing direction, loss and go-arounds; the
+`events` side of `history.json`, never in the choice). Writes `config.json`, `round_<k>/{sentences.json, checkpoint.pt,
+optimiser.pt, readout.json, …}`, `history.json`, `choice.json` (`ts-traffic-window-reward-v4`).
 
 ### R38 · `run_ts.py prior_generation_grading` — a generation-records run graded beyond its pass rate: the landed runway, and FDE's time and place (2026-09-30)
 
@@ -1124,7 +1133,7 @@ replayed one (`ended_with`); per training round its sentences (trained on, start
 largest, clipped share, data NLL, KL to base at the start); the traffic attention's output over the residual per layer and
 the teacher-forced NLL; the choice. Tested on a run written by R37's own pieces whose rounds differ (a wrong pair, round or
 kind fails it). `--out` (a new directory) also writes `traffic_window_reward_readout.json`
-(`ts-traffic-window-reward-readout-v1`). Replaces the ad-hoc script the first readout used (user 2026-09-30: a readout
+(`ts-traffic-window-reward-readout-v2`; v2 adds the select hard events of a run with `--select-events`). Replaces the ad-hoc script the first readout used (user 2026-09-30: a readout
 used every run is a runner).
 
     python run_ts.py traffic_window_reward_readout \
@@ -1233,7 +1242,8 @@ that flies fewer flights fails. All pass → `passed-<executor_source_sha256[:12
 
 2026-10-01 (the user: measure before choosing the next post-training method; nothing is trained). `traffic_window_rewind
 --prior <traffic prior> --executor <spec> --instructions <artefact> --split select [--augment-seed 7919] [--offsets-s 10 30
-60 120] [--branches 8] --out <new dir>`. **The original pass**: the drawn windows spoken to once, every commanded aircraft
+60 120] [--roles answered partner both] [--branches 8] --out <new dir>`; `--offsets-s` with no value runs `start` alone and
+`--roles` only those of an event's aircraft (multi-aircraft step 8's hard events: `--offsets-s --roles answered`). **The original pass**: the drawn windows spoken to once, every commanded aircraft
 together — R34's "scene" reading at `--samples 1`, from its streams (`batch_seed`), so `original.jsonl` is R34's rows.
 **Events**: each loss there that ended a commanded aircraft (a wake shortfall at a landing included), not one it started
 in; one episode of a pair is one event, whoever of the two it ended and when; its time `t_L` is the episode's first step
@@ -1256,8 +1266,10 @@ the original, with the same other aircraft); each kept beside. Per role × offse
 aircraft's stratum (`instructions.readout.stratum`), kind and relation of the loss, window size and augmented kind: cells,
 the share with at least one branch rescued, the mean share rescued, `TALLIES`, the three conditions' shares and the words
 changed between the branch's step and the loss (rescued and not). Writes, at the end, `original.jsonl`, `events.jsonl`
-(an event a row, its branches beside) and `window_rewind.json` (`ts-traffic-window-rewind-v2`, with R34's pooled summary
-of the original pass).
+(an event a row, its branches beside), `original_words.npz` (each commanded aircraft of every window holding an event: its
+key, the own steps it spoke and its words — `write_original_words`; what R37's hard events fly again: the original pass
+cannot be spoken again by later code, whose batches and streams move) and `window_rewind.json`
+(`ts-traffic-window-rewind-v3`, with R34's pooled summary of the original pass, the offsets and roles run).
 
     python run_ts.py traffic_window_rewind \
         --prior 4dTrajectory/outputs/POOLED/prior/m4_passes_20260929/traffic_s1337/round_05 \

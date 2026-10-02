@@ -179,7 +179,8 @@ def window_advantages(rows: Sequence[Mapping[str, object]], samples: int
       where it is above 0 (`WindowRewardTuner._window_scored`). An aircraft with a probe's go-around and no unprobed
       sample is refused.
     - Trained: of an aircraft none of whose samples starts in a loss it answers for (no word of it made that one), each
-      such group's rows whose rewards differ, and a probe's sentence whose gain is above 0."""
+      such group's rows whose rewards differ, and a probe's sentence whose gain is above 0. An aircraft whose words were
+      given (``given``: a hard event's other aircraft, `traffic_window_events`) is never trained, its advantage 0."""
     groups: dict[tuple[object, object], list[int]] = {}
     for k, row in enumerate(rows):
         groups.setdefault((row["window"], row["dataset_id"]), []).append(k)
@@ -189,6 +190,10 @@ def window_advantages(rows: Sequence[Mapping[str, object]], samples: int
         if sorted(rows[k]["sample"] for k in members) != list(range(samples)):
             raise ValueError(f"window {window}, {key}: samples {[rows[k]['sample'] for k in members]}, not 0 … "
                              f"{samples - 1} once each")
+        if any(rows[k]["given"] for k in members):
+            if not all(rows[k]["given"] for k in members):
+                raise ValueError(f"window {window}, {key}: its words given in some samples only")
+            continue
         rewards = {k: float(rows[k]["reward"]) for k in members}
         unprobed = [k for k in members if not rows[k]["probed"]]
         unfired = [k for k in members if rows[k]["probed"] and rows[k]["forced"] is None]

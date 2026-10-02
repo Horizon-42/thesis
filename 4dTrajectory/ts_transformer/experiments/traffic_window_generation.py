@@ -107,8 +107,9 @@ from ts_transformer.prior.model import Prior, with_traffic
 from ts_transformer.prior.scene import N_LOOK, Landings, hang, presence
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
-#: v3 (2026-10-01): the model's sources read (`model_sources`) in the header.
-SCHEMA = "ts-traffic-window-generation-v5"
+#: v3 (2026-10-01): the model's sources read (`model_sources`) in the header; v4–v5 (2026-10-02): multi-aircraft step 8
+#: (go-around fields, probes, the go-around reward); v6: a row says whether its words were given (``given``).
+SCHEMA = "ts-traffic-window-generation-v6"
 SOURCES = ("scene", "alone", "labelled", "recorded")
 #: The sources the model speaks in (`--model-sources`: a read that needs only one — a pair of priors on the same windows
 #: reads "scene" — skips the other, half the model's time; each source from its own streams, so the rows of the one read
@@ -164,6 +165,33 @@ class Drawn:
     limits: list[float]
     moves: list[Augmentation | None]
     roles: list[str | None]
+
+
+def drawn_subset(drawn: Drawn, windows: Sequence[int]) -> Drawn:
+    """The windows at ``windows`` (in that order), their commanded aircraft's flights with them."""
+    index = [j for w in windows for j in drawn.members[w]]
+    members, at = [], 0
+    for w in windows:
+        members.append(range(at, at + len(drawn.members[w])))
+        at += len(drawn.members[w])
+    return Drawn([drawn.windows[w] for w in windows], [drawn.augmented[w] for w in windows], members,
+                 replay.subset(drawn.batch, index), [drawn.limits[j] for j in index], [drawn.moves[j] for j in index],
+                 [drawn.roles[j] for j in index])
+
+
+def drawn_join(parts: Sequence[Drawn]) -> Drawn:
+    """Several draws' windows as one, in order."""
+    members, at = [], 0
+    for part in parts:
+        members += [range(at + r.start, at + r.stop) for r in part.members]
+        at += len(part.batch.signals)
+    first = parts[0].batch
+    batch = replay.Batch(**{f.name: ([x for part in parts for x in getattr(part.batch, f.name)]
+                                     if isinstance(getattr(first, f.name), list) else getattr(first, f.name))
+                            for f in dataclasses.fields(first)})
+    return Drawn([w for part in parts for w in part.windows], [a for part in parts for a in part.augmented], members,
+                 batch, [x for part in parts for x in part.limits], [m for part in parts for m in part.moves],
+                 [r for part in parts for r in part.roles])
 
 
 def drawn_windows(draw: Any, airports: Mapping[str, Any], params: Any, step_s: float) -> Drawn:
@@ -353,6 +381,8 @@ def fly_windows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, w
     inputs = augmented_inputs(flight_inputs(part.series, device=cpu, anchor=N_LOOK), part.geometries,
                               [drawn.moves[j] for j in index])
     probing = [b % samples >= samples - probe_samples for b, w in enumerate(instances) for _ in drawn.members[w]]
+    if given is not None:                  # an aircraft given its words flies as it did: never made to go around
+        probing = [p and (line is None or line.until == 0) for p, line in zip(probing, given)]
     loop = WindowLoop(model, [drawn.windows[w] for w in instances], part.signals, part.geometries, inputs, runways,
                       charts, approach, [drawn.limits[j] for j in index], words, params, landings, generator=generator,
                       temperature=temperature, procedure_masks=procedure_masks, alone=source == "alone", given=given,
@@ -388,12 +418,13 @@ def model_rows(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, wo
 def window_sentences(model: Prior, drawn: Drawn, chunk: Sequence[int], source: str, words: Words, params: Any,
                      landings: Any, every_landing: Mapping[str, Landings], samples: int, *, generator: torch.Generator,
                      temperature: float, procedure_masks: Any, probe_samples: int = 0,
-                     probe_margin: float = PROBE_MARGIN) -> WindowSentences:
+                     probe_margin: float = PROBE_MARGIN,
+                     given: Sequence[Given | None] | None = None) -> WindowSentences:
     """`model_rows` with what the speaker read of each aircraft and what its masks allowed (`WindowSentences`: what a
-    trainer scores the words with); ``probe_samples``, ``probe_margin``: `fly_windows`'."""
+    trainer scores the words with); ``probe_samples``, ``probe_margin``, ``given``: `fly_windows`'."""
     flown = fly_windows(model, drawn, chunk, source, words, params, landings, samples, generator=generator,
-                        temperature=temperature, procedure_masks=procedure_masks, probe_samples=probe_samples,
-                        probe_margin=probe_margin)
+                        temperature=temperature, procedure_masks=procedure_masks, given=given,
+                        probe_samples=probe_samples, probe_margin=probe_margin)
     out = flown_sentences(flown, drawn, source, words, every_landing, samples)
     flown.loop.close()
     return out
@@ -428,6 +459,8 @@ def flown_sentences(flown: Flown, drawn: Drawn, source: str, words: Words, every
             row["reward"] = _reward(row, direction)
             row["landed_here"] = bool(row["outcome"] == "landed" and direction[row["runway"]])
             row["probed"], row["forced"] = bool(loop.probing[i]), got.forced
+            # its words given, not the model's (`traffic_window.Given`: from its first predicted step on)
+            row["given"] = loop.given[i] is not None and loop.given[i].until > 0
             row["go_around"] = None
             if got.go_around is not None:                   # multi-aircraft design §6.6 step 8 item 9
                 scored = go_around_fields(loop, i, got, row, direction)
@@ -543,7 +576,7 @@ def fixed_rows(drawn: Drawn, chunk: Sequence[int], source: str, words: Words, pa
             direction = landing_direction(part.signals[j], part.geometries[j], context)
             row["reward"] = _reward(row, direction)
             row["landed_here"] = bool(row["outcome"] == "landed" and direction[row["runway"]])
-            row["probed"], row["forced"] = False, None
+            row["probed"], row["forced"], row["given"] = False, None, False
             row["go_around"] = None                         # the labelled words and the record say none
             rows.append(row)
         at += len(window.commanded)

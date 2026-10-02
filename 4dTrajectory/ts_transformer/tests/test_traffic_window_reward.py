@@ -28,7 +28,7 @@ def _round(tmp_path, monkeypatch):
     windows = [window_of(airport, 0.0, c, [LIMIT_S] * len(c), STEP_S) for c in commanded]
     drawn = _as_drawn(windows, [range(0, 2), range(2, 3)], _batch(airport, signals, spec, keys), [LIMIT_S] * 3)
     _patch_runner_physics(monkeypatch, signals, airport.flights.geometry, keys)
-    return WindowRound(drawn, ["real", "real"]), airport, spec
+    return WindowRound(drawn, ["real", "real"], [None, None]), airport, spec
 
 
 def _speaking(spec, airport):
@@ -40,7 +40,8 @@ def _speaking(spec, airport):
 
 
 def test_windows_selected_and_joined_keep_their_aircraft_and_an_airport_short_is_refused(tmp_path, monkeypatch):
-    from ts_transformer.experiments.traffic_window_reward import drawn_join, drawn_subset, first_windows_per_airport
+    from ts_transformer.experiments.traffic_window_generation import drawn_join, drawn_subset
+    from ts_transformer.experiments.traffic_window_reward import first_windows_per_airport
 
     round_, _, _ = _round(tmp_path, monkeypatch)
     drawn = round_.drawn
@@ -142,7 +143,7 @@ def test_the_ordering_guard_reads_the_same_leaders_on_both_sides():
                              rows=lambda k: recorded[k], first_step_s=lambda k, step_s: 0.0,
                              airport=SimpleNamespace(flights=SimpleNamespace(separation=separation,
                                                                              geometry=geometry)))
-    round_ = WindowRound(SimpleNamespace(windows=[window]), ["real"])
+    round_ = WindowRound(SimpleNamespace(windows=[window]), ["real"], [None])
 
     def row(key, landing_s, outcome="landed"):
         return {"window": 0, "sample": 0, "dataset_id": key, "landing_s": landing_s, "runway": 0, "outcome": outcome,
@@ -210,6 +211,18 @@ def test_probes_need_two_samples_and_two_unprobed_ones(tmp_path):
     assert not (tmp_path / "run").exists()
 
 
+def test_hard_events_to_train_on_need_their_count_an_airport(tmp_path):
+    """Multi-aircraft design §6.6 step 8 item 11: ``--events`` and ``--events-per-airport`` go together — refused before
+    anything is opened."""
+    from ts_transformer.experiments.traffic_window_reward import main
+
+    paths = ["--prior", "p", "--base", "b", "--instructions", "i", "--executor", "e", "--out", str(tmp_path / "run")]
+    for more in (["--events", "r"], ["--events-per-airport", "3"]):
+        with pytest.raises(SystemExit):
+            main(paths + more)
+    assert not (tmp_path / "run").exists()
+
+
 def test_only_a_training_round_is_probed(monkeypatch):
     """Multi-aircraft design §6.6 step 8 item 10: a training round's windows are probed in their last samples; the
     select readouts never are."""
@@ -229,7 +242,7 @@ def test_only_a_training_round_is_probed(monkeypatch):
     monkeypatch.setattr(runner, "window_sentences", spoken)
     speaking = runner.WindowSpeaking(None, None, None, None, 1, None, 2, 1.25)
     model = torch.nn.Linear(1, 1)
-    round_ = SimpleNamespace(drawn=None, kinds=[])
+    round_ = SimpleNamespace(drawn=None, kinds=[], given=[None])
     for source in ("train", "scene"):
         speaking.speak(model, round_, [0], 0, 8, seed=0, source=source)
     assert asked == [(2, 1.25), (0, 1.25)]

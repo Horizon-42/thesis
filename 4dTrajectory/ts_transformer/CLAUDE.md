@@ -440,7 +440,9 @@ are the aircraft whose own end is a landing; the M4 model is named `traffic`, M4
 `traffic_window_reward` is M4 in windows — R32's rounds over window samples: every commanded aircraft rewarded, its advantage
 against its own samples, each sample scored whole as the speaker read it (`experiments/traffic_window_tuner.py`, the one layout
 `window_inputs` / `window_edges`, encoded in blocks of steps so every window fits the GPU; one commanded aircraft a window trains
-as R32 does; checks the formal size before it speaks) (R37).
+as R32 does; checks the formal size before it speaks; `--events` adds hard events from training-day R43 runs — the other
+aircraft given their original words, only the answered one trained — and `--select-events` reads select-day ones every
+round, `experiments/traffic_window_events.py`) (R37).
 `traffic_window_reward_readout` reads such a run round by round, running or ended, from its files — paired against round 0
 as the round choice pairs (R39).
 `traffic_window_pair` pairs two window readouts of the same windows read the same way (refused otherwise, the model-free
@@ -448,7 +450,8 @@ rows equal row for row) aircraft by aircraft: second − first per measure over 
 operating day (R41).
 `traffic_window_rewind` asks whether a window's losses of separation can be undone by rewinding ONE aircraft — each loss's
 aircraft speaks again from 10–120 s before it (or its start), the others given the words they said (`traffic_window.Given`:
-not sampled, not masked), 8 branches an offset, a control that must replay the original pass to the last field (R43).
+not sampled, not masked), 8 branches an offset, a control that must replay the original pass to the last field; `--offsets-s`
+empty runs `start` alone, `--roles` limits who speaks again, `original_words.npz` keeps the original words (R43).
 `executor_conformance` flies a spec's reference tracks again with the code on disk in every way the executor flies and
 writes the passed record `replay.open_executor` asks for; `--write-reference` writes a spec's reference first, from a clean
 checkout with the code that measured it (`autopilot/conformance.py`; executor design §12.3) (R42).

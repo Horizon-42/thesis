@@ -43,12 +43,13 @@ def _varied(rows, number, side):
                    ended_with=None if outcome != LOST_SEPARATION else ("commanded", "replayed")[int(rng.random() < 0.5)])
 
 
-def _write_run(tmp_path, monkeypatch, rounds=2):
-    """A window M4 run of ``rounds`` training rounds at ``tmp_path / "run"``, as the runner writes one."""
+def _write_run(tmp_path, monkeypatch, rounds=2, events=False):
+    """A window M4 run of ``rounds`` training rounds at ``tmp_path / "run"``, as the runner writes one (``events``: with
+    a select hard-event side — here the select windows themselves, every aircraft read)."""
     from ts_transformer.experiments.traffic_reward import traffic_readout
     from ts_transformer.experiments.traffic_scene_data import build_split
     from ts_transformer.experiments.traffic_window_reward import (
-        SCHEMA, history_row, round_summary, side_readout, window_split, write_choice,
+        SCHEMA, event_readout, history_row, round_summary, side_readout, window_split, write_choice,
     )
     from ts_transformer.experiments.traffic_window_tuner import WindowRewardTuner, window_advantages
     from ts_transformer.io_utils import write_json_atomic
@@ -96,6 +97,12 @@ def _write_run(tmp_path, monkeypatch, rounds=2):
                 _kinds(select.rows)
             readout[side] = side_readout(select, round_, spec.step_s, real=side == "real")
             _varied(readout[side]["aircraft"], number, side)
+        if events:
+            select = spoken("scene", 5)
+            _varied(select.rows, number, "events")
+            for row in select.rows:
+                row["landed_here"] = row["outcome"] == "landed"
+            readout["events"] = event_readout(select)
         readout["traffic"] = traffic_readout(model, built, 2, CPU)
         history.append(history_row(number, readout, **more))
         (out / f"round_{number:02d}").mkdir()
@@ -188,6 +195,29 @@ def test_a_run_is_read_round_by_round_from_its_files_paired_as_the_round_choice_
         read_run(short)
 
 
+def test_a_run_s_select_hard_events_are_read_paired_against_round_0(tmp_path, monkeypatch, capsys):
+    """Multi-aircraft design §6.6 step 8 item 11: a run with ``--select-events`` — its hard-event side read per round and
+    paired against round 0 as the other sides are, and printed."""
+    from ts_transformer.experiments.traffic_window_reward_readout import main, read_run
+
+    out = _write_run(tmp_path, monkeypatch, rounds=1, events=True)
+    read = read_run(out)
+    readouts = [json.loads((out / f"round_{n:02d}" / "readout.json").read_text()) for n in range(2)]
+    for n, row in enumerate(read["rounds"]):
+        part = row["select"]["events"]
+        assert part["reward"] == readouts[n]["events"]["reward"] and part["sentences"] == len(readouts[n]["events"]["aircraft"])
+        rows_0, rows = readouts[0]["events"]["aircraft"], readouts[n]["events"]["aircraft"]
+        keys = [(r["window"], r["dataset_id"], r["sample"]) for r in rows if not r["starts_in_a_loss"]]
+        first = {(r["window"], r["dataset_id"], r["sample"]): r["reward"] for r in rows_0 if not r["starts_in_a_loss"]}
+        now = {(r["window"], r["dataset_id"], r["sample"]): r["reward"] for r in rows if not r["starts_in_a_loss"]}
+        both = sorted(first.keys() & now.keys())
+        assert part["against_round_0"]["reward"]["sentences"] == len(both) and keys
+        assert part["against_round_0"]["reward"]["difference"] == pytest.approx(
+            float(np.mean([now[k] - first[k] for k in both])))
+    assert main(["--run", str(out)]) == 0
+    assert "select hard events" in capsys.readouterr().out
+
+
 def test_the_readout_prints_and_writes_into_a_new_directory_only(tmp_path, monkeypatch, capsys):
     from ts_transformer.experiments.traffic_window_reward_readout import SCHEMA, main
 
@@ -195,6 +225,7 @@ def test_the_readout_prints_and_writes_into_a_new_directory_only(tmp_path, monke
     assert main(["--run", str(out)]) == 0
     printed = capsys.readouterr().out
     assert "rounds 0 … 1 finished (the last invocation asked for rounds up to 1)" in printed and "choice over rounds 0 … 1" in printed and "BEHIND" not in printed
+    assert "select hard events" not in printed                      # a run without them prints none
     # a choice behind the rounds finished (a resumed run between invocations) is said to be; none yet, said so
     choice = json.loads((out / "choice.json").read_text())
     (out / "choice.json").write_text(json.dumps({**choice, "against_round_0": choice["against_round_0"][:1]}))

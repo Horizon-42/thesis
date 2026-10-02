@@ -9,7 +9,11 @@ Each round:
    round): of each airport's, the first ``--real-per-airport`` as they are and, of the next `POOL_FACTOR` ×
    ``--augmented-per-airport``, the first ``--augmented-per-airport`` whose augmentation qualifies
    (`traffic_window_augment`: the flow compressed, a start moved, a flight inserted and commanded, a third each; the
-   round's augmentation stream) — refused when an airport runs short;
+   round's augmentation stream) — refused when an airport runs short; with ``--events``, ``--events-per-airport`` hard
+   events an airport (all where it has fewer; the round's pick stream) from training-day window rewind runs (R43,
+   `traffic_window_events`: the answered aircraft could not undo the loss speaking again from its start) — the window
+   flown again with every other commanded aircraft given its words, the answered one spoken (multi-aircraft design §6.6
+   step 8 item 11);
 2. **sentences** — each window spoken to ``--samples`` times (`traffic_window_generation.window_sentences`: every
    commanded aircraft together, the vocabulary's rules, the start's procedure's masks, the two separation masks, judged
    as it flies under VISUAL), by ``--speakers`` processes (`traffic_reward.Speakers`, each loop batch its own stream);
@@ -25,13 +29,16 @@ Each round:
 4. **``--passes`` passes** (`traffic_window_tuner.WindowRewardTuner`): M4's loss, each window sample scored whole as the
    speaker read it (the other commanded aircraft at the rows they flew with the words they were said), the loss on its
    trained aircraft's own words, the pull to base reading each alone, the data term the training days' scene samples;
-   the distance to base on the fresh sentences before the pass, the real windows' and the augmented ones' apart;
+   the distance to base on the fresh sentences before the pass, the real windows', the augmented ones' and the hard
+   events' apart;
 5. **the select readouts** (every round, round 0 the start): the select days' ``--select-per-airport`` windows ×
    ``--select-samples``, as drawn and augmented once (``seed`` + `SELECT_AUGMENT_OFFSET`), the same windows, streams and
    batches every round — per side the executor's landed share, landed on the observed runway, the words a sentence says
    after its first step, lost separation, the reward (and per kind), on the real windows the ordering (`ordering`); the
    teacher-forced NLL on the select days' scene samples and the traffic attention's output (`traffic_reward.
-   traffic_readout`).
+   traffic_readout`); with ``--select-events``, every select-day hard event of those rewind runs too, as its window is
+   flown for training (`event_readout`: the answered aircraft's reward, landing, loss and go-arounds) — read, never in the
+   round's choice.
 
 The round kept (``choice.json``): `traffic_reward.guarded_choice` — within round 0's guards on these readouts, the
 augmented-window reward beating round 0 by `TIE_STANDARD_ERRORS` paired standard errors (the select readouts speak the
@@ -96,11 +103,13 @@ from ts_transformer.experiments.traffic_reward import (
 from ts_transformer.experiments.traffic_scene_data import airport_flights, edge_source_sha256, split_samples
 from ts_transformer.experiments.traffic_speaking import with_tracks
 from ts_transformer.experiments.traffic_tuner import part_cost
-from ts_transformer.experiments.traffic_window import draw_windows, window_places
+from ts_transformer.experiments.traffic_window import Given, draw_windows, window_places
 from ts_transformer.experiments.traffic_window_augment import busiest
+from ts_transformer.experiments.traffic_window_events import EventPool, event_pool, pick
 from ts_transformer.experiments.traffic_go_around import GO_AROUND_EXTRA_S, IMITATION_WEIGHT, PROBE_MARGIN
 from ts_transformer.experiments.traffic_window_generation import (
-    Drawn, WindowSentences, augmented_windows, drawn_windows, fixed_rows, window_batches, window_sentences,
+    Drawn, WindowSentences, augmented_windows, drawn_join, drawn_subset, drawn_windows, fixed_rows, window_batches,
+    window_sentences,
 )
 from ts_transformer.experiments.traffic_window_tuner import (
     PAIRS_PER_BLOCK, WindowRewardTuner, WindowSplit, scoring_cost, window_advantages, window_flight,
@@ -119,7 +128,7 @@ from ts_transformer.prior.scene import N_LOOK, Landings
 from ts_transformer.prior.train import RewardConfig
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-SCHEMA = "ts-traffic-window-reward-v3"
+SCHEMA = "ts-traffic-window-reward-v4"
 RUNNER = "ts_transformer.experiments.traffic_window_reward"
 #: Host memory a speaking process holds beyond what it shares with the parent, and what the parent grows by in a round
 #: (a round's windows built, the pass), GB — measured on the formal run (2026-09-30: a speaking process's own memory for a
@@ -129,42 +138,57 @@ SPEAKER_HOST_GB = 2.5
 PARENT_GROWTH_GB = 2.0
 #: The preflight's windows: the costliest of round 1's by their time limits, each spoken twice.
 PREFLIGHT_WINDOWS = 3
+#: Hard events (multi-aircraft design §6.6 step 8 item 11): a training round's pick, and the select side's speaking —
+#: streams beside `traffic_reward`'s 0–4.
+EVENT_PICK_STREAM = 5
+SELECT_EVENT_STREAM = 6
+EVENT = "event"
 
 
 @dataclasses.dataclass(frozen=True)
 class WindowRound:
     """A round's windows (`traffic_window_generation.Drawn`: each window, its commanded aircraft's flights, limits and
-    moved starts) and each window's kind: ``real``, or its augmentation's (C, B, A)."""
+    moved starts), each window's kind — ``real``, its augmentation's (C, B, A) or `EVENT` (a hard event,
+    `traffic_window_events`) — and each window's given lines: None (every aircraft spoken), or one per commanded
+    aircraft in the window's order (`traffic_window.Given`; None: spoken)."""
 
     drawn: Drawn
     kinds: list[str]
+    given: list[tuple[Given | None, ...] | None]
+
+    def __post_init__(self) -> None:
+        if not len(self.drawn.windows) == len(self.kinds) == len(self.given):
+            raise ValueError("a round: a kind and a given line set (or None) per window")
+        for w, lines in enumerate(self.given):
+            if lines is not None and len(lines) != len(self.drawn.members[w]):
+                raise ValueError(f"window {w}: {len(lines)} given lines for {len(self.drawn.members[w])} aircraft")
 
 
-def drawn_subset(drawn: Drawn, windows: Sequence[int]) -> Drawn:
-    """The windows at ``windows`` (in that order), their commanded aircraft's flights with them."""
-    index = [j for w in windows for j in drawn.members[w]]
-    members, at = [], 0
-    for w in windows:
-        members.append(range(at, at + len(drawn.members[w])))
-        at += len(drawn.members[w])
-    return Drawn([drawn.windows[w] for w in windows], [drawn.augmented[w] for w in windows], members,
-                 replay.subset(drawn.batch, index), [drawn.limits[j] for j in index], [drawn.moves[j] for j in index],
-                 [drawn.roles[j] for j in index])
+def spoken_round(drawn: Drawn, kinds: Sequence[str]) -> WindowRound:
+    """A round whose every aircraft is spoken."""
+    return WindowRound(drawn, list(kinds), [None] * len(drawn.windows))
 
 
-def drawn_join(parts: Sequence[Drawn]) -> Drawn:
-    """Several draws' windows as one, in order."""
-    members, at = [], 0
-    for part in parts:
-        members += [range(at + r.start, at + r.stop) for r in part.members]
-        at += len(part.batch.signals)
-    first = parts[0].batch
-    batch = replay.Batch(**{f.name: ([x for part in parts for x in getattr(part.batch, f.name)]
-                                     if isinstance(getattr(first, f.name), list) else getattr(first, f.name))
-                            for f in dataclasses.fields(first)})
-    return Drawn([w for part in parts for w in part.windows], [a for part in parts for a in part.augmented], members,
-                 batch, [x for part in parts for x in part.limits], [m for part in parts for m in part.moves],
-                 [r for part in parts for r in part.roles])
+def event_round(pools: Sequence[EventPool], places: Sequence[tuple[int, int]]) -> WindowRound:
+    """The hard events at ``places`` (`traffic_window_events.pick`) as a round: each its pool's window, kind `EVENT`,
+    the other aircraft given their words."""
+    parts = [drawn_subset(pools[p].drawn, [pools[p].scenes[s].window]) for p, s in places]
+    return WindowRound(drawn_join(parts), [EVENT] * len(places), [pools[p].scenes[s].given for p, s in places])
+
+
+def loop_given(round_: WindowRound, chunk: Sequence[int], samples: int) -> list[Given | None] | None:
+    """The given lines of a loop over ``chunk``'s windows spoken to ``samples`` times each (`fly_windows`' order: each
+    window ``samples`` times, its commanded aircraft in order); None when none is given."""
+    if all(round_.given[w] is None for w in chunk):
+        return None
+    return [line for w in chunk for _ in range(samples)
+            for line in (round_.given[w] or (None,) * len(round_.drawn.members[w]))]
+
+
+def round_join(parts: Sequence[WindowRound]) -> WindowRound:
+    """Several rounds' windows as one, in order."""
+    return WindowRound(drawn_join([part.drawn for part in parts]), [k for part in parts for k in part.kinds],
+                       [g for part in parts for g in part.given])
 
 
 def first_windows_per_airport(drawn: Drawn, per_airport: int, airports: Sequence[str]) -> list[int]:
@@ -188,7 +212,7 @@ class WindowSpeaking(Speaking):
     window_batches`), each spoken by `window_sentences` from its own stream, each row marked with its window's kind;
     ``every_landing`` the airports' landings the reward's landing direction reads; a training round's windows probed in
     their last ``probe_samples`` samples under ``probe_margin`` (multi-aircraft design §6.6 step 8 item 10; the select
-    readouts never)."""
+    readouts never); a window's given lines (`WindowRound.given`) given in every one of its samples (`loop_given`)."""
 
     every_landing: Any
     probe_samples: int = 0
@@ -204,19 +228,22 @@ class WindowSpeaking(Speaking):
                                self.every_landing, samples, generator=generator, temperature=1.0,
                                procedure_masks=self.procedures,
                                probe_samples=self.probe_samples if source == "train" else 0,
-                               probe_margin=self.probe_margin)
+                               probe_margin=self.probe_margin, given=loop_given(round_, chunk, samples))
         for row in got.rows:
             row["kind"] = round_.kinds[row["window"]]
         return got
 
     def fingerprint(self, round_: WindowRound) -> list[tuple[Any, ...]]:
         """Each window: its airport, opening, commanded and replayed aircraft, the flights moved in it (their keys and
-        first row times), its kind, and each commanded aircraft's moved start and time limit."""
+        first row times), its kind, each commanded aircraft's moved start and time limit, and its given lines."""
         drawn = round_.drawn
+        def lines(given: tuple[Given | None, ...] | None) -> Any:
+            return None if given is None else tuple(None if g is None else (g.until, g.said.tobytes()) for g in given)
         return [(window.airport.flights.code, window.opens_s, window.commanded, window.others,
                  tuple((rows.presence.dataset_id, float(rows.presence.times_s[0])) for rows, _ in window.moved), kind,
-                 tuple((None if drawn.moves[j] is None else asdict(drawn.moves[j]), drawn.limits[j]) for j in members))
-                for window, kind, members in zip(drawn.windows, round_.kinds, drawn.members)]
+                 tuple((None if drawn.moves[j] is None else asdict(drawn.moves[j]), drawn.limits[j]) for j in members),
+                 lines(given))
+                for window, kind, members, given in zip(drawn.windows, round_.kinds, drawn.members, round_.given)]
 
     def assemble(self, round_: WindowRound, samples: int, plan: Sequence[Sequence[int]],
                  parts: Mapping[int, WindowSentences]) -> WindowSentences:
@@ -290,14 +317,17 @@ def preflight(model: Prior, base: Prior, round_: WindowRound, speaking: WindowSp
         return part_cost(1, aircraft, int((places.start + np.array(rows)).max()))
 
     costliest = sorted(range(len(drawn.windows)), key=bound)[-PREFLIGHT_WINDOWS:]
-    part = WindowRound(drawn_subset(drawn, costliest), [round_.kinds[w] for w in costliest])
+    part = WindowRound(drawn_subset(drawn, costliest), [round_.kinds[w] for w in costliest],
+                       [round_.given[w] for w in costliest])
     # with probes, every cleared aircraft goes around at once: a go-around's sentences are the longest to score
     probed = 2 if speaking.probe_samples else 0
     spoken = window_sentences(model, part.drawn, list(range(len(costliest))), "scene", speaking.words, speaking.params,
                               speaking.landings, speaking.every_landing, 2,
                               generator=torch.Generator(device=device).manual_seed(0), temperature=1.0,
-                              procedure_masks=speaking.procedures, probe_samples=probed, probe_margin=math.inf)
-    # every aircraft trained and every probe's go-around word learned: the memory is measured, not the values
+                              procedure_masks=speaking.procedures, probe_samples=probed, probe_margin=math.inf,
+                              given=loop_given(part, range(len(costliest)), 2))
+    # every aircraft trained (a given one too: the most) and every probe's go-around word learned: the memory is
+    # measured, not the values
     rows = spoken.rows
     split, _ = window_split(part, spoken, np.ones(len(rows)), np.array([float(r["forced"] is not None) for r in rows]),
                             np.arange(len(rows)), table, speaking.landings, step_s)
@@ -329,9 +359,14 @@ def preflight(model: Prior, base: Prior, round_: WindowRound, speaking: WindowSp
     return out
 
 
-def split_of_kinds(split: WindowSplit, kinds: Sequence[str], of: Sequence[bool]) -> WindowSplit:
-    """``split``'s window samples whose kind (``kinds``, per sample) is among ``of`` (True: real)."""
-    keep = [s for s, kind in enumerate(kinds) if (kind == "real") in of]
+def side_of(kind: str) -> str:
+    """A window kind's side: ``real``, ``events`` (`EVENT`) or ``augmented`` (C, B, A)."""
+    return "real" if kind == "real" else "events" if kind == EVENT else "augmented"
+
+
+def split_of_kinds(split: WindowSplit, kinds: Sequence[str], side: str) -> WindowSplit:
+    """``split``'s window samples whose kind (``kinds``, per sample) is of ``side`` (`side_of`)."""
+    keep = [s for s, kind in enumerate(kinds) if side_of(kind) == side]
     return WindowSplit(split.table, [split.windows[s] for s in keep], [split.flights[s] for s in keep],
                        [split.records[s] for s in keep], [split.trained[s] for s in keep],
                        [split.advantages[s] for s in keep], [split.allowed[s] for s in keep],
@@ -422,6 +457,19 @@ def side_readout(spoken: WindowSentences, round_: WindowRound, step_s: float, *,
     return out
 
 
+def event_readout(spoken: WindowSentences) -> dict[str, Any]:
+    """The select side of hard events (multi-aircraft design §6.6 step 8 item 11): over the answered aircraft's sentences
+    (the others' words given: ``given``) — the reward, landed in the landing direction, lost separation, said a
+    go-around, and the outcomes; every one of their rows."""
+    rows = [row for row in spoken.rows if not row["given"]]
+    return {"sentences": len(rows), "reward": float(np.mean([r["reward"] for r in rows])),
+            "landed_here": float(np.mean([r["landed_here"] for r in rows])),
+            "lost_separation": float(np.mean([r["outcome"] == LOST_SEPARATION for r in rows])),
+            "said_a_go_around": float(np.mean([r["go_around"] is not None for r in rows])),
+            "outcomes": {k: v / len(rows) for k, v in sorted(Counter(r["outcome"] for r in rows).items())},
+            "aircraft": rows}
+
+
 def select_counted(rows: Sequence[Mapping[str, Any]], value: Callable[[Mapping[str, Any]], float]
                    ) -> dict[tuple[int, str, int], float]:
     """``value`` of each select sentence the reward counts (not starting in a loss it answers for), keyed by window,
@@ -462,7 +510,8 @@ def write_choice(out: Path, history: Sequence[Mapping[str, Any]], labelled: Mapp
 
 def write_sentences(path: Path, spoken: WindowSentences, advantages: np.ndarray, gains: np.ndarray) -> None:
     """A round's words kept (R32's ``sentences.npz``): per aircraft sentence its window, key, sample, the words it said to
-    its own end (``said`` over ``step_offsets``), its outcome, runway, reward and advantage, whether a probe watched it,
+    its own end (``said`` over ``step_offsets``), its outcome, runway, reward and advantage, whether a probe watched it
+    and whether its words were given (a hard event's other aircraft),
     the own step a probe said a go-around for it at (``forced``, −1: none) and its probe gain (`window_advantages`)."""
     said = [record.grid[: row["said_steps"]] for row, record in zip(spoken.rows, spoken.records)]
     np.savez_compressed(path, window=np.array([r["window"] for r in spoken.rows]),
@@ -474,6 +523,7 @@ def write_sentences(path: Path, spoken: WindowSentences, advantages: np.ndarray,
                         runway=np.array([r["runway"] for r in spoken.rows]),
                         reward=np.array([r["reward"] for r in spoken.rows]), advantage=advantages,
                         probed=np.array([r["probed"] for r in spoken.rows]),
+                        given=np.array([r["given"] for r in spoken.rows]),
                         forced=np.array([-1 if r["forced"] is None else r["forced"] for r in spoken.rows]),
                         probe_gain=gains)
 
@@ -482,7 +532,8 @@ def history_row(round_number: int, readout: Mapping[str, Any], **more: Any) -> d
     """A round's ``history.json`` row: its select readout without the aircraft sentences (those stay in the round's
     ``readout.json``), and ``more`` (the training round's sentences and pass)."""
     return {"round": round_number,
-            **{side: {k: v for k, v in readout[side].items() if k != "aircraft"} for side in ("real", "augmented")},
+            **{side: {k: v for k, v in readout[side].items() if k != "aircraft"}
+               for side in ("real", "augmented", "events") if side in readout},
             "traffic": readout["traffic"], **more}
 
 
@@ -491,9 +542,10 @@ def round_summary(round_: WindowRound, spoken: WindowSentences, trained: np.ndar
     """How a round's sentences did: the reward, lost separation and the executor's landed share, in all, per kind and
     for the unprobed and the probed samples apart; the aircraft sentences trained on, those starting in a loss; and the
     go-arounds (multi-aircraft design §6.6 step 8): said by the model, said by a probe, and a probe's learned (its
-    sentence trained on, its probe gain above 0, `window_advantages`)."""
-    rows = spoken.rows
+    sentence trained on, its probe gain above 0, `window_advantages`). Over the model's sentences: a hard event's other
+    aircraft, given their words, are counted apart (``given``)."""
     taught = set(trained.tolist())
+    rows = [r for r in spoken.rows if not r["given"]]
 
     def shares(members: Sequence[Mapping[str, Any]]) -> dict[str, float]:
         return {"sentences": len(members), "reward": float(np.mean([r["reward"] for r in members])),
@@ -503,14 +555,14 @@ def round_summary(round_: WindowRound, spoken: WindowSentences, trained: np.ndar
     return {"all": shares(rows),
             "by_kind": {kind: shares([r for r in rows if r["kind"] == kind]) for kind in sorted({r["kind"] for r in rows})},
             "windows": len(round_.drawn.windows), "kinds": dict(Counter(round_.kinds)),
-            "aircraft_sentences": len(rows), "trained_on": int(len(trained)),
+            "aircraft_sentences": len(rows), "given": len(spoken.rows) - len(rows), "trained_on": int(len(trained)),
             "starting_in_a_loss": sum(r["starts_in_a_loss"] for r in rows),
             "unprobed": shares([r for r in rows if not r["probed"]]),
             "probed": shares([r for r in rows if r["probed"]]) if any(r["probed"] for r in rows) else None,
             "go_arounds": {"said_by_the_model": sum(r["go_around"] is not None and r["forced"] is None for r in rows),
                            "said_by_a_probe": sum(r["forced"] is not None for r in rows),
                            "probes_learned": sum(bool(r["forced"] is not None and k in taught and gains[k] > 0.0)
-                                                 for k, r in enumerate(rows))}}
+                                                 for k, r in enumerate(spoken.rows))}}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -541,6 +593,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--imitation-weight", type=float, default=IMITATION_WEIGHT, help="a probe's word learned: "
                         "this × its probe gain (its reward less its aircraft's unprobed samples' mean) × its "
                         "cross-entropy, where the gain is above 0")
+    parser.add_argument("--events", type=Path, nargs="*", default=[], help="window rewind runs (R43) on the training "
+                        "days whose hard events a round adds (multi-aircraft design §6.6 step 8 item 11)")
+    parser.add_argument("--events-per-airport", type=int, default=0, help="hard events an airport a round (all an "
+                        "airport has where fewer)")
+    parser.add_argument("--select-events", type=Path, nargs="*", default=[], help="window rewind runs (R43) on the "
+                        "select days whose hard events every select readout reads")
     parser.add_argument("--device", default="cuda", help="the prior's; the executor flies on CPU")
     parser.add_argument("--smoke", action="store_true", help="a dirty tree allowed; the runs are marked smoke")
     for field, default in asdict(RewardConfig()).items():
@@ -552,6 +610,7 @@ def main(argv: list[str] | None = None) -> int:
 
     prior_dir, base_dir, instructions, executor_dir, out = map(
         resolved, (args.prior, args.base, args.instructions, args.executor, args.out))
+    event_runs, select_event_runs = [resolved(r) for r in args.events], [resolved(r) for r in args.select_events]
     if args.resume and not (out / "config.json").exists():
         parser.error(f"--resume: {out} holds no run")
     if not args.resume and out.exists():
@@ -571,6 +630,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--passes is the sweeps over a round's sentences, 1 or more")
     if args.data_weight <= 0.0:
         parser.error("the post-training trains beside the data (design §6.2): --data-weight > 0")
+    if bool(args.events) != (args.events_per_airport > 0):
+        parser.error("--events and --events-per-airport > 0 go together")
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("the tree has uncommitted changes; a fine-tuning run is made at a commit")
@@ -617,10 +678,20 @@ def main(argv: list[str] | None = None) -> int:
     select_draw = draw_windows(instructions, "select", spec, words, select_airports,
                                per_airport=args.select_per_airport, seed=args.seed, step_s=step_s)
     select_as_drawn = drawn_windows(select_draw, select_airports, params, step_s)
-    select_real = WindowRound(select_as_drawn, ["real"] * len(select_as_drawn.windows))
+    select_real = spoken_round(select_as_drawn, ["real"] * len(select_as_drawn.windows))
     select_augmented_drawn, select_augmenting = augmented_windows(select_as_drawn, params, most, max_rows,
                                                                   args.seed + SELECT_AUGMENT_OFFSET, windows_alt, spec)
-    select_augmented = WindowRound(select_augmented_drawn, [a["kind"] for a in select_augmented_drawn.augmented])
+    select_augmented = spoken_round(select_augmented_drawn, [a["kind"] for a in select_augmented_drawn.augmented])
+    # hard events (multi-aircraft design §6.6 step 8 item 11): the training days' to train on, the select days' read
+    pooled = dict(instructions=instructions, spec=spec, words=words, params=params, executor_sha256=record["sha256"],
+                  most=most, max_rows=max_rows, windows_alt=windows_alt)
+    try:
+        event_pools = [event_pool(run, "train", airports=train_airports, **pooled) for run in event_runs]
+        select_pools = [event_pool(run, "select", airports=select_airports, **pooled) for run in select_event_runs]
+    except ValueError as refusal:
+        parser.error(str(refusal))
+    select_events = (event_round(select_pools, [(p, s) for p, pool in enumerate(select_pools)
+                                                for s in range(len(pool.scenes))]) if select_pools else None)
     labelled = {"real": labelled_words(select_real.drawn.batch),
                 "augmented": labelled_words(select_augmented.drawn.batch)}
     recorded_rows = fixed_rows(select_real.drawn, list(range(len(select_real.drawn.windows))), "recorded", words,
@@ -638,6 +709,8 @@ def main(argv: list[str] | None = None) -> int:
         "real_per_airport": args.real_per_airport, "augmented_per_airport": args.augmented_per_airport,
         "samples": args.samples, "pool_factor": POOL_FACTOR, "aircraft_steps": args.aircraft_steps,
         "probes": {"samples": args.probe_samples, "margin": args.probe_margin, "imitation_weight": args.imitation_weight},
+        "events": {"runs": [pool.record for pool in event_pools], "per_airport": args.events_per_airport,
+                   "select_runs": [pool.record for pool in select_pools]},
         "speakers": args.speakers, "busiest_training_step": most,
         "data": {"split": "train", "scene_samples": len(data), "built": data_counts},
         "select": {"per_airport": args.select_per_airport, "samples": args.select_samples, "drawn": select_draw.counts,
@@ -649,7 +722,8 @@ def main(argv: list[str] | None = None) -> int:
                    "order_growth": GUARD_ORDER_GROWTH, "word_columns": list(GUARD_WORD_COLUMNS),
                    "word_margin_ln": math.log(GUARD_WORD_GROWTH)},
         "streams": {"windows": "seed + round", "augmentations": [AUGMENT_STREAM], "sampling": [SAMPLING_STREAM],
-                    "pass": [PASS_STREAM], "select": SELECT_STREAMS, "loop_batches": "[stream seed, batch number]"},
+                    "pass": [PASS_STREAM], "select": {**SELECT_STREAMS, "events": SELECT_EVENT_STREAM},
+                    "event_pick": [EVENT_PICK_STREAM], "loop_batches": "[stream seed, batch number]"},
         "device": str(device), "n_look": N_LOOK, "resumed": []}
     if args.resume:
         stored = json.loads((out / "config.json").read_text(encoding="utf-8"))
@@ -680,7 +754,8 @@ def main(argv: list[str] | None = None) -> int:
     log(f"{f'resumed after round {last}; ' if args.resume else ''}train days: {len(data)} scene samples; select: "
         f"{len(select_real.drawn.windows)} windows ({len(select_real.drawn.batch.signals)} aircraft), "
         f"{len(select_augmented.drawn.windows)} augmented ({dict(Counter(select_augmented.kinds))}); recorded lost "
-        f"separation {recorded_lost:.3f}")
+        f"separation {recorded_lost:.3f}; hard events {[pool.record['hard'] for pool in event_pools]} to train on, "
+        f"{[pool.record['hard'] for pool in select_pools]} read")
 
     def free_gpu() -> None:
         if device.type == "cuda":
@@ -695,12 +770,20 @@ def main(argv: list[str] | None = None) -> int:
                                            seed=round_seed(args.seed, 0, SELECT_STREAMS[side]), source="scene")
             readout[side] = side_readout(spoken, round_, step_s, real=side == "real")
             readout[side]["speaking_gpu_peak_gb"] = peaks
+        if select_events is not None:
+            free_gpu()
+            spoken, peaks = speakers.speak("select", "events", select_events, model, args.select_samples,
+                                           seed=round_seed(args.seed, 0, SELECT_EVENT_STREAM), source="scene")
+            readout["events"] = {**event_readout(spoken), "speaking_gpu_peak_gb": peaks}
         readout["traffic"] = traffic_readout(model, select_built, slots, device)
         real, augmented = readout["real"], readout["augmented"]
         log(f"round {round_number}: select reward real {real['reward']:.3f} augmented {augmented['reward']:.3f} ("
             + " ".join(f"{k} {v:.3f}" for k, v in augmented["reward_by_kind"].items())
             + f"); lost separation real {real['separation']['lost_separation']:.3f} augmented "
-              f"{augmented['separation']['lost_separation']:.3f}; landed real "
+              f"{augmented['separation']['lost_separation']:.3f}; "
+            + (f"hard events reward {readout['events']['reward']:.3f} landed {readout['events']['landed_here']:.3f} "
+               f"go-around {readout['events']['said_a_go_around']:.3f}; " if "events" in readout else "")
+            + f"landed real "
               f"{real['free_generation']['all']['outcomes']['landed']:.3f}; ordering time "
               f"{real['ordering']['time_ratio']} gap {real['ordering']['gap_ratio']}; TF NLL "
               f"{readout['traffic']['teacher_forced']['nll_per_step']:.4f}")
@@ -714,8 +797,9 @@ def main(argv: list[str] | None = None) -> int:
         model = resumed.model
 
     def train_round(round_number: int) -> tuple[WindowRound, dict[str, Any]]:
-        """Round ``round_number``'s windows (module docstring, item 1), the same in every process: the round and what
-        its draw and augmentation counted."""
+        """Round ``round_number``'s windows (module docstring, item 1), the same in every process: the round (with its
+        hard events, picked by the round's stream) and what its draw and augmentation counted and which events it
+        picked."""
         per_airport = args.real_per_airport + math.ceil(args.augmented_per_airport * POOL_FACTOR)
         drawn = draw_windows(instructions, "train", spec, words, train_airports, per_airport=per_airport,
                              seed=args.seed + round_number, step_s=step_s)
@@ -726,9 +810,15 @@ def main(argv: list[str] | None = None) -> int:
                                                    [args.seed, round_number, AUGMENT_STREAM], windows_alt, spec)
         augmented = drawn_subset(candidates, first_windows_per_airport(candidates, args.augmented_per_airport,
                                                                        airports))
-        joined = drawn_join([drawn_subset(pool, real), augmented])
-        kinds = ["real"] * len(real) + [a["kind"] for a in augmented.augmented]
-        return WindowRound(joined, kinds), {"drawn": drawn.counts, "augmenting": augmenting}
+        parts = [spoken_round(drawn_join([drawn_subset(pool, real), augmented]),
+                              ["real"] * len(real) + [a["kind"] for a in augmented.augmented])]
+        picked = []
+        if event_pools:
+            picked = pick(event_pools, args.events_per_airport,
+                          np.random.default_rng([args.seed, round_number, EVENT_PICK_STREAM]))
+            parts.append(event_round(event_pools, picked))
+        return round_join(parts), {"drawn": drawn.counts, "augmenting": augmenting,
+                                   "events": [[p, event_pools[p].scenes[s].event] for p, s in picked]}
 
     if args.resume and args.rounds == last:                 # the choice alone: nothing to speak
         write_json_atomic(out / "config.json", record)
@@ -745,7 +835,9 @@ def main(argv: list[str] | None = None) -> int:
     speaking = WindowSpeaking(words, params, landings, start_masks, args.aircraft_steps, every_landing,
                               args.probe_samples, args.probe_margin)
     speakers = Speakers(args.speakers, lambda n: train_round(n)[0],
-                        {"real": select_real, "augmented": select_augmented}, model, args.device, speaking)
+                        {"real": select_real, "augmented": select_augmented,
+                         **({"events": select_events} if select_events is not None else {})},
+                        model, args.device, speaking)
     model.to(device)
     base.to(device)
     if last < 0:                                        # the first invocation: the formal size checked before round 0
@@ -787,7 +879,7 @@ def main(argv: list[str] | None = None) -> int:
         write_json_atomic(directory / "sentences.json", {
             **described, "aircraft": [{k: r[k] for k in ("window", "dataset_id", "sample", "kind", "role", "reward",
                                                          "outcome", "own", "counted", "starts_in_a_loss", "probed",
-                                                         "forced", "go_around")}
+                                                         "forced", "given", "go_around")}
                                       | {"advantage": float(a), "probe_gain": float(g)}
                                       for r, a, g in zip(spoken.rows, advantages, gains)]})
         log(f"round {round_number}: {len(spoken.rows)} aircraft sentences in {len(round_.drawn.windows)} windows, "
@@ -797,8 +889,8 @@ def main(argv: list[str] | None = None) -> int:
               f"{described['starting_in_a_loss']} starting in a loss; go-arounds {described['go_arounds']}")
         split, sample_kinds = window_split(round_, spoken, advantages, gains, trained, table, landings, step_s)
         start_distance, measured_on = {}, {}
-        for side, of in (("real", (True,)), ("augmented", (False,))):
-            part = split_of_kinds(split, sample_kinds, of)
+        for side in ("real", "augmented", *(("events",) if event_pools else ())):
+            part = split_of_kinds(split, sample_kinds, side)
             measured_on[side] = part.sentences
             start_distance[side] = tuner.window_distance(part) if part.windows else None
         tuner.restart(np.random.default_rng([args.seed, round_number, PASS_STREAM]))

@@ -77,7 +77,8 @@ from ts_transformer.experiments.traffic_window import Window, draw_windows
 from ts_transformer.experiments.training_attitude import attitude_payload, executor_attitude, observed_attitudes
 from ts_transformer.experiments.traffic_window_generation import (
     AIRCRAFT_STEPS, SCHEMA as READOUT_SCHEMA, SIZES, WINDOWS_PER_AIRPORT, WORKERS, Drawn, FixedWindow, Flown,
-    batch_seed, drawn_windows, fixed_paths, fly_windows, in_processes, size_of, window_batches, window_prior,
+    batch_seed, drawn_subset, drawn_windows, fixed_paths, fly_windows, in_processes, size_of, window_batches,
+    window_prior,
 )
 from ts_transformer.inference.separation import IFR
 from ts_transformer.instructions.artefact import load_candidates, load_signals, spec_labeller_source
@@ -141,18 +142,6 @@ def choose_windows(openings: Sequence[tuple[str, float, tuple[str, ...]]], codes
                         "taken": {size: sum(size_of(len(openings[w][2])) == size for w in picked) for size in SIZES},
                         "filled": len(filled)}
     return chosen, counts
-
-
-def drawn_subset(drawn: Drawn, chosen: Sequence[int]) -> Drawn:
-    """The windows at ``chosen`` of ``drawn``, in that order, with their commanded aircraft."""
-    index = [j for w in chosen for j in drawn.members[w]]
-    members, at = [], 0
-    for w in chosen:
-        members.append(range(at, at + len(drawn.members[w])))
-        at += len(drawn.members[w])
-    return Drawn([drawn.windows[w] for w in chosen], [drawn.augmented[w] for w in chosen], members,
-                 replay.subset(drawn.batch, index), [drawn.limits[j] for j in index], [drawn.moves[j] for j in index],
-                 [drawn.roles[j] for j in index])
 
 
 # ---- what is written
