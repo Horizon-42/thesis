@@ -1,10 +1,14 @@
-"""Augmented windows for the loop where the prior commands every aircraft of a window (multi-aircraft design §5, §6.6
-step 7 item 6), not a runner: a window changed so that it holds traffic the data rarely does — only in the closed loop
-(reward and readouts), never teacher forcing (§5.1).
+"""Augmented windows for the window loop (multi-aircraft design §5, §6.6 step 7 item 6 and step 9's "9.4 的代码"), not a
+runner: a window changed so that it holds traffic the data rarely does — only in the closed loop (reward and readouts),
+never teacher forcing (§5.1).
 
-The three ways of "every aircraft of a window commanded" (§5.2, §9 item 7), a third each — **a window's kind is drawn
-once**, and only its parameters are drawn again when a draw is refused (a kind that took over another's refused windows
-would read a different population):
+**A window's kind is drawn once**, and only its parameters are drawn again when a draw is refused (a kind that took over
+another's refused windows would read a different population); the kinds are a third each (§5.4 item 2, §9 item 7), by
+how the draw commands (`KINDS_OF`, `traffic_window.COMMANDED`): every aircraft of a window commanded — C, B, A, A's
+inserted flight commanded too; one aircraft a window commanded — D, B, A, A's inserted flight replayed along its record
+(the one-aircraft setting's, as M4's first runner had them).
+
+The ways of "every aircraft of a window commanded":
 
 - **C, the flow compressed** — every commanded aircraft moved whole toward the window's opening: its first row's time
   after the opening × c, c ~ U[`COMPRESSION`] (the arrivals up to 1 / 0.6 ≈ 1.7 times as dense). The replayed ones stay
@@ -21,6 +25,17 @@ would read a different population):
   timing), g ~ U[`traffic_augment.GAP_RANGE`] — and commanded too, keyed `traffic_speaking.INSERTED` after its own key,
   over its own time limit; the window no longer replays the flight it came from (its recorded landing stays in the
   landing contexts, as in `traffic_augment`).
+
+The ways of "one aircraft a window commanded" (design §5.2):
+
+- **D, the leader moved** — the replayed flight landing just before the commanded one on its runway or one separated as
+  one with it, in the air at its first predicted step (`leader`: by landing order, not by where the approach clock has
+  them before they turn final — design §2.5's reading), moved whole by δ drawn evenly from the whole steps in
+  [−`traffic_augment.SHIFT_S`, `traffic_augment.SHIFT_S`] but 0 (a leader not moved is not an augmentation); its moved
+  landing is the one in the commanded aircraft's landing context (`traffic_speaking.scene_landings`);
+- **B, the start moved** — as above;
+- **A, a flight inserted** — as above, drawn and timed alike, but REPLAYED along its record: the commanded aircraft's new
+  leader (one aircraft is commanded).
 
 **Every shift is whole steps** (even seconds, so whole seconds too): a moved flight's rows stay on the scene's steps
 (`prior.scene`, `traffic_augment.moved`), the rosters' landing times are whole seconds, and a flight's own landing leaves
@@ -62,7 +77,7 @@ from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.flights import flight_inputs
 from ts_transformer.data.day_split import parse_utc
 from ts_transformer.experiments.prior_free_generation import augmented_starts
-from ts_transformer.experiments.traffic_augment import GAP_RANGE, TRIES, moved
+from ts_transformer.experiments.traffic_augment import GAP_RANGE, SHIFT_S, TRIES, moved
 from ts_transformer.experiments.traffic_census import track
 from ts_transformer.experiments.traffic_loop import recorded
 from ts_transformer.experiments.traffic_scene_data import FlightRows
@@ -76,13 +91,15 @@ from ts_transformer.prior.augment import Augmentation, augment_signals
 from ts_transformer.prior.generate import rows_for
 from ts_transformer.prior.scene import N_LOOK, SceneIndex, in_scene, presence, scene_steps
 
-KINDS = ("C", "B", "A")
+#: The ways of augmenting (design §5.2), and each draw's (module docstring), in the order a kind is drawn from.
+KINDS = ("A", "B", "C", "D")
+KINDS_OF = {"every": ("C", "B", "A"), "one": ("D", "B", "A")}
 COMPRESSION = (0.6, 1.0)
 #: A commanded aircraft's part in its window's augmentation: moved in time (C), its start moved (B), inserted (A).
 ROLES = ("shifted", "moved", "inserted")
 #: Why a draw was refused (module docstring).
-REFUSALS = ("no_plausible_start", "no_flight_to_insert", "longer_than_the_model", "busier_than_the_data",
-            "lost_before_the_model_speaks")
+REFUSALS = ("no_plausible_start", "no_flight_to_insert", "no_leader_to_move", "longer_than_the_model",
+            "busier_than_the_data", "lost_before_the_model_speaks")
 
 
 @dataclass(frozen=True)
@@ -141,6 +158,18 @@ def at_once(flights: Sequence[Any], step_s: float) -> int:
     return int(in_scene(flights, scene_steps(first, last, step_s)).max())
 
 
+def leader(window: Window, key: str, step_s: float) -> str | None:
+    """The replayed flight landing just before commanded aircraft ``key`` on its landed runway or one separated as one
+    with it, among those in the air at its first predicted step; None without one."""
+    t0 = window.first_step_s(key) + N_LOOK * step_s
+    own = window.track(key).presence
+    separation = window.airport.flights.separation
+    before = [(window.track(k).presence.landing_s, k) for k in window.others
+              if window.track(k).on_step(t0) and separation.one_runway(window.track(k).presence.runway, own.runway)
+              and window.track(k).presence.landing_s < own.landing_s]
+    return max(before)[1] if before else None
+
+
 def qualifies(window: Window, signals: Mapping[str, FlightSignals], step_s: float) -> bool:
     """No commanded aircraft of ``window`` answers for a loss through its observed rows (``signals``: each one's, a
     moved one's moved), judged not established, against every other aircraft along its record (module docstring)."""
@@ -164,16 +193,20 @@ def qualifies(window: Window, signals: Mapping[str, FlightSignals], step_s: floa
 def augment_window(window: Window, batch: replay.Batch, places: Sequence[int], pool: Mapping[str, int],
                    limits: Sequence[float], moved_limits: Sequence[float], most: int, max_rows: int,
                    rng: np.random.Generator, windows: dict[str, tuple[float, float]], spec: VocabularySpec,
-                   kinds: Sequence[str] = KINDS) -> tuple[AugmentedWindow | None, str, Counter]:
-    """``window`` augmented (module docstring), its kind and the draws refused by why (`REFUSALS`). ``batch``: the draw's
+                   kinds: Sequence[str] = KINDS_OF["every"], commanded: str = "every"
+                   ) -> tuple[AugmentedWindow | None, str, Counter]:
+    """``window`` augmented (module docstring), its kind and the draws refused by why (`REFUSALS`): ``kinds`` those the
+    kind is drawn from, each alike — of the kinds of a draw that commanded ``commanded`` (`KINDS_OF`). ``batch``: the draw's
     flights, the window's commanded ones at ``places`` (in its order); ``pool``: the flights an insertion is drawn from,
     by key, their places in ``batch`` (the draw's flights at this airport); ``limits`` / ``moved_limits``: every flight's
     time limit in ``batch``, the executor spec's and stage 2's; ``most``: the airport's busiest training step
-    (`busiest`); ``max_rows``: the model's positions; ``windows``: stage 2's altitude windows; ``kinds``: those the kind
-    is drawn from, each alike. None after `TRIES` draws refused."""
+    (`busiest`); ``max_rows``: the model's positions; ``windows``: stage 2's altitude windows. None after `TRIES` draws
+    refused."""
     step_s = spec.step_s
     airport = window.airport
     geometry, separation = airport.flights.geometry, airport.flights.separation
+    if not set(kinds) <= set(KINDS_OF[commanded]):
+        raise ValueError(f"kinds {tuple(kinds)}: a draw that commanded {commanded!r} is augmented by {KINDS_OF[commanded]}")
     own = dict(zip(window.commanded, places))
     kind = kinds[int(rng.integers(len(kinds)))]
     refused: Counter = Counter()
@@ -210,6 +243,17 @@ def augment_window(window: Window, batch: replay.Batch, places: Sequence[int], p
             parts.append((dataclasses.replace(rows, presence=record.presence), record))
             move[key], role[key], limit[key] = start, "moved", moved_limits[j]
             drawn = {"moved": key, **dataclasses.asdict(start)}
+        elif kind == "D":
+            follower = window.commanded[int(rng.integers(len(window.commanded)))]
+            lead = leader(window, follower, step_s)
+            if lead is None:
+                refused["no_leader_to_move"] += 1
+                continue
+            reach = int(SHIFT_S // step_s)
+            steps = int(rng.integers(-reach, reach))
+            dt = step_s * float(steps + 1 if steps >= 0 else steps)
+            parts.append(moved(window.rows(lead), window.track(lead), dt, lead, step_s))
+            drawn = {"leader": lead, "follower": follower, "shift_s": dt}
         else:
             follower = window.commanded[int(rng.integers(len(window.commanded)))]
             behind = window.track(follower)
@@ -231,17 +275,21 @@ def augment_window(window: Window, batch: replay.Batch, places: Sequence[int], p
             key = source_key + INSERTED
             j = pool[source_key]
             parts.append(moved(airport.flights.flights[source_key], source, float(dt), key, step_s))
-            place[key], signals[key], limit[key], role[key] = j, shifted(batch.signals[j], dt, key), limits[j], "inserted"
+            if commanded == "every":                    # commanded too; one aircraft a window: replayed
+                place[key], signals[key], limit[key], role[key] = (j, shifted(batch.signals[j], dt, key), limits[j],
+                                                                   "inserted")
             left_out.append(source_key)
             drawn = {"inserted": source_key, "follower": follower, "gap": gap, "shift_s": dt}
         if rows_for(max(limit.values()) + step_s, step_s) > max_rows:
             refused["longer_than_the_model"] += 1
             continue
         placed = Window(airport, window.opens_s, tuple(place), (), tuple(parts))
-        commanded = tuple(sorted(place, key=lambda k: (placed.first_step_s(k), k)))
-        candidate = window_of(airport, window.opens_s, commanded, [limit[k] for k in commanded], step_s, parts,
+        order = tuple(sorted(place, key=lambda k: (placed.first_step_s(k), k)))
+        candidate = window_of(airport, window.opens_s, order, [limit[k] for k in order], step_s, parts,
                               left_out)
-        cap = max(most, at_once([airport.tracks[k].presence for k in (*window.commanded, *candidate.others)], step_s))
+        # the same span as recorded: an inserted flight replayed (one aircraft a window) is what the augmentation adds
+        cap = max(most, at_once([airport.tracks[k].presence for k in (*window.commanded, *candidate.others)
+                                 if k in airport.tracks], step_s))
         count = at_once([candidate.track(k).presence for k in (*candidate.commanded, *candidate.others)], step_s)
         if count > cap:
             refused["busier_than_the_data"] += 1
@@ -250,8 +298,8 @@ def augment_window(window: Window, batch: replay.Batch, places: Sequence[int], p
         if not qualifies(candidate, signals, step_s):
             refused["lost_before_the_model_speaks"] += 1
             continue
-        return (AugmentedWindow(kind, candidate, tuple(place[k] for k in commanded),
-                                tuple(signals[k] for k in commanded), tuple(move.get(k) for k in commanded),
-                                tuple(limit[k] for k in commanded), tuple(role.get(k) for k in commanded), drawn, draw),
+        return (AugmentedWindow(kind, candidate, tuple(place[k] for k in order),
+                                tuple(signals[k] for k in order), tuple(move.get(k) for k in order),
+                                tuple(limit[k] for k in order), tuple(role.get(k) for k in order), drawn, draw),
                 kind, refused)
     return None, kind, refused

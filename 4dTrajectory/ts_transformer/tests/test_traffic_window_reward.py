@@ -99,7 +99,7 @@ def test_a_window_round_is_spoken_by_its_plan_and_its_trained_samples_are_what_t
 
 
 def test_the_select_readout_is_in_the_shape_the_round_choice_reads(tmp_path, monkeypatch):
-    from ts_transformer.experiments.traffic_reward import guarded_choice, ordering_failures
+    from ts_transformer.experiments.traffic_rounds import guarded_choice, ordering_failures
     from ts_transformer.experiments.traffic_window_reward import side_readout
     from ts_transformer.instructions.words import COLUMNS
 
@@ -159,7 +159,7 @@ def test_the_ordering_guard_reads_the_same_leaders_on_both_sides():
 def test_a_window_round_speaks_the_same_in_one_process_or_two(tmp_path, monkeypatch):
     """R32's speaking processes with the window speaking, a batch a window (budget 1): the same sentences and what the
     speaker read, a training round's and a select side's, whatever the number of processes."""
-    from ts_transformer.experiments.traffic_reward import Speakers
+    from ts_transformer.experiments.traffic_rounds import Speakers
 
     round_, airport, spec = _round(tmp_path, monkeypatch)
     base = _speaking(spec, airport)
@@ -208,6 +208,18 @@ def test_probes_need_two_samples_and_two_unprobed_ones(tmp_path):
     for samples, probes in ((8, 1), (8, 7), (3, 2), (2, 1)):
         with pytest.raises(SystemExit):
             main(paths + ["--samples", str(samples), "--probe-samples", str(probes)])
+    assert not (tmp_path / "run").exists()
+
+
+def test_a_probe_run_may_sweep_its_round_several_times(tmp_path):
+    """The user, 2026-10-02 (multi-aircraft design §9 item 37): three passes a round, a probe's go-around word learned in
+    each — the argument checks let a probe run sweep more than once: it stops only at the executor spec that is not
+    there."""
+    from ts_transformer.experiments.traffic_window_reward import main
+
+    paths = ["--prior", "p", "--base", "b", "--instructions", "i", "--executor", "e", "--out", str(tmp_path / "run")]
+    with pytest.raises(FileNotFoundError, match="spec.json"):
+        main(paths + ["--samples", "8", "--probe-samples", "4", "--passes", "3", "--smoke"])
     assert not (tmp_path / "run").exists()
 
 

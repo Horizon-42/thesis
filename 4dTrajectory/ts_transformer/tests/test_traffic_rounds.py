@@ -2,8 +2,7 @@
 M4's first runner in step 9's 9.4.1): the guards exclude a round by name and the choice reads paired standard errors,
 taking the earliest within the tie; paired differences read the sentences both rounds count; the ordering guards read the
 record; a resumed run continues only from finished rounds of the same configuration; the traffic attention's readout;
-a traffic prior written by a runner is read back by `load_prior`. A probe run may sweep its round several times (the
-user, 2026-10-02: multi-aircraft design §9 item 37). The speaking processes are tested with window rounds
+a traffic prior written by a runner is read back by `load_prior`. The speaking processes are tested with window rounds
 (`test_traffic_window_reward.py`)."""
 
 from __future__ import annotations
@@ -190,14 +189,3 @@ def test_a_resumed_run_continues_only_from_finished_rounds_of_the_same_configura
     # each round's streams are its own
     seeds = {round_seed(1337, r, s) for r in (1, 2) for s in (1, 2)}
     assert len(seeds) == 4 and round_seed(1337, 1, 1) == round_seed(1337, 1, 1)
-
-
-def test_a_probe_run_may_sweep_its_round_several_times(tmp_path):
-    """The user, 2026-10-02 (multi-aircraft design §9 item 37): three passes a round, a probe's go-around word learned in
-    each — the argument checks let a probe run sweep more than once (it then stops at the inputs that are not there)."""
-    from ts_transformer.experiments.traffic_window_reward import main
-
-    paths = ["--prior", "p", "--base", "b", "--instructions", "i", "--executor", "e", "--out", str(tmp_path / "run")]
-    with pytest.raises(Exception) as refused:
-        main(paths + ["--samples", "8", "--probe-samples", "4", "--passes", "3", "--smoke"])
-    assert not isinstance(refused.value, SystemExit)

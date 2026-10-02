@@ -46,7 +46,7 @@ def _varied(rows, number, side):
 def _write_run(tmp_path, monkeypatch, rounds=2, events=False):
     """A window M4 run of ``rounds`` training rounds at ``tmp_path / "run"``, as the runner writes one (``events``: with
     a select hard-event side — here the select windows themselves, every aircraft read)."""
-    from ts_transformer.experiments.traffic_reward import traffic_readout
+    from ts_transformer.experiments.traffic_rounds import traffic_readout
     from ts_transformer.experiments.traffic_scene_data import build_split
     from ts_transformer.experiments.traffic_window_reward import (
         SCHEMA, event_readout, history_row, round_summary, side_readout, window_split, write_choice,

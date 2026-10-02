@@ -111,6 +111,31 @@ def test_the_draw_commands_the_flights_that_fly_and_passes_over_a_window_where_n
         draw_windows(directory, "train", spec, Words(spec), airports, per_airport=3, seed=5, step_s=STEP_S)
 
 
+
+def test_one_commanded_a_window_draws_the_flights_the_single_aircraft_runners_draw(tmp_path, monkeypatch):
+    """Multi-aircraft design §6.6 step 9 ("9.4 的代码"): ``commanded="one"`` — `replay.draw`'s flights, each the one
+    commanded aircraft of its own window opening on its first row's step; the draw says how it commanded."""
+    from ts_transformer.autopilot import replay
+    from ts_transformer.experiments.traffic_window import draw_windows
+
+    directory, airports, spec = _airport(tmp_path, monkeypatch)
+    monkeypatch.setattr(replay, "draw_flights", _fake_draw(set(_keys(0, 1, 2, 3, 4, 5))))
+    words = Words(spec)
+    drawn = draw_windows(directory, "train", spec, words, airports, per_airport=3, seed=5, step_s=STEP_S,
+                         commanded="one")
+    keys = [s.dataset_id for s in replay.draw(directory, "train", spec, words, per_airport=3, seed=5).signals]
+    assert [c for _, _, c in drawn.openings] == [(k,) for k in keys]
+    assert [s.dataset_id for s in drawn.batch.signals] == keys
+    flights = airports["KXXX"].flights.flights
+    assert [opens for _, opens, _ in drawn.openings] == [flights[k].presence.start_s for k in keys]
+    assert drawn.counts["commanded"] == "one" and drawn.counts["airports"] == {"KXXX": len(keys)}
+    assert [list(r) for r in drawn.members()] == [[j] for j in range(len(keys))]
+    assert draw_windows(directory, "train", spec, words, airports, per_airport=2, seed=5,
+                        step_s=STEP_S).counts["commanded"] == "every"
+    with pytest.raises(ValueError, match="commands"):
+        draw_windows(directory, "train", spec, words, airports, per_airport=2, seed=5, step_s=STEP_S, commanded="two")
+
+
 # ---- the loop (step 7.3)
 
 LIMIT_S = 60.0

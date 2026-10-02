@@ -5,7 +5,9 @@ judged in its window. A readout only. ``--prior`` may instead be a traffic prior
 `prior_train.TRAFFIC_CHECKPOINT_SCHEMA`), read as it was trained.
 
 ``--windows-per-airport`` windows of the split are drawn (`traffic_window.draw_windows`: seeded, a window without a flight
-that flies on its own dynamics passed over and counted), and every commanded aircraft is read four ways:
+that flies on its own dynamics passed over and counted) — or, ``--commanded one``, as many flights an airport, each the
+one commanded aircraft of its own window, the others replayed (design §6.6 step 9: the setting "一架由模型指挥" read in
+the window loop) — and every commanded aircraft is read four ways:
 
 - **scene** — the model speaking to every commanded aircraft of the window, ``--samples`` times (a sample is the whole
   window: its aircraft's words said together, the separation masks on);
@@ -32,8 +34,9 @@ aircraft go together over its samples (the pooled correlation of each aircraft's
 over the pairs of a window).
 
 With ``--augment-seed`` every window is augmented instead (`traffic_window_augment`: the flow compressed, a start moved,
-a flight inserted and commanded, a third each; qualified, and never more aircraft at once than the airport's busiest step
-on the training days), read by the model's sources only — as M3's first pass on augmented scenes: a moved start has no
+a flight inserted and commanded, a third each — one commanded aircraft a window: its leader moved, its start moved, a
+flight inserted and replayed; qualified, and never more aircraft at once than the airport's busiest step on the training
+days), read by the model's sources only — as M3's first pass on augmented scenes: a moved start has no
 record, and its labelled words would fly from the recorded start. Each row carries its window's augmentation and its
 aircraft's part in it; the readout adds each kind and each part, and counts the windows left out and the draws refused,
 by why.
@@ -91,9 +94,11 @@ from ts_transformer.experiments.traffic_speaking import (
     HISTORY_S, MASK_COLUMNS, scene_airports, scene_landings, speaking_aircraft,
 )
 from ts_transformer.experiments.traffic_window import (
-    Commanded, Given, Window, WindowLoop, WindowRecord, _with_landing, draw_windows, window_landings, window_of,
+    COMMANDED, Commanded, Given, Window, WindowLoop, WindowRecord, _with_landing, draw_windows, window_landings, window_of,
 )
-from ts_transformer.experiments.traffic_window_augment import KINDS, REFUSALS, ROLES, augment_window, busiest
+from ts_transformer.experiments.traffic_window_augment import (
+    KINDS, KINDS_OF, REFUSALS, ROLES, augment_window, busiest,
+)
 from ts_transformer.inference.scene_edges import EDGE_FEATURES
 from ts_transformer.inference.separation import IFR, VISUAL
 from ts_transformer.instructions.artefact import SPLITS
@@ -108,8 +113,9 @@ from ts_transformer.prior.scene import N_LOOK, Landings, presence
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 #: v3 (2026-10-01): the model's sources read (`model_sources`) in the header; v4–v5 (2026-10-02): multi-aircraft step 8
-#: (go-around fields, probes, the go-around reward); v6: a row says whether its words were given (``given``).
-SCHEMA = "ts-traffic-window-generation-v6"
+#: (go-around fields, probes, the go-around reward); v6: a row says whether its words were given (``given``); v7
+#: (multi-aircraft step 9): how a window's aircraft were commanded (``commanded``, `traffic_window.COMMANDED`).
+SCHEMA = "ts-traffic-window-generation-v7"
 SOURCES = ("scene", "alone", "labelled", "recorded")
 #: The sources the model speaks in (`--model-sources`: a read that needs only one — a pair of priors on the same windows
 #: reads "scene" — skips the other, half the model's time; each source from its own streams, so the rows of the one read
@@ -205,12 +211,13 @@ def drawn_windows(draw: Any, airports: Mapping[str, Any], params: Any, step_s: f
 
 
 def augmented_windows(drawn: Drawn, params: Any, most: Mapping[str, int], max_rows: int, seed: int,
-                      windows: dict[str, tuple[float, float]], spec: Any, kinds: Sequence[str] = KINDS
-                      ) -> tuple[Drawn, dict[str, Any]]:
-    """Every window of ``drawn`` augmented (`traffic_window_augment.augment_window` over ``kinds``, one generator from
-    ``seed`` in the windows' order; an insertion drawn from the draw's flights at the window's airport, ``most`` each
-    airport's busiest step on the training days, ``max_rows`` the model's positions): the windows kept, and the count of
-    the kinds kept, of the windows left out (by airport and kind) and of the draws refused, by why."""
+                      windows: dict[str, tuple[float, float]], spec: Any, kinds: Sequence[str] = KINDS_OF["every"],
+                      commanded: str = "every") -> tuple[Drawn, dict[str, Any]]:
+    """Every window of ``drawn`` — drawn ``commanded`` (`traffic_window.COMMANDED`) — augmented
+    (`traffic_window_augment.augment_window` over ``kinds``, one generator from ``seed`` in the windows' order; an
+    insertion drawn from the draw's flights at the window's airport, ``most`` each airport's busiest step on the training
+    days, ``max_rows`` the model's positions): the windows kept, and the count of the draw's kinds kept, of the windows
+    left out (by airport and kind) and of the draws refused, by why."""
     rng = np.random.default_rng(seed)
     moved_limits = limits_s(drawn.batch, params, spec.step_s, augmented=True)
     pools: dict[str, dict[str, int]] = defaultdict(dict)
@@ -220,7 +227,7 @@ def augmented_windows(drawn: Drawn, params: Any, most: Mapping[str, int], max_ro
     for window, part in zip(drawn.windows, drawn.members):
         code = window.airport.flights.code
         got, kind, why = augment_window(window, drawn.batch, list(part), pools[code], drawn.limits, moved_limits,
-                                        most[code], max_rows, rng, windows, spec, kinds)
+                                        most[code], max_rows, rng, windows, spec, kinds, commanded)
         refused.update(why)
         if got is None:
             left_out[code][kind] += 1
@@ -232,7 +239,7 @@ def augmented_windows(drawn: Drawn, params: Any, most: Mapping[str, int], max_ro
     for a in kept:
         members.append(range(at, at + len(a.places)))
         at += len(a.places)
-    counts = {"kinds": {kind: sum(a.kind == kind for a in kept) for kind in KINDS},
+    counts = {"kinds": {kind: sum(a.kind == kind for a in kept) for kind in KINDS_OF[commanded]},
               "left_out": {code: dict(by_kind) for code, by_kind in sorted(left_out.items())},
               "refused": {why: refused[why] for why in REFUSALS},
               "busiest_training_step": dict(most),
@@ -824,6 +831,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--executor", type=Path, required=True, help="the executor spec directory")
     parser.add_argument("--split", choices=SPLITS, required=True)
     parser.add_argument("--windows-per-airport", type=int, default=WINDOWS_PER_AIRPORT)
+    parser.add_argument("--commanded", choices=COMMANDED, default="every", help="every aircraft of a window commanded, "
+                        "or one a window (`traffic_window.draw_windows`)")
     parser.add_argument("--samples", type=int, default=4)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=1337)
@@ -865,14 +874,15 @@ def main(argv: list[str] | None = None) -> int:
     airports, built = scene_airports(instructions, args.split, words.spec, model.config.airports, landings,
                                      model.config.max_rows)
     draw = draw_windows(instructions, args.split, words.spec, words, airports, per_airport=args.windows_per_airport,
-                        seed=args.seed, step_s=step_s)
+                        seed=args.seed, step_s=step_s, commanded=args.commanded)
     drawn = drawn_windows(draw, airports, params, step_s)
     augmented = args.augment_seed is not None
     augmenting = None
     if augmented:
         most = busiest(instructions, words.spec, model.config.airports, step_s)
         drawn, augmenting = augmented_windows(drawn, params, most, model.config.max_rows, args.augment_seed,
-                                              start_altitude_windows(instructions), words.spec)
+                                              start_altitude_windows(instructions), words.spec,
+                                              KINDS_OF[args.commanded], args.commanded)
         print(f"augmented windows: {augmenting}", flush=True)
         if not drawn.windows:
             parser.error("every window was left out")
@@ -913,7 +923,8 @@ def main(argv: list[str] | None = None) -> int:
     (out / "aircraft.jsonl.sorted").replace(out / "aircraft.jsonl")
     readout = summaries(rows, augmented)
     write_json_atomic(out / "window_generation.json", {
-        "schema": SCHEMA, "written_utc": utc_now(), "git": git, "split": args.split, "drawn": draw.counts,
+        "schema": SCHEMA, "written_utc": utc_now(), "git": git, "split": args.split, "commanded": args.commanded,
+        "drawn": draw.counts,
         "windows_per_airport": args.windows_per_airport, "samples": args.samples, "temperature": args.temperature,
         "probes": {"samples": args.probe_samples, "margin": args.probe_margin},
         "seed": args.seed, "augment_seed": args.augment_seed, "augmenting": augmenting,

@@ -9,7 +9,10 @@ Each round:
    round): of each airport's, the first ``--real-per-airport`` as they are and, of the next `POOL_FACTOR` ×
    ``--augmented-per-airport``, the first ``--augmented-per-airport`` whose augmentation qualifies
    (`traffic_window_augment`: the flow compressed, a start moved, a flight inserted and commanded, a third each; the
-   round's augmentation stream) — refused when an airport runs short; with ``--events``, ``--events-per-airport`` hard
+   round's augmentation stream) — refused when an airport runs short. ``--commanded one`` (design §6.6 step 9, "9.4 的代码":
+   the setting "一架由模型指挥"): as many flights an airport drawn as the single-aircraft runners draw them, each the one
+   commanded aircraft of its own window, the others replayed; augmented by its leader moved, its start moved, a flight
+   inserted and replayed (`traffic_window_augment.KINDS_OF`); with ``--events``, ``--events-per-airport`` hard
    events an airport (all where it has fewer; the round's pick stream) from training-day window rewind runs (R43,
    `traffic_window_events`: the answered aircraft could not undo the loss speaking again from its start) — the window
    flown again with every other commanded aircraft given its words, the answered one spoken (multi-aircraft design §6.6
@@ -103,8 +106,8 @@ from ts_transformer.experiments.traffic_rounds import (
 from ts_transformer.experiments.traffic_scene_data import airport_flights, edge_source_sha256, split_samples
 from ts_transformer.experiments.traffic_speaking import with_tracks
 from ts_transformer.experiments.traffic_tuner import part_cost
-from ts_transformer.experiments.traffic_window import Given, draw_windows, window_places
-from ts_transformer.experiments.traffic_window_augment import busiest
+from ts_transformer.experiments.traffic_window import COMMANDED, Given, draw_windows, window_places
+from ts_transformer.experiments.traffic_window_augment import KINDS_OF, busiest
 from ts_transformer.experiments.traffic_window_events import EventPool, event_pool, pick
 from ts_transformer.experiments.traffic_go_around import GO_AROUND_EXTRA_S, IMITATION_WEIGHT, PROBE_MARGIN
 from ts_transformer.experiments.traffic_window_generation import (
@@ -129,7 +132,8 @@ from ts_transformer.prior.scene import N_LOOK, Landings
 from ts_transformer.prior.train import RewardConfig
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-SCHEMA = "ts-traffic-window-reward-v4"
+#: v5 (multi-aircraft step 9): how a window's aircraft are commanded (``commanded``, `traffic_window.COMMANDED`).
+SCHEMA = "ts-traffic-window-reward-v5"
 RUNNER = "ts_transformer.experiments.traffic_window_reward"
 #: Host memory a speaking process holds beyond what it shares with the parent, and what the parent grows by in a round
 #: (a round's windows built, the pass), GB — measured on the formal run (2026-09-30: a speaking process's own memory for a
@@ -149,9 +153,9 @@ EVENT = "event"
 @dataclasses.dataclass(frozen=True)
 class WindowRound:
     """A round's windows (`traffic_window_generation.Drawn`: each window, its commanded aircraft's flights, limits and
-    moved starts), each window's kind — ``real``, its augmentation's (C, B, A) or `EVENT` (a hard event,
-    `traffic_window_events`) — and each window's given lines: None (every aircraft spoken), or one per commanded
-    aircraft in the window's order (`traffic_window.Given`; None: spoken)."""
+    moved starts), each window's kind — ``real``, its augmentation's (`traffic_window_augment.KINDS_OF`) or `EVENT`
+    (a hard event, `traffic_window_events`) — and each window's given lines: None (every aircraft spoken), or one per
+    commanded aircraft in the window's order (`traffic_window.Given`; None: spoken)."""
 
     drawn: Drawn
     kinds: list[str]
@@ -368,7 +372,7 @@ def preflight(model: Prior, base: Prior, round_: WindowRound, speaking: WindowSp
 
 
 def side_of(kind: str) -> str:
-    """A window kind's side: ``real``, ``events`` (`EVENT`) or ``augmented`` (C, B, A)."""
+    """A window kind's side: ``real``, ``events`` (`EVENT`) or ``augmented`` (an augmentation's kind)."""
     return "real" if kind == "real" else "events" if kind == EVENT else "augmented"
 
 
@@ -583,6 +587,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     parser.add_argument("--rounds", type=int, default=8, help="the last round to run (0: round 0 alone)")
     parser.add_argument("--resume", action="store_true", help="continue the run at --out from its last finished round")
+    parser.add_argument("--commanded", choices=COMMANDED, default="every", help="every aircraft of a window commanded, "
+                        "or one a window (`traffic_window.draw_windows`; module docstring, item 1)")
     parser.add_argument("--real-per-airport", type=int, default=70, help="real windows an airport a round")
     parser.add_argument("--augmented-per-airport", type=int, default=70, help="augmented windows an airport a round")
     parser.add_argument("--samples", type=int, default=8, help="sentences a window")
@@ -682,11 +688,13 @@ def main(argv: list[str] | None = None) -> int:
     select_airports = with_tracks(instructions, "select", spec, select_flights)
     select_built = [b for b in split_samples(select_flights, select_counts, step_s)[0] if b.sample.asks]
     select_draw = draw_windows(instructions, "select", spec, words, select_airports,
-                               per_airport=args.select_per_airport, seed=args.seed, step_s=step_s)
+                               per_airport=args.select_per_airport, seed=args.seed, step_s=step_s,
+                               commanded=args.commanded)
     select_as_drawn = drawn_windows(select_draw, select_airports, params, step_s)
     select_real = spoken_round(select_as_drawn, ["real"] * len(select_as_drawn.windows))
     select_augmented_drawn, select_augmenting = augmented_windows(select_as_drawn, params, most, max_rows,
-                                                                  args.seed + SELECT_AUGMENT_OFFSET, windows_alt, spec)
+                                                                  args.seed + SELECT_AUGMENT_OFFSET, windows_alt, spec,
+                                                                  KINDS_OF[args.commanded], args.commanded)
     select_augmented = spoken_round(select_augmented_drawn, [a["kind"] for a in select_augmented_drawn.augmented])
     # hard events (multi-aircraft design §6.6 step 8 item 11): the training days' to train on, the select days' read
     pooled = dict(instructions=instructions, spec=spec, words=words, params=params, executor_sha256=record["sha256"],
@@ -705,7 +713,7 @@ def main(argv: list[str] | None = None) -> int:
     recorded_counted = [r for r in recorded_rows if not r["starts_in_a_loss"]]         # (the model's shares' basis)
     recorded_lost = sum(r["outcome"] == LOST_SEPARATION for r in recorded_counted) / len(recorded_counted)
     record = {
-        "schema": SCHEMA, "written_utc": utc_now(), "git": git, "smoke": args.smoke,
+        "schema": SCHEMA, "written_utc": utc_now(), "git": git, "smoke": args.smoke, "commanded": args.commanded,
         "prior": {"directory": str(prior_dir), "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"),
                   "schema": start_payload["schema"], "procedure_masks": list(start_masks.names)},
         "base": {"directory": str(base_dir), "checkpoint_sha256": file_sha256(base_dir / "checkpoint.pt")},
@@ -808,12 +816,13 @@ def main(argv: list[str] | None = None) -> int:
         picked."""
         per_airport = args.real_per_airport + math.ceil(args.augmented_per_airport * POOL_FACTOR)
         drawn = draw_windows(instructions, "train", spec, words, train_airports, per_airport=per_airport,
-                             seed=args.seed + round_number, step_s=step_s)
+                             seed=args.seed + round_number, step_s=step_s, commanded=args.commanded)
         pool = drawn_windows(drawn, train_airports, params, step_s)
         real = first_windows_per_airport(pool, args.real_per_airport, airports)
         rest = [w for w in range(len(pool.windows)) if w not in set(real)]
         candidates, augmenting = augmented_windows(drawn_subset(pool, rest), params, most, max_rows,
-                                                   [args.seed, round_number, AUGMENT_STREAM], windows_alt, spec)
+                                                   [args.seed, round_number, AUGMENT_STREAM], windows_alt, spec,
+                                                   KINDS_OF[args.commanded], args.commanded)
         augmented = drawn_subset(candidates, first_windows_per_airport(candidates, args.augmented_per_airport,
                                                                        airports))
         parts = [spoken_round(drawn_join([drawn_subset(pool, real), augmented]),
@@ -914,7 +923,8 @@ def main(argv: list[str] | None = None) -> int:
             + (f", the pass {passed['pass_gpu_peak_gb']:.2f} GB allocated" if "pass_gpu_peak_gb" in passed else ""))
         del split, part, spoken                         # the round's sentences go before the select readout's come
         write_traffic_prior(directory, model, prior_dir, start, spec.sha256, git=git, smoke=args.smoke, writer=RUNNER,
-                            fine_tuning={"schema": SCHEMA, "from": str(prior_dir), "base": str(base_dir),
+                            fine_tuning={"schema": SCHEMA, "commanded": args.commanded, "from": str(prior_dir),
+                                         "base": str(base_dir),
                                          "round": round_number, "optimiser": asdict(config),
                                          "traffic_learning_rate": args.traffic_learning_rate,
                                          "samples": args.samples, "passes": args.passes})

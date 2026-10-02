@@ -139,6 +139,7 @@ added three entries (the rows after the performance index's).
 | A wake shortfall's end rounds `counted` a step short in the window loop (10-01) | open | new; see the entry | **yes**: the steps M4-in-windows (R37) trains a wake-shortfall follower on |
 | The labeller fingerprint hashes content code, not only the vocabulary's format (10-02) | open | new; see the entry | no: a check, not a training input — but the fix changes what the stored specs record |
 | The executor cannot fly a batch on CUDA past eight batch sizes: `torch.compile` recompile limit (10-02) | open | new; see the entry | no: every closed loop and readout flies the executor on CPU; only `traffic_labelled --device cuda` (and any other caller passing a CUDA device) fails |
+| Three shared ts modules are listed as runners: `traffic_go_around`, `traffic_window_events`, `training_attitude` (10-02) | open | new; see the entry | no: `run_ts.py --list` only |
 | The edge and executor fingerprints hash row-placement and data-plane code (10-02) | open | new; see the entry | no: a check — but the fix changes what the stored checkpoints and passed records name |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
@@ -722,3 +723,10 @@ each size is a recompile, and the ninth is refused. The same airport on CPU took
 4,500 flights, so 9.2 ran on CPU. **Judgement**: the executor needs no gradients — fly under `torch.inference_mode()` (the
 inference step compiles with `dynamic=True`) or drop `--device` from runners that only ever fly on CPU. `autopilot/` is inside
 the executor's conformance identity (C33): the fix needs one conformance pass, nothing is retrained.
+
+## Three shared ts modules are listed as runners: `traffic_go_around`, `traffic_window_events`, `training_attitude` (2026-10-02)
+
+**Verified** (review of `dev-step9-one-commanded` 9.4.1). `experiments/__main__.py` `NOT_RUNNERS` names the shared modules
+under `experiments/` that are not runners; these three have no `main` and are missing from it, so `run_ts.py --list` shows
+them and `run_ts.py <name>` fails with an AttributeError. **Judgement**: add them to `NOT_RUNNERS` (or have
+`runner_names` keep only modules that define `main`, and test it).

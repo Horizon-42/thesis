@@ -1,6 +1,7 @@
-"""Augmented windows (`experiments/traffic_window_augment`, multi-aircraft design §6.6 step 7 item 6): a flight's times
-moved by whole steps, the flow compressed, a start moved, a flight inserted and commanded, the qualification and the
-cap on the aircraft at once — and the M3 window runner reading augmented windows. On the scene-data fixture."""
+"""Augmented windows (`experiments/traffic_window_augment`, multi-aircraft design §6.6 step 7 item 6 and step 9): a
+flight's times moved by whole steps, the flow compressed, a start moved, a flight inserted and commanded, the
+qualification and the cap on the aircraft at once — one commanded aircraft a window: its leader moved, a flight inserted
+and replayed — and the M3 window runner reading augmented windows. On the scene-data fixture."""
 
 from __future__ import annotations
 
@@ -193,6 +194,71 @@ def test_an_inserted_flight_is_commanded_the_gap_ahead_of_its_follower_and_its_s
     alone, kind, refused = augment_window(window, batch, [0], {}, [LIMIT_S, 900.0], [LIMIT_S] * 2, MANY, ROWS,
                                           np.random.default_rng(1), ANY_ALTITUDE, spec, kinds=("A",))
     assert alone is None and kind == "A" and refused == {"no_flight_to_insert": 10}
+
+
+
+def test_one_commanded_its_leader_moved_whole_steps_is_replayed_once_at_its_moved_time(tmp_path, monkeypatch):
+    """D (one commanded aircraft a window): the replayed flight landing just before the commanded one, in the air at its
+    first predicted step, moved by whole steps in [−60, 60] s but 0 — replayed once, at its moved time."""
+    from ts_transformer.experiments.traffic_augment import TRIES
+    from ts_transformer.experiments.traffic_window_augment import augment_window, leader
+
+    # f1 commanded, f0 landing before it and in the air at its first predicted step, f2 behind it
+    airport, _, spec, window, batch, _ = _window_and_batch(tmp_path, monkeypatch, [0.0, 200.0, 400.0], _keys(1))
+    assert leader(window, "KXXX:f1", STEP_S) == "KXXX:f0"
+    shifts = set()
+    for seed in range(6):
+        got, kind, _ = augment_window(window, batch, [0], {}, [LIMIT_S] * 3, [LIMIT_S] * 3, MANY, ROWS,
+                                      np.random.default_rng(seed), ANY_ALTITUDE, spec, kinds=("D",), commanded="one")
+        assert got is not None and got.kind == kind == "D"
+        assert got.drawn["leader"] == "KXXX:f0" and got.drawn["follower"] == "KXXX:f1"
+        shift = got.drawn["shift_s"]
+        assert shift % STEP_S == 0 and 0 < abs(shift) <= 60.0
+        shifts.add(shift)
+        assert got.window.commanded == window.commanded and got.roles == (None,) and got.moves == (None,)
+        assert got.window.others.count("KXXX:f0") == 1
+        assert np.array_equal(got.window.track("KXXX:f0").presence.times_s,
+                              airport.tracks["KXXX:f0"].presence.times_s + shift)
+    assert len(shifts) > 1
+    # no leader in the air: D never applies; a window draw is never augmented by D
+    (tmp_path / "alone").mkdir()
+    _, _, spec, alone, batch, _ = _window_and_batch(tmp_path / "alone", monkeypatch, [0.0, 3_600.0], _keys(1))
+    assert leader(alone, "KXXX:f1", STEP_S) is None
+    got, kind, refused = augment_window(alone, batch, [0], {}, [LIMIT_S] * 2, [LIMIT_S] * 2, MANY, ROWS,
+                                        np.random.default_rng(0), ANY_ALTITUDE, spec, kinds=("D",), commanded="one")
+    assert got is None and kind == "D" and refused == {"no_leader_to_move": TRIES}
+    with pytest.raises(ValueError, match="augmented by"):
+        augment_window(alone, batch, [0], {}, [LIMIT_S] * 2, [LIMIT_S] * 2, MANY, ROWS, np.random.default_rng(0),
+                       ANY_ALTITUDE, spec, kinds=("D",))
+
+
+def test_one_commanded_an_inserted_flight_is_replayed_ahead_and_counted_as_what_the_augmentation_adds(tmp_path,
+                                                                                                        monkeypatch):
+    """A (one commanded aircraft a window): drawn and timed as a window's A, but replayed — the commanded aircraft's new
+    leader; the cap counts it on the augmented window's side only."""
+    from ts_transformer.experiments.traffic_augment import TRIES
+    from ts_transformer.experiments.traffic_speaking import INSERTED
+    from ts_transformer.experiments.traffic_window_augment import augment_window, qualifies
+
+    airport, signals, spec, window, batch, _ = _window_and_batch(
+        tmp_path, monkeypatch, [0.0, 400.0, 700.0], _keys(1), pool=_keys(2))
+    got, kind, refused = augment_window(window, batch, [0], {"KXXX:f2": 1}, [LIMIT_S, 900.0], [LIMIT_S] * 2, MANY,
+                                        ROWS, np.random.default_rng(1), ANY_ALTITUDE, spec, kinds=("A",),
+                                        commanded="one")
+    assert got is not None and got.kind == kind == "A"
+    key = "KXXX:f2" + INSERTED
+    assert got.window.commanded == ("KXXX:f1",) and got.places == (0,) and got.limits == (LIMIT_S,)
+    assert got.roles == (None,) and key in got.window.others and "KXXX:f2" not in got.window.others
+    follower, inserted = airport.tracks["KXXX:f1"], got.window.track(key)
+    assert inserted.presence.landing_s < follower.presence.landing_s
+    assert qualifies(got.window, {"KXXX:f1": signals["KXXX:f1"]}, STEP_S)
+    # f1 with f0 in the air (two as recorded); the inserted one makes three: over a cap of 2, never over the recorded
+    (tmp_path / "busy").mkdir()
+    _, _, spec, busy, batch, _ = _window_and_batch(tmp_path / "busy", monkeypatch, [0.0, 200.0, 400.0, 3_600.0],
+                                                   _keys(1), pool=_keys(3))
+    got, _, refused = augment_window(busy, batch, [0], {"KXXX:f3": 1}, [LIMIT_S] * 2, [LIMIT_S] * 2, 1, ROWS,
+                                     np.random.default_rng(2), ANY_ALTITUDE, spec, kinds=("A",), commanded="one")
+    assert got is None and refused == {"busier_than_the_data": TRIES}
 
 
 def test_a_moved_start_moves_one_commanded_aircraft_and_what_the_others_read_of_it(tmp_path, monkeypatch):

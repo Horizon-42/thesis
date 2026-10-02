@@ -3,7 +3,8 @@ the kept M4-in-windows round against its start on the val windows).
 
 Reads two `traffic_window_generation` (R34) outputs — ``--first`` and ``--second``, typically two priors — and refuses
 them unless they read the SAME windows the SAME way with the SAME code: every field of their ``window_generation.json``
-that decides what is drawn and how it is read (`SAME`: the code's commit, the split, the draw, the windows an airport, the
+that decides what is drawn and how it is read (`SAME`: the code's commit, the split, how a window's aircraft are commanded,
+the draw, the windows an airport, the
 samples, the temperature, the seed, the augmentation, the executor spec, the sentence artefact, the scenes, the history,
 the readings, the batches and their size, the model's sources read) equal; the same rows (window, aircraft, sample, source) in both, whose fields no
 model decides (`MODEL_FREE`) are equal; and the sources no model reads — the labelled words and the record — equal row for
@@ -54,9 +55,9 @@ from ts_transformer.repo_layout import REPO_ROOT, repo_relative
 
 SCHEMA = "ts-traffic-window-pair-v1"
 #: What decides which windows are read and how: equal in both readouts, or they do not pair.
-SAME = ("schema", "git", "split", "drawn", "windows_per_airport", "samples", "temperature", "seed", "augment_seed",
-        "augmenting", "executor", "instructions", "scenes", "history_s", "readings", "aircraft_steps", "batches",
-        "model_sources", "probes")
+SAME = ("schema", "git", "split", "commanded", "drawn", "windows_per_airport", "samples", "temperature", "seed",
+        "augment_seed", "augmenting", "executor", "instructions", "scenes", "history_s", "readings", "aircraft_steps",
+        "batches", "model_sources", "probes")
 #: A model row's fields no model decides: equal in both readouts.
 MODEL_FREE = ("airport", "commanded", "observed_runway", "augmented", "role", "batch")
 #: A flight's identity ends in its landing time (`flight_scenarios.identity.flight_key`): what its operating day is read from.

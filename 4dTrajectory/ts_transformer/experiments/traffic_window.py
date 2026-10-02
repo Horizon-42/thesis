@@ -9,6 +9,11 @@ the air — before, after, the background, a flight the executor cannot fly — 
 overlap, so a flight is commanded in two of them, once in each. A window's scene runs from its first commanded aircraft's
 first row to the last one's time limit.
 
+**One commanded aircraft a window** (`draw_windows(commanded="one")`, design §6.6 step 9, "9.4 的代码"): the flights are
+drawn as the single-aircraft runners draw them (`replay.draw`), each the one commanded aircraft of its own window, every
+other aircraft in its time replayed — the setting "一架由模型指挥" (design §2.2) in the window loop, which says, flies
+and judges a window with one commanded aircraft as the one-aircraft scene loop did.
+
 What the loop reads is placed by the one-aircraft code (`traffic_speaking`, in the edge features' source hash): each
 commanded aircraft's view of its window is a one-speaking `traffic_speaking.Scene` (`Window.scene`).
 """
@@ -67,6 +72,9 @@ WINDOW_S = 1_200.0
 WINDOW_EVERY_S = 600.0
 #: Windows whose flights are rebuilt at a time while drawing (a rebuild opens the flights' tracks).
 DRAW_CHUNK = 64
+#: How a draw commands a window's aircraft (module docstring): every flight with a sentence entering the window that
+#: flies on its own dynamics, or one flight a window.
+COMMANDED = ("every", "one")
 
 
 @dataclass(frozen=True)
@@ -128,14 +136,15 @@ def window_of(airport: SceneAirport, opens_s: float, commanded: Sequence[str], l
               step_s: float, moved: Sequence[tuple[FlightRows, Track]] = (), left_out: Sequence[str] = ()) -> Window:
     """The window opening at ``opens_s`` with ``commanded`` (each flying ``limits_s`` from its first predicted step;
     ``moved``: flights moved in time or inserted, an augmented window's): everything else in the air from the first one's
-    first row to the end of the last one's time limit replayed — but ``left_out`` (an inserted flight's source)."""
+    first row to the end of the last one's time limit replayed — but ``left_out`` (an inserted flight's source); a moved
+    flight of the airport replayed at its moved time (`Window.track`), an inserted one added."""
     window = Window(airport, opens_s, tuple(commanded), (), tuple(moved))
     firsts = [window.first_step_s(k) for k in commanded]
     start = min(firsts)
     end = max(first + N_LOOK * step_s + limit for first, limit in zip(firsts, limits_s))
     taken = set(commanded) | set(left_out)
     tracks = [window.track(k) for k in airport.tracks if k not in taken] + \
-        [track for _, track in moved if track.key not in taken]
+        [track for _, track in moved if track.key not in taken and track.key not in airport.tracks]
     others = tuple(t.key for t in tracks if t.first_step_s <= end and t.last_step_s >= start)
     return dataclasses.replace(window, others=others)
 
@@ -159,12 +168,17 @@ class WindowDraw:
 
 
 def draw_windows(directory: Path, split: str, spec: VocabularySpec, words: Words, airports: Mapping[str, SceneAirport],
-                 *, per_airport: int, seed: int, step_s: float) -> WindowDraw:
-    """``per_airport`` windows of each airport of ``airports`` (in order), drawn from its tiles (`window_tiles`) in a
-    permutation of one generator seeded ``seed``: in each, the flights that fly on their own dynamics are commanded (each
-    rebuilt once — `replay.draw_flights`, a chunk of tiles at a time — re-read and checked against its stored sentence,
-    as `replay.draw` does); a tile none of whose flights flies is passed over and counted; refused when an airport runs
-    short."""
+                 *, per_airport: int, seed: int, step_s: float, commanded: str = "every") -> WindowDraw:
+    """``per_airport`` windows of each airport of ``airports`` (in order), ``commanded`` (`COMMANDED`) ``every``: drawn
+    from its tiles (`window_tiles`) in a permutation of one generator seeded ``seed``: in each, the flights that fly on
+    their own dynamics are commanded (each rebuilt once — `replay.draw_flights`, a chunk of tiles at a time — re-read and
+    checked against its stored sentence, as `replay.draw` does); a tile none of whose flights flies is passed over and
+    counted; refused when an airport runs short. ``one``: `one_commanded_windows`. What the draw counted names how it
+    commanded."""
+    if commanded == "one":
+        return one_commanded_windows(directory, split, spec, words, airports, per_airport=per_airport, seed=seed)
+    if commanded != "every":
+        raise ValueError(f"a draw commands {COMMANDED}, not {commanded!r}")
     sentences = load_sentences(directory, split, spec)
     stored = {int(index): k for k, index in enumerate(sentences["signal_index"])}
     # the split's signals, loaded once: a flight's arrays are views of the whole split's, and every `draw_flights`
@@ -176,7 +190,8 @@ def draw_windows(directory: Path, split: str, spec: VocabularySpec, words: Words
     rebuilt: dict[str, tuple[Any, Any, str, Any] | None] = {}   # key → (signals, series, group, reading); None: no
     geometries: Mapping[str, Any] = {}
     paths: Mapping[str, Any] = {}
-    counts: dict[str, Any] = {"split": split, "seed": seed, "per_airport": per_airport, "airports": {}}
+    counts: dict[str, Any] = {"split": split, "seed": seed, "per_airport": per_airport, "commanded": "every",
+                              "airports": {}}
     for code, airport in airports.items():
         tiles = window_tiles(airport, step_s)
         order = rng.permutation(len(tiles))
@@ -223,6 +238,20 @@ def draw_windows(directory: Path, split: str, spec: VocabularySpec, words: Words
                          vertical_paths=[paths[m[0].airport] for m in members],
                          approach_ias_mps=[replay.flight_approach_ias_mps(m[1], m[2]) for m in members],
                          groups=[m[2] for m in members], drawn=counts)
+    return WindowDraw(openings, batch, counts)
+
+
+def one_commanded_windows(directory: Path, split: str, spec: VocabularySpec, words: Words,
+                          airports: Mapping[str, SceneAirport], *, per_airport: int, seed: int) -> WindowDraw:
+    """``per_airport`` flights of each airport drawn as the single-aircraft runners draw them (`replay.draw`: the
+    split's labelled flights that fly on their own dynamics, the first of each airport in a permutation seeded
+    ``seed``, each re-read and checked against its stored sentence), each the one commanded aircraft of its own window,
+    opening on its first row's step (``airports``: every airport of the split's)."""
+    batch = replay.draw(directory, split, spec, words, per_airport=per_airport, seed=seed)
+    openings = [(s.airport, airports[s.airport].flights.flights[s.dataset_id].presence.start_s, (s.dataset_id,))
+                for s in batch.signals]
+    counts = {"split": split, "seed": seed, "per_airport": per_airport, "commanded": "one",
+              "airports": dict(sorted(Counter(s.airport for s in batch.signals).items())), "flights": batch.drawn}
     return WindowDraw(openings, batch, counts)
 
 
