@@ -389,7 +389,8 @@
     `dev-step8-go-around` 已合并（`2f2157e8`，执行器核对 `passed-802cec34cfa7`，后端已重启）。难事件场景（8.4，§9 第 35 项）已合并（`ef2eeb54`）。
     显卡队列（7.7 跑完后）：① 选项 1 的小规模训练（`outputs/POOLED/prior/step8_probe_test_20261002.run/`，固定检出 `step8-probe-run`）；
     ② 找难事件（`outputs/POOLED/traffic/hard_events_20261002.run/`：训练日真实 / 扩充各每机场 300 个窗口、选择集 200 个，只跑负责的那架从头，
-    固定检出 `step8-events-run`）；③ 带难事件的小规模训练。
+    固定检出 `step8-events-run`）；③ 带难事件的小规模训练。① 跑完（读数 `readouts/2026-10-02_step8_gpu_option1.zh.md`：模型自己 0 次复飞；
+    按组算优势让代说句子的正优势从 16 % 到 32 %；两轮小规模看不出变化，选中第 0 轮）；② ③ 由 `outputs/POOLED/prior/step8_queue_20261002.run/` 串着跑。
   - 实际做法（已核原文，`docs/literature/go_around/`，设计第 8 步细节第 12 条）：复飞只对在进近上的飞机；复飞后雷达管制下由管制员引导回来再进近，
     飞复飞程序到等待点是没有别的指令时的默认。
 - **7.8 的回溯算法：暂缓**（用户 2026-10-02：算法复杂、费算力）。之前发给用户的四个问题（重新开始时再谈）：
