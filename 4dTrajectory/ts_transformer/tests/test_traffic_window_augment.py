@@ -219,13 +219,22 @@ def test_one_commanded_its_leader_moved_whole_steps_is_replayed_once_at_its_move
         assert np.array_equal(got.window.track("KXXX:f0").presence.times_s,
                               airport.tracks["KXXX:f0"].presence.times_s + shift)
     assert len(shifts) > 1
-    # no leader in the air: D never applies; a window draw is never augmented by D
+    # no leader in the air: D cannot apply — the kind is drawn again among the others (left out when there is none);
+    # a window draw is never augmented by D
     (tmp_path / "alone").mkdir()
     _, _, spec, alone, batch, _ = _window_and_batch(tmp_path / "alone", monkeypatch, [0.0, 3_600.0], _keys(1))
     assert leader(alone, "KXXX:f1", STEP_S) is None
     got, kind, refused = augment_window(alone, batch, [0], {}, [LIMIT_S] * 2, [LIMIT_S] * 2, MANY, ROWS,
                                         np.random.default_rng(0), ANY_ALTITUDE, spec, kinds=("D",), commanded="one")
-    assert got is None and kind == "D" and refused == {"no_leader_to_move": TRIES}
+    assert got is None and kind == "D" and refused == {"no_leader_to_move": 1}
+    redrawn = []
+    for seed in range(8):
+        got, kind, refused = augment_window(alone, batch, [0], {}, [LIMIT_S] * 2, [LIMIT_S] * 2, MANY, ROWS,
+                                            np.random.default_rng(seed), ANY_ALTITUDE, spec, kinds=("D", "B"),
+                                            commanded="one")
+        assert got is not None and got.kind == kind == "B"
+        redrawn.append(refused["no_leader_to_move"])
+    assert set(redrawn) == {0, 1}                      # drawn B at once, or drawn D and drawn again
     with pytest.raises(ValueError, match="augmented by"):
         augment_window(alone, batch, [0], {}, [LIMIT_S] * 2, [LIMIT_S] * 2, MANY, ROWS, np.random.default_rng(0),
                        ANY_ALTITUDE, spec, kinds=("D",))

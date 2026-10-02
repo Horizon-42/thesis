@@ -3,7 +3,11 @@ runner: a window changed so that it holds traffic the data rarely does — only 
 never teacher forcing (§5.1).
 
 **A window's kind is drawn once**, and only its parameters are drawn again when a draw is refused (a kind that took over
-another's refused windows would read a different population); the kinds are a third each (§5.4 item 2, §9 item 7), by
+another's refused windows would read a different population) — but D, which cannot apply to a window whose commanded
+aircraft has no leader in the air (about 45 % of the training days' flights, 2026-10-02), is drawn again among the
+others there, as M4's first runner drew its scenes' kinds again: left out instead, those flights fell out of the round
+(R37's pool ran short); so D is about a fifth of the one-commanded windows, not a third. The kinds are drawn a third
+each (§5.4 item 2, §9 item 7), by
 how the draw commands (`KINDS_OF`, `traffic_window.COMMANDED`): every aircraft of a window commanded — C, B, A, A's
 inserted flight commanded too; one aircraft a window commanded — D, B, A, A's inserted flight replayed along its record
 (the one-aircraft setting's, as M4's first runner had them).
@@ -226,6 +230,14 @@ def augment_window(window: Window, batch: replay.Batch, places: Sequence[int], p
     own = dict(zip(window.commanded, places))
     kind = kinds[int(rng.integers(len(kinds)))]
     refused: Counter = Counter()
+    if kind == "D":
+        followers = [k for k in window.commanded if leader(window, k, step_s) is not None]
+        if not followers:                           # D cannot apply to this window: drawn again among the others
+            refused["no_leader_to_move"] += 1
+            others = [k for k in kinds if k != "D"]
+            if not others:
+                return None, kind, refused
+            kind = others[int(rng.integers(len(others)))]
     for draw in range(1, TRIES + 1):
         place, signals = dict(own), {k: batch.signals[j] for k, j in own.items()}
         limit = {k: limits[j] for k, j in own.items()}
@@ -260,11 +272,8 @@ def augment_window(window: Window, batch: replay.Batch, places: Sequence[int], p
             move[key], role[key], limit[key] = start, "moved", moved_limits[j]
             drawn = {"moved": key, **dataclasses.asdict(start)}
         elif kind == "D":
-            follower = window.commanded[int(rng.integers(len(window.commanded)))]
+            follower = followers[int(rng.integers(len(followers)))]
             lead = leader(window, follower, step_s)
-            if lead is None:
-                refused["no_leader_to_move"] += 1
-                continue
             reach = int(SHIFT_S // step_s)
             steps = int(rng.integers(-reach, reach))
             dt = step_s * float(steps + 1 if steps >= 0 else steps)
