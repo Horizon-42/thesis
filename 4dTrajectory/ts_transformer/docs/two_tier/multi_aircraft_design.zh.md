@@ -265,7 +265,7 @@
 2. 同一时间步里，本机的输入、多机注意力读的邻机隐状态、边特征（§2.5.5）、失去间隔的判定，读的都是这一时刻。不挂，不推，不往回推。
 3. 闭环里由执行器飞的飞机从它的第 0 行起飞，此后每个状态都在时间步上。什么都不挪。
 4. 照记录回放的飞机，在时间步上就是它的行。判定要在两个时间步之间的时刻比（前机过入口时），才在行之间插值。
-5. 扩充把一架飞机整体挪动时，只挪整数个时间步（`experiments/traffic_augment.py` `moved` 拒绝其他挪法）。
+5. 扩充把一架飞机整体挪动时，只挪整数个时间步（`experiments/traffic_window_augment.py` `moved` 拒绝其他挪法）。
 
 **为什么重新取行**（§9 第 13 项）：
 
@@ -1045,9 +1045,11 @@ M2 不改单机的代码路径和产物：现行的 v3 检查点（base、landin
 | 6 | M4 runner：每轮真实 200 + 扩充 200（每机场）× `K` = 8。优势按同一架、同一场景比。奖励项 + 0.04 拉回 base + 1 数据项（M2 的场景样本）。交通注意力的学习率按 §8。选轮与护栏按 §6.2。计分办法见步 6.4 | `experiments/` 新 runner（场景打分的 tuner 放这里：场景批要边特征）；`prior/train.py` 的 `RewardTuner` 加两个不改行为的钩子（数据项、参数组） | traffic 模型 | 完成 |
 | 7 | 「窗口内由模型指挥」：多架同时由模型指挥；扩充 C；M3、M4 在这个设置上再做一遍；再量失去间隔还救不救得回来（7.7），按结果换训练方法（7.8，暂缓，§9 第 31 项）。细节见步 7 | 同上 | 第二遍 M3 / M4；7.7 的读数；7.8 的模型 | 7.1–7.7 完成；7.8 暂缓 |
 | 8 | 复飞：让模型会用词表里已有的复飞词避开失去间隔。进近列的转换规则（解码屏蔽）、复飞后的航向词照飞与每海里 200 ft 的爬升（执行器两处）、量复飞（R40）、新奖励、试探样本。细节见步 8 | 同上；执行器改两处，过执行器核对 | 会复飞的 traffic 模型 | 8.1–8.4 完成；训练进行中 |
-| 9 | 在对齐的场景上重做（第 2 阶段，§2.1）：M0 在 v6 上重量；基线只量验证集；先一架由模型指挥、学会复飞，再窗口。细节见步 9 | `experiments/traffic_window_reward.py`（R37 加一架由模型指挥的抽法，我建议） | M0 读数、基线、两段训练与读数 | 计划写好，待用户确认 9.8 |
+| 9 | 在对齐的场景上重做（第 2 阶段，§2.1）：M0 在 v6 上重量；基线只量验证集；先一架由模型指挥、学会复飞，再窗口。细节见步 9 | `experiments/traffic_window.py` `draw_windows(commanded="one")`、R34 / R37 `--commanded one`；单机模式代码归档（9.4 的代码） | M0 读数、基线、两段训练与读数 | 9.2 做完；9.4 的代码写完、待合并（9.4 的代码，进度） |
 
 #### 开发步 1–5 的设计要点
+
+（2026-10-02：开发步 1–6 写的一架由模型指挥的代码——场景说话器、场景闭环、R31、扩充、R32 与它的打分器——已归档 `archive/one_commanded_scene_2026_10/`；这个设置现在是窗口闭环里只指挥一架的窗口，见步 9「9.4 的代码」。下面是当时的设计。）
 
 **步 1 交通注意力**（`prior.model.with_traffic`；检查点 v5，契约 C37）：
 
@@ -1082,7 +1084,7 @@ M2 不改单机的代码路径和产物：现行的 v3 检查点（base、landin
 
 #### 步 6：M4 runner 的细节
 
-用户 2026-09-28 让开始 M4。运行代码：`experiments/traffic_reward.py`（R32）、`experiments/traffic_tuner.py`。
+用户 2026-09-28 让开始 M4。运行代码：`experiments/traffic_reward.py`（R32）、`experiments/traffic_tuner.py`（2026-10-02 归档，轮次做法留在 `experiments/traffic_rounds.py`，打分器并进 `traffic_window_tuner`）。
 
 **步 6.1 每轮的场景**：
 
@@ -1282,7 +1284,7 @@ M2 不改单机的代码路径和产物：现行的 v3 检查点（base、landin
 5. 执行器判结束的（落地、超时等）照常离开场景。
 6. 不让它消失：消失等于给别的飞机腾出空间，变相奖励失败。
 
-**「一架由模型指挥」是窗口闭环的特例**：窗口里只有一架由模型指挥时，到判定的结束为止，说的词、飞的状态、结局与 `traffic_speaking.SceneLoop` 加 `judged` 逐位相同（测试）。新代码不改边特征源码指纹（`traffic_scene_data.EDGE_SOURCES`）里的任何文件，已训练的 traffic 模型照样能读。
+**「一架由模型指挥」是窗口闭环的特例**：窗口里只有一架由模型指挥时，到判定的结束为止，说的词、飞的状态、结局与 `traffic_speaking.SceneLoop` 加 `judged` 逐位相同（测试）。2026-10-02 场景闭环归档（步 9），这些测试换成：窗口里没有别的飞机时与单机自由生成（`prior_free_generation.speak_and_fly`）逐位相同；每架在它的路径事后判定结束的地方结束（`traffic_speaking.judged`）。新代码不改边特征源码指纹（`traffic_scene_data.EDGE_SOURCES`）里的任何文件，已训练的 traffic 模型照样能读。
 
 **实现约定**：
 
@@ -1300,7 +1302,7 @@ M2 不改单机的代码路径和产物：现行的 v3 检查点（base、landin
 
 **核对**：
 
-- 每个窗口一架时，到判定的结束为止与 `SceneLoop` + `judged` 逐位相同。
+- 每个窗口一架时，到判定的结束为止与 `SceneLoop` + `judged` 逐位相同（场景闭环归档后改为与单机自由生成、事后判定比，见上）。
 - 执行器分组与每架各一个执行器飞出的状态逐位相同。
 - 被判结束的飞机不再说话、继续飞。
 - 两架都由模型指挥时，前面的先说；后面那架的速度屏蔽读得到前面那架这个时间步刚说的词。
@@ -1901,14 +1903,29 @@ runner R40 `go_around_census`（分支 `dev-go-around`）。读数 `readouts/202
 **试探与遍数**（用户 2026-10-02，§9 第 37 项）：每轮 3 遍，代说的复飞词每遍都加交叉熵。R37 拒绝「试探 + 多遍」的那道检查去掉。
 代价写明：这一项没有截断的比那样的上限，3 遍就把代说的词推 3 次（8.10 第 5 条）。
 
+**进度**（分支 `dev-step9-one-commanded`，2026-10-02）：
+
+1. 9.4.1 `6eac48df`：轮次做法提到 `traffic_rounds.py`；R37 的「试探 + 多遍」拒绝去掉。opus 审查：搬动逐位相同；修了测试的导入、试探遍数测试钉住它到达的错误（`e05507bb`）。
+2. 9.4.2–9.4.3 `e05507bb`：抽法、扩充 D 和照记录回放的 A。opus 审查：窗口模式逐位不变（随机数、扩充次序）；按审查改了：
+   - R36 的读数检查加 `commanded`，一架由模型指挥的读数不会被当成窗口发布；
+   - R43 的 schema 升到 v4（头里多了抽法和 D 的拒绝原因）；
+   - R37 不许 `--commanded one` 与难事件同用（难事件是每架都由模型指挥的窗口）；
+   - 扩充种类的次序恢复成 C、B、A 在前（窗口模式的读数逐字节不变）。
+3. 9.4.4：归档（见上表）；窗口打分器直接继承单机的 `RewardTuner`（原计划在 9.4.1，挪到这里与归档一起做）；比场景闭环的测试换成比单机自由生成、
+   事后判定、单机打分器。
+4. 要在小规模里看的：一架由模型指挥时，没有前机的航班抽到 D 就被放弃（一个窗口的做法只抽一次）。R37 的候选只多 25 %（`POOL_FACTOR`），
+   安静的机场可能不够、这一轮被拒（会报错，不会悄悄少）。
+5. 待用户定：9.4 训出的模型叫什么。发布时导出器按方法的 schema 命名，R37 的都叫 window；`fine_tuning` 里记了 `commanded`，可以分开。
+6. D 和 A 的飞机按执行器规格的时限飞，只有 B 挪了起点的用第二阶段的时限，与 R32 实际飞的相同。
+
 **开发顺序**（分支 `dev-step9-one-commanded`，从 `dev-two-tier` 起；每步有测试；第 1、3、4 步后各一次 opus 审查）：
 
 | 开发步 | 写什么 | 测试 |
 |---|---|---|
-| 9.4.1 | 轮次做法提到 `traffic_rounds.py`；`WindowRewardTuner` 不再继承场景打分器；试探 + 多遍放开 | R37、R39 的测试原样过；打分器与单机 `RewardTuner` 相同 |
+| 9.4.1 | 轮次做法提到 `traffic_rounds.py`；试探 + 多遍放开 | R37、R39 的测试原样过 |
 | 9.4.2 | `--commanded one` 抽法（R34、R37、R39、R41） | 默认抽法逐位不变；一架一窗口的航班与 `replay.draw` 相同 |
 | 9.4.3 | 扩充 D、「插一架、照记录回放」 | 计数、整步、资格、上限 |
-| 9.4.4 | 归档；`traffic_speaking` 去掉场景闭环；换掉比场景的测试 | ts 全套测试 |
+| 9.4.4 | 归档；`traffic_speaking` 去掉场景闭环；`WindowRewardTuner` 直接继承 `RewardTuner`；换掉比场景的测试 | ts 全套测试；打分器与单机 `RewardTuner` 相同 |
 | 9.4.5 | 文档（runners、索引、本节）；冒烟（每机场几架、两轮、`--resume`） | — |
 
 **9.5 训练第二段：窗口内由模型指挥**：
@@ -2370,15 +2387,13 @@ runner R40 `go_around_census`（分支 `dev-go-around`）。读数 `readouts/202
 | 边特征源码指纹（七个文件 + 两张 CWT 表） | `experiments/traffic_scene_data.py:56` `EDGE_SOURCES`，`:62` `edge_source_sha256` |
 | 场景样本（§2.3） | `prior/scene_data.py:52` `SceneSample`，`:91` `placed`；`experiments/traffic_scene_data.py:224` `build_split` |
 | 交通注意力、检查点 v5（§2.5.3） | `prior/model.py:138` `TrafficAttention`，`:430` `with_traffic`；`:326` `Prior.encode`（`pairs_per_block`） |
-| 场景说话器（「一架由模型指挥」） | `prior/scene_speaker.py:50` `SceneSpeaker`，`:124` `scene_inputs` |
-| 窗口说话器（「窗口内由模型指挥」） | `prior/window_speaker.py:56` `WindowSpeaker`，`:209` `speak`（`given=`），`:337` `window_inputs` |
-| 场景闭环、判定 | `experiments/traffic_loop.py:308` `Loop`，`:223` `Judging`；`experiments/traffic_speaking.py:330` `SceneLoop`，`:276` `edge_rows`，`:458` `judged` |
-| 窗口闭环、窗口 | `experiments/traffic_window.py:331` `WindowLoop`，`:318` `Given`，`:73` `Window`，`:66` `WINDOW_S`，`:67` `WINDOW_EVERY_S`，`:1034` `window_places`，`:1051` `window_edges` |
-| 扩充（「一架由模型指挥」） | `experiments/traffic_augment.py:62` `KINDS`，`:123` `augment` |
-| 扩充（窗口内） | `experiments/traffic_window_augment.py:79` `KINDS`，`:164` `augment_window` |
-| M4 的一架设置：打分与选轮 | `experiments/traffic_tuner.py:192` `SceneRewardTuner`；`experiments/traffic_reward.py:618` `guarded_choice`，`:384` `Speakers` |
-| M4 在窗口里：说话、打分、读数 | `experiments/traffic_window_reward.py:210` `WindowSpeaking`，`:568` `main`；`experiments/traffic_window_tuner.py:323` `WindowRewardTuner`，`:48` `PAIRS_PER_BLOCK`，`:164` `window_advantages` |
-| 倒回重说 R43 | `experiments/traffic_window_rewind.py:87` `SCHEMA`，`:89` `OFFSETS_S`，`:191` `events_of`，`:217` `branches_of` |
+| 窗口说话器 | `prior/window_speaker.py:60` `WindowSpeaker`，`:213` `speak`（`given=`），`:341` `window_inputs` |
+| 一架看到的场景、屏蔽、判定 | `experiments/traffic_loop.py:308` `Loop`，`:223` `Judging`；`experiments/traffic_speaking.py:111` `Scene`，`:174` `speaking_masks`，`:254` `edge_rows`，`:299` `speaking_aircraft`，`:328` `judged` |
+| 窗口闭环、窗口、抽法 | `experiments/traffic_window.py:360` `WindowLoop`，`:347` `Given`，`:81` `Window`，`:71` `WINDOW_S`，`:72` `WINDOW_EVERY_S`，`:77` `COMMANDED`，`:170` `draw_windows`，`:244` `one_commanded_windows`，`:1064` `window_places`，`:1081` `window_edges` |
+| 扩充 | `experiments/traffic_window_augment.py:100` `KINDS`，`:101` `KINDS_OF`，`:138` `moved`，`:177` `leader`（D），`:209` `augment_window` |
+| 轮次做法：说话进程、选轮 | `experiments/traffic_rounds.py:98` `Speaking`，`:165` `Speakers`，`:285` `guarded_choice`，`:325` `paired_difference` |
+| M4 在窗口里：说话、打分、读数 | `experiments/traffic_window_reward.py:214` `WindowSpeaking`，`:579` `main`；`experiments/traffic_window_tuner.py:366` `WindowRewardTuner`，`:508` `sweeps`，`:65` `PAIRS_PER_BLOCK`，`:195` `window_advantages` |
+| 倒回重说 R43 | `experiments/traffic_window_rewind.py:88` `SCHEMA`，`:90` `OFFSETS_S`，`:192` `events_of`，`:218` `branches_of` |
 | 难事件的事件池（步 8.11） | `experiments/traffic_window_events.py:73` `event_pool`，`:132` `pick` |
 | 复飞：进近列的转换（步 8.6） | `instructions/grammar.py:53` `approach_words_allowed`；`prior/generate.py:244` `vocabulary_allowed`（进近列在 `:265`） |
 | 复飞：奖励的常量和算法（步 8.9） | `experiments/traffic_go_around.py:48`–`:66` 常量，`:115` `after_go_around` |

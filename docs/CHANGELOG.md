@@ -1,5 +1,25 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-02 — Two-tier multi-aircraft 9.4: one commanded aircraft a window; the one-aircraft scene mode archived
+
+- The user (design §9 item 37): R37 takes a one-commanded draw, and the one-aircraft mode code this made redundant goes
+  ("reuse code in a good structure"). `traffic_window.draw_windows(commanded="one")` draws flights as `replay.draw` does,
+  each the one commanded aircraft of its own window, every other aircraft replayed; R34 / R37 `--commanded {every,one}`
+  (schemas `ts-traffic-window-generation-v7`, `ts-traffic-window-reward-v5`; R41 pairs only readouts drawn alike; R43 v4).
+  Augmentation `KINDS_OF`: windows C/B/A as before (byte-identical), one commanded D (its replayed leader moved by whole
+  steps in [-60, 60] s but 0) / B / A (a flight inserted and replayed).
+- Archived to `ts_transformer/archive/one_commanded_scene_2026_10/` (modules and tests unmodified, README, runner entries
+  R31–R33): `traffic_free_generation` (R31), `traffic_reward` (R32), `traffic_reward_readout` (R33), `traffic_reward_val`,
+  `traffic_tuner`, `traffic_augment`, `prior/scene_speaker.py` and the scene loop of `traffic_speaking`. Kept, moved:
+  the round protocol → `experiments/traffic_rounds.py`; `WindowRewardTuner` inherits `prior.train.RewardTuner` with the
+  scene tuner's shared parts; `moved` / `SHIFT_S` / `GAP_RANGE` / `TRIES` → `traffic_window_augment`; `BLOCK_STEPS` →
+  `window_speaker`; the exporter mirrors R32's schema to name its published rounds.
+- Probes may sweep several passes (the user: three passes, the probe word learned in each).
+- Tests that compared the window loop with the scene loop now compare it with single-aircraft free generation
+  (`speak_and_fly`, bit for bit, a window with nothing else in it), the path read afterwards (`judged`), and the
+  single-aircraft `RewardTuner` (distance to the reference, to 1e-5).
+- The edge features' source hash changes (`traffic_speaking.py` is in it); stored traffic priors already refused on v6.
+
 ### 2026-10-02 — Two-tier multi-aircraft step 9.2: M0 re-measured on sentence artefact v6
 
 - Census R24, labelled flight R26 and the two masks R27 re-run on `instruction_language/v6_20261002` (rows on the UTC

@@ -408,24 +408,14 @@ on steps with a leader / busy, matched on phase and airport (formal `interaction
 (`inference/scene_edges.py`: motion from the row before, never the fitted velocities), checkpoint `ts-prior-checkpoint-v4`
 pinned to the edge code by `edge_source_sha256` (R29). `traffic_scene_readout` reads it against base on the select days — scene
 − base and scene − alone (attention between aircraft cut) on leader / busy steps (formal `scene_readout_20260928` and, with 4 batches
-per update, `scene_readout_acc4_20260928`: better nowhere, 0.2880 / 0.2868 vs 0.2839; the M1 gap stays) (R30). `traffic_free_generation` is M3 — augmented with a zero traffic attention
-speaking to one aircraft of each scene (`experiments/traffic_speaking.py`, `prior/scene_speaker.py`), read beside the
-same model alone, the labelled words and the record, all judged in the scene; `--augment-seed` on augmented scenes
-(`experiments/traffic_augment.py`: leader moved, start moved, flight inserted) (formal `free_generation_20260928`: 11.5 % lost
-separation vs 4.9 % labelled, 2.6 % recorded; vectored 21.6 %) (R31). `traffic_reward` is M4 — the traffic post-training
-from augmented + a zero traffic attention, real and augmented training scenes, reward = landed without losing separation,
-each sentence scored in its scene by the speaker's own layout and edge code (`experiments/traffic_tuner.py`), base alone,
-M2's scene samples as the data term; runs round by round (`--rounds k`, then `--resume`: per-round streams, the optimiser's
-state saved per round, refused on another config or commit), spoken by `--speakers` forked processes (each loop batch its own
-stream: the sentences do not depend on their number); `--passes` sweeps against the model frozen once, the round chosen against
-paired standard errors (R32). `traffic_reward_readout` reads a finished M4 run round by round from its files — select numbers per side, kind and approach type,
-where the reward term's signal comes from, round 0 against the last on the same draws (the select readout is seeded alike every round:
-paired, not repeated tries) beside M3's labelled and recorded readings (R33).
+per update, `scene_readout_acc4_20260928`: better nowhere, 0.2880 / 0.2868 vs 0.2839; the M1 gap stays) (R30).
 `traffic_window_generation` is M3's second pass — every aircraft of a 20-minute window commanded at once
 (`experiments/traffic_window.py` WindowLoop, `prior/window_speaker.py`: rounds from the front of the approach clock,
 executors grouped by first spoken step, the judge run as it flies, ended aircraft flying on silent), beside alone /
 labelled / recorded, all judged in the window; `--augment-seed` on augmented windows (`experiments/traffic_window_augment.py`:
-the flow compressed, a start moved, a flight inserted and commanded; capped at the airport's busiest training step) (R34).
+the flow compressed, a start moved, a flight inserted and commanded; capped at the airport's busiest training step);
+`--commanded one` reads the setting "一架由模型指挥" there — a window a flight (`replay.draw`'s), the others replayed, augmented
+by its leader moved / its start moved / a flight inserted and replayed (`KINDS_OF`) (R34).
 `prior_generation_records` flies a free-generation readout's STORED sentences again (the readout's draw and chunks; every
 sentence must reproduce its readout row) and writes them as evaluation records per sample — ADE / FDE from row `N_LOOK`
 against the observed flight, the evaluation's pass rate over every sentence, best of the samples; an augmented start has no
@@ -439,10 +429,13 @@ scores its lateness × speed; the arrival endpoint error is where it landed (R38
 module — a model-free window set (`traffic-windows`: 20 select windows an airport of the readouts' draw, by size) and a
 `window-generation` overlay per prior on its OWN draws (no readout re-run; `--readout` only copies summaries); the landings
 are the aircraft whose own end is a landing; the M4 model is named `traffic`, M4 in windows (R37) `window` (R36).
-`traffic_window_reward` is M4 in windows — R32's rounds over window samples: every commanded aircraft rewarded, its advantage
+`traffic_window_reward` is M4 in windows — M4's round protocol (`experiments/traffic_rounds.py`: the speaking processes,
+per-round streams, `--resume`, the guarded choice on paired standard errors) over window samples: every commanded aircraft
+rewarded, its advantage
 against its own samples, each sample scored whole as the speaker read it (`experiments/traffic_window_tuner.py`, the one layout
-`window_inputs` / `window_edges`, encoded in blocks of steps so every window fits the GPU; one commanded aircraft a window trains
-as R32 does; checks the formal size before it speaks; `--events` adds hard events from training-day R43 runs — the other
+`window_inputs` / `window_edges`, encoded in blocks of steps so every window fits the GPU; checks the formal size before it
+speaks; `--commanded one` trains in the one-commanded setting (design §6.6 step 9, refused with hard events); probes may sweep
+several passes; `--events` adds hard events from training-day R43 runs — the other
 aircraft given their original words, only the answered one trained — and `--select-events` reads select-day ones every
 round, `experiments/traffic_window_events.py`) (R37).
 `traffic_window_reward_readout` reads such a run round by round, running or ended, from its files — paired against round 0
