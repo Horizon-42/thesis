@@ -114,7 +114,7 @@ def own_rows(rows: int, device: torch.device, start: int = 0) -> torch.Tensor:
 
 def self_edges(batch: int, aircraft: int, rows: int, device: torch.device) -> torch.Tensor:
     """``[B, T, A, A, len(SINGLE_EDGE_FEATURES)]`` of scenes with no relation but each aircraft's to itself."""
-    eye = torch.eye(aircraft, device=device)[None, None, :, :, None]
+    eye = torch.eye(aircraft, device=device)[None, None, :, :, None] # add new dimension with lenght 1
     return eye.expand(batch, rows, aircraft, aircraft, 1).contiguous()
 
 
@@ -156,8 +156,11 @@ class TrafficAttention(nn.Module):
         [B, A, R, d]."""
         batch, aircraft, rows, d = x.shape
         head = d // self.heads
-        y = self.norm(x).transpose(1, 2)
+        # x: hidden state come from the "time attention", it only contains infomation from last time step in the scene
+        y = self.norm(x).transpose(1, 2) # transpose from [B, A, R, d] -> [B, R, A, d]; R is parallel rows; For training, it >1, for predicting, R==1
+        # slice the tensor on dim 3, from [B, R, A, 3, heads, head] to [B, R, A, heads, head]*3
         q, k, v = self.qkv(y).reshape(batch, rows, aircraft, 3, self.heads, head).unbind(dim=3)
+        
         scores = torch.einsum("btihc,btjhc->bthij", q, k) / math.sqrt(head)
         scores = scores + self.bias(edges).permute(0, 1, 4, 2, 3)
         others = (present.transpose(1, 2)[:, :, None, None, :]
