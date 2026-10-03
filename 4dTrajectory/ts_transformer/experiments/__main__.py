@@ -18,9 +18,9 @@ if __package__ in (None, ""):  # run by path: the package's parent goes on the p
         sys.path.insert(0, str(_PACKAGE_PARENT))
 
 PACKAGE = "ts_transformer.experiments"
-#: Modules here that are not runners: shared code the runners import (a readout's code version: step 9.9 on). The
-#: multi-aircraft loop's shared modules moved to `archive/two_tier_v3_2026_10/` (two-tier v4, stage A0).
-NOT_RUNNERS = {"__main__", "code_version", "support"}
+#: Modules here that are not runners: shared code the runners import. The multi-aircraft loop's shared modules and a
+#: readout's code version moved to `archive/two_tier_v3_2026_10/` (two-tier v4, stage A0).
+NOT_RUNNERS = {"__main__", "support"}
 
 
 def runner_names() -> list[str]:

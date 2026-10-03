@@ -685,15 +685,15 @@ def test_the_instructions_package_sits_below_the_models():
                 assert module in INSTRUCTIONS_MAY_IMPORT, f"{rel} imports {name}"
 
 
-def test_only_the_runners_the_executor_and_the_prior_reach_the_instructions_package():
-    """The instruction language is consumed by the runners, the executor (`autopilot/`), which flies its words,
-    and the prior (`prior/`), which learns to say them (framework document §2)."""
+def test_only_the_runners_and_the_executor_reach_the_instructions_package():
+    """The instruction language is consumed by the runners and the executor (`autopilot/`), which flies its words
+    (framework document §2; the prior, which learns to say them, comes back in stage B of two-tier v4)."""
     for path in _module_files():
         if path.is_relative_to(INSTRUCTIONS):
             continue
         rel = path.relative_to(TS_DIR).as_posix()
         if any(name.split(".")[0] == "instructions" for name in _imported_names(path)):
-            assert rel.startswith(("experiments/", "autopilot/", "prior/")), f"{rel} imports the instructions package"
+            assert rel.startswith(("experiments/", "autopilot/")), f"{rel} imports the instructions package"
 
 
 AUTOPILOT = TS_DIR / "autopilot"

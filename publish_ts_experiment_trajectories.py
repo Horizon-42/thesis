@@ -1778,7 +1778,8 @@ def run_executor_publication(plan: ExecutorPublicationPlan, *, dry_run: bool) ->
 # ── a free-generation readout's records (two-tier: the prior speaks, the executor flies) ─────────────────────
 
 #: MIRRORS of the records runner's names (`experiments.prior_generation_records.RECORDS_SCHEMA`, `PREDICTORS`,
-#: `HORIZON`) — not imported, as the executor's above; `test_the_generation_names_mirror_the_runner` pins them.
+#: `HORIZON`) — not imported, as the executor's above. The runner is archived (`archive/two_tier_v3_2026_10/`, two-tier
+#: v4) and so is the test that pinned these (`test_the_generation_names_mirror_the_runner`): unpinned until it is back.
 GENERATION_RECORDS_SCHEMA = "ts-prior-generation-records-v1"
 GENERATION_PREDICTORS = {"labelled": "executor", "prior": "prior"}
 GENERATION_HORIZON = "sentence"
