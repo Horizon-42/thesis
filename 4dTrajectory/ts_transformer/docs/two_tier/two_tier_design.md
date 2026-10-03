@@ -36,7 +36,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D8 | The heading grid is aligned to the course of the runway in force (§3.3) | Decided | User, 2026-10-03 |
 | D9 | The executor laws in §5.7 are removed, the glidepath floor included | Decided | User, 2026-10-03 |
 | D10 | Go-around is an event: "abandon this approach". It does not change the runway in force; a runway word ends it. Its effects on the executor, the judge and the masks: §3.2 | Decided | User, 2026-10-03 |
-| D11 | The labeller stage includes an ablation of the row interval: 2 s now, larger intervals possible (§4.8) | Decided. Values and criteria: O10 | User, 2026-10-03 |
+| D11 | The labeller stage includes an ablation of the row interval: 2 s now, larger intervals possible (§4.8) | Decided. Values: D25. Criteria: O10 | User, 2026-10-03 |
 | D12 | No runway lock. While G is false the model can change the runway at any time; the judge reads R at the crossing (§3.2) | Decided (the user considered a lock that a go-around lifts, and chose no lock) | User, 2026-10-03 |
 | D13 | The prior gets the height above the published glidepath of R at each step (§6.1) | Decided (was O3) | User, 2026-10-03 |
 | D14 | While G is true: "no level-off" is not permitted (rule 5), and the procedure mask "no climb below the entry height" does not apply (§3.7) | Decided | User, 2026-10-03 |
@@ -48,6 +48,9 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D20 | This design is a new version: it is developed on a new branch in a new worktree. Artefacts `v1`–`v6`, the executor specs and every prior are superseded and are not kept readable. The running experiments keep their own checkouts | Decided | User, 2026-10-03 |
 | D21 | Identities bind format and data rules only. A code identity is a behaviour check on fixed inputs, never a hash of source bytes; data are identified by their flights, never by the bytes of a manifest (§9.2) | Decided (was O13) | User, 2026-10-03 |
 | D22 | Altitude words use the grid "optimal 40 levels" of the altitude-grid proposal: 60 m steps from 0 to 1,260 m, 120 m steps to 2,700 m, 450 m steps to 5,400 m (§3.4) | Decided | User, 2026-10-03 |
+| D23 | How the prior gets the frame of R (D5) and the glidepath height (D13). The own state of the aircraft has no frame. Every position and direction is in the candidate vectors, each in the frame of its own candidate. R is an input only as its candidate vector. No input of a row up to the first predicted step is computed from R. Each candidate vector has the height above its own glidepath; the value of R is the input of D13 (§6.1) | Decided | User, 2026-10-03 |
+| D24 | A candidate vector has no constant of its runway: no length, no elevation, no layout relative to R. Such a value comes back only as a variant that O7 selects (§6.1) | Decided | User, 2026-10-03 |
+| D25 | The ablation reads Δ = 2, 4, 8 s: each divides the 16 s observation of the prior. At each Δ, the motion inputs of a row come from the 2 s before the row (§4.8, §6.1) | Decided (the values of O10) | User, 2026-10-03 |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -58,7 +61,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | O7 | Selection of designs by leave-one-airport-out (train on four airports, read the fifth) | Discuss with §7 | 7 |
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
 | O9 | Finer grids near the runway course and near the glidepath angle | Decided by D6: measure first | 3.3, 3.5 |
-| O10 | The row intervals of the ablation and how to compare them | Proposal: 2, 4, 6, 8 s. Criteria by the user after the design is settled (D7) | 4.8 |
+| O10 | How to compare the row intervals of the ablation (the values are D25: 2, 4, 8 s) | Criteria by the user after the design is settled (D7) | 4.8 |
 | O12 | Climb classes: keep one, add more, or set the climb to the missed-approach gradient | Proposal: keep one climb class; its value from the measurement with D15; a second class only if the climb angles have two clear groups | 3.5 |
 
 ### 0.3 Implementation
@@ -75,8 +78,8 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 1. Stage A (§14.2): write the vocabulary, the labeller, the identities, the executor, the judge and the replay on the
    branch `dev-two-tier-v4`, milestone by milestone, each with tests and a code review. Another agent does this.
 2. Claude checks the result of stage A against this document (§14.6).
-3. The user sets the criteria (D7) and the values of O2, O10, O12. Then the formal artefact is built, and the replay
-   gate is read at each row interval of the ablation (D11). The same readings answer D6 / O9 (are the grids sufficient).
+3. The user sets the criteria (D7, O10) and the values of O2 and O12. Then the formal artefact is built, and the
+   replay gate is read at each row interval of the ablation (D11, D25: 2, 4, 8 s). The same readings answer D6 / O9 (are the grids sufficient).
 4. Stages B, C, D (§14.3–§14.5): the prior from the start, the post-training and the multi-aircraft work, the frontend.
 5. The user merges the branch.
 
@@ -109,7 +112,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 
 | Term | Meaning |
 |---|---|
-| Row, step | One line of a sentence. A row is Δ = 2 s now, on even UTC seconds (artefact `v6_20261002`); the ablation of §4.8 reads larger Δ |
+| Row, step | One line of a sentence. A row is Δ = 2 s now, on even UTC seconds (artefact `v6_20261002`); the ablation of §4.8 also reads Δ = 4 and 8 s (D25) |
 | Sentence | The rows of one flight, from its first row to the row before the landing |
 | Column | One kind of word in a row. A row has five columns (§3.1) |
 | Word | The value of one column in one row. The value "unchanged" means that the column says nothing new |
@@ -151,7 +154,7 @@ of the table. A later column sees the values that the earlier columns said in th
 
 **Meaning of a runway word.** "Expect runway k." The executor uses R for three things only: the conversion of the
 heading words (§5.4), the course of a go-around (§5.4), and the distance for the deceleration to the approach speed
-(§5.6). The judge uses R for the landing (§5.8). The prior uses R as the frame of its inputs (§6.1). The multi-aircraft
+(§5.6). The judge uses R for the landing (§5.8). The prior gets R as the candidate vector of R (§6.1, D23). The multi-aircraft
 loop uses R for the relations between aircraft (§8).
 
 **Regulation.** Approach control gives the expected approach and runway at the first contact (FAA JO 7110.65BB
@@ -454,7 +457,8 @@ the words on a Δ grid:
    previous Δ row. Inside one interval, only the last word of a column stays.
 3. The first Δ row says all five columns. The grammar rules (§3.7) are checked again on the Δ grid.
 
-Thus one reading gives every Δ. Δ must be a multiple of 2 s.
+Thus one reading gives every Δ. Δ must be a multiple of 2 s, and it must divide the 16 s observation of the prior
+(D25): the first predicted step is a Δ row.
 
 **What a larger Δ changes (to read in the ablation; no criteria here, D7):**
 
@@ -463,10 +467,17 @@ Thus one reading gives every Δ. Δ must be a multiple of 2 s.
 | Heading words | In a 3°/s turn the track moves 12° in 4 s, so one word jumps two or three 5° classes. The lead L = 4 s is one row at Δ = 4 s and less than one row above it |
 | Executor | The cycle stays 1 s. It hears the words at each Δ row. The heading law (arrive L after the hearing, the stopping rate) flies larger steps |
 | Final approach | With D2 and D3 the model corrects the final only every Δ; an error grows for a longer time before the next word |
-| Prior | Fewer steps for each flight and more changes for each step. The observation stays 16 s (`N_LOOK` = 16 s / Δ rows). A loss for each step cannot be compared between two Δ; a loss for each flight or each second can |
+| Prior | Fewer steps for each flight and more changes for each step. The observation stays 16 s (`N_LOOK` = 16 s / Δ rows: 8, 4, 2). The motion inputs do not change with Δ: they come from the 2 s before the row (D25, §6.1). A loss for each step cannot be compared between two Δ; a loss for each flight or each second can |
 | Multi-aircraft | The scene step is Δ |
 
-**Values (O10).** Proposal: Δ = 2, 4, 6, 8 s. The user sets the values and the criteria after the design is settled.
+**Values (D25).** Δ = 2, 4, 8 s. A Δ of 6 s is not used: 16 s is not a whole number of 6 s rows. The user sets the
+criteria after the design is settled (O10, D7).
+
+**Why the motion inputs do not change with Δ (D25).** If the motion of a row were the displacement since the row before,
+it would be the mean over Δ. In a 3°/s turn, the direction of that mean is approximately 12° behind the track at
+Δ = 8 s (3° at 2 s). The ablation would then compare a coarser input as well as a longer interval. With the
+displacement in the 2 s before the row, only the interval changes. The data has a row every 2 s, and in closed loop the
+executor has a state every 1 s, so the value exists at every Δ. At Δ = 2 s it is the value of now.
 
 ---
 
@@ -581,27 +592,63 @@ the model says "go-around" before the DA point, the flight continues (§3.2).
 
 ### 6.1 Inputs
 
-- **Frame (D5).** All positions and directions are relative to R: distance to the threshold along the course, offset
-  right of the final, height above the threshold, motion direction minus the course (sine, cosine). The MSL height of
-  the aircraft stays, because the level words are MSL.
-- **Removed (D5):** the airport embedding (`prior/model.py:312`), the absolute position E, N and the absolute motion
-  direction (`prior/data.py:63`), the absolute threshold position and course of each candidate (`prior/data.py:70`).
-- **Candidates:** for each candidate, its position relative to the aircraft (as now) and relative to R (the layout of
-  parallel runways), its length and its elevation. The landings on it in the 30 min before the step (as now).
-- **Words in force:** the runway in force as its candidate vector, the go-around state G, the heading in force as the
-  sine and cosine of its angle relative to the course of R, the other columns as embeddings, and the steps since each
-  column said its word.
-- **Glidepath (D13):** the height above the published glidepath of R at the aircraft's distance before the threshold,
-  with the straight-line reference of §11.4 (TCH + d·tan(angle) + d²/(2R_e), R_e the earth's radius of curvature along
-  the course). It is procedure geometry as an input; the model still decides the profile (principle 2). The value is
-  only meaningful near the final; the model also has the offset from the final to weigh it.
+- **Own state (D5, D23).** The own state of the aircraft has no frame: its MSL height (the level words are MSL), its
+  ground speed and its vertical rate.
+- **Frame (D5, D23).** Every position and every direction is in the candidate vectors. Each candidate vector gives the
+  aircraft in the frame of that candidate: the distance to its threshold along its course, the offset right of its
+  final, the height above its threshold, the motion direction minus its course (sine, cosine), as now
+  (`instructions.airport.relative_to_runway`, `prior/data.py:198`). "The frame of R" is the candidate vector of R, which
+  the prior gets as the runway in force (`prior/model.py:388` `_runway`, as now). There is no second set of values
+  relative to R.
+- **No input is computed from R before R is said (D23).** The first predicted step says R. The inputs of the rows before
+  it and of the first predicted step itself use no value computed from R. (The heads of a row see the runway that the
+  same row said, §3.1; that is an output, not an input of the row.) The reason: the artefact writes the runway word at
+  row 0 (§4.7), and its value is the runway on which the flight landed. An input of these rows computed from it gives
+  the answer of the first predicted step, and in closed loop the same input does not exist. A test: a change of the
+  runway word of a sentence leaves the inputs of rows 0 to `N_LOOK` the same, bit for bit.
+- **Removed (D5, D24):** the airport embedding (`prior/model.py:312`), the absolute position E, N and the absolute
+  motion direction (`prior/data.py:63`), and the whole table of candidate constants (`prior/data.py:70`): the absolute
+  threshold position, the course, the elevation and the length.
+- **Candidates (D24).** A candidate vector has only values that change with the aircraft: the values of the frame above,
+  the glidepath height below, and the landings on the candidate in the 30 min before the step (as now). It has no
+  constant of its runway. Such a constant identifies the runway:
+  - In the candidate table of `v6_20261002`, the pair (length, elevation) is different for 24 of the 25 candidates. The
+    length alone tells the left runway of KRDU from the right one (05L / 23R 3,048 m, 05R / 23L 2,286 m).
+  - The spacing of parallel runways is different at each airport: KRDU 1,068 m, KSJC 213 m, KSMF 1,827 m, KSTL 397 /
+    855 / 1,251 m. A layout relative to R is a code of the airport when R is known.
+  - The runway-intent study found this channel (R1.1, gradient-boosted trees, split by day; [plan](../history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md)
+    §15): with a constant of each runway (`prior_share`), the trees recognised "30L" and were right on only 53 / 59 % of
+    the flights on the two KSJC days with 30L closed. Without it (R1.1b) they were right on 96.8 / 97.6 %. For the prior,
+    R46 shows that it uses an airport identity when it gets one (§11.1).
+
+  The constants are also not necessary. The length is a cause only together with the aircraft type, and the prior has
+  no aircraft type. The elevation is the MSL height minus the height above the threshold. Which of two parallel runways
+  is the left one shows at each step in the offsets right of their finals (the value of the left runway is always
+  larger). The relative positions of all candidates together still show the layout of the airport. That is real
+  geometry and stays; only O7 can measure how much the prior uses it. A constant comes back only as a variant that O7
+  selects.
+- **Words in force:** the runway in force as its candidate vector ("none yet" up to the first predicted step), the
+  go-around state G, the heading in force as the sine and cosine of its angle relative to the course of R, the other
+  columns as embeddings, and the time since each column said its word (D17).
+- **Glidepath (D13, D23).** Each candidate vector has the height above the published glidepath of that candidate at
+  the aircraft's distance before its threshold, with the straight-line reference of §11.4 (TCH + d·tan(angle) +
+  d²/(2R_e), R_e the earth's radius of curvature along the course). The value in the vector of R is the input of D13.
+  Thus the value exists at every row, also before R is said. Every candidate has a TCH and a glidepath angle (§4.2
+  refuses a candidate without them). It is procedure geometry as an input; the model still decides the profile
+  (principle 2). The value is only meaningful near the final; the model also has the offset from the final to weigh it.
+- **Motion (D25).** The ground speed, the vertical rate and the motion direction (in each candidate vector, minus its
+  course) come from the displacement in the 2 s before the row, at every row interval Δ (§4.8). Only past positions
+  give them; never the fitted track, ground speed or vertical rate of the signals, which use 7.5 s of the future (as
+  now, `prior/data.py:163` `_motion`).
 - **Time (D16).** No row position embedding (`prior/model.py:313`) and no input "time from row 0" (`prior/data.py:63`
   `time`): both measure the time since the aircraft entered the 25 km slice, a cut of the data, and a long sentence (a
   go-around adds up to 900 s) reaches rows that training seldom saw. The causal time attention gives the order. RoPE in
   the time attention gives how far back each earlier row is: the rotation of a row's query and key uses its time in
   seconds, so the attention reads only time differences. Seconds, not rows, so that every row interval of D11 reads the
-  same time. RoPE works with the row-by-row cache of the speaker (`Prior.extend`): a key is rotated once, when it is
-  written. The RoPE base is set at implementation.
+  same time. The time of a row is in seconds from the aircraft's own row 0. Only differences count, so the zero changes
+  no result; but a UTC time (approximately 1.76e9 s) in float32 has a step of 128 s and loses the rows. RoPE works with
+  the row-by-row cache of the speaker (`Prior.extend`): a key is rotated once, when it is written. The RoPE base is set
+  at implementation.
 - **Time since each word (D17).** Each column has the input "time since this column said its word in force"
   (`since`, now `log1p(rows) / 5`, counted from the first predicted step at the earliest). It is in seconds, for every
   column, so that every row interval of D11 reads the same time. The runway column's value is, in the labelled data, the time since the first predicted step, because a
@@ -640,7 +687,8 @@ a held-out test airport only. The selection method between designs is open (O7).
   aircraft's own rows; the attention among the aircraft and the traffic attention read one scene step, which is one
   instant, and use no position. Edge features are relative (the approach clock is a distance; the closest-approach time
   is a time difference). The landing context counts the landings in the 30 min before the step's UTC time, as now.
-- R exists at every step for every aircraft. Thus the relations of the edge features (`inference/scene_edges.py`: the
+- R exists at every step for every aircraft from its first predicted step on. Before it, no input reads the aircraft's
+  R (D23), the edge features included. Thus the relations of the edge features (`inference/scene_edges.py`: the
   approach clock, the same runway, the parallel runways) and the separation judge (`inference/separation.py`) have a
   runway at every step. In `instruction-v3` this was also true; this design keeps it.
 - The clearance mask (`inference/separation_masks.py:131`) blocks "cleared" while a cleared aircraft ahead is too close.
@@ -685,7 +733,9 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 
 | Item | Value | Source |
 |---|---|---|
-| Row | 2 s, on even UTC seconds; larger intervals in the ablation (D11) | Artefact `v6_20261002` |
+| Row | 2 s, on even UTC seconds; the ablation also reads 4 and 8 s | Artefact `v6_20261002`; D11, D25 |
+| Observation of the prior | 16 s (8, 4, 2 rows at Δ = 2, 4, 8 s) | Prior design §10 (`N_LOOK`); D25 |
+| Motion inputs of the prior | Displacement in the 2 s before the row, at every Δ | D25 |
 | Executor cycle | 1 s | Fixed choice |
 | Heading grid | 5°, relative to the course of R | Spec (grid); D8 (frame) |
 | Heading lead L | 4 s | Measured (vocabulary design §10.1) |
@@ -936,7 +986,8 @@ stage D.
 - Assembly (§4.7): five columns; the grammar of A1 checked on the 2 s rows.
 - Row interval (§4.8, D11): a pure function that puts a 2 s sentence on a grid of Δ (a multiple of 2 s, rows on UTC
   multiples of Δ), keeping the last word of a column inside an interval, the first Δ row saying all five columns, and
-  the grammar checked again. Its tests: Δ = 2 gives the sentence back; Δ = 4, 6, 8 on hand-built sentences.
+  the grammar checked again. It refuses a Δ that does not divide 16 s (D25). Its tests: Δ = 2 gives the sentence back;
+  Δ = 4 and 8 on hand-built sentences; Δ = 6 is refused.
 - Candidates: refuse a candidate without TCH, glidepath angle or LPV DA before labelling (§4.2).
 - Tests: a level at the middle of two 60 m levels is found as level; a slow descent inside one 450 m step is not a
   level; synthetic flights (`tests/support.py` `fly_legs`, `instruction_flight`) for a downwind–base–final with
@@ -1015,10 +1066,13 @@ commits, the archive list, the smoke results (as information, not as a verdict),
 
 ### 14.3 Stage B: prior (outline)
 
-Bring `prior/` back from the archive and change it to §6: inputs in the frame of R (D5), no airport embedding, the
-glidepath height input (D13), RoPE with seconds and no row embedding (D16), the time since each word in seconds (D17),
-the go-around state as an input, five heads with the runway head scoring the candidates, "unchanged" and "go-around".
-The observation is 16 s at every Δ. The checkpoint identity of §9.2 #5. The procedure masks' word tolerance becomes half
+Copy `prior/` out of the archive and change the copy to §6. The archived copy stays unchanged: it is the record of
+`instruction-v3`. The changes: an own state without a frame, every position and direction in the candidate vectors,
+and no input computed from R up to the first predicted step, with its test (D5, D23); no candidate constant (D24); no
+airport embedding; the glidepath height in each candidate vector (D13, D23); the motion from the 2 s before each row
+(D25); RoPE with seconds from the aircraft's row 0 and no row embedding (D16); the time since each word in seconds
+(D17); the go-around state as an input; five heads with the runway head scoring the candidates, "unchanged" and
+"go-around". The observation is 16 s at every Δ (8, 4, 2 rows). The checkpoint identity of §9.2 #5. The procedure masks' word tolerance becomes half
 the step of the level's segment (D22; `prior/procedure.py` `word_tolerance_m`). The selection method is open (O7). Free
 generation with the masks of §3.7 and the procedure masks (D14). Milestones, tests and reviews as in stage A.
 
@@ -1035,7 +1089,8 @@ frontend reads the reading name, not the spec sha (§9.2 #9). After stage D the 
 
 ### 14.6 What Claude checks at the end of stage A
 
-1. Each decision D1–D21 against the code: the module and the test that carry it (a table in the report).
+1. Each decision that stage A carries (D1–D22, and the Δ values of D25) against the code: the module and the test that
+   carry it (a table in the report).
 2. The targeted tests and the full suite pass on the branch head (run again, not read from the report).
 3. The smoke build: both conformance checks pass; the replay at Δ = 2 and 4 runs to its end; a labelled go-around
    flies as a go-around (G, climb, a new runway word, a landing after it).
