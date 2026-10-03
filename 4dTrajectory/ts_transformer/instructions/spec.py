@@ -137,6 +137,11 @@ class VocabularySpec:
     go_around_min_climb_m: float
     #: A point past the threshold and at most this high is on the runway (a touch-and-go): not a go-around.
     go_around_on_runway_height_m: float
+    # --- the closed-loop reading (design §4.9, D32; `autopilot.closed_loop`)
+    #: A heading correction starts when the flown path is more than `closed_loop_lateral_m` off the observed one, an
+    #: angle correction when it is more than `closed_loop_vertical_m` above or below it; each ends under half of it.
+    closed_loop_lateral_m: float
+    closed_loop_vertical_m: float
     reading_rule: str = READING_RULE
 
     def __post_init__(self) -> None:
@@ -157,7 +162,7 @@ class VocabularySpec:
             "speed_fit_tolerance_mps", "speed_flat_accel_mps2", "speed_min_hold_s", "speed_accel_max_mps2",
             "unspecified_plateau_s", "unspecified_distance_m", "go_around_max_cross_m", "go_around_max_height_m",
             "go_around_min_progress_m", "go_around_hold_s", "go_around_min_drop_m", "go_around_min_climb_m",
-            "go_around_on_runway_height_m",
+            "go_around_on_runway_height_m", "closed_loop_lateral_m", "closed_loop_vertical_m",
         )
         for name in positive:
             if getattr(self, name) <= 0:

@@ -62,10 +62,10 @@ def main(argv: list[str] | None = None) -> int:
     with (out / "index.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(["file", "dataset_id", "stratum", "verdict (对 / 漏读 / 误读)", "note"])
-        for page, (stratum, flight, reading) in enumerate(chosen):
-            name = f"{page:02d}_{stratum}_{flight.dataset_id.replace(':', '_')}.png"
+        for page, (kind, flight, reading) in enumerate(chosen):
+            name = f"{page:02d}_{kind}_{flight.dataset_id.replace(':', '_')}.png"
             draw_flight(flight, reading, geometries[flight.airport], spec, out / name)
-            writer.writerow([name, flight.dataset_id, stratum, "", ""])
+            writer.writerow([name, flight.dataset_id, kind, "", ""])
     print(f"wrote {len(chosen)} pages to {out} (seed {args.seed}; short strata: "
           f"{ {s: n for s, n in wanted.items() if n} or 'none'})")
     return 0

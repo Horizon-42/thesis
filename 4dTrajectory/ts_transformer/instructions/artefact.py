@@ -9,6 +9,10 @@
 ``sentences_<split>.npz`` + ``labels.json``  the sentences, and every flight's outcome
 ``conformance/``                             the labeller's reference sample and its passed records
                                              (`instructions.conformance`)
+``closed_loop/``                             the closed-loop sentences of every split and row interval, flown by an
+                                             executor spec (`write_closed_loop`), with ``summary.json`` and their
+                                             reference sample and passed records (``conformance/``,
+                                             `autopilot.closed_loop`)
 
 A reader checks the spec's sha against the sentences it opens and refuses a mismatch — the
 sentence files carry the sha they were read with. The LABELLER is not named by its source here
@@ -198,4 +202,54 @@ def load_sentences(directory: Path, split: str, spec: VocabularySpec) -> dict[st
     if str(data["spec_sha256"]) != spec.sha256:
         raise ValueError(f"sentences_{split}.npz was read with spec {str(data['spec_sha256'])[:12]}, "
                          f"not {spec.sha256[:12]}")
+    return data
+
+
+#: The closed-loop sentences (design §4.9, D32; written by `experiments/instruction_closed_loop.py` from
+#: `autopilot.closed_loop`): per split and row interval, the words said from the first predicted step, which are
+#: corrections, the states on every row (observed before that step, flown from it) and the errors against the observed
+#: path.
+CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v1"
+#: The directory inside the artefact that holds them, written once (`closed_loop_path`).
+CLOSED_LOOP_DIRECTORY = "closed_loop"
+
+
+def closed_loop_path(directory: Path, split: str, row_interval_s: float) -> Path:
+    return directory / CLOSED_LOOP_DIRECTORY / f"{split}_{row_interval_s:g}s.npz"
+
+
+def write_closed_loop(path: Path, spec: VocabularySpec, *, executor_params_sha256: str, row_interval_s: float,
+                      start_row: int, signal_index: Sequence[int], first_row: Sequence[int],
+                      grids: Sequence[np.ndarray], corrections: Sequence[np.ndarray], states: Sequence[np.ndarray],
+                      lateral_m: Sequence[np.ndarray], vertical_m: Sequence[np.ndarray], ended: Sequence[bool]) -> None:
+    """One split's closed-loop sentences at one row interval, in the order given. Sentence ``k``'s words are
+    ``words[offsets[k]: offsets[k + 1]]`` (from its first predicted step, `start_row` rows after its first row on the
+    interval's grid, which is its signals' 2 s row ``first_row[k]``), its states ``states[state_offsets[k]:
+    state_offsets[k + 1]]`` (every row from its first: observed before ``start_row``, flown from it)."""
+    lengths = np.array([len(grid) for grid in grids], dtype=np.int64)
+    state_lengths = np.array([len(rows) for rows in states], dtype=np.int64)
+    if not np.array_equal(state_lengths, lengths + start_row):
+        raise ValueError("every sentence's states cover its rows before the first predicted step and its words")
+    np.savez_compressed(
+        _fresh(path),
+        schema=np.array(CLOSED_LOOP_SCHEMA), spec_sha256=np.array(spec.sha256),
+        executor_params_sha256=np.array(executor_params_sha256), row_interval_s=np.array(row_interval_s),
+        start_row=np.array(start_row), signal_index=np.asarray(signal_index, dtype=np.int64),
+        first_row=np.asarray(first_row, dtype=np.int64),
+        offsets=np.concatenate(([0], np.cumsum(lengths))).astype(np.int64),
+        state_offsets=np.concatenate(([0], np.cumsum(state_lengths))).astype(np.int64),
+        words=np.concatenate(grids).astype(np.int16), correction=np.concatenate(corrections).astype(bool),
+        states=np.concatenate(states).astype(np.float64), lateral_m=np.concatenate(lateral_m).astype(np.float64),
+        vertical_m=np.concatenate(vertical_m).astype(np.float64), ended=np.asarray(ended, dtype=bool))
+
+
+def load_closed_loop(path: Path, spec: VocabularySpec) -> dict[str, np.ndarray]:
+    """One split's closed-loop sentences at one row interval, refused unless they are this schema's and were read with
+    ``spec``."""
+    with np.load(path) as arrays:
+        data = {name: arrays[name] for name in arrays.files}
+    if str(data["schema"]) != CLOSED_LOOP_SCHEMA:
+        raise ValueError(f"{path} is not a {CLOSED_LOOP_SCHEMA} file")
+    if str(data["spec_sha256"]) != spec.sha256:
+        raise ValueError(f"{path} was read with spec {str(data['spec_sha256'])[:12]}, not {spec.sha256[:12]}")
     return data

@@ -401,7 +401,7 @@ def test_a_go_around_and_a_second_approach():
     # the second approach's speed reading starts at the go-around row: the speed held is said there
     assert reading.words[go, SPEED] == words.speed_index(70.0)
     assert go_around_in_force(reading, words) == [{"no_level_off": True, "unspecified": True, "captured": True,
-                                                    "other_runway": False}]
+                                                    "other_runway": False, "past_threshold": False}]
 
 
 def test_a_go_around_on_one_runway_and_a_landing_on_another():
@@ -618,3 +618,63 @@ def test_a_heading_word_heard_with_a_runway_of_another_course_is_refused_on_the_
     on_interval(sentence, 0, 8.0, 2.0, np.full(9, 900.0), words, [90.0, 90.0])
     with pytest.raises(Refused, match="heading word across a runway change"):     # said at row 5, heard at row 8
         on_interval(sentence, 0, 8.0, 2.0, np.full(9, 900.0), words, [90.0, 80.0])
+
+
+TWO_GO_AROUNDS = [*GO_AROUND_LEGS[:8], (89, 0, 70, -GLIDE), (40, 0, 70, 8.0), (10, 0, 70, 0), (30, -6, 70, 0),
+                  (170, 0, 70, 0), (30, -6, 70, 0), (20, 0, 70, 0), (104, 0, 70, -GLIDE)]
+
+
+def test_two_go_arounds_are_three_approaches_each_with_its_own_words():
+    """D26 with two go-arounds: each climb is its own go-around row, each approach ends there with "no level-off" in
+    force, and the speed reading of each later approach starts at the go-around row before it. The first low pass is
+    440 m past the threshold: the capture corridor ends at the threshold, so that approach has no capture row and no
+    "unspecified" (the letter of §4.5; whether a pass past the threshold should keep its capture is the user's to say,
+    the readout counts them)."""
+    one, words = spec(), Words(spec())
+    reading = read_flight(instruction_flight(*fly_legs(TWO_GO_AROUNDS, 90.0, 900.0, -400.0, 0.0)),
+                          instruction_airport(), one, words)
+    first, second = reading.go_around_rows
+    assert abs(first - 119) <= 2 and second > reading.runway_again_rows[0] > first
+    assert [(a.first, a.end) for a in reading.approaches] == [
+        (0, first), (reading.runway_again_rows[0], second), (reading.runway_again_rows[1], len(reading.words))]
+    assert go_around_in_force(reading, words) == [
+        {"no_level_off": True, "unspecified": False, "captured": False, "other_runway": False, "past_threshold": True},
+        {"no_level_off": True, "unspecified": True, "captured": True, "other_runway": False, "past_threshold": False}]
+    held = in_force(reading.words)
+    for row in reading.go_around_rows:                               # 70 m/s: said, or still in force from row 0
+        assert held[row, SPEED] == words.speed_index(70.0) and reading.words[row, ANGLE] == words.angle_climb
+    assert reading.approaches[0].capture_row is None
+    assert all(a.first <= a.capture_row < a.end for a in reading.approaches[1:])
+
+
+def test_a_heading_word_of_the_class_in_force_after_a_runway_change_is_refused():
+    """§4.3: under one course a new word is always another class; after R changes course the track can need the class
+    in force again, which the sentence cannot say (a word equal to the one in force is no instruction)."""
+    one, words = spec(), Words(spec())
+    track = np.concatenate((np.full(20, 90.0), np.full(20, 93.0)))
+    relatives = [_relative(40, 0, course, track, 0.0) for course in (90.0, 92.0)]
+    runway_rows = np.where(np.arange(40) < 10, 0, 1)
+    with pytest.raises(Refused, match="heading word repeated after a runway change"):
+        read_lateral(track, relatives, [90.0, 92.0], [Approach(0, 40, 1)], runway_rows, one, words)
+
+
+def test_a_step_up_from_a_level_is_a_go_around_climb():
+    """`vertical.climb_after`: a level followed straight by a higher level (a step) is a climb said at the first
+    level's last row."""
+    from ts_transformer.instructions.labeller.vertical import VerticalPiece, climb_after
+
+    one = spec()
+    groups = [[VerticalPiece(0, 20, MOVE, angle_deg=3.0)], [VerticalPiece(20, 40, LEVEL, target_index=5)],
+              [VerticalPiece(40, 60, LEVEL, target_index=8)]]
+    assert climb_after(groups, 30, 60, one) == 2
+    with pytest.raises(Refused, match="go-around without a climb word"):
+        climb_after(groups[:2], 30, 40, one)
+
+
+def test_the_figures_runner_draws_a_labelled_flight(tmp_path, monkeypatch):
+    from ts_transformer.experiments import instruction_figures
+    from ts_transformer.tests.support import labelled_instruction_artefact
+
+    labelled_instruction_artefact(tmp_path / "artefact", split="val")
+    monkeypatch.setattr(instruction_figures, "require_conforming_labeller", lambda directory: None)
+    assert instruction_figures.main(["--dir", str(tmp_path / "artefact"), "--count", "2"]) == 0

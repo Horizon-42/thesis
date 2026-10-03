@@ -15,6 +15,13 @@ and kind of sentence (with a go-around or not): each outcome, the words inside t
 envelopes' widths, the decision-altitude checks, and of the flights whose observed track passes evaluation the share
 whose replay passes too. NO CRITERION IS READ (design D7): the user sets them after the design is settled.
 
+With ``--closed-loop`` it flies the artefact's CLOSED-LOOP sentences instead (design §4.9, D32; written by
+`instruction_closed_loop`, refused unless the code on disk reads their reference as it was read): each from its first
+predicted step, on its own clock (the time clock, whatever the spec's word clock: a closed-loop sentence is said in time),
+from the observed state there. Every flight must fly its stored states again (within the executor conformance's bound);
+each row adds the largest |e_y| and |e_h| against the observed path and the correction words for each column. The
+labelled flights without a closed-loop sentence are counted.
+
 The VAL replay waits for the user's go-ahead and runs from a clean tree. Development runs use train.
 
     python run_ts.py executor_replay --split train --per-airport 20 --row-interval-s 2 \\
@@ -30,7 +37,7 @@ import subprocess
 import sys
 import time
 from collections import Counter, defaultdict
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -38,7 +45,9 @@ import numpy as np
 import torch
 
 from aerodynamic_model.common import GeodeticState
-from ts_transformer.autopilot import replay
+from ts_transformer.autopilot import closed_loop, replay
+from ts_transformer.autopilot.conformance import STATE_BOUND_M
+from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.autopilot.executor import Flown
 from ts_transformer.autopilot.judge import CROSSINGS, Outcome, Verdict
 from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
@@ -47,7 +56,8 @@ from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.data.lateral_eligibility import default_evaluation_report_path
 from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
 from ts_transformer.inference.forecast import Forecast
-from ts_transformer.instructions.artefact import SPLITS
+from ts_transformer.instructions.artefact import SPLITS, closed_loop_path, load_closed_loop
+from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.instructions.readout import STRATA, stratum
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.outputs.envelope import control_contract
@@ -103,15 +113,15 @@ def readout_table(rows: list[dict[str, Any]]) -> dict[str, Any]:
     cells: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         for airport in (row["airport"], "all"):
-            for stratum in (row["stratum"], "all"):
+            for part in (row["stratum"], "all"):
                 for kind in (row["kind"], "all"):
-                    cells[(row["group"], airport, stratum, kind)].append(row)
-    for (group, airport, stratum, kind), members in sorted(cells.items()):
+                    cells[(row["group"], airport, part, kind)].append(row)
+    for (group, airport, part, kind), members in sorted(cells.items()):
         judged = [w for r in members if r["words"] is not None for w in r["words"]]
         paired = [r for r in members if r["observed_verdict"] == "pass"]
         pairs = [r["heading_words_told_with_a_skipped_word"] for r in members]
         decisions = [r["crossing"]["decision"] for r in members if r["crossing"] is not None and "decision" in r["crossing"]]
-        table.setdefault(group, {}).setdefault(airport, {}).setdefault(stratum, {})[kind] = {
+        table.setdefault(group, {}).setdefault(airport, {}).setdefault(part, {})[kind] = {
             "flights": len(members), "outcomes": dict(Counter(r["outcome"] for r in members).most_common()),
             "landed": _share(sum(r["outcome"] == "landed" for r in members), len(members)),
             "words_judged": len(judged), "words_inside": _share(sum(ok for _, ok in judged), len(judged)),
@@ -222,6 +232,29 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
     return rows, graded
 
 
+def closed_loop_columns(stored: dict[int, closed_loop.Stored]
+                        ) -> Callable[[replay.Batch, Flown, list[Verdict]], list[dict[str, Any]]]:
+    """The rows' closed-loop columns: each flight's largest |e_y| and |e_h| and its correction words per column — after
+    checking that it flew its stored states again (each Δ row's position and height within `STATE_BOUND_M`)."""
+    def columns(part: replay.Batch, flown: Flown, verdicts: list[Verdict]) -> list[dict[str, Any]]:
+        out = []
+        for j, index in enumerate(part.indices):
+            sentence = stored[index]
+            cycles = int(round(part.row_interval_s / flown.cycle_s))
+            rows = np.arange(len(sentence.grid)) * cycles
+            track = flown_track(flown.states[j, : rows[-1] + 1].cpu().numpy(), part.geometries[j])
+            again = np.column_stack([track["e"][rows], track["n"][rows], track["height"][rows]])
+            apart = float(np.abs(again - sentence.states[:, :3]).max())
+            if apart > STATE_BOUND_M:
+                raise ValueError(f"{part.signals[j].dataset_id}: flown {apart:.3g} m from its closed-loop states")
+            out.append({"largest_lateral_m": float(np.abs(sentence.lateral_m).max()),
+                        "largest_vertical_m": float(np.abs(sentence.vertical_m).max()),
+                        "correction_words": dict(zip(COLUMNS, sentence.correction.sum(axis=0).tolist()))})
+        return out
+
+    return columns
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--instructions", type=Path, required=True)
@@ -231,6 +264,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--row-interval-s", type=float, default=2.0,
                         help="the sentences' row interval: 2, 4 or 8 s (design §4.8, D25)")
+    parser.add_argument("--closed-loop", action="store_true",
+                        help="fly the artefact's closed-loop sentences from the first predicted step (module docstring)")
     parser.add_argument("--chunk", type=int, default=500)
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     parser.add_argument("--device", default="cpu")
@@ -249,6 +284,17 @@ def main(argv: list[str] | None = None) -> int:
                         groups=(replay.OWN, replay.STAND_IN), row_interval_s=args.row_interval_s)
     print(f"{batch.drawn['flights']} {args.split} flights ({batch.drawn['by_group']}; not flown "
           f"{batch.drawn['excluded']}), {time.perf_counter() - started:.0f}s", flush=True)
+    per_flight = None
+    if args.closed_loop:
+        closed_loop.require_conforming_closed_loop(instructions)
+        params = replace(params, word_clock="time")
+        stored = closed_loop.stored_sentences(load_closed_loop(
+            closed_loop_path(instructions, args.split, args.row_interval_s), spec))
+        batch, missing = closed_loop.replay_batch(batch, stored, words)
+        batch.drawn["without_a_closed_loop_sentence"] = missing
+        print(f"{len(batch.sentences)} closed-loop sentences flown from the first predicted step, {missing} flights "
+              f"without one", flush=True)
+        per_flight = closed_loop_columns(stored)
 
     out.mkdir(parents=True)
     rows: list[dict[str, Any]] = []
@@ -264,7 +310,9 @@ def main(argv: list[str] | None = None) -> int:
                                          device=torch.device(args.device), records=out / "records" / airport,
                                          split=args.split, checkpoint=str(executor),
                                          extra_summary={"executor_spec_sha256": record["sha256"],
-                                                        "row_interval_s": args.row_interval_s})
+                                                        "row_interval_s": args.row_interval_s,
+                                                        "closed_loop": args.closed_loop},
+                                         per_flight=per_flight)
         require_same_grading(graded, observed_reports[airport], airport)
         for row in flown_rows:
             row["observed_verdict"] = observed[row["flight_key"]]
@@ -275,17 +323,18 @@ def main(argv: list[str] | None = None) -> int:
     table = readout_table(rows)
     write_json_atomic(out / "replay.json", {
         "schema": REPLAY_SCHEMA, "written_utc": utc_now(), "split": args.split, "row_interval_s": args.row_interval_s,
+        "closed_loop": args.closed_loop,
         "executor_spec_sha256": record["sha256"], "vocabulary_spec_sha256": spec.sha256, "params": asdict(params),
         "envelope_widths": envelope_widths(words), "drawn": batch.drawn, "strata": list(STRATA), "kinds": list(KINDS),
         "readout": table, "flights": rows, "git": git_state(), "elapsed_s": time.perf_counter() - started})
     for group, airports in table.items():
         for airport, strata in airports.items():
-            for stratum, kinds in strata.items():
+            for part, kinds in strata.items():
                 for kind, cell in kinds.items():
                     shares = "  ".join(f"{name} {cell[key] if cell[key] is None else round(cell[key], 3)}"
                                        for name, key in (("landed", "landed"), ("words", "words_inside"),
                                                          ("eval", "replay_passes_where_observed_passes")))
-                    print(f"  {group:18s} {airport:5s} {stratum:12s} {kind:17s} n={cell['flights']:5d}  {shares}  "
+                    print(f"  {group:18s} {airport:5s} {part:12s} {kind:17s} n={cell['flights']:5d}  {shares}  "
                           f"{cell['outcomes']}")
     print(f"→ {out / 'replay.json'}")
     return 0

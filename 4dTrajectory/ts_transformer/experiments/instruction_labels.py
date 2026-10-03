@@ -79,7 +79,7 @@ def render(summary: dict[str, Any], spec: VocabularySpec) -> str:
     def group_rows(title: str, groups: dict[str, dict[str, Any]]) -> list[str]:
         out = ["", f"### {title}", "",
                "| 组 | 架次 | 每架指令 均值 / p95 | 跑道 | 航向 | 高度 | 下降角 | 速度 | 非沉默步 | 截获前转过的角度 p50 / p95 | "
-               "在入口处截断 | 复飞（架次 / 词） | 复飞时生效：不改平 / 未指定速度 / 该进近有截获 / 之后换跑道 |",
+               "在入口处截断 | 复飞（架次 / 词） | 复飞时生效：不改平 / 未指定速度 / 该进近有截获 / 之后换跑道 / 最低点过了入口 |",
                "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for name, g in groups.items():
             w, t = g["words_per_flight"], g["turning_deg"]
@@ -88,7 +88,8 @@ def render(summary: dict[str, Any], spec: VocabularySpec) -> str:
                        + " | ".join(_fmt(w[c].get("mean"), 2) for c in ("runway", "heading", "altitude", "angle", "speed"))
                        + f" | {_pct(g['non_silent_step_share'])} | {_fmt(t.get('p50'), 0)} / {_fmt(t.get('p95'), 0)} | "
                        f"{_pct(g['cut_at_crossing_share'])} | {g['go_arounds']['flights']} / {g['go_arounds']['words']} | "
-                       + " / ".join(str(g['go_arounds'][k]) for k in ("no_level_off", "unspecified", "captured", "other_runway"))
+                       + " / ".join(str(g['go_arounds'][k]) for k in ("no_level_off", "unspecified", "captured", "other_runway",
+                                                                       "past_threshold"))
                        + " |")
         return out
 

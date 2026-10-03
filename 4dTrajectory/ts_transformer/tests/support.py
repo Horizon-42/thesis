@@ -187,8 +187,8 @@ def passed_executor(spec_dir):
         "reference_sha256": executor_spec.reference_sha256(directory)}), encoding="utf-8")
 
 
-def labelled_instruction_artefact(directory):
-    """A tmp instruction artefact at ``directory`` (created) holding one synthetic train flight onto
+def labelled_instruction_artefact(directory, split="train"):
+    """A tmp instruction artefact at ``directory`` (created) holding one synthetic ``split`` flight onto
     `instruction_airport`'s runway 09 — a downwind, a base, a final on a 3° descent — labelled by the labeller:
     signals, candidates, spec, sentences. Returns the spec."""
     import numpy as np
@@ -199,15 +199,42 @@ def labelled_instruction_artefact(directory):
 
     legs = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (20, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
             (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
-    flight = instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0), dataset_id="KXXX:a")
+    flight = instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0), dataset_id="KXXX:a", split=split)
     directory.mkdir(parents=True)
-    write_signals(directory, {"train": [flight]},
-                  {"counts": {"train": {"built_usable": 1}}, "test_days": {"flights_not_opened": 0},
+    write_signals(directory, {split: [flight]},
+                  {"counts": {split: {"built_usable": 1}}, "test_days": {"flights_not_opened": 0},
                    "sources": [{"airport": "KXXX", "arrival_manifest_sha256": "0" * 64}]}, fixture_days())
     write_candidates(directory, {"KXXX": instruction_airport()})
     spec = instruction_spec()
     write_spec(directory, spec, {"n": 1}, {"labeller_code_sha256": labeller_code_sha256(),
                                            "git": {"head": "test", "dirty": False}})
-    write_sentences(directory, "train", spec, [read_flight(flight, instruction_airport(), spec)], [0],
+    write_sentences(directory, split, spec, [read_flight(flight, instruction_airport(), spec)], [0],
                     labeller_code_sha256())
     return spec
+
+
+def executor_inputs(signals, geometry, row=0, mass_kg=62000.0):
+    """`autopilot.flights.FlightInputs` of one A320 flown from ``signals``' 2 s row ``row`` (a synthetic flight has no
+    data-plane series to rebuild): its state there, the airframe, the chart at the first candidate's threshold."""
+    import math
+
+    import torch
+
+    from aircraft.aero_params import aero_params_for_aircraft
+    from flight_scenarios.scenario import aircraft_for_code
+    from ts_transformer.autopilot.flights import FlightInputs
+
+    aircraft = aircraft_for_code("A320")
+    aero = aero_params_for_aircraft(aircraft)
+    lat, lon = geometry.frame.latlon_from_horizontal(signals.e_m[row], signals.n_m[row])
+    gamma = math.atan2(signals.vertical_rate_mps[row], signals.ground_speed_mps[row])
+    state = [lat, lon, signals.altitude_m[row], signals.ground_speed_mps[row] / math.cos(gamma),
+             math.radians(90.0 - signals.track_deg[row]), gamma, mass_kg]
+    candidate = geometry.candidates[0]
+    tlat, tlon = geometry.frame.latlon_from_horizontal(candidate.threshold_e_m, candidate.threshold_n_m)
+    f64 = torch.float64
+    return FlightInputs(
+        initial_state=torch.tensor([state], dtype=f64),
+        aero_params=torch.tensor([[aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall]], dtype=f64),
+        frame_params=torch.tensor([[tlat, tlon, candidate.elevation_m, 0.0]], dtype=f64),
+        max_thrust_n=torch.tensor([aircraft.engine.max_thrust_total_n], dtype=f64))

@@ -21,12 +21,12 @@ which is the outcome (at one row, in `EVENT_ORDER`, the table's order):
 - ``unstable_at_minimums``: an approach crossing at most that high, inside the runway limit, after a failed decision-
   altitude check — or with no DA point (the aircraft crossed above the DA);
 - ``landed``: such a crossing after a DA check that passed;
-- ``crossed_other_runway``: the threshold plane of a candidate other than R crossed lined up with it, inside that
+- ``crossed_other_runway``: G false, the threshold plane of a candidate other than R crossed lined up with it, inside that
   runway's own limit, at any height (the flight ends there; what it flew after is not the flight's);
 - ``timeout``: none of these within the flight's time limit.
 
-A crossing that is not lined up (abeam a threshold on a downwind) is not an event, and neither is a crossing of R while
-G is true: the flight flies on.
+A crossing that is not lined up (abeam a threshold on a downwind) is not an event, and while G is true no crossing is one,
+of R or of another candidate (D33): the flight flies on.
 
 THE DECISION-ALTITUDE CHECK (D3, O2). The approach of an approach crossing is the run of cycles before it with R the
 crossed runway and G false; its DA POINT is the first state row of that run where the aircraft, on R's final (before the
@@ -180,6 +180,8 @@ def _outcome(states: np.ndarray, track: dict[str, np.ndarray], runway_cycle: np.
         landing_limit = landing_cross_limit_m(geometry, index, spec.landing_cross_limit_m, spec.parallel_course_delta_deg)
         on_runway_m = runway_lateral_limit_m(geometry, index, spec)
         for row in (np.nonzero((before[:-1] > 0.0) & (before[1:] <= 0.0))[0] + 1).tolist():
+            if go_around_row[row]:
+                continue                                   # D33: no crossing is an event while G is true
             crossing = _crossing(relative, row, index)
             lined_up = abs(float(relative.track_minus_course_deg[row])) <= spec.lined_up_deg
             if runway_row[row] != index:
@@ -187,7 +189,7 @@ def _outcome(states: np.ndarray, track: dict[str, np.ndarray], runway_cycle: np.
                     events.append((row, "crossed_other_runway", crossing))
                     break
                 continue
-            if go_around_row[row] or not lined_up or abs(crossing["cross_m"]) > landing_limit:
+            if not lined_up or abs(crossing["cross_m"]) > landing_limit:
                 continue                                   # not an approach crossing: no event
             if crossing["height_m"] > spec.landing_max_height_m:
                 events.append((row, "crossed_too_high", crossing))

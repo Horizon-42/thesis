@@ -50,7 +50,7 @@ from ts_transformer.instructions.artefact import load_candidates, load_sentences
 from ts_transformer.instructions.conformance import require_conforming_labeller
 from ts_transformer.instructions.labeller.interval import first_interval_row, later_utc, on_interval
 from ts_transformer.instructions.labeller.read import Reading, read_flight
-from ts_transformer.instructions.labeller.records import Instruction
+from ts_transformer.instructions.labeller.records import Instruction, Refused
 from ts_transformer.instructions.signals import ROW_FIELDS, FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
@@ -63,8 +63,8 @@ OWN, STAND_IN = "own dynamics", "stand-in dynamics"
 @dataclass(frozen=True)
 class Sentence:
     """What one flight is flown on: its sentence on the batch's row interval (``grid`` ``[N, 5]``), its words as
-    instructions on those rows (a heading word's ``info["target_deg"]`` the track it says under the landed runway, which
-    a labelled sentence never changes), and the 2 s row of the observed flight its row 0 is (``first_row``)."""
+    instructions on those rows (a heading word's ``info["target_deg"]`` the track it says under the runway in force at
+    its row), and the 2 s row of the observed flight its row 0 is (``first_row``)."""
     grid: np.ndarray
     instructions: list[Instruction]
     first_row: int
@@ -82,14 +82,20 @@ def sentence_on_interval(reading: Reading, signals: FlightSignals, interval_s: f
     first = first_interval_row(signals.entry_time_utc, interval_s, step_s)
     courses = [candidate.course_deg for candidate in geometry.candidates]
     grid = on_interval(reading.words, first, interval_s, step_s, reading.held_altitude_m, words, courses)
-    # the runway in force at each row: a heading word is heard with its row's (the runway column comes first)
+    return Sentence(grid=grid, instructions=instructions_of(grid, geometry, words), first_row=first)
+
+
+def instructions_of(grid: np.ndarray, geometry: AirportGeometry, words: Words) -> list[Instruction]:
+    """A sentence's words as instructions on its rows (what the judge reads): a heading word's ``target_deg`` the track
+    it says under the runway in force at its row (the runway column comes first in a row)."""
+    courses = [candidate.course_deg for candidate in geometry.candidates]
     runway = grid[np.maximum.accumulate(np.where(grid[:, RUNWAY] >= 0, np.arange(len(grid)), 0)), RUNWAY]
     instructions = []
     for row, column in zip(*np.nonzero(grid != UNCHANGED)):
         value = int(grid[row, column])
         info = {"target_deg": words.heading_track_deg(value, courses[runway[row]])} if column == HEADING else {}
         instructions.append(Instruction(int(column), value, int(row), "said", info))
-    return Sentence(grid=grid, instructions=instructions, first_row=first)
+    return instructions
 
 
 def from_row(signals: FlightSignals, row: int) -> FlightSignals:
@@ -104,6 +110,7 @@ def from_row(signals: FlightSignals, row: int) -> FlightSignals:
 
 @dataclass
 class Batch:
+    indices: list[int]              # each flight's place in the artefact's signals of the split
     signals: list[FlightSignals]    # the observed flights, from each sentence's first row on
     series: list[FlightSeries]
     readings: list[Reading]         # the labeller's readings (the data's step)
@@ -225,22 +232,43 @@ def draw_flights(directory: Path, split: str, candidates: list[int], *, per_airp
 
 def batch_of(drawn: Drawn, keep: list[int], readings: list[Reading], row_interval_s: float, words: Words) -> Batch:
     """The flights of ``drawn`` at ``keep`` flown from ``readings`` (one per kept flight, in that order), each sentence
-    on ``row_interval_s`` (`sentence_on_interval`)."""
-    geometries = [drawn.geometries[drawn.signals[i].airport] for i in keep]
-    sentences = [sentence_on_interval(reading, drawn.signals[i], row_interval_s, geometry, words)
-                 for i, reading, geometry in zip(keep, readings, geometries)]
-    return Batch(signals=[from_row(drawn.signals[i], s.first_row) for i, s in zip(keep, sentences)],
-                 series=[drawn.series[i] for i in keep], readings=readings, sentences=sentences,
-                 row_interval_s=row_interval_s, geometries=geometries,
-                 vertical_paths=[drawn.vertical_paths[drawn.signals[i].airport] for i in keep],
-                 approach_ias_mps=[flight_approach_ias_mps(drawn.series[i], drawn.groups[i]) for i in keep],
-                 groups=[drawn.groups[i] for i in keep], drawn={**drawn.description, "row_interval_s": row_interval_s})
+    on ``row_interval_s`` (`sentence_on_interval`); a flight whose sentence the row interval refuses is left out and
+    counted by reason in the description (``refused_on_interval``)."""
+    flights, sentences, kept_readings = [], [], []
+    refused: Counter = Counter()
+    for i, reading in zip(keep, readings):
+        try:
+            sentence = sentence_on_interval(reading, drawn.signals[i], row_interval_s,
+                                            drawn.geometries[drawn.signals[i].airport], words)
+        except Refused as refusal:
+            refused[refusal.reason] += 1
+            continue
+        flights.append(i)
+        sentences.append(sentence)
+        kept_readings.append(reading)
+    return Batch(indices=[drawn.indices[i] for i in flights],
+                 signals=[from_row(drawn.signals[i], s.first_row) for i, s in zip(flights, sentences)],
+                 series=[drawn.series[i] for i in flights], readings=kept_readings, sentences=sentences,
+                 row_interval_s=row_interval_s, geometries=[drawn.geometries[drawn.signals[i].airport] for i in flights],
+                 vertical_paths=[drawn.vertical_paths[drawn.signals[i].airport] for i in flights],
+                 approach_ias_mps=[flight_approach_ias_mps(drawn.series[i], drawn.groups[i]) for i in flights],
+                 groups=[drawn.groups[i] for i in flights],
+                 drawn={**drawn.description, "row_interval_s": row_interval_s,
+                        "refused_on_interval": dict(refused.most_common())})
 
 
 def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per_airport: int, seed: int,
          groups: tuple[str, ...] = (OWN,), row_interval_s: float) -> Batch:
     """The split's first ``per_airport`` labelled flights of ``groups`` per airport (0: every one), in a
     seeded permutation, each re-read and checked against its stored sentence, flown on ``row_interval_s``."""
+    drawn, readings = draw_readings(directory, split, spec, words, per_airport=per_airport, seed=seed, groups=groups)
+    return batch_of(drawn, list(range(len(readings))), readings, row_interval_s, words)
+
+
+def draw_readings(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per_airport: int, seed: int,
+                  groups: tuple[str, ...] = (OWN,)) -> tuple[Drawn, list[Reading]]:
+    """`draw`'s flights and their readings, each re-read and checked against its stored sentence, before any row
+    interval."""
     sentences = load_sentences(directory, split, spec)
     stored = {int(index): k for k, index in enumerate(sentences["signal_index"])}
     drawn = draw_flights(directory, split, list(stored), per_airport=per_airport, seed=seed, groups=groups)
@@ -252,12 +280,13 @@ def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per
         if not np.array_equal(reading.words, grid) or reading.runway_index != int(sentences["runway_index"][k]):
             raise ValueError(f"{flight.dataset_id}: the re-read sentence differs from the stored one")
         readings.append(reading)
-    return batch_of(drawn, list(range(len(readings))), readings, row_interval_s, words)
+    return drawn, readings
 
 
 def subset(batch: Batch, indices: list[int]) -> Batch:
     """The flights at ``indices``, in that order (the sample's description is the whole batch's)."""
-    return Batch(signals=[batch.signals[i] for i in indices], series=[batch.series[i] for i in indices],
+    return Batch(indices=[batch.indices[i] for i in indices], signals=[batch.signals[i] for i in indices],
+                 series=[batch.series[i] for i in indices],
                  readings=[batch.readings[i] for i in indices], sentences=[batch.sentences[i] for i in indices],
                  row_interval_s=batch.row_interval_s, geometries=[batch.geometries[i] for i in indices],
                  vertical_paths=[batch.vertical_paths[i] for i in indices],

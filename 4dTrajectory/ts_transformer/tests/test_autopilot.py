@@ -614,6 +614,22 @@ def test_a_go_around_climbs_at_the_go_around_angle_keeps_the_heading_word_and_th
     assert int(flown.done_cycle[0]) + 1 == pytest.approx(len(grid) * 2.0 * 1.5 + GO_AROUND_EXTRA_S)
 
 
+def test_a_go_around_on_the_base_keeps_flying_the_base():
+    """D27: "go-around" said on the base leg (+90°, class 18, in force; nothing said after it) keeps that track — the
+    removed law flew R's course (090) instead."""
+    words = Words(spec())
+    signals, reading = _downwind()
+    base = words.heading_class(180.0, 90.0)
+    said = int(np.nonzero(reading.words[:, HEADING] == base)[0][0])
+    go = said + 8                                                  # on the base, the turn onto it done
+    grid = reading.words[: go + 1].copy()
+    grid = np.vstack([grid, np.full((60, len(COLUMNS)), UNCHANGED)])
+    grid[go, RUNWAY] = RUNWAY_GO_AROUND
+    flown, _, _ = _fly_sentence(signals, grid, clock="time")
+    track = compass_from_math_rad(flown.states[0, 1:, 4].numpy())
+    assert np.abs(np_wrap180(track[go * 2 + 2: go * 2 + 82] - 180.0)).max() < 2.0
+
+
 def test_the_go_around_angle_is_the_thrust_limited_climb_within_its_limits():
     """D28: γ_GA = min(3°, max(1.885°, γ_T)), sin γ_T = (T_max − D) / (m g) with the drag at load factor 1: 3° with ample
     thrust, γ_T itself between the limits, 1.885° when the thrust is short (the thrust limit then binds in flight)."""
@@ -653,6 +669,16 @@ def test_go_around_alone_starts_no_climb():
     final[len(final) - 15, RUNWAY] = RUNWAY_GO_AROUND                  # "no level-off" in force
     with pytest.raises(ValueError, match="rules 5 and 6"):
         _fly_sentence(signals, final, clock="time")
+    from ts_transformer.autopilot import single
+    from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S
+
+    inputs, _, _, approach = _physics(signals, instruction_airport())
+    executor = single.SingleExecutor(inputs, instruction_airport(), float(approach[0]), _params(), words, step_s=2.0,
+                                     time_limit_s=len(final) * 3.0, reserve_s=GO_AROUND_EXTRA_S)
+    sentence = single.Sentence(final, words, step_s=2.0)
+    with pytest.raises(ValueError, match="rules 5 and 6"):
+        for cycle in range(executor.cycles):
+            executor.cycle(sentence.at(float(cycle - cycle % 2)), float(cycle))
 
 
 def test_a_speed_word_under_a_go_around_replaces_the_held_airspeed():
@@ -784,8 +810,10 @@ def test_each_outcome_on_a_hand_built_track():
 
 
 def test_a_crossing_under_a_go_around_is_not_an_event():
-    """§5.8: while G is true a crossing of R is not an event — the low pass flies on."""
+    """§5.8, D33: while G is true no crossing is an event — of R (the low pass flies on) or of another candidate."""
     assert _judged(-20.0, 15.0, glide=True, go_around=True)[0] == "timeout"
+    assert _judged(1480.0, 250.0)[0] == "crossed_other_runway"
+    assert _judged(1480.0, 250.0, go_around=True)[0] == "timeout"
 
 
 def test_the_decision_altitude_check_passes_and_fails():
@@ -1176,7 +1204,8 @@ def _batch(signals, reading, interval_s=2.0):
 
     geometry, words = instruction_airport(), Words(spec())
     sentence = replay.sentence_on_interval(reading, signals, interval_s, geometry, words)
-    return replay.Batch(signals=[replay.from_row(signals, sentence.first_row)], series=[], readings=[reading],
+    return replay.Batch(indices=[0], signals=[replay.from_row(signals, sentence.first_row)], series=[],
+                        readings=[reading],
                         sentences=[sentence], row_interval_s=interval_s, geometries=[geometry],
                         vertical_paths=[vertical_paths(geometry)], approach_ias_mps=[], groups=[replay.OWN], drawn={})
 

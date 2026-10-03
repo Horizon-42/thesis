@@ -29,7 +29,8 @@ def stratum(reading: Reading) -> str:
 
 def go_around_in_force(reading: Reading, words: Words) -> list[dict[str, bool]]:
     """At each go-around row (D26, design §11.6): whether "no level-off" and "unspecified" are in force (said before the
-    row), whether the approach it ends had a capture row, and whether the next approach is to another runway."""
+    row), whether the approach it ends had a capture row, whether the next approach is to another runway, and whether
+    the go-around's lowest point lies past the threshold (where the capture corridor has ended)."""
     held = in_force(reading.words)
     out = []
     for position, row in enumerate(reading.go_around_rows):
@@ -37,7 +38,8 @@ def go_around_in_force(reading: Reading, words: Words) -> list[dict[str, bool]]:
         out.append({"no_level_off": bool(held[row - 1, ALTITUDE] == words.altitude_no_level_off),
                     "unspecified": bool(held[row - 1, SPEED] == words.speed_unspecified),
                     "captured": ending.capture_row is not None,
-                    "other_runway": following.runway_index != ending.runway_index})
+                    "other_runway": following.runway_index != ending.runway_index,
+                    "past_threshold": reading.checks["go_arounds"][position]["along_m"] > 0.0})
     return out
 
 
@@ -104,7 +106,7 @@ def summarise_group(records: list[dict[str, Any]]) -> dict[str, Any]:
         "capture_before_threshold_m": _quantiles(r["capture_before_threshold_m"] for r in records),
         "go_arounds": {"flights": sum(r["go_arounds"] > 0 for r in records), "words": total("go_arounds"),
                        **{key: sum(item[key] for r in records for item in r["go_around_in_force"])
-                          for key in ("no_level_off", "unspecified", "captured", "other_runway")}},
+                          for key in ("no_level_off", "unspecified", "captured", "other_runway", "past_threshold")}},
         "altitude": {"words": total("altitude_words"),
                      "contained_share": _share(total("altitude_contained"), total("altitude_words")),
                      "row_share": _share(total("altitude_rows_inside"), total("altitude_rows")),

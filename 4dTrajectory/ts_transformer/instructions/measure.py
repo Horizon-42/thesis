@@ -89,6 +89,9 @@ SUGGESTED: dict[str, Any] = {
     "go_around_min_drop_m": 150.0,
     "go_around_min_climb_m": 150.0,
     "go_around_on_runway_height_m": 15.0,
+    # the closed-loop reading's tolerances (design §4.9, D32: the user, 2026-10-03)
+    "closed_loop_lateral_m": 30.0,
+    "closed_loop_vertical_m": 15.0,
 }
 SUGGESTED["heading_tolerance_deg"] = SUGGESTED["heading_step_deg"] / 2 + HEADING_WANDER_ALLOWANCE_DEG
 #: Descent classes: how many, and the outer edges (a slightly negative floor so a flat stretch
