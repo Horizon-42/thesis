@@ -41,13 +41,14 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D13 | The prior gets the height above the published glidepath of R at each step (§6.1) | Decided (was O3) | User, 2026-10-03 |
 | D14 | While G is true: "no level-off" is not permitted (rule 5), and the procedure mask "no climb below the entry height" does not apply (§3.7) | Decided | User, 2026-10-03 |
 | D15 | The spec measurement gives each value that it fits from data with rounder candidates and the fit that each leaves; the user chooses (§3.5) | Decided | User, 2026-10-03 |
+| D16 | The prior has no row position embedding and no input "time from row 0". The time attention uses RoPE with the row's time in seconds (§6.1) | Decided (was the first half of O4) | User, 2026-10-03 |
 
 ### 0.2 Open items, in the order of discussion
 
 | # | Item | Proposal | §  |
 |---|---|---|---|
 | O2 | Tolerances of the stability check at the decision altitude (DA) | No values in this document (D7) | 5.8 |
-| O4 | Keep or remove the row position embedding and the input "time from row 0" | Remove both. They show where the 25 km slice starts, not a fact of the flight | 6.1 |
+| O4 | The per-column input "time since this column said its word" | Proposal: keep it for every column, in seconds instead of rows (the same for every row interval, D11) | 6.1 |
 | O5 | Label the real go-arounds (R40 found 105 on the training days) | Discuss after O2 and O4 | 4.6 |
 | O6 | Replacement for the clearance mask of the multi-aircraft loop | Discuss with §8 | 8 |
 | O7 | Selection of designs by leave-one-airport-out (train on four airports, read the fifth) | Discuss with §7 | 7 |
@@ -535,7 +536,18 @@ the model says "go-around" before the DA point, the flight continues (§3.2).
   with the straight-line reference of §11.4 (TCH + d·tan(angle) + d²/(2R_e), R_e the earth's radius of curvature along
   the course). It is procedure geometry as an input; the model still decides the profile (principle 2). The value is
   only meaningful near the final; the model also has the offset from the final to weigh it.
-- **Open:** the row position embedding and "time from row 0" (O4).
+- **Time (D16).** No row position embedding (`prior/model.py:313`) and no input "time from row 0" (`prior/data.py:63`
+  `time`): both measure the time since the aircraft entered the 25 km slice, a cut of the data, and a long sentence (a
+  go-around adds up to 900 s) reaches rows that training seldom saw. The causal time attention gives the order. RoPE in
+  the time attention gives how far back each earlier row is: the rotation of a row's query and key uses its time in
+  seconds, so the attention reads only time differences. Seconds, not rows, so that every row interval of D11 reads the
+  same time. RoPE works with the row-by-row cache of the speaker (`Prior.extend`): a key is rotated once, when it is
+  written. The RoPE base is set at implementation.
+- **Time since each word (O4, proposal).** Each column has the input "time since this column said its word in force"
+  (`since`, now `log1p(rows) / 5`, counted from the first predicted step at the earliest). Proposal: in seconds, for
+  every column. The runway column's value is, in the labelled data, the time since the first predicted step, because a
+  labelled sentence says its runway only there. In closed loop it is the time since the runway was given or given again
+  (a change of runway, or the runway word that ends a go-around), so it measures a real fact.
 
 ### 6.2 Outputs
 
@@ -564,6 +576,11 @@ a held-out test airport only. The selection method between designs is open (O7).
 
 ## 8 Multi-aircraft (outline)
 
+- **Time.** A scene puts its aircraft on one UTC grid: a scene step is one instant for every aircraft (multi-aircraft
+  design §2.1). That is the layout of the data, not a model input, and D16 does not change it. RoPE runs along each
+  aircraft's own rows; the attention among the aircraft and the traffic attention read one scene step, which is one
+  instant, and use no position. Edge features are relative (the approach clock is a distance; the closest-approach time
+  is a time difference). The landing context counts the landings in the 30 min before the step's UTC time, as now.
 - R exists at every step for every aircraft. Thus the relations of the edge features (`inference/scene_edges.py`: the
   approach clock, the same runway, the parallel runways) and the separation judge (`inference/separation.py`) have a
   runway at every step. In `instruction-v3` this was also true; this design keeps it.
