@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import numpy as np
 
 from ts_transformer.data.day_split import parse_utc
@@ -47,6 +49,12 @@ def first_interval_row(entry_time_utc: str, interval_s: float, step_s: float) ->
     if abs(seconds / step_s - round(seconds / step_s)) > 1e-9:
         raise ValueError(f"row 0 at {entry_time_utc} is not on the {step_s:g} s UTC grid")
     return next(row for row in range(every) if round(seconds + row * step_s) % round(interval_s) == 0)
+
+
+def later_utc(entry_time_utc: str, seconds: float) -> str:
+    """The UTC time ``seconds`` after ``entry_time_utc``, in the artefact's form (whole seconds): a sentence's first row
+    on a coarser grid starts there."""
+    return (parse_utc(entry_time_utc) + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def in_force(grid: np.ndarray) -> np.ndarray:

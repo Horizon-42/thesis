@@ -1,12 +1,13 @@
-"""Executor E7: write the executor's spec (executor design §9–§10).
+"""Executor E7: write the executor's spec (design §5, §14.2 A6; executor design §9–§10).
 
 The executor takes no information beyond the vocabulary (the user's rule, 2026-09-24) and the procedure standards:
 method A (`autopilot/derive.py`) sets τ_ψ = the heading lead; the roll rate p is the standards' 5°/s (`ROLL_RATE_DEG_S`);
-the turn rates, the bank limit, the speed changes' pace and the altitude tolerance are the vocabulary's, read at run time; a word takes effect
-when it is said; the landing crosses the pointed runway at its published threshold crossing height and never
-descends under its published glidepath's lower edge (read at replay, `runway_data.published_vertical_paths`;
-every candidate's is recorded in ``measurements.json`` as the spec is written). Nothing is measured from data (the measurements that set these before are
-archived: `archive/executor_vocabulary_only_2026_09/`). The design's fixed choices are module constants below. Writes ``spec.json`` + ``measurements.json`` into
+the turn rates, the bank limit, the speed changes' pace and the level bands are the vocabulary's, read at run time; a
+word takes effect when it is said. The judge's decision-altitude check takes two tolerances the USER gives (design §5.8,
+O2): ``--decision-cone-share`` and ``--decision-glidepath-tolerance-m``, required, with no default; each candidate's
+published vertical path and decision altitude (read at replay, `runway_data.published_vertical_paths`) are recorded in
+``measurements.json`` as the spec is written. Nothing is measured from data. The design's fixed choices are module
+constants below. Writes ``spec.json`` + ``measurements.json`` into
 ``--dir`` (never over an existing file), from a clean tree only: the spec records the commit it was measured at and the
 executor code's logic hash; then the spec's reference tracks, flown by that code, and its passed record
 (`autopilot.conformance`) — a spec is opened only for executor code that flies them within the bounds (executor design
@@ -31,9 +32,9 @@ from ts_transformer.autopilot.runway_data import published_vertical_paths
 from ts_transformer.autopilot.sentence import CLOCKS
 from ts_transformer.autopilot.speed import speed_change_mps2
 from ts_transformer.autopilot.spec import executor_source_sha256, params_sha256, write_spec
-from ts_transformer.instructions.artefact import (
-    labeller_source_sha256, load_candidates, load_spec, require_current_labeller,
-)
+from ts_transformer.instructions.artefact import load_candidates, load_spec
+from ts_transformer.instructions.conformance import labeller_code_sha256, require_conforming_labeller
+from ts_transformer.instructions.words import Words
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: Δt, the control period (the user's choice, design §14 item 5).
@@ -58,6 +59,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dir", type=Path, required=True, help="the new executor spec directory")
     parser.add_argument("--word-clock", choices=CLOCKS, required=True,
                         help="the clock a replay says a truth sentence's words on (§11)")
+    parser.add_argument("--decision-cone-share", type=float, required=True,
+                        help="the DA check: the lateral offset within this share of the FAS cone's half-width (O2)")
+    parser.add_argument("--decision-glidepath-tolerance-m", type=float, required=True,
+                        help="the DA check: the height within this of the published glidepath, metres (O2)")
     args = parser.parse_args(argv)
     # normalised (".." resolved, links kept): a worktree's data trees are links to the main tree's
     instructions = Path(os.path.normpath(args.instructions if args.instructions.is_absolute()
@@ -72,8 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     git = git_state()
     if git["dirty"]:
         parser.error("the tree has uncommitted changes; an executor spec is measured at a commit")
-    require_current_labeller(instructions)
-    executor, labeller = executor_source_sha256(), labeller_source_sha256()
+    require_conforming_labeller(instructions)
+    executor, labeller = executor_source_sha256(), labeller_code_sha256()
     spec = load_spec(instructions)
 
     tau, roll_rate = derive.heading_time_constant_s(spec, CYCLE_S), ROLL_RATE_DEG_S
@@ -83,11 +88,13 @@ def main(argv: list[str] | None = None) -> int:
                      "and lead the executor's own turns would outrun their stopping rate (`derive.stopping_roll_rate_deg_s`)")
     params = ExecutorParams(cycle_s=CYCLE_S, heading_time_constant_s=tau, bank_rate_deg_s=roll_rate,
                             path_time_constant_s=PATH_TIME_CONSTANT_S, path_rate_factor=PATH_RATE_FACTOR,
-                            timeout_factor=TIMEOUT_FACTOR, word_clock=args.word_clock)
-    params.check(spec)
+                            timeout_factor=TIMEOUT_FACTOR, word_clock=args.word_clock,
+                            decision_cone_share=args.decision_cone_share,
+                            decision_glidepath_tolerance_m=args.decision_glidepath_tolerance_m)
+    params.check(spec, spec.step_s)
     print(f"method A (the vocabulary): τ_ψ {tau:g} s; the standards' roll rate p {roll_rate:g}°/s", flush=True)
 
-    if executor_source_sha256() != executor or labeller_source_sha256() != labeller:
+    if executor_source_sha256() != executor or labeller_code_sha256() != labeller:
         raise SystemExit("the executor's or the labeller's code changed while the spec was measured; measure again")
     measurements = {
         "method_a": {
@@ -103,15 +110,17 @@ def main(argv: list[str] | None = None) -> int:
                                                                     "turns stop within the bank limit"},
         },
         "from_the_vocabulary": {"turn_rate_max_deg_s": spec.turn_rate_max_deg_s,
-                                "turn_rate_min_deg_s": spec.turn_rate_min_deg_s,
                                 "turn_bank_max_deg": spec.turn_bank_max_deg, "heading_lead_s": spec.heading_lead_s,
                                 "speed_change_mps2": speed_change_mps2(spec),
-                                "altitude_tolerance_m": spec.altitude_tolerance_m,
-                                "landing_max_height_m": spec.landing_max_height_m},
+                                "narrowest_level_band_m": float(Words(spec).altitude_tolerances.min()),
+                                "lined_up_deg": spec.lined_up_deg, "landing_max_height_m": spec.landing_max_height_m},
+        "from_the_user": {"decision_cone_share": args.decision_cone_share,
+                          "decision_glidepath_tolerance_m": args.decision_glidepath_tolerance_m,
+                          "rule": "the decision-altitude check's tolerances (design §5.8, O2), given on the command line"},
         "from_the_runway": {
-            "rule": "each candidate's published threshold crossing height (the landing's crossing point) and glidepath "
-                    "angle (its lower edge not descended under before the threshold), read at replay "
-                    "(runway_data.published_vertical_paths); recorded here as the spec was written",
+            "rule": "each candidate's published threshold crossing height, glidepath angle and decision altitude (the "
+                    "judge's decision-altitude check), read at replay (runway_data.published_vertical_paths); recorded "
+                    "here as the spec was written",
             "published": {code: {candidate.ident: asdict(path)
                                  for candidate, path in zip(geometry.candidates, published_vertical_paths(geometry))}
                           for code, geometry in sorted(load_candidates(instructions).items())},
@@ -119,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         "fixed": {"cycle_s": CYCLE_S, "path_time_constant_s": PATH_TIME_CONSTANT_S, "path_rate_factor": PATH_RATE_FACTOR,
                   "timeout_factor": TIMEOUT_FACTOR},
     }
-    source = {"executor_source_sha256": executor, "python": platform.python_version(), "labeller_source_sha256": labeller,
+    source = {"executor_source_sha256": executor, "python": platform.python_version(), "labeller_code_sha256": labeller,
               "instructions": artefact_name, "git": git}
     write_spec(directory, params, spec.sha256, measurements, source)
     print(f"executor spec {params_sha256(params)[:12]} → {directory}")

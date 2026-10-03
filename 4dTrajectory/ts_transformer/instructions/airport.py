@@ -24,7 +24,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from flight_scenarios.runway_target import airport_reference_point, airport_runways
-from geokit import ft_to_m
+from geokit import ft_to_m, wgs84_curvature_radii
 from ts_transformer.data.coordinate_frames import AirportENUFrame, AirportReference
 from ts_transformer.instructions.words import wrap180
 
@@ -170,3 +170,20 @@ def relative_to_runway(e_m, n_m, track_deg, altitude_m, candidate: RunwayCandida
         track_minus_course_deg=wrap180(np.asarray(track_deg) - candidate.course_deg),
         height_above_threshold_m=np.asarray(altitude_m) - candidate.elevation_m,
     )
+
+
+def curvature_radius_m(lat_deg: float, course_deg: float) -> float:
+    """The earth's radius of curvature along a compass course at a latitude: Euler's formula on the WGS84 meridional
+    and prime-vertical radii (R49's, `archive/two_tier_v3_2026_10/experiments/instruction_final_approach.py`)."""
+    meridional, prime_vertical = wgs84_curvature_radii(lat_deg)
+    course = math.radians(course_deg)
+    return 1.0 / (math.cos(course) ** 2 / meridional + math.sin(course) ** 2 / prime_vertical)
+
+
+def glidepath_height_m(before_threshold_m, crossing_height_m: float, glidepath_deg: float, radius_m: float):
+    """The published glidepath's height above the threshold at each distance before it, as a straight line in space
+    (design §11.4, the "straight line" reference): ``TCH + d · tan(angle) + d² / (2 R)``, R the earth's radius of
+    curvature along the course (`curvature_radius_m`) — the flat formula without the last term is up to 31 m low at
+    20 km. The judge's decision-altitude check reads it (`autopilot.judge`), and so will the prior's input (D13)."""
+    d = np.asarray(before_threshold_m, dtype=np.float64)
+    return crossing_height_m + d * math.tan(math.radians(glidepath_deg)) + d ** 2 / (2.0 * radius_m)

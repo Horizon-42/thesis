@@ -1,8 +1,8 @@
 """The executor spec on disk (executor design §10, §12): the parameters, with a sha, written once — the vocabulary's rule
 for its own spec.
 
-``spec.json`` carries the parameters (`ExecutorParams`), their sha, the vocabulary spec they were derived from, the
-labeller that reads the flights, the logic hash of the executor code that measured it (`executor_source_sha256`: where
+``spec.json`` carries the parameters (`ExecutorParams`), their sha, the vocabulary spec they were derived from, the logic
+hash of the executor code that measured it (`executor_source_sha256`: where
 the spec came from) and the git state; ``measurements.json`` where every value comes from. Nothing here is ever
 overwritten.
 
@@ -30,12 +30,11 @@ from pathlib import Path
 from typing import Any
 
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.io_utils import logic, logic_sha256, write_json_atomic
+from ts_transformer.io_utils import logic_sha256, write_json_atomic
 
-#: v6 (2026-09-27, executor v11): the source hash is over the code's logic (`logic`), no longer its bytes
-#: (v5, 2026-09-24: nothing measured from data is left — the speed changes' pace is the vocabulary's, the landing
-#: crosses at the runway's published TCH).
-EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v6"
+#: v7 (two-tier v4, design §14.2 A6): the laws of design §5 (no capture, no landing aim, no glidepath floor), the
+#: decision-altitude check's two tolerances among the parameters, the labeller identified by its conformance.
+EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v7"
 PACKAGE = Path(__file__).resolve().parent
 #: Imported by the executor but not part of what decides a flown track or a value: the instruction language
 #: (its own hash, the labeller's, is recorded in the spec and checked at replay), the path and file helpers, and the

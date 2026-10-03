@@ -40,19 +40,18 @@ from aerodynamic_model.torch_dynamics import (
 )
 from aerodynamic_model.torch_scaled_transport_chart_dynamics import SCALED_TRANSPORT_CHART_REFERENCE_UNITS
 from geokit import METRES_PER_DEG_LAT, WGS84_A, WGS84_E2
-from ts_transformer.autopilot.executor import LIMITS, MODES, Flown
+from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S, LIMITS, MODES, Flown
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.inverse import BANK_MAX_RAD, LOAD_FACTOR_MAX, LOAD_FACTOR_MIN
-from ts_transformer.autopilot.lateral import capture_planning_rate_deg_s
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
-from ts_transformer.autopilot.runway_data import VerticalPath
 from ts_transformer.autopilot.sentence import ROW_ROUNDING, TRACK_MAX_ROWS_PER_CYCLE, TRACK_WINDOW_S, _filled
 from ts_transformer.autopilot.speed import speed_change_mps2
-from ts_transformer.autopilot.vertical import GLIDEPATH_BELOW_M, GO_AROUND_CLIMB_RAD, TUBE_MARGIN_SHARE
-from ts_transformer.instructions.airport import AirportGeometry
+from ts_transformer.autopilot.vertical import GO_AROUND_CLIMB_RAD
+from ts_transformer.instructions.airport import AirportGeometry, landing_cross_limit_m
+from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import (
-    ALTITUDE, ANGLE, ANGLE_LEVEL, APPROACH, APPROACH_CLEARED, APPROACH_GO_AROUND, HEADING, RUNWAY, SPEED, Words,
+    ALTITUDE, ANGLE, ANGLE_LEVEL, HEADING, RUNWAY, RUNWAY_GO_AROUND, SPEED, Words,
 )
 from ts_transformer.outputs.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION
 
@@ -130,15 +129,13 @@ class Runway:
     threshold_n_m: float
     course_deg: float
     elevation_m: float
-    crossing_height_m: float
-    glidepath_tan: float
+    landing_limit_m: float
 
 
-def runways_of(geometry: AirportGeometry, paths: Sequence[VerticalPath]) -> tuple[Runway, ...]:
-    if len(paths) != len(geometry.candidates):
-        raise ValueError("one published vertical path per candidate runway")
-    return tuple(Runway(c.threshold_e_m, c.threshold_n_m, c.course_deg, c.elevation_m, path.crossing_height_m,
-                        math.tan(math.radians(path.glidepath_deg))) for c, path in zip(geometry.candidates, paths))
+def runways_of(geometry: AirportGeometry, spec: VocabularySpec) -> tuple[Runway, ...]:
+    return tuple(Runway(c.threshold_e_m, c.threshold_n_m, c.course_deg, c.elevation_m,
+                        landing_cross_limit_m(geometry, index, spec.landing_cross_limit_m, spec.parallel_course_delta_deg))
+                 for index, c in enumerate(geometry.candidates))
 
 
 def relative(state: Kin, runway: Runway) -> tuple[float, float, float]:
@@ -256,10 +253,10 @@ class WordsNow:
     """The words in force at one cycle (`sentence.WordsNow`, one flight)."""
 
     runway: int
-    approach: int
-    heading_deg: float
+    go_around: bool
+    heading_rel_deg: float
     altitude_m: float
-    land: bool
+    no_level_off: bool
     angle_class: int
     angle_deg: float
     speed_mps: float
@@ -268,26 +265,27 @@ class WordsNow:
 
 
 class Sentence:
-    """One sentence (``grid``: the artefact's ``[N, 6]`` word grid) looked up at any sentence time (`Sentences.at`)."""
+    """One sentence (``grid``: ``[N, 5]``, rows ``step_s`` apart) looked up at any sentence time (`Sentences.at`)."""
 
-    def __init__(self, grid: np.ndarray, words: Words) -> None:
-        value, issued = _filled(np.asarray(grid, dtype=np.int64))
-        self.value, self.issued, self.rows = value.tolist(), issued.tolist(), len(grid)
-        self.step_s = words.spec.step_s
-        self.heading = [words.heading_deg(i) for i in range(words.n_heading)]
-        self.altitude = [words.altitude_m(i) if i != words.altitude_land else math.nan
-                         for i in range(words.altitude_land + 1)]
+    def __init__(self, grid: np.ndarray, words: Words, *, step_s: float) -> None:
+        value, issued, runway = _filled(np.asarray(grid, dtype=np.int64))
+        self.value, self.issued, self.runway, self.rows = value.tolist(), issued.tolist(), runway.tolist(), len(grid)
+        self.step_s = step_s
+        self.heading = [words.heading_relative_deg(i) for i in range(words.n_heading)]
+        self.altitude = [words.altitude_m(i) if i != words.altitude_no_level_off else math.nan
+                         for i in range(words.altitude_no_level_off + 1)]
         self.angle = [words.angle_deg(i) for i in range(words.n_descent + 2)]
         self.speed = [words.speed_mps(i) if i != words.speed_unspecified else math.nan
                       for i in range(words.speed_unspecified + 1)]
-        self.land, self.unspecified = words.altitude_land, words.speed_unspecified
+        self.no_level_off, self.unspecified = words.altitude_no_level_off, words.speed_unspecified
 
     def at(self, heard_s: float) -> WordsNow:
         row = min(max(math.floor(heard_s / self.step_s + ROW_ROUNDING), 0), self.rows - 1)
         value = self.value[row]
-        return WordsNow(runway=value[RUNWAY], approach=value[APPROACH], heading_deg=self.heading[value[HEADING]],
-                        altitude_m=self.altitude[value[ALTITUDE]], land=value[ALTITUDE] == self.land,
-                        angle_class=value[ANGLE], angle_deg=self.angle[value[ANGLE]], speed_mps=self.speed[value[SPEED]],
+        return WordsNow(runway=self.runway[row], go_around=value[RUNWAY] == RUNWAY_GO_AROUND,
+                        heading_rel_deg=self.heading[value[HEADING]], altitude_m=self.altitude[value[ALTITUDE]],
+                        no_level_off=value[ALTITUDE] == self.no_level_off, angle_class=value[ANGLE],
+                        angle_deg=self.angle[value[ANGLE]], speed_mps=self.speed[value[SPEED]],
                         unspecified=value[SPEED] == self.unspecified, issued_step=tuple(self.issued[row]))
 
 
@@ -364,53 +362,29 @@ class Lateral:
     def __init__(self, params: ExecutorParams, words: Words) -> None:
         spec = words.spec
         self.params, self.spec = params, spec
-        self.captured = self.tracking = self.cleared = False
-        self.runway: int | None = None
         self.word_deg: float | None = None
         self.word_step = 0
         self.heard_s = self.track_unwrapped = self.target_unwrapped = self.last_track = 0.0
-        self.planning_rad_s = math.radians(capture_planning_rate_deg_s(spec))
         self.return_gain = 2.0 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s)
-        self.tightest = GRAVITY_MPS2 * math.tan(math.radians(spec.turn_bank_max_deg))
-        self.widening_tan = math.tan(math.radians(spec.corridor_widening_deg))
 
-    def _corridor_half_width(self, before: float) -> float:
-        return self.spec.corridor_half_width_m + _clamp(before, 0.0) * self.widening_tan
-
-    def _converges(self, heading: float, course: float, right: float, before: float, tolerance: float) -> bool:
-        angle = _wrap180(heading - course)
-        within_angle = abs(angle) <= 90.0 + tolerance
-        inside = abs(right) <= self._corridor_half_width(before)
-        toward = -1.0 if right >= 0.0 else 1.0
-        best = _clamp(angle + toward * tolerance, -90.0, 90.0)
-        pointing = best * toward > 0.0
-        slope = math.tan(math.radians(abs(best) if pointing else 1.0))
-        reaches = before - abs(right) / slope > 0.0
-        return within_angle and (inside or (pointing and reaches))
-
-    def _capture_lead(self, state: Kin, off_course: float, bank: float, bank_rate: float) -> float:
-        rate, speed = self.planning_rad_s, state.ground_speed_mps
-        off = math.radians(off_course)
-        turn_bank = math.atan(speed * rate / GRAVITY_MPS2) * (1.0 if off > 0.0 else -1.0)
-        roll_s = abs(turn_bank - bank) / bank_rate
-        return (speed / rate * (1.0 - math.cos(abs(off))) + speed * math.sin(abs(off)) * roll_s / 2.0
-                + speed * rate * self.params.heading_time_constant_s ** 2 / 2.0)
-
-    def _word_error(self, state: Kin, heading: float, issued: int, flying_course: bool, go_around: bool,
-                    time_s: float) -> float:
+    def _word_error(self, state: Kin, relative_deg: float, issued: int, course: float, flying_course: bool,
+                    go_around: bool, time_s: float) -> float:
+        heard = _remainder(course + relative_deg, 360.0)
         if self.word_deg is None:
             self.track_unwrapped = state.track_deg
-            self.target_unwrapped = state.track_deg + _wrap180(heading - state.track_deg)
+            self.target_unwrapped = state.track_deg + _wrap180(heard - state.track_deg)
+            word = heard
         else:
             self.track_unwrapped = self.track_unwrapped + _wrap180(state.track_deg - self.last_track)
             new = issued != self.word_step
+            word = heard if new else self.word_deg
             if new or flying_course:
                 self.heard_s = time_s
             if new:
-                self.target_unwrapped = self.target_unwrapped + _wrap180(heading - self.word_deg)
+                self.target_unwrapped = self.target_unwrapped + _wrap180(word - self.word_deg)
             if flying_course or (go_around and new):
-                self.target_unwrapped = self.track_unwrapped + _wrap180(heading - state.track_deg)
-        self.word_deg, self.word_step, self.last_track = heading, issued, state.track_deg
+                self.target_unwrapped = self.track_unwrapped + _wrap180(word - state.track_deg)
+        self.word_deg, self.word_step, self.last_track = word, issued, state.track_deg
         return self.target_unwrapped - self.track_unwrapped
 
     def _rate_for_error(self, error: float) -> float:
@@ -422,63 +396,18 @@ class Lateral:
         rate = _min(abs(error / _clamp(to_go, 2.0 * self.params.cycle_s)), stopping)
         return _sign(error) * _clamp(rate, high=self.spec.turn_rate_max_deg_s)
 
-    def rate(self, state: Kin, force: WordsNow, runways: Sequence[Runway], bank: float, bank_rate: float,
-             time_s: float) -> tuple[float, dict[str, bool]]:
-        params, spec = self.params, self.spec
-        if self.runway is not None and force.runway != self.runway and (self.cleared or self.captured):
-            raise ValueError("the runway pointer changed after the clearance (executor design §4.6)")
-        self.runway = force.runway
-        runway = runways[force.runway]
-        course = runway.course_deg
-        before, right, off_course = relative(state, runway)
-        go_around = force.approach == APPROACH_GO_AROUND
-        flying_course = go_around and force.issued_step[HEADING] < force.issued_step[APPROACH]
-        cleared = force.approach == APPROACH_CLEARED
-        self.cleared = (self.cleared or cleared) and not go_around
-        toward_line = right * math.sin(math.radians(off_course)) < 0.0
-        turn_lands_on_line = abs(right) <= self._capture_lead(state, off_course, bank, bank_rate)
-        inside = abs(right) <= self._corridor_half_width(before)
-        start = cleared and not self.captured and before > 0.0 and ((toward_line and turn_lands_on_line) or inside)
-        self.captured = (self.captured or start) and not go_around
-        on_course = abs(off_course) <= spec.corridor_course_tolerance_deg
-        self.tracking = self.captured and (self.tracking or on_course or not toward_line)
-
-        heading = force.heading_deg
-        misses = not self._converges(heading, course, right, before, 0.0)
-        bent_reaches = self._converges(heading, course, right, before, spec.heading_tolerance_deg)
-        waiting = cleared and not self.captured and before > 0.0
-        bend = waiting and misses and bent_reaches
-        intercept = waiting and not bent_reaches
-        side = -1.0 if right >= 0.0 else 1.0
-        error = self._word_error(state, heading, force.issued_step[HEADING], flying_course, go_around, time_s) + (
-            side * spec.heading_tolerance_deg if bend else 0.0)
-        if intercept:
-            error = _wrap180(course + side * spec.intercept_angle_deg - state.track_deg)
-        gain = 1.0 / (4.0 * state.ground_speed_mps * params.heading_time_constant_s)
-        steer = spec.corridor_course_tolerance_deg / 2.0 if inside else spec.intercept_angle_deg
-        line = course - _max(_min(math.degrees(gain * right), steer), -steer)
-        if self.tracking:
-            error = _wrap180(line - state.track_deg)
+    def rate(self, state: Kin, force: WordsNow, runways: Sequence[Runway], time_s: float
+             ) -> tuple[float, dict[str, bool]]:
+        course = runways[force.runway].course_deg
+        flying_course = force.go_around and force.issued_step[HEADING] < force.issued_step[RUNWAY]
+        error = self._word_error(state, force.heading_rel_deg, force.issued_step[HEADING], course, flying_course,
+                                 force.go_around, time_s)
         if flying_course:
             error = _wrap180(course - state.track_deg)
-        off = abs(math.radians(off_course))
-        arc = state.ground_speed_mps * (1.0 - math.cos(off)) / _clamp(abs(right), 1e-9)
-        steady = _clamp(arc, math.radians(spec.turn_rate_min_deg_s))
-        tightest = _clamp(self.tightest / state.ground_speed_mps, high=math.radians(spec.turn_rate_max_deg_s))
-        capture_rad_s = _min(steady, tightest)
-        capture = -_sign(off_course) * _min(math.degrees(capture_rad_s), abs(off_course) / params.heading_time_constant_s)
-        if self.captured and not self.tracking:
-            rate = capture
-        elif self.tracking:
-            rate = self._rate_for_error(error)
-        elif intercept or flying_course:
             rate = self._rate_for_error(error)
         else:
-            rate = self._word_rate(error, self.heard_s + spec.heading_lead_s - time_s, state.ground_speed_mps)
-        intercept_target = course + side * spec.intercept_angle_deg
-        off_word = intercept and abs(_wrap180(intercept_target - heading)) > spec.heading_tolerance_deg
-        return rate, {"captured": self.captured, "tracking": self.tracking, "bent": bend, "intercepting": intercept,
-                      "intercepting_off_word": off_word, "go_around": go_around}
+            rate = self._word_rate(error, self.heard_s + self.spec.heading_lead_s - time_s, state.ground_speed_mps)
+        return rate, {"flying_course": flying_course}
 
 
 class Vertical:
@@ -487,32 +416,21 @@ class Vertical:
     def __init__(self, params: ExecutorParams, words: Words) -> None:
         spec = words.spec
         self.params, self.words = params, words
-        self.tolerance_m = spec.altitude_tolerance_m
-        self.landing_max_height_m = spec.landing_max_height_m
+        self.tolerance_m = float(words.altitude_tolerances.min())
         self.steepest_low_rad = math.radians(spec.descent_angle_edges_deg[-2])
-        self.steepest_low_tan = math.tan(self.steepest_low_rad)
         self.descent_max_rad = math.radians(max(spec.descent_angle_centres_deg))
         self.climb_rad = math.radians(spec.climb_angle_centre_deg)
-        self.steepest_rad = math.radians(words.angle_bounds(words.n_descent)[1])
-        bounds = [words.angle_bounds(index) for index in range(words.n_descent + 2)]
-        self.shallow_tan = [math.tan(math.radians(low)) for low, _ in bounds]
-        self.steep_tan = [math.tan(math.radians(steep)) for _, steep in bounds]
-        self.captured = self.left_tube = False
+        self.captured = False
         self.issued = (-1, -1)
-        self.flown_m = self.anchor_m = 0.0
-        self.anchor_height_m = math.nan
 
-    def rate(self, state: Kin, force: WordsNow, to_go_m: float, runway: Runway, off_course_deg: float,
-             straight_m: float, line_captured: bool, go_around: bool) -> tuple[float, float, dict[str, bool]]:
-        land, angle_class = force.land, force.angle_class
-        if land and not (ANGLE_LEVEL + 1 <= angle_class <= self.words.n_descent):
-            raise ValueError("\"descend to land\" in force without a descent class (vocabulary §2.5, rule 3)")
+    def rate(self, state: Kin, force: WordsNow) -> tuple[float, float, dict[str, bool]]:
+        no_level_off, angle_class, go_around = force.no_level_off, force.angle_class, force.go_around
+        if no_level_off and not (ANGLE_LEVEL + 1 <= angle_class <= self.words.n_descent):
+            raise ValueError("\"no level-off\" in force without a descent class (design §3.7, rule 4)")
         issued = (force.issued_step[ALTITUDE], force.issued_step[ANGLE])
         new_word = issued != self.issued
         self.captured = self.captured and not new_word
         self.issued = issued
-        if new_word or self.anchor_height_m != self.anchor_height_m:
-            self.anchor_m, self.anchor_height_m = self.flown_m, state.height_m
 
         params, speed = self.params, state.speed_mps
         rate_max = params.path_rate_factor * speed * self.steepest_low_rad ** 2 / (2.0 * self.tolerance_m)
@@ -520,56 +438,19 @@ class Vertical:
         climb_rad = GO_AROUND_CLIMB_RAD if go_around else self.climb_rad
         height_to_go = state.height_m - force.altitude_m
         level_off = speed * (nominal * nominal) / (2.0 * rate_max)
-        moving = not land and angle_class != ANGLE_LEVEL and not self.captured
+        moving = not no_level_off and angle_class != ANGLE_LEVEL and not self.captured
         reached = moving and ((height_to_go if nominal > 0.0 else -height_to_go) <= level_off)
-        self.captured = self.captured or reached or (not land and angle_class == ANGLE_LEVEL)
+        self.captured = self.captured or reached or (not no_level_off and angle_class == ANGLE_LEVEL)
 
         hold_tau = 4.0 * params.path_time_constant_s
-        hold = _clamp(-height_to_go / (speed * hold_tau), -self.descent_max_rad, climb_rad)
-        tolerance = self.tolerance_m
-        margin = TUBE_MARGIN_SHARE * tolerance
-        steep_tan, shallow_tan = self.steep_tan[angle_class], self.shallow_tan[angle_class]
-        crossing_height, glidepath_tan = runway.crossing_height_m, runway.glidepath_tan
-        height = state.height_m - runway.elevation_m
-        anchor = self.anchor_height_m - runway.elevation_m
-        here = self.flown_m - self.anchor_m
-        along = self.flown_m - self.anchor_m + to_go_m
-        admitted_low = _clamp(crossing_height - tolerance + margin, 0.0)
-        admitted_high = _clamp(crossing_height + tolerance - margin, high=self.landing_max_height_m)
-        tube_low = anchor - along * steep_tan - tolerance + margin
-        tube_high = anchor - along * shallow_tan + tolerance - margin
-        low, high = _max(tube_low, admitted_low), _min(tube_high, admitted_high)
-        nearer_edge = admitted_high if tube_low > admitted_high else admitted_low
-        crossing = _min(_max(crossing_height, low), high) if low <= high else nearer_edge
-        above_crossing = height - crossing
-        on_line = _clamp(math.atan2(above_crossing, _clamp(to_go_m, 1.0)), 0.0, self.steepest_rad)
-        shortest = _clamp(math.atan2(above_crossing, _clamp(straight_m, 1.0)), 0.0)
-        toward = on_line if line_captured else _min(nominal, shortest)
-        upper = anchor - here * shallow_tan + tolerance - margin
-        lower = anchor - here * steep_tan - tolerance + margin
-        speed_tau = speed * hold_tau
-        below_glidepath = line_captured and height < crossing_height + to_go_m * glidepath_tan
-        in_tube = _min(_max(0.0 if below_glidepath else toward, math.atan(shallow_tan) + (height - upper) / speed_tau),
-                       math.atan(steep_tan) + (height - lower) / speed_tau)
-        in_reach = (lower - to_go_m * self.steepest_low_tan <= admitted_high) and (upper >= admitted_low)
-        self.left_tube = land and not go_around and line_captured and not in_reach
-        crossing_floor = _max(above_crossing / speed_tau, on_line) if line_captured else shortest
-        glidepath = crossing_height + to_go_m * glidepath_tan - GLIDEPATH_BELOW_M
-        closing_tan = glidepath_tan * math.cos(math.radians(off_course_deg))
-        on_glidepath = math.atan(closing_tan) + (height - glidepath) / speed_tau
-        floor = _min(crossing_floor, on_glidepath) if to_go_m > 0.0 else crossing_floor
-        wanted_aim = in_tube if in_reach else toward
-        aim = _clamp(_min(wanted_aim, floor), 0.0, self.steepest_rad)
-        glidepath_floor = land and not go_around and aim < _clamp(_min(wanted_aim, crossing_floor), 0.0, self.steepest_rad)
-        if land:
-            reference = climb_rad if go_around else -aim
+        hold = _min(_max(-height_to_go / (speed * hold_tau), -self.descent_max_rad), climb_rad)
+        if no_level_off:
+            reference = climb_rad if go_around else -nominal
         else:
             reference = hold if self.captured else -nominal
         wanted = (reference - state.gamma_rad) / params.path_time_constant_s
         gamma_rate = _clamp(wanted, -rate_max, rate_max)
-        self.flown_m = self.flown_m + state.ground_speed_mps * params.cycle_s
-        return gamma_rate, wanted, {"level_captured": self.captured, "aim_left_tube": self.left_tube,
-                                    "glidepath_floor": glidepath_floor, "path_rate_limited": abs(wanted) > rate_max}
+        return gamma_rate, wanted, {"level_captured": self.captured, "path_rate_limited": abs(wanted) > rate_max}
 
 
 class Speed:
@@ -608,17 +489,19 @@ class SingleExecutor:
     """`executor.Executor` for one flight, one cycle at a time: ``cycle`` flies the words given, ``done`` says the
     flight is over, ``flown`` hands the record over as the batch's `Flown` (a batch of one) for the judge."""
 
-    def __init__(self, inputs: FlightInputs, geometry: AirportGeometry, vertical_paths: Sequence[VerticalPath],
-                 approach_ias_mps: float, params: ExecutorParams, words: Words, *, time_limit_s: float) -> None:
+    def __init__(self, inputs: FlightInputs, geometry: AirportGeometry, approach_ias_mps: float, params: ExecutorParams,
+                 words: Words, *, step_s: float, time_limit_s: float, reserve_s: float) -> None:
         """``inputs``: the flight's physical context as the batch's executor takes it (`flights.flight_inputs`, a batch
-        of one), read into floats."""
+        of one), read into floats; ``step_s`` the sentence's row interval; ``reserve_s`` the time its go-arounds may
+        add."""
         spec = words.spec
-        params.check(spec)
+        params.check(spec, step_s)
         if len(inputs.initial_state) != 1:
             raise ValueError(f"the single-flight executor flies one flight, got {len(inputs.initial_state)}")
         self.params, self.words, self.time_limit_s = params, words, time_limit_s
+        self.most_s = time_limit_s + reserve_s
         self.chart = Chart(geometry.frame.lat0, geometry.frame.lon0, geometry.frame.m_per_deg_lon)
-        self.runways = runways_of(geometry, vertical_paths)
+        self.runways = runways_of(geometry, spec)
         self.aero = tuple(inputs.aero_params[0].tolist())
         self.max_thrust_n = float(inputs.max_thrust_n[0])
         self.plant = Plant(self.aero, inputs.frame_params[0].tolist(), self.max_thrust_n)
@@ -627,36 +510,37 @@ class SingleExecutor:
         self.bank_cap_rad = math.radians(spec.turn_bank_max_deg)
         if not 0.0 < self.bank_cap_rad <= BANK_MAX_RAD:
             raise ValueError(f"bank cap {spec.turn_bank_max_deg:.1f}° outside (0, {math.degrees(BANK_MAX_RAD):.0f}°]")
-        self.cycles = int(math.ceil(time_limit_s / params.cycle_s))
-        self.step_rows = int(round(spec.step_s / params.cycle_s))
+        self.cycles = int(math.ceil(self.most_s / params.cycle_s))
+        self.step_rows = int(round(step_s / params.cycle_s))
         self.state = tuple(inputs.initial_state[0].tolist())
         self.bank = 0.0
         self.states, self.commands, self.wanted = [self.state], [], []
         self.limits: dict[str, list[bool]] = {name: [] for name in LIMITS}
         self.modes: dict[str, list[bool]] = {name: [] for name in MODES}
         self.sentence_times: list[float] = []
+        self.runway_rows: list[int] = []
+        self.runway_issued = -1
         self.done, self.done_cycle, self.count = False, self.cycles - 1, 0
 
     def now(self) -> Kin:
         return self.chart.read(self.state)
-
-    @property
-    def runway_locked(self) -> bool:
-        return self.lateral.cleared or self.lateral.captured
 
     def cycle(self, force: WordsNow, sentence_s: float) -> None:
         params, cycle = self.params, self.count
         now = self.now()
         self.sentence_times.append(sentence_s)
         bank_rate = math.inf if cycle == 0 else math.radians(params.bank_rate_deg_s)
-        track_rate, lateral_modes = self.lateral.rate(now, force, self.runways, self.bank, bank_rate,
-                                                      cycle * params.cycle_s)
+        issued = force.issued_step[RUNWAY]
+        if force.go_around and issued != self.runway_issued and not self.done:
+            if self.time_limit_s + GO_AROUND_EXTRA_S > self.most_s:
+                raise ValueError("a time limit extended past the executor's reserve")
+            self.time_limit_s += GO_AROUND_EXTRA_S
+        self.runway_issued = issued
+        track_rate, lateral_modes = self.lateral.rate(now, force, self.runways, cycle * params.cycle_s)
         runway = self.runways[force.runway]
-        before, right, off_course = relative(now, runway)
+        before, right, _off_course = relative(now, runway)
         straight = math.hypot(before, right)
-        go_around = lateral_modes["go_around"]
-        gamma_rate, gamma_wanted, vertical_modes = self.vertical.rate(now, force, before, runway, off_course, straight,
-                                                                      self.lateral.captured, go_around)
+        gamma_rate, gamma_wanted, vertical_modes = self.vertical.rate(now, force)
         # `inverse.attitude`: the bank and load factor for the wanted rates, limits 1 and 2
         speed, gamma = now.speed_mps, now.gamma_rad
         cos_gamma = math.cos(gamma)
@@ -668,7 +552,7 @@ class SingleExecutor:
         bank = _min(_max(capped, self.bank - step), self.bank + step)
         load_wanted = b / math.cos(bank)
         load = _clamp(load_wanted, LOAD_FACTOR_MIN, LOAD_FACTOR_MAX)
-        accel, accel_wanted, speed_modes = self.speed.rate(now, force, go_around, load, self.aero, straight)
+        accel, accel_wanted, speed_modes = self.speed.rate(now, force, force.go_around, load, self.aero, straight)
         # `inverse.thrust`: the thrust fraction for the airspeed rate at that load factor, limit 3
         sin_gamma = math.sin(gamma)
         drag, stalled = _polar(load, speed, now.mass_kg, _isa_density(now.height_m), self.aero)
@@ -681,20 +565,25 @@ class SingleExecutor:
         self.states.append(self.state)
         self.commands.append(command)
         self.wanted.append((track_rate, gamma_wanted, accel_wanted))
+        self.runway_rows.append(force.runway)
         limits = {"bank_cap": capped != wanted_bank, "bank_rate": bank != capped, "load_factor": load != load_wanted,
                   "path_rate_limited": vertical_modes["path_rate_limited"], "stall_floor": speed_modes["stall_floor"],
                   "thrust_max": thrust_wanted > MAX_THRUST_FRACTION, "thrust_min": thrust_wanted < MIN_THRUST_FRACTION,
                   "stall": stalled}
         for name in LIMITS:
             self.limits[name].append(limits[name])
-        modes = {**lateral_modes, "level_captured": vertical_modes["level_captured"],
-                 "aim_left_tube": vertical_modes["aim_left_tube"], "glidepath_floor": vertical_modes["glidepath_floor"]}
+        modes = {"go_around": force.go_around, **lateral_modes, "level_captured": vertical_modes["level_captured"]}
         for name in MODES:
             self.modes[name].append(modes[name])
 
         after = self.chart.read(self.state)
-        before_after = relative(after, runway)[0]
-        finished = ((self.lateral.captured and before_after <= 0.0) or (before_after > 0.0 and after.height_m < runway.elevation_m)
+        past, right_after, off_after = relative(after, runway)
+        # `executor.Executor.cycle`'s approach crossing of R: G false, lined up, inside the landing screen
+        fraction_crossed = _clamp(_divide(before, before - past), 0.0, 1.0)
+        crossed = (before > 0.0 and past <= 0.0 and not force.go_around
+                   and abs(off_after) <= self.words.spec.lined_up_deg
+                   and abs(right + fraction_crossed * (right_after - right)) <= runway.landing_limit_m)
+        finished = (crossed or (past > 0.0 and after.height_m < runway.elevation_m)
                     or not all(math.isfinite(value) for value in self.state) or after.speed_mps <= 0.0
                     or (cycle + 1) * params.cycle_s >= self.time_limit_s)
         if finished and not self.done:
@@ -712,5 +601,6 @@ class SingleExecutor:
         return Flown(states=rows(self.states), commands=rows(self.commands), wanted=rows(self.wanted),
                      limits={name: flags(values) for name, values in self.limits.items()},
                      modes={name: flags(values) for name, values in self.modes.items()},
+                     runway=torch.tensor([self.runway_rows], dtype=torch.long),
                      done_cycle=torch.tensor([self.done_cycle], dtype=torch.long), sentence_s=rows(self.sentence_times),
                      cycle_s=self.params.cycle_s)

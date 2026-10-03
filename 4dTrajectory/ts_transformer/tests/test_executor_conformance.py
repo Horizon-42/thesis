@@ -16,7 +16,8 @@ import pytest
 from geokit import METRES_PER_DEG_LAT
 from ts_transformer.autopilot.frame import ALT, LAT, LON, PSI
 from ts_transformer.autopilot import conformance
-from ts_transformer.tests.support import fly_legs, instruction_flight
+from ts_transformer.instructions.words import Words
+from ts_transformer.tests.support import fly_legs, instruction_flight, instruction_spec
 from ts_transformer.tests.test_autopilot import DOWNWIND_BASE_FINAL, _fly_sentence, _params
 
 
@@ -76,12 +77,16 @@ def test_states_and_floats_pass_inside_the_bounds_and_fail_outside():
 def test_every_discrete_difference_is_named():
     reference = _flown()
     k = reference.done // 2
-    modes = {**reference.modes, "captured": reference.modes["captured"].copy()}
-    modes["captured"][k] = ~modes["captured"][k]
+    modes = {**reference.modes, "level_captured": reference.modes["level_captured"].copy()}
+    modes["level_captured"][k] = ~modes["level_captured"][k]
     assert _compare(reference, _with(reference, modes=modes)).mismatches["KXXX:f1"] == [
-        f"mode captured differs at cycle {k} (1 cycles)"]
+        f"mode level_captured differs at cycle {k} (1 cycles)"]
+    runway = reference.runway.copy()
+    runway[k:] = 1
+    assert _compare(reference, _with(reference, runway=runway)).mismatches["KXXX:f1"] == [
+        f"the runway in force differs at cycle {k} ({reference.done + 1 - k} cycles)"]
     shorter = _with(reference, done=reference.done - 1, states=reference.states[:-1],
-                    **{f: getattr(reference, f)[:-1] for f in ("commands", "wanted", "sentence_s")},
+                    **{f: getattr(reference, f)[:-1] for f in ("commands", "wanted", "sentence_s", "runway")},
                     limits={k: v[:-1] for k, v in reference.limits.items()},
                     modes={k: v[:-1] for k, v in reference.modes.items()})
     assert any("done at cycle" in p for p in _compare(reference, shorter).mismatches["KXXX:f1"])
@@ -139,13 +144,14 @@ def test_a_way_of_flying_that_drops_flights_or_cuts_them_short_does_not_pass():
 def test_a_changed_law_is_found():
     """A behaviour change the source hash would have caught is caught by what it flies."""
     reference = _flown()
-    changed = _compare(reference, _flown(_params(heading_time_constant_s=6.0)))
+    changed = _compare(reference, _flown(_params(bank_rate_deg_s=3.0)))
     assert not changed.passed and changed.horizontal_m > 1.0
 
 
 def _spec_dir(tmp_path, monkeypatch, results, *, keys=("KXXX:f1",)):
     record = {"sha256": "s" * 64, "vocabulary_spec_sha256": "v" * 64, "source": {"executor_source_sha256": "c" * 64}}
-    monkeypatch.setattr(conformance.replay, "open_spec", lambda executor, instructions: (_params(), record, None))
+    monkeypatch.setattr(conformance.replay, "open_spec",
+                        lambda executor, instructions: (_params(), record, Words(instruction_spec())))
     monkeypatch.setattr(conformance, "git_state", lambda: {"head": "h", "dirty": False})
     monkeypatch.setattr(conformance, "executor_source_sha256", lambda: "c" * 64)
     monkeypatch.setattr(conformance, "MODES", {"batch": lambda batch, params, words: results})

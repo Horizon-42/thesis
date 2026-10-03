@@ -100,10 +100,13 @@ class FlightInputs:
     max_thrust_n: torch.Tensor      # [B]
 
 
-def flight_inputs(series: Sequence[FlightSeries], *, device: torch.device, anchor: int = 0) -> FlightInputs:
-    """`rollout_context` at each flight's row ``anchor`` — its first (a replay flies the sentence from row 0), or where
-    a closed loop starts (the prior's first predicted step)."""
-    rows = [rollout_context(item, anchor) for item in series]
+def flight_inputs(series: Sequence[FlightSeries], anchors: Sequence[int], *, device: torch.device) -> FlightInputs:
+    """`rollout_context` at each flight's own row ``anchors[i]`` — where it is flown from: its sentence's first row (a
+    replay at the data's step: row 0; at a coarser row interval: its first row on that grid), or where a closed loop
+    starts."""
+    if len(anchors) != len(series):
+        raise ValueError(f"{len(series)} flights, {len(anchors)} anchors")
+    rows = [rollout_context(item, int(anchor)) for item, anchor in zip(series, anchors)]
 
     def stack(key: str) -> torch.Tensor:
         return torch.as_tensor(np.stack([row[key] for row in rows]), dtype=torch.float64, device=device)

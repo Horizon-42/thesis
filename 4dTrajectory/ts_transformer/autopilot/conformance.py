@@ -1,8 +1,8 @@
 """The executor checked by what it flies, not by its source (executor design §12.3, the user 2026-10-01).
 
 A spec's REFERENCE is a fixed batch of labelled train flights — the replay's draw (`replay.draw`: `SPLIT`, `PER_AIRPORT`
-an airport, `SEED`, flights on their own dynamics) — flown from row 0 on their labelled words by the code that measured
-the spec. Every cycle is recorded: states, commands, wanted rates, every limit and mode, the sentence time, and the
+an airport, `SEED`, flights on their own dynamics, at the data's row interval) — flown from row 0 on their labelled words
+by the code that measured the spec. Every cycle is recorded: states, commands, wanted rates, every limit and mode, the sentence time, and the
 cycle each flight was done at. Every flight is judged (`autopilot.judge`: outcome, end row, crossing, each limit's count
 and every word's verdict and check numbers). It is written once into ``<spec>/conformance/`` (``reference.json`` +
 ``reference.npz``), from a clean checkout whose executor code measured the spec (`executor_spec` writes it with the
@@ -51,13 +51,14 @@ from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import Sentences, TimeClock
 from ts_transformer.autopilot.spec import (
-    CONFORMANCE_DIRECTORY as DIRECTORY, PASSED_SCHEMA, executor_source_sha256, logic, passed_path, reference_sha256,
+    CONFORMANCE_DIRECTORY as DIRECTORY, PASSED_SCHEMA, executor_source_sha256, passed_path, reference_sha256,
 )
 from ts_transformer.instructions.words import Words
-from ts_transformer.io_utils import utc_now, write_json_atomic
+from ts_transformer.io_utils import logic, utc_now, write_json_atomic
 from ts_transformer.repo_layout import git_state, repo_relative
 
-REFERENCE_SCHEMA = "ts-executor-conformance-reference-v1"
+#: v2 (two-tier v4): the flights' runway in force per cycle, the five-column words, the go-around's time reserve.
+REFERENCE_SCHEMA = "ts-executor-conformance-reference-v2"
 #: The reference's flights: the replay gate's draw on the training days, every airport alike.
 SPLIT, PER_AIRPORT, SEED, GROUPS = "train", 50, 1337, (replay.OWN,)
 #: How far apart two flown states may be, metres, horizontally or vertically — the single-flight executor's bound
@@ -78,6 +79,7 @@ class FlightResult:
     commands: np.ndarray
     wanted: np.ndarray
     sentence_s: np.ndarray
+    runway: np.ndarray
     limits: dict[str, np.ndarray]
     modes: dict[str, np.ndarray]
     done: int
@@ -113,6 +115,7 @@ def flight_results(flown: Flown, verdicts: Sequence[Verdict]) -> list[FlightResu
         out.append(FlightResult(
             states=flown.states[j, :done + 2].cpu().numpy(), commands=flown.commands[j, :done + 1].cpu().numpy(),
             wanted=flown.wanted[j, :done + 1].cpu().numpy(), sentence_s=flown.sentence_s[j, :done + 1].cpu().numpy(),
+            runway=flown.runway[j, :done + 1].cpu().numpy(),
             limits={name: flown.limits[name][j, :done + 1].cpu().numpy() for name in LIMITS},
             modes={name: flown.modes[name][j, :done + 1].cpu().numpy() for name in EXECUTOR_MODES},
             done=done, verdict=verdict_json(verdict)))
@@ -146,18 +149,17 @@ def fly_staggered(batch: replay.Batch, params: ExecutorParams, words: Words) -> 
     clock and limits), each halted (`Executor.halt`) from the cycle after it is done while the others fly on. (The
     words said a step at a time to such a batch, `Spoken`'s ``start_step``, are the window loop's: checked there, each
     aircraft against the same flight flown alone — `tests/test_traffic_window.py`.)"""
-    spec = words.spec
     f64 = torch.float64
-    step_rows = int(round(spec.step_s / params.cycle_s))
-    starts = np.random.default_rng(SEED).integers(0, STAGGER_STEPS + 1, size=len(batch.readings)) * step_rows
-    limits = torch.tensor([len(r.words) * spec.step_s * params.timeout_factor for r in batch.readings], dtype=f64,
-                          device=DEVICE)
-    sentences = Sentences([r.words for r in batch.readings], words, device=DEVICE)
-    clock = replay.word_clock(batch, params, spec.step_s, DEVICE)
-    executor = Executor(batch.inputs(DEVICE), Runways.of(batch.geometries, batch.vertical_paths, dtype=f64, device=DEVICE),
+    step_rows = int(round(batch.row_interval_s / params.cycle_s))
+    starts = np.random.default_rng(SEED).integers(0, STAGGER_STEPS + 1, size=len(batch.sentences)) * step_rows
+    limits = torch.tensor(replay.time_limits_s(batch, params), dtype=f64, device=DEVICE)
+    sentences = Sentences([s.grid for s in batch.sentences], words, step_s=batch.row_interval_s, device=DEVICE)
+    clock = replay.word_clock(batch, params, DEVICE)
+    executor = Executor(batch.inputs(DEVICE), Runways.of(batch.geometries, words.spec, dtype=f64, device=DEVICE),
                         AirportCharts.of(batch.geometries, dtype=f64, device=DEVICE),
                         torch.tensor(batch.approach_ias_mps, dtype=f64, device=DEVICE), params, words,
-                        time_limit_s=limits, start_cycle=torch.as_tensor(starts, device=DEVICE))
+                        step_s=batch.row_interval_s, time_limit_s=limits, start_cycle=torch.as_tensor(starts, device=DEVICE),
+                        reserve_s=replay.reserve_s(batch))
     step_start_s = torch.zeros(len(starts), dtype=f64, device=DEVICE)
     for _ in range(executor.cycles):
         own = executor.own_cycle()
@@ -175,9 +177,7 @@ def fly_staggered(batch: replay.Batch, params: ExecutorParams, words: Words) -> 
             break
         executor.halt(executor.done)          # held from the cycle after it is done, as the window loop halts a cohort
     flown = executor.flown()
-    verdicts = [judge(flown, j, batch.geometries[j], batch.readings[j].runway_index, batch.readings[j],
-                      batch.signals[j], spec, words) for j in range(len(batch.readings))]
-    return flight_results(flown, verdicts)
+    return flight_results(flown, replay.judge_batch(batch, flown, params, words))
 
 
 def fly_single(batch: replay.Batch, params: ExecutorParams, words: Words) -> list[FlightResult]:
@@ -185,14 +185,15 @@ def fly_single(batch: replay.Batch, params: ExecutorParams, words: Words) -> lis
     drives a batch — the spec's word clock read before each cycle, a step's words heard on the cycle that starts it."""
     spec = words.spec
     inputs = batch.inputs(DEVICE)
+    limits, reserve = replay.time_limits_s(batch, params), replay.reserve_s(batch)
     out = []
-    for j, reading in enumerate(batch.readings):
-        rows = len(reading.words)
+    for j, sentence_flown in enumerate(batch.sentences):
         flight = FlightInputs(**{f.name: getattr(inputs, f.name)[j: j + 1] for f in dataclasses.fields(FlightInputs)})
-        executor = single.SingleExecutor(flight, batch.geometries[j], batch.vertical_paths[j], batch.approach_ias_mps[j],
-                                         params, words, time_limit_s=rows * spec.step_s * params.timeout_factor)
-        clock = single.word_clock(params, batch.signals[j].e_m[:rows], batch.signals[j].n_m[:rows], spec.step_s)
-        sentence = single.Sentence(reading.words, words)
+        executor = single.SingleExecutor(flight, batch.geometries[j], batch.approach_ias_mps[j], params, words,
+                                         step_s=batch.row_interval_s, time_limit_s=limits[j], reserve_s=reserve)
+        e_m, n_m = replay.observed_rows(batch.signals[j], sentence_flown, batch.row_interval_s, spec.step_s)
+        clock = single.word_clock(params, e_m, n_m, batch.row_interval_s)
+        sentence = single.Sentence(sentence_flown.grid, words, step_s=batch.row_interval_s)
         for cycle in range(executor.cycles):
             sentence_s = clock.now(cycle, executor.now())
             if cycle % executor.step_rows == 0:
@@ -201,7 +202,8 @@ def fly_single(batch: replay.Batch, params: ExecutorParams, words: Words) -> lis
             if executor.done:
                 break
         flown = executor.flown()
-        verdict = judge(flown, 0, batch.geometries[j], reading.runway_index, reading, batch.signals[j], spec, words)
+        verdict = judge(flown, 0, batch.geometries[j], batch.vertical_paths[j], sentence_flown.instructions,
+                        batch.row_interval_s, batch.signals[j], spec, words, params)
         out += flight_results(flown, [verdict])
     return out
 
@@ -227,7 +229,8 @@ def save_results(path: Path, results: Sequence[FlightResult]) -> None:
               "states": _stack([r.states for r in results], np.nan),
               "commands": _stack([r.commands for r in results], np.nan),
               "wanted": _stack([r.wanted for r in results], np.nan),
-              "sentence_s": _stack([r.sentence_s for r in results], np.nan)}
+              "sentence_s": _stack([r.sentence_s for r in results], np.nan),
+              "runway": _stack([r.runway for r in results], -1)}
     for name in LIMITS:
         arrays[f"limit_{name}"] = _stack([r.limits[name] for r in results], False)
     for name in EXECUTOR_MODES:
@@ -239,7 +242,7 @@ def save_results(path: Path, results: Sequence[FlightResult]) -> None:
 def load_results(path: Path, verdicts: Sequence[dict[str, Any]]) -> list[FlightResult]:
     with np.load(path) as data:
         arrays = {key: data[key] for key in data.files}
-    keys = {"done", "states", "commands", "wanted", "sentence_s", *(f"limit_{n}" for n in LIMITS),
+    keys = {"done", "states", "commands", "wanted", "sentence_s", "runway", *(f"limit_{n}" for n in LIMITS),
             *(f"mode_{n}" for n in EXECUTOR_MODES)}
     if set(arrays) != keys or any(len(v) != len(verdicts) for v in arrays.values()):
         raise ValueError(f"{path} does not hold one row of every limit and mode for each of its {len(verdicts)} flights")
@@ -249,6 +252,7 @@ def load_results(path: Path, verdicts: Sequence[dict[str, Any]]) -> list[FlightR
         out.append(FlightResult(
             states=arrays["states"][j, :done + 2], commands=arrays["commands"][j, :done + 1],
             wanted=arrays["wanted"][j, :done + 1], sentence_s=arrays["sentence_s"][j, :done + 1],
+            runway=arrays["runway"][j, :done + 1],
             limits={name: arrays[f"limit_{name}"][j, :done + 1] for name in LIMITS},
             modes={name: arrays[f"mode_{name}"][j, :done + 1] for name in EXECUTOR_MODES},
             done=done, verdict=verdict))
@@ -325,7 +329,8 @@ def compare(reference: FlightResult, flown: FlightResult, difference: Difference
     """Add flight ``name``'s comparison to ``difference``."""
     problems: list[str] = []
     for result in (reference, flown):
-        rows = {"states": len(result.states), **{f: len(getattr(result, f)) for f in ("commands", "wanted", "sentence_s")},
+        rows = {"states": len(result.states),
+                **{f: len(getattr(result, f)) for f in ("commands", "wanted", "sentence_s", "runway")},
                 **{f"limit {k}": len(v) for k, v in result.limits.items()},
                 **{f"mode {k}": len(v) for k, v in result.modes.items()}}
         wrong = {k: n for k, n in rows.items() if n != result.done + (2 if k == "states" else 1)}
@@ -351,6 +356,9 @@ def compare(reference: FlightResult, flown: FlightResult, difference: Difference
         problems.append(f"states {horizontal_m:.3g} m apart horizontally, {vertical_m:.3g} m vertically")
     if other > ROUNDOFF:
         problems.append(f"a float {other:.3g} apart")
+    apart = np.flatnonzero(flown.runway[:cycles] != reference.runway[:cycles])
+    if len(apart):
+        problems.append(f"the runway in force differs at cycle {int(apart[0])} ({len(apart)} cycles)")
     for kind, ours, theirs in (("limit", flown.limits, reference.limits), ("mode", flown.modes, reference.modes)):
         for key in theirs:
             apart = np.flatnonzero(ours[key][:cycles] != theirs[key][:cycles])
@@ -370,15 +378,16 @@ def compare(reference: FlightResult, flown: FlightResult, difference: Difference
 def input_digests(batch: replay.Batch, params: ExecutorParams, words: Words) -> list[str]:
     """Each flight's inputs as one sha256 (module docstring): what `replay.fly_sentences` flies it from and its word
     clock reads, and what the judge reads it against."""
-    spec = words.spec
     inputs = batch.inputs(DEVICE)
+    limits, reserve = replay.time_limits_s(batch, params), replay.reserve_s(batch)
     out = []
-    for j, reading in enumerate(batch.readings):
-        rows = len(reading.words)
+    for j, sentence in enumerate(batch.sentences):
         geometry = batch.geometries[j]
+        e_m, n_m = replay.observed_rows(batch.signals[j], sentence, batch.row_interval_s, words.spec.step_s)
         parts = [inputs.initial_state[j], inputs.aero_params[j], inputs.frame_params[j], inputs.max_thrust_n[j],
-                 np.array([batch.approach_ias_mps[j], rows * spec.step_s * params.timeout_factor, reading.runway_index]),
-                 np.asarray(reading.words), batch.signals[j].e_m[:rows], batch.signals[j].n_m[:rows],
+                 np.array([batch.approach_ias_mps[j], limits[j], reserve, batch.readings[j].runway_index,
+                           batch.row_interval_s, sentence.first_row]),
+                 np.asarray(sentence.grid), e_m, n_m,
                  np.array([[c.threshold_e_m, c.threshold_n_m, c.course_deg, c.elevation_m] for c in geometry.candidates]),
                  np.array([[float(getattr(path, f.name)) for f in dataclasses.fields(path)]
                            for path in batch.vertical_paths[j]], dtype=np.float64)]
@@ -399,7 +408,7 @@ def spec_identity(executor_dir: Path, record: Mapping[str, Any], instructions: P
 
 def draw_reference_batch(instructions: Path, words: Words, draw: Mapping[str, Any]) -> replay.Batch:
     return replay.draw(instructions, draw["split"], words.spec, words, per_airport=draw["per_airport"],
-                       seed=draw["seed"], groups=tuple(draw["groups"]))
+                       seed=draw["seed"], groups=tuple(draw["groups"]), row_interval_s=draw["row_interval_s"])
 
 
 def keys_of(batch: replay.Batch) -> list[str]:
@@ -420,7 +429,8 @@ def write_reference(executor_dir: Path, instructions: Path, *, batch: replay.Bat
     directory = executor_dir / DIRECTORY
     if directory.exists():
         raise FileExistsError(f"{directory} exists: a spec's reference is written once")
-    draw = {"split": SPLIT, "per_airport": PER_AIRPORT, "seed": SEED, "groups": list(GROUPS)}
+    draw = {"split": SPLIT, "per_airport": PER_AIRPORT, "seed": SEED, "groups": list(GROUPS),
+            "row_interval_s": words.spec.step_s}
     batch = draw_reference_batch(instructions, words, draw) if batch is None else batch
     results = MODES["batch"](batch, params, words)
     payload = {"schema": REFERENCE_SCHEMA, "written_utc": utc_now(), "git": git, "python": platform.python_version(),

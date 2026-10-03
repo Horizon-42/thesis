@@ -22,8 +22,9 @@ capture and glidepath laws) and comes back, rewritten, in the stage named.
 | `experiments/go_around_census.py` (R40) | the go-around census | its detection rule moves into `instructions/labeller/go_around.py` (A2); the census itself is not rewritten |
 | `experiments/instruction_word_frames.py` (R48), `experiments/instruction_final_approach.py` (R49) | readouts of the old artefacts for the design's §11 evidence | not planned (their outputs stay in `4dTrajectory/outputs/POOLED/analyses/`) |
 | `experiments/heading_lead_ablation.py` (R23) | the heading-lead ablation on executor v11 | not planned |
+| `experiments/executor_sensitivity.py` (R12's middle runner; moved in A4–A5) | one executor v11 parameter moved at a time on train | not planned (its test, in `tests/test_autopilot.py`, went with the old executor's tests) |
 
-Their tests are under `tests/`, unmodified. `tests/test_mirrors_cut_from_live_tests.py` holds test functions cut
+Their tests are under `tests/`, unmodified. `tests/test_autopilot.py` is the old executor's test file as it was (moved in A4–A5: the executor's laws, judge and replay were rewritten in place, and the live `tests/test_autopilot.py` is new; the tests that still applied were carried over, adapted). `tests/test_mirrors_cut_from_live_tests.py` holds test functions cut
 verbatim from live test files because their other side moved here: the executor's glidepath edge against
 `prior.procedure` (the edge itself goes in A4), the publisher's generation-record names against R35 / R38, and the prior's
 layout rules from `tests/test_architecture.py` (stage B puts them back with the prior).

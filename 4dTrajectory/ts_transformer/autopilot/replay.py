@@ -1,5 +1,5 @@
-"""A batch of labelled flights flown from their sentences (executor design §11): who is flown, their inputs,
-the flight and the verdicts — shared by the spec's measurements, the sensitivity check and the replay gate.
+"""A batch of labelled flights flown from their sentences (executor design §11; design §14.2 A6): who is flown, their
+inputs, the flight and the verdicts — shared by the spec's conformance reference and the replay readout.
 
 Who is flown (§11), by `group_of`: an identified type that publishes an approach speed ("unspecified" is
 flown at it) is flown — on its own dynamics (`OWN`: the identified type is the dynamics type) or on a
@@ -12,15 +12,20 @@ permutation of a split's labelled flights, read in order until each airport hold
 the asked groups (0: every one) — the pool, the count read and the exclusions are returned with it.
 
 Every flight is re-read with the labeller and must reproduce its stored sentence (the words grid and the
-runway), the export's rule: the executor flies the reading of the flight, kinds and split parts included,
-not a grid that merely looks like it.
+runway), the export's rule: the executor flies the reading of the flight, not a grid that merely looks like it.
+
+THE ROW INTERVAL (design §4.8, D11, D25). A batch is flown at one row interval Δ (the data's 2 s, or 4 or 8 s): each
+sentence is put on the Δ grid (`instructions.labeller.interval`: the rows on UTC multiples of Δ) and flown from its first
+Δ row — the flight's state there, the observed rows from there on (the word clock's, the judge's reference) — with
+`Sentence` holding the grid and its words as instructions on the Δ rows. At Δ = 2 s the first row is row 0 and the
+sentence is the labelled one.
 """
 
 from __future__ import annotations
 
 import math
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +35,7 @@ import torch
 from ts_transformer.autopilot.executor import Flown, fly
 from ts_transformer.autopilot.flights import FlightInputs, flight_inputs, rebuild_series
 from ts_transformer.autopilot.frame import AirportCharts
+from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S
 from ts_transformer.autopilot.judge import Outcome, Verdict, flown_track, judge
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
@@ -41,21 +47,66 @@ from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.instructions import artefact
 from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals
+from ts_transformer.instructions.conformance import require_conforming_labeller
+from ts_transformer.instructions.labeller.interval import first_interval_row, later_utc, on_interval
 from ts_transformer.instructions.labeller.read import Reading, read_flight
-from ts_transformer.instructions.signals import FlightSignals
+from ts_transformer.instructions.labeller.records import Instruction
+from ts_transformer.instructions.signals import ROW_FIELDS, FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
-from ts_transformer.instructions.words import Words
+from ts_transformer.instructions.words import HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
 
 #: Rebuilt at a time while drawing the sample (a rebuild opens the flights' tracks).
 DRAW_CHUNK = 200
 OWN, STAND_IN = "own dynamics", "stand-in dynamics"
 
 
+@dataclass(frozen=True)
+class Sentence:
+    """What one flight is flown on: its sentence on the batch's row interval (``grid`` ``[N, 5]``), its words as
+    instructions on those rows (a heading word's ``info["target_deg"]`` the track it says under the landed runway, which
+    a labelled sentence never changes), and the 2 s row of the observed flight its row 0 is (``first_row``)."""
+    grid: np.ndarray
+    instructions: list[Instruction]
+    first_row: int
+
+    @property
+    def go_arounds(self) -> int:
+        return int((self.grid[:, RUNWAY] == RUNWAY_GO_AROUND).sum())
+
+
+def sentence_on_interval(reading: Reading, signals: FlightSignals, interval_s: float, geometry: AirportGeometry,
+                         words: Words) -> Sentence:
+    """A labelled flight's sentence on the row interval (module docstring): `on_interval` on its UTC grid, read at the
+    heights the labeller checked its words at; its words as instructions on the new rows."""
+    step_s = words.spec.step_s
+    first = first_interval_row(signals.entry_time_utc, interval_s, step_s)
+    grid = on_interval(reading.words, first, interval_s, step_s, reading.held_altitude_m, words, len(geometry.candidates))
+    course = geometry.candidates[reading.runway_index].course_deg
+    instructions = []
+    for row, column in zip(*np.nonzero(grid != UNCHANGED)):
+        value = int(grid[row, column])
+        info = {"target_deg": words.heading_track_deg(value, course)} if column == HEADING else {}
+        instructions.append(Instruction(int(column), value, int(row), "said", info))
+    return Sentence(grid=grid, instructions=instructions, first_row=first)
+
+
+def from_row(signals: FlightSignals, row: int) -> FlightSignals:
+    """The observed flight from row ``row`` on: its clock starting there (row 0 at that row's UTC second)."""
+    if row == 0:
+        return signals
+    entry = later_utc(signals.entry_time_utc, float(signals.time_s[row] - signals.time_s[0]))
+    return replace(signals, entry_time_utc=entry,
+                   **{name: getattr(signals, name)[row:] for name in ROW_FIELDS if name != "time_s"},
+                   time_s=signals.time_s[row:] - signals.time_s[row])
+
+
 @dataclass
 class Batch:
-    signals: list[FlightSignals]
+    signals: list[FlightSignals]    # the observed flights, from each sentence's first row on
     series: list[FlightSeries]
-    readings: list[Reading]
+    readings: list[Reading]         # the labeller's readings (the data's step)
+    sentences: list[Sentence]       # what is flown, on ``row_interval_s``
+    row_interval_s: float
     geometries: list[AirportGeometry]
     vertical_paths: list[tuple[VerticalPath, ...]]  # each flight's candidates' vertical paths (`published_vertical_paths`)
     approach_ias_mps: list[float]
@@ -63,7 +114,7 @@ class Batch:
     drawn: dict[str, Any]           # the sample's description: pool, read, exclusions, per airport
 
     def inputs(self, device: torch.device) -> FlightInputs:
-        return flight_inputs(self.series, device=device)
+        return flight_inputs(self.series, [s.first_row for s in self.sentences], device=device)
 
 
 def open_executor(executor_dir: Path, instructions_dir: Path) -> tuple[ExecutorParams, dict[str, Any], Words]:
@@ -76,19 +127,16 @@ def open_executor(executor_dir: Path, instructions_dir: Path) -> tuple[ExecutorP
 
 def open_spec(executor_dir: Path, instructions_dir: Path) -> tuple[ExecutorParams, dict[str, Any], Words]:
     """An executor spec and the instruction artefact it flies, refused unless the spec was measured against this
-    artefact's vocabulary and the artefact's labeller is this code (the judge reads with it) — whatever executor code is
-    on disk: what flies the spec's reference tracks again (`autopilot.conformance`) opens it so."""
+    artefact's vocabulary and the labeller code on disk reads the artefact's reference as it was read (the replay
+    re-reads every flight, and the judge reads with it, `instructions.conformance`) — whatever executor code is on
+    disk: what flies the spec's reference tracks again (`autopilot.conformance`) opens it so."""
     params, record = load_spec(executor_dir)
     spec = artefact.load_spec(instructions_dir)
     if record["vocabulary_spec_sha256"] != spec.sha256:
         raise ValueError(f"the executor spec was measured against vocabulary {record['vocabulary_spec_sha256'][:12]}, "
                          f"{instructions_dir} holds {spec.sha256[:12]}")
-    artefact.require_current_labeller(instructions_dir)
-    if record["source"]["labeller_source_sha256"] != artefact.labeller_source_sha256():
-        raise ValueError("the executor spec was measured on readings of other labeller code "
-                         f"({record['source']['labeller_source_sha256'][:12]}, now "
-                         f"{artefact.labeller_source_sha256()[:12]})")
-    params.check(spec)
+    require_conforming_labeller(instructions_dir)
+    params.check(spec, spec.step_s)
     return params, record, Words(spec)
 
 
@@ -173,19 +221,24 @@ def draw_flights(directory: Path, split: str, candidates: list[int], *, per_airp
                                   for code, geometry in geometries.items()}})
 
 
-def batch_of(drawn: Drawn, keep: list[int], readings: list[Reading]) -> Batch:
-    """The flights of ``drawn`` at ``keep`` flown from ``readings`` (one per kept flight, in that order)."""
-    return Batch(signals=[drawn.signals[i] for i in keep], series=[drawn.series[i] for i in keep], readings=readings,
-                 geometries=[drawn.geometries[drawn.signals[i].airport] for i in keep],
+def batch_of(drawn: Drawn, keep: list[int], readings: list[Reading], row_interval_s: float, words: Words) -> Batch:
+    """The flights of ``drawn`` at ``keep`` flown from ``readings`` (one per kept flight, in that order), each sentence
+    on ``row_interval_s`` (`sentence_on_interval`)."""
+    geometries = [drawn.geometries[drawn.signals[i].airport] for i in keep]
+    sentences = [sentence_on_interval(reading, drawn.signals[i], row_interval_s, geometry, words)
+                 for i, reading, geometry in zip(keep, readings, geometries)]
+    return Batch(signals=[from_row(drawn.signals[i], s.first_row) for i, s in zip(keep, sentences)],
+                 series=[drawn.series[i] for i in keep], readings=readings, sentences=sentences,
+                 row_interval_s=row_interval_s, geometries=geometries,
                  vertical_paths=[drawn.vertical_paths[drawn.signals[i].airport] for i in keep],
                  approach_ias_mps=[flight_approach_ias_mps(drawn.series[i], drawn.groups[i]) for i in keep],
-                 groups=[drawn.groups[i] for i in keep], drawn=drawn.description)
+                 groups=[drawn.groups[i] for i in keep], drawn={**drawn.description, "row_interval_s": row_interval_s})
 
 
 def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per_airport: int, seed: int,
-         groups: tuple[str, ...] = (OWN,)) -> Batch:
+         groups: tuple[str, ...] = (OWN,), row_interval_s: float) -> Batch:
     """The split's first ``per_airport`` labelled flights of ``groups`` per airport (0: every one), in a
-    seeded permutation, each re-read and checked against its stored sentence."""
+    seeded permutation, each re-read and checked against its stored sentence, flown on ``row_interval_s``."""
     sentences = load_sentences(directory, split, spec)
     stored = {int(index): k for k, index in enumerate(sentences["signal_index"])}
     drawn = draw_flights(directory, split, list(stored), per_airport=per_airport, seed=seed, groups=groups)
@@ -197,71 +250,90 @@ def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per
         if not np.array_equal(reading.words, grid) or reading.runway_index != int(sentences["runway_index"][k]):
             raise ValueError(f"{flight.dataset_id}: the re-read sentence differs from the stored one")
         readings.append(reading)
-    return batch_of(drawn, list(range(len(readings))), readings)
+    return batch_of(drawn, list(range(len(readings))), readings, row_interval_s, words)
 
 
 def subset(batch: Batch, indices: list[int]) -> Batch:
     """The flights at ``indices``, in that order (the sample's description is the whole batch's)."""
     return Batch(signals=[batch.signals[i] for i in indices], series=[batch.series[i] for i in indices],
-                 readings=[batch.readings[i] for i in indices], geometries=[batch.geometries[i] for i in indices],
+                 readings=[batch.readings[i] for i in indices], sentences=[batch.sentences[i] for i in indices],
+                 row_interval_s=batch.row_interval_s, geometries=[batch.geometries[i] for i in indices],
                  vertical_paths=[batch.vertical_paths[i] for i in indices],
                  approach_ias_mps=[batch.approach_ias_mps[i] for i in indices], groups=[batch.groups[i] for i in indices],
                  drawn=batch.drawn)
 
 
-def word_clock(batch: Batch, params: ExecutorParams, step_s: float,
-               device: torch.device) -> TimeClock | DistanceClock | TrackClock:
-    """The clock the batch's truth sentences are said on (`ExecutorParams.word_clock`, §11): the distance clock
-    reads each observed flight's path at its sentence's rows."""
+def observed_rows(signals: FlightSignals, sentence: Sentence, row_interval_s: float, step_s: float
+                  ) -> tuple[np.ndarray, np.ndarray]:
+    """The observed positions at the sentence's rows (``signals`` from its first row on)."""
+    every = int(round(row_interval_s / step_s))
+    rows = len(sentence.grid)
+    return signals.e_m[::every][:rows], signals.n_m[::every][:rows]
+
+
+def word_clock(batch: Batch, params: ExecutorParams, device: torch.device) -> TimeClock | DistanceClock | TrackClock:
+    """The clock the batch's truth sentences are said on (`ExecutorParams.word_clock`, §11): the distance and track
+    clocks read each observed flight at its sentence's rows."""
     if params.word_clock == "time":
         return TimeClock(params.cycle_s)
-    rows = [len(r.words) for r in batch.readings]
-    e_m, n_m = [f.e_m[:n] for f, n in zip(batch.signals, rows)], [f.n_m[:n] for f, n in zip(batch.signals, rows)]
+    rows = [observed_rows(f, s, batch.row_interval_s, f.time_s[1] - f.time_s[0])
+            for f, s in zip(batch.signals, batch.sentences)]
     clock = DistanceClock if params.word_clock == "distance" else TrackClock
-    return clock.of(e_m, n_m, step_s, params.cycle_s, device=device)
+    return clock.of([e for e, _ in rows], [n for _, n in rows], batch.row_interval_s, params.cycle_s, device=device)
+
+
+def time_limits_s(batch: Batch, params: ExecutorParams) -> list[float]:
+    """Each flight's time limit before its go-arounds: its sentence's rows × the row interval × the timeout factor
+    (design §5.8: the remaining observed time × 1.5)."""
+    return [len(s.grid) * batch.row_interval_s * params.timeout_factor for s in batch.sentences]
+
+
+def reserve_s(batch: Batch) -> float:
+    """The time the batch's go-arounds may add (`executor.GO_AROUND_EXTRA_S` each, its most go-arounds)."""
+    return GO_AROUND_EXTRA_S * max(s.go_arounds for s in batch.sentences)
 
 
 def fly_sentences(batch: Batch, params: ExecutorParams, words: Words, *, device: torch.device) -> Flown:
-    """Fly every flight's sentence from its row 0."""
-    spec = words.spec
+    """Fly every flight's sentence from its first row."""
     f64 = torch.float64
-    limits = torch.tensor([len(r.words) * spec.step_s * params.timeout_factor for r in batch.readings], dtype=f64,
-                          device=device)
-    sentences = Sentences([r.words for r in batch.readings], words, device=device)
-    return fly(batch.inputs(device), sentences, word_clock(batch, params, spec.step_s, device),
-               Runways.of(batch.geometries, batch.vertical_paths, dtype=f64, device=device),
+    sentences = Sentences([s.grid for s in batch.sentences], words, step_s=batch.row_interval_s, device=device)
+    return fly(batch.inputs(device), sentences, word_clock(batch, params, device),
+               Runways.of(batch.geometries, words.spec, dtype=f64, device=device),
                AirportCharts.of(batch.geometries, dtype=f64, device=device),
-               torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words, time_limit_s=limits)
+               torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words,
+               time_limit_s=torch.tensor(time_limits_s(batch, params), dtype=f64, device=device),
+               reserve_s=reserve_s(batch))
+
+
+def judge_batch(batch: Batch, flown: Flown, params: ExecutorParams, words: Words) -> list[Verdict]:
+    return [judge(flown, j, batch.geometries[j], batch.vertical_paths[j], batch.sentences[j].instructions,
+                  batch.row_interval_s, batch.signals[j], words.spec, words, params) for j in range(len(batch.sentences))]
 
 
 def fly_batch(batch: Batch, params: ExecutorParams, words: Words, *,
               device: torch.device) -> tuple[Flown, list[Verdict]]:
-    """Fly every flight's sentence from its row 0 and judge it."""
+    """Fly every flight's sentence from its first row and judge it."""
     flown = fly_sentences(batch, params, words, device=device)
-    verdicts = [judge(flown, j, batch.geometries[j], batch.readings[j].runway_index, batch.readings[j],
-                      batch.signals[j], words.spec, words) for j in range(len(batch.readings))]
-    return flown, verdicts
+    return flown, judge_batch(batch, flown, params, words)
+
+
+#: The columns layer 2 judges (the runway column has no envelope).
+JUDGED = ("heading", "altitude", "speed")
 
 
 def word_results(verdict: Verdict) -> tuple[list[tuple[str, bool]], int] | None:
-    """Every word the judge judged, ``(column, inside its envelope)``, and how many heading words it did not
-    judge (the lead carried their rows past the clearance or the capture); None when the flown track did not
-    pass the labeller's gate (nothing was judged)."""
+    """Every word the judge judged, ``(column, inside its envelope)`` (altitude and angle words share their tube), and
+    how many heading words it did not judge (the lead carried their rows past the flight's end); None when fewer than
+    two flown rows were left (nothing was judged)."""
     if verdict.words is None:
         return None
     judged: list[tuple[str, bool]] = []
     not_judged = 0
-    if verdict.words["intercepting_off_word_cycles"]:
-        judged.append(("heading", False))                   # the word the executor left to intercept on its own
     for h in verdict.words["heading"]:
         if h["rows"] == 0:
             not_judged += 1
             continue
         judged.append(("heading", h["inside"] == h["rows"]))
-    corridor, capture = verdict.words["corridor"], verdict.words["capture_turn"]
-    if corridor["cleared"]:
-        judged.append(("approach", capture is not None and capture["progress_ok"] and capture["rate_ok"]
-                       and corridor["entered"] and corridor["inside"] == corridor["rows"]))
     judged += [("altitude", bool(v["contained"])) for v in verdict.words["vertical"]]
     judged += [("speed", bool(v["contained"])) for v in verdict.words["speed"]]
     return judged, not_judged
@@ -271,7 +343,7 @@ def skipped_by_clock(headings: list[dict[str, int]]) -> list[bool]:
     """For each of a verdict's heading words, whether the clock skipped it: a later heading word was told on its flown
     row (the track or distance clock passed two sentence rows within a step, `sentence.TRACK_MAX_ROWS_PER_CYCLE`) and
     that row's last word is judged — so this one, never flown, is judged on no rows because of the clock, not because
-    its lead ran past the clearance or the capture."""
+    its lead ran past the flight's end."""
     last = {h["row"]: h for h in headings}
     return [h["rows"] == 0 and last[h["row"]] is not h and last[h["row"]]["rows"] > 0 for h in headings]
 
@@ -291,49 +363,47 @@ def clock_pairs(verdict: Verdict) -> dict[str, int]:
 
 
 def summary(verdicts: list[Verdict]) -> dict[str, Any]:
-    """The batch's headline numbers: outcomes, flown as said, the words inside their envelopes (per word
+    """The batch's headline numbers: outcomes, flown as said, the words inside their envelopes per column (per word
     judged; the words not judged beside it), and the word checks that failed. The heading words told with one the
     clock skipped (`told_with_skipped`) are counted apart as well: what the clock did to the sentence, not the
-    executor."""
+    executor. No criterion is read here (design D7)."""
     outcomes = Counter(v.outcome for v in verdicts)
     counted = [word_results(v) for v in verdicts]
-    judged = [ok for c in counted if c is not None for _, ok in c[0]]
+    judged = [(column, ok) for c in counted if c is not None for column, ok in c[0]]
     words_failed: Counter = Counter()
     pairs = [clock_pairs(v) for v in verdicts]
     for v in verdicts:
         if v.words is None:
-            words_failed["flown track refused by the labeller's gate"] += 1
+            words_failed["fewer than two flown rows (nothing judged)"] += 1
             continue
         headings = v.words["heading"]
         for h, skipped, together in zip(headings, skipped_by_clock(headings), told_with_skipped(headings)):
             outside = 0 < h["rows"] and h["inside"] < h["rows"]
             words_failed["heading word skipped by the clock (told with the next, not judged)"] += skipped
-            words_failed["heading word past the clearance or capture (not judged)"] += h["rows"] == 0 and not skipped
+            words_failed["heading word past the flight's end (not judged)"] += h["rows"] == 0 and not skipped
             words_failed["track off its heading word a lead later"] += outside and not together
             words_failed["track off its heading word a lead later, told with a skipped word"] += outside and together
-        words_failed["left its heading word to intercept on its own"] += v.words["intercepting_off_word_cycles"] > 0
-        words_failed["landing aim left the word's tube"] += v.words["aim_left_tube_cycles"] > 0
         words_failed["superseded before flown (not judged)"] += v.words["superseded_before_flown"]
-        corridor, capture = v.words["corridor"], v.words["capture_turn"]
-        words_failed["cleared, never captured"] += corridor["cleared"] and capture is None
-        words_failed["capture turn outside its envelope"] += capture is not None and not (
-            capture["progress_ok"] and capture["rate_ok"])
-        words_failed["cleared, corridor never entered"] += corridor["cleared"] and not corridor["entered"]
-        words_failed["cleared, corridor left after entry"] += corridor["cleared"] and corridor["inside"] < corridor["rows"]
-        words_failed["altitude word outside its tube"] += sum(not x["contained"] and not x["glidepath_floor_cycles"]
-                                                              for x in v.words["vertical"])
-        words_failed["altitude word outside its tube, the glidepath floor held it"] += sum(
-            not x["contained"] and x["glidepath_floor_cycles"] > 0 for x in v.words["vertical"])
+        words_failed["altitude word outside its tube"] += sum(not x["contained"] for x in v.words["vertical"])
         words_failed["speed word outside its band"] += sum(not x["contained"] for x in v.words["speed"])
+    decisions = [v.crossing["decision"] for v in verdicts if v.crossing is not None and "decision" in v.crossing]
     n = len(verdicts)
     return {"flights": n, "outcomes": dict(outcomes.most_common()),
             "landed_share": outcomes["landed"] / n,
             "flew_the_sentence_share": sum(v.flew_the_sentence for v in verdicts) / n,
-            "words_judged": len(judged), "words_inside_share": sum(judged) / len(judged) if judged else None,
+            "words_judged": len(judged), "words_inside_share": sum(ok for _, ok in judged) / len(judged) if judged else None,
+            "words_inside_share_by_column": {
+                column: (sum(ok for c, ok in judged if c == column) / sum(c == column for c, _ in judged)
+                         if any(c == column for c, _ in judged) else None) for column in JUDGED},
             "heading_words_not_judged": sum(c[1] for c in counted if c is not None),
             "heading_words_told_with_a_skipped_word": {"judged": sum(p["judged"] for p in pairs),
                                                        "inside": sum(p["inside"] for p in pairs)},
             "flights_with_unjudged_words": sum(c is None for c in counted),
+            "decision_checks": {"approach_crossings_low": len(decisions),
+                                "no_da_point": sum(d is None for d in decisions),
+                                "passed": sum(d is not None and d["passed"] for d in decisions),
+                                "lateral_failed": sum(d is not None and not d["lateral_ok"] for d in decisions),
+                                "vertical_failed": sum(d is not None and not d["vertical_ok"] for d in decisions)},
             "word_failures": {k: int(c) for k, c in words_failed.most_common() if c}}
 
 
@@ -343,11 +413,12 @@ def _percentiles(values: list[float]) -> dict[str, float] | None:
     return {f"p{q}": float(np.percentile(values, q)) for q in (5, 25, 50, 75, 95)} | {"n": len(values)}
 
 
-def observed_landing_s(observed: FlightSignals, reading: Reading, geometry: AirportGeometry) -> float:
-    """When the observed flight reached the pointed threshold: its sentence's last row, carried on at that row's
-    ground speed over the distance still to go."""
-    last = len(reading.words) - 1
-    candidate = geometry.candidates[reading.runway_index]
+def observed_landing_s(observed: FlightSignals, rows: int, runway_index: int, geometry: AirportGeometry) -> float:
+    """When the observed flight (from its sentence's first row on) reached the landed threshold: the sentence's last row
+    of the data's step (``rows`` of them from the first), carried on at that row's ground speed over the distance still
+    to go."""
+    last = rows - 1
+    candidate = geometry.candidates[runway_index]
     relative = relative_to_runway(observed.e_m[last: last + 1], observed.n_m[last: last + 1],
                                   observed.track_deg[last: last + 1], observed.altitude_m[last: last + 1], candidate)
     return float(observed.time_s[last] + relative.before_threshold_m[0] / observed.ground_speed_mps[last])
@@ -355,24 +426,25 @@ def observed_landing_s(observed: FlightSignals, reading: Reading, geometry: Airp
 
 def flight_alignment(batch: Batch, flown: Flown,
                      verdicts: list[Outcome] | list[Verdict]) -> list[dict[str, float | None]]:
-    """How each flown track differs from the observed one (§11, reported, no gate): the mean horizontal and
-    vertical distance at the sentence's rows both tracks reach (time-aligned from row 0), and for a landed
-    flight its landing time minus the observed one — its interpolated crossing against the sentence's last
-    row carried to the threshold at that row's ground speed (the data plane ends a flight at its landing, so
-    the last row is the last one before it; None for a flight that did not land)."""
+    """How each flown track differs from the observed one (reported, no gate): the mean horizontal and vertical distance
+    at the data's rows both tracks reach (time-aligned from the sentence's first row), and for a landed flight its
+    landing time minus the observed one — its interpolated crossing against the sentence's last row carried to the
+    threshold at that row's ground speed (None for a flight that did not land)."""
     out = []
     for j, verdict in enumerate(verdicts):
-        observed, reading = batch.signals[j], batch.readings[j]
+        observed, reading, sentence = batch.signals[j], batch.readings[j], batch.sentences[j]
         step_rows = int(round((observed.time_s[1] - observed.time_s[0]) / flown.cycle_s))
         track = flown_track(flown.states[j, : verdict.end_row + 1].cpu().numpy(), batch.geometries[j])
-        rows = min(len(reading.words), verdict.end_row // step_rows + 1)
+        sentence_rows = len(reading.words) - sentence.first_row
+        rows = min(sentence_rows, verdict.end_row // step_rows + 1)
         flown_rows = np.arange(rows) * step_rows
         out.append({
             "mean_horizontal_distance_m": float(np.mean(np.hypot(track["e"][flown_rows] - observed.e_m[:rows],
                                                                  track["n"][flown_rows] - observed.n_m[:rows]))),
             "mean_vertical_distance_m": float(np.mean(np.abs(track["height"][flown_rows] - observed.altitude_m[:rows]))),
             "landing_time_minus_observed_s": (verdict.crossing["at_row"] * flown.cycle_s - observed_landing_s(
-                observed, reading, batch.geometries[j]) if verdict.outcome == "landed" else None)})
+                observed, sentence_rows, reading.runway_index, batch.geometries[j])
+                if verdict.outcome == "landed" else None)})
     return out
 
 
