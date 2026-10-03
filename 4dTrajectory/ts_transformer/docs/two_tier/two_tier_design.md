@@ -36,7 +36,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D8 | The heading grid is aligned to the course of the runway in force (§3.3) | Decided | User, 2026-10-03 |
 | D9 | The executor laws in §5.7 are removed, the glidepath floor included | Decided | User, 2026-10-03 |
 | D10 | Go-around is an event: "abandon this approach". It does not change the runway in force; a runway word ends it. Its effects on the executor, the judge and the masks: §3.2 | Decided | User, 2026-10-03 |
-| D11 | The labeller stage includes an ablation of the row interval: 2 s now, larger intervals possible (§4.8) | Decided. Values: D25. Criteria: O10 | User, 2026-10-03 |
+| D11 | The labeller stage includes an ablation of the row interval: 2 s now, larger intervals possible (§4.8) | Decided. Values: D25. Readings: D34 | User, 2026-10-03 |
 | D12 | No runway lock. While G is false the model can change the runway at any time; the judge reads R at the crossing (§3.2) | Decided | User, 2026-10-03 |
 | D13 | The prior gets the height above the published glidepath of R at each step (§6.1) | Decided | User, 2026-10-03 |
 | D14 | While G is true: "no level-off" is not permitted (rule 5), and the procedure mask "no climb below the entry height" does not apply (§3.7) | Decided | User, 2026-10-03 |
@@ -50,7 +50,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D22 | Altitude words use the grid "optimal 40 levels" of the altitude-grid proposal: 60 m steps from 0 to 1,260 m, 120 m steps to 2,700 m, 450 m steps to 5,400 m (§3.4) | Decided | User, 2026-10-03 |
 | D23 | How the prior gets the frame of R (D5) and the glidepath height (D13). The own state of the aircraft has no frame. Every position and direction is in the candidate vectors, each in the frame of its own candidate. R is an input only as its candidate vector. No input of a row up to the first predicted step is computed from R. Each candidate vector has the height above its own glidepath; the value of R is the input of D13 (§6.1) | Decided | User, 2026-10-03 |
 | D24 | A candidate vector has no constant of its runway: no length, no elevation, no layout relative to R. Such a value comes back only as a variant that O7 selects (§6.1) | Decided | User, 2026-10-03 |
-| D25 | The ablation reads Δ = 2, 4, 8 s: each divides the 16 s observation of the prior. At each Δ, the motion inputs of a row come from the 2 s before the row (§4.8, §6.1) | Decided (the values of O10) | User, 2026-10-03 |
+| D25 | The ablation reads Δ = 2, 4, 8 s: each divides the 16 s observation of the prior. At each Δ, the motion inputs of a row come from the 2 s before the row (§4.8, §6.1) | Decided | User, 2026-10-03 |
 | D26 | The labeller reads a flight with a go-around approach by approach. An approach ends at the landing or at a go-around row. The last descent that reaches a go-around row says "no level-off". Each approach has its own capture row and its own "unspecified". The first row says the runway of the first approach. The go-around row is the row of the climb word (§4.2, §4.4–§4.6) | Decided | User, 2026-10-03 |
 | D27 | "Go-around" changes no target of another column. A row that says "go-around" while "no level-off" is in force also says a level above the aircraft (rule 6). The executor keeps the heading word in force; it does not fly the course of R. While G is true, "unspecified" holds the airspeed (§3.2, §3.7, §5.4–§5.6) | Decided | User, 2026-10-03 |
 | D28 | The vocabulary has one climb word. Its angle is a value of the executor. While G is true, the executor climbs at the steady climb angle that the thrust limit permits, not more than 3° and not less than 1.885° (200 ft per NM). While G is false, it climbs at the nominal angle of the climb class; that value comes from the spec measurement with D15 (§3.5, §5.5) | Decided (the range 1.885°–3° and the nominal from D15: the user; the thrust rule inside the range: Claude's proposal) | User, 2026-10-03 |
@@ -59,6 +59,10 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D31 | Multi-aircraft inputs and judgements (§8): the landing context of every aircraft of a scene counts the landings of the closed loop; D23 holds for every aircraft of a scene, with a test; "established on the final" is a function of one row, the same for every aircraft (its rule: O6). The prior's training stops on the select days (§6.3) | Decided | User, 2026-10-03 |
 | D32 | Closed-loop reading. The labeller flies its sentence with the executor. When the flown path leaves the observed path by more than a tolerance, it says a correction word, and the observed word again when the flown path is back. The prior trains on the flown states of these sentences (§4.9, §6.1). Tolerances: lateral 30 m, vertical 15 m | Decided | User, 2026-10-03 |
 | D33 | While G is true, no crossing of a threshold is an event: of R or of another candidate (§3.2, §5.8) | Decided | User, 2026-10-03 |
+| D34 | The ablation of the row interval reads, at each Δ: the correction words of the closed-loop reading for each flight and each column; the errors left where §4.9 makes no correction; the replay outcomes. The user compares the Δ values on these readings (§4.8) | Decided | User, 2026-10-03 |
+| D35 | No finer grids. A finer grid does not remove the drift of open-loop words (§11.9); the closed-loop reading does (D32). The heading grid stays 5°, the descent classes stay (D6) | Decided | User, 2026-10-03 |
+| D36 | The teacher-forced data term of the post-training uses single-aircraft samples of the closed-loop sentences, not scene samples. The flown states keep the observed path, not the observed time (§4.9), so two aircraft of one scene do not keep their observed spacing (§7, §8) | Decided | User, 2026-10-04 |
+| D37 | Branch training. Each training aircraft is spoken one time. When its reward is less than 1, it is spoken again from saved states at its first predicted step and every 120 s after it, before the event that ended it. Each branch group compares only the words after its branch point (§7) | Decided | User, 2026-10-04 |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -68,8 +72,6 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | O6 | Replacement for the clearance mask of the multi-aircraft loop; the rule "established on the final" of the separation judge and masks (D31) | Discuss with §8 | 8 |
 | O7 | Selection of designs by leave-one-airport-out (train on four airports, read the fifth) | Discuss with §7 | 7 |
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
-| O9 | Finer grids near the runway course and near the glidepath angle | Decided by D6: measure first | 3.3, 3.5 |
-| O10 | How to compare the row intervals of the ablation (the values are D25: 2, 4, 8 s) | Criteria by the user after the design is settled (D7) | 4.8 |
 
 ### 0.3 Implementation
 
@@ -85,8 +87,8 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 1. Stage A (§14.2): write the vocabulary, the labeller, the identities, the executor, the judge and the replay on the
    branch `dev-two-tier-v4`, milestones A0–A9, each with tests and a code review. Another agent does this.
 2. Claude checks the result of stage A against this document (§14.6).
-3. The user sets the criteria (D7, O10), the values of O2 and the fitted values of D15. Then the formal artefact is built, and the
-   replay gate is read at each row interval of the ablation (D11, D25: 2, 4, 8 s). The same readings answer D6 / O9 (are the grids sufficient).
+3. The user sets the values of O2 and chooses the fitted values of D15. Then the formal artefact is built, and the
+   readings of D34 are made at each row interval of the ablation (D11, D25: 2, 4, 8 s). The user compares them (D7).
 4. Stages B, C, D (§14.3–§14.5): the prior from the start, the post-training and the multi-aircraft work, the frontend.
 5. The user merges the branch.
 
@@ -239,8 +241,9 @@ They describe the turn onto the final and the final itself (§4.3).
 (`envelope.heading_words_inside`). The rows of a word continue to the end of the sentence. There is no cut at a
 clearance or a capture.
 
-**Grid (D6, O9).** The grid stays 5°. A measurement or a rough labelling decides if 5° holds the final. A word of class 0
-gives no lateral correction. The aircraft keeps its lateral offset until the model says a word of ±5°.
+**Grid (D6, D35).** The grid stays 5°. A word of class 0 gives no lateral correction: the aircraft keeps its lateral
+offset until the model says a word of ±5°. The corrections come from the closed-loop reading (D32, §4.9), not from a
+finer grid (§11.9).
 
 ### 3.4 Altitude column
 
@@ -297,8 +300,8 @@ with these widths (principle 6). The level detection of the labeller does not us
 | Climb | No angle in the word. The executor's angle (D28): the nominal of D15 while G is false (fitted: 1.32°); 1.885°–3° while G is true | 0.5° to 15° climb (the labeller's range of a climb piece) |
 
 The four descent classes come from a length-weighted k-means on the train days (spec `145d6911e75b`). The grid stays
-(D6). With D3 the model holds the glidepath with these classes. A measurement or a rough labelling decides if they are
-sufficient (O9). An alternative for discussion: a fixed angle grid, not a k-means result.
+(D6, D35). With D3 the model holds the glidepath with these classes; the closed-loop reading gives the corrections
+(D32, §4.9).
 
 **Rounder values (D15).** The spec measurement gives each value that it fits from data (the descent centres and edges,
 the climb centre) with rounder candidates (for example to 0.5°, 0.25°, 0.1°) and, for each candidate, the fit that it
@@ -523,8 +526,17 @@ Thus one reading gives every Δ. Δ must be a multiple of 2 s, and it must divid
 | Prior | Fewer steps for each flight and more changes for each step. The observation stays 16 s (`N_LOOK` = 16 s / Δ rows: 8, 4, 2). The motion inputs do not change with Δ: they come from the 2 s before the row (D25, §6.1). A loss for each step cannot be compared between two Δ; a loss for each flight or each second can |
 | Multi-aircraft | The scene step is Δ |
 
-**Values (D25).** Δ = 2, 4, 8 s. A Δ of 6 s is not used: 16 s is not a whole number of 6 s rows. The user sets the
-criteria after the design is settled (O10, D7).
+**Values (D25).** Δ = 2, 4, 8 s. A Δ of 6 s is not used: 16 s is not a whole number of 6 s rows.
+
+**Readings (D34).** The closed-loop reading (§4.9) makes each replay follow the observed path, so the landed share no
+longer shows how well a Δ carries a flight. At each Δ the ablation reads instead:
+
+1. the correction words of the closed-loop reading, for each flight and each column;
+2. the errors left where §4.9 makes no correction (a level hold, a climb, no steeper or shallower class): the largest
+   |e_y| and |e_h| for each flight;
+3. the replay outcomes (§5.8).
+
+The user compares the Δ values on these readings; this document sets no threshold (D7).
 
 **Why the motion inputs do not change with Δ (D25).** If the motion of a row were the displacement since the row before,
 it would be the mean over Δ. In a 3°/s turn, the direction of that mean is approximately 12° behind the track at
@@ -861,9 +873,10 @@ training does not read the validation days: they are read one time for each stag
 4. **Windows.** Real windows and augmented windows of the train days: B (a moved start: a turn about the airport, a
    height change and a speed change, post-training design §4), A (one inserted aircraft that flies its record), D (the
    leader moved) (multi-aircraft design §5, step 9.4). The counts are set at stage C.
-5. **Loss**: the clipped-ratio surrogate (ε = 0.2) with the advantage among the K sentences of
-   the same aircraft and window; the pull to the base model (0.04, the KL on the sampled words, masked distribution);
-   the teacher-forced data term (1) on scene samples of the train days; the traffic attention has its own learning rate.
+5. **Loss**: the clipped-ratio surrogate (ε = 0.2) with the advantage inside each branch group (item 9); the pull to
+   the base model (0.04, the KL on the sampled words, masked distribution); the teacher-forced data term (1) on
+   single-aircraft samples of the closed-loop sentences of the train days (D36); the traffic attention has its own
+   learning rate. One pass over the sentences of a round.
 6. **Go-around sampling first.** Before the training, measure the probability that the base model gives "go-around" on
    the final (with D26 the data has go-arounds with "no level-off" and "unspecified" in force). If the model says
    "go-around" by itself, the training uses no probes. If it does not, the probes of the multi-aircraft design (8.10)
@@ -872,6 +885,35 @@ training does not read the validation days: they are read one time for each stag
    leave-one-airport-out as the selection method for the airport generalization.
 8. **Later, optional.** A stage with every aircraft of a window commanded (multi-aircraft design 7.6, 9.5) starts from
    the model of item 7.
+9. **Branch training (D37).** The samples of a round:
+   1. Each training window (one commanded aircraft) is spoken one time: the first sentence.
+   2. If the reward of the first sentence is 1, the window gives no sample: a group whose rewards are all the same
+      gives no gradient.
+   3. If the reward is less than 1, the event time t_E is the step where the first sentence ended: the first step of
+      the loss of separation that ended it, the step of its judged outcome, or the time limit. The branch points are
+      the first predicted step and every 120 s after it, before t_E.
+   4. At each branch point, the window is spoken again K = 8 times from the state saved there. The saved state holds
+      the executor state, the speaker's cache, the judge state and the window loop; the other aircraft fly their
+      records, so their states come from the time. Each continuation has its own random numbers, from the seed, the
+      round, the window, the branch point and k. A continuation with the random numbers of the first sentence repeats
+      the first sentence, bit for bit (a test).
+   5. A branch group is the first sentence and the K continuations of one branch point; they differ only after the
+      branch point. The advantage is the reward minus the mean of the group. It applies only to the words after the
+      branch point; a group whose rewards are all the same gives no sample.
+   6. The executor flies without gradients while it speaks (inference mode); the states are the same as with gradients
+      (a test). The training scores the prior only.
+
+   **Why.**
+   - Cost: with K full sentences for each window, the speaking took approximately 55 % of a round, and only 37–47 % of
+     the sentences carried a gradient (§11.10). Branch training spends the extra sentences only where the first
+     sentence failed, and a continuation flies only the part after its branch point.
+   - Credit: a reward for a whole sentence gives every word the same advantage. In a branch group, only the words
+     after the branch point differ, so the advantage goes to them (§11.8, §11.10).
+   - Branch points: the readout of multi-aircraft step 7.7 found that a new sentence from the start rescues the most
+     events, then from 120 s before the event; 60 s and less rescue few (§11.10). Its reading, decided before the
+     run, puts the branch points at the start and at fixed times, not some tens of seconds before the event.
+   - A window whose first sentence lands gives no sample in this round. Its chance to fail comes again in a later
+     round, as the windows are drawn again.
 
 ---
 
@@ -896,9 +938,9 @@ training does not read the validation days: they are read one time for each stag
   landing of a commanded aircraft is never in it: that landing is the future of the commanded aircraft. Through the
   traffic attention, a commanded aircraft that flies later than its record would read a landing on its own landed
   runway.
-- **States in a scene (D32).** In a teacher-forced scene sample, an aircraft with a training sentence has its flown
-  states. An aircraft without one (a background aircraft, a flight that the replay does not fly) has its observed
-  states. In the closed loop the other aircraft fly their records.
+- **States in a scene (D32, D36).** A scene occurs only in the closed loop. The commanded aircraft flies with the
+  executor; the other aircraft fly their records. There is no teacher-forced scene sample: the flown states keep the
+  observed path but not the observed time, so the spacing between two aircraft would not be the observed one.
 - **D23 in a scene (D31).** At the rows up to the first predicted step of an aircraft, no input of any aircraft and no
   edge feature uses a value computed from that aircraft's R. A test: a change of one aircraft's runway word leaves all
   inputs and edge features of the scene at those rows the same, bit for bit.
@@ -1115,6 +1157,27 @@ at Δ = 2 s, 150 train flights on their own dynamics). One-off scripts, 2026-10-
 - The final descent ("no level-off" in force, median 20 km) flown at the nominal angles of its labelled classes, from
   the observed height where it starts: the height at the last row minus the observed height, p10 / p50 / p90:
   −45 / −4 / +53 m; 22 % more than 30 m high, 19 % more than 30 m low.
+
+### 11.10 Cost and credit of the post-training
+
+- Multi-aircraft step 9.4, one aircraft commanded, 700 windows × K = 8 = 5,600 sentences each round, four speaking
+  processes (`outputs/POOLED/prior/step9_4_traffic_20261003.run/run.log`):
+
+  | Part of a round | Round 1 | Round 2 |
+  |---|---|---|
+  | Speaking the 5,600 sentences | 2,050 s | 2,157 s |
+  | Training (3 passes) | 891 s | 1,051 s |
+  | Selection readout | 694 s | 748 s |
+  | Sentences that carried a gradient | 2,063 (37 %) | 2,609 (47 %) |
+
+- Multi-aircraft step 7.7 (`readouts/2026-10-02_window_rewind.zh.md` §2.1; real windows of the select days, the
+  responsible aircraft spoken again 8 times): events with at least one rescue in 8, and the mean rescue of one
+  sentence: from the start 69.6 % and 32.7 %; 120 s before the event 41.7 % and 17.4 %; 60 s 25.4 % and 9.1 %;
+  30 s 13.0 % and 4.9 %; 10 s 3.1 % and 1.1 %. Each branch flew the whole window again from its start: 13.5 h for the
+  readout.
+- Three passes on the same sentences against one (multi-aircraft M4, second run against the first): the KL to the base
+  model grew 1.4 times faster (0.0137 against 0.0098 for each round), and the rewards of rounds 1–7 did not differ
+  from the first run's, sentence by sentence (`readouts/2026-09-30_m4_passes.zh.md`).
 
 ## 12 Regulation sources
 
@@ -1403,8 +1466,12 @@ Milestones, tests and reviews as in stage A.
 ### 14.4 Stage C: post-training and multi-aircraft (outline)
 
 One post-training stage from the base model with one aircraft commanded (D29, §7): the window loop of the multi-aircraft
-design with `--commanded one`, the traffic attention, the reward of D30, the masks, real and augmented windows. Before
-it: the go-around probability of the base model on the final (§7 item 6). The multi-aircraft parts of §8 (D31): the
+design with `--commanded one`, the traffic attention, the reward of D30, the masks, real and augmented windows. The
+training is branch training (D37, §7 item 9): the saved state of a window at a branch point (executor, speaker cache,
+judge, loop) and its restart, the branch groups and their advantage after the branch point, one pass, the executor in
+inference mode while it speaks. The data term uses single-aircraft samples of the closed-loop sentences (D36). Before
+it: a profile of one speaking batch (the prior, the executor, the masks, the edge features), and the go-around
+probability of the base model on the final (§7 item 6). The multi-aircraft parts of §8 (D31): the
 landing context from the loop for every aircraft (the archived `experiments/traffic_window.py` gives a replayed aircraft
 its recorded context), the D23 test over a scene, the rule "established on the final" and
 the replacement of the clearance mask (O6). The edge-feature conformance (§9.2 #6). The multi-aircraft step-8.9 reward is
