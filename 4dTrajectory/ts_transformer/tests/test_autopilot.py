@@ -450,6 +450,11 @@ def test_a_downwind_base_final_sentence_is_flown_onto_the_final_by_its_words_and
     assert verdict.outcome == "landed" and verdict.flew_the_sentence
     assert abs(verdict.crossing["cross_m"]) < 60.0 and 0.0 < verdict.crossing["height_m"] < 100.0
     assert verdict.crossing["decision"]["passed"]
+    # against the runway's real 15 m TCH the open-loop drift fails the DA check (D38): the closed loop's to correct
+    from ts_transformer.autopilot.judge import outcome_of
+
+    real = outcome_of(flown, 0, instruction_airport(), vertical_paths(instruction_airport()), spec())
+    assert real.outcome == "unstable_at_minimums" and real.crossing["decision"]["above_glidepath_m"] > 22.0
     assert set(MODES) == {"go_around", "level_captured"}
     assert not any(verdict.limits[name]["cycles"] for name in ("thrust_max", "thrust_min", "stall", "load_factor"))
     assert all(h["inside"] == h["rows"] for h in verdict.words["heading"] if h["rows"])
@@ -861,6 +866,12 @@ def test_the_decision_altitude_check_passes_and_fails():
     cone = decision["cone_half_width_m"]
     e = np.arange(-3000.0, 1.0, 70.0)
     height = 100.0 + TEST_TCH_M + np.maximum(-e, 0.0) * math.tan(math.radians(3.0))
+    # below the glidepath alike: −21 m passes, −23 m fails
+    for below, ok in ((21.0, True), (23.0, False)):
+        relative = relative_to_runway(e, np.full(len(e), -20.0), np.full(len(e), 90.0), height - below,
+                                      geometry.candidates[0])
+        checked = decision_check(relative, range(1, len(e)), geometry, 0, vertical_paths(geometry)[0], spec())
+        assert checked["vertical_ok"] is ok and checked["above_glidepath_m"] == pytest.approx(-below, abs=0.2)
     for offset, inside in ((cone - 5.0, True), (cone + 5.0, False)):
         relative = relative_to_runway(e, np.full(len(e), -offset), np.full(len(e), 90.0), height, geometry.candidates[0])
         checked = decision_check(relative, range(1, len(e)), geometry, 0, vertical_paths(geometry)[0], spec())
@@ -1147,7 +1158,7 @@ def test_the_executor_hash_reads_the_logic_and_covers_what_it_imports_from_the_r
     assert {f"autopilot/{name}" for name in package} <= set(labels) and "autopilot/spec.py" not in labels
     for needed in ("aerodynamic_model.torch_dynamics", "aircraft.reference_speeds",
                    "ts_transformer.outputs.dynamics.rollout", "ts_transformer.outputs.envelope", "geokit",
-                   "flight_scenarios.fas_geometry"):
+                   "flight_scenarios.fas_geometry", "evaluation.thresholds"):
         assert needed in labels
     assert set(executor_spec.REACHED_MODULES) <= set(labels)
     assert not any(label.startswith(("ts_transformer.instructions", "ts_transformer.io_utils", "evaluation.cli"))
@@ -1345,15 +1356,6 @@ def test_draw_reads_a_seeded_permutation_until_each_airport_is_full(monkeypatch)
     reread["differ"] = first.signals[0].dataset_id
     with pytest.raises(ValueError, match="differs from the stored one"):
         replay.draw(Path("x"), "train", one, words, per_airport=3, seed=5, row_interval_s=2.0)
-
-
-def test_the_spec_runner_takes_the_decision_altitude_tolerances_from_the_user_only():
-    """O2, D7: the two tolerances are required on the command line, with no default."""
-    from ts_transformer.experiments import executor_spec
-
-    for missing in ([], ["--decision-cone-share", "1.0"], ["--decision-glidepath-tolerance-m", "30"]):
-        with pytest.raises(SystemExit):
-            executor_spec.main(["--instructions", "x", "--dir", "y", "--word-clock", "track", *missing])
 
 
 def test_a_sentence_on_a_coarser_interval_is_flown_and_judged_on_its_own_rows():

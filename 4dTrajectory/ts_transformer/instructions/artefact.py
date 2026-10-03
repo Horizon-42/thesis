@@ -210,6 +210,10 @@ def load_sentences(directory: Path, split: str, spec: VocabularySpec) -> dict[st
 #: corrections, the states on every row (observed before that step, flown from it) and the errors against the observed
 #: path.
 CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v1"
+#: Every array a closed-loop file holds.
+CLOSED_LOOP_FIELDS = {"schema", "spec_sha256", "executor_params_sha256", "row_interval_s", "start_row", "signal_index",
+                      "first_row", "offsets", "state_offsets", "words", "correction", "states", "lateral_m",
+                      "vertical_m", "uncorrectable", "ended"}
 #: The directory inside the artefact that holds them, written once (`closed_loop_path`).
 CLOSED_LOOP_DIRECTORY = "closed_loop"
 
@@ -253,8 +257,8 @@ def load_closed_loop(path: Path, spec: VocabularySpec) -> dict[str, np.ndarray]:
     ``spec``."""
     with np.load(path) as arrays:
         data = {name: arrays[name] for name in arrays.files}
-    if str(data["schema"]) != CLOSED_LOOP_SCHEMA:
-        raise ValueError(f"{path} is not a {CLOSED_LOOP_SCHEMA} file")
+    if set(data) != CLOSED_LOOP_FIELDS or str(data["schema"]) != CLOSED_LOOP_SCHEMA:
+        raise ValueError(f"{path} is not a {CLOSED_LOOP_SCHEMA} file (fields {sorted(data)})")
     if str(data["spec_sha256"]) != spec.sha256:
         raise ValueError(f"{path} was read with spec {str(data['spec_sha256'])[:12]}, not {spec.sha256[:12]}")
     return data

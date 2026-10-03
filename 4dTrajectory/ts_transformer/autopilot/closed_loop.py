@@ -182,7 +182,8 @@ class Corrector:
             angle = int(held[ANGLE])
             self.uncorrectable[1] = (observed[ALTITUDE] != UNCHANGED or observed[ANGLE] != UNCHANGED or holding
                                      or not self.words.is_descent(angle)
-                                     or not self.words.is_descent(angle + _sign(vertical_m)))
+                                     or (abs(vertical_m) > self.vertical_m
+                                         and not self.words.is_descent(angle + _sign(vertical_m))))
             if observed[ALTITUDE] != UNCHANGED or observed[ANGLE] != UNCHANGED or holding:
                 self.slope = 0
             elif self.slope and (abs(vertical_m) < self.vertical_m / 2 or _sign(vertical_m) != self.slope):

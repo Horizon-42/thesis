@@ -32,8 +32,8 @@ from typing import Any
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.io_utils import logic_sha256, write_json_atomic
 
-#: v7 (two-tier v4, design §14.2 A6): the laws of design §5 (no capture, no landing aim, no glidepath floor), the
-#: decision-altitude check's two tolerances among the parameters, the labeller identified by its conformance.
+#: v7 (two-tier v4, design §14.2 A6): the laws of design §5 (no capture, no landing aim, no glidepath floor), no
+#: parameter of the decision-altitude check (D38: the evaluation's bounds), the labeller identified by its conformance.
 EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v7"
 PACKAGE = Path(__file__).resolve().parent
 #: Imported by the executor but not part of what decides a flown track or a value: the instruction language

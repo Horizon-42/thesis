@@ -270,11 +270,15 @@ def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(t
     stored = closed_loop.stored_sentences(load_closed_loop(path, words.spec))
     assert list(stored) == [7] and np.array_equal(stored[7].grid, sentence.grid)
     assert np.array_equal(stored[7].states, sentence.states[sentence.start:])
+    assert np.array_equal(stored[7].uncorrectable, sentence.uncorrectable)
     _, moved, missing, flown = _replayed(batch, inputs, sentence, params, words, monkeypatch)
     assert missing == 0 and moved.sentences[0].first_row == batch.sentences[0].first_row + sentence.start * 2
     assert moved.signals[0].e_m[0] == batch.signals[0].e_m[sentence.start * 2]
     (row,) = closed_loop_columns(stored)(moved, flown, [None])
     assert row["largest_lateral_m"] == pytest.approx(float(np.abs(sentence.lateral_m).max()))
+    assert row["uncorrected_lateral_m"] == closed_loop.uncorrected_m(sentence.lateral_m, sentence.uncorrectable[:, 0])
+    assert row["uncorrected_vertical_m"] == closed_loop.uncorrected_m(sentence.vertical_m, sentence.uncorrectable[:, 1])
+    assert row["uncorrected_lateral_m"] != row["uncorrected_vertical_m"]
     assert sum(row["correction_words"].values()) == int(sentence.correction.sum())
     stored[7] = closed_loop.Stored(grid=sentence.grid, correction=sentence.correction, first_row=0,
                                    states=sentence.states[sentence.start:] + [1.0, 0, 0, 0, 0, 0],
@@ -351,6 +355,9 @@ def test_the_conformance_check_passes_the_same_reading_and_finds_every_change(tm
     assert not shorter.passed
     other = _reference(tmp_path / "other", monkeypatch, lambda s: (["KXXX:other"], [s]))
     assert not other.passed and "other flights" in str(other.mismatches)
+    flags = _reference(tmp_path / "flags", monkeypatch, lambda s: (["KXXX:test"], [
+        replace(s, uncorrectable=~s.uncorrectable)]))
+    assert not flags.passed and "the uncorrectable differ" in str(flags.mismatches)
     refused = _reference(tmp_path / "refused", monkeypatch, lambda s: (["KXXX:test"], [Refused("too short")]))
     assert not refused.passed
 
@@ -397,6 +404,20 @@ def test_the_rows_without_a_correction_are_marked_for_the_ablation():
     assert corrector.uncorrectable.tolist() == [False, False]                # both corrected
     corrector.row(3, 40.0, -30.0, 600.0, holding=True)
     assert corrector.uncorrectable.tolist() == [False, True]                 # the level held
+    climb = Corrector(_grid([_first(words, 1200.0, words.angle_climb), {}]), 0, words, 1)
+    climb.row(0, 0.0, 0.0, 900.0, holding=False)
+    climb.row(1, 0.0, -30.0, 900.0, holding=False)
+    assert climb.uncorrectable.tolist() == [False, True]                     # a climb
+    shallow = Corrector(_grid([_first(words, 600.0, 1), {}, {}]), 0, words, 1)
+    shallow.row(0, 0.0, 0.0, 900.0, holding=False)
+    shallow.row(1, 0.0, -30.0, 900.0, holding=False)
+    assert shallow.uncorrectable.tolist() == [False, True]                   # descent 1, too low: none shallower
+    shallow.row(2, 0.0, 5.0, 900.0, holding=False)
+    assert shallow.uncorrectable.tolist() == [False, False]                  # within H: nothing to correct
+    level = Corrector(_grid([_first(words, 600.0, 2), {ALTITUDE: words.altitude_index(480.0)}]), 0, words, 1)
+    level.row(0, 0.0, 0.0, 900.0, holding=False)
+    level.row(1, 0.0, 30.0, 900.0, holding=False)
+    assert level.uncorrectable.tolist() == [False, True]                     # a new observed altitude word
     assert closed_loop.uncorrected_m(np.array([5.0, -40.0, 9.0]), np.array([True, False, True])) == 9.0
     batch, inputs, words = _batch()
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
