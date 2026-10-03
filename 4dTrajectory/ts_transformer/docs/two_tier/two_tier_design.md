@@ -63,12 +63,12 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D35 | No finer grids. A finer grid does not remove the drift of open-loop words (§11.9); the closed-loop reading does (D32). The heading grid stays 5°, the descent classes stay (D6) | Decided | User, 2026-10-03 |
 | D36 | The teacher-forced data term of the post-training uses single-aircraft samples of the closed-loop sentences, not scene samples. The flown states keep the observed path, not the observed time (§4.9), so two aircraft of one scene do not keep their observed spacing (§7, §8) | Decided | User, 2026-10-04 |
 | D37 | Branch training. Each training aircraft is spoken one time. When its reward is less than 1, it is spoken again from saved states at its first predicted step and every 120 s after it, before the event that ended it. Each branch group compares only the words after its branch point (§7) | Decided | User, 2026-10-04 |
+| D38 | The DA check uses one definition with the evaluation module. Vertical: within ±22 m of the published glidepath of R, the bound of `evaluation/thresholds.py` (`RNAV_TERMINAL_VERTICAL_BOUND_M`, ICAO Doc 9613). Lateral: inside the FAS cone at the distance of the DA point. Neither is a parameter (§5.8) | Decided | User, 2026-10-04 |
 
 ### 0.2 Open items, in the order of discussion
 
 | # | Item | Proposal | §  |
 |---|---|---|---|
-| O2 | Tolerances of the stability check at the decision altitude (DA) | No values in this document (D7) | 5.8 |
 | O6 | Replacement for the clearance mask of the multi-aircraft loop; the rule "established on the final" of the separation judge and masks (D31) | Discuss with §8 | 8 |
 | O7 | Selection of designs by leave-one-airport-out (train on four airports, read the fifth) | Discuss with §7 | 7 |
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
@@ -87,7 +87,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 1. Stage A (§14.2): write the vocabulary, the labeller, the identities, the executor, the judge and the replay on the
    branch `dev-two-tier-v4`, milestones A0–A9, each with tests and a code review. Another agent does this.
 2. Claude checks the result of stage A against this document (§14.6).
-3. The user sets the values of O2 and chooses the fitted values of D15. Then the formal artefact is built, and the
+3. The user chooses the fitted values of D15. Then the formal artefact is built, and the
    readings of D34 are made at each row interval of the ablation (D11, D25: 2, 4, 8 s). The user compares them (D7).
 4. Stages B, C, D (§14.3–§14.5): the prior from the start, the post-training and the multi-aircraft work, the frontend.
 5. The user merges the branch.
@@ -735,9 +735,18 @@ A crossing that is not lined up (for example, abeam the threshold on a downwind)
 crossing is an event, of R or of another candidate (D33): the flight continues. `crossed_without_capture` goes, because the executor has no capture
 state.
 
-**The DA check (D3, O2).** At the DA point the judge checks that the aircraft is stable: lateral offset inside the FAS
-cone at that distance, height inside a tolerance of the published glidepath of R (TCH + d·tan(glidepath angle)). The
-tolerances are open (D7). The regulation basis: the missed approach starts at the DA (AIM 5-4-21 b: "Obstacle
+**The DA check (D3, D38).** At the DA point the judge checks that the aircraft is stable:
+
+- **Vertical:** the height within ±22 m of the published glidepath of R (straight-line reference, §11.4). The value is
+  the vertical bound of the evaluation module (`evaluation/thresholds.py` `RNAV_TERMINAL_VERTICAL_BOUND_M`; ICAO Doc
+  9613, RNP APCH Baro-VNAV final approach segment). The judge imports it; it is not a parameter.
+- **Lateral:** the lateral offset inside the FAS cone at the distance of the DA point (FAA Order 8260.58D Formula 3-1-1,
+  `flight_scenarios/fas_geometry.py`), the same geometry as the runway limit of the crossing. The lateral bound of the
+  evaluation module (half the runway width, 15.24–22.86 m) is a landing-geometry criterion at the threshold (evaluation
+  EV1). At the DA point, 0.9–2.1 km before the threshold, it would be narrower than the lateral tolerance of the
+  closed-loop reading (30 m, D32): a sentence that follows a real flight could then fail the check.
+
+The regulation basis: the missed approach starts at the DA (AIM 5-4-21 b: "Obstacle
 protection for missed approach is predicated on the missed approach being initiated at the decision altitude"). If
 the model says "go-around" before the DA point, the flight continues (§3.2).
 
@@ -1011,7 +1020,7 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | Landing screen | lateral ≤ 1,000 m and ≤ half the parallel spacing; height ≤ 100 m | `final_approach.assign.LandingScreen` |
 | Landed lateral limit | FAS half-width at the threshold, 106.7 m | FAA Order 8260.58D Formula 3-1-1 |
 | Lined up | track within 30° of the course | 7110.65BB 5-9-2, TBL 5-9-1 |
-| DA check tolerances | open | O2, D7 |
+| DA check | vertical ±22 m of the published glidepath; lateral inside the FAS cone at the DA distance | D38 (`evaluation/thresholds.py`; FAA Order 8260.58D Formula 3-1-1) |
 | Time limit | remaining observed time × 1.5 | Fixed choice |
 | Closed-loop reading: tolerances | lateral Y = 30 m, vertical H = 15 m; a correction ends below half the tolerance or at a change of sign | D32 |
 | Closed-loop reading: correction | heading: one class (5°) toward the observed path; angle: the next descent class | D32 |
@@ -1380,15 +1389,15 @@ stage D.
   (`Executor.extend_time_limit`).
 - The DA check: at the DA point, the lateral offset against the FAS cone at that distance
   (`flight_scenarios/fas_geometry.py`) and the height against the published glidepath, straight-line reference
-  (§11.4), within two tolerances. The tolerances are REQUIRED parameters of the executor spec, given on the command line
-  of `executor_spec`, with no default (O2: the user gives the values).
+  (§11.4). The bounds of D38: ±22 m imported from `evaluation/thresholds.py`, and the FAS cone itself. They are not
+  parameters.
 - Layer 2: the heading words to the end of the flight; the clearance and corridor checks go.
 - Tests: each outcome on a hand-built flown track; the order of two events at one row; a go-around low pass that is not
   an event; the DA check pass and fail.
 
 **A6. Executor spec, conformance and replay.**
 
-- `executor_spec`: schema `ts-executor-spec-v7`; the parameters (with the DA tolerances) and the conformance reference
+- `executor_spec`: schema `ts-executor-spec-v7`; the parameters and the conformance reference
   (250 flights) as now; `executor_conformance` as now (§9.2 #3).
 - `executor_replay`: a new option `--row-interval-s` (default 2; a multiple of 2): the sentences go through the A2
   projection before they are flown. The summary gives each outcome, the words inside their envelopes (with the
@@ -1435,6 +1444,9 @@ holds this milestone into `dev-two-tier-v4`.
   by reason (§4.9, "Artefact"). Sentences schema: a new name (principle 8).
 - Labeller conformance (§9.2 #2): it covers the closed-loop reading, with the artefact's executor spec.
 - Judge (D33): while G is true, no crossing is an event, of R or of another candidate.
+- DA check (D38): the vertical bound imported from `evaluation/thresholds.py` (`RNAV_TERMINAL_VERTICAL_BOUND_M`), the
+  lateral bound the FAS cone at the DA distance; the two required DA parameters of the executor spec go (A5 built them).
+  Tests: a flight 21 m above the glidepath at the DA point passes, 23 m fails; inside and outside the cone.
 - `executor_replay` flies the closed-loop sentences. It reports, besides the outcomes: for each flight, the largest
   |e_y| and |e_h| against the observed path, and the correction words for each column. Replaying a closed-loop sentence
   gives its flown states again (a test).
@@ -1484,7 +1496,7 @@ frontend reads the reading name, not the spec sha (§9.2 #9). After stage D the 
 
 ### 14.6 What Claude checks at the end of stage A
 
-1. Each decision that stage A carries (D1–D22, the Δ values of D25, D26–D28, D32 and D33) against the code: the module and the
+1. Each decision that stage A carries (D1–D22, the Δ values of D25, D26–D28, D32, D33 and D38) against the code: the module and the
    test that carry it (a table in the report).
 2. The targeted tests and the full suite pass on the branch head (run again, not read from the report).
 3. The smoke build: both conformance checks pass; the replay at Δ = 2 and 4 runs to its end; a labelled go-around
