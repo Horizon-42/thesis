@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ORBIT_PITCH_MAX_DEG, ORBIT_PITCH_MIN_DEG, ZOOM_MIN_RANGE_M,
-  dialFlatten, dialPoint, orbitDrag, quantiseHeading, quantiseReadout, sameReadout, wrapDegrees360, zoomRange,
+  dialFlatten, dialPoint, formatAltitude, orbitDrag, quantiseHeading, quantiseReadout, sameReadout, wrapDegrees360, zoomRange,
 } from "../cameraDial";
 
 describe("dialFlatten", () => {
@@ -88,5 +88,18 @@ describe("readout quantising", () => {
     const a = quantiseReadout(read);
     expect(sameReadout(a, quantiseReadout({ ...read, heading: 359.9401, altitude: 5348.9 }))).toBe(true);
     expect(sameReadout(a, quantiseReadout({ ...read, altitude: 5350 }))).toBe(false);
+  });
+});
+
+describe("formatAltitude", () => {
+  it("switches unit at 9 999 m and at 1 000 km, so the readout never outgrows its column", () => {
+    expect(formatAltitude(852.4)).toBe("852 m");
+    expect(formatAltitude(5349)).toBe("5,349 m");
+    expect(formatAltitude(10_000)).toBe("10.0 km");
+    expect(formatAltitude(999_900)).toBe("999.9 km");
+    expect(formatAltitude(25_351_200)).toBe("25.4 Mm");
+    for (const m of [0, 852, 9_998, 10_000, 999_900, 25_351_200, 4e7]) {
+      expect(formatAltitude(m).length).toBeLessThanOrEqual(8);
+    }
   });
 });

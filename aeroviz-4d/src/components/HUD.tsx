@@ -24,6 +24,7 @@ import {
   ORBIT_PITCH_MIN_DEG,
   dialFlatten,
   dialPoint,
+  formatAltitude,
   orbitDrag,
   quantiseDeg,
   quantiseHeading,
@@ -39,8 +40,8 @@ const SIDE_VIEW_PITCH_DEG = -8;
 const TERRAIN_EXAGGERATION_MAX = 20;
 const EXAGGERATION_COMMIT_DELAY_MS = 180;
 const DIAL_SIZE = 84;
-const DIAL_R = 34;
-const ZOOM_STRIP_TRAVEL_PX = 34;
+const DIAL_R = 37;
+const ZOOM_STRIP_TRAVEL_PX = 28; // half the strip (104 px) less its signs and the thumb
 const WHEEL_PX_PER_DELTA = 0.25;
 const WHEEL_PX_PER_LINE = 33; // deltaMode 1 (Firefox): deltaY counts lines, not pixels
 
@@ -57,7 +58,7 @@ const OrbitDial = memo(function OrbitDial({ heading, pitch }: { heading: number;
   const cy = c - 3;
   const k = dialFlatten(pitch);
   return (
-    <svg viewBox={`0 0 ${DIAL_SIZE} ${DIAL_SIZE}`} width={DIAL_SIZE} height={DIAL_SIZE} className="hud-dial-svg">
+    <svg viewBox={`0 0 ${DIAL_SIZE} ${DIAL_SIZE}`} className="hud-dial-svg">
       <ellipse cx={c} cy={cy} rx={DIAL_R} ry={DIAL_R * k} fill="rgba(16,20,30,0.6)" stroke="#2a3a5a" strokeWidth="1.5" />
       <ellipse cx={c} cy={cy} rx={DIAL_R * 0.5} ry={DIAL_R * 0.5 * k} fill="none" stroke="#22304c" strokeWidth="1" />
       {DIAL_TICKS.map((b) => {
@@ -369,12 +370,6 @@ export default function HUD({ children }: { children?: ReactNode } = {}) {
   }
 
   // ── Formatting helpers ────────────────────────────────────────────────────
-  function fmtAlt(m: number): string {
-    return m >= 9_999
-      ? `${(m / 1000).toFixed(1)} km`
-      : `${Math.round(m).toLocaleString()} m`;
-  }
-
   function fmtCoord(deg: number, pos: string, neg: string): string {
     return `${Math.abs(deg).toFixed(4)}°\u2009${deg >= 0 ? pos : neg}`;
   }
@@ -446,7 +441,7 @@ export default function HUD({ children }: { children?: ReactNode } = {}) {
           </div>
           <div className="hud-readout-row">
             <span className="hud-readout-label">ALT</span>
-            <span className="hud-readout-val">{fmtAlt(cam.altitude)}</span>
+            <span className="hud-readout-val">{formatAltitude(cam.altitude)}</span>
           </div>
         </div>
       </div>

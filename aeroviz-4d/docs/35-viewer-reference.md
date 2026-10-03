@@ -815,5 +815,5 @@ indeterminate on another runway.
 
 **Layers 在相机面板下方（2026-10-03）**：图层开关不再是顶栏按钮打开的抽屉，而是 `HudLayers`（`HUD` 的 children，`App.tsx` 传入；本地地形演示页的 HUD
 不带它，那里的图层是页面自己的状态）：默认折叠，标题显示"开着的数/9"；展开后一图层一个胶囊（真 checkbox，键盘可达），范围环开着时多一行半径（滑块 +
-数字框，1–50 km），本地地形开着时多一行来源摘要（完整坐标系名在 tooltip）。已删除：顶栏 Layers 按钮、`LayersDrawer`、`layersDrawerOpen` 状态，以及
-"Legacy FAF OCS Debug"图层（`ocsSurfaces` 键和只服务于它的 `useOcsLayer`；`ocsGeometry.ts` 和它的测试还在，现在没有调用方）。
+数字框，1–50 km），本地地形开着时多一行来源摘要；Labels 是 Obstacles 的子开关，只在 Obstacles 开着时出现（排在它后面、缩进），关掉 Obstacles 就收起它（它自己的开关状态保留），标题的计数只数看得见的（完整坐标系名在 tooltip）。已删除：顶栏 Layers 按钮、`LayersDrawer`、`layersDrawerOpen` 状态，以及
+"Legacy FAF OCS Debug"图层（`ocsSurfaces` 键和只服务于它的 `useOcsLayer`；`ocsGeometry.ts` 和它的测试随后也删了，2026-10-03）。

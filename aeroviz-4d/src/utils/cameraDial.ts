@@ -83,3 +83,10 @@ export function sameReadout(a: CameraReadout, b: CameraReadout): boolean {
   return a.heading === b.heading && a.pitch === b.pitch && a.altitude === b.altitude
     && a.lat === b.lat && a.lon === b.lon;
 }
+
+/** The altitude readout, at most 8 characters (the readout column is 60 px): m, km from 9 999 m, Mm from 1 000 km (whole-globe views). */
+export function formatAltitude(m: number): string {
+  if (m >= 1e6) return `${(m / 1e6).toFixed(1)} Mm`;
+  if (m >= 9_999) return `${(m / 1000).toFixed(1)} km`;
+  return `${Math.round(m).toLocaleString()} m`;
+}

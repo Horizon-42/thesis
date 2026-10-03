@@ -443,6 +443,9 @@ body,
   line-height: 14px;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
+/* A child chip (Labels under Obstacles) is smaller and marked with a hook, so it reads as part of the chip before it. */
+.hud-layer-chip-child span { font-size: 10px; padding: 2px 7px 2px 6px; }
+.hud-layer-chip-child span::before { content: "↳ "; opacity: 0.7; }
 .hud-layer-chip:hover span { border-color: #5a7ab8; color: #c8d8ec; }
 .hud-layer-chip input:checked + span {
   background: #1a4a8a;
@@ -4680,18 +4683,19 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
 .hud-pad-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 7px;
 }
 .hud-dial {
   flex: 0 0 auto;
-  width: 84px;
-  height: 84px;
+  width: 104px;
+  height: 104px;
   border-radius: 8px;
   cursor: grab;
   touch-action: none;
 }
 .hud-dial:active { cursor: grabbing; }
-.hud-dial-svg { display: block; }
+.hud-dial-svg { display: block; width: 100%; height: 100%; }
 
 .hud-zoom {
   flex: 0 0 auto;
@@ -4700,7 +4704,7 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   align-items: center;
   justify-content: space-between;
   width: 18px;
-  height: 84px;
+  height: 104px;
   cursor: ns-resize;
   touch-action: none;
 }
@@ -4736,20 +4740,21 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
 
 /* HDG / PIT / ALT readout, lat/lon line */
 .hud-readout {
-  flex: 1;
+  flex: 0 1 60px;
   min-width: 0;
+  align-self: stretch;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  justify-content: space-around;
+  text-align: center;
 }
-.hud-readout-row   { display: flex; align-items: baseline; gap: 5px; }
+.hud-readout-row   { display: flex; flex-direction: column; align-items: center; gap: 1px; }
 .hud-readout-label {
-  font-size: 10px;
+  font-size: 9px;
+  line-height: 10px;
   text-transform: uppercase;
   letter-spacing: 0;
   color: #8898aa;
-  width: 24px;
-  flex-shrink: 0;
 }
 .hud-readout-val {
   font-family: "Courier New", monospace;

@@ -13,7 +13,8 @@ import { useApp, useRangeRingRadiusKm, type LayerKey } from "../context/AppConte
 
 // `procedures` is intentionally absent — the RNAV procedures master switch lives in the
 // Procedures-mode panel itself (ProcedurePanel), not here.
-const LAYER_CHIPS: { key: LayerKey; label: string; title: string }[] = [
+// `parent`: a child chip is shown (and usable) only while its parent layer is on, right after it.
+const LAYER_CHIPS: { key: LayerKey; label: string; title: string; parent?: LayerKey }[] = [
   { key: "satelliteImagery", label: "Imagery", title: "Satellite imagery" },
   { key: "terrain", label: "Terrain", title: "Terrain" },
   { key: "airportLocalTerrain", label: "Local terrain", title: "Airport local terrain" },
@@ -21,7 +22,7 @@ const LAYER_CHIPS: { key: LayerKey; label: string; title: string }[] = [
   { key: "terrainHeightTint", label: "Height tint", title: "Terrain height tint" },
   { key: "runways", label: "Runways", title: "Runways" },
   { key: "obstacles", label: "Obstacles", title: "Obstacles" },
-  { key: "obstacleLabels", label: "Labels", title: "Obstacle labels (drawn only while Obstacles is on)" },
+  { key: "obstacleLabels", label: "Labels", title: "Obstacle labels", parent: "obstacles" },
   { key: "rangeRing", label: "Range ring", title: "Range ring around the airport" },
 ];
 
@@ -70,7 +71,8 @@ export default function HudLayers() {
     }
   }, [rangeRingRadiusKm]);
 
-  const onCount = LAYER_CHIPS.filter(({ key }) => layers[key]).length;
+  const chips = LAYER_CHIPS.filter(({ parent }) => !parent || layers[parent]);
+  const onCount = chips.filter(({ key }) => layers[key]).length;
   const localTerrainSummary = [
     formatTerrainSource(airportLocalTerrain.sourceKind, airportLocalTerrain.sourceName),
     formatTerrainResolution(airportLocalTerrain.horizontalResolutionM),
@@ -86,15 +88,15 @@ export default function HudLayers() {
         onClick={() => setOpen(!open)}
       >
         <span className="hud-layers-title">Layers</span>
-        <span className="hud-layers-count">{onCount}/{LAYER_CHIPS.length}</span>
+        <span className="hud-layers-count">{onCount}/{chips.length}</span>
         <span className="hud-layers-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
       </button>
 
       {open ? (
         <>
           <div className="hud-layer-chips">
-            {LAYER_CHIPS.map(({ key, label, title }) => (
-              <label key={key} className="hud-layer-chip" title={title}>
+            {chips.map(({ key, label, title, parent }) => (
+              <label key={key} className={parent ? "hud-layer-chip hud-layer-chip-child" : "hud-layer-chip"} title={title}>
                 <input type="checkbox" checked={layers[key]} onChange={() => toggleLayer(key)} />
                 <span>{label}</span>
               </label>

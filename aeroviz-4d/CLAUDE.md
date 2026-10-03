@@ -21,7 +21,7 @@ npm run backend                      # the Python backend, from here
 npm run build                        # tsc + vite production build
 npm test                             # Vitest (watch mode)
 npx vitest run                       # Single run, no watch
-npx vitest run src/utils/__tests__/ocsGeometry.test.ts  # Single test file
+npx vitest run src/utils/__tests__/cameraDial.test.ts  # Single test file
 npm run test:coverage                # Coverage report
 npm run build:local-terrain          # Airport-local heightmap terrain tiles
 npm run build:local-terrain:visual-assets
@@ -62,7 +62,6 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 
 ## Utility modules
 
-- `ocsGeometry.ts` — pure PANS-OPS obstacle clearance surface math
 - `czmlBuilder.ts` — pure CZML packet construction helpers
 - `utils/procedureGeoMath.ts` — the single TS geo/units module (constants imported from generated
   `geoConstants.json`; regenerated from `geokit` — see `geokit/CLAUDE.md`)
@@ -242,7 +241,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   its name (a Python contract) (AV43).
 - **The Camera panel is a drag disc, orbiting the screen-centre point** (`HUD.tsx`, math in `utils/cameraDial.ts`): heading/pitch are
   ACCUMULATED during a drag and never read back from the camera (they differ at long range); the 10 Hz readout is quantised and skips
-  re-renders when nothing visible changed; orbit pitch is limited to −89°…−1°; no effect while following a flight (AV44). The layer toggles are `HudLayers`, the HUD's children under it (no top-bar button, no drawer; "Legacy FAF OCS Debug" is gone).
+  re-renders when nothing visible changed; orbit pitch is limited to −89°…−1°; no effect while following a flight (AV44). The layer toggles are `HudLayers`, the HUD's children under it (no top-bar button, no drawer; "Legacy FAF OCS Debug" is gone; Labels is a child of Obstacles — shown only while it is on).
 
 ## Comparison CZML colour contract
 

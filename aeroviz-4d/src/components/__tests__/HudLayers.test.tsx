@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 const { appState, rangeRing, toggleLayer, setRangeRingRadiusKm } = vi.hoisted(() => {
   const defaultLayers = {
@@ -58,7 +58,7 @@ describe("HudLayers", () => {
     render(<HudLayers />);
     const head = screen.getByRole("button", { name: /Layers/ });
     expect(head.getAttribute("aria-expanded")).toBe("false");
-    expect(head.textContent).toContain("2/9");
+    expect(head.textContent).toContain("2/8");
     expect(screen.queryByLabelText("Imagery")).toBeNull();
   });
 
@@ -66,7 +66,7 @@ describe("HudLayers", () => {
     render(<HudLayers />);
     expand();
     expect(screen.queryByLabelText("RNAV Procedures")).toBeNull();
-    expect(screen.getAllByRole("checkbox")).toHaveLength(9);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(8);
   });
 
   it("has no legacy FAF OCS debug toggle", () => {
@@ -75,13 +75,39 @@ describe("HudLayers", () => {
     expect(screen.queryByLabelText(/Legacy FAF/i)).toBeNull();
   });
 
-  it("toggles obstacle labels independently", () => {
+  it("hides Labels while Obstacles is off", () => {
+    render(<HudLayers />);
+    expand();
+    expect(screen.queryByLabelText("Labels")).toBeNull();
+    expect(screen.getAllByRole("checkbox")).toHaveLength(8);
+  });
+
+  it("shows Labels right after Obstacles once Obstacles is on", () => {
+    appState.layers.obstacles = true;
+    render(<HudLayers />);
+    expand();
+    const names = screen.getAllByRole("checkbox").map((box) => box.closest("label")?.textContent);
+    expect(names).toHaveLength(9);
+    expect(names.indexOf("Labels")).toBe(names.indexOf("Obstacles") + 1);
+  });
+
+  it("toggles obstacle labels from its own chip", () => {
+    appState.layers.obstacles = true;
     render(<HudLayers />);
     expand();
     const checkbox = screen.getByLabelText("Labels") as HTMLInputElement;
     expect(checkbox.checked).toBe(false);
     fireEvent.click(checkbox);
     expect(toggleLayer).toHaveBeenCalledWith("obstacleLabels");
+  });
+
+  it("counts only the chips that are showing", () => {
+    render(<HudLayers />);
+    expect(screen.getByRole("button", { name: /Layers/ }).textContent).toContain("2/8");
+    cleanup();
+    appState.layers.obstacles = true;
+    render(<HudLayers />);
+    expect(screen.getByRole("button", { name: /Layers/ }).textContent).toContain("3/9");
   });
 
   it("places satellite imagery before terrain in the layer toggles", () => {
