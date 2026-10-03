@@ -1,7 +1,7 @@
 """Instruction labeller, the check by eye: draw a seeded sample of VAL flights with their
 sentences (half straight-in, half vectored) into ``figures/`` of the artefact directory.
 
-Each page: the plan view with the heading words and the capture, the altitude against distance
+Each page: the plan view with the heading words (relative to the runway's course), the go-arounds and the capture, the altitude against distance
 flown with the altitude and angle words and their tubes, the ground speed against time with the
 speed words. An ``index.csv`` lists the pages for a verdict column.
 
@@ -16,7 +16,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ts_transformer.instructions.artefact import load_candidates, load_signals, load_spec, require_current_labeller
+from ts_transformer.instructions.artefact import load_candidates, load_signals, load_spec
+from ts_transformer.instructions.conformance import require_conforming_labeller
 from ts_transformer.instructions.figures import draw_flight
 from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.instructions.labeller.records import Refused
@@ -37,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{out} exists; an instruction artefact is never overwritten")
     if args.count % 2:
         parser.error("--count draws half per stratum: give an even number")
-    require_current_labeller(directory)
+    require_conforming_labeller(directory)
     spec = load_spec(directory)
     words = Words(spec)
     geometries = load_candidates(directory)

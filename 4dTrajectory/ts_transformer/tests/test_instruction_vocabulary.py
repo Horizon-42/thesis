@@ -1,12 +1,11 @@
-"""The instruction vocabulary's parts: the spec, the words, the candidate runways, the envelopes,
-the piecewise fit, the measurements and the artefact (design: docs/two_tier/instruction_vocabulary_design.zh.md)."""
+"""The instruction vocabulary's parts: the spec, the words, the grammar, the candidate runways, the envelopes,
+the piecewise fit, the measurements and the artefact (design: docs/two_tier/two_tier_design.md §3, §4)."""
 
 from __future__ import annotations
 
 import json
 import math
 from dataclasses import replace
-from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -18,16 +17,15 @@ from ts_transformer.data.channels import channels_from_states
 from ts_transformer.instructions import envelope, measure
 from ts_transformer.instructions.airport import AirportGeometry, airport_geometry, relative_to_runway
 from ts_transformer.instructions.artefact import (
-    CANDIDATES_SCHEMA, keep_spec, labeller_source_sha256, load_candidates, load_day_split, load_sentences, load_signals,
-    load_spec, require_current_labeller,
-    write_candidates, write_sentences, write_signals, write_spec,
+    CANDIDATES_SCHEMA, SENTENCES_SCHEMA, keep_spec, load_candidates, load_day_split, load_sentences, load_signals,
+    load_spec, write_candidates, write_sentences, write_signals, write_spec,
 )
 from ts_transformer.instructions.labeller.read import admit, read_flight
 from ts_transformer.instructions.piecewise import fit_pieces, moving_average
 from ts_transformer.instructions.signals import FlightSignals, signals_from_series
 from ts_transformer.instructions.spec import SPEC_SCHEMA, VocabularySpec
 from ts_transformer.instructions.words import (
-    ANGLE_LEVEL, Words, compass_from_math_rad, math_rad_from_compass, wrap180,
+    ANGLE_LEVEL, COLUMNS, Words, compass_from_math_rad, math_rad_from_compass, wrap180,
 )
 from ts_transformer.data.day_split import SealedDay
 from ts_transformer.tests.support import (
@@ -47,7 +45,8 @@ spec = instruction_spec
 def test_the_sha_is_stable_and_moves_with_any_field():
     a, b = spec(), spec()
     assert a.sha256 == b.sha256
-    assert spec(altitude_step_m=30.0).sha256 == a.sha256
+    assert spec(level_band_m=25.0).sha256 == a.sha256
+    assert spec(altitude_segment_steps_m=(60.0, 120.0, 450.0)).sha256 == a.sha256
     assert spec(heading_tolerance_deg=5.0).sha256 != a.sha256
 
 
@@ -63,7 +62,10 @@ def test_from_dict_refuses_a_missing_or_an_extra_key_and_another_reading_rule():
 
 @pytest.mark.parametrize("changes, message", [
     ({"heading_tolerance_deg": 2.0}, "half a heading step"),
-    ({"altitude_tolerance_m": 10.0}, "half an altitude step"),
+    ({"altitude_segment_steps_m": (80.0, 120.0, 450.0)}, "whole number of 80 m steps"),
+    ({"altitude_segment_tops_m": (1260.0, 1200.0, 5400.0)}, "whole number"),
+    ({"altitude_segment_steps_m": (60.0, 120.0)}, "one step per segment top"),
+    ({"go_around_along_m": (3000.0, -10000.0)}, "increasing pair"),
     ({"heading_step_deg": 7.0}, "does not divide 360"),
     ({"heading_lead_s": 3.0}, "not a whole number of steps"),
     ({"heading_lead_s": -2.0}, "not a whole number of steps"),
@@ -76,22 +78,56 @@ def test_the_spec_refuses_inconsistent_values(changes, message):
 
 
 # ---- words
-def test_heading_words_wrap_the_circle():
-    words = Words(spec())
-    assert words.n_heading == 72
-    assert words.heading_index(357.6) == 0
-    assert words.heading_index(-2.4) == 0
-    assert words.heading_deg(words.heading_index(222.4)) == 220.0
+def test_the_columns_are_five_and_the_class_counts_are_the_designs():
+    """§3.1: runway, heading, altitude, angle, speed; 72 headings, 40 levels + "no level-off", level + 4 descents +
+    climb, 47 speeds + "unspecified" (each column's "unchanged" apart)."""
+    assert COLUMNS == ("runway", "heading", "altitude", "angle", "speed")
+    assert Words(spec()).class_counts() == {"heading": 72, "altitude": 41, "angle": 6, "speed": 48}
 
 
-def test_altitude_words_refuse_out_of_range_and_keep_land_apart():
+@pytest.mark.parametrize("course", [90.0, 122.3, 242.7, 302.3, 358.0, 2.0])
+def test_heading_classes_are_relative_to_the_course_both_ways(course):
+    """D8: class k is the track course + 5k°; class 0 is the course itself (KSTL's 2.3°-off-grid courses included),
+    class 36 the opposite direction, 18 and 54 the base legs; the conversion wraps 0°/360° both ways."""
     words = Words(spec())
+    assert words.heading_class(course, course) == 0
+    assert words.heading_track_deg(0, course) == pytest.approx(course % 360.0)
+    assert words.heading_track_deg(36, course) == pytest.approx((course + 180.0) % 360.0)
+    assert words.heading_track_deg(18, course) == pytest.approx((course + 90.0) % 360.0)
+    assert words.heading_track_deg(54, course) == pytest.approx((course - 90.0) % 360.0)
+    for k in range(words.n_heading):
+        track = words.heading_track_deg(k, course)
+        assert 0.0 <= track < 360.0 and words.heading_class(track, course) == k
+        assert words.heading_class(track + 2.4, course) == k and words.heading_class(track - 2.4 + 360.0, course) == k
+
+
+def test_relative_headings_lie_in_the_half_open_circle():
+    words = Words(spec())
+    assert words.heading_relative_deg(0) == 0.0 and words.heading_relative_deg(36) == 180.0
+    assert words.heading_relative_deg(37) == -175.0 and words.heading_relative_deg(71) == -5.0
+    assert words.heading_index(-5.0) == 71 and words.heading_index(-180.0) == 36 and words.heading_index(357.6) == 0
+
+
+def test_altitude_words_are_the_40_levels_of_three_segments():
+    """D22: 60 m steps 0–1,260 m, 120 m to 2,700 m, 450 m to 5,400 m; ε is half the larger gap to a level's neighbours
+    + 10 m — half the segment's step, except at a segment's top level, which takes the next segment's half step."""
+    words = Words(spec())
+    levels = words.altitude_levels
+    assert len(levels) == 40 == words.n_altitude_levels
+    assert levels.tolist() == [*np.arange(0.0, 1261.0, 60.0), *np.arange(1380.0, 2701.0, 120.0),
+                               *np.arange(3150.0, 5401.0, 450.0)]
+    assert [words.altitude_tolerance_m(i) for i in (0, 20, 21, 22, 32, 33, 34, 39)] == [
+        40.0, 40.0, 70.0, 70.0, 70.0, 235.0, 235.0, 235.0]
+    assert words.altitude_tolerance_m(words.altitude_no_level_off) == 40.0
     assert words.altitude_m(words.altitude_index(914.0)) == 900.0
-    assert words.altitude_m(words.altitude_land) is None
-    with pytest.raises(ValueError):
-        words.altitude_index(6000.0)
-    with pytest.raises(ValueError):
-        words.altitude_index(-40.0)
+    assert words.altitude_m(words.altitude_index(630.0)) == 600.0          # a tie goes to the lower level
+    assert words.altitude_m(words.altitude_index(1319.0)) == 1260.0
+    assert words.altitude_m(words.altitude_index(1321.0)) == 1380.0
+    assert words.altitude_m(words.altitude_index(5600.0)) == 5400.0
+    assert words.altitude_m(words.altitude_no_level_off) is None
+    for outside in (5626.0, -31.0):
+        with pytest.raises(ValueError):
+            words.altitude_index(outside)
 
 
 def test_angle_classes_follow_the_edges():
@@ -227,19 +263,6 @@ def test_the_vertical_tube_stops_at_the_target():
     assert (low[1], high[1]) == pytest.approx((875.0, 925.0))
 
 
-@pytest.mark.parametrize("heading, offset, before, converges", [
-    (0.0, 800.0, 12000.0, True),       # a base 92° off an off-grid course (092), from its right: within 90° + 4.5°
-    (180.0, -800.0, 12000.0, True),    # the mirror base from its left, 88° off
-    (270.0, 800.0, 12000.0, False),    # flying away from the course
-    (90.0, -60.0, 4000.0, True),       # aligned, 60 m out where the corridor is 51 m: a track within 4.5° meets the line
-    (90.0, -2000.0, 12000.0, False),   # parallel 2 km out: even 4.5° toward the line meets it beyond the threshold
-    (90.0, 800.0, 12000.0, True),      # 2° toward the line from its right... within the tolerance
-    (100.0, 800.0, 12000.0, False),    # 8° away from the line: no track within the tolerance comes back
-])
-def test_a_heading_converges_when_a_track_within_its_tolerance_meets_the_final(heading, offset, before, converges):
-    assert envelope.heading_converges(heading, 92.0, offset, before, 4.5, 20.0, 0.45) is converges
-
-
 def test_the_corridor_widens_with_distance():
     width = envelope.corridor_half_width_m(np.array([0.0, 10000.0, -50.0]), 20.0, 0.45)
     assert width.tolist() == pytest.approx([20.0, 20.0 + 10000.0 * math.tan(math.radians(0.45)), 20.0])
@@ -247,21 +270,9 @@ def test_the_corridor_widens_with_distance():
     assert inside.tolist() == [True, False]
 
 
-def test_turn_and_speed_progress():
-    assert envelope.turn_progress_ok(np.array([0.0, 20.0, 50.0, 88.0, 90.0]), 90.0, 4.5)
-    assert not envelope.turn_progress_ok(np.array([0.0, 30.0, 20.0, 90.0]), 90.0, 4.5)
-    assert not envelope.turn_progress_ok(np.array([0.0, 50.0, 100.0]), 90.0, 4.5)
-    ok = lambda turn, mean, top, bank: envelope.turn_rate_ok(turn, mean, top, bank, 1.0, 3.5, 32.0, 10.0)  # noqa: E731
-    assert ok(90.0, 2.0, 2.5, 20.0)
-    assert not ok(90.0, 0.8, 2.5, 20.0)          # a slow large turn
-    assert ok(-5.0, 0.2, 0.4, 2.0)               # a small change of track: no lower bound
-    assert not ok(-5.0, 2.0, 4.0, 20.0)          # but never faster than the highest rate
-    assert not ok(90.0, 2.0, 3.0, 33.0)          # nor steeper than the highest bank
-
-
 def test_a_heading_word_is_judged_from_its_row_plus_the_lead_to_the_next_words():
-    """§10.1: a word said at row r says where the track is a lead later — judged from r + lead to the next word's row +
-    lead, never at or past the clearance; a word the lead carries past it has no rows."""
+    """§3.3: a word said at row r says where the track is a lead later — judged from r + lead to the next word's row +
+    lead, never at or past the end; a word the lead carries past it has no rows."""
     assert envelope.heading_word_rows([0, 10, 25, 29], 2, 30) == [(2, 12), (12, 27), (27, 30), (31, 31)]
     track = np.concatenate((np.full(12, 90.0), np.full(10, 95.0), np.full(8, 101.0)))
     judged = envelope.heading_words_inside(track, [(0, 90.0), (10, 95.0), (20, 100.0)], 2, 30, 4.5)
@@ -343,6 +354,30 @@ def test_the_measurements_read_only_the_admitted_rows(geometry):
     assert rows["5"][0] == 30.0
 
 
+def test_every_fitted_angle_comes_with_rounder_candidates_and_the_fit_each_leaves():
+    """D15: the fitted descent centres / inner edges and the climb centre, each rounded to 0.5°, 0.25° and 0.1°, with the
+    end-of-piece height error each leaves; the fitted row is `fit_descent_classes`'s own error."""
+    rng = np.random.default_rng(0)
+    angle = np.concatenate((rng.normal(3.0, 0.2, 300), rng.normal(1.0, 0.2, 300), rng.normal(-1.5, 0.3, 40)))
+    length = rng.uniform(500.0, 3000.0, len(angle))
+    fit = measure.fit_descent_classes(angle, length, 4)
+    rows = measure.rounding_candidates(angle, length, fit["centres_deg"], fit["edges_deg"], 1.47)
+    assert set(rows) == {"fitted", "0.5", "0.25", "0.1"}
+    assert rows["fitted"]["descent_end_height_error_m"] == pytest.approx(fit["end_height_error_m"])
+    assert rows["0.5"]["climb_centre_deg"] == 1.5 and rows["0.1"]["climb_centre_deg"] == 1.5
+    assert all(c * 4 == round(c * 4) for c in rows["0.25"]["descent_centres_deg"])
+    assert rows["0.5"]["descent_edges_deg"][0] == measure.DESCENT_FLOOR_DEG
+    climbs = measure.climb_distribution(angle, length)
+    assert climbs["pieces"] == 40 and 1.0 < climbs["length_weighted_deg"]["p50"] < 2.0
+
+
+def test_the_level_rounding_error_is_read_under_the_grid_and_a_uniform_30_m_grid():
+    words = Words(spec())
+    reading = measure.level_rounding(np.array([630.0, 905.0, 1320.0, 3375.0]), words)
+    assert reading["levels"] == 4 and reading["grid"]["max"] == pytest.approx(225.0)
+    assert reading["uniform_30_m"]["max"] == pytest.approx(15.0)
+
+
 # ---- artefact
 def _signals(identifier: str, rows: int, split: str = "train") -> FlightSignals:
     t = np.arange(rows) * 2.0
@@ -367,39 +402,40 @@ def test_the_artefact_round_trips_and_refuses_overwrites_and_other_specs(tmp_pat
     with pytest.raises(ValueError, match=f"is not a {CANDIDATES_SCHEMA} file"):
         load_candidates(tmp_path / "unnamed")
     one = spec()
-    source = {"labeller_source_sha256": labeller_source_sha256(), "git": {"head": "test", "dirty": False}}
+    source = {"labeller_code_sha256": "c" * 64, "git": {"head": "test", "dirty": False}}
     write_spec(tmp_path, one, {"n": 1}, source)
     assert load_spec(tmp_path) == one
-    require_current_labeller(tmp_path)
     with pytest.raises(FileExistsError):
         write_spec(tmp_path, one, {"n": 1}, source)
     legs = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (20, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
             (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
     reading = read_flight(instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0)), geometry, one)
-    write_sentences(tmp_path, "train", one, [reading], [1])
+    reading.go_around_rows, reading.runway_again_rows = [5], [9]          # the go-around columns, round-tripped
+    write_sentences(tmp_path, "train", one, [reading, reading], [1, 0], "c" * 64)
     with pytest.raises(ValueError, match="read with spec"):
         load_sentences(tmp_path, "train", spec(heading_tolerance_deg=5.0))
     sentences = load_sentences(tmp_path, "train", one)
-    assert sentences["words"].tolist() == reading.words.tolist() and sentences["signal_index"].tolist() == [1]
-    assert len(sentences["instruction_row"]) == len(reading.instructions)
+    assert sentences["words"].tolist() == reading.words.tolist() * 2 and sentences["signal_index"].tolist() == [1, 0]
+    assert sentences["words"].shape[1] == 5 and len(sentences["instruction_row"]) == 2 * len(reading.instructions)
+    assert sentences["go_around_offsets"].tolist() == [0, 1, 2] and sentences["runway_again_row"].tolist() == [9, 9]
+    assert "join_row" not in sentences and str(sentences["labeller_code_sha256"]) == "c" * 64
+    # a sentence file of another schema (an old artefact) is refused by its name
+    with np.load(tmp_path / "sentences_train.npz") as arrays:
+        old = {name: arrays[name] for name in arrays.files}
+    (tmp_path / "v6").mkdir()
+    np.savez_compressed(tmp_path / "v6" / "sentences_train.npz", **{**old, "schema": np.array("ts-instruction-sentences-v2")})
+    with pytest.raises(ValueError, match=f"is not a {SENTENCES_SCHEMA} file"):
+        load_sentences(tmp_path / "v6", "train", one)
     # a spec file of another schema is refused by name
     (tmp_path / "old").mkdir()
     (tmp_path / "old" / "spec.json").write_text(json.dumps({"schema": f"{SPEC_SCHEMA}-other", "sha256": one.sha256,
                                                             "spec": one.to_dict()}), encoding="utf-8")
     with pytest.raises(ValueError, match=f"is not a {SPEC_SCHEMA} file"):
         load_spec(tmp_path / "old")
-    # a spec measured by another labeller: labelling refuses, and so does the sentence file
-    other = tmp_path / "other"
-    other.mkdir()
-    write_spec(other, one, {"n": 1}, {**source, "labeller_source_sha256": "0" * 64})
-    with pytest.raises(ValueError, match="measured by labeller 000000000000"):
-        require_current_labeller(other)
-    (other / "sentences_train.npz").write_bytes((tmp_path / "sentences_train.npz").read_bytes())
-    with pytest.raises(ValueError, match="not the one that measured the spec"):
-        load_sentences(other, "train", one)
+    assert SPEC_SCHEMA == "ts-instruction-spec-v5" and one.reading_rule == "instruction-v4"
 
 
-def test_a_spec_is_kept_for_new_rows_byte_for_byte_and_only_from_this_labeller(tmp_path):
+def test_a_spec_is_kept_for_new_rows_byte_for_byte(tmp_path):
     """`keep_spec`: new rows under the same vocabulary keep the spec (the instruction_spec runner's ``--spec-from``)."""
     config = {"dt_s": 2.0, "seq_len": 60}
     for name in ("old", "new", "other_rows", "foreign"):
@@ -407,23 +443,19 @@ def test_a_spec_is_kept_for_new_rows_byte_for_byte_and_only_from_this_labeller(t
         write_signals(tmp_path / name, {"train": [_signals("KXXX:a", 5)]},
                       {"config": {**config, "dt_s": 1.0} if name == "other_rows" else config}, fixture_days())
     one = spec()
-    source = {"labeller_source_sha256": labeller_source_sha256(), "git": {"head": "measured", "dirty": False}}
+    source = {"labeller_code_sha256": "c" * 64, "git": {"head": "measured", "dirty": False}}
     write_spec(tmp_path / "old", one, {"n": 1}, source)
     assert keep_spec(tmp_path / "old", tmp_path / "new", {"spec_from": "old", "git": {"head": "kept"}}) == one
     for name in ("spec.json", "measurements.json"):
         assert (tmp_path / "new" / name).read_bytes() == (tmp_path / "old" / name).read_bytes()
     assert load_spec(tmp_path / "new") == one
-    require_current_labeller(tmp_path / "new")
     record = json.loads((tmp_path / "new" / "spec_from.json").read_text(encoding="utf-8"))
     assert (record["spec_from"], record["spec_sha256"], record["git"]["head"]) == ("old", one.sha256, "kept")
     with pytest.raises(FileExistsError):
         keep_spec(tmp_path / "old", tmp_path / "new", {})
-    # signals built under another configuration, or a spec another labeller measured, are refused
+    # signals built under another configuration are refused
     with pytest.raises(ValueError, match="built under"):
         keep_spec(tmp_path / "old", tmp_path / "other_rows", {})
-    write_spec(tmp_path / "foreign", one, {"n": 1}, {**source, "labeller_source_sha256": "0" * 64})
-    with pytest.raises(ValueError, match="measured by labeller 000000000000"):
-        keep_spec(tmp_path / "foreign", tmp_path / "other_rows", {})
     assert not (tmp_path / "other_rows" / "spec.json").exists()
 
 
@@ -452,15 +484,6 @@ def test_the_artefact_holds_development_days_only_and_each_flight_on_its_own_spl
         write_signals(tmp_path / "d", {"val": [_signals("KXXX:v", 5, "val")], "train": [_signals("KXXX:a", 5, "val")]},
                       {"note": "test"}, fixture_days())
     assert not any((tmp_path / "d").iterdir())
-
-
-def test_the_labeller_hash_covers_the_labelling_code_only():
-    from ts_transformer.instructions import artefact
-
-    package = Path(artefact.__file__).resolve().parent
-    covered = {p.relative_to(package).as_posix() for pattern in artefact.LABELLER_MODULES for p in package.glob(pattern)}
-    assert {"spec.py", "envelope.py", "measure.py", "labeller/read.py", "labeller/lateral.py"} <= covered
-    assert not covered & {"artefact.py", "readout.py", "figures.py", "__init__.py"}
 
 
 # ---- the landing, as the harvest and the evaluator judge it

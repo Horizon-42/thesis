@@ -82,7 +82,7 @@ def instruction_spec(**changes):
     from ts_transformer.instructions.spec import VocabularySpec
 
     measured = measure.MeasuredValues(
-        turn_rate_min_deg_s=1.0, turn_rate_max_deg_s=3.5, turn_bank_max_deg=32.0,
+        turn_rate_max_deg_s=3.5, turn_bank_max_deg=32.0,
         corridor_half_width_m=20.0, corridor_widening_deg=0.45, corridor_course_tolerance_deg=2.0,
         descent_angle_edges_deg=(-0.5, 1.4, 2.6, 3.7, 10.0), descent_angle_centres_deg=(0.8, 2.1, 3.0, 4.4),
         climb_angle_centre_deg=1.3, speed_accel_max_mps2=2.5,
@@ -176,9 +176,8 @@ def labelled_instruction_artefact(directory):
     signals, candidates, spec, sentences. Returns the spec."""
     import numpy as np
 
-    from ts_transformer.instructions.artefact import (
-        labeller_source_sha256, write_candidates, write_sentences, write_signals, write_spec,
-    )
+    from ts_transformer.instructions.artefact import write_candidates, write_sentences, write_signals, write_spec
+    from ts_transformer.instructions.conformance import labeller_code_sha256
     from ts_transformer.instructions.labeller.read import read_flight
 
     legs = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (20, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
@@ -190,7 +189,8 @@ def labelled_instruction_artefact(directory):
                    "sources": [{"airport": "KXXX", "arrival_manifest_sha256": "0" * 64}]}, fixture_days())
     write_candidates(directory, {"KXXX": instruction_airport()})
     spec = instruction_spec()
-    write_spec(directory, spec, {"n": 1}, {"labeller_source_sha256": labeller_source_sha256(),
+    write_spec(directory, spec, {"n": 1}, {"labeller_code_sha256": labeller_code_sha256(),
                                            "git": {"head": "test", "dirty": False}})
-    write_sentences(directory, "train", spec, [read_flight(flight, instruction_airport(), spec)], [0])
+    write_sentences(directory, "train", spec, [read_flight(flight, instruction_airport(), spec)], [0],
+                    labeller_code_sha256())
     return spec

@@ -1,6 +1,7 @@
 """One flight's sentence drawn over its track, for checking the labeller by eye: the plan view
-with the heading words and the capture, the altitude against distance flown with the altitude and
-angle words and their tubes, the ground speed against time with the speed words."""
+with the heading words (relative to the runway's course), the go-arounds and the capture, the
+altitude against distance flown with the altitude and angle words and their tubes, the ground
+speed against time with the speed words."""
 
 from __future__ import annotations
 
@@ -13,9 +14,7 @@ from ts_transformer.instructions.labeller.read import Reading, admit
 from ts_transformer.instructions.labeller.vertical import tube_bounds
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
-from ts_transformer.instructions.words import (
-    ANGLE, APPROACH, HEADING, SPEED, UNCHANGED, Words,
-)
+from ts_transformer.instructions.words import ANGLE, HEADING, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words
 
 
 def draw_flight(signals: FlightSignals, reading: Reading, geometry: AirportGeometry, spec: VocabularySpec,
@@ -40,10 +39,10 @@ def draw_flight(signals: FlightSignals, reading: Reading, geometry: AirportGeome
     plan.plot(back, back_n, "k--", lw=0.8, label=f"{candidate.ident} centreline")
     for row in np.nonzero(grid[:, HEADING] != UNCHANGED)[0]:
         plan.plot(e[row], n[row], "o", color="tab:blue")
-        plan.annotate(f"{words.heading_deg(int(grid[row, HEADING])):03.0f}", (e[row], n[row]), fontsize=8,
+        plan.annotate(f"{words.heading_relative_deg(int(grid[row, HEADING])):+.0f}", (e[row], n[row]), fontsize=8,
                       xytext=(4, 4), textcoords="offset points", color="tab:blue")
-    for row in np.nonzero(grid[:, APPROACH] != UNCHANGED)[0]:
-        label = ["not cleared", "cleared", "go-around"][int(grid[row, APPROACH])]
+    for row in np.nonzero(grid[1:, RUNWAY] != UNCHANGED)[0] + 1:
+        label = "go-around" if int(grid[row, RUNWAY]) == RUNWAY_GO_AROUND else f"runway {candidate.ident}"
         plan.annotate(label, (e[row], n[row]), fontsize=8, xytext=(4, -10), textcoords="offset points", color="tab:green")
     plan.plot(e[reading.capture_row], n[reading.capture_row], "s", color="tab:red", label="capture")
     plan.plot(e[0], n[0], "^", color="k", label="entry")
@@ -61,7 +60,7 @@ def draw_flight(signals: FlightSignals, reading: Reading, geometry: AirportGeome
     for word, stop, low, high in tube_bounds(reading.instructions, s, smoothed.altitude_m, spec, words):
         vertical.fill_between(s[word.row: stop] / 1000, low, high, color="tab:orange", alpha=0.25, lw=0)
         target = words.altitude_m(word.value)
-        label = "land" if target is None else f"{target:.0f} m"
+        label = "no level-off" if target is None else f"{target:.0f} m"
         vertical.annotate(label, (s[word.row] / 1000, smoothed.altitude_m[word.row]), fontsize=8, color="tab:orange",
                           xytext=(2, 6), textcoords="offset points")
     for row in angle_rows:
@@ -87,7 +86,7 @@ def draw_flight(signals: FlightSignals, reading: Reading, geometry: AirportGeome
         speed.fill_between(t[start:stop], target - spec.speed_tolerance_mps, target + spec.speed_tolerance_mps,
                            color="tab:cyan", alpha=0.25, lw=0)
         speed.annotate(f"{target:.0f}", (t[start], target), fontsize=8, xytext=(2, 6), textcoords="offset points")
-    speed.axvline(t[reading.join_row], color="tab:green", lw=0.8, ls="--", label="clearance")
+    speed.axvline(t[reading.capture_row], color="tab:green", lw=0.8, ls="--", label="capture")
     speed.set_xlabel("time (s)")
     speed.set_ylabel("ground speed (m/s)")
     speed.legend(fontsize=8)

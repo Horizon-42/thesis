@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.io_utils import write_json_atomic
+from ts_transformer.io_utils import logic, logic_sha256, write_json_atomic
 
 #: v6 (2026-09-27, executor v11): the source hash is over the code's logic (`logic`), no longer its bytes
 #: (v5, 2026-09-24: nothing measured from data is left — the speed changes' pace is the vocabulary's, the landing
@@ -128,26 +128,9 @@ def params_sha256(params: ExecutorParams) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-DOCUMENTED = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
-
-
-def logic(source: str) -> str:
-    """A module's logic as text: its syntax tree with the docstring of the module, every class and every function
-    removed (a body left empty holds ``pass``), written back by `ast.unparse` — no comment, docstring or layout in it."""
-    tree = ast.parse(source)
-    for node in ast.walk(tree):
-        if (isinstance(node, DOCUMENTED) and node.body and isinstance(node.body[0], ast.Expr)
-                and isinstance(node.body[0].value, ast.Constant) and isinstance(node.body[0].value.value, str)):
-            node.body = node.body[1:] or [ast.Pass()]
-    return ast.unparse(tree)
-
-
 def executor_source_sha256() -> str:
-    """sha256 over `executor_source_files` (label and `logic`, in order)."""
-    digest = hashlib.sha256()
-    for label, path in executor_source_files():
-        digest.update(label.encode("utf-8") + b"\0" + logic(path.read_text(encoding="utf-8")).encode("utf-8") + b"\0")
-    return digest.hexdigest()
+    """sha256 over `executor_source_files` (label and `logic`, in order: `io_utils.logic_sha256`)."""
+    return logic_sha256(executor_source_files())
 
 
 def _fresh(path: Path) -> Path:

@@ -1,13 +1,16 @@
-"""Speed words and the "unspecified" speed (vocabulary design §2.6, §3.4).
+"""Speed words and the "unspecified" speed (design §3.6, §4.5).
 
 The smoothed ground speed is fitted against time by straight pieces. A piece at least the
 minimum hold long, flatter than the flat-acceleration bound and inside one speed target's
 band is a HOLD; every other piece is a TRANSITION. Consecutive transitions in one direction
 form a run; a run's word is the next hold's target (the turning speed when the direction
-reverses without a hold), issued where the run begins. After the approach clearance the speed
-is the pilot's own ("unspecified", 7110.65BB 5-7-1 d), unless a hold of at least
-`unspecified_plateau_s` still ends `unspecified_distance_m` or more before the threshold
-(ATC may assign a speed until 5 NM, 5-7-1 b.4): then the words run on until that hold ends.
+reverses without a hold), issued where the run begins. From the CAPTURE ROW on (D4: the
+labeller's first row of the final run in the capture corridor; an approach clearance cancels
+the assigned speeds, 7110.65BB 5-7-1 d, and the data has no clearance) the speed is the
+pilot's own ("unspecified"), unless a hold of at least `unspecified_plateau_s` ends at or
+after that row and `unspecified_distance_m` or more before the threshold (ATC may assign a
+speed until 5 NM, 5-7-1 b.4): then the words run on until the last such hold ends. A change of
+speed under way there, begun less than a minimum hold before, is the pilot's own already.
 """
 
 from __future__ import annotations
@@ -80,15 +83,15 @@ def _groups(pieces: list[SpeedPiece]) -> list[list[SpeedPiece]]:
     return groups
 
 
-def read_speed(time: np.ndarray, speed: np.ndarray, before_threshold_m: np.ndarray, join_row: int,
+def read_speed(time: np.ndarray, speed: np.ndarray, before_threshold_m: np.ndarray, capture_row: int,
                spec: VocabularySpec, words: Words) -> SpeedReading:
     pieces = speed_pieces(time, speed, spec, words)
     groups = _groups(pieces)
     minimum_plateau = spec.rows(spec.unspecified_plateau_s)
     kept = [g[0] for g in groups
-            if g[0].kind == HOLD and g[0].stop - 1 >= join_row and g[0].rows >= minimum_plateau
+            if g[0].kind == HOLD and g[0].stop - 1 >= capture_row and g[0].rows >= minimum_plateau
             and before_threshold_m[g[0].stop - 1] >= spec.unspecified_distance_m]
-    unspecified_row = kept[-1].stop if kept else join_row
+    unspecified_row = kept[-1].stop if kept else capture_row
     # a change of speed already under way at that row, begun less than a minimum hold before
     # it, is the pilot's own speed too: "unspecified" from where it began
     for group in groups:

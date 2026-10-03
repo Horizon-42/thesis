@@ -1,4 +1,11 @@
-"""One flight: signals → sentence, or a refusal with its reason (vocabulary design §3)."""
+"""One flight: signals → sentence, or a refusal with its reason (design §4).
+
+The runway column says the landed runway at row 0 (the harvest's assignment; the data cannot show a change of runway,
+so a labelled sentence never changes it, §4.2). Each go-around inside the sentence (`go_around.go_arounds`, D18) says
+"go-around" at its point, and the landed runway again where the approach is taken up (D19): at the first level-off
+after the go-around (the first level piece of the altitude reading that starts after the point), and not later than
+the row of the next "no level-off" (rule 5: the runway word, said first in its row, ends the go-around before it).
+"""
 
 from __future__ import annotations
 
@@ -12,15 +19,16 @@ from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import (
     AirportGeometry, RunwayCandidate, RunwayRelative, landing_cross_limit_m, relative_to_runway,
 )
+from ts_transformer.instructions.labeller.go_around import GoAround, go_arounds
 from ts_transformer.instructions.labeller.lateral import read_lateral
 from ts_transformer.instructions.labeller.records import Instruction, Refused
 from ts_transformer.instructions.labeller.sentence import assemble
 from ts_transformer.instructions.labeller.speed import read_speed, span_checks
-from ts_transformer.instructions.labeller.vertical import read_vertical, tube_checks
+from ts_transformer.instructions.labeller.vertical import LEVEL, VerticalReading, held_altitude, read_vertical, tube_checks
 from ts_transformer.instructions.piecewise import moving_average
 from ts_transformer.instructions.signals import ROW_FIELDS, FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
-from ts_transformer.instructions.words import HEADING, RUNWAY, Words
+from ts_transformer.instructions.words import ALTITUDE, HEADING, RUNWAY, RUNWAY_GO_AROUND, Words
 
 
 @dataclass
@@ -48,13 +56,17 @@ class Reading:
     dataset_id: str
     airport: str
     runway_index: int
-    words: np.ndarray                     # [N, 6] int16, UNCHANGED = -1
+    words: np.ndarray                     # [N, 5] int16, UNCHANGED = -1
     instructions: list[Instruction]
     capture_row: int
-    join_row: int
     unspecified_row: int
+    #: Each go-around's row ("go-around" said) and the row the landed runway is said again (D19), in order.
+    go_around_rows: list[int]
+    runway_again_rows: list[int]
     #: The sentence covers the signal rows before the threshold crossing: ``len(words)`` rows.
     cut_at_crossing: bool
+    #: The height each row's words were checked at (`vertical.held_altitude`): what the grammar is read at again.
+    held_altitude_m: np.ndarray
     checks: dict[str, Any] = field(default_factory=dict)
 
 
@@ -87,6 +99,9 @@ class Admitted:
     smoothed: Smoothed
     relative: RunwayRelative       # on the smoothed track and altitude
     cut_at_crossing: bool
+    #: The rows of the landing passages BEFORE the landing (low crossings the flight came back from): each must lie in
+    #: a go-around's low pass (`read_flight`).
+    passages_before: tuple[int, ...] = ()
 
 
 def admit(signals: FlightSignals, geometry: AirportGeometry, spec: VocabularySpec) -> Admitted:
@@ -94,10 +109,12 @@ def admit(signals: FlightSignals, geometry: AirportGeometry, spec: VocabularySpe
     runway, the cut before the landing, and the ground-speed refusals (§3.1, §3.6).
 
     The data plane cuts a flight at its landing, so a series normally ends short of the threshold.
-    A landing as the harvest judges one (`landing_passages`) that the flight comes back from is not
-    its landing (a low pass, or an approach flown before the one that landed): refused, since the
-    landing it would be read up to is not in the series. A crossing of the plane too high or too far
-    off the centreline to be a landing (an overflight, a downwind abeam) is not a landing at all."""
+    The landing is the LAST landing passage (`landing_passages`, as the harvest judges a landing): a
+    flight that comes back ahead of the threshold after it is refused, since the landing it would be
+    read up to is not in the series; an earlier passage is a low pass the flight came back from, which
+    `read_flight` reads as a go-around or refuses (``passages_before``). A crossing of the plane too high
+    or too far off the centreline to be a landing (an overflight, a downwind abeam) is not a landing at
+    all."""
     if not np.allclose(np.diff(signals.time_s), spec.step_s, atol=1e-6):
         raise Refused("step mismatch", f"rows are not {spec.step_s:g} s apart")
     try:
@@ -108,7 +125,7 @@ def admit(signals: FlightSignals, geometry: AirportGeometry, spec: VocabularySpe
     raw = relative_to_runway(signals.e_m, signals.n_m, signals.track_deg, signals.altitude_m, candidate)
     limit = landing_cross_limit_m(geometry, runway_index, spec.landing_cross_limit_m, spec.parallel_course_delta_deg)
     passages = landing_passages(raw, limit, spec)
-    crossing = passages[0] if passages else None
+    crossing = passages[-1] if passages else None
     if crossing is not None:
         if (raw.before_threshold_m[crossing:] > 0.0).any():
             raise Refused("threshold passed before the landing",
@@ -126,7 +143,48 @@ def admit(signals: FlightSignals, geometry: AirportGeometry, spec: VocabularySpe
         raise Refused("ground speed outside the speed words", f"smoothed {speed.min():.1f}–{speed.max():.1f} m/s")
     relative = relative_to_runway(signals.e_m, signals.n_m, smoothed.track_deg, smoothed.altitude_m, candidate)
     return Admitted(signals=signals, runway_index=runway_index, candidate=candidate, smoothed=smoothed,
-                    relative=relative, cut_at_crossing=crossing is not None)
+                    relative=relative, cut_at_crossing=crossing is not None, passages_before=tuple(passages[:-1]))
+
+
+def flight_go_arounds(flight: Admitted, geometry: AirportGeometry, spec: VocabularySpec) -> list[GoAround]:
+    """The admitted flight's go-arounds (`go_around.go_arounds`) on its smoothed altitude, every candidate's frame;
+    refused when one is on the runway (a touch-and-go) or when a landing passage before the landing is not inside a
+    go-around's low pass."""
+    smoothed, signals = flight.smoothed, flight.signals
+    relatives = [relative_to_runway(signals.e_m, signals.n_m, smoothed.track_deg, smoothed.altitude_m, candidate)
+                 for candidate in geometry.candidates]
+    found = go_arounds(signals.time_s, smoothed.altitude_m, relatives, spec)
+    for item in found:
+        if item.on_runway:
+            raise Refused("touch-and-go", f"row {item.row}: {item.along_m:.0f} m past the threshold, "
+                                          f"{item.height_m:.0f} m up")
+    for row in flight.passages_before:
+        if not any(item.low_pass.first <= row <= item.low_pass.last + 1 for item in found):
+            raise Refused("threshold passed before the landing",
+                          f"a landing passage at row {row} that no go-around explains")
+    return found
+
+
+def runway_words(found: list[GoAround], vertical: VerticalReading, runway_index: int, ident: str, n_rows: int,
+                 words: Words) -> list[Instruction]:
+    """The runway column's words (module docstring): the landed runway at row 0, and per go-around "go-around" at its
+    point and the landed runway again at the first level-off after it, at the latest at the next "no level-off"."""
+    out = [Instruction(RUNWAY, runway_index, 0, "initial", {"ident": ident})]
+    levels = [piece.start for piece in vertical.pieces if piece.kind == LEVEL]
+    no_level_off = [item.row for item in vertical.instructions
+                    if item.column == ALTITUDE and item.value == words.altitude_no_level_off]
+    rows = [item.row for item in found]
+    for position, row in enumerate(rows):
+        candidates = [start for start in levels if start > row] + [start for start in no_level_off if start >= row]
+        if not candidates:
+            raise Refused("go-around not ended", f"row {row}: no level-off and no final descent after it")
+        again = min(candidates)
+        following = rows[position + 1] if position + 1 < len(rows) else n_rows
+        if again >= following:
+            raise Refused("go-around not ended", f"row {row}: the next go-around at row {following} comes first")
+        out += [Instruction(RUNWAY, RUNWAY_GO_AROUND, row, "go-around"),
+                Instruction(RUNWAY, runway_index, again, "runway again", {"ident": ident})]
+    return out
 
 
 def read_flight(signals: FlightSignals, geometry: AirportGeometry, spec: VocabularySpec,
@@ -134,27 +192,34 @@ def read_flight(signals: FlightSignals, geometry: AirportGeometry, spec: Vocabul
     words = words or Words(spec)
     flight = admit(signals, geometry, spec)
     signals, smoothed, relative, candidate = flight.signals, flight.smoothed, flight.relative, flight.candidate
-    lateral = read_lateral(smoothed.track_deg, smoothed.ground_speed_mps, relative, candidate.course_deg, spec, words)
+    lateral = read_lateral(smoothed.track_deg, relative, candidate.course_deg, spec, words)
     vertical = read_vertical(smoothed.distance_m, smoothed.altitude_m, spec, words)
-    speeds = read_speed(signals.time_s, smoothed.ground_speed_mps, relative.before_threshold_m, lateral.join_row,
+    found = flight_go_arounds(flight, geometry, spec)
+    runway = runway_words(found, vertical, flight.runway_index, candidate.ident, signals.n_rows, words)
+    speeds = read_speed(signals.time_s, smoothed.ground_speed_mps, relative.before_threshold_m, lateral.capture_row,
                         spec, words)
-    instructions = [Instruction(RUNWAY, flight.runway_index, 0, "initial", {"ident": candidate.ident}),
-                    *lateral.instructions, *vertical.instructions, *speeds.instructions]
-    grid, kept = assemble(signals.n_rows, instructions, smoothed.altitude_m, spec, words)
+    instructions = [*runway, *lateral.instructions, *vertical.instructions, *speeds.instructions]
+    held = held_altitude(vertical.pieces, smoothed.altitude_m)
+    grid, kept = assemble(signals.n_rows, instructions, held, words, len(geometry.candidates))
 
     # every check runs on the sentence as kept: a word the assembly dropped is not judged
     heading = [(item.row, float(item.info["target_deg"])) for item in kept if item.column == HEADING]
     checks = {
         "heading": envelope.heading_words_inside(smoothed.track_deg, heading, spec.rows_exact(spec.heading_lead_s),
-                                                 lateral.join_row, spec.heading_tolerance_deg),
-        "capture_turn": lateral.capture_turn, "turning_deg": lateral.turning_deg,
+                                                 signals.n_rows, spec.heading_tolerance_deg),
+        "turning_deg": lateral.turning_deg,
         "capture_before_threshold_m": float(relative.before_threshold_m[lateral.capture_row]),
+        "go_arounds": [{"row": item.row, "candidate": item.low_pass.candidate, "height_m": item.height_m,
+                        "along_m": item.along_m, "drop_m": item.drop_m, "climb_m": item.climb_m} for item in found],
         "vertical": tube_checks(kept, smoothed.distance_m, smoothed.altitude_m, spec, words),
         "speed": span_checks(kept, smoothed.ground_speed_mps, spec, words),
     }
     return Reading(dataset_id=signals.dataset_id, airport=signals.airport, runway_index=flight.runway_index,
-                   words=grid, instructions=kept, capture_row=lateral.capture_row, join_row=lateral.join_row,
-                   unspecified_row=speeds.unspecified_row, cut_at_crossing=flight.cut_at_crossing, checks=checks)
+                   words=grid, instructions=kept, capture_row=lateral.capture_row,
+                   unspecified_row=speeds.unspecified_row,
+                   go_around_rows=[item.row for item in runway if item.kind == "go-around"],
+                   runway_again_rows=[item.row for item in runway if item.kind == "runway again"],
+                   cut_at_crossing=flight.cut_at_crossing, held_altitude_m=held, checks=checks)
 
 
 def truncated(signals: FlightSignals, rows: int) -> FlightSignals:

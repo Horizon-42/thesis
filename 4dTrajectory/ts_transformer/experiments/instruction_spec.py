@@ -9,8 +9,10 @@ on the last stretch of the final, and the path angle of every move piece; it als
 track's and the altitude's wander for the bands the two tolerances are chosen from. Those set
 the bank range, the acceleration bound, the course tolerance and the descent classes. Pass B,
 with the course tolerance, fits the capture corridor on the aligned final and compares the
-heading grids on the rows before it. Writes ``spec.json`` (with the labeller's source hash and
-git state) and ``measurements.json`` into the signals directory (never over an existing file).
+heading grids on the rows before it. Every value fitted from data is written beside its rounder candidates and the fit
+each leaves (D15), with the climb angles' distribution (O12) and the level words' rounding error under the grid and
+under a uniform 30 m grid (§11.7). Writes ``spec.json`` (with the git state and, as information, the labeller code that
+measured it) and ``measurements.json`` into the signals directory (never over an existing file).
 
 ``--spec-from <artefact>`` measures nothing: that artefact's spec is kept unchanged (`artefact.keep_spec` — new rows
 under the same vocabulary, e.g. rows moved onto the UTC steps, keep the spec; every model trained under it still opens).
@@ -33,12 +35,12 @@ import numpy as np
 
 from ts_transformer.instructions import measure
 from ts_transformer.instructions.airport import AirportGeometry
-from ts_transformer.instructions.artefact import (
-    keep_spec, labeller_source_sha256, load_candidates, load_signals, write_spec,
-)
+from ts_transformer.instructions.artefact import keep_spec, load_candidates, load_signals, write_spec
+from ts_transformer.instructions.conformance import labeller_code_sha256
 from ts_transformer.instructions.labeller.read import admit
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.spec import VocabularySpec
+from ts_transformer.instructions.words import Words
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 CHUNK = 1000
@@ -60,7 +62,12 @@ def _pass_a(flights: list[Any], spec_data: dict[str, Any], geometry_data: dict[s
     admitted, refused = _admitted(flights, spec, geometry_data)
     pooled: dict[str, list[np.ndarray]] = {}
     for flight in admitted:
-        for name, values in measure.measure_flight(flight, spec).items():
+        try:
+            measured = measure.measure_flight(flight, spec)
+        except Refused as refusal:            # a level out of the grid: the labeller refuses the flight too
+            refused[refusal.reason] += 1
+            continue
+        for name, values in measured.items():
             pooled.setdefault(name, []).append(values)
     return {name: np.concatenate(values) for name, values in pooled.items()}, refused
 
@@ -110,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"kept spec {spec.sha256[:12]} from {source}")
         return 0
     started = time.perf_counter()
-    labeller = labeller_source_sha256()          # the code the workers measure with
+    labeller = labeller_code_sha256()            # the code the workers measure with
     flights = load_signals(directory, "train")
     print(f"{len(flights)} train flights", flush=True)
     provisional = measure.provisional_spec()
@@ -144,8 +151,6 @@ def main(argv: list[str] | None = None) -> int:
     cumulative = np.cumsum(length[climbs][order]) / length[climbs].sum()
     climb_centre = float(-angle[climbs][order][np.searchsorted(cumulative, 0.5)])
     measured = measure.MeasuredValues(
-        # every turning row is faster than turn_onset_rate_deg_s, so the p5 stays above it
-        turn_rate_min_deg_s=measure.round_down(float(np.percentile(first["turn_mean_rate_deg_s"], 5)), 0.1),
         turn_rate_max_deg_s=measure.round_up(float(np.percentile(first["turn_row_rate_deg_s"], 99.9)), 0.1),
         turn_bank_max_deg=measure.round_up(float(np.percentile(first["turn_row_bank_deg"], 99.9)), 1.0),
         corridor_half_width_m=measure.round_up(corridor["half_width_m"], 5.0),
@@ -165,7 +170,6 @@ def main(argv: list[str] | None = None) -> int:
                                      "(see sensitivity.heading_wander_p95_by_band)",
             "altitude_tolerance_m": "chosen: altitude_step/2 + altitude_fit_tolerance "
                                     "(see sensitivity.level_wander_p95_by_fit_tolerance)",
-            "turn_rate_min_deg_s": "p5 of a turn's mean rate (turns of at least turn_rate_min_from_deg, from the onset rate on), down to 0.1°/s",
             "turn_rate_max_deg_s": "p99.9 of the turn rate on turning rows, up to 0.1°/s",
             "turn_bank_max_deg": "p99.9 of the bank on turning rows, up to 1°",
             "corridor_half_width_m": "p99 offset of the aligned final's nearest distance bin (0–3 km), up to 5 m",
@@ -182,17 +186,21 @@ def main(argv: list[str] | None = None) -> int:
                                                   for t in measure.LEVEL_FIT_TOLERANCES_M},
         },
         "pass_a": {name: measure.percentiles(values) for name, values in first.items()
-                   if name not in ("move_angle_deg", "move_length_m")},
+                   if name not in ("move_angle_deg", "move_length_m", "level_height_m")},
         "move_pieces": {"angle_deg": measure.percentiles(angle), "length_m": measure.percentiles(length),
                         "climb_pieces": int(climbs.sum())},
         "descent_class_fits": {str(k): v for k, v in fits.items()},
+        "rounding_candidates": measure.rounding_candidates(angle, length, chosen["centres_deg"], chosen["edges_deg"],
+                                                           climb_centre),
+        "climb_angles": measure.climb_distribution(angle, length),
+        "level_rounding": measure.level_rounding(first["level_height_m"], Words(spec)),
         "corridor_fit": corridor,
         "heading_grids": _grid_table(grid_rows, grids),
         "elapsed_s": time.perf_counter() - started,
     }
-    if labeller_source_sha256() != labeller:
+    if labeller_code_sha256() != labeller:
         raise SystemExit("the labeller's code changed while the spec was being measured; measure again")
-    source = {"labeller_source_sha256": labeller, "git": git_state()}
+    source = {"labeller_code_sha256": labeller, "git": git_state()}
     write_spec(directory, spec, measurements, source)
     print(f"spec {spec.sha256[:12]}:")
     for name, value in measured.to_dict().items():
@@ -201,6 +209,12 @@ def main(argv: list[str] | None = None) -> int:
         e = fit["end_height_error_m"]
         print(f"  descent K={k}: centres {[round(c, 2) for c in fit['centres_deg']]}  end-height error p50 "
               f"{e['p50']:.1f} m, p95 {e['p95']:.1f} m")
+    for name, row in measurements["rounding_candidates"].items():
+        print(f"  rounded {name:>6}: descent end-height error p50 {row['descent_end_height_error_m']['p50']:.1f} m, "
+              f"climb {row['climb_centre_deg']}° p50 {row['climb_end_height_error_m']['p50']:.1f} m")
+    level = measurements["level_rounding"]
+    print(f"  level words ({level['levels']}): grid p50 / p95 / max "
+          + " / ".join(f"{level['grid'][k]:.0f}" for k in ("p50", "p95", "max")) + " m")
     for grid, row in measurements["heading_grids"].items():
         print(f"  heading grid {grid}°: tolerance {row['tolerance_deg']}°, heading words/flight "
               f"p50 {row['heading_words_per_flight']['p50']:.0f}, p95 {row['heading_words_per_flight']['p95']:.0f}")

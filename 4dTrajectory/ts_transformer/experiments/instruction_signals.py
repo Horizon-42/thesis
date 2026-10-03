@@ -13,8 +13,8 @@ first even second at or after its first kept sample, and its ``entry_time_utc`` 
 of any two flights at the same step is at the same time. The candidates are each manifest's published runway geometry; beside them
 go every runway end the harvest builds, from the configuration and CIFP the harvest and the
 evaluator read by default (`evaluation.cli.DEFAULT_CONFIG`, `DEFAULT_CIFP`). Every candidate must
-publish a threshold crossing height and a glidepath there (the executor's crossing point and floor for "descend to
-land", `autopilot.runway_data.vertical_paths`): a runway without them is refused before anything is
+publish a threshold crossing height, a glidepath and a decision altitude there (the judge's decision-altitude check,
+design §4.2, §5.8, `autopilot.runway_data.vertical_paths`): a runway without them is refused before anything is
 written, never dropped quietly. Writes ``signals_{train,select,val}.npz``, ``signals.json`` (with the
 day split) and ``candidates.json`` into a NEW directory.
 
@@ -129,9 +129,8 @@ def main(argv: list[str] | None = None) -> int:
     runways = {a: load_airport(a, config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways for a in airports}
     geometries = {a: airport_geometry(a, json.loads(m.read_text(encoding="utf-8"))["runway_targets"], runways[a])
                   for a, m in manifests.items()}
-    # a candidate runway must publish a threshold crossing height and a glidepath: "descend to land" crosses it at the
-    # one and does not descend under the other's lower edge (executor design §5.3) — refused before anything is written,
-    # never dropped quietly
+    # a candidate runway must publish a threshold crossing height, a glidepath and a decision altitude: the judge checks
+    # the decision altitude against them (design §4.2, §5.8) — refused before anything is written, never dropped quietly
     for airport, geometry in geometries.items():
         vertical_paths(geometry, runways[airport])
 
