@@ -265,21 +265,23 @@ def subset(batch: Batch, indices: list[int]) -> Batch:
 
 def observed_rows(signals: FlightSignals, sentence: Sentence, row_interval_s: float, step_s: float
                   ) -> tuple[np.ndarray, np.ndarray]:
-    """The observed positions at the sentence's rows (``signals`` from its first row on)."""
-    every = int(round(row_interval_s / step_s))
-    rows = len(sentence.grid)
-    return signals.e_m[::every][:rows], signals.n_m[::every][:rows]
+    """The observed positions at the data's rows (``step_s`` apart, ``signals`` from the sentence's first row on) over
+    the sentence's span: what the distance and track clocks read, at every row interval alike — so that in the ablation
+    only the sentence's interval changes, never the clock (design §4.8)."""
+    rows = len(sentence.grid) * int(round(row_interval_s / step_s))
+    return signals.e_m[:rows], signals.n_m[:rows]
 
 
-def word_clock(batch: Batch, params: ExecutorParams, device: torch.device) -> TimeClock | DistanceClock | TrackClock:
+def word_clock(batch: Batch, params: ExecutorParams, step_s: float,
+               device: torch.device) -> TimeClock | DistanceClock | TrackClock:
     """The clock the batch's truth sentences are said on (`ExecutorParams.word_clock`, §11): the distance and track
-    clocks read each observed flight at its sentence's rows."""
+    clocks read each observed flight at the data's rows (``step_s``, `observed_rows`); a sentence time in seconds is
+    looked up on the sentence's own rows (`Sentences.at`)."""
     if params.word_clock == "time":
         return TimeClock(params.cycle_s)
-    rows = [observed_rows(f, s, batch.row_interval_s, f.time_s[1] - f.time_s[0])
-            for f, s in zip(batch.signals, batch.sentences)]
+    rows = [observed_rows(f, s, batch.row_interval_s, step_s) for f, s in zip(batch.signals, batch.sentences)]
     clock = DistanceClock if params.word_clock == "distance" else TrackClock
-    return clock.of([e for e, _ in rows], [n for _, n in rows], batch.row_interval_s, params.cycle_s, device=device)
+    return clock.of([e for e, _ in rows], [n for _, n in rows], step_s, params.cycle_s, device=device)
 
 
 def time_limits_s(batch: Batch, params: ExecutorParams) -> list[float]:
@@ -297,7 +299,7 @@ def fly_sentences(batch: Batch, params: ExecutorParams, words: Words, *, device:
     """Fly every flight's sentence from its first row."""
     f64 = torch.float64
     sentences = Sentences([s.grid for s in batch.sentences], words, step_s=batch.row_interval_s, device=device)
-    return fly(batch.inputs(device), sentences, word_clock(batch, params, device),
+    return fly(batch.inputs(device), sentences, word_clock(batch, params, words.spec.step_s, device),
                Runways.of(batch.geometries, words.spec, dtype=f64, device=device),
                AirportCharts.of(batch.geometries, dtype=f64, device=device),
                torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words,

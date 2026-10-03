@@ -190,11 +190,11 @@ class Spoken:
         if self.staggered:
             row = np.where((self.start <= self.steps)[:, None], row, UNCHANGED)
             first = self.start == self.steps
-            if not (row[first] != UNCHANGED).all():
-                raise ValueError("a sentence's step 0 must write every column")
             own = torch.as_tensor(self.steps - self.start, device=self.device)[:, None].expand_as(self.issued)
-        elif not self.grid and not (row != UNCHANGED).all():
-            raise ValueError("a sentence's step 0 must write every column")
+        else:
+            first = np.full(len(row), not self.grid)
+        if not ((row[first] != UNCHANGED).all() and (row[first, RUNWAY] >= 0).all()):
+            raise ValueError("a sentence's step 0 must write every column, a candidate in the runway column")
         written = torch.as_tensor(row != UNCHANGED, device=self.device)
         words = torch.as_tensor(row, device=self.device)
         self.runway = torch.where(words[:, RUNWAY] >= 0, words[:, RUNWAY], self.runway)

@@ -266,12 +266,13 @@ class Said:
 
 
 def words_said(flown: Flown, index: int, instructions: Sequence[Instruction], sentence_step_s: float,
-               spec: VocabularySpec) -> Said:
+               spec: VocabularySpec, end_row: int) -> Said:
     """Each word (its ``row`` a sentence row, ``sentence_step_s`` apart) at the flown row where the executor heard it,
     as the executor looked it up (`sentence.Sentences.at`, one reading of a sentence time, `sentence.row_at`): the first
     cycle that starts a sentence row whose sentence time's row reaches the word's; the flown row is that cycle on the
-    data's step."""
-    last = int(flown.done_cycle[index]) + 1
+    data's step. Only the cycles before the outcome's state row ``end_row`` count (an outcome that does not stop the
+    executor — another runway, a stall — leaves cycles after it that are not the flight's)."""
+    last = min(int(flown.done_cycle[index]) + 1, max(end_row, 1))
     sentence_rows = int(round(sentence_step_s / flown.cycle_s))
     data_rows = int(round(spec.step_s / flown.cycle_s))
     step_start_rows = row_at(flown.sentence_s[index, :last].cpu().numpy(), sentence_step_s)[::sentence_rows]
@@ -327,7 +328,7 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, paths: Sequence[V
     if smoothed is None:
         return Verdict(outcome, end_row, crossing, limits, None, flown_rows=end_row + 1)
     rows = len(smoothed.track_deg)
-    said = words_said(flown, index, instructions, sentence_step_s, spec)
+    said = words_said(flown, index, instructions, sentence_step_s, spec, end_row)
     reached = [word for word in said.moved if word.row < rows]
     never = len(instructions) - said.superseded - len(reached)
     headings = envelope.heading_words_inside(

@@ -154,7 +154,7 @@ def fly_staggered(batch: replay.Batch, params: ExecutorParams, words: Words) -> 
     starts = np.random.default_rng(SEED).integers(0, STAGGER_STEPS + 1, size=len(batch.sentences)) * step_rows
     limits = torch.tensor(replay.time_limits_s(batch, params), dtype=f64, device=DEVICE)
     sentences = Sentences([s.grid for s in batch.sentences], words, step_s=batch.row_interval_s, device=DEVICE)
-    clock = replay.word_clock(batch, params, DEVICE)
+    clock = replay.word_clock(batch, params, words.spec.step_s, DEVICE)
     executor = Executor(batch.inputs(DEVICE), Runways.of(batch.geometries, words.spec, dtype=f64, device=DEVICE),
                         AirportCharts.of(batch.geometries, dtype=f64, device=DEVICE),
                         torch.tensor(batch.approach_ias_mps, dtype=f64, device=DEVICE), params, words,
@@ -192,7 +192,7 @@ def fly_single(batch: replay.Batch, params: ExecutorParams, words: Words) -> lis
         executor = single.SingleExecutor(flight, batch.geometries[j], batch.approach_ias_mps[j], params, words,
                                          step_s=batch.row_interval_s, time_limit_s=limits[j], reserve_s=reserve)
         e_m, n_m = replay.observed_rows(batch.signals[j], sentence_flown, batch.row_interval_s, spec.step_s)
-        clock = single.word_clock(params, e_m, n_m, batch.row_interval_s)
+        clock = single.word_clock(params, e_m, n_m, spec.step_s)
         sentence = single.Sentence(sentence_flown.grid, words, step_s=batch.row_interval_s)
         for cycle in range(executor.cycles):
             sentence_s = clock.now(cycle, executor.now())
