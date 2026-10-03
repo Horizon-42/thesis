@@ -4,8 +4,8 @@ The executor takes no information beyond the vocabulary (the user's rule, 2026-0
 the roll rate p is the standards' 5°/s (`ROLL_RATE_DEG_S`); the executor makes no turn of its own (D2, D27), so no
 time constant of one; the turn rates, the bank limit, the speed changes' pace and the level bands are the vocabulary's,
 read at run time; a
-word takes effect when it is said. The judge's decision-altitude check takes two tolerances the USER gives (design §5.8,
-O2): ``--decision-cone-share`` and ``--decision-glidepath-tolerance-m``, required, with no default; each candidate's
+word takes effect when it is said. The judge's decision-altitude check has no parameter (design §5.8, D38: the
+evaluation module's vertical bound and the FAS cone); each candidate's
 published vertical path and decision altitude (read at replay, `runway_data.published_vertical_paths`) are recorded in
 ``measurements.json`` as the spec is written. Nothing is measured from data. The design's fixed choices are module
 constants below. Writes ``spec.json`` + ``measurements.json`` into
@@ -60,10 +60,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dir", type=Path, required=True, help="the new executor spec directory")
     parser.add_argument("--word-clock", choices=CLOCKS, required=True,
                         help="the clock a replay says a truth sentence's words on (§11)")
-    parser.add_argument("--decision-cone-share", type=float, required=True,
-                        help="the DA check: the lateral offset within this share of the FAS cone's half-width (O2)")
-    parser.add_argument("--decision-glidepath-tolerance-m", type=float, required=True,
-                        help="the DA check: the height within this of the published glidepath, metres (O2)")
     args = parser.parse_args(argv)
     # normalised (".." resolved, links kept): a worktree's data trees are links to the main tree's
     instructions = Path(os.path.normpath(args.instructions if args.instructions.is_absolute()
@@ -84,9 +80,7 @@ def main(argv: list[str] | None = None) -> int:
 
     params = ExecutorParams(cycle_s=CYCLE_S, bank_rate_deg_s=ROLL_RATE_DEG_S,
                             path_time_constant_s=PATH_TIME_CONSTANT_S, path_rate_factor=PATH_RATE_FACTOR,
-                            timeout_factor=TIMEOUT_FACTOR, word_clock=args.word_clock,
-                            decision_cone_share=args.decision_cone_share,
-                            decision_glidepath_tolerance_m=args.decision_glidepath_tolerance_m)
+                            timeout_factor=TIMEOUT_FACTOR, word_clock=args.word_clock)
     params.check(spec, spec.step_s)
     print(f"the standards' roll rate p {ROLL_RATE_DEG_S:g}°/s", flush=True)
 
@@ -103,9 +97,6 @@ def main(argv: list[str] | None = None) -> int:
                                 "speed_change_mps2": speed_change_mps2(spec),
                                 "narrowest_level_band_m": float(Words(spec).altitude_tolerances.min()),
                                 "lined_up_deg": spec.lined_up_deg, "landing_max_height_m": spec.landing_max_height_m},
-        "from_the_user": {"decision_cone_share": args.decision_cone_share,
-                          "decision_glidepath_tolerance_m": args.decision_glidepath_tolerance_m,
-                          "rule": "the decision-altitude check's tolerances (design §5.8, O2), given on the command line"},
         "from_the_runway": {
             "rule": "each candidate's published threshold crossing height, glidepath angle and decision altitude (the "
                     "judge's decision-altitude check), read at replay (runway_data.published_vertical_paths); recorded "

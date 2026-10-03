@@ -250,6 +250,10 @@ def closed_loop_columns(stored: dict[int, closed_loop.Stored]
                 raise ValueError(f"{part.signals[j].dataset_id}: flown {apart:.3g} m from its closed-loop states")
             out.append({"largest_lateral_m": float(np.abs(sentence.lateral_m).max()),
                         "largest_vertical_m": float(np.abs(sentence.vertical_m).max()),
+                        "uncorrected_lateral_m": closed_loop.uncorrected_m(sentence.lateral_m,
+                                                                           sentence.uncorrectable[:, 0]),
+                        "uncorrected_vertical_m": closed_loop.uncorrected_m(sentence.vertical_m,
+                                                                            sentence.uncorrectable[:, 1]),
                         "correction_words": dict(zip(COLUMNS, sentence.correction.sum(axis=0).tolist()))})
         return out
 

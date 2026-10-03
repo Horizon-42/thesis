@@ -98,6 +98,8 @@ class ClosedLoopSentence:
     states: np.ndarray          # [start + M, 6] `STATE_COLUMNS` on every Δ row from the sentence's first
     lateral_m: np.ndarray       # [M] e_y at each said row
     vertical_m: np.ndarray      # [M] e_h at each said row
+    #: [M, 2] bool: the rows where §4.9 makes no heading / angle correction (`Corrector.row`; the readings of D34)
+    uncorrectable: np.ndarray
     start: int                  # the first predicted step's Δ row (`start_row`)
     ended: bool                 # the executor was done before the sentence's last row
 
@@ -135,6 +137,11 @@ class ObservedPath:
         return lateral, height_m - (self.height[i] + t * (self.height[i + 1] - self.height[i]))
 
 
+def uncorrected_m(errors: np.ndarray, uncorrectable: np.ndarray) -> float:
+    """The largest |error| on the rows where §4.9 makes no correction (D34; 0 where there is none)."""
+    return float(np.abs(errors[uncorrectable]).max(initial=0.0))
+
+
 def _sign(value: float) -> int:
     return 1 if value > 0.0 else -1
 
@@ -159,7 +166,11 @@ class Corrector:
         executor holds the level in force (``holding``, module docstring); refused when the grammar refuses the row."""
         observed, held = self.observed[k], self.held[k]
         wanted = held.astype(np.int64).copy()
+        #: rows where §4.9 makes no correction of each column (the readings of D34): the first predicted step, a row
+        #: that says a new observed word; vertically also a level hold, no descent class, no class beyond it
+        self.uncorrectable = np.ones(2, dtype=bool)
         if k > self.start:
+            self.uncorrectable[0] = observed[HEADING] != UNCHANGED
             if observed[HEADING] != UNCHANGED:
                 self.turn = 0
             elif self.turn and (abs(lateral_m) < self.lateral_m / 2 or _sign(lateral_m) != self.turn):
@@ -169,6 +180,9 @@ class Corrector:
             if self.turn:                                  # right of the path: one class to the left
                 wanted[HEADING] = (int(held[HEADING]) - self.turn) % self.words.n_heading
             angle = int(held[ANGLE])
+            self.uncorrectable[1] = (observed[ALTITUDE] != UNCHANGED or observed[ANGLE] != UNCHANGED or holding
+                                     or not self.words.is_descent(angle)
+                                     or not self.words.is_descent(angle + _sign(vertical_m)))
             if observed[ALTITUDE] != UNCHANGED or observed[ANGLE] != UNCHANGED or holding:
                 self.slope = 0
             elif self.slope and (abs(vertical_m) < self.vertical_m / 2 or _sign(vertical_m) != self.slope):
@@ -233,7 +247,7 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
     if not flying:
         return out  # type: ignore[return-value]
     rows = [len(batch.sentences[j].grid) - start for j in flying]
-    paths, correctors, said, added, errors, states = [], [], [], [], [], []
+    paths, correctors, said, added, blocked, errors, states = [], [], [], [], [], [], []
     for j in flying:
         signals, reading, sentence = batch.signals[j], batch.readings[j], batch.sentences[j]
         span = len(reading.words) - sentence.first_row          # the observed rows the sentence covers
@@ -244,6 +258,7 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
         states.append([*_state_rows(signals, observed)])
         said.append([])
         added.append([])
+        blocked.append([])
         errors.append([])
     f64 = torch.float64
     go_arounds = max(int((batch.sentences[j].grid[start:, RUNWAY] == RUNWAY_GO_AROUND).sum()) for j in flying)
@@ -282,6 +297,7 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
             step[f] = words_row
             said[f].append(words_row)
             added[f].append(mask)
+            blocked[f].append(correctors[f].uncorrectable)
             errors[f].append((lateral, vertical))
             states[f].append(flown)
         if not live.any():
@@ -302,7 +318,8 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
         lateral, vertical = (np.array([e[c] for e in errors[f]]) for c in (0, 1))
         out[j] = ClosedLoopSentence(grid=np.array(said[f], dtype=np.int16), correction=np.array(added[f], dtype=bool),
                                     states=np.array(states[f], dtype=np.float64), lateral_m=lateral,
-                                    vertical_m=vertical, start=start, ended=bool(ended[f]))
+                                    vertical_m=vertical, uncorrectable=np.array(blocked[f], dtype=bool), start=start,
+                                    ended=bool(ended[f]))
     return out  # type: ignore[return-value]
 
 
@@ -383,6 +400,7 @@ def _stacked(results: Sequence[ClosedLoopSentence]) -> dict[str, np.ndarray]:
         return np.concatenate(rows).astype(dtype) if rows else np.zeros((0, width) if width else 0, dtype=dtype)
 
     return {"words": cat("grid", 5, np.int16), "correction": cat("correction", 5, bool),
+            "uncorrectable": cat("uncorrectable", 2, bool),
             "states": cat("states", len(STATE_COLUMNS), np.float64), "lateral_m": cat("lateral_m", 0, np.float64),
             "vertical_m": cat("vertical_m", 0, np.float64)}
 
@@ -434,7 +452,7 @@ def check(instructions: Path, params: ExecutorParams, words: Words, *, git: dict
                     f"{_result_json(result)}, the reference {expected}")
         if checked.mismatches:
             continue
-        for name in ("words", "correction"):
+        for name in ("words", "correction", "uncorrectable"):
             if not np.array_equal(again[name], reference[name]):
                 checked.mismatches.setdefault(f"{interval:g} s", []).append(f"the {name} differ")
         if any(again[n].shape != reference[n].shape for n in ("states", "lateral_m", "vertical_m")):
@@ -501,6 +519,7 @@ class Stored:
     states: np.ndarray          # the flown rows only, from the first predicted step
     lateral_m: np.ndarray
     vertical_m: np.ndarray
+    uncorrectable: np.ndarray
 
 
 def stored_sentences(data: dict[str, np.ndarray]) -> dict[int, Stored]:
@@ -512,7 +531,8 @@ def stored_sentences(data: dict[str, np.ndarray]) -> dict[int, Stored]:
         states = slice(int(data["state_offsets"][k]) + start, int(data["state_offsets"][k + 1]))
         out[index] = Stored(grid=data["words"][rows], correction=data["correction"][rows],
                             first_row=int(data["first_row"][k]), states=data["states"][states],
-                            lateral_m=data["lateral_m"][rows], vertical_m=data["vertical_m"][rows])
+                            lateral_m=data["lateral_m"][rows], vertical_m=data["vertical_m"][rows],
+                            uncorrectable=data["uncorrectable"][rows])
     return out
 
 

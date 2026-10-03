@@ -177,7 +177,7 @@ def fly_staggered(batch: replay.Batch, params: ExecutorParams, words: Words) -> 
             break
         executor.halt(executor.done)          # held from the cycle after it is done, as the window loop halts a cohort
     flown = executor.flown()
-    return flight_results(flown, replay.judge_batch(batch, flown, params, words))
+    return flight_results(flown, replay.judge_batch(batch, flown, words))
 
 
 def fly_single(batch: replay.Batch, params: ExecutorParams, words: Words) -> list[FlightResult]:
@@ -203,7 +203,7 @@ def fly_single(batch: replay.Batch, params: ExecutorParams, words: Words) -> lis
                 break
         flown = executor.flown()
         verdict = judge(flown, 0, batch.geometries[j], batch.vertical_paths[j], sentence_flown.instructions,
-                        batch.row_interval_s, batch.signals[j], spec, words, params)
+                        batch.row_interval_s, batch.signals[j], spec, words)
         out += flight_results(flown, [verdict])
     return out
 

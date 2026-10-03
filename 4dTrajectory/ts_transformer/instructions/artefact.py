@@ -221,11 +221,13 @@ def closed_loop_path(directory: Path, split: str, row_interval_s: float) -> Path
 def write_closed_loop(path: Path, spec: VocabularySpec, *, executor_params_sha256: str, row_interval_s: float,
                       start_row: int, signal_index: Sequence[int], first_row: Sequence[int],
                       grids: Sequence[np.ndarray], corrections: Sequence[np.ndarray], states: Sequence[np.ndarray],
-                      lateral_m: Sequence[np.ndarray], vertical_m: Sequence[np.ndarray], ended: Sequence[bool]) -> None:
+                      lateral_m: Sequence[np.ndarray], vertical_m: Sequence[np.ndarray],
+                      uncorrectable: Sequence[np.ndarray], ended: Sequence[bool]) -> None:
     """One split's closed-loop sentences at one row interval, in the order given. Sentence ``k``'s words are
     ``words[offsets[k]: offsets[k + 1]]`` (from its first predicted step, `start_row` rows after its first row on the
     interval's grid, which is its signals' 2 s row ``first_row[k]``), its states ``states[state_offsets[k]:
-    state_offsets[k + 1]]`` (every row from its first: observed before ``start_row``, flown from it)."""
+    state_offsets[k + 1]]`` (every row from its first: observed before ``start_row``, flown from it); ``uncorrectable``
+    ``[rows, 2]`` the rows where the reading makes no heading / angle correction (D34)."""
     if not grids:
         raise ValueError(f"no closed-loop sentence for {path.name}: nothing to write")
     lengths = np.array([len(grid) for grid in grids], dtype=np.int64)
@@ -242,7 +244,8 @@ def write_closed_loop(path: Path, spec: VocabularySpec, *, executor_params_sha25
         state_offsets=np.concatenate(([0], np.cumsum(state_lengths))).astype(np.int64),
         words=np.concatenate(grids).astype(np.int16), correction=np.concatenate(corrections).astype(bool),
         states=np.concatenate(states).astype(np.float64), lateral_m=np.concatenate(lateral_m).astype(np.float64),
-        vertical_m=np.concatenate(vertical_m).astype(np.float64), ended=np.asarray(ended, dtype=bool))
+        vertical_m=np.concatenate(vertical_m).astype(np.float64),
+        uncorrectable=np.concatenate(uncorrectable).astype(bool), ended=np.asarray(ended, dtype=bool))
 
 
 def load_closed_loop(path: Path, spec: VocabularySpec) -> dict[str, np.ndarray]:

@@ -338,16 +338,16 @@ def fly_sentences(batch: Batch, params: ExecutorParams, words: Words, *, device:
                reserve_s=reserve_s(batch))
 
 
-def judge_batch(batch: Batch, flown: Flown, params: ExecutorParams, words: Words) -> list[Verdict]:
+def judge_batch(batch: Batch, flown: Flown, words: Words) -> list[Verdict]:
     return [judge(flown, j, batch.geometries[j], batch.vertical_paths[j], batch.sentences[j].instructions,
-                  batch.row_interval_s, batch.signals[j], words.spec, words, params) for j in range(len(batch.sentences))]
+                  batch.row_interval_s, batch.signals[j], words.spec, words) for j in range(len(batch.sentences))]
 
 
 def fly_batch(batch: Batch, params: ExecutorParams, words: Words, *,
               device: torch.device) -> tuple[Flown, list[Verdict]]:
     """Fly every flight's sentence from its first row and judge it."""
     flown = fly_sentences(batch, params, words, device=device)
-    return flown, judge_batch(batch, flown, params, words)
+    return flown, judge_batch(batch, flown, words)
 
 
 #: The columns layer 2 judges (the runway column has no envelope).

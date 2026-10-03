@@ -62,6 +62,11 @@ def summarise(results: list[ClosedLoopSentence | Any], excluded: dict[str, int],
                                           for c, column in enumerate(COLUMNS)},
             "largest_lateral_m": _percentiles([float(np.abs(r.lateral_m).max()) for r in read]),
             "largest_vertical_m": _percentiles([float(np.abs(r.vertical_m).max()) for r in read]),
+            # D34: what is left where §4.9 makes no correction
+            "uncorrected_lateral_m": _percentiles([closed_loop.uncorrected_m(r.lateral_m, r.uncorrectable[:, 0])
+                                                   for r in read]),
+            "uncorrected_vertical_m": _percentiles([closed_loop.uncorrected_m(r.vertical_m, r.uncorrectable[:, 1])
+                                                    for r in read]),
             "last_row_lateral_m": _percentiles([float(abs(r.lateral_m[-1])) for r in read]),
             "ended_before_the_last_row": sum(r.ended for r in read)}
 
@@ -128,7 +133,8 @@ def main(argv: list[str] | None = None) -> int:
                               first_row=[batch.sentences[j].first_row for j, _ in kept],
                               grids=[r.grid for _, r in kept], corrections=[r.correction for _, r in kept],
                               states=[r.states for _, r in kept], lateral_m=[r.lateral_m for _, r in kept],
-                              vertical_m=[r.vertical_m for _, r in kept], ended=[r.ended for _, r in kept])
+                              vertical_m=[r.vertical_m for _, r in kept],
+                              uncorrectable=[r.uncorrectable for _, r in kept], ended=[r.ended for _, r in kept])
             numbers = summarise(results, drawn.description["excluded"], batch.drawn["refused_on_interval"])
             summary["splits"][split]["intervals"][f"{interval:g}"] = numbers
             print(f"{split} {interval:g} s: {numbers['sentences']} sentences, corrections "

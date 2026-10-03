@@ -29,8 +29,7 @@ def _params():
     from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
 
     return ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, path_time_constant_s=2.0, path_rate_factor=2.0,
-                          timeout_factor=1.5, word_clock="time", decision_cone_share=1.0,
-                          decision_glidepath_tolerance_m=60.0)
+                          timeout_factor=1.5, word_clock="time")
 
 
 # ---- the comparison
@@ -209,7 +208,8 @@ def _replayed(batch, inputs, sentence, params, words, monkeypatch):
     """``sentence`` flown again as the replay flies it (`replay_batch`, `replay.fly_sentences` on the time clock)."""
     stored = {7: closed_loop.Stored(grid=sentence.grid, correction=sentence.correction,
                                     first_row=batch.sentences[0].first_row, states=sentence.states[sentence.start:],
-                                    lateral_m=sentence.lateral_m, vertical_m=sentence.vertical_m)}
+                                    lateral_m=sentence.lateral_m, vertical_m=sentence.vertical_m,
+                                    uncorrectable=sentence.uncorrectable)}
     batch.indices[0] = 7
     moved, missing = closed_loop.replay_batch(batch, stored, words)
     monkeypatch.setattr(replay.Batch, "inputs", lambda self, device: inputs)
@@ -255,16 +255,18 @@ def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(t
     write_closed_loop(path, words.spec, executor_params_sha256="x", row_interval_s=4.0, start_row=sentence.start,
                       signal_index=[7], first_row=[batch.sentences[0].first_row], grids=[sentence.grid],
                       corrections=[sentence.correction], states=[sentence.states], lateral_m=[sentence.lateral_m],
-                      vertical_m=[sentence.vertical_m], ended=[sentence.ended])
+                      vertical_m=[sentence.vertical_m], uncorrectable=[sentence.uncorrectable],
+                      ended=[sentence.ended])
     with pytest.raises(ValueError, match="nothing to write"):
         write_closed_loop(tmp_path / "empty.npz", words.spec, executor_params_sha256="x", row_interval_s=4.0,
                           start_row=sentence.start, signal_index=[], first_row=[], grids=[], corrections=[], states=[],
-                          lateral_m=[], vertical_m=[], ended=[])
+                          lateral_m=[], vertical_m=[], uncorrectable=[], ended=[])
     with pytest.raises(FileExistsError):
         write_closed_loop(path, words.spec, executor_params_sha256="x", row_interval_s=4.0, start_row=sentence.start,
                           signal_index=[7], first_row=[batch.sentences[0].first_row], grids=[sentence.grid],
                           corrections=[sentence.correction], states=[sentence.states], lateral_m=[sentence.lateral_m],
-                          vertical_m=[sentence.vertical_m], ended=[sentence.ended])
+                          vertical_m=[sentence.vertical_m], uncorrectable=[sentence.uncorrectable],
+                      ended=[sentence.ended])
     stored = closed_loop.stored_sentences(load_closed_loop(path, words.spec))
     assert list(stored) == [7] and np.array_equal(stored[7].grid, sentence.grid)
     assert np.array_equal(stored[7].states, sentence.states[sentence.start:])
@@ -276,7 +278,8 @@ def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(t
     assert sum(row["correction_words"].values()) == int(sentence.correction.sum())
     stored[7] = closed_loop.Stored(grid=sentence.grid, correction=sentence.correction, first_row=0,
                                    states=sentence.states[sentence.start:] + [1.0, 0, 0, 0, 0, 0],
-                                   lateral_m=sentence.lateral_m, vertical_m=sentence.vertical_m)
+                                   lateral_m=sentence.lateral_m, vertical_m=sentence.vertical_m,
+                                   uncorrectable=sentence.uncorrectable)
     with pytest.raises(ValueError, match="from its closed-loop states"):
         closed_loop_columns(stored)(moved, flown, [None])
 
@@ -357,7 +360,7 @@ def test_the_replay_refuses_a_sentence_of_another_first_row(monkeypatch):
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     stored = {0: closed_loop.Stored(grid=sentence.grid, correction=sentence.correction, first_row=3,
                                     states=sentence.states[sentence.start:], lateral_m=sentence.lateral_m,
-                                    vertical_m=sentence.vertical_m)}
+                                    vertical_m=sentence.vertical_m, uncorrectable=sentence.uncorrectable)}
     with pytest.raises(ValueError, match="starts at 2 s row 3"):
         closed_loop.replay_batch(batch, stored, words)
 
@@ -379,3 +382,22 @@ def test_read_chunked_puts_each_result_in_its_place(monkeypatch):
     assert isinstance(results[0], Refused)
     for result in results[1:]:
         assert np.array_equal(result.grid, alone.grid) and np.array_equal(result.states, alone.states)
+
+
+def test_the_rows_without_a_correction_are_marked_for_the_ablation():
+    """D34: the rows where §4.9 makes no correction — the first predicted step, a new observed word, a level hold, a climb,
+    no class beyond — are marked per column, and each flight's largest error on them is read."""
+    words = Words(spec())
+    corrector = Corrector(_grid([_first(words, 600.0, words.n_descent), {HEADING: 2}, {}, {}]), 0, words, 1)
+    corrector.row(0, 0.0, 0.0, 900.0, holding=False)
+    assert corrector.uncorrectable.tolist() == [True, True]                  # the first predicted step
+    corrector.row(1, 40.0, 30.0, 900.0, holding=False)
+    assert corrector.uncorrectable.tolist() == [True, True]                  # a new heading word; no class steeper
+    corrector.row(2, 40.0, -30.0, 900.0, holding=False)
+    assert corrector.uncorrectable.tolist() == [False, False]                # both corrected
+    corrector.row(3, 40.0, -30.0, 600.0, holding=True)
+    assert corrector.uncorrectable.tolist() == [False, True]                 # the level held
+    assert closed_loop.uncorrected_m(np.array([5.0, -40.0, 9.0]), np.array([True, False, True])) == 9.0
+    batch, inputs, words = _batch()
+    (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
+    assert sentence.uncorrectable.shape == (len(sentence.grid), 2) and sentence.uncorrectable[0].all()
