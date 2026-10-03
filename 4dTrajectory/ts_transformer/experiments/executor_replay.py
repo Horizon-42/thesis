@@ -288,7 +288,11 @@ def main(argv: list[str] | None = None) -> int:
     per_flight = None
     if args.closed_loop:
         closed_loop.require_conforming_closed_loop(instructions)
-        data = load_closed_loop(closed_loop_path(instructions, args.split, args.row_interval_s), spec)
+        path = closed_loop_path(instructions, args.split, args.row_interval_s)
+        if not path.exists():
+            parser.error(f"{path} does not exist: the closed-loop reading wrote no sentence there "
+                         f"({path.parent / 'summary.json'} says why)")
+        data = load_closed_loop(path, spec)
         if str(data["executor_params_sha256"]) != params_sha256(params):
             parser.error(f"the closed-loop sentences were flown by executor parameters "
                          f"{str(data['executor_params_sha256'])[:12]}, {executor} holds {params_sha256(params)[:12]}")

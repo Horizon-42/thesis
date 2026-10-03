@@ -29,9 +29,9 @@ THE CORRECTIONS (`Corrector`), with Y = `closed_loop_lateral_m` and H = `closed_
   when e_h < −H the next shallower (none beyond descent 4 or descent 1); the observed class again when |e_h| < H / 2 or
   e_h changes sign; a new observed altitude or angle word ends a correction. A level hold and a climb get none. A
   level reached by a descent says no angle word (the descent class stays in force, `labeller.vertical`), so a LEVEL
-  HOLD is read off the flight: a level T in force and the flown height within T's band (`Words.altitude_tolerance_m`)
-  — there no correction starts and one in force ends (Claude's reading of §4.9 "during a level hold"; the hold is the
-  executor's, and the rounding of T to the grid is not corrected).
+  HOLD is the executor's: the level in force captured (`vertical.Vertical.captured`, the level-off begun) — there no
+  correction starts and one in force ends (Claude's reading of §4.9 "during a level hold"; the rounding of the level to
+  the grid is not corrected).
 
 A correction word is an ordinary word of its column: the grammar (`instructions.grammar`) reads every row at the flown
 height, and a row it refuses refuses the flight (counted by reason). A word equal to the one in force is not said (the
@@ -153,9 +153,10 @@ class Corrector:
         self.said: np.ndarray | None = None     # the said sentence's words in force
         self.grammar: InForce | None = None
 
-    def row(self, k: int, lateral_m: float, vertical_m: float, height_m: float) -> tuple[np.ndarray, np.ndarray]:
-        """Δ row ``k``'s words and which are corrections, from the errors and the flown height there; refused when the
-        grammar refuses the row."""
+    def row(self, k: int, lateral_m: float, vertical_m: float, height_m: float, *,
+            holding: bool) -> tuple[np.ndarray, np.ndarray]:
+        """Δ row ``k``'s words and which are corrections, from the errors, the flown height there and whether the
+        executor holds the level in force (``holding``, module docstring); refused when the grammar refuses the row."""
         observed, held = self.observed[k], self.held[k]
         wanted = held.astype(np.int64).copy()
         if k > self.start:
@@ -167,9 +168,7 @@ class Corrector:
                 self.turn = _sign(lateral_m)
             if self.turn:                                  # right of the path: one class to the left
                 wanted[HEADING] = (int(held[HEADING]) - self.turn) % self.words.n_heading
-            angle, level = int(held[ANGLE]), int(held[ALTITUDE])
-            target = self.words.altitude_m(level)
-            holding = target is not None and abs(height_m - target) <= self.words.altitude_tolerance_m(level)
+            angle = int(held[ANGLE])
             if observed[ALTITUDE] != UNCHANGED or observed[ANGLE] != UNCHANGED or holding:
                 self.slope = 0
             elif self.slope and (abs(vertical_m) < self.vertical_m / 2 or _sign(vertical_m) != self.slope):
@@ -261,6 +260,7 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
     ended = np.zeros(len(flying), dtype=bool)
     for s in range(max(rows)):
         now = executor.now()
+        captured = executor.vertical.captured.cpu().numpy()
         step = np.full((len(flying), len(COLUMNS)), UNCHANGED, dtype=np.int64)
         for f, j in enumerate(flying):
             if not live[f] or s >= rows[f]:
@@ -271,7 +271,7 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
             flown = _flown_row(now, f)
             lateral, vertical = paths[f].match(flown[0], flown[1], flown[2])
             try:
-                words_row, mask = correctors[f].row(start + s, lateral, vertical, flown[2])
+                words_row, mask = correctors[f].row(start + s, lateral, vertical, flown[2], holding=bool(captured[f]))
             except Refused as refused:
                 out[j] = refused
                 live[f] = False
@@ -442,9 +442,9 @@ def check(instructions: Path, params: ExecutorParams, words: Words, *, git: dict
             continue
 
         def apart(a: np.ndarray, b: np.ndarray) -> float:
-            """The largest difference, NaN where one is NaN and the other not (both NaN: equal)."""
+            """The largest difference, infinite where one is NaN and the other not (both NaN: equal)."""
             if not np.array_equal(np.isnan(a), np.isnan(b)):
-                return math.nan
+                return math.inf
             return float(np.abs(np.nan_to_num(a) - np.nan_to_num(b)).max(initial=0.0))
 
         difference = apart(again["states"][:, :3], reference["states"][:, :3])
