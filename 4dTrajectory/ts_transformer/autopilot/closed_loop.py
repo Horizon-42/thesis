@@ -27,7 +27,11 @@ THE CORRECTIONS (`Corrector`), with Y = `closed_loop_lateral_m` and H = `closed_
   new observed heading word ends a correction (it is said, and the comparison goes on from the next row);
 - vertical: only while a descent class of the observed words is in force — when e_h > H the next steeper descent class,
   when e_h < −H the next shallower (none beyond descent 4 or descent 1); the observed class again when |e_h| < H / 2 or
-  e_h changes sign; a new observed altitude or angle word ends a correction. A level hold and a climb get none.
+  e_h changes sign; a new observed altitude or angle word ends a correction. A level hold and a climb get none. A
+  level reached by a descent says no angle word (the descent class stays in force, `labeller.vertical`), so a LEVEL
+  HOLD is read off the flight: a level T in force and the flown height within T's band (`Words.altitude_tolerance_m`)
+  — there no correction starts and one in force ends (Claude's reading of §4.9 "during a level hold"; the hold is the
+  executor's, and the rounding of T to the grid is not corrected).
 
 A correction word is an ordinary word of its column: the grammar (`instructions.grammar`) reads every row at the flown
 height, and a row it refuses refuses the flight (counted by reason). A word equal to the one in force is not said (the
@@ -37,8 +41,8 @@ reading's; the executor reads only words.
 THE RESULT (`ClosedLoopSentence`): the said words from the first predicted step (each word the reading added marked a
 correction: every word that is not the observed word said at its row), the states on every Δ row from the sentence's
 first — observed before the first predicted step, flown from it (position in the airport frame, MSL height, track,
-ground speed, vertical rate) — and e_y, e_h at each flown row. Flown again from the same state on its own clock, a
-closed-loop sentence gives the same states (`fly_sentences`).
+ground speed, vertical rate) — and e_y, e_h at each flown row. Flown again from the same state on its own clock (the
+replay: `replay_batch`, the time clock), a closed-loop sentence gives the same states.
 """
 
 from __future__ import annotations
@@ -56,13 +60,13 @@ import torch
 
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.conformance import DEVICE, ROUNDOFF, STATE_BOUND_M
-from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S, Executor, Flown, fly
+from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S, Executor
 from ts_transformer.autopilot.flights import FlightInputs, flight_inputs
 from ts_transformer.autopilot.frame import AirportCharts, Kinematics
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.replay import Batch, subset
-from ts_transformer.autopilot.sentence import Sentences, Spoken, TimeClock
+from ts_transformer.autopilot.sentence import Spoken
 from ts_transformer.autopilot.spec import executor_source_files, params_sha256
 from ts_transformer.instructions.artefact import CLOSED_LOOP_DIRECTORY
 from ts_transformer.instructions.conformance import labeller_code_files
@@ -73,6 +77,7 @@ from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256, logic_sha256, utc_now, write_json_atomic
+from ts_transformer.repo_layout import git_state
 
 #: The columns of a row's state: the airport frame's east and north, MSL height, compass track, ground speed, vertical
 #: rate (SI).
@@ -101,10 +106,13 @@ class ObservedPath:
     """An observed flight's path at the data's rows, and the forward search of the matched point (module docstring)."""
 
     def __init__(self, e_m: np.ndarray, n_m: np.ndarray, height_m: np.ndarray, first: int) -> None:
-        if len(e_m) < 2:
-            raise ValueError("a path needs two rows")
-        self.e, self.n, self.height = (np.asarray(a, dtype=np.float64) for a in (e_m, n_m, height_m))
-        self.segment = min(first, len(self.e) - 2)
+        e_m, n_m, height_m = (np.asarray(a, dtype=np.float64) for a in (e_m, n_m, height_m))
+        # a row at the position of the one before is no segment: dropped (the matched segment counts the rows kept)
+        moved = np.concatenate(([True], (np.diff(e_m) != 0.0) | (np.diff(n_m) != 0.0)))
+        if moved.sum() < 2:
+            raise ValueError("a path needs two positions")
+        self.e, self.n, self.height = e_m[moved], n_m[moved], height_m[moved]
+        self.segment = min(int(moved[: first + 1].sum()) - 1, len(self.e) - 2)
 
     def _nearest(self, i: int, e_m: float, n_m: float) -> tuple[float, float]:
         """``(t, distance)``: the point of segment ``i`` nearest the position (``t`` along it, 0 to 1)."""
@@ -159,8 +167,10 @@ class Corrector:
                 self.turn = _sign(lateral_m)
             if self.turn:                                  # right of the path: one class to the left
                 wanted[HEADING] = (int(held[HEADING]) - self.turn) % self.words.n_heading
-            angle = int(held[ANGLE])
-            if observed[ALTITUDE] != UNCHANGED or observed[ANGLE] != UNCHANGED:
+            angle, level = int(held[ANGLE]), int(held[ALTITUDE])
+            target = self.words.altitude_m(level)
+            holding = target is not None and abs(height_m - target) <= self.words.altitude_tolerance_m(level)
+            if observed[ALTITUDE] != UNCHANGED or observed[ANGLE] != UNCHANGED or holding:
                 self.slope = 0
             elif self.slope and (abs(vertical_m) < self.vertical_m / 2 or _sign(vertical_m) != self.slope):
                 self.slope = 0
@@ -202,21 +212,25 @@ def _rows(inputs: FlightInputs, flights: list[int]) -> FlightInputs:
                           ("initial_state", "aero_params", "frame_params", "max_thrust_n")))
 
 
+def refusal(sentence: replay.Sentence, row_interval_s: float) -> Refused | None:
+    """Why a sentence cannot be read in closed loop before it is flown, or None (module docstring)."""
+    start = start_row(row_interval_s)
+    if len(sentence.grid) - start < 2:
+        return Refused("too short for the closed loop", f"{len(sentence.grid)} rows of {row_interval_s:g} s")
+    if in_force(sentence.grid)[start, RUNWAY] == RUNWAY_GO_AROUND:
+        return Refused("go-around at the first predicted step", f"row {start} of {row_interval_s:g} s")
+    return None
+
+
 def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Words, *,
          device: torch.device) -> list[ClosedLoopSentence | Refused]:
     """Every flight of ``batch`` read in closed loop (module docstring), in the batch's order: its sentence, or why it
-    has none; ``inputs`` every flight's physical context at its first predicted step (`start_inputs`)."""
+    has none; ``inputs`` every flight's physical context at its first predicted step (`start_inputs`; any rows for the
+    flights `refusal` refuses, which are not flown)."""
     spec, interval = words.spec, batch.row_interval_s
     every, start = interval_rows(interval, spec.step_s), start_row(interval)
-    out: list[ClosedLoopSentence | Refused | None] = [None] * len(batch.sentences)
-    flying = []
-    for j, sentence in enumerate(batch.sentences):
-        if len(sentence.grid) - start < 2:
-            out[j] = Refused("too short for the closed loop", f"{len(sentence.grid)} rows of {interval:g} s")
-        elif in_force(sentence.grid)[start, RUNWAY] == RUNWAY_GO_AROUND:
-            out[j] = Refused("go-around at the first predicted step", f"row {start} of {interval:g} s")
-        else:
-            flying.append(j)
+    out: list[ClosedLoopSentence | Refused | None] = [refusal(s, interval) for s in batch.sentences]
+    flying = [j for j, result in enumerate(out) if result is None]
     if not flying:
         return out  # type: ignore[return-value]
     rows = [len(batch.sentences[j].grid) - start for j in flying]
@@ -258,8 +272,8 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
             lateral, vertical = paths[f].match(flown[0], flown[1], flown[2])
             try:
                 words_row, mask = correctors[f].row(start + s, lateral, vertical, flown[2])
-            except Refused as refusal:
-                out[j] = refusal
+            except Refused as refused:
+                out[j] = refused
                 live[f] = False
                 executor.halt(torch.as_tensor(~live, device=device))
                 if s == 0:
@@ -292,33 +306,23 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
     return out  # type: ignore[return-value]
 
 
-def fly_sentences(batch: Batch, inputs: FlightInputs, sentences: Sequence[ClosedLoopSentence], params: ExecutorParams,
-                  words: Words, *, time_limits_s: Sequence[float], reserve_s: float, device: torch.device) -> Flown:
-    """Fly closed-loop sentences of ``batch``'s flights (one each, in order) from their first predicted step, on their
-    own clock (`sentence.TimeClock`): each flight from ``inputs`` (`start_inputs`)."""
-    spec, interval = words.spec, batch.row_interval_s
-    f64 = torch.float64
-    return fly(inputs,
-               Sentences([c.grid for c in sentences], words, step_s=interval, device=device), TimeClock(params.cycle_s),
-               Runways.of(batch.geometries, spec, dtype=f64, device=device),
-               AirportCharts.of(batch.geometries, dtype=f64, device=device),
-               torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words,
-               time_limit_s=torch.tensor(list(time_limits_s), dtype=f64, device=device), reserve_s=reserve_s)
-
-
 def read_chunked(batch: Batch, params: ExecutorParams, words: Words, *, chunk: int,
                  device: torch.device) -> list[ClosedLoopSentence | Refused]:
     """`read` over ``batch`` in chunks of ``chunk`` flights (each flown on its own executor), in the batch's order."""
-    out: list[ClosedLoopSentence | Refused] = []
-    for first in range(0, len(batch.sentences), chunk):
-        part = subset(batch, list(range(first, min(first + chunk, len(batch.sentences)))))
-        out += read(part, start_inputs(part, words.spec.step_s, device=device), params, words, device=device)
-    return out
+    out: list[ClosedLoopSentence | Refused | None] = [refusal(s, batch.row_interval_s) for s in batch.sentences]
+    flying = [j for j, result in enumerate(out) if result is None]     # only these have a first predicted step
+    for first in range(0, len(flying), chunk):
+        members = flying[first: first + chunk]
+        part = subset(batch, members)
+        for j, result in zip(members, read(part, start_inputs(part, words.spec.step_s, device=device), params, words,
+                                           device=device)):
+            out[j] = result
+    return out  # type: ignore[return-value]
 
 
 # ---- the conformance (design §9.2 #2): the closed-loop reading checked by what it reads, as the labeller's and the
 # executor's are. A fixed REFERENCE sample — the train split's first `REFERENCE_PER_AIRPORT` flown flights of each
-# airport in a permutation seeded by `REFERENCE_SEED`, at every row interval of `REFERENCE_INTERVALS` — is read by the
+# airport in a permutation seeded by `REFERENCE_SEED`, at every row interval the closed-loop sentences were written at — is read by the
 # code that wrote the artefact's closed-loop sentences, and stored; the CHECK reads it again with the code on disk and
 # compares: the same flights, the same refusals, the same words and corrections, and states and errors no further
 # apart than the executor's conformance bound. A check that passes, from a clean checkout, writes
@@ -326,7 +330,7 @@ def read_chunked(batch: Batch, params: ExecutorParams, words: Words, *, chunk: i
 # code is named by the logic of the executor's files and the labeller's (`closed_loop_code_sha256`).
 REFERENCE_SCHEMA = "ts-closed-loop-conformance-reference-v1"
 PASSED_SCHEMA = "ts-closed-loop-conformance-passed-v1"
-REFERENCE_SPLIT, REFERENCE_PER_AIRPORT, REFERENCE_SEED, REFERENCE_INTERVALS = "train", 10, 1337, (2.0, 4.0)
+REFERENCE_SPLIT, REFERENCE_PER_AIRPORT, REFERENCE_SEED = "train", 10, 1337
 CONFORMANCE = "conformance"
 
 
@@ -334,13 +338,13 @@ def closed_loop_code_sha256() -> str:
     return logic_sha256([*executor_source_files(), *labeller_code_files()])
 
 
-def _reference_results(instructions: Path, params: ExecutorParams, words: Words, *,
+def _reference_results(instructions: Path, params: ExecutorParams, words: Words, intervals: Sequence[float], *,
                        device: torch.device) -> dict[float, tuple[list[str], list[ClosedLoopSentence | Refused]]]:
     drawn, readings = replay.draw_readings(instructions, REFERENCE_SPLIT, words.spec, words,
                                            per_airport=REFERENCE_PER_AIRPORT, seed=REFERENCE_SEED,
                                            groups=(replay.OWN, replay.STAND_IN))
     out = {}
-    for interval in REFERENCE_INTERVALS:
+    for interval in intervals:
         batch = replay.batch_of(drawn, list(range(len(readings))), readings, interval, words)
         out[interval] = ([s.dataset_id for s in batch.signals],
                          read_chunked(batch, params, words, chunk=len(batch.sentences), device=device))
@@ -353,16 +357,18 @@ def _result_json(result: ClosedLoopSentence | Refused) -> dict[str, Any]:
     return {"rows": len(result.grid), "ended": result.ended}
 
 
-def write_reference(instructions: Path, params: ExecutorParams, words: Words, *, git: dict[str, Any],
-                    target: Path) -> Path:
-    """Write the reference into ``target`` (`CONFORMANCE` inside the closed-loop directory being written)."""
+def write_reference(instructions: Path, params: ExecutorParams, words: Words, intervals: Sequence[float], *,
+                    git: dict[str, Any], target: Path) -> Path:
+    """Write the reference into ``target`` (`CONFORMANCE` inside the closed-loop directory being written), at every row
+    interval of ``intervals`` (the closed-loop sentences')."""
     target.mkdir()
     payload: dict[str, Any] = {"schema": REFERENCE_SCHEMA, "written_utc": utc_now(), "git": git,
                                "python": platform.python_version(), "code_sha256": closed_loop_code_sha256(),
                                "spec_sha256": words.spec.sha256, "executor_params_sha256": params_sha256(params),
                                "split": REFERENCE_SPLIT, "per_airport": REFERENCE_PER_AIRPORT, "seed": REFERENCE_SEED,
                                "intervals": {}}
-    for interval, (flights, results) in _reference_results(instructions, params, words, device=DEVICE).items():
+    for interval, (flights, results) in _reference_results(instructions, params, words, intervals,
+                                                           device=DEVICE).items():
         payload["intervals"][f"{interval:g}"] = {"flights": flights, "results": [_result_json(r) for r in results]}
         read_ok = [r for r in results if isinstance(r, ClosedLoopSentence)]
         with (target / f"reference_{interval:g}s.npz").open("xb") as handle:
@@ -410,10 +416,14 @@ def check(instructions: Path, params: ExecutorParams, words: Words, *, git: dict
     if payload["spec_sha256"] != words.spec.sha256 or payload["executor_params_sha256"] != params_sha256(params):
         raise ValueError(f"{directory} was read with another vocabulary spec or executor spec")
     checked = Checked(flights=0, code_sha256=closed_loop_code_sha256(), git=git)
-    for interval, (flights, results) in _reference_results(instructions, params, words, device=DEVICE).items():
+    intervals = [float(name) for name in payload["intervals"]]
+    for interval, (flights, results) in _reference_results(instructions, params, words, intervals,
+                                                           device=DEVICE).items():
         stored = payload["intervals"][f"{interval:g}"]
         if flights != stored["flights"]:
-            raise ValueError(f"the reference's {interval:g} s flights differ from those drawn today: the data moved")
+            checked.mismatches.setdefault(f"{interval:g} s", []).append(
+                "other flights than the reference's: the data moved, or the row interval refuses others")
+            continue
         with np.load(directory / f"reference_{interval:g}s.npz") as data:
             reference = {name: data[name] for name in data.files}
         again = _stacked([r for r in results if isinstance(r, ClosedLoopSentence)])
@@ -427,13 +437,21 @@ def check(instructions: Path, params: ExecutorParams, words: Words, *, git: dict
         for name in ("words", "correction"):
             if not np.array_equal(again[name], reference[name]):
                 checked.mismatches.setdefault(f"{interval:g} s", []).append(f"the {name} differ")
-        if again["states"].shape != reference["states"].shape:
+        if any(again[n].shape != reference[n].shape for n in ("states", "lateral_m", "vertical_m")):
+            checked.mismatches.setdefault(f"{interval:g} s", []).append("the states have another shape")
             continue
-        difference = float(np.abs(again["states"][:, :3] - reference["states"][:, :3]).max(initial=0.0))
-        others = max(float(np.abs(again[n] - reference[n]).max(initial=0.0)) for n in ("lateral_m", "vertical_m"))
-        rest = float(np.abs(again["states"][:, 3:] - reference["states"][:, 3:]).max(initial=0.0))
+
+        def apart(a: np.ndarray, b: np.ndarray) -> float:
+            """The largest difference, NaN where one is NaN and the other not (both NaN: equal)."""
+            if not np.array_equal(np.isnan(a), np.isnan(b)):
+                return math.nan
+            return float(np.abs(np.nan_to_num(a) - np.nan_to_num(b)).max(initial=0.0))
+
+        difference = apart(again["states"][:, :3], reference["states"][:, :3])
+        others = max(apart(again[n], reference[n]) for n in ("lateral_m", "vertical_m"))
+        rest = apart(again["states"][:, 3:], reference["states"][:, 3:])
         checked.largest_state_difference_m = max(checked.largest_state_difference_m, difference, others)
-        if max(difference, others) > STATE_BOUND_M or rest > ROUNDOFF:
+        if not (difference <= STATE_BOUND_M and others <= STATE_BOUND_M and rest <= ROUNDOFF):
             checked.mismatches.setdefault(f"{interval:g} s", []).append(
                 f"states {difference:.3g} m, errors {others:.3g} m, other columns {rest:.3g}")
     return checked
@@ -443,10 +461,11 @@ def passed_path(instructions: Path, code_sha256: str) -> Path:
     return instructions / CLOSED_LOOP_DIRECTORY / CONFORMANCE / f"passed-{code_sha256[:12]}.json"
 
 
-def write_passed(instructions: Path, checked: Checked, *, git: dict[str, Any]) -> Path:
+def write_passed(instructions: Path, checked: Checked) -> Path:
     """The record that the code on disk reads the reference as it was read (a passed check, from a clean checkout)."""
     if not checked.passed:
         raise ValueError(f"the closed-loop reference reads otherwise: {checked.mismatches}")
+    git = git_state()
     if checked.git["dirty"] or git != checked.git or closed_loop_code_sha256() != checked.code_sha256:
         raise RuntimeError("a passed record is written from a clean checkout only, for the code the check read with")
     path = passed_path(instructions, checked.code_sha256)
@@ -478,6 +497,7 @@ class Stored:
 
     grid: np.ndarray
     correction: np.ndarray
+    first_row: int              # the 2 s row of its sentence's first row on the interval's grid
     states: np.ndarray          # the flown rows only, from the first predicted step
     lateral_m: np.ndarray
     vertical_m: np.ndarray
@@ -490,7 +510,8 @@ def stored_sentences(data: dict[str, np.ndarray]) -> dict[int, Stored]:
     for k, index in enumerate(data["signal_index"].tolist()):
         rows = slice(int(data["offsets"][k]), int(data["offsets"][k + 1]))
         states = slice(int(data["state_offsets"][k]) + start, int(data["state_offsets"][k + 1]))
-        out[index] = Stored(grid=data["words"][rows], correction=data["correction"][rows], states=data["states"][states],
+        out[index] = Stored(grid=data["words"][rows], correction=data["correction"][rows],
+                            first_row=int(data["first_row"][k]), states=data["states"][states],
                             lateral_m=data["lateral_m"][rows], vertical_m=data["vertical_m"][rows])
     return out
 
@@ -503,6 +524,9 @@ def replay_batch(batch: Batch, stored: dict[int, Stored], words: Words) -> tuple
     out = subset(batch, kept)
     for position, j in enumerate(kept):
         grid = stored[batch.indices[j]].grid
+        if stored[batch.indices[j]].first_row != batch.sentences[j].first_row:
+            raise ValueError(f"{batch.signals[j].dataset_id}: the closed-loop sentence starts at 2 s row "
+                             f"{stored[batch.indices[j]].first_row}, the labelled one at {batch.sentences[j].first_row}")
         out.sentences[position] = replay.Sentence(
             grid=grid, instructions=replay.instructions_of(grid, batch.geometries[j], words),
             first_row=batch.sentences[j].first_row + start * every)

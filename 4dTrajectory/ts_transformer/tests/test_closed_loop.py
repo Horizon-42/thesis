@@ -205,15 +205,24 @@ def test_a_flight_whose_words_leave_an_offset_is_brought_back_by_heading_correct
     assert np.abs(sentence.lateral_m[-len(sentence.lateral_m) // 4:]).max() < words.spec.closed_loop_lateral_m
 
 
-def test_a_closed_loop_sentence_flown_again_gives_its_states():
-    from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S
+def _replayed(batch, inputs, sentence, params, words, monkeypatch):
+    """``sentence`` flown again as the replay flies it (`replay_batch`, `replay.fly_sentences` on the time clock)."""
+    stored = {7: closed_loop.Stored(grid=sentence.grid, correction=sentence.correction,
+                                    first_row=batch.sentences[0].first_row, states=sentence.states[sentence.start:],
+                                    lateral_m=sentence.lateral_m, vertical_m=sentence.vertical_m)}
+    batch.indices[0] = 7
+    moved, missing = closed_loop.replay_batch(batch, stored, words)
+    monkeypatch.setattr(replay.Batch, "inputs", lambda self, device: inputs)
+    return stored, moved, missing, replay.fly_sentences(moved, params, words, device=CPU)
 
+
+def test_a_closed_loop_sentence_flown_again_gives_its_states(monkeypatch):
+    """The replay flies a closed-loop sentence on the time clock (the runner sets it, whatever the spec's)."""
     batch, inputs, words = _batch()
     params = _params()
     (sentence,) = closed_loop.read(batch, inputs, params, words, device=CPU)
     rows = len(sentence.grid)
-    flown = closed_loop.fly_sentences(batch, inputs, [sentence], params, words, time_limits_s=[rows * 2.0 * 1.5],
-                                      reserve_s=GO_AROUND_EXTRA_S, device=CPU)
+    _, _, _, flown = _replayed(batch, inputs, sentence, params, words, monkeypatch)
     track = flown_track(flown.states[0].numpy(), batch.geometries[0])
     at = np.arange(rows) * 2                                     # the cycle starting each row
     again = np.column_stack([track["e"][at], track["n"][at], track["height"][at]])
@@ -232,11 +241,10 @@ def test_a_go_around_at_the_first_predicted_step_and_a_short_sentence_are_refuse
         assert isinstance(result, Refused) and result.reason.startswith(reason)
 
 
-def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(tmp_path):
+def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(tmp_path, monkeypatch):
     """§4.9 "Artefact": the words, corrections, states and errors written and read back by signal index; the replay's
     batch flies each from its first predicted step (its sentence and observed flight moved there) and the replay's check
     finds the stored states again."""
-    from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S
     from ts_transformer.experiments.executor_replay import closed_loop_columns
     from ts_transformer.instructions.artefact import load_closed_loop, write_closed_loop
 
@@ -248,24 +256,25 @@ def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(t
                       signal_index=[7], first_row=[batch.sentences[0].first_row], grids=[sentence.grid],
                       corrections=[sentence.correction], states=[sentence.states], lateral_m=[sentence.lateral_m],
                       vertical_m=[sentence.vertical_m], ended=[sentence.ended])
+    with pytest.raises(ValueError, match="nothing to write"):
+        write_closed_loop(tmp_path / "empty.npz", words.spec, executor_params_sha256="x", row_interval_s=4.0,
+                          start_row=sentence.start, signal_index=[], first_row=[], grids=[], corrections=[], states=[],
+                          lateral_m=[], vertical_m=[], ended=[])
     with pytest.raises(FileExistsError):
         write_closed_loop(path, words.spec, executor_params_sha256="x", row_interval_s=4.0, start_row=sentence.start,
-                          signal_index=[], first_row=[], grids=[], corrections=[], states=[], lateral_m=[],
-                          vertical_m=[], ended=[])
+                          signal_index=[7], first_row=[batch.sentences[0].first_row], grids=[sentence.grid],
+                          corrections=[sentence.correction], states=[sentence.states], lateral_m=[sentence.lateral_m],
+                          vertical_m=[sentence.vertical_m], ended=[sentence.ended])
     stored = closed_loop.stored_sentences(load_closed_loop(path, words.spec))
     assert list(stored) == [7] and np.array_equal(stored[7].grid, sentence.grid)
     assert np.array_equal(stored[7].states, sentence.states[sentence.start:])
-    batch.indices[0] = 7
-    moved, missing = closed_loop.replay_batch(batch, stored, words)
+    _, moved, missing, flown = _replayed(batch, inputs, sentence, params, words, monkeypatch)
     assert missing == 0 and moved.sentences[0].first_row == batch.sentences[0].first_row + sentence.start * 2
     assert moved.signals[0].e_m[0] == batch.signals[0].e_m[sentence.start * 2]
-    flown = closed_loop.fly_sentences(moved, inputs, [sentence], params, words,
-                                      time_limits_s=[len(sentence.grid) * 4.0 * 1.5], reserve_s=GO_AROUND_EXTRA_S,
-                                      device=CPU)
     (row,) = closed_loop_columns(stored)(moved, flown, [None])
     assert row["largest_lateral_m"] == pytest.approx(float(np.abs(sentence.lateral_m).max()))
     assert sum(row["correction_words"].values()) == int(sentence.correction.sum())
-    stored[7] = closed_loop.Stored(grid=sentence.grid, correction=sentence.correction,
+    stored[7] = closed_loop.Stored(grid=sentence.grid, correction=sentence.correction, first_row=0,
                                    states=sentence.states[sentence.start:] + [1.0, 0, 0, 0, 0, 0],
                                    lateral_m=sentence.lateral_m, vertical_m=sentence.vertical_m)
     with pytest.raises(ValueError, match="from its closed-loop states"):
@@ -286,3 +295,22 @@ def test_the_runner_counts_the_flights_without_a_sentence_by_reason():
         "not flown": {"no aircraft dynamics": 3}, "refused on the row interval": {"heading word across a runway change": 1},
         "refused by the closed loop": {"go-around at the first predicted step": 1}}
     assert numbers["correction_words"]["heading"] == int(sentence.correction[:, HEADING].sum()) > 0
+
+
+def test_no_angle_correction_while_the_level_reached_by_a_descent_is_held():
+    """§4.9 vertical item 1: a level reached by a descent says no angle word, the descent class stays in force; while the
+    flown height is within the level's band the level is held — no correction starts, and one in force ends."""
+    words = Words(spec())
+    corrector = Corrector(_grid([_first(words, 1080.0, 2), *[{}] * 5]), 0, words, 1)
+    corrector.row(0, 0.0, 0.0, 1300.0)
+    assert int(corrector.row(1, 0.0, 30.0, 1250.0)[0][ANGLE]) == 3        # still descending to 1,080 m: corrected
+    said, added = corrector.row(2, 0.0, -18.5, 1081.5)                   # level at 1,080 m: the correction ends
+    assert int(said[ANGLE]) == 2 and added[ANGLE]
+    assert int(corrector.row(3, 0.0, -18.5, 1080.0)[0][ANGLE]) == UNCHANGED   # and none starts
+
+
+def test_a_repeated_observed_position_is_no_segment():
+    e = np.array([0.0, 100.0, 100.0, 200.0, 300.0])
+    path = ObservedPath(e, np.zeros(5), np.full(5, 500.0), 2)
+    lateral, vertical = path.match(150.0, -10.0, 510.0)
+    assert lateral == pytest.approx(10.0) and vertical == pytest.approx(10.0) and math.isfinite(lateral)

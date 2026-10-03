@@ -91,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         if not checked.passed:
             print("NOT conforming: no passed record written")
             return 1
-        print(f"conforming → {closed_loop.write_passed(instructions, checked, git=git)}")
+        print(f"conforming → {closed_loop.write_passed(instructions, checked)}")
         return 0
     if args.row_interval_s is None:
         parser.error("--row-interval-s is required to write the closed-loop reading")
@@ -117,6 +117,10 @@ def main(argv: list[str] | None = None) -> int:
             batch = replay.batch_of(drawn, list(range(len(readings))), readings, interval, words)
             results = closed_loop.read_chunked(batch, params, words, chunk=args.chunk, device=device)
             kept = [(j, r) for j, r in enumerate(results) if isinstance(r, ClosedLoopSentence)]
+            if not kept:                                       # nothing to write: the summary says why
+                summary["splits"][split]["intervals"][f"{interval:g}"] = summarise(
+                    results, drawn.description["excluded"], batch.drawn["refused_on_interval"])
+                continue
             write_closed_loop(staging / f"{split}_{interval:g}s.npz", words.spec,
                               executor_params_sha256=params_sha256(params), row_interval_s=interval,
                               start_row=closed_loop.start_row(interval),
@@ -131,12 +135,13 @@ def main(argv: list[str] | None = None) -> int:
                   f"{numbers['correction_words']}, without a sentence {numbers['without_a_sentence']}, "
                   f"{time.perf_counter() - started:.0f}s", flush=True)
     write_json_atomic(staging / "summary.json", summary)
-    closed_loop.write_reference(instructions, params, words, git=git, target=staging / closed_loop.CONFORMANCE)
+    closed_loop.write_reference(instructions, params, words, args.row_interval_s, git=git,
+                                target=staging / closed_loop.CONFORMANCE)
     staging.rename(target)
     checked = closed_loop.check(instructions, params, words, git=git)
     if not checked.passed:
         raise SystemExit(f"the code that wrote the reference reads it otherwise: {checked.mismatches}")
-    print(f"→ {target}; passed → {closed_loop.write_passed(instructions, checked, git=git)}")
+    print(f"→ {target}; passed → {closed_loop.write_passed(instructions, checked)}")
     return 0
 
 

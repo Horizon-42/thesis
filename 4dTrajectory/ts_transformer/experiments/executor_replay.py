@@ -51,6 +51,7 @@ from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.autopilot.executor import Flown
 from ts_transformer.autopilot.judge import CROSSINGS, Outcome, Verdict
 from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
+from ts_transformer.autopilot.spec import params_sha256
 from ts_transformer.data.channels import channels_from_states
 from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.data.lateral_eligibility import default_evaluation_report_path
@@ -287,9 +288,12 @@ def main(argv: list[str] | None = None) -> int:
     per_flight = None
     if args.closed_loop:
         closed_loop.require_conforming_closed_loop(instructions)
+        data = load_closed_loop(closed_loop_path(instructions, args.split, args.row_interval_s), spec)
+        if str(data["executor_params_sha256"]) != params_sha256(params):
+            parser.error(f"the closed-loop sentences were flown by executor parameters "
+                         f"{str(data['executor_params_sha256'])[:12]}, {executor} holds {params_sha256(params)[:12]}")
         params = replace(params, word_clock="time")
-        stored = closed_loop.stored_sentences(load_closed_loop(
-            closed_loop_path(instructions, args.split, args.row_interval_s), spec))
+        stored = closed_loop.stored_sentences(data)
         batch, missing = closed_loop.replay_batch(batch, stored, words)
         batch.drawn["without_a_closed_loop_sentence"] = missing
         print(f"{len(batch.sentences)} closed-loop sentences flown from the first predicted step, {missing} flights "

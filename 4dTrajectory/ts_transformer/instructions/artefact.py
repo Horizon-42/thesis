@@ -226,6 +226,8 @@ def write_closed_loop(path: Path, spec: VocabularySpec, *, executor_params_sha25
     ``words[offsets[k]: offsets[k + 1]]`` (from its first predicted step, `start_row` rows after its first row on the
     interval's grid, which is its signals' 2 s row ``first_row[k]``), its states ``states[state_offsets[k]:
     state_offsets[k + 1]]`` (every row from its first: observed before ``start_row``, flown from it)."""
+    if not grids:
+        raise ValueError(f"no closed-loop sentence for {path.name}: nothing to write")
     lengths = np.array([len(grid) for grid in grids], dtype=np.int64)
     state_lengths = np.array([len(rows) for rows in states], dtype=np.int64)
     if not np.array_equal(state_lengths, lengths + start_row):
