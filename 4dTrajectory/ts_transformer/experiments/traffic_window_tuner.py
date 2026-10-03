@@ -192,6 +192,13 @@ def window_logits(model: Prior, layout: WindowLayout, *, checkpoint: bool = Fals
     return model.logits(own_h, own_tokens, valid[scene[:, 0]], targets, first)
 
 
+def forced_go_around_log_p(approach: torch.Tensor, sentences: np.ndarray, forced: np.ndarray) -> torch.Tensor:
+    """The log-probability ``sentences`` (places in ``approach``, the masked approach column's logits ``[N, 1, rows,
+    classes]``) give the go-around at their own steps ``forced``: the word a probe said for them, which its cross-entropy
+    learns (`WindowRewardTuner._window_scored`) and `traffic_window_probe_readout` reads."""
+    return torch.log_softmax(approach[sentences, 0, N_LOOK + forced], dim=-1)[:, APPROACH_GO_AROUND + 1]
+
+
 def window_advantages(rows: Sequence[Mapping[str, object]], samples: int
                       ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``(each row's advantage, each row's probe gain, the rows trained on)`` of a round's window sentences
@@ -463,12 +470,28 @@ class WindowRewardTuner(RewardTuner):
         learned = np.flatnonzero((forced >= 0) & (gains > 0.0))
         imitation = None
         if len(learned):
-            log_p = torch.log_softmax(logits[APPROACH][learned, 0, N_LOOK + forced[learned]], dim=-1)
+            log_p = forced_go_around_log_p(logits[APPROACH], learned, forced[learned])
             weight = torch.as_tensor(self.imitation_weight * gains[learned], dtype=log_p.dtype, device=self.device)
             imitation = torch.zeros(len(advantages), dtype=log_p.dtype, device=self.device)
-            imitation = imitation.index_put((torch.as_tensor(learned, device=self.device),),
-                                            -weight * log_p[:, APPROACH_GO_AROUND + 1])
+            imitation = imitation.index_put((torch.as_tensor(learned, device=self.device),), -weight * log_p)
         return batch, logits, started, reference, steps, advantages, imitation
+
+    def forced_log_probs(self, split: WindowSplit) -> dict[tuple[int, int], float]:
+        """Under this tuner's model, each trained sentence's log-probability of the go-around a probe said for it
+        (`forced_go_around_log_p`: its approach column at that step, masked as it was spoken) — keyed by (window sample,
+        place in it), the probed sentences only; teacher forcing, no gradient."""
+        self.model.eval()
+        out: dict[tuple[int, int], float] = {}
+        with torch.no_grad():
+            for part in self._window_parts(split, range(len(split.windows))):
+                _, logits, _, _, _, _, _ = self._window_scored(split, part, None)
+                keys = [(s, k) for s in part for k in split.trained[s]]
+                forced = np.concatenate([np.asarray(split.forced[s], dtype=np.int64) for s in part])
+                at = np.flatnonzero(forced >= 0)
+                if len(at):
+                    values = forced_go_around_log_p(logits[APPROACH], at, forced[at]).cpu().numpy()
+                    out.update({keys[i]: float(v) for i, v in zip(at, values)})
+        return out
 
     def _window_parts(self, split: WindowSplit, indices: Sequence[int]) -> list[list[int]]:
         """Parts by the scene tuner's budget (`SCORE_BUDGET`, `PAIR_COST`: the WHOLE encoding's cost, measured on

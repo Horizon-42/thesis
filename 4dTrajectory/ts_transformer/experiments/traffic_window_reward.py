@@ -264,6 +264,56 @@ class WindowSpeaking:
                                [a for n in range(len(plan)) for a in parts[n].allowed])
 
 
+@dataclasses.dataclass(frozen=True)
+class RoundSource:
+    """What a training round's windows are drawn from (module docstring, item 1): the sentence artefact, its spec and
+    vocabulary, the training days' scenes and the model's airports, the executor's parameters, each airport's busiest
+    training step, the model's positions, the start-altitude windows, the run's seed, the real and augmented windows an
+    airport, how a window's aircraft are commanded, and the hard-event pools with the events an airport a round."""
+
+    instructions: Path
+    spec: Any
+    words: Words
+    scenes: Mapping[str, Any]
+    airports: Sequence[str]
+    params: Any
+    most: Mapping[str, int]
+    max_rows: int
+    windows_alt: Any
+    seed: int
+    real_per_airport: int
+    augmented_per_airport: int
+    commanded: str
+    event_pools: Sequence[EventPool]
+    events_per_airport: int
+
+
+def round_windows(source: RoundSource, round_number: int) -> tuple[WindowRound, dict[str, Any]]:
+    """Round ``round_number``'s windows (module docstring, item 1), the same in every process and every reader
+    (`traffic_window_probe_readout` draws a round again with it): the round (with its hard events, picked by the round's
+    stream) and what its draw and augmentation counted and which events it picked."""
+    s, step_s = source, source.spec.step_s
+    per_airport = s.real_per_airport + math.ceil(s.augmented_per_airport * POOL_FACTOR)
+    drawn = draw_windows(s.instructions, "train", s.spec, s.words, s.scenes, per_airport=per_airport,
+                         seed=s.seed + round_number, step_s=step_s, commanded=s.commanded)
+    pool = drawn_windows(drawn, s.scenes, s.params, step_s)
+    real = first_windows_per_airport(pool, s.real_per_airport, s.airports)
+    rest = [w for w in range(len(pool.windows)) if w not in set(real)]
+    candidates, augmenting = augmented_windows(drawn_subset(pool, rest), s.params, s.most, s.max_rows,
+                                               [s.seed, round_number, AUGMENT_STREAM], s.windows_alt, s.spec,
+                                               KINDS_OF[s.commanded], s.commanded)
+    augmented = drawn_subset(candidates, first_windows_per_airport(candidates, s.augmented_per_airport, s.airports))
+    parts = [spoken_round(drawn_join([drawn_subset(pool, real), augmented]),
+                          ["real"] * len(real) + [a["kind"] for a in augmented.augmented])]
+    picked = []
+    if s.event_pools:
+        picked = pick(s.event_pools, s.events_per_airport,
+                      np.random.default_rng([s.seed, round_number, EVENT_PICK_STREAM]))
+        parts.append(event_round(s.event_pools, picked))
+    return round_join(parts), {"drawn": drawn.counts, "augmenting": augmenting,
+                               "events": [[p, s.event_pools[p].scenes[e].event] for p, e in picked]}
+
+
 def window_split(round_: WindowRound, spoken: WindowSentences, advantages: np.ndarray, gains: np.ndarray,
                  trained: np.ndarray, table: Split, landings: Mapping[str, Landings] | None, step_s: float
                  ) -> tuple[WindowSplit, list[str]]:
@@ -811,30 +861,12 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(f"{out}/round_{last:02d} grew from {resumed.payload['start']}, not {grown_from}")
         model = resumed.model
 
+    source = RoundSource(instructions, spec, words, train_airports, airports, params, most, max_rows, windows_alt,
+                         args.seed, args.real_per_airport, args.augmented_per_airport, args.commanded, event_pools,
+                         args.events_per_airport)
+
     def train_round(round_number: int) -> tuple[WindowRound, dict[str, Any]]:
-        """Round ``round_number``'s windows (module docstring, item 1), the same in every process: the round (with its
-        hard events, picked by the round's stream) and what its draw and augmentation counted and which events it
-        picked."""
-        per_airport = args.real_per_airport + math.ceil(args.augmented_per_airport * POOL_FACTOR)
-        drawn = draw_windows(instructions, "train", spec, words, train_airports, per_airport=per_airport,
-                             seed=args.seed + round_number, step_s=step_s, commanded=args.commanded)
-        pool = drawn_windows(drawn, train_airports, params, step_s)
-        real = first_windows_per_airport(pool, args.real_per_airport, airports)
-        rest = [w for w in range(len(pool.windows)) if w not in set(real)]
-        candidates, augmenting = augmented_windows(drawn_subset(pool, rest), params, most, max_rows,
-                                                   [args.seed, round_number, AUGMENT_STREAM], windows_alt, spec,
-                                                   KINDS_OF[args.commanded], args.commanded)
-        augmented = drawn_subset(candidates, first_windows_per_airport(candidates, args.augmented_per_airport,
-                                                                       airports))
-        parts = [spoken_round(drawn_join([drawn_subset(pool, real), augmented]),
-                              ["real"] * len(real) + [a["kind"] for a in augmented.augmented])]
-        picked = []
-        if event_pools:
-            picked = pick(event_pools, args.events_per_airport,
-                          np.random.default_rng([args.seed, round_number, EVENT_PICK_STREAM]))
-            parts.append(event_round(event_pools, picked))
-        return round_join(parts), {"drawn": drawn.counts, "augmenting": augmenting,
-                                   "events": [[p, event_pools[p].scenes[s].event] for p, s in picked]}
+        return round_windows(source, round_number)
 
     if args.resume and args.rounds == last:                 # the choice alone: nothing to speak
         write_json_atomic(out / "config.json", record)
