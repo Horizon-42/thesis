@@ -62,7 +62,6 @@ export type LayerKey =
   | "terrainHeightTint"
   | "runways"
   | "waypoints"
-  | "ocsSurfaces"
   | "trajectories"
   | "obstacles"
   | "obstacleLabels"
@@ -376,9 +375,6 @@ interface WorkbenchUiState {
   /** When true, every dock/chrome is hidden, leaving a clean globe (demos/figures). */
   presentationMode: boolean;
   setPresentationMode: (enabled: boolean) => void;
-  /** Whether the on-demand Layers drawer is open. */
-  layersDrawerOpen: boolean;
-  setLayersDrawerOpen: (open: boolean) => void;
   /** Whether the right inspector dock is collapsed. */
   rightInspectorCollapsed: boolean;
   setRightInspectorCollapsed: (collapsed: boolean) => void;
@@ -508,7 +504,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [proceduresOpen, setProceduresOpen] = useState<boolean>(false);
   const [pilotTransport, setPilotTransport] = useState<PilotTransport | null>(null);
   const [presentationMode, setPresentationMode] = useState<boolean>(false);
-  const [layersDrawerOpen, setLayersDrawerOpen] = useState<boolean>(false);
   const [rightInspectorCollapsed, setRightInspectorCollapsed] = useState<boolean>(false);
   const [airportLocalTerrain, setAirportLocalTerrain] = useState<AirportLocalTerrainState>({
     status: "disabled",
@@ -537,7 +532,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     terrainHeightTint: false,
     runways: true,
     waypoints: false,
-    ocsSurfaces: false,
     trajectories: false,
     obstacles: false,
     obstacleLabels: false,
@@ -734,13 +728,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setProceduresOpen,
     presentationMode,
     setPresentationMode,
-    layersDrawerOpen,
-    setLayersDrawerOpen,
     rightInspectorCollapsed,
     setRightInspectorCollapsed,
     pilotTransport,
     setPilotTransport,
-  }), [mode, proceduresOpen, presentationMode, layersDrawerOpen, rightInspectorCollapsed, pilotTransport]);
+  }), [mode, proceduresOpen, presentationMode, rightInspectorCollapsed, pilotTransport]);
 
   return (
     <AirportSessionContext.Provider value={airportSessionState}>

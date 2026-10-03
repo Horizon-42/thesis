@@ -378,72 +378,103 @@ body,
   display: none;
 }
 
-/* ── Layers drawer (opened from the top bar) ───────────────────────────────── */
-.layers-drawer {
-  position: absolute;
-  top: 56px;
-  right: 16px;
-  z-index: 120;
-  width: 248px;
-  max-height: calc(100% - 96px);
-  overflow-y: auto;
-  pointer-events: auto;
-  box-sizing: border-box;
-  padding: 12px 14px;
-  border: 1px solid rgba(103, 232, 249, 0.24);
-  border-radius: 8px;
-  background: rgba(20, 24, 35, 0.94);
-  backdrop-filter: blur(8px);
-  color: #e0e6f0;
-  box-shadow: 0 18px 42px rgba(2, 8, 23, 0.4);
-  font-family: "Inter", "Segoe UI", sans-serif;
-  font-size: 13px;
-  user-select: none;
+/* ── Layers (collapsible sub-control under the Camera panel) ──────────────── */
+.hud-layers {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid #2a3550;
 }
-
-.layers-drawer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.layers-drawer-header h3 {
-  margin: 0;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #8898aa;
-}
-
-.layers-drawer-header button {
-  background: none;
-  border: none;
-  color: #9fb3c8;
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-  padding: 2px 4px;
-}
-
-.layers-drawer-header button:hover {
-  color: #e0e6f0;
-}
-
-.layers-drawer-list {
-  display: grid;
-  gap: 4px;
-}
-
-.layers-drawer label {
+.hud-layers-head {
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  color: #7eb8f7;
+  cursor: pointer;
+  font: inherit;
+}
+.hud-layers-title {
+  flex: 1;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.hud-layers-count {
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+  color: #8898aa;
+}
+.hud-layers-caret { font-size: 11px; color: #8898aa; }
+.hud-layers-head:hover .hud-layers-caret,
+.hud-layers-head:hover .hud-layers-count { color: #c8d8ec; }
+
+.hud-layer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+/* A real checkbox (keyboard + screen reader) drawn as a pill: the input covers the chip, the span is the look. */
+.hud-layer-chip {
+  position: relative;
   cursor: pointer;
 }
+.hud-layer-chip input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.hud-layer-chip span {
+  display: block;
+  padding: 2px 8px;
+  border: 1px solid #3a4a6a;
+  border-radius: 10px;
+  background: #1a2236;
+  color: #8898aa;
+  font-size: 11px;
+  line-height: 14px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.hud-layer-chip:hover span { border-color: #5a7ab8; color: #c8d8ec; }
+.hud-layer-chip input:checked + span {
+  background: #1a4a8a;
+  border-color: #5a9be8;
+  color: #d8f3ff;
+}
+.hud-layer-chip input:focus-visible + span { outline: 2px solid #7eb8f7; outline-offset: 1px; }
 
-.workbench--presentation .layers-drawer {
-  display: none;
+.hud-layer-ring {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+}
+.hud-layer-ring-number {
+  width: 46px;
+  box-sizing: border-box;
+  padding: 1px 3px;
+  background: #1a2236;
+  border: 1px solid #3a4a6a;
+  border-radius: 4px;
+  color: #c8d8ec;
+  font: 11px "Courier New", monospace;
+}
+.hud-layer-terrain-note {
+  margin-top: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Courier New", monospace;
+  font-size: 10px;
+  color: #8898aa;
 }
 
 /* ── Right inspector (collapsible HUD / selected-flight detail) ─────────────── */
@@ -2849,12 +2880,6 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   cursor: pointer;
 }
 
-.control-panel-layer-toggle-dependent {
-  margin-left: 18px;
-  color: #aebbd0;
-  font-size: 12px;
-}
-
 .control-panel-airport-selector {
   display: grid;
   gap: 4px;
@@ -2877,59 +2902,6 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   margin: -6px 0 8px;
   font-size: 11px;
   color: rgba(250, 204, 21, 0.85);
-}
-
-.control-panel-terrain-details {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-}
-
-.control-panel-terrain-details div {
-  display: grid;
-  grid-template-columns: 104px minmax(0, 1fr);
-  gap: 8px;
-}
-
-.control-panel-terrain-details dt {
-  color: #8898aa;
-  white-space: nowrap;
-}
-
-.control-panel-terrain-details dd {
-  margin: 0;
-  color: #dbeafe;
-  text-align: right;
-  overflow-wrap: anywhere;
-}
-
-.control-panel-range-ring-value {
-  color: #7eecff;
-  font-variant-numeric: tabular-nums;
-  margin-bottom: 6px;
-}
-
-.control-panel-range-ring-inputs {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px;
-  gap: 8px;
-  align-items: center;
-}
-
-.control-panel-range-ring-inputs input[type="range"] {
-  width: 100%;
-  min-width: 0;
-}
-
-.control-panel-range-ring-inputs input[type="number"] {
-  width: 100%;
-  box-sizing: border-box;
-  background: #2a3550;
-  border: 1px solid #3a4a6a;
-  color: #c8d8ec;
-  border-radius: 4px;
-  padding: 3px 6px;
-  font-size: 12px;
 }
 
 /* ── Procedure Panel overlay ─────────────────────────────────────────────── */

@@ -12,7 +12,6 @@ vi.mock("../../context/AppContext", () => ({
 
 // Stub the chrome the shell composes so this test is about the shell itself.
 vi.mock("../WorkbenchTopBar", () => ({ default: () => <div>TOPBAR</div> }));
-vi.mock("../LayersDrawer", () => ({ default: () => <div>DRAWER</div> }));
 
 import WorkbenchShell from "../WorkbenchShell";
 

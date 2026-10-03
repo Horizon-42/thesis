@@ -15,7 +15,6 @@
  *         (useWaypointLayer)     loads waypoints.geojson
  *         (useTerrainHillshadeLayer/useTerrainHeightTintLayer) adds local terrain visual aids
  *         (useProcedureSegmentLayer) loads v3 procedure render bundles
- *         (useOcsLayer)          builds OCS geometry
  *         (useObservedTrajectoryLayer) loads the bounded observed response
  */
 
@@ -30,7 +29,6 @@ import { useTerrainHeightTintLayer } from "../hooks/useTerrainHeightTintLayer";
 import { useObstacleLayer } from "../hooks/useObstacleLayer";
 import { useProcedureAnnotationPicking } from "../hooks/useProcedureAnnotationPicking";
 import { useProcedureSegmentLayer } from "../hooks/useProcedureSegmentLayer";
-import { useOcsLayer } from "../hooks/useOcsLayer";
 import { useRangeRingLayer } from "../hooks/useRangeRingLayer";
 import { useApp } from "../context/AppContext";
 
@@ -58,7 +56,6 @@ export default function CesiumViewerComponent() {
   useObstacleLayer();
   useProcedureSegmentLayer();
   useProcedureAnnotationPicking();
-  useOcsLayer({ enabled: layers.ocsSurfaces });
   useRangeRingLayer();
   // Waypoint rendering is intentionally disabled for now.
   // Keep the hook implementation for future use.

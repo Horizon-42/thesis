@@ -105,7 +105,6 @@ describe("AppContext", () => {
     expect(result.current.mode).toBe("evaluation");
     expect(result.current.proceduresOpen).toBe(false);
     expect(result.current.presentationMode).toBe(false);
-    expect(result.current.layersDrawerOpen).toBe(false);
     expect(result.current.rightInspectorCollapsed).toBe(false);
     expect(result.current.observedVerdictFilter).toBe("all");
 
@@ -113,7 +112,6 @@ describe("AppContext", () => {
       result.current.setMode("optimize");
       result.current.setProceduresOpen(true);
       result.current.setPresentationMode(true);
-      result.current.setLayersDrawerOpen(true);
       result.current.setRightInspectorCollapsed(true);
       result.current.setObservedVerdictFilter("fail");
     });
@@ -121,7 +119,6 @@ describe("AppContext", () => {
     expect(result.current.mode).toBe("optimize");
     expect(result.current.proceduresOpen).toBe(true);
     expect(result.current.presentationMode).toBe(true);
-    expect(result.current.layersDrawerOpen).toBe(true);
     expect(result.current.rightInspectorCollapsed).toBe(true);
     expect(result.current.observedVerdictFilter).toBe("fail");
   });

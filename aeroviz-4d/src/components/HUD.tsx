@@ -11,7 +11,7 @@
  * so the display stays live without hammering React's reconciler.
  */
 
-import { memo, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { memo, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from "react";
 import * as Cesium from "cesium";
 import {
   useAirportLocalTerrainProgress,
@@ -103,7 +103,7 @@ export function localTerrainLabel(
   }
 }
 
-export default function HUD() {
+export default function HUD({ children }: { children?: ReactNode } = {}) {
   const { viewer, airport, airportLocalTerrain, setSelectedFlightId } = useApp();
   const terrainProgress = useAirportLocalTerrainProgress();
   const [cam, setCam] = useState<CameraReadout | null>(null);
@@ -506,6 +506,7 @@ export default function HUD() {
           Local {localTerrainLabel(airportLocalTerrain.status, terrainProgress)}
         </span>
       </div>
+      {children}
     </div>
   );
 }

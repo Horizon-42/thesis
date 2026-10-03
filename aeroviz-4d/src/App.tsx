@@ -20,6 +20,7 @@ import AirportLocalTerrainDemoPage from "./components/AirportLocalTerrainDemoPag
 import ChartAnnotatedPage from "./components/ChartAnnotatedPage";
 import AirportLocalTerrainAlert from "./components/AirportLocalTerrainAlert";
 import HUD from "./components/HUD";
+import HudLayers from "./components/HudLayers";
 import WorkbenchRightInspector from "./components/WorkbenchRightInspector";
 import WorkbenchBottomBar from "./components/WorkbenchBottomBar";
 import ProcedureDetailsPage from "./components/ProcedureDetailsPage";
@@ -98,7 +99,9 @@ function FlightApp() {
         }
         right={
           <WorkbenchRightInspector>
-            <HUD />
+            <HUD>
+              <HudLayers />
+            </HUD>
           </WorkbenchRightInspector>
         }
         bottom={

@@ -6,7 +6,8 @@
  *
  * These functions do NOT touch Cesium — they work purely with numbers and
  * arrays so they are easy to unit-test without a browser or WebGL context.
- * The caller (useOcsLayer hook) converts the output into Cesium entities.
+ * Its only caller, the legacy FAF debug layer (`useOcsLayer`), was removed with the "Legacy FAF OCS Debug"
+ * toggle (2026-10-03); the module and its test remain.
  *
  * Coordinate convention used throughout this file:
  *   lon  = longitude in decimal degrees (WGS84)

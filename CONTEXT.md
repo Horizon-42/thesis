@@ -146,7 +146,7 @@ Cesium integration is mostly in hooks:
 - `useCzmlLoader`: load trajectory CZML and synchronize clock/data source.
 - `useRunwayLayer`, `useWaypointLayer`, `useObstacleLayer`, `useTerrainLayer`,
   `useAirportLocalTerrainLayer`, `useTerrainHillshadeLayer`,
-  `useTerrainHeightTintLayer`, `useOcsLayer`, `useProcedureSegmentLayer`: layer
+  `useTerrainHeightTintLayer`, `useProcedureSegmentLayer`: layer
   lifecycle and Cesium entity/data source management.
 
 Pure geometry and assessment logic lives under `aeroviz-4d/src/utils/` and

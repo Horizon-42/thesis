@@ -16,7 +16,6 @@ import { useEffect, type ReactNode } from "react";
 import { useApp } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import WorkbenchTopBar from "./WorkbenchTopBar";
-import LayersDrawer from "./LayersDrawer";
 
 export default function WorkbenchShell({
   left,
@@ -68,7 +67,6 @@ export default function WorkbenchShell({
         {children}
       </div>
       {bottom}
-      <LayersDrawer />
       {presentationMode ? (
         <button
           type="button"

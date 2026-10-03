@@ -7,7 +7,6 @@ const {
   setSelectedRunway,
   setMode,
   setProceduresOpen,
-  setLayersDrawerOpen,
   setPresentationMode,
   landingsRef,
 } = vi.hoisted(() => {
@@ -20,7 +19,6 @@ const {
     selectedRunway: null,
     mode: "evaluation",
     proceduresOpen: false,
-    layersDrawerOpen: false,
     presentationMode: false,
   };
   return {
@@ -29,7 +27,6 @@ const {
     setSelectedRunway: vi.fn(),
     setMode: vi.fn(),
     setProceduresOpen: vi.fn(),
-    setLayersDrawerOpen: vi.fn(),
     setPresentationMode: vi.fn(),
     landingsRef: { current: { manifest: null as unknown, status: "empty" } },
   };
@@ -42,7 +39,6 @@ vi.mock("../../context/AppContext", () => ({
     setSelectedRunway,
     setMode,
     setProceduresOpen,
-    setLayersDrawerOpen,
     setPresentationMode,
   }),
 }));
@@ -59,7 +55,6 @@ describe("WorkbenchTopBar", () => {
     appState.mode = "evaluation";
     appState.proceduresOpen = false;
     appState.selectedRunway = null;
-    appState.layersDrawerOpen = false;
     appState.presentationMode = false;
     vi.clearAllMocks();
   });
@@ -153,10 +148,9 @@ describe("WorkbenchTopBar", () => {
     expect(screen.queryByLabelText("Landing Runway")).toBeNull();
   });
 
-  it("toggles the layers drawer and presentation mode", () => {
+  it("toggles presentation mode, and has no Layers button (the layers live under the Camera panel)", () => {
     render(<WorkbenchTopBar />);
-    fireEvent.click(screen.getByRole("button", { name: /Layers/ }));
-    expect(setLayersDrawerOpen).toHaveBeenCalledWith(true);
+    expect(screen.queryByRole("button", { name: /Layers/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Present/ }));
     expect(setPresentationMode).toHaveBeenCalledWith(true);
   });

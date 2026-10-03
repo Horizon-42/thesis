@@ -25,7 +25,6 @@ const {
     terrainHeightTint: false,
     runways: true,
     waypoints: false,
-    ocsSurfaces: true,
     trajectories: true,
     obstacles: false,
     obstacleLabels: false,

@@ -812,3 +812,8 @@ indeterminate on another runway.
   量过的代价：按下约 1 ms、每步拖动处理 + React 刷新 2–4 ms，场景每帧约 12–17 ms，所以圆盘不比三维画面慢。
 - 拖动只认主键、主指针，失去指针捕获就结束；按下时 `cancelFlight()`（Side / north-up / Reset 的飞行会和拖动抢相机）。
 - 已知：Follow camera（`trackedEntity`）时相机归 Cesium 的跟踪管，拖动无效——旧按钮也一样。
+
+**Layers 在相机面板下方（2026-10-03）**：图层开关不再是顶栏按钮打开的抽屉，而是 `HudLayers`（`HUD` 的 children，`App.tsx` 传入；本地地形演示页的 HUD
+不带它，那里的图层是页面自己的状态）：默认折叠，标题显示"开着的数/9"；展开后一图层一个胶囊（真 checkbox，键盘可达），范围环开着时多一行半径（滑块 +
+数字框，1–50 km），本地地形开着时多一行来源摘要（完整坐标系名在 tooltip）。已删除：顶栏 Layers 按钮、`LayersDrawer`、`layersDrawerOpen` 状态，以及
+"Legacy FAF OCS Debug"图层（`ocsSurfaces` 键和只服务于它的 `useOcsLayer`；`ocsGeometry.ts` 和它的测试还在，现在没有调用方）。

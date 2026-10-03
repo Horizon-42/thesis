@@ -46,8 +46,6 @@ export default function WorkbenchTopBar() {
     setMode,
     proceduresOpen,
     setProceduresOpen,
-    layersDrawerOpen,
-    setLayersDrawerOpen,
     presentationMode,
     setPresentationMode,
   } = useApp();
@@ -118,14 +116,6 @@ export default function WorkbenchTopBar() {
       </nav>
 
       <div className="workbench-topbar-actions">
-        <button
-          type="button"
-          className={`workbench-topbar-button${layersDrawerOpen ? " active" : ""}`}
-          aria-pressed={layersDrawerOpen}
-          onClick={() => setLayersDrawerOpen(!layersDrawerOpen)}
-        >
-          ⚙ Layers
-        </button>
         <button
           type="button"
           className={`workbench-topbar-button${presentationMode ? " active" : ""}`}
