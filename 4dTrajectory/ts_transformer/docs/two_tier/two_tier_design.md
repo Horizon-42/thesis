@@ -33,23 +33,25 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D5 | Prior inputs are in the frame of the runway in force. The prior has no airport embedding, no absolute position and no absolute direction | Decided | User, 2026-10-03 |
 | D6 | The grids of the words (heading 5°, four descent classes) stay as they are now. A measurement or a rough labelling decides if they are sufficient | Decided | User, 2026-10-03 |
 | D7 | This document sets no test criteria and no measurement criteria. The user sets them after the design is settled | Decided | User, 2026-10-03 |
-| D8 | The heading grid is aligned to the course of the runway in force (§3.3) | Proposed. Necessary for D2 at KSTL (§11.3) | Claude |
-| D9 | The executor laws in §5.7 are removed, the glidepath floor included | Follows from D2 and D3. The user approved the glidepath floor on 2026-09-26; confirm its removal | Claude |
-| D10 | Go-around is an event: it does not change the runway in force; a runway word ends it (§3.2) | Proposed | Claude |
+| D8 | The heading grid is aligned to the course of the runway in force (§3.3) | Decided | User, 2026-10-03 |
+| D9 | The executor laws in §5.7 are removed, the glidepath floor included | Decided | User, 2026-10-03 |
+| D10 | Go-around is an event: it does not change the runway in force; a runway word ends it. In the masks, a go-around only lifts masks; it adds none (§3.2, §3.7) | Decided. "It only lifts masks" is Claude's reading of the user's note "复飞只是取消屏蔽词" | User, 2026-10-03 |
+| D11 | The labeller stage includes an ablation of the row interval: 2 s now, larger intervals possible (§4.8) | Decided. Values and criteria: O10 | User, 2026-10-03 |
+| D12 | No runway lock. The model can change the runway at any time while G is false; the judge reads R at the crossing (§3.2) | Decided (was O1) | User, 2026-10-03 |
+| D13 | The prior gets the height above the published glidepath of R at each step (§6.1) | Decided (was O3) | User, 2026-10-03 |
 
 ### 0.2 Open items, in the order of discussion
 
 | # | Item | Proposal | §  |
 |---|---|---|---|
-| O1 | Runway lock: can the model change the runway on the final? | No lock. The judge reads the runway in force at the threshold | 3.2 |
 | O2 | Tolerances of the stability check at the decision altitude (DA) | No values in this document (D7) | 5.8 |
-| O3 | Published glidepath data as a prior input | Give the height above the published glidepath at each step. This is Claude's reading of the user's rule of 2026-09-16 (procedure geometry as an input is permitted). The user must confirm | 6.1 |
 | O4 | Keep or remove the row position embedding and the input "time from row 0" | Remove both. They show where the 25 km slice starts, not a fact of the flight | 6.1 |
-| O5 | Label the real go-arounds (R40 found 105 on the training days) | Discuss after O1–O4 | 4.6 |
+| O5 | Label the real go-arounds (R40 found 105 on the training days) | Discuss after O2 and O4 | 4.6 |
 | O6 | Replacement for the clearance mask of the multi-aircraft loop | Discuss with §8 | 8 |
 | O7 | Selection of designs by leave-one-airport-out (train on four airports, read the fifth) | Discuss with §7 | 7 |
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
 | O9 | Finer grids near the runway course and near the glidepath angle | Decided by D6: measure first | 3.3, 3.5 |
+| O10 | The row intervals of the ablation and how to compare them | Proposal: 2, 4, 6, 8 s. Criteria by the user after the design is settled (D7) | 4.8 |
 
 ### 0.3 Implementation
 
@@ -62,10 +64,11 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 
 ### 0.4 Plan
 
-1. Settle the open items O1–O8 with the user. Update this document after each decision.
+1. Settle the open items (§0.2) with the user. Update this document after each decision.
 2. Do the measurement or rough labelling of D6 (the user sets the criteria, D7).
 3. Write the vocabulary, the labeller and the executor on a branch in a worktree. Each step gets a code review.
-4. Fly the labelled sentences with the executor (the replay gate, §9). The user sets its criteria.
+4. Fly the labelled sentences with the executor (the replay gate, §9), at each row interval of the ablation (D11, §4.8).
+   The user sets the criteria and chooses the interval.
 5. Train the prior from the start, then the post-training, then the multi-aircraft stages (§6–§8).
 
 ---
@@ -97,7 +100,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 
 | Term | Meaning |
 |---|---|
-| Row, step | One line of a sentence. A row is 2 s. Rows are on even UTC seconds (artefact `v6_20261002`) |
+| Row, step | One line of a sentence. A row is Δ = 2 s now, on even UTC seconds (artefact `v6_20261002`); the ablation of §4.8 reads larger Δ |
 | Sentence | The rows of one flight, from its first row to the row before the landing |
 | Column | One kind of word in a row. A row has five columns (§3.1) |
 | Word | The value of one column in one row. The value "unchanged" means that the column says nothing new |
@@ -110,7 +113,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | Final | The extended centreline of R, before the threshold, in the direction of the course |
 | Capture corridor | On the final: lateral offset ≤ 20 m + d·tan 0.45°, track within 2° of the course (d: distance to the threshold). Spec values (§10) |
 | Capture row | The labeller's first row from which the observed track stays in the capture corridor to the threshold. Only the labeller uses it (D4). It uses later rows, so it is never an input |
-| First predicted step | Row `N_LOOK` = 8 of a sentence. The prior observes the rows before it and says nothing there |
+| First predicted step | The row 16 s after row 0 (`N_LOOK` = 8 rows at 2 s). The prior observes the rows before it and says nothing there |
 | Executor cycle | 1 s. The executor hears the words at the start of each 2 s row |
 | Labeller | The program that reads a sentence from an observed track (`instructions/labeller/`) |
 | Judge | The part of the executor package that classifies what the executor flew (`autopilot/judge.py`) |
@@ -159,15 +162,16 @@ start of the turn onto the final. This design has no clearance word. The model s
 | candidate k, G true | k | false | any candidate, R included |
 | go-around | R (no change) | true | G false, after the first predicted step |
 
-**Go-around (D10, proposed).** The word "go-around" starts the go-around manoeuvre of the executor (§5.5, §5.4). It does
-not change R. R stays the frame of the heading words when the model vectors the aircraft back. While G is true, a
-crossing of the threshold of R is not a landing (§5.8). A runway word ends the go-around state. The model can say R
-again or another candidate. This keeps the step-8 sequence of the multi-aircraft design (approach → go-around →
-approach) in one column.
+**Go-around (D10).** The word "go-around" starts the go-around manoeuvre of the executor (§5.5, §5.4). It does not
+change R. R stays the frame of the heading words when the model vectors the aircraft back. While G is true, a crossing
+of the threshold of R is not a landing (§5.8). A runway word ends the go-around state. The model can say R again or
+another candidate. This keeps the step-8 sequence of the multi-aircraft design (approach → go-around → approach) in one
+column. In the masks, a go-around only lifts masks: the procedure mask that stops a climb after the aircraft is below
+the entry height does not apply while G is true (post-training design §3). A go-around adds no mask.
 
-**Runway lock (O1, open).** In `instruction-v3` the clearance locked the runway. In this design no executor state
-needs a lock. Proposal: no lock. A change of runway on the final is a real manoeuvre (a change to a parallel runway).
-The judge reads R at the crossing.
+**No runway lock (D12).** In `instruction-v3` the clearance locked the runway. In this design no executor state needs a
+lock. The model can change the runway at any time while G is false; a change to a parallel runway on the final is a real
+manoeuvre. The judge reads R at the crossing.
 
 ### 3.3 Heading column
 
@@ -256,7 +260,9 @@ labeller sha").
 3. When a new level T needs a direction that the angle in force does not give (level, or the opposite direction), the
    same row says an angle of the correct direction.
 4. "No level-off" needs a descent class in force or in the same row.
-5. Proposed: "no level-off" is not permitted while G is true. A landing needs G false (§5.8).
+
+A go-around adds no rule here (D10). While G is true the model can say any word that these rules permit; a crossing of
+the threshold is not a landing until a runway word ends G (§5.8).
 
 ### 3.8 Example
 
@@ -336,11 +342,41 @@ slice that includes the second approach (median 421 s from the go-around to the 
 
 ### 4.7 Assembly and artefact
 
-- All words go on the 2 s grid. A word equal to the word in force is not a word. The first row says all five columns.
+- All words go on the row grid (2 s now; §4.8). A word equal to the word in force is not a word. The first row says all five columns.
   Two different words in one column in one row: refused.
 - The artefact has a new reading name and a new spec format (principle 8). The spec records the grids, the classes, the
   tolerances and the reading. The labeller identity hash covers the reading code and `grammar.py`.
 - The new code refuses artefacts `v1`–`v6` and every prior trained on them.
+
+### 4.8 Row interval: an ablation (D11)
+
+**What the row interval Δ sets.** Δ is 2 s now: the resample step of the data plane. Δ sets the grid of the words, how
+often the prior speaks and the executor hears, the length of a sentence (median 154 rows at 2 s) and the step of a
+multi-aircraft scene. Each column changes its word at only 1–2 % of the 2 s rows ([prior design](prior_design.zh.md)
+§1), so a larger Δ can be sufficient. The user asked to measure this at the labeller stage, before the prior trains.
+
+**How the ablation changes only Δ.** The labeller reads each flight at the 2 s rows of the data, as now. Then it puts
+the words on a Δ grid:
+
+1. The Δ rows are the rows on UTC multiples of Δ (the rule of artefact `v6_20261002` for Δ = 2 s), so the aircraft of a
+   scene stay on one grid.
+2. At each Δ row, each column says the word in force at that 2 s row if it differs from the word in force at the
+   previous Δ row. Inside one interval, only the last word of a column stays.
+3. The first Δ row says all five columns. The grammar rules (§3.7) are checked again on the Δ grid.
+
+Thus one reading gives every Δ. Δ must be a multiple of 2 s.
+
+**What a larger Δ changes (to read in the ablation; no criteria here, D7):**
+
+| Part | Change |
+|---|---|
+| Heading words | In a 3°/s turn the track moves 12° in 4 s, so one word jumps two or three 5° classes. The lead L = 4 s is one row at Δ = 4 s and less than one row above it |
+| Executor | The cycle stays 1 s. It hears the words at each Δ row. The heading law (arrive L after the hearing, the stopping rate) flies larger steps |
+| Final approach | With D2 and D3 the model corrects the final only every Δ; an error grows for a longer time before the next word |
+| Prior | Fewer steps for each flight and more changes for each step. The observation stays 16 s (`N_LOOK` = 16 s / Δ rows). A loss for each step cannot be compared between two Δ; a loss for each flight or each second can |
+| Multi-aircraft | The scene step is Δ |
+
+**Values (O10).** Proposal: Δ = 2, 4, 6, 8 s. The user sets the values and the criteria after the design is settled.
 
 ---
 
@@ -406,12 +442,12 @@ executor holds the airspeed.
 
 | Law in `v11` | Where | Why it goes |
 |---|---|---|
-| Runway lock after a clearance or a capture | `executor.runway_locked`, `lateral.Lateral.rate` | No clearance word; O1 |
+| Runway lock after a clearance or a capture | `executor.runway_locked`, `lateral.Lateral.rate` | No clearance word; D12 |
 | Capture state and the capture turn (an arc tangent to the final, planned at 1.53°/s) | `lateral.py:284`, executor design §4.4 | D2 |
 | Heading bend of ±4.5° and the own intercept at 30° after a clearance | `lateral.py:293`, executor design §4.3 | D2 |
 | Centreline tracking after capture | executor design §4.5 | D3 |
 | "Descend to land": aim at the TCH crossing point, the tube limit, the exit from the tube, not below the crossing height | `vertical.py:140`, executor design §5.3.1–§5.3.3 | D3 |
-| Glidepath floor (published glidepath − 60 m) and level flight below the glidepath after capture | `vertical.py:74`, executor design §5.3.4–§5.3.5 | D3; confirm (D9) |
+| Glidepath floor (published glidepath − 60 m) and level flight below the glidepath after capture | `vertical.py:74`, executor design §5.3.4–§5.3.5 | D3, D9 |
 
 ### 5.8 Judge
 
@@ -465,7 +501,11 @@ the model says "go-around" before the DA point, the flight continues (§3.2).
 - **Words in force:** the runway in force as its candidate vector, the go-around state G, the heading in force as the
   sine and cosine of its angle relative to the course of R, the other columns as embeddings, and the steps since each
   column said its word.
-- **Open:** the height above the published glidepath of R (O3); the row position embedding and "time from row 0" (O4).
+- **Glidepath (D13):** the height above the published glidepath of R at the aircraft's distance before the threshold,
+  with the straight-line reference of §11.4 (TCH + d·tan(angle) + d²/(2R_e), R_e the earth's radius of curvature along
+  the course). It is procedure geometry as an input; the model still decides the profile (principle 2). The value is
+  only meaningful near the final; the model also has the offset from the final to weigh it.
+- **Open:** the row position embedding and "time from row 0" (O4).
 
 ### 6.2 Outputs
 
@@ -518,7 +558,7 @@ This document sets none.
 
 | Item | Value | Source |
 |---|---|---|
-| Row | 2 s, on even UTC seconds | Artefact `v6_20261002` |
+| Row | 2 s, on even UTC seconds; larger intervals in the ablation (D11) | Artefact `v6_20261002` |
 | Executor cycle | 1 s | Fixed choice |
 | Heading grid | 5°, relative to the course of R | Spec (grid); D8 (frame) |
 | Heading lead L | 4 s | Measured (vocabulary design §10.1) |
