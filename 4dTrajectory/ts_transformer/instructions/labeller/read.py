@@ -108,13 +108,12 @@ def admit(signals: FlightSignals, geometry: AirportGeometry, spec: VocabularySpe
     """The one gate in front of both the labeller and the spec's measurements: the step, the
     runway, the cut before the landing, and the ground-speed refusals (§3.1, §3.6).
 
-    The data plane cuts a flight at its landing, so a series normally ends short of the threshold.
-    The landing is the LAST landing passage (`landing_passages`, as the harvest judges a landing): a
-    flight that comes back ahead of the threshold after it is refused, since the landing it would be
-    read up to is not in the series; an earlier passage is a low pass the flight came back from, which
-    `read_flight` reads as a go-around or refuses (``passages_before``). A crossing of the plane too high
-    or too far off the centreline to be a landing (an overflight, a downwind abeam) is not a landing at
-    all."""
+    The data plane cuts a flight at its landing, so a series normally ends short of the threshold and
+    holds no landing passage at all. A landing passage (`landing_passages`, as the harvest judges a
+    landing) the flight never comes back ahead of the threshold from is its landing: the sentence is cut
+    there. Every other passage is a low pass the flight came back from, which `read_flight` reads as a
+    go-around or refuses (``passages_before``). A crossing of the plane too high or too far off the
+    centreline to be a landing (an overflight, a downwind abeam) is not a landing at all."""
     if not np.allclose(np.diff(signals.time_s), spec.step_s, atol=1e-6):
         raise Refused("step mismatch", f"rows are not {spec.step_s:g} s apart")
     try:
@@ -125,11 +124,9 @@ def admit(signals: FlightSignals, geometry: AirportGeometry, spec: VocabularySpe
     raw = relative_to_runway(signals.e_m, signals.n_m, signals.track_deg, signals.altitude_m, candidate)
     limit = landing_cross_limit_m(geometry, runway_index, spec.landing_cross_limit_m, spec.parallel_course_delta_deg)
     passages = landing_passages(raw, limit, spec)
-    crossing = passages[-1] if passages else None
+    crossing = passages[-1] if passages and not (raw.before_threshold_m[passages[-1]:] > 0.0).any() else None
+    passages_before = tuple(passages[:-1] if crossing is not None else passages)
     if crossing is not None:
-        if (raw.before_threshold_m[crossing:] > 0.0).any():
-            raise Refused("threshold passed before the landing",
-                          f"lands at row {crossing} (as the harvest judges a landing) and comes back ahead of it")
         signals = truncated(signals, crossing)
     if signals.n_rows < 2:
         raise Refused("too short", f"{signals.n_rows} rows before the threshold")
@@ -143,7 +140,7 @@ def admit(signals: FlightSignals, geometry: AirportGeometry, spec: VocabularySpe
         raise Refused("ground speed outside the speed words", f"smoothed {speed.min():.1f}–{speed.max():.1f} m/s")
     relative = relative_to_runway(signals.e_m, signals.n_m, smoothed.track_deg, smoothed.altitude_m, candidate)
     return Admitted(signals=signals, runway_index=runway_index, candidate=candidate, smoothed=smoothed,
-                    relative=relative, cut_at_crossing=crossing is not None, passages_before=tuple(passages[:-1]))
+                    relative=relative, cut_at_crossing=crossing is not None, passages_before=passages_before)
 
 
 def flight_go_arounds(flight: Admitted, geometry: AirportGeometry, spec: VocabularySpec) -> list[GoAround]:
@@ -165,17 +162,21 @@ def flight_go_arounds(flight: Admitted, geometry: AirportGeometry, spec: Vocabul
     return found
 
 
-def runway_words(found: list[GoAround], vertical: VerticalReading, runway_index: int, ident: str, n_rows: int,
-                 words: Words) -> list[Instruction]:
+def runway_words(found: list[GoAround], vertical: VerticalReading, altitude_m: np.ndarray, runway_index: int,
+                 ident: str, n_rows: int, spec: VocabularySpec, words: Words) -> list[Instruction]:
     """The runway column's words (module docstring): the landed runway at row 0, and per go-around "go-around" at its
-    point and the landed runway again at the first level-off after it, at the latest at the next "no level-off"."""
+    point and the landed runway again at the first level-off after its climb — the first level piece after the point
+    held at least `go_around_min_climb_m` above it (R40's climb; a level flown at the low point before the climb is not
+    it) — at the latest at the next "no level-off"."""
     out = [Instruction(RUNWAY, runway_index, 0, "initial", {"ident": ident})]
-    levels = [piece.start for piece in vertical.pieces if piece.kind == LEVEL]
     no_level_off = [item.row for item in vertical.instructions
                     if item.column == ALTITUDE and item.value == words.altitude_no_level_off]
     rows = [item.row for item in found]
     for position, row in enumerate(rows):
-        candidates = [start for start in levels if start > row] + [start for start in no_level_off if start >= row]
+        climbed = float(altitude_m[row]) + spec.go_around_min_climb_m
+        levels = [piece.start for piece in vertical.pieces
+                  if piece.kind == LEVEL and piece.start > row and piece.median_m >= climbed]
+        candidates = levels[:1] + [start for start in no_level_off if start >= row]
         if not candidates:
             raise Refused("go-around not ended", f"row {row}: no level-off and no final descent after it")
         again = min(candidates)
@@ -192,10 +193,11 @@ def read_flight(signals: FlightSignals, geometry: AirportGeometry, spec: Vocabul
     words = words or Words(spec)
     flight = admit(signals, geometry, spec)
     signals, smoothed, relative, candidate = flight.signals, flight.smoothed, flight.relative, flight.candidate
+    found = flight_go_arounds(flight, geometry, spec)
     lateral = read_lateral(smoothed.track_deg, relative, candidate.course_deg, spec, words)
     vertical = read_vertical(smoothed.distance_m, smoothed.altitude_m, spec, words)
-    found = flight_go_arounds(flight, geometry, spec)
-    runway = runway_words(found, vertical, flight.runway_index, candidate.ident, signals.n_rows, words)
+    runway = runway_words(found, vertical, smoothed.altitude_m, flight.runway_index, candidate.ident, signals.n_rows,
+                          spec, words)
     speeds = read_speed(signals.time_s, smoothed.ground_speed_mps, relative.before_threshold_m, lateral.capture_row,
                         spec, words)
     instructions = [*runway, *lateral.instructions, *vertical.instructions, *speeds.instructions]

@@ -353,17 +353,36 @@ def test_a_go_around_and_a_second_approach():
     assert reading.capture_row > again                               # the second approach's capture
 
 
-def test_a_low_pass_over_the_runway_followed_by_a_second_approach_is_read_not_refused():
+LOW_OVER_THE_RUNWAY = [(30, 0, 70, 0), (102, 0, 70, -GLIDE), (40, 0, 70, 8.0), (10, 0, 70, 0), (30, -6, 70, 0),
+                      (162, 0, 70, 0), (30, -6, 70, 0), (20, 0, 70, 0), (99, 0, 70, -GLIDE)]
+
+
+@pytest.mark.parametrize("short", [True, False])
+def test_a_low_pass_over_the_runway_followed_by_a_second_approach_is_read_not_refused(short):
     """§4.6 item 5: a go-around that crosses the threshold low (a landing as the harvest judges one) and comes back is
-    read with the go-around rule; the cut is the last landing passage."""
-    legs = [(30, 0, 70, 0), (102, 0, 70, -GLIDE), (40, 0, 70, 8.0), (10, 0, 70, 0), (30, -6, 70, 0),
-            (162, 0, 70, 0), (30, -6, 70, 0), (20, 0, 70, 0), (99, 0, 70, -GLIDE)]
-    e, n, altitude, track, speed = fly_legs(legs, 90.0, 900.0, 1000.0, 0.0)
+    read with the go-around rule. A real series ends short of its landing (the data plane's cut): then it holds the low
+    crossing only; a series that crosses again is cut at that second crossing, the one it never comes back from."""
+    e, n, altitude, track, speed = fly_legs(LOW_OVER_THE_RUNWAY, 90.0, 900.0, 1000.0, 0.0)
     crossings = np.nonzero((e[:-1] < 0.0) & (e[1:] >= 0.0))[0] + 1
     assert len(crossings) == 2 and altitude[crossings[0]] - 100.0 < 100.0   # the go-around crosses under 100 m
+    if short:                                                                 # ended 10 rows before the landing
+        e, n, altitude, track, speed = (a[: crossings[1] - 10] for a in (e, n, altitude, track, speed))
     reading = read_flight(instruction_flight(e, n, altitude, track, speed), instruction_airport(), spec())
-    assert reading.cut_at_crossing and len(reading.words) == crossings[1]      # cut at the second crossing
+    if short:
+        assert not reading.cut_at_crossing and len(reading.words) == len(e)
+    else:
+        assert reading.cut_at_crossing and len(reading.words) == crossings[1]
     assert len(reading.go_around_rows) == 1 and abs(reading.go_around_rows[0] - crossings[0]) <= 2
+
+
+def test_the_runway_word_after_a_go_around_waits_for_the_level_off_after_the_climb():
+    """D19: a missed approach that first flies level at its low point (early, to the missed approach point) does not end
+    the go-around there: the runway is said again at the level held after the climb."""
+    legs = [(30, 0, 70, 0), (89, 0, 70, -GLIDE), (15, 0, 70, 0), (40, 0, 70, 8.0), (10, 0, 70, 0), (30, -6, 70, 0),
+            (185, 0, 70, 0), (30, -6, 70, 0), (20, 0, 70, 0), (104, 0, 70, -GLIDE)]
+    reading = read_flight(instruction_flight(*fly_legs(legs, 90.0, 900.0, -400.0, 0.0)), instruction_airport(), spec())
+    (go,), (again,) = reading.go_around_rows, reading.runway_again_rows
+    assert 119 <= go <= 136 and again >= 172                         # the climb starts at row 134, levels at 174
 
 
 def test_a_go_around_needs_a_held_level_before_and_after():
@@ -393,7 +412,7 @@ def test_a_touch_and_go_is_refused():
     e, n, altitude, track, speed = fly_legs(legs, 90.0, 900.0, -400.0, 0.0)
     low = int(np.argmin(altitude[:200]))
     assert e[low] > 0.0 and altitude[low] - 100.0 < 15.0
-    with pytest.raises(Refused, match="touch-and-go|threshold passed before the landing"):
+    with pytest.raises(Refused, match="touch-and-go"):
         read_flight(instruction_flight(e, n, altitude, track, speed), instruction_airport(), spec())
 
 

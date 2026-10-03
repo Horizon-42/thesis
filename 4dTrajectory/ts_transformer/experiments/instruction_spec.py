@@ -168,8 +168,10 @@ def main(argv: list[str] | None = None) -> int:
         "rules": {
             "heading_tolerance_deg": f"chosen: heading_step/2 + {measure.HEADING_WANDER_ALLOWANCE_DEG:g}° of wander "
                                      "(see sensitivity.heading_wander_p95_by_band)",
-            "altitude_tolerance_m": "chosen: altitude_step/2 + altitude_fit_tolerance "
-                                    "(see sensitivity.level_wander_p95_by_fit_tolerance)",
+            "altitude_grid": "chosen (D22): the segments' steps and tops; a level's band is half the larger gap to its "
+                             "neighbours + altitude_fit_tolerance (Words.altitude_tolerances)",
+            "level_band_m": "chosen: a level piece's rows lie within it of the piece's own median (design §4.4; see "
+                            "sensitivity.level_wander_p95_by_fit_tolerance)",
             "turn_rate_max_deg_s": "p99.9 of the turn rate on turning rows, up to 0.1°/s",
             "turn_bank_max_deg": "p99.9 of the bank on turning rows, up to 1°",
             "corridor_half_width_m": "p99 offset of the aligned final's nearest distance bin (0–3 km), up to 5 m",

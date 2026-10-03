@@ -105,12 +105,6 @@ def signals_flights(directory: Path, split: str) -> list[dict[str, Any]]:
     return _signals_record(directory)["splits"][split]["flights"]
 
 
-def arrival_manifest_sha256s(directory: Path) -> dict[str, str]:
-    """The sha256 of each airport's arrival manifest the signals were read from, by airport — information only: no
-    reader refuses on it (§9.2 #4)."""
-    return {source["airport"]: source["arrival_manifest_sha256"] for source in _signals_record(directory)["sources"]}
-
-
 def write_candidates(directory: Path, geometries: dict[str, AirportGeometry]) -> None:
     write_json_atomic(_fresh(directory / "candidates.json"),
                       {"schema": CANDIDATES_SCHEMA,
