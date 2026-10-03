@@ -15,6 +15,9 @@
   the deceleration that reaches it over the straight-line distance left to the threshold when that is harder (the
   shortest path there, so it errs early) — at most the vocabulary's largest acceleration. Said late on a long final at a
   high speed, the pace alone crossed the threshold 20 m/s over the type's window.
+- While G is true, "unspecified" is the pilot's own speed in a missed approach: the airspeed the aircraft had when it
+  heard the go-around, held (D27; Claude's reading, not checked in the regulation text). A speed word replaces it at
+  any row.
 - The stall floor: ``V_ref ≥ margin · V_stall(n)`` at the load factor the inverse commands this cycle
   (`outputs.constraints.speed_floor.stall_speed_mps`, the control path's margin).
 """
@@ -54,28 +57,38 @@ def speed_change_mps2(spec: VocabularySpec) -> float:
 
 
 class Speed:
+    #: what a cycle changes, per flight (a multi-aircraft batch holds it for a flight that has not started)
+    PER_FLIGHT = ("held_mps",)
+
     def __init__(self, approach_ias_mps: torch.Tensor, spec: VocabularySpec) -> None:
         self.approach_ias_mps = approach_ias_mps
         self.band_mps, self.accel_max_mps2 = spec.speed_tolerance_mps, spec.speed_accel_max_mps2
         self.pace_mps2 = speed_change_mps2(spec)
         self.margin = EXECUTOR_DYNAMICS.control_speed_floor_margin
+        #: the airspeed each flight had when it last heard a go-around (NaN: none heard)
+        self.held_mps = torch.full_like(approach_ias_mps, math.nan)
+
+    def hear_go_around(self, heard: torch.Tensor, state: Kinematics) -> None:
+        """The flights ``heard`` (``[B]`` bool) hear a go-around this cycle: their airspeed now is the one "unspecified"
+        holds while it is in force (module docstring)."""
+        self.held_mps = torch.where(heard, state.speed_mps, self.held_mps)
 
     def rate(self, state: Kinematics, speed_mps: torch.Tensor, unspecified: torch.Tensor, go_around: torch.Tensor,
              load_factor: torch.Tensor, aero_params: torch.Tensor,
              straight_m: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
         """The airspeed rate for this cycle, the rate the law wanted before the stall floor, and whether the
-        floor set it; a go-around holds the airspeed it has (§4.6); ``straight_m`` is the straight-line distance
-        to the pointed threshold."""
-        if (unspecified & self.approach_ias_mps.isnan()).any():
+        floor set it; ``go_around`` the go-around state G; ``straight_m`` is the straight-line distance to the pointed
+        threshold."""
+        if (unspecified & ~go_around & self.approach_ias_mps.isnan()).any():
             raise ValueError("\"unspecified\" in force for a flight whose type publishes no approach speed")
         density = isa_density(state.height_m)
         own = self.approach_ias_mps * torch.sqrt(ISA_RHO0_KG_M3 / density)
-        wanted = torch.where(go_around, state.speed_mps,
-                             torch.where(unspecified, own, speed_mps / torch.cos(state.gamma_rad)))
+        wanted = torch.where(unspecified, torch.where(go_around, self.held_mps, own),
+                             speed_mps / torch.cos(state.gamma_rad))
         floor = self.margin * stall_speed_mps(load_factor, state.mass_kg, density, aero_params[:, 0], aero_params[:, 1])
         landing = ((state.speed_mps.square() - own.square()) / (2.0 * straight_m.clamp(min=1.0))).clamp(
             self.pace_mps2, self.accel_max_mps2)
-        slowing = torch.where(unspecified, landing, torch.full_like(landing, self.pace_mps2))
+        slowing = torch.where(unspecified & ~go_around, landing, torch.full_like(landing, self.pace_mps2))
 
         def toward(reference: torch.Tensor) -> torch.Tensor:
             faster = reference > state.speed_mps

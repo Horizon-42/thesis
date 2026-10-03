@@ -234,9 +234,9 @@ def _params(**changes):
     from ts_transformer.autopilot.params import ExecutorParams
     from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
 
-    base = ExecutorParams(cycle_s=1.0, heading_time_constant_s=4.0, bank_rate_deg_s=ROLL_RATE_DEG_S,
-                          path_time_constant_s=2.0, path_rate_factor=2.0, timeout_factor=1.5, word_clock="time",
-                          decision_cone_share=1.0, decision_glidepath_tolerance_m=60.0)
+    base = ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, path_time_constant_s=2.0, path_rate_factor=2.0,
+                          timeout_factor=1.5, word_clock="time", decision_cone_share=1.0,
+                          decision_glidepath_tolerance_m=60.0)
     return replace(base, **changes)
 
 
@@ -244,8 +244,7 @@ def test_the_parameters_are_checked_against_the_designs_constraints():
     one, params = spec(), _params()
     params.check(one, 2.0)
     params.check(one, 8.0)
-    for change, message in ((dict(heading_time_constant_s=1.5), "under 2 Δt"),
-                            (dict(path_time_constant_s=1.0), "under 2 Δt"),
+    for change, message in ((dict(path_time_constant_s=1.0), "under 2 Δt"),
                             (dict(timeout_factor=0.0), "positive"),
                             (dict(decision_cone_share=0.0), "positive"),
                             (dict(decision_glidepath_tolerance_m=math.nan), "finite"),
@@ -255,27 +254,6 @@ def test_the_parameters_are_checked_against_the_designs_constraints():
             replace(params, **change).check(one, 2.0)
     with pytest.raises(ValueError, match="row interval 2.5 s"):
         params.check(one, 2.5)
-
-
-def test_the_standards_roll_rate_stops_the_executors_own_turns_within_the_bank_limit():
-    from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
-    from ts_transformer.autopilot import derive
-    from ts_transformer.autopilot.lateral import rate_for_error, stopping_rate_deg_s
-    from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
-
-    one = spec(turn_rate_max_deg_s=10.0)
-    floor = derive.stopping_roll_rate_deg_s(one, 4.0)
-    assert floor == pytest.approx(math.degrees(math.tan(math.radians(32.0)) / 8.0)) and floor < ROLL_RATE_DEG_S
-    speed = torch.linspace(50.0, 160.0, 23, dtype=F64)[:, None]
-    error = torch.linspace(0.5, 180.0, 360, dtype=F64)[None, :]
-    bank_capped = GRAVITY_MPS2 * math.tan(math.radians(32.0)) / speed
-
-    def excess(p_deg_s: float) -> float:
-        params = _params(bank_rate_deg_s=p_deg_s)
-        own = torch.minimum(rate_for_error(error, params, one), torch.rad2deg(bank_capped))
-        return float((own - stopping_rate_deg_s(error, speed, params)).max())
-
-    assert excess(floor) <= 1e-9 and excess(ROLL_RATE_DEG_S) <= 0.0 and excess(0.9 * floor) > 0.0
 
 
 # ---- the lateral law
@@ -293,17 +271,6 @@ def test_the_lateral_relative_mirrors_the_labellers():
     ref = relative_to_runway(e, n, track, np.zeros(50), candidate)
     assert ours[0].numpy() == pytest.approx(ref.before_threshold_m) and ours[1].numpy() == pytest.approx(ref.right_of_course_m)
     assert ours[2].numpy() == pytest.approx(ref.track_minus_course_deg)
-
-
-def test_the_executors_own_turn_takes_the_shorter_way_within_the_vocabularys_rates_and_eases_out():
-    from ts_transformer.autopilot.lateral import rate_for_error
-
-    params, one = _params(), spec()
-    track, target = torch.tensor([10.0, 350.0, 100.0, 100.0], dtype=F64), torch.tensor([350.0, 10.0, 104.0, 100.0],
-                                                                                        dtype=F64)
-    rate = rate_for_error(wrap180(target - track), params, one)
-    assert rate.tolist() == pytest.approx([-one.turn_rate_max_deg_s, one.turn_rate_max_deg_s,
-                                           4.0 / params.heading_time_constant_s, 0.0])
 
 
 def test_a_heading_word_is_flown_to_arrive_when_its_lead_runs_out_no_faster_than_the_bank_can_stop():
@@ -347,12 +314,11 @@ def test_a_heading_word_is_converted_with_the_course_of_r_when_heard_and_a_runwa
     geometry = _two_runways()
     runways = Runways.of([geometry], one, dtype=F64, device=CPU)
     lateral = Lateral(1, _params(), one, CPU)
-    no = torch.tensor([False])
 
     def error(relative_deg, issued, runway, track_deg, time_s):
         state = _lateral_state(track_deg)
-        _, _ = lateral.rate(state, torch.tensor([relative_deg], dtype=F64), torch.tensor([issued]),
-                            torch.tensor([runway]), no, torch.tensor([0]), runways, time_s)
+        lateral.rate(state, torch.tensor([relative_deg], dtype=F64), torch.tensor([issued]), torch.tensor([runway]),
+                     runways, time_s)
         return float(lateral.target_unwrapped[0] - lateral.track_unwrapped[0]), float(lateral.word_deg[0])
 
     assert error(words.heading_relative_deg(0), 0, 0, 90.0, 0.0) == pytest.approx((0.0, 90.0))       # on R = 09's course
@@ -399,13 +365,14 @@ def _physics(signals, geometry, approach_ias=None):
             torch.tensor([approach_speed_ias_mps("A320", mass) if approach_ias is None else approach_ias], dtype=F64))
 
 
-def _said(grid, words, geometry, runway_index=0):
+def _said(grid, words, geometry):
     """A grid's words as instructions on its rows (`replay.sentence_on_interval`'s): a heading word's track under the
-    runway."""
-    course = geometry.candidates[runway_index].course_deg
+    runway in force at its row."""
+    runway = grid[np.maximum.accumulate(np.where(grid[:, RUNWAY] >= 0, np.arange(len(grid)), 0)), RUNWAY]
     out = []
     for row, column in zip(*np.nonzero(grid != UNCHANGED)):
         value = int(grid[row, column])
+        course = geometry.candidates[runway[row]].course_deg
         info = {"target_deg": words.heading_track_deg(value, course)} if column == HEADING else {}
         out.append(Instruction(int(column), value, int(row), "said", info))
     return out
@@ -468,7 +435,7 @@ def test_a_downwind_base_final_sentence_is_flown_onto_the_final_by_its_words_and
     assert verdict.outcome == "landed" and verdict.flew_the_sentence
     assert abs(verdict.crossing["cross_m"]) < 60.0 and 0.0 < verdict.crossing["height_m"] < 100.0
     assert verdict.crossing["decision"]["passed"]
-    assert set(MODES) == {"go_around", "flying_course", "level_captured"}
+    assert set(MODES) == {"go_around", "level_captured"}
     assert not any(verdict.limits[name]["cycles"] for name in ("thrust_max", "thrust_min", "stall", "load_factor"))
     assert all(h["inside"] == h["rows"] for h in verdict.words["heading"] if h["rows"])
 
@@ -613,29 +580,92 @@ def test_the_flight_meets_the_ground_when_told_below_the_threshold():
     assert limited["cycles"] > 0 and limited["wanted_minus_given"] > 1e-4
 
 
-# ---- the go-around (§3.2, §5.4, §5.5, D10)
-def test_a_go_around_climbs_at_200_ft_per_nm_on_rs_course_holds_its_speed_and_lands_after_a_runway_word():
-    """D10: "go-around" climbs at the missed-approach gradient (the climb replaces "no level-off"), flies the course of R,
-    holds the airspeed, gives the flight 900 s more, and a crossing under it is no event; the runway said again ends it,
-    and the words that follow bring the aircraft round to land."""
-    from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S
-    from ts_transformer.autopilot.vertical import GO_AROUND_CLIMB_RAD
+# ---- the go-around (§3.2, §5.4–§5.6, D10, D27, D28)
+def _go_around(grid, go, words, level_m=900.0):
+    """``grid`` with "go-around" at step ``go`` — on the final, "no level-off" in force — and, by rule 6, a level above
+    the aircraft and the climb in that step."""
+    out = grid.copy()
+    out[go, RUNWAY], out[go, ALTITUDE], out[go, ANGLE] = RUNWAY_GO_AROUND, words.altitude_index(level_m), words.angle_climb
+    return out
 
+
+def test_a_go_around_climbs_at_the_go_around_angle_keeps_the_heading_word_and_the_airspeed():
+    """D27, D28: "go-around" with its level and its climb word climbs at the go-around angle (an A320 has the thrust for
+    more than 3°: 3°), the heading word in force (class 0, R's course) stays, "unspecified" holds the airspeed the
+    aircraft had at the go-around row, the flight gets 900 s more, and a crossing under G is no event."""
+    from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S
+    from ts_transformer.autopilot.vertical import GO_AROUND_MAX_RAD
+
+    words = Words(spec())
     signals, reading = _downwind()
-    grid = reading.words.copy()
-    go = len(grid) - 15                                         # on the final, "no level-off" in force
-    grid[go, RUNWAY] = RUNWAY_GO_AROUND
+    go = len(reading.words) - 15                                # on the final, "no level-off" in force
+    assert reading.words[go:, HEADING].tolist() == [UNCHANGED] * 15
+    grid = _go_around(reading.words, go, words)
     flown, verdict, _ = _fly_sentence(signals, grid)
     gamma, speed = flown.states[0, 1:, 5].numpy(), flown.states[0, 1:, 3].numpy()
     track = compass_from_math_rad(flown.states[0, 1:, 4].numpy())
     after = int(np.argmax(flown.modes["go_around"][0].numpy()))          # the cycle that heard it
     assert after > 0 and flown.modes["go_around"][0, after:].all()
-    assert gamma[after + 25: after + 90] == pytest.approx(GO_AROUND_CLIMB_RAD, abs=1e-3)
+    assert gamma[after + 25: after + 90] == pytest.approx(GO_AROUND_MAX_RAD, abs=1e-3)
     assert abs(speed[after + 60] - speed[after]) < 1.0
-    assert np.abs(np_wrap180(track[after + 5: after + 90] - 90.0)).max() < 2.0
+    assert np.abs(np_wrap180(track[after: after + 90] - 90.0)).max() < 2.0
     # over the threshold under the go-around: no event; the flight flies on to its extended limit
     assert verdict.outcome == "timeout"
     assert int(flown.done_cycle[0]) + 1 == pytest.approx(len(grid) * 2.0 * 1.5 + GO_AROUND_EXTRA_S)
+
+
+def test_the_go_around_angle_is_the_thrust_limited_climb_within_its_limits():
+    """D28: γ_GA = min(3°, max(1.885°, γ_T)), sin γ_T = (T_max − D) / (m g) with the drag at load factor 1: 3° with ample
+    thrust, γ_T itself between the limits, 1.885° when the thrust is short (the thrust limit then binds in flight)."""
+    from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, FlightCondition, flight_aerodynamics, isa_density
+    from ts_transformer.autopilot.vertical import GO_AROUND_MAX_RAD, GO_AROUND_MIN_RAD, go_around_angle_rad
+
+    signals, _ = _downwind()
+    inputs, _, charts, _ = _physics(signals, instruction_airport())
+    state = read_state(inputs.initial_state, charts)
+    condition = FlightCondition(state.speed_mps, torch.sin(state.gamma_rad), state.mass_kg, isa_density(state.height_m))
+    drag = float(flight_aerodynamics(condition, torch.ones(1, dtype=F64), inputs.aero_params).drag_n[0])
+    weight = float(state.mass_kg[0]) * GRAVITY_MPS2
+    assert float(go_around_angle_rad(state, inputs.aero_params, inputs.max_thrust_n)[0]) == GO_AROUND_MAX_RAD
+    between = drag + weight * math.sin(math.radians(2.5))                # the thrust for a steady 2.5°
+    assert float(go_around_angle_rad(state, inputs.aero_params, torch.tensor([between], dtype=F64))[0]) == \
+        pytest.approx(math.radians(2.5), rel=1e-12)
+    assert float(go_around_angle_rad(state, inputs.aero_params, torch.tensor([drag], dtype=F64))[0]) == GO_AROUND_MIN_RAD
+    assert GO_AROUND_MIN_RAD == pytest.approx(math.atan(200.0 * 0.3048 / 1852.0))
+
+
+def test_go_around_alone_starts_no_climb():
+    """D27, rules 5 and 6: "go-around" changes no target. Said with a level in force, the level is held; "no level-off"
+    in force with G (an ungrammatical sentence) is refused, never flown as a climb."""
+    from ts_transformer.instructions.labeller.interval import in_force
+
+    words = Words(spec())
+    signals, reading = _downwind()
+    level = int(np.nonzero(reading.words[:, ALTITUDE] == words.altitude_no_level_off)[0][0]) - 5   # a level in force
+    grid = reading.words.copy()
+    grid[level:, ALTITUDE], grid[level:, ANGLE] = UNCHANGED, UNCHANGED
+    grid[level, RUNWAY] = RUNWAY_GO_AROUND
+    flown, _, _ = _fly_sentence(signals, grid, clock="time")
+    height = flown.states[0, 1:, 2].numpy()
+    held = float(words.altitude_m(int(in_force(grid)[level, ALTITUDE])))
+    assert np.abs(height[level * 2 + 30: level * 2 + 200] - held).max() < 5.0
+    final = reading.words.copy()
+    final[len(final) - 15, RUNWAY] = RUNWAY_GO_AROUND                  # "no level-off" in force
+    with pytest.raises(ValueError, match="rules 5 and 6"):
+        _fly_sentence(signals, final, clock="time")
+
+
+def test_a_speed_word_under_a_go_around_replaces_the_held_airspeed():
+    """D27: under G "unspecified" holds the airspeed of the go-around row; a speed word replaces it at any row."""
+    words = Words(spec())
+    signals, reading = _downwind()
+    go = len(reading.words) - 15
+    grid = _go_around(reading.words, go, words)
+    grid[go + 5, SPEED] = words.speed_index(90.0)
+    flown, _, _ = _fly_sentence(signals, grid, clock="time")
+    speed, gamma = flown.states[0, 1:, 3].numpy(), flown.states[0, 1:, 5].numpy()
+    late = (go + 5) * 2 + 150
+    assert speed[late] * math.cos(gamma[late]) == pytest.approx(90.0, abs=2.0)
 
 
 def test_a_heading_word_said_at_or_after_a_go_around_is_flown():
@@ -650,8 +680,7 @@ def test_a_heading_word_said_at_or_after_a_go_around_is_flown():
         return np.abs((track - target + 180.0) % 360.0 - 180.0)
 
     go = len(reading.words) - 15
-    after = reading.words.copy()
-    after[go, RUNWAY] = RUNWAY_GO_AROUND
+    after = _go_around(reading.words, go, words)
     after[go + 10, HEADING] = words.heading_class(0.0, 90.0)     # 10 steps later: left onto north
     track = track_deg(after)
     assert off(track[go * 2 + 10: (go + 10) * 2], 90.0).max() < 2.0
@@ -660,50 +689,25 @@ def test_a_heading_word_said_at_or_after_a_go_around_is_flown():
 
 
 def test_the_runway_word_after_a_go_around_ends_it_and_a_level_word_holds():
-    """§3.2, §5.5: a climb word under the go-around climbs at 200 ft per NM to its level and holds it; a runway word ends
-    G, after which a climb word flies the climb class's own centre."""
-    from ts_transformer.autopilot.vertical import GO_AROUND_CLIMB_RAD
+    """§3.2, §5.5: the go-around's climb word climbs at the go-around angle to its level and holds it; a runway word ends
+    G, after which a climb word flies the climb class's nominal angle (D28)."""
+    from ts_transformer.autopilot.vertical import GO_AROUND_MAX_RAD
 
     words = Words(spec())
     signals, reading = _downwind()
     go = len(reading.words) - 15
-    grid = np.vstack([reading.words, np.full((200, len(COLUMNS)), UNCHANGED)])
-    grid[go, RUNWAY] = RUNWAY_GO_AROUND
-    grid[go + 2, ALTITUDE], grid[go + 2, ANGLE] = words.altitude_index(900.0), words.angle_climb
-    grid[go + 160, RUNWAY] = 0                                            # the climb to 900 m takes ~110 steps
+    grid = _go_around(np.vstack([reading.words, np.full((200, len(COLUMNS)), UNCHANGED)]), go, words)
+    grid[go + 160, RUNWAY] = 0                                            # the climb to 900 m takes ~60 steps
     grid[go + 165, ALTITUDE], grid[go + 165, ANGLE] = words.altitude_index(1260.0), words.angle_climb
     flown, _, _ = _fly_sentence(signals, grid, clock="time")
     gamma, height = flown.states[0, 1:, 5].numpy(), flown.states[0, 1:, 2].numpy()
     assert flown.modes["go_around"][0, go * 2: (go + 160) * 2].all()
     assert not flown.modes["go_around"][0, (go + 160) * 2:].any()
-    assert gamma[(go + 2) * 2 + 20: (go + 2) * 2 + 40] == pytest.approx(GO_AROUND_CLIMB_RAD, abs=1e-3)
+    assert gamma[go * 2 + 20: go * 2 + 40] == pytest.approx(GO_AROUND_MAX_RAD, abs=1e-3)
     held = slice((go + 160) * 2 - 20, (go + 165) * 2)                     # the level reached, held to the next word
     assert height[held] == pytest.approx(900.0, abs=3.0) and flown.modes["level_captured"][0, held].all()
     climbing = slice((go + 165) * 2 + 20, (go + 165) * 2 + 40)
     assert gamma[climbing] == pytest.approx(math.radians(spec().climb_angle_centre_deg), abs=1e-3)
-
-
-def test_the_vertical_law_knows_how_long_its_own_go_around_climb_takes():
-    from ts_transformer.autopilot.vertical import GO_AROUND_CLIMB_GRADIENT, Vertical
-
-    words, params = Words(spec()), _params()
-    vertical = Vertical(1, params, words, CPU)
-    signals, reading = _downwind()
-    grid = reading.words.copy()
-    go = len(grid) - 15
-    grid[go, RUNWAY] = RUNWAY_GO_AROUND
-    flown, _, _ = _fly_sentence(signals, grid, clock="time")
-    start = go * 2
-    height, speed, gamma = (flown.states[0, start:, c].numpy() for c in (2, 3, 5))
-    for climb_m in (5.0, 50.0, 150.0):
-        flew_s = float(np.argmax(height >= height[0] + climb_m)) * params.cycle_s
-        reference = vertical.go_around_climb_s(float(height[0]), float(gamma[0]), float(speed[0]), height[0] + climb_m)
-        assert abs(reference - flew_s) <= 2.0 * params.cycle_s
-    assert vertical.go_around_climb_s(500.0, -0.05, 70.0, 500.0) == 0.0
-    with pytest.raises(ValueError, match="flying forward"):
-        vertical.go_around_climb_s(400.0, -0.05, 0.0, 500.0)
-    alone = 7.0 / (70.0 * GO_AROUND_CLIMB_GRADIENT)
-    assert vertical.go_around_climb_s(493.0, -math.radians(3.0), 70.0, 500.0) > 3.0 * alone
 
 
 def test_a_go_around_word_past_the_reserve_is_refused():
@@ -907,13 +911,20 @@ def test_a_speed_word_is_flown_at_the_vocabularys_pace_both_ways():
     state = Kinematics(*(torch.tensor([v], dtype=F64) for v in (0.0, 0.0, 100.0, 90.0, 90.0, 0.0, 90.0, 60000.0)))
     aero = torch.tensor([[122.6, 2.5, 0.02, 0.04, 0.9, 0.2]], dtype=F64)
 
-    def rate(word_mps, go_around=False):
-        return float(speed.rate(state, torch.tensor([word_mps], dtype=F64), torch.tensor([False]),
+    def rate(word_mps, go_around=False, unspecified=False):
+        return float(speed.rate(state, torch.tensor([word_mps], dtype=F64), torch.tensor([unspecified]),
                                 torch.tensor([go_around]), torch.ones(1, dtype=F64), aero,
                                 torch.tensor([50_000.0], dtype=F64))[0][0])
 
     assert rate(70.0) == pytest.approx(-speed_change_mps2(one)) and rate(110.0) == pytest.approx(speed_change_mps2(one))
-    assert rate(70.0, go_around=True) == pytest.approx(0.0)                 # a go-around holds the airspeed
+    # D27: under a go-around a speed word is flown; "unspecified" holds the airspeed the go-around was heard at
+    assert rate(70.0, go_around=True) == pytest.approx(-speed_change_mps2(one))
+    speed.hear_go_around(torch.tensor([True]), state)
+    assert rate(math.nan, go_around=True, unspecified=True) == pytest.approx(0.0)
+    slower = Kinematics(*(torch.tensor([v], dtype=F64) for v in (0.0, 0.0, 100.0, 80.0, 90.0, 0.0, 80.0, 60000.0)))
+    assert float(speed.rate(slower, torch.tensor([math.nan], dtype=F64), torch.tensor([True]), torch.tensor([True]),
+                            torch.ones(1, dtype=F64), aero, torch.tensor([50_000.0], dtype=F64))[0][0]) == \
+        pytest.approx(speed_change_mps2(one))                                # back up to the held 90 m/s
 
 
 def test_the_pilots_own_speed_is_reached_by_the_threshold():
@@ -998,22 +1009,34 @@ def test_words_spoken_to_a_multi_aircraft_batch_count_from_each_flights_first_st
     assert said.shape == (2, 3, len(COLUMNS)) and (said[1, 1:] == UNCHANGED).all() and (said[1, 0] == 0).all()
 
 
-def test_the_single_flight_executor_flies_what_the_batch_flies():
+@pytest.mark.parametrize("thrust_share", [1.0, 0.3, 0.2])
+def test_the_single_flight_executor_flies_what_the_batch_flies(thrust_share):
     """§12.4: `autopilot.single` mirrors the batch's cycle — a go-around, a runway word and "no level-off" included —
-    to round-off."""
+    to round-off; with all of the A320's thrust, 30 % and 20 % of it, the go-around angle is 3°, between its limits and
+    1.885° (D28)."""
     from ts_transformer.autopilot import single
-    from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S
+    from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S, fly
+    from ts_transformer.autopilot.vertical import GO_AROUND_MAX_RAD, GO_AROUND_MIN_RAD
 
     words, params, geometry = Words(spec()), _params(), instruction_airport()
     signals, reading = _downwind()
     go = len(reading.words) - 15
-    grid = np.vstack([reading.words, np.full((60, len(COLUMNS)), UNCHANGED)])
-    grid[go, RUNWAY] = RUNWAY_GO_AROUND
+    grid = _go_around(np.vstack([reading.words, np.full((60, len(COLUMNS)), UNCHANGED)]), go, words)
     grid[go + 40, RUNWAY] = 0
-    batch, _, _ = _fly_sentence(signals, grid, clock="time")
-    inputs, _, _, approach = _physics(signals, geometry)
+    grid[go + 42, ALTITUDE], grid[go + 42, ANGLE] = words.altitude_no_level_off, 3
+    inputs, runways, charts, approach = _physics(signals, geometry)
+    inputs = replace(inputs, max_thrust_n=inputs.max_thrust_n * thrust_share)
+    limit = len(grid) * 2.0 * params.timeout_factor
+    batch = fly(inputs, Sentences([grid], words, step_s=2.0, device=CPU), TimeClock(params.cycle_s), runways, charts,
+                approach, params, words, time_limit_s=torch.tensor([limit], dtype=F64), reserve_s=GO_AROUND_EXTRA_S)
+    climb = float(batch.states[0, go * 2 + 30, 5])
+    expected = {1.0: GO_AROUND_MAX_RAD, 0.2: GO_AROUND_MIN_RAD}
+    if thrust_share in expected:
+        assert climb == pytest.approx(expected[thrust_share], abs=2e-3)
+    else:
+        assert GO_AROUND_MIN_RAD + 2e-3 < climb < GO_AROUND_MAX_RAD - 2e-3
     executor = single.SingleExecutor(inputs, geometry, float(approach[0]), params, words, step_s=2.0,
-                                     time_limit_s=len(grid) * 2.0 * params.timeout_factor, reserve_s=GO_AROUND_EXTRA_S)
+                                     time_limit_s=limit, reserve_s=GO_AROUND_EXTRA_S)
     sentence = single.Sentence(grid, words, step_s=2.0)
     for cycle in range(executor.cycles):
         executor.cycle(sentence.at(float(cycle - cycle % 2)), float(cycle))
@@ -1315,8 +1338,8 @@ def test_a_multi_aircraft_batch_with_go_arounds_flies_each_as_it_flies_alone():
     signals, reading = _downwind()
     grids = []
     for go in (len(reading.words) - 15, len(reading.words) - 25):
-        grid = np.vstack([reading.words, np.full((60, len(COLUMNS)), UNCHANGED)])
-        grid[go, RUNWAY], grid[go + 30, RUNWAY] = RUNWAY_GO_AROUND, 0
+        grid = _go_around(np.vstack([reading.words, np.full((60, len(COLUMNS)), UNCHANGED)]), go, words)
+        grid[go + 30, RUNWAY] = 0
         grids.append(grid)
     physics = _physics(signals, geometry)
     limits = [len(g) * one.step_s * params.timeout_factor for g in grids]

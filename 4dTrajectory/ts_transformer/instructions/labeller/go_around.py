@@ -46,10 +46,11 @@ class Pass:
 
 @dataclass(frozen=True)
 class GoAround:
-    """A go-around: its pass, and the go-around point (the pass's lowest row) relative to the pass's candidate."""
+    """A go-around: its pass, and the go-around point (the pass's lowest row) relative to the pass's candidate. The
+    go-around ROW, where "go-around" is said, is the row its climb is said at (`vertical.read_vertical`, D26)."""
 
     low_pass: Pass
-    row: int
+    point: int
     height_m: float         # above the threshold
     along_m: float          # along the landing direction from the threshold (negative before it)
     cross_m: float          # right of the centreline

@@ -47,7 +47,7 @@ from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
 from ts_transformer.autopilot.sentence import ROW_ROUNDING, TRACK_MAX_ROWS_PER_CYCLE, TRACK_WINDOW_S, _filled
 from ts_transformer.autopilot.speed import speed_change_mps2
-from ts_transformer.autopilot.vertical import GO_AROUND_CLIMB_RAD
+from ts_transformer.autopilot.vertical import GO_AROUND_MAX_RAD, GO_AROUND_MIN_RAD
 from ts_transformer.instructions.airport import AirportGeometry, landing_cross_limit_m
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import (
@@ -367,8 +367,7 @@ class Lateral:
         self.heard_s = self.track_unwrapped = self.target_unwrapped = self.last_track = 0.0
         self.return_gain = 2.0 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s)
 
-    def _word_error(self, state: Kin, relative_deg: float, issued: int, course: float, flying_course: bool,
-                    go_around: bool, time_s: float) -> float:
+    def _word_error(self, state: Kin, relative_deg: float, issued: int, course: float, time_s: float) -> float:
         heard = _remainder(course + relative_deg, 360.0)
         if self.word_deg is None:
             self.track_unwrapped = state.track_deg
@@ -378,36 +377,21 @@ class Lateral:
             self.track_unwrapped = self.track_unwrapped + _wrap180(state.track_deg - self.last_track)
             new = issued != self.word_step
             word = heard if new else self.word_deg
-            if new or flying_course:
-                self.heard_s = time_s
             if new:
+                self.heard_s = time_s
                 self.target_unwrapped = self.target_unwrapped + _wrap180(word - self.word_deg)
-            if flying_course or (go_around and new):
-                self.target_unwrapped = self.track_unwrapped + _wrap180(word - state.track_deg)
         self.word_deg, self.word_step, self.last_track = word, issued, state.track_deg
         return self.target_unwrapped - self.track_unwrapped
-
-    def _rate_for_error(self, error: float) -> float:
-        top = self.spec.turn_rate_max_deg_s
-        return _clamp(error / self.params.heading_time_constant_s, -top, top)
 
     def _word_rate(self, error: float, to_go: float, speed: float) -> float:
         stopping = math.degrees(math.sqrt(self.return_gain / speed * math.radians(abs(error))))
         rate = _min(abs(error / _clamp(to_go, 2.0 * self.params.cycle_s)), stopping)
         return _sign(error) * _clamp(rate, high=self.spec.turn_rate_max_deg_s)
 
-    def rate(self, state: Kin, force: WordsNow, runways: Sequence[Runway], time_s: float
-             ) -> tuple[float, dict[str, bool]]:
+    def rate(self, state: Kin, force: WordsNow, runways: Sequence[Runway], time_s: float) -> float:
         course = runways[force.runway].course_deg
-        flying_course = force.go_around and force.issued_step[HEADING] < force.issued_step[RUNWAY]
-        error = self._word_error(state, force.heading_rel_deg, force.issued_step[HEADING], course, flying_course,
-                                 force.go_around, time_s)
-        if flying_course:
-            error = _wrap180(course - state.track_deg)
-            rate = self._rate_for_error(error)
-        else:
-            rate = self._word_rate(error, self.heard_s + self.spec.heading_lead_s - time_s, state.ground_speed_mps)
-        return rate, {"flying_course": flying_course}
+        error = self._word_error(state, force.heading_rel_deg, force.issued_step[HEADING], course, time_s)
+        return self._word_rate(error, self.heard_s + self.spec.heading_lead_s - time_s, state.ground_speed_mps)
 
 
 class Vertical:
@@ -423,10 +407,13 @@ class Vertical:
         self.captured = False
         self.issued = (-1, -1)
 
-    def rate(self, state: Kin, force: WordsNow) -> tuple[float, float, dict[str, bool]]:
+    def rate(self, state: Kin, force: WordsNow, aero: Sequence[float], max_thrust_n: float
+             ) -> tuple[float, float, dict[str, bool]]:
         no_level_off, angle_class, go_around = force.no_level_off, force.angle_class, force.go_around
         if no_level_off and not (ANGLE_LEVEL + 1 <= angle_class <= self.words.n_descent):
             raise ValueError("\"no level-off\" in force without a descent class (design §3.7, rule 4)")
+        if no_level_off and go_around:
+            raise ValueError("\"no level-off\" in force while a go-around is (design §3.7, rules 5 and 6)")
         issued = (force.issued_step[ALTITUDE], force.issued_step[ANGLE])
         new_word = issued != self.issued
         self.captured = self.captured and not new_word
@@ -434,8 +421,12 @@ class Vertical:
 
         params, speed = self.params, state.speed_mps
         rate_max = params.path_rate_factor * speed * self.steepest_low_rad ** 2 / (2.0 * self.tolerance_m)
-        nominal = -GO_AROUND_CLIMB_RAD if go_around and angle_class == self.words.angle_climb else math.radians(force.angle_deg)
-        climb_rad = GO_AROUND_CLIMB_RAD if go_around else self.climb_rad
+        # `vertical.go_around_angle_rad`: the steady climb at the thrust limit, load factor 1, within its limits
+        drag, _stalled = _polar(1.0, speed, state.mass_kg, _isa_density(state.height_m), aero)
+        sine = _clamp((MAX_THRUST_FRACTION * max_thrust_n - drag) / (state.mass_kg * GRAVITY_MPS2), -1.0, 1.0)
+        go_around_rad = _clamp(math.asin(sine), GO_AROUND_MIN_RAD, GO_AROUND_MAX_RAD)
+        climb_rad = go_around_rad if go_around else self.climb_rad
+        nominal = -go_around_rad if go_around and angle_class == self.words.angle_climb else math.radians(force.angle_deg)
         height_to_go = state.height_m - force.altitude_m
         level_off = speed * (nominal * nominal) / (2.0 * rate_max)
         moving = not no_level_off and angle_class != ANGLE_LEVEL and not self.captured
@@ -444,10 +435,7 @@ class Vertical:
 
         hold_tau = 4.0 * params.path_time_constant_s
         hold = _min(_max(-height_to_go / (speed * hold_tau), -self.descent_max_rad), climb_rad)
-        if no_level_off:
-            reference = climb_rad if go_around else -nominal
-        else:
-            reference = hold if self.captured else -nominal
+        reference = hold if self.captured and not no_level_off else -nominal
         wanted = (reference - state.gamma_rad) / params.path_time_constant_s
         gamma_rate = _clamp(wanted, -rate_max, rate_max)
         return gamma_rate, wanted, {"level_captured": self.captured, "path_rate_limited": abs(wanted) > rate_max}
@@ -462,19 +450,27 @@ class Speed:
         self.band_mps, self.accel_max_mps2 = spec.speed_tolerance_mps, spec.speed_accel_max_mps2
         self.pace_mps2 = speed_change_mps2(spec)
         self.margin = EXECUTOR_DYNAMICS.control_speed_floor_margin
+        self.held_mps = math.nan
 
-    def rate(self, state: Kin, force: WordsNow, go_around: bool, load: float, aero: Sequence[float],
+    def hear_go_around(self, state: Kin) -> None:
+        self.held_mps = state.speed_mps
+
+    def rate(self, state: Kin, force: WordsNow, load: float, aero: Sequence[float],
              straight_m: float) -> tuple[float, float, dict[str, bool]]:
-        if force.unspecified and self.approach_ias_mps != self.approach_ias_mps:
+        go_around = force.go_around
+        if force.unspecified and not go_around and self.approach_ias_mps != self.approach_ias_mps:
             raise ValueError("\"unspecified\" in force for a flight whose type publishes no approach speed")
         speed = state.speed_mps
         density = _isa_density(state.height_m)
         own = self.approach_ias_mps * math.sqrt(ISA_RHO0_KG_M3 / density)
-        wanted = speed if go_around else (own if force.unspecified else force.speed_mps / math.cos(state.gamma_rad))
+        if force.unspecified:
+            wanted = self.held_mps if go_around else own
+        else:
+            wanted = force.speed_mps / math.cos(state.gamma_rad)
         floor = self.margin * math.sqrt(2.0 * load * state.mass_kg * GRAVITY_MPS2 / (density * aero[0] * aero[1]))
         landing = _clamp((speed * speed - own * own) / (2.0 * _clamp(straight_m, 1.0)), self.pace_mps2,
                          self.accel_max_mps2)
-        slowing = landing if force.unspecified else self.pace_mps2
+        slowing = landing if force.unspecified and not go_around else self.pace_mps2
 
         def toward(reference: float) -> float:
             tau = self.band_mps / (self.pace_mps2 if reference > speed else slowing)
@@ -535,12 +531,13 @@ class SingleExecutor:
             if self.time_limit_s + GO_AROUND_EXTRA_S > self.most_s:
                 raise ValueError("a time limit extended past the executor's reserve")
             self.time_limit_s += GO_AROUND_EXTRA_S
+            self.speed.hear_go_around(now)
         self.runway_issued = issued
-        track_rate, lateral_modes = self.lateral.rate(now, force, self.runways, cycle * params.cycle_s)
+        track_rate = self.lateral.rate(now, force, self.runways, cycle * params.cycle_s)
         runway = self.runways[force.runway]
         before, right, _off_course = relative(now, runway)
         straight = math.hypot(before, right)
-        gamma_rate, gamma_wanted, vertical_modes = self.vertical.rate(now, force)
+        gamma_rate, gamma_wanted, vertical_modes = self.vertical.rate(now, force, self.aero, self.max_thrust_n)
         # `inverse.attitude`: the bank and load factor for the wanted rates, limits 1 and 2
         speed, gamma = now.speed_mps, now.gamma_rad
         cos_gamma = math.cos(gamma)
@@ -552,7 +549,7 @@ class SingleExecutor:
         bank = _min(_max(capped, self.bank - step), self.bank + step)
         load_wanted = b / math.cos(bank)
         load = _clamp(load_wanted, LOAD_FACTOR_MIN, LOAD_FACTOR_MAX)
-        accel, accel_wanted, speed_modes = self.speed.rate(now, force, force.go_around, load, self.aero, straight)
+        accel, accel_wanted, speed_modes = self.speed.rate(now, force, load, self.aero, straight)
         # `inverse.thrust`: the thrust fraction for the airspeed rate at that load factor, limit 3
         sin_gamma = math.sin(gamma)
         drag, stalled = _polar(load, speed, now.mass_kg, _isa_density(now.height_m), self.aero)
@@ -572,7 +569,7 @@ class SingleExecutor:
                   "stall": stalled}
         for name in LIMITS:
             self.limits[name].append(limits[name])
-        modes = {"go_around": force.go_around, **lateral_modes, "level_captured": vertical_modes["level_captured"]}
+        modes = {"go_around": force.go_around, "level_captured": vertical_modes["level_captured"]}
         for name in MODES:
             self.modes[name].append(modes[name])
 

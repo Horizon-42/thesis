@@ -9,17 +9,19 @@ from ts_transformer.instructions import grammar
 from ts_transformer.instructions.airport import RunwayRelative, relative_to_runway
 from ts_transformer.instructions.labeller.go_around import go_arounds, held_level, low_passes
 from ts_transformer.instructions.labeller.interval import first_interval_row, in_force, interval_rows, on_interval
-from ts_transformer.instructions.labeller.lateral import read_lateral
+from ts_transformer.instructions.labeller.lateral import Approach, per_step_words, read_lateral
 from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.instructions.labeller.records import Instruction, Refused
 from ts_transformer.instructions.labeller.sentence import assemble
 from ts_transformer.instructions.labeller.speed import read_speed
+from ts_transformer.instructions.readout import go_around_in_force
 from ts_transformer.instructions.labeller.vertical import LEVEL, MOVE, read_vertical, tube_checks, vertical_pieces
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, ANGLE_LEVEL, HEADING, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words,
 )
 from ts_transformer.tests.support import (
-    INSTRUCTION_STEP_S, fly_legs, instruction_airport, instruction_flight, instruction_spec as spec,
+    INSTRUCTION_STEP_S, PARALLEL_SPACING_M, fly_legs, instruction_airport, instruction_flight,
+    instruction_spec as spec, parallel_airport,
 )
 
 
@@ -83,10 +85,16 @@ def _relative(n_rows: int, capture: int, course: float, track: np.ndarray, offse
                           height_above_threshold_m=np.full(n_rows, 500.0))
 
 
+def _lateral(track, relative, course, one, words):
+    """`read_lateral` on one approach to one runway of course ``course``."""
+    return read_lateral(track, [relative], [course], [Approach(0, len(track), 0)], np.zeros(len(track), dtype=np.int64),
+                        one, words)
+
+
 def _per_step(track, capture, course, offset, **changes):
     one = spec(**changes)
     words = Words(one)
-    return read_lateral(track, _relative(len(track), capture, course, track, offset), course, one, words), words
+    return _lateral(track, _relative(len(track), capture, course, track, offset), course, one, words), words
 
 
 # a slow continuous turn from north onto an eastbound final (course 090), 500 m left of it: 3° a row for 30 rows
@@ -132,9 +140,29 @@ def test_per_step_says_a_word_each_time_a_wander_crosses_a_cell_edge():
 def test_a_flight_on_the_final_from_row_0_is_captured_at_row_0():
     one, words = spec(), Words(spec())
     track = np.full(40, 91.0)
-    reading = read_lateral(track, _relative(40, 0, 90.0, track, 0.0), 90.0, one, words)
-    assert reading.capture_row == 0 and reading.turning_deg == 0.0
+    reading = _lateral(track, _relative(40, 0, 90.0, track, 0.0), 90.0, one, words)
+    assert reading.capture_rows == [0] and reading.turning_deg == 0.0
     assert [(i.column, i.row, i.value) for i in reading.instructions] == [(HEADING, 0, 0)]
+
+
+def test_a_word_in_force_keeps_its_track_when_the_runway_changes_course():
+    """§3.3, §5.4: the executor keeps a word's track when R changes; a new word is said only where the track leaves it,
+    relative to the new course."""
+    track = np.concatenate((np.full(20, 90.0), np.full(20, 100.0)))
+    course = np.concatenate((np.full(10, 90.0), np.full(30, 80.0)))     # R changes course at row 10
+    assert per_step_words(track, course, 5.0, 0) == [(0, 0.0), (20, 20.0)]
+
+
+def test_an_approach_that_ends_at_a_go_around_off_the_corridor_has_no_capture_row():
+    """D26: each approach its own capture row, to its own end; the landing approach must end on the final."""
+    one, words = spec(), Words(spec())
+    track = np.full(60, 90.0)
+    relative = _relative(60, 40, 90.0, track, -500.0)                  # off the final before row 40
+    approaches = [Approach(0, 20, 0), Approach(30, 60, 0)]
+    reading = read_lateral(track, [relative], [90.0], approaches, np.zeros(60, dtype=np.int64), one, words)
+    assert reading.capture_rows == [None, 40]
+    with pytest.raises(Refused, match="not on the final at the end"):
+        read_lateral(track, [relative], [90.0], [Approach(0, 30, 0)], np.zeros(60, dtype=np.int64), one, words)
 
 
 def test_level_descend_level_descend_reads_targets_angles_and_no_level_off():
@@ -143,7 +171,7 @@ def test_level_descend_level_descend_reads_targets_angles_and_no_level_off():
     altitude = np.concatenate((np.full(100, 1500.0), 1500.0 - np.arange(1, 81) * 150.0 * np.tan(np.radians(2.1)),
                                np.full(120, 1500.0 - 80 * 150.0 * np.tan(np.radians(2.1)))))
     altitude = np.concatenate((altitude, altitude[-1] - np.arange(1, 101) * 150.0 * np.tan(np.radians(3.0))))
-    reading = read_vertical(distance, altitude, one, words)
+    reading = read_vertical(distance, altitude, one, words, [])
     targets = [(i.row, words.altitude_m(i.value)) for i in reading.instructions if i.column == ALTITUDE]
     checks = tube_checks(reading.instructions, distance, altitude, one, words)
     assert targets[0] == (0, 1500.0)                            # segment 2: 1,380 + 120 k
@@ -164,7 +192,7 @@ def test_a_level_between_two_grid_levels_is_found_and_named_by_the_nearest():
     altitude = np.concatenate((np.full(40, 630.0), 630.0 - np.arange(1, 41) * 150.0 * np.tan(np.radians(3.0))))
     pieces = vertical_pieces(distance, altitude, one, words)
     assert pieces[0].kind == LEVEL and words.altitude_m(pieces[0].target_index) == 600.0 and pieces[0].stop >= 39
-    reading = read_vertical(distance, altitude, one, words)
+    reading = read_vertical(distance, altitude, one, words, [])
     assert [(i.column, i.row, i.value) for i in reading.instructions][:2] == [
         (ALTITUDE, 0, words.altitude_index(600.0)), (ANGLE, 0, ANGLE_LEVEL)]
 
@@ -184,7 +212,7 @@ def test_a_move_between_two_heights_of_one_level_says_nothing():
     one, words = spec(), Words(spec())
     distance = np.arange(126) * 150.0
     altitude = np.concatenate((np.full(60, 1280.0), 1280.0 - np.arange(1, 7) * 40.0 / 6.0, np.full(60, 1240.0)))
-    reading = read_vertical(distance, altitude, one, words)
+    reading = read_vertical(distance, altitude, one, words, [])
     assert [(i.column, i.row, i.value) for i in reading.instructions] == [
         (ALTITUDE, 0, words.altitude_index(1260.0)), (ANGLE, 0, ANGLE_LEVEL)]
 
@@ -193,7 +221,7 @@ def test_a_step_between_two_levels_is_issued_at_the_first_levels_end_with_its_ow
     one, words = spec(), Words(spec())
     distance = np.arange(60) * 400.0
     altitude = np.concatenate((np.full(30, 900.0), np.full(30, 970.0)))
-    reading = read_vertical(distance, altitude, one, words)
+    reading = read_vertical(distance, altitude, one, words, [])
     assert [(i.column, i.row, i.value) for i in reading.instructions] == [
         (ALTITUDE, 0, words.altitude_index(900.0)), (ANGLE, 0, ANGLE_LEVEL),
         (ALTITUDE, 29, words.altitude_index(960.0)), (ANGLE, 29, words.angle_climb)]
@@ -206,7 +234,7 @@ def test_a_flight_climbing_at_the_end_is_refused():
     one, words = spec(), Words(spec())
     altitude = np.concatenate((np.full(30, 900.0), 900.0 + np.arange(1, 31) * 3.0))
     with pytest.raises(Refused, match="climbing at the end"):
-        read_vertical(np.arange(60) * 200.0, altitude, one, words)
+        read_vertical(np.arange(60) * 200.0, altitude, one, words, [])
 
 
 def test_the_speed_is_unspecified_from_the_capture_row_unless_a_hold_ends_far_enough_out():
@@ -311,9 +339,23 @@ def test_rule_5_no_level_off_waits_for_the_runway_word():
     assert not grammar.step_allowed(_state(go_around=True), _step(**descending), 900.0, words, 1)
     assert grammar.step_allowed(_state(go_around=True), _step(runway=0, **descending), 900.0, words, 1)
     assert grammar.step_allowed(_state(), _step(**descending), 900.0, words, 1)
-    # a "no level-off" said before the go-around stays in force through it (the go-around's climb replaces it)
-    assert grammar.step_allowed(_state(go_around=True, altitude=words.altitude_no_level_off, angle=3),
-                                _step(heading=5), 900.0, words, 1)
+
+
+def test_rule_6_a_go_around_on_a_final_descent_says_a_level_above_and_the_climb():
+    """D27: "go-around" while "no level-off" is in force also says a level more than its band above the aircraft, and
+    rule 3 makes that row climb; with a level in force "go-around" alone is a sentence."""
+    words = Words(spec())
+    final = _state(altitude=words.altitude_no_level_off, angle=3)
+    above, near = words.altitude_index(1200.0), words.altitude_index(900.0)
+    go = {"runway": RUNWAY_GO_AROUND}
+    assert grammar.step_allowed(final, _step(**go, altitude=above, angle=words.angle_climb), 900.0, words, 1)
+    with pytest.raises(grammar.Ungrammatical, match="go-around without a level above"):
+        grammar.apply(final, _step(**go), 900.0, words, 1)
+    with pytest.raises(grammar.Ungrammatical, match="go-around without a level above"):
+        grammar.apply(final, _step(**go, altitude=near, angle=words.angle_climb), 900.0, words, 1)   # inside its band
+    with pytest.raises(grammar.Ungrammatical, match="altitude and angle incompatible"):
+        grammar.apply(final, _step(**go, altitude=above), 900.0, words, 1)                     # still descending
+    assert grammar.step_allowed(_state(), _step(**go), 900.0, words, 1)
 
 
 def test_rules_3_and_4_the_level_and_the_angle_agree():
@@ -335,22 +377,57 @@ def test_the_runway_mask_follows_the_table():
 
 # ---- go-arounds (§4.6, D18, D19)
 def test_a_go_around_and_a_second_approach():
-    """D18: "go-around" at the lowest row of the low pass; the climb read as altitude and angle words; D19: the landed
-    runway said again at the first level-off after the climb, before the final's "no level-off" (rule 5 holds)."""
+    """D18, D26: "go-around" in the row of the climb's words — its level and "climb" — the first row of the climb after
+    the low pass; the descent to it is the first approach's last, "no level-off", and the first approach (on the final
+    from row 0) is "unspecified" from its capture row, so both are in force at the go-around row; D19: the landed runway
+    said again at the first level-off after the climb, before the final's "no level-off" (rule 5 holds)."""
     one, words = spec(), Words(spec())
     e, n, altitude, track, speed = fly_legs(GO_AROUND_LEGS, 90.0, 900.0, -400.0, 0.0)
     reading = read_flight(instruction_flight(e, n, altitude, track, speed), instruction_airport(), one, words)
     (go,), (again,) = reading.go_around_rows, reading.runway_again_rows
-    assert abs(go - 119) <= 2                                        # the lowest row, 960 m before the threshold
+    assert abs(go - 119) <= 2                                        # the climb starts at row 119, 960 m out
     assert columns(reading, RUNWAY) == [(0, 0), (go, RUNWAY_GO_AROUND), (again, 0)]
-    altitude_words = columns(reading, ALTITUDE)
-    climb = [(row, value) for row, value in altitude_words if go - 3 <= row <= go + 3]
-    assert climb and words.altitude_m(climb[0][1]) == 900.0 and (climb[0][0], words.angle_climb) in columns(reading, ANGLE)
+    assert words.altitude_m(int(reading.words[go, ALTITUDE])) == 900.0 and reading.words[go, ANGLE] == words.angle_climb
+    held = in_force(reading.words)
+    assert held[go - 1, ALTITUDE] == words.altitude_no_level_off and held[go - 1, SPEED] == words.speed_unspecified
     assert 158 <= again <= 164                                       # the level-off after the climb (row 159)
-    final = [row for row, value in altitude_words if value == words.altitude_no_level_off]
-    assert final and final[0] > again
+    final = [row for row, value in columns(reading, ALTITUDE) if value == words.altitude_no_level_off]
+    assert len(final) == 2 and final[0] < go and final[1] > again    # each approach's own
     assert reading.checks["go_arounds"][0]["drop_m"] >= 150.0 and reading.checks["go_arounds"][0]["climb_m"] >= 150.0
-    assert reading.capture_row > again                               # the second approach's capture
+    first, second = reading.approaches
+    assert (first.first, first.end, first.capture_row, first.unspecified_row) == (0, go, 0, 0)
+    assert second.first == again and second.end == len(reading.words) and second.capture_row > again
+    assert reading.capture_row == second.capture_row                 # the landing approach's
+    # the second approach's speed reading starts at the go-around row: the speed held is said there
+    assert reading.words[go, SPEED] == words.speed_index(70.0)
+    assert go_around_in_force(reading, words) == [{"no_level_off": True, "unspecified": True, "captured": True,
+                                                    "other_runway": False}]
+
+
+def test_a_go_around_on_one_runway_and_a_landing_on_another():
+    """D26, §4.2: the first row says the runway of the first low pass (09L, the parallel), the runway word that ends the
+    go-around the runway the flight landed on (09); the heading words read each one's course."""
+    one, words = spec(), Words(spec())
+    legs = [*GO_AROUND_LEGS[:6], (40, -4.5, 70, 0), *GO_AROUND_LEGS[7:]]   # a wider second turn: 891 m further south
+    e, n, altitude, track, speed = fly_legs(legs, 90.0, 900.0, -400.0, 0.0)
+    assert n[100] == pytest.approx(PARALLEL_SPACING_M, abs=1.0)       # the first final: 09L's centreline
+    airport = parallel_airport()
+    reading = read_flight(instruction_flight(e, n, altitude, track, speed), airport, one, words)
+    (go,), (again,) = reading.go_around_rows, reading.runway_again_rows
+    left, landed = [candidate.ident for candidate in airport.candidates].index("09L"), 0
+    assert columns(reading, RUNWAY) == [(0, left), (go, RUNWAY_GO_AROUND), (again, landed)]
+    assert [(a.runway_index, a.capture_row is not None) for a in reading.approaches] == [(left, True), (landed, True)]
+    assert reading.runway_index == landed and reading.checks["go_arounds"][0]["candidate"] == left
+    assert go_around_in_force(reading, words)[0]["other_runway"]
+
+
+def test_a_go_around_without_a_climb_word_is_refused():
+    """D26: the go-around row is the row of the climb word; a low point with no climb after it is refused."""
+    one, words = spec(), Words(spec())
+    distance = np.arange(80) * 150.0
+    altitude = np.concatenate((np.full(40, 900.0), 900.0 - np.arange(1, 41) * 150.0 * np.tan(np.radians(3.0))))
+    with pytest.raises(Refused, match="go-around without a climb word"):
+        read_vertical(distance, altitude, one, words, [79])
 
 
 LOW_OVER_THE_RUNWAY = [(30, 0, 70, 0), (102, 0, 70, -GLIDE), (40, 0, 70, 8.0), (10, 0, 70, 0), (30, -6, 70, 0),
@@ -376,14 +453,18 @@ def test_a_low_pass_over_the_runway_followed_by_a_second_approach_is_read_not_re
 
 
 def test_the_runway_word_after_a_go_around_waits_for_the_level_off_after_the_climb():
-    """D19: a missed approach that first flies level at its low point (early, to the missed approach point) does not end
-    the go-around there: the runway is said again at the level held after the climb."""
+    """D19, D26: a missed approach that first flies level at its low point (early, to the missed approach point): the
+    go-around row is where the climb is said, after that level, and the runway is said again at the level held after
+    the climb, not at the low one. The descent ends at the low level, so it is no final descent ("no level-off")."""
     # down 15 m under the low level and back within 4 s, so the lowest row comes before the level piece begins
     legs = [(30, 0, 70, 0), (78, 0, 70, -GLIDE), (2, 0, 70, 4.0), (15, 0, 70, 0), (40, 0, 70, 8.0), (10, 0, 70, 0),
             (30, -6, 70, 0), (170, 0, 70, 0), (30, -6, 70, 0), (20, 0, 70, 0), (104, 0, 70, -GLIDE)]
-    reading = read_flight(instruction_flight(*fly_legs(legs, 90.0, 900.0, -400.0, 0.0)), instruction_airport(), spec())
+    words = Words(spec())
+    reading = read_flight(instruction_flight(*fly_legs(legs, 90.0, 900.0, -400.0, 0.0)), instruction_airport(), spec(),
+                          words)
     (go,), (again,) = reading.go_around_rows, reading.runway_again_rows
-    assert go < 125 <= again                                         # the climb starts at row 125
+    assert 124 <= go <= 127 and again >= go + 38                     # the climb starts at row 125, lasts 40 rows
+    assert in_force(reading.words)[go - 1, ALTITUDE] != words.altitude_no_level_off
 
 
 def test_a_go_around_needs_a_held_level_before_and_after():
@@ -455,7 +536,7 @@ def test_at_the_data_step_the_sentence_comes_back():
     words = Words(spec())
     flight = instruction_flight(*fly_legs(GO_AROUND_LEGS, 90.0, 900.0, -400.0, 0.0))
     reading = read_flight(flight, instruction_airport(), spec(), words)
-    assert np.array_equal(on_interval(reading.words, 0, 2.0, 2.0, reading.held_altitude_m, words, 1), reading.words)
+    assert np.array_equal(on_interval(reading.words, 0, 2.0, 2.0, reading.held_altitude_m, words, [90.0]), reading.words)
 
 
 def _grid(rows):
@@ -477,7 +558,7 @@ HAND = _grid([
 
 def test_four_seconds_keeps_the_last_word_of_each_interval():
     words = Words(spec())
-    out = on_interval(HAND, 0, 4.0, 2.0, np.full(16, 900.0), words, 1)
+    out = on_interval(HAND, 0, 4.0, 2.0, np.full(16, 900.0), words, [90.0])
     assert out.shape == (8, 5)
     expected = _grid([
         {RUNWAY: 0, HEADING: 0, ALTITUDE: 15, ANGLE: ANGLE_LEVEL, SPEED: 16},
@@ -495,7 +576,7 @@ def test_four_seconds_keeps_the_last_word_of_each_interval():
 
 def test_eight_seconds_keeps_the_words_in_force_and_cancels_a_go_around_inside_one_interval():
     words = Words(spec())
-    out = on_interval(HAND, 0, 8.0, 2.0, np.full(16, 900.0), words, 1)
+    out = on_interval(HAND, 0, 8.0, 2.0, np.full(16, 900.0), words, [90.0])
     assert np.array_equal(out, _grid([
         {RUNWAY: 0, HEADING: 0, ALTITUDE: 15, ANGLE: ANGLE_LEVEL, SPEED: 16},
         {HEADING: 2, SPEED: 14},                                   # row 4
@@ -504,7 +585,7 @@ def test_eight_seconds_keeps_the_words_in_force_and_cancels_a_go_around_inside_o
     ]))
     # from row 3 (a later UTC multiple): the go-around (row 8) and the runway again (row 10) fall between rows 7 and
     # 11 — one interval — and cancel; the first row says every word in force
-    shifted = on_interval(HAND, 3, 8.0, 2.0, np.full(16, 900.0), words, 1)
+    shifted = on_interval(HAND, 3, 8.0, 2.0, np.full(16, 900.0), words, [90.0])
     assert (shifted[0] != UNCHANGED).all() and np.array_equal(in_force(shifted), in_force(HAND)[[3, 7, 11, 15]])
     assert (shifted[:, RUNWAY] == RUNWAY_GO_AROUND).sum() == 0
 
@@ -512,9 +593,9 @@ def test_eight_seconds_keeps_the_words_in_force_and_cancels_a_go_around_inside_o
 def test_six_seconds_is_refused_and_a_go_around_at_the_first_row_too():
     words = Words(spec())
     with pytest.raises(ValueError, match="16 s observation"):
-        on_interval(HAND, 0, 6.0, 2.0, np.full(16, 900.0), words, 1)
+        on_interval(HAND, 0, 6.0, 2.0, np.full(16, 900.0), words, [90.0])
     with pytest.raises(Refused, match="go-around at the first row"):
-        on_interval(HAND, 8, 4.0, 2.0, np.full(16, 900.0), words, 1)
+        on_interval(HAND, 8, 4.0, 2.0, np.full(16, 900.0), words, [90.0])
 
 
 def test_the_grammar_is_read_on_the_projected_rows():
@@ -523,4 +604,17 @@ def test_the_grammar_is_read_on_the_projected_rows():
     split = HAND.copy()
     split[6, ANGLE], split[7, ANGLE] = UNCHANGED, 2
     with pytest.raises(Refused):
-        on_interval(split, 0, 2.0, 2.0, np.full(16, 900.0), words, 1)
+        on_interval(split, 0, 2.0, 2.0, np.full(16, 900.0), words, [90.0])
+
+
+def test_a_heading_word_heard_with_a_runway_of_another_course_is_refused_on_the_interval():
+    """§4.8 item 4: a heading word said under one course, before a runway word of another course, and heard with it at
+    one Δ row would say another track — refused; at the step, or with runways of one course, it is the same word."""
+    words = Words(spec())
+    sentence = _grid([
+        {RUNWAY: 0, HEADING: 0, ALTITUDE: 15, ANGLE: ANGLE_LEVEL, SPEED: 16},
+        {}, {}, {RUNWAY: RUNWAY_GO_AROUND}, {}, {HEADING: 2}, {RUNWAY: 1}, {}, {}])
+    assert np.array_equal(on_interval(sentence, 0, 2.0, 2.0, np.full(9, 900.0), words, [90.0, 80.0]), sentence)
+    on_interval(sentence, 0, 8.0, 2.0, np.full(9, 900.0), words, [90.0, 90.0])
+    with pytest.raises(Refused, match="heading word across a runway change"):     # said at row 5, heard at row 8
+        on_interval(sentence, 0, 8.0, 2.0, np.full(9, 900.0), words, [90.0, 80.0])

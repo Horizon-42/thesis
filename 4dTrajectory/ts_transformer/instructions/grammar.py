@@ -1,4 +1,4 @@
-"""Which words may be said at a step — the vocabulary's grammar (design §3.2 table, §3.7 rules 1–5), in ONE function
+"""Which words may be said at a step — the vocabulary's grammar (design §3.2 table, §3.7 rules 1–6), in ONE function
 (`apply`) that the labeller checks every row with and a speaker masks with ("checked in labelling, a mask in decoding").
 
 A step is one row of five words (`UNCHANGED` where a column says nothing). The words in force (`InForce`) carry the
@@ -13,6 +13,10 @@ runway in force R and the go-around state G beside the last word of each other c
 4. "No level-off" needs a descent class in force or in the same row.
 5. "No level-off" is not said while G is true (D14): a runway word ends G first — in the same row (the runway column
    comes first) or earlier.
+6. A step that says "go-around" while "no level-off" is in force also says a level more than its band above the
+   aircraft (D27): rule 3 then makes it say the climb. With rule 5, "no level-off" is never in force while G is true.
+   ("Above the present height" read as rule 3 reads it, more than the level's band above: the reading under which
+   rule 3 makes the row climb — Claude's reading of §3.7.)
 
 A rule broken raises `Ungrammatical` with a fixed reason (counted by the labeller as a refusal).
 """
@@ -73,6 +77,12 @@ def apply(in_force: InForce | None, step: Sequence[int], altitude_m: float, word
         if runway == RUNWAY_GO_AROUND:
             if in_force.go_around:
                 raise Ungrammatical("runway word not permitted", "go-around while a go-around is in force")
+            if in_force.altitude == words.altitude_no_level_off:
+                target = (None if step[ALTITUDE] in (UNCHANGED, words.altitude_no_level_off)
+                          else words.altitude_m(step[ALTITUDE]))
+                if target is None or target <= altitude_m + words.altitude_tolerance_m(step[ALTITUDE]):
+                    raise Ungrammatical("go-around without a level above",
+                                        f"\"no level-off\" in force at {altitude_m:.0f} m (rule 6)")
             after = replace(after, go_around=True)
         elif runway != UNCHANGED:
             if not 0 <= runway < n_candidates:

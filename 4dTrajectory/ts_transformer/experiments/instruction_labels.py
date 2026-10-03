@@ -49,7 +49,7 @@ def _label(flights: list[Any], spec_data: dict[str, Any], geometry_data: dict[st
                             {"dataset_id": flight.dataset_id, "airport": flight.airport,
                              "status": "refused", "reason": refusal.reason, "detail": refusal.detail}))
             continue
-        record = flight_record(reading)
+        record = flight_record(reading, words)
         reading.checks = {}
         results.append(("labelled", reading, record))
     return results
@@ -79,15 +79,17 @@ def render(summary: dict[str, Any], spec: VocabularySpec) -> str:
     def group_rows(title: str, groups: dict[str, dict[str, Any]]) -> list[str]:
         out = ["", f"### {title}", "",
                "| 组 | 架次 | 每架指令 均值 / p95 | 跑道 | 航向 | 高度 | 下降角 | 速度 | 非沉默步 | 截获前转过的角度 p50 / p95 | "
-               "在入口处截断 | 复飞（架次 / 词） |",
-               "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+               "在入口处截断 | 复飞（架次 / 词） | 复飞时生效：不改平 / 未指定速度 / 该进近有截获 / 之后换跑道 |",
+               "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for name, g in groups.items():
             w, t = g["words_per_flight"], g["turning_deg"]
             out.append(f"| {name} | {g['flights']} | {_fmt(g['instructions_per_flight'].get('mean'))} / "
                        f"{_fmt(g['instructions_per_flight'].get('p95'), 0)} | "
                        + " | ".join(_fmt(w[c].get("mean"), 2) for c in ("runway", "heading", "altitude", "angle", "speed"))
                        + f" | {_pct(g['non_silent_step_share'])} | {_fmt(t.get('p50'), 0)} / {_fmt(t.get('p95'), 0)} | "
-                       f"{_pct(g['cut_at_crossing_share'])} | {g['go_arounds']['flights']} / {g['go_arounds']['words']} |")
+                       f"{_pct(g['cut_at_crossing_share'])} | {g['go_arounds']['flights']} / {g['go_arounds']['words']} | "
+                       + " / ".join(str(g['go_arounds'][k]) for k in ("no_level_off", "unspecified", "captured", "other_runway"))
+                       + " |")
         return out
 
     def envelope_rows(title: str, groups: dict[str, dict[str, Any]]) -> list[str]:

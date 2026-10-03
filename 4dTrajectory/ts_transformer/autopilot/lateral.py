@@ -1,5 +1,6 @@
-"""The lateral law (design §5.4; executor design §4.1): a heading word, and the go-around's course. Nothing else — no
-capture, no turn onto the final, no centreline tracking (D2, D3, D9): the words fly the aircraft onto the final.
+"""The lateral law (design §5.4; executor design §4.1): a heading word. Nothing else — no capture, no turn onto the
+final, no centreline tracking (D2, D3, D9): the words fly the aircraft onto the final, and "go-around" changes no
+heading target (D27): the word in force stays, and the model turns the aircraft with heading words as at every row.
 
 Every law here returns a compass TRACK RATE for the inverse (`autopilot.inverse.attitude`) to fly, within the
 vocabulary's turn rates and under its bank limit (the executor takes nothing beyond the vocabulary, the user's rule
@@ -16,10 +17,7 @@ of 2026-09-24):
   know a word is a turn's last); up to the vocabulary's largest turn rate ``r_max`` (the bank limit binds first in the
   inverse at most speeds). The error ``e`` is measured from the word in force: a new word turns ``wrap180(θ_new −
   θ_old)`` further than the old one, so a turn said word by word keeps its way even while the aircraft lags it; the
-  first word turns the shorter way;
-- a go-around (§3.2, D10) flies the course of R until a heading word is said at or after the go-around's step; that
-  word, and every one after it while the go-around is in force, is measured from the track when it is heard (the
-  shorter way round). The go-around's own turn onto the course is the executor's: ``e / τ_ψ`` (`rate_for_error`).
+  first word turns the shorter way.
 
 Positions are the airport frame's (`autopilot.frame`), the runway geometry the artefact's candidates.
 """
@@ -59,15 +57,6 @@ def word_rate(error_deg: torch.Tensor, to_go_s: torch.Tensor, speed_mps: torch.T
     rate = torch.minimum((error_deg / to_go_s.clamp(min=2.0 * params.cycle_s)).abs(),
                          stopping_rate_deg_s(error_deg, speed_mps, params))
     return torch.sign(error_deg) * rate.clamp(max=spec.turn_rate_max_deg_s)
-
-
-def rate_for_error(error_deg: torch.Tensor, params: ExecutorParams, spec: VocabularySpec) -> torch.Tensor:
-    """The compass track rate, deg/s, of the executor's OWN turn that takes out a heading error of ``error_deg``
-    (target − track) — the go-around's course: ``e / τ_ψ`` within the vocabulary's largest turn rate. It needs no
-    stopping limit (`stopping_rate_deg_s`): ``e / τ_ψ`` exceeds the stopping rate only past ``e = 2 g p τ_ψ² / V``,
-    where it asks for a bank of ``tan φ > 2 p τ_ψ`` — beyond the vocabulary's bank limit, which binds first, as long as
-    ``2 p τ_ψ ≥ tan φ_max`` (`derive.stopping_roll_rate_deg_s`; the spec runner refuses a slower p)."""
-    return (error_deg / params.heading_time_constant_s).clamp(-spec.turn_rate_max_deg_s, spec.turn_rate_max_deg_s)
 
 
 @dataclass(frozen=True)
@@ -136,14 +125,10 @@ class Lateral:
         self.last_track = torch.zeros(batch, dtype=torch.float64, device=device)
 
     def word_error(self, state: Kinematics, relative_deg: torch.Tensor, issued: torch.Tensor, course_deg: torch.Tensor,
-                   flying_course: torch.Tensor, go_around: torch.Tensor, time_s: float | torch.Tensor,
-                   fresh: torch.Tensor | None = None) -> torch.Tensor:
+                   time_s: float | torch.Tensor, fresh: torch.Tensor | None = None) -> torch.Tensor:
         """The heading word's error, degrees: a NEW word (``issued`` changed) is converted with ``course_deg`` (the course
-        of R now) and its target unwrapped from the word before it; its hearing time is ``time_s``. A go-around flying
-        the course (``flying_course``), not the word, anchors the word's target again at the track meanwhile, and a word
-        said while ``go_around`` is in force is anchored at the track when it is heard: a word after the go-around is
-        measured from where the aircraft is. ``fresh`` (a multi-aircraft batch): the flights at their own first cycle,
-        anchored as the batch's first cycle anchors."""
+        of R now) and its target unwrapped from the word before it; its hearing time is ``time_s``. ``fresh`` (a
+        multi-aircraft batch): the flights at their own first cycle, anchored as the batch's first cycle anchors."""
         heard = torch.remainder(course_deg + relative_deg, 360.0)
         if self.word_deg is None:
             self.track_unwrapped = state.track_deg.clone()
@@ -154,11 +139,8 @@ class Lateral:
             self.track_unwrapped = self.track_unwrapped + wrap180(state.track_deg - self.last_track)
             new = issued != self.word_step
             word = torch.where(new, heard, self.word_deg)
-            self.heard_s = torch.where(new | flying_course, time_s, self.heard_s)
+            self.heard_s = torch.where(new, time_s, self.heard_s)
             self.target_unwrapped = torch.where(new, self.target_unwrapped + wrap180(word - self.word_deg),
-                                                self.target_unwrapped)
-            self.target_unwrapped = torch.where(flying_course | (go_around & new),
-                                                self.track_unwrapped + wrap180(word - state.track_deg),
                                                 self.target_unwrapped)
             if fresh is not None and bool(fresh.any()):
                 word = torch.where(fresh, heard, word)
@@ -170,18 +152,10 @@ class Lateral:
         return self.target_unwrapped - self.track_unwrapped
 
     def rate(self, state: Kinematics, relative_deg: torch.Tensor, issued: torch.Tensor, runway: torch.Tensor,
-             go_around: torch.Tensor, runway_issued: torch.Tensor, runways: Runways, time_s: float | torch.Tensor, *,
-             fresh: torch.Tensor | None = None) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        """The track rate for this cycle, and what the law did (``flying_course``: a go-around on R's course);
-        ``issued`` is the step the heading word in force was written at, ``runway`` the runway in force, ``go_around``
-        the go-around state and ``runway_issued`` the step the runway column's last word (the go-around, while one is
-        in force) was written at; ``time_s`` the time flown."""
+             runways: Runways, time_s: float | torch.Tensor, *, fresh: torch.Tensor | None = None) -> torch.Tensor:
+        """The track rate for this cycle; ``issued`` is the step the heading word in force was written at, ``runway``
+        the runway in force, ``time_s`` the time flown."""
         course = runways.pointed(runway)[2]
-        # a go-around flies the course until a heading word is said at or after its step (module docstring)
-        flying_course = go_around & (issued < runway_issued)
-        error = self.word_error(state, relative_deg, issued, course, flying_course, go_around, time_s, fresh)
-        error = torch.where(flying_course, wrap180(course - state.track_deg), error)
+        error = self.word_error(state, relative_deg, issued, course, time_s, fresh)
         to_go = self.heard_s + self.spec.heading_lead_s - time_s
-        rate = torch.where(flying_course, rate_for_error(error, self.params, self.spec),
-                           word_rate(error, to_go, state.ground_speed_mps, self.params, self.spec))
-        return rate, {"flying_course": flying_course}
+        return word_rate(error, to_go, state.ground_speed_mps, self.params, self.spec)

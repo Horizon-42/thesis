@@ -80,12 +80,14 @@ def sentence_on_interval(reading: Reading, signals: FlightSignals, interval_s: f
     heights the labeller checked its words at; its words as instructions on the new rows."""
     step_s = words.spec.step_s
     first = first_interval_row(signals.entry_time_utc, interval_s, step_s)
-    grid = on_interval(reading.words, first, interval_s, step_s, reading.held_altitude_m, words, len(geometry.candidates))
-    course = geometry.candidates[reading.runway_index].course_deg
+    courses = [candidate.course_deg for candidate in geometry.candidates]
+    grid = on_interval(reading.words, first, interval_s, step_s, reading.held_altitude_m, words, courses)
+    # the runway in force at each row: a heading word is heard with its row's (the runway column comes first)
+    runway = grid[np.maximum.accumulate(np.where(grid[:, RUNWAY] >= 0, np.arange(len(grid)), 0)), RUNWAY]
     instructions = []
     for row, column in zip(*np.nonzero(grid != UNCHANGED)):
         value = int(grid[row, column])
-        info = {"target_deg": words.heading_track_deg(value, course)} if column == HEADING else {}
+        info = {"target_deg": words.heading_track_deg(value, courses[runway[row]])} if column == HEADING else {}
         instructions.append(Instruction(int(column), value, int(row), "said", info))
     return Sentence(grid=grid, instructions=instructions, first_row=first)
 

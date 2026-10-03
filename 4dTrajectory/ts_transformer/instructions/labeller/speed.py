@@ -11,6 +11,10 @@ pilot's own ("unspecified"), unless a hold of at least `unspecified_plateau_s` e
 after that row and `unspecified_distance_m` or more before the threshold (ATC may assign a
 speed until 5 NM, 5-7-1 b.4): then the words run on until the last such hold ends. A change of
 speed under way there, begun less than a minimum hold before, is the pilot's own already.
+
+A flight with go-arounds has one reading per approach (D26, `read_speed` on each approach's rows: from row 0 or the
+go-around row before it to the next go-around row or the end), with that approach's capture row and runway. An approach
+that ends at a go-around row outside the corridor has no capture row: its words run to its end, none "unspecified".
 """
 
 from __future__ import annotations
@@ -47,7 +51,7 @@ class SpeedPiece:
 class SpeedReading:
     instructions: list[Instruction]
     pieces: list[SpeedPiece]
-    unspecified_row: int
+    unspecified_row: int | None     # None: no capture row, nothing "unspecified"
 
 
 def speed_pieces(time: np.ndarray, speed: np.ndarray, spec: VocabularySpec, words: Words) -> list[SpeedPiece]:
@@ -83,23 +87,27 @@ def _groups(pieces: list[SpeedPiece]) -> list[list[SpeedPiece]]:
     return groups
 
 
-def read_speed(time: np.ndarray, speed: np.ndarray, before_threshold_m: np.ndarray, capture_row: int,
+def read_speed(time: np.ndarray, speed: np.ndarray, before_threshold_m: np.ndarray, capture_row: int | None,
                spec: VocabularySpec, words: Words) -> SpeedReading:
+    """One approach's speed words (module docstring), rows from 0; ``capture_row`` None: the approach has none."""
     pieces = speed_pieces(time, speed, spec, words)
     groups = _groups(pieces)
-    minimum_plateau = spec.rows(spec.unspecified_plateau_s)
-    kept = [g[0] for g in groups
-            if g[0].kind == HOLD and g[0].stop - 1 >= capture_row and g[0].rows >= minimum_plateau
-            and before_threshold_m[g[0].stop - 1] >= spec.unspecified_distance_m]
-    unspecified_row = kept[-1].stop if kept else capture_row
-    # a change of speed already under way at that row, begun less than a minimum hold before
-    # it, is the pilot's own speed too: "unspecified" from where it began
-    for group in groups:
-        first = group[0]
-        if (first.kind == TRANSITION and first.start < unspecified_row <= group[-1].stop - 1
-                and unspecified_row - first.start < spec.rows(spec.speed_min_hold_s)):
-            unspecified_row = first.start
-            break
+    if capture_row is None:
+        unspecified_row = len(speed)
+    else:
+        minimum_plateau = spec.rows(spec.unspecified_plateau_s)
+        kept = [g[0] for g in groups
+                if g[0].kind == HOLD and g[0].stop - 1 >= capture_row and g[0].rows >= minimum_plateau
+                and before_threshold_m[g[0].stop - 1] >= spec.unspecified_distance_m]
+        unspecified_row = kept[-1].stop if kept else capture_row
+        # a change of speed already under way at that row, begun less than a minimum hold before
+        # it, is the pilot's own speed too: "unspecified" from where it began
+        for group in groups:
+            first = group[0]
+            if (first.kind == TRANSITION and first.start < unspecified_row <= group[-1].stop - 1
+                    and unspecified_row - first.start < spec.rows(spec.speed_min_hold_s)):
+                unspecified_row = first.start
+                break
 
     def target_word(value_mps: float) -> int:
         try:
@@ -125,10 +133,12 @@ def read_speed(time: np.ndarray, speed: np.ndarray, before_threshold_m: np.ndarr
             target_index = following[0].target_index
         elif following is not None:          # the direction reverses without a hold
             target_index = target_word(float(speed[group[-1].stop - 1]))
-        else:                                # the run carries on into the unspecified speed
+        else:                                # the run carries on into the unspecified speed, or to the end
             target_index = target_word(float(speed[unspecified_row - 1]))
         instructions.append(Instruction(SPEED, target_index, first.start, kind,
                                         {"target_mps": words.speed_mps(target_index)}))
+    if capture_row is None:
+        return SpeedReading(instructions=instructions, pieces=pieces, unspecified_row=None)
     instructions.append(Instruction(SPEED, words.speed_unspecified, unspecified_row,
                                     "initial" if unspecified_row == 0 else "unspecified"))
     return SpeedReading(instructions=instructions, pieces=pieces, unspecified_row=unspecified_row)

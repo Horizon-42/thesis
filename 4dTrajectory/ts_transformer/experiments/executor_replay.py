@@ -48,7 +48,7 @@ from ts_transformer.data.lateral_eligibility import default_evaluation_report_pa
 from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
 from ts_transformer.inference.forecast import Forecast
 from ts_transformer.instructions.artefact import SPLITS
-from ts_transformer.instructions.readout import STRATA, flight_record
+from ts_transformer.instructions.readout import STRATA, stratum
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.outputs.envelope import control_contract
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state
@@ -201,7 +201,7 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
             reading = part.readings[j]
             rows.append({
                 "dataset_id": reading.dataset_id, "flight_key": series.scenario.source["flight_key"],
-                "airport": reading.airport, "group": part.groups[j], "stratum": flight_record(reading)["stratum"],
+                "airport": reading.airport, "group": part.groups[j], "stratum": stratum(reading),
                 "kind": KINDS[part.sentences[j].go_arounds > 0], "first_row": part.sentences[j].first_row,
                 "outcome": verdict.outcome, "flew_the_sentence": verdict.flew_the_sentence,
                 "crossing": verdict.crossing, "words": None if counted is None else counted[0],

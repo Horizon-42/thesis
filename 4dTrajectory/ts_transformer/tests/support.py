@@ -141,6 +141,23 @@ def instruction_flight(e, n, altitude, track, speed, dataset_id="KXXX:test", spl
                          altitude, track, speed, np.gradient(altitude, INSTRUCTION_STEP_S))
 
 
+#: `parallel_airport`'s second runway, north of 09: how far, metres.
+PARALLEL_SPACING_M = 891.0
+
+
+def parallel_airport():
+    """`instruction_airport` with a parallel runway "09L" `PARALLEL_SPACING_M` north of "09" (candidate 0), the same
+    threshold position along the course and the same elevation."""
+    from ts_transformer.instructions.airport import AirportGeometry
+
+    ends = [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0},
+            {"ident": "09L", "threshold_e_m": 0.0, "threshold_n_m": PARALLEL_SPACING_M, "course_deg": 90.0}]
+    return AirportGeometry.from_dict({
+        "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": 100.0},
+        "candidates": [{**end, "elevation_m": 100.0, "length_m": 3000.0} for end in ends], "runway_ends": ends,
+    })
+
+
 def signal_attitudes(_directory, signals):
     """`training_attitude.observed_attitudes` for synthetic flights, which have no arrival manifest to rebuild a series
     from: each one's heading and path angle read off its signals, its bank and attack those of a flight with no airframe

@@ -8,6 +8,11 @@
    interval cancel). In the runway column the word in force is the column's last word, "go-around" included.
 3. The first Δ row says the five words in force there; a sentence in a go-around at its first Δ row cannot say a
    runway there and is refused. The grammar (`instructions.grammar`) is checked again on the Δ rows, at their altitude.
+4. A heading word is relative to the course of R when it is heard, and keeps its track until the next one (§3.3).
+   Where R changes course, the Δ rows can say another track than the step rows: a heading word said before the runway
+   word and heard with it at one Δ row, or a word of the value in force said under the new course that the Δ rows do
+   not say again. A sentence where a Δ row's word says another track than the word in force on the step rows is
+   refused.
 
 Δ must be a whole number of steps and divide the prior's 16 s observation (D25: Δ = 2, 4, 8 s; 6 s is refused); at
 Δ = the step the sentence comes back unchanged.
@@ -16,13 +21,14 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Sequence
 
 import numpy as np
 
 from ts_transformer.data.day_split import parse_utc
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.labeller.sentence import check_grammar
-from ts_transformer.instructions.words import RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
+from ts_transformer.instructions.words import HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
 
 
 #: The prior's observation before its first predicted step, s (design §2, `N_LOOK` = 8 rows at 2 s): every Δ divides it,
@@ -67,17 +73,32 @@ def in_force(grid: np.ndarray) -> np.ndarray:
 
 
 def on_interval(grid: np.ndarray, first_row: int, interval_s: float, step_s: float, altitude_m: np.ndarray,
-                words: Words, n_candidates: int) -> np.ndarray:
+                words: Words, courses_deg: Sequence[float]) -> np.ndarray:
     """``grid`` (a sentence on its ``step_s`` rows) on the Δ rows ``first_row``, ``first_row + Δ / step_s``, …: one
-    row each (module docstring); ``altitude_m`` the altitude the grammar is read at, one per ``step_s`` row."""
+    row each (module docstring); ``altitude_m`` the altitude the grammar is read at, one per ``step_s`` row;
+    ``courses_deg`` the candidates' courses."""
     every = interval_rows(interval_s, step_s)
     rows = np.arange(first_row, len(grid), every)
     if len(rows) == 0:
         raise Refused("too short", f"no row on the {interval_s:g} s grid")
-    held = in_force(np.asarray(grid))[rows]
+    grid = np.asarray(grid)
+    held = in_force(grid)[rows]
     if held[0, RUNWAY] == RUNWAY_GO_AROUND:
         raise Refused("go-around at the first row", f"row {first_row} on the {interval_s:g} s grid")
     out = np.where(np.vstack([np.ones((1, held.shape[1]), dtype=bool), held[1:] != held[:-1]]), held, UNCHANGED)
     out = out.astype(np.int16)
-    check_grammar(out, np.asarray(altitude_m)[rows], words, n_candidates)
+    # item 4: the track each Δ row's heading word says when heard there (a word not said again keeps the track it was
+    # heard with) against the track the word in force says on the step rows
+    runway = grid[np.maximum.accumulate(np.where(grid[:, RUNWAY] >= 0, np.arange(len(grid)), 0)), RUNWAY]
+    said = np.maximum.accumulate(np.where(grid[:, HEADING] != UNCHANGED, np.arange(len(grid)), 0))
+    heading = in_force(grid)[:, HEADING]
+    heard = None
+    for position, row in enumerate(rows):
+        if out[position, HEADING] != UNCHANGED:
+            heard = courses_deg[runway[row]] + words.heading_relative_deg(int(out[position, HEADING]))
+        meant = courses_deg[runway[said[row]]] + words.heading_relative_deg(int(heading[row]))
+        if abs((heard - meant + 180.0) % 360.0 - 180.0) > 1e-9:
+            raise Refused("heading word across a runway change",
+                          f"row {row}: heard as {heard % 360.0:.1f}°, said as {meant % 360.0:.1f}° at row {said[row]}")
+    check_grammar(out, np.asarray(altitude_m)[rows], words, len(courses_deg))
     return out

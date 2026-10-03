@@ -1,8 +1,9 @@
 """Executor E7: write the executor's spec (design §5, §14.2 A6; executor design §9–§10).
 
 The executor takes no information beyond the vocabulary (the user's rule, 2026-09-24) and the procedure standards:
-method A (`autopilot/derive.py`) sets τ_ψ = the heading lead; the roll rate p is the standards' 5°/s (`ROLL_RATE_DEG_S`);
-the turn rates, the bank limit, the speed changes' pace and the level bands are the vocabulary's, read at run time; a
+the roll rate p is the standards' 5°/s (`ROLL_RATE_DEG_S`); the executor makes no turn of its own (D2, D27), so no
+time constant of one; the turn rates, the bank limit, the speed changes' pace and the level bands are the vocabulary's,
+read at run time; a
 word takes effect when it is said. The judge's decision-altitude check takes two tolerances the USER gives (design §5.8,
 O2): ``--decision-cone-share`` and ``--decision-glidepath-tolerance-m``, required, with no default; each candidate's
 published vertical path and decision altitude (read at replay, `runway_data.published_vertical_paths`) are recorded in
@@ -26,7 +27,7 @@ import platform
 from dataclasses import asdict
 from pathlib import Path
 
-from ts_transformer.autopilot import conformance, derive
+from ts_transformer.autopilot import conformance
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.runway_data import published_vertical_paths
 from ts_transformer.autopilot.sentence import CLOCKS
@@ -81,33 +82,21 @@ def main(argv: list[str] | None = None) -> int:
     executor, labeller = executor_source_sha256(), labeller_code_sha256()
     spec = load_spec(instructions)
 
-    tau, roll_rate = derive.heading_time_constant_s(spec, CYCLE_S), ROLL_RATE_DEG_S
-    floor = derive.stopping_roll_rate_deg_s(spec, tau)
-    if roll_rate < floor:
-        parser.error(f"the standards' roll rate {roll_rate:g}°/s is under {floor:.2f}°/s: with this vocabulary's bank limit "
-                     "and lead the executor's own turns would outrun their stopping rate (`derive.stopping_roll_rate_deg_s`)")
-    params = ExecutorParams(cycle_s=CYCLE_S, heading_time_constant_s=tau, bank_rate_deg_s=roll_rate,
+    params = ExecutorParams(cycle_s=CYCLE_S, bank_rate_deg_s=ROLL_RATE_DEG_S,
                             path_time_constant_s=PATH_TIME_CONSTANT_S, path_rate_factor=PATH_RATE_FACTOR,
                             timeout_factor=TIMEOUT_FACTOR, word_clock=args.word_clock,
                             decision_cone_share=args.decision_cone_share,
                             decision_glidepath_tolerance_m=args.decision_glidepath_tolerance_m)
     params.check(spec, spec.step_s)
-    print(f"method A (the vocabulary): τ_ψ {tau:g} s; the standards' roll rate p {roll_rate:g}°/s", flush=True)
+    print(f"the standards' roll rate p {ROLL_RATE_DEG_S:g}°/s", flush=True)
 
     if executor_source_sha256() != executor or labeller_code_sha256() != labeller:
         raise SystemExit("the executor's or the labeller's code changed while the spec was measured; measure again")
     measurements = {
-        "method_a": {
-            "heading_time_constant_s": {"value": tau, "rule": "heading_lead_s, the time a heading word gives to "
-                                                              "arrive — τ_ψ eases out the executor's own turns only; "
-                                                              "heading words arrive a lead after they are heard"},
-        },
         "from_the_standards": {
-            "bank_rate_deg_s": {"value": roll_rate, "rule": "the procedure standards' roll rate: FAA Order 8260.3G App. E "
-                                                            "Sec. 4 ¶6.a (up to 5°/s), ICAO Doc 8168 Vol II Part II Sec 4 "
-                                                            "Ch 1 1.3.9.1 (bank established in 5 s)",
-                                "floor_deg_s": floor, "floor_rule": "tan(turn_bank_max_deg) / (2 τ_ψ): the executor's own "
-                                                                    "turns stop within the bank limit"},
+            "bank_rate_deg_s": {"value": ROLL_RATE_DEG_S,
+                                "rule": "the procedure standards' roll rate: FAA Order 8260.3G App. E Sec. 4 ¶6.a (up to "
+                                        "5°/s), ICAO Doc 8168 Vol II Part II Sec 4 Ch 1 1.3.9.1 (bank established in 5 s)"},
         },
         "from_the_vocabulary": {"turn_rate_max_deg_s": spec.turn_rate_max_deg_s,
                                 "turn_bank_max_deg": spec.turn_bank_max_deg, "heading_lead_s": spec.heading_lead_s,

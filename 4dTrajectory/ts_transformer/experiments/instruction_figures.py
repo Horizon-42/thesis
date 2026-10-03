@@ -21,7 +21,7 @@ from ts_transformer.instructions.conformance import require_conforming_labeller
 from ts_transformer.instructions.figures import draw_flight
 from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.instructions.labeller.records import Refused
-from ts_transformer.instructions.readout import STRATA, flight_record
+from ts_transformer.instructions.readout import STRATA, stratum
 from ts_transformer.instructions.words import Words
 from ts_transformer.repo_layout import REPO_ROOT
 
@@ -52,10 +52,10 @@ def main(argv: list[str] | None = None) -> int:
             reading = read_flight(flight, geometries[flight.airport], spec, words)
         except Refused:
             continue
-        stratum = flight_record(reading)["stratum"]
-        if wanted[stratum]:
-            wanted[stratum] -= 1
-            chosen.append((stratum, flight, reading))
+        kind = stratum(reading)
+        if wanted[kind]:
+            wanted[kind] -= 1
+            chosen.append((kind, flight, reading))
         if not any(wanted.values()):
             break
     out.mkdir()

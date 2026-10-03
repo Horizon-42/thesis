@@ -247,8 +247,9 @@ def measure_final(flight: Admitted, spec: VocabularySpec, course_tolerance_deg: 
     lead = spec.rows_exact(spec.heading_lead_s)
     # the rows before the aligned final, each led into it by the track up to its first row
     before = max(stop, 1)
-    relative_track = smoothed.track_deg[: before + 1] - flight.candidate.course_deg
-    rows = {f"{step:g}": [float(sum(row < before for row, _ in per_step_words(relative_track, step, lead)) - 1)]
+    track = smoothed.track_deg[: before + 1]
+    course = np.full(len(track), flight.candidate.course_deg)
+    rows = {f"{step:g}": [float(sum(row < before for row, _ in per_step_words(track, course, step, lead)) - 1)]
             for step in grids}
     return arrays, rows
 

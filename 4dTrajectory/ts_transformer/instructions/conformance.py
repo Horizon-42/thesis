@@ -64,7 +64,9 @@ def labelled_record(reading: Reading) -> dict[str, Any]:
     """A labelled flight's record: the sentence's rows beside its words."""
     return {"dataset_id": reading.dataset_id, "status": "labelled", "runway_index": reading.runway_index,
             "capture_row": reading.capture_row, "unspecified_row": reading.unspecified_row,
-            "go_around_rows": list(reading.go_around_rows), "runway_again_rows": list(reading.runway_again_rows)}
+            "go_around_rows": list(reading.go_around_rows), "runway_again_rows": list(reading.runway_again_rows),
+            "approaches": [[a.first, a.end, a.runway_index, a.capture_row, a.unspecified_row]
+                           for a in reading.approaches]}
 
 
 def refused_record(dataset_id: str, refusal: Refused) -> dict[str, Any]:

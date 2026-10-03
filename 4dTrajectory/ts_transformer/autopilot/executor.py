@@ -54,8 +54,8 @@ from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, RUNWAY, 
 #: Every limit the cycle can meet (§8.1), in the order they are applied.
 LIMITS = ("bank_cap", "bank_rate", "load_factor", "path_rate_limited", "stall_floor", "thrust_max", "thrust_min",
           "stall")
-#: What the laws were doing each cycle: the go-around state, its course flown, a level captured.
-MODES = ("go_around", "flying_course", "level_captured")
+#: What the laws were doing each cycle: the go-around state, a level captured.
+MODES = ("go_around", "level_captured")
 #: The time a go-around adds to its flight's limit (design §5.8; multi-aircraft design §6.6 step 8, the user 2026-10-02).
 GO_AROUND_EXTRA_S = 900.0
 
@@ -149,7 +149,7 @@ class Executor:
         """Every per-flight quantity a cycle changes (the state, the bank, each law's `PER_FLIGHT`), as it is now."""
         out: list[tuple[Any, str, torch.Tensor | None]] = [(self, "state", self.state), (self, "bank", self.bank),
                                                             (self, "runway_issued", self.runway_issued)]
-        for law in (self.lateral, self.vertical):
+        for law in (self.lateral, self.vertical, self.speed):
             out += [(law, name, getattr(law, name)) for name in law.PER_FLIGHT]
         return out
 
@@ -187,15 +187,16 @@ class Executor:
         self.runway_issued = issued.clone()
         if bool(heard_go_around.any()):
             self.extend_time_limit(torch.where(heard_go_around, GO_AROUND_EXTRA_S, 0.0).to(self.time_limit_s.dtype))
-        track_rate, lateral_modes = self.lateral.rate(now, force.heading_rel_deg, force.issued_step[:, HEADING],
-                                                      force.runway, force.go_around, issued, self.runways, time_s,
-                                                      fresh=fresh)
+        self.speed.hear_go_around(heard_go_around, now)
+        track_rate = self.lateral.rate(now, force.heading_rel_deg, force.issued_step[:, HEADING], force.runway,
+                                       self.runways, time_s, fresh=fresh)
         e0, n0, course, elevation, landing_limit = self.runways.pointed(force.runway)
         before, right, _off_course = relative(now, e0, n0, course)
         gamma_rate, gamma_wanted, vertical_modes = self.vertical.rate(now, force.altitude_m, force.no_level_off,
                                                                       force.angle_class, force.angle_deg,
                                                                       force.issued_step[:, [ALTITUDE, ANGLE]],
-                                                                      force.go_around)
+                                                                      force.go_around, self.inputs.aero_params,
+                                                                      self.inputs.max_thrust_n)
         attitude = inverse.attitude(now, track_rate, gamma_rate, self.bank,
                                     bank_cap_rad=math.radians(self.words.spec.turn_bank_max_deg),
                                     bank_rate_rad_s=bank_rate, cycle_s=params.cycle_s)
@@ -207,7 +208,7 @@ class Executor:
         command = torch.stack((thrust.fraction, self.bank, attitude.load_factor), dim=1)
         self.state = self.plant.step(self.state, command, params.cycle_s)
         limits = {**attitude.binds, **thrust.binds, **speed_modes, "path_rate_limited": vertical_modes["path_rate_limited"]}
-        modes = {"go_around": force.go_around.clone(), **lateral_modes, "level_captured": vertical_modes["level_captured"]}
+        modes = {"go_around": force.go_around.clone(), "level_captured": vertical_modes["level_captured"]}
         if frozen is not None and bool(frozen.any()):
             for owner, name, value in held:
                 after = getattr(owner, name)

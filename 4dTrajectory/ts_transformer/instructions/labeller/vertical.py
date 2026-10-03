@@ -11,6 +11,12 @@ whose word is the altitude word in force — a move between two heights that rou
 be said (§3.4). Two levels that meet with no move between them are a STEP: the altitude left the first level inside the
 fitted pieces; its word is issued at the first level's last row, its angle read over the rows from there to where the
 second level's target is met.
+
+A flight with go-arounds is read approach by approach (D26, §4.6). Each go-around's climb is the first climb — a
+climbing run, or a step up — still under way at its lowest point (`climb_after`); the GO-AROUND ROW is the row the climb
+is said at, its level word and its climb word in that row. An approach ends there, so the descent run straight before
+that climb is the last descent that reaches the end of its approach and says "no level-off", as the last run before
+the threshold does.
 """
 
 from __future__ import annotations
@@ -52,6 +58,8 @@ class VerticalPiece:
 class VerticalReading:
     instructions: list[Instruction]
     pieces: list[VerticalPiece]
+    #: Each go-around's row, in the order of the lowest points given (module docstring).
+    go_around_rows: list[int]
 
 
 def vertical_pieces(distance: np.ndarray, altitude: np.ndarray, spec: VocabularySpec, words: Words) -> list[VerticalPiece]:
@@ -99,10 +107,41 @@ def _runs(pieces: list[VerticalPiece], spec: VocabularySpec) -> list[list[Vertic
     return groups
 
 
-def read_vertical(distance: np.ndarray, altitude: np.ndarray, spec: VocabularySpec, words: Words) -> VerticalReading:
+def _climb_start(groups: list[list[VerticalPiece]], position: int, spec: VocabularySpec) -> tuple[int, int] | None:
+    """``(row said, last row climbing)`` of the climb group ``position`` starts — a climbing run, or a level stepping up
+    from the level before it (`_step`'s row) — or None when it starts none."""
+    group = groups[position]
+    if group[0].kind == MOVE:
+        return None if group[0].descending(spec) else (group[0].start, group[-1].stop - 1)
+    previous = groups[position - 1][0] if position else None
+    if previous is None or previous.kind != LEVEL or group[0].target_index <= previous.target_index:
+        return None
+    return previous.stop - 1, group[0].start
+
+
+def climb_after(groups: list[list[VerticalPiece]], point: int, before: int, spec: VocabularySpec) -> int:
+    """The group of the go-around climb from the lowest point ``point``: the first climb (`_climb_start`) still under way
+    at ``point``, said before row ``before`` (the next go-around's lowest point, or the end); refused when there is
+    none."""
+    for position in range(len(groups)):
+        climb = _climb_start(groups, position, spec)
+        if climb is not None and climb[1] >= point and climb[0] < before:
+            return position
+    raise Refused("go-around without a climb word", f"no climb after the lowest point at row {point}")
+
+
+def read_vertical(distance: np.ndarray, altitude: np.ndarray, spec: VocabularySpec, words: Words,
+                  go_around_points: list[int]) -> VerticalReading:
+    """The altitude and angle words; ``go_around_points`` each go-around's lowest point, in row order (module
+    docstring)."""
     pieces = vertical_pieces(distance, altitude, spec, words)
     groups = _runs(pieces, spec)
-    reading = VerticalReading(instructions=[], pieces=pieces)
+    bounds = [*go_around_points[1:], len(altitude)]
+    climbs = [climb_after(groups, point, before, spec) for point, before in zip(go_around_points, bounds)]
+    # the last descent of each approach that ends at a go-around row: the run straight before its climb
+    final_descents = {position - 1 for position in climbs
+                      if position and groups[position - 1][0].kind == MOVE and groups[position - 1][0].descending(spec)}
+    reading = VerticalReading(instructions=[], pieces=pieces, go_around_rows=[])
     in_force_angle: int | None = None
     in_force_altitude: int | None = None
     for position, group in enumerate(groups):
@@ -129,6 +168,8 @@ def read_vertical(distance: np.ndarray, altitude: np.ndarray, spec: VocabularySp
         if following is None:
             if not descending:
                 raise Refused("climbing at the end", f"{altitude[-1] - altitude[first.start]:+.0f} m over the last run")
+            target_index = words.altitude_no_level_off
+        elif position in final_descents:
             target_index = words.altitude_no_level_off
         elif following[0].kind == LEVEL:
             target_index = following[0].target_index
@@ -158,6 +199,14 @@ def read_vertical(distance: np.ndarray, altitude: np.ndarray, spec: VocabularySp
                     ANGLE, angle_class, piece.start, "initial" if piece.start == 0 else "angle",
                     {"angle_deg": piece.angle_deg}))
                 in_force_angle = angle_class
+    for position in climbs:
+        row = _climb_start(groups, position, spec)[0]
+        said = [item for item in reading.instructions if item.row == row]
+        level = any(item.column == ALTITUDE for item in said)
+        climb = any(item.column == ANGLE and item.value == words.angle_climb for item in said)
+        if not (level and climb):
+            raise Refused("go-around without a climb word", f"the climb at row {row} says no level and climb there")
+        reading.go_around_rows.append(row)
     return reading
 
 
