@@ -43,19 +43,22 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D15 | The spec measurement gives each value that it fits from data with rounder candidates and the fit that each leaves; the user chooses (§3.5) | Decided | User, 2026-10-03 |
 | D16 | The prior has no row position embedding and no input "time from row 0". The time attention uses RoPE with the row's time in seconds (§6.1) | Decided (was the first half of O4) | User, 2026-10-03 |
 | D17 | Every column keeps the input "time since this column said its word in force", in seconds; the runway column's too (§6.1) | Decided (was O4) | User, 2026-10-03 |
+| D18 | The labeller reads the real go-arounds inside a sentence and says "go-around" at the go-around point (§4.6) | Decided (was O5) | User, 2026-10-03 |
+| D19 | After a labelled go-around, the runway word that ends G is at the first level-off after the go-around climb, and not later than the row of the next "no level-off" (§4.6) | Decided | User, 2026-10-03 |
+| D20 | This design is a new version: it is developed on a new branch in a new worktree. Artefacts `v1`–`v6`, the executor specs and every prior are superseded and are not kept readable. The running experiments keep their own checkouts | Decided | User, 2026-10-03 |
 
 ### 0.2 Open items, in the order of discussion
 
 | # | Item | Proposal | §  |
 |---|---|---|---|
 | O2 | Tolerances of the stability check at the decision altitude (DA) | No values in this document (D7) | 5.8 |
-| O5 | Label the real go-arounds (R40 found 105 on the training days) | Discuss after O2 and O4 | 4.6 |
 | O6 | Replacement for the clearance mask of the multi-aircraft loop | Discuss with §8 | 8 |
 | O7 | Selection of designs by leave-one-airport-out (train on four airports, read the fifth) | Discuss with §7 | 7 |
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
 | O9 | Finer grids near the runway course and near the glidepath angle | Decided by D6: measure first | 3.3, 3.5 |
 | O10 | The row intervals of the ablation and how to compare them | Proposal: 2, 4, 6, 8 s. Criteria by the user after the design is settled (D7) | 4.8 |
 | O12 | Climb classes: keep one, add more, or set the climb to the missed-approach gradient | Proposal: keep one climb class; its value from the measurement with D15; a second class only if the climb angles have two clear groups | 3.5 |
+| O13 | Which data and code identities (hashes) the new version keeps | Under evaluation with the user (the user, 2026-10-03: some are too strict) | 4.7, 5 |
 
 ### 0.3 Implementation
 
@@ -364,12 +367,31 @@ row (D4). The two exceptions stay, with the new anchor:
 2. A deceleration that started less than 20 s before that row is already the pilot's speed. "Unspecified" starts where
    it started.
 
-### 4.6 Go-around words
+### 4.6 Go-around words (D18, D19)
 
-The labelled data has no go-around: the arrival slice keeps only the last approach, and the labeller refuses a flight
-that crosses and comes back. Thus the prior gives the word a probability near zero (approximately 1e−11 in the 9.4
-readouts). O5 asks if the labeller must read the real go-arounds (R40 v2 found 105 on the training days). That needs a
-slice that includes the second approach (median 421 s from the go-around to the next turn onto the final).
+**The data.** R40 v2 (`go_around_census`, readout `readouts/2026-10-01_go_arounds.zh.md` §3) found 109 go-arounds on the
+training days. In 73 of them the go-around point is inside a labelled sentence of `v5`: `instruction-v3` read the first
+approach and the climb as heading and altitude words, and put the clearance at the second capture. In 11 more the
+point is inside the arrival slice, but the labeller refused the flight. In 23 the go-around point is before the sentence
+(the aircraft left 25 km; the slice starts at its return). Without a go-around word the prior gives the word a
+probability of approximately 1e−11 (the 9.4 readouts).
+
+**The reading.**
+
+1. The labeller finds a go-around with the rule of R40: a low pass on the final of a runway end, down from a level held
+   for 20 s at least 150 m higher, then up to a level held for 20 s at least 150 m higher. The rule moves from the runner
+   into `instructions/labeller/` (the labeller cannot import a runner), with its tests.
+2. The go-around row is the row of the lowest point. The runway column says "go-around" there; G becomes true.
+3. The climb after it is read as altitude and angle words, as every climb. While G is true the executor flies it at
+   the missed-approach gradient (§5.5); the observed climbs are steeper (median 9.3 %), inside the climb class's range.
+4. The runway word that ends G (D19): at the first level-off after the go-around climb, and not later than the row of
+   the next "no level-off" (rule 5). It says the runway on which the flight landed.
+5. A flight that the labeller refused only because it crossed a threshold and came back is read again with this rule.
+
+**Not in this version.** The 23 go-arounds before their sentence need a longer arrival slice, and 9 sentences of `v5`
+end at a low go-around that the harvest took for the landing (it takes the best-aligned crossing under 100 m, not the
+last; R40 v2 §5). Both are changes of the harvest or of the data plane, which other lines (evaluation, the optimizer,
+the one-tier models) share.
 
 ### 4.7 Assembly and artefact
 
