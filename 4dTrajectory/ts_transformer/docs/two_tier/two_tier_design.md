@@ -46,6 +46,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D18 | The labeller reads the real go-arounds inside a sentence and says "go-around" at the go-around point (§4.6) | Decided (was O5) | User, 2026-10-03 |
 | D19 | After a labelled go-around, the runway word that ends G is at the first level-off after the go-around climb, and not later than the row of the next "no level-off" (§4.6) | Decided | User, 2026-10-03 |
 | D20 | This design is a new version: it is developed on a new branch in a new worktree. Artefacts `v1`–`v6`, the executor specs and every prior are superseded and are not kept readable. The running experiments keep their own checkouts | Decided | User, 2026-10-03 |
+| D21 | Identities bind format and data rules only. A code identity is a behaviour check on fixed inputs, never a hash of source bytes; data are identified by their flights, never by the bytes of a manifest (§9.2) | Decided (was O13) | User, 2026-10-03 |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -58,25 +59,25 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | O9 | Finer grids near the runway course and near the glidepath angle | Decided by D6: measure first | 3.3, 3.5 |
 | O10 | The row intervals of the ablation and how to compare them | Proposal: 2, 4, 6, 8 s. Criteria by the user after the design is settled (D7) | 4.8 |
 | O12 | Climb classes: keep one, add more, or set the climb to the missed-approach gradient | Proposal: keep one climb class; its value from the measurement with D15; a second class only if the climb angles have two clear groups | 3.5 |
-| O13 | Which data and code identities (hashes) the new version keeps | Under evaluation with the user (the user, 2026-10-03: some are too strict) | 4.7, 5 |
 
 ### 0.3 Implementation
 
 | Part | State |
 |---|---|
-| Vocabulary spec, words, grammar (`instructions/`) | Not started |
-| Labeller (`instructions/labeller/`) | Not started |
-| Executor and judge (`autopilot/`) | Not started |
-| Prior, post-training, multi-aircraft | Outline only (§6–§8) |
+| Stage A: vocabulary, labeller, identities, executor, judge, replay (§14.2) | Not started. Another agent implements and reviews; Claude checks the result (§14.6) |
+| Stage B: prior (§14.3) | Not started; outline |
+| Stage C: post-training and multi-aircraft (§14.4) | Not started; outline |
+| Stage D: frontend and backend (§14.5) | Not started; outline |
 
 ### 0.4 Plan
 
-1. Settle the open items (§0.2) with the user. Update this document after each decision.
-2. Do the measurement or rough labelling of D6 (the user sets the criteria, D7).
-3. Write the vocabulary, the labeller and the executor on a branch in a worktree. Each step gets a code review.
-4. Fly the labelled sentences with the executor (the replay gate, §9), at each row interval of the ablation (D11, §4.8).
-   The user sets the criteria and chooses the interval.
-5. Train the prior from the start, then the post-training, then the multi-aircraft stages (§6–§8).
+1. Stage A (§14.2): write the vocabulary, the labeller, the identities, the executor, the judge and the replay on the
+   branch `dev-two-tier-v4`, milestone by milestone, each with tests and a code review. Another agent does this.
+2. Claude checks the result of stage A against this document (§14.6).
+3. The user sets the criteria (D7) and the values of O2, O10, O12. Then the formal artefact is built, and the replay
+   gate is read at each row interval of the ablation (D11). The same readings answer D6 / O9 (are the grids sufficient).
+4. Stages B, C, D (§14.3–§14.5): the prior from the start, the post-training and the multi-aircraft work, the frontend.
+5. The user merges the branch.
 
 ---
 
@@ -614,12 +615,33 @@ a held-out test airport only. The selection method between designs is open (O7).
 
 ---
 
-## 9 Gates
+## 9 Gates and identities
+
+### 9.1 Gates
 
 Each stage keeps a gate: the labeller (completeness, envelope containment with envelope width), the replay (the
 executor flies the labelled sentences), the prior (teacher-forced likelihood against baselines, free generation), the
 post-training, the multi-aircraft stages. The user sets the criteria of each gate after the design is settled (D7).
 This document sets none.
+
+### 9.2 Identities (D21)
+
+**Rule** (the user, 2026-10-02 and 2026-10-03). An identity binds the format (what the words and the payloads mean)
+and the data rules (the sealed test days). Code is identified by what it does on fixed inputs (a conformance check), not
+by the bytes of its source. Data are identified by their flights, not by the bytes of a file they came from.
+
+| # | Identity in `instruction-v3` | Decision | Where (stage) |
+|---|---|---|---|
+| 1 | Vocabulary spec sha (grids, classes, tolerances, reading name) | Keep. It is the format | A |
+| 2 | Labeller source hash over bytes (`instructions/artefact.py:132`, checked by `require_current_labeller` and `load_sentences`) | Remove. Replace it by the labeller conformance (§14.2 A3): a fixed reference sample labelled again by today's code gives the same words. The artefact records which code wrote it as information | A |
+| 3 | Executor spec: the parameters' sha and the conformance of the reference tracks (C33) | Keep. It is the model for #2 and #6 | A |
+| 4 | Each airport's arrival manifest bytes (`arrival_manifest_sha256s`) | Remove as a check. The artefact keeps the signals; a consumer that rebuilds a flight from the harvest compares it row by row with the stored signals (`autopilot/flights.py` `require_same_flight`, kept) | A |
+| 5 | Prior → artefact: spec sha, labeller sha, day split, candidate table (C34) | Keep the spec sha, the day split and the candidate table. Replace the labeller sha by the artefact's identity: the sha256 of its sentence files | B |
+| 6 | Edge source hash (`EDGE_SOURCES`) | Remove. Replace it by a conformance check: the edge features of fixed reference scenes are the same | C |
+| 7 | Procedure masks: the set name, the checkpoint sha, the digests of the procedure data (C35) | Keep. The procedure data are the format of the masks | B |
+| 8 | Window readouts: the code version and the conformance R44 | Keep | C |
+| 9 | The frontend pins the vocabulary spec sha; the pin of the single-flight executor | Replace by the reading name | D |
+| 10 | The day split file and the sealed test days (C32) | Keep. It is a data rule | A |
 
 ---
 
@@ -777,3 +799,189 @@ The current code that this design changes. Line numbers are at `dev-two-tier` `2
 | Prior: step, relative and candidate features | `prior/data.py:63`, `:64`, `:70` |
 | Clearance mask | `inference/separation_masks.py:131` `clearance_check` |
 | Edge features | `inference/scene_edges.py:51` `EDGE_FEATURES` |
+
+---
+
+## 14 Implementation plan
+
+This section tells the implementing agent what to build. The sections above give the design; this one gives the work.
+Read the design sections that a milestone names before you start it.
+
+### 14.1 Branch and rules
+
+1. Make the branch from `dev-two-tier` at the commit that holds this section:
+   `git worktree add -b dev-two-tier-v4 .claude/worktrees/two-tier-v4 dev-two-tier`. In the worktree, link the ignored
+   data trees with absolute links: `data`, `trajectory_data_process/outputs`, `4dTrajectory/outputs`,
+   `aeroviz-4d/public/data/airports`. These links point at LIVE data.
+2. Each milestone: read the code that it changes; write the code and its tests; run the milestone's test files; get a
+   code review from a separate reviewer (code only, never documents); correct; commit with explicit paths. Never use
+   `git add -A`. Before each commit, read `git diff --cached --stat`.
+3. A test never writes under a live root. A test that calls a runner's `main()` gives every write root a tmp path
+   (`tests/support.py` `labelled_instruction_artefact` is an example).
+4. Run single test files in the foreground. Run the full ts suite (approximately 55 min) only at the end of the stage,
+   detached (`nohup setsid`, the script writes its own PID file).
+5. No compatibility (principle 8). Every changed format gets a new name: reading `instruction-v4`, spec schema
+   `ts-instruction-spec-v5`, sentences schema `ts-instruction-sentences-v3`, executor spec schema `ts-executor-spec-v7`.
+   The new code refuses an old artefact by its name. No `.get(key, default)` fallbacks, no branches on a schema version.
+6. SI units only. A value from a regulation has its paragraph in a comment and is defined one time.
+7. No formal data build and no formal readout. A smoke build (a stated limit for each airport) goes to a tmp or
+   scratch directory. The formal artefact, the replay gate and every criterion wait for the user (D7). Never write into
+   an existing directory under `4dTrajectory/outputs/`.
+8. Do not touch the checkouts of running experiments (`.claude/worktrees/step9-run` and others) or the main checkout.
+9. A defect that you find outside the milestone goes to `docs/code-health-followups.md` (an entry and a table row), not
+   into the change.
+10. At each milestone, update §0.3 (state, commit). At the end of stage A, update §13 (key code index) to the new code.
+11. The branch is not merged before stage D: the backend's live executor (`aeroviz_backend/autopilot_segment/`) and the
+    frontend's Training view read the old format until then. The user merges.
+
+### 14.2 Stage A: vocabulary, labeller, identities, executor, judge, replay
+
+**A0. Archive.** Move to `archive/two_tier_v3_2026_10/`, unmodified and with their tests, the modules that belong to
+the old vocabulary and that stage A does not rewrite. Write a `README.md` there: what moved, why (D20), the last commit
+before the move, which stage brings each part back. The list:
+
+- `prior/` (the whole package; stage B brings it back, rewritten);
+- every `experiments/prior_*.py` and `experiments/traffic_*.py`, `experiments/window_training_export.py`,
+  `inference/separation_masks.py`, `inference/scene_edges.py` (stages B and C);
+- the Training exports: `experiments/instruction_training_export.py`, `experiments/executor_training_export.py`,
+  `experiments/training_attitude.py`, `instructions/training_files.py`, `instructions/display.py` (stage D);
+- the readouts of old artefacts: `experiments/go_around_census.py` (R40; A2 moves its detection rule into the
+  labeller), `experiments/instruction_word_frames.py` (R48), `experiments/instruction_final_approach.py` (R49),
+  `experiments/heading_lead_ablation.py` (R23).
+
+Remove their names from `experiments/__main__.py` `NOT_RUNNERS` where they occur. If a later milestone breaks another
+module that stage A does not rewrite, archive it in that milestone and add it to the README. `tests/test_architecture.py`
+must pass. Note in the README that the backend tests under `aeroviz_backend/tests/` that use the two-tier code
+(`test_single_executor.py`, `test_autopilot_segment.py`, `test_http_server.py` where it calls that route) fail until
+stage D.
+
+**A1. Vocabulary** (§3; `instructions/spec.py`, `words.py`, `grammar.py`).
+
+- Columns: `("runway", "heading", "altitude", "angle", "speed")`. The approach column and its constants go.
+- Runway column: the candidate pointer plus the value "go-around". The states R and G and the table of §3.2.
+- Heading column: class k is the relative heading 5k° from the course of the runway in force (D8). `Words` gets the
+  conversions both ways with the course as an argument; there is no absolute heading class any more.
+- Altitude column: the value "descend to land" becomes "no level-off" (§3.4); same index position after the levels.
+- Angle and speed columns: unchanged.
+- Grammar rules 1–5 of §3.7 and the runway/G table of §3.2, as one function that the labeller checks and the speaker
+  masks with. There is no runway lock (D12).
+- Spec: reading `instruction-v4`, schema `ts-instruction-spec-v5`; the spec sha over the format fields, as now.
+- Tests: the conversion relative ↔ absolute at several courses (KSTL 122.3°, wrap at 0°/360°); every row of the
+  runway/G table, permitted and refused; rule 5; the first step.
+
+**A2. Labeller** (§4; `instructions/labeller/`).
+
+- Heading words (§4.3): the per-row reading in the frame of the landed runway, from row 0 to the last row. No clearance
+  placement, no capture-turn check. `capture_row` stays (for "unspecified" and the readout groups).
+- Go-around (§4.6, D18, D19): move the detection rule of `experiments/go_around_census.py` (the low pass, the levels
+  held 20 s, 150 m below and above) into a new module `instructions/labeller/go_around.py` with its tests (move the
+  relevant tests from `tests/test_go_around_census.py`). Say "go-around" at the row of the lowest point; read the climb
+  as altitude and angle words; say the landed runway again at the first level-off after the climb, not later than the
+  next "no level-off". A flight that `instruction-v3` refused only because it crossed and came back is read with this
+  rule. The landing cut is the last qualifying crossing, not one that a go-around follows.
+- Altitude and angle (§4.4): unchanged except the name "no level-off".
+- Speed (§4.5): "unspecified" starts at the capture row, with the two exceptions re-anchored (D4).
+- Assembly (§4.7): five columns; the grammar of A1 checked on the 2 s rows.
+- Row interval (§4.8, D11): a pure function that puts a 2 s sentence on a grid of Δ (a multiple of 2 s, rows on UTC
+  multiples of Δ), keeping the last word of a column inside an interval, the first Δ row saying all five columns, and
+  the grammar checked again. Its tests: Δ = 2 gives the sentence back; Δ = 4, 6, 8 on hand-built sentences.
+- Candidates: refuse a candidate without TCH, glidepath angle or LPV DA before labelling (§4.2).
+- Tests: synthetic flights (`tests/support.py` `fly_legs`, `instruction_flight`) for a downwind–base–final with
+  heading words to the end; a go-around and a second approach (the go-around row, the runway word's row, rule 5);
+  "unspecified" at the capture row with each exception.
+
+**A3. Artefact and identities** (§9.2, D21; `instructions/artefact.py`, `instructions/measure.py`, runners).
+
+- Remove `labeller_source_sha256`, `require_current_labeller` and the labeller check in `load_sentences`.
+- Labeller conformance: when `instruction_labels` writes the artefact, it also writes `conformance/`: a fixed sample of
+  250 labelled train flights (seed 1337, every airport) with their signals and their words. A new runner
+  `instruction_conformance` labels them again with today's code and requires the same words and the same refusals,
+  word for word; it writes `conformance/passed-<code>.json`, where `<code>` is a digest of the labeller's code by its
+  logic (as `autopilot/spec.py` does for the executor). Any runner that labels, or reads sentences for a replay,
+  requires a passed record for today's code.
+- Arrival manifests: remove the byte checks of the manifest (`arrival_manifest_sha256s` stays as recorded information
+  only). `autopilot/flights.py` `require_same_flight` stays.
+- Sentences schema `ts-instruction-sentences-v3`: five columns; per sentence the runway, the capture row, the go-around
+  rows; no `join_row`.
+- The spec measurement (D15): for the descent centres and edges and the climb centre, write the fitted value and the
+  candidates rounded to 0.5°, 0.25° and 0.1°, each with the end-of-piece height error that it leaves (the existing
+  `fit_descent_classes` error, and the same for the climb pieces). Also write the distribution of the climb angles
+  (O12). The spec keeps the fitted values until the user chooses.
+- Runners kept and changed: `instruction_signals`, `instruction_spec`, `instruction_labels`, `instruction_figures`.
+- Tests: the conformance passes on a tmp artefact and fails when a labeller rule changes; an old artefact is refused by
+  its schema name.
+
+**A4. Executor** (§5; `autopilot/`).
+
+- Remove the laws of §5.7: the runway lock (`Executor.runway_locked`), the capture state and turn, the heading bend and
+  own intercept, the centreline tracking, every special law of "descend to land", the glidepath floor and the level
+  flight below the glidepath. The executor laws no longer read the TCH or the glidepath (`runway_data` stays for the
+  judge).
+- Heading: convert each heading word with the course of R at the hearing time; keep the absolute target until the
+  next heading word (§3.3, §5.4).
+- Go-around (§5.4, §5.5): G from the runway column; the climb at 1.885° (`GO_AROUND_CLIMB_GRADIENT`) for "no
+  level-off" or a higher level; the course of R until a heading word; hold the airspeed; a runway word ends G.
+- Vertical modes of §5.5; speed law unchanged (§5.6).
+- Row interval: the executor hears the words at the start of each row of Δ (the word clocks of `autopilot/sentence.py`
+  take Δ, not the spec's 2 s).
+- Port every change to the single-flight executor `autopilot/single.py` (the conformance flies it too).
+- Tests: the heading conversion and a runway change that does not turn the aircraft; a go-around (climb gradient,
+  course, end by a runway word); "no level-off" flies the class angle without a level-off; nothing captures or locks.
+
+**A5. Judge** (§5.8; `autopilot/judge.py`).
+
+- The outcomes of the §5.8 table, in the order of the table: `dynamics_failure`, `ground_contact`, `crossed_too_high`,
+  `crossed_off_runway`, `unstable_at_minimums`, `landed`, `crossed_other_runway`, `timeout`. The four crossing outcomes
+  of R need an approach crossing (G false, lined up within 30°, inside the landing screen). `crossed_without_capture`
+  goes.
+- A crossing while G is true is not an event. The time limit grows by 900 s at each go-around
+  (`Executor.extend_time_limit`).
+- The DA check: at the DA point, the lateral offset against the FAS cone at that distance
+  (`flight_scenarios/fas_geometry.py`) and the height against the published glidepath, straight-line reference
+  (§11.4), within two tolerances. The tolerances are REQUIRED parameters of the executor spec, given on the command line
+  of `executor_spec`, with no default (O2: the user gives the values).
+- Layer 2: the heading words to the end of the flight; the clearance and corridor checks go.
+- Tests: each outcome on a hand-built flown track; the order of two events at one row; a go-around low pass that is not
+  an event; the DA check pass and fail.
+
+**A6. Executor spec, conformance and replay.**
+
+- `executor_spec`: schema `ts-executor-spec-v7`; the parameters (with the DA tolerances) and the conformance reference
+  (250 flights) as now; `executor_conformance` as now (§9.2 #3).
+- `executor_replay`: a new option `--row-interval-s` (default 2; a multiple of 2): the sentences go through the A2
+  projection before they are flown. The summary gives each outcome, the words inside their envelopes (with the
+  envelope widths), the go-around sentences apart, for each airport and pooled. It requires the labeller and the
+  executor conformance records.
+- Smoke only (14.1 rule 7): build a smoke artefact (for example 30 flights for each airport) in a scratch directory,
+  pass both conformance checks, and run the replay at Δ = 2 and 4 to its end. No criterion is read.
+
+**A7. Close of stage A.** The full ts suite passes (run detached). §0.3 and §13 are updated. Report to the user: the
+commits, the archive list, the smoke results (as information, not as a verdict), and what stage B needs.
+
+### 14.3 Stage B: prior (outline)
+
+Bring `prior/` back from the archive and change it to §6: inputs in the frame of R (D5), no airport embedding, the
+glidepath height input (D13), RoPE with seconds and no row embedding (D16), the time since each word in seconds (D17),
+the go-around state as an input, five heads with the runway head scoring the candidates, "unchanged" and "go-around".
+The observation is 16 s at every Δ. The checkpoint identity of §9.2 #5. The selection method is open (O7). Free
+generation with the masks of §3.7 and the procedure masks (D14). Milestones, tests and reviews as in stage A.
+
+### 14.4 Stage C: post-training and multi-aircraft (outline)
+
+The landing reward and stage 2 (§7) on the new outcomes, the go-around reward (multi-aircraft design §6.6 step 8), the
+traffic attention and the window loop (§8), the replacement of the clearance mask (O6), the edge-feature conformance
+(§9.2 #6).
+
+### 14.5 Stage D: frontend and backend (outline)
+
+The Training exports and the backend's live executor (`aeroviz_backend/autopilot_segment/`) on the new format; the
+frontend reads the reading name, not the spec sha (§9.2 #9). After stage D the user merges the branch.
+
+### 14.6 What Claude checks at the end of stage A
+
+1. Each decision D1–D21 against the code: the module and the test that carry it (a table in the report).
+2. The targeted tests and the full suite pass on the branch head (run again, not read from the report).
+3. The smoke build: both conformance checks pass; the replay at Δ = 2 and 4 runs to its end; a labelled go-around
+   flies as a go-around (G, climb, a new runway word, a landing after it).
+4. No write under a live root, and no existing directory under `4dTrajectory/outputs/` changed.
+5. Nothing in the archive was edited after the move.
