@@ -40,6 +40,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D12 | No runway lock. While G is false the model can change the runway at any time; the judge reads R at the crossing (§3.2) | Decided (the user considered a lock that a go-around lifts, and chose no lock) | User, 2026-10-03 |
 | D13 | The prior gets the height above the published glidepath of R at each step (§6.1) | Decided (was O3) | User, 2026-10-03 |
 | D14 | While G is true: "no level-off" is not permitted (rule 5), and the procedure mask "no climb below the entry height" does not apply (§3.7) | Decided | User, 2026-10-03 |
+| D15 | The spec measurement gives each value that it fits from data with rounder candidates and the fit that each leaves; the user chooses (§3.5) | Decided | User, 2026-10-03 |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -53,6 +54,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
 | O9 | Finer grids near the runway course and near the glidepath angle | Decided by D6: measure first | 3.3, 3.5 |
 | O10 | The row intervals of the ablation and how to compare them | Proposal: 2, 4, 6, 8 s. Criteria by the user after the design is settled (D7) | 4.8 |
+| O12 | Climb classes: keep one, add more, or set the climb to the missed-approach gradient | Proposal: keep one climb class; its value from the measurement with D15; a second class only if the climb angles have two clear groups | 3.5 |
 
 ### 0.3 Implementation
 
@@ -243,6 +245,21 @@ while it descends, T ± ε after it arrives (ε = 25 m; s is the horizontal dist
 The four descent classes come from a length-weighted k-means on the train days (spec `145d6911e75b`). The grid stays
 (D6). With D3 the model holds the glidepath with these classes. A measurement or a rough labelling decides if they are
 sufficient (O9). An alternative for discussion: a fixed angle grid, not a k-means result.
+
+**Rounder values (D15).** The spec measurement gives each value that it fits from data (the descent centres and edges,
+the climb centre) with rounder candidates (for example to 0.5°, 0.25°, 0.1°) and, for each candidate, the fit that it
+leaves: the end-of-piece height error that the measurement already reports (`instructions/measure.py`
+`fit_descent_classes`), and the same for the climb pieces. The user chooses (criteria: D7). Two facts for that choice:
+24 of the 25 candidate runways publish a 3.0° glidepath (§11.4), and with D3 the model holds the final with an angle
+word, so a centre of 3.06° flies 10 m from a 3.0° glidepath in 10 km; the k-means with three classes put a centre at
+3.006°. The values that the measurement takes as percentiles are already rounded by their rules (turn rates to
+0.1°/s, the bank limit to 1°, the corridor to 5 m, 0.05° and 1°, the acceleration to 0.1 m/s²).
+
+**Climb (O12).** The train days have 1,498 climb pieces among 233,649 vertical pieces (0.6 %); their length-weighted
+median is 1.32°. The missed-approach climb is now the go-around's (D10, 1.885°). Proposal: one climb class; its value
+from the measurement with D15; a second class only if the climb angles show two clear groups. Setting the climb class to
+1.885° is also possible (one climb gradient in the vocabulary, from a regulation, not from data), but 1.885° is a
+minimum for a missed approach, and the climbs in the data are shallower.
 
 ### 3.6 Speed column
 
