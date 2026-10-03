@@ -450,6 +450,9 @@ the sentences counted in both, errors clustered by airport × operating day (R41
 `traffic_window_conformance` re-reads 24 batches of a window readout from its own config under today's code (after the whole
 draw) and compares the rows field by field; passed on a clean checkout → `<readout>.conformance/passed-<commit12>-<device>.json`, the
 evidence R41 accepts (design §6.6 step 9.9.2; same idea as R42) (R44).
+`traffic_window_probe_readout` speaks an R37 run's training rounds again (checked word for word against `sentences.npz`; R37's
+`round_windows`) and reads, under every model of the run, the probability of the go-around word at each probe's step — the
+term the probe's cross-entropy trains (`traffic_window_tuner.forced_go_around_log_p`) (R45).
 `traffic_window_rewind` asks whether a window's losses of separation can be undone by rewinding ONE aircraft — each loss's
 aircraft speaks again from 10–120 s before it (or its start), the others given the words they said (`traffic_window.Given`:
 not sampled, not masked), 8 branches an offset, a control that must replay the original pass to the last field; `--offsets-s`

@@ -1225,3 +1225,26 @@ seen; a row field added or dropped fails it; another torch / CUDA / GPU may move
 
     python run_ts.py traffic_window_conformance --readout 4dTrajectory/outputs/POOLED/traffic/window_val_start_20261002 \
         --device cuda
+
+### R45 · `run_ts.py traffic_window_probe_readout` — does an M4-in-windows run (R37) move the go-around word? (multi-aircraft design §6.6 step 9.4)
+
+2026-10-03 (the user, after 9.4's small run said no go-around itself: "量一下" — a count of 0 cannot tell whether the word's
+probability moved). `traffic_window_probe_readout --run <R37 run dir> --out <new dir> [--workers 3] [--device cuda]`. Reads
+the run's `config.json` (paths found from `4dTrajectory/outputs/` on; the prior's, the base's and the executor spec's
+checksums must be the disk's; a run with hard events refused) and, for each training round k ≥ 1, speaks the round again as
+the run spoke it: its windows drawn again by R37's own `round_windows`, spoken by the model that spoke them (the start —
+built as R37 builds it, the traffic attention drawn under the run's seed — for round 1, round k − 1's checkpoint after), from
+the round's sampling stream, probed as the run probed (`WindowSpeaking`, in forked processes; each loop batch its own stream),
+and refuses unless every sentence is the stored one (`sentences.npz`: window, flight, sample, every word, outcome, runway,
+reward, probed, forced step, advantage and probe gain computed again). Then every sentence a probe made say a go-around inside
+its counted steps is read by every model of the run (round 0 = the start, each round's checkpoint), teacher-forced in its
+window (`WindowRewardTuner.forced_log_probs` → `traffic_window_tuner.forced_go_around_log_p`, the term the probe's
+cross-entropy trains): the probability of the go-around word at the probe's step, masked as spoken. Writes `forced.jsonl`
+(a row per forced sentence with each model's log-probability) and `probe_readout.json` (`ts-traffic-window-probe-readout-v1`:
+per round of sentences × model, the probability's mean / quartiles on the learned sentences (probe gain > 0), the others and
+all, and how many rose against round 0).
+
+    python run_ts.py traffic_window_probe_readout \
+        --run 4dTrajectory/outputs/POOLED/prior/step9_4_small_20261003/traffic_s1337 \
+        --out 4dTrajectory/outputs/POOLED/prior/step9_4_small_probe_20261003
+
