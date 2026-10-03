@@ -35,10 +35,11 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D7 | This document sets no test criteria and no measurement criteria. The user sets them after the design is settled | Decided | User, 2026-10-03 |
 | D8 | The heading grid is aligned to the course of the runway in force (§3.3) | Decided | User, 2026-10-03 |
 | D9 | The executor laws in §5.7 are removed, the glidepath floor included | Decided | User, 2026-10-03 |
-| D10 | Go-around is an event: it does not change the runway in force; a runway word ends it. A go-around lifts the mask that stops a runway change (§3.2). Which other masks a go-around lifts or adds: O11 | Decided | User, 2026-10-03 |
+| D10 | Go-around is an event: "abandon this approach". It does not change the runway in force; a runway word ends it. Its effects on the executor, the judge and the masks: §3.2 | Decided | User, 2026-10-03 |
 | D11 | The labeller stage includes an ablation of the row interval: 2 s now, larger intervals possible (§4.8) | Decided. Values and criteria: O10 | User, 2026-10-03 |
-| D12 | A runway lock exists and a go-around lifts it (the user's meaning of D10). When the lock starts: O11. The judge reads R at the crossing (§3.2) | Decided; replaces "no lock" of the same day | User, 2026-10-03 |
+| D12 | No runway lock. While G is false the model can change the runway at any time; the judge reads R at the crossing (§3.2) | Decided (the user considered a lock that a go-around lifts, and chose no lock) | User, 2026-10-03 |
 | D13 | The prior gets the height above the published glidepath of R at each step (§6.1) | Decided (was O3) | User, 2026-10-03 |
+| D14 | While G is true: "no level-off" is not permitted (rule 5), and the procedure mask "no climb below the entry height" does not apply (§3.7) | Decided | User, 2026-10-03 |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -52,7 +53,6 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
 | O9 | Finer grids near the runway course and near the glidepath angle | Decided by D6: measure first | 3.3, 3.5 |
 | O10 | The row intervals of the ablation and how to compare them | Proposal: 2, 4, 6, 8 s. Criteria by the user after the design is settled (D7) | 4.8 |
-| O11 | When the runway lock starts; which masks apply while G is true | Proposal in §3.2 and §3.7 | 3.2, 3.7 |
 
 ### 0.3 Implementation
 
@@ -163,17 +163,23 @@ start of the turn onto the final. This design has no clearance word. The model s
 | candidate k, G true | k | false | any candidate, R included |
 | go-around | R (no change) | true | G false, after the first predicted step |
 
-**Go-around (D10).** The word "go-around" starts the go-around manoeuvre of the executor (§5.5, §5.4). It does not
-change R. R stays the frame of the heading words when the model vectors the aircraft back. While G is true, a crossing
-of the threshold of R is not a landing (§5.8). A runway word ends the go-around state. The model can say R again or
-another candidate. This keeps the step-8 sequence of the multi-aircraft design (approach → go-around → approach) in one
-column. A go-around lifts the runway lock (D12).
+**No runway lock (D12).** While G is false the model can change the runway at any time, also on the final (a change to
+a parallel runway is a real manoeuvre). The judge reads R at the crossing.
 
-**Runway lock (D12, O11).** In `instruction-v3` a clearance or a capture locked the runway until a go-around
-(`prior/generate.py`, executor design §4.6). This design keeps a lock that a go-around lifts. The lock is a decode mask,
-not an executor state. When it starts is open (O11). Proposal: when the aircraft is first inside the capture corridor of
-R (computed from the flown state); before that, the model can change the runway. The alternative: from the first runway
-word, so that only a go-around permits a change. The judge reads R at the crossing.
+**Go-around (D10): "abandon this approach".** A change of runway does not stop a descent and does not tell the judge
+anything. A go-around does. It does not change R: R stays the frame of the heading words while the model vectors the
+aircraft back. Its effects:
+
+| Who | Effect of "go-around" |
+|---|---|
+| Executor (§5.4, §5.5) | Climb at the missed-approach gradient, 200 ft per NM (1.885°, AIM 5-4-21 b). No other word gives it: the climb class is 1.32°. The climb replaces "no level-off" in force. Fly the course of R until a heading word. Hold the airspeed |
+| Judge (§5.8) | While G is true, a crossing of the threshold is not an event (not a landing and not a failure): the flight continues. A go-around before the DA point answers a failed DA check. The time limit of the flight grows by 900 s (multi-aircraft design §6.6 step 8, the user 2026-10-02) |
+| Masks (§3.7, D14) | Rule 5: no "no level-off" while G is true. The procedure mask "no climb below the entry height" does not apply while G is true |
+| Prior (§6.1) | G is an input: the aircraft is in a missed approach |
+| Multi-aircraft (§8) | The decision is explicit: it can be counted and rewarded, and the separation judge can treat the aircraft as no longer on the approach (open with O6) |
+
+A runway word ends G. The model can say R again or another candidate ("expect runway k" again). This keeps the step-8
+sequence of the multi-aircraft design (approach → go-around → approach) in one column.
 
 ### 3.3 Heading column
 
@@ -262,14 +268,14 @@ labeller sha").
 3. When a new level T needs a direction that the angle in force does not give (level, or the opposite direction), the
    same row says an angle of the correct direction.
 4. "No level-off" needs a descent class in force or in the same row.
-5. Proposed (O11): "no level-off" is not permitted while G is true. The model first says a runway word, which ends G;
-   in the same row (the runway column comes first) or later it can say "no level-off".
+5. "No level-off" is not permitted while G is true (D14). The model first says a runway word, which ends G; in the same
+   row (the runway column comes first) or later it can say "no level-off".
 
-**Masks while G is true (O11, proposal).** Only one mask stops a go-around: the procedure rule "no climb after the
-aircraft is below the entry height before the join". The current code already lifts it while a go-around is in force
-(`prior/procedure.py:126` `climb_barred`), and its stretch starts again after the go-around. The other procedure masks
-are lower limits (the glidepath lower edge inside the FAF, the DA before the join). A go-around climbs above them, so
-they stay. The vocabulary rules 1–4 stay. The runway lock is lifted (D12).
+**Masks while G is true (D14).** Only one mask stops a go-around: the procedure rule "no climb after the aircraft is
+below the entry height before the join". It does not apply while G is true; the current code already lifts it while a
+go-around is in force (`prior/procedure.py:126` `climb_barred`), and its stretch starts again after the go-around. The
+other procedure masks are lower limits (the glidepath lower edge inside the FAF, the DA before the join). A go-around
+climbs above them, so they stay. The vocabulary rules 1–4 stay.
 
 ### 3.8 Example
 
@@ -478,7 +484,7 @@ half the spacing to a parallel. The judge gives the first outcome that occurs. A
 | `unstable_at_minimums` | An approach crossing at ≤ 100 m, inside the runway limit, after a failed DA check (or with no DA point: the aircraft crossed above the DA) |
 | `landed` | An approach crossing at ≤ 100 m, inside the runway limit, after a DA check that passed |
 | `crossed_other_runway` | The threshold plane of another candidate crossed lined up, inside that runway's own limit, at any height |
-| `timeout` | None of these within the time limit (the remaining observed time × 1.5) |
+| `timeout` | None of these within the time limit (the remaining observed time × 1.5, plus 900 s for each go-around) |
 
 A crossing that is not lined up (for example, abeam the threshold on a downwind) is not an event. A crossing of R while G
 is true is not an event: the flight continues. `crossed_without_capture` goes, because the executor has no capture
