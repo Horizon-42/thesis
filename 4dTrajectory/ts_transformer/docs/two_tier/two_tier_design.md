@@ -47,6 +47,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D19 | After a labelled go-around, the runway word that ends G is at the first level-off after the go-around climb, and not later than the row of the next "no level-off" (§4.6) | Decided | User, 2026-10-03 |
 | D20 | This design is a new version: it is developed on a new branch in a new worktree. Artefacts `v1`–`v6`, the executor specs and every prior are superseded and are not kept readable. The running experiments keep their own checkouts | Decided | User, 2026-10-03 |
 | D21 | Identities bind format and data rules only. A code identity is a behaviour check on fixed inputs, never a hash of source bytes; data are identified by their flights, never by the bytes of a manifest (§9.2) | Decided (was O13) | User, 2026-10-03 |
+| D22 | Altitude words use the grid "optimal 40 levels" of the altitude-grid proposal: 60 m steps from 0 to 1,260 m, 120 m steps to 2,700 m, 450 m steps to 5,400 m (§3.4) | Decided | User, 2026-10-03 |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -139,7 +140,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 |---|---|---|---|
 | 0 | Runway | a candidate runway (pointer), "go-around" | candidates of the airport + 2 |
 | 1 | Heading | relative heading, 5° grid (72 values) | 73 |
-| 2 | Altitude | target level, geometric MSL, 30 m grid, 0–5,400 m (181 values); "no level-off" | 183 |
+| 2 | Altitude | target level, geometric MSL, 40 levels on three segments (60 / 120 / 450 m steps), 0–5,400 m; "no level-off" | 42 |
 | 3 | Angle | level; descent 1–4; climb | 7 |
 | 4 | Speed | target ground speed, 5 m/s grid, 20–250 m/s (47 values); "unspecified" | 49 |
 
@@ -221,8 +222,32 @@ gives no lateral correction. The aircraft keeps its lateral offset until the mod
 
 ### 3.4 Altitude column
 
-**Meaning.** "Descend (or climb) to level T and keep it" (7110.65BB 4-5-7, DESCEND AND MAINTAIN). T is geometric MSL, on
-a 30 m grid, 0–5,400 m. The direction comes from T and the present height. The angle column says how steep.
+**Meaning.** "Descend (or climb) to level T and keep it" (7110.65BB 4-5-7, DESCEND AND MAINTAIN). T is geometric MSL.
+The direction comes from T and the present height. The angle column says how steep.
+
+**Grid (D22).** 40 levels on three segments, each segment uniform:
+
+| Segment | Levels | Step | Largest rounding error |
+|---|---|---|---|
+| 1 | 0, 60, …, 1,260 m | 60 m | 30 m |
+| 2 | 1,380, …, 2,700 m | 120 m | 60 m |
+| 3 | 3,150, …, 5,400 m | 450 m | 225 m |
+
+The steps and the break points are constants of the vocabulary and go into the spec. A word is the nearest level; its
+meaning stays an absolute height, the same at every airport and from every position. The grid comes from the proposal
+[altitude_word_grid.zh.md](altitude_word_grid.zh.md): an exact dynamic-programming fit of at most three uniform
+segments that makes the squared rounding error of the observed level-offs smallest for 40 levels (§11.7).
+
+**Why a coarser grid higher up.** (1) The `instruction-v3` grid used 116 of its 182 classes; 99.7 % of the level words
+are under 3,000 m. (2) A controller assigns a pressure altitude; the geometric height of one assigned level moves from
+day to day by about height × ΔT / 273 (ΔT: the day's temperature deviation; the model does not see it). At KRDU this is
+about 15 m at 600–900 m and about 90 m at 2,000–3,000 m ([vocabulary design](instruction_vocabulary_design.zh.md)
+§2.4). A fine step high up only divides this spread.
+
+**What a coarse segment costs.** In segment 3 two assigned levels 1,000 ft (304.8 m) apart can round to one word, and
+a small change of level inside one step has no word. Such words are rare (above 2,700 m: approximately 0.3 % of the
+words, mostly the entry level at row 0). The 1,000 ft between opposite base legs (7110.65BB 5-9-1 b) is at low
+altitude, where the step is 60 m.
 
 **"No level-off".** "Descend at the angle in force. Do not level off." The judge stops the flight at the threshold or
 at the ground. This value replaces "descend to land" of `instruction-v3`. The name changes because the meaning changes:
@@ -232,9 +257,11 @@ the executor has no special law for it (§5.5, §5.7).
 level distributions of the five airports become less similar, not more (§11.2). KSJC has 28 % of its level words on
 levels that the other four airports almost never use. This is airspace, not frame.
 
-**Envelope (unchanged).** The tube from the row of the word: max(T, h0 − s·tan γ_hi) − ε ≤ h ≤ max(T, h0 − s·tan γ_lo) + ε
-while it descends, T ± ε after it arrives (ε = 25 m; s is the horizontal distance flown from the row of the word). For
-"no level-off" there is no lower bound T. A new angle word starts a new tube.
+**Envelope.** The tube from the row of the word: max(T, h0 − s·tan γ_hi) − ε ≤ h ≤ max(T, h0 − s·tan γ_lo) + ε while
+it descends, T ± ε after it arrives (s is the horizontal distance flown from the row of the word). ε depends on the
+segment of T: half its step plus the fit residual 10 m, that is 40 / 70 / 235 m (in `instruction-v3`, 25 m for every
+level). For "no level-off" there is no lower bound T. A new angle word starts a new tube. A containment rate is given
+with these widths (principle 6). The level detection of the labeller does not use ε (§4.4).
 
 ### 3.5 Angle column
 
@@ -352,11 +379,20 @@ glidepath angle or an LPV DA is refused before labelling (the judge needs all th
   capture turn (`turn_check` as an envelope of a clearance).
 - Kept for other uses: the capture row (`capture_row`), for D4 and for the readout groups (straight-in, vectored).
 
-### 4.4 Altitude and angle words (unchanged except the name)
+### 4.4 Altitude and angle words
 
-Piecewise-linear fit of the smoothed altitude against distance (residual ≤ 10 m). Level segments ≥ 20 s inside a
-30 m level ± 25 m. Moving segments give the level words and the angle words. The last descent to the threshold gives
-"no level-off" (the old "descend to land"). The tube of §3.4 checks each word.
+Piecewise-linear fit of the smoothed altitude against distance (residual ≤ 10 m), as in `instruction-v3`. One change
+follows from D22. In `instruction-v3` a piece is level when its rows lie within 25 m of the nearest 30 m level
+(`instructions/labeller/vertical.py:60`); with 60–450 m steps that test would miss real level-offs (a level at 630 m is
+30 m from both neighbours) or swallow descents. So the two questions separate:
+
+1. **Is the piece level?** At least 20 s, and every row within 25 m of the piece's own median. This is a physical test
+   with a constant of the labeller; it does not use the grid.
+2. **Which word?** The nearest level of the grid to the median.
+
+Two level pieces in a row with the same word merge. Moving pieces give the level words and the angle words. A move
+between two levels that round to the same word gives no level word (it cannot be said; §3.4). The last descent to the
+threshold gives "no level-off". The tube of §3.4 checks each word, with the ε of its segment.
 
 ### 4.5 Speed words
 
@@ -657,7 +693,9 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | Turn-rate limit | 4.7°/s | Spec, measured (p99.9) |
 | Bank limit | 32° | Spec, measured (p99.9) |
 | Roll rate p | 5°/s | Source cited in executor design §9 |
-| Level grid, range, tolerance | 30 m, 0–5,400 m MSL, ±25 m | Spec |
+| Level grid | 60 m to 1,260 m, 120 m to 2,700 m, 450 m to 5,400 m MSL; 40 levels | D22 (fit of the altitude-grid proposal) |
+| Level envelope ε | half the segment's step + 10 m: 40 / 70 / 235 m | D22 |
+| Level detection | ≥ 20 s, rows within 25 m of the piece's median | Labeller constant (§4.4) |
 | Descent classes | edges −0.5 / 1.52 / 2.59 / 3.74 / 10°; nominal 0.92 / 2.13 / 3.06 / 4.41° | Spec, k-means on train days |
 | Climb class | 0.5–15°, nominal 1.32° | Spec |
 | Go-around climb | 1.885° (200 ft per NM) | AIM 5-4-21 b |
@@ -748,6 +786,16 @@ largest).
   p95 598 s ([readout](readouts/2026-10-01_go_arounds.zh.md)).
 
 ---
+
+### 11.7 The altitude grid
+
+From the proposal [altitude_word_grid.zh.md](altitude_word_grid.zh.md) (`v6_20261002`; fit on 11,937 train flights,
+read on 3,964 validation flights; continuous level-off heights). Rounding error of the level words other than row 0,
+p50 / p95 / largest: the chosen grid (40 levels) 17 / 30 / 58 m; the same shape with steps doubling and break points at
+1,200 and 2,400 m (44 levels) 17 / 38 / 79 m; a uniform grid of 48 levels over the range 35 / 55 / 57 m. The
+`instruction-v3` grid (30 m, 182 classes) has at most 15 m. These numbers come from a one-off script of that proposal;
+the spec measurement of stage A gives them again from a runner (§14.2 A3). The proposal did not fly the grid: the replay
+of stage A does.
 
 ## 12 Regulation sources
 
@@ -861,7 +909,9 @@ stage D.
 - Runway column: the candidate pointer plus the value "go-around". The states R and G and the table of §3.2.
 - Heading column: class k is the relative heading 5k° from the course of the runway in force (D8). `Words` gets the
   conversions both ways with the course as an argument; there is no absolute heading class any more.
-- Altitude column: the value "descend to land" becomes "no level-off" (§3.4); same index position after the levels.
+- Altitude column: the grid of D22 (§3.4): 40 levels on three uniform segments, with the steps and break points as
+  spec constants; `Words` maps a height to the nearest level and a level to its height, and gives the ε of a level's
+  segment. The value "descend to land" becomes "no level-off", the index after the levels.
 - Angle and speed columns: unchanged.
 - Grammar rules 1–5 of §3.7 and the runway/G table of §3.2, as one function that the labeller checks and the speaker
   masks with. There is no runway lock (D12).
@@ -879,14 +929,17 @@ stage D.
   as altitude and angle words; say the landed runway again at the first level-off after the climb, not later than the
   next "no level-off". A flight that `instruction-v3` refused only because it crossed and came back is read with this
   rule. The landing cut is the last qualifying crossing, not one that a go-around follows.
-- Altitude and angle (§4.4): unchanged except the name "no level-off".
+- Altitude and angle (§4.4): the level test no longer uses the grid (rows within 25 m of the piece's own median, at
+  least 20 s); the word is the nearest level; level pieces with the same word merge; a move between two levels with the
+  same word gives no level word; the tube uses the ε of the word's segment; the name "no level-off".
 - Speed (§4.5): "unspecified" starts at the capture row, with the two exceptions re-anchored (D4).
 - Assembly (§4.7): five columns; the grammar of A1 checked on the 2 s rows.
 - Row interval (§4.8, D11): a pure function that puts a 2 s sentence on a grid of Δ (a multiple of 2 s, rows on UTC
   multiples of Δ), keeping the last word of a column inside an interval, the first Δ row saying all five columns, and
   the grammar checked again. Its tests: Δ = 2 gives the sentence back; Δ = 4, 6, 8 on hand-built sentences.
 - Candidates: refuse a candidate without TCH, glidepath angle or LPV DA before labelling (§4.2).
-- Tests: synthetic flights (`tests/support.py` `fly_legs`, `instruction_flight`) for a downwind–base–final with
+- Tests: a level at the middle of two 60 m levels is found as level; a slow descent inside one 450 m step is not a
+  level; synthetic flights (`tests/support.py` `fly_legs`, `instruction_flight`) for a downwind–base–final with
   heading words to the end; a go-around and a second approach (the go-around row, the runway word's row, rule 5);
   "unspecified" at the capture row with each exception.
 
@@ -907,6 +960,8 @@ stage D.
   candidates rounded to 0.5°, 0.25° and 0.1°, each with the end-of-piece height error that it leaves (the existing
   `fit_descent_classes` error, and the same for the climb pieces). Also write the distribution of the climb angles
   (O12). The spec keeps the fitted values until the user chooses.
+- The spec measurement also writes the rounding error of the level words (row 0 apart, p50 / p95 / largest) under the
+  grid of D22 and under a uniform 30 m grid, on the train flights, so that §11.7 comes from a runner.
 - Runners kept and changed: `instruction_signals`, `instruction_spec`, `instruction_labels`, `instruction_figures`.
 - Tests: the conformance passes on a tmp artefact and fails when a labeller rule changes; an old artefact is refused by
   its schema name.
@@ -963,7 +1018,8 @@ commits, the archive list, the smoke results (as information, not as a verdict),
 Bring `prior/` back from the archive and change it to §6: inputs in the frame of R (D5), no airport embedding, the
 glidepath height input (D13), RoPE with seconds and no row embedding (D16), the time since each word in seconds (D17),
 the go-around state as an input, five heads with the runway head scoring the candidates, "unchanged" and "go-around".
-The observation is 16 s at every Δ. The checkpoint identity of §9.2 #5. The selection method is open (O7). Free
+The observation is 16 s at every Δ. The checkpoint identity of §9.2 #5. The procedure masks' word tolerance becomes half
+the step of the level's segment (D22; `prior/procedure.py` `word_tolerance_m`). The selection method is open (O7). Free
 generation with the masks of §3.7 and the procedure masks (D14). Milestones, tests and reviews as in stage A.
 
 ### 14.4 Stage C: post-training and multi-aircraft (outline)
