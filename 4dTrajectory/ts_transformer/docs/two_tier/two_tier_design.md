@@ -28,7 +28,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 |---|---|---|---|
 | D1 | Merge the approach column into the runway column. The runway word is the expected runway. The model says it at the first predicted step. "Cleared" is not a word. "Go-around" is a value of the runway column | Decided | User, 2026-10-03 |
 | D2 | The model flies the aircraft to the runway with heading words. No executor law turns the aircraft onto the final | Decided | User, 2026-10-03 |
-| D3 | After the aircraft is on the final, the executor continues to fly the words of the model. The LPV minimums are a judgement only. The model must learn to land or to go around | Decided. It replaces "the executor tracks the centreline after capture" (decided earlier the same day) | User, 2026-10-03 |
+| D3 | After the aircraft is on the final, the executor continues to fly the words of the model. The LPV minimums are a judgement only. The model must learn to land or to go around | Decided | User, 2026-10-03 |
 | D4 | The speed value "unspecified" starts at the capture row of the labeller, not at a clearance | Decided | User, 2026-10-03 |
 | D5 | Prior inputs are in the frame of the runway in force. The prior has no airport embedding, no absolute position and no absolute direction | Decided | User, 2026-10-03 |
 | D6 | The grids of the words (heading 5°, four descent classes) stay as they are now. A measurement or a rough labelling decides if they are sufficient | Decided | User, 2026-10-03 |
@@ -37,25 +37,25 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D9 | The executor laws in §5.7 are removed, the glidepath floor included | Decided | User, 2026-10-03 |
 | D10 | Go-around is an event: "abandon this approach". It does not change the runway in force; a runway word ends it. Its effects on the executor, the judge and the masks: §3.2 | Decided | User, 2026-10-03 |
 | D11 | The labeller stage includes an ablation of the row interval: 2 s now, larger intervals possible (§4.8) | Decided. Values: D25. Criteria: O10 | User, 2026-10-03 |
-| D12 | No runway lock. While G is false the model can change the runway at any time; the judge reads R at the crossing (§3.2) | Decided (the user considered a lock that a go-around lifts, and chose no lock) | User, 2026-10-03 |
-| D13 | The prior gets the height above the published glidepath of R at each step (§6.1) | Decided (was O3) | User, 2026-10-03 |
+| D12 | No runway lock. While G is false the model can change the runway at any time; the judge reads R at the crossing (§3.2) | Decided | User, 2026-10-03 |
+| D13 | The prior gets the height above the published glidepath of R at each step (§6.1) | Decided | User, 2026-10-03 |
 | D14 | While G is true: "no level-off" is not permitted (rule 5), and the procedure mask "no climb below the entry height" does not apply (§3.7) | Decided | User, 2026-10-03 |
 | D15 | The spec measurement gives each value that it fits from data with rounder candidates and the fit that each leaves; the user chooses (§3.5) | Decided | User, 2026-10-03 |
-| D16 | The prior has no row position embedding and no input "time from row 0". The time attention uses RoPE with the row's time in seconds (§6.1) | Decided (was the first half of O4) | User, 2026-10-03 |
-| D17 | Every column keeps the input "time since this column said its word in force", in seconds; the runway column's too (§6.1) | Decided (was O4) | User, 2026-10-03 |
-| D18 | The labeller reads the real go-arounds inside a sentence and says "go-around" at the go-around point (§4.6) | Decided (was O5) | User, 2026-10-03 |
+| D16 | The prior has no row position embedding and no input "time from row 0". The time attention uses RoPE with the row's time in seconds (§6.1) | Decided | User, 2026-10-03 |
+| D17 | Every column keeps the input "time since this column said its word in force", in seconds; the runway column's too (§6.1) | Decided | User, 2026-10-03 |
+| D18 | The labeller reads the real go-arounds inside a sentence and says "go-around" at the go-around point (§4.6) | Decided | User, 2026-10-03 |
 | D19 | After a labelled go-around, the runway word that ends G is at the first level-off after the go-around climb, and not later than the row of the next "no level-off" (§4.6) | Decided | User, 2026-10-03 |
 | D20 | This design is a new version: it is developed on a new branch in a new worktree. Artefacts `v1`–`v6`, the executor specs and every prior are superseded and are not kept readable. The running experiments keep their own checkouts | Decided | User, 2026-10-03 |
-| D21 | Identities bind format and data rules only. A code identity is a behaviour check on fixed inputs, never a hash of source bytes; data are identified by their flights, never by the bytes of a manifest (§9.2) | Decided (was O13) | User, 2026-10-03 |
+| D21 | Identities bind format and data rules only. A code identity is a behaviour check on fixed inputs, never a hash of source bytes; data are identified by their flights, never by the bytes of a manifest (§9.2) | Decided | User, 2026-10-03 |
 | D22 | Altitude words use the grid "optimal 40 levels" of the altitude-grid proposal: 60 m steps from 0 to 1,260 m, 120 m steps to 2,700 m, 450 m steps to 5,400 m (§3.4) | Decided | User, 2026-10-03 |
 | D23 | How the prior gets the frame of R (D5) and the glidepath height (D13). The own state of the aircraft has no frame. Every position and direction is in the candidate vectors, each in the frame of its own candidate. R is an input only as its candidate vector. No input of a row up to the first predicted step is computed from R. Each candidate vector has the height above its own glidepath; the value of R is the input of D13 (§6.1) | Decided | User, 2026-10-03 |
 | D24 | A candidate vector has no constant of its runway: no length, no elevation, no layout relative to R. Such a value comes back only as a variant that O7 selects (§6.1) | Decided | User, 2026-10-03 |
 | D25 | The ablation reads Δ = 2, 4, 8 s: each divides the 16 s observation of the prior. At each Δ, the motion inputs of a row come from the 2 s before the row (§4.8, §6.1) | Decided (the values of O10) | User, 2026-10-03 |
 | D26 | The labeller reads a flight with a go-around approach by approach. An approach ends at the landing or at a go-around row. The last descent that reaches a go-around row says "no level-off". Each approach has its own capture row and its own "unspecified". The first row says the runway of the first approach. The go-around row is the row of the climb word (§4.2, §4.4–§4.6) | Decided | User, 2026-10-03 |
-| D27 | "Go-around" changes no target of another column. A row that says "go-around" while "no level-off" is in force also says a level above the aircraft (rule 6). The executor keeps the heading word in force; it does not fly the course of R. While G is true, "unspecified" holds the airspeed (§3.2, §3.7, §5.4–§5.6) | Decided. It replaces the executor part of D10 and multi-aircraft design 8.7 (2026-10-02) | User, 2026-10-03 |
-| D28 | The vocabulary has one climb word. Its angle is a value of the executor. While G is true, the executor climbs at the steady climb angle that the thrust limit permits, not more than 3° and not less than 1.885° (200 ft per NM). While G is false, it climbs at the nominal angle of the climb class (O12) (§3.5, §5.5) | Decided (the range 1.885°–3°: the user; the thrust rule inside the range: Claude's proposal) | User, 2026-10-03 |
-| D29 | Post-training starts from the base model in the multi-aircraft setting "one aircraft commanded". There is no single-aircraft post-training stage (§7) | Decided. It replaces multi-aircraft design §9 item 23 | User, 2026-10-03 |
-| D30 | The post-training reward comes only from the outcome: 1 for `landed` without a go-around; cⁿ (c < 1) for `landed` after n go-arounds; 0 for every other outcome and for every loss of separation. No payment for a go-around without a landing. No mask on where "go-around" can be said (D10 stays). The step-8.9 reward of the multi-aircraft design is not used (§7) | Decided. The value of c: O14 | User, 2026-10-03 |
+| D27 | "Go-around" changes no target of another column. A row that says "go-around" while "no level-off" is in force also says a level above the aircraft (rule 6). The executor keeps the heading word in force; it does not fly the course of R. While G is true, "unspecified" holds the airspeed (§3.2, §3.7, §5.4–§5.6) | Decided | User, 2026-10-03 |
+| D28 | The vocabulary has one climb word. Its angle is a value of the executor. While G is true, the executor climbs at the steady climb angle that the thrust limit permits, not more than 3° and not less than 1.885° (200 ft per NM). While G is false, it climbs at the nominal angle of the climb class; that value comes from the spec measurement with D15 (§3.5, §5.5) | Decided (the range 1.885°–3° and the nominal from D15: the user; the thrust rule inside the range: Claude's proposal) | User, 2026-10-03 |
+| D29 | Post-training starts from the base model in the multi-aircraft setting "one aircraft commanded". There is no single-aircraft post-training stage (§7) | Decided | User, 2026-10-03 |
+| D30 | The post-training reward comes only from the outcome: 1 for `landed` without a go-around; 0.9ⁿ for `landed` after n go-arounds; 0 for every other outcome and for every loss of separation. No payment for a go-around without a landing. No mask on where "go-around" can be said (D10). The step-8.9 reward of the multi-aircraft design is not used (§7) | Decided | User, 2026-10-03 |
 | D31 | Multi-aircraft inputs and judgements (§8): the landing context of every aircraft of a scene counts the landings of the closed loop; D23 holds for every aircraft of a scene, with a test; "established on the final" is a function of one row, the same for every aircraft (its rule: O6). The prior's training stops on the select days (§6.3) | Decided | User, 2026-10-03 |
 
 ### 0.2 Open items, in the order of discussion
@@ -68,8 +68,6 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
 | O9 | Finer grids near the runway course and near the glidepath angle | Decided by D6: measure first | 3.3, 3.5 |
 | O10 | How to compare the row intervals of the ablation (the values are D25: 2, 4, 8 s) | Criteria by the user after the design is settled (D7) | 4.8 |
-| O12 | The nominal angle of the climb word while G is false (one climb word: D28) | Proposal: the value from the measurement with D15 (now 1.32°) | 3.5 |
-| O14 | The value of c in D30 (the reward of a landing after a go-around) | Proposal 0.9: the highest reward that a go-around sentence could get under the user's decision of 2026-10-02 ("a clean landing is always best") | 7 |
 
 ### 0.3 Implementation
 
@@ -83,10 +81,9 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 ### 0.4 Plan
 
 1. Stage A (§14.2): write the vocabulary, the labeller, the identities, the executor, the judge and the replay on the
-   branch `dev-two-tier-v4`, milestone by milestone, each with tests and a code review. Another agent does this.
-   A0–A7 are built; A8 puts D26–D28 into that code.
+   branch `dev-two-tier-v4`, milestones A0–A8, each with tests and a code review. Another agent does this.
 2. Claude checks the result of stage A against this document (§14.6).
-3. The user sets the criteria (D7, O10) and the values of O2, O12 and O14. Then the formal artefact is built, and the
+3. The user sets the criteria (D7, O10), the values of O2 and the fitted values of D15. Then the formal artefact is built, and the
    replay gate is read at each row interval of the ablation (D11, D25: 2, 4, 8 s). The same readings answer D6 / O9 (are the grids sufficient).
 4. Stages B, C, D (§14.3–§14.5): the prior from the start, the post-training and the multi-aircraft work, the frontend.
 5. The user merges the branch.
@@ -202,13 +199,11 @@ aircraft back. Its effects:
 A runway word ends G. The model can say R again or another candidate ("expect runway k" again). This keeps the step-8
 sequence of the multi-aircraft design (approach → go-around → approach) in one column.
 
-**Why "go-around" changes no target (D27).** In `instruction-v3` the executor flew the final itself (capture,
-centreline, glidepath), so after a go-around no heading word and no usable altitude word was in force; the executor
-needed its own targets (multi-aircraft design 8.7: climb, course of R). In this design the model flies the final with
-its own heading and altitude words (D2, D3). An executor target for a go-around would replace a word of the model:
-"climb" against the "no level-off" in force, the course of R against the heading word in force. Then a target comes
-from the executor and not from a word (§5.1). Thus the go-around changes only the go-around angle of a climb word and
-the meaning of "unspecified" (§5.5, §5.6); the model says the climb and the heading.
+**Why "go-around" changes no target (D27).** The model flies the final with its own heading and altitude words (D2,
+D3). An executor target for a go-around would replace a word of the model that is in force: a climb against "no
+level-off", the course of R against the heading word. Then a target would come from the executor and not from a word
+(§5.1). Thus a go-around changes only the angle of a climb word and the meaning of "unspecified" (§5.5, §5.6). The model
+says the climb and the heading.
 
 ### 3.3 Heading column
 
@@ -293,7 +288,7 @@ with these widths (principle 6). The level detection of the labeller does not us
 | Descent 2 | 2.13° | 1.52° to 2.59° |
 | Descent 3 | 3.06° | 2.59° to 3.74° |
 | Descent 4 | 4.41° | 3.74° to 10° |
-| Climb | No angle in the word. The executor's angle (D28): 1.32° while G is false (O12); 1.885°–3° while G is true | 0.5° to 15° climb (the labeller's range of a climb piece) |
+| Climb | No angle in the word. The executor's angle (D28): the nominal of D15 while G is false (fitted: 1.32°); 1.885°–3° while G is true | 0.5° to 15° climb (the labeller's range of a climb piece) |
 
 The four descent classes come from a length-weighted k-means on the train days (spec `145d6911e75b`). The grid stays
 (D6). With D3 the model holds the glidepath with these classes. A measurement or a rough labelling decides if they are
@@ -308,15 +303,16 @@ word, so a centre of 3.06° flies 10 m from a 3.0° glidepath in 10 km; the k-me
 3.006°. The values that the measurement takes as percentiles are already rounded by their rules (turn rates to
 0.1°/s, the bank limit to 1°, the corridor to 5 m, 0.05° and 1°, the acceleration to 0.1 m/s²).
 
-**Climb (D28, O12).** The vocabulary has one climb word: "climb". The word has no angle. The angle is a value of the
+**Climb (D28).** The vocabulary has one climb word: "climb". The word has no angle. The angle is a value of the
 executor (§5.5), from the state G:
 
 - **G true (a missed approach).** The executor climbs at the go-around angle: the steady climb angle that the thrust
   limit permits at the present airspeed, not more than 3° and not less than 1.885°. 1.885° is the minimum gradient of a
-  missed approach, 200 ft per NM (AIM 5-4-21 b). 3° is the upper limit (the user, 2026-10-03). The real go-around climbs
-  are steeper (R40 v2: median 9.3 %, 5.3°), so the 3° limit usually applies.
-- **G false.** The executor climbs at the nominal angle of the climb class. The train days have 1,498 climb pieces among
-  233,649 vertical pieces (0.6 %); their length-weighted median is 1.32°. O12: the value from the measurement with D15.
+  missed approach, 200 ft per NM (AIM 5-4-21 b). 3° is the upper limit. The real go-around climbs are steeper (§11.6),
+  so the 3° limit usually applies.
+- **G false.** The executor climbs at the nominal angle of the climb class. The spec measurement fits it from the climb
+  pieces of the train days, with rounder candidates (D15); the user chooses. The train days have 1,498 climb pieces
+  among 233,649 vertical pieces (0.6 %); their length-weighted median is 1.32°.
 
 The labeller does not read a go-around angle: a climb piece is a climb when its angle is 0.5° to 15°, in and out of G.
 
@@ -399,8 +395,7 @@ only what differs from `instruction-v3` and what stays the same. The detailed ru
 The first row says the runway of the first approach (D26). For a flight without a go-around, this is the runway on
 which the flight landed (the harvest assignment). For a flight with a go-around, it is the runway of the first low pass
 (§4.6). The data shows a change of runway only at a go-around, so a labelled sentence changes R only with the runway
-word that ends G (D19). In `v5`, 9 of the 70 go-arounds inside a train sentence go to another runway (§11.6). A
-candidate without a published threshold crossing height (TCH), a
+word that ends G (D19). A candidate without a published threshold crossing height (TCH), a
 glidepath angle or an LPV DA is refused before labelling (the judge needs all three, §5.8).
 
 ### 4.3 Heading words
@@ -425,9 +420,8 @@ follows from D22. In `instruction-v3` a piece is level when its rows lie within 
 
 Two level pieces in a row with the same word merge. Moving pieces give the level words and the angle words. A move
 between two levels that round to the same word gives no level word (it cannot be said; §3.4). The last descent of
-each approach gives "no level-off" when it reaches the end of the approach: the threshold, or the go-around row (D26).
-Without this rule, the descent before a go-around gets a level word, the height where it stopped (§4.6). The tube of
-§3.4 checks each word, with the ε of its segment.
+each approach gives "no level-off" when it reaches the end of the approach: the threshold, or the go-around row (D26,
+§4.6). The tube of §3.4 checks each word, with the ε of its segment.
 
 ### 4.5 Speed words
 
@@ -458,8 +452,7 @@ probability of approximately 1e−11 (the 9.4 readouts).
    into `instructions/labeller/` (the labeller cannot import a runner), with its tests.
 2. The go-around row is the first row of the climb after the low pass: the row where the altitude reading starts the
    climb run, with its level word and its climb word (D26). The runway column says "go-around" in that row; G becomes
-   true. A go-around without a climb word is refused, with its reason. (In `v5`, the climb word is 0–4 rows after the
-   lowest point for 51 of the 69 go-arounds that have one; §11.6.)
+   true. A go-around without a climb word is refused, with its reason.
 3. The climb is read as altitude and angle words, as every climb. Its level word and its climb word are in the
    go-around row (rule 6). While G is true the executor flies the climb at the go-around angle (D28, §5.5).
 4. The runway word that ends G (D19): at the first level-off after the go-around climb, and not later than the row of
@@ -470,19 +463,15 @@ probability of approximately 1e−11 (the 9.4 readouts).
    the capture row and "unspecified" belong to the approach (§4.5); the first row says the runway of the first low pass
    (§4.2).
 
-**Why each approach is read separately (D26).** The labeller of `instruction-v3`, kept by stage A, reads a sentence as
-one approach to the landing. Two of its rules use the end of the sentence. A descent that changes to a climb without a
-level gets a level word, the height where it stopped; only the last descent to the end of the sentence says "no
-level-off" (`instructions/labeller/vertical.py`, module text). The capture row is the first row from which the track
-stays in the corridor to the end of the sentence (`instructions/labeller/lateral.py` `capture_row`). At the 70 real
-go-arounds inside the train sentences of `v5`, the words in force were a low level (70 of 70) and a speed value (70 of
-70), never "no level-off" or "unspecified" (§11.6). Thus in training the prior sees "go-around" only after a low level
-and a speed value. In closed loop the model flies its final with "no level-off" and "unspecified" in force. There the
-prior gives "go-around" a probability near zero, but there the DA check needs it (D3). The level word before a
-go-around also tells the prior that this approach will not land. The labeller knows that only from the rows after the
-go-around. This is the same type of fault as the one that D23 removes: a word that the labeller computes from later
-rows becomes an input of the rows after it. After D26, "go-around" occurs with "no level-off" and "unspecified" in
-force, as in a real go-around.
+**Why each approach is read separately (D26).** A word must not tell the prior what only later rows show (the rule of
+D23). Two readings use the end of an approach: "no level-off" is the last descent that reaches the end, and the capture
+row needs the track in the corridor up to the end. If the end were the landing for every approach, the words before a
+go-around would be a low level and a speed value, never "no level-off" or "unspecified" (§11.6). These words then tell
+the prior that this approach will not land, a fact that only the rows after the go-around show. The prior would also
+learn "go-around" only after a low level and a speed value. In closed loop the model flies its final with "no
+level-off" and "unspecified" in force, and there the prior would give "go-around" a probability near zero, where the DA
+check needs it (D3). With each approach read separately, "go-around" occurs with "no level-off" and "unspecified" in
+force, as on a real final.
 
 **Not in this version.** The 23 go-arounds before their sentence need a longer arrival slice, and 9 sentences of `v5`
 end at a low go-around that the harvest took for the landing (it takes the best-aligned crossing under 100 m, not the
@@ -583,15 +572,15 @@ The inner path-angle loop stays: γ̇* = sat((γ_ref − γ) / τ_γ, ±γ̇_max
 |---|---|---|
 | Level T + level | Hold | Altitude hold law, τ_h = 8 s (executor design §5.5) |
 | Level T + descent class | Descend to T | −nominal angle of the class; level-off starts at V·γ²/(2·γ̇_max) above T |
-| Level T + climb, G false | Climb to T | +nominal angle of the climb class (1.32°, O12); level-off as above |
+| Level T + climb, G false | Climb to T | +nominal angle of the climb class (D15, D28); level-off as above |
 | Level T + climb, G true | Go-around climb to T | +γ_GA, the go-around angle (below); level-off as above |
 | "No level-off" + descent class | Descend | −nominal angle of the class; no level-off |
 
 **The go-around angle (D28).** γ_GA = min(3°, max(1.885°, γ_T)). γ_T is the steady climb angle at the thrust limit and
 the present airspeed: sin γ_T = (T_max − D) / (m·g), with the drag D of the present state at load factor 1 (the
 point-mass model of §5.3). The executor computes γ_T at each cycle from the aircraft data that it already reads (§5.2).
-1.885° is the minimum gradient of a missed approach, 200 ft per NM (AIM 5-4-21 b); 3° is the upper limit (the user,
-2026-10-03). When γ_T is less than 1.885°, the reference is 1.885° and the inner loop gives what the thrust permits;
+1.885° is the minimum gradient of a missed approach, 200 ft per NM (AIM 5-4-21 b); 3° is the upper limit. When γ_T is
+less than 1.885°, the reference is 1.885° and the inner loop gives what the thrust permits;
 layer 1 of the judge records the limit that bound (§5.8). No word of the vocabulary says an angle of a climb: the
 vocabulary has one climb word (§3.5).
 
@@ -735,8 +724,7 @@ Teacher forcing on the new artefact, split by operating day (`data/day_split_202
 a held-out test airport only. The selection method between designs is open (O7).
 
 **Stop on the select days (D31).** The training keeps the epoch with the smallest per-step loss on the select days. The
-validation days are read one time for each stage, as in the post-training (§7). The prior of `instruction-v3` stopped
-on the validation days (`experiments/prior_train.py:173`, `:191` at `a80f6cf2`): it read them at every epoch.
+training does not read the validation days: they are read one time for each stage, as in the post-training (§7).
 
 ---
 
@@ -745,67 +733,50 @@ on the validation days (`experiments/prior_train.py:173`, `:191` at `a80f6cf2`):
 1. **One stage, from the base model, with one aircraft commanded (D29).** The closed loop is the multi-aircraft window
    loop with one commanded aircraft (R37 `--commanded one`, multi-aircraft design §6.6 step 9.4). The model speaks for
    one aircraft; the other aircraft fly their records. The start model is the base model with a traffic attention whose
-   output is zero (§8). There is no single-aircraft stage (in `instruction-v3`: landing, then augmented). The reasons:
+   output is zero (§8). There is no single-aircraft stage. The reasons:
    - The single-aircraft closed loop is a special case of this loop. With no other aircraft in its window, the
-     commanded aircraft says and flies what single-aircraft free generation does, with the same loss and gradients
-     (the tests of step 9.4). On the train days, approximately 45 % of the flights have no leader in the air at their
-     first predicted step (step 9.4, progress item 4).
-   - A single-aircraft reward does not see when an aircraft lands. The start model of the multi-aircraft work
-     (augmented, trained with single-aircraft rewards) landed between 111 s earlier and 121 s later than its record
-     (p10, p90; the labelled words: −36 s, +21 s). On the select days, 11.5 % of its flights lost separation with the
-     recorded traffic, and 12.3 % when it did not see the traffic: it did not use the other aircraft. The selected round
-     (5 of 8) of the multi-aircraft training then removed 1.75 points on the validation days (readouts `2026-09-28_m3_free_generation`,
-     `2026-09-30_m4_passes`). There is no reading of the base model in this loop, so these numbers do not show that the
-     single-aircraft rewards caused the spread; they show that those rewards do not limit it.
-   - Without the capture law (D2, D3), the base model must learn more to land. It learns it one time, in the loop where
+     commanded aircraft says and flies what single-aircraft free generation does, with the same loss and gradients.
+     Approximately 45 % of the train flights have no leader in the air at their first predicted step (§11.8).
+   - A single-aircraft reward does not see when an aircraft lands, so it does not limit the spread of the landing times.
+     In traffic, that spread puts the aircraft into the sequence of the other aircraft (§11.8).
+   - Without a capture law (D2, D3), the base model must learn more to land. It learns it one time, in the loop where
      it is used.
 2. **Reward (D30).**
 
    | Outcome of the sentence (§5.8) | Reward |
    |---|---|
    | `landed`, no go-around, on a runway of the airport's present landing direction | 1 |
-   | `landed` after n go-arounds, on such a runway | cⁿ, c < 1 (O14) |
+   | `landed` after n go-arounds, on such a runway | 0.9ⁿ |
    | Every other outcome; every loss of separation (multi-aircraft design §3.4) | 0 |
 
-   "The airport's present landing direction" is as now: a runway within 90° of a runway with a landing in the 30 min
-   before the first predicted step. The reward gives "a reward for a go-around that the DA check needs" without a term of
-   its own. An unstable approach that continues ends as `unstable_at_minimums`: 0. A go-around before the DA point
-   continues the flight with 900 s more time (§3.2); a landing then gives c. Thus the model gains from a go-around only
-   when the go-around changes a probable failure into a probable landing: with the same probability p of a landing
-   before and after the go-around, c·p < p. A go-around that prevents a loss of separation keeps the chance of c, so the
-   same reward also gives the go-around for traffic. The power n stops a chain of go-arounds that only adds time.
+   "The airport's present landing direction": a runway within 90° of a runway with a landing in the 30 min before the
+   first predicted step. The reward gives "a reward for a go-around that the DA check needs" without a term of its own.
+   An unstable approach that continues ends as `unstable_at_minimums`: 0. A go-around before the DA point continues the
+   flight with 900 s more time (§3.2); a landing then gives 0.9. Thus the model gains from a go-around only when the
+   go-around changes a probable failure into a probable landing: with the same probability p of a landing before and
+   after the go-around, 0.9·p < p. A go-around that prevents a loss of separation keeps the chance of 0.9, so the same
+   reward also gives the go-around for traffic. The power n stops a chain of go-arounds that only adds time.
 
-   **Why not the step-8.9 reward of the multi-aircraft design** (0.48·L + 0.14·S + 0.14·H + 0.14·Q, at most 0.9). It was
-   made for `instruction-v3`, where "go-around" could only follow "cleared", near the final. Three of its parts do not
-   fit this vocabulary:
-   - It pays up to 0.42 for a go-around without a landing (S, H, Q). Here "go-around" is permitted at any row after the
-     first predicted step (D10). A go-around far from other aircraft and above the approach altitude gets S = 1 and
-     H = 1 at once. With the same p before and after the go-around, its expected reward is approximately 0.28 + 0.62·p,
-     against p without it: more for p below approximately 0.74 (Claude's arithmetic). The base model has no capture law,
-     so p is low on many flights when the training starts. The reward then pays for a go-around when the model is not
-     sure, not when the approach is unstable.
-   - S and Q stop at "established on the final again", from the capture state of the executor. The executor has no
-     capture state (§5.8).
-   - H measures the time to climb to the approach altitude. That climb is the executor's go-around angle (D28), not a
-     choice of the model.
-
-   In this stage the other aircraft fly their records. They do not react, so a go-around without a landing cannot help
-   them land (the user's reason of 2026-10-02 for S, H, Q). A later stage with every aircraft of a window commanded
-   discusses it again.
+   **No payment for a go-around without a landing.** Such a payment f makes a go-around better than the continued
+   approach when p < f / (f + 0.1), with the same p before and after the go-around (Claude's arithmetic). For example,
+   f = 0.28 gives p < 0.74. "Go-around" is permitted at any row after the first predicted step (D10), and p is low on
+   many flights when the training starts. The payment then teaches a go-around where the model is not sure, not where
+   the approach is unstable. In this stage the other aircraft fly their records and do not react: a go-around cannot
+   help them land. A stage with every aircraft of a window commanded (item 8) decides for itself if it pays for that
+   help.
 3. **Masks.** The vocabulary rules (§3.7); the procedure masks (glidepath lower edge inside the FAF, DA before the
    join, no climb back; D14 while G is true); the separation masks (§8, O6). The masks stay with the model
    (`procedure_masks.json`, contract C35).
-4. **Windows.** Real windows and augmented windows of the train days: B (a moved start, the transformation of stage 2
-   of `instruction-v3`), A (one inserted aircraft that flies its record), D (the leader moved) (multi-aircraft design §5,
-   step 9.4). The counts are set at stage C.
-5. **Loss** (as in `instruction-v3`): the clipped-ratio surrogate (ε = 0.2) with the advantage among the K sentences of
+4. **Windows.** Real windows and augmented windows of the train days: B (a moved start: a turn about the airport, a
+   height change and a speed change, post-training design §4), A (one inserted aircraft that flies its record), D (the
+   leader moved) (multi-aircraft design §5, step 9.4). The counts are set at stage C.
+5. **Loss**: the clipped-ratio surrogate (ε = 0.2) with the advantage among the K sentences of
    the same aircraft and window; the pull to the base model (0.04, the KL on the sampled words, masked distribution);
    the teacher-forced data term (1) on scene samples of the train days; the traffic attention has its own learning rate.
 6. **Go-around sampling first.** Before the training, measure the probability that the base model gives "go-around" on
-   the final (after D26 the data has go-arounds with "no level-off" and "unspecified" in force). If the model says
-   "go-around" by itself, the training uses no probes. Only if it does not, the probes of the multi-aircraft design
-   (8.10) come back, to be discussed with their evidence: with a cross-entropy on the forced word, the model said
-   "go-around" by itself, but 88 of its 108 own go-arounds ended worse than round 0 (§11.6).
+   the final (with D26 the data has go-arounds with "no level-off" and "unspecified" in force). If the model says
+   "go-around" by itself, the training uses no probes. If it does not, the probes of the multi-aircraft design (8.10)
+   are discussed with the evidence of §11.6: a cross-entropy on a forced word teaches the word, not when to say it.
 7. **Selection.** On the select days; the validation days are read one time for each stage. O7 asks for
    leave-one-airport-out as the selection method for the airport generalization.
 8. **Later, optional.** A stage with every aircraft of a window commanded (multi-aircraft design 7.6, 9.5) starts from
@@ -823,7 +794,7 @@ on the validation days (`experiments/prior_train.py:173`, `:191` at `a80f6cf2`):
 - R exists at every step for every aircraft from its first predicted step on. Before it, no input reads the aircraft's
   R (D23), the edge features included. Thus the relations of the edge features (`inference/scene_edges.py`: the
   approach clock, the same runway, the parallel runways) and the separation judge (`inference/separation.py`) have a
-  runway at every step. In `instruction-v3` this was also true; this design keeps it.
+  runway at every step.
 - The clearance mask (`inference/separation_masks.py:131`) blocks "cleared" while a cleared aircraft ahead is too close.
   This design has no "cleared" word. A replacement is open (O6).
 - The speed-word mask stays.
@@ -831,20 +802,18 @@ on the validation days (`experiments/prior_train.py:173`, `:191` at `a80f6cf2`):
 - **Landing context (D31).** In the closed loop, the landing context of every aircraft of the scene, the replayed
   aircraft included, counts the landings that occur in the loop: the recorded landings of the replayed aircraft and of
   the aircraft before the window, and the landing of a commanded aircraft when it lands in the loop. The recorded
-  landing of a commanded aircraft is never in it. In `instruction-v3` only the commanded aircraft had this context. The
-  replayed aircraft kept their recorded context, with the recorded landings of the commanded aircraft
-  (`experiments/traffic_window.py:405`, a stated approximation). A commanded aircraft that flew later than its record
-  thus read, through the traffic attention, a landing on its own landed runway at its recorded time.
+  landing of a commanded aircraft is never in it: that landing is the future of the commanded aircraft. Through the
+  traffic attention, a commanded aircraft that flies later than its record would read a landing on its own landed
+  runway.
 - **D23 in a scene (D31).** At the rows up to the first predicted step of an aircraft, no input of any aircraft and no
   edge feature uses a value computed from that aircraft's R. A test: a change of one aircraft's runway word leaves all
   inputs and edge features of the scene at those rows the same, bit for bit.
 - **Established on the final (D31, O6).** The separation judge (multi-aircraft design §3.2: the in-trail rule, who is
-  responsible) and the separation masks must know if an aircraft is established on the final of its R. In
-  `instruction-v3` this came from the executor's capture state (a commanded aircraft) and from the labeller's capture
-  row (a replayed aircraft). The capture row uses later rows, and this executor has no capture state (§5.8). The new
-  rule is a function of one row: the state of the aircraft at that row and its R. It is the same for every aircraft
-  (commanded, labelled, replayed). It is not an executor law: only the separation judge and the masks read it. Its rule
-  is open with O6.
+  responsible) and the separation masks must know if an aircraft is established on the final of its R. This comes from
+  a function of one row: the state of the aircraft at that row and its R. It is the same for every aircraft
+  (commanded, labelled, replayed). It does not come from the capture row, which uses later rows (§2), and not from an
+  executor state, because the executor has none (§5.8). It is not an executor law: only the separation judge and the
+  masks read it. Its rule is open with O6.
 
 ---
 
@@ -896,9 +865,9 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | Level envelope ε | half the segment's step + 10 m: 40 / 70 / 235 m | D22 |
 | Level detection | ≥ 20 s, rows within 25 m of the piece's median | Labeller constant (§4.4) |
 | Descent classes | edges −0.5 / 1.52 / 2.59 / 3.74 / 10°; nominal 0.92 / 2.13 / 3.06 / 4.41° | Spec, k-means on train days |
-| Climb word | One class; a climb piece is 0.5–15° (labeller); executor angle while G is false: nominal 1.32° | Spec; D28, O12 |
-| Go-around angle (executor, while G is true) | The steady climb angle at the thrust limit, within 1.885°–3° | AIM 5-4-21 b (minimum, 200 ft per NM); the user, 2026-10-03 (maximum); D28 |
-| Reward of a landing after n go-arounds | cⁿ; c open (proposal 0.9) | D30, O14 |
+| Climb word | One class; a climb piece is 0.5–15° (labeller); executor angle while G is false: the nominal of D15 (fitted 1.32°) | Spec; D15, D28 |
+| Go-around angle (executor, while G is true) | The steady climb angle at the thrust limit, within 1.885°–3° | AIM 5-4-21 b (minimum, 200 ft per NM); D28 (maximum) |
+| Reward of a landing after n go-arounds | 0.9ⁿ | D30 |
 | Speed grid, range, tolerance | 5 m/s, 20–250 m/s, ±5 m/s | Spec |
 | Speed change rate (executor) | 0.25 m/s² | 5 m/s ÷ 20 s (user, 2026-09-24) |
 | Transition acceleration limit | 1.4 m/s² | Spec, measured (p99.9) |
@@ -984,14 +953,15 @@ largest).
   ([readout](readouts/2026-10-03_9_4_weights.zh.md)).
 - R40 v2: 105 real go-arounds on the training days; from the go-around to the next turn onto the final, median 421 s,
   p95 598 s ([readout](readouts/2026-10-01_go_arounds.zh.md)).
-- Words in force at the 70 real go-arounds inside the train sentences of `v5` (R40 v2 joined to the `v5` sentences;
-  a one-off script, 2026-10-03; the A8 smoke readout gives the same counts for the new labeller): "descend to land" 0 of
+- Words in force at the 70 real go-arounds inside the train sentences of `v5`, where each sentence is one
+  approach to the landing (R40 v2 joined to the `v5` sentences; a one-off script, 2026-10-03): "descend to land" 0 of
   70; a level 70 of 70 (median 450 m MSL; the go-around heights above the threshold p10 / p50 / p90 90 / 236 / 481 m);
   "unspecified" 0 of 70; the capture row after the go-around row 70 of 70; a landing on another runway after the
   go-around 9 of 70 (D26).
 - The row of the climb word in `v5`, relative to the lowest point of the go-around (69 of the 70 have a climb word):
   1–3 rows before 7; the same row 6; 1–4 rows after 45; 5–23 rows after 11. D26 puts "go-around" in the row of the
   climb word.
+- The climb after a real go-around: median gradient 9.3 % (5.3°); 96 % are at least 200 ft per NM (R40 v2, readout §7).
 
 ---
 
@@ -1004,6 +974,23 @@ p50 / p95 / largest: the chosen grid (40 levels) 17 / 30 / 58 m; the same shape 
 `instruction-v3` grid (30 m, 182 classes) has at most 15 m. These numbers come from a one-off script of that proposal;
 the spec measurement of stage A gives them again from a runner (§14.2 A3). The proposal did not fly the grid: the replay
 of stage A does.
+
+### 11.8 The post-training in traffic
+
+From the multi-aircraft readouts of `instruction-v3` (`readouts/2026-09-28_m3_free_generation.zh.md`,
+`readouts/2026-09-30_m4_passes.zh.md`; multi-aircraft design §6.6 step 9.4):
+
+- The start model of the multi-aircraft work (augmented: landing and augmented starts, single-aircraft rewards) with
+  one aircraft commanded, on the select days: it landed between 111 s earlier and 121 s later than its record (p10,
+  p90); the labelled words, −36 s and +21 s. A loss of separation with the recorded traffic ended 11.5 % of its
+  sentences; 12.3 % when it did not see the traffic. Most losses were on vectored approaches (21.6 %; straight-in 4.0 %).
+- The selected round (5 of 8) of the multi-aircraft training, validation days: 1.75 points fewer losses of separation
+  than the start model (11.1 % → 9.3 %); the labelled words 4.4 %, the records 2.9 %.
+- No readout has the base model in this loop. The numbers show that single-aircraft rewards do not limit the spread of
+  the landing times; they do not show that those rewards make it.
+- In the window loop with one commanded aircraft and no other aircraft, the words, the flown states, the loss and the
+  gradients are the same as in single-aircraft free generation and training (tests of step 9.4). On the train days,
+  approximately 45 % of the flights have no leader in the air at their first predicted step.
 
 ## 12 Regulation sources
 
@@ -1170,7 +1157,7 @@ stage D.
 - The spec measurement (D15): for the descent centres and edges and the climb centre, write the fitted value and the
   candidates rounded to 0.5°, 0.25° and 0.1°, each with the end-of-piece height error that it leaves (the existing
   `fit_descent_classes` error, and the same for the climb pieces). Also write the distribution of the climb angles
-  (O12). The spec keeps the fitted values until the user chooses.
+  (D15, D28). The spec keeps the fitted values until the user chooses.
 - The spec measurement also writes the rounding error of the level words (row 0 apart, p50 / p95 / largest) under the
   grid of D22 and under a uniform 30 m grid, on the train flights, so that §11.7 comes from a runner.
 - Runners kept and changed: `instruction_signals`, `instruction_spec`, `instruction_labels`, `instruction_figures`.
@@ -1226,8 +1213,8 @@ stage D.
 **A7. Close of stage A.** The full ts suite passes (run detached). §0.3 and §13 are updated. Report to the user: the
 commits, the archive list, the smoke results (as information, not as a verdict), and what stage B needs.
 
-**A8. Go-around reading and the go-around in the executor (D26–D28).** A0–A7 were built before these decisions. First
-merge the `dev-two-tier` commit that holds this milestone into `dev-two-tier-v4`.
+**A8. Go-around reading and the go-around in the executor (D26–D28).** First merge the `dev-two-tier` commit that
+holds this milestone into `dev-two-tier-v4`.
 
 - Labeller (§4.2, §4.4–§4.6): read each approach separately. `vertical.py`: the last descent that reaches a go-around
   row says "no level-off". `lateral.py` `capture_row`: one per approach, to the end of the approach; an approach that
@@ -1260,7 +1247,7 @@ airport embedding; the glidepath height in each candidate vector (D13, D23); the
 (D17); the go-around state as an input; five heads with the runway head scoring the candidates, "unchanged" and
 "go-around". The observation is 16 s at every Δ (8, 4, 2 rows). The checkpoint identity of §9.2 #5. The procedure masks' word tolerance becomes half
 the step of the level's segment (D22; `prior/procedure.py` `word_tolerance_m`). The training stops on the select days
-(D31, §6.3). The selection method is open (O7). Free generation with the masks of §3.7 and the procedure masks (D14).
+(D31, §6.3; the archived `experiments/prior_train.py` stops on the validation days). The selection method is open (O7). Free generation with the masks of §3.7 and the procedure masks (D14).
 Milestones, tests and reviews as in stage A.
 
 ### 14.4 Stage C: post-training and multi-aircraft (outline)
@@ -1268,7 +1255,8 @@ Milestones, tests and reviews as in stage A.
 One post-training stage from the base model with one aircraft commanded (D29, §7): the window loop of the multi-aircraft
 design with `--commanded one`, the traffic attention, the reward of D30, the masks, real and augmented windows. Before
 it: the go-around probability of the base model on the final (§7 item 6). The multi-aircraft parts of §8 (D31): the
-landing context from the loop for every aircraft, the D23 test over a scene, the rule "established on the final" and
+landing context from the loop for every aircraft (the archived `experiments/traffic_window.py` gives a replayed aircraft
+its recorded context), the D23 test over a scene, the rule "established on the final" and
 the replacement of the clearance mask (O6). The edge-feature conformance (§9.2 #6). The multi-aircraft step-8.9 reward is
 not built (D30). A later stage with every aircraft of a window commanded is optional (§7 item 8).
 
