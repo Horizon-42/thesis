@@ -42,13 +42,13 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D14 | While G is true: "no level-off" is not permitted (rule 5), and the procedure mask "no climb below the entry height" does not apply (§3.7) | Decided | User, 2026-10-03 |
 | D15 | The spec measurement gives each value that it fits from data with rounder candidates and the fit that each leaves; the user chooses (§3.5) | Decided | User, 2026-10-03 |
 | D16 | The prior has no row position embedding and no input "time from row 0". The time attention uses RoPE with the row's time in seconds (§6.1) | Decided (was the first half of O4) | User, 2026-10-03 |
+| D17 | Every column keeps the input "time since this column said its word in force", in seconds; the runway column's too (§6.1) | Decided (was O4) | User, 2026-10-03 |
 
 ### 0.2 Open items, in the order of discussion
 
 | # | Item | Proposal | §  |
 |---|---|---|---|
 | O2 | Tolerances of the stability check at the decision altitude (DA) | No values in this document (D7) | 5.8 |
-| O4 | The per-column input "time since this column said its word" | Proposal: keep it for every column, in seconds instead of rows (the same for every row interval, D11) | 6.1 |
 | O5 | Label the real go-arounds (R40 found 105 on the training days) | Discuss after O2 and O4 | 4.6 |
 | O6 | Replacement for the clearance mask of the multi-aircraft loop | Discuss with §8 | 8 |
 | O7 | Selection of designs by leave-one-airport-out (train on four airports, read the fifth) | Discuss with §7 | 7 |
@@ -543,9 +543,9 @@ the model says "go-around" before the DA point, the flight continues (§3.2).
   seconds, so the attention reads only time differences. Seconds, not rows, so that every row interval of D11 reads the
   same time. RoPE works with the row-by-row cache of the speaker (`Prior.extend`): a key is rotated once, when it is
   written. The RoPE base is set at implementation.
-- **Time since each word (O4, proposal).** Each column has the input "time since this column said its word in force"
-  (`since`, now `log1p(rows) / 5`, counted from the first predicted step at the earliest). Proposal: in seconds, for
-  every column. The runway column's value is, in the labelled data, the time since the first predicted step, because a
+- **Time since each word (D17).** Each column has the input "time since this column said its word in force"
+  (`since`, now `log1p(rows) / 5`, counted from the first predicted step at the earliest). It is in seconds, for every
+  column, so that every row interval of D11 reads the same time. The runway column's value is, in the labelled data, the time since the first predicted step, because a
   labelled sentence says its runway only there. In closed loop it is the time since the runway was given or given again
   (a change of runway, or the runway word that ends a go-around), so it measures a real fact.
 
