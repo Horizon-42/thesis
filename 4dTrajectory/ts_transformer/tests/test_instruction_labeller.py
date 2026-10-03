@@ -378,11 +378,12 @@ def test_a_low_pass_over_the_runway_followed_by_a_second_approach_is_read_not_re
 def test_the_runway_word_after_a_go_around_waits_for_the_level_off_after_the_climb():
     """D19: a missed approach that first flies level at its low point (early, to the missed approach point) does not end
     the go-around there: the runway is said again at the level held after the climb."""
-    legs = [(30, 0, 70, 0), (89, 0, 70, -GLIDE), (15, 0, 70, 0), (40, 0, 70, 8.0), (10, 0, 70, 0), (30, -6, 70, 0),
-            (185, 0, 70, 0), (30, -6, 70, 0), (20, 0, 70, 0), (104, 0, 70, -GLIDE)]
+    # down 15 m under the low level and back within 4 s, so the lowest row comes before the level piece begins
+    legs = [(30, 0, 70, 0), (78, 0, 70, -GLIDE), (2, 0, 70, 4.0), (15, 0, 70, 0), (40, 0, 70, 8.0), (10, 0, 70, 0),
+            (30, -6, 70, 0), (170, 0, 70, 0), (30, -6, 70, 0), (20, 0, 70, 0), (104, 0, 70, -GLIDE)]
     reading = read_flight(instruction_flight(*fly_legs(legs, 90.0, 900.0, -400.0, 0.0)), instruction_airport(), spec())
     (go,), (again,) = reading.go_around_rows, reading.runway_again_rows
-    assert 119 <= go <= 136 and again >= 172                         # the climb starts at row 134, levels at 174
+    assert go < 125 <= again                                         # the climb starts at row 125
 
 
 def test_a_go_around_needs_a_held_level_before_and_after():

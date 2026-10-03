@@ -99,14 +99,14 @@ class Admitted:
     smoothed: Smoothed
     relative: RunwayRelative       # on the smoothed track and altitude
     cut_at_crossing: bool
-    #: The rows of the landing passages BEFORE the landing (low crossings the flight came back from): each must lie in
-    #: a go-around's low pass (`read_flight`).
-    passages_before: tuple[int, ...] = ()
+    #: The go-arounds on its rows (`flight_go_arounds`): every landing passage it came back from lies in one's low pass.
+    go_arounds: tuple[GoAround, ...]
 
 
 def admit(signals: FlightSignals, geometry: AirportGeometry, spec: VocabularySpec) -> Admitted:
     """The one gate in front of both the labeller and the spec's measurements: the step, the
-    runway, the cut before the landing, and the ground-speed refusals (§3.1, §3.6).
+    runway, the cut before the landing, the go-arounds (and the passages they must explain), and the
+    ground-speed refusals (§4.1, §4.6).
 
     The data plane cuts a flight at its landing, so a series normally ends short of the threshold and
     holds no landing passage at all. A landing passage (`landing_passages`, as the harvest judges a
@@ -125,7 +125,7 @@ def admit(signals: FlightSignals, geometry: AirportGeometry, spec: VocabularySpe
     limit = landing_cross_limit_m(geometry, runway_index, spec.landing_cross_limit_m, spec.parallel_course_delta_deg)
     passages = landing_passages(raw, limit, spec)
     crossing = passages[-1] if passages and not (raw.before_threshold_m[passages[-1]:] > 0.0).any() else None
-    passages_before = tuple(passages[:-1] if crossing is not None else passages)
+    passages_before = passages[:-1] if crossing is not None else passages
     if crossing is not None:
         signals = truncated(signals, crossing)
     if signals.n_rows < 2:
@@ -140,14 +140,15 @@ def admit(signals: FlightSignals, geometry: AirportGeometry, spec: VocabularySpe
         raise Refused("ground speed outside the speed words", f"smoothed {speed.min():.1f}–{speed.max():.1f} m/s")
     relative = relative_to_runway(signals.e_m, signals.n_m, smoothed.track_deg, smoothed.altitude_m, candidate)
     return Admitted(signals=signals, runway_index=runway_index, candidate=candidate, smoothed=smoothed,
-                    relative=relative, cut_at_crossing=crossing is not None, passages_before=passages_before)
+                    relative=relative, cut_at_crossing=crossing is not None,
+                    go_arounds=tuple(flight_go_arounds(signals, smoothed, passages_before, geometry, spec)))
 
 
-def flight_go_arounds(flight: Admitted, geometry: AirportGeometry, spec: VocabularySpec) -> list[GoAround]:
-    """The admitted flight's go-arounds (`go_around.go_arounds`) on its smoothed altitude, every candidate's frame;
-    refused when one is on the runway (a touch-and-go) or when a landing passage before the landing is not inside a
+def flight_go_arounds(signals: FlightSignals, smoothed: Smoothed, passages_before: list[int], geometry: AirportGeometry,
+                      spec: VocabularySpec) -> list[GoAround]:
+    """A flight's go-arounds (`go_around.go_arounds`) on its smoothed altitude, every candidate's frame; refused when one
+    is on the runway (a touch-and-go) or when a landing passage it came back from (``passages_before``) is not inside a
     go-around's low pass."""
-    smoothed, signals = flight.smoothed, flight.signals
     relatives = [relative_to_runway(signals.e_m, signals.n_m, smoothed.track_deg, smoothed.altitude_m, candidate)
                  for candidate in geometry.candidates]
     found = go_arounds(signals.time_s, smoothed.altitude_m, relatives, spec)
@@ -155,7 +156,7 @@ def flight_go_arounds(flight: Admitted, geometry: AirportGeometry, spec: Vocabul
         if item.on_runway:
             raise Refused("touch-and-go", f"row {item.row}: {item.along_m:.0f} m past the threshold, "
                                           f"{item.height_m:.0f} m up")
-    for row in flight.passages_before:
+    for row in passages_before:
         if not any(item.low_pass.first <= row <= item.low_pass.last + 1 for item in found):
             raise Refused("threshold passed before the landing",
                           f"a landing passage at row {row} that no go-around explains")
@@ -193,7 +194,7 @@ def read_flight(signals: FlightSignals, geometry: AirportGeometry, spec: Vocabul
     words = words or Words(spec)
     flight = admit(signals, geometry, spec)
     signals, smoothed, relative, candidate = flight.signals, flight.smoothed, flight.relative, flight.candidate
-    found = flight_go_arounds(flight, geometry, spec)
+    found = list(flight.go_arounds)
     lateral = read_lateral(smoothed.track_deg, relative, candidate.course_deg, spec, words)
     vertical = read_vertical(smoothed.distance_m, smoothed.altitude_m, spec, words)
     runway = runway_words(found, vertical, smoothed.altitude_m, flight.runway_index, candidate.ident, signals.n_rows,
