@@ -480,6 +480,8 @@ class WindowRewardTuner(RewardTuner):
         """Under this tuner's model, each trained sentence's log-probability of the go-around a probe said for it
         (`forced_go_around_log_p`: its approach column at that step, masked as it was spoken) — keyed by (window sample,
         place in it), the probed sentences only; teacher forcing, no gradient."""
+        if not split.windows:
+            raise ValueError("no window sample to read the probes' go-arounds on")
         self.model.eval()
         out: dict[tuple[int, int], float] = {}
         with torch.no_grad():
