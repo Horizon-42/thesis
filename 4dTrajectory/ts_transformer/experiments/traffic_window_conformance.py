@@ -6,21 +6,24 @@ read with today's code and the readout's own functions (`traffic_window_generati
 scenes, the draw, the augmentation, the batches — the checksums of the prior's checkpoint and the executor spec must be
 the disk's, or the data changed, not the code). Then, against the readout's ``aircraft.jsonl``:
 
-1. **the whole draw** (no model, quick): the same batches, and in each the same (window, flight) pairs as its rows —
-   every window's draw, augmentation and batch;
+1. **the whole draw** (no model, quick): every batch's rows — the same (window, flight, sample, source) keys as today's
+   draw makes (`traffic_window_generation.batch_keys`), each with the same fields the draw alone decides (who it is,
+   its airport, window and batch, its window's size, its observed runway, its window's augmentation and its part in
+   it) — every window's draw, augmentation and batch, in every batch;
 2. **``--batches`` batches read again** (24 by default: `numpy.linspace` over the batch numbers, rounded, each once; the
    batches run from the smallest windows to the largest, so the ones read span the sizes), in forked processes as the
    readout reads (`traffic_window_generation.read_batches`), as the configuration says: row by row — the same rows by
    (window, flight, sample, source), each with the same fields of the same values (both written as JSON with sorted
-   keys: a float bit for bit, NaN for NaN).
+   keys, today's rows as the readout writes them: a float bit for bit, NaN for NaN).
 
 Not read: the summary, the counts, the run record — the configuration and the code make them; the same rows, the same
 numbers. A check passes or prints the first difference (which batch, which row, which fields, both values) and exits
 non-zero. Passed on a clean checkout, it writes ``<readout>.conformance/passed-<commit 12>.json`` beside the readout
-(read-only): today's code version (`code_version.code_version`, the keys of the readout's ``code.json``), the readout,
-the batches and the ones read, the rows compared, the time — the record `traffic_window_compare` accepts as the code
-version's evidence. A dirty checkout's check is read and reported, never written; a commit's record is never written
-over.
+(read-only; `record_payload`): today's code version (`code_version.code_version`, the keys of the readout's
+``code.json``), the readout checked — its path, the checksum of its rows and its own ``code.json``, so a record never
+vouches for another readout written later under the same name — the batches and the ones read, the rows compared, the
+time: the record `traffic_window_compare` accepts as the code version's evidence. A dirty checkout's check is read and
+reported, never written; a clean commit's record is never written over.
 
 What it cannot see (the design's limits): a change that alters only batches not read; a row field added or dropped
 fails it ("other fields"); another torch / CUDA / GPU may move a float — reported as it is.
@@ -42,9 +45,10 @@ import torch
 
 from ts_transformer.experiments.code_version import code_version
 from ts_transformer.experiments.traffic_window_generation import (
-    READING_CONSTANTS, WORKERS, Prepared, prepare, read_aircraft, read_batches, readout_config,
+    AIRCRAFT_FILE, CODE_FILE, READING_CONSTANTS, WORKERS, Prepared, batch_keys, prepare, read_aircraft, read_batches,
+    readout_config,
 )
-from ts_transformer.io_utils import utc_now, write_json_atomic
+from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 #: Batches read again by default (the user, 2026-10-03).
@@ -82,24 +86,39 @@ def row_key(row: Mapping[str, Any]) -> tuple[int, str, Any, str]:
     return row["window"], row["dataset_id"], row["sample"], row["source"]
 
 
-def check_draw(prepared: Prepared, rows: Sequence[Mapping[str, Any]]) -> None:
-    """The readout's rows hold today's batches, and each batch today's (window, flight) pairs (module docstring 1)."""
-    drawn, batches = prepared.drawn, prepared.batches
-    stored: dict[int, set[tuple[int, str]]] = {}
-    for row in rows:
-        stored.setdefault(row["batch"], set()).add((row["window"], row["dataset_id"]))
-    if sorted(stored) != list(range(len(batches))):
-        raise Differs(f"the readout's rows are in batches {sorted(stored)[:5]}… ({len(stored)}), today's draw makes "
-                      f"{len(batches)}")
-    for number, windows in enumerate(batches):
-        today = {(w, drawn.batch.signals[j].dataset_id) for w in windows for j in drawn.members[w]}
-        if stored[number] != today:
-            raise Differs(f"batch {number} holds other (window, flight) pairs: {sorted(stored[number] - today)[:3]} "
-                          f"only in the readout, {sorted(today - stored[number])[:3]} only today")
+def _shown(keys: set) -> list:
+    """A few of ``keys`` to print (a sample is None for the labelled and recorded rows, an int for the model's)."""
+    return sorted(keys, key=repr)[:3]
 
 
 def _written(value: Any) -> str:
-    return json.dumps(value, sort_keys=True)
+    """``value`` as a readout writes it (JSON: a tuple a list, a key a string), with sorted keys."""
+    return json.dumps(json.loads(json.dumps(value)), sort_keys=True)
+
+
+def check_draw(prepared: Prepared, rows: Sequence[Mapping[str, Any]]) -> None:
+    """The readout's rows are today's draw (module docstring 1), batch by batch."""
+    config, batches = prepared.config, prepared.batches
+    stored: dict[int, list[Mapping[str, Any]]] = {}
+    for row in rows:
+        stored.setdefault(row["batch"], []).append(row)
+    if sorted(stored) != list(range(len(batches))):
+        raise Differs(f"the readout's rows are in batches {sorted(stored)[:5]}… ({len(stored)}), today's draw makes "
+                      f"{len(batches)}")
+    for number, chunk in enumerate(batches):
+        today = batch_keys(prepared.drawn, number, chunk, config.samples, config.model_sources)
+        mine = {row_key(row): row for row in stored[number]}
+        if len(mine) != len(stored[number]):
+            raise Differs(f"batch {number} holds a (window, flight, sample, source) twice")
+        if mine.keys() != today.keys():
+            raise Differs(f"batch {number}: rows {_shown(mine.keys() - today.keys())} only in the readout, "
+                          f"{_shown(today.keys() - mine.keys())} only in today's draw")
+        for key, drawn in today.items():
+            moved = [name for name in drawn if _written(mine[key][name]) != _written(drawn[name])]
+            if moved:
+                raise Differs(f"batch {number}, row {key}: what the draw decides differs in {moved} — "
+                              + "; ".join(f"{name}: readout {_written(mine[key][name])[:200]}, today "
+                                          f"{_written(drawn[name])[:200]}" for name in moved[:3]))
 
 
 def check_rows(number: int, stored: Sequence[Mapping[str, Any]], read: Sequence[Mapping[str, Any]]) -> int:
@@ -112,8 +131,8 @@ def check_rows(number: int, stored: Sequence[Mapping[str, Any]], read: Sequence[
     if len(by_key) != len(stored) or len(today) != len(read):
         raise Differs(f"batch {number} holds a (window, flight, sample, source) twice")
     if by_key.keys() != today.keys():
-        raise Differs(f"batch {number}: rows {sorted(by_key.keys() - today.keys())[:3]} only in the readout, "
-                      f"{sorted(today.keys() - by_key.keys())[:3]} only today")
+        raise Differs(f"batch {number}: rows {_shown(by_key.keys() - today.keys())} only in the readout, "
+                      f"{_shown(today.keys() - by_key.keys())} only today")
     for key, row in by_key.items():
         new = today[key]
         if _written(row) == _written(new):
@@ -126,6 +145,19 @@ def check_rows(number: int, stored: Sequence[Mapping[str, Any]], read: Sequence[
                       + "; ".join(f"{name}: readout {_written(row[name])[:200]}, today {_written(new[name])[:200]}"
                                   for name in fields[:3]))
     return len(stored)
+
+
+def readout_identity(readout: Path) -> dict[str, Any]:
+    """What a record binds its readout by beside its path: the checksum of its rows and its ``code.json``."""
+    return {"aircraft_sha256": file_sha256(readout / AIRCRAFT_FILE),
+            "readout_code": json.loads((readout / CODE_FILE).read_text(encoding="utf-8"))}
+
+
+def record_payload(readout: Path, code: Mapping[str, Any], checked: Mapping[str, Any], elapsed_s: float
+                   ) -> dict[str, Any]:
+    """A passed record (module docstring): the checker's code version, the readout checked, what was checked."""
+    return {"readout": repo_relative(readout), **readout_identity(readout), "code": dict(code), **checked,
+            "elapsed_s": elapsed_s, "written_utc": utc_now()}
 
 
 def check(readout: Path, batches: int, workers: int, device: torch.device) -> dict[str, Any]:
@@ -161,7 +193,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     readout = args.readout if args.readout.is_absolute() else REPO_ROOT / args.readout
     git = git_state()
     record = record_path(readout, git["head"])
-    if record.exists():
+    if record.exists() and not git["dirty"]:
         parser.error(f"{record} exists: this commit's check is written once")
     device = torch.device(args.device)
     started = time.perf_counter()
@@ -178,8 +210,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if record.exists():
         parser.error(f"{record} was written while this check ran: this commit's check is written once")
-    write_json_atomic(record, {"readout": repo_relative(readout), "code": code_version(git, device, READING_CONSTANTS),
-                               **checked, "elapsed_s": elapsed, "written_utc": utc_now()}, allow_nan=False)
+    write_json_atomic(record, record_payload(readout, code_version(git, device, READING_CONSTANTS), checked, elapsed),
+                      allow_nan=False)
     print(f"→ {record}")
     return 0
 

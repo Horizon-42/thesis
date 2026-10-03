@@ -1120,7 +1120,8 @@ misled — it compares two models, it does not check code). `traffic_window_comp
 [--out <new dir>]`. The same three rules for any two readouts, no case written for one comparison: (1) the configurations
 (`config.json`, R34's loader) equal in every key but the model's (`COMPARED`: `prior`, `prior_checkpoint_sha256`), else
 refused naming the keys; (2) the code version's evidence — the two `code.json` equal and neither dirty, or a conformance
-record (R44) of one readout, naming it, whose code version is the other's `code.json` (either direction), else refused
+record (R44) of one readout, naming it and binding it as it is now (its rows' checksum and `code.json`), whose code
+version is the other's `code.json` (either direction), else refused
 naming the record to make; (3) the same (window, aircraft, sample, source) rows with their model-free fields
 (`MODEL_FREE`) equal, and the model-free sources (labelled, recorded) equal row for row (they read the prior's procedure
 masks too). The result names its evidence (`code_evidence`). A row STARTING IN A LOSS depends on the model (the aircraft
@@ -1206,15 +1207,18 @@ cannot be spoken again by later code, whose batches and streams move) and `windo
 the executor's R42 is the same idea). `traffic_window_conformance --readout <R34 dir> [--batches 24] [--workers 6]
 [--device cuda]`. Reads the readout's `config.json` with R34's loader and builds what it read with today's code and R34's
 own `prepare` (the two checksums must be the disk's — else the data changed, not the code); then against its
-`aircraft.jsonl`: (1) the whole draw, without the model — the same batches, each holding the same (window, flight) pairs;
+`aircraft.jsonl`: (1) the whole draw, without the model — the same batches, each holding the same (window, flight,
+sample, source) rows with the same fields the draw alone decides (`traffic_window_generation.batch_keys`, built by the
+readout's own row function), in every batch, read again or not;
 (2) `--batches` batches read again (`chosen_batches`: `numpy.linspace` over the batch numbers, rounded, each once — the
 batches run from the smallest windows to the largest) in forked processes as R34 reads (`read_batches`), compared row by
 row: the same rows by (window, flight, sample, source), every field equal as written (JSON with sorted keys: floats bit for
 bit, NaN for NaN). Not read: summary, counts, run record. A difference prints the first one (batch, row, fields, both
 values) and exits 1. Passed on a clean checkout it writes `<readout>.conformance/passed-<commit 12>.json` beside the
-(read-only) readout: the checker's code version (`code.json`'s keys), the readout, the batches and those read, the rows
-compared, the time — the evidence R41 accepts; a dirty checkout is checked and nothing written; a commit's record is never
-written over. Only readouts to be compared are checked. Limits (design): a change touching only batches not read is not
+(read-only) readout (`record_payload`): the checker's code version (`code.json`'s keys), the readout — its path, its rows'
+checksum and its own `code.json`, so a readout written again under the same name is not vouched for — the batches and
+those read, the rows compared, the time: the evidence R41 accepts; a dirty checkout is checked and nothing written; a
+clean commit's record is never written over. Only readouts to be compared are checked. Limits (design): a change touching only batches not read is not
 seen; a row field added or dropped fails it; another torch / CUDA / GPU may move a float — reported as it is.
 
     python run_ts.py traffic_window_conformance --readout 4dTrajectory/outputs/POOLED/traffic/window_val_start_20261002 \

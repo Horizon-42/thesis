@@ -255,6 +255,32 @@ def test_a_readout_runs_from_its_configuration_reads_the_same_rows_in_one_and_tw
     assert list(run) == ["finished_utc", "elapsed_s", "workers", "gpu_peak_gb_a_process"] and run["workers"] == 2
 
 
+def test_a_batch_s_keys_and_drawn_fields_are_what_its_rows_carry(tmp_path, monkeypatch):
+    """`batch_keys` (what the conformance check holds every batch to, without the model) against `batch_rows`: the same
+    keys, and each row's draw-decided fields as `batch_keys` builds them."""
+    import torch
+
+    from ts_transformer.experiments import traffic_window_generation as runner
+
+    config = runner.load_config(_raw(samples=2, seed=5))
+    prepared = prepared_fixture(tmp_path, monkeypatch, config)
+    for number, chunk in enumerate(prepared.batches):
+        rows = runner.batch_rows(prepared.model, prepared.drawn, number, chunk, prepared.words, prepared.params,
+                                 prepared.landings, prepared.every_landing, 2, seed=5, temperature=1.0,
+                                 procedure_masks=prepared.own_masks, device=torch.device("cpu"))
+        keys = runner.batch_keys(prepared.drawn, number, chunk, 2, runner.MODEL_SOURCES)
+        by_key = {(r["window"], r["dataset_id"], r["sample"], r["source"]): r for r in rows}
+        assert len(by_key) == len(rows) and by_key.keys() == keys.keys()
+        assert all({name: by_key[key][name] for name in drawn} == drawn for key, drawn in keys.items())
+        assert set(next(iter(keys.values()))) == {"dataset_id", "airport", "window", "commanded", "source", "sample",
+                                                  "observed_runway", "augmented", "role", "batch"}
+    # a model source left out has no keys; an augmented window no labelled or recorded ones
+    only_scene = runner.batch_keys(prepared.drawn, 0, prepared.batches[0], 2, ("scene",))
+    assert {k[3] for k in only_scene} == {"scene", "labelled", "recorded"}
+    augmented = dataclasses.replace(prepared.drawn, augmented=[{"kind": "C"}] * len(prepared.drawn.windows))
+    assert {k[3] for k in runner.batch_keys(augmented, 0, prepared.batches[0], 2, ("scene",))} == {"scene"}
+
+
 def test_a_readout_is_never_written_over(tmp_path, capsys):
     from ts_transformer.experiments import traffic_window_generation as runner
 

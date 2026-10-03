@@ -10,7 +10,8 @@ when three things hold, the same for any two readouts (design §6.6 step 9.9.3):
    augmentation, the executor spec, the sentence artefact, the sources, the probes, the batch size;
 2. **the code version** (`evidence`): their ``code.json`` are equal and neither checkout was dirty, or a conformance
    record (`traffic_window_conformance`) shows one readout read the same under the other's code version — its record
-   names that readout and its code version is the other's ``code.json``;
+   names that readout, binds it as it is now (the checksum of its rows and its ``code.json``: a readout written again
+   under the same name is not the one checked) and its code version is the other's ``code.json``;
 3. **the rows**: the same rows (window, aircraft, sample, source) in both, whose fields no model decides
    (`MODEL_FREE`) are equal, and the sources no model reads — the labelled words and the record — equal row for row
    (they also read the prior's procedure masks: two priors under other masks differ there).
@@ -55,7 +56,7 @@ from ts_transformer.experiments.traffic_loop import LOST_SEPARATION
 from ts_transformer.experiments.traffic_rounds import paired_difference
 from ts_transformer.experiments.traffic_speaking import INSERTED
 from ts_transformer.experiments.traffic_window_augment import KINDS, ROLES
-from ts_transformer.experiments.traffic_window_conformance import passed_records
+from ts_transformer.experiments.traffic_window_conformance import passed_records, readout_identity
 from ts_transformer.experiments.traffic_window_generation import (
     CODE_FILE, CONFIG_KEYS, MODEL_SOURCES, SIZES, ReadoutConfig, read_aircraft, readout_config, size_of,
 )
@@ -100,12 +101,15 @@ def require_same_config(first: ReadoutConfig, second: ReadoutConfig) -> None:
 def evidence(first_dir: Path, first_code: Mapping[str, Any], second_dir: Path, second_code: Mapping[str, Any]
              ) -> dict[str, Any]:
     """Rule 2 (module docstring): why the two readouts' code versions read the same — the same clean code version, or a
-    conformance record of one readout under the other's code version (the first's record tried first)."""
+    conformance record of one readout, as it is now, under the other's code version (the first's record tried first)."""
     if first_code == second_code and not first_code["dirty"]:
         return {"kind": "same code version", "commit": first_code["commit"]}
     for readout, other_code in ((first_dir, second_code), (second_dir, first_code)):
-        for path, record in passed_records(readout):
-            if record["readout"] == repo_relative(readout) and record["code"] == other_code:
+        records = passed_records(readout)
+        identity = readout_identity(readout) if records else None
+        for path, record in records:
+            if (record["readout"] == repo_relative(readout) and record["code"] == other_code
+                    and {name: record[name] for name in identity} == identity):
                 return {"kind": "conformance record", "record": repo_relative(path), "readout": record["readout"],
                         "batches": record["batches"], "checked_batches": len(record["checked_batches"]),
                         "rows_compared": record["rows_compared"]}

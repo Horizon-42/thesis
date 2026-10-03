@@ -127,32 +127,92 @@ def _edited(readout, tmp_path, edit):
     return copy
 
 
-def test_rows_that_are_not_the_draw_s_fail(tmp_path, monkeypatch, capsys):
+def test_rows_that_are_not_the_draw_s_fail_in_every_batch_read_again_or_not(tmp_path, monkeypatch, capsys):
+    """Only batch 0 read again (``--batches 1``): batch 1's rows are held to today's draw all the same."""
     readout, _ = _readout(tmp_path, monkeypatch)
 
-    def moved(rows):                                    # one row of batch 0 filed under batch 1
-        first = next(i for i, r in enumerate(rows) if r["batch"] == 0)
-        rows[first]["batch"] = 1
+    def first_of_batch_1(rows):
+        return next(i for i, r in enumerate(rows) if r["batch"] == 1)
+
+    def moved(rows):                                    # a row of batch 1 filed under batch 0
+        rows[first_of_batch_1(rows)]["batch"] = 0
         return rows
 
-    assert _check(_edited(readout, tmp_path, moved)) == 1
-    assert "NOT THE SAME: batch 1 holds other (window, flight) pairs" in capsys.readouterr().out
-    shutil.rmtree(tmp_path / "edited")
+    def dropped(rows):                                  # a sample's row gone (the flight's other rows stay)
+        del rows[first_of_batch_1(rows)]
+        return rows
+
+    def runway(rows):
+        rows[first_of_batch_1(rows)]["observed_runway"] += 1
+        return rows
+
+    def role(rows):
+        rows[first_of_batch_1(rows)]["role"] = "inserted"
+        return rows
 
     def extra(rows):                                    # a batch today's draw does not make
         rows[-1]["batch"] = 5
         return rows
 
-    assert _check(_edited(readout, tmp_path, extra)) == 1
-    assert "today's draw makes 2" in capsys.readouterr().out
-    shutil.rmtree(tmp_path / "edited")
+    for edit, refusal in ((moved, "batch 0: rows [(1, 'KXXX:f2', 0, 'scene')] only in the readout, [] only in today's draw"),
+                          (dropped, "batch 1: rows [] only in the readout, [(1, 'KXXX:f2', 0, 'scene')] only in today's "
+                                    "draw"),
+                          (runway, "batch 1, row (1, 'KXXX:f2', 0, 'scene'): what the draw decides differs in "
+                                   "['observed_runway']"),
+                          (role, "what the draw decides differs in ['role']"),
+                          (extra, "today's draw makes 2")):
+        assert _check(_edited(readout, tmp_path, edit), "--batches", "1") == 1
+        assert "NOT THE SAME: " in (out := capsys.readouterr().out) and refusal in out, (edit.__name__, out)
+        shutil.rmtree(tmp_path / "edited")
+    # unedited, the one batch read again passes
+    assert _check(_edited(readout, tmp_path, lambda rows: rows), "--batches", "1") == 0
 
-    def dropped(rows):                                  # a sample's row gone: the pairs stay, the rows do not
-        return [r for r in rows if not (r["batch"] == 0 and r["source"] == "scene" and r["sample"] == 1
-                                        and r["dataset_id"] == "KXXX:f0")]
 
-    assert _check(_edited(readout, tmp_path, dropped)) == 1
-    assert "NOT THE SAME: batch 0: " in capsys.readouterr().out
+def test_a_dirty_checkout_is_checked_even_beside_its_commit_s_record(tmp_path, monkeypatch, capsys):
+    from ts_transformer.experiments import traffic_window_conformance as conformance
+
+    readout, _ = _readout(tmp_path, monkeypatch)
+    assert _check(readout) == 0
+    monkeypatch.setattr(conformance, "git_state", lambda: {**CLEAN, "dirty": True})
+    assert _check(readout) == 0
+    assert "dirty: nothing written" in capsys.readouterr().out and len(conformance.passed_records(readout)) == 1
+
+
+def test_a_record_written_by_the_check_is_the_evidence_the_comparison_accepts_and_only_for_the_readout_it_checked(
+        tmp_path, monkeypatch):
+    """The record end to end: written by the check under a later commit, accepted by `traffic_window_compare` for the
+    readout against one read under that commit — and refused once the readout is written again (other rows, or the same
+    rows under another code version) under the same name."""
+    from ts_transformer.experiments import traffic_window_compare as compare
+    from ts_transformer.experiments import traffic_window_conformance as conformance
+    from ts_transformer.experiments import traffic_window_generation as runner
+
+    readout, _ = _readout(tmp_path, monkeypatch)
+    later = {"head": "b" * 40, "dirty": False}
+    monkeypatch.setattr(conformance, "git_state", lambda: dict(later))
+    assert _check(readout) == 0
+    (record_path, record), = conformance.passed_records(readout)
+    code = compare.read_code(readout)
+    assert record["code"] != code and record["code"]["commit"] == later["head"]
+    other = tmp_path / "other"                          # a readout read under the later code
+    other.mkdir()
+    (other / runner.CODE_FILE).write_text(json.dumps(record["code"]))
+    got = compare.evidence(readout, code, other, record["code"])
+    assert (got["kind"], got["readout"], got["checked_batches"], got["rows_compared"]) == \
+        ("conformance record", record["readout"], 2, record["rows_compared"])
+    assert compare.evidence(other, record["code"], readout, code)["kind"] == "conformance record"   # either way
+    # the readout written again under its name: its rows, or its code version, no longer the ones checked
+    readout.chmod(0o755)
+    rows = (readout / runner.AIRCRAFT_FILE).read_text().splitlines()
+    (readout / runner.AIRCRAFT_FILE).write_text("\n".join(rows[:-1]) + "\n")
+    with pytest.raises(ValueError, match="no conformance record"):
+        compare.evidence(readout, code, other, record["code"])
+    (readout / runner.AIRCRAFT_FILE).write_text("\n".join(rows) + "\n")
+    assert compare.evidence(readout, code, other, record["code"])["kind"] == "conformance record"
+    dirty = {**code, "dirty": True}
+    (readout / runner.CODE_FILE).write_text(json.dumps(dirty))
+    with pytest.raises(ValueError, match="no conformance record"):
+        compare.evidence(readout, dirty, other, record["code"])
 
 
 def test_a_row_with_other_fields_is_named_as_such(tmp_path, monkeypatch, capsys):

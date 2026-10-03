@@ -761,6 +761,21 @@ def batch_rows(model: Prior, drawn: Drawn, number: int, chunk: Sequence[int], wo
     return rows
 
 
+def batch_keys(drawn: Drawn, number: int, chunk: Sequence[int], samples: int, model_sources: Sequence[str]
+               ) -> dict[tuple[int, str, int | None, str], dict[str, Any]]:
+    """The rows `batch_rows` writes for loop batch ``number`` (the windows at ``chunk``), without the model: by (window,
+    flight, sample, source), each with the fields the draw alone decides (`_aircraft_row` and the batch) — what
+    `traffic_window_conformance` checks every batch of a readout against."""
+    out: dict[tuple[int, str, int | None, str], dict[str, Any]] = {}
+    fixed = ("labelled", "recorded") if drawn.augmented[chunk[0]] is None else ()
+    for w in chunk:
+        for j in drawn.members[w]:
+            for source, sample in [(s, k) for s in model_sources for k in range(samples)] + [(s, None) for s in fixed]:
+                row = {**_aircraft_row(drawn, drawn.batch, j, j, w, source, sample), "batch": number}
+                out[(w, row["dataset_id"], sample, source)] = row
+    return out
+
+
 #: `prctl` option: the signal a process gets when its parent dies (linux/prctl.h).
 PR_SET_PDEATHSIG = 1
 

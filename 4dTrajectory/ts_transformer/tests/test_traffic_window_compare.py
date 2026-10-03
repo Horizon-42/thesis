@@ -133,15 +133,14 @@ def test_the_rows_must_be_the_same_windows_read_the_same_way(tmp_path):
 
 
 def _record(directory, code, **changes):
-    """A conformance record beside readout ``directory`` (`traffic_window_conformance.record_path`) passed under
-    ``code``."""
-    from ts_transformer.experiments.traffic_window_conformance import record_path
-    from ts_transformer.repo_layout import repo_relative
+    """A conformance record of readout ``directory`` as it is now (`traffic_window_conformance.record_payload`),
+    passed under ``code``, written where the check writes it."""
+    from ts_transformer.experiments.traffic_window_conformance import record_path, record_payload
 
     path = record_path(directory, code["commit"])
     path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps({"readout": repo_relative(directory), "code": code, "batches": 40,
-                                "checked_batches": list(range(24)), "rows_compared": 1000, "rows": 2000, **changes}))
+    checked = {"batches": 40, "checked_batches": list(range(24)), "rows_compared": 1000, "rows": 2000}
+    path.write_text(json.dumps({**record_payload(directory, code, checked, 1.0), **changes}))
     return path
 
 
