@@ -68,7 +68,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 
 | Part | State |
 |---|---|
-| Stage A: vocabulary, labeller, identities, executor, judge, replay (§14.2) | Not started. Another agent implements and reviews; Claude checks the result (§14.6) |
+| Stage A: vocabulary, labeller, identities, executor, judge, replay (§14.2) | Built on `dev-two-tier-v4`, each milestone reviewed: A0 `e57c62d8` + `d2917c06`; A1–A3 `63639a54` + review fixes `feaf9558`, `d1e277f7`; A4–A6 `330ffbaf` + review fixes `c7603a4c`; A7: this section, §13, and the full ts suite (1,469 passed at `c7603a4c`). Smoke build (80 flights an airport and split, in the ignored `smoke_v4/data/` of the worktree): both conformance checks pass; the replay ran to its end at Δ = 2 and 4 s. Claude's readings that the user should confirm: listed in the stage A report (level band at a segment's top, the grammar's held height, "no level-off"'s band, LNAV/VNAV DAs, the DA lateral tolerance as a share of the cone). Claude checks the result (§14.6) |
 | Stage B: prior (§14.3) | Not started; outline |
 | Stage C: post-training and multi-aircraft (§14.4) | Not started; outline |
 | Stage D: frontend and backend (§14.5) | Not started; outline |
@@ -868,35 +868,34 @@ Checked on 2026-10-03 in the local PDF files (`docs/literature/runway_assignment
 
 ## 13 Key code index
 
-The current code that this design changes. Line numbers are at `dev-two-tier` `26e96c5e`.
+The code of this design (stage A). Line numbers are at the end of stage A on `dev-two-tier-v4`; paths are relative to
+`4dTrajectory/ts_transformer/`.
 
 | What | Where |
 |---|---|
-| Columns; the approach classes | `instructions/words.py:16`, `:20`–`:23` |
-| Absolute heading classes | `instructions/words.py:56` `heading_index`, `:59` `heading_deg` |
-| "Descend to land" value | `instructions/words.py:37` |
-| Approach transitions (decode rule) | `instructions/grammar.py:30` `APPROACH_NEXT`, `:53` `approach_words_allowed` |
-| Row rules (altitude and angle) | `instructions/grammar.py:36` `step_allowed` |
-| Capture row | `instructions/labeller/lateral.py:48` `capture_row` |
-| Heading words cut at the clearance | `instructions/labeller/lateral.py:85` `per_step_words`, `:130` `read_lateral` |
-| Clearance at the turn onset | `instructions/labeller/lateral.py:116` `capture_turn_onset` |
-| "Unspecified" anchored to the clearance | `instructions/labeller/speed.py:83` `read_speed` (`join_row`) |
-| Heading envelope | `instructions/envelope.py:19` `heading_word_rows`, `:31` `heading_words_inside` |
-| Convergence and corridor | `instructions/envelope.py:78` `heading_converges`, `:96` `corridor` |
-| Tube checks | `instructions/labeller/vertical.py:169` `tube_bounds`, `:200` `tube_checks` |
-| Landing screen | `instructions/labeller/read.py:61` `landing_passages` |
-| Heading law | `autopilot/lateral.py:99` `word_rate` |
-| Capture start, wait, bend, lock | `autopilot/lateral.py:262` `Lateral.rate` (`:284` capture start, `:293` wait) |
-| Vertical modes; glidepath floor; go-around climb | `autopilot/vertical.py:140` `Vertical.rate`, `:74` `GLIDEPATH_BELOW_M`, `:81` `GO_AROUND_CLIMB_GRADIENT` |
-| Runway lock | `autopilot/executor.py:149` `runway_locked` |
-| TCH and glidepath read by the executor | `autopilot/runway_data.py:26` `VerticalPath`, `:51` `published_vertical_paths` |
-| Outcomes | `autopilot/judge.py:82` `OUTCOMES`, `:126` `runway_lateral_limit_m`, `:144` `_outcome` |
-| FAS cone | `flight_scenarios/fas_geometry.py:46` `fas_course_geometry` (repository root) |
-| DA above the threshold | `trajectory_data_process/harvest/airports.py:169` (repository root) |
-| Prior: airport embedding, position embedding, candidate sum | `prior/model.py:312`, `:313`, `:382`, `:385` |
-| Prior: step, relative and candidate features | `prior/data.py:63`, `:64`, `:70` |
-| Clearance mask | `inference/separation_masks.py:131` `clearance_check` |
-| Edge features | `inference/scene_edges.py:51` `EDGE_FEATURES` |
+| Columns; "go-around" in the runway column | `instructions/words.py:20` `COLUMNS`, `:24` `RUNWAY_GO_AROUND` |
+| Heading classes relative to the course of R | `instructions/words.py:80` `heading_class`, `:84` `heading_track_deg` |
+| The 40 levels, their bands | `instructions/words.py:47` `altitude_tolerances`, `:89` `altitude_index` |
+| Grammar: rules 1–5 and the runway/G table, one function | `instructions/grammar.py:54` `apply`, `:117` `runway_words_allowed` |
+| Capture row; heading words to the end, relative frame | `instructions/labeller/lateral.py:38` `capture_row`, `:57` `per_step_words`, `:90` `read_lateral` |
+| Level test by the piece's own median; held height; tubes | `instructions/labeller/vertical.py:57` `vertical_pieces`, `:78` `held_altitude`, `:187` `tube_bounds`, `:218` `tube_checks` |
+| "Unspecified" from the capture row | `instructions/labeller/speed.py:86` `read_speed` |
+| Go-around rule (R40's, on the rows) | `instructions/labeller/go_around.py:61` `low_passes`, `:108` `go_arounds` |
+| Landing cut, go-arounds in the gate, runway words (D19) | `instructions/labeller/read.py:106` `admit`, `:147` `flight_go_arounds`, `:166` `runway_words`, `:192` `read_flight` |
+| Row interval (D11, D25) | `instructions/labeller/interval.py:45` `first_interval_row`, `:69` `on_interval` |
+| Labeller conformance (§9.2 #2) | `instructions/conformance.py:59` `labeller_code_sha256`, `:148` `check`, `:202` `require_conforming_labeller` |
+| Heading envelope | `instructions/envelope.py:31` `heading_words_inside` |
+| Straight-line glidepath (D13, the DA check) | `instructions/airport.py:183` `glidepath_height_m` |
+| Heading law; conversion with the course of R; go-around course | `autopilot/lateral.py:54` `word_rate`, `:138` `Lateral.word_error`, `:172` `Lateral.rate` |
+| Vertical modes; go-around climb | `autopilot/vertical.py:43` `GO_AROUND_CLIMB_GRADIENT`, `:89` `Vertical.rate` |
+| The cycle; go-around time; approach crossing ends the flight | `autopilot/executor.py:60` `GO_AROUND_EXTRA_S`, `:160` `Executor.cycle` |
+| R and G per row | `autopilot/sentence.py:89` `_filled` |
+| Outcomes, their order; the DA check | `autopilot/judge.py:74` `OUTCOMES`, `:77` `EVENT_ORDER`, `:135` `decision_check`, `:158` `_outcome`, `:319` `judge` |
+| TCH, glidepath, DA read by the judge | `autopilot/runway_data.py:25` `VerticalPath` |
+| A sentence on Δ; the readout | `autopilot/replay.py:77` `sentence_on_interval`, `:367` `summary`; `experiments/executor_replay.py:99` `readout_table` |
+| Clearance mask (stage C) | archived: `archive/two_tier_v3_2026_10/inference/separation_masks.py` |
+| Prior: airport embedding, inputs (stage B) | archived: `archive/two_tier_v3_2026_10/prior/model.py`, `prior/data.py` |
+| FAS cone; DA above the threshold | `flight_scenarios/fas_geometry.py:46` `fas_course_geometry`; `trajectory_data_process/harvest/airports.py:169` (repository root) |
 
 ---
 
