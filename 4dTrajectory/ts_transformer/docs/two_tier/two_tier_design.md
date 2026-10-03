@@ -57,7 +57,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D29 | Post-training starts from the base model in the multi-aircraft setting "one aircraft commanded". There is no single-aircraft post-training stage (§7) | Decided | User, 2026-10-03 |
 | D30 | The post-training reward comes only from the outcome: 1 for `landed` without a go-around; 0.9ⁿ for `landed` after n go-arounds; 0 for every other outcome and for every loss of separation. No payment for a go-around without a landing. No mask on where "go-around" can be said (D10). The step-8.9 reward of the multi-aircraft design is not used (§7) | Decided | User, 2026-10-03 |
 | D31 | Multi-aircraft inputs and judgements (§8): the landing context of every aircraft of a scene counts the landings of the closed loop; D23 holds for every aircraft of a scene, with a test; "established on the final" is a function of one row, the same for every aircraft (its rule: O6). The prior's training stops on the select days (§6.3) | Decided | User, 2026-10-03 |
-| D32 | Closed-loop reading. The labeller flies its sentence with the executor. When the flown path leaves the observed path by more than a tolerance, it says a correction word, and the observed word again when the flown path is back. The prior trains on the flown states of these sentences (§4.9, §6.1) | Decided. The tolerances: O15 | User, 2026-10-03 |
+| D32 | Closed-loop reading. The labeller flies its sentence with the executor. When the flown path leaves the observed path by more than a tolerance, it says a correction word, and the observed word again when the flown path is back. The prior trains on the flown states of these sentences (§4.9, §6.1). Tolerances: lateral 30 m, vertical 15 m | Decided | User, 2026-10-03 |
 | D33 | While G is true, no crossing of a threshold is an event: of R or of another candidate (§3.2, §5.8) | Decided | User, 2026-10-03 |
 
 ### 0.2 Open items, in the order of discussion
@@ -70,7 +70,6 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
 | O9 | Finer grids near the runway course and near the glidepath angle | Decided by D6: measure first | 3.3, 3.5 |
 | O10 | How to compare the row intervals of the ablation (the values are D25: 2, 4, 8 s) | Criteria by the user after the design is settled (D7) | 4.8 |
-| O15 | The two tolerances of the closed-loop reading (D32) | Proposal: lateral 30 m, vertical 15 m (§4.9) | 4.9 |
 
 ### 0.3 Implementation
 
@@ -86,7 +85,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 1. Stage A (§14.2): write the vocabulary, the labeller, the identities, the executor, the judge and the replay on the
    branch `dev-two-tier-v4`, milestones A0–A9, each with tests and a code review. Another agent does this.
 2. Claude checks the result of stage A against this document (§14.6).
-3. The user sets the criteria (D7, O10), the values of O2 and O15 and the fitted values of D15. Then the formal artefact is built, and the
+3. The user sets the criteria (D7, O10), the values of O2 and the fitted values of D15. Then the formal artefact is built, and the
    replay gate is read at each row interval of the ablation (D11, D25: 2, 4, 8 s). The same readings answer D6 / O9 (are the grids sufficient).
 4. Stages B, C, D (§14.3–§14.5): the prior from the start, the post-training and the multi-aircraft work, the frontend.
 5. The user merges the branch.
@@ -599,10 +598,10 @@ observed track stay as the readout of the open-loop reading. The capture row, th
 come from the open-loop reading: the decisions come from the observed track; the closed-loop reading only adds
 corrections. The executor reads only words (D2, D3).
 
-**Tolerances (O15).** Y and H are constants of the labeller in the spec. They are required, with no default. Proposal:
-Y = 30 m. The flown path then ends within approximately 30 m of the observed path, which ends 2 m from the centreline
-(median), far inside the runway limit of 106.7 m. H = 15 m: larger than the fit residual of the altitude pieces (10 m,
-§4.4), so that the noise of the fit starts no correction.
+**Tolerances (D32).** Y = 30 m and H = 15 m, constants of the labeller in the spec. With Y = 30 m the flown path ends
+within approximately 30 m of the observed path, which ends 2 m from the centreline (median), far inside the runway
+limit of 106.7 m. H = 15 m is larger than the fit residual of the altitude pieces (10 m, §4.4), so that the noise of
+the fit starts no correction.
 
 **Where the code goes.** The labeller package (`instructions/`) does not import the executor; only the runners and
 `autopilot/` read `instructions/` (`tests/test_architecture.py`). The closed-loop reading is a module in `autopilot/`.
@@ -972,7 +971,7 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | Lined up | track within 30° of the course | 7110.65BB 5-9-2, TBL 5-9-1 |
 | DA check tolerances | open | O2, D7 |
 | Time limit | remaining observed time × 1.5 | Fixed choice |
-| Closed-loop reading: tolerances | lateral Y, vertical H: open (proposal 30 m, 15 m); a correction ends below half the tolerance or at a change of sign | D32, O15 |
+| Closed-loop reading: tolerances | lateral Y = 30 m, vertical H = 15 m; a correction ends below half the tolerance or at a change of sign | D32 |
 | Closed-loop reading: correction | heading: one class (5°) toward the observed path; angle: the next descent class | D32 |
 
 ---
@@ -1367,8 +1366,7 @@ holds this milestone into `dev-two-tier-v4`.
 - Module in `autopilot/` (§4.9, "Where the code goes"): for one flight, it flies the sentence of a row interval with
   the executor from the first predicted step and returns the closed-loop sentence (correction words marked) and the
   flown states on the rows. The comparison, the lateral and the vertical corrections exactly as in §4.9.
-- Spec: the two tolerances Y and H (O15) are required parameters of the instruction spec, given on the command line,
-  with no default (as the DA tolerances, A5).
+- Spec: the two tolerances Y = 30 m and H = 15 m are labeller constants of the instruction spec (D32).
 - Runner: after `executor_spec`, a runner writes the closed-loop sentences and the flown states for each split and each
   Δ of the ablation into the artefact, with the counts of correction words and the flights without a training sentence
   by reason (§4.9, "Artefact"). Sentences schema: a new name (principle 8).
