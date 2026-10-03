@@ -1251,3 +1251,44 @@ others and all, and how many rose against round 0).
         --run 4dTrajectory/outputs/POOLED/prior/step9_4_small_20261003/traffic_s1337 \
         --out 4dTrajectory/outputs/POOLED/prior/step9_4_small_probe_20261003
 
+
+### R48 · `run_ts.py instruction_word_frames` — how airport-specific the labelled heading and level words are, absolute vs the runway's frame (two-tier design §11.2–§11.3)
+
+2026-10-03 (the user: "把 §11 的脚本存为正式程序" — the one-off counts behind the next design's runway-relative heading
+grid). `instruction_word_frames --instructions <artefact> [--split train] --out <new dir>`, CPU, about 10 s on v6 train.
+Reads only the artefact (spec, candidates, the split's flight records and sentences; every sentence's row-0 runway word
+must be its flight's landed runway). Per airport it counts three measures in two frames: every heading word (absolute
+5° class, and the class re-indexed by the labelled runway's course rounded to the grid, `course_shift`), the heading word
+in force at the sentence's `join_row` (`intercept_heading`; a sentence cleared at row 0 has none), and every level word
+but "descend to land" (MSL class, and the class less the threshold elevation rounded to the level step). Each measure ×
+frame: the pairwise Jensen–Shannon divergence in bits (mean, largest, every pair) and each airport's rare share (its
+words on classes the other airports pooled use under `RARE_SHARE` = 0.2 %). Also every candidate course's offset from
+the heading grid beside the corridor's course tolerance (`grid_offsets`). A read, not a gate (design D7). Writes
+`word_frames.json` (`ts-instruction-word-frames-v1`).
+
+    python run_ts.py instruction_word_frames \
+        --instructions 4dTrajectory/outputs/POOLED/instruction_language/v6_20261002 \
+        --out 4dTrajectory/outputs/POOLED/analyses/word_frames_20261003
+
+### R49 · `run_ts.py instruction_final_approach` — where the sentences put the clearance and "descend to land", and how close the flights fly to the published glidepath after capture (two-tier design §11.4)
+
+2026-10-03 (same request as R48). `instruction_final_approach --instructions <artefact> [--split train] --out <new dir>`,
+CPU, about 10 s on v6 train. Reads the artefact (signals, sentences, candidates; the landed-runway check as R48) and
+each candidate's published vertical path (`autopilot.runway_data.published_vertical_paths`: TCH and glidepath angle, the
+harvest's CIFP — what the executor and the procedure masks read). Per sentence, from its signals' first `len(words)` rows
+and `instructions.airport.relative_to_runway`: the clearance row (`join_row`), the first "descend to land" row (its
+distance before the threshold, before the clearance / capture row or not), and, from `capture_row` on and more than
+`FLARE_EXCLUDED_M` = 300 m before the threshold, the height above the threshold less the glidepath's under two
+references: `flat` = `TCH + d · tan(angle)` (the executor's and the procedure masks' formula, no earth curvature) and
+`straight_line` = flat + d²/(2R) (the published straight path over the curved earth; R = `curvature_radius_m`, Euler's
+formula on the WGS84 radii at the airport's latitude along the course; ≈ 15 m at 14 km, 31 m at 20 km — the review of
+2026-10-03 found the flat reference alone silently biased); a sentence with fewer than `MIN_ROWS` = 5 such rows is not
+read on the glidepath. Pooled and per airport: rows before the clearance, cleared at row 0, "descend to land" before the
+clearance (lead p10 / p50 / p90 s) and before the capture row, and for each reference the deviation's quantiles over rows
+and over flight medians, the shares within `BANDS_M` (30, 60 m — readout bands, not criteria), the flights with ≥ 90 % of
+their rows within 60 m, and at the capture row the deviation and the shares more than 60 m above / below. Writes
+`final_approach.json` (`ts-instruction-final-approach-v1`).
+
+    python run_ts.py instruction_final_approach \
+        --instructions 4dTrajectory/outputs/POOLED/instruction_language/v6_20261002 \
+        --out 4dTrajectory/outputs/POOLED/analyses/final_approach_20261003

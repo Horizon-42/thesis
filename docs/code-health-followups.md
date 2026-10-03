@@ -138,6 +138,7 @@ added three entries (the rows after the performance index's).
 | Stored tracks carry other aircraft's samples; no read-time position repair (10-01) | open | new; see the entry | **yes**: the arrival slices every model reads (if repaired in the harvest view) |
 | A wake shortfall's end rounds `counted` a step short in the window loop (10-01) | open | new; see the entry | **yes**: the steps M4-in-windows (R37) trains a wake-shortfall follower on |
 | The labeller fingerprint hashes content code, not only the vocabulary's format (10-02) | open | new; see the entry | no: a check, not a training input — but the fix changes what the stored specs record |
+| The executor's glidepath and the procedure masks' glidepath edge leave the earth's curvature out (10-03) | open | new; see the entry | **yes**: the masks are a model's procedure set (C35) and the executor's floor is in its conformance identity; the next design removes the floor (two-tier design D9) |
 | The executor cannot fly a batch on CUDA past eight batch sizes: `torch.compile` recompile limit (10-02) | open | new; see the entry | no: every closed loop and readout flies the executor on CPU; only `traffic_labelled --device cuda` (and any other caller passing a CUDA device) fails |
 | Three shared ts modules are listed as runners: `traffic_go_around`, `traffic_window_events`, `training_attitude` (10-02) | open | new; see the entry | no: `run_ts.py --list` only |
 | The edge and executor fingerprints hash row-placement and data-plane code (10-02) | open | new; see the entry | no: a check — but the fix changes what the stored checkpoints and passed records name |
@@ -742,4 +743,15 @@ the window readout into `config.json` / `code.json` / `aircraft.jsonl` + `summar
 file — done (`1e3bd470`, with `experiments/code_version.py` for every readout to share). **Judgement**: the other readout runners with the same single header — at least `traffic_window_rewind` (R43), M0 census, labelled-flight and mask readouts (R24,
 R26, R27), `go_around_census` (R40) — should take the same layout and the shared
 code-version function when they are next changed; nothing pairs them today, so nothing is blocked.
+
+## The executor's glidepath and the procedure masks' glidepath edge leave the earth's curvature out (2026-10-03)
+
+**Verified** (R49 `instruction_final_approach`, review of `dev-redesign-evidence`). `autopilot/vertical.py` (the glidepath
+floor and "level below the glidepath", `:223`) and `prior/procedure.py` (the glidepath lower edge, `:319`) place the
+published glidepath at TCH + d·tan(angle) above the threshold while the heights are geometric MSL. The published path is a
+straight line in space, so over the curved earth it is d²/(2R) higher: about 8 m at 10 km, 15 m at 14 km, 31 m at 20 km.
+On v6 train after the capture row the observed median is +6 m over the flat line and +2 m over the straight one.
+**Judgement**: inside the FAF, where the masks bind (typically ≤ 10 km), the error is under about 8 m against the 60 m edge;
+the executor's floor binds anywhere before the threshold. The next design removes the executor's floor (two-tier design
+D9); the masks can take the d²/(2R) term with their next procedure set.
 

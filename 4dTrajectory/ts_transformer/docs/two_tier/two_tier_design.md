@@ -178,7 +178,7 @@ Class 36 is the opposite direction (downwind). Classes 18 and 54 are the two bas
 **Why a relative grid (D8).** Two reasons, both measured on the v6 train split (§11):
 
 1. **The final must be on the grid.** The capture corridor permits 2° from the course. The four courses of KSTL (62.7°,
-   122.3°, 242.7°, 302.3°) are 2.3–2.7° from the nearest absolute 5° value. With absolute words, no heading word holds
+   122.3°, 242.7°, 302.3°) are 2.26–2.32° from the nearest absolute 5° value. With absolute words, no heading word holds
    a KSTL final. With D2 and D3 the model must hold the final with heading words.
 2. **The same manoeuvre gets the same word at all airports.** The heading in force at the end of the labelled turn onto
    the final is very different between airports in absolute classes. It is much more similar in relative classes
@@ -544,8 +544,11 @@ This document sets none.
 
 ## 11 Evidence
 
-All counts in §11.2–§11.4 are one-off, read-only counts on the train split of artefact `v6_20261002`, made on
-2026-10-03 with scripts outside the repository. They are not runners yet.
+All counts in §11.2–§11.4 come from two runners on the train split of artefact `v6_20261002` (44,375 sentences),
+2026-10-03: R48 `instruction_word_frames` (§11.2, §11.3; output
+`4dTrajectory/outputs/POOLED/analyses/word_frames_20261003/word_frames.json`) and R49 `instruction_final_approach`
+(§11.4; output `4dTrajectory/outputs/POOLED/analyses/final_approach_20261003/final_approach.json`). Each output gives
+the same numbers for each airport too. `docs/reference/runners.md` R48, R49 give the definitions.
 
 ### 11.1 The prior uses its airport embedding (R46)
 
@@ -557,7 +560,8 @@ The candidate table (absolute threshold positions and courses) is a second ident
 
 ### 11.2 Frames of the heading and level words
 
-Mean pairwise Jensen–Shannon divergence between the word distributions of the five airports (bits; 0 is the same):
+Mean pairwise Jensen–Shannon divergence between the word distributions of the five airports (bits; 0 is the same
+distribution, 1 is no class in common):
 
 | Words | Absolute | Relative to R |
 |---|---|---|
@@ -565,21 +569,36 @@ Mean pairwise Jensen–Shannon divergence between the word distributions of the 
 | Heading in force at the clearance row of `instruction-v3` (the intercept heading) | 0.619 | 0.195 |
 | Level words (relative = height above the threshold) | 0.426 | 0.484 |
 
+Share of each airport's MSL level words on levels that the other four airports use for less than 0.2 % of theirs: KSJC
+27.8 %, KRDU 6.8 %, KSTL 4.8 %, KSMF 3.7 %, KMSY 0.4 %.
+
 ### 11.3 Courses of KSTL against the 5° grid
 
-KSTL courses 62.7°, 122.3°, 242.7°, 302.3°: the nearest absolute grid values are 2.3–2.7° away. The capture corridor
-permits 2°. The courses of the other four airports are 0.0–1.1° from the grid.
+KSTL courses 62.7°, 122.3°, 242.7°, 302.3° (all eight candidates): the nearest absolute grid values are 2.26–2.32° away.
+The capture corridor permits 2°. The courses of the other four airports are 0.01–1.07° from the grid (KSJC the
+largest).
 
 ### 11.4 Clearance, final descent and glidepath in the labelled data
 
 - 47.1 % of all sentence rows are before the clearance row of `instruction-v3`. 25.3 % of the flights are cleared at
   row 0.
 - "Descend to land" comes before the clearance row in 49.9 % of the flights (median 96 s before, p90 332 s). It comes
-  before the capture row in 59.0 % (median 15.7 km before the threshold).
+  before the capture row in 59.0 %. Its distance before the threshold along the course is −0.9 / 15.7 / 24.0 km
+  (p10 / p50 / p90; a negative distance is past the threshold plane, on a downwind).
 - After the capture row and more than 300 m before the threshold, the observed height minus the published glidepath of
-  the landed runway is −9 / +6 / +31 m (p10 / p50 / p90). 83.6 % of the rows are within ±30 m, 92.5 % within ±60 m.
-  78.0 % of the flights have ≥ 90 % of their rows within ±60 m. At the capture row, 21.0 % are more than 60 m below the
-  glidepath and 11.2 % more than 60 m above.
+  the landed runway, against two references (R49). "Flat" is TCH + d·tan(angle), the formula that the executor and the
+  procedure masks use; it leaves out the earth's curvature. "Straight line" is the published path as a straight line in
+  space; over the curved earth it is d²/(2R) higher (approximately 15 m at 14 km, 31 m at 20 km).
+
+  | Measure | Flat | Straight line |
+  |---|---|---|
+  | Rows: p10 / p50 / p90 | −9 / +6 / +31 m | −20 / +2 / +21 m |
+  | Rows within ±30 m / ±60 m | 83.6 % / 92.5 % | 86.2 % / 92.8 % |
+  | Flights with ≥ 90 % of their rows within ±60 m | 78.0 % | 78.9 % |
+  | At the capture row (median 13.9 km before the threshold): more than 60 m above / below | 11.2 % / 21.0 % | 5.7 % / 24.9 % |
+
+  The flat formula of the executor is a few metres to 31 m low far from the threshold. This matters only for a design
+  that uses it as a reference.
 - Published glidepaths: 3.0° at all candidates, 3.5° at KRDU 32. TCH 13.7–19.5 m.
 
 ### 11.5 Free generation and the heading column

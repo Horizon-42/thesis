@@ -466,6 +466,10 @@ each level HELD 20 s), timed to its landing, placed against the arrival slice an
 time-limit slack; touch-and-goes and landings that were not the last (a low go-around stored as the landing) set aside and
 listed; a loop that left the 30 km crop is unseen; v2 adds, inside a labelled sentence, the time to the clearance /
 capture turn of the approach that followed, and every go-around's first 150 m of climb against 200 ft per NM (R40).
+`instruction_word_frames` / `instruction_final_approach` read an instruction artefact for the next design's evidence
+(`docs/two_tier/two_tier_design.md` §11): heading and level words per airport, absolute against the labelled runway's
+frame, and each course's offset from the heading grid (R48); the clearance and "descend to land" rows, and the height
+over the published glidepath after the capture row (R49).
 **Every Training export writes the attitude each track is drawn in** (`experiments/training_attitude.py`, 2026-09-30): heading,
 path angle, right bank and an attack READING — executor tracks from its states and the command of the cycle starting at each row
 (the track's end: the cycle ending there), observed tracks from `rebuild_series` + the teacher's `actual_controls`, none for a flight

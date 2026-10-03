@@ -168,3 +168,29 @@ def passed_executor(spec_dir):
     executor_spec.passed_path(spec_dir, code).write_text(json.dumps({
         "schema": executor_spec.PASSED_SCHEMA, "executor_source_sha256": code,
         "reference_sha256": executor_spec.reference_sha256(directory)}), encoding="utf-8")
+
+
+def labelled_instruction_artefact(directory):
+    """A tmp instruction artefact at ``directory`` (created) holding one synthetic train flight onto
+    `instruction_airport`'s runway 09 — a downwind, a base, a final on a 3° descent — labelled by the labeller:
+    signals, candidates, spec, sentences. Returns the spec."""
+    import numpy as np
+
+    from ts_transformer.instructions.artefact import (
+        labeller_source_sha256, write_candidates, write_sentences, write_signals, write_spec,
+    )
+    from ts_transformer.instructions.labeller.read import read_flight
+
+    legs = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (20, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
+            (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
+    flight = instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0), dataset_id="KXXX:a")
+    directory.mkdir(parents=True)
+    write_signals(directory, {"train": [flight]},
+                  {"counts": {"train": {"built_usable": 1}}, "test_days": {"flights_not_opened": 0},
+                   "sources": [{"airport": "KXXX", "arrival_manifest_sha256": "0" * 64}]}, fixture_days())
+    write_candidates(directory, {"KXXX": instruction_airport()})
+    spec = instruction_spec()
+    write_spec(directory, spec, {"n": 1}, {"labeller_source_sha256": labeller_source_sha256(),
+                                           "git": {"head": "test", "dirty": False}})
+    write_sentences(directory, "train", spec, [read_flight(flight, instruction_airport(), spec)], [0])
+    return spec
