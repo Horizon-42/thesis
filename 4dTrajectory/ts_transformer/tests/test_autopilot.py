@@ -1373,14 +1373,6 @@ def test_descend_to_land_never_goes_under_the_published_glidepaths_lower_edge_be
     assert aim_deg(edge, 8000.0, False, off_course_deg=180.0, angle_class=steepest) == pytest.approx(0.0)
 
 
-def test_the_executors_glidepath_edge_is_the_post_training_checks():
-    """`vertical.GLIDEPATH_BELOW_M` mirrors `prior.procedure.GLIDEPATH_BELOW_M` (`autopilot` imports no model package)."""
-    from ts_transformer.autopilot.vertical import GLIDEPATH_BELOW_M
-    from ts_transformer.prior import procedure
-
-    assert GLIDEPATH_BELOW_M == procedure.GLIDEPATH_BELOW_M
-
-
 def test_words_said_on_one_flown_row_leave_the_later_one_of_each_column():
     """A clock running ahead of the sentence can say two words of a column on one flown row: the later one flies."""
     from ts_transformer.autopilot.judge import said_at

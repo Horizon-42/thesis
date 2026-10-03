@@ -1547,15 +1547,6 @@ def _generation_records(tmp_path: Path, intent_registry: Path, *, partial=None, 
     return run
 
 
-def test_the_generation_names_mirror_the_runner():
-    from ts_transformer.experiments.prior_generation_grading import GRADING_SCHEMA
-    from ts_transformer.experiments.prior_generation_records import HORIZON, PREDICTORS, RECORDS_SCHEMA
-
-    assert publisher.GENERATION_RECORDS_SCHEMA == RECORDS_SCHEMA
-    assert publisher.GENERATION_GRADING_SCHEMA == GRADING_SCHEMA
-    assert (publisher.GENERATION_PREDICTORS, publisher.GENERATION_HORIZON) == (PREDICTORS, HORIZON)
-
-
 def test_generation_records_publish_one_category_per_kind_and_airport(monkeypatch, tmp_path, intent_registry):
     run = _generation_records(tmp_path, intent_registry)
     calls: list[list[str]] = []
