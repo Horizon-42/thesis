@@ -447,7 +447,7 @@ aircraft: refused unless the configurations differ only in the model, the code v
 shows one readout reads the same under the other's code, and the model-free rows are equal; second − first per measure over
 the sentences counted in both, errors clustered by airport × operating day (R41).
 `traffic_window_conformance` re-reads 24 batches of a window readout from its own config under today's code (after the whole
-draw) and compares the rows field by field; passed on a clean checkout → `<readout>.conformance/passed-<commit12>.json`, the
+draw) and compares the rows field by field; passed on a clean checkout → `<readout>.conformance/passed-<commit12>-<device>.json`, the
 evidence R41 accepts (design §6.6 step 9.9.2; same idea as R42) (R44).
 `traffic_window_rewind` asks whether a window's losses of separation can be undone by rewinding ONE aircraft — each loss's
 aircraft speaks again from 10–120 s before it (or its start), the others given the words they said (`traffic_window.Given`:

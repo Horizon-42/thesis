@@ -56,14 +56,16 @@ def test_the_batches_read_again_run_evenly_from_the_first_to_the_last():
 
 
 def test_a_readout_passes_under_its_own_code_and_the_record_is_written_once_beside_it(tmp_path, monkeypatch, capsys):
+    import torch
+
     from ts_transformer.experiments import traffic_window_conformance as conformance
     from ts_transformer.experiments import traffic_window_generation as runner
     from ts_transformer.experiments.code_version import KEYS
 
     readout, _ = _readout(tmp_path, monkeypatch)
     assert _check(readout) == 0
-    record = tmp_path / "readout.conformance" / "passed-aaaaaaaaaaaa.json"
-    assert conformance.record_path(readout, CLEAN["head"]) == record
+    record = tmp_path / "readout.conformance" / "passed-aaaaaaaaaaaa-cpu.json"
+    assert conformance.record_path(readout, CLEAN["head"], torch.device("cpu")) == record
     written = json.loads(record.read_text())
     rows = runner.read_aircraft(readout)
     assert (written["batches"], written["checked_batches"], written["rows_compared"], written["rows"]) == \

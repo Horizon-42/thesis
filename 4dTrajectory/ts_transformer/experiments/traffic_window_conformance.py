@@ -18,12 +18,13 @@ the disk's, or the data changed, not the code). Then, against the readout's ``ai
 
 Not read: the summary, the counts, the run record — the configuration and the code make them; the same rows, the same
 numbers. A check passes or prints the first difference (which batch, which row, which fields, both values) and exits
-non-zero. Passed on a clean checkout, it writes ``<readout>.conformance/passed-<commit 12>.json`` beside the readout
+non-zero. Passed on a clean checkout, it writes ``<readout>.conformance/passed-<commit 12>-<device>.json`` beside the readout
 (read-only; `record_payload`): today's code version (`code_version.code_version`, the keys of the readout's
 ``code.json``), the readout checked — its path, the checksum of its rows and its own ``code.json``, so a record never
 vouches for another readout written later under the same name — the batches and the ones read, the rows compared, the
 time: the record `traffic_window_compare` accepts as the code version's evidence. A dirty checkout's check is read and
-reported, never written; a clean commit's record is never written over.
+reported, never written; a clean commit's record on a device is never written over (the device in the name — the user
+2026-10-03: a check on the CPU leaves the one on the GPU to be made).
 
 What it cannot see (the design's limits): a change that alters only batches not read; a row field added or dropped
 fails it ("other fields"); another torch / CUDA / GPU may move a float — reported as it is.
@@ -53,7 +54,7 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 #: Batches read again by default (the user, 2026-10-03).
 BATCHES = 24
-#: Beside a readout ``<readout>``: ``<readout>.conformance/passed-<commit 12>.json``.
+#: Beside a readout ``<readout>``: ``<readout>.conformance/passed-<commit 12>-<device>.json``.
 RECORDS_SUFFIX = ".conformance"
 
 
@@ -65,8 +66,8 @@ def records_dir(readout: Path) -> Path:
     return readout.with_name(readout.name + RECORDS_SUFFIX)
 
 
-def record_path(readout: Path, commit: str) -> Path:
-    return records_dir(readout) / f"passed-{commit[:12]}.json"
+def record_path(readout: Path, commit: str, device: torch.device) -> Path:
+    return records_dir(readout) / f"passed-{commit[:12]}-{device.type}.json"
 
 
 def passed_records(readout: Path) -> list[tuple[Path, dict[str, Any]]]:
@@ -192,10 +193,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("at least one batch and one reading process")
     readout = args.readout if args.readout.is_absolute() else REPO_ROOT / args.readout
     git = git_state()
-    record = record_path(readout, git["head"])
-    if record.exists() and not git["dirty"]:
-        parser.error(f"{record} exists: this commit's check is written once")
     device = torch.device(args.device)
+    record = record_path(readout, git["head"], device)
+    if record.exists() and not git["dirty"]:
+        parser.error(f"{record} exists: this commit's check on this device is written once")
     started = time.perf_counter()
     try:
         checked = check(readout, args.batches, args.workers, device)
@@ -209,7 +210,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("the checkout is dirty: nothing written", flush=True)
         return 0
     if record.exists():
-        parser.error(f"{record} was written while this check ran: this commit's check is written once")
+        parser.error(f"{record} was written while this check ran: this commit's check on this device is written once")
     write_json_atomic(record, record_payload(readout, code_version(git, device, READING_CONSTANTS), checked, elapsed),
                       allow_nan=False)
     print(f"→ {record}")

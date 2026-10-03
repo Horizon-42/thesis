@@ -1214,11 +1214,12 @@ readout's own row function), in every batch, read again or not;
 batches run from the smallest windows to the largest) in forked processes as R34 reads (`read_batches`), compared row by
 row: the same rows by (window, flight, sample, source), every field equal as written (JSON with sorted keys: floats bit for
 bit, NaN for NaN). Not read: summary, counts, run record. A difference prints the first one (batch, row, fields, both
-values) and exits 1. Passed on a clean checkout it writes `<readout>.conformance/passed-<commit 12>.json` beside the
+values) and exits 1. Passed on a clean checkout it writes `<readout>.conformance/passed-<commit 12>-<device>.json` beside the
 (read-only) readout (`record_payload`): the checker's code version (`code.json`'s keys), the readout — its path, its rows'
 checksum and its own `code.json`, so a readout written again under the same name is not vouched for — the batches and
 those read, the rows compared, the time: the evidence R41 accepts; a dirty checkout is checked and nothing written; a
-clean commit's record is never written over. Only readouts to be compared are checked. Limits (design): a change touching only batches not read is not
+clean commit's record on a device is never written over (the device in the name: the user, 2026-10-03). R41 accepts a
+record however few batches it read (the user, 2026-10-03: no floor); its count is in the result. Only readouts to be compared are checked. Limits (design): a change touching only batches not read is not
 seen; a row field added or dropped fails it; another torch / CUDA / GPU may move a float — reported as it is.
 
     python run_ts.py traffic_window_conformance --readout 4dTrajectory/outputs/POOLED/traffic/window_val_start_20261002 \
