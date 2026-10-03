@@ -4682,84 +4682,131 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   user-select: none;
 }
 
-/* Title */
+/* Title row: name left, Side / Reset chips right */
+.hud-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 5px;
+}
 .hud-title {
-  margin: 0 0 4px;
+  flex: 1;
+  margin: 0;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0;
   text-transform: uppercase;
   color: #7eb8f7;
 }
-
-/* Section wrapper + label */
-.hud-section       { margin-bottom: 4px; }
-.hud-section-label {
-  margin: 0 0 2px;
-  font-size: 10px;
-  font-weight: 400;
-  text-transform: uppercase;
-  letter-spacing: 0;
-  color: #8898aa;
+.hud-chip-btn {
+  padding: 3px 7px;
+  font-size: 11px;
+  color: #d8f3ff;
 }
 
-/* Compass row: [◁] [svg + hdg value] [▷] */
-.hud-compass-row {
+/* Drag controller: [disc] [zoom strip] [HDG / PIT / ALT] */
+.hud-pad-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 5px;
+  gap: 8px;
 }
-.hud-compass-wrap {
+.hud-dial {
+  flex: 0 0 auto;
+  width: 84px;
+  height: 84px;
+  border-radius: 8px;
+  cursor: grab;
+  touch-action: none;
+}
+.hud-dial:active { cursor: grabbing; }
+.hud-dial-svg { display: block; }
+
+.hud-zoom {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  flex: 1;
+  justify-content: space-between;
+  width: 18px;
+  height: 84px;
+  cursor: ns-resize;
+  touch-action: none;
 }
-.hud-compass-svg {
-  display: block;
-  width: 52px;
-  height: 52px;
-}
-.hud-hdg-value {
-  font-family: "Courier New", monospace;
-  font-size: 13px;
+.hud-zoom-sign {
+  font-size: 12px;
   font-weight: 700;
-  color: #7eb8f7;
-  letter-spacing: 0;
-  line-height: 1;
+  line-height: 10px;
+  color: #8898aa;
 }
+.hud-zoom-track {
+  position: relative;
+  flex: 1;
+  width: 4px;
+  margin: 3px 0;
+  border-radius: 2px;
+  background: #2a3a5a;
+}
+.hud-zoom-thumb {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: #1e2840;
+  border: 2px solid #5a7ab8;
+  transition: transform 0.15s ease-out, border-color 0.15s;
+}
+.hud-zoom:hover .hud-zoom-thumb { border-color: #7eb8f7; }
+.hud-zoom-thumb.is-dragging { transition: none; border-color: #7eb8f7; background: #1a5fb4; }
 
-/* Pitch & altitude control rows: [▲/−] [value] [▼/+] */
-.hud-ctrl-row {
+/* HDG / PIT / ALT readout, lat/lon line */
+.hud-readout {
+  flex: 1;
+  min-width: 0;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 5px;
 }
-.hud-ctrl-value {
-  flex: 1;
-  text-align: center;
-  font-family: "Courier New", monospace;
-  font-size: 13px;
-  color: #c8d8ec;
+.hud-readout-row   { display: flex; align-items: baseline; gap: 5px; }
+.hud-readout-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  color: #8898aa;
+  width: 24px;
+  flex-shrink: 0;
 }
-.hud-alt-value { color: #7eb8f7; font-weight: 600; }
+.hud-readout-val {
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  color: #a0b8d0;
+  white-space: nowrap;
+}
+.hud-readout-main { color: #7eb8f7; font-weight: 700; font-size: 13px; }
+.hud-position {
+  margin-top: 4px;
+  font-family: "Courier New", monospace;
+  font-size: 10px;
+  color: #8898aa;
+  white-space: pre;
+  text-align: center;
+}
 
-/* Toggle row (checkbox + label) */
+/* Scene: terrain slider + sun toggle, then one status line */
 .hud-toggle-row {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   cursor: pointer;
-  margin: 0 0 2px;
 }
+.hud-sun-toggle { flex: 0 0 auto; }
 .hud-toggle-label {
   font-size: 11px;
   color: #c8d8ec;
 }
-
-/* Slider row (label + range + value) */
 .hud-slider-row {
   display: flex;
   align-items: center;
@@ -4767,6 +4814,7 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
 }
 .hud-slider {
   flex: 1;
+  min-width: 36px;
   height: 4px;
   accent-color: #4a8fe8;
   cursor: pointer;
@@ -4775,7 +4823,7 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   font-family: "Courier New", monospace;
   font-size: 11px;
   color: #7eb8f7;
-  min-width: 28px;
+  min-width: 26px;
   text-align: right;
 }
 .hud-terrain-status {
@@ -4783,14 +4831,13 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   align-items: center;
   justify-content: space-between;
   gap: 5px;
-  margin-top: 3px;
+  margin-top: 4px;
 }
 .hud-terrain-status-value {
   font-family: "Courier New", monospace;
-  font-size: 11px;
+  font-size: 10px;
   color: #9fb2c9;
-  text-align: right;
-  min-width: 72px;
+  white-space: nowrap;
 }
 .hud-terrain-status-value.is-loading {
   color: #ffd166;
@@ -4816,71 +4863,11 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
 .hud-btn:hover  { background: #2a3f6a; border-color: #5a7ab8; }
 .hud-btn:active { background: #1a5fb4; }
 
-/* Arrow buttons (tall to align with compass SVG) */
-.hud-arrow-btn {
-  width: 24px;
-  height: 52px;
-  font-size: 15px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  flex-shrink: 0;
-}
-
-/* Small square buttons for pitch / zoom */
-.hud-sm-btn {
-  width: 23px;
-  height: 23px;
-  font-size: 14px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  flex-shrink: 0;
-}
-
-/* Full-width reset button */
-.hud-side-view-btn {
-  width: 100%;
-  margin-top: 3px;
-  padding: 3px 0;
-  font-size: 11px;
-  color: #d8f3ff;
-}
-
-.hud-reset-btn {
-  width: 100%;
-  padding: 4px 0;
-  font-size: 11px;
-  letter-spacing: 0;
-  text-align: center;
-  justify-content: center;
-}
-
-/* Divider between controls and position readout */
+/* Divider between the drag controller and the scene controls */
 .hud-divider {
   border: none;
   border-top: 1px solid #2a3550;
-  margin: 4px 0;
-}
-
-/* Lat / lon readout */
-.hud-readout       { display: flex; flex-direction: column; gap: 2px; margin-bottom: 5px; }
-.hud-readout-row   { display: flex; align-items: center; gap: 5px; }
-.hud-readout-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0;
-  color: #8898aa;
-  width: 26px;
-  flex-shrink: 0;
-}
-.hud-readout-val {
-  font-family: "Courier New", monospace;
-  font-size: 11px;
-  color: #a0b8d0;
+  margin: 5px 0;
 }
 
 /* ── Flight table ─────────────────────────────────────────────────────────── */

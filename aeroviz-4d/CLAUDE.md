@@ -240,6 +240,9 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   over the screen, the live sim's state (`liveSnapshot`) is never a playback's (`playbackSnapshot`), and the bottom bar
   drives the live sim (`pilotTransport`) or, with a comparison loaded, the clock — which a playback stops when it unloads. The published key `rawKinematics.observedBaseline` keeps
   its name (a Python contract) (AV43).
+- **The Camera panel is a drag disc, orbiting the screen-centre point** (`HUD.tsx`, math in `utils/cameraDial.ts`): heading/pitch are
+  ACCUMULATED during a drag and never read back from the camera (they differ at long range); the 10 Hz readout is quantised and skips
+  re-renders when nothing visible changed; orbit pitch is limited to −89°…−1°; no effect while following a flight (AV44).
 
 ## Comparison CZML colour contract
 

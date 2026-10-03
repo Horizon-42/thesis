@@ -797,3 +797,18 @@ indeterminate on another runway.
 - 测试：`PilotPanel.test.tsx` 新增六条（比较飞的是面板自己的操纵量、Alpha 下不可用、改操纵量清掉结果；两种飞法的交接与底栏；
   暂停的实时飞行跨 Optimize 保持；Optimize 回放后 Start 重新开始；Fly 选的 RNAV 点切到 Optimize 仍在；Compute 期间锁住操纵量、
   改 Simulation 清掉比较），`WorkbenchBottomBar.test.tsx` 的 Fly 无传输用例改成"驱动时钟"。
+
+### AV44 · 相机面板是一个拖动圆盘：绕屏幕中心点转，航向/俯仰在拖动里累加、不回读（2026-10-03）
+
+`HUD.tsx` 的 Camera 面板用一个"从相机看地面"的小圆盘取代了按钮行：左右拖是航向（圆盘跟手转，向右拖航向减小），上下拖是俯仰（向下拖更接近俯视，
+圆盘更圆），旁边的竖条拖动缩放（上拖拉近，松手弹回），滚轮在两者上都缩放，双击圆盘回到正北。纯数学在 `utils/cameraDial.ts`（有测试）。
+
+- **绕屏幕中心的地面点转，不是原地转头**：按下时取一次焦点（`globe.pick`，约 1 ms）和距离，整个拖动用同一个点
+  `camera.lookAt(focus, HeadingPitchRange)` + `lookAtTransform(IDENTITY)`；中心是天空时退回原地 `setView`。俯仰限在 −89°…−1°
+  （相机在焦点之下看到的是地面背面）；起始俯仰在按下时夹进这个范围。
+- **航向/俯仰在拖动里自己累加，不从相机回读**：`camera.heading` 在相机位置量，轨道在焦点处量，长距离下两者不同——回读会让圆盘来回跳。
+  拖动期间 10 Hz 的读数也不覆盖圆盘的航向/俯仰；松手后才回到相机的读数（可能有一次小跳）。
+- **读数按显示精度取整再比较**（航向/俯仰 0.1°、高度 1 m、经纬度 1e−4°，航向 359.95 记作 0，不是 360）：相机不动时面板不重渲染。
+  量过的代价：按下约 1 ms、每步拖动处理 + React 刷新 2–4 ms，场景每帧约 12–17 ms，所以圆盘不比三维画面慢。
+- 拖动只认主键、主指针，失去指针捕获就结束；按下时 `cancelFlight()`（Side / north-up / Reset 的飞行会和拖动抢相机）。
+- 已知：Follow camera（`trackedEntity`）时相机归 Cesium 的跟踪管，拖动无效——旧按钮也一样。
