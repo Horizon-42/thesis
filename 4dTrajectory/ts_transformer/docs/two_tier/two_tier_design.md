@@ -79,7 +79,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 
 | Part | State |
 |---|---|
-| Stage A: vocabulary, labeller, identities, executor, judge, replay (§14.2) | Built on `dev-two-tier-v4`, each milestone reviewed: A0 `e57c62d8` + `d2917c06`; A1–A3 `63639a54` + review fixes `feaf9558`, `d1e277f7`; A4–A6 `330ffbaf` + review fixes `c7603a4c`; A7: this section, §13, and the full ts suite (1,469 passed at `c7603a4c`). Smoke build (80 flights an airport and split, in the ignored `smoke_v4/data/` of the worktree): both conformance checks pass; the replay ran to its end at Δ = 2 and 4 s. Claude's readings that the user should confirm: listed in the stage A report (level band at a segment's top, the grammar's held height, "no level-off"'s band, LNAV/VNAV DAs, the DA lateral tolerance as a share of the cone). Claude checks the result (§14.6) |
+| Stage A: vocabulary, labeller, identities, executor, judge, replay, closed-loop reading (§14.2) | Built on `dev-two-tier-v4`, each milestone reviewed: A0 `e57c62d8` + `d2917c06`; A1–A3 `63639a54` + review fixes `feaf9558`, `d1e277f7`; A4–A6 `330ffbaf` + review fixes `c7603a4c`; A7 `14eb7946`; A8 `05f00be7` + review fixes in `c41ce7af`; A9 `c41ce7af` + review fixes `2e182e8d`, `983f2847`; D38 and D34 `6d1e8c4a` + review fixes `fdc3b832`. Smoke build (80 flights an airport and split, in the ignored `smoke_v4/data/` of the worktree): the labeller's, the executor's and the closed loop's conformance checks pass; the replays ran at Δ = 2 and 4 s, open loop and closed loop. Report: `readouts/2026-10-04_stage_a_a8_a9_report.zh.md` (dev-two-tier). Claude checks the result (§14.6) |
 | Stage B: prior (§14.3) | Not started; outline |
 | Stage C: post-training and multi-aircraft (§14.4) | Not started; outline |
 | Stage D: frontend and backend (§14.5) | Not started; outline |
@@ -1270,7 +1270,7 @@ Checked on 2026-10-03 in the local PDF files (`docs/literature/runway_assignment
 
 ## 13 Key code index
 
-The code of this design (stage A). Line numbers are at the end of stage A on `dev-two-tier-v4`; paths are relative to
+The code of this design (stage A). Line numbers are at the end of A9 on `dev-two-tier-v4`; paths are relative to
 `4dTrajectory/ts_transformer/`.
 
 | What | Where |
@@ -1278,23 +1278,27 @@ The code of this design (stage A). Line numbers are at the end of stage A on `de
 | Columns; "go-around" in the runway column | `instructions/words.py:20` `COLUMNS`, `:24` `RUNWAY_GO_AROUND` |
 | Heading classes relative to the course of R | `instructions/words.py:80` `heading_class`, `:84` `heading_track_deg` |
 | The 40 levels, their bands | `instructions/words.py:47` `altitude_tolerances`, `:89` `altitude_index` |
-| Grammar: rules 1–5 and the runway/G table, one function | `instructions/grammar.py:54` `apply`, `:117` `runway_words_allowed` |
-| Capture row; heading words to the end, relative frame | `instructions/labeller/lateral.py:38` `capture_row`, `:57` `per_step_words`, `:90` `read_lateral` |
-| Level test by the piece's own median; held height; tubes | `instructions/labeller/vertical.py:57` `vertical_pieces`, `:78` `held_altitude`, `:187` `tube_bounds`, `:218` `tube_checks` |
-| "Unspecified" from the capture row | `instructions/labeller/speed.py:86` `read_speed` |
-| Go-around rule (R40's, on the rows) | `instructions/labeller/go_around.py:61` `low_passes`, `:108` `go_arounds` |
-| Landing cut, go-arounds in the gate, runway words (D19) | `instructions/labeller/read.py:106` `admit`, `:147` `flight_go_arounds`, `:166` `runway_words`, `:192` `read_flight` |
-| Row interval (D11, D25) | `instructions/labeller/interval.py:45` `first_interval_row`, `:69` `on_interval` |
-| Labeller conformance (§9.2 #2) | `instructions/conformance.py:59` `labeller_code_sha256`, `:148` `check`, `:202` `require_conforming_labeller` |
+| Grammar: rules 1–6 and the runway/G table, one function | `instructions/grammar.py:58` `apply`, `:127` `runway_words_allowed` |
+| Approaches; capture row per approach; heading words relative to the R of each row | `instructions/labeller/lateral.py:32` `Approach`, `:53` `capture_row`, `:71` `per_step_words`, `:105` `read_lateral` |
+| Level test by the piece's own median; held height; the go-around climb and the final descent before it (D26); tubes | `instructions/labeller/vertical.py:65` `vertical_pieces`, `:86` `held_altitude`, `:122` `climb_after`, `:133` `read_vertical`, `:236` `tube_bounds`, `:267` `tube_checks` |
+| Speed words per approach; "unspecified" from the capture row | `instructions/labeller/speed.py:90` `read_speed` |
+| Go-around rule (R40's, on the rows) | `instructions/labeller/go_around.py:62` `low_passes`, `:109` `go_arounds` |
+| Landing cut, go-arounds in the gate, approaches, runway words (D19, D26) | `instructions/labeller/read.py:59` `ApproachReading`, `:126` `admit`, `:168` `flight_go_arounds`, `:185` `runway_again_rows`, `:208` `read_flight` |
+| Row interval (D11, D25); a heading word across a runway change | `instructions/labeller/interval.py:51` `first_interval_row`, `:75` `on_interval` |
+| Labeller conformance (§9.2 #2) | `instructions/conformance.py:59` `labeller_code_sha256`, `:150` `check`, `:204` `require_conforming_labeller` |
+| The words in force at each go-around row (readout) | `instructions/readout.py:30` `go_around_in_force` |
 | Heading envelope | `instructions/envelope.py:31` `heading_words_inside` |
 | Straight-line glidepath (D13, the DA check) | `instructions/airport.py:183` `glidepath_height_m` |
-| Heading law; conversion with the course of R; go-around course | `autopilot/lateral.py:54` `word_rate`, `:138` `Lateral.word_error`, `:172` `Lateral.rate` |
-| Vertical modes; go-around climb | `autopilot/vertical.py:43` `GO_AROUND_CLIMB_GRADIENT`, `:89` `Vertical.rate` |
+| Closed-loop sentences on disk | `instructions/artefact.py:212` `CLOSED_LOOP_SCHEMA`, `:225` `write_closed_loop`, `:255` `load_closed_loop` |
+| Heading law; conversion with the course of R ("go-around" changes no target, D27) | `autopilot/lateral.py:52` `word_rate`, `:127` `Lateral.word_error`, `:154` `Lateral.rate` |
+| Vertical modes; the go-around angle (D28) | `autopilot/vertical.py:49` `GO_AROUND_MIN_RAD`, `:54` `go_around_angle_rad`, `:88` `Vertical.rate` |
+| "Unspecified" under G holds the go-around row's airspeed | `autopilot/speed.py:71` `Speed.hear_go_around`, `:76` `Speed.rate` |
 | The cycle; go-around time; approach crossing ends the flight | `autopilot/executor.py:60` `GO_AROUND_EXTRA_S`, `:160` `Executor.cycle` |
 | R and G per row | `autopilot/sentence.py:89` `_filled` |
-| Outcomes, their order; the DA check | `autopilot/judge.py:74` `OUTCOMES`, `:77` `EVENT_ORDER`, `:135` `decision_check`, `:158` `_outcome`, `:319` `judge` |
+| Outcomes, their order; the DA check (D38); no crossing is an event under G (D33) | `autopilot/judge.py:75` `OUTCOMES`, `:78` `EVENT_ORDER`, `:136` `decision_check` (D38: `evaluation/thresholds.py` `RNAV_TERMINAL_VERTICAL_BOUND_M`, repository root), `:159` `_outcome`, `:321` `judge` |
 | TCH, glidepath, DA read by the judge | `autopilot/runway_data.py:25` `VerticalPath` |
-| A sentence on Δ; the readout | `autopilot/replay.py:77` `sentence_on_interval`, `:367` `summary`; `experiments/executor_replay.py:99` `readout_table` |
+| A sentence on Δ; the readout | `autopilot/replay.py:77` `sentence_on_interval`, `:88` `instructions_of`, `:233` `batch_of`, `:398` `summary`; `experiments/executor_replay.py:110` `readout_table` |
+| Closed-loop reading (D32): the matched point, the corrections, the rows without one (D34), the flight, its conformance, its replay | `autopilot/closed_loop.py:107` `ObservedPath`, `:140` `uncorrected_m`, `:149` `Corrector`, `:239` `read`, `:327` `read_chunked`, `:355` `closed_loop_code_sha256`, `:429` `check`, `:498` `require_conforming_closed_loop`, `:540` `replay_batch`; `experiments/instruction_closed_loop.py:74` `main`; `experiments/executor_replay.py:236` `closed_loop_columns` |
 | Clearance mask (stage C) | archived: `archive/two_tier_v3_2026_10/inference/separation_masks.py` |
 | Prior: airport embedding, inputs (stage B) | archived: `archive/two_tier_v3_2026_10/prior/model.py`, `prior/data.py` |
 | FAS cone; DA above the threshold | `flight_scenarios/fas_geometry.py:46` `fas_course_geometry`; `trajectory_data_process/harvest/airports.py:169` (repository root) |
