@@ -226,8 +226,17 @@ def test_the_models_are_named_by_the_method_that_trained_them_every_version_alik
     assert export.model_identity(_tuned(LANDING_REWARD_SCHEMA, PRIOR, 3)) == ("landing", 3)
     assert export.model_identity(_tuned(AUGMENTED_REWARD_SCHEMA, PRIOR, 2)) == ("augmented", 2)
     assert export.model_identity(_tuned(TRAFFIC_REWARD_SCHEMA, PRIOR, 5)) == ("traffic", 5)
-    # M4 in windows trains its own model, never another traffic round ("traffic r5" is its start)
-    assert export.model_identity(_tuned(TRAFFIC_WINDOW_REWARD_SCHEMA, PRIOR, 5)) == ("window", 5)
+    # M4 in windows: every aircraft of a window commanded trains "window"; one a window — M4's own setting — "traffic"
+    # (the user, 2026-10-03); a round from before its runs recorded which is not named
+    window_round = _tuned(TRAFFIC_WINDOW_REWARD_SCHEMA, PRIOR, 5)
+    for commanded, name in (("every", "window"), ("one", "traffic")):
+        window_round["fine_tuning"]["commanded"] = commanded
+        assert export.model_identity(window_round) == (name, 5)
+    del window_round["fine_tuning"]["commanded"]
+    with pytest.raises(ValueError, match="before its rounds recorded how a window's aircraft were commanded"):
+        export.model_identity(window_round)
+    from ts_transformer.experiments.traffic_window import COMMANDED
+    assert set(export.WINDOW_MODELS) == set(COMMANDED)
     # the adopted landing model was written by the method's first version: the same model
     assert export.model_identity(_tuned("ts-prior-landing-reward-v1", PRIOR, 1)) == ("landing", 1)
     with pytest.raises(ValueError, match="no model is named for ts-prior-closed-loop-sft-v1"):
@@ -235,7 +244,7 @@ def test_the_models_are_named_by_the_method_that_trained_them_every_version_alik
     for schema in ("ts-prior-landing-reward-vnext", "ts-prior-landing-reward"):
         with pytest.raises(ValueError, match="not a versioned post-training schema"):
             export.method_of(schema)
-    assert set(export.METHOD_MODELS.values()) | {"base"} == set(export.MODEL_NAMES)
+    assert set(export.METHOD_MODELS.values()) | set(export.WINDOW_MODELS.values()) | {"base"} == set(export.MODEL_NAMES)
     # the archived runner's schema, mirrored (nothing imports the archive): read from its source
     from ts_transformer.repo_layout import REPO_ROOT
 

@@ -962,7 +962,8 @@ as drawn, unprobed, the model read in the scene (a readout of the single header 
 `fixed_paths` / `FixedWindow`, `sentence_counts`, `generation_block`, `head_block` / `flights_block`, `check_set` by kind. The
 model trained by `ts-traffic-reward` is named **traffic** (`MODEL_NAMES`, user 2026-09-30), the one trained by
 `ts-traffic-window-reward` (R37, M4 in windows) **window** (user 2026-10-01). A run of R37 `--commanded one` (design §6.6
-step 9.4) is named the same way until the user names it (its `fine_tuning` records `commanded`); the set reads only readouts
+step 9.4) is named **traffic** (the user, 2026-10-03: one commanded aircraft a window is M4's own setting; `WINDOW_MODELS`
+by its `fine_tuning.commanded`; an R37 round from before that field is refused); the set reads only readouts
 of every aircraft commanded (`readout_block` checks `commanded`).
 
 

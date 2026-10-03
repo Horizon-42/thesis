@@ -35,7 +35,7 @@ each read, which the live backend checks before it flies a sample again (`aerovi
 
 **Which model it is, by name** (`MODEL_NAMES`, the post-training design's table): a prior trained on data alone is
 ``base``; a post-trained round is named by the method that trained it (`fine_tuning.schema` less its version,
-`METHOD_MODELS`), with its round, the run holding its rounds and the model it started from, named the same way — so the
+`METHOD_MODELS`; M4 in windows by how a window's aircraft were commanded, `WINDOW_MODELS`), with its round, the run holding its rounds and the model it started from, named the same way — so the
 frontend can switch between the rounds of every stage. A method with no name is refused: a new stage's name is agreed
 with the user and added here.
 
@@ -157,9 +157,14 @@ def method_of(schema: str) -> str:
 #: MIRROR of the checkpoint schema of M4's first runner (R32, archived: `archive/one_commanded_scene_2026_10/experiments/
 #: traffic_reward.py`, nothing imports the archive), whose rounds are ``traffic``.
 TRAFFIC_REWARD_SCHEMA = "ts-traffic-reward-v1"
-#: The model a post-training method makes (``base`` has none: it is trained on data alone).
+#: The model a post-training method makes (``base`` has none: it is trained on data alone); M4 in windows (R37) makes
+#: two, by `WINDOW_MODELS`.
 METHOD_MODELS = {method_of(LANDING_REWARD_SCHEMA): "landing", method_of(AUGMENTED_REWARD_SCHEMA): "augmented",
-                 method_of(TRAFFIC_REWARD_SCHEMA): "traffic", method_of(TRAFFIC_WINDOW_REWARD_SCHEMA): "window"}
+                 method_of(TRAFFIC_REWARD_SCHEMA): "traffic"}
+#: R37's rounds by how a window's aircraft were commanded (its ``fine_tuning.commanded``, `traffic_window.COMMANDED`):
+#: one a window is M4's own setting, so ``traffic`` (the user, 2026-10-03: multi-aircraft step 9.4's model); every
+#: aircraft ``window`` (the user, 2026-10-01).
+WINDOW_MODELS = {"one": "traffic", "every": "window"}
 
 
 def model_identity(config_file: dict[str, Any]) -> tuple[str, int | None]:
@@ -169,6 +174,11 @@ def model_identity(config_file: dict[str, Any]) -> tuple[str, int | None]:
         return "base", None
     tuning = config_file["fine_tuning"]
     method = method_of(tuning["schema"])
+    if method == method_of(TRAFFIC_WINDOW_REWARD_SCHEMA):
+        if "commanded" not in tuning:
+            raise ValueError(f"a {tuning['schema']} round written before its rounds recorded how a window's aircraft "
+                             f"were commanded (multi-aircraft step 9.4): its model is not named")
+        return WINDOW_MODELS[tuning["commanded"]], tuning["round"]
     if method not in METHOD_MODELS:
         raise ValueError(f"no model is named for {tuning['schema']}: a new stage's name is agreed with the user and "
                          f"added to MODEL_NAMES / METHOD_MODELS")

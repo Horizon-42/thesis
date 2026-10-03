@@ -1925,7 +1925,8 @@ runner R40 `go_around_census`（分支 `dev-go-around`）。读数 `readouts/202
      没有前机。抽到 D 的这些航班原来被放弃，占候选的 15 %，KSMF 只剩 199 / 191 个（要 200），这一轮会被拒。
    - 改为：窗口里由模型指挥的飞机没有前机时，D 用不上，在其余的做法里重抽（计一次 `no_leader_to_move`），与 R32 重抽做法相同。改后每机场留下
      248–250 个候选。D 约占一架由模型指挥的扩充窗口的五分之一（R32 也是：2,000 里 346），做不到 §5.4 说的三分之一。窗口模式没有 D，不变。
-5. 待用户定：9.4 训出的模型叫什么。发布时导出器按方法的 schema 命名，R37 的都叫 window；`fine_tuning` 里记了 `commanded`，可以分开。
+5. 9.4 训出的模型叫 **traffic**（用户 2026-10-03）：R37 按 `fine_tuning.commanded` 命名，一架由模型指挥叫 traffic，全部指挥叫 window
+   （`prior_generation_training_export.WINDOW_MODELS`）；9.4 之前的 R37 轮没有这一项，不命名、拒绝。
 6. D 和 A 的飞机按执行器规格的时限飞，只有 B 挪了起点的用第二阶段的时限，与 R32 实际飞的相同。
 
 **开发顺序**（分支 `dev-step9-one-commanded`，从 `dev-two-tier` 起；每步有测试；第 1、3、4 步后各一次 opus 审查）：
