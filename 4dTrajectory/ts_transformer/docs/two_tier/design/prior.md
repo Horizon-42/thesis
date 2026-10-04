@@ -46,6 +46,7 @@ The decision numbers are shared by all documents (outline §3).
 | D65 | The inputs and the model where §2 left them open: the fixed scales of §9 (the height above the glidepath as asinh(h / 100 m)); the candidate tokens reach a row through one attention over them whose weights sum to one; the RoPE base is 10,000; the variant `constants` gives the threshold elevation MSL; the runway column's `since` starts again at a candidate word, not at "go-around" (§2) | Decided | User, 2026-10-04, on the proposals of the stage B agent and Claude's review |
 | D68 | Free generation lets a flight say at most 2 go-arounds. After its second, the runner forbids "go-around" in the runway column (a mask of a caller, §4), and it gives 2 as the most go-arounds to the start of the closed loop (vocabulary §6, item 5; D67). The readout counts the flights that reached the bound. Why: the executor lays out the time that go-arounds add (900 s each) when it starts, and the number that a model says is not known before; no closed-loop sentence of `v9_20261004` at Δ = 2 s has more than one go-around (train 68 of 40,534 sentences, select 12 of 6,199, val 20 of 9,750); 2 lets a model say one more than the data, and no flight goes around without end (B4) | Decided | User, 2026-10-04, on the report of the stage B agent |
 | D72 | The readout's probability of "go-around" on the final (B4, B5) is read on the rows on the final (inside the region of the runway in force, D64) where the masks permit "go-around": not while G is true, not after the bound of D68. The probability is that of the distribution the speaker draws the runway word from, the masks applied. Why: at a row where the word is masked, its probability is 0 because of the mask, not the model, and would pull the mean down | Decided | User, 2026-10-04, on the proposal of the stage B agent |
+| D75 | The base learns only from closed-loop sentences whose own words land: a selection of the artefact's sentences by a named rule (`all`, `landed`), applied when they are read; the artefact is not changed. `landed` keeps a sentence whose stored outcome (vocabulary §6, item 3; D74) is a landing. It applies to train and select (the stop and the choices of D39 and D40 read the same kind of sentence that the training reads) and to the teacher-forced loss of the validation readout; free generation starts from every flight, and the readout gives the flights outside the selection apart. A run records the rule and, for each split, airport, stratum and outcome, the sentences kept and left out (§8, item 1). Why: about 2.2–2.6 % of the sentences do not land when their own words are flown (A25, Δ = 2 s: train 1,955 of 1,999 replayed, select 6,036 of 6,199; KMSY 94–95 %), mostly high at the DA; their last words teach an end that does not land, and the vocabulary and the executor, not the words, are often the cause, so imitation cannot correct them. They come back in the post-training as starts (post-training D76) (milestone B8) | Decided | User, 2026-10-04 |
 
 ### 0.2 Open items
 
@@ -87,6 +88,7 @@ changed); 3 (the runway head's class order) is a detail of the code. The code fo
    | After A21 of stage A (the formal artefact), and again after A25 (the formal artefact with the vertical tolerance of the final descent, D66) and A30 (the same artefact with no code digest, vocabulary D73; the formal runs read it) | B1–B4 on a sample of the formal artefact at Δ = 2 s: the smoke run of B3, its time and the memory check at the formal size; free generation with the executor of the formal artefact |
    | After A26 of stage A (the start of a closed loop, D67), merged into this branch | Free generation of B4 (the speaker with the executor and the judge, through the start), on synthetic artefacts and on the formal artefact |
    | After A27 of stage A (each flight's stratum in the sentence file, D70), merged into this branch | B4's readout by stratum |
+   | After A31 of stage A (each closed-loop sentence's outcome, vocabulary D74), merged into this branch | B8 (the selection of the base's sentences, D75), on synthetic artefacts; on the formal artefact after A30 |
    | After A28 of stage A (the start opens the executor spec, D71), merged into this branch | The main of the free-generation runner of B4 (it gives the start the directory of the executor spec) |
    | After A23 of stage A (the Training view of stage A), merged into this branch | B6's export and view, on the smoke sets of B3 and B4 |
    | After Claude's check of stage A and the user's choice of Δ (outline §4) | B5; B6's publication of the folds and the base; B7 |
@@ -358,7 +360,7 @@ sets its criteria (D7). The identities follow D21 (outline §3):
 
 | # | What | Its identity |
 |---|---|---|
-| 1 | The artefact of a prior | The spec sha, the day split, the candidate table, the sha256 of the sentence files, and the landings that the candidate vectors count (D63): for each airport, the sha256 of each landing's flight, runway and time, in time order, and of the number left out on the sealed test days. A run that reads the landings again computes the digest again and refuses a difference |
+| 1 | The artefact of a prior | The spec sha, the day split, the candidate table, the sha256 of the sentence files, the selection of its sentences (D75: the rule, and the sentences kept and left out for each split, airport, stratum and outcome), and the landings that the candidate vectors count (D63): for each airport, the sha256 of each landing's flight, runway and time, in time order, and of the number left out on the sealed test days. A run that reads the landings again computes the digest again and refuses a difference |
 | 2 | The procedure masks of a prior | The set name, the checkpoint sha and the digests of the procedure data (C35). The procedure data are the format of the masks |
 
 ---
@@ -377,6 +379,7 @@ sets its criteria (D7). The identities follow D21 (outline §3):
 | Input scales | Distances asinh(d / 1 km); heights / 1 km; height above a glidepath asinh(h / 100 m); ground speed / 100 m/s; vertical rate / 10 m/s; landings in 30 min / 10; length / 1 km and threshold elevation MSL / 1 km (`constants`) | D41, D65 |
 | RoPE base | 10,000 (heads 32 wide: periods 6.3 s to approximately 35,000 s) | D65 |
 | Go-arounds of a flight in free generation | At most 2; after the second, "go-around" is masked | D68 |
+| Sentences of the base, the folds and the configurations | `landed`: only sentences whose own words land; train, select and the validation's teacher-forced loss | D75 |
 
 ---
 
@@ -513,12 +516,27 @@ D67–D72).
 **B5. Cross-validation and the base** (D39, D40, D41).
 
 - The 31 training runs of §5, as one campaign from one commit on a clean checkout, one at a time on the GPU.
-- For each fold: the held-out loss, the first-step runway at the held-out airport, the free generation at the held-out
-  airport (200 flights × 2).
+- Every run reads the sentences of the selection `landed` (D75). For each fold: the held-out loss, the first-step
+  runway at the held-out airport, the free generation at the held-out airport (200 flights × 2, from every flight;
+  the flights outside the selection given apart).
 - `prior_select` applies the rules of §5 and writes the choice. Then the base on all five airports, and its one
   validation readout: the teacher-forced loss, the free generation, the share of the labelled words that the masks
   block, the probability of "go-around" on the final (D72).
 - No criterion is applied: the user reads the results (D7).
+
+**B8. The selection of the base's sentences** (§8 item 1; vocabulary §6 item 3; D74, D75). After A31 is on this
+branch; before B5.
+
+- `prior/selection.py`: the rules `all` and `landed`, applied to the sentences of a split and Δ as the reader of
+  item 3 gives them, with their stored outcomes; the artefact is not changed. `prior_train` takes the rule
+  (`landed` for every run of B5) and applies it to train and select; the validation readout applies it to the
+  teacher-forced loss, and free generation draws from every flight.
+- The identity of the data (§8, item 1) holds the rule and, for each split, airport, stratum and outcome, the
+  sentences kept and left out; a run refuses a selection that differs from its identity. The readouts print the
+  counts.
+- Tests: `landed` keeps exactly the sentences whose stored outcome is a landing and `all` keeps every one; the counts
+  add up to the sentences of the split; the artefact's files are unchanged after a run; a run under another rule
+  than its identity's is refused by name.
 
 **B6. The Training view of stage B (outline §6).** After A23 is on this branch; the publication of the folds and the
 base after B5. The user sees what the prior says and how the executor flies it.

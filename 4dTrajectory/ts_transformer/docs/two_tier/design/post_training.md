@@ -32,6 +32,7 @@ The decision numbers are shared by all documents (outline §3).
 | D31 | Multi-aircraft inputs and judgements (§3): the landing context of every aircraft of a scene counts the landings of the closed loop; D23 holds for every aircraft of a scene, with a test; "established on the final" is a function of one row, the same for every aircraft (its rule: O6). (The part of the prior: D31 there) | Decided | User, 2026-10-03 |
 | D36 | The teacher-forced data term of the post-training uses single-aircraft samples of the closed-loop sentences, not scene samples. The flown states keep the observed path, not the observed time (vocabulary, D42), so two aircraft of one scene do not keep their observed spacing (§2, §3) | Decided | User, 2026-10-04 |
 | D37 | Branch training. Each training aircraft is spoken one time. When its reward is less than 1, it is spoken again from saved states at its first predicted step and every 120 s after it, before the event that ended it. Each branch group compares only the words after its branch point (§2) | Decided | User, 2026-10-04 |
+| D76 | The flights outside the base's selection (prior D75) come back in the post-training only as starts of the closed loops, rewarded by their outcome (D30). The teacher-forced data term (D36) uses the same selection `landed`, so a sentence whose own words do not land is never imitated | Decided | User, 2026-10-04 |
 
 ### 0.2 Open items
 
@@ -107,7 +108,8 @@ The decision numbers are shared by all documents (outline §3).
    counts are set at stage C.
 5. **Loss**: the clipped-ratio surrogate (ε = 0.2) with the advantage inside each branch group (item 9); the pull to
    the base model (0.04, the KL on the sampled words, masked distribution); the teacher-forced data term (1) on
-   single-aircraft samples of the closed-loop sentences of the train days (D36); the traffic attention has its own
+   single-aircraft samples of the closed-loop sentences of the train days in the base's selection `landed` (D36,
+   D76); the flights outside it are starts like the others (D76); the traffic attention has its own
    learning rate. One pass over the sentences of a round.
 6. **Go-around sampling first.** Before the training, measure the probability that the base model gives "go-around" on
    the final (with D26 the data has go-arounds with "no level-off" and "unspecified" in force). If the model says
