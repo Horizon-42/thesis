@@ -242,6 +242,12 @@ def test_the_runner_trains_a_smoke_run_into_a_new_directory(tmp_path, monkeypatc
         prior_train.main(argv)                                       # never over an existing run
 
 
+def test_the_memory_check_only_writes_the_check_and_trains_nothing(tmp_path, monkeypatch):
+    _, _, out, _, _ = run_runner(tmp_path, monkeypatch, "--memory-check-only")
+    assert {p.name for p in out.iterdir()} == {"config.json", "memory.json"}
+    assert json.loads((out / "memory.json").read_text())["batches"]
+
+
 def test_a_fold_trains_without_its_held_out_airport_and_scores_it_on_its_select_days(tmp_path, monkeypatch):
     _, _, out, _, _ = run_runner(tmp_path, monkeypatch, "--held-out", "KYYY", "--sample", "2",
                                  airports=("KXXX", "KYYY"))

@@ -7,6 +7,9 @@ airport's landings from its tracks roster (D63). Never reads the validation days
 at the formal size: the largest batches, one forward and backward pass each on the device, and refuses
 a run that would not fit (``memory.json``).
 
+``--memory-check-only`` stops after the check (it writes ``config.json`` and ``memory.json``): the check at the formal
+size before a formal run, from any tree.
+
 Writes into ``--out`` (a new directory, never over an existing one; a clean tree unless ``--sample``, a SMOKE option
 that trains on a random sample of N sentences of each airport and split, seed 1337, D55, and says so in
 ``config.json``): ``checkpoint.pt`` (`prior.checkpoint`, the identity of the data, §8 item 1), ``config.json``,
@@ -69,6 +72,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--held-out", default=None, help="the fold's held-out airport (D39); none: every airport")
     parser.add_argument("--sample", type=int, default=None,
                         help=f"SMOKE: a random sample of N sentences of each airport and split, seed {SAMPLE_SEED}")
+    parser.add_argument("--memory-check-only", action="store_true",
+                        help="the memory check at this run's size, written to --out (memory.json, config.json); no "
+                             "training (§12 B3: the check at the formal size before a formal run)")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--procedure-root", type=Path, default=DEFAULT_PROCEDURE_ROOT)
     shape = {item.name: item.default for item in fields(PriorConfig) if item.name in SHAPE}
@@ -81,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     if out.exists():
         parser.error(f"{out} exists; a training run is never overwritten")
     git = git_state()
-    if git["dirty"] and args.sample is None:
+    if git["dirty"] and args.sample is None and not args.memory_check_only:
         parser.error("a run that is not a smoke run needs a clean tree")
     require_conforming_closed_loop(instructions)
     device = torch.device(args.device)
@@ -118,6 +124,9 @@ def main(argv: list[str] | None = None) -> int:
         "sentences": {"train": len(data.train), "select": len(data.select)},
         "parameters": sum(p.numel() for p in model.parameters())})
 
+    if args.memory_check_only:
+        print(json.dumps({"out": str(out), "memory": memory}))
+        return 0
     result = train(model, data, config, device, print)
     write_json_atomic(out / "history.json", {"best_epoch": result.best_epoch, "epochs": result.history})
     # the run record says whether it is a smoke run: the checkpoint alone must tell (its identity is the artefact's)
