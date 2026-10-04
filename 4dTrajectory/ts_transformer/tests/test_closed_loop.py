@@ -591,18 +591,30 @@ def test_the_observed_heading_words_of_a_turn_are_said_at_the_nearest_row_on_ave
     minus the word's 2 s time) is spread over ±Δ/2 and near zero on average at Δ = 2, 4 and 8 s; said at the first row
     past its place (A10) it was Δ/2 late on average. A slow turn: a word every 10 s, the flown aircraft 3 % slower."""
     words = Words(spec())
-    rows = [_first(words), *[{HEADING: (k // 5) % words.n_heading} if k % 5 == 0 else {} for k in range(1, 200)]]
+    first_row = 3                                     # the sentence's first Δ row: 2 s row 3 of the reading
+    rows = [_first(words), {}, {}, {},
+            *[{HEADING: (k // 5) % words.n_heading} if k % 5 == 0 else {} for k in range(1, 200)]]
+    grid = _grid(rows)
     for every in (1, 2, 4):
-        corrector = Corrector(_grid(rows), 0, 0, every, words, [90.0])
-        lateness, s = [], 0
-        while corrector.next < len(rows) - 1:
+        corrector = Corrector(grid, first_row, 0, every, words, [90.0])
+        lateness, said_rows, s = [], [], 0
+        while corrector.next < len(rows) - first_row - 1:
             said, added = corrector.row(s * every * 0.97, 0.0, 0.0, 900.0, holding=False, past_end=False)
-            if s and said[HEADING] != UNCHANGED:
-                lateness.append(corrector.matched_row - corrector.heading_row[corrector.observed_row])
+            said_rows.append((said, added, corrector.observed_row, corrector.matched_row))
+            if s and said[HEADING] != UNCHANGED:      # the word's 2 s row, counted from the sentence's first row
+                lateness.append(corrector.matched_row - (corrector.heading_row[corrector.observed_row] - first_row))
             s += 1
         lateness = np.array(lateness) * 2.0
         assert len(lateness) >= 35 and np.abs(lateness).max() <= every + 1e-9          # within ±Δ/2
         assert abs(lateness.mean()) < 0.5
+        # the runner's readout reads the same from the sentence and the reading from its first row
+        n = len(said_rows)
+        sentence = ClosedLoopSentence(
+            grid=np.array([r[0] for r in said_rows]), correction=np.array([r[1] for r in said_rows]),
+            states=np.zeros((n, 6)), lateral_m=np.zeros(n), vertical_m=np.zeros(n), uncorrectable=np.ones((n, 2), bool),
+            observed_row=np.array([r[2] for r in said_rows]), matched_row=np.array([r[3] for r in said_rows]), start=0,
+            timed_out=False)
+        assert np.allclose(closed_loop.heading_lateness_rows(sentence, grid[first_row:]) * 2.0, lateness)
 
 
 def test_a_flown_aircraft_behind_hears_the_turn_where_the_observed_one_did_and_flies_past_the_observed_time():

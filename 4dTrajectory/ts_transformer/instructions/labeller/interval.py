@@ -4,7 +4,8 @@
 1. The Δ rows are the rows on UTC multiples of Δ (the rule that put artefact `v6_20261002`'s rows on even seconds, so
    the aircraft of a scene stay on one grid): the first is `first_interval_row`, then every Δ / step rows.
 2. Each word of the step rows goes to the nearest Δ row; a word exactly between two Δ rows goes to the later one (D45:
-   the mean lateness of a word is then zero; the next Δ row would make it (Δ − step) / 2 late). A Δ row says, for each
+   the next Δ row would make a word (Δ − step) / 2 late on average; the nearest makes it step / 2 late at Δ ≥ 4 s, the
+   ties going later, and on time at the step). A Δ row says, for each
    column, the last word that goes to it if it differs from the word in force: a go-around and the runway said again
    that go to one Δ row cancel. In the runway column the word in force is the column's last word, "go-around" included.
    The rounding keeps the order of the words, and the words of one step row stay in one Δ row. Words that would go to a
