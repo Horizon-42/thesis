@@ -87,12 +87,10 @@ The decision numbers are shared by all documents (outline §3).
 
 ### 0.4 Plan
 
-1. A0–A20 and A22 are done; the formal build of A18 was stopped for D58; the spec measurement on all train days with A19
-   and A20 is done and the user chose the fitted grid (D59). Now A21: the formal artefact and the readings of D34 at
-   Δ = 2, 4, 8 s (§12.1). The build of A21 that started on 2026-10-04 at 13:36Z (`v8_20261004`, `v13_20261004`) was made
-   before D61 and is superseded; the rebuild into `v9_<date>` / `v14_<date>` waits for disk space (the user's go to
-   delete the superseded directories).
-2. Claude checks A15–A22 and the formal artefact (§12.2).
+1. A0–A22 are done, and A21's formal artefact is built (`instruction_language/v9_20261004`, `executor/v14_20261004`,
+   read-only with `SHA256SUMS`; report `readouts/2026-10-04_stage_a_a21_report.zh.md`).
+2. Claude's check of A15–A22 and the formal artefact (§12.2) is done: all five items pass
+   (`readouts/2026-10-04_stage_a_check_a15_a22.zh.md`).
 3. A23: the Training view of stage A (§12.1, outline §6), so that the user sees the words, the closed-loop sentences
    at Δ = 2, 4, 8 s and the executor in the frontend.
 4. The user compares the readings of D34 and chooses Δ (D7, D11), before or after A23. The replay of the val days waits
@@ -1380,7 +1378,10 @@ days done (§9.5); the user chose the fitted grid (D59). After A18; together wit
   gives the grid candidates and their rounding errors, and the rows of D56 again (they must not change). The user
   chooses the grid (D55).
 
-**A21. The formal artefact (D56, D58, D59, D61).** After A22.
+**A21. The formal artefact (D56, D58, D59, D61).** Done: built from `9a986c09` on 2026-10-04 15:35–16:41Z into
+`v9_20261004` / `v14_20261004` (report `readouts/2026-10-04_stage_a_a21_report.zh.md`); its signals, sentences and
+closed-loop files equal the build before D61 bit for bit (A22 changed no word and no state), which is deleted with the
+user's go. After A22.
 
 - The formal artefact, from a clean checkout, into new directories:
   `4dTrajectory/outputs/POOLED/instruction_language/v9_<date>/` (signals of every development flight, the spec with
@@ -1447,7 +1448,8 @@ the executor of this stage in the frontend.
 ### 12.2 Claude's check of stage A
 
 The check of A0–A14 is done (`readouts/2026-10-04_stage_a_check.zh.md`, at `ab295b18`; its points became D48–D52).
-After A21, Claude checks A15–A22 and the formal artefact. The formal runs of stage B wait for this check (outline §4):
+After A21, Claude checks A15–A22 and the formal artefact. The formal runs of stage B wait for this check (outline §4).
+Done at `9a986c09`: all five items pass (`readouts/2026-10-04_stage_a_check_a15_a22.zh.md`).
 
 1. D48–D56 against the code: done at `688e945e`. D57, D58, D59, D61 and D62, and the code changed after `688e945e`,
    against the code of the formal build of A21.
