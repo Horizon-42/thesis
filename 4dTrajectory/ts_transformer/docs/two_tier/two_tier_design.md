@@ -77,6 +77,9 @@ repository root.
 | D51 | The closed-loop artefact stores the flown states on the data's 2 s rows at every Δ, with the Δ rows marked. Observed and flown rows are then on one grid, and stage B builds the motion input of D25 with one piece of code for both. The artefact stores raw states, not a derived input, so a change of the motion window needs no rebuild. The replay check of a closed-loop sentence compares on the 2 s rows. At Δ = 2 s nothing changes (§4.8, §4.9) | Decided | User, 2026-10-04 (check §3 item 1) |
 | D52 | ε of a level = half the larger gap to its neighbouring levels + 10 m: 40 m for 0–1,200 m, 70 m for 1,260–2,580 m, 235 m for 2,700–5,400 m. A level's band then covers the largest rounding error of its word; the top level of a segment collects the heights up to half the next segment's step above it. One band for both sides (a one-sided band would differ at two levels only). "No level-off" has ε = 40 m: it has no level, so no rounding to cover; its tube's width comes mainly from the edges of the angle class (§3.4, §10) | Decided | User, 2026-10-04 (check §3 item 5) |
 | D53 | An overshoot. When a correction is in force and the error changes its sign while it is more than the tolerance (the flown aircraft crossed the observed path in one row), the labeller says the opposite correction in the same row: one class toward the path from the observed word. When the error changes its sign and is within the tolerance, it says the observed word again. Laterally and vertically alike. The rule of D50 then holds on every row (§4.9, §14.6). Why: a correction ends at a sign change so that it does not push the aircraft further on the other side; waiting one row to correct that side adds a lag of one row Δ that comes from the reading, not from Δ, and the ablation compares Δ (A15 smoke: every break of D50 at Δ = 4 and 8 s was such a row) | Decided | User, 2026-10-04 |
+| D54 | The descent classes are a k-means on tan(angle) of the descent pieces, with each piece weighted by the square of its length. A piece flown at the nominal angle of its class ends length · \|tan a − tan c\| from its observed end, so the k-means makes the sum of the squared end-of-piece height errors smallest; D15 gives the same error for each candidate. The climb nominal is the length-weighted median of the climb pieces (§3.5) | Decided | User, 2026-10-04 |
+| D55 | A value that a runner fits from data and the user chooses (D15) is measured on all train days, in a scratch directory, directly after the milestone that writes the runner; the user chooses before a later milestone reads the value. A smoke build uses the chosen spec, and its flights are a random sample for each airport and split (seed 1337), not the first flights of the sorted flight keys (a key starts with the callsign, so the first flights are mostly one airline). Why: the smoke of stage A fitted its own spec on approximately 400 train flights, 373 of them one airline, with one climb piece; every smoke reading of A9–A16 used it (§14.1 rules 7 and 12) | Decided | User, 2026-10-04 |
+| D56 | The values of D15, chosen: the candidate rounded to 0.25° of the spec measurement on all train days (stage A code at `42f3ff62`, 44,703 train flights, 227,559 descent pieces, 1,339 climb pieces). Descent nominals 1.5 / 2.5 / 3.0 / 4.5°, edges −0.5 / 2.0 / 2.75 / 3.75 / 10°; climb nominal (G false) 1.5°. End-of-piece height error p50 / p90: 15.0 / 51.0 m (fitted 1.51 / 2.45 / 3.09 / 4.45°: 14.7 / 47.8 m). Descent 3 is the published 3.0° glidepath of 24 of the 25 candidate runways (§3.5, §10) | Decided | User, 2026-10-04 |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -99,10 +102,10 @@ repository root.
 1. Stage A (§14.2): write the vocabulary, the labeller, the identities, the executor, the judge and the replay on the
    branch `dev-two-tier-v4`, milestones A0–A14, each with tests and a code review. Another agent does this.
 2. Claude checks the result of stage A against this document (§14.6). Then A15 (§14.2) from the decisions on the
-   check (D48–D52), and A16 (D53).
-3. The user chooses the fitted values of D15 (the turn law of the executor stays, D47). Then the formal artefact is
-   built, and the
-   readings of D34 are made at each row interval of the ablation (D11, D25: 2, 4, 8 s). The user compares them (D7).
+   check (D48–D52), A16 (D53), A17 (D55) and A18 (D56: the chosen spec, the formal artefact).
+3. The spec measurement on all train days, in a scratch directory, gives the candidates of D15 (D55); the user
+   chooses them (the turn law of the executor stays, D47). Then the formal artefact is built, and the readings of
+   D34 are made at each row interval of the ablation (D11, D25: 2, 4, 8 s). The user compares them (D7).
 4. Stages B, C, D (§14.3–§14.5): the prior from the start, the post-training and the multi-aircraft work, the frontend.
 5. The user merges the branch.
 
@@ -319,14 +322,19 @@ with these widths (principle 6). The level detection of the labeller does not us
 | Class | Nominal | Range |
 |---|---|---|
 | Level | 0° | used only to hold a level that the aircraft reached |
-| Descent 1 | 0.92° | −0.5° to 1.52° |
-| Descent 2 | 2.13° | 1.52° to 2.59° |
-| Descent 3 | 3.06° | 2.59° to 3.74° |
-| Descent 4 | 4.41° | 3.74° to 10° |
-| Climb | No angle in the word. The executor's angle (D28): the nominal of D15 while G is false (fitted: 1.32°); 1.885°–3° while G is true | 0.5° to 15° climb (the labeller's range of a climb piece) |
+| Descent 1 | 1.5° | −0.5° to 2.0° |
+| Descent 2 | 2.5° | 2.0° to 2.75° |
+| Descent 3 | 3.0° | 2.75° to 3.75° |
+| Descent 4 | 4.5° | 3.75° to 10° |
+| Climb | No angle in the word. The executor's angle (D28): the nominal of D15 while G is false (1.5°, D56); 1.885°–3° while G is true | 0.5° to 15° climb (the labeller's range of a climb piece) |
 
-The four descent classes are a length-weighted k-means of the descent pieces of the train days. The values of the
-table come from the fit on artefact `v6_20261002` (spec `145d6911e75b`); the spec measurement fits them again (D15).
+The four descent classes are a k-means on tan(angle) of the descent pieces of the train days, with each piece weighted
+by the square of its length (D54): a piece flown at the nominal angle of its class ends length · |tan a − tan c| from
+its observed end, so the k-means makes the sum of the squared end-of-piece height errors smallest. The values of the
+table are the user's choice (D56): the fit on all train days rounded to 0.25° (fitted 1.51 / 2.45 / 3.09 / 4.45°, edges
+1.98 / 2.77 / 3.77°, climb 1.47°). The old labeller's pieces (artefact `v6_20261002`) gave 0.92 / 2.13 / 3.06 / 4.41°
+under the same rule: the same flights and a median piece angle of 2.98° against 2.97°, but its shallowest class (12 % of
+the weight at 0.92°) is not in the new pieces.
 With D3 the model holds the glidepath with these classes; the closed-loop reading gives the corrections (D32, §4.9).
 
 **Rounder values (D15).** The spec measurement gives each value that it fits from data (the descent centres and edges,
@@ -1260,8 +1268,8 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | Level grid | 60 m to 1,260 m, 120 m to 2,700 m, 450 m to 5,400 m MSL; 40 levels | D22 (fit of the altitude-grid proposal) |
 | Level envelope ε | half the larger gap to the neighbouring levels + 10 m: 40 m (0–1,200 m), 70 m (1,260–2,580 m), 235 m (2,700–5,400 m); "no level-off" 40 m | D22, D52 |
 | Level detection | ≥ 20 s, rows within 25 m of the piece's median | Labeller constant (§4.4) |
-| Descent classes | edges −0.5 / 1.52 / 2.59 / 3.74 / 10°; nominal 0.92 / 2.13 / 3.06 / 4.41° | Spec, k-means on train days |
-| Climb word | One class; a climb piece is 0.5–15° (labeller); executor angle while G is false: the nominal of D15 (fitted 1.32°) | Spec; D15, D28 |
+| Descent classes | edges −0.5 / 2.0 / 2.75 / 3.75 / 10°; nominal 1.5 / 2.5 / 3.0 / 4.5° | Spec; k-means on the train days, weight length² (D54), rounded to 0.25° (D56) |
+| Climb word | One class; a climb piece is 0.5–15° (labeller); executor angle while G is false: the nominal of D15, 1.5° | Spec; D15, D28, D56 |
 | Go-around angle (executor, while G is true) | The steady climb angle at the thrust limit, within 1.885°–3° | AIM 5-4-21 b (minimum, 200 ft per NM); D28 (maximum) |
 | Reward of a landing after n go-arounds | 0.9ⁿ | D30 |
 | Speed grid, range, tolerance | 5 m/s, 20–250 m/s, ±5 m/s | Spec |
@@ -1630,14 +1638,19 @@ Read the design sections that a milestone names before you start it.
    The new code refuses an old artefact by its name. No `.get(key, default)` fallbacks, no branches on a schema version.
 6. SI units only. A value from a regulation has its paragraph in a comment and is defined one time.
 7. No formal data build and no formal readout. A smoke build (a stated limit for each airport) goes to a tmp or
-   scratch directory. The formal artefact, the replay gate and every criterion wait for the user (D7). Never write into
-   an existing directory under `4dTrajectory/outputs/`.
+   scratch directory. It uses the spec that the user chose (D15), and its flights are a random sample for each
+   airport and split, seed 1337 (D55). The formal artefact, the replay gate and every criterion wait for the user
+   (D7). Never write into an existing directory under `4dTrajectory/outputs/`.
 8. Do not touch the checkouts of running experiments (`.claude/worktrees/step9-run` and others) or the main checkout.
 9. A defect that you find outside the milestone goes to `docs/code-health-followups.md` (an entry and a table row), not
    into the change.
 10. At each milestone, update §0.3 (state, commit). At the end of stage A, update §13 (key code index) to the new code.
 11. The branch is not merged before stage D: the backend's live executor (`aeroviz_backend/autopilot_segment/`) and the
     frontend's Training view read the old format until then. The user merges.
+12. A value that a runner fits from data and the user chooses (D15) is measured on all train days in a scratch
+    directory, directly after the milestone that writes the runner. This measurement is not a formal build: it writes
+    nothing under `4dTrajectory/outputs/`. Report the fitted values and their candidates to the user, and wait for the
+    choice before a later milestone reads the value (D55).
 
 ### 14.2 Stage A: vocabulary, labeller, identities, executor, judge, replay
 
@@ -1947,6 +1960,30 @@ test: their one source is the spec, which the spec sha identifies (D21), and §1
 - The smoke build again (a new smoke directory), its conformance, the closed-loop replays at Δ = 2, 4, 8 s; against
   A15: which sentences changed, the rule of D50 (0 breaks), the readings of D34; as information. Then the full ts suite
   again, and the report.
+
+**A17. The smoke sample (D55).** After A16.
+
+- `experiments/instruction_signals.py` `build_jobs`: `--limit N` takes a random sample of N flights for each airport
+  and split (seed 1337), not the first N of the sorted keys. The artefact records the seed beside the limit.
+- Tests: a limit takes the same flights at each run; from a key list whose first N keys share one callsign, the sample
+  also holds other callsigns; a limit of 0 takes all flights.
+- No smoke build in this milestone. The next smoke uses the spec that the user chose under D15 (§14.1 rule 7).
+
+**A18. The chosen spec and the formal artefact (D56).** After A17.
+
+- `experiments/instruction_spec.py`: `--candidate NAME` (required when the runner measures): the spec takes the descent
+  nominals and edges and the climb nominal of that row of `rounding_candidates` (`fitted`, `0.5`, `0.25`, `0.1`);
+  `measurements.json` records the chosen row beside the fitted values. Tests: the spec holds the chosen row; a name not
+  in the rows is refused.
+- The formal artefact (the user, 2026-10-04: "完成正式数据的读数"), from a clean checkout, into new directories:
+  `4dTrajectory/outputs/POOLED/instruction_language/v7_20261004/` (signals of every development flight, the spec with
+  `--candidate 0.25`, labels, the labeller conformance, the closed-loop reading at Δ = 2, 4, 8 s on every split) and
+  `4dTrajectory/outputs/POOLED/executor/v12_20261004/` (the executor spec, word clock `track` as in the smokes, its
+  conformance).
+- The readings of D34 at Δ = 2, 4, 8 s: the closed-loop summary of every split (items 1–3) and the closed-loop replays
+  (item 4) of train (400 flights an airport, seed 1337) and select (every labelled flight). The val replay waits for the
+  user (as for every executor before). The data are made read-only with a `SHA256SUMS` beside them. The report gives
+  the readings side by side; it sets no criterion (D7).
 
 ### 14.3 Stage B: prior
 
