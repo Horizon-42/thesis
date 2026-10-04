@@ -449,6 +449,6 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
   block, the probability of "go-around" on the final.
 - No criterion is applied: the user reads the results (D7).
 
-**B6. Close of stage B.** The full ts suite passes (run detached). §0.3, §11 and `docs/reference/runners.md` are
-updated. `dev-two-tier-v4` merges `dev-two-tier-v4-prior` (outline §5 rule 1). Report to the user: the commits, the
+**B6. Close of stage B.** The full ts suite passes (run detached). §0.3 (the log) and `docs/reference/runners.md` are
+updated; the report gives the new code index for §11 (outline §5 rule 10). `dev-two-tier-v4` merges `dev-two-tier-v4-prior` (outline §5 rule 1). Report to the user: the commits, the
 readings of each fold and of the base, the choice and its rule, and what stage C needs.
