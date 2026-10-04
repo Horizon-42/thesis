@@ -610,20 +610,41 @@ def test_four_seconds_keeps_the_last_word_of_each_interval():
     assert np.array_equal(in_force(out)[-1], in_force(HAND)[-1])
 
 
-def test_eight_seconds_keeps_the_words_in_force_and_cancels_a_go_around_inside_one_interval():
+def test_eight_seconds_puts_each_word_on_the_nearest_row_and_cancels_a_go_around_inside_one_row():
+    """D45: at 8 s a Δ row takes the words from 2 s before it to 2 s after it; a word 4 s after a Δ row goes to the next."""
     words = Words(spec())
     out = on_interval(HAND, 0, 8.0, 2.0, np.full(16, 900.0), words, [90.0])
     assert np.array_equal(out, _grid([
-        {RUNWAY: 0, HEADING: 0, ALTITUDE: 15, ANGLE: ANGLE_LEVEL, SPEED: 16},
-        {HEADING: 2, SPEED: 14},                                   # row 4
-        {RUNWAY: RUNWAY_GO_AROUND, ALTITUDE: 10, ANGLE: 2},        # row 8: the go-around is in force there
-        {RUNWAY: 0, HEADING: 0},                                   # row 12
+        {RUNWAY: 0, HEADING: 1, ALTITUDE: 15, ANGLE: ANGLE_LEVEL, SPEED: 16},   # rows 0, 1
+        {HEADING: 2, SPEED: 14},                                   # rows 2–5
+        {RUNWAY: RUNWAY_GO_AROUND, ALTITUDE: 10, ANGLE: 2},        # rows 6–9: the go-around is in force there
+        {RUNWAY: 0, HEADING: 0},                                   # rows 10–13
     ]))
-    # from row 3 (a later UTC multiple): the go-around (row 8) and the runway again (row 10) fall between rows 7 and
-    # 11 — one interval — and cancel; the first row says every word in force
-    shifted = on_interval(HAND, 3, 8.0, 2.0, np.full(16, 900.0), words, [90.0])
-    assert (shifted[0] != UNCHANGED).all() and np.array_equal(in_force(shifted), in_force(HAND)[[3, 7, 11, 15]])
+    # from row 1 (a later UTC multiple): the go-around (row 8) and the runway again (row 10) go to one Δ row (rows 7–10)
+    # and cancel; the first row says every word in force
+    shifted = on_interval(HAND, 1, 8.0, 2.0, np.full(16, 900.0), words, [90.0])
+    assert (shifted[0] != UNCHANGED).all() and np.array_equal(in_force(shifted), in_force(HAND)[[2, 6, 10, 14]])
     assert (shifted[:, RUNWAY] == RUNWAY_GO_AROUND).sum() == 0
+
+
+def test_a_word_goes_to_the_nearest_interval_row_and_a_tie_to_the_later():
+    """D45 at 4 and 8 s: a word 2 s after a Δ row goes to that row, 2 s before a Δ row to that row, a word exactly between
+    two to the later; the words keep their order and the words of one 2 s row stay in one Δ row."""
+    words = Words(spec())
+    first = {RUNWAY: 0, HEADING: 0, ALTITUDE: 15, ANGLE: ANGLE_LEVEL, SPEED: 16}
+    sentence = _grid([first, {SPEED: 15}, {}, {HEADING: 1}, {}, {SPEED: 14}, {HEADING: 2, SPEED: 13}, {}, {},
+                      {ALTITUDE: 10, ANGLE: 2}, {}, {}, {}])
+    out = on_interval(sentence, 0, 8.0, 2.0, np.full(13, 900.0), words, [90.0])
+    assert np.array_equal(out, _grid([
+        {**first, SPEED: 15},                       # row 1: 2 s after row 0
+        {HEADING: 1, SPEED: 14},                    # row 3: 2 s before row 4; row 5: 2 s after it
+        {HEADING: 2, SPEED: 13, ALTITUDE: 10, ANGLE: 2},   # row 6: a tie, the later; row 9: 2 s after row 8
+        {},
+    ]))
+    out = on_interval(sentence, 0, 4.0, 2.0, np.full(13, 900.0), words, [90.0])
+    # ties go to the later row: row 1 to row 2; rows 5 and 6 to row 6, where the last word stays
+    assert [int(v) for v in out[:, SPEED]] == [16, 15, UNCHANGED, 13, UNCHANGED, UNCHANGED, UNCHANGED]
+    assert int(out[2, HEADING]) == 1 and int(out[3, HEADING]) == 2 and int(out[5, ANGLE]) == 2
 
 
 def test_six_seconds_is_refused_and_a_go_around_at_the_first_row_too():
@@ -643,17 +664,32 @@ def test_the_grammar_is_read_on_the_projected_rows():
         on_interval(split, 0, 2.0, 2.0, np.full(16, 900.0), words, [90.0])
 
 
-def test_a_heading_word_heard_with_a_runway_of_another_course_is_refused_on_the_interval():
-    """§4.8 item 4: a heading word said under one course, before a runway word of another course, and heard with it at
-    one Δ row would say another track — refused; at the step, or with runways of one course, it is the same word."""
+def test_a_heading_word_moved_across_a_runway_word_is_said_in_the_frame_where_it_is_heard():
+    """D46: a heading word said under one course before a runway word and heard with it at one Δ row is the class nearest
+    its absolute track under the new course: the same class after a parallel runway, the class of its track after a
+    runway 6° off. No sentence is refused; at the step, it is the same word."""
     words = Words(spec())
     sentence = _grid([
         {RUNWAY: 0, HEADING: 0, ALTITUDE: 15, ANGLE: ANGLE_LEVEL, SPEED: 16},
-        {}, {}, {RUNWAY: RUNWAY_GO_AROUND}, {}, {HEADING: 2}, {RUNWAY: 1}, {}, {}])
-    assert np.array_equal(on_interval(sentence, 0, 2.0, 2.0, np.full(9, 900.0), words, [90.0, 80.0]), sentence)
-    on_interval(sentence, 0, 8.0, 2.0, np.full(9, 900.0), words, [90.0, 90.0])
-    with pytest.raises(Refused, match="heading word across a runway change"):     # said at row 5, heard at row 8
-        on_interval(sentence, 0, 8.0, 2.0, np.full(9, 900.0), words, [90.0, 80.0])
+        {}, {}, {RUNWAY: RUNWAY_GO_AROUND}, {}, {}, {HEADING: 2}, {RUNWAY: 1}, {}])
+    assert np.array_equal(on_interval(sentence, 0, 2.0, 2.0, np.full(9, 900.0), words, [90.0, 96.0]), sentence)
+    for courses, heard in (([90.0, 90.005], 2), ([90.0, 96.0], 1)):          # 100° under 96°: +4°, class 1
+        out = on_interval(sentence, 0, 8.0, 2.0, np.full(9, 900.0), words, courses)
+        assert int(out[2, RUNWAY]) == 1 and int(out[2, HEADING]) == heard     # rows 6, 7 → Δ row 8
+
+
+def test_a_heading_word_of_the_class_in_force_under_another_course_is_said_on_the_interval():
+    """D46, Claude's reading: a class says a track only with its course. A Δ row whose new heading word, in the frame where
+    it is heard, is the class in force under another course says it (its track differs); a change of runway alone says
+    no heading word."""
+    words = Words(spec())
+    sentence = _grid([
+        {RUNWAY: 0, HEADING: 1, ALTITUDE: 15, ANGLE: ANGLE_LEVEL, SPEED: 16},
+        {}, {}, {RUNWAY: RUNWAY_GO_AROUND}, {}, {}, {HEADING: 3}, {RUNWAY: 1}, {}, {}, {}, {},
+        {RUNWAY: RUNWAY_GO_AROUND}, {}, {}, {RUNWAY: 0}, {}])
+    out = on_interval(sentence, 0, 8.0, 2.0, np.full(17, 900.0), words, [90.0, 100.0])
+    assert int(out[2, HEADING]) == 1 and int(out[2, RUNWAY]) == 1       # 105° under 100°: class 1, as in force
+    assert int(out[3, RUNWAY]) == RUNWAY_GO_AROUND and int(out[4, RUNWAY]) == 0 and (out[3:, HEADING] == UNCHANGED).all()
 
 
 TWO_GO_AROUNDS = [*GO_AROUND_LEGS[:8], (89, 0, 70, -GLIDE), (40, 0, 70, 8.0), (10, 0, 70, 0), (30, -6, 70, 0),

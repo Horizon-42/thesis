@@ -3,16 +3,22 @@
 
 1. The Δ rows are the rows on UTC multiples of Δ (the rule that put artefact `v6_20261002`'s rows on even seconds, so
    the aircraft of a scene stay on one grid): the first is `first_interval_row`, then every Δ / step rows.
-2. At each Δ row each column says the word in force at that row if it differs from the word in force at the previous
-   Δ row: inside one interval only the last word of a column stays (a go-around and the runway said again inside one
-   interval cancel). In the runway column the word in force is the column's last word, "go-around" included.
-3. The first Δ row says the five words in force there; a sentence in a go-around at its first Δ row cannot say a
-   runway there and is refused. The grammar (`instructions.grammar`) is checked again on the Δ rows, at their altitude.
-4. A heading word is relative to the course of R when it is heard, and keeps its track until the next one (§3.3).
-   Where R changes course, the Δ rows can say another track than the step rows: a heading word said before the runway
-   word and heard with it at one Δ row, or a word of the value in force said under the new course that the Δ rows do
-   not say again. A sentence where a Δ row's word says another track than the word in force on the step rows is
-   refused.
+2. Each word of the step rows goes to the nearest Δ row; a word exactly between two Δ rows goes to the later one (D45:
+   the mean lateness of a word is then zero; the next Δ row would make it (Δ − step) / 2 late). A Δ row says, for each
+   column, the last word that goes to it if it differs from the word in force: a go-around and the runway said again
+   that go to one Δ row cancel. In the runway column the word in force is the column's last word, "go-around" included.
+   The rounding keeps the order of the words, and the words of one step row stay in one Δ row. Words that would go to a
+   Δ row past the sentence's last are not said (the sentence ends there).
+3. The first Δ row says the five words in force there (every word that goes to it); a sentence in a go-around at its
+   first Δ row cannot say a runway there and is refused. The grammar (`instructions.grammar`) is checked again on the Δ
+   rows, at their altitude.
+4. A heading word is said in the frame where it is heard (D46, §3.3): the step rows' word says an absolute track (its
+   class under the course of R at its row); the Δ row that says it gives the class nearest that track minus the course
+   of the R in force at the Δ row (the same class when R did not change, or changed to a parallel runway). A Δ row says
+   a heading word when a new heading word of the step rows goes to it and its track differs from the track the Δ rows
+   have in force — also when its class is the class in force, said under another course (Claude's reading: a class
+   says a track only with its course; the step rows refuse that case, `labeller.lateral`, the Δ rows cannot). A change
+   of R alone says no heading word (the executor keeps its absolute track, §3.3).
 
 Δ must be a whole number of steps and divide the prior's 16 s observation (D25: Δ = 2, 4, 8 s; 6 s is refused); at
 Δ = the step the sentence comes back unchanged.
@@ -28,7 +34,7 @@ import numpy as np
 from ts_transformer.data.day_split import parse_utc
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.labeller.sentence import check_grammar
-from ts_transformer.instructions.words import HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
+from ts_transformer.instructions.words import HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words, wrap180
 
 
 #: The prior's observation before its first predicted step, s (design §2, `N_LOOK` = 8 rows at 2 s): every Δ divides it,
@@ -75,30 +81,35 @@ def in_force(grid: np.ndarray) -> np.ndarray:
 def on_interval(grid: np.ndarray, first_row: int, interval_s: float, step_s: float, altitude_m: np.ndarray,
                 words: Words, courses_deg: Sequence[float]) -> np.ndarray:
     """``grid`` (a sentence on its ``step_s`` rows) on the Δ rows ``first_row``, ``first_row + Δ / step_s``, …: one
-    row each (module docstring); ``altitude_m`` the altitude the grammar is read at, one per ``step_s`` row;
-    ``courses_deg`` the candidates' courses."""
+    row each, every word on the nearest (module docstring); ``altitude_m`` the altitude the grammar is read at, one per
+    ``step_s`` row; ``courses_deg`` the candidates' courses."""
     every = interval_rows(interval_s, step_s)
     rows = np.arange(first_row, len(grid), every)
     if len(rows) == 0:
         raise Refused("too short", f"no row on the {interval_s:g} s grid")
     grid = np.asarray(grid)
-    held = in_force(grid)[rows]
+    # item 2: Δ row k takes the step rows up to `last[k]` (a tie goes to the later Δ row)
+    last = np.minimum(rows + (every + 1) // 2 - 1, len(grid) - 1)
+    force = in_force(grid)
+    held = force[last]
     if held[0, RUNWAY] == RUNWAY_GO_AROUND:
         raise Refused("go-around at the first row", f"row {first_row} on the {interval_s:g} s grid")
     out = np.where(np.vstack([np.ones((1, held.shape[1]), dtype=bool), held[1:] != held[:-1]]), held, UNCHANGED)
     out = out.astype(np.int16)
-    # item 4: the track each Δ row's heading word says when heard there (a word not said again keeps the track it was
-    # heard with) against the track the word in force says on the step rows
-    runway = grid[np.maximum.accumulate(np.where(grid[:, RUNWAY] >= 0, np.arange(len(grid)), 0)), RUNWAY]
-    said = np.maximum.accumulate(np.where(grid[:, HEADING] != UNCHANGED, np.arange(len(grid)), 0))
-    heading = in_force(grid)[:, HEADING]
-    heard = None
-    for position, row in enumerate(rows):
-        if out[position, HEADING] != UNCHANGED:
-            heard = courses_deg[runway[row]] + words.heading_relative_deg(int(out[position, HEADING]))
-        meant = courses_deg[runway[said[row]]] + words.heading_relative_deg(int(heading[row]))
-        if abs((heard - meant + 180.0) % 360.0 - 180.0) > 1e-9:
-            raise Refused("heading word across a runway change",
-                          f"row {row}: heard as {heard % 360.0:.1f}°, said as {meant % 360.0:.1f}° at row {said[row]}")
+    # item 4: each step row's heading word in force as an absolute track (said under the course of R at its row), and
+    # the Δ rows' heading words in the frame of the R in force where they are heard
+    steps = np.arange(len(grid))
+    runway = grid[np.maximum.accumulate(np.where(grid[:, RUNWAY] >= 0, steps, 0)), RUNWAY]
+    said = np.maximum.accumulate(np.where(grid[:, HEADING] != UNCHANGED, steps, 0))
+    out[:, HEADING] = UNCHANGED
+    track = source = None
+    for position, step in enumerate(last):
+        if said[step] == source:
+            continue
+        source = said[step]
+        wanted = courses_deg[runway[source]] + words.heading_relative_deg(int(force[step, HEADING]))
+        if track is None or abs(float(wrap180(wanted - track))) > 1e-9:
+            out[position, HEADING] = words.heading_class(wanted, courses_deg[runway[step]])
+            track = courses_deg[runway[step]] + words.heading_relative_deg(int(out[position, HEADING]))
     check_grammar(out, np.asarray(altitude_m)[rows], words, len(courses_deg))
     return out

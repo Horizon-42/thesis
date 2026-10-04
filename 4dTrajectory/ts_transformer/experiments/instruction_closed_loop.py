@@ -7,8 +7,9 @@ on disk and writes its passed record.
 Who: the replay's flights (`replay.group_of`): on their own dynamics or on a stand-in's; a flight with no identified type,
 no aircraft dynamics or no published approach speed gives no training sentence. Each split's flights are counted by
 reason in ``closed_loop/summary.json`` — not flown, refused on the row interval, refused by the closed loop — beside the
-correction words for each column, the flights with any correction, the largest |e_y| and |e_h| per flight (percentiles)
-and the flights done at their time limit. Written from a clean tree only (the artefact records the
+correction words for each column, the flights with any correction, the largest |e_y| and |e_h| per flight (percentiles),
+the flights done at their time limit, and the lateness of the observed heading words (A12: the matched point's observed
+time at the row that says a word minus the word's 2 s time, s; information). Written from a clean tree only (the artefact records the
 commit).
 
     python run_ts.py instruction_closed_loop --row-interval-s 2 4 8 \\
@@ -49,9 +50,11 @@ def _percentiles(values: list[float]) -> dict[str, float] | None:
 
 
 def summarise(results: list[ClosedLoopSentence | Any], excluded: dict[str, int],
-              refused_on_interval: dict[str, int]) -> dict[str, Any]:
-    """One split's numbers at one row interval (module docstring)."""
+              refused_on_interval: dict[str, int], heading_lateness_s: list[np.ndarray]) -> dict[str, Any]:
+    """One split's numbers at one row interval (module docstring); ``heading_lateness_s`` each sentence's
+    (`closed_loop.heading_lateness_rows`, in seconds)."""
     read = [r for r in results if isinstance(r, ClosedLoopSentence)]
+    lateness = np.concatenate([np.zeros(0), *heading_lateness_s])
     refused = Counter(r.reason for r in results if not isinstance(r, ClosedLoopSentence))
     corrections = np.array([r.correction.sum(axis=0) for r in read]).reshape(-1, len(COLUMNS))
     return {"sentences": len(read),
@@ -60,15 +63,20 @@ def summarise(results: list[ClosedLoopSentence | Any], excluded: dict[str, int],
             "correction_words": dict(zip(COLUMNS, corrections.sum(axis=0).tolist())),
             "flights_with_a_correction": {column: int((corrections[:, c] > 0).sum())
                                           for c, column in enumerate(COLUMNS)},
-            "largest_lateral_m": _percentiles([float(np.abs(r.lateral_m).max()) for r in read]),
-            "largest_vertical_m": _percentiles([float(np.abs(r.vertical_m).max()) for r in read]),
+            "largest_lateral_m": _percentiles([closed_loop.largest_m(r.lateral_m) for r in read]),
+            "largest_vertical_m": _percentiles([closed_loop.largest_m(r.vertical_m) for r in read]),
             # D34: what is left where §4.9 makes no correction
             "uncorrected_lateral_m": _percentiles([closed_loop.uncorrected_m(r.lateral_m, r.uncorrectable[:, 0])
                                                    for r in read]),
             "uncorrected_vertical_m": _percentiles([closed_loop.uncorrected_m(r.vertical_m, r.uncorrectable[:, 1])
                                                     for r in read]),
             "last_row_lateral_m": _percentiles([float(abs(r.lateral_m[-1])) for r in read]),
-            "timed_out": sum(r.timed_out for r in read)}
+            "timed_out": sum(1 for r in read if r.timed_out),
+            # D44: the rows past the end of the observed path (no observed height there)
+            "rows_past_the_end": int(sum(np.isnan(r.vertical_m).sum() for r in read)),
+            "heading_word_lateness_s": None if not len(lateness) else {
+                "mean": float(lateness.mean()), "n": len(lateness),
+                **{f"p{q}": float(np.percentile(lateness, q)) for q in (5, 25, 50, 75, 95)}}}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -122,9 +130,11 @@ def main(argv: list[str] | None = None) -> int:
             batch = replay.batch_of(drawn, list(range(len(readings))), readings, interval, words)
             results = closed_loop.read_chunked(batch, params, words, chunk=args.chunk, device=device)
             kept = [(j, r) for j, r in enumerate(results) if isinstance(r, ClosedLoopSentence)]
+            lateness = [closed_loop.heading_lateness_rows(r, batch.readings[j].words[batch.sentences[j].first_row:])
+                        * words.spec.step_s for j, r in kept]
             if not kept:                                       # nothing to write: the summary says why
                 summary["splits"][split]["intervals"][f"{interval:g}"] = summarise(
-                    results, drawn.description["excluded"], batch.drawn["refused_on_interval"])
+                    results, drawn.description["excluded"], batch.drawn["refused_on_interval"], lateness)
                 continue
             write_closed_loop(staging / f"{split}_{interval:g}s.npz", words.spec,
                               executor_params_sha256=params_sha256(params), row_interval_s=interval,
@@ -136,8 +146,9 @@ def main(argv: list[str] | None = None) -> int:
                               vertical_m=[r.vertical_m for _, r in kept],
                               uncorrectable=[r.uncorrectable for _, r in kept],
                               observed_row=[r.observed_row for _, r in kept],
+                              matched_row=[r.matched_row for _, r in kept],
                               timed_out=[r.timed_out for _, r in kept])
-            numbers = summarise(results, drawn.description["excluded"], batch.drawn["refused_on_interval"])
+            numbers = summarise(results, drawn.description["excluded"], batch.drawn["refused_on_interval"], lateness)
             summary["splits"][split]["intervals"][f"{interval:g}"] = numbers
             print(f"{split} {interval:g} s: {numbers['sentences']} sentences, corrections "
                   f"{numbers['correction_words']}, without a sentence {numbers['without_a_sentence']}, "

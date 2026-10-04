@@ -211,11 +211,13 @@ def load_sentences(directory: Path, split: str, spec: VocabularySpec) -> dict[st
 #: path.
 #: v2 (A10, D42): `observed_row` and `timed_out` (the flight ends when the executor is done, not at the open-loop
 #: sentence's last row).
-CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v2"
+#: v3 (A12, D44–D46): the observed words from the 2 s reading, `observed_row` a 2 s row, `matched_row` the matched
+#: point's observed time; `vertical_m` NaN past the end of the observed path.
+CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v3"
 #: Every array a closed-loop file holds.
 CLOSED_LOOP_FIELDS = {"schema", "spec_sha256", "executor_params_sha256", "row_interval_s", "start_row", "signal_index",
                       "first_row", "offsets", "state_offsets", "words", "correction", "states", "lateral_m",
-                      "vertical_m", "uncorrectable", "observed_row", "timed_out"}
+                      "vertical_m", "uncorrectable", "observed_row", "matched_row", "timed_out"}
 #: The directory inside the artefact that holds them, written once (`closed_loop_path`).
 CLOSED_LOOP_DIRECTORY = "closed_loop"
 
@@ -229,13 +231,15 @@ def write_closed_loop(path: Path, spec: VocabularySpec, *, executor_params_sha25
                       grids: Sequence[np.ndarray], corrections: Sequence[np.ndarray], states: Sequence[np.ndarray],
                       lateral_m: Sequence[np.ndarray], vertical_m: Sequence[np.ndarray],
                       uncorrectable: Sequence[np.ndarray], observed_row: Sequence[np.ndarray],
-                      timed_out: Sequence[bool]) -> None:
+                      matched_row: Sequence[np.ndarray], timed_out: Sequence[bool]) -> None:
     """One split's closed-loop sentences at one row interval, in the order given. Sentence ``k``'s words are
     ``words[offsets[k]: offsets[k + 1]]`` (from its first predicted step, `start_row` rows after its first row on the
     interval's grid, which is its signals' 2 s row ``first_row[k]``), its states ``states[state_offsets[k]:
     state_offsets[k + 1]]`` (every row from its first: observed before ``start_row``, flown from it); ``uncorrectable``
-    ``[rows, 2]`` the rows where the reading makes no heading / angle correction (D34); ``observed_row`` the open-loop
-    row each row's observed words reach (D42); ``timed_out`` whether each flight was done at its time limit."""
+    ``[rows, 2]`` the rows where the reading makes no heading / angle correction (D34); ``observed_row`` the last 2 s
+    row of the open-loop reading (from ``first_row[k]``) whose words each row has said, ``matched_row`` the matched
+    point's observed time there (2 s rows, D42, D45); ``vertical_m`` NaN past the end of the observed path (D44);
+    ``timed_out`` whether each flight was done at its time limit."""
     if not grids:
         raise ValueError(f"no closed-loop sentence for {path.name}: nothing to write")
     lengths = np.array([len(grid) for grid in grids], dtype=np.int64)
@@ -254,7 +258,8 @@ def write_closed_loop(path: Path, spec: VocabularySpec, *, executor_params_sha25
         states=np.concatenate(states).astype(np.float64), lateral_m=np.concatenate(lateral_m).astype(np.float64),
         vertical_m=np.concatenate(vertical_m).astype(np.float64),
         uncorrectable=np.concatenate(uncorrectable).astype(bool),
-        observed_row=np.concatenate(observed_row).astype(np.int64), timed_out=np.asarray(timed_out, dtype=bool))
+        observed_row=np.concatenate(observed_row).astype(np.int64),
+        matched_row=np.concatenate(matched_row).astype(np.float64), timed_out=np.asarray(timed_out, dtype=bool))
 
 
 def load_closed_loop(path: Path, spec: VocabularySpec) -> dict[str, np.ndarray]:
