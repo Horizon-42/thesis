@@ -68,6 +68,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D40 | Hyperparameters: the values of `instruction-v3` are the start (configuration A). The same folds compare four configurations (A, a smaller model, a larger model, a stronger regularization); the one with the fewest parameters within twice the seed scale of the best is chosen (§6.3) | Decided | User, 2026-10-04 |
 | D41 | The design runs at an airport that is not in the training data: the number of candidates is not fixed; every input has a fixed physical scale, never a statistic of the training data; each fold of D39 flies the full closed loop at its held-out airport. The altitude grid limits this to airports whose approach levels lie in its 60 m segment (§6.4) | Decided | User, 2026-10-04 |
 | D42 | The closed-loop reading says each observed word at the place where the observed aircraft heard it, not at the time: at the first Δ row at which the matched point of the flown aircraft has reached that place. The correction words do not change. The flight ends when the executor is done or at the time limit of the replay (§4.9) | Decided | User, 2026-10-04 |
+| D43 | Speed words in steps. In a change of speed, the labeller says each grid value on the way, where the observed speed comes nearer to it than to the value before. The executor changes the speed of a speed word at the largest acceleration of the speed envelope (a_max, a value of the spec). The rate of a change thus comes from the words, as the turn rate comes from the heading words. "Unspecified" keeps its rate (§3.6, §4.5, §5.6) | Decided | User, 2026-10-04 |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -88,7 +89,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 ### 0.4 Plan
 
 1. Stage A (§14.2): write the vocabulary, the labeller, the identities, the executor, the judge and the replay on the
-   branch `dev-two-tier-v4`, milestones A0–A10, each with tests and a code review. Another agent does this.
+   branch `dev-two-tier-v4`, milestones A0–A11, each with tests and a code review. Another agent does this.
 2. Claude checks the result of stage A against this document (§14.6).
 3. The user chooses the fitted values of D15. Then the formal artefact is built, and the
    readings of D34 are made at each row interval of the ablation (D11, D25: 2, 4, 8 s). The user compares them (D7).
@@ -337,8 +338,12 @@ words use ground speed. "Unspecified" means that the pilot flies the approach sp
 clearance cancels the assigned speeds (7110.65BB 5-7-1 d). In this design the labeller starts "unspecified" at the
 capture row (D4, §4.5).
 
-**Envelope (unchanged).** A transition is monotone (a step back ≤ 5 m/s) with acceleration ≤ 1.4 m/s². After it, the
-speed stays within V ± 5 m/s. "Unspecified" checks only the range.
+**Steps (D43).** In a change of speed, the labeller says each grid value on the way (§4.5). Each speed word is then a
+step of 5 m/s, and the time between the words gives the rate of the change, as the time between the heading words
+gives the rate of a turn. The executor makes each step at a_max (§5.6).
+
+**Envelope (unchanged).** A transition is monotone (a step back ≤ 5 m/s) with acceleration ≤ a_max (1.4 m/s², spec).
+After it, the speed stays within V ± 5 m/s. "Unspecified" checks only the range.
 
 **Wind (O8, open).** At constant airspeed, the ground speed changes when the aircraft turns in wind. Such a change can
 become a speed word that no controller said. A check against the surface winds of the METAR data is open.
@@ -439,16 +444,39 @@ each approach gives "no level-off" when it reaches the end of the approach: the 
 
 ### 4.5 Speed words
 
-The reading of `instruction-v3` stays, with two changes. (1) "Unspecified" starts at the capture row, not at the
+The reading of `instruction-v3` stays, with three changes. (1) "Unspecified" starts at the capture row, not at the
 clearance row (D4). (2) Each approach has its own reading (D26): speed words before its capture row, "unspecified" from
 its capture row to the end of the approach. An approach that ends at a go-around row outside the capture corridor has
-no capture row; its speed word in force stays. After the go-around row, the reading of the next approach starts. The
-two exceptions stay, with the new anchor:
+no capture row; its speed word in force stays. After the go-around row, the reading of the next approach starts. (3) A change
+of speed says each step on the way (D43, below). The two exceptions stay, with the new anchor:
 
 1. A hold of at least 30 s that ends at or after the capture row, and ends 9,260 m (5 NM, 7110.65BB 5-7-1 b.4) or
    more before the threshold, keeps the speed word in force. "Unspecified" starts at the end of the last such hold.
 2. A deceleration that started less than 20 s before that row is already the pilot's speed. "Unspecified" starts where
    it started.
+
+**Steps (D43).** The pieces, the holds and the runs of `instruction-v3` stay. A run is a sequence of transitions in one
+direction. Its target is the target of the next hold, or the grid value nearest to the speed where the direction
+changes without a hold. In a run, the labeller says each grid value from the word in force to the target, in order. It
+says a grid value at the first row at which the smoothed observed speed is nearer to that value than to the value
+before it. It says the target at the latest at the last row of the run. Thus, in a change of speed, the word in force is
+approximately the grid value nearest to the observed speed. Inside a run, the labeller says no value in the other
+direction, so noise of the speed gives no words.
+
+Why:
+
+- A speed word gives a target, not a rate. The rate of a real change of speed is a choice of the pilot or the
+  controller. On the smoke artefact it is 0.24 m/s² in level flight and 0.19 m/s² in a descent (median), and it changes
+  by more than three times in each (§11.12). It does not follow from the aircraft.
+- The dynamics cannot give it. Their drag polar is clean: no flaps, no landing gear, no speedbrakes. The thrust floor of
+  −20 % of the installed thrust is a stand-in for these devices (`outputs/envelope.py`). Thus "the deceleration that
+  the aircraft can do" is not a physical value in this model.
+- One target word with a fixed rate of the executor moves the flown aircraft ahead of the observed aircraft along the
+  path, or behind it, by more than 1 km in 31 % of the flights (before "unspecified"). A faster rate makes this worse.
+  With the steps and the executor at a_max, no flight is more than 1 km ahead or behind (§11.12, a one-dimensional
+  estimate).
+- The prior says the steps. Thus the prior, not the executor, sets the rate of a change of speed. A controller who
+  keeps the spacing between two aircraft does this with speed.
 
 ### 4.6 Go-around words (D18, D19)
 
@@ -527,6 +555,7 @@ Thus one reading gives every Δ. Δ must be a multiple of 2 s, and it must divid
 |---|---|
 | Heading words | In a 3°/s turn the track moves 12° in 4 s, so one word jumps two or three 5° classes. The lead L = 4 s is one row at Δ = 4 s and less than one row above it |
 | Executor | The cycle stays 1 s. It hears the words at each Δ row. The heading law (arrive L after the hearing, the stopping rate) flies larger steps |
+| Speed words | A change of speed faster than 5 m/s in Δ puts two steps (D43) into one row; the row says the last one, and the executor flies it at a_max |
 | Final approach | With D2 and D3 the model corrects the final only every Δ; an error grows for a longer time before the next word |
 | Prior | Fewer steps for each flight and more changes for each step. The observation stays 16 s (`N_LOOK` = 16 s / Δ rows: 8, 4, 2). The motion inputs do not change with Δ: they come from the 2 s before the row (D25, §6.1). A loss for each step cannot be compared between two Δ; a loss for each flight or each second can |
 | Multi-aircraft | The scene step is Δ |
@@ -718,12 +747,15 @@ vocabulary has one climb word (§3.5).
 **No climb without a target.** Rules 5 and 6 (§3.7) make sure that "no level-off" is never in force while G is true.
 Thus the executor has no mode "climb with no target", and "go-around" alone starts no climb.
 
-### 5.6 Speed law (unchanged)
+### 5.6 Speed law (D43)
 
-V_ref = V_g / cos γ (ground speed to airspeed without wind), not below 1.10·V_stall(n). The speed changes at
-a = 0.25 m/s² (a speed step of 5 m/s divided by the minimum hold of 20 s) and goes exponentially into the last 5 m/s.
-"Unspecified" is the published approach speed of the type at the published maximum landing mass. The deceleration to it
-is the larger of a and the rate that reaches it at the threshold of R, not more than 1.4 m/s². While G is true,
+V_ref = V_g / cos γ (ground speed to airspeed without wind), not below 1.10·V_stall(n). For a speed word, the speed
+changes at a_max, the largest acceleration of the speed envelope (§3.6, a value of the spec), and goes exponentially
+into the last 5 m/s. A speed word is a step of 5 m/s (D43), so the executor makes each step in a few seconds; the rate
+of a longer change comes from the words. Where the thrust limits cannot give a_max, the thrust limit binds (§5.3), and
+the replay counts it. "Unspecified" is the published approach speed of the type at the published maximum landing
+mass. The deceleration to it is the larger of a_U = 0.25 m/s² (a speed step of 5 m/s divided by the minimum hold of
+20 s) and the rate that reaches it at the threshold of R, not more than a_max. While G is true,
 "unspecified" means the pilot's own speed in a missed approach: the executor holds the airspeed that the aircraft has
 at the go-around row (D27; Claude's reading, not checked in the regulation text). This replaces no word of the model:
 a speed word of the model replaces it at any row.
@@ -1104,7 +1136,8 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | Go-around angle (executor, while G is true) | The steady climb angle at the thrust limit, within 1.885°–3° | AIM 5-4-21 b (minimum, 200 ft per NM); D28 (maximum) |
 | Reward of a landing after n go-arounds | 0.9ⁿ | D30 |
 | Speed grid, range, tolerance | 5 m/s, 20–250 m/s, ±5 m/s | Spec |
-| Speed change rate (executor) | 0.25 m/s² | 5 m/s ÷ 20 s (user, 2026-09-24) |
+| Speed change rate (executor), speed word | a_max (the transition acceleration limit below) | D43 |
+| Speed change rate (executor), "unspecified" | a_U = 0.25 m/s², or the rate that reaches the approach speed at the threshold when larger; not more than a_max | 5 m/s ÷ 20 s (user, 2026-09-24) |
 | Transition acceleration limit | 1.4 m/s² | Spec, measured (p99.9) |
 | Capture corridor (labeller only) | 20 m + d·tan 0.45°, course ±2° | Spec, measured (p99) |
 | Landing screen | lateral ≤ 1,000 m and ≤ half the parallel spacing; height ≤ 100 m | `final_approach.assign.LandingScreen` |
@@ -1306,6 +1339,33 @@ One-off scripts, 2026-10-04; information, not a criterion (D7).
   within 3 m of the observed path and the observed path is 19–23 m above the glidepath; in 3, the flown path is 9–16 m
   above the observed path and the observed path is 12–15 m above the glidepath; in 1, the flown path is 44 m above the
   observed path; in 1, the flown path is 850 m to the side of the observed path.
+
+### 11.12 Speed words and the rate of a change of speed
+
+From the smoke build of A9 (`dev-two-tier-v4` at `751d0ec8`, `smoke_v4/data/`), train and select. One-off scripts,
+2026-10-04; information, not a criterion (D7).
+
+- The observed rate of a deceleration (20 s windows that slow down; ground speed, 10 s mean), p25 / p50 / p75: level
+  flight (|vertical rate| < 0.5 m/s, 844 windows) 0.12 / 0.24 / 0.40 m/s²; descent (vertical rate below −3 m/s, 3,540
+  windows) 0.11 / 0.19 / 0.31 m/s².
+- A one-dimensional estimate: 634 flights with at least 30 rows of 2 s before "unspecified"; from the first predicted
+  step, the speed goes toward the word in force at a constant rate, the words at the observed time, no dynamics. The
+  "steps" are the grid value nearest to the observed speed at each row. The largest difference along the path from the
+  observed aircraft, for each flight:
+
+  | Words | Rate | p50 | p90 | More than 1 km |
+  |---|---|---|---|---|
+  | One word for each run (its target) | 0.25 m/s² | 499 m | 2,235 m | 31 % |
+  | One word for each run (its target) | 0.5 m/s² | 537 m | 2,359 m | 32 % |
+  | One word for each run (its target) | 1.5 m/s² | 1,276 m | 4,527 m | 57 % |
+  | Steps | 0.25 m/s² | 743 m | 2,251 m | 39 % |
+  | Steps | 0.5 m/s² | 255 m | 563 m | 1 % |
+  | Steps | 1.0 m/s² | 148 m | 297 m | 0 % |
+  | Steps | 1.5 m/s² | 120 m | 243 m | 0 % |
+
+- Speed words before "unspecified", for each flight (mean): 2.2 for one word for each run, 11.1 for the steps.
+- With a thrust floor of 0 N, 40 % of the inverted teacher segments of the KSJC outer-train cohort needed less thrust
+  than 0 N: the real aircraft slowed down more than the clean polar permits (`outputs/envelope.py`).
 
 ## 12 Regulation sources
 
@@ -1604,6 +1664,25 @@ holds this milestone into `dev-two-tier-v4`.
   observed path by more than 300 m and the correction words for each sentence (compare §11.11).
 - Then the full ts suite again, and the report.
 
+**A11. Speed words in steps (D43).** After A10, or together with it.
+
+- Labeller (`instructions/labeller/speed.py`): the steps of §4.5. The pieces, the holds, the runs and their targets,
+  "unspecified" and its two exceptions, and the reading for each approach (D26) do not change.
+- Executor (`autopilot/speed.py`, and `autopilot/single.py` in the same way): a speed word changes the speed at the
+  spec's a_max (`speed_accel_max_mps2`); "unspecified" keeps a_U = 0.25 m/s² and the rate to the threshold, not more than
+  a_max. The spec gets no new value.
+- Δ grid: two steps in one Δ row keep the last one (§4.8, as now).
+- Tests: a deceleration of 40 m/s from a hold to a hold gives 8 words, each at the first row where the smoothed speed is
+  nearer to it than to the value before, the last one the target of the hold; a run that changes direction without a
+  hold ends at the grid value nearest to the speed where it changes; noise inside a run gives no word in the other
+  direction; the executor makes a step of 5 m/s at a_max and records the thrust limit where the dynamics cannot give
+  a_max; "unspecified" decelerates as before.
+- The labeller, executor and closed-loop conformance references are made again (the code changes). Smoke: build again
+  from the open-loop reading; the readouts of A10 and, for each stratum, the speed words for each sentence and the
+  largest difference along the path from the observed aircraft of the same time before "unspecified" (compare §11.12),
+  as information.
+- Then the full ts suite again, and the report.
+
 ### 14.3 Stage B: prior
 
 **Start.** After Claude's check of stage A (§14.6). The code is written and tested on the smoke artefact at Δ = 2 s.
@@ -1710,7 +1789,7 @@ frontend reads the reading name, not the spec sha (§9.2 #9). After stage D the 
 
 ### 14.6 What Claude checks at the end of stage A
 
-1. Each decision that stage A carries (D1–D22, the Δ values of D25, D26–D28, D32, D33, D38 and D42) against the code: the module and the
+1. Each decision that stage A carries (D1–D22, the Δ values of D25, D26–D28, D32, D33, D38, D42 and D43) against the code: the module and the
    test that carry it (a table in the report).
 2. The targeted tests and the full suite pass on the branch head (run again, not read from the report).
 3. The smoke build: both conformance checks pass; the replay at Δ = 2 and 4 runs to its end; a labelled go-around
@@ -1719,6 +1798,6 @@ frontend reads the reading name, not the spec sha (§9.2 #9). After stage D the 
    at Δ = 2 and 4 replay to their flown states, and their flown paths stay within the tolerances of the observed
    paths except where §4.9 permits no correction (D32); each observed word of a closed-loop sentence comes at the first Δ
    row at which the matched point reaches it (D42), and a labelled go-around is in its closed-loop sentence and flies as
-   a go-around.
+   a go-around; a change of speed says its steps, and the executor makes each step at a_max (D43).
 4. No write under a live root, and no existing directory under `4dTrajectory/outputs/` changed.
 5. Nothing in the archive was edited after the move.
