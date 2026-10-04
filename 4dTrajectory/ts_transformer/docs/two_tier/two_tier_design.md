@@ -67,9 +67,10 @@ repository root.
 | D41 | The design runs at an airport that is not in the training data: the number of candidates is not fixed; every input has a fixed physical scale, never a statistic of the training data; each fold of D39 flies the full closed loop at its held-out airport. The altitude grid limits this to airports whose approach levels lie in its 60 m segment (§6.4) | Decided | User, 2026-10-04 |
 | D42 | The closed-loop reading says each observed word at the place where the observed aircraft heard it, not at the time: at the Δ row nearest to the place where the matched point of the flown aircraft reaches it (D45). The correction words do not change. The flight ends when the executor is done or at the time limit of the replay (§4.9) | Decided | User, 2026-10-04 |
 | D43 | Speed words in steps. In a change of speed, the labeller says each grid value on the way, where the observed speed comes nearer to it than to the value before. The executor changes the speed of a speed word at the largest acceleration of the speed envelope (a_max, a value of the spec). The rate of a change thus comes from the words, as the turn rate comes from the heading words. "Unspecified" has its own rate (§3.6, §4.5, §5.6) | Decided | User, 2026-10-04 |
-| D44 | No correction past the end of the observed path. There the closed-loop reading measures the lateral error against the line of the last segment, for the readouts only; it says no lateral or vertical correction, and the rows count as rows without correction (D34). The DA point always lies before the end of the observed path (§4.9) | Decided | User, 2026-10-04 |
-| D45 | A word goes to the nearest row, not to the next row. The Δ grid puts each word of the 2 s reading on the nearest Δ row (§4.8). The closed-loop reading takes the observed words with their 2 s times and says a word at the first Δ row whose matched observed time is not more than Δ/2 before the time of the word (§4.9). The mean lateness of a word is then zero at every Δ | Decided | User, 2026-10-04 |
-| D46 | A heading word is said in the frame where the executor hears it. Where the Δ grid or the closed-loop reading moves a heading word across a runway word, the word is the class nearest to its absolute track minus the course of the R in force when it is heard. No sentence is refused for a heading word across a change of runway (§3.3, §4.8, §4.9) | Decided | User, 2026-10-04 |
+| D44 | No correction past the end of the observed path (the observed slice ends before the threshold; the flown aircraft flies on to it). There the closed-loop reading measures the lateral error against the line of the last segment, for the readouts only, and no vertical error (there is no observed height); it says no lateral or vertical correction: a correction in force ends, and the observed word is said again; the aircraft flies the last observed words to the threshold. The rows count as rows without correction (D34). The DA point always lies before the end of the observed path (§4.9) | Decided | User, 2026-10-04 |
+| D45 | A word goes to the nearest row, not to the next row. The Δ grid puts each word of the 2 s reading on the nearest Δ row (§4.8). The closed-loop reading takes the observed words with their 2 s times and says a word at the first Δ row whose matched observed time is less than Δ/2 before the time of the word (§4.9). A word exactly between two rows goes to the later row in both. The mean lateness of a word is then zero in the closed loop, and on the Δ grid zero at 2 s and 1 s (half a 2 s row, from the ties) at 4 and 8 s | Decided | User, 2026-10-04 |
+| D46 | A heading word is said in the frame where the executor hears it. Where the Δ grid or the closed-loop reading moves a heading word across a runway word, the word is the class nearest to its absolute track minus the course of the R in force when it is heard. A heading word is said when its absolute track differs from the track in force, also when its class is the class in force said under another course. A change of runway alone says no heading word. No sentence is refused for a heading word across a change of runway (§3.3, §4.8, §4.9) | Decided | User, 2026-10-04 |
+| D47 | The turn law of the executor stays (§5.4). The measurement of A13: the words alone (the 5° grid and the lead) end a turn approximately 35 m inside the observed turn; the executor gives back approximately 18 m of it; the stopping-rate limit changes approximately 3 m (§11.14). The readout of a turn is its own part (the change of the displacement from the observed aircraft of the same time); the change of e_y is read beside it, because it holds the offsets that earlier turns left | Decided | User, 2026-10-04 |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -90,10 +91,10 @@ repository root.
 ### 0.4 Plan
 
 1. Stage A (§14.2): write the vocabulary, the labeller, the identities, the executor, the judge and the replay on the
-   branch `dev-two-tier-v4`, milestones A0–A13, each with tests and a code review. Another agent does this.
+   branch `dev-two-tier-v4`, milestones A0–A14, each with tests and a code review. Another agent does this.
 2. Claude checks the result of stage A against this document (§14.6).
-3. The user chooses the fitted values of D15 and, from the measurement of A13, if the turn law of the executor
-   changes. Then the formal artefact is built, and the
+3. The user chooses the fitted values of D15 (the turn law of the executor stays, D47). Then the formal artefact is
+   built, and the
    readings of D34 are made at each row interval of the ablation (D11, D25: 2, 4, 8 s). The user compares them (D7).
 4. Stages B, C, D (§14.3–§14.5): the prior from the start, the post-training and the multi-aircraft work, the frontend.
 5. The user merges the branch.
@@ -242,7 +243,10 @@ heading in force as the sine and cosine of its angle relative to the course of t
 when the executor hears it. Where the Δ grid (§4.8) or the closed-loop reading (§4.9) moves a heading word across a
 runway word, the word is the class nearest to its absolute track minus the course of the new R. For parallel runways
 (courses 0.002–0.01° apart) the class does not change; for other runways the absolute track stays within half a step,
-and the closed-loop reading corrects the rest.
+and the closed-loop reading corrects the rest. A class gives a track only with its course: a heading word is said when
+its absolute track differs from the track in force, also when its class is the class in force said under another course
+(the executor takes a heading word as new because it is said, not because its class is new). A change of R alone says no
+heading word.
 
 **Reading.** At each row, the labeller takes the smoothed track L = 4 s later (the lead; near the end, the track of the
 last row). The word is the grid value, relative to the course of R at that row, nearest to that track. A new word is
@@ -606,7 +610,8 @@ the words on a Δ grid:
 matched point has passed its place (§4.9) is late by Δ/2 more: approximately 1 s at Δ = 2 s, 3 s at 4 s and 7 s at 8 s.
 A late heading word makes a turn end late: 3 s late at 70–100 m/s leaves approximately 200–300 m of lateral offset after
 a turn of 90°. The ablation would then read the rounding, not the row interval (§11.13). With the nearest row, the mean
-lateness is zero. The spread of ±Δ/2 stays; that spread is the cost of a coarser Δ.
+lateness is zero at Δ = 2 s and 1 s at 4 and 8 s (a word exactly between two rows goes to the later one). The spread of
+±Δ/2 stays; that spread is the cost of a coarser Δ.
 
 Thus one reading gives every Δ. Δ must be a multiple of 2 s, and it must divide the 16 s observation of the prior
 (D25): the first predicted step is a Δ row.
@@ -689,19 +694,23 @@ difference of time) is not corrected, and the speed words stay the observed ones
 
 **Past the end of the observed path (D44).** The observed slice ends before the threshold, and the flown aircraft flies
 on to it: approximately 150 m (median), at most approximately 750 m (§11.13). There the path continues along the line of
-its last segment, and the lateral error is measured against that line for the readouts. The labeller says no
-correction there, lateral or vertical, and these rows count as rows without correction (D34). Why: there is no
+its last segment, and the lateral error is measured against that line for the readouts; no vertical error is measured
+there. The labeller says no correction there, lateral or vertical: a correction in force ends at the end of the path, and
+the observed word of its column is said again (in the readouts this word counts as a correction word; the prior and the
+executor read every word alike). The aircraft flies the last observed words to the threshold. These rows count as rows
+without correction (D34). Why: there is no
 observation there; the slope of one 2 s segment is not a measurement (the ADS-B altitude has steps of 7.6 m, so one
 segment can be approximately ±3° wrong, ±20 m over 400 m); and the DA point, 0.9–2.1 km before the threshold, always
 lies before the end of the observed path, so the DA check does not change.
 
 **When the observed words are said (D42, D45, D46).** The observed time of the matched point is the time at which the
-observed aircraft was at that point. At each Δ row, the labeller says every observed word whose 2 s time is not more
-than Δ/2 after the observed time of the matched point, and that it did not say before (D45). Thus a word is said at
-the Δ row nearest to the place where the observed aircraft heard it, and its mean lateness is zero. When one Δ row says
+observed aircraft was at that point. At each Δ row, the labeller says every observed word whose 2 s time is less
+than Δ/2 after the observed time of the matched point, and that it did not say before (D45; a word exactly Δ/2 after
+waits for the next row, as on the Δ grid). Thus a word is said at the Δ row nearest to the place where the observed
+aircraft heard it, and its mean lateness is zero. When one Δ row says
 more than one observed word of a column, it says the last one. A heading word is said in the frame where the executor
 hears it (D46, §3.3). When the flown aircraft is behind the observed aircraft, the observed words wait. The first
-predicted step says every column (rule 1): the observed words in force Δ/2 after its observed time.
+predicted step says every column (rule 1): the observed words in force before Δ/2 after its observed time.
 
 Why:
 
@@ -1250,8 +1259,9 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | Time limit | remaining observed time × 1.5 | Fixed choice |
 | Closed-loop reading: tolerances | lateral Y = 30 m, vertical H = 15 m; a correction ends below half the tolerance or at a change of sign | D32 |
 | Closed-loop reading: correction | heading: one class (5°) toward the observed path; angle: the next descent class | D32 |
-| Closed-loop reading: observed words | at the first Δ row whose matched observed time is not more than Δ/2 before the word's 2 s time (the Δ row nearest to its place); a heading word in the frame where it is heard | D42, D45, D46 |
-| Closed-loop reading past the end of the observed path | no correction | D44 |
+| Closed-loop reading: observed words | at the first Δ row whose matched observed time is less than Δ/2 before the word's 2 s time (the Δ row nearest to its place; a tie: the later row); a heading word in the frame where it is heard | D42, D45, D46 |
+| Closed-loop reading past the end of the observed path | no correction (one in force ends); lateral error for the readouts, no vertical error | D44 |
+| Turn law of the executor | unchanged after A13 | D47 |
 | Δ grid of the open-loop reading | each 2 s word on the nearest Δ row (a tie: the later row) | D45 |
 
 ---
@@ -1497,6 +1507,26 @@ words said at the first Δ row after their place, speed words in steps). Readout
 - A synthetic flight at the observed speed, flown open loop: 75–180 m of lateral offset after each turn (a test of A11
   holds 93 m after the second turn).
 - The courses of parallel runways differ by 0.002–0.01°.
+
+### 11.14 The nearest row and the turn of the executor
+
+From the smoke build of A12 and A13 (`dev-two-tier-v4` at `fd235e19` and `b8994f58`, `smoke_v4/data/a12/`, the spec of
+the A9 smoke; the closed loop with a tie at the earlier row, before A14). Readouts of the stage A report
+(`readouts/2026-10-04_stage_a_a12_a13_report.zh.md`); information, not a criterion (D7).
+
+- Closed-loop sentences replayed, train, vectored: more than 300 m from the observed path at Δ = 4 s 0 of 40 (§11.13: 35
+  of 40), at Δ = 8 s 2 of 40; all 40 land at each Δ. Select, Δ = 2 s, vectored: 159 of 166 land.
+- The lateness of the observed heading words said in closed loop (the matched observed time of the row that says a word
+  minus the word's 2 s time), train, mean: +0.03 s at Δ = 2 s, −0.3 s at 4 s, −1.6 s at 8 s; inside ±Δ/2. In a turn
+  several words fall in one row and only the last, the earliest in time, is said: thus the words said are early on
+  average at Δ = 8 s.
+- The open-loop sentences at Δ = 4 s do not change: on a 4 s grid, the nearest row with a tie at the later row is the
+  next row.
+- The turn of the executor (A13, `experiments/executor_turns.py`), select, 837 turns measured in every way, the turn's
+  own part toward the outside, mean: the exact words −36 m, the executor −18 m, the executor without the stopping-rate
+  limit −21 m, the observed track integrated (the control) −2 m. Without the 292 turns whose next turn starts within
+  30 s of the end: −34, −16, −18, +1 m. Larger at higher speed: at 100 m/s or more the words −39 m, the executor −18 m.
+  The change of e_y across a turn: p50 58 m, p90 390 m (the executor); it holds the offsets of earlier turns.
 
 ## 12 Regulation sources
 
@@ -1852,6 +1882,16 @@ holds this milestone into `dev-two-tier-v4`.
 - The user decides from the readout if the heading law changes. A change uses only values of the vocabulary (§5.1). It
   comes before the formal artefact, because every closed-loop sentence depends on the executor.
 
+**A14. A tie in the closed loop at the later row (D45).** After A13.
+
+- Closed loop (`autopilot/closed_loop.py`): a word is said at the first Δ row whose matched observed time is less than
+  Δ/2 before its 2 s time; the first predicted step says the words in force before Δ/2 after its observed time (as the
+  Δ grid puts a tie at the later row).
+- Tests: at Δ = 4 and 8 s a word exactly Δ/2 after the matched time waits for the next row; the first predicted step
+  and the refusal of a go-around at it read the same row.
+- The closed-loop reading of the smoke build again (a new smoke directory), its conformance, the closed-loop replays;
+  as information. Then the full ts suite again, and the report.
+
 ### 14.3 Stage B: prior
 
 **Start.** After Claude's check of stage A (§14.6). The code is written and tested on the smoke artefact at Δ = 2 s.
@@ -1958,7 +1998,7 @@ frontend reads the reading name, not the spec sha (§9.2 #9). After stage D the 
 
 ### 14.6 What Claude checks at the end of stage A
 
-1. Each decision that stage A carries (D1–D22, the Δ values of D25, D26–D28, D32, D33, D38 and D42–D46) against the code: the module and the
+1. Each decision that stage A carries (D1–D22, the Δ values of D25, D26–D28, D32, D33, D38 and D42–D47) against the code: the module and the
    test that carry it (a table in the report).
 2. The targeted tests and the full suite pass on the branch head (run again, not read from the report).
 3. The smoke build: both conformance checks pass; the replay at Δ = 2 and 4 runs to its end; a labelled go-around
