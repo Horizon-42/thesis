@@ -58,10 +58,10 @@ A proposal is a reading where the design says nothing; it holds only until the u
 |---|---|
 | B0: the package `prior/`; its import rules in `tests/test_architecture.py` (`prior/` reads only `instructions/`, the day split and the plain utilities; only the runners import it) | Done, `f3070978` |
 | B2: the model (`prior/model.py`), a sentence's rows and their batch (`prior/batch.py`), the checkpoint `ts-prior-checkpoint-v6` (`prior/checkpoint.py`); `no_motion` (D60) | Done on synthetic sentences, `f3070978`, `de7d4994`. Full ts suite at `f3070978`: 1,559 passed |
-| B3: the training loop (`prior/train.py`), the data of a run or a fold (`prior/runs.py`) | The loop done on synthetic sentences, `f3070978`. The runner `prior_train`, the smoke run, its time and the memory check at the formal size wait for A21 |
+| B3: the training loop (`prior/train.py`), the data of a run or a fold (`prior/runs.py`), the runner `prior_train` | The loop done on synthetic sentences, `f3070978`. The runner (one run or one fold; the memory check of the largest batches before training; `--sample` a smoke run, D55) on synthetic artefacts, `849e9cde` (reviewed). Next: the smoke run on a sample of the formal artefact at Δ = 2 s, its time and the memory check at the formal size |
 | B1: the inputs of a row (`prior/inputs.py`: `state_inputs`, `Heard`; a sentence and a loop use both), the landings (`prior/landings.py`), the artefact as sentences and the identity of the data (`prior/source.py`) | Done on synthetic artefacts, `278b626b`; the landings digest as D63, `ff514325` |
 | B4: the speaker (`prior/speaker.py`), the procedure masks (`prior/procedure.py`, set `procedure-masks-v4`) | Done on synthetic inputs, `278b626b`; the finals read on KRDU's CIFP. The masks and the glidepath scale as D64 and D65, with B4's tests of D64, `07f3f49b` (reviewed). Free generation (the speaker with the executor, the judge, the time limit) waits for A21 |
-| The full ts suite at `278b626b` / `ff514325` / `07f3f49b` | Not run yet: stage A's A21 build runs (outline §5 rule 13) |
+| The full ts suite | `8fbc4f96` (with `07f3f49b`): 1,607 passed; `849e9cde`: 1,610 passed |
 | B6: the Training view of stage B | Waits for A23 of stage A, merged into `dev-two-tier-v4`; then its export and view on the smoke sets of B3 and B4; the publication of the folds and the base after B5 |
 | B5, B7 (the close of stage B) | Wait for Claude's check of stage A and the user's choice of Δ |
 
