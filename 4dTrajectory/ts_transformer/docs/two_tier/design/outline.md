@@ -92,11 +92,11 @@ they came from. Each document lists the identities of its parts.
 | Document | Decisions | Open items |
 |---|---|---|
 | Outline | D7, D20, D21, D55 | — |
-| Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62 | O8 |
-| Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65 | — |
-| Post-training | D29–D31, D36, D37 | O6 |
+| Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67 | O8 |
+| Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68 | — |
+| Post-training | D29–D31, D36, D37 | O6, O9 |
 
-The next free numbers: D66, O9.
+The next free numbers: D69, O10.
 
 ---
 
@@ -104,8 +104,9 @@ The next free numbers: D66, O9.
 
 1. Stage A (vocabulary §0.4): A19 and A20, the user's choice of the altitude grid, A22 (the vertical path of each
    candidate, the state columns and the grammar's column mask in the public interface, D61, D62), A21 (the formal
-   artefact and the readings of D34), Claude's check, A23 (the Training view of stage A). The user compares the
-   readings of D34 and chooses Δ (D7, D11).
+   artefact and the readings of D34), Claude's check, A24 (the vertical tolerance of the final descent, D66: measured,
+   the user chooses), A26 (the start of a closed loop in the public interface, D67), A25 (the formal artefact again),
+   A23 (the Training view of stage A). The user compares the readings of D34 and chooses Δ (D7, D11).
 2. Stage B (prior §0.4): the prior from the start, chosen by cross-validation over the airports, and the base model.
    Stage B is developed in parallel with the end of stage A (the user, 2026-10-04). A milestone of stage B starts when
    the parts of stage A that it reads are on `dev-two-tier-v4`. The formal runs of stage B wait for Claude's check of
@@ -147,10 +148,10 @@ sections that it names.
    names are constants of the code). The new code refuses an old artefact by its name. No `.get(key, default)`
    fallbacks, no branches on a schema version.
 6. SI units only. A value from a regulation has its paragraph in a comment and is defined one time.
-7. A formal build or a formal readout only where the user orders it (vocabulary A18, A21). A smoke build (a stated limit
-   for each airport) goes to a tmp or scratch directory. It uses the spec that the user chose (D15), and its flights are
-   a random sample for each airport and split, seed 1337 (D55). The replay of the val days and every criterion wait for
-   the user (D7). Never write into an existing directory under `4dTrajectory/outputs/`.
+7. A formal build or a formal readout only where the user orders it (vocabulary A18, A21, A25). A smoke build (a stated
+   limit for each airport) goes to a tmp or scratch directory. It uses the spec that the user chose (D15), and its
+   flights are a random sample for each airport and split, seed 1337 (D55). The replay of the val days and every
+   criterion wait for the user (D7). Never write into an existing directory under `4dTrajectory/outputs/`.
 8. Do not touch the checkouts of running experiments (`.claude/worktrees/step9-run` and others) or the main checkout.
 9. A defect that you find outside the milestone goes to `docs/code-health-followups.md` (an entry and a table row), not
    into the change.

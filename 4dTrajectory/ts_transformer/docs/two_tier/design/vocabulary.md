@@ -48,7 +48,7 @@ The decision numbers are shared by all documents (outline §3).
 | D26 | The labeller reads a flight with a go-around approach by approach. An approach ends at the landing or at a go-around row. The last descent that reaches a go-around row says "no level-off". Each approach has its own capture row and its own "unspecified". The first row says the runway of the first approach. The go-around row is the row of the climb word (§4.2, §4.4–§4.6) | Decided | User, 2026-10-03 |
 | D27 | "Go-around" changes no target of another column. A row that says "go-around" while "no level-off" is in force also says a level above the aircraft (rule 6). The executor keeps the heading word in force; it does not fly the course of R. While G is true, "unspecified" holds the airspeed (§3.2, §3.7, §5.4–§5.6) | Decided | User, 2026-10-03 |
 | D28 | The vocabulary has one climb word. Its angle is a value of the executor. While G is true, the executor climbs at the steady climb angle that the thrust limit permits, not more than 3° and not less than 1.885° (200 ft per NM). While G is false, it climbs at the nominal angle of the climb class; that value comes from the spec measurement with D15 (§3.5, §5.5) | Decided (the range 1.885°–3° and the nominal from D15: the user; the thrust rule inside the range: Claude's proposal) | User, 2026-10-03 |
-| D32 | Closed-loop reading. The labeller flies its sentence with the executor. When the flown path leaves the observed path by more than a tolerance, it says a correction word, and the observed word again when the flown path is back. These sentences and their flown states are the training sentences of the artefact (§4.9, §6). Tolerances: lateral 30 m, vertical 15 m | Decided | User, 2026-10-03 |
+| D32 | Closed-loop reading. The labeller flies its sentence with the executor. When the flown path leaves the observed path by more than a tolerance, it says a correction word, and the observed word again when the flown path is back. These sentences and their flown states are the training sentences of the artefact (§4.9, §6). Tolerances: lateral 30 m, vertical 15 m (in the final descent H_final, D66) | Decided | User, 2026-10-03 |
 | D33 | While G is true, no crossing of a threshold is an event: of R or of another candidate (§3.2, §5.8) | Decided | User, 2026-10-03 |
 | D34 | The ablation of the row interval reads, at each Δ: the correction words of the closed-loop reading for each flight and each column; the errors left where §4.9 makes no correction; the replay outcomes. The user compares the Δ values on these readings (§4.8) | Decided | User, 2026-10-03 |
 | D35 | No finer grids. A finer grid does not remove the drift of open-loop words (§9.6); the closed-loop reading does (D32). The grids are those of D6 | Decided | User, 2026-10-03 |
@@ -72,6 +72,8 @@ The decision numbers are shared by all documents (outline §3).
 | D59 | The grid of D58, chosen: the fitted row of the spec measurement on all train days (code `220e858e`, 44,703 train flights, 25,727 level words above E): 60 / 120 / 450 m, break points 1,260 and 2,700 m, 40 levels — the grid of D22 itself; rounding error of the level words p50 / p95 / largest 17 / 34 / 190 m. The next best of the 4,515 grids of the fit leaves 7.6 % more squared error. A21 builds with `--grid fitted` (§3.4, §9.5) | Decided | User, 2026-10-04 |
 | D61 | The vertical path of each candidate (its TCH, its glidepath angle and its DA above the threshold) is part of the artefact: the first runner writes it into `candidates.json` beside the geometry, and every reader (the labeller's refusal, the judge, the closed-loop reading, the replay, the executor spec, the prior) takes it from there, never from the CIFP at run time. The names of the state columns of a closed-loop file and the function that reads a closed-loop file into its sentences are in `instructions/artefact.py`. Why: the public interface (§6, items 3 and 4) gives them, but the code held them in `autopilot/`, which the prior cannot import; and a value read from the CIFP at run time is not bound to the artefact (§6, milestone A22) | Decided | User, 2026-10-04, on the report of the stage B agent |
 | D62 | The grammar's mask for a speaker (§6, item 2) is one function in `instructions/grammar.py`. It takes the words in force (with R and G; none before the first step), the words that the earlier columns of the row said, the column asked, the height above E, the number of candidates and, for each later column, the words that the speaker's other masks permit (all words when not given). It gives, for each word of the column ("unchanged" and, in the runway column, "go-around" included), whether some words of the later columns, each among its permitted words, make the row pass `apply`. Its definition is `apply`, not a second copy of rules 1–6. Why: a speaker says a row column by column, and a check with the later columns "unchanged" refuses good words (a level below the aircraft, which a descent class in the angle column makes grammatical); a copy of the rules in the prior breaks the one definition (§3.7); the permitted words of the later columns make sure that a row never reaches a column with no permitted word (milestone A22) | Decided | User, 2026-10-04, on the report of the stage B agent |
+| D66 | While "no level-off" is in force (the final descent), the vertical tolerance of the closed-loop reading is H_final, smaller than H; elsewhere H = 15 m stays. The final descent is told by the words, not by procedure data (principle 3). The value is measured and the user chooses it (D55): the closed-loop reading and its replay at Δ = 2, 4, 8 s for H_final = 15, 10, 7.5 and 5 m, on the train sample of D34 and on every labelled select flight (milestone A24). A correction ends below half the tolerance in force; the rule of D50 and the readings of D34 read the tolerance in force at each row. Why: the DA check allows 22 m (D38); the real tracks lie up to +8 m (p90) above the glidepath at the DA point; with H = 15 m the flown path can stay up to 15 m above the observed one before a correction starts, and the correction then needs time. 67 of 1,999 train replays at Δ = 2 s ended `unstable_at_minimums`, 61 of them high, and 57 of these 67 flights passed the same check on their real track (`readouts/2026-10-04_stage_a_check_a15_a22.zh.md` §7). These sentences are the prior's training sentences | Decided; the value waits for A24 and the user's choice | User, 2026-10-04, on Claude's reading of the check |
+| D67 | The start of a closed loop is part of the public interface (§6, item 5): one function in `autopilot/start.py`. It takes closed-loop sentences of the artefact as the reader of item 3 gives them (a split and a Δ), the executor spec of the artefact and the most go-arounds that a flight may say. It gives the executor at the first predicted step of each sentence's flight: the flight rebuilt from the harvest and compared row by row with the stored signals (§7.2 #4), its aircraft (its own dynamics or a stand-in's, by the rule of the replay) and its approach speed, its time limit (§5.8) and the time that its go-arounds may add (900 s each, up to the most given; a further go-around is refused, and the caller masks it). Then, at each Δ row, the caller gives the words of the row for each flight; the executor flies Δ seconds and gives the states of the 2 s rows flown (`STATE_COLUMNS`) and the flights that are done. The judge gives the outcome of a flight from what the executor recorded, with no observed words (§6, item 6). The closed-loop reading (§4.9) starts its flights with the same function. Why: a speaker's closed loop (the prior's free generation, the post-training) needs the start, and the code that makes it (`autopilot/replay.py`, `autopilot/flights.py`) is not in the public interface: a caller of that code breaks when stage A changes it. The start is not stored in the artefact: the artefact holds the signals, not the dynamics (§7.2 #4) (milestone A26) | Decided | User, 2026-10-04, on the report of the stage B agent |
 
 ### 0.2 Open items
 
@@ -87,16 +89,21 @@ The decision numbers are shared by all documents (outline §3).
 
 ### 0.4 Plan
 
-1. A0–A20 and A22 are done; the formal build of A18 was stopped for D58; the spec measurement on all train days with A19
-   and A20 is done and the user chose the fitted grid (D59). Now A21: the formal artefact and the readings of D34 at
-   Δ = 2, 4, 8 s (§12.1). The build of A21 that started on 2026-10-04 at 13:36Z (`v8_20261004`, `v13_20261004`) was made
-   before D61 and is superseded; the rebuild into `v9_<date>` / `v14_<date>` waits for disk space (the user's go to
-   delete the superseded directories).
-2. Claude checks A15–A22 and the formal artefact (§12.2).
-3. A23: the Training view of stage A (§12.1, outline §6), so that the user sees the words, the closed-loop sentences
-   at Δ = 2, 4, 8 s and the executor in the frontend.
-4. The user compares the readings of D34 and chooses Δ (D7, D11), before or after A23. The replay of the val days waits
-   for the user.
+1. A0–A22 are done, and A21's formal artefact is built (`instruction_language/v9_20261004`, `executor/v14_20261004`,
+   read-only with `SHA256SUMS`; report `readouts/2026-10-04_stage_a_a21_report.zh.md`).
+2. Claude's check of A15–A22 and the formal artefact (§12.2) is done: all five items pass
+   (`readouts/2026-10-04_stage_a_check_a15_a22.zh.md`).
+3. A24 (D66): the vertical tolerance of the final descent in the code, and its measurement at H_final = 15, 10, 7.5
+   and 5 m; the user chooses the value (D55).
+4. A26 (D67): the start of a closed loop, written while the user chooses H_final. Before A25, so that the conformance
+   records of A25 are those of the code with it. Stage B's free generation waits for it.
+5. A25: the formal artefact again, with the chosen H_final, and the readings of D34 again; `v9_20261004` and
+   `v14_20261004` superseded, deleted with the user's go. Claude checks A24, A26 and A25 (§12.2).
+6. A23: the Training view of stage A (§12.1, outline §6), so that the user sees the words, the closed-loop sentences
+   at Δ = 2, 4, 8 s and the executor in the frontend. Its code can be written on `v9_20261004`; its export and
+   publication read the artefact of A25.
+7. The user compares the readings of D34 of A25 and chooses Δ (D7, D11), before or after A23. The replay of the val
+   days waits for the user.
 
 ---
 
@@ -668,7 +675,7 @@ that its own closed loop also gives.
 **The flight.**
 
 1. The executor starts at the first predicted step, from the observed state of that row, as a speaker's closed loop
-   does. The rows before it stay observed.
+   does: both through the start of a closed loop (§6, item 5; D67). The rows before it stay observed.
 2. The aircraft flies with its own dynamics or with a stand-in's, by the rule of the replay (`autopilot/replay.py`
    `group_of`). A flight that the replay does not fly (no identified type, no aircraft dynamics, or no published
    approach speed) gives no training sentence. Nor does a sentence with fewer than two rows from the first predicted
@@ -743,7 +750,8 @@ observed time (D42).
    toward the other side).
 3. A new observed heading word ends a correction. The labeller says the observed word, and the comparison continues.
 
-**Vertical correction.**
+**Vertical correction.** The vertical tolerance in force is H_final while "no level-off" is in force (the final
+descent) and H elsewhere (D66). In the rules below, H is the tolerance in force.
 
 1. Only while a descent class is in force (toward a level or with "no level-off"). During a level hold the level word
    is the target; its rounding to the grid (§3.4) is not corrected. A level hold is the executor's: the level in force
@@ -764,10 +772,12 @@ of the open-loop reading. The capture row, the runway words and the go-around ro
 decisions come from the observed track; the closed-loop reading only adds corrections. The executor reads only words
 (D2, D3).
 
-**Tolerances (D32).** Y = 30 m and H = 15 m, constants of the labeller in the spec. With Y = 30 m the flown path ends
-within approximately 30 m of the observed path, which ends 2 m from the centreline (median), far inside the runway
-limit of 106.7 m. H = 15 m is larger than the fit residual of the altitude pieces (10 m, §4.4), so that the noise of
-the fit starts no correction.
+**Tolerances (D32, D66).** Y = 30 m, H = 15 m and H_final, constants of the labeller in the spec. With Y = 30 m the
+flown path ends within approximately 30 m of the observed path, which ends 2 m from the centreline (median), far inside
+the runway limit of 106.7 m. H = 15 m is larger than the fit residual of the altitude pieces (10 m, §4.4), so that the
+noise of the fit starts no correction. In the final descent, H = 15 m is too wide for the DA check (D38: 22 m at the DA
+point, with the real tracks up to +8 m above the glidepath there, p90), so H_final is smaller there; its value is the
+user's choice from the measurement of A24, which also counts the correction words that each value adds (D66).
 
 **Where the code goes.** The labeller package (`instructions/`) does not import the executor; only the runners and
 `autopilot/` read `instructions/` (`tests/test_architecture.py`). The closed-loop reading is a module in `autopilot/`.
@@ -950,12 +960,12 @@ change of the other documents.
 
 | # | Item | What it gives | Code | Identity |
 |---|---|---|---|---|
-| 1 | The vocabulary spec | The five columns in their order and their values (§3.1); the grids, the classes and their nominal angles, the ε of each level, the tolerances Y and H, the lead L, the turn, bank and speed limits, the reading name. `Words` converts a heading class to a track with the course of R, a level to a height with the airport elevation E, a speed value to m/s | `instructions/spec.py` `VocabularySpec`, `instructions/words.py` `Words` | The spec sha |
+| 1 | The vocabulary spec | The five columns in their order and their values (§3.1); the grids, the classes and their nominal angles, the ε of each level, the tolerances Y, H and H_final, the lead L, the turn, bank and speed limits, the reading name. `Words` converts a heading class to a track with the course of R, a level to a height with the airport elevation E, a speed value to m/s | `instructions/spec.py` `VocabularySpec`, `instructions/words.py` `Words` | The spec sha |
 | 2 | The grammar | Rules 1–6 and the runway/G table (§3.2, §3.7) as one function: it checks a row (`apply`); for a speaker's mask, it gives the permitted words of a column after the earlier columns of the row: a word is permitted when some words of the later columns, each among the words that the caller permits, make the row pass `apply` (D62) | `instructions/grammar.py` `apply` | The labeller conformance |
 | 3 | The sentence artefact | For each split of the day split (the test days sealed, contract C32) and each Δ of the ablation: the closed-loop sentences (the words of each row, each correction word marked) and the flown states on the data's 2 s rows with the Δ rows marked (position in the airport frame, MSL height, track, ground speed, vertical rate; observed before the first predicted step, flown from it; D51); for each sentence its flight, its runway, its capture row and its go-around rows; the flights without a sentence, by reason. The capture row and the go-around rows use later rows: they are for readouts and strata, never an input | `instructions/artefact.py`: the formats, `STATE_COLUMNS` (the names of the state columns) and the function that reads a closed-loop file into its sentences (for each: its flight, its first row, its words and correction marks, all its states on the 2 s rows from row 0 with the Δ rows marked) (D61) | The format names; the labeller and the closed-loop conformance records (§7.2) |
 | 4 | The candidates and their geometry | For each airport: E; for each candidate: the threshold, the course, the threshold elevation, the length, and its vertical path (D61): the TCH, the glidepath angle and the DA above the threshold (the LPV line's; where a runway publishes no LPV line, KRDU 32 and KSMF 35R, the LNAV/VNAV line's: the reading of the code). The functions: the position, height and direction relative to a candidate (distance before its threshold along its course, offset right of its final, height above its threshold, direction minus its course); the height of its published glidepath at a distance before its threshold with the straight-line reference (§9.3), one function of the airport, the candidate and the distance, the radius of curvature included, which the judge and the prior both call; the lateral limit of a landing passage | `candidates.json` (a new format name, D61); `instructions/airport.py` `VerticalPath`, `relative_to_runway`, the glidepath height, `landing_cross_limit_m` | Part of the artefact (item 3) |
-| 5 | The executor | Flies the words of one row at each Δ row, in 1 s cycles, from a given state (§5): one aircraft, a batch, or a batch in which each aircraft starts at its own cycle; it gives the state at each cycle and when the aircraft is done. It reads only the words, the aircraft and the runway geometry (§5.2) | `autopilot/executor.py` `Executor`, `autopilot/single.py` | The executor spec sha and its conformance record (§7.2) |
-| 6 | The judge | The outcome of a flight and its order (§5.8), the DA check, the time limit (the remaining observed time × 1.5, plus 900 s for each go-around), the limits that bound in each cycle | `autopilot/judge.py` | With item 5 |
+| 5 | The executor | Flies the words of one row at each Δ row, in 1 s cycles, from a given state (§5): one aircraft, a batch, or a batch in which each aircraft starts at its own cycle; it gives the state at each cycle and when the aircraft is done. It reads only the words, the aircraft and the runway geometry (§5.2). The start of a closed loop (D67): for closed-loop sentences of the artefact (item 3) at a Δ, with the executor spec and the most go-arounds of a flight, the executor at each flight's first predicted step (the flight rebuilt and compared with the stored signals, its aircraft and approach speed, its time limit and the time its go-arounds may add); then, for the words of one row of each flight, the states of the 2 s rows flown (`STATE_COLUMNS`) and the flights done | `autopilot/executor.py` `Executor`, `autopilot/single.py`; the start: `autopilot/start.py` | The executor spec sha and its conformance record (§7.2) |
+| 6 | The judge | The outcome of a flight and its order (§5.8), the DA check, the time limit (the remaining observed time × 1.5, plus 900 s for each go-around), the limits that bound in each cycle. The outcome of a flight flown from the start of a closed loop needs no observed words (D67) | `autopilot/judge.py` (the outcome: `outcome_of`) | With item 5 |
 | 7 | The row grid | Rows on UTC multiples of Δ, Δ = 2, 4 or 8 s (D25); the first predicted step 16 s after row 0 | `instructions/labeller/interval.py` | — |
 
 The package rules in the code: `instructions/` imports neither `autopilot/` nor a model package; `autopilot/` imports
@@ -1015,7 +1025,7 @@ fixed inputs, data by their flights.
 | Lined up | track within 30° of the course | 7110.65BB 5-9-2, TBL 5-9-1 |
 | DA check | vertical ±22 m of the published glidepath; lateral inside the FAS cone at the DA distance | D38 (`evaluation/thresholds.py`; FAA Order 8260.58D Formula 3-1-1) |
 | Time limit | remaining observed time × 1.5, plus 900 s for each go-around | Fixed choice; the 900 s: the user, 2026-10-02 |
-| Closed-loop reading: tolerances | lateral Y = 30 m, vertical H = 15 m; a correction ends below half the tolerance or at a change of sign; a change of sign beyond the tolerance says the opposite correction in the same row | D32, D53 |
+| Closed-loop reading: tolerances | lateral Y = 30 m, vertical H = 15 m; vertical H_final while "no level-off" is in force (the user's choice from A24); a correction ends below half the tolerance in force or at a change of sign; a change of sign beyond the tolerance says the opposite correction in the same row | D32, D53, D66 |
 | Closed-loop reading: correction | heading: one class (5°) toward the observed path; angle: the next descent class | D32 |
 | Closed-loop reading: observed words | at the first Δ row whose matched observed time is less than Δ/2 before the word's 2 s time (the Δ row nearest to its place; a tie: the later row); a heading word in the frame where it is heard | D42, D45, D46 |
 | Closed-loop reading past the end of the observed path | no correction (one in force ends); lateral error for the readouts, no vertical error | D44 |
@@ -1380,7 +1390,10 @@ days done (§9.5); the user chose the fitted grid (D59). After A18; together wit
   gives the grid candidates and their rounding errors, and the rows of D56 again (they must not change). The user
   chooses the grid (D55).
 
-**A21. The formal artefact (D56, D58, D59, D61).** After A22.
+**A21. The formal artefact (D56, D58, D59, D61).** Done: built from `9a986c09` on 2026-10-04 15:35–16:41Z into
+`v9_20261004` / `v14_20261004` (report `readouts/2026-10-04_stage_a_a21_report.zh.md`); its signals, sentences and
+closed-loop files equal the build before D61 bit for bit (A22 changed no word and no state), which is deleted with the
+user's go. After A22.
 
 - The formal artefact, from a clean checkout, into new directories:
   `4dTrajectory/outputs/POOLED/instruction_language/v9_<date>/` (signals of every development flight, the spec with
@@ -1421,8 +1434,9 @@ sentence changes.
   class; the labeller, executor and closed-loop conformance checks pass.
 - The key code index (§11) follows the moves.
 
-**A23. The Training view of stage A (outline §6).** After A21. The user sees the words, the closed-loop sentences and
-the executor of this stage in the frontend.
+**A23. The Training view of stage A (outline §6).** Its code after A21, on `v9_20261004`; its export and publication
+from the artefact of A25 (D66). The user sees the words, the closed-loop sentences and the executor of this stage in
+the frontend.
 
 - **Backend.** The live executor (`aeroviz_backend/autopilot_segment/`) on the new executor: `autopilot/single.py` with
   the executor spec of the formal artefact (`executor/v14_20261004`). It flies the words of this vocabulary from a
@@ -1444,10 +1458,55 @@ the executor of this stage in the frontend.
   that the export writes; a live segment equals the export's flown states from the same state with the same words
   (the executor conformance tolerance); the browser check (outline §6 item 6).
 
+**A24. The vertical tolerance of the final descent (D66).** After A22.
+
+- The closed-loop reading (`autopilot/closed_loop.py`) uses H_final while "no level-off" is in force and H elsewhere;
+  a correction ends below half the tolerance in force, and an overshoot is beyond the tolerance in force (D53). H_final
+  is a value of the vocabulary spec: a new spec schema name and new names for every changed format (outline §5 rule 5).
+  The rule of D50 and the readings of D34 (`experiments/instruction_closed_loop.py`) read the tolerance in force at each
+  row.
+- The measurement (outline §5 rule 12), in a scratch directory: for each H_final = 15, 10, 7.5 and 5 m, an artefact as
+  `v9_20261004` in everything else, on the train sample of D34 (400 flights an airport, seed 1337) and on every
+  labelled select flight; the closed-loop reading and its replay at Δ = 2, 4, 8 s. For each value, Δ and airport: the
+  landed share and the outcomes (`unstable_at_minimums` high and low apart); the height above the glidepath at the DA
+  point (p10 / p50 / p90); the flights whose real track passes the DA check and whose replay does not; the angle
+  correction words in each final descent (the cost: words that the prior must learn). The report gives them side by
+  side, with no criterion (D7); the user chooses H_final (D55). An airport that stays apart from the others at every
+  value is named in the report: its cause can be in its data, not in the tolerance.
+- Tests: the tolerance in force changes where "no level-off" starts and ends (a go-around included); in a final descent
+  an e_h between H_final and H starts a correction, and before the final descent it does not; at H_final = H the
+  sentences equal those of the spec without H_final.
+
+**A25. The formal artefact with the chosen H_final (D56, D58, D59, D61, D66).** After the user's choice of H_final
+and A26.
+
+- A21's steps, from a clean checkout, into new directories:
+  `4dTrajectory/outputs/POOLED/instruction_language/v10_<date>/` and `4dTrajectory/outputs/POOLED/executor/v15_<date>/`;
+  the readings of D34 at Δ = 2, 4, 8 s; read-only with a `SHA256SUMS`. The report gives the readings beside those of
+  A21.
+- `v9_20261004` and `v14_20261004` are superseded: deleted with the user's go, never kept beside the formal artefact.
+
+**A26. The start of a closed loop (D67).** After A24's code; before A25, so that A25's conformance records are those of
+the code with it. The artefact's formats do not change.
+
+- `autopilot/start.py`: for closed-loop sentences of the artefact at a Δ (a split, as the reader of `instructions/artefact.py`
+  gives them), the executor spec and the most go-arounds of a flight: each sentence's flight rebuilt from the harvest
+  and compared with the stored signals (`autopilot/flights.py`); its group and approach speed by the rule of the replay
+  (`autopilot/replay.py` `group_of`); its time limit (the remaining observed time from the first predicted step × 1.5)
+  and the time its go-arounds may add; the executor at the first predicted step. A step: the words of one row for each
+  flight → the states of the 2 s rows flown (`STATE_COLUMNS`) and the flights done. A flight's outcome:
+  `autopilot/judge.py` `outcome_of`.
+- The closed-loop reading (`autopilot/closed_loop.py`) starts its flights with it; its sentences do not change.
+- Tests: the words of a closed-loop sentence said through the start give its stored states on the 2 s rows (within
+  the executor conformance tolerance) and its outcome, at Δ = 2, 4 and 8 s; the time limit equals the closed-loop
+  reading's; a go-around beyond the most given is refused by name; the closed-loop and executor conformance checks
+  pass.
+
 ### 12.2 Claude's check of stage A
 
 The check of A0–A14 is done (`readouts/2026-10-04_stage_a_check.zh.md`, at `ab295b18`; its points became D48–D52).
-After A21, Claude checks A15–A22 and the formal artefact. The formal runs of stage B wait for this check (outline §4):
+After A21, Claude checks A15–A22 and the formal artefact. The formal runs of stage B wait for this check (outline §4).
+Done at `9a986c09`: all five items pass (`readouts/2026-10-04_stage_a_check_a15_a22.zh.md`).
 
 1. D48–D56 against the code: done at `688e945e`. D57, D58, D59, D61 and D62, and the code changed after `688e945e`,
    against the code of the formal build of A21.
@@ -1464,3 +1523,6 @@ After A21, Claude checks A15–A22 and the formal artefact. The formal runs of s
 5. Nothing in the archive was edited after the move.
 6. After A23: the published sets open and play in the browser; a live segment equals the export's flown states; the
    old Training index and its sets are unchanged; the backend tests pass (outline §6).
+7. After A24, A26 and A25: D66 and D67 against the code (A26's test of the stored states run again on the artefact of
+   A25); the spec of the formal artefact holds the chosen H_final and its measurement records the choice; the readings
+   of D34 exist for every Δ, split and airport; the artefact of A21 deleted with the user's go.
