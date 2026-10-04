@@ -74,6 +74,8 @@ repository root.
 | D48 | The 2 s reading follows D46 too. After a change of R, a heading word whose class is the class in force is said, because its absolute track differs from the track in force. No flight is refused for it (§4.3) | Decided | User, 2026-10-04 (Claude's check of stage A, §3 item 2) |
 | D49 | The labeller conformance also covers the Δ grid: its reference sample stores the sentences at Δ = 4 and 8 s, and the check compares them again with the code on disk (§9.2) | Decided | User, 2026-10-04 (check §3 item 3) |
 | D50 | The closed-loop reading does not keep every row inside the tolerances of D32. A correction is one class and needs time to bring the flown path back (§11.11); in the stage A smoke 10–25 % of the correctable rows are more than 30 m off laterally. The check of §14.6 reads that the corrections bring the flown path back inside the tolerances, not that every row is inside them (§14.6) | Decided | User, 2026-10-04 (check §3 item 4) |
+| D51 | The closed-loop artefact stores, for each row from the first predicted step, the flown position 2 s before the row (east, north, MSL height), at every Δ. The executor flies 1 s cycles, so the value exists; at Δ = 2 s it is the row before. The motion input of D25 is read from it; stage B does not fly a sentence again to get it (§4.8, §4.9) | Decided | User, 2026-10-04 (check §3 item 1) |
+| D52 | The band of an altitude level is half the larger gap to its two neighbours + the fit residual 10 m. Inside a segment this is half its step + 10 m; the top level of a segment takes the larger gap above it (1,260 m: 70 m; 2,700 m: 235 m), so every height said as a level is inside its band. "No level-off" takes the band of the lowest level, 40 m (§3.4) | Decided | User, 2026-10-04 (check §3 item 5) |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -81,14 +83,12 @@ repository root.
 |---|---|---|---|
 | O6 | A mask for the spacing on the final (this design has no clearance word to hold back); the rule "established on the final" of the separation judge and the masks (D31) | Discuss with §8 | 8 |
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
-| O9 | The motion input of the prior (D25: the displacement in the 2 s before a row) on the flown rows of a closed-loop sentence at Δ = 4 and 8 s: the artefact stores the flown state on the Δ rows only, so the state 2 s before a row is not on disk | Under discussion (check §3 item 1) | 4.9, 6.1 |
-| O10 | The band of the top level of a segment (1,260 m and 2,700 m): §3.4 gives half its segment's step + 10 m (40 / 70 m); the code gives half the larger gap to a neighbour + 10 m (70 / 235 m), because the heights between that level and the middle of the gap above it are said as that level | Under discussion (check §3 item 5) | 3.4 |
 
 ### 0.3 Implementation
 
 | Part | State |
 |---|---|
-| Stage A: vocabulary, labeller, identities, executor, judge, replay, closed-loop reading (§14.2) | Built on `dev-two-tier-v4`, each milestone reviewed: A0 `e57c62d8` + `d2917c06`; A1–A3 `63639a54` + review fixes `feaf9558`, `d1e277f7`; A4–A6 `330ffbaf` + review fixes `c7603a4c`; A7 `14eb7946`; A8 `05f00be7` + review fixes in `c41ce7af`; A9 `c41ce7af` + review fixes `2e182e8d`, `983f2847`; D38 and D34 `6d1e8c4a` + review fixes `fdc3b832`; A10 `4ac34679` + review fixes `d1258c00`; A11 `efcbb5dc` + review fixes `0c0778c8`; A12 `b8077c34` + review fixes `b5b76c5a`; A13 `47865c8e` + review fixes `249804bd`, `b8994f58`; A14 `66daefa2` + review fix `ab295b18`. Smoke build of A12 and A13 (80 flights an airport and split, from the open-loop reading again, in the ignored `smoke_v4/data/a12/` of the worktree): the labeller's, the executor's and the closed loop's conformance checks pass; the closed loop read at Δ = 2, 4 and 8 s; the replays ran at Δ = 2 and 4 s open loop and 2, 4, 8 s closed loop; the turn readout of A13 ran on train and select; the full ts suite passes (1,523). Reports: `readouts/2026-10-04_stage_a_a8_a9_report.zh.md`, `readouts/2026-10-04_stage_a_a10_a11_report.zh.md`, `readouts/2026-10-04_stage_a_a12_a13_report.zh.md`. The closed loop of A14 built again in `smoke_v4/data/a14/`; the full ts suite at `ab295b18` passes (1,524). Claude's check of stage A (§14.6) at `ab295b18`: `readouts/2026-10-04_stage_a_check.zh.md` — items 2, 4, 5 pass; items 1 and 3 hold with points for the user (the motion input 2 s before a row is not stored at Δ = 4 and 8 s). The user's decisions on the check: D48–D50 and A15; O9 and O10 under discussion |
+| Stage A: vocabulary, labeller, identities, executor, judge, replay, closed-loop reading (§14.2) | Built on `dev-two-tier-v4`, each milestone reviewed: A0 `e57c62d8` + `d2917c06`; A1–A3 `63639a54` + review fixes `feaf9558`, `d1e277f7`; A4–A6 `330ffbaf` + review fixes `c7603a4c`; A7 `14eb7946`; A8 `05f00be7` + review fixes in `c41ce7af`; A9 `c41ce7af` + review fixes `2e182e8d`, `983f2847`; D38 and D34 `6d1e8c4a` + review fixes `fdc3b832`; A10 `4ac34679` + review fixes `d1258c00`; A11 `efcbb5dc` + review fixes `0c0778c8`; A12 `b8077c34` + review fixes `b5b76c5a`; A13 `47865c8e` + review fixes `249804bd`, `b8994f58`; A14 `66daefa2` + review fix `ab295b18`. Smoke build of A12 and A13 (80 flights an airport and split, from the open-loop reading again, in the ignored `smoke_v4/data/a12/` of the worktree): the labeller's, the executor's and the closed loop's conformance checks pass; the closed loop read at Δ = 2, 4 and 8 s; the replays ran at Δ = 2 and 4 s open loop and 2, 4, 8 s closed loop; the turn readout of A13 ran on train and select; the full ts suite passes (1,523). Reports: `readouts/2026-10-04_stage_a_a8_a9_report.zh.md`, `readouts/2026-10-04_stage_a_a10_a11_report.zh.md`, `readouts/2026-10-04_stage_a_a12_a13_report.zh.md`. The closed loop of A14 built again in `smoke_v4/data/a14/`; the full ts suite at `ab295b18` passes (1,524). Claude's check of stage A (§14.6) at `ab295b18`: `readouts/2026-10-04_stage_a_check.zh.md` — items 2, 4, 5 pass; items 1 and 3 hold with points for the user (the motion input 2 s before a row is not stored at Δ = 4 and 8 s). The user's decisions on the check: D48–D52 and A15 |
 | Stage B: prior (§14.3) | Not started; outline |
 | Stage C: post-training and multi-aircraft (§14.4) | Not started; outline |
 | Stage D: frontend and backend (§14.5) | Not started; outline |
@@ -98,7 +98,7 @@ repository root.
 1. Stage A (§14.2): write the vocabulary, the labeller, the identities, the executor, the judge and the replay on the
    branch `dev-two-tier-v4`, milestones A0–A14, each with tests and a code review. Another agent does this.
 2. Claude checks the result of stage A against this document (§14.6). Then A15 (§14.2) from the decisions on the
-   check (D48–D50, O9, O10).
+   check (D48–D52).
 3. The user chooses the fitted values of D15 (the turn law of the executor stays, D47). Then the formal artefact is
    built, and the
    readings of D34 are made at each row interval of the ablation (D11, D25: 2, 4, 8 s). The user compares them (D7).
@@ -306,8 +306,11 @@ levels that the other four airports almost never use. This is airspace, not fram
 
 **Envelope.** The tube from the row of the word: max(T, h0 − s·tan γ_hi) − ε ≤ h ≤ max(T, h0 − s·tan γ_lo) + ε while
 it descends, T ± ε after it arrives (s is the horizontal distance flown from the row of the word). ε depends on the
-segment of T: half its step plus the fit residual 10 m, that is 40 / 70 / 235 m. For "no level-off" there is no lower
-bound T. A new angle word starts a new tube. A containment rate is given
+level (D52): half the larger gap to its two neighbours plus the fit residual 10 m. Inside a segment that is half its
+step + 10 m, 40 / 70 / 235 m. The top level of a segment takes the larger gap above it: 1,260 m has 70 m and 2,700 m has
+235 m, because the heights up to the middle of that gap are said as that level (with half the segment's own step, a
+level held at 1,301–1,320 m or 2,771–2,925 m would be outside the band of its own word). For "no level-off" there is no
+lower bound T, and ε is the band of the lowest level, 40 m. A new angle word starts a new tube. A containment rate is given
 with these widths (principle 6). The level detection of the labeller does not use ε (§4.4).
 
 ### 3.5 Angle column
@@ -649,7 +652,8 @@ The user compares the Δ values on these readings; this document sets no thresho
 it would be the mean over Δ. In a 3°/s turn, the direction of that mean is approximately 12° behind the track at
 Δ = 8 s (3° at 2 s). The ablation would then compare a coarser input as well as a longer interval. With the
 displacement in the 2 s before the row, only the interval changes. The data has a row every 2 s, and in closed loop the
-executor has a state every 1 s, so the value exists at every Δ. At Δ = 2 s it is the value of now.
+executor has a state every 1 s, so the value exists at every Δ; the closed-loop artefact stores it (D51). At Δ = 2 s it
+is the value of now.
 
 ### 4.9 Closed-loop reading (D32)
 
@@ -768,7 +772,8 @@ the fit starts no correction.
 It reads the open-loop artefact and the executor spec.
 
 **Artefact.** For each split and each Δ: the closed-loop sentences (each correction word marked as a correction); the
-flown states on the rows (position in the airport frame, MSL height, track, ground speed, vertical rate); the count of
+flown states on the rows (position in the airport frame, MSL height, track, ground speed, vertical rate); on each row
+from the first predicted step, the flown position 2 s before it (D51); the count of
 correction words for each column; the flights without a training sentence, by reason.
 
 ---
@@ -1895,15 +1900,19 @@ holds this milestone into `dev-two-tier-v4`.
 - The closed-loop reading of the smoke build again (a new smoke directory), its conformance, the closed-loop replays;
   as information. Then the full ts suite again, and the report.
 
-**A15. The decisions on Claude's check of stage A (D48, D49; the check's §3 item 6).** After A14. O9 and O10 add to
-it when the user decides them.
+**A15. The decisions on Claude's check of stage A (D48, D49, D51; the check's §3 item 6).** After A14. D50 and D52
+change no code (the band of D52 is in `instructions/words.py` since A1).
 
 - 2 s reading (`instructions/labeller/lateral.py`, `instructions/labeller/sentence.py`): after a change of R, a heading
   word whose class is the class in force is said; the refusal "heading word repeated after a runway change" goes (D48).
+- Closed-loop artefact (`autopilot/closed_loop.py`, `instructions/artefact.py`): for each row from the first predicted
+  step, the flown position 2 s before it (east, north, MSL height), taken from the executor's cycle 2 s before the row.
+  A new closed-loop format name; the closed-loop conformance compares it too (D51).
 - Labeller conformance (`instructions/conformance.py`): the reference sample also stores each sentence on the Δ grid at
   Δ = 4 and 8 s (`labeller/interval.on_interval`); the check compares them again. A new reference format name (D49).
-- Tests: the 2 s reading of a flight that changes to a runway 6° off and keeps its class says the word, and the
-  executor flies the new track; the labeller conformance finds a change of the Δ grid's rule (the tie of D45); the
+- Tests: at Δ = 2 s the position 2 s before a flown row is the state of the row before; at Δ = 4 and 8 s it is the
+  state that the executor flies 2 s before the row (a sentence flown again cycle by cycle); the 2 s reading of a
+  flight that changes to a runway 6° off and keeps its class says the word, and the executor flies the new track; the labeller conformance finds a change of the Δ grid's rule (the tie of D45); the
   tolerances of D32 pinned (lateral 30 m, vertical 15 m); `tests/test_architecture.py`: no module of the executor's
   laws (`autopilot/lateral.py`, `vertical.py`, `speed.py`, `executor.py`, `single.py`) imports the runway data (D9).
 - The smoke build again (a new smoke directory): the labeller, the executor and the closed-loop conformance; how many
