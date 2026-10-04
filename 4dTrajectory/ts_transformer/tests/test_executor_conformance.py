@@ -12,13 +12,15 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import torch
 
 from geokit import METRES_PER_DEG_LAT
 from ts_transformer.autopilot.frame import ALT, LAT, LON, PSI
 from ts_transformer.autopilot import conformance
+from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.instructions.words import Words
 from ts_transformer.tests.support import fly_legs, instruction_flight, instruction_spec
-from ts_transformer.tests.test_autopilot import DOWNWIND_BASE_FINAL, _fly_sentence, _params
+from ts_transformer.tests.test_autopilot import DOWNWIND_BASE_FINAL, _batch, _downwind, _fly_sentence, _params, _physics
 
 
 def _flown(params=None):
@@ -146,6 +148,29 @@ def test_a_changed_law_is_found():
     reference = _flown()
     changed = _compare(reference, _flown(_params(bank_rate_deg_s=3.0)))
     assert not changed.passed and changed.horizontal_m > 1.0
+
+
+def test_every_way_of_flying_gives_the_same_flown_states(monkeypatch):
+    """D57, executor design §12.4: the single-aircraft batch, the multi-aircraft batch (each flight from its own seeded
+    start) and the single-flight executor say the words on the sentence's own rows and fly the same states."""
+    from ts_transformer.tests.support import instruction_airport
+
+    signals, reading = _downwind()
+    one = _batch(signals, reading, 4.0)
+    batch = replace(one, **{name: getattr(one, name) * 2 for name in (
+        "indices", "signals", "readings", "sentences", "geometries", "vertical_paths", "groups")}, approach_ias_mps=[])
+    inputs, _, _, approach = _physics(batch.signals[0], instruction_airport())
+    batch.approach_ias_mps = [float(approach[0])] * 2
+    monkeypatch.setattr(type(batch), "inputs", lambda self, device: FlightInputs(
+        *(torch.cat([getattr(inputs, f.name)] * 2) for f in dataclasses.fields(FlightInputs))))
+    words = Words(instruction_spec())
+    flown = {mode: fly(batch, _params(), words) for mode, fly in conformance.MODES.items()}
+    assert set(flown) == {"batch", "staggered", "single"}
+    for mode in ("staggered", "single"):
+        for j in range(2):
+            difference = _compare(flown["batch"][j], flown[mode][j])
+            assert difference.passed, (mode, j, difference.mismatches)
+            assert difference.horizontal_m < 1e-6 and difference.vertical_m < 1e-6
 
 
 def _spec_dir(tmp_path, monkeypatch, results, *, keys=("KXXX:f1",)):

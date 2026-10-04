@@ -10,7 +10,7 @@
 - The rate: ``V̇* = sat((V_ref − V) / τ_V, ±a)`` with ``τ_V = δv / a`` — a constant acceleration or
   deceleration ``a`` until one band half-width δv from the target, then an exponential approach, so the
   transition is monotone and does not pass the target. For a speed word ``a`` is a_max, the speed envelope's largest
-  acceleration (`speed_accel_max_mps2` of the spec; design §5.6, D43): a speed word is a step of one grid value, so the
+  acceleration (`speed_accel_max_mps2` of the spec; vocabulary §5.6, D43): a speed word is a step of one grid value, so the
   executor makes each step in a few seconds and the rate of a longer change comes from the words, as the turn rate comes
   from the heading words. Where the thrust cannot give a_max the thrust limit binds (`inverse.thrust`), counted.
 - "Unspecified" has its own rate: the pace a_U (`speed_change_mps2`: one speed step over the shortest hold a speed word
@@ -54,7 +54,7 @@ def approach_speed_ias_mps(typecode: str | None, mass_kg: float | None) -> float
 
 def speed_change_mps2(spec: VocabularySpec) -> float:
     """a_U, the pace of "unspecified", m/s²: one of the vocabulary's speed steps over the shortest hold a speed word keeps
-    (5 m/s over 20 s = 0.25 m/s²; the user's choice, 2026-09-24; design §5.6)."""
+    (5 m/s over 20 s = 0.25 m/s²; the user's choice, 2026-09-24; vocabulary §5.6)."""
     return spec.speed_step_mps / spec.speed_min_hold_s
 
 

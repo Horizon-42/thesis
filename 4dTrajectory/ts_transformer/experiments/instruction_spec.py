@@ -1,5 +1,5 @@
 """Instruction labeller, step 2: measure the vocabulary's measured values on the TRAIN signals
-and write the spec (vocabulary design §8).
+and write the spec (vocabulary §8).
 
 Every flight first goes through the labeller's own gate (`labeller.read.admit`): the measured
 population is the labelled one, cut before the landing, with the ground-speed refusals applied.
@@ -10,18 +10,21 @@ track's and the altitude's wander for the bands the two tolerances are chosen fr
 the bank range, the acceleration bound, the course tolerance and the descent classes. Pass B,
 with the course tolerance, fits the capture corridor on the aligned final and compares the
 heading grids on the rows before it. Every value fitted from data is written beside its rounder candidates and the fit
-each leaves (D15), with the climb angles' distribution (O12) and the level words' rounding error under the grid and
-under a uniform 30 m grid (§11.7). Writes ``spec.json`` (with the git state and, as information, the labeller code that
+each leaves (D15), with the climb angles' distribution (O12); the altitude grid is fitted again on the level-offs above
+the airport elevation E (D58, `measure.fit_altitude_grid`) and written beside the grid of D22, each with the rounding
+error of the level words (`measure.grid_candidates`). Writes ``spec.json`` (with the git state and, as information, the labeller code that
 measured it) and ``measurements.json`` into the signals directory (never over an existing file).
 
 ``--candidate NAME`` (required when measuring) is the user's choice of D15 (D56): the descent nominals and edges and
-the climb nominal of that row of the rounding candidates (`measure.CANDIDATE_NAMES`); the fitted values and every row
-stay in ``measurements.json`` beside the choice.
+the climb nominal of that row of the rounding candidates (`measure.CANDIDATE_NAMES`); ``--grid NAME`` (required when
+measuring) is the user's choice of the altitude grid (D58): a row of the grid candidates (`measure.GRID_NAMES`). The
+fitted values and every row stay in ``measurements.json`` beside the choices.
 
 ``--spec-from <artefact>`` measures nothing: that artefact's spec is kept unchanged (`artefact.keep_spec` — new rows
 under the same vocabulary, e.g. rows moved onto the UTC steps, keep the spec; every model trained under it still opens).
 
-    python run_ts.py instruction_spec --dir 4dTrajectory/outputs/POOLED/instruction_language/<name> --candidate 0.25
+    python run_ts.py instruction_spec --dir 4dTrajectory/outputs/POOLED/instruction_language/<name> --candidate 0.25 \
+        --grid <name>
     python run_ts.py instruction_spec --dir <new> --spec-from 4dTrajectory/outputs/POOLED/instruction_language/<old>
 """
 
@@ -44,18 +47,19 @@ from ts_transformer.instructions.conformance import labeller_code_sha256
 from ts_transformer.instructions.labeller.read import admit
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.spec import VocabularySpec
-from ts_transformer.instructions.words import Words
 from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 CHUNK = 1000
 
 
-def _admitted(flights: list[Any], spec: VocabularySpec, geometry_data: dict[str, Any]) -> tuple[list[Any], Counter]:
+def _admitted(flights: list[Any], spec: VocabularySpec, geometry_data: dict[str, Any]
+              ) -> tuple[list[tuple[Any, AirportGeometry]], Counter]:
+    """The admitted flights, each with its airport's geometry."""
     geometries = {code: AirportGeometry.from_dict(data) for code, data in geometry_data.items()}
     admitted, refused = [], Counter()
     for flight in flights:
         try:
-            admitted.append(admit(flight, geometries[flight.airport], spec))
+            admitted.append((admit(flight, geometries[flight.airport], spec), geometries[flight.airport]))
         except Refused as refusal:
             refused[refusal.reason] += 1
     return admitted, refused
@@ -65,9 +69,9 @@ def _pass_a(flights: list[Any], spec_data: dict[str, Any], geometry_data: dict[s
     spec = VocabularySpec.from_dict(spec_data)
     admitted, refused = _admitted(flights, spec, geometry_data)
     pooled: dict[str, list[np.ndarray]] = {}
-    for flight in admitted:
+    for flight, geometry in admitted:
         try:
-            measured = measure.measure_flight(flight, spec)
+            measured = measure.measure_flight(flight, spec, geometry.elevation_m)
         except Refused as refusal:            # a level out of the grid: the labeller refuses the flight too
             refused[refusal.reason] += 1
             continue
@@ -82,7 +86,7 @@ def _pass_b(flights: list[Any], spec_data: dict[str, Any], geometry_data: dict[s
     admitted, _ = _admitted(flights, spec, geometry_data)
     pooled: dict[str, list[np.ndarray]] = {}
     grid_rows: dict[str, list[list[float]]] = {}
-    for flight in admitted:
+    for flight, _ in admitted:
         arrays, rows = measure.measure_final(flight, spec, course_tolerance_deg, grids)
         for name, values in arrays.items():
             pooled.setdefault(name, []).append(values)
@@ -112,9 +116,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="an artefact whose spec is kept unchanged instead of measuring one (module docstring)")
     parser.add_argument("--candidate", choices=measure.CANDIDATE_NAMES, default=None,
                         help="the user's choice of D15 (required when measuring; module docstring)")
+    parser.add_argument("--grid", choices=measure.GRID_NAMES, default=None,
+                        help="the user's choice of the altitude grid (D58; required when measuring)")
     args = parser.parse_args(argv)
-    if (args.spec_from is None) == (args.candidate is None):
-        parser.error("measuring needs --candidate (the user's choice of D15); --spec-from keeps a spec and takes none")
+    if (args.spec_from is None) == (args.candidate is None) or (args.candidate is None) != (args.grid is None):
+        parser.error("measuring needs --candidate and --grid (the user's choices of D15 and D58); --spec-from keeps a "
+                     "spec and takes neither")
     directory = args.dir if args.dir.is_absolute() else REPO_ROOT / args.dir
     for name in ("spec.json", "measurements.json"):
         if (directory / name).exists():
@@ -159,6 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     cumulative = np.cumsum(length[climbs][order]) / length[climbs].sum()
     climb_centre = float(-angle[climbs][order][np.searchsorted(cumulative, 0.5)])
     candidates = measure.rounding_candidates(angle, length, chosen["centres_deg"], chosen["edges_deg"], climb_centre)
+    grids_m = measure.grid_candidates(first["level_height_m"])
     measured = measure.MeasuredValues(
         turn_rate_max_deg_s=measure.round_up(float(np.percentile(first["turn_row_rate_deg_s"], 99.9)), 0.1),
         turn_bank_max_deg=measure.round_up(float(np.percentile(first["turn_row_bank_deg"], 99.9)), 1.0),
@@ -167,17 +175,21 @@ def main(argv: list[str] | None = None) -> int:
         corridor_course_tolerance_deg=course_tolerance,
         **measure.candidate_values(candidates, args.candidate),
         speed_accel_max_mps2=measure.round_up(float(np.percentile(first["transition_accel_mps2"], 99.9)), 0.1),
+        **measure.grid_values(grids_m, args.grid),
     )
     spec = measure.build_spec(measured)
     measurements = {
         "train_flights": len(flights), "not_admitted": dict(refused.most_common()),
         "suggested": suggested, "measured": measured.to_dict(), "chosen_candidate": args.candidate,
+        "chosen_grid": args.grid,
         "rules": {
             "heading_tolerance_deg": f"chosen: heading_step/2 + {measure.HEADING_WANDER_ALLOWANCE_DEG:g}° of wander "
                                      "(see sensitivity.heading_wander_p95_by_band)",
-            "altitude_grid": "chosen (D22): the segments' steps and tops; a level's band is half the larger gap to its "
+            "altitude_grid": f"the row {args.grid!r} of grid_candidates (the user's choice, D58): the grid fitted on the "
+                             "level-offs above E (row 0 apart; the level pieces as the labeller reads them under the "
+                             "provisional spec's D22 grid) or D22's; a level's band is half the larger gap to its "
                              "neighbours + altitude_fit_tolerance (Words.altitude_tolerances)",
-            "level_band_m": "chosen: a level piece's rows lie within it of the piece's own median (design §4.4; see "
+            "level_band_m": "chosen: a level piece's rows lie within it of the piece's own median (vocabulary §4.4; see "
                             "sensitivity.level_wander_p95_by_fit_tolerance)",
             "turn_rate_max_deg_s": "p99.9 of the turn rate on turning rows, up to 0.1°/s",
             "turn_bank_max_deg": "p99.9 of the bank on turning rows, up to 1°",
@@ -202,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
         "descent_class_fits": {str(k): v for k, v in fits.items()},
         "rounding_candidates": candidates,
         "climb_angles": measure.climb_distribution(angle, length),
-        "level_rounding": measure.level_rounding(first["level_height_m"], Words(spec)),
+        "grid_candidates": grids_m,
         "corridor_fit": corridor,
         "heading_grids": _grid_table(grid_rows, grids),
         "elapsed_s": time.perf_counter() - started,
@@ -211,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("the labeller's code changed while the spec was being measured; measure again")
     source = {"labeller_code_sha256": labeller, "git": git_state()}
     write_spec(directory, spec, measurements, source)
-    print(f"spec {spec.sha256[:12]} (candidate {args.candidate}):")
+    print(f"spec {spec.sha256[:12]} (candidate {args.candidate}, grid {args.grid}):")
     for name, value in measured.to_dict().items():
         print(f"  {name:32s} {value}")
     for k, fit in fits.items():
@@ -221,9 +233,11 @@ def main(argv: list[str] | None = None) -> int:
     for name, row in measurements["rounding_candidates"].items():
         print(f"  rounded {name:>6}: descent end-height error p50 {row['descent_end_height_error_m']['p50']:.1f} m, "
               f"climb {row['climb_centre_deg']}° p50 {row['climb_end_height_error_m']['p50']:.1f} m")
-    level = measurements["level_rounding"]
-    print(f"  level words ({level['levels']}): grid p50 / p95 / max "
-          + " / ".join(f"{level['grid'][k]:.0f}" for k in ("p50", "p95", "max")) + " m")
+    for name, row in grids_m.items():
+        error = row["rounding_error_m"]
+        print(f"  grid {name:>6}: steps {row['altitude_segment_steps_m']} tops {row['altitude_segment_tops_m']} "
+              f"({row['levels']} levels), level words ({error['n']}) rounding error p50 / p95 / max "
+              + " / ".join(f"{error[k]:.0f}" for k in ("p50", "p95", "max")) + " m")
     for grid, row in measurements["heading_grids"].items():
         print(f"  heading grid {grid}°: tolerance {row['tolerance_deg']}°, heading words/flight "
               f"p50 {row['heading_words_per_flight']['p50']:.0f}, p95 {row['heading_words_per_flight']['p95']:.0f}")

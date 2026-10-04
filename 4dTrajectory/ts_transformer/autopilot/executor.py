@@ -1,4 +1,4 @@
-"""The executor's cycle (design §5; executor design §3, §7): state → words in force → rates → controls → one cycle.
+"""The executor's cycle (vocabulary §5; executor design §3, §7): state → words in force → rates → controls → one cycle.
 
 Each cycle, in the design's order of limits:
 
@@ -13,7 +13,7 @@ Each cycle, in the design's order of limits:
 The first cycle's bank is not rate-limited: step 0's words describe what the aircraft is already doing,
 so a flight entering the slice in a turn keeps turning instead of rolling level first.
 
-A flight is DONE at the end of the cycle in which it makes an APPROACH CROSSING of the runway in force R (design §5.8:
+A flight is DONE at the end of the cycle in which it makes an APPROACH CROSSING of the runway in force R (vocabulary §5.8:
 the go-around state G false, the threshold plane crossed lined up — the track within the vocabulary's lined-up angle of
 the course — and within the landing screen's lateral limit, `lateral.Runways`), is below R's threshold elevation while
 before it, leaves the dynamics (a non-finite state or no airspeed), or reaches its time limit; the batch stops when every
@@ -46,7 +46,7 @@ from ts_transformer.autopilot.frame import AirportCharts, Kinematics, read_state
 from ts_transformer.autopilot.lateral import Lateral, Runways, relative
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.plant import Plant
-from ts_transformer.autopilot.sentence import DistanceClock, Sentences, TimeClock, TrackClock, WordsNow
+from ts_transformer.autopilot.sentence import Sentences, WordsNow
 from ts_transformer.autopilot.speed import Speed
 from ts_transformer.autopilot.vertical import Vertical
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, RUNWAY, Words
@@ -56,7 +56,7 @@ LIMITS = ("bank_cap", "bank_rate", "load_factor", "path_rate_limited", "stall_fl
           "stall")
 #: What the laws were doing each cycle: the go-around state, a level captured.
 MODES = ("go_around", "level_captured")
-#: The time a go-around adds to its flight's limit (design §5.8; multi-aircraft design §6.6 step 8, the user 2026-10-02).
+#: The time a go-around adds to its flight's limit (vocabulary §5.8; multi-aircraft design §6.6 step 8, the user 2026-10-02).
 GO_AROUND_EXTRA_S = 900.0
 
 
@@ -192,7 +192,8 @@ class Executor:
                                        self.runways, time_s, fresh=fresh)
         e0, n0, course, elevation, landing_limit = self.runways.pointed(force.runway)
         before, right, _off_course = relative(now, e0, n0, course)
-        gamma_rate, gamma_wanted, vertical_modes = self.vertical.rate(now, force.altitude_m, force.no_level_off,
+        gamma_rate, gamma_wanted, vertical_modes = self.vertical.rate(now, force.level_m, self.charts.elevation_m,
+                                                                      force.no_level_off,
                                                                       force.angle_class, force.angle_deg,
                                                                       force.issued_step[:, [ALTITUDE, ANGLE]],
                                                                       force.go_around, self.inputs.aero_params,
@@ -231,7 +232,7 @@ class Executor:
 
         after = read_state(self.state, self.charts)
         past, right_after, off_after = relative(after, e0, n0, course)
-        # an approach crossing of R (design §5.8): G false, lined up, inside the landing screen at the interpolated
+        # an approach crossing of R (vocabulary §5.8): G false, lined up, inside the landing screen at the interpolated
         # crossing — the judge reads the same rows (`judge._outcome`)
         fraction = (before / (before - past)).clamp(0.0, 1.0)
         crossed = ((before > 0.0) & (past <= 0.0) & ~force.go_around
@@ -267,18 +268,17 @@ class Executor:
                      done_cycle=self.done_cycle, sentence_s=stack(self.sentence_times), cycle_s=self.params.cycle_s)
 
 
-def fly(inputs: FlightInputs, sentences: Sentences, clock: TimeClock | DistanceClock | TrackClock, runways: Runways,
-        charts: AirportCharts, approach_ias_mps: torch.Tensor, params: ExecutorParams, words: Words, *,
-        time_limit_s: torch.Tensor, reserve_s: float) -> Flown:
-    """Fly every flight's sentence, its words said on ``clock``, until each is done or its time limit (``reserve_s``:
-    the time its go-arounds may add, `Executor`)."""
+def fly(inputs: FlightInputs, sentences: Sentences, runways: Runways, charts: AirportCharts,
+        approach_ias_mps: torch.Tensor, params: ExecutorParams, words: Words, *, time_limit_s: torch.Tensor,
+        reserve_s: float) -> Flown:
+    """Fly every flight's sentence on its own rows (D57: a cycle's sentence time is the time flown, a step's words heard
+    on the cycle that starts it), until each is done or its time limit (``reserve_s``: the time its go-arounds may add,
+    `Executor`)."""
     executor = Executor(inputs, runways, charts, approach_ias_mps, params, words, step_s=sentences.step_s,
                         time_limit_s=time_limit_s, reserve_s=reserve_s)
     for cycle in range(executor.cycles):
-        sentence_s = clock.now(cycle, executor.now())
-        if cycle % executor.step_rows == 0:
-            step_start_s = sentence_s                  # every word is heard once a step (`sentence`)
-        executor.cycle(sentences.at(step_start_s), sentence_s)
+        sentence_s = torch.full_like(executor.now().e_m, cycle * params.cycle_s)
+        executor.cycle(sentences.at(sentence_s), sentence_s)
         if bool(executor.done.all()):
             break
     return executor.flown()

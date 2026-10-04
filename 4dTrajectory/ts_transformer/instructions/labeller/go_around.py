@@ -1,4 +1,4 @@
-"""Go-arounds inside a sentence (design §4.6, D18, D19): the rule of R40 (`go_around_census`, archived in
+"""Go-arounds inside a sentence (vocabulary §4.6, D18, D19): the rule of R40 (`go_around_census`, archived in
 `archive/two_tier_v3_2026_10/`) on the sentence's own rows.
 
 R40 read the harvest's raw samples; the labeller reads the data plane's 2 s rows — already resampled and repaired, so

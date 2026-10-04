@@ -1,4 +1,4 @@
-"""Did the executor fly the sentence? (design §5.8; executor design §8) — three layers, read off what it flew.
+"""Did the executor fly the sentence? (vocabulary §5.8; executor design §8) — three layers, read off what it flew.
 
 Layer 1, every cycle: which limit bound, and by how much the rate the laws wanted differs from the rate the dynamics
 gave (the rate each limit costs: bank → track rate, load factor and the path-angle rate limit → path-angle rate, thrust
@@ -40,7 +40,7 @@ one definition with the evaluation (D38). Quality beyond that is the evaluation 
 Layer 2, every word: the sentence's words checked against what was FLOWN, with the labeller's own checks. The flown
 track is read at the data's 2 s rows (the labeller's smoothing, no landing cut: the flight is read up to where it
 ended) and judged from the flown row each word was heard at: a heading word over its rows to the end of the flight
-(`envelope.heading_words_inside`, §3.3), altitude and angle words in their tubes (`labeller.vertical.tube_checks`),
+(`envelope.heading_words_inside`, §3.3), altitude and angle words in their tubes on the height above E (`labeller.vertical.tube_checks`, D58),
 speed words in their spans (`labeller.speed.span_checks`). A word whose row the flight never reached is counted as
 ``not_reached`` and not judged.
 """
@@ -69,8 +69,7 @@ from ts_transformer.instructions.labeller.speed import span_checks
 from ts_transformer.instructions.labeller.vertical import tube_checks
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
-from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, Words, compass_from_math_rad
-from ts_transformer.instructions.words import SPEED as SPEED_WORD
+from ts_transformer.instructions.words import HEADING, Words, compass_from_math_rad
 
 OUTCOMES = ("landed", "unstable_at_minimums", "crossed_too_high", "crossed_off_runway", "crossed_other_runway",
             "ground_contact", "timeout", "dynamics_failure")
@@ -241,30 +240,14 @@ def flown_signals(track: dict[str, np.ndarray], end_row: int, reference: FlightS
                          vertical_rate_mps=track["vertical_rate"][rows])
 
 
-def said_at(instructions: list[Instruction], flown_rows: list[int]) -> tuple[list[Instruction], int]:
-    """The sentence's words at the flown rows the executor was told them at (``info["sentence_row"]``: the sentence row
-    it was said at), and how many were superseded before they flew: on a clock that runs ahead of the sentence, two
-    altitude, angle or speed words can fall on one flown row, and only the later one is flown. Heading words are kept
-    (each is judged on its own rows, `envelope.heading_words_inside`)."""
-    moved = [replace(word, row=row, info={**word.info, "sentence_row": word.row})
-             for word, row in zip(instructions, flown_rows)]
-    last = {}
-    for number, word in enumerate(moved):
-        last[(word.column, word.row)] = number
-    kept = [word for number, word in enumerate(moved)
-            if word.column not in (ALTITUDE, ANGLE, SPEED_WORD) or last[(word.column, word.row)] == number]
-    return kept, len(moved) - len(kept)
-
-
 @dataclass(frozen=True)
 class Said:
     """How the sentence's words reached the executor: ``cycles``, one per word, the cycle it was heard at
-    (``n_cycles`` for a word the clock never reached); ``moved``, the words heard, at the flown rows (the data's
-    step) they were heard at, the superseded dropped (`said_at`)."""
+    (``n_cycles`` for a word the flight never reached); ``moved``, the words heard, at the flown rows (the data's
+    step) they were heard at — each sentence row on its own flown row (D57), so no two words of a column share one."""
     cycles: list[int]
     n_cycles: int
     moved: list[Instruction]
-    superseded: int
 
 
 def words_said(flown: Flown, index: int, instructions: Sequence[Instruction], sentence_step_s: float,
@@ -279,9 +262,8 @@ def words_said(flown: Flown, index: int, instructions: Sequence[Instruction], se
     data_rows = int(round(spec.step_s / flown.cycle_s))
     step_start_rows = row_at(flown.sentence_s[index, :last].cpu().numpy(), sentence_step_s)[::sentence_rows]
     cycles = [min(int(np.searchsorted(step_start_rows, word.row)) * sentence_rows, last) for word in instructions]
-    said = [(word, cycle // data_rows) for word, cycle in zip(instructions, cycles) if cycle < last]
-    moved, superseded = said_at([word for word, _ in said], [row for _, row in said])
-    return Said(cycles, last, moved, superseded)
+    moved = [replace(word, row=cycle // data_rows) for word, cycle in zip(instructions, cycles) if cycle < last]
+    return Said(cycles, last, moved)
 
 
 def read_flown(flown: Flown, index: int, outcome: str, end_row: int, geometry: AirportGeometry,
@@ -332,14 +314,14 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, paths: Sequence[V
     rows = len(smoothed.track_deg)
     said = words_said(flown, index, instructions, sentence_step_s, spec, end_row)
     reached = [word for word in said.moved if word.row < rows]
-    never = len(instructions) - said.superseded - len(reached)
+    never = len(instructions) - len(reached)
     headings = envelope.heading_words_inside(
         smoothed.track_deg, [(word.row, float(word.info["target_deg"])) for word in reached if word.column == HEADING],
         spec.rows_exact(spec.heading_lead_s), rows, spec.heading_tolerance_deg)
-    vertical = tube_checks(reached, smoothed.distance_m, smoothed.altitude_m, spec, words)
+    vertical = tube_checks(reached, smoothed.distance_m, smoothed.altitude_m - geometry.elevation_m, spec, words)  # D58
     speed = span_checks(reached, smoothed.ground_speed_mps, spec, words)
     contained = (all(h["inside"] == h["rows"] for h in headings) and all(v["contained"] for v in vertical)
                  and all(v["contained"] for v in speed))
     return Verdict(outcome, end_row, crossing, limits, flown_rows=end_row + 1, words={
-        "not_reached": never, "superseded_before_flown": said.superseded, "heading": headings,
+        "not_reached": never, "heading": headings,
         "vertical": vertical, "speed": speed, "all_contained": bool(contained)})

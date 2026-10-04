@@ -147,8 +147,8 @@ of the package, not a migration in progress.
 - **A replay finds a checkpoint's manifests by the digest it recorded**
   (`repo_layout.checkpoint_arrival_manifests`): the live harvest or a FROZEN generation
   (`harvest-v5-20260823` holds every checkpoint of 2026-08-24..09-23); never by path (C29).
-- **The instruction sentence artefact** (`instructions/`; v4: reading `instruction-v4`, spec `ts-instruction-spec-v5`,
-  sentences `ts-instruction-sentences-v3`): one spec sha, written once and refused on a sha mismatch; the LABELLER is
+- **The instruction sentence artefact** (`instructions/`; v4: reading `instruction-v5`, spec `ts-instruction-spec-v6`,
+  sentences `ts-instruction-sentences-v4`; the altitude words are heights above the airport elevation E, D58): one spec sha, written once and refused on a sha mismatch; the LABELLER is
   identified by what it reads, never by its source (design D21): `conformance/` holds a reference sample (its sentences
   on the 2 s rows and on the Δ grid at 4 and 8 s, D49) and a
   `passed-<code>.json` per labeller code that reads it again the same (`instructions/conformance.py`, runner
@@ -157,21 +157,22 @@ of the package, not a migration in progress.
   signals (it ends before the landing); a flight with go-arounds is read approach by approach (D26); since v6
   (2026-10-02) every row is on the UTC even seconds; a change of speed says its 5 m/s steps, flown at a_max (D43);
   `--spec-from` keeps another artefact's spec (C30).
-- **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v4`; design §4.9, D32): each
+- **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v5`; vocabulary §4.9, D32): each
   split × row interval — the 2 s open-loop words flown from the first predicted step by an executor spec, each said at the
   Δ row nearest where the observed aircraft heard it (D42, D45), a heading word in the frame where it is heard (D46), with
   heading and angle corrections (none past the end of the observed path, D44), to the executor's end; the flown states on the data's 2 s rows, the Δ rows marked (D51), the errors against the observed path and the rows that allow no correction
   (D34); written once by `instruction_closed_loop` with its own reference and passed record, read only for code that
   passed it (`closed_loop.require_conforming_closed_loop`) (C38).
 - **An executor spec opens only for executor code that flies its reference tracks within the bounds** (2026-10-01, the
-  user: checked by what it flies, not by its source; `ts-executor-spec-v7`): `conformance/` beside the spec — 250
+  user: checked by what it flies, not by its source; `ts-executor-spec-v8`: a sentence said on its own rows, D57; a level
+  word flown at T + E MSL, D58): `conformance/` beside the spec — 250
   labelled train flights flown by the spec's code — and a `passed-<code>.json` per executor code that flew them again in
   every way (single-aircraft batch, multi-aircraft batch, single flight) within 1e-6 m (`spec.require_conforming_executor`,
   runner `executor_conformance`); a code change that stays within the bounds needs one ~30 s check and nothing is
   retrained; the vocabulary binds by its spec sha, the labeller by its conformance; the judge's decision-altitude check
   has no parameter (D38: the evaluation's ±22 m and the FAS cone) (C33). **C34 (a prior belongs to one sentence
   artefact), C35 (a prior speaks under its procedure's masks) and C37 (the traffic prior) describe the instruction-v3
-  prior, archived with it** (`archive/two_tier_v3_2026_10/prior/`); the v4 prior is stage B (design §14.3).
+  prior, archived with it** (`archive/two_tier_v3_2026_10/prior/`); the v4 prior is stage B (`docs/two_tier/design/prior.md` §12).
 - **Loss of separation has ONE judge, two readings** (`inference/separation.py`, 2026-09-27): `IFR` (7110.65BB as written)
   and `VISUAL` — the closed loop's checks and reward — = 7-4-4 c with visual approach clearances and NEVER visual
   separation: parallels ≥ 2,500 ft free once both are turned in (≤ 30°, own side of the midline), close pairs one runway,

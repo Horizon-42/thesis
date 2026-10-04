@@ -1,6 +1,6 @@
-"""The closed-loop reading (design §4.9, D32): the labeller's second pass. It flies each open-loop sentence (the observed
+"""The closed-loop reading (vocabulary §4.9, D32): the labeller's second pass. It flies each open-loop sentence (the observed
 words, `instructions.labeller`) with the executor and adds CORRECTION WORDS where the flown path leaves the observed
-one; the prior trains on the flown states of these sentences (§6.1).
+one; the prior trains on the flown states of these sentences (prior §2).
 
 THE FLIGHT. A batch of sentences on one row interval Δ (`replay.batch_of`) is flown from the FIRST PREDICTED STEP, Δ row
 ``OBSERVATION_S / Δ`` (16 s after the sentence's first Δ row), from the observed state there; the rows before it stay
@@ -56,7 +56,7 @@ THE CORRECTIONS (`Corrector`), with Y = `closed_loop_lateral_m` and H = `closed_
   the grid is not corrected).
 
 A correction word is an ordinary word of its column: the grammar (`instructions.grammar`) reads every row at the flown
-height, and a row it refuses refuses the flight (counted by reason). A word equal to the one in force is not said (the
+height above the airport elevation E (D58), and a row it refuses refuses the flight (counted by reason). A word equal to the one in force is not said (the
 sentence's own rule, `labeller.sentence`). The capture, the runway words and the go-around rows are the open-loop
 reading's; the executor reads only words.
 
@@ -204,7 +204,7 @@ def uncorrected_m(errors: np.ndarray, uncorrectable: np.ndarray) -> float:
 
 
 def heading_lateness_rows(sentence: ClosedLoopSentence, observed: np.ndarray) -> np.ndarray:
-    """The lateness of each observed heading word a closed-loop sentence says after its first row (§14.2 A12): the
+    """The lateness of each observed heading word a closed-loop sentence says after its first row (vocabulary §12.1 A12): the
     matched point's observed time at the row that says it minus the word's 2 s time, in 2 s rows; ``observed`` the
     open-loop reading's words from the sentence's first row (a correction is no observed word)."""
     rows = np.arange(len(observed))
@@ -231,7 +231,7 @@ def outside_rows(sentence: ClosedLoopSentence, observed: np.ndarray, first_row: 
     """Read from the stored sentence and its open-loop reading (``observed``, from its row 0; the sentence starts at its
     2 s row ``first_row``): the rows where §4.9 permits a correction, those where the flown path is outside the tolerance
     (|e_y| > Y, |e_h| > H; their share is a reading of the ablation, D34), and of those the rows after which no
-    correction TOWARD the path is in force (the rule of D50, §14.6): the heading word in force says a track on the
+    correction TOWARD the path is in force (the rule of D50, vocabulary §12.2): the heading word in force says a track on the
     path's side of the observed word's (said in the frame of the word in force), the angle in force is steeper than the observed class when too high and
     shallower when too low. By column, ``lateral`` and ``vertical``, each ``[3, M]``."""
     _, _, track = observed_tracks(observed, words, courses_deg)
@@ -306,7 +306,7 @@ class Corrector:
             past_end: bool) -> tuple[np.ndarray, np.ndarray]:
         """The next said row's words and which are corrections: the observed words not said before up to (not at) Δ/2 after the
         matched point's observed time ``matched_row`` (the first predicted step: after its own), and the corrections from
-        the errors, the flown height there, whether the executor holds the level in force (``holding``) and whether the
+        the errors, the flown height above the airport elevation E there (D58), whether the executor holds the level in force (``holding``) and whether the
         matched point is past the end of the observed path (``past_end``, module docstring); refused when the grammar
         refuses the row."""
         first = self.said is None
@@ -473,7 +473,8 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
             match = paths[f].match(flown[0], flown[1], flown[2])
             lateral, vertical = match.lateral_m, match.vertical_m
             try:
-                words_row, mask = correctors[f].row(match.row, lateral, vertical, flown[2], holding=bool(captured[f]),
+                height = flown[2] - batch.geometries[j].elevation_m       # above E, as the grammar reads it (D58)
+                words_row, mask = correctors[f].row(match.row, lateral, vertical, height, holding=bool(captured[f]),
                                                     past_end=match.past_end)
             except Refused as refused:
                 out[j] = refused
@@ -539,7 +540,7 @@ def read_chunked(batch: Batch, params: ExecutorParams, words: Words, *, chunk: i
     return out  # type: ignore[return-value]
 
 
-# ---- the conformance (design §9.2 #2): the closed-loop reading checked by what it reads, as the labeller's and the
+# ---- the conformance (vocabulary §7.2 #2): the closed-loop reading checked by what it reads, as the labeller's and the
 # executor's are. A fixed REFERENCE sample — the train split's first `REFERENCE_PER_AIRPORT` flown flights of each
 # airport in a permutation seeded by `REFERENCE_SEED`, at every row interval the closed-loop sentences were written at — is read by the
 # code that wrote the artefact's closed-loop sentences, and stored; the CHECK reads it again with the code on disk and
@@ -547,7 +548,7 @@ def read_chunked(batch: Batch, params: ExecutorParams, words: Words, *, chunk: i
 # apart than the executor's conformance bound. A check that passes, from a clean checkout, writes
 # ``passed-<code>.json``: what `require_conforming_closed_loop` asks for before closed-loop sentences are read. The
 # code is named by the logic of the executor's files and the labeller's (`closed_loop_code_sha256`).
-REFERENCE_SCHEMA = "ts-closed-loop-conformance-reference-v4"
+REFERENCE_SCHEMA = "ts-closed-loop-conformance-reference-v5"         # v5: A20 (D58), the words above E
 PASSED_SCHEMA = "ts-closed-loop-conformance-passed-v1"
 REFERENCE_SPLIT, REFERENCE_PER_AIRPORT, REFERENCE_SEED = "train", 10, 1337
 CONFORMANCE = "conformance"

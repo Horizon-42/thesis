@@ -1,4 +1,4 @@
-"""The lateral law (design §5.4; executor design §4.1): a heading word. Nothing else — no capture, no turn onto the
+"""The lateral law (vocabulary §5.4; executor design §4.1): a heading word. Nothing else — no capture, no turn onto the
 final, no centreline tracking (D2, D3, D9): the words fly the aircraft onto the final, and "go-around" changes no
 heading target (D27): the word in force stays, and the model turns the aircraft with heading words as at every row.
 

@@ -10,7 +10,7 @@ The rebuilt flight must reproduce the stored signals row for row and name the sa
 aircraft (`instructions.signals.signals_from_series`), and the build configuration must be the one the
 signals recorded, or it is refused: an executor flown from another flight — or another airframe — than
 the one the sentence was read off answers nothing. The flight is identified by what it is, never by the
-bytes of the manifest it came from (design §9.2 #4, D21: a manifest rewritten over the same flights opens).
+bytes of the manifest it came from (vocabulary §7.2 #4, D21: a manifest rewritten over the same flights opens).
 
 The executor starts at the flight's first row: the state is the signals' row 0, and the flight's
 physical context is `outputs.dynamics.context.rollout_context` at anchor 0 — the reading of a series

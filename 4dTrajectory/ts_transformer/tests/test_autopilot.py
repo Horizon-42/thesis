@@ -1,4 +1,4 @@
-"""The executor (`autopilot/`, design docs/two_tier/two_tier_design.md §5): conventions, words in force, the one-cycle
+"""The executor (`autopilot/`, design docs/two_tier/design/vocabulary.md §5): conventions, words in force, the one-cycle
 plant and the exact inverse, the laws, the judge and the replay, on synthetic states of a real airframe. (The tests of
 the instruction-v3 executor are archived with it: `archive/two_tier_v3_2026_10/tests/test_autopilot.py`.)"""
 
@@ -21,13 +21,15 @@ from ts_transformer.autopilot import inverse
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.frame import AirportCharts, compass_deg, read_state, wrap180
 from ts_transformer.autopilot.plant import Plant
-from ts_transformer.autopilot.sentence import DistanceClock, Sentences, TimeClock, TrackClock
+from ts_transformer.autopilot.sentence import Sentences
 from ts_transformer.instructions.labeller.records import Instruction
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words, compass_from_math_rad,
     wrap180 as np_wrap180,
 )
-from ts_transformer.tests.support import fly_legs, instruction_airport, instruction_flight, instruction_spec as spec
+from ts_transformer.tests.support import (
+    fly_legs, instruction_airport, instruction_flight, instruction_spec as spec, raised_airport,
+)
 
 F64 = torch.float64
 CPU = torch.device("cpu")
@@ -51,7 +53,7 @@ def test_the_state_reads_as_the_words_read_a_flight():
     assert float(k.ground_speed_mps) == pytest.approx(100.0 * math.cos(math.radians(3.0)))
 
 
-# ---- words in force, and the clocks they are said on
+# ---- words in force
 def _grid():
     words = Words(spec())
     grid = np.full((6, len(COLUMNS)), UNCHANGED, dtype=np.int64)
@@ -74,7 +76,7 @@ def test_each_word_takes_effect_when_it_is_said_and_stays_in_force():
     assert (relative[:4] == 180.0).all() and (relative[4:] == 90.0).all()
     no_level_off = np.array([bool(w.no_level_off[0]) for w in at])
     assert not no_level_off[:6].any() and no_level_off[6:].all()
-    assert float(at[0].altitude_m[0]) == 1200.0 and float(at[6].angle_deg[0]) == one.descent_angle_centres_deg[2]
+    assert float(at[0].level_m[0]) == 1200.0 and float(at[6].angle_deg[0]) == one.descent_angle_centres_deg[2]
     go_around = np.array([bool(w.go_around[0]) for w in at])
     assert not go_around[:8].any() and go_around[8:10].all() and not go_around[10:].any()
     assert [int(w.runway[0]) for w in at] == [0] * 10 + [1] * 6       # the go-around keeps R; the runway word sets it
@@ -101,33 +103,6 @@ def test_a_coarser_row_interval_holds_each_row_for_its_seconds():
     assert rows == [0, 0, 2, 2]
 
 
-def test_the_distance_clock_says_a_word_where_the_observed_aircraft_was_told_it():
-    from ts_transformer.autopilot.frame import Kinematics
-
-    e = np.arange(5) * 100.0
-    clock = DistanceClock.of([e], [np.zeros(5)], 2.0, 1.0, device=CPU)
-
-    def at(position):
-        state = Kinematics(*(torch.tensor([value], dtype=F64) for value in (position, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)))
-        return float(clock.now(0, state)[0])
-
-    assert [at(100.0 * t) for t in range(7)] == pytest.approx([0.0, 2.0, 4.0, 6.0, 8.0, 9.0, 10.0])
-    assert float(TimeClock(1.0).now(7, Kinematics(*(torch.zeros(1, dtype=F64) for _ in range(8))))[0]) == 7.0
-
-
-def test_the_track_clock_follows_the_observed_track_forward_one_row_a_cycle_at_most():
-    from ts_transformer.autopilot.frame import Kinematics
-
-    clock = TrackClock.of([np.arange(6) * 100.0], [np.zeros(6)], 2.0, 1.0, device=CPU)
-
-    def at(position):
-        state = Kinematics(*(torch.tensor([value], dtype=F64) for value in (position, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)))
-        return float(clock.now(0, state)[0])
-
-    assert [at(x) for x in (0.0, 440.0, 460.0, 120.0, 900.0, 900.0, 900.0, 900.0)] == pytest.approx(
-        [0.0, 2.0, 4.0, 4.0, 6.0, 8.0, 10.0, 11.0])
-
-
 def test_a_rebuilt_flight_must_be_the_one_the_signals_were_read_from(monkeypatch):
     from ts_transformer.autopilot import flights
 
@@ -143,7 +118,7 @@ def test_a_rebuilt_flight_must_be_the_one_the_signals_were_read_from(monkeypatch
 
 
 def test_a_flight_is_rebuilt_without_reading_its_manifests_bytes(monkeypatch, tmp_path):
-    """D21 (§9.2 #4): a rebuilt flight is the stored one row for row, whatever bytes its manifest has now."""
+    """D21 (vocabulary §7.2 #4): a rebuilt flight is the stored one row for row, whatever bytes its manifest has now."""
     import json
 
     from ts_transformer.autopilot import flights
@@ -236,7 +211,7 @@ def _params(**changes):
     from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
 
     base = ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, path_time_constant_s=2.0, path_rate_factor=2.0,
-                          timeout_factor=1.5, word_clock="time")
+                          timeout_factor=1.5)
     return replace(base, **changes)
 
 
@@ -248,8 +223,7 @@ def test_the_parameters_are_checked_against_the_designs_constraints():
                             (dict(timeout_factor=0.0), "positive"),
                             (dict(path_rate_factor=0.0), "positive"),
                             (dict(cycle_s=math.nan), "finite"),
-                            (dict(bank_rate_deg_s=math.nan), "finite"),
-                            (dict(word_clock="sundial"), "word_clock")):
+                            (dict(bank_rate_deg_s=math.nan), "finite")):
         with pytest.raises(ValueError, match=message):
             replace(params, **change).check(one, 2.0)
     with pytest.raises(ValueError, match="row interval 2.5 s"):
@@ -343,7 +317,7 @@ def vertical_paths(geometry):
 
 
 #: The downwind flight's runway (`_downwind`): its final flown on its open-loop words crosses about 40 m up — the vertical
-#: drift the closed-loop reading corrects (design §11.9, D32), which the DA check's ±22 m (D38) does not let pass at a
+#: drift the closed-loop reading corrects (vocabulary §9.6, D32), which the DA check's ±22 m (D38) does not let pass at a
 #: 15 m TCH. Its published glidepath is put where these words fly, so the tests that fly it read the judge's landing,
 #: the go-around and the readout, not the drift.
 DOWNWIND_TCH_M = 40.0
@@ -391,10 +365,8 @@ def _said(grid, words, geometry):
     return out
 
 
-def _fly_sentence(signals, grid=None, params=None, approach_ias=None, clock="distance", reading=None):
-    """Read ``signals`` with the labeller, fly its sentence (or ``grid``) from row 0 on ``clock`` (the distance clock by
-    default: the words said where the observed aircraft was, so the executor's own pace does not move them) and judge
-    it."""
+def _fly_sentence(signals, grid=None, params=None, approach_ias=None, reading=None):
+    """Read ``signals`` with the labeller, fly its sentence (or ``grid``) from row 0 on its own rows and judge it."""
     from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S, fly
     from ts_transformer.autopilot.judge import judge
     from ts_transformer.instructions.labeller.read import read_flight
@@ -406,12 +378,7 @@ def _fly_sentence(signals, grid=None, params=None, approach_ias=None, clock="dis
     grid = reading.words if grid is None else grid
     inputs, runways, charts, approach = _physics(signals, geometry, approach_ias)
     rows = len(grid)
-    clocks = {"time": lambda: TimeClock(params.cycle_s),
-              "track": lambda: TrackClock.of([signals.e_m[:rows]], [signals.n_m[:rows]], one.step_s, params.cycle_s,
-                                             device=CPU),
-              "distance": lambda: DistanceClock.of([signals.e_m[:rows]], [signals.n_m[:rows]], one.step_s,
-                                                   params.cycle_s, device=CPU)}
-    flown = fly(inputs, Sentences([grid], words, step_s=one.step_s, device=CPU), clocks[clock](), runways, charts,
+    flown = fly(inputs, Sentences([grid], words, step_s=one.step_s, device=CPU), runways, charts,
                 approach, params, words, time_limit_s=torch.tensor([rows * one.step_s * params.timeout_factor], dtype=F64),
                 reserve_s=GO_AROUND_EXTRA_S * int((grid[:, RUNWAY] == RUNWAY_GO_AROUND).sum()))
     verdict = judge(flown, 0, geometry, downwind_paths(geometry), _said(grid, words, geometry), one.step_s, signals, one,
@@ -442,14 +409,14 @@ def _downwind():
 
 def test_a_downwind_base_final_sentence_is_flown_onto_the_final_by_its_words_and_lands():
     """D2, D3: the words alone — the turn onto the final said word by word, the final held by class 0, the descent by
-    "no level-off" at the class's angle — bring the aircraft to the runway, said on the sentence's own clock (the speed
+    "no level-off" at the class's angle — bring the aircraft to the runway, said on the sentence's own rows (the speed
     words' steps carry the observed changes of speed, D43); the DA check passes and every word is inside its envelope.
     Nothing captures (no such mode exists). The turns leave the flown aircraft 90-odd metres right of the line: inside
     the FAS cone, the offset the closed loop corrects."""
     from ts_transformer.autopilot.executor import MODES
 
     signals, _ = _downwind()
-    flown, verdict, reading = _fly_sentence(signals, clock="time")
+    flown, verdict, reading = _fly_sentence(signals)
     assert verdict.outcome == "landed" and verdict.flew_the_sentence
     assert verdict.crossing["cross_m"] == pytest.approx(93.0, abs=10.0)    # the turns' offset, pinned (a change shows)
     assert 0.0 < verdict.crossing["height_m"] < 100.0
@@ -469,13 +436,13 @@ def test_a_downwind_base_final_sentence_is_flown_onto_the_final_by_its_words_and
 
 def test_class_0_holds_the_course_and_keeps_the_offset_the_turn_left():
     """§3.3: "a word of class 0 gives no lateral correction. The aircraft keeps its lateral offset until the model says
-    a word of ±5°" — on the time clock the executor's turn onto the final ends 90-odd metres right of the line, and it
+    a word of ±5°" — on its own rows the executor's turn onto the final ends 90-odd metres right of the line, and it
     stays there to the threshold, where it crosses at that offset: no law brings it back (D2, D3)."""
     from ts_transformer.autopilot.judge import flown_track
     from ts_transformer.instructions.airport import relative_to_runway
 
     signals, reading = _downwind()
-    flown, verdict, _ = _fly_sentence(signals, clock="time")
+    flown, verdict, _ = _fly_sentence(signals)
     geometry = instruction_airport()
     track = flown_track(flown.states[0, : verdict.end_row + 1].numpy(), geometry)
     relative = relative_to_runway(track["e"], track["n"], track["track"], track["height"], geometry.candidates[0])
@@ -510,7 +477,7 @@ def test_a_sentence_said_a_step_at_a_time_is_flown_as_the_whole_sentence():
     grid = reading.words
     inputs, runways, charts, approach = _physics(signals, geometry)
     limit = torch.tensor([len(grid) * one.step_s * params.timeout_factor], dtype=F64)
-    whole = fly(inputs, Sentences([grid], words, step_s=one.step_s, device=CPU), TimeClock(params.cycle_s), runways,
+    whole = fly(inputs, Sentences([grid], words, step_s=one.step_s, device=CPU), runways,
                 charts, approach, params, words, time_limit_s=limit, reserve_s=0.0)
     executor = Executor(inputs, runways, charts, approach, params, words, step_s=one.step_s, time_limit_s=limit)
     spoken = Spoken(1, words, step_s=one.step_s, device=CPU)
@@ -549,15 +516,12 @@ def test_a_turn_said_word_by_word_is_flown_without_levelling():
     assert all(h["inside"] == h["rows"] for h in verdict.words["heading"])
 
 
-def test_a_fast_turn_said_word_by_word_is_followed_on_every_clock():
-    from ts_transformer.autopilot.sentence import CLOCKS
-
+def test_a_fast_turn_said_word_by_word_is_followed():
     legs = [(40, 0.0, 80.0, 0.0), *_turn(-90.0, 80.0, 6.0), (20, 0.0, 80.0, 0.0), *_turn(-90.0, 80.0, 6.0),
             (120, 0.0, 70.0, -70.0 * np.tan(np.radians(3.0)))]
     signals = instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0))
-    for clock in CLOCKS:
-        _, verdict, _ = _fly_sentence(signals, clock=clock)
-        assert all(h["inside"] == h["rows"] for h in verdict.words["heading"]), clock
+    _, verdict, _ = _fly_sentence(signals)
+    assert all(h["inside"] == h["rows"] for h in verdict.words["heading"])
 
 
 def test_descents_level_off_at_their_targets_inside_the_tubes():
@@ -652,7 +616,7 @@ def test_a_go_around_on_the_base_keeps_flying_the_base():
     grid = reading.words[: go + 1].copy()
     grid = np.vstack([grid, np.full((60, len(COLUMNS)), UNCHANGED)])
     grid[go, RUNWAY] = RUNWAY_GO_AROUND
-    flown, _, _ = _fly_sentence(signals, grid, clock="time")
+    flown, _, _ = _fly_sentence(signals, grid)
     track = compass_from_math_rad(flown.states[0, 1:, 4].numpy())
     assert np.abs(np_wrap180(track[go * 2 + 2: go * 2 + 82] - 180.0)).max() < 2.0
 
@@ -688,14 +652,14 @@ def test_go_around_alone_starts_no_climb():
     grid = reading.words.copy()
     grid[level:, ALTITUDE], grid[level:, ANGLE] = UNCHANGED, UNCHANGED
     grid[level, RUNWAY] = RUNWAY_GO_AROUND
-    flown, _, _ = _fly_sentence(signals, grid, clock="time")
+    flown, _, _ = _fly_sentence(signals, grid)
     height = flown.states[0, 1:, 2].numpy()
-    held = float(words.altitude_m(int(in_force(grid)[level, ALTITUDE])))
+    held = float(words.altitude_msl_m(int(in_force(grid)[level, ALTITUDE]), instruction_airport().elevation_m))
     assert np.abs(height[level * 2 + 30: level * 2 + 200] - held).max() < 5.0
     final = reading.words.copy()
     final[len(final) - 15, RUNWAY] = RUNWAY_GO_AROUND                  # "no level-off" in force
     with pytest.raises(ValueError, match="rules 5 and 6"):
-        _fly_sentence(signals, final, clock="time")
+        _fly_sentence(signals, final)
     from ts_transformer.autopilot import single
     from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S
 
@@ -715,7 +679,7 @@ def test_a_speed_word_under_a_go_around_replaces_the_held_airspeed():
     go = len(reading.words) - 15
     grid = _go_around(reading.words, go, words)
     grid[go + 5, SPEED] = words.speed_index(90.0)
-    flown, _, _ = _fly_sentence(signals, grid, clock="time")
+    flown, _, _ = _fly_sentence(signals, grid)
     speed, gamma = flown.states[0, 1:, 3].numpy(), flown.states[0, 1:, 5].numpy()
     late = (go + 5) * 2 + 150
     assert speed[late] * math.cos(gamma[late]) == pytest.approx(90.0, abs=2.0)
@@ -726,7 +690,7 @@ def test_a_heading_word_said_at_or_after_a_go_around_is_flown():
     signals, reading = _downwind()
 
     def track_deg(grid):
-        flown, _, _ = _fly_sentence(signals, grid, clock="time")
+        flown, _, _ = _fly_sentence(signals, grid)
         return compass_from_math_rad(flown.states[0, 1:, 4].numpy())
 
     def off(track, target):
@@ -752,13 +716,14 @@ def test_the_runway_word_after_a_go_around_ends_it_and_a_level_word_holds():
     grid = _go_around(np.vstack([reading.words, np.full((200, len(COLUMNS)), UNCHANGED)]), go, words)
     grid[go + 160, RUNWAY] = 0                                            # the climb to 900 m takes ~60 steps
     grid[go + 165, ALTITUDE], grid[go + 165, ANGLE] = words.altitude_index(1260.0), words.angle_climb
-    flown, _, _ = _fly_sentence(signals, grid, clock="time")
+    flown, _, _ = _fly_sentence(signals, grid)
     gamma, height = flown.states[0, 1:, 5].numpy(), flown.states[0, 1:, 2].numpy()
     assert flown.modes["go_around"][0, go * 2: (go + 160) * 2].all()
     assert not flown.modes["go_around"][0, (go + 160) * 2:].any()
     assert gamma[go * 2 + 20: go * 2 + 40] == pytest.approx(GO_AROUND_MAX_RAD, abs=1e-3)
     held = slice((go + 160) * 2 - 20, (go + 165) * 2)                     # the level reached, held to the next word
-    assert height[held] == pytest.approx(900.0, abs=3.0) and flown.modes["level_captured"][0, held].all()
+    level_msl = 900.0 + instruction_airport().elevation_m                  # the word 900 m above E (D58)
+    assert height[held] == pytest.approx(level_msl, abs=3.0) and flown.modes["level_captured"][0, held].all()
     climbing = slice((go + 165) * 2 + 20, (go + 165) * 2 + 40)
     assert gamma[climbing] == pytest.approx(math.radians(spec().climb_angle_centre_deg), abs=1e-3)
 
@@ -894,7 +859,7 @@ def test_two_events_at_one_row_follow_the_tables_order():
                            "unstable_at_minimums", "landed", "crossed_other_runway")
     one, geometry = spec(), instruction_airport()
     signals, _ = _downwind()
-    flown, verdict, _ = _fly_sentence(signals, clock="time")
+    flown, verdict, _ = _fly_sentence(signals)
     states = flown.states[0, : verdict.end_row + 1].numpy()
     track = flown_track(states, geometry)
     last = verdict.end_row
@@ -942,23 +907,11 @@ def test_a_dynamics_failure_judges_its_words_only_on_the_states_before_it():
     assert judged and all(h["inside"] == h["rows"] for h in judged)
 
 
-def test_a_word_the_clock_never_reached_is_not_reached():
+def test_a_word_the_flight_never_reached_is_not_reached():
     signals, reading = _downwind()
-    _, verdict, _ = _fly_sentence(signals, params=_params(timeout_factor=0.3), clock="time")
+    _, verdict, _ = _fly_sentence(signals, params=_params(timeout_factor=0.3))
     later = [i for i in _said(reading.words, Words(spec()), instruction_airport()) if i.row * 2.0 >= verdict.end_row]
     assert later and verdict.words["not_reached"] == len(later)
-
-
-def test_words_said_on_one_flown_row_leave_the_later_one_of_each_column():
-    from ts_transformer.autopilot.judge import said_at
-
-    words = [Instruction(ALTITUDE, 30, 10, "target"), Instruction(ALTITUDE, 20, 12, "target"),
-             Instruction(HEADING, 5, 10, "per-step", {"target_deg": 25.0}),
-             Instruction(HEADING, 9, 11, "per-step", {"target_deg": 45.0}), Instruction(SPEED, 14, 20, "target")]
-    kept, superseded = said_at(words, [7, 7, 7, 7, 15])
-    assert superseded == 1
-    assert [(w.column, w.value, w.row, w.info["sentence_row"]) for w in kept] == [
-        (ALTITUDE, 20, 7, 12), (HEADING, 5, 7, 10), (HEADING, 9, 7, 11), (SPEED, 14, 15, 20)]
 
 
 def test_the_word_count_leaves_out_the_words_the_judge_did_not_judge():
@@ -966,7 +919,7 @@ def test_the_word_count_leaves_out_the_words_the_judge_did_not_judge():
     from ts_transformer.autopilot.replay import word_results
 
     heading = [{"row": 0, "rows": 5, "inside": 5}, {"row": 9, "rows": 3, "inside": 2}, {"row": 12, "rows": 0, "inside": 0}]
-    words = {"not_reached": 0, "superseded_before_flown": 0, "heading": heading, "vertical": [{"contained": True}],
+    words = {"not_reached": 0, "heading": heading, "vertical": [{"contained": True}],
              "speed": [{"contained": False}], "all_contained": False}
     judged, not_judged = word_results(Verdict("landed", 50, None, {}, words, flown_rows=51))
     assert not_judged == 1
@@ -1016,7 +969,7 @@ def test_a_speed_step_is_made_in_seconds_and_the_thrust_limit_binds_where_the_ai
     held = int(in_force(grid)[10, SPEED])
     grid[10:, SPEED] = UNCHANGED
     grid[10, SPEED], grid[30, SPEED] = held - 1, held
-    flown, _, _ = _fly_sentence(signals, grid, clock="time")
+    flown, _, _ = _fly_sentence(signals, grid)
     airspeed = flown.states[0, :, 3].numpy()
     wanted, rate = flown.wanted[0, :, 2].numpy(), np.diff(airspeed)
     assert wanted[20] == pytest.approx(-a_max) and wanted[60] == pytest.approx(a_max)     # rows 10 and 30
@@ -1057,7 +1010,7 @@ def test_a_multi_aircraft_batch_flies_each_flight_from_its_own_start_as_it_flies
     grids = [read_flight(f, geometry, one, words).words for f in flights]
     physics = [_physics(f, geometry) for f in flights]
     limits = [len(g) * one.step_s * params.timeout_factor for g in grids]
-    alone = [fly(inputs, Sentences([grid], words, step_s=one.step_s, device=CPU), TimeClock(params.cycle_s), runways,
+    alone = [fly(inputs, Sentences([grid], words, step_s=one.step_s, device=CPU), runways,
                  charts, approach, params, words, time_limit_s=torch.tensor([limit], dtype=F64), reserve_s=0.0)
              for (inputs, runways, charts, approach), grid, limit in zip(physics, grids, limits)]
     step_rows = int(round(one.step_s / params.cycle_s))
@@ -1126,7 +1079,7 @@ def test_the_single_flight_executor_flies_what_the_batch_flies(thrust_share):
     inputs, runways, charts, approach = _physics(signals, geometry)
     inputs = replace(inputs, max_thrust_n=inputs.max_thrust_n * thrust_share)
     limit = len(grid) * 2.0 * params.timeout_factor
-    batch = fly(inputs, Sentences([grid], words, step_s=2.0, device=CPU), TimeClock(params.cycle_s), runways, charts,
+    batch = fly(inputs, Sentences([grid], words, step_s=2.0, device=CPU), runways, charts,
                 approach, params, words, time_limit_s=torch.tensor([limit], dtype=F64), reserve_s=GO_AROUND_EXTRA_S)
     climb = float(batch.states[0, go * 2 + 30, 5])
     expected = {1.0: GO_AROUND_MAX_RAD, 0.2: GO_AROUND_MIN_RAD}
@@ -1164,7 +1117,7 @@ def test_the_executor_spec_is_written_once_and_opened_only_for_code_that_flew_it
     executor_spec.write_spec(tmp_path, params, "vocabulary", {"data": {}}, source)
     loaded, record = executor_spec.load_spec(tmp_path)
     assert loaded == params and record["sha256"] == executor_spec.params_sha256(params)
-    assert record["schema"] == "ts-executor-spec-v7"
+    assert record["schema"] == "ts-executor-spec-v8"
     with pytest.raises(FileExistsError):
         executor_spec.write_spec(tmp_path, params, "vocabulary", {}, source)
     assert executor_spec.params_sha256(replace(params, timeout_factor=2.0)) != record["sha256"]
@@ -1176,7 +1129,7 @@ def test_the_executor_spec_is_written_once_and_opened_only_for_code_that_flew_it
     for broken, message in (({**stored, "params": {**stored["params"], "bank_rate_deg_s": 9.0}}, "do not hash"),
                             ({**stored, "params": {k: v for k, v in stored["params"].items()
                                                    if k != "timeout_factor"}}, "missing"),
-                            ({**stored, "schema": "ts-executor-spec-v6"}, "is not a ts-executor-spec-v7 file")):
+                            ({**stored, "schema": "ts-executor-spec-v7"}, "is not a ts-executor-spec-v8 file")):
         (tmp_path / "spec.json").write_text(json.dumps(broken))
         with pytest.raises(ValueError, match=message):
             executor_spec.load_spec(tmp_path)
@@ -1300,7 +1253,7 @@ def test_a_batch_readout_counts_what_was_flown_and_how_far_it_lies_from_the_obse
     from ts_transformer.autopilot import replay
 
     signals, reading = _downwind()
-    flown, verdict, _ = _fly_sentence(signals, clock="time")
+    flown, verdict, _ = _fly_sentence(signals)
     batch = _batch(signals, reading)
     summary = replay.summary([verdict])
     judged = replay.word_results(verdict)[0]
@@ -1328,7 +1281,7 @@ def test_a_replayed_flight_becomes_a_control_record_and_the_readout_reads_no_cri
     assert forecast.truncated_at_threshold and not forecast.horizon_capped
     assert forecast.control_parameterization == EXECUTOR_DYNAMICS.control_thrust_parameterization
     base = {"airport": "KXXX", "group": "own dynamics", "stratum": "vectored", "words_not_reached": 0,
-            "heading_words_not_judged": 0, "heading_words_told_with_a_skipped_word": {"judged": 0, "inside": 0},
+            "heading_words_not_judged": 0,
             "crossing": None, "speed_words": 2, "largest_along_m": None}
     rows = [{**base, "kind": "with go-around", "outcome": "landed", "speed_words": 4, "largest_along_m": np.float64(1500.0),
              "words": [("heading", True)] * 9 + [("altitude", False)], "observed_verdict": "pass",
@@ -1409,15 +1362,63 @@ def test_a_sentence_on_a_coarser_interval_is_flown_and_judged_on_its_own_rows():
     sentence, observed = batch.sentences[0], batch.signals[0]
     assert sentence.first_row == 1
     inputs, runways, charts, approach = _physics(observed, geometry)
-    e_m, n_m = replay.observed_rows(observed, sentence, 4.0, one.step_s)
-    assert len(e_m) == min(len(sentence.grid) * 2, observed.n_rows)    # the clock reads the data's 2 s rows
-    flown = fly(inputs, Sentences([sentence.grid], words, step_s=4.0, device=CPU),
-                DistanceClock.of([e_m], [n_m], one.step_s, params.cycle_s, device=CPU), runways, charts, approach,
+    flown = fly(inputs, Sentences([sentence.grid], words, step_s=4.0, device=CPU), runways, charts, approach,
                 params, words, time_limit_s=torch.tensor([len(sentence.grid) * 4.0 * 1.5], dtype=F64), reserve_s=0.0)
     verdict = judge(flown, 0, geometry, downwind_paths(geometry), sentence.instructions, 4.0, observed, one, words)
     headings = [h for h in verdict.words["heading"] if h["rows"]]
     assert len(headings) == sum(i.column == HEADING for i in sentence.instructions)
     assert verdict.outcome in ("landed", "unstable_at_minimums", "crossed_off_runway", "crossed_too_high")
+
+
+def test_the_executor_levels_a_word_at_its_level_above_the_airport_elevation():
+    """D58, §5.5: a level word T is flown at T + E MSL — the downwind's word at the test airport (E = 60 m) and the
+    same flight 128 m higher at the airport raised to E = 188 m: one word, held 128 m apart; the single-flight executor
+    holds it there too."""
+    from ts_transformer.autopilot import single
+    from ts_transformer.autopilot.executor import fly
+    from ts_transformer.instructions.labeller.read import read_flight
+
+    one, words, params = spec(), Words(spec()), _params()
+    low = instruction_airport()
+    signals, reading = _downwind()
+    for geometry in (low, raised_airport(low, 188.0)):
+        rise = geometry.elevation_m - low.elevation_m
+        moved = replace(signals, altitude_m=signals.altitude_m + rise)
+        grid = read_flight(moved, geometry, one, words).words
+        assert np.array_equal(grid, reading.words)
+        level = words.altitude_msl_m(int(grid[0, ALTITUDE]), geometry.elevation_m)
+        assert level == 1020.0 + geometry.elevation_m
+        inputs, runways, charts, approach = _physics(moved, geometry)
+        limit = len(grid) * 2.0 * params.timeout_factor
+        flown = fly(inputs, Sentences([grid], words, step_s=2.0, device=CPU), runways, charts, approach, params, words,
+                    time_limit_s=torch.tensor([limit], dtype=F64), reserve_s=0.0)
+        assert flown.states[0, 10:100, 2].numpy() == pytest.approx(level, abs=0.5)      # the downwind, level
+        alone = single.SingleExecutor(inputs, geometry, float(approach[0]), params, words, step_s=2.0,
+                                      time_limit_s=limit, reserve_s=0.0)
+        sentence = single.Sentence(grid, words, step_s=2.0)
+        for cycle in range(100):
+            alone.cycle(sentence.at(float(cycle)), float(cycle))
+        assert alone.flown().states[0, 10:100, 2].numpy() == pytest.approx(level, abs=0.5)
+
+
+def test_an_open_loop_replay_says_each_word_on_its_own_row():
+    """D57: one word clock — a sentence at Δ = 4 s is said on its own rows: each word heard on the cycle that starts its
+    row (row × 4 cycles), whatever the executor's pace."""
+    from ts_transformer.autopilot.executor import fly
+    from ts_transformer.autopilot.judge import words_said
+
+    one, words, params, geometry = spec(), Words(spec()), _params(), instruction_airport()
+    signals, reading = _downwind()
+    batch = _batch(replace(signals, entry_time_utc="2026-06-01T11:00:02Z"), reading, 4.0)
+    sentence, observed = batch.sentences[0], batch.signals[0]
+    inputs, runways, charts, approach = _physics(observed, geometry, approach_ias=60.0)    # slower than observed
+    flown = fly(inputs, Sentences([sentence.grid], words, step_s=4.0, device=CPU), runways, charts, approach, params,
+                words, time_limit_s=torch.tensor([len(sentence.grid) * 4.0 * 1.5], dtype=F64), reserve_s=0.0)
+    done = int(flown.done_cycle[0])
+    assert np.array_equal(flown.sentence_s[0, :done + 1].numpy(), np.arange(done + 1) * params.cycle_s)
+    said = words_said(flown, 0, sentence.instructions, 4.0, one, done + 1)
+    heard = [cycle for word, cycle in zip(sentence.instructions, said.cycles) if word.row * 4 <= done]
+    assert heard == [word.row * 4 for word in sentence.instructions if word.row * 4 <= done] and len(heard) > 10
 
 
 def test_a_multi_aircraft_batch_with_go_arounds_flies_each_as_it_flies_alone():
@@ -1436,7 +1437,7 @@ def test_a_multi_aircraft_batch_with_go_arounds_flies_each_as_it_flies_alone():
         grids.append(grid)
     physics = _physics(signals, geometry)
     limits = [len(g) * one.step_s * params.timeout_factor for g in grids]
-    alone = [fly(physics[0], Sentences([g], words, step_s=2.0, device=CPU), TimeClock(params.cycle_s), physics[1],
+    alone = [fly(physics[0], Sentences([g], words, step_s=2.0, device=CPU), physics[1],
                  physics[2], physics[3], params, words, time_limit_s=torch.tensor([limit], dtype=F64),
                  reserve_s=GO_AROUND_EXTRA_S) for g, limit in zip(grids, limits)]
     inputs = FlightInputs(*(torch.cat([getattr(physics[0], name)] * 2) for name in (

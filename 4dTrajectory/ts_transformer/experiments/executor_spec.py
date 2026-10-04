@@ -1,11 +1,11 @@
-"""Executor E7: write the executor's spec (design §5, §14.2 A6; executor design §9–§10).
+"""Executor E7: write the executor's spec (vocabulary §5, §12.1 A6; executor design §9–§10).
 
 The executor takes no information beyond the vocabulary (the user's rule, 2026-09-24) and the procedure standards:
 the roll rate p is the standards' 5°/s (`ROLL_RATE_DEG_S`); the executor makes no turn of its own (D2, D27), so no
 time constant of one; the turn rates, the bank limit, the speed word's rate (a_max, D43), "unspecified"'s pace and the
 level bands are the vocabulary's,
 read at run time; a
-word takes effect when it is said. The judge's decision-altitude check has no parameter (design §5.8, D38: the
+word takes effect when it is said. The judge's decision-altitude check has no parameter (vocabulary §5.8, D38: the
 evaluation module's vertical bound and the FAS cone); each candidate's
 published vertical path and decision altitude (read at replay, `runway_data.published_vertical_paths`) are recorded in
 ``measurements.json`` as the spec is written. Nothing is measured from data. The design's fixed choices are module
@@ -31,7 +31,6 @@ from pathlib import Path
 from ts_transformer.autopilot import conformance
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.runway_data import published_vertical_paths
-from ts_transformer.autopilot.sentence import CLOCKS
 from ts_transformer.autopilot.speed import speed_change_mps2
 from ts_transformer.autopilot.spec import executor_source_sha256, params_sha256, write_spec
 from ts_transformer.instructions.artefact import load_candidates, load_spec
@@ -59,8 +58,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--instructions", type=Path, required=True, help="the instruction artefact the executor flies")
     parser.add_argument("--dir", type=Path, required=True, help="the new executor spec directory")
-    parser.add_argument("--word-clock", choices=CLOCKS, required=True,
-                        help="the clock a replay says a truth sentence's words on (§11)")
     args = parser.parse_args(argv)
     # normalised (".." resolved, links kept): a worktree's data trees are links to the main tree's
     instructions = Path(os.path.normpath(args.instructions if args.instructions.is_absolute()
@@ -81,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
 
     params = ExecutorParams(cycle_s=CYCLE_S, bank_rate_deg_s=ROLL_RATE_DEG_S,
                             path_time_constant_s=PATH_TIME_CONSTANT_S, path_rate_factor=PATH_RATE_FACTOR,
-                            timeout_factor=TIMEOUT_FACTOR, word_clock=args.word_clock)
+                            timeout_factor=TIMEOUT_FACTOR)
     params.check(spec, spec.step_s)
     print(f"the standards' roll rate p {ROLL_RATE_DEG_S:g}°/s", flush=True)
 

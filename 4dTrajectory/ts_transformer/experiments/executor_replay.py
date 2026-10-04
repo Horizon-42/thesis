@@ -1,9 +1,9 @@
-"""Executor E8: the replay readout (design §14.2 A6; executor design §11) — the labelled sentences flown and judged.
+"""Executor E8: the replay readout (vocabulary §12.1 A6; executor design §11) — the labelled sentences flown and judged.
 
 Who (§11, `replay.draw`): every labelled flight of ``--split`` (or ``--per-airport`` of each airport, a seeded
 sample) whose identified type publishes an approach speed; flights on their own type's dynamics and flights on a
 stand-in's are flown and reported apart; the rest are counted. Each sentence is put on the row interval
-``--row-interval-s`` (2 s, or 4 or 8 s: design §4.8, D11, D25) and flown from its first row on that grid. Each airport is
+``--row-interval-s`` (2 s, or 4 or 8 s: vocabulary §4.8, D11, D25) and flown from its first row on that grid. Each airport is
 flown in chunks of ``--chunk`` flights, judged (`autopilot.judge`), and written as control-path prediction records
 (`build_prediction_record` / `write_batch`: the dense flown states from the first row, the thrust-fraction schedule
 resolved to newtons by the contract's own law) that the evaluation package grades; its verdict is joined by
@@ -15,17 +15,16 @@ and kind of sentence (with a go-around or not): each outcome, the words inside t
 envelopes' widths, the decision-altitude checks, and of the flights whose observed track passes evaluation the share
 whose replay passes too. NO CRITERION IS READ (design D7): the user sets them after the design is settled.
 
-With ``--closed-loop`` it flies the artefact's CLOSED-LOOP sentences instead (design §4.9, D32; written by
+With ``--closed-loop`` it flies the artefact's CLOSED-LOOP sentences instead (vocabulary §4.9, D32; written by
 `instruction_closed_loop`, refused unless the code on disk reads their reference as it was read): each from its first
-predicted step, on its own clock (the time clock, whatever the spec's word clock: a closed-loop sentence is said in time),
-from the observed state there. Every flight must fly its stored states again (within the executor conformance's bound);
+predicted step, on its own rows, from the observed state there. Every flight must fly its stored states again (within the executor conformance's bound);
 each row adds the largest |e_y| and |e_h| against the observed path and the correction words for each column, and each
 cell of the readout the flights that left the observed path by more than `LEFT_THE_PATH_M` and the correction words for
 each sentence. The labelled flights without a closed-loop sentence are counted.
 
 Open or closed loop, each row also counts its sentence's speed words (other than "unspecified") and the largest distance
 along the observed path between the flown aircraft and the observed aircraft of the same time before "unspecified"
-(`along_columns`), and each cell their mean, percentiles and the flights farther than `FAR_ALONG_M` (design §11.12, D43).
+(`along_columns`), and each cell their mean, percentiles and the flights farther than `FAR_ALONG_M` (vocabulary §9.8, D43).
 
 The VAL replay waits for the user's go-ahead and runs from a clean tree. Development runs use train.
 
@@ -42,7 +41,7 @@ import subprocess
 import sys
 import time
 from collections import Counter, defaultdict
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable
 
@@ -73,16 +72,16 @@ from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_sta
 #: The name the records carry as their predictor, and the horizon they were flown over.
 PREDICTOR = "executor"
 HORIZON = "sentence"
-#: v6 (two-tier v4): the outcomes of design §5.8 (`unstable_at_minimums`, the decision-altitude check on a crossing), the
+#: v6 (two-tier v4): the outcomes of vocabulary §5.8 (`unstable_at_minimums`, the decision-altitude check on a crossing), the
 #: row interval, the sentences with a go-around apart, no gate.
-REPLAY_SCHEMA = "ts-executor-replay-v6"
+REPLAY_SCHEMA = "ts-executor-replay-v7"
 #: The kinds of sentence the readout reads apart.
 KINDS = ("without go-around", "with go-around")
 #: A closed-loop flight that goes farther than this from its observed path, laterally, LEFT the path: a reading of the
-#: A9 smoke build (design §11.11) that A10 compares against (§14.2 A10), not a criterion (D7).
+#: A9 smoke build (vocabulary §9.7) that A10 compares against (§12.1 A10), not a criterion (D7).
 LEFT_THE_PATH_M = 300.0
 #: A flight farther than this along the path from the observed aircraft of the same time, before "unspecified": the
-#: reading of design §11.12 that A11 compares against (§14.2 A11), not a criterion (D7).
+#: reading of vocabulary §9.8 that A11 compares against (§12.1 A11), not a criterion (D7).
 FAR_ALONG_M = 1000.0
 
 
@@ -134,7 +133,6 @@ def readout_table(rows: list[dict[str, Any]], *, closed_loop_rows: bool) -> dict
     for (group, airport, part, kind), members in sorted(cells.items()):
         judged = [w for r in members if r["words"] is not None for w in r["words"]]
         paired = [r for r in members if r["observed_verdict"] == "pass"]
-        pairs = [r["heading_words_told_with_a_skipped_word"] for r in members]
         decisions = [r["crossing"]["decision"] for r in members if r["crossing"] is not None and "decision" in r["crossing"]]
         table.setdefault(group, {}).setdefault(airport, {}).setdefault(part, {})[kind] = {
             "flights": len(members), "outcomes": dict(Counter(r["outcome"] for r in members).most_common()),
@@ -143,8 +141,6 @@ def readout_table(rows: list[dict[str, Any]], *, closed_loop_rows: bool) -> dict
             "words_inside_by_column": {column: _share(sum(ok for c, ok in judged if c == column),
                                                       sum(c == column for c, _ in judged))
                                        for column in replay.JUDGED},
-            "heading_words_told_with_a_skipped_word": {"judged": sum(p["judged"] for p in pairs),
-                                                       "inside": sum(p["inside"] for p in pairs)},
             "heading_words_not_judged": sum(r["heading_words_not_judged"] for r in members),
             "words_not_reached": sum(r["words_not_reached"] for r in members),
             "flights_with_unjudged_words": sum(r["words"] is None for r in members),
@@ -241,9 +237,7 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
                 "outcome": verdict.outcome, "flew_the_sentence": verdict.flew_the_sentence,
                 "crossing": verdict.crossing, "words": None if counted is None else counted[0],
                 "heading_words_not_judged": 0 if counted is None else counted[1],
-                "heading_words_told_with_a_skipped_word": replay.clock_pairs(verdict),
                 "words_not_reached": 0 if verdict.words is None else verdict.words["not_reached"],
-                "words_superseded_before_flown": 0 if verdict.words is None else verdict.words["superseded_before_flown"],
                 "limits": verdict.limits, "recorded": recorded, **aligned[j], **more[j]})
         del flown, verdicts
     write_batch(predictions, output_dir=records, config_dict={"model": PREDICTOR, "horizon_mode": HORIZON,
@@ -262,7 +256,7 @@ def _percentiles(values: list[float]) -> dict[str, float] | None:
 
 
 def along_columns(words: Words) -> Callable[[replay.Batch, Flown, list[Verdict]], list[dict[str, Any]]]:
-    """The rows' speed columns (design §11.12, §14.2 A11), on the Δ rows of the flown sentence before "unspecified" is
+    """The rows' speed columns (vocabulary §9.8, §12.1 A11), on the Δ rows of the flown sentence before "unspecified" is
     first in force (a closed-loop sentence's from its first predicted step): its speed words, and the largest distance
     along the observed path between the flown aircraft (its matched point, the closed loop's forward search,
     `closed_loop.ObservedPath`) and the observed aircraft of the same time while both fly — the failed state of a
@@ -325,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--per-airport", type=int, default=0, help="0: every labelled flight of the split")
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--row-interval-s", type=float, default=2.0,
-                        help="the sentences' row interval: 2, 4 or 8 s (design §4.8, D25)")
+                        help="the sentences' row interval: 2, 4 or 8 s (vocabulary §4.8, D25)")
     parser.add_argument("--closed-loop", action="store_true",
                         help="fly the artefact's closed-loop sentences from the first predicted step (module docstring)")
     parser.add_argument("--chunk", type=int, default=500)
@@ -358,7 +352,6 @@ def main(argv: list[str] | None = None) -> int:
         if str(data["executor_params_sha256"]) != params_sha256(params):
             parser.error(f"the closed-loop sentences were flown by executor parameters "
                          f"{str(data['executor_params_sha256'])[:12]}, {executor} holds {params_sha256(params)[:12]}")
-        params = replace(params, word_clock="time")
         stored = closed_loop.stored_sentences(data)
         batch, missing = closed_loop.replay_batch(batch, stored, words)
         batch.drawn["without_a_closed_loop_sentence"] = missing

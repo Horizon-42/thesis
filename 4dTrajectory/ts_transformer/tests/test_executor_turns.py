@@ -1,4 +1,4 @@
-"""The turn of the executor measured (design §14.2 A13, `experiments/executor_turns.py`): three ways to fly the open-loop
+"""The turn of the executor measured (vocabulary §12.1 A13, `experiments/executor_turns.py`): three ways to fly the open-loop
 words and a control, and the offset each leaves across a turn."""
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""The closed-loop reading (design §4.9, D32, §14.2 A9; `autopilot.closed_loop`): every labelled flight of every split
+"""The closed-loop reading (vocabulary §4.9, D32, §12.1 A9; `autopilot.closed_loop`): every labelled flight of every split
 flown on its open-loop words by an executor spec, with the correction words its flown path needs, at each row interval
 of the ablation — written into the instruction artefact as ``closed_loop/`` (never over an existing one), with its
 reference sample and the passed record of the code that wrote it; ``--check`` reads that reference again with the code
@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--instructions", type=Path, required=True)
     parser.add_argument("--executor", type=Path, required=True, help="the executor spec directory")
     parser.add_argument("--row-interval-s", type=float, nargs="+", default=None,
-                        help="the row intervals of the ablation (design §4.8, D25: 2, 4, 8 s)")
+                        help="the row intervals of the ablation (vocabulary §4.8, D25: 2, 4, 8 s)")
     parser.add_argument("--check", action="store_true", help="read the reference again and write the passed record")
     parser.add_argument("--chunk", type=int, default=256)
     parser.add_argument("--device", default="cpu")

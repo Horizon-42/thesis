@@ -14,7 +14,7 @@ of any two flights at the same step is at the same time. The candidates are each
 go every runway end the harvest builds, from the configuration and CIFP the harvest and the
 evaluator read by default (`evaluation.cli.DEFAULT_CONFIG`, `DEFAULT_CIFP`). Every candidate must
 publish a threshold crossing height, a glidepath and a decision altitude there (the judge's decision-altitude check,
-design §4.2, §5.8, `autopilot.runway_data.vertical_paths`): a runway without them is refused before anything is
+vocabulary §4.2, §5.8, `autopilot.runway_data.vertical_paths`): a runway without them is refused before anything is
 written, never dropped quietly. Writes ``signals_{train,select,val}.npz``, ``signals.json`` (with the
 day split) and ``candidates.json`` into a NEW directory.
 
@@ -139,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     geometries = {a: airport_geometry(a, json.loads(m.read_text(encoding="utf-8"))["runway_targets"], runways[a])
                   for a, m in manifests.items()}
     # a candidate runway must publish a threshold crossing height, a glidepath and a decision altitude: the judge checks
-    # the decision altitude against them (design §4.2, §5.8) — refused before anything is written, never dropped quietly
+    # the decision altitude against them (vocabulary §4.2, §5.8) — refused before anything is written, never dropped quietly
     for airport, geometry in geometries.items():
         vertical_paths(geometry, runways[airport])
 

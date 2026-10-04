@@ -1,5 +1,5 @@
 """The instruction vocabulary's parts: the spec, the words, the grammar, the candidate runways, the envelopes,
-the piecewise fit, the measurements and the artefact (design: docs/two_tier/two_tier_design.md §3, §4)."""
+the piecewise fit, the measurements and the artefact (design: docs/two_tier/design/vocabulary.md §3, §4)."""
 
 from __future__ import annotations
 
@@ -119,12 +119,12 @@ def test_altitude_words_are_the_40_levels_of_three_segments():
     assert [words.altitude_tolerance_m(i) for i in (0, 20, 21, 22, 32, 33, 34, 39)] == [
         40.0, 40.0, 70.0, 70.0, 70.0, 235.0, 235.0, 235.0]
     assert words.altitude_tolerance_m(words.altitude_no_level_off) == 40.0
-    assert words.altitude_m(words.altitude_index(914.0)) == 900.0
-    assert words.altitude_m(words.altitude_index(630.0)) == 600.0          # a tie goes to the lower level
-    assert words.altitude_m(words.altitude_index(1319.0)) == 1260.0
-    assert words.altitude_m(words.altitude_index(1321.0)) == 1380.0
-    assert words.altitude_m(words.altitude_index(5600.0)) == 5400.0
-    assert words.altitude_m(words.altitude_no_level_off) is None
+    assert words.altitude_level_m(words.altitude_index(914.0)) == 900.0
+    assert words.altitude_level_m(words.altitude_index(630.0)) == 600.0          # a tie goes to the lower level
+    assert words.altitude_level_m(words.altitude_index(1319.0)) == 1260.0
+    assert words.altitude_level_m(words.altitude_index(1321.0)) == 1380.0
+    assert words.altitude_level_m(words.altitude_index(5600.0)) == 5400.0
+    assert words.altitude_level_m(words.altitude_no_level_off) is None
     for outside in (5626.0, -31.0):
         with pytest.raises(ValueError):
             words.altitude_index(outside)
@@ -343,7 +343,7 @@ def test_the_measurements_read_only_the_admitted_rows(geometry):
             (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0))), (10, 0.0, 70.0, 0.0)]
     flight = admit(instruction_flight(*fly_legs(legs, 270.0, 1110.0, 1400.0, 0.0)), geometry, measure.provisional_spec())
     assert flight.cut_at_crossing and flight.relative.before_threshold_m.min() >= 0.0
-    arrays = measure.measure_flight(flight, measure.provisional_spec())
+    arrays = measure.measure_flight(flight, measure.provisional_spec(), geometry.elevation_m)
     assert {f"heading_wander_deg_band{h:g}" for h in measure.FREE_HOLD_HALF_RANGES_DEG} <= set(arrays)
     assert len(arrays["turn_mean_rate_deg_s"]) == 2                   # onto the base and onto the final
     assert arrays["move_angle_deg"] == pytest.approx([3.0], abs=0.05)
@@ -352,6 +352,23 @@ def test_the_measurements_read_only_the_admitted_rows(geometry):
     assert len(finals["aligned_offset_m"]) == flight.signals.n_rows - first
     # each 90° turn at 6° a row says 15 words on the 5° grid (the grid skips a cell every 30°)
     assert rows["5"][0] == 30.0
+
+
+def test_the_level_offs_are_measured_above_the_airport_elevation(geometry):
+    """D58: the level-offs the grid is fitted on are heights above E — the go-around flight's level after its climb,
+    887 m MSL, is 827 m at the test airport (E = 60 m), and the same at the airport raised to E = 188 m with the flight
+    128 m higher."""
+    from ts_transformer.tests.support import raised_airport
+    from ts_transformer.tests.test_instruction_labeller import GO_AROUND_LEGS
+
+    provisional = measure.provisional_spec()
+    e, n, altitude, track, speed = fly_legs(GO_AROUND_LEGS, 90.0, 900.0, -400.0, 0.0)
+    heights = []
+    for airport, rise in ((instruction_airport(), 0.0), (raised_airport(instruction_airport(), 188.0), 128.0)):
+        flight = admit(instruction_flight(e, n, altitude + rise, track, speed), airport, provisional)
+        heights.append(measure.measure_flight(flight, provisional, airport.elevation_m)["level_height_m"])
+    assert heights[0] == pytest.approx(heights[1], abs=1e-6)
+    assert len(heights[0]) >= 1 and heights[0][0] == pytest.approx(887.0 - 60.0, abs=2.0)
 
 
 def test_every_fitted_angle_comes_with_rounder_candidates_and_the_fit_each_leaves():
@@ -371,11 +388,46 @@ def test_every_fitted_angle_comes_with_rounder_candidates_and_the_fit_each_leave
     assert climbs["pieces"] == 40 and 1.0 < climbs["length_weighted_deg"]["p50"] < 2.0
 
 
-def test_the_level_rounding_error_is_read_under_the_grid_and_a_uniform_30_m_grid():
-    words = Words(spec())
-    reading = measure.level_rounding(np.array([630.0, 905.0, 1320.0, 3375.0]), words)
-    assert reading["levels"] == 4 and reading["grid"]["max"] == pytest.approx(225.0)
-    assert reading["uniform_30_m"]["max"] == pytest.approx(15.0)
+def test_the_grid_fit_finds_a_known_grid_in_synthetic_level_offs():
+    """D58, vocabulary §3.4: level-offs held at every level of a 40-level grid of three uniform segments (45 m to 1,080 m,
+    180 m to 2,700 m, 450 m to 5,400 m), a metre off at most, give that grid back; the grid of D22 is written beside it,
+    each with the rounding error of the level words."""
+    from ts_transformer.instructions.words import grid_levels
+
+    known = {"altitude_segment_steps_m": (45.0, 180.0, 450.0), "altitude_segment_tops_m": (1080.0, 2700.0, 5400.0)}
+    levels = grid_levels(*known.values())
+    assert len(levels) == measure.GRID_LEVELS == 40
+    rng = np.random.default_rng(3)
+    heights = np.repeat(levels, 5) + rng.uniform(-1.0, 1.0, 5 * len(levels))
+    assert measure.fit_altitude_grid(heights) == known
+    rows = measure.grid_candidates(heights)
+    assert list(rows) == list(measure.GRID_NAMES)
+    assert rows["fitted"]["levels"] == rows["d22"]["levels"] == 40
+    assert rows["fitted"]["rounding_error_m"]["max"] <= 1.0 < rows["d22"]["rounding_error_m"]["max"]
+    assert rows["d22"]["altitude_segment_steps_m"] == [60.0, 120.0, 450.0]
+    assert measure.grid_values(rows, "fitted") == known
+    with pytest.raises(ValueError, match="no grid 'd21'"):
+        measure.grid_values(rows, "d21")
+    with pytest.raises(ValueError, match="no level-off"):
+        measure.fit_altitude_grid(np.zeros(0))
+
+
+def test_the_grid_fit_is_the_least_squared_rounding_error_of_its_shapes():
+    """The dynamic programme against a direct search over one family: every two-segment grid with steps 60 / 120 m and
+    an 450 m top segment that the fit could choose leaves at least the fitted grid's squared error."""
+    from ts_transformer.instructions.words import grid_levels
+
+    rng = np.random.default_rng(5)
+    heights = np.concatenate((rng.uniform(0.0, 1500.0, 400), rng.uniform(1500.0, 3200.0, 60)))
+    fitted = measure.fit_altitude_grid(heights)
+    best = float((measure.rounding_error_m(heights, grid_levels(*fitted.values())) ** 2).sum())
+    assert len(grid_levels(*fitted.values())) == 40
+    for first in np.arange(60.0, 2700.0, 60.0):
+        for second in np.arange(first + 120.0, 5400.0, 120.0):
+            grid = ((60.0, 120.0, 450.0), (first, second, 5400.0))
+            if (5400.0 - second) % 450.0 or len(grid_levels(*grid)) != 40:
+                continue
+            assert best <= float((measure.rounding_error_m(heights, grid_levels(*grid)) ** 2).sum()) + 1e-6
 
 
 # ---- artefact
@@ -432,7 +484,6 @@ def test_the_artefact_round_trips_and_refuses_overwrites_and_other_specs(tmp_pat
                                                             "spec": one.to_dict()}), encoding="utf-8")
     with pytest.raises(ValueError, match=f"is not a {SPEC_SCHEMA} file"):
         load_spec(tmp_path / "old")
-    assert SPEC_SCHEMA == "ts-instruction-spec-v5" and one.reading_rule == "instruction-v4"
 
 
 def test_a_spec_is_kept_for_new_rows_byte_for_byte(tmp_path):
@@ -553,15 +604,18 @@ def test_the_spec_takes_the_chosen_row_of_the_rounding_candidates_and_refuses_an
         measure.candidate_values(candidates, "0.2")
 
 
-def test_the_spec_runner_measures_only_with_a_candidate_and_keeps_a_spec_only_without(tmp_path, capsys):
-    """D15, D56: measuring needs the user's choice; --spec-from keeps a spec and takes none — both refused before any
-    file is read."""
+def test_the_spec_runner_measures_only_with_a_candidate_and_a_grid_and_keeps_a_spec_only_without(tmp_path, capsys):
+    """D15, D56, D58: measuring needs the user's choices of the angles and the grid; --spec-from keeps a spec and takes
+    neither — refused before any file is read; a name that is no row is refused."""
     from ts_transformer.experiments import instruction_spec
 
-    for argv in ([], ["--candidate", "0.25", "--spec-from", str(tmp_path / "other")]):
+    for argv in ([], ["--candidate", "0.25"], ["--grid", "fitted"],
+                 ["--candidate", "0.25", "--grid", "d22", "--spec-from", str(tmp_path / "other")]):
         with pytest.raises(SystemExit):
             instruction_spec.main(["--dir", str(tmp_path / "new"), *argv])
-        assert "measuring needs --candidate" in capsys.readouterr().err
-    with pytest.raises(SystemExit):
-        instruction_spec.main(["--dir", str(tmp_path / "new"), "--candidate", "0.2"])
+        assert "measuring needs --candidate and --grid" in capsys.readouterr().err
+    for argv in (["--candidate", "0.2", "--grid", "d22"], ["--candidate", "0.25", "--grid", "d21"]):
+        with pytest.raises(SystemExit):
+            instruction_spec.main(["--dir", str(tmp_path / "new"), *argv])
+        assert "invalid choice" in capsys.readouterr().err
     assert not (tmp_path / "new").exists()

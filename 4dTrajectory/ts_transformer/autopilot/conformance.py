@@ -19,7 +19,7 @@ flight with its reference up to the cycle it was done at:
 
 Before flying, each flight's INPUTS are compared with the reference's digests (`input_digests`: the state it starts
 from, its airframe, frame, thrust and approach speed, its time limit, its words and runway, the runways' geometry and
-vertical paths, the observed rows its word clock reads): inputs that moved are refused by name — the data under the
+vertical paths): inputs that moved are refused by name — the data under the
 reference changed, which says nothing about the executor.
 
 A check that passes writes ``passed-<code>.json`` beside the reference (`spec.passed_path`), only from a clean
@@ -49,7 +49,7 @@ from ts_transformer.autopilot.frame import ALT, LAT, LON, PSI, AirportCharts
 from ts_transformer.autopilot.judge import Verdict, judge
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.autopilot.sentence import Sentences, TimeClock
+from ts_transformer.autopilot.sentence import Sentences
 from ts_transformer.autopilot.spec import (
     CONFORMANCE_DIRECTORY as DIRECTORY, PASSED_SCHEMA, executor_source_sha256, passed_path, reference_sha256,
 )
@@ -58,7 +58,8 @@ from ts_transformer.io_utils import logic, utc_now, write_json_atomic
 from ts_transformer.repo_layout import git_state, repo_relative
 
 #: v2 (two-tier v4): the flights' runway in force per cycle, the five-column words, the go-around's time reserve.
-REFERENCE_SCHEMA = "ts-executor-conformance-reference-v2"
+#: v3 (A19, A20): no word clock's observed rows in a flight's input digest; the airport elevation E in it (D58).
+REFERENCE_SCHEMA = "ts-executor-conformance-reference-v3"
 #: The reference's flights: the replay gate's draw on the training days, every airport alike.
 SPLIT, PER_AIRPORT, SEED, GROUPS = "train", 50, 1337, (replay.OWN,)
 #: How far apart two flown states may be, metres, horizontally or vertically — the single-flight executor's bound
@@ -132,21 +133,10 @@ def fly_batch(batch: replay.Batch, params: ExecutorParams, words: Words) -> list
 STAGGER_STEPS = 30
 
 
-def _held_clock(clock: Any, before: dict[str, Any], waiting: torch.Tensor) -> None:
-    """Put back the per-flight state of a word clock for the flights that have not started."""
-    for name, value in before.items():
-        after = getattr(clock, name)
-        if isinstance(value, torch.Tensor) and isinstance(after, torch.Tensor) and len(value) == len(waiting):
-            keep = waiting.view(-1, *([1] * (after.dim() - 1)))
-            setattr(clock, name, torch.where(keep, value, after))
-        elif isinstance(value, tuple) and isinstance(after, tuple):
-            setattr(clock, name, tuple(torch.where(waiting, v, a) for v, a in zip(value, after)))
-
-
 def fly_staggered(batch: replay.Batch, params: ExecutorParams, words: Words) -> list[FlightResult]:
     """Multi-aircraft batch: the same flights in one executor, each from its own seeded start
-    (`Executor`'s ``start_cycle``), its words on its own clock from its own first cycle (`replay.fly_sentences`'s
-    clock and limits), each halted (`Executor.halt`) from the cycle after it is done while the others fly on. (The
+    (`Executor`'s ``start_cycle``), its words on its own rows from its own first cycle (`replay.fly_sentences`'s
+    limits), each halted (`Executor.halt`) from the cycle after it is done while the others fly on. (The
     words said a step at a time to such a batch, `Spoken`'s ``start_step``, are the window loop's: checked there, each
     aircraft against the same flight flown alone — `tests/test_traffic_window.py`.)"""
     f64 = torch.float64
@@ -154,25 +144,14 @@ def fly_staggered(batch: replay.Batch, params: ExecutorParams, words: Words) -> 
     starts = np.random.default_rng(SEED).integers(0, STAGGER_STEPS + 1, size=len(batch.sentences)) * step_rows
     limits = torch.tensor(replay.time_limits_s(batch, params, words.spec.step_s), dtype=f64, device=DEVICE)
     sentences = Sentences([s.grid for s in batch.sentences], words, step_s=batch.row_interval_s, device=DEVICE)
-    clock = replay.word_clock(batch, params, words.spec.step_s, DEVICE)
     executor = Executor(batch.inputs(DEVICE), Runways.of(batch.geometries, words.spec, dtype=f64, device=DEVICE),
                         AirportCharts.of(batch.geometries, dtype=f64, device=DEVICE),
                         torch.tensor(batch.approach_ias_mps, dtype=f64, device=DEVICE), params, words,
                         step_s=batch.row_interval_s, time_limit_s=limits, start_cycle=torch.as_tensor(starts, device=DEVICE),
                         reserve_s=replay.reserve_s(batch))
-    step_start_s = torch.zeros(len(starts), dtype=f64, device=DEVICE)
     for _ in range(executor.cycles):
-        own = executor.own_cycle()
-        waiting = own < 0
-        before = {name: (value.clone() if isinstance(value, torch.Tensor) else value)
-                  for name, value in vars(clock).items()}
-        if isinstance(clock, TimeClock):
-            sentence_s = own.clamp(min=0).to(f64) * params.cycle_s
-        else:
-            sentence_s = clock.now(0, executor.now())
-            _held_clock(clock, before, waiting)
-        step_start_s = torch.where((own % step_rows == 0) & ~waiting, sentence_s, step_start_s)
-        executor.cycle(sentences.at(step_start_s), sentence_s)
+        sentence_s = executor.own_cycle().clamp(min=0).to(f64) * params.cycle_s
+        executor.cycle(sentences.at(sentence_s), sentence_s)
         if bool(executor.done.all()):
             break
         executor.halt(executor.done)          # held from the cycle after it is done, as the window loop halts a cohort
@@ -182,7 +161,7 @@ def fly_staggered(batch: replay.Batch, params: ExecutorParams, words: Words) -> 
 
 def fly_single(batch: replay.Batch, params: ExecutorParams, words: Words) -> list[FlightResult]:
     """Single flight: each flight alone in the single-flight executor (`autopilot.single`), driven as `executor.fly`
-    drives a batch — the spec's word clock read before each cycle, a step's words heard on the cycle that starts it."""
+    drives a batch — a step's words heard on the cycle that starts it."""
     spec = words.spec
     inputs = batch.inputs(DEVICE)
     limits, reserve = replay.time_limits_s(batch, params, words.spec.step_s), replay.reserve_s(batch)
@@ -191,14 +170,10 @@ def fly_single(batch: replay.Batch, params: ExecutorParams, words: Words) -> lis
         flight = FlightInputs(**{f.name: getattr(inputs, f.name)[j: j + 1] for f in dataclasses.fields(FlightInputs)})
         executor = single.SingleExecutor(flight, batch.geometries[j], batch.approach_ias_mps[j], params, words,
                                          step_s=batch.row_interval_s, time_limit_s=limits[j], reserve_s=reserve)
-        e_m, n_m = replay.observed_rows(batch.signals[j], sentence_flown, batch.row_interval_s, spec.step_s)
-        clock = single.word_clock(params, e_m, n_m, spec.step_s)
         sentence = single.Sentence(sentence_flown.grid, words, step_s=batch.row_interval_s)
         for cycle in range(executor.cycles):
-            sentence_s = clock.now(cycle, executor.now())
-            if cycle % executor.step_rows == 0:
-                step_start_s = sentence_s
-            executor.cycle(sentence.at(step_start_s), sentence_s)
+            sentence_s = cycle * params.cycle_s
+            executor.cycle(sentence.at(sentence_s), sentence_s)
             if executor.done:
                 break
         flown = executor.flown()
@@ -376,19 +351,19 @@ def compare(reference: FlightResult, flown: FlightResult, difference: Difference
 # ---- what each flight is flown from
 
 def input_digests(batch: replay.Batch, params: ExecutorParams, words: Words) -> list[str]:
-    """Each flight's inputs as one sha256 (module docstring): what `replay.fly_sentences` flies it from and its word
-    clock reads, and what the judge reads it against."""
+    """Each flight's inputs as one sha256 (module docstring): what `replay.fly_sentences` flies it from, and what the
+    judge reads it against."""
     inputs = batch.inputs(DEVICE)
     limits, reserve = replay.time_limits_s(batch, params, words.spec.step_s), replay.reserve_s(batch)
     out = []
     for j, sentence in enumerate(batch.sentences):
         geometry = batch.geometries[j]
-        e_m, n_m = replay.observed_rows(batch.signals[j], sentence, batch.row_interval_s, words.spec.step_s)
         parts = [inputs.initial_state[j], inputs.aero_params[j], inputs.frame_params[j], inputs.max_thrust_n[j],
                  np.array([batch.approach_ias_mps[j], limits[j], reserve, batch.readings[j].runway_index,
                            batch.row_interval_s, sentence.first_row]),
-                 np.asarray(sentence.grid), e_m, n_m,
+                 np.asarray(sentence.grid),
                  np.array([[c.threshold_e_m, c.threshold_n_m, c.course_deg, c.elevation_m] for c in geometry.candidates]),
+                 np.array([geometry.elevation_m]),
                  np.array([[float(getattr(path, f.name)) for f in dataclasses.fields(path)]
                            for path in batch.vertical_paths[j]], dtype=np.float64)]
         digest = hashlib.sha256()

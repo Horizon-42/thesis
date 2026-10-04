@@ -1,4 +1,4 @@
-"""A batch of labelled flights flown from their sentences (executor design §11; design §14.2 A6): who is flown, their
+"""A batch of labelled flights flown from their sentences (executor design §11; vocabulary §12.1 A6): who is flown, their
 inputs, the flight and the verdicts — shared by the spec's conformance reference and the replay readout.
 
 Who is flown (§11), by `group_of`: an identified type that publishes an approach speed ("unspecified" is
@@ -14,9 +14,9 @@ the asked groups (0: every one) — the pool, the count read and the exclusions 
 Every flight is re-read with the labeller and must reproduce its stored sentence (the words grid and the
 runway), the export's rule: the executor flies the reading of the flight, not a grid that merely looks like it.
 
-THE ROW INTERVAL (design §4.8, D11, D25). A batch is flown at one row interval Δ (the data's 2 s, or 4 or 8 s): each
+THE ROW INTERVAL (vocabulary §4.8, D11, D25). A batch is flown at one row interval Δ (the data's 2 s, or 4 or 8 s): each
 sentence is put on the Δ grid (`instructions.labeller.interval`: the rows on UTC multiples of Δ) and flown from its first
-Δ row — the flight's state there, the observed rows from there on (the word clock's, the judge's reference) — with
+Δ row — the flight's state there, the observed rows from there on (the judge's reference) — with
 `Sentence` holding the grid and its words as instructions on the Δ rows. At Δ = 2 s the first row is row 0 and the
 sentence is the labelled one.
 """
@@ -40,7 +40,7 @@ from ts_transformer.autopilot.judge import Outcome, Verdict, flown_track, judge
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.runway_data import VerticalPath, published_vertical_paths
-from ts_transformer.autopilot.sentence import DistanceClock, Sentences, TimeClock, TrackClock
+from ts_transformer.autopilot.sentence import Sentences
 from ts_transformer.autopilot.spec import load_spec, require_conforming_executor
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
 from ts_transformer.data.dataset import FlightSeries
@@ -80,7 +80,7 @@ def sentence_on_interval(reading: Reading, signals: FlightSignals, interval_s: f
     heights the labeller checked its words at; its words as instructions on the new rows."""
     courses = [candidate.course_deg for candidate in geometry.candidates]
     first, grid = on_utc_grid(reading.words, signals.entry_time_utc, interval_s, words.spec.step_s,
-                              reading.held_altitude_m, words, courses)
+                              reading.held_height_m, words, courses)
     return Sentence(grid=grid, instructions=instructions_of(grid, geometry, words), first_row=first)
 
 
@@ -293,34 +293,13 @@ def subset(batch: Batch, indices: list[int]) -> Batch:
                  drawn=batch.drawn)
 
 
-def observed_rows(signals: FlightSignals, sentence: Sentence, row_interval_s: float, step_s: float
-                  ) -> tuple[np.ndarray, np.ndarray]:
-    """The observed positions at the data's rows (``step_s`` apart, ``signals`` from the sentence's first row on) over
-    the sentence's span: what the distance and track clocks read, at every row interval alike — so that in the ablation
-    only the sentence's interval changes, never the clock (design §4.8)."""
-    rows = len(sentence.grid) * int(round(row_interval_s / step_s))
-    return signals.e_m[:rows], signals.n_m[:rows]
-
-
-def word_clock(batch: Batch, params: ExecutorParams, step_s: float,
-               device: torch.device) -> TimeClock | DistanceClock | TrackClock:
-    """The clock the batch's truth sentences are said on (`ExecutorParams.word_clock`, §11): the distance and track
-    clocks read each observed flight at the data's rows (``step_s``, `observed_rows`); a sentence time in seconds is
-    looked up on the sentence's own rows (`Sentences.at`)."""
-    if params.word_clock == "time":
-        return TimeClock(params.cycle_s)
-    rows = [observed_rows(f, s, batch.row_interval_s, step_s) for f, s in zip(batch.signals, batch.sentences)]
-    clock = DistanceClock if params.word_clock == "distance" else TrackClock
-    return clock.of([e for e, _ in rows], [n for _, n in rows], step_s, params.cycle_s, device=device)
-
-
 def remaining_observed_s(reading: Reading, first_row: int, step_s: float) -> float:
     """The observed time from the 2 s row ``first_row`` to the end of the labeller's reading (a row per ``step_s``)."""
     return (len(reading.words) - first_row) * step_s
 
 
 def time_limits_s(batch: Batch, params: ExecutorParams, step_s: float) -> list[float]:
-    """Each flight's time limit before its go-arounds (design §5.8: the remaining observed time × 1.5): the observed time
+    """Each flight's time limit before its go-arounds (vocabulary §5.8: the remaining observed time × 1.5): the observed time
     from its sentence's first row (`remaining_observed_s`), not its sentence's rows — a closed-loop sentence has the flown
     rows (§4.9 item 6), and its replay keeps the limit it was read under."""
     return [remaining_observed_s(r, s.first_row, step_s) * params.timeout_factor
@@ -336,8 +315,7 @@ def fly_sentences(batch: Batch, params: ExecutorParams, words: Words, *, device:
     """Fly every flight's sentence from its first row."""
     f64 = torch.float64
     sentences = Sentences([s.grid for s in batch.sentences], words, step_s=batch.row_interval_s, device=device)
-    return fly(batch.inputs(device), sentences, word_clock(batch, params, words.spec.step_s, device),
-               Runways.of(batch.geometries, words.spec, dtype=f64, device=device),
+    return fly(batch.inputs(device), sentences, Runways.of(batch.geometries, words.spec, dtype=f64, device=device),
                AirportCharts.of(batch.geometries, dtype=f64, device=device),
                torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words,
                time_limit_s=torch.tensor(time_limits_s(batch, params, words.spec.step_s), dtype=f64, device=device),
@@ -378,51 +356,20 @@ def word_results(verdict: Verdict) -> tuple[list[tuple[str, bool]], int] | None:
     return judged, not_judged
 
 
-def skipped_by_clock(headings: list[dict[str, int]]) -> list[bool]:
-    """For each of a verdict's heading words, whether the clock skipped it: a later heading word was told on its flown
-    row (the track or distance clock passed two sentence rows within a step, `sentence.TRACK_MAX_ROWS_PER_CYCLE`) and
-    that row's last word is judged — so this one, never flown, is judged on no rows because of the clock, not because
-    its lead ran past the flight's end."""
-    last = {h["row"]: h for h in headings}
-    return [h["rows"] == 0 and last[h["row"]] is not h and last[h["row"]]["rows"] > 0 for h in headings]
-
-
-def told_with_skipped(headings: list[dict[str, int]]) -> list[bool]:
-    """For each of a verdict's heading words, whether it is judged and was told on the flown row of a word the clock
-    skipped (`skipped_by_clock`): it arrives two steps' worth of turn at once."""
-    skipped_rows = {h["row"] for h, skipped in zip(headings, skipped_by_clock(headings)) if skipped}
-    return [h["rows"] > 0 and h["row"] in skipped_rows for h in headings]
-
-
-def clock_pairs(verdict: Verdict) -> dict[str, int]:
-    """The judged heading words told with a word the clock skipped (`told_with_skipped`), and how many are inside."""
-    headings = [] if verdict.words is None else verdict.words["heading"]
-    told = [h for h, together in zip(headings, told_with_skipped(headings)) if together]
-    return {"judged": len(told), "inside": sum(h["inside"] == h["rows"] for h in told)}
-
-
 def summary(verdicts: list[Verdict]) -> dict[str, Any]:
     """The batch's headline numbers: outcomes, flown as said, the words inside their envelopes per column (per word
-    judged; the words not judged beside it), and the word checks that failed. The heading words told with one the
-    clock skipped (`told_with_skipped`) are counted apart as well: what the clock did to the sentence, not the
-    executor. No criterion is read here (design D7)."""
+    judged; the words not judged beside it), and the word checks that failed. No criterion is read here (design D7)."""
     outcomes = Counter(v.outcome for v in verdicts)
     counted = [word_results(v) for v in verdicts]
     judged = [(column, ok) for c in counted if c is not None for column, ok in c[0]]
     words_failed: Counter = Counter()
-    pairs = [clock_pairs(v) for v in verdicts]
     for v in verdicts:
         if v.words is None:
             words_failed["fewer than two flown rows (nothing judged)"] += 1
             continue
-        headings = v.words["heading"]
-        for h, skipped, together in zip(headings, skipped_by_clock(headings), told_with_skipped(headings)):
-            outside = 0 < h["rows"] and h["inside"] < h["rows"]
-            words_failed["heading word skipped by the clock (told with the next, not judged)"] += skipped
-            words_failed["heading word past the flight's end (not judged)"] += h["rows"] == 0 and not skipped
-            words_failed["track off its heading word a lead later"] += outside and not together
-            words_failed["track off its heading word a lead later, told with a skipped word"] += outside and together
-        words_failed["superseded before flown (not judged)"] += v.words["superseded_before_flown"]
+        for h in v.words["heading"]:
+            words_failed["heading word past the flight's end (not judged)"] += h["rows"] == 0
+            words_failed["track off its heading word a lead later"] += 0 < h["rows"] and h["inside"] < h["rows"]
         words_failed["altitude word outside its tube"] += sum(not x["contained"] for x in v.words["vertical"])
         words_failed["speed word outside its band"] += sum(not x["contained"] for x in v.words["speed"])
     decisions = [v.crossing["decision"] for v in verdicts if v.crossing is not None and "decision" in v.crossing]
@@ -435,8 +382,6 @@ def summary(verdicts: list[Verdict]) -> dict[str, Any]:
                 column: (sum(ok for c, ok in judged if c == column) / sum(c == column for c, _ in judged)
                          if any(c == column for c, _ in judged) else None) for column in JUDGED},
             "heading_words_not_judged": sum(c[1] for c in counted if c is not None),
-            "heading_words_told_with_a_skipped_word": {"judged": sum(p["judged"] for p in pairs),
-                                                       "inside": sum(p["inside"] for p in pairs)},
             "flights_with_unjudged_words": sum(c is None for c in counted),
             "decision_checks": {"approach_crossings_low": len(decisions),
                                 "no_da_point": sum(d is None for d in decisions),

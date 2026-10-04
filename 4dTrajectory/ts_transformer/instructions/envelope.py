@@ -1,5 +1,5 @@
 """The allowed region of each instruction — one implementation for the labeller's checks and the executor's judge
-(design §3.3–§3.6).
+(vocabulary §3.3–§3.6).
 
 Pure functions over numpy arrays; every angle in degrees (compass for tracks, descending
 positive for path angles), every length in metres.

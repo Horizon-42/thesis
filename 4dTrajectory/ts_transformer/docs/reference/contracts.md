@@ -391,8 +391,8 @@ four runners that restated it import it).
 
 ### C30 · the instruction sentence artefact: one spec sha, written once, rows aligned with the signals
 
-2026-09-23 (the instruction labeller); **v4 since 2026-10-03** (`docs/two_tier/two_tier_design.md` §4, §9.2, §14.2 A1–A3,
-A8). An artefact directory under `4dTrajectory/outputs/POOLED/instruction_language/<name>/` is written by the runners in
+2026-09-23 (the instruction labeller); **v4 since 2026-10-03** (`docs/two_tier/design/vocabulary.md` §4, §7.2, §12.1 A1–A3,
+A8, A20; the altitude words heights above the airport elevation E since A20, D58). An artefact directory under `4dTrajectory/outputs/POOLED/instruction_language/<name>/` is written by the runners in
 order and never overwritten (`instructions.artefact._fresh` refuses an existing file):
 `signals_{train,select,val}.npz` + `signals.json` (the flights, from the live harvest's eligible arrivals, split BY
 OPERATING DAY (C32) — a test day's tracks are never opened, and `write_signals` / `load_signals` refuse a test-day flight
@@ -403,16 +403,17 @@ target is built from; position, elevation, true course only — never the publis
 end the harvest builds, which the landing rule reads), `spec.json` + `measurements.json`,
 `sentences_{train,select,val}.npz` + `labels.json` + `readout.{json,md}`, `conformance/` (below) and, once an executor spec
 flies them, `closed_loop/` (C38). Every file code reads back carries its format's name (`SIGNALS_SCHEMA`,
-`CANDIDATES_SCHEMA`, `SPEC_SCHEMA` `ts-instruction-spec-v5`, `SENTENCES_SCHEMA` `ts-instruction-sentences-v3`) and is
+`CANDIDATES_SCHEMA`, `SPEC_SCHEMA` `ts-instruction-spec-v6`, `SENTENCES_SCHEMA` `ts-instruction-sentences-v4`) and is
 refused under any other; **a name changes with its file's shape**, in the same change (2026-09-24, the user's rule). The
 spec's sha covers every word, grid, class, tolerance and the reading rule (`instructions.spec.READING_RULE`,
-`instruction-v4`); `load_sentences` refuses a sentences file read with another sha, `VocabularySpec.from_dict` refuses a
+`instruction-v5`: the level words above E, read from the smoothed MSL height minus E, E = `candidates.json`
+`reference.elevation_m`, `AirportGeometry.elevation_m`); `load_sentences` refuses a sentences file read with another sha, `VocabularySpec.from_dict` refuses a
 missing or extra key and another reading rule — no compatibility.
 
 **The labeller is identified by what it reads, never by its source** (design D21, 2026-10-03; until v3 `spec.json`
 recorded `labeller_source_sha256` and every runner refused other code): `instruction_labels` writes `conformance/` — a
 fixed reference sample (`instructions.conformance`: train, seed 1337, 50 labelled and 10 refused flights an airport, their
-signals, outcomes and word grids; since A15, `ts-instruction-conformance-reference-v2`, each labelled sentence's word
+signals, outcomes and word grids; since A15 (v2; v3 since A20, D58), `ts-instruction-conformance-reference-v3`, each labelled sentence's word
 grid also on its UTC Δ grid at 4 and 8 s, `labeller.interval.on_utc_grid`, or why that grid refuses it, D49) — and a
 `passed-<code12>.json` is written for each labeller code that reads it again the same, on the 2 s rows and every Δ grid (`check`, runner `instruction_conformance`, from a clean checkout; the code is named by the LOGIC of
 `LABELLER_MODULES`, `io_utils.logic_sha256`). `require_conforming_labeller` asks for it before labelling, measuring a spec
@@ -504,9 +505,10 @@ split's test).
 ### C33 · the executor spec: written once, opened for executor code that flies its reference tracks within the bounds
 
 2026-09-24 (`autopilot/spec.py`, `autopilot/replay.py`), **changed 2026-10-01 (the user): the executor is checked by what
-it flies, not by its source**; v4 (`ts-executor-spec-v7`, design §5, §9.2 #3, §14.2 A4–A6). An executor spec is a directory
+it flies, not by its source**; v4 (`ts-executor-spec-v8`, vocabulary §5, §7.2 #3, §12.1 A4–A6, A19, A20: one word clock — a
+sentence said on its own rows, D57 — and a level word flown at T + E MSL, D58). An executor spec is a directory
 written once (`spec.json` + `measurements.json`, an existing file refuses): the parameters under their own sha
-(`ExecutorParams`: cycle, roll rate, τ_γ, γ̇_max factor, timeout factor, word clock — every value from the vocabulary, the
+(`ExecutorParams`: cycle, roll rate, τ_γ, γ̇_max factor, timeout factor — every value from the vocabulary, the
 procedure standards or a fixed choice, nothing from data; the decision-altitude check has none, D38), the vocabulary spec
 sha it was measured against, and `source`: the logic hash of the executor code that measured it (`executor_source_sha256`
 over `executor_source_files`: every `autopilot/` module but `spec.py` plus the repository modules they import directly, by
@@ -526,8 +528,8 @@ passed record with it, from a clean checkout. Every `autopilot/` module counts, 
 
 ### C34 · a prior checkpoint belongs to one sentence artefact
 
-**Archived 2026-10-03 with the instruction-v3 prior** (`archive/two_tier_v3_2026_10/prior/`, design §14.2 A0): this
-entry is the record of that code; the v4 prior is stage B (design §14.3).
+**Archived 2026-10-03 with the instruction-v3 prior** (`archive/two_tier_v3_2026_10/prior/`, vocabulary §12.1 A0): this
+entry is the record of that code; the v4 prior is stage B (prior §12).
 
 2026-09-24 (`experiments/prior_train.py` `load_prior`). A prior is `checkpoint.pt` + `config.json` under
 `ts-prior-checkpoint-v3`, written by `prior_train`, `prior_landing_reward` and `prior_augmented_reward` alike. It is refused
@@ -537,8 +539,8 @@ sentence artefact it is opened with, its candidate-runway table equals the artef
 
 ### C35 · a prior speaks under the procedure's masks it was trained under, recorded beside its checkpoint
 
-**Archived 2026-10-03 with the instruction-v3 prior** (`archive/two_tier_v3_2026_10/prior/`, design §14.2 A0): this
-entry is the record of that code; the v4 prior is stage B (design §14.3).
+**Archived 2026-10-03 with the instruction-v3 prior** (`archive/two_tier_v3_2026_10/prior/`, vocabulary §12.1 A0): this
+entry is the record of that code; the v4 prior is stage B (prior §12).
 
 2026-09-26 (`prior/masks.py`; prior design §5.1). Two kinds of mask take words away when the prior speaks, kept apart: the
 vocabulary's rules (the grammar, the runway not said again, the listener's lock) are the speaker's own, always on, bound
@@ -573,8 +575,8 @@ package does not reach `instructions` (architecture test): the caller measures c
 
 ### C37 · a traffic prior is a single-aircraft prior with a traffic attention that starts at zero (`ts-prior-checkpoint-v5`)
 
-**Archived 2026-10-03 with the instruction-v3 prior** (`archive/two_tier_v3_2026_10/prior/`, design §14.2 A0): this
-entry is the record of that code; the v4 prior is stage B (design §14.3).
+**Archived 2026-10-03 with the instruction-v3 prior** (`archive/two_tier_v3_2026_10/prior/`, vocabulary §12.1 A0): this
+entry is the record of that code; the v4 prior is stage B (prior §12).
 
 2026-09-28 (multi-aircraft design §2.5, §6.2, §9 items 22–23). `prior.model.with_traffic(model, EDGE_FEATURES)` keeps every
 weight of a single-aircraft prior (augmented, for the multi-aircraft post-training) and adds, in every layer after the
@@ -599,7 +601,7 @@ refuses both.
 2026-10-04 (`autopilot/closed_loop.py`, `instructions/artefact.py` `write_closed_loop` / `load_closed_loop`, runner
 `instruction_closed_loop` R50; design §4.9, D32–D34, D42, D44–D46). `<artefact>/closed_loop/` is written once, from a clean checkout,
 with an executor spec (C33): for each split and each row interval given (D25), `<split>_<Δ>s.npz`
-(`ts-instruction-closed-loop-v4`, refused unless every field is there and its spec sha is the artefact's): each flown
+(`ts-instruction-closed-loop-v5`, refused unless every field is there and its spec sha is the artefact's): each flown
 flight's words from its first predicted step (Δ row 16 s / Δ; row 0 says every column), which words the reading added
 (`correction`), its states on the data's 2 s rows from its first row to its last said row, its Δ rows marked
 (`on_interval`, D51, since A15; v3 stored the Δ rows only), observed before the first predicted step, flown from it — a

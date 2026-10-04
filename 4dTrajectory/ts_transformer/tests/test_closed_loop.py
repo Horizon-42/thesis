@@ -1,4 +1,4 @@
-"""The closed-loop reading (design §4.9, D32): the comparison, the corrections, and a flight read and flown again."""
+"""The closed-loop reading (vocabulary §4.9, D32): the comparison, the corrections, and a flight read and flown again."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def _params():
     from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
 
     return ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, path_time_constant_s=2.0, path_rate_factor=2.0,
-                          timeout_factor=1.5, word_clock="time")
+                          timeout_factor=1.5)
 
 
 # ---- the comparison
@@ -188,7 +188,7 @@ def _batch(interval_s=2.0, legs=DOWNWIND_BASE_FINAL, track_deg=270.0, altitude_m
             for row, speed_mps in speeds.items():
                 grid[row, SPEED] = words.speed_index(speed_mps)
         rows = len(grid) - cut
-        reading = replace(reading, words=grid[:rows], held_altitude_m=reading.held_altitude_m[:rows])
+        reading = replace(reading, words=grid[:rows], held_height_m=reading.held_height_m[:rows])
     sentence = replay.sentence_on_interval(reading, signals, interval_s, geometry, words)
     observed = replay.from_row(signals, sentence.first_row)
     batch = replay.Batch(indices=[0], signals=[observed], series=[None], readings=[reading], sentences=[sentence],
@@ -389,7 +389,7 @@ def _outside(batch, sentence, words):
 
 
 def test_the_rule_of_d50_reads_the_direction_of_the_correction_in_force():
-    """D50 (§14.6): on a correctable row with |e_y| > Y a heading correction toward the path is in force after it, read
+    """D50 (vocabulary §12.2): on a correctable row with |e_y| > Y a heading correction toward the path is in force after it, read
     from the stored sentence and its open-loop reading. Taken away (the observed words alone), the rule breaks on
     exactly the rows that were outside; turned away from the path, too — a word that only cancels a correction, or one
     on the wrong side, answers nothing."""
@@ -785,7 +785,7 @@ def test_a_flown_aircraft_behind_hears_the_turn_where_the_observed_one_did_and_f
 def test_a_flown_aircraft_ahead_hears_the_go_around_before_the_threshold_where_the_observed_one_went_around(
         monkeypatch):
     """D42: told 90 m/s on the final (the observed aircraft flies 70 m/s), the flown aircraft is ahead of the observed
-    one; said at the observed time, the go-around would come after it crossed the threshold (§11.11, KSTL). Said at the
+    one; said at the observed time, the go-around would come after it crossed the threshold (vocabulary §9.7, KSTL). Said at the
     place, it comes where the observed aircraft went around, before the threshold, and the sentence flies it again as a
     go-around."""
     from ts_transformer.tests.test_instruction_labeller import GO_AROUND_LEGS
@@ -810,7 +810,7 @@ def test_a_flown_aircraft_ahead_hears_the_go_around_before_the_threshold_where_t
 
 
 def test_the_replay_reads_the_speed_words_and_how_far_along_the_path_the_flown_aircraft_is(monkeypatch):
-    """§11.12, A11: each flown sentence's speed words other than "unspecified", and the largest distance along the observed
+    """Vocabulary §9.8, A11: each flown sentence's speed words other than "unspecified", and the largest distance along the observed
     path from the observed aircraft of the same time before "unspecified" — told 70 m/s on the 100 m/s downwind (the
     open loop, the time clock), the flown aircraft falls far behind."""
     from ts_transformer.experiments.executor_replay import along_columns

@@ -32,9 +32,10 @@ from typing import Any
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.io_utils import logic_sha256, write_json_atomic
 
-#: v7 (two-tier v4, design §14.2 A6): the laws of design §5 (no capture, no landing aim, no glidepath floor), no
-#: parameter of the decision-altitude check (D38: the evaluation's bounds), the labeller identified by its conformance.
-EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v7"
+#: v8 (vocabulary §12.1 A19, A20): one word clock — a sentence is said on its own rows, no ``word_clock``
+#: parameter (D57) — and a level word flown at T + E MSL, E the airport elevation (D58); the laws of §5 otherwise as v7
+#: (no capture, no landing aim, no glidepath floor, no parameter of the decision-altitude check, D38).
+EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v8"
 PACKAGE = Path(__file__).resolve().parent
 #: Imported by the executor but not part of what decides a flown track or a value: the instruction language
 #: (its own hash, the labeller's, is recorded in the spec and checked at replay), the path and file helpers, and the

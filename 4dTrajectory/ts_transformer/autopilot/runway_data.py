@@ -1,4 +1,4 @@
-"""The runway data the JUDGE reads beyond the vocabulary and the candidates' geometry (design §5.8): each candidate's
+"""The runway data the JUDGE reads beyond the vocabulary and the candidates' geometry (vocabulary §5.8): each candidate's
 published vertical path — its threshold crossing height (TCH) and glidepath angle, the glidepath the decision-altitude
 check measures the height against — and its decision altitude as a height above the threshold. The executor's laws read
 none of it (§5.2, D9).

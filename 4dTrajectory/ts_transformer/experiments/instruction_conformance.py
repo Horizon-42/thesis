@@ -1,4 +1,4 @@
-"""The labeller checked by what it reads (design §9.2 #2, D21; `instructions.conformance`): read an artefact's reference
+"""The labeller checked by what it reads (vocabulary §7.2 #2, D21; `instructions.conformance`): read an artefact's reference
 flights again with the code on disk, require the same sentences and refusals, and write the passed record the labelling
 and replay runners ask for (only from a clean checkout).
 

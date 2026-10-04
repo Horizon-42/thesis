@@ -63,13 +63,31 @@ def terminal_contexts() -> dict[tuple[str, str], AssessmentContext]:
     )}
 
 
+def raised_airport(geometry, elevation_m: float):
+    """``geometry`` with the airport elevation E at ``elevation_m`` and every threshold raised by as much: the same
+    airport, higher (D58)."""
+    from ts_transformer.instructions.airport import AirportGeometry
+
+    data = geometry.to_dict()
+    rise = elevation_m - data["reference"]["elevation_m"]
+    data["reference"]["elevation_m"] = elevation_m
+    data["candidates"] = [{**c, "elevation_m": c["elevation_m"] + rise} for c in data["candidates"]]
+    return AirportGeometry.from_dict(data)
+
+
+#: `instruction_airport`'s field elevation E, MSL m.
+INSTRUCTION_AIRPORT_ELEVATION_M = 60.0
+
+
 def instruction_airport():
     """A synthetic airport for the instruction labeller: one candidate runway "09", threshold at
-    the airport frame's origin, course 090° true, elevation 100 m MSL."""
+    the airport frame's origin, course 090° true, elevation 100 m MSL; the airport elevation E (the field's,
+    `INSTRUCTION_AIRPORT_ELEVATION_M`) 40 m below it, so that the altitude words, heights above E (D58), differ from MSL
+    by one 60 m step: a level of 1,080 m MSL is the word 1,020 m."""
     from ts_transformer.instructions.airport import AirportGeometry
 
     return AirportGeometry.from_dict({
-        "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": 100.0},
+        "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": INSTRUCTION_AIRPORT_ELEVATION_M},
         "candidates": [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0,
                         "elevation_m": 100.0, "length_m": 3000.0}],
         "runway_ends": [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0}],
@@ -85,7 +103,7 @@ def instruction_spec(**changes):
         turn_rate_max_deg_s=3.5, turn_bank_max_deg=32.0,
         corridor_half_width_m=20.0, corridor_widening_deg=0.45, corridor_course_tolerance_deg=2.0,
         descent_angle_edges_deg=(-0.5, 1.4, 2.6, 3.7, 10.0), descent_angle_centres_deg=(0.8, 2.1, 3.0, 4.4),
-        climb_angle_centre_deg=1.3, speed_accel_max_mps2=2.5,
+        climb_angle_centre_deg=1.3, speed_accel_max_mps2=2.5, **measure.D22_GRID,
     )
     data = measure.build_spec(measured).to_dict()
     data.update(changes)
@@ -153,7 +171,7 @@ def parallel_airport():
     ends = [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0},
             {"ident": "09L", "threshold_e_m": 0.0, "threshold_n_m": PARALLEL_SPACING_M, "course_deg": 90.0}]
     return AirportGeometry.from_dict({
-        "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": 100.0},
+        "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": INSTRUCTION_AIRPORT_ELEVATION_M},
         "candidates": [{**end, "elevation_m": 100.0, "length_m": 3000.0} for end in ends], "runway_ends": ends,
     })
 

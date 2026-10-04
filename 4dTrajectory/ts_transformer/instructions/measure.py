@@ -1,4 +1,4 @@
-"""The measurements that set the vocabulary's measured values (vocabulary design §8), and the
+"""The measurements that set the vocabulary's measured values (vocabulary §8), and the
 rule that turns them into a spec.
 
 Every measurement runs on the TRAIN split's signals only, and only on flights the labeller
@@ -26,7 +26,7 @@ from ts_transformer.instructions.piecewise import fit_pieces
 from ts_transformer.instructions.spec import (
     ATC_MAX_INTERCEPT_DEG, ATC_NO_SPEED_ASSIGNMENT_DISTANCE_M, VocabularySpec,
 )
-from ts_transformer.instructions.words import Words
+from ts_transformer.instructions.words import Words, grid_levels
 
 #: The heading tolerance is half the grid step plus this allowance for the track's own wander in
 #: straight flight — a choice: the wander measured inside a free hold (no grid) grows with the band it is
@@ -39,13 +39,13 @@ FREE_HOLD_MIN_S = 10.0
 #: lie within it of their line); the level wander is listed for these fit tolerances.
 LEVEL_FIT_TOLERANCES_M = (5.0, 10.0, 20.0)
 
-#: The values fixed by choice (design §8 and the labeller's reading parameters).
+#: The values fixed by choice (vocabulary §8 and the labeller's reading parameters).
 SUGGESTED: dict[str, Any] = {
     "step_s": 2.0,
     "track_smoothing_s": 6.0,
     "altitude_smoothing_s": 10.0,
     "speed_smoothing_s": 10.0,
-    # §10.1 (user 2026-09-24): the per-step reading on a 5° grid, each row labelled with the track 4 s later
+    # vocabulary §4.3 (user 2026-09-24): the per-step reading on a 5° grid, each row labelled with the track 4 s later
     "heading_lead_s": 4.0,
     "heading_step_deg": 5.0,
     "turn_onset_rate_deg_s": 0.2,
@@ -56,10 +56,6 @@ SUGGESTED: dict[str, Any] = {
     # MIRROR of trajectory_data_process.harvest.threshold_event.MAX_PARALLEL_COURSE_DELTA_DEG
     # (checked equal in tests/test_instruction_vocabulary.py)
     "parallel_course_delta_deg": 5.0,
-    # D22 (design §3.4, the altitude-grid proposal's "optimal 40 levels"): 60 m to 1,260 m, 120 m to 2,700 m, 450 m to
-    # 5,400 m MSL
-    "altitude_segment_steps_m": (60.0, 120.0, 450.0),
-    "altitude_segment_tops_m": (1260.0, 2700.0, 5400.0),
     "altitude_fit_tolerance_m": 10.0,
     "level_min_s": 20.0,
     # §4.4: a level is a piece whose rows stay within this of its own median (the instruction-v3 band, 25 m)
@@ -89,7 +85,7 @@ SUGGESTED: dict[str, Any] = {
     "go_around_min_drop_m": 150.0,
     "go_around_min_climb_m": 150.0,
     "go_around_on_runway_height_m": 15.0,
-    # the closed-loop reading's tolerances (design §4.9, D32: the user, 2026-10-03)
+    # the closed-loop reading's tolerances (vocabulary §4.9, D32: the user, 2026-10-03)
     "closed_loop_lateral_m": 30.0,
     "closed_loop_vertical_m": 15.0,
 }
@@ -122,8 +118,20 @@ ROUNDING_STEPS_DEG = (0.5, 0.25, 0.1)
 CANDIDATE_NAMES = ("fitted", *(f"{step:g}" for step in ROUNDING_STEPS_DEG))
 #: O12: the climb angles' distribution, in bins this wide.
 CLIMB_BIN_DEG = 0.5
-#: §11.7: the level words' rounding error is also read under a uniform grid of this step (instruction-v3's 30 m).
-UNIFORM_LEVEL_STEP_M = 30.0
+#: D22 (vocabulary §3.4, the altitude-grid proposal's "optimal 40 levels", fitted on MSL level-offs): 60 m to 1,260 m, 120 m
+#: to 2,700 m, 450 m to 5,400 m. Since D58 the levels are heights above E, and the spec measurement fits the grid again
+#: on the level-offs above E (`fit_altitude_grid`) and writes it beside this one; the user chooses (`GRID_NAMES`).
+D22_GRID = {"altitude_segment_steps_m": (60.0, 120.0, 450.0), "altitude_segment_tops_m": (1260.0, 2700.0, 5400.0)}
+#: The fit of vocabulary §3.4 (§9.5): at most `GRID_SEGMENTS_MAX` uniform segments from 0 m to `GRID_TOP_M` (D22's range),
+#: the break points on a `GRID_BREAK_M` grid, each segment's step one of `GRID_STEPS_M` and its length a whole number of
+#: steps, `GRID_LEVELS` levels (0 m included), the smallest sum of squared rounding errors of the level-offs.
+GRID_SEGMENTS_MAX = 3
+GRID_TOP_M = D22_GRID["altitude_segment_tops_m"][-1]
+GRID_BREAK_M = 15.0
+GRID_STEPS_M = (15.0, 30.0, 45.0, 60.0, 75.0, 90.0, 120.0, 150.0, 180.0, 240.0, 300.0, 450.0, 600.0)
+GRID_LEVELS = len(grid_levels(*D22_GRID.values()))
+#: The rows of `grid_candidates`, by name: the user chooses one (D55, D58; `instruction_spec --grid`).
+GRID_NAMES = ("fitted", "d22")
 
 
 @dataclass(frozen=True)
@@ -137,11 +145,14 @@ class MeasuredValues:
     descent_angle_centres_deg: tuple[float, ...]
     climb_angle_centre_deg: float
     speed_accel_max_mps2: float
+    altitude_segment_steps_m: tuple[float, ...]
+    altitude_segment_tops_m: tuple[float, ...]
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        data["descent_angle_edges_deg"] = list(self.descent_angle_edges_deg)
-        data["descent_angle_centres_deg"] = list(self.descent_angle_centres_deg)
+        for name in ("descent_angle_edges_deg", "descent_angle_centres_deg", "altitude_segment_steps_m",
+                     "altitude_segment_tops_m"):
+            data[name] = list(getattr(self, name))
         return data
 
 
@@ -158,7 +169,7 @@ def provisional_spec() -> VocabularySpec:
         corridor_half_width_m=500.0, corridor_widening_deg=0.0, corridor_course_tolerance_deg=10.0,
         descent_angle_edges_deg=(DESCENT_FLOOR_DEG, 2.0, 2.75, 3.5, DESCENT_CEILING_DEG),
         descent_angle_centres_deg=(1.5, 2.4, 3.1, 4.0),
-        climb_angle_centre_deg=3.0, speed_accel_max_mps2=2.0,
+        climb_angle_centre_deg=3.0, speed_accel_max_mps2=2.0, **D22_GRID,
     ))
 
 
@@ -178,9 +189,9 @@ def _free_holds(track: np.ndarray, min_rows: int, half_range_deg: float) -> list
     return holds
 
 
-def measure_flight(flight: Admitted, spec: VocabularySpec) -> dict[str, np.ndarray]:
+def measure_flight(flight: Admitted, spec: VocabularySpec, elevation_m: float) -> dict[str, np.ndarray]:
     """Pass A: one admitted flight's contribution to every measurement that needs no measured
-    value, as flat arrays."""
+    value, as flat arrays; ``elevation_m`` its airport's elevation E (the level-offs are heights above it, D58)."""
     smoothed, relative = flight.smoothed, flight.relative
     track, speed, distance = smoothed.track_deg, smoothed.ground_speed_mps, smoothed.distance_m
     out: dict[str, list[float]] = {name: [] for name in (
@@ -215,11 +226,11 @@ def measure_flight(flight: Admitted, spec: VocabularySpec) -> dict[str, np.ndarr
             out["transition_accel_mps2"] += list(np.abs(np.diff(rows)) / spec.step_s)
     final = distance[-1] - distance <= FINAL_MEASURE_M
     out["final_course_error_deg"] += list(np.abs(relative.track_minus_course_deg[final]))
-    for piece in vertical_pieces(distance, smoothed.altitude_m, spec, Words(spec)):
+    for piece in vertical_pieces(distance, smoothed.altitude_m - elevation_m, spec, Words(spec)):
         if piece.kind == MOVE:
             out["move_angle_deg"].append(piece.angle_deg)
             out["move_length_m"].append(float(distance[piece.stop - 1] - distance[piece.start]))
-        elif piece.start > 0:               # a level word other than row 0's: the height it is held at (§11.7)
+        elif piece.start > 0:               # a level word other than row 0's: the height above E it is held at (§9.5)
             out["level_height_m"].append(piece.median_m)
     return {name: np.asarray(values, dtype=np.float64) for name, values in out.items()}
 
@@ -360,13 +371,88 @@ def climb_distribution(angle_deg: np.ndarray, length_m: np.ndarray) -> dict[str,
             "length_m_by_bin": {f"{low:g}-{high:g}": float(c) for low, high, c in zip(edges, edges[1:], counts)}}
 
 
-def level_rounding(heights_m: np.ndarray, words: Words) -> dict[str, Any]:
-    """§11.7: the rounding error of the level words (row 0 apart: the heights their level pieces are held at) under the
-    spec's grid and under a uniform `UNIFORM_LEVEL_STEP_M` grid."""
-    grid = np.abs(heights_m - words.altitude_levels[np.argmin(np.abs(heights_m[:, None] - words.altitude_levels[None, :]),
-                                                              axis=1)]) if len(heights_m) else heights_m
-    uniform = np.abs(heights_m - np.round(heights_m / UNIFORM_LEVEL_STEP_M) * UNIFORM_LEVEL_STEP_M)
-    return {"levels": int(len(heights_m)), "grid": percentiles(grid), f"uniform_{UNIFORM_LEVEL_STEP_M:g}_m": percentiles(uniform)}
+def rounding_error_m(heights_m: np.ndarray, levels_m: np.ndarray) -> np.ndarray:
+    """Each height's distance to its nearest level."""
+    return np.abs(heights_m[:, None] - levels_m[None, :]).min(axis=1) if len(heights_m) else heights_m
+
+
+def fit_altitude_grid(heights_m: np.ndarray) -> dict[str, tuple[float, ...]]:
+    """The grid of vocabulary §3.4 (`GRID_SEGMENTS_MAX` ... `GRID_LEVELS`) with the smallest sum of squared rounding errors
+    of ``heights_m``, by exact dynamic programming over the break points: a segment [a, b] of step s rounds the heights in
+    it to a, a + s, ..., b, so the error is additive over segments, and the state is (segments, break point, levels
+    used). Every step is a whole number of `GRID_BREAK_M`, so a segment's error depends on its start only through the
+    phase a mod s: one prefix sum over the sorted heights for each step and phase gives every segment's error. A height
+    outside [0, `GRID_TOP_M`] rounds to the end level of every grid alike and does not move the choice. Ties go to the
+    first found (fewer segments; for a segment, the later start and then the smaller step); no heights raise."""
+    heights = np.sort(np.asarray(heights_m, dtype=np.float64))
+    if not len(heights):
+        raise ValueError("no level-off to fit the altitude grid on")
+    unit = GRID_BREAK_M
+    points = int(round(GRID_TOP_M / unit)) + 1                       # break points 0, 15, ..., GRID_TOP_M
+    at = np.searchsorted(heights, np.arange(points) * unit, side="left")
+    # error[s][phase][p]: the squared rounding error of the heights below break point p, to the levels phase + k s
+    error: dict[float, np.ndarray] = {}
+    for step in GRID_STEPS_M:
+        phases = int(round(step / unit))
+        table = np.empty((phases, points))
+        for phase in range(phases):
+            r = np.mod(heights - phase * unit, step)
+            table[phase] = np.concatenate(([0.0], np.cumsum(np.minimum(r, step - r) ** 2)))[at]
+        error[step] = table
+    counts = GRID_LEVELS - 1                                          # the levels above 0 m
+    best = np.full((GRID_SEGMENTS_MAX + 1, points, counts + 1), np.inf)
+    best[0, 0, 0] = 0.0
+    parent: dict[tuple[int, int, int], tuple[int, float]] = {}
+    for k in range(1, GRID_SEGMENTS_MAX + 1):
+        for end in range(1, points):
+            for step in GRID_STEPS_M:
+                stride = int(round(step / unit))
+                starts = np.arange(end - stride, -1, -stride)          # a whole number of steps before ``end``
+                if not len(starts):
+                    continue
+                levels = (end - starts) // stride
+                cost = error[step][starts % stride, end] - error[step][starts % stride, starts]
+                used = np.arange(counts + 1)[None, :] - levels[:, None]
+                previous = np.where(used >= 0, best[k - 1, starts[:, None], np.clip(used, 0, None)], np.inf)
+                total = previous + cost[:, None]
+                pick = np.argmin(total, axis=0)
+                value = total[pick, np.arange(counts + 1)]
+                better = value < best[k, end]
+                for n in np.nonzero(better)[0]:
+                    parent[(k, end, int(n))] = (int(starts[pick[n]]), step)
+                best[k, end] = np.where(better, value, best[k, end])
+    k = int(np.argmin(best[1:, points - 1, counts])) + 1
+    if not np.isfinite(best[k, points - 1, counts]):
+        raise ValueError(f"no grid of {GRID_LEVELS} levels fits {GRID_TOP_M:g} m")
+    steps, tops, end, n = [], [], points - 1, counts
+    for segment in range(k, 0, -1):
+        start, step = parent[(segment, end, n)]
+        steps.append(step)
+        tops.append(end * unit)
+        n -= (end - start) // int(round(step / unit))
+        end = start
+    return {"altitude_segment_steps_m": tuple(steps[::-1]), "altitude_segment_tops_m": tuple(tops[::-1])}
+
+
+def grid_candidates(heights_m: np.ndarray) -> dict[str, Any]:
+    """D58: the grid fitted on the level-offs above E (`fit_altitude_grid`) and the grid of D22, each with its levels
+    and the rounding error of the level words (`GRID_NAMES`)."""
+    rows = {"fitted": fit_altitude_grid(heights_m), "d22": D22_GRID}
+    return {name: {"altitude_segment_steps_m": list(grid["altitude_segment_steps_m"]),
+                   "altitude_segment_tops_m": list(grid["altitude_segment_tops_m"]),
+                   "levels": len(grid_levels(grid["altitude_segment_steps_m"], grid["altitude_segment_tops_m"])),
+                   "rounding_error_m": percentiles(rounding_error_m(heights_m, grid_levels(
+                       grid["altitude_segment_steps_m"], grid["altitude_segment_tops_m"])))}
+            for name, grid in rows.items()}
+
+
+def grid_values(candidates: dict[str, Any], name: str) -> dict[str, tuple[float, ...]]:
+    """The spec's altitude grid from the row ``name`` of `grid_candidates`."""
+    if name not in candidates:
+        raise ValueError(f"no grid {name!r}: the rows are {sorted(candidates)}")
+    row = candidates[name]
+    return {"altitude_segment_steps_m": tuple(float(v) for v in row["altitude_segment_steps_m"]),
+            "altitude_segment_tops_m": tuple(float(v) for v in row["altitude_segment_tops_m"])}
 
 
 def round_up(value: float, step: float) -> float:

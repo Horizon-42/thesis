@@ -12,7 +12,7 @@
    Δ row past the sentence's last are not said (the sentence ends there).
 3. The first Δ row says the five words in force there (every word that goes to it); a sentence in a go-around at its
    first Δ row cannot say a runway there and is refused. The grammar (`instructions.grammar`) is checked again on the Δ
-   rows, at their altitude.
+   rows, at their height above the airport elevation E (D58).
 4. A heading word is said in the frame where it is heard (D46, §3.3): the step rows' word says an absolute track (its
    class under the course of R at its row); the Δ row that says it gives the class nearest that track minus the course
    of the R in force at the Δ row (the same class when R did not change, or changed to a parallel runway). A Δ row says
@@ -39,7 +39,7 @@ from ts_transformer.instructions.labeller.sentence import check_grammar
 from ts_transformer.instructions.words import HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words, same_track
 
 
-#: The prior's observation before its first predicted step, s (design §2, `N_LOOK` = 8 rows at 2 s): every Δ divides it,
+#: The prior's observation before its first predicted step, s (vocabulary §2, `N_LOOK` = 8 rows at 2 s): every Δ divides it,
 #: so the first predicted step is a Δ row at every Δ (D25).
 OBSERVATION_S = 16.0
 
@@ -92,18 +92,18 @@ def in_force(grid: np.ndarray) -> np.ndarray:
     return np.take_along_axis(grid, last, axis=0)
 
 
-def on_utc_grid(grid: np.ndarray, entry_time_utc: str, interval_s: float, step_s: float, altitude_m: np.ndarray,
+def on_utc_grid(grid: np.ndarray, entry_time_utc: str, interval_s: float, step_s: float, height_m: np.ndarray,
                 words: Words, courses_deg: Sequence[float]) -> tuple[int, np.ndarray]:
     """A labelled sentence on its UTC Δ grid (`first_interval_row` of its first row's UTC time, then `on_interval`): the
     2 s row of its first Δ row and its words there. The replay and the labeller conformance read it alike (D49)."""
     first = first_interval_row(entry_time_utc, interval_s, step_s)
-    return first, on_interval(grid, first, interval_s, step_s, altitude_m, words, courses_deg)
+    return first, on_interval(grid, first, interval_s, step_s, height_m, words, courses_deg)
 
 
-def on_interval(grid: np.ndarray, first_row: int, interval_s: float, step_s: float, altitude_m: np.ndarray,
+def on_interval(grid: np.ndarray, first_row: int, interval_s: float, step_s: float, height_m: np.ndarray,
                 words: Words, courses_deg: Sequence[float]) -> np.ndarray:
     """``grid`` (a sentence on its ``step_s`` rows) on the Δ rows ``first_row``, ``first_row + Δ / step_s``, …: one
-    row each, every word on the nearest (module docstring); ``altitude_m`` the altitude the grammar is read at, one per
+    row each, every word on the nearest (module docstring); ``height_m`` the height above E the grammar is read at, one per
     ``step_s`` row; ``courses_deg`` the candidates' courses."""
     every = interval_rows(interval_s, step_s)
     rows = np.arange(first_row, len(grid), every)
@@ -133,5 +133,5 @@ def on_interval(grid: np.ndarray, first_row: int, interval_s: float, step_s: flo
         if track is None or not same_track(wanted, track):
             out[position, HEADING] = words.heading_class(wanted, courses_deg[runway[step]])
             track = courses_deg[runway[step]] + words.heading_relative_deg(int(out[position, HEADING]))
-    check_grammar(out, np.asarray(altitude_m)[rows], words, len(courses_deg))
+    check_grammar(out, np.asarray(height_m)[rows], words, len(courses_deg))
     return out
