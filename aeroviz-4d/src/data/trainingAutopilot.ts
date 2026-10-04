@@ -1,147 +1,92 @@
 /**
  * trainingAutopilot.ts
  * --------------------
- * THE EXECUTOR, LIVE: one word's segment of the selected Training flight, flown by the backend at the moment it is
- * asked (`POST /autopilot/segment`, the `aeroviz_backend/autopilot_segment/` package). Design:
- * `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §4.7.
+ * THE EXECUTOR, LIVE: one word's segment of the selected Training flight's closed-loop sentence, flown by the backend at
+ * the moment it is asked (`POST /autopilot/segment`, the `aeroviz_backend/autopilot_segment/` package; the answer is
+ * written by its `payload.py`).
  *
- * A SEGMENT is the band the sentence bar draws and the user CLICKED: one column's word from the step it is said to the
- * step the next word of its column is said (`TrainingWordRun`), flown to where the word's own envelope ends
- * (`segmentStopRow`: the next word of its column; a heading word's a lead later, the next heading word told on the way as
- * the sentence says) — or, when that is the sentence's end, on to its outcome. Only the selected word is judged, by the
- * executor's judge. WHICH SENTENCE the word is of (`TrainingPick.source`) decides where the executor starts:
+ * A SEGMENT is the word the user CLICKED, flown every control cycle (1 s) from the cycle it is heard (Δ row × Δ, from the
+ * sentence's first predicted step) to the cycle the next word of its column is heard — the column's last word on to the
+ * flight's outcome, which the judge reads: the crossing and the DA check come back with it. The flight is flown from the
+ * first predicted step with the sentence's earlier words, so the aircraft is where those took it; the answer holds the
+ * part from the word on. NOTHING IS PRECOMPUTED: every request is flown again, and the answer says how far it lies from
+ * the exported flown states on the 2 s rows both have (`stored`).
  *
- *  • THE TRUTH's word: from the observed aircraft's state at that step, told the six words in force there, then the
- *    sentence's words, each where the observed aircraft heard it.
- *  • A MODEL's word (its own sentence, one sample): the request carries the model's words, and the backend flies them as
- *    the model's free generation flew them — from the observed state at the sentence's first step, each word heard at its
- *    own step — to the word's stop, answering the flight from the word on. The executor is deterministic, so that is the
- *    exported sample's own flight.
+ * The request names the word by its Δ row in `closedLoop[Δ].words` (the `row` of that Δ's events) and its column's NAME.
+ * The answer is refused unless it is the segment of the word the bar shows: its column, row, word and correction mark are
+ * the sentence's, and its first cycle is the word's.
  *
- * NOTHING IS PRECOMPUTED: no replay record, no overlay. Every request is flown again by the executor code the backend
- * runs — its stepper, one control cycle at a time, stopped at the segment's stop — under the executor spec written by
- * that code for the set's vocabulary; the answer says which spec, which code, how many cycles were flown and how long
- * each part took (`timing`).
- *
- * THE ANSWER IS BOUND TO THE FLIGHT ON SCREEN, or refused whole: the same set, flight and segment (its end is the
- * run's, its stop the word's envelope's), the same vocabulary spec, and the words the executor was told are the words the
- * sentence bar shows for that segment — the six in force at its first step, then every word said before its stop. A verdict drawn on another
- * sentence than the one shown is worse than none.
- *
- * NOTHING HERE IS COMPUTED: the flown track, the verdict and its heading band are the backend's (the judge's own);
- * this file checks bookkeeping and hands numbers to the views.
- *
- * SI units only: metres, m/s, degrees, seconds.
+ * Time. The answer counts 1 s cycles from the first predicted step; here its times are put on the flight's clock
+ * (`startS` of the closed loop added once), like every other track.
  */
 
 import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
-import { asNumber, attempt, Reader, type Parsed } from "./trainingReader";
+import { attempt, Reader, type Parsed } from "./trainingReader";
 import {
+  lastStateCycle,
   readCrossing,
-  readJudgedBand,
-  readWordVerdict,
-  TRAINING_BELOW_GLIDEPATH,
-  TRAINING_CROSSING_OUTCOMES,
-  TRAINING_PROCEDURE_ALTITUDES,
-  TRAINING_FREE_OUTCOMES,
-  type TrainingCrossing,
-  type TrainingFreeOutcome,
-  type TrainingAugmentation,
-  type TrainingProcedureMask,
-  type TrainingExecutorCheck,
-  type TrainingGeneratedSentence,
-  type TrainingSource,
-} from "./trainingOverlays";
-import { TRAINING_AUTOPILOT_COLOR, TRAINING_AUTOPILOT_OUTSIDE_COLOR } from "../utils/trainingWordColors";
-import {
-  sentenceColumnRuns,
+  rowAtTime,
   sentenceWordAt,
-  trainingTruthSentence,
-  trainingWordLabel,
+  trainingBandLabel,
+  trainingReadingOf,
+  unwrapDegrees,
   TRAINING_COLUMNS,
+  TRAINING_OUTCOMES,
+  TRAINING_RUNWAY_GO_AROUND,
   type TrainingColumn,
-  type TrainingFlight,
-  type TrainingHeadingBand,
+  type TrainingCrossing,
+  type TrainingOutcome,
   type TrainingSelection,
-  type TrainingSentence,
-  type TrainingSentenceEvent,
-  type TrainingVocabulary,
 } from "./trainingSample";
+import { TRAINING_AUTOPILOT_COLOR, TRAINING_FAILURE_COLOR } from "../utils/trainingWordColors";
 
 /** MIRROR of `aeroviz_backend/autopilot_segment/payload.py` `SCHEMA`: the backend's answer; anything else is refused by
- *  name (the backend's `MirrorTest` pins these four). */
-export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v8";
-/** MIRROR of `autopilot_segment/verdict.py` `STATUSES`: the selected word's verdict. */
-export const TRAINING_AUTOPILOT_STATUSES = ["inside", "outside", "not judged", "no check"] as const;
-export type TrainingAutopilotStatus = (typeof TRAINING_AUTOPILOT_STATUSES)[number];
-/** MIRROR of `autopilot_segment/payload.py` `SEGMENT_END`: the flight reached the point where its word's envelope ends. */
-export const TRAINING_AUTOPILOT_SEGMENT_END = "segment_end" as const;
+ *  name. A name changes with the payload's shape, on both sides, in one change. */
+export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v9";
+/** MIRROR of `payload.py` `SEGMENT_END`: the flight reached the point where its word's segment stops. */
+export const TRAINING_AUTOPILOT_SEGMENT_END = "segment_end";
 export const TRAINING_AUTOPILOT_PATH = "/autopilot/segment";
 /** This page, as the backend knows it: a request from the same page supersedes an older one still waiting or flying there
- *  (HTTP 409), so clicking through bands never queues segments nobody is looking at. One per page load: 128 random bits
- *  in hex — `getRandomValues`, not `randomUUID`, which exists only in a secure context, and the app is opened over plain
- *  http from other machines. */
+ *  (409). Random per page load. */
 export const TRAINING_AUTOPILOT_CLIENT_ID = Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)),
   (byte) => byte.toString(16).padStart(2, "0")).join("");
-/** The page's requests, numbered in the order it makes them (`seq`): the backend flies only the page's highest, whatever
- *  order they happen to arrive in. */
+/** The page's requests, numbered in the order it makes them (`seq`): the backend flies only the page's highest. */
 let requestSeq = 0;
 
-/** A model's own sentence as a request carries it (the sample on screen): its words from its first step, and the
- *  procedure's masks it was spoken under (its overlay's, with the digest of the data each read: the backend builds them
- *  again, refuses moved data, and cuts the flight where the glidepath lower edge stopped the sample). */
-export interface TrainingAutopilotSentence {
-  overlayId: string;
-  sample: number;
-  firstRow: number;
-  rows: number;
-  events: TrainingSentenceEvent[];
-  procedureMasks: TrainingProcedureMask[];
-  /** The augmented start it was spoken from (its overlay's `prior-generation-augmented` flight: the backend flies it from
-   *  there), or null from the flight's own. */
-  augmentation: TrainingAugmentation | null;
-}
-
-/** What the Training view asks for: the clicked word's segment of the selected flight — of its truth (``sentence``
- *  null), or of a model's own sentence of it. */
+/** What the Training view asks for: the clicked word's segment of the selected flight's closed-loop sentence at Δ. */
 export interface TrainingAutopilotRequest {
   airport: string;
   setId: string;
   flightKey: string;
+  rowIntervalS: number;
   column: TrainingColumn;
-  /** The step the selected word is said at: its segment's first step. */
+  /** The Δ row the word is said at (`closedLoop[Δ].events[].row`). */
   row: number;
-  sentence: TrainingAutopilotSentence | null;
 }
 
-/** A request's sentence as the sentence bar draws it. */
-export function requestSentence(request: TrainingAutopilotRequest, flight: TrainingFlight): TrainingSentence {
-  return request.sentence === null ? trainingTruthSentence(flight)
-    : { rows: request.sentence.rows, firstRow: request.sentence.firstRow, events: request.sentence.events };
-}
-
-/** The flown segment every control cycle, on the flight's own clock and axes (see the backend's `track_payload`). */
+/** The flown segment every control cycle, on the flight's clock. */
 export interface TrainingAutopilotTrack {
-  /** Seconds from the flight's first step: the segment's first step's time, then one cycle apart. */
+  /** The cycles (1 s) from the first predicted step, ascending by one from the word's. */
+  cycle: number[];
+  /** Flight time (s). */
   tS: number[];
   eM: number[];
   nM: number[];
   lon: number[];
   lat: number[];
-  altitudeM: number[];
+  altitudeMslM: number[];
   altitudeHaeM: number[];
+  /** Compass degrees in [0, 360). */
+  trackDeg: number[];
+  /** `trackDeg` continuous, on the branch of the judged track at its first point: what a chart plots. */
+  trackPlotDeg: number[];
   groundSpeedMps: number[];
   verticalRateMps: number[];
-  /** Unwrapped, on the observed smoothed track's branch at the segment's first step. */
-  trackDeg: number[];
-  /** The observed flight's distance flown at the segment's first step, plus the executor's own. */
-  distanceM: number[];
   /** The commands each cycle flew: one fewer than the states. */
   thrustFraction: number[];
   /** Positive: banked right (turning right). */
   bankRightDeg: number[];
   loadFactor: number[];
-  /** The attitude its aircraft is drawn in at each STATE (`trainingAttitude.ts`). */
   attitude: TrainingAttitude;
 }
 
@@ -150,182 +95,89 @@ export interface TrainingAutopilotSegment {
   setId: string;
   flightKey: string;
   datasetId: string;
+  rowIntervalS: number;
   computedUtc: string;
   /** Wall-clock seconds on the backend: the wait, then the parts that add up to `computeS`. */
-  timing: {
-    /** Waiting for the flight before it (the backend flies one at a time). */
-    waitS: number;
-    /** The set and the executor spec found. */
-    setupS: number;
-    /** The flight rebuilt from the data plane — or kept from an earlier request (`flightKept`). */
-    openS: number;
-    flightKept: boolean;
-    /** The segment set up for the executor (its sentence, clock and physics). */
-    prepareS: number;
-    /** The executor flying its `cycles` control cycles — what was computed, which may run past the judged outcome. */
-    flyS: number;
-    cycles: number;
-    /** The judge. */
-    judgeS: number;
-    /** The answer written. */
-    answerS: number;
-    /** The whole request once it began. */
-    computeS: number;
-  };
-  executor: {
-    spec: string;
-    specSha256: string;
-    /** The executor code the spec was written by — the code that flew this (the backend refuses any other). */
-    sourceSha256: string;
-    /** The word clock this flight was flown on: the spec's for the truth's words, "time" for a model's sentence. */
-    wordClock: string;
-    cycleS: number;
-    /** Control cycles per sentence step: the track's point `k * stepCycles` is the flight's step `segment.row + k`. */
-    stepCycles: number;
-    timeoutFactor: number;
-  };
+  timing: { waitS: number; openS: number; flyS: number; cycles: number; judgeS: number; answerS: number; computeS: number };
+  executor: { spec: string; specSha256: string; cycleS: number };
   artefact: string;
-  vocabularySpecSha256: string;
-  /** "own dynamics" or "stand-in dynamics" (a stand-in's errors are its aerodynamics, not the executor's). */
-  group: string;
-  /** Which sentence was flown: the truth's, or one sample of a model's own, flown again from its first step. */
-  source: { kind: "truth" } | {
-    kind: "model"; overlayId: string; sample: number; firstRow: number; augmentation: TrainingAugmentation | null;
-  };
   segment: {
     column: TrainingColumn;
     row: number;
-    /** Where the next word of its column is said (the sentence's length for the column's last word). */
-    endRow: number;
-    /** Where the flight stops: `segmentStopRow`. */
-    stopRow: number;
-    /** `stopRow` is the sentence's end: flown on to the outcome. */
-    toLanding: boolean;
-    /** The observed aircraft's time over the same steps (to the landing: to its threshold crossing); null for a model's
-     *  word, whose flight has no observed counterpart. */
-    observedS: number | null;
-    /** The words the executor was told, at the flight's steps, by step then column. */
-    told: Array<{ row: number; column: number; value: number }>;
-    /** When the executor heard the next word of its column, as a time of `track.tS` (the flight's clock; a point of
-     *  it, never the first or the last): past it the aircraft flies that word — a heading word's segment goes on only
-     *  because the word is judged to a lead after it (to its outcome when the sentence ends within that lead). null when
-     *  nothing is flown past it: the column's last word, another column's word (it stops before the next is told), a
-     *  flight that ended before it heard it or on the cycle it did. */
-    nextWordHeardS: number | null;
+    word: number;
+    correction: boolean;
+    startCycle: number;
+    /** The cycle the segment stops before; null: flown on to the outcome. */
+    stopCycle: number | null;
+    /** `TRAINING_AUTOPILOT_SEGMENT_END`, or the judge's outcome. */
+    end: typeof TRAINING_AUTOPILOT_SEGMENT_END | TrainingOutcome;
+    endCycle: number;
   };
-  end: {
-    /** `TRAINING_AUTOPILOT_SEGMENT_END`, or the judge's outcome (`TRAINING_EXECUTOR_OUTCOMES`), or — a model's sentence
-     *  spoken under the procedure's altitudes — `TRAINING_BELOW_GLIDEPATH`, where its sample was stopped. */
-    reason: typeof TRAINING_AUTOPILOT_SEGMENT_END | TrainingFreeOutcome;
-    /** null for a column's last word. */
-    reachedSegmentEnd: boolean | null;
-    /** At the segment's end: the executor minus the observed aircraft where the next word was said (the truth's only). */
-    offsetFromObserved: { horizontalM: number; aboveM: number; groundSpeedMps: number } | null;
-    /** From the selected word on. */
-    flownS: number;
-    crossing: TrainingCrossing | null;
-    /** Why the labeller's gate refused the flown segment (nothing is then judged). */
-    refused: string | null;
-  };
-  word: {
-    status: TrainingAutopilotStatus;
-    checks: TrainingExecutorCheck[];
-    reason: string | null;
-    /** A heading word the judge judged: its band over the flown rows, at the flight's steps. */
-    heading: TrainingHeadingBand | null;
-  };
-  limits: { cycles: number; bound: Record<string, number> };
   track: TrainingAutopilotTrack;
-  /** A heading word's flown segment as the judge read it: its step k is the flight's step `segment.row + k`. */
-  judgedTrackDeg: number[] | null;
-  /** The track's point at `segment.nextWordHeardS`, where its tail begins; null without one. */
-  tailFrom: number | null;
+  /** Flown to its outcome: the judge's crossing and DA check; null at a segment's end, or when the flight did not cross. */
+  crossing: TrainingCrossing | null;
+  /** The live flight against the exported flown states on the 2 s rows both have. */
+  stored: { rows: number; horizontalM: number; verticalM: number };
 }
 
-/** What the panel publishes for the sentence bar, the read-back window and the 3D scene. */
+/** What the panel publishes for the sentence bar, the read-back window and 3D. */
 export type TrainingAutopilotView =
   | { status: "flying"; request: TrainingAutopilotRequest }
   | { status: "failed"; request: TrainingAutopilotRequest; problem: string }
   /** `playedAt`: when the answer arrived, and the 3D scene began flying it out. */
   | { status: "ready"; request: TrainingAutopilotRequest; segment: TrainingAutopilotSegment; playedAt: number };
 
-/** Where a word's segment stops: where its own envelope ends — the step the next word of its column is said, and for a
- *  heading word a lead later (it is judged from a lead after it is said to a lead after the next heading word is) —
- *  never past its sentence's end (``rows``). MIRROR of the backend's `segment_of` / `model_segment`. */
-export function segmentStopRow(rows: number, column: TrainingColumn, endRow: number, headingLeadRows: number): number {
-  return Math.min(endRow + (column === "heading" ? headingLeadRows : 0), rows);
-}
-
-/** THE WORD THE LIVE EXECUTOR FLIES (`trainingPick`) — of the flight on screen, which the pick belongs to and is reset
- *  with (`AppContext`): the sentence it is a word of (``source``: null for the truth, or a model's sample), the word's
- *  column and the step it is said at, and which attempt at it — a new attempt at the same word flies it again. */
+/** THE WORD THE LIVE EXECUTOR FLIES (`trainingPick`) — of the flight on screen at Δ, which the pick belongs to and is reset
+ *  with: set only by a click, never by the cursor. */
 export interface TrainingPick {
-  source: TrainingSource | null;
+  rowIntervalS: number;
   column: TrainingColumn;
   row: number;
   attempt: number;
 }
 
-/** Two sources the same: both the truth, or the same sample of the same model. */
-export function sameSource(a: TrainingSource | null, b: TrainingSource | null): boolean {
-  return a === null || b === null ? a === b : a.overlayId === b.overlayId && a.sample === b.sample;
+/** The pick that flies ``column``'s word said at Δ row ``row`` now: a new attempt when it is the word already picked. */
+export function nextPick(current: TrainingPick | null, rowIntervalS: number, column: TrainingColumn, row: number): TrainingPick {
+  const same = current !== null && current.rowIntervalS === rowIntervalS && current.column === column && current.row === row;
+  return { rowIntervalS, column, row, attempt: same ? current.attempt + 1 : 0 };
 }
 
-/** The pick that flies ``column``'s word said at ``row`` of ``source``'s sentence now: a new attempt when it is the word
- *  picked already, else its first. */
-export function nextPick(current: TrainingPick | null, source: TrainingSource | null, column: TrainingColumn, row: number): TrainingPick {
-  const same = current !== null && sameSource(current.source, source) && current.column === column && current.row === row;
-  return { source, column, row, attempt: same ? current.attempt + 1 : 0 };
+/** The request for a pick of the flight on screen. */
+export function trainingAutopilotRequest(selection: TrainingSelection, pick: TrainingPick): TrainingAutopilotRequest {
+  return {
+    airport: selection.airport, setId: selection.setId, flightKey: selection.flight.flightKey,
+    rowIntervalS: pick.rowIntervalS, column: pick.column, row: pick.row,
+  };
 }
 
-/** The source a request flew. */
-function requestSource(request: TrainingAutopilotRequest): TrainingSource | null {
-  return request.sentence === null ? null : { overlayId: request.sentence.overlayId, sample: request.sentence.sample };
-}
-
-/** The live executor's view if it is of the flight on screen — its airport, set and flight — and of the sentence read
- *  (``source``: the truth's, or the model's sample on screen), else null: in the render after a switch, the view still
- *  published is the last flight's or the last sentence's, and is not drawn. */
+/** The live executor's view if it is of the flight on screen — its airport, set and flight — and of the reading on screen
+ *  (``intervalS``: its Δ; null for the open-loop reading, which the backend does not fly). */
 export function autopilotOnScreen(
-  view: TrainingAutopilotView | null, selection: TrainingSelection | null, source: TrainingSource | null,
+  view: TrainingAutopilotView | null, selection: TrainingSelection | null, intervalS: number | null,
 ): TrainingAutopilotView | null {
-  if (view === null || selection === null) return null;
+  if (view === null || selection === null || intervalS === null) return null;
   const { request } = view;
   return request.airport === selection.airport && request.setId === selection.setId
-    && request.flightKey === selection.flight.flightKey && sameSource(requestSource(request), source) ? view : null;
+    && request.flightKey === selection.flight.flightKey && request.rowIntervalS === intervalS ? view : null;
 }
 
-/** The word a request flies, as its sentence reads it: "heading 270°" — the word said at its step, whichever word the
- *  views have selected since. */
+/** The word a request flies, as the sentence reads it: "heading +15°". */
 export function autopilotWord(request: TrainingAutopilotRequest, selection: TrainingSelection): string {
-  const value = sentenceWordAt(requestSentence(request, selection.flight), request.column, request.row)!.value;
-  return `${request.column} ${trainingWordLabel(selection.vocabulary, selection.candidates, request.column, value)}`;
+  const reading = trainingReadingOf(selection.flight, selection.vocabulary.stepS, request.rowIntervalS);
+  const run = sentenceWordAt(reading, request.column, request.row)!;
+  return `${request.column} ${trainingBandLabel(run.event.says)}`;
 }
 
-/** The flown segment has a line to draw: two states or more (a dynamics failure in its first cycle keeps one — the
- *  bar's status line says what happened; the charts and 3D have nothing to draw). */
+/** The flown segment has a line to draw: two states or more (a dynamics failure in its first cycle keeps one). */
 export function autopilotHasLine(segment: TrainingAutopilotSegment): boolean {
   return segment.track.tS.length >= 2;
 }
 
-/** The flown track's points split where the executor heard the next word of the column (`tailFrom`): the word's own
- *  RUN, from where it was said to there, and the TAIL past it, sharing that point — a heading word's lead into the next
- *  heading word (on to the outcome when the sentence ends within it), flown only because the word is judged to a lead
- *  after that word — drawn faded and dashed everywhere. No tail: every point is the run. */
-export function autopilotRunAndTail(segment: TrainingAutopilotSegment): { run: number[]; tail: number[] } {
-  const points = segment.track.tS.map((_, index) => index);
-  const from = segment.tailFrom;
-  return from === null ? { run: points, tail: [] } : { run: points.slice(0, from + 1), tail: points.slice(from) };
-}
-
-/** The tail's opacity, in the charts and in 3D, and its dash in the charts (3D dashes it Cesium's way, shorter than an
- *  occluded line's). */
-export const AUTOPILOT_TAIL_OPACITY = 0.45;
-export const AUTOPILOT_TAIL_DASH = "4 3";
-
-/** The colour a flown segment is drawn in, everywhere: red when the selected word flew outside its envelope. */
+/** The colour a flown segment is drawn in, everywhere: blue, or the failure red when the flight was flown on to an outcome
+ *  other than a landing. */
 export function autopilotColour(segment: TrainingAutopilotSegment): string {
-  return segment.word.status === "outside" ? TRAINING_AUTOPILOT_OUTSIDE_COLOR : TRAINING_AUTOPILOT_COLOR;
+  const { end } = segment.segment;
+  return end === TRAINING_AUTOPILOT_SEGMENT_END || end === "landed" ? TRAINING_AUTOPILOT_COLOR : TRAINING_FAILURE_COLOR;
 }
 
 // ── flying it out in 3D ──────────────────────────────────────────────────────
@@ -339,16 +191,15 @@ export function autopilotPlaybackSpeedup(flownS: number): number {
   return Math.max(AUTOPILOT_PLAYBACK_MIN_SPEEDUP, flownS / AUTOPILOT_PLAYBACK_MAX_S);
 }
 
-/** How far into its segment the live executor's aircraft is at ``nowMs``, in simulated seconds: the fly-out's clock — the
- *  real time since ``playedAt`` times the speed-up, held at the segment's end once flown out. The 3D aircraft and the
- *  sentence bar's cursor both read it, so the two move together. */
+/** How far into its segment the live executor's aircraft is at ``nowMs``, in simulated seconds: the fly-out's clock —
+ *  shared by the 3D aircraft and the sentence bar's cursor, so they stay together. */
 export function autopilotPlaybackS(track: TrainingAutopilotTrack, playedAt: number, nowMs: number): number {
   const flownS = track.tS[track.tS.length - 1] - track.tS[0];
   return Math.min(Math.max(nowMs - playedAt, 0) / 1000 * autopilotPlaybackSpeedup(flownS), flownS);
 }
 
 /** Where the live executor is ``flownS`` seconds into its segment: the last point at or before it and the fraction of
- *  the way to the next (1 at and past the segment's end). */
+ *  the way to the next. */
 export function autopilotFlownAt(track: TrainingAutopilotTrack, flownS: number): { index: number; fraction: number } {
   const target = track.tS[0] + Math.max(flownS, 0);
   const last = track.tS.length - 1;
@@ -359,264 +210,112 @@ export function autopilotFlownAt(track: TrainingAutopilotTrack, flownS: number):
 }
 
 /** The aircraft's label at a flown point: the simulated time flown so far of the whole, the playback's speed-up, ground
- *  speed, geometric MSL height and bank — the command of the cycle it is in, the last cycle's at the end. */
+ *  speed, height and bank. */
 export function autopilotAircraftLabel(track: TrainingAutopilotTrack, index: number, speedup: number): string {
-  const bank = track.bankRightDeg[Math.min(index, track.bankRightDeg.length - 1)];
+  const bank = track.bankRightDeg.length === 0 ? 0 : track.bankRightDeg[Math.min(index, track.bankRightDeg.length - 1)];
   const flownS = track.tS[index] - track.tS[0];
   const totalS = track.tS[track.tS.length - 1] - track.tS[0];
   return `autopilot ${flownS.toFixed(0)} / ${totalS.toFixed(0)} s simulated ×${speedup.toFixed(0)} · ` +
-    `${track.groundSpeedMps[index].toFixed(0)} m/s · ${track.altitudeM[index].toFixed(0)} m · bank ` +
+    `${track.groundSpeedMps[index].toFixed(0)} m/s · ${track.altitudeMslM[index].toFixed(0)} m · bank ` +
     `${Math.abs(bank).toFixed(0)}°${Math.abs(bank) < 0.5 ? "" : bank > 0 ? " R" : " L"}`;
 }
 
-/** The flown segment at the flight's steps — the points the judge read (every `stepCycles`-th) — from its first step:
- *  their longitudes and latitudes, as many as the judged track (a heading word's), for its rows outside to be drawn on. */
-export function autopilotJudgedPoints(segment: TrainingAutopilotSegment): { lon: number[]; lat: number[] } {
-  const steps = segment.judgedTrackDeg?.length ?? 0;
-  const every = segment.executor.stepCycles;
-  return {
-    lon: Array.from({ length: steps }, (_, step) => segment.track.lon[step * every]),
-    lat: Array.from({ length: steps }, (_, step) => segment.track.lat[step * every]),
-  };
-}
+// ── the answer ───────────────────────────────────────────────────────────────
 
-/** The words a segment's sentence tells the executor, as the backend lists them, by step then column — the truth's: the
- *  six in force at the word's step, then every word said before the stop; a model's: its whole sentence from its first
- *  step to the stop (its flight is flown again from there). */
-export function segmentWords(
-  request: TrainingAutopilotRequest, flight: TrainingFlight, stopRow: number,
-): Array<{ row: number; column: number; value: number }> {
-  const plain = (events: TrainingSentenceEvent[]) => events.map(({ row: step, column, value }) => ({ row: step, column, value }))
-    .sort((a, b) => a.row - b.row || a.column - b.column);
-  if (request.sentence !== null) return plain(request.sentence.events.filter((event) => event.row < stopRow));
-  const { row } = request;
-  const opening = TRAINING_COLUMNS.map((_, column) => ({ row, column, value: flight.words.inForce[column][row] }));
-  return [...opening, ...plain(flight.words.events.filter((event) => event.row > row && event.row < stopRow))];
-}
-
-function parseTrack(reader: Reader, row: number, stepS: number): TrainingAutopilotTrack {
-  const tS = reader.numbers("tS");
+function parseTrack(reader: Reader, startS: number, referenceDeg: number): TrainingAutopilotTrack {
+  const cycle = reader.numbers("cycle");
   // one state is an answer too: a dynamics failure in the first cycle keeps only the state it started from
-  if (tS.length < 1) reader.fail("tS is empty");
-  if (Math.abs(tS[0] - row * stepS) > 1e-3) reader.fail(`starts at ${tS[0]} s, not at step ${row} (${row * stepS} s)`);
-  if (tS.some((value, index) => index > 0 && value <= tS[index - 1])) reader.fail("tS does not run forward");
-  const n = tS.length;
+  if (cycle.length < 1) reader.fail("cycle is empty");
+  const n = cycle.length;
+  cycle.forEach((value, index) => {
+    if (!Number.isInteger(value) || (index > 0 && value !== cycle[index - 1] + 1)) {
+      reader.fail(`cycle does not run forward one at a time at ${index}`);
+    }
+  });
+  const tS = reader.numbers("tS", n).map((value) => value + startS);
+  const trackDeg = reader.numbers("trackDeg", n);
   return {
-    tS, eM: reader.numbers("eM", n), nM: reader.numbers("nM", n), lon: reader.numbers("lon", n), lat: reader.numbers("lat", n),
-    altitudeM: reader.numbers("altitudeM", n), altitudeHaeM: reader.numbers("altitudeHaeM", n),
-    groundSpeedMps: reader.numbers("groundSpeedMps", n), verticalRateMps: reader.numbers("verticalRateMps", n),
-    trackDeg: reader.numbers("trackDeg", n), distanceM: reader.numbers("distanceM", n),
-    thrustFraction: reader.numbers("thrustFraction", n - 1), bankRightDeg: reader.numbers("bankRightDeg", n - 1),
-    loadFactor: reader.numbers("loadFactor", n - 1), attitude: readAttitude(reader.child("attitude"), n),
+    cycle, tS, eM: reader.numbers("eM", n), nM: reader.numbers("nM", n), lon: reader.numbers("lonDeg", n),
+    lat: reader.numbers("latDeg", n), altitudeMslM: reader.numbers("altitudeMslM", n), altitudeHaeM: reader.numbers("altitudeHaeM", n),
+    trackDeg, trackPlotDeg: unwrapDegrees(trackDeg, referenceDeg), groundSpeedMps: reader.numbers("groundSpeedMps", n),
+    verticalRateMps: reader.numbers("verticalRateMps", n), thrustFraction: reader.numbers("thrustFraction", n - 1),
+    bankRightDeg: reader.numbers("bankRightDeg", n - 1), loadFactor: reader.numbers("loadFactor", n - 1),
+    attitude: readAttitude(reader.child("attitude"), n),
   };
 }
 
-/** The segment the answer flew: the run on screen that was asked for, stopped where its envelope ends, told the words
- *  the sentence bar shows for it. */
-function readSegment(
-  segment: Reader, request: TrainingAutopilotRequest, flight: TrainingFlight, vocabulary: TrainingVocabulary,
-): TrainingAutopilotSegment["segment"] {
-  const sentence = requestSentence(request, flight);
-  const rows = sentence.rows;
-  const column = segment.oneOf("column", TRAINING_COLUMNS);
-  const row = segment.integer("row", sentence.firstRow, rows - 1);
-  if (column !== request.column || row !== request.row) {
-    segment.fail(`is ${column} from step ${row}, but ${request.column} from step ${request.row} was asked for`);
-  }
-  const run = sentenceColumnRuns(sentence, column).find((item) => item.row === row);
-  if (run === undefined) segment.fail(`no ${column} word is said at step ${row} of the sentence on screen`);
-  const endRow = segment.integer("endRow", row + 1, rows);
-  if (endRow !== run.endRow) segment.fail(`ends at step ${endRow}, but the word on screen is in force to step ${run.endRow}`);
-  const stopRow = segment.integer("stopRow", row + 1, rows);
-  const toLanding = segment.boolean("toLanding");
-  const stop = segmentStopRow(rows, column, endRow, vocabulary.headingLeadRows);
-  if (stopRow !== stop || toLanding !== (stopRow === rows)) {
-    segment.fail(`stops at step ${stopRow}${toLanding ? " (to the landing)" : ""}, but this word's envelope ends at step ${stop}`);
-  }
-  const told = segment.children("told").map((word) => ({
-    row: word.integer("row", 0, rows - 1), column: word.integer("column", 0, TRAINING_COLUMNS.length - 1),
-    value: word.count("value"),
-  }));
-  const shown = segmentWords(request, flight, stopRow);
-  const same = told.length === shown.length && told.every((word, index) =>
-    word.row === shown[index].row && word.column === shown[index].column && word.value === shown[index].value);
-  if (!same) {
-    segment.fail(`told the executor ${told.length} words that are not the ${shown.length} the sentence shows for this ` +
-      "segment: the backend flew another sentence of this flight");
-  }
-  // a model's word has no observed counterpart; the truth's has the observed aircraft's time over the same steps
-  if (request.sentence !== null && segment.raw("observedS") !== null) segment.fail("gives an observed time for a model's word");
-  const observedS = request.sentence === null ? segment.number("observedS") : null;
-  const nextWordHeardS = segment.nullableNumber("nextWordHeardS");
-  if (nextWordHeardS !== null && stopRow === endRow) {
-    segment.fail(`heard the next ${column} word at ${nextWordHeardS} s, but its segment stops before that word is told`);
-  }
-  return { column, row, endRow, stopRow, toLanding, observedS, told, nextWordHeardS };
-}
-
-/** How the flight ended: at its segment's end (with its offset from the observed aircraft there — the truth's only), or
- *  the judge's outcome — to the landing, only the latter. */
-/** ``stoppable``: a model's sentence spoken under the procedure's altitudes — the only flight the glidepath lower edge
- *  stops. */
-function readEnd(end: Reader, toLanding: boolean, truth: boolean, stoppable: boolean): TrainingAutopilotSegment["end"] {
-  const reason = end.oneOf("reason", [TRAINING_AUTOPILOT_SEGMENT_END, ...TRAINING_FREE_OUTCOMES] as const);
-  if (reason === TRAINING_BELOW_GLIDEPATH && !stoppable) {
-    end.fail(truth ? "the truth's flight is never stopped below the glidepath"
-      : "the model's sentence was spoken without the procedure's altitudes: it is never stopped below the glidepath");
-  }
-  const reachedSegmentEnd = end.nullableBoolean("reachedSegmentEnd");
-  if ((reachedSegmentEnd === null) !== toLanding) {
-    end.fail(toLanding ? "the column's last word is flown to its outcome, not to a segment end"
-      : "says nothing of whether the segment's end was reached");
-  }
-  if (reason === TRAINING_AUTOPILOT_SEGMENT_END && reachedSegmentEnd !== true) end.fail("ended at a segment end it did not reach");
-  const offset = end.nullableChild("offsetFromObserved");
-  if ((offset !== null) !== (truth && reason === TRAINING_AUTOPILOT_SEGMENT_END)) {
-    end.fail("offsetFromObserved is given exactly when the truth's flight ended at its segment's end");
-  }
-  const crossing = end.nullableChild("crossing");
-  if ((crossing !== null) !== TRAINING_CROSSING_OUTCOMES.includes(reason as TrainingFreeOutcome)) {
-    end.fail(`ends ${reason} ${crossing === null ? "with no crossing" : "and carries a crossing"}`);
-  }
-  return {
-    reason, reachedSegmentEnd,
-    offsetFromObserved: offset === null ? null : {
-      horizontalM: offset.number("horizontalM"), aboveM: offset.number("aboveM"), groundSpeedMps: offset.number("groundSpeedMps"),
-    },
-    flownS: end.number("flownS"),
-    crossing: crossing === null ? null : readCrossing(crossing),
-    refused: end.nullableString("refused"),
-  };
-}
-
-function readTiming(timing: Reader, states: number): TrainingAutopilotSegment["timing"] {
-  const cycles = timing.count("cycles");
-  if (states - 1 > cycles) timing.fail(`${cycles} cycles flown, but the track holds ${states} states`);
-  return {
-    waitS: timing.number("waitS"), setupS: timing.number("setupS"), openS: timing.number("openS"),
-    flightKept: timing.boolean("flightKept"), prepareS: timing.number("prepareS"), flyS: timing.number("flyS"), cycles,
-    judgeS: timing.number("judgeS"), answerS: timing.number("answerS"), computeS: timing.number("computeS"),
-  };
-}
-
-/** What the Training view asks the backend for: the picked word's segment of the flight on screen — of the truth, or of
- *  the model's sample the pick names (``model``: that sample as the view read it, the procedure's masks its overlay
- *  says it was spoken under, and the augmented start it was spoken from — null from the flight's own). */
-export function trainingAutopilotRequest(
-  selection: TrainingSelection, pick: TrainingPick,
-  model: { sentence: TrainingGeneratedSentence; procedureMasks: TrainingProcedureMask[]; augmentation: TrainingAugmentation | null } | null,
-): TrainingAutopilotRequest {
-  if ((pick.source === null) !== (model === null)) throw new Error("a model's pick is flown with its sentence, the truth's without");
-  return {
-    airport: selection.airport, setId: selection.setId, flightKey: selection.flight.flightKey, column: pick.column, row: pick.row,
-    sentence: pick.source === null || model === null ? null : {
-      overlayId: pick.source.overlayId, sample: pick.source.sample, firstRow: model.sentence.firstRow, rows: model.sentence.rows,
-      events: model.sentence.events.map(({ row, column, value }) => ({ row, column, value })),
-      procedureMasks: model.procedureMasks.map(({ name, dataSha256 }) => ({ name, dataSha256 })),
-      augmentation: model.augmentation === null ? null : { ...model.augmentation },
-    },
-  };
-}
-
-/** Parse the backend's answer against the request and the flight on screen — all or nothing. */
+/** The backend's answer against the request it answers and the sentence on screen: refused by name unless it is the
+ *  segment of the word the bar shows. */
 export function parseTrainingAutopilot(
   raw: unknown, request: TrainingAutopilotRequest, selection: TrainingSelection,
 ): Parsed<TrainingAutopilotSegment> {
   return attempt(() => {
-    const answer: Reader = Reader.of(raw, "the autopilot's answer");
-    if (answer.raw("schema") !== TRAINING_AUTOPILOT_SCHEMA) {
-      answer.fail(`schema is ${JSON.stringify(answer.raw("schema"))}, expected ${JSON.stringify(TRAINING_AUTOPILOT_SCHEMA)}`);
+    const answer = Reader.of(raw, "autopilot answer");
+    answer.oneOf("schema", [TRAINING_AUTOPILOT_SCHEMA]);
+    if (!answer.boolean("ok")) answer.fail("ok is false");
+    for (const key of ["airport", "setId", "flightKey"] as const) {
+      if (answer.string(key) !== request[key]) answer.fail(`${key} is ${answer.raw(key)}, but ${request[key]} was asked for`);
     }
-    const { vocabulary, flight } = selection;
-    if (request.airport !== selection.airport || request.setId !== selection.setId || request.flightKey !== flight.flightKey) {
-      answer.fail(`answers ${request.airport} ${request.setId} ${request.flightKey}, but ${selection.airport} ` +
-        `${selection.setId} ${flight.flightKey} is on screen`);
-    }
-    const echo = {
-      airport: answer.string("airport"), setId: answer.string("setId"), flightKey: answer.string("flightKey"),
-      datasetId: answer.string("datasetId"),
-    };
-    if (echo.airport !== request.airport || echo.setId !== request.setId || echo.flightKey !== request.flightKey
-        || echo.datasetId !== flight.datasetId) {
-      answer.fail(`flew ${echo.airport} ${echo.setId} ${echo.datasetId}, but ${request.airport} ${request.setId} ` +
-        `${flight.datasetId} was asked for`);
-    }
-    const vocabularySpecSha256 = answer.string("vocabularySpecSha256");
-    if (vocabularySpecSha256 !== vocabulary.specSha256) {
-      answer.fail(`flew vocabulary ${vocabularySpecSha256.slice(0, 12)}, the set on screen is ${vocabulary.specSha256.slice(0, 12)}`);
-    }
-    const source = answer.child("source");
-    const kind = source.oneOf("kind", ["truth", "model"] as const);
-    const moved = kind === "truth" ? null : source.nullableChild("augmentation");
-    const flownSource: TrainingAutopilotSegment["source"] = kind === "truth" ? { kind }
-      : { kind, overlayId: source.string("overlayId"), sample: source.count("sample"), firstRow: source.count("firstRow"),
-        augmentation: moved === null ? null : { rotationDeg: moved.number("rotationDeg"), altitudeM: moved.number("altitudeM"),
-          speedScale: moved.number("speedScale") } };
-    const asked = request.sentence;
-    // the start it was flown from is the one asked for: none, or the same move
-    const sameStart = (flown: TrainingAugmentation | null, wanted: TrainingAugmentation | null) => (flown === null || wanted === null
-      ? flown === wanted
-      : flown.rotationDeg === wanted.rotationDeg && flown.altitudeM === wanted.altitudeM && flown.speedScale === wanted.speedScale);
-    if (flownSource.kind === "truth" ? asked !== null
-      : asked === null || flownSource.overlayId !== asked.overlayId || flownSource.sample !== asked.sample
-        || flownSource.firstRow !== asked.firstRow || !sameStart(flownSource.augmentation, asked.augmentation)) {
-      source.fail(`flew ${flownSource.kind === "truth" ? "the truth" : `${flownSource.overlayId} #${flownSource.sample}`}, but ` +
-        `${asked === null ? "the truth" : `${asked.overlayId} #${asked.sample}`} was asked for`);
-    }
-    const segment = readSegment(answer.child("segment"), request, flight, vocabulary);
+    const rowIntervalS = answer.number("rowIntervalS");
+    if (rowIntervalS !== request.rowIntervalS) answer.fail(`rowIntervalS is ${rowIntervalS}, but ${request.rowIntervalS} was asked for`);
+    const { flight } = selection;
+    const reading = trainingReadingOf(flight, selection.vocabulary.stepS, request.rowIntervalS);
+    const closed = reading.closed!;
     const executor = answer.child("executor");
     const cycleS = executor.number("cycleS");
-    const stepCycles = vocabulary.stepS / cycleS;
-    if (!Number.isInteger(stepCycles) || stepCycles < 1) executor.fail(`a ${cycleS} s cycle does not divide the ${vocabulary.stepS} s step`);
-    const track = parseTrack(answer.child("track"), segment.row, vocabulary.stepS);
-    const end = readEnd(answer.child("end"), segment.toLanding, flownSource.kind === "truth",
-      request.sentence !== null && request.sentence.procedureMasks.some((item) => item.name === TRAINING_PROCEDURE_ALTITUDES));
-    const heardS = segment.nextWordHeardS;
-    const tailFrom = heardS === null ? null : track.tS.findIndex((time) => Math.abs(time - heardS) <= 1e-3);
-    if (tailFrom === -1) answer.fail(`the next ${segment.column} word was heard at ${heardS} s, not a point of the flown track`);
-    // heard on the word's own first point, or on the track's last (nothing flown past it: the backend says null)
-    if (tailFrom === 0 || tailFrom === track.tS.length - 1) {
-      answer.fail(`the next ${segment.column} word was heard at ${heardS} s, the flown track's ${tailFrom === 0 ? "first" : "last"} point`);
-    }
+    if (cycleS !== closed.cycleS) executor.fail(`cycleS is ${cycleS} s, but the set's executor cycle is ${closed.cycleS} s`);
 
-    // ── the selected word's verdict: a heading word's band and the track its judge read come together ──
-    const word = answer.child("word");
-    const verdict = readWordVerdict(word, TRAINING_AUTOPILOT_STATUSES, end.refused);
-    const judgedTrackDeg = answer.nullableNumbers("judgedTrackDeg");
-    if ((word.raw("heading") !== null) !== (judgedTrackDeg !== null)) word.fail("a heading band comes with the track its judge read");
-    if (judgedTrackDeg !== null && segment.column !== "heading") word.fail(`a ${segment.column} word carries a heading band`);
-    if (judgedTrackDeg !== null && end.refused !== null) word.fail("carries a heading band, but the gate refused the flown track");
-    let heading: TrainingHeadingBand | null = null;
-    if (judgedTrackDeg !== null) {
-      const misplaced = judgedTrackDeg.findIndex((_, step) =>
-        !(Math.abs(track.tS[step * stepCycles] - (segment.row + step) * vocabulary.stepS) <= 1e-3));
-      if (misplaced >= 0) answer.fail(`judgedTrackDeg's step ${misplaced} is not a step of the flown track`);
-      // Its rows are FLOWN steps, and end by the track its judge read: where the executor heard the next heading word
-      // (plus the lead) is its own step, not the sentence's — lagging the observed aircraft on the track clock, it hears
-      // it later — so the segment's stop, a sentence step, does not bound them.
-      const targetDeg = vocabulary.headingTargetsDeg[sentenceWordAt(requestSentence(request, flight), "heading", segment.row)!.value];
-      heading = readJudgedBand(word, verdict, segment.row, targetDeg, vocabulary, segment.row + judgedTrackDeg.length);
+    const segment = answer.child("segment");
+    const column = TRAINING_COLUMNS[segment.integer("column", 0, TRAINING_COLUMNS.length - 1)];
+    const row = segment.count("row");
+    if (column !== request.column || row !== request.row) {
+      segment.fail(`is ${column} at Δ row ${row}, but ${request.column} at Δ row ${request.row} was asked for`);
     }
-    const limits = answer.child("limits");
+    const run = sentenceWordAt(reading, column, row);
+    if (run === null || run.row !== row) return segment.fail(`no ${column} word is said at Δ row ${row} of the sentence on screen`);
+    const word = segment.integer("word", TRAINING_RUNWAY_GO_AROUND, Number.MAX_SAFE_INTEGER);
+    const correction = segment.boolean("correction");
+    if (word !== run.event.value || correction !== run.event.correction) {
+      segment.fail(`is word ${word}${correction ? " (a correction)" : ""}, but the sentence says word ${run.event.value}` +
+        `${run.event.correction ? " (a correction)" : ""} there: the backend flew another sentence of this flight`);
+    }
+    const startCycle = segment.count("startCycle");
+    if (startCycle * cycleS !== row * request.rowIntervalS) {
+      segment.fail(`startCycle ${startCycle} (${startCycle * cycleS} s) is not Δ row ${row} (${row * request.rowIntervalS} s)`);
+    }
+    const stopCycle = segment.nullableCount("stopCycle");
+    const end = segment.oneOf("end", [TRAINING_AUTOPILOT_SEGMENT_END, ...TRAINING_OUTCOMES] as const);
+    if (end === TRAINING_AUTOPILOT_SEGMENT_END && stopCycle === null) segment.fail("ended at a segment end it has none of");
+    const endCycle = segment.count("endCycle");
+
+    const track = parseTrack(answer.child("track"), closed.startS,
+      closed.flown.trackPlotDeg[rowAtTime(closed.flown.tS, closed.startS + startCycle * cycleS)]);
+    if (track.cycle[0] !== startCycle) answer.fail(`track starts at cycle ${track.cycle[0]}, not at the word's cycle ${startCycle}`);
+    // a segment stopped at its end has its last state at `endCycle`; a flight flown to its outcome at the last state the judge
+    // keeps (`lastStateCycle`: a dynamics failure's failed state is left out)
+    const lastCycle = end === TRAINING_AUTOPILOT_SEGMENT_END ? endCycle : lastStateCycle(end, endCycle);
+    if (track.cycle[track.cycle.length - 1] !== lastCycle) {
+      answer.fail(`track ends at cycle ${track.cycle[track.cycle.length - 1]}, but a segment that ended at cycle ${endCycle} (${end}) ends at ${lastCycle}`);
+    }
+    const crossingReader = answer.nullableChild("crossing");
+    if ((crossingReader !== null) && end === TRAINING_AUTOPILOT_SEGMENT_END) {
+      answer.fail("gives a crossing for a flight stopped at its segment's end");
+    }
+    const stored = answer.child("stored");
+    const timing = answer.child("timing");
     return {
-      ...echo,
-      computedUtc: answer.string("computedUtc"),
-      timing: readTiming(answer.child("timing"), track.tS.length),
-      executor: {
-        spec: executor.string("spec"), specSha256: executor.string("specSha256"), sourceSha256: executor.string("sourceSha256"),
-        wordClock: executor.string("wordClock"), cycleS, stepCycles, timeoutFactor: executor.number("timeoutFactor"),
+      airport: request.airport, setId: request.setId, flightKey: request.flightKey, datasetId: answer.string("datasetId"),
+      rowIntervalS, computedUtc: answer.string("computedUtc"),
+      timing: {
+        waitS: timing.number("waitS"), openS: timing.number("openS"), flyS: timing.number("flyS"), cycles: timing.count("cycles"),
+        judgeS: timing.number("judgeS"), answerS: timing.number("answerS"), computeS: timing.number("computeS"),
       },
+      executor: { spec: executor.string("spec"), specSha256: executor.string("specSha256"), cycleS },
       artefact: answer.string("artefact"),
-      vocabularySpecSha256,
-      group: answer.string("group"),
-      source: flownSource,
-      segment,
-      end,
-      word: { status: verdict.status, checks: verdict.checks, reason: verdict.reason, heading },
-      limits: { cycles: limits.count("cycles"), bound: limits.record("bound", asNumber) },
+      segment: { column, row, word, correction, startCycle, stopCycle, end, endCycle },
       track,
-      judgedTrackDeg,
-      tailFrom,
+      crossing: crossingReader === null ? null : readCrossing(crossingReader, selection.candidates.length),
+      stored: { rows: stored.count("rows"), horizontalM: stored.number("horizontalM"), verticalM: stored.number("verticalM") },
     };
   });
 }

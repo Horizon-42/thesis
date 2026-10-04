@@ -20,18 +20,9 @@ from ts_transformer.data.dataset import (
     build_series,
     window_anchors,
 )
-from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.tests.support_prediction import series as _series
 
 AIRPORT, RUNWAY = "KRDU", "05L"
-
-
-def _series(n_flights=8, **config_overrides):
-    """Synthetic KRDU arrivals, built into FlightSeries. Returns ``(series, config)``."""
-    config = TSConfig(**config_overrides)
-    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3)
-    series, report = build_series(flights, config, airport=AIRPORT)
-    assert report.built == n_flights, report.format()
-    return series, config
 
 
 def _fitted_tail_flight():

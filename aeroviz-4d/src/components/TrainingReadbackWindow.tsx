@@ -1,58 +1,46 @@
 /**
  * TrainingReadbackWindow.tsx
  * --------------------------
- * The read-back check: one flight's sentence against its track, envelope by envelope. Design:
- * `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`. The charts are `training/Readback*.tsx` over one shared model
- * (`training/readbackModel.ts`):
+ * The read-back check: one flight's sentence against its track, envelope by envelope. The charts are
+ * `training/Readback*.tsx` over one shared model (`training/readbackModel.ts`):
  *
- *  • PLAN VIEW (the airport frame, one scale on both axes): the runways, the capture corridor and turn, the track, the
- *    words' issues, the clearance, the capture, the end of the sentence; the rows a heading band judged outside, red.
- *  • HEADING against time: each heading word's BAND — its target ± the heading tolerance over the rows it is judged on
- *    — with its rows outside red; the capture turn onto the course; the course band after the capture.
- *  • ALTITUDE against the horizontal distance flown — the axis the tubes are defined on: the tubes, the angle words that
- *    re-anchor them, the runway's elevation.
- *  • SPEED against time: each word's transition and band, the "unspecified" spans.
+ *  • PLAN VIEW (the airport frame, one scale on both axes): the runways, the observed track, the flown path of a
+ *    closed-loop reading, the words it added, the DA point, the live segment; the rows a heading band judged outside, red.
+ *  • HEADING against flight time: each heading word's BAND — its target ± the heading tolerance over the rows it is
+ *    judged on — with its rows outside red.
+ *  • ALTITUDE against flight time: each altitude word's tube (a level above the airport elevation E, in MSL), the angle
+ *    words, the DA point.
+ *  • SPEED against flight time: each word's band and the "unspecified" spans.
  *
  * WHAT IS SELECTED STANDS OUT, THE REST RECEDES: yellow is the selected word alone (`column`, and its word in force at the
  * cursor) — its envelope's edge, and the rows it is in force over the track and over the one chart that plots its
  * signal; every other word's envelope fades. Hovering moves the cursor only; a click on a chart selects its column.
  *
- * EVERY SHAPE IS THE EXPORTER'S: bands, row verdicts and tubes are numbers computed in Python, every verdict the
- * labeller's; this window draws them. The smoothed signal is the bright line (what the labeller read), the raw rows
- * faint behind it, red the rows counted outside.
+ * EVERY SHAPE IS THE EXPORTER'S: bands, row verdicts and tubes are numbers computed in Python, every verdict the judge's
+ * or the labeller's; this window draws them. A closed-loop reading judges the FLOWN path (teal) with the observed track
+ * (white) beside it; the labelled reading judges the observed track.
  *
- * THE EXECUTOR'S REPLAY (`executor`, dashed teal) runs on its OWN clock and distance flown — it flies at its own pace,
- * so the axes hold both and nothing is aligned; its heading bands are drawn from where IT was told each word. THE LIVE
- * SEGMENT (`autopilot`, solid, blue or red by its verdict) starts where the observed aircraft was when its word was said,
- * on the flight's clock, so its lines begin on the observed ones and part from them; past where it heard the next word
- * of its column (a heading word's lead into the next heading word) it goes on faded and dashed, its TAIL. Each says what
- * it is in one line
- * below the charts, only when it is there.
+ * THE FLOWN FLIGHT's end is written below the charts — the judge's outcome, the threshold crossing and the DA check's
+ * values — and THE LIVE SEGMENT (solid, blue or red by how it ended) says what it is in one line, only when it is there.
  */
 
 import type { TrainingLayers } from "../context/AppContext";
 import {
-  TRAINING_CAPTURE_TURN_COLOR,
-  TRAINING_CORRIDOR_COLOR,
+  TRAINING_CORRECTION_COLOR,
+  TRAINING_DECISION_FAIL_COLOR,
+  TRAINING_DECISION_PASS_COLOR,
   TRAINING_EXECUTOR_COLOR,
   TRAINING_HEADING_BAND_COLOR,
   TRAINING_OUTSIDE_COLOR,
-  TRAINING_RAW_COLOR,
   TRAINING_SPEED_COLOR,
   TRAINING_TRACE_COLOR,
   TRAINING_TUBE_COLOR,
   TRAINING_WORD_COLOR,
+  trainingOutcomeColour,
 } from "../utils/trainingWordColors";
-import {
-  TRAINING_COLUMN_INDEX,
-  type TrainingCandidate,
-  type TrainingColumn,
-  type TrainingFlight,
-  type TrainingVocabulary,
-} from "../data/trainingSample";
-import type { TrainingExecutorFlight } from "../data/trainingOverlays";
-import { AUTOPILOT_TAIL_DASH, AUTOPILOT_TAIL_OPACITY, autopilotColour, type TrainingAutopilotSegment } from "../data/trainingAutopilot";
-import { TRAINING_OUTCOME_TAG, TRAINING_VERDICT_TEXT } from "../data/trainingText";
+import { closedCycleTimeS, sentenceWordAt, trainingBandLabel, wordsOutside, type TrainingColumn, type TrainingReading, type TrainingSelection } from "../data/trainingSample";
+import { autopilotColour, type TrainingAutopilotSegment } from "../data/trainingAutopilot";
+import { checkMark, crossingText, replayText, segmentEndText, TRAINING_OUTCOME_TAG } from "../data/trainingText";
 import useMeasuredWidth from "../hooks/useMeasuredWidth";
 import TrainingWindow from "./training/TrainingWindow";
 import { SwatchIcon, type Swatch } from "./training/chartKit";
@@ -67,95 +55,71 @@ const DEFAULT_W = 980;
 const MIN_W = 420;
 
 export interface TrainingReadbackWindowProps {
-  flight: TrainingFlight;
-  vocabulary: TrainingVocabulary;
-  candidates: TrainingCandidate[];
+  selection: TrainingSelection;
+  reading: TrainingReading;
   layers: TrainingLayers;
   cursorS: number;
-  /** The cursor is on the flight (`cursorOnFlight`). */
-  cursorOn: boolean;
   onCursorChange: (seconds: number) => void;
   /** The selected word class; its word in force at the cursor is the one drawn yellow. */
   column: TrainingColumn | null;
   onColumnChange: (column: TrainingColumn) => void;
   onClose: () => void;
-  /** The executor's replay of this flight, when its overlay is on; null otherwise. */
-  executor: TrainingExecutorFlight | null;
   /** The picked word's segment, flown live (`trainingAutopilot`, ready); null otherwise. */
   autopilot: TrainingAutopilotSegment | null;
-}
-
-/** The executor's replay, in one line (null when it is off); what its lines are, in the title. */
-function replaySlot(m: ReadbackModel, executor: TrainingExecutorFlight): { text: string; title: string } {
-  if (!executor.flown) return { text: `not flown: ${executor.group}.`, title: "the replay does not fly this flight" };
-  const outcome = `${TRAINING_OUTCOME_TAG[executor.outcome]} on ${executor.group}`;
-  if (m.flownTrack === null) return { text: `${outcome} within its first step: no flown track to draw.`, title: outcome };
-  return {
-    text: `${outcome}; dashed teal, on its own clock`,
-    title: "Its flown track, and its heading, altitude and ground speed on its own clock and its own distance flown: it " +
-      "flies at its own pace from row 0, each word said where the observed aircraft heard it, so its lines do not line up " +
-      "with the observed ones. Its heading words' bands are the teal outlines, from where IT was told each word plus the " +
-      "lead, its rows outside them red (dashed: on the flown track as its judge read it); its other words are judged on " +
-      "envelopes re-drawn from where it was told them — the sentence bar's dots.",
-  };
 }
 
 /** The colours the charts use, in one row; what each is, in its title. */
 function footerSwatches(m: ReadbackModel): Array<{ key: string; swatch: Swatch; text: string; title: string }> {
   const { vocabulary } = m;
   return [
-    { key: "trace", swatch: { kind: "line", colour: TRAINING_TRACE_COLOR }, text: "smoothed signal",
-      title: `what the labeller read: track ${vocabulary.smoothingS.track} s, altitude ${vocabulary.smoothingS.altitude} s, ` +
-        `speed ${vocabulary.smoothingS.speed} s; the raw rows are the faint line behind it` },
-    { key: "raw", swatch: { kind: "line", colour: TRAINING_RAW_COLOR }, text: "raw", title: "the raw rows" },
+    { key: "trace", swatch: { kind: "line", colour: TRAINING_TRACE_COLOR }, text: "observed track",
+      title: "the observed flight, on the 2 s rows of the data" },
+    ...(m.flown ? [{ key: "flown", swatch: { kind: "line", colour: TRAINING_EXECUTOR_COLOR } as Swatch, text: "flown path",
+      title: "the closed-loop sentence flown by the executor from the first predicted step; the envelopes judge it" }] : []),
     { key: "heading", swatch: { kind: "area", colour: TRAINING_HEADING_BAND_COLOR, opacity: 0.3 }, text: "heading band",
-      title: "a heading word's band: its target ± the tolerance over the rows it is judged on (the numbers: the details page's Vocabulary)" },
-    { key: "capture", swatch: { kind: "area", colour: TRAINING_CAPTURE_TURN_COLOR, opacity: 0.2, dash: "3 2" }, text: "capture turn",
-      title: "from the clearance onto the course" },
-    { key: "corridor", swatch: { kind: "area", colour: TRAINING_CORRIDOR_COLOR, opacity: 0.3 }, text: "corridor",
-      title: "the capture corridor, and the course band after the capture" },
+      title: `a heading word's band: its target track ± ${vocabulary.headingToleranceDeg}° over the rows it is judged on, from ` +
+        `${vocabulary.headingLeadS} s after it is said` },
     { key: "tube", swatch: { kind: "area", colour: TRAINING_TUBE_COLOR, opacity: 0.3 }, text: "altitude tube",
-      title: "an altitude word's tube, re-anchored at every angle word" },
+      title: "an altitude word's tube, re-anchored at every angle word; heights are MSL, the level is above the airport elevation E" },
     { key: "speed", swatch: { kind: "area", colour: TRAINING_SPEED_COLOR, opacity: 0.3 }, text: "speed band",
-      title: "a speed word: its transition, then its band; grey: \"unspecified\", the pilot's own speed" },
+      title: "a speed word: the transition to it (dashed), then its band; grey: speed left to the pilot" },
     { key: "outside", swatch: { kind: "line", colour: TRAINING_OUTSIDE_COLOR }, text: "outside",
-      title: "rows the labeller counted outside, or an envelope whose check failed" },
+      title: "rows the judge counted outside a band, or an envelope whose check failed" },
     { key: "selected", swatch: { kind: "line", colour: TRAINING_WORD_COLOR }, text: "selected word",
       title: "the class chosen in the sentence bar, or by clicking a chart, at the cursor" },
-    ...(m.flownTrack ? [{ key: "executor", swatch: { kind: "line", colour: TRAINING_EXECUTOR_COLOR, dash: "5 3" } as Swatch,
-      text: "executor replay", title: "the executor's replay, on its own clock" }] : []),
+    ...(m.closed ? [
+      { key: "correction", swatch: { kind: "area", colour: TRAINING_CORRECTION_COLOR, opacity: 0.6 } as Swatch, text: "correction",
+        title: "a word the closed-loop reading added to the labelled sentence to bring the flown path back to the observed one" },
+      { key: "da", swatch: { kind: "point", colour: "none", ring: TRAINING_DECISION_PASS_COLOR } as Swatch, text: "DA point",
+        title: "the decision-altitude check of the threshold crossing: green passed, red failed" },
+    ] : []),
     ...(m.live ? [{ key: "autopilot", swatch: { kind: "line", colour: m.liveColour } as Swatch, text: "autopilot",
-      title: "the picked word's segment, flown live" }] : []),
-    ...(m.liveTail.length >= 2 ? [{ key: "autopilot-tail",
-      swatch: { kind: "line", colour: m.liveColour, dash: AUTOPILOT_TAIL_DASH, opacity: AUTOPILOT_TAIL_OPACITY } as Swatch,
-      text: "autopilot tail",
-      title: "past where it heard the next word of the column: already flying that word, still judged for the picked one" }] : []),
+      title: "the clicked word's segment, flown live" }] : []),
   ];
 }
 
 export default function TrainingReadbackWindow(props: TrainingReadbackWindowProps) {
-  const { flight, cursorS, onCursorChange, onColumnChange, onClose, executor } = props;
+  const { selection, reading, cursorS, onCursorChange, onColumnChange, onClose, autopilot } = props;
+  const { flight } = selection;
   const [frame, width] = useMeasuredWidth(MIN_W, DEFAULT_W);
   const m = readbackModel({ ...props, width });
-  const replay = executor === null ? null : replaySlot(m, executor);
-  // the live answer is named whether or not it has a line to draw (`m.live`)
-  const live = props.autopilot;
-  const liveWord = live === null ? null
-    : m.label(live.segment.column, flight.words.inForce[TRAINING_COLUMN_INDEX[live.segment.column]][live.segment.row]);
-  const liveTitle = "The picked word's segment, flown by the executor when it was picked, from the observed state where the " +
-    "word was said — its track, altitude (against the distance flown, from the observed aircraft's there) and ground speed " +
-    "on the flight's own clock." + (m.liveBand ? " Its heading band is the outline on the heading chart, as its judge read " +
-    "the flown segment, its rows outside red." : "");
+  const live = autopilot;
+  const liveWord = live === null ? null : sentenceWordAt(reading, live.segment.column, live.segment.row)!.event;
+  const liveTitle = "The clicked word's segment, flown by the executor when it was clicked: the closed-loop flight flown again " +
+    "from the first predicted step, its track, altitude and ground speed from the word on (flight time). It lies " +
+    `${live === null ? 0 : live.stored.horizontalM.toFixed(3)} m horizontally and ${live === null ? 0 : live.stored.verticalM.toFixed(3)} m ` +
+    "vertically from the exported flown states on the 2 s rows both have.";
   const swatches = footerSwatches(m);
+  const replay = m.closed === null ? null : m.closed.replay;
 
   return (
     <TrainingWindow title="Read-back check" closeLabel="Close the read-back check" cursorS={cursorS} cursorRow={m.cursorRow}
-      cursorOn={m.cursorOn}
       onClose={onClose}
       chips={<>
         <span>{flight.callsign}</span>
         <span>runway {flight.runway}</span>
         <span>{flight.stratum}</span>
+        <span>{reading.loop === "open" ? "labelled sentence" : `closed loop · Δ ${reading.intervalS} s`}</span>
       </>}>
       <div className="training-readback-frame" ref={frame}>
         <ReadbackPlan m={m} />
@@ -166,16 +130,35 @@ export default function TrainingReadbackWindow(props: TrainingReadbackWindowProp
         {replay !== null || live !== null ? (
           <div className="training-readback-slots">
             {replay !== null ? (
-              <p className="training-readback-slot" aria-label="Executor replay" title={replay.title}>
-                <strong style={{ color: TRAINING_EXECUTOR_COLOR }}>Executor replay</strong> — {replay.text}
+              <p className="training-readback-slot" aria-label="The flown flight" title={replayText(replay)}>
+                <strong style={{ color: trainingOutcomeColour(replay.outcome) }}>Flown flight</strong> —{" "}
+                {TRAINING_OUTCOME_TAG[replay.outcome]} at {closedCycleTimeS(m.closed!, replay.endCycle)} s
+                {replay.crossing === null ? " · no threshold crossing" : ` · crossing ${crossingText(replay.crossing)}`}
+                {replay.crossing === null ? null
+                  : replay.crossing.decision === null ? " · no DA check" : (
+                    <>
+                      {" "}· DA check{" "}
+                      <strong style={{ color: replay.crossing.decision.passed ? TRAINING_DECISION_PASS_COLOR : TRAINING_DECISION_FAIL_COLOR }}>
+                        {replay.crossing.decision.passed ? "passed" : "failed"}
+                      </strong>
+                      : {Math.abs(replay.crossing.decision.rightM).toFixed(1)} m {replay.crossing.decision.rightM >= 0 ? "right" : "left"} of the
+                      centreline, cone half width {replay.crossing.decision.coneHalfWidthM.toFixed(1)} m{" "}
+                      {checkMark(replay.crossing.decision.lateralOk)}; {Math.abs(replay.crossing.decision.aboveGlidepathM).toFixed(1)} m{" "}
+                      {replay.crossing.decision.aboveGlidepathM >= 0 ? "above" : "below"} the glidepath {checkMark(replay.crossing.decision.verticalOk)};
+                      at {replay.crossing.decision.heightMslM.toFixed(0)} m MSL
+                    </>
+                  )}
+                {/* landed but not as said: the words that left their envelopes (the outcome says the rest) */}
+                {replay.outcome === "landed" && !replay.flewTheSentence && replay.envelopes !== null
+                  ? ` · landed, but ${wordsOutside(replay.envelopes)} words left their envelopes` : ""}
+                {replay.notReached > 0 ? ` · ${replay.notReached} words said after the landing` : ""}
               </p>
             ) : null}
             {live !== null ? (
               <p className="training-readback-slot" aria-label="The autopilot, live" title={liveTitle}>
-                <strong style={{ color: autopilotColour(live) }}>Autopilot</strong> — {live.segment.column} {liveWord} from step{" "}
-                {live.segment.row} · {TRAINING_VERDICT_TEXT[live.word.status]} ·{" "}
-                {m.live === null ? "no line to draw: it ended in its first cycle"
-                  : `solid ${live.word.status === "outside" ? "red" : "blue"}${m.liveTail.length >= 2 ? ", then a faded dashed tail" : ""}`}
+                <strong style={{ color: autopilotColour(live) }}>Autopilot</strong> — {live.segment.column} {trainingBandLabel(liveWord!.says)} from Δ
+                row {live.segment.row}{live.segment.correction ? " (a correction)" : ""} · {segmentEndText(live)} ·{" "}
+                {live.stored.horizontalM.toFixed(3)} m from the exported flight
               </p>
             ) : null}
           </div>
@@ -192,7 +175,6 @@ export default function TrainingReadbackWindow(props: TrainingReadbackWindowProp
         <NotesToggle label="What the lines and colours are">
           <NotesList items={[
             ...swatches.map((item) => ({ key: item.key, name: <><SwatchIcon swatch={item.swatch} /> {item.text}</>, text: item.title })),
-            ...(replay !== null ? [{ key: "replay-slot", name: "Executor replay", text: replay.title }] : []),
             ...(live !== null ? [{ key: "autopilot-slot", name: "Autopilot", text: liveTitle }] : []),
           ]} />
         </NotesToggle>

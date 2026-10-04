@@ -1,19 +1,14 @@
-"""The executor flies ONE SEGMENT of a Training flight's sentence, live, for the frontend's Training view
-(aeroviz-4d `docs/36-2026-09-20-training-module.zh.md` §4.7; the executor: `4dTrajectory/ts_transformer/autopilot/`).
+"""The executor flies ONE SEGMENT of a Training flight's closed-loop sentence, live, for the frontend's Training view of
+stage A (two-tier vocabulary §12.1 A23, outline §6; the executor: `4dTrajectory/ts_transformer/autopilot/`).
 
-A SEGMENT is one word of one column in force, flown to where its own envelope ends (`segment`). The TRUTH's word is
-flown from the observed aircraft's state where the word was said: the executor is told the six words in force there as
-its step 0 (a sentence's step 0 is what the aircraft is already doing, executor design §2.4), then the sentence's words
-of the steps after it, each where the observed aircraft heard it (the spec's word clock, design §11). A MODEL's word
-(one sample of its free generation, which the request carries) is flown as the free generation flew it: the model's
-whole sentence from the observed state at its first step, each word at its own step — so the flight is the sample's
-own. Either is flown with the executor's own stepper, stopped at the segment's stop (`fly`). Only the selected word is
-judged, by the executor's own judge on what was flown (`verdict`); the answer (`payload`) says how long each part took.
-NOTHING IS PRECOMPUTED: no replay record and no Training overlay is read. The service — which set, which spec, the
-flights kept rebuilt — is `backend`.
+A SEGMENT is one word of one column of the closed-loop sentence at a row interval Δ, flown with the single-flight
+executor from the sentence's first predicted step — set up as the export and the formal replay set it up
+(`ts_transformer.experiments.training_flights`) — to where the next word of its column is heard (a heading word a lead
+later), or to its outcome (`fly`). The answer (`payload`) returns the flight from the word on, the judge's crossing and
+decision-altitude check when flown to the outcome, and how far it lies from the artefact's stored flown states. NOTHING
+IS PRECOMPUTED: no exported track is read. The service — which set, which spec, the flights kept set up — is `backend`.
 
-    segment.py   which segment a word is, what it is told (pure)       verdict.py  the selected word's verdict
-    fly.py       the flight rebuilt; the segment flown and stopped     payload.py  the answer
+    fly.py       the segment, flown and stopped         payload.py  the answer
     backend.py   ``POST /autopilot/segment``
 """
 

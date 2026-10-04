@@ -26,7 +26,6 @@ import torch
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, heading_rate_rad_s  # noqa: E402
 from ts_transformer.backbone.adapters import build_model  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
-    CONTROL_DURATION_UNIFORM,
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_POINT_MASS,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
@@ -37,19 +36,14 @@ from ts_transformer.config import (  # noqa: E402
     CONTROL_RECIPE_CUSTOM,
     CONTROL_RECIPE_NAMES,
     CONTROL_SPECIFIC_FORCE,
-    CONTROL_STATE_CLOCK_OBSERVED,
-    CONTROL_STATE_LOSS_GRID_NATIVE,
-    CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
     CONTROL_CONDITION_FEATURES_RAW,
     CONTROL_THRUST_FRACTION,
-    PREDICTION_CONTROL,
     PREDICTION_STATE,
     TSConfig,
     control_recipe,
     recipe_settings,
 )
-from ts_transformer.data.dataset import Normalizer, build_series  # noqa: E402
-from ts_transformer.data.synthetic import synthetic_arrivals  # noqa: E402
+from ts_transformer.data.dataset import Normalizer  # noqa: E402
 from ts_transformer.inference.export import build_prediction_record  # noqa: E402
 from ts_transformer.outputs.conditioning import CONDITION_WIDTH  # noqa: E402
 from ts_transformer.outputs.control.forecast import forecast_control_batch  # noqa: E402
@@ -68,6 +62,8 @@ from ts_transformer.outputs.envelope import (  # noqa: E402
     control_contract,
 )
 from ts_transformer.run_naming import run_display_name, run_slug  # noqa: E402
+from ts_transformer.tests.support_prediction import series_for as _series
+from ts_transformer.tests.support_prediction import control_config as _config
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 LAG = {
@@ -80,27 +76,6 @@ AERO = (122.6, 2.7, 0.02, 0.04, 0.9, 0.1)
 FRAME = (37.36, -121.93, 18.0, 0.0)
 INITIAL_STATE = (37.55, -121.70, 1800.0, 120.0, -2.4, -0.035, 62_000.0)
 HORIZON_S = 240.0
-
-
-def _config(**overrides) -> TSConfig:
-    settings = dict(
-        prediction_output=PREDICTION_CONTROL,
-        control_duration_parameterization=CONTROL_DURATION_UNIFORM,
-        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_NATIVE,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        n_segments=8, seq_len=16, d_model=32, d_ff=64, n_heads=4, e_layers=1,
-    )
-    settings.update(overrides)
-    return TSConfig(**settings)
-
-
-def _series(config: TSConfig, n_flights: int = 2):
-    series, report = build_series(
-        synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3), config, airport=AIRPORT
-    )
-    assert report.built == n_flights, report.format()
-    return series
 
 
 # ── the teacher is the inverse of this forward model ─────────────────────────

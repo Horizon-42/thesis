@@ -30,15 +30,12 @@ import {
 } from "../data/airportData";
 import {
   parseTrainingIndex,
-  TRAINING_READBACK_SET_KIND,
-  TRAINING_TRAFFIC_SET_KIND,
-  trainingSetRefusal,
+  parseTrainingSample,
+  TRAINING_INDEX_FILE,
   type TrainingIndex,
-  type TrainingReadableSetKind,
+  type TrainingSample,
   type TrainingSetEntry,
 } from "../data/trainingSample";
-import { parseTrainingOverlays, type TrainingOverlayEntry, type TrainingOverlays } from "../data/trainingOverlays";
-import { openSetHead, parseOverlayOver, parseTrainingSet, type TrainingOpenSet } from "../data/trainingSets";
 
 export interface PublicationFinding {
   level: "error" | "warn";
@@ -227,108 +224,54 @@ export interface TrainingChecked<T> {
 }
 
 /**
- * The Training manifest as the panel reads it.
+ * The Training index (`training/index_v4.json`) as the panel reads it.
  *
  * Training is checked on the OPPOSITE rule to the comparison picker above. There a bad category
- * empties the airport, so the check exists to stop that; here a bad entry is greyed out on its own
- * by design, which means a half-written export is easy to publish and never notice. The check is
- * what notices — naming the entry and the field.
+ * empties the airport, so the check exists to stop that; here a bad entry is named on its own by
+ * design, which means a half-written export is easy to publish and never notice. The check is
+ * what notices — naming the entry and the field. An index of another schema is one error naming the
+ * schema found and the one expected; the instruction-v3 view's `training/index.json` is never read.
  */
 export function checkTrainingIndex(manifest: unknown): TrainingChecked<TrainingIndex> {
   const parsed = parseTrainingIndex(manifest);
   if (!parsed.ok) {
-    return { findings: [{ level: "error", message: `training/index.json is not a manifest: ${parsed.problem}` }], value: null };
+    return { findings: [{ level: "error", message: `training/${TRAINING_INDEX_FILE} is not an index: ${parsed.problem}` }], value: null };
   }
   const findings = parsed.value.rejected.map((item) => ({
     level: "error" as const,
     category: item.id,
-    message: `the panel would grey this entry out: ${item.problem}`,
+    message: `the panel would reject this entry: ${item.problem}`,
   }));
   return { findings, value: parsed.value };
 }
 
-/**
- * A listed set the panel REFUSES by name — a superseded vocabulary, another spec, a prior set —
- * is a warning, not an error: it is refused on purpose, from the manifest alone, and deleting it
- * is a decision about data on disk, not about whether the panel loads.
- */
-export function checkTrainingSetRefusal(entry: TrainingSetEntry): PublicationFinding[] {
-  const refusal = trainingSetRefusal(entry);
-  return refusal === null
-    ? []
-    : [{ level: "warn", category: entry.id, message: `listed, and refused by name: ${refusal}` }];
-}
-
-/** One readable set's file, through the panel's own reader for its kind. */
-export function checkTrainingSet(setId: string, kind: TrainingReadableSetKind, raw: unknown): TrainingChecked<TrainingOpenSet> {
-  const parsed = parseTrainingSet(kind, raw);
+/** One set's file, through the panel's own reader. */
+export function checkTrainingSet(setId: string, raw: unknown): TrainingChecked<TrainingSample> {
+  const parsed = parseTrainingSample(raw);
   return parsed.ok
     ? { findings: [], value: parsed.value }
-    : { findings: [{ level: "error", category: setId, message: `${kind} set: ${parsed.problem}` }], value: null };
+    : { findings: [{ level: "error", category: setId, message: `set: ${parsed.problem}` }], value: null };
 }
 
 /**
- * What the manifest promises against what the set's file holds. The two files are written by one run
+ * What the index promises against what the set's file holds. The two files are written by one run
  * of the exporter, so a disagreement means they came from different runs.
  */
-export function checkTrainingSetAgrees(
-  entry: TrainingSetEntry, open: TrainingOpenSet, airport: string,
-): PublicationFinding[] {
+export function checkTrainingSetAgrees(entry: TrainingSetEntry, sample: TrainingSample, airport: string): PublicationFinding[] {
   const findings: PublicationFinding[] = [];
-  const set = openSetHead(open);
-  // each kind's cohort: a read-back set's flights per stratum, a window set's windows
-  const cohort: Array<[string, string | number, string | number]> =
-    open.kind === TRAINING_READBACK_SET_KIND && entry.kind !== TRAINING_TRAFFIC_SET_KIND ? [
-      ["cohort.split", entry.cohort.split, open.sample.cohort.split],
-      ["cohort.perStratum", entry.cohort.perStratum, open.sample.cohort.perStratum],
-      ["cohort.seed", entry.cohort.seed, open.sample.cohort.seed],
-    ] : open.kind === TRAINING_TRAFFIC_SET_KIND && entry.kind === TRAINING_TRAFFIC_SET_KIND ? [
-      ["cohort.split", entry.cohort.split, open.traffic.cohort.split],
-      ["cohort.windows", entry.cohort.windows, open.traffic.cohort.windows],
-      ["cohort.seed", entry.cohort.seed, open.traffic.cohort.seed],
-    ] : [["kind", entry.kind, open.kind]];
   const pairs: Array<[string, string | number, string | number]> = [
-    ["airport", airport, set.airport],
-    ["setId", entry.id, set.setId],
-    ["flights", entry.flights, set.flights.length],
-    ["vocabularySha256", entry.vocabularySha256, set.vocabulary.specSha256],
-    ["runwaySha256", entry.runwaySha256, set.candidatesSha256],
-    ["readingRule", entry.readingRule, set.vocabulary.readingRule],
-    ...cohort,
+    ["airport", airport, sample.airport],
+    ["setId", entry.id, sample.setId],
+    ["flights", entry.flights, sample.flights.length],
+    ["source.specSha256", entry.source.specSha256, sample.source.specSha256],
+    ["source.executorSpecSha256", entry.source.executorSpecSha256, sample.source.executorSpecSha256],
+    ["cohort.perStratum", entry.cohort.perStratum, sample.cohort.perStratum],
+    ["cohort.seed", entry.cohort.seed, sample.cohort.seed],
   ];
   for (const [what, listed, held] of pairs) {
     if (listed !== held) {
-      findings.push({ level: "error", category: entry.id, message: `${what}: the manifest says ${listed}, ${entry.file} says ${held}` });
+      findings.push({ level: "error", category: entry.id, message: `${what}: the index says ${listed}, ${entry.file} says ${held}` });
     }
-  }
-  return findings;
-}
-
-// ── the Training overlays ────────────────────────────────────────────────────
-
-/** The overlays manifest as the panel reads it: an entry it rejects is shown as a problem, so it is an error here. */
-export function checkTrainingOverlays(manifest: unknown): TrainingChecked<TrainingOverlays> {
-  const parsed = parseTrainingOverlays(manifest);
-  if (!parsed.ok) {
-    return { findings: [{ level: "error", message: `training/overlays.json is not a manifest: ${parsed.problem}` }], value: null };
-  }
-  const findings = parsed.value.rejected.map((item) => ({
-    level: "error" as const, category: item.id, message: `the panel would reject this overlay: ${item.problem}`,
-  }));
-  return { findings, value: parsed.value };
-}
-
-/**
- * One overlay's file through the panel's own reader, against the set it is drawn over (`trainingSets.parseOverlayOver`):
- * the reader binds the two by what they share — the set, spec, candidates, frame and every flight (a window overlay:
- * every window) — never by the set file's bytes.
- */
-export function checkTrainingOverlay(entry: TrainingOverlayEntry, payload: unknown, open: TrainingOpenSet): PublicationFinding[] {
-  const findings: PublicationFinding[] = [];
-  const parsed = parseOverlayOver(entry, payload, open);
-  if (!parsed.ok) findings.push({ level: "error", category: entry.id, message: `${entry.file}: ${parsed.problem}` });
-  else if (parsed.value.flights !== entry.flights) {
-    findings.push({ level: "error", category: entry.id, message: `the manifest says ${entry.flights} flights, ${entry.file} holds ${parsed.value.flights}` });
   }
   return findings;
 }

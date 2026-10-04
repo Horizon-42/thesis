@@ -1,402 +1,322 @@
 /**
- * The Training reader under the instruction vocabulary: what it accepts, and — the point of it — that
- * everything it refuses is refused BY NAME, with the field that failed.
+ * The stage-A reader (`trainingSample.ts`) on the files the Python code writes (`stageA.ts`): the index and the sample are
+ * read; a file of another schema is refused by name with the schema found and the one expected; the bookkeeping is checked;
+ * and the readings (the labelled sentence, the closed-loop sentence at Δ) put everything on the flight's clock.
  */
 import { describe, expect, it } from "vitest";
-
 import {
+  nearestBranch,
+  outsideSpans,
   parseTrainingIndex,
   parseTrainingSample,
-  rowAtTime,
-  outsideSpans,
-  trainingColumnRuns,
-  trainingWordAt,
-  trainingSetRefusal,
-  trainingVerdicts,
+  readingRowAt,
+  readingRowTimeS,
+  sentenceColumnRuns,
+  sentenceWordAt,
+  closedCycleTimeS,
   trainingBandLabel,
+  trainingEnvelopeIndex,
+  trainingReadingOf,
   trainingWordLabel,
+  wordsOutside,
+  unwrapDegrees,
   TRAINING_COLUMNS,
   TRAINING_INDEX_SCHEMA,
   TRAINING_READING_RULE,
   TRAINING_SAMPLE_SCHEMA,
-  TRAINING_SPEC_SHA256,
-  type TrainingSample,
-  type TrainingSetEntry,
+  TRAINING_SET_KIND,
 } from "../trainingSample";
-import { MOCK_ROWS, SET_ID, STRAIGHT_KEY, VECTORED_KEY, WORD, mockIndex, mockSample } from "./trainingSample.fixture";
-
-function parsed(raw: unknown = mockSample()): TrainingSample {
-  const result = parseTrainingSample(raw);
-  if (!result.ok) throw new Error(result.problem);
-  return result.value;
-}
-
-/** The sample with one change applied to its raw JSON, and the reader's answer. */
-function refusal(change: (raw: any) => void): string {
-  const raw: any = mockSample();
-  change(raw);
-  const result = parseTrainingSample(raw);
-  if (result.ok) throw new Error("the change was accepted");
-  return result.problem;
-}
-
-describe("parseTrainingSample", () => {
-  it("reads both flights, the candidates and the vocabulary's tables", () => {
-    const sample = parsed();
-    expect(sample.flights.map((flight) => flight.flightKey)).toEqual([VECTORED_KEY, STRAIGHT_KEY]);
-    expect(sample.candidates.map((candidate) => candidate.ident)).toEqual(["09", "27"]);
-    expect(sample.vocabulary.specSha256).toBe(TRAINING_SPEC_SHA256);
-    const flight = sample.flights[0];
-    expect(flight.rows).toBe(MOCK_ROWS);
-    expect(flight.words.inForce).toHaveLength(TRAINING_COLUMNS.length);
-    expect(flight.envelopes.altitude[1].inside.filter((ok) => !ok)).toHaveLength(1);
-    expect(flight.envelopes.approach.captureTurn).toMatchObject({ startRow: 20, endRow: 25 });
-    // the lead in steps, from the vocabulary's seconds
-    expect(sample.vocabulary.headingLeadRows).toBe(2);
-    // each heading word's band: judged from two steps after it to the next word's, the last to the clearance
-    expect(flight.envelopes.heading.map((item) => [item.row, item.firstRow, item.stopRow, item.check.inside, item.check.rows]))
-      .toEqual([[0, 2, 10, 8, 8], [8, 10, 12, 2, 2], [10, 12, 20, 7, 8]]);
-    // a flight on the final at step 0: its heading word has no row of its own, and there is no capture turn
-    expect(sample.flights[1].envelopes.heading[0]).toMatchObject({ firstRow: 2, stopRow: 2, inside: [], check: { rows: 0, inside: 0 } });
-    expect(sample.flights[1].envelopes.approach.captureTurn).toBeNull();
-  });
-
-  // ── refused by name ─────────────────────────────────────────────────────
-  it("refuses a sample of an earlier format by its schema name, whatever vocabulary it carries", () => {
-    // v2: the box vocabulary's sample; v3: instruction-v1's, and instruction-v2's before its change of
-    // shape got a name of its own; v4: instruction-v2's before the heading wedge; v5: with the flown type
-    // (an A320 for every type without dynamics); v6: instruction-v2's turns and holds. All are superseded
-    // names, so they are written out here.
-    for (const schema of ["aeroviz-training-sample-v2", "aeroviz-training-sample-v3", "aeroviz-training-sample-v4",
-                          "aeroviz-training-sample-v5", "aeroviz-training-sample-v6"]) {
-      expect(refusal((raw) => { raw.schema = schema; })).toContain(
-        `schema is "${schema}", expected "${TRAINING_SAMPLE_SCHEMA}" — a file of another format is not read`);
-    }
-  });
-
-  it("reads a flight whose type is unresolved as null, and refuses an empty type", () => {
-    const raw: any = mockSample();
-    raw.flights[1].typecode = null;
-    expect(parsed(raw).flights[1].typecode).toBeNull();
-    expect(refusal((sample) => { sample.flights[0].typecode = ""; })).toContain("typecode");
-  });
-
-  it("refuses another reading rule and another spec by name", () => {
-    for (const rule of ["box-v3", "instruction-v1", "instruction-v2"]) {
-      expect(refusal((raw) => { raw.vocabulary.readingRule = rule; })).toContain(
-        `readingRule is ${rule}, and this reader is written for ${TRAINING_READING_RULE}`);
-    }
-    expect(refusal((raw) => { raw.vocabulary.specSha256 = "0".repeat(64); })).toMatch(
-      new RegExp(`specSha256 is 000000000000, and this reader is written for spec ${TRAINING_SPEC_SHA256.slice(0, 12)}`));
-  });
-
-  it("refuses the columns in another order — they are positional", () => {
-    expect(refusal((raw) => { raw.vocabulary.columns = ["runway", "approach", "heading", "angle", "altitude", "speed"]; }))
-      .toMatch(/columns are \[runway, approach, heading, angle, altitude, speed\], expected \[runway, approach, heading, altitude, angle, speed\]/);
-  });
-
-  it("refuses a class table that disagrees with the stated class count", () => {
-    expect(refusal((raw) => { raw.vocabulary.headingTargetsDeg.pop(); }))
-      .toMatch(/headingTargetsDeg holds 71 classes, but classCounts says 72/);
-  });
-
-  it("refuses a step 0 that does not carry all six words", () => {
-    expect(refusal((raw) => {
-      raw.flights[0].words.events = raw.flights[0].words.events.filter((e: any) => !(e.row === 0 && e.column === 4));
-    })).toMatch(/step 0 carries no word for angle/);
-  });
-
-  it("refuses a per-row table that is not the events filled forward", () => {
-    expect(refusal((raw) => { raw.flights[0].words.inForce[2][12] = WORD.heading270; }))
-      .toMatch(/inForce\.heading\[12\] is 54, but the events put 36 in force there/);
-  });
-
-  it("refuses a word outside its column's classes", () => {
-    expect(refusal((raw) => { raw.flights[0].words.events[0].value = 2; }))
-      .toMatch(/events\[0\]\.value is 2, not a whole number in 0…1/);
-  });
-
-  it("refuses a word issued for a reason the labeller does not name — the holds reading's kinds included", () => {
-    for (const kind of ["guess", "turn", "turn-split", "intercept"]) {
-      expect(refusal((raw) => { raw.flights[0].words.events[6].kind = kind; }))
-        .toMatch(new RegExp(`events\\[6\\]\\.kind is "${kind}", not one of initial, per-step`));
-    }
-  });
-
-  it("refuses an envelope list that does not match its column's words", () => {
-    expect(refusal((raw) => { raw.flights[0].envelopes.heading.pop(); }))
-      .toMatch(/heading holds 2 envelopes for 3 heading words/);
-    expect(refusal((raw) => { raw.flights[0].envelopes.altitude[1].row = 21; }))
-      .toMatch(/altitude\[1\]: is \(row 21, value 181\), but the sentence's altitude word 1 is \(row 20, value 181, target\)/);
-  });
-
-  it("refuses a verdict whose count is not the count of its own flags", () => {
-    expect(refusal((raw) => { raw.flights[0].envelopes.altitude[1].check.inside = 40; }))
-      .toMatch(/says 40 rows inside, but the tube's own flags count 39/);
-    expect(refusal((raw) => { raw.flights[0].envelopes.speed[0].bandInside[3] = 0; }))
-      .toMatch(/says 30 band rows inside, but the band's own flags count 29/);
-  });
-
-  it("refuses a tube of the wrong length and an inverted one", () => {
-    expect(refusal((raw) => { raw.flights[0].envelopes.altitude[0].lowerM.pop(); }))
-      .toMatch(/altitude\[0\]\.lowerM has 19 values, expected 20/);
-    expect(refusal((raw) => { raw.flights[0].envelopes.altitude[0].lowerM[3] = 2000; }))
-      .toMatch(/is inverted at row 3/);
-  });
-
-  it("refuses a runway that is not the candidate pointed at", () => {
-    expect(refusal((raw) => { raw.flights[0].runway = "27"; }))
-      .toMatch(/runway is 27, but candidate 0 is 09/);
-  });
-
-  it("refuses a missing field by its path rather than reading it as a default", () => {
-    expect(refusal((raw) => { delete raw.flights[0].envelopes.approach.corridor; }))
-      .toMatch(/envelopes\.approach\.corridor is not an object/);
-    expect(refusal((raw) => { delete raw.flights[0].envelopes.approach.captureTurn; }))
-      .toMatch(/envelopes\.approach\.captureTurn is not an object/);
-  });
-
-  it("refuses a heading band whose rows are not a lead after its word, or do not end at the next word's or the clearance", () => {
-    expect(refusal((raw) => { Object.assign(raw.flights[0].envelopes.heading[1], { firstRow: 9, inside: [1, 1, 1] }); }))
-      .toMatch(/heading\[1\]: firstRow is 9, but a word told at step 8 is judged from 10 \(the 4 s lead\)/);
-    // past the next word's first row
-    expect(refusal((raw) => {
-      const item = raw.flights[0].envelopes.heading[1];
-      item.stopRow = 13; item.inside = [1, 1, 1]; item.check = { rows: 3, inside: 3 };
-    })).toMatch(/heading\[1\]: stopRow is 13, but this word's rows end at 12/);
-    // short of it: a band cut early, its check counting the rows it kept
-    expect(refusal((raw) => {
-      const item = raw.flights[0].envelopes.heading[1];
-      item.stopRow = 11; item.inside = [1]; item.check = { rows: 1, inside: 1 };
-    })).toMatch(/heading\[1\]: stopRow is 11, but this word's rows end at 12/);
-    // past the clearance
-    expect(refusal((raw) => {
-      const item = raw.flights[0].envelopes.heading[2];
-      item.stopRow = 21; item.inside.push(1); item.check = { rows: 9, inside: 8 };
-    })).toMatch(/heading\[2\]: stopRow is 21, but this word's rows end at 20/);
-  });
-
-  it("refuses a heading band's verdicts that are not one per row, or that its check does not count", () => {
-    expect(refusal((raw) => { raw.flights[0].envelopes.heading[2].inside.pop(); }))
-      .toMatch(/heading\[2\]\.inside has 7 values, expected 8/);
-    expect(refusal((raw) => { raw.flights[0].envelopes.heading[2].check.inside = 8; }))
-      .toMatch(/heading\[2\]\.check: says 8 rows inside, but the band's own flags count 7/);
-    expect(refusal((raw) => { raw.flights[0].envelopes.heading[2].check.rows = 7; }))
-      .toMatch(/heading\[2\]\.check\.rows is 7, not a whole number in 8…8/);
-  });
-
-  it("refuses a band that is not its word's target ± the vocabulary's tolerance", () => {
-    expect(refusal((raw) => { raw.flights[0].envelopes.heading[2].targetOnTrackDeg = 185; }))
-      .toMatch(/targetOnTrackDeg is 185, not the word's 180° on any branch/);
-    expect(refusal((raw) => { raw.flights[0].envelopes.heading[2].bandDeg = [175, 185]; }))
-      .toMatch(/bandDeg is \[175, 185\], not 180° ± the vocabulary's 4\.5°/);
-    // a whole turn away is the same heading on another branch of the unwrapped track
-    const raw: any = mockSample();
-    Object.assign(raw.flights[0].envelopes.heading[2], { targetOnTrackDeg: 540, bandDeg: [535.5, 544.5] });
-    expect(parsed(raw).flights[0].envelopes.heading[2].targetOnTrackDeg).toBe(540);
-  });
-
-  it("refuses a lead in steps that is not the lead in seconds", () => {
-    expect(refusal((raw) => { raw.vocabulary.headingLeadS = 3; }))
-      .toMatch(/headingLeadRows is 2, but 2 steps of 2 s are not headingLeadS 3 s/);
-    expect(refusal((raw) => { raw.vocabulary.headingLeadRows = 2.5; }))
-      .toMatch(/headingLeadRows is 2\.5, not a whole number of at least 0/);
-  });
-
-  it("refuses the holds reading's fields by their absence, never reading them as defaults", () => {
-    expect(refusal((raw) => { delete raw.flights[0].envelopes.heading[0].firstRow; raw.flights[0].envelopes.heading[0].turn = null; }))
-      .toMatch(/heading\[0\]\.firstRow is undefined, not a number/);
-    expect(refusal((raw) => { delete raw.vocabulary.headingLeadS; raw.vocabulary.headingMaxTurnDeg = 150; }))
-      .toMatch(/headingLeadS is undefined, not a number/);
-  });
-
-  it("refuses markers that are not the words' own rows", () => {
-    expect(refusal((raw) => { raw.flights[0].joinRow = 21; raw.flights[0].envelopes.approach.clearanceRow = 21; }))
-      .toMatch(/joinRow is 21, but the clearance is issued at row 20/);
-    expect(refusal((raw) => { raw.flights[0].unspecifiedRow = 31; }))
-      .toMatch(/unspecifiedRow is 31, but the last speed word is 47 at row 30/);
-  });
-
-  it("refuses a speed verdict at odds with its own parts", () => {
-    expect(refusal((raw) => { raw.flights[0].envelopes.speed[0].check.arrivalRows = 2; }))
-      .toMatch(/arrivalRows is 2, not a whole number in 0…0/);
-    expect(refusal((raw) => { raw.flights[0].envelopes.speed[0].check.transitionOk = false; }))
-      .toMatch(/contained is true, with the transition failed/);
-  });
-
-  it("reads a speed span the next word cut before its band was reached: the transition to the cut, no band", () => {
-    // as the labeller leaves it: the target never reached in the span, judged on its transition alone
-    const cut = (raw: any) => {
-      const span = raw.flights[0].envelopes.speed[0];
-      Object.assign(span, {
-        arrivalRow: null, bandInside: null,
-        transitionLowerMps: Array.from({ length: 30 }, () => 104), transitionUpperMps: Array.from({ length: 30 }, () => 116),
-      });
-      Object.assign(span.check, { arrivalRows: 30, cutBeforeArrival: true, bandRows: 0, bandInside: 0, contained: true });
-    };
-    const raw: any = mockSample();
-    cut(raw);
-    const span = parsed(raw).flights[0].envelopes.speed[0];
-    expect(span).toMatchObject({ arrivalRow: null, bandInside: null, check: { cutBeforeArrival: true, bandRows: 0, contained: true } });
-    expect(span.transitionLowerMps).toHaveLength(30);
-    expect(refusal((raw) => { cut(raw); raw.flights[0].envelopes.speed[0].bandInside = []; }))
-      .toMatch(/speed\[0\]: bandInside is given, but the band is never reached/);
-    expect(refusal((raw) => { cut(raw); raw.flights[0].envelopes.speed[0].arrivalRow = 29; }))
-      .toMatch(/speed\[0\]: arrivalRow is given exactly when the band is reached before the next word/);
-    expect(refusal((raw) => { cut(raw); raw.flights[0].envelopes.speed[0].transitionLowerMps.pop(); }))
-      .toMatch(/speed\[0\]\.transitionLowerMps/);
-    expect(refusal((raw) => { cut(raw); raw.flights[0].envelopes.speed[0].check.arrivalRows = 29; }))
-      .toMatch(/arrivalRows is 29, not a whole number in 30…30/);
-    expect(refusal((raw) => { cut(raw); raw.flights[0].envelopes.speed[0].check.contained = false; }))
-      .toMatch(/contained is false, with the transition ok and 0 of 0 band rows inside/);
-  });
-
-  it("reads a sentence cut at the threshold crossing, the crossing a row past the last", () => {
-    const crossed = (raw: any) => {
-      Object.assign(raw.flights[0].envelopes.approach.landing, {
-        cutAtCrossing: true, crossing: { row: MOCK_ROWS, eM: 0, nM: 1.5, lon: -78, lat: 35 },
-      });
-    };
-    const raw: any = mockSample();
-    crossed(raw);
-    expect(parsed(raw).flights[0].envelopes.approach.landing).toMatchObject({ cutAtCrossing: true, crossing: { row: MOCK_ROWS, nM: 1.5 } });
-    expect(refusal((raw) => { crossed(raw); raw.flights[0].envelopes.approach.landing.crossing.row = MOCK_ROWS - 1; }))
-      .toMatch(new RegExp(`crossing\\.row is ${MOCK_ROWS - 1}, not a whole number in ${MOCK_ROWS}…${MOCK_ROWS}`));
-    expect(refusal((raw) => { crossed(raw); raw.flights[0].envelopes.approach.landing.crossing = null; }))
-      .toMatch(/the crossing row is given exactly when the sentence was cut at it/);
-    expect(refusal((raw) => { crossed(raw); raw.flights[0].envelopes.approach.landing.cutAtCrossing = false; }))
-      .toMatch(/the crossing row is given exactly when the sentence was cut at it/);
-  });
-
-  it("refuses a capture turn that is not the clearance's to the capture's, or one a flight on the final has", () => {
-    expect(refusal((raw) => { raw.flights[0].envelopes.approach.captureTurn.startRow = 19; }))
-      .toMatch(/captureTurn\.startRow is 19, not a whole number in 20…20/);
-    expect(refusal((raw) => { raw.flights[0].envelopes.approach.captureTurn.endRow = 26; }))
-      .toMatch(/captureTurn\.endRow is 26, not a whole number in 25…25/);
-    expect(refusal((raw) => { raw.flights[0].envelopes.approach.captureTurn = null; }))
-      .toMatch(/captureTurn is absent with the capture at step 25/);
-    expect(refusal((raw) => { raw.flights[1].envelopes.approach.captureTurn = raw.flights[0].envelopes.approach.captureTurn; }))
-      .toMatch(/captureTurn is given with the capture at step 0/);
-  });
-
-  it("refuses a runway's landing limit above the vocabulary's", () => {
-    expect(refusal((raw) => { raw.candidates[1].landingCrossLimitM = 1200; }))
-      .toMatch(/candidates\[1\]: landingCrossLimitM is 1200, not in \(0, 1000\] m/);
-  });
-
-  it("refuses a measured angle for the level class", () => {
-    expect(refusal((raw) => { raw.flights[0].envelopes.angle[0].measuredDeg = 0.1; }))
-      .toMatch(/angle\[0\]: a measured angle is given for every class but level/);
-  });
-
-  it("refuses a speed band for 'unspecified'", () => {
-    expect(refusal((raw) => { raw.flights[0].envelopes.speed[1].bandMps = [10, 20]; }))
-      .toMatch(/bandMps is given for "unspecified"/);
-  });
-});
+import { trainingBandGround } from "../../scene/trainingEntities";
+import { FLIGHT_KEY, stageAIndex, stageASample, stageASampleFile } from "./stageA";
 
 describe("the index", () => {
-  it("keeps every entry and names what the reader refuses, from the manifest alone", () => {
-    const index = parseTrainingIndex(mockIndex());
-    if (!index.ok) throw new Error(index.problem);
-    expect(index.value.sets.map((entry) => entry.id))
-      .toEqual(["box_v3", "instruction_v1", "instruction_v2", SET_ID, "prior_s1337_val"]);
-    const [old, first, second, current, prior] = index.value.sets;
-    expect(trainingSetRefusal(current)).toBeNull();
-    expect(trainingSetRefusal(old)).toMatch(/read under box-v3, a superseded vocabulary/);
-    expect(trainingSetRefusal(first)).toMatch(/read under instruction-v1, a superseded vocabulary/);
-    expect(trainingSetRefusal(second)).toMatch(/read under instruction-v2, a superseded vocabulary/);
-    expect(trainingSetRefusal(prior)).toMatch(/read under segment-v13/);
-    expect(trainingSetRefusal({ ...current, vocabularySha256: "9".repeat(64) }))
-      .toContain(`spec 999999999999 is not the ${TRAINING_READING_RULE} spec`);
-    expect(trainingSetRefusal({ ...current, kind: "prior-generated" } as TrainingSetEntry))
-      .toContain("this reader opens only vocabulary-readback and traffic-windows sets");
+  it("is read: one set, with its source and cohort", () => {
+    const parsed = parseTrainingIndex(stageAIndex());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    expect(parsed.value.rejected).toEqual([]);
+    expect(parsed.value.sets.map((set) => set.id)).toEqual(["fixture_set"]);
+    expect(parsed.value.sets[0].file).toBe("fixture_set/sample.json");
+    expect(parsed.value.sets[0].cohort.strata).toEqual(["straight-in", "vectored"]);
   });
 
-  it("greys out one malformed entry without emptying the manifest", () => {
-    const raw: any = mockIndex();
-    delete raw.sets[0].cohort;
-    const index = parseTrainingIndex(raw);
-    if (!index.ok) throw new Error(index.problem);
-    expect(index.value.sets.map((entry) => entry.id)).toEqual(["instruction_v1", "instruction_v2", SET_ID, "prior_s1337_val"]);
-    expect(index.value.rejected).toEqual([{ id: "box_v3", problem: "set box_v3.cohort is not an object" }]);
-  });
-
-  it("refuses a manifest of another schema whole", () => {
-    expect(parseTrainingIndex({ ...mockIndex(), schema: "aeroviz-training-index-v0" })).toEqual({
-      ok: false, problem: `schema is "aeroviz-training-index-v0", expected "${TRAINING_INDEX_SCHEMA}"`,
+  it("refuses another schema by name: the one found and the one expected", () => {
+    const old = { ...stageAIndex(), schema: "aeroviz-training-index-v1" };
+    const parsed = parseTrainingIndex(old);
+    expect(parsed).toEqual({
+      ok: false, problem: `schema is "aeroviz-training-index-v1", expected "${TRAINING_INDEX_SCHEMA}"`,
     });
+  });
+
+  it("rejects an entry of another kind or reading rule on its own, naming the field", () => {
+    const index = stageAIndex();
+    index.sets.push({ ...index.sets[0], id: "old_kind", kind: "vocabulary-readback" });
+    index.sets.push({ ...index.sets[0], id: "old_rule", readingRule: "instruction-v3" });
+    const parsed = parseTrainingIndex(index);
+    if (!parsed.ok) throw new Error(parsed.problem);
+    expect(parsed.value.sets.map((set) => set.id)).toEqual(["fixture_set"]);
+    expect(parsed.value.rejected.map((item) => item.id)).toEqual(["old_kind", "old_rule"]);
+    expect(parsed.value.rejected[0].problem).toContain(`not one of ${TRAINING_SET_KIND}`);
+    expect(parsed.value.rejected[1].problem).toContain(`not one of ${TRAINING_READING_RULE}`);
   });
 });
 
-describe("reading a sentence", () => {
-  it("labels every column from the vocabulary's tables, in SI", () => {
-    const { vocabulary, candidates } = parsed();
-    const label = (column: (typeof TRAINING_COLUMNS)[number], value: number) =>
-      trainingWordLabel(vocabulary, candidates, column, value);
-    expect(label("runway", WORD.runway09)).toBe("09");
-    expect(label("approach", WORD.cleared)).toBe("cleared");
-    expect(label("heading", WORD.heading090)).toBe("090°");
-    expect(label("altitude", WORD.altitude1110)).toBe("1110 m");
-    expect(label("altitude", WORD.land)).toBe("descend to land");
-    expect(label("angle", WORD.level)).toBe("level");
-    expect(label("angle", WORD.descent3)).toBe("descent 3 (3.06°)");
-    expect(label("speed", WORD.speed110)).toBe("110 m/s");
-    expect(label("speed", WORD.unspecified)).toBe("unspecified");
+describe("the sample", () => {
+  it("is read: five columns, the observed track, the labelled sentence and a closed-loop sentence per Δ", () => {
+    const sample = stageASample();
+    expect(TRAINING_COLUMNS).toEqual(["runway", "heading", "altitude", "angle", "speed"]);
+    expect(sample.vocabulary.rowIntervalsS).toEqual([2, 4, 8]);
+    const [flight] = sample.flights;
+    expect(flight.flightKey).toBe(FLIGHT_KEY);
+    expect(Object.keys(flight.closedLoop)).toEqual(["2", "4", "8"]);
+    expect(flight.openLoop.events.every((event) => !event.correction)).toBe(true);
+    expect(flight.observed.altitudeHaeM[0]).toBeCloseTo(flight.observed.altitudeMslM[0] + flight.haeMinusMslM, 6);
   });
 
-  it("writes a descent class on its band by its number and angle, under the row named Descent", () => {
-    const { vocabulary, candidates } = parsed();
-    const band = (column: (typeof TRAINING_COLUMNS)[number], value: number) =>
-      trainingBandLabel(vocabulary, candidates, column, value);
-    expect(band("angle", WORD.descent3)).toBe("3: 3.06°");
-    expect(band("angle", WORD.level)).toBe("level");
-    expect(band("angle", vocabulary.angleClasses.findIndex((angle) => angle.name === "climb"))).toBe("climb: -1.22°");
-    // every other column's band reads its word in full
-    expect(band("heading", WORD.heading090)).toBe("090°");
-    expect(band("altitude", WORD.land)).toBe("descend to land");
-  });
-
-  it("runs a column from each issue to the next, the last to the end", () => {
-    const flight = parsed().flights[0];
-    expect(trainingColumnRuns(flight, "heading").map(({ row, endRow, value }) => [row, endRow, value]))
-      .toEqual([[0, 8, WORD.heading270], [8, 10, WORD.heading225], [10, MOCK_ROWS, WORD.heading180]]);
-    expect(trainingColumnRuns(flight, "runway")).toHaveLength(1);
-  });
-
-  it("finds one column's word at a row, and its place among that column's words (= its envelope's)", () => {
-    const flight = parsed().flights[0];
-    expect(trainingWordAt(flight, "heading", 7)).toMatchObject({ index: 0, row: 0, endRow: 8 });
-    expect(trainingWordAt(flight, "heading", 9)).toMatchObject({ index: 1, row: 8, endRow: 10 });
-    // after the capture the heading word in force is still the last one: the corridor is not a heading word's
-    expect(trainingWordAt(flight, "heading", 25)).toMatchObject({ index: 2, row: 10, endRow: MOCK_ROWS });
-    // heading changes at step 10 and altitude at step 20: at step 15 they are different runs
-    expect(trainingWordAt(flight, "altitude", 15)).toMatchObject({ index: 0, row: 0, endRow: 20 });
-    expect(trainingWordAt(flight, "altitude", 20).index).toBe(1);
-    expect(trainingWordAt(flight, "speed", MOCK_ROWS - 1)).toMatchObject({ index: 1, row: 30, endRow: MOCK_ROWS });
-    expect(rowAtTime(flight.signals.tS, 21)).toBe(10);
-  });
-
-  it("draws rows outside on to the next row, so one row outside is a segment", () => {
-    const inside = [false, true, true, false, false];
-    expect(outsideSpans(inside, 12, 59)).toEqual([[12, 13], [15, 17]]);
-    // at the line's end, back to the row before
-    expect(outsideSpans(inside, 12, 16)).toEqual([[12, 13], [15, 16]]);
-    expect(outsideSpans([false], 16, 16)).toEqual([[15, 16]]);
-    expect(outsideSpans(inside.map(() => true), 12, 59)).toEqual([]);
-    // a tube outside on one row: a segment to the next row, never a point
-    expect(outsideSpans([true, true, true, true, true, false, true], 0, 59)).toEqual([[5, 6]]);
-  });
-
-  it("counts the labeller's verdicts: heading words judged apart from those with no row of their own", () => {
-    const [vectored, straight] = parsed().flights;
-    const verdicts = trainingVerdicts(vectored);
-    expect(verdicts).toMatchObject({
-      headingJudged: 3, headingContained: 2, headingNotJudged: 0,
-      altitudeWords: 2, altitudeContained: 1, speedWords: 1, speedContained: 1, instructionsAfterStep0: 6,
+  it("refuses an old sample schema by name", () => {
+    const parsed = parseTrainingSample({ ...stageASampleFile(), schema: "aeroviz-training-sample-v8" });
+    expect(parsed).toEqual({
+      ok: false, problem: `sample.schema is "aeroviz-training-sample-v8", not one of ${TRAINING_SAMPLE_SCHEMA}`,
     });
-    expect(verdicts.captureTurn).toMatchObject({ progressOk: true, rateOk: true });
-    expect(verdicts.silentSteps).toBe(MOCK_ROWS - 1 - 4);   // steps 8, 10, 20 and 30 say something
-    expect(trainingVerdicts(straight)).toMatchObject({ headingJudged: 0, headingContained: 0, headingNotJudged: 1, captureTurn: null });
+  });
+
+  it("refuses another reading rule", () => {
+    const parsed = parseTrainingSample({ ...stageASampleFile(), readingRule: "instruction-v3" });
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.problem).toContain(`not one of ${TRAINING_READING_RULE}`);
+  });
+
+  it("refuses a vocabulary of six columns", () => {
+    const file = stageASampleFile();
+    file.vocabulary.columns = ["runway", "approach", "heading", "altitude", "angle", "speed"];
+    const parsed = parseTrainingSample(file);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.problem).toContain("expected [runway, heading, altitude, angle, speed] in that order");
+  });
+
+  it("checks the bookkeeping: events are the grid's words; the closed loops are the set's Δ", () => {
+    const events = stageASampleFile();
+    events.flights[0].closedLoop["4"].events.pop();
+    const a = parseTrainingSample(events);
+    expect(a.ok).toBe(false);
+    if (!a.ok) expect(a.problem).toContain("events are not the");
+
+    const missing = stageASampleFile();
+    delete missing.flights[0].closedLoop["8"];
+    const b = parseTrainingSample(missing);
+    expect(b.ok).toBe(false);
+    if (!b.ok) expect(b.problem).toContain("closedLoop is listed at [2, 4] s, expected the set's [2, 4, 8]");
+
+    const rows = stageASampleFile();
+    rows.flights[0].closedLoop["2"].flownFromRow += 1;
+    const c = parseTrainingSample(rows);
+    expect(c.ok).toBe(false);
+    if (!c.ok) expect(c.problem).toContain("flownFromRow");
+  });
+
+  it("refuses an unknown outcome and a rows grid that is not the vocabulary's 2 s from 0", () => {
+    const outcome = stageASampleFile();
+    outcome.flights[0].closedLoop["2"].replay.outcome = "went_around";
+    const a = parseTrainingSample(outcome);
+    expect(a.ok).toBe(false);
+
+    const times = stageASampleFile();
+    times.flights[0].observed.timeS[3] += 1;
+    const b = parseTrainingSample(times);
+    expect(b.ok).toBe(false);
+    if (!b.ok) expect(b.problem).toContain("timeS[3]");
+  });
+
+  it("accepts a replay without envelopes and a crossing without a DA check", () => {
+    const file = stageASampleFile();
+    file.flights[0].closedLoop["2"].replay.envelopes = null;
+    file.flights[0].closedLoop["4"].replay.crossing.decision = null;
+    file.flights[0].closedLoop["8"].replay.crossing = null;
+    const parsed = parseTrainingSample(file);
+    if (!parsed.ok) throw new Error(parsed.problem);
+    const [flight] = parsed.value.flights;
+    expect(flight.closedLoop["2"].replay.envelopes).toBeNull();
+    expect(flight.closedLoop["4"].replay.crossing!.decision).toBeNull();
+    expect(flight.closedLoop["8"].replay.crossing).toBeNull();
+  });
+});
+
+describe("the flown flight (replay.track)", () => {
+  it("is the flight drawn: from the first predicted step to the judge's outcome, on the sample's executor cycle", () => {
+    const sample = stageASample();
+    expect(sample.executor.cycleS).toBe(1);
+    const raw = stageASampleFile().flights[0].closedLoop;
+    for (const key of ["2", "4", "8"]) {
+      const closed = sample.flights[0].closedLoop[key];
+      expect(closed.flown.tS).toHaveLength(raw[key].replay.track.rows);
+      expect(closed.flown.eM).toEqual(raw[key].replay.track.eM);
+      expect(closed.flown.attitude.headingDeg).toHaveLength(raw[key].replay.track.rows);
+      expect(closed.cycleS).toBe(1);
+      // the flown flight reaches the outcome: the stored states may end sooner (at the sentence's last said row)
+      expect(closed.flown.tS[closed.flown.tS.length - 1]).toBe(closed.startS + (raw[key].replay.track.rows - 1) * 2);
+      expect(closedCycleTimeS(closed, raw[key].replay.track.lastCycle) - closed.flown.tS[closed.flown.tS.length - 1]).toBeLessThan(2);
+    }
+  });
+
+  it("turns a replay cycle into flight time by the executor's cycle", () => {
+    const closed = stageASample().flights[0].closedLoop["2"];
+    expect(closedCycleTimeS(closed, 10)).toBe(closed.startS + 10);
+    expect(closedCycleTimeS({ ...closed, cycleS: 0.5 }, 10)).toBe(closed.startS + 5);
+  });
+
+  it("refuses an envelope that ends past the track, a track that is not the stored states, and a last cycle that is not the outcome's", () => {
+    const past = stageASampleFile();
+    past.flights[0].closedLoop["2"].replay.envelopes.speed[0].endRow = 300;
+    const a = parseTrainingSample(past);
+    expect(a.ok).toBe(false);
+    if (!a.ok) expect(a.problem).toContain("an envelope's");
+
+    const apart = stageASampleFile();
+    apart.flights[0].closedLoop["4"].replay.track.eM[5] += 2;
+    const b = parseTrainingSample(apart);
+    expect(b.ok).toBe(false);
+    if (!b.ok) expect(b.problem).toContain("replay.track and states are one flight");
+
+    const last = stageASampleFile();
+    last.flights[0].closedLoop["8"].replay.track.lastCycle -= 1;
+    const c = parseTrainingSample(last);
+    expect(c.ok).toBe(false);
+    if (!c.ok) expect(c.problem).toContain("lastCycle is");
+
+    const rows = stageASampleFile();
+    rows.flights[0].closedLoop["2"].replay.track.rows -= 1;
+    const r = parseTrainingSample(rows);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.problem).toMatch(/rows is \d+, but \d+ cycles/);
+
+    const cycle = stageASampleFile();
+    delete cycle.executor;
+    expect(parseTrainingSample(cycle).ok).toBe(false);
+
+    const uneven = stageASampleFile();
+    uneven.executor.cycleS = 0.75;
+    const u = parseTrainingSample(uneven);
+    expect(u.ok).toBe(false);
+    if (!u.ok) expect(u.problem).toContain("not a whole number of 0.75 s cycles");
+
+    const open = stageASampleFile();
+    const spans = open.flights[0].openLoop.envelopes.speed;
+    spans[spans.length - 1].endRow = open.flights[0].observed.rows + 1;
+    const o = parseTrainingSample(open);
+    expect(o.ok).toBe(false);
+    if (!o.ok) expect(o.problem).toContain("rows of the observed track");
+  });
+
+  it("accepts an empty heading band wherever it lies — its word's lead runs past the end of the flight — and draws nothing for it", () => {
+    const file = stageASampleFile();
+    const bands = file.flights[0].closedLoop["2"].replay.envelopes.heading;
+    bands.push({ ...bands[0], row: 900, firstRow: 902, stopRow: 902, inside: [] });
+    file.flights[0].openLoop.envelopes.heading.push({ ...file.flights[0].openLoop.envelopes.heading[0], row: 900, firstRow: 902, stopRow: 902, inside: [] });
+    const parsed = parseTrainingSample(file);
+    if (!parsed.ok) throw new Error(parsed.problem);
+    const empty = parsed.value.flights[0].closedLoop["2"].replay.envelopes!.heading.slice(-1)[0];
+    expect(empty.inside).toEqual([]);
+    expect(trainingBandGround(parsed.value.flights[0].closedLoop["2"].flown, empty)).toEqual([]);
+  });
+});
+
+describe("the readings", () => {
+  const sample = stageASample();
+  const [flight] = sample.flights;
+  const stepS = sample.vocabulary.stepS;
+
+  it("puts the labelled sentence on the observed rows from 0 and the closed-loop one on the first predicted step", () => {
+    const open = trainingReadingOf(flight, stepS, null);
+    expect(open.loop).toBe("open");
+    expect(open.originS).toBe(0);
+    expect(readingRowTimeS(open, 3)).toBe(6);
+    expect(open.judged).toBe(flight.observed);
+    const closed = trainingReadingOf(flight, stepS, 4);
+    const raw = flight.closedLoop["4"];
+    // state row k is observed row firstRow + k; the first predicted step is state row flownFromRow
+    expect(closed.originS).toBe((raw.firstRow + raw.flownFromRow) * stepS);
+    expect(readingRowTimeS(closed, 2)).toBe(closed.originS + 8);
+    expect(closed.judged).toBe(raw.flown);
+    expect(raw.flown.tS[0]).toBe(closed.originS);
+    expect(raw.flown.tS[1] - raw.flown.tS[0]).toBe(stepS);
+    expect(trainingReadingOf(flight, stepS, 4)).toBe(closed);
+  });
+
+  it("finds the sentence row at a time: none before the sentence opens, the last at and after its end", () => {
+    const closed = trainingReadingOf(flight, stepS, 8);
+    expect(readingRowAt(closed, closed.originS - 1)).toBeNull();
+    expect(readingRowAt(closed, closed.originS)).toBe(0);
+    expect(readingRowAt(closed, closed.originS + 15.9)).toBe(1);
+    expect(readingRowAt(closed, closed.endS + 100)).toBe(closed.rows - 1);
+  });
+
+  it("runs a column's words to the next one's row and marks the corrections", () => {
+    const closed = trainingReadingOf(flight, stepS, 2);
+    const runs = sentenceColumnRuns(closed, "heading");
+    expect(runs[0].row).toBe(0);
+    expect(runs[runs.length - 1].endRow).toBe(closed.rows);
+    runs.slice(1).forEach((run, i) => expect(runs[i].endRow).toBe(run.row));
+    expect(runs.some((run) => run.event.correction)).toBe(true);
+    expect(sentenceWordAt(closed, "heading", 52)!.event.value).toBe(35);
+    expect(sentenceWordAt(closed, "heading", null)).toBeNull();
+  });
+
+  it("matches a word to its envelope: one to one in the labelled sentence, by the judge's row in a closed-loop one", () => {
+    const open = trainingReadingOf(flight, stepS, null);
+    sentenceColumnRuns(open, "heading").forEach((run, index) => expect(trainingEnvelopeIndex(open, stepS, "heading", run)).toBe(index));
+    for (const interval of [2, 4, 8]) {
+      const closed = trainingReadingOf(flight, stepS, interval);
+      const bands = closed.envelopes!.heading;
+      const found = sentenceColumnRuns(closed, "heading")
+        .map((run) => trainingEnvelopeIndex(closed, stepS, "heading", run)).filter((index) => index !== null);
+      expect(found).toEqual(bands.map((_, index) => index));
+      // a column with no envelope gives none
+      expect(trainingEnvelopeIndex(closed, stepS, "runway", sentenceColumnRuns(closed, "runway")[0])).toBeNull();
+    }
+  });
+
+  it("spells a word from what it says, decoding nothing", () => {
+    const closed = trainingReadingOf(flight, stepS, 2);
+    const says = (column: (typeof TRAINING_COLUMNS)[number], row: number) => sentenceWordAt(closed, column, row)!.event.says;
+    expect(trainingBandLabel(says("runway", 0))).toBe("09");
+    expect(trainingWordLabel(says("runway", 0))).toBe("runway 09");
+    expect(trainingBandLabel({ column: "heading", relativeDeg: -20, trackDeg: 205 })).toBe("−20°");
+    expect(trainingBandLabel({ column: "heading", relativeDeg: 0, trackDeg: 225 })).toBe("0°");
+    expect(trainingWordLabel({ column: "heading", relativeDeg: 15, trackDeg: 240.026 })).toBe("+15° from the course (track 240°)");
+    expect(trainingBandLabel({ column: "altitude", noLevelOff: true })).toBe("no level-off");
+    expect(trainingWordLabel({ column: "altitude", noLevelOff: false, levelM: 780, mslM: 912.6 })).toBe("780 m above the airport (913 m MSL)");
+    expect(trainingBandLabel({ column: "angle", angleDeg: 0, climb: false, level: true })).toBe("level");
+    expect(trainingBandLabel({ column: "angle", angleDeg: -1.5, climb: true, level: false })).toBe("climb 1.5°");
+    expect(trainingBandLabel({ column: "angle", angleDeg: 3, climb: false, level: false })).toBe("3.0°");
+    expect(trainingBandLabel({ column: "speed", speedMps: null })).toBe("unspecified");
+    expect(trainingBandLabel({ column: "runway", goAround: true })).toBe("go-around");
+  });
+});
+
+describe("words outside their envelopes", () => {
+  it("counts a heading word with a row outside its band, a tube or span that did not hold, never an empty band", () => {
+    const sample = stageASample();
+    const envelopes = sample.flights[0].closedLoop["2"].replay.envelopes!;
+    const expected = envelopes.heading.filter((band) => band.inside.includes(false)).length +
+      envelopes.altitude.filter((tube) => !tube.contained).length + envelopes.speed.filter((span) => !span.contained).length;
+    expect(wordsOutside(envelopes)).toBe(expected);
+    const empty = { firstRow: 900, stopRow: 900, row: 898, targetDeg: 0, toleranceDeg: 4.5, inside: [] };
+    const one = envelopes.altitude.length ? { ...envelopes.altitude[0], contained: false } : null;
+    const more = { ...envelopes, heading: [...envelopes.heading, empty], altitude: one ? [one, ...envelopes.altitude.slice(1)] : [] };
+    const before = envelopes.altitude.length && !envelopes.altitude[0].contained ? 0 : 1;
+    expect(wordsOutside(more)).toBe(expected + (one ? before : 0));
+  });
+});
+
+describe("drawing helpers", () => {
+  it("carries a run of rows outside on to the next row, so one row is a segment", () => {
+    expect(outsideSpans([true, false, false, true, false], 10, 20)).toEqual([[11, 13], [14, 15]]);
+    expect(outsideSpans([true, true], 0, 5)).toEqual([]);
+  });
+
+  it("makes a track continuous and puts a target on the branch of the track", () => {
+    expect(unwrapDegrees([350, 355, 2, 8])).toEqual([350, 355, 362, 368]);
+    expect(unwrapDegrees([10, 5, 355], 370)).toEqual([370, 365, 355]);
+    expect(nearestBranch(184, 544)).toBe(544);
+    expect(nearestBranch(347, -13)).toBe(-13);
   });
 });

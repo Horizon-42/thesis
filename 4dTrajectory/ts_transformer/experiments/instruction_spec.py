@@ -1,5 +1,5 @@
 """Instruction labeller, step 2: measure the vocabulary's measured values on the TRAIN signals
-and write the spec (vocabulary design §8).
+and write the spec (vocabulary §8).
 
 Every flight first goes through the labeller's own gate (`labeller.read.admit`): the measured
 population is the labelled one, cut before the landing, with the ground-speed refusals applied.
@@ -9,13 +9,24 @@ on the last stretch of the final, and the path angle of every move piece; it als
 track's and the altitude's wander for the bands the two tolerances are chosen from. Those set
 the bank range, the acceleration bound, the course tolerance and the descent classes. Pass B,
 with the course tolerance, fits the capture corridor on the aligned final and compares the
-heading grids on the rows before it. Writes ``spec.json`` (with the labeller's source hash and
-git state) and ``measurements.json`` into the signals directory (never over an existing file).
+heading grids on the rows before it. Every value fitted from data is written beside its rounder candidates and the fit
+each leaves (D15), with the climb angles' distribution (O12); the altitude grid is fitted again on the level-offs above
+the airport elevation E (D58, `measure.fit_altitude_grid`) and written beside the grid of D22, each with the rounding
+error of the level words (`measure.grid_candidates`). Writes ``spec.json`` (with the git state, as information) and
+``measurements.json`` into the signals directory (never over an existing file).
+
+``--candidate NAME`` (required when measuring) is the user's choice of D15 (D56): the descent nominals and edges and
+the climb nominal of that row of the rounding candidates (`measure.CANDIDATE_NAMES`); ``--grid NAME`` (required when
+measuring) is the user's choice of the altitude grid (D58): a row of the grid candidates (`measure.GRID_NAMES`). The
+fitted values and every row stay in ``measurements.json`` beside the choices. ``--closed-loop-final-vertical-m`` (required
+when measuring) is the closed-loop reading's vertical tolerance in the final descent, H_final (D66): measured by A24, not
+here, and chosen by the user; at most H (`closed_loop_vertical_m`); recorded beside the other choices.
 
 ``--spec-from <artefact>`` measures nothing: that artefact's spec is kept unchanged (`artefact.keep_spec` — new rows
 under the same vocabulary, e.g. rows moved onto the UTC steps, keep the spec; every model trained under it still opens).
 
-    python run_ts.py instruction_spec --dir 4dTrajectory/outputs/POOLED/instruction_language/<name>
+    python run_ts.py instruction_spec --dir 4dTrajectory/outputs/POOLED/instruction_language/<name> --candidate 0.25 \
+        --grid <name> --closed-loop-final-vertical-m <m>
     python run_ts.py instruction_spec --dir <new> --spec-from 4dTrajectory/outputs/POOLED/instruction_language/<old>
 """
 
@@ -25,6 +36,7 @@ import argparse
 import time
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import replace
 from multiprocessing import get_context
 from pathlib import Path
 from typing import Any
@@ -33,9 +45,7 @@ import numpy as np
 
 from ts_transformer.instructions import measure
 from ts_transformer.instructions.airport import AirportGeometry
-from ts_transformer.instructions.artefact import (
-    keep_spec, labeller_source_sha256, load_candidates, load_signals, write_spec,
-)
+from ts_transformer.instructions.artefact import keep_spec, load_candidates, load_signals, write_spec
 from ts_transformer.instructions.labeller.read import admit
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.spec import VocabularySpec
@@ -44,12 +54,14 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 CHUNK = 1000
 
 
-def _admitted(flights: list[Any], spec: VocabularySpec, geometry_data: dict[str, Any]) -> tuple[list[Any], Counter]:
+def _admitted(flights: list[Any], spec: VocabularySpec, geometry_data: dict[str, Any]
+              ) -> tuple[list[tuple[Any, AirportGeometry]], Counter]:
+    """The admitted flights, each with its airport's geometry."""
     geometries = {code: AirportGeometry.from_dict(data) for code, data in geometry_data.items()}
     admitted, refused = [], Counter()
     for flight in flights:
         try:
-            admitted.append(admit(flight, geometries[flight.airport], spec))
+            admitted.append((admit(flight, geometries[flight.airport], spec), geometries[flight.airport]))
         except Refused as refusal:
             refused[refusal.reason] += 1
     return admitted, refused
@@ -59,8 +71,13 @@ def _pass_a(flights: list[Any], spec_data: dict[str, Any], geometry_data: dict[s
     spec = VocabularySpec.from_dict(spec_data)
     admitted, refused = _admitted(flights, spec, geometry_data)
     pooled: dict[str, list[np.ndarray]] = {}
-    for flight in admitted:
-        for name, values in measure.measure_flight(flight, spec).items():
+    for flight, geometry in admitted:
+        try:
+            measured = measure.measure_flight(flight, spec, geometry.elevation_m)
+        except Refused as refusal:            # a level out of the grid: the labeller refuses the flight too
+            refused[refusal.reason] += 1
+            continue
+        for name, values in measured.items():
             pooled.setdefault(name, []).append(values)
     return {name: np.concatenate(values) for name, values in pooled.items()}, refused
 
@@ -71,7 +88,7 @@ def _pass_b(flights: list[Any], spec_data: dict[str, Any], geometry_data: dict[s
     admitted, _ = _admitted(flights, spec, geometry_data)
     pooled: dict[str, list[np.ndarray]] = {}
     grid_rows: dict[str, list[list[float]]] = {}
-    for flight in admitted:
+    for flight, _ in admitted:
         arrays, rows = measure.measure_final(flight, spec, course_tolerance_deg, grids)
         for name, values in arrays.items():
             pooled.setdefault(name, []).append(values)
@@ -99,7 +116,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--spec-from", type=Path, default=None,
                         help="an artefact whose spec is kept unchanged instead of measuring one (module docstring)")
+    parser.add_argument("--candidate", choices=measure.CANDIDATE_NAMES, default=None,
+                        help="the user's choice of D15 (required when measuring; module docstring)")
+    parser.add_argument("--grid", choices=measure.GRID_NAMES, default=None,
+                        help="the user's choice of the altitude grid (D58; required when measuring)")
+    parser.add_argument("--closed-loop-final-vertical-m", type=float, default=None,
+                        help="H_final, the vertical tolerance of the closed loop in the final descent (D66; required "
+                             "when measuring)")
     args = parser.parse_args(argv)
+    choices = (args.candidate, args.grid, args.closed_loop_final_vertical_m)
+    if (args.spec_from is None) == (args.candidate is None) or len({c is None for c in choices}) != 1:
+        parser.error("measuring needs --candidate, --grid and --closed-loop-final-vertical-m (the user's choices of D15, "
+                     "D58 and D66); --spec-from keeps a spec and takes none")
+    if args.closed_loop_final_vertical_m is not None:      # refused by the spec's own rule before anything is read
+        try:
+            replace(measure.provisional_spec(), closed_loop_final_vertical_m=args.closed_loop_final_vertical_m)
+        except ValueError as error:
+            parser.error(f"--closed-loop-final-vertical-m: {error}")
     directory = args.dir if args.dir.is_absolute() else REPO_ROOT / args.dir
     for name in ("spec.json", "measurements.json"):
         if (directory / name).exists():
@@ -110,7 +143,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"kept spec {spec.sha256[:12]} from {source}")
         return 0
     started = time.perf_counter()
-    labeller = labeller_source_sha256()          # the code the workers measure with
     flights = load_signals(directory, "train")
     print(f"{len(flights)} train flights", flush=True)
     provisional = measure.provisional_spec()
@@ -143,37 +175,43 @@ def main(argv: list[str] | None = None) -> int:
     order = np.argsort(-angle[climbs])
     cumulative = np.cumsum(length[climbs][order]) / length[climbs].sum()
     climb_centre = float(-angle[climbs][order][np.searchsorted(cumulative, 0.5)])
+    candidates = measure.rounding_candidates(angle, length, chosen["centres_deg"], chosen["edges_deg"], climb_centre)
+    grids_m = measure.grid_candidates(first["level_height_m"])
     measured = measure.MeasuredValues(
-        # every turning row is faster than turn_onset_rate_deg_s, so the p5 stays above it
-        turn_rate_min_deg_s=measure.round_down(float(np.percentile(first["turn_mean_rate_deg_s"], 5)), 0.1),
         turn_rate_max_deg_s=measure.round_up(float(np.percentile(first["turn_row_rate_deg_s"], 99.9)), 0.1),
         turn_bank_max_deg=measure.round_up(float(np.percentile(first["turn_row_bank_deg"], 99.9)), 1.0),
         corridor_half_width_m=measure.round_up(corridor["half_width_m"], 5.0),
         corridor_widening_deg=measure.round_up(float(np.degrees(np.arctan(corridor["slope"]))), 0.05),
         corridor_course_tolerance_deg=course_tolerance,
-        descent_angle_edges_deg=tuple(round(e, 2) for e in chosen["edges_deg"]),
-        descent_angle_centres_deg=tuple(round(c, 2) for c in chosen["centres_deg"]),
-        climb_angle_centre_deg=round(climb_centre, 2),
+        **measure.candidate_values(candidates, args.candidate),
         speed_accel_max_mps2=measure.round_up(float(np.percentile(first["transition_accel_mps2"], 99.9)), 0.1),
+        **measure.grid_values(grids_m, args.grid),
     )
-    spec = measure.build_spec(measured)
+    spec = measure.build_spec(measured, closed_loop_final_vertical_m=args.closed_loop_final_vertical_m)
     measurements = {
         "train_flights": len(flights), "not_admitted": dict(refused.most_common()),
-        "suggested": suggested, "measured": measured.to_dict(),
+        "suggested": suggested, "measured": measured.to_dict(), "chosen_candidate": args.candidate,
+        "chosen_grid": args.grid, "chosen_closed_loop_final_vertical_m": args.closed_loop_final_vertical_m,
         "rules": {
             "heading_tolerance_deg": f"chosen: heading_step/2 + {measure.HEADING_WANDER_ALLOWANCE_DEG:g}° of wander "
                                      "(see sensitivity.heading_wander_p95_by_band)",
-            "altitude_tolerance_m": "chosen: altitude_step/2 + altitude_fit_tolerance "
-                                    "(see sensitivity.level_wander_p95_by_fit_tolerance)",
-            "turn_rate_min_deg_s": "p5 of a turn's mean rate (turns of at least turn_rate_min_from_deg, from the onset rate on), down to 0.1°/s",
+            "altitude_grid": f"the row {args.grid!r} of grid_candidates (the user's choice, D58): the grid fitted on the "
+                             "level-offs above E (row 0 apart; the level pieces as the labeller reads them under the "
+                             "provisional spec's D22 grid) or D22's; a level's band is half the larger gap to its "
+                             "neighbours + altitude_fit_tolerance (Words.altitude_tolerances)",
+            "level_band_m": "chosen: a level piece's rows lie within it of the piece's own median (vocabulary §4.4; see "
+                            "sensitivity.level_wander_p95_by_fit_tolerance)",
             "turn_rate_max_deg_s": "p99.9 of the turn rate on turning rows, up to 0.1°/s",
             "turn_bank_max_deg": "p99.9 of the bank on turning rows, up to 1°",
             "corridor_half_width_m": "p99 offset of the aligned final's nearest distance bin (0–3 km), up to 5 m",
             "corridor_widening_deg": "the smallest widening that keeps every bin's p99 inside at the bin's middle, up to 0.05°",
             "corridor_course_tolerance_deg": f"p99 of |track − course| on the last {measure.FINAL_MEASURE_M:.0f} m flown, up to 1°",
-            "descent_angle_classes": f"{measure.DESCENT_CLASSES} classes, weighted k-means on tan(angle), weight = length²",
-            "climb_angle_centre_deg": "length-weighted median of the climb pieces",
+            "descent_angle_classes": f"{measure.DESCENT_CLASSES} classes, weighted k-means on tan(angle), weight = length², "
+                                     f"the row {args.candidate!r} of rounding_candidates (the user's choice, D15)",
+            "climb_angle_centre_deg": f"length-weighted median of the climb pieces, the row {args.candidate!r}",
             "speed_accel_max_mps2": "p99.9 of |acceleration| on transition rows, up to 0.1",
+            "closed_loop_final_vertical_m": "the user's choice of H_final (D66), from the measurement of A24 — not "
+                                            "measured here",
         },
         "sensitivity": {
             "heading_wander_p95_by_band": {f"{h:g}": float(np.percentile(first[f"heading_wander_deg_band{h:g}"], 95))
@@ -182,25 +220,35 @@ def main(argv: list[str] | None = None) -> int:
                                                   for t in measure.LEVEL_FIT_TOLERANCES_M},
         },
         "pass_a": {name: measure.percentiles(values) for name, values in first.items()
-                   if name not in ("move_angle_deg", "move_length_m")},
+                   if name not in ("move_angle_deg", "move_length_m", "level_height_m")},
         "move_pieces": {"angle_deg": measure.percentiles(angle), "length_m": measure.percentiles(length),
                         "climb_pieces": int(climbs.sum())},
         "descent_class_fits": {str(k): v for k, v in fits.items()},
+        "rounding_candidates": candidates,
+        "climb_angles": measure.climb_distribution(angle, length),
+        "grid_candidates": grids_m,
         "corridor_fit": corridor,
         "heading_grids": _grid_table(grid_rows, grids),
         "elapsed_s": time.perf_counter() - started,
     }
-    if labeller_source_sha256() != labeller:
-        raise SystemExit("the labeller's code changed while the spec was being measured; measure again")
-    source = {"labeller_source_sha256": labeller, "git": git_state()}
+    source = {"git": git_state()}
     write_spec(directory, spec, measurements, source)
-    print(f"spec {spec.sha256[:12]}:")
+    print(f"spec {spec.sha256[:12]} (candidate {args.candidate}, grid {args.grid}, H_final "
+          f"{args.closed_loop_final_vertical_m:g} m):")
     for name, value in measured.to_dict().items():
         print(f"  {name:32s} {value}")
     for k, fit in fits.items():
         e = fit["end_height_error_m"]
         print(f"  descent K={k}: centres {[round(c, 2) for c in fit['centres_deg']]}  end-height error p50 "
               f"{e['p50']:.1f} m, p95 {e['p95']:.1f} m")
+    for name, row in measurements["rounding_candidates"].items():
+        print(f"  rounded {name:>6}: descent end-height error p50 {row['descent_end_height_error_m']['p50']:.1f} m, "
+              f"climb {row['climb_centre_deg']}° p50 {row['climb_end_height_error_m']['p50']:.1f} m")
+    for name, row in grids_m.items():
+        error = row["rounding_error_m"]
+        print(f"  grid {name:>6}: steps {row['altitude_segment_steps_m']} tops {row['altitude_segment_tops_m']} "
+              f"({row['levels']} levels), level words ({error['n']}) rounding error p50 / p95 / max "
+              + " / ".join(f"{error[k]:.0f}" for k in ("p50", "p95", "max")) + " m")
     for grid, row in measurements["heading_grids"].items():
         print(f"  heading grid {grid}°: tolerance {row['tolerance_deg']}°, heading words/flight "
               f"p50 {row['heading_words_per_flight']['p50']:.0f}, p95 {row['heading_words_per_flight']['p95']:.0f}")

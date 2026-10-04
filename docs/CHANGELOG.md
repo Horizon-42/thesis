@@ -1,5 +1,37 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-04 — `run_all_tests.sh` runs its three groups at once, on pytest-xdist workers
+
+- The user's goal was speed. Measured: the ts_transformer suite (1,531 tests) 15.5 min serial -> 2.8-3.2 min on 8-16 workers; the
+  whole script 192 s wall, exit 0 (ts_transformer 1529 passed / 2 skipped, modeling + backend 1005 passed, aeroviz-4d/python 161 passed).
+  Groups: ts_transformer (`TS_TEST_WORKERS`, default 8), the other modeling suites (`MODELING_TEST_WORKERS`, 6), aeroviz-4d/python
+  (`FRONTEND_TEST_WORKERS`, 2); 0 = that group serial. `OMP_NUM_THREADS` / `MKL_NUM_THREADS` 1 per worker; no test file changed.
+- 16 workers were no faster than 8 here (single tests ran 2x slower under contention). In a worktree the git-ignored `data/` and
+  `aeroviz-4d/public/data/airports` must be linked (three tests read them; read-only).
+
+### 2026-10-04 — Three one-tier readouts archived; the test fixtures of the one-tier paths gathered
+
+- The user ("chain_sensitivity 搬进 archive；B 类的也搬进去"): `eta_error_readout`, `latent_probe`, `latent_fan_readout` and their tests
+  joined `archive/one_tier_oneoffs_2026_10/`; the two `eta_error_readout` tests left `test_two_head_duration.py` as an excerpt
+  there. NOT moved, with the reasons in the campaign README and `docs/test_suite_audit_2026-10-04.zh.md` §3: `eta_calibration`
+  (the only producer of `predict --cta-from-quantiles`'s table) and `chain_sensitivity` (its tests are the only tests of the
+  live `inference/receding.py`).
+- `tests/support_prediction.py`: the one-tier prediction fixtures that were byte-identical in several test files, or imported
+  by one test file from another; 28 test files take them under their old names, test bodies unchanged.
+
+### 2026-10-04 — Finished one-tier diagnostics and the runway-intent R0 / R1.1 runners archived
+
+- The user ("A 类可以搬，B、C 先不动"), after an audit of `ts_transformer/tests/`: eight runners with no `runners.md` entry, no live
+  importer and no mention in the two-tier documents moved to `archive/one_tier_oneoffs_2026_10/` with their six test files,
+  unmodified: `kinematic_ablation`, `overfit_diagnostic`, `clock_attribution`, `control_capacity_ceiling`,
+  `runway_intent_r0` (+ `_readout`), `runway_intent_r11` (+ `_readout`). Three passages of mixed documents cut verbatim to its
+  `docs/cut_sections.md`.
+- Kept live although first listed: `approach_clock_figure`, `approach_legs_figure`, `scene_sample_figure` (they draw the SVGs
+  committed under `docs/two_tier/figures/`, and their tests hold the files to the code). `runway_intent_r1` stays (imported by
+  `run_naming.py`); `runway_hypotheses` stays (nothing live reads it now — open).
+- `tests/test_architecture.py::test_nothing_live_imports_the_archive` already failed at `47ac23a4`: `archive/two_tier_v3_2026_10/`
+  has `docs/README.md` but no `README.md`.
+
 ### 2026-10-04 — Obsolete experiment outputs deleted (46.4 GiB; the user's go)
 
 - The user, on Claude's audit of the two lists in `4dTrajectory/ts_transformer/docs/data_cleanup/` (table 1: obsolete

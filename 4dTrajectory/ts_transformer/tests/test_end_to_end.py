@@ -35,14 +35,13 @@ from ts_transformer.config import (
     TSConfig,
 )
 from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from ts_transformer.data.dataset import Normalizer, build_series
+from ts_transformer.data.dataset import Normalizer
 from ts_transformer.data.splits import split_by_flight
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records
 from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
 from ts_transformer.inference.forecast import forecast_approach
 from ts_transformer.backbone.adapters import build_model
-from ts_transformer.data.synthetic import synthetic_arrivals  # noqa: E402
 # Imported, never restated: a schema version pinned by hand in a fixture is a version
 # the fixture cannot check, and this one gates every loader that reads the roster.
 from ts_transformer.outputs.state.loss import STATE_LOSS_COMPONENT_NAMES
@@ -51,17 +50,9 @@ from ts_transformer.training.train import (  # noqa: E402
     CHECKPOINT_METADATA_SCHEMA, FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA,
     evaluate_fit_splits, load_checkpoint, train,
 )
+from ts_transformer.tests.support_prediction import series as _series
 
 AIRPORT, RUNWAY = "KRDU", "05L"
-
-
-def _series(n_flights=8, **config_overrides):
-    """Synthetic KRDU arrivals, built into FlightSeries. Returns ``(series, config)``."""
-    config = TSConfig(**config_overrides)
-    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3)
-    series, report = build_series(flights, config, airport=AIRPORT)
-    assert report.built == n_flights, report.format()
-    return series, config
 
 
 L1_NATIVE32_CHECKPOINT = _REPO_ROOT / "4dTrajectory/outputs/KRDU/experiments/l1_lowdim_20260907/L1_native32/checkpoint.pt"

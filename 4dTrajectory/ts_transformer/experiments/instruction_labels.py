@@ -1,9 +1,12 @@
 """Instruction labeller, step 3: read every flight of every split (train, select, val) into its sentence
-with the spec of step 2, and write the sentences and the readout (vocabulary design §7).
+with the spec of step 2, and write the sentences and the readout (vocabulary §4.7).
 
 Writes ``sentences_{train,select,val}.npz``, ``labels.json``, ``readout.json`` and ``readout.md``
-into the signals directory (never over an existing file). The candidate runways are the
-artefact's own ``candidates.json`` (written with the signals).
+into the signals directory (never over an existing file), and the labeller's conformance reference
+``conformance/`` (`instructions.conformance`: a fixed sample of the train flights and what this code
+read), in the run that writes what it pins; every later process that uses the labeller on the artefact runs the
+check against it first (`require_conforming_labeller`, D73). The candidate
+runways are the artefact's own ``candidates.json`` (written with the signals).
 
     python run_ts.py instruction_labels --dir 4dTrajectory/outputs/POOLED/instruction_language/<name>
 """
@@ -19,17 +22,16 @@ from typing import Any
 
 import numpy as np
 
+from ts_transformer.instructions import conformance
 from ts_transformer.instructions.airport import AirportGeometry
-from ts_transformer.instructions.artefact import (
-    SPLITS, load_candidates, load_signals, load_spec, require_current_labeller, write_sentences,
-)
+from ts_transformer.instructions.artefact import SPLITS, load_candidates, load_signals, load_spec, write_sentences
 from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.readout import class_usage, flight_record, summarise
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import COLUMNS, Words
 from ts_transformer.io_utils import utc_now, write_json_atomic
-from ts_transformer.repo_layout import REPO_ROOT
+from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 CHUNK = 1000
 
@@ -44,11 +46,12 @@ def _label(flights: list[Any], spec_data: dict[str, Any], geometry_data: dict[st
         try:
             reading = read_flight(flight, geometry, spec, words)
         except Refused as refusal:
-            results.append(("refused", None, {"dataset_id": flight.dataset_id, "airport": flight.airport,
-                                              "status": "refused", "reason": refusal.reason, "detail": refusal.detail}))
+            results.append(("refused", conformance.refused_record(flight.dataset_id, refusal),
+                            {"dataset_id": flight.dataset_id, "airport": flight.airport,
+                             "status": "refused", "reason": refusal.reason, "detail": refusal.detail}))
             continue
-        record = flight_record(reading)
-        reading.checks = {}
+        record = flight_record(reading, words)
+        reading.checks = {"turning_deg": reading.checks["turning_deg"]}   # what the stratum of the sentence file reads (D70)
         results.append(("labelled", reading, record))
     return results
 
@@ -76,32 +79,34 @@ def render(summary: dict[str, Any], spec: VocabularySpec) -> str:
 
     def group_rows(title: str, groups: dict[str, dict[str, Any]]) -> list[str]:
         out = ["", f"### {title}", "",
-               "| 组 | 架次 | 每架指令 均值 / p95 | 航向 | 高度 | 下降角 | 速度 | 进近 | 非沉默步 | 截获前转过的角度 p50 / p95 | "
-               "在入口处截断 |",
-               "|---|---|---|---|---|---|---|---|---|---|---|"]
+               "| 组 | 架次 | 每架指令 均值 / p95 | 跑道 | 航向 | 高度 | 下降角 | 速度 | 非沉默步 | 截获前转过的角度 p50 / p95 | "
+               "在入口处截断 | 复飞（架次 / 词） | 复飞时生效：不改平 / 未指定速度 / 该进近有截获 / 之后换跑道 / 最低点过了入口 |",
+               "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for name, g in groups.items():
             w, t = g["words_per_flight"], g["turning_deg"]
             out.append(f"| {name} | {g['flights']} | {_fmt(g['instructions_per_flight'].get('mean'))} / "
                        f"{_fmt(g['instructions_per_flight'].get('p95'), 0)} | "
-                       + " | ".join(_fmt(w[c].get("mean"), 2) for c in ("heading", "altitude", "angle", "speed", "approach"))
+                       + " | ".join(_fmt(w[c].get("mean"), 2) for c in ("runway", "heading", "altitude", "angle", "speed"))
                        + f" | {_pct(g['non_silent_step_share'])} | {_fmt(t.get('p50'), 0)} / {_fmt(t.get('p95'), 0)} | "
-                       f"{_pct(g['cut_at_crossing_share'])} |")
+                       f"{_pct(g['cut_at_crossing_share'])} | {g['go_arounds']['flights']} / {g['go_arounds']['words']} | "
+                       + " / ".join(str(g['go_arounds'][k]) for k in ("no_level_off", "unspecified", "captured", "other_runway",
+                                                                       "past_threshold"))
+                       + " |")
         return out
 
     def envelope_rows(title: str, groups: dict[str, dict[str, Any]]) -> list[str]:
         out = ["", f"### {title}", "",
-               "| 组 | 航向词包含：整条 / 逐行 | 截获转弯单调 / 转弯率与坡度在范围内 | 截获转弯平均转弯率 p50 (°/s) | "
-               "截获时离入口 p5 / p50 (km) | 高度词包含 | 高度逐行 | 管子末宽 p50 / p95 (m) | 下降至落地末宽 p50 / p95 (m) | "
-               "速度词包含 | 速度带内逐行 |",
-               "|---|---|---|---|---|---|---|---|---|---|---|"]
+               "| 组 | 航向词包含：整条 / 逐行（容差 ±4.5°） | 截获时离入口 p5 / p50 (km) | 高度词包含 | 高度逐行 | "
+               "管子末宽 p50 / p95 (m) | 不改平末宽 p50 / p95 (m) | 速度词包含 | 速度带内逐行（±5 m/s） |",
+               "|---|---|---|---|---|---|---|---|---|"]
         for name, g in groups.items():
-            h, a, v, c, d = g["heading"], g["altitude"], g["speed"], g["capture_turns"], g["capture_before_threshold_m"]
+            h, a, v, d = g["heading"], g["altitude"], g["speed"], g["capture_before_threshold_m"]
             out.append(f"| {name} | {_pct(h['contained_share'])} / {_pct(h['row_share'])} | "
-                       f"{_pct(c['progress_ok'])} / {_pct(c['rate_ok'])} | {_fmt(c['mean_rate_deg_s'].get('p50'), 2)} | "
                        f"{_fmt(d['p5'] / 1000, 1)} / {_fmt(d['p50'] / 1000, 1)} | "
                        f"{_pct(a['contained_share'])} | {_pct(a['row_share'])} | "
                        f"{_fmt(a['tube_width_end_m'].get('p50'), 0)} / {_fmt(a['tube_width_end_m'].get('p95'), 0)} | "
-                       f"{_fmt(a['land_tube_width_end_m'].get('p50'), 0)} / {_fmt(a['land_tube_width_end_m'].get('p95'), 0)} | "
+                       f"{_fmt(a['no_level_off_tube_width_end_m'].get('p50'), 0)} / "
+                       f"{_fmt(a['no_level_off_tube_width_end_m'].get('p95'), 0)} | "
                        f"{_pct(v['contained_share'])} | {_pct(v['band_row_share'])} |")
         return out
 
@@ -126,8 +131,9 @@ def main(argv: list[str] | None = None) -> int:
     for name in (*(f"sentences_{split}.npz" for split in SPLITS), "labels.json", "readout.json", "readout.md"):
         if (directory / name).exists():
             parser.error(f"{directory / name} exists; an instruction artefact is never overwritten")
+    if (directory / conformance.DIRECTORY).exists():
+        parser.error(f"{directory / conformance.DIRECTORY} exists; an instruction artefact is never overwritten")
     started = time.perf_counter()
-    require_current_labeller(directory)
     spec = load_spec(directory)
     words = Words(spec)
     geometry_data = {code: geometry.to_dict() for code, geometry in load_candidates(directory).items()}
@@ -139,24 +145,32 @@ def main(argv: list[str] | None = None) -> int:
             flights = load_signals(directory, split)
             futures = [pool.submit(_label, flights[i: i + CHUNK], spec.to_dict(), geometry_data) for i in range(0, len(flights), CHUNK)]
             readings, indices, records, refusals = [], [], [], []
+            outcomes: list[dict[str, Any]] = []          # every flight's conformance record, in signal order
+            labelled: list[Any] = []                     # every flight's reading, None where refused
             for chunk, future in enumerate(futures):
                 for offset, (status, reading, record) in enumerate(future.result()):
                     if status == "labelled":
                         readings.append(reading)
                         indices.append(chunk * CHUNK + offset)
                         records.append(record)
+                        outcomes.append(conformance.labelled_record(reading))
+                        labelled.append(reading)
                     else:
                         refusals.append(record)
+                        outcomes.append(reading)             # the refusal's conformance record
+                        labelled.append(None)
             print(f"  {split}: {len(readings)} labelled, {len(refusals)} refused, "
                   f"{time.perf_counter() - started:.0f}s", flush=True)
             if not readings:
                 raise SystemExit(f"no {split} flight was labelled ({len(refusals)} refused): nothing to write")
-            require_current_labeller(directory)      # the code did not change while the workers read
             write_sentences(directory, split, spec, readings, indices)
+            if split == conformance.SPLIT:                    # the reference, in the run that writes what it pins
+                conformance.write_reference(directory, flights, outcomes, labelled, git=git_state())
             summary[split] = {**summarise(records, refusals),
                               "class_usage": class_usage(np.concatenate([r.words for r in readings]), words)}
             labels[split] = {"labelled": records, "refused": refusals}
-    write_json_atomic(directory / "labels.json", {"spec_sha256": spec.sha256, "written_utc": utc_now(), **labels})
+    write_json_atomic(directory / "labels.json", {"spec_sha256": spec.sha256, "git": git_state(),
+                                                  "written_utc": utc_now(), **labels})
     write_json_atomic(directory / "readout.json", {"spec_sha256": spec.sha256, "written_utc": utc_now(),
                                                    "columns": list(COLUMNS), "elapsed_s": time.perf_counter() - started,
                                                    **summary})

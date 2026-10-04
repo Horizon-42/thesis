@@ -11,19 +11,13 @@ import {
   explainCategoryRejection,
   indexCzmlFiles,
   checkTrainingIndex,
-  checkTrainingOverlay,
-  checkTrainingOverlays,
   checkTrainingSet,
   checkTrainingSetAgrees,
-  checkTrainingSetRefusal,
 } from "../checkPublication";
-import { parseTrainingIndex, parseTrainingSample, type TrainingSetEntry } from "../../data/trainingSample";
-import type { TrainingOpenSet } from "../../data/trainingSets";
-import { parseTrainingOverlays } from "../../data/trainingOverlays";
-import { SET_ID, mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import {
-  mockExecutorOverlay, mockOverlays, mockPriorOverlay,
-} from "../../data/__tests__/trainingOverlays.fixture";
+  parseTrainingIndex, parseTrainingSample, TRAINING_INDEX_SCHEMA, TRAINING_SAMPLE_SCHEMA, type TrainingSetEntry,
+} from "../../data/trainingSample";
+import { SET_ID, stageAIndex, stageASampleFile } from "../../data/__tests__/stageA";
 
 const observed: ComparisonCategory = {
   key: "observed",
@@ -171,114 +165,63 @@ describe("checkComparisonIndex", () => {
 // ── the Training export ──────────────────────────────────────────────────────
 
 function readable() {
-  const index = parseTrainingIndex(mockIndex());
-  const sample = parseTrainingSample(mockSample());
+  const index = parseTrainingIndex(stageAIndex());
+  const sample = parseTrainingSample(stageASampleFile());
   if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
-  const entry = index.value.sets.find((item) => item.id === SET_ID)!;
-  const open: TrainingOpenSet = { kind: "vocabulary-readback", sample: sample.value };
-  return { index: index.value, entry, sample: open };
+  return { index: index.value, entry: index.value.sets.find((item) => item.id === SET_ID)!, sample: sample.value };
 }
 
 describe("the Training export's checks", () => {
-  it("passes a manifest and a readable sample that agree", () => {
+  it("passes an index and a readable sample that agree", () => {
     const { entry, sample } = readable();
-    expect(checkTrainingIndex(mockIndex()).findings).toEqual([]);
-    expect(checkTrainingSet(SET_ID, "vocabulary-readback", mockSample()).findings).toEqual([]);
-    expect(checkTrainingSetRefusal(entry)).toEqual([]);
+    expect(checkTrainingIndex(stageAIndex()).findings).toEqual([]);
+    expect(checkTrainingSet(SET_ID, stageASampleFile()).findings).toEqual([]);
     expect(checkTrainingSetAgrees(entry, sample, "KXXX")).toEqual([]);
   });
 
-  // A set of a superseded vocabulary is refused on purpose: a WARNING naming why, not an error.
-  it("warns, by name, about the sets the panel refuses", () => {
-    const { index } = readable();
-    const findings = index.sets.flatMap(checkTrainingSetRefusal);
-    expect(findings.map((finding) => [finding.level, finding.category])).toEqual([
-      ["warn", "box_v3"], ["warn", "instruction_v1"], ["warn", "instruction_v2"], ["warn", "prior_s1337_val"],
-    ]);
-    expect(findings[0].message).toContain("read under box-v3, a superseded vocabulary");
+  it("refuses an index of another schema whole, naming the one found and the one expected", () => {
+    const { findings, value } = checkTrainingIndex({ ...stageAIndex(), schema: "aeroviz-training-index-v1" });
+    expect(value).toBeNull();
+    expect(findings).toEqual([expect.objectContaining({ level: "error" })]);
+    expect(findings[0].message).toContain("training/index_v4.json is not an index");
+    expect(findings[0].message).toContain(`schema is "aeroviz-training-index-v1", expected "${TRAINING_INDEX_SCHEMA}"`);
   });
 
-  it("names the entry and the field when the panel would grey an entry out", () => {
-    const index = mockIndex() as any;
-    index.sets.push({ ...index.sets[1], id: "half_written", kind: "not-a-kind" });
+  it("names the entry and the field when the panel would reject an entry", () => {
+    const index = stageAIndex();
+    index.sets.push({ ...index.sets[0], id: "half_written", kind: "not-a-kind" });
     const { findings } = checkTrainingIndex(index);
     expect(findings).toHaveLength(1);
     expect(findings[0].category).toBe("half_written");
     expect(findings[0].message).toContain("not-a-kind");
   });
 
-  it("names the field when a readable sample is wrong", () => {
-    const sample = mockSample() as any;
-    sample.flights[0].envelopes.speed[0].check.bandInside = 7;
-    const { findings, value } = checkTrainingSet(SET_ID, "vocabulary-readback", sample);
+  it("names the field when a sample is wrong, and the schema when it is another one", () => {
+    const sample = stageASampleFile();
+    sample.flights[0].closedLoop["2"].flownFromRow += 1;
+    const { findings, value } = checkTrainingSet(SET_ID, sample);
     expect(value).toBeNull();
     expect(findings[0].category).toBe(SET_ID);
-    expect(findings[0].message).toContain("says 7 band rows inside");
+    expect(findings[0].message).toContain("flownFromRow");
+    const old = checkTrainingSet(SET_ID, { ...stageASampleFile(), schema: "aeroviz-training-sample-v8" });
+    expect(old.findings[0].message).toContain(`sample.schema is "aeroviz-training-sample-v8", not one of ${TRAINING_SAMPLE_SCHEMA}`);
   });
 
   // The two files come out of ONE run of the exporter; every field they must agree on is checked.
-  it("catches each field the manifest and the sample must agree on", () => {
+  it("catches each field the index and the sample must agree on", () => {
     const { entry, sample } = readable();
-    for (const [field, value] of [
-      ["vocabularySha256", "0".repeat(64)],
-      ["runwaySha256", "0000"],
-      ["readingRule", "plateau-v9"],
-      ["flights", 40],
-      ["id", "another_set"],
-    ] as const) {
-      const findings = checkTrainingSetAgrees({ ...entry, [field]: value } as TrainingSetEntry, sample, "KXXX");
-      expect(findings, field).toHaveLength(1);
+    for (const change of [
+      { flights: 40 },
+      { id: "another_set" },
+      { source: { ...entry.source, specSha256: "0".repeat(64) } },
+      { source: { ...entry.source, executorSpecSha256: "0000" } },
+      { cohort: { ...entry.cohort, perStratum: 7 } },
+      { cohort: { ...entry.cohort, seed: 7 } },
+    ]) {
+      const findings = checkTrainingSetAgrees({ ...entry, ...change } as TrainingSetEntry, sample, "KXXX");
+      expect(findings, JSON.stringify(Object.keys(change))).toHaveLength(1);
     }
-    const reseeded = checkTrainingSetAgrees({ ...entry, cohort: { ...entry.cohort, seed: 7 } } as TrainingSetEntry, sample, "KXXX");
-    expect(reseeded[0].message).toContain("cohort.seed");
-    const resplit = checkTrainingSetAgrees({ ...entry, cohort: { ...entry.cohort, split: "test" } } as TrainingSetEntry, sample, "KXXX");
-    expect(resplit[0].message).toContain("cohort.split");
     // a sample filed under another airport's directory
-    expect(checkTrainingSetAgrees(entry, sample, "KYYY")[0].message).toContain("airport: the manifest says KYYY");
-  });
-});
-
-describe("the Training overlays' checks", () => {
-  function entries() {
-    const parsed = parseTrainingOverlays(mockOverlays());
-    if (!parsed.ok) throw new Error(parsed.problem);
-    return parsed.value.overlays;
-  }
-
-  function sample(): TrainingOpenSet {
-    const parsed = parseTrainingSample(mockSample());
-    if (!parsed.ok) throw new Error(parsed.problem);
-    return { kind: "vocabulary-readback", sample: parsed.value };
-  }
-
-  it("passes both overlays read against the sample of their set", () => {
-    const [executor, prior] = entries();
-    expect(checkTrainingOverlays(mockOverlays()).findings).toEqual([]);
-    expect(checkTrainingOverlay(executor, mockExecutorOverlay(), sample())).toEqual([]);
-    expect(checkTrainingOverlay(prior, mockPriorOverlay(), sample())).toEqual([]);
-  });
-
-  it("names an overlay the panel would reject", () => {
-    const raw: any = mockOverlays();
-    raw.overlays[1].flights = -1;
-    expect(checkTrainingOverlays(raw).findings).toEqual([expect.objectContaining({ level: "error", category: "prior_test" })]);
-  });
-
-  it("is an error when the overlay shares other candidate runways with the set than the sample on disk", () => {
-    const [executor] = entries();
-    const stale: any = mockExecutorOverlay();
-    stale.base.candidatesSha256 = "6".repeat(64);
-    const findings = checkTrainingOverlay(executor, stale, sample());
-    expect(findings).toEqual([expect.objectContaining({ level: "error", category: "executor_test" })]);
-    expect(findings[0].message).toMatch(/has candidates 666666666666, the loaded sample/);
-  });
-
-  it("names the field when an overlay does not read, and a flight count the manifest does not match", () => {
-    const [executor, prior] = entries();
-    const broken: any = mockPriorOverlay();
-    broken.flights[0].columns[3].truthP[0] = -0.1;
-    expect(checkTrainingOverlay(prior, broken, sample())[0].message).toMatch(/truthP\[0\] is -0.1/);
-    expect(checkTrainingOverlay({ ...executor, flights: 40 }, mockExecutorOverlay(), sample())[0].message)
-      .toMatch(/the manifest says 40 flights/);
+    expect(checkTrainingSetAgrees(entry, sample, "KYYY")[0].message).toContain("airport: the index says KYYY");
   });
 });

@@ -27,19 +27,11 @@ from ts_transformer.data.dataset import (
 )
 from ts_transformer.data.splits import split_by_flight
 from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.tests.support_prediction import series as _series
 # Imported, never restated: a schema version pinned by hand in a fixture is a version
 # the fixture cannot check, and this one gates every loader that reads the roster.
 
 AIRPORT, RUNWAY = "KRDU", "05L"
-
-
-def _series(n_flights=8, **config_overrides):
-    """Synthetic KRDU arrivals, built into FlightSeries. Returns ``(series, config)``."""
-    config = TSConfig(**config_overrides)
-    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3)
-    series, report = build_series(flights, config, airport=AIRPORT)
-    assert report.built == n_flights, report.format()
-    return series, config
 
 
 def test_fixed_anchor_dataset_keeps_one_window_per_flight():

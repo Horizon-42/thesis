@@ -1,6 +1,7 @@
-"""The attitude an aircraft is DRAWN in by the Training views (Training module design, doc 36 §4.12): its heading, path
-angle and bank, and a reading of its angle of attack — computed once here and written beside each exported track, so
-the viewer computes no attitude.
+"""The attitude an aircraft is DRAWN in by the Training views (outline §6; brought back from
+`archive/two_tier_v3_2026_10/experiments/training_attitude.py` for A23, the reading unchanged): its heading, path angle
+and bank, and a reading of its angle of attack — computed once here and written beside each exported track, so the
+viewer computes no attitude. A shared module of the Training export and the backend's live executor, not a runner.
 
 One reading, :func:`attitude`, of a state row ``(lat, lon, alt, V, ψ, γ, m)`` with the bank and load factor in force
 (the dynamics' sign: a positive bank turns LEFT), fed from two sources:

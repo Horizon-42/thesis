@@ -12,24 +12,14 @@ import torch
 import ts_transformer.data.channels as ch
 import ts_transformer.data.coordinate_frames as frames
 import ts_transformer.outputs.control.strategy as control_strategy
-from ts_transformer.config import TSConfig
-from ts_transformer.data.dataset import Normalizer, build_series
+from ts_transformer.data.dataset import Normalizer
 from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
 from ts_transformer.inference.forecast import forecast_approach
 from ts_transformer.backbone.adapters import build_model
 from ts_transformer.outputs.control.heads import ControlPrediction
-from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.tests.support_prediction import series as _series
 
 AIRPORT, RUNWAY = "KRDU", "05L"
-
-
-def _series(n_flights=8, **config_overrides):
-    """Synthetic KRDU arrivals, built into FlightSeries. Returns ``(series, config)``."""
-    config = TSConfig(**config_overrides)
-    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3)
-    series, report = build_series(flights, config, airport=AIRPORT)
-    assert report.built == n_flights, report.format()
-    return series, config
 
 
 # ── review 2026-09-09 ────────────────────────────────────────────────────────

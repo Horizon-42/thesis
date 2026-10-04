@@ -1,6 +1,6 @@
 """The executor checked by what it flies (`experiments/executor_conformance.py`, executor design §12.3): a flight flown
 again matches its reference, the bounds are where they are said to be, every discrete difference is named, a changed law
-is found, and the reference and the passed record are bound to their spec, flights and every way of flying."""
+is found, the reference is bound to its spec and flights, and the check runs where the spec is opened (D73)."""
 
 from __future__ import annotations
 
@@ -12,12 +12,15 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import torch
 
 from geokit import METRES_PER_DEG_LAT
 from ts_transformer.autopilot.frame import ALT, LAT, LON, PSI
 from ts_transformer.autopilot import conformance
-from ts_transformer.tests.support import fly_legs, instruction_flight
-from ts_transformer.tests.test_autopilot import DOWNWIND_BASE_FINAL, _fly_sentence, _params
+from ts_transformer.autopilot.flights import FlightInputs
+from ts_transformer.instructions.words import Words
+from ts_transformer.tests.support import fly_legs, instruction_flight, instruction_spec
+from ts_transformer.tests.test_autopilot import DOWNWIND_BASE_FINAL, _batch, _downwind, _fly_sentence, _params, _physics
 
 
 def _flown(params=None):
@@ -76,12 +79,16 @@ def test_states_and_floats_pass_inside_the_bounds_and_fail_outside():
 def test_every_discrete_difference_is_named():
     reference = _flown()
     k = reference.done // 2
-    modes = {**reference.modes, "captured": reference.modes["captured"].copy()}
-    modes["captured"][k] = ~modes["captured"][k]
+    modes = {**reference.modes, "level_captured": reference.modes["level_captured"].copy()}
+    modes["level_captured"][k] = ~modes["level_captured"][k]
     assert _compare(reference, _with(reference, modes=modes)).mismatches["KXXX:f1"] == [
-        f"mode captured differs at cycle {k} (1 cycles)"]
+        f"mode level_captured differs at cycle {k} (1 cycles)"]
+    runway = reference.runway.copy()
+    runway[k:] = 1
+    assert _compare(reference, _with(reference, runway=runway)).mismatches["KXXX:f1"] == [
+        f"the runway in force differs at cycle {k} ({reference.done + 1 - k} cycles)"]
     shorter = _with(reference, done=reference.done - 1, states=reference.states[:-1],
-                    **{f: getattr(reference, f)[:-1] for f in ("commands", "wanted", "sentence_s")},
+                    **{f: getattr(reference, f)[:-1] for f in ("commands", "wanted", "sentence_s", "runway")},
                     limits={k: v[:-1] for k, v in reference.limits.items()},
                     modes={k: v[:-1] for k, v in reference.modes.items()})
     assert any("done at cycle" in p for p in _compare(reference, shorter).mismatches["KXXX:f1"])
@@ -139,15 +146,38 @@ def test_a_way_of_flying_that_drops_flights_or_cuts_them_short_does_not_pass():
 def test_a_changed_law_is_found():
     """A behaviour change the source hash would have caught is caught by what it flies."""
     reference = _flown()
-    changed = _compare(reference, _flown(_params(heading_time_constant_s=6.0)))
+    changed = _compare(reference, _flown(_params(bank_rate_deg_s=3.0)))
     assert not changed.passed and changed.horizontal_m > 1.0
 
 
+def test_every_way_of_flying_gives_the_same_flown_states(monkeypatch):
+    """D57, executor design §12.4: the single-aircraft batch, the multi-aircraft batch (each flight from its own seeded
+    start) and the single-flight executor say the words on the sentence's own rows and fly the same states."""
+    from ts_transformer.tests.support import instruction_airport
+
+    signals, reading = _downwind()
+    one = _batch(signals, reading, 4.0)
+    batch = replace(one, **{name: getattr(one, name) * 2 for name in (
+        "indices", "signals", "readings", "sentences", "geometries", "groups")}, approach_ias_mps=[])
+    inputs, _, _, approach = _physics(batch.signals[0], instruction_airport())
+    batch.approach_ias_mps = [float(approach[0])] * 2
+    monkeypatch.setattr(type(batch), "inputs", lambda self, device: FlightInputs(
+        *(torch.cat([getattr(inputs, f.name)] * 2) for f in dataclasses.fields(FlightInputs))))
+    words = Words(instruction_spec())
+    flown = {mode: fly(batch, _params(), words) for mode, fly in conformance.MODES.items()}
+    assert set(flown) == {"batch", "staggered", "single"}
+    for mode in ("staggered", "single"):
+        for j in range(2):
+            difference = _compare(flown["batch"][j], flown[mode][j])
+            assert difference.passed, (mode, j, difference.mismatches)
+            assert difference.horizontal_m < 1e-6 and difference.vertical_m < 1e-6
+
+
 def _spec_dir(tmp_path, monkeypatch, results, *, keys=("KXXX:f1",)):
-    record = {"sha256": "s" * 64, "vocabulary_spec_sha256": "v" * 64, "source": {"executor_source_sha256": "c" * 64}}
-    monkeypatch.setattr(conformance.replay, "open_spec", lambda executor, instructions: (_params(), record, None))
-    monkeypatch.setattr(conformance, "git_state", lambda: {"head": "h", "dirty": False})
-    monkeypatch.setattr(conformance, "executor_source_sha256", lambda: "c" * 64)
+    record = {"sha256": "s" * 64, "vocabulary_spec_sha256": "v" * 64, "source": {}}
+    monkeypatch.setattr(conformance.replay, "open_spec",
+                        lambda executor, instructions: (_params(), record, Words(instruction_spec())))
+    monkeypatch.setattr(conformance, "git_state", lambda: {"head": "h", "dirty": True})
     monkeypatch.setattr(conformance, "MODES", {"batch": lambda batch, params, words: results})
     monkeypatch.setattr(conformance, "input_digests", lambda batch, params, words: [f"in-{s.dataset_id}"
                                                                                      for s in batch.signals])
@@ -157,22 +187,20 @@ def _spec_dir(tmp_path, monkeypatch, results, *, keys=("KXXX:f1",)):
     return executor, record, batch
 
 
-def test_the_reference_is_written_once_from_a_clean_checkout_and_checked_against_its_own_spec_and_flights(
-        tmp_path, monkeypatch):
+def test_the_reference_is_written_once_and_checked_against_its_own_spec_and_flights(tmp_path, monkeypatch):
+    """D73: written in the run that writes the spec (a dirty tree too: the commit is recorded, as information) and flown
+    again by the check, with no record and no digest of code."""
     results = [_flown()]
     executor, record, batch = _spec_dir(tmp_path, monkeypatch, results)
     instructions = tmp_path / "instructions"
     directory = conformance.write_reference(executor, instructions, batch=batch)
     payload = json.loads((directory / "reference.json").read_text())
     assert payload["schema"] == conformance.REFERENCE_SCHEMA and payload["flights"] == ["KXXX:f1"]
-    assert payload["flown_by"] == {"executor_source_sha256": "c" * 64, "mode": "batch"}
+    assert payload["flown_by"] == "batch" and payload["git"] == {"head": "h", "dirty": True}
+    assert not any("sha256" in key and key not in ("spec_sha256", "vocabulary_spec_sha256") for key in payload)
     checked = conformance.check(executor, instructions, batch=batch)
-    assert checked.differences["batch"].passed and checked.executor_source_sha256 == "c" * 64
-    passed = conformance.write_passed(executor, checked)
-    assert passed.name == f"passed-{'c' * 12}.json"
-    record_ = json.loads(passed.read_text())
-    assert record_["reference_sha256"] == conformance.reference_sha256(directory)
-    assert record_["modes"]["batch"]["mismatched_flights"] == 0
+    assert checked.passed and checked.summary()["batch"]["mismatched_flights"] == 0
+    assert sorted(p.name for p in directory.iterdir()) == ["reference.json", "reference.npz"]   # the check writes nothing
     with pytest.raises(FileExistsError):
         conformance.write_reference(executor, instructions, batch=batch)
     other = SimpleNamespace(signals=[SimpleNamespace(dataset_id="KXXX:f2")], drawn={})
@@ -195,37 +223,23 @@ def test_the_reference_is_written_once_from_a_clean_checkout_and_checked_against
         conformance.check(executor, instructions, batch=batch)
 
 
-def test_a_reference_is_written_only_from_a_clean_checkout_by_the_code_that_measured_the_spec(tmp_path, monkeypatch):
-    executor, record, batch = _spec_dir(tmp_path, monkeypatch, [_flown()])
-    monkeypatch.setattr(conformance, "git_state", lambda: {"head": "h", "dirty": True})
-    with pytest.raises(RuntimeError, match="clean checkout"):
-        conformance.write_reference(executor, tmp_path / "instructions", batch=batch)
-    monkeypatch.setattr(conformance, "git_state", lambda: {"head": "h", "dirty": False})
-    record["source"]["executor_source_sha256"] = "d" * 64
-    with pytest.raises(ValueError, match="measured by other executor code"):
-        conformance.write_reference(executor, tmp_path / "instructions", batch=batch)
-    assert not (executor / conformance.DIRECTORY).exists()
+def test_opening_a_spec_flies_its_reference_and_a_flight_off_it_is_refused_by_name(tmp_path, monkeypatch):
+    """D73: `require_conforming_executor` (what `replay.open_executor` runs) flies the reference again every time: code
+    that flies it alike opens with nothing run beforehand and nothing on disk but the reference; a law that moves a track
+    is refused by name, and a way of flying not checked does not pass."""
+    reference = [_flown()]
+    executor, _, batch = _spec_dir(tmp_path, monkeypatch, reference)
+    instructions = tmp_path / "instructions"
+    conformance.write_reference(executor, instructions, batch=batch)
+    assert conformance.require_conforming_executor(executor, instructions, batch=batch).passed
+    changed = _flown(params=replace(_params(), bank_rate_deg_s=2.0))            # another law: the turns move
+    monkeypatch.setattr(conformance, "MODES", {"batch": lambda batch, params, words: [changed]})
+    with pytest.raises(ValueError, match="the executor flies executor's reference tracks otherwise: batch: KXXX:f1"):
+        conformance.require_conforming_executor(executor, instructions, batch=batch)
+    assert conformance.Checked({"batch": conformance.Difference(expected=1, flights=1)}).passed   # MODES = {"batch"} here
+    monkeypatch.setattr(conformance, "MODES", {"batch": lambda batch, params, words: reference, "single": None})
+    assert not conformance.Checked({"batch": conformance.Difference(expected=1, flights=1)}).passed
 
-
-def test_a_passed_record_needs_every_way_of_flying_within_the_bounds(tmp_path, monkeypatch):
-    executor, _, _ = _spec_dir(tmp_path, monkeypatch, [])
-    (executor / conformance.DIRECTORY).mkdir()
-    failing = conformance.Difference(expected=1, flights=1,
-                                     mismatches={"KXXX:f1": ["done at cycle 3, the reference at 4"]})
-    with pytest.raises(ValueError, match="every way of flying"):
-        conformance.write_passed(executor, conformance.Checked({"batch": failing}, "c" * 64, {"head": "h", "dirty": False}))
-    with pytest.raises(ValueError, match="every way of flying"):
-        conformance.write_passed(executor, conformance.Checked({}, "c" * 64, {"head": "h", "dirty": False}))
-    monkeypatch.setattr(conformance, "git_state", lambda: {"head": "h", "dirty": True})
-    with pytest.raises(RuntimeError, match="clean checkout"):
-        conformance.write_passed(executor, conformance.Checked({"batch": conformance.Difference(expected=1, flights=1)},
-                                                               "c" * 64, {"head": "h", "dirty": False}))
-    monkeypatch.setattr(conformance, "git_state", lambda: {"head": "h", "dirty": False})
-    passing = {"batch": conformance.Difference(expected=1, flights=1)}
-    # the code or the commit moved while the check flew: the record would name code that was not flown
-    for code, git in (("d" * 64, {"head": "h", "dirty": False}), ("c" * 64, {"head": "g", "dirty": False})):
-        with pytest.raises(RuntimeError, match="the code the check flew"):
-            conformance.write_passed(executor, conformance.Checked(passing, code, git))
 
 
 def test_the_verdict_json_is_the_verdict_s_fields():

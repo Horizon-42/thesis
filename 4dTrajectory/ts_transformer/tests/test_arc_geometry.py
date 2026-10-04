@@ -21,7 +21,6 @@ from ts_transformer.geometry.terminal_state_loss import (
     last_reliable_terminal_velocity_target,
     terminal_state_metrics_numpy,
 )
-from ts_transformer.data.dataset import Normalizer
 from ts_transformer.data.fixed_dt_supervision import (
     FixedDTControlSupervision,
     build_fixed_dt_supervision,
@@ -33,13 +32,7 @@ from ts_transformer.training.fixed_anchor_validation import (
     fixed_anchor_arc_length_geometry_metrics,
     fixed_anchor_common_weights_and_terminal_velocity,
 )
-
-
-def _identity_normalizer() -> Normalizer:
-    return Normalizer(
-        mean=np.zeros(len(ch.CHANNELS), dtype=np.float64),
-        std=np.ones(len(ch.CHANNELS), dtype=np.float64),
-    )
+from ts_transformer.tests.support_prediction import identity_normalizer as _identity_normalizer
 
 
 def test_horizontal_arc_resampling_is_independent_of_node_spacing():

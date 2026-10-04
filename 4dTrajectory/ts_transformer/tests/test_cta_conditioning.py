@@ -18,12 +18,7 @@ import torch
 
 from ts_transformer.data.batch_contract import model_forward
 from ts_transformer.config import (
-    CONTROL_DURATION_UNIFORM,
-    CONTROL_STATE_CLOCK_OBSERVED,
-    CONTROL_STATE_LOSS_GRID_FIXED_DT,
-    CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CTA_CONDITIONING_GIVEN,
-    PREDICTION_CONTROL,
     PREDICTION_STATE,
     TSConfig,
 )
@@ -42,6 +37,7 @@ from ts_transformer.run_naming import run_display_name
 from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.training.train import load_checkpoint, train
 from ts_transformer.tests.support import dynamics_context
+from ts_transformer.tests.support_prediction import given_cta_config as _config
 
 _CLI_SPEC = importlib.util.spec_from_file_location("ts_transformer_cli_cta_test", Path(__file__).resolve().parents[1] / "__main__.py")
 assert _CLI_SPEC is not None and _CLI_SPEC.loader is not None
@@ -49,24 +45,6 @@ ts_cli = importlib.util.module_from_spec(_CLI_SPEC)
 _CLI_SPEC.loader.exec_module(ts_cli)
 
 AIRPORT, RUNWAY = "KRDU", "05L"
-
-
-def _config(**overrides) -> TSConfig:
-    settings = dict(
-        prediction_output=PREDICTION_CONTROL,
-        control_duration_parameterization=CONTROL_DURATION_UNIFORM,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
-        checkpoint_selection_metric="fixed-anchor-common-grid-ade",
-        control_rollout_integrator_dt_s=0.5,
-        seq_len=8, n_segments=4, d_model=16, n_heads=4, d_ff=32, e_layers=1,
-        final_time_scale_s=2.0, device="cpu", horizon_mode="normalized",
-        epochs=1, patience=1, batch_size=8, dropout=0.0,
-        cta_conditioning=CTA_CONDITIONING_GIVEN,
-    )
-    settings.update(overrides)
-    return TSConfig(**settings)
 
 
 def test_config_refuses_a_cta_off_the_control_path_and_unknown_values():

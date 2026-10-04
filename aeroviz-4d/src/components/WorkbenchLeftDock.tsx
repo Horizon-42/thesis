@@ -4,7 +4,7 @@
  * The left working dock. It shows only the controls for the active task, switching
  * on the global workbench `mode` (the four mutually-exclusive tasks):
  *   • evaluation     → trajectory playback/options + the flight list
- *   • training       → the TrainingPanel (stage B's intermediate results)
+ *   • training       → the TrainingPanel (stage A: the two-tier model's Training view)
  *   • fly / optimize → the PilotPanel, which takes the task as its mode
  *
  * Procedures is NOT a task — the procedure panel is rendered separately (gated on
@@ -12,7 +12,7 @@
  *
  * TRAINING KEEPS ITS SESSION at the airport it was opened at: the TrainingPanel stays mounted — hidden in the other
  * tasks — so leaving Training and coming back finds the same set, flight, word and live answer, and downloads nothing
- * again (the index, the sample — KRDU's is 6 MB — and the overlays). Another airport opened in another task drops it
+ * again (the index and the sample — KRDU's is 6 MB). Another airport opened in another task drops it
  * (the panel is unmounted: a hidden panel would otherwise download each airport's Training files in the background);
  * the next visit to Training opens that airport's afresh. Its views draw only in Training (the sentence bar and the 3D
  * layers read `mode`).

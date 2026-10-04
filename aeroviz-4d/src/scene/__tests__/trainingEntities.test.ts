@@ -1,186 +1,75 @@
 /**
- * The Training 3D scene's pieces (`scene/trainingEntities.ts`): the exporter's coordinates handed to Cesium unchanged —
- * the track at its ellipsoid height, a plan line as [lon, lat, …], a tube as a wall over the track's own rows, a heading
- * word's judged rows and its rows outside on the ground — what ONE selected word lights up (its own column's envelope
- * and the rows it is in force), and the live executor's fly-out (`data/trainingAutopilot.ts`).
+ * The 3D scene's coordinates and the word each envelope belongs to (`scene/trainingEntities.ts`), on the stage-A fixture:
+ * what is drawn is the exporter's, only put in Cesium's flat arrays.
  */
 import { describe, expect, it } from "vitest";
-
 import {
+  groundRows,
   lonLatHeights,
   planDegrees,
-  planRingDegrees,
+  TRAINING_ENTITY,
   trainingBandGround,
   trainingBandOutsideGround,
   trainingEnvelopeEntities,
-  trainingFocusEntities,
+  trainingFocusEntity,
   trainingFocusStretch,
   trainingTubeWall,
-  TRAINING_ENTITY,
 } from "../trainingEntities";
-import {
-  autopilotAircraftLabel,
-  autopilotFlownAt,
-  autopilotJudgedPoints,
-  autopilotPlaybackSpeedup,
-  AUTOPILOT_PLAYBACK_MAX_S,
-  AUTOPILOT_PLAYBACK_MIN_SPEEDUP,
-} from "../../data/trainingAutopilot";
-import { parseTrainingSample, trainingSelectionOf, trainingWordAt, type TrainingSelection } from "../../data/trainingSample";
-import { mockSample } from "../../data/__tests__/trainingSample.fixture";
-import { EXECUTOR_ID, mockExecutorOverlay, mockOverlayEntry } from "../../data/__tests__/trainingOverlays.fixture";
-import { parseTrainingExecutorOverlay } from "../../data/trainingOverlays";
-import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
-import { VECTORED_KEY } from "../../data/__tests__/trainingSample.fixture";
-import { mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "../../data/__tests__/trainingAutopilot.fixture";
+import { sentenceColumnRuns, trainingReadingOf } from "../../data/trainingSample";
+import { stageASample } from "../../data/__tests__/stageA";
 
-function selection(position = 0): TrainingSelection {
-  const parsed = parseTrainingSample(mockSample());
-  if (!parsed.ok) throw new Error(parsed.problem);
-  return trainingSelectionOf(parsed.value, parsed.value.flights[position]);
-}
+const sample = stageASample();
+const [flight] = sample.flights;
+const stepS = sample.vocabulary.stepS;
 
-function flight(position = 0) {
-  return selection(position).flight;
-}
-
-describe("the Training scene's pieces", () => {
-  it("flattens the track to lon, lat and its ellipsoid height, never the MSL altitude", () => {
-    const item = flight();
-    const positions = lonLatHeights(item.signals);
-    expect(positions).toHaveLength(item.rows * 3);
-    expect(positions.slice(0, 3)).toEqual([item.signals.lon[0], item.signals.lat[0], item.signals.altitudeHaeM[0]]);
-    expect(positions[2]).not.toBe(item.signals.smoothed.altitudeM[0]);
+describe("the coordinates", () => {
+  it("lays longitude, latitude and ellipsoid height out as Cesium's flat arrays", () => {
+    const track = { lon: [1, 2], lat: [3, 4], altitudeHaeM: [5, 6] };
+    expect(lonLatHeights(track)).toEqual([1, 3, 5, 2, 4, 6]);
+    expect(planDegrees(track)).toEqual([1, 3, 2, 4]);
+    expect(groundRows([1, 2, 3], [4, 5, 6], 1, 2)).toEqual([2, 5, 3, 6]);
+    expect(groundRows([1, 2, 3], [4, 5, 6], 1, 1)).toEqual([]);
   });
 
-  it("flattens the executor's flown track at its ellipsoid height", () => {
-    const parsed = parseTrainingSample(mockSample());
-    if (!parsed.ok) throw new Error(parsed.problem);
-    const overlay = parseTrainingExecutorOverlay(mockExecutorOverlay(), mockOverlayEntry(EXECUTOR_ID), parsed.value);
-    if (!overlay.ok) throw new Error(overlay.problem);
-    const flown = overlay.value.flights[0];
-    if (!flown.flown) throw new Error("the fixture's first flight is flown");
-    const { track } = flown;
-    const positions = lonLatHeights(track);
-    expect(positions).toHaveLength(track.lon.length * 3);
-    expect(positions.slice(0, 3)).toEqual([track.lon[0], track.lat[0], track.altitudeHaeM[0]]);
-    expect(positions[2]).not.toBe(track.altitudeM[0]);
+  it("draws a band's judged rows on the ground and its rows outside as segments of them", () => {
+    const reading = trainingReadingOf(flight, stepS, 2);
+    const band = reading.envelopes!.heading[0];
+    expect(trainingBandGround(reading.judged, band)).toHaveLength((band.stopRow - band.firstRow + 1) * 2);
+    const outside = trainingBandOutsideGround(reading.judged, { ...band, inside: band.inside.map((_, i) => i !== 1) });
+    expect(outside).toHaveLength(1);
+    expect(outside[0]).toHaveLength(4);
+    expect(trainingBandGround(reading.judged, { ...band, stopRow: band.firstRow })).toEqual([]);
   });
 
-  it("hands a plan line over as [lon, lat, …]", () => {
-    const item = flight();
-    const outline = item.envelopes.approach.corridor.outline;
-    expect(planDegrees(outline)).toEqual(outline.lon.flatMap((lon, point) => [lon, outline.lat[point]]));
-  });
-
-  it("walls a tube over exactly the rows it covers, with its own edges", () => {
-    const item = flight();
-    const tube = item.envelopes.altitude[1];
-    const wall = trainingTubeWall(item, tube);
-    expect(wall.positions).toHaveLength((tube.endRow - tube.row) * 2);
-    expect(wall.positions.slice(0, 2)).toEqual([item.signals.lon[tube.row], item.signals.lat[tube.row]]);
-    expect(wall.minimumHeights).toBe(tube.lowerHaeM);
-    expect(wall.maximumHeights).toBe(tube.upperHaeM);
-  });
-
-  it("closes an exported ring, which is open, for its outline", () => {
-    const outline = flight().envelopes.approach.corridor.outline;
-    const ring = planRingDegrees(outline);
-    expect(ring.slice(0, -2)).toEqual(planDegrees(outline));
-    expect(ring.slice(-2)).toEqual([outline.lon[0], outline.lat[0]]);
-  });
-
-  it("drapes a heading word's judged rows on the ground, on to where the next word's begin", () => {
-    const item = flight();
-    const { lon, lat } = item.signals;
-    const [first, second, third] = item.envelopes.heading;
-    const rows = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, k) => [lon[from + k], lat[from + k]]).flat();
-    expect(trainingBandGround(lon, lat, first)).toEqual(rows(2, 10));
-    expect(trainingBandGround(lon, lat, second)).toEqual(rows(10, 12));
-    expect(trainingBandGround(lon, lat, third)).toEqual(rows(12, 20));
-    // a word with no row of its own has nothing on the ground
-    expect(trainingBandGround(lon, lat, flight(1).envelopes.heading[0])).toEqual([]);
-  });
-
-  it("draws a band's rows outside as segments on the ground, one row outside on to the next", () => {
-    const item = flight();
-    const { lon, lat } = item.signals;
-    expect(trainingBandOutsideGround(lon, lat, item.envelopes.heading[2])).toEqual([[lon[12], lat[12], lon[13], lat[13]]]);
-    expect(trainingBandOutsideGround(lon, lat, item.envelopes.heading[0])).toEqual([]);
-    // a run to the band's end, and a run of one row at the line's very end (back to the row before it)
-    const band = { firstRow: 57, stopRow: 60, targetOnTrackDeg: 90, bandDeg: [85.5, 94.5] as [number, number], inside: [true, false, false] };
-    expect(trainingBandOutsideGround(lon, lat, band)).toEqual([[lon[58], lat[58], lon[59], lat[59]]]);
-    const last = { ...band, firstRow: 59, stopRow: 60, inside: [false] };
-    expect(trainingBandOutsideGround(lon, lat, last)).toEqual([[lon[58], lat[58], lon[59], lat[59]]]);
-  });
-
-  it("lights up the selected word's OWN envelope, never another column's", () => {
-    const scene = selection();
-    const at = (column: Parameters<typeof trainingWordAt>[1], row: number) =>
-      trainingFocusEntities(scene, column, trainingWordAt(scene.flight, column, row));
-    expect(at("heading", 15)).toEqual([TRAINING_ENTITY.heading(2)]);
-    expect(at("heading", 9)).toEqual([TRAINING_ENTITY.heading(1)]);
-    // after the capture a heading word is still its own: the corridor is the clearance's
-    expect(at("heading", 50)).toEqual(at("heading", 15));
-    expect(at("altitude", 15)).toEqual([TRAINING_ENTITY.tube(0)]);
-    expect(at("approach", 25)).toEqual([TRAINING_ENTITY.captureTurn, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis]);
-    expect(at("approach", 5)).toEqual([]);   // "not cleared" bounds nothing
-    expect(at("runway", 5)).toEqual([TRAINING_ENTITY.runway("09"), TRAINING_ENTITY.centreline("09")]);
-    expect(at("angle", 30)).toEqual([]);
-    expect(at("speed", 30)).toEqual([]);
-    expect(trainingEnvelopeEntities(scene.flight)).toEqual([
-      TRAINING_ENTITY.heading(0), TRAINING_ENTITY.heading(1), TRAINING_ENTITY.heading(2),
-      TRAINING_ENTITY.captureTurn, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis,
-      TRAINING_ENTITY.tube(0), TRAINING_ENTITY.tube(1),
-    ]);
-  });
-
-  it("draws the rows a word is in force, on to the next word's issue", () => {
-    const item = flight();
-    const altitude = trainingWordAt(item, "altitude", 5);
-    expect(trainingFocusStretch(item, altitude)).toEqual(lonLatHeights(item.signals).slice(0, 21 * 3));
-    // the last word runs to the last row
-    const last = trainingWordAt(item, "altitude", 30);
-    expect(trainingFocusStretch(item, last)).toEqual(lonLatHeights(item.signals).slice(20 * 3));
+  it("puts a tube on the judged track's ground position, at the exported edges plus the flight's HAE − MSL", () => {
+    const reading = trainingReadingOf(flight, stepS, null);
+    const tube = reading.envelopes!.altitude[0];
+    const wall = trainingTubeWall(reading.judged, tube, flight.haeMinusMslM);
+    expect(wall.minimumHeights).toHaveLength(tube.endRow - tube.row);
+    expect(wall.minimumHeights[0]).toBeCloseTo(tube.lowMslM[0] + flight.haeMinusMslM, 6);
+    expect(wall.positions.slice(0, 2)).toEqual([reading.judged.lon[tube.row], reading.judged.lat[tube.row]]);
   });
 });
 
-describe("the live executor in 3D", () => {
-  function segment() {
-    const parsed = parseTrainingSample(mockSample());
-    if (!parsed.ok) throw new Error(parsed.problem);
-    const request = mockAutopilotRequest(parsed.value, VECTORED_KEY, "heading", 8);
-    const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, mockSelection(parsed.value, request));
-    if (!answer.ok) throw new Error(answer.problem);
-    return answer.value;
-  }
-  const track = () => segment().track;
-
-  it("flattens the flown segment at its ellipsoid height", () => {
-    const flown = track();
-    expect(lonLatHeights(flown).slice(0, 3)).toEqual([flown.lon[0], flown.lat[0], flown.altitudeHaeM[0]]);
+describe("the selected word", () => {
+  it("owns its heading band or its tube, and nothing for a column without an envelope", () => {
+    const reading = trainingReadingOf(flight, stepS, 4);
+    const heading = sentenceColumnRuns(reading, "heading").flatMap((run) => {
+      const id = trainingFocusEntity(reading, stepS, "heading", run);
+      return id === null ? [] : [id];
+    });
+    expect(heading).toEqual(reading.envelopes!.heading.map((_, index) => TRAINING_ENTITY.heading(index)));
+    const altitude = sentenceColumnRuns(reading, "altitude").map((run) => trainingFocusEntity(reading, stepS, "altitude", run));
+    expect(altitude.filter((id) => id !== null)).toEqual(reading.envelopes!.altitude.map((_, index) => TRAINING_ENTITY.tube(index)));
+    expect(trainingFocusEntity(reading, stepS, "angle", sentenceColumnRuns(reading, "angle")[0])).toBeNull();
+    expect(trainingEnvelopeEntities(reading)).toHaveLength(reading.envelopes!.heading.length + reading.envelopes!.altitude.length);
   });
 
-  it("finds the judged steps among the flown points: every step's worth of cycles", () => {
-    const flown = segment();                                 // 1 s cycles, 2 s steps: points 0, 2, 4, 6, 8
-    const { lon, lat } = autopilotJudgedPoints(flown);
-    expect(lon).toEqual([0, 2, 4, 6, 8].map((index) => flown.track.lon[index]));
-    expect(lat).toHaveLength(flown.judgedTrackDeg!.length);
-  });
-
-  it("finds the aircraft between two flown points, and at the last from the segment's end on", () => {
-    const flown = track();                                    // 16 … 24 s, one point a second
-    expect(autopilotFlownAt(flown, 0)).toEqual({ index: 0, fraction: 0 });
-    expect(autopilotFlownAt(flown, 2.5)).toEqual({ index: 2, fraction: 0.5 });
-    expect(autopilotFlownAt(flown, 4)).toEqual({ index: 4, fraction: 0 });
-    expect(autopilotFlownAt(flown, 8)).toEqual({ index: 8, fraction: 1 });
-    expect(autopilotFlownAt(flown, 99)).toEqual({ index: 8, fraction: 1 });
-    expect(autopilotFlownAt(flown, -3)).toEqual({ index: 0, fraction: 0 });
-  });
-
-  it("plays a segment at least 8× and never longer than 20 s, and says how fast", () => {
-    expect(autopilotPlaybackSpeedup(60)).toBe(AUTOPILOT_PLAYBACK_MIN_SPEEDUP);
-    expect(autopilotPlaybackSpeedup(600)).toBe(600 / AUTOPILOT_PLAYBACK_MAX_S);
-    expect(autopilotAircraftLabel(track(), 1, 8)).toBe("autopilot 1 / 8 s simulated ×8 · 110 m/s · 1110 m · bank 12° L");
+  it("gives the stretch of the judged track a word is in force", () => {
+    const reading = trainingReadingOf(flight, stepS, 2);
+    const stretch = trainingFocusStretch(reading.judged, reading.originS + 10, reading.originS + 20);
+    expect(stretch).toHaveLength(6 * 3);
+    expect(trainingFocusStretch(reading.judged, reading.originS + 10, reading.originS + 10)).toEqual([]);
+    expect(trainingFocusStretch(reading.judged, 1e6, 2e6)).toEqual([]);
   });
 });

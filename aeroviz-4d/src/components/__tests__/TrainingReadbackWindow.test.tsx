@@ -1,341 +1,171 @@
 /**
- * The read-back check: every envelope the exporter sent is drawn where it belongs — the heading words'
- * bands on the heading chart with their rows outside in red (and in the plan view), the capture turn,
- * the corridor, the tubes against distance flown, the speed transitions and bands against time — the
- * switches reach every chart, only the selected column's word is yellow, and the executor's replay, when
- * it is on, is drawn on its own clock beside the observed track with its own heading bands.
+ * The read-back check: the four charts draw what the exporter sent — the heading bands with their rows outside, the altitude
+ * tubes, the speed bands, the DA point — on one flight clock, the flown path of a closed-loop sentence beside the observed
+ * track, the correction words on the axis, the flown flight's outcome and DA values below, the live segment when there is one;
+ * the switches reach every chart and the selected column's word is the yellow one.
  */
 import { describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import TrainingReadbackWindow from "../TrainingReadbackWindow";
-import { extent } from "../training/readbackModel";
-import { parseTrainingSample, type TrainingColumn } from "../../data/trainingSample";
-import { mockSample } from "../../data/__tests__/trainingSample.fixture";
-import { EXECUTOR_ID, mockExecutorOverlay, mockOverlayEntry } from "../../data/__tests__/trainingOverlays.fixture";
-import { parseTrainingExecutorOverlay, type TrainingExecutorFlight } from "../../data/trainingOverlays";
-import type { TrainingLayers } from "../../context/AppContext";
+import { extent, readbackModel } from "../training/readbackModel";
 import { parseTrainingAutopilot, type TrainingAutopilotSegment } from "../../data/trainingAutopilot";
-import { VECTORED_KEY } from "../../data/__tests__/trainingSample.fixture";
-import { failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "../../data/__tests__/trainingAutopilot.fixture";
+import { trainingReadingOf, type TrainingColumn } from "../../data/trainingSample";
+import type { TrainingLayers } from "../../context/AppContext";
 import { TRAINING_WORD_COLOR } from "../../utils/trainingWordColors";
+import { requestOf, stageAAnswers, stageASampleFile, stageASelection } from "../../data/__tests__/stageA";
+import { parseTrainingSample, trainingSelectionOf } from "../../data/trainingSample";
 
-const ALL: TrainingLayers = { headingBands: true, corridor: true, vertical: true, candidates: true };
+const ALL: TrainingLayers = { headingBands: true, vertical: true, candidates: true };
+const selection = stageASelection();
 
-function executorFlight(position = 0): TrainingExecutorFlight {
-  const parsed = parseTrainingSample(mockSample());
+function liveSegment(which = 0): TrainingAutopilotSegment {
+  const raw = stageAAnswers()[which];
+  const parsed = parseTrainingAutopilot(raw, requestOf(raw), selection);
   if (!parsed.ok) throw new Error(parsed.problem);
-  const overlay = parseTrainingExecutorOverlay(mockExecutorOverlay(), mockOverlayEntry(EXECUTOR_ID), parsed.value);
-  if (!overlay.ok) throw new Error(overlay.problem);
-  return overlay.value.flights[position];
+  return parsed.value;
 }
 
-/** The heading 225° word's segment, flown; ``failedWithStates``: its dynamics failing, that many states kept. */
-function autopilotSegment(failedWithStates: number | null = null): TrainingAutopilotSegment {
-  const parsed = parseTrainingSample(mockSample());
-  if (!parsed.ok) throw new Error(parsed.problem);
-  const request = mockAutopilotRequest(parsed.value, VECTORED_KEY, "heading", 8);
-  const raw = mockAutopilotAnswer(parsed.value, request);
-  const answer = parseTrainingAutopilot(failedWithStates === null ? raw : failedAnswer(raw, failedWithStates), request,
-    mockSelection(parsed.value, request));
-  if (!answer.ok) throw new Error(answer.problem);
-  return answer.value;
-}
-
-function open(layers: TrainingLayers = ALL, position = 0, cursorS = 0, column: TrainingColumn | null = null,
-  executor: TrainingExecutorFlight | null = null, autopilot: TrainingAutopilotSegment | null = null) {
-  const parsed = parseTrainingSample(mockSample());
-  if (!parsed.ok) throw new Error(parsed.problem);
+function open(intervalS: number | null = 2, layers: TrainingLayers = ALL, cursorS = 100, column: TrainingColumn | null = null,
+  autopilot: TrainingAutopilotSegment | null = null) {
   const onCursorChange = vi.fn();
   const onColumnChange = vi.fn();
-  render(
-    <TrainingReadbackWindow
-      flight={parsed.value.flights[position]}
-      vocabulary={parsed.value.vocabulary}
-      candidates={parsed.value.candidates}
-      layers={layers}
-      cursorS={cursorS}
-      cursorOn
-      onCursorChange={onCursorChange}
-      column={column}
-      onColumnChange={onColumnChange}
-      onClose={() => undefined}
-      executor={executor}
-      autopilot={autopilot}
-    />,
+  const reading = trainingReadingOf(selection.flight, selection.vocabulary.stepS, intervalS);
+  const view = render(
+    <TrainingReadbackWindow selection={selection} reading={reading} layers={layers} cursorS={cursorS} onCursorChange={onCursorChange}
+      column={column} onColumnChange={onColumnChange} onClose={vi.fn()} autopilot={autopilot} />,
   );
-  return { onCursorChange, onColumnChange };
+  return { ...view, onCursorChange, onColumnChange };
 }
 
-/** The elements the charts stroke in the selected word's colour (the footer's swatch is not a chart's). */
-const yellow = () => [...document.body.querySelectorAll(`.training-readback-frame [stroke="${TRAINING_WORD_COLOR}"]`)];
-
-/** The window renders through a portal into `document.body`. */
-const count = (selector: string) => document.body.querySelectorAll(selector).length;
-const chart = (name: string) => screen.getByLabelText(name);
+const chart = (name: string) => document.querySelector(`svg[aria-label="${name}"]`) as SVGSVGElement;
 
 describe("TrainingReadbackWindow", () => {
-  it("draws the plan view's envelopes: the corridor, the capture turn's rows, every candidate — and no turn region or funnel", () => {
-    open();
-    expect(count(".training-readback-corridor")).toBe(1);
-    expect(count(".training-readback-capture-turn")).toBe(1);
-    expect(count(".training-readback-candidate")).toBe(2);
-    for (const gone of [".training-readback-turn", ".training-readback-turn-end", ".training-readback-turn-path",
-                        ".training-readback-funnel", ".training-readback-hold-band", ".training-readback-turn-band"]) {
-      expect(count(gone), gone).toBe(0);
+  it("is a dialog with the four charts, named by the sentence it reads", () => {
+    open(4);
+    expect(screen.getByRole("dialog", { name: "Read-back check" })).toBeTruthy();
+    for (const name of ["Plan view", "Heading chart", "Altitude chart", "Speed chart"]) expect(chart(name)).toBeTruthy();
+    expect(screen.getByText("closed loop · Δ 4 s")).toBeTruthy();
+    cleanup();
+    open(null);
+    expect(screen.getByText("labelled sentence")).toBeTruthy();
+  });
+
+  it("draws the flown path beside the observed track in every chart and the plan, only for a closed-loop sentence", () => {
+    open(2);
+    expect(document.querySelector("svg[aria-label='Plan view'] polyline.training-readback-executor")).toBeTruthy();
+    for (const name of ["Heading chart", "Altitude chart", "Speed chart"]) {
+      expect(chart(name).querySelector("polyline.training-readback-executor")).toBeTruthy();
+      expect(chart(name).querySelector("polyline.training-readback-trace")).toBeTruthy();
+    }
+    cleanup();
+    open(null);
+    for (const name of ["Plan view", "Heading chart", "Altitude chart", "Speed chart"]) {
+      expect(chart(name).querySelector("polyline.training-readback-executor")).toBeNull();
     }
   });
 
-  it("keeps the designated runway when the other candidates are switched off", () => {
-    open({ ...ALL, candidates: false });
-    const drawn = [...document.body.querySelectorAll(".training-readback-candidate")].map((g) => g.getAttribute("aria-label"));
-    expect(drawn).toEqual([expect.stringMatching(/^the designated runway 09/)]);
+  it("draws a band per judged heading word, a tube per altitude word and a band per speed word, and the switches reach them", () => {
+    const reading = trainingReadingOf(selection.flight, selection.vocabulary.stepS, 2);
+    const judged = reading.envelopes!.heading.filter((band) => band.stopRow > band.firstRow).length;
+    const { rerender, onCursorChange } = open(2);
+    expect(chart("Heading chart").querySelectorAll("rect.training-readback-heading-band")).toHaveLength(judged);
+    expect(chart("Altitude chart").querySelectorAll("polygon.training-readback-tube")).toHaveLength(reading.envelopes!.altitude.length);
+    expect(chart("Speed chart").querySelectorAll("rect.training-readback-speed-band")).toHaveLength(reading.envelopes!.speed.length);
+    rerender(<TrainingReadbackWindow selection={selection} reading={reading} layers={{ ...ALL, headingBands: false, vertical: false }}
+      cursorS={100} onCursorChange={onCursorChange} column={null} onColumnChange={vi.fn()} onClose={vi.fn()} autopilot={null} />);
+    expect(chart("Heading chart").querySelectorAll("rect.training-readback-heading-band")).toHaveLength(0);
+    expect(chart("Altitude chart").querySelectorAll("polygon.training-readback-tube")).toHaveLength(0);
+    expect(chart("Speed chart").querySelectorAll("rect.training-readback-speed-band")).toHaveLength(0);
   });
 
-  it("draws each heading word's band over the rows it is judged on, from its first judged step to the next word's", () => {
-    open();
-    const bands = [...chart("Heading chart").querySelectorAll(".training-readback-heading-band")];
-    expect(bands).toHaveLength(3);
-    expect(bands.map((band) => band.textContent)).toEqual([
-      expect.stringMatching(/^270° ±4\.5°, said at step 0 and judged at steps 2–9 \(4 s later, to the next heading word's\): 8 of 8 rows inside$/),
-      expect.stringMatching(/^225° ±4\.5°, said at step 8 and judged at steps 10–11 .*: 2 of 2 rows inside$/),
-      expect.stringMatching(/^180° ±4\.5°, said at step 10 and judged at steps 12–19 .*: 7 of 8 rows inside$/),
-    ]);
-    // one band's width is its rows: steps 12 to 20 (the clearance) — eight steps of 2 s
-    const widths = bands.map((band) => Number(band.getAttribute("width")));
-    expect(widths[2] / widths[0]).toBeCloseTo(1);
-    expect(widths[1] / widths[0]).toBeCloseTo(0.25);
-    // a band with a row outside is edged in red; the row itself is red on the track, in the chart and in the plan
-    expect(bands.map((band) => band.getAttribute("stroke"))).toEqual(["#38bdf8", "#38bdf8", "#f87171"]);
-    expect(chart("Heading chart").querySelectorAll(".training-readback-outside")).toHaveLength(1);
-    expect(chart("Plan view").querySelectorAll(".training-readback-outside")).toHaveLength(1);
+  it("marks the correction words on the axis of their columns' charts and the plan", () => {
+    open(2);
+    const reading = trainingReadingOf(selection.flight, selection.vocabulary.stepS, 2);
+    const heading = reading.events.filter((event) => event.correction && event.says.column === "heading").length;
+    expect(chart("Heading chart").querySelectorAll("polygon.training-readback-correction")).toHaveLength(heading);
+    expect(chart("Plan view").querySelectorAll(".training-readback-correction")).toHaveLength(9);
+    expect(chart("Speed chart").querySelectorAll("polygon.training-readback-correction")).toHaveLength(
+      reading.events.filter((event) => event.correction && event.says.column === "speed").length);
   });
 
-  it("draws no band for a word the lead carries to the clearance", () => {
-    open(ALL, 1);
-    expect(count(".training-readback-heading-band")).toBe(0);
-    expect(count(".training-readback-capture-band") + count(".training-readback-capture-turn")).toBe(0);
-    expect(screen.getByText(/in force: 090° · no row of its own: the 4 s lead carries it to the clearance/)).toBeTruthy();
-  });
-
-  it("switches the heading bands off everywhere, and the capture with the corridor", () => {
-    open({ ...ALL, headingBands: false });
-    expect(count(".training-readback-heading-band")).toBe(0);
-    expect(chart("Heading chart").querySelectorAll(".training-readback-outside")).toHaveLength(0);
-    expect(chart("Plan view").querySelectorAll(".training-readback-outside")).toHaveLength(0);
+  it("writes the flown flight's outcome, the crossing and the DA check's values below the charts", () => {
+    open(2);
+    const slot = screen.getByLabelText("The flown flight");
+    expect(slot.textContent).toContain("unstable at minimums at 511 s");
+    expect(slot.textContent).toContain("crossing 15.5 m right of the centreline, 41.8 m above the threshold");
+    expect(slot.textContent).toContain("DA check failed");
+    expect(slot.textContent).toContain("15.5 m right of the centreline, cone half width 116.3 m ✓");
+    expect(slot.textContent).toContain("26.8 m above the glidepath ✗");
+    expect(slot.textContent).toContain("at 157 m MSL");
+    // the DA point is drawn in the plan and on the altitude chart
+    expect(chart("Plan view").querySelector('g[aria-label="the decision-altitude point"]')).toBeTruthy();
+    expect(chart("Altitude chart").querySelector("circle title")!.textContent).toContain("DA check failed");
     cleanup();
-    open({ ...ALL, corridor: false });
-    for (const selector of [".training-readback-corridor", ".training-readback-capture-turn", ".training-readback-capture-band",
-                            ".training-readback-capture-course", ".training-readback-course-band"]) {
-      expect(count(selector), selector).toBe(0);
+    open(null);
+    expect(screen.queryByLabelText("The flown flight")).toBeNull();
+    expect(chart("Plan view").querySelector('g[aria-label="the decision-altitude point"]')).toBeNull();
+  });
+
+  it("draws the live segment on every chart and names it", () => {
+    open(2, ALL, 100, null, liveSegment());
+    for (const name of ["Plan view", "Heading chart", "Altitude chart", "Speed chart"]) {
+      expect(chart(name).querySelector("polyline.training-readback-autopilot")).toBeTruthy();
     }
-    expect(count(".training-readback-heading-band")).toBe(3);
-  });
-
-  it("draws the capture turn against time, from the clearance to the capture, and the course band after it", () => {
-    open();
-    expect(count(".training-readback-capture-band")).toBe(1);
-    expect(count(".training-readback-capture-course")).toBe(1);
-    expect(count(".training-readback-course-band")).toBe(1);
-    expect(document.body.querySelector(".training-readback-capture-band")!.textContent)
-      .toMatch(/the capture turn, steps 20–25: from the clearance onto the course, monotone ✓, rate and bank ✓/);
-  });
-
-  it("draws one tube per altitude word, and the row the labeller counted outside in red", () => {
-    open();
-    expect(count(".training-readback-tube")).toBe(2);
-    // one row outside is a segment on to the next row: a one-point polyline would draw nothing
-    const outside = [...chart("Altitude chart").querySelectorAll(".training-readback-outside")];
-    expect(outside).toHaveLength(1);
-    expect(outside[0].getAttribute("points")!.split(" ")).toHaveLength(2);
-    expect(screen.getByLabelText(/angle word descent 3 \(3\.06°\) at step 20/)).toBeTruthy();
-    // switched off with the tubes it belongs to
+    const slot = screen.getByLabelText("The autopilot, live");
+    expect(slot.textContent).toContain("heading");
+    expect(slot.textContent).toContain("from Δ row 52");
+    expect(slot.textContent).toContain("reached the point where the next heading word is said");
     cleanup();
-    open({ ...ALL, vertical: false });
-    expect(chart("Altitude chart").querySelectorAll(".training-readback-outside")).toHaveLength(0);
+    open(2, ALL, 100, null, liveSegment(1));
+    expect(screen.getByLabelText("The autopilot, live").textContent).toContain("(a correction)");
   });
 
-  it("draws each speed word's transition and band, and 'unspecified' as the pilot's own", () => {
-    open();
-    expect(count(".training-readback-transition")).toBe(1);
-    expect(count(".training-readback-speed-band")).toBe(1);
-    expect(count(".training-readback-unspecified")).toBe(1);
+  it("hovers move the cursor in flight time and a click selects the chart's column", () => {
+    const { onCursorChange, onColumnChange } = open(2);
+    const heading = chart("Heading chart");
+    heading.getBoundingClientRect = () => ({ left: 0, top: 0, right: 980, bottom: 132, width: 980, height: 132, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent.mouseMove(heading, { clientX: 64, clientY: 20 });
+    expect(onCursorChange).toHaveBeenLastCalledWith(0);
+    fireEvent.click(heading, { clientX: 64 + 450, clientY: 20 });
+    expect(onColumnChange).toHaveBeenLastCalledWith("heading");
+    expect(onCursorChange.mock.calls[onCursorChange.mock.calls.length - 1][0]).toBeGreaterThan(100);
   });
 
-  it("switches the tubes and the speed envelopes off with the vertical layer", () => {
-    open({ ...ALL, vertical: false });
-    expect(count(".training-readback-tube") + count(".training-readback-speed-band") + count(".training-readback-transition")).toBe(0);
+  it("draws the selected word alone in yellow, on its own column's chart", () => {
+    const reading = trainingReadingOf(selection.flight, selection.vocabulary.stepS, 2);
+    // the heading word in force 100 s in
+    open(2, ALL, 100, "heading");
+    expect(chart("Heading chart").querySelector(`polyline.training-readback-focus[stroke="${TRAINING_WORD_COLOR}"]`)).toBeTruthy();
+    expect(chart("Speed chart").querySelector("polyline.training-readback-focus")).toBeNull();
+    expect(chart("Plan view").querySelector("polyline.training-readback-focus")).toBeTruthy();
+    const m = readbackModel({ selection, reading, layers: ALL, cursorS: 100, column: "heading", autopilot: null, width: 980 });
+    expect(m.focusIndex).not.toBeNull();
+    expect(m.recede(false)).toBe(0.3);
+    expect(m.recede(true)).toBe(1);
   });
 
-  it("names what is in force at the cursor: the heading word's band, and the capture turn's verdict inside it", () => {
-    open(ALL, 0, 22);
-    expect(screen.getByText(/in force: 180° · its band: steps 12–19 \(4 s after it was said\), 7\/8 rows within ±4\.5°/)).toBeTruthy();
-    expect(screen.getByText(/in force: 1110 m, level/)).toBeTruthy();
-    cleanup();
-    open(ALL, 0, 44);
-    expect(screen.getByText(/the capture turn: ✓ monotone, ✓ rate \(mean 2\.40°\/s, max 3\.10°\/s, max bank 24\.9°\)/)).toBeTruthy();
-  });
-
-  it("says the corridor holds once the flight is captured", () => {
-    open(ALL, 0, 60);
-    expect(screen.getByText(/captured: the corridor holds/)).toBeTruthy();
-  });
-
-  it("draws no executor without its replay, and says nothing of it", () => {
-    open();
-    expect(screen.queryByLabelText("Executor replay")).toBeNull();
-    expect(document.body.querySelectorAll(".training-readback-executor")).toHaveLength(0);
-  });
-
-  it("draws the executor's flown track in plan, its three signals on its own clock, and its own heading bands", () => {
-    open(ALL, 0, 0, null, executorFlight(0));
-    // the plan view's track, the heading, the altitude and the ground speed
-    expect(document.body.querySelectorAll(".training-readback-executor")).toHaveLength(4);
-    expect(screen.getByText("executor: landed")).toBeTruthy();
-    expect(screen.getByLabelText("Executor replay").textContent).toMatch(/landed on own dynamics; dashed teal/);
-    // its bands from where IT was told each word; the one it flew a row late is edged red, its row outside red too
-    const bands = [...document.body.querySelectorAll(".training-readback-executor-band")];
-    expect(bands.map((band) => band.getAttribute("stroke"))).toEqual(["#14b8a6", "#14b8a6", "#f87171"]);
-    expect(chart("Heading chart").querySelectorAll(".training-readback-executor-outside")).toHaveLength(1);
-    expect(chart("Plan view").querySelectorAll(".training-readback-executor-outside")).toHaveLength(1);
-    cleanup();
-    open({ ...ALL, headingBands: false }, 0, 0, null, executorFlight(0));
-    expect(count(".training-readback-executor-band") + count(".training-readback-executor-outside")).toBe(0);
-  });
-
-  it("says so when the executor's flight ended within its first step", () => {
-    const flown = executorFlight(0);
-    if (!flown.flown) throw new Error("the fixture's first flight is flown");
-    const { attitude, ...arrays } = flown.track;
-    const point = { ...Object.fromEntries(Object.entries(arrays).map(([key, values]) => [key, (values as number[]).slice(0, 1)])),
-      attitude: Object.fromEntries(Object.entries(attitude).map(([key, values]) => [key, values?.slice(0, 1) ?? null])) };
-    open(ALL, 0, 0, null, { ...flown, outcome: "dynamics_failure", track: point as unknown as typeof flown.track });
-    expect(screen.getByLabelText("Executor replay").textContent).toMatch(/dynamics failure on own dynamics within its first step/);
-    expect(document.body.querySelectorAll(".training-readback-executor")).toHaveLength(0);
-    expect(count(".training-readback-executor-band")).toBe(0);
-  });
-
-  it("names why a flight the replay does not fly has no executor line", () => {
-    open(ALL, 1, 0, null, executorFlight(1));
-    expect(screen.getByLabelText("Executor replay").textContent).toMatch(/not flown: no identified type/);
-    expect(document.body.querySelectorAll(".training-readback-executor")).toHaveLength(0);
-  });
-
-  it("reads the cursor off a chart, and a click selects that chart's column", () => {
-    const { onCursorChange, onColumnChange } = open();
-    fireEvent.mouseMove(screen.getByLabelText("Heading chart"));
-    expect(onCursorChange).toHaveBeenCalled();
-    expect(onColumnChange).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByLabelText("Speed chart"));
-    expect(onColumnChange).toHaveBeenCalledWith("speed");
-  });
-
-  it("draws nothing yellow until a column is selected", () => {
-    open(ALL, 0, 22);
-    expect(yellow()).toHaveLength(0);
-    expect(count(".training-readback-focus")).toBe(0);
-  });
-
-  it("draws ONLY the selected column's word yellow — not the other words in force at the same step", () => {
-    // at 22 s heading 180° (from step 10) and altitude 1110 m (from step 0) are both in force
-    open(ALL, 0, 22, "heading");
-    const lit = yellow().map((element) => element.getAttribute("class"));
-    expect(lit.sort()).toEqual(["training-readback-focus", "training-readback-focus", "training-readback-heading-band"]);
-    // its rows: over the plan track and over the heading chart, not the altitude or speed chart
-    expect(chart("Altitude chart").querySelector(".training-readback-focus")).toBeNull();
-    // every other word's envelope recedes; with nothing selected nothing does
-    const opacities = [...document.body.querySelectorAll(".training-readback-heading-band")].map((band) => band.getAttribute("opacity"));
-    expect(opacities).toEqual(["0.3", "0.3", "1"]);
-    expect(document.body.querySelector(".training-readback-corridor")!.getAttribute("opacity")).toBe("0.3");
-    cleanup();
-    open(ALL, 0, 22);
-    expect(document.body.querySelector(".training-readback-corridor")!.getAttribute("opacity")).toBe("1");
-  });
-
-  it("gives the clearance the corridor and the capture turn, and an angle word its rows on the altitude chart", () => {
-    open(ALL, 0, 60, "approach");
-    const lit = yellow().map((element) => element.getAttribute("class"));
-    expect(lit).toEqual(expect.arrayContaining(["training-readback-corridor", "training-readback-capture-turn",
-      "training-readback-capture-band", "training-readback-capture-course", "training-readback-course-band"]));
-    expect(lit).not.toContain("training-readback-heading-band");
-    cleanup();
-    open(ALL, 0, 60, "angle");
-    expect(screen.getByLabelText("Altitude chart").querySelector(".training-readback-focus")).not.toBeNull();
-  });
-});
-
-describe("helpers", () => {
-  it("pads an extent and never returns a zero-wide one", () => {
-    expect(extent([0, 100])).toEqual([-8, 108]);
-    expect(extent([5, 5])).toEqual([4, 6]);
-  });
-});
-
-describe("the live executor in the read-back check", () => {
-  it("draws its segment on the plan, heading, altitude and speed charts, with the selected heading word's band", () => {
-    cleanup();
-    open(ALL, 0, 16, "heading", null, autopilotSegment());
-    // plan, heading, altitude, speed
-    expect(count("polyline.training-readback-autopilot")).toBe(4);
-    expect(count("rect.training-readback-autopilot-band")).toBe(1);
-    // each goes on faded and dashed past where it heard the next heading word (20 s): the run's 5 points to it, the
-    // tail's 5 from it
-    expect(count("polyline.training-readback-autopilot-tail")).toBe(4);
-    const heading = screen.getByLabelText("Heading chart");
-    const points = (selector: string) => heading.querySelector(selector)!.getAttribute("points")!.split(" ").length;
-    expect([points("polyline.training-readback-autopilot"), points("polyline.training-readback-autopilot-tail")]).toEqual([5, 5]);
-    const tail = heading.querySelector("polyline.training-readback-autopilot-tail")!;
-    expect([tail.getAttribute("stroke-dasharray"), tail.getAttribute("stroke-opacity")]).toEqual(["4 3", "0.45"]);
-    // one line, naming the word it flew — whichever word is selected now
-    expect(screen.getByLabelText("The autopilot, live").textContent)
-      .toBe("Autopilot — heading 225° from step 8 · in envelope · solid blue, then a faded dashed tail");
-    cleanup();
-    open(ALL, 0, 60, "speed", null, autopilotSegment());
-    expect(screen.getByLabelText("The autopilot, live").textContent).toMatch(/^Autopilot — heading 225° from step 8/);
-  });
-
-  it("shows what every line and colour is behind ⓘ, as text", () => {
-    cleanup();
-    open(ALL, 0, 16, "heading", executorFlight(0), autopilotSegment());
-    fireEvent.click(screen.getByRole("button", { name: "What the lines and colours are" }));
-    const notes = screen.getByRole("note", { name: "What the lines and colours are" }).textContent!;
-    expect(notes).toMatch(/heading band.*a heading word's band: its target ± the tolerance/);
-    expect(notes).toMatch(/Executor replay.*Its flown track, and its heading, altitude and ground speed on its own clock/);
-    expect(notes).toMatch(/Autopilot.*The picked word's segment, flown by the executor when it was picked/);
-  });
-
-  it("says so when its dynamics failed in its first cycle, and draws nothing", () => {
-    cleanup();
-    open(ALL, 0, 16, "heading", null, autopilotSegment(1));
-    expect(count("polyline.training-readback-autopilot")).toBe(0);
-    expect(count("rect.training-readback-autopilot-band")).toBe(0);
-    expect(screen.getByLabelText("The autopilot, live").textContent)
-      .toBe("Autopilot — heading 225° from step 8 · not judged · no line to draw: it ended in its first cycle");
-    // failed later, it has its line, and the band on the rows its judge read
-    cleanup();
-    open(ALL, 0, 16, "heading", null, autopilotSegment(7));
-    expect(count("polyline.training-readback-autopilot")).toBe(4);
-    expect(count("rect.training-readback-autopilot-band")).toBe(1);
-  });
-
-  it("says nothing of it when there is none", () => {
-    cleanup();
-    open(ALL, 0, 16, "heading");
-    expect(count("polyline.training-readback-autopilot")).toBe(0);
-    expect(screen.queryByLabelText("The autopilot, live")).toBeNull();
-  });
-
-  it("closes on Escape from the moment it opens: the window takes the focus", () => {
-    cleanup();
-    const parsed = parseTrainingSample(mockSample());
+  it("draws a flight that did not cross the threshold and has no envelopes: lines only, outcome without a DA check", () => {
+    const file = stageASampleFile();
+    file.flights[0].closedLoop["2"].replay.crossing = null;
+    file.flights[0].closedLoop["2"].replay.envelopes = null;
+    file.flights[0].closedLoop["2"].replay.outcome = "ground_contact";
+    const parsed = parseTrainingSample(file);
     if (!parsed.ok) throw new Error(parsed.problem);
-    const onClose = vi.fn();
-    render(<TrainingReadbackWindow flight={parsed.value.flights[0]} vocabulary={parsed.value.vocabulary}
-      candidates={parsed.value.candidates} layers={ALL} cursorS={0} cursorOn onCursorChange={() => undefined} column={null}
-      onColumnChange={() => undefined} onClose={onClose} executor={null} autopilot={null} />);
-    const dialog = screen.getByRole("dialog", { name: "Read-back check" });
-    expect(document.activeElement).toBe(dialog);
-    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
-    expect(onClose).toHaveBeenCalled();
+    const bare = trainingSelectionOf(parsed.value, parsed.value.flights[0]);
+    const reading = trainingReadingOf(bare.flight, bare.vocabulary.stepS, 2);
+    render(<TrainingReadbackWindow selection={bare} reading={reading} layers={ALL} cursorS={100} onCursorChange={vi.fn()}
+      column="heading" onColumnChange={vi.fn()} onClose={vi.fn()} autopilot={null} />);
+    expect(chart("Heading chart").querySelectorAll("rect.training-readback-heading-band")).toHaveLength(0);
+    expect(chart("Heading chart").querySelector("polyline.training-readback-executor")).toBeTruthy();
+    expect(chart("Plan view").querySelector('g[aria-label="the decision-altitude point"]')).toBeNull();
+    const slot = screen.getByLabelText("The flown flight");
+    expect(slot.textContent).toContain("ground contact");
+    expect(slot.textContent).toContain("no threshold crossing");
+  });
+
+  it("scales a chart over what it draws, padded, never zero-wide", () => {
+    expect(extent([10, 20])).toEqual([9.2, 20.8]);
+    expect(extent([5, 5])).toEqual([4, 6]);
   });
 });

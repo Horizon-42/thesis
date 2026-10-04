@@ -18,20 +18,17 @@ from ts_transformer.config import (
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     PREDICTION_CONTROL,
-    TSConfig,
 )
 from ts_transformer.data.dataset import iter_batches
 from ts_transformer.data.dataset import (
     FixedAnchorTrajectoryWindows,
     FlightEpochSampler,
     Normalizer,
-    build_series,
 )
 from ts_transformer.data.splits import split_by_flight
 from ts_transformer.data.fixed_dt_supervision import build_fixed_dt_supervision
 from ts_transformer.backbone.adapters import build_model
 from ts_transformer.outputs.control.heads import ControlPrediction
-from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.training.objective import (
     loss_component_names,
     move_dynamics,
@@ -40,17 +37,9 @@ from ts_transformer.training.objective import (
 )
 from ts_transformer.tests.support import fake_data_provenance
 from ts_transformer.training.train import FIT_EVALUATION_NAME, evaluate_fit_splits, train
+from ts_transformer.tests.support_prediction import series as _series
 
 AIRPORT, RUNWAY = "KRDU", "05L"
-
-
-def _series(n_flights=8, **config_overrides):
-    """Synthetic KRDU arrivals, built into FlightSeries. Returns ``(series, config)``."""
-    config = TSConfig(**config_overrides)
-    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3)
-    series, report = build_series(flights, config, airport=AIRPORT)
-    assert report.built == n_flights, report.format()
-    return series, config
 
 
 def _two_pass_loss_components(

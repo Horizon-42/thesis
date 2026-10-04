@@ -31,28 +31,21 @@ import torch
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
 from ts_transformer.backbone.adapters import build_model
 from ts_transformer.config import (
-    CONTROL_DURATION_UNIFORM,
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_POINT_MASS,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_HOOKS_AVAILABLE,
-    CONTROL_HOOK_OFF,
     CONTROL_IMITATION_TARGET_FITTED,
     CONTROL_RECIPE_CUSTOM,
     CONTROL_RECIPE_NAMES,
     CONTROL_SPECIFIC_FORCE,
     CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
-    CONTROL_STATE_CLOCK_OBSERVED,
-    CONTROL_STATE_LOSS_GRID_NATIVE,
-    CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
     CONTROL_THRUST_FRACTION,
-    PREDICTION_CONTROL,
     TSConfig,
     control_recipe,
     recipe_settings,
 )
-from ts_transformer.data.dataset import Normalizer, build_series
-from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.data.dataset import Normalizer
 from ts_transformer.inference.export import build_prediction_record
 from ts_transformer.outputs.conditioning import CONDITION_WIDTH
 from ts_transformer.outputs.control.forecast import forecast_control_batch
@@ -73,6 +66,8 @@ from ts_transformer.outputs.envelope import (
     control_contract,
 )
 from ts_transformer.run_naming import run_display_name, run_slug
+from ts_transformer.tests.support_prediction import series_for as _series
+from ts_transformer.tests.support_prediction import control_config as _config
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 LAG = {
@@ -86,27 +81,6 @@ AERO = (122.6, 2.7, 0.02, 0.04, 0.9, 0.1)
 FRAME = (37.36, -121.93, 18.0, 0.0)
 INITIAL_STATE = (37.55, -121.70, 1800.0, 120.0, -2.4, -0.035, 62_000.0)
 HORIZON_S = 240.0
-
-
-def _config(**overrides) -> TSConfig:
-    settings = dict(
-        prediction_output=PREDICTION_CONTROL,
-        control_duration_parameterization=CONTROL_DURATION_UNIFORM,
-        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_NATIVE,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        n_segments=8, seq_len=16, d_model=32, d_ff=64, n_heads=4, e_layers=1,
-    )
-    settings.update(overrides)
-    return TSConfig(**settings)
-
-
-def _series(config: TSConfig, n_flights: int = 2):
-    series, report = build_series(
-        synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3), config, airport=AIRPORT
-    )
-    assert report.built == n_flights, report.format()
-    return series
 
 
 def _rollout(config: TSConfig, controls: np.ndarray, offsets: np.ndarray, *,

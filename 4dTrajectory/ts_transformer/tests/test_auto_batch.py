@@ -169,7 +169,7 @@ def test_auto_batch_probe_executes_the_shared_physics_loss(monkeypatch):
 def test_the_probe_builds_a_latent_model_s_posterior_and_kl(monkeypatch):
     """A latent control model consumes the future (its posterior encoder and the KL): the probe hands it one, as the
     training loop does, so it measures the graph training builds — without it the KL had no posterior and raised."""
-    from ts_transformer.tests.test_latent_control import _config as latent_config
+    from ts_transformer.tests.support_prediction import latent_config
 
     monkeypatch.setattr(torch.cuda, "synchronize", lambda *_args: None)   # the probe step, run on the CPU
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)

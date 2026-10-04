@@ -3,13 +3,14 @@
 The artefact stores each flight's signals, not its dynamics. The aircraft's aero row, installed
 thrust, mass and the chart the rollout integrates in come from the data plane's own `FlightSeries`,
 rebuilt here with the call that built the signals (`data.dataset.build_series` under the default
-`TSConfig`, from the arrival manifest the artefact recorded — refused if the manifest moved since),
+`TSConfig`, from the airport's live arrival manifest),
 its first row where the stored signals have it (`stored_rows`: an artefact's rows are on the UTC
 steps since 2026-10-02, an older one's at each flight's first sample — both rebuild row for row).
 The rebuilt flight must reproduce the stored signals row for row and name the same runway and
 aircraft (`instructions.signals.signals_from_series`), and the build configuration must be the one the
 signals recorded, or it is refused: an executor flown from another flight — or another airframe — than
-the one the sentence was read off answers nothing.
+the one the sentence was read off answers nothing. The flight is identified by what it is, never by the
+bytes of the manifest it came from (vocabulary §7.2 #4, D21: a manifest rewritten over the same flights opens).
 
 The executor starts at the flight's first row: the state is the signals' row 0, and the flight's
 physical context is `outputs.dynamics.context.rollout_context` at anchor 0 — the reading of a series
@@ -31,7 +32,6 @@ from ts_transformer.data.dataset import FlightSeries, RowStart, build_series, lo
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import load_candidates
 from ts_transformer.instructions.signals import ROW_FIELDS, FlightSignals, signals_from_series
-from ts_transformer.io_utils import file_sha256
 from ts_transformer.outputs.dynamics.context import rollout_context
 from ts_transformer.repo_layout import arrival_manifest_path
 from trajectory_data_process.harvest.utc import parse_iso_utc_s
@@ -45,7 +45,6 @@ def rebuild_series(directory: Path, signals: Sequence[FlightSignals]) -> list[Fl
     """The `FlightSeries` behind each of ``signals``, in the same order, each checked to be the flight the
     signals were read from (`require_same_flight`)."""
     record = json.loads((directory / "signals.json").read_text(encoding="utf-8"))
-    recorded = {source["airport"]: source["arrival_manifest_sha256"] for source in record["sources"]}
     config = TSConfig()
     changed = {name: (value, getattr(config, name)) for name, value in record["config"].items()
                if getattr(config, name) != value}
@@ -55,9 +54,6 @@ def rebuild_series(directory: Path, signals: Sequence[FlightSignals]) -> list[Fl
     built: dict[str, FlightSeries] = {}
     for airport in sorted({item.airport for item in signals}):
         manifest = arrival_manifest_path(airport)
-        if file_sha256(manifest) != recorded[airport]:
-            raise ValueError(f"{manifest} is not the manifest the artefact's signals were read from "
-                             f"(sha256 {recorded[airport][:12]} recorded)")
         keys = {item.dataset_id for item in signals if item.airport == airport}
         flights = load_flight_dicts([manifest], include_flight_keys=keys, verbose=False)
         series, _report = build_series(flights, config, row_start=stored_rows(signals))
@@ -104,10 +100,13 @@ class FlightInputs:
     max_thrust_n: torch.Tensor      # [B]
 
 
-def flight_inputs(series: Sequence[FlightSeries], *, device: torch.device, anchor: int = 0) -> FlightInputs:
-    """`rollout_context` at each flight's row ``anchor`` — its first (a replay flies the sentence from row 0), or where
-    a closed loop starts (the prior's first predicted step)."""
-    rows = [rollout_context(item, anchor) for item in series]
+def flight_inputs(series: Sequence[FlightSeries], anchors: Sequence[int], *, device: torch.device) -> FlightInputs:
+    """`rollout_context` at each flight's own row ``anchors[i]`` — where it is flown from: its sentence's first row (a
+    replay at the data's step: row 0; at a coarser row interval: its first row on that grid), or where a closed loop
+    starts."""
+    if len(anchors) != len(series):
+        raise ValueError(f"{len(series)} flights, {len(anchors)} anchors")
+    rows = [rollout_context(item, int(anchor)) for item, anchor in zip(series, anchors)]
 
     def stack(key: str) -> torch.Tensor:
         return torch.as_tensor(np.stack([row[key] for row in rows]), dtype=torch.float64, device=device)

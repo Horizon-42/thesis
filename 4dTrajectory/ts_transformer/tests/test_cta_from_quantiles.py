@@ -39,8 +39,8 @@ from ts_transformer.run_naming import run_display_name
 from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.training.train import load_checkpoint, train
 
-from ts_transformer.tests.test_duration_quantiles import _config
-from ts_transformer.tests.test_eta_calibration import _cohort
+from ts_transformer.tests.support_prediction import quantile_config as _config
+from ts_transformer.tests.support_prediction import eta_cohort as _cohort
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
