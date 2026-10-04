@@ -70,6 +70,7 @@ The decision numbers are shared by all documents (outline §3).
 | D57 | One word clock: `time`. An open-loop sentence is said on its own rows, as a closed-loop sentence and a sentence of a speaker are. The clocks `distance` and `track` (an open-loop word said where the flown aircraft reaches the observed track) are removed with the next change of the executor spec, not in the formal build of A18 (A19). Why: no training sentence and no reading of D34 uses them; the closed-loop reading has the one rule of the place (D42, D45); the clock is a parameter of the executor spec, so a change of it gives a new spec identity and a rebuild of the closed-loop data that it does not change (D21); and the batch and the single-flight executors each carry it. The question "how far do the observed words alone carry a flight" is read, when a readout needs it, with the closed-loop reading with no corrections (§4.9) | Decided | User, 2026-10-04 |
 | D58 | The altitude words are heights above the airport elevation E (the published field elevation, one value for each airport, `candidates.json` `reference.elevation_m`), not MSL. The labeller reads them from the height above E; the executor flies a level T at T + E MSL. E, not the threshold of R: R can change during a sentence, and the thresholds of one airport differ by up to 28 m (KSTL 160.8–188.4 m). The spec measurement fits the grid of D22 again on the level-offs above E, with the D22 grid among the candidates; the user chooses (D55). Why: at a high airport (KDEN, approximately 1,650 m) the MSL words of an approach are far from what the five training airports (1–188 m) said for the same manoeuvre, and they fall in the coarse segments of the grid; and the day-to-day spread of the geometric height of an assigned level grows with the height above the altimeter-setting source, the airport. The cost: the round MSL levels that controllers assign fall on different words at each airport (3,000 ft MSL: 900 m at KMSY, 780 m at KRDU, 720 m at KSTL) (§3.4). | Decided | User, 2026-10-04 |
 | D59 | The grid of D58, chosen: the fitted row of the spec measurement on all train days (code `220e858e`, 44,703 train flights, 25,727 level words above E): 60 / 120 / 450 m, break points 1,260 and 2,700 m, 40 levels — the grid of D22 itself; rounding error of the level words p50 / p95 / largest 17 / 34 / 190 m. The next best of the 4,515 grids of the fit leaves 7.6 % more squared error. A21 builds with `--grid fitted` (§3.4, §9.5) | Decided | User, 2026-10-04 |
+| D61 | The vertical path of each candidate (its TCH, its glidepath angle and its DA above the threshold) is part of the artefact: the first runner writes it into `candidates.json` beside the geometry, and every reader (the labeller's refusal, the judge, the closed-loop reading, the replay, the executor spec, the prior) takes it from there, never from the CIFP at run time. The names of the state columns of a closed-loop file and the function that reads a closed-loop file into its sentences are in `instructions/artefact.py`. Why: the public interface (§6, items 3 and 4) gives them, but the code held them in `autopilot/`, which the prior cannot import; and a value read from the CIFP at run time is not bound to the artefact (§6, milestone A22) | Decided | User, 2026-10-04, on the report of the stage B agent |
 
 ### 0.2 Open items
 
@@ -86,9 +87,10 @@ The decision numbers are shared by all documents (outline §3).
 ### 0.4 Plan
 
 1. A0–A20 are done; the formal build of A18 was stopped for D58; the spec measurement on all train days with A19 and
-   A20 is done and the user chose the fitted grid (D59). Now A21: the formal artefact and the readings of D34 at
-   Δ = 2, 4, 8 s (§12.1).
-2. Claude checks A15–A21 and the formal artefact (§12.2).
+   A20 is done and the user chose the fitted grid (D59). Now A22 (D61: the vertical path and the state columns in the
+   public interface), then A21: the formal artefact and the readings of D34 at Δ = 2, 4, 8 s (§12.1). The build of A21
+   that started on 2026-10-04 at 13:36Z (`v8_20261004`, `v13_20261004`) was made before D61 and is superseded.
+2. Claude checks A15–A22 and the formal artefact (§12.2).
 3. The user compares the readings of D34 and chooses Δ (D7, D11). The replay of the val days waits for the user.
 
 ---
@@ -429,7 +431,8 @@ The first row says the runway of the first approach (D26). For a flight without 
 which the flight landed (the harvest assignment). For a flight with a go-around, it is the runway of the first low pass
 (§4.6). The data shows a change of runway only at a go-around, so a labelled sentence changes R only with the runway
 word that ends G (D19). A candidate without a published threshold crossing height (TCH), a
-glidepath angle or an LPV DA is refused before labelling (the judge needs all three, §5.8).
+glidepath angle or an LPV DA is refused before labelling (the judge needs all three, §5.8). The first runner writes
+the three values of each candidate into `candidates.json` (D61).
 
 ### 4.3 Heading words
 
@@ -787,7 +790,8 @@ executor uses only the vocabulary; a parameter mined from data shows that it doe
 | The distance to the threshold of R | The deceleration to the approach speed (§5.6) |
 | The aircraft: aerodynamic data, installed thrust, published maximum landing mass, published approach speed | Dynamics and "unspecified" speed |
 
-The executor laws do not read the TCH, the glidepath angle or the DA. Only the judge reads them (§5.8).
+The executor laws do not read the TCH, the glidepath angle or the DA. Only the judge reads them (§5.8), from
+`candidates.json` (D61); an architecture test makes sure that the executor's laws read no vertical path.
 
 ### 5.3 One cycle
 
@@ -913,7 +917,8 @@ crossing is an event, of R or of another candidate (D33): the flight continues.
 
 **The DA check (D3, D38).** At the DA point the judge checks that the aircraft is stable:
 
-- **Vertical:** the height within ±22 m of the published glidepath of R (straight-line reference, §9.3). The value is
+- **Vertical:** the height within ±22 m of the published glidepath of R (straight-line reference, §9.3; the TCH and the
+  glidepath angle of R from `candidates.json`, D61). The value is
   the vertical bound of the evaluation module (`evaluation/thresholds.py` `RNAV_TERMINAL_VERTICAL_BOUND_M`; ICAO Doc
   9613, RNP APCH Baro-VNAV final approach segment). The judge imports it; it is not a parameter.
 - **Lateral:** the lateral offset inside the FAS cone at the distance of the DA point (FAA Order 8260.58D Formula 3-1-1,
@@ -940,8 +945,8 @@ change of the other documents.
 |---|---|---|---|---|
 | 1 | The vocabulary spec | The five columns in their order and their values (§3.1); the grids, the classes and their nominal angles, the ε of each level, the tolerances Y and H, the lead L, the turn, bank and speed limits, the reading name. `Words` converts a heading class to a track with the course of R, a level to a height with the airport elevation E, a speed value to m/s | `instructions/spec.py` `VocabularySpec`, `instructions/words.py` `Words` | The spec sha |
 | 2 | The grammar | Rules 1–6 and the runway/G table (§3.2, §3.7) as one function: it checks a row, or gives the permitted words of a column for a speaker's mask | `instructions/grammar.py` `apply` | The labeller conformance |
-| 3 | The sentence artefact | For each split of the day split (the test days sealed, contract C32) and each Δ of the ablation: the closed-loop sentences (the words of each row, each correction word marked) and the flown states on the data's 2 s rows with the Δ rows marked (position in the airport frame, MSL height, track, ground speed, vertical rate; observed before the first predicted step, flown from it; D51); for each sentence its flight, its runway, its capture row and its go-around rows; the flights without a sentence, by reason. The capture row and the go-around rows use later rows: they are for readouts and strata, never an input | `instructions/artefact.py` | The format names; the labeller and the closed-loop conformance records (§7.2) |
-| 4 | The candidates and their geometry | For each airport: E; for each candidate: the threshold, the course, the threshold elevation, the length, the TCH, the glidepath angle, the LPV DA. The functions: the position, height and direction relative to a candidate (distance before its threshold along its course, offset right of its final, height above its threshold, direction minus its course); the height above its published glidepath with the straight-line reference (§9.3); the lateral limit of a landing passage | `candidates.json`; `instructions/airport.py` `relative_to_runway`, `glidepath_height_m`, `landing_cross_limit_m` | Part of the artefact (item 3) |
+| 3 | The sentence artefact | For each split of the day split (the test days sealed, contract C32) and each Δ of the ablation: the closed-loop sentences (the words of each row, each correction word marked) and the flown states on the data's 2 s rows with the Δ rows marked (position in the airport frame, MSL height, track, ground speed, vertical rate; observed before the first predicted step, flown from it; D51); for each sentence its flight, its runway, its capture row and its go-around rows; the flights without a sentence, by reason. The capture row and the go-around rows use later rows: they are for readouts and strata, never an input | `instructions/artefact.py`: the formats, `STATE_COLUMNS` (the names of the state columns) and the function that reads a closed-loop file into its sentences (for each: its flight, its first row, its words and correction marks, all its states on the 2 s rows from row 0 with the Δ rows marked) (D61) | The format names; the labeller and the closed-loop conformance records (§7.2) |
+| 4 | The candidates and their geometry | For each airport: E; for each candidate: the threshold, the course, the threshold elevation, the length, and its vertical path (D61): the TCH, the glidepath angle and the DA above the threshold (the LPV line's; where a runway publishes no LPV line, KRDU 32 and KSMF 35R, the LNAV/VNAV line's: the reading of the code). The functions: the position, height and direction relative to a candidate (distance before its threshold along its course, offset right of its final, height above its threshold, direction minus its course); the height of its published glidepath at a distance before its threshold with the straight-line reference (§9.3), one function of the airport, the candidate and the distance, the radius of curvature included, which the judge and the prior both call; the lateral limit of a landing passage | `candidates.json` (a new format name, D61); `instructions/airport.py` `VerticalPath`, `relative_to_runway`, the glidepath height, `landing_cross_limit_m` | Part of the artefact (item 3) |
 | 5 | The executor | Flies the words of one row at each Δ row, in 1 s cycles, from a given state (§5): one aircraft, a batch, or a batch in which each aircraft starts at its own cycle; it gives the state at each cycle and when the aircraft is done. It reads only the words, the aircraft and the runway geometry (§5.2) | `autopilot/executor.py` `Executor`, `autopilot/single.py` | The executor spec sha and its conformance record (§7.2) |
 | 6 | The judge | The outcome of a flight and its order (§5.8), the DA check, the time limit (the remaining observed time × 1.5, plus 900 s for each go-around), the limits that bound in each cycle | `autopilot/judge.py` | With item 5 |
 | 7 | The row grid | Rows on UTC multiples of Δ, Δ = 2, 4 or 8 s (D25); the first predicted step 16 s after row 0 | `instructions/labeller/interval.py` | — |
@@ -1369,31 +1374,54 @@ days done (§9.5); the user chose the fitted grid (D59). After A18; together wit
   gives the grid candidates and their rounding errors, and the rows of D56 again (they must not change). The user
   chooses the grid (D55).
 
-**A21. The formal artefact (D56, D58).** After the user's choice of the grid.
+**A21. The formal artefact (D56, D58, D59, D61).** After A22.
 
 - The formal artefact, from a clean checkout, into new directories:
-  `4dTrajectory/outputs/POOLED/instruction_language/v8_<date>/` (signals of every development flight, the spec with
+  `4dTrajectory/outputs/POOLED/instruction_language/v9_<date>/` (signals of every development flight, the spec with
   `--candidate 0.25` and `--grid fitted` (D59), labels, the labeller conformance, the closed-loop reading at Δ = 2, 4, 8 s
-  on every split) and `4dTrajectory/outputs/POOLED/executor/v13_<date>/` (the executor spec, its conformance).
+  on every split) and `4dTrajectory/outputs/POOLED/executor/v14_<date>/` (the executor spec, its conformance).
+- The build of 2026-10-04 13:36Z (`v8_20261004`, `v13_20261004`) was made before D61: its `candidates.json` has no
+  vertical path. It is superseded and deleted with the user's go, never kept beside the formal artefact.
 - The readings of D34 at Δ = 2, 4, 8 s: the closed-loop summary of every split (items 1–3) and the closed-loop replays
   (item 4) of train (400 flights an airport, seed 1337) and select (every labelled flight). The val replay waits for the
   user (as for every executor before). The data are made read-only with a `SHA256SUMS` beside them. The report gives
   the readings side by side; it sets no criterion (D7).
 
+**A22. The vertical path and the state columns in the public interface (D61).** Before A21. The values do not change,
+only where they are: no word and no state of a sentence changes.
+
+- `instructions/airport.py`: `VerticalPath` (the TCH, the glidepath angle and the DA above the threshold), one for each
+  candidate, moved from `autopilot/runway_data.py`. The first runner (`instruction_signals`) builds them from the
+  harvest's runway data, as now, refuses a candidate without them (§4.2), and writes them into `candidates.json` beside
+  the geometry. `candidates.json` gets a new format name (outline §5 rule 5).
+- One function gives the height of the published glidepath of a candidate at a distance before its threshold, from the
+  airport, the candidate and the distance (§6, item 4); the judge calls it.
+- Every reader takes the vertical paths from `candidates.json`: the judge (the DA check), the closed-loop reading, the
+  replay, the executor spec. Nothing reads the CIFP after the first runner. `autopilot/runway_data.py` goes.
+- `instructions/artefact.py`: `STATE_COLUMNS` beside `CLOSED_LOOP_FIELDS`, and the function that reads a closed-loop
+  file into its sentences (§6, item 3). `autopilot/closed_loop.py` imports both and keeps no copy.
+- The architecture test of A15 (the executor's laws do not read the runway data) checks that the executor's laws read
+  no `VerticalPath`.
+- Tests: `candidates.json` writes and reads the vertical paths, and the old format name is refused; the DA check gives
+  the same result from `candidates.json` as from the harvest's runway data on fixed flights; the reader gives back the
+  words, the marks and the states that were written; the labeller, executor and closed-loop conformance checks pass.
+- The key code index (§11) follows the moves.
+
 ### 12.2 Claude's check of stage A
 
 The check of A0–A14 is done (`readouts/2026-10-04_stage_a_check.zh.md`, at `ab295b18`; its points became D48–D52).
-After A21, Claude checks A15–A21 and the formal artefact. The formal runs of stage B wait for this check (outline §4):
+After A21, Claude checks A15–A22 and the formal artefact. The formal runs of stage B wait for this check (outline §4):
 
-1. D48–D56 against the code: done at `688e945e`. D57 and D58, and the code changed after `688e945e`, against the code of
-   the formal build of A21.
-2. The targeted tests of A15–A21 pass on the commit of the formal build (run again); the full suite of that commit
+1. D48–D56 against the code: done at `688e945e`. D57, D58, D59 and D61, and the code changed after `688e945e`, against
+   the code of the formal build of A21.
+2. The targeted tests of A15–A22 pass on the commit of the formal build (run again); the full suite of that commit
    passed (outline §5 rule 4; its log).
 3. The formal artefact: the spec holds the values of D56 and the grid that the user chose (D58), and its measurement
-   records both choices; the labeller, the executor and the closed-loop conformance records pass for the code of the
-   build; at each Δ, the closed-loop sentences of the replays give their flown states again on the 2 s rows, and the
-   rule of D50 holds on every stored row; the readings of D34 (items 1–4) exist for every Δ, each split that A21 reads
-   and each airport.
+   records both choices; `candidates.json` holds the vertical path of every candidate (D61); the labeller, the executor
+   and the closed-loop conformance records pass for the code of the build; at each Δ, the closed-loop sentences of the
+   replays give their flown states again on the 2 s rows, and the rule of D50 holds on every stored row; the readings of
+   D34 (items 1–4) exist for every Δ, each split that A21 reads and each airport.
 4. No write under a live root except the new directories of A21; no existing directory under `4dTrajectory/outputs/`
-   changed; the superseded directories of A18 deleted; the `SHA256SUMS` beside the formal data match.
+   changed; the superseded directories of A18 and of the build before D61 deleted; the `SHA256SUMS` beside the formal
+   data match.
 5. Nothing in the archive was edited after the move.

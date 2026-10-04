@@ -40,6 +40,7 @@ The decision numbers are shared by all documents (outline §3).
 | D40 | Hyperparameters: configuration A (§5) is the start. The same folds compare four configurations (A, a smaller model, a larger model, a stronger regularization); the one with the fewest parameters within twice the seed scale of the best is chosen (§5). Every configuration has attention heads 32 wide: A 6 heads, B (d_model 128) 4, C (d_model 256) 8 — 128 and 256 are not six heads of one width | Decided | User, 2026-10-04; the head width: user, 2026-10-04, on Claude's proposal |
 | D41 | The design runs at an airport that is not in the training data: the number of candidates is not fixed; every input has a fixed physical scale, never a statistic of the training data; each fold of D39 flies the full closed loop at its held-out airport. The altitude words are above the airport elevation (D58), so the levels of an approach lie in the 60 m segment at any airport (§6) | Decided | User, 2026-10-04 |
 | D58 | The prior's own height is the height above the airport elevation E, as the altitude words are (vocabulary, D58). The prior gets neither E nor the MSL height (D24), so it cannot know where the round MSL levels that controllers assign lie (§2). (The words: D58 in the vocabulary) | Decided | User, 2026-10-04 |
+| D60 | Row 0 of an aircraft has no motion inputs: no state 2 s before it is stored. There, the ground speed, the vertical rate and the motion direction in each candidate vector (sine, cosine) are 0, and the own input `no_motion` is 1 (0 at every other row). The same at every Δ, in training, in closed loop and in a loop of several aircraft. Not the fitted values of the data, which use 7.5 s after the row (§2) | Decided | User, 2026-10-04, on Claude's proposal |
 
 ### 0.2 Open items
 
@@ -65,7 +66,7 @@ None.
    | When | What |
    |---|---|
    | Now | B0. B2 and the training loop of B3, tested on synthetic inputs. The words of each column and their number come from the vocabulary spec (vocabulary §6, item 1), never from constants of the prior |
-   | After A19 and A20 of stage A (the altitude words above E, the new format names, the executor that flies T + E) | B1, tested on synthetic artefacts (`tests/support.py`). The speaker and the masks of B4 |
+   | After A19, A20 and A22 of stage A (the altitude words above E, the new format names, the executor that flies T + E; the vertical path of each candidate in `candidates.json` and the reader of a closed-loop file, D61) | B1, tested on synthetic artefacts (`tests/support.py`). The speaker and the masks of B4 |
    | After A21 of stage A (the formal artefact) | B1–B4 on a sample of the formal artefact at Δ = 2 s: the smoke run of B3, its time and the memory check at the formal size; free generation with the executor of the formal artefact |
    | After Claude's check of stage A and the user's choice of Δ (outline §4) | B5, B6 |
 
@@ -92,9 +93,9 @@ None.
   comes from the flown states of the closed-loop sentences (vocabulary §6, item 3), not from the observed track. The
   words in force are those of the closed-loop sentence, corrections included. In closed loop the states come from the
   executor.
-- **Own state (D5, D23, D58).** The own state of the aircraft has no frame: its height above the airport elevation (the
-  level words are above it), its ground speed and its vertical rate. No MSL height: with it, the airport elevation (a
-  constant of the airport) would be an input (D24).
+- **Own state (D5, D23, D58, D60).** The own state of the aircraft has no frame: its height above the airport elevation
+  (the level words are above it), its ground speed, its vertical rate and `no_motion` (1 only at row 0, below). No MSL
+  height: with it, the airport elevation (a constant of the airport) would be an input (D24).
 - **Frame (D5, D23).** Every position and every direction is in the candidate vectors. Each candidate vector gives the
   aircraft in the frame of that candidate: the distance to its threshold along its course, the offset right of its
   final, the height above its threshold, the motion direction minus its course (sine, cosine)
@@ -143,7 +144,21 @@ None.
   to weigh it.
 - **Motion (D25).** The ground speed, the vertical rate and the motion direction (in each candidate vector, minus its
   course) come from the displacement in the 2 s before the row, at every row interval Δ. Only past positions
-  give them; never the fitted track, ground speed or vertical rate of the signals, which use 7.5 s of the future.
+  give them; never the fitted track, ground speed or vertical rate of the signals: a least-squares fit over 15 s
+  centred on the row, which uses 7.5 s of the future.
+- **Row 0 (D60).** Row 0 of an aircraft has no state 2 s before it: the observed data start at the entry of the 25 km
+  slice, and the sentence artefact stores the states from row 0 of each sentence (vocabulary §6, item 3). At row 0 the
+  ground speed, the vertical rate and the motion direction in each candidate vector (sine, cosine) are 0, and
+  `no_motion` is 1; at every other row `no_motion` is 0. The rule is the same at every Δ, also when the data have a 2 s
+  row before row 0, so that only the interval changes with Δ (D25). It is the same in training, in closed loop and in a
+  loop of several aircraft (§7, item 2): the first row of an aircraft never has a state before it. The zeros alone
+  already mark the row (no aircraft in flight has a ground speed of 0, and (0, 0) is not a direction); `no_motion` says
+  it directly, so that the network does not have to learn it from an extreme value. Two other values were not chosen:
+  - The fitted values of the data at row 0. They use 7.5 s after the row. For the aircraft's own first predicted step,
+    16 s after row 0, this is no leak; but in a loop of several aircraft another aircraft reads the row at its own time,
+    and then reads 7.5 s of the future (principle 7). Also, it would be a 15 s fit at one row and a 2 s displacement at
+    every other row.
+  - The displacement from row 0 to the next row: in a loop of several aircraft, that is 2 s of the future.
 - **Time (D16).** No row position embedding and no input "time from row 0": both measure the time since the aircraft
   entered the 25 km slice, a cut of the data, and a long sentence (a go-around adds up to 900 s) reaches rows that
   training seldom saw. The causal time attention gives the order. RoPE in the time attention gives how far back each
@@ -163,8 +178,8 @@ None.
 it would be the mean over Δ. In a 3°/s turn, the direction of that mean is approximately 12° behind the track at
 Δ = 8 s (3° at 2 s). The ablation of Δ would then compare a coarser input as well as a longer interval. With the
 displacement in the 2 s before the row, only the interval changes. The data has a row every 2 s, and in closed loop the
-executor has a state every 1 s, so the value exists at every Δ; the closed-loop artefact stores the flown states on
-the 2 s rows (D51). At Δ = 2 s it is the value of now.
+executor has a state every 1 s, so the value exists at every Δ, at every row after row 0 (D60); the closed-loop
+artefact stores the flown states on the 2 s rows (D51). At Δ = 2 s it is the value of now.
 
 ## 3 Outputs
 
@@ -295,7 +310,7 @@ sets its criteria (D7). The identities follow D21 (outline §3):
 
 | Item | Value | Source |
 |---|---|---|
-| Motion inputs | Displacement in the 2 s before the row, at every Δ | D25 |
+| Motion inputs | Displacement in the 2 s before the row, at every Δ; at row 0 of an aircraft 0, with `no_motion` = 1 | D25, D60 |
 | Rows before the first predicted step | 16 s: 8, 4, 2 rows at Δ = 2, 4, 8 s | Vocabulary §6, item 7 |
 | Time since a word | log(1 + t / 2 s) / 5, t in seconds, from the first predicted step at the earliest | D17 |
 | Landings of a candidate | In the 30 min before the step | §2 |
@@ -363,12 +378,12 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
   the campaign of B5 and writes the choice), `prior_free_generation` (the prior speaks, the executor flies). New code;
   the archived runners of the same names stay as they are.
 
-**B1. Data** (§2, §7 item 2; D13, D17, D23–D25, D32, D41).
+**B1. Data** (§2, §7 item 2; D13, D17, D23–D25, D32, D41, D60).
 
 - The rows: before the first predicted step, the observed states; from it on, the flown states of the closed-loop
   sentences, on the rows of the chosen Δ.
-- The own state: height above the airport elevation (D58), ground speed, vertical rate; the motion from the displacement
-  in the 2 s before the row.
+- The own state: height above the airport elevation (D58), ground speed, vertical rate, `no_motion`; the motion from the
+  displacement in the 2 s before the row; at row 0 the motion inputs 0 and `no_motion` 1 (D60).
 - One vector for each candidate: the distance before its threshold along its course, the offset right of its final,
   the height above its threshold, the motion direction minus its course (sine, cosine), the height above its glidepath
   (straight-line reference), the landings on it in the 30 min before the step. No constant of the runway, except in the
@@ -379,9 +394,12 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
 - The targets: the five columns of the closed-loop sentence.
 - Every scale is a constant in SI units (D41). A flight without a training sentence (vocabulary §6, item 3) is not read.
 - Tests: a change of the runway word leaves the inputs of the rows up to the first predicted step the same, bit for bit
-  (D23); the glidepath height against a hand computation; the motion from the 2 s displacement at Δ = 2, 4, 8 s; the
-  flown states from the first predicted step on; a permutation of the candidates permutes their vectors and nothing
-  else; an airport with more candidates than any training airport is read.
+  (D23); the glidepath height against a hand computation; the motion from the 2 s displacement at Δ = 2, 4, 8 s; at row
+  0 the motion inputs 0 and `no_motion` 1 at Δ = 2, 4, 8 s, also when the data have a 2 s row before row 0, and
+  `no_motion` 0 at every other row (D60); a change of the stored track, ground speed and vertical rate of the states
+  changes no input (only positions and heights give the motion); the flown states from the first predicted step on; a
+  permutation of the candidates permutes their vectors and nothing else; an airport with more candidates than any
+  training airport is read.
 
 **B2. Model** (§2, §3; D16, D41).
 
