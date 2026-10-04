@@ -50,7 +50,9 @@ from ts_transformer.instructions.labeller.speed import span_checks
 from ts_transformer.instructions.labeller.vertical import tube_bounds, tube_checks
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import READING_RULE, SPEC_SCHEMA, VocabularySpec
-from ts_transformer.instructions.words import COLUMNS, HEADING, SPEED, Words
+from ts_transformer.instructions.words import (
+    ALTITUDE, ANGLE, ANGLE_LEVEL, COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words,
+)
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
 
 #: The row intervals of the ablation (D25), each a closed-loop sentence of every exported flight.
@@ -108,13 +110,40 @@ def envelopes(instructions: list[Instruction], track_deg: np.ndarray, distance_m
             "altitude": tubes, "speed": spans}
 
 
-def events(grid: np.ndarray, correction: np.ndarray | None = None) -> list[dict[str, Any]]:
-    """Every word said in a sentence's grid (``[rows, 5]``), each with its row, column and value, and whether the
-    closed-loop reading added it (``correction``; an open-loop sentence has none)."""
-    out = []
-    for row, column in zip(*np.nonzero(grid != -1)):
-        out.append({"row": int(row), "column": int(column), "value": int(grid[row, column]),
-                    "correction": bool(correction is not None and correction[row, column])})
+def said(column: int, value: int, runway_index: int, geometry: AirportGeometry, words: Words) -> dict[str, Any]:
+    """What a word says, decoded with the vocabulary (`Words`) so the views decode nothing: the runway word its candidate
+    or go-around; a heading word its class relative to the course of the runway in force (``runway_index``) and the
+    compass track that makes (D8); an altitude word its level above E and in MSL, or "no level-off" (D58); an angle word
+    its nominal angle (descending positive); a speed word its ground speed, or "unspecified"."""
+    if column == RUNWAY:
+        return {"goAround": True} if value == RUNWAY_GO_AROUND else {"runway": geometry.candidates[value].ident,
+                                                                      "runwayIndex": value}
+    if column == HEADING:
+        course = geometry.candidates[runway_index].course_deg
+        return {"relativeDeg": words.heading_relative_deg(value), "trackDeg": round(words.heading_track_deg(value, course), 3)}
+    if column == ALTITUDE:
+        level = words.altitude_level_m(value)
+        return {"noLevelOff": level is None, "levelM": level,
+                "mslM": None if level is None else round(level + geometry.elevation_m, 1)}
+    if column == ANGLE:
+        return {"angleDeg": words.angle_deg(value), "climb": value == words.angle_climb, "level": value == ANGLE_LEVEL}
+    return {"speedMps": words.speed_mps(value)}
+
+
+def events(grid: np.ndarray, correction: np.ndarray | None, geometry: AirportGeometry, words: Words
+           ) -> list[dict[str, Any]]:
+    """Every word said in a sentence's grid (``[rows, 5]``, row 0 says every column), each with its row, column and
+    value, whether the closed-loop reading added it (``correction``; an open-loop sentence has none) and what it says
+    (`said`, a heading word with the runway in force at its row: go-around changes no runway, D27)."""
+    out, runway = [], -1
+    for row in range(len(grid)):
+        if grid[row, RUNWAY] >= 0:
+            runway = int(grid[row, RUNWAY])
+        for column in np.flatnonzero(grid[row] != UNCHANGED):
+            value = int(grid[row, column])
+            out.append({"row": row, "column": int(column), "value": value,
+                        "correction": bool(correction is not None and correction[row, column]),
+                        "says": said(int(column), value, runway, geometry, words)})
     return out
 
 
@@ -137,7 +166,7 @@ def open_loop_payload(flight: FlightSignals, reading: Reading, geometry: Airport
     """The labelled (open-loop) sentence on the 2 s rows, with the labeller's envelopes on the observed track."""
     admitted = admit(flight, geometry, spec)
     smoothed = admitted.smoothed
-    return {"rows": len(reading.words), "words": reading.words.astype(int).tolist(), "events": events(reading.words),
+    return {"rows": len(reading.words), "words": reading.words.astype(int).tolist(), "events": events(reading.words, None, geometry, words),
             "kinds": [{"row": item.row, "column": item.column, "kind": item.kind} for item in reading.instructions],
             "captureRow": reading.capture_row, "unspecifiedRow": reading.unspecified_row,
             "goAroundRows": list(reading.go_around_rows), "runwayAgainRows": list(reading.runway_again_rows),
@@ -189,13 +218,13 @@ def replay_payload(flown: Flown, j: int, verdict: Verdict, part: replay.Batch, s
 
 
 def closed_loop_payload(sentence: ClosedLoopSentence, replayed: dict[str, Any], interval_s: float,
-                        geometry: AirportGeometry) -> dict[str, Any]:
+                        geometry: AirportGeometry, words: Words) -> dict[str, Any]:
     states = sentence.states
     lat, lon = geometry.frame.latlon_from_horizontal(states[:, 0], states[:, 1])
     return {"rowIntervalS": interval_s, "firstRow": sentence.first_row, "startRow": sentence.start,
             # the row of ``states`` the executor flew from (the first predicted step; the replay's cycle 0)
             "flownFromRow": int(np.flatnonzero(sentence.on_interval)[sentence.start]),
-            "words": sentence.grid.astype(int).tolist(), "events": events(sentence.grid, sentence.correction),
+            "words": sentence.grid.astype(int).tolist(), "events": events(sentence.grid, sentence.correction, geometry, words),
             "states": {"rows": len(states), "eM": files.rounded(states[:, 0], 1), "nM": files.rounded(states[:, 1], 1),
                        "latDeg": files.rounded(lat, 7), "lonDeg": files.rounded(lon, 7),
                        "heightMslM": files.rounded(states[:, 2], 1), "trackDeg": files.rounded(states[:, 3], 2),
@@ -298,8 +327,8 @@ def build_airport(airport: str, instructions: Path, executor: Path, params: Any,
                 sentence = sentences[j]
                 replayed = replay_payload(flown, j, verdict, batch, sentence, rows[interval][dataset_id], aero[j], spec,
                                           words)
-                per_flight[dataset_id]["closedLoop"][f"{interval:g}"] = closed_loop_payload(sentence, replayed, interval,
-                                                                                         geometry)
+                per_flight[dataset_id]["closedLoop"][f"{interval:g}"] = closed_loop_payload(
+                    sentence, replayed, interval, geometry, words)
         flights_out += [per_flight[d] for d in chosen]
     return {"flights": flights_out, "geometry": geometry}, len(flights_out)
 
