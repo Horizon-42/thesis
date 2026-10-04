@@ -80,7 +80,7 @@ changed); 3 (the runway head's class order) is a detail of the code. The code fo
    |---|---|
    | Now | B0. B2 and the training loop of B3, tested on synthetic inputs. The words of each column and their number come from the vocabulary spec (vocabulary §6, item 1), never from constants of the prior |
    | After A19, A20 and A22 of stage A (the altitude words above E, the new format names, the executor that flies T + E; the vertical path of each candidate in `candidates.json`, the reader of a closed-loop file, D61; the grammar's column mask, D62) | B1, tested on synthetic artefacts (`tests/support.py`). The speaker and the masks of B4 |
-   | After A21 of stage A (the formal artefact) | B1–B4 on a sample of the formal artefact at Δ = 2 s: the smoke run of B3, its time and the memory check at the formal size; free generation with the executor of the formal artefact |
+   | After A21 of stage A (the formal artefact), and again after A25 (the formal artefact with the vertical tolerance of the final descent, D66) | B1–B4 on a sample of the formal artefact at Δ = 2 s: the smoke run of B3, its time and the memory check at the formal size; free generation with the executor of the formal artefact |
    | After A23 of stage A (the Training view of stage A), merged into this branch | B6's export and view, on the smoke sets of B3 and B4 |
    | After Claude's check of stage A and the user's choice of Δ (outline §4) | B5; B6's publication of the folds and the base; B7 |
 
@@ -404,11 +404,11 @@ The code that this design replaces, archived by stage A unchanged.
 ## 12 Implementation plan: stage B
 
 **Start.** In parallel with the end of stage A, on the branch `dev-two-tier-v4-prior` (outline §5 rule 1); §0.4 gives
-when each milestone starts. Until the formal artefact of A21 exists, the tests use synthetic inputs and artefacts. Then
-the code is tested on a sample of the formal artefact at Δ = 2 s, read-only. The smoke artefacts of stage A are not
-used: their spec is not the spec of D56 and D58 (D55). The formal runs of B5 need Claude's check of stage A and the
-chosen Δ (D11). Stage B changes no code of `instructions/` or `autopilot/`; it reads them only through the
-vocabulary's public interface (vocabulary §6). The rules of outline §5 apply.
+when each milestone starts. Until the formal artefact (A21, then A25) exists, the tests use synthetic inputs and
+artefacts. Then the code is tested on a sample of the formal artefact at Δ = 2 s, read-only. The smoke artefacts of
+stage A are not used: their spec is not the spec of D56 and D58 (D55). The formal runs of B5 need Claude's check of
+stage A and the chosen Δ (D11). Stage B changes no code of `instructions/` or `autopilot/`; it reads them only through
+the vocabulary's public interface (vocabulary §6). The rules of outline §5 apply.
 
 **Written from this document, not patched from the archive.** The archived `prior/`
 (`archive/two_tier_v3_2026_10/prior/`) stays unchanged. A part of it comes back only where its logic fits this document,
