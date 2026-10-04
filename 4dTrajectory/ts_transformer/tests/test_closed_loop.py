@@ -869,3 +869,62 @@ def test_the_replay_reads_the_speed_words_and_how_far_along_the_path_the_flown_a
     assert read["slow"]["speed_words"] == read["slow_4"]["speed_words"] == 1
     assert read["slow"]["largest_along_m"] > 1000.0 > read["observed"]["largest_along_m"]
     assert read["slow_4"]["largest_along_m"] == pytest.approx(read["slow"]["largest_along_m"], rel=0.1)
+
+
+def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(tmp_path, monkeypatch):
+    """`instruction_closed_loop --workers N` reads each cell (a split at a row interval) in its own process: the files and
+    the summary are those of one process. Synthetic flights have no harvest: their draw and executor inputs stand in."""
+    import json as json_module
+
+    from ts_transformer.autopilot.flights import FlightInputs
+    from ts_transformer.experiments import instruction_closed_loop as runner
+    from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals
+    from ts_transformer.tests.test_instruction_conformance import _artefact as labelled_artefact
+
+    clean = {"head": "h", "dirty": False}
+
+    def draw(directory, split, one, words, *, per_airport, seed, groups):
+        stored, signals, geometries = load_sentences(directory, split, one), load_signals(directory, split), \
+            load_candidates(directory)
+        indices = [int(i) for i in stored["signal_index"]]
+        readings = [read_flight(signals[i], geometries[signals[i].airport], one, words) for i in indices]
+        return replay.Drawn(indices=indices, signals=[signals[i] for i in indices], series=[None] * len(indices),
+                            groups=[replay.OWN] * len(indices), geometries=geometries,
+                            description={"split": split, "excluded": {}, "flights": len(indices)}), readings
+
+    def inputs(batch, step_s, *, device):
+        start = closed_loop.start_row(batch.row_interval_s) * int(round(batch.row_interval_s / step_s))
+        parts = [executor_inputs(s, g, start) for s, g in zip(batch.signals, batch.geometries)]
+        return FlightInputs(*(torch.cat([getattr(p, name) for p in parts])
+                              for name in ("initial_state", "aero_params", "frame_params", "max_thrust_n")))
+
+    words = Words(spec())
+    monkeypatch.setattr(replay, "open_executor", lambda executor, instructions: (_params(), {"sha256": "e"}, words))
+    monkeypatch.setattr(replay, "draw_readings", draw)
+    monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: approach_speed_ias_mps("A320", 62000.0))
+    monkeypatch.setattr(closed_loop, "start_inputs", inputs)
+    monkeypatch.setattr(runner, "git_state", lambda: clean)
+    monkeypatch.setattr(closed_loop, "git_state", lambda: clean)
+    monkeypatch.setattr(runner, "POOL_CONTEXT", "fork")
+    read = {}
+    for workers in (1, 2):
+        directory = labelled_artefact(tmp_path / f"w{workers}", monkeypatch)
+        assert runner.main(["--instructions", str(directory), "--executor", str(tmp_path), "--row-interval-s", "2", "8",
+                            "--workers", str(workers)]) == 0
+        files = sorted(p.name for p in (directory / "closed_loop").glob("*.npz"))
+        summary = json_module.loads((directory / "closed_loop" / "summary.json").read_text(encoding="utf-8"))
+        summary.pop("written_utc")
+        arrays = {}
+        for name in files:
+            with np.load(directory / "closed_loop" / name) as data:
+                arrays[name] = {key: data[key] for key in data.files}
+        read[workers] = (files, summary, arrays)
+    assert read[1][0] == read[2][0] == ["select_2s.npz", "select_8s.npz", "train_2s.npz", "train_8s.npz",
+                                        "val_2s.npz", "val_8s.npz"]
+    assert read[1][1] == read[2][1] and list(read[2][1]["splits"]) == ["train", "select", "val"]
+    for name in read[1][0]:
+        for key, value in read[1][2][name].items():
+            assert np.array_equal(value, read[2][2][name][key], equal_nan=value.dtype.kind == "f"), (name, key)
+    with pytest.raises(SystemExit):
+        runner.main(["--instructions", str(tmp_path / "w1"), "--executor", str(tmp_path), "--row-interval-s", "2",
+                     "--workers", "0"])
