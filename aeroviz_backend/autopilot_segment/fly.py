@@ -8,7 +8,8 @@ its grid: Δ row ``row`` of ``column``.
 
 THE SEGMENT of a word runs from the cycle it is heard (``row`` × Δ) to the cycle the next word of its column is heard —
 for a heading word a lead later (the heading lead L), since the judge reads a heading word to a lead after the next one
-is said. The column's last word is flown on to the outcome, and judged there. The flight is flown from the sentence's
+is said. The column's last word is flown on to the outcome, and judged there — as is any word whose flight ends before
+its stop (a heading word said in the sentence's last rows, its lead past the flight's end). The flight is flown from the sentence's
 first predicted step, so the aircraft is where the sentence's earlier words took it; the answer returns the part from the
 word on. Nothing is precomputed: the flight is flown again, and then compared with the artefact's stored flown states on
 the 2 s rows (`apart_from_stored`), which the export's flown states are too.
@@ -104,6 +105,8 @@ def apart_from_stored(result: FlownSegment, sentence: ClosedLoopSentence, batch:
     rows = min(len(stored), last_state(result) // step_cycles + 1)
     cycles = np.arange(rows) * step_cycles
     track = flown_track(result.flown.states[0, : cycles[-1] + 1].cpu().numpy(), batch.geometries[j])
-    horizontal = np.hypot(track["e"][cycles] - stored[:rows, 0], track["n"][cycles] - stored[:rows, 1])
-    vertical = np.abs(track["height"][cycles] - stored[:rows, 2])
-    return {"rows": int(rows), "horizontalM": float(horizontal.max()), "verticalM": float(vertical.max())}
+    horizontal = float(np.hypot(track["e"][cycles] - stored[:rows, 0], track["n"][cycles] - stored[:rows, 1]).max())
+    vertical = float(np.abs(track["height"][cycles] - stored[:rows, 2]).max())
+    if not (np.isfinite(horizontal) and np.isfinite(vertical)):
+        raise ValueError(f"the live flight is {horizontal} m / {vertical} m from the stored states: a non-finite state")
+    return {"rows": int(rows), "horizontalM": horizontal, "verticalM": vertical}

@@ -141,7 +141,7 @@ class AutopilotSegmentBackend:
                         for split in training_files.SPLITS:
                             for interval in sample["vocabulary"]["rowIntervalsS"]:
                                 self.set_flown(sample, split, float(interval), instructions, words, opened)
-                    except (NotListed, ValueError, OSError, KeyError) as error:
+                    except Exception as error:   # noqa: BLE001 — a prefetch: logged by type; a request gets it whole
                         log(f"autopilot warm-up: {airport} {entry['id']} skipped — {type(error).__name__}: "
                             f"{str(error).split('; ')[0]}")
                         continue

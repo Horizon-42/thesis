@@ -63,7 +63,7 @@ REFERENCE_SCHEMA = "ts-executor-conformance-reference-v3"
 #: The reference's flights: the replay gate's draw on the training days, every airport alike.
 SPLIT, PER_AIRPORT, SEED, GROUPS = "train", 50, 1337, (replay.OWN,)
 #: How far apart two flown states may be, metres, horizontally or vertically — the single-flight executor's bound
-#: against the batched one (`aeroviz_backend.autopilot_segment.check_single`, 7,426 segments within 1.6e-8 m).
+#: against the batched one (instruction-v3's fleet check, 7,426 live segments within 1.6e-8 m; now the spec's reference).
 STATE_BOUND_M = 1e-6
 #: How far apart any other two floats may be (speed m/s, angles rad, mass kg, commands, wanted rates, sentence times,
 #: a verdict's check numbers).

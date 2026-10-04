@@ -212,3 +212,51 @@ def test_the_frontend_fixtures_are_what_the_export_writes():
     replayed = flight["closedLoop"]["2"]["replay"]
     assert replayed["outcome"] == "unstable_at_minimums" and replayed["crossing"]["decision"]["passed"] is False
     assert any(event["correction"] for event in flight["closedLoop"]["2"]["events"])
+
+
+def test_a_flight_flown_again_is_refused_unless_it_gives_its_stored_states_and_its_formal_outcome():
+    import dataclasses
+
+    import torch
+
+    from ts_transformer.autopilot import replay
+    from ts_transformer.tests.support import closed_loop_flight
+
+    one = closed_loop_flight(4.0)
+    flown, (verdict,) = replay.fly_batch(one.batch, one.params, one.words, device=torch.device("cpu"))
+    aero = one.inputs.aero_params[0].numpy()
+    states = one.sentence.states.copy()
+    states[-1, 2] += 1e-3                                       # a stored height a millimetre off
+    moved = dataclasses.replace(one.sentence, states=states)
+    with pytest.raises(ValueError, match="from its closed-loop states"):
+        export.replay_payload(flown, 0, verdict, one.batch, moved, {"outcome": verdict.outcome}, aero, one.words.spec,
+                              one.words)
+    states[-1, 2] = float("nan")
+    with pytest.raises(ValueError, match="from its closed-loop states"):
+        export.replay_payload(flown, 0, verdict, one.batch, dataclasses.replace(one.sentence, states=states),
+                              {"outcome": verdict.outcome}, aero, one.words.spec, one.words)
+    with pytest.raises(ValueError, match="the formal replay to landed"):
+        export.replay_payload(flown, 0, verdict, one.batch, one.sentence, {"outcome": "landed"}, aero, one.words.spec,
+                              one.words)
+
+
+def test_a_set_whose_directory_exists_is_refused_before_any_airport_is_written(tmp_path):
+    training = tmp_path / "training"
+    (training / "set_a").mkdir(parents=True)                    # a leftover directory, not listed
+    with pytest.raises(ValueError, match="exists; an export is never overwritten"):
+        files.require_writable(training, "KAAA", _entry("set_a"), [])
+    assert not (training / files.INDEX_FILE).exists()
+
+
+def test_a_kept_flight_owns_its_arrays():
+    """The split's signals and closed-loop sentences are views into one array of every flight; a kept view keeps it
+    whole (0.1–0.7 GB a split), so the set's flights are copied."""
+    from ts_transformer.experiments import training_flights
+    from ts_transformer.tests.support import closed_loop_flight
+
+    one = closed_loop_flight(2.0)
+    signals = training_flights.owned_signals(one.signals)
+    sentence = training_flights.owned_sentence(one.sentence)
+    assert not np.shares_memory(signals.e_m, one.signals.e_m) and np.array_equal(signals.e_m, one.signals.e_m)
+    assert not np.shares_memory(sentence.states, one.sentence.states)
+    assert np.array_equal(sentence.grid, one.sentence.grid) and sentence.start == one.sentence.start

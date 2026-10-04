@@ -32,9 +32,12 @@ from ts_transformer.instructions.artefact import (
     ClosedLoopSentence, closed_loop_path, closed_loop_sentences, load_closed_loop, load_sentences, load_signals,
 )
 from ts_transformer.instructions.labeller.read import Reading, read_flight
+from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import Words
 
 CPU = torch.device("cpu")
+#: The outcomes of an approach crossing, whose crossing carries the judge's decision-altitude check (`judge._outcome`).
+APPROACH_OUTCOMES = ("landed", "unstable_at_minimums")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -65,8 +68,8 @@ def open_flights(instructions: Path, split: str, dataset_ids: Sequence[str], wor
         raise ValueError(f"{split}: {sorted(set(dataset_ids) - set(at))[:3]} cannot be flown (no airframe)")
     order = [at[d] for d in dataset_ids]
     drawn = dataclasses.replace(drawn, indices=[drawn.indices[k] for k in order],
-                                signals=[drawn.signals[k] for k in order], series=[drawn.series[k] for k in order],
-                                groups=[drawn.groups[k] for k in order])
+                                signals=[owned_signals(drawn.signals[k]) for k in order],
+                                series=[drawn.series[k] for k in order], groups=[drawn.groups[k] for k in order])
     readings = []
     for i, flight in zip(drawn.indices, drawn.signals):
         reading = read_flight(flight, drawn.geometries[flight.airport], spec, words)
@@ -76,6 +79,21 @@ def open_flights(instructions: Path, split: str, dataset_ids: Sequence[str], wor
             raise ValueError(f"{flight.dataset_id}: the re-read sentence differs from the stored one")
         readings.append(reading)
     return SetFlights(drawn, readings)
+
+
+def owned_signals(flight: FlightSignals) -> FlightSignals:
+    """A flight's signals with arrays of its own: the split's loaded signals are views into one array of every flight
+    (`artefact.load_signals`), which a kept view would keep alive whole (~0.5 GB for train)."""
+    return dataclasses.replace(flight, **{f.name: getattr(flight, f.name).copy() for f in dataclasses.fields(flight)
+                                          if isinstance(getattr(flight, f.name), np.ndarray)})
+
+
+def owned_sentence(sentence: ClosedLoopSentence) -> ClosedLoopSentence:
+    """A closed-loop sentence with arrays of its own (`closed_loop_sentences` gives views into the split's file, ~0.1–0.7
+    GB loaded, which a kept view would keep alive whole)."""
+    return dataclasses.replace(sentence, **{f.name: getattr(sentence, f.name).copy()
+                                            for f in dataclasses.fields(sentence)
+                                            if isinstance(getattr(sentence, f.name), np.ndarray)})
 
 
 def stored_closed_loop(instructions: Path, split: str, interval_s: float, words: Words) -> dict[int, ClosedLoopSentence]:
@@ -93,7 +111,7 @@ def closed_loop_batch(flights: SetFlights, stored: dict[int, ClosedLoopSentence]
     if missing or len(batch.indices) != len(flights.readings):
         raise ValueError(f"{len(flights.readings) - len(batch.indices)} of the set's flights have no closed-loop sentence "
                          f"at {interval_s:g} s (refused on the interval: {batch.drawn['refused_on_interval']})")
-    return batch, [stored[index] for index in batch.indices]
+    return batch, [owned_sentence(stored[index]) for index in batch.indices]
 
 
 def fly_single(batch: replay.Batch, inputs: FlightInputs, j: int, params: ExecutorParams, words: Words, *,
@@ -135,8 +153,8 @@ def crossing_payload(verdict: Verdict, flown: Flown, j: int, geometry: AirportGe
     crossing = verdict.crossing
     out = {"crossM": round(crossing["cross_m"], 2), "heightM": round(crossing["height_m"], 2),
            "atCycle": round(crossing["at_row"], 3), "runwayIndex": int(crossing["runway_index"]), "decision": None}
-    # the judge writes a decision-altitude check (or None: no DA point) only for an approach crossing
-    decision = crossing["decision"] if "decision" in crossing else None
+    # the judge writes a decision-altitude check (None: no DA point) on the crossings it reads as approaches: those
+    decision = crossing["decision"] if verdict.outcome in APPROACH_OUTCOMES else None
     if decision is not None:
         state = flown.states[j, decision["row"]].cpu().numpy()
         e, n = geometry.frame.horizontal_from_latlon(float(state[LAT]), float(state[LON]))
