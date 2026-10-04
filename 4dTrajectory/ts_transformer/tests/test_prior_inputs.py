@@ -336,3 +336,41 @@ def test_the_flight_key_mirror_reads_the_dataset_id_as_the_data_plane_writes_it(
     assert own_flight_key({"dataset_id": dataset_flight_key(source, 0), "airport": "KRDU"}) == flight_key(source, 0)
     with pytest.raises(ValueError, match="flight key"):
         own_flight_key({"dataset_id": dataset_flight_key(source, 0), "airport": "KSJC"})
+
+
+def test_the_landings_digest_holds_each_landings_flight_runway_and_time_only():
+    """D63: a change of a landing's time or runway in the roster changes the digest; a change of another field of the
+    roster does not; the landings left out on the sealed test days count."""
+    days = fixture_days()
+    train_day, test_day = days.days["train"][0], days.days["test"][0]
+    records = [{**record("A", "05L", f"{train_day}T12:00:00Z"), "icao24": "abc123", "file": "a.json"},
+               {**record("B", "23R", f"{train_day}T12:20:00Z"), "icao24": "def456", "file": "b.json"},
+               record("C", "05L", f"{test_day}T12:00:00Z")]
+
+    def digest(rows):
+        return roster_landings(rows, ("05L", "23R"), days).digest()
+
+    base = digest(records)
+    assert digest([{**records[0], "icao24": "zzz999", "file": "elsewhere.json"}, *records[1:]]) == base
+    assert digest([{**records[0], "landing_time_utc": f"{train_day}T12:00:02Z"}, *records[1:]]) != base
+    assert digest([{**records[0], "runway": "23R"}, *records[1:]]) != base
+    assert digest(records[:2]) != base                                    # one sealed landing fewer
+
+
+def test_a_run_refuses_landings_whose_digest_differs_from_the_identity(tmp_path):
+    """D63: the identity is computed again from the landings read again; a checkpoint of other landings is refused."""
+    from ts_transformer.prior.checkpoint import load_checkpoint, save_checkpoint
+    from ts_transformer.prior.model import Prior, PriorConfig
+
+    directory = tmp_path / "artefact"
+    words, records = prior_artefact(directory, interval_s=2.0)
+    days = fixture_days()
+    landings = {"KXXX": roster_landings(records, ("09", "09L"), days)}
+    model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64))
+    path = tmp_path / "checkpoint.pt"
+    save_checkpoint(path, model, model.state_dict(), identity=artefact_identity(directory, 2.0, landings),
+                    run={"airports": ["KXXX"], "held_out": None}, train_config={})
+    load_checkpoint(path, artefact_identity(directory, 2.0, landings))
+    moved = [{**records[0], "landing_time_utc": records[0]["landing_time_utc"].replace(":00Z", ":04Z")}, *records[1:]]
+    with pytest.raises(ValueError, match=r"\['landings'\] differ"):
+        load_checkpoint(path, artefact_identity(directory, 2.0, {"KXXX": roster_landings(moved, ("09", "09L"), days)}))

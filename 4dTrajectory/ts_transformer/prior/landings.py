@@ -55,11 +55,10 @@ class LandingIndex:
         object.__setattr__(self, "_own", {landing.flight_key: landing for landing in self.landings})
 
     def digest(self) -> str:
-        """The identity of these landings (D21: data by their flights, never by a file's bytes): the sha256 of each
-        landing's flight, runway and time, in order, and the sealed count."""
+        """The identity of these landings (D63; D21: data by their flights, never by the roster's bytes): the sha256 of
+        each landing's flight, runway and time, in time order, and of the number left out on the sealed test days."""
         rows = [[landing.flight_key, landing.runway, landing.time_s] for landing in self.landings]
-        payload = json.dumps({"runways": list(self.runways), "landings": rows, "sealed": self.sealed},
-                             separators=(",", ":"))
+        payload = json.dumps({"landings": rows, "sealed": self.sealed}, separators=(",", ":"))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def counts_before(self, time_s: np.ndarray, *, without: str) -> np.ndarray:
