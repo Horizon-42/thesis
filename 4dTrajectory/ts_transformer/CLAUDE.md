@@ -147,7 +147,7 @@ of the package, not a migration in progress.
 - **A replay finds a checkpoint's manifests by the digest it recorded**
   (`repo_layout.checkpoint_arrival_manifests`): the live harvest or a FROZEN generation
   (`harvest-v5-20260823` holds every checkpoint of 2026-08-24..09-23); never by path (C29).
-- **The instruction sentence artefact** (`instructions/`; v4: reading `instruction-v5`, spec `ts-instruction-spec-v6`,
+- **The instruction sentence artefact** (`instructions/`; v4: reading `instruction-v6`, spec `ts-instruction-spec-v7`,
   sentences `ts-instruction-sentences-v4`; the altitude words are heights above the airport elevation E, D58): one spec sha, written once and refused on a sha mismatch; the LABELLER is
   identified by what it reads, never by its source (design D21): `conformance/` holds a reference sample (its sentences
   on the 2 s rows and on the Δ grid at 4 and 8 s, D49) and a
@@ -362,7 +362,8 @@ its reference tracks and passed record; clean tree) (R12) → `instruction_close
 split at each row interval, their reference and passed record; clean tree; `--check` re-checks) (R50) →
 `executor_replay` (`--row-interval-s`, `--closed-loop`; no criterion is read; select and val from a clean tree) (R12);
 `executor_conformance` checks a spec's reference after an `autopilot/` change (R42); `executor_turns` measures the
-executor's turn against the exact words (A13, R51); `instruction_figures` draws val pages
+executor's turn against the exact words (A13, R51); `final_descent_tolerance` reads the closed loop and its replay of one
+H_final artefact in memory and puts several side by side (A24, D66, R52); `instruction_figures` draws val pages
 (R10). **Archived with instruction-v3** (`archive/two_tier_v3_2026_10/`, its README; their manual entries stay as the
 record): the Training exports and the attitude they draw (R11, R13), `executor_sensitivity` (R12), the prior and its
 post-training (R15–R22, R35, R38), `heading_lead_ablation` (R23), the multi-aircraft runners (R24–R39, R41, R43–R45),

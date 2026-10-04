@@ -40,7 +40,9 @@ measured against that line, for the readouts only; e_h is NaN there (no observed
 is no measurement), the reading says no correction, a correction in force ends, and the rows count as rows without
 correction (D34).
 
-THE CORRECTIONS (`Corrector`), with Y = `closed_loop_lateral_m` and H = `closed_loop_vertical_m` of the spec:
+THE CORRECTIONS (`Corrector`), with Y = `closed_loop_lateral_m` of the spec and H the vertical tolerance in force
+(`vertical_tolerance_m`, D66): `closed_loop_final_vertical_m` (H_final) while "no level-off" is in force — the final
+descent, told by the words — and `closed_loop_vertical_m` elsewhere:
 
 - lateral: when |e_y| > Y and the row says no new observed heading word, the heading class one step (5°)
   from the observed word in force, toward the path; the observed word again when |e_y| < Y / 2 or e_y changes sign —
@@ -49,7 +51,8 @@ THE CORRECTIONS (`Corrector`), with Y = `closed_loop_lateral_m` and H = `closed_
 - vertical: only while a descent class of the observed words is in force — when e_h > H the next steeper descent class,
   when e_h < −H the next shallower (none beyond descent 4 or descent 1); the observed class again when |e_h| < H / 2 or
   e_h changes sign — an overshoot beyond H takes the opposite class in the same row where it exists (D53); a new
-  observed altitude or angle word ends a correction. A level hold and a climb get none. A
+  observed altitude or angle word ends a correction (so a correction never runs across a change of the tolerance: the
+  altitude word changes there). A level hold and a climb get none. A
   level reached by a descent says no angle word (the descent class stays in force, `labeller.vertical`), so a LEVEL
   HOLD is the executor's: the level in force captured (`vertical.Vertical.captured`, the level-off begun) — there no
   correction starts and one in force ends (Claude's reading of §4.9 "during a level hold"; the rounding of the level to
@@ -168,6 +171,14 @@ class ObservedPath:
         return Match(lateral, vertical, row, along, last)
 
 
+def vertical_tolerance_m(words: Words, altitude: np.ndarray | int) -> np.ndarray:
+    """The vertical tolerance in force under each altitude word in force (D66, module docstring): H_final under "no
+    level-off", H under a level. The one definition the corrections and the rule of D50 read."""
+    spec = words.spec
+    return np.where(np.asarray(altitude) == words.altitude_no_level_off, spec.closed_loop_final_vertical_m,
+                    spec.closed_loop_vertical_m)
+
+
 def uncorrected_m(errors: np.ndarray, uncorrectable: np.ndarray) -> float:
     """The largest |error| on the rows where §4.9 makes no correction (D34; 0 where there is none; a NaN error, past the
     end of the observed path, is no error)."""
@@ -201,7 +212,8 @@ def outside_rows(sentence: ClosedLoopSentence, observed: np.ndarray, first_row: 
                  courses_deg: Sequence[float]) -> dict[str, np.ndarray]:
     """Read from the stored sentence and its open-loop reading (``observed``, from its row 0; the sentence starts at its
     2 s row ``first_row``): the rows where §4.9 permits a correction, those where the flown path is outside the tolerance
-    (|e_y| > Y, |e_h| > H; their share is a reading of the ablation, D34), and of those the rows after which no
+    (|e_y| > Y, |e_h| > the vertical tolerance in force at the row, D66; their share is a reading of the ablation,
+    D34), and of those the rows after which no
     correction TOWARD the path is in force (the rule of D50, vocabulary §12.2): the heading word in force says a track on the
     path's side of the observed word's (said in the frame of the word in force), the angle in force is steeper than the observed class when too high and
     shallower when too low. By column, ``lateral`` and ``vertical``, each ``[3, M]``."""
@@ -220,7 +232,7 @@ def outside_rows(sentence: ClosedLoopSentence, observed: np.ndarray, first_row: 
     toward = (np.sign(np.round(wrap180(said - plain), 9)) == -np.sign(sentence.lateral_m),
               np.sign(in_force(sentence.grid)[:, ANGLE].astype(int) - in_force(observed)[seen, ANGLE].astype(int))
               == np.sign(np.nan_to_num(sentence.vertical_m)))
-    tolerances = (words.spec.closed_loop_lateral_m, words.spec.closed_loop_vertical_m)
+    tolerances = (words.spec.closed_loop_lateral_m, vertical_tolerance_m(words, in_force(sentence.grid)[:, ALTITUDE]))
     out = {}
     for k, (name, errors) in enumerate((("lateral", sentence.lateral_m), ("vertical", sentence.vertical_m))):
         correctable = ~sentence.uncorrectable[:, k]
@@ -263,7 +275,7 @@ class Corrector:
         self.heading_row, self.track = heading_row[first_row:], track[first_row:]
         self.start, self.every, self.words = start, every, words
         spec = words.spec
-        self.lateral_m, self.vertical_m = spec.closed_loop_lateral_m, spec.closed_loop_vertical_m
+        self.lateral_m = spec.closed_loop_lateral_m
         self.next = start        # the first 2 s row not said yet
         self.rows_said = 0
         self.turn = 0            # a heading correction in force: the sign of e_y it answers (0: none)
@@ -302,16 +314,17 @@ class Corrector:
             elif not self.turn and abs(lateral_m) > self.lateral_m:
                 self.turn = _sign(lateral_m)
             angle = int(held[ANGLE])
+            tolerance = float(vertical_tolerance_m(self.words, int(held[ALTITUDE])))     # in force at the row (D66)
             ends = observed[ALTITUDE] != UNCHANGED or observed[ANGLE] != UNCHANGED or holding or past_end
             self.uncorrectable[1] = (ends or not self.words.is_descent(angle)
-                                     or (abs(vertical_m) > self.vertical_m
+                                     or (abs(vertical_m) > tolerance
                                          and not self.words.is_descent(angle + _sign(vertical_m))))
             if ends:
                 self.slope = 0
-            elif self.slope and (abs(vertical_m) < self.vertical_m / 2 or _sign(vertical_m) != self.slope):
-                self.slope = (_sign(vertical_m) if abs(vertical_m) > self.vertical_m      # an overshoot (D53)
+            elif self.slope and (abs(vertical_m) < tolerance / 2 or _sign(vertical_m) != self.slope):
+                self.slope = (_sign(vertical_m) if abs(vertical_m) > tolerance      # an overshoot (D53)
                               and self.words.is_descent(angle + _sign(vertical_m)) else 0)
-            elif (not self.slope and self.words.is_descent(angle) and abs(vertical_m) > self.vertical_m
+            elif (not self.slope and self.words.is_descent(angle) and abs(vertical_m) > tolerance
                   and self.words.is_descent(angle + _sign(vertical_m))):
                 self.slope = _sign(vertical_m)
             if self.slope:                                 # too high: the next steeper class

@@ -1465,3 +1465,26 @@ the fixture's track leads its positions by 1 s. Information for the user's decis
     python run_ts.py executor_turns --split train \
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> \
         --executor 4dTrajectory/outputs/POOLED/executor/<name> --out <new dir>
+
+### R52 · `run_ts.py final_descent_tolerance` — the closed loop's vertical tolerance in the final descent, H_final, measured for the user's choice (vocabulary §12.1 A24, D66)
+
+2026-10-04 (vocabulary §4.9, D34, D38, D55, D66, §12.1 A24; `experiments/final_descent_tolerance.py`). `final_descent_tolerance
+--instructions <artefact> --executor <spec dir> --split train|select [--per-airport N] [--seed 1337] --row-interval-s 2 4 8
+[--chunk 2048] [--device cpu] --out <new dir>` (select from a clean tree; val is refused): one artefact built as the formal
+one in everything but the spec's `closed_loop_final_vertical_m`, with its executor spec. The flights of the split (train:
+`--per-airport` of each airport, D34's seeded sample; select: every labelled flight; own dynamics or a stand-in's), each read
+in closed loop at each Δ IN MEMORY (`closed_loop.read_chunked`, nothing written into the artefact), its sentence flown again
+as the replay flies it (every flight must fly its stored states again) and judged (`judge.outcome_of`). `readout.json`
+(`ts-final-descent-tolerance-readout-v1`): per Δ the split's closed-loop numbers (`instruction_closed_loop.summarise`, D34
+readings 1–3 with the tolerance in force at each row) and, per airport and pooled, the outcomes and landed share, the
+`unstable_at_minimums` flights by why (no DA point / high / low / lateral only), the height above the glidepath at the DA
+point p10 / p50 / p90, the DA check of the OBSERVED track (the judge's `decision_check` on the raw observed rows of the
+landing approach, from its last runway word, on its labelled runway — check A15–A22 §7.3's reading, which it reproduces:
+select 97.97 %, −6.4 / +1.0 / +8.7 m) against the replay's, and the angle correction words per final descent (runs of rows
+with "no level-off" in force) and per flight; every flight's row. `--table DIR ... --out <new dir>` puts readouts side by
+side (refused unless their specs differ only in H_final and a split's readouts drew the same flights at the same Δ):
+`table.json` (`ts-final-descent-tolerance-table-v1`) and `table.md`. No criterion is read (D7): the user chooses (D55).
+
+    python run_ts.py final_descent_tolerance --split train --per-airport 400 --row-interval-s 2 4 8 \
+        --instructions <scratch artefact at one H_final> --executor <its executor spec> --out <new dir>
+    python run_ts.py final_descent_tolerance --table <readout dir> ... --out <new dir>

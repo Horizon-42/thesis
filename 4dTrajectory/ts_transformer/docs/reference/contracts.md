@@ -406,11 +406,12 @@ nothing reads the CIFP after the first runner — and every runway end the harve
 E is `reference.elevation_m`), `spec.json` + `measurements.json`,
 `sentences_{train,select,val}.npz` + `labels.json` + `readout.{json,md}`, `conformance/` (below) and, once an executor spec
 flies them, `closed_loop/` (C38). Every file code reads back carries its format's name (`SIGNALS_SCHEMA`,
-`CANDIDATES_SCHEMA`, `SPEC_SCHEMA` `ts-instruction-spec-v6`, `SENTENCES_SCHEMA` `ts-instruction-sentences-v4`) and is
+`CANDIDATES_SCHEMA`, `SPEC_SCHEMA` `ts-instruction-spec-v7`, `SENTENCES_SCHEMA` `ts-instruction-sentences-v4`) and is
 refused under any other; **a name changes with its file's shape**, in the same change (2026-09-24, the user's rule). The
 spec's sha covers every word, grid, class, tolerance and the reading rule (`instructions.spec.READING_RULE`,
-`instruction-v5`: the level words above E, read from the smoothed MSL height minus E, E = `candidates.json`
-`reference.elevation_m`, `AirportGeometry.elevation_m`); `load_sentences` refuses a sentences file read with another sha, `VocabularySpec.from_dict` refuses a
+`instruction-v6`: the level words above E, read from the smoothed MSL height minus E, E = `candidates.json`
+`reference.elevation_m`, `AirportGeometry.elevation_m`; since A24 (D66) the closed loop's vertical tolerance in the final
+descent, `closed_loop_final_vertical_m`, chosen by the user, `instruction_spec --closed-loop-final-vertical-m`); `load_sentences` refuses a sentences file read with another sha, `VocabularySpec.from_dict` refuses a
 missing or extra key and another reading rule — no compatibility.
 
 **The labeller is identified by what it reads, never by its source** (design D21, 2026-10-03; until v3 `spec.json`
@@ -634,8 +635,10 @@ last segment's line, there is no e_h, no correction is said (one in force ends: 
 rows without correction. The flight runs until
 the executor is done or reaches the replay's time limit (`replay.time_limits_s`: the remaining observed time from the
 sentence's first row × 1.5, plus 900 s a go-around), so a sentence has the flown rows and its replay the same limit. It adds one-class heading
-corrections beyond 30 m and one-class angle corrections beyond 15 m under a descent class (the spec's
-`closed_loop_lateral_m` / `closed_loop_vertical_m`), ending under half of it, at a sign change or at a new observed word;
+corrections beyond 30 m and one-class angle corrections beyond the vertical tolerance in force under a descent class (the
+spec's `closed_loop_lateral_m`; vertically `closed_loop_final_vertical_m`, H_final, while "no level-off" is in force and
+`closed_loop_vertical_m`, 15 m, elsewhere — one definition, `closed_loop.vertical_tolerance_m`, which the rule of D50 and
+the readings of D34 read at each row, D66), ending under half of it, at a sign change or at a new observed word;
 a level hold is the executor's capture of the level in force (Claude's reading). `conformance/` holds a reference sample
 (train, seed 1337, 10 flights an airport, every row interval written) and a `passed-<code12>.json` per code (the logic of
 the executor's files and the labeller's) that reads it again with the same words, flags and refusals and states within

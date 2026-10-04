@@ -50,6 +50,18 @@ def test_the_sha_is_stable_and_moves_with_any_field():
     assert spec(heading_tolerance_deg=5.0).sha256 != a.sha256
 
 
+def test_the_final_descent_tolerance_is_at_most_the_vertical_tolerance():
+    """D66: H_final, the closed loop's vertical tolerance while "no level-off" is in force, is the smaller one; equal to H
+    is the reading before D66."""
+    assert (instruction_spec(closed_loop_final_vertical_m=15.0).closed_loop_final_vertical_m
+            == instruction_spec().closed_loop_vertical_m == 15.0)
+    assert instruction_spec(closed_loop_final_vertical_m=5.0).closed_loop_final_vertical_m == 5.0
+    with pytest.raises(ValueError, match="the final descent's tolerance is the smaller one"):
+        instruction_spec(closed_loop_final_vertical_m=15.5)
+    with pytest.raises(ValueError, match="closed_loop_final_vertical_m must be positive"):
+        instruction_spec(closed_loop_final_vertical_m=0.0)
+
+
 def test_from_dict_refuses_a_missing_or_an_extra_key_and_another_reading_rule():
     data = spec().to_dict()
     with pytest.raises(ValueError, match="missing"):
@@ -650,17 +662,25 @@ def test_the_spec_takes_the_chosen_row_of_the_rounding_candidates_and_refuses_an
         measure.candidate_values(candidates, "0.2")
 
 
-def test_the_spec_runner_measures_only_with_a_candidate_and_a_grid_and_keeps_a_spec_only_without(tmp_path, capsys):
-    """D15, D56, D58: measuring needs the user's choices of the angles and the grid; --spec-from keeps a spec and takes
-    neither — refused before any file is read; a name that is no row is refused."""
+def test_the_spec_runner_measures_only_with_a_candidate_a_grid_and_h_final_and_keeps_a_spec_only_without(tmp_path, capsys):
+    """D15, D56, D58, D66: measuring needs the user's choices of the angles, the grid and H_final; --spec-from keeps a
+    spec and takes none — refused before any file is read; a name that is no row is refused."""
     from ts_transformer.experiments import instruction_spec
 
-    for argv in ([], ["--candidate", "0.25"], ["--grid", "fitted"],
-                 ["--candidate", "0.25", "--grid", "d22", "--spec-from", str(tmp_path / "other")]):
+    h_final = ["--closed-loop-final-vertical-m", "10"]
+    for argv in ([], ["--candidate", "0.25"], ["--grid", "fitted"], ["--candidate", "0.25", "--grid", "d22"], h_final,
+                 ["--candidate", "0.25", *h_final],
+                 ["--candidate", "0.25", "--grid", "d22", *h_final, "--spec-from", str(tmp_path / "other")],
+                 [*h_final, "--spec-from", str(tmp_path / "other")]):
         with pytest.raises(SystemExit):
             instruction_spec.main(["--dir", str(tmp_path / "new"), *argv])
-        assert "measuring needs --candidate and --grid" in capsys.readouterr().err
-    for argv in (["--candidate", "0.2", "--grid", "d22"], ["--candidate", "0.25", "--grid", "d21"]):
+        assert "measuring needs --candidate, --grid and --closed-loop-final-vertical-m" in capsys.readouterr().err
+    for value in ("15.5", "0", "nan"):                    # the spec's own rule, before any file is read
+        with pytest.raises(SystemExit):
+            instruction_spec.main(["--dir", str(tmp_path / "new"), "--candidate", "0.25", "--grid", "d22",
+                                   "--closed-loop-final-vertical-m", value])
+        assert "--closed-loop-final-vertical-m:" in capsys.readouterr().err
+    for argv in (["--candidate", "0.2", "--grid", "d22", *h_final], ["--candidate", "0.25", "--grid", "d21", *h_final]):
         with pytest.raises(SystemExit):
             instruction_spec.main(["--dir", str(tmp_path / "new"), *argv])
         assert "invalid choice" in capsys.readouterr().err
