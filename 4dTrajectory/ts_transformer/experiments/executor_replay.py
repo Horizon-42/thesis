@@ -61,7 +61,9 @@ from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.data.lateral_eligibility import default_evaluation_report_path
 from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
 from ts_transformer.inference.forecast import Forecast
-from ts_transformer.instructions.artefact import SPLITS, closed_loop_path, load_closed_loop
+from ts_transformer.instructions.artefact import (
+    SPLITS, ClosedLoopSentence, closed_loop_path, closed_loop_sentences, load_closed_loop,
+)
 from ts_transformer.instructions.labeller.interval import in_force
 from ts_transformer.instructions.words import COLUMNS, SPEED, UNCHANGED, Words
 from ts_transformer.instructions.readout import STRATA, stratum
@@ -285,7 +287,7 @@ def along_columns(words: Words) -> Callable[[replay.Batch, Flown, list[Verdict]]
     return columns
 
 
-def closed_loop_columns(stored: dict[int, closed_loop.Stored], step_s: float
+def closed_loop_columns(stored: dict[int, ClosedLoopSentence], step_s: float
                         ) -> Callable[[replay.Batch, Flown, list[Verdict]], list[dict[str, Any]]]:
     """The rows' closed-loop columns: each flight's largest |e_y| and |e_h| and its correction words per column — after
     checking that it flew its stored states again (each 2 s row's position and height within `STATE_BOUND_M`, D51)."""
@@ -293,10 +295,11 @@ def closed_loop_columns(stored: dict[int, closed_loop.Stored], step_s: float
         out = []
         for j, index in enumerate(part.indices):
             sentence = stored[index]
-            rows = np.arange(len(sentence.states)) * int(round(step_s / flown.cycle_s))
+            flown_states = sentence.flown_states
+            rows = np.arange(len(flown_states)) * int(round(step_s / flown.cycle_s))
             track = flown_track(flown.states[j, : rows[-1] + 1].cpu().numpy(), part.geometries[j])
             again = np.column_stack([track["e"][rows], track["n"][rows], track["height"][rows]])
-            apart = float(np.abs(again - sentence.states[:, :3]).max())
+            apart = float(np.abs(again - flown_states[:, :3]).max())
             if apart > STATE_BOUND_M:
                 raise ValueError(f"{part.signals[j].dataset_id}: flown {apart:.3g} m from its closed-loop states")
             out.append({"largest_lateral_m": closed_loop.largest_m(sentence.lateral_m),
@@ -352,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
         if str(data["executor_params_sha256"]) != params_sha256(params):
             parser.error(f"the closed-loop sentences were flown by executor parameters "
                          f"{str(data['executor_params_sha256'])[:12]}, {executor} holds {params_sha256(params)[:12]}")
-        stored = closed_loop.stored_sentences(data)
+        stored = closed_loop_sentences(data)
         batch, missing = closed_loop.replay_batch(batch, stored, words)
         batch.drawn["without_a_closed_loop_sentence"] = missing
         print(f"{len(batch.sentences)} closed-loop sentences flown from the first predicted step, {missing} flights "

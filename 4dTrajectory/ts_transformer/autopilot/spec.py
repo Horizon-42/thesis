@@ -38,10 +38,8 @@ from ts_transformer.io_utils import logic_sha256, write_json_atomic
 EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v8"
 PACKAGE = Path(__file__).resolve().parent
 #: Imported by the executor but not part of what decides a flown track or a value: the instruction language
-#: (its own hash, the labeller's, is recorded in the spec and checked at replay), the path and file helpers, and the
-#: evaluation CLI (it only names the runway data's files; a replay records the crossing heights it flew to).
-UNHASHED_IMPORTS = ("ts_transformer.instructions", "ts_transformer.io_utils", "ts_transformer.repo_layout",
-                    "evaluation.cli")
+#: (its own hash, the labeller's, is recorded in the spec and checked at replay) and the path and file helpers.
+UNHASHED_IMPORTS = ("ts_transformer.instructions", "ts_transformer.io_utils", "ts_transformer.repo_layout")
 #: What the executor's integration reaches beyond its direct imports — the plant's rollout down to the right-hand side
 #: (`Plant.step` → `outputs.dynamics.rollout` → `backends` → `aerodynamic_model`'s scaled transport-chart RK4) — named
 #: whoever imports them: the code a passed record names must hold every module whose change moves a flown track (the

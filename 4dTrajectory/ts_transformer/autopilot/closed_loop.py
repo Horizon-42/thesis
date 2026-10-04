@@ -66,7 +66,7 @@ sentence's first row to its last said row, the Δ rows marked (D51) — observed
 from it (position in the airport frame, MSL height, track, ground speed, vertical rate; a flown 2 s row between two Δ
 rows is the executor's state at the end of its cycle there) — e_y, e_h at each said row, the matched point's observed time and the last 2 s row whose
 observed words have been said at each row, and whether the flight was done at its time limit. Flown
-again from the same state on its own clock (the replay: `replay_batch`, the time clock, under the same time limit), a
+again from the same state on its own rows (the replay: `replay_batch`, under the same time limit), a
 closed-loop sentence gives the same states on every 2 s row.
 """
 
@@ -93,7 +93,7 @@ from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.replay import Batch, subset
 from ts_transformer.autopilot.sentence import Spoken
 from ts_transformer.autopilot.spec import executor_source_files, params_sha256
-from ts_transformer.instructions.artefact import CLOSED_LOOP_DIRECTORY
+from ts_transformer.instructions.artefact import CLOSED_LOOP_DIRECTORY, STATE_COLUMNS, ClosedLoopSentence
 from ts_transformer.instructions.conformance import labeller_code_files
 from ts_transformer.instructions.grammar import InForce, Ungrammatical, apply
 from ts_transformer.instructions.labeller.interval import (
@@ -108,38 +108,9 @@ from ts_transformer.instructions.words import (
 from ts_transformer.io_utils import file_sha256, logic_sha256, utc_now, write_json_atomic
 from ts_transformer.repo_layout import git_state
 
-#: The columns of a row's state: the airport frame's east and north, MSL height, compass track, ground speed, vertical
-#: rate (SI).
-STATE_COLUMNS = ("e_m", "n_m", "height_m", "track_deg", "ground_speed_mps", "vertical_rate_mps")
-
-
 def start_row(row_interval_s: float) -> int:
     """The first predicted step's Δ row: the prior's observation (16 s) after the sentence's first Δ row."""
     return int(round(OBSERVATION_S / row_interval_s))
-
-
-@dataclass(frozen=True)
-class ClosedLoopSentence:
-    """One flight's closed-loop sentence on its row interval (module docstring)."""
-
-    grid: np.ndarray            # [M, 5] int16: the words said from the first predicted step (row 0: every column)
-    correction: np.ndarray      # [M, 5] bool: a word the closed-loop reading added
-    #: [(start + M − 1)·every + 1, 6] `STATE_COLUMNS` on every 2 s row from the sentence's first to its last said row
-    #: (D51)
-    states: np.ndarray
-    on_interval: np.ndarray     # [rows of ``states``] bool: the Δ rows among them (`on_interval_rows`)
-    lateral_m: np.ndarray       # [M] e_y at each said row
-    vertical_m: np.ndarray      # [M] e_h at each said row
-    #: [M, 2] bool: the rows where §4.9 makes no heading / angle correction (`Corrector.row`; the readings of D34)
-    uncorrectable: np.ndarray
-    #: [M] the last 2 s row of the open-loop reading, from the sentence's first row, whose words have been said at each
-    #: said row (D45: the last whose time is less than Δ/2 after the matched point's)
-    observed_row: np.ndarray
-    #: [M] the matched point's observed time at each said row, in 2 s rows from the sentence's first row (the first
-    #: predicted step: its own observed time)
-    matched_row: np.ndarray
-    start: int                  # the first predicted step's Δ row (`start_row`)
-    timed_out: bool             # the executor was done in the cycle that reached its time limit
 
 
 class Match(NamedTuple):
@@ -516,7 +487,8 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
         if out[j] is not None:
             continue
         lateral, vertical = (np.array([e[c] for e in errors[f]]) for c in (0, 1))
-        out[j] = ClosedLoopSentence(grid=np.array(said[f], dtype=np.int16), correction=np.array(added[f], dtype=bool),
+        out[j] = ClosedLoopSentence(first_row=batch.sentences[j].first_row, grid=np.array(said[f], dtype=np.int16),
+                                    correction=np.array(added[f], dtype=bool),
                                     states=np.array(states[f], dtype=np.float64),
                                     on_interval=on_interval_rows(len(states[f]), every), lateral_m=lateral,
                                     vertical_m=vertical, uncorrectable=np.array(blocked[f], dtype=bool),
@@ -717,41 +689,9 @@ def require_conforming_closed_loop(instructions: Path) -> None:
         raise ValueError(f"{path} is not a passed record of this code against {instructions.name}'s reference: {command}")
 
 
-@dataclass(frozen=True)
-class Stored:
-    """One flight's closed-loop sentence as the artefact holds it (`instructions.artefact.load_closed_loop`)."""
-
-    grid: np.ndarray
-    correction: np.ndarray
-    first_row: int              # the 2 s row of its sentence's first row on the interval's grid
-    states: np.ndarray          # the flown 2 s rows only, from the first predicted step (D51)
-    lateral_m: np.ndarray
-    vertical_m: np.ndarray
-    uncorrectable: np.ndarray
-    observed_row: np.ndarray
-    matched_row: np.ndarray
-
-
-def stored_sentences(data: dict[str, np.ndarray]) -> dict[int, Stored]:
-    """A loaded closed-loop file's sentences by their signal index."""
-    start = int(data["start_row"])
-    out = {}
-    for k, index in enumerate(data["signal_index"].tolist()):
-        rows = slice(int(data["offsets"][k]), int(data["offsets"][k + 1]))
-        rows_of = slice(int(data["state_offsets"][k]), int(data["state_offsets"][k + 1]))
-        first = int(np.flatnonzero(data["on_interval"][rows_of])[start])     # the first predicted step's 2 s row
-        states = slice(rows_of.start + first, rows_of.stop)
-        out[index] = Stored(grid=data["words"][rows], correction=data["correction"][rows],
-                            first_row=int(data["first_row"][k]), states=data["states"][states],
-                            lateral_m=data["lateral_m"][rows], vertical_m=data["vertical_m"][rows],
-                            uncorrectable=data["uncorrectable"][rows], observed_row=data["observed_row"][rows],
-                            matched_row=data["matched_row"][rows])
-    return out
-
-
-def replay_batch(batch: Batch, stored: dict[int, Stored], words: Words) -> tuple[Batch, int]:
-    """``batch``'s flights that have a closed-loop sentence in ``stored``, each to be flown on it from its first
-    predicted step (its sentence's first row and its observed flight moved there), and how many had none."""
+def replay_batch(batch: Batch, stored: dict[int, ClosedLoopSentence], words: Words) -> tuple[Batch, int]:
+    """``batch``'s flights that have a closed-loop sentence in ``stored`` (`artefact.closed_loop_sentences`), each to
+    be flown on it from its first predicted step (its sentence's first row and its observed flight moved there), and how many had none."""
     every, start = interval_rows(batch.row_interval_s, words.spec.step_s), start_row(batch.row_interval_s)
     kept = [j for j, index in enumerate(batch.indices) if index in stored]
     out = subset(batch, kept)

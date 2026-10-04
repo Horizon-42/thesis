@@ -28,7 +28,8 @@ from ts_transformer.instructions.words import (
     wrap180 as np_wrap180,
 )
 from ts_transformer.tests.support import (
-    fly_legs, instruction_airport, instruction_flight, instruction_spec as spec, raised_airport,
+    TEST_DA_M, TEST_GLIDEPATH_DEG, TEST_TCH_M, TEST_VERTICAL_PATH, fly_legs, instruction_airport, instruction_flight,
+    instruction_spec as spec, raised_airport, with_vertical_path,
 )
 
 F64 = torch.float64
@@ -276,7 +277,8 @@ def _two_runways():
             {"ident": "12", "threshold_e_m": 500.0, "threshold_n_m": -3000.0, "course_deg": 120.3}]
     return AirportGeometry.from_dict({
         "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": 100.0},
-        "candidates": [{**end, "elevation_m": 100.0, "length_m": 3000.0} for end in ends], "runway_ends": ends})
+        "candidates": [{**end, "elevation_m": 100.0, "length_m": 3000.0, "vertical_path": TEST_VERTICAL_PATH}
+                       for end in ends], "runway_ends": ends})
 
 
 def test_a_heading_word_is_converted_with_the_course_of_r_when_heard_and_a_runway_change_does_not_turn():
@@ -305,17 +307,6 @@ def test_a_heading_word_is_converted_with_the_course_of_r_when_heard_and_a_runwa
 
 
 # ---- whole flights
-#: The test airport's runways' published TCH, glidepath and decision altitude (the fleet's DAs above the threshold
-#: run 61–129 m).
-TEST_TCH_M, TEST_GLIDEPATH_DEG, TEST_DA_M = 15.0, 3.0, 60.0
-
-
-def vertical_paths(geometry):
-    from ts_transformer.autopilot.runway_data import VerticalPath
-
-    return tuple(VerticalPath(TEST_TCH_M, TEST_GLIDEPATH_DEG, TEST_DA_M) for _ in geometry.candidates)
-
-
 #: The downwind flight's runway (`_downwind`): its final flown on its open-loop words crosses about 40 m up — the vertical
 #: drift the closed-loop reading corrects (vocabulary §9.6, D32), which the DA check's ±22 m (D38) does not let pass at a
 #: 15 m TCH. Its published glidepath is put where these words fly, so the tests that fly it read the judge's landing,
@@ -323,10 +314,11 @@ def vertical_paths(geometry):
 DOWNWIND_TCH_M = 40.0
 
 
-def downwind_paths(geometry):
-    from ts_transformer.autopilot.runway_data import VerticalPath
+def downwind_airport(geometry):
+    """``geometry`` with the downwind flight's published glidepath (`DOWNWIND_TCH_M`)."""
+    from ts_transformer.instructions.airport import VerticalPath
 
-    return tuple(VerticalPath(DOWNWIND_TCH_M, TEST_GLIDEPATH_DEG, TEST_DA_M) for _ in geometry.candidates)
+    return with_vertical_path(geometry, VerticalPath(DOWNWIND_TCH_M, TEST_GLIDEPATH_DEG, TEST_DA_M))
 
 
 def _physics(signals, geometry, approach_ias=None):
@@ -381,7 +373,7 @@ def _fly_sentence(signals, grid=None, params=None, approach_ias=None, reading=No
     flown = fly(inputs, Sentences([grid], words, step_s=one.step_s, device=CPU), runways, charts,
                 approach, params, words, time_limit_s=torch.tensor([rows * one.step_s * params.timeout_factor], dtype=F64),
                 reserve_s=GO_AROUND_EXTRA_S * int((grid[:, RUNWAY] == RUNWAY_GO_AROUND).sum()))
-    verdict = judge(flown, 0, geometry, downwind_paths(geometry), _said(grid, words, geometry), one.step_s, signals, one,
+    verdict = judge(flown, 0, downwind_airport(geometry), _said(grid, words, geometry), one.step_s, signals, one,
                     words)
     return flown, verdict, reading
 
@@ -424,7 +416,7 @@ def test_a_downwind_base_final_sentence_is_flown_onto_the_final_by_its_words_and
     # against the runway's real 15 m TCH the open-loop drift fails the DA check (D38): the closed loop's to correct
     from ts_transformer.autopilot.judge import outcome_of
 
-    real = outcome_of(flown, 0, instruction_airport(), vertical_paths(instruction_airport()), spec())
+    real = outcome_of(flown, 0, instruction_airport(), spec())
     assert real.outcome == "unstable_at_minimums" and real.crossing["decision"]["above_glidepath_m"] > 22.0
     assert set(MODES) == {"go_around", "level_captured"}
     # the 5 m/s steps at the test spec's a_max (2.5 m/s²) slow faster than an A320's clean drag and thrust floor allow:
@@ -540,7 +532,7 @@ def test_the_outcome_alone_is_the_verdict_s_first_layer():
     signals, _ = _downwind()
     flown, verdict, _ = _fly_sentence(signals)
     geometry = instruction_airport()
-    ended = outcome_of(flown, 0, geometry, downwind_paths(geometry), spec())
+    ended = outcome_of(flown, 0, downwind_airport(geometry), spec())
     assert (ended.outcome, ended.end_row, ended.crossing, ended.limits) == (
         verdict.outcome, verdict.end_row, verdict.crossing, verdict.limits)
 
@@ -757,7 +749,8 @@ def _parallels():
             {"ident": "27L", "threshold_e_m": 3000.0, "threshold_n_m": 0.0, "course_deg": 270.0}]
     return AirportGeometry.from_dict({
         "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": 100.0},
-        "candidates": [{**end, "elevation_m": 100.0, "length_m": 3000.0} for end in ends], "runway_ends": ends})
+        "candidates": [{**end, "elevation_m": 100.0, "length_m": 3000.0, "vertical_path": TEST_VERTICAL_PATH}
+                       for end in ends], "runway_ends": ends})
 
 
 def _judged(n_m, height_m, *, runway=0, go_around=False, track_deg=90.0, e_from=-3000.0, e_to=200.0,
@@ -773,7 +766,7 @@ def _judged(n_m, height_m, *, runway=0, go_around=False, track_deg=90.0, e_from=
     track = {"e": e, "n": np.full(len(e), n_m), "height": height, "track": np.full(len(e), track_deg)}
     rows = len(e)
     return _outcome(np.ones((rows, 7)), track, np.full(rows - 1, runway), np.full(rows - 1, go_around),
-                    np.zeros(rows, dtype=bool), geometry, vertical_paths(geometry), spec())
+                    np.zeros(rows, dtype=bool), geometry, spec())
 
 
 def test_each_outcome_on_a_hand_built_track():
@@ -842,11 +835,11 @@ def test_the_decision_altitude_check_passes_and_fails():
     for below, ok in ((21.0, True), (23.0, False)):
         relative = relative_to_runway(e, np.full(len(e), -20.0), np.full(len(e), 90.0), height - below,
                                       geometry.candidates[0])
-        checked = decision_check(relative, range(1, len(e)), geometry, 0, vertical_paths(geometry)[0], spec())
+        checked = decision_check(relative, range(1, len(e)), geometry, 0, spec())
         assert checked["vertical_ok"] is ok and checked["above_glidepath_m"] == pytest.approx(-below, abs=0.2)
     for offset, inside in ((cone - 5.0, True), (cone + 5.0, False)):
         relative = relative_to_runway(e, np.full(len(e), -offset), np.full(len(e), 90.0), height, geometry.candidates[0])
-        checked = decision_check(relative, range(1, len(e)), geometry, 0, vertical_paths(geometry)[0], spec())
+        checked = decision_check(relative, range(1, len(e)), geometry, 0, spec())
         assert checked["lateral_ok"] is inside and checked["vertical_ok"]
 
 
@@ -866,7 +859,7 @@ def test_two_events_at_one_row_follow_the_tables_order():
     runway = flown.runway[0, :last].numpy()
     go_around = flown.modes["go_around"][0, :last].numpy()
     stalled = np.zeros(len(states), dtype=bool)
-    args = (geometry, downwind_paths(geometry), one)
+    args = (downwind_airport(geometry), one)
     assert _outcome(states, track, runway, go_around, stalled, *args)[:2] == ("landed", last)
     stalled[last] = True
     assert _outcome(states, track, runway, go_around, stalled, *args)[:2] == ("dynamics_failure", last)
@@ -876,7 +869,8 @@ def test_two_events_at_one_row_follow_the_tables_order():
     ends = [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0},
             {"ident": "08", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 80.0}]
     twin = AirportGeometry.from_dict({"code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": 100.0},
-                                      "candidates": [{**end, "elevation_m": 100.0, "length_m": 3000.0} for end in ends],
+                                      "candidates": [{**end, "elevation_m": 100.0, "length_m": 3000.0, "vertical_path": TEST_VERTICAL_PATH}
+                       for end in ends],
                                       "runway_ends": ends})
     kind, _, crossing = _judged(-20.0, 15.0, glide=True, geometry=twin)
     assert kind == "landed" and crossing["runway_index"] == 0
@@ -900,7 +894,7 @@ def test_a_dynamics_failure_judges_its_words_only_on_the_states_before_it():
     states = flown.states.clone()
     states[0, failed_at:] = float("nan")
     broken = replace(flown, states=states, done_cycle=torch.tensor([failed_at - 1]))
-    verdict = judge(broken, 0, geometry, downwind_paths(geometry), _said(reading.words, words, geometry), one.step_s,
+    verdict = judge(broken, 0, downwind_airport(geometry), _said(reading.words, words, geometry), one.step_s,
                     signals, one, words)
     assert verdict.outcome == "dynamics_failure" and verdict.end_row == failed_at
     judged = [h for h in verdict.words["heading"] if h["rows"] > 0]
@@ -1180,31 +1174,42 @@ def test_an_executor_spec_is_opened_only_against_its_own_vocabulary_and_a_confor
         replay.open_executor(tmp_path / "spec", tmp_path / "artefact")
 
 
-def test_each_candidate_reads_its_runways_published_vertical_path_and_decision_altitude(monkeypatch):
-    from ts_transformer.autopilot import runway_data
-    from ts_transformer.autopilot.runway_data import VerticalPath
+def test_the_decision_altitude_check_reads_candidates_json_as_the_harvest_publishes_it(tmp_path):
+    """D61: each candidate's vertical path, written into `candidates.json` from the harvest's runway data (the FAA CIFP
+    and the plate's minima, KRDU), is the harvest's TCH, glidepath angle and DA, and the DA check on fixed flights gives
+    the same result from the file as from the geometry built from the harvest."""
+    from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG
+    from trajectory_data_process.harvest.airports import load_airport
+    from ts_transformer.autopilot.judge import decision_check
+    from ts_transformer.instructions.airport import airport_geometry, relative_to_runway
+    from ts_transformer.instructions.artefact import load_candidates, write_candidates
 
-    geometry = _two_runways()
-    idents = [c.ident for c in geometry.candidates]
-    published = {ident: (15.0 + k, 3.0 + 0.5 * k, 60.0 + 10 * k) for k, ident in enumerate(idents)}
-
-    def runways(guided=True):
-        return [SimpleNamespace(ident=ident, threshold_crossing_height_m=tch, published_glidepath_deg=glidepath,
-                                decision_height_above_threshold_m=da,
-                                published_minima=SimpleNamespace(vertically_guided=guided, note="no plate"))
-                for ident, (tch, glidepath, da) in reversed(published.items())]
-
-    monkeypatch.setattr(runway_data, "load_airport", lambda code, **_: SimpleNamespace(runways=runways()))
-    paths = tuple(VerticalPath(*published[ident]) for ident in idents)
-    assert runway_data.vertical_paths(geometry, runways()) == paths
-    assert runway_data.published_vertical_paths(geometry) == paths
-    with pytest.raises(ValueError, match="publishes no decision altitude"):
-        runway_data.vertical_paths(geometry, runways(guided=False))
-    with pytest.raises(ValueError, match="not among the harvest's runways"):
-        runway_data.vertical_paths(geometry, [r for r in runways() if r.ident != idents[0]])
-    published[idents[0]] = (None, 3.0, 60.0)
-    with pytest.raises(ValueError, match="publishes no threshold crossing height or glidepath"):
-        runway_data.vertical_paths(geometry, runways())
+    runways = tuple(load_airport("KRDU", config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways)
+    guided = [r for r in runways if r.threshold_crossing_height_m is not None and r.published_glidepath_deg is not None
+              and r.published_minima.vertically_guided]
+    targets = {r.ident: {"lat": r.lat, "lon": r.lon, "elevation_msl_m": 120.0, "course_deg": r.course_deg} for r in guided}
+    built = airport_geometry("KRDU", targets, runways)
+    write_candidates(tmp_path, {"KRDU": built})
+    stored = load_candidates(tmp_path)["KRDU"]
+    by_ident = {r.ident: r for r in guided}
+    for candidate in stored.candidates:
+        runway, path = by_ident[candidate.ident], candidate.vertical_path
+        assert (path.crossing_height_m, path.glidepath_deg, path.decision_height_m) == (
+            runway.threshold_crossing_height_m, runway.published_glidepath_deg, runway.decision_height_above_threshold_m)
+    checked = 0
+    for index, candidate in enumerate(stored.candidates):
+        course = math.radians(candidate.course_deg)
+        along = np.arange(-6000.0, 1.0, 70.0)                              # a straight-in on the course, 3°, to it
+        e = candidate.threshold_e_m + along * math.sin(course)
+        n = candidate.threshold_n_m + along * math.cos(course)
+        path = candidate.vertical_path
+        height = candidate.elevation_m + path.crossing_height_m + np.maximum(-along, 0.0) * math.tan(math.radians(3.0))
+        for below in (5.0, 30.0):
+            relative = relative_to_runway(e, n, np.full(len(e), candidate.course_deg), height - below, candidate)
+            from_file = decision_check(relative, range(1, len(e)), stored, index, spec())
+            assert from_file == decision_check(relative, range(1, len(e)), built, index, spec())
+            checked += from_file is not None
+    assert checked == 2 * len(stored.candidates)
 
 
 def test_a_flight_is_flown_on_its_own_or_a_stand_ins_dynamics_only_with_a_published_approach_speed(monkeypatch):
@@ -1230,8 +1235,8 @@ def _batch(signals, reading, interval_s=2.0):
     sentence = replay.sentence_on_interval(reading, signals, interval_s, geometry, words)
     return replay.Batch(indices=[0], signals=[replay.from_row(signals, sentence.first_row)], series=[],
                         readings=[reading],
-                        sentences=[sentence], row_interval_s=interval_s, geometries=[geometry],
-                        vertical_paths=[downwind_paths(geometry)], approach_ias_mps=[], groups=[replay.OWN], drawn={})
+                        sentences=[sentence], row_interval_s=interval_s, geometries=[downwind_airport(geometry)],
+                        approach_ias_mps=[], groups=[replay.OWN], drawn={})
 
 
 def test_a_sentence_on_a_coarser_interval_starts_on_its_utc_grid():
@@ -1316,17 +1321,15 @@ def _observed_series(geometry):
 
 def test_draw_reads_a_seeded_permutation_until_each_airport_is_full(monkeypatch):
     from ts_transformer.autopilot import replay
-    from ts_transformer.autopilot.runway_data import VerticalPath
 
     flights = [SimpleNamespace(airport="KAAA" if i % 3 else "KBBB", dataset_id=f"F{i}") for i in range(30)]
     stored = [np.full((3, len(COLUMNS)), i, dtype=np.int16) for i in range(30)]
     sentences = {"signal_index": np.arange(30), "offsets": np.arange(31) * 3,
                  "words": np.concatenate(stored), "runway_index": np.zeros(30, dtype=np.int64)}
     typecode = {i: ("A320", "A320") if i % 4 else ("CRJ7", "A320") for i in range(30)}
-    geometries = {code: SimpleNamespace(code=code, candidates=(SimpleNamespace(ident="09"),)) for code in ("KAAA", "KBBB")}
+    geometries = {code: SimpleNamespace(code=code, candidates=(SimpleNamespace(
+        ident="09", vertical_path=SimpleNamespace(crossing_height_m=15.0)),)) for code in ("KAAA", "KBBB")}
     monkeypatch.setattr(replay, "load_candidates", lambda d: geometries)
-    paths = {"KAAA": (VerticalPath(15.0, 3.0, 60.0),), "KBBB": (VerticalPath(16.0, 3.5, 70.0),)}
-    monkeypatch.setattr(replay, "published_vertical_paths", lambda geometry: paths[geometry.code])
     monkeypatch.setattr(replay, "load_signals", lambda d, split: flights)
     monkeypatch.setattr(replay, "load_sentences", lambda d, split, spec: sentences)
     monkeypatch.setattr(replay, "rebuild_series", lambda d, items: [SimpleNamespace(scenario=SimpleNamespace(
@@ -1351,7 +1354,6 @@ def test_draw_reads_a_seeded_permutation_until_each_airport_is_full(monkeypatch)
 def test_a_sentence_on_a_coarser_interval_is_flown_and_judged_on_its_own_rows():
     """§4.8: at Δ = 4 s from the first row on a UTC multiple of 4 s the executor hears a row every 4 s, and the judge
     files each word at the flown row (the data's 2 s) where it was heard: every heading word is judged."""
-    from ts_transformer.autopilot import replay
     from ts_transformer.autopilot.executor import fly
     from ts_transformer.autopilot.judge import judge
 
@@ -1364,7 +1366,7 @@ def test_a_sentence_on_a_coarser_interval_is_flown_and_judged_on_its_own_rows():
     inputs, runways, charts, approach = _physics(observed, geometry)
     flown = fly(inputs, Sentences([sentence.grid], words, step_s=4.0, device=CPU), runways, charts, approach,
                 params, words, time_limit_s=torch.tensor([len(sentence.grid) * 4.0 * 1.5], dtype=F64), reserve_s=0.0)
-    verdict = judge(flown, 0, geometry, downwind_paths(geometry), sentence.instructions, 4.0, observed, one, words)
+    verdict = judge(flown, 0, downwind_airport(geometry), sentence.instructions, 4.0, observed, one, words)
     headings = [h for h in verdict.words["heading"] if h["rows"]]
     assert len(headings) == sum(i.column == HEADING for i in sentence.instructions)
     assert verdict.outcome in ("landed", "unstable_at_minimums", "crossed_off_runway", "crossed_too_high")

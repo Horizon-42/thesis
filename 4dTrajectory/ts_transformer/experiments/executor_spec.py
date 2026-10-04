@@ -7,7 +7,7 @@ level bands are the vocabulary's,
 read at run time; a
 word takes effect when it is said. The judge's decision-altitude check has no parameter (vocabulary §5.8, D38: the
 evaluation module's vertical bound and the FAS cone); each candidate's
-published vertical path and decision altitude (read at replay, `runway_data.published_vertical_paths`) are recorded in
+published vertical path and decision altitude (the artefact's `candidates.json`, D61) are recorded in
 ``measurements.json`` as the spec is written. Nothing is measured from data. The design's fixed choices are module
 constants below. Writes ``spec.json`` + ``measurements.json`` into
 ``--dir`` (never over an existing file), from a clean tree only: the spec records the commit it was measured at and the
@@ -30,7 +30,6 @@ from pathlib import Path
 
 from ts_transformer.autopilot import conformance
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.autopilot.runway_data import published_vertical_paths
 from ts_transformer.autopilot.speed import speed_change_mps2
 from ts_transformer.autopilot.spec import executor_source_sha256, params_sha256, write_spec
 from ts_transformer.instructions.artefact import load_candidates, load_spec
@@ -98,10 +97,9 @@ def main(argv: list[str] | None = None) -> int:
                                 "lined_up_deg": spec.lined_up_deg, "landing_max_height_m": spec.landing_max_height_m},
         "from_the_runway": {
             "rule": "each candidate's published threshold crossing height, glidepath angle and decision altitude (the "
-                    "judge's decision-altitude check), read at replay (runway_data.published_vertical_paths); recorded "
-                    "here as the spec was written",
-            "published": {code: {candidate.ident: asdict(path)
-                                 for candidate, path in zip(geometry.candidates, published_vertical_paths(geometry))}
+                    "judge's decision-altitude check), from the artefact's candidates.json (D61); recorded here as the "
+                    "spec was written",
+            "published": {code: {candidate.ident: asdict(candidate.vertical_path) for candidate in geometry.candidates}
                           for code, geometry in sorted(load_candidates(instructions).items())},
         },
         "fixed": {"cycle_s": CYCLE_S, "path_time_constant_s": PATH_TIME_CONSTANT_S, "path_rate_factor": PATH_RATE_FACTOR,

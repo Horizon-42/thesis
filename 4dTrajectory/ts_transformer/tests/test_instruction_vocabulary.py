@@ -15,7 +15,7 @@ from aerodynamic_model.common import GeodeticState
 from ts_transformer.data.channels import channels_from_states
 
 from ts_transformer.instructions import envelope, measure
-from ts_transformer.instructions.airport import AirportGeometry, airport_geometry, relative_to_runway
+from ts_transformer.instructions.airport import AirportGeometry, airport_geometry, relative_to_runway, vertical_path
 from ts_transformer.instructions.artefact import (
     CANDIDATES_SCHEMA, SENTENCES_SCHEMA, keep_spec, load_candidates, load_day_split, load_sentences, load_signals,
     load_spec, write_candidates, write_sentences, write_signals, write_spec,
@@ -160,9 +160,17 @@ def test_compass_and_math_headings_round_trip():
 
 
 # ---- airport
+def _guided(**fields):
+    """A harvest `Runway` stand-in that publishes a vertical path (TCH 15 m, 3°, DA 60 m above the threshold)."""
+    published = {"threshold_crossing_height_m": 15.0, "published_glidepath_deg": 3.0,
+                 "decision_height_above_threshold_m": 60.0,
+                 "published_minima": SimpleNamespace(vertically_guided=True, note="LPV")}
+    return SimpleNamespace(**{**published, **fields})
+
+
 def test_the_candidates_are_the_published_geometry_with_the_configured_length():
-    ends = [SimpleNamespace(ident="23R", lat=35.8937988, lon=-78.7779999, course_deg=225.3),
-            SimpleNamespace(ident="05L", lat=35.8753, lon=-78.7970, course_deg=45.3)]
+    ends = [_guided(ident="23R", lat=35.8937988, lon=-78.7779999, course_deg=225.3),
+            _guided(ident="05L", lat=35.8753, lon=-78.7970, course_deg=45.3)]
     geometry = airport_geometry("KRDU", {"23R": {"lat": 35.8937988, "lon": -78.7779999, "elevation_msl_m": 124.7,
                                                  "course_deg": 225.3}}, ends)
     (candidate,) = geometry.candidates
@@ -177,6 +185,33 @@ def test_the_candidates_are_the_published_geometry_with_the_configured_length():
     with pytest.raises(KeyError, match="not runway ends the harvest builds"):
         airport_geometry("KRDU", {"23R": {"lat": 35.8937988, "lon": -78.7779999, "elevation_msl_m": 124.7,
                                           "course_deg": 225.3}}, ends[1:])
+
+
+def test_each_candidate_carries_its_published_vertical_path_into_candidates_json(tmp_path):
+    """D61: the first runner reads each candidate's TCH, glidepath angle and DA from the harvest's runway data with the
+    geometry, refuses a candidate without them (§4.2), and `candidates.json` holds them; the old format is refused."""
+    from ts_transformer.instructions.airport import VerticalPath
+
+    target = {"23R": {"lat": 35.8937988, "lon": -78.7779999, "elevation_msl_m": 124.7, "course_deg": 225.3}}
+    end = dict(ident="23R", lat=35.8937988, lon=-78.7779999, course_deg=225.3)
+    geometry = airport_geometry("KRDU", target, [_guided(**end, threshold_crossing_height_m=16.5,
+                                                         published_glidepath_deg=3.1)])
+    assert geometry.candidates[0].vertical_path == VerticalPath(16.5, 3.1, 60.0)
+    write_candidates(tmp_path, {"KRDU": geometry})
+    assert load_candidates(tmp_path)["KRDU"] == geometry
+    record = json.loads((tmp_path / "candidates.json").read_text(encoding="utf-8"))
+    assert record["airports"]["KRDU"]["candidates"][0]["vertical_path"] == {
+        "crossing_height_m": 16.5, "glidepath_deg": 3.1, "decision_height_m": 60.0}
+    (tmp_path / "old").mkdir()
+    (tmp_path / "old" / "candidates.json").write_text(json.dumps({**record, "schema": "ts-instruction-candidates-v2"}),
+                                                      encoding="utf-8")
+    with pytest.raises(ValueError, match=f"is not a {CANDIDATES_SCHEMA} file"):
+        load_candidates(tmp_path / "old")
+    with pytest.raises(ValueError, match="publishes no decision altitude"):
+        airport_geometry("KRDU", target, [_guided(**end, published_minima=SimpleNamespace(vertically_guided=False,
+                                                                                            note="LNAV only"))])
+    with pytest.raises(ValueError, match="publishes no threshold crossing height or glidepath"):
+        vertical_path("KRDU", _guided(**end, threshold_crossing_height_m=None))
 
 
 def test_relative_position_signs(geometry):
@@ -413,8 +448,8 @@ def test_the_grid_fit_finds_a_known_grid_in_synthetic_level_offs():
 
 
 def test_the_grid_fit_is_the_least_squared_rounding_error_of_its_shapes():
-    """The dynamic programme against a direct search over one family: every two-segment grid with steps 60 / 120 m and
-    an 450 m top segment that the fit could choose leaves at least the fitted grid's squared error."""
+    """The dynamic programme against a direct search over one family: every three-segment grid of steps 60 / 120 / 450 m
+    and 40 levels that the fit could choose leaves at least the fitted grid's squared error."""
     from ts_transformer.instructions.words import grid_levels
 
     rng = np.random.default_rng(5)
@@ -571,10 +606,21 @@ def test_the_landing_constants_are_the_harvest_s_and_the_parallel_limit_mirrors_
     def targets(runways):
         return {r.ident: {"lat": r.lat, "lon": r.lon, "elevation_msl_m": 0.0, "course_deg": r.course_deg}
                 for r in runways}
+    def guided(code, runways):
+        """The runway ends that publish a vertical path: only they can be candidates (D61)."""
+        out = []
+        for runway in runways:
+            try:
+                vertical_path(code, runway)
+            except ValueError:
+                continue
+            out.append(runway)
+        return out
+
     for code in ("KMSY", "KRDU", "KSJC", "KSMF", "KSTL"):
         runways = tuple(load_airport(code, config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways)
-        geometry = airport_geometry(code, targets(runways), runways)
-        for runway in runways:
+        geometry = airport_geometry(code, targets(guided(code, runways)), runways)      # every end a parallel partner
+        for runway in guided(code, runways):
             mine = landing_cross_limit_m(geometry, geometry.candidate_index(runway.ident), one.landing_cross_limit_m,
                                          one.parallel_course_delta_deg)
             theirs = _runway_bracket_cross_limit(runway, runways, fallback_m=LandingScreen().threshold_radius_m)

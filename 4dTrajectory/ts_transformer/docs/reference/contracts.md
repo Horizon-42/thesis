@@ -399,8 +399,11 @@ OPERATING DAY (C32) — a test day's tracks are never opened, and `write_signals
 or one filed under another split; each flight carries `entry_time_utc` (row 0) and `landing_time_utc` — built by
 `build_series` + `usable_series` under the default `TSConfig`, so the population is the models'), `candidates.json`
 (each airport's candidate runways: the arrival manifest's `runway_targets`, the FAA CIFP runway geometry the modeling
-target is built from; position, elevation, true course only — never the published glidepath or TCH — and every runway
-end the harvest builds, which the landing rule reads), `spec.json` + `measurements.json`,
+target is built from: position, elevation, true course, and since A22 (D61, `ts-instruction-candidates-v3`) each
+candidate's published vertical path `VerticalPath` — TCH, glidepath angle and DA above the threshold, read once from
+the harvest's runway data by the first runner, which refuses a candidate without them; the judge reads them from here,
+nothing reads the CIFP after the first runner — and every runway end the harvest builds, which the landing rule reads;
+E is `reference.elevation_m`), `spec.json` + `measurements.json`,
 `sentences_{train,select,val}.npz` + `labels.json` + `readout.{json,md}`, `conformance/` (below) and, once an executor spec
 flies them, `closed_loop/` (C38). Every file code reads back carries its format's name (`SIGNALS_SCHEMA`,
 `CANDIDATES_SCHEMA`, `SPEC_SCHEMA` `ts-instruction-spec-v6`, `SENTENCES_SCHEMA` `ts-instruction-sentences-v4`) and is
@@ -598,7 +601,9 @@ refuses both.
 
 ### C38 · the closed-loop sentences: flown by an executor spec, corrected toward the observed path, checked by what they read
 
-2026-10-04 (`autopilot/closed_loop.py`, `instructions/artefact.py` `write_closed_loop` / `load_closed_loop`, runner
+2026-10-04 (`autopilot/closed_loop.py`, `instructions/artefact.py` `write_closed_loop` / `load_closed_loop` /
+`closed_loop_sentences` — since A22 (D61) the public reader: each sentence a `ClosedLoopSentence` with its first row, words,
+correction marks, all its states on the 2 s rows (`STATE_COLUMNS`) with the Δ rows marked — runner
 `instruction_closed_loop` R50; design §4.9, D32–D34, D42, D44–D46). `<artefact>/closed_loop/` is written once, from a clean checkout,
 with an executor spec (C33): for each split and each row interval given (D25), `<split>_<Δ>s.npz`
 (`ts-instruction-closed-loop-v5`, refused unless every field is there and its spec sha is the artefact's): each flown

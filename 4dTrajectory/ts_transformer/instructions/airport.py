@@ -8,9 +8,10 @@ candidate, it never learns an identifier.
 The threshold position and the course are the arrival manifest's ``runway_targets`` — the FAA
 CIFP runway geometry the modeling plane's own target is built from
 (`flight_scenarios.runway_target.threshold_target_state`), so the line a sentence joins is the
-line the models are judged against. Only the runway's geometry is read (position, elevation,
-true course); the published threshold-crossing height and glidepath are procedure and stay out.
-The runway length comes from the runway configuration. Beside the candidates the geometry keeps
+line the models are judged against. The runway length comes from the runway configuration. Each
+candidate also carries its published vertical path (`VerticalPath`: the threshold crossing height,
+the glidepath angle and the decision altitude, D61), read once from the harvest's runway data when the
+geometry is built: the judge's decision-altitude check reads it, the executor's laws never do (D9). Beside the candidates the geometry keeps
 every runway end the harvest builds (`trajectory_data_process.harvest.airports.load_airport`), the
 set its landing rule measures parallel runways against (`landing_cross_limit_m`).
 """
@@ -18,7 +19,7 @@ set its landing rule measures parallel runways against (`landing_cross_limit_m`)
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Sequence
 
 import numpy as np
@@ -30,8 +31,20 @@ from ts_transformer.instructions.words import wrap180
 
 
 @dataclass(frozen=True)
+class VerticalPath:
+    """One runway end's published vertical path and decision altitude (D61): the FAA CIFP's vertical path and the
+    plate's minima as the harvest reads them (`trajectory_data_process.harvest.airports.load_airport`). The decision
+    altitude is the harvest's `Runway.decision_height_above_threshold_m`: the LPV line's, or the LNAV/VNAV line's where
+    the runway publishes no LPV (KRDU 32, KSMF 35R — Claude's reading of "the LPV DA" for those two candidates)."""
+
+    crossing_height_m: float        # the TCH, m above the threshold
+    glidepath_deg: float            # the glidepath angle, deg
+    decision_height_m: float        # the DA, m above the threshold
+
+
+@dataclass(frozen=True)
 class RunwayCandidate:
-    """One landing threshold in the airport frame (metres, compass degrees true)."""
+    """One landing threshold in the airport frame (metres, compass degrees true) and its published vertical path."""
 
     ident: str
     threshold_e_m: float
@@ -39,10 +52,16 @@ class RunwayCandidate:
     course_deg: float
     elevation_m: float
     length_m: float
+    vertical_path: VerticalPath
 
     def to_dict(self) -> dict[str, Any]:
         return {"ident": self.ident, "threshold_e_m": self.threshold_e_m, "threshold_n_m": self.threshold_n_m,
-                "course_deg": self.course_deg, "elevation_m": self.elevation_m, "length_m": self.length_m}
+                "course_deg": self.course_deg, "elevation_m": self.elevation_m, "length_m": self.length_m,
+                "vertical_path": asdict(self.vertical_path)}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RunwayCandidate:
+        return cls(**{**data, "vertical_path": VerticalPath(**data["vertical_path"])})
 
 
 @dataclass(frozen=True)
@@ -92,29 +111,44 @@ class AirportGeometry:
         frame = AirportENUFrame.for_airport(AirportReference(
             code=data["code"], lat=reference["lat"], lon=reference["lon"], elevation_msl_m=reference["elevation_m"]))
         return cls(code=data["code"], frame=frame,
-                   candidates=tuple(RunwayCandidate(**item) for item in data["candidates"]),
+                   candidates=tuple(RunwayCandidate.from_dict(item) for item in data["candidates"]),
                    runway_ends=tuple(RunwayEnd(**item) for item in data["runway_ends"]))
+
+
+def vertical_path(code: str, runway: Any) -> VerticalPath:
+    """A candidate's published vertical path from the harvest's `Runway` ``runway``; a runway without a TCH, a glidepath
+    or vertically guided minima is refused (vocabulary §4.2): the judge cannot check its decision altitude."""
+    if runway.threshold_crossing_height_m is None or runway.published_glidepath_deg is None:
+        raise ValueError(f"{code} {runway.ident} publishes no threshold crossing height or glidepath")
+    if not runway.published_minima.vertically_guided:
+        raise ValueError(f"{code} {runway.ident} publishes no decision altitude ({runway.published_minima.note})")
+    return VerticalPath(crossing_height_m=float(runway.threshold_crossing_height_m),
+                        glidepath_deg=float(runway.published_glidepath_deg),
+                        decision_height_m=float(runway.decision_height_above_threshold_m))
 
 
 def airport_geometry(code: str, runway_targets: dict[str, dict[str, Any]], harvest_runways: Sequence[Any]) -> AirportGeometry:
     """The airport frame, every landing threshold of ``code`` that the arrival manifest's
-    ``runway_targets`` publishes (sorted by ident), and every runway end of ``harvest_runways``
-    (the harvest's `Runway` objects: ``ident``, ``lat``, ``lon``, ``course_deg``; sorted by ident)."""
+    ``runway_targets`` publishes (sorted by ident) with its published vertical path (`vertical_path`, D61), and every
+    runway end of ``harvest_runways`` (the harvest's `Runway` objects; sorted by ident)."""
     code = code.upper()
     point = airport_reference_point(code)
     frame = AirportENUFrame.for_airport(AirportReference(code=code, lat=point["lat"], lon=point["lon"],
                                                          elevation_msl_m=point["elevation_m"]))
     lengths = {str(threshold["ident"]).upper(): ft_to_m(float(runway["length_ft"]))
                for runway in airport_runways(code) for threshold in runway["thresholds"]}
+    by_ident = {str(runway.ident).upper(): runway for runway in harvest_runways}
     candidates = []
     for ident, target in runway_targets.items():
         e, n = frame.horizontal_from_latlon(float(target["lat"]), float(target["lon"]))
         if ident.upper() not in lengths:
             raise KeyError(f"{code} runway {ident} is published but not in the runway configuration")
+        if ident.upper() not in by_ident:
+            raise KeyError(f"{code} candidates {[ident.upper()]} are not runway ends the harvest builds")
         candidates.append(RunwayCandidate(
             ident=ident.upper(), threshold_e_m=float(e), threshold_n_m=float(n),
             course_deg=float(target["course_deg"]) % 360.0, elevation_m=float(target["elevation_msl_m"]),
-            length_m=lengths[ident.upper()]))
+            length_m=lengths[ident.upper()], vertical_path=vertical_path(code, by_ident[ident.upper()])))
     candidates.sort(key=lambda item: item.ident)
     ends = []
     for runway in harvest_runways:
@@ -122,9 +156,6 @@ def airport_geometry(code: str, runway_targets: dict[str, dict[str, Any]], harve
         ends.append(RunwayEnd(ident=str(runway.ident).upper(), threshold_e_m=float(e), threshold_n_m=float(n),
                               course_deg=float(runway.course_deg) % 360.0))
     ends.sort(key=lambda item: item.ident)
-    missing = {c.ident for c in candidates} - {end.ident for end in ends}
-    if missing:
-        raise KeyError(f"{code} candidates {sorted(missing)} are not runway ends the harvest builds")
     return AirportGeometry(code=code, frame=frame, candidates=tuple(candidates), runway_ends=tuple(ends))
 
 
@@ -186,10 +217,21 @@ def curvature_radius_m(lat_deg: float, course_deg: float) -> float:
     return 1.0 / (math.cos(course) ** 2 / meridional + math.sin(course) ** 2 / prime_vertical)
 
 
+def published_glidepath_height_m(geometry: AirportGeometry, index: int, before_threshold_m):
+    """The height above its threshold of candidate ``index``'s published glidepath at each distance before the
+    threshold (vocabulary §6 item 4, D61): its vertical path's TCH and angle on the straight-line reference with the
+    earth's radius of curvature along its course at the airport (`glidepath_height_m`). The judge's decision-altitude
+    check reads it, and so will the prior's input."""
+    candidate = geometry.candidates[index]
+    path = candidate.vertical_path
+    return glidepath_height_m(before_threshold_m, path.crossing_height_m, path.glidepath_deg,
+                              curvature_radius_m(geometry.frame.lat0, candidate.course_deg))
+
+
 def glidepath_height_m(before_threshold_m, crossing_height_m: float, glidepath_deg: float, radius_m: float):
     """The published glidepath's height above the threshold at each distance before it, as a straight line in space
     (vocabulary §9.3, the "straight line" reference): ``TCH + d · tan(angle) + d² / (2 R)``, R the earth's radius of
     curvature along the course (`curvature_radius_m`) — the flat formula without the last term is up to 31 m low at
-    20 km. The judge's decision-altitude check reads it (`autopilot.judge`), and so will the prior's input (D13)."""
+    20 km. `published_glidepath_height_m` reads it with a candidate's vertical path."""
     d = np.asarray(before_threshold_m, dtype=np.float64)
     return crossing_height_m + d * math.tan(math.radians(glidepath_deg)) + d ** 2 / (2.0 * radius_m)

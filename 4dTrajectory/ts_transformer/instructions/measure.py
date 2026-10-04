@@ -383,7 +383,7 @@ def fit_altitude_grid(heights_m: np.ndarray) -> dict[str, tuple[float, ...]]:
     used). Every step is a whole number of `GRID_BREAK_M`, so a segment's error depends on its start only through the
     phase a mod s: one prefix sum over the sorted heights for each step and phase gives every segment's error. A height
     outside [0, `GRID_TOP_M`] rounds to the end level of every grid alike and does not move the choice. Ties go to the
-    first found (fewer segments; for a segment, the later start and then the smaller step); no heights raise."""
+    first found (fewer segments; for a segment, the smaller step and then the later start); no heights raise."""
     heights = np.sort(np.asarray(heights_m, dtype=np.float64))
     if not len(heights):
         raise ValueError("no level-off to fit the altitude grid on")
