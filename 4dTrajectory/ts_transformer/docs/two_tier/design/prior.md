@@ -62,7 +62,8 @@ A proposal is a reading where the design says nothing; it holds only until the u
 | B1: the inputs of a row (`prior/inputs.py`: `state_inputs`, `Heard`; a sentence and a loop use both), the landings (`prior/landings.py`), the artefact as sentences and the identity of the data (`prior/source.py`) | Done on synthetic artefacts, `278b626b`; the landings digest as D63, `ff514325` |
 | B4: the speaker (`prior/speaker.py`), the procedure masks (`prior/procedure.py`, set `procedure-masks-v4`) | Done on synthetic inputs, `278b626b`; the finals read on KRDU's CIFP. The masks and the glidepath scale as D64 and D65, with B4's tests of D64, `07f3f49b` (reviewed). Free generation (the speaker with the executor, the judge, the time limit) waits for A21 |
 | The full ts suite at `278b626b` / `ff514325` / `07f3f49b` | Not run yet: stage A's A21 build runs (outline §5 rule 13) |
-| B5, B6 | Wait for Claude's check of stage A and the user's choice of Δ |
+| B6: the Training view of stage B | Waits for A23 of stage A, merged into `dev-two-tier-v4`; then its export and view on the smoke sets of B3 and B4; the publication of the folds and the base after B5 |
+| B5, B7 (the close of stage B) | Wait for Claude's check of stage A and the user's choice of Δ |
 
 Proposals (where the design says nothing): none open. The nine proposals of `bbedfe9e` were decided by the user on
 2026-10-04 as D64 (the procedure masks: 7, 8, 9; 7 and 9 changed) and D65 (the inputs and the model: 1, 2, 4, 5, 6; 4
