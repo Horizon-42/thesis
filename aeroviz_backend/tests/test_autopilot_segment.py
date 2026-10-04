@@ -92,9 +92,10 @@ class LiveEqualsExportTest(unittest.TestCase):
                         self.assertLess(float(np.abs(live[name] - reference[name][:end]).max()), STATE_BOUND_M)
                     apart = apart_from_stored(result, one.sentence, one.batch, 0, one.words.spec.step_s)
                     self.assertLess(max(apart["horizontalM"], apart["verticalM"]), STATE_BOUND_M)
-                    # a column's last word is flown to its outcome; a word stopped has no verdict
-                    self.assertTrue(not result.stopped if last[column] == row else True)
-                    self.assertEqual(result.verdict is None, result.stopped)
+                    # stopped exactly when its stop comes before the flight's end; the column's last word never
+                    stop = result.segment.stop_cycle
+                    self.assertEqual(result.stopped, stop is not None and stop <= int(batch.done_cycle[0]))
+                    self.assertTrue(stop is None or last[column] != row)
                     if last[column] == row:
                         answer = segment_payload(result, one.geometry, -33.0, one.inputs.aero_params[0].numpy(), apart)
                         self.assertEqual(answer["segment"]["end"], exported["outcome"])

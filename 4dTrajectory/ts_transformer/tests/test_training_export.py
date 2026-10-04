@@ -260,3 +260,28 @@ def test_a_kept_flight_owns_its_arrays():
     assert not np.shares_memory(signals.e_m, one.signals.e_m) and np.array_equal(signals.e_m, one.signals.e_m)
     assert not np.shares_memory(sentence.states, one.sentence.states)
     assert np.array_equal(sentence.grid, one.sentence.grid) and sentence.start == one.sentence.start
+
+
+def test_the_set_s_batch_holds_no_view_into_the_loaded_closed_loop_file(monkeypatch):
+    """`closed_loop_batch` gives the batch and the sentences arrays of their own — a words grid kept as a view would keep
+    the split's whole file (72 MB of words at train, Δ = 2 s, an airport) — and refuses a flight without a sentence."""
+    import dataclasses
+    from types import SimpleNamespace
+
+    from ts_transformer.autopilot import replay
+    from ts_transformer.experiments import training_flights
+    from ts_transformer.tests import test_closed_loop
+    from ts_transformer.tests.support import closed_loop_flight
+
+    one = closed_loop_flight(2.0)
+    before, _, _ = test_closed_loop._batch(2.0)                  # the batch `replay.batch_of` would build
+    before.drawn = {"refused_on_interval": {}}
+    monkeypatch.setattr(replay, "batch_of", lambda *args: before)
+    whole = np.concatenate([one.sentence.grid, one.sentence.grid])   # the file's words: this sentence is a view of it
+    stored = {0: dataclasses.replace(one.sentence, grid=whole[: len(one.sentence.grid)])}
+    flights = SimpleNamespace(drawn=None, readings=before.readings)
+    batch, (sentence,) = training_flights.closed_loop_batch(flights, stored, 2.0, one.words)
+    assert np.array_equal(batch.sentences[0].grid, one.sentence.grid) and np.array_equal(sentence.grid, one.sentence.grid)
+    assert not np.shares_memory(batch.sentences[0].grid, whole) and not np.shares_memory(sentence.grid, whole)
+    with pytest.raises(ValueError, match="1 of the set's flights have no closed-loop sentence at 2 s"):
+        training_flights.closed_loop_batch(flights, {}, 2.0, one.words)

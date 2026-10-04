@@ -128,8 +128,8 @@ class AutopilotSegmentBackend:
             airport = index.parent.parent.name
             try:
                 sets = training_files.index_sets(json.loads(index.read_text(encoding="utf-8")), index, airport)
-            except (ValueError, OSError) as error:
-                log(f"autopilot warm-up: {airport} skipped — {index}: {error}")
+            except Exception as error:       # noqa: BLE001 — a prefetch: logged; a request gets it whole
+                log(f"autopilot warm-up: {airport} skipped — {index}: {type(error).__name__}: {error}")
                 continue
             for entry in sets:
                 began = time.perf_counter()
