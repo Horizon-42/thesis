@@ -88,11 +88,15 @@ class Speaker:
         self.n_candidates = np.array([len(f) for f in finals], dtype=np.int64)
         self.generator, self.temperature = generator, temperature
         self.past = model.no_past(len(finals), capacity)
-        #: each aircraft's words in force (the grammar's), None before its first predicted step
         #: each aircraft's words in force (`inputs.Heard`, the training sentences' own walk): a loop reads the inputs of
         #: the next row from it, so the speaker and the inputs never keep two copies
         self.heard = [Heard(finals_b[0].geometry, words) for finals_b in finals]
         self.forbidden: dict[int, list[np.ndarray]] = {c: [] for c in range(len(COLUMNS))}
+        #: per row said: each aircraft's probability of "go-around" in the distribution its runway word was drawn from
+        #: (the masks applied; the readout's "probability of go-around", §12 B4)
+        self.go_around_probability: list[np.ndarray] = []
+        #: per row said: whether the masks permitted each aircraft "go-around" (no G in force, the bound of D68 not met)
+        self.go_around_permitted: list[np.ndarray] = []
         #: the go-arounds each aircraft has said (D68: a caller bounds them with `go_around_bound`)
         self.go_arounds = np.zeros(len(finals), dtype=np.int64)
 
@@ -129,7 +133,11 @@ class Speaker:
                 raise ValueError(f"column {COLUMNS[column]}: an aircraft has no permitted word (D62)")
             probabilities = torch.softmax(logits, dim=-1)
             self.forbidden[column].append(probabilities.masked_fill(permitted, 0.0).sum(dim=-1).cpu().numpy())
-            chosen = torch.multinomial(torch.softmax(masked / self.temperature, dim=-1), 1, generator=self.generator)
+            drawn = torch.softmax(masked / self.temperature, dim=-1)
+            if column == RUNWAY:
+                self.go_around_probability.append(drawn[:, RUNWAY_GO_AROUND_CLASS].cpu().numpy())
+                self.go_around_permitted.append(permitted[:, RUNWAY_GO_AROUND_CLASS].cpu().numpy())
+            chosen = torch.multinomial(drawn, 1, generator=self.generator)
             g = self.model.after_choice(column, g, chosen, tokens)
             said = np.concatenate((said, class_words(column, chosen.cpu().numpy())), axis=1)
         for heard, step, height, time_s in zip(self.heard, said, at.height_m, row.time_s[:, 0].tolist()):

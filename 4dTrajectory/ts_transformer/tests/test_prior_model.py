@@ -292,3 +292,23 @@ def test_the_checkpoint_opens_only_for_its_artefact(words, tmp_path):
     torch.save({**payload, "schema": "ts-prior-checkpoint-v3"}, other)
     with pytest.raises(ValueError, match=CHECKPOINT_SCHEMA):
         load_checkpoint(other, identity)
+
+
+def test_a_loops_row_is_the_sentences_row(words):
+    """§7 item 2: the row a loop builds for a speaker (`row_tensors`) is the row `collate` gives the same sentence —
+    every input; the targets are not the loop's to give."""
+    from ts_transformer.prior.batch import row_tensors
+
+    rng = np.random.default_rng(9)
+    group = [prior_sentence(rng, words, candidates=k, rows=n) for k, n in ((2, 20), (5, 26))]
+    whole = collate(group, CPU)
+    r = 12
+    row = row_tensors(np.array([s.time_s[r] for s in group]), np.stack([s.own[r] for s in group]),
+                      [s.candidates[r] for s in group], np.array([s.runway_in_force[r] for s in group]),
+                      np.array([s.go_around[r] for s in group]), np.stack([s.heading_in_force[r] for s in group]),
+                      np.stack([s.words_in_force[r] for s in group]), np.stack([s.since[r] for s in group]),
+                      np.array([s.first_step == r for s in group]), np.array([r >= s.first_step for s in group]), CPU)
+    expected = whole.between(r, r + 1)
+    for name in row._fields:
+        if name != "targets":
+            assert torch.equal(getattr(row, name), getattr(expected, name)), name

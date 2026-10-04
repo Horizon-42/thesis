@@ -211,3 +211,27 @@ def collate(sentences: Sequence[SentenceRows], device: torch.device) -> RowTenso
         targets[b, :n] = target_classes(s.targets)
     arrays = (time_s, own, candidates, valid, runway, go_around, heading, words, since, present, first, asked, targets)
     return RowTensors(*(torch.as_tensor(a, device=device) for a in arrays))
+
+
+def row_tensors(time_s: np.ndarray, own: np.ndarray, candidates: Sequence[np.ndarray], runway_in_force: np.ndarray,
+                go_around: np.ndarray, heading_in_force: np.ndarray, words_in_force: np.ndarray, since: np.ndarray,
+                first: np.ndarray, asked: np.ndarray, device: torch.device) -> RowTensors:
+    """One Δ row of a batch of aircraft (``[B, 1]``), as a loop gives a speaker the row it is about to say (§7 item 2):
+    each aircraft's row inputs (`inputs.state_inputs`, `inputs.Heard.inputs`), its candidates ``[K_b, F]`` padded to the
+    most; ``first`` which aircraft are at their first predicted step, ``asked`` which are at or after it. The row is
+    present; it has no targets (the speaker chooses them), so they are 0. `collate` gives a sentence's rows the same
+    tensors (tested)."""
+    count = len(time_s)
+    slots, width = max(len(c) for c in candidates), candidates[0].shape[1]
+    padded = np.zeros((count, 1, slots, width), dtype=np.float32)
+    valid = np.zeros((count, slots), dtype=bool)
+    for b, vectors in enumerate(candidates):
+        padded[b, 0, : len(vectors)], valid[b, : len(vectors)] = vectors, True
+    one = np.ones((count, 1), dtype=bool)
+    arrays = (np.asarray(time_s, dtype=np.float32)[:, None], np.asarray(own, dtype=np.float32)[:, None], padded, valid,
+              np.asarray(runway_in_force, dtype=np.int64)[:, None], np.asarray(go_around, dtype=bool)[:, None],
+              np.asarray(heading_in_force, dtype=np.float32)[:, None], np.asarray(words_in_force, dtype=np.int64)[:, None],
+              np.asarray(since, dtype=np.float32)[:, None], one, np.asarray(first, dtype=bool)[:, None],
+              np.asarray(asked, dtype=bool)[:, None],
+              np.zeros((count, 1, len(COLUMNS)), dtype=np.int64))
+    return RowTensors(*(torch.as_tensor(a, device=device) for a in arrays))
