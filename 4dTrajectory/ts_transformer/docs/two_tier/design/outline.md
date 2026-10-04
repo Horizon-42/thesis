@@ -92,18 +92,19 @@ they came from. Each document lists the identities of its parts.
 | Document | Decisions | Open items |
 |---|---|---|
 | Outline | D7, D20, D21, D55 | — |
-| Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59 | O8 |
-| Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58 | — |
+| Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62 | O8 |
+| Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60 | — |
 | Post-training | D29–D31, D36, D37 | O6 |
 
-The next free numbers: D60, O9.
+The next free numbers: D63, O9.
 
 ---
 
 ## 4 Plan
 
-1. Stage A (vocabulary §0.4): A19 and A20, the user's choice of the altitude grid, A21 (the formal artefact and the
-   readings of D34), Claude's check. The user compares the readings of D34 and chooses Δ (D7, D11).
+1. Stage A (vocabulary §0.4): A19 and A20, the user's choice of the altitude grid, A22 (the vertical path of each
+   candidate, the state columns and the grammar's column mask in the public interface, D61, D62), A21 (the formal
+   artefact and the readings of D34), Claude's check. The user compares the readings of D34 and chooses Δ (D7, D11).
 2. Stage B (prior §0.4): the prior from the start, chosen by cross-validation over the airports, and the base model.
    Stage B is developed in parallel with the end of stage A (the user, 2026-10-04). A milestone of stage B starts when
    the parts of stage A that it reads are on `dev-two-tier-v4`. The formal runs of stage B wait for Claude's check of
