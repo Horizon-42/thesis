@@ -37,7 +37,7 @@ The decision numbers are shared by all documents (outline §3).
 | D25 | At each Δ of the ablation (2, 4, 8 s), the motion inputs of a row come from the 2 s before the row (§2). (The Δ values: D25 in the vocabulary) | Decided | User, 2026-10-03 |
 | D31 | The prior's training stops on the select days (§5). (The multi-aircraft part: D31 in the post-training) | Decided | User, 2026-10-03 |
 | D39 | The prior's design is chosen by leave-one-airport-out cross-validation (5 folds: train on four airports, read the fifth). Two variants: `full` (§2) and `constants` (`full` and, in each candidate vector, the runway's length and threshold elevation). `constants` is chosen only if it is better by more than twice the seed scale (§5) | Decided | User, 2026-10-04 |
-| D40 | Hyperparameters: configuration A (§5) is the start. The same folds compare four configurations (A, a smaller model, a larger model, a stronger regularization); the one with the fewest parameters within twice the seed scale of the best is chosen (§5) | Decided | User, 2026-10-04 |
+| D40 | Hyperparameters: configuration A (§5) is the start. The same folds compare four configurations (A, a smaller model, a larger model, a stronger regularization); the one with the fewest parameters within twice the seed scale of the best is chosen (§5). Every configuration has attention heads 32 wide: A 6 heads, B (d_model 128) 4, C (d_model 256) 8 — 128 and 256 are not six heads of one width | Decided | User, 2026-10-04; the head width: user, 2026-10-04, on Claude's proposal |
 | D41 | The design runs at an airport that is not in the training data: the number of candidates is not fixed; every input has a fixed physical scale, never a statistic of the training data; each fold of D39 flies the full closed loop at its held-out airport. The altitude words are above the airport elevation (D58), so the levels of an approach lie in the 60 m segment at any airport (§6) | Decided | User, 2026-10-04 |
 | D58 | The prior's own height is the height above the airport elevation E, as the altitude words are (vocabulary, D58). The prior gets neither E nor the MSL height (D24), so it cannot know where the round MSL levels that controllers assign lie (§2). (The words: D58 in the vocabulary) | Decided | User, 2026-10-04 |
 
@@ -216,7 +216,7 @@ The goal is a new airport, so the folds are airports, not days. All runs use the
 
 | Step | Runs | Training runs |
 |---|---|---|
-| 1 | Variant `full`, four configurations, each on the 5 folds. A: the start. B: d_model 128, feed-forward 512. C: d_model 256, feed-forward 1,024. D: dropout 0.2, weight decay 0.05. B, C and D have the layers and the learning rate of A | 20 |
+| 1 | Variant `full`, four configurations, each on the 5 folds. A: the start. B: d_model 128, 4 heads, feed-forward 512. C: d_model 256, 8 heads, feed-forward 1,024. D: dropout 0.2, weight decay 0.05. B, C and D have the layers and the learning rate of A; every head is 32 wide | 20 |
 | 2 | The seed scale: configuration A with a second seed, on the 5 folds | 5 |
 | 3 | Variant `constants` with the configuration chosen in step 1, on the 5 folds | 5 |
 | 4 | The base: the chosen configuration and variant on all five airports, stopped on their select days; the validation days read one time | 1 |
@@ -300,6 +300,7 @@ sets its criteria (D7). The identities follow D21 (outline §3):
 | Time since a word | log(1 + t / 2 s) / 5, t in seconds, from the first predicted step at the earliest | D17 |
 | Landings of a candidate | In the 30 min before the step | §2 |
 | Configuration A | d_model 192, 4 layers, 6 heads, feed-forward 768, dropout 0.1, weight decay 0.01, learning rate 3·10⁻⁴, 500 warm-up steps, clip 1.0, 16,384 aircraft-steps a batch, at most 30 epochs, stop after 3 | D40 |
+| Configurations B, C, D | B: d_model 128, 4 heads, feed-forward 512. C: d_model 256, 8 heads, feed-forward 1,024. D: A with dropout 0.2, weight decay 0.05. A head is 32 wide in each | D40 |
 | Procedure masks | Glidepath lower edge: published glidepath − 60 m inside the FAF and the LPV cone; the DA before the join; no climb below the entry height before the join | §4 |
 
 ---
