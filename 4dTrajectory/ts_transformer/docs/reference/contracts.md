@@ -391,49 +391,48 @@ four runners that restated it import it).
 
 ### C30 · the instruction sentence artefact: one spec sha, written once, rows aligned with the signals
 
-2026-09-23 (the instruction labeller, `docs/two_tier/two_tier_framework.zh.md` §3). An artefact
-directory under `4dTrajectory/outputs/POOLED/instruction_language/<name>/` is written by the four
-runners in order and never overwritten (`instructions.artefact._fresh` refuses an existing file):
-`signals_{train,select,val}.npz` + `signals.json` (the flights, from the live harvest's eligible arrivals,
-split BY OPERATING DAY (C32) — a test day's tracks are never opened, and `write_signals` / `load_signals` refuse
-a test-day flight or one filed under another split; each flight carries `entry_time_utc` (row 0) and
-`landing_time_utc` — built by `build_series` + `usable_series` under the default `TSConfig`, so the population
-is the models'), `candidates.json`
-(each airport's candidate runways: the arrival manifest's `runway_targets`, the FAA CIFP runway
-geometry the modeling target is built from; position, elevation, true course only — never the
-published glidepath or TCH — and every runway end the harvest builds, which the landing rule reads),
-`spec.json` + `measurements.json`, `sentences_{train,select,val}.npz` + `labels.json` + `readout.{json,md}`.
-Every file code reads back carries its format's name (`SIGNALS_SCHEMA`, `CANDIDATES_SCHEMA`,
-`SPEC_SCHEMA`, `SENTENCES_SCHEMA`) and is refused under any other; **a name changes with its file's
-shape**, in the same change (2026-09-24, the user's rule). The spec's sha covers every word, grid,
-class, tolerance and the reading rule (`instructions.spec.READING_RULE`); `load_sentences` refuses a
-sentences file read with another sha, `VocabularySpec.from_dict` refuses a missing or extra key and
-another reading rule — no compatibility. **The code is part of the identity**: `spec.json` records
-`labeller_source_sha256` (the modules that decide a sentence and the spec, `artefact.LABELLER_MODULES` —
-not the artefact, readout, figure or display code) and
-the git head/dirty state it was measured at; `instruction_labels` / `instruction_figures` refuse a
-spec measured by other code (`require_current_labeller`), and every sentence file carries the hash
-it was read with (`load_sentences` refuses a mismatch). A sentence's words line up row for row
-with the FIRST `len(words)` rows of its flight's signals (`signal_index` names the flight): the
-sentence ends before its landing — since `instruction-v2` the harvest's and the evaluator's condition
-(`read.landing_passages`: the threshold plane crossed, the crossing interpolated with
-`final_approach.crossing.bracket_fraction`, within `LandingScreen`'s 1000 m of the centreline capped at half
-the spacing to a parallel runway — `airport.landing_cross_limit_m`, a MIRROR of the harvest's
-`_runway_bracket_cross_limit`, checked equal on every runway — and within its 100 m above the threshold). The
-first such crossing is the landing; a flight that comes back ahead of the threshold after it is refused
-(`read.admit`, the one gate the labeller, the measurements and the figures share). Since signals v2
-(2026-09-24) a flight's `typecode` is its OWN ICAO type (`source["resolved_typecode"]`) or null when its
-identity is unresolved — v1 carried the type the dynamics flew, an A320 for every type without dynamics
-— and the default `TSConfig` keeps flights without aircraft dynamics (C31); the frontend sample moved to
-`aeroviz-training-sample-v6` with it (v5's shape plus the nullable type). **Since artefact v6 (2026-10-02, the user;
-multi-aircraft design §2.1) every row is on the UTC clock's even seconds**: `instruction_signals` builds with
-`data.dataset.on_utc_steps` — row 0 the first even second at or after the first kept sample, `entry_time_utc` row 0's
-(0–2 s after that sample), never extrapolated; the one-tier models keep their rows at the first sample. A scene refuses
-an artefact whose rows are elsewhere (`prior.scene.presence`, by name: v5 and earlier), and `autopilot.flights.rebuild_series`
-cuts each flight where its stored row 0 is, so both kinds rebuild row for row. A spec is the vocabulary's format, not the
-data's: `instruction_spec --spec-from <artefact>` (`artefact.keep_spec`) keeps another artefact's spec byte for byte —
-refused unless this code's labeller measured it and both were built under one configuration — and `spec_from.json`
-says so (v6 keeps v5's).
+2026-09-23 (the instruction labeller); **v4 since 2026-10-03** (`docs/two_tier/two_tier_design.md` §4, §9.2, §14.2 A1–A3,
+A8). An artefact directory under `4dTrajectory/outputs/POOLED/instruction_language/<name>/` is written by the runners in
+order and never overwritten (`instructions.artefact._fresh` refuses an existing file):
+`signals_{train,select,val}.npz` + `signals.json` (the flights, from the live harvest's eligible arrivals, split BY
+OPERATING DAY (C32) — a test day's tracks are never opened, and `write_signals` / `load_signals` refuse a test-day flight
+or one filed under another split; each flight carries `entry_time_utc` (row 0) and `landing_time_utc` — built by
+`build_series` + `usable_series` under the default `TSConfig`, so the population is the models'), `candidates.json`
+(each airport's candidate runways: the arrival manifest's `runway_targets`, the FAA CIFP runway geometry the modeling
+target is built from; position, elevation, true course only — never the published glidepath or TCH — and every runway
+end the harvest builds, which the landing rule reads), `spec.json` + `measurements.json`,
+`sentences_{train,select,val}.npz` + `labels.json` + `readout.{json,md}`, `conformance/` (below) and, once an executor spec
+flies them, `closed_loop/` (C38). Every file code reads back carries its format's name (`SIGNALS_SCHEMA`,
+`CANDIDATES_SCHEMA`, `SPEC_SCHEMA` `ts-instruction-spec-v5`, `SENTENCES_SCHEMA` `ts-instruction-sentences-v3`) and is
+refused under any other; **a name changes with its file's shape**, in the same change (2026-09-24, the user's rule). The
+spec's sha covers every word, grid, class, tolerance and the reading rule (`instructions.spec.READING_RULE`,
+`instruction-v4`); `load_sentences` refuses a sentences file read with another sha, `VocabularySpec.from_dict` refuses a
+missing or extra key and another reading rule — no compatibility.
+
+**The labeller is identified by what it reads, never by its source** (design D21, 2026-10-03; until v3 `spec.json`
+recorded `labeller_source_sha256` and every runner refused other code): `instruction_labels` writes `conformance/` — a
+fixed reference sample (`instructions.conformance`: train, seed 1337, 50 labelled and 10 refused flights an airport, their
+signals, outcomes and word grids) — and a `passed-<code12>.json` is written for each labeller code that reads it again
+the same (`check`, runner `instruction_conformance`, from a clean checkout; the code is named by the LOGIC of
+`LABELLER_MODULES`, `io_utils.logic_sha256`). `require_conforming_labeller` asks for it before labelling, measuring a spec
+or replaying; the sentence files record which code wrote them, as information.
+
+A sentence's words line up row for row with the FIRST `len(words)` rows of its flight's signals (`signal_index` names
+the flight): the sentence ends before its landing — the harvest's and the evaluator's condition (`read.landing_passages`:
+the threshold plane crossed, interpolated with `final_approach.crossing.bracket_fraction`, within `LandingScreen`'s
+1000 m of the centreline capped at half the spacing to a parallel runway — `airport.landing_cross_limit_m`, a MIRROR of
+the harvest's `_runway_bracket_cross_limit` — and within its 100 m above the threshold). The landing is the passage the
+flight never comes back from; a passage it comes back from must lie in a go-around's low pass (`read.flight_go_arounds`)
+or the flight is refused — `read.admit` is the one gate the labeller, the measurements and the figures share. A flight
+with go-arounds is read APPROACH BY APPROACH (D26): each go-around row is the row of its climb word, the descent that
+reaches it says "no level-off", each approach has its own capture row, "unspecified" and speed words, row 0 says the
+first low pass's runway and the runway word that ends a go-around the next approach's; the sentence file keeps each
+go-around's row and the row its runway is said again (`go_around_offsets`). A flight's `typecode` is its OWN ICAO type
+(`source["resolved_typecode"]`) or null; the default `TSConfig` keeps flights without aircraft dynamics (C31). **Since
+artefact v6 (2026-10-02, the user) every row is on the UTC clock's even seconds** (`data.dataset.on_utc_steps`); a
+sentence is put on a coarser row interval Δ (2, 4, 8 s, D25) by `labeller.interval.on_interval` on the UTC multiples of Δ,
+never stored. A spec is the vocabulary's format, not the data's: `instruction_spec --spec-from <artefact>`
+(`artefact.keep_spec`) keeps another artefact's spec byte for byte, and `spec_from.json` says so.
 
 ### C31 · the aircraft filter: drop a flight only where dynamics are used
 
@@ -499,27 +498,31 @@ split's test).
 
 ### C33 · the executor spec: written once, opened for executor code that flies its reference tracks within the bounds
 
-2026-09-24 (`autopilot/spec.py`, `autopilot/replay.py`; executor design §12), **changed 2026-10-01 (the user): the
-executor is checked by what it flies, not by its source**. An executor spec is a directory written once (`spec.json` +
-`measurements.json`, an existing file refuses): the parameters under their own sha, the vocabulary spec sha it was
-measured against, and `source`: the logic hash of the executor code that measured it (`executor_source_sha256` over
-`executor_source_files`: every `autopilot/` module but `spec.py` plus the repository modules they import directly, by
-module name; each file's LOGIC — `spec.logic`, docstrings and comments free) and the labeller's source sha.
-Beside it, `conformance/` (`autopilot/conformance.py`, runner `executor_conformance`, R42): the REFERENCE TRACKS — 50
-labelled train flights an airport (the replay's draw, seed 1337, own dynamics) flown on their labelled words by the
-code that measured the spec, every cycle and every verdict, with each flight's input digest — and one
-`passed-<code12>.json` for each executor code that flew them again within the bounds in EVERY way the executor flies
-(single-aircraft batch, multi-aircraft batch with staggered starts, the single-flight executor): states ≤ 1e-6 m
-horizontally and vertically, other floats ≤ 1e-6, every limit, mode, done cycle, outcome and word verdict equal.
-`replay.open_executor` refuses a spec of another schema, vocabulary or labeller, and opens it only for executor code
-with a passed record against its reference (`spec.require_conforming_executor`); `replay.open_spec` opens it without,
-for the check itself. **A code change whose tracks stay within the bounds needs one check (~30 s), and no spec,
-training or readout is redone; one that leaves them needs a new spec.** v11's reference was written 2026-10-01 from
-`a7a32324` (the executor code that measured it, `a0a6e20bdd84`); `executor_spec` writes a new spec's reference and passed
-record with it. Before 2026-10-01 the spec was bound to the source hash itself (any code change refused every spec: v7 → v11
-came that way); the single-flight executor carried its own source pin (`MIRRORED_SOURCE_SHA256`), now gone.
+2026-09-24 (`autopilot/spec.py`, `autopilot/replay.py`), **changed 2026-10-01 (the user): the executor is checked by what
+it flies, not by its source**; v4 (`ts-executor-spec-v7`, design §5, §9.2 #3, §14.2 A4–A6). An executor spec is a directory
+written once (`spec.json` + `measurements.json`, an existing file refuses): the parameters under their own sha
+(`ExecutorParams`: cycle, roll rate, τ_γ, γ̇_max factor, timeout factor, word clock — every value from the vocabulary, the
+procedure standards or a fixed choice, nothing from data; the decision-altitude check has none, D38), the vocabulary spec
+sha it was measured against, and `source`: the logic hash of the executor code that measured it (`executor_source_sha256`
+over `executor_source_files`: every `autopilot/` module but `spec.py` plus the repository modules they import directly, by
+module name — `evaluation.thresholds` among them; each file's LOGIC, docstrings and comments free). Beside it,
+`conformance/` (`autopilot/conformance.py`, runner `executor_conformance`, R42): the REFERENCE TRACKS — 50 labelled train
+flights an airport (the replay's draw, seed 1337, own dynamics) flown on their labelled words by the code that measured
+the spec, every cycle and every verdict, with each flight's input digest — and one `passed-<code12>.json` for each
+executor code that flew them again within the bounds in EVERY way the executor flies (single-aircraft batch,
+multi-aircraft batch with staggered starts, the single-flight executor): states ≤ 1e-6 m horizontally and vertically,
+other floats ≤ 1e-6, every limit, mode, done cycle, outcome and word verdict equal. `replay.open_executor` refuses a spec of
+another schema or vocabulary, and opens it only for executor code with a passed record against its reference
+(`spec.require_conforming_executor`) and labeller code with one against the artefact's (C30); `replay.open_spec` opens it
+without, for the check itself. **A code change whose tracks stay within the bounds needs one check (~30 s), and no spec,
+training or readout is redone; one that leaves them needs a new spec.** `executor_spec` writes a new spec's reference and
+passed record with it, from a clean checkout. Every `autopilot/` module counts, so a change to `closed_loop.py` or
+`replay.py` asks for the check too.
 
 ### C34 · a prior checkpoint belongs to one sentence artefact
+
+**Archived 2026-10-03 with the instruction-v3 prior** (`archive/two_tier_v3_2026_10/prior/`, design §14.2 A0): this
+entry is the record of that code; the v4 prior is stage B (design §14.3).
 
 2026-09-24 (`experiments/prior_train.py` `load_prior`). A prior is `checkpoint.pt` + `config.json` under
 `ts-prior-checkpoint-v3`, written by `prior_train`, `prior_landing_reward` and `prior_augmented_reward` alike. It is refused
@@ -528,6 +531,9 @@ sentence artefact it is opened with, its candidate-runway table equals the artef
 (`strict=True`). A new artefact under the same spec and labeller (v4 → v5 on 2026-09-26) opens every stored prior.
 
 ### C35 · a prior speaks under the procedure's masks it was trained under, recorded beside its checkpoint
+
+**Archived 2026-10-03 with the instruction-v3 prior** (`archive/two_tier_v3_2026_10/prior/`, design §14.2 A0): this
+entry is the record of that code; the v4 prior is stage B (design §14.3).
 
 2026-09-26 (`prior/masks.py`; prior design §5.1). Two kinds of mask take words away when the prior speaks, kept apart: the
 vocabulary's rules (the grammar, the runway not said again, the listener's lock) are the speaker's own, always on, bound
@@ -562,6 +568,9 @@ package does not reach `instructions` (architecture test): the caller measures c
 
 ### C37 · a traffic prior is a single-aircraft prior with a traffic attention that starts at zero (`ts-prior-checkpoint-v5`)
 
+**Archived 2026-10-03 with the instruction-v3 prior** (`archive/two_tier_v3_2026_10/prior/`, design §14.2 A0): this
+entry is the record of that code; the v4 prior is stage B (design §14.3).
+
 2026-09-28 (multi-aircraft design §2.5, §6.2, §9 items 22–23). `prior.model.with_traffic(model, EDGE_FEATURES)` keeps every
 weight of a single-aircraft prior (augmented, for the multi-aircraft post-training) and adds, in every layer after the
 aircraft attention, a `TrafficAttention`: each aircraft reads only the OTHER aircraft present at its step, the edge
@@ -580,3 +589,24 @@ plus `edge_features`, `traffic_features`, `edge_source_sha256` and `start` (the 
 sha256); `load_prior` reads v3, v4 and v5 by name and checks the edge code of v4 and v5; the single-aircraft `Speaker`
 refuses both.
 
+### C38 · the closed-loop sentences: flown by an executor spec, corrected toward the observed path, checked by what they read
+
+2026-10-04 (`autopilot/closed_loop.py`, `instructions/artefact.py` `write_closed_loop` / `load_closed_loop`, runner
+`instruction_closed_loop` R50; design §4.9, D32–D34). `<artefact>/closed_loop/` is written once, from a clean checkout,
+with an executor spec (C33): for each split and each row interval given (D25), `<split>_<Δ>s.npz`
+(`ts-instruction-closed-loop-v1`, refused unless every field is there and its spec sha is the artefact's): each flown
+flight's words from its first predicted step (Δ row 16 s / Δ; row 0 says every column), which words the reading added
+(`correction`), its states on every Δ row (observed before the first predicted step, flown from it: airport-frame e/n,
+MSL height, track, ground speed, vertical rate), its errors against the observed path (`lateral_m` right positive,
+`vertical_m`), the rows where §4.9 makes no heading / angle correction (`uncorrectable`, D34) and the executor parameters'
+sha it was flown with; `summary.json` counts the flights without a sentence by reason (not flown by `replay.group_of`,
+refused on the row interval, refused by the closed loop — the grammar read at the flown height), the correction words per
+column and the D34 readings. The reading flies the open-loop words on the sentence's own clock and adds one-class heading
+corrections beyond 30 m and one-class angle corrections beyond 15 m under a descent class (the spec's
+`closed_loop_lateral_m` / `closed_loop_vertical_m`), ending under half of it, at a sign change or at a new observed word;
+a level hold is the executor's capture of the level in force (Claude's reading). `conformance/` holds a reference sample
+(train, seed 1337, 10 flights an airport, every row interval written) and a `passed-<code12>.json` per code (the logic of
+the executor's files and the labeller's) that reads it again with the same words, flags and refusals and states within
+1e-6 m; `require_conforming_closed_loop` asks for it before `executor_replay --closed-loop`, which refuses sentences of
+other executor parameters, flies each from its first predicted step on the time clock and requires each flight to fly its
+stored states again.

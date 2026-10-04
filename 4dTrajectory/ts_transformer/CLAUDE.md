@@ -12,7 +12,8 @@ That text was moved there verbatim on 2026-09-16 (this file had reached 118 KB),
 and the 09-14…09-17 additions were placed there the same way on 09-18. The evidence
 behind each line — measurements, campaign results, the causes already ruled out — lives in
 `docs/reference/ENGINEERING_NOTES.md` for the one-tier paths up to 2026-09-10, and in the design and readout
-documents the line names after that; **the two-tier model's status is `docs/two_tier/two_tier_stage_notes.zh.md`**;
+documents the line names after that; **the two-tier model (v4) is `docs/two_tier/two_tier_design.md`** — §0 its
+status and decisions, §14 its plan; its stage reports are in `docs/two_tier/readouts/`;
 mechanism and result tables of the one-tier paths in the package `README.md`; history in the repo's
 `docs/CHANGELOG.md` (2026-07-19, 07-20 ×2; the move itself: 2026-09-16).
 Read the notes before designing an experiment or touching the loss, rollout or output layer.
@@ -50,7 +51,8 @@ of the package, not a migration in progress.
   refused at load, published categories kept (the frontend mirrors `PREDICTION_OUTPUTS_PUBLISHED`).
   Only the rule guidance stayed live, as `outputs/guidance/`. Their numbers:
   `archive/plan_head_2026_09/docs/2026-09-09_plan_and_guidance_design.md` §12, `archive/two_tier_v2_2026_09/docs/2026-09-17_two_tier_plan_v2.zh.md` §10–§12 (P3, P4, P9).
-- **`manoeuvre` — the SECOND LAYER's line; the second layer itself is not built.** The
+- **`manoeuvre` — the first attempt at a second layer, a learned code; it is not the second layer that exists** (the
+  instruction words: `instructions/`, `autopilot/`, design `docs/two_tier/two_tier_design.md`). The
   **intent-code** layer (a learned FSQ code per segment, the executor conditioned on it, a causal
   prior over codes) is **ARCHIVED 2026-09-20**: `archive/manoeuvre_codes_2026_09/` (README there;
   tokenizer, sequences, prior, readout, `plan_token.py`, gates T/X/P/E/S copied to
@@ -63,7 +65,8 @@ of the package, not a migration in progress.
   keeps ONLY `off`; `manoeuvre-code` is refused at load by name (`PLAN_CONDITIONINGS_RETIRED`).
   **Live**: the no-token closed loop — `lockstep.py` (protocol `none`, payload schema
   `ts-manoeuvre-lockstep-v4`), `gates.py` (grid + relative), `failure_modes.py`, runners
-  `manoeuvre_lockstep`, `executor_*`, `two_tier_grid_queue` (R8) — i.e. two-tier v3 stage A
+  `manoeuvre_lockstep`, `executor_grid_gate` / `executor_relative_gate` / `executor_failure_modes`,
+  `two_tier_grid_queue` (R8) — plan v3's stage A of 2026-09-18, NOT the instruction words' `instruction-v3`
   (P10, D30 / D31 / C28 / R7 / R9 are the archived layer's records).
 - **Control-path axes**: `latent_dim > 0` (latent intent z) and `cta_conditioning=given` (the
   given arrival time IS the duration) — their oracle forms READ THE FUTURE and the run name says so
@@ -145,26 +148,28 @@ of the package, not a migration in progress.
 - **A replay finds a checkpoint's manifests by the digest it recorded**
   (`repo_layout.checkpoint_arrival_manifests`): the live harvest or a FROZEN generation
   (`harvest-v5-20260823` holds every checkpoint of 2026-08-24..09-23); never by path (C29).
-- **The instruction sentence artefact** (`instructions/`, 2026-09-23): one spec sha, written once and
-  refused on a sha mismatch; the LABELLER's source hash is part of it (a spec measured by other code
-  refuses to label); candidates = the manifest's CIFP runway geometry; one gate (`read.admit`) for
-  labelling and measuring; a sentence's words align with the FIRST `len(words)` rows of its
-  signals (it ends before the landing — since `instruction-v2` the harvest's condition, parallel runways
-  from every runway end the harvest builds; the labeller, the judge and the display share one heading-word check,
-  `envelope.heading_words_inside`, since `instruction-v3`); since v6 (2026-10-02) every row is on the UTC even
-  seconds — a scene refuses an artefact whose rows are not; `--spec-from` keeps another artefact's spec (C30).
+- **The instruction sentence artefact** (`instructions/`; v4: reading `instruction-v4`, spec `ts-instruction-spec-v5`,
+  sentences `ts-instruction-sentences-v3`): one spec sha, written once and refused on a sha mismatch; the LABELLER is
+  identified by what it reads, never by its source (design D21): `conformance/` holds a reference sample and a
+  `passed-<code>.json` per labeller code that reads it again the same (`instructions/conformance.py`, runner
+  `instruction_conformance`), which every later runner asks for; candidates = the manifest's CIFP runway geometry; one
+  gate (`read.admit`) for labelling and measuring; a sentence's words align with the FIRST `len(words)` rows of its
+  signals (it ends before the landing); a flight with go-arounds is read approach by approach (D26); since v6
+  (2026-10-02) every row is on the UTC even seconds; `--spec-from` keeps another artefact's spec (C30).
+- **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v1`; design §4.9, D32): each
+  split × row interval — the open-loop words flown from the first predicted step by an executor spec, with heading and
+  angle corrections, the flown states, the errors against the observed path and the rows that allow no correction
+  (D34); written once by `instruction_closed_loop` with its own reference and passed record, read only for code that
+  passed it (`closed_loop.require_conforming_closed_loop`) (C38).
 - **An executor spec opens only for executor code that flies its reference tracks within the bounds** (2026-10-01, the
-  user: checked by what it flies, not by its source): `conformance/` beside the spec — 250 labelled train flights flown by
-  the spec's code — and a `passed-<code>.json` per executor code that flew them again in every way (single-aircraft batch,
-  multi-aircraft batch, single flight) within 1e-6 m (`spec.require_conforming_executor`, runner `executor_conformance`);
-  a code change that stays within the bounds needs one ~30 s check and nothing is retrained; the vocabulary and the
-  labeller still bind by sha (C33). **A prior belongs to
-  one sentence artefact**: spec, labeller, day split and candidate table must match (`ts-prior-checkpoint-v3`, C34).
-  **A prior speaks under the procedure's masks it was trained under**: named sets, recorded beside its checkpoint
-  (`procedure_masks.json`, `prior/masks.py`), read by `load_prior`; the vocabulary's rules apart, always on (C35).
-  **A traffic prior** (`ts-prior-checkpoint-v5`, `prior.model.with_traffic`) is a single-aircraft prior plus a traffic
-  attention reading only the other aircraft, its output layer at zero: it answers as the single prior does alone, to
-  rounding, until it learns (C37).
+  user: checked by what it flies, not by its source; `ts-executor-spec-v7`): `conformance/` beside the spec — 250
+  labelled train flights flown by the spec's code — and a `passed-<code>.json` per executor code that flew them again in
+  every way (single-aircraft batch, multi-aircraft batch, single flight) within 1e-6 m (`spec.require_conforming_executor`,
+  runner `executor_conformance`); a code change that stays within the bounds needs one ~30 s check and nothing is
+  retrained; the vocabulary binds by its spec sha, the labeller by its conformance; the judge's decision-altitude check
+  has no parameter (D38: the evaluation's ±22 m and the FAS cone) (C33). **C34 (a prior belongs to one sentence
+  artefact), C35 (a prior speaks under its procedure's masks) and C37 (the traffic prior) describe the instruction-v3
+  prior, archived with it** (`archive/two_tier_v3_2026_10/prior/`); the v4 prior is stage B (design §14.3).
 - **Loss of separation has ONE judge, two readings** (`inference/separation.py`, 2026-09-27): `IFR` (7110.65BB as written)
   and `VISUAL` — the closed loop's checks and reward — = 7-4-4 c with visual approach clearances and NEVER visual
   separation: parallels ≥ 2,500 ft free once both are turned in (≤ 30°, own side of the midline), close pairs one runway,
@@ -187,9 +192,9 @@ of the package, not a migration in progress.
 | `coordinate_frame` | `enu` | keep; `airport-enu` / `runway-aligned` FROZEN (D1) |
 | `state_position_reference` | `absolute` | `corridor-bounded` adopted as candidate default; `anchor-relative` VETOED — stored configs load, new runs cannot select it (`*_AVAILABLE`) (D2) |
 | control recipe | `simple-v3` | imitation weight 64.0 does NOT transfer between airports; a latent run is `custom` (D3) |
-| `control_thrust_parameterization` | `thrust-fraction` | `specific-force` (the head predicts `n_x = (T−D)/W`) measured on N3: **NOT adopted** — straight-in FDE p50 +240 / +222 m, and the cause is the last 5 km's height/speed SPLIT (open-loop vertical load), not the missing drag feedback (D25) |
+| `control_thrust_parameterization` | `thrust-fraction` | `specific-force` (the head predicts `n_x = (T−D)/W`): **NOT adopted** — worse straight-in FDE, from the last 5 km's height/speed split (D25) |
 | `control_thrust_parameterization` = `speed-command` | — | N6: **ran 2026-09-15 and FAILED, unstable in training** — do not train it again as is; its premise was wrong too (D26) |
-| `control_thrust_parameterization` = `specific-force+path-angle` | — | N7′: the third column is a path-angle target flown by a 3 s loop. **Passes every pre-registered gate on both seeds** — fully flyable 97.7 / 97.4 % against the twin's 0.4 / 0.2 %, straight-in FDE p50 543 / 559 vs 647 / 663, pooled ADE 1173 / 1182 vs 1325 / 1295. ONE regression: vectored FDE p50 +625 / +704 m, unexplained (not turn authority). **Adoption is the user's call** (D27) |
+| `control_thrust_parameterization` = `specific-force+path-angle` | — | N7′, a path-angle target flown by a 3 s loop: passes every pre-registered gate on both seeds, one unexplained regression (vectored FDE); **adoption is the user's call** (D27) |
 | `control_condition_features` | `raw` | `ratios` carries the SAME information at the SAME width (so a ratios arm starts from its raw twin's weights); 4 of the 8 raw channels are constant on this fleet. Built, not yet measured (D28) |
 | `control_horizon_s` | `0` (whole approach) | two-tier L1: a FIXED rollout horizon Δ — ONE span definition (`dataset.target_horizon_s`), ONE floor rule (`dataset.effective_min_future_s`), and every duration-deciding axis (CTA, quantile head, `final_time_loss_weight`, latent, imitation teacher) refused. **An L1 arm's numbers are its readouts' [0, Δ], never the record summary's** whole-remainder ADE/FDE (D29) |
 | `plan_conditioning` | `off` | **`off` is the only value**: `manoeuvre-code` ARCHIVED 2026-09-20 (D30 / D31 are its record) and `truth-next` / `waypoints` 2026-09-18 — all three refused at load by name, each pointing at its own archive (`PLAN_CONDITIONINGS_RETIRED`) |
@@ -306,15 +311,16 @@ of the package, not a migration in progress.
 - A module belongs under `outputs/control/` only if EVERY consumer is control-specific (L23);
   import direction rules, all enforced by `tests/test_architecture.py` (L24). **Between paths**: the
   guidance layer never imports the control path (L28). **`manoeuvre/`**: **nothing under `outputs/`
-  imports `manoeuvre`**; only the runners do (L29). **`instructions/`** (2026-09-23): the second
-  layer's language — vocabulary, signals, envelopes, labeller, artefact; torch-free, below every
-  model, consumed by the runners and the executor (L30). **`autopilot/`** (2026-09-24): the executor —
+  imports `manoeuvre`**; only the runners do (L29). **`instructions/`** (2026-09-23; v4 2026-10-03): the second
+  layer's language — vocabulary, grammar (one function the labeller checks and a speaker masks with), signals,
+  envelopes, labeller, its conformance, the artefact; torch-free, below every model, consumed by the runners and
+  `autopilot/` (L30). **`autopilot/`** (2026-09-24): the executor —
   flies the words through the control path's point-mass dynamics one 1 s cycle at a time (that backend
   runs no hooks), exact inverse, limits in order; three ways to fly (a single-aircraft batch, a multi-aircraft batch —
   `Executor(start_cycle=…)`, each flight from its own cycle, `halt` — and the single flight, `single.py`, plain floats);
-  imports no model, training or path package (L31). **`prior/`**
-  (2026-09-24): the prior — data, scenes, model, training, the speaker, the glidepath edge; reads only the instruction
-  language, the day split and `data.runway_context`, never the executor; only the runners join the two (L32).
+  imports no model, training or path package; `closed_loop.py` is the labeller's closed-loop reading, here because it
+  flies the executor (L31). **`prior/`**: archived with instruction-v3 (`archive/two_tier_v3_2026_10/prior/`); stage B
+  rebuilds it from design §6 (L32).
 - Every CLI flag is named after the `TSConfig` field it sets, parsers use `allow_abbrev=False`;
   the exceptions are listed (L25).
 - `run_naming.py` is the single naming grammar and every field is named or excused;
@@ -328,13 +334,13 @@ pooled checkpoint's bin cannot be published per airport (R1). `eta_calibration` 
 head alone, half A fits the deployed δ and half B measures, a single cut's coverage carries cut
 noise (sd ≈ 0.05, sign flips), the table is a sidecar never in `data_provenance` (R2).
 `quantile_fan_readout` — B3; the geometric column is a readout, not a coverage guarantee;
-`cal.hit*` is in-sample on val (R3). `eta_error_readout` — B0; |Δt| p80 is 65.8–72.5 s vectored against
-12.0–20.3 s straight-in (KRDU val), so one pooled ETA interval cannot serve both (R4). `latent_probe` — L2.f;
+`cal.hit*` is in-sample on val (R3). `eta_error_readout` — B0; vectored and straight-in errors differ several-fold,
+so one pooled ETA interval cannot serve both (R4). `latent_probe` — L2.f;
 `--limit N` is a prefix (a smoke test); the posterior reads the future (R5). `latent_fan_readout`
 — 4(a); the RANDOM fan is the reading, not a footnote (R6). **`manoeuvre_codebook` / `manoeuvre_readout` /
 `manoeuvre_prior` / `manoeuvre_prior_readout` / `manoeuvre_gates` / `manoeuvre_code_atlas`** —
-ARCHIVED 2026-09-20 (`archive/manoeuvre_codes_2026_09/`; R7 is their record). **Two-tier v3
-stage A** (2026-09-18): `plan_cohort --arms` writes one development cohort PER CELL from one load (an arm's
+ARCHIVED 2026-09-20 (`archive/manoeuvre_codes_2026_09/`; R7 is their record). **Plan v3's
+stage A** (2026-09-18, the manoeuvre line, not `instruction-v3`): `plan_cohort --arms` writes one development cohort PER CELL from one load (an arm's
 own `development_cohort` wins over the file's; `frame_ablation --only` trains a subset); `manoeuvre_lockstep`
 flies the no-token closed loop (schema `ts-manoeuvre-lockstep-v4`) and `--anchor-remaining-km X` starts it at the remaining-path bin
 (`lockstep.from_remaining_path` + `dataset.series_from_row`: the same flight first seen at the bin's row) and
@@ -346,135 +352,17 @@ for every lookback — reading (a) from L−1 confounds lookback with starting p
 protocol-none baseline on the common flights (§3.3 rows A3 / B / B1, the seed line named, never typed in; it reads
 THIS code's schema only, no compatibility) (R8). **Stage B's intent-code queue** (`two_tier_b_queue`, 2026-09-19):
 ARCHIVED 2026-09-20 (R9 is its record); `manoeuvre_lockstep --cohort` stayed (B0's re-read on the B cohort = the
-grid's L60_D60 cohort). **The instruction labeller** (2026-09-23): `instruction_signals` →
-`instruction_spec` (measured on TRAIN only) → `instruction_labels` → `instruction_figures`, each into
-one never-overwritten artefact directory (R10). `instruction_training_export` writes the frontend's Training sets
-from that artefact — a seeded per-airport VAL sample, every flight re-read against its stored sentence, every envelope's
-geometry from `instructions/display.py` (instruction-v3: a heading word is its band over its judged rows, row verdicts
-checked against the labeller's count; sample v7), added to each airport's `training/index.json` without touching its other
-sets (R11).
-**The executor** (2026-09-24): `executor_spec` (data on train, methods A and B, a clean tree, written once) →
-`executor_sensitivity` (train, one parameter at a time; a negative delay is a probe) → `executor_replay` (the §11 gate
-readout through evaluation, paired with the observed verdicts; val = stage 4, only on the user's go-ahead) (R12).
-**Publishing the executor and the prior** (2026-09-24): `executor_training_export` / `prior_training_export` write
-OVERLAYS beside a Training set (`training/overlays.json`; every re-flown flight must reproduce its formal replay row — a
-heading word's verdict is the judge's per-row band result, exported with its band, overlay v2 — the prior's path reproduces
-its val readout; the executor export runs from a worktree — the spec's hash counts `geokit` from the main checkout), and the
-root publisher's `--executor-replay` files the replay's records under Experiments (R13). `prior_generation_training_export`
-(2026-09-26) writes a model's OWN sentences over a set — free generation's own loop under the model's OWN procedure's masks (read by `said_rows`, the glidepath stop included),
-`--samples` a flight, words + flown track + outcome, the model NAMED from its config (base / landing / augmented, its round,
-run and start model; `MODEL_NAMES` is a frontend mirror), the formal val readout bound by prior / spec / artefact; with
-`--augment-seed` from stage 2's augmented starts instead, a kind + schema of its own (R13).
-`heading_reading_compare` (ARCHIVED 2026-09-24 with the holds reading) flew one train sample under every heading reading at
-fixed executor parameters, pairing evaluation with the observed flights graded by the same code (vocabulary design §10.1) (R14).
-**The prior** (third version, 2026-09-24): `prior_train` (one variant — landing context, ordered heads — on single-aircraft
-scenes of the day split's train days, read on the select days; checkpoint `ts-prior-checkpoint-v3`) → `prior_select` (the
-rule of readouts §4, then the ONE val readout on the chosen run); the first `N_LOOK` = 8 rows are observed only, the first
-predicted step says every column, inputs are only what is known before the step (R15). **Free generation**
-(`prior_free_generation`, design §9.1): the prior speaks (`prior.generate.Speaker`, column order, the vocabulary's
-compatibility rules as a decode mask via `instructions.grammar`) and the stepped executor (`autopilot.executor.Executor`,
-`sentence.Spoken`; `fly()` is its loop, flights unchanged state for state) flies each step; the labelled words from the
-same row are the reference (R17). The speaker encodes row by row (`Prior.extend`). **The landing
-reward** (`prior_landing_reward`, design §9.3): free sentences, 1 for landing in the airport's landing direction, each
-compared with its flight's others; the clipped-ratio surrogate (PPO/GRPO, ε 0.2, against the model frozen at the pass's
-start — without it a pass's stale sentences ran the model from the base, readouts §15) + the KL to the frozen reference +
-the teacher-forced data term (`train.RewardTuner`, dropout off), the round chosen on select within guards (R19). **The procedure's altitudes** (post-training design §3): `prior/procedure.py` (the glidepath lower edge = the
-published glidepath − 60 m inside the FAF and the LPV cone, nowhere else — the RNAV floors outside the FAF disagree with
-10–14 % of the recorded tracks); before the join (the first row inside that region) the published DA, and no climbing back
-once under the entry height (2026-09-26), the set `procedure-altitudes-v2` (C35); under it `prior_free_generation`
-masks the altitude and angle columns,
-stops a sentence at the first flown step below the edge (outcome `below_glidepath`) and reads each sentence before the
-join beside the observed track (under the DA, climbing back, under the FAA MVA — `prior/mva.py`, a readout only; schema
-v4); `prior_procedure_check` measures them on labelled data before training (R20). **Post-training stage 2**
-(`prior_augmented_reward`, R21): half real, half augmented starts (`prior.augment`, time limit × 2.0), the masks, the
-terminal reward, scored under the masks each sentence was said under;
-the first stage's loss (reward + 0.04 × the pull to the base model + 1 × the teacher-forced data term — without the data
-term the pull alone could not hold it, readouts §9), and the rounds are guarded by words per flight against the
-labelled words on both start kinds, not by the teacher-forced NLL. **Why the labelled replays sink below the edge** (`prior_glidepath_diagnosis`, R22): the
-executor against the observed aircraft cycle by cycle, the height given up by word, and a one-line what-if of the vertical
-law run in-process (readouts §12). **The heading-lead ablation** (`heading_lead_ablation`, R23, 2026-09-27): L, the bank limit and p moved
-over the formal train replay's sample, relabelled and flown with no hashed code touched; the reference cell must reproduce the
-formal replay first; words inside compare neither across L nor across the bank limit. **Multi-aircraft M0**
-(2026-09-27): `traffic_census` judges the training days' observed traffic under both readings (C36) into a new directory
-(`ts-traffic-census-v3`; formal `census_20260927`: 0.98 vs 0.60 pairs/h; on v6 `census_v6_20261002`: the same, `A_max` 18) (R24); `traffic_separation_examples` draws five
-typical recorded losses for the readout (R25); `traffic_labelled` flies every labelled flight on its labelled words together
-in the scene closed loop (`experiments/traffic_loop.py`, shared with M3/M4) beside the same flights along their records
-(formal `labelled_v2_20260928`: 3.93 vs 2.76 % ended under VISUAL; the pass line gates the executor's addition; on v6
-`labelled_v6_20261002`: 3.90 vs 2.77 %; CPU only — `--device cuda` hits torch.compile's recompile limit) (R26);
-`traffic_masks` measures the loop's two separation masks (`inference/separation_masks.py`: speed words, approach
-clearance; computed by the loop and handed to the speaker, the prior never imports them; a fallback masks nothing) on
-the labelled words (formal `masks_v2_20260928`: 0.32 % masked; on v6 `masks_v6_20261002`: 0.32 %) (R27); `traffic_interaction` is M1 — the base prior's NLL
-on steps with a leader / busy, matched on phase and airport (formal `interaction_20260928`: speed +0.0077 with a leader) (R28). `traffic_prior_train` is M2 — base's recipe on scene samples with 17 edge features
-(`inference/scene_edges.py`: motion from the row before, never the fitted velocities), checkpoint `ts-prior-checkpoint-v4`
-pinned to the edge code by `edge_source_sha256` (R29). `traffic_scene_readout` reads it against base on the select days — scene
-− base and scene − alone (attention between aircraft cut) on leader / busy steps (formal `scene_readout_20260928` and, with 4 batches
-per update, `scene_readout_acc4_20260928`: better nowhere, 0.2880 / 0.2868 vs 0.2839; the M1 gap stays) (R30).
-`traffic_window_generation` is M3's second pass — every aircraft of a 20-minute window commanded at once
-(`experiments/traffic_window.py` WindowLoop, `prior/window_speaker.py`: rounds from the front of the approach clock,
-executors grouped by first spoken step, the judge run as it flies, ended aircraft flying on silent), beside alone /
-labelled / recorded, all judged in the window; **it reads only `--config`** (`ReadoutConfig`, one loader: unknown / missing
-required keys refused, defaults filled) and writes config.json / code.json / aircraft.jsonl / summary.json / run.json, no
-readout-wide schema (design §6.6 step 9.9, 2026-10-03); `augment_seed` on augmented windows (`experiments/traffic_window_augment.py`:
-the flow compressed, a start moved, a flight inserted and commanded; capped at the airport's busiest training step);
-`commanded` `one` reads the setting "一架由模型指挥" there — a window a flight (`replay.draw`'s), the others replayed, augmented
-by its leader moved / its start moved / a flight inserted and replayed (`KINDS_OF`) (R34).
-`prior_generation_records` flies a free-generation readout's STORED sentences again (the readout's draw and chunks; every
-sentence must reproduce its readout row) and writes them as evaluation records per sample — ADE / FDE from row `N_LOOK`
-against the observed flight, the evaluation's pass rate over every sentence, best of the samples; an augmented start has no
-truth, so its readout carries the pass rate only; the root publisher's `--generation-records` files each kind × airport as
-one Experiments category (R35).
-`prior_generation_grading` grades such a run on the runway each sentence last pointed at and CROSSED (a graded copy of
-each such other-runway record against that runway's own threshold point; the evaluation grades `source.runway`, the observed flight's) and splits
-FDE into time and place over the landed sentences — FDE is the distance at the observed landing TIME, so a late arrival
-scores its lateness × speed; the arrival endpoint error is where it landed (R38).
-`window_training_export` writes R34's windows for the frontend's Training
-module — a model-free window set (`traffic-windows`: 20 select windows an airport of the readouts' draw, by size) and a
-`window-generation` overlay per prior on its OWN draws (no readout re-run; `--readout` only copies summaries); the landings
-are the aircraft whose own end is a landing; the M4 model is named `traffic`, M4 in windows (R37) `window` — an R37 run with `--commanded one` `traffic` again
-(the user, 2026-10-03; `WINDOW_MODELS`) (R36).
-`traffic_window_reward` is M4 in windows — M4's round protocol (`experiments/traffic_rounds.py`: the speaking processes,
-per-round streams, `--resume`, the guarded choice on paired standard errors) over window samples: every commanded aircraft
-rewarded, its advantage
-against its own samples, each sample scored whole as the speaker read it (`experiments/traffic_window_tuner.py`, the one layout
-`window_inputs` / `window_edges`, encoded in blocks of steps so every window fits the GPU; checks the formal size before it
-speaks; `--commanded one` trains in the one-commanded setting (design §6.6 step 9, refused with hard events); probes may sweep
-several passes; `--events` adds hard events from training-day R43 runs — the other
-aircraft given their original words, only the answered one trained — and `--select-events` reads select-day ones every
-round, `experiments/traffic_window_events.py`) (R37).
-`traffic_window_reward_readout` reads such a run round by round, running or ended, from its files — paired against round 0
-as the round choice pairs (R39).
-`traffic_window_compare` (renamed from `traffic_window_pair` 2026-10-03) compares two MODELS' window readouts aircraft by
-aircraft: refused unless the configurations differ only in the model, the code versions are equal and clean or an R44 record
-shows one readout reads the same under the other's code, and the model-free rows are equal; second − first per measure over
-the sentences counted in both, errors clustered by airport × operating day (R41).
-`traffic_window_conformance` re-reads 24 batches of a window readout from its own config under today's code (after the whole
-draw) and compares the rows field by field; passed on a clean checkout → `<readout>.conformance/passed-<commit12>-<device>.json`, the
-evidence R41 accepts (design §6.6 step 9.9.2; same idea as R42) (R44).
-`traffic_window_probe_readout` speaks an R37 run's training rounds again (checked word for word against `sentences.npz`; R37's
-`round_windows`) and reads, under every model of the run, the probability of the go-around word at each probe's step — the
-term the probe's cross-entropy trains (`traffic_window_tuner.forced_go_around_log_p`) (R45).
-`traffic_window_rewind` asks whether a window's losses of separation can be undone by rewinding ONE aircraft — each loss's
-aircraft speaks again from 10–120 s before it (or its start), the others given the words they said (`traffic_window.Given`:
-not sampled, not masked), 8 branches an offset, a control that must replay the original pass to the last field; `--offsets-s`
-empty runs `start` alone, `--roles` limits who speaks again, `original_words.npz` keeps the original words (R43).
-`executor_conformance` flies a spec's reference tracks again with the code on disk in every way the executor flies and
-writes the passed record `replay.open_executor` asks for; `--write-reference` writes a spec's reference first, from a clean
-checkout with the code that measured it (`autopilot/conformance.py`; executor design §12.3) (R42).
-`go_around_census` is multi-aircraft step 8's first measurement — every go-around in the training days' stored landing tracks
-(stray samples of other aircraft set aside first; a low pass on any runway end's final, came down to it and climbed away,
-each level HELD 20 s), timed to its landing, placed against the arrival slice and the labelled sentence, beside today's
-time-limit slack; touch-and-goes and landings that were not the last (a low go-around stored as the landing) set aside and
-listed; a loop that left the 30 km crop is unseen; v2 adds, inside a labelled sentence, the time to the clearance /
-capture turn of the approach that followed, and every go-around's first 150 m of climb against 200 ft per NM (R40).
-`instruction_word_frames` / `instruction_final_approach` read an instruction artefact for the next design's evidence
-(`docs/two_tier/two_tier_design.md` §11): heading and level words per airport, absolute against the labelled runway's
-frame, and each course's offset from the heading grid (R48); the clearance and "descend to land" rows, and the height
-over the published glidepath after the capture row (R49).
-**Every Training export writes the attitude each track is drawn in** (`experiments/training_attitude.py`, 2026-09-30): heading,
-path angle, right bank and an attack READING — executor tracks from its states and the command of the cycle starting at each row
-(the track's end: the cycle ending there), observed tracks from `rebuild_series` + the teacher's `actual_controls`, none for a flight
-without an airframe; read-only on `autopilot/`, `outputs/dynamics/`, `traffic_window*.py` (sample v8, traffic v2, executor v5,
-generation v5, augmented v3, window-generation v2; frontend AV42).
+grid's L60_D60 cohort). **The two-tier model, v4** (design `docs/two_tier/two_tier_design.md` §14): `instruction_signals` →
+`instruction_spec` (measured on TRAIN only) → `instruction_labels` (writes the labeller's reference) →
+`instruction_conformance` (the passed record every later step asks for) (R10) → `executor_spec` (no value from data; writes
+its reference tracks and passed record; clean tree) (R12) → `instruction_closed_loop` (the closed-loop sentences of every
+split at each row interval, their reference and passed record; clean tree; `--check` re-checks) (R50) →
+`executor_replay` (`--row-interval-s`, `--closed-loop`; no criterion is read; select and val from a clean tree) (R12);
+`executor_conformance` checks a spec's reference after an `autopilot/` change (R42); `instruction_figures` draws val pages
+(R10). **Archived with instruction-v3** (`archive/two_tier_v3_2026_10/`, its README; their manual entries stay as the
+record): the Training exports and the attitude they draw (R11, R13), `executor_sensitivity` (R12), the prior and its
+post-training (R15–R22, R35, R38), `heading_lead_ablation` (R23), the multi-aircraft runners (R24–R39, R41, R43–R45),
+`go_around_census` (R40), `instruction_word_frames` / `instruction_final_approach` (R48, R49); R14 went 2026-09-24.
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 
@@ -523,13 +411,13 @@ generation v5, augmented v3, window-generation v2; frontend AV42).
 | doing this | read first |
 |---|---|
 | finding any document (what is current, what is history, where the archived lines' documents went) | `docs/README.md` |
-| picking up the two-tier model (the current line) | `docs/two_tier/two_tier_stage_notes.zh.md` (status, artefacts, decisions, next step), then W2 |
+| picking up the two-tier model (the current line) | `docs/two_tier/two_tier_design.md` (§0 status and decisions, §14 the plan by stage), the latest stage report in `docs/two_tier/readouts/`, then W2 |
 | designing a one-tier experiment / changing loss, rollout, output layer | `docs/reference/ENGINEERING_NOTES.md` (evidence up to 2026-09-10) |
 | checking what a one-tier campaign settled | `docs/history/OPEN_ITEMS_2026-09-18.md` (up to 2026-09-18) and the defaults table above |
 | putting the procedure constraint into TRAINING as a hard constraint, or the lazy-network / gate question | `docs/history/2026-09_constraints/2026-09-08_hard_constraints_survey_and_integration_plan.md` §3 — a literature survey with formulas; its H0–H6 plan was never built (papers in repo `docs/literature/procedure_hard_constraints/`). The two-tier model's procedure constraint is a decode mask: post-training design §3 |
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
 | comparing airports or quoting an ADE | `data/approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
 | predicting the landing runway (runway intent), multi-runway scheduling | `docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` (status by stage R0–R4: W1). The separation rules themselves: `inference/runway_schedule.py` and repo `docs/literature/arrival_separation/` |
-| building or reading the **two-tier model** (a prior that says controller-like words, an executor that flies them; later several aircraft with separation masks) | the stage notes, then **`docs/two_tier/two_tier_framework.zh.md`** (layers, packages, artefacts, gates), **`docs/two_tier/instruction_vocabulary_design.zh.md`** (the words, envelopes, labeller, values), **`docs/two_tier/executor_design.zh.md`**, **`docs/two_tier/prior_design.zh.md`**, **`docs/two_tier/post_training_design.zh.md`**, **`docs/two_tier/multi_aircraft_design.zh.md`** (several aircraft: scenes, augmentation, separation, sequencing; draft); readouts `docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md`. Plans v2 / v3, the intent-code plan and the 09-16 feasibility doc are SUPERSEDED — only their measurements are citable: W2 |
+| building or reading the **two-tier model** (a prior that says controller-like words, an executor that flies them; later several aircraft with separation masks) | `docs/two_tier/two_tier_design.md` §3–§9 (vocabulary, labeller, executor, prior, post-training, multi-aircraft) and its key code index §13. The Chinese framework / vocabulary / executor / prior / post-training / multi-aircraft documents and `two_tier_stage_notes.zh.md` describe instruction-v3: its record, cited by the design for derivations and evidence; W2 |
 | the full text behind any line of this index | `docs/reference/*.md`, by ID |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |
