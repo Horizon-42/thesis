@@ -87,7 +87,7 @@ function flyOut(viewer: Cesium.Viewer, view: Ready) {
       font: "600 12px sans-serif",
       // white on the segment's colour: the simulated clock must read over any terrain
       fillColor: Cesium.Color.WHITE, showBackground: true, backgroundColor: colour(hue, 0.85), style: Cesium.LabelStyle.FILL,
-      pixelOffset: new Cesium.Cartesian2(0, -20), disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      pixelOffset: new Cesium.Cartesian2(0, -44), disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
   });
   const land = () => {

@@ -36,6 +36,7 @@ from ts_transformer.data.day_split import DEVELOPMENT_SPLITS, DaySplit, landing_
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.labeller.interval import interval_rows, on_interval_rows
 from ts_transformer.instructions.labeller.read import Reading
+from ts_transformer.instructions.readout import STRATA, stratum
 from ts_transformer.instructions.signals import SIGNALS_SCHEMA, FlightSignals, pack_signals, unpack_signals
 from ts_transformer.instructions.spec import SPEC_SCHEMA, VocabularySpec
 from ts_transformer.io_utils import utc_now, write_bytes_atomic, write_json_atomic
@@ -43,7 +44,9 @@ from ts_transformer.io_utils import utc_now, write_bytes_atomic, write_json_atom
 #: v3 (instruction-v4): five columns; per sentence the runway, the capture row, the "unspecified" row and the go-around
 #: rows (each go-around's row and the row the runway is said again); no clearance row and no labeller source hash.
 #: v4 (instruction-v5, D58): the altitude words are levels above the airport elevation E, not MSL.
-SENTENCES_SCHEMA = "ts-instruction-sentences-v4"
+#: v5 (A27, D70): each sentence's stratum by its name (`readout.STRATA`, from `readout.stratum`): for readouts and strata,
+#: never an input (it reads the turns before the capture row).
+SENTENCES_SCHEMA = "ts-instruction-sentences-v5"
 #: v3 (A22, D61): each candidate carries its published vertical path (TCH, glidepath angle, DA above the threshold).
 CANDIDATES_SCHEMA = "ts-instruction-candidates-v3"
 #: The splits an artefact holds: the development operating days (the internal selection set is its
@@ -172,8 +175,8 @@ def write_sentences(directory: Path, split: str, spec: VocabularySpec, readings:
     position in ``signals_<split>.npz``. A sentence's words line up row for row with the first
     ``len(words)`` rows of its signals (the rows before the threshold crossing). Sentence ``k``'s
     go-arounds are ``go_around_row[go_around_offsets[k]: go_around_offsets[k + 1]]`` (and the rows the
-    runway is said again, ``runway_again_row``, alike). ``labeller_code_sha256`` names the code that
-    read them (`instructions.conformance.labeller_code_sha256`): information, never checked."""
+    runway is said again, ``runway_again_row``, alike); ``stratum`` is each one's stratum by name (D70). ``labeller_code_sha256``
+    names the code that read them (`instructions.conformance.labeller_code_sha256`): information, never checked."""
     lengths = np.array([len(r.words) for r in readings], dtype=np.int64)
     counts = np.array([len(r.go_around_rows) for r in readings], dtype=np.int64)
     instructions = [(f, i.column, i.value, i.row) for f, r in enumerate(readings) for i in r.instructions]
@@ -187,6 +190,7 @@ def write_sentences(directory: Path, split: str, spec: VocabularySpec, readings:
         words=np.concatenate([r.words for r in readings]).astype(np.int16),
         signal_index=np.asarray(signal_index, dtype=np.int64),
         runway_index=np.array([r.runway_index for r in readings], dtype=np.int64),
+        stratum=np.array([stratum(r) for r in readings], dtype=np.str_),
         capture_row=np.array([r.capture_row for r in readings], dtype=np.int64),
         unspecified_row=np.array([r.unspecified_row for r in readings], dtype=np.int64),
         go_around_offsets=np.concatenate(([0], np.cumsum(counts))).astype(np.int64),
@@ -198,7 +202,8 @@ def write_sentences(directory: Path, split: str, spec: VocabularySpec, readings:
 
 
 def load_sentences(directory: Path, split: str, spec: VocabularySpec) -> dict[str, np.ndarray]:
-    """One split's sentences, refused unless they are this schema's and were read with ``spec``."""
+    """One split's sentences, refused unless they are this schema's, were read with ``spec`` and name every stratum
+    among `STRATA`."""
     with np.load(directory / f"sentences_{split}.npz") as arrays:
         data = {name: arrays[name] for name in arrays.files}
     if str(data["schema"]) != SENTENCES_SCHEMA:
@@ -206,6 +211,9 @@ def load_sentences(directory: Path, split: str, spec: VocabularySpec) -> dict[st
     if str(data["spec_sha256"]) != spec.sha256:
         raise ValueError(f"sentences_{split}.npz was read with spec {str(data['spec_sha256'])[:12]}, "
                          f"not {spec.sha256[:12]}")
+    unknown = set(data["stratum"].tolist()) - set(STRATA)
+    if unknown:
+        raise ValueError(f"sentences_{split}.npz names strata {sorted(unknown)}, not among {STRATA}")
     return data
 
 

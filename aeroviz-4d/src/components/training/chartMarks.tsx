@@ -6,7 +6,7 @@
  */
 
 import { TRAINING_CORRECTION_COLOR, trainingOutcomeColour } from "../../utils/trainingWordColors";
-import { formatSeconds, type TrainingColumn, type TrainingEvent } from "../../data/trainingSample";
+import { closedCycleTimeS, formatSeconds, type TrainingColumn, type TrainingEvent } from "../../data/trainingSample";
 import { replayText, TRAINING_OUTCOME_TAG } from "../../data/trainingText";
 import { VLine } from "./chartKit";
 import type { ReadbackModel } from "./readbackModel";
@@ -34,8 +34,8 @@ export function CorrectionTicks({ m, columns, bottom, colour = TRAINING_CORRECTI
  *  sentence, which was not flown). */
 export function OutcomeLine({ m, top, bottom }: { m: ReadbackModel; top: number; bottom: number }) {
   if (m.closed === null) return null;
-  const { replay, startS } = m.closed;
-  const atS = startS + replay.endCycle;
+  const { replay } = m.closed;
+  const atS = closedCycleTimeS(m.closed, replay.endCycle);
   return (
     <VLine x={m.xTime(Math.min(atS, m.endS))} top={top} bottom={bottom} stroke={trainingOutcomeColour(replay.outcome)} dash="2 3"
       title={`the flown flight ended at ${formatSeconds(atS)} s: ${TRAINING_OUTCOME_TAG[replay.outcome]} — ${replayText(replay)}`} />

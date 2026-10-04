@@ -24,6 +24,7 @@ import {
   trainingOutcomeColour,
 } from "../../utils/trainingWordColors";
 import {
+  closedCycleTimeS,
   correctionCount,
   trainingSelectionOf,
   type TrainingClosedLoop,
@@ -66,7 +67,7 @@ function FlownBlock({ closed }: { closed: TrainingClosedLoop }) {
       <div>
         <dt>Flown flight · Δ {closed.rowIntervalS} s</dt>
         <dd style={{ color: trainingOutcomeColour(replay.outcome) }} title={TRAINING_OUTCOME_TEXT[replay.outcome]}>
-          {TRAINING_OUTCOME_TAG[replay.outcome]} at {closed.startS + replay.endCycle} s
+          {TRAINING_OUTCOME_TAG[replay.outcome]} at {closedCycleTimeS(closed, replay.endCycle)} s
         </dd>
       </div>
       <div>
@@ -172,7 +173,7 @@ export default function TrainingFlightSession({ airport, sample, entry, details 
   if (sample === null) return null;
 
   const selected: TrainingFlight | undefined = sample.flights.find((flight) => flight.flightKey === flightKey);
-  const selectedClosed = selected === undefined || trainingIntervalS === null ? null : selected.closedLoop[String(trainingIntervalS)] ?? null;
+  const selectedClosed = selected === undefined || trainingIntervalS === null ? null : selected.closedLoop[String(trainingIntervalS)];
 
   // ── the details page ──────────────────────────────────────────────────────
   const sections: TrainingDetailsSection[] = [

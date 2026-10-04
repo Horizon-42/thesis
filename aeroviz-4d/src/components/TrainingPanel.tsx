@@ -142,7 +142,7 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
     }
     let live = true;
     setSetState({ status: "loading" });
-    fetchTrainingSample(activeAirportCode, entry.file)
+    fetchTrainingSample(activeAirportCode, entry.file, entry.id)
       .then((parsed) => {
         if (!live) return;
         if (parsed.ok) setSetState({ status: "ready", sample: parsed.value });

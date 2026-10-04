@@ -14,7 +14,9 @@ import {
   checkTrainingSet,
   checkTrainingSetAgrees,
 } from "../checkPublication";
-import { parseTrainingIndex, parseTrainingSample, type TrainingSetEntry } from "../../data/trainingSample";
+import {
+  parseTrainingIndex, parseTrainingSample, TRAINING_INDEX_SCHEMA, TRAINING_SAMPLE_SCHEMA, type TrainingSetEntry,
+} from "../../data/trainingSample";
 import { SET_ID, stageAIndex, stageASampleFile } from "../../data/__tests__/stageA";
 
 const observed: ComparisonCategory = {
@@ -182,7 +184,7 @@ describe("the Training export's checks", () => {
     expect(value).toBeNull();
     expect(findings).toEqual([expect.objectContaining({ level: "error" })]);
     expect(findings[0].message).toContain("training/index_v4.json is not an index");
-    expect(findings[0].message).toContain('schema is "aeroviz-training-index-v1", expected "aeroviz-training-index-v2"');
+    expect(findings[0].message).toContain(`schema is "aeroviz-training-index-v1", expected "${TRAINING_INDEX_SCHEMA}"`);
   });
 
   it("names the entry and the field when the panel would reject an entry", () => {
@@ -202,7 +204,7 @@ describe("the Training export's checks", () => {
     expect(findings[0].category).toBe(SET_ID);
     expect(findings[0].message).toContain("flownFromRow");
     const old = checkTrainingSet(SET_ID, { ...stageASampleFile(), schema: "aeroviz-training-sample-v8" });
-    expect(old.findings[0].message).toContain('sample.schema is "aeroviz-training-sample-v8", not one of aeroviz-training-sample-v9');
+    expect(old.findings[0].message).toContain(`sample.schema is "aeroviz-training-sample-v8", not one of ${TRAINING_SAMPLE_SCHEMA}`);
   });
 
   // The two files come out of ONE run of the exporter; every field they must agree on is checked.

@@ -220,8 +220,10 @@ def replay_payload(flown: Flown, j: int, verdict: Verdict, part: replay.Batch, s
     whole = flown_track(flown.states[j, : last + 1].cpu().numpy(), geometry)
     states = flown.states[j, cycles].cpu().numpy()
     if judged is not None:
-        ends = ([band["stopRow"] for band in judged["heading"]] + [tube["endRow"] for tube in judged["altitude"]]
-                + [span["endRow"] for span in judged["speed"]])
+        # a heading word whose lead runs past the flight's end has an empty band (``firstRow == stopRow``, maybe past
+        # the track): not judged, and nothing to draw (`envelope.heading_word_rows`)
+        ends = ([band["stopRow"] for band in judged["heading"] if band["stopRow"] > band["firstRow"]]
+                + [tube["endRow"] for tube in judged["altitude"]] + [span["endRow"] for span in judged["speed"]])
         if max(ends, default=0) > len(cycles):
             raise ValueError(f"{part.signals[j].dataset_id}: an envelope ends at row {max(ends)}, past the flown "
                              f"track's {len(cycles)} rows")

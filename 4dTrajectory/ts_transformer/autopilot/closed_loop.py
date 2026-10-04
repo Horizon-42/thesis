@@ -40,7 +40,9 @@ measured against that line, for the readouts only; e_h is NaN there (no observed
 is no measurement), the reading says no correction, a correction in force ends, and the rows count as rows without
 correction (D34).
 
-THE CORRECTIONS (`Corrector`), with Y = `closed_loop_lateral_m` and H = `closed_loop_vertical_m` of the spec:
+THE CORRECTIONS (`Corrector`), with Y = `closed_loop_lateral_m` of the spec and H the vertical tolerance in force
+(`vertical_tolerance_m`, D66): `closed_loop_final_vertical_m` (H_final) while "no level-off" is in force — the final
+descent, told by the words — and `closed_loop_vertical_m` elsewhere:
 
 - lateral: when |e_y| > Y and the row says no new observed heading word, the heading class one step (5°)
   from the observed word in force, toward the path; the observed word again when |e_y| < Y / 2 or e_y changes sign —
@@ -49,7 +51,8 @@ THE CORRECTIONS (`Corrector`), with Y = `closed_loop_lateral_m` and H = `closed_
 - vertical: only while a descent class of the observed words is in force — when e_h > H the next steeper descent class,
   when e_h < −H the next shallower (none beyond descent 4 or descent 1); the observed class again when |e_h| < H / 2 or
   e_h changes sign — an overshoot beyond H takes the opposite class in the same row where it exists (D53); a new
-  observed altitude or angle word ends a correction. A level hold and a climb get none. A
+  observed altitude or angle word ends a correction (so a correction never runs across a change of the tolerance: the
+  altitude word changes there). A level hold and a climb get none. A
   level reached by a descent says no angle word (the descent class stays in force, `labeller.vertical`), so a LEVEL
   HOLD is the executor's: the level in force captured (`vertical.Vertical.captured`, the level-off begun) — there no
   correction starts and one in force ends (Claude's reading of §4.9 "during a level hold"; the rounding of the level to
@@ -85,33 +88,24 @@ import torch
 
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.conformance import DEVICE, ROUNDOFF, STATE_BOUND_M
-from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S, Executor
 from ts_transformer.autopilot.flights import FlightInputs, flight_inputs
-from ts_transformer.autopilot.frame import AirportCharts, Kinematics
-from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.replay import Batch, subset
-from ts_transformer.autopilot.sentence import Spoken
 from ts_transformer.autopilot.spec import executor_source_files, params_sha256
+from ts_transformer.autopilot.start import Loop, observed_rows, start_row
 from ts_transformer.instructions.artefact import CLOSED_LOOP_DIRECTORY, STATE_COLUMNS, ClosedLoopSentence
 from ts_transformer.instructions.conformance import labeller_code_files
 from ts_transformer.instructions.grammar import InForce, Ungrammatical, apply
 from ts_transformer.instructions.labeller.interval import (
-    OBSERVATION_S, in_force, interval_rows, last_heard_row, on_interval_rows,
+    in_force, interval_rows, last_heard_row, on_interval_rows,
 )
 from ts_transformer.instructions.labeller.read import Reading, smooth, truncated
 from ts_transformer.instructions.labeller.records import Refused
-from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words, same_track, wrap180,
 )
 from ts_transformer.io_utils import file_sha256, logic_sha256, utc_now, write_json_atomic
 from ts_transformer.repo_layout import git_state
-
-def start_row(row_interval_s: float) -> int:
-    """The first predicted step's Δ row: the prior's observation (16 s) after the sentence's first Δ row."""
-    return int(round(OBSERVATION_S / row_interval_s))
-
 
 class Match(NamedTuple):
     """A flown position against the observed path (`ObservedPath.match`)."""
@@ -168,6 +162,14 @@ class ObservedPath:
         return Match(lateral, vertical, row, along, last)
 
 
+def vertical_tolerance_m(words: Words, altitude: np.ndarray | int) -> np.ndarray:
+    """The vertical tolerance in force under each altitude word in force (D66, module docstring): H_final under "no
+    level-off", H under a level. The one definition the corrections and the rule of D50 read."""
+    spec = words.spec
+    return np.where(np.asarray(altitude) == words.altitude_no_level_off, spec.closed_loop_final_vertical_m,
+                    spec.closed_loop_vertical_m)
+
+
 def uncorrected_m(errors: np.ndarray, uncorrectable: np.ndarray) -> float:
     """The largest |error| on the rows where §4.9 makes no correction (D34; 0 where there is none; a NaN error, past the
     end of the observed path, is no error)."""
@@ -201,7 +203,8 @@ def outside_rows(sentence: ClosedLoopSentence, observed: np.ndarray, first_row: 
                  courses_deg: Sequence[float]) -> dict[str, np.ndarray]:
     """Read from the stored sentence and its open-loop reading (``observed``, from its row 0; the sentence starts at its
     2 s row ``first_row``): the rows where §4.9 permits a correction, those where the flown path is outside the tolerance
-    (|e_y| > Y, |e_h| > H; their share is a reading of the ablation, D34), and of those the rows after which no
+    (|e_y| > Y, |e_h| > the vertical tolerance in force at the row, D66; their share is a reading of the ablation,
+    D34), and of those the rows after which no
     correction TOWARD the path is in force (the rule of D50, vocabulary §12.2): the heading word in force says a track on the
     path's side of the observed word's (said in the frame of the word in force), the angle in force is steeper than the observed class when too high and
     shallower when too low. By column, ``lateral`` and ``vertical``, each ``[3, M]``."""
@@ -220,7 +223,7 @@ def outside_rows(sentence: ClosedLoopSentence, observed: np.ndarray, first_row: 
     toward = (np.sign(np.round(wrap180(said - plain), 9)) == -np.sign(sentence.lateral_m),
               np.sign(in_force(sentence.grid)[:, ANGLE].astype(int) - in_force(observed)[seen, ANGLE].astype(int))
               == np.sign(np.nan_to_num(sentence.vertical_m)))
-    tolerances = (words.spec.closed_loop_lateral_m, words.spec.closed_loop_vertical_m)
+    tolerances = (words.spec.closed_loop_lateral_m, vertical_tolerance_m(words, in_force(sentence.grid)[:, ALTITUDE]))
     out = {}
     for k, (name, errors) in enumerate((("lateral", sentence.lateral_m), ("vertical", sentence.vertical_m))):
         correctable = ~sentence.uncorrectable[:, k]
@@ -263,7 +266,7 @@ class Corrector:
         self.heading_row, self.track = heading_row[first_row:], track[first_row:]
         self.start, self.every, self.words = start, every, words
         spec = words.spec
-        self.lateral_m, self.vertical_m = spec.closed_loop_lateral_m, spec.closed_loop_vertical_m
+        self.lateral_m = spec.closed_loop_lateral_m
         self.next = start        # the first 2 s row not said yet
         self.rows_said = 0
         self.turn = 0            # a heading correction in force: the sign of e_y it answers (0: none)
@@ -302,16 +305,17 @@ class Corrector:
             elif not self.turn and abs(lateral_m) > self.lateral_m:
                 self.turn = _sign(lateral_m)
             angle = int(held[ANGLE])
+            tolerance = float(vertical_tolerance_m(self.words, int(held[ALTITUDE])))     # in force at the row (D66)
             ends = observed[ALTITUDE] != UNCHANGED or observed[ANGLE] != UNCHANGED or holding or past_end
             self.uncorrectable[1] = (ends or not self.words.is_descent(angle)
-                                     or (abs(vertical_m) > self.vertical_m
+                                     or (abs(vertical_m) > tolerance
                                          and not self.words.is_descent(angle + _sign(vertical_m))))
             if ends:
                 self.slope = 0
-            elif self.slope and (abs(vertical_m) < self.vertical_m / 2 or _sign(vertical_m) != self.slope):
-                self.slope = (_sign(vertical_m) if abs(vertical_m) > self.vertical_m      # an overshoot (D53)
+            elif self.slope and (abs(vertical_m) < tolerance / 2 or _sign(vertical_m) != self.slope):
+                self.slope = (_sign(vertical_m) if abs(vertical_m) > tolerance      # an overshoot (D53)
                               and self.words.is_descent(angle + _sign(vertical_m)) else 0)
-            elif (not self.slope and self.words.is_descent(angle) and abs(vertical_m) > self.vertical_m
+            elif (not self.slope and self.words.is_descent(angle) and abs(vertical_m) > tolerance
                   and self.words.is_descent(angle + _sign(vertical_m))):
                 self.slope = _sign(vertical_m)
             if self.slope:                                 # too high: the next steeper class
@@ -344,18 +348,6 @@ class Corrector:
             return UNCHANGED
         self.target_deg = target
         return word
-
-
-def _state_rows(signals: FlightSignals, rows: np.ndarray) -> np.ndarray:
-    """The observed flight's `STATE_COLUMNS` at its 2 s ``rows``."""
-    return np.column_stack([signals.e_m[rows], signals.n_m[rows], signals.altitude_m[rows], signals.track_deg[rows],
-                            signals.ground_speed_mps[rows], signals.vertical_rate_mps[rows]])
-
-
-def _flown_row(state: Kinematics, j: int) -> np.ndarray:
-    speed, gamma = float(state.speed_mps[j]), float(state.gamma_rad[j])
-    return np.array([float(state.e_m[j]), float(state.n_m[j]), float(state.height_m[j]), float(state.track_deg[j]),
-                     float(state.ground_speed_mps[j]), speed * math.sin(gamma)])
 
 
 def start_inputs(batch: Batch, step_s: float, *, device: torch.device) -> FlightInputs:
@@ -407,50 +399,41 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
         paths.append(ObservedPath(signals.e_m[:span], signals.n_m[:span], smoothed.altitude_m, start * every))
         correctors.append(Corrector(reading.words, sentence.first_row, start * every, every, words,
                                     [candidate.course_deg for candidate in batch.geometries[j].candidates]))
-        limits.append(replay.remaining_observed_s(reading, sentence.first_row + start * every, spec.step_s)
-                      * params.timeout_factor)
-        states.append([*_state_rows(signals, np.arange(start * every))])     # the observed 2 s rows (D51)
+        limits.append(replay.time_limit_s(len(reading.words), sentence.first_row + start * every, params, spec.step_s))
+        states.append([*observed_rows(signals, np.arange(start * every))])     # the observed 2 s rows (D51)
         said.append([])
         added.append([])
         blocked.append([])
         reached.append([])
         matched.append([])
         errors.append([])
-    f64 = torch.float64
     # the most go-arounds a flight can say: its reading's from the first predicted step (the cycles' layout)
     go_arounds = max(int((batch.readings[j].words[batch.sentences[j].first_row + start * every:, RUNWAY]
                           == RUNWAY_GO_AROUND).sum()) for j in flying)
-    executor = Executor(
-        _rows(inputs, flying),
-        Runways.of([batch.geometries[j] for j in flying], spec, dtype=f64, device=device),
-        AirportCharts.of([batch.geometries[j] for j in flying], dtype=f64, device=device),
-        torch.tensor([batch.approach_ias_mps[j] for j in flying], dtype=f64, device=device), params, words,
-        step_s=interval, time_limit_s=torch.tensor(limits, dtype=f64, device=device),
-        reserve_s=GO_AROUND_EXTRA_S * go_arounds)
-    spoken = Spoken(len(flying), words, step_s=interval, device=device)
-    step_cycles = int(round(interval / params.cycle_s))
-    row_cycles = int(round(spec.step_s / params.cycle_s))     # the cycles of one 2 s row
+    loop = Loop(_rows(inputs, flying), [batch.geometries[j] for j in flying],
+                [batch.approach_ias_mps[j] for j in flying], limits, params, words, interval_s=interval,
+                most_go_arounds=go_arounds, device=device)       # the start of a closed loop (D67)
     live = np.ones(len(flying), dtype=bool)
     timed_out = np.zeros(len(flying), dtype=bool)
     s = 0
+    now = loop.rows()
     while live.any():
-        now = executor.now()
-        captured = executor.vertical.captured.cpu().numpy()
+        captured = loop.executor.vertical.captured.cpu().numpy()
         step = np.full((len(flying), len(COLUMNS)), UNCHANGED, dtype=np.int64)
         for f, j in enumerate(flying):
             if not live[f]:
                 continue
-            flown = _flown_row(now, f)
-            match = paths[f].match(flown[0], flown[1], flown[2])
+            flown = now[f]
+            match = paths[f].match(float(flown[0]), float(flown[1]), float(flown[2]))
             lateral, vertical = match.lateral_m, match.vertical_m
             try:
-                height = flown[2] - batch.geometries[j].elevation_m       # above E, as the grammar reads it (D58)
+                height = float(flown[2]) - batch.geometries[j].elevation_m       # above E, as the grammar reads it (D58)
                 words_row, mask = correctors[f].row(match.row, lateral, vertical, height, holding=bool(captured[f]),
                                                     past_end=match.past_end)
             except Refused as refused:
                 out[j] = refused
                 live[f] = False
-                executor.halt(torch.as_tensor(~live, device=device))
+                loop.halt(~live)
                 if s == 0:                                  # the cycle starts with every column said
                     held = correctors[f].held
                     step[f] = held[min(last_heard_row(start * every, every), len(held) - 1)]
@@ -466,22 +449,12 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
             states[f].append(flown)
         if not live.any():
             break
-        spoken.say(step)
-        heard = torch.full((len(flying),), s * interval, dtype=f64, device=device)
-        between = [[] for _ in flying]
-        for cycle in range(1, step_cycles + 1):
-            executor.cycle(spoken.at(heard), torch.full_like(heard, executor.count * params.cycle_s))
-            if cycle % row_cycles == 0 and cycle < step_cycles:   # a 2 s row between two Δ rows
-                now = executor.now()
-                for f in np.nonzero(live)[0]:
-                    between[f].append(_flown_row(now, int(f)))
-        done = executor.done.cpu().numpy()
-        cycles = executor.done_cycle.cpu().numpy()
-        limit = executor.time_limit_s.cpu().numpy()
-        for f in range(len(flying)):
-            if live[f] and done[f]:
-                live[f] = False
-                timed_out[f] = (cycles[f] + 1) * params.cycle_s >= limit[f]   # the executor's own test
+        rows, done = loop.step(step)
+        between = [[*rows[f, :-1]] if live[f] else [] for f in range(len(flying))]   # the 2 s rows between two Δ rows
+        now = rows[:, -1]
+        ended = live & done
+        timed_out |= ended & loop.timed_out()
+        live &= ~done
         s += 1
     for f, j in enumerate(flying):
         if out[j] is not None:

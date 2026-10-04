@@ -147,8 +147,8 @@ of the package, not a migration in progress.
 - **A replay finds a checkpoint's manifests by the digest it recorded**
   (`repo_layout.checkpoint_arrival_manifests`): the live harvest or a FROZEN generation
   (`harvest-v5-20260823` holds every checkpoint of 2026-08-24..09-23); never by path (C29).
-- **The instruction sentence artefact** (`instructions/`; v4: reading `instruction-v5`, spec `ts-instruction-spec-v6`,
-  sentences `ts-instruction-sentences-v4`; the altitude words are heights above the airport elevation E, D58): one spec sha, written once and refused on a sha mismatch; the LABELLER is
+- **The instruction sentence artefact** (`instructions/`; v4: reading `instruction-v6`, spec `ts-instruction-spec-v7`,
+  sentences `ts-instruction-sentences-v5`, each with its stratum, D70; the altitude words are heights above the airport elevation E, D58): one spec sha, written once and refused on a sha mismatch; the LABELLER is
   identified by what it reads, never by its source (design D21): `conformance/` holds a reference sample (its sentences
   on the 2 s rows and on the Δ grid at 4 and 8 s, D49) and a
   `passed-<code>.json` per labeller code that reads it again the same (`instructions/conformance.py`, runner
@@ -162,7 +162,8 @@ of the package, not a migration in progress.
   Δ row nearest where the observed aircraft heard it (D42, D45), a heading word in the frame where it is heard (D46), with
   heading and angle corrections (none past the end of the observed path, D44), to the executor's end; the flown states on the data's 2 s rows, the Δ rows marked (D51), the errors against the observed path and the rows that allow no correction
   (D34); written once by `instruction_closed_loop` with its own reference and passed record, read only for code that
-  passed it (`closed_loop.require_conforming_closed_loop`) (C38).
+  passed it (`closed_loop.require_conforming_closed_loop`); a speaker's closed loop starts where the reading does,
+  through `autopilot/start.py` (`start`, `Loop.step`, D67) (C38).
 - **An executor spec opens only for executor code that flies its reference tracks within the bounds** (2026-10-01, the
   user: checked by what it flies, not by its source; `ts-executor-spec-v8`: a sentence said on its own rows, D57; a level
   word flown at T + E MSL, D58): `conformance/` beside the spec — 250
@@ -362,11 +363,13 @@ its reference tracks and passed record; clean tree) (R12) → `instruction_close
 split at each row interval, their reference and passed record; clean tree; `--check` re-checks) (R50) →
 `executor_replay` (`--row-interval-s`, `--closed-loop`; no criterion is read; select and val from a clean tree) (R12);
 `executor_conformance` checks a spec's reference after an `autopilot/` change (R42); `executor_turns` measures the
-executor's turn against the exact words (A13, R51); `training_export` writes the Training sets of stage A beside the old ones (`training/index_v4.json`, sample
+executor's turn against the exact words (A13, R51); `final_descent_tolerance` reads the closed loop and its replay of one
+H_final artefact in memory and puts several side by side (A24, D66, R52); `closed_loop_start_check` says stored
+closed-loop sentences through `autopilot/start.py` and requires their stored states back (A26, D67, R53); `training_export` writes the Training sets of stage A beside the old ones (`training/index_v4.json`, sample
 v9; every closed-loop sentence flown again against its stored states and formal outcome; the live executor shares its
-setup, `experiments/training_flights.py`, and `aeroviz_backend.autopilot_segment.check_live` checks a set against it) (R52); `instruction_figures` draws val pages
+setup, `experiments/training_flights.py`, and `aeroviz_backend.autopilot_segment.check_live` checks a set against it) (R54); `instruction_figures` draws val pages
 (R10). **Archived with instruction-v3** (`archive/two_tier_v3_2026_10/`, its README; their manual entries stay as the
-record): the instruction-v3 Training exports (R11, R13; the attitude module came back unchanged for A23, R52), `executor_sensitivity` (R12), the prior and its
+record): the instruction-v3 Training exports (R11, R13; the attitude module came back unchanged for A23, R54), `executor_sensitivity` (R12), the prior and its
 post-training (R15–R22, R35, R38), `heading_lead_ablation` (R23), the multi-aircraft runners (R24–R39, R41, R43–R45),
 `go_around_census` (R40), `instruction_word_frames` / `instruction_final_approach` (R48, R49); R14 went 2026-09-24.
 

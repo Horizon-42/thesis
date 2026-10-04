@@ -13,18 +13,19 @@ import {
   readingRowTimeS,
   sentenceColumnRuns,
   sentenceWordAt,
+  closedCycleTimeS,
   trainingBandLabel,
   trainingEnvelopeIndex,
   trainingReadingOf,
   trainingWordLabel,
   unwrapDegrees,
   TRAINING_COLUMNS,
-  TRAINING_INDEX_FILE,
   TRAINING_INDEX_SCHEMA,
   TRAINING_READING_RULE,
   TRAINING_SAMPLE_SCHEMA,
   TRAINING_SET_KIND,
 } from "../trainingSample";
+import { trainingBandGround } from "../../scene/trainingEntities";
 import { FLIGHT_KEY, stageAIndex, stageASample, stageASampleFile } from "./stageA";
 
 describe("the index", () => {
@@ -35,7 +36,6 @@ describe("the index", () => {
     expect(parsed.value.sets.map((set) => set.id)).toEqual(["fixture_set"]);
     expect(parsed.value.sets[0].file).toBe("fixture_set/sample.json");
     expect(parsed.value.sets[0].cohort.strata).toEqual(["straight-in", "vectored"]);
-    expect(TRAINING_INDEX_FILE).toBe("index_v4.json");
   });
 
   it("refuses another schema by name: the one found and the one expected", () => {
@@ -139,6 +139,70 @@ describe("the sample", () => {
   });
 });
 
+describe("the flown flight (replay.track)", () => {
+  it("is the flight drawn: from the first predicted step to the judge's outcome, on the sample's executor cycle", () => {
+    const sample = stageASample();
+    expect(sample.executor.cycleS).toBe(1);
+    const raw = stageASampleFile().flights[0].closedLoop;
+    for (const key of ["2", "4", "8"]) {
+      const closed = sample.flights[0].closedLoop[key];
+      expect(closed.flown.tS).toHaveLength(raw[key].replay.track.rows);
+      expect(closed.flown.eM).toEqual(raw[key].replay.track.eM);
+      expect(closed.flown.attitude.headingDeg).toHaveLength(raw[key].replay.track.rows);
+      expect(closed.cycleS).toBe(1);
+      // the flown flight reaches the outcome: the stored states may end sooner (at the sentence's last said row)
+      expect(closed.flown.tS[closed.flown.tS.length - 1]).toBe(closed.startS + (raw[key].replay.track.rows - 1) * 2);
+      expect(closedCycleTimeS(closed, raw[key].replay.track.lastCycle) - closed.flown.tS[closed.flown.tS.length - 1]).toBeLessThan(2);
+    }
+  });
+
+  it("turns a replay cycle into flight time by the executor's cycle", () => {
+    const closed = stageASample().flights[0].closedLoop["2"];
+    expect(closedCycleTimeS(closed, 10)).toBe(closed.startS + 10);
+    expect(closedCycleTimeS({ ...closed, cycleS: 0.5 }, 10)).toBe(closed.startS + 5);
+  });
+
+  it("refuses an envelope that ends past the track, a track that is not the stored states, and a last cycle that is not the outcome's", () => {
+    const past = stageASampleFile();
+    past.flights[0].closedLoop["2"].replay.envelopes.speed[0].endRow = 300;
+    const a = parseTrainingSample(past);
+    expect(a.ok).toBe(false);
+    if (!a.ok) expect(a.problem).toContain("an envelope's");
+
+    const apart = stageASampleFile();
+    apart.flights[0].closedLoop["4"].replay.track.eM[5] += 2;
+    const b = parseTrainingSample(apart);
+    expect(b.ok).toBe(false);
+    if (!b.ok) expect(b.problem).toContain("replay.track and states are one flight");
+
+    const last = stageASampleFile();
+    last.flights[0].closedLoop["8"].replay.track.lastCycle -= 1;
+    const c = parseTrainingSample(last);
+    expect(c.ok).toBe(false);
+    if (!c.ok) expect(c.problem).toContain("lastCycle is");
+
+    const rows = stageASampleFile();
+    rows.flights[0].closedLoop["2"].replay.track.rows -= 1;
+    expect(parseTrainingSample(rows).ok).toBe(false);
+
+    const cycle = stageASampleFile();
+    delete cycle.executor;
+    expect(parseTrainingSample(cycle).ok).toBe(false);
+  });
+
+  it("accepts an empty heading band wherever it lies — its word's lead runs past the end of the flight — and draws nothing for it", () => {
+    const file = stageASampleFile();
+    const bands = file.flights[0].closedLoop["2"].replay.envelopes.heading;
+    bands.push({ ...bands[0], row: 900, firstRow: 902, stopRow: 902, inside: [] });
+    file.flights[0].openLoop.envelopes.heading.push({ ...file.flights[0].openLoop.envelopes.heading[0], row: 900, firstRow: 902, stopRow: 902, inside: [] });
+    const parsed = parseTrainingSample(file);
+    if (!parsed.ok) throw new Error(parsed.problem);
+    const empty = parsed.value.flights[0].closedLoop["2"].replay.envelopes!.heading.slice(-1)[0];
+    expect(empty.inside).toEqual([]);
+    expect(trainingBandGround(parsed.value.flights[0].closedLoop["2"].flown, empty)).toEqual([]);
+  });
+});
+
 describe("the readings", () => {
   const sample = stageASample();
   const [flight] = sample.flights;
@@ -216,6 +280,10 @@ describe("drawing helpers", () => {
   it("carries a run of rows outside on to the next row, so one row is a segment", () => {
     expect(outsideSpans([true, false, false, true, false], 10, 20)).toEqual([[11, 13], [14, 15]]);
     expect(outsideSpans([true, true], 0, 5)).toEqual([]);
+    // never a span past the line's last row: verdicts beyond it are dropped, one that runs over is cut
+    expect(outsideSpans([false, false, false], 8, 9)).toEqual([[8, 9]]);
+    expect(outsideSpans([true, false], 9, 9)).toEqual([]);
+    expect(outsideSpans([false], 12, 9)).toEqual([]);
   });
 
   it("makes a track continuous and puts a target on the branch of the track", () => {

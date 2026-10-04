@@ -24,9 +24,9 @@ from geokit import FT_M, KT_MS, NM_M
 #: holds "go-around", D1, D10), heading words relative to the course of the runway in force (D8), altitude words on a
 #: 40-level grid of at most three uniform segments (D22) with "no level-off", as heights above the airport elevation E
 #: (D58; instruction-v4 read them as MSL), the go-around read from the track (D18, D19), "unspecified" from the capture
-#: row (D4).
-READING_RULE = "instruction-v5"
-SPEC_SCHEMA = "ts-instruction-spec-v6"
+#: row (D4); since instruction-v6 the closed-loop reading's vertical tolerance in the final descent (D66, a field of its own).
+READING_RULE = "instruction-v6"
+SPEC_SCHEMA = "ts-instruction-spec-v7"
 
 #: FAA JO 7110.65BB 5-9-2 TBL 5-9-1: the largest final-approach interception angle 2 NM or
 #: more outside the approach gate — the judge's "lined up" (vocabulary §5.8).
@@ -140,9 +140,12 @@ class VocabularySpec:
     go_around_on_runway_height_m: float
     # --- the closed-loop reading (vocabulary §4.9, D32; `autopilot.closed_loop`)
     #: A heading correction starts when the flown path is more than `closed_loop_lateral_m` off the observed one, an
-    #: angle correction when it is more than `closed_loop_vertical_m` above or below it; each ends under half of it.
+    #: angle correction when it is more than the vertical tolerance in force above or below it; each ends under half of
+    #: it. The vertical tolerance in force is `closed_loop_final_vertical_m` (H_final) while "no level-off" is in force
+    #: (the final descent) and `closed_loop_vertical_m` (H) elsewhere (D66).
     closed_loop_lateral_m: float
     closed_loop_vertical_m: float
+    closed_loop_final_vertical_m: float
     reading_rule: str = READING_RULE
 
     def __post_init__(self) -> None:
@@ -164,6 +167,7 @@ class VocabularySpec:
             "unspecified_plateau_s", "unspecified_distance_m", "go_around_max_cross_m", "go_around_max_height_m",
             "go_around_min_progress_m", "go_around_hold_s", "go_around_min_drop_m", "go_around_min_climb_m",
             "go_around_on_runway_height_m", "closed_loop_lateral_m", "closed_loop_vertical_m",
+            "closed_loop_final_vertical_m",
         )
         for name in positive:
             if getattr(self, name) <= 0:
@@ -206,6 +210,9 @@ class VocabularySpec:
             raise ValueError("each descent centre must lie inside its class")
         if self.climb_angle_centre_deg > self.climb_angle_max_deg:
             raise ValueError("the climb centre lies beyond the climb range")
+        if self.closed_loop_final_vertical_m > self.closed_loop_vertical_m:
+            raise ValueError("closed_loop_final_vertical_m above closed_loop_vertical_m: the final descent's tolerance "
+                             "is the smaller one (D66)")
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

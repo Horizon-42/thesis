@@ -24,7 +24,8 @@ STRATA = ("straight-in", "vectored")
 
 def stratum(reading: Reading) -> str:
     """The flight's stratum (module docstring)."""
-    return "vectored" if reading.checks["turning_deg"] >= VECTORED_TURN_DEG else "straight-in"
+    straight_in, vectored = STRATA
+    return vectored if reading.checks["turning_deg"] >= VECTORED_TURN_DEG else straight_in
 
 
 def go_around_in_force(reading: Reading, words: Words) -> list[dict[str, bool]]:

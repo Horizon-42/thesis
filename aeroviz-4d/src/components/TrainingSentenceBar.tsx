@@ -72,6 +72,7 @@ import {
   type TrainingAutopilotView,
 } from "../data/trainingAutopilot";
 import {
+  closedCycleTimeS,
   correctionCount,
   formatSeconds,
   readingRowAt,
@@ -145,7 +146,7 @@ export function spacedLabels(xs: number[], minGap: number, keepLast = false): bo
 function wordHeld(envelopes: TrainingEnvelopes | null, column: TrainingColumn, index: number | null): boolean | null {
   if (envelopes === null || index === null) return null;
   switch (column) {
-    case "heading": return envelopes.heading[index].inside.every(Boolean);
+    case "heading": return envelopes.heading[index].inside.length === 0 ? null : envelopes.heading[index].inside.every(Boolean);
     case "altitude": return envelopes.altitude[index].contained;
     case "speed": return envelopes.speed[index].contained;
     default: return null;
@@ -278,10 +279,10 @@ export default function TrainingSentenceBar() {
     ...reading.open.goAroundRows.map((row) => ({ at: timeOf(row), key: `go-around-${row}`, colour: TRAINING_COLUMN_COLOR.runway,
       dash: "3 3", width: 1.5, title: `go-around said at ${formatSeconds(timeOf(row))} s` })),
   ] : [
-    ...(decision === null ? [] : [{ at: closed!.startS + decision.cycle, key: "decision", width: 1.5, dash: "2 3",
+    ...(decision === null ? [] : [{ at: closedCycleTimeS(closed!, decision.cycle), key: "decision", width: 1.5, dash: "2 3",
       colour: decision.passed ? TRAINING_DECISION_PASS_COLOR : TRAINING_DECISION_FAIL_COLOR, title: decisionText(decision) }]),
-    { at: closed!.startS + replay!.endCycle, key: "flown-end", colour: trainingOutcomeColour(replay!.outcome), dash: undefined,
-      width: 2, title: `the flown flight ended at ${formatSeconds(closed!.startS + replay!.endCycle)} s: ${replayText(replay!)}` },
+    { at: closedCycleTimeS(closed!, replay!.endCycle), key: "flown-end", colour: trainingOutcomeColour(replay!.outcome), dash: undefined,
+      width: 2, title: `the flown flight ended at ${formatSeconds(closedCycleTimeS(closed!, replay!.endCycle))} s: ${replayText(replay!)}` },
   ];
 
   // the live executor, when it is of the flight and the Δ on screen
