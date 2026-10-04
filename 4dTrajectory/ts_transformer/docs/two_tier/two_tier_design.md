@@ -1825,7 +1825,7 @@ frontend reads the reading name, not the spec sha (§9.2 #9). After stage D the 
 The check of A0–A14 is done (`readouts/2026-10-04_stage_a_check.zh.md`, at `ab295b18`; its points became D48–D52).
 Before stage B, Claude checks A15–A18 and the formal artefact:
 
-1. D48, D49, D51, D53, D55 and D56 against the code: the module and the test that carry each (a table in the report).
+1. D48–D56 against the code: done at `688e945e` (the code of the formal build); again only for code changed after it.
 2. The targeted tests of A15–A18 pass on the commit of the formal build (run again); the full suite of that commit
    passed (§14.1 rule 4; its log).
 3. The formal artefact: the spec holds the values of D56 and its measurement records the chosen row; the labeller, the
