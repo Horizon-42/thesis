@@ -1301,7 +1301,7 @@ def test_a_replayed_flight_becomes_a_control_record_and_the_readout_reads_no_cri
              "replay_verdict": "pass", "crossing": {"decision": {"passed": True}}},
             {**base, "kind": "without go-around", "outcome": "unstable_at_minimums", "words": None,
              "observed_verdict": "fail", "replay_verdict": "fail", "crossing": {"decision": None}}]
-    table = readout_table(rows)
+    table = readout_table(rows, closed_loop_rows=False)
     cell = table["own dynamics"]["all"]["all"]["all"]
     assert (cell["flights"], cell["landed"], cell["words_inside"]) == (2, 0.5, 0.9)
     assert cell["words_inside_by_column"] == {"heading": 1.0, "altitude": 0.0, "speed": None}

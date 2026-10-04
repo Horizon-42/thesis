@@ -592,16 +592,22 @@ refuses both.
 ### C38 · the closed-loop sentences: flown by an executor spec, corrected toward the observed path, checked by what they read
 
 2026-10-04 (`autopilot/closed_loop.py`, `instructions/artefact.py` `write_closed_loop` / `load_closed_loop`, runner
-`instruction_closed_loop` R50; design §4.9, D32–D34). `<artefact>/closed_loop/` is written once, from a clean checkout,
+`instruction_closed_loop` R50; design §4.9, D32–D34, D42). `<artefact>/closed_loop/` is written once, from a clean checkout,
 with an executor spec (C33): for each split and each row interval given (D25), `<split>_<Δ>s.npz`
 (`ts-instruction-closed-loop-v1`, refused unless every field is there and its spec sha is the artefact's): each flown
 flight's words from its first predicted step (Δ row 16 s / Δ; row 0 says every column), which words the reading added
 (`correction`), its states on every Δ row (observed before the first predicted step, flown from it: airport-frame e/n,
 MSL height, track, ground speed, vertical rate), its errors against the observed path (`lateral_m` right positive,
-`vertical_m`), the rows where §4.9 makes no heading / angle correction (`uncorrectable`, D34) and the executor parameters'
-sha it was flown with; `summary.json` counts the flights without a sentence by reason (not flown by `replay.group_of`,
+`vertical_m`), the rows where §4.9 makes no heading / angle correction (`uncorrectable`, D34), the open-loop Δ row each
+row's observed words reach (`observed_row`, D42), whether each flight was done at its time limit (`timed_out`) and the
+executor parameters' sha it was flown with; `summary.json` counts the flights without a sentence by reason (not flown by `replay.group_of`,
 refused on the row interval, refused by the closed loop — the grammar read at the flown height), the correction words per
-column and the D34 readings. The reading flies the open-loop words on the sentence's own clock and adds one-class heading
+column and the D34 readings. The reading says each observed word at the PLACE where the observed aircraft heard it, not at
+its time (D42): at each Δ row the words of every open-loop row whose time is not later than the matched point's observed
+time and not said before (of several, each column's last word), so the words wait while the flown aircraft is behind;
+a heading word that would be heard under another course than it was said under refuses the flight. The flight runs until
+the executor is done or reaches the replay's time limit (`replay.time_limits_s`: the remaining observed time from the
+sentence's first row × 1.5, plus 900 s a go-around), so a sentence has the flown rows and its replay the same limit. It adds one-class heading
 corrections beyond 30 m and one-class angle corrections beyond 15 m under a descent class (the spec's
 `closed_loop_lateral_m` / `closed_loop_vertical_m`), ending under half of it, at a sign change or at a new observed word;
 a level hold is the executor's capture of the level in force (Claude's reading). `conformance/` holds a reference sample

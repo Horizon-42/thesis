@@ -157,8 +157,8 @@ of the package, not a migration in progress.
   signals (it ends before the landing); a flight with go-arounds is read approach by approach (D26); since v6
   (2026-10-02) every row is on the UTC even seconds; `--spec-from` keeps another artefact's spec (C30).
 - **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v1`; design §4.9, D32): each
-  split × row interval — the open-loop words flown from the first predicted step by an executor spec, with heading and
-  angle corrections, the flown states, the errors against the observed path and the rows that allow no correction
+  split × row interval — the open-loop words flown from the first predicted step by an executor spec, each said where the
+  observed aircraft heard it (D42), with heading and angle corrections, to the executor's end; the flown states, the errors against the observed path and the rows that allow no correction
   (D34); written once by `instruction_closed_loop` with its own reference and passed record, read only for code that
   passed it (`closed_loop.require_conforming_closed_loop`) (C38).
 - **An executor spec opens only for executor code that flies its reference tracks within the bounds** (2026-10-01, the

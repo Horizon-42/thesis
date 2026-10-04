@@ -213,7 +213,7 @@ CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v1"
 #: Every array a closed-loop file holds.
 CLOSED_LOOP_FIELDS = {"schema", "spec_sha256", "executor_params_sha256", "row_interval_s", "start_row", "signal_index",
                       "first_row", "offsets", "state_offsets", "words", "correction", "states", "lateral_m",
-                      "vertical_m", "uncorrectable", "ended"}
+                      "vertical_m", "uncorrectable", "observed_row", "timed_out"}
 #: The directory inside the artefact that holds them, written once (`closed_loop_path`).
 CLOSED_LOOP_DIRECTORY = "closed_loop"
 
@@ -226,12 +226,14 @@ def write_closed_loop(path: Path, spec: VocabularySpec, *, executor_params_sha25
                       start_row: int, signal_index: Sequence[int], first_row: Sequence[int],
                       grids: Sequence[np.ndarray], corrections: Sequence[np.ndarray], states: Sequence[np.ndarray],
                       lateral_m: Sequence[np.ndarray], vertical_m: Sequence[np.ndarray],
-                      uncorrectable: Sequence[np.ndarray], ended: Sequence[bool]) -> None:
+                      uncorrectable: Sequence[np.ndarray], observed_row: Sequence[np.ndarray],
+                      timed_out: Sequence[bool]) -> None:
     """One split's closed-loop sentences at one row interval, in the order given. Sentence ``k``'s words are
     ``words[offsets[k]: offsets[k + 1]]`` (from its first predicted step, `start_row` rows after its first row on the
     interval's grid, which is its signals' 2 s row ``first_row[k]``), its states ``states[state_offsets[k]:
     state_offsets[k + 1]]`` (every row from its first: observed before ``start_row``, flown from it); ``uncorrectable``
-    ``[rows, 2]`` the rows where the reading makes no heading / angle correction (D34)."""
+    ``[rows, 2]`` the rows where the reading makes no heading / angle correction (D34); ``observed_row`` the open-loop
+    row each row's observed words reach (D42); ``timed_out`` whether each flight was done at its time limit."""
     if not grids:
         raise ValueError(f"no closed-loop sentence for {path.name}: nothing to write")
     lengths = np.array([len(grid) for grid in grids], dtype=np.int64)
@@ -249,7 +251,8 @@ def write_closed_loop(path: Path, spec: VocabularySpec, *, executor_params_sha25
         words=np.concatenate(grids).astype(np.int16), correction=np.concatenate(corrections).astype(bool),
         states=np.concatenate(states).astype(np.float64), lateral_m=np.concatenate(lateral_m).astype(np.float64),
         vertical_m=np.concatenate(vertical_m).astype(np.float64),
-        uncorrectable=np.concatenate(uncorrectable).astype(bool), ended=np.asarray(ended, dtype=bool))
+        uncorrectable=np.concatenate(uncorrectable).astype(bool),
+        observed_row=np.concatenate(observed_row).astype(np.int64), timed_out=np.asarray(timed_out, dtype=bool))
 
 
 def load_closed_loop(path: Path, spec: VocabularySpec) -> dict[str, np.ndarray]:

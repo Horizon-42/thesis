@@ -152,7 +152,7 @@ def fly_staggered(batch: replay.Batch, params: ExecutorParams, words: Words) -> 
     f64 = torch.float64
     step_rows = int(round(batch.row_interval_s / params.cycle_s))
     starts = np.random.default_rng(SEED).integers(0, STAGGER_STEPS + 1, size=len(batch.sentences)) * step_rows
-    limits = torch.tensor(replay.time_limits_s(batch, params), dtype=f64, device=DEVICE)
+    limits = torch.tensor(replay.time_limits_s(batch, params, words.spec.step_s), dtype=f64, device=DEVICE)
     sentences = Sentences([s.grid for s in batch.sentences], words, step_s=batch.row_interval_s, device=DEVICE)
     clock = replay.word_clock(batch, params, words.spec.step_s, DEVICE)
     executor = Executor(batch.inputs(DEVICE), Runways.of(batch.geometries, words.spec, dtype=f64, device=DEVICE),
@@ -185,7 +185,7 @@ def fly_single(batch: replay.Batch, params: ExecutorParams, words: Words) -> lis
     drives a batch — the spec's word clock read before each cycle, a step's words heard on the cycle that starts it."""
     spec = words.spec
     inputs = batch.inputs(DEVICE)
-    limits, reserve = replay.time_limits_s(batch, params), replay.reserve_s(batch)
+    limits, reserve = replay.time_limits_s(batch, params, words.spec.step_s), replay.reserve_s(batch)
     out = []
     for j, sentence_flown in enumerate(batch.sentences):
         flight = FlightInputs(**{f.name: getattr(inputs, f.name)[j: j + 1] for f in dataclasses.fields(FlightInputs)})
@@ -379,7 +379,7 @@ def input_digests(batch: replay.Batch, params: ExecutorParams, words: Words) -> 
     """Each flight's inputs as one sha256 (module docstring): what `replay.fly_sentences` flies it from and its word
     clock reads, and what the judge reads it against."""
     inputs = batch.inputs(DEVICE)
-    limits, reserve = replay.time_limits_s(batch, params), replay.reserve_s(batch)
+    limits, reserve = replay.time_limits_s(batch, params, words.spec.step_s), replay.reserve_s(batch)
     out = []
     for j, sentence in enumerate(batch.sentences):
         geometry = batch.geometries[j]

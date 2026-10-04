@@ -8,7 +8,7 @@ Who: the replay's flights (`replay.group_of`): on their own dynamics or on a sta
 no aircraft dynamics or no published approach speed gives no training sentence. Each split's flights are counted by
 reason in ``closed_loop/summary.json`` — not flown, refused on the row interval, refused by the closed loop — beside the
 correction words for each column, the flights with any correction, the largest |e_y| and |e_h| per flight (percentiles)
-and the flights the executor finished before their last row. Written from a clean tree only (the artefact records the
+and the flights done at their time limit. Written from a clean tree only (the artefact records the
 commit).
 
     python run_ts.py instruction_closed_loop --row-interval-s 2 4 8 \\
@@ -68,7 +68,7 @@ def summarise(results: list[ClosedLoopSentence | Any], excluded: dict[str, int],
             "uncorrected_vertical_m": _percentiles([closed_loop.uncorrected_m(r.vertical_m, r.uncorrectable[:, 1])
                                                     for r in read]),
             "last_row_lateral_m": _percentiles([float(abs(r.lateral_m[-1])) for r in read]),
-            "ended_before_the_last_row": sum(r.ended for r in read)}
+            "timed_out": sum(r.timed_out for r in read)}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -134,7 +134,9 @@ def main(argv: list[str] | None = None) -> int:
                               grids=[r.grid for _, r in kept], corrections=[r.correction for _, r in kept],
                               states=[r.states for _, r in kept], lateral_m=[r.lateral_m for _, r in kept],
                               vertical_m=[r.vertical_m for _, r in kept],
-                              uncorrectable=[r.uncorrectable for _, r in kept], ended=[r.ended for _, r in kept])
+                              uncorrectable=[r.uncorrectable for _, r in kept],
+                              observed_row=[r.observed_row for _, r in kept],
+                              timed_out=[r.timed_out for _, r in kept])
             numbers = summarise(results, drawn.description["excluded"], batch.drawn["refused_on_interval"])
             summary["splits"][split]["intervals"][f"{interval:g}"] = numbers
             print(f"{split} {interval:g} s: {numbers['sentences']} sentences, corrections "

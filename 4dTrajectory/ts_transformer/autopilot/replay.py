@@ -315,10 +315,17 @@ def word_clock(batch: Batch, params: ExecutorParams, step_s: float,
     return clock.of([e for e, _ in rows], [n for _, n in rows], step_s, params.cycle_s, device=device)
 
 
-def time_limits_s(batch: Batch, params: ExecutorParams) -> list[float]:
-    """Each flight's time limit before its go-arounds: its sentence's rows × the row interval × the timeout factor
-    (design §5.8: the remaining observed time × 1.5)."""
-    return [len(s.grid) * batch.row_interval_s * params.timeout_factor for s in batch.sentences]
+def remaining_observed_s(reading: Reading, first_row: int, step_s: float) -> float:
+    """The observed time from the 2 s row ``first_row`` to the end of the labeller's reading (a row per ``step_s``)."""
+    return (len(reading.words) - first_row) * step_s
+
+
+def time_limits_s(batch: Batch, params: ExecutorParams, step_s: float) -> list[float]:
+    """Each flight's time limit before its go-arounds (design §5.8: the remaining observed time × 1.5): the observed time
+    from its sentence's first row (`remaining_observed_s`), not its sentence's rows — a closed-loop sentence has the flown
+    rows (§4.9 item 6), and its replay keeps the limit it was read under."""
+    return [remaining_observed_s(r, s.first_row, step_s) * params.timeout_factor
+            for r, s in zip(batch.readings, batch.sentences)]
 
 
 def reserve_s(batch: Batch) -> float:
@@ -334,7 +341,7 @@ def fly_sentences(batch: Batch, params: ExecutorParams, words: Words, *, device:
                Runways.of(batch.geometries, words.spec, dtype=f64, device=device),
                AirportCharts.of(batch.geometries, dtype=f64, device=device),
                torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words,
-               time_limit_s=torch.tensor(time_limits_s(batch, params), dtype=f64, device=device),
+               time_limit_s=torch.tensor(time_limits_s(batch, params, words.spec.step_s), dtype=f64, device=device),
                reserve_s=reserve_s(batch))
 
 

@@ -19,8 +19,9 @@ With ``--closed-loop`` it flies the artefact's CLOSED-LOOP sentences instead (de
 `instruction_closed_loop`, refused unless the code on disk reads their reference as it was read): each from its first
 predicted step, on its own clock (the time clock, whatever the spec's word clock: a closed-loop sentence is said in time),
 from the observed state there. Every flight must fly its stored states again (within the executor conformance's bound);
-each row adds the largest |e_y| and |e_h| against the observed path and the correction words for each column. The
-labelled flights without a closed-loop sentence are counted.
+each row adds the largest |e_y| and |e_h| against the observed path and the correction words for each column, and each
+cell of the readout the flights that left the observed path by more than `LEFT_THE_PATH_M` and the correction words for
+each sentence. The labelled flights without a closed-loop sentence are counted.
 
 The VAL replay waits for the user's go-ahead and runs from a clean tree. Development runs use train.
 
@@ -72,6 +73,9 @@ HORIZON = "sentence"
 REPLAY_SCHEMA = "ts-executor-replay-v6"
 #: The kinds of sentence the readout reads apart.
 KINDS = ("without go-around", "with go-around")
+#: A closed-loop flight that goes farther than this from its observed path, laterally, LEFT the path: a reading of the
+#: A9 smoke build (design §11.11) that A10 compares against (§14.2 A10), not a criterion (D7).
+LEFT_THE_PATH_M = 300.0
 
 
 def executor_forecast(flown: Flown, index: int, verdict: Outcome | Verdict, inputs: Any,
@@ -107,9 +111,11 @@ def _share(passed: int, total: int) -> float | None:
     return passed / total if total else None
 
 
-def readout_table(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def readout_table(rows: list[dict[str, Any]], *, closed_loop_rows: bool) -> dict[str, Any]:
     """Per group, airport (and "all"), stratum (and "all") and kind of sentence (and "all"): the outcomes, the words inside
-    their envelopes per column, the decision-altitude checks and the evaluation pairing (module docstring)."""
+    their envelopes per column, the decision-altitude checks and the evaluation pairing (module docstring); of
+    closed-loop sentences (``closed_loop_rows``: the rows carry `closed_loop_columns`) also the flights that left the
+    observed path (`LEFT_THE_PATH_M`) and the correction words for each sentence, per column."""
     table: dict[str, Any] = {}
     cells: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -139,6 +145,11 @@ def readout_table(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "observed_passes": len(paired),
             "replay_passes_where_observed_passes": _share(sum(r["replay_verdict"] == "pass" for r in paired), len(paired)),
         }
+        if closed_loop_rows:
+            table[group][airport][part][kind]["closed_loop"] = {
+                "left_the_path": sum(r["largest_lateral_m"] > LEFT_THE_PATH_M for r in members),
+                "correction_words_per_sentence": {column: sum(r["correction_words"][column] for r in members)
+                                                  / len(members) for column in COLUMNS}}
     return table
 
 
@@ -332,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
         landed = sum(r["outcome"] == "landed" for r in flown_rows)
         print(f"  {airport}: {len(flown_rows)} flown, {landed} landed, {time.perf_counter() - started:.0f}s", flush=True)
 
-    table = readout_table(rows)
+    table = readout_table(rows, closed_loop_rows=args.closed_loop)
     write_json_atomic(out / "replay.json", {
         "schema": REPLAY_SCHEMA, "written_utc": utc_now(), "split": args.split, "row_interval_s": args.row_interval_s,
         "closed_loop": args.closed_loop,
@@ -346,8 +357,11 @@ def main(argv: list[str] | None = None) -> int:
                     shares = "  ".join(f"{name} {cell[key] if cell[key] is None else round(cell[key], 3)}"
                                        for name, key in (("landed", "landed"), ("words", "words_inside"),
                                                          ("eval", "replay_passes_where_observed_passes")))
+                    closed = (f"  left the path {cell['closed_loop']['left_the_path']}, heading corrections a "
+                              f"sentence {cell['closed_loop']['correction_words_per_sentence']['heading']:.1f}"
+                              if args.closed_loop else "")
                     print(f"  {group:18s} {airport:5s} {part:12s} {kind:17s} n={cell['flights']:5d}  {shares}  "
-                          f"{cell['outcomes']}")
+                          f"{cell['outcomes']}{closed}")
     print(f"→ {out / 'replay.json'}")
     return 0
 

@@ -259,7 +259,9 @@ envelopes per column with the envelopes' widths, the decision-altitude checks, t
 **No criterion is read** (design D7). With `--closed-loop` it flies the artefact's closed-loop sentences instead (C38,
 R50): each from its first predicted step on the time clock, refused for another executor's parameters, each flight
 required to fly its stored states again; each row adds the largest |e_y| and |e_h|, those on the rows without a correction
-(D34) and the correction words per column. Select and val run from a clean tree; **the val replay waits for the user's
+(D34) and the correction words per column, and each cell of the table the flights that left the observed path by more
+than 300 m (`LEFT_THE_PATH_M`, the reading of design §11.11) and the correction words per sentence. Every replay's time
+limit is the remaining observed time from the sentence's first row × 1.5 (`replay.time_limits_s`), not its rows. Select and val run from a clean tree; **the val replay waits for the user's
 go-ahead**. Every write refuses an existing directory. Tests: `tests/test_autopilot.py`, `tests/test_closed_loop.py` (every
 write into `tmp_path`). `executor_sensitivity` is archived (`archive/two_tier_v3_2026_10/experiments/`).
 
@@ -1405,7 +1407,7 @@ their rows within 60 m, and at the capture row the deviation and the shares more
 
 ### R50 · `run_ts.py instruction_closed_loop` — the closed-loop reading: every labelled flight flown on its words with the corrections its flown path needs (design §4.9)
 
-2026-10-04 (design §4.9, D32–D34, §14.2 A9; contract C38; `autopilot/closed_loop.py`). `instruction_closed_loop
+2026-10-04 (design §4.9, D32–D34, D42, §14.2 A9–A10; contract C38; `autopilot/closed_loop.py`). `instruction_closed_loop
 --instructions <artefact> --executor <spec dir> --row-interval-s 2 4 [8] [--chunk 256] [--device cpu]`, from a clean tree,
 after `executor_spec`: refused unless the executor code passes the spec's reference and the labeller code the artefact's;
 every Δ must divide the 16 s observation. For each split (train, select, val) it draws every labelled flight
@@ -1413,11 +1415,11 @@ every Δ must divide the 16 s observation. For each split (train, select, val) i
 sentence on each Δ and reads it in closed loop in chunks (`closed_loop.read_chunked`), writes
 `<artefact>/closed_loop/<split>_<Δ>s.npz` and `summary.json` (the flights without a sentence by reason, the correction words
 per column, the flights with a correction, the largest |e_y| / |e_h| and those on the rows without a correction (D34), the
-last row's |e_y|, the flights the executor finished before their last row), then the reference sample (train, 10 flights an
+last row's |e_y|, the flights done at their time limit), then the reference sample (train, 10 flights an
 airport, every Δ written) and, after checking it with the same code, its passed record. Written in a staging directory and
 renamed: an existing `closed_loop/` refuses. `--check` reads the reference again with the code on disk and writes its passed
-record (after a change to `autopilot/` or the labeller). Smoke (2026-10-04, 80 flights an airport and split): 395 train
-sentences at 2 s with 4,912 heading and 2,611 angle corrections; ~2 min for both intervals of all three splits on the CPU.
+record (after a change to `autopilot/` or the labeller). The observed words are said where the observed aircraft heard
+them (D42, A10); a sentence has the flown rows.
 
     python run_ts.py instruction_closed_loop --row-interval-s 2 4 8 \
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> \
