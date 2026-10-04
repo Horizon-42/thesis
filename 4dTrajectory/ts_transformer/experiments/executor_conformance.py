@@ -13,6 +13,7 @@ import argparse
 from pathlib import Path
 
 from ts_transformer.autopilot import conformance
+from ts_transformer.instructions.conformance import require_conforming_labeller
 from ts_transformer.repo_layout import REPO_ROOT
 
 
@@ -23,6 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     executor = args.executor if args.executor.is_absolute() else REPO_ROOT / args.executor
     instructions = args.instructions if args.instructions.is_absolute() else REPO_ROOT / args.instructions
+    require_conforming_labeller(instructions)        # the flights are read again: a moved labeller is named as such
     checked = conformance.check(executor, instructions)
     for mode, difference in checked.differences.items():
         summary = difference.summary()

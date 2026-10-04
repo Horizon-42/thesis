@@ -38,7 +38,8 @@ from ts_transformer.instructions.words import RUNWAY, RUNWAY_GO_AROUND, UNCHANGE
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-CHECK_SCHEMA = "ts-closed-loop-start-check-v1"
+#: v2 (A29, D73): the checks the run ran before its work, as information.
+CHECK_SCHEMA = "ts-closed-loop-start-check-v2"
 
 
 def sample(airports: list[str], per_airport: int, seed: int) -> list[int]:
@@ -148,7 +149,8 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True)
     write_json_atomic(out / "check.json", {
         "schema": CHECK_SCHEMA, "written_utc": utc_now(), "git": git_state(), "instructions": str(instructions),
-        "executor": str(executor), "executor_spec_sha256": record["sha256"], "split": args.split,
+        "executor": str(executor), "executor_spec_sha256": record["sha256"], "checks": record["checks"],
+        "split": args.split,
         "per_airport": args.per_airport, "seed": args.seed, "bounds": {"position_m": STATE_BOUND_M,
                                                                        "other_columns": ROUNDOFF},
         "intervals": intervals})

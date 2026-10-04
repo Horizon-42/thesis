@@ -181,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
                                "executor": executor.relative_to(REPO_ROOT).as_posix()
                                if executor.is_relative_to(REPO_ROOT) else str(executor),
                                "executor_spec_sha256": record["sha256"], "executor_params_sha256": params_sha256(params),
-                               "row_intervals_s": args.row_interval_s, "splits": {}}
+                               "checks": record["checks"], "row_intervals_s": args.row_interval_s, "splits": {}}
     done: dict[str, tuple[dict[str, Any], dict[float, dict[str, Any]]]] = {}
 
     def finished(split: str, drawn: dict[str, Any], numbers: dict[float, dict[str, Any]], peak_gb: float) -> None:

@@ -570,15 +570,20 @@ def test_reading_closed_loop_sentences_runs_the_checks_and_refuses_a_difference_
 
     _reference(tmp_path, monkeypatch, lambda s: (["KXXX:test"], [s]))
     batch, inputs, words = _batch()
-    opened = (_params(), {"sha256": "e"}, words)
-    monkeypatch.setattr(replay, "open_executor", lambda executor, instructions: opened)
+    monkeypatch.setattr(replay, "CHECKED", {})
+    monkeypatch.setattr(replay, "open_executor",
+                        lambda executor, instructions: (_params(), {"sha256": "e", "checks": {"executor": "x"}}, words))
     before = sorted(p.name for p in (tmp_path / closed_loop.CLOSED_LOOP_DIRECTORY / closed_loop.CONFORMANCE).iterdir())
-    assert closed_loop.require_conforming_closed_loop(tmp_path, tmp_path / "executor") == opened
+    params, record, opened_words = closed_loop.require_conforming_closed_loop(tmp_path, tmp_path / "executor")
+    assert params == _params() and opened_words is words and record["sha256"] == "e"
+    assert record["checks"]["executor"] == "x" and record["checks"]["closed_loop"]["flights"] == 1
     assert sorted(p.name for p in (tmp_path / closed_loop.CLOSED_LOOP_DIRECTORY / closed_loop.CONFORMANCE).iterdir()) \
         == before
     monkeypatch.setattr(closed_loop, "_reference_results", lambda instructions, p, w, intervals, device: {
         2.0: (["KXXX:test"], [replace(s, states=s.states + 1e-3) for s in [closed_loop.read(batch, inputs, _params(),
                                                                                              words, device=CPU)[0]]])})
+    closed_loop.require_conforming_closed_loop(tmp_path, tmp_path / "executor")     # checked once in this process
+    replay.CHECKED.clear()                                                          # a new process checks again
     with pytest.raises(ValueError, match=f"reads {tmp_path.name}'s closed-loop reference otherwise: 2 s"):
         closed_loop.require_conforming_closed_loop(tmp_path, tmp_path / "executor")
 
@@ -920,7 +925,8 @@ def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(
                               for name in ("initial_state", "aero_params", "frame_params", "max_thrust_n")))
 
     words = Words(spec())
-    monkeypatch.setattr(replay, "open_executor", lambda executor, instructions: (_params(), {"sha256": "e"}, words))
+    monkeypatch.setattr(replay, "open_executor",
+                        lambda executor, instructions: (_params(), {"sha256": "e", "checks": {}}, words))
     monkeypatch.setattr(replay, "draw_readings", draw)
     monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: approach_speed_ias_mps("A320", 62000.0))
     monkeypatch.setattr(closed_loop, "start_inputs", inputs)

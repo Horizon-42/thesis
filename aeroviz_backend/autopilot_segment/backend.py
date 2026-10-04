@@ -7,9 +7,10 @@ requests happen to arrive in.
 Which flight: the request names a Training set of stage A (``airport``, ``setId``: `training_files.listed_set`, the
 airport's ``training/index_v4.json``) and a flight of it (``flightKey``); the set's sample names the instruction artefact
 and the executor spec it was exported from, and the flight's split. Which sentence: the flight's closed-loop sentence at
-``rowIntervalS`` (one of the set's Δ). Which word: Δ row ``row`` of ``column`` (`fly.segment_of`). The executor spec
-opens only for executor code that flies its reference tracks within the bounds (`replay.open_executor`), the
-single-flight executor included.
+``rowIntervalS`` (one of the set's Δ). Which word: Δ row ``row`` of ``column`` (`fly.segment_of`). The set's executor
+spec opens, and its closed-loop sentences are flown again, only after the labeller's, the executor's (the single-flight
+executor included) and the closed loop's checks pass in this process (`closed_loop.require_conforming_closed_loop`, D73),
+run at the warm-up.
 
 WARMED UP AT START (`warm_up`, which the server runs in a thread): every stage-A set is opened ahead of the first
 request — its flights drawn and read again, each Δ's closed-loop sentences set up — which a first request would
@@ -28,7 +29,7 @@ from typing import Any
 
 import numpy as np
 
-from ts_transformer.autopilot import replay
+from ts_transformer.autopilot import closed_loop, replay
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.experiments import training_flights
 from ts_transformer.instructions import training_files
@@ -91,12 +92,13 @@ class AutopilotSegmentBackend:
             raise NotListed(str(error)) from None
 
     def executor_for(self, sample: dict[str, Any]) -> tuple[Path, Path, ExecutorParams, dict[str, Any], Words]:
-        """The set's instruction artefact and executor spec (absolute), and the spec opened for them on this code."""
+        """The set's instruction artefact and executor spec (absolute), and the spec opened for them after this process's
+        checks (`closed_loop.require_conforming_closed_loop`: the set flies closed-loop sentences again)."""
         instructions = REPO_ROOT / sample["source"]["instructions"]
         executor = REPO_ROOT / sample["source"]["executor"]
         key = (instructions, executor)
         if key not in self._executors:
-            self._executors[key] = replay.open_executor(executor, instructions)
+            self._executors[key] = closed_loop.require_conforming_closed_loop(instructions, executor)
         params, record, words = self._executors[key]
         if record["sha256"] != sample["source"]["executorSpecSha256"]:
             raise ValueError(f"{executor.name} is spec {record['sha256'][:12]}, the set was exported with "

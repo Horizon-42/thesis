@@ -112,14 +112,6 @@ class WindowContext:
         a cached or validation row is built without one."""
         return None
 
-    def override(self, i: int, epoch_seed: int) -> tuple[np.ndarray, dict[str, np.ndarray]] | None:
-        """A TRAINING draw's substitute for window ``i`` this epoch, or None: the NORMALIZED
-        ``[L, C]`` window that replaces the observed one (the set's conditioning is added
-        by `batch`) and the context row that goes with it. Only the training iterator asks
-        (`iter_batches(shuffle=True)` passes the epoch's seed). Every live path answers None: the
-        plan path, which answered with one of the flight's rolled windows (design v5.2), is archived
-        (2026-09-18). The hook stays because `data/dataset.py` asks it."""
-        return None
 
     def dense(
         self, indices: Sequence[int] | np.ndarray

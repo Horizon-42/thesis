@@ -59,7 +59,8 @@ from ts_transformer.instructions.words import ALTITUDE, ANGLE, RUNWAY, Words
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-READOUT_SCHEMA = "ts-final-descent-tolerance-readout-v1"
+#: v2 (A29, D73): the checks the run ran before its work, as information.
+READOUT_SCHEMA = "ts-final-descent-tolerance-readout-v2"
 TABLE_SCHEMA = "ts-final-descent-tolerance-table-v1"
 #: Why an ``unstable_at_minimums`` replay failed its DA check (`unstable_kind`).
 UNSTABLE_KINDS = ("no DA point", "high", "low", "lateral only")
@@ -209,7 +210,7 @@ def readout(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     write_json_atomic(out / "readout.json", {
         "schema": READOUT_SCHEMA, "written_utc": utc_now(), "git": git,
         "instructions": str(instructions), "executor": str(executor), "executor_spec_sha256": record["sha256"],
-        "executor_params_sha256": params_sha256(params),
+        "executor_params_sha256": params_sha256(params), "checks": record["checks"],
         "vocabulary_spec_sha256": spec.sha256, "spec": spec.to_dict(),
         "closed_loop_final_vertical_m": spec.closed_loop_final_vertical_m, "split": args.split,
         "per_airport": args.per_airport, "seed": args.seed, "drawn": drawn.description,

@@ -1134,13 +1134,14 @@ def test_an_executor_spec_is_opened_only_against_its_own_vocabulary_and_after_bo
     executor_spec.write_spec(tmp_path / "spec", _params(), one.sha256, {}, {"git": {"head": "x", "dirty": False}})
     monkeypatch.setattr(replay.artefact, "load_spec", lambda directory: one)
     stand_in_checks(monkeypatch)
-    params, _, _ = replay.open_executor(tmp_path / "spec", tmp_path / "artefact")
-    assert params == _params()
+    params, record, _ = replay.open_executor(tmp_path / "spec", tmp_path / "artefact")
+    assert params == _params() and set(record["checks"]) == {"labeller", "executor"}       # recorded, information
     for module, name, message in ((replay, "require_conforming_labeller", "the labeller reads 1 of"),
                                   (conformance, "require_conforming_executor", "the executor flies spec's")):
         def refuse(*args, message=message, **kwargs):
             raise ValueError(message)
         with monkeypatch.context() as patched:
+            patched.setattr(replay, "CHECKED", {})                     # a new process: the checks run again
             patched.setattr(module, name, refuse)
             with pytest.raises(ValueError, match=message):
                 replay.open_executor(tmp_path / "spec", tmp_path / "artefact")

@@ -210,6 +210,7 @@ def stand_in_checks(monkeypatch):
     from ts_transformer.autopilot import conformance, replay
     from ts_transformer.instructions.conformance import Checked as LabellerChecked
 
+    monkeypatch.setattr(replay, "CHECKED", {})
     monkeypatch.setattr(replay, "require_conforming_labeller", lambda directory: LabellerChecked(flights=0))
     monkeypatch.setattr(conformance, "require_conforming_executor", lambda executor_dir, instructions, **_: (
         conformance.Checked({mode: conformance.Difference(expected=0) for mode in conformance.MODES})))

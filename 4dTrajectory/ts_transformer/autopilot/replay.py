@@ -123,23 +123,34 @@ class Batch:
         return flight_inputs(self.series, [s.first_row for s in self.sentences], device=device)
 
 
+#: The checks this process has run, by (executor spec, artefact) resolved: the code in a process does not change, so a
+#: check run once before the process's first work holds for the rest of it (D73: "in the process that uses them, before
+#: its work" — Claude's reading, which keeps a runner that starts a loop per chunk from flying the reference per chunk).
+CHECKED: dict[tuple[Any, ...], dict[str, Any]] = {}
+
+
 def open_executor(executor_dir: Path, instructions_dir: Path) -> tuple[ExecutorParams, dict[str, Any], Words]:
     """An executor spec and the instruction artefact it flies (`open_spec`), refused by name unless the labeller in this
     process reads the artefact's reference as it was read (the replay re-reads every flight, and the judge reads with it,
     `instructions.conformance`) and the executor in this process flies the spec's reference tracks within the bounds in
-    every way it flies (`autopilot.conformance`, executor design §12.3): both checks run here, every time (D73), and
-    their largest differences are printed for the run's log (information)."""
+    every way it flies (`autopilot.conformance`, executor design §12.3): both checks run in this process before its first
+    use of the pair (D73, `CHECKED`). The record returned carries their largest differences (``record["checks"]``), for
+    the run to record as information."""
     # the executor's check flies through this module: imported here, not at the top
     from ts_transformer.autopilot.conformance import require_conforming_executor
 
-    opened = open_spec(executor_dir, instructions_dir)
-    labeller = require_conforming_labeller(instructions_dir)
-    executor = require_conforming_executor(executor_dir, instructions_dir)
-    print(f"checks: the labeller reads {labeller.flights} reference flights of {instructions_dir.name} as they were read; "
-          f"the executor flies {executor_dir.name}'s reference within the bounds, largest differences "
-          + ", ".join(f"{mode} {d['horizontal_m']:.2g} / {d['vertical_m']:.2g} m"
-                      for mode, d in executor.summary().items()), flush=True)
-    return opened
+    params, record, words = open_spec(executor_dir, instructions_dir)
+    key = (executor_dir.resolve(), instructions_dir.resolve())
+    if key not in CHECKED:
+        labeller = require_conforming_labeller(instructions_dir)
+        executor = require_conforming_executor(executor_dir, instructions_dir)
+        CHECKED[key] = {"labeller": {"flights": labeller.flights, "read_otherwise": len(labeller.mismatches)},
+                        "executor": executor.summary()}
+        print(f"checks: the labeller reads {labeller.flights} reference flights of {instructions_dir.name} as they were "
+              f"read; the executor flies {executor_dir.name}'s reference within the bounds, largest differences "
+              + ", ".join(f"{mode} {d['horizontal_m']:.2g} / {d['vertical_m']:.2g} m"
+                          for mode, d in CHECKED[key]["executor"].items()), flush=True)
+    return params, {**record, "checks": dict(CHECKED[key])}, words
 
 
 def open_spec(executor_dir: Path, instructions_dir: Path) -> tuple[ExecutorParams, dict[str, Any], Words]:

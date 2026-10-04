@@ -226,7 +226,7 @@ def test_the_start_check_runner_exits_1_on_a_failed_flight_and_never_overwrites(
     from ts_transformer.experiments import closed_loop_start_check as runner
 
     monkeypatch.setattr(closed_loop, "require_conforming_closed_loop",
-                        lambda instructions, executor: (_params(), {"sha256": "e"}, None))
+                        lambda instructions, executor: (_params(), {"sha256": "e", "checks": {}}, None))
     good = {"dataset_id": "KXXX:a", "same_rows": True, "position_m": 0.0, "other_columns": 0.0,
             "done_at_last_row": True, "timed_out_as_stored": True}
     argv = ["--instructions", str(tmp_path), "--executor", str(tmp_path), "--split", "train", "--row-interval-s", "2"]

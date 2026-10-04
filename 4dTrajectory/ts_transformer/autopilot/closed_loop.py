@@ -616,16 +616,21 @@ def require_conforming_closed_loop(instructions: Path, executor: Path) -> tuple[
     """The executor spec in ``executor`` opened for ``instructions`` (`replay.open_executor`: the labeller's and the
     executor's checks), refused by name unless the closed-loop reading in this process reads the artefact's closed-loop
     reference as it was read (the section's comment; D69: the one call before closed-loop sentences are read or flown
-    again). Returns what `replay.open_executor` returns, so the caller runs no check twice."""
-    opened = replay.open_executor(executor, instructions)
-    params, _, words = opened
-    checked = check(instructions, params, words)
-    if not checked.passed:
-        shown = "; ".join(f"{name}: {', '.join(problems[:3])}" for name, problems in list(checked.mismatches.items())[:5])
-        raise ValueError(f"the closed-loop reading reads {instructions.name}'s closed-loop reference otherwise: {shown}")
-    print(f"checks: the closed-loop reading reads {checked.flights} reference flights as they were read, largest state "
-          f"difference {checked.largest_state_difference_m:.2g} m", flush=True)
-    return opened
+    again; once a process, as `replay.open_executor`'s). Returns what `replay.open_executor` returns, its record's
+    ``checks`` with the closed loop's, so the caller runs no check twice."""
+    params, record, words = replay.open_executor(executor, instructions)
+    key = ("closed_loop", executor.resolve(), instructions.resolve())
+    if key not in replay.CHECKED:
+        checked = check(instructions, params, words)
+        if not checked.passed:
+            shown = "; ".join(f"{name}: {', '.join(problems[:3])}"
+                              for name, problems in list(checked.mismatches.items())[:5])
+            raise ValueError(f"the closed-loop reading reads {instructions.name}'s closed-loop reference otherwise: {shown}")
+        replay.CHECKED[key] = {"flights": checked.flights,
+                               "largest_state_difference_m": checked.largest_state_difference_m}
+        print(f"checks: the closed-loop reading reads {checked.flights} reference flights as they were read, largest "
+              f"state difference {checked.largest_state_difference_m:.2g} m", flush=True)
+    return params, {**record, "checks": {**record["checks"], "closed_loop": replay.CHECKED[key]}}, words
 
 
 def replay_batch(batch: Batch, stored: dict[int, ClosedLoopSentence], words: Words) -> tuple[Batch, int]:
