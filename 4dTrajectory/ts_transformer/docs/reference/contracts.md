@@ -649,8 +649,10 @@ other executor parameters, flies each from its first predicted step on the time 
 stored states again.
 
 **The start of a closed loop** (vocabulary §6 item 5, D67, §12.1 A26; `autopilot/start.py`, 2026-10-04): `start(instructions,
-split, Δ, sentences, params, words, most_go_arounds=…)` takes closed-loop sentences as `closed_loop_sentences` gives them
-and returns a `Loop` at each flight's first predicted step — the flight rebuilt and compared with its stored signals
+split, Δ, sentences, executor_dir, most_go_arounds=…)` takes closed-loop sentences as `closed_loop_sentences` gives them and
+the executor spec's DIRECTORY (since A28, D71: it opens the spec itself with `replay.open_executor` — the spec's vocabulary
+against the artefact's, the labeller and executor conformance — so no caller handles executor parameters; the words are the
+artefact's) and returns a `Loop` at each flight's first predicted step — the flight rebuilt and compared with its stored signals
 (`flights.rebuild_series`), its aircraft and approach speed by the replay's rule, its time limit (`start.time_limit_s`: the
 observed time left from the first predicted step to the end of its labelled sentence × the timeout factor) and 900 s for
 each go-around up to the most given. `Loop.step(words [B, 5])` flies one Δ row and gives the states of the 2 s rows

@@ -3,15 +3,17 @@ flight, then flown a row at a time on the words a caller gives — the closed-lo
 a speaker's (the prior's free generation, the post-training) one way in.
 
 `start` takes closed-loop sentences of the artefact as the artefact's reader gives them (`instructions.artefact.
-closed_loop_sentences`: a split and a row interval Δ), the executor spec's parameters and the most go-arounds a flight
-may say. For each sentence's flight: the flight rebuilt from the harvest and compared row by row with the stored signals
+closed_loop_sentences`: a split and a row interval Δ), the directory of the executor spec and the most go-arounds a flight
+may say. It opens the spec itself as the replay and the backend do (`replay.open_executor`, D71: the spec measured against
+the artefact's vocabulary, the labeller and the executor conformance), so no caller handles executor parameters; the
+words are the artefact's vocabulary's. For each sentence's flight: the flight rebuilt from the harvest and compared row by row with the stored signals
 (`flights.rebuild_series`, vocabulary §7.2 #4); its aircraft — its own dynamics or a stand-in's — and its approach speed,
 by the rule of the replay (`replay.group_of`, `replay.flight_approach_ias_mps`); its state and physical context at the
 first predicted step (`flights.flight_inputs`); its time limit (§5.8: the observed time left from the first predicted
 step to the end of its labelled sentence × the spec's timeout factor, `replay.time_limit_s`) and the time its go-arounds
 may add (`GO_AROUND_EXTRA_S` each, up to the most given). The sentences are tied to what they were read under: each
 sentence's observed rows (before its first predicted step) must be its flight's stored signals there, and the artefact's
-closed-loop file of the split and Δ must have been flown by ``params``. The artefact holds the signals, not the dynamics (§7.2 #4), so the
+closed-loop file of the split and Δ must have been flown by the spec's parameters. The artefact holds the signals, not the dynamics (§7.2 #4), so the
 start is rebuilt, never stored.
 
 `Loop` is the executor so started (the closed-loop reading builds its own from the same pieces, `Loop.__init__`): at each
@@ -41,7 +43,7 @@ from ts_transformer.autopilot.sentence import Spoken
 from ts_transformer.autopilot.spec import params_sha256
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import (
-    CLOSED_LOOP_SCHEMA, ClosedLoopSentence, closed_loop_path, load_candidates, load_sentences, load_signals, load_spec,
+    CLOSED_LOOP_SCHEMA, ClosedLoopSentence, closed_loop_path, load_candidates, load_sentences, load_signals,
 )
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.labeller.interval import OBSERVATION_S, interval_rows
@@ -152,16 +154,16 @@ class Loop:
 
 
 def start(instructions: Path, split: str, interval_s: float, sentences: Mapping[int, ClosedLoopSentence],
-          params: ExecutorParams, words: Words, *, most_go_arounds: int, device: torch.device) -> tuple[Loop, list[int]]:
+          executor: Path, *, most_go_arounds: int, device: torch.device) -> tuple[Loop, list[int]]:
     """The loop of the flights of ``sentences`` (keyed by their place in the artefact's ``split`` signals, as the reader
-    gives them), in the order of their keys, and that order (module docstring). Refused unless ``words`` is the
-    artefact's vocabulary, the artefact's closed-loop sentences of ``split`` at Δ were flown by ``params``, every sentence
-    starts at Δ's first predicted step and its observed rows are its flight's stored signals."""
-    spec = words.spec
+    gives them), in the order of their keys, and that order (module docstring), flown by the executor spec in the
+    directory ``executor``. Refused unless the spec opens for this artefact (`replay.open_executor`), the artefact's
+    closed-loop sentences of ``split`` at Δ were flown by its parameters, every sentence starts at Δ's first predicted step
+    and its observed rows are its flight's stored signals."""
     if not sentences:
         raise ValueError("no sentence to start")
-    if load_spec(instructions).sha256 != spec.sha256:
-        raise ValueError(f"{instructions} holds another vocabulary than the words given")
+    params, _, words = replay.open_executor(executor, instructions)
+    spec = words.spec
     first = start_row(interval_s)
     every = interval_rows(interval_s, spec.step_s)
     order = sorted(sentences)
