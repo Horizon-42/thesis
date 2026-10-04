@@ -17,34 +17,20 @@ frontend reads. Solver internals and defaults live in `4dTrajectory/CLAUDE.md`.
   casadi load-factor controls (fake 8–11 km "drift").
 - Playback drift guard: `playbackDriftM` on every optimize response; stderr WARNING above
   `PLAYBACK_DRIFT_WARN_M = 50`.
-- **`POST /autopilot/segment`** (the `autopilot_segment/` package, the Training view's live executor): flies one word's segment
-  of a Training flight (to where the word's envelope ends: a heading word's a lead past the next heading word — the answer's
-  `segment.nextWordHeardS`, from the judge's `words_said`, says where the executor heard it: the views draw the rest as a tail) with
-  the SINGLE-FLIGHT executor (`ts_transformer/autopilot/single.py`, 2026-09-27, moved into the executor package 2026-10-01:
-  the executor's cycle for one flight in plain floats, ~9 ms for 200 cycles where the torch `Executor` on a batch of one took
-  ~0.55 s; the same result, not bitwise — torch's own atan2 / hypot differ between a batch and one flight — checked by
-  `test_single_executor.py`, the fleet check `check_single` and the spec's reference tracks: `replay.open_executor` opens a
-  spec only for executor code that flies them within 1e-6 m in every way, this one included; no source pin), driven as
-  `executor.fly` drives it and stopped at the segment's stop (`fly_until`);
-  never a replay record or overlay; the answer carries per-part wall-clock `timing`. The spec is the ONE under
-  `4dTrajectory/outputs/POOLED/executor/` that `replay.open_executor` accepts for the set's artefact, or it is refused
-  naming each (looked up again when a spec is added, moved or rewritten). A bad request is 400 (`errors.RequestRefused`), a set
-  or flight not listed 404 (`errors.NotListed`), superseded by a later request from the same page 409 (`errors.Superseded`: every
-  request names its page, `clientId`, and its number there, `seq`; the page's lower-numbered ones still waiting are not
-  flown, one flying stops before its next cycle, one arriving late is refused — the page's numbers decide, not arrival), a flight the data cannot fly (no aircraft dynamics) 422 (`errors.NotFlyable`; `errors` is stdlib-only so the server
-  maps them without torch), anything else 500 with its reason. WARMED UP AT START (2026-09-28; `http_server.warm_autopilot`
-  runs `AutopilotSegmentBackend.warm_up` in a thread): the backend is built (torch + ts_transformer, ~470 MB) and every
-  read-back set of the current reading rule it can fly is opened — flights, spec, the procedure's masks — ~10 s for the five
-  airports (the first 4 s, then ~1 s each: the val split's files are read once for all of them and let go after), so a first
-  click answers in milliseconds (it took 2–4 s a set, the first model word 2 s more); a set the code cannot fly (another spec)
-  is logged as skipped; a request during the warm-up waits at most for the set being opened (the same lock). One flight at a
-  time; a Training set's flights are rebuilt TOGETHER (`open_flights`: one `rebuild_series`, procedure files and arrival
-  manifests read once; each airport's published vertical paths kept) and kept for the process; each flight answers for itself (one a check refuses is refused alone,
-  `rebuilt_each`). A request with a `sentence` (a model's sample) flies
-  that sentence as `prior_free_generation` flew it — from the observed state at its first step, the time clock, the
-  generation's time limit (`fly.model_time_limit_s` MIRRORS `limits_s`), the sentence's last runway — and so re-flies the exported
-  sample to round-off (the single-flight executor against the torch one that flew it). Full text:
-  `aeroviz-4d/docs/35-viewer-reference.md` AV26.
+- **`POST /autopilot/segment`** (the `autopilot_segment/` package, the Training view's live executor; rewritten for stage A
+  of the two-tier vocabulary, A23, 2026-10-04): flies one word of a Training flight's CLOSED-LOOP sentence at the row
+  interval Δ the view shows (`{clientId, seq, airport, setId, flightKey, rowIntervalS, column, row}`, ``row`` a Δ row) with
+  the SINGLE-FLIGHT executor (`ts_transformer/autopilot/single.py`), set up as the Training export and the formal replay set
+  it up (`ts_transformer/experiments/training_flights.py`: from the first predicted step, its time limit and reserve) — to
+  the cycle the next word of its column is heard (a heading word a lead later), or, the column's last word, to its outcome,
+  judged. The answer (`aeroviz-autopilot-segment-v9`) is the flight every cycle from the word on, the crossing with its
+  decision-altitude check when flown to the outcome, and its distance from the artefact's stored flown states (`stored`).
+  Sets are read from `<airport>/training/index_v4.json` (never `index.json`); the set's sample names its artefact and
+  executor spec, opened with `replay.open_executor` (only for executor code that flies the spec's reference tracks within
+  1e-6 m). 400 a bad request, 404 not listed, 409 superseded by a later request of the same page (`clientId` + rising
+  `seq`), 500 anything else with its reason. Warmed up at start (`http_server.warm_autopilot`). `--training-airports-root`
+  points the server at a test stack's own airports tree. `python -m aeroviz_backend.autopilot_segment.check_live` flies
+  every word of a published set against its sample (outline §6 item 6).
 
 ## Observed tracks have TWO windows — the comparison overlay must use the model one
 

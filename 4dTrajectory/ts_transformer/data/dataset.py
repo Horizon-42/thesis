@@ -1273,11 +1273,7 @@ class TrajectoryWindows(Dataset, ABC):
     ) -> tuple:
         """Build one contiguous batch without per-sample Tensor creation and collation.
 
-        ``epoch_seed`` is given by the TRAINING iterator only: with it, the path's context
-        may substitute a sample (`WindowContext.override` — the plan path's rolled windows,
-        design v5.2), whose history is the substitute's NORMALIZED window under the flight's
-        own conditioning and whose targets and weights are ZERO (nothing on the truth's grid
-        supervises a window the flight never flew; the path's loss reads its context row).
+        ``epoch_seed`` is given by the TRAINING iterator only; the path's context row reads it.
         """
         batch_size = len(indices)
         L, N, C = self.config.seq_len, self.config.pred_len, len(self.config.channels)
@@ -1294,20 +1290,8 @@ class TrajectoryWindows(Dataset, ABC):
         # All expensive work inside a sample is vectorized over N progress points and C
         # channels, and conversion to Torch happens once per complete batch below.
         for row, index in enumerate(indices):
-            substitute = None if epoch_seed is None else self.context.override(int(index), epoch_seed)
-            if substitute is None:
-                sample_x, sample_y, sample_weights, sample_time, flight_weight = (
-                    self._sample_arrays(int(index))
-                )
-                context_row = self.context.row(int(index), epoch_seed)
-            else:
-                encoded, context_row = substitute
-                s_idx = self.index[int(index)][0]
-                sample_x = conditioned_history(encoded, self.conditioning[s_idx])
-                sample_y = np.zeros((N, C), dtype=np.float32)
-                sample_weights = np.zeros((N, C), dtype=np.float32)
-                sample_time = np.float32(0.0)
-                flight_weight = self.flight_weights[s_idx]
+            sample_x, sample_y, sample_weights, sample_time, flight_weight = self._sample_arrays(int(index))
+            context_row = self.context.row(int(index), epoch_seed)
             x[row] = sample_x
             y[row] = sample_y
             weights[row] = sample_weights

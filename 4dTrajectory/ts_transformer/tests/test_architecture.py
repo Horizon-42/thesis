@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+import re
 import sys
 
 TS_DIR = Path(__file__).resolve().parents[1]
@@ -685,15 +686,15 @@ def test_the_instructions_package_sits_below_the_models():
                 assert module in INSTRUCTIONS_MAY_IMPORT, f"{rel} imports {name}"
 
 
-def test_only_the_runners_the_executor_and_the_prior_reach_the_instructions_package():
-    """The instruction language is consumed by the runners, the executor (`autopilot/`), which flies its words,
-    and the prior (`prior/`), which learns to say them (framework document §2)."""
+def test_only_the_runners_and_the_executor_reach_the_instructions_package():
+    """The instruction language is consumed by the runners and the executor (`autopilot/`), which flies its words
+    (framework document §2; the prior, which learns to say them, comes back in stage B of two-tier v4)."""
     for path in _module_files():
         if path.is_relative_to(INSTRUCTIONS):
             continue
         rel = path.relative_to(TS_DIR).as_posix()
         if any(name.split(".")[0] == "instructions" for name in _imported_names(path)):
-            assert rel.startswith(("experiments/", "autopilot/", "prior/")), f"{rel} imports the instructions package"
+            assert rel.startswith(("experiments/", "autopilot/")), f"{rel} imports the instructions package"
 
 
 AUTOPILOT = TS_DIR / "autopilot"
@@ -728,47 +729,113 @@ def test_only_the_runners_reach_the_executor_for_now():
             assert rel.startswith("experiments/"), f"{rel} imports the executor"
 
 
-PRIOR = TS_DIR / "prior"
-#: The prior sits on the instruction language (framework document §2): inside this package it reads the words and the
-#: artefact, the day split the artefact was dealt by (its landing context leaves the sealed test days out) and the causal
-#: runway rules its first-step runway is read against (`data.runway_context`, design §8) — never the executor, a model
-#: of the prediction paths, the training plane or a runner. Outside it, the glidepath lower edge (`prior/procedure.py`,
-#: post-training design §3) reads the coded approach, the harvest's runway data and the LPV cone
-#: (`PROCEDURE_MAY_IMPORT_OUTSIDE`) and stays torch-free.
-PRIOR_MAY_IMPORT = ("prior.", "instructions.", "data.day_split", "data.runway_context", "io_utils", "repo_layout")
-PROCEDURE_MAY_IMPORT_OUTSIDE = {"evaluation.cli", "flight_scenarios.fas_geometry", "flight_scenarios.procedure_final",
-                                "trajectory_data_process.harvest.airports"}
+#: The modules of the executor's laws (vocabulary §5.4–§5.7): they fly words only, so none reads the runway data — the
+#: published glidepaths and decision altitudes the judge reads (D3, D9).
+EXECUTOR_LAW_MODULES = ("lateral", "vertical", "speed", "executor", "single")
+#: The names a module reads a vertical path through (`instructions.airport`, D61).
+VERTICAL_PATH_NAMES = {"VerticalPath", "vertical_path", "published_glidepath_height_m", "glidepath_height_m"}
 
 
-def test_the_prior_reads_only_the_instruction_language():
-    groups = {p.name for p in TS_DIR.iterdir() if (p / "__init__.py").is_file()} | {p.stem for p in TS_DIR.glob("*.py")}
-    for path in PRIOR.rglob("*.py"):
-        if "__pycache__" in path.parts:
+def test_the_executor_laws_never_read_a_vertical_path():
+    """D9, D61: no law of §5.7 (a glidepath floor, an intercept, a capture of the final): no module the laws import,
+    inside the executor package and through each other, names a candidate's vertical path or the published glidepath
+    (the judge reads them; it is not a law)."""
+    import ast
+
+    seen, todo = set(), [f"autopilot.{name}" for name in EXECUTOR_LAW_MODULES]
+    while todo:
+        module = todo.pop()
+        if module in seen:
             continue
-        rel = path.relative_to(TS_DIR).as_posix()
-        for name in _imported_names(path):
-            if name.split(".")[0] not in groups or name == "prior":
-                continue
-            allowed = any((name == item[:-1] or name.startswith(item)) if item.endswith(".") else
-                          (name == item or name.startswith(item + ".")) for item in PRIOR_MAY_IMPORT)
-            assert allowed, f"{rel} imports {name}"
+        seen.add(module)
+        path = TS_DIR / (module.replace(".", "/") + ".py")
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        names |= {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+        names |= {alias.name for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) for alias in node.names}
+        assert not names & VERTICAL_PATH_NAMES, f"{module} reads a vertical path ({sorted(names & VERTICAL_PATH_NAMES)})"
+        todo += [name for name in _imported_names(path) if name.startswith("autopilot.")
+                 and (TS_DIR / (name.replace(".", "/") + ".py")).is_file()]
+    assert {"autopilot.lateral", "autopilot.plant", "autopilot.sentence"} <= seen
 
 
-def test_the_glidepath_edge_reads_only_the_procedure_sources_and_no_torch():
-    groups = {p.name for p in TS_DIR.iterdir() if (p / "__init__.py").is_file()} | {p.stem for p in TS_DIR.glob("*.py")}
-    for name in _imported_names(PRIOR / "procedure.py"):
-        top = name.split(".")[0]
-        assert top != "torch", f"prior/procedure.py imports {name}"
-        if top in groups or top in {"__future__", "collections", "math", "dataclasses", "typing", "numpy"}:
-            continue
-        assert any(name == allowed or name.startswith(allowed + ".") for allowed in PROCEDURE_MAY_IMPORT_OUTSIDE), \
-            f"prior/procedure.py imports {name}"
+#: D73 (no code fingerprint): the trees where a check of the labeller, the executor or the closed loop runs, and the
+#: package's own helpers they import.
+NO_CODE_DIGEST_TREES = ("instructions", "autopilot", "prior", "experiments")
+NO_CODE_DIGEST_FILES = ("io_utils.py", "repo_layout.py")
+#: Names of the retired code digests and their helpers, as identifiers or as text (a payload key is text).
+CODE_DIGEST_NAMES = ("logic", "logic_sha256", "executor_source_files", "executor_source_sha256", "labeller_code_files",
+                     "labeller_code_sha256", "closed_loop_code_sha256", "checker_sha256", "code_sha256",
+                     "REACHED_MODULES", "UNHASHED_IMPORTS", "passed_path", "write_passed")
+#: The modules that may locate themselves (``Path(__file__)`` for a root on ``sys.path`` or the repository's root) —
+#: none of them reads a source file.
+LOCATES_ITSELF = ("4dTrajectory/ts_transformer/repo_layout.py", "4dTrajectory/ts_transformer/experiments/__main__.py",
+                  "aeroviz_backend/http_server.py", "aeroviz_backend/paths.py")
 
 
-def test_only_the_runners_reach_the_prior_for_now():
-    for path in _module_files():
-        if path.is_relative_to(PRIOR):
-            continue
-        rel = path.relative_to(TS_DIR).as_posix()
-        if any(name.split(".")[0] == "prior" for name in _imported_names(path)):
-            assert rel.startswith("experiments/"), f"{rel} imports the prior"
+def _reads_code(node: ast.AST) -> bool:
+    """Whether ``node`` can read Python source: `inspect` or `ast.unparse`, a module's ``__file__`` or ``__code__``,
+    `importlib`'s ``find_spec`` (a module's file), or a ``.py`` name or glob."""
+    if isinstance(node, ast.Attribute) and node.attr in ("getsource", "getsourcelines", "getsourcefile", "unparse",
+                                                        "__file__", "__code__", "find_spec", "origin"):
+        return True
+    if isinstance(node, ast.Name) and node.id in ("__file__", "find_spec", "getsource"):
+        return True
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        names = [alias.name for alias in node.names] + ([node.module] if isinstance(node, ast.ImportFrom) else [])
+        return any(name in ("inspect", "getsource", "unparse") for name in names if name)
+    # a glob of modules, or a bare path to one, handed to a call (a docstring or a message naming a script is neither)
+    return isinstance(node, ast.Call) and any(
+        isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+        and ("*.py" in arg.value or re.fullmatch(r"[\w./-]+\.py", arg.value) is not None) for arg in node.args)
+
+
+def _code_digest_findings(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    relative = path.relative_to(REPO_ROOT).as_posix()
+    found = [] if relative in LOCATES_ITSELF else [f"line {n.lineno}: reads code" for n in ast.walk(tree)
+                                                   if _reads_code(n) and hasattr(n, "lineno")]
+    for n in ast.walk(tree):
+        name = (n.id if isinstance(n, ast.Name) else n.attr if isinstance(n, ast.Attribute)
+                else n.name if isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.alias)) else None)
+        if name in CODE_DIGEST_NAMES:
+            found.append(f"line {n.lineno}: names {name}")
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value in CODE_DIGEST_NAMES:
+            found.append(f"line {n.lineno}: the text {n.value!r}")
+    return sorted(set(found))
+
+
+def test_no_module_where_the_checks_run_computes_a_digest_of_code():
+    """D73: the labeller, the executor and the closed loop are checked by what they do, every time; no module of
+    `instructions/`, `autopilot/`, `prior/`, the runners, the backend or the helpers they share reads Python source or
+    names a code digest (as an identifier or as a payload's key)."""
+    files = [path for tree in NO_CODE_DIGEST_TREES for path in sorted((TS_DIR / tree).rglob("*.py"))]
+    files += [TS_DIR / name for name in NO_CODE_DIGEST_FILES] + sorted((REPO_ROOT / "aeroviz_backend").rglob("*.py"))
+    files = [path for path in files if "tests" not in path.relative_to(REPO_ROOT).parts]
+    assert any(path.parent.name == "autopilot" for path in files) and any(p.name == "io_utils.py" for p in files)
+    offending = {path.relative_to(REPO_ROOT).as_posix(): found for path in files if (found := _code_digest_findings(path))}
+    assert not offending, offending
+
+
+def test_the_digest_scan_finds_every_way_of_reading_source(tmp_path):
+    """Each way a module could digest its own code or another's is found; reading data is not."""
+    shapes = ["import hashlib\nfrom pathlib import Path\nd = hashlib.sha256(Path(__file__).read_text().encode())\n",
+              "with open(__file__) as f:\n    text = f.read()\n",
+              "here = Path(__file__)\ntext = here.read_text()\n",
+              "files = sorted(PACKAGE.glob('*.py'))\n",
+              "import geokit\npath = geokit.__file__\n",
+              "import importlib.util\norigin = importlib.util.find_spec('geokit').origin\n",
+              "from inspect import getsource\n",
+              "record = {'code_sha256': digest}\n",
+              "from ts_transformer.io_utils import logic\n"]
+    for k, source in enumerate(shapes):
+        (tmp_path / f"m{k}.py").write_text(source)
+    found = {}
+    for k in range(len(shapes)):
+        path = tmp_path / f"m{k}.py"
+        tree = ast.parse(path.read_text())
+        found[k] = any(_reads_code(n) for n in ast.walk(tree)) or any(
+            (isinstance(n, ast.Constant) and n.value in CODE_DIGEST_NAMES)
+            or (isinstance(n, ast.alias) and n.name in CODE_DIGEST_NAMES) for n in ast.walk(tree))
+    assert all(found.values()), found
+    assert not any(_reads_code(n) for n in ast.walk(ast.parse("Path('data.json').read_text()\nx = 'run_ts.py'\n")))

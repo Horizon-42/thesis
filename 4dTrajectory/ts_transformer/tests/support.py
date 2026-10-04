@@ -63,15 +63,46 @@ def terminal_contexts() -> dict[tuple[str, str], AssessmentContext]:
     )}
 
 
+def raised_airport(geometry, elevation_m: float):
+    """``geometry`` with the airport elevation E at ``elevation_m`` and every threshold raised by as much: the same
+    airport, higher (D58)."""
+    from ts_transformer.instructions.airport import AirportGeometry
+
+    data = geometry.to_dict()
+    rise = elevation_m - data["reference"]["elevation_m"]
+    data["reference"]["elevation_m"] = elevation_m
+    data["candidates"] = [{**c, "elevation_m": c["elevation_m"] + rise} for c in data["candidates"]]
+    return AirportGeometry.from_dict(data)
+
+
+#: The test airports' runways' published TCH, glidepath and decision altitude (the fleet's DAs above the threshold run
+#: 61–129 m), each candidate's vertical path in `candidates.json` (D61).
+TEST_TCH_M, TEST_GLIDEPATH_DEG, TEST_DA_M = 15.0, 3.0, 60.0
+TEST_VERTICAL_PATH = {"crossing_height_m": TEST_TCH_M, "glidepath_deg": TEST_GLIDEPATH_DEG, "decision_height_m": TEST_DA_M}
+
+
+def with_vertical_path(geometry, path):
+    """``geometry`` with every candidate's published vertical path ``path`` (an `instructions.airport.VerticalPath`)."""
+    from dataclasses import replace
+
+    return replace(geometry, candidates=tuple(replace(c, vertical_path=path) for c in geometry.candidates))
+
+
+#: `instruction_airport`'s field elevation E, MSL m.
+INSTRUCTION_AIRPORT_ELEVATION_M = 60.0
+
+
 def instruction_airport():
     """A synthetic airport for the instruction labeller: one candidate runway "09", threshold at
-    the airport frame's origin, course 090° true, elevation 100 m MSL."""
+    the airport frame's origin, course 090° true, elevation 100 m MSL; the airport elevation E (the field's,
+    `INSTRUCTION_AIRPORT_ELEVATION_M`) 40 m below it, so that the altitude words, heights above E (D58), differ from MSL
+    by one 60 m step: a level of 1,080 m MSL is the word 1,020 m."""
     from ts_transformer.instructions.airport import AirportGeometry
 
     return AirportGeometry.from_dict({
-        "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": 100.0},
+        "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": INSTRUCTION_AIRPORT_ELEVATION_M},
         "candidates": [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0,
-                        "elevation_m": 100.0, "length_m": 3000.0}],
+                        "elevation_m": 100.0, "length_m": 3000.0, "vertical_path": TEST_VERTICAL_PATH}],
         "runway_ends": [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0}],
     })
 
@@ -82,12 +113,13 @@ def instruction_spec(**changes):
     from ts_transformer.instructions.spec import VocabularySpec
 
     measured = measure.MeasuredValues(
-        turn_rate_min_deg_s=1.0, turn_rate_max_deg_s=3.5, turn_bank_max_deg=32.0,
+        turn_rate_max_deg_s=3.5, turn_bank_max_deg=32.0,
         corridor_half_width_m=20.0, corridor_widening_deg=0.45, corridor_course_tolerance_deg=2.0,
         descent_angle_edges_deg=(-0.5, 1.4, 2.6, 3.7, 10.0), descent_angle_centres_deg=(0.8, 2.1, 3.0, 4.4),
-        climb_angle_centre_deg=1.3, speed_accel_max_mps2=2.5,
+        climb_angle_centre_deg=1.3, speed_accel_max_mps2=2.5, **measure.D22_GRID,
     )
-    data = measure.build_spec(measured).to_dict()
+    # H_final = H unless a test changes it (D66: at H_final = H the closed-loop reading is the one before it)
+    data = measure.build_spec(measured, closed_loop_final_vertical_m=measure.SUGGESTED["closed_loop_vertical_m"]).to_dict()
     data.update(changes)
     return VocabularySpec.from_dict(data)
 
@@ -141,6 +173,24 @@ def instruction_flight(e, n, altitude, track, speed, dataset_id="KXXX:test", spl
                          altitude, track, speed, np.gradient(altitude, INSTRUCTION_STEP_S))
 
 
+#: `parallel_airport`'s second runway, north of 09: how far, metres.
+PARALLEL_SPACING_M = 891.0
+
+
+def parallel_airport():
+    """`instruction_airport` with a parallel runway "09L" `PARALLEL_SPACING_M` north of "09" (candidate 0), the same
+    threshold position along the course and the same elevation."""
+    from ts_transformer.instructions.airport import AirportGeometry
+
+    ends = [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0},
+            {"ident": "09L", "threshold_e_m": 0.0, "threshold_n_m": PARALLEL_SPACING_M, "course_deg": 90.0}]
+    return AirportGeometry.from_dict({
+        "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": INSTRUCTION_AIRPORT_ELEVATION_M},
+        "candidates": [{**end, "elevation_m": 100.0, "length_m": 3000.0, "vertical_path": TEST_VERTICAL_PATH}
+                       for end in ends], "runway_ends": ends,
+    })
+
+
 def signal_attitudes(_directory, signals):
     """`training_attitude.observed_attitudes` for synthetic flights, which have no arrival manifest to rebuild a series
     from: each one's heading and path angle read off its signals, its bank and attack those of a flight with no airframe
@@ -152,45 +202,99 @@ def signal_attitudes(_directory, signals):
                                 "bankRightDeg": None, "attackDeg": None} for flight in signals}
 
 
-def passed_executor(spec_dir):
-    """Mark a test's executor spec at ``spec_dir`` as flown within the bounds by the code on disk: placeholder reference
-    files and a passed record for this code — what `replay.open_executor` asks for (`spec.require_conforming_executor`).
-    The check itself is tested in `test_executor_conformance.py`."""
-    import json
+def stand_in_checks(monkeypatch):
+    """Stand in for the labeller's and the executor's checks that `replay.open_executor` runs (D73), for a test whose
+    synthetic artefact and spec hold no reference: both pass with nothing flown. The checks themselves are tested in
+    `test_instruction_conformance.py` and `test_executor_conformance.py`, and through a real reference in
+    `test_start.py`."""
+    from ts_transformer.autopilot import conformance, replay
+    from ts_transformer.instructions.conformance import Checked as LabellerChecked
 
-    from ts_transformer.autopilot import spec as executor_spec
-
-    directory = spec_dir / executor_spec.CONFORMANCE_DIRECTORY
-    directory.mkdir()
-    (directory / "reference.json").write_text("{}", encoding="utf-8")
-    (directory / "reference.npz").write_bytes(b"")
-    code = executor_spec.executor_source_sha256()
-    executor_spec.passed_path(spec_dir, code).write_text(json.dumps({
-        "schema": executor_spec.PASSED_SCHEMA, "executor_source_sha256": code,
-        "reference_sha256": executor_spec.reference_sha256(directory)}), encoding="utf-8")
+    monkeypatch.setattr(replay, "CHECKED", {})
+    monkeypatch.setattr(replay, "require_conforming_labeller", lambda directory: LabellerChecked(flights=0))
+    monkeypatch.setattr(conformance, "require_conforming_executor", lambda executor_dir, instructions, **_: (
+        conformance.Checked({mode: conformance.Difference(expected=0) for mode in conformance.MODES})))
 
 
-def labelled_instruction_artefact(directory):
-    """A tmp instruction artefact at ``directory`` (created) holding one synthetic train flight onto
+def labelled_instruction_artefact(directory, split="train"):
+    """A tmp instruction artefact at ``directory`` (created) holding one synthetic ``split`` flight onto
     `instruction_airport`'s runway 09 — a downwind, a base, a final on a 3° descent — labelled by the labeller:
     signals, candidates, spec, sentences. Returns the spec."""
     import numpy as np
 
-    from ts_transformer.instructions.artefact import (
-        labeller_source_sha256, write_candidates, write_sentences, write_signals, write_spec,
-    )
+    from ts_transformer.instructions.artefact import write_candidates, write_sentences, write_signals, write_spec
     from ts_transformer.instructions.labeller.read import read_flight
 
     legs = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (20, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
             (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
-    flight = instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0), dataset_id="KXXX:a")
+    flight = instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0), dataset_id="KXXX:a", split=split)
     directory.mkdir(parents=True)
-    write_signals(directory, {"train": [flight]},
-                  {"counts": {"train": {"built_usable": 1}}, "test_days": {"flights_not_opened": 0},
+    write_signals(directory, {split: [flight]},
+                  {"counts": {split: {"built_usable": 1}}, "test_days": {"flights_not_opened": 0},
                    "sources": [{"airport": "KXXX", "arrival_manifest_sha256": "0" * 64}]}, fixture_days())
     write_candidates(directory, {"KXXX": instruction_airport()})
     spec = instruction_spec()
-    write_spec(directory, spec, {"n": 1}, {"labeller_source_sha256": labeller_source_sha256(),
-                                           "git": {"head": "test", "dirty": False}})
-    write_sentences(directory, "train", spec, [read_flight(flight, instruction_airport(), spec)], [0])
+    write_spec(directory, spec, {"n": 1}, {"git": {"head": "test", "dirty": False}})
+    write_sentences(directory, split, spec, [read_flight(flight, instruction_airport(), spec)], [0])
     return spec
+
+
+def executor_inputs(signals, geometry, row=0, mass_kg=62000.0):
+    """`autopilot.flights.FlightInputs` of one A320 flown from ``signals``' 2 s row ``row`` (a synthetic flight has no
+    data-plane series to rebuild): its state there, the airframe, the chart at the first candidate's threshold."""
+    import math
+
+    import torch
+
+    from aircraft.aero_params import aero_params_for_aircraft
+    from flight_scenarios.scenario import aircraft_for_code
+    from ts_transformer.autopilot.flights import FlightInputs
+
+    aircraft = aircraft_for_code("A320")
+    aero = aero_params_for_aircraft(aircraft)
+    lat, lon = geometry.frame.latlon_from_horizontal(signals.e_m[row], signals.n_m[row])
+    gamma = math.atan2(signals.vertical_rate_mps[row], signals.ground_speed_mps[row])
+    state = [lat, lon, signals.altitude_m[row], signals.ground_speed_mps[row] / math.cos(gamma),
+             math.radians(90.0 - signals.track_deg[row]), gamma, mass_kg]
+    candidate = geometry.candidates[0]
+    tlat, tlon = geometry.frame.latlon_from_horizontal(candidate.threshold_e_m, candidate.threshold_n_m)
+    f64 = torch.float64
+    return FlightInputs(
+        initial_state=torch.tensor([state], dtype=f64),
+        aero_params=torch.tensor([[aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall]], dtype=f64),
+        frame_params=torch.tensor([[tlat, tlon, candidate.elevation_m, 0.0]], dtype=f64),
+        max_thrust_n=torch.tensor([aircraft.engine.max_thrust_total_n], dtype=f64))
+
+
+def closed_loop_flight(interval_s: float = 2.0):
+    """A synthetic flight on its closed-loop sentence at ``interval_s``, from its first predicted step as
+    `closed_loop.replay_batch` sets it up — the core of `experiments.training_flights.closed_loop_batch`, whose drawing
+    (`replay.batch_of`) needs a data-plane flight: the downwind, base and final of `test_closed_loop`, read in closed
+    loop (`closed_loop.read`). Returns a namespace: ``batch``, the replay batch of
+    one flight from its first predicted step — whose inputs are fixed, a synthetic flight having no data-plane series —
+    ``inputs``, its executor inputs there, ``sentence``, its stored `ClosedLoopSentence`, ``params``, ``words``, and the
+    observed flight as labelled: ``signals`` (from its first row), ``reading`` and ``geometry``."""
+    import dataclasses
+    from types import SimpleNamespace
+
+    import torch
+
+    from ts_transformer.autopilot import closed_loop, replay
+    from ts_transformer.tests import test_closed_loop
+
+    batch, inputs, words = test_closed_loop._batch(interval_s)
+    params = test_closed_loop._params()
+    (sentence,) = closed_loop.read(batch, inputs, params, words, device=torch.device("cpu"))
+    replayed, missing = closed_loop.replay_batch(batch, {0: sentence}, words)
+    assert not missing
+
+    @dataclasses.dataclass
+    class FixedInputs(replay.Batch):
+        fixed: object = None
+
+        def inputs(self, device):
+            return self.fixed
+
+    fixed = FixedInputs(**{f.name: getattr(replayed, f.name) for f in dataclasses.fields(replay.Batch)}, fixed=inputs)
+    return SimpleNamespace(batch=fixed, inputs=inputs, sentence=sentence, params=params, words=words,
+                           signals=batch.signals[0], reading=batch.readings[0], geometry=batch.geometries[0])

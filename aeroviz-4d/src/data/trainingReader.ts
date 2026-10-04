@@ -1,8 +1,8 @@
 /**
  * trainingReader.ts
  * -----------------
- * The ONE reader every Training file is parsed with: the manifest and a set's sample (`trainingSample.ts`), the
- * overlays drawn over a set (`trainingOverlays.ts`) and the live executor's answer (`trainingAutopilot.ts`). A field is
+ * The ONE reader every Training file is parsed with: the index and a set's sample (`trainingSample.ts`) and the live
+ * executor's answer (`trainingAutopilot.ts`). A field is
  * read or refused by its path — `sample.flights[3].signals.tS has 40 values, expected 41` — and `attempt` turns a
  * refusal into a `Parsed` problem. One `Refusal` class, so a refusal thrown by one file's reader inside another's
  * `attempt` is a problem named on screen, never a crash.
@@ -109,17 +109,6 @@ export class Reader {
     return this.source[key] === null ? null : this.count(key, low);
   }
 
-  /** A share of a whole: a number in [0, 1]. */
-  share(key: string): number {
-    const value = this.number(key);
-    if (value < 0 || value > 1) this.refuse(key, "not a share in [0, 1]");
-    return value;
-  }
-
-  nullableShare(key: string): number | null {
-    return this.source[key] === null ? null : this.share(key);
-  }
-
   boolean(key: string): boolean {
     const value = this.source[key];
     if (typeof value !== "boolean") this.refuse(key, "not true/false");
@@ -143,20 +132,22 @@ export class Reader {
     return this.source[key] === null ? null : this.numbers(key, length);
   }
 
+  /** A list of numbers in which a null is a value not given (a row with nothing to compare against). */
+  numbersOrNull(key: string, length: number): Array<number | null> {
+    const value = this.source[key];
+    if (!Array.isArray(value) || !value.every((item) => item === null || isNumber(item))) {
+      throw new Refusal(`${this.at(key)} is missing or not a list of numbers and nulls`);
+    }
+    if (value.length !== length) throw new Refusal(`${this.at(key)} has ${value.length} values, expected ${length}`);
+    return value;
+  }
+
   /** 0/1 per row, as booleans. */
   flags(key: string, length: number): boolean[] {
     return this.numbers(key, length).map((value, index) => {
       if (value !== 0 && value !== 1) throw new Refusal(`${this.at(key)}[${index}] is ${value}, not 0/1`);
       return value === 1;
     });
-  }
-
-  /** Probabilities: numbers in [0, 1]. */
-  probabilities(key: string, length: number): number[] {
-    const values = this.numbers(key, length);
-    const outside = values.findIndex((value) => value < 0 || value > 1);
-    if (outside >= 0) throw new Refusal(`${this.at(key)}[${outside}] is ${values[outside]}, not a probability`);
-    return values;
   }
 
   /** An ascending [low, high] pair. */

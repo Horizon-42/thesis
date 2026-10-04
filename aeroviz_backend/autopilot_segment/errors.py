@@ -7,11 +7,6 @@ class RequestRefused(ValueError):
     column, an airport that is not an airport code, a step that says no word of it (HTTP 400)."""
 
 
-class NotFlyable(ValueError):
-    """A listed flight the executor cannot fly by the data's own account — no aircraft dynamics for its type (HTTP 422);
-    the formal replay does not fly it either."""
-
-
 class Superseded(RuntimeError):
     """A newer request from the same page came in: this one is not flown, or stops flying (HTTP 409) — the page has
     already dropped it, and the backend flies one segment at a time, so it would only hold the newer one up."""

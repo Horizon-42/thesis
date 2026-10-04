@@ -13,10 +13,11 @@ first even second at or after its first kept sample, and its ``entry_time_utc`` 
 of any two flights at the same step is at the same time. The candidates are each manifest's published runway geometry; beside them
 go every runway end the harvest builds, from the configuration and CIFP the harvest and the
 evaluator read by default (`evaluation.cli.DEFAULT_CONFIG`, `DEFAULT_CIFP`). Every candidate must
-publish a threshold crossing height and a glidepath there (the executor's crossing point and floor for "descend to
-land", `autopilot.runway_data.vertical_paths`): a runway without them is refused before anything is
-written, never dropped quietly. Writes ``signals_{train,select,val}.npz``, ``signals.json`` (with the
-day split) and ``candidates.json`` into a NEW directory.
+publish a threshold crossing height, a glidepath and a decision altitude there (the judge's decision-altitude check,
+vocabulary §4.2, §5.8, `instructions.airport.vertical_path`): a runway without them is refused before anything is
+written, never dropped quietly; with them they go into ``candidates.json`` (D61), and nothing later reads the CIFP.
+Writes ``signals_{train,select,val}.npz``, ``signals.json`` (with the day split) and ``candidates.json`` into a NEW
+directory.
 
     python run_ts.py instruction_signals --out 4dTrajectory/outputs/POOLED/instruction_language/<name>
 """
@@ -32,10 +33,11 @@ from multiprocessing import get_context
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from aircraft.performance_index import performance_index_identity
 from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG
 from trajectory_data_process.harvest.airports import load_airport
-from ts_transformer.autopilot.runway_data import vertical_paths
 from ts_transformer.config import TSConfig
 from ts_transformer.data.data_provenance import arrival_data_provenance
 from ts_transformer.data.day_split import (
@@ -65,15 +67,21 @@ def keys_by_day(provenance: dict[str, Any], manifests: dict[str, Path], days: Da
     return result
 
 
+#: The seed of a smoke build's sample (D55): the same flights at every run.
+LIMIT_SEED = 1337
+
+
 def build_jobs(keys: dict[str, list[str]], manifests: dict[str, Path], limit: int) -> list[tuple[str, str, str, list[str]]]:
     """The chunks to build: ``(split, airport, manifest, keys)`` for the development splits only — a test day's
-    key never reaches a worker. ``limit``: the first N flights per airport and split (0: all)."""
+    key never reaches a worker. ``limit``: a random sample of N flights per airport and split, `LIMIT_SEED` (D55: the
+    first N of the sorted keys share a callsign prefix; 0: all)."""
     jobs = []
     for split in SPLITS:
         for airport, manifest in manifests.items():
             mine = sorted(k for k in keys[split] if k.startswith(f"{airport}:"))
             if limit:
-                mine = mine[:limit]
+                drawn = np.random.default_rng(LIMIT_SEED).permutation(len(mine))[:limit]
+                mine = [mine[i] for i in sorted(drawn.tolist())]
             for start in range(0, len(mine), CHUNK):
                 jobs.append((split, airport, str(manifest), mine[start: start + CHUNK]))
     return jobs
@@ -105,7 +113,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--airports", nargs="+", default=None, help="default: every harvested airport")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--limit", type=int, default=0,
-                        help="SMOKE TEST ONLY: the first N flights per airport and split (recorded in signals.json)")
+                        help="SMOKE TEST ONLY: a random sample of N flights per airport and split, seed LIMIT_SEED "
+                             "(recorded in signals.json)")
     args = parser.parse_args(argv)
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
     if out.exists():
@@ -127,13 +136,10 @@ def main(argv: list[str] | None = None) -> int:
     # the candidates: each manifest's published runway geometry (the modeling target's own source),
     # and every runway end the harvest builds (its landing rule's parallel runways)
     runways = {a: load_airport(a, config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways for a in airports}
+    # each candidate's published vertical path goes into candidates.json (D61): a candidate without a threshold crossing
+    # height, a glidepath or a decision altitude is refused here (vocabulary §4.2, §5.8), before anything is written
     geometries = {a: airport_geometry(a, json.loads(m.read_text(encoding="utf-8"))["runway_targets"], runways[a])
                   for a, m in manifests.items()}
-    # a candidate runway must publish a threshold crossing height and a glidepath: "descend to land" crosses it at the
-    # one and does not descend under the other's lower edge (executor design §5.3) — refused before anything is written,
-    # never dropped quietly
-    for airport, geometry in geometries.items():
-        vertical_paths(geometry, runways[airport])
 
     jobs = build_jobs(keys, manifests, args.limit)
     geometry_data = {a: g.to_dict() for a, g in geometries.items()}
@@ -186,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
                       "flight_split": {"method": SPLIT_ASSIGNMENT_METHOD, "seed": config.resolved_split_seed,
                                        "val_fraction": config.val_fraction, "test_fraction": config.test_fraction}},
         "limit_per_airport_and_split": args.limit or None,
+        "limit_seed": LIMIT_SEED if args.limit else None,
         "typecodes": dict(typecodes.most_common()),
         # The labeller reads kinematics only, so a flight whose type has no dynamics is kept
         # (`all-flights`); how many, and why, against the index that decided it.

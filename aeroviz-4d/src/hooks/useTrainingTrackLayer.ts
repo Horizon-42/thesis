@@ -1,36 +1,32 @@
 /**
  * useTrainingTrackLayer.ts
  * ------------------------
- * The selected Training flight in the 3D scene: its track, and the envelopes its sentence allows. Design:
- * `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`. The pieces are `scene/trainingEntities.ts`; the executor's
- * replay and the live executor are `useTrainingExecutorLayers`, a model's own sentence `useTrainingGenerationLayers`,
- * both called from here. The truth — this track and its sentence's envelopes — is drawn whichever sentence is read.
+ * The selected Training flight in the 3D scene: its observed track, the flown path of the sentence read beside it, and
+ * the envelopes the sentence allows. The pieces are `scene/trainingEntities.ts`; the live executor's segment is
+ * `useTrainingLiveLayer`, the aircraft at the cursor `useTrainingAircraftLayer`, both called from here.
  *
- *  • THE TRACK, in 3D, at its ellipsoid height (the exporter converted MSL once, adding the flight's runway's HAE − MSL
- *    offset — the one the data plane subtracted — so it is the height the aircraft reported), and its GROUND TRACE draped
- *    under it: the lateral envelopes lie on the ground, and from any oblique view the airborne line is displaced from
- *    them — the trace is what they are read against.
- *  • THE HEADING WORDS (`headingBands`, instruction-v3): a heading word bounds no position — it says where the track is a
- *    lead after it is said, and is judged on the rows from then to the next heading word's — so what is honest in plan
- *    is the stretch of ground trace it is judged on, draped in the band colour, one entity per word, and the rows of that
- *    stretch outside the band drawn over it in red, never faded. The band itself — target ± tolerance against time — is
- *    the read-back window's heading chart.
- *  • THE CAPTURE (`corridor`): the capture turn's rows on the ground, dashed, in the turn's verdict colour; the capture
- *    corridor and its centreline, a draped polygon with a draped edge.
- *  • THE ALTITUDE TUBES (`vertical`): one Cesium wall per altitude word, over the aircraft's own ground track, between
- *    the tube's lower and upper edge (both HAE, exported), and the two edges as lines — ±25 m is a sliver under the track
- *    from any distance; the lines are not.
- *  • THE CANDIDATE RUNWAYS (`candidates`): every threshold the runway pointer can point at, its runway and extended
- *    centreline; the designated one is drawn whatever the switch says, because the corridor and the landing are measured
- *    from it.
- *  • WHERE WORDS WERE ISSUED: a point on the track at every heading word, the clearance, the capture and the end of the
- *    sentence.
+ *  • THE OBSERVED TRACK, in 3D, at its ellipsoid height (the exporter's MSL plus the flight's runway's HAE − MSL, added
+ *    once in the reader), and its GROUND TRACE draped under it: the lateral envelopes lie on the ground, and from any
+ *    oblique view the airborne line is displaced from them — the trace is what they are read against.
+ *  • THE FLOWN PATH (a closed-loop reading): the states the executor flew from the first predicted step
+ *    when it was told the sentence at the chosen Δ, in teal beside the observed track, its ground trace dashed, where
+ *    it ended — named with the judge's outcome — and the DA POINT of the threshold crossing, green when the check
+ *    passed, red when it did not (its values in the label).
+ *  • THE CORRECTION WORDS: an orange point on the flown path where each word the closed-loop reading added is said.
+ *  • THE HEADING WORDS (`headingBands`): a heading word bounds no position — it says where the track is a lead after it
+ *    is said, and is judged on the rows from then on — so what is honest in plan is the stretch of ground trace it is
+ *    judged on, draped in the band colour, one entity per word, and the rows of that stretch outside the band drawn over
+ *    it in red, never faded. The envelopes are the judged track's: the observed track's for the labelled sentence, the
+ *    flown path's for a closed-loop one.
+ *  • THE ALTITUDE TUBES (`vertical`): one Cesium wall per altitude word, over the judged track's ground position, between
+ *    the tube's lower and upper edge (exported MSL plus the flight's HAE − MSL), and the two edges as lines.
+ *  • THE CANDIDATE RUNWAYS (`candidates`): every threshold the runway word can point at, as a point with its name; the one
+ *    the flight lands on is drawn whatever the switch says. (The runway itself is the airport's own layer.)
  *
- * BUILT ONCE PER FLIGHT: a Draw switch shows or hides its entities and rebuilds nothing — the draped layers would
- * otherwise be re-draped on every switch, and the runways drawn first would land on top of the envelopes they sit under.
+ * BUILT ONCE PER FLIGHT AND READING: a Draw switch shows or hides its entities and rebuilds nothing — the draped layers
+ * would otherwise be re-draped on every switch.
  *
- * THE SELECTED WORD (`trainingColumn`, its word in force at the cursor — of the truth; a model's sentence read paints its
- * own, `useTrainingGenerationLayers`) is the only thing highlighted: its own envelope
+ * THE SELECTED WORD (`trainingColumn`, its word in force at the cursor) is the only thing highlighted: its own envelope
  * turns yellow (a line) or keeps its hue deepened with a yellow edge (a fill); the rows it is in force are drawn yellow
  * over the track, and its issue is marked with its name. Every other word's envelope recedes (its colours faded). Moving
  * the cursor within one word repaints nothing. Selecting a flight frames it once; the cursor never moves the camera.
@@ -41,21 +37,21 @@
  * Evaluation's playback.
  */
 
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp, useTrainingCursor, type TrainingLayers } from "../context/AppContext";
-import useTrainingTrafficLayer from "./useTrainingTrafficLayer";
 import useTrainingAircraftLayer from "./useTrainingAircraftLayer";
-import { windowOnScreen } from "../data/trainingTraffic";
+import useTrainingLiveLayer from "./useTrainingLiveLayer";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { frameTrajectoryCamera } from "../utils/frameTrajectoryCamera";
 import {
   TRAINING_CANDIDATE_COLOR,
-  TRAINING_CAPTURE_TURN_COLOR,
-  TRAINING_COLUMN_COLOR,
-  TRAINING_CORRIDOR_COLOR,
+  TRAINING_CORRECTION_COLOR,
+  TRAINING_DECISION_FAIL_COLOR,
+  TRAINING_DECISION_PASS_COLOR,
   TRAINING_DESIGNATED_COLOR,
   TRAINING_ENVELOPE_ALPHA,
+  TRAINING_EXECUTOR_COLOR,
   TRAINING_HEADING_BAND_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_TRACE_COLOR,
@@ -63,14 +59,18 @@ import {
   TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
 import {
-  cursorOnFlight,
+  readingRowAt,
+  readingRowTimeS,
   rowAtTime,
-  trainingWordAt,
+  sentenceWordAt,
+  trainingBandLabel,
+  trainingReadingOf,
   trainingWordLabel,
   type TrainingColumn,
-  type TrainingPlanLine,
+  type TrainingReading,
   type TrainingSelection,
 } from "../data/trainingSample";
+import { decisionText, TRAINING_OUTCOME_TAG } from "../data/trainingText";
 import {
   airLine,
   colour,
@@ -78,23 +78,18 @@ import {
   entityGroup,
   GROUND_ROWS_WIDTH,
   groundLine,
-  groundRows,
   lonLatHeights,
   marker,
   planDegrees,
-  planRingDegrees,
   TRAINING_ENTITY,
   trainingBandGround,
   trainingBandOutsideGround,
   trainingEnvelopeEntities,
-  trainingFocusEntities,
+  trainingFocusEntity,
   trainingFocusStretch,
   trainingTubeWall,
   type EntityOptions,
 } from "../scene/trainingEntities";
-import useTrainingExecutorLayers from "./useTrainingExecutorLayers";
-import useTrainingGenerationLayers from "./useTrainingGenerationLayers";
-import { generationOnScreen, sentenceAxisEndS } from "../data/trainingOverlays";
 
 const ALPHA = TRAINING_ENVELOPE_ALPHA;
 /** An envelope's edge, at rest and when it is the selected word's (px). */
@@ -106,129 +101,127 @@ const FADED = 0.3;
 const FRAME_MARGIN = 1.5;
 
 type LayerIds = Record<keyof TrainingLayers, string[]>;
-const noLayerIds = (): LayerIds => ({ headingBands: [], corridor: [], vertical: [], candidates: [] });
+const noLayerIds = (): LayerIds => ({ headingBands: [], vertical: [], candidates: [] });
 
-/** Every entity of the flight's scene, added once; the ids each Draw switch shows and hides. */
-function buildScene(viewer: Cesium.Viewer, selection: TrainingSelection): { layerIds: LayerIds; remove: () => void } {
+/** Every entity of the flight's scene at one reading, added once; the ids each Draw switch shows and hides. */
+function buildScene(viewer: Cesium.Viewer, selection: TrainingSelection, reading: TrainingReading): { layerIds: LayerIds; remove: () => void } {
   const { flight, candidates } = selection;
-  const { envelopes, signals } = flight;
+  const { observed, judged, envelopes, closed } = reading;
   const group = entityGroup(viewer);
   const layerIds = noLayerIds();
   const add = (layer: keyof TrainingLayers | null, options: EntityOptions) => {
     group.add(options);
     if (layer !== null) layerIds[layer].push(options.id);
   };
-  /** A draped region and its edge. */
-  const region = (layer: keyof TrainingLayers, id: string, line: TrainingPlanLine, css: string, alpha: number, name: string) => {
-    add(layer, {
-      id, name,
-      polygon: {
-        hierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(planDegrees(line))),
-        material: colour(css, alpha), classificationType: Cesium.ClassificationType.BOTH,
-      },
-    });
-    add(layer, groundLine(TRAINING_ENTITY.edge(id), undefined, planRingDegrees(line), EDGE_WIDTH, colour(css)));
-  };
   const verdict = (ok: boolean, css: string) => (ok ? css : TRAINING_OUTSIDE_COLOR);
 
-  // THE RUNWAYS first, so every envelope reads over them; the designated one whatever the switch says.
+  // THE RUNWAYS' THRESHOLDS first; the one the flight lands on whatever the switch says.
   for (const candidate of candidates) {
-    const pointed = candidate.index === flight.runwayIndex;
-    const layer = pointed ? null : "candidates";
-    const css = pointed ? TRAINING_DESIGNATED_COLOR : TRAINING_CANDIDATE_COLOR;
-    add(layer, groundLine(TRAINING_ENTITY.centreline(candidate.ident), undefined, planDegrees(candidate.centreline),
-      pointed ? 2 : 1.5, dash(css)));
-    add(layer, groundLine(TRAINING_ENTITY.runway(candidate.ident), undefined, planDegrees(candidate.runway), pointed ? 7 : 5,
-      colour(css)));
-    add(layer, {
-      id: TRAINING_ENTITY.runwayLabel(candidate.ident),
-      position: Cesium.Cartesian3.fromDegrees(candidate.runway.lon[0], candidate.runway.lat[0]),
-      label: {
-        text: candidate.ident, font: "13px sans-serif", fillColor: colour(css),
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, pixelOffset: new Cesium.Cartesian2(0, -14),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
+    const designated = candidate.index === flight.runwayIndex;
+    add(designated ? null : "candidates", marker(TRAINING_ENTITY.candidate(candidate.ident),
+      `${designated ? "The runway the flight lands on" : "Candidate runway"} ${candidate.ident}: course ${candidate.courseDeg.toFixed(1)}°`,
+      Cesium.Cartesian3.fromDegrees(candidate.lonDeg, candidate.latDeg, candidate.elevationM + candidate.haeMinusMslM),
+      designated ? TRAINING_DESIGNATED_COLOR : TRAINING_CANDIDATE_COLOR, designated ? 10 : 7, candidate.ident));
+  }
+
+  if (envelopes !== null) {
+    envelopes.heading.forEach((band, index) => {
+      const rows = trainingBandGround(judged, band);
+      if (!rows.length) return;
+      add("headingBands", groundLine(TRAINING_ENTITY.heading(index), `Heading word ${index + 1}: the rows it is judged on`,
+        rows, GROUND_ROWS_WIDTH, colour(TRAINING_HEADING_BAND_COLOR, ALPHA.headingBand)));
+      trainingBandOutsideGround(judged, band).forEach((degrees, run) =>
+        add("headingBands", groundLine(TRAINING_ENTITY.headingOutside(index, run), `Heading word ${index + 1}: rows outside its band`,
+          degrees, GROUND_ROWS_WIDTH, colour(TRAINING_OUTSIDE_COLOR))));
     });
-  }
 
-  region("corridor", TRAINING_ENTITY.corridor, envelopes.approach.corridor.outline, TRAINING_CORRIDOR_COLOR, ALPHA.corridor,
-    "The capture corridor");
-  add("corridor", groundLine(TRAINING_ENTITY.corridorAxis, undefined, planDegrees(envelopes.approach.corridor.axis), 2,
-    colour(TRAINING_CORRIDOR_COLOR)));
-  const capture = envelopes.approach.captureTurn;
-  const turnRows = capture === null ? [] : groundRows(signals.lon, signals.lat, capture.startRow, capture.endRow);
-  if (capture !== null && turnRows.length) {
-    add("corridor", groundLine(TRAINING_ENTITY.captureTurn, "The capture turn", turnRows, GROUND_ROWS_WIDTH,
-      dash(verdict(capture.check.progressOk && capture.check.rateOk, TRAINING_CAPTURE_TURN_COLOR), ALPHA.captureTurn)));
-  }
-
-  envelopes.heading.forEach((item, index) => {
-    const rows = trainingBandGround(signals.lon, signals.lat, item);
-    if (!rows.length) return;
-    add("headingBands", groundLine(TRAINING_ENTITY.heading(index), `Heading word ${index + 1}: the rows it is judged on`,
-      rows, GROUND_ROWS_WIDTH, colour(TRAINING_HEADING_BAND_COLOR, ALPHA.headingBand)));
-    trainingBandOutsideGround(signals.lon, signals.lat, item).forEach((degrees, run) =>
-      add("headingBands", groundLine(TRAINING_ENTITY.headingOutside(index, run), `Heading word ${index + 1}: rows outside its band`,
-        degrees, GROUND_ROWS_WIDTH, colour(TRAINING_OUTSIDE_COLOR))));
-  });
-
-  envelopes.altitude.forEach((tube, index) => {
-    const id = TRAINING_ENTITY.tube(index);
-    const wall = trainingTubeWall(flight, tube);
-    const edgeCss = verdict(tube.check.contained, TRAINING_TUBE_COLOR);
-    if (wall.minimumHeights.length < 2) {
-      // A tube of ONE row has no length to be a wall along: its extent is a vertical segment.
+    envelopes.altitude.forEach((tube, index) => {
+      const id = TRAINING_ENTITY.tube(index);
+      const wall = trainingTubeWall(judged, tube, flight.haeMinusMslM);
+      const edgeCss = verdict(tube.contained, TRAINING_TUBE_COLOR);
+      if (wall.minimumHeights.length < 2) {
+        // A tube of ONE row has no length to be a wall along: its extent is a vertical segment.
+        if (wall.minimumHeights.length === 1) {
+          add("vertical", {
+            id, name: `Altitude tube ${index + 1}`,
+            polyline: {
+              positions: Cesium.Cartesian3.fromDegreesArrayHeights([
+                wall.positions[0], wall.positions[1], wall.minimumHeights[0],
+                wall.positions[0], wall.positions[1], wall.maximumHeights[0],
+              ]),
+              width: 3, material: colour(edgeCss, 0.8),
+            },
+          });
+        }
+        return;
+      }
       add("vertical", {
         id, name: `Altitude tube ${index + 1}`,
-        polyline: {
-          positions: Cesium.Cartesian3.fromDegreesArrayHeights([
-            wall.positions[0], wall.positions[1], wall.minimumHeights[0],
-            wall.positions[0], wall.positions[1], wall.maximumHeights[0],
-          ]),
-          width: 3, material: colour(edgeCss, 0.8),
+        wall: {
+          positions: Cesium.Cartesian3.fromDegreesArray(wall.positions), minimumHeights: wall.minimumHeights,
+          maximumHeights: wall.maximumHeights, material: colour(TRAINING_TUBE_COLOR, ALPHA.tube), outline: false,
         },
       });
-      return;
-    }
-    add("vertical", {
-      id, name: `Altitude tube ${index + 1}`,
-      wall: {
-        positions: Cesium.Cartesian3.fromDegreesArray(wall.positions), minimumHeights: wall.minimumHeights,
-        maximumHeights: wall.maximumHeights, material: colour(TRAINING_TUBE_COLOR, ALPHA.tube), outline: false,
-      },
+      for (const side of ["upper", "lower"] as const) {
+        const heights = side === "upper" ? wall.maximumHeights : wall.minimumHeights;
+        add("vertical", {
+          id: TRAINING_ENTITY.edge(id, side),
+          polyline: {
+            positions: Cesium.Cartesian3.fromDegreesArrayHeights(
+              heights.flatMap((height, offset) => [wall.positions[offset * 2], wall.positions[offset * 2 + 1], height])),
+            width: EDGE_WIDTH, material: colour(edgeCss, 0.9),
+          },
+        });
+      }
     });
-    for (const side of ["upper", "lower"] as const) {
-      const heights = side === "upper" ? wall.maximumHeights : wall.minimumHeights;
-      add("vertical", {
-        id: TRAINING_ENTITY.edge(id, side),
-        polyline: {
-          positions: Cesium.Cartesian3.fromDegreesArrayHeights(
-            heights.flatMap((height, offset) => [wall.positions[offset * 2], wall.positions[offset * 2 + 1], height])),
-          width: EDGE_WIDTH, material: colour(edgeCss, 0.9),
-        },
-      });
-    }
-  });
+  }
 
-  // The track's plan position, on the ground with the envelopes that bound it; the track in the air.
-  add(null, groundLine(TRAINING_ENTITY.groundTrace, "The track's ground trace", planDegrees(signals), 2,
+  // The observed track's plan position, on the ground with the envelopes that bound it; the track in the air.
+  add(null, groundLine(TRAINING_ENTITY.observedGround, "The observed track's ground trace", planDegrees(observed), 2,
     colour(TRAINING_TRACE_COLOR, 0.55)));
-  add(null, airLine(TRAINING_ENTITY.track, "The observed track",
-    Cesium.Cartesian3.fromDegreesArrayHeights(lonLatHeights(signals)), TRAINING_TRACE_COLOR, 3));
-  const at = (row: number) => Cesium.Cartesian3.fromDegrees(signals.lon[row], signals.lat[row], signals.altitudeHaeM[row]);
-  envelopes.heading.forEach((item, index) => add(null,
-    marker(TRAINING_ENTITY.issue(index), `Heading word ${index + 1} issued`, at(item.row), TRAINING_COLUMN_COLOR.heading, 7)));
-  add(null, marker(TRAINING_ENTITY.clearance, "Cleared to join the final", at(flight.joinRow), TRAINING_COLUMN_COLOR.approach, 10));
-  add(null, marker(TRAINING_ENTITY.capture, "The final captured", at(flight.captureRow), TRAINING_CORRIDOR_COLOR, 10));
-  add(null, marker(TRAINING_ENTITY.end, "The end of the sentence", at(flight.rows - 1), TRAINING_TRACE_COLOR, 8));
+  add(null, airLine(TRAINING_ENTITY.observedTrack, "The observed track",
+    Cesium.Cartesian3.fromDegreesArrayHeights(lonLatHeights(observed)), TRAINING_TRACE_COLOR, 3));
+
+  if (closed !== null) {
+    const { flown, replay } = closed;
+    add(null, groundLine(TRAINING_ENTITY.flownGround, "The flown path's ground trace", planDegrees(flown), 2,
+      dash(TRAINING_EXECUTOR_COLOR, 0.6)));
+    add(null, airLine(TRAINING_ENTITY.flownTrack, "The flown path: the closed-loop sentence flown by the executor",
+      Cesium.Cartesian3.fromDegreesArrayHeights(lonLatHeights(flown)), TRAINING_EXECUTOR_COLOR, 3));
+    const end = flown.lon.length - 1;
+    add(null, marker(TRAINING_ENTITY.flownEnd, "Where the flown path ends",
+      Cesium.Cartesian3.fromDegrees(flown.lon[end], flown.lat[end], flown.altitudeHaeM[end]), TRAINING_EXECUTOR_COLOR, 9,
+      `flown: ${TRAINING_OUTCOME_TAG[replay.outcome]}`,
+      // above and to the LEFT of the end, right-aligned: the DA label sits above-right, the runway designators below
+      new Cesium.Cartesian2(-12, -30), Cesium.HorizontalOrigin.RIGHT));
+    const decision = replay.crossing?.decision ?? null;
+    if (decision !== null) {
+      add(null, marker(TRAINING_ENTITY.decision, `The decision-altitude point: ${decisionText(decision)}`,
+        Cesium.Cartesian3.fromDegrees(decision.lonDeg, decision.latDeg, decision.heightMslM + flight.haeMinusMslM),
+        decision.passed ? TRAINING_DECISION_PASS_COLOR : TRAINING_DECISION_FAIL_COLOR, 12,
+        `DA ${decision.passed ? "✓" : "✗"} · ${Math.abs(decision.aboveGlidepathM).toFixed(0)} m ` +
+        `${decision.aboveGlidepathM >= 0 ? "above" : "below"} · ${Math.abs(decision.rightM).toFixed(0)} m ` +
+        `${decision.rightM >= 0 ? "right" : "left"}`,
+        // above and to the right of the point: the runway designators are labelled below theirs
+        new Cesium.Cartesian2(14, -34)));
+    }
+    // the words the reading added, where they were said on the flown path
+    reading.events.filter((event) => event.correction).forEach((event, index) => {
+      const point = rowAtTime(flown.tS, readingRowTimeS(reading, event.row));
+      add(null, marker(TRAINING_ENTITY.correction(index),
+        `Correction: ${event.says.column} ${trainingBandLabel(event.says)} added by the closed-loop reading at ${readingRowTimeS(reading, event.row)} s`,
+        Cesium.Cartesian3.fromDegrees(flown.lon[point], flown.lat[point], flown.altitudeHaeM[point]), TRAINING_CORRECTION_COLOR, 8));
+    });
+  }
   return { layerIds, remove: group.remove };
 }
 
 /** THE SELECTED WORD: its own envelope yellow (or its fill deepened, its edge yellow), every other word's faded, the
  *  rows it is in force yellow over the track and its issue named. Returns the undo. */
-function paintFocus(viewer: Cesium.Viewer, selection: TrainingSelection, column: TrainingColumn, focusRow: number): () => void {
-  const { flight, vocabulary, candidates } = selection;
-  const word = trainingWordAt(flight, column, focusRow);
+function paintFocus(
+  viewer: Cesium.Viewer, selection: TrainingSelection, reading: TrainingReading, column: TrainingColumn, wordRow: number,
+): () => void {
+  const run = sentenceWordAt(reading, column, wordRow)!;
   const time = Cesium.JulianDate.now();
   const selectedEdge = colour(TRAINING_WORD_COLOR);
   type Graphics = Cesium.PolygonGraphics | Cesium.WallGraphics | Cesium.PolylineGraphics;
@@ -252,9 +245,10 @@ function paintFocus(viewer: Cesium.Viewer, selection: TrainingSelection, column:
   };
   const edges = (id: string) => [TRAINING_ENTITY.edge(id), TRAINING_ENTITY.edge(id, "upper"), TRAINING_ENTITY.edge(id, "lower")];
 
-  const mine = new Set(trainingFocusEntities(selection, column, word));
+  const focusId = trainingFocusEntity(reading, selection.vocabulary.stepS, column, run);
+  const mine = new Set(focusId === null ? [] : [focusId]);
   // Every other word's envelope recedes: its fill and its edges keep their hue.
-  for (const id of trainingEnvelopeEntities(flight)) {
+  for (const id of trainingEnvelopeEntities(reading)) {
     if (mine.has(id)) continue;
     for (const part of [id, ...edges(id)]) {
       const entity = viewer.entities.getById(part);
@@ -273,7 +267,7 @@ function paintFocus(viewer: Cesium.Viewer, selection: TrainingSelection, column:
     if (!entity) continue;
     const fill = entity.polygon ?? entity.wall;
     if (fill) {
-      // Its own hue, deepened: the corridor stays green and the tube violet, so the word still reads.
+      // Its own hue, deepened: the tube stays violet, so the word still reads.
       const own = (fill.material.getValue(time) as { color: Cesium.Color }).color;
       repaint(fill, new Cesium.ColorMaterialProperty(own.withAlpha(ALPHA.selected)));
     } else if (entity.polyline) {
@@ -286,7 +280,9 @@ function paintFocus(viewer: Cesium.Viewer, selection: TrainingSelection, column:
   }
 
   const group = entityGroup(viewer);
-  const stretch = trainingFocusStretch(flight, word);
+  const { judged } = reading;
+  const fromS = readingRowTimeS(reading, run.row);
+  const stretch = trainingFocusStretch(judged, fromS, readingRowTimeS(reading, run.endRow));
   if (stretch.length) {
     group.add({
       id: TRAINING_ENTITY.focusStretch, name: "Where the selected word is in force",
@@ -296,16 +292,16 @@ function paintFocus(viewer: Cesium.Viewer, selection: TrainingSelection, column:
       },
     });
   }
-  const { lon, lat, altitudeHaeM } = flight.signals;
+  const point = rowAtTime(judged.tS, fromS);
   group.add({
-    id: TRAINING_ENTITY.focusIssue, name: "The selected word, where it was issued",
-    position: Cesium.Cartesian3.fromDegrees(lon[word.row], lat[word.row], altitudeHaeM[word.row]),
+    id: TRAINING_ENTITY.focusIssue, name: "The selected word, where it was said",
+    position: Cesium.Cartesian3.fromDegrees(judged.lon[point], judged.lat[point], judged.altitudeHaeM[point]),
     point: {
       pixelSize: 13, color: selectedEdge, outlineColor: Cesium.Color.BLACK.withAlpha(0.7), outlineWidth: 2,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
     label: {
-      text: `${column} ${trainingWordLabel(vocabulary, candidates, column, word.value)} · step ${word.row}`,
+      text: `${column} ${trainingWordLabel(run.event.says)}${run.event.correction ? " (correction)" : ""}`,
       font: "600 13px sans-serif", fillColor: selectedEdge, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
       style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -20),
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -318,21 +314,33 @@ function paintFocus(viewer: Cesium.Viewer, selection: TrainingSelection, column:
 }
 
 export default function useTrainingTrackLayer(): void {
-  const { viewer, mode, trainingSelection, trainingLayers, trainingColumn, trainingGenerations, trainingSource, trainingWindow } = useApp();
+  const { viewer, mode, trainingSelection, trainingLayers, trainingColumn, trainingIntervalS } = useApp();
   const { trainingCursorS } = useTrainingCursor();
   const selection = mode === "training" ? trainingSelection : null;
+  const reading = useMemo(
+    () => (selection === null ? null : trainingReadingOf(selection.flight, selection.vocabulary.stepS, trainingIntervalS)),
+    [selection, trainingIntervalS]);
 
-  // The flight's scene, built once per flight; the ids each switch shows, for the effect below.
+  // The flight's scene, built once per flight and reading; the ids each switch shows, for the effect below.
   const layerIds = useRef<LayerIds>(noLayerIds());
+  const switches = useRef(trainingLayers);
+  switches.current = trainingLayers;
   useEffect(() => {
-    if (!isCesiumViewerUsable(viewer) || selection === null) return;
-    const scene = buildScene(viewer, selection);
+    if (!isCesiumViewerUsable(viewer) || selection === null || reading === null) return;
+    const scene = buildScene(viewer, selection, reading);
     layerIds.current = scene.layerIds;
+    // the switches as they stand now (this effect runs again only for a new flight or reading)
+    for (const layer of Object.keys(scene.layerIds) as Array<keyof TrainingLayers>) {
+      for (const id of scene.layerIds[layer]) {
+        const entity = viewer.entities.getById(id);
+        if (entity) entity.show = switches.current[layer];
+      }
+    }
     return () => {
       layerIds.current = noLayerIds();
       scene.remove();
     };
-  }, [viewer, selection]);
+  }, [viewer, selection, reading]);
 
   // THE DRAW SWITCHES show and hide what they name.
   useEffect(() => {
@@ -343,43 +351,37 @@ export default function useTrainingTrackLayer(): void {
         if (entity) entity.show = trainingLayers[layer];
       }
     }
-  }, [viewer, selection, trainingLayers]);
+  }, [viewer, selection, reading, trainingLayers]);
 
-  // A new CLOCK is framed ONCE — a flight can lie tens of kilometres from the airport view: the flight on screen, or — an
-  // aircraft of a multi-aircraft window, on the window's clock — every aircraft of the window, so putting another of them
-  // on screen keeps the view. Coming back to Training frames it again (another task moved the camera).
-  const frameScope = selection === null ? null : selection.clock.scope;
-  const framing = useRef({ selection, window: trainingWindow });
+  // A new FLIGHT is framed ONCE — a flight can lie tens of kilometres from the airport view. Coming back to Training frames
+  // it again (another task moved the camera).
+  const frameKey = selection === null ? null : `${selection.airport}/${selection.setId}/${selection.flight.flightKey}`;
+  const framing = useRef(selection);
   useLayoutEffect(() => {
-    framing.current = { selection, window: trainingWindow };
+    framing.current = selection;
   });
   useEffect(() => {
-    const { selection: shown, window } = framing.current;
+    const shown = framing.current;
     if (!isCesiumViewerUsable(viewer) || shown === null) return;
-    // a window: its commanded aircraft (one replayed from long before the window would zoom far out)
-    const onScreen = windowOnScreen(window, shown);
-    const tracks = onScreen !== null ? onScreen.window.commanded.map((one) => one.recorded) : [shown.flight.signals];
-    frameTrajectoryCamera(viewer, tracks.flatMap(({ lon, lat, altitudeHaeM }) =>
-      lon.map((value, row) => ({ lon: value, lat: lat[row], altM: altitudeHaeM[row] }))), { margin: FRAME_MARGIN });
-  }, [viewer, frameScope]);
+    const { observed } = shown.flight;
+    frameTrajectoryCamera(viewer, observed.lon.map((value, row) => ({ lon: value, lat: observed.lat[row], altM: observed.altitudeHaeM[row] })),
+      { margin: FRAME_MARGIN });
+  }, [viewer, frameKey]);
 
   // THE SELECTED WORD: the column's word in force at the cursor. Keyed on the word's issue row, so a cursor moving inside
-  // one word repaints nothing. Only the truth's: a model's sentence read paints its own word on its own track.
-  const modelRead = generationOnScreen(trainingGenerations, trainingSource, selection)?.sentence ?? null;
-  const focusRow = selection !== null && trainingColumn !== null && modelRead === null
-    && cursorOnFlight(selection, trainingCursorS, sentenceAxisEndS(selection.flight, selection.vocabulary.stepS, null))
-    ? trainingWordAt(selection.flight, trainingColumn, rowAtTime(selection.flight.signals.tS, trainingCursorS)).row
-    : null;
+  // one word repaints nothing.
+  const focusRow = useMemo(() => {
+    if (reading === null || trainingColumn === null) return null;
+    return sentenceWordAt(reading, trainingColumn, readingRowAt(reading, trainingCursorS))?.row ?? null;
+  }, [reading, trainingColumn, trainingCursorS]);
   useEffect(() => {
-    if (!isCesiumViewerUsable(viewer) || selection === null || trainingColumn === null || focusRow === null) return;
-    const undo = paintFocus(viewer, selection, trainingColumn, focusRow);
+    if (!isCesiumViewerUsable(viewer) || selection === null || reading === null || trainingColumn === null || focusRow === null) return;
+    const undo = paintFocus(viewer, selection, reading, trainingColumn, focusRow);
     return () => {
       if (isCesiumViewerUsable(viewer)) undo();
     };
-  }, [viewer, selection, trainingColumn, focusRow]);
+  }, [viewer, selection, reading, trainingColumn, focusRow]);
 
-  useTrainingExecutorLayers();
-  useTrainingGenerationLayers();
+  useTrainingLiveLayer();
   useTrainingAircraftLayer();
-  useTrainingTrafficLayer();
 }

@@ -471,58 +471,50 @@ entry ⇒ the publication is blocked** before any predict/CZML work; `--refresh-
 
 ### L30 · `instructions/`: the second layer's language, below every model
 
-2026-09-23. The instruction vocabulary (`spec`, `words`), the per-step signals in the airport frame
-(`signals`, `airport`), the envelopes (`envelope`, the one implementation the labeller, the executor
-and the display share), the piecewise fit, the labeller (`labeller/`: `records`, `lateral`,
-`vertical`, `speed`, `sentence`, `read`), the measurements (`measure`), the artefact (`artefact`),
-the readout and the eye-check figures. Torch-free; inside the package it imports only
-`data.channels`, `data.coordinate_frames` and `io_utils` (outside it: `flight_scenarios`,
-`aerodynamic_model.common`, `geokit`, numpy)
-(`tests/test_architecture.py::test_the_instructions_package_sits_below_the_models`), and only the runners, the
-executor (`autopilot/`, L31) and the prior (`prior/`, L32) consume it
-(`test_only_the_runners_the_executor_and_the_prior_reach_the_instructions_package`). `grammar` asks the labeller's
-compatibility rules of one step at a time — the prior's decode mask; `display` and `training_files` serve the
-frontend (below). No `closed_loop/` or `constraints/` group exists: the closed loop is the runners joining
-`prior.generate` and `autopilot.executor`, the glidepath lower edge is `prior/procedure.py` (framework document §2).
-
-**Note (2026-09-25):** `instructions/training_files.py` holds the frontend's Training files — the index, the sets,
-the overlays manifest, their schemas (mirrored by `aeroviz-4d/src/data/training*.ts`) and the checks every writer and
-reader shares (`check_set`, `open_base_set`, `require_stored_sentence`, `words_in_force`, `band_payload`,
-`require_index_unchanged` / `require_overlays_unchanged`, and since 2026-09-26 `runway_hae_minus_msl_m`, the one MSL → HAE
-every writer of a Training height adds; its caller passes the arrival manifest path, because the instructions package
-may not import `repo_layout`). It was the runner `instruction_training_export`, which the other
-exporters and the backend imported; now nothing imports a runner for it, and everything in it raises `ValueError` (a
-runner lets it propagate with its traceback; the backend answers it), never `SystemExit`, which a server thread would
-let escape its handler.
+2026-09-23; v4 since 2026-10-03 (`docs/two_tier/design/vocabulary.md` §3, §4). The instruction vocabulary (`spec`, `words`:
+five columns, "go-around" in the runway column), the grammar (`grammar._rules`: the rules of vocabulary §3.7 written ONCE, on one
+row for `apply`, which the labeller checks every row with, and on arrays for `column_mask`, a speaker's mask of a column
+given the later columns' permitted words, D62), the per-step signals in the airport frame (`signals`, `airport`: each
+candidate's `VerticalPath` and `published_glidepath_height_m`, D61), the envelopes (`envelope`, the one implementation the labeller and the executor's judge share), the piecewise
+fit, the labeller (`labeller/`: `records`, `lateral`, `vertical`, `speed`, `go_around`, `sentence`, `interval` — a
+sentence on a coarser row interval — and `read`), the labeller's conformance (`conformance`, C30), the measurements
+(`measure`), the artefact (`artefact`, the closed-loop file format included, C38), the readout and the eye-check
+figures. Torch-free; inside the package it imports only `data.channels`, `data.coordinate_frames`, `data.day_split` and
+`io_utils` (outside it: `final_approach`, `flight_scenarios`, `aerodynamic_model.common`, `geokit`, numpy)
+(`tests/test_architecture.py::test_the_instructions_package_sits_below_the_models`), and only the runners and the
+executor (`autopilot/`, L31) consume it (`test_only_the_runners_and_the_executor_reach_the_instructions_package`). The
+closed-loop reading flies the executor, so it lives in `autopilot/closed_loop.py`; its file format stays here, torch-free,
+for a reader that must not import the executor (the prior, stage B). The frontend's Training files (`display`,
+`training_files`) are archived with instruction-v3 (`archive/two_tier_v3_2026_10/instructions/`); stage D rebuilds them.
 
 ### L31 · `autopilot/`: the executor, flying the words through the shared dynamics
 
-2026-09-24 (`docs/two_tier/executor_design.zh.md`). Stage 3 of the two-tier framework: `frame`
-(the dynamics' geodetic rows read the way the words read a flight — airport frame, compass track,
-geometric MSL height; a positive bank turns LEFT), `sentence` (the word in force per column per
-control cycle; a word takes effect when it is said, no delay), `flights` (a labelled flight rebuilt from the
-recorded manifest with `build_series`, refused unless it reproduces the stored signals row for row;
-its physical context is `outputs.dynamics.context.rollout_context` at row 0), `plant` (one cycle of
-the control path's point-mass scaled-chart dynamics through `rollout_control_endpoints` — that
-backend runs no command hooks, so the executor steps it cycle by cycle, the same computation),
-`inverse` (wanted rates → bank, load factor, thrust; limits in the design's order, each recorded),
-`lateral` / `vertical` / `speed` (the three laws), `params` (the executor's parameters and the design's
-constraints on them), `executor` (the cycle loop, `fly`), `judge` (the three-layer verdict, with the
-labeller's own checks), `replay` (who is flown — own dynamics or a stand-in's, the performance index's
-substitute; a flight without aircraft dynamics is counted, never flown, C31 — drawing, flying and reading
-a batch), `derive` (method A: τ_ψ from the vocabulary; p is the standards' 5°/s, a constant of the spec runner since v11),
-`runway_data` (each candidate runway's published TCH, the one runway datum beyond the vocabulary) and `spec`
-(`ts-executor-spec-v6`: the parameters written once with their sha and the executor's source hash over the code's logic,
-`executor_source_files`, `logic`; C33). Method B (`observe`,
-the word delays) and method A's flown checks are archived (`archive/executor_vocabulary_only_2026_09/`: the executor
-takes no information beyond the vocabulary, the user's rule of 2026-09-24). It may import the data plane
-(`data.dataset`), the shared dynamics and geometry, and `instructions/`; never
-`training`, `experiments`, `cli`, `backbone`, `inference`, `manoeuvre`, `outputs.control`,
-`outputs.guidance`, `outputs.state`
-(`tests/test_architecture.py::test_the_executor_flies_through_the_shared_dynamics_only`); only the
-runners consume it (`test_only_the_runners_reach_the_executor_for_now`).
+2026-09-24; v4 since 2026-10-03 (`docs/two_tier/design/vocabulary.md` §5). `frame` (the dynamics' geodetic rows read the way
+the words read a flight — airport frame, compass track, geometric MSL height; a positive bank turns LEFT), `sentence` (the
+word in force per column per control cycle, the runway in force R and the go-around state G; a word takes effect when it
+is said; a sentence said on its own rows, D57), `flights` (a labelled flight rebuilt from the recorded manifest with `build_series`, refused
+unless it reproduces the stored signals row for row; its physical context is
+`outputs.dynamics.context.rollout_context` at the row it is flown from), `plant` (one cycle of the control path's
+point-mass scaled-chart dynamics through `rollout_control_endpoints` — that backend runs no command hooks, so the executor
+steps it cycle by cycle, the same computation), `inverse` (wanted rates → bank, load factor, thrust; limits in the
+design's order, each recorded), `lateral` / `vertical` / `speed` (the three laws: no capture, no landing aim, no
+glidepath floor; "go-around" changes no target, a climb under G at the thrust-limited angle within 1.885°–3°),
+`params` (the executor's parameters and the constraints on them), `executor` (the cycle loop, `fly`; a multi-aircraft batch
+by `start_cycle`), `single` (the single flight in plain floats, mirroring the batch operation for operation), `judge` (the
+outcomes and their order, the decision-altitude check with the evaluation's bounds — each candidate's published TCH,
+glidepath angle and DA from `candidates.json`, D61 — the words), `replay` (who is flown — own dynamics or a
+stand-in's; a flight without aircraft dynamics is counted, never flown, C31 — drawing, a sentence on a row interval,
+flying and reading a batch), `conformance` (the spec's reference tracks and their check, C33), `closed_loop` (the
+labeller's closed-loop reading and its conformance, C38) and `spec` (`ts-executor-spec-v8`, C33). It may import the data
+plane (`data.dataset`), the shared dynamics and geometry, and `instructions/`; never `training`, `experiments`, `cli`,
+`backbone`, `inference`, `manoeuvre`, `outputs.control`, `outputs.guidance`, `outputs.state`
+(`tests/test_architecture.py::test_the_executor_flies_through_the_shared_dynamics_only`); only the runners consume it
+(`test_only_the_runners_reach_the_executor_for_now`).
 
 ### L32 · `prior/`: the prior, saying the words
+
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/prior/`, vocabulary §12.1 A0): this entry is the
+record of that package; stage B rebuilds `prior/` from design §6 (§14.3).
 
 2026-09-24 (`docs/two_tier/prior_design.zh.md`, `docs/two_tier/post_training_design.zh.md`). Stage 5 of the two-tier
 framework: `data` (the sentence artefact as training data, one flight at a time, only what is known before each step),
