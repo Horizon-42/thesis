@@ -789,3 +789,54 @@ def test_only_the_runners_reach_the_prior():
         rel = path.relative_to(TS_DIR).as_posix()
         if any(name.split(".")[0] == "prior" for name in _imported_names(path)):
             assert rel.startswith("experiments/"), f"{rel} imports the prior"
+
+
+#: What the runners of the prior may take from `autopilot/` (vocabulary §6 items 3, 5, 6; D67, D69; prior §12 B4): the
+#: modules of the executor, the single flight, the start of a closed loop and the judge, whole; and of the closed-loop
+#: reading only the check that its sentences may be read.
+PRIOR_RUNNER_AUTOPILOT_MODULES = {"autopilot.executor", "autopilot.single", "autopilot.start", "autopilot.judge"}
+PRIOR_RUNNER_AUTOPILOT_NAMES = {"autopilot.closed_loop": {"require_conforming_closed_loop"}}
+
+
+def _autopilot_imports_refused(source: str) -> list[str]:
+    """Each import of ``source`` that takes from `autopilot/` what `PRIOR_RUNNER_AUTOPILOT_*` does not list, by the
+    names it imports."""
+    refused = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            module = _package_relative(node.module)
+            if module.split(".")[0] != "autopilot":
+                continue
+            for alias in node.names:
+                if module in PRIOR_RUNNER_AUTOPILOT_MODULES:
+                    continue
+                if module == "autopilot" and f"autopilot.{alias.name}" in PRIOR_RUNNER_AUTOPILOT_MODULES:
+                    continue
+                if module in PRIOR_RUNNER_AUTOPILOT_NAMES and alias.name in PRIOR_RUNNER_AUTOPILOT_NAMES[module]:
+                    continue
+                refused.append(f"from {module} import {alias.name}")
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                module = _package_relative(alias.name)
+                if module.split(".")[0] == "autopilot" and module not in PRIOR_RUNNER_AUTOPILOT_MODULES:
+                    refused.append(f"import {module}")
+    return refused
+
+
+def test_the_prior_runners_take_from_autopilot_only_what_its_interface_lists():
+    """Prior §12 B4 (D67, D69): a runner of the prior imports from `autopilot/` only the modules of vocabulary §6 items
+    5 and 6 and, of `autopilot/closed_loop.py`, only `require_conforming_closed_loop` — read by the names imported."""
+    runners = sorted((TS_DIR / "experiments").glob("prior_*.py"))
+    assert runners, "no runner of the prior; this test would pass vacuously"
+    for path in runners:
+        refused = _autopilot_imports_refused(path.read_text(encoding="utf-8"))
+        assert not refused, f"{path.name}: {refused}"
+    assert not _autopilot_imports_refused("from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop\n"
+                                          "from ts_transformer.autopilot.start import anything\n"
+                                          "from ts_transformer.autopilot import judge\n")
+    assert _autopilot_imports_refused("from ts_transformer.autopilot.closed_loop import read\n"
+                                      "from ts_transformer.autopilot.replay import Batch\n"
+                                      "from ts_transformer.autopilot import flights\n"
+                                      "import ts_transformer.autopilot.closed_loop\n") == [
+        "from autopilot.closed_loop import read", "from autopilot.replay import Batch", "from autopilot import flights",
+        "import autopilot.closed_loop"]
