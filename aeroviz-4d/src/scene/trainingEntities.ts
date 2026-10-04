@@ -1,8 +1,8 @@
 /**
  * trainingEntities.ts
  * -------------------
- * The pieces the Training 3D scene is built from (`hooks/useTrainingTrackLayer.ts`, `hooks/useTrainingExecutorLayers.ts`):
- * the entity ids, the exporter's and the backend's coordinates as Cesium's flat arrays, and the few entity shapes every
+ * The pieces the Training 3D scene is built from (`hooks/useTrainingTrackLayer.ts`, `hooks/useTrainingLiveLayer.ts`): the
+ * entity ids, the exporter's and the backend's coordinates as Cesium's flat arrays, and the few entity shapes every
  * layer draws — a line in the air (dashed where terrain hides it), a line on the ground, a marker. Nothing here computes
  * geometry: every coordinate is the exporter's (lon / lat and heights computed in Python) or the backend's.
  *
@@ -15,63 +15,46 @@ import { AIRCRAFT_MODEL_URI, aircraftOrientation } from "../utils/aircraftOrient
 import type { TrainingAircraftPose } from "../data/trainingAttitude";
 import {
   outsideSpans,
+  trainingEnvelopeIndex,
   type TrainingAltitudeTube,
   type TrainingColumn,
-  type TrainingFlight,
   type TrainingHeadingBand,
-  type TrainingPlanLine,
-  type TrainingSelection,
+  type TrainingReading,
+  type TrainingTrack,
   type TrainingWordRun,
 } from "../data/trainingSample";
 
 export const TRAINING_ENTITY = {
-  track: "training-track",
-  groundTrace: "training-ground-trace",
+  observedTrack: "training-observed-track",
+  observedGround: "training-observed-ground",
   /** A heading word's judged rows on the ground, and its rows outside the band (`run` counts them). */
   heading: (index: number) => `training-heading-${index}`,
   headingOutside: (index: number, run: number) => `training-heading-${index}-outside-${run}`,
-  captureTurn: "training-capture-turn",
-  corridor: "training-corridor",
-  corridorAxis: "training-corridor-axis",
   tube: (index: number) => `training-tube-${index}`,
-  /** An envelope's edge: the outline of a draped polygon, or a tube's upper / lower line. */
+  /** An envelope's edge: a tube's upper / lower line. */
   edge: (id: string, side?: "upper" | "lower") => (side ? `${id}-edge-${side}` : `${id}-edge`),
-  centreline: (ident: string) => `training-centreline-${ident}`,
-  runway: (ident: string) => `training-runway-${ident}`,
-  runwayLabel: (ident: string) => `training-runway-label-${ident}`,
-  issue: (index: number) => `training-issue-${index}`,
-  clearance: "training-clearance",
-  capture: "training-capture",
-  end: "training-end",
+  candidate: (ident: string) => `training-candidate-${ident}`,
+  /** The words the closed-loop reading added, where they were said on the flown path. */
+  correction: (index: number) => `training-correction-${index}`,
+  /** The flown path of the closed-loop sentence: its line, ground trace, where it ended and the DA point. */
+  flownTrack: "training-flown-track",
+  flownGround: "training-flown-ground",
+  flownEnd: "training-flown-end",
+  decision: "training-decision",
   /** The selected word: the rows it is in force, and its issue with its name. */
   focusStretch: "training-focus-stretch",
   focusIssue: "training-focus-issue",
-  /** The executor's replay: its flown track, its ground trace, where it ended, and its rows outside a heading word. */
-  executorTrack: "training-executor-track",
-  executorGround: "training-executor-ground",
-  executorEnd: "training-executor-end",
-  executorOutside: (run: number) => `training-executor-outside-${run}`,
-  /** The live executor's segment: its flown line, the aircraft flying it out, where it began, its ground trace (once
-   *  flown) and its rows outside the selected heading word. */
+  /** The live executor's segment: its flown line, the aircraft flying it out, where it began and its ground trace. */
   autopilotTrack: "training-autopilot-track",
   autopilotAircraft: "training-autopilot-aircraft",
   autopilotStart: "training-autopilot-start",
   autopilotGround: "training-autopilot-ground",
-  autopilotTail: "training-autopilot-tail",
-  autopilotTailGround: "training-autopilot-tail-ground",
-  autopilotOutside: (run: number) => `training-autopilot-outside-${run}`,
-  /** The model sentence read: each of its samples' flown tracks, the one read's ground trace, where it ended, where it
-   *  said its heading words and the clearance (by the word's place in its events), and its selected word. */
-  modelTrack: (sample: number) => `training-model-track-${sample}`,
-  modelGround: "training-model-ground",
-  modelEnd: "training-model-end",
-  modelMoved: "training-model-moved",
-  modelIssue: (index: number) => `training-model-issue-${index}`,
-  modelFocusStretch: "training-model-focus-stretch",
-  modelFocusIssue: "training-model-focus-issue",
+  /** The aircraft at the cursor: the observed one, and the flown one. */
+  aircraftObserved: "training-aircraft-observed",
+  aircraftFlown: "training-aircraft-flown",
 } as const;
 
-/** A heading word's judged rows and the capture turn on the ground (px): wider than the ground trace they lie on. */
+/** A heading word's judged rows on the ground (px): wider than the ground trace they lie on. */
 export const GROUND_ROWS_WIDTH = 5;
 
 export const colour = (css: string, alpha = 1) => Cesium.Color.fromCssColorString(css).withAlpha(alpha);
@@ -97,28 +80,29 @@ export function entityGroup(viewer: Cesium.Viewer) {
 
 // ── coordinates ──────────────────────────────────────────────────────────────
 
-/** Points carrying longitude, latitude and ellipsoid height as columns — the observed track, the executor's flown
- *  track, the live executor's segment — as Cesium's flat [lon, lat, height, …]. */
+/** Points carrying longitude, latitude and ellipsoid height as columns — a track, the live executor's segment — as
+ *  Cesium's flat [lon, lat, height, …]. */
 export function lonLatHeights(points: { lon: number[]; lat: number[]; altitudeHaeM: number[] }): number[] {
   return points.lon.flatMap((lon, index) => [lon, points.lat[index], points.altitudeHaeM[index]]);
 }
 
-/** A plan line — or any points with longitude and latitude columns — as Cesium's flat [lon, lat, …]. */
+/** Points with longitude and latitude columns as Cesium's flat [lon, lat, …]. */
 export function planDegrees(line: { lon: number[]; lat: number[] }): number[] {
   return line.lon.flatMap((lon, point) => [lon, line.lat[point]]);
 }
 
-/** A region's outline as a closed line: the exporter's rings are open (a polygon closes itself). */
-export function planRingDegrees(line: TrainingPlanLine): number[] {
-  return [...planDegrees(line), line.lon[0], line.lat[0]];
-}
-
-/** One altitude tube as a wall over the aircraft's own ground track: a position per row it covers, with that row's
- *  lower and upper edge (HAE, as exported). */
-export function trainingTubeWall(flight: TrainingFlight, tube: TrainingAltitudeTube) {
+/** One altitude tube as a wall over the judged track's ground position: a position per row it covers, with that row's lower
+ *  and upper edge (MSL as exported, plus the flight's HAE − MSL). Envelope row r is the judged track's point r (both
+ *  count from the same origin); a tube longer than the track is cut where the track ends. */
+export function trainingTubeWall(track: TrainingTrack, tube: TrainingAltitudeTube, haeMinusMslM: number) {
+  const last = Math.min(tube.endRow, track.tS.length);
   const positions: number[] = [];
-  for (let row = tube.row; row < tube.endRow; row += 1) positions.push(flight.signals.lon[row], flight.signals.lat[row]);
-  return { positions, minimumHeights: tube.lowerHaeM, maximumHeights: tube.upperHaeM };
+  for (let row = tube.row; row < last; row += 1) positions.push(track.lon[row], track.lat[row]);
+  return {
+    positions,
+    minimumHeights: tube.lowMslM.slice(0, last - tube.row).map((value) => value + haeMinusMslM),
+    maximumHeights: tube.highMslM.slice(0, last - tube.row).map((value) => value + haeMinusMslM),
+  };
 }
 
 /** Rows ``first..last`` (inclusive) of a line of points as Cesium's flat [lon, lat, …], or nothing when that is fewer
@@ -128,65 +112,50 @@ export function groundRows(lon: number[], lat: number[], first: number, last: nu
   return Array.from({ length: last - first + 1 }, (_, offset) => [lon[first + offset], lat[first + offset]]).flat();
 }
 
-/** A heading word's judged rows on the ground: its first judged row on to its stop row, where the next word's begin,
- *  so the words meet; nothing for a word with no row of its own. */
-export function trainingBandGround(lon: number[], lat: number[], band: TrainingHeadingBand): number[] {
+/** A heading word's judged rows on the ground: its first judged row on to its stop row, where the next word's begin, so
+ *  the words meet; nothing for a word with no row of its own. */
+export function trainingBandGround(track: TrainingTrack, band: TrainingHeadingBand): number[] {
   if (band.stopRow <= band.firstRow) return [];
-  return groundRows(lon, lat, band.firstRow, Math.min(band.stopRow, lon.length - 1));
+  return groundRows(track.lon, track.lat, band.firstRow, Math.min(band.stopRow, track.lon.length - 1));
 }
 
-/** The rows a band judged outside, each as a line on the ground (`outsideSpans`: one row outside on to the next, so it
- *  is a segment). */
-export function trainingBandOutsideGround(lon: number[], lat: number[], band: TrainingHeadingBand): number[][] {
-  return outsideSpans(band.inside, band.firstRow, lon.length - 1).map(([first, last]) => groundRows(lon, lat, first, last));
+/** The rows a band judged outside, each as a line on the ground (`outsideSpans`: one row outside on to the next, so it is
+ *  a segment). */
+export function trainingBandOutsideGround(track: TrainingTrack, band: TrainingHeadingBand): number[][] {
+  return outsideSpans(band.inside, band.firstRow, track.lon.length - 1)
+    .map(([first, last]) => groundRows(track.lon, track.lat, first, last));
 }
 
 // ── the selected word ────────────────────────────────────────────────────────
 
-/**
- * The entities that ARE a word's envelope — its own column's, and nothing of another column's: a heading word's
- * judged rows; the clearance's capture turn and corridor; an altitude word's tube; the runway pointed at. An angle or a
- * speed word bounds no position, so it owns none: the stretch of track it is in force is its picture. An id the scene
- * does not hold (a word the lead carries to the clearance has no rows; a switch is off) is simply not there to paint.
- */
-export function trainingFocusEntities(
-  selection: TrainingSelection, column: TrainingColumn, word: TrainingWordRun & { index: number },
-): string[] {
-  switch (column) {
-    case "heading":
-      return [TRAINING_ENTITY.heading(word.index)];
-    case "approach":
-      return word.event.kind === "clear"
-        ? [TRAINING_ENTITY.captureTurn, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis]
-        : [];
-    case "altitude":
-      return [TRAINING_ENTITY.tube(word.index)];
-    case "runway": {
-      const ident = selection.candidates[word.value].ident;
-      return [TRAINING_ENTITY.runway(ident), TRAINING_ENTITY.centreline(ident)];
-    }
-    case "angle":
-    case "speed":
-      return [];
-  }
+/** The envelope entity a word owns, or null: a heading word's judged rows, an altitude word's tube. A runway, angle or
+ *  speed word bounds no position, so it owns none: the stretch of track it is in force is its picture. */
+export function trainingFocusEntity(reading: TrainingReading, stepS: number, column: TrainingColumn, word: TrainingWordRun): string | null {
+  const index = trainingEnvelopeIndex(reading, stepS, column, word);
+  if (index === null) return null;
+  if (column === "heading") return TRAINING_ENTITY.heading(index);
+  return column === "altitude" ? TRAINING_ENTITY.tube(index) : null;
 }
 
-/** Every envelope of a flight, by the id of its main entity: the one that `trainingFocusEntities` names, and whose
- *  edges (`TRAINING_ENTITY.edge` of it) go with it. */
-export function trainingEnvelopeEntities(flight: TrainingFlight): string[] {
+/** Every envelope of a reading, by the id of its main entity: the one that `trainingFocusEntity` names, and whose edges
+ *  (`TRAINING_ENTITY.edge` of it) go with it. */
+export function trainingEnvelopeEntities(reading: TrainingReading): string[] {
+  if (reading.envelopes === null) return [];
   return [
-    ...flight.envelopes.heading.map((_, index) => TRAINING_ENTITY.heading(index)),
-    TRAINING_ENTITY.captureTurn, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis,
-    ...flight.envelopes.altitude.map((_, index) => TRAINING_ENTITY.tube(index)),
+    ...reading.envelopes.heading.map((_, index) => TRAINING_ENTITY.heading(index)),
+    ...reading.envelopes.altitude.map((_, index) => TRAINING_ENTITY.tube(index)),
   ];
 }
 
-/** The track rows a word is in force, as positions: on to the next word's issue, so that it meets it. Only a word
- *  issued on the last row has no stretch (its issue marker is its picture). */
-export function trainingFocusStretch(flight: TrainingFlight, word: TrainingWordRun): number[] {
-  const last = Math.min(word.endRow, flight.rows - 1);
-  if (last <= word.row) return [];
-  return lonLatHeights(flight.signals).slice(word.row * 3, (last + 1) * 3);
+/** The flight-time stretch of a track a word is in force, as positions (on to the next word's issue, so that it meets
+ *  it), or nothing when the word is said outside the track. */
+export function trainingFocusStretch(track: TrainingTrack, fromS: number, toS: number): number[] {
+  const first = track.tS.findIndex((t) => t >= fromS - 1e-9);
+  if (first < 0) return [];
+  let last = track.tS.length - 1;
+  while (last > first && track.tS[last] > toS + 1e-9) last -= 1;
+  if (last <= first) return [];
+  return lonLatHeights(track).slice(first * 3, (last + 1) * 3);
 }
 
 // ── the shapes every layer draws ─────────────────────────────────────────────

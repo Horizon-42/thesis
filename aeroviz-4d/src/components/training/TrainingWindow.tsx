@@ -1,7 +1,7 @@
 /**
  * TrainingWindow.tsx
  * ------------------
- * The Training views' floating window (the read-back check, the prior's predictions): a dialog over the scene, not
+ * The Training views' floating window (the read-back check): a dialog over the scene, not
  * modal — the sentence bar and the flight list stay usable behind it, because reading one against the other is the
  * point. Its header names it, carries a few chips and the shared cursor, and closes it; Escape closes it too, from the
  * moment it opens (it takes the focus).
@@ -22,16 +22,15 @@ export interface TrainingWindowProps {
   /** Short facts beside the title. */
   chips: ReactNode;
   cursorS: number;
-  cursorRow: number;
-  /** The cursor is on the flight (`cursorOnFlight`): a window's clock can lie outside it. */
-  cursorOn: boolean;
+  /** The sentence row in force at the cursor; null before the sentence opens. */
+  cursorRow: number | null;
   onClose: () => void;
   className?: string;
   children: ReactNode;
 }
 
 export default function TrainingWindow({
-  title, closeLabel, chips, cursorS, cursorRow, cursorOn, onClose, className, children,
+  title, closeLabel, chips, cursorS, cursorRow, onClose, className, children,
 }: TrainingWindowProps) {
   const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -48,7 +47,7 @@ export default function TrainingWindow({
           <strong>{title}</strong>
           {chips}
           <span className="training-readback-cursor">
-            t = {formatSeconds(cursorS)} s · {cursorOn ? `step ${cursorRow}` : "outside this aircraft"}
+            t = {formatSeconds(cursorS)} s · {cursorRow === null ? "before the sentence opens" : `row ${cursorRow}`}
           </span>
           <button type="button" onClick={onClose} aria-label={closeLabel}>×</button>
         </header>
