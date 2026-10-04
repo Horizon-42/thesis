@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from dataclasses import fields, replace
 
 import numpy as np
@@ -409,14 +410,14 @@ def test_the_runner_counts_the_flights_without_a_sentence_by_reason():
     from ts_transformer.experiments.instruction_closed_loop import merge_tallies, summarise, tally
 
     batch, inputs, words = _batch()
-    batch = replace(batch, drawn={"refused_on_interval": {"too short": 1}})
+    batch = replace(batch, refused_seen=Counter({"too short": 1}))
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     lateness = closed_loop.heading_lateness_rows(sentence, batch.readings[0].words[batch.sentences[0].first_row:]) * 2.0
     counted = tally(batch, [sentence, Refused("go-around at the first predicted step")], words)
     numbers = summarise(counted, {"no aircraft dynamics": 3})
     # a split read in parts: each part's tally in order gives the numbers of the whole
     whole = replay.subset(batch, [0, 0, 0])
-    first, second = replay.subset(batch, [0, 0]), replace(replay.subset(batch, [0]), drawn={"refused_on_interval": {}})
+    first, second = replay.subset(batch, [0, 0]), replace(replay.subset(batch, [0]), refused_seen=Counter())
     gone = Refused("go-around at the first predicted step")
     assert summarise(merge_tallies([tally(first, [sentence, gone], words), tally(second, [sentence], words)]), {}) \
         == summarise(tally(whole, [sentence, gone, sentence], words), {})
@@ -973,7 +974,7 @@ def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(
         n = len(indices)
         return replay.Drawn(indices=indices, signals=[signals[i] for i in indices], series=[None] * n,
                             groups=[replay.OWN] * n, geometries=geometries,
-                            description={"split": split, "seed": seed, "per_airport": per_airport, "groups": list(groups),
+                            excluded_seen=Counter({"no aircraft dynamics": n}), description={"split": split, "seed": seed, "per_airport": per_airport, "groups": list(groups),
                                          "threshold_crossing_heights_m": {}, "pool": 2 * n, "read": 2 * n, "flights": n,
                                          "excluded": {"no aircraft dynamics": n}, "by_group": {"own": n}}), readings
 
@@ -1014,7 +1015,7 @@ def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(
     assert train["drawn"]["excluded"] == {"no aircraft dynamics": 3} and train["drawn"]["pool"] == 6
     for run in runs[1:]:
         files, summary, arrays = read[run]
-        assert files == whole[0] and summary == whole[1], run
+        assert files == whole[0] and json_module.dumps(summary) == json_module.dumps(whole[1]), run   # text too
         for name in files:
             assert list(arrays[name]) == list(whole[2][name]), (run, name)
             for key, value in whole[2][name].items():
@@ -1025,10 +1026,14 @@ def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(
                          *bad])
 
 
-def test_a_split_is_drawn_in_parts_of_its_one_permutation_and_their_descriptions_add_up(tmp_path):
+def test_a_split_is_drawn_in_parts_of_its_one_permutation_and_their_descriptions_add_up(tmp_path, monkeypatch):
     """`replay.part_of`: the parts in turn are the whole order, sizes differing by at most one; a part that does not
-    exist and a part with a cap per airport are refused; `merge_descriptions` adds the counts and refuses parts of
-    different draws."""
+    exist and a part with a cap per airport are refused. `draw_flights` in parts: their flights in turn are the whole
+    draw's, and `merge_descriptions` gives the whole draw's description as its text — a stand-in drawn first, exclusions
+    tied — and refuses parts of different draws, a field it does not know and exclusions not the description's."""
+    import json as json_module
+    from types import SimpleNamespace
+
     order = list(range(10, 27))
     for n in (1, 2, 3, 5, 17):
         parts = [replay.part_of(order, (k, n)) for k in range(n)]
@@ -1038,13 +1043,33 @@ def test_a_split_is_drawn_in_parts_of_its_one_permutation_and_their_descriptions
             replay.part_of(order, bad)
     with pytest.raises(ValueError, match="only with every flight"):
         replay.draw_flights(tmp_path, "train", order, per_airport=5, seed=1, part=(0, 2))
-    shared = {"split": "train", "seed": 1, "per_airport": "every labelled flight", "groups": ["own"],
-              "threshold_crossing_heights_m": {"KXXX": {"RW27": 15.0}}}
-    first = {**shared, "pool": 9, "read": 9, "flights": 7, "excluded": {"a": 1, "b": 1}, "by_group": {"own": 7}}
-    second = {**shared, "pool": 8, "read": 8, "flights": 5, "excluded": {"b": 3}, "by_group": {"own": 4, "stand-in": 1}}
-    merged = replay.merge_descriptions([first, second])
-    assert merged == {**shared, "pool": 17, "read": 17, "flights": 12, "excluded": {"b": 4, "a": 1},
-                      "by_group": {"own": 11, "stand-in": 1}}
-    assert list(merged["excluded"]) == ["b", "a"]                                   # by count, as a draw writes it
+    flights = 40
+    # each flight's group by its place in the drawing order: a stand-in first though own flights are the most, and two
+    # reasons not drawn that end tied (3 each) — "no aircraft dynamics" met first, yet fewer of it in the first half
+    drawing = [int(i) for i in np.random.default_rng(7).permutation(list(range(flights)))]
+    by_place = {0: replay.STAND_IN, 1: "no aircraft dynamics", 2: "no identified type", 3: "no identified type",
+                20: "no aircraft dynamics", 21: "no aircraft dynamics", 22: "no identified type"}
+    group = {i: by_place.get(place, replay.OWN) for place, i in enumerate(drawing)}
+    monkeypatch.setattr(replay, "load_candidates", lambda directory: {"KXXX": SimpleNamespace(candidates=[])})
+    monkeypatch.setattr(replay, "load_signals", lambda directory, split: [SimpleNamespace(airport="KXXX", i=i)
+                                                                        for i in range(flights)])
+    monkeypatch.setattr(replay, "rebuild_series", lambda directory, signals: list(signals))
+    monkeypatch.setattr(replay, "group_of", lambda series: group[series.i])
+    groups = (replay.OWN, replay.STAND_IN)
+    whole = replay.draw_flights(tmp_path, "train", list(range(flights)), per_airport=0, seed=7, groups=groups)
+    assert list(whole.description["excluded"]) == ["no aircraft dynamics", "no identified type"]       # a tie
+    assert list(whole.description["by_group"]) == [replay.STAND_IN, replay.OWN]
+    for n in (2, 3, 7):
+        parts = [replay.draw_flights(tmp_path, "train", list(range(flights)), per_airport=0, seed=7, groups=groups,
+                                     part=(k, n)) for k in range(n)]
+        assert [i for p in parts for i in p.indices] == whole.indices
+        assert [g for p in parts for g in p.groups] == whole.groups
+        merged = replay.merge_descriptions([(p.description, p.excluded_seen) for p in parts])
+        assert json_module.dumps(merged) == json_module.dumps(whole.description), n
+    first = whole.description, whole.excluded_seen
     with pytest.raises(ValueError, match="not of one draw"):
-        replay.merge_descriptions([first, {**second, "seed": 2}])
+        replay.merge_descriptions([first, ({**first[0], "seed": 2}, first[1])])
+    with pytest.raises(ValueError, match="not of one draw"):
+        replay.merge_descriptions([first, ({**first[0], "new": 1}, first[1])])
+    with pytest.raises(ValueError, match="not its description's"):
+        replay.merge_descriptions([first, (first[0], Counter({"no identified type": 1}))])

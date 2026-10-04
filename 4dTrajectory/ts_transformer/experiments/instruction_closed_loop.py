@@ -80,7 +80,7 @@ class Tally:
     outcomes: list[str]                     # D74
     rows_past_the_end: int                  # D44
     refused: Counter                        # the flights the closed loop refused, by reason
-    refused_on_interval: Counter            # the flights the row interval refused, by reason
+    refused_on_interval: Counter            # the flights the row interval refused, by reason in the order first met
     lateness_s: np.ndarray                  # the observed heading words' lateness (A12), sentence after sentence
     outside: dict[str, np.ndarray]          # by column the three counts of `closed_loop.outside_rows`
 
@@ -107,7 +107,7 @@ def tally(batch: replay.Batch, results: list[ClosedLoopSentence | Any], words: A
         timed_out=np.array([r.timed_out for r in read], dtype=bool), outcomes=[r.outcome for r in read],
         rows_past_the_end=int(sum(np.isnan(r.vertical_m).sum() for r in read)),
         refused=Counter(r.reason for r in results if not isinstance(r, ClosedLoopSentence)),
-        refused_on_interval=Counter(batch.drawn["refused_on_interval"]),
+        refused_on_interval=batch.refused_seen,
         lateness_s=np.concatenate([np.zeros(0), *lateness]), outside=outside)
 
 
@@ -183,12 +183,13 @@ def part_path(staging: Path, split: str, interval_s: float, part: tuple[int, int
 
 
 def read_part(instructions: Path, executor: Path, split: str, part: tuple[int, int], intervals_s: list[float],
-              staging: Path, *, chunk: int, device: str) -> tuple[str, int, dict[str, Any], dict[float, Tally], float]:
+              staging: Path, *, chunk: int, device: str
+              ) -> tuple[str, int, tuple[dict[str, Any], Counter], dict[float, Tally], float]:
     """Part ``part`` = ``(k, n)`` of a split (module docstring; ``(0, 1)`` the whole split): its labelled flights drawn
     once (`replay.draw_readings`) and read in closed loop at each of ``intervals_s`` in turn, each interval's sentences
     written (`part_path`) before the next is read (none when no flight keeps one: the tally says why). Returns the split,
-    ``k``, the draw's description, the tallies by interval and the process's peak memory (GB, Linux's ``ru_maxrss`` in
-    KiB)."""
+    ``k``, the draw's description and exclusions in the order first met (`replay.merge_descriptions`), the tallies by
+    interval and the process's peak memory (GB, Linux's ``ru_maxrss`` in KiB)."""
     params, _, words = replay.open_executor(executor, instructions)
     drawn, readings = replay.draw_readings(instructions, split, words.spec, words, per_airport=0, seed=SEED,
                                            groups=(replay.OWN, replay.STAND_IN), part=part)
@@ -203,22 +204,33 @@ def read_part(instructions: Path, executor: Path, split: str, part: tuple[int, i
                               start_row=closed_loop.start_row(interval_s),
                               sentences={batch.indices[j]: r for j, r in kept})
         del batch, results, kept
-    return split, part[0], drawn.description, tallies, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6
+    return (split, part[0], (drawn.description, drawn.excluded_seen), tallies,
+            resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6)
 
 
-def join_parts(staging: Path, split: str, intervals_s: list[float], parts: int, params: Any, words: Any) -> None:
-    """A split read in ``parts`` parts: each interval's part files put together in order into the split's file, as
-    the split read whole writes it, and taken away."""
-    for interval_s in intervals_s:
-        paths = [part_path(staging, split, interval_s, (k, parts)) for k in range(parts)]
-        sentences = {index: sentence for path in paths if path.exists()
-                     for index, sentence in closed_loop_sentences(load_closed_loop(path, words.spec)).items()}
+def join_parts(staging: Path, split: str, tallies: list[dict[float, Tally]], params: Any, words: Any) -> None:
+    """A split read in parts (``tallies``: each part's, in order): each interval's part files put together in order into
+    the split's file, as the split read whole writes it, and taken away. Refused unless a part has a file exactly when
+    its tally counts a sentence, and the split's file holds every sentence the tallies count."""
+    for interval_s in tallies[0]:
+        sentences: dict[int, ClosedLoopSentence] = {}
+        written = []
+        for k, counted in enumerate(tallies):
+            path = part_path(staging, split, interval_s, (k, len(tallies)))
+            if path.exists() != bool(counted[interval_s].outcomes):
+                raise ValueError(f"{path.name}: a part's file is there exactly when its tally counts a sentence")
+            if path.exists():
+                sentences.update(closed_loop_sentences(load_closed_loop(path, words.spec)))
+                written.append(path)
+        if len(sentences) != sum(len(counted[interval_s].outcomes) for counted in tallies):
+            raise ValueError(f"{split} {interval_s:g} s: the parts' files do not hold the sentences their tallies count")
         if sentences:
             write_closed_loop(staging / f"{split}_{interval_s:g}s.npz", words.spec,
                               executor_params_sha256=params_sha256(params), row_interval_s=interval_s,
                               start_row=closed_loop.start_row(interval_s), sentences=sentences)
-        for path in paths:
-            path.unlink(missing_ok=True)
+        del sentences
+        for path in written:
+            path.unlink()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -266,15 +278,16 @@ def main(argv: list[str] | None = None) -> int:
                                "checks": record["checks"], "row_intervals_s": args.row_interval_s, "splits": {}}
     parts = {split: args.train_parts if split == "train" else 1 for split in SPLITS}
     tasks = [(split, (k, parts[split])) for split in SPLITS for k in range(parts[split])]   # train, the largest, first
-    done: dict[str, dict[int, tuple[dict[str, Any], dict[float, Tally]]]] = {split: {} for split in SPLITS}
+    done: dict[str, dict[int, tuple[tuple[dict[str, Any], Counter], dict[float, Tally]]]] = {split: {} for split in SPLITS}
     intervals = list(args.row_interval_s)
     if any(n > 1 for n in parts.values()):
         (staging / PARTS).mkdir()
 
-    def finished(split: str, k: int, drawn: dict[str, Any], tallies: dict[float, Tally], peak_gb: float) -> None:
+    def finished(split: str, k: int, drawn: tuple[dict[str, Any], Counter], tallies: dict[float, Tally],
+                 peak_gb: float) -> None:
         done[split][k] = (drawn, tallies)
         name = split if parts[split] == 1 else f"{split} part {k + 1} of {parts[split]}"
-        print(f"{name}: {drawn['flights']} flights, peak {peak_gb:.1f} GB, {time.perf_counter() - started:.0f}s",
+        print(f"{name}: {drawn[0]['flights']} flights, peak {peak_gb:.1f} GB, {time.perf_counter() - started:.0f}s",
               flush=True)
 
     if args.workers == 1:
@@ -296,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
                     raise SystemExit(f"the split {split} (part {k + 1} of {n}) failed: {error!r}") from error
     for split in SPLITS:
         if parts[split] > 1:
-            join_parts(staging, split, intervals, parts[split], params, words)
+            join_parts(staging, split, [done[split][k][1] for k in range(parts[split])], params, words)
         drawn = replay.merge_descriptions([done[split][k][0] for k in range(parts[split])])
         numbers = {interval: summarise(merge_tallies([done[split][k][1][interval] for k in range(parts[split])]),
                                        drawn["excluded"]) for interval in intervals}

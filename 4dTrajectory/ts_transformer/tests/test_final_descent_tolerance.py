@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from types import SimpleNamespace
 
 import numpy as np
@@ -90,7 +91,7 @@ def _flown(monkeypatch, final_vertical_m, interval_s):
     flight = instruction_flight(*fly_legs(LEGS, 270.0, 1079.0, -400.0, 0.0))
     reading = read_flight(flight, geometry, one, words)
     drawn = replay.Drawn(indices=[5], signals=[flight], series=[None], groups=[replay.OWN],
-                         geometries={flight.airport: geometry}, description={"excluded": {}})
+                         geometries={flight.airport: geometry}, description={"excluded": {}}, excluded_seen=Counter())
     monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: approach_speed_ias_mps("A320", 62000.0))
     sentence = replay.sentence_on_interval(reading, flight, interval_s, geometry, words)
     start = sentence.first_row + closed_loop.start_row(interval_s) * int(round(interval_s / one.step_s))
