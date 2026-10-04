@@ -185,13 +185,15 @@ The no-token executor's own axes — lookback L × segment Δ, `docs/experiments
 committed day split (C32; refused when the harvest's days are not its days), reads the train, select and val flights
 (process pool, 500 keys per chunk, spawn) — a test day's flight is only counted from the roster, with how many of
 them the per-flight split also holds out — and writes the signals (with the day split) and `candidates.json`;
-`--limit` is a SMOKE option recorded in `signals.json`. Since 2026-10-02 the rows are on the UTC clock's even seconds
+`--limit` is a SMOKE option recorded in `signals.json`: a random sample of N flights per airport and split, seed 1337 (`LIMIT_SEED`, since A17, design D55; before, the first N sorted keys — 94 % one callsign). Since 2026-10-02 the rows are on the UTC clock's even seconds
 (`data.dataset.on_utc_steps`; multi-aircraft design §2.1). `instruction_spec --dir <new> --spec-from <artefact>`
 measures nothing: that artefact's `spec.json` and `measurements.json` are copied byte for byte with a
 `spec_from.json` (`artefact.keep_spec`). `instruction_spec --dir` measures on TRAIN only, and only on the flights and
 rows the labeller admits (`read.admit`; the refusals are counted in `measurements.json` `not_admitted`), and writes
 `spec.json` (`measure.SUGGESTED` + `MeasuredValues`, the git state) with `measurements.json`: each value it fits from
-data beside its rounder candidates and the fit each leaves (design D15), the climb angles' distribution, the level
+data beside its rounder candidates and the fit each leaves (design D15) — the spec takes the row the user chose,
+`--candidate fitted|0.5|0.25|0.1` (required when measuring, refused with `--spec-from`; A18, D56: the formal artefact
+uses 0.25), recorded as `chosen_candidate` — the climb angles' distribution, the level
 words' rounding error under the 40-level grid and a uniform 30 m one (design §11.7). `instruction_labels --dir` reads
 train, select and val with that spec and writes the sentences, `labels.json`, the readout (with, at each go-around row,
 the words in force — design §11.6 — and whether its low pass lies past the threshold) and the labeller's reference
@@ -202,7 +204,7 @@ straight-in / half vectored sample of VAL flights into `figures/` with an `index
 refuses to write over an existing file.
 
     python run_ts.py instruction_signals --out <artefact> --limit 80     # a smoke build; no --limit for the formal one
-    python run_ts.py instruction_spec --dir <artefact>
+    python run_ts.py instruction_spec --dir <artefact> --candidate 0.25
     python run_ts.py instruction_labels --dir <artefact>
     python run_ts.py instruction_conformance --dir <artefact>
 

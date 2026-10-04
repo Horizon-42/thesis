@@ -14,10 +14,14 @@ each leaves (D15), with the climb angles' distribution (O12) and the level words
 under a uniform 30 m grid (§11.7). Writes ``spec.json`` (with the git state and, as information, the labeller code that
 measured it) and ``measurements.json`` into the signals directory (never over an existing file).
 
+``--candidate NAME`` (required when measuring) is the user's choice of D15 (D56): the descent nominals and edges and
+the climb nominal of that row of the rounding candidates (`measure.CANDIDATE_NAMES`); the fitted values and every row
+stay in ``measurements.json`` beside the choice.
+
 ``--spec-from <artefact>`` measures nothing: that artefact's spec is kept unchanged (`artefact.keep_spec` — new rows
 under the same vocabulary, e.g. rows moved onto the UTC steps, keep the spec; every model trained under it still opens).
 
-    python run_ts.py instruction_spec --dir 4dTrajectory/outputs/POOLED/instruction_language/<name>
+    python run_ts.py instruction_spec --dir 4dTrajectory/outputs/POOLED/instruction_language/<name> --candidate 0.25
     python run_ts.py instruction_spec --dir <new> --spec-from 4dTrajectory/outputs/POOLED/instruction_language/<old>
 """
 
@@ -106,7 +110,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--spec-from", type=Path, default=None,
                         help="an artefact whose spec is kept unchanged instead of measuring one (module docstring)")
+    parser.add_argument("--candidate", choices=measure.CANDIDATE_NAMES, default=None,
+                        help="the user's choice of D15 (required when measuring; module docstring)")
     args = parser.parse_args(argv)
+    if (args.spec_from is None) == (args.candidate is None):
+        parser.error("measuring needs --candidate (the user's choice of D15); --spec-from keeps a spec and takes none")
     directory = args.dir if args.dir.is_absolute() else REPO_ROOT / args.dir
     for name in ("spec.json", "measurements.json"):
         if (directory / name).exists():
@@ -150,21 +158,20 @@ def main(argv: list[str] | None = None) -> int:
     order = np.argsort(-angle[climbs])
     cumulative = np.cumsum(length[climbs][order]) / length[climbs].sum()
     climb_centre = float(-angle[climbs][order][np.searchsorted(cumulative, 0.5)])
+    candidates = measure.rounding_candidates(angle, length, chosen["centres_deg"], chosen["edges_deg"], climb_centre)
     measured = measure.MeasuredValues(
         turn_rate_max_deg_s=measure.round_up(float(np.percentile(first["turn_row_rate_deg_s"], 99.9)), 0.1),
         turn_bank_max_deg=measure.round_up(float(np.percentile(first["turn_row_bank_deg"], 99.9)), 1.0),
         corridor_half_width_m=measure.round_up(corridor["half_width_m"], 5.0),
         corridor_widening_deg=measure.round_up(float(np.degrees(np.arctan(corridor["slope"]))), 0.05),
         corridor_course_tolerance_deg=course_tolerance,
-        descent_angle_edges_deg=tuple(round(e, 2) for e in chosen["edges_deg"]),
-        descent_angle_centres_deg=tuple(round(c, 2) for c in chosen["centres_deg"]),
-        climb_angle_centre_deg=round(climb_centre, 2),
+        **measure.candidate_values(candidates, args.candidate),
         speed_accel_max_mps2=measure.round_up(float(np.percentile(first["transition_accel_mps2"], 99.9)), 0.1),
     )
     spec = measure.build_spec(measured)
     measurements = {
         "train_flights": len(flights), "not_admitted": dict(refused.most_common()),
-        "suggested": suggested, "measured": measured.to_dict(),
+        "suggested": suggested, "measured": measured.to_dict(), "chosen_candidate": args.candidate,
         "rules": {
             "heading_tolerance_deg": f"chosen: heading_step/2 + {measure.HEADING_WANDER_ALLOWANCE_DEG:g}° of wander "
                                      "(see sensitivity.heading_wander_p95_by_band)",
@@ -177,8 +184,9 @@ def main(argv: list[str] | None = None) -> int:
             "corridor_half_width_m": "p99 offset of the aligned final's nearest distance bin (0–3 km), up to 5 m",
             "corridor_widening_deg": "the smallest widening that keeps every bin's p99 inside at the bin's middle, up to 0.05°",
             "corridor_course_tolerance_deg": f"p99 of |track − course| on the last {measure.FINAL_MEASURE_M:.0f} m flown, up to 1°",
-            "descent_angle_classes": f"{measure.DESCENT_CLASSES} classes, weighted k-means on tan(angle), weight = length²",
-            "climb_angle_centre_deg": "length-weighted median of the climb pieces",
+            "descent_angle_classes": f"{measure.DESCENT_CLASSES} classes, weighted k-means on tan(angle), weight = length², "
+                                     f"the row {args.candidate!r} of rounding_candidates (the user's choice, D15)",
+            "climb_angle_centre_deg": f"length-weighted median of the climb pieces, the row {args.candidate!r}",
             "speed_accel_max_mps2": "p99.9 of |acceleration| on transition rows, up to 0.1",
         },
         "sensitivity": {
@@ -192,8 +200,7 @@ def main(argv: list[str] | None = None) -> int:
         "move_pieces": {"angle_deg": measure.percentiles(angle), "length_m": measure.percentiles(length),
                         "climb_pieces": int(climbs.sum())},
         "descent_class_fits": {str(k): v for k, v in fits.items()},
-        "rounding_candidates": measure.rounding_candidates(angle, length, chosen["centres_deg"], chosen["edges_deg"],
-                                                           climb_centre),
+        "rounding_candidates": candidates,
         "climb_angles": measure.climb_distribution(angle, length),
         "level_rounding": measure.level_rounding(first["level_height_m"], Words(spec)),
         "corridor_fit": corridor,
@@ -204,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("the labeller's code changed while the spec was being measured; measure again")
     source = {"labeller_code_sha256": labeller, "git": git_state()}
     write_spec(directory, spec, measurements, source)
-    print(f"spec {spec.sha256[:12]}:")
+    print(f"spec {spec.sha256[:12]} (candidate {args.candidate}):")
     for name, value in measured.to_dict().items():
         print(f"  {name:32s} {value}")
     for k, fit in fits.items():

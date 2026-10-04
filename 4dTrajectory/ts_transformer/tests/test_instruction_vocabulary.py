@@ -533,3 +533,35 @@ def test_the_landing_constants_are_the_harvest_s_and_the_parallel_limit_mirrors_
     alone = airport_geometry("KSJC", targets(r for r in runways if r.ident == "30L"), runways)
     assert landing_cross_limit_m(alone, 0, one.landing_cross_limit_m, one.parallel_course_delta_deg) == pytest.approx(
         _runway_bracket_cross_limit(next(r for r in runways if r.ident == "30L"), runways, fallback_m=1000.0), abs=1.0)
+
+
+def test_the_spec_takes_the_chosen_row_of_the_rounding_candidates_and_refuses_another_name():
+    """D15, D56: `instruction_spec --candidate` writes the descent nominals and edges and the climb nominal of the row
+    the user chose; the outer edges stay; a name that is no row is refused."""
+    from ts_transformer.instructions import measure
+
+    rng = np.random.default_rng(0)
+    angle = np.concatenate((rng.uniform(0.5, 5.0, 400), -rng.uniform(1.0, 2.0, 20)))
+    length = rng.uniform(500.0, 5000.0, len(angle))
+    candidates = measure.rounding_candidates(angle, length, [1.51, 2.45, 3.09, 4.45], [-0.5, 1.98, 2.77, 3.77, 10.0], 1.47)
+    assert list(candidates) == list(measure.CANDIDATE_NAMES)
+    assert measure.candidate_values(candidates, "0.25") == {
+        "descent_angle_edges_deg": (-0.5, 2.0, 2.75, 3.75, 10.0), "descent_angle_centres_deg": (1.5, 2.5, 3.0, 4.5),
+        "climb_angle_centre_deg": 1.5}
+    assert measure.candidate_values(candidates, "fitted")["descent_angle_centres_deg"] == (1.51, 2.45, 3.09, 4.45)
+    with pytest.raises(ValueError, match="no candidate '0.2'"):
+        measure.candidate_values(candidates, "0.2")
+
+
+def test_the_spec_runner_measures_only_with_a_candidate_and_keeps_a_spec_only_without(tmp_path, capsys):
+    """D15, D56: measuring needs the user's choice; --spec-from keeps a spec and takes none — both refused before any
+    file is read."""
+    from ts_transformer.experiments import instruction_spec
+
+    for argv in ([], ["--candidate", "0.25", "--spec-from", str(tmp_path / "other")]):
+        with pytest.raises(SystemExit):
+            instruction_spec.main(["--dir", str(tmp_path / "new"), *argv])
+        assert "measuring needs --candidate" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        instruction_spec.main(["--dir", str(tmp_path / "new"), "--candidate", "0.2"])
+    assert not (tmp_path / "new").exists()

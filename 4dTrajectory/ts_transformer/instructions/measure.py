@@ -118,6 +118,8 @@ PERCENTILES = (50, 90, 95, 99, 99.9)
 #: D15: every value the measurement fits from data (the descent centres and inner edges, the climb centre) is written with
 #: these rounder candidates and the end-of-piece height error each leaves; the user chooses.
 ROUNDING_STEPS_DEG = (0.5, 0.25, 0.1)
+#: The rows of `rounding_candidates`, by name: the user chooses one (D15, D56; `instruction_spec --candidate`).
+CANDIDATE_NAMES = ("fitted", *(f"{step:g}" for step in ROUNDING_STEPS_DEG))
 #: O12: the climb angles' distribution, in bins this wide.
 CLIMB_BIN_DEG = 0.5
 #: §11.7: the level words' rounding error is also read under a uniform grid of this step (instruction-v3's 30 m).
@@ -322,14 +324,25 @@ def rounding_candidates(angle_deg: np.ndarray, length_m: np.ndarray, centres_deg
     climbs = angle_deg < DESCENT_FLOOR_DEG
     climb_deg, climb_length = -angle_deg[climbs], length_m[climbs]
     rows = {"fitted": (list(centres_deg), list(edges_deg), climb_centre_deg)}
-    for step in ROUNDING_STEPS_DEG:
-        rows[f"{step:g}"] = ([round(round(c / step) * step, 9) for c in centres_deg],
+    for name, step in zip(CANDIDATE_NAMES[1:], ROUNDING_STEPS_DEG):
+        rows[name] = ([round(round(c / step) * step, 9) for c in centres_deg],
                              [edges_deg[0], *(round(round(e / step) * step, 9) for e in edges_deg[1:-1]), edges_deg[-1]],
                              round(round(climb_centre_deg / step) * step, 9))
     return {name: {"descent_centres_deg": centres, "descent_edges_deg": edges,
                    "descent_end_height_error_m": descent_end_error(angle_deg, length_m, centres, edges),
                    "climb_centre_deg": climb, "climb_end_height_error_m": climb_end_error(climb_deg, climb_length, climb)}
             for name, (centres, edges, climb) in rows.items()}
+
+
+def candidate_values(candidates: dict[str, Any], name: str) -> dict[str, Any]:
+    """The spec's descent edges and nominals and its climb nominal from the row ``name`` of `rounding_candidates`
+    (to 0.01°, as the fitted values always were)."""
+    if name not in candidates:
+        raise ValueError(f"no candidate {name!r}: the rows are {sorted(candidates)}")
+    row = candidates[name]
+    return {"descent_angle_edges_deg": tuple(round(e, 2) for e in row["descent_edges_deg"]),
+            "descent_angle_centres_deg": tuple(round(c, 2) for c in row["descent_centres_deg"]),
+            "climb_angle_centre_deg": round(row["climb_centre_deg"], 2)}
 
 
 def climb_distribution(angle_deg: np.ndarray, length_m: np.ndarray) -> dict[str, Any]:

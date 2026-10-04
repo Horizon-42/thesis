@@ -32,6 +32,8 @@ from multiprocessing import get_context
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from aircraft.performance_index import performance_index_identity
 from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG
 from trajectory_data_process.harvest.airports import load_airport
@@ -65,15 +67,21 @@ def keys_by_day(provenance: dict[str, Any], manifests: dict[str, Path], days: Da
     return result
 
 
+#: The seed of a smoke build's sample (D55): the same flights at every run.
+LIMIT_SEED = 1337
+
+
 def build_jobs(keys: dict[str, list[str]], manifests: dict[str, Path], limit: int) -> list[tuple[str, str, str, list[str]]]:
     """The chunks to build: ``(split, airport, manifest, keys)`` for the development splits only — a test day's
-    key never reaches a worker. ``limit``: the first N flights per airport and split (0: all)."""
+    key never reaches a worker. ``limit``: a random sample of N flights per airport and split, `LIMIT_SEED` (D55: the
+    first N of the sorted keys share a callsign prefix; 0: all)."""
     jobs = []
     for split in SPLITS:
         for airport, manifest in manifests.items():
             mine = sorted(k for k in keys[split] if k.startswith(f"{airport}:"))
             if limit:
-                mine = mine[:limit]
+                drawn = np.random.default_rng(LIMIT_SEED).permutation(len(mine))[:limit]
+                mine = [mine[i] for i in sorted(drawn.tolist())]
             for start in range(0, len(mine), CHUNK):
                 jobs.append((split, airport, str(manifest), mine[start: start + CHUNK]))
     return jobs
@@ -105,7 +113,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--airports", nargs="+", default=None, help="default: every harvested airport")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--limit", type=int, default=0,
-                        help="SMOKE TEST ONLY: the first N flights per airport and split (recorded in signals.json)")
+                        help="SMOKE TEST ONLY: a random sample of N flights per airport and split, seed LIMIT_SEED "
+                             "(recorded in signals.json)")
     args = parser.parse_args(argv)
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
     if out.exists():
@@ -185,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
                       "flight_split": {"method": SPLIT_ASSIGNMENT_METHOD, "seed": config.resolved_split_seed,
                                        "val_fraction": config.val_fraction, "test_fraction": config.test_fraction}},
         "limit_per_airport_and_split": args.limit or None,
+        "limit_seed": LIMIT_SEED if args.limit else None,
         "typecodes": dict(typecodes.most_common()),
         # The labeller reads kinematics only, so a flight whose type has no dynamics is kept
         # (`all-flights`); how many, and why, against the index that decided it.

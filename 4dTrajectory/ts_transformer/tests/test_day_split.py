@@ -132,6 +132,14 @@ def test_the_signals_runner_deals_flights_by_landing_day_and_never_builds_a_test
     assert sorted(built) == ["KAAA:a1", "KAAA:a3", "KBBB:b1"] and {split for split, *_ in jobs} == {"train", "select", "val"}
     assert all(key.startswith(f"{airport}:") and manifest == str(manifests[airport]) for _, airport, manifest, chunk in jobs
                for key in chunk)
+    # D55: a limit is a seeded random sample of each airport and split, the same at every run; 0 takes all
+    many = {"train": [f"KAAA:AAL{i:03d}" for i in range(40)] + [f"KAAA:UAL{i:03d}" for i in range(40)],
+            "select": [], "val": []}
+    drawn = [key for _, _, _, chunk in build_jobs(many, {"KAAA": manifests["KAAA"]}, limit=10) for key in chunk]
+    assert len(drawn) == 10 and drawn == sorted(drawn)
+    assert drawn == [key for _, _, _, chunk in build_jobs(many, {"KAAA": manifests["KAAA"]}, limit=10) for key in chunk]
+    assert any(key.startswith("KAAA:UAL") for key in drawn) and any(key.startswith("KAAA:AAL") for key in drawn)
+    assert len([k for _, _, _, c in build_jobs(many, {"KAAA": manifests["KAAA"]}, limit=0) for k in c]) == 80
     # an eligible flight landing on a day the deal never saw is refused, never guessed into a split
     provenance["manifests"][1]["source_records"].append({"flight_key": "late"})
     with pytest.raises(KeyError, match="2026-06-30 is not in this day split"):
