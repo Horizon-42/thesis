@@ -199,7 +199,9 @@ function buildScene(viewer: Cesium.Viewer, selection: TrainingSelection, reading
         decision.passed ? TRAINING_DECISION_PASS_COLOR : TRAINING_DECISION_FAIL_COLOR, 12,
         `DA ${decision.passed ? "✓" : "✗"} · ${Math.abs(decision.aboveGlidepathM).toFixed(0)} m ` +
         `${decision.aboveGlidepathM >= 0 ? "above" : "below"} · ${Math.abs(decision.rightM).toFixed(0)} m ` +
-        `${decision.rightM >= 0 ? "right" : "left"}`));
+        `${decision.rightM >= 0 ? "right" : "left"}`,
+        // above and to the right of the point: the runway designators are labelled below theirs
+        new Cesium.Cartesian2(14, -34)));
     }
     // the words the reading added, where they were said on the flown path
     reading.events.filter((event) => event.correction).forEach((event, index) => {

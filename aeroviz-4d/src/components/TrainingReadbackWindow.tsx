@@ -27,6 +27,7 @@
 import type { TrainingLayers } from "../context/AppContext";
 import {
   TRAINING_CORRECTION_COLOR,
+  TRAINING_DECISION_FAIL_COLOR,
   TRAINING_DECISION_PASS_COLOR,
   TRAINING_EXECUTOR_COLOR,
   TRAINING_HEADING_BAND_COLOR,
@@ -37,7 +38,7 @@ import {
   TRAINING_WORD_COLOR,
   trainingOutcomeColour,
 } from "../utils/trainingWordColors";
-import { sentenceWordAt, trainingBandLabel, type TrainingColumn, type TrainingReading, type TrainingSelection } from "../data/trainingSample";
+import { closedCycleTimeS, sentenceWordAt, trainingBandLabel, type TrainingColumn, type TrainingReading, type TrainingSelection } from "../data/trainingSample";
 import { autopilotColour, type TrainingAutopilotSegment } from "../data/trainingAutopilot";
 import { checkMark, crossingText, replayText, segmentEndText, TRAINING_OUTCOME_TAG } from "../data/trainingText";
 import useMeasuredWidth from "../hooks/useMeasuredWidth";
@@ -131,13 +132,13 @@ export default function TrainingReadbackWindow(props: TrainingReadbackWindowProp
             {replay !== null ? (
               <p className="training-readback-slot" aria-label="The flown flight" title={replayText(replay)}>
                 <strong style={{ color: trainingOutcomeColour(replay.outcome) }}>Flown flight</strong> —{" "}
-                {TRAINING_OUTCOME_TAG[replay.outcome]} at {m.closed!.startS + replay.endCycle} s
+                {TRAINING_OUTCOME_TAG[replay.outcome]} at {closedCycleTimeS(m.closed!, replay.endCycle)} s
                 {replay.crossing === null ? " · no threshold crossing" : ` · crossing ${crossingText(replay.crossing)}`}
                 {replay.crossing === null ? null
                   : replay.crossing.decision === null ? " · no DA check" : (
                     <>
                       {" "}· DA check{" "}
-                      <strong style={{ color: replay.crossing.decision.passed ? TRAINING_DECISION_PASS_COLOR : trainingOutcomeColour("timeout") }}>
+                      <strong style={{ color: replay.crossing.decision.passed ? TRAINING_DECISION_PASS_COLOR : TRAINING_DECISION_FAIL_COLOR }}>
                         {replay.crossing.decision.passed ? "passed" : "failed"}
                       </strong>
                       : {Math.abs(replay.crossing.decision.rightM).toFixed(1)} m {replay.crossing.decision.rightM >= 0 ? "right" : "left"} of the

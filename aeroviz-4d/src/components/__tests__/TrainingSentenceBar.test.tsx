@@ -134,7 +134,18 @@ describe("TrainingSentenceBar", () => {
   it("shades the rows before the first predicted step as observed only, and ends the axis at the flown flight", () => {
     const { container } = open(4);
     expect(container.querySelector("g.training-sentence-observed title")!.textContent).toContain("observed only");
-    expect(container.querySelector("line.training-sentence-marker")).toBeTruthy();
+    // the axis ends where the sentence does (16 s + 124 rows of 4 s); the flown flight ended at cycle 494 of the executor's 1 s
+    const ticks = [...container.querySelectorAll("text.training-sentence-tick")].map((node) => node.textContent);
+    expect(ticks[ticks.length - 1]).toBe("512 s");
+    const end = [...container.querySelectorAll("g[aria-label^='the flown flight ended']")];
+    expect(end).toHaveLength(1);
+    expect(end[0].getAttribute("aria-label")).toContain("ended at 510 s: ");
+    expect(end[0].querySelector("line.training-sentence-marker")).toBeTruthy();
+    // and its x is the flown end's place on the axis: 510 of 512 s
+    const x = (node: Element, attr: string) => Number(node.getAttribute(attr));
+    const axis = container.querySelector("line.training-sentence-axis")!;
+    const atEnd = (x(end[0].querySelector("line")!, "x1") - x(axis, "x1")) / (x(axis, "x2") - x(axis, "x1"));
+    expect(atEnd).toBeCloseTo(510 / 512, 4);
     const { container: labelled } = open(null);
     expect(labelled.querySelectorAll("g.training-sentence-observed")).toHaveLength(0);
   });

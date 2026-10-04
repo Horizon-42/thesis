@@ -19,7 +19,7 @@ import {
   TRAINING_AUTOPILOT_SEGMENT_END,
   type TrainingAutopilotView,
 } from "../trainingAutopilot";
-import { trainingReadingOf } from "../trainingSample";
+import { lastStateCycle, trainingReadingOf } from "../trainingSample";
 import { TRAINING_AUTOPILOT_COLOR, TRAINING_FAILURE_COLOR } from "../../utils/trainingWordColors";
 import { requestOf, stageAAnswers, stageASelection } from "./stageA";
 
@@ -83,13 +83,45 @@ describe("the answer", () => {
 
   it("refuses a track that does not start at the word, and a crossing for a stopped flight", () => {
     const [raw, final] = stageAAnswers();
-    const track = { ...raw.track, cycle: raw.track.cycle.map((c: number) => c + 1) };
-    expect(parseTrainingAutopilot({ ...raw, track }, requestOf(raw), selection).ok).toBe(false);
+    // the same track without its first state: it ends where the segment says, and only its start is wrong
+    const cut = (values: unknown[]) => values.slice(1);
+    const track = Object.fromEntries(Object.entries(raw.track).map(([key, value]) => [key, key === "attitude"
+      ? Object.fromEntries(Object.entries(value as Record<string, unknown[]>).map(([name, list]) => [name, cut(list)]))
+      : cut(value as unknown[])]));
+    const late = parseTrainingAutopilot({ ...raw, track }, requestOf(raw), selection);
+    expect(late.ok).toBe(false);
+    if (!late.ok) expect(late.problem).toContain("track starts at cycle 105, not at the word's cycle 104");
     const crossing = parseTrainingAutopilot({ ...raw, crossing: final.crossing }, requestOf(raw), selection);
     expect(crossing.ok).toBe(false);
     if (!crossing.ok) expect(crossing.problem).toContain("stopped at its segment's end");
     const outcome = parseTrainingAutopilot({ ...raw, segment: { ...raw.segment, end: "went_around" } }, requestOf(raw), selection);
     expect(outcome.ok).toBe(false);
+  });
+});
+
+describe("where a flown flight's track ends", () => {
+  it("is the judge's outcome row, and one before it for a dynamics failure, whose failed state is left out", () => {
+    const [, final] = stageAAnswers();
+    // flown on to a dynamics failure: the judge's row is 496, the last state kept 495
+    const failure = { ...final, segment: { ...final.segment, end: "dynamics_failure", endCycle: final.segment.endCycle + 1 } };
+    const parsed = parseTrainingAutopilot(failure, requestOf(final), selection);
+    if (!parsed.ok) throw new Error(parsed.problem);
+    expect(parsed.value.segment.end).toBe("dynamics_failure");
+    expect(lastStateCycle("dynamics_failure", 496)).toBe(495);
+    expect(lastStateCycle("landed", 495)).toBe(495);
+    // any other outcome must end its track at the outcome row itself
+    const wrong = parseTrainingAutopilot({ ...final, segment: { ...final.segment, endCycle: final.segment.endCycle + 1 } }, requestOf(final), selection);
+    expect(wrong.ok).toBe(false);
+    if (!wrong.ok) expect(wrong.problem).toContain("a segment that ended at cycle 496 (unstable_at_minimums) ends at 496");
+    const unmoved = parseTrainingAutopilot({ ...final, segment: { ...final.segment, end: "dynamics_failure" } }, requestOf(final), selection);
+    expect(unmoved.ok).toBe(false);
+  });
+
+  it("refuses an answer from an executor of another cycle than the set's", () => {
+    const [raw] = stageAAnswers();
+    const parsed = parseTrainingAutopilot({ ...raw, executor: { ...raw.executor, cycleS: 0.5 } }, requestOf(raw), selection);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.problem).toContain("the set's executor cycle is 1 s");
   });
 });
 

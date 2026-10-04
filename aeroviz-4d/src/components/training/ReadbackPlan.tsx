@@ -86,9 +86,6 @@ export default function ReadbackPlan({ m }: { m: ReadbackModel }) {
             </polyline>
             <rect x={endOf(flown).x - 3.5} y={endOf(flown).y - 3.5} width={7} height={7} fill={TRAINING_EXECUTOR_COLOR}
               stroke="black" strokeWidth={0.6} />
-            <text x={endOf(flown).x + 6} y={endOf(flown).y + 12} className="training-readback-path-label" fill={TRAINING_EXECUTOR_COLOR}>
-              flown: {TRAINING_OUTCOME_TAG[m.closed!.replay.outcome]}
-            </text>
           </g>
         ) : null}
         {column !== null && column !== "runway" && focusRows.length >= 2 ? (
@@ -135,6 +132,7 @@ export default function ReadbackPlan({ m }: { m: ReadbackModel }) {
       </g>
       <text x={GUTTER + 4} y={PLAN_H - 6} className="training-readback-tick">
         runway {designated.ident} · course {designated.courseDeg.toFixed(0)}°
+        {m.closed ? ` · flown path: ${TRAINING_OUTCOME_TAG[m.closed.replay.outcome]}` : ""}
       </text>
     </ChartFrame>
   );

@@ -19,7 +19,7 @@ import {
   TRAINING_TUBE_COLOR,
   TRAINING_WORD_COLOR,
 } from "../../utils/trainingWordColors";
-import { sentenceColumnRuns, trainingBandLabel } from "../../data/trainingSample";
+import { closedCycleTimeS, sentenceColumnRuns, trainingBandLabel } from "../../data/trainingSample";
 import { checkMark, decisionText } from "../../data/trainingText";
 import AutopilotLine from "./AutopilotLine";
 import { Axis, ChartFrame, Line, VLine } from "./chartKit";
@@ -103,7 +103,7 @@ export default function ReadbackAltitude({ m, onCursorChange, onColumnChange }: 
           title="the autopilot's altitude over its segment" />
       ) : null}
       {decision !== null && m.closed !== null ? (
-        <circle cx={m.xTime(m.closed.startS + decision.cycle)} cy={yAltitude(decision.heightMslM)} r={5} fill="none" strokeWidth={2}
+        <circle cx={m.xTime(closedCycleTimeS(m.closed, decision.cycle))} cy={yAltitude(decision.heightMslM)} r={5} fill="none" strokeWidth={2}
           stroke={decision.passed ? TRAINING_DECISION_PASS_COLOR : TRAINING_DECISION_FAIL_COLOR}>
           <title>{decisionText(decision)}</title>
         </circle>

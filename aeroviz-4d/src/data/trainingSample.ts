@@ -258,7 +258,7 @@ export interface TrainingOpenLoop {
 
 /** The decision-altitude check at the crossing (D38): the flown point, its place against the glidepath and the cone. */
 export interface TrainingDecision {
-  /** The cycle (1 s) from the first predicted step. */
+  /** The cycle of the set's executor (`TrainingSample.executor.cycleS`) from the first predicted step. */
   cycle: number;
   eM: number;
   nM: number;
@@ -277,7 +277,7 @@ export interface TrainingCrossing {
   /** Metres right of the centreline / above the threshold, at the crossing. */
   crossM: number;
   heightM: number;
-  /** The cycle (1 s, fractional) from the first predicted step. */
+  /** The executor's cycle (fractional) from the first predicted step. */
   atCycle: number;
   runwayIndex: number;
   /** null: no DA check (a crossing above the landing screen, or no DA point). */
@@ -286,7 +286,7 @@ export interface TrainingCrossing {
 
 export interface TrainingReplay {
   outcome: TrainingOutcome;
-  /** Cycles (1 s) from the first predicted step to the outcome. */
+  /** The executor's cycles from the first predicted step to the judge's outcome row. */
   endCycle: number;
   /** null: the flight did not cross the threshold. */
   crossing: TrainingCrossing | null;
@@ -310,7 +310,9 @@ export interface TrainingClosedLoop {
   lateralM: Array<number | null>;
   verticalM: Array<number | null>;
   timedOut: boolean;
-  /** The states the executor flew, from the first predicted step. */
+  /** The executor's control cycle (s): a replay cycle (`endCycle`, `atCycle`, a decision's `cycle`) is this long. */
+  cycleS: number;
+  /** The flight the executor flew, from the first predicted step to the judge's outcome (`replay.track`), on the 2 s rows. */
   flown: TrainingTrack;
   replay: TrainingReplay;
 }
@@ -340,6 +342,8 @@ export interface TrainingFlight {
 export interface TrainingSample {
   setId: string;
   airport: string;
+  /** The executor's control cycle (s), the unit of every replay cycle in the set. */
+  executor: { cycleS: number };
   formats: Record<string, string>;
   source: TrainingSource;
   cohort: TrainingCohort;
@@ -436,6 +440,18 @@ export function readingRowTimeS(reading: TrainingReading, row: number): number {
 export function readingRowAt(reading: TrainingReading, atS: number): number | null {
   if (atS < reading.originS - 1e-9) return null;
   return Math.min(Math.floor((atS - reading.originS) / reading.rowS + 1e-9), reading.rows - 1);
+}
+
+/** Flight time of a replay cycle (cycles of the set's executor, counted from the first predicted step). */
+export function closedCycleTimeS(closed: TrainingClosedLoop, cycles: number): number {
+  return closed.startS + cycles * closed.cycleS;
+}
+
+/** The cycle of the last state of a flight that ended at the judge's outcome row ``endCycle``: the row itself, but for a
+ *  dynamics failure the failed state is left out — one before.
+ *  MIRROR of `aeroviz_backend/autopilot_segment/fly.py` `last_state` and `training_export.replay_payload`. */
+export function lastStateCycle(outcome: TrainingOutcome, endCycle: number): number {
+  return outcome === "dynamics_failure" ? endCycle - 1 : endCycle;
 }
 
 /** One word of a column and the rows it is in force: from its row to the next word of its column (or the sentence's end). */
@@ -562,11 +578,13 @@ export function outsideSpans(inside: boolean[], firstRow: number, lastRow: numbe
     const closes = start !== null && (ok || offset === inside.length - 1);
     if (!closes) return;
     const first = firstRow + start!;
+    start = null;
+    // a verdict past the line's last row has nothing to draw
+    if (first > lastRow) return;
     const last = Math.min(firstRow + (ok ? offset - 1 : offset) + 1, lastRow);
     spans.push(last > first ? [first, last] : [Math.max(first - 1, 0), first]);
-    start = null;
   });
-  return spans.filter(([first, last]) => last > first);
+  return spans.filter(([first, last]) => last > first && last <= lastRow);
 }
 
 /** Track degrees made continuous (no jump of more than 180° between neighbours), and — with a ``reference`` — shifted by
@@ -848,23 +866,49 @@ export function readCrossing(reader: Reader, candidateCount: number): TrainingCr
   };
 }
 
-function parseReplay(reader: Reader, flownRows: number, candidates: TrainingCandidate[]): { replay: TrainingReplay; attitude: TrainingAttitude } {
+/** Every row a judge's envelope ends at lies within the flown track (the export guarantees it) — but for a heading band whose
+ *  word's lead runs past the end of the flight: it is empty (`firstRow == stopRow`, no verdicts), may lie anywhere, and is
+ *  not drawn. */
+function requireWithin(reader: Reader, envelopes: TrainingEnvelopes, rows: number): void {
+  const ends = [
+    ...envelopes.heading.filter((band) => band.stopRow > band.firstRow).map((band) => ["heading stopRow", band.stopRow] as const),
+    ...envelopes.altitude.map((tube) => ["altitude endRow", tube.endRow] as const),
+    ...envelopes.speed.map((span) => ["speed endRow", span.endRow] as const),
+  ];
+  const past = ends.find(([, row]) => row > rows);
+  if (past) reader.fail(`an envelope's ${past[0]} is ${past[1]}, past the ${rows} rows of the flown track (replay.track)`);
+}
+
+function parseReplay(
+  reader: Reader, candidates: TrainingCandidate[], cycleS: number, stepS: number,
+): { replay: TrainingReplay; track: Reader; rows: number } {
   const crossing = reader.nullableChild("crossing");
   const envelopes = reader.nullableChild("envelopes");
+  const outcome = reader.oneOf("outcome", TRAINING_OUTCOMES);
+  const endCycle = reader.count("endCycle");
+  const track = reader.child("track");
+  const rows = track.count("rows", 1);
+  const lastCycle = track.count("lastCycle");
+  if (lastCycle !== lastStateCycle(outcome, endCycle)) {
+    track.fail(`lastCycle is ${lastCycle}, but a flight that ended at cycle ${endCycle} (${outcome}) has its last state at ${lastStateCycle(outcome, endCycle)}`);
+  }
+  if (rows !== Math.floor((lastCycle * cycleS) / stepS + 1e-9) + 1) {
+    track.fail(`rows is ${rows}, but ${lastCycle} cycles of ${cycleS} s are ${Math.floor((lastCycle * cycleS) / stepS + 1e-9) + 1} rows of ${stepS} s`);
+  }
+  const judged = envelopes === null ? null : parseEnvelopes(envelopes);
+  if (judged !== null) requireWithin(envelopes!, judged, rows);
   return {
     replay: {
-      outcome: reader.oneOf("outcome", TRAINING_OUTCOMES), endCycle: reader.count("endCycle"),
-      crossing: crossing === null ? null : readCrossing(crossing, candidates.length),
-      flewTheSentence: reader.boolean("flewTheSentence"), notReached: reader.count("notReached"),
-      envelopes: envelopes === null ? null : parseEnvelopes(envelopes),
+      outcome, endCycle, crossing: crossing === null ? null : readCrossing(crossing, candidates.length),
+      flewTheSentence: reader.boolean("flewTheSentence"), notReached: reader.count("notReached"), envelopes: judged,
     },
-    attitude: parseAttitudeOf(reader, flownRows),
+    track, rows,
   };
 }
 
 function parseClosedLoop(
   reader: Reader, key: string, vocabulary: TrainingVocabulary, candidates: TrainingCandidate[], observed: TrainingTrack,
-  haeMinusMslM: number,
+  haeMinusMslM: number, cycleS: number,
 ): TrainingClosedLoop {
   const rowIntervalS = reader.number("rowIntervalS");
   if (String(rowIntervalS) !== key) reader.fail(`rowIntervalS is ${rowIntervalS}, but it is listed under ${key}`);
@@ -889,37 +933,44 @@ function parseClosedLoop(
   }
   // the states before the first predicted step are the observed ones (observed row firstRow + k)
   const stateE = states.numbers("eM", stateRows);
+  const stateN = states.numbers("nM", stateRows);
+  const stateHeight = states.numbers("heightMslM", stateRows);
   for (let k = 0; k < flownFromRow; k += 1) {
     if (Math.abs(stateE[k] - observed.eM[firstRow + k]) > 0.2) {
       states.fail(`eM[${k}] is ${stateE[k]} m, but the observed row ${firstRow + k} is at ${observed.eM[firstRow + k]} m: the states before the first predicted step are observed`);
     }
   }
-  const flownRows = stateRows - flownFromRow;
-  const take = <T>(values: T[]) => values.slice(flownFromRow);
-  const heightMslM = take(states.numbers("heightMslM", stateRows));
-  const trackDeg = take(states.numbers("trackDeg", stateRows));
   const startIndex = firstRow + flownFromRow;
   const startS = startIndex * stepS;
-  const replayReader = reader.child("replay");
-  const { replay, attitude } = parseReplay(replayReader, flownRows, candidates);
+  const { replay, track, rows } = parseReplay(reader.child("replay"), candidates, cycleS, stepS);
+  // the flown flight is `replay.track`; the stored states are the same flight on the rows both have, to the written rounding
+  const eM = track.numbers("eM", rows);
+  const nM = track.numbers("nM", rows);
+  const heightMslM = track.numbers("heightMslM", rows);
+  for (let i = 0; i < Math.min(rows, stateRows - flownFromRow); i += 1) {
+    const apart = Math.max(Math.abs(eM[i] - stateE[flownFromRow + i]), Math.abs(nM[i] - stateN[flownFromRow + i]),
+      Math.abs(heightMslM[i] - stateHeight[flownFromRow + i]));
+    if (apart > 0.11) track.fail(`row ${i} is ${apart.toFixed(2)} m from the stored state ${flownFromRow + i}: replay.track and states are one flight`);
+  }
+  const trackDeg = track.numbers("trackDeg", rows);
   const flown: TrainingTrack = {
-    tS: Array.from({ length: flownRows }, (_, i) => (startIndex + i) * stepS),
-    eM: take(stateE), nM: take(states.numbers("nM", stateRows)), lat: take(states.numbers("latDeg", stateRows)),
-    lon: take(states.numbers("lonDeg", stateRows)), altitudeMslM: heightMslM,
+    tS: Array.from({ length: rows }, (_, i) => (startIndex + i) * stepS),
+    eM, nM, lat: track.numbers("latDeg", rows), lon: track.numbers("lonDeg", rows), altitudeMslM: heightMslM,
     altitudeHaeM: heightMslM.map((value) => value + haeMinusMslM), trackDeg,
     trackPlotDeg: unwrapDegrees(trackDeg, observed.trackPlotDeg[Math.min(startIndex, observed.tS.length - 1)]),
-    groundSpeedMps: take(states.numbers("groundSpeedMps", stateRows)),
-    verticalRateMps: take(states.numbers("verticalRateMps", stateRows)), attitude,
+    groundSpeedMps: track.numbers("groundSpeedMps", rows), verticalRateMps: track.numbers("verticalRateMps", rows),
+    // `replay.attitude` is on the rows of `replay.track`
+    attitude: parseAttitudeOf(reader.child("replay"), rows),
   };
   return {
     rowIntervalS, firstRow, startRow, flownFromRow, startS, words, events,
     lateralM: reader.numbersOrNull("lateralM", words.length), verticalM: reader.numbersOrNull("verticalM", words.length),
-    timedOut: reader.boolean("timedOut"), flown, replay,
+    timedOut: reader.boolean("timedOut"), cycleS, flown, replay,
   };
 }
 
 function parseFlight(
-  reader: Reader, vocabulary: TrainingVocabulary, candidates: TrainingCandidate[],
+  reader: Reader, vocabulary: TrainingVocabulary, candidates: TrainingCandidate[], cycleS: number,
 ): TrainingFlight {
   const runwayIndex = reader.integer("runwayIndex", 0, candidates.length - 1);
   const runway = reader.string("runway");
@@ -937,7 +988,7 @@ function parseFlight(
     reader.fail(`closedLoop is listed at [${found.join(", ")}] s, expected the set's [${expected.join(", ")}]`);
   }
   const closedLoop = Object.fromEntries(expected.map((key) => [
-    key, parseClosedLoop(closedReader.child(key), key, vocabulary, candidates, observed, haeMinusMslM)]));
+    key, parseClosedLoop(closedReader.child(key), key, vocabulary, candidates, observed, haeMinusMslM, cycleS)]));
   return {
     datasetId: reader.string("datasetId"), flightKey, callsign: flightKey.split("_")[0], split: reader.oneOf("split", TRAINING_SPLITS),
     stratum: reader.oneOf("stratum", TRAINING_STRATA), kind: reader.string("kind"), typecode: reader.nullableString("typecode"),
@@ -956,11 +1007,13 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
     const vocabulary = parseVocabulary(sample.child("vocabulary"));
     const candidates = parseCandidates(sample);
     const frame = sample.child("airportFrame");
-    const flights = sample.children("flights").map((flight) => parseFlight(flight, vocabulary, candidates));
+    const cycleS = sample.child("executor").number("cycleS");
+    if (!(cycleS > 0)) sample.fail(`executor.cycleS is ${cycleS}, not a positive length`);
+    const flights = sample.children("flights").map((flight) => parseFlight(flight, vocabulary, candidates, cycleS));
     const keys = new Set(flights.map((flight) => flight.flightKey));
     if (keys.size !== flights.length) sample.fail("two flights carry one flight key: a flight is its key");
     return {
-      setId: sample.string("setId"), airport: sample.string("airport"), formats: parseFormats(sample),
+      setId: sample.string("setId"), airport: sample.string("airport"), executor: { cycleS }, formats: parseFormats(sample),
       source: parseSource(sample.child("source")), cohort: parseCohort(sample.child("cohort")), vocabulary,
       airportFrame: { code: frame.string("code"), lat: frame.number("lat"), lon: frame.number("lon"), elevationM: frame.number("elevationM") },
       candidatesSha256: sample.string("candidatesSha256"), candidates, flights,
@@ -985,10 +1038,20 @@ export function trainingFilePath(airportCode: string, file: string): string {
   return `${trainingDirectory(airportCode)}/${file}`;
 }
 
+/** The airport's index, refused unless it is the one asked for (a file copied under another airport's directory). */
 export async function fetchTrainingIndex(airportCode: string): Promise<Parsed<TrainingIndex>> {
-  return parseTrainingIndex(await fetchJson<unknown>(trainingIndexPath(airportCode)));
+  const parsed = parseTrainingIndex(await fetchJson<unknown>(trainingIndexPath(airportCode)));
+  if (parsed.ok && parsed.value.airport !== airportCode) {
+    return { ok: false, problem: `${trainingIndexPath(airportCode)} is ${parsed.value.airport}'s index, not ${airportCode}'s` };
+  }
+  return parsed;
 }
 
-export async function fetchTrainingSample(airportCode: string, file: string): Promise<Parsed<TrainingSample>> {
-  return parseTrainingSample(await fetchJson<unknown>(trainingFilePath(airportCode, file)));
+/** A set's sample, refused unless it is the set and airport asked for. */
+export async function fetchTrainingSample(airportCode: string, file: string, setId: string): Promise<Parsed<TrainingSample>> {
+  const parsed = parseTrainingSample(await fetchJson<unknown>(trainingFilePath(airportCode, file)));
+  if (parsed.ok && (parsed.value.airport !== airportCode || parsed.value.setId !== setId)) {
+    return { ok: false, problem: `${file} holds set ${parsed.value.setId} of ${parsed.value.airport}, not ${setId} of ${airportCode}` };
+  }
+  return parsed;
 }

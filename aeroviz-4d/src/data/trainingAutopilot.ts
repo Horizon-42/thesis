@@ -23,6 +23,7 @@
 import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
 import { attempt, Reader, type Parsed } from "./trainingReader";
 import {
+  lastStateCycle,
   readCrossing,
   rowAtTime,
   sentenceWordAt,
@@ -31,6 +32,7 @@ import {
   unwrapDegrees,
   TRAINING_COLUMNS,
   TRAINING_OUTCOMES,
+  TRAINING_RUNWAY_GO_AROUND,
   type TrainingColumn,
   type TrainingCrossing,
   type TrainingOutcome,
@@ -261,6 +263,7 @@ export function parseTrainingAutopilot(
     const closed = reading.closed!;
     const executor = answer.child("executor");
     const cycleS = executor.number("cycleS");
+    if (cycleS !== closed.cycleS) executor.fail(`cycleS is ${cycleS} s, but the set's executor cycle is ${closed.cycleS} s`);
 
     const segment = answer.child("segment");
     const column = TRAINING_COLUMNS[segment.integer("column", 0, TRAINING_COLUMNS.length - 1)];
@@ -270,7 +273,7 @@ export function parseTrainingAutopilot(
     }
     const run = sentenceWordAt(reading, column, row);
     if (run === null || run.row !== row) return segment.fail(`no ${column} word is said at Δ row ${row} of the sentence on screen`);
-    const word = segment.integer("word", -2, Number.MAX_SAFE_INTEGER);
+    const word = segment.integer("word", TRAINING_RUNWAY_GO_AROUND, Number.MAX_SAFE_INTEGER);
     const correction = segment.boolean("correction");
     if (word !== run.event.value || correction !== run.event.correction) {
       segment.fail(`is word ${word}${correction ? " (a correction)" : ""}, but the sentence says word ${run.event.value}` +
@@ -288,8 +291,11 @@ export function parseTrainingAutopilot(
     const track = parseTrack(answer.child("track"), closed.startS,
       closed.flown.trackPlotDeg[rowAtTime(closed.flown.tS, closed.startS + startCycle * cycleS)]);
     if (track.cycle[0] !== startCycle) answer.fail(`track starts at cycle ${track.cycle[0]}, not at the word's cycle ${startCycle}`);
-    if (track.cycle[track.cycle.length - 1] !== endCycle) {
-      answer.fail(`track ends at cycle ${track.cycle[track.cycle.length - 1]}, but the segment says it ends at ${endCycle}`);
+    // a segment stopped at its end has its last state at `endCycle`; a flight flown to its outcome at the last state the judge
+    // keeps (`lastStateCycle`: a dynamics failure's failed state is left out)
+    const lastCycle = end === TRAINING_AUTOPILOT_SEGMENT_END ? endCycle : lastStateCycle(end, endCycle);
+    if (track.cycle[track.cycle.length - 1] !== lastCycle) {
+      answer.fail(`track ends at cycle ${track.cycle[track.cycle.length - 1]}, but a segment that ended at cycle ${endCycle} (${end}) ends at ${lastCycle}`);
     }
     const crossingReader = answer.nullableChild("crossing");
     if ((crossingReader !== null) && end === TRAINING_AUTOPILOT_SEGMENT_END) {

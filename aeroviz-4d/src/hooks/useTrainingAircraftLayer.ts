@@ -22,6 +22,8 @@ import { TRAINING_EXECUTOR_COLOR, TRAINING_TRACE_COLOR } from "../utils/training
 
 /** The model's least size on screen (px). */
 const AIRCRAFT_PX = 64;
+/** How far under its aircraft each label sits (px): the flown one lower, so the two never overlap. */
+const LABEL_DROP_PX: Record<string, number> = { [TRAINING_ENTITY.aircraftObserved]: 30, [TRAINING_ENTITY.aircraftFlown]: 62 };
 
 interface Drawn {
   id: string;
@@ -57,7 +59,7 @@ export default function useTrainingAircraftLayer(): void {
         ...aircraftModel(item.id, item.who, first, { css: item.css, blend: 0.4, alpha: 1, minimumPixelSize: AIRCRAFT_PX,
           ringCss: "#000000", ringPx: 2 }),
         label: { text: poseText(first), font: "600 12px sans-serif", fillColor: colour(item.css), outlineColor: Cesium.Color.BLACK,
-          outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, 30),
+          outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, LABEL_DROP_PX[item.id]),
           verticalOrigin: Cesium.VerticalOrigin.TOP, disableDepthTestDistance: Number.POSITIVE_INFINITY },
       }));
     }
