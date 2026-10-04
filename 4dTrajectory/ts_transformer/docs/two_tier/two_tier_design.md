@@ -381,13 +381,14 @@ labeller conformance (§9.2) covers them.
 
 1. At the first predicted step, each column says a value. The runway column says a candidate.
 2. The runway column follows the table of §3.2.
-3. When a new level T needs a direction that the angle in force does not give (level, or the opposite direction), the
-   same row says an angle of the correct direction.
+3. In a row that says an altitude word or an angle word, the level T in force and the angle in force agree at the
+   height of the aircraft: a T more than its ε (§3.4) below the aircraft needs a descent class, a T more than its ε
+   above it needs the climb class.
 4. "No level-off" needs a descent class in force or in the same row.
 5. "No level-off" is not permitted while G is true (D14). The model first says a runway word, which ends G; in the same
    row (the runway column comes first) or later it can say "no level-off".
-6. A row that says "go-around" while "no level-off" is in force also says a level T above the present height of the
-   aircraft (D27). Rule 3 then makes the same row say "climb". With rules 5 and 6, "no level-off" is never in force
+6. A row that says "go-around" while "no level-off" is in force also says a level T more than its ε above the present
+   height of the aircraft (D27). Rule 3 then makes the same row say "climb". With rules 5 and 6, "no level-off" is never in force
    while G is true, so every climb of a go-around has a target from an altitude word.
 
 **Procedure masks.** The prior also decodes under three masks from the procedure of R (principle 3). The first two
@@ -437,7 +438,7 @@ them with the executor and adds the correction words; its sentences are the trai
 - **Smoothing:** centred moving means of the track (6 s), the altitude (10 s) and the ground speed (10 s). The flown
   distance is the integral of the smoothed ground speed.
 - **Cut** (`read.admit`). A landing passage is a row where the flight crosses the threshold plane of its landed runway
-  inside the landing screen of the harvest: lateral ≤ 1,000 m and ≤ half the spacing to a parallel runway, height
+  inside the landing screen of the harvest: lateral ≤ 1,000 m and ≤ half the spacing to a parallel runway (a candidate whose course is within 5°), height
   ≤ 100 m, both interpolated between the two rows (`read.landing_passages`). The sentence ends before the last landing
   passage after which the flight does not come back before the threshold.
 - **Gate.** The labeller refuses a flight, with its reason, when: its rows are not 2 s apart; its landed runway is not
@@ -570,9 +571,11 @@ aircraft left the 25 km slice, and the slice starts at its return.
    true. A go-around without a climb word is refused, with its reason.
 3. The climb is read as altitude and angle words, as every climb. Its level word and its climb word are in the
    go-around row (rule 6). While G is true the executor flies the climb at the go-around angle (D28, §5.5).
-4. The runway word that ends G (D19): at the first level-off after the go-around climb, and not later than the row of
-   the next "no level-off" (rule 5). It says the runway of the next approach: the runway on which the flight landed,
-   after its last go-around.
+4. The runway word that ends G (D19): at the first level after the go-around row held at least 150 m above the go-around
+   point (a level flown at the low point before the climb is not it), and not later than the row of the next "no
+   level-off" (rule 5). It says the runway of the next approach: the runway on which the flight landed, after its last
+   go-around. A go-around without such a row, or whose row comes at or after the next go-around row, is refused ("go-around
+   not ended").
 5. A landing passage that the flight comes back from must lie inside the low pass of a go-around; otherwise the
    flight is refused (§4.1).
 6. Each approach is read separately (D26): the last descent that reaches the go-around row says "no level-off" (§4.4);
@@ -620,7 +623,8 @@ the words on a Δ grid:
    heading word that moves across a runway word is said in the frame where it is heard (D46, §3.3).
 3. The first Δ row says all five columns. The grammar rules (§3.7) are checked again on the Δ grid. The rounding keeps
    the order of the words, and the words of one 2 s row stay in one Δ row (a level word and its angle word, a
-   go-around row).
+   go-around row). A "go-around" and the runway word that ends it in one Δ row cancel. A sentence in a go-around at its
+   first Δ row is refused (it cannot say a runway there). A word that goes past the last Δ row is not said.
 
 **Why the nearest row (D45).** A word put on the next Δ row is late by (Δ − 2)/2 on average, and a word said when the
 matched point has passed its place (§4.9) is late by Δ/2 more: approximately 1 s at Δ = 2 s, 3 s at 4 s and 7 s at 8 s.
@@ -688,7 +692,8 @@ also gives.
    rows before it stay observed.
 2. The aircraft flies with its own dynamics or with a stand-in's, by the rule of the replay (`autopilot/replay.py`
    `group_of`). A flight that the replay does not fly (no identified type, no aircraft dynamics, or no published approach
-   speed) gives no training sentence. The artefact counts these flights by reason.
+   speed) gives no training sentence. Nor does a sentence with fewer than two rows from the first predicted step, or in
+   a go-around at it. The artefact counts these flights by reason.
 3. At each row, the labeller finds the matched point, then decides the words of the row: the observed words that the
    matched point has reached ("When the observed words are said", below) and the correction words. The executor hears
    them together.
@@ -707,6 +712,8 @@ the matched point:
 - the lateral error e_y is the distance of the flown position from the observed path, perpendicular to the observed
   track there (positive to the right);
 - the vertical error e_h is the flown height minus the observed height.
+
+The observed height and track are those that the labeller reads (smoothed, §4.1); the positions are as observed.
 
 The reference is the matched point, not the observed point at the same time. Thus a difference along the path (a
 difference of time) is not corrected, and the speed words stay the observed ones.
@@ -760,8 +767,10 @@ observed time (D36).
 **Vertical correction.**
 
 1. Only while a descent class is in force (toward a level or with "no level-off"). During a level hold the level word
-   is the target; its rounding to the grid (§3.4) is not corrected. A climb has one class, so a climb gets no
-   correction.
+   is the target; its rounding to the grid (§3.4) is not corrected. A level hold is the executor's: the level in force
+   is captured (its level-off has started, §5.5). A level reached by a descent says no angle word, so the descent class
+   stays in force there, and the capture, not the angle word, tells the hold. In a level hold no correction starts, and
+   one in force ends. A climb has one class, so a climb gets no correction.
 2. When e_h > H (too high), the labeller says the next steeper descent class. When e_h < −H (too low), it says the next
    shallower descent class. From descent 4 there is no steeper class, and from descent 1 no shallower one: then there is
    no correction.
@@ -769,11 +778,12 @@ observed time (D36).
    overshoot (D53): when e_h changes its sign and |e_h| > H, it says the opposite correction in the same row (item 2,
    where that class exists). A new observed altitude word or angle word ends a correction.
 
-**The words.** A correction word is an ordinary word of its column (§3.3, §3.5). The grammar (§3.7) checks it. The
-envelopes of the closed-loop sentence are checked on the flown states. The envelopes of the observed words on the
-observed track stay as the readout of the open-loop reading. The capture row, the runway words and the go-around rows
-come from the open-loop reading: the decisions come from the observed track; the closed-loop reading only adds
-corrections. The executor reads only words (D2, D3).
+**The words.** A correction word is an ordinary word of its column (§3.3, §3.5). The grammar (§3.7) checks each row at
+the flown height; a row that it refuses refuses the flight (counted by reason). The envelopes of the closed-loop
+sentence are checked on the flown states. The envelopes of the observed words on the observed track stay as the readout
+of the open-loop reading. The capture row, the runway words and the go-around rows come from the open-loop reading: the
+decisions come from the observed track; the closed-loop reading only adds corrections. The executor reads only words
+(D2, D3).
 
 **Tolerances (D32).** Y = 30 m and H = 15 m, constants of the labeller in the spec. With Y = 30 m the flown path ends
 within approximately 30 m of the observed path, which ends 2 m from the centreline (median), far inside the runway
@@ -886,11 +896,12 @@ into the last 5 m/s. A speed word is a step of 5 m/s (D43), so the executor make
 of a longer change comes from the words. Where the thrust limits cannot give a_max, the thrust limit binds (§5.3), and
 the replay counts it. "Unspecified" is the published approach speed of the type (an indicated airspeed at the maximum
 landing mass), scaled by √(m / maximum landing mass) to the mass of the aircraft and flown as the true airspeed at the
-present density. The deceleration to it is the larger of a_U = 0.25 m/s² (a speed step of 5 m/s divided by the minimum hold of
-20 s) and the rate that reaches it at the threshold of R, not more than a_max. While G is true,
-"unspecified" means the pilot's own speed in a missed approach: the executor holds the airspeed that the aircraft has
-at the go-around row (D27; Claude's reading, not checked in the regulation text). A speed word of the model ends it at
-any row.
+present density. A flight on a stand-in's dynamics has the stand-in's mass, so it takes the published speed of its own
+type unscaled. The deceleration to it is the larger of a_U = 0.25 m/s² (a speed step of 5 m/s divided by the minimum
+hold of 20 s) and the rate that reaches it over the straight-line distance to the threshold of R, not more than a_max.
+While G is true, "unspecified" means the pilot's own speed in a missed approach: the executor holds the airspeed that
+the aircraft has at the go-around row (D27; Claude's reading, not checked in the regulation text). A speed word of the
+model ends it at any row.
 
 ### 5.7 What the executor does not do (D9)
 
