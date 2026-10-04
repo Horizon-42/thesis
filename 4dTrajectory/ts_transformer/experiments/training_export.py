@@ -37,6 +37,7 @@ import torch
 from ts_transformer.autopilot import closed_loop, replay
 from ts_transformer.autopilot.conformance import STATE_BOUND_M
 from ts_transformer.autopilot.executor import Flown
+from ts_transformer.autopilot.frame import ALT, LAT, LON
 from ts_transformer.autopilot.judge import Verdict, flown_track, read_flown, words_said
 from ts_transformer.autopilot.spec import EXECUTOR_SPEC_SCHEMA
 from ts_transformer.experiments import training_flights
@@ -192,7 +193,8 @@ def replay_payload(flown: Flown, j: int, verdict: Verdict, part: replay.Batch, s
                    formal: dict[str, Any], aero: np.ndarray, spec: VocabularySpec, words: Words) -> dict[str, Any]:
     """The closed-loop sentence flown again (module docstring): refused unless it gives its stored states on every 2 s
     row and its formal row's outcome; its outcome, crossing and decision-altitude check with the DA point's place, the
-    attitude on its 2 s rows and the judge's envelopes on the flown track."""
+    flight to its outcome on the 2 s rows from the first predicted step (``track``, with its attitude) and the judge's
+    envelopes on it (refused unless they end within it)."""
     geometry = part.geometries[j]
     rows = flown_states_row_cycles(sentence, flown.cycle_s, spec.step_s)
     track = flown_track(flown.states[j, : rows[-1] + 1].cpu().numpy(), geometry)
@@ -211,10 +213,28 @@ def replay_payload(flown: Flown, j: int, verdict: Verdict, part: replay.Batch, s
         reached = [word for word in said.moved if word.row < len(smoothed.track_deg)]
         judged = envelopes(reached, smoothed.track_deg, smoothed.distance_m, smoothed.altitude_m,
                            smoothed.ground_speed_mps, geometry, spec, words)
+    # the flight to its outcome on the 2 s rows (the stored states end at the sentence's last said row): its last state
+    # the outcome's — a dynamics failure's failed state left out, as the live executor draws it
+    last = verdict.end_row - 1 if verdict.outcome == "dynamics_failure" else verdict.end_row
+    cycles = np.arange(0, last + 1, int(round(spec.step_s / flown.cycle_s)))
+    whole = flown_track(flown.states[j, : last + 1].cpu().numpy(), geometry)
+    states = flown.states[j, cycles].cpu().numpy()
+    if judged is not None:
+        ends = ([band["stopRow"] for band in judged["heading"]] + [tube["endRow"] for tube in judged["altitude"]]
+                + [span["endRow"] for span in judged["speed"]])
+        if max(ends, default=0) > len(cycles):
+            raise ValueError(f"{part.signals[j].dataset_id}: an envelope ends at row {max(ends)}, past the flown "
+                             f"track's {len(cycles)} rows")
     return {"outcome": verdict.outcome, "endCycle": int(verdict.end_row), "crossing": crossing,
             "flewTheSentence": bool(verdict.flew_the_sentence),
             "notReached": 0 if verdict.words is None else int(verdict.words["not_reached"]),
-            "attitude": attitude_payload(executor_attitude(flown, j, rows, aero)), "envelopes": judged}
+            "track": {"rows": len(cycles), "lastCycle": int(last), "eM": files.rounded(whole["e"][cycles], 1),
+                      "nM": files.rounded(whole["n"][cycles], 1), "latDeg": files.rounded(states[:, LAT], 7),
+                      "lonDeg": files.rounded(states[:, LON], 7), "heightMslM": files.rounded(states[:, ALT], 1),
+                      "trackDeg": files.rounded(np.mod(whole["track"][cycles], 360.0), 2),
+                      "groundSpeedMps": files.rounded(whole["ground_speed"][cycles], 2),
+                      "verticalRateMps": files.rounded(whole["vertical_rate"][cycles], 2)},
+            "attitude": attitude_payload(executor_attitude(flown, j, cycles, aero)), "envelopes": judged}
 
 
 def closed_loop_payload(sentence: ClosedLoopSentence, replayed: dict[str, Any], interval_s: float,
@@ -277,7 +297,7 @@ FORMATS = {"spec": SPEC_SCHEMA, "sentences": SENTENCES_SCHEMA, "closedLoop": CLO
 
 
 def sample_of(set_id: str, geometry: AirportGeometry, hae_minus_msl_m: dict[str, float], source: dict[str, Any],
-              cohort: dict[str, Any], words: Words, flights: list[dict[str, Any]]) -> dict[str, Any]:
+              cohort: dict[str, Any], words: Words, cycle_s: float, flights: list[dict[str, Any]]) -> dict[str, Any]:
     """A set's sample: its head (formats, source, cohort, vocabulary, the airport frame, the candidates with their
     HAE − MSL) and its flights, each given its runway's HAE − MSL (the height its observed track is drawn at, and every
     flown track of it)."""
@@ -285,6 +305,8 @@ def sample_of(set_id: str, geometry: AirportGeometry, hae_minus_msl_m: dict[str,
         flight["haeMinusMslM"] = hae_minus_msl_m[flight["runway"]]
     return {"schema": files.SAMPLE_SCHEMA, "setId": set_id, "airport": geometry.code, "readingRule": READING_RULE,
             "formats": FORMATS, "source": source, "cohort": cohort, "vocabulary": vocabulary_block(words.spec, words),
+            # the executor's control cycle: a replay's ``endCycle`` and a DA point's ``cycle`` count these
+            "executor": {"cycleS": cycle_s},
             "airportFrame": {"code": geometry.code, "lat": geometry.frame.lat0, "lon": geometry.frame.lon0,
                              "elevationM": geometry.elevation_m},
             "candidatesSha256": files.candidates_sha256(geometry), "candidates": candidates_block(geometry, hae_minus_msl_m),
@@ -368,7 +390,7 @@ def main(argv: list[str] | None = None) -> int:
                                "replays flew at every row interval (train: 400 an airport; select: every labelled flight)"}
         source = {"instructions": repo_relative(instructions), "executor": repo_relative(executor),
                   "specSha256": spec.sha256, "executorSpecSha256": record["sha256"], "git": git}
-        sample = sample_of(args.set_id, geometry, hae, source, cohort, words, payload["flights"])
+        sample = sample_of(args.set_id, geometry, hae, source, cohort, words, params.cycle_s, payload["flights"])
         entry = index_entry(args.set_id, sample)
         built[airport] = (entry, files.serialise(sample))
         print(f"{airport}: {count} flights, {len(built[airport][1]) / 1e6:.1f} MB, {time.perf_counter() - started:.0f}s",

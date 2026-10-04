@@ -188,7 +188,7 @@ def stage_a_fixture() -> tuple[dict, dict]:
     cohort = {"splits": {"train": 1, "select": 0}, "perStratum": 1, "strata": list(export.STRATA), "seed": 1337,
               "drawnFrom": "a synthetic flight"}
     sample = export.sample_of(FIXTURE_SET, geometry, {c.ident: -33.0 for c in geometry.candidates}, source, cohort,
-                              words, [flight])
+                              words, one.params.cycle_s, [flight])
     index = {"schema": files.INDEX_SCHEMA, "writtenUtc": "fixture", "airport": geometry.code,
              "sets": [export.index_entry(FIXTURE_SET, sample)]}
     return index, sample
