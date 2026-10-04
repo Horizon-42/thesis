@@ -414,6 +414,7 @@ def test_each_broken_rule_says_what_it_found():
     words = Words(spec())
     for in_force, step, found in (
             (None, _step(runway=0), "first step incomplete: no word for ['heading', 'altitude', 'angle', 'speed']"),
+            (None, [5, 0, 15, ANGLE_LEVEL, 16], "runway word not permitted: the first step says 5, not a candidate"),
             (_state(), _step(runway=5), "runway word not permitted: 5 is not a candidate of 2"),
             (_state(), _step(runway=0), "runway word not permitted: runway 0 is already in force"),
             (_state(go_around=True), _step(runway=RUNWAY_GO_AROUND),
@@ -421,8 +422,13 @@ def test_each_broken_rule_says_what_it_found():
         with pytest.raises(grammar.Ungrammatical) as refused:
             grammar.apply(in_force, step, 900.0, words, 2)
         assert str(refused.value) == found
-    with pytest.raises(ValueError, match="altitude class -2 outside"):
-        grammar.apply(_state(), _step(altitude=-2), 900.0, words, 2)
+    top = words.altitude_no_level_off
+    for outside in (-2, top + 1):
+        with pytest.raises(ValueError, match=f"altitude class {outside} outside 0..{top}"):
+            grammar.apply(_state(), _step(altitude=outside), 900.0, words, 2)
+        with pytest.raises(ValueError, match=f"altitude class {outside} outside 0..{top}"):
+            grammar.column_mask([_state()], np.array([[UNCHANGED, UNCHANGED, outside]]), ANGLE, np.array([900.0]), [2],
+                                words)
 
 
 def test_a_height_that_is_not_a_number_compares_with_nothing():
