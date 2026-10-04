@@ -62,7 +62,7 @@ None.
    | When | What |
    |---|---|
    | Now | B0. B2 and the training loop of B3, tested on synthetic inputs. The words of each column and their number come from the vocabulary spec (vocabulary §6, item 1), never from constants of the prior |
-   | After A19, A20 and A22 of stage A (the altitude words above E, the new format names, the executor that flies T + E; the vertical path of each candidate in `candidates.json` and the reader of a closed-loop file, D61) | B1, tested on synthetic artefacts (`tests/support.py`). The speaker and the masks of B4 |
+   | After A19, A20 and A22 of stage A (the altitude words above E, the new format names, the executor that flies T + E; the vertical path of each candidate in `candidates.json`, the reader of a closed-loop file, D61; the grammar's column mask, D62) | B1, tested on synthetic artefacts (`tests/support.py`). The speaker and the masks of B4 |
    | After A21 of stage A (the formal artefact) | B1–B4 on a sample of the formal artefact at Δ = 2 s: the smoke run of B3, its time and the memory check at the formal size; free generation with the executor of the formal artefact |
    | After Claude's check of stage A and the user's choice of Δ (outline §4) | B5, B6 |
 
@@ -188,7 +188,9 @@ The speaker says a row column by column, in the order of the columns. A later co
 columns of the same row. Three kinds of masks block words:
 
 **The grammar.** Rules 1–6 and the runway/G table, the vocabulary's one function (vocabulary §6, item 2). The first
-predicted step masks "unchanged" in each column and "go-around" in the runway column.
+predicted step masks "unchanged" in each column and "go-around" in the runway column. The speaker asks the grammar
+column by column, after the earlier columns of the row (D62). It gives the grammar, for each later column, the words
+that its other masks (below) permit there, so that a row never reaches a column with no permitted word.
 
 **Procedure masks.** The prior decodes under three masks from the procedure of R (principle 3). The first two
 block the altitude and angle words that would take the aircraft below a lower limit; the third blocks the climb:
@@ -415,7 +417,7 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
 - A smoke run on a sample of the formal artefact; it gives the time of one run for the cost of B5.
 - Tests: the stop reads only the select days; a fold never reads its held-out airport in training.
 
-**B4. Speaking and free generation** (§4, §7 item 3; vocabulary §6 items 2, 5, 6; D14, D33, D38, D52).
+**B4. Speaking and free generation** (§4, §7 item 3; vocabulary §6 items 2, 5, 6; D14, D33, D38, D52, D62).
 
 - The masks of §4: the grammar; the procedure masks (the glidepath lower edge inside the FAF, the DA before the join,
   no climb back; lifted while G is true as D14 says), a level checked with the band ε of its level (D52); the masks of
@@ -425,7 +427,7 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
 - The readout: the outcomes for each airport and each kind of approach; the words for each column against the
   labelled ones; the go-arounds said; the probability of "go-around" on the final.
 - Tests: one flight spoken and flown to its outcome; each mask; G; the time limit; the same seed gives the same
-  sentence.
+  sentence; no row reaches a column with no permitted word (D62).
 
 **B5. Cross-validation and the base** (D39, D40, D41).
 
