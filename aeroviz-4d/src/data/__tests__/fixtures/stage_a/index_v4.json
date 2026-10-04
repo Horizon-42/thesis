@@ -6,13 +6,13 @@
   {
    "id": "fixture_set",
    "kind": "closed-loop-readback",
-   "readingRule": "instruction-v5",
-   "title": "Stage A \u00b7 instruction-v5 \u00b7 closed loop at \u0394 2/4/8 s \u00b7 train + select",
+   "readingRule": "instruction-v6",
+   "title": "Stage A \u00b7 instruction-v6 \u00b7 closed loop at \u0394 2/4/8 s \u00b7 train + select",
    "file": "fixture_set/sample.json",
    "flights": 1,
    "formats": {
-    "spec": "ts-instruction-spec-v6",
-    "sentences": "ts-instruction-sentences-v4",
+    "spec": "ts-instruction-spec-v7",
+    "sentences": "ts-instruction-sentences-v5",
     "closedLoop": "ts-instruction-closed-loop-v5",
     "candidates": "ts-instruction-candidates-v3",
     "executorSpec": "ts-executor-spec-v8"

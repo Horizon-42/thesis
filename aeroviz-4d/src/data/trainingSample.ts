@@ -1,7 +1,7 @@
 /**
  * trainingSample.ts
  * -----------------
- * The Training view's data contract for STAGE A of the two-tier vocabulary (`instruction-v5`): the airport's index of
+ * The Training view's data contract for STAGE A of the two-tier vocabulary (`instruction-v6`): the airport's index of
  * stage-A sets and one set's flights. Written by `ts_transformer/experiments/training_export.py` (the files:
  * `ts_transformer/instructions/training_files.py`); design: vocabulary §12.1 A23, outline §6.
  *
@@ -46,7 +46,7 @@ export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v9";
 /** MIRROR of `SET_KIND`: a stage-A set — flights read back through the closed loop. */
 export const TRAINING_SET_KIND = "closed-loop-readback";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
-export const TRAINING_READING_RULE = "instruction-v5";
+export const TRAINING_READING_RULE = "instruction-v6";
 
 /** MIRROR of `instructions.words.COLUMNS`. The columns are POSITIONAL: this order is that of every word grid and of the
  *  five rows the sentence bar draws. */
