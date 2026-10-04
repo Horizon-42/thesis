@@ -1,4 +1,4 @@
-"""Speed words and the "unspecified" speed (design §3.6, §4.5).
+"""Speed words and the "unspecified" speed (vocabulary §3.6, §4.5).
 
 The smoothed ground speed is fitted against time by straight pieces. A piece at least the
 minimum hold long, flatter than the flat-acceleration bound and inside one speed target's

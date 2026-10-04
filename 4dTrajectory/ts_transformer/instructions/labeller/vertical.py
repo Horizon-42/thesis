@@ -1,6 +1,10 @@
-"""Altitude words and descent-angle words (design §3.4, §3.5, §4.4).
+"""Altitude words and descent-angle words (vocabulary §3.4, §3.5, §4.4).
 
-The smoothed altitude is fitted against horizontal distance by straight pieces. A piece that lasts the minimum level
+Every height here is a height above the airport elevation E (D58): the caller gives the smoothed MSL altitude minus E,
+and a level word's ``level_m`` is its level T above E. The pieces, the level test and the angles do not depend on a
+constant offset.
+
+The smoothed height is fitted against horizontal distance by straight pieces. A piece that lasts the minimum level
 time with every row within `level_band_m` of its own median is a LEVEL — a physical test that does not use the grid
 (§4.4: the grid's 60–450 m steps would miss a level between two of its levels or swallow a descent) — and its word is
 the grid level nearest that median; consecutive level pieces with the same word merge. Every other piece is a MOVE with
@@ -83,11 +87,11 @@ def vertical_pieces(distance: np.ndarray, altitude: np.ndarray, spec: Vocabulary
     return pieces
 
 
-def held_altitude(pieces: list[VerticalPiece], altitude: np.ndarray) -> np.ndarray:
-    """The height the aircraft holds at each row, as the reading has it: a level piece's rows at the height the level is
-    held at (its median; a level's rows wander up to `level_band_m` about it), every other row at its own altitude —
-    what the grammar reads a row's words at (`labeller.sentence.check_grammar`)."""
-    held = np.array(altitude, dtype=np.float64)
+def held_height(pieces: list[VerticalPiece], height: np.ndarray) -> np.ndarray:
+    """The height above E the aircraft holds at each row, as the reading has it: a level piece's rows at the height the
+    level is held at (its median; a level's rows wander up to `level_band_m` about it), every other row at its own
+    height — what the grammar reads a row's words at (`labeller.sentence.check_grammar`)."""
+    held = np.array(height, dtype=np.float64)
     for piece in pieces:
         if piece.kind == LEVEL:
             held[piece.start: piece.stop] = piece.median_m
@@ -149,14 +153,14 @@ def read_vertical(distance: np.ndarray, altitude: np.ndarray, spec: VocabularySp
         if first.kind == LEVEL:
             if position == 0:
                 reading.instructions += [
-                    Instruction(ALTITUDE, first.target_index, 0, "initial", {"target_m": words.altitude_m(first.target_index)}),
+                    Instruction(ALTITUDE, first.target_index, 0, "initial", {"level_m": words.altitude_level_m(first.target_index)}),
                     Instruction(ANGLE, ANGLE_LEVEL, 0, "initial"),
                 ]
                 in_force_angle, in_force_altitude = ANGLE_LEVEL, first.target_index
             elif groups[position - 1][0].kind == LEVEL:
                 row, angle_class, angle = _step(groups[position - 1][0], first, distance, altitude, spec, words)
                 reading.instructions.append(Instruction(ALTITUDE, first.target_index, row, "step",
-                                                        {"target_m": words.altitude_m(first.target_index)}))
+                                                        {"level_m": words.altitude_level_m(first.target_index)}))
                 in_force_altitude = first.target_index
                 if angle_class != in_force_angle:
                     reading.instructions.append(Instruction(ANGLE, angle_class, row, "angle", {"angle_deg": angle}))
@@ -181,13 +185,13 @@ def read_vertical(distance: np.ndarray, altitude: np.ndarray, spec: VocabularySp
                 raise Refused("altitude target out of range", str(error)) from None
         if target_index == in_force_altitude:
             continue                            # a move between two heights of one level: it cannot be said (§3.4)
-        target_m = words.altitude_m(target_index)
+        target_m = words.altitude_level_m(target_index)
         band = words.altitude_tolerance_m(target_index)
         if target_m is not None and (target_m > start_altitude + band if descending else target_m < start_altitude - band):
             raise Refused("altitude target on the wrong side",
                           f"{'descent' if descending else 'climb'} from {start_altitude:.0f} m to {target_m:.0f} m")
         kind = "initial" if first.start == 0 else "target"
-        reading.instructions.append(Instruction(ALTITUDE, target_index, first.start, kind, {"target_m": target_m}))
+        reading.instructions.append(Instruction(ALTITUDE, target_index, first.start, kind, {"level_m": target_m}))
         in_force_altitude = target_index
         for piece in group:
             try:
@@ -222,7 +226,7 @@ def _step(previous: VerticalPiece, level: VerticalPiece, distance: np.ndarray, a
     climbing = level.target_index > previous.target_index
     if climbing != (angle < 0.0):
         raise Refused("altitude target on the wrong side",
-                      f"step to {words.altitude_m(level.target_index):.0f} m read at {angle:+.2f}° from row {row}")
+                      f"step to {words.altitude_level_m(level.target_index):.0f} m read at {angle:+.2f}° from row {row}")
     if climbing:
         if -angle > spec.climb_angle_max_deg:
             raise Refused("path angle out of range", f"step climb at {-angle:.1f}°")
@@ -244,7 +248,7 @@ def tube_bounds(instructions: list[Instruction], distance: np.ndarray, altitude:
     ends = [item.row for item in altitude_words[1:]] + [len(altitude)]
     tubes = []
     for word, end in zip(altitude_words, ends):
-        target, tolerance = words.altitude_m(word.value), words.altitude_tolerance_m(word.value)
+        target, tolerance = words.altitude_level_m(word.value), words.altitude_tolerance_m(word.value)
         anchors = [a for a in angle_words if word.row <= a.row < end]
         before = [a for a in angle_words if a.row < word.row]
         if not anchors or anchors[0].row != word.row:
@@ -273,5 +277,5 @@ def tube_checks(instructions: list[Instruction], distance: np.ndarray, altitude:
         span = altitude[word.row: end]
         inside = int(np.count_nonzero((span >= low) & (span <= high)))
         results.append({"row": word.row, "rows": end - word.row, "inside": inside, "contained": inside == end - word.row,
-                        "target_m": words.altitude_m(word.value), "tube_width_end_m": float(high[-1] - low[-1])})
+                        "level_m": words.altitude_level_m(word.value), "tube_width_end_m": float(high[-1] - low[-1])})
     return results

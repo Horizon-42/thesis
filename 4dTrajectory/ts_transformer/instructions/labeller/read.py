@@ -1,4 +1,4 @@
-"""One flight: signals → sentence, or a refusal with its reason (design §4).
+"""One flight: signals → sentence, or a refusal with its reason (vocabulary §4).
 
 A flight is read APPROACH BY APPROACH (D26): an approach runs from row 0, or from the runway word that ends a go-around,
 to the landing or to the next go-around row. Each go-around inside the sentence (`go_around.go_arounds`, D18) ends one:
@@ -28,7 +28,7 @@ from ts_transformer.instructions.labeller.lateral import Approach, read_lateral
 from ts_transformer.instructions.labeller.records import Instruction, Refused
 from ts_transformer.instructions.labeller.sentence import assemble
 from ts_transformer.instructions.labeller.speed import read_speed, span_checks
-from ts_transformer.instructions.labeller.vertical import LEVEL, VerticalReading, held_altitude, read_vertical, tube_checks
+from ts_transformer.instructions.labeller.vertical import LEVEL, VerticalReading, held_height, read_vertical, tube_checks
 from ts_transformer.instructions.piecewise import moving_average
 from ts_transformer.instructions.signals import ROW_FIELDS, FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
@@ -83,8 +83,9 @@ class Reading:
     approaches: list[ApproachReading]
     #: The sentence covers the signal rows before the threshold crossing: ``len(words)`` rows.
     cut_at_crossing: bool
-    #: The height each row's words were checked at (`vertical.held_altitude`): what the grammar is read at again.
-    held_altitude_m: np.ndarray
+    #: The height above the airport elevation E each row's words were checked at (`vertical.held_height`, D58): what
+    #: the grammar is read at again.
+    held_height_m: np.ndarray
     checks: dict[str, Any] = field(default_factory=dict)
 
 
@@ -183,7 +184,7 @@ def flight_go_arounds(signals: FlightSignals, smoothed: Smoothed, relatives: Seq
 
 
 def runway_again_rows(found: Sequence[GoAround], go_around_rows: list[int], vertical: VerticalReading,
-                      altitude_m: np.ndarray, n_rows: int, spec: VocabularySpec, words: Words) -> list[int]:
+                      height_m: np.ndarray, n_rows: int, spec: VocabularySpec, words: Words) -> list[int]:
     """The row of the runway word that ends each go-around (module docstring): the first level piece after its row held
     at least `go_around_min_climb_m` above its lowest point (R40's climb; a level flown at the low point before the climb
     is not it), at the latest the next "no level-off"; refused when it comes at or after the next go-around row."""
@@ -191,7 +192,7 @@ def runway_again_rows(found: Sequence[GoAround], go_around_rows: list[int], vert
                     if item.column == ALTITUDE and item.value == words.altitude_no_level_off]
     out = []
     for position, (item, row) in enumerate(zip(found, go_around_rows)):
-        climbed = float(altitude_m[item.point]) + spec.go_around_min_climb_m
+        climbed = float(height_m[item.point]) + spec.go_around_min_climb_m
         levels = [piece.start for piece in vertical.pieces
                   if piece.kind == LEVEL and piece.start > row and piece.median_m >= climbed]
         candidates = levels[:1] + [start for start in no_level_off if start >= row]
@@ -212,9 +213,10 @@ def read_flight(signals: FlightSignals, geometry: AirportGeometry, spec: Vocabul
     signals, smoothed = flight.signals, flight.smoothed
     found = list(flight.go_arounds)
     n_rows = signals.n_rows
-    vertical = read_vertical(smoothed.distance_m, smoothed.altitude_m, spec, words, [item.point for item in found])
+    height = smoothed.altitude_m - geometry.elevation_m          # the altitude words: heights above E (D58)
+    vertical = read_vertical(smoothed.distance_m, height, spec, words, [item.point for item in found])
     rows = vertical.go_around_rows
-    again = runway_again_rows(found, rows, vertical, smoothed.altitude_m, n_rows, spec, words)
+    again = runway_again_rows(found, rows, vertical, height, n_rows, spec, words)
     runways = [item.low_pass.candidate for item in found] + [flight.runway_index]
     approaches = [Approach(first, end, runway) for first, end, runway in zip([0, *again], [*rows, n_rows], runways)]
     runway_rows = np.full(n_rows, runways[0], dtype=np.int64)
@@ -243,7 +245,7 @@ def read_flight(signals: FlightSignals, geometry: AirportGeometry, spec: Vocabul
         approach_readings.append(ApproachReading(approach.first, approach.end, approach.runway_index, capture,
                                                  unspecified))
     instructions += [*lateral.instructions, *vertical.instructions]
-    held = held_altitude(vertical.pieces, smoothed.altitude_m)
+    held = held_height(vertical.pieces, height)
     grid, kept = assemble(n_rows, instructions, held, words, courses)
 
     # every check runs on the sentence as kept: a word the assembly dropped is not judged
@@ -257,13 +259,13 @@ def read_flight(signals: FlightSignals, geometry: AirportGeometry, spec: Vocabul
         "go_arounds": [{"row": row, "point": item.point, "candidate": item.low_pass.candidate,
                         "height_m": item.height_m, "along_m": item.along_m, "drop_m": item.drop_m,
                         "climb_m": item.climb_m} for item, row in zip(found, rows)],
-        "vertical": tube_checks(kept, smoothed.distance_m, smoothed.altitude_m, spec, words),
+        "vertical": tube_checks(kept, smoothed.distance_m, height, spec, words),
         "speed": span_checks(kept, smoothed.ground_speed_mps, spec, words),
     }
     return Reading(dataset_id=signals.dataset_id, airport=signals.airport, runway_index=flight.runway_index,
                    words=grid, instructions=kept, capture_row=landing.capture_row,
                    unspecified_row=landing.unspecified_row, go_around_rows=list(rows), runway_again_rows=again,
-                   approaches=approach_readings, cut_at_crossing=flight.cut_at_crossing, held_altitude_m=held,
+                   approaches=approach_readings, cut_at_crossing=flight.cut_at_crossing, held_height_m=held,
                    checks=checks)
 
 

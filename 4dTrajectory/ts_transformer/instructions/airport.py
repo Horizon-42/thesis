@@ -68,6 +68,12 @@ class AirportGeometry:
     #: Every runway end of the airport as the harvest builds it — a superset of the candidates.
     runway_ends: tuple[RunwayEnd, ...]
 
+    @property
+    def elevation_m(self) -> float:
+        """E, the airport's published field elevation (MSL m; ``reference.elevation_m`` of ``candidates.json``): the
+        altitude words are heights above it (D58)."""
+        return float(self.frame.alt0)
+
     def candidate_index(self, ident: str) -> int:
         for index, candidate in enumerate(self.candidates):
             if candidate.ident == ident.upper():
@@ -182,7 +188,7 @@ def curvature_radius_m(lat_deg: float, course_deg: float) -> float:
 
 def glidepath_height_m(before_threshold_m, crossing_height_m: float, glidepath_deg: float, radius_m: float):
     """The published glidepath's height above the threshold at each distance before it, as a straight line in space
-    (design §11.4, the "straight line" reference): ``TCH + d · tan(angle) + d² / (2 R)``, R the earth's radius of
+    (vocabulary §9.3, the "straight line" reference): ``TCH + d · tan(angle) + d² / (2 R)``, R the earth's radius of
     curvature along the course (`curvature_radius_m`) — the flat formula without the last term is up to 31 m low at
     20 km. The judge's decision-altitude check reads it (`autopilot.judge`), and so will the prior's input (D13)."""
     d = np.asarray(before_threshold_m, dtype=np.float64)

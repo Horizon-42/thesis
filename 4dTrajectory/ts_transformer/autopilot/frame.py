@@ -39,11 +39,13 @@ def wrap180(angle_deg: torch.Tensor) -> torch.Tensor:
 @dataclass(frozen=True)
 class AirportCharts:
     """Each flight's airport frame, one row per flight: the same projection as
-    `AirportENUFrame.horizontal_from_latlon`, read off the frame object itself."""
+    `AirportENUFrame.horizontal_from_latlon`, read off the frame object itself, and the airport elevation E the level
+    words are heights above (`AirportGeometry.elevation_m`, D58)."""
 
     lat0_deg: torch.Tensor          # [B]
     lon0_deg: torch.Tensor          # [B]
     m_per_deg_lon: torch.Tensor     # [B]
+    elevation_m: torch.Tensor       # [B], E (MSL m)
 
     @classmethod
     def of(cls, geometries: Sequence[AirportGeometry], *, dtype: torch.dtype, device: torch.device) -> AirportCharts:
@@ -51,7 +53,8 @@ class AirportCharts:
             return torch.tensor(values, dtype=dtype, device=device)
         return cls(lat0_deg=column([g.frame.lat0 for g in geometries]),
                    lon0_deg=column([g.frame.lon0 for g in geometries]),
-                   m_per_deg_lon=column([g.frame.m_per_deg_lon for g in geometries]))
+                   m_per_deg_lon=column([g.frame.m_per_deg_lon for g in geometries]),
+                   elevation_m=column([g.elevation_m for g in geometries]))
 
     def horizontal(self, lat_deg: torch.Tensor, lon_deg: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         return (lon_deg - self.lon0_deg) * self.m_per_deg_lon, (lat_deg - self.lat0_deg) * METRES_PER_DEG_LAT

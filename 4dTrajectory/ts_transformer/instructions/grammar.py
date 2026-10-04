@@ -1,4 +1,4 @@
-"""Which words may be said at a step — the vocabulary's grammar (design §3.2 table, §3.7 rules 1–6), in ONE function
+"""Which words may be said at a step — the vocabulary's grammar (vocabulary §3.2 table, §3.7 rules 1–6), in ONE function
 (`apply`) that the labeller checks every row with and a speaker masks with ("checked in labelling, a mask in decoding").
 
 A step is one row of five words (`UNCHANGED` where a column says nothing). The words in force (`InForce`) carry the
@@ -9,7 +9,8 @@ runway in force R and the go-around state G beside the last word of each other c
    said again); with G true any candidate, R included — it ends G; "go-around" only with G false (and never at the
    first step). There is no runway lock (D12).
 3. When an altitude or angle word is said, the level T in force and the angle in force agree at the aircraft's height:
-   a T more than its band below the aircraft needs a descent class, more than its band above it the climb class.
+   a T more than its band below the aircraft needs a descent class, more than its band above it the climb class. Both
+   are heights above the airport elevation E (D58).
 4. "No level-off" needs a descent class in force or in the same row.
 5. "No level-off" is not said while G is true (D14): a runway word ends G first — in the same row (the runway column
    comes first) or earlier.
@@ -55,11 +56,11 @@ class InForce:
     speed: int
 
 
-def apply(in_force: InForce | None, step: Sequence[int], altitude_m: float, words: Words,
+def apply(in_force: InForce | None, step: Sequence[int], height_m: float, words: Words,
           n_candidates: int) -> InForce:
     """The words in force after ``step`` (five words) is said after ``in_force`` (None: ``step`` is the first step) to
-    an aircraft at ``altitude_m`` (geometric MSL), at an airport of ``n_candidates`` candidate runways; refused by
-    `Ungrammatical` (module docstring)."""
+    an aircraft ``height_m`` above the airport elevation E (D58), at an airport of ``n_candidates`` candidate runways;
+    refused by `Ungrammatical` (module docstring)."""
     step = [int(v) for v in step]
     if len(step) != len(COLUMNS):
         raise ValueError(f"a step has {len(COLUMNS)} words, got {len(step)}")
@@ -79,10 +80,10 @@ def apply(in_force: InForce | None, step: Sequence[int], altitude_m: float, word
                 raise Ungrammatical("runway word not permitted", "go-around while a go-around is in force")
             if in_force.altitude == words.altitude_no_level_off:
                 target = (None if step[ALTITUDE] in (UNCHANGED, words.altitude_no_level_off)
-                          else words.altitude_m(step[ALTITUDE]))
-                if target is None or target <= altitude_m + words.altitude_tolerance_m(step[ALTITUDE]):
+                          else words.altitude_level_m(step[ALTITUDE]))
+                if target is None or target <= height_m + words.altitude_tolerance_m(step[ALTITUDE]):
                     raise Ungrammatical("go-around without a level above",
-                                        f"\"no level-off\" in force at {altitude_m:.0f} m (rule 6)")
+                                        f"\"no level-off\" in force at {height_m:.0f} m above the airport (rule 6)")
             after = replace(after, go_around=True)
         elif runway != UNCHANGED:
             if not 0 <= runway < n_candidates:
@@ -95,30 +96,30 @@ def apply(in_force: InForce | None, step: Sequence[int], altitude_m: float, word
     if step[ALTITUDE] == words.altitude_no_level_off and after.go_around:
         raise Ungrammatical("no level-off during a go-around", "a runway word ends the go-around first (rule 5)")
     if step[ALTITUDE] != UNCHANGED or step[ANGLE] != UNCHANGED:
-        target, angle = words.altitude_m(after.altitude), after.angle
+        target, angle = words.altitude_level_m(after.altitude), after.angle
         if target is None:
             if not words.is_descent(angle):
                 raise Ungrammatical("no level-off without a descent", f"angle class {angle} in force (rule 4)")
         else:
             band = words.altitude_tolerance_m(after.altitude)
-            if target < altitude_m - band:
+            if target < height_m - band:
                 ok = words.is_descent(angle)
-            elif target > altitude_m + band:
+            elif target > height_m + band:
                 ok = angle == words.angle_climb
             else:
                 ok = True
             if not ok:
                 raise Ungrammatical("altitude and angle incompatible",
-                                    f"target {target:.0f} m at {altitude_m:.0f} m with angle class {angle}"
+                                    f"target {target:.0f} m at {height_m:.0f} m above the airport with angle class {angle}"
                                     + (" (level)" if angle == ANGLE_LEVEL else ""))
     return after
 
 
-def step_allowed(in_force: InForce | None, step: Sequence[int], altitude_m: float, words: Words,
+def step_allowed(in_force: InForce | None, step: Sequence[int], height_m: float, words: Words,
                  n_candidates: int) -> bool:
     """May ``step`` be said after ``in_force`` (`apply`)?"""
     try:
-        apply(in_force, step, altitude_m, words, n_candidates)
+        apply(in_force, step, height_m, words, n_candidates)
     except Ungrammatical:
         return False
     return True

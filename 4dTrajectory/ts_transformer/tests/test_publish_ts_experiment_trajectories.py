@@ -1382,7 +1382,7 @@ def _executor_replay(tmp_path: Path, intent_registry: Path, *, recorded: tuple[b
     spec_dir = tmp_path / "outputs" / "executor" / "v2_test"
     _write_json(spec_dir / "spec.json", {
         "schema": publisher.EXECUTOR_SPEC_SCHEMA, "sha256": _EXECUTOR_SHA,
-        "params": {"cycle_s": 1.0, "bank_rate_deg_s": 8.0, "word_clock": "track"},
+        "params": {"cycle_s": 1.0, "bank_rate_deg_s": 8.0},
         "vocabulary_spec_sha256": "b" * 64, "source": {},
     })
     groups = ("own dynamics", "stand-in dynamics", "stand-in dynamics")

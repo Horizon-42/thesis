@@ -57,9 +57,11 @@ def draw_flight(signals: FlightSignals, reading: Reading, geometry: AirportGeome
     vertical.plot(s / 1000, signals.altitude_m, color="0.75", lw=1, label="altitude (raw)")
     vertical.plot(s / 1000, smoothed.altitude_m, color="k", lw=1, label="altitude (smoothed)")
     angle_rows = list(np.nonzero(grid[:, ANGLE] != UNCHANGED)[0])
-    for word, stop, low, high in tube_bounds(reading.instructions, s, smoothed.altitude_m, spec, words):
-        vertical.fill_between(s[word.row: stop] / 1000, low, high, color="tab:orange", alpha=0.25, lw=0)
-        target = words.altitude_m(word.value)
+    elevation = geometry.elevation_m              # the tubes are on the height above E (D58), drawn in MSL
+    for word, stop, low, high in tube_bounds(reading.instructions, s, smoothed.altitude_m - elevation, spec, words):
+        vertical.fill_between(s[word.row: stop] / 1000, low + elevation, high + elevation, color="tab:orange",
+                              alpha=0.25, lw=0)
+        target = words.altitude_msl_m(word.value, elevation)
         label = "no level-off" if target is None else f"{target:.0f} m"
         vertical.annotate(label, (s[word.row] / 1000, smoothed.altitude_m[word.row]), fontsize=8, color="tab:orange",
                           xytext=(2, 6), textcoords="offset points")

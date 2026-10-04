@@ -728,7 +728,7 @@ def test_only_the_runners_reach_the_executor_for_now():
             assert rel.startswith("experiments/"), f"{rel} imports the executor"
 
 
-#: The modules of the executor's laws (design §5.4–§5.7): they fly words only, so none reaches the runway data — the
+#: The modules of the executor's laws (vocabulary §5.4–§5.7): they fly words only, so none reaches the runway data — the
 #: published glidepaths and decision altitudes the judge and the replay read (D3, D9).
 EXECUTOR_LAW_MODULES = ("lateral", "vertical", "speed", "executor", "single")
 

@@ -1,9 +1,9 @@
-"""Executor A13: the turn of the executor measured (design §14.2 A13) — how much of the lateral offset after a turn comes
+"""Executor A13: the turn of the executor measured (vocabulary §12.1 A13) — how much of the lateral offset after a turn comes
 from the heading law of the executor (§5.4), and how much from the words (the 5° grid, the lead). Information, before
 the formal artefact: the user decides from it if the heading law changes. NO CRITERION IS READ (D7).
 
 Who: the replay's flights (`replay.draw`: ``--split``, ``--per-airport`` of each airport in a seeded sample, on their own
-dynamics or a stand-in's), their open-loop sentences at Δ = 2 s, each flown from its first row on the TIME clock in
+dynamics or a stand-in's), their open-loop sentences at Δ = 2 s, each flown from its first row on its own rows in
 three ways (`WAYS`):
 
 (a) ``executor`` — the executor at the observed ground speed (`ObservedSpeedExecutor`; past the observed flight's end,
@@ -13,7 +13,7 @@ three ways (`WAYS`):
     the same airspeed — they differ by cos γ — and no speed word pulling it away inside a cycle);
 (b) ``executor_no_stopping`` — as (a), with the stopping-rate limit of the heading law lifted (`NoStoppingLateral`: the
     error over the time left of the lead, up to the vocabulary's largest turn rate);
-(c) ``exact_words`` — the exact model of the heading words (§11.9, `exact_positions`): each word's track reached the
+(c) ``exact_words`` — the exact model of the heading words (vocabulary §9.6, `exact_positions`): each word's track reached the
     lead after the word, linearly in time from the track there (a later word measured from the word before it, as the
     executor measures it; the first the shorter way from the observed track at row 0), at the observed ground speed,
     from the observed position at row 0.
@@ -28,7 +28,7 @@ THE READOUT. The turns are the observed flight's runs of 2 s rows that turn one 
 
 - ``change_m``: the change of the lateral offset from the observed path (e_y, the closed loop's matched point,
   `closed_loop.ObservedPath`, right of the observed track positive) from the row the turn starts at to `AFTER_S` after
-  the row it ends at (§14.2 A13 as written). It also holds what earlier turns left: before a turn the flown aircraft is
+  the row it ends at (vocabulary §12.1 A13 as written). It also holds what earlier turns left: before a turn the flown aircraft is
   already off to a side and ahead or behind, and a turn moves that gap from one axis to the other (a 90° turn makes an
   along-track lead a lateral offset).
 - ``own_m`` (Claude's reading, for the user's choice of which to read): the turn's own part — the change of the
@@ -70,7 +70,7 @@ from ts_transformer.autopilot.frame import GAMMA, SPEED, AirportCharts
 from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.autopilot.lateral import Lateral, Runways
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.autopilot.sentence import Sentences, TimeClock, WordsNow
+from ts_transformer.autopilot.sentence import Sentences, WordsNow
 from ts_transformer.autopilot.speed import Speed
 from ts_transformer.instructions.artefact import SPLITS
 from ts_transformer.instructions.labeller.lateral import turn_runs
@@ -83,12 +83,12 @@ from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 READOUT_SCHEMA = "ts-executor-turns-readout-v1"
-#: The three ways of §14.2 A13 and the control (module docstring).
+#: The three ways of vocabulary §12.1 A13 and the control (module docstring).
 WAYS = ("executor", "executor_no_stopping", "exact_words", "observed_track")
 #: The paired differences of the own outward part read over the turns measured in every way: the heading law (each
 #: executor way against the exact words), and the words (the exact words against the control).
 DIFFERENCES = (("executor", "exact_words"), ("executor_no_stopping", "exact_words"), ("exact_words", "observed_track"))
-#: How long after a turn's end its offset is read, s (§14.2 A13).
+#: How long after a turn's end its offset is read, s (vocabulary §12.1 A13).
 AFTER_S = 30.0
 #: Bands of the observed ground speed over a turn, m/s: [low, high).
 SPEED_BANDS_MPS = ((0.0, 70.0), (70.0, 85.0), (85.0, 100.0), (100.0, math.inf))
@@ -155,7 +155,7 @@ class ObservedSpeedExecutor(Executor):
 
 def fly_way(batch: replay.Batch, params: ExecutorParams, words: Words, *, stopping: bool,
             device: torch.device) -> Flown:
-    """Every flight's sentence flown on the time clock at the observed ground speed (ways (a), (b)), as `executor.fly`
+    """Every flight's sentence flown on its own rows at the observed ground speed (ways (a), (b)), as `executor.fly`
     flies it."""
     f64 = torch.float64
     sentences = Sentences([s.grid for s in batch.sentences], words, step_s=batch.row_interval_s, device=device)
@@ -169,12 +169,9 @@ def fly_way(batch: replay.Batch, params: ExecutorParams, words: Words, *, stoppi
         torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words, step_s=batch.row_interval_s,
         time_limit_s=torch.tensor(limits, dtype=f64, device=device), reserve_s=replay.reserve_s(batch),
         ground_speed_mps=speed, stopping=stopping)
-    clock = TimeClock(params.cycle_s)
     for cycle in range(executor.cycles):
-        sentence_s = clock.now(cycle, executor.now())
-        if cycle % executor.step_rows == 0:
-            step_start_s = sentence_s
-        executor.cycle(sentences.at(step_start_s), sentence_s)
+        sentence_s = torch.full_like(executor.now().e_m, cycle * params.cycle_s)
+        executor.cycle(sentences.at(sentence_s), sentence_s)
         if bool(executor.done.all()):
             break
     return executor.flown()

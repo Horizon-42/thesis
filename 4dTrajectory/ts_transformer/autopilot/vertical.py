@@ -1,4 +1,4 @@
-"""The vertical law (design §5.5; executor design §5.1, §5.4): the altitude word and the angle word, as a path-angle
+"""The vertical law (vocabulary §5.5; executor design §5.1, §5.4): the altitude word and the angle word, as a path-angle
 rate. No landing aim, no glidepath floor (D3, D9): "no level-off" flies its class's angle and the words decide the
 profile.
 
@@ -13,7 +13,8 @@ The inner loop (executor design §5.1) turns a reference path angle into the rat
 | level T + climb, G true                | ``+γ_GA`` (below), level-off as above                                  |
 | "no level-off" + descent k             | ``−γ_k``, no level-off                                                 |
 
-γ_k is the class's nominal angle (the spec's class centre, `Words.angle_deg`); γ_climb the climb class's nominal (the
+A level T is a height above the airport elevation E (D58): it is flown at T + E MSL, the aircraft's geometric MSL
+height h measured against it. γ_k is the class's nominal angle (the spec's class centre, `Words.angle_deg`); γ_climb the climb class's nominal (the
 spec's climb centre, D15, D28). Once a target is captured the flight holds it until a new altitude or angle word
 arrives, so the mode does not chatter at the capture height. The hold law's reference is kept inside the angles the
 words know to change height with — the steepest descent class's and the climb's (γ_GA while G is true). ``γ̇_max`` is
@@ -21,7 +22,7 @@ words know to change height with — the steepest descent class's and the climb'
 (``V γ_lo² / (2 ε)``, γ_lo the steepest class's lower edge, ε the narrowest level band of the grid,
 `Words.altitude_tolerances`).
 
-THE GO-AROUND ANGLE (D28, design §5.5). While G is true a climb word climbs at ``γ_GA = min(3°, max(1.885°, γ_T))``:
+THE GO-AROUND ANGLE (D28, vocabulary §5.5). While G is true a climb word climbs at ``γ_GA = min(3°, max(1.885°, γ_T))``:
 γ_T the steady climb angle at the thrust limit and the present airspeed, ``sin γ_T = (T_max − D) / (m g)``, D the drag
 of the present state at load factor 1 (`go_around_angle_rad`, the dynamics' own polar). 1.885° is the minimum gradient
 of a missed approach, 200 ft per NM (AIM 5-4-21 b); 3° the upper limit. Where γ_T is under 1.885° the reference is
@@ -85,18 +86,20 @@ class Vertical:
         """γ̇_max, rad/s, at airspeed ``speed_mps`` (module docstring)."""
         return self.params.path_rate_factor * speed_mps * self.steepest_low_rad ** 2 / (2.0 * self.tolerance_m)
 
-    def rate(self, state: Kinematics, altitude_m: torch.Tensor, no_level_off: torch.Tensor, angle_class: torch.Tensor,
-             angle_deg: torch.Tensor, issued: torch.Tensor, go_around: torch.Tensor, aero_params: torch.Tensor,
-             max_thrust_n: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+    def rate(self, state: Kinematics, level_m: torch.Tensor, elevation_m: torch.Tensor, no_level_off: torch.Tensor,
+             angle_class: torch.Tensor, angle_deg: torch.Tensor, issued: torch.Tensor, go_around: torch.Tensor,
+             aero_params: torch.Tensor, max_thrust_n: torch.Tensor
+             ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
         """The path-angle rate for this cycle, the rate the law wanted before its own limit ``γ̇_max``, and its modes;
+        ``level_m`` the level T in force above the airport elevation ``elevation_m`` (E, D58);
         ``issued`` is ``[B, 2]``, the steps the altitude and angle words in force were written at (a new word releases
         a captured target); ``go_around`` the go-around state G; ``aero_params`` / ``max_thrust_n`` the airframes (the
         go-around angle, `go_around_angle_rad`)."""
         descent = (angle_class >= ANGLE_LEVEL + 1) & (angle_class <= self.words.n_descent)
         if (no_level_off & ~descent).any():
-            raise ValueError("\"no level-off\" in force without a descent class (design §3.7, rule 4)")
+            raise ValueError("\"no level-off\" in force without a descent class (vocabulary §3.7, rule 4)")
         if (no_level_off & go_around).any():
-            raise ValueError("\"no level-off\" in force while a go-around is (design §3.7, rules 5 and 6)")
+            raise ValueError("\"no level-off\" in force while a go-around is (vocabulary §3.7, rules 5 and 6)")
         new_word = (issued != self.issued).any(dim=1)
         self.captured = self.captured & ~new_word
         self.issued = issued.clone()
@@ -108,7 +111,7 @@ class Vertical:
         climb_rad = torch.where(go_around, go_around_rad, torch.full_like(go_around_rad, self.climb_rad))
         nominal = torch.where(go_around & (angle_class == self.words.angle_climb), -go_around_rad,
                               torch.deg2rad(angle_deg))             # descending positive; a climb negative
-        height_to_go = state.height_m - altitude_m                  # NaN under "no level-off": never compared then
+        height_to_go = state.height_m - (level_m + elevation_m)     # NaN under "no level-off": never compared then
         level_off = state.speed_mps * nominal.square() / (2.0 * rate_max)
         moving = ~no_level_off & (angle_class != ANGLE_LEVEL) & ~self.captured
         reached = moving & (torch.where(nominal > 0.0, height_to_go, -height_to_go) <= level_off)

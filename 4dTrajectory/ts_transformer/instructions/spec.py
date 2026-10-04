@@ -1,7 +1,7 @@
 """The vocabulary specification: every grid, class, tolerance and reading parameter, and its sha.
 
 One frozen value. A sentence artefact carries the sha of the spec it was read with, and every
-reader refuses an artefact whose sha differs from its own spec (design §3 of the framework
+reader refuses an artefact whose sha differs from its own spec (vocabulary §3 of the framework
 document) — there is no compatibility path. ``READING_RULE`` names the labelling algorithm:
 changing what a field MEANS, or adding one, bumps it, so an old file is refused by name rather
 than read with a guessed default.
@@ -20,15 +20,16 @@ from typing import Any
 
 from geokit import FT_M, KT_MS, NM_M
 
-#: instruction-v4 (two-tier design `docs/two_tier/two_tier_design.md`, 2026-10-03): five columns (the runway column
-#: holds "go-around", D1, D10), heading words relative to the course of the runway in force (D8), altitude words on the
-#: 40-level grid of three segments (D22) with "no level-off", the go-around read from the track (D18, D19), "unspecified"
-#: from the capture row (D4).
-READING_RULE = "instruction-v4"
-SPEC_SCHEMA = "ts-instruction-spec-v5"
+#: instruction-v5 (`docs/two_tier/design/vocabulary.md` §3, §4): five columns (the runway column
+#: holds "go-around", D1, D10), heading words relative to the course of the runway in force (D8), altitude words on a
+#: 40-level grid of at most three uniform segments (D22) with "no level-off", as heights above the airport elevation E
+#: (D58; instruction-v4 read them as MSL), the go-around read from the track (D18, D19), "unspecified" from the capture
+#: row (D4).
+READING_RULE = "instruction-v5"
+SPEC_SCHEMA = "ts-instruction-spec-v6"
 
 #: FAA JO 7110.65BB 5-9-2 TBL 5-9-1: the largest final-approach interception angle 2 NM or
-#: more outside the approach gate — the judge's "lined up" (design §5.8).
+#: more outside the approach gate — the judge's "lined up" (vocabulary §5.8).
 ATC_MAX_INTERCEPT_DEG = 30.0
 #: 7110.65BB 5-7-1 b.4: no speed adjustment inside the FAF or 5 NM from the runway.
 ATC_NO_SPEED_ASSIGNMENT_DISTANCE_M = 5.0 * NM_M          # 9,260 m
@@ -48,7 +49,7 @@ class VocabularySpec:
     track_smoothing_s: float
     altitude_smoothing_s: float
     speed_smoothing_s: float
-    # --- heading: ground-track targets relative to the course of the runway in force (design §3.3, D8), read row by row
+    # --- heading: ground-track targets relative to the course of the runway in force (vocabulary §3.3, D8), read row by row
     #: Each row is labelled with the grid value nearest the track this long later, relative to the course, and the
     #: rows merged into one word while that stays the same grid cell: a word says where the track will be.
     heading_lead_s: float
@@ -65,9 +66,9 @@ class VocabularySpec:
     turn_bank_max_deg: float
     # --- approach
     #: A threshold is crossed LINED UP when the track is within this of the runway's course (ATC_MAX_INTERCEPT_DEG):
-    #: the judge's approach crossing, another runway's crossing and the decision altitude's point (design §5.8).
+    #: the judge's approach crossing, another runway's crossing and the decision altitude's point (vocabulary §5.8).
     lined_up_deg: float
-    #: The capture corridor (only the labeller's capture row reads it, design §2): its half width is
+    #: The capture corridor (only the labeller's capture row reads it, vocabulary §2): its half width is
     #: `corridor_half_width_m` at the threshold and widens by tan(`corridor_widening_deg`) per metre before it (an
     #: angular corridor, as LOC / LPV guidance is); the track stays within `corridor_course_tolerance_deg` of the course.
     corridor_half_width_m: float
@@ -81,7 +82,7 @@ class VocabularySpec:
     landing_cross_limit_m: float
     landing_max_height_m: float
     parallel_course_delta_deg: float
-    # --- altitude: geometric MSL targets on a grid of uniform segments (design §3.4, D22)
+    # --- altitude: heights above the airport elevation E on a grid of uniform segments (vocabulary §3.4, D22, D58)
     #: Segment i holds the levels from the previous segment's top (0 m for the first) plus its step, up to its top, in
     #: steps of ``altitude_segment_steps_m[i]``; the first segment also holds 0 m.
     altitude_segment_steps_m: tuple[float, ...]
@@ -117,10 +118,10 @@ class VocabularySpec:
     #: Transition envelope: the largest acceleration magnitude.
     speed_accel_max_mps2: float
     #: From the capture row on the speed is "unspecified" unless a hold of at least this long ends at or after the
-    #: capture row and at least `unspecified_distance_m` before the threshold (5-7-1 b.4 / d; design §4.5, D4).
+    #: capture row and at least `unspecified_distance_m` before the threshold (5-7-1 b.4 / d; vocabulary §4.5, D4).
     unspecified_plateau_s: float
     unspecified_distance_m: float
-    # --- go-around (design §4.6, D18; the rule of R40 `go_around_census`, on the sentence's rows)
+    # --- go-around (vocabulary §4.6, D18; the rule of R40 `go_around_census`, on the sentence's rows)
     #: A LOW PASS: a run of rows on a candidate's final — at most `go_around_max_cross_m` off its centreline, between
     #: `go_around_along_m` (before the threshold negative, past it positive) and at most `go_around_max_height_m`
     #: above it — with gaps of at most `go_around_max_gap_rows` rows, moving at least `go_around_min_progress_m` along
@@ -137,7 +138,7 @@ class VocabularySpec:
     go_around_min_climb_m: float
     #: A point past the threshold and at most this high is on the runway (a touch-and-go): not a go-around.
     go_around_on_runway_height_m: float
-    # --- the closed-loop reading (design §4.9, D32; `autopilot.closed_loop`)
+    # --- the closed-loop reading (vocabulary §4.9, D32; `autopilot.closed_loop`)
     #: A heading correction starts when the flown path is more than `closed_loop_lateral_m` off the observed one, an
     #: angle correction when it is more than `closed_loop_vertical_m` above or below it; each ends under half of it.
     closed_loop_lateral_m: float

@@ -180,7 +180,7 @@ The no-token executor's own axes — lookback L × segment Δ, `docs/experiments
 
 ### R10 · the instruction labeller: `instruction_signals` → `instruction_spec` → `instruction_labels` → `instruction_conformance`; `instruction_figures`
 
-2026-09-23; v4 since 2026-10-03 (`docs/two_tier/two_tier_design.md` §4, §14.2 A1–A3, A8; artefact contract C30).
+2026-09-23; v4 since 2026-10-03 (`docs/two_tier/design/vocabulary.md` §4, §12.1 A1–A3, A8, A20; artefact contract C30).
 `instruction_signals --out <new dir> [--airports …] [--workers N] [--limit N]` deals the eligible arrivals by the
 committed day split (C32; refused when the harvest's days are not its days), reads the train, select and val flights
 (process pool, 500 keys per chunk, spawn) — a test day's flight is only counted from the roster, with how many of
@@ -193,10 +193,14 @@ rows the labeller admits (`read.admit`; the refusals are counted in `measurement
 `spec.json` (`measure.SUGGESTED` + `MeasuredValues`, the git state) with `measurements.json`: each value it fits from
 data beside its rounder candidates and the fit each leaves (design D15) — the spec takes the row the user chose,
 `--candidate fitted|0.5|0.25|0.1` (required when measuring, refused with `--spec-from`; A18, D56: the formal artefact
-uses 0.25), recorded as `chosen_candidate` — the climb angles' distribution, the level
-words' rounding error under the 40-level grid and a uniform 30 m one (design §11.7). `instruction_labels --dir` reads
+uses 0.25), recorded as `chosen_candidate` — the climb angles' distribution, and the altitude grid (A20, D58): fitted
+on the level-offs above the airport elevation E (row 0 apart; at most three uniform segments from 0 to 5,400 m, break
+points on a 15 m grid, steps of 15–600 m, 40 levels, the least sum of squared rounding errors by exact dynamic
+programming, `measure.fit_altitude_grid`) beside the grid of D22, each with the rounding error of the level words
+(`grid_candidates`); the spec takes the row the user chose, `--grid fitted|d22` (required when measuring, as
+`--candidate`), recorded as `chosen_grid`. `instruction_labels --dir` reads
 train, select and val with that spec and writes the sentences, `labels.json`, the readout (with, at each go-around row,
-the words in force — design §11.6 — and whether its low pass lies past the threshold) and the labeller's reference
+the words in force — vocabulary §9.4 — and whether its low pass lies past the threshold) and the labeller's reference
 sample `conformance/` (C30). `instruction_conformance --dir` reads that reference again with the code on disk and,
 from a clean checkout, writes the `passed-<code>.json` that `instruction_figures`, `executor_spec`, `executor_replay`
 and `instruction_closed_loop` ask for. `instruction_figures --dir [--count 24] [--seed 1337]` draws a seeded half
@@ -204,13 +208,13 @@ straight-in / half vectored sample of VAL flights into `figures/` with an `index
 refuses to write over an existing file.
 
     python run_ts.py instruction_signals --out <artefact> --limit 80     # a smoke build; no --limit for the formal one
-    python run_ts.py instruction_spec --dir <artefact> --candidate 0.25
+    python run_ts.py instruction_spec --dir <artefact> --candidate 0.25 --grid <the user's choice>
     python run_ts.py instruction_labels --dir <artefact>
     python run_ts.py instruction_conformance --dir <artefact>
 
 ### R11 · `run_ts.py instruction_training_export` — the frontend's Training sets
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-23 (`aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`; the frontend side: `aeroviz-4d/docs/35-viewer-reference.md`
@@ -239,8 +243,9 @@ frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `t
 
 ### R12 · the executor: `executor_spec` → `executor_replay`
 
-2026-09-24; v4 since 2026-10-03 (`docs/two_tier/two_tier_design.md` §5, §14.2 A4–A6, A9; layout L31, contract C33).
-`executor_spec --instructions <artefact> --dir <new dir> --word-clock {time,distance,track}` (`ts-executor-spec-v7`)
+2026-09-24; v4 since 2026-10-03 (`docs/two_tier/design/vocabulary.md` §5, §12.1 A4–A6, A9, A19; layout L31, contract C33).
+`executor_spec --instructions <artefact> --dir <new dir>` (`ts-executor-spec-v8`; since A19 no `--word-clock`: a sentence is
+said on its own rows, D57)
 refuses a dirty tree, an existing directory and labeller code without a passed record against the artefact's reference;
 p = `ROLL_RATE_DEG_S` (5°/s, FAA Order 8260.3G App. E §4 ¶6.a, ICAO Doc 8168 Vol II); the executor makes no turn of its own,
 so it has no time constant of one. Nothing is measured from data: the turn rates, the bank limit, the speed word's rate
@@ -256,21 +261,21 @@ and passed record with it (R42).
 the row interval (design §4.8: the UTC multiples of Δ; a sentence the interval refuses is counted,
 `drawn.refused_on_interval`); each airport flown in chunks, judged, written as control-path prediction records
 (`records/<ICAO>/`) that `python -m evaluation` grades; the drawn flights' observed records are linked read-only and graded
-by the same evaluation code and paired by `flight_key`; `replay.json` (`ts-executor-replay-v6`) holds every flight's row
+by the same evaluation code and paired by `flight_key`; `replay.json` (`ts-executor-replay-v7`; since A19 no count of heading words told with one a word clock skipped) holds every flight's row
 and the table per group, airport, stratum and kind (with a go-around or not): the outcomes, the words inside their
 envelopes per column with the envelopes' widths, the decision-altitude checks, the evaluation where the observed passes.
 **No criterion is read** (design D7). With `--closed-loop` it flies the artefact's closed-loop sentences instead (C38,
 R50): each from its first predicted step on the time clock, refused for another executor's parameters, each flight
 required to fly its stored states again; each row adds the largest |e_y| and |e_h|, those on the rows without a correction
 (D34) and the correction words per column, and each cell of the table the flights that left the observed path by more
-than 300 m (`LEFT_THE_PATH_M`, the reading of design §11.11) and the correction words per sentence. Every replay's time
+than 300 m (`LEFT_THE_PATH_M`, the reading of vocabulary §9.7) and the correction words per sentence. Every replay's time
 limit is the remaining observed time from the sentence's first row × 1.5 (`replay.time_limits_s`), not its rows. Select and val run from a clean tree; **the val replay waits for the user's
 go-ahead**. Every write refuses an existing directory. Tests: `tests/test_autopilot.py`, `tests/test_closed_loop.py` (every
 write into `tmp_path`). `executor_sensitivity` is archived (`archive/two_tier_v3_2026_10/experiments/`).
 
 ### R13 · publishing the executor and the prior: `executor_training_export`, `prior_training_export`, `publish_ts_experiment_trajectories.py --executor-replay`
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-24 (`aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §2.6, §4.6; the frontend side: `aeroviz-4d/docs/35-viewer-reference.md`
@@ -427,7 +432,7 @@ failure. Writes `compare.json` (`ts-heading-reading-compare-v1`), `compare.md`, 
 
 ### R15 · the prior: `prior_train` → `prior_select` (prior design §7–§9, step 1)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-24, the third version. `prior_train --instructions <artefact split by day> --variant full|no-context|unordered
@@ -451,7 +456,7 @@ artefact, rosters, training settings but the seed, smoke limit, commit — and t
 
 ### R16 · `run_ts.py prior_scene_census` — the scene prior's step 0 (prior design §9)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-24. `prior_scene_census --instructions <artefact split by day> --out <new dir>` reads the TRAIN days only:
@@ -468,7 +473,7 @@ overflights are in no scene. Records each tracks roster's sha256. Writes `census
 
 ### R17 · `run_ts.py prior_free_generation` — the prior speaks, the executor flies (prior design §9.1)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-25. `prior_free_generation --prior <chosen run> --instructions <artefact> --executor <executor spec dir> --split
@@ -530,7 +535,7 @@ recorded `augment_seed`, `augmented_left_out` and each flight's augmentation.
 
 ### R20 · `run_ts.py prior_procedure_check` — the procedure's altitude masks on labelled data (post-training design §3.6)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-25 (the edge), 2026-09-26 (the rules before the join). `prior_procedure_check --instructions <artefact> --executor
@@ -550,7 +555,7 @@ over an existing directory.
 
 ### R21 · `run_ts.py prior_augmented_reward` — post-training stage 2 (post-training design §3–§5)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-26. `prior_augmented_reward --prior <the first stage's kept round> --base <the data-only step-1 run>
@@ -591,7 +596,7 @@ would be read under other masks than the round; so too a round 0 kept).
 
 ### R22 · `run_ts.py prior_glidepath_diagnosis` — why the labelled replays sink below the glidepath lower edge (prior readouts §12)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-26. `prior_glidepath_diagnosis --instructions <artefact> --executor <executor spec dir> [--split train]
@@ -622,7 +627,7 @@ directory; development splits only.
 
 ### R19 · `run_ts.py prior_landing_reward` — the landing reward (prior design §9.3)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-25. `prior_landing_reward --prior <the step-1 run> --instructions <artefact> --executor
@@ -654,7 +659,7 @@ ratio (v2: advantage × the NLL, no ratio — the adopted landing model's run).
 
 ### R23 · `run_ts.py heading_lead_ablation` — the heading lead, the bank limit and the roll rate moved over one train sample (two-tier progress report 2026-09-27, P0 item 1)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-27. `heading_lead_ablation --instructions <formal artefact> --executor <formal executor spec> --reference-replay
@@ -680,7 +685,7 @@ checked before a cell is flown and before its result is written.
 
 ### R24 · `run_ts.py traffic_census` — the observed traffic of the training days judged as the multi-aircraft closed loop will be (multi-aircraft design §6.4 step 4)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-27. `traffic_census --instructions <sentence artefact> --out <new dir> [--airports ...]`. Every arrival of the
@@ -699,7 +704,7 @@ into a NEW directory; about two minutes. Formal: `outputs/POOLED/traffic/census_
 
 ### R25 · `run_ts.py traffic_separation_examples` — recorded examples of the losses the census finds (readout figures)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-27. `traffic_separation_examples --census <census dir> --instructions <the artefact it read> --out <dir>`. For
@@ -712,7 +717,7 @@ IFR episode summarised at its first step. Refuses a census of another schema. Ou
 
 ### R26 · `run_ts.py traffic_labelled` — every labelled flight flies its labelled words together on the training days' scenes, judged as the closed loop judges (multi-aircraft design §6.4 step 5)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-28. `traffic_labelled --instructions <sentence artefact> --executor <executor spec> --out <new dir> [--airports ...]
@@ -743,7 +748,7 @@ fails — the executor flies with autograd on and the compiled step recompiles p
 
 ### R27 · `run_ts.py traffic_masks` — the closed loop's two separation masks measured on the training days' labelled words (multi-aircraft design §6.4 step 6)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-28. `traffic_masks --instructions <sentence artefact> --out <new dir> [--airports ...]`. The masks live in
@@ -767,7 +772,7 @@ crossing. Pass line (design §3.4 step 0): ≤ 1 % of the labelled speed words a
 
 ### R28 · `run_ts.py traffic_interaction` — multi-aircraft M1: does the single-aircraft base prior's word choice depend on traffic it cannot see (design §6.1, prior design §8)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-28. `traffic_interaction --prior <prior run> --instructions <its artefact> --out <new dir> [--device]`. The prior
@@ -783,7 +788,7 @@ most, KMSY and KRDU about none.
 
 ### R29 · `run_ts.py traffic_prior_train` — multi-aircraft M2: the scene prior "scene", base's recipe on scene samples with edge features (design §6.1, §6.5)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-28. `traffic_prior_train --variant full --instructions <artefact> --out <new dir> [--device] [--limit N]
@@ -817,7 +822,7 @@ flight's asked rows), so the val NLL per step reads against base's 0.2643.
 
 ### R30 · `run_ts.py traffic_scene_readout` — multi-aircraft M2's readout: what the scene prior gains from seeing traffic (design §6.1, §7)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-28. `traffic_scene_readout --scene <scene prior> --base <base prior> --instructions <artefact> --out <new dir>
@@ -843,28 +848,28 @@ unused. Readout `docs/two_tier/readouts/2026-09-28_m2_scene_prior.zh.md` §2, §
 
 ### R31 · `run_ts.py traffic_free_generation` — multi-aircraft M3: the post-training's start speaking to one aircraft of each scene (design §6.1, §6.6 step 4)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 **ARCHIVED 2026-10-02** (`archive/one_commanded_scene_2026_10/`, README there): one aircraft commanded is a window with one commanded aircraft — R34 with `commanded` `one` in its configuration. The entry's text: `archive/one_commanded_scene_2026_10/docs/reference/entries.md`.
 
 ### R32 · `run_ts.py traffic_reward` — multi-aircraft M4: the traffic post-training (design §6.2, §6.6 step 6)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 **ARCHIVED 2026-10-02** (`archive/one_commanded_scene_2026_10/`, README there): R37 `--commanded one`; the round protocol lives on in `experiments/traffic_rounds.py`. The entry's text: `archive/one_commanded_scene_2026_10/docs/reference/entries.md`.
 
 ### R33 · `run_ts.py traffic_reward_readout` — multi-aircraft M4's readout, round by round (design §7)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 **ARCHIVED 2026-10-02** (`archive/one_commanded_scene_2026_10/`, README there): R39 reads R37's runs. The entry's text: `archive/one_commanded_scene_2026_10/docs/reference/entries.md`.
 
 ### R34 · `run_ts.py traffic_window_generation` — multi-aircraft M3's second pass: the post-training's start commanding every aircraft of a window (design §6.6 step 7 item 4)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-30. `traffic_window_generation --config <config.json> --out <new dir> [--workers 6] [--device cuda]` (since
@@ -963,7 +968,7 @@ R41 compares only readouts probed alike.
 
 ### R35 · `run_ts.py prior_generation_records` — a free-generation readout's sentences as evaluation records: ADE / FDE and the evaluation's pass rate (2026-09-30)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 A `prior_free_generation` readout (`generation.json` schema `ts-prior-free-generation-v5`, `sentences.npz`) stores the
@@ -1022,7 +1027,7 @@ records, or already current.
 
 ### R36 · `run_ts.py window_training_export` — multi-aircraft windows for the frontend's Training module (Training module §2.9)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-30. `window_training_export --prior <augmented, or an M4 round> --instructions <artefact> --executor <spec>
@@ -1054,7 +1059,7 @@ of every aircraft commanded (`readout_block` checks `commanded`).
 
 ### R37 · `run_ts.py traffic_window_reward` — multi-aircraft M4's second pass: the traffic post-training in windows (design §6.6 step 7 item 7, the 7.6 plan)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-09-30. `traffic_window_reward --prior <single-aircraft prior (augmented) or traffic prior (an M4 round)> --base <base>
@@ -1099,7 +1104,7 @@ optimiser.pt, readout.json, …}`, `history.json`, `choice.json` (`ts-traffic-wi
 
 ### R38 · `run_ts.py prior_generation_grading` — a generation-records run graded beyond its pass rate: the landed runway, and FDE's time and place (2026-09-30)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 Reads a whole `prior_generation_records` run (R35: `records.json` + its record directories; a partial run is refused) and
@@ -1128,7 +1133,7 @@ airport × kind.
 
 ### R39 · `run_ts.py traffic_window_reward_readout` — an M4-in-windows run (R37) read round by round, while it runs or after it ends
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 Reads only the run's own files: each finished round's `readout.json` (a round is finished once it is written — the runner
@@ -1154,7 +1159,7 @@ used every run is a runner).
 
 ### R40 · `run_ts.py go_around_census` — how long a real go-around takes to land again, on the training days (2026-10-01)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 Multi-aircraft step 8 item 7 (design §6.6): the time limit for a sentence that says go-around is set from this. Reads every
@@ -1212,7 +1217,7 @@ comparison, not a parameter.
 
 ### R41 · `run_ts.py traffic_window_compare` — two models' window readouts (R34) of the same windows, aircraft by aircraft
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-10-01 (the user: the kept M4-in-windows round against its start on the val windows); renamed from
@@ -1249,10 +1254,11 @@ labelled train flights an airport — the replay's draw (`replay.draw`, seed 133
 their labelled words by the code that measured the spec (refused otherwise, and from a dirty checkout): every cycle's states,
 commands, wanted rates, sentence times, limits and modes, the done cycle, and each flight's verdict (`judge`) into
 `<spec>/conformance/reference.{json,npz}`, with each flight's input digest (start state, airframe, frame, thrust, approach
-speed, time limit, words, runway, the runways' geometry and vertical paths, the observed rows the word clock reads), the
+speed, time limit, words, runway, the runways' geometry and vertical paths, the airport elevation E; reference
+`ts-executor-conformance-reference-v3` since A19/A20), the
 bounds and the checker's logic hash; written atomically, once. **The check**: the same flights rebuilt (inputs that moved
 are refused by name — the data changed, not the executor) and flown in every way of `conformance.MODES` — `batch`
-(`replay.fly_batch`), `staggered` (one executor, each flight from a seeded start in 0–30 steps, its words on its own clock),
+(`replay.fly_batch`), `staggered` (one executor, each flight from a seeded start in 0–30 steps, its words on its own rows),
 `single` (`autopilot.single`, one flight at a time, driven as `fly` drives a batch) — each flight compared with its reference
 up to its done cycle: states ≤ `STATE_BOUND_M` (1e-6 m) horizontally and vertically, every other float ≤ `ROUNDOFF` (1e-6;
 ψ round the circle; NaN only against NaN), every limit, mode, done cycle, outcome, end row and word verdict equal; a way
@@ -1265,7 +1271,7 @@ that flies fewer flights fails. All pass → `passed-<executor_source_sha256[:12
 
 ### R43 · `run_ts.py traffic_window_rewind` — can a loss of separation be undone by rewinding one aircraft? (multi-aircraft design §6.6 step 7.7)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-10-01 (the user: measure before choosing the next post-training method; nothing is trained). `traffic_window_rewind
@@ -1307,7 +1313,7 @@ cannot be spoken again by later code, whose batches and streams move) and `windo
 
 ### R44 · `run_ts.py traffic_window_conformance` — does a window readout (R34) read the same under today's code? (multi-aircraft design §6.6 step 9.9.2)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-10-03 (the user: code that read two readouts is shown to behave the same by what it reads, never by an equal commit;
@@ -1334,7 +1340,7 @@ seen; a row field added or dropped fails it; another torch / CUDA / GPU may move
 
 ### R45 · `run_ts.py traffic_window_probe_readout` — does an M4-in-windows run (R37) move the go-around word? (multi-aircraft design §6.6 step 9.4)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-10-03 (the user, after 9.4's small run said no go-around itself: "量一下" — a count of 0 cannot tell whether the word's
@@ -1363,7 +1369,7 @@ others and all, and how many rose against round 0).
 
 ### R48 · `run_ts.py instruction_word_frames` — how airport-specific the labelled heading and level words are, absolute vs the runway's frame (two-tier design §11.2–§11.3)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-10-03 (the user: "把 §11 的脚本存为正式程序" — the one-off counts behind the next design's runway-relative heading
@@ -1384,7 +1390,7 @@ the heading grid beside the corridor's course tolerance (`grid_offsets`). A read
 
 ### R49 · `run_ts.py instruction_final_approach` — where the sentences put the clearance and "descend to land", and how close the flights fly to the published glidepath after capture (two-tier design §11.4)
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, design §14.2 A0): this entry is the record of
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/`, vocabulary §12.1 A0): this entry is the record of
 that runner; the v4 code does not have it.
 
 2026-10-03 (same request as R48). `instruction_final_approach --instructions <artefact> [--split train] --out <new dir>`,
@@ -1432,12 +1438,12 @@ them (D42, A10), at the nearest Δ row (D45, A12); a sentence has the flown rows
     python run_ts.py executor_replay --closed-loop --split train --per-airport 30 --row-interval-s 2 \
         --instructions <artefact> --executor <spec> --out <new dir>
 
-### R51 · `run_ts.py executor_turns` — the turn of the executor measured: how much of the offset after a turn is the heading law's, how much the words' (design §14.2 A13)
+### R51 · `run_ts.py executor_turns` — the turn of the executor measured: how much of the offset after a turn is the heading law's, how much the words' (vocabulary §12.1 A13)
 
-2026-10-04 (design §5.4, §4.3, §11.9, §14.2 A13; `experiments/executor_turns.py`). `executor_turns --instructions
+2026-10-04 (vocabulary §5.4, §4.3, §9.6, §12.1 A13; `experiments/executor_turns.py`). `executor_turns --instructions
 <artefact> --executor <spec dir> --split train [--per-airport N] [--seed 1337] [--chunk 500] --out <new dir>` (another
 split from a clean tree): the replay's flights (`replay.draw`), their open-loop sentences at Δ = 2 s, flown from the first
-row on the time clock in three ways — `executor` (the executor at the observed ground speed: the airspeed set at each
+row, said on their own rows, in three ways — `executor` (the executor at the observed ground speed: the airspeed set at each
 cycle's start so that the ground speed is the observed one, and moved within the cycle to the observed one at its end in
 place of the speed law), `executor_no_stopping` (the same, without the stopping-rate limit of §5.4) and `exact_words` (each
 heading word's track reached 4 s after the word, linearly, at the observed ground speed, from the observed position at row

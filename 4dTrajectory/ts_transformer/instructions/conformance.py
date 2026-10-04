@@ -1,4 +1,4 @@
-"""The labeller checked by what it reads, not by its source (design §9.2 #2, D21; the executor's own rule, C33).
+"""The labeller checked by what it reads, not by its source (vocabulary §7.2 #2, D21; the executor's own rule, C33).
 
 When `instruction_labels` writes an artefact it also writes ``conformance/``: a REFERENCE — a fixed sample of the train
 split's flights (`draw`: a seeded permutation, `PER_AIRPORT` labelled flights and `REFUSED_PER_AIRPORT` refused ones of
@@ -37,7 +37,8 @@ from ts_transformer.instructions.signals import FlightSignals, pack_signals, unp
 from ts_transformer.instructions.words import Words
 from ts_transformer.io_utils import file_sha256, logic_sha256, utc_now, write_json_atomic
 
-REFERENCE_SCHEMA = "ts-instruction-conformance-reference-v2"
+#: v3 (A20, D58): the sentences' altitude words are levels above the airport elevation E.
+REFERENCE_SCHEMA = "ts-instruction-conformance-reference-v3"
 PASSED_SCHEMA = "ts-instruction-conformance-passed-v1"
 DIRECTORY = "conformance"
 #: The reference's flights: the train split, every airport alike (A3: 250 labelled train flights, seed 1337, at five
@@ -88,7 +89,7 @@ def sentences_of(reading: Reading, flight: FlightSignals, geometry: Any,
     for interval in INTERVALS_S:
         try:
             grids[f"{interval:g}"] = on_utc_grid(reading.words, flight.entry_time_utc, interval, step_s,
-                                                 reading.held_altitude_m, words, courses)[1]
+                                                 reading.held_height_m, words, courses)[1]
         except Refused as refusal:
             refusals[f"{interval:g}"] = refusal.reason
             grids[f"{interval:g}"] = np.zeros((0, len(reading.words[0])), dtype=reading.words.dtype)

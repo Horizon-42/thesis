@@ -1,4 +1,4 @@
-"""Heading words and the capture of the final (design §3.3, §4.3).
+"""Heading words and the capture of the final (vocabulary §3.3, §4.3).
 
 Every row of the sentence is labelled with the grid heading — RELATIVE to the course of the runway in force R at that
 row (D8) — nearest the smoothed track `heading_lead_s` later (the last row's track once that lies past the end), and
@@ -10,7 +10,7 @@ word. The words run from row 0 to the sentence's last row — they describe the 
 a new word reads the new course — and it is said also when its class is the class in force, its track being another
 (D48).
 
-The CAPTURE ROW (`capture_row`, design §2) of an approach (D26) is the first row from which the track stays in the
+The CAPTURE ROW (`capture_row`, vocabulary §2) of an approach (D26) is the first row from which the track stays in the
 capture corridor of its runway to the end of the approach. It uses later rows, so it is never an input; only the
 labeller reads it: "unspecified" speed starts there (D4), and the readout's stratum counts the turns before the landing
 approach's. An approach that ends at a go-around row outside the corridor has none; the landing approach must end in it.

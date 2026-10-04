@@ -16,7 +16,7 @@
 
 A reader checks the spec's sha against the sentences it opens and refuses a mismatch — the
 sentence files carry the sha they were read with. The LABELLER is not named by its source here
-(design §9.2, D21): which code wrote the sentences is recorded as information, and a runner that
+(vocabulary §7.2, D21): which code wrote the sentences is recorded as information, and a runner that
 labels, or reads sentences for a replay, asks the conformance for a passed record of today's code.
 The arrival manifests' sha256s are recorded as information too; a flight rebuilt from the harvest
 is compared row by row with its stored signals (`autopilot.flights.require_same_flight`). Nothing
@@ -41,7 +41,8 @@ from ts_transformer.io_utils import utc_now, write_bytes_atomic, write_json_atom
 
 #: v3 (instruction-v4): five columns; per sentence the runway, the capture row, the "unspecified" row and the go-around
 #: rows (each go-around's row and the row the runway is said again); no clearance row and no labeller source hash.
-SENTENCES_SCHEMA = "ts-instruction-sentences-v3"
+#: v4 (instruction-v5, D58): the altitude words are levels above the airport elevation E, not MSL.
+SENTENCES_SCHEMA = "ts-instruction-sentences-v4"
 CANDIDATES_SCHEMA = "ts-instruction-candidates-v2"
 #: The splits an artefact holds: the development operating days (the internal selection set is its
 #: own split, so no reader carves it out of train by another rule).
@@ -206,7 +207,7 @@ def load_sentences(directory: Path, split: str, spec: VocabularySpec) -> dict[st
     return data
 
 
-#: The closed-loop sentences (design §4.9, D32; written by `experiments/instruction_closed_loop.py` from
+#: The closed-loop sentences (vocabulary §4.9, D32; written by `experiments/instruction_closed_loop.py` from
 #: `autopilot.closed_loop`): per split and row interval, the words said from the first predicted step, which are
 #: corrections, the states on every row (observed before that step, flown from it) and the errors against the observed
 #: path.
@@ -214,7 +215,9 @@ def load_sentences(directory: Path, split: str, spec: VocabularySpec) -> dict[st
 #: sentence's last row).
 #: v3 (A12, D44–D46): the observed words from the 2 s reading, `observed_row` a 2 s row, `matched_row` the matched
 #: point's observed time; `vertical_m` NaN past the end of the observed path.
-CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v4"
+#: v4 (A15, D51): the states on every 2 s row, the Δ rows marked (`on_interval`).
+#: v5 (A20, D58): the altitude words are levels above the airport elevation E (the states stay MSL).
+CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v5"
 #: Every array a closed-loop file holds.
 CLOSED_LOOP_FIELDS = {"schema", "spec_sha256", "executor_params_sha256", "row_interval_s", "start_row", "signal_index",
                       "first_row", "offsets", "state_offsets", "words", "correction", "states", "on_interval",

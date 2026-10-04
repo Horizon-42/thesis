@@ -1,4 +1,4 @@
-"""The instruction labeller on synthetic flights whose sentence is known (design docs/two_tier/two_tier_design.md §4)."""
+"""The instruction labeller on synthetic flights whose sentence is known (design docs/two_tier/design/vocabulary.md §4)."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from ts_transformer.instructions.words import (
 )
 from ts_transformer.tests.support import (
     INSTRUCTION_STEP_S, PARALLEL_SPACING_M, fly_legs, instruction_airport, instruction_flight,
-    instruction_spec as spec, parallel_airport,
+    instruction_spec as spec, parallel_airport, raised_airport,
 )
 
 
@@ -57,7 +57,7 @@ def test_downwind_base_final_reads_heading_words_relative_to_the_course_to_the_e
     assert headings[-1][0] > reading.capture_row - 5                  # the turn onto the final is the model's words
     assert columns(reading, RUNWAY) == [(0, 0)] and reading.go_around_rows == []
     altitude = columns(reading, ALTITUDE)
-    assert words.altitude_m(altitude[0][1]) == 1080.0 and altitude[-1][1] == words.altitude_no_level_off
+    assert words.altitude_level_m(altitude[0][1]) == 1020.0 and altitude[-1][1] == words.altitude_no_level_off  # 1,080 m MSL
     angle = columns(reading, ANGLE)
     assert angle[0] == (0, ANGLE_LEVEL) and words.angle_bounds(angle[-1][1]) == (2.6, 3.7)
     assert all(h["inside"] == h["rows"] for h in reading.checks["heading"])     # the observed track, by construction
@@ -172,7 +172,7 @@ def test_level_descend_level_descend_reads_targets_angles_and_no_level_off():
                                np.full(120, 1500.0 - 80 * 150.0 * np.tan(np.radians(2.1)))))
     altitude = np.concatenate((altitude, altitude[-1] - np.arange(1, 101) * 150.0 * np.tan(np.radians(3.0))))
     reading = read_vertical(distance, altitude, one, words, [])
-    targets = [(i.row, words.altitude_m(i.value)) for i in reading.instructions if i.column == ALTITUDE]
+    targets = [(i.row, words.altitude_level_m(i.value)) for i in reading.instructions if i.column == ALTITUDE]
     checks = tube_checks(reading.instructions, distance, altitude, one, words)
     assert targets[0] == (0, 1500.0)                            # segment 2: 1,380 + 120 k
     assert targets[1][1] == 1080.0                              # the level at 1,060 m, nearest 60 m level
@@ -191,7 +191,7 @@ def test_a_level_between_two_grid_levels_is_found_and_named_by_the_nearest():
     distance = np.arange(80) * 150.0
     altitude = np.concatenate((np.full(40, 630.0), 630.0 - np.arange(1, 41) * 150.0 * np.tan(np.radians(3.0))))
     pieces = vertical_pieces(distance, altitude, one, words)
-    assert pieces[0].kind == LEVEL and words.altitude_m(pieces[0].target_index) == 600.0 and pieces[0].stop >= 39
+    assert pieces[0].kind == LEVEL and words.altitude_level_m(pieces[0].target_index) == 600.0 and pieces[0].stop >= 39
     reading = read_vertical(distance, altitude, one, words, [])
     assert [(i.column, i.row, i.value) for i in reading.instructions][:2] == [
         (ALTITUDE, 0, words.altitude_index(600.0)), (ANGLE, 0, ANGLE_LEVEL)]
@@ -415,6 +415,60 @@ def test_the_runway_mask_follows_the_table():
     assert grammar.runway_words_allowed(_state(runway=1, go_around=True), 3).tolist() == [True, True, True, False]
 
 
+# ---- the altitude words above the airport elevation (D58)
+def test_two_airports_of_different_elevation_say_one_word_for_one_height_above_it():
+    """D58: the same flight 128 m higher at an airport 128 m higher (E = 188 m, the highest threshold of the training
+    airports) reads the same sentence — a go-around included, so grammar rules 3 and 6 are read on the height above E;
+    read at the MSL heights instead, the same words break them."""
+    from ts_transformer.instructions.labeller.sentence import check_grammar
+
+    one, words = spec(), Words(spec())
+    low = instruction_airport()
+    high = raised_airport(low, 188.0)
+    rise = high.elevation_m - low.elevation_m
+    e, n, altitude, track, speed = fly_legs(GO_AROUND_LEGS, 90.0, 900.0, -400.0, 0.0)
+    first = read_flight(instruction_flight(e, n, altitude, track, speed), low, one, words)
+    second = read_flight(instruction_flight(e, n, altitude + rise, track, speed), high, one, words)
+    assert second.go_around_rows == first.go_around_rows and len(first.go_around_rows) == 1
+    assert np.array_equal(second.words, first.words)
+    assert second.held_height_m == pytest.approx(first.held_height_m, abs=1e-6)
+    assert words.altitude_level_m(int(second.words[0, ALTITUDE])) == 840.0          # 1,028 m MSL at E = 188 m
+    with pytest.raises(Refused, match="altitude and angle incompatible"):
+        check_grammar(second.words, second.held_height_m + high.elevation_m, words, 1)
+
+
+#: `GO_AROUND_LEGS` with the climb in two steps: 240 m, a level of 24 s, then 400 m — the first level after the
+#: go-around is 240 m above its lowest point, between 150 m and 150 m + E at an airport of E = 188 m.
+GO_AROUND_STEP_LEGS = [*GO_AROUND_LEGS[:2], (20, 0, 70, 6.0), (12, 0, 70, 0), (18, 0, 70, 400.0 / 36.0),
+                       *GO_AROUND_LEGS[4:]]
+
+
+def test_the_runway_word_after_a_go_around_reads_the_climb_above_the_airport_elevation():
+    """D19, D58: the runway word that ends a go-around is said at the first level at least 150 m above the go-around's
+    lowest point, both heights above E — at E = 188 m the level 240 m up is it (read on MSL against heights above E,
+    it would not be: 240 < 150 + 188)."""
+    one, words = spec(), Words(spec())
+    high = raised_airport(instruction_airport(), 188.0)
+    e, n, altitude, track, speed = fly_legs(GO_AROUND_STEP_LEGS, 90.0, 1028.0, -400.0, 0.0)
+    reading = read_flight(instruction_flight(e, n, altitude, track, speed), high, one, words)
+    (go,), (again,) = reading.go_around_rows, reading.runway_again_rows
+    assert go < again <= go + 25                                     # the 24 s level after the first 240 m
+
+
+def test_rule_6_reads_the_height_it_is_given():
+    """§3.7 rule 6 with D58: a go-around while "no level-off" is in force says a level more than its ε above the
+    aircraft — 300 m against 200 m above E passes; the same rows read 188 m higher (MSL at E = 188 m) do not."""
+    from ts_transformer.instructions.labeller.sentence import check_grammar
+
+    words = Words(spec())
+    grid = np.full((2, 5), UNCHANGED, dtype=np.int64)
+    grid[0] = [0, 0, words.altitude_no_level_off, 3, words.speed_unspecified]
+    grid[1, RUNWAY], grid[1, ALTITUDE], grid[1, ANGLE] = RUNWAY_GO_AROUND, words.altitude_index(300.0), words.angle_climb
+    check_grammar(grid, np.array([250.0, 200.0]), words, 1)
+    with pytest.raises(Refused, match="go-around without a level above"):
+        check_grammar(grid, np.array([250.0, 200.0]) + 188.0, words, 1)
+
+
 # ---- go-arounds (§4.6, D18, D19)
 def test_a_go_around_and_a_second_approach():
     """D18, D26: "go-around" in the row of the climb's words — its level and "climb" — the first row of the climb after
@@ -427,7 +481,8 @@ def test_a_go_around_and_a_second_approach():
     (go,), (again,) = reading.go_around_rows, reading.runway_again_rows
     assert abs(go - 119) <= 2                                        # the climb starts at row 119, 960 m out
     assert columns(reading, RUNWAY) == [(0, 0), (go, RUNWAY_GO_AROUND), (again, 0)]
-    assert words.altitude_m(int(reading.words[go, ALTITUDE])) == 900.0 and reading.words[go, ANGLE] == words.angle_climb
+    assert words.altitude_level_m(int(reading.words[go, ALTITUDE])) == 840.0 and reading.words[go, ANGLE] == words.angle_climb
+    # 900 m MSL: 840 m above E
     held = in_force(reading.words)
     assert held[go - 1, ALTITUDE] == words.altitude_no_level_off and held[go - 1, SPEED] == words.speed_unspecified
     assert 158 <= again <= 164                                       # the level-off after the climb (row 159)
@@ -576,7 +631,7 @@ def test_at_the_data_step_the_sentence_comes_back():
     words = Words(spec())
     flight = instruction_flight(*fly_legs(GO_AROUND_LEGS, 90.0, 900.0, -400.0, 0.0))
     reading = read_flight(flight, instruction_airport(), spec(), words)
-    assert np.array_equal(on_interval(reading.words, 0, 2.0, 2.0, reading.held_altitude_m, words, [90.0]), reading.words)
+    assert np.array_equal(on_interval(reading.words, 0, 2.0, 2.0, reading.held_height_m, words, [90.0]), reading.words)
 
 
 def _grid(rows):

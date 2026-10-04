@@ -1,4 +1,4 @@
-"""The labelling runner and the labeller's conformance (design §9.2 #2, D21; `instructions.conformance`): the reference
+"""The labelling runner and the labeller's conformance (vocabulary §7.2 #2, D21; `instructions.conformance`): the reference
 written with the sentences, read again by today's code, the passed record that later runners ask for."""
 
 from __future__ import annotations

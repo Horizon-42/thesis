@@ -1,5 +1,5 @@
 """Instruction labeller, step 3: read every flight of every split (train, select, val) into its sentence
-with the spec of step 2, and write the sentences and the readout (vocabulary design §7).
+with the spec of step 2, and write the sentences and the readout (vocabulary §4.7).
 
 Writes ``sentences_{train,select,val}.npz``, ``labels.json``, ``readout.json`` and ``readout.md``
 into the signals directory (never over an existing file), and the labeller's conformance reference

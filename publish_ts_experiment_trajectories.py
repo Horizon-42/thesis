@@ -1521,8 +1521,8 @@ def run_publication(
 #: `PREDICTOR`, `HORIZON`; `autopilot.spec.EXECUTOR_SPEC_SCHEMA`) — not imported: those modules pull in torch and
 #: the executor, and this orchestrator stays importable without them. `test_the_executor_names_mirror_the_runners`
 #: pins them.
-EXECUTOR_REPLAY_SCHEMA = "ts-executor-replay-v6"
-EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v7"
+EXECUTOR_REPLAY_SCHEMA = "ts-executor-replay-v7"
+EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v8"
 EXECUTOR_PREDICTOR = "executor"
 EXECUTOR_HORIZON = "sentence"
 #: The executor's own publication record: not a checkpoint's (`PUBLICATION_SCHEMA`), so the checkpoint refresh and
@@ -1656,8 +1656,8 @@ class ExecutorPublicationPlan:
     @cached_property
     def display_name(self) -> str:
         flights = " + ".join(f"{count} on {group}" for group, count in sorted(self.replay.recorded(self.airport).items()))
-        return (f"executor · spec {self.replay.token} · word clock {self.replay.spec['params']['word_clock']} · the "
-                f"truth sentence flown from row 0 ({flights}), {self.replay.run_id}")
+        return (f"executor · spec {self.replay.token} · the truth sentence flown from row 0 ({flights}), "
+                f"{self.replay.run_id}")
 
     @property
     def label(self) -> str:

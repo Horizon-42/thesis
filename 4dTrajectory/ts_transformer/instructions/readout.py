@@ -1,4 +1,4 @@
-"""The labeller's readout (design §9.1): completeness, envelopes with their widths, sentence length, go-arounds and
+"""The labeller's readout (vocabulary §7.1): completeness, envelopes with their widths, sentence length, go-arounds and
 class usage — per split, per airport, per stratum.
 
 The stratum is read off the reading: VECTORED when the track's turns before the capture — each run of rows turning
@@ -28,7 +28,7 @@ def stratum(reading: Reading) -> str:
 
 
 def go_around_in_force(reading: Reading, words: Words) -> list[dict[str, bool]]:
-    """At each go-around row (D26, design §11.6): whether "no level-off" and "unspecified" are in force (said before the
+    """At each go-around row (D26, vocabulary §9.4): whether "no level-off" and "unspecified" are in force (said before the
     row), whether the approach it ends had a capture row, whether the next approach is to another runway, and whether
     the go-around's lowest point lies past the threshold (where the capture corridor has ended)."""
     held = in_force(reading.words)
@@ -64,7 +64,7 @@ def flight_record(reading: Reading, words: Words) -> dict[str, Any]:
         "altitude_words": len(vertical), "altitude_contained": sum(1 for v in vertical if v["contained"]),
         "altitude_rows": sum(v["rows"] for v in vertical), "altitude_rows_inside": sum(v["inside"] for v in vertical),
         "tube_width_end_m": [v["tube_width_end_m"] for v in vertical],
-        "no_level_off_tube_width_end_m": [v["tube_width_end_m"] for v in vertical if v["target_m"] is None],
+        "no_level_off_tube_width_end_m": [v["tube_width_end_m"] for v in vertical if v["level_m"] is None],
         "speed_words": len(speed), "speed_contained": sum(1 for v in speed if v["contained"]),
         "speed_transition_ok": sum(1 for v in speed if v["transition_ok"]),
         "speed_cut_before_arrival": sum(1 for v in speed if v["cut_before_arrival"]),

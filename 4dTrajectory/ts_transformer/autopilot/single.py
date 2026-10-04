@@ -26,7 +26,6 @@ vertical path) gets a non-finite state, as the torch rollout writes NaN, and is 
 
 from __future__ import annotations
 
-import bisect
 import math
 from dataclasses import dataclass
 from typing import Sequence
@@ -45,7 +44,7 @@ from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.inverse import BANK_MAX_RAD, LOAD_FACTOR_MAX, LOAD_FACTOR_MIN
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
-from ts_transformer.autopilot.sentence import ROW_ROUNDING, TRACK_MAX_ROWS_PER_CYCLE, TRACK_WINDOW_S, _filled
+from ts_transformer.autopilot.sentence import ROW_ROUNDING, _filled
 from ts_transformer.autopilot.speed import speed_change_mps2
 from ts_transformer.autopilot.vertical import GO_AROUND_MAX_RAD, GO_AROUND_MIN_RAD
 from ts_transformer.instructions.airport import AirportGeometry, landing_cross_limit_m
@@ -108,11 +107,12 @@ class Kin:
 
 @dataclass(frozen=True)
 class Chart:
-    """The airport frame the words read positions in (`frame.AirportCharts`, one flight)."""
+    """The airport frame the words read positions in, and its elevation E (`frame.AirportCharts`, one flight)."""
 
     lat0_deg: float
     lon0_deg: float
     m_per_deg_lon: float
+    elevation_m: float
 
     def read(self, state: Sequence[float]) -> Kin:
         lat, lon, alt, speed, psi, gamma, mass = state
@@ -246,7 +246,7 @@ class Plant:
             return (math.nan,) * 6 + (mass,)
 
 
-# ---- the words said, and the clocks they are said on (`sentence`)
+# ---- the words said (`sentence`)
 
 @dataclass(frozen=True)
 class WordsNow:
@@ -255,7 +255,7 @@ class WordsNow:
     runway: int
     go_around: bool
     heading_rel_deg: float
-    altitude_m: float
+    level_m: float
     no_level_off: bool
     angle_class: int
     angle_deg: float
@@ -272,8 +272,8 @@ class Sentence:
         self.value, self.issued, self.runway, self.rows = value.tolist(), issued.tolist(), runway.tolist(), len(grid)
         self.step_s = step_s
         self.heading = [words.heading_relative_deg(i) for i in range(words.n_heading)]
-        self.altitude = [words.altitude_m(i) if i != words.altitude_no_level_off else math.nan
-                         for i in range(words.altitude_no_level_off + 1)]
+        self.level = [words.altitude_level_m(i) if i != words.altitude_no_level_off else math.nan
+                      for i in range(words.altitude_no_level_off + 1)]
         self.angle = [words.angle_deg(i) for i in range(words.n_descent + 2)]
         self.speed = [words.speed_mps(i) if i != words.speed_unspecified else math.nan
                       for i in range(words.speed_unspecified + 1)]
@@ -283,75 +283,10 @@ class Sentence:
         row = min(max(math.floor(heard_s / self.step_s + ROW_ROUNDING), 0), self.rows - 1)
         value = self.value[row]
         return WordsNow(runway=self.runway[row], go_around=value[RUNWAY] == RUNWAY_GO_AROUND,
-                        heading_rel_deg=self.heading[value[HEADING]], altitude_m=self.altitude[value[ALTITUDE]],
+                        heading_rel_deg=self.heading[value[HEADING]], level_m=self.level[value[ALTITUDE]],
                         no_level_off=value[ALTITUDE] == self.no_level_off, angle_class=value[ANGLE],
                         angle_deg=self.angle[value[ANGLE]], speed_mps=self.speed[value[SPEED]],
                         unspecified=value[SPEED] == self.unspecified, issued_step=tuple(self.issued[row]))
-
-
-class TimeClock:
-    """`sentence.TimeClock`: a cycle's sentence time is the time flown."""
-
-    def __init__(self, cycle_s: float) -> None:
-        self.cycle_s = cycle_s
-
-    def now(self, cycle: int, state: Kin) -> float:
-        return cycle * self.cycle_s
-
-
-class DistanceClock:
-    """`sentence.DistanceClock`, one flight: the observed aircraft's time at the executor's own path length."""
-
-    def __init__(self, e_m: np.ndarray, n_m: np.ndarray, step_s: float, cycle_s: float) -> None:
-        steps = np.concatenate(([0.0], np.cumsum(np.hypot(np.diff(e_m), np.diff(n_m)))))
-        self.path, self.rows, self.step_s, self.cycle_s = steps.tolist(), len(e_m), step_s, cycle_s
-        self.flown = 0.0
-        self.last: tuple[float, float] | None = None
-        self.beyond_s = 0.0
-
-    def now(self, cycle: int, state: Kin) -> float:
-        if self.last is not None:
-            self.flown = self.flown + math.hypot(state.e_m - self.last[0], state.n_m - self.last[1])
-        self.last = (state.e_m, state.n_m)
-        index = min(max(bisect.bisect_right(self.path, self.flown) - 1, 0), len(self.path) - 2)
-        low, high = self.path[index], self.path[index + 1]
-        time = (index + _clamp(_divide(self.flown - low, high - low), 0.0, 1.0)) * self.step_s
-        end = (self.rows - 1) * self.step_s
-        if time >= end:
-            time = end + self.beyond_s
-            self.beyond_s = self.beyond_s + self.cycle_s
-        return time
-
-
-class TrackClock:
-    """`sentence.TrackClock`, one flight: the observed track's nearest point ahead, never back, a row a cycle at most."""
-
-    def __init__(self, e_m: np.ndarray, n_m: np.ndarray, step_s: float, cycle_s: float) -> None:
-        self.e, self.n, self.rows = [float(v) for v in e_m], [float(v) for v in n_m], len(e_m)
-        self.step_s, self.cycle_s = step_s, cycle_s
-        self.window = int(round(TRACK_WINDOW_S / step_s))
-        self.row = 0
-        self.beyond_s = 0.0
-
-    def now(self, cycle: int, state: Kin) -> float:
-        nearest, best = self.row, math.inf
-        for ahead in range(self.window + 1):
-            index = min(self.row + ahead, self.rows - 1)
-            distance = math.hypot(self.e[index] - state.e_m, self.n[index] - state.n_m)
-            if distance < best:                          # the first of equal distances, as argmin
-                nearest, best = index, distance
-        if self.row == self.rows - 1:
-            self.beyond_s = self.beyond_s + self.cycle_s
-        self.row = min(nearest, self.row + TRACK_MAX_ROWS_PER_CYCLE)
-        return self.row * self.step_s + self.beyond_s
-
-
-def word_clock(params: ExecutorParams, e_m: np.ndarray, n_m: np.ndarray, step_s: float
-               ) -> TimeClock | DistanceClock | TrackClock:
-    """The spec's clock for a truth sentence whose observed rows are ``e_m`` / ``n_m`` (`replay.word_clock`)."""
-    if params.word_clock == "time":
-        return TimeClock(params.cycle_s)
-    return (DistanceClock if params.word_clock == "distance" else TrackClock)(e_m, n_m, step_s, params.cycle_s)
 
 
 # ---- the laws (`lateral`, `vertical`, `speed`, `inverse`)
@@ -407,13 +342,13 @@ class Vertical:
         self.captured = False
         self.issued = (-1, -1)
 
-    def rate(self, state: Kin, force: WordsNow, aero: Sequence[float], max_thrust_n: float
+    def rate(self, state: Kin, force: WordsNow, elevation_m: float, aero: Sequence[float], max_thrust_n: float
              ) -> tuple[float, float, dict[str, bool]]:
         no_level_off, angle_class, go_around = force.no_level_off, force.angle_class, force.go_around
         if no_level_off and not (ANGLE_LEVEL + 1 <= angle_class <= self.words.n_descent):
-            raise ValueError("\"no level-off\" in force without a descent class (design §3.7, rule 4)")
+            raise ValueError("\"no level-off\" in force without a descent class (vocabulary §3.7, rule 4)")
         if no_level_off and go_around:
-            raise ValueError("\"no level-off\" in force while a go-around is (design §3.7, rules 5 and 6)")
+            raise ValueError("\"no level-off\" in force while a go-around is (vocabulary §3.7, rules 5 and 6)")
         issued = (force.issued_step[ALTITUDE], force.issued_step[ANGLE])
         new_word = issued != self.issued
         self.captured = self.captured and not new_word
@@ -427,7 +362,7 @@ class Vertical:
         go_around_rad = _clamp(math.asin(sine), GO_AROUND_MIN_RAD, GO_AROUND_MAX_RAD)
         climb_rad = go_around_rad if go_around else self.climb_rad
         nominal = -go_around_rad if go_around and angle_class == self.words.angle_climb else math.radians(force.angle_deg)
-        height_to_go = state.height_m - force.altitude_m
+        height_to_go = state.height_m - (force.level_m + elevation_m)
         level_off = speed * (nominal * nominal) / (2.0 * rate_max)
         moving = not no_level_off and angle_class != ANGLE_LEVEL and not self.captured
         reached = moving and ((height_to_go if nominal > 0.0 else -height_to_go) <= level_off)
@@ -498,7 +433,7 @@ class SingleExecutor:
             raise ValueError(f"the single-flight executor flies one flight, got {len(inputs.initial_state)}")
         self.params, self.words, self.time_limit_s = params, words, time_limit_s
         self.most_s = time_limit_s + reserve_s
-        self.chart = Chart(geometry.frame.lat0, geometry.frame.lon0, geometry.frame.m_per_deg_lon)
+        self.chart = Chart(geometry.frame.lat0, geometry.frame.lon0, geometry.frame.m_per_deg_lon, geometry.elevation_m)
         self.runways = runways_of(geometry, spec)
         self.aero = tuple(inputs.aero_params[0].tolist())
         self.max_thrust_n = float(inputs.max_thrust_n[0])
@@ -539,7 +474,8 @@ class SingleExecutor:
         runway = self.runways[force.runway]
         before, right, _off_course = relative(now, runway)
         straight = math.hypot(before, right)
-        gamma_rate, gamma_wanted, vertical_modes = self.vertical.rate(now, force, self.aero, self.max_thrust_n)
+        gamma_rate, gamma_wanted, vertical_modes = self.vertical.rate(now, force, self.chart.elevation_m, self.aero,
+                                                                      self.max_thrust_n)
         # `inverse.attitude`: the bank and load factor for the wanted rates, limits 1 and 2
         speed, gamma = now.speed_mps, now.gamma_rad
         cos_gamma = math.cos(gamma)

@@ -1,4 +1,4 @@
-"""The five columns of a sentence step, and each column's class index ↔ physical target (design §3).
+"""The five columns of a sentence step, and each column's class index ↔ physical target (vocabulary §3).
 
 Every column has a value "unchanged" (`UNCHANGED`, stored as -1): no new instruction of that
 kind at this step. The runway column is a POINTER into the airport's candidate list
@@ -6,7 +6,9 @@ kind at this step. The runway column is a POINTER into the airport's candidate l
 other value is "go-around" (`RUNWAY_GO_AROUND`, stored as -2: "abandon this approach", D10), which
 does not change the runway in force. The heading column's classes are RELATIVE to the course of the
 runway in force (D8): class k is the track ``course + k · step``, so a heading word is turned into
-a track only with a course (`Words.heading_track_deg`).
+a track only with a course (`Words.heading_track_deg`). The altitude column's levels are heights
+above the airport elevation E (D58, the published field elevation, `AirportGeometry.elevation_m`):
+a level is turned into a geometric MSL height only with E (`Words.altitude_msl_m`).
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from ts_transformer.instructions.spec import VocabularySpec
 COLUMNS = ("runway", "heading", "altitude", "angle", "speed")
 RUNWAY, HEADING, ALTITUDE, ANGLE, SPEED = range(len(COLUMNS))
 UNCHANGED = -1
-#: The runway column's "go-around" (design §3.2): every other value of the column is a candidate's index.
+#: The runway column's "go-around" (vocabulary §3.2): every other value of the column is a candidate's index.
 RUNWAY_GO_AROUND = -2
 
 ANGLE_LEVEL = 0
@@ -33,17 +35,14 @@ class Words:
     def __init__(self, spec: VocabularySpec) -> None:
         self.spec = spec
         self.n_heading = int(round(360.0 / spec.heading_step_deg))
-        levels = [0.0]
-        for step, bottom, top in zip(spec.altitude_segment_steps_m, (0.0, *spec.altitude_segment_tops_m[:-1]),
-                                     spec.altitude_segment_tops_m):
-            levels += [bottom + step * k for k in range(1, int(round((top - bottom) / step)) + 1)]
+        levels = grid_levels(spec.altitude_segment_steps_m, spec.altitude_segment_tops_m)
         gaps = np.diff(levels)
-        #: Every level's height (MSL m) and its band's half width: half the larger gap to its neighbours — the largest
+        #: Every level's height (m above the airport elevation E, D58) and its band's half width: half the larger gap to its neighbours — the largest
         #: rounding error a height said as it can carry — plus the fit residual. Inside a segment that is half the
         #: segment's step + 10 m (§3.4: 40 / 70 / 235 m); a segment's TOP level takes the heights up to half the next
         #: segment's step above it, so its band is that one's (1,260 m: 70 m; 2,700 m: 235 m) — Claude's reading of
         #: §3.4, whose "half its segment's step" would refuse every level held at 1,301–1,320 m or 2,771–2,925 m.
-        self.altitude_levels = np.array(levels)
+        self.altitude_levels = levels
         self.altitude_tolerances = np.maximum(np.concatenate((gaps[:1], gaps)), np.concatenate((gaps, gaps[-1:]))) / 2 \
             + spec.altitude_fit_tolerance_m
         self.n_altitude_levels = len(levels)
@@ -66,7 +65,7 @@ class Words:
             "speed": self.n_speed_levels + 1,
         }
 
-    # ---- heading: relative to the course of the runway in force, degrees, clockwise (design §3.3)
+    # ---- heading: relative to the course of the runway in force, degrees, clockwise (vocabulary §3.3)
     def heading_index(self, relative_deg: float) -> int:
         """The class of a relative heading (track minus the course)."""
         return int(round((relative_deg % 360.0) / self.spec.heading_step_deg)) % self.n_heading
@@ -85,23 +84,29 @@ class Words:
         """The compass track in [0, 360) a class says with a runway of course ``course_deg`` in force."""
         return (course_deg + self.heading_relative_deg(index)) % 360.0
 
-    # ---- altitude: geometric MSL metres, the levels of the spec's segments (design §3.4, D22)
-    def altitude_index(self, altitude_m: float) -> int:
-        """The level nearest ``altitude_m`` (the lower one at a tie); outside the grid by more than half its outer
+    # ---- altitude: heights above the airport elevation E, the levels of the spec's segments (vocabulary §3.4, D22, D58)
+    def altitude_index(self, height_m: float) -> int:
+        """The level nearest ``height_m`` above E (the lower one at a tie); outside the grid by more than half its outer
         segment's step raises."""
         steps, top = self.spec.altitude_segment_steps_m, self.spec.altitude_segment_tops_m[-1]
-        if not -steps[0] / 2 <= altitude_m < top + steps[-1] / 2:
-            raise ValueError(f"altitude target {altitude_m:.0f} m outside 0–{top:.0f} m")
-        return int(np.argmin(np.abs(self.altitude_levels - altitude_m)))
+        if not -steps[0] / 2 <= height_m < top + steps[-1] / 2:
+            raise ValueError(f"altitude target {height_m:.0f} m above the airport outside 0–{top:.0f} m")
+        return int(np.argmin(np.abs(self.altitude_levels - height_m)))
 
-    def altitude_m(self, index: int) -> float | None:
-        """The target plane, or ``None`` for "no level-off"."""
+    def altitude_level_m(self, index: int) -> float | None:
+        """The level T above E, or ``None`` for "no level-off"."""
         self._require(index, self.n_altitude_levels + 1, "altitude")
         return None if index == self.altitude_no_level_off else float(self.altitude_levels[index])
 
+    def altitude_msl_m(self, index: int, elevation_m: float) -> float | None:
+        """The geometric MSL height T + E a level says at an airport of elevation ``elevation_m``, or ``None`` for "no
+        level-off"."""
+        level = self.altitude_level_m(index)
+        return None if level is None else level + elevation_m
+
     def altitude_tolerance_m(self, index: int) -> float:
         """The half width of an altitude word's band and tube margin (`altitude_tolerances`). "No level-off" has no
-        level: it takes the lowest level's, where the final descent flies (Claude's choice, design §3.4 sets ε per level
+        level: it takes the lowest level's, where the final descent flies (Claude's choice, vocabulary §3.4 sets ε per level
         only)."""
         self._require(index, self.n_altitude_levels + 1, "altitude")
         return float(self.altitude_tolerances[0 if index == self.altitude_no_level_off else index])
@@ -158,6 +163,15 @@ class Words:
     def _require(index: int, count: int, column: str) -> None:
         if not 0 <= index < count:
             raise ValueError(f"{column} class {index} outside 0..{count - 1}")
+
+
+def grid_levels(steps_m, tops_m) -> np.ndarray:
+    """The levels of an altitude grid of uniform segments (`VocabularySpec.altitude_segment_steps_m` / ``_tops_m``):
+    0 m, then each segment's levels from the previous top (0 m for the first) in its own steps, up to its top."""
+    levels = [0.0]
+    for step, bottom, top in zip(steps_m, (0.0, *tops_m[:-1]), tops_m):
+        levels += [bottom + step * k for k in range(1, int(round((top - bottom) / step)) + 1)]
+    return np.array(levels)
 
 
 def wrap180(angle_deg):

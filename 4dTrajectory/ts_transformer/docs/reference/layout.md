@@ -471,7 +471,7 @@ entry ⇒ the publication is blocked** before any predict/CZML work; `--refresh-
 
 ### L30 · `instructions/`: the second layer's language, below every model
 
-2026-09-23; v4 since 2026-10-03 (`docs/two_tier/two_tier_design.md` §3, §4). The instruction vocabulary (`spec`, `words`:
+2026-09-23; v4 since 2026-10-03 (`docs/two_tier/design/vocabulary.md` §3, §4). The instruction vocabulary (`spec`, `words`:
 five columns, "go-around" in the runway column), the grammar (`grammar.apply`: the rules of design §3.7 in ONE function,
 which the labeller checks every row with and a speaker masks with), the per-step signals in the airport frame (`signals`,
 `airport`), the envelopes (`envelope`, the one implementation the labeller and the executor's judge share), the piecewise
@@ -488,10 +488,10 @@ for a reader that must not import the executor (the prior, stage B). The fronten
 
 ### L31 · `autopilot/`: the executor, flying the words through the shared dynamics
 
-2026-09-24; v4 since 2026-10-03 (`docs/two_tier/two_tier_design.md` §5). `frame` (the dynamics' geodetic rows read the way
+2026-09-24; v4 since 2026-10-03 (`docs/two_tier/design/vocabulary.md` §5). `frame` (the dynamics' geodetic rows read the way
 the words read a flight — airport frame, compass track, geometric MSL height; a positive bank turns LEFT), `sentence` (the
 word in force per column per control cycle, the runway in force R and the go-around state G; a word takes effect when it
-is said; the word clocks), `flights` (a labelled flight rebuilt from the recorded manifest with `build_series`, refused
+is said; a sentence said on its own rows, D57), `flights` (a labelled flight rebuilt from the recorded manifest with `build_series`, refused
 unless it reproduces the stored signals row for row; its physical context is
 `outputs.dynamics.context.rollout_context` at the row it is flown from), `plant` (one cycle of the control path's
 point-mass scaled-chart dynamics through `rollout_control_endpoints` — that backend runs no command hooks, so the executor
@@ -504,7 +504,7 @@ outcomes and their order, the decision-altitude check with the evaluation's boun
 candidate's published TCH, glidepath angle and DA, read only by the judge), `replay` (who is flown — own dynamics or a
 stand-in's; a flight without aircraft dynamics is counted, never flown, C31 — drawing, a sentence on a row interval,
 flying and reading a batch), `conformance` (the spec's reference tracks and their check, C33), `closed_loop` (the
-labeller's closed-loop reading and its conformance, C38) and `spec` (`ts-executor-spec-v7`, C33). It may import the data
+labeller's closed-loop reading and its conformance, C38) and `spec` (`ts-executor-spec-v8`, C33). It may import the data
 plane (`data.dataset`), the shared dynamics and geometry, and `instructions/`; never `training`, `experiments`, `cli`,
 `backbone`, `inference`, `manoeuvre`, `outputs.control`, `outputs.guidance`, `outputs.state`
 (`tests/test_architecture.py::test_the_executor_flies_through_the_shared_dynamics_only`); only the runners consume it
@@ -512,7 +512,7 @@ plane (`data.dataset`), the shared dynamics and geometry, and `instructions/`; n
 
 ### L32 · `prior/`: the prior, saying the words
 
-**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/prior/`, design §14.2 A0): this entry is the
+**Archived 2026-10-03 with instruction-v3** (`archive/two_tier_v3_2026_10/prior/`, vocabulary §12.1 A0): this entry is the
 record of that package; stage B rebuilds `prior/` from design §6 (§14.3).
 
 2026-09-24 (`docs/two_tier/prior_design.zh.md`, `docs/two_tier/post_training_design.zh.md`). Stage 5 of the two-tier
