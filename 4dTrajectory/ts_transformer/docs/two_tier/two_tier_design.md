@@ -67,6 +67,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D39 | The prior's design is chosen by leave-one-airport-out cross-validation (5 folds: train on four airports, read the fifth). Two variants: `full` (§6.1) and `constants` (`full` and, in each candidate vector, the runway's length and threshold elevation). `constants` is chosen only if it is better by more than twice the seed scale (§6.3) | Decided | User, 2026-10-04 |
 | D40 | Hyperparameters: the values of `instruction-v3` are the start (configuration A). The same folds compare four configurations (A, a smaller model, a larger model, a stronger regularization); the one with the fewest parameters within twice the seed scale of the best is chosen (§6.3) | Decided | User, 2026-10-04 |
 | D41 | The design runs at an airport that is not in the training data: the number of candidates is not fixed; every input has a fixed physical scale, never a statistic of the training data; each fold of D39 flies the full closed loop at its held-out airport. The altitude grid limits this to airports whose approach levels lie in its 60 m segment (§6.4) | Decided | User, 2026-10-04 |
+| D42 | The closed-loop reading says each observed word at the place where the observed aircraft heard it, not at the time: at the first Δ row at which the matched point of the flown aircraft has reached that place. The correction words do not change. The flight ends when the executor is done or at the time limit of the replay (§4.9) | Decided | User, 2026-10-04 |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -87,7 +88,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 ### 0.4 Plan
 
 1. Stage A (§14.2): write the vocabulary, the labeller, the identities, the executor, the judge and the replay on the
-   branch `dev-two-tier-v4`, milestones A0–A9, each with tests and a code review. Another agent does this.
+   branch `dev-two-tier-v4`, milestones A0–A10, each with tests and a code review. Another agent does this.
 2. Claude checks the result of stage A against this document (§14.6).
 3. The user chooses the fitted values of D15. Then the formal artefact is built, and the
    readings of D34 are made at each row interval of the ablation (D11, D25: 2, 4, 8 s). The user compares them (D7).
@@ -143,6 +144,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | Closed-loop reading | The labeller's second pass: it flies the sentence with the executor and adds correction words (D32, §4.9) |
 | Flown states | The states of the executor in the closed-loop reading, on the rows of the sentence. The prior trains on them (§6.1) |
 | Correction word | A word that the closed-loop reading adds to bring the flown path back to the observed path (§4.9) |
+| Matched point | The point of the observed path nearest to the flown position, searched forward from the matched point of the row before (§4.9). The closed-loop reading compares the flown state with the observed path there, and says the observed words there (D42) |
 | First predicted step | The row 16 s after row 0 (`N_LOOK` = 8 rows at 2 s). The prior observes the rows before it and says nothing there |
 | Executor cycle | 1 s. The executor hears the words at the start of each 2 s row |
 | Labeller | The program that reads a sentence from an observed track (`instructions/labeller/`) |
@@ -572,11 +574,15 @@ also gives.
 2. The aircraft flies with its own dynamics or with a stand-in's, by the rule of the replay (`autopilot/replay.py`
    `group_of`). A flight that the replay does not fly (no identified type, no aircraft dynamics, or no published approach
    speed) gives no training sentence. The artefact counts these flights by reason.
-3. At each row, the labeller compares the flown state with the observed path, then decides the correction words of the
-   row. The executor hears the observed words and the correction words of the row together.
+3. At each row, the labeller finds the matched point, then decides the words of the row: the observed words that the
+   matched point has reached ("When the observed words are said", below) and the correction words. The executor hears
+   them together.
 4. The closed-loop reading runs on the sentence of each row interval (§4.8). The corrections are on the Δ rows; the
    corrections and the flown states belong to that Δ.
 5. The observed path includes a go-around and the next approach (D26). The comparison continues while G is true.
+6. The flight ends when the executor is done (a crossing, the ground, the dynamics) or at the time limit of the replay
+   (§5.8). The closed-loop sentence has one row for each Δ row of the flight: its length is the flown time, not the
+   observed time.
 
 **The comparison.** The matched point is the point of the observed path nearest to the flown position. The search
 starts at the matched point of the row before and goes forward, so that a path that crosses itself does not jump. At
@@ -589,10 +595,33 @@ the matched point:
 The reference is the matched point, not the observed point at the same time. Thus a difference along the path (a
 difference of time) is not corrected, and the speed words stay the observed ones.
 
+**When the observed words are said (D42).** The observed time of the matched point is the time at which the observed
+aircraft was at that point. At each Δ row, the labeller says the observed words of each Δ row of the open-loop sentence
+whose time is not later than the observed time of the matched point, and that it did not say before. When the matched
+point passes more than one of these rows in one Δ row, the labeller says the last observed word of each column. When
+the flown aircraft is behind the observed aircraft, the observed words wait. The first predicted step says every
+column (rule 1): the observed words in force there.
+
+Why:
+
+- A word gives a target, not a rate. A speed word does not tell how fast to change the speed, and the executor changes
+  the speed at its own fixed rate (§5.6). Thus the flown aircraft moves ahead of the observed aircraft along the path,
+  or falls behind it. The comparison does not correct this difference.
+- A turn word must come where the observed aircraft turned. A word said at the observed time comes where the flown
+  aircraft is at that time: 2 km ahead along the path before a turn of 90° gives a lateral offset of 2 km after the
+  turn. One correction class removes such an offset too slowly (§11.11).
+- The controller gives a turn at a place, not at a time. The prior learns from the flown states when to say a word, so
+  the words must agree with the flown states.
+- A go-around word said at the observed time can come after the flown aircraft has crossed the threshold. Said at the
+  place, it comes where the observed aircraft went around.
+
+Thus the flown time to the threshold is not the observed time. The flown states keep the observed path, not the
+observed time (D36).
+
 **Lateral correction.**
 
-1. When |e_y| > Y (the lateral tolerance), and the observed heading word does not change in this row, the labeller
-   says the heading class one step (5°) from the observed word in force, toward the observed path.
+1. When |e_y| > Y (the lateral tolerance), and the row says no new observed heading word, the labeller says the
+   heading class one step (5°) from the observed word in force, toward the observed path.
 2. When |e_y| < Y / 2, or e_y changes its sign, the labeller says the observed word in force again.
 3. A new observed heading word ends a correction. The labeller says the observed word, and the comparison continues.
 
@@ -1085,6 +1114,7 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | Time limit | remaining observed time × 1.5 | Fixed choice |
 | Closed-loop reading: tolerances | lateral Y = 30 m, vertical H = 15 m; a correction ends below half the tolerance or at a change of sign | D32 |
 | Closed-loop reading: correction | heading: one class (5°) toward the observed path; angle: the next descent class | D32 |
+| Closed-loop reading: observed words | at the first Δ row at which the matched point reaches the place where the observed aircraft heard the word | D42 |
 
 ---
 
@@ -1248,6 +1278,34 @@ at Δ = 2 s, 150 train flights on their own dynamics). One-off scripts, 2026-10-
 - Three passes on the same sentences against one (multi-aircraft M4, second run against the first): the KL to the base
   model grew 1.4 times faster (0.0137 against 0.0098 for each round), and the rewards of rounds 1–7 did not differ
   from the first run's, sentence by sentence (`readouts/2026-09-30_m4_passes.zh.md`).
+
+### 11.11 Closed-loop sentences with the observed words at the observed time
+
+From the smoke build of A9 (`dev-two-tier-v4` at `751d0ec8`, `smoke_v4/data/`): closed-loop sentences at Δ = 2 s, each
+observed word said at its observed time, replayed; the select split, the 395 flights on their own dynamics.
+One-off scripts, 2026-10-04; information, not a criterion (D7).
+
+- Landed: straight-in 222 of 229 (96.9 %), vectored 122 of 166 (73.5 %). The vectored failures: `timeout` 17,
+  `crossed_off_runway` 13, `unstable_at_minimums` 6, `crossed_too_high` 5, `crossed_other_runway` 3.
+- 41 of the 44 vectored failures leave the observed path laterally by more than 300 m (largest offset: median 1.55 km).
+  At the row before, the flown aircraft is ahead of or behind the observed aircraft of the same time, along the
+  observed track, by 1.3 km (median; p90 3.6 km; more than 500 m in 88 %).
+- 76 of the 122 landed vectored flights also leave the path by more than 300 m (along the track before it: median
+  0.6 km); they come back before the threshold. Heading correction words: 12.4 for each sentence (train, Δ = 2 s).
+- The straight-in flights are also ahead or behind (median of the largest difference 0.7 km), but they do not turn:
+  13 of the 222 landed straight-in flights leave the path by more than 300 m.
+- KMSY `AAL2354_11_a9942e_20260826T153443Z` hears 70 m/s at 62 s. The observed aircraft slows at 0.36 m/s², the
+  executor at 0.25 m/s². At the start of a turn of approximately 100° the flown aircraft is 1.8 km ahead; after the
+  turn it is 2.5 km to the side (`timeout`).
+- KSTL `AAL1010_30R_aae316_20260722T024358Z` hears 105 m/s at the first predicted step. The observed aircraft takes
+  approximately 290 s from 146 m/s to 105 m/s, the executor approximately 160 s. The flown aircraft is 4 km behind; after
+  the turns it is 11 km to the side (`timeout`).
+- One correction class (5°) closes 6–9 m/s at a ground speed of 70–100 m/s: 2 km in 4–5 minutes. A new observed heading
+  word ends a correction (§4.9).
+- The 8 vertical failures of the DA check (select, 22–54 m above the glidepath at the DA point): in 3, the flown path is
+  within 3 m of the observed path and the observed path is 19–23 m above the glidepath; in 3, the flown path is 9–16 m
+  above the observed path and the observed path is 12–15 m above the glidepath; in 1, the flown path is 44 m above the
+  observed path; in 1, the flown path is 850 m to the side of the observed path.
 
 ## 12 Regulation sources
 
@@ -1524,6 +1582,31 @@ holds this milestone into `dev-two-tier-v4`.
   the outcomes, the largest errors against the observed path and the correction words for each flight.
 - Then the full ts suite again, and the report.
 
+**A10. Observed words at the place (D42).** After A9.
+
+- `autopilot/closed_loop.py`: at each Δ row, the observed words of each open-loop Δ row whose observed time is not
+  later than the observed time of the matched point, and that were not said before; when one Δ row passes more than one
+  of these rows, the last word of each column (§4.9, "When the observed words are said"). One matched point for each
+  row serves the comparison and the words (`ObservedPath.match`, the forward search). The corrections do not change: a
+  row that says a new observed word of a column ends a correction of that column, as before.
+- The flight ends when the executor is done or at the time limit of the replay (§5.8: the remaining observed time ×
+  1.5, plus 900 s for each go-around), not at the last row of the open-loop sentence. The closed-loop sentence has the
+  flown rows.
+- The replay of a closed-loop sentence does not change: the sentence is said on its own rows and gives its flown states
+  again (the test of A9).
+- The closed-loop conformance (§9.2 #2) gets a new reference from the new code. The closed-loop sentences of the A9
+  smoke build come from superseded code: delete them and write them again.
+- Tests: a flown aircraft behind the observed one hears a turn word where the observed aircraft heard it, not at the
+  observed time, and ends within Y of the path; a flown aircraft ahead passes two observed heading words in one Δ row
+  and hears the last one; the observed words wait while the flown aircraft is behind; the first predicted step says
+  every column; a flown aircraft ahead of the observed one hears a go-around word before the threshold where the
+  observed aircraft went around before it (synthetic flights); a flight longer than the observed time is not cut at the
+  end of the open-loop sentence.
+- Smoke: the closed-loop reading at Δ = 2 and 4 and the replay of its sentences (train 30 flights for each airport,
+  select every flight). As information: the readouts of A9 and, for each stratum, the number of flights that leave the
+  observed path by more than 300 m and the correction words for each sentence (compare §11.11).
+- Then the full ts suite again, and the report.
+
 ### 14.3 Stage B: prior
 
 **Start.** After Claude's check of stage A (§14.6). The code is written and tested on the smoke artefact at Δ = 2 s.
@@ -1630,13 +1713,15 @@ frontend reads the reading name, not the spec sha (§9.2 #9). After stage D the 
 
 ### 14.6 What Claude checks at the end of stage A
 
-1. Each decision that stage A carries (D1–D22, the Δ values of D25, D26–D28, D32, D33 and D38) against the code: the module and the
+1. Each decision that stage A carries (D1–D22, the Δ values of D25, D26–D28, D32, D33, D38 and D42) against the code: the module and the
    test that carry it (a table in the report).
 2. The targeted tests and the full suite pass on the branch head (run again, not read from the report).
 3. The smoke build: both conformance checks pass; the replay at Δ = 2 and 4 runs to its end; a labelled go-around
    flies as a go-around (G, the climb from its level word, a new runway word, a landing after it); at each go-around
    row, "no level-off" and "unspecified" are in force where the approach reached them (D26); the closed-loop sentences
    at Δ = 2 and 4 replay to their flown states, and their flown paths stay within the tolerances of the observed
-   paths except where §4.9 permits no correction (D32).
+   paths except where §4.9 permits no correction (D32); each observed word of a closed-loop sentence comes at the first Δ
+   row at which the matched point reaches it (D42), and a labelled go-around is in its closed-loop sentence and flies as
+   a go-around.
 4. No write under a live root, and no existing directory under `4dTrajectory/outputs/` changed.
 5. Nothing in the archive was edited after the move.
