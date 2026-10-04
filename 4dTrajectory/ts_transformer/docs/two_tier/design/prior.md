@@ -83,7 +83,7 @@ changed); 3 (the runway head's class order) is a detail of the code. The code fo
    |---|---|
    | Now | B0. B2 and the training loop of B3, tested on synthetic inputs. The words of each column and their number come from the vocabulary spec (vocabulary §6, item 1), never from constants of the prior |
    | After A19, A20 and A22 of stage A (the altitude words above E, the new format names, the executor that flies T + E; the vertical path of each candidate in `candidates.json`, the reader of a closed-loop file, D61; the grammar's column mask, D62) | B1, tested on synthetic artefacts (`tests/support.py`). The speaker and the masks of B4 |
-   | After A21 of stage A (the formal artefact), and again after A25 (the formal artefact with the vertical tolerance of the final descent, D66) | B1–B4 on a sample of the formal artefact at Δ = 2 s: the smoke run of B3, its time and the memory check at the formal size; free generation with the executor of the formal artefact |
+   | After A21 of stage A (the formal artefact), and again after A25 (the formal artefact with the vertical tolerance of the final descent, D66) and A30 (the same artefact with no code digest, vocabulary D73; the formal runs read it) | B1–B4 on a sample of the formal artefact at Δ = 2 s: the smoke run of B3, its time and the memory check at the formal size; free generation with the executor of the formal artefact |
    | After A26 of stage A (the start of a closed loop, D67), merged into this branch | Free generation of B4 (the speaker with the executor and the judge, through the start), on synthetic artefacts and on the formal artefact |
    | After A27 of stage A (each flight's stratum in the sentence file, D70), merged into this branch | B4's readout by stratum |
    | After A28 of stage A (the start opens the executor spec, D71), merged into this branch | The main of the free-generation runner of B4 (it gives the start the directory of the executor spec) |
@@ -478,7 +478,8 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
 
 - Teacher forcing; the airports of a run (all, or a fold without its held-out airport); the stop on the select days;
   the validation days not read. The closed-loop sentences are read only after the check of vocabulary §6, item 3
-  (D69).
+  (D69), which the runner calls with the artefact and the executor spec's directory and which runs the closed-loop
+  check itself (vocabulary D73).
 - Before a formal run: the check at the formal size of the host memory and the GPU memory of the largest batch.
 - A smoke run on a sample of the formal artefact; it gives the time of one run for the cost of B5.
 - Tests: the stop reads only the select days; a fold never reads its held-out airport in training.
