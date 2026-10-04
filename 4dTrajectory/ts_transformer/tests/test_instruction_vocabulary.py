@@ -501,7 +501,7 @@ def test_the_artefact_round_trips_and_refuses_overwrites_and_other_specs(tmp_pat
     with pytest.raises(ValueError, match=f"is not a {CANDIDATES_SCHEMA} file"):
         load_candidates(tmp_path / "unnamed")
     one = spec()
-    source = {"labeller_code_sha256": "c" * 64, "git": {"head": "test", "dirty": False}}
+    source = {"git": {"head": "test", "dirty": False}}
     write_spec(tmp_path, one, {"n": 1}, source)
     assert load_spec(tmp_path) == one
     with pytest.raises(FileExistsError):
@@ -510,14 +510,14 @@ def test_the_artefact_round_trips_and_refuses_overwrites_and_other_specs(tmp_pat
             (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
     reading = read_flight(instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0)), geometry, one)
     reading.go_around_rows, reading.runway_again_rows = [5], [9]          # the go-around columns, round-tripped
-    write_sentences(tmp_path, "train", one, [reading, reading], [1, 0], "c" * 64)
+    write_sentences(tmp_path, "train", one, [reading, reading], [1, 0])
     with pytest.raises(ValueError, match="read with spec"):
         load_sentences(tmp_path, "train", spec(heading_tolerance_deg=5.0))
     sentences = load_sentences(tmp_path, "train", one)
     assert sentences["words"].tolist() == reading.words.tolist() * 2 and sentences["signal_index"].tolist() == [1, 0]
     assert sentences["words"].shape[1] == 5 and len(sentences["instruction_row"]) == 2 * len(reading.instructions)
     assert sentences["go_around_offsets"].tolist() == [0, 1, 2] and sentences["runway_again_row"].tolist() == [9, 9]
-    assert "join_row" not in sentences and str(sentences["labeller_code_sha256"]) == "c" * 64
+    assert "join_row" not in sentences and "labeller_code_sha256" not in sentences      # D73: no digest of code
     # a sentence file of another schema (an old artefact) is refused by its name
     with np.load(tmp_path / "sentences_train.npz") as arrays:
         old = {name: arrays[name] for name in arrays.files}
@@ -541,7 +541,7 @@ def test_a_spec_is_kept_for_new_rows_byte_for_byte(tmp_path):
         write_signals(tmp_path / name, {"train": [_signals("KXXX:a", 5)]},
                       {"config": {**config, "dt_s": 1.0} if name == "other_rows" else config}, fixture_days())
     one = spec()
-    source = {"labeller_code_sha256": "c" * 64, "git": {"head": "measured", "dirty": False}}
+    source = {"git": {"head": "measured", "dirty": False}}
     write_spec(tmp_path / "old", one, {"n": 1}, source)
     assert keep_spec(tmp_path / "old", tmp_path / "new", {"spec_from": "old", "git": {"head": "kept"}}) == one
     for name in ("spec.json", "measurements.json"):

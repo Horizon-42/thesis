@@ -1098,77 +1098,52 @@ def test_the_single_flight_executor_flies_what_the_batch_flies(thrust_share):
 
 
 # ---- the spec, the hash and the replay
-def test_the_executor_spec_is_written_once_and_opened_only_for_code_that_flew_its_reference(tmp_path, monkeypatch):
+def test_the_executor_spec_is_written_once_with_no_digest_of_code(tmp_path):
     import json
-    import platform
 
     from ts_transformer.autopilot import spec as executor_spec
-    from ts_transformer.tests.support import passed_executor
 
     params = _params()
-    source = {"executor_source_sha256": executor_spec.executor_source_sha256(), "python": platform.python_version(),
-              "git": {"head": "x", "dirty": False}}
+    source = {"python": "3", "git": {"head": "x", "dirty": False}}
     executor_spec.write_spec(tmp_path, params, "vocabulary", {"data": {}}, source)
     loaded, record = executor_spec.load_spec(tmp_path)
     assert loaded == params and record["sha256"] == executor_spec.params_sha256(params)
-    assert record["schema"] == "ts-executor-spec-v8"
+    assert record["schema"] == executor_spec.EXECUTOR_SPEC_SCHEMA and record["source"] == source
     with pytest.raises(FileExistsError):
         executor_spec.write_spec(tmp_path, params, "vocabulary", {}, source)
     assert executor_spec.params_sha256(replace(params, timeout_factor=2.0)) != record["sha256"]
-    with pytest.raises(ValueError, match=r"has not been checked against .* reference tracks"):
-        executor_spec.require_conforming_executor(tmp_path)
-    passed_executor(tmp_path)
-    executor_spec.require_conforming_executor(tmp_path)
     stored = json.loads((tmp_path / "spec.json").read_text())
     for broken, message in (({**stored, "params": {**stored["params"], "bank_rate_deg_s": 9.0}}, "do not hash"),
                             ({**stored, "params": {k: v for k, v in stored["params"].items()
                                                    if k != "timeout_factor"}}, "missing"),
-                            ({**stored, "schema": "ts-executor-spec-v7"}, "is not a ts-executor-spec-v8 file")):
+                            ({**stored, "schema": "ts-executor-spec-v8"},
+                             f"is not a {executor_spec.EXECUTOR_SPEC_SCHEMA} file")):
         (tmp_path / "spec.json").write_text(json.dumps(broken))
         with pytest.raises(ValueError, match=message):
             executor_spec.load_spec(tmp_path)
 
 
-def test_the_executor_hash_reads_the_logic_and_covers_what_it_imports_from_the_repository():
+def test_an_executor_spec_is_opened_only_against_its_own_vocabulary_and_after_both_checks(tmp_path, monkeypatch):
+    """D73: `open_executor` runs the labeller's and the executor's checks every time; either refusing refuses the spec,
+    by the check's own message."""
+    from ts_transformer.autopilot import conformance, replay
     from ts_transformer.autopilot import spec as executor_spec
-    from ts_transformer.io_utils import logic
-
-    assert logic('"""doc"""\nx = 1  # note\n') == logic("x = 1\n")
-    labels = [label for label, _ in executor_spec.executor_source_files()]
-    package = {path.name for path in executor_spec.PACKAGE.glob("*.py")} - {"spec.py"}
-    assert {f"autopilot/{name}" for name in package} <= set(labels) and "autopilot/spec.py" not in labels
-    for needed in ("aerodynamic_model.torch_dynamics", "aircraft.reference_speeds",
-                   "ts_transformer.outputs.dynamics.rollout", "ts_transformer.outputs.envelope", "geokit",
-                   "flight_scenarios.fas_geometry", "evaluation.thresholds"):
-        assert needed in labels
-    assert set(executor_spec.REACHED_MODULES) <= set(labels)
-    assert not any(label.startswith(("ts_transformer.instructions", "ts_transformer.io_utils", "evaluation.cli"))
-                   for label in labels)
-
-
-def test_an_executor_spec_is_opened_only_against_its_own_vocabulary_and_a_conforming_labeller(tmp_path, monkeypatch):
-    from ts_transformer.autopilot import replay
-    from ts_transformer.autopilot import spec as executor_spec
-    from ts_transformer.tests.support import passed_executor
+    from ts_transformer.tests.support import stand_in_checks
 
     one = spec()
-    source = {"executor_source_sha256": executor_spec.executor_source_sha256(), "python": "3",
-              "git": {"head": "x", "dirty": False}}
-    executor_spec.write_spec(tmp_path / "spec", _params(), one.sha256, {}, source)
-    passed_executor(tmp_path / "spec")
+    executor_spec.write_spec(tmp_path / "spec", _params(), one.sha256, {}, {"git": {"head": "x", "dirty": False}})
     monkeypatch.setattr(replay.artefact, "load_spec", lambda directory: one)
-    labeller = {"conforms": True}
-
-    def require(directory):
-        if not labeller["conforms"]:
-            raise ValueError("the labeller code on disk has not been checked")
-    monkeypatch.setattr(replay, "require_conforming_labeller", require)
+    stand_in_checks(monkeypatch)
     params, _, _ = replay.open_executor(tmp_path / "spec", tmp_path / "artefact")
     assert params == _params()
-    labeller["conforms"] = False
-    with pytest.raises(ValueError, match="labeller code on disk"):
-        replay.open_executor(tmp_path / "spec", tmp_path / "artefact")
-    labeller["conforms"] = True
+    for module, name, message in ((replay, "require_conforming_labeller", "the labeller reads 1 of"),
+                                  (conformance, "require_conforming_executor", "the executor flies spec's")):
+        def refuse(*args, message=message, **kwargs):
+            raise ValueError(message)
+        with monkeypatch.context() as patched:
+            patched.setattr(module, name, refuse)
+            with pytest.raises(ValueError, match=message):
+                replay.open_executor(tmp_path / "spec", tmp_path / "artefact")
     monkeypatch.setattr(replay.artefact, "load_spec", lambda directory: spec(heading_tolerance_deg=4.0))
     with pytest.raises(ValueError, match="measured against vocabulary"):
         replay.open_executor(tmp_path / "spec", tmp_path / "artefact")

@@ -1,12 +1,12 @@
-"""The executor checked by what it flies, not by its source (executor design §12.3, the user 2026-10-01).
+"""The executor checked by what it flies, never by its source (executor design §12.3, the user 2026-10-01; D73).
 
 A spec's REFERENCE is a fixed batch of labelled train flights — the replay's draw (`replay.draw`: `SPLIT`, `PER_AIRPORT`
 an airport, `SEED`, flights on their own dynamics, at the data's row interval) — flown from row 0 on their labelled words
 by the code that measured the spec. Every cycle is recorded: states, commands, wanted rates, every limit and mode, the sentence time, and the
 cycle each flight was done at. Every flight is judged (`autopilot.judge`: outcome, end row, crossing, each limit's count
 and every word's verdict and check numbers). It is written once into ``<spec>/conformance/`` (``reference.json`` +
-``reference.npz``), from a clean checkout whose executor code measured the spec (`executor_spec` writes it with the
-spec; v11's was written by `a7a32324`, before the executor's code first changed).
+``reference.npz``), in the run that writes the spec (`executor_spec`), so the code that flew it is the code that measured
+the spec.
 
 The CHECK flies the reference's flights again with the code on disk in every way the executor flies (`MODES`: a
 single-aircraft batch, a multi-aircraft batch with staggered starts, the single-flight executor) and compares each
@@ -22,9 +22,10 @@ from, its airframe, frame, thrust and approach speed, its time limit, its words 
 vertical paths): inputs that moved are refused by name — the data under the
 reference changed, which says nothing about the executor.
 
-A check that passes writes ``passed-<code>.json`` beside the reference (`spec.passed_path`), only from a clean
-checkout: the code it checked (`spec.executor_source_sha256`, which covers this module too), each way's largest
-differences, when and from which commit — what `spec.require_conforming_executor` asks for before a spec is opened.
+The check runs in every process that opens the spec, before its work (`require_conforming_executor`, called by
+`replay.open_executor`: the replay, the start of a closed loop, the closed-loop reading, the backend at its start): a
+flight off its reference refuses by name, and the caller records each way's largest differences as information. There is
+no passed record and no digest of code.
 """
 
 from __future__ import annotations
@@ -50,16 +51,15 @@ from ts_transformer.autopilot.judge import Verdict, judge
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import Sentences
-from ts_transformer.autopilot.spec import (
-    CONFORMANCE_DIRECTORY as DIRECTORY, PASSED_SCHEMA, executor_source_sha256, passed_path, reference_sha256,
-)
+from ts_transformer.autopilot.spec import CONFORMANCE_DIRECTORY as DIRECTORY
 from ts_transformer.instructions.words import Words
-from ts_transformer.io_utils import logic, utc_now, write_json_atomic
+from ts_transformer.io_utils import utc_now
 from ts_transformer.repo_layout import git_state, repo_relative
 
 #: v2 (two-tier v4): the flights' runway in force per cycle, the five-column words, the go-around's time reserve.
 #: v3 (A19, A20): no word clock's observed rows in a flight's input digest; the airport elevation E in it (D58).
-REFERENCE_SCHEMA = "ts-executor-conformance-reference-v3"
+#: v4 (A29, D73): no digest of the executor's code or of this checker.
+REFERENCE_SCHEMA = "ts-executor-conformance-reference-v4"
 #: The reference's flights: the replay gate's draw on the training days, every airport alike.
 SPLIT, PER_AIRPORT, SEED, GROUPS = "train", 50, 1337, (replay.OWN,)
 #: How far apart two flown states may be, metres, horizontally or vertically — the single-flight executor's bound
@@ -236,11 +236,6 @@ def load_results(path: Path, verdicts: Sequence[dict[str, Any]]) -> list[FlightR
 
 # ---- comparing a flight with its reference
 
-def checker_sha256() -> str:
-    """This module's logic (`spec.logic`): the checker a reference and a passed record were made by."""
-    return hashlib.sha256(logic(Path(__file__).read_text(encoding="utf-8")).encode("utf-8")).hexdigest()
-
-
 def bounds() -> dict[str, float]:
     return {"state_m": STATE_BOUND_M, "roundoff": ROUNDOFF}
 
@@ -391,16 +386,10 @@ def keys_of(batch: replay.Batch) -> list[str]:
 
 
 def write_reference(executor_dir: Path, instructions: Path, *, batch: replay.Batch | None = None) -> Path:
-    """Fly the reference with the code on disk and write it into ``<executor_dir>/conformance/`` (a new directory).
-    Only from a clean checkout, and only with the code that measured the spec (its `executor_source_sha256`)."""
+    """Fly the reference with the code in this process and write it into ``<executor_dir>/conformance/`` (a new
+    directory), in the run that writes the spec (module docstring); the commit is recorded as information."""
     params, record, words = replay.open_spec(executor_dir, instructions)
     git = git_state()
-    if git["dirty"]:
-        raise RuntimeError("the reference is written from a clean checkout only (it records the commit)")
-    if record["source"]["executor_source_sha256"] != executor_source_sha256():
-        raise ValueError(f"{executor_dir.name} was measured by other executor code "
-                         f"({record['source']['executor_source_sha256'][:12]}, now {executor_source_sha256()[:12]}): its "
-                         f"reference is flown by the code that measured it")
     directory = executor_dir / DIRECTORY
     if directory.exists():
         raise FileExistsError(f"{directory} exists: a spec's reference is written once")
@@ -410,8 +399,7 @@ def write_reference(executor_dir: Path, instructions: Path, *, batch: replay.Bat
     results = MODES["batch"](batch, params, words)
     payload = {"schema": REFERENCE_SCHEMA, "written_utc": utc_now(), "git": git, "python": platform.python_version(),
                **spec_identity(executor_dir, record, instructions), "draw": draw, "drawn": batch.drawn,
-               "flown_by": {"executor_source_sha256": executor_source_sha256(), "mode": "batch"},
-               "checker_sha256": checker_sha256(), "bounds": bounds(), "flights": keys_of(batch),
+               "flown_by": "batch", "bounds": bounds(), "flights": keys_of(batch),
                "inputs": input_digests(batch, params, words), "verdicts": [r.verdict for r in results]}
     text = json.dumps(payload, indent=2, allow_nan=True)
     staging = executor_dir / f".{DIRECTORY}.writing-{os.getpid()}"
@@ -424,18 +412,23 @@ def write_reference(executor_dir: Path, instructions: Path, *, batch: replay.Bat
 
 @dataclasses.dataclass(frozen=True)
 class Checked:
-    """A check's differences, way by way, and the executor code and commit it flew — taken before it flew."""
+    """A check's differences, way by way."""
 
     differences: dict[str, Difference]
-    executor_source_sha256: str
-    git: dict[str, Any]
+
+    @property
+    def passed(self) -> bool:
+        return set(self.differences) == set(MODES) and all(d.passed for d in self.differences.values())
+
+    def summary(self) -> dict[str, Any]:
+        """Each way's largest differences, for the caller to record (information)."""
+        return {mode: d.summary() for mode, d in self.differences.items()}
 
 
 def check(executor_dir: Path, instructions: Path, *, modes: Sequence[str] | None = None,
           batch: replay.Batch | None = None) -> Checked:
     """Fly the reference's flights in every way of ``modes`` (every one of `MODES` by default) and compare each with the
     reference."""
-    code, git = executor_source_sha256(), git_state()
     params, record, words = replay.open_spec(executor_dir, instructions)
     directory = executor_dir / DIRECTORY
     payload = json.loads((directory / "reference.json").read_text(encoding="utf-8"))
@@ -464,23 +457,17 @@ def check(executor_dir: Path, instructions: Path, *, modes: Sequence[str] | None
         for name, ref, result in zip(payload["flights"], reference, flown, strict=True):
             compare(ref, result, difference, name)
         out[mode] = difference
-    return Checked(out, code, git)
+    return Checked(out)
 
 
-def write_passed(executor_dir: Path, checked: Checked) -> Path:
-    """The record that the code on disk flies the reference within the bounds in every way (refused otherwise, and
-    when the code or the commit is not the one the check flew)."""
-    differences = checked.differences
-    if set(differences) != set(MODES) or not all(d.passed for d in differences.values()):
-        raise ValueError("a passed record needs every way of flying checked and within the bounds")
-    git, code = git_state(), executor_source_sha256()
-    if checked.git["dirty"] or git != checked.git or code != checked.executor_source_sha256:
-        raise RuntimeError("a passed record is written from a clean checkout only, for the code the check flew (the "
-                           "code or the commit changed while it flew)")
-    path = passed_path(executor_dir, code)
-    write_json_atomic(path, {"schema": PASSED_SCHEMA, "written_utc": utc_now(), "git": git,
-                             "python": platform.python_version(), "executor_source_sha256": code,
-                             "checker_sha256": checker_sha256(),
-                             "reference_sha256": reference_sha256(executor_dir / DIRECTORY), "bounds": bounds(),
-                             "modes": {mode: d.summary() for mode, d in differences.items()}})
-    return path
+
+def require_conforming_executor(executor_dir: Path, instructions: Path, *,
+                                batch: replay.Batch | None = None) -> Checked:
+    """Refused by name unless the executor in this process flies ``executor_dir``'s reference tracks within the bounds
+    in every way it flies (module docstring); the check, for the caller to record."""
+    checked = check(executor_dir, instructions, batch=batch)
+    if not checked.passed:
+        shown = "; ".join(f"{mode}: {name}: {', '.join(problems[:2])}" for mode, d in checked.differences.items()
+                          for name, problems in list(d.mismatches.items())[:2])
+        raise ValueError(f"the executor flies {executor_dir.name}'s reference tracks otherwise: {shown}")
+    return checked

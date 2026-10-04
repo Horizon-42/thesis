@@ -118,8 +118,7 @@ class WindowContext:
         by `batch`) and the context row that goes with it. Only the training iterator asks
         (`iter_batches(shuffle=True)` passes the epoch's seed). Every live path answers None: the
         plan path, which answered with one of the flight's rolled windows (design v5.2), is archived
-        (2026-09-18). The hook stays because `data/dataset.py` asks it, and that file is part of the
-        executor's code identity (`autopilot.spec.executor_source_sha256`)."""
+        (2026-09-18). The hook stays because `data/dataset.py` asks it."""
         return None
 
     def dense(

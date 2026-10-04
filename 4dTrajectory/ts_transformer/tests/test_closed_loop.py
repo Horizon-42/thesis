@@ -533,10 +533,10 @@ def _reference(tmp_path, monkeypatch, results):
     target.parent.mkdir(parents=True)
     monkeypatch.setattr(closed_loop, "_reference_results",
                         lambda instructions, p, w, intervals, device: {2.0: (["KXXX:test"], [sentence])})
-    closed_loop.write_reference(tmp_path, params, words, [2.0], git={"dirty": False}, target=target)
+    closed_loop.write_reference(tmp_path, params, words, [2.0], git={"dirty": True}, target=target)
     monkeypatch.setattr(closed_loop, "_reference_results",
                         lambda instructions, p, w, intervals, device: {2.0: results(sentence)})
-    return closed_loop.check(tmp_path, params, words, git={"dirty": False})
+    return closed_loop.check(tmp_path, params, words)
 
 
 def test_the_conformance_check_passes_the_same_reading_and_finds_every_change(tmp_path, monkeypatch):
@@ -560,6 +560,27 @@ def test_the_conformance_check_passes_the_same_reading_and_finds_every_change(tm
     assert not flags.passed and "the uncorrectable differ" in str(flags.mismatches)
     refused = _reference(tmp_path / "refused", monkeypatch, lambda s: (["KXXX:test"], [Refused("too short")]))
     assert not refused.passed
+
+
+def test_reading_closed_loop_sentences_runs_the_checks_and_refuses_a_difference_by_name(tmp_path, monkeypatch):
+    """D69, D73: `require_conforming_closed_loop` opens the executor spec (the labeller's and the executor's checks) and
+    reads the closed-loop reference again, every time: alike, it returns what `open_executor` returns and writes nothing;
+    a reading off the reference is refused by name."""
+    from dataclasses import replace
+
+    _reference(tmp_path, monkeypatch, lambda s: (["KXXX:test"], [s]))
+    batch, inputs, words = _batch()
+    opened = (_params(), {"sha256": "e"}, words)
+    monkeypatch.setattr(replay, "open_executor", lambda executor, instructions: opened)
+    before = sorted(p.name for p in (tmp_path / closed_loop.CLOSED_LOOP_DIRECTORY / closed_loop.CONFORMANCE).iterdir())
+    assert closed_loop.require_conforming_closed_loop(tmp_path, tmp_path / "executor") == opened
+    assert sorted(p.name for p in (tmp_path / closed_loop.CLOSED_LOOP_DIRECTORY / closed_loop.CONFORMANCE).iterdir()) \
+        == before
+    monkeypatch.setattr(closed_loop, "_reference_results", lambda instructions, p, w, intervals, device: {
+        2.0: (["KXXX:test"], [replace(s, states=s.states + 1e-3) for s in [closed_loop.read(batch, inputs, _params(),
+                                                                                             words, device=CPU)[0]]])})
+    with pytest.raises(ValueError, match=f"reads {tmp_path.name}'s closed-loop reference otherwise: 2 s"):
+        closed_loop.require_conforming_closed_loop(tmp_path, tmp_path / "executor")
 
 
 def test_the_replay_refuses_a_sentence_of_another_first_row(monkeypatch):
@@ -904,7 +925,6 @@ def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(
     monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: approach_speed_ias_mps("A320", 62000.0))
     monkeypatch.setattr(closed_loop, "start_inputs", inputs)
     monkeypatch.setattr(runner, "git_state", lambda: clean)
-    monkeypatch.setattr(closed_loop, "git_state", lambda: clean)
     monkeypatch.setattr(runner, "POOL_OPTIONS", {"start_method": "fork"})
     read = {}
     for workers in (1, 2):

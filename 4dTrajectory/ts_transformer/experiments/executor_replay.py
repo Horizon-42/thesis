@@ -336,7 +336,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{out} exists; a readout is never overwritten")
     if args.split != "train" and git_state()["dirty"]:
         parser.error(f"the {args.split} replay (stage 4) runs from a clean tree")
-    params, record, words = replay.open_executor(executor, instructions)
+    # the checks every reader runs (D73): the labeller's and the executor's, and for closed-loop sentences the closed loop's
+    params, record, words = (closed_loop.require_conforming_closed_loop(instructions, executor) if args.closed_loop
+                             else replay.open_executor(executor, instructions))
     spec = words.spec
     started = time.perf_counter()
     batch = replay.draw(instructions, args.split, spec, words, per_airport=args.per_airport, seed=args.seed,
@@ -346,7 +348,6 @@ def main(argv: list[str] | None = None) -> int:
     along = along_columns(words)
     per_flight = along
     if args.closed_loop:
-        closed_loop.require_conforming_closed_loop(instructions)
         path = closed_loop_path(instructions, args.split, args.row_interval_s)
         if not path.exists():
             parser.error(f"{path} does not exist: the closed-loop reading wrote no sentence there "

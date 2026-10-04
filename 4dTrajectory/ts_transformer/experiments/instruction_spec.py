@@ -12,8 +12,8 @@ with the course tolerance, fits the capture corridor on the aligned final and co
 heading grids on the rows before it. Every value fitted from data is written beside its rounder candidates and the fit
 each leaves (D15), with the climb angles' distribution (O12); the altitude grid is fitted again on the level-offs above
 the airport elevation E (D58, `measure.fit_altitude_grid`) and written beside the grid of D22, each with the rounding
-error of the level words (`measure.grid_candidates`). Writes ``spec.json`` (with the git state and, as information, the labeller code that
-measured it) and ``measurements.json`` into the signals directory (never over an existing file).
+error of the level words (`measure.grid_candidates`). Writes ``spec.json`` (with the git state, as information) and
+``measurements.json`` into the signals directory (never over an existing file).
 
 ``--candidate NAME`` (required when measuring) is the user's choice of D15 (D56): the descent nominals and edges and
 the climb nominal of that row of the rounding candidates (`measure.CANDIDATE_NAMES`); ``--grid NAME`` (required when
@@ -46,7 +46,6 @@ import numpy as np
 from ts_transformer.instructions import measure
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import keep_spec, load_candidates, load_signals, write_spec
-from ts_transformer.instructions.conformance import labeller_code_sha256
 from ts_transformer.instructions.labeller.read import admit
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.spec import VocabularySpec
@@ -144,7 +143,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"kept spec {spec.sha256[:12]} from {source}")
         return 0
     started = time.perf_counter()
-    labeller = labeller_code_sha256()            # the code the workers measure with
     flights = load_signals(directory, "train")
     print(f"{len(flights)} train flights", flush=True)
     provisional = measure.provisional_spec()
@@ -233,9 +231,7 @@ def main(argv: list[str] | None = None) -> int:
         "heading_grids": _grid_table(grid_rows, grids),
         "elapsed_s": time.perf_counter() - started,
     }
-    if labeller_code_sha256() != labeller:
-        raise SystemExit("the labeller's code changed while the spec was being measured; measure again")
-    source = {"labeller_code_sha256": labeller, "git": git_state()}
+    source = {"git": git_state()}
     write_spec(directory, spec, measurements, source)
     print(f"spec {spec.sha256[:12]} (candidate {args.candidate}, grid {args.grid}, H_final "
           f"{args.closed_loop_final_vertical_m:g} m):")

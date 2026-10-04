@@ -1,8 +1,8 @@
 """The flights of a Training set of stage A on their closed-loop sentences (vocabulary §12.1 A23): the one setup the
 Training export (`training_export`) and the backend's live executor (`aeroviz_backend/autopilot_segment/`) share — so a
 live segment is the export's flight, and the two are checked against each other (outline §6 item 6). A shared module of
-both, not a runner (`experiments.__main__.NOT_RUNNERS`); here and not in `autopilot/` because the executor's source
-hash covers every module there (`autopilot.spec.executor_source_files`), and this module flies no differently.
+both, not a runner (`experiments.__main__.NOT_RUNNERS`); here and not in `autopilot/` because it joins the executor to
+the Training sets, which the executor does not know.
 
 A flight is drawn by its dataset id, read again by the labeller and checked against its stored sentence, then set up on
 its closed-loop sentence at the row interval Δ from its first predicted step — `closed_loop.replay_batch`, as the formal

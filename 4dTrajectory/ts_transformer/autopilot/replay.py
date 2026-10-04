@@ -40,7 +40,7 @@ from ts_transformer.autopilot.judge import Outcome, Verdict, flown_track, judge
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import Sentences
-from ts_transformer.autopilot.spec import load_spec, require_conforming_executor
+from ts_transformer.autopilot.spec import load_spec
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
 from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.instructions import artefact
@@ -124,24 +124,32 @@ class Batch:
 
 
 def open_executor(executor_dir: Path, instructions_dir: Path) -> tuple[ExecutorParams, dict[str, Any], Words]:
-    """An executor spec and the instruction artefact it flies (`open_spec`), refused unless the executor code on disk
-    flies the spec's reference tracks within the bounds (`spec.require_conforming_executor`, executor design §12.3)."""
+    """An executor spec and the instruction artefact it flies (`open_spec`), refused by name unless the labeller in this
+    process reads the artefact's reference as it was read (the replay re-reads every flight, and the judge reads with it,
+    `instructions.conformance`) and the executor in this process flies the spec's reference tracks within the bounds in
+    every way it flies (`autopilot.conformance`, executor design §12.3): both checks run here, every time (D73), and
+    their largest differences are printed for the run's log (information)."""
+    # the executor's check flies through this module: imported here, not at the top
+    from ts_transformer.autopilot.conformance import require_conforming_executor
+
     opened = open_spec(executor_dir, instructions_dir)
-    require_conforming_executor(executor_dir)
+    labeller = require_conforming_labeller(instructions_dir)
+    executor = require_conforming_executor(executor_dir, instructions_dir)
+    print(f"checks: the labeller reads {labeller.flights} reference flights of {instructions_dir.name} as they were read; "
+          f"the executor flies {executor_dir.name}'s reference within the bounds, largest differences "
+          + ", ".join(f"{mode} {d['horizontal_m']:.2g} / {d['vertical_m']:.2g} m"
+                      for mode, d in executor.summary().items()), flush=True)
     return opened
 
 
 def open_spec(executor_dir: Path, instructions_dir: Path) -> tuple[ExecutorParams, dict[str, Any], Words]:
     """An executor spec and the instruction artefact it flies, refused unless the spec was measured against this
-    artefact's vocabulary and the labeller code on disk reads the artefact's reference as it was read (the replay
-    re-reads every flight, and the judge reads with it, `instructions.conformance`) — whatever executor code is on
-    disk: what flies the spec's reference tracks again (`autopilot.conformance`) opens it so."""
+    artefact's vocabulary — no check of the code (`open_executor` runs them; the checks themselves open with this)."""
     params, record = load_spec(executor_dir)
     spec = artefact.load_spec(instructions_dir)
     if record["vocabulary_spec_sha256"] != spec.sha256:
         raise ValueError(f"the executor spec was measured against vocabulary {record['vocabulary_spec_sha256'][:12]}, "
                          f"{instructions_dir} holds {spec.sha256[:12]}")
-    require_conforming_labeller(instructions_dir)
     params.check(spec, spec.step_s)
     return params, record, Words(spec)
 

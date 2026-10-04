@@ -27,7 +27,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from ts_transformer.autopilot import closed_loop, replay
+from ts_transformer.autopilot import closed_loop
 from ts_transformer.autopilot.conformance import ROUNDOFF, STATE_BOUND_M
 from ts_transformer.autopilot.start import start
 from ts_transformer.instructions.artefact import (
@@ -132,8 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
     if out.exists():
         parser.error(f"{out} exists; a check is never overwritten")
-    _, record, words = replay.open_executor(executor, instructions)
-    closed_loop.require_conforming_closed_loop(instructions)
+    _, record, words = closed_loop.require_conforming_closed_loop(instructions, executor)
     started = time.perf_counter()
     intervals = {}
     for interval in args.row_interval_s:

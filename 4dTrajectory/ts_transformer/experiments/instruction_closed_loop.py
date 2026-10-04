@@ -1,8 +1,8 @@
 """The closed-loop reading (vocabulary §4.9, D32, §12.1 A9; `autopilot.closed_loop`): every labelled flight of every split
 flown on its open-loop words by an executor spec, with the correction words its flown path needs, at each row interval
 of the ablation — written into the instruction artefact as ``closed_loop/`` (never over an existing one), with its
-reference sample and the passed record of the code that wrote it; ``--check`` reads that reference again with the code
-on disk and writes its passed record.
+reference sample, written in the same run; ``--check`` runs the checks every reader runs (`require_conforming_closed_loop`:
+the labeller's, the executor's and the closed loop's, D73) and writes nothing.
 
 Who: the replay's flights (`replay.group_of`): on their own dynamics or on a stand-in's; a flight with no identified type,
 no aircraft dynamics or no published approach speed gives no training sentence. Each split's flights are counted by
@@ -51,8 +51,8 @@ from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 SEED = 1337
-#: How the workers start (`--workers`): spawned, as the other runners' pools, one cell each (tests fork, so their stand-ins
-#: carry over; a forked pool takes no task limit).
+#: How the workers start (`--workers`): spawned, as the other runners' pools, one split each (tests fork, so their
+#: stand-ins carry over; a forked pool takes no task limit).
 POOL_OPTIONS = {"start_method": "spawn", "max_tasks_per_child": 1}
 
 
@@ -148,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--executor", type=Path, required=True, help="the executor spec directory")
     parser.add_argument("--row-interval-s", type=float, nargs="+", default=None,
                         help="the row intervals of the ablation (vocabulary §4.8, D25: 2, 4, 8 s)")
-    parser.add_argument("--check", action="store_true", help="read the reference again and write the passed record")
+    parser.add_argument("--check", action="store_true", help="run the readers' checks against the artefact; write nothing")
     parser.add_argument("--chunk", type=int, default=256)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--workers", type=int, default=1, help="splits read in up to this many processes (module docstring)")
@@ -157,21 +157,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--workers must be at least 1")
     instructions = args.instructions if args.instructions.is_absolute() else REPO_ROOT / args.instructions
     executor = args.executor if args.executor.is_absolute() else REPO_ROOT / args.executor
+    if args.check:
+        closed_loop.require_conforming_closed_loop(instructions, executor)        # refused by name on a difference
+        print("conforming")
+        return 0
     git = git_state()
     if git["dirty"]:
-        parser.error("the tree has uncommitted changes; the closed-loop reading is written and checked at a commit")
+        parser.error("the tree has uncommitted changes; the closed-loop reading is written at a commit (it records it)")
     params, record, words = replay.open_executor(executor, instructions)
-    if args.check:
-        checked = closed_loop.check(instructions, params, words, git=git)
-        print(f"{checked.flights} reference flights read again by code {checked.code_sha256[:12]}; largest state "
-              f"difference {checked.largest_state_difference_m:.3g} m; {len(checked.mismatches)} read otherwise")
-        for name, problems in list(checked.mismatches.items())[:20]:
-            print(f"  {name}: " + "; ".join(problems[:6]))
-        if not checked.passed:
-            print("NOT conforming: no passed record written")
-            return 1
-        print(f"conforming → {closed_loop.write_passed(instructions, checked)}")
-        return 0
     if args.row_interval_s is None:
         parser.error("--row-interval-s is required to write the closed-loop reading")
     for interval in args.row_interval_s:
@@ -188,7 +181,6 @@ def main(argv: list[str] | None = None) -> int:
                                "executor": executor.relative_to(REPO_ROOT).as_posix()
                                if executor.is_relative_to(REPO_ROOT) else str(executor),
                                "executor_spec_sha256": record["sha256"], "executor_params_sha256": params_sha256(params),
-                               "code_sha256": closed_loop.closed_loop_code_sha256(),
                                "row_intervals_s": args.row_interval_s, "splits": {}}
     done: dict[str, tuple[dict[str, Any], dict[float, dict[str, Any]]]] = {}
 
@@ -224,10 +216,11 @@ def main(argv: list[str] | None = None) -> int:
     closed_loop.write_reference(instructions, params, words, args.row_interval_s, git=git,
                                 target=staging / closed_loop.CONFORMANCE)
     staging.rename(target)
-    checked = closed_loop.check(instructions, params, words, git=git)
+    checked = closed_loop.check(instructions, params, words)
     if not checked.passed:
         raise SystemExit(f"the code that wrote the reference reads it otherwise: {checked.mismatches}")
-    print(f"→ {target}; passed → {closed_loop.write_passed(instructions, checked)}")
+    print(f"→ {target} (its reference read again: {checked.flights} flights, largest state difference "
+          f"{checked.largest_state_difference_m:.2g} m)")
     return 0
 
 

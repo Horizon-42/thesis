@@ -202,22 +202,17 @@ def signal_attitudes(_directory, signals):
                                 "bankRightDeg": None, "attackDeg": None} for flight in signals}
 
 
-def passed_executor(spec_dir):
-    """Mark a test's executor spec at ``spec_dir`` as flown within the bounds by the code on disk: placeholder reference
-    files and a passed record for this code — what `replay.open_executor` asks for (`spec.require_conforming_executor`).
-    The check itself is tested in `test_executor_conformance.py`."""
-    import json
+def stand_in_checks(monkeypatch):
+    """Stand in for the labeller's and the executor's checks that `replay.open_executor` runs (D73), for a test whose
+    synthetic artefact and spec hold no reference: both pass with nothing flown. The checks themselves are tested in
+    `test_instruction_conformance.py` and `test_executor_conformance.py`, and through a real reference in
+    `test_start.py`."""
+    from ts_transformer.autopilot import conformance, replay
+    from ts_transformer.instructions.conformance import Checked as LabellerChecked
 
-    from ts_transformer.autopilot import spec as executor_spec
-
-    directory = spec_dir / executor_spec.CONFORMANCE_DIRECTORY
-    directory.mkdir()
-    (directory / "reference.json").write_text("{}", encoding="utf-8")
-    (directory / "reference.npz").write_bytes(b"")
-    code = executor_spec.executor_source_sha256()
-    executor_spec.passed_path(spec_dir, code).write_text(json.dumps({
-        "schema": executor_spec.PASSED_SCHEMA, "executor_source_sha256": code,
-        "reference_sha256": executor_spec.reference_sha256(directory)}), encoding="utf-8")
+    monkeypatch.setattr(replay, "require_conforming_labeller", lambda directory: LabellerChecked(flights=0))
+    monkeypatch.setattr(conformance, "require_conforming_executor", lambda executor_dir, instructions, **_: (
+        conformance.Checked({mode: conformance.Difference(expected=0) for mode in conformance.MODES})))
 
 
 def labelled_instruction_artefact(directory, split="train"):
@@ -227,7 +222,6 @@ def labelled_instruction_artefact(directory, split="train"):
     import numpy as np
 
     from ts_transformer.instructions.artefact import write_candidates, write_sentences, write_signals, write_spec
-    from ts_transformer.instructions.conformance import labeller_code_sha256
     from ts_transformer.instructions.labeller.read import read_flight
 
     legs = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (20, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
@@ -239,10 +233,8 @@ def labelled_instruction_artefact(directory, split="train"):
                    "sources": [{"airport": "KXXX", "arrival_manifest_sha256": "0" * 64}]}, fixture_days())
     write_candidates(directory, {"KXXX": instruction_airport()})
     spec = instruction_spec()
-    write_spec(directory, spec, {"n": 1}, {"labeller_code_sha256": labeller_code_sha256(),
-                                           "git": {"head": "test", "dirty": False}})
-    write_sentences(directory, split, spec, [read_flight(flight, instruction_airport(), spec)], [0],
-                    labeller_code_sha256())
+    write_spec(directory, spec, {"n": 1}, {"git": {"head": "test", "dirty": False}})
+    write_sentences(directory, split, spec, [read_flight(flight, instruction_airport(), spec)], [0])
     return spec
 
 

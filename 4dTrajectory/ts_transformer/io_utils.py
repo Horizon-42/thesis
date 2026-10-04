@@ -7,12 +7,11 @@ definition each. Deliberately torch-free: `experiments/pipeline.py` is import-li
 
 from __future__ import annotations
 
-import ast
 from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 
 def utc_now() -> str:
@@ -50,26 +49,3 @@ def file_sha256(path: Path) -> str:
             digest.update(chunk)
     return digest.hexdigest()
 
-
-_DOCUMENTED = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
-
-
-def logic(source: str) -> str:
-    """A module's logic as text: its syntax tree with the docstring of the module, every class and every function
-    removed (a body left empty holds ``pass``), written back by `ast.unparse` — no comment, docstring or layout in it.
-    The text is the running Python's, so another Python version may write another text."""
-    tree = ast.parse(source)
-    for node in ast.walk(tree):
-        if (isinstance(node, _DOCUMENTED) and node.body and isinstance(node.body[0], ast.Expr)
-                and isinstance(node.body[0].value, ast.Constant) and isinstance(node.body[0].value.value, str)):
-            node.body = node.body[1:] or [ast.Pass()]
-    return ast.unparse(tree)
-
-
-def logic_sha256(files: Sequence[tuple[str, Path]]) -> str:
-    """sha256 over ``(label, file)`` pairs in order: each label and the file's `logic` — what names a piece of code by
-    what it does, not by its comments (the executor's and the labeller's conformance records are named by it)."""
-    digest = hashlib.sha256()
-    for label, path in files:
-        digest.update(label.encode("utf-8") + b"\0" + logic(path.read_text(encoding="utf-8")).encode("utf-8") + b"\0")
-    return digest.hexdigest()

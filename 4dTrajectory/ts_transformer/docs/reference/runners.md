@@ -201,9 +201,10 @@ programming, `measure.fit_altitude_grid`) beside the grid of D22, each with the 
 `--candidate`), recorded as `chosen_grid`. `instruction_labels --dir` reads
 train, select and val with that spec and writes the sentences, `labels.json`, the readout (with, at each go-around row,
 the words in force — vocabulary §9.4 — and whether its low pass lies past the threshold) and the labeller's reference
-sample `conformance/` (C30). `instruction_conformance --dir` reads that reference again with the code on disk and,
-from a clean checkout, writes the `passed-<code>.json` that `instruction_figures`, `executor_spec`, `executor_replay`
-and `instruction_closed_loop` ask for. `instruction_figures --dir [--count 24] [--seed 1337]` draws a seeded half
+sample `conformance/` (C30), in the same run. `instruction_conformance --dir` reads that reference again with the code on
+disk and prints the differences (information, exit 1 on any): since A29 (D73) every runner that uses the labeller on the
+artefact (`instruction_figures`, `executor_spec`, `executor_replay`, `instruction_closed_loop`, the start, the backend)
+runs the same check itself first; there is no passed record. `instruction_figures --dir [--count 24] [--seed 1337]` draws a seeded half
 straight-in / half vectored sample of VAL flights into `figures/` with an `index.csv` for a verdict column. Every step
 refuses to write over an existing file.
 
@@ -244,9 +245,10 @@ frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `t
 ### R12 · the executor: `executor_spec` → `executor_replay`
 
 2026-09-24; v4 since 2026-10-03 (`docs/two_tier/design/vocabulary.md` §5, §12.1 A4–A6, A9, A19; layout L31, contract C33).
-`executor_spec --instructions <artefact> --dir <new dir>` (`ts-executor-spec-v8`; since A19 no `--word-clock`: a sentence is
-said on its own rows, D57)
-refuses a dirty tree, an existing directory and labeller code without a passed record against the artefact's reference;
+`executor_spec --instructions <artefact> --dir <new dir>` (`ts-executor-spec-v9`; since A19 no `--word-clock`: a sentence is
+said on its own rows, D57; since A29 no digest of code, D73)
+refuses a dirty tree, an existing directory and a labeller that reads the artefact's reference otherwise (its check runs
+first);
 p = `ROLL_RATE_DEG_S` (5°/s, FAA Order 8260.3G App. E §4 ¶6.a, ICAO Doc 8168 Vol II); the executor makes no turn of its own,
 so it has no time constant of one. Nothing is measured from data: the turn rates, the bank limit, the speed word's rate
 (a_max, the speed envelope's largest acceleration: a speed word is a step of one grid value, D43), "unspecified"'s pace (a
@@ -254,7 +256,7 @@ speed step over the shortest speed hold, 0.25 m/s²) and the level bands are the
 candidate's published TCH, glidepath angle and DA are the artefact's (`candidates.json`, D61) and recorded in
 `measurements.json`; the decision-altitude check takes no parameter (D38); the design's fixed choices (Δt, τ_γ, the γ̇
 factor, the timeout factor) are module constants written into `measurements.json`. It writes the spec's reference tracks
-and passed record with it (R42).
+with it, in the same run, and flies them again in every way before it ends (R42).
 `executor_replay --instructions --executor --split {train,select,val} --out <new dir> [--per-airport 0 = every flight]
 [--seed] [--chunk 500] [--row-interval-s 2|4|8] [--closed-loop]` is the readout: own-dynamics flights and a stand-in's
 (the performance index's substitute) reported apart, a flight without aircraft dynamics counted (C31); each sentence put on
@@ -1247,24 +1249,24 @@ the old program's, kept as written.
 
 ### R42 · `run_ts.py executor_conformance` — the executor checked by what it flies: a spec's reference tracks flown again in every way, within the bounds (executor design §12.3)
 
-2026-10-01 (the user: the executor is checked by its tracks, not its source). `executor_conformance --executor <spec dir>
---instructions <artefact> [--write-reference]`; the core is `autopilot/conformance.py` (inside the executor's code identity,
-so the checker is checked with it). **The reference** (`--write-reference`, or `executor_spec` with every new spec): 50
+2026-10-01 (the user: the executor is checked by its tracks, not its source); since A29 (D73, 2026-10-04) the check runs in
+every process that opens a spec (`replay.open_executor` → `conformance.require_conforming_executor`) and this runner only
+prints it. `executor_conformance --executor <spec dir> --instructions <artefact>`; the core is `autopilot/conformance.py`.
+**The reference** (written only by `executor_spec`, with the spec, in the same run; `--write-reference` is gone): 50
 labelled train flights an airport — the replay's draw (`replay.draw`, seed 1337, own dynamics; 250) — flown from row 0 on
-their labelled words by the code that measured the spec (refused otherwise, and from a dirty checkout): every cycle's states,
+their labelled words by the code that measured the spec: every cycle's states,
 commands, wanted rates, sentence times, limits and modes, the done cycle, and each flight's verdict (`judge`) into
 `<spec>/conformance/reference.{json,npz}`, with each flight's input digest (start state, airframe, frame, thrust, approach
 speed, time limit, words, runway, the runways' geometry and vertical paths, the airport elevation E; reference
-`ts-executor-conformance-reference-v3` since A19/A20), the
-bounds and the checker's logic hash; written atomically, once. **The check**: the same flights rebuilt (inputs that moved
+`ts-executor-conformance-reference-v4` since A29: no digest of code) and the bounds; written atomically, once. **The check**: the same flights rebuilt (inputs that moved
 are refused by name — the data changed, not the executor) and flown in every way of `conformance.MODES` — `batch`
 (`replay.fly_batch`), `staggered` (one executor, each flight from a seeded start in 0–30 steps, its words on its own rows),
 `single` (`autopilot.single`, one flight at a time, driven as `fly` drives a batch) — each flight compared with its reference
 up to its done cycle: states ≤ `STATE_BOUND_M` (1e-6 m) horizontally and vertically, every other float ≤ `ROUNDOFF` (1e-6;
 ψ round the circle; NaN only against NaN), every limit, mode, done cycle, outcome, end row and word verdict equal; a way
-that flies fewer flights fails. All pass → `passed-<executor_source_sha256[:12]>.json` (clean checkout only), which
-`spec.require_conforming_executor` — and so `replay.open_executor` — asks for. v11 (2026-10-01, 27 s): batch and staggered
-0 m apart, single 1.3e-8 m / 5.5e-10 m.
+that flies fewer flights fails; any difference refuses the opening by name (until A29 a passing check wrote a
+`passed-<code>.json` named by a digest of the code, which the opening asked for instead). v11 (2026-10-01, 27 s): batch and
+staggered 0 m apart, single 1.3e-8 m / 5.5e-10 m.
 
     python run_ts.py executor_conformance --executor 4dTrajectory/outputs/POOLED/executor/v11_20260927 \
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/v5_20260926
@@ -1427,9 +1429,10 @@ per column, the flights with a correction, the largest |e_y| / |e_h| and those o
 last row's |e_y|, the flights done at their time limit, the rows past the end of the observed path, and the lateness of
 the observed heading words said — the matched point's observed time at the row that says a word minus the word's 2 s time,
 mean and percentiles, information), then the reference sample (train, 10 flights an
-airport, every Δ written) and, after checking it with the same code, its passed record. Written in a staging directory and
-renamed: an existing `closed_loop/` refuses. `--check` reads the reference again with the code on disk and writes its passed
-record (after a change to `autopilot/` or the labeller). The observed words are said where the observed aircraft heard
+airport, every Δ written), read again before it ends. Written in a staging directory and renamed: an existing
+`closed_loop/` refuses. `--workers N` (2026-10-04) reads the splits in up to N processes, each split drawn once (the
+serial path's reading: the same files). `--check` runs the checks every reader runs (`require_conforming_closed_loop`:
+the labeller's, the executor's, the closed loop's, D73) and writes nothing; there is no passed record. The observed words are said where the observed aircraft heard
 them (D42, A10), at the nearest Δ row (D45, A12); a sentence has the flown rows.
 
     python run_ts.py instruction_closed_loop --row-interval-s 2 4 8 \

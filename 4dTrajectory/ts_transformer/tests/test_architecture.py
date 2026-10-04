@@ -756,3 +756,52 @@ def test_the_executor_laws_never_read_a_vertical_path():
         todo += [name for name in _imported_names(path) if name.startswith("autopilot.")
                  and (TS_DIR / (name.replace(".", "/") + ".py")).is_file()]
     assert {"autopilot.lateral", "autopilot.plant", "autopilot.sentence"} <= seen
+
+
+#: D73 (no code fingerprint): the trees where a check of the labeller, the executor or the closed loop runs.
+NO_CODE_DIGEST_TREES = ("instructions", "autopilot", "prior", "experiments")
+#: Names of the retired code digests and their helpers.
+CODE_DIGEST_NAMES = ("logic_sha256", "executor_source_files", "executor_source_sha256", "labeller_code_files",
+                     "labeller_code_sha256", "closed_loop_code_sha256", "checker_sha256", "code_sha256",
+                     "REACHED_MODULES", "UNHASHED_IMPORTS", "passed_path", "write_passed")
+
+
+def _reads_code(node: ast.AST) -> bool:
+    """Whether ``node`` reads Python source: `inspect`'s source getters, `ast.unparse`, or a read of a file reached from
+    `__file__` or named by a ``.py`` literal."""
+    if isinstance(node, ast.Attribute) and node.attr in ("getsource", "getsourcelines", "getsourcefile", "unparse"):
+        return True
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in (
+            "read_text", "read_bytes", "open"):
+        inside = list(ast.walk(node.func.value))
+        return any(isinstance(n, ast.Name) and n.id == "__file__" for n in inside) or any(
+            isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value.endswith(".py") for n in inside)
+    return False
+
+
+def test_no_module_where_the_checks_run_computes_a_digest_of_code():
+    """D73: the labeller, the executor and the closed loop are checked by what they do, every time; no module of
+    `instructions/`, `autopilot/`, `prior/`, the runners or the backend reads Python source or names a code digest."""
+    files = [path for tree in NO_CODE_DIGEST_TREES for path in sorted((TS_DIR / tree).rglob("*.py"))]
+    files += sorted((REPO_ROOT / "aeroviz_backend").rglob("*.py"))
+    files = [path for path in files if "tests" not in path.relative_to(REPO_ROOT).parts]
+    assert files and any(path.parent.name == "autopilot" for path in files)
+    offending = {}
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        found = [f"line {n.lineno}" for n in ast.walk(tree) if _reads_code(n)]
+        found += [name for name in CODE_DIGEST_NAMES for n in ast.walk(tree)
+                  if (isinstance(n, ast.Name) and n.id == name) or (isinstance(n, ast.Attribute) and n.attr == name)
+                  or (isinstance(n, (ast.FunctionDef, ast.alias)) and getattr(n, "name", None) == name)]
+        found += [f"imports {alias.name}" for n in ast.walk(tree) if isinstance(n, ast.Import)
+                  for alias in n.names if alias.name == "inspect"]
+        if found:
+            offending[path.relative_to(REPO_ROOT).as_posix()] = sorted(set(found))
+    assert not offending, offending
+
+
+def test_the_digest_scan_finds_a_module_that_reads_its_own_source():
+    sample = ast.parse("import hashlib\nfrom pathlib import Path\n"
+                       "digest = hashlib.sha256(Path(__file__).read_text().encode()).hexdigest()\n")
+    assert any(_reads_code(n) for n in ast.walk(sample))
+    assert not any(_reads_code(n) for n in ast.walk(ast.parse("Path('data.json').read_text()")))

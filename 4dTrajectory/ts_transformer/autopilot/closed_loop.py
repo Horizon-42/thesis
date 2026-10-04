@@ -75,7 +75,6 @@ closed-loop sentence gives the same states on every 2 s row.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import platform
@@ -91,10 +90,9 @@ from ts_transformer.autopilot.conformance import DEVICE, ROUNDOFF, STATE_BOUND_M
 from ts_transformer.autopilot.flights import FlightInputs, flight_inputs
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.replay import Batch, subset
-from ts_transformer.autopilot.spec import executor_source_files, params_sha256
+from ts_transformer.autopilot.spec import params_sha256
 from ts_transformer.autopilot.start import Loop, observed_rows, start_row
 from ts_transformer.instructions.artefact import CLOSED_LOOP_DIRECTORY, STATE_COLUMNS, ClosedLoopSentence
-from ts_transformer.instructions.conformance import labeller_code_files
 from ts_transformer.instructions.grammar import InForce, Ungrammatical, apply
 from ts_transformer.instructions.labeller.interval import (
     in_force, interval_rows, last_heard_row, on_interval_rows,
@@ -104,8 +102,7 @@ from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words, same_track, wrap180,
 )
-from ts_transformer.io_utils import file_sha256, logic_sha256, utc_now, write_json_atomic
-from ts_transformer.repo_layout import git_state
+from ts_transformer.io_utils import utc_now
 
 class Match(NamedTuple):
     """A flown position against the observed path (`ObservedPath.match`)."""
@@ -488,19 +485,15 @@ def read_chunked(batch: Batch, params: ExecutorParams, words: Words, *, chunk: i
 # ---- the conformance (vocabulary §7.2 #2): the closed-loop reading checked by what it reads, as the labeller's and the
 # executor's are. A fixed REFERENCE sample — the train split's first `REFERENCE_PER_AIRPORT` flown flights of each
 # airport in a permutation seeded by `REFERENCE_SEED`, at every row interval the closed-loop sentences were written at — is read by the
-# code that wrote the artefact's closed-loop sentences, and stored; the CHECK reads it again with the code on disk and
-# compares: the same flights, the same refusals, the same words and corrections, and states and errors no further
-# apart than the executor's conformance bound. A check that passes, from a clean checkout, writes
-# ``passed-<code>.json``: what `require_conforming_closed_loop` asks for before closed-loop sentences are read. The
-# code is named by the logic of the executor's files and the labeller's (`closed_loop_code_sha256`).
-REFERENCE_SCHEMA = "ts-closed-loop-conformance-reference-v5"         # v5: A20 (D58), the words above E
-PASSED_SCHEMA = "ts-closed-loop-conformance-passed-v1"
+# code that wrote the artefact's closed-loop sentences, in the same run, and stored; the CHECK reads it again with the code
+# in the process and compares: the same flights, the same refusals, the same words and corrections, and states and errors
+# no further apart than the executor's conformance bound. It runs in every process that reads closed-loop sentences or
+# flies them again, before its work (`require_conforming_closed_loop`, D69, D73), with the labeller's and the executor's
+# checks; a difference refuses by name. There is no passed record and no digest of code.
+#: v5: A20 (D58), the words above E; v6 (A29, D73): no digest of code.
+REFERENCE_SCHEMA = "ts-closed-loop-conformance-reference-v6"
 REFERENCE_SPLIT, REFERENCE_PER_AIRPORT, REFERENCE_SEED = "train", 10, 1337
 CONFORMANCE = "conformance"
-
-
-def closed_loop_code_sha256() -> str:
-    return logic_sha256([*executor_source_files(), *labeller_code_files()])
 
 
 def _reference_results(instructions: Path, params: ExecutorParams, words: Words, intervals: Sequence[float], *,
@@ -528,7 +521,7 @@ def write_reference(instructions: Path, params: ExecutorParams, words: Words, in
     interval of ``intervals`` (the closed-loop sentences')."""
     target.mkdir()
     payload: dict[str, Any] = {"schema": REFERENCE_SCHEMA, "written_utc": utc_now(), "git": git,
-                               "python": platform.python_version(), "code_sha256": closed_loop_code_sha256(),
+                               "python": platform.python_version(),
                                "spec_sha256": words.spec.sha256, "executor_params_sha256": params_sha256(params),
                                "split": REFERENCE_SPLIT, "per_airport": REFERENCE_PER_AIRPORT, "seed": REFERENCE_SEED,
                                "intervals": {}}
@@ -555,18 +548,9 @@ def _stacked(results: Sequence[ClosedLoopSentence]) -> dict[str, np.ndarray]:
             "vertical_m": cat("vertical_m", 0, np.float64)}
 
 
-def _reference_sha256(directory: Path) -> str:
-    digest = hashlib.sha256()
-    for path in sorted(directory.glob("reference*")):
-        digest.update(path.name.encode("utf-8") + b"\0" + file_sha256(path).encode("utf-8") + b"\0")
-    return digest.hexdigest()
-
-
 @dataclass
 class Checked:
     flights: int
-    code_sha256: str
-    git: dict[str, Any]
     largest_state_difference_m: float = 0.0
     mismatches: dict[str, list[str]] = field(default_factory=dict)
 
@@ -575,15 +559,15 @@ class Checked:
         return not self.mismatches
 
 
-def check(instructions: Path, params: ExecutorParams, words: Words, *, git: dict[str, Any]) -> Checked:
-    """Read the reference again with the code on disk and compare (the section's comment)."""
+def check(instructions: Path, params: ExecutorParams, words: Words) -> Checked:
+    """Read the reference again with the code in this process and compare (the section's comment)."""
     directory = instructions / CLOSED_LOOP_DIRECTORY / CONFORMANCE
     payload = json.loads((directory / "reference.json").read_text(encoding="utf-8"))
     if payload["schema"] != REFERENCE_SCHEMA:
         raise ValueError(f"{directory / 'reference.json'} is not a {REFERENCE_SCHEMA} file")
     if payload["spec_sha256"] != words.spec.sha256 or payload["executor_params_sha256"] != params_sha256(params):
         raise ValueError(f"{directory} was read with another vocabulary spec or executor spec")
-    checked = Checked(flights=0, code_sha256=closed_loop_code_sha256(), git=git)
+    checked = Checked(flights=0)
     intervals = [float(name) for name in payload["intervals"]]
     for interval, (flights, results) in _reference_results(instructions, params, words, intervals,
                                                            device=DEVICE).items():
@@ -628,38 +612,20 @@ def check(instructions: Path, params: ExecutorParams, words: Words, *, git: dict
     return checked
 
 
-def passed_path(instructions: Path, code_sha256: str) -> Path:
-    return instructions / CLOSED_LOOP_DIRECTORY / CONFORMANCE / f"passed-{code_sha256[:12]}.json"
-
-
-def write_passed(instructions: Path, checked: Checked) -> Path:
-    """The record that the code on disk reads the reference as it was read (a passed check, from a clean checkout)."""
+def require_conforming_closed_loop(instructions: Path, executor: Path) -> tuple[ExecutorParams, dict[str, Any], Words]:
+    """The executor spec in ``executor`` opened for ``instructions`` (`replay.open_executor`: the labeller's and the
+    executor's checks), refused by name unless the closed-loop reading in this process reads the artefact's closed-loop
+    reference as it was read (the section's comment; D69: the one call before closed-loop sentences are read or flown
+    again). Returns what `replay.open_executor` returns, so the caller runs no check twice."""
+    opened = replay.open_executor(executor, instructions)
+    params, _, words = opened
+    checked = check(instructions, params, words)
     if not checked.passed:
-        raise ValueError(f"the closed-loop reference reads otherwise: {checked.mismatches}")
-    git = git_state()
-    if checked.git["dirty"] or git != checked.git or closed_loop_code_sha256() != checked.code_sha256:
-        raise RuntimeError("a passed record is written from a clean checkout only, for the code the check read with")
-    path = passed_path(instructions, checked.code_sha256)
-    write_json_atomic(path, {"schema": PASSED_SCHEMA, "written_utc": utc_now(), "git": git,
-                             "python": platform.python_version(), "code_sha256": checked.code_sha256,
-                             "reference_sha256": _reference_sha256(path.parent), "flights": checked.flights,
-                             "largest_state_difference_m": checked.largest_state_difference_m})
-    return path
-
-
-def require_conforming_closed_loop(instructions: Path) -> None:
-    """Refused unless the code on disk has read ``instructions``' closed-loop reference as it was read."""
-    code = closed_loop_code_sha256()
-    path = passed_path(instructions, code)
-    command = (f"python run_ts.py instruction_closed_loop --check --instructions {instructions} --executor <its spec> "
-               f"(Python {platform.python_version()})")
-    if not path.exists():
-        raise ValueError(f"the closed-loop code on disk ({code[:12]}) has not been checked against {instructions.name}'s "
-                         f"reference: {command}")
-    record = json.loads(path.read_text(encoding="utf-8"))
-    if (record["schema"] != PASSED_SCHEMA or record["code_sha256"] != code
-            or record["reference_sha256"] != _reference_sha256(path.parent)):
-        raise ValueError(f"{path} is not a passed record of this code against {instructions.name}'s reference: {command}")
+        shown = "; ".join(f"{name}: {', '.join(problems[:3])}" for name, problems in list(checked.mismatches.items())[:5])
+        raise ValueError(f"the closed-loop reading reads {instructions.name}'s closed-loop reference otherwise: {shown}")
+    print(f"checks: the closed-loop reading reads {checked.flights} reference flights as they were read, largest state "
+          f"difference {checked.largest_state_difference_m:.2g} m", flush=True)
+    return opened
 
 
 def replay_batch(batch: Batch, stored: dict[int, ClosedLoopSentence], words: Words) -> tuple[Batch, int]:

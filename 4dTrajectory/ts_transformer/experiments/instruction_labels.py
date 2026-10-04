@@ -4,7 +4,8 @@ with the spec of step 2, and write the sentences and the readout (vocabulary §4
 Writes ``sentences_{train,select,val}.npz``, ``labels.json``, ``readout.json`` and ``readout.md``
 into the signals directory (never over an existing file), and the labeller's conformance reference
 ``conformance/`` (`instructions.conformance`: a fixed sample of the train flights and what this code
-read) — `instruction_conformance` then writes the passed record later runners ask for. The candidate
+read), in the run that writes what it pins; every later process that uses the labeller on the artefact runs the
+check against it first (`require_conforming_labeller`, D73). The candidate
 runways are the artefact's own ``candidates.json`` (written with the signals).
 
     python run_ts.py instruction_labels --dir 4dTrajectory/outputs/POOLED/instruction_language/<name>
@@ -133,7 +134,6 @@ def main(argv: list[str] | None = None) -> int:
     if (directory / conformance.DIRECTORY).exists():
         parser.error(f"{directory / conformance.DIRECTORY} exists; an instruction artefact is never overwritten")
     started = time.perf_counter()
-    code = conformance.labeller_code_sha256()     # the code the workers read with
     spec = load_spec(directory)
     words = Words(spec)
     geometry_data = {code: geometry.to_dict() for code, geometry in load_candidates(directory).items()}
@@ -163,15 +163,13 @@ def main(argv: list[str] | None = None) -> int:
                   f"{time.perf_counter() - started:.0f}s", flush=True)
             if not readings:
                 raise SystemExit(f"no {split} flight was labelled ({len(refusals)} refused): nothing to write")
-            if conformance.labeller_code_sha256() != code:
-                raise SystemExit("the labeller's code changed while the workers read; label again")
-            write_sentences(directory, split, spec, readings, indices, code)
-            if split == conformance.SPLIT:
-                conformance.write_reference(directory, flights, outcomes, labelled, code_sha256=code, git=git_state())
+            write_sentences(directory, split, spec, readings, indices)
+            if split == conformance.SPLIT:                    # the reference, in the run that writes what it pins
+                conformance.write_reference(directory, flights, outcomes, labelled, git=git_state())
             summary[split] = {**summarise(records, refusals),
                               "class_usage": class_usage(np.concatenate([r.words for r in readings]), words)}
             labels[split] = {"labelled": records, "refused": refusals}
-    write_json_atomic(directory / "labels.json", {"spec_sha256": spec.sha256, "labeller_code_sha256": code,
+    write_json_atomic(directory / "labels.json", {"spec_sha256": spec.sha256, "git": git_state(),
                                                   "written_utc": utc_now(), **labels})
     write_json_atomic(directory / "readout.json", {"spec_sha256": spec.sha256, "written_utc": utc_now(),
                                                    "columns": list(COLUMNS), "elapsed_s": time.perf_counter() - started,
