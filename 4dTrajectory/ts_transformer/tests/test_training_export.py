@@ -84,6 +84,9 @@ def test_a_heading_band_is_the_judges_rows_and_verdicts():
         (j["row"], j["rows"], j["inside"]) for j in judged]
     assert (bands[0]["firstRow"], bands[0]["stopRow"], bands[1]["firstRow"], bands[1]["stopRow"]) == (2, 7, 7, 10)
     assert bands[1]["inside"] == [0, 1, 1]
+    # a word whose lead runs past the end has an empty band past the track: not judged, nothing drawn
+    (late,) = files.heading_bands(track, [(9, 130.0)], 2, len(track), 4.5)
+    assert (late["firstRow"], late["stopRow"], late["inside"]) == (11, 11, [])
 
 
 def test_a_tube_is_written_in_msl_beside_its_level_above_the_airport():
