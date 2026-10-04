@@ -45,7 +45,7 @@ repository root.
 | D19 | After a labelled go-around, the runway word that ends G is at the first level-off after the go-around climb, and not later than the row of the next "no level-off" (§4.6) | Decided | User, 2026-10-03 |
 | D20 | This design is a new version, on its own branch and worktree. It reads no artefact, executor spec or prior that an earlier version made (`v1`–`v6`). The running experiments keep their own checkouts | Decided | User, 2026-10-03 |
 | D21 | Identities bind format and data rules only. A code identity is a behaviour check on fixed inputs, never a hash of source bytes; data are identified by their flights, never by the bytes of a manifest (§9.2) | Decided | User, 2026-10-03 |
-| D22 | Altitude words use the grid "optimal 40 levels" of the altitude-grid proposal: 60 m steps from 0 to 1,260 m, 120 m steps to 2,700 m, 450 m steps to 5,400 m (§3.4) | Decided | User, 2026-10-03 |
+| D22 | Altitude words use the grid "optimal 40 levels" of the altitude-grid proposal: 60 m steps from 0 to 1,260 m, 120 m steps to 2,700 m, 450 m steps to 5,400 m (§3.4). Since D58 the heights are above the airport elevation, and the grid is fitted again on them | Decided | User, 2026-10-03 |
 | D23 | How the prior gets the frame of R (D5) and the glidepath height (D13). The own state of the aircraft has no frame. Every position and direction is in the candidate vectors, each in the frame of its own candidate. R is an input only as its candidate vector. No input of a row up to the first predicted step is computed from R. Each candidate vector has the height above its own glidepath; the value of R is the input of D13 (§6.1) | Decided | User, 2026-10-03 |
 | D24 | A candidate vector has no constant of its runway: no length, no elevation, no layout relative to R. Such a value comes back only as a variant that D39 selects (§6.1) | Decided | User, 2026-10-03 |
 | D25 | The ablation reads Δ = 2, 4, 8 s: each divides the 16 s observation of the prior. At each Δ, the motion inputs of a row come from the 2 s before the row (§4.8, §6.1) | Decided | User, 2026-10-03 |
@@ -81,6 +81,7 @@ repository root.
 | D55 | A value that a runner fits from data and the user chooses (D15) is measured on all train days, in a scratch directory, directly after the milestone that writes the runner; the user chooses before a later milestone reads the value. A smoke build uses the chosen spec, and its flights are a random sample for each airport and split (seed 1337), not the first flights of the sorted flight keys (a key starts with the callsign, so the first flights are mostly one airline). Why: the smoke of stage A fitted its own spec on approximately 400 train flights, 373 of them one airline, with one climb piece; every smoke reading of A9–A16 used it (§14.1 rules 7 and 12) | Decided | User, 2026-10-04 |
 | D56 | The values of D15, chosen: the candidate rounded to 0.25° of the spec measurement on all train days (stage A code at `42f3ff62`, 44,703 train flights, 227,559 descent pieces, 1,339 climb pieces). Descent nominals 1.5 / 2.5 / 3.0 / 4.5°, edges −0.5 / 2.0 / 2.75 / 3.75 / 10°; climb nominal (G false) 1.5°. End-of-piece height error p50 / p90: 15.0 / 51.0 m (fitted 1.51 / 2.45 / 3.09 / 4.45°: 14.7 / 47.8 m). Descent 3 is the published 3.0° glidepath of 24 of the 25 candidate runways (§3.5, §10) | Decided | User, 2026-10-04 |
 | D57 | One word clock: `time`. An open-loop sentence is said on its own rows, as a closed-loop sentence and a sentence of the prior are. The clocks `distance` and `track` (an open-loop word said where the flown aircraft reaches the observed track) are removed with the next change of the executor spec, not in the formal build of A18 (A19). Why: no training sentence and no reading of D34 uses them; the closed-loop reading has the one rule of the place (D42, D45); the clock is a parameter of the executor spec, so a change of it gives a new spec identity and a rebuild of the closed-loop data that it does not change (D21); and the batch and the single-flight executors each carry it. The question "how far do the observed words alone carry a flight" is read, when a readout needs it, with the closed-loop reading with no corrections (§4.9) | Decided | User, 2026-10-04 |
+| D58 | The altitude words are heights above the airport elevation E (the published field elevation, one value for each airport, `candidates.json` `reference.elevation_m`), not MSL. The labeller reads them from the height above E; the executor flies a level T at T + E MSL; the prior's own height is above E (§6.1). E, not the threshold of R: R can change during a sentence, and the thresholds of one airport differ by up to 28 m (KSTL 160.8–188.4 m). The spec measurement fits the grid of D22 again on the level-offs above E, with the D22 grid among the candidates; the user chooses (D55). Why: at a high airport (KDEN, approximately 1,650 m) the MSL words of an approach are far from what the five training airports (1–188 m) said for the same manoeuvre, and they fall in the coarse segments of the grid; and the day-to-day spread of the geometric height of an assigned level grows with the height above the altimeter-setting source, the airport. The cost: the round MSL levels that controllers assign fall on different words at each airport (3,000 ft MSL: 900 m at KMSY, 780 m at KRDU, 720 m at KSTL), and the prior does not get E (D24; only the variant `constants` of D39) (§3.4) | Decided | User, 2026-10-04 |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -100,10 +101,11 @@ repository root.
 
 ### 0.4 Plan
 
-1. Stage A (§14.2), on the branch `dev-two-tier-v4`, by another agent: A0–A17 are done; A18 builds the formal artefact
-   with the spec of D56 and makes the readings of D34 at Δ = 2, 4, 8 s. A19 (D57, one word clock) comes with the next
-   change of the executor spec.
-2. Claude checks A15–A18 and the formal artefact (§14.6).
+1. Stage A (§14.2), on the branch `dev-two-tier-v4`, by another agent: A0–A18 are done; the formal build of A18 was
+   stopped for D58. A19 and A20 (one word clock; the altitude words above the airport), then the spec measurement on all
+   train days, and the user chooses the grid (D55, D58). Then A21: the formal artefact and the readings of D34 at
+   Δ = 2, 4, 8 s.
+2. Claude checks A15–A21 and the formal artefact (§14.6).
 3. The user compares the readings of D34 and chooses Δ (D7, D11). The replay of the val days waits for the user.
 4. Stages B, C, D (§14.3–§14.5): the prior from the start, the post-training and the multi-aircraft work, the frontend.
 5. The user merges the branch.
@@ -162,6 +164,7 @@ repository root.
 | Executor cycle | 1 s. The executor hears the words at the start of each row |
 | Labeller | The program that reads a sentence from an observed track (`instructions/labeller/`) |
 | Judge | The part of the executor package that classifies what the executor flew (`autopilot/judge.py`) |
+| Airport elevation (E) | The published elevation of the airport (`candidates.json` `reference.elevation_m`). The altitude words are heights above it (D58) |
 | Decision altitude (DA) | The published DA of the LPV minimums of R, as a height above the threshold (`Runway.decision_height_above_threshold_m`) |
 | DA point | The first flown row where the aircraft, on the final of R and with G false, descends through the DA |
 | Final approach segment (FAS) cone | The LPV lateral containment: half-width 106.7 m (350 ft) at the threshold, larger with distance (FAA Order 8260.58D Formula 3-1-1, `flight_scenarios/fas_geometry.py`) |
@@ -176,7 +179,7 @@ repository root.
 |---|---|---|---|
 | 0 | Runway | a candidate runway (pointer), "go-around" | candidates of the airport + 2 |
 | 1 | Heading | relative heading, 5° grid (72 values) | 73 |
-| 2 | Altitude | target level, geometric MSL, 40 levels on three segments (60 / 120 / 450 m steps), 0–5,400 m; "no level-off" | 42 |
+| 2 | Altitude | target level, geometric height above the airport elevation, 40 levels on three segments (60 / 120 / 450 m steps), 0–5,400 m; "no level-off" | 42 |
 | 3 | Angle | level; descent 1–4; climb | 7 |
 | 4 | Speed | target ground speed, 5 m/s grid, 20–250 m/s (47 values); "unspecified" | 49 |
 
@@ -273,10 +276,15 @@ finer grid (§11.9).
 
 ### 3.4 Altitude column
 
-**Meaning.** "Descend (or climb) to level T and keep it" (7110.65BB 4-5-7, DESCEND AND MAINTAIN). T is geometric MSL.
-The direction comes from T and the present height. The angle column says how steep.
+**Meaning.** "Descend (or climb) to level T and keep it" (7110.65BB 4-5-7, DESCEND AND MAINTAIN). T is a geometric
+height above the airport elevation E (D58); the executor flies it at T + E MSL. The direction comes from T and the
+present height. The angle column says how steep. In this section a height is a height above E.
 
-**Grid (D22).** 40 levels on three segments, each segment uniform:
+**Reference (D58).** E is one value for each airport: the published field elevation. It is not the threshold of R: R
+can change during a sentence, and a level word must not change its meaning with it (as a heading word keeps its track,
+§3.3); and the thresholds of one airport differ by up to 28 m (KSTL 160.8–188.4 m), about half a step of the grid.
+
+**Grid (D22, D58).** 40 levels on three segments, each segment uniform:
 
 | Segment | Levels | Step | Largest rounding error |
 |---|---|---|---|
@@ -285,27 +293,40 @@ The direction comes from T and the present height. The angle column says how ste
 | 3 | 3,150, …, 5,400 m | 450 m | 225 m |
 
 The steps and the break points are constants of the vocabulary and go into the spec. A word is the nearest level; its
-meaning is an absolute height, the same at every airport and from every position. The grid is an exact
-dynamic-programming fit of at most three uniform segments that makes the squared rounding error of the observed
-level-offs smallest for 40 levels (§11.7).
+meaning is a height above the airport, the same at every airport and from every position. The grid of the table is an
+exact dynamic-programming fit on MSL level-offs: at most three uniform segments, break points on a 15 m grid, steps from
+a fixed set of 15–600 m, that make the squared rounding error of the observed level-offs smallest for 40 levels (§11.7).
+The spec measurement makes the same fit on the level-offs above E of the train days and writes it beside the grid of
+the table, each with its rounding error; the user chooses (D55, D58).
 
 **Why a coarser grid higher up.** (1) 99.7 % of the level words are under 3,000 m (§11.7). (2) A controller assigns a
-pressure altitude; the geometric height of one assigned level moves from day to day by about height × ΔT / 273 (ΔT: the
-day's temperature deviation; the model does not see it). At KRDU this is about 15 m at 600–900 m and about 90 m at
-2,000–3,000 m (§11.7). A fine step high up only divides this spread.
+pressure altitude, which the altimeter setting of the airport makes correct at the airport. The geometric height of one
+assigned level moves from day to day by about h × ΔT / 273, with h the height above the airport and ΔT the day's
+temperature deviation (the model does not see it); ICAO gives its cold-temperature corrections by the height above the
+altimeter-setting source (Claude's reading, the text not checked). At KRDU (E = 133 m) this is about 15 m at 600–900 m
+MSL and about 90 m at 2,000–3,000 m MSL (§11.7). A fine step high up only divides this spread.
 
 **What a coarse segment costs.** In segment 3 two assigned levels 1,000 ft (304.8 m) apart can round to one word, and
 a small change of level inside one step has no word. Such words are rare (above 2,700 m: approximately 0.3 % of the
 words, mostly the entry level at row 0). The 1,000 ft between opposite base legs (7110.65BB 5-9-1 b) is at low
-altitude, where the step is 60 m. At an airport above approximately 600 m elevation the final approach uses the 120 m
-segment (§6.4).
+altitude, where the step is 60 m. Because the heights are above the airport, the final approach lies in the 60 m
+segment at every airport (§6.4).
 
 **"No level-off".** "Descend at the angle in force. Do not level off." The executor flies the nominal angle of the
 class in force and has no other law for it (§5.5, §5.7). The judge stops the flight at the threshold or at the ground.
 
-**Why MSL and not height above the threshold.** Controllers assign MSL levels. Relative to the threshold elevation, the
-level distributions of the five airports become less similar, not more (§11.2). KSJC has 28 % of its level words on
-levels that the other four airports almost never use. This is airspace, not frame.
+**Why above the airport and not MSL (D58).** A word must mean the same manoeuvre at every airport (principle 4). In MSL,
+a high airport is outside what the training airports said: at KDEN (E approximately 1,650 m) an intercept of the final
+600–900 m above the airport is at approximately 2,250–2,550 m MSL, a height that the five training airports (E = 1–188
+m) use only far out, and it falls in the 120 m segment, a downwind in the 450 m segment. Above E, the same manoeuvre is
+the same word, in the 60 m segment. The spread of an assigned level also grows with the height above the airport, not
+above the sea (the grid above). The cost: controllers assign round MSL levels, and above E one assigned level is a
+different word at each airport (3,000 ft MSL: 900 m at KMSY, 780 m at KRDU, 720 m at KSTL). The prior does not get E
+(D24), so it cannot know where the round MSL levels lie; its level words spread over one to three steps more. This
+changes where the aircraft levels by at most one to three steps; the final is held with angle words and the corrections
+of §4.9, not with level words. The level words of the five airports differ mainly by their airspace in both frames
+(§11.2: KSJC has 28 % of its level words on levels that the other four airports almost never use); that measurement
+covers only airports between 1 and 188 m.
 
 **Envelope.** The tube from the row of the word: max(T, h0 − s·tan γ_hi) − ε ≤ h ≤ max(T, h0 − s·tan γ_lo) + ε while
 it descends, T ± ε after it arrives (s is the horizontal distance flown from the row of the word). ε depends on the
@@ -406,15 +427,15 @@ climbs above them, so they apply. Rules 1–4 apply while G is true as at every 
 ### 3.8 Example
 
 A KRDU arrival that lands on 23R (course 225.0°). At row 0 it is on the left downwind of 23R: 3.0 km before the
-threshold, 5.0 km left of the final, track 045°, level at 1,200 m MSL, 115 m/s. Only rows with a word are shown; an empty
-cell is "unchanged". Relative headings are given in degrees.
+threshold, 5.0 km left of the final, track 045°, level at 1,080 m above the airport (E = 133 m; 1,213 m MSL), 115 m/s.
+Only rows with a word are shown; an empty cell is "unchanged". Relative headings and heights above the airport are given.
 
 | t (s) | Runway | Heading | Altitude | Angle | Speed | What happens |
 |---|---|---|---|---|---|---|
-| 0 | 23R | +180 | 1,200 m | level | 115 m/s | Expected runway 23R. Downwind, level |
+| 0 | 23R | +180 | 1,080 m | level | 115 m/s | Expected runway 23R. Downwind, level |
 | 40 | | | | | 105 m/s | Speed reduction |
 | 106–134 | | +175 … +90 (one word each row) | | | | Left turn onto the base leg, 4 s before the track |
-| 120 | | | 900 m | descent 2 | | Descend to 900 m |
+| 120 | | | 780 m | descent 2 | | Descend to 780 m above the airport |
 | 156–200 | | +85 … 0 (one word each row) | | | | Left turn onto the final, with heading words (D2) |
 | 204 | | | | | unspecified | Capture row; the pilot's own speed (D4) |
 | 210 | | | no level-off | descent 3 | | Final descent |
@@ -434,7 +455,8 @@ them with the executor and adds the correction words; its sentences are the trai
 ### 4.1 Signals, cut and gate
 
 - **Signals** come from the ts data plane (`build_series`): the altitude repaired at read time, MSL, 2 s rows on even
-  UTC seconds, the airport frame. The test days are sealed: the labeller never opens them (contract C32).
+  UTC seconds, the airport frame. The test days are sealed: the labeller never opens them (contract C32). The labeller
+  reads the altitude words from the height above the airport elevation, MSL − E (D58).
 - **Smoothing:** centred moving means of the track (6 s), the altitude (10 s) and the ground speed (10 s). The flown
   distance is the integral of the smoothed ground speed.
 - **Cut** (`read.admit`). A landing passage is a row where the flight crosses the threshold plane of its landed runway
@@ -470,7 +492,7 @@ glidepath angle or an LPV DA is refused before labelling (the judge needs all th
 
 ### 4.4 Altitude and angle words
 
-**Pieces.** The smoothed altitude is fitted against the flown distance by straight pieces. From the first row of a
+**Pieces.** The smoothed height above the airport elevation is fitted against the flown distance by straight pieces. From the first row of a
 piece, the piece grows as long as the least-squares line through its rows keeps every residual within 10 m (the fit
 residual). A piece has at least two rows.
 
@@ -816,6 +838,7 @@ executor uses only the vocabulary; a parameter mined from data shows that it doe
 | The vocabulary spec | Grids, nominal angles, tolerances, lead, turn-rate limit, bank limit, speed change rate |
 | The words of each row | The targets |
 | The course of each candidate runway (`candidates.json`) | Conversion of heading words (§5.4) |
+| The airport elevation E (`candidates.json`) | Conversion of level words: a level T is flown at T + E MSL (§5.5, D58) |
 | The distance to the threshold of R | The deceleration to the approach speed (§5.6) |
 | The aircraft: aerodynamic data, installed thrust, published maximum landing mass, published approach speed | Dynamics and "unspecified" speed |
 
@@ -864,7 +887,8 @@ judge records each limit that bound (§5.8).
 
 The inner path-angle loop: γ̇* = sat((γ_ref − γ) / τ_γ, ±γ̇_max), τ_γ = 2 s. γ̇_max is twice the smallest rate that keeps
 an entry into the steepest descent class inside its tube: 2 × V·γ_lo² / (2ε), with γ_lo the lower edge of the steepest
-class and ε the narrowest level band of the grid. The modes choose γ_ref (climbing positive):
+class and ε the narrowest level band of the grid. A level T is the height T + E MSL (D58); h is the height of the
+aircraft above E. The modes choose γ_ref (climbing positive):
 
 | Words in force | Mode | γ_ref |
 |---|---|---|
@@ -969,8 +993,9 @@ the model says "go-around" before the DA point, the flight continues (§3.2).
   From the first predicted step on, every input that comes from a state (the own state, the candidate vectors, the
   motion) comes from the flown states of the closed-loop reading (§4.9), not from the observed track. The words in
   force are those of the closed-loop sentence, corrections included. In closed loop the states come from the executor.
-- **Own state (D5, D23).** The own state of the aircraft has no frame: its MSL height (the level words are MSL), its
-  ground speed and its vertical rate.
+- **Own state (D5, D23, D58).** The own state of the aircraft has no frame: its height above the airport elevation (the
+  level words are above it), its ground speed and its vertical rate. No MSL height: with it, the airport elevation (a
+  constant of the airport) would be an input (D24).
 - **Frame (D5, D23).** Every position and every direction is in the candidate vectors. Each candidate vector gives the
   aircraft in the frame of that candidate: the distance to its threshold along its course, the offset right of its
   final, the height above its threshold, the motion direction minus its course (sine, cosine)
@@ -998,7 +1023,10 @@ the model says "go-around" before the DA point, the flight continues (§3.2).
     R46 shows that it uses an airport identity when it gets one (§11.1).
 
   The constants are also not necessary. The length is a cause only together with the aircraft type, and the prior has
-  no aircraft type. The elevation is the MSL height minus the height above the threshold. Which of two parallel runways
+  no aircraft type. The elevation is not needed: the words and the own height are above the airport, and each candidate
+  gives the height above its own threshold. (The own height minus a candidate's height above its threshold is that
+  threshold's height relative to E: 0–28 m at the five airports, a small constant of the runway that two physical inputs
+  give together.) Which of two parallel runways
   is the left one shows at each step in the offsets right of their finals (the value of the left runway is always
   larger). The relative positions of all candidates together still show the layout of the airport. That is real
   geometry, and the prior has it; only the held-out airports of D39 can measure how much the prior uses it. A constant comes back
@@ -1081,7 +1109,7 @@ come from:
 
 | What the airport needs | Source |
 |---|---|
-| Candidate runways and their geometry: threshold, course, TCH, glidepath angle, LPV DA | FAA CIFP and the runway data (§4.2 refuses a candidate without them) |
+| Candidate runways and their geometry: threshold, course, TCH, glidepath angle, LPV DA; the airport elevation | FAA CIFP and the runway data (§4.2 refuses a candidate without them) |
 | The procedure data for the procedure masks: the FAF, the LPV cone | FAA CIFP procedure details |
 | The landings in the 30 min before the step | The airport's tracks (offline) or a live surveillance feed |
 | The dynamics of each aircraft type | Independent of the airport |
@@ -1095,10 +1123,11 @@ The design makes sure of three more points:
 3. **The check is a flight.** Each fold of D39 runs the full closed loop at its held-out airport (the prior speaks,
    the executor flies, the judge decides), as well as the teacher-forced loss. The final test on KAUS is the same.
 
-**Known limit: the altitude grid.** The altitude words are MSL, and the 60 m steps reach to 1,260 m (§3.4). At an
-airport whose elevation is above approximately 600 m, the levels of the final approach fall in the 120 m segment,
-coarser than at the five training airports. The five airports and KAUS lie below 200 m, so this design does not meet
-the limit.
+**Heights and speeds at a high airport.** The altitude words are above the airport elevation (D58), so a level word means
+the same height above the airport, and the final approach lies in the 60 m segment, at every airport. The speed words
+are ground speeds: at a high airport one indicated airspeed is a larger ground speed (at E = 1,650 m approximately
+8 %, about 6 m/s at an approach speed of 70 m/s: one step). The speed words of a high airport thus lie about one step
+above those of the training airports for the same phase. The five airports and KAUS lie below 200 m.
 
 ---
 
@@ -1275,7 +1304,8 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | Turn-rate limit | 4.7°/s | Spec, measured (p99.9) |
 | Bank limit | 32° | Spec, measured (p99.9) |
 | Roll rate p | 5°/s | FAA Order 8260.3G Appendix E §4 ¶6.a ("roll-in rates of up to five degrees per second") |
-| Level grid | 60 m to 1,260 m, 120 m to 2,700 m, 450 m to 5,400 m MSL; 40 levels | D22 (fit of the altitude-grid proposal) |
+| Altitude reference | The airport elevation E; a level T is T + E MSL | D58 |
+| Level grid | 60 m to 1,260 m, 120 m to 2,700 m, 450 m to 5,400 m above E; 40 levels; fitted again on the level-offs above E, the user chooses | D22 (fit of the altitude-grid proposal, on MSL), D58 |
 | Level envelope ε | half the larger gap to the neighbouring levels + 10 m: 40 m (0–1,200 m), 70 m (1,260–2,580 m), 235 m (2,700–5,400 m); "no level-off" 40 m | D22, D52 |
 | Level detection | ≥ 20 s, rows within 25 m of the piece's median | Labeller constant (§4.4) |
 | Descent classes | edges −0.5 / 2.0 / 2.75 / 3.75 / 10°; nominal 1.5 / 2.5 / 3.0 / 4.5° | Spec; k-means on the train days, weight length² (D54), rounded to 0.25° (D56) |
@@ -1400,7 +1430,8 @@ p50 / p95 / largest: the chosen grid (40 levels) 17 / 30 / 58 m; the same shape 
 1,200 and 2,400 m (44 levels) 17 / 38 / 79 m; a uniform grid of 48 levels over the range 35 / 55 / 57 m. The
 `instruction-v3` grid (30 m, 182 classes) has at most 15 m. These numbers come from a one-off script of that proposal.
 The spec measurement gives them from a runner (`instruction_spec`, `level_rounding`): on all train days with the labeller
-of stage A (code at `42f3ff62`, 25,654 level words), 16 / 34 / 223 m; the largest is in the 450 m segment.
+of stage A (code at `42f3ff62`, 25,654 level words), 16 / 34 / 223 m; the largest is in the 450 m segment. These are MSL
+heights; since D58 the measurement reads the heights above the airport elevation (A20).
 
 - In `v6_20261002`, 99.7 % of the level words are under 3,000 m; its 30 m grid used 116 of its 182 classes.
 - The geometric height of one assigned pressure level moves from day to day by about height × ΔT / 273 (ΔT: the day's
@@ -1687,24 +1718,14 @@ of Claude's check (`readouts/2026-10-04_stage_a_check.zh.md` §2), those of A15�
 | A16 | An overshoot corrected in its row | D53 |
 | A17 | The smoke sample random for each airport and split | D55 |
 
-**A18. The chosen spec and the formal artefact (D56).** After A17.
+**A18. The chosen spec (D56).** Done: `experiments/instruction_spec.py` `--candidate NAME` (required when the runner
+measures) takes the descent nominals and edges and the climb nominal of that row of `rounding_candidates` (`fitted`,
+`0.5`, `0.25`, `0.1`); `measurements.json` records the chosen row beside the fitted values. Its formal build was stopped
+for D58 (the user, 2026-10-04): the directories `4dTrajectory/outputs/POOLED/instruction_language/v7_20261004/` and
+`4dTrajectory/outputs/POOLED/executor/v12_20261004/` are superseded. They are deleted with the user's go, never kept
+beside the formal artefact of A21.
 
-- `experiments/instruction_spec.py`: `--candidate NAME` (required when the runner measures): the spec takes the descent
-  nominals and edges and the climb nominal of that row of `rounding_candidates` (`fitted`, `0.5`, `0.25`, `0.1`);
-  `measurements.json` records the chosen row beside the fitted values. Tests: the spec holds the chosen row; a name not
-  in the rows is refused.
-- The formal artefact (the user, 2026-10-04: "完成正式数据的读数"), from a clean checkout, into new directories:
-  `4dTrajectory/outputs/POOLED/instruction_language/v7_20261004/` (signals of every development flight, the spec with
-  `--candidate 0.25`, labels, the labeller conformance, the closed-loop reading at Δ = 2, 4, 8 s on every split) and
-  `4dTrajectory/outputs/POOLED/executor/v12_20261004/` (the executor spec, word clock `track` as in the smokes, its
-  conformance).
-- The readings of D34 at Δ = 2, 4, 8 s: the closed-loop summary of every split (items 1–3) and the closed-loop replays
-  (item 4) of train (400 flights an airport, seed 1337) and select (every labelled flight). The val replay waits for the
-  user (as for every executor before). The data are made read-only with a `SHA256SUMS` beside them. The report gives
-  the readings side by side; it sets no criterion (D7).
-
-**A19. One word clock (D57).** With the next change of the executor spec, not before: the executor spec
-`v12_20261004` is in the formal artefact of A18, and a new spec needs a new closed-loop reading.
+**A19. One word clock (D57).** Together with A20: A20 changes the executor, and one rebuild serves both.
 
 - Remove the clocks `distance` and `track`: `autopilot/sentence.py` (`DistanceClock`, `TrackClock`, `CLOCKS`),
   `autopilot/single.py` (`word_clock`), `autopilot/replay.py` (`word_clock`), `ExecutorParams.word_clock`,
@@ -1715,10 +1736,46 @@ of Claude's check (`readouts/2026-10-04_stage_a_check.zh.md` §2), those of A15�
 - The readout "the observed words alone" is not built here. When a readout needs it, it is the closed-loop reading with
   no corrections (a runner setting).
 
+**A20. The altitude words above the airport (D58).** After A18; together with A19.
+
+- Vocabulary (`instructions/words.py`, `instructions/spec.py`): a level is a height above the airport elevation E;
+  `Words` maps a height above E to its level and a level to its height, with E as an argument (as the course for the
+  heading words). E is `reference.elevation_m` of the airport in `candidates.json`. A new reading name and new names for
+  every changed format (§14.1 rule 5).
+- Labeller (`instructions/labeller/`): the altitude words from the smoothed height above E; the tubes of §3.4 and grammar
+  rules 3 and 6 on the height above E. The path angles, the level detection and the pieces do not depend on a constant
+  offset, so the descent and climb classes of D56 stay.
+- Executor (`autopilot/vertical.py`, `autopilot/executor.py`, `autopilot/single.py`) and judge (layer 2): a level T is
+  flown and judged at T + E MSL. The DA check, the crossings and the ground contact keep their MSL and threshold
+  references. The closed-loop reading keeps e_h (a difference) and stores MSL heights (D51).
+- Spec measurement (`instructions/measure.py`, `experiments/instruction_spec.py`): the grid fit of §3.4 as a step of the
+  runner: on the level-offs above E of the train days (row 0 apart), at most three uniform segments, break points on a
+  15 m grid, steps from 15, 30, 45, 60, 75, 90, 120, 150, 180, 240, 300, 450 and 600 m, 40 levels, the smallest sum of
+  squared rounding errors (exact dynamic programming). It writes this fit and the grid of D22, each with its rounding
+  error of the level words (p50 / p95 / largest). `--grid NAME` (required when the runner measures, as `--candidate`)
+  takes the chosen grid into the spec; `measurements.json` records it.
+- Tests: two airports with different E give one word for one height above E; the executor levels a word T at T + E MSL;
+  rules 3 and 6 at an airport with E = 188 m; the grid fit finds a known grid in synthetic level-offs; `--grid` refuses
+  a name that is not in the rows.
+- Then (§14.1 rule 12): the spec measurement on all train days in a scratch directory, with A19 and A20. The report
+  gives the grid candidates and their rounding errors, and the rows of D56 again (they must not change). The user
+  chooses the grid (D55).
+
+**A21. The formal artefact (D56, D58).** After the user's choice of the grid.
+
+- The formal artefact, from a clean checkout, into new directories:
+  `4dTrajectory/outputs/POOLED/instruction_language/v8_<date>/` (signals of every development flight, the spec with `--candidate 0.25` and the chosen `--grid`, labels, the labeller
+  conformance, the closed-loop reading at Δ = 2, 4, 8 s on every split) and
+  `4dTrajectory/outputs/POOLED/executor/v13_<date>/` (the executor spec, its conformance).
+- The readings of D34 at Δ = 2, 4, 8 s: the closed-loop summary of every split (items 1–3) and the closed-loop replays
+  (item 4) of train (400 flights an airport, seed 1337) and select (every labelled flight). The val replay waits for the
+  user (as for every executor before). The data are made read-only with a `SHA256SUMS` beside them. The report gives
+  the readings side by side; it sets no criterion (D7).
+
 ### 14.3 Stage B: prior
 
 **Start.** After Claude's check of stage A (§14.6). The code is written and tested on a sample of the formal artefact
-`v7_20261004` at Δ = 2 s, read-only. The smoke artefacts of stage A are not used: their spec is not the spec of D56
+of A21 at Δ = 2 s, read-only. The smoke artefacts of stage A are not used: their spec is not the spec of D56 and D58
 (D55). The formal runs of B5 need the chosen Δ (§0.4 item 3). The rules of §14.1 apply.
 
 **Written from §6, not patched from the archive.** The archived `prior/` (`archive/two_tier_v3_2026_10/prior/`) stays
@@ -1742,7 +1799,7 @@ the aircraft attention of a one-aircraft scene, the checkpoint formats `v3`–`v
 
 - The rows: before the first predicted step, the observed states; from it on, the flown states of the closed-loop
   sentences, on the rows of the chosen Δ.
-- The own state: MSL height, ground speed, vertical rate; the motion from the displacement in the 2 s before the row.
+- The own state: height above the airport elevation (D58), ground speed, vertical rate; the motion from the displacement in the 2 s before the row.
 - One vector for each candidate: the distance before its threshold along its course, the offset right of its final,
   the height above its threshold, the motion direction minus its course (sine, cosine), the height above its glidepath
   (straight-line reference), the landings on it in the 30 min before the step. No constant of the runway, except in the
@@ -1823,15 +1880,17 @@ frontend reads the reading name, not the spec sha (§9.2 #9). After stage D the 
 ### 14.6 What Claude checks before stage B
 
 The check of A0–A14 is done (`readouts/2026-10-04_stage_a_check.zh.md`, at `ab295b18`; its points became D48–D52).
-Before stage B, Claude checks A15–A18 and the formal artefact:
+Before stage B, Claude checks A15–A21 and the formal artefact:
 
-1. D48–D56 against the code: done at `688e945e` (the code of the formal build); again only for code changed after it.
-2. The targeted tests of A15–A18 pass on the commit of the formal build (run again); the full suite of that commit
+1. D48–D56 against the code: done at `688e945e`. D57 and D58, and the code changed after `688e945e`, against the code of
+   the formal build of A21.
+2. The targeted tests of A15–A21 pass on the commit of the formal build (run again); the full suite of that commit
    passed (§14.1 rule 4; its log).
-3. The formal artefact: the spec holds the values of D56 and its measurement records the chosen row; the labeller, the
-   executor and the closed-loop conformance records pass for the code of the build; at each Δ, the closed-loop sentences
-   of the replays give their flown states again on the 2 s rows, and the rule of D50 holds on every stored row; the
-   readings of D34 (items 1–4) exist for every Δ, each split that A18 reads and each airport.
-4. No write under a live root except the new directories of A18; no existing directory under `4dTrajectory/outputs/`
-   changed; the `SHA256SUMS` beside the formal data match.
+3. The formal artefact: the spec holds the values of D56 and the grid that the user chose (D58), and its measurement
+   records both choices; the labeller, the executor and the closed-loop conformance records pass for the code of the
+   build; at each Δ, the closed-loop sentences of the replays give their flown states again on the 2 s rows, and the
+   rule of D50 holds on every stored row; the readings of D34 (items 1–4) exist for every Δ, each split that A21 reads
+   and each airport.
+4. No write under a live root except the new directories of A21; no existing directory under `4dTrajectory/outputs/`
+   changed; the superseded directories of A18 deleted; the `SHA256SUMS` beside the formal data match.
 5. Nothing in the archive was edited after the move.
