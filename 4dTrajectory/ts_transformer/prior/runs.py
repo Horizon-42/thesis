@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol, Sequence
 
+import numpy as np
+
 from ts_transformer.prior.batch import SentenceRows
 
 TRAIN, SELECT = "train", "select"
@@ -78,3 +80,23 @@ def held_out_sentences(source: SentenceSource, run: Run) -> list[SentenceRows]:
     if run.held_out is None:
         raise ValueError("a run on every airport has no held-out airport")
     return _read(source, SELECT, (run.held_out,))
+
+
+#: The seed of a smoke run's sample (D55): the same flights at every run.
+SAMPLE_SEED = 1337
+
+
+def sampled_run_data(source: SentenceSource, run: Run, per_airport: int, seed: int = SAMPLE_SEED) -> RunData:
+    """`run_data` on a random sample of at most ``per_airport`` sentences of each training airport and split (a smoke
+    run, D55: never the first sentences in order), drawn with ``seed``."""
+    rng = np.random.default_rng(seed)
+
+    def sample(split: str) -> list[SentenceRows]:
+        out = []
+        for airport in run.training_airports:
+            sentences = source.sentences(split, airport)
+            keep = np.sort(rng.choice(len(sentences), size=min(per_airport, len(sentences)), replace=False))
+            out += [sentences[i] for i in keep]
+        return out
+
+    return RunData(run, sample(TRAIN), sample(SELECT))

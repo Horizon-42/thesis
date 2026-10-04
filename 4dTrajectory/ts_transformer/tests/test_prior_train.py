@@ -3,6 +3,7 @@ the select days, and a fold that never reads its held-out airport in training.""
 
 from __future__ import annotations
 
+import json
 import zlib
 
 import numpy as np
@@ -175,3 +176,89 @@ def test_a_non_finite_loss_stops_the_training(words):
         nn.init.constant_(model.heads["speed"].weight, float("nan"))
     with pytest.raises(FloatingPointError, match="epoch 1"):
         train(model, data, TrainConfig(tokens_per_batch=400, max_epochs=2), CPU, lambda line: None)
+
+
+
+def procedure_root(tmp_path, airport, runways):
+    """A tmp CIFP procedure tree with an RNAV(GPS) document for each of ``runways`` at ``airport`` (only its bytes are
+    read here)."""
+    root = tmp_path / "procedures"
+    details = root / airport / "procedure-details"
+    details.mkdir(parents=True)
+    index = {"runways": [{"runwayIdent": f"RW{r}", "procedures": [{"procedureFamily": "RNAV_GPS",
+                                                                   "procedureUid": f"R{r}"}]} for r in runways]}
+    (details / "index.json").write_text(json.dumps(index))
+    for r in runways:
+        (details / f"R{r}.json").write_text(json.dumps({"runway": r}))
+    return root
+
+
+def run_runner(tmp_path, monkeypatch, *more, airports=("KXXX",)):
+    """`prior_train.main` on a synthetic artefact of ``airports``: every write root under tmp, the landings from the
+    artefact's roster records (never a live roster), the closed-loop check of the runner stubbed (the synthetic artefact
+    has no reference). Returns ``(artefact, landings, out, argv, checked)``."""
+    from ts_transformer.experiments import prior_train
+    from ts_transformer.prior.landings import roster_landings
+    from ts_transformer.tests.support import fixture_days, prior_artefact
+
+    artefact = tmp_path / "artefact"
+    _, records = prior_artefact(artefact, interval_s=4.0, airports=airports)
+    landings = {code: roster_landings(records[code], ("09", "09L"), fixture_days()) for code in airports}
+    checked = []
+    monkeypatch.setattr(prior_train, "require_conforming_closed_loop", checked.append)
+    monkeypatch.setattr(prior_train, "airport_landings", lambda geometries, days: landings)
+    procedures = tmp_path / "procedures"
+    for code in airports:
+        procedure_root(procedures, code, ("09", "09L"))
+    out = tmp_path / "run"
+    argv = ["--instructions", str(artefact), "--row-interval-s", "4", "--variant", "full", "--out", str(out),
+            "--sample", "1", "--device", "cpu", "--procedure-root", str(procedures / "procedures"),
+            "--d-model", "32", "--layers", "1", "--heads", "4", "--feedforward", "64", "--max-epochs", "2",
+            "--warmup-steps", "1", *more]
+    assert prior_train.main(argv) == 0
+    return artefact, landings, out, argv, checked
+
+
+def test_the_runner_trains_a_smoke_run_into_a_new_directory(tmp_path, monkeypatch):
+    from ts_transformer.experiments import prior_train
+    from ts_transformer.prior.checkpoint import load_checkpoint
+    from ts_transformer.prior.source import artefact_identity
+
+    artefact, landings, out, argv, checked = run_runner(tmp_path, monkeypatch)
+    assert checked == [artefact]
+    assert {p.name for p in out.iterdir()} == {"checkpoint.pt", "config.json", "memory.json", "history.json",
+                                              "procedure_masks.json"}
+    config = json.loads((out / "config.json").read_text())
+    assert config["sample"] == {"per_airport_and_split": 1, "seed": 1337}
+    assert config["sentences"] == {"train": 1, "select": 1}
+    memory = json.loads((out / "memory.json").read_text())
+    assert memory["batches"][0]["sentences"] == 1 and memory["gpu_peak_reserved_bytes"] is None
+    masks = json.loads((out / "procedure_masks.json").read_text())
+    assert set(masks["procedure_data"]["KXXX"]) == {"09", "09L"}
+    loaded = load_checkpoint(out / "checkpoint.pt", artefact_identity(artefact, 4.0, landings))
+    assert loaded.model.config.d_model == 32
+    assert loaded.run["sample"] == config["sample"]                  # a smoke checkpoint says so itself
+    with pytest.raises(SystemExit):
+        prior_train.main(argv)                                       # never over an existing run
+
+
+def test_a_fold_trains_without_its_held_out_airport_and_scores_it_on_its_select_days(tmp_path, monkeypatch):
+    _, _, out, _, _ = run_runner(tmp_path, monkeypatch, "--held-out", "KYYY", "--sample", "2",
+                                 airports=("KXXX", "KYYY"))
+    config = json.loads((out / "config.json").read_text())
+    assert config["run"] == {"airports": ["KXXX", "KYYY"], "held_out": "KYYY"}
+    assert config["sentences"] == {"train": 2, "select": 2}         # KXXX's alone
+    held_out = json.loads((out / "held_out.json").read_text())
+    assert held_out["airport"] == "KYYY" and held_out["steps"] > 0 and np.isfinite(held_out["loss_per_step"])
+
+
+def test_the_memory_check_takes_the_batch_of_the_most_row_candidates(words):
+    """§12 B3: the batches checked are the one with the most padded rows × sentences × candidates and the one of the
+    longest sentences."""
+    from ts_transformer.prior.train import largest_batches
+
+    rng = np.random.default_rng(0)
+    sentences = [prior_sentence(rng, words, rows=n, candidates=k) for n, k in ((30, 2), (30, 2), (60, 2), (31, 8))]
+    most, longest = largest_batches(sentences, 64)
+    assert [sentences[i].rows for i in most] == [31] and sentences[most[0]].candidates.shape[1] == 8
+    assert [sentences[i].rows for i in longest] == [60]

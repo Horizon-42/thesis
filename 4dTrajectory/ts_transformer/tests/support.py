@@ -365,12 +365,15 @@ def prior_closed_loop_sentence(signals, words, *, interval_s, first_row=0, go_ar
         timed_out=False)
 
 
-def prior_artefact(directory, interval_s=2.0):
-    """A tmp instruction artefact at ``directory`` (created) as the prior reads it (vocabulary §6 items 3, 4): two
-    straight-in flights onto `parallel_airport`'s "09" on each development split (the second with a go-around), the
-    spec, the candidates with their vertical paths, and each split's closed-loop file at Δ = ``interval_s``
-    (`prior_closed_loop_sentence`). Returns ``(words, roster records)``: the tracks roster's records of the flights'
-    landings (`prior.landings`)."""
+def prior_artefact(directory, interval_s=2.0, airports=("KXXX",)):
+    """A tmp instruction artefact at ``directory`` (created) as the prior reads it (vocabulary §6 items 3, 4): at each of
+    ``airports`` (`parallel_airport` under that code) two straight-in flights onto "09" on each development split (the
+    second with a go-around), the spec, the candidates with their vertical paths, and each split's closed-loop file at
+    Δ = ``interval_s`` (`prior_closed_loop_sentence`). Returns ``(words, roster records by airport)``: the tracks
+    roster's records of the flights' landings (`prior.landings`)."""
+    from dataclasses import replace
+
+    from ts_transformer.instructions.airport import AirportGeometry
     from ts_transformer.instructions.artefact import (
         SPLITS, closed_loop_path, write_candidates, write_closed_loop, write_signals, write_spec,
     )
@@ -378,25 +381,27 @@ def prior_artefact(directory, interval_s=2.0):
 
     spec = instruction_spec()
     words = Words(spec)
-    flights, records = {}, []
-    for split in SPLITS:
-        flights[split] = []
-        for i in range(2):
-            legs = [(160, 0.0, 75.0 - 2.0 * i, -1.5)]
-            flight = instruction_flight(*fly_legs(legs, 90.0, 750.0 + 30.0 * i, -400.0, 0.0),
-                                        dataset_id=f"KXXX:F{split}{i}", split=split)
-            flights[split].append(flight)
-            records.append({"flight_key": f"F{split}{i}", "outcome": "assigned", "runway": "09",
-                            "landing_time_utc": flight.landing_time_utc})
+    flights = {split: [] for split in SPLITS}
+    records = {code: [] for code in airports}
+    for code in airports:
+        for split in SPLITS:
+            for i in range(2):
+                legs = [(160, 0.0, 75.0 - 2.0 * i, -1.5)]
+                flight = instruction_flight(*fly_legs(legs, 90.0, 750.0 + 30.0 * i, -400.0, 0.0),
+                                            dataset_id=f"{code}:F{split}{i}", split=split)
+                flights[split].append(replace(flight, airport=code))
+                records[code].append({"flight_key": f"F{split}{i}", "outcome": "assigned", "runway": "09",
+                                      "landing_time_utc": flight.landing_time_utc})
     directory.mkdir(parents=True)
     write_signals(directory, flights, {"counts": {}, "test_days": {"flights_not_opened": 0}, "sources": []},
                   fixture_days())
-    write_candidates(directory, {"KXXX": parallel_airport()})
+    write_candidates(directory, {code: AirportGeometry.from_dict({**parallel_airport().to_dict(), "code": code})
+                                 for code in airports})
     write_spec(directory, spec, {"n": 1}, {"git": {"head": "test", "dirty": False}})
     (directory / "closed_loop").mkdir()
     for split in SPLITS:
-        sentences = {i: prior_closed_loop_sentence(flight, words, interval_s=interval_s, go_around=i == 1)
-                     for i, flight in enumerate(flights[split])}
+        sentences = {k: prior_closed_loop_sentence(flight, words, interval_s=interval_s, go_around=k % 2 == 1)
+                     for k, flight in enumerate(flights[split])}
         write_closed_loop(closed_loop_path(directory, split, interval_s), spec, executor_params_sha256="test",
                           row_interval_s=interval_s, start_row=sentences[0].start, sentences=sentences)
     return words, records

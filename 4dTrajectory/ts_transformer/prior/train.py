@@ -153,3 +153,40 @@ def train(model: Prior, data: RunData, config: TrainConfig, device: torch.device
         if stale >= config.patience:
             break
     return TrainResult(best_state, best_epoch, history)
+
+
+def largest_batches(sentences: Sequence[SentenceRows], tokens_per_batch: int) -> list[list[int]]:
+    """The batches of `length_groups` that may need the most memory: the one with the most padded row-candidates
+    (the candidate tokens) and the one of the longest sentences (the time attention, whose cost can grow with the
+    square of the rows) — one batch when they are the same."""
+    groups = length_groups([s.rows for s in sentences], tokens_per_batch, None)
+    most = max(groups, key=lambda group: max(sentences[i].rows for i in group) * len(group)
+               * max(sentences[i].candidates.shape[1] for i in group))
+    longest = max(groups, key=lambda group: max(sentences[i].rows for i in group))
+    return [most] if longest == most else [most, longest]
+
+
+def largest_batch_memory(model: Prior, sentences: Sequence[SentenceRows], config: TrainConfig, device: torch.device
+                         ) -> dict[str, Any]:
+    """One teacher-forced forward and backward pass of each of `largest_batches`, the gradients cleared: the peak GPU
+    memory the allocator reserved on a CUDA ``device`` (None on the CPU), the memory the training adds on top (AdamW's
+    two moments, the gradients and the copy of the best state: four times the parameters) and each batch's shape — the
+    check at the formal size before a run (§12 B3)."""
+    model.train()
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+        torch.cuda.reset_peak_memory_stats(device)
+    shapes = []
+    for group in largest_batches(sentences, config.tokens_per_batch):
+        rows = collate([sentences[i] for i in group], device)
+        nll, asked = batch_nll(model, rows)
+        (nll.sum() / asked).backward()
+        model.zero_grad(set_to_none=True)
+        shapes.append({"sentences": len(group), "rows": int(rows.present.shape[1]),
+                       "candidates": int(rows.valid.shape[1])})
+    peak = None
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+        peak = int(torch.cuda.max_memory_reserved(device))
+    state = 4 * sum(p.numel() * p.element_size() for p in model.parameters())
+    return {"batches": shapes, "gpu_peak_reserved_bytes": peak, "training_state_bytes": state}

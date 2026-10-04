@@ -248,7 +248,7 @@ def test_the_artefact_source_reads_every_sentence_and_its_identity(tmp_path):
     directory = tmp_path / "artefact"
     words, records = prior_artefact(directory, interval_s=4.0)
     days = fixture_days()
-    source = ArtefactSource(directory, 4.0, "full", {"KXXX": roster_landings(records, ("09", "09L"), days)})
+    source = ArtefactSource(directory, 4.0, "full", {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), days)})
     for split in ("train", "select", "val"):
         sentences = source.sentences(split, "KXXX")
         assert [s.flight_key for s in sentences] == [f["dataset_id"] for f in signals_flights(directory, split)]
@@ -363,7 +363,8 @@ def test_a_run_refuses_landings_whose_digest_differs_from_the_identity(tmp_path)
     from ts_transformer.prior.model import Prior, PriorConfig
 
     directory = tmp_path / "artefact"
-    words, records = prior_artefact(directory, interval_s=2.0)
+    words, by_airport = prior_artefact(directory, interval_s=2.0)
+    records = by_airport["KXXX"]
     days = fixture_days()
     landings = {"KXXX": roster_landings(records, ("09", "09L"), days)}
     model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64))
