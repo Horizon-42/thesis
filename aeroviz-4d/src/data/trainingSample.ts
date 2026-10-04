@@ -570,6 +570,14 @@ export function formatSeconds(seconds: number): string {
  * outside is a segment (back to the row before it at the line's end) — never a single point, which draws nothing. One
  * rule for every verdict drawn red; the verdicts are the file's own.
  */
+/** How many words left their envelope, as the judge counts them (`replay.word_results`): a heading word with a row of its
+ *  band outside (an empty band was not judged), an altitude word whose tube did not contain it, a speed word whose span
+ *  did not. */
+export function wordsOutside(envelopes: TrainingEnvelopes): number {
+  return envelopes.heading.filter((band) => band.inside.some((inside) => !inside)).length +
+    envelopes.altitude.filter((tube) => !tube.contained).length + envelopes.speed.filter((span) => !span.contained).length;
+}
+
 export function outsideSpans(inside: boolean[], firstRow: number, lastRow: number): Array<[number, number]> {
   const spans: Array<[number, number]> = [];
   let start: number | null = null;

@@ -18,6 +18,7 @@ import {
   trainingEnvelopeIndex,
   trainingReadingOf,
   trainingWordLabel,
+  wordsOutside,
   unwrapDegrees,
   TRAINING_COLUMNS,
   TRAINING_INDEX_SCHEMA,
@@ -288,6 +289,21 @@ describe("the readings", () => {
     expect(trainingBandLabel({ column: "angle", angleDeg: 3, climb: false, level: false })).toBe("3.0°");
     expect(trainingBandLabel({ column: "speed", speedMps: null })).toBe("unspecified");
     expect(trainingBandLabel({ column: "runway", goAround: true })).toBe("go-around");
+  });
+});
+
+describe("words outside their envelopes", () => {
+  it("counts a heading word with a row outside its band, a tube or span that did not hold, never an empty band", () => {
+    const sample = stageASample();
+    const envelopes = sample.flights[0].closedLoop["2"].replay.envelopes!;
+    const expected = envelopes.heading.filter((band) => band.inside.includes(false)).length +
+      envelopes.altitude.filter((tube) => !tube.contained).length + envelopes.speed.filter((span) => !span.contained).length;
+    expect(wordsOutside(envelopes)).toBe(expected);
+    const empty = { firstRow: 900, stopRow: 900, row: 898, targetDeg: 0, toleranceDeg: 4.5, inside: [] };
+    const one = envelopes.altitude.length ? { ...envelopes.altitude[0], contained: false } : null;
+    const more = { ...envelopes, heading: [...envelopes.heading, empty], altitude: one ? [one, ...envelopes.altitude.slice(1)] : [] };
+    const before = envelopes.altitude.length && !envelopes.altitude[0].contained ? 0 : 1;
+    expect(wordsOutside(more)).toBe(expected + (one ? before : 0));
   });
 });
 

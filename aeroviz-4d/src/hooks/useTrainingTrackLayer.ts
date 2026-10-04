@@ -191,7 +191,9 @@ function buildScene(viewer: Cesium.Viewer, selection: TrainingSelection, reading
     const end = flown.lon.length - 1;
     add(null, marker(TRAINING_ENTITY.flownEnd, "Where the flown path ends",
       Cesium.Cartesian3.fromDegrees(flown.lon[end], flown.lat[end], flown.altitudeHaeM[end]), TRAINING_EXECUTOR_COLOR, 9,
-      `flown: ${TRAINING_OUTCOME_TAG[replay.outcome]}`));
+      `flown: ${TRAINING_OUTCOME_TAG[replay.outcome]}`,
+      // above and to the LEFT of the end, right-aligned: the DA label sits above-right, the runway designators below
+      new Cesium.Cartesian2(-12, -30), Cesium.HorizontalOrigin.RIGHT));
     const decision = replay.crossing?.decision ?? null;
     if (decision !== null) {
       add(null, marker(TRAINING_ENTITY.decision, `The decision-altitude point: ${decisionText(decision)}`,
