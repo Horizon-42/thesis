@@ -14,6 +14,7 @@ from ts_transformer.autopilot.closed_loop import ClosedLoopSentence, Corrector, 
 from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
+from ts_transformer.instructions.labeller.interval import in_force, last_heard_row, on_interval
 from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.words import (
@@ -466,11 +467,21 @@ def test_the_matched_point_has_the_observed_time_of_its_place():
     assert path.match(260.0, 0.0, 500.0).row == pytest.approx(4.0)
     # D45 "less than Δ/2 after": at Δ = 2 s a word 0.8 s after the matched point is reached, 1 s after (a tie) waits; at
     # Δ = 8 s, 3.8 s after is reached, 4 s after waits
-    assert [closed_loop.reached_row(row, every) for row, every in ((2.6, 1), (2.5, 1), (7.1, 4), (7.0, 4))] == [3, 2, 9, 8]
-    # A14: on a row of the grid the closed loop reaches what the Δ grid puts on that row (a tie on the later row)
+    assert [last_heard_row(row, every) for row, every in ((2.6, 1), (2.5, 1), (7.1, 4), (7.0, 4))] == [3, 2, 9, 8]
+
+
+def test_a_flight_on_schedule_hears_in_closed_loop_the_words_the_interval_grid_says():
+    """A14: a flown aircraft exactly where the observed one was at each Δ row hears the words in force that the Δ grid
+    says at that row — every word, a tie on the later row in both — at Δ = 2, 4 and 8 s."""
+    words = Words(spec())
+    rows = [_first(words), *[{HEADING: k % words.n_heading} if k % 3 else {} for k in range(1, 48)]]
+    grid = _grid(rows)
     for every in (1, 2, 4):
-        for k in range(4):
-            assert closed_loop.reached_row(k * every, every) == k * every + (every + 1) // 2 - 1
+        expected = in_force(on_interval(grid, 0, 2.0 * every, 2.0, np.full(len(rows), 900.0), words, [90.0]))
+        corrector = Corrector(grid, 0, 0, every, words, [90.0])
+        said = [corrector.row(float(k * every), 0.0, 0.0, 900.0, holding=False, past_end=False)[0]
+                for k in range(len(expected))]
+        assert np.array_equal(in_force(np.array(said)), expected)
 
 
 def test_past_the_end_of_the_observed_path_its_last_segment_goes_on_without_a_height():

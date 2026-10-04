@@ -16,9 +16,9 @@ refused.
 WHEN THE OBSERVED WORDS ARE SAID (D42, D45, D46). The observed words are the open-loop reading's at the data's 2 s rows
 (not the Δ grid of `labeller.interval`), each with its 2 s time. The observed time of the matched point is the time at
 which the observed aircraft was there (`ObservedPath.match`). At each Δ row the reading says every observed word whose
-time is less than Δ/2 after the matched point's observed time and that was not said before (`reached_row`; a word
-exactly Δ/2 after waits for the next row, as the Δ grid puts a tie on the later row): a word
-comes at the Δ row nearest the place where the observed aircraft heard it, and its mean lateness is zero (D45). Of
+time is less than Δ/2 after the matched point's observed time and that was not said before (the Δ grid's own rule,
+`labeller.interval.last_heard_row`: a word exactly Δ/2 after waits for the next row): a word comes at the Δ row nearest
+the place where the observed aircraft heard it, and its mean lateness is zero (D45). Of
 several words of a column, the last (`last_words`). While the flown aircraft is behind the observed one the observed
 words wait; ahead of it, they come sooner. The first predicted step says every column (rule 1): the observed words in
 force before Δ/2 after its observed time. A heading word is said in the frame where it is heard (D46, §3.3): the observed word
@@ -93,7 +93,7 @@ from ts_transformer.autopilot.spec import executor_source_files, params_sha256
 from ts_transformer.instructions.artefact import CLOSED_LOOP_DIRECTORY
 from ts_transformer.instructions.conformance import labeller_code_files
 from ts_transformer.instructions.grammar import InForce, Ungrammatical, apply
-from ts_transformer.instructions.labeller.interval import OBSERVATION_S, in_force, interval_rows
+from ts_transformer.instructions.labeller.interval import OBSERVATION_S, in_force, interval_rows, last_heard_row
 from ts_transformer.instructions.labeller.read import Reading, smooth, truncated
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.signals import FlightSignals
@@ -189,12 +189,6 @@ class ObservedPath:
         return Match(lateral, vertical, row, along, last)
 
 
-def reached_row(row: float, every: int) -> int:
-    """The last 2 s row whose observed time is less than Δ/2 (``every`` 2 s rows) after the matched point's observed
-    time ``row`` (in 2 s rows, D45: a row exactly Δ/2 after waits, as a tie goes to the later row on the Δ grid)."""
-    return int(math.ceil(row + every / 2.0)) - 1
-
-
 def uncorrected_m(errors: np.ndarray, uncorrectable: np.ndarray) -> float:
     """The largest |error| on the rows where §4.9 makes no correction (D34; 0 where there is none; a NaN error, past the
     end of the observed path, is no error)."""
@@ -271,7 +265,7 @@ class Corrector:
         refuses the row."""
         first = self.said is None
         self.matched_row = float(self.start) if first else matched_row
-        last = min(reached_row(self.matched_row, self.every), len(self.observed) - 1)
+        last = min(last_heard_row(self.matched_row, self.every), len(self.observed) - 1)
         observed = last_words(self.observed[self.next: last + 1])
         self.next = max(self.next, last + 1)
         self.observed_row = self.next - 1
@@ -363,7 +357,7 @@ def refusal(sentence: replay.Sentence, reading: Reading, row_interval_s: float, 
     if len(sentence.grid) - start < 2:
         return Refused("too short for the closed loop", f"{len(sentence.grid)} rows of {row_interval_s:g} s")
     every = interval_rows(row_interval_s, step_s)
-    first = min(sentence.first_row + reached_row(start * every, every), len(reading.words) - 1)
+    first = min(sentence.first_row + last_heard_row(start * every, every), len(reading.words) - 1)
     if in_force(reading.words)[first, RUNWAY] == RUNWAY_GO_AROUND:
         return Refused("go-around at the first predicted step", f"row {start} of {row_interval_s:g} s")
     return None
@@ -437,7 +431,8 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
                 live[f] = False
                 executor.halt(torch.as_tensor(~live, device=device))
                 if s == 0:                                  # the cycle starts with every column said
-                    step[f] = correctors[f].held[min(reached_row(start * every, every), len(correctors[f].held) - 1)]
+                    held = correctors[f].held
+                    step[f] = held[min(last_heard_row(start * every, every), len(held) - 1)]
                 continue
             step[f] = words_row
             said[f].append(words_row)

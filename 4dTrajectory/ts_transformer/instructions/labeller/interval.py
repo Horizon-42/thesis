@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import timedelta
 from typing import Sequence
 
@@ -64,6 +65,13 @@ def first_interval_row(entry_time_utc: str, interval_s: float, step_s: float) ->
     return next(row for row in range(every) if round(seconds + row * step_s) % round(interval_s) == 0)
 
 
+def last_heard_row(row: float, every: int) -> int:
+    """The last step row whose time is less than Δ/2 (``every`` step rows) after ``row`` (in step rows): the last word a
+    Δ row at ``row`` says (item 2, D45: a word exactly between two Δ rows goes to the later one). The closed-loop reading
+    asks it at the matched point's observed time (`autopilot.closed_loop`), the Δ grid at its rows."""
+    return int(math.ceil(row + every / 2.0)) - 1
+
+
 def later_utc(entry_time_utc: str, seconds: float) -> str:
     """The UTC time ``seconds`` after ``entry_time_utc``, in the artefact's form (whole seconds): a sentence's first row
     on a coarser grid starts there."""
@@ -90,7 +98,7 @@ def on_interval(grid: np.ndarray, first_row: int, interval_s: float, step_s: flo
         raise Refused("too short", f"no row on the {interval_s:g} s grid")
     grid = np.asarray(grid)
     # item 2: Δ row k takes the step rows up to `last[k]` (a tie goes to the later Δ row)
-    last = np.minimum(rows + (every + 1) // 2 - 1, len(grid) - 1)
+    last = np.minimum([last_heard_row(row, every) for row in rows], len(grid) - 1)
     force = in_force(grid)
     held = force[last]
     if held[0, RUNWAY] == RUNWAY_GO_AROUND:
