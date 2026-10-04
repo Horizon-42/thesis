@@ -15,7 +15,9 @@
 | 把 `dev-two-tier-v4` 合进该分支 | 已做 | 合并提交 `045439a7`，无冲突 |
 | 一次性实验的复核（v4 基线） | 已做 | §3 |
 | 重复夹具合并、测试之间互相导入的清理（冷文件） | 已做，28 个测试文件 + 新模块 `support_prediction.py` | §4 |
-| B 类、C 类、`runway_hypotheses` | 按用户决定先不动，等判断 | §3 |
+| B 类中 `eta_error_readout`、`latent_probe`、`latent_fan_readout` 搬进 archive（用户：「B 类的也搬进去」） | 已做 | 同一归档目录；`test_two_head_duration` 里属于前者的 2 个测试摘出，见 §3 |
+| `chain_sensitivity`（用户：「搬进 archive」）、B 类中的 `eta_calibration` | **没搬，等用户**：搬了会让活代码失去测试或失去输入的产生者 | §3 |
+| C 类其余、`runway_hypotheses` | 按用户决定先不动 | §3 |
 | 热文件里测试互相导入的清理 | 没做，等 v4 开发告一段落 | §4 |
 | 各测试文件的运行时间、分层标记 | **没测，没做** | §5 |
 | 金丝雀测试（旧 checkpoint 仍能加载）去留 | 等用户决定 | §4 |
@@ -67,26 +69,26 @@
 
 `approach_clock_figure`、`approach_legs_figure`、`scene_sample_figure` 画的是已提交的 `docs/two_tier/figures/*.svg`，测试负责让 SVG 和代码保持一致。**它们是活的，不搬。** 早先说「文档里没有引用」是错的——当时只按模块名搜，漏了图文件本身。v4 基线上这三张图仍在。
 
-### B 类：有文档、没有活代码导入，等用户判断
+### B 类：有 `runners.md` 条目、没有活代码导入的四个（用户要求搬）
 
-| runner | `runners.md` | 备注 |
-|---|---|---|
-| `eta_error_readout` | R4 | |
-| `latent_fan_readout` | R6 | |
-| `latent_probe` | R5 | `intents.json` 提到 1 次；依赖 `anytime_curve` |
-| `eta_calibration` | R2 | `intents.json` 提到 2 次；依赖 `anytime_curve` |
+| runner | 结果 |
+|---|---|
+| `latent_fan_readout`（R6） | 已搬。干净 |
+| `latent_probe`（R5） | 已搬。活文档里提到它的几处（`CLAUDE.md` 的 C8 一行、`contracts.md` 两处）改成指向归档，注释里的提法保留 |
+| `eta_error_readout`（R4） | 已搬。它的 2 个测试原在 `test_two_head_duration.py` 里，和活代码的测试混在一起：从活文件摘出（其余 20 个测试逐个比对未变），连同头部导入和它们用到的辅助函数，作为**摘录**放进归档的 `tests/test_two_head_duration_eta_readout.py` |
+| `eta_calibration`（R2） | **没搬。** 审查时「没有导入者」只查了 Python 导入，漏了三处：(1) 它是 `predict --cta-from-quantiles` 读的那张共形校准表的**唯一产生者**，`cli/predict.py` 的提示信息还叫用户去运行它；(2) `test_two_head_duration` 里 `test_the_calibration_runner_takes_a_two_head_checkpoint` 用它；(3) `test_cta_from_quantiles` 用它的测试夹具。搬走后活的预测功能没法再得到校准表 |
 
-`heading_lead_ablation`（审查时的 B 类）已被 v4 归档，不在此列。
+`runners.md` 里这三个条目的全文搬进归档的 `docs/reference/entries.md`，活文件只留一行标题（沿用 R18 的先例）；`CLAUDE.md` 索引里的相应句子剪走，索引里不留指针。
 
 ### C 类：被耦合住，不能单独搬
 
 | 模块 | 状态 |
 |---|---|
 | `runway_intent_r1`（含 `_readout`） | `run_naming.py` 导入 r1；R1.1 的 runner 已归档但读它们 |
-| `anytime_curve` | `eta_calibration`、`chain_sensitivity`、`latent_probe` 共用；`runners.md` R1 收录 |
+| `anytime_curve` | `eta_calibration`、`chain_sensitivity` 共用；`runners.md` R1 收录。`latent_probe` 搬走后少了一个用户 |
 | `lead_time_error` | `data/anchor_grid.py` 导入 |
-| `control_basis_oracle` | **已核实是活的**：`cli/common.py` 和 `config.py` 的报错信息让用户去跑它，`outputs/control/basis_fit.py` 读它的输出（拟合教师表，C23）。审查时「两次检查结果不同」的疑点由此了结 |
-| `chain_sensitivity` | **v4 基线上情况变了**：发布脚本里只剩一行注释提到它（审查时当成了「导入」），没有活代码导入，`runners.md` 没收录。按 A 类判据现在符合；发布脚本对已归档代码留镜像注释有先例（`manoeuvre_readout`）。用户说过 C 类先不动，所以**没搬，等判断** |
+| `control_basis_oracle` | **已核实是活的**：`cli/common.py` 和 `config.py` 的报错信息让用户去跑它，`outputs/control/basis_fit.py` 读它的输出（拟合教师表，C23） |
+| `chain_sensitivity` | 用户要求搬，**没搬**。它没有活代码导入、`runners.md` 没收录，按判据符合；但 (1) `test_chain_sensitivity.py` 的 15 个测试是 `inference/receding.py`（`rolled_series`、`cut_at_lead`、`displacement_at`）**仅有**的测试，而 `receding.py` 被活的无令牌闭环 `manoeuvre/lockstep.py` 导入；搬走测试，这些活代码就没有测试了；(2) `test_publish_ts_experiment_trajectories.py` 的 `test_the_publishers_variant_blocks_mirror_the_runners` 导入它的 `RECORDS_BLOCK`，要像 `manoeuvre_readout` 那样改成镜像常量 |
 
 `frame_ablation` 是活的（`runners.md` R8、`intents.json` 6 处、两层格子队列在调），不是候选。
 
@@ -129,7 +131,7 @@ R0b 的 runner。`runners.md` 没收录；唯一导入它的是已搬走的 `run
 ## 7. 接下来（按优先级）
 
 1. 把本分支报告给用户合并（用户决定后 worktree 与分支再清理）。
-2. 用户判断 B 类、`chain_sensitivity`、`runway_hypotheses`；决定后同样按「模块连同旧测试原样搬」处理。
+2. 用户决定：`eta_calibration` 与 `chain_sensitivity` 怎么办（见 §3：要么保留，要么先为 `receding.py` 单独补一份针对活接口的测试、为校准表另找产生者，再搬）；`runway_hypotheses` 搬不搬。
 3. 两层队列空闲时测一次耗时，再据此打分层标记。
 4. 用户决定金丝雀测试的去留。
 5. v4 阶段 A 告一段落后，清理热文件里测试互相导入的那一批（§4 没做的第 1 条）。

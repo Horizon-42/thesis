@@ -1,5 +1,15 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-04 — Three one-tier readouts archived; the test fixtures of the one-tier paths gathered
+
+- The user ("chain_sensitivity 搬进 archive；B 类的也搬进去"): `eta_error_readout`, `latent_probe`, `latent_fan_readout` and their tests
+  joined `archive/one_tier_oneoffs_2026_10/`; the two `eta_error_readout` tests left `test_two_head_duration.py` as an excerpt
+  there. NOT moved, with the reasons in the campaign README and `docs/test_suite_audit_2026-10-04.zh.md` §3: `eta_calibration`
+  (the only producer of `predict --cta-from-quantiles`'s table) and `chain_sensitivity` (its tests are the only tests of the
+  live `inference/receding.py`).
+- `tests/support_prediction.py`: the one-tier prediction fixtures that were byte-identical in several test files, or imported
+  by one test file from another; 28 test files take them under their old names, test bodies unchanged.
+
 ### 2026-10-04 — Finished one-tier diagnostics and the runway-intent R0 / R1.1 runners archived
 
 - The user ("A 类可以搬，B、C 先不动"), after an audit of `ts_transformer/tests/`: eight runners with no `runners.md` entry, no live
