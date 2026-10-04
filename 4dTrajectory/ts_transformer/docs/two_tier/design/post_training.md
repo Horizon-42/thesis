@@ -48,7 +48,7 @@ The decision numbers are shared by all documents (outline §3).
 ### 0.4 Plan
 
 1. Stage C starts from the base model of stage B (outline §4).
-2. The parts of §8, then the post-training stage of §2.
+2. The parts of §8, then the post-training stage of §2, then the Training view of stage C (§8).
 
 ---
 
@@ -59,7 +59,7 @@ The decision numbers are shared by all documents (outline §3).
 - **It reads** the outline; the vocabulary's public interface (vocabulary §6): the grammar, the sentence artefact, the
   candidates, the executor, the judge and the row grid; and the prior's public interface (prior §7): the checkpoint,
   the inputs of a row, the speaker, the teacher-forced loss and the place for an added module.
-- **It gives** the post-trained checkpoints and the window readouts, read by stage D (outline §6).
+- **It gives** the post-trained checkpoints and the window readouts, and their Training view (§8, outline §6).
 
 ---
 
@@ -292,3 +292,11 @@ landing context from the loop for every aircraft (the archived `experiments/traf
 its recorded context), the D23 test over a scene, the rule "established on the final" and
 the replacement of the clearance mask (O6). The edge-feature conformance (§4). The multi-aircraft step-8.9 reward is
 not built (D30). A later stage with every aircraft of a window commanded is optional (§2 item 8).
+
+**The Training view of stage C (outline §6).** The last milestone of the stage. The window export (the archived
+`experiments/window_training_export.py`, R36, rewritten): windows of recorded traffic with the commanded aircraft
+flown on the words of the post-trained model and the other aircraft on their records; the separation judge's events;
+the outcome of each window; the rounds of the post-training side by side. The frontend's Training view shows the
+traffic window with the five columns of the commanded aircraft, and a click on a word flies its segment live with the
+executor of A23. New schema names; its own index beside the old one; the intent of each set; a test stack and the
+browser check (outline §6).

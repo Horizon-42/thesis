@@ -41,6 +41,9 @@ The decision numbers are shared by all documents (outline §3).
 | D41 | The design runs at an airport that is not in the training data: the number of candidates is not fixed; every input has a fixed physical scale, never a statistic of the training data; each fold of D39 flies the full closed loop at its held-out airport. The altitude words are above the airport elevation (D58), so the levels of an approach lie in the 60 m segment at any airport (§6) | Decided | User, 2026-10-04 |
 | D58 | The prior's own height is the height above the airport elevation E, as the altitude words are (vocabulary, D58). The prior gets neither E nor the MSL height (D24), so it cannot know where the round MSL levels that controllers assign lie (§2). (The words: D58 in the vocabulary) | Decided | User, 2026-10-04 |
 | D60 | Row 0 of an aircraft has no motion inputs: no state 2 s before it is stored. There, the ground speed, the vertical rate and the motion direction in each candidate vector (sine, cosine) are 0, and the own input `no_motion` is 1 (0 at every other row). The same at every Δ, in training, in closed loop and in a loop of several aircraft. Not the fitted values of the data, which use 7.5 s after the row (§2) | Decided | User, 2026-10-04, on Claude's proposal |
+| D63 | The identity of a prior's data (§8, item 1) also holds the landings that the candidate vectors count: for each airport, the sha256 of each landing's flight, runway and time, in time order, and of the number of landings left out on the sealed test days. The landings come from the airport's tracks roster, outside the artefact: without them, a changed roster would change the inputs and leave the identity the same. By their flights, never by the bytes of the roster (D21). A run that reads the landings again computes the digest again and refuses a difference (§2, §8) | Decided | User, 2026-10-04, on the reading of the stage B agent |
+| D64 | The word rules of the procedure masks (§4). They block a word when it is said and never block "unchanged". Inside the region (the FAF and the LPV cone of R) a level T only where T ≥ the glidepath lower edge − ε(T), and "no level-off" not where the aircraft is more than ε("no level-off") below the edge. Wherever the aircraft is not inside the region (before the join, or after it when the aircraft has left the region), a level T only where T ≥ DA − ε(T). Before the join, once the aircraft has been below the entry height by more than the band ε of the level nearest the entry height, no level above the aircraft's height + ε and no climb class. A go-around clears the join and the passage below the entry height; while G is true neither is kept | Decided | User, 2026-10-04, on the proposals of the stage B agent and Claude's review |
+| D65 | The inputs and the model where §2 left them open: the fixed scales of §9 (the height above the glidepath as asinh(h / 100 m)); the candidate tokens reach a row through one attention over them whose weights sum to one; the RoPE base is 10,000; the variant `constants` gives the threshold elevation MSL; the runway column's `since` starts again at a candidate word, not at "go-around" (§2) | Decided | User, 2026-10-04, on the proposals of the stage B agent and Claude's review |
 
 ### 0.2 Open items
 
@@ -48,23 +51,38 @@ None.
 
 ### 0.3 Implementation
 
+The implementer's log (outline §5 rule 10). Branch `dev-two-tier-v4-prior`, worktree `.claude/worktrees/two-tier-v4-prior`.
+A proposal is a reading where the design says nothing; it holds only until the user decides.
+
 | Part | State |
 |---|---|
-| Stage B: prior (§12) | Not started |
+| B0: the package `prior/`; its import rules in `tests/test_architecture.py` (`prior/` reads only `instructions/`, the day split and the plain utilities; only the runners import it) | Done, `f3070978` |
+| B2: the model (`prior/model.py`), a sentence's rows and their batch (`prior/batch.py`), the checkpoint `ts-prior-checkpoint-v6` (`prior/checkpoint.py`); `no_motion` (D60) | Done on synthetic sentences, `f3070978`, `de7d4994`. Full ts suite at `f3070978`: 1,559 passed |
+| B3: the training loop (`prior/train.py`), the data of a run or a fold (`prior/runs.py`), the runner `prior_train` | The loop done on synthetic sentences, `f3070978`. The runner (one run or one fold; the memory check of the largest batches before training; `--sample` a smoke run, D55) on synthetic artefacts, `849e9cde` (reviewed); `--memory-check-only`, `5a214031`. The smoke on the formal artefact `v9_20261004` at Δ = 2 s (`98a5a9aa`, configuration A, 2.17 M parameters, variant `full`, all five airports, 200 sentences of each airport and split, seed 1337, 3 epochs, in the scratchpad): 1.8–1.9 s an epoch for 1,000 train and 1,000 select sentences; the select loss 18.74, 17.43, 15.41 per step (still in the warm-up); loading the train and select splits approximately 1 min 50 s. The memory check at the formal size (40,534 train sentences, 7.56 M rows; the longest 770 rows): the largest batches 128 × 128 rows and 8 × 770 rows, 8 candidates; GPU 1.86 GB reserved (7.55 GB free); host 3.9 GB. Claude's estimate from the smoke: approximately 55 s an epoch on all five airports, 45 s on a fold; at most approximately 25 min a run of 30 epochs |
+| B1: the inputs of a row (`prior/inputs.py`: `state_inputs`, `Heard`; a sentence and a loop use both), the landings (`prior/landings.py`), the artefact as sentences and the identity of the data (`prior/source.py`) | Done on synthetic artefacts, `278b626b`; the landings digest as D63, `ff514325` |
+| B4: the speaker (`prior/speaker.py`), the procedure masks (`prior/procedure.py`, set `procedure-masks-v4`) | Done on synthetic inputs, `278b626b`; the finals read on KRDU's CIFP. The masks and the glidepath scale as D64 and D65, with B4's tests of D64, `07f3f49b` (reviewed). Free generation (the speaker with the executor, the judge, the time limit) waits for A21 |
+| The full ts suite | `8fbc4f96` (with `07f3f49b`): 1,607 passed; `849e9cde`: 1,610 passed |
+| B6: the Training view of stage B | Waits for A23 of stage A, merged into `dev-two-tier-v4`; then its export and view on the smoke sets of B3 and B4; the publication of the folds and the base after B5 |
+| B5, B7 (the close of stage B) | Wait for Claude's check of stage A and the user's choice of Δ |
+
+Proposals (where the design says nothing): none open. The nine proposals of `bbedfe9e` were decided by the user on
+2026-10-04 as D64 (the procedure masks: 7, 8, 9; 7 and 9 changed) and D65 (the inputs and the model: 1, 2, 4, 5, 6; 4
+changed); 3 (the runway head's class order) is a detail of the code. The code follows them at `07f3f49b`.
 
 ### 0.4 Plan
 
 1. Stage B is developed in parallel with the end of stage A (the user, 2026-10-04), on its own branch (outline §5
-   rule 1). B0–B6 (§12): the package, the data, the model, the training, the speaking and free generation, the
-   cross-validation and the base model. A milestone starts when the parts of stage A that it reads are on
-   `dev-two-tier-v4` (outline §4):
+   rule 1). B0–B7 (§12): the package, the data, the model, the training, the speaking and free generation, the
+   cross-validation and the base model, the Training view of stage B, the close. A milestone starts when the parts of
+   stage A that it reads are on `dev-two-tier-v4` (outline §4):
 
    | When | What |
    |---|---|
    | Now | B0. B2 and the training loop of B3, tested on synthetic inputs. The words of each column and their number come from the vocabulary spec (vocabulary §6, item 1), never from constants of the prior |
    | After A19, A20 and A22 of stage A (the altitude words above E, the new format names, the executor that flies T + E; the vertical path of each candidate in `candidates.json`, the reader of a closed-loop file, D61; the grammar's column mask, D62) | B1, tested on synthetic artefacts (`tests/support.py`). The speaker and the masks of B4 |
    | After A21 of stage A (the formal artefact) | B1–B4 on a sample of the formal artefact at Δ = 2 s: the smoke run of B3, its time and the memory check at the formal size; free generation with the executor of the formal artefact |
-   | After Claude's check of stage A and the user's choice of Δ (outline §4) | B5, B6 |
+   | After A23 of stage A (the Training view of stage A), merged into this branch | B6's export and view, on the smoke sets of B3 and B4 |
+   | After Claude's check of stage A and the user's choice of Δ (outline §4) | B5; B6's publication of the folds and the base; B7 |
 
 2. Then the post-training (`post_training.md`).
 
@@ -72,8 +90,8 @@ None.
 
 ## 1 Scope
 
-- **This document owns** the package `prior/` (the inputs, the model, the training, the speaker and its masks) and its
-  runners.
+- **This document owns** the package `prior/` (the inputs, the model, the training, the speaker and its masks), its
+  runners, and the Training view of its results (B6, outline §6).
 - **It reads** the outline (the principles, the shared decisions D7, D20, D21, D55, the rules of the implementation)
   and the vocabulary's public interface (vocabulary §6): the vocabulary spec and the grammar (items 1, 2), the sentence
   artefact (item 3), the candidates and their geometry (item 4) and the row grid (item 7). The package `prior/` does
@@ -127,7 +145,22 @@ None.
   give together.) Which of two parallel runways is the left one shows at each step in the offsets right of their finals
   (the value of the left runway is always larger). The relative positions of all candidates together still show the
   layout of the airport. That is real geometry, and the prior has it; only the held-out airports of D39 can measure how
-  much the prior uses it. A constant comes back only as the variant `constants` of D39.
+  much the prior uses it. A constant comes back only as the variant `constants` of D39: the length and the threshold
+  elevation MSL (D65). That variant thus also gives the airport elevation E, which `full` does not (D58).
+- **Landings (D63).** Offline, the landings come from the airport's tracks roster: every flight that the harvest
+  assigned to a candidate, with a sentence or without one, less the landings on the sealed test days (C32). A flight
+  never counts its own landing: a closed-loop sentence can fly past the time at which the observed aircraft landed, and
+  the runway of that landing is the answer of the runway word. In a loop, the caller gives the landings that the loop
+  knows. The roster is outside the artefact, so the identity of a prior's data holds a digest of the landings (§8,
+  item 1).
+- **Candidate tokens (D41, D65).** Each candidate vector goes through one shared network. The candidate tokens reach a
+  row through one attention over them whose weights sum to one: a sum would grow with the number of candidates.
+- **Scales (D41, D65).** Every input has a fixed scale in SI units (§9): the distances along and across a candidate
+  asinh(d / 1 km), linear within a few hundred metres of a final; the heights (above E, above a threshold) h / 1 km; the
+  height above a glidepath asinh(h / 100 m), linear near the glidepath, where the value has a meaning, and compressed
+  far from it (an aircraft high above an opposite runway's extended glidepath is thousands of metres above it); the
+  ground speed v / 100 m/s; the vertical rate v / 10 m/s; the landings in 30 min n / 10; in the variant `constants` the
+  length l / 1 km and the threshold elevation MSL h / 1 km.
 - **Words in force:** the runway in force as its candidate vector ("none yet" up to the first predicted step), the
   go-around state G, the heading in force as the sine and cosine of its angle relative to the course of R, the other
   columns as embeddings, and the time since each column said its word (D17).
@@ -162,13 +195,15 @@ None.
   differences. Seconds, not rows, so that every row interval of D11 reads the same time. The time of a row is in seconds
   from the aircraft's own row 0. Only differences count, so the zero changes no result; but a UTC time (approximately
   1.76e9 s) in float32 has a step of 128 s and loses the rows. RoPE works with the row-by-row cache of the speaker
-  (`Prior.extend`): a key is rotated once, when it is written. The RoPE base is set at implementation.
+  (`Prior.extend`): a key is rotated once, when it is written. The RoPE base is 10,000 (D65): with heads 32 wide, the
+  periods go from 6.3 s to approximately 35,000 s.
 - **Time since each word (D17).** Each column has the input "time since this column said its word in force" (`since`):
   log(1 + t / 2 s) / 5, with t in seconds, counted from the first predicted step at the earliest. It is in seconds for
   every column, so that every row interval of D11 reads the same time. The runway column's value is, in the labelled
   data, the time since the first predicted step, because a labelled sentence says its runway only there, and again only
   at the runway word that ends a go-around (D19, D26). In closed loop it is the time since the runway was given or given
-  again (a change of runway, or the runway word that ends a go-around), so it measures a real fact.
+  again (a change of runway, or the runway word that ends a go-around), so it measures a real fact. A candidate word
+  starts it again; "go-around" does not, because it keeps R (D10) and G is an input of its own (D65).
 
 **Why the motion inputs do not change with Δ (D25).** If the motion of a row were the displacement since the row before,
 it would be the mean over Δ. In a 3°/s turn, the direction of that mean is approximately 12° behind the track at
@@ -192,20 +227,35 @@ predicted step masks "unchanged" in each column and "go-around" in the runway co
 column by column, after the earlier columns of the row (D62). It gives the grammar, for each later column, the words
 that its other masks (below) permit there, so that a row never reaches a column with no permitted word.
 
-**Procedure masks.** The prior decodes under three masks from the procedure of R (principle 3). The first two
-block the altitude and angle words that would take the aircraft below a lower limit; the third blocks the climb:
+**Procedure masks (D64).** The prior decodes under three masks from the procedure of R (principle 3). The first two
+are lower limits on the altitude words; the third blocks the climb. The region is inside the FAF and the LPV cone of R;
+the join is the first row inside it. ε is the band of a level (vocabulary §6, item 1; D52):
 
-- inside the FAF and the LPV cone: the glidepath lower edge, the published glidepath − 60 m (nowhere else: the RNAV
-  floors outside the FAF disagree with 10–14 % of the recorded tracks);
-- before the join (the first row inside that region): the published DA;
-- once the aircraft is below the entry height before the join: no climb.
+- **The glidepath lower edge**, inside the region: the published glidepath − 60 m (nowhere else: the RNAV floors outside
+  the FAF disagree with 10–14 % of the recorded tracks). A level T only where T ≥ edge − ε(T). "No level-off" not where
+  the aircraft is already more than ε("no level-off") below the edge. The edge is taken at the aircraft's position; it
+  only falls toward the threshold, so a level permitted there stays permitted inbound.
+- **The DA**, wherever the aircraft is not inside the region: before the join, and after it when the aircraft has left
+  the region (out of the LPV cone before the threshold). A level T only where T ≥ DA − ε(T). After the join, outside the
+  region, no other limit holds, so the DA holds there too.
+- **No climb**, before the join, once the aircraft has been below the entry height (the glidepath at the FAF) by more
+  than the band ε of the level nearest the entry height: no level T above the aircraft's height + ε(T), and no climb
+  class. The band: the levels are on a grid and the executor holds a level exactly, so an aircraft at the level nearest
+  the FAF altitude can be up to half a step below the entry height without a descent below it.
+
+**A mask blocks a word when it is said, never "unchanged".** A word in force was permitted when it was said. A mask
+that made the speaker change it, for example a level forced above an aircraft that sank under the edge with
+"no level-off" in force, would fly the aircraft along a line that the procedure computes: the glidepath floor that the
+executor does not have (D9). Whether to correct or to go around is the model's decision, and the DA check judges it
+(vocabulary §6, item 6).
 
 **Masks while G is true (D14).** Only one mask stops a go-around: "no climb below the entry height". It does not apply
-while G is true, and its stretch starts again after the go-around. The other two masks are lower limits; a go-around
-climbs above them, so they apply. The grammar applies while G is true as at every row.
+while G is true. A go-around clears the join and the passage below the entry height, and while G is true neither is
+kept: the next approach is read as a new one (D26). The other two masks are lower limits; a go-around climbs above
+them, so they apply. The grammar applies while G is true as at every row.
 
-A level word is checked against these limits with the band ε of its level (vocabulary §6, item 1). A prior records the
-set of procedure masks that it was trained under (`procedure_masks.json`, contract C35) and speaks under it.
+A prior records the set of procedure masks that it was trained under (`procedure_masks.json`, contract C35) and speaks
+under it.
 
 **Masks of a caller.** The loop that runs the speaker can give a set of forbidden words for each column (§7, item 3).
 The speaker applies them as it applies the others. The prior does not know what they mean.
@@ -220,8 +270,8 @@ training does not read the validation days: they are read one time for each stag
 
 **Hyperparameters (D40).** Configuration A, the start: d_model 192, 4 layers, 6 attention heads, feed-forward 768,
 dropout 0.1, weight decay 0.01, learning rate 3·10⁻⁴ with 500 warm-up steps, gradient clip 1.0, 16,384 aircraft-steps
-in a batch, at most 30 epochs, a stop after 3 epochs without a better select loss. The RoPE base is set at
-implementation; a test makes sure that a shift of all times changes nothing.
+in a batch, at most 30 epochs, a stop after 3 epochs without a better select loss. The RoPE base is 10,000 (D65); a
+test makes sure that a shift of all times changes nothing.
 
 **Cross-validation and the choice of the design (D39, D40).** The folds are the five airports: a fold trains on the
 train days of four airports, stops on their select days and reads the select days of the fifth (the held-out airport).
@@ -299,7 +349,7 @@ sets its criteria (D7). The identities follow D21 (outline §3):
 
 | # | What | Its identity |
 |---|---|---|
-| 1 | The artefact of a prior | The spec sha, the day split, the candidate table and the sha256 of the sentence files |
+| 1 | The artefact of a prior | The spec sha, the day split, the candidate table, the sha256 of the sentence files, and the landings that the candidate vectors count (D63): for each airport, the sha256 of each landing's flight, runway and time, in time order, and of the number left out on the sealed test days. A run that reads the landings again computes the digest again and refuses a difference |
 | 2 | The procedure masks of a prior | The set name, the checkpoint sha and the digests of the procedure data (C35). The procedure data are the format of the masks |
 
 ---
@@ -314,7 +364,9 @@ sets its criteria (D7). The identities follow D21 (outline §3):
 | Landings of a candidate | In the 30 min before the step | §2 |
 | Configuration A | d_model 192, 4 layers, 6 heads, feed-forward 768, dropout 0.1, weight decay 0.01, learning rate 3·10⁻⁴, 500 warm-up steps, clip 1.0, 16,384 aircraft-steps a batch, at most 30 epochs, stop after 3 | D40 |
 | Configurations B, C, D | B: d_model 128, 4 heads, feed-forward 512. C: d_model 256, 8 heads, feed-forward 1,024. D: A with dropout 0.2, weight decay 0.05. A head is 32 wide in each | D40 |
-| Procedure masks | Glidepath lower edge: published glidepath − 60 m inside the FAF and the LPV cone; the DA before the join; no climb below the entry height before the join | §4 |
+| Procedure masks | Glidepath lower edge: published glidepath − 60 m inside the FAF and the LPV cone; the DA wherever the aircraft is not inside them; no climb before the join, once more than ε of the level nearest the entry height below the entry height; never "unchanged" blocked | §4, D64 |
+| Input scales | Distances asinh(d / 1 km); heights / 1 km; height above a glidepath asinh(h / 100 m); ground speed / 100 m/s; vertical rate / 10 m/s; landings in 30 min / 10; length / 1 km and threshold elevation MSL / 1 km (`constants`) | D41, D65 |
+| RoPE base | 10,000 (heads 32 wide: periods 6.3 s to approximately 35,000 s) | D65 |
 
 ---
 
@@ -376,7 +428,7 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
   the campaign of B5 and writes the choice), `prior_free_generation` (the prior speaks, the executor flies). New code;
   the archived runners of the same names stay as they are.
 
-**B1. Data** (§2, §7 item 2; D13, D17, D23–D25, D32, D41, D60).
+**B1. Data** (§2, §7 item 2; D13, D17, D23–D25, D32, D41, D60, D63).
 
 - The rows: before the first predicted step, the observed states; from it on, the flown states of the closed-loop
   sentences, on the rows of the chosen Δ.
@@ -391,19 +443,23 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
   since each column said its word, in seconds.
 - The targets: the five columns of the closed-loop sentence.
 - Every scale is a constant in SI units (D41). A flight without a training sentence (vocabulary §6, item 3) is not read.
+- The landings from each airport's tracks roster, less the sealed test days, never a flight's own (§2, D63); their
+  digest in the identity of the data (§8, item 1).
 - Tests: a change of the runway word leaves the inputs of the rows up to the first predicted step the same, bit for bit
   (D23); the glidepath height against a hand computation; the motion from the 2 s displacement at Δ = 2, 4, 8 s; at row
   0 the motion inputs 0 and `no_motion` 1 at Δ = 2, 4, 8 s, also when the data have a 2 s row before row 0, and
   `no_motion` 0 at every other row (D60); a change of the stored track, ground speed and vertical rate of the states
   changes no input (only positions and heights give the motion); the flown states from the first predicted step on; a
   permutation of the candidates permutes their vectors and nothing else; an airport with more candidates than any
-  training airport is read.
+  training airport is read; a change of a landing's time or runway in the roster changes the digest of the landings, and
+  a change of another field of the roster does not; a run refuses landings whose digest differs from the identity (D63).
 
-**B2. Model** (§2, §3; D16, D41).
+**B2. Model** (§2, §3; D16, D41, D65).
 
 - The time attention with RoPE on the seconds from the aircraft's row 0; no row-position and no airport embedding.
-- The candidate tokens through one shared network; five heads in the order of the columns; the runway head points at the
-  candidates, plus "unchanged" and "go-around"; the first predicted step masks "unchanged" and "go-around".
+- The candidate tokens through one shared network and one attention over them (weights that sum to one); five heads in
+  the order of the columns; the runway head points at the candidates, plus "unchanged" and "go-around"; the first
+  predicted step masks "unchanged" and "go-around".
 - Each layer has a place where a module with a zero output can be added (§7, item 5).
 - The checkpoint: a new format name; its identity as §8.
 - Tests: the row-by-row encoding gives what the encoding of the whole sentence gives; a shift of all times changes no
@@ -417,17 +473,21 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
 - A smoke run on a sample of the formal artefact; it gives the time of one run for the cost of B5.
 - Tests: the stop reads only the select days; a fold never reads its held-out airport in training.
 
-**B4. Speaking and free generation** (§4, §7 item 3; vocabulary §6 items 2, 5, 6; D14, D33, D38, D52, D62).
+**B4. Speaking and free generation** (§4, §7 item 3; vocabulary §6 items 2, 5, 6; D14, D33, D38, D52, D62, D64).
 
-- The masks of §4: the grammar; the procedure masks (the glidepath lower edge inside the FAF, the DA before the join,
-  no climb back; lifted while G is true as D14 says), a level checked with the band ε of its level (D52); the masks of
-  a caller.
+- The masks of §4: the grammar; the procedure masks of D64 (the glidepath lower edge inside the region, the DA outside
+  it, no climb back with the band of the level nearest the entry height; never "unchanged"; the climb mask lifted while
+  G is true and a go-around clearing the join, D14), a level checked with the band ε of its level (D52); the masks of a
+  caller.
 - The closed loop: the prior speaks, the executor flies, the judge decides (D33, D38); 900 s more time at each
   go-around; the observed rows before the first predicted step, the executor's states after it.
 - The readout: the outcomes for each airport and each kind of approach; the words for each column against the
   labelled ones; the go-arounds said; the probability of "go-around" on the final.
 - Tests: one flight spoken and flown to its outcome; each mask; G; the time limit; the same seed gives the same
-  sentence; no row reaches a column with no permitted word (D62).
+  sentence; no row reaches a column with no permitted word (D62); a procedure mask never blocks "unchanged", also when
+  the word in force breaks a limit; a level below the DA is blocked after the join when the aircraft has left the LPV
+  cone; an aircraft at the level nearest the entry height, less than its ε below it, may still climb; after a go-around
+  the join and the passage below the entry height start again (D64).
 
 **B5. Cross-validation and the base** (D39, D40, D41).
 
@@ -439,6 +499,25 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
   block, the probability of "go-around" on the final.
 - No criterion is applied: the user reads the results (D7).
 
-**B6. Close of stage B.** The full ts suite passes (run detached). §0.3, §11 and `docs/reference/runners.md` are
-updated. `dev-two-tier-v4` merges `dev-two-tier-v4-prior` (outline §5 rule 1). Report to the user: the commits, the
-readings of each fold and of the base, the choice and its rule, and what stage C needs.
+**B6. The Training view of stage B (outline §6).** After A23 is on this branch; the publication of the folds and the
+base after B5. The user sees what the prior says and how the executor flies it.
+
+- **Export** (the archived prior Training exports, rewritten). For each flight of the sample: the observed rows before
+  the first predicted step; the sentences that the prior says in free generation and their flown states (several
+  sentences of one flight side by side); the closed-loop sentence of the same flight; the outcome and the DA check of
+  each; at each row, the words that the procedure masks blocked; the region, the glidepath lower edge, the DA and the
+  entry height of R. Sets: each fold of B5 at its held-out airport (the flights of its free generation), and the base
+  model (its one validation readout). Before B5, a smoke set from the smoke model of B3 checks the view. New schema
+  names; its own index beside the old one (outline §6 item 3).
+- **Frontend.** The Training view of A23 with the prior's sentences: the five columns, a choice of sentence, the
+  blocked words at a row, the procedure's limits drawn, the outcome. A click on a word flies its segment live with the
+  executor of A23.
+- **Publication and view.** The intent of each set in `docs/experiments/intents.json`; a test stack from the worktree
+  (outline §6 items 4, 5).
+- **Tests.** The export (a sample written and read again); the frontend's readers on fixtures that the export writes;
+  a live segment equals the export's flown states; the browser check (outline §6 item 6).
+
+**B7. Close of stage B.** The full ts suite passes (run detached). §0.3 (the log) and `docs/reference/runners.md` are
+updated; the report gives the new code index for §11 (outline §5 rule 10). `dev-two-tier-v4` merges
+`dev-two-tier-v4-prior` (outline §5 rule 1). Report to the user: the commits, the readings of each fold and of the base,
+the choice and its rule, and what stage C needs.
