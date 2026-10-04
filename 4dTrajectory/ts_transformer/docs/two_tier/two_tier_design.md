@@ -87,6 +87,7 @@ repository root.
 |---|---|---|---|
 | O6 | A mask for the spacing on the final (this design has no clearance word to hold back); the rule "established on the final" of the separation judge and the masks (D31) | Discuss with §8 | 8 |
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
+| O9 | The word clock of an open-loop replay. The executor spec chooses `time`, `distance` or `track` (`autopilot/sentence.py` `CLOCKS`); the formal executor spec `v12_20261004` uses `track`: a word is said at the row whose observed point is nearest the flown aircraft (forward, at most 60 s ahead, at most one row a cycle). It serves only the open-loop replays and the reference flights of the executor conformance. The closed-loop reading says its words at its own matched point (D42), and a closed-loop sentence is said on its own rows, so no training sentence and no reading of D34 uses it | At the next change of the executor spec: `time` only (an open-loop sentence said on its own rows), the other two clocks removed. Until then the value is part of the executor spec | 5.8, 9.2 |
 
 ### 0.3 Implementation
 
@@ -99,13 +100,10 @@ repository root.
 
 ### 0.4 Plan
 
-1. Stage A (§14.2): write the vocabulary, the labeller, the identities, the executor, the judge and the replay on the
-   branch `dev-two-tier-v4`, milestones A0–A14, each with tests and a code review. Another agent does this.
-2. Claude checks the result of stage A against this document (§14.6). Then A15 (§14.2) from the decisions on the
-   check (D48–D52), A16 (D53), A17 (D55) and A18 (D56: the chosen spec, the formal artefact).
-3. The spec measurement on all train days, in a scratch directory, gives the candidates of D15 (D55); the user
-   chooses them (the turn law of the executor stays, D47). Then the formal artefact is built, and the readings of
-   D34 are made at each row interval of the ablation (D11, D25: 2, 4, 8 s). The user compares them (D7).
+1. Stage A (§14.2), on the branch `dev-two-tier-v4`, by another agent: A0–A17 are done; A18 builds the formal artefact
+   with the spec of D56 and makes the readings of D34 at Δ = 2, 4, 8 s.
+2. Claude checks A15–A18 and the formal artefact (§14.6).
+3. The user compares the readings of D34 and chooses Δ (D7, D11). The replay of the val days waits for the user.
 4. Stages B, C, D (§14.3–§14.5): the prior from the start, the post-training and the multi-aircraft work, the frontend.
 5. The user merges the branch.
 
@@ -337,14 +335,13 @@ under the same rule: the same flights and a median piece angle of 2.98° against
 the weight at 0.92°) is not in the new pieces.
 With D3 the model holds the glidepath with these classes; the closed-loop reading gives the corrections (D32, §4.9).
 
-**Rounder values (D15).** The spec measurement gives each value that it fits from data (the descent centres and edges,
-the climb centre) with rounder candidates (for example to 0.5°, 0.25°, 0.1°) and, for each candidate, the fit that it
-leaves: the end-of-piece height error that the measurement already reports (`instructions/measure.py`
-`fit_descent_classes`), and the same for the climb pieces. The user chooses (criteria: D7). Two facts for that choice:
-24 of the 25 candidate runways publish a 3.0° glidepath (§11.4), and with D3 the model holds the final with an angle
-word, so a centre of 3.06° flies 10 m from a 3.0° glidepath in 10 km; the k-means with three classes put a centre at
-3.006°. The values that the measurement takes as percentiles are already rounded by their rules (turn rates to
-0.1°/s, the bank limit to 1°, the corridor to 5 m, 0.05° and 1°, the acceleration to 0.1 m/s²).
+**Rounder values (D15, D56).** The spec measurement writes each value that it fits from data (the descent nominals and
+edges, the climb nominal) with candidates rounded to 0.5°, 0.25° and 0.1°, and for each candidate the end-of-piece
+height error that it leaves on the descent and on the climb pieces (`instructions/measure.py` `rounding_candidates`).
+The spec takes the row that the user chose (`instruction_spec --candidate`; D56: 0.25°). Descent 3 is then the 3.0°
+glidepath that 24 of the 25 candidate runways publish (§11.4). The values that the measurement takes as percentiles
+are rounded by their own rules (turn rates to 0.1°/s, the bank limit to 1°, the corridor to 5 m, 0.05° and 1°, the
+acceleration to 0.1 m/s²).
 
 **Climb (D28).** The vocabulary has one climb word: "climb". The word has no angle. The angle is a value of the
 executor (§5.5), from the state G:
@@ -353,9 +350,9 @@ executor (§5.5), from the state G:
   limit permits at the present airspeed, not more than 3° and not less than 1.885°. 1.885° is the minimum gradient of a
   missed approach, 200 ft per NM (AIM 5-4-21 b). 3° is the upper limit. The real go-around climbs are steeper (§11.6),
   so the 3° limit usually applies.
-- **G false.** The executor climbs at the nominal angle of the climb class. The spec measurement fits it from the climb
-  pieces of the train days, with rounder candidates (D15); the user chooses. The train days have 1,498 climb pieces
-  among 233,649 vertical pieces (0.6 %); their length-weighted median is 1.32°.
+- **G false.** The executor climbs at the nominal angle of the climb class, 1.5° (D56): the length-weighted median of
+  the climb pieces of the train days (1.47°), rounded to 0.25°. The train days have 1,339 climb pieces against 227,559
+  descent pieces (0.6 %).
 
 The labeller does not read a go-around angle: a climb piece is a climb when its angle is 0.5° to 15°, in and out of G.
 
@@ -497,7 +494,7 @@ residual). A piece has at least two rows.
    outside the classes, or when a level word is on the wrong side of the height where its run starts (by more than its
    ε).
 
-The tube of §3.4 checks each word, with the ε of its segment.
+The tube of §3.4 checks each word, with the ε of its level (D52).
 
 ### 4.5 Speed words
 
@@ -735,12 +732,13 @@ predicted step says every column (rule 1): the observed words in force before Δ
 
 Why:
 
-- A word gives a target, not a rate. A speed word does not tell how fast to change the speed, and the executor changes
-  the speed at its own fixed rate (§5.6). Thus the flown aircraft moves ahead of the observed aircraft along the path,
-  or falls behind it. The comparison does not correct this difference.
+- A word gives a target, not a time. The speed steps (D43) give the rate of a change of speed, but the steps, the
+  dynamics and the 5 m/s grid still leave a difference along the path: the flown aircraft moves ahead of the observed
+  aircraft, or falls behind it (closed loop, select, Δ = 2 s, vectored: p50 221 m, p90 348 m; §11.13). The comparison
+  does not correct this difference.
 - A turn word must come where the observed aircraft turned. A word said at the observed time comes where the flown
-  aircraft is at that time: 2 km ahead along the path before a turn of 90° gives a lateral offset of 2 km after the
-  turn. One correction class removes such an offset too slowly (§11.11).
+  aircraft is at that time: an aircraft d ahead along the path before a turn of 90° is d to the side after the turn.
+  One correction class closes 6–9 m/s, too slowly for such an offset (§11.11).
 - The controller gives a turn at a place, not at a time. The prior learns from the flown states when to say a word, so
   the words must agree with the flown states.
 - A go-around word said at the observed time can come after the flown aircraft has crossed the threshold. Said at the
@@ -1225,10 +1223,10 @@ the limit.
 
 ### 9.1 Gates
 
-Each stage has a gate: the labeller (completeness, envelope containment with envelope width), the replay (the
-executor flies the labelled sentences), the prior (teacher-forced likelihood against baselines, free generation), the
-post-training, the multi-aircraft stages. The user sets the criteria of each gate after the design is settled (D7).
-This document sets none.
+Each stage has a gate: the labeller (completeness, envelope containment with envelope width), the replay (the executor
+flies the closed-loop sentences; §4.8, reading 4), the prior (teacher-forced likelihood against baselines, free
+generation), the post-training, the multi-aircraft stages. The user sets the criteria of each gate after the design is
+settled (D7). This document sets none.
 
 ### 9.2 Identities (D21)
 
@@ -1239,8 +1237,8 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | # | What | Its identity | Stage |
 |---|---|---|---|
 | 1 | The vocabulary (grids, classes, tolerances, reading name) | The spec sha. It is the format | A |
-| 2 | The labeller, open-loop and closed-loop reading | The labeller conformance (§14.2 A3): a fixed reference sample, labelled again by the code on disk, gives the same words, on the 2 s rows and on the Δ grid at Δ = 4 and 8 s (D49); for the closed-loop reading (D32), with the artefact's executor spec, the same correction words and the same flown states within the tolerance of the executor conformance. The artefact records which code wrote it, as information | A |
-| 3 | The executor | The sha of the spec's parameters and the conformance of its reference tracks (C33) | A |
+| 2 | The labeller, open-loop and closed-loop reading | The labeller conformance: the artefact holds a reference sample (`conformance/`; train, seed 1337, 50 labelled and 10 refused flights for each airport, with their signals); `instruction_conformance` labels it again with the code on disk and requires the same words and the same refusals, on the 2 s rows and on the Δ grid at Δ = 4 and 8 s (D49). The closed-loop reading (D32) has its own reference sample (train, seed 1337, 10 flights for each airport, at each Δ of the artefact): with the artefact's executor spec, the same correction words and the same flown states on the 2 s rows (D51), within the tolerance of the executor conformance. Each check writes a passed record named by a digest of the code by its logic; a runner that labels, reads the closed loop or replays sentences requires the passed record of the code on disk. The artefact records which code wrote it, as information | A |
+| 3 | The executor | The sha of the spec's parameters and the conformance of its reference tracks (C33): the spec's labelled train flights, flown again in every way the executor flies (single-aircraft batch, multi-aircraft batch, single flight) within 1e-6 m. The open-loop sentences of these flights are said on the spec's word clock (O9) | A |
 | 4 | The flights of an artefact | The stored signals. A consumer that rebuilds a flight from the harvest compares it row by row with them (`autopilot/flights.py` `require_same_flight`). No byte hash of an arrival manifest | A |
 | 5 | The artefact of a prior | The spec sha, the day split, the candidate table and the sha256 of the sentence files | B |
 | 6 | The edge features of a scene | A conformance check: fixed reference scenes give the same edge features | C |
@@ -1281,13 +1279,14 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | Landed lateral limit | FAS half-width at the threshold, 106.7 m | FAA Order 8260.58D Formula 3-1-1 |
 | Lined up | track within 30° of the course | 7110.65BB 5-9-2, TBL 5-9-1 |
 | DA check | vertical ±22 m of the published glidepath; lateral inside the FAS cone at the DA distance | D38 (`evaluation/thresholds.py`; FAA Order 8260.58D Formula 3-1-1) |
-| Time limit | remaining observed time × 1.5 | Fixed choice |
-| Closed-loop reading: tolerances | lateral Y = 30 m, vertical H = 15 m; a correction ends below half the tolerance or at a change of sign | D32 |
+| Time limit | remaining observed time × 1.5, plus 900 s for each go-around | Fixed choice; the 900 s: the user, 2026-10-02 |
+| Closed-loop reading: tolerances | lateral Y = 30 m, vertical H = 15 m; a correction ends below half the tolerance or at a change of sign; a change of sign beyond the tolerance says the opposite correction in the same row | D32, D53 |
 | Closed-loop reading: correction | heading: one class (5°) toward the observed path; angle: the next descent class | D32 |
 | Closed-loop reading: observed words | at the first Δ row whose matched observed time is less than Δ/2 before the word's 2 s time (the Δ row nearest to its place; a tie: the later row); a heading word in the frame where it is heard | D42, D45, D46 |
 | Closed-loop reading past the end of the observed path | no correction (one in force ends); lateral error for the readouts, no vertical error | D44 |
-| Turn law of the executor | unchanged after A13 | D47 |
+| Turn rate of a heading word | the smallest of: the error over the time left until L (not less than two cycles), the stopping rate √(2·g·p·\|e\| / V), the turn-rate limit | §5.4; D47 |
 | Δ grid of the open-loop reading | each 2 s word on the nearest Δ row (a tie: the later row) | D45 |
+| Word clock of an open-loop replay | `track` (executor spec `v12_20261004`) | O9 |
 
 ---
 
@@ -1298,6 +1297,11 @@ All counts in §11.2–§11.4 come from two runners on the train split of artefa
 `4dTrajectory/outputs/POOLED/analyses/word_frames_20261003/word_frames.json`) and R49 `instruction_final_approach`
 (§11.4; output `4dTrajectory/outputs/POOLED/analyses/final_approach_20261003/final_approach.json`). Each output gives
 the same numbers for each airport too. `docs/reference/runners.md` R48, R49 give the definitions.
+
+The smoke builds of §11.9 and §11.11–§11.14 took the first 80 sorted flight keys of each airport and split (a key starts
+with the callsign: approximately 400 train flights, 373 of them one airline), and each fitted its spec on its own train
+flights (the A9 smoke: descent nominals 1.51 / 2.36 / 3.08 / 4.36°, the climb 4.24° from one climb piece). Their numbers
+show how the mechanisms act; they are not numbers of the formal artefact (D55).
 
 ### 11.1 The prior uses its airport embedding (R46)
 
@@ -1382,9 +1386,9 @@ From the proposal [altitude_word_grid.zh.md](altitude_word_grid.zh.md) (`v6_2026
 read on 3,964 validation flights; continuous level-off heights). Rounding error of the level words other than row 0,
 p50 / p95 / largest: the chosen grid (40 levels) 17 / 30 / 58 m; the same shape with steps doubling and break points at
 1,200 and 2,400 m (44 levels) 17 / 38 / 79 m; a uniform grid of 48 levels over the range 35 / 55 / 57 m. The
-`instruction-v3` grid (30 m, 182 classes) has at most 15 m. These numbers come from a one-off script of that proposal;
-the spec measurement of stage A gives them again from a runner (§14.2 A3). The proposal did not fly the grid: the replay
-of stage A does.
+`instruction-v3` grid (30 m, 182 classes) has at most 15 m. These numbers come from a one-off script of that proposal.
+The spec measurement gives them from a runner (`instruction_spec`, `level_rounding`): on all train days with the labeller
+of stage A (code at `42f3ff62`, 25,654 level words), 16 / 34 / 223 m; the largest is in the 450 m segment.
 
 - In `v6_20261002`, 99.7 % of the level words are under 3,000 m; its 30 m grid used 116 of its 182 classes.
 - The geometric height of one assigned pressure level moves from day to day by about height × ΔT / 273 (ΔT: the day's
@@ -1613,24 +1617,25 @@ Read the design sections that a milestone names before you start it.
 
 ### 14.1 Branch and rules
 
-1. Make the branch from `dev-two-tier` at the commit that holds this section:
-   `git worktree add -b dev-two-tier-v4 .claude/worktrees/two-tier-v4 dev-two-tier`. In the worktree, link the ignored
-   data trees with absolute links: `data`, `trajectory_data_process/outputs`, `4dTrajectory/outputs`,
-   `aeroviz-4d/public/data/airports`. These links point at LIVE data.
+1. The branch is `dev-two-tier-v4`, in the worktree `.claude/worktrees/two-tier-v4`, made from `dev-two-tier`. Before a
+   milestone that a new design commit holds, merge `dev-two-tier` into it. The ignored data trees of the worktree
+   (`data`, `trajectory_data_process/outputs`, `4dTrajectory/outputs`, `aeroviz-4d/public/data/airports`) are absolute
+   links to LIVE data.
 2. Each milestone: read the code that it changes; write the code and its tests; run the milestone's test files; get a
    code review from a separate reviewer (code only, never documents); correct; commit with explicit paths. Never use
    `git add -A`. Before each commit, read `git diff --cached --stat`.
 3. A test never writes under a live root. A test that calls a runner's `main()` gives every write root a tmp path
    (`tests/support.py` `labelled_instruction_artefact` is an example).
-4. Run single test files in the foreground. Run the full ts suite (approximately 55 min) only at the end of the stage,
-   detached (`nohup setsid`, the script writes its own PID file).
-5. No compatibility (principle 8). Every changed format gets a new name: reading `instruction-v4`, spec schema
-   `ts-instruction-spec-v5`, sentences schema `ts-instruction-sentences-v3`, executor spec schema `ts-executor-spec-v7`.
-   The new code refuses an old artefact by its name. No `.get(key, default)` fallbacks, no branches on a schema version.
+4. Run single test files in the foreground. Run the full ts suite (approximately 55 min, detached: `nohup setsid`, the
+   script writes its own PID file) at the end of each milestone that changes code, before its report, and before a
+   formal build.
+5. No compatibility (principle 8). Every changed format gets a new name (the reading name, each schema name; the
+   names are constants of the code). The new code refuses an old artefact by its name. No `.get(key, default)`
+   fallbacks, no branches on a schema version.
 6. SI units only. A value from a regulation has its paragraph in a comment and is defined one time.
-7. No formal data build and no formal readout. A smoke build (a stated limit for each airport) goes to a tmp or
-   scratch directory. It uses the spec that the user chose (D15), and its flights are a random sample for each
-   airport and split, seed 1337 (D55). The formal artefact, the replay gate and every criterion wait for the user
+7. A formal build or a formal readout only where the user orders it (A18). A smoke build (a stated limit for each
+   airport) goes to a tmp or scratch directory. It uses the spec that the user chose (D15), and its flights are a random
+   sample for each airport and split, seed 1337 (D55). The replay of the val days and every criterion wait for the user
    (D7). Never write into an existing directory under `4dTrajectory/outputs/`.
 8. Do not touch the checkouts of running experiments (`.claude/worktrees/step9-run` and others) or the main checkout.
 9. A defect that you find outside the milestone goes to `docs/code-health-followups.md` (an entry and a table row), not
@@ -1645,320 +1650,30 @@ Read the design sections that a milestone names before you start it.
 
 ### 14.2 Stage A: vocabulary, labeller, identities, executor, judge, replay
 
-**A0. Archive.** Move to `archive/two_tier_v3_2026_10/`, unmodified and with their tests, the modules that belong to
-the old vocabulary and that stage A does not rewrite. Write a `README.md` there: what moved, why (D20), the last commit
-before the move, which stage brings each part back. The list:
+A0–A17 are done (§0.3 gives the commits; the reports are in `readouts/`). The rules are in the design sections above;
+the table gives what each milestone built. The module and the test that carry each decision of A0–A14 are in the table
+of Claude's check (`readouts/2026-10-04_stage_a_check.zh.md` §2), those of A15–A17 in their reports.
 
-- `prior/` (the whole package; stage B brings it back, rewritten);
-- every `experiments/prior_*.py` and `experiments/traffic_*.py`, `experiments/window_training_export.py`,
-  `inference/separation_masks.py`, `inference/scene_edges.py` (stages B and C);
-- the Training exports: `experiments/instruction_training_export.py`, `experiments/executor_training_export.py`,
-  `experiments/training_attitude.py`, `instructions/training_files.py`, `instructions/display.py` (stage D);
-- the readouts of old artefacts: `experiments/go_around_census.py` (R40; A2 moves its detection rule into the
-  labeller), `experiments/instruction_word_frames.py` (R48), `experiments/instruction_final_approach.py` (R49),
-  `experiments/heading_lead_ablation.py` (R23).
-
-Remove their names from `experiments/__main__.py` `NOT_RUNNERS` where they occur. If a later milestone breaks another
-module that stage A does not rewrite, archive it in that milestone and add it to the README. `tests/test_architecture.py`
-must pass. Note in the README that the backend tests under `aeroviz_backend/tests/` that use the two-tier code
-(`test_single_executor.py`, `test_autopilot_segment.py`, `test_http_server.py` where it calls that route) fail until
-stage D.
-
-**A1. Vocabulary** (§3; `instructions/spec.py`, `words.py`, `grammar.py`).
-
-- Columns: `("runway", "heading", "altitude", "angle", "speed")`. The approach column and its constants go.
-- Runway column: the candidate pointer plus the value "go-around". The states R and G and the table of §3.2.
-- Heading column: class k is the relative heading 5k° from the course of the runway in force (D8). `Words` gets the
-  conversions both ways with the course as an argument; there is no absolute heading class any more.
-- Altitude column: the grid of D22 (§3.4): 40 levels on three uniform segments, with the steps and break points as
-  spec constants; `Words` maps a height to the nearest level and a level to its height, and gives the ε of a level's
-  segment. The value "descend to land" becomes "no level-off", the index after the levels.
-- Angle and speed columns: unchanged.
-- Grammar rules 1–6 of §3.7 and the runway/G table of §3.2, as one function that the labeller checks and the speaker
-  masks with. There is no runway lock (D12).
-- Spec: reading `instruction-v4`, schema `ts-instruction-spec-v5`; the spec sha over the format fields, as now.
-- Tests: the conversion relative ↔ absolute at several courses (KSTL 122.3°, wrap at 0°/360°); every row of the
-  runway/G table, permitted and refused; rules 5 and 6; the first step.
-
-**A2. Labeller** (§4; `instructions/labeller/`).
-
-- Heading words (§4.3): the per-row reading in the frame of the landed runway, from row 0 to the last row. No clearance
-  placement, no capture-turn check. `capture_row` stays (for "unspecified" and the readout groups).
-- Go-around (§4.6, D18, D19): move the detection rule of `experiments/go_around_census.py` (the low pass, the levels
-  held 20 s, 150 m below and above) into a new module `instructions/labeller/go_around.py` with its tests (move the
-  relevant tests from `tests/test_go_around_census.py`). Say "go-around" at the first row of the climb (the row of the
-  climb word, D26); read the climb as altitude and angle words; say the runway of the next approach at the first
-  level-off after the climb, not later than the next "no level-off". Read each approach separately (D26, §4.6 item 6):
-  "no level-off" for the last descent that reaches the go-around row, a capture row and "unspecified" for each approach,
-  the runway of the first low pass at the first row. A flight that `instruction-v3` refused only because it crossed and came back is read with this
-  rule. The landing cut is the last qualifying crossing, not one that a go-around follows.
-- Altitude and angle (§4.4): the level test no longer uses the grid (rows within 25 m of the piece's own median, at
-  least 20 s); the word is the nearest level; level pieces with the same word merge; a move between two levels with the
-  same word gives no level word; the tube uses the ε of the word's segment; the name "no level-off".
-- Speed (§4.5): "unspecified" starts at the capture row, with the two exceptions re-anchored (D4).
-- Assembly (§4.7): five columns; the grammar of A1 checked on the 2 s rows.
-- Row interval (§4.8, D11): a pure function that puts a 2 s sentence on a grid of Δ (a multiple of 2 s, rows on UTC
-  multiples of Δ), keeping the last word of a column inside an interval, the first Δ row saying all five columns, and
-  the grammar checked again. It refuses a Δ that does not divide 16 s (D25). Its tests: Δ = 2 gives the sentence back;
-  Δ = 4 and 8 on hand-built sentences; Δ = 6 is refused.
-- Candidates: refuse a candidate without TCH, glidepath angle or LPV DA before labelling (§4.2).
-- Tests: a level at the middle of two 60 m levels is found as level; a slow descent inside one 450 m step is not a
-  level; synthetic flights (`tests/support.py` `fly_legs`, `instruction_flight`) for a downwind–base–final with
-  heading words to the end; a go-around and a second approach (the go-around row, the runway word's row, rule 5);
-  "unspecified" at the capture row with each exception.
-
-**A3. Artefact and identities** (§9.2, D21; `instructions/artefact.py`, `instructions/measure.py`, runners).
-
-- Remove `labeller_source_sha256`, `require_current_labeller` and the labeller check in `load_sentences`.
-- Labeller conformance: when `instruction_labels` writes the artefact, it also writes `conformance/`: a fixed sample of
-  250 labelled train flights (seed 1337, every airport) with their signals and their words. A new runner
-  `instruction_conformance` labels them again with today's code and requires the same words and the same refusals,
-  word for word; it writes `conformance/passed-<code>.json`, where `<code>` is a digest of the labeller's code by its
-  logic (as `autopilot/spec.py` does for the executor). Any runner that labels, or reads sentences for a replay,
-  requires a passed record for today's code.
-- Arrival manifests: remove the byte checks of the manifest (`arrival_manifest_sha256s` stays as recorded information
-  only). `autopilot/flights.py` `require_same_flight` stays.
-- Sentences schema `ts-instruction-sentences-v3`: five columns; per sentence the runway, the capture row, the go-around
-  rows; no `join_row`.
-- The spec measurement (D15): for the descent centres and edges and the climb centre, write the fitted value and the
-  candidates rounded to 0.5°, 0.25° and 0.1°, each with the end-of-piece height error that it leaves (the existing
-  `fit_descent_classes` error, and the same for the climb pieces). Also write the distribution of the climb angles
-  (D15, D28). The spec keeps the fitted values until the user chooses.
-- The spec measurement also writes the rounding error of the level words (row 0 apart, p50 / p95 / largest) under the
-  grid of D22 and under a uniform 30 m grid, on the train flights, so that §11.7 comes from a runner.
-- Runners kept and changed: `instruction_signals`, `instruction_spec`, `instruction_labels`, `instruction_figures`.
-- Tests: the conformance passes on a tmp artefact and fails when a labeller rule changes; an old artefact is refused by
-  its schema name.
-
-**A4. Executor** (§5; `autopilot/`).
-
-- Remove the laws of §5.7: the runway lock (`Executor.runway_locked`), the capture state and turn, the heading bend and
-  own intercept, the centreline tracking, every special law of "descend to land", the glidepath floor and the level
-  flight below the glidepath. The executor laws no longer read the TCH or the glidepath (`runway_data` stays for the
-  judge).
-- Heading: convert each heading word with the course of R at the hearing time; keep the absolute target until the
-  next heading word (§3.3, §5.4).
-- Go-around (§5.4–§5.6, D27, D28): G from the runway column; while G is true a climb word climbs at the go-around
-  angle (the thrust-limited steady climb angle within 1.885°–3°); the heading word in force stays; "unspecified"
-  holds the airspeed; a runway word ends G. No mode climbs without an altitude word.
-- Vertical modes of §5.5; speed law unchanged (§5.6).
-- Row interval: the executor hears the words at the start of each row of Δ (the word clocks of `autopilot/sentence.py`
-  take Δ, not the spec's 2 s).
-- Port every change to the single-flight executor `autopilot/single.py` (the conformance flies it too).
-- Tests: the heading conversion and a runway change that does not turn the aircraft; a go-around (the go-around angle,
-  the heading word in force kept, end by a runway word); "no level-off" flies the class angle without a level-off;
-  nothing captures or locks.
-
-**A5. Judge** (§5.8; `autopilot/judge.py`).
-
-- The outcomes of the §5.8 table, in the order of the table: `dynamics_failure`, `ground_contact`, `crossed_too_high`,
-  `crossed_off_runway`, `unstable_at_minimums`, `landed`, `crossed_other_runway`, `timeout`. The four crossing outcomes
-  of R need an approach crossing (G false, lined up within 30°, inside the landing screen). `crossed_without_capture`
-  goes.
-- A crossing while G is true is not an event. The time limit grows by 900 s at each go-around
-  (`Executor.extend_time_limit`).
-- The DA check: at the DA point, the lateral offset against the FAS cone at that distance
-  (`flight_scenarios/fas_geometry.py`) and the height against the published glidepath, straight-line reference
-  (§11.4). The bounds of D38: ±22 m imported from `evaluation/thresholds.py`, and the FAS cone itself. They are not
-  parameters.
-- Layer 2: the heading words to the end of the flight; the clearance and corridor checks go.
-- Tests: each outcome on a hand-built flown track; the order of two events at one row; a go-around low pass that is not
-  an event; the DA check pass and fail.
-
-**A6. Executor spec, conformance and replay.**
-
-- `executor_spec`: schema `ts-executor-spec-v7`; the parameters and the conformance reference
-  (250 flights) as now; `executor_conformance` as now (§9.2 #3).
-- `executor_replay`: a new option `--row-interval-s` (default 2; a multiple of 2): the sentences go through the A2
-  projection before they are flown. The summary gives each outcome, the words inside their envelopes (with the
-  envelope widths), the go-around sentences apart, for each airport and pooled. It requires the labeller and the
-  executor conformance records.
-- Smoke only (14.1 rule 7): build a smoke artefact (for example 30 flights for each airport) in a scratch directory,
-  pass both conformance checks, and run the replay at Δ = 2 and 4 to its end. No criterion is read.
-
-**A7. Close of stage A.** The full ts suite passes (run detached). §0.3 and §13 are updated. Report to the user: the
-commits, the archive list, the smoke results (as information, not as a verdict), and what stage B needs.
-
-**A8. Go-around reading and the go-around in the executor (D26–D28).** First merge the `dev-two-tier` commit that
-holds this milestone into `dev-two-tier-v4`.
-
-- Labeller (§4.2, §4.4–§4.6): read each approach separately. `vertical.py`: the last descent that reaches a go-around
-  row says "no level-off". `lateral.py` `capture_row`: one per approach, to the end of the approach; an approach that
-  ends at a go-around row outside the corridor has no capture row and is not refused for it. `speed.py` `read_speed`:
-  one reading per approach. `read.py`: the first row says the runway of the first low pass; the go-around row is the
-  first row of the climb; a go-around without a climb word is refused, with its reason.
-- Grammar (§3.7): rule 6, in the one function that the labeller checks and the speaker masks with.
-- Executor (`autopilot/`, and `autopilot/single.py`): remove "fly the course of R after a go-around" and the climb with
-  "no level-off" in force; the go-around angle of §5.5 (γ_T from the dynamics at each cycle, limited to 1.885°–3°);
-  the nominal climb angle while G is false. "Unspecified" holds the airspeed while G is true, as now.
-- Names: keep the names of §14.1 rule 5. No formal artefact exists yet. Delete the smoke artefact of A6 (it was made
-  by superseded code) and build it again.
-- Tests: a synthetic flight with a go-around and a second approach: "no level-off" and "unspecified" in force at the
-  go-around row; "go-around", the level word and "climb" in one row; the first row's runway is the low-pass runway when
-  the flight lands on another runway; rule 6 refuses a go-around row without a level while "no level-off" is in force.
-  Executor: the heading word in force stays after "go-around"; the go-around angle is 3° with ample thrust, γ_T between
-  the limits, and a 1.885° reference when the thrust is short; "go-around" alone starts no climb.
-- Smoke: the replay at Δ = 2 and 4 to its end; each labelled go-around flies as a go-around (G, the climb from its
-  level word, a new runway word, a landing after it). A readout of the smoke artefact gives, for each go-around row,
-  the altitude and speed words in force (the counts of §11.6 for the new labeller), as information.
-- Then the full ts suite again (as A7), and the report.
-
-**A9. Closed-loop reading (D32, D33).** After A8.
-
-- Module in `autopilot/` (§4.9, "Where the code goes"): for one flight, it flies the sentence of a row interval with
-  the executor from the first predicted step and returns the closed-loop sentence (correction words marked) and the
-  flown states on the rows. The comparison, the lateral and the vertical corrections exactly as in §4.9.
-- Spec: the two tolerances Y = 30 m and H = 15 m are labeller constants of the instruction spec (D32).
-- Runner: after `executor_spec`, a runner writes the closed-loop sentences and the flown states for each split and each
-  Δ of the ablation into the artefact, with the counts of correction words and the flights without a training sentence
-  by reason (§4.9, "Artefact"). Sentences schema: a new name (principle 8).
-- Labeller conformance (§9.2 #2): it covers the closed-loop reading, with the artefact's executor spec.
-- Judge (D33): while G is true, no crossing is an event, of R or of another candidate.
-- DA check (D38): the vertical bound imported from `evaluation/thresholds.py` (`RNAV_TERMINAL_VERTICAL_BOUND_M`), the
-  lateral bound the FAS cone at the DA distance; the two required DA parameters of the executor spec go (A5 built them).
-  Tests: a flight 21 m above the glidepath at the DA point passes, 23 m fails; inside and outside the cone.
-- `executor_replay` flies the closed-loop sentences. It reports, besides the outcomes: for each flight, the largest
-  |e_y| and |e_h| against the observed path, and the correction words for each column. Replaying a closed-loop sentence
-  gives its flown states again (a test).
-- Tests: a synthetic flight whose open-loop words leave a lateral offset gets heading corrections of one class toward
-  the path and ends within the tolerance; the correction ends below Y / 2 and at a change of sign; a new observed word
-  ends a correction; a final descent that is too high gets the next steeper class, and the observed class again; no
-  vertical correction during a level hold or a climb; a path that crosses itself keeps the forward matched point; a
-  flight without dynamics gives no training sentence and is counted; the rows before the first predicted step stay
-  observed; a crossing of another runway while G is true is not an event.
-- Smoke: the closed-loop reading at Δ = 2 and 4 on the smoke artefact; the replay of its sentences; as information,
-  the outcomes, the largest errors against the observed path and the correction words for each flight.
-- Then the full ts suite again, and the report.
-
-**A10. Observed words at the place (D42).** After A9.
-
-- `autopilot/closed_loop.py`: at each Δ row, the observed words of each open-loop Δ row whose observed time is not
-  later than the observed time of the matched point, and that were not said before; when one Δ row passes more than one
-  of these rows, the last word of each column (§4.9, "When the observed words are said"). One matched point for each
-  row serves the comparison and the words (`ObservedPath.match`, the forward search). The corrections do not change: a
-  row that says a new observed word of a column ends a correction of that column, as before.
-- The flight ends when the executor is done or at the time limit of the replay (§5.8: the remaining observed time ×
-  1.5, plus 900 s for each go-around), not at the last row of the open-loop sentence. The closed-loop sentence has the
-  flown rows.
-- The replay of a closed-loop sentence does not change: the sentence is said on its own rows and gives its flown states
-  again (the test of A9).
-- The closed-loop conformance (§9.2 #2) gets a new reference from the new code. The closed-loop sentences of the A9
-  smoke build come from superseded code: delete them and write them again.
-- Tests: a flown aircraft behind the observed one hears a turn word where the observed aircraft heard it, not at the
-  observed time, and ends within Y of the path; a flown aircraft ahead passes two observed heading words in one Δ row
-  and hears the last one; the observed words wait while the flown aircraft is behind; the first predicted step says
-  every column; a flown aircraft ahead of the observed one hears a go-around word before the threshold where the
-  observed aircraft went around before it (synthetic flights); a flight longer than the observed time is not cut at the
-  end of the open-loop sentence.
-- Smoke: the closed-loop reading at Δ = 2 and 4 and the replay of its sentences (train 30 flights for each airport,
-  select every flight). As information: the readouts of A9 and, for each stratum, the number of flights that leave the
-  observed path by more than 300 m and the correction words for each sentence (compare §11.11).
-- Then the full ts suite again, and the report.
-
-**A11. Speed words in steps (D43).** After A10, or together with it.
-
-- Labeller (`instructions/labeller/speed.py`): the steps of §4.5. The pieces, the holds, the runs and their targets,
-  "unspecified" and its two exceptions, and the reading for each approach (D26) do not change.
-- Executor (`autopilot/speed.py`, and `autopilot/single.py` in the same way): a speed word changes the speed at the
-  spec's a_max (`speed_accel_max_mps2`); "unspecified" keeps a_U = 0.25 m/s² and the rate to the threshold, not more than
-  a_max. The spec gets no new value.
-- Δ grid: two steps in one Δ row keep the last one (§4.8, as now).
-- Tests: a deceleration of 40 m/s from a hold to a hold gives 8 words, each at the first row where the smoothed speed is
-  nearer to it than to the value before, the last one the target of the hold; a run that changes direction without a
-  hold ends at the grid value nearest to the speed where it changes; noise inside a run gives no word in the other
-  direction; the executor makes a step of 5 m/s at a_max and records the thrust limit where the dynamics cannot give
-  a_max; "unspecified" decelerates as before.
-- The labeller, executor and closed-loop conformance references are made again (the code changes). Smoke: build again
-  from the open-loop reading; the readouts of A10 and, for each stratum, the speed words for each sentence and the
-  largest difference along the path from the observed aircraft of the same time before "unspecified" (compare §11.12),
-  as information.
-- Then the full ts suite again, and the report.
-
-**A12. The nearest row, the frame of a heading word, nothing past the end (D44, D45, D46).** After A11.
-
-- Δ grid (`instructions/labeller/interval.py`): each word of the 2 s reading on the nearest Δ row (a tie: the later
-  row); a heading word that moves across a runway word in the frame where it is heard (D46). The refusal of a heading
-  word across a change of course goes.
-- Closed loop (`autopilot/closed_loop.py`): the observed words from the 2 s open-loop reading, with their 2 s times; a
-  word said at the first Δ row whose matched observed time is not more than Δ/2 before its time; the first predicted
-  step says the words in force Δ/2 after its observed time; a heading word in the frame where it is heard (D46). The
-  refusal "closed loop: heading word across a runway change" goes. Past the end of the observed path: no correction,
-  and the rows count as rows without correction (D44).
-- Tests: the rounding at Δ = 4 and 8 s (a word 2 s after a Δ row goes to that row, 2 s before a Δ row to that row, a tie
-  to the later row; the order of the words is kept); a heading word heard after a change to a parallel runway keeps its
-  class, and after a change to a runway 6° off it gets the class of its absolute track; a flight with a long stretch past
-  the end of its observed path gets no correction there; the mean lateness of the heading words of a synthetic turn is
-  near zero at Δ = 2, 4 and 8 s.
-- The labeller and closed-loop conformance references are made again. Smoke: build again; the readouts of A11 and, for
-  each Δ, the lateness of the observed heading words (the matched observed time of the row that says a word, minus the
-  word's 2 s time), as information (compare §11.13).
-- Then the full ts suite again, and the report.
-
-**A13. The turn of the executor: a measurement (before the formal artefact).** After A12.
-
-- The question: how much of the lateral offset after a turn comes from the heading law of the executor (§5.4), and how
-  much from the words (the 5° grid, the lead)?
-- A runner (`experiments/`, with tests): the open-loop sentences of the smoke artefact at Δ = 2 s, flown on the time
-  clock in three ways: (a) the executor, its airspeed set to the observed ground speed at every cycle; (b) as (a), with
-  the stopping-rate limit lifted; (c) the exact model of the heading words (each word's track reached L after the word,
-  at the observed ground speed; §11.9). The settings of (a) and (b) belong to the runner only; the laws of the executor
-  do not change.
-- The readout: for each turn (a run of rows that turn one way faster than 0.2°/s, §4.3), the change of the lateral
-  offset from the observed path across the turn (from the row before the turn to 30 s after its end), for (a), (b) and
-  (c); by stratum and by band of ground speed; as information.
-- The user decides from the readout if the heading law changes. A change uses only values of the vocabulary (§5.1). It
-  comes before the formal artefact, because every closed-loop sentence depends on the executor.
-
-**A14. A tie in the closed loop at the later row (D45).** After A13.
-
-- Closed loop (`autopilot/closed_loop.py`): a word is said at the first Δ row whose matched observed time is less than
-  Δ/2 before its 2 s time; the first predicted step says the words in force before Δ/2 after its observed time (as the
-  Δ grid puts a tie at the later row).
-- Tests: at Δ = 4 and 8 s a word exactly Δ/2 after the matched time waits for the next row; the first predicted step
-  and the refusal of a go-around at it read the same row.
-- The closed-loop reading of the smoke build again (a new smoke directory), its conformance, the closed-loop replays;
-  as information. Then the full ts suite again, and the report.
-
-**A15. The decisions on Claude's check of stage A (D48, D49, D51; the check's §3 item 6).** After A14. D50 and D52
-change no code (the band of D52 is in `instructions/words.py` since A1). The tolerances Y and H are not restated in a
-test: their one source is the spec, which the spec sha identifies (D21), and §10 records them.
-
-- 2 s reading (`instructions/labeller/lateral.py`, `instructions/labeller/sentence.py`): after a change of R, a heading
-  word whose class is the class in force is said; the refusal "heading word repeated after a runway change" goes (D48).
-- Closed-loop artefact (`autopilot/closed_loop.py`, `instructions/artefact.py`): the flown states on the data's 2 s
-  rows, with the Δ rows marked (D51); the observed rows before the first predicted step on the same grid. A new
-  closed-loop format name. The replay of a closed-loop sentence and the closed-loop conformance compare on the 2 s
-  rows.
-- Labeller conformance (`instructions/conformance.py`): the reference sample also stores each sentence on the Δ grid at
-  Δ = 4 and 8 s (`labeller/interval.on_interval`); the check compares them again. A new reference format name (D49).
-- Tests: at Δ = 2 s the stored states are those of A14; at Δ = 4 and 8 s the states on the Δ rows are those of A14
-  and the rows between are the states the executor flies there; a closed-loop sentence replays to its states on every
-  2 s row; the 2 s reading of a flight that changes to a runway 6° off and keeps its class says the word, and the
-  executor flies the new track; the labeller conformance finds a change of the Δ grid's rule (the tie of D45);
-  `tests/test_architecture.py`: no module of the executor's laws (`autopilot/lateral.py`, `vertical.py`, `speed.py`,
-  `executor.py`, `single.py`) imports the runway data (D9).
-- The smoke build again (a new smoke directory): the labeller, the executor and the closed-loop conformance; how many
-  flights the 2 s reading refused for the repeated heading word before, and how many it says now; the closed-loop
-  replays at Δ = 2, 4, 8 s; the rule of D50 on the stored rows; as information. Then the full ts suite again, and the
-  report.
-
-**A16. An overshoot corrected in the same row (D53).** After A15.
-
-- Closed loop (`autopilot/closed_loop.py` `Corrector.row`): when a correction is in force and the error changes its sign
-  while |e_y| > Y (|e_h| > H, the class existing), the opposite correction in the same row; otherwise as before.
-- Tests: the overshoot case (e_y 0, +60, −60, −60, 0 at Y = 30 m) says the opposite correction at the overshoot row and
-  the rule of D50 holds; an overshoot within the tolerance says the observed word; the vertical case alike.
-- The smoke build again (a new smoke directory), its conformance, the closed-loop replays at Δ = 2, 4, 8 s; against
-  A15: which sentences changed, the rule of D50 (0 breaks), the readings of D34; as information. Then the full ts suite
-  again, and the report.
-
-**A17. The smoke sample (D55).** After A16.
-
-- `experiments/instruction_signals.py` `build_jobs`: `--limit N` takes a random sample of N flights for each airport
-  and split (seed 1337), not the first N of the sorted keys. The artefact records the seed beside the limit.
-- Tests: a limit takes the same flights at each run; from a key list whose first N keys share one callsign, the sample
-  also holds other callsigns; a limit of 0 takes all flights.
-- No smoke build in this milestone. The next smoke uses the spec that the user chose under D15 (§14.1 rule 7).
+| Milestone | What it built | Decisions |
+|---|---|---|
+| A0 | The archive of the modules of the old vocabulary that stage A does not rewrite (`archive/two_tier_v3_2026_10/`, with a `README.md`: what moved, why, which stage brings each part back; the backend tests that use the two-tier code fail until stage D) | D20 |
+| A1 | The vocabulary: five columns, the runway/G table, heading classes relative to the course of R, the altitude grid, grammar rules 1–5 as one function for the labeller and the speaker | D1, D8, D10, D12, D14, D22 |
+| A2 | The labeller: heading words from row 0 to the end, the go-around reading, the level test without the grid, "unspecified" from the capture row, the Δ grid; candidates without TCH, glidepath angle or LPV DA refused | D4, D11, D18, D19, D25 |
+| A3 | The artefact and the identities: the labeller conformance (§9.2 #2), no byte checks of the arrival manifests, the sentences schema, the spec measurement with its rounding candidates and the level rounding errors | D15, D21 |
+| A4 | The executor without the laws of §5.7; heading words converted with the course of R when heard; the go-around; the words heard at each Δ row; the same in `autopilot/single.py` | D2, D3, D9, D10, D27 |
+| A5 | The judge: the outcomes of §5.8 in their order, no event while G is true, the time limit + 900 s for each go-around, the DA check | D3, D33 |
+| A6 | The executor spec (`ts-executor-spec-v7`) and its conformance; `executor_replay --row-interval-s` | D21 |
+| A7 | The close of the first part: the full suite, the report `readouts/2026-10-03_stage_a_report.zh.md` | — |
+| A8 | Each approach read separately; rule 6; "go-around" changes no target; the go-around angle | D26–D28 |
+| A9 | The closed-loop reading (`autopilot/closed_loop.py`, runner `instruction_closed_loop`) and its conformance; the replay of closed-loop sentences; the DA check with the bounds of D38; the readings of D34 | D32–D34, D38 |
+| A10 | The observed words said at the place; the flight to the end of the executor or the time limit | D42 |
+| A11 | Speed words in steps; the executor at a_max | D43 |
+| A12 | Each word on the nearest Δ row; a heading word in the frame where it is heard; no correction past the end of the observed path | D44–D46 |
+| A13 | The turn measurement (`experiments/executor_turns.py`, R51); the user kept the turn law | D47 |
+| A14 | A tie at the later row in the closed loop too | D45 |
+| A15 | A heading word of the class in force after a change of R; the flown states on the 2 s rows; the Δ grid in the labeller conformance; the architecture test that the executor's laws do not import the runway data | D48, D49, D51 |
+| A16 | An overshoot corrected in its row | D53 |
+| A17 | The smoke sample random for each airport and split | D55 |
 
 **A18. The chosen spec and the formal artefact (D56).** After A17.
 
@@ -1978,8 +1693,9 @@ test: their one source is the spec, which the spec sha identifies (D21), and §1
 
 ### 14.3 Stage B: prior
 
-**Start.** After Claude's check of stage A (§14.6). The code is written and tested on the smoke artefact at Δ = 2 s.
-The formal runs of B5 need the formal artefact (§0.4 item 3) and the chosen Δ. The rules of §14.1 apply.
+**Start.** After Claude's check of stage A (§14.6). The code is written and tested on a sample of the formal artefact
+`v7_20261004` at Δ = 2 s, read-only. The smoke artefacts of stage A are not used: their spec is not the spec of D56
+(D55). The formal runs of B5 need the chosen Δ (§0.4 item 3). The rules of §14.1 apply.
 
 **Written from §6, not patched from the archive.** The archived `prior/` (`archive/two_tier_v3_2026_10/prior/`) stays
 unchanged. A part of it comes back only where its logic fits §6, rewritten into the new modules: the row-by-row encoding
@@ -2032,7 +1748,7 @@ the aircraft attention of a one-aircraft scene, the checkpoint formats `v3`–`v
 - Teacher forcing; the airports of a run (all, or a fold without its held-out airport); the stop on the select days;
   the validation days not read.
 - Before a formal run: the check at the formal size of the host memory and the GPU memory of the largest batch.
-- A smoke run on the smoke artefact; it gives the time of one run for the cost of B5.
+- A smoke run on a sample of the formal artefact; it gives the time of one run for the cost of B5.
 - Tests: the stop reads only the select days; a fold never reads its held-out airport in training.
 
 **B4. Speaking and free generation** (§3.7, §5.8; D14, D22, D33, D38).
@@ -2080,20 +1796,18 @@ not built (D30). A later stage with every aircraft of a window commanded is opti
 The Training exports and the backend's live executor (`aeroviz_backend/autopilot_segment/`) on the new format; the
 frontend reads the reading name, not the spec sha (§9.2 #9). After stage D the user merges the branch.
 
-### 14.6 What Claude checks at the end of stage A
+### 14.6 What Claude checks before stage B
 
-1. Each decision that stage A carries (D1–D22, the Δ values of D25, D26–D28, D32, D33, D38 and D42–D47) against the code: the module and the
-   test that carry it (a table in the report).
-2. The targeted tests and the full suite pass on the branch head (run again, not read from the report).
-3. The smoke build: both conformance checks pass; the replay at Δ = 2 and 4 runs to its end; a labelled go-around
-   flies as a go-around (G, the climb from its level word, a new runway word, a landing after it); at each go-around
-   row, "no level-off" and "unspecified" are in force where the approach reached them (D26); the closed-loop sentences
-   at Δ = 2 and 4 replay to their flown states, and on every row where §4.9 permits a correction, |e_y| > Y is
-   followed by a heading correction in force after that row and |e_h| > H by an angle correction (D32, D50; the p90
-   of |e_y| at the last row as information); the observed words of a closed-loop sentence follow the matched
-   point (D42), and a labelled go-around is in its closed-loop sentence and flies as
-   a go-around; a change of speed says its steps, and the executor makes each step at a_max (D43); each observed word of
-   a closed-loop sentence comes at the Δ row nearest to its place (D45); no correction past the end of the observed path
-   (D44); a heading word moved across a runway word is in the frame where it is heard (D46); the readout of A13 exists.
-4. No write under a live root, and no existing directory under `4dTrajectory/outputs/` changed.
+The check of A0–A14 is done (`readouts/2026-10-04_stage_a_check.zh.md`, at `ab295b18`; its points became D48–D52).
+Before stage B, Claude checks A15–A18 and the formal artefact:
+
+1. D48, D49, D51, D53, D55 and D56 against the code: the module and the test that carry each (a table in the report).
+2. The targeted tests of A15–A18 pass on the commit of the formal build (run again); the full suite of that commit
+   passed (§14.1 rule 4; its log).
+3. The formal artefact: the spec holds the values of D56 and its measurement records the chosen row; the labeller, the
+   executor and the closed-loop conformance records pass for the code of the build; at each Δ, the closed-loop sentences
+   of the replays give their flown states again on the 2 s rows, and the rule of D50 holds on every stored row; the
+   readings of D34 (items 1–4) exist for every Δ, each split that A18 reads and each airport.
+4. No write under a live root except the new directories of A18; no existing directory under `4dTrajectory/outputs/`
+   changed; the `SHA256SUMS` beside the formal data match.
 5. Nothing in the archive was edited after the move.
