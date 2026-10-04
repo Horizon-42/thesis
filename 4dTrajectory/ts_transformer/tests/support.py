@@ -326,3 +326,77 @@ def prior_sentence(rng, words, *, candidates=3, rows=30, first_step=8, airport="
         candidates=candidate_vectors,
         runway_in_force=runway_in_force, go_around=np.zeros(rows, dtype=bool), heading_in_force=heading_in_force,
         words_in_force=words_in_force, since=since, targets=targets)
+
+
+#: `prior_artefact`'s closed-loop sentences: the words said, rows from the first predicted step.
+PRIOR_ARTEFACT_ROWS = 30
+
+
+def prior_closed_loop_sentence(signals, words, *, interval_s, first_row=0, go_around=False):
+    """A closed-loop sentence of ``signals`` (a straight-in onto `parallel_airport`'s "09", descending) at Δ =
+    ``interval_s``, built by hand (`instructions.artefact.ClosedLoopSentence`): its states are the observed ones from its
+    2 s row ``first_row`` (a stand-in for flown ones); its words a grammatical sentence — at the first predicted step
+    "09", the course, "no level-off" with the descent class of 3°, the speed; a heading word and a speed word later;
+    with ``go_around`` a go-around (a level above and the climb) and "09" again to end it."""
+    import numpy as np
+
+    from ts_transformer.instructions.artefact import ClosedLoopSentence
+    from ts_transformer.instructions.labeller.interval import OBSERVATION_S, interval_rows, on_interval_rows
+    from ts_transformer.instructions.words import RUNWAY_GO_AROUND, UNCHANGED
+
+    every = interval_rows(interval_s, words.spec.step_s)
+    start, said = int(round(OBSERVATION_S / interval_s)), PRIOR_ARTEFACT_ROWS
+    count = (start + said - 1) * every + 1
+    rows = slice(first_row, first_row + count)
+    states = np.stack([signals.e_m[rows], signals.n_m[rows], signals.altitude_m[rows], signals.track_deg[rows],
+                       signals.ground_speed_mps[rows], signals.vertical_rate_mps[rows]], axis=1)
+    grid = np.full((said, 5), UNCHANGED, dtype=np.int16)
+    grid[0] = [0, words.heading_index(0.0), words.altitude_no_level_off, words.angle_index(3.0), words.speed_index(75.0)]
+    grid[5, 1] = words.heading_index(5.0)
+    grid[9, 4] = words.speed_index(70.0)
+    if go_around:
+        height = signals.altitude_m[first_row + (start + 12) * every] - INSTRUCTION_AIRPORT_ELEVATION_M
+        grid[12, [0, 2, 3]] = [RUNWAY_GO_AROUND, words.altitude_index(height + 300.0), words.angle_climb]
+        grid[20, 0] = 0
+    return ClosedLoopSentence(
+        first_row=first_row, start=start, grid=grid, correction=np.zeros((said, 5), dtype=bool), states=states,
+        on_interval=on_interval_rows(count, every), lateral_m=np.zeros(said), vertical_m=np.zeros(said),
+        uncorrectable=np.zeros((said, 2), dtype=bool), observed_row=np.arange(said), matched_row=np.arange(said) * 1.0,
+        timed_out=False)
+
+
+def prior_artefact(directory, interval_s=2.0):
+    """A tmp instruction artefact at ``directory`` (created) as the prior reads it (vocabulary §6 items 3, 4): two
+    straight-in flights onto `parallel_airport`'s "09" on each development split (the second with a go-around), the
+    spec, the candidates with their vertical paths, and each split's closed-loop file at Δ = ``interval_s``
+    (`prior_closed_loop_sentence`). Returns ``(words, roster records)``: the tracks roster's records of the flights'
+    landings (`prior.landings`)."""
+    from ts_transformer.instructions.artefact import (
+        SPLITS, closed_loop_path, write_candidates, write_closed_loop, write_signals, write_spec,
+    )
+    from ts_transformer.instructions.words import Words
+
+    spec = instruction_spec()
+    words = Words(spec)
+    flights, records = {}, []
+    for split in SPLITS:
+        flights[split] = []
+        for i in range(2):
+            legs = [(160, 0.0, 75.0 - 2.0 * i, -1.5)]
+            flight = instruction_flight(*fly_legs(legs, 90.0, 750.0 + 30.0 * i, -400.0, 0.0),
+                                        dataset_id=f"KXXX:F{split}{i}", split=split)
+            flights[split].append(flight)
+            records.append({"flight_key": f"F{split}{i}", "outcome": "assigned", "runway": "09",
+                            "landing_time_utc": flight.landing_time_utc})
+    directory.mkdir(parents=True)
+    write_signals(directory, flights, {"counts": {}, "test_days": {"flights_not_opened": 0}, "sources": []},
+                  fixture_days())
+    write_candidates(directory, {"KXXX": parallel_airport()})
+    write_spec(directory, spec, {"n": 1}, {"git": {"head": "test", "dirty": False}})
+    (directory / "closed_loop").mkdir()
+    for split in SPLITS:
+        sentences = {i: prior_closed_loop_sentence(flight, words, interval_s=interval_s, go_around=i == 1)
+                     for i, flight in enumerate(flights[split])}
+        write_closed_loop(closed_loop_path(directory, split, interval_s), spec, executor_params_sha256="test",
+                          row_interval_s=interval_s, start_row=sentences[0].start, sentences=sentences)
+    return words, records
