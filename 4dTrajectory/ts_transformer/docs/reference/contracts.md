@@ -383,8 +383,9 @@ frozen roots, the file whose bytes hash to the recorded digest; none raises by a
 digest. The arrival loader reads a non-current schema only when the bytes are a frozen
 generation's, so a frozen roster is read AS WRITTEN (the checkpoint's data is not converted).
 Users: `experiments/support.checkpoint_manifests`, `anytime_curve.load_arm` (and through it
-`latent_probe`, `chain_sensitivity`), `control_capacity_ceiling`, `clock_attribution`,
-`predictability_report`, `control_basis_oracle` (teacher fit), `runway_hypotheses`.
+`latent_probe`, `chain_sensitivity`),
+`predictability_report`, `control_basis_oracle` (teacher fit), `runway_hypotheses` (and the archived
+`control_capacity_ceiling`, `clock_attribution`: `archive/one_tier_oneoffs_2026_10/`).
 `predict` / `evaluate-fit` take `--data` explicitly — pass the frozen root's manifests there.
 New training always reads the live root (`repo_layout.HARVEST_ROOT`, the one definition; the
 four runners that restated it import it).
