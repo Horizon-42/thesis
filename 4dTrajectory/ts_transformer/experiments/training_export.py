@@ -203,9 +203,9 @@ def replay_payload(flown: Flown, j: int, verdict: Verdict, part: replay.Batch, s
     apart = float(np.abs(again - sentence.flown_states[:, :3]).max())
     if not apart <= STATE_BOUND_M:                     # a NaN state is refused too
         raise ValueError(f"{part.signals[j].dataset_id}: flown again {apart:.3g} m from its closed-loop states")
-    if verdict.outcome != formal["outcome"]:
+    if verdict.outcome != formal["outcome"] or verdict.outcome != sentence.outcome:
         raise ValueError(f"{part.signals[j].dataset_id}: flown again to {verdict.outcome}, the formal replay to "
-                         f"{formal['outcome']}")
+                         f"{formal['outcome']}, stored {sentence.outcome}")
     crossing = training_flights.crossing_payload(verdict, flown, j, geometry)
     judged = None
     smoothed = read_flown(flown, j, verdict.outcome, verdict.end_row, geometry, part.signals[j], spec)

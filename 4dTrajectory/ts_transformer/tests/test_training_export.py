@@ -241,6 +241,10 @@ def test_a_flight_flown_again_is_refused_unless_it_gives_its_stored_states_and_i
     with pytest.raises(ValueError, match="the formal replay to landed"):
         export.replay_payload(flown, 0, verdict, one.batch, one.sentence, {"outcome": "landed"}, aero, one.words.spec,
                               one.words)
+    other = "timeout" if verdict.outcome != "timeout" else "landed"                 # D74: the stored outcome
+    with pytest.raises(ValueError, match=f"stored {other}"):
+        export.replay_payload(flown, 0, verdict, one.batch, dataclasses.replace(one.sentence, outcome=other),
+                              {"outcome": verdict.outcome}, aero, one.words.spec, one.words)
 
 
 def test_a_set_whose_directory_exists_is_refused_before_any_airport_is_written(tmp_path):

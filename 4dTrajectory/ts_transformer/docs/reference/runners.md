@@ -268,7 +268,7 @@ and the table per group, airport, stratum and kind (with a go-around or not): th
 envelopes per column with the envelopes' widths, the decision-altitude checks, the evaluation where the observed passes.
 **No criterion is read** (design D7). With `--closed-loop` it flies the artefact's closed-loop sentences instead (C38,
 R50): each from its first predicted step on the time clock, refused for another executor's parameters, each flight
-required to fly its stored states again; each row adds the largest |e_y| and |e_h|, those on the rows without a correction
+required to fly its stored states again to its stored outcome (D74); each row adds the largest |e_y| and |e_h|, those on the rows without a correction
 (D34) and the correction words per column, and each cell of the table the flights that left the observed path by more
 than 300 m (`LEFT_THE_PATH_M`, the reading of vocabulary §9.7) and the correction words per sentence. Every replay's time
 limit is the remaining observed time from the sentence's first row × 1.5 (`replay.time_limits_s`), not its rows. Select and val run from a clean tree; **the val replay waits for the user's
@@ -1496,12 +1496,14 @@ side (refused unless their specs differ only in H_final and a split's readouts d
 
 2026-10-04 (`experiments/closed_loop_start_check.py`, `autopilot/start.py`). `closed_loop_start_check --instructions <artefact>
 --executor <spec dir> --split train|select|val --row-interval-s 2 4 8 [--per-airport 50] [--seed 1337] [--chunk 2048] --out <new dir>`:
-refused unless the executor and closed-loop conformance records of the code on disk exist. For each Δ, the artefact's stored
+the labeller's, the executor's and the closed loop's checks run first in the process (`start.start` opens the spec,
+D73; the run records their largest differences). For each Δ, the artefact's stored
 closed-loop sentences of the split (`--per-airport` of each airport, seeded; 0 every one; an airport with fewer refused) are started `--chunk` at a time through
 `start.start` — rebuilt from the harvest, their aircraft and approach speeds by the replay's rule, their time limits from
 the sentence file — and said row by row (each its own rows, then "unchanged"). Each flight must give back its stored
 states on every 2 s row while it flies (position and height within `STATE_BOUND_M`, the other columns — the track wrapped — within `ROUNDOFF`), be done at its
-sentence's last row and time out as stored; `check.json` (`ts-closed-loop-start-check-v1`) holds every flight; exit 1 when
+sentence's last row, time out as stored and be judged to its stored outcome (D74, since A31); `check.json`
+(`ts-closed-loop-start-check-v3`) holds every flight; exit 1 when
 any fails. The test of A26 on the artefact of A25 (§12.2 item 7).
 
     python run_ts.py closed_loop_start_check --split train --row-interval-s 2 4 8 \

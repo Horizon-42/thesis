@@ -375,15 +375,32 @@ def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(t
     _, moved, missing, flown = _replayed(batch, inputs, sentence, params, words, monkeypatch)
     assert missing == 0 and moved.sentences[0].first_row == batch.sentences[0].first_row + sentence.start * 2
     assert moved.signals[0].e_m[0] == batch.signals[0].e_m[sentence.start * 2]
-    (row,) = closed_loop_columns(stored, 2.0)(moved, flown, [None])
+    verdicts = replay.judge_batch(moved, flown, words)
+    assert verdicts[0].outcome == sentence.outcome                                  # D74: the replay's is the stored
+    (row,) = closed_loop_columns(stored, 2.0)(moved, flown, verdicts)
     assert row["largest_lateral_m"] == pytest.approx(float(np.abs(sentence.lateral_m).max()))
     assert row["uncorrected_lateral_m"] == closed_loop.uncorrected_m(sentence.lateral_m, sentence.uncorrectable[:, 0])
     assert row["uncorrected_vertical_m"] == closed_loop.uncorrected_m(sentence.vertical_m, sentence.uncorrectable[:, 1])
     assert row["uncorrected_lateral_m"] != row["uncorrected_vertical_m"]
     assert sum(row["correction_words"].values()) == int(sentence.correction.sum())
+    stored[7] = replace(sentence, outcome="ground_contact" if sentence.outcome != "ground_contact" else "landed")
+    with pytest.raises(ValueError, match=f"flown again to {sentence.outcome}, stored {stored[7].outcome}"):
+        closed_loop_columns(stored, 2.0)(moved, flown, verdicts)
     stored[7] = replace(sentence, states=sentence.states + [1.0, 0, 0, 0, 0, 0])
     with pytest.raises(ValueError, match="from its closed-loop states"):
-        closed_loop_columns(stored, 2.0)(moved, flown, [None])
+        closed_loop_columns(stored, 2.0)(moved, flown, verdicts)
+
+
+@pytest.mark.parametrize("interval_s", [2.0, 8.0])
+def test_a_sentence_that_reaches_its_time_limit_stores_the_timeout_the_replay_gives(monkeypatch, interval_s):
+    """D74 at the time limit: a flight cut short of the runway is done in the cycle that reaches its time limit, stored
+    as `timeout`, and flown again it is judged the same."""
+    batch, inputs, words = _batch(interval_s, cut=120)
+    params = _params()
+    (sentence,) = closed_loop.read(batch, inputs, params, words, device=CPU)
+    assert sentence.timed_out and sentence.outcome == "timeout"
+    _, moved, _, flown = _replayed(batch, inputs, sentence, params, words, monkeypatch)
+    assert replay.judge_batch(moved, flown, words)[0].outcome == sentence.outcome
 
 
 def test_the_runner_counts_the_flights_without_a_sentence_by_reason():
@@ -397,6 +414,7 @@ def test_the_runner_counts_the_flights_without_a_sentence_by_reason():
     numbers = summarise([sentence, Refused("go-around at the first predicted step")],
                         {"no aircraft dynamics": 3}, {"too short": 1}, [lateness], [_outside(batch, sentence, words)])
     assert numbers["sentences"] == 1
+    assert numbers["outcomes"] == {sentence.outcome: 1}                                             # D74
     assert numbers["without_a_sentence"] == {
         "not flown": {"no aircraft dynamics": 3}, "refused on the row interval": {"too short": 1},
         "refused by the closed loop": {"go-around at the first predicted step": 1}}
@@ -582,6 +600,9 @@ def test_the_conformance_check_passes_the_same_reading_and_finds_every_change(tm
     flags = _reference(tmp_path / "flags", monkeypatch, lambda s: (["KXXX:test"], [
         replace(s, uncorrectable=~s.uncorrectable)]))
     assert not flags.passed and "the uncorrectable differ" in str(flags.mismatches)
+    judged = _reference(tmp_path / "outcome", monkeypatch, lambda s: (["KXXX:test"], [
+        replace(s, outcome="timeout" if s.outcome != "timeout" else "landed")]))
+    assert not judged.passed and "outcome" in str(judged.mismatches)                              # D74
     refused = _reference(tmp_path / "refused", monkeypatch, lambda s: (["KXXX:test"], [Refused("too short")]))
     assert not refused.passed
 
@@ -633,10 +654,12 @@ def test_read_chunked_puts_each_result_in_its_place(monkeypatch):
     monkeypatch.setattr(closed_loop, "start_inputs", lambda part, step_s, device: closed_loop._rows(
         closed_loop.FlightInputs(*(torch.cat([getattr(inputs, n)] * len(part.sentences)) for n in (
             "initial_state", "aero_params", "frame_params", "max_thrust_n"))), list(range(len(part.sentences)))))
-    results = closed_loop.read_chunked(batch, params, words, chunk=1, device=CPU)
-    assert isinstance(results[0], Refused)
-    for result in results[1:]:
-        assert np.array_equal(result.grid, alone.grid) and np.array_equal(result.states, alone.states)
+    for chunk in (1, 3):                    # 3: the refused flight ahead of the flown ones in one reading (D74's index)
+        results = closed_loop.read_chunked(batch, params, words, chunk=chunk, device=CPU)
+        assert isinstance(results[0], Refused)
+        for result in results[1:]:
+            assert np.array_equal(result.grid, alone.grid) and np.array_equal(result.states, alone.states)
+            assert result.outcome == alone.outcome
 
 
 def test_the_rows_without_a_correction_are_marked_for_the_ablation():

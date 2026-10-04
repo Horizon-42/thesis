@@ -292,7 +292,8 @@ def along_columns(words: Words) -> Callable[[replay.Batch, Flown, list[Verdict]]
 def closed_loop_columns(stored: dict[int, ClosedLoopSentence], step_s: float
                         ) -> Callable[[replay.Batch, Flown, list[Verdict]], list[dict[str, Any]]]:
     """The rows' closed-loop columns: each flight's largest |e_y| and |e_h| and its correction words per column — after
-    checking that it flew its stored states again (each 2 s row's position and height within `STATE_BOUND_M`, D51)."""
+    checking that it flew its stored states again (each 2 s row's position and height within `STATE_BOUND_M`, D51) to
+    its stored outcome (D74)."""
     def columns(part: replay.Batch, flown: Flown, verdicts: list[Verdict]) -> list[dict[str, Any]]:
         out = []
         for j, index in enumerate(part.indices):
@@ -304,6 +305,9 @@ def closed_loop_columns(stored: dict[int, ClosedLoopSentence], step_s: float
             apart = float(np.abs(again - flown_states[:, :3]).max())
             if apart > STATE_BOUND_M:
                 raise ValueError(f"{part.signals[j].dataset_id}: flown {apart:.3g} m from its closed-loop states")
+            if verdicts[j].outcome != sentence.outcome:
+                raise ValueError(f"{part.signals[j].dataset_id}: flown again to {verdicts[j].outcome}, stored "
+                                 f"{sentence.outcome}")
             out.append({"largest_lateral_m": closed_loop.largest_m(sentence.lateral_m),
                         "largest_vertical_m": closed_loop.largest_m(sentence.vertical_m),
                         "uncorrected_lateral_m": closed_loop.uncorrected_m(sentence.lateral_m,

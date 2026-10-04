@@ -9,8 +9,9 @@ started ``--chunk`` flights together (`start.start`, the most go-arounds the mos
 each flight's own rows, then "unchanged" once its sentence has ended; a flight's 2 s rows are kept while it flies, so one
 done early has fewer rows than stored. Per flight: the largest difference of the position and height (columns 0–2) and
 of the other columns (the track wrapped to ±180°) between the flown 2 s rows and the stored ones; whether it is done
-exactly at its sentence's last row; and whether it timed out as stored. Refused (exit 1) unless every flight is within the executor conformance's
-bound (`STATE_BOUND_M`; other columns `ROUNDOFF`), done at its last row and timed out as stored. Writes ``check.json``.
+exactly at its sentence's last row; whether it timed out as stored; and whether the judge gives its stored outcome (D74).
+Refused (exit 1) unless every flight is within the executor conformance's bound (`STATE_BOUND_M`; other columns
+`ROUNDOFF`), done at its last row, timed out as stored and judged as stored. Writes ``check.json``.
 
     python run_ts.py closed_loop_start_check --instructions <artefact> --executor <spec> --split train \\
         --row-interval-s 2 4 8 --per-airport 50 --out <new dir>
@@ -38,8 +39,8 @@ from ts_transformer.instructions.words import RUNWAY, RUNWAY_GO_AROUND, UNCHANGE
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-#: v2 (A29, D73): the checks the run ran before its work, as information.
-CHECK_SCHEMA = "ts-closed-loop-start-check-v2"
+#: v2 (A29, D73): the checks the run ran before its work, as information. v3 (A31, D74): each flight's outcome as stored.
+CHECK_SCHEMA = "ts-closed-loop-start-check-v3"
 
 
 def sample(airports: list[str], per_airport: int, seed: int) -> list[int]:
@@ -107,13 +108,14 @@ def _check_chunk(instructions: Path, split: str, interval_s: float, chosen: dict
                     "position_m": float(np.abs(apart[:, :3]).max()) if same_shape else None,
                     "other_columns": float(np.abs(apart[:, 3:]).max()) if same_shape else None,
                     "done_at_last_row": bool(done_at[f] == len(sentence.grid) - 1),
-                    "timed_out_as_stored": bool(timed_out[f]) == sentence.timed_out})
+                    "timed_out_as_stored": bool(timed_out[f]) == sentence.timed_out,
+                    "outcome_as_stored": bool(done[f]) and loop.outcome(f).outcome == sentence.outcome})
     return out
 
 
 def passes(row: dict[str, Any]) -> bool:
     return (row["same_rows"] and row["position_m"] <= STATE_BOUND_M and row["other_columns"] <= ROUNDOFF
-            and row["done_at_last_row"] and row["timed_out_as_stored"])
+            and row["done_at_last_row"] and row["timed_out_as_stored"] and row["outcome_as_stored"])
 
 
 def main(argv: list[str] | None = None) -> int:
