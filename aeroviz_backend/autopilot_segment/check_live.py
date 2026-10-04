@@ -23,6 +23,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 import aeroviz_backend.paths  # noqa: F401 — `ts_transformer` lives under 4dTrajectory/
 
 from ts_transformer.autopilot.conformance import STATE_BOUND_M
@@ -38,25 +40,28 @@ AIRPORTS = ("KMSY", "KRDU", "KSJC", "KSMF", "KSTL")
 ROUNDING_M = 0.1 + 1e-9
 
 
-def compare(answer: dict[str, Any], closed: dict[str, Any], last_word: bool) -> list[str]:
-    """What differs between a live answer and the sample's closed-loop sentence of the same flight and Δ."""
+def compare(answer: dict[str, Any], closed: dict[str, Any], step_s: float, to_outcome: bool) -> list[str]:
+    """What differs between a live answer and the sample's closed-loop sentence of the same flight and Δ (``step_s``:
+    the sample's state rows; ``to_outcome``: the word is its column's last, flown to the outcome)."""
     differ = []
     states, track, base = closed["states"], answer["track"], closed["flownFromRow"]
+    every = int(round(step_s / answer["executor"]["cycleS"]))
     for k, cycle in enumerate(track["cycle"]):
-        row = base + cycle // 2
-        if cycle % 2 or row >= states["rows"]:
+        row = base + cycle // every
+        if cycle % every or row >= states["rows"]:
             continue
-        apart = max(abs(track["eM"][k] - states["eM"][row]), abs(track["nM"][k] - states["nM"][row]),
-                    abs(track["altitudeMslM"][k] - states["heightMslM"][row]))
-        if apart > ROUNDING_M:
-            differ.append(f"cycle {cycle}: {apart:.3f} m from the sample's row {row}")
+        apart = np.array([track["eM"][k] - states["eM"][row], track["nM"][k] - states["nM"][row],
+                          track["altitudeMslM"][k] - states["heightMslM"][row]])
+        if not np.abs(apart).max() <= ROUNDING_M:       # a NaN differs too
+            differ.append(f"cycle {cycle}: {apart} m from the sample's row {row}")
             break
-    if max(answer["stored"]["horizontalM"], answer["stored"]["verticalM"]) > STATE_BOUND_M:
+    if not (answer["stored"]["horizontalM"] <= STATE_BOUND_M and answer["stored"]["verticalM"] <= STATE_BOUND_M):
         differ.append(f"{answer['stored']} from the artefact's stored states")
-    if last_word:
+    if to_outcome:
         replayed = closed["replay"]
-        if answer["segment"]["end"] != replayed["outcome"]:
-            differ.append(f"ended {answer['segment']['end']}, the sample's replay {replayed['outcome']}")
+        if (answer["segment"]["end"], answer["segment"]["endCycle"]) != (replayed["outcome"], replayed["endCycle"]):
+            differ.append(f"ended {answer['segment']['end']} at cycle {answer['segment']['endCycle']}, the sample's "
+                          f"replay {replayed['outcome']} at {replayed['endCycle']}")
         if answer["crossing"] != replayed["crossing"]:
             differ.append(f"crossing {answer['crossing']}, the sample's {replayed['crossing']}")
     return differ
@@ -87,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
                                           "row": event["row"]})
                     segments += 1
                     by_end[answer["segment"]["end"]] = by_end.get(answer["segment"]["end"], 0) + 1
-                    differ = compare(answer, closed, last[event["column"]] == event["row"])
+                    differ = compare(answer, closed, sample["vocabulary"]["stepS"], last[event["column"]] == event["row"])
                     if differ:
                         differing.append({"airport": airport, "flightKey": flight["flightKey"], "rowIntervalS": interval,
                                           "column": COLUMNS[event["column"]], "row": event["row"], "differ": differ})

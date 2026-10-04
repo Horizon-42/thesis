@@ -14,7 +14,7 @@ flight in a batch and the flight alone, so no rewrite can be bitwise equal to th
 single-flight torch run never was bitwise equal to the batched exports. The contract is the RESULT: flown against the
 torch executor on the Training sets' flights, every segment ends with the same outcome, the same verdict for every word
 and the same crossing, and the flown tracks agree to the round-off the comparison reports
-(`aeroviz_backend/tests/test_single_executor.py`; the fleet check `check_single`).
+(`aeroviz_backend/tests/test_single_executor.py`; on real flights the spec's reference tracks, `conformance`).
 
 CHECKED BY WHAT IT FLIES (executor design §12.3, the user 2026-10-01): it is one of the ways the spec's reference tracks
 are flown again (`autopilot.conformance`, ``single``), so a change here or in the laws it mirrors is found by the check,

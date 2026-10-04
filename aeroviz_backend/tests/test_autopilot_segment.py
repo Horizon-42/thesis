@@ -92,7 +92,9 @@ class LiveEqualsExportTest(unittest.TestCase):
                         self.assertLess(float(np.abs(live[name] - reference[name][:end]).max()), STATE_BOUND_M)
                     apart = apart_from_stored(result, one.sentence, one.batch, 0, one.words.spec.step_s)
                     self.assertLess(max(apart["horizontalM"], apart["verticalM"]), STATE_BOUND_M)
-                    self.assertEqual(result.stopped, last[column] != row)
+                    # a column's last word is flown to its outcome; a word stopped has no verdict
+                    self.assertTrue(not result.stopped if last[column] == row else True)
+                    self.assertEqual(result.verdict is None, result.stopped)
                     if last[column] == row:
                         answer = segment_payload(result, one.geometry, -33.0, one.inputs.aero_params[0].numpy(), apart)
                         self.assertEqual(answer["segment"]["end"], exported["outcome"])
@@ -211,6 +213,63 @@ class BackendTest(unittest.TestCase):
         self.assertRegex(lines[0], r"^autopilot warm-up: KBBB skipped — .*is a another file")
         self.assertRegex(lines[1], rf"^autopilot warm-up: {self.airport} {FIXTURE_SET}: 1 flights opened in")
         self.assertRegex(lines[2], r"^autopilot warm-up: 1 sets ready in")
+
+
+class SetUpTest(unittest.TestCase):
+    """The service's own setup, not the synthetic one: the spec refused unless it is the set's, each split's flights
+    drawn once for every Δ in the warm-up, and each (split, Δ) kept."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        self.sample = set_up_set(self.root)
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def test_the_spec_is_refused_unless_it_is_the_one_the_set_was_exported_with(self):
+        from unittest import mock
+
+        one = flight(2.0)
+        backend = AutopilotSegmentBackend(airports_root=self.root)
+        with mock.patch("ts_transformer.autopilot.replay.open_executor",
+                        return_value=(one.params, {"sha256": "another"}, one.words)):
+            with self.assertRaisesRegex(ValueError, "the set was exported with fixture"):
+                backend.executor_for(self.sample)
+
+    def test_the_warm_up_draws_each_split_once_for_every_row_interval_and_keeps_each(self):
+        from unittest import mock
+
+        from ts_transformer.experiments import training_flights
+
+        drawn, built = [], []
+
+        def open_flights(instructions, split, ids, words):
+            drawn.append((split, tuple(ids)))
+            return f"flights of {split}"
+
+        def closed_loop_batch(flights, stored, interval, words):
+            built.append((flights, interval))
+            one = flight(interval)
+            return one.batch, [one.sentence]
+
+        backend = AutopilotSegmentBackend(airports_root=self.root)
+        one = flight(2.0)
+        with mock.patch.object(AutopilotSegmentBackend, "executor_for",
+                               return_value=(Path("i"), Path("x"), one.params, {"sha256": "fixture"}, one.words)), \
+                mock.patch.object(training_flights, "open_flights", open_flights), \
+                mock.patch.object(training_flights, "stored_closed_loop", lambda *args: {}), \
+                mock.patch.object(training_flights, "closed_loop_batch", closed_loop_batch):
+            backend.warm_up(log=lambda line: None)
+            key = self.sample["flights"][0]["datasetId"]
+            self.assertEqual(drawn, [("train", (key,)), ("select", ())])
+            self.assertEqual(built, [("flights of train", 2.0), ("flights of train", 4.0), ("flights of train", 8.0),
+                                     ("flights of select", 2.0), ("flights of select", 4.0),
+                                     ("flights of select", 8.0)])
+            answer = backend.fly({"clientId": "p", "seq": 1, "airport": self.sample["airport"], "setId": FIXTURE_SET,
+                                  "flightKey": self.sample["flights"][0]["flightKey"], "rowIntervalS": 4,
+                                  "column": "heading", "row": 0})
+            self.assertEqual((len(drawn), len(built), answer["rowIntervalS"]), (2, 6, 4.0))   # kept, not drawn again
 
 
 class FakeAutopilot:

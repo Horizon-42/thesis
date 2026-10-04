@@ -273,9 +273,10 @@ def executor_inputs(signals, geometry, row=0, mass_kg=62000.0):
 
 
 def closed_loop_flight(interval_s: float = 2.0):
-    """A synthetic flight on its closed-loop sentence at ``interval_s``, set up as the Training export and the live
-    executor set a set's flight up (`experiments.training_flights.closed_loop_batch`): the downwind, base and final of
-    `test_closed_loop`, read in closed loop (`closed_loop.read`). Returns a namespace: ``batch``, the replay batch of
+    """A synthetic flight on its closed-loop sentence at ``interval_s``, from its first predicted step as
+    `closed_loop.replay_batch` sets it up — the core of `experiments.training_flights.closed_loop_batch`, whose drawing
+    (`replay.batch_of`) needs a data-plane flight: the downwind, base and final of `test_closed_loop`, read in closed
+    loop (`closed_loop.read`). Returns a namespace: ``batch``, the replay batch of
     one flight from its first predicted step — whose inputs are fixed, a synthetic flight having no data-plane series —
     ``inputs``, its executor inputs there, ``sentence``, its stored `ClosedLoopSentence`, ``params``, ``words``, and the
     observed flight as labelled: ``signals`` (from its first row), ``reading`` and ``geometry``."""

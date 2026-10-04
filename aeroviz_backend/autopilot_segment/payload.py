@@ -63,7 +63,9 @@ def segment_payload(result: FlownSegment, geometry: Any, hae_minus_msl_m: float,
                     "correction": segment.correction, "startCycle": segment.start_cycle,
                     "stopCycle": segment.stop_cycle,
                     "end": SEGMENT_END if verdict is None else verdict.outcome,
-                    "endCycle": last_state(result)},
+                    # the cycle the flight ended: the stop's last state, or the judge's outcome row (as the export's
+                    # replay writes it; a dynamics failure's track ends one state before it)
+                    "endCycle": last_state(result) if verdict is None else verdict.end_row},
         "track": track_payload(result, geometry, hae_minus_msl_m, aero_params),
         # flown to its outcome: the judge's crossing and decision-altitude check, as the export writes them
         "crossing": None if verdict is None else crossing_payload(verdict, result.flown, 0, geometry),

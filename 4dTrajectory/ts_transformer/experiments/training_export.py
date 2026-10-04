@@ -124,7 +124,7 @@ def said(column: int, value: int, runway_index: int, geometry: AirportGeometry, 
     if column == ALTITUDE:
         level = words.altitude_level_m(value)
         return {"noLevelOff": level is None, "levelM": level,
-                "mslM": None if level is None else round(level + geometry.elevation_m, 1)}
+                "mslM": None if level is None else round(words.altitude_msl_m(value, geometry.elevation_m), 1)}
     if column == ANGLE:
         return {"angleDeg": words.angle_deg(value), "climb": value == words.angle_climb, "level": value == ANGLE_LEVEL}
     return {"speedMps": words.speed_mps(value)}
@@ -198,7 +198,7 @@ def replay_payload(flown: Flown, j: int, verdict: Verdict, part: replay.Batch, s
     track = flown_track(flown.states[j, : rows[-1] + 1].cpu().numpy(), geometry)
     again = np.column_stack([track["e"][rows], track["n"][rows], track["height"][rows]])
     apart = float(np.abs(again - sentence.flown_states[:, :3]).max())
-    if apart > STATE_BOUND_M:
+    if not apart <= STATE_BOUND_M:                     # a NaN state is refused too
         raise ValueError(f"{part.signals[j].dataset_id}: flown again {apart:.3g} m from its closed-loop states")
     if verdict.outcome != formal["outcome"]:
         raise ValueError(f"{part.signals[j].dataset_id}: flown again to {verdict.outcome}, the formal replay to "
@@ -373,6 +373,8 @@ def main(argv: list[str] | None = None) -> int:
         built[airport] = (entry, files.serialise(sample))
         print(f"{airport}: {count} flights, {len(built[airport][1]) / 1e6:.1f} MB, {time.perf_counter() - started:.0f}s",
               flush=True)
+    for airport, (entry, _) in built.items():          # every airport writable before any is written
+        files.require_writable(args.root / airport / "training", airport, entry, existing[airport])
     for airport, (entry, text) in built.items():
         out = files.write_set(args.root / airport / "training", airport, entry, text, existing[airport])
         print(f"→ {out}")

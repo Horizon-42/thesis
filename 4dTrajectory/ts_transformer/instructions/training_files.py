@@ -24,7 +24,7 @@ import numpy as np
 from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.spec import READING_RULE
-from ts_transformer.instructions.words import UNCHANGED, wrap180
+from ts_transformer.instructions.words import wrap180
 from ts_transformer.io_utils import utc_now
 
 #: MIRROR of `aeroviz-4d/src/data/trainingSample.ts` (`TRAINING_INDEX_SCHEMA`, `TRAINING_INDEX_FILE`,
@@ -54,14 +54,6 @@ def nullable(values: Any, digits: int) -> list[float | None]:
     """`rounded`, a NaN written as null (an error with no observed reference past the end of the observed path, D44)."""
     return [None if not np.isfinite(value) else round(float(value), digits)
             for value in np.asarray(values, dtype=np.float64).ravel()]
-
-
-def words_in_force(grid: np.ndarray) -> np.ndarray:
-    """``[rows, columns]``: the word in force at each step — the value at the last step its column was said at or
-    before (a sentence's step 0 says every column)."""
-    rows, columns = grid.shape
-    last_said = np.maximum.accumulate(np.where(grid != UNCHANGED, np.arange(rows)[:, None], 0), axis=0)
-    return grid[last_said, np.arange(columns)[None, :]]
 
 
 # ---- the envelopes the views draw (they compute none)
@@ -141,8 +133,8 @@ def read_index(training: Path, airport: str, set_id: str) -> list[dict[str, Any]
 
 
 def candidates_sha256(geometry: AirportGeometry) -> str:
-    """The identity of an airport's candidates and runway ends (the runway word points into them; information beside
-    a set, the reader matches the live executor's answer against it)."""
+    """The identity of an airport's candidates and runway ends (the runway word points into them): written beside a
+    set, information for its reader."""
     canonical = json.dumps(geometry.to_dict(), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -175,15 +167,24 @@ def _write_text_atomic(path: Path, text: str) -> None:
 
 def require_index_unchanged(training: Path, airport: str, set_id: str, existing: list[dict[str, Any]]) -> None:
     """The index is still what ``existing`` read at the start of the run: another export that wrote it meanwhile would
-    lose its set. A run checks EVERY airport before it writes any, and each write checks again."""
+    lose its set."""
     if read_index(training, airport, set_id) != existing:
         raise ValueError(f"{training / INDEX_FILE} changed since this run read it; run the export again")
 
 
-def write_set(training: Path, airport: str, entry: dict[str, Any], text: str, existing: list[dict[str, Any]]) -> Path:
-    """A set's sample (``text``, `serialise`'s) in a directory of its own (refused if it exists), then the index with it
-    added (`require_index_unchanged`)."""
+def require_writable(training: Path, airport: str, entry: dict[str, Any], existing: list[dict[str, Any]]) -> None:
+    """The set can be written: the index is still what the run read (`require_index_unchanged`) and the set's directory
+    does not exist. A run asks it of every airport before it writes any, so a refusal leaves no airport written."""
     require_index_unchanged(training, airport, entry["id"], existing)
+    directory = (training / entry["file"]).parent
+    if directory.exists():
+        raise ValueError(f"{directory} exists; an export is never overwritten")
+
+
+def write_set(training: Path, airport: str, entry: dict[str, Any], text: str, existing: list[dict[str, Any]]) -> Path:
+    """A set's sample (``text``, `serialise`'s) in a directory of its own, then the index with it added — refused
+    unless `require_writable`."""
+    require_writable(training, airport, entry, existing)
     out = training / entry["file"]
     out.parent.mkdir(parents=True)
     _write_text_atomic(out, text)
