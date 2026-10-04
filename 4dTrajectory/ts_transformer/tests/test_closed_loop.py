@@ -570,14 +570,17 @@ def test_the_replay_reads_the_speed_words_and_how_far_along_the_path_the_flown_a
 
     params = _params()
     read = {}
-    for name, speeds in (("observed", None), ("slow", {0: 70.0})):
-        batch, inputs, words = _batch(speeds=speeds)
+    for name, speeds, interval_s in (("observed", None, 2.0), ("slow", {0: 70.0}, 2.0), ("slow_4", {0: 70.0}, 4.0)):
+        batch, inputs, words = _batch(interval_s, speeds=speeds)
         batch.vertical_paths[0] = vertical_paths(batch.geometries[0])
         monkeypatch.setattr(replay.Batch, "inputs", lambda self, device, inputs=executor_inputs(
             batch.signals[0], batch.geometries[0]): inputs)
         flown = replay.fly_sentences(batch, params, words, device=CPU)
         (read[name],) = along_columns(words)(batch, flown, replay.judge_batch(batch, flown, words))
-        speed = batch.sentences[0].grid[:, SPEED]
-        assert read[name]["speed_words"] == int(((speed != UNCHANGED) & (speed != words.speed_unspecified)).sum())
-    assert read["slow"]["speed_words"] == 1
+        grid = batch.sentences[0].grid
+        held = closed_loop.in_force(grid)[:, SPEED] == words.speed_unspecified
+        before = int(np.argmax(held)) if held.any() else len(grid)
+        assert read[name]["speed_words"] == int((grid[:before, SPEED] != UNCHANGED).sum())     # before "unspecified"
+    assert read["slow"]["speed_words"] == read["slow_4"]["speed_words"] == 1
     assert read["slow"]["largest_along_m"] > 1000.0 > read["observed"]["largest_along_m"]
+    assert read["slow_4"]["largest_along_m"] == pytest.approx(read["slow"]["largest_along_m"], rel=0.1)

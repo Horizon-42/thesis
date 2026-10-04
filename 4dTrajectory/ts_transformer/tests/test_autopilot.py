@@ -4,6 +4,7 @@ the instruction-v3 executor are archived with it: `archive/two_tier_v3_2026_10/t
 
 from __future__ import annotations
 
+import json
 import math
 from collections import Counter
 from dataclasses import replace
@@ -450,7 +451,7 @@ def test_a_downwind_base_final_sentence_is_flown_onto_the_final_by_its_words_and
     signals, _ = _downwind()
     flown, verdict, reading = _fly_sentence(signals, clock="time")
     assert verdict.outcome == "landed" and verdict.flew_the_sentence
-    assert abs(verdict.crossing["cross_m"]) < verdict.crossing["decision"]["cone_half_width_m"]
+    assert verdict.crossing["cross_m"] == pytest.approx(93.0, abs=10.0)    # the turns' offset, pinned (a change shows)
     assert 0.0 < verdict.crossing["height_m"] < 100.0
     assert verdict.crossing["decision"]["passed"]
     # against the runway's real 15 m TCH the open-loop drift fails the DA check (D38): the closed loop's to correct
@@ -991,8 +992,9 @@ def test_a_speed_word_is_flown_at_a_max_both_ways_and_unspecified_at_its_own_pac
 
     a_max = one.speed_accel_max_mps2
     assert rate(85.0) == pytest.approx(-a_max) and rate(95.0) == pytest.approx(a_max)
+    assert rate(70.0) == pytest.approx(-a_max) and rate(110.0) == pytest.approx(a_max)   # several steps away: a_max
     assert rate(88.0) == pytest.approx(-2.0 * a_max / one.speed_tolerance_mps)     # inside the last band: exponential
-    assert rate(85.0, go_around=True) == pytest.approx(-a_max)
+    assert rate(85.0, go_around=True) == pytest.approx(-a_max) and rate(60.0, go_around=True) == pytest.approx(-a_max)
     speed.hear_go_around(torch.tensor([True]), state)
     assert rate(math.nan, go_around=True, unspecified=True) == pytest.approx(0.0)
     slower = Kinematics(*(torch.tensor([v], dtype=F64) for v in (0.0, 0.0, 100.0, 80.0, 90.0, 0.0, 80.0, 60000.0)))
@@ -1328,7 +1330,7 @@ def test_a_replayed_flight_becomes_a_control_record_and_the_readout_reads_no_cri
     base = {"airport": "KXXX", "group": "own dynamics", "stratum": "vectored", "words_not_reached": 0,
             "heading_words_not_judged": 0, "heading_words_told_with_a_skipped_word": {"judged": 0, "inside": 0},
             "crossing": None, "speed_words": 2, "largest_along_m": None}
-    rows = [{**base, "kind": "with go-around", "outcome": "landed", "speed_words": 4, "largest_along_m": 1500.0,
+    rows = [{**base, "kind": "with go-around", "outcome": "landed", "speed_words": 4, "largest_along_m": np.float64(1500.0),
              "words": [("heading", True)] * 9 + [("altitude", False)], "observed_verdict": "pass",
              "replay_verdict": "pass", "crossing": {"decision": {"passed": True}}},
             {**base, "kind": "without go-around", "outcome": "unstable_at_minimums", "words": None,
@@ -1340,6 +1342,7 @@ def test_a_replayed_flight_becomes_a_control_record_and_the_readout_reads_no_cri
     assert cell["decision_checks"] == {"n": 2, "no_da_point": 1, "passed": 1}
     assert table["own dynamics"]["KXXX"]["vectored"]["with go-around"]["flights"] == 1
     assert "clears" not in cell
+    json.dumps(table)                                                         # numpy scalars would not write
     assert cell["along_the_path"] == {"speed_words_per_sentence": 3.0, "flights": 1,
                                       "largest_along_m": {"p50": 1500.0, "p90": 1500.0}, "farther_than_1_km": 1}
 

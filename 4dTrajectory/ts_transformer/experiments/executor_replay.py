@@ -262,22 +262,23 @@ def _percentiles(values: list[float]) -> dict[str, float] | None:
 
 
 def along_columns(words: Words) -> Callable[[replay.Batch, Flown, list[Verdict]], list[dict[str, Any]]]:
-    """The rows' speed columns (design §11.12, §14.2 A11): each flown sentence's speed words other than "unspecified",
-    and the largest distance along the observed path between the flown aircraft (its matched point, the closed loop's
-    forward search, `closed_loop.ObservedPath`) and the observed aircraft of the same time, on the Δ rows before
-    "unspecified" is in force, while both fly (None: no such row)."""
+    """The rows' speed columns (design §11.12, §14.2 A11), on the Δ rows of the flown sentence before "unspecified" is
+    first in force (a closed-loop sentence's from its first predicted step): its speed words, and the largest distance
+    along the observed path between the flown aircraft (its matched point, the closed loop's forward search,
+    `closed_loop.ObservedPath`) and the observed aircraft of the same time while both fly — the failed state of a
+    dynamics failure left out, as the records leave it (None: no such row)."""
     def columns(part: replay.Batch, flown: Flown, verdicts: list[Verdict]) -> list[dict[str, Any]]:
         out = []
         every = int(round(part.row_interval_s / words.spec.step_s))
         cycles = int(round(part.row_interval_s / flown.cycle_s))
         for j, verdict in enumerate(verdicts):
             grid, signals = part.sentences[j].grid, part.signals[j]
-            speed = grid[:, SPEED]
-            said = int(((speed != UNCHANGED) & (speed != words.speed_unspecified)).sum())
             held = in_force(grid)[:, SPEED] == words.speed_unspecified
             before = int(np.argmax(held)) if held.any() else len(grid)
+            said = int((grid[:before, SPEED] != UNCHANGED).sum())
             span = len(part.readings[j].words) - part.sentences[j].first_row
-            rows = [k for k in range(before) if k * every < span and k * cycles <= verdict.end_row]
+            end = verdict.end_row - 1 if verdict.outcome == "dynamics_failure" else verdict.end_row
+            rows = [k for k in range(before) if k * every < span and k * cycles <= end]
             largest = None
             if rows:
                 track = flown_track(flown.states[j, : rows[-1] * cycles + 1].cpu().numpy(), part.geometries[j])
@@ -407,14 +408,14 @@ def main(argv: list[str] | None = None) -> int:
                     shares = "  ".join(f"{name} {cell[key] if cell[key] is None else round(cell[key], 3)}"
                                        for name, key in (("landed", "landed"), ("words", "words_inside"),
                                                          ("eval", "replay_passes_where_observed_passes")))
-                    closed = (f"  left the path {cell['closed_loop']['left_the_path']}, heading corrections a "
-                              f"sentence {cell['closed_loop']['correction_words_per_sentence']['heading']:.1f}"
-                              if args.closed_loop else "")
-                    speed = cell["along_the_path"]
-                    along = (f"  speed words a sentence {speed['speed_words_per_sentence']:.1f}, along the path "
-                             f"{speed['largest_along_m']}, farther than 1 km {speed['farther_than_1_km']}")
+                    loop_text = (f"  left the path {cell['closed_loop']['left_the_path']}, heading corrections a "
+                                 f"sentence {cell['closed_loop']['correction_words_per_sentence']['heading']:.1f}"
+                                 if args.closed_loop else "")
+                    speeds = cell["along_the_path"]
+                    along_text = (f"  speed words a sentence {speeds['speed_words_per_sentence']:.1f}, along the path "
+                                  f"{speeds['largest_along_m']}, farther than 1 km {speeds['farther_than_1_km']}")
                     print(f"  {group:18s} {airport:5s} {part:12s} {kind:17s} n={cell['flights']:5d}  {shares}  "
-                          f"{cell['outcomes']}{closed}{along}")
+                          f"{cell['outcomes']}{loop_text}{along_text}")
     print(f"→ {out / 'replay.json'}")
     return 0
 
