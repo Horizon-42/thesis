@@ -14,6 +14,7 @@
 | 发布一次实验 | [`experiments/intents.json`](experiments/intents.json)（没有条目，发布脚本拒绝）和代码仍在的实验的配置（`experiments/*_arms.json`） |
 | 两个骨干网络怎么工作 | [`tutorials/`](tutorials/)：iTransformer / PatchTST 教程（机制准确，文中的项目路径是 2026-07 的）、条件化综述、多机终止调研、`einsum` 交互教程（`einsum_tutorial.zh.html`，读 `prior/model.py` 的注意力时用） |
 | 查一次已经做完的实验 | [`history/README.md`](history/README.md)（按研究线，一份一行：问的什么、结论、现在在哪） |
+| 整理测试套件（哪些必须留、哪些已归档、哪些待判断） | [`test_suite_audit_2026-10-04.zh.md`](test_suite_audit_2026-10-04.zh.md) |
 
 ## 目录
 
