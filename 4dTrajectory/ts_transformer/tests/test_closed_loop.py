@@ -150,6 +150,33 @@ def test_an_angle_correction_on_a_final_descent_and_none_on_a_level_a_climb_or_b
     assert int(said[ANGLE]) == 1 and added[ANGLE]                                         # descent 1: the observed class
 
 
+def test_the_vertical_tolerance_in_force_is_h_final_only_while_no_level_off_is_in_force():
+    """D66: an e_h between H_final (5 m) and H (15 m) starts an angle correction in a final descent and not before it; the
+    tolerance changes where "no level-off" is said and where a go-around row says a level (rule 6), and again at the
+    next final descent; at H_final = H no correction starts anywhere."""
+    def read(final_vertical_m):
+        words = Words(spec(closed_loop_final_vertical_m=final_vertical_m))
+        final = {ALTITUDE: words.altitude_no_level_off, ANGLE: 3}
+        rows = [(_first(words, 600.0, 2), 0.0, 900.0), ({}, 10.0, 850.0),          # a descent to a level: H
+                (final, 10.0, 800.0), ({}, 10.0, 700.0), ({}, 2.0, 600.0),           # the final descent: H_final
+                ({RUNWAY: RUNWAY_GO_AROUND, ALTITUDE: words.altitude_index(900.0), ANGLE: words.angle_climb}, 10.0, 300.0),
+                ({}, 10.0, 500.0), ({RUNWAY: 0}, 10.0, 700.0),                       # a climb: no correction
+                ({ALTITUDE: words.altitude_index(600.0), ANGLE: 2}, 10.0, 900.0), ({}, 10.0, 850.0),   # H again
+                (final, 10.0, 700.0), ({}, 10.0, 650.0)]                             # H_final again
+        grid = _grid([said for said, _, _ in rows])
+        corrector = Corrector(grid, 0, 0, 1, words, [90.0])
+        said = [corrector.row(k, 0.0, e_h, height, holding=False, past_end=False) for k, (_, e_h, height) in enumerate(rows)]
+        return words, grid, said
+
+    words, grid, said = read(5.0)
+    assert closed_loop.vertical_tolerance_m(words, in_force(grid)[:, ALTITUDE]).tolist() == [
+        15.0, 15.0, 5.0, 5.0, 5.0, 15.0, 15.0, 15.0, 15.0, 15.0, 5.0, 5.0]
+    assert [k for k, (_, added) in enumerate(said) if added[ANGLE]] == [3, 4, 11]
+    assert [int(said[k][0][ANGLE]) for k in (3, 4, 11)] == [4, 3, 4]    # one class steeper, the observed class again
+    _, _, before = read(15.0)
+    assert not any(added[ANGLE] for _, added in before)
+
+
 def test_a_new_observed_altitude_word_ends_an_angle_correction():
     words = Words(spec())
     corrector = Corrector(_grid([_first(words, 600.0, 2), {}, {ALTITUDE: words.altitude_index(480.0)}]), 0, 0, 1, words, [90.0])
@@ -174,11 +201,13 @@ DOWNWIND_BASE_FINAL = [(60, 0.0, 100.0, 0.0), *_turn(-90.0, 100.0), (20, 0.0, 90
                        (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
 
 
-def _batch(interval_s=2.0, legs=DOWNWIND_BASE_FINAL, track_deg=270.0, altitude_m=1110.0, speeds=None, cut=0):
+def _batch(interval_s=2.0, legs=DOWNWIND_BASE_FINAL, track_deg=270.0, altitude_m=1110.0, speeds=None, cut=0,
+           final_vertical_m=15.0):
     """A synthetic flight's batch, its executor inputs at the first predicted step and the words; ``speeds``: the speed
     words its open-loop reading says instead of the observed ones, ``{2 s row: m/s}`` (none: the observed words);
-    ``cut``: the observed flight and its reading end that many 2 s rows early (the slice stops short of the threshold)."""
-    one, geometry = spec(), instruction_airport()
+    ``cut``: the observed flight and its reading end that many 2 s rows early (the slice stops short of the threshold);
+    ``final_vertical_m``: H_final (D66; H = 15 m, the reading before D66)."""
+    one, geometry = spec(closed_loop_final_vertical_m=final_vertical_m), instruction_airport()
     words = Words(one)
     signals = instruction_flight(*fly_legs(legs, track_deg, altitude_m, -400.0, 0.0))
     reading = read_flight(signals, geometry, one, words)
@@ -378,6 +407,47 @@ def test_the_rule_of_d50_reads_the_direction_of_the_correction_in_force():
         grid = sentence.grid.copy()
         grid[:, HEADING] = heading
         assert np.array_equal(_outside(batch, replace(sentence, grid=grid), words)["lateral"][2], outside), name
+
+
+def test_the_readings_of_d34_read_the_vertical_tolerance_in_force_at_each_row():
+    """D66, D50: a row is outside vertically when |e_h| exceeds the tolerance in force there — H_final in the final
+    descent, H before it — and the rule of D50 holds on the rows the corrector read."""
+    words = Words(spec(closed_loop_final_vertical_m=5.0))
+    final = {ALTITUDE: words.altitude_no_level_off, ANGLE: 3}
+    observed = _grid([_first(words, 600.0, 2), {}, final, {}, {}])
+    corrector = Corrector(observed, 0, 0, 1, words, [90.0])
+    errors = [0.0, 10.0, 10.0, 10.0, 10.0]
+    rows, uncorrectable = [], []
+    for k, (e_h, height) in enumerate(zip(errors, (900.0, 850.0, 800.0, 750.0, 700.0))):
+        rows.append(corrector.row(k, 0.0, e_h, height, holding=False, past_end=False))
+        uncorrectable.append(corrector.uncorrectable.copy())
+    n = len(rows)
+    sentence = ClosedLoopSentence(
+        first_row=0, grid=np.array([r[0] for r in rows]), correction=np.array([r[1] for r in rows]),
+        states=np.zeros((n, 6)), on_interval=np.ones(n, bool), lateral_m=np.zeros(n), vertical_m=np.array(errors),
+        uncorrectable=np.array(uncorrectable), observed_row=np.arange(n), matched_row=np.arange(n, dtype=float),
+        start=0, timed_out=False)
+    correctable, outside, breaks = closed_loop.outside_rows(sentence, observed, 0, words, [90.0])["vertical"]
+    assert correctable.tolist() == [False, True, False, True, True]     # the first row and a new word: none
+    assert outside.tolist() == [False, False, False, True, True] and not breaks.any()
+
+
+def test_a_closed_loop_flight_with_h_final_differs_only_in_its_final_descent():
+    """D66 on a whole flight: read at H_final = 5 m and at H_final = H, the sentence and the flown states are the same on
+    every row before the first row where "no level-off" is in force; after it, angle corrections that H leaves out."""
+    readings = {}
+    for final_vertical_m in (15.0, 5.0):
+        batch, inputs, words = _batch(final_vertical_m=final_vertical_m)
+        (readings[final_vertical_m],) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
+    before, after = readings[15.0], readings[5.0]
+    final = in_force(before.grid)[:, ALTITUDE] == words.altitude_no_level_off
+    first = int(np.argmax(final))
+    assert final.any() and np.array_equal(in_force(after.grid)[:first + 1, ALTITUDE], in_force(before.grid)[:first + 1, ALTITUDE])
+    assert np.array_equal(before.grid[:first + 1], after.grid[:first + 1])
+    assert np.array_equal(before.correction[:first + 1], after.correction[:first + 1])
+    every = int(round(2.0 / words.spec.step_s))
+    assert np.array_equal(before.states[:(before.start + first) * every + 1], after.states[:(after.start + first) * every + 1])
+    assert after.correction[first:, ANGLE].sum() > before.correction[first:, ANGLE].sum()
 
 
 def test_the_rule_of_d50_reads_a_word_moved_across_a_runway_word_in_its_new_frame():

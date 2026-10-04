@@ -3,7 +3,7 @@
 When `instruction_labels` writes an artefact it also writes ``conformance/``: a REFERENCE — a fixed sample of the train
 split's flights (`draw`: a seeded permutation, `PER_AIRPORT` labelled flights and `REFUSED_PER_AIRPORT` refused ones of
 every airport) with their signals and what the labeller made of each: the sentence (words, runway, capture row,
-"unspecified" row, go-around rows) or the refusal's reason — and each labelled sentence also on its UTC Δ grid at every
+"unspecified" row, go-around rows, stratum — D70) or the refusal's reason — and each labelled sentence also on its UTC Δ grid at every
 row interval of `INTERVALS_S` (`labeller.interval.on_utc_grid`, the rule of D45 and D46; D49), or why that grid refuses
 it. The CHECK (`check`, runner `instruction_conformance`) reads the reference's flights again with the code on disk,
 under the artefact's own spec and candidates, and requires the same sentences word for word, on the 2 s rows and on
@@ -33,12 +33,14 @@ from ts_transformer.instructions.artefact import load_candidates, load_spec
 from ts_transformer.instructions.labeller.interval import on_utc_grid
 from ts_transformer.instructions.labeller.read import Reading, read_flight
 from ts_transformer.instructions.labeller.records import Refused
+from ts_transformer.instructions.readout import stratum
 from ts_transformer.instructions.signals import FlightSignals, pack_signals, unpack_signals
 from ts_transformer.instructions.words import Words
 from ts_transformer.io_utils import file_sha256, logic_sha256, utc_now, write_json_atomic
 
 #: v3 (A20, D58): the sentences' altitude words are levels above the airport elevation E.
-REFERENCE_SCHEMA = "ts-instruction-conformance-reference-v3"
+#: v4 (A27, D70): a labelled flight's record holds its stratum.
+REFERENCE_SCHEMA = "ts-instruction-conformance-reference-v4"
 PASSED_SCHEMA = "ts-instruction-conformance-passed-v1"
 DIRECTORY = "conformance"
 #: The reference's flights: the train split, every airport alike (A3: 250 labelled train flights, seed 1337, at five
@@ -46,10 +48,11 @@ DIRECTORY = "conformance"
 SPLIT, SEED, PER_AIRPORT, REFUSED_PER_AIRPORT = "train", 1337, 50, 10
 #: The row intervals whose Δ grid the reference holds beside the 2 s rows (D49: the ablation's coarser intervals, D25).
 INTERVALS_S = (4.0, 8.0)
-#: The modules that decide a sentence, relative to the package — what the code's name covers. The spec's measurement,
-#: the artefact, the readout, the figures and this module are left out: they do not change a sentence.
+#: The modules that decide a sentence, relative to the package — what the code's name covers: since A27 the readout too,
+#: whose `stratum` the sentence file stores (D70). The spec's measurement, the artefact, the figures and this module are
+#: left out: they do not change a sentence.
 LABELLER_MODULES = ("spec.py", "words.py", "grammar.py", "airport.py", "signals.py", "piecewise.py", "envelope.py",
-                    "labeller/*.py")
+                    "readout.py", "labeller/*.py")
 #: Modules outside the package whose code decides a sentence: the crossing interpolation of the landing rule.
 LABELLER_EXTERNAL_MODULES = (crossing,)
 
@@ -69,7 +72,7 @@ def labeller_code_sha256() -> str:
 def labelled_record(reading: Reading) -> dict[str, Any]:
     """A labelled flight's record: the sentence's rows beside its words."""
     return {"dataset_id": reading.dataset_id, "status": "labelled", "runway_index": reading.runway_index,
-            "capture_row": reading.capture_row, "unspecified_row": reading.unspecified_row,
+            "stratum": stratum(reading), "capture_row": reading.capture_row, "unspecified_row": reading.unspecified_row,
             "go_around_rows": list(reading.go_around_rows), "runway_again_rows": list(reading.runway_again_rows),
             "approaches": [[a.first, a.end, a.runway_index, a.capture_row, a.unspecified_row]
                            for a in reading.approaches]}

@@ -17,17 +17,21 @@ from ts_transformer.tests.support import (
 
 LEGS = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (20, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
         (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
+#: A straight-in flight: the final alone, on runway 09's course, a 3° descent ending 400 m before the threshold.
+STRAIGHT_IN = [(200, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
 CLEAN = {"head": "h", "dirty": False}
 
 
-def _artefact(directory: Path, monkeypatch) -> Path:
-    """A tmp artefact labelled by the runner: three train flights (one refused), one select, one val."""
+def _artefact(directory: Path, monkeypatch, *, straight_in: bool = False) -> Path:
+    """A tmp artefact labelled by the runner: three train flights (one refused) — and with ``straight_in`` a straight-in
+    flight between them — one select, one val."""
     from ts_transformer.experiments import instruction_labels
 
     good = fly_legs(LEGS, 270.0, 1110.0, -400.0, 0.0)
     slow = (*good[:4], np.full(len(good[0]), 10.0))                     # impossible ground speed
+    direct = [instruction_flight(*fly_legs(STRAIGHT_IN, 90.0, 1300.0, -400.0, 0.0), dataset_id="KXXX:s")]
     flights = {"train": [instruction_flight(*good, dataset_id="KXXX:a"), instruction_flight(*slow, dataset_id="KXXX:b"),
-                         instruction_flight(*good, dataset_id="KXXX:c")],
+                         *(direct if straight_in else []), instruction_flight(*good, dataset_id="KXXX:c")],
                "select": [instruction_flight(*good, dataset_id="KXXX:e", split="select")],
                "val": [instruction_flight(*good, dataset_id="KXXX:d", split="val")]}
     directory.mkdir()
@@ -170,8 +174,64 @@ def test_the_draw_takes_labelled_and_refused_flights_of_every_airport(monkeypatc
                               ("KBBB", "labelled"), ("KBBB", "labelled"), ("KBBB", "refused")]
 
 
-def test_the_code_name_covers_the_reading_code_only():
+def test_the_code_name_covers_the_code_that_decides_a_sentence_file_only():
     covered = {label for label, _ in conformance.labeller_code_files()}
     assert {"spec.py", "words.py", "grammar.py", "envelope.py", "labeller/read.py", "labeller/go_around.py",
-            "labeller/interval.py", "final_approach.crossing"} <= covered
-    assert not covered & {"artefact.py", "readout.py", "figures.py", "measure.py", "conformance.py", "__init__.py"}
+            "labeller/interval.py", "readout.py", "final_approach.crossing"} <= covered      # readout: the stratum (D70)
+    assert not covered & {"artefact.py", "figures.py", "measure.py", "conformance.py", "__init__.py"}
+
+
+def test_the_sentence_file_stores_each_flight_s_stratum_from_the_one_definition(tmp_path, monkeypatch):
+    """D70: the stored stratum of each labelled flight is `readout.stratum` of its reading, by its name in `STRATA`."""
+    from ts_transformer.instructions.artefact import load_candidates, load_signals
+    from ts_transformer.instructions.labeller.read import read_flight
+    from ts_transformer.instructions.readout import STRATA, stratum
+
+    directory = _artefact(tmp_path / "a", monkeypatch, straight_in=True)
+    for split in ("train", "select", "val"):
+        stored = load_sentences(directory, split, spec())
+        signals = load_signals(directory, split)
+        geometry = load_candidates(directory)["KXXX"]
+        expected = [stratum(read_flight(signals[int(i)], geometry, spec())) for i in stored["signal_index"]]
+        assert stored["stratum"].tolist() == expected and set(expected) <= set(STRATA)
+    # in signal order: two 90° turns, the final alone, two 90° turns
+    assert load_sentences(directory, "train", spec())["stratum"].tolist() == ["vectored", "straight-in", "vectored"]
+
+
+def test_a_flight_is_vectored_from_90_degrees_of_turns_before_the_capture_row():
+    from types import SimpleNamespace
+
+    from ts_transformer.instructions.readout import stratum
+
+    assert stratum(SimpleNamespace(checks={"turning_deg": 90.0})) == "vectored"
+    assert stratum(SimpleNamespace(checks={"turning_deg": 89.0})) == "straight-in"
+
+
+def test_a_changed_stratum_fails_the_conformance_by_name(tmp_path, monkeypatch):
+    """D70: the labeller conformance compares the stratum as it compares the words — a rule that moves it fails there."""
+    from ts_transformer.instructions import readout
+
+    directory = _artefact(tmp_path / "a", monkeypatch, straight_in=True)
+    assert conformance.check(directory, git=CLEAN).passed
+    monkeypatch.setattr(readout, "VECTORED_TURN_DEG", 1000.0)       # every flight straight-in: the vectored ones move
+    checked = conformance.check(directory, git=CLEAN)
+    assert checked.mismatches == {flight: ["stratum: 'straight-in', the reference 'vectored'"]
+                                  for flight in ("KXXX:a", "KXXX:c")}
+
+
+def test_a_sentence_file_of_the_former_format_is_refused_by_name(tmp_path, monkeypatch):
+    """D70: the sentence file before the stratum (`ts-instruction-sentences-v4`) is refused by its name; so is a stratum
+    that is no name of `STRATA`."""
+    from ts_transformer.instructions.artefact import SENTENCES_SCHEMA
+
+    directory = _artefact(tmp_path / "a", monkeypatch)
+    with np.load(directory / "sentences_train.npz") as data:
+        arrays = {name: data[name] for name in data.files}
+    for name, changes in (("old", {"schema": np.array("ts-instruction-sentences-v4")}),
+                          ("odd", {"stratum": np.array(["vectored", "circling"])})):
+        (tmp_path / name).mkdir()
+        np.savez_compressed(tmp_path / name / "sentences_train.npz", **{**arrays, **changes})
+    with pytest.raises(ValueError, match=f"is not a {SENTENCES_SCHEMA} file"):
+        load_sentences(tmp_path / "old", "train", spec())
+    with pytest.raises(ValueError, match="names strata \\['circling'\\]"):
+        load_sentences(tmp_path / "odd", "train", spec())

@@ -91,6 +91,21 @@ def summarise(results: list[ClosedLoopSentence | Any], excluded: dict[str, int],
                 **{f"p{q}": float(np.percentile(lateness, q)) for q in (5, 25, 50, 75, 95)}}}
 
 
+def read_interval(drawn: replay.Drawn, readings: list[Any], interval_s: float, params: Any, words: Any, *, chunk: int,
+                  device: torch.device) -> tuple[replay.Batch, list[ClosedLoopSentence | Any], dict[str, Any]]:
+    """One split's drawn flights read in closed loop at one row interval: the batch, every flight's result and the split's
+    numbers (`summarise`)."""
+    batch = replay.batch_of(drawn, list(range(len(readings))), readings, interval_s, words)
+    results = closed_loop.read_chunked(batch, params, words, chunk=chunk, device=device)
+    kept = [(j, r) for j, r in enumerate(results) if isinstance(r, ClosedLoopSentence)]
+    lateness = [closed_loop.heading_lateness_rows(r, batch.readings[j].words[batch.sentences[j].first_row:])
+                * words.spec.step_s for j, r in kept]
+    outside = [closed_loop.outside_rows(r, batch.readings[j].words, batch.sentences[j].first_row, words,
+                                        [c.course_deg for c in batch.geometries[j].candidates]) for j, r in kept]
+    return batch, results, summarise(results, drawn.description["excluded"], batch.drawn["refused_on_interval"],
+                                     lateness, outside)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--instructions", type=Path, required=True)
@@ -139,24 +154,16 @@ def main(argv: list[str] | None = None) -> int:
                                                groups=(replay.OWN, replay.STAND_IN))
         summary["splits"][split] = {"drawn": drawn.description, "intervals": {}}
         for interval in args.row_interval_s:
-            batch = replay.batch_of(drawn, list(range(len(readings))), readings, interval, words)
-            results = closed_loop.read_chunked(batch, params, words, chunk=args.chunk, device=device)
+            batch, results, numbers = read_interval(drawn, readings, interval, params, words, chunk=args.chunk,
+                                                    device=device)
+            summary["splits"][split]["intervals"][f"{interval:g}"] = numbers
             kept = [(j, r) for j, r in enumerate(results) if isinstance(r, ClosedLoopSentence)]
-            lateness = [closed_loop.heading_lateness_rows(r, batch.readings[j].words[batch.sentences[j].first_row:])
-                        * words.spec.step_s for j, r in kept]
-            outside = [closed_loop.outside_rows(r, batch.readings[j].words, batch.sentences[j].first_row, words,
-                                                [c.course_deg for c in batch.geometries[j].candidates]) for j, r in kept]
             if not kept:                                       # nothing to write: the summary says why
-                summary["splits"][split]["intervals"][f"{interval:g}"] = summarise(
-                    results, drawn.description["excluded"], batch.drawn["refused_on_interval"], lateness, outside)
                 continue
             write_closed_loop(staging / f"{split}_{interval:g}s.npz", words.spec,
                               executor_params_sha256=params_sha256(params), row_interval_s=interval,
                               start_row=closed_loop.start_row(interval),
                               sentences={batch.indices[j]: r for j, r in kept})
-            numbers = summarise(results, drawn.description["excluded"], batch.drawn["refused_on_interval"], lateness,
-                                outside)
-            summary["splits"][split]["intervals"][f"{interval:g}"] = numbers
             print(f"{split} {interval:g} s: {numbers['sentences']} sentences, corrections "
                   f"{numbers['correction_words']}, without a sentence {numbers['without_a_sentence']}, "
                   f"{time.perf_counter() - started:.0f}s", flush=True)

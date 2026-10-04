@@ -18,13 +18,15 @@ measured it) and ``measurements.json`` into the signals directory (never over an
 ``--candidate NAME`` (required when measuring) is the user's choice of D15 (D56): the descent nominals and edges and
 the climb nominal of that row of the rounding candidates (`measure.CANDIDATE_NAMES`); ``--grid NAME`` (required when
 measuring) is the user's choice of the altitude grid (D58): a row of the grid candidates (`measure.GRID_NAMES`). The
-fitted values and every row stay in ``measurements.json`` beside the choices.
+fitted values and every row stay in ``measurements.json`` beside the choices. ``--closed-loop-final-vertical-m`` (required
+when measuring) is the closed-loop reading's vertical tolerance in the final descent, H_final (D66): measured by A24, not
+here, and chosen by the user; at most H (`closed_loop_vertical_m`); recorded beside the other choices.
 
 ``--spec-from <artefact>`` measures nothing: that artefact's spec is kept unchanged (`artefact.keep_spec` — new rows
 under the same vocabulary, e.g. rows moved onto the UTC steps, keep the spec; every model trained under it still opens).
 
     python run_ts.py instruction_spec --dir 4dTrajectory/outputs/POOLED/instruction_language/<name> --candidate 0.25 \
-        --grid <name>
+        --grid <name> --closed-loop-final-vertical-m <m>
     python run_ts.py instruction_spec --dir <new> --spec-from 4dTrajectory/outputs/POOLED/instruction_language/<old>
 """
 
@@ -34,6 +36,7 @@ import argparse
 import time
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import replace
 from multiprocessing import get_context
 from pathlib import Path
 from typing import Any
@@ -118,10 +121,19 @@ def main(argv: list[str] | None = None) -> int:
                         help="the user's choice of D15 (required when measuring; module docstring)")
     parser.add_argument("--grid", choices=measure.GRID_NAMES, default=None,
                         help="the user's choice of the altitude grid (D58; required when measuring)")
+    parser.add_argument("--closed-loop-final-vertical-m", type=float, default=None,
+                        help="H_final, the vertical tolerance of the closed loop in the final descent (D66; required "
+                             "when measuring)")
     args = parser.parse_args(argv)
-    if (args.spec_from is None) == (args.candidate is None) or (args.candidate is None) != (args.grid is None):
-        parser.error("measuring needs --candidate and --grid (the user's choices of D15 and D58); --spec-from keeps a "
-                     "spec and takes neither")
+    choices = (args.candidate, args.grid, args.closed_loop_final_vertical_m)
+    if (args.spec_from is None) == (args.candidate is None) or len({c is None for c in choices}) != 1:
+        parser.error("measuring needs --candidate, --grid and --closed-loop-final-vertical-m (the user's choices of D15, "
+                     "D58 and D66); --spec-from keeps a spec and takes none")
+    if args.closed_loop_final_vertical_m is not None:      # refused by the spec's own rule before anything is read
+        try:
+            replace(measure.provisional_spec(), closed_loop_final_vertical_m=args.closed_loop_final_vertical_m)
+        except ValueError as error:
+            parser.error(f"--closed-loop-final-vertical-m: {error}")
     directory = args.dir if args.dir.is_absolute() else REPO_ROOT / args.dir
     for name in ("spec.json", "measurements.json"):
         if (directory / name).exists():
@@ -177,11 +189,11 @@ def main(argv: list[str] | None = None) -> int:
         speed_accel_max_mps2=measure.round_up(float(np.percentile(first["transition_accel_mps2"], 99.9)), 0.1),
         **measure.grid_values(grids_m, args.grid),
     )
-    spec = measure.build_spec(measured)
+    spec = measure.build_spec(measured, closed_loop_final_vertical_m=args.closed_loop_final_vertical_m)
     measurements = {
         "train_flights": len(flights), "not_admitted": dict(refused.most_common()),
         "suggested": suggested, "measured": measured.to_dict(), "chosen_candidate": args.candidate,
-        "chosen_grid": args.grid,
+        "chosen_grid": args.grid, "chosen_closed_loop_final_vertical_m": args.closed_loop_final_vertical_m,
         "rules": {
             "heading_tolerance_deg": f"chosen: heading_step/2 + {measure.HEADING_WANDER_ALLOWANCE_DEG:g}° of wander "
                                      "(see sensitivity.heading_wander_p95_by_band)",
@@ -200,6 +212,8 @@ def main(argv: list[str] | None = None) -> int:
                                      f"the row {args.candidate!r} of rounding_candidates (the user's choice, D15)",
             "climb_angle_centre_deg": f"length-weighted median of the climb pieces, the row {args.candidate!r}",
             "speed_accel_max_mps2": "p99.9 of |acceleration| on transition rows, up to 0.1",
+            "closed_loop_final_vertical_m": "the user's choice of H_final (D66), from the measurement of A24 — not "
+                                            "measured here",
         },
         "sensitivity": {
             "heading_wander_p95_by_band": {f"{h:g}": float(np.percentile(first[f"heading_wander_deg_band{h:g}"], 95))
@@ -223,7 +237,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("the labeller's code changed while the spec was being measured; measure again")
     source = {"labeller_code_sha256": labeller, "git": git_state()}
     write_spec(directory, spec, measurements, source)
-    print(f"spec {spec.sha256[:12]} (candidate {args.candidate}, grid {args.grid}):")
+    print(f"spec {spec.sha256[:12]} (candidate {args.candidate}, grid {args.grid}, H_final "
+          f"{args.closed_loop_final_vertical_m:g} m):")
     for name, value in measured.to_dict().items():
         print(f"  {name:32s} {value}")
     for k, fit in fits.items():

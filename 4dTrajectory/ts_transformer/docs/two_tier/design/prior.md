@@ -83,6 +83,7 @@ changed); 3 (the runway head's class order) is a detail of the code. The code fo
    | After A19, A20 and A22 of stage A (the altitude words above E, the new format names, the executor that flies T + E; the vertical path of each candidate in `candidates.json`, the reader of a closed-loop file, D61; the grammar's column mask, D62) | B1, tested on synthetic artefacts (`tests/support.py`). The speaker and the masks of B4 |
    | After A21 of stage A (the formal artefact), and again after A25 (the formal artefact with the vertical tolerance of the final descent, D66) | B1–B4 on a sample of the formal artefact at Δ = 2 s: the smoke run of B3, its time and the memory check at the formal size; free generation with the executor of the formal artefact |
    | After A26 of stage A (the start of a closed loop, D67), merged into this branch | Free generation of B4 (the speaker with the executor and the judge, through the start), on synthetic artefacts and on the formal artefact |
+   | After A27 of stage A (each flight's stratum in the sentence file, D70), merged into this branch | B4's readout by stratum |
    | After A23 of stage A (the Training view of stage A), merged into this branch | B6's export and view, on the smoke sets of B3 and B4 |
    | After Claude's check of stage A and the user's choice of Δ (outline §4) | B5; B6's publication of the folds and the base; B7 |
 
@@ -473,13 +474,14 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
 **B3. Training** (§5; D31, D40).
 
 - Teacher forcing; the airports of a run (all, or a fold without its held-out airport); the stop on the select days;
-  the validation days not read.
+  the validation days not read. The closed-loop sentences are read only after the check of vocabulary §6, item 3
+  (D69).
 - Before a formal run: the check at the formal size of the host memory and the GPU memory of the largest batch.
 - A smoke run on a sample of the formal artefact; it gives the time of one run for the cost of B5.
 - Tests: the stop reads only the select days; a fold never reads its held-out airport in training.
 
-**B4. Speaking and free generation** (§4, §7 item 3; vocabulary §6 items 2, 5, 6; D14, D33, D38, D52, D62, D64, D67,
-D68).
+**B4. Speaking and free generation** (§4, §7 item 3; vocabulary §6 items 2, 3, 5, 6; D14, D33, D38, D52, D62, D64,
+D67–D70).
 
 - The masks of §4: the grammar; the procedure masks of D64 (the glidepath lower edge inside the region, the DA outside
   it, no climb back with the band of the level nearest the entry height; never "unchanged"; the climb mask lifted while
@@ -488,17 +490,19 @@ D68).
 - The closed loop: the prior speaks, the executor flies, the judge decides (D33, D38); 900 s more time at each
   go-around; the observed rows before the first predicted step, the executor's states after it. The executor is started
   and flown a row at a time through the start of a closed loop (vocabulary §6, item 5; D67), and the outcome is the
-  judge's (item 6); the runner imports nothing else of `autopilot/`. At most 2 go-arounds a flight (D68).
-- The readout: the outcomes for each airport and each kind of approach; the words for each column against the
-  labelled ones; the go-arounds said and the flights that reached the bound of D68; the probability of "go-around" on
-  the final.
+  judge's (item 6). Before it reads closed-loop sentences, the runner calls the check of item 3 (D69); it imports
+  nothing else of `autopilot/`. At most 2 go-arounds a flight (D68).
+- The readout: the outcomes for each airport and each stratum of the flight (straight-in or vectored, as the sentence
+  file stores it: vocabulary §6, item 3; D70); the words for each column against the labelled ones; the go-arounds said
+  and the flights that reached the bound of D68; the probability of "go-around" on the final.
 - Tests: one flight spoken and flown to its outcome; each mask; G; the time limit; the same seed gives the same
   sentence; no row reaches a column with no permitted word (D62); a procedure mask never blocks "unchanged", also when
   the word in force breaks a limit; a level below the DA is blocked after the join when the aircraft has left the LPV
   cone; an aircraft at the level nearest the entry height, less than its ε below it, may still climb; after a go-around
   the join and the passage below the entry height start again (D64); after a flight's second go-around, "go-around"
-  is masked (D68); the runners of `prior/` import from `autopilot/` only the modules of vocabulary §6 items 5 and 6
-  (`tests/test_architecture.py`).
+  is masked (D68); the runners of `prior/` import from `autopilot/` only what vocabulary §6 lists: the modules of
+  items 5 and 6, and of `autopilot/closed_loop.py` only `require_conforming_closed_loop` (item 3, D69); the test reads
+  the names imported (`tests/test_architecture.py`).
 
 **B5. Cross-validation and the base** (D39, D40, D41).
 

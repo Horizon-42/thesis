@@ -285,17 +285,17 @@ def subset(batch: Batch, indices: list[int]) -> Batch:
                  drawn=batch.drawn)
 
 
-def remaining_observed_s(reading: Reading, first_row: int, step_s: float) -> float:
-    """The observed time from the 2 s row ``first_row`` to the end of the labeller's reading (a row per ``step_s``)."""
-    return (len(reading.words) - first_row) * step_s
+def time_limit_s(observed_rows: int, first_row: int, params: ExecutorParams, step_s: float) -> float:
+    """A flight's time limit before its go-arounds (vocabulary §5.8): the observed time from its 2 s row ``first_row`` to
+    the end of its labelled sentence of ``observed_rows`` rows, × the timeout factor — the one definition the replay, the
+    closed-loop reading and the start of a closed loop (`autopilot.start`) read."""
+    return (observed_rows - first_row) * step_s * params.timeout_factor
 
 
 def time_limits_s(batch: Batch, params: ExecutorParams, step_s: float) -> list[float]:
-    """Each flight's time limit before its go-arounds (vocabulary §5.8: the remaining observed time × 1.5): the observed time
-    from its sentence's first row (`remaining_observed_s`), not its sentence's rows — a closed-loop sentence has the flown
-    rows (§4.9 item 6), and its replay keeps the limit it was read under."""
-    return [remaining_observed_s(r, s.first_row, step_s) * params.timeout_factor
-            for r, s in zip(batch.readings, batch.sentences)]
+    """Each flight's time limit before its go-arounds (`time_limit_s`): from its sentence's first row, not its sentence's
+    rows — a closed-loop sentence has the flown rows (§4.9 item 6), and its replay keeps the limit it was read under."""
+    return [time_limit_s(len(r.words), s.first_row, params, step_s) for r, s in zip(batch.readings, batch.sentences)]
 
 
 def reserve_s(batch: Batch) -> float:
