@@ -107,11 +107,13 @@ def closed_loop_batch(flights: SetFlights, stored: dict[int, ClosedLoopSentence]
     replay flew them (`replay.batch_of`, `closed_loop.replay_batch`), and each one's stored sentence; refused when a
     flight has none."""
     batch = replay.batch_of(flights.drawn, list(range(len(flights.readings))), flights.readings, interval_s, words)
-    batch, missing = closed_loop.replay_batch(batch, stored, words)
+    # the set's sentences copied BEFORE the batch is built on them: its words grids would be views into the file
+    owned = {index: owned_sentence(stored[index]) for index in batch.indices if index in stored}
+    batch, missing = closed_loop.replay_batch(batch, owned, words)
     if missing or len(batch.indices) != len(flights.readings):
         raise ValueError(f"{len(flights.readings) - len(batch.indices)} of the set's flights have no closed-loop sentence "
                          f"at {interval_s:g} s (refused on the interval: {batch.drawn['refused_on_interval']})")
-    return batch, [owned_sentence(stored[index]) for index in batch.indices]
+    return batch, [owned[index] for index in batch.indices]
 
 
 def fly_single(batch: replay.Batch, inputs: FlightInputs, j: int, params: ExecutorParams, words: Words, *,
