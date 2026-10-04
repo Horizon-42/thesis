@@ -270,3 +270,36 @@ def executor_inputs(signals, geometry, row=0, mass_kg=62000.0):
         aero_params=torch.tensor([[aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall]], dtype=f64),
         frame_params=torch.tensor([[tlat, tlon, candidate.elevation_m, 0.0]], dtype=f64),
         max_thrust_n=torch.tensor([aircraft.engine.max_thrust_total_n], dtype=f64))
+
+
+def closed_loop_flight(interval_s: float = 2.0):
+    """A synthetic flight on its closed-loop sentence at ``interval_s``, set up as the Training export and the live
+    executor set a set's flight up (`experiments.training_flights.closed_loop_batch`): the downwind, base and final of
+    `test_closed_loop`, read in closed loop (`closed_loop.read`). Returns a namespace: ``batch``, the replay batch of
+    one flight from its first predicted step — whose inputs are fixed, a synthetic flight having no data-plane series —
+    ``inputs``, its executor inputs there, ``sentence``, its stored `ClosedLoopSentence`, ``params``, ``words``, and the
+    observed flight as labelled: ``signals`` (from its first row), ``reading`` and ``geometry``."""
+    import dataclasses
+    from types import SimpleNamespace
+
+    import torch
+
+    from ts_transformer.autopilot import closed_loop, replay
+    from ts_transformer.tests import test_closed_loop
+
+    batch, inputs, words = test_closed_loop._batch(interval_s)
+    params = test_closed_loop._params()
+    (sentence,) = closed_loop.read(batch, inputs, params, words, device=torch.device("cpu"))
+    replayed, missing = closed_loop.replay_batch(batch, {0: sentence}, words)
+    assert not missing
+
+    @dataclasses.dataclass
+    class FixedInputs(replay.Batch):
+        fixed: object = None
+
+        def inputs(self, device):
+            return self.fixed
+
+    fixed = FixedInputs(**{f.name: getattr(replayed, f.name) for f in dataclasses.fields(replay.Batch)}, fixed=inputs)
+    return SimpleNamespace(batch=fixed, inputs=inputs, sentence=sentence, params=params, words=words,
+                           signals=batch.signals[0], reading=batch.readings[0], geometry=batch.geometries[0])

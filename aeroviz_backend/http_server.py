@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlsplit
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from aeroviz_backend.autopilot_segment.errors import NotFlyable, NotListed, RequestRefused, Superseded
+from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused, Superseded
 from aeroviz_backend.dynamics_comparison_backend import DynamicsComparisonBackend
 from aeroviz_backend.isolated_backend import (
     IsolatedDynamicsComparisonBackend,
@@ -130,8 +130,8 @@ class AeroVizBackendApp:
             return 200, self.dynamics_comparison_backend.clear(payload), None
         if path == "/autopilot/segment":
             # the executor flies one word's segment of a Training flight, live: a request the view cannot make is a
-            # 400, a set or flight not listed a 404, one a newer request from the same page superseded a 409, a flight
-            # the data cannot fly a 422, and anything else that stops a listed flight a 500 with its reason
+            # 400, a set or flight not listed a 404, one a newer request from the same page superseded a 409, and
+            # anything else that stops a listed flight a 500 with its reason
             try:
                 return 200, self.autopilot_segment_backend().fly(payload), None
             except RequestRefused as exc:
@@ -140,8 +140,6 @@ class AeroVizBackendApp:
                 return 404, {"ok": False, "error": str(exc)}, None
             except Superseded as exc:
                 return 409, {"ok": False, "error": str(exc)}, None
-            except NotFlyable as exc:
-                return 422, {"ok": False, "error": str(exc)}, None
             except Exception as exc:
                 return 500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"}, None
         return 404, {"ok": False, "error": "not found"}, None
@@ -395,9 +393,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the AeroViz backend server.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--training-airports-root", type=Path, default=None,
+                        help="the airports root whose Training sets the live executor flies (a test stack's own; "
+                             "default: the frontend's public data)")
     args = parser.parse_args()
 
-    app = AeroVizBackendApp()
+    if args.training_airports_root is None:
+        app = AeroVizBackendApp()
+    else:
+        from aeroviz_backend.autopilot_segment.backend import AutopilotSegmentBackend
+
+        app = AeroVizBackendApp(autopilot_segment_backend=AutopilotSegmentBackend(airports_root=args.training_airports_root))
     http_server = ThreadingHTTPServer(
         (args.host, args.port),
         make_request_handler(app),
