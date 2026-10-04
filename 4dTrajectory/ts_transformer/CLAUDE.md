@@ -362,9 +362,11 @@ its reference tracks and passed record; clean tree) (R12) → `instruction_close
 split at each row interval, their reference and passed record; clean tree; `--check` re-checks) (R50) →
 `executor_replay` (`--row-interval-s`, `--closed-loop`; no criterion is read; select and val from a clean tree) (R12);
 `executor_conformance` checks a spec's reference after an `autopilot/` change (R42); `executor_turns` measures the
-executor's turn against the exact words (A13, R51); `instruction_figures` draws val pages
+executor's turn against the exact words (A13, R51); `training_export` writes the Training sets of stage A beside the old ones (`training/index_v4.json`, sample
+v9; every closed-loop sentence flown again against its stored states and formal outcome; the live executor shares its
+setup, `experiments/training_flights.py`, and `aeroviz_backend.autopilot_segment.check_live` checks a set against it) (R52); `instruction_figures` draws val pages
 (R10). **Archived with instruction-v3** (`archive/two_tier_v3_2026_10/`, its README; their manual entries stay as the
-record): the Training exports and the attitude they draw (R11, R13), `executor_sensitivity` (R12), the prior and its
+record): the instruction-v3 Training exports (R11, R13; the attitude module came back unchanged for A23, R52), `executor_sensitivity` (R12), the prior and its
 post-training (R15–R22, R35, R38), `heading_lead_ablation` (R23), the multi-aircraft runners (R24–R39, R41, R43–R45),
 `go_around_census` (R40), `instruction_word_frames` / `instruction_final_approach` (R48, R49); R14 went 2026-09-24.
 

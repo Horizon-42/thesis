@@ -1465,3 +1465,28 @@ the fixture's track leads its positions by 1 s. Information for the user's decis
     python run_ts.py executor_turns --split train \
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> \
         --executor 4dTrajectory/outputs/POOLED/executor/<name> --out <new dir>
+
+### R52 · `run_ts.py training_export` — the Training sets of stage A: observed, open-loop and closed-loop sentences flown again (vocabulary §12.1 A23)
+
+2026-10-04, two-tier v4 milestone A23 (outline §6). Per airport, `--per-stratum` (default 10) straight-in and as many
+vectored flights of train and of select (`training_files.SPLITS`), a seeded (`--seed`, 1337) permutation per split and
+stratum of the flights the formal closed-loop replays (`<executor>/replay-closed-<split>-<Δ>s`) flew at every Δ — so each
+has a formal row to give back. Each flight: the observed track and its attitude; the open-loop sentence on the 2 s rows
+with the labeller's envelopes; at Δ = 2, 4, 8 s the closed-loop sentence (each correction word marked; every word with
+what it says, decoded by `Words`), its stored states, and its replay flown again here (`training_flights.closed_loop_batch`
++ `replay.fly_batch`) — refused unless every 2 s row is within `STATE_BOUND_M` of the stored states and the outcome is the
+formal row's — with the judge's crossing, decision-altitude check and DA point, attitudes and envelopes on the flown track.
+
+Writes `<root>/<airport>/training/<set-id>/sample.json` (`aeroviz-training-sample-v9`) and its entry in
+`<root>/<airport>/training/index_v4.json` (`aeroviz-training-index-v2`) — a NEW index beside the instruction-v3 view's
+`training/index.json`, never read or written; a listed set is never overwritten; every airport is built before any is
+written; from a clean tree. `--root` defaults to the frontend's public airports (the live data): a trial goes to a scratch
+root. The live executor (`aeroviz_backend/autopilot_segment/`) shares the flights' setup (`experiments/training_flights.py`,
+a shared module, not a runner) and `python -m aeroviz_backend.autopilot_segment.check_live --set-id <set> --out <dir>`
+flies every word of a published set against its sample (outline §6 item 6). The frontend's fixtures
+(`aeroviz-4d/src/data/__tests__/fixtures/stage_a/`) are written by this code (`AEROVIZ_WRITE_FIXTURES=1`, tests
+`test_training_export.py` and `aeroviz_backend/tests/test_autopilot_segment.py`).
+
+Measured on `v9_20261004` / `v14_20261004` into a scratch root (nothing published; the export waits for A25's artefact,
+D66): 5 airports × 40 flights in ~2 min CPU, ~5 MB a sample; on KRDU's 4-flight trial 781 live segments 0 m from the
+stored states, crossings equal to the export's.
