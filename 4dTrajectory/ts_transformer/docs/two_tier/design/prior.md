@@ -60,27 +60,13 @@ A proposal is a reading where the design says nothing; it holds only until the u
 | B2: the model (`prior/model.py`), a sentence's rows and their batch (`prior/batch.py`), the checkpoint `ts-prior-checkpoint-v6` (`prior/checkpoint.py`); `no_motion` (D60) | Done on synthetic sentences, `f3070978`, `de7d4994`. Full ts suite at `f3070978`: 1,559 passed |
 | B3: the training loop (`prior/train.py`), the data of a run or a fold (`prior/runs.py`) | The loop done on synthetic sentences, `f3070978`. The runner `prior_train`, the smoke run, its time and the memory check at the formal size wait for A21 |
 | B1: the inputs of a row (`prior/inputs.py`: `state_inputs`, `Heard`; a sentence and a loop use both), the landings (`prior/landings.py`), the artefact as sentences and the identity of the data (`prior/source.py`) | Done on synthetic artefacts, `278b626b`; the landings digest as D63, `ff514325` |
-| B4: the speaker (`prior/speaker.py`), the procedure masks (`prior/procedure.py`, set `procedure-masks-v4`) | Done on synthetic inputs, `278b626b`; the finals read on KRDU's CIFP. Free generation (the speaker with the executor, the judge, the time limit) waits for A21 |
-| The full ts suite at `278b626b` / `ff514325` | Not run yet: stage A's A21 build runs (outline §5 rule 13) |
+| B4: the speaker (`prior/speaker.py`), the procedure masks (`prior/procedure.py`, set `procedure-masks-v4`) | Done on synthetic inputs, `278b626b`; the finals read on KRDU's CIFP. The masks and the glidepath scale as D64 and D65, with B4's tests of D64, `07f3f49b` (reviewed). Free generation (the speaker with the executor, the judge, the time limit) waits for A21 |
+| The full ts suite at `278b626b` / `ff514325` / `07f3f49b` | Not run yet: stage A's A21 build runs (outline §5 rule 13) |
 | B5, B6 | Wait for Claude's check of stage A and the user's choice of Δ |
 
-Proposals (where the design says nothing):
-
-1. The candidate tokens reach a row through one attention over them, whose weights sum to one: not a sum, which grows
-   with the number of candidates (D41).
-2. The RoPE base is 10,000 (a head of 32: periods from 6.3 s to approximately 35,000 s).
-3. The runway head's classes: "unchanged", "go-around", then the candidates.
-4. The fixed scales (D41): distances along and across a candidate asinh(d / 1 km); heights 1 km; the height above the
-   glidepath 100 m; ground speed 100 m/s; vertical rate 10 m/s; landings in 30 min 10; length 1 km.
-5. The variant `constants` gives the threshold elevation as MSL.
-6. The runway column's `since` starts again at a candidate word, not at "go-around".
-7. The word rules of the procedure masks: a level only where it is not lower than the edge (inside the region) or the
-   DA (before the join) by more than its ε; "no level-off" not inside the region where the aircraft is more than its ε
-   below the edge; where the climb is barred no level higher than the aircraft's height plus its ε and no climb class;
-   "unchanged" in the altitude column only where the word in force passes the rules that apply.
-8. "Its stretch starts again after the go-around" (D14): a go-around clears where the aircraft joined and dipped; the
-   next approach is read as new.
-9. The entry height is passed when the aircraft is below it, with no band.
+Proposals (where the design says nothing): none open. The nine proposals of `bbedfe9e` were decided by the user on
+2026-10-04 as D64 (the procedure masks: 7, 8, 9; 7 and 9 changed) and D65 (the inputs and the model: 1, 2, 4, 5, 6; 4
+changed); 3 (the runway head's class order) is a detail of the code. The code follows them at `07f3f49b`.
 
 ### 0.4 Plan
 
