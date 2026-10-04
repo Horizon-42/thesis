@@ -8,16 +8,18 @@ may say. For each sentence's flight: the flight rebuilt from the harvest and com
 (`flights.rebuild_series`, vocabulary §7.2 #4); its aircraft — its own dynamics or a stand-in's — and its approach speed,
 by the rule of the replay (`replay.group_of`, `replay.flight_approach_ias_mps`); its state and physical context at the
 first predicted step (`flights.flight_inputs`); its time limit (§5.8: the observed time left from the first predicted
-step to the end of its labelled sentence × the spec's timeout factor, `time_limit_s`) and the time its go-arounds may add
-(`GO_AROUND_EXTRA_S` each, up to the most given). The artefact holds the signals, not the dynamics (§7.2 #4), so the
+step to the end of its labelled sentence × the spec's timeout factor, `replay.time_limit_s`) and the time its go-arounds
+may add (`GO_AROUND_EXTRA_S` each, up to the most given). The sentences are tied to what they were read under: each
+sentence's observed rows (before its first predicted step) must be its flight's stored signals there, and the artefact's
+closed-loop file of the split and Δ must have been flown by ``params``. The artefact holds the signals, not the dynamics (§7.2 #4), so the
 start is rebuilt, never stored.
 
 `Loop` is the executor so started (the closed-loop reading builds its own from the same pieces, `Loop.__init__`): at each
 Δ row the caller gives every flight's words of the row (`Loop.step`, ``[B, 5]``; the first row every column); the
 executor flies Δ seconds in its 1 s cycles and gives the states of the 2 s rows flown (`instructions.artefact.
-STATE_COLUMNS`) and the flights done. A go-around word beyond the most given is refused by name (`GoAroundBeyondMost`):
-the caller masks it. A flight's outcome is the judge's on what the executor recorded, no observed words read
-(`Loop.outcome`, `judge.outcome_of`).
+STATE_COLUMNS`) and the flights done. A go-around word beyond the most given, for a flight still flying, is refused by
+name (`GoAroundBeyondMost`): the caller masks it (a done or halted flight's words are not heard). A done flight's outcome is
+the judge's on what the executor recorded, no observed words read (`Loop.outcome`, `judge.outcome_of`).
 """
 
 from __future__ import annotations
@@ -36,10 +38,12 @@ from ts_transformer.autopilot.judge import Outcome, outcome_of
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import Spoken
+from ts_transformer.autopilot.spec import params_sha256
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import (
-    ClosedLoopSentence, load_candidates, load_sentences, load_signals, load_spec,
+    ClosedLoopSentence, closed_loop_path, load_candidates, load_sentences, load_signals, load_spec,
 )
+from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.labeller.interval import OBSERVATION_S, interval_rows
 from ts_transformer.instructions.words import RUNWAY, RUNWAY_GO_AROUND, Words
 
@@ -53,10 +57,11 @@ def start_row(row_interval_s: float) -> int:
     return int(round(OBSERVATION_S / row_interval_s))
 
 
-def time_limit_s(observed_rows: int, first_row: int, params: ExecutorParams, step_s: float) -> float:
-    """A flight's time limit before its go-arounds (vocabulary §5.8): the observed time from its 2 s row ``first_row`` to
-    the end of its labelled sentence of ``observed_rows`` rows, × the timeout factor."""
-    return (observed_rows - first_row) * step_s * params.timeout_factor
+def observed_rows(signals: FlightSignals, rows: np.ndarray) -> np.ndarray:
+    """The observed flight's `STATE_COLUMNS` at its 2 s ``rows`` (what a closed-loop sentence holds before its first
+    predicted step)."""
+    return np.column_stack([signals.e_m[rows], signals.n_m[rows], signals.altitude_m[rows], signals.track_deg[rows],
+                            signals.ground_speed_mps[rows], signals.vertical_rate_mps[rows]])
 
 
 def state_rows(state: Kinematics) -> np.ndarray:
@@ -106,14 +111,15 @@ class Loop:
         (``[B, Δ / 2 s, 6]``, the last at the end of the row) and which flights are done. A go-around beyond the most
         given refuses the row by name, before anything is flown."""
         row = np.asarray(words_row, dtype=np.int64)
-        go_around = row[:, RUNWAY] == RUNWAY_GO_AROUND
+        executor, cycle_s = self.executor, self.params.cycle_s
+        flying = ~(executor.done | executor.halted).cpu().numpy()     # a done or halted flight's words are not heard
+        go_around = (row[:, RUNWAY] == RUNWAY_GO_AROUND) & flying
         beyond = np.flatnonzero(go_around & (self.go_arounds >= self.most_go_arounds))
         if len(beyond):
             raise GoAroundBeyondMost(f"flight(s) {beyond.tolist()} said a go-around beyond the most "
                                      f"{self.most_go_arounds} at row {self.steps}")
-        self.go_arounds += go_around
         self.spoken.say(row)
-        executor, cycle_s = self.executor, self.params.cycle_s
+        self.go_arounds += go_around
         heard = torch.full((len(row),), self.steps * self.interval_s, dtype=torch.float64,
                            device=executor.state.device)
         flown = []
@@ -136,7 +142,10 @@ class Loop:
                 >= executor.time_limit_s.cpu().numpy()) & executor.done.cpu().numpy()
 
     def outcome(self, flight: int) -> Outcome:
-        """Flight ``flight``'s outcome, read by the judge off what the executor recorded (`judge.outcome_of`)."""
+        """Flight ``flight``'s outcome, read by the judge off what the executor recorded (`judge.outcome_of`); refused for a
+        flight not done (a halted flight is never done)."""
+        if not bool(self.executor.done[flight]):
+            raise ValueError(f"flight {flight} is not done: it has no outcome yet")
         if self._flown is None:
             self._flown = self.executor.flown()
         return outcome_of(self._flown, flight, self.geometries[flight], self.words.spec)
@@ -146,10 +155,18 @@ def start(instructions: Path, split: str, interval_s: float, sentences: Mapping[
           params: ExecutorParams, words: Words, *, most_go_arounds: int, device: torch.device) -> tuple[Loop, list[int]]:
     """The loop of the flights of ``sentences`` (keyed by their place in the artefact's ``split`` signals, as the reader
     gives them), in the order of their keys, and that order (module docstring). Refused unless ``words`` is the
-    artefact's vocabulary and every sentence starts at Δ's first predicted step."""
+    artefact's vocabulary, the artefact's closed-loop sentences of ``split`` at Δ were flown by ``params``, every sentence
+    starts at Δ's first predicted step and its observed rows are its flight's stored signals."""
     spec = words.spec
+    if not sentences:
+        raise ValueError("no sentence to start")
     if load_spec(instructions).sha256 != spec.sha256:
         raise ValueError(f"{instructions} holds another vocabulary than the words given")
+    with np.load(closed_loop_path(instructions, split, interval_s)) as data:
+        flown_by = str(data["executor_params_sha256"])
+    if flown_by != params_sha256(params):
+        raise ValueError(f"the {split} closed-loop sentences at {interval_s:g} s were flown by executor parameters "
+                         f"{flown_by[:12]}, not {params_sha256(params)[:12]}")
     first = start_row(interval_s)
     every = interval_rows(interval_s, spec.step_s)
     order = sorted(sentences)
@@ -158,17 +175,21 @@ def start(instructions: Path, split: str, interval_s: float, sentences: Mapping[
     signals = load_signals(instructions, split)
     geometries = load_candidates(instructions)
     flights = [signals[i] for i in order]
+    for i, flight in zip(order, flights):
+        rows = sentences[i].first_row + np.arange(first * every)
+        if not np.array_equal(sentences[i].states[: first * every], observed_rows(flight, rows)):
+            raise ValueError(f"the sentence of {split} flight {i} is not {flight.dataset_id}'s: its observed rows differ")
     series = rebuild_series(instructions, flights)
     groups = [replay.group_of(item) for item in series]
     unflown = [f.dataset_id for f, g in zip(flights, groups) if g not in (replay.OWN, replay.STAND_IN)]
     if unflown:
         raise ValueError(f"{len(unflown)} flight(s) have no aircraft to fly, e.g. {unflown[:3]}")
     labelled = load_sentences(instructions, split, spec)
-    rows = dict(zip(labelled["signal_index"].tolist(), np.diff(labelled["offsets"]).tolist()))
+    lengths = dict(zip(labelled["signal_index"].tolist(), np.diff(labelled["offsets"]).tolist()))
     anchors = [sentences[i].first_row + first * every for i in order]
     loop = Loop(flight_inputs(series, anchors, device=device), [geometries[f.airport] for f in flights],
                 [replay.flight_approach_ias_mps(s, g) for s, g in zip(series, groups)],
-                [time_limit_s(int(rows[i]), anchor, params, spec.step_s) for i, anchor in zip(order, anchors)],
+                [replay.time_limit_s(int(lengths[i]), anchor, params, spec.step_s) for i, anchor in zip(order, anchors)],
                 params, words, interval_s=interval_s, most_go_arounds=most_go_arounds, device=device)
     return loop, order
 

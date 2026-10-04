@@ -92,7 +92,7 @@ from ts_transformer.autopilot.flights import FlightInputs, flight_inputs
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.replay import Batch, subset
 from ts_transformer.autopilot.spec import executor_source_files, params_sha256
-from ts_transformer.autopilot.start import Loop, start_row, time_limit_s
+from ts_transformer.autopilot.start import Loop, observed_rows, start_row
 from ts_transformer.instructions.artefact import CLOSED_LOOP_DIRECTORY, STATE_COLUMNS, ClosedLoopSentence
 from ts_transformer.instructions.conformance import labeller_code_files
 from ts_transformer.instructions.grammar import InForce, Ungrammatical, apply
@@ -101,7 +101,6 @@ from ts_transformer.instructions.labeller.interval import (
 )
 from ts_transformer.instructions.labeller.read import Reading, smooth, truncated
 from ts_transformer.instructions.labeller.records import Refused
-from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words, same_track, wrap180,
 )
@@ -351,12 +350,6 @@ class Corrector:
         return word
 
 
-def _state_rows(signals: FlightSignals, rows: np.ndarray) -> np.ndarray:
-    """The observed flight's `STATE_COLUMNS` at its 2 s ``rows``."""
-    return np.column_stack([signals.e_m[rows], signals.n_m[rows], signals.altitude_m[rows], signals.track_deg[rows],
-                            signals.ground_speed_mps[rows], signals.vertical_rate_mps[rows]])
-
-
 def start_inputs(batch: Batch, step_s: float, *, device: torch.device) -> FlightInputs:
     """Every flight's physical context at its first predicted step (`flights.flight_inputs` at that 2 s row)."""
     every, start = interval_rows(batch.row_interval_s, step_s), start_row(batch.row_interval_s)
@@ -406,8 +399,8 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
         paths.append(ObservedPath(signals.e_m[:span], signals.n_m[:span], smoothed.altitude_m, start * every))
         correctors.append(Corrector(reading.words, sentence.first_row, start * every, every, words,
                                     [candidate.course_deg for candidate in batch.geometries[j].candidates]))
-        limits.append(time_limit_s(len(reading.words), sentence.first_row + start * every, params, spec.step_s))
-        states.append([*_state_rows(signals, np.arange(start * every))])     # the observed 2 s rows (D51)
+        limits.append(replay.time_limit_s(len(reading.words), sentence.first_row + start * every, params, spec.step_s))
+        states.append([*observed_rows(signals, np.arange(start * every))])     # the observed 2 s rows (D51)
         said.append([])
         added.append([])
         blocked.append([])

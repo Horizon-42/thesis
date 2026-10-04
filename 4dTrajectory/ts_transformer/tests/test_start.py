@@ -12,7 +12,13 @@ from ts_transformer.autopilot.judge import outcome_of
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
 from ts_transformer.autopilot.start import GoAroundBeyondMost, Loop, start
-from ts_transformer.instructions.artefact import ClosedLoopSentence, load_candidates, load_signals
+from dataclasses import replace
+
+from ts_transformer.autopilot.spec import params_sha256
+from ts_transformer.instructions.artefact import (
+    CLOSED_LOOP_DIRECTORY, ClosedLoopSentence, closed_loop_path, closed_loop_sentences, load_candidates, load_closed_loop,
+    load_signals, write_closed_loop,
+)
 from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
 from ts_transformer.tests.support import executor_inputs, labelled_instruction_artefact
@@ -30,7 +36,8 @@ def _params():
 
 def _artefact(tmp_path, monkeypatch, interval_s):
     """A tmp artefact of one labelled flight (no harvest behind it: its rebuild, aircraft and approach speed stand in),
-    its closed-loop sentence read at ``interval_s`` and the batch it was read from."""
+    its closed-loop sentence read at ``interval_s``, written into the artefact and read back as the reader gives it, and
+    the batch it was read from."""
     directory = tmp_path / "artefact"
     spec = labelled_instruction_artefact(directory)
     words = Words(spec)
@@ -44,8 +51,13 @@ def _artefact(tmp_path, monkeypatch, interval_s):
     batch = replay.Batch(indices=[0], signals=[replay.from_row(signals, sentence.first_row)], series=[None],
                          readings=[reading], sentences=[sentence], row_interval_s=interval_s, geometries=[geometry],
                          approach_ias_mps=[A320_IAS], groups=[replay.OWN], drawn={})
-    (stored,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
-    assert isinstance(stored, ClosedLoopSentence)
+    (read,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
+    assert isinstance(read, ClosedLoopSentence)
+    (directory / CLOSED_LOOP_DIRECTORY).mkdir()
+    path = closed_loop_path(directory, "train", interval_s)
+    write_closed_loop(path, spec, executor_params_sha256=params_sha256(_params()), row_interval_s=interval_s,
+                      start_row=start_module.start_row(interval_s), sentences={0: read})
+    (stored,) = closed_loop_sentences(load_closed_loop(path, spec)).values()
     monkeypatch.setattr(start_module, "rebuild_series", lambda d, flights: [None] * len(flights))
     monkeypatch.setattr(replay, "group_of", lambda series: replay.OWN)
     monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: A320_IAS)
@@ -76,7 +88,8 @@ def test_a_stored_sentence_said_through_the_start_gives_its_states_and_its_outco
     every = int(round(interval_s / words.spec.step_s))
     expected = stored.states[stored.start * every:]
     assert len(flown) == len(expected)
-    assert np.abs(np.array(flown)[:, :3] - expected[:, :3]).max() <= STATE_BOUND_M
+    assert np.abs(np.array(flown)[:, :3] - expected[:, :3]).max() <= STATE_BOUND_M     # the conformance tolerance
+    assert np.array_equal(np.array(flown), expected)                                   # and here, the same code: exact
     moved, _ = closed_loop.replay_batch(batch, {0: stored}, words)
     replayed = outcome_of(replay.fly_sentences(moved, params, words, device=CPU), 0, batch.geometries[0], words.spec)
     assert loop.outcome(0).outcome == replayed.outcome
@@ -100,19 +113,40 @@ def test_a_go_around_beyond_the_most_given_is_refused_by_name(tmp_path, monkeypa
         if most == 0:
             with pytest.raises(GoAroundBeyondMost, match="beyond the most 0"):
                 loop.step(climb)
-            assert loop.steps == 1 and loop.executor.count == 2       # nothing flown
+            assert loop.steps == 1 and loop.executor.count == 2 and loop.go_arounds[0] == 0      # nothing flown
             continue
         loop.step(climb)
-        assert float(loop.executor.time_limit_s[0]) == before + 900.0
+        assert float(loop.executor.time_limit_s[0]) == before + 900.0 and loop.go_arounds[0] == 1
         loop.step(again)
         with pytest.raises(GoAroundBeyondMost, match="beyond the most 1"):
             loop.step(climb)
+        assert loop.go_arounds[0] == 1
+    # a done flight's words are not heard: its go-around is no go-around
+    loop, _ = start(directory, "train", 2.0, {0: stored}, params, words, most_go_arounds=0, device=CPU)
+    with pytest.raises(ValueError, match="not done"):
+        loop.outcome(0)
+    for row in stored.grid:
+        loop.step(row[None, :])
+    ended = loop.outcome(0)
+    loop.step(climb)
+    assert loop.go_arounds[0] == 0 and loop.outcome(0) == ended
 
 
-def test_the_start_refuses_another_vocabulary_or_another_row_interval(tmp_path, monkeypatch):
+def test_the_start_refuses_sentences_not_read_under_its_artefact_split_and_executor(tmp_path, monkeypatch):
+    """The sentences are tied to what they were read under: the vocabulary, the executor parameters of the artefact's
+    closed-loop file, the row interval, and the flight (its observed rows are its stored signals)."""
     directory, words, _, stored, _ = _artefact(tmp_path, monkeypatch, 4.0)
+    with pytest.raises(ValueError, match="no sentence"):
+        start(directory, "train", 4.0, {}, _params(), words, most_go_arounds=0, device=CPU)
+    (directory / CLOSED_LOOP_DIRECTORY / "train_2s.npz").symlink_to(closed_loop_path(directory, "train", 4.0))
     with pytest.raises(ValueError, match="does not start at row 8 of 2 s"):
         start(directory, "train", 2.0, {0: stored}, _params(), words, most_go_arounds=0, device=CPU)
+    with pytest.raises(ValueError, match="flown by executor parameters"):
+        start(directory, "train", 4.0, {0: stored}, replace(_params(), timeout_factor=2.0), words, most_go_arounds=0,
+              device=CPU)
+    moved = replace(stored, states=stored.states + np.array([1.0, 0, 0, 0, 0, 0]))     # another flight's rows
+    with pytest.raises(ValueError, match="its observed rows differ"):
+        start(directory, "train", 4.0, {0: moved}, _params(), words, most_go_arounds=0, device=CPU)
     other = Words(type(words.spec).from_dict({**words.spec.to_dict(), "closed_loop_lateral_m": 20.0}))
     with pytest.raises(ValueError, match="another vocabulary"):
         start(directory, "train", 4.0, {0: stored}, _params(), other, most_go_arounds=0, device=CPU)
@@ -120,3 +154,25 @@ def test_the_start_refuses_another_vocabulary_or_another_row_interval(tmp_path, 
         Loop(executor_inputs(load_signals(directory, "train")[0], load_candidates(directory)["KXXX"]),
              [load_candidates(directory)["KXXX"]], [A320_IAS], [100.0], _params(), words, interval_s=4.0,
              most_go_arounds=-1, device=CPU)
+
+
+@pytest.mark.parametrize("interval_s", [2.0, 8.0])
+def test_the_start_check_runner_says_stored_sentences_through_the_start(tmp_path, monkeypatch, interval_s):
+    """R53 (§12.2 item 7): the artefact's stored sentences said through the start give back their states, are done at
+    their last row and time out as stored; a flight off its stored states fails the check."""
+    from ts_transformer.experiments import closed_loop_start_check as runner
+
+    directory, words, _, _, _ = _artefact(tmp_path, monkeypatch, interval_s)
+    (row,) = runner.check_interval(directory, "train", interval_s, _params(), words, per_airport=0, seed=1337,
+                                   device=CPU)
+    assert row["same_rows"] and row["position_m"] == 0.0 and row["other_columns"] == 0.0 and runner.passes(row)
+    assert not runner.passes({**row, "position_m": 2e-6}) and not runner.passes({**row, "done_at_last_row": False})
+
+
+def test_the_start_check_samples_each_airport_alike():
+    from ts_transformer.experiments.closed_loop_start_check import sample
+
+    airports = ["A"] * 5 + ["B"] * 3
+    chosen = sample(airports, 2, 1337)
+    assert len(chosen) == 4 and sorted(airports[k] for k in chosen) == ["A", "A", "B", "B"] and chosen == sorted(chosen)
+    assert sample(airports, 0, 1337) == list(range(8)) and sample(airports, 2, 1337) == chosen

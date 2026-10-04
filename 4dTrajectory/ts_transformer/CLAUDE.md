@@ -364,7 +364,8 @@ split at each row interval, their reference and passed record; clean tree; `--ch
 `executor_replay` (`--row-interval-s`, `--closed-loop`; no criterion is read; select and val from a clean tree) (R12);
 `executor_conformance` checks a spec's reference after an `autopilot/` change (R42); `executor_turns` measures the
 executor's turn against the exact words (A13, R51); `final_descent_tolerance` reads the closed loop and its replay of one
-H_final artefact in memory and puts several side by side (A24, D66, R52); `instruction_figures` draws val pages
+H_final artefact in memory and puts several side by side (A24, D66, R52); `closed_loop_start_check` says stored
+closed-loop sentences through `autopilot/start.py` and requires their stored states back (A26, D67, R53); `instruction_figures` draws val pages
 (R10). **Archived with instruction-v3** (`archive/two_tier_v3_2026_10/`, its README; their manual entries stay as the
 record): the Training exports and the attitude they draw (R11, R13), `executor_sensitivity` (R12), the prior and its
 post-training (R15–R22, R35, R38), `heading_lead_ablation` (R23), the multi-aircraft runners (R24–R39, R41, R43–R45),
