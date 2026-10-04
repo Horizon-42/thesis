@@ -143,9 +143,11 @@ sections that it names.
    `git add -A`. Before each commit, read `git diff --cached --stat`.
 3. A test never writes under a live root. A test that calls a runner's `main()` gives every write root a tmp path
    (`tests/support.py` `labelled_instruction_artefact` is an example).
-4. Run single test files in the foreground. Run the full ts suite (approximately 55 min, detached: `nohup setsid`, the
-   script writes its own PID file) at the end of each milestone that changes code, before its report, and before a
-   formal build.
+4. Run single test files in the foreground. Run the full ts suite at the end of each milestone that changes code, before
+   its report, and before a formal build: on 8 workers, in the foreground (`OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python
+   -m pytest --import-mode=importlib -n 8 --dist worksteal 4dTrajectory/ts_transformer/tests`; about 3 min for about
+   1,600 tests, 2026-10-05), or one test at a time, detached (about 15 min: `nohup setsid`, the script writes its own
+   PID file). Rule 13 comes first: the 8 workers never start beside a formal build.
 5. No compatibility (principle 8). Every changed format gets a new name (the reading name, each schema name; the
    names are constants of the code). The new code refuses an old artefact by its name. No `.get(key, default)`
    fallbacks, no branches on a schema version.
