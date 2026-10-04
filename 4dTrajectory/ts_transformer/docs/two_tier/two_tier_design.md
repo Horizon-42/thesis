@@ -71,6 +71,11 @@ repository root.
 | D45 | A word goes to the nearest row, not to the next row. The Δ grid puts each word of the 2 s reading on the nearest Δ row (§4.8). The closed-loop reading takes the observed words with their 2 s times and says a word at the first Δ row whose matched observed time is less than Δ/2 before the time of the word (§4.9). A word exactly between two rows goes to the later row in both. The mean lateness of a word is then zero in the closed loop, and on the Δ grid zero at 2 s and 1 s (half a 2 s row, from the ties) at 4 and 8 s | Decided | User, 2026-10-04 |
 | D46 | A heading word is said in the frame where the executor hears it. Where the Δ grid or the closed-loop reading moves a heading word across a runway word, the word is the class nearest to its absolute track minus the course of the R in force when it is heard. A heading word is said when its absolute track differs from the track in force, also when its class is the class in force said under another course. A change of runway alone says no heading word. No sentence is refused for a heading word across a change of runway (§3.3, §4.8, §4.9) | Decided | User, 2026-10-04 |
 | D47 | The turn law of the executor stays (§5.4). The measurement of A13: the words alone (the 5° grid and the lead) end a turn approximately 35 m inside the observed turn; the executor gives back approximately 18 m of it; the stopping-rate limit changes approximately 3 m (§11.14). The readout of a turn is its own part (the change of the displacement from the observed aircraft of the same time); the change of e_y is read beside it, because it holds the offsets that earlier turns left | Decided | User, 2026-10-04 |
+| D48 | The 2 s reading follows D46 too. After a change of R, a heading word whose class is the class in force is said, because its absolute track differs from the track in force. No flight is refused for it (§4.3) | Decided | User, 2026-10-04 (Claude's check of stage A, §3 item 2) |
+| D49 | The labeller conformance also covers the Δ grid: its reference sample stores the sentences at Δ = 4 and 8 s, and the check compares them again with the code on disk (§9.2) | Decided | User, 2026-10-04 (check §3 item 3) |
+| D50 | The closed-loop reading does not keep every row inside the tolerances of D32. A correction is one class and needs time to bring the flown path back (§11.11); in the stage A smoke 10–25 % of the correctable rows are more than 30 m off laterally. The check of §14.6 reads that the corrections bring the flown path back inside the tolerances, not that every row is inside them (§14.6) | Decided | User, 2026-10-04 (check §3 item 4) |
+| D51 | The closed-loop artefact stores, for each row from the first predicted step, the flown position 2 s before the row (east, north, MSL height), at every Δ. The executor flies 1 s cycles, so the value exists; at Δ = 2 s it is the row before. The motion input of D25 is read from it; stage B does not fly a sentence again to get it (§4.8, §4.9) | Decided | User, 2026-10-04 (check §3 item 1) |
+| D52 | The band of an altitude level is half the larger gap to its two neighbours + the fit residual 10 m. Inside a segment this is half its step + 10 m; the top level of a segment takes the larger gap above it (1,260 m: 70 m; 2,700 m: 235 m), so every height said as a level is inside its band. "No level-off" takes the band of the lowest level, 40 m (§3.4) | Decided | User, 2026-10-04 (check §3 item 5) |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -83,7 +88,7 @@ repository root.
 
 | Part | State |
 |---|---|
-| Stage A: vocabulary, labeller, identities, executor, judge, replay, closed-loop reading (§14.2) | Built on `dev-two-tier-v4`, each milestone reviewed: A0 `e57c62d8` + `d2917c06`; A1–A3 `63639a54` + review fixes `feaf9558`, `d1e277f7`; A4–A6 `330ffbaf` + review fixes `c7603a4c`; A7 `14eb7946`; A8 `05f00be7` + review fixes in `c41ce7af`; A9 `c41ce7af` + review fixes `2e182e8d`, `983f2847`; D38 and D34 `6d1e8c4a` + review fixes `fdc3b832`; A10 `4ac34679` + review fixes `d1258c00`; A11 `efcbb5dc` + review fixes `0c0778c8`; A12 `b8077c34` + review fixes `b5b76c5a`; A13 `47865c8e` + review fixes `249804bd`, `b8994f58`. Smoke build of A12 and A13 (80 flights an airport and split, from the open-loop reading again, in the ignored `smoke_v4/data/a12/` of the worktree): the labeller's, the executor's and the closed loop's conformance checks pass; the closed loop read at Δ = 2, 4 and 8 s; the replays ran at Δ = 2 and 4 s open loop and 2, 4, 8 s closed loop; the turn readout of A13 ran on train and select; the full ts suite passes (1,523). Reports: `readouts/2026-10-04_stage_a_a8_a9_report.zh.md`, `readouts/2026-10-04_stage_a_a10_a11_report.zh.md`, `readouts/2026-10-04_stage_a_a12_a13_report.zh.md`. Claude checks the result (§14.6) |
+| Stage A: vocabulary, labeller, identities, executor, judge, replay, closed-loop reading (§14.2) | Built on `dev-two-tier-v4`, each milestone reviewed: A0 `e57c62d8` + `d2917c06`; A1–A3 `63639a54` + review fixes `feaf9558`, `d1e277f7`; A4–A6 `330ffbaf` + review fixes `c7603a4c`; A7 `14eb7946`; A8 `05f00be7` + review fixes in `c41ce7af`; A9 `c41ce7af` + review fixes `2e182e8d`, `983f2847`; D38 and D34 `6d1e8c4a` + review fixes `fdc3b832`; A10 `4ac34679` + review fixes `d1258c00`; A11 `efcbb5dc` + review fixes `0c0778c8`; A12 `b8077c34` + review fixes `b5b76c5a`; A13 `47865c8e` + review fixes `249804bd`, `b8994f58`; A14 `66daefa2` + review fix `ab295b18`. Smoke build of A12 and A13 (80 flights an airport and split, from the open-loop reading again, in the ignored `smoke_v4/data/a12/` of the worktree): the labeller's, the executor's and the closed loop's conformance checks pass; the closed loop read at Δ = 2, 4 and 8 s; the replays ran at Δ = 2 and 4 s open loop and 2, 4, 8 s closed loop; the turn readout of A13 ran on train and select; the full ts suite passes (1,523). Reports: `readouts/2026-10-04_stage_a_a8_a9_report.zh.md`, `readouts/2026-10-04_stage_a_a10_a11_report.zh.md`, `readouts/2026-10-04_stage_a_a12_a13_report.zh.md`. The closed loop of A14 built again in `smoke_v4/data/a14/`; the full ts suite at `ab295b18` passes (1,524). Claude's check of stage A (§14.6) at `ab295b18`: `readouts/2026-10-04_stage_a_check.zh.md` — items 2, 4, 5 pass; items 1 and 3 hold with points for the user (the motion input 2 s before a row is not stored at Δ = 4 and 8 s). The user's decisions on the check: D48–D52 and A15 |
 | Stage B: prior (§14.3) | Not started; outline |
 | Stage C: post-training and multi-aircraft (§14.4) | Not started; outline |
 | Stage D: frontend and backend (§14.5) | Not started; outline |
@@ -92,7 +97,8 @@ repository root.
 
 1. Stage A (§14.2): write the vocabulary, the labeller, the identities, the executor, the judge and the replay on the
    branch `dev-two-tier-v4`, milestones A0–A14, each with tests and a code review. Another agent does this.
-2. Claude checks the result of stage A against this document (§14.6).
+2. Claude checks the result of stage A against this document (§14.6). Then A15 (§14.2) from the decisions on the
+   check (D48–D52).
 3. The user chooses the fitted values of D15 (the turn law of the executor stays, D47). Then the formal artefact is
    built, and the
    readings of D34 are made at each row interval of the ablation (D11, D25: 2, 4, 8 s). The user compares them (D7).
@@ -300,8 +306,11 @@ levels that the other four airports almost never use. This is airspace, not fram
 
 **Envelope.** The tube from the row of the word: max(T, h0 − s·tan γ_hi) − ε ≤ h ≤ max(T, h0 − s·tan γ_lo) + ε while
 it descends, T ± ε after it arrives (s is the horizontal distance flown from the row of the word). ε depends on the
-segment of T: half its step plus the fit residual 10 m, that is 40 / 70 / 235 m. For "no level-off" there is no lower
-bound T. A new angle word starts a new tube. A containment rate is given
+level (D52): half the larger gap to its two neighbours plus the fit residual 10 m. Inside a segment that is half its
+step + 10 m, 40 / 70 / 235 m. The top level of a segment takes the larger gap above it: 1,260 m has 70 m and 2,700 m has
+235 m, because the heights up to the middle of that gap are said as that level (with half the segment's own step, a
+level held at 1,301–1,320 m or 2,771–2,925 m would be outside the band of its own word). For "no level-off" there is no
+lower bound T, and ε is the band of the lowest level, 40 m. A new angle word starts a new tube. A containment rate is given
 with these widths (principle 6). The level detection of the labeller does not use ε (§4.4).
 
 ### 3.5 Angle column
@@ -443,8 +452,8 @@ glidepath angle or an LPV DA is refused before labelling (the judge needs all th
 - **Frame:** the course of R at each row (D8): the runway of the first approach, then, from the runway word that ends
   a go-around, the runway of the next approach (§4.2, §4.6).
 - **Reading:** §3.3, at every row from row 0 to the last row of the sentence. A word in force keeps its track when R
-  changes; only a new word reads the new course. After a change of R, a new word with the class in force cannot be said:
-  the flight is refused.
+  changes; only a new word reads the new course. After a change of R, a new word with the class in force is said,
+  because its absolute track differs from the track in force (D48, as D46 on the Δ grid and in the closed loop).
 - **Capture row** (D4, D26): the first row of an approach from which the track stays in the capture corridor of its
   runway, before the threshold, to the end of the approach. The landing approach must end in the corridor; otherwise
   the flight is refused. An approach that ends at a go-around row outside the corridor has no capture row.
@@ -643,7 +652,8 @@ The user compares the Δ values on these readings; this document sets no thresho
 it would be the mean over Δ. In a 3°/s turn, the direction of that mean is approximately 12° behind the track at
 Δ = 8 s (3° at 2 s). The ablation would then compare a coarser input as well as a longer interval. With the
 displacement in the 2 s before the row, only the interval changes. The data has a row every 2 s, and in closed loop the
-executor has a state every 1 s, so the value exists at every Δ. At Δ = 2 s it is the value of now.
+executor has a state every 1 s, so the value exists at every Δ; the closed-loop artefact stores it (D51). At Δ = 2 s it
+is the value of now.
 
 ### 4.9 Closed-loop reading (D32)
 
@@ -762,7 +772,8 @@ the fit starts no correction.
 It reads the open-loop artefact and the executor spec.
 
 **Artefact.** For each split and each Δ: the closed-loop sentences (each correction word marked as a correction); the
-flown states on the rows (position in the airport frame, MSL height, track, ground speed, vertical rate); the count of
+flown states on the rows (position in the airport frame, MSL height, track, ground speed, vertical rate); on each row
+from the first predicted step, the flown position 2 s before it (D51); the count of
 correction words for each column; the flights without a training sentence, by reason.
 
 ---
@@ -1214,7 +1225,7 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | # | What | Its identity | Stage |
 |---|---|---|---|
 | 1 | The vocabulary (grids, classes, tolerances, reading name) | The spec sha. It is the format | A |
-| 2 | The labeller, open-loop and closed-loop reading | The labeller conformance (§14.2 A3): a fixed reference sample, labelled again by the code on disk, gives the same words; for the closed-loop reading (D32), with the artefact's executor spec, the same correction words and the same flown states within the tolerance of the executor conformance. The artefact records which code wrote it, as information | A |
+| 2 | The labeller, open-loop and closed-loop reading | The labeller conformance (§14.2 A3): a fixed reference sample, labelled again by the code on disk, gives the same words, on the 2 s rows and on the Δ grid at Δ = 4 and 8 s (D49); for the closed-loop reading (D32), with the artefact's executor spec, the same correction words and the same flown states within the tolerance of the executor conformance. The artefact records which code wrote it, as information | A |
 | 3 | The executor | The sha of the spec's parameters and the conformance of its reference tracks (C33) | A |
 | 4 | The flights of an artefact | The stored signals. A consumer that rebuilds a flight from the harvest compares it row by row with them (`autopilot/flights.py` `require_same_flight`). No byte hash of an arrival manifest | A |
 | 5 | The artefact of a prior | The spec sha, the day split, the candidate table and the sha256 of the sentence files | B |
@@ -1892,6 +1903,25 @@ holds this milestone into `dev-two-tier-v4`.
 - The closed-loop reading of the smoke build again (a new smoke directory), its conformance, the closed-loop replays;
   as information. Then the full ts suite again, and the report.
 
+**A15. The decisions on Claude's check of stage A (D48, D49, D51; the check's §3 item 6).** After A14. D50 and D52
+change no code (the band of D52 is in `instructions/words.py` since A1).
+
+- 2 s reading (`instructions/labeller/lateral.py`, `instructions/labeller/sentence.py`): after a change of R, a heading
+  word whose class is the class in force is said; the refusal "heading word repeated after a runway change" goes (D48).
+- Closed-loop artefact (`autopilot/closed_loop.py`, `instructions/artefact.py`): for each row from the first predicted
+  step, the flown position 2 s before it (east, north, MSL height), taken from the executor's cycle 2 s before the row.
+  A new closed-loop format name; the closed-loop conformance compares it too (D51).
+- Labeller conformance (`instructions/conformance.py`): the reference sample also stores each sentence on the Δ grid at
+  Δ = 4 and 8 s (`labeller/interval.on_interval`); the check compares them again. A new reference format name (D49).
+- Tests: at Δ = 2 s the position 2 s before a flown row is the state of the row before; at Δ = 4 and 8 s it is the
+  state that the executor flies 2 s before the row (a sentence flown again cycle by cycle); the 2 s reading of a
+  flight that changes to a runway 6° off and keeps its class says the word, and the executor flies the new track; the labeller conformance finds a change of the Δ grid's rule (the tie of D45); the
+  tolerances of D32 pinned (lateral 30 m, vertical 15 m); `tests/test_architecture.py`: no module of the executor's
+  laws (`autopilot/lateral.py`, `vertical.py`, `speed.py`, `executor.py`, `single.py`) imports the runway data (D9).
+- The smoke build again (a new smoke directory): the labeller, the executor and the closed-loop conformance; how many
+  flights the 2 s reading refused for the repeated heading word before, and how many it says now; the closed-loop
+  replays at Δ = 2, 4, 8 s; as information. Then the full ts suite again, and the report.
+
 ### 14.3 Stage B: prior
 
 **Start.** After Claude's check of stage A (§14.6). The code is written and tested on the smoke artefact at Δ = 2 s.
@@ -2004,8 +2034,8 @@ frontend reads the reading name, not the spec sha (§9.2 #9). After stage D the 
 3. The smoke build: both conformance checks pass; the replay at Δ = 2 and 4 runs to its end; a labelled go-around
    flies as a go-around (G, the climb from its level word, a new runway word, a landing after it); at each go-around
    row, "no level-off" and "unspecified" are in force where the approach reached them (D26); the closed-loop sentences
-   at Δ = 2 and 4 replay to their flown states, and their flown paths stay within the tolerances of the observed
-   paths except where §4.9 permits no correction (D32); the observed words of a closed-loop sentence follow the matched
+   at Δ = 2 and 4 replay to their flown states, and their corrections bring the flown paths back inside the tolerances
+   of the observed paths, except where §4.9 permits no correction (D32, D50); the observed words of a closed-loop sentence follow the matched
    point (D42), and a labelled go-around is in its closed-loop sentence and flies as
    a go-around; a change of speed says its steps, and the executor makes each step at a_max (D43); each observed word of
    a closed-loop sentence comes at the Δ row nearest to its place (D45); no correction past the end of the observed path
