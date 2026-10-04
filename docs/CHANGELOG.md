@@ -1,5 +1,33 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-04 — Obsolete experiment outputs deleted (46.4 GiB; the user's go)
+
+- The user, on Claude's audit of the two lists in `4dTrajectory/ts_transformer/docs/data_cleanup/` (table 1: obsolete
+  by the two-tier redesign, D20; table 2: made by archived code). 207 paths under `4dTrajectory/outputs/` deleted.
+  Free disk space went from 7.2 GB to 55 GB.
+  - Table 1: instruction artefacts v1–v4 and v6, executor specs v2–v10, every `POOLED/prior/` directory but one log,
+    all of `POOLED/traffic/`, six `POOLED/analyses/`, the two-tier v3 trees, the old export and rebuild directories.
+  - Table 2 A: closure, scene encoder, plan head and runway intent R2/R3, manoeuvre codes and `codebooks/`, two-tier
+    v2 (`outputs/archive/KRDU/two_tier_2026_09`), closed-loop SFT, M3/M4 first round, heading reading, oracle teacher,
+    flight-model pair, nominal-residual hook.
+  - Table 2 B: the 2026-08-16 teacher-initialised control checkpoint, its publication and its two development
+    predictions. Every control checkpoint from before 2026-08-18 is refused at load anyway.
+  - List and script: the session's job directory; nothing in the tree reads them. Live code, tests, the backend and
+    the new artefacts (v9, v14) read none of them. The rows the tables marked as inferred were checked against their
+    `publication.json`: closure, the retired waypoints conditioning, two-tier v2, and checkpoints from 2026-08-16.
+- **Kept, for the old Training view** (outline §6 rule 3: the old index and its sets stay until the user merges the
+  stage A view): `POOLED/instruction_language/v5_20260926` and `POOLED/executor/v11_20260927`. Every flyable old
+  Training set, overlay and window set is flown on them. After the deletion the backend's lookup still finds v11
+  for the v5 set. Also kept: `analyses/word_frames_20261003` and `analyses/final_approach_20261003` (vocabulary §9),
+  and `prior/step9_4_traffic_20261003.run/` (post-training §6.2 cites its `run.log`).
+- Not touched: the frontend's published comparison categories and Training sets (the user's later choice), the
+  one-tier campaigns (table 2 D, E), the optimizer outputs, and the harvests.
+- Now stale pointers: the published overlays and categories name the deleted directories as their source (display
+  only, nothing opens them). The `experiment_predictions/index.json` files list deleted publications until the
+  publisher rewrites them. The `plan_head_2026_09` README says `plan_guidance_20260910` "stays in place": the gates
+  that read it are archived, and the archive is not edited. The old runners on `dev-two-tier` default to deleted
+  paths (D20: the new design reads none of them).
+
 ### 2026-10-02 — Two-tier multi-aircraft 9.4: one commanded aircraft a window; the one-aircraft scene mode archived
 
 - The user (design §9 item 37): R37 takes a one-commanded draw, and the one-aircraft mode code this made redundant goes
