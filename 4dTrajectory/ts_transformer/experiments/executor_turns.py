@@ -18,16 +18,32 @@ three ways (`WAYS`):
     executor measures it; the first the shorter way from the observed track at row 0), at the observed ground speed,
     from the observed position at row 0.
 
+A CONTROL way, ``observed_track`` (`observed_positions`): the observed track itself, integrated as (c) integrates the
+words — what the integration alone leaves (near 0 where the observed positions agree with their velocities).
+
 The settings of (a) and (b) belong to this runner only: the laws of the executor do not change.
 
 THE READOUT. The turns are the observed flight's runs of 2 s rows that turn one way faster than the turn onset rate
-(0.2°/s, §4.3, `labeller.lateral.turn_runs` on the labeller's smoothed track). For each turn and way, the change of the
-lateral offset from the observed path (e_y, the closed loop's matched point, `closed_loop.ObservedPath`, right of the
-observed track positive) from the row the turn starts at to `AFTER_S` after the row it ends at — and that change toward
-the outside of the turn (``outward_m``: positive where the flown path ends outside the observed turn). A turn whose end
-+ `AFTER_S` lies past the observed flight, or past the end of a way's flight, is counted as not measured for that way.
-Per stratum (straight-in / vectored, `instructions.readout`) and band of the observed ground speed over the turn
-(`SPEED_BANDS_MPS`), and pooled: the turns, |change| p50 / p90 and the outward change p50 / mean, per way.
+(0.2°/s, §4.3, `labeller.lateral.turn_runs` on the labeller's smoothed track). For each turn and way:
+
+- ``change_m``: the change of the lateral offset from the observed path (e_y, the closed loop's matched point,
+  `closed_loop.ObservedPath`, right of the observed track positive) from the row the turn starts at to `AFTER_S` after
+  the row it ends at (§14.2 A13 as written). It also holds what earlier turns left: before a turn the flown aircraft is
+  already off to a side and ahead or behind, and a turn moves that gap from one axis to the other (a 90° turn makes an
+  along-track lead a lateral offset).
+- ``own_m`` (Claude's reading, for the user's choice of which to read): the turn's own part — the change of the
+  displacement from the observed aircraft of the same time (flown minus observed position, constant through a turn
+  flown exactly, as every way flies the observed ground speed) over the same rows, projected on the right of the observed
+  track at the later row.
+- each also toward the outside of the turn (``*_outward_m``: positive where the flown path ends outside the observed
+  turn), and the way's e_y at the turn's start.
+
+A turn whose end + `AFTER_S` lies past the observed flight, or past the end of a way's flight (a crossing, the ground, a
+dynamics failure), is not measured for that way. Per stratum (straight-in / vectored, `instructions.readout`) and band of
+the observed ground speed over the turn (`SPEED_BANDS_MPS`), and pooled: per way, the turns measured, |change| and |own|
+p50 / p90 and their outward p50 / mean; and over the turns measured in EVERY way (``paired``), the same, with the paired
+differences of the own outward part (`DIFFERENCES`: (a) and (b) from (c) — the heading law; (c) from the control — the
+words; p50, p90, mean).
 
     python run_ts.py executor_turns --split train --per-airport 0 \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> \\
@@ -39,7 +55,6 @@ from __future__ import annotations
 import argparse
 import math
 import time
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -66,7 +81,11 @@ from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 READOUT_SCHEMA = "ts-executor-turns-readout-v1"
-WAYS = ("executor", "executor_no_stopping", "exact_words")
+#: The three ways of §14.2 A13 and the control (module docstring).
+WAYS = ("executor", "executor_no_stopping", "exact_words", "observed_track")
+#: The paired differences of the own outward part read over the turns measured in every way: the heading law (each
+#: executor way against the exact words), and the words (the exact words against the control).
+DIFFERENCES = (("executor", "exact_words"), ("executor_no_stopping", "exact_words"), ("exact_words", "observed_track"))
 #: How long after a turn's end its offset is read, s (§14.2 A13).
 AFTER_S = 30.0
 #: Bands of the observed ground speed over a turn, m/s: [low, high).
@@ -137,7 +156,6 @@ def fly_way(batch: replay.Batch, params: ExecutorParams, words: Words, *, stoppi
     """Every flight's sentence flown on the time clock at the observed ground speed (ways (a), (b)), as `executor.fly`
     flies it."""
     f64 = torch.float64
-    params = replace(params, word_clock="time")
     sentences = Sentences([s.grid for s in batch.sentences], words, step_s=batch.row_interval_s, device=device)
     limits = replay.time_limits_s(batch, params, words.spec.step_s)
     cycles = int(math.ceil((max(limits) + replay.reserve_s(batch)) / params.cycle_s))
@@ -160,14 +178,25 @@ def fly_way(batch: replay.Batch, params: ExecutorParams, words: Words, *, stoppi
     return executor.flown()
 
 
-def exact_positions(sentence: replay.Sentence, signals: FlightSignals, lead_s: float, step_s: float,
+def _integrated(tracks: np.ndarray, signals: FlightSignals, cycle_s: float, per_row: int) -> tuple[np.ndarray, np.ndarray]:
+    """East and north, m, at every ``per_row``-th cycle: compass ``tracks`` (one per cycle boundary) flown at the observed
+    ground speed from the observed position at row 0 (the trapezoid rule over each cycle)."""
+    speed = observed_speed_mps(signals, len(tracks) - 1, cycle_s)
+    rad = np.radians(tracks)
+    step_e = 0.5 * (speed[1:] * np.sin(rad[1:]) + speed[:-1] * np.sin(rad[:-1])) * cycle_s
+    step_n = 0.5 * (speed[1:] * np.cos(rad[1:]) + speed[:-1] * np.cos(rad[:-1])) * cycle_s
+    e = float(signals.e_m[0]) + np.concatenate(([0.0], np.cumsum(step_e)))
+    n = float(signals.n_m[0]) + np.concatenate(([0.0], np.cumsum(step_n)))
+    return e[::per_row], n[::per_row]
+
+
+def exact_positions(sentence: replay.Sentence, signals: FlightSignals, lead_s: float, row_s: float,
                     cycle_s: float) -> tuple[np.ndarray, np.ndarray]:
     """Way (c), the exact model of the heading words (module docstring): east and north, m, at each of the sentence's
-    rows (``step_s`` apart), integrated in cycles of ``cycle_s`` at the observed ground speed."""
+    rows (``row_s`` apart), integrated in cycles of ``cycle_s`` at the observed ground speed."""
     rows = len(sentence.grid)
-    cycles = int(round((rows - 1) * step_s / cycle_s))
-    per_row = int(round(step_s / cycle_s))
-    said = sorted((i.row * step_s, float(i.info["target_deg"])) for i in sentence.instructions if i.column == HEADING)
+    cycles = int(round((rows - 1) * row_s / cycle_s))
+    said = sorted((i.row * row_s, float(i.info["target_deg"])) for i in sentence.instructions if i.column == HEADING)
     times = np.arange(cycles + 1) * cycle_s
     tracks = np.empty(len(times))
     # the ramp in force (unwrapped degrees): from `begin` at `heard` to `target` at `heard + lead_s`
@@ -185,18 +214,21 @@ def exact_positions(sentence: replay.Sentence, signals: FlightSignals, lead_s: f
             target = base + float(wrap180(said[next_word][1] - base))
             next_word += 1
         tracks[k] = on_ramp(t)
-    speed = observed_speed_mps(signals, cycles, cycle_s)
-    rad = np.radians(tracks)
-    step_e = 0.5 * (speed[1:] * np.sin(rad[1:]) + speed[:-1] * np.sin(rad[:-1])) * cycle_s
-    step_n = 0.5 * (speed[1:] * np.cos(rad[1:]) + speed[:-1] * np.cos(rad[:-1])) * cycle_s
-    e = float(signals.e_m[0]) + np.concatenate(([0.0], np.cumsum(step_e)))
-    n = float(signals.n_m[0]) + np.concatenate(([0.0], np.cumsum(step_n)))
-    return e[::per_row], n[::per_row]
+    return _integrated(tracks, signals, cycle_s, int(round(row_s / cycle_s)))
 
 
-def offsets_m(signals: FlightSignals, span: int, e_m: np.ndarray, n_m: np.ndarray) -> np.ndarray:
-    """e_y of flown positions at the observed rows (one per row from row 0) against the observed path of the first
-    ``span`` rows: the closed loop's matched point, searched forward row by row."""
+def observed_positions(sentence: replay.Sentence, signals: FlightSignals, row_s: float,
+                       cycle_s: float) -> tuple[np.ndarray, np.ndarray]:
+    """The control way: the observed track (unwrapped, linear between its rows) integrated as `exact_positions`
+    integrates the words."""
+    cycles = int(round((len(sentence.grid) - 1) * row_s / cycle_s))
+    tracks = np.interp(np.arange(cycles + 1) * cycle_s, signals.time_s, signals.track_deg)
+    return _integrated(tracks, signals, cycle_s, int(round(row_s / cycle_s)))
+
+
+def offsets_m(signals: FlightSignals, span: int, e_m: np.ndarray, n_m: np.ndarray, every: int) -> np.ndarray:
+    """e_y of flown positions at the sentence's rows (``every`` 2 s rows apart, from row 0) against the observed path of
+    the first ``span`` 2 s rows: the closed loop's matched point, searched forward row by row."""
     path = ObservedPath(signals.e_m[:span], signals.n_m[:span], np.zeros(span), 0)
     return np.array([path.match(float(e), float(n), 0.0).lateral_m for e, n in zip(e_m, n_m)])
 
@@ -204,8 +236,7 @@ def offsets_m(signals: FlightSignals, span: int, e_m: np.ndarray, n_m: np.ndarra
 def turns(signals: FlightSignals, span: int, words: Words) -> list[tuple[int, int, float, float]]:
     """``(start row, end row, net turn deg (compass, right positive), mean observed ground speed m/s)`` of every turn of
     the observed flight's first ``span`` rows (module docstring)."""
-    smoothed = smooth(truncated(signals, span), words.spec)
-    track = np.degrees(np.unwrap(np.radians(smoothed.track_deg)))
+    track = smooth(truncated(signals, span), words.spec).track_deg      # unwrapped, as the signals carry it
     rate = np.diff(track) / words.spec.step_s
     return [(start, stop, float(track[stop] - track[start]),
              float(np.mean(signals.ground_speed_mps[start: stop + 1])))
@@ -215,18 +246,23 @@ def turns(signals: FlightSignals, span: int, words: Words) -> list[tuple[int, in
 def turn_rows(batch: replay.Batch, flown: dict[str, Flown | list[tuple[np.ndarray, np.ndarray]]],
               words: Words) -> list[dict[str, Any]]:
     """One record per turn of ``batch``'s flights (module docstring); ``flown`` each way's flight: a `Flown` of ways (a)
-    and (b), the exact positions of way (c)."""
-    step_s = words.spec.step_s
-    after = int(round(AFTER_S / step_s))
+    and (b), the positions at the sentence's rows of way (c) and the control."""
+    row_s = batch.row_interval_s
+    after = int(round(AFTER_S / row_s))
+    every = int(round(row_s / words.spec.step_s))
     out = []
     for j, signals in enumerate(batch.signals):
         reading, sentence = batch.readings[j], batch.sentences[j]
-        span = min(len(reading.words) - sentence.first_row, len(sentence.grid))
-        offsets = {}
+        span = min((len(reading.words) - sentence.first_row) // every, len(sentence.grid))
+        observed_e, observed_n = signals.e_m[::every][:span], signals.n_m[::every][:span]
+        # the observed track at each row, and the unit vector to its right (east, north)
+        right = np.radians(signals.track_deg[::every][:span])
+        right_e, right_n = np.cos(right), -np.sin(right)
+        positions = {}
         for way in WAYS:
             result = flown[way]
             if isinstance(result, Flown):
-                cycles = int(round(step_s / result.cycle_s))
+                cycles = int(round(row_s / result.cycle_s))
                 last = min(int(result.done_cycle[j]) + 1, result.states.shape[1] - 1)
                 rows = min(span, last // cycles + 1)
                 track = flown_track(result.states[j, : (rows - 1) * cycles + 1].cpu().numpy(), batch.geometries[j])
@@ -236,17 +272,24 @@ def turn_rows(batch: replay.Batch, flown: dict[str, Flown | list[tuple[np.ndarra
             # a flight's rows up to its end, and up to a state the dynamics left (a dynamics failure)
             finite = np.isfinite(e_m) & np.isfinite(n_m)
             rows = min(span, len(e_m), int(np.argmin(finite)) if not finite.all() else len(e_m))
-            offsets[way] = offsets_m(signals, span, e_m[:rows], n_m[:rows])
-        for start, stop, turned, speed in turns(signals, span, words):
+            positions[way] = (e_m[:rows], n_m[:rows], offsets_m(signals, span * every, e_m[:rows], n_m[:rows], every))
+        for start, stop, turned, speed in turns(signals, span * every, words):
+            first, later = start // every, -(-(stop + after * every) // every)    # on the sentence's rows
             record: dict[str, Any] = {"dataset_id": reading.dataset_id, "airport": reading.airport,
-                                      "stratum": stratum(reading), "start_row": start, "end_row": stop,
-                                      "turn_deg": turned, "ground_speed_mps": speed}
+                                      "group": batch.groups[j], "stratum": stratum(reading), "start_row": start,
+                                      "end_row": stop, "turn_deg": turned, "ground_speed_mps": speed}
+            outward = -math.copysign(1.0, turned)       # a right turn's outside is left of the track
             for way in WAYS:
-                lateral = offsets[way]
-                measured = stop + after < len(lateral)
-                change = float(lateral[stop + after] - lateral[start]) if measured else None
-                record[way] = None if change is None else {"change_m": change,
-                                                           "outward_m": -math.copysign(1.0, turned) * change}
+                e_m, n_m, lateral = positions[way]
+                if later >= len(lateral):
+                    record[way] = None
+                    continue
+                de = (e_m[later] - observed_e[later]) - (e_m[first] - observed_e[first])
+                dn = (n_m[later] - observed_n[later]) - (n_m[first] - observed_n[first])
+                change = float(lateral[later] - lateral[first])
+                own = float(de * right_e[later] + dn * right_n[later])
+                record[way] = {"start_lateral_m": float(lateral[first]), "change_m": change,
+                               "outward_m": outward * change, "own_m": own, "own_outward_m": outward * own}
             out.append(record)
     return out
 
@@ -256,25 +299,37 @@ def band_name(speed_mps: float) -> str:
     return f"{low:g}-{high:g} m/s"
 
 
+def _summary(values: list[float]) -> dict[str, float] | None:
+    return None if not values else {"p50": float(np.percentile(values, 50)), "p90": float(np.percentile(values, 90)),
+                                    "mean": float(np.mean(values))}
+
+
+def _ways(members: list[dict[str, Any]]) -> dict[str, Any]:
+    cell: dict[str, Any] = {}
+    for way in WAYS:
+        measured = [r[way] for r in members if r[way] is not None]
+        cell[way] = {"measured": len(measured), "not_measured": len(members) - len(measured),
+                     **{f"abs_{name}": _summary([abs(m[name]) for m in measured]) for name in ("change_m", "own_m")},
+                     **{name: _summary([m[name] for m in measured]) for name in ("outward_m", "own_outward_m")}}
+    return cell
+
+
 def readout_table(records: list[dict[str, Any]]) -> dict[str, Any]:
-    """Per stratum (and "all") and speed band (and "all"), per way: the turns measured and not, |change| p50 / p90, the
-    outward change p50 and mean (module docstring)."""
+    """Per stratum (and "all") and speed band (and "all"): per way, the turns measured and not, |change| and |own|
+    (p50, p90, mean) and their outward parts; and over the turns measured in every way, the same and the paired
+    differences of the own outward part (`DIFFERENCES`, module docstring)."""
     table: dict[str, Any] = {}
     for part in (*STRATA, "all"):
         for band in (*(band_name(low) for low, _ in SPEED_BANDS_MPS), "all"):
             members = [r for r in records if part in (r["stratum"], "all")
                        and band in (band_name(r["ground_speed_mps"]), "all")]
-            cell: dict[str, Any] = {"turns": len(members)}
-            for way in WAYS:
-                measured = [r[way] for r in members if r[way] is not None]
-                size = [abs(m["change_m"]) for m in measured]
-                outward = [m["outward_m"] for m in measured]
-                cell[way] = {"measured": len(measured), "not_measured": len(members) - len(measured),
-                             "abs_change_m": None if not size else {"p50": float(np.percentile(size, 50)),
-                                                                     "p90": float(np.percentile(size, 90))},
-                             "outward_m": None if not outward else {"p50": float(np.percentile(outward, 50)),
-                                                                    "mean": float(np.mean(outward))}}
-            table.setdefault(part, {})[band] = cell
+            paired = [r for r in members if all(r[way] is not None for way in WAYS)]
+            table.setdefault(part, {})[band] = {
+                "turns": len(members), **_ways(members),
+                "paired": {"turns": len(paired), **_ways(paired),
+                           **{f"{way}_minus_{base}_own_outward_m": _summary(
+                               [r[way]["own_outward_m"] - r[base]["own_outward_m"] for r in paired])
+                              for way, base in DIFFERENCES}}}
     return table
 
 
@@ -308,8 +363,10 @@ def main(argv: list[str] | None = None) -> int:
         flown: dict[str, Any] = {
             "executor": fly_way(part, params, words, stopping=True, device=device),
             "executor_no_stopping": fly_way(part, params, words, stopping=False, device=device),
-            "exact_words": [exact_positions(s, f, words.spec.heading_lead_s, words.spec.step_s, params.cycle_s)
-                            for s, f in zip(part.sentences, part.signals)]}
+            "exact_words": [exact_positions(s, f, words.spec.heading_lead_s, part.row_interval_s, params.cycle_s)
+                            for s, f in zip(part.sentences, part.signals)],
+            "observed_track": [observed_positions(s, f, part.row_interval_s, params.cycle_s)
+                               for s, f in zip(part.sentences, part.signals)]}
         records += turn_rows(part, flown, words)
         print(f"  {first + len(part.sentences)} flights, {len(records)} turns, {time.perf_counter() - started:.0f}s",
               flush=True)
@@ -322,8 +379,14 @@ def main(argv: list[str] | None = None) -> int:
         "elapsed_s": time.perf_counter() - started})
     for part, bands in table.items():
         for band, cell in bands.items():
-            text = "  ".join(f"{way} {cell[way]['abs_change_m']} out {cell[way]['outward_m']}" for way in WAYS)
-            print(f"  {part:12s} {band:14s} turns {cell['turns']:5d}  {text}")
+            paired = cell["paired"]
+
+            def p50(value: dict[str, float] | None) -> str:
+                return "-" if value is None else f"{value['p50']:.0f}"
+
+            text = "  ".join(f"{way} |own| {p50(paired[way]['abs_own_m'])} own out {p50(paired[way]['own_outward_m'])}"
+                             f" |change| {p50(paired[way]['abs_change_m'])}" for way in WAYS)
+            print(f"  {part:12s} {band:14s} turns {cell['turns']:5d} paired {paired['turns']:5d}  {text}")
     print(f"→ {out / 'turns.json'}")
     return 0
 
