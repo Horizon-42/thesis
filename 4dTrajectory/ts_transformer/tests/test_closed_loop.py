@@ -905,7 +905,7 @@ def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(
     monkeypatch.setattr(closed_loop, "start_inputs", inputs)
     monkeypatch.setattr(runner, "git_state", lambda: clean)
     monkeypatch.setattr(closed_loop, "git_state", lambda: clean)
-    monkeypatch.setattr(runner, "POOL_CONTEXT", "fork")
+    monkeypatch.setattr(runner, "POOL_OPTIONS", {"start_method": "fork"})
     read = {}
     for workers in (1, 2):
         directory = labelled_artefact(tmp_path / f"w{workers}", monkeypatch)

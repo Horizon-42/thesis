@@ -14,7 +14,8 @@ commit).
 
 ``--workers N`` reads the CELLS (one split at one row interval, `read_cell`) in N processes, the largest split first; a
 cell is the same reading in a worker as in one process (its split drawn, read in chunks of ``--chunk``), so the files and
-the summary are the same whatever N. Each cell's peak memory is printed (information for the next build's N).
+the summary are the same whatever N. A worker reads one cell and ends (its memory goes back), so the peak printed is the
+cell's; a cell that fails stops the cells not yet started, and its name is in the error.
 
     python run_ts.py instruction_closed_loop --row-interval-s 2 4 8 \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> \\
@@ -25,6 +26,7 @@ the summary are the same whatever N. Each cell's peak memory is printed (informa
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import resource
@@ -49,8 +51,9 @@ from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 SEED = 1337
-#: How the workers start (`--workers`): spawned, as the other runners' pools (tests fork, so their stand-ins carry over).
-POOL_CONTEXT = "spawn"
+#: How the workers start (`--workers`): spawned, as the other runners' pools, one cell each (tests fork, so their stand-ins
+#: carry over; a forked pool takes no task limit).
+POOL_OPTIONS = {"start_method": "spawn", "max_tasks_per_child": 1}
 
 
 def _percentiles(values: list[float]) -> dict[str, float] | None:
@@ -120,7 +123,8 @@ def read_cell(instructions: Path, executor: Path, split: str, interval_s: float,
               device: str) -> tuple[str, float, dict[str, Any], dict[str, Any], float]:
     """One cell (module docstring): ``split``'s labelled flights drawn and read in closed loop at ``interval_s``, its
     sentences written into ``staging`` (none when no flight keeps one: the numbers say why). Returns the split, the
-    interval, the draw's description, the numbers and the process's peak memory (GB)."""
+    interval, the draw's description and its flights (a digest of their places in the split), the numbers and the
+    process's peak memory (GB, Linux's ``ru_maxrss`` in KiB)."""
     params, _, words = replay.open_executor(executor, instructions)
     drawn, readings = replay.draw_readings(instructions, split, words.spec, words, per_airport=0, seed=SEED,
                                            groups=(replay.OWN, replay.STAND_IN))
@@ -132,7 +136,9 @@ def read_cell(instructions: Path, executor: Path, split: str, interval_s: float,
                           executor_params_sha256=params_sha256(params), row_interval_s=interval_s,
                           start_row=closed_loop.start_row(interval_s),
                           sentences={batch.indices[j]: r for j, r in kept})
-    return split, interval_s, drawn.description, numbers, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6
+    flights = hashlib.sha256(np.asarray(drawn.indices, dtype=np.int64).tobytes()).hexdigest()
+    return (split, interval_s, {"description": drawn.description, "indices_sha256": flights}, numbers,
+            resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -169,6 +175,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--row-interval-s is required to write the closed-loop reading")
     for interval in args.row_interval_s:
         interval_rows(interval, words.spec.step_s)                      # refused unless it divides 16 s
+    if len(set(args.row_interval_s)) != len(args.row_interval_s):
+        parser.error(f"--row-interval-s {args.row_interval_s} names a row interval twice")
     target = instructions / CLOSED_LOOP_DIRECTORY
     if target.exists():
         parser.error(f"{target} exists; the closed-loop reading is never overwritten")
@@ -194,15 +202,22 @@ def main(argv: list[str] | None = None) -> int:
         for split, interval in cells:
             finished(*read_cell(instructions, executor, split, interval, staging, chunk=args.chunk, device=args.device))
     else:
-        with ProcessPoolExecutor(max_workers=args.workers, mp_context=get_context(POOL_CONTEXT)) as pool:
-            futures = [pool.submit(read_cell, instructions, executor, split, interval, staging, chunk=args.chunk,
-                                   device=args.device) for split, interval in cells]
+        options = dict(POOL_OPTIONS)
+        with ProcessPoolExecutor(max_workers=args.workers, mp_context=get_context(options.pop("start_method")),
+                                 **options) as pool:
+            futures = {pool.submit(read_cell, instructions, executor, split, interval, staging, chunk=args.chunk,
+                                   device=args.device): (split, interval) for split, interval in cells}
             for future in as_completed(futures):
-                finished(*future.result())
+                try:
+                    finished(*future.result())
+                except BaseException as error:                    # stop the cells not yet started, name the cell
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    split, interval = futures[future]
+                    raise SystemExit(f"the cell {split} at {interval:g} s failed: {error!r}") from error
     for split in SPLITS:
         if len({json.dumps(done[(split, interval)][0], sort_keys=True) for interval in args.row_interval_s}) != 1:
             raise SystemExit(f"the cells of {split} drew different flights")
-        summary["splits"][split] = {"drawn": done[(split, args.row_interval_s[0])][0], "intervals": {
+        summary["splits"][split] = {"drawn": done[(split, args.row_interval_s[0])][0]["description"], "intervals": {
             f"{interval:g}": done[(split, interval)][1] for interval in args.row_interval_s}}
     write_json_atomic(staging / "summary.json", summary)
     closed_loop.write_reference(instructions, params, words, args.row_interval_s, git=git,
