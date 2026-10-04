@@ -1,0 +1,347 @@
+% Related-work references for the thesis (see related_work_reading_list.md).
+% Metadata verified against each PDF's first page or the folder README under docs/literature/.
+% Entries with a `note` still need a check against the published version before submission.
+
+% ---------- 2.1 Trajectory prediction ----------
+
+@article{sun2020openap,
+  author  = {Sun, Junzi and Hoekstra, Jacco M. and Ellerbroek, Joost},
+  title   = {{OpenAP}: An Open-Source Aircraft Performance Model for Air Transportation Studies and Simulations},
+  journal = {Aerospace},
+  year    = {2020},
+  volume  = {7},
+  number  = {8},
+  pages   = {104},
+  doi     = {10.3390/aerospace7080104}
+}
+
+@article{nuic2010bada,
+  author  = {Nuic, Angela and Poles, Damir and Mouillet, Vincent},
+  title   = {{BADA}: An Advanced Aircraft Performance Model for Present and Future {ATM} Systems},
+  journal = {International Journal of Adaptive Control and Signal Processing},
+  year    = {2010},
+  volume  = {24},
+  number  = {10},
+  pages   = {850--866},
+  doi     = {10.1002/acs.1176}
+}
+
+@techreport{eurocontrol2009bada3,
+  author      = {{EUROCONTROL}},
+  title       = {User Manual for the Base of Aircraft Data ({BADA}) Revision 3.7},
+  institution = {EUROCONTROL Experimental Centre},
+  year        = {2009},
+  note        = {Title and report number to be checked against the PDF}
+}
+
+@article{zeng2020deep,
+  author  = {Zeng, Weili and Quan, Zhibin and Zhao, Ziyu and Xie, Chao and Lu, Xiaobo},
+  title   = {A Deep Learning Approach for Aircraft Trajectory Prediction in Terminal Airspace},
+  journal = {IEEE Access},
+  year    = {2020},
+  volume  = {8},
+  pages   = {151250--151266},
+  doi     = {10.1109/ACCESS.2020.3016289}
+}
+
+@article{yoon2026maiformer,
+  author        = {Yoon, Seokbin and Lee, Keumjin},
+  title         = {Multi-Agent Inverted Transformer for Flight Trajectory Prediction},
+  journal       = {IEEE Transactions on Intelligent Transportation Systems},
+  year          = {2026},
+  pages         = {1--11},
+  doi           = {10.1109/TITS.2026.3689290},
+  eprint        = {2509.21004},
+  archiveprefix = {arXiv}
+}
+
+@article{ma2020hybrid,
+  author  = {Ma, Lan and Tian, Shan},
+  title   = {A Hybrid {CNN-LSTM} Model for Aircraft {4D} Trajectory Prediction},
+  journal = {IEEE Access},
+  year    = {2020},
+  volume  = {8},
+  pages   = {134668--134680},
+  doi     = {10.1109/ACCESS.2020.3010963}
+}
+
+@inproceedings{pang2019lstm,
+  author    = {Pang, Yutian and Xu, Nan and Liu, Yongming},
+  title     = {Aircraft Trajectory Prediction using {LSTM} Neural Network with Embedded Convolutional Layer},
+  booktitle = {Annual Conference of the PHM Society},
+  year      = {2019},
+  volume    = {11},
+  number    = {1},
+  doi       = {10.36001/phmconf.2019.v11i1.849}
+}
+
+@inproceedings{huang2023landing,
+  author        = {Huang, Liping and Zhang, Sheng and Zhang, Yicheng and Zhang, Yi and Yin, Yifang},
+  title         = {Aircraft Landing Time Prediction with Deep Learning on Trajectory Images},
+  booktitle     = {13th SESAR Innovation Days (SIDS)},
+  year          = {2023},
+  eprint        = {2401.01083},
+  archiveprefix = {arXiv}
+}
+
+@misc{liu2018deeptp,
+  author        = {Liu, Yulin and Hansen, Mark},
+  title         = {Predicting Aircraft Trajectories: A Deep Generative Convolutional Recurrent Neural Networks Approach},
+  year          = {2018},
+  eprint        = {1812.11670},
+  archiveprefix = {arXiv},
+  note          = {Preprint; the PDF states no venue}
+}
+
+@misc{xiang2024probabilistic,
+  author        = {Xiang, Jun and Chen, Jun},
+  title         = {Data-driven Probabilistic Trajectory Learning with High Temporal Resolution in Terminal Airspace},
+  year          = {2024},
+  eprint        = {2409.17359},
+  archiveprefix = {arXiv}
+}
+
+@inproceedings{prutsch2026ascent,
+  author        = {Prutsch, Alexander and Schinagl, David and Possegger, Horst},
+  title         = {{ASCENT}: Transformer-Based Aircraft Trajectory Prediction in Non-Towered Terminal Airspace},
+  booktitle     = {IEEE International Conference on Robotics and Automation (ICRA)},
+  year          = {2026},
+  eprint        = {2603.16550},
+  archiveprefix = {arXiv}
+}
+
+@misc{petit2026flowatc,
+  author        = {Petit, Mathurin and Torun, Emir and Brusset, Louis and Kam, Jordan and Bayen, Alexandre M.},
+  title         = {{FlowATC}: Aircraft Trajectory Prediction via Flow Matching},
+  year          = {2026},
+  eprint        = {2609.16528},
+  archiveprefix = {arXiv}
+}
+
+@inproceedings{patrikar2022pilot,
+  author        = {Patrikar, Jay and Moon, Brady and Oh, Jean and Scherer, Sebastian},
+  title         = {Predicting Like A Pilot: Dataset and Method to Predict Socially-Aware Aircraft Trajectories in Non-Towered Terminal Airspace},
+  booktitle     = {IEEE International Conference on Robotics and Automation (ICRA)},
+  year          = {2022},
+  doi           = {10.1109/ICRA46639.2022.9811972},
+  eprint        = {2109.15158},
+  archiveprefix = {arXiv}
+}
+
+@inproceedings{hodgkin2026met,
+  author        = {Hodgkin, Amy and Pepper, Nick and Thomas, Marc},
+  title         = {Conditioning Aircraft Trajectory Prediction on Meteorological Data with a Physics-Informed Machine Learning Approach},
+  booktitle     = {AIAA SciTech Forum},
+  year          = {2026},
+  doi           = {10.2514/6.2026-1792},
+  eprint        = {2601.03152},
+  archiveprefix = {arXiv}
+}
+
+% ---------- 2.2 Physics-informed learning and differentiable kinematics ----------
+
+@misc{raissi2017pinn,
+  author        = {Raissi, Maziar and Perdikaris, Paris and Karniadakis, George Em},
+  title         = {Physics Informed Deep Learning (Part {I}): Data-driven Solutions of Nonlinear Partial Differential Equations},
+  year          = {2017},
+  eprint        = {1711.10561},
+  archiveprefix = {arXiv},
+  note          = {arXiv v1; the combined version appeared in J. Comput. Phys. 378 (2019) and should be cited instead if that is the version used}
+}
+
+@inproceedings{cui2020dkm,
+  author    = {Cui, Henggang and Nguyen, Thi and Chou, Fang-Chieh and Lin, Tsung-Han and Schneider, Jeff and Bradley, David and Djuric, Nemanja},
+  title     = {Deep Kinematic Models for Kinematically Feasible Vehicle Trajectory Predictions},
+  booktitle = {IEEE International Conference on Robotics and Automation (ICRA)},
+  year      = {2020},
+  doi       = {10.1109/ICRA40945.2020.9197560}
+}
+
+@inproceedings{salzmann2020trajectronpp,
+  author        = {Salzmann, Tim and Ivanovic, Boris and Chakravarty, Punarjay and Pavone, Marco},
+  title         = {{Trajectron++}: Dynamically-Feasible Trajectory Forecasting With Heterogeneous Data},
+  booktitle     = {European Conference on Computer Vision (ECCV)},
+  year          = {2020},
+  eprint        = {2001.03093},
+  archiveprefix = {arXiv}
+}
+
+@misc{hodgkin2025descent,
+  author        = {Hodgkin, Amy and Pepper, Nick and Thomas, Marc},
+  title         = {Probabilistic Simulation of Aircraft Descent via a Physics-Informed Machine Learning Approach},
+  year          = {2025},
+  eprint        = {2504.02529},
+  archiveprefix = {arXiv}
+}
+
+@article{pepper2024climb,
+  author        = {Pepper, Nick and Thomas, Marc},
+  title         = {Learning Generative Models for Climbing Aircraft from Radar Data},
+  journal       = {Journal of Aerospace Information Systems},
+  year          = {2024},
+  volume        = {21},
+  number        = {6},
+  pages         = {474--481},
+  doi           = {10.2514/1.I011359},
+  eprint        = {2309.14941},
+  archiveprefix = {arXiv}
+}
+
+@article{alligier2013mass,
+  author  = {Alligier, Richard and Gianazza, David and Durand, Nicolas},
+  title   = {Learning the Aircraft Mass and Thrust to Improve the Ground-Based Trajectory Prediction of Climbing Flights},
+  journal = {Transportation Research Part C: Emerging Technologies},
+  year    = {2013},
+  volume  = {36},
+  pages   = {45--60},
+  doi     = {10.1016/j.trc.2013.08.006}
+}
+
+% ---------- 2.3 Constraints as differentiable terms ----------
+
+@misc{marquezneila2017hard,
+  author        = {M{\'a}rquez-Neila, Pablo and Salzmann, Mathieu and Fua, Pascal},
+  title         = {Imposing Hard Constraints on Deep Networks: Promises and Limitations},
+  year          = {2017},
+  eprint        = {1706.02025},
+  archiveprefix = {arXiv}
+}
+
+@inproceedings{fioretto2020lagrangian,
+  author        = {Fioretto, Ferdinando and Mak, Terrence W. K. and Van Hentenryck, Pascal},
+  title         = {Lagrangian Duality for Constrained Deep Learning},
+  booktitle     = {European Conference on Machine Learning and Principles and Practice of Knowledge Discovery in Databases (ECML PKDD)},
+  year          = {2020},
+  eprint        = {2001.09394},
+  archiveprefix = {arXiv},
+  note          = {Author order to be checked against the published version}
+}
+
+@inproceedings{chamon2020pac,
+  author        = {Chamon, Luiz F. O. and Ribeiro, Alejandro},
+  title         = {Probably Approximately Correct Constrained Learning},
+  booktitle     = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year          = {2020},
+  eprint        = {2006.05487},
+  archiveprefix = {arXiv}
+}
+
+@misc{xiao2021barriernet,
+  author        = {Xiao, Wei and Hasani, Ramin and Li, Xiao and Rus, Daniela},
+  title         = {{BarrierNet}: A Safety-Guaranteed Layer for Neural Networks},
+  year          = {2021},
+  eprint        = {2111.11277},
+  archiveprefix = {arXiv},
+  note          = {arXiv v1 as stored in the repo; the journal version (IEEE T-RO 2023) has a different title and author list, check before citing it instead}
+}
+
+@inproceedings{kervadec2022logbarrier,
+  author        = {Kervadec, Hoel and Dolz, Jose and Yuan, Jing and Desrosiers, Christian and Granger, Eric and Ben Ayed, Ismail},
+  title         = {Constrained Deep Networks: Lagrangian Optimization via Log-Barrier Extensions},
+  booktitle     = {International Conference on Pattern Recognition (ICPR)},
+  year          = {2022},
+  eprint        = {1904.04205},
+  archiveprefix = {arXiv}
+}
+
+% ---------- 2.4 Multi-aircraft interaction and separation ----------
+
+@manual{faa7110,
+  author       = {{Federal Aviation Administration}},
+  title        = {Order {JO} 7110.65{BB}, Air Traffic Control, Change 3},
+  year         = {2026},
+  organization = {FAA},
+  note         = {Cite by paragraph, e.g. Chapter 5, Section 5, Radar Separation; effective 2026-07-09}
+}
+
+@techreport{erzberger2014arrival,
+  author      = {Erzberger, Heinz and Itoh, Eri},
+  title       = {Design Principles and Algorithms for Air Traffic Arrival Scheduling},
+  institution = {NASA Ames Research Center},
+  type        = {NASA Technical Paper},
+  number      = {NASA/TP-2014-218302},
+  year        = {2014},
+  month       = may
+}
+
+@article{lee2008tradeoffs,
+  author  = {Lee, Hanbong and Balakrishnan, Hamsa},
+  title   = {A Study of Tradeoffs in Scheduling Terminal-Area Operations},
+  journal = {Proceedings of the IEEE},
+  year    = {2008},
+  note    = {Volume and pages to be checked against the PDF}
+}
+
+@inproceedings{kim2026maltp,
+  author        = {Kim, Kyungmin and Yoon, Seokbin and Lee, Keumjin},
+  title         = {Probabilistic Multi-Agent Aircraft Landing Time Prediction},
+  booktitle     = {AIAA SciTech Forum},
+  year          = {2026},
+  eprint        = {2512.08281},
+  archiveprefix = {arXiv}
+}
+
+@misc{jung2023inferring,
+  author        = {Jung, Soyeon and Hardy, Amelia and Kochenderfer, Mykel J.},
+  title         = {Inferring Traffic Models in Terminal Airspace from Flight Tracks and Procedures},
+  year          = {2023},
+  eprint        = {2303.09981},
+  archiveprefix = {arXiv},
+  note          = {v3, 2025; the PDF states no venue}
+}
+
+@inproceedings{groot2022relstate,
+  author    = {Groot, D. J. and Ellerbroek, Joost and Hoekstra, J. M.},
+  title     = {Using Relative State Transformer Models for Multi-Agent Reinforcement Learning in Air Traffic Control},
+  booktitle = {SESAR Innovation Days},
+  year      = {2022},
+  pages     = {1--9}
+}
+
+@misc{brittain2020d2mav,
+  author        = {Brittain, Marc and Yang, Xuxi and Wei, Peng},
+  title         = {A Deep Multi-Agent Reinforcement Learning Approach to Autonomous Separation Assurance},
+  year          = {2020},
+  eprint        = {2003.08353},
+  archiveprefix = {arXiv}
+}
+
+@inproceedings{suo2021trafficsim,
+  author        = {Suo, Simon and Regalado, Sebastian and Casas, Sergio and Urtasun, Raquel},
+  title         = {{TrafficSim}: Learning to Simulate Realistic Multi-Agent Behaviors},
+  booktitle     = {IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year          = {2021},
+  pages         = {10400--10409},
+  eprint        = {2101.06557},
+  archiveprefix = {arXiv}
+}
+
+% ---------- 2.5 Sequence generation and closed-loop training ----------
+
+@inproceedings{seff2023motionlm,
+  author        = {Seff, Ari and Cera, Brian and Chen, Dian and Ng, Mason and Zhou, Aurick and Nayakanti, Nigamaa and Refaat, Khaled S. and Al-Rfou, Rami and Sapp, Benjamin},
+  title         = {{MotionLM}: Multi-Agent Motion Forecasting as Language Modeling},
+  booktitle     = {IEEE/CVF International Conference on Computer Vision (ICCV)},
+  year          = {2023},
+  eprint        = {2309.16534},
+  archiveprefix = {arXiv}
+}
+
+@inproceedings{zhang2025catk,
+  author        = {Zhang, Zhejun and Karkus, Peter and Igl, Maximilian and Ding, Wenhao and Chen, Yuxiao and Ivanovic, Boris and Pavone, Marco},
+  title         = {Closed-Loop Supervised Fine-Tuning of Tokenized Traffic Models},
+  booktitle     = {IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year          = {2025},
+  eprint        = {2412.05334},
+  archiveprefix = {arXiv}
+}
+
+% ---------- 2.6 Datasets ----------
+
+@misc{patrikar2024tartan,
+  author        = {Patrikar, Jay and Dantas, Joao and Moon, Brady and Hamidi, Milad and Ghosh, Sourish and Keetha, Nikhil and Higgins, Ian and Chandak, Atharva and Yoneyama, Takashi and Scherer, Sebastian},
+  title         = {{TartanAviation}: Image, Speech, and {ADS-B} Trajectory Datasets for Terminal Airspace Operations},
+  year          = {2024},
+  eprint        = {2403.03372},
+  archiveprefix = {arXiv}
+}
