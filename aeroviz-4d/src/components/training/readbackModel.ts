@@ -1,29 +1,34 @@
 /**
  * readbackModel.ts
  * ----------------
- * Everything the read-back window's four charts share, computed once per render: which lines are drawn (the executor's
- * replay and the live segment, when they have two points), the selected word and what recedes, and every scale — the
- * plan view's one scale on both axes, the time and distance axes extended to hold the executor's lines, each chart's y
- * extent over what it draws. No envelope is computed: the numbers scaled are the exporter's and the backend's.
+ * Everything the read-back window's four charts share, computed once per render: which lines are drawn (the observed
+ * track, the flown path of a closed-loop reading, the live segment), the selected word and what recedes, and every
+ * scale — the plan view's one scale on both axes, the one time axis, each chart's y extent over what it draws. No
+ * envelope is computed: the numbers scaled are the exporter's and the backend's.
+ *
+ * ONE CLOCK: flight time. The sentence's rows, the envelopes' rows and every track are put on it here
+ * (`readingRowTimeS`, `envelopeTimeS`); a chart draws what it is told at the time it is told.
  */
 
 import type { TrainingLayers } from "../../context/AppContext";
 import { TRAINING_AUTOPILOT_COLOR } from "../../utils/trainingWordColors";
 import {
   formatSeconds,
-  outsideSpans,
-  rowAtTime,
-  trainingWordAt,
-  trainingWordLabel,
-  TRAINING_COLUMN_INDEX,
+  nearestBranch,
+  readingRowAt,
+  readingRowTimeS,
+  sentenceColumnRuns,
+  sentenceWordAt,
+  trainingBandLabel,
+  trainingEnvelopeIndex,
   type TrainingCandidate,
   type TrainingColumn,
-  type TrainingFlight,
   type TrainingHeadingBand,
-  type TrainingVocabulary,
+  type TrainingReading,
+  type TrainingSelection,
+  type TrainingWordRun,
 } from "../../data/trainingSample";
-import type { TrainingExecutorFlight } from "../../data/trainingOverlays";
-import { autopilotColour, autopilotHasLine, autopilotRunAndTail, type TrainingAutopilotSegment } from "../../data/trainingAutopilot";
+import { autopilotColour, autopilotHasLine, type TrainingAutopilotSegment } from "../../data/trainingAutopilot";
 
 export const GUTTER = 64;
 export const PAD_R = 16;
@@ -52,90 +57,79 @@ export function extent(values: number[]): [number, number] {
 export const judged = (band: TrainingHeadingBand) => band.stopRow > band.firstRow;
 
 export interface ReadbackInputs {
-  flight: TrainingFlight;
-  vocabulary: TrainingVocabulary;
-  candidates: TrainingCandidate[];
+  selection: TrainingSelection;
+  reading: TrainingReading;
   layers: TrainingLayers;
   cursorS: number;
-  /** The cursor is on the flight (`cursorOnFlight`): off it, no cursor is drawn and no word is the one at it. */
-  cursorOn: boolean;
   column: TrainingColumn | null;
-  executor: TrainingExecutorFlight | null;
+  /** The picked word's segment, flown live (`trainingAutopilot`, ready); null otherwise. */
   autopilot: TrainingAutopilotSegment | null;
   width: number;
 }
 
-export function readbackModel({ flight, vocabulary, candidates, layers, cursorS, cursorOn, column, executor, autopilot, width }: ReadbackInputs) {
-  const { signals, envelopes } = flight;
-  const { tS } = signals;
-  const last = flight.rows - 1;
-  const cursorRow = rowAtTime(tS, cursorS);
+export function readbackModel({ selection, reading, layers, cursorS, column, autopilot, width }: ReadbackInputs) {
+  const { flight, vocabulary, candidates } = selection;
+  const stepS = vocabulary.stepS;
+  const { observed, judged: judgedTrack, envelopes, closed } = reading;
+  const flown = closed === null ? null : closed.flown;
   const designated = candidates[flight.runwayIndex];
-  const label = (name: TrainingColumn, value: number) => trainingWordLabel(vocabulary, candidates, name, value);
-  const inForce = (name: TrainingColumn) => flight.words.inForce[TRAINING_COLUMN_INDEX[name]][cursorRow];
+  const cursorRow = readingRowAt(reading, cursorS);
 
-  // ── the executor's replay: drawn on its own clock, and not at all without two points ──
-  const flown = executor?.flown && executor.track.tS.length >= 2 ? executor : null;
-  const flownTrack = flown?.track ?? null;
-  // its heading words' bands, on the flown track as its judge read it
-  const judgedTrack = flown?.judgedTrackDeg ?? null;
-  const flownBands = flown && judgedTrack ? flown.words.flatMap((word) => (word.heading === null ? [] : [word.heading])) : [];
+  /** Flight time of an envelope row. */
+  const envelopeTimeS = (row: number) => reading.envelopeOriginS + row * stepS;
+  const rowTimeS = (row: number) => readingRowTimeS(reading, row);
 
-  // ── the live segment (not drawn without two points: a dynamics failure in its first cycle keeps one); its judged
-  // step k is the flight's step `row + k`, the flown track's point k × `stepCycles` ──
+  // ── the live segment (not drawn without two points: a dynamics failure in its first cycle keeps one) ──
   const live = autopilot !== null && autopilotHasLine(autopilot) ? autopilot : null;
   const liveColour = live === null ? TRAINING_AUTOPILOT_COLOR : autopilotColour(live);
-  // its points drawn solid (the word's run) and faded (the tail past the next word of its column)
-  const { run: liveRun, tail: liveTail } = live === null ? { run: [], tail: [] } : autopilotRunAndTail(live);
-  const liveBand = live?.word.heading ?? null;
-  const liveJudged = live?.judgedTrackDeg ?? null;
-  /** Its rows outside its heading band, as [first, last] judged steps. */
-  const liveOutside = live && liveBand && liveJudged && layers.headingBands
-    ? outsideSpans(liveBand.inside, liveBand.firstRow, live.segment.row + liveJudged.length - 1)
-      .map(([first, lastRow]) => [first - live.segment.row, lastRow - live.segment.row] as [number, number])
-    : [];
 
   // ── the selected word: one column's, never the step's ──
-  const focus = column === null || !cursorOn ? null : trainingWordAt(flight, column, cursorRow);
-  /** Is this the selected word — the `index`-th word (and envelope) of column `name`? */
-  const focused = (name: TrainingColumn, index: number) => focus !== null && column === name && focus.index === index;
-  // The clearance owns the approach's envelopes: the capture turn and the corridor.
-  const approachFocused = column === "approach" && focus !== null && focus.event.kind === "clear";
+  const focus: TrainingWordRun | null = column === null ? null : sentenceWordAt(reading, column, cursorRow);
+  const focusIndex = column === null || focus === null ? null : trainingEnvelopeIndex(reading, stepS, column, focus);
+  /** Is this the selected word — the `index`-th envelope of column `name`? */
+  const focused = (name: TrainingColumn, index: number) => focusIndex !== null && column === name && focusIndex === index;
   /** An envelope's opacity: full for the selected word's, or for every word when none is selected. */
   const recede = (mine: boolean) => (column === null || mine ? 1 : FADED);
-  // The rows the selected word is in force, on to the next word's issue so that it meets it; only a word issued on the
-  // last row has no stretch.
-  const focusRows = focus === null
-    ? []
-    : Array.from({ length: Math.min(focus.endRow, last) - focus.row + 1 }, (_, offset) => focus.row + offset);
-  const capture = envelopes.approach.captureTurn;
-  const captureOk = capture !== null && capture.check.progressOk && capture.check.rateOk;
+  /** The span of flight time the selected word is in force. */
+  const focusSpanS: [number, number] | null = focus === null ? null : [rowTimeS(focus.row), rowTimeS(focus.endRow)];
+  /** The points of ``tS`` inside the selected word's span, on to the next one so that it meets the next word's stretch. */
+  const focusPoints = (tS: number[]): number[] => {
+    if (focusSpanS === null) return [];
+    const out: number[] = [];
+    tS.forEach((t, index) => {
+      if (t >= focusSpanS[0] - 1e-9 && t <= focusSpanS[1] + 1e-9) out.push(index);
+    });
+    return out;
+  };
 
-  // ── the time charts share one x: the observed flight's, or longer when an executor flew longer ──
+  // ── the time axis: the flight's clock from 0, to the longest line drawn ──
   const plotW = width - GUTTER - PAD_R;
-  const endS = Math.max(tS[last], flownTrack ? flownTrack.tS[flownTrack.tS.length - 1] : 0,
-    live ? live.track.tS[live.track.tS.length - 1] : 0);
+  const lastOf = (tS: number[]) => tS[tS.length - 1];
+  const endS = Math.max(lastOf(observed.tS), flown === null ? 0 : lastOf(flown.tS), live === null ? 0 : lastOf(live.track.tS));
   const xTime = (seconds: number) => GUTTER + (seconds / endS) * plotW;
-  // The cursor is the observed flight's time: past its end (where only the executor's lines run) it stays at the end.
-  const timeAtX = (x: number) => Math.min(Math.max(((x - GUTTER) / plotW) * endS, 0), tS[last]);
-  /** A row as a time edge; the step after the last row is the last row. */
-  const edge = (row: number) => tS[Math.min(row, last)];
-  const rowX = (row: number) => xTime(tS[row]);
-  /** A flown step's time; the step after the flown track's last is its last. */
-  const flownEdge = (step: number) => flownTrack!.tS[Math.min(step, flownTrack!.tS.length - 1)];
-  const distanceEnd = Math.max(signals.smoothed.distanceM[last],
-    flownTrack ? flownTrack.distanceM[flownTrack.distanceM.length - 1] : 0,
-    live ? live.track.distanceM[live.track.distanceM.length - 1] : 0);
-  const xDistance = (metres: number) => GUTTER + (metres / distanceEnd) * plotW;
-  const distanceAtX = (x: number) => Math.min(Math.max(((x - GUTTER) / plotW) * distanceEnd, 0), distanceEnd);
-  const rowXDistance = (row: number) => xDistance(signals.smoothed.distanceM[row]);
+  const timeAtX = (x: number) => Math.min(Math.max(((x - GUTTER) / plotW) * endS, 0), endS);
 
-  // ── the plan view: the track and the threshold decide the frame, one scale on both axes ──
+  // ── the plan view: the tracks and the threshold decide the frame, one scale on both axes ──
   const km = (metres: number) => metres / 1000;
-  const [eLow, eHigh] = extent([...signals.eM, designated.thresholdEM, ...envelopes.approach.corridor.axis.eM,
-    ...(flownTrack?.eM ?? []), ...(live?.track.eM ?? [])].map(km));
-  const [nLow, nHigh] = extent([...signals.nM, designated.thresholdNM, ...envelopes.approach.corridor.axis.nM,
-    ...(flownTrack?.nM ?? []), ...(live?.track.nM ?? [])].map(km));
+  const reach = Math.max(1000, ...[observed, ...(flown ? [flown] : [])].flatMap((track) =>
+    track.eM.map((e, i) => Math.hypot(e - designated.thresholdEM, track.nM[i] - designated.thresholdNM))));
+  const courseRad = (designated.courseDeg * Math.PI) / 180;
+  /** The approach centreline of a candidate, from ``reach`` out on the approach side to its threshold, and its runway. */
+  const runwayLine = (candidate: TrainingCandidate) => {
+    const east = Math.sin((candidate.courseDeg * Math.PI) / 180);
+    const north = Math.cos((candidate.courseDeg * Math.PI) / 180);
+    return {
+      runway: [[candidate.thresholdEM, candidate.thresholdNM],
+        [candidate.thresholdEM + candidate.lengthM * east, candidate.thresholdNM + candidate.lengthM * north]],
+      centreline: [[candidate.thresholdEM - reach * east, candidate.thresholdNM - reach * north],
+        [candidate.thresholdEM, candidate.thresholdNM]],
+    };
+  };
+  const decision = closed?.replay.crossing?.decision ?? null;
+  const [eLow, eHigh] = extent([...observed.eM, ...(flown?.eM ?? []), ...(live?.track.eM ?? []), designated.thresholdEM,
+    designated.thresholdEM - reach * Math.sin(courseRad) * 0.2].map(km));
+  const [nLow, nHigh] = extent([...observed.nM, ...(flown?.nM ?? []), ...(live?.track.nM ?? []), designated.thresholdNM,
+    designated.thresholdNM - reach * Math.cos(courseRad) * 0.2].map(km));
   const planScale = Math.min((plotW - 12) / (eHigh - eLow), (PLAN_H - 16) / (nHigh - nLow));
   // centred in whichever direction has room to spare
   const planLeft = GUTTER + 6 + (plotW - 12 - (eHigh - eLow) * planScale) / 2;
@@ -146,40 +140,51 @@ export function readbackModel({ flight, vocabulary, candidates, layers, cursorS,
   const planPoints = (line: { eM: number[]; nM: number[] }, indices?: number[]) =>
     (indices ?? line.eM.map((_, index) => index)).map((index) => `${px(line.eM[index])},${py(line.nM[index])}`).join(" ");
   /** Rows first..last (inclusive). */
-  const rows = (first: number, lastRow: number) => Array.from({ length: lastRow - first + 1 }, (_, offset) => first + offset);
-  const at = (row: number) => ({ x: px(signals.eM[row]), y: py(signals.nM[row]) });
+  const rows = (first: number, last: number) => Array.from({ length: last - first + 1 }, (_, offset) => first + offset);
+  /** Where the judged track was at flight time ``t`` (its row at or before it). */
+  const indexAt = (tS: number[], t: number) => Math.min(Math.max(Math.floor((t - tS[0]) / stepS + 1e-9), 0), tS.length - 1);
+
+  // a heading band's centre, on the branch of the judged track where the band begins
+  const bandCentre = (band: TrainingHeadingBand) =>
+    nearestBranch(band.targetDeg, judgedTrack.trackPlotDeg[Math.min(band.firstRow, judgedTrack.trackPlotDeg.length - 1)]);
 
   // ── each chart's y, over what it draws ──
   const yOf = (low: number, high: number) => (value: number) => PLOT_TOP + ((high - value) / (high - low)) * PLOT_H;
+  const bands = envelopes === null || !layers.headingBands ? [] : envelopes.heading.filter(judged);
   const [hLow, hHigh] = extent([
-    ...signals.smoothed.trackDeg, ...signals.raw.trackDeg,
-    ...(layers.headingBands ? envelopes.heading.flatMap((item) => (judged(item) ? item.bandDeg : [])) : []),
-    ...(layers.corridor ? [...envelopes.approach.courseBandDeg, ...(capture ? [capture.courseOnTrackDeg] : [])] : []),
-    ...(flownTrack?.trackDeg ?? []), ...(judgedTrack ?? []),
-    ...(layers.headingBands ? flownBands.flatMap((band) => (judged(band) ? band.bandDeg : [])) : []),
-    ...(live?.track.trackDeg ?? []), ...(liveJudged ?? []),
-    ...(layers.headingBands && liveBand && judged(liveBand) ? liveBand.bandDeg : []),
+    ...observed.trackPlotDeg, ...(flown?.trackPlotDeg ?? []), ...(live?.track.trackPlotDeg ?? []),
+    ...bands.flatMap((band) => [bandCentre(band) - band.toleranceDeg, bandCentre(band) + band.toleranceDeg]),
   ]);
+  const tubes = envelopes === null || !layers.vertical ? [] : envelopes.altitude;
   const [aLow, aHigh] = extent([
-    ...signals.smoothed.altitudeM, ...signals.raw.altitudeM, designated.elevationM,
-    ...(layers.vertical ? envelopes.altitude.flatMap((tube) => [...tube.lowerM, ...tube.upperM]) : []),
-    ...(flownTrack?.altitudeM ?? []), ...(live?.track.altitudeM ?? []),
+    ...observed.altitudeMslM, ...(flown?.altitudeMslM ?? []), ...(live?.track.altitudeMslM ?? []), designated.elevationM,
+    ...tubes.flatMap((tube) => [...tube.lowMslM, ...tube.highMslM]),
   ]);
+  const spans = envelopes === null || !layers.vertical ? [] : envelopes.speed;
   const [sLow, sHigh] = extent([
-    ...signals.smoothed.groundSpeedMps, ...signals.raw.groundSpeedMps,
-    ...(layers.vertical ? envelopes.speed.flatMap((span) =>
-      [...(span.bandMps ?? []), ...(span.transitionLowerMps ?? []), ...(span.transitionUpperMps ?? [])]) : []),
-    ...(flownTrack?.groundSpeedMps ?? []), ...(live?.track.groundSpeedMps ?? []),
+    ...observed.groundSpeedMps, ...(flown?.groundSpeedMps ?? []), ...(live?.track.groundSpeedMps ?? []),
+    ...spans.flatMap((span) => [span.targetMps - span.toleranceMps, span.targetMps + span.toleranceMps]),
   ]);
 
+  /** The words of ``columns`` the closed-loop reading added, at their flight time. */
+  const corrections = (...columns: TrainingColumn[]) => reading.events
+    .filter((event) => event.correction && columns.includes(event.says.column))
+    .map((event) => ({ event, atS: rowTimeS(event.row) }));
+  /** The unspecified-speed runs: where the speed word leaves the speed to the pilot. */
+  const unspecifiedRuns = sentenceColumnRuns(reading, "speed").filter((run) => run.event.says.column === "speed" && run.event.says.speedMps === null);
+
   return {
-    flight, vocabulary, candidates, layers, cursorS, cursorOn, column, last, cursorRow, designated, label, inForce,
-    flown, flownTrack, judgedTrack, flownBands,
-    live, liveColour, liveRun, liveTail, liveBand, liveJudged, liveOutside,
-    focus, focused, approachFocused, recede, focusRows, capture, captureOk,
-    width, plotW, endS, xTime, timeAtX, edge, rowX, flownEdge, distanceEnd, xDistance, distanceAtX, rowXDistance,
-    px, py, planPoints, rows, at,
+    selection, flight, vocabulary, candidates, layers, reading, cursorS, cursorRow, column, designated, stepS,
+    observed, flown, judged: judgedTrack, envelopes, closed, decision,
+    live, liveColour, focus, focusIndex, focused, recede, focusSpanS, focusPoints, corrections, unspecifiedRuns,
+    width, plotW, endS, xTime, timeAtX, envelopeTimeS, rowTimeS,
+    px, py, planPoints, rows, indexAt, runwayLine, reach, bandCentre, bands, tubes, spans,
     yHeading: yOf(hLow, hHigh), yAltitude: yOf(aLow, aHigh), ySpeed: yOf(sLow, sHigh),
+    /** The word of ``name`` in force at the cursor, short. */
+    label: (name: TrainingColumn) => {
+      const run = sentenceWordAt(reading, name, cursorRow);
+      return run === null ? "—" : trainingBandLabel(run.event.says);
+    },
   };
 }
 
@@ -190,9 +195,4 @@ const FRACTIONS = [0, 0.25, 0.5, 0.75, 1];
 /** The time axis's ticks: seconds at the quarters. */
 export function timeTicks(m: ReadbackModel): Array<{ x: number; text: string }> {
   return FRACTIONS.map((fraction) => ({ x: m.xTime(fraction * m.endS), text: formatSeconds(Math.round(fraction * m.endS)) }));
-}
-
-/** The distance axis's ticks: kilometres at the quarters. */
-export function distanceTicks(m: ReadbackModel): Array<{ x: number; text: string }> {
-  return FRACTIONS.map((fraction) => ({ x: m.xDistance(fraction * m.distanceEnd), text: ((fraction * m.distanceEnd) / 1000).toFixed(1) }));
 }

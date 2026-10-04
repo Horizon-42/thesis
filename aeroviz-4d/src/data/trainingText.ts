@@ -2,108 +2,82 @@
  * trainingText.ts
  * ---------------
  * The Training views' words for what the files hold — one spelling of each, shared by the panel, the sentence bar (and
- * its live-executor line), the read-back and prior windows and the 3D labels, so the replay and the live executor never
- * word one judge's outcome two ways.
+ * its live-executor line), the read-back window and the 3D labels, so the export and the live executor never word one
+ * judge's outcome two ways.
  */
 
+import type { TrainingAutopilotSegment } from "./trainingAutopilot";
 import {
-  countedTwice,
-  replayVerdict,
-  trainingModelLabel,
-  trainingRunName,
-  type TrainingCrossing,
-  type TrainingExecutorFlown,
-  type TrainingExecutorCheck,
-  type TrainingGenerationModel,
-  type TrainingSentenceOutcome,
-} from "./trainingOverlays";
-import type { TrainingAutopilotStatus } from "./trainingAutopilot";
-import {
-  trainingWordLabel, TRAINING_COLUMNS, type TrainingCandidate, type TrainingColumn, type TrainingVocabulary,
-} from "./trainingSample";
+  TRAINING_AUTOPILOT_SEGMENT_END,
+  type TrainingAutopilotView,
+} from "./trainingAutopilot";
+import type { TrainingColumn, TrainingCrossing, TrainingDecision, TrainingOutcome, TrainingReplay } from "./trainingSample";
 
-/** The six columns as the views name them — the angle column as "Descent": its classes are descent angles (and level,
- *  and the climb). */
+/** The five columns as the views name them. */
 export const TRAINING_COLUMN_LABEL: Record<TrainingColumn, string> = {
-  runway: "Runway", approach: "Approach", heading: "Heading", altitude: "Altitude", angle: "Descent", speed: "Speed",
+  runway: "Runway", heading: "Heading", altitude: "Altitude", angle: "Angle", speed: "Speed",
 };
 
-/** How the executor's flight ended (the judge's outcomes, a model's sentence stopped below the glidepath, and in a window
- *  one the judge ended for a loss of separation), in words. */
-export const TRAINING_OUTCOME_TEXT: Record<TrainingSentenceOutcome, string> = {
-  landed: "landed",
+/** What each column's words say, for the legend and the notes. */
+export const TRAINING_COLUMN_MEANING: Record<TrainingColumn, string> = {
+  runway: "the runway the flight is cleared to land on, or go-around",
+  heading: "the track to fly, relative to the course of the runway in force (+ to the right)",
+  altitude: "a level above the airport elevation E to hold, or \"no level-off\"",
+  angle: "the descent angle to fly (level, a descent class, or a climb)",
+  speed: "the ground speed to fly, or left to the pilot",
+};
+
+/** How the executor's flight ended (the judge's outcomes, `autopilot/judge.py`), in words. */
+export const TRAINING_OUTCOME_TEXT: Record<TrainingOutcome, string> = {
+  landed: "landed: crossed the threshold lined up, inside the runway limit, after a decision-altitude check that passed",
+  unstable_at_minimums: "crossed the threshold on the runway, but unstable at minimums: the decision-altitude check failed or had no point",
   crossed_too_high: "crossed the threshold on the runway's centreline, too high to land",
   crossed_off_runway: "crossed the threshold wide of the runway",
   crossed_other_runway: "crossed another runway's threshold, lined up to land on it",
-  crossed_without_capture: "crossed the threshold without capturing the final",
   ground_contact: "reached the threshold's elevation before the threshold",
   timeout: "did not get there within its time limit",
   dynamics_failure: "left the dynamics (a non-finite state, no airspeed or a stall)",
-  below_glidepath: "sank below the glidepath's lower edge (the procedure's altitudes stop the sentence there)",
-  lost_separation: "lost separation from another aircraft it answers for (the window's judge ends it there; it flies on, silent)",
 };
 
-/** The same, as a short tag: the flight list, the 3D label. */
-export const TRAINING_OUTCOME_TAG: Record<TrainingSentenceOutcome, string> = {
+/** The same, as a short tag: the flight list, the bar's chip. */
+export const TRAINING_OUTCOME_TAG: Record<TrainingOutcome, string> = {
   landed: "landed",
+  unstable_at_minimums: "unstable at minimums",
   crossed_too_high: "too high",
   crossed_off_runway: "off the runway",
   crossed_other_runway: "other runway",
-  crossed_without_capture: "no capture",
   ground_contact: "ground contact",
   timeout: "timed out",
   dynamics_failure: "dynamics failure",
-  below_glidepath: "below glidepath",
-  lost_separation: "lost separation",
-};
-
-/** What went wrong in the executor's replay of a flight (`replayVerdict`), in the fewest words — "2 words out", "timed
- *  out · 1 word out", "track refused" — or null when it landed clean: the sentence bar's header says it only then (the
- *  user, 2026-09-28). The words out are the gate's count, as the flight list's "43/45" says them. */
-export function replayIssueText(flight: TrainingExecutorFlown): string | null {
-  const { kind, wordsOut, refused } = replayVerdict(flight);
-  if (kind === "clean") return null;
-  return [
-    ...(flight.outcome === "landed" ? [] : [TRAINING_OUTCOME_TAG[flight.outcome]]),
-    ...(refused ? ["track refused"] : []),
-    ...(wordsOut === 0 ? [] : [`${wordsOut} word${wordsOut === 1 ? "" : "s"} out`]),
-  ].join(" · ");
-}
-
-/** The words the replay flew outside their envelopes, named: "heading 095° at step 164" — the word the gate counts twice
- *  (`countedTwice`) says so when both its checks failed, so the names add up to the words out. */
-export function replayOutsideWords(
-  flight: TrainingExecutorFlown, vocabulary: TrainingVocabulary, candidates: TrainingCandidate[],
-): string[] {
-  return flight.words.filter((word) => word.status === "outside").map((word) => {
-    const column = TRAINING_COLUMNS[word.column];
-    const twice = countedTwice(word) && !word.checks[0].ok;
-    return `${column} ${trainingWordLabel(vocabulary, candidates, column, word.value)} at step ${word.row}` +
-      (twice ? " (counted twice: its band and the intercept)" : "");
-  });
-}
-
-/** The live executor's verdict on its word, as it is read first. */
-export const TRAINING_VERDICT_TEXT: Record<TrainingAutopilotStatus, string> = {
-  inside: "in envelope",
-  outside: "out of envelope",
-  "not judged": "not judged",
-  "no check": "no envelope",
 };
 
 export function checkMark(ok: boolean): string {
   return ok ? "✓" : "✗";
 }
 
-/** A judge's check: its name, its mark, and over rows how many were inside. */
-export function checkText(check: TrainingExecutorCheck): string {
-  return `${checkMark(check.ok)} ${check.name}${check.rows === null ? "" : ` (${check.inside}/${check.rows} rows)`}`;
-}
-
 /** Where the threshold was passed: "1.5 m right of the centreline, 20.8 m above the threshold". */
 export function crossingText(crossing: TrainingCrossing): string {
   return `${Math.abs(crossing.crossM).toFixed(1)} m ${crossing.crossM >= 0 ? "right" : "left"} of the centreline, ` +
     `${crossing.heightM.toFixed(1)} m above the threshold`;
+}
+
+/** The decision-altitude check in one line: its verdict, and each of the two values it is made of with its mark. */
+export function decisionText(decision: TrainingDecision): string {
+  return `DA check ${decision.passed ? "passed" : "failed"} · ` +
+    `${Math.abs(decision.rightM).toFixed(1)} m ${decision.rightM >= 0 ? "right" : "left"} of the centreline ` +
+    `(cone half width ${decision.coneHalfWidthM.toFixed(1)} m) ${checkMark(decision.lateralOk)} · ` +
+    `${Math.abs(decision.aboveGlidepathM).toFixed(1)} m ${decision.aboveGlidepathM >= 0 ? "above" : "below"} the glidepath ` +
+    `${checkMark(decision.verticalOk)}`;
+}
+
+/** A flown flight's end as one line: its outcome, the crossing and the DA check. */
+export function replayText(replay: TrainingReplay): string {
+  const crossing = replay.crossing;
+  return [
+    TRAINING_OUTCOME_TEXT[replay.outcome],
+    crossing === null ? "no threshold crossing" : crossingText(crossing),
+    crossing === null ? null : crossing.decision === null ? "no DA check (none was made)" : decisionText(crossing.decision),
+  ].filter((part) => part !== null).join(" · ");
 }
 
 /** A sha as the views show it: its first 12 characters. */
@@ -119,15 +93,19 @@ export function formatElapsed(seconds: number): string {
   return Math.round(seconds * 100) < 1000 ? `${seconds.toFixed(2)} s` : `${seconds.toFixed(1)} s`;
 }
 
-/** How a model was trained: on data alone, or post-trained from which model by which method. */
-export function trainingModelOrigin(model: TrainingGenerationModel): string {
-  const { fineTuning } = model;
-  return fineTuning === null ? "trained on data alone"
-    : `post-trained from ${trainingModelLabel({ name: fineTuning.fromName, round: fineTuning.fromRound })} by ${fineTuning.schema}`;
+/** How the live segment ended, in words. */
+export function segmentEndText(segment: TrainingAutopilotSegment): string {
+  const { end } = segment.segment;
+  if (end === TRAINING_AUTOPILOT_SEGMENT_END) {
+    return `reached the point where the next ${segment.segment.column} word is said`;
+  }
+  const crossing = segment.crossing;
+  return `${TRAINING_OUTCOME_TEXT[end]}${crossing === null ? "" : ` — ${crossingText(crossing)}`}`;
 }
 
-/** A model named in full: its name and round, the run its rounds come from and the model it started from — a tab's,
- *  a round's, a table row's tooltip. */
-export function trainingModelText(model: TrainingGenerationModel): string {
-  return `${trainingModelLabel(model)} (${trainingRunName(model.run)}, ${trainingModelOrigin(model)})`;
+/** The live answer, one short phrase for the bar. */
+export function autopilotStatusText(view: Extract<TrainingAutopilotView, { status: "ready" }>): string {
+  const { segment } = view;
+  const { end } = segment.segment;
+  return end === TRAINING_AUTOPILOT_SEGMENT_END ? "flown to the next word" : TRAINING_OUTCOME_TAG[end];
 }

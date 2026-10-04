@@ -675,8 +675,8 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   backdrop-filter: none;
 }
 
-/* Training task (docs/36-2026-09-20-training-module.zh.md): the panel, the sentence bar, the read-back and prior
-   windows, the 3D legend. The panel renders flat inside the dock card, like ControlPanel above. */
+/* Training task (docs/36-2026-09-20-training-module.zh.md): the panel, the sentence bar, the read-back
+   window, the 3D legend. The panel renders flat inside the dock card, like ControlPanel above. */
 .training-panel {
   /* it fills the dock (the list takes what is left) and never shrinks below its content: the dock scrolls instead */
   flex: 1 0 auto;
@@ -920,158 +920,8 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
 }
 
 /* A window set (multi-aircraft windows): the windows share the dock's leftover height with the window's aircraft. */
-.training-window-list {
-  min-height: 120px;
-}
-
-.training-window-list button {
-  grid-template-columns: auto 1fr auto;
-}
-
-.training-window-heading {
-  margin: 6px 0 2px;
-  font-size: 11px;
-  font-weight: 600;
-  color: rgba(224, 230, 240, 0.75);
-}
-
-.training-window-aircraft {
-  list-style: none;
-  margin: 0;
-  padding: 0 2px 0 0;
-  max-height: 180px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.training-window-aircraft button {
-  width: 100%;
-  display: grid;
-  grid-template-columns: auto auto 1fr;
-  gap: 6px;
-  align-items: baseline;
-  padding: 2px 6px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: rgba(23, 32, 58, 0.55);
-  color: #c8d8ec;
-  cursor: pointer;
-  font-size: 11.5px;
-  text-align: left;
-}
-
-.training-window-aircraft button:hover {
-  background: #2a3550;
-}
-
-.training-window-aircraft button.active {
-  border-color: #4a8fe8;
-  background: #1a5fb4;
-  color: #fff;
-}
-
-.training-window-fate {
-  justify-self: end;
-  font-size: 10.5px;
-}
 
 /* the aircraft the model does not command: listed, not clickable */
-.training-window-other {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px;
-  padding: 1px 7px;
-  font-size: 10.5px;
-}
-
-/* The window's clock above the sentence bar (TrainingTrafficStrip). */
-.training-traffic-strip {
-  margin: 0 0 4px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid rgba(103, 232, 249, 0.14);
-}
-
-.training-traffic-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  font-size: 11px;
-  color: rgba(224, 230, 240, 0.8);
-}
-
-.training-traffic-play {
-  display: inline-flex;
-  gap: 4px;
-}
-
-.training-traffic-play button,
-.training-traffic-play select {
-  padding: 0 6px;
-  border: 1px solid rgba(103, 232, 249, 0.3);
-  border-radius: 4px;
-  background: rgba(23, 32, 58, 0.8);
-  color: #e0e6f0;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.training-traffic-read {
-  font-weight: 600;
-}
-
-.training-traffic-alert {
-  font-weight: 600;
-}
-
-.training-traffic-strip svg {
-  display: block;
-  cursor: crosshair;
-  touch-action: none;
-}
-
-.training-traffic-callsign,
-.training-traffic-others {
-  font-size: 9.5px;
-  fill: rgba(224, 230, 240, 0.7);
-}
-
-.training-traffic-row {
-  cursor: pointer;
-}
-
-.training-traffic-row.active .training-traffic-callsign {
-  fill: #fff;
-  font-weight: 600;
-}
-
-.training-traffic-row .training-traffic-landing {
-  font-size: 9.5px;
-  fill: #e2e8f0;
-}
-
-/* where the judge ended an aircraft: large, in the failure red its `fill` gives, outlined to read over its bar */
-.training-traffic-ended {
-  font-size: 14px;
-  font-weight: 700;
-  stroke: #000;
-  stroke-width: 2px;
-  paint-order: stroke;
-}
-
-.training-traffic-bracket {
-  fill: rgba(250, 204, 21, 0.18);
-  stroke: rgba(250, 204, 21, 0.7);
-  stroke-width: 1;
-}
-
-/* The chosen model's samples of a flight: one mark each, filled where the flight landed. */
-.training-flight-samples {
-  font-size: 10px;
-  letter-spacing: 1px;
-}
 
 /* The executor's outcome under each flight: a line of its own, in its verdict's colour. */
 .training-flight-executor {
@@ -1080,38 +930,53 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
-/* An overlay's switch, what it is, and why it is missing or unreadable. */
-.training-overlay-switch {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: 3px;
-}
-
-.training-overlay-switch select {
-  align-self: flex-start;
-  background: #17203a;
-  border: 1px solid #2f3f63;
-  border-radius: 4px;
-  color: #e0e6f0;
+/* The flown flight of the selected flight at Δ: outcome, threshold crossing and the DA check's values, a few lines. */
+.training-flown-block {
+  margin: 6px 0;
   font-size: 11px;
+  line-height: 1.35;
 }
 
-.training-overlay-note {
-  margin: 0 0 0 20px;
-  font-size: 10.5px;
-  line-height: 1.4;
-  color: rgba(224, 230, 240, 0.55);
-  overflow-wrap: anywhere;
+.training-flown-block > div {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 6px;
 }
 
-.training-overlay-note code {
-  font-size: 10px;
-  user-select: text;
+.training-flown-block dt {
+  color: var(--text-muted, #94a3b8);
 }
 
-.training-overlay-note summary {
-  cursor: pointer;
+.training-flown-block > div:first-child dt {
+  grid-column: 1 / -1;
+  font-weight: 600;
+  color: inherit;
+}
+
+.training-flown-block > div:first-child {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.training-flown-block dd {
+  margin: 0;
+}
+
+/* The details page's table of every flight at every Δ. */
+.training-flown-table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.training-flown-table th,
+.training-flown-table td {
+  padding: 3px 10px 3px 0;
+  text-align: left;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.training-flown-table thead th {
+  font-weight: 600;
 }
 
 /* The sentence bar's Fly button: the live executor's start, in its own blue. */
@@ -1350,11 +1215,9 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   border-radius: 2px;
 }
 
-/* the readings of each switch and overlay, and every field every model shares: a name column and its text */
+/* the readings of each switch, and every field of the vocabulary: a name column and its text */
 .training-details-main .training-notes-list,
-.training-details-main .training-vocabulary,
-.training-details-facts,
-.training-details-terms {
+.training-details-main .training-vocabulary {
   display: grid;
   grid-template-columns: minmax(140px, max-content) minmax(0, 1fr);
   gap: 0;
@@ -1365,16 +1228,12 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
 }
 
 .training-details-main .training-notes-list > div,
-.training-details-main .training-vocabulary > div,
-.training-details-facts > div,
-.training-details-terms > div {
+.training-details-main .training-vocabulary > div {
   display: contents;
 }
 
 .training-details-main .training-notes-list dt,
-.training-details-main .training-vocabulary dt,
-.training-details-facts dt,
-.training-details-terms dt {
+.training-details-main .training-vocabulary dt {
   display: block;
   padding: 7px 16px 7px 0;
   border-bottom: 1px solid #1c2640;
@@ -1383,9 +1242,7 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
 }
 
 .training-details-main .training-notes-list dd,
-.training-details-main .training-vocabulary dd,
-.training-details-facts dd,
-.training-details-terms dd {
+.training-details-main .training-vocabulary dd {
   margin: 0;
   padding: 7px 0;
   border-bottom: 1px solid #1c2640;
@@ -1399,151 +1256,12 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   color: #e0e6f0;
 }
 
-.training-details-main .training-vocabulary dd,
-.training-details-facts dd {
+.training-details-main .training-vocabulary dd {
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;
   font-size: 12px;
 }
 
 /* ── The readouts' tables (on the details page) ── */
-.training-results-table {
-  width: auto;
-  min-width: min(560px, 100%);
-  margin: 0 0 20px;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 12.5px;
-  font-variant-numeric: tabular-nums;
-}
-
-.training-results-table caption {
-  caption-side: top;
-  padding: 0 0 6px;
-  text-align: left;
-  font-size: 13px;
-  color: #e0e6f0;
-}
-
-.training-results-caption-note {
-  margin-left: 10px;
-  font-size: 11.5px;
-  color: rgba(224, 230, 240, 0.55);
-}
-
-.training-results-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding: 7px 14px;
-  border-bottom: 1px solid #34456b;
-  background: #111a2b;
-  color: rgba(224, 230, 240, 0.65);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  text-align: right;
-  white-space: nowrap;
-}
-
-.training-results-table thead th:first-child {
-  text-align: left;
-  border-top-left-radius: 6px;
-}
-
-.training-results-table thead th:last-child {
-  border-top-right-radius: 6px;
-}
-
-.training-results-table td,
-.training-results-table tbody th {
-  padding: 6px 14px;
-  border-bottom: 1px solid #1c2640;
-  text-align: right;
-  white-space: nowrap;
-}
-
-.training-results-table tbody th {
-  text-align: left;
-  font-weight: 500;
-  color: #e0e6f0;
-}
-
-.training-results-table tbody tr:hover td,
-.training-results-table tbody tr:hover th[scope="row"] {
-  background: rgba(103, 232, 249, 0.05);
-}
-
-.training-results-total td,
-.training-results-total th {
-  font-weight: 600;
-  background: rgba(126, 184, 247, 0.06);
-}
-
-.training-results-best {
-  font-weight: 700;
-  color: #fff;
-}
-
-.training-results-mark {
-  display: inline-block;
-  width: 1.2em;
-  margin-left: 4px;
-  text-align: center;
-}
-
-.training-results-mark.is-pass {
-  color: #4ade80;
-}
-
-.training-results-mark.is-fail {
-  color: #f87171;
-}
-
-.training-results-count {
-  margin-left: 2px;
-  font-size: 11px;
-  color: rgba(224, 230, 240, 0.45);
-}
-
-.training-results-empty {
-  color: rgba(224, 230, 240, 0.35);
-}
-
-/* the models' table: a model's rows grouped under its name, a rule between models */
-.training-results-models tbody th[scope="rowgroup"] {
-  vertical-align: top;
-  text-align: left;
-  font-weight: 600;
-  border-bottom: 1px solid #2a3858;
-}
-
-.training-results-models tbody tr:last-child td {
-  border-bottom-color: #2a3858;
-}
-
-.training-results-table .training-results-where {
-  text-align: left;
-  color: rgba(224, 230, 240, 0.7);
-}
-
-/* a table of words, not numbers: left-aligned and allowed to wrap */
-.training-results-text td {
-  text-align: left;
-  white-space: normal;
-}
-
-.training-results-text thead th {
-  text-align: left;
-}
-
-.training-results-note {
-  max-width: 78ch;
-  margin: -8px 0 16px;
-  font-size: 12px;
-  line-height: 1.55;
-  color: rgba(224, 230, 240, 0.6);
-}
 
 /* The bar spans the whole width at the bottom edge: the sentence is read left to
    right against real time, so a narrow dock would compress the long gaps that are
@@ -1726,14 +1444,12 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
 }
 
 /* The sentence read (the bar's tabs) and a model's samples: a segmented control each. */
-.training-source-tabs,
-.training-sample-buttons {
+.training-source-tabs {
   display: inline-flex;
   align-self: center;
 }
 
-.training-source-tab,
-.training-sample-button {
+.training-source-tab {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1746,24 +1462,20 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   font-size: 11px;
 }
 
-.training-source-tab:first-child,
-.training-sample-button:first-child {
+.training-source-tab:first-child {
   margin-left: 0;
   border-radius: 4px 0 0 4px;
 }
 
-.training-source-tab:last-child,
-.training-sample-button:last-child {
+.training-source-tab:last-child {
   border-radius: 0 4px 4px 0;
 }
 
-.training-source-tab:only-child,
-.training-sample-button:only-child {
+.training-source-tab:only-child {
   border-radius: 4px;
 }
 
-.training-source-tab:hover,
-.training-sample-button:hover {
+.training-source-tab:hover {
   background: #2a3550;
 }
 
@@ -1776,44 +1488,9 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
 }
 
 /* a model's rounds, beside the tabs when it is published at several */
-.training-round-tabs {
-  margin-left: 4px;
-}
 
-/* Where the models' sentences start: a segmented control before the tabs of the models flown from there. */
-.training-start-tabs {
-  margin-right: 4px;
-}
-
-.training-round-tabs .training-source-tab {
-  padding: 2px 7px;
-  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
-}
-
-.training-source-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.training-sample-button {
-  padding: 2px 7px;
-  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
-  color: #fca5a5;
-}
-
-.training-sample-button.landed {
-  color: #e0e6f0;
-}
-
-.training-sample-button[aria-pressed="true"] {
-  position: relative;
-  font-weight: 600;
-}
-
-/* the span a model only observed, and the truth's ticks under its rows, are read, not clicked */
-.training-sentence-observed,
-.training-sentence-truth-tick {
+/* the span only the observed flight supplies is read, not clicked */
+.training-sentence-observed {
   pointer-events: none;
 }
 
@@ -1838,7 +1515,7 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   background: #3a4f78;
 }
 
-/* The Training windows (the read-back check, the prior). Portalled into document.body (AV7), so they are positioned
+/* The Training window (the read-back check). Portalled into document.body (AV7), so they are positioned
    against the viewport rather than against `.flight-ops-panel`'s backdrop-filtered box. NOT modal: the sentence bar
    and the flight list stay usable behind, because reading one against the other is the point. */
 .training-readback-backdrop {
@@ -1964,40 +1641,6 @@ body.workbench-training-active:not(.workbench-presentation-active) .cesium-viewe
   line-height: 1.45;
   color: rgba(224, 230, 240, 0.7);
   cursor: default;
-}
-
-.training-slot {
-  opacity: 0.55;
-  font-style: italic;
-}
-
-/* The prior's window: the table at the cursor above the strips. */
-.training-prior-table {
-  width: 100%;
-  margin: 8px 0 6px;
-  border-collapse: collapse;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.training-prior-table th,
-.training-prior-table td {
-  padding: 2px 6px;
-  text-align: left;
-  border-bottom: 1px solid rgba(42, 53, 82, 0.6);
-}
-
-.training-prior-table thead th {
-  font-weight: 500;
-  color: rgba(224, 230, 240, 0.6);
-}
-
-.training-prior-table tbody tr {
-  cursor: pointer;
-}
-
-.training-prior-muted {
-  color: rgba(224, 230, 240, 0.5);
 }
 
 /* The live executor's line: short, and never broken — the header wraps around it whole. */

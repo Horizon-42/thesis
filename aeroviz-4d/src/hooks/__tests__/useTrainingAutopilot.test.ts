@@ -1,165 +1,119 @@
 /**
- * useTrainingAutopilot: a PICKED word (the Fly button, or a band clicked) of the flight on screen is
- * flown by the backend when it is picked — once per pick and attempt, never for the cursor — and only the current pick's
- * answer is ever published — a model's word asked with its sample's sentence, or not at all when that sentence is not
- * published. (That a pick is reset with the flight is `useTrainingAutopilotScope.test.tsx`'s.)
+ * useTrainingAutopilot: a PICKED word (the Fly button, or a band clicked) of the flight on screen's closed-loop sentence is
+ * flown by the backend when it is picked — once per pick and attempt, never for the cursor — the request names the page and
+ * its number, and only the current pick's answer is ever published; an answer for another word is published as a failure.
+ * (That a pick is reset with the flight and its Δ is `useTrainingAutopilotScope.test.tsx`'s.)
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 
-import { parseTrainingSample, trainingSelectionOf, type TrainingSample } from "../../data/trainingSample";
 import { nextPick } from "../../data/trainingAutopilot";
-import { VECTORED_KEY, mockSample } from "../../data/__tests__/trainingSample.fixture";
-import { mockAutopilotAnswer, mockAutopilotRequest } from "../../data/__tests__/trainingAutopilot.fixture";
-import { AUGSTART_BASE_ID, BASE_MODEL_ID, MOCK_MOVE, mockGenerationViews } from "../../data/__tests__/trainingOverlays.fixture";
+import { stageAAnswers, stageASelection } from "../../data/__tests__/stageA";
 
-const { appState, cursor, setTrainingAutopilot } = vi.hoisted(() => ({
-  appState: { trainingSelection: null as unknown, trainingPick: null as any, trainingGenerations: [] as unknown[] },
-  cursor: { trainingCursorS: 0 },
+const { appState, setTrainingAutopilot } = vi.hoisted(() => ({
+  appState: { trainingSelection: null as unknown, trainingPick: null as any },
   setTrainingAutopilot: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
   useApp: () => ({ ...appState, setTrainingAutopilot }),
-  useTrainingCursor: () => ({ trainingCursorS: cursor.trainingCursorS, setTrainingCursorS: () => undefined }),
 }));
 
 import useTrainingAutopilot from "../useTrainingAutopilot";
 
-function sample(): TrainingSample {
-  const parsed = parseTrainingSample(mockSample());
-  if (!parsed.ok) throw new Error(parsed.problem);
-  return parsed.value;
-}
-
 const BACKEND = "http://backend.test";
 
-function answering(set: TrainingSample) {
+/** The backend: answers a request for heading row 52 or 126 of the fixture's Δ = 2 s sentence with the Python-written answer. */
+function backend(wrong?: (answer: Record<string, any>) => void) {
   return async (_url: string, init: RequestInit) => {
     const request = JSON.parse(init.body as string);
-    return { ok: true, status: 200, text: async () => JSON.stringify(mockAutopilotAnswer(set, request)) };
+    const answer = stageAAnswers().find((item) => item.segment.row === request.row);
+    if (!answer) return { ok: false, status: 400, text: async () => JSON.stringify({ ok: false, error: "no such word" }) };
+    wrong?.(answer);
+    return { ok: true, status: 200, text: async () => JSON.stringify(answer) };
   };
 }
 
 describe("useTrainingAutopilot", () => {
-  let set: TrainingSample;
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    set = sample();
-    appState.trainingSelection = trainingSelectionOf(set, set.flights.find((item) => item.flightKey === VECTORED_KEY)!);
+    appState.trainingSelection = stageASelection();
     appState.trainingPick = null;
-    appState.trainingGenerations = [];
-    cursor.trainingCursorS = 0;
-    setTrainingAutopilot.mockClear();
-    fetchMock = vi.fn(answering(set));
+    setTrainingAutopilot.mockReset();
+    fetchMock = vi.fn(backend());
     vi.stubGlobal("fetch", fetchMock);
   });
 
-  afterEach(() => vi.unstubAllGlobals());
-
-  const last = () => setTrainingAutopilot.mock.calls[setTrainingAutopilot.mock.calls.length - 1][0];
-
-  it("asks for nothing until a word is picked, whatever the cursor does", () => {
-    const { rerender } = renderHook(() => useTrainingAutopilot(BACKEND));
-    cursor.trainingCursorS = 22;
-    rerender();
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(last()).toBeNull();
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  it("flies the picked word's segment and publishes the answer", async () => {
-    appState.trainingPick = nextPick(null, null, "heading", 8);
+  it("asks nothing while no word is picked: the cursor never asks", () => {
     renderHook(() => useTrainingAutopilot(BACKEND));
-    expect(last()).toMatchObject({ status: "flying", request: mockAutopilotRequest(set, VECTORED_KEY, "heading", 8) });
-    await waitFor(() => expect(last().status).toBe("ready"));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(last().segment.segment).toMatchObject({ row: 8, endRow: 10, stopRow: 12 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(setTrainingAutopilot).toHaveBeenLastCalledWith(null);
   });
 
-  it("asks again for another pick and for a new attempt at the same one, never for the cursor moving", async () => {
-    appState.trainingPick = nextPick(null, null, "heading", 8);
+  it("flies a picked word on the backend and publishes flying, then the answer, on the flight's clock", async () => {
+    appState.trainingPick = nextPick(null, 2, "heading", 52);
+    renderHook(() => useTrainingAutopilot(BACKEND));
+    expect(setTrainingAutopilot).toHaveBeenCalledWith({
+      status: "flying",
+      request: { airport: "KXXX", setId: "fixture_set", flightKey: "KXXX:test_fixture", rowIntervalS: 2, column: "heading", row: 52 },
+    });
+    await waitFor(() => expect(setTrainingAutopilot).toHaveBeenLastCalledWith(expect.objectContaining({ status: "ready" })));
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${BACKEND}/autopilot/segment`);
+    const body = JSON.parse(init.body);
+    expect(body).toMatchObject({ airport: "KXXX", setId: "fixture_set", column: "heading", row: 52, rowIntervalS: 2 });
+    expect(typeof body.clientId).toBe("string");
+    expect(Number.isInteger(body.seq)).toBe(true);
+    const ready = setTrainingAutopilot.mock.calls[setTrainingAutopilot.mock.calls.length - 1][0];
+    expect(ready.segment.segment.end).toBe("segment_end");
+  });
+
+  it("flies the same word again on a new attempt, with a higher number", async () => {
+    appState.trainingPick = nextPick(null, 2, "heading", 52);
     const { rerender } = renderHook(() => useTrainingAutopilot(BACKEND));
-    await waitFor(() => expect(last().status).toBe("ready"));
-    cursor.trainingCursorS = 40;                         // hovering a chart
-    rerender();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    appState.trainingPick = nextPick(appState.trainingPick, null, "heading", 10);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    appState.trainingPick = nextPick(appState.trainingPick, 2, "heading", 52);
     rerender();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    appState.trainingPick = nextPick(appState.trainingPick, null, "heading", 10);   // "Fly again"
-    expect(appState.trainingPick.attempt).toBe(1);
-    rerender();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    await waitFor(() => expect(last().status).toBe("ready"));
-    expect(last().request.row).toBe(10);
+    const seqs = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body).seq);
+    expect(seqs[1]).toBeGreaterThan(seqs[0]);
   });
 
-  it("never publishes the answer to a pick that has moved on", async () => {
-    let answerFirst: () => void = () => undefined;
-    fetchMock.mockImplementationOnce((url: string, init: RequestInit) => new Promise((resolve) => {
-      answerFirst = () => resolve(answering(set)(url, init));
-    }));
-    appState.trainingPick = nextPick(null, null, "heading", 8);
-    const { rerender } = renderHook(() => useTrainingAutopilot(BACKEND));
-    appState.trainingPick = nextPick(appState.trainingPick, null, "heading", 10);
-    rerender();
-    await waitFor(() => expect(last().status).toBe("ready"));
-    expect(last().request.row).toBe(10);
-    await act(async () => answerFirst());
-    expect(setTrainingAutopilot.mock.calls.filter(([view]) => view?.status === "ready" && view.request.row === 8)).toHaveLength(0);
-  });
-
-  it("publishes the refusal when the backend refuses, or the answer is not the segment on screen", async () => {
-    appState.trainingPick = nextPick(null, null, "heading", 8);
-    fetchMock.mockImplementationOnce(async () => ({ ok: false, status: 400, text: async () => JSON.stringify({ ok: false, error: "no spec" }) }));
-    const { rerender } = renderHook(() => useTrainingAutopilot(BACKEND));
-    await waitFor(() => expect(last().status).toBe("failed"));
-    expect(last().problem).toMatch(/no spec/);
-    fetchMock.mockImplementationOnce(async (_url: string, init: RequestInit) => {
-      const answer = mockAutopilotAnswer(set, JSON.parse(init.body as string));
-      answer.segment.endRow = 11;
-      return { ok: true, status: 200, text: async () => JSON.stringify(answer) };
-    });
-    appState.trainingPick = nextPick(appState.trainingPick, null, "heading", 8);
-    rerender();
-    await waitFor(() => expect(last().problem ?? "").toMatch(/ends at step 11/));
-  });
-
-  it("asks for a model's word with its sample's sentence — and for nothing while that sentence is not published", async () => {
-    appState.trainingPick = nextPick(null, { overlayId: BASE_MODEL_ID, sample: 1 }, "heading", 12);
-    const { rerender } = renderHook(() => useTrainingAutopilot(BACKEND));
-    expect(fetchMock).not.toHaveBeenCalled();
-    appState.trainingGenerations = mockGenerationViews(set);
-    rerender();
-    await waitFor(() => expect(last()?.status).toBe("ready"));
-    const asked = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(asked.sentence).toMatchObject({ overlayId: BASE_MODEL_ID, sample: 1, firstRow: 4, rows: 76, augmentation: null });
-    expect(last().segment.source).toMatchObject({ kind: "model", sample: 1 });
-  });
-
-  it("asks for a word of a sample from an augmented start with the move its overlay's flight was flown from", async () => {
-    appState.trainingGenerations = mockGenerationViews(set, 0, () => undefined, [AUGSTART_BASE_ID]);
-    appState.trainingPick = nextPick(null, { overlayId: AUGSTART_BASE_ID, sample: 0 }, "heading", 12);
+  it("publishes the backend's refusal as a failure", async () => {
+    appState.trainingPick = nextPick(null, 2, "heading", 999);
     renderHook(() => useTrainingAutopilot(BACKEND));
-    await waitFor(() => expect(last()?.status).toBe("ready"));
-    const asked = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(asked.sentence).toMatchObject({ overlayId: AUGSTART_BASE_ID, augmentation: MOCK_MOVE });
-    expect(last().segment.source).toMatchObject({ kind: "model", augmentation: MOCK_MOVE });
+    await waitFor(() => expect(setTrainingAutopilot).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed" })));
+    const failed = setTrainingAutopilot.mock.calls[setTrainingAutopilot.mock.calls.length - 1][0];
+    expect(failed.problem).toBe("the backend refused (400): no such word");
   });
-});
 
-describe("nextPick", () => {
-  it("is a new attempt at the word picked already, and a first attempt at any other", () => {
-    const first = nextPick(null, null, "heading", 8);
-    expect(first).toEqual({ source: null, column: "heading", row: 8, attempt: 0 });
-    expect(nextPick(first, null, "heading", 8).attempt).toBe(1);
-    expect(nextPick(first, null, "heading", 10).attempt).toBe(0);
-    expect(nextPick(first, null, "speed", 8).attempt).toBe(0);
-    // the same step and column of another sentence is another word
-    const model = nextPick(first, { overlayId: BASE_MODEL_ID, sample: 0 }, "heading", 8);
-    expect(model).toEqual({ source: { overlayId: BASE_MODEL_ID, sample: 0 }, column: "heading", row: 8, attempt: 0 });
-    expect(nextPick(model, { overlayId: BASE_MODEL_ID, sample: 0 }, "heading", 8).attempt).toBe(1);
-    expect(nextPick(model, { overlayId: BASE_MODEL_ID, sample: 1 }, "heading", 8).attempt).toBe(0);
+  it("publishes an answer for another word than the one picked as a failure, by name", async () => {
+    fetchMock.mockImplementation(backend((answer) => { answer.segment.word += 1; }));
+    appState.trainingPick = nextPick(null, 2, "heading", 52);
+    renderHook(() => useTrainingAutopilot(BACKEND));
+    await waitFor(() => expect(setTrainingAutopilot).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed" })));
+    const failed = setTrainingAutopilot.mock.calls[setTrainingAutopilot.mock.calls.length - 1][0];
+    expect(failed.problem).toContain("another sentence of this flight");
+  });
+
+  it("publishes nothing for a pick that moved on while its request flew", async () => {
+    let release!: () => void;
+    fetchMock.mockImplementation((url: string, init: RequestInit) => new Promise((resolve) => {
+      release = () => resolve(backend()(url, init));
+    }));
+    appState.trainingPick = nextPick(null, 2, "heading", 52);
+    const { unmount } = renderHook(() => useTrainingAutopilot(BACKEND));
+    await act(async () => undefined);
+    const published = setTrainingAutopilot.mock.calls.length;
+    unmount();
+    release();
+    await act(async () => undefined);
+    // only the unmount's reset follows
+    expect(setTrainingAutopilot.mock.calls.slice(published).map(([view]) => view)).toEqual([null]);
   });
 });

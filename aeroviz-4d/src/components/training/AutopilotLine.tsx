@@ -1,12 +1,10 @@
 /**
  * AutopilotLine.tsx
  * -----------------
- * The live segment on a read-back chart: its RUN solid in the segment's colour, and its TAIL — past where the executor
- * heard the next word of the column, flown only because a heading word is judged to a lead after it — faded and dashed
- * (`autopilotRunAndTail`, the same split the 3D scene draws).
+ * The live segment on a read-back chart: its line in the segment's colour (blue, or the failure red when the flight was
+ * flown on to an outcome other than a landing, `autopilotColour`).
  */
 
-import { AUTOPILOT_TAIL_DASH, AUTOPILOT_TAIL_OPACITY } from "../../data/trainingAutopilot";
 import { Line } from "./chartKit";
 import type { ReadbackModel } from "./readbackModel";
 
@@ -14,15 +12,9 @@ import type { ReadbackModel } from "./readbackModel";
 export default function AutopilotLine({ m, x, y, title }: {
   m: ReadbackModel; x: (index: number) => number; y: (index: number) => number; title: string;
 }) {
+  const points = m.live!.track.tS.map((_, index) => index);
   return (
-    <>
-      <Line xs={m.liveRun.map(x)} ys={m.liveRun.map(y)} stroke={m.liveColour} width={1.8} className="training-readback-autopilot"
-        title={title} />
-      {m.liveTail.length >= 2 ? (
-        <Line xs={m.liveTail.map(x)} ys={m.liveTail.map(y)} stroke={m.liveColour} width={1.8} dash={AUTOPILOT_TAIL_DASH}
-          opacity={AUTOPILOT_TAIL_OPACITY} className="training-readback-autopilot-tail"
-          title={`past where it heard the next ${m.live!.segment.column} word: already flying that word, still judged for this one`} />
-      ) : null}
-    </>
+    <Line xs={points.map(x)} ys={points.map(y)} stroke={m.liveColour} width={1.8} className="training-readback-autopilot"
+      title={title} />
   );
 }

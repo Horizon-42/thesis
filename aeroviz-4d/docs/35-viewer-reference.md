@@ -187,6 +187,8 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 ### AV19 · Training 只读一份词表：`instruction-v3`
 
+（2026-10-04：本条所述已被 AV45 取代——阶段 A 的 Training 视图读 `instruction-v5`，只有五列、没有叠加层、模型句子、窗口集合和增强起点。）
+
 （2026-09-24 改写：词表从 `instruction-v2` 换成 `instruction-v3`，航向词按步读。）
 
 `src/data/trainingSample.ts` 钉住并逐项核对：样本格式名 `aeroviz-training-sample-v7`（`instruction-v3` 的形状：
@@ -263,6 +265,8 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 ### AV22 · Training 的三维与图表各用什么坐标
 
+（2026-10-04：本条所述已被 AV45 取代——阶段 A 的 Training 视图读 `instruction-v5`，只有五列、没有叠加层、模型句子、窗口集合和增强起点。）
+
 - 三维：航迹用 `signals.altitudeHaeM`（椭球高）；高度管子是一面墙，沿飞机自己的地面航迹，上下沿为导出的
   `lowerHaeM` / `upperHaeM`；航向词被判的那几行、截获转弯的那几行、走廊、候选跑道和延长中线**贴地画**——它们只关于
   平面，词没有给它们高度，飘在任何高度都是编出来的。文件里其余高度都是几何 MSL，椭球高只在这三处，由导出器
@@ -282,6 +286,8 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 ### AV23 · Training 的航向词：逐行判定的航向带
 
+（2026-10-04：本条所述已被 AV45 取代——阶段 A 的 Training 视图读 `instruction-v5`，只有五列、没有叠加层、模型句子、窗口集合和增强起点。）
+
 （2026-09-24 起，`instruction-v3`；原来的转弯区、平行四边形和保持漏斗随保持段读法一起删掉。）
 
 - **一个航向词不约束位置**：它说的是"提前量（4 s）之后航迹在这个 5° 格子里"，所以它的包络是**一段时间上的一条航向带**：
@@ -300,6 +306,8 @@ that divergence is a known open item (see the README's "Future Improvements").
   判定核对过；前端不重算。
 
 ### AV24 · Training 的叠加层：执行器的回放与先验的预测，画在一个集合的航班上
+
+（2026-10-04：本条所述已被 AV45 取代——阶段 A 的 Training 视图读 `instruction-v5`，只有五列、没有叠加层、模型句子、窗口集合和增强起点。）
 
 - **叠加层在集合旁边，不在集合里面。** 每个机场的 `training/overlays.json`（`aeroviz-training-overlays-v2`）列出叠加层：
   种类（`executor-replay` / `prior-prediction`）、画在哪个集合上（`base`）、文件位置
@@ -336,6 +344,8 @@ that divergence is a known open item (see the README's "Future Improvements").
   教师强制的读法**：每一步都看到真值句子在它之前的词，不是先验自己说出的句子。
 
 ### AV27 · Training 模块的代码结构（2026-09-25 整模块审查后）
+
+（2026-10-04：本条所述已被 AV45 取代——阶段 A 的 Training 视图读 `instruction-v5`，只有五列、没有叠加层、模型句子、窗口集合和增强起点。）
 
 - **一个读取器**（`src/data/trainingReader.ts`：`Reader`、`Refusal`、`attempt`、`Parsed`、清单的骨架 `parseManifest`）读三种
   文件：集合与样本（`trainingSample.ts`）、叠加层（`trainingOverlays.ts`）、实时执行器的答复（`trainingAutopilot.ts`）。拒读
@@ -399,6 +409,8 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 ### AV31 · Training 读模型自己说的句子：`prior-generation` 叠加层（2026-09-26）
 
+（2026-10-04：本条所述已被 AV45 取代——阶段 A 的 Training 视图读 `instruction-v5`，只有五列、没有叠加层、模型句子、窗口集合和增强起点。）
+
 - 导出：`python run_ts.py prior_generation_training_export`（ts R13）——先验说、执行器飞，和正式自由生成读数同一条路径
   （`prior_free_generation.speak_and_fly`）；每架航班 `--samples` 个样本；只飞自己机型有动力学的航班。文件
   `training/<叠加层 id>/generation.json`，格式 `aeroviz-training-generation-v4`（Python `SCHEMA` 与 `TRAINING_GENERATION_SCHEMA`
@@ -425,6 +437,8 @@ that divergence is a known open item (see the README's "Future Improvements").
   左栏只留当前集合的模型下载，读不了的有 Retry（`useGenerationOverlays`）。
 
 ### AV32 · 模型按名字认：base / landing / augmented 加轮次，句子条上可以在各轮之间切换（2026-09-26）
+
+（2026-10-04：本条所述已被 AV45 取代——阶段 A 的 Training 视图读 `instruction-v5`，只有五列、没有叠加层、模型句子、窗口集合和增强起点。）
 
 - 用户 2026-09-26：Training 里只能在 base 和"后训练"之间切换，多轮后训练的各个模型分不开。先验的模型名字是用户定的
   （后训练设计开头的表）：**base**（只用数据训练）、**landing**（base 按落地奖励后训练，第一阶段）、**augmented**（landing
@@ -491,6 +505,8 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 ### AV35 · 增强起点上的模型句子：`prior-generation-augmented` 叠加层（2026-09-27）
 
+（2026-10-04：本条所述已被 AV45 取代——阶段 A 的 Training 视图读 `instruction-v5`，只有五列、没有叠加层、模型句子、窗口集合和增强起点。）
+
 - 用户（2026-09-27）：前端 40 架都是真实 val 航班，想看模型从第二阶段后训练用的**增强起点**怎么飞。导出器
   `prior_generation_training_export --augment-seed 1337`（ts R13）写另一种叠加层：种类 `prior-generation-augmented`，格式
   `aeroviz-training-augmented-generation-v2`（与集合的绑定同 AV24，增强后的第 0–7 行也核对高度基准）。每架航班多 `augmentDraws`、`augmentation`（转角、抬高、速度倍数）、
@@ -504,6 +520,8 @@ that divergence is a known open item (see the README's "Future Improvements").
   取整到 0.0001° 时差约 2 cm，此后导出不取整）；详情页的模型一节多一张表；三维把增强后的前 8 行用模型颜色虚线画出，接到样本航迹起点。
 
 ### AV36 · Training 藏起 Cesium 的时钟；句子条贴底；下降角一行叫 Descent；实时执行器的小游标（2026-09-28）
+
+（2026-10-04：本条所述已被 AV45 取代——阶段 A 的 Training 视图读 `instruction-v5`，只有五列、没有叠加层、模型句子、窗口集合和增强起点。）
 
 - 用户（2026-09-28）：Training 里 Cesium 的控制台（时钟盘、时间轴）不起作用，藏起来让句子条沉底。Training 不载 CZML，句子条
   有自己的时间，`viewer.clock` 属于 Evaluation 的回放。`WorkbenchShell` 按 `mode` 给 `body` 加 `workbench-training-active`，
@@ -527,6 +545,8 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 ### AV37 · 执行器回放对一架航班的判定：三种颜色；出问题时句子条头部一个小块（2026-09-28）
 
+（2026-10-04：本条所述已被 AV45 取代——阶段 A 的 Training 视图读 `instruction-v5`，只有五列、没有叠加层、模型句子、窗口集合和增强起点。）
+
 - 用户（2026-09-28，看 KRDU SWA4462 的 "landed · 43/45" 为什么是红的）：落地了、45 个判了的词里 2 个出界，和没落地用同一种
   红色分不开。现在一个规则、一处定义（`replayVerdict`，`data/trainingOverlays.ts`，挨着 `executorWordCounts`）：**clean**——落地、
   判的词全在包络里；**flawed**——落地，但有词出界，或者标注器的门拒了它的航迹（那样一个词也不判，不能算干净）；**not landed**。
@@ -547,6 +567,8 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 ### AV38 · 左栏的 "Autopilot (live)" 一栏删掉；点色块总是直接飞（2026-09-29）
 
+（2026-10-04：本条所述已被 AV45 取代——阶段 A 的 Training 视图读 `instruction-v5`，只有五列、没有叠加层、模型句子、窗口集合和增强起点。）
+
 - 用户（2026-09-29）："左边栏里 AUTOPILOT (LIVE) 这个面板中的信息也是多余的 把这块儿也删了……删干净，包括相关测试"。删掉的：
   面板的这一栏（开关 "Fly on band click" 与结果卡 `TrainingAutopilotCard`：词与步数、判定、尾巴的说明、模拟飞行与计算两个时间、
   检查项、Details 里的计算分项 / 规格与代码 sha / 词钟、模型词与导出样本的逐点核对、"Replay in 3D"、没飞成时的 "Fly again"），
@@ -564,6 +586,8 @@ that divergence is a known open item (see the README's "Future Improvements").
   两个没走 flying 这一步的测试，都已改。
 
 ### AV39 · 多机模式：窗口集合与窗口里的模型句子（2026-09-30）
+
+（2026-10-04：本条所述已被 AV45 取代——阶段 A 的 Training 视图读 `instruction-v5`，只有五列、没有叠加层、模型句子、窗口集合和增强起点。）
 
 - 用户（2026-09-30）要在 Training 里看多机：同一机场 20 分钟的一个**窗口**，模型同时指挥这段时间进场、有句子的几架，其余照记录
   回放。方案用户审过（设计与定下的事在 `36-2026-09-20-training-module.zh.md` §2.9、§4.11）。数据由 ts `window_training_export`
@@ -630,6 +654,8 @@ that divergence is a known open item (see the README's "Future Improvements").
   和每个参数。第一个周期就动力学失败的航班没有记录，不在类别里（参数表写出有几架）。
 
 ### AV26 · Training 的实时执行器：选中一个词，后端现飞它的一段
+
+（2026-10-04：本条所述已被 AV45 取代——阶段 A 的 Training 视图读 `instruction-v5`，只有五列、没有叠加层、模型句子、窗口集合和增强起点。）
 
 - 用途是验证执行器，所以**每次选中都现飞**：`POST /autopilot/segment`（`aeroviz_backend/autopilot_segment/` 包：`segment`、
   `verdict`、`fly`、`payload`、`backend`、`errors`），不读执行器的
@@ -817,3 +843,23 @@ indeterminate on another runway.
 不带它，那里的图层是页面自己的状态）：默认折叠，标题显示"开着的数/9"；展开后一图层一个胶囊（真 checkbox，键盘可达），范围环开着时多一行半径（滑块 +
 数字框，1–50 km），本地地形开着时多一行来源摘要；Labels 是 Obstacles 的子开关，只在 Obstacles 开着时出现（排在它后面、缩进），关掉 Obstacles 就收起它（它自己的开关状态保留），标题的计数只数看得见的（完整坐标系名在 tooltip）。已删除：顶栏 Layers 按钮、`LayersDrawer`、`layersDrawerOpen` 状态，以及
 "Legacy FAF OCS Debug"图层（`ocsSurfaces` 键和只服务于它的 `useOcsLayer`；`ocsGeometry.ts` 和它的测试随后也删了，2026-10-03）。
+
+### AV45 · 阶段 A 的 Training 视图：五列、闭环句子、飞出来的路径、DA 点（2026-10-04）
+
+两阶段模型阶段 A（词表设计 §12.1 A23）把已有的 Training 视图改到新词表上，没有另建一个视图。读的文件只有 `training/index_v4.json`
+（`aeroviz-training-index-v2`）和它列的 `aeroviz-training-sample-v9`；旧视图的 `training/index.json` 不读，别的 schema 名按名字拒绝，
+说出读到的和要的（`check-publication` 同）。
+
+- **五列**：runway（含 go-around）、heading（相对跑道航向）、altitude（机场标高 E 之上的高度，或 "no level-off"）、angle、speed；
+  没有 approach 列。每个词自带 `says`（Python 的 `Words` 解好的），前端不解码。
+- **两种句子**（句子条的标签页）：`Labelled`——标注器对观测航迹的开环读法，2 s 行；`Δ 2/4/8 s`——闭环读法对执行器说的词，从第一个预测步起
+  每 Δ 一行，闭环读法**加的词**（`correction`）画成橙色虚线带、左边一个橙色小三角。`trainingIntervalS` 是选中的 Δ（null = 标注句）。
+- **一条时钟**：航班时间，从观测航迹第 0 行起。闭环 `states` 的第 k 行是观测第 `firstRow + k` 行，第一个预测步在 `flownFromRow`；
+  词的行、法官的包络行和实时答案的周期都从那里数（`trainingReadingOf`）。词与包络的对应：闭环里包络行 = 词的 Δ 行 × Δ/2。
+- **飞出来的路径**：闭环 `states` 从 `flownFromRow` 起，和观测航迹一起画在三维、平面图和三张时间图里；包络判的是飞出来的路径。
+- **结果与 DA 点**：`replay.outcome`、`replay.crossing`（可为 null）、`crossing.decision`（可为 null）——句子条的两个小块、左栏的"Flown flight"几行、
+  读回窗口底下一句、三维里的 DA 点（过了绿、没过红）；详情页"Flown flights"列出每个航班每个 Δ。
+- **点一个词**：`POST /autopilot/segment`（`aeroviz-autopilot-segment-v9`），请求里的 `row` 是该词在 `closedLoop[Δ].words` 里的 Δ 行；答案的周期（1 s）
+  从第一个预测步数起，读入时加上 `startS`；答案必须是句子条上那个词的一段，否则按名字拒绝。标注句不飞。
+- 删掉的：叠加层（执行器回放、先验预测）、模型自己的句子、多机窗口、增强起点、程序掩码、approach 列的捕获转弯和走廊。
+- 测试：Vitest 用 Python 写出的夹具（`src/data/__tests__/fixtures/stage_a/`，经 `stageA.ts` 读），不手写、不手改。

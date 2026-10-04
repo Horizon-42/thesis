@@ -17,9 +17,10 @@ import torch
 import aeroviz_backend.autopilot_segment  # noqa: F401 — puts `ts_transformer` (under 4dTrajectory/) on the path
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.conformance import STATE_BOUND_M
-from ts_transformer.autopilot.judge import flown_track
+from ts_transformer.autopilot.judge import OUTCOMES, flown_track
 from ts_transformer.experiments import training_export as export
 from ts_transformer.instructions import training_files
+from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.words import COLUMNS, HEADING, UNCHANGED
 from ts_transformer.tests.support import closed_loop_flight
 from ts_transformer.tests.test_training_export import FIXTURE_SET, FIXTURES, stage_a_fixture
@@ -342,6 +343,14 @@ def ts_constant(path: Path, name: str) -> str:
     return match.group(1)
 
 
+def ts_strings(path: Path, name: str) -> list[str]:
+    """A `export const NAME = [ "…", … ] as const` of a frontend file."""
+    match = re.search(rf"export const {name} = \[([^\]]*)\]", path.read_text(encoding="utf-8"))
+    if match is None:
+        raise AssertionError(f"{path.name} has no array constant {name}")
+    return re.findall(r'"([^"]*)"', match.group(1))
+
+
 class MirrorTest(unittest.TestCase):
     def test_the_frontend_reads_the_names_the_backend_and_the_export_write(self):
         autopilot, sample = FRONTEND / "trainingAutopilot.ts", FRONTEND / "trainingSample.ts"
@@ -351,7 +360,10 @@ class MirrorTest(unittest.TestCase):
         self.assertEqual(ts_constant(sample, "TRAINING_INDEX_FILE"), training_files.INDEX_FILE)
         self.assertEqual(ts_constant(sample, "TRAINING_SAMPLE_SCHEMA"), training_files.SAMPLE_SCHEMA)
         self.assertEqual(ts_constant(sample, "TRAINING_SET_KIND"), training_files.SET_KIND)
-        self.assertEqual(ts_constant(sample, "TRAINING_READING_RULE"), "instruction-v5")
+        self.assertEqual(ts_constant(sample, "TRAINING_READING_RULE"), READING_RULE)
+        self.assertEqual(ts_strings(sample, "TRAINING_OUTCOMES"), list(OUTCOMES))
+        self.assertEqual(ts_strings(sample, "TRAINING_SPLITS"), list(training_files.SPLITS))
+        self.assertEqual(ts_strings(sample, "TRAINING_STRATA"), list(export.STRATA))
 
 
 if __name__ == "__main__":

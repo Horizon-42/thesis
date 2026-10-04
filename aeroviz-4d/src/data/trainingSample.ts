@@ -1,127 +1,105 @@
 /**
  * trainingSample.ts
  * -----------------
- * The Training module's data contract: the manifest of exported sets, and one set's flights
- * under the instruction vocabulary (`instruction-v3`: the heading read step by step, vocabulary design §10.1; spec
- * `145d6911e75b`, measured on the day split's training days, `4dTrajectory/outputs/POOLED/instruction_language/v4_20260924/`).
- * Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`; the words:
- * `4dTrajectory/ts_transformer/docs/2026-09-23_instruction_vocabulary_design.zh.md`.
+ * The Training view's data contract for STAGE A of the two-tier vocabulary (`instruction-v5`): the airport's index of
+ * stage-A sets and one set's flights. Written by `ts_transformer/experiments/training_export.py` (the files:
+ * `ts_transformer/instructions/training_files.py`); design: vocabulary §12.1 A23, outline §6.
  *
- * A SENTENCE IS SIX COLUMNS PER 2 s STEP — runway pointer, approach, heading, altitude, angle,
- * speed, in that order — and every column has "unchanged" (-1). Step 0 carries all six; after it
- * the sentence is mostly silent. A WORD IS A TARGET PLUS THE ENVELOPE IT ALLOWS: a heading word's
- * band — its target ± the heading tolerance over the rows it is judged on, from a lead after it is
- * said to the next heading word's — the capture turn and corridor, an altitude word's tube, a speed
- * word's transition and band.
+ * A SENTENCE IS FIVE COLUMNS — runway (with go-around), heading (relative to the course of the runway in force), altitude
+ * (a level above the airport elevation E, or "no level-off"), angle, speed — and every column has "unchanged" (-1). A
+ * flight carries two kinds of sentence:
  *
- * THIS FILE COMPUTES NO ENVELOPE. Every band, row verdict, region and tube is what the exporter
- * computed in Python from the vocabulary's own functions (`instructions/display.py` over
- * `envelope.py` and `labeller/*`), and every verdict is the labeller's. The reader checks the file's
- * BOOKKEEPING — lengths, rows, that the per-row words are the events filled forward, that a
- * verdict's count is the count of its own per-row flags — and draws numbers. A second
- * implementation of the envelopes here would be a second answer on one screen.
+ *  • the OPEN-LOOP sentence: the labeller's reading of the observed track, on the observed 2 s rows from row 0, with the
+ *    envelopes of its words on the observed track;
+ *  • the CLOSED-LOOP sentence at each row interval Δ (`vocabulary.rowIntervalsS`): the words the closed-loop reading
+ *    says to the executor from the first predicted step on, one Δ row apart, a word the reading ADDED marked
+ *    (`correction`), with the states the executor flew — observed before the first predicted step, flown from it — and
+ *    the judge's outcome, the threshold crossing and the decision-altitude (DA) check.
  *
- * NO COMPATIBILITY. The schema, the reading rule and the spec sha are pinned below and a file
- * that carries anything else is refused by name; a set of a superseded vocabulary stays listed in
- * the manifest and is refused by name without being downloaded.
+ * ONE CLOCK: flight time, seconds from the observed track's row 0. The closed-loop states are on the 2 s rows from the
+ * sentence's `firstRow` (state row k is observed row `firstRow + k`); the first predicted step is state row `flownFromRow`;
+ * its Δ rows (the words) and the judge's envelopes count from it.
  *
- * VALIDATION IS PER SET: `parseTrainingIndex` keeps the good sets and returns the rejected ones
- * with the field that failed, instead of emptying the airport (the comparison picker's
- * `.every(...)` did that twice — AV6).
+ * THIS FILE DECODES NO WORD AND COMPUTES NO ENVELOPE: every word carries what it says (`says`, decoded by the
+ * vocabulary's `Words` in Python) and every band, tube, span and verdict is the exporter's. The reader checks the file's
+ * BOOKKEEPING — lengths, rows, that the events are the grid's words — and draws numbers.
  *
- * SI units only: metres, m/s, degrees, seconds.
+ * NO COMPATIBILITY. The index and sample schemas, the set kind and the reading rule are pinned below and a file that
+ * carries anything else is refused by name (the schema found and the one expected). This reader never reads
+ * `training/index.json`: its index is `index_v4.json`.
+ *
+ * SI units only: metres, m/s, degrees, seconds. Heights in the files are MSL; the 3D scene's are ellipsoid heights (the
+ * flight's own `haeMinusMslM` added once, here).
  */
 
 import { fetchJson } from "../utils/fetchJson";
 import { attempt, parseManifest, Reader, type Parsed } from "./trainingReader";
 import { readAttitude, type TrainingAttitude } from "./trainingAttitude";
 
-/** MIRROR of the exporter's `INDEX_SCHEMA`. The index keeps this shape across vocabularies:
- *  every set, current or superseded, is listed in it. */
-export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v1";
-/** MIRROR of the exporter's `SAMPLE_SCHEMA` (`ts_transformer/instructions/training_files.py`). The name changes
- *  with the file's shape, on both sides, in the same change: v7 is `instruction-v3`'s sample — a
- *  heading word is its band over its judged rows with a verdict per row, the capture turn its rows
- *  and its check, and there are no turn regions, hold funnels, split parts or inserted intercepts;
- *  a file under any other name — `v6` (instruction-v2's turns and holds) and every earlier one
- *  included, whatever vocabulary it carries — is refused. */
-export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v8";
+/** MIRROR of the exporter's `INDEX_SCHEMA` (`ts_transformer/instructions/training_files.py`): the airport's index of
+ *  stage-A sets. A name changes with its file's shape, on both sides, in the same change. */
+export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v2";
+/** MIRROR of `INDEX_FILE`: a NEW index beside the old view's `index.json`, which this view never reads. */
+export const TRAINING_INDEX_FILE = "index_v4.json";
+/** MIRROR of `SAMPLE_SCHEMA`: a set's sample. */
+export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v9";
+/** MIRROR of `SET_KIND`: a stage-A set — flights read back through the closed loop. */
+export const TRAINING_SET_KIND = "closed-loop-readback";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
-export const TRAINING_READING_RULE = "instruction-v3";
-/** MIRROR of the spec's sha: a new vocabulary is a new sha, and this reader is bound to the one it was written for
- *  (`v4_20260924/spec.json`, instruction-v3 re-measured on the operating-day split's training days, 2026-09-25 — the
- *  artefact today's executor code flies; the flight-split `v3_20260924` spec `0b4ea75be36d` is refused by name). */
-export const TRAINING_SPEC_SHA256 = "145d6911e75b02f61697cda79f7a5b9fe7de948e55c12199c5a1df081a2d5bd5";
-/** MIRROR of the exporter's `KIND_READBACK`: a read-back set — val flights, each read as its sentence. */
-export const TRAINING_READBACK_SET_KIND = "vocabulary-readback";
-/** MIRROR of the exporter's `KIND_TRAFFIC`: a window set — multi-aircraft windows (`trainingTraffic.ts`). */
-export const TRAINING_TRAFFIC_SET_KIND = "traffic-windows";
-/** The set kinds the manifest may list. A `prior-generated` set (the segment prior's generated sentences) has no
- *  contract under this vocabulary — the instruction prior is drawn as an overlay over a read-back set
- *  (`trainingOverlays.ts`) — so it is listed and refused by name. */
-export const TRAINING_SET_KINDS = [TRAINING_READBACK_SET_KIND, "prior-generated", TRAINING_TRAFFIC_SET_KIND] as const;
-export type TrainingSetKind = (typeof TRAINING_SET_KINDS)[number];
-/** The kinds this reader opens: a read-back set shows its flights one at a time, a window set its windows. */
-export const TRAINING_READABLE_SET_KINDS = [TRAINING_READBACK_SET_KIND, TRAINING_TRAFFIC_SET_KIND] as const;
-export type TrainingReadableSetKind = (typeof TRAINING_READABLE_SET_KINDS)[number];
+export const TRAINING_READING_RULE = "instruction-v5";
 
-/** MIRROR of `instructions.words.COLUMNS`. The columns are POSITIONAL: this order is the
- *  order of every `inForce` table and of the six rows the sentence bar draws. */
-export const TRAINING_COLUMNS = ["runway", "approach", "heading", "altitude", "angle", "speed"] as const;
+/** MIRROR of `instructions.words.COLUMNS`. The columns are POSITIONAL: this order is that of every word grid and of the
+ *  five rows the sentence bar draws. */
+export const TRAINING_COLUMNS = ["runway", "heading", "altitude", "angle", "speed"] as const;
 export type TrainingColumn = (typeof TRAINING_COLUMNS)[number];
-/** MIRROR of `instructions.words.UNCHANGED`. */
-export const TRAINING_UNCHANGED = -1;
-/** MIRROR of `instructions.readout.STRATA`. */
-export const TRAINING_STRATA = ["straight-in", "vectored"] as const;
-export type TrainingStratum = (typeof TRAINING_STRATA)[number];
-
-/** MIRROR of the exporter's `WORD_KINDS`: why the labeller issued a word. A kind outside it is
- *  refused by name — the views name every kind, and an unnamed one would be shown as a code. */
-export const TRAINING_WORD_KINDS = [
-  "initial", "per-step", "clear", "target", "step", "angle", "unspecified",
-] as const;
-export type TrainingWordKind = (typeof TRAINING_WORD_KINDS)[number];
-
 export const TRAINING_COLUMN_INDEX = Object.fromEntries(
   TRAINING_COLUMNS.map((column, index) => [column, index]),
 ) as Record<TrainingColumn, number>;
+/** MIRROR of `instructions.words.UNCHANGED`. */
+export const TRAINING_UNCHANGED = -1;
+/** MIRROR of `instructions.words.RUNWAY_GO_AROUND`: the runway column's word that sends the flight around. */
+export const TRAINING_RUNWAY_GO_AROUND = -2;
+/** MIRROR of `training_files.SPLITS`. */
+export const TRAINING_SPLITS = ["train", "select"] as const;
+/** MIRROR of `training_export.STRATA`. */
+export const TRAINING_STRATA = ["straight-in", "vectored"] as const;
+export type TrainingStratum = (typeof TRAINING_STRATA)[number];
+/** MIRROR of `autopilot.judge.OUTCOMES`: how a flown flight ended. */
+export const TRAINING_OUTCOMES = [
+  "landed", "unstable_at_minimums", "crossed_too_high", "crossed_off_runway", "crossed_other_runway", "ground_contact",
+  "timeout", "dynamics_failure",
+] as const;
+export type TrainingOutcome = (typeof TRAINING_OUTCOMES)[number];
 
 // ── shapes ───────────────────────────────────────────────────────────────────
 
 export interface TrainingCohort {
-  split: string;
+  splits: Record<string, number>;
   perStratum: number;
+  strata: string[];
   seed: number;
   drawnFrom: string;
 }
 
-/** How a window set's windows were drawn (`window_training_export`): of the split's windows, ``windows`` an airport. */
-export interface TrainingWindowCohort {
-  split: string;
-  windows: number;
-  seed: number;
-  drawnFrom: string;
+export interface TrainingSource {
+  instructions: string;
+  executor: string;
+  specSha256: string;
+  executorSpecSha256: string;
+  git: { head: string; dirty: boolean };
 }
 
-interface TrainingSetEntryFields {
+/** A set as the index lists it. */
+export interface TrainingSetEntry {
   id: string;
   title: string;
-  /** Path of the set's file (a sample, a window set), relative to the airport's `training/` directory. */
+  /** The set's sample, relative to the airport's `training/` directory. */
   file: string;
-  /** The vocabulary spec's sha. */
-  vocabularySha256: string;
-  /** The sha of the airport's geometry: its candidate runways (the runway pointer's choices) and
-   *  every runway end the landing rule reads (the sample's `candidatesSha256`). */
-  runwaySha256: string;
-  readingRule: string;
   flights: number;
+  formats: Record<string, string>;
+  cohort: TrainingCohort;
+  source: TrainingSource;
 }
-
-/** A set as the index lists it; its cohort is its kind's — a read-back set's flights per stratum, a window set's windows. */
-export type TrainingSetEntry = TrainingSetEntryFields & (
-  | { kind: typeof TRAINING_READBACK_SET_KIND | "prior-generated"; cohort: TrainingCohort }
-  | { kind: typeof TRAINING_TRAFFIC_SET_KIND; cohort: TrainingWindowCohort }
-);
 
 export interface TrainingIndex {
   airport: string;
@@ -131,71 +109,32 @@ export interface TrainingIndex {
 }
 
 export interface TrainingAngleClass {
-  value: number;
+  index: number;
   name: string;
   nominalDeg: number;
-  /** The class's range; a climb is negative, level is [0, 0]. */
   lowDeg: number;
-  steepDeg: number;
+  highDeg: number;
 }
 
-/** What the words mean: every class as a table, so a label is a lookup, never a decode. */
+/** What the words mean, as numbers for the details page and the tolerances the charts name. */
 export interface TrainingVocabulary {
   readingRule: string;
-  specSha256: string;
-  labellerSourceSha256: string;
+  /** The row step of the 2 s grid every track and envelope is on. */
   stepS: number;
-  smoothingS: { track: number; altitude: number; speed: number };
-  classCounts: Record<Exclude<TrainingColumn, "runway">, number>;
-  approachClasses: string[];
-  headingTargetsDeg: number[];
-  /** A heading word says where the track is this long after it is said, and is judged from then. */
+  headingStepDeg: number;
+  /** A heading word is judged from this long after it is said. */
   headingLeadS: number;
-  /** The same lead in steps, as the exporter wrote it (`spec.rows_exact`); the reader checks the two agree. */
-  headingLeadRows: number;
-  /** A heading word's band: the track within this of its target on every row it is judged on. */
   headingToleranceDeg: number;
-  /** The capture turn begins where the track turns toward the course faster than this. */
-  turnOnsetRateDegS: number;
-  /** The capture turn's rate: at most `turnRateMaxDegS` on every row (and at most `turnBankMaxDeg`
-   *  of bank at the flown speed); at least `turnRateMinDegS` on average for a turn of
-   *  `turnRateMinFromDeg` or more. */
-  turnRateMinDegS: number;
-  turnRateMaxDegS: number;
-  turnRateMinFromDeg: number;
-  turnBankMaxDeg: number;
-  interceptAngleDeg: number;
-  corridorHalfWidthM: number;
-  corridorWideningDeg: number;
-  corridorCourseToleranceDeg: number;
-  /** The landing: the threshold passed within this far of the centreline (capped per runway by a
-   *  parallel runway — `TrainingCandidate.landingCrossLimitM`) and this high above the threshold. */
-  landingCrossLimitM: number;
-  landingMaxHeightM: number;
-  /** Two runways within this of each other's course are parallel partners for the cap. */
-  parallelCourseDeltaDeg: number;
-  altitudeTargetsM: number[];
-  /** The altitude value "descend to land": one past the last target. */
-  altitudeLandValue: number;
-  altitudeToleranceM: number;
+  altitudeLevelsM: number[];
+  altitudeTolerancesM: number[];
+  /** The altitude word that means "no level-off". */
+  noLevelOff: number;
   angleClasses: TrainingAngleClass[];
-  /** The angle value "level": a target reached, not a slope. */
-  angleLevelValue: number;
-  speedTargetsMps: number[];
-  /** The speed value "unspecified": one past the last target. */
-  speedUnspecifiedValue: number;
-  speedToleranceMps: number;
-  speedAccelMaxMps2: number;
-  speedRangeMps: [number, number];
-}
-
-/** Points in the airport frame (metres east / north of the reference point) and the same points
- *  on the globe — one computation at the exporter, two spellings. */
-export interface TrainingPlanLine {
-  eM: number[];
-  nM: number[];
-  lon: number[];
-  lat: number[];
+  speed: { minMps: number; stepMps: number; levels: number; unspecified: number; toleranceMps: number };
+  /** The closed-loop reading adds a word when the flown track is this far off the observed one. */
+  closedLoopLateralM: number;
+  closedLoopVerticalM: number;
+  rowIntervalsS: number[];
 }
 
 export interface TrainingCandidate {
@@ -203,340 +142,394 @@ export interface TrainingCandidate {
   ident: string;
   thresholdEM: number;
   thresholdNM: number;
+  latDeg: number;
+  lonDeg: number;
   courseDeg: number;
   elevationM: number;
   lengthM: number;
-  /** The landing's limit off this runway's centreline: the vocabulary's, capped at half the spacing
-   *  to a parallel runway. */
-  landingCrossLimitM: number;
-  /** From the threshold out along the approach side, `centrelineLengthM` long. */
-  centreline: TrainingPlanLine;
-  /** The runway: the threshold to its far end. */
-  runway: TrainingPlanLine;
+  haeMinusMslM: number;
+  verticalPath: { crossingHeightM: number; glidepathDeg: number; decisionHeightM: number };
 }
 
-/** One word of a sentence: the step it is said at, its column (`TRAINING_COLUMNS` order) and its value. */
-export interface TrainingSentenceEvent {
+/** What a word says, as the exporter decoded it with the vocabulary (`training_export.said`). */
+export type TrainingSays =
+  | { column: "runway"; goAround: false; runway: string; runwayIndex: number }
+  | { column: "runway"; goAround: true }
+  | { column: "heading"; relativeDeg: number; trackDeg: number }
+  | { column: "altitude"; noLevelOff: true }
+  | { column: "altitude"; noLevelOff: false; levelM: number; mslM: number }
+  | { column: "angle"; angleDeg: number; climb: boolean; level: boolean }
+  /** null: speed left to the pilot. */
+  | { column: "speed"; speedMps: number | null };
+
+/** One word of a sentence: the row it is said at, its column (`TRAINING_COLUMNS` order), its value, whether the
+ *  closed-loop reading added it, and what it says. */
+export interface TrainingEvent {
   row: number;
   column: number;
   value: number;
+  correction: boolean;
+  says: TrainingSays;
 }
 
-/** A word of the TRUTH sentence: the labeller says why it issued it. */
-export interface TrainingWordEvent extends TrainingSentenceEvent {
-  kind: TrainingWordKind;
+/** A track on the flight clock: the observed one, or the one the executor flew. */
+export interface TrainingTrack {
+  /** Flight time (s from the observed row 0), one point per 2 s row. */
+  tS: number[];
+  eM: number[];
+  nM: number[];
+  lon: number[];
+  lat: number[];
+  altitudeMslM: number[];
+  /** The height Cesium draws in: MSL plus the flight's runway's HAE − MSL. */
+  altitudeHaeM: number[];
+  /** As the file has it: the observed track continues past 360°, a flown one is within [0, 360). */
+  trackDeg: number[];
+  /** `trackDeg` continuous, on the branch of the observed track at the same time: what a chart plots. */
+  trackPlotDeg: number[];
+  groundSpeedMps: number[];
+  verticalRateMps: number[];
+  attitude: TrainingAttitude;
 }
 
-/**
- * A SENTENCE, as the sentence bar draws it: its words in (row, column) order over the rows it covers, opening at
- * ``firstRow`` with every column said. The truth's opens at step 0 (`trainingTruthSentence`); a model's own opens at its
- * first predicted row — the rows before are observed only (`trainingOverlays.TrainingGeneratedSentence`).
- */
-export interface TrainingSentence<E extends TrainingSentenceEvent = TrainingSentenceEvent> {
-  rows: number;
-  firstRow: number;
-  events: E[];
-}
-
-/** The labeller's check of the capture turn: monotone progress toward the course, its rate inside the range. */
-export interface TrainingTurnCheck {
-  progressOk: boolean;
-  rateOk: boolean;
-  meanRateDegS: number;
-  maxRateDegS: number;
-  maxBankDeg: number;
-  /** The lowest rate is judged only for turns of at least `turnRateMinFromDeg`. */
-  rateMinApplies: boolean;
-}
-
-/**
- * A heading word's envelope (vocabulary design §10.1): its target ± the heading tolerance over the rows it is judged
- * on — from its row plus the lead to the next heading word's row plus the lead, never at or past the clearance — and
- * each row's verdict. None when the lead carries its rows to the clearance (`firstRow === stopRow`). The executor's
- * overlay writes its words' bands in this shape too, on its own flown rows.
- */
+/** A heading word's band: its target ± the tolerance over the rows it is judged on, and each judged row's verdict. Rows
+ *  count from the envelopes' origin (the observed row 0, or the first predicted step). */
 export interface TrainingHeadingBand {
+  row: number;
   firstRow: number;
   /** One past the last row judged. */
   stopRow: number;
-  /** The target on the heading chart's branch. */
-  targetOnTrackDeg: number;
-  bandDeg: [number, number];
-  /** One per judged row: the track within the band. */
-  inside: boolean[];
-}
-
-export interface TrainingHeadingEnvelope extends TrainingHeadingBand {
-  row: number;
-  value: number;
-  kind: TrainingWordKind;
+  /** The word's target track, compass degrees in [0, 360). */
   targetDeg: number;
-  /** The labeller's check: its judged rows and how many were inside. */
-  check: { rows: number; inside: number };
-}
-
-export interface TrainingApproach {
-  clearanceRow: number;
-  captureRow: number;
-  captureBeforeThresholdM: number;
-  /** From the clearance to the capture, onto the course; null for a flight on the final at step 0. */
-  captureTurn: {
-    startRow: number;
-    endRow: number;
-    /** The course on the heading chart's branch at the start. */
-    courseOnTrackDeg: number;
-    check: TrainingTurnCheck;
-  } | null;
-  /** The course ± its tolerance, on the heading chart's branch, from the capture on. */
-  courseBandDeg: [number, number];
-  corridor: {
-    beforeThresholdM: number;
-    halfWidthAtCaptureM: number;
-    halfWidthAtThresholdM: number;
-    rows: number;
-    axis: TrainingPlanLine;
-    outline: TrainingPlanLine;
-  };
-  landing: {
-    cutAtCrossing: boolean;
-    lastRowBeforeThresholdM: number;
-    crossing: { row: number; eM: number; nM: number; lon: number; lat: number } | null;
-  };
+  toleranceDeg: number;
+  inside: boolean[];
 }
 
 export interface TrainingAltitudeTube {
   row: number;
   /** One past the last row the tube covers. */
   endRow: number;
-  value: number;
-  kind: TrainingWordKind;
-  /** null = "descend to land". */
-  targetM: number | null;
-  lowerM: number[];
-  upperM: number[];
-  lowerHaeM: number[];
-  upperHaeM: number[];
-  inside: boolean[];
-  check: { rows: number; inside: number; contained: boolean; tubeWidthEndM: number };
-}
-
-export interface TrainingAngleWord {
-  row: number;
-  value: number;
-  kind: TrainingWordKind;
-  /** The straight piece's measured angle; null for level (a target reached, not a slope). */
-  measuredDeg: number | null;
+  /** The level above E; null: "no level-off". */
+  levelM: number | null;
+  /** The tube's edges, MSL, one per row it covers. */
+  lowMslM: number[];
+  highMslM: number[];
+  rows: number;
+  inside: number;
+  contained: boolean;
 }
 
 export interface TrainingSpeedSpan {
   row: number;
   endRow: number;
-  value: number;
-  kind: TrainingWordKind;
-  /** null = "unspecified". */
-  targetMps: number | null;
-  arrivalRow: number | null;
-  transitionLowerMps: number[] | null;
-  transitionUpperMps: number[] | null;
-  bandMps: [number, number] | null;
-  bandInside: boolean[] | null;
-  check: {
-    arrivalRows: number; cutBeforeArrival: boolean; transitionOk: boolean; accelOk: boolean;
-    bandRows: number; bandInside: number; contained: boolean;
-  } | null;
-  rangeMps: [number, number] | null;
+  targetMps: number;
+  toleranceMps: number;
+  /** The row the speed reached its band at. */
+  arrivalRow: number;
+  transitionOk: boolean;
+  accelOk: boolean;
+  contained: boolean;
 }
 
-export interface TrainingSignals {
-  tS: number[];
-  eM: number[];
-  nM: number[];
-  lon: number[];
-  lat: number[];
-  altitudeHaeM: number[];
-  raw: { trackDeg: number[]; altitudeM: number[]; groundSpeedMps: number[]; verticalRateMps: number[] };
-  smoothed: { trackDeg: number[]; altitudeM: number[]; groundSpeedMps: number[]; distanceM: number[] };
-  beforeThresholdM: number[];
-  rightOfCourseM: number[];
-  /** The attitude the observed aircraft is drawn in at each row (`trainingAttitude.ts`). */
-  attitude: TrainingAttitude;
+export interface TrainingEnvelopes {
+  heading: TrainingHeadingBand[];
+  altitude: TrainingAltitudeTube[];
+  speed: TrainingSpeedSpan[];
+}
+
+/** The labeller's kind of each word of the open-loop sentence. */
+export interface TrainingWordKindEntry {
+  row: number;
+  column: number;
+  kind: string;
+}
+
+export interface TrainingOpenLoop {
+  rows: number;
+  words: number[][];
+  events: TrainingEvent[];
+  kinds: TrainingWordKindEntry[];
+  captureRow: number;
+  unspecifiedRow: number;
+  goAroundRows: number[];
+  runwayAgainRows: number[];
+  envelopes: TrainingEnvelopes;
+}
+
+/** The decision-altitude check at the crossing (D38): the flown point, its place against the glidepath and the cone. */
+export interface TrainingDecision {
+  /** The cycle (1 s) from the first predicted step. */
+  cycle: number;
+  eM: number;
+  nM: number;
+  latDeg: number;
+  lonDeg: number;
+  heightMslM: number;
+  rightM: number;
+  coneHalfWidthM: number;
+  aboveGlidepathM: number;
+  lateralOk: boolean;
+  verticalOk: boolean;
+  passed: boolean;
+}
+
+export interface TrainingCrossing {
+  /** Metres right of the centreline / above the threshold, at the crossing. */
+  crossM: number;
+  heightM: number;
+  /** The cycle (1 s, fractional) from the first predicted step. */
+  atCycle: number;
+  runwayIndex: number;
+  /** null: no DA check (a crossing above the landing screen, or no DA point). */
+  decision: TrainingDecision | null;
+}
+
+export interface TrainingReplay {
+  outcome: TrainingOutcome;
+  /** Cycles (1 s) from the first predicted step to the outcome. */
+  endCycle: number;
+  /** null: the flight did not cross the threshold. */
+  crossing: TrainingCrossing | null;
+  flewTheSentence: boolean;
+  notReached: number;
+  /** The judge's envelopes on the flown track, rows from the first predicted step; null: none were read. */
+  envelopes: TrainingEnvelopes | null;
+}
+
+/** The closed-loop sentence at one Δ and what flying it gave. */
+export interface TrainingClosedLoop {
+  rowIntervalS: number;
+  firstRow: number;
+  startRow: number;
+  flownFromRow: number;
+  /** Flight time of the first predicted step: Δ row 0 of the words and cycle 0 of the replay. */
+  startS: number;
+  words: number[][];
+  events: TrainingEvent[];
+  /** Per Δ row, the flown track's distance from the observed one (null: the observed path has ended). */
+  lateralM: Array<number | null>;
+  verticalM: Array<number | null>;
+  timedOut: boolean;
+  /** The states the executor flew, from the first predicted step. */
+  flown: TrainingTrack;
+  replay: TrainingReplay;
 }
 
 export interface TrainingFlight {
   datasetId: string;
   flightKey: string;
+  /** The id part of the flight key (the callsign): a label only — a flight is its key. */
   callsign: string;
-  /** The flight's own ICAO type; null = its identity is unresolved (sample v6). */
+  split: (typeof TRAINING_SPLITS)[number];
+  stratum: TrainingStratum;
+  kind: string;
+  /** null: the flight's identity is unresolved. */
   typecode: string | null;
+  /** "own dynamics" or "stand-in dynamics". */
+  group: string;
   runway: string;
   runwayIndex: number;
-  stratum: TrainingStratum;
-  /** The sentence's steps = the signal rows it covers. */
-  rows: number;
-  captureRow: number;
-  joinRow: number;
-  unspecifiedRow: number;
-  captureBeforeThresholdM: number;
-  signals: TrainingSignals;
-  words: { events: TrainingWordEvent[]; inForce: number[][] };
-  envelopes: {
-    heading: TrainingHeadingEnvelope[];
-    approach: TrainingApproach;
-    altitude: TrainingAltitudeTube[];
-    angle: TrainingAngleWord[];
-    speed: TrainingSpeedSpan[];
-  };
+  entryTimeUtc: string;
+  haeMinusMslM: number;
+  observed: TrainingTrack;
+  openLoop: TrainingOpenLoop;
+  /** By row interval, as the set's `rowIntervalsS`. */
+  closedLoop: Record<string, TrainingClosedLoop>;
 }
 
-/** What every set file carries besides its cohort: the vocabulary, the frame, the candidate runways and its flights (a
- *  read-back set's sample, a window set's commanded aircraft) — what an overlay binds to and a selection is read from. */
-export interface TrainingSetHead {
+export interface TrainingSample {
   setId: string;
   airport: string;
-  /** When the exporter wrote it: an overlay drawn over the set names the sample it was drawn over by it. */
-  writtenUtc: string;
+  formats: Record<string, string>;
+  source: TrainingSource;
+  cohort: TrainingCohort;
   vocabulary: TrainingVocabulary;
   airportFrame: { code: string; lat: number; lon: number; elevationM: number };
   candidatesSha256: string;
-  centrelineLengthM: number;
   candidates: TrainingCandidate[];
   flights: TrainingFlight[];
 }
 
-export interface TrainingSample extends TrainingSetHead {
-  cohort: TrainingCohort & { pool: number; read: number };
-}
+// ── the flight on screen ─────────────────────────────────────────────────────
 
-/** The clock the flight on screen is read on (`useTrainingCursor`): the cursor is kept in the time of ``scope`` — the
- *  flight itself, or the multi-aircraft window it is in — and the flight's own time 0 is ``offsetS`` there. A window keeps
- *  its time when another of its aircraft is put on screen. */
-export interface TrainingClock {
-  scope: string;
-  offsetS: number;
-}
-
-/** What the panel publishes for the sentence bar, the read-back window and the 3D layer: the flight on screen, with the
- *  set and airport it is read from — a flight key alone repeats across the sets of one airport. */
+/** What the panel publishes for the sentence bar, the read-back window and the 3D layer: the flight on screen with the set
+ *  and airport it is read from (a flight key alone repeats across the sets of one airport). */
 export interface TrainingSelection {
   airport: string;
   setId: string;
   vocabulary: TrainingVocabulary;
   candidates: TrainingCandidate[];
   flight: TrainingFlight;
-  clock: TrainingClock;
-  /** Whether the backend flies this flight's words live (`trainingAutopilot.ts`): it opens read-back sets only. */
-  liveExecutor: boolean;
 }
 
-/** The flight on screen as one identity — the live executor's pick belongs to it and resets with it. */
+/** The flight on screen as one identity — the cursor and the live executor's pick belong to it and reset with it. */
 export function trainingSelectionKey(selection: TrainingSelection | null): string | null {
   return selection === null ? null : `${selection.airport}/${selection.setId}/${selection.flight.flightKey}`;
 }
 
-/** Whether the flight on screen is read on its own clock — not on a multi-aircraft window's, whose time can lie outside
- *  the flight's. */
-export function isOwnClock(selection: TrainingSelection): boolean {
-  return selection.clock.scope === trainingSelectionKey(selection);
-}
-
-/** Whether the cursor — ``atS`` on the flight's own clock — is ON the flight on screen, for an axis ending at ``endS``:
- *  always on the flight's own clock (a time past the axis is held at its end, as ever); on a multi-aircraft window's clock
- *  only from its 0 s to the axis's end — outside that the aircraft is not flying yet, or not any more, and no view draws a
- *  cursor, or a word in force, for it. */
-export function cursorOnFlight(selection: TrainingSelection, atS: number, endS: number): boolean {
-  return isOwnClock(selection) || (atS >= 0 && atS <= endS);
-}
-
-/** The selection of one flight of a read-back set: read on its own clock. */
 export function trainingSelectionOf(sample: TrainingSample, flight: TrainingFlight): TrainingSelection {
-  const selection = { airport: sample.airport, setId: sample.setId, vocabulary: sample.vocabulary, candidates: sample.candidates,
-    flight, liveExecutor: true, clock: { scope: "", offsetS: 0 } };
-  // its own clock: the flight's own identity is the clock's scope (`isOwnClock`)
-  return { ...selection, clock: { scope: trainingSelectionKey(selection)!, offsetS: 0 } };
+  return { airport: sample.airport, setId: sample.setId, vocabulary: sample.vocabulary, candidates: sample.candidates, flight };
 }
 
-// ── reading a word ───────────────────────────────────────────────────────────
+// ── reading a sentence ───────────────────────────────────────────────────────
 
-/** MIRROR of `instruction_training_export.APPROACH_NAMES[APPROACH_CLEARED]`: the approach word that clears the flight to
- *  join the final. */
-export const TRAINING_APPROACH_CLEARED = "cleared";
-
-/** MIRROR of `instruction_training_export.APPROACH_NAMES[APPROACH_GO_AROUND]`: the approach word that sends the flight
- *  around. */
-export const TRAINING_APPROACH_GO_AROUND = "go-around";
-
-/** The approach column's value that clears the flight (the set's own table names it; the vocabulary reader refuses a
- *  table without it). */
-export function trainingClearedValue(vocabulary: TrainingVocabulary): number {
-  return vocabulary.approachClasses.indexOf(TRAINING_APPROACH_CLEARED);
+/**
+ * The sentence the views read: the labelled (open-loop) one on the observed rows, or the closed-loop one at a Δ. Its
+ * rows are ``rowS`` apart from ``originS`` (flight time); the envelopes are on 2 s rows from ``envelopeOriginS`` and
+ * judge ``judged`` — the observed track (open loop) or the flown one (closed loop).
+ */
+export interface TrainingReading {
+  loop: "open" | "closed";
+  /** Δ for a closed-loop reading; null for the open loop. */
+  intervalS: number | null;
+  rows: number;
+  rowS: number;
+  originS: number;
+  /** Flight time the sentence's last row ends at. */
+  endS: number;
+  events: TrainingEvent[];
+  envelopeOriginS: number;
+  envelopes: TrainingEnvelopes | null;
+  /** The track the envelopes judge. */
+  judged: TrainingTrack;
+  /** The observed track beside it (the same track for the open loop). */
+  observed: TrainingTrack;
+  closed: TrainingClosedLoop | null;
+  open: TrainingOpenLoop;
 }
 
-/** The approach column's value that sends the flight around (as `trainingClearedValue`). */
-export function trainingGoAroundValue(vocabulary: TrainingVocabulary): number {
-  return vocabulary.approachClasses.indexOf(TRAINING_APPROACH_GO_AROUND);
+const readings = new WeakMap<TrainingFlight, Map<number | null, TrainingReading>>();
+
+/** The reading of ``flight`` at row interval ``intervalS`` (null: the labelled, open-loop sentence). */
+export function trainingReadingOf(flight: TrainingFlight, stepS: number, intervalS: number | null): TrainingReading {
+  const cached = readings.get(flight)?.get(intervalS);
+  if (cached !== undefined) return cached;
+  const open = flight.openLoop;
+  let reading: TrainingReading;
+  if (intervalS === null) {
+    reading = {
+      loop: "open", intervalS: null, rows: open.rows, rowS: stepS, originS: flight.observed.tS[0],
+      endS: flight.observed.tS[0] + open.rows * stepS, events: open.events, envelopeOriginS: flight.observed.tS[0],
+      envelopes: open.envelopes, judged: flight.observed, observed: flight.observed, closed: null, open,
+    };
+  } else {
+    const closed = flight.closedLoop[String(intervalS)];
+    const rows = closed.words.length;
+    reading = {
+      loop: "closed", intervalS, rows, rowS: intervalS, originS: closed.startS, endS: closed.startS + rows * intervalS,
+      events: closed.events, envelopeOriginS: closed.startS, envelopes: closed.replay.envelopes, judged: closed.flown,
+      observed: flight.observed, closed, open,
+    };
+  }
+  const byInterval = readings.get(flight) ?? new Map<number | null, TrainingReading>();
+  byInterval.set(intervalS, reading);
+  readings.set(flight, byInterval);
+  return reading;
 }
 
-/** The class count of a column; the runway pointer's is the airport's candidate count. */
-export function trainingClassCount(
-  vocabulary: TrainingVocabulary, candidates: TrainingCandidate[], column: TrainingColumn,
-): number {
-  return column === "runway" ? candidates.length : vocabulary.classCounts[column];
+/** Flight time of sentence row ``row``. */
+export function readingRowTimeS(reading: TrainingReading, row: number): number {
+  return reading.originS + row * reading.rowS;
 }
 
-/** A word as a person reads it. SI units; the tables decide, nothing is decoded. */
-export function trainingWordLabel(
-  vocabulary: TrainingVocabulary, candidates: TrainingCandidate[], column: TrainingColumn, value: number,
-): string {
-  switch (column) {
+/** The sentence row in force at flight time ``atS``: null before the sentence opens, the last row at and after its end. */
+export function readingRowAt(reading: TrainingReading, atS: number): number | null {
+  if (atS < reading.originS - 1e-9) return null;
+  return Math.min(Math.floor((atS - reading.originS) / reading.rowS + 1e-9), reading.rows - 1);
+}
+
+/** One word of a column and the rows it is in force: from its row to the next word of its column (or the sentence's end). */
+export interface TrainingWordRun {
+  row: number;
+  endRow: number;
+  event: TrainingEvent;
+  /** Its place among its column's words. */
+  index: number;
+}
+
+/** The runs of one column of a sentence. */
+export function sentenceColumnRuns(reading: TrainingReading, column: TrainingColumn): TrainingWordRun[] {
+  const index = TRAINING_COLUMN_INDEX[column];
+  const events = reading.events.filter((event) => event.column === index);
+  return events.map((event, position) => ({
+    row: event.row, endRow: position + 1 < events.length ? events[position + 1].row : reading.rows, event, index: position,
+  }));
+}
+
+/** The word of one column in force at a sentence row, or null before the sentence opens. */
+export function sentenceWordAt(reading: TrainingReading, column: TrainingColumn, row: number | null): TrainingWordRun | null {
+  if (row === null) return null;
+  return sentenceColumnRuns(reading, column).find((run) => run.row <= row && row < run.endRow) ?? null;
+}
+
+/** A word's row in the envelopes' rows (2 s, from the envelopes' origin): the judge hears a closed-loop word on the cycle
+ *  that starts its Δ row, so a Δ of 4 s puts the word at envelope row 2 × its row. */
+export function trainingEnvelopeRow(reading: TrainingReading, stepS: number, word: TrainingWordRun): number {
+  return word.row * (reading.rowS / stepS);
+}
+
+/** Where a word's envelope sits in its column's list (`envelopes.heading` / `altitude` / `speed`), or null: a runway or
+ *  angle word has none, nor a speed word left to the pilot, nor a word the flown flight never reached. */
+export function trainingEnvelopeIndex(
+  reading: TrainingReading, stepS: number, column: TrainingColumn, word: TrainingWordRun,
+): number | null {
+  if (reading.envelopes === null) return null;
+  const row = trainingEnvelopeRow(reading, stepS, word);
+  const list = column === "heading" ? reading.envelopes.heading : column === "altitude" ? reading.envelopes.altitude
+    : column === "speed" ? reading.envelopes.speed : [];
+  const index = list.findIndex((item) => item.row === row);
+  return index < 0 ? null : index;
+}
+
+/** The closed-loop words the reading added, counted. */
+export function correctionCount(events: TrainingEvent[]): number {
+  return events.filter((event) => event.correction).length;
+}
+
+// ── a word as a person reads it (the exporter decoded it; this is its spelling) ──
+
+function signedDegrees(value: number): string {
+  if (value === 0) return "0°";
+  return `${value > 0 ? "+" : "−"}${Math.abs(value).toFixed(0)}°`;
+}
+
+/** A word as its band reads it, short. */
+export function trainingBandLabel(says: TrainingSays): string {
+  switch (says.column) {
     case "runway":
-      return candidates[value].ident;
-    case "approach":
-      return vocabulary.approachClasses[value];
+      return says.goAround ? "go-around" : says.runway;
     case "heading":
-      return `${vocabulary.headingTargetsDeg[value].toFixed(0).padStart(3, "0")}°`;
+      return signedDegrees(says.relativeDeg);
     case "altitude":
-      return value === vocabulary.altitudeLandValue
-        ? "descend to land"
-        : `${vocabulary.altitudeTargetsM[value].toFixed(0)} m`;
-    case "angle": {
-      const angle = vocabulary.angleClasses[value];
-      return value === vocabulary.angleLevelValue ? angle.name : `${angle.name} (${angle.nominalDeg.toFixed(2)}°)`;
-    }
+      return says.noLevelOff ? "no level-off" : `${says.levelM.toFixed(0)} m`;
+    case "angle":
+      if (says.level) return "level";
+      return says.climb ? `climb ${Math.abs(says.angleDeg).toFixed(1)}°` : `${says.angleDeg.toFixed(1)}°`;
     case "speed":
-      return value === vocabulary.speedUnspecifiedValue
-        ? "unspecified"
-        : `${vocabulary.speedTargetsMps[value].toFixed(0)} m/s`;
+      return says.speedMps === null ? "unspecified" : `${says.speedMps.toFixed(0)} m/s`;
   }
 }
 
-/** A word as its band in the sentence bar reads it, under its row's name: a descent class by its number and angle
- *  ("1: 0.92°" — the row is named "Descent", so the class's own "descent " is not repeated; the names are the pinned
- *  vocabulary's, AV19), the climb as "climb: …"; every other word as `trainingWordLabel` (its tooltip keeps that full
- *  label). */
-export function trainingBandLabel(
-  vocabulary: TrainingVocabulary, candidates: TrainingCandidate[], column: TrainingColumn, value: number,
-): string {
-  if (column !== "angle" || value === vocabulary.angleLevelValue) return trainingWordLabel(vocabulary, candidates, column, value);
-  const angle = vocabulary.angleClasses[value];
-  return `${angle.name.replace(/^descent /, "")}: ${angle.nominalDeg.toFixed(2)}°`;
+/** A word in full: what it says in words, for tooltips and the live line. */
+export function trainingWordLabel(says: TrainingSays): string {
+  switch (says.column) {
+    case "runway":
+      return says.goAround ? "go-around" : `runway ${says.runway}`;
+    case "heading":
+      return `${signedDegrees(says.relativeDeg)} from the course (track ${says.trackDeg.toFixed(0).padStart(3, "0")}°)`;
+    case "altitude":
+      return says.noLevelOff ? "no level-off" : `${says.levelM.toFixed(0)} m above the airport (${says.mslM.toFixed(0)} m MSL)`;
+    case "angle":
+      if (says.level) return "level";
+      return says.climb ? `climb ${Math.abs(says.angleDeg).toFixed(1)}°` : `descent ${says.angleDeg.toFixed(1)}°`;
+    case "speed":
+      return says.speedMps === null ? "speed unspecified (the pilot's own)" : `${says.speedMps.toFixed(0)} m/s ground speed`;
+  }
 }
 
-/** Why a word was issued, in words — one for every kind the labeller writes. */
-const KIND_LABEL: Record<TrainingWordKind, string> = {
-  initial: "in force at entry (step 0)",
-  "per-step": "the heading the track reaches a lead later",
-  clear: "cleared to join the final",
-  target: "a new target",
-  step: "a step between two holds",
-  angle: "a new descent angle",
-  unspecified: "speed left to the pilot",
-};
+// ── times, rows and the rows outside ─────────────────────────────────────────
 
-export function trainingKindLabel(kind: TrainingWordKind): string {
-  return KIND_LABEL[kind];
-}
-
-/** The row in force at a time: the last row at or before it. */
+/** The last index of ascending ``tS`` at or before ``seconds`` (0 before the first). */
 export function rowAtTime(tS: number[], seconds: number): number {
   if (seconds <= tS[0]) return 0;
   let low = 0;
@@ -555,436 +548,11 @@ export function formatSeconds(seconds: number): string {
   return Number.isInteger(seconds) ? `${seconds}` : seconds.toFixed(1);
 }
 
-/** One word of a column and the rows it is in force: from its issue to the next word of its column. */
-export interface TrainingWordRun<E extends TrainingSentenceEvent = TrainingWordEvent> {
-  row: number;
-  endRow: number;
-  value: number;
-  event: E;
-}
-
-/** The flight's truth sentence, as a sentence. */
-export function trainingTruthSentence(flight: TrainingFlight): TrainingSentence<TrainingWordEvent> {
-  return { rows: flight.rows, firstRow: 0, events: flight.words.events };
-}
-
-/** The runs of one column of a sentence: the value in force from each of its issue rows to the next. */
-export function sentenceColumnRuns<E extends TrainingSentenceEvent>(
-  sentence: TrainingSentence<E>, column: TrainingColumn,
-): TrainingWordRun<E>[] {
-  const index = TRAINING_COLUMN_INDEX[column];
-  const events = sentence.events.filter((event) => event.column === index);
-  return events.map((event, position) => ({
-    row: event.row,
-    endRow: position + 1 < events.length ? events[position + 1].row : sentence.rows,
-    value: event.value,
-    event,
-  }));
-}
-
-/** The runs of one column of the flight's truth sentence. */
-export function trainingColumnRuns(flight: TrainingFlight, column: TrainingColumn): TrainingWordRun[] {
-  return sentenceColumnRuns(trainingTruthSentence(flight), column);
-}
-
-/** The word of one column of a sentence in force at a row, or null before the sentence opens (a model's, over the rows
- *  it only observed) or after it ends. */
-export function sentenceWordAt<E extends TrainingSentenceEvent>(
-  sentence: TrainingSentence<E>, column: TrainingColumn, row: number,
-): TrainingWordRun<E> | null {
-  return sentenceColumnRuns(sentence, column).find((run) => run.row <= row && row < run.endRow) ?? null;
-}
-
 /**
- * The word of ONE column in force at a row, and its place among that column's words — which is also
- * the place of its envelope: `envelopes.heading / altitude / angle / speed` hold one entry per word of
- * their column, in order (the parser checks it). Step 0 gives every column a word and the runs tile
- * the sentence, so there is always one.
- */
-export function trainingWordAt(
-  flight: TrainingFlight, column: TrainingColumn, row: number,
-): TrainingWordRun & { index: number } {
-  const runs = trainingColumnRuns(flight, column);
-  const index = runs.findIndex((run) => run.row <= row && row < run.endRow);
-  return { ...runs[index], index };
-}
-
-/** The flight's verdicts, counted from the labeller's own checks. */
-export function trainingVerdicts(flight: TrainingFlight) {
-  const heading = flight.envelopes.heading;
-  const judged = heading.filter((item) => item.check.rows > 0);
-  const tubes = flight.envelopes.altitude;
-  const speeds = flight.envelopes.speed.flatMap((span) => (span.check === null ? [] : [span.check]));
-  const issued = new Set(flight.words.events.filter((event) => event.row > 0).map((event) => event.row));
-  return {
-    headingJudged: judged.length,
-    headingContained: judged.filter((item) => item.check.inside === item.check.rows).length,
-    /** Heading words the lead carries to the clearance: no row of their own to judge. */
-    headingNotJudged: heading.length - judged.length,
-    captureTurn: flight.envelopes.approach.captureTurn?.check ?? null,
-    altitudeWords: tubes.length,
-    altitudeContained: tubes.filter((tube) => tube.check.contained).length,
-    speedWords: speeds.length,
-    speedContained: speeds.filter((check) => check.contained).length,
-    instructionsAfterStep0: flight.words.events.filter((event) => event.row > 0).length,
-    silentSteps: flight.rows - 1 - issued.size,
-  };
-}
-
-function parsePlanLine(reader: Reader, key: string, minimum: number): TrainingPlanLine {
-  const line = reader.child(key);
-  const eM = line.numbers("eM");
-  if (eM.length < minimum) line.fail(`holds ${eM.length} points, fewer than ${minimum}`);
-  // ONE outline in two coordinate systems: a length that differs is two shapes drawn as one.
-  return { eM, nM: line.numbers("nM", eM.length), lon: line.numbers("lon", eM.length), lat: line.numbers("lat", eM.length) };
-}
-
-// ── the index ────────────────────────────────────────────────────────────────
-
-function parseCohort(cohort: Reader): TrainingCohort {
-  return {
-    split: cohort.string("split"), perStratum: cohort.count("perStratum", 1), seed: cohort.number("seed"),
-    drawnFrom: cohort.string("drawnFrom"),
-  };
-}
-
-function parseWindowCohort(cohort: Reader): TrainingWindowCohort {
-  return { split: cohort.string("split"), windows: cohort.count("windows", 1), seed: cohort.number("seed"),
-    drawnFrom: cohort.string("drawnFrom") };
-}
-
-function parseSetEntry(entry: Reader): TrainingSetEntry {
-  const fields = {
-    id: entry.string("id"),
-    title: entry.string("title"),
-    file: entry.string("file"),
-    vocabularySha256: entry.string("vocabularySha256"),
-    runwaySha256: entry.string("runwaySha256"),
-    readingRule: entry.string("readingRule"),
-    flights: entry.count("flights"),
-  };
-  const kind = entry.oneOf("kind", TRAINING_SET_KINDS);
-  return kind === TRAINING_TRAFFIC_SET_KIND
-    ? { ...fields, kind, cohort: parseWindowCohort(entry.child("cohort")) }
-    : { ...fields, kind, cohort: parseCohort(entry.child("cohort")) };
-}
-
-/** Parse the manifest. A bad entry is rejected on its own; only a manifest that is not a
- *  manifest at all fails the whole call. */
-export function parseTrainingIndex(raw: unknown): Parsed<TrainingIndex> {
-  const manifest = parseManifest(raw, { name: "manifest", schema: TRAINING_INDEX_SCHEMA, listKey: "sets", entryName: "set" },
-    parseSetEntry);
-  if (!manifest.ok) return manifest;
-  return { ok: true, value: { airport: manifest.value.airport, sets: manifest.value.entries, rejected: manifest.value.rejected } };
-}
-
-/**
- * Why this reader will not open a listed set — by name, from the manifest alone, so a set of a
- * superseded vocabulary is never downloaded — or null when it will.
- */
-export function trainingSetRefusal(entry: TrainingSetEntry): string | null {
-  if (entry.readingRule !== TRAINING_READING_RULE) {
-    return (
-      `read under ${entry.readingRule}, a superseded vocabulary: this reader reads ${TRAINING_READING_RULE} ` +
-      `(spec ${TRAINING_SPEC_SHA256.slice(0, 12)}) and nothing else`
-    );
-  }
-  if (entry.vocabularySha256 !== TRAINING_SPEC_SHA256) {
-    return (
-      `spec ${entry.vocabularySha256.slice(0, 12)} is not the ${TRAINING_READING_RULE} spec ` +
-      `${TRAINING_SPEC_SHA256.slice(0, 12)} this reader is written for`
-    );
-  }
-  if (!(TRAINING_READABLE_SET_KINDS as readonly string[]).includes(entry.kind)) {
-    return `a ${entry.kind} set: this reader opens only ${TRAINING_READABLE_SET_KINDS.join(" and ")} sets (the prior is ` +
-      "drawn over one, as an overlay)";
-  }
-  return null;
-}
-
-// ── one sample set ───────────────────────────────────────────────────────────
-
-function parseVocabulary(reader: Reader): TrainingVocabulary {
-  const rule = reader.string("readingRule");
-  if (rule !== TRAINING_READING_RULE) {
-    reader.fail(`readingRule is ${rule}, and this reader is written for ${TRAINING_READING_RULE} — re-export under the current vocabulary`);
-  }
-  const sha = reader.string("specSha256");
-  if (sha !== TRAINING_SPEC_SHA256) {
-    reader.fail(`specSha256 is ${sha.slice(0, 12)}, and this reader is written for spec ${TRAINING_SPEC_SHA256.slice(0, 12)}`);
-  }
-  reader.sameNames("columns", TRAINING_COLUMNS);
-  if (reader.number("unchanged") !== TRAINING_UNCHANGED) {
-    reader.fail(`unchanged is ${reader.raw("unchanged")}, expected ${TRAINING_UNCHANGED}`);
-  }
-  const counts = reader.child("classCounts");
-  const classCounts = {
-    approach: counts.count("approach", 1),
-    heading: counts.count("heading", 1),
-    altitude: counts.count("altitude", 1),
-    angle: counts.count("angle", 1),
-    speed: counts.count("speed", 1),
-  };
-  const approachClasses = reader.strings("approachClasses");
-  const unnamed = [TRAINING_APPROACH_CLEARED, TRAINING_APPROACH_GO_AROUND].filter((name) => !approachClasses.includes(name));
-  if (unnamed.length > 0) reader.fail(`approachClasses [${approachClasses.join(", ")}] name no "${unnamed.join('", "')}" word`);
-  const headingTargetsDeg = reader.numbers("headingTargetsDeg");
-  const altitudeTargetsM = reader.numbers("altitudeTargetsM");
-  const speedTargetsMps = reader.numbers("speedTargetsMps");
-  const angleClasses = reader.children("angleClasses").map((angle, index) => {
-    if (angle.number("value") !== index) angle.fail(`value is ${angle.raw("value")}, expected ${index}: the table is in class order`);
-    return {
-      value: index, name: angle.string("name"), nominalDeg: angle.number("nominalDeg"),
-      lowDeg: angle.number("lowDeg"), steepDeg: angle.number("steepDeg"),
-    };
-  });
-  // Each table against the count the vocabulary states: a table one short shifts every word.
-  const tables: Array<[string, number, number]> = [
-    ["approachClasses", approachClasses.length, classCounts.approach],
-    ["headingTargetsDeg", headingTargetsDeg.length, classCounts.heading],
-    ["altitudeTargetsM (+ descend to land)", altitudeTargetsM.length + 1, classCounts.altitude],
-    ["angleClasses", angleClasses.length, classCounts.angle],
-    ["speedTargetsMps (+ unspecified)", speedTargetsMps.length + 1, classCounts.speed],
-  ];
-  for (const [name, held, stated] of tables) {
-    if (held !== stated) reader.fail(`${name} holds ${held} classes, but classCounts says ${stated}`);
-  }
-  const altitudeLandValue = reader.number("altitudeLandValue");
-  if (altitudeLandValue !== altitudeTargetsM.length) {
-    reader.fail(`altitudeLandValue is ${altitudeLandValue}, expected ${altitudeTargetsM.length} (one past the last target)`);
-  }
-  const angleLevelValue = reader.integer("angleLevelValue", 0, angleClasses.length - 1);
-  const speedUnspecifiedValue = reader.number("speedUnspecifiedValue");
-  if (speedUnspecifiedValue !== speedTargetsMps.length) {
-    reader.fail(`speedUnspecifiedValue is ${speedUnspecifiedValue}, expected ${speedTargetsMps.length} (one past the last target)`);
-  }
-  const smoothing = reader.child("smoothingS");
-  const stepS = reader.number("stepS");
-  // The lead in seconds and in steps are one number: a word's first judged row is its own row plus the steps.
-  const headingLeadS = reader.number("headingLeadS");
-  const headingLeadRows = reader.count("headingLeadRows", 0);
-  if (Math.abs(headingLeadRows * stepS - headingLeadS) > 1e-9) {
-    reader.fail(`headingLeadRows is ${headingLeadRows}, but ${headingLeadRows} steps of ${stepS} s are not headingLeadS ${headingLeadS} s`);
-  }
-  return {
-    readingRule: rule,
-    specSha256: sha,
-    labellerSourceSha256: reader.string("labellerSourceSha256"),
-    stepS,
-    smoothingS: { track: smoothing.number("track"), altitude: smoothing.number("altitude"), speed: smoothing.number("speed") },
-    classCounts,
-    approachClasses,
-    headingTargetsDeg,
-    headingLeadS,
-    headingLeadRows,
-    headingToleranceDeg: reader.number("headingToleranceDeg"),
-    turnOnsetRateDegS: reader.number("turnOnsetRateDegS"),
-    turnRateMinDegS: reader.number("turnRateMinDegS"),
-    turnRateMaxDegS: reader.number("turnRateMaxDegS"),
-    turnRateMinFromDeg: reader.number("turnRateMinFromDeg"),
-    turnBankMaxDeg: reader.number("turnBankMaxDeg"),
-    interceptAngleDeg: reader.number("interceptAngleDeg"),
-    corridorHalfWidthM: reader.number("corridorHalfWidthM"),
-    corridorWideningDeg: reader.number("corridorWideningDeg"),
-    corridorCourseToleranceDeg: reader.number("corridorCourseToleranceDeg"),
-    landingCrossLimitM: reader.number("landingCrossLimitM"),
-    landingMaxHeightM: reader.number("landingMaxHeightM"),
-    parallelCourseDeltaDeg: reader.number("parallelCourseDeltaDeg"),
-    altitudeTargetsM,
-    altitudeLandValue,
-    altitudeToleranceM: reader.number("altitudeToleranceM"),
-    angleClasses,
-    angleLevelValue,
-    speedTargetsMps,
-    speedUnspecifiedValue,
-    speedToleranceMps: reader.number("speedToleranceMps"),
-    speedAccelMaxMps2: reader.number("speedAccelMaxMps2"),
-    speedRangeMps: reader.range("speedRangeMps"),
-  };
-}
-
-function parseCandidates(reader: Reader, vocabulary: TrainingVocabulary): TrainingCandidate[] {
-  const candidates = reader.children("candidates").map((candidate, index) => {
-    if (candidate.number("index") !== index) candidate.fail(`index is ${candidate.raw("index")}, expected ${index}`);
-    // A parallel runway can only tighten the landing's limit, never loosen it.
-    const landingCrossLimitM = candidate.number("landingCrossLimitM");
-    if (!(landingCrossLimitM > 0 && landingCrossLimitM <= vocabulary.landingCrossLimitM)) {
-      candidate.fail(`landingCrossLimitM is ${landingCrossLimitM}, not in (0, ${vocabulary.landingCrossLimitM}] m`);
-    }
-    return {
-      index,
-      ident: candidate.string("ident"),
-      thresholdEM: candidate.number("thresholdEM"),
-      thresholdNM: candidate.number("thresholdNM"),
-      courseDeg: candidate.number("courseDeg"),
-      elevationM: candidate.number("elevationM"),
-      lengthM: candidate.number("lengthM"),
-      landingCrossLimitM,
-      centreline: parsePlanLine(candidate, "centreline", 2),
-      runway: parsePlanLine(candidate, "runway", 2),
-    };
-  });
-  if (candidates.length === 0) reader.fail("candidates is empty: the runway pointer has nothing to point at");
-  return candidates;
-}
-
-function parseTurnCheck(reader: Reader): TrainingTurnCheck {
-  return {
-    progressOk: reader.boolean("progressOk"),
-    rateOk: reader.boolean("rateOk"),
-    meanRateDegS: reader.number("meanRateDegS"),
-    maxRateDegS: reader.number("maxRateDegS"),
-    maxBankDeg: reader.number("maxBankDeg"),
-    rateMinApplies: reader.boolean("rateMinApplies"),
-  };
-}
-
-function parseSignals(reader: Reader, rows: number, stepS: number): TrainingSignals {
-  const tS = reader.numbers("tS", rows);
-  if (tS[0] !== 0) reader.fail(`tS starts at ${tS[0]} s, not 0`);
-  for (let row = 1; row < rows; row += 1) {
-    if (Math.abs(tS[row] - tS[row - 1] - stepS) > 1e-3) {
-      reader.fail(`tS steps ${tS[row - 1]} → ${tS[row]} at row ${row}, not the vocabulary's ${stepS} s`);
-    }
-  }
-  const raw = reader.child("raw");
-  const smoothed = reader.child("smoothed");
-  const distanceM = smoothed.numbers("distanceM", rows);
-  for (let row = 1; row < rows; row += 1) {
-    if (distanceM[row] < distanceM[row - 1]) smoothed.fail(`distanceM falls at row ${row}: a path length only grows`);
-  }
-  return {
-    tS,
-    eM: reader.numbers("eM", rows),
-    nM: reader.numbers("nM", rows),
-    lon: reader.numbers("lon", rows),
-    lat: reader.numbers("lat", rows),
-    altitudeHaeM: reader.numbers("altitudeHaeM", rows),
-    raw: {
-      trackDeg: raw.numbers("trackDeg", rows),
-      altitudeM: raw.numbers("altitudeM", rows),
-      groundSpeedMps: raw.numbers("groundSpeedMps", rows),
-      verticalRateMps: raw.numbers("verticalRateMps", rows),
-    },
-    smoothed: {
-      trackDeg: smoothed.numbers("trackDeg", rows),
-      altitudeM: smoothed.numbers("altitudeM", rows),
-      groundSpeedMps: smoothed.numbers("groundSpeedMps", rows),
-      distanceM,
-    },
-    beforeThresholdM: reader.numbers("beforeThresholdM", rows),
-    rightOfCourseM: reader.numbers("rightOfCourseM", rows),
-    attitude: readAttitude(reader.child("attitude"), rows),
-  };
-}
-
-function parseWords(
-  reader: Reader, rows: number, counts: number[],
-): { events: TrainingWordEvent[]; inForce: number[][] } {
-  const events = reader.children("events").map((event) => {
-    const column = event.integer("column", 0, TRAINING_COLUMNS.length - 1);
-    return {
-      row: event.integer("row", 0, rows - 1),
-      column,
-      value: event.integer("value", 0, counts[column] - 1),
-      kind: event.oneOf("kind", TRAINING_WORD_KINDS),
-    };
-  });
-  events.forEach((event, index) => {
-    const previous = events[index - 1];
-    if (previous && (previous.row > event.row || (previous.row === event.row && previous.column >= event.column))) {
-      reader.fail(`events are not in (row, column) order at ${index}: one cell, one word`);
-    }
-  });
-  // STEP 0 IS COMPLETE: the sentence opens with the six words already in force.
-  const opening = events.filter((event) => event.row === 0).map((event) => event.column);
-  if (opening.length !== TRAINING_COLUMNS.length) {
-    const missing = TRAINING_COLUMNS.filter((_, column) => !opening.includes(column));
-    reader.fail(`step 0 carries no word for ${missing.join(", ")} — step 0 gives all six`);
-  }
-  const inForce = reader.list("inForce");
-  if (inForce.length !== TRAINING_COLUMNS.length) reader.fail(`inForce has ${inForce.length} columns, expected ${TRAINING_COLUMNS.length}`);
-  const table = inForce.map((values, column) => {
-    if (!Array.isArray(values) || values.length !== rows || !values.every((value) => Number.isInteger(value))) {
-      reader.fail(`inForce.${TRAINING_COLUMNS[column]} is not ${rows} whole numbers, one per step`);
-    }
-    return values as number[];
-  });
-  // The per-row table is the events filled forward — two spellings of one sentence.
-  TRAINING_COLUMNS.forEach((name, column) => {
-    let value = TRAINING_UNCHANGED;
-    const issued = new Map(events.filter((event) => event.column === column).map((event) => [event.row, event.value]));
-    for (let row = 0; row < rows; row += 1) {
-      value = issued.get(row) ?? value;
-      if (table[column][row] !== value) {
-        reader.fail(`inForce.${name}[${row}] is ${table[column][row]}, but the events put ${value} in force there`);
-      }
-    }
-  });
-  return { events, inForce: table };
-}
-
-function eventsOf(events: TrainingWordEvent[], column: TrainingColumn): TrainingWordEvent[] {
-  return events.filter((event) => event.column === TRAINING_COLUMN_INDEX[column]);
-}
-
-/** One envelope per word of its column, in the sentence's order: its row and its value. */
-function matchWord(item: Reader, event: TrainingWordEvent | undefined, index: number, column: TrainingColumn): void {
-  if (event === undefined) item.fail(`there is no ${column} word ${index} for it to belong to`);
-  if (item.number("row") !== event.row || item.number("value") !== event.value || item.string("kind") !== event.kind) {
-    item.fail(`is (row ${item.raw("row")}, value ${item.raw("value")}), but the sentence's ${column} word ${index} is ` +
-              `(row ${event.row}, value ${event.value}, ${event.kind})`);
-  }
-}
-
-/**
- * Where a heading band's rows end: EXACTLY at ``stop`` — the sample's own words, whose stop the reader knows (the next
- * heading word's row plus the lead, never past the clearance: `envelope.heading_word_rows`) — or BY it: a band the
- * executor's judge drew on flown rows, which end where its own clearance, capture or track do.
- */
-export type TrainingBandStop = { exactly: number } | { by: number };
-
-/**
- * What is wrong with a heading word's band by the bookkeeping alone, or null: its first row is the word's own plus the
- * lead, its rows run forward and end at (or by) its stop — or it has none when the lead carries it there — one
- * verdict per row, and the band is the word's target ± the vocabulary's tolerance on some branch.
- */
-function headingBandProblem(
-  band: TrainingHeadingBand, wordRow: number, targetDeg: number, vocabulary: TrainingVocabulary, stop: TrainingBandStop,
-): string | null {
-  const first = wordRow + vocabulary.headingLeadRows;
-  if (band.firstRow !== first) {
-    return `firstRow is ${band.firstRow}, but a word told at step ${wordRow} is judged from ${first} (the ` +
-      `${vocabulary.headingLeadS} s lead)`;
-  }
-  if ("exactly" in stop) {
-    const expected = Math.max(first, stop.exactly);
-    if (band.stopRow !== expected) return `stopRow is ${band.stopRow}, but this word's rows end at ${expected}`;
-  } else {
-    const stopMax = Math.max(first, stop.by);
-    if (!(band.firstRow <= band.stopRow && band.stopRow <= stopMax)) return `stopRow is ${band.stopRow}, not in ${band.firstRow}…${stopMax}`;
-  }
-  if (band.inside.length !== band.stopRow - band.firstRow) {
-    return `inside holds ${band.inside.length} verdicts for the ${band.stopRow - band.firstRow} rows judged`;
-  }
-  const turns = (band.targetOnTrackDeg - targetDeg) / 360;
-  if (Math.abs(turns - Math.round(turns)) > 1e-5) {
-    return `targetOnTrackDeg is ${band.targetOnTrackDeg}, not the word's ${targetDeg}° on any branch`;
-  }
-  const tolerance = vocabulary.headingToleranceDeg;
-  if (Math.abs(band.bandDeg[0] - (band.targetOnTrackDeg - tolerance)) > 2e-3
-      || Math.abs(band.bandDeg[1] - (band.targetOnTrackDeg + tolerance)) > 2e-3) {
-    return `bandDeg is [${band.bandDeg.join(", ")}], not ${band.targetOnTrackDeg}° ± the vocabulary's ${tolerance}°`;
-  }
-  return null;
-}
-
-/**
- * The rows judged outside, as inclusive [first, last] row spans to DRAW on a line of rows `0..lastRow`: ``inside``
- * holds one verdict per row from ``firstRow``, and each run of rows outside is carried on to the next row, so that one
- * row outside is a segment (back to the row before it at the line's end) — never a single point, which draws nothing.
- * One rule for every verdict drawn red — a heading band's rows, a tube's, a speed band's — in the read-back window and
- * the 3D scene alike; the verdicts are the file's own.
+ * The rows judged outside, as inclusive [first, last] row spans to DRAW on a line of rows `0..lastRow`: ``inside`` holds
+ * one verdict per row from ``firstRow``, and each run of rows outside is carried on to the next row, so that one row
+ * outside is a segment (back to the row before it at the line's end) — never a single point, which draws nothing. One
+ * rule for every verdict drawn red; the verdicts are the file's own.
  */
 export function outsideSpans(inside: boolean[], firstRow: number, lastRow: number): Array<[number, number]> {
   const spans: Array<[number, number]> = [];
@@ -1001,299 +569,402 @@ export function outsideSpans(inside: boolean[], firstRow: number, lastRow: numbe
   return spans.filter(([first, last]) => last > first);
 }
 
-/** A heading word's band as a file writes it, checked by `headingBandProblem`. */
-export function readHeadingBand(
-  item: Reader, wordRow: number, targetDeg: number, vocabulary: TrainingVocabulary, stop: TrainingBandStop,
-): TrainingHeadingBand {
-  const firstRow = item.integer("firstRow", 0, Number.MAX_SAFE_INTEGER);
-  const stopRow = item.integer("stopRow", firstRow, Number.MAX_SAFE_INTEGER);
-  const band = {
-    firstRow, stopRow, targetOnTrackDeg: item.number("targetOnTrackDeg"), bandDeg: item.range("bandDeg"),
-    inside: item.flags("inside", stopRow - firstRow),
-  };
-  const problem = headingBandProblem(band, wordRow, targetDeg, vocabulary, stop);
-  if (problem !== null) item.fail(problem);
-  return band;
+/** Track degrees made continuous (no jump of more than 180° between neighbours), and — with a ``reference`` — shifted by
+ *  whole turns so the first value is the nearest to it: the branch a chart draws a heading on. Drawing only: the
+ *  verdicts are the file's. */
+export function unwrapDegrees(values: number[], reference?: number): number[] {
+  const out = [...values];
+  for (let i = 1; i < out.length; i += 1) out[i] = out[i - 1] + (((values[i] - values[i - 1] + 540) % 360) - 180);
+  if (reference === undefined || out.length === 0) return out;
+  const turns = Math.round((reference - out[0]) / 360);
+  return out.map((value) => value + 360 * turns);
 }
 
-function parseHeading(reader: Reader, events: TrainingWordEvent[], vocabulary: TrainingVocabulary, joinRow: number) {
-  const words = eventsOf(events, "heading");
-  const list = reader.children("heading");
-  if (list.length !== words.length) reader.fail(`heading holds ${list.length} envelopes for ${words.length} heading words`);
-  return list.map((item, index): TrainingHeadingEnvelope => {
-    matchWord(item, words[index], index, "heading");
-    const word = words[index];
-    const targetDeg = item.number("targetDeg");
-    if (targetDeg !== vocabulary.headingTargetsDeg[word.value]) {
-      item.fail(`targetDeg is ${targetDeg}, but word ${word.value} is ${vocabulary.headingTargetsDeg[word.value]}°`);
-    }
-    // A word's rows end at the next word's first row, and never past the clearance (`envelope.heading_word_rows`).
-    const next = words[index + 1];
-    const stop = next === undefined ? joinRow : Math.min(next.row + vocabulary.headingLeadRows, joinRow);
-    const band = readHeadingBand(item, word.row, targetDeg, vocabulary, { exactly: stop });
-    // THE CHECK counts exactly the drawn rows and their verdicts.
-    const check = item.child("check");
-    const rows = check.integer("rows", band.stopRow - band.firstRow, band.stopRow - band.firstRow);
-    const counted = band.inside.filter(Boolean).length;
-    const insideCount = check.integer("inside", 0, rows);
-    if (insideCount !== counted) check.fail(`says ${insideCount} rows inside, but the band's own flags count ${counted}`);
-    return { row: word.row, value: word.value, kind: word.kind, targetDeg, ...band, check: { rows, inside: insideCount } };
-  });
+/** ``target`` (compass degrees) on the branch nearest to ``reference``: a band is drawn on the branch of the track. */
+export function nearestBranch(target: number, reference: number): number {
+  return target + 360 * Math.round((reference - target) / 360);
 }
 
-function parseApproach(reader: Reader, flight: { rows: number; captureRow: number; joinRow: number }): TrainingApproach {
-  const approach = reader.child("approach");
-  if (approach.number("clearanceRow") !== flight.joinRow) approach.fail(`clearanceRow is ${approach.raw("clearanceRow")}, the flight's joinRow ${flight.joinRow}`);
-  if (approach.number("captureRow") !== flight.captureRow) approach.fail(`captureRow is ${approach.raw("captureRow")}, the flight's ${flight.captureRow}`);
-  const capture = approach.nullableChild("captureTurn");
-  const corridor = approach.child("corridor");
-  const rows = corridor.integer("rows", 1, flight.rows);
-  if (rows !== flight.rows - flight.captureRow) {
-    corridor.fail(`rows is ${rows}, but the capture at row ${flight.captureRow} leaves ${flight.rows - flight.captureRow}`);
-  }
-  // The capture turn runs from the clearance to the capture; a flight on the final at step 0 has none.
-  if ((capture === null) !== (flight.captureRow === 0)) {
-    approach.fail(`captureTurn is ${capture === null ? "absent" : "given"} with the capture at step ${flight.captureRow}`);
-  }
-  const captureTurn = (turn: Reader) => ({
-    startRow: turn.integer("startRow", flight.joinRow, flight.joinRow),
-    endRow: turn.integer("endRow", flight.captureRow, flight.captureRow),
-    courseOnTrackDeg: turn.number("courseOnTrackDeg"),
-    check: parseTurnCheck(turn.child("check")),
-  });
-  const landing = approach.child("landing");
-  const crossing = landing.nullableChild("crossing");
-  const cutAtCrossing = landing.boolean("cutAtCrossing");
-  if (cutAtCrossing !== (crossing !== null)) landing.fail("the crossing row is given exactly when the sentence was cut at it");
+// ── the index ────────────────────────────────────────────────────────────────
+
+function parseCohort(cohort: Reader): TrainingCohort {
   return {
-    clearanceRow: flight.joinRow,
-    captureRow: flight.captureRow,
-    captureBeforeThresholdM: approach.number("captureBeforeThresholdM"),
-    captureTurn: capture === null ? null : captureTurn(capture),
-    courseBandDeg: approach.range("courseBandDeg"),
-    corridor: {
-      beforeThresholdM: corridor.number("beforeThresholdM"),
-      halfWidthAtCaptureM: corridor.number("halfWidthAtCaptureM"),
-      halfWidthAtThresholdM: corridor.number("halfWidthAtThresholdM"),
-      rows,
-      axis: parsePlanLine(corridor, "axis", 2),
-      outline: parsePlanLine(corridor, "outline", 3),
+    splits: cohort.record("splits", (value, where) => {
+      if (typeof value !== "number" || !Number.isInteger(value) || value < 0) throw new Error(`${where} is not a count`);
+      return value;
+    }),
+    perStratum: cohort.count("perStratum", 1), strata: cohort.strings("strata"), seed: cohort.number("seed"),
+    drawnFrom: cohort.string("drawnFrom"),
+  };
+}
+
+function parseFormats(reader: Reader): Record<string, string> {
+  return reader.record("formats", (value, where) => {
+    if (typeof value !== "string" || value.length === 0) throw new Error(`${where} is not a format name`);
+    return value;
+  });
+}
+
+function parseSource(reader: Reader): TrainingSource {
+  const git = reader.child("git");
+  return {
+    instructions: reader.string("instructions"), executor: reader.string("executor"), specSha256: reader.string("specSha256"),
+    executorSpecSha256: reader.string("executorSpecSha256"), git: { head: git.string("head"), dirty: git.boolean("dirty") },
+  };
+}
+
+function parseSetEntry(entry: Reader): TrainingSetEntry {
+  entry.oneOf("kind", [TRAINING_SET_KIND]);
+  entry.oneOf("readingRule", [TRAINING_READING_RULE]);
+  return {
+    id: entry.string("id"), title: entry.string("title"), file: entry.string("file"), flights: entry.count("flights"),
+    formats: parseFormats(entry), cohort: parseCohort(entry.child("cohort")), source: parseSource(entry.child("source")),
+  };
+}
+
+/** Parse the index. A bad entry is rejected on its own; only an index that is not an index at all fails the call — and a
+ *  schema other than `TRAINING_INDEX_SCHEMA` is refused whole, naming the one found and the one expected. */
+export function parseTrainingIndex(raw: unknown): Parsed<TrainingIndex> {
+  const manifest = parseManifest(raw, { name: "index", schema: TRAINING_INDEX_SCHEMA, listKey: "sets", entryName: "set" },
+    parseSetEntry);
+  if (!manifest.ok) return manifest;
+  return { ok: true, value: { airport: manifest.value.airport, sets: manifest.value.entries, rejected: manifest.value.rejected } };
+}
+
+// ── one set ──────────────────────────────────────────────────────────────────
+
+function parseVocabulary(reader: Reader): TrainingVocabulary {
+  reader.oneOf("readingRule", [TRAINING_READING_RULE]);
+  reader.sameNames("columns", TRAINING_COLUMNS);
+  const angleClasses = reader.children("angleClasses").map((angle, index) => {
+    if (angle.number("index") !== index) angle.fail(`index is ${angle.raw("index")}, expected ${index}: the table is in class order`);
+    return {
+      index, name: angle.string("name"), nominalDeg: angle.number("nominalDeg"), lowDeg: angle.number("lowDeg"),
+      highDeg: angle.number("highDeg"),
+    };
+  });
+  const levels = reader.numbers("altitudeLevelsM");
+  const speed = reader.child("speed");
+  const rowIntervalsS = reader.numbers("rowIntervalsS");
+  if (rowIntervalsS.length === 0) reader.fail("rowIntervalsS is empty: there is no closed-loop sentence to read");
+  return {
+    readingRule: TRAINING_READING_RULE, stepS: reader.number("stepS"), headingStepDeg: reader.number("headingStepDeg"),
+    headingLeadS: reader.number("headingLeadS"), headingToleranceDeg: reader.number("headingToleranceDeg"),
+    altitudeLevelsM: levels, altitudeTolerancesM: reader.numbers("altitudeTolerancesM", levels.length),
+    noLevelOff: reader.integer("noLevelOff", 0, Number.MAX_SAFE_INTEGER), angleClasses,
+    speed: {
+      minMps: speed.number("minMps"), stepMps: speed.number("stepMps"), levels: speed.count("levels", 1),
+      unspecified: speed.count("unspecified"), toleranceMps: speed.number("toleranceMps"),
     },
-    landing: {
-      cutAtCrossing,
-      lastRowBeforeThresholdM: landing.number("lastRowBeforeThresholdM"),
-      crossing: crossing === null ? null : {
-        row: crossing.integer("row", flight.rows, flight.rows),
-        eM: crossing.number("eM"), nM: crossing.number("nM"), lon: crossing.number("lon"), lat: crossing.number("lat"),
+    closedLoopLateralM: reader.number("closedLoopLateralM"), closedLoopVerticalM: reader.number("closedLoopVerticalM"),
+    rowIntervalsS,
+  };
+}
+
+function parseCandidates(reader: Reader): TrainingCandidate[] {
+  const candidates = reader.children("candidates").map((candidate, index) => {
+    if (candidate.number("index") !== index) candidate.fail(`index is ${candidate.raw("index")}, expected ${index}`);
+    const path = candidate.child("verticalPath");
+    return {
+      index, ident: candidate.string("ident"), thresholdEM: candidate.number("thresholdEM"),
+      thresholdNM: candidate.number("thresholdNM"), latDeg: candidate.number("latDeg"), lonDeg: candidate.number("lonDeg"),
+      courseDeg: candidate.number("courseDeg"), elevationM: candidate.number("elevationM"),
+      lengthM: candidate.number("lengthM"), haeMinusMslM: candidate.number("haeMinusMslM"),
+      verticalPath: {
+        crossingHeightM: path.number("crossingHeightM"), glidepathDeg: path.number("glidepathDeg"),
+        decisionHeightM: path.number("decisionHeightM"),
       },
-    },
-  };
-}
-
-function parseAltitude(reader: Reader, events: TrainingWordEvent[], vocabulary: TrainingVocabulary, rows: number) {
-  const words = eventsOf(events, "altitude");
-  const list = reader.children("altitude");
-  if (list.length !== words.length) reader.fail(`altitude holds ${list.length} tubes for ${words.length} altitude words`);
-  return list.map((item, index): TrainingAltitudeTube => {
-    matchWord(item, words[index], index, "altitude");
-    const endRow = index + 1 < words.length ? words[index + 1].row : rows;
-    if (item.number("endRow") !== endRow) item.fail(`endRow is ${item.raw("endRow")}, but the next altitude word opens at ${endRow}`);
-    const value = words[index].value;
-    const targetM = item.nullableNumber("targetM");
-    const expected = value === vocabulary.altitudeLandValue ? null : vocabulary.altitudeTargetsM[value];
-    if (targetM !== expected) item.fail(`targetM is ${targetM}, but word ${value} is ${expected === null ? "descend to land" : `${expected} m`}`);
-    const length = endRow - words[index].row;
-    const lowerM = item.numbers("lowerM", length);
-    const upperM = item.numbers("upperM", length);
-    lowerM.forEach((low, offset) => {
-      if (low > upperM[offset]) item.fail(`is inverted at row ${words[index].row + offset}: ${low} above ${upperM[offset]}`);
-    });
-    const inside = item.flags("inside", length);
-    const check = item.child("check");
-    const tube = {
-      rows: check.integer("rows", length, length),
-      inside: check.integer("inside", 0, length),
-      contained: check.boolean("contained"),
-      tubeWidthEndM: check.number("tubeWidthEndM"),
-    };
-    const counted = inside.filter(Boolean).length;
-    if (counted !== tube.inside) check.fail(`says ${tube.inside} rows inside, but the tube's own flags count ${counted}`);
-    if (tube.contained !== (counted === length)) check.fail(`contained is ${tube.contained} with ${counted} of ${length} rows inside`);
-    return {
-      row: words[index].row, endRow, value, kind: words[index].kind, targetM, lowerM, upperM,
-      lowerHaeM: item.numbers("lowerHaeM", length), upperHaeM: item.numbers("upperHaeM", length), inside, check: tube,
     };
   });
+  if (candidates.length === 0) reader.fail("candidates is empty: the runway word has nothing to point at");
+  return candidates;
 }
 
-function parseAngle(reader: Reader, events: TrainingWordEvent[], vocabulary: TrainingVocabulary) {
-  const words = eventsOf(events, "angle");
-  const list = reader.children("angle");
-  if (list.length !== words.length) reader.fail(`angle holds ${list.length} entries for ${words.length} angle words`);
-  return list.map((item, index): TrainingAngleWord => {
-    matchWord(item, words[index], index, "angle");
-    const measuredDeg = item.nullableNumber("measuredDeg");
-    if ((measuredDeg === null) !== (words[index].value === vocabulary.angleLevelValue)) {
-      item.fail("a measured angle is given for every class but level, which is a target reached");
+/** The word grid (``[rows][5]``, "unchanged" = -1). */
+function parseGrid(reader: Reader, key: string, rows?: number): number[][] {
+  const grid = reader.list(key).map((row, index) => {
+    if (!Array.isArray(row) || row.length !== TRAINING_COLUMNS.length || !row.every((value) => Number.isInteger(value))) {
+      reader.fail(`${key}[${index}] is not ${TRAINING_COLUMNS.length} whole numbers, one per column`);
     }
-    return { row: words[index].row, value: words[index].value, kind: words[index].kind, measuredDeg };
+    return row as number[];
   });
+  if (rows !== undefined && grid.length !== rows) reader.fail(`${key} holds ${grid.length} rows, expected ${rows}`);
+  if (grid.length === 0) reader.fail(`${key} is empty`);
+  return grid;
 }
 
-function parseSpeed(reader: Reader, events: TrainingWordEvent[], vocabulary: TrainingVocabulary, rows: number) {
-  const words = eventsOf(events, "speed");
-  const list = reader.children("speed");
-  if (list.length !== words.length) reader.fail(`speed holds ${list.length} spans for ${words.length} speed words`);
-  return list.map((item, index): TrainingSpeedSpan => {
-    matchWord(item, words[index], index, "speed");
-    const row = words[index].row;
-    const endRow = index + 1 < words.length ? words[index + 1].row : rows;
-    if (item.number("endRow") !== endRow) item.fail(`endRow is ${item.raw("endRow")}, but the next speed word opens at ${endRow}`);
-    const value = words[index].value;
-    const targetMps = item.nullableNumber("targetMps");
-    const unspecified = value === vocabulary.speedUnspecifiedValue;
-    const expected = unspecified ? null : vocabulary.speedTargetsMps[value];
-    if (targetMps !== expected) item.fail(`targetMps is ${targetMps}, but word ${value} is ${expected === null ? "unspecified" : `${expected} m/s`}`);
-    if (unspecified) {
-      for (const key of ["arrivalRow", "transitionLowerMps", "transitionUpperMps", "bandMps", "bandInside", "check"]) {
-        if (item.raw(key) !== null) item.fail(`${key} is given for "unspecified", which has only the range`);
+function parseSays(reader: Reader, column: number, value: number, candidates: TrainingCandidate[]): TrainingSays {
+  switch (TRAINING_COLUMNS[column]) {
+    case "runway": {
+      if (reader.raw("goAround") !== undefined) {
+        if (reader.boolean("goAround") !== true) reader.fail("goAround is false");
+        return { column: "runway", goAround: true };
       }
-      const rangeMps = item.range("rangeMps");
-      if (rangeMps.some((bound, end) => Math.abs(bound - vocabulary.speedRangeMps[end]) > 1e-3)) {
-        item.fail(`rangeMps is [${rangeMps.join(", ")}], not the vocabulary's speed range [${vocabulary.speedRangeMps.join(", ")}]`);
-      }
-      return {
-        row, endRow, value, kind: words[index].kind, targetMps: null, arrivalRow: null, transitionLowerMps: null,
-        transitionUpperMps: null, bandMps: null, bandInside: null, check: null, rangeMps,
-      };
+      const runwayIndex = reader.integer("runwayIndex", 0, candidates.length - 1);
+      const runway = reader.string("runway");
+      if (candidates[runwayIndex].ident !== runway) reader.fail(`runway ${runway} is not candidate ${runwayIndex}'s (${candidates[runwayIndex].ident})`);
+      return { column: "runway", goAround: false, runway, runwayIndex };
     }
-    if (item.raw("rangeMps") !== null) item.fail("rangeMps is given for a target, which has a band instead");
-    const check = item.child("check");
-    const cut = check.boolean("cutBeforeArrival");
-    const arrivalRow = item.nullableInteger("arrivalRow", row, endRow - 1);
-    if (cut !== (arrivalRow === null)) item.fail("arrivalRow is given exactly when the band is reached before the next word");
-    const transitionRows = (arrivalRow === null ? endRow - 1 : arrivalRow) - row + 1;
-    const bandRows = arrivalRow === null ? 0 : endRow - arrivalRow;
-    const bandInside = arrivalRow === null ? null : item.flags("bandInside", bandRows);
-    if (arrivalRow === null && item.raw("bandInside") !== null) item.fail("bandInside is given, but the band is never reached");
-    const verdict = {
-      arrivalRows: check.integer("arrivalRows", (arrivalRow ?? endRow) - row, (arrivalRow ?? endRow) - row),
-      cutBeforeArrival: cut,
-      transitionOk: check.boolean("transitionOk"),
-      accelOk: check.boolean("accelOk"),
-      bandRows: check.integer("bandRows", bandRows, bandRows),
-      bandInside: check.integer("bandInside", 0, bandRows),
-      contained: check.boolean("contained"),
-    };
-    const counted = bandInside === null ? 0 : bandInside.filter(Boolean).length;
-    if (counted !== verdict.bandInside) check.fail(`says ${verdict.bandInside} band rows inside, but the band's own flags count ${counted}`);
-    if (verdict.contained !== (verdict.transitionOk && counted === bandRows)) {
-      check.fail(`contained is ${verdict.contained}, with the transition ${verdict.transitionOk ? "ok" : "failed"} and ${counted} of ${bandRows} band rows inside`);
-    }
-    return {
-      row, endRow, value, kind: words[index].kind, targetMps, arrivalRow,
-      transitionLowerMps: item.numbers("transitionLowerMps", transitionRows),
-      transitionUpperMps: item.numbers("transitionUpperMps", transitionRows),
-      bandMps: item.range("bandMps"), bandInside, check: verdict, rangeMps: null,
-    };
-  });
+    case "heading":
+      return { column: "heading", relativeDeg: reader.number("relativeDeg"), trackDeg: reader.number("trackDeg") };
+    case "altitude":
+      return reader.boolean("noLevelOff")
+        ? { column: "altitude", noLevelOff: true }
+        : { column: "altitude", noLevelOff: false, levelM: reader.number("levelM"), mslM: reader.number("mslM") };
+    case "angle":
+      return { column: "angle", angleDeg: reader.number("angleDeg"), climb: reader.boolean("climb"), level: reader.boolean("level") };
+    case "speed":
+      return { column: "speed", speedMps: reader.nullableNumber("speedMps") };
+  }
+  return reader.fail(`column ${column} (value ${value}) is none of the five`);
 }
 
-function parseFlight(flight: Reader, vocabulary: TrainingVocabulary, candidates: TrainingCandidate[]): TrainingFlight {
-  const rows = flight.count("rows", 2);
-  const runwayIndex = flight.integer("runwayIndex", 0, candidates.length - 1);
-  const runway = flight.string("runway");
-  if (runway !== candidates[runwayIndex].ident) {
-    flight.fail(`runway is ${runway}, but candidate ${runwayIndex} is ${candidates[runwayIndex].ident}`);
+/** A sentence's events, checked to be exactly the words of its grid, in (row, column) order. */
+function parseEvents(reader: Reader, grid: number[][], candidates: TrainingCandidate[], corrections: boolean): TrainingEvent[] {
+  const events = reader.children("events").map((event) => {
+    const column = event.integer("column", 0, TRAINING_COLUMNS.length - 1);
+    const value = event.integer("value", TRAINING_RUNWAY_GO_AROUND, Number.MAX_SAFE_INTEGER);
+    const correction = event.boolean("correction");
+    if (correction && !corrections) event.fail("correction is true in the open-loop sentence, which no reading adds words to");
+    const says = parseSays(event.child("says"), column, value, candidates);
+    if ((says.column === "runway" && says.goAround) !== (value === TRAINING_RUNWAY_GO_AROUND)) {
+      event.fail(`value ${value} and what it says disagree about the go-around`);
+    }
+    return { row: event.integer("row", 0, grid.length - 1), column, value, correction, says };
+  });
+  const words = grid.flatMap((row, r) => row.flatMap((value, column) => (value === TRAINING_UNCHANGED ? [] : [{ row: r, column, value }])));
+  if (words.length !== events.length || words.some((word, i) => word.row !== events[i].row || word.column !== events[i].column
+    || word.value !== events[i].value)) {
+    reader.fail(`events are not the ${words.length} words of the grid, in (row, column) order`);
   }
-  const stratum = flight.oneOf("stratum", TRAINING_STRATA);
-  const counts = TRAINING_COLUMNS.map((column) => trainingClassCount(vocabulary, candidates, column));
-  const words = parseWords(flight.child("words"), rows, counts);
-  const pointer = words.events.find((event) => event.row === 0 && event.column === TRAINING_COLUMN_INDEX.runway)!;
-  if (pointer.value !== runwayIndex) flight.fail(`step 0 points at runway ${pointer.value}, the flight lands on ${runwayIndex}`);
-  const captureRow = flight.integer("captureRow", 0, rows - 1);
-  const joinRow = flight.integer("joinRow", 0, rows - 1);
-  const unspecifiedRow = flight.integer("unspecifiedRow", 0, rows - 1);
-  // The markers the views draw are the words' own rows: the clearance, and the speed left to the pilot.
-  const cleared = words.events.find((event) => event.kind === "clear");
-  if (cleared === undefined || cleared.row !== joinRow) {
-    flight.fail(`joinRow is ${joinRow}, but the clearance is issued at ${cleared === undefined ? "no row" : `row ${cleared.row}`}`);
+  if (grid[0].some((value) => value === TRAINING_UNCHANGED)) reader.fail("row 0 does not say every column");
+  return events;
+}
+
+function parseAttitudeOf(reader: Reader, rows: number): TrainingAttitude {
+  return readAttitude(reader.child("attitude"), rows);
+}
+
+/** The observed track on its 2 s rows, which must be the vocabulary's grid from flight time 0. */
+function parseObserved(reader: Reader, stepS: number, haeMinusMslM: number): TrainingTrack {
+  const rows = reader.count("rows", 2);
+  const tS = reader.numbers("timeS", rows);
+  for (let row = 0; row < rows; row += 1) {
+    if (Math.abs(tS[row] - row * stepS) > 1e-3) reader.fail(`timeS[${row}] is ${tS[row]} s, not ${row * stepS}: the rows are the vocabulary's ${stepS} s grid from 0`);
   }
-  const speeds = words.events.filter((event) => event.column === TRAINING_COLUMN_INDEX.speed);
-  const unspecified = speeds[speeds.length - 1];
-  if (unspecified.value !== vocabulary.speedUnspecifiedValue || unspecified.row !== unspecifiedRow) {
-    flight.fail(`unspecifiedRow is ${unspecifiedRow}, but the last speed word is ${unspecified.value} at row ${unspecified.row}`);
-  }
-  const envelopes = flight.child("envelopes");
-  const signals = parseSignals(flight.child("signals"), rows, vocabulary.stepS);
+  const altitudeMslM = reader.numbers("altitudeMslM", rows);
+  const trackDeg = reader.numbers("trackDeg", rows);
   return {
-    datasetId: flight.string("datasetId"),
-    flightKey: flight.string("flightKey"),
-    callsign: flight.string("callsign"),
-    typecode: flight.nullableString("typecode"),
-    runway,
-    runwayIndex,
-    stratum,
-    rows,
-    captureRow,
-    joinRow,
-    unspecifiedRow,
-    captureBeforeThresholdM: flight.number("captureBeforeThresholdM"),
-    signals,
-    words,
-    envelopes: {
-      heading: parseHeading(envelopes, words.events, vocabulary, joinRow),
-      approach: parseApproach(envelopes, { rows, captureRow, joinRow }),
-      altitude: parseAltitude(envelopes, words.events, vocabulary, rows),
-      angle: parseAngle(envelopes, words.events, vocabulary),
-      speed: parseSpeed(envelopes, words.events, vocabulary, rows),
-    },
+    tS, eM: reader.numbers("eM", rows), nM: reader.numbers("nM", rows), lat: reader.numbers("latDeg", rows),
+    lon: reader.numbers("lonDeg", rows), altitudeMslM, altitudeHaeM: altitudeMslM.map((value) => value + haeMinusMslM),
+    trackDeg, trackPlotDeg: unwrapDegrees(trackDeg), groundSpeedMps: reader.numbers("groundSpeedMps", rows),
+    verticalRateMps: reader.numbers("verticalRateMps", rows), attitude: parseAttitudeOf(reader, rows),
   };
 }
 
-/** A set file's head (`TrainingSetHead`) under ``schema`` — refused by name under any other: its vocabulary, frame,
- *  candidates and flights, each flight once (a flight is its key everywhere — the picker, the overlays, the live
- *  executor's request). */
-export function readSetHead(set: Reader, schema: string): TrainingSetHead {
-  if (set.raw("schema") !== schema) {
-    set.fail(`schema is ${JSON.stringify(set.raw("schema"))}, expected ${JSON.stringify(schema)} — ` +
-      "a file of another format is not read: re-export the set");
-  }
-  const vocabulary = parseVocabulary(set.child("vocabulary"));
-  const candidates = parseCandidates(set, vocabulary);
-  const airport = set.string("airport");
-  const frame = set.child("airportFrame");
-  if (frame.string("code") !== airport) frame.fail(`code is ${frame.raw("code")}, but the set is ${airport}'s`);
-  const flights = set.list("flights").map((item, position) => {
-    const key = Reader.of(item, `${set.where}.flights[${position}]`).string("flightKey");
-    return parseFlight(Reader.of(item, `flight ${key}`), vocabulary, candidates);
+function headingBands(list: Reader[]): TrainingHeadingBand[] {
+  return list.map((item) => {
+    const firstRow = item.count("firstRow");
+    const stopRow = item.count("stopRow");
+    if (stopRow < firstRow) item.fail(`stopRow ${stopRow} is before firstRow ${firstRow}`);
+    return {
+      row: item.count("row"), firstRow, stopRow, targetDeg: item.number("targetDeg"), toleranceDeg: item.number("toleranceDeg"),
+      inside: item.flags("inside", stopRow - firstRow),
+    };
   });
-  const seen = new Set<string>();
-  for (const flight of flights) {
-    if (seen.has(flight.flightKey)) set.fail(`flight ${flight.flightKey} is listed twice`);
-    seen.add(flight.flightKey);
+}
+
+function altitudeTubes(list: Reader[]): TrainingAltitudeTube[] {
+  return list.map((item) => {
+    const row = item.count("row");
+    const endRow = item.count("endRow");
+    if (endRow < row) item.fail(`endRow ${endRow} is before row ${row}`);
+    const lowMslM = item.numbers("lowMslM", endRow - row);
+    const rows = item.count("rows");
+    const inside = item.count("inside");
+    if (inside > rows) item.fail(`inside ${inside} is more than its ${rows} rows`);
+    return {
+      row, endRow, levelM: item.nullableNumber("levelM"), lowMslM, highMslM: item.numbers("highMslM", endRow - row), rows, inside,
+      contained: item.boolean("contained"),
+    };
+  });
+}
+
+function speedSpans(list: Reader[]): TrainingSpeedSpan[] {
+  return list.map((item) => {
+    const row = item.count("row");
+    const endRow = item.count("endRow");
+    if (endRow < row) item.fail(`endRow ${endRow} is before row ${row}`);
+    return {
+      row, endRow, targetMps: item.number("targetMps"), toleranceMps: item.number("toleranceMps"),
+      arrivalRow: item.count("arrivalRow"), transitionOk: item.boolean("transitionOk"), accelOk: item.boolean("accelOk"),
+      contained: item.boolean("contained"),
+    };
+  });
+}
+
+function parseEnvelopes(reader: Reader): TrainingEnvelopes {
+  return {
+    heading: headingBands(reader.children("heading")), altitude: altitudeTubes(reader.children("altitude")),
+    speed: speedSpans(reader.children("speed")),
+  };
+}
+
+function parseOpenLoop(reader: Reader, observedRows: number, candidates: TrainingCandidate[]): TrainingOpenLoop {
+  const rows = reader.count("rows", 1);
+  if (rows !== observedRows) reader.fail(`rows is ${rows}, but the observed track has ${observedRows}`);
+  const words = parseGrid(reader, "words", rows);
+  const events = parseEvents(reader, words, candidates, false);
+  const kinds = reader.children("kinds").map((item) => ({
+    row: item.integer("row", 0, rows - 1), column: item.integer("column", 0, TRAINING_COLUMNS.length - 1),
+    // why the labeller said it (`labeller.records.Instruction.kind`): free text for readouts, many writers, no list
+    kind: item.string("kind"),
+  }));
+  if (kinds.length !== events.length || kinds.some((kind, i) => kind.row !== events[i].row || kind.column !== events[i].column)) {
+    reader.fail(`kinds are not the ${events.length} words of the sentence, in order`);
   }
   return {
-    setId: set.string("setId"),
-    airport,
-    writtenUtc: set.string("writtenUtc"),
-    vocabulary,
-    airportFrame: { code: airport, lat: frame.number("lat"), lon: frame.number("lon"), elevationM: frame.number("elevationM") },
-    candidatesSha256: set.string("candidatesSha256"),
-    centrelineLengthM: set.number("centrelineLengthM"),
-    candidates,
-    flights,
+    rows, words, events, kinds, captureRow: reader.integer("captureRow", 0, rows), unspecifiedRow: reader.integer("unspecifiedRow", 0, rows),
+    goAroundRows: reader.numbers("goAroundRows"), runwayAgainRows: reader.numbers("runwayAgainRows"),
+    envelopes: parseEnvelopes(reader.child("envelopes")),
   };
 }
 
-/** Parse one sample set — all or nothing: a flight the reader cannot trust would be drawn
- *  beside real ones with no way to tell. */
+function parseDecision(reader: Reader): TrainingDecision {
+  return {
+    cycle: reader.count("cycle"), eM: reader.number("eM"), nM: reader.number("nM"), latDeg: reader.number("latDeg"),
+    lonDeg: reader.number("lonDeg"), heightMslM: reader.number("heightMslM"), rightM: reader.number("rightM"),
+    coneHalfWidthM: reader.number("coneHalfWidthM"), aboveGlidepathM: reader.number("aboveGlidepathM"),
+    lateralOk: reader.boolean("lateralOk"), verticalOk: reader.boolean("verticalOk"), passed: reader.boolean("passed"),
+  };
+}
+
+/** A threshold crossing and its decision-altitude check, as the export and the live answer write them. */
+export function readCrossing(reader: Reader, candidateCount: number): TrainingCrossing {
+  const decision = reader.nullableChild("decision");
+  return {
+    crossM: reader.number("crossM"), heightM: reader.number("heightM"), atCycle: reader.number("atCycle"),
+    runwayIndex: reader.integer("runwayIndex", 0, candidateCount - 1), decision: decision === null ? null : parseDecision(decision),
+  };
+}
+
+function parseReplay(reader: Reader, flownRows: number, candidates: TrainingCandidate[]): { replay: TrainingReplay; attitude: TrainingAttitude } {
+  const crossing = reader.nullableChild("crossing");
+  const envelopes = reader.nullableChild("envelopes");
+  return {
+    replay: {
+      outcome: reader.oneOf("outcome", TRAINING_OUTCOMES), endCycle: reader.count("endCycle"),
+      crossing: crossing === null ? null : readCrossing(crossing, candidates.length),
+      flewTheSentence: reader.boolean("flewTheSentence"), notReached: reader.count("notReached"),
+      envelopes: envelopes === null ? null : parseEnvelopes(envelopes),
+    },
+    attitude: parseAttitudeOf(reader, flownRows),
+  };
+}
+
+function parseClosedLoop(
+  reader: Reader, key: string, vocabulary: TrainingVocabulary, candidates: TrainingCandidate[], observed: TrainingTrack,
+  haeMinusMslM: number,
+): TrainingClosedLoop {
+  const rowIntervalS = reader.number("rowIntervalS");
+  if (String(rowIntervalS) !== key) reader.fail(`rowIntervalS is ${rowIntervalS}, but it is listed under ${key}`);
+  const stepS = vocabulary.stepS;
+  const every = rowIntervalS / stepS;
+  if (!Number.isInteger(every) || every < 1) reader.fail(`rowIntervalS ${rowIntervalS} is not a whole number of ${stepS} s rows`);
+  const firstRow = reader.count("firstRow");
+  const startRow = reader.count("startRow");
+  const flownFromRow = reader.count("flownFromRow");
+  if (flownFromRow !== startRow * every) reader.fail(`flownFromRow is ${flownFromRow}, but Δ row ${startRow} is state row ${startRow * every}`);
+  const words = parseGrid(reader, "words");
+  const events = parseEvents(reader, words, candidates, true);
+  const states = reader.child("states");
+  const stateRows = states.count("rows", flownFromRow + 2);
+  if (stateRows !== (words.length + startRow - 1) * every + 1) {
+    states.fail(`rows is ${stateRows}, but ${words.length} Δ rows from Δ row ${startRow} cover ${(words.length + startRow - 1) * every + 1}`);
+  }
+  const onInterval = states.flags("onInterval", stateRows);
+  const marked = onInterval.flatMap((on, row) => (on ? [row] : []));
+  if (marked[startRow] !== flownFromRow || marked.some((row, i) => row !== i * every)) {
+    states.fail(`onInterval does not mark every ${every}th state row from row 0, or Δ row ${startRow} is not state row ${flownFromRow}`);
+  }
+  // the states before the first predicted step are the observed ones (observed row firstRow + k)
+  const stateE = states.numbers("eM", stateRows);
+  for (let k = 0; k < flownFromRow; k += 1) {
+    if (Math.abs(stateE[k] - observed.eM[firstRow + k]) > 0.2) {
+      states.fail(`eM[${k}] is ${stateE[k]} m, but the observed row ${firstRow + k} is at ${observed.eM[firstRow + k]} m: the states before the first predicted step are observed`);
+    }
+  }
+  const flownRows = stateRows - flownFromRow;
+  const take = <T>(values: T[]) => values.slice(flownFromRow);
+  const heightMslM = take(states.numbers("heightMslM", stateRows));
+  const trackDeg = take(states.numbers("trackDeg", stateRows));
+  const startIndex = firstRow + flownFromRow;
+  const startS = startIndex * stepS;
+  const replayReader = reader.child("replay");
+  const { replay, attitude } = parseReplay(replayReader, flownRows, candidates);
+  const flown: TrainingTrack = {
+    tS: Array.from({ length: flownRows }, (_, i) => (startIndex + i) * stepS),
+    eM: take(stateE), nM: take(states.numbers("nM", stateRows)), lat: take(states.numbers("latDeg", stateRows)),
+    lon: take(states.numbers("lonDeg", stateRows)), altitudeMslM: heightMslM,
+    altitudeHaeM: heightMslM.map((value) => value + haeMinusMslM), trackDeg,
+    trackPlotDeg: unwrapDegrees(trackDeg, observed.trackPlotDeg[Math.min(startIndex, observed.tS.length - 1)]),
+    groundSpeedMps: take(states.numbers("groundSpeedMps", stateRows)),
+    verticalRateMps: take(states.numbers("verticalRateMps", stateRows)), attitude,
+  };
+  return {
+    rowIntervalS, firstRow, startRow, flownFromRow, startS, words, events,
+    lateralM: reader.numbersOrNull("lateralM", words.length), verticalM: reader.numbersOrNull("verticalM", words.length),
+    timedOut: reader.boolean("timedOut"), flown, replay,
+  };
+}
+
+function parseFlight(
+  reader: Reader, vocabulary: TrainingVocabulary, candidates: TrainingCandidate[],
+): TrainingFlight {
+  const runwayIndex = reader.integer("runwayIndex", 0, candidates.length - 1);
+  const runway = reader.string("runway");
+  if (candidates[runwayIndex].ident !== runway) reader.fail(`runway ${runway} is not candidate ${runwayIndex}'s (${candidates[runwayIndex].ident})`);
+  const haeMinusMslM = reader.number("haeMinusMslM");
+  if (Math.abs(haeMinusMslM - candidates[runwayIndex].haeMinusMslM) > 0.02) {
+    reader.fail(`haeMinusMslM is ${haeMinusMslM}, but runway ${runway}'s is ${candidates[runwayIndex].haeMinusMslM}`);
+  }
+  const flightKey = reader.string("flightKey");
+  const observed = parseObserved(reader.child("observed"), vocabulary.stepS, haeMinusMslM);
+  const closedReader = reader.child("closedLoop");
+  const expected = vocabulary.rowIntervalsS.map(String);
+  const found = Object.keys(reader.raw("closedLoop") as Record<string, unknown>);
+  if (found.length !== expected.length || found.some((key, i) => key !== expected[i])) {
+    reader.fail(`closedLoop is listed at [${found.join(", ")}] s, expected the set's [${expected.join(", ")}]`);
+  }
+  const closedLoop = Object.fromEntries(expected.map((key) => [
+    key, parseClosedLoop(closedReader.child(key), key, vocabulary, candidates, observed, haeMinusMslM)]));
+  return {
+    datasetId: reader.string("datasetId"), flightKey, callsign: flightKey.split("_")[0], split: reader.oneOf("split", TRAINING_SPLITS),
+    stratum: reader.oneOf("stratum", TRAINING_STRATA), kind: reader.string("kind"), typecode: reader.nullableString("typecode"),
+    group: reader.string("group"), runway, runwayIndex, entryTimeUtc: reader.string("entryTimeUtc"), haeMinusMslM, observed,
+    openLoop: parseOpenLoop(reader.child("openLoop"), observed.tS.length, candidates), closedLoop,
+  };
+}
+
+/** Parse a set's sample. A schema other than `TRAINING_SAMPLE_SCHEMA` is refused whole, naming the one found and the one
+ *  expected. */
 export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
   return attempt(() => {
     const sample = Reader.of(raw, "sample");
-    const head = readSetHead(sample, TRAINING_SAMPLE_SCHEMA);
-    const cohort = sample.child("cohort");
-    return { ...head, cohort: { ...parseCohort(cohort), pool: cohort.count("pool"), read: cohort.count("read") } };
+    sample.oneOf("schema", [TRAINING_SAMPLE_SCHEMA]);
+    sample.oneOf("readingRule", [TRAINING_READING_RULE]);
+    const vocabulary = parseVocabulary(sample.child("vocabulary"));
+    const candidates = parseCandidates(sample);
+    const frame = sample.child("airportFrame");
+    const flights = sample.children("flights").map((flight) => parseFlight(flight, vocabulary, candidates));
+    const keys = new Set(flights.map((flight) => flight.flightKey));
+    if (keys.size !== flights.length) sample.fail("two flights carry one flight key: a flight is its key");
+    return {
+      setId: sample.string("setId"), airport: sample.string("airport"), formats: parseFormats(sample),
+      source: parseSource(sample.child("source")), cohort: parseCohort(sample.child("cohort")), vocabulary,
+      airportFrame: { code: frame.string("code"), lat: frame.number("lat"), lon: frame.number("lon"), elevationM: frame.number("elevationM") },
+      candidatesSha256: sample.string("candidatesSha256"), candidates, flights,
+    };
   });
 }
 
@@ -1304,12 +975,12 @@ export function trainingDirectory(airportCode: string): string {
   return `data/airports/${airportCode}/training`;
 }
 
-/** The manifest the panel reads — shown in the empty state and used by the fetch below. */
+/** The index the panel reads — shown in the empty state and used by the fetch below. */
 export function trainingIndexPath(airportCode: string): string {
-  return `${trainingDirectory(airportCode)}/index.json`;
+  return `${trainingDirectory(airportCode)}/${TRAINING_INDEX_FILE}`;
 }
 
-/** A file the manifests list — a set's sample, an overlay — relative to the airport's Training directory. */
+/** A file the index lists — a set's sample — relative to the airport's Training directory. */
 export function trainingFilePath(airportCode: string, file: string): string {
   return `${trainingDirectory(airportCode)}/${file}`;
 }

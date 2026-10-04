@@ -18,11 +18,9 @@
  *      which this layer reports as "restart the dev server". A Training sample the server
  *      answers is also read through the panel's own parser: HTTP 200 is not "it loads".
  *
- * Training sets: every set the manifest lists must have its file; a set the panel refuses by
- * name (a superseded vocabulary) is a WARNING, since it is refused on purpose; every readable set
- * is parsed by the panel's own reader and compared with its manifest entry. Every overlay listed in
- * `training/overlays.json` (the executor's replay, the prior's predictions, the models' own sentences) is read
- * against the sample of the set it is drawn over, by the panel's own reader.
+ * Training sets: the stage-A index `training/index_v4.json` (the instruction-v3 view's `index.json` is never read);
+ * every set it lists must have its file, which is parsed by the panel's own reader and compared with its index entry.
+ * An index or sample of another schema is an error naming the schema found and the one expected.
  *
  * Exit status 1 on any error-level finding, 2 on a usage error. Runs under vite-node (no
  * build, no browser); `npm run typecheck:scripts` type-checks it.
@@ -41,15 +39,12 @@ import {
   checkCategoriesManifest,
   checkComparisonIndex,
   checkTrainingIndex,
-  checkTrainingOverlay,
-  checkTrainingOverlays,
   checkTrainingSet,
   checkTrainingSetAgrees,
-  checkTrainingSetRefusal,
   indexCzmlFiles,
   type PublicationFinding,
 } from "../src/utils/checkPublication";
-import { openable, parseTrainingSet, type TrainingOpenSet } from "../src/data/trainingSets";
+import { parseTrainingSample, TRAINING_INDEX_FILE } from "../src/data/trainingSample";
 
 const FRONTEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PUBLISHED_ROOT = path.join(FRONTEND_ROOT, "public", "data", "airports");
@@ -99,7 +94,7 @@ function parseArgs(argv: string[]): Options {
     options.airports = readdirSync(options.root, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && (
         existsSync(path.join(options.root, entry.name, "comparison", "categories.json"))
-        || existsSync(path.join(options.root, entry.name, "training", "index.json"))
+        || existsSync(path.join(options.root, entry.name, "training", TRAINING_INDEX_FILE))
       ))
       .map((entry) => entry.name)
       .sort();
@@ -165,21 +160,18 @@ interface AirportReport {
   listed: number;
   trainingSets: number;
   readableTrainingSets: number;
-  /** Overlays listed in `training/overlays.json`, and how many read against their set. */
-  overlays?: number;
-  readableOverlays?: number;
   findings: PublicationFinding[];
 }
 
 /**
  * The Training export (design §7, T8). It is OPTIONAL — `public/data` is git-ignored and most
  * airports have none — so its absence is a count of zero, never a finding. What is a finding is
- * an export that exists and is half-written: the panel greys a bad set out and carries on
+ * an export that exists and is half-written: the panel names a bad set and carries on
  * (§4.5 ③), so nothing on screen shouts, and this is what shouts.
  */
 async function checkTraining(root: string, airport: string, server: string | null): Promise<AirportReport> {
   const trainingDir = path.join(root, airport, "training");
-  const manifestFile = path.join(trainingDir, "index.json");
+  const manifestFile = path.join(trainingDir, TRAINING_INDEX_FILE);
   if (!existsSync(manifestFile)) return { listed: 0, trainingSets: 0, readableTrainingSets: 0, findings: [] };
 
   const findings: PublicationFinding[] = [];
@@ -190,7 +182,7 @@ async function checkTraining(root: string, airport: string, server: string | nul
     const detail = error instanceof Error ? error.message : String(error);
     return {
       listed: 0, trainingSets: 0, readableTrainingSets: 0,
-      findings: [{ level: "error", message: `training/index.json is not readable JSON: ${detail}` }],
+      findings: [{ level: "error", message: `training/${TRAINING_INDEX_FILE} is not readable JSON: ${detail}` }],
     };
   }
   const index = checkTrainingIndex(manifest);
@@ -199,24 +191,15 @@ async function checkTraining(root: string, airport: string, server: string | nul
 
   const serverRoot = server ? `${server}/data/airports/${airport}/training` : null;
   let readable = 0;
-  // the readable sets, opened, for the overlays drawn over them
-  const samples = new Map<string, TrainingOpenSet>();
   if (serverRoot) {
-    const problem = await served(`${serverRoot}/index.json`, "json");
-    if (problem) findings.push({ level: "error", message: `server: training/index.json ${problem}` });
+    const problem = await served(`${serverRoot}/${TRAINING_INDEX_FILE}`, "json");
+    if (problem) findings.push({ level: "error", message: `server: training/${TRAINING_INDEX_FILE} ${problem}` });
   }
 
   for (const entry of index.value.sets) {
     const sampleFile = path.join(trainingDir, entry.file);
     if (!existsSync(sampleFile)) {
       findings.push({ level: "error", category: entry.id, message: `${entry.file} is listed but missing on disk` });
-      continue;
-    }
-    // A set the panel refuses by name is never downloaded by it, so it is not parsed here either:
-    // it is reported as what it is — listed, and refused on purpose.
-    const { kind } = openable(entry);
-    if (kind === null) {
-      findings.push(...checkTrainingSetRefusal(entry));
       continue;
     }
     // A truncated file is the commonest shape of a half-written export: name the set and go on.
@@ -227,12 +210,11 @@ async function checkTraining(root: string, airport: string, server: string | nul
       findings.push({ level: "error", category: entry.id, message: `${entry.file} is not readable JSON: ${unreadable(error)}` });
       continue;
     }
-    const read = checkTrainingSet(entry.id, kind, raw);
+    const read = checkTrainingSet(entry.id, raw);
     findings.push(...read.findings);
     if (read.value !== null) {
       readable += 1;
       findings.push(...checkTrainingSetAgrees(entry, read.value, airport));
-      samples.set(entry.id, read.value);
     }
     if (serverRoot) {
       const problem = await served(`${serverRoot}/${entry.file}`, "json");
@@ -240,76 +222,12 @@ async function checkTraining(root: string, airport: string, server: string | nul
       else {
         // HTTP 200 is not "it loads": the SERVED body goes through the same reader.
         const body = await servedJson(`${serverRoot}/${entry.file}`);
-        const answered = body.ok ? parseTrainingSet(kind, body.value) : body;
+        const answered = body.ok ? parseTrainingSample(body.value) : body;
         if (!answered.ok) findings.push({ level: "error", category: entry.id, message: `server: ${entry.file}: ${answered.problem}` });
       }
     }
   }
-  const overlays = await checkOverlays(trainingDir, samples, serverRoot, findings);
-  return { listed: 0, trainingSets: index.value.sets.length, readableTrainingSets: readable, ...overlays, findings };
-}
-
-/**
- * The overlays drawn over the readable sets (design §2.6). OPTIONAL like the export: no manifest is a count of zero.
- * An overlay over a set the panel does not read is a WARNING (the panel never offers it); one that fails to read
- * against its set is an ERROR, named with the field.
- */
-async function checkOverlays(
-  trainingDir: string, samples: Map<string, TrainingOpenSet>, serverRoot: string | null,
-  findings: PublicationFinding[],
-): Promise<{ overlays: number; readableOverlays: number }> {
-  const manifestFile = path.join(trainingDir, "overlays.json");
-  if (!existsSync(manifestFile)) return { overlays: 0, readableOverlays: 0 };
-  let manifest: unknown;
-  try {
-    manifest = readJson(manifestFile);
-  } catch (error) {
-    findings.push({ level: "error", message: `training/overlays.json is not readable JSON: ${unreadable(error)}` });
-    return { overlays: 0, readableOverlays: 0 };
-  }
-  const overlays = checkTrainingOverlays(manifest);
-  findings.push(...overlays.findings);
-  if (overlays.value === null) return { overlays: 0, readableOverlays: 0 };
-  if (serverRoot) {
-    const problem = await served(`${serverRoot}/overlays.json`, "json");
-    if (problem) findings.push({ level: "error", message: `server: training/overlays.json ${problem}` });
-  }
-  let readable = 0;
-  for (const entry of overlays.value.overlays) {
-    const sample = samples.get(entry.base);
-    if (!sample) {
-      findings.push({ level: "warn", category: entry.id, message: `drawn over ${entry.base}, a set the panel does not read` });
-      continue;
-    }
-    const file = path.join(trainingDir, entry.file);
-    if (!existsSync(file)) {
-      findings.push({ level: "error", category: entry.id, message: `${entry.file} is listed but missing on disk` });
-      continue;
-    }
-    // a truncated overlay is named and passed over, as a truncated sample is: the airports after it are still checked
-    let payload: unknown;
-    try {
-      payload = readJson(file);
-    } catch (error) {
-      findings.push({ level: "error", category: entry.id, message: `${entry.file} is not readable JSON: ${unreadable(error)}` });
-      continue;
-    }
-    const found = checkTrainingOverlay(entry, payload, sample);
-    findings.push(...found);
-    if (!found.length) readable += 1;
-    if (serverRoot) {
-      const problem = await served(`${serverRoot}/${entry.file}`, "json");
-      if (problem) findings.push({ level: "error", category: entry.id, message: `server: ${entry.file} ${problem}` });
-      else {
-        // the SERVED body through the same reader
-        const body = await servedJson(`${serverRoot}/${entry.file}`);
-        const found = body.ok ? checkTrainingOverlay(entry, body.value, sample)
-          : [{ level: "error" as const, category: entry.id, message: `${entry.file}: ${body.problem}` }];
-        for (const finding of found) findings.push({ ...finding, message: `server: ${finding.message}` });
-      }
-    }
-  }
-  return { overlays: overlays.value.overlays.length, readableOverlays: readable };
+  return { listed: 0, trainingSets: index.value.sets.length, readableTrainingSets: readable, findings };
 }
 
 async function checkAirport(root: string, airport: string, server: string | null): Promise<AirportReport> {
@@ -319,7 +237,7 @@ async function checkAirport(root: string, airport: string, server: string | null
   if (!existsSync(manifestFile)) {
     // An airport can be published with a Training export and no comparison at all; only an
     // airport asked for BY NAME with neither is a mistake, and `checkTraining` says so.
-    const level = existsSync(path.join(root, airport, "training", "index.json")) ? "warn" : "error";
+    const level = existsSync(path.join(root, airport, "training", TRAINING_INDEX_FILE)) ? "warn" : "error";
     return { listed: 0, trainingSets: 0, readableTrainingSets: 0, findings: [{ level, message: `${manifestFile} does not exist` }] };
   }
   const manifest = readJson(manifestFile);
@@ -383,8 +301,7 @@ async function main(): Promise<number> {
     const scope = options.server ? " (disk + server)" : " (disk only)";
     const listed = comparison.listed;
     const trained = training.trainingSets
-      ? `, ${training.trainingSets} Training sets (${training.readableTrainingSets} readable)` +
-        (training.overlays ? `, ${training.overlays} overlays (${training.readableOverlays} read against their set)` : "")
+      ? `, ${training.trainingSets} Training sets (${training.readableTrainingSets} readable)`
       : "";
     console.log(`${airport}: ${listed} categories listed${trained}, ${errorCount} errors, ${findings.length - errorCount} warnings — ${verdict}${scope}`);
     for (const finding of findings) {
