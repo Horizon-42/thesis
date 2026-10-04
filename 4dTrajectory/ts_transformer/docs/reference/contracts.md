@@ -614,8 +614,8 @@ column, the D34 readings (since A15 also `outside_the_tolerance`: per column the
 the share is D34's third reading — and of those the rows after which no correction TOWARD the path is in force
 (`without_a_correction_toward_the_path`, `closed_loop.outside_rows`, read from the stored sentence and its open-loop
 reading: the heading word in force on the path's side of the observed word's track, the angle class steeper when too
-high): the rule of D50 that §14.6 checks. §4.9 ends a correction when the error changes sign and starts the other one a
-row later, so an overshoot row counts there), the rows past the end and the lateness of the observed heading words. The reading says each
+high): the rule of D50 that §14.6 checks; since A16 an overshoot — the error changing its sign beyond the tolerance —
+takes the opposite correction in its own row (D53), so the reading keeps the rule on every row), the rows past the end and the lateness of the observed heading words. The reading says each
 observed word at the PLACE where the observed aircraft heard it, not at its time (D42): the words of the 2 s open-loop
 reading (not the Δ grid), each said at the first Δ row whose matched observed time is less than Δ/2 before the word's
 2 s time (D45: the nearest row; of several, each column's last word), so the words wait while the flown aircraft is

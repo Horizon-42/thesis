@@ -43,11 +43,13 @@ correction (D34).
 THE CORRECTIONS (`Corrector`), with Y = `closed_loop_lateral_m` and H = `closed_loop_vertical_m` of the spec:
 
 - lateral: when |e_y| > Y and the row says no new observed heading word, the heading class one step (5°)
-  from the observed word in force, toward the path; the observed word again when |e_y| < Y / 2 or e_y changes sign; a
+  from the observed word in force, toward the path; the observed word again when |e_y| < Y / 2 or e_y changes sign —
+  except an OVERSHOOT (D53): e_y changed its sign beyond Y, and the opposite correction is said in the same row; a
   new observed heading word ends a correction (it is said, and the comparison goes on from the next row);
 - vertical: only while a descent class of the observed words is in force — when e_h > H the next steeper descent class,
   when e_h < −H the next shallower (none beyond descent 4 or descent 1); the observed class again when |e_h| < H / 2 or
-  e_h changes sign; a new observed altitude or angle word ends a correction. A level hold and a climb get none. A
+  e_h changes sign — an overshoot beyond H takes the opposite class in the same row where it exists (D53); a new
+  observed altitude or angle word ends a correction. A level hold and a climb get none. A
   level reached by a descent says no angle word (the descent class stays in force, `labeller.vertical`), so a LEVEL
   HOLD is the executor's: the level in force captured (`vertical.Vertical.captured`, the level-off begun) — there no
   correction starts and one in force ends (Claude's reading of §4.9 "during a level hold"; the rounding of the level to
@@ -324,7 +326,8 @@ class Corrector:
             if observed[HEADING] != UNCHANGED or past_end:
                 self.turn = 0
             elif self.turn and (abs(lateral_m) < self.lateral_m / 2 or _sign(lateral_m) != self.turn):
-                self.turn = 0
+                # ended; an overshoot beyond the tolerance takes the opposite correction in the same row (D53)
+                self.turn = _sign(lateral_m) if abs(lateral_m) > self.lateral_m else 0
             elif not self.turn and abs(lateral_m) > self.lateral_m:
                 self.turn = _sign(lateral_m)
             angle = int(held[ANGLE])
@@ -335,7 +338,8 @@ class Corrector:
             if ends:
                 self.slope = 0
             elif self.slope and (abs(vertical_m) < self.vertical_m / 2 or _sign(vertical_m) != self.slope):
-                self.slope = 0
+                self.slope = (_sign(vertical_m) if abs(vertical_m) > self.vertical_m      # an overshoot (D53)
+                              and self.words.is_descent(angle + _sign(vertical_m)) else 0)
             elif (not self.slope and self.words.is_descent(angle) and abs(vertical_m) > self.vertical_m
                   and self.words.is_descent(angle + _sign(vertical_m))):
                 self.slope = _sign(vertical_m)

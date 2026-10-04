@@ -97,8 +97,10 @@ def test_a_heading_correction_is_one_class_toward_the_path_and_ends_under_half_t
     assert heading(3, 20.0) == (UNCHANGED, False)                # still over Y / 2: in force
     assert heading(4, 10.0) == (0, True)                         # under Y / 2: the observed word again
     assert heading(5, -45.0) == (right, True)
-    assert heading(6, 2.0) == (0, True)                          # the sign changed
+    assert heading(6, 2.0) == (0, True)                          # the sign changed, within Y: the observed word
     assert heading(7, 35.0) == (left, True)
+    assert heading(8, -40.0) == (right, True)                    # an overshoot beyond Y: the opposite at once (D53)
+    assert heading(9, -20.0) == (UNCHANGED, False)               # in force
 
 
 def test_a_new_observed_heading_word_ends_a_correction():
@@ -128,6 +130,8 @@ def test_an_angle_correction_on_a_final_descent_and_none_on_a_level_a_climb_or_b
     assert angle(4, 5.0) == (3, True)                            # under H / 2: the observed class again
     assert angle(5, -20.0) == (2, True)                          # too low: the next shallower
     assert angle(6, 3.0) == (3, True)
+    assert angle(7, 20.0) == (4, True)
+    assert angle(8, -20.0) == (2, True)                          # an overshoot beyond H: the shallower class at once (D53)
     level = Corrector(_grid([_first(words), *[{}] * 3]), 0, 0, 1, words, [90.0])
     level.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
     assert int(level.row(1, 0.0, 60.0, 960.0, holding=False, past_end=False)[0][ANGLE]) == UNCHANGED            # a level hold: none
@@ -140,6 +144,9 @@ def test_an_angle_correction_on_a_final_descent_and_none_on_a_level_a_climb_or_b
     shallowest = Corrector(_grid([_first(words, 600.0, 1), *[{}] * 3]), 0, 0, 1, words, [90.0])
     shallowest.row(0, 0.0, 0.0, 900.0, holding=False, past_end=False)
     assert int(shallowest.row(1, 0.0, -60.0, 900.0, holding=False, past_end=False)[0][ANGLE]) == UNCHANGED     # none shallower than descent 1
+    assert int(shallowest.row(2, 0.0, 60.0, 900.0, holding=False, past_end=False)[0][ANGLE]) == 2
+    said, added = shallowest.row(3, 0.0, -60.0, 900.0, holding=False, past_end=False)   # an overshoot with no class beyond
+    assert int(said[ANGLE]) == 1 and added[ANGLE]                                         # descent 1: the observed class
 
 
 def test_a_new_observed_altitude_word_ends_an_angle_correction():
@@ -426,9 +433,10 @@ def test_the_rule_of_d50_reads_a_word_moved_across_a_runway_word_in_its_new_fram
     assert not breaks.any()
 
 
-def test_the_rule_of_d50_sees_the_row_an_overshoot_cancels_a_correction():
-    """§4.9 ends a correction when e_y changes sign and starts the other one a row later: the overshoot row answers
-    nothing, and the rule of D50 counts it (a word that cancels a correction is no correction toward the path)."""
+def test_an_overshoot_takes_the_opposite_correction_in_its_row_and_the_rule_of_d50_holds():
+    """D53: the flown aircraft crosses the path in one row, 60 m right then 60 m left of it: the overshoot row says the
+    opposite correction at once, and the rule of D50 holds on every row. A word that only cancels a correction would
+    answer nothing there, and the rule counts it."""
     words = Words(spec())
     corrector = Corrector(_grid([_first(words, 900.0, ANGLE_LEVEL), *[{}] * 5]), 0, 0, 1, words, [90.0])
     rows = [corrector.row(s, e_y, 0.0, 900.0, holding=False, past_end=False)
@@ -442,7 +450,13 @@ def test_the_rule_of_d50_sees_the_row_an_overshoot_cancels_a_correction():
         matched_row=np.zeros(n), start=0, timed_out=False)
     observed = _grid([_first(words, 900.0, ANGLE_LEVEL), *[{}] * 5])
     _, outside, breaks = closed_loop.outside_rows(sentence, observed, 0, words, [90.0])["lateral"]
-    assert outside.tolist() == [False, True, True, True, False] and breaks.tolist() == [False, False, True, False, False]
+    assert outside.tolist() == [False, True, True, True, False] and not breaks.any()
+    assert [int(r[0][HEADING]) for r in rows[1:3]] == [words.n_heading - 1, 1] and rows[2][1][HEADING]
+    cancelled = grid.copy()
+    cancelled[2, HEADING] = 0                                    # the observed word: the correction only cancelled
+    cancelled[3, HEADING] = 1
+    _, _, breaks = closed_loop.outside_rows(replace(sentence, grid=cancelled), observed, 0, words, [90.0])["lateral"]
+    assert breaks.tolist() == [False, False, True, False, False]
 
 
 
