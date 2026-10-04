@@ -157,10 +157,10 @@ of the package, not a migration in progress.
   signals (it ends before the landing); a flight with go-arounds is read approach by approach (D26); since v6
   (2026-10-02) every row is on the UTC even seconds; a change of speed says its 5 m/s steps, flown at a_max (D43);
   `--spec-from` keeps another artefact's spec (C30).
-- **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v6`; vocabulary §4.9, D32): each
+- **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v7`; vocabulary §4.9, D32): each
   split × row interval — the 2 s open-loop words flown from the first predicted step by an executor spec, each said at the
   Δ row nearest where the observed aircraft heard it (D42, D45), a heading word in the frame where it is heard (D46), with
-  heading and angle corrections (none past the end of the observed path, D44), to the executor's end; the flown states on the data's 2 s rows, the Δ rows marked (D51), the errors against the observed path and the rows that allow no correction
+  heading and angle corrections (none past the end of the observed path, D44), to the executor's end, and its outcome by name (the judge's on what it flew, D74 — for readouts and selection, never an input); the flown states on the data's 2 s rows, the Δ rows marked (D51), the errors against the observed path and the rows that allow no correction
   (D34); written once by `instruction_closed_loop` with its own reference, read only after the labeller's, the executor's
   and the closed loop's checks run in the reading process (`closed_loop.require_conforming_closed_loop(artefact,
   executor_dir)`, D69, D73); a speaker's closed loop starts where the reading does,

@@ -612,7 +612,7 @@ refuses both.
 correction marks, all its states on the 2 s rows (`STATE_COLUMNS`) with the Δ rows marked — runner
 `instruction_closed_loop` R50; design §4.9, D32–D34, D42, D44–D46). `<artefact>/closed_loop/` is written once, from a clean checkout (it records the commit),
 with an executor spec (C33): for each split and each row interval given (D25), `<split>_<Δ>s.npz`
-(`ts-instruction-closed-loop-v6` since A29, D73; refused unless every field is there and its spec sha is the artefact's): each flown
+(`ts-instruction-closed-loop-v7` since A31, D74; refused unless every field is there and its spec sha is the artefact's): each flown
 flight's words from its first predicted step (Δ row 16 s / Δ; row 0 says every column), which words the reading added
 (`correction`), its states on the data's 2 s rows from its first row to its last said row, its Δ rows marked
 (`on_interval`, D51, since A15; v3 stored the Δ rows only), observed before the first predicted step, flown from it — a
@@ -620,9 +620,11 @@ flown row between two Δ rows the executor's state at the end of its cycle there
 ground speed, vertical rate); the replay check compares every 2 s row, its errors against the observed path (`lateral_m` right positive,
 `vertical_m`, NaN past the end of the observed path), the rows where §4.9 makes no heading / angle correction
 (`uncorrectable`, D34), the last 2 s row of the open-loop reading whose words each row has said (`observed_row`) and the
-matched point's observed time there (`matched_row`, 2 s rows), whether each flight was done at its time limit (`timed_out`) and the
-executor parameters' sha it was flown with; `summary.json` counts the flights without a sentence by reason (not flown by `replay.group_of`,
-refused on the row interval, refused by the closed loop — the grammar read at the flown height), the correction words per
+matched point's observed time there (`matched_row`, 2 s rows), whether each flight was done at its time limit (`timed_out`), its
+outcome by name (`outcome`, D74: the judge's, `judge.outcome_of`, on what the reading's executor flew to its end — the same
+as the replay's and the start's for that sentence; later rows decide it, so it is for readouts and selection, never an
+input) and the executor parameters' sha it was flown with; `summary.json` counts the flights without a sentence by reason (not flown by `replay.group_of`,
+refused on the row interval, refused by the closed loop — the grammar read at the flown height), the sentences by outcome (`outcomes`, D74), the correction words per
 column, the D34 readings (since A15 also `outside_the_tolerance`: per column the correctable rows, those outside Y / H —
 the share is D34's third reading — and of those the rows after which no correction TOWARD the path is in force
 (`without_a_correction_toward_the_path`, `closed_loop.outside_rows`, read from the stored sentence and its open-loop

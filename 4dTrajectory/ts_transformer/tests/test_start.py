@@ -118,6 +118,7 @@ def test_a_stored_sentence_said_through_the_start_gives_its_states_and_its_outco
     replayed = outcome_of(replay.fly_sentences(moved, params, words, device=CPU), 0, batch.geometries[0], words.spec)
     assert loop.outcome(0).outcome == replayed.outcome
     assert loop.outcome(0).crossing == replayed.crossing
+    assert stored.outcome == replayed.outcome           # D74: the reading's outcome, stored, is the replay's and the start's
     assert bool(loop.timed_out()[0]) == stored.timed_out
 
 

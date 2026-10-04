@@ -68,7 +68,8 @@ correction: every word that is not an observed word said at its row), the states
 sentence's first row to its last said row, the Δ rows marked (D51) — observed before the first predicted step, flown
 from it (position in the airport frame, MSL height, track, ground speed, vertical rate; a flown 2 s row between two Δ
 rows is the executor's state at the end of its cycle there) — e_y, e_h at each said row, the matched point's observed time and the last 2 s row whose
-observed words have been said at each row, and whether the flight was done at its time limit. Flown
+observed words have been said at each row, whether the flight was done at its time limit, and its OUTCOME (D74: the
+judge's, `judge.outcome_of`, on what the reading's executor flew from the first predicted step to its end). Flown
 again from the same state on its own rows (the replay: `replay_batch`, under the same time limit), a
 closed-loop sentence gives the same states on every 2 s row.
 """
@@ -464,7 +465,8 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
                                     vertical_m=vertical, uncorrectable=np.array(blocked[f], dtype=bool),
                                     observed_row=np.array(reached[f], dtype=np.int64),
                                     matched_row=np.array(matched[f], dtype=np.float64), start=start,
-                                    timed_out=bool(timed_out[f]))
+                                    timed_out=bool(timed_out[f]),
+                                    outcome=loop.outcome(f).outcome)      # the judge's, on what it flew (D74)
     return out  # type: ignore[return-value]
 
 
@@ -490,8 +492,8 @@ def read_chunked(batch: Batch, params: ExecutorParams, words: Words, *, chunk: i
 # no further apart than the executor's conformance bound. It runs in every process that reads closed-loop sentences or
 # flies them again, before its work (`require_conforming_closed_loop`, D69, D73), with the labeller's and the executor's
 # checks; a difference refuses by name. There is no passed record and no digest of code.
-#: v5: A20 (D58), the words above E; v6 (A29, D73): no digest of code.
-REFERENCE_SCHEMA = "ts-closed-loop-conformance-reference-v6"
+#: v5: A20 (D58), the words above E; v6 (A29, D73): no digest of code; v7 (A31, D74): each flight's outcome compared.
+REFERENCE_SCHEMA = "ts-closed-loop-conformance-reference-v7"
 REFERENCE_SPLIT, REFERENCE_PER_AIRPORT, REFERENCE_SEED = "train", 10, 1337
 CONFORMANCE = "conformance"
 
@@ -512,7 +514,7 @@ def _reference_results(instructions: Path, params: ExecutorParams, words: Words,
 def _result_json(result: ClosedLoopSentence | Refused) -> dict[str, Any]:
     if isinstance(result, Refused):
         return {"refused": result.reason}
-    return {"rows": len(result.grid), "timed_out": result.timed_out}
+    return {"rows": len(result.grid), "timed_out": result.timed_out, "outcome": result.outcome}
 
 
 def write_reference(instructions: Path, params: ExecutorParams, words: Words, intervals: Sequence[float], *,

@@ -97,6 +97,8 @@ def summarise(results: list[ClosedLoopSentence | Any], excluded: dict[str, int],
                                              "without_a_correction_toward_the_path": int(c[2])}
                                       for name, c in counts.items()},
             "timed_out": sum(1 for r in read if r.timed_out),
+            # D74: the sentences by the judge's outcome of what the reading flew (for readouts and selection)
+            "outcomes": dict(Counter(r.outcome for r in read).most_common()),
             # D44: the rows past the end of the observed path (no observed height there)
             "rows_past_the_end": int(sum(np.isnan(r.vertical_m).sum() for r in read)),
             "heading_word_lateness_s": None if not len(lateness) else {

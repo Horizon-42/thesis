@@ -320,6 +320,30 @@ def test_a_go_around_at_the_first_predicted_step_and_a_short_sentence_are_refuse
         assert isinstance(result, Refused) and result.reason.startswith(reason)
 
 
+def test_each_outcome_is_stored_by_name_and_a_file_of_the_former_format_is_refused(tmp_path):
+    """D74: the reading's outcome of each sentence — a landing and every kind of failure of the judge (§5.8) — is written
+    by its name and read back with its sentence; a closed-loop file of the former format (no outcome) is refused by name."""
+    from ts_transformer.autopilot.judge import OUTCOMES
+    from ts_transformer.instructions.artefact import CLOSED_LOOP_SCHEMA, load_closed_loop, write_closed_loop
+
+    batch, inputs, words = _batch(4.0)
+    (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
+    assert sentence.outcome in OUTCOMES
+    path = tmp_path / "train_4s.npz"
+    write_closed_loop(path, words.spec, executor_params_sha256="x", row_interval_s=4.0, start_row=sentence.start,
+                      sentences={k: replace(sentence, outcome=name) for k, name in enumerate(OUTCOMES)})
+    stored = closed_loop_sentences(load_closed_loop(path, words.spec))
+    assert [stored[k].outcome for k in range(len(OUTCOMES))] == list(OUTCOMES)
+    assert set(OUTCOMES) >= {"landed", "unstable_at_minimums", "crossed_too_high", "crossed_off_runway",
+                             "crossed_other_runway", "ground_contact", "timeout", "dynamics_failure"}
+    with np.load(path) as data:
+        former = {name: data[name] for name in data.files if name != "outcome"}
+    former["schema"] = np.array("ts-instruction-closed-loop-v6")
+    np.savez_compressed(tmp_path / "former.npz", **former)
+    with pytest.raises(ValueError, match=f"is not a {CLOSED_LOOP_SCHEMA} file"):
+        load_closed_loop(tmp_path / "former.npz", words.spec)
+
+
 def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(tmp_path, monkeypatch):
     """§4.9 "Artefact": the words, corrections, states and errors written and read back by signal index; the replay's
     batch flies each from its first predicted step (its sentence and observed flight moved there) and the replay's check
@@ -426,7 +450,7 @@ def test_the_readings_of_d34_read_the_vertical_tolerance_in_force_at_each_row():
         first_row=0, grid=np.array([r[0] for r in rows]), correction=np.array([r[1] for r in rows]),
         states=np.zeros((n, 6)), on_interval=np.ones(n, bool), lateral_m=np.zeros(n), vertical_m=np.array(errors),
         uncorrectable=np.array(uncorrectable), observed_row=np.arange(n), matched_row=np.arange(n, dtype=float),
-        start=0, timed_out=False)
+        start=0, timed_out=False, outcome="landed")
     correctable, outside, breaks = closed_loop.outside_rows(sentence, observed, 0, words, [90.0])["vertical"]
     assert correctable.tolist() == [False, True, False, True, True]     # the first row and a new word: none
     assert outside.tolist() == [False, False, False, True, True] and not breaks.any()
@@ -466,7 +490,7 @@ def test_the_rule_of_d50_reads_a_word_moved_across_a_runway_word_in_its_new_fram
         first_row=0, grid=grid, correction=np.zeros((n, 5), bool), states=np.zeros((n, 6)), on_interval=np.ones(n, bool),
         lateral_m=np.array([0.0, 0.0, 0.0, 0.0, -60.0]), vertical_m=np.zeros(n),
         uncorrectable=np.array([[True, True], *[[False, True]] * (n - 1)]),
-        observed_row=np.array([0, 1, 2, 3, 3]), matched_row=np.zeros(n), start=0, timed_out=False)
+        observed_row=np.array([0, 1, 2, 3, 3]), matched_row=np.zeros(n), start=0, timed_out=False, outcome="landed")
     _, outside, breaks = closed_loop.outside_rows(sentence, observed, 0, words, [90.0, 92.0])["lateral"]
     assert outside.tolist() == [False, False, False, False, True] and breaks.tolist() == outside.tolist()
     corrected = grid.copy()
@@ -489,7 +513,7 @@ def test_an_overshoot_takes_the_opposite_correction_in_its_row_and_the_rule_of_d
         first_row=0, grid=grid, correction=np.array([r[1] for r in rows]), states=np.zeros((n, 6)), on_interval=np.ones(n, bool),
         lateral_m=np.array([0.0, 60.0, -60.0, -60.0, 0.0]), vertical_m=np.zeros(n),
         uncorrectable=np.array([[True, True], *[[False, True]] * (n - 1)]), observed_row=np.zeros(n, dtype=int),
-        matched_row=np.zeros(n), start=0, timed_out=False)
+        matched_row=np.zeros(n), start=0, timed_out=False, outcome="landed")
     observed = _grid([_first(words, 900.0, ANGLE_LEVEL), *[{}] * 5])
     _, outside, breaks = closed_loop.outside_rows(sentence, observed, 0, words, [90.0])["lateral"]
     assert outside.tolist() == [False, True, True, True, False] and not breaks.any()
@@ -820,7 +844,7 @@ def test_the_observed_heading_words_of_a_turn_are_said_at_the_nearest_row_on_ave
             first_row=0, grid=np.array([r[0] for r in said_rows]), correction=np.array([r[1] for r in said_rows]),
             states=np.zeros((n, 6)), on_interval=np.ones(n, bool), lateral_m=np.zeros(n), vertical_m=np.zeros(n), uncorrectable=np.ones((n, 2), bool),
             observed_row=np.array([r[2] for r in said_rows]), matched_row=np.array([r[3] for r in said_rows]), start=0,
-            timed_out=False)
+            timed_out=False, outcome="landed")
         assert np.allclose(closed_loop.heading_lateness_rows(sentence, grid[first_row:]) * 2.0, lateness)
 
 
