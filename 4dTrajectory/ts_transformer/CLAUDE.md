@@ -162,7 +162,8 @@ of the package, not a migration in progress.
   Δ row nearest where the observed aircraft heard it (D42, D45), a heading word in the frame where it is heard (D46), with
   heading and angle corrections (none past the end of the observed path, D44), to the executor's end; the flown states on the data's 2 s rows, the Δ rows marked (D51), the errors against the observed path and the rows that allow no correction
   (D34); written once by `instruction_closed_loop` with its own reference and passed record, read only for code that
-  passed it (`closed_loop.require_conforming_closed_loop`) (C38).
+  passed it (`closed_loop.require_conforming_closed_loop`); a speaker's closed loop starts where the reading does,
+  through `autopilot/start.py` (`start`, `Loop.step`, D67) (C38).
 - **An executor spec opens only for executor code that flies its reference tracks within the bounds** (2026-10-01, the
   user: checked by what it flies, not by its source; `ts-executor-spec-v8`: a sentence said on its own rows, D57; a level
   word flown at T + E MSL, D58): `conformance/` beside the spec — 250

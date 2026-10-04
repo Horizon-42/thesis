@@ -88,19 +88,16 @@ import torch
 
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.conformance import DEVICE, ROUNDOFF, STATE_BOUND_M
-from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S, Executor
 from ts_transformer.autopilot.flights import FlightInputs, flight_inputs
-from ts_transformer.autopilot.frame import AirportCharts, Kinematics
-from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.replay import Batch, subset
-from ts_transformer.autopilot.sentence import Spoken
 from ts_transformer.autopilot.spec import executor_source_files, params_sha256
+from ts_transformer.autopilot.start import Loop, start_row, time_limit_s
 from ts_transformer.instructions.artefact import CLOSED_LOOP_DIRECTORY, STATE_COLUMNS, ClosedLoopSentence
 from ts_transformer.instructions.conformance import labeller_code_files
 from ts_transformer.instructions.grammar import InForce, Ungrammatical, apply
 from ts_transformer.instructions.labeller.interval import (
-    OBSERVATION_S, in_force, interval_rows, last_heard_row, on_interval_rows,
+    in_force, interval_rows, last_heard_row, on_interval_rows,
 )
 from ts_transformer.instructions.labeller.read import Reading, smooth, truncated
 from ts_transformer.instructions.labeller.records import Refused
@@ -110,11 +107,6 @@ from ts_transformer.instructions.words import (
 )
 from ts_transformer.io_utils import file_sha256, logic_sha256, utc_now, write_json_atomic
 from ts_transformer.repo_layout import git_state
-
-def start_row(row_interval_s: float) -> int:
-    """The first predicted step's Δ row: the prior's observation (16 s) after the sentence's first Δ row."""
-    return int(round(OBSERVATION_S / row_interval_s))
-
 
 class Match(NamedTuple):
     """A flown position against the observed path (`ObservedPath.match`)."""
@@ -365,12 +357,6 @@ def _state_rows(signals: FlightSignals, rows: np.ndarray) -> np.ndarray:
                             signals.ground_speed_mps[rows], signals.vertical_rate_mps[rows]])
 
 
-def _flown_row(state: Kinematics, j: int) -> np.ndarray:
-    speed, gamma = float(state.speed_mps[j]), float(state.gamma_rad[j])
-    return np.array([float(state.e_m[j]), float(state.n_m[j]), float(state.height_m[j]), float(state.track_deg[j]),
-                     float(state.ground_speed_mps[j]), speed * math.sin(gamma)])
-
-
 def start_inputs(batch: Batch, step_s: float, *, device: torch.device) -> FlightInputs:
     """Every flight's physical context at its first predicted step (`flights.flight_inputs` at that 2 s row)."""
     every, start = interval_rows(batch.row_interval_s, step_s), start_row(batch.row_interval_s)
@@ -420,8 +406,7 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
         paths.append(ObservedPath(signals.e_m[:span], signals.n_m[:span], smoothed.altitude_m, start * every))
         correctors.append(Corrector(reading.words, sentence.first_row, start * every, every, words,
                                     [candidate.course_deg for candidate in batch.geometries[j].candidates]))
-        limits.append(replay.remaining_observed_s(reading, sentence.first_row + start * every, spec.step_s)
-                      * params.timeout_factor)
+        limits.append(time_limit_s(len(reading.words), sentence.first_row + start * every, params, spec.step_s))
         states.append([*_state_rows(signals, np.arange(start * every))])     # the observed 2 s rows (D51)
         said.append([])
         added.append([])
@@ -429,41 +414,33 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
         reached.append([])
         matched.append([])
         errors.append([])
-    f64 = torch.float64
     # the most go-arounds a flight can say: its reading's from the first predicted step (the cycles' layout)
     go_arounds = max(int((batch.readings[j].words[batch.sentences[j].first_row + start * every:, RUNWAY]
                           == RUNWAY_GO_AROUND).sum()) for j in flying)
-    executor = Executor(
-        _rows(inputs, flying),
-        Runways.of([batch.geometries[j] for j in flying], spec, dtype=f64, device=device),
-        AirportCharts.of([batch.geometries[j] for j in flying], dtype=f64, device=device),
-        torch.tensor([batch.approach_ias_mps[j] for j in flying], dtype=f64, device=device), params, words,
-        step_s=interval, time_limit_s=torch.tensor(limits, dtype=f64, device=device),
-        reserve_s=GO_AROUND_EXTRA_S * go_arounds)
-    spoken = Spoken(len(flying), words, step_s=interval, device=device)
-    step_cycles = int(round(interval / params.cycle_s))
-    row_cycles = int(round(spec.step_s / params.cycle_s))     # the cycles of one 2 s row
+    loop = Loop(_rows(inputs, flying), [batch.geometries[j] for j in flying],
+                [batch.approach_ias_mps[j] for j in flying], limits, params, words, interval_s=interval,
+                most_go_arounds=go_arounds, device=device)       # the start of a closed loop (D67)
     live = np.ones(len(flying), dtype=bool)
     timed_out = np.zeros(len(flying), dtype=bool)
     s = 0
+    now = loop.rows()
     while live.any():
-        now = executor.now()
-        captured = executor.vertical.captured.cpu().numpy()
+        captured = loop.executor.vertical.captured.cpu().numpy()
         step = np.full((len(flying), len(COLUMNS)), UNCHANGED, dtype=np.int64)
         for f, j in enumerate(flying):
             if not live[f]:
                 continue
-            flown = _flown_row(now, f)
-            match = paths[f].match(flown[0], flown[1], flown[2])
+            flown = now[f]
+            match = paths[f].match(float(flown[0]), float(flown[1]), float(flown[2]))
             lateral, vertical = match.lateral_m, match.vertical_m
             try:
-                height = flown[2] - batch.geometries[j].elevation_m       # above E, as the grammar reads it (D58)
+                height = float(flown[2]) - batch.geometries[j].elevation_m       # above E, as the grammar reads it (D58)
                 words_row, mask = correctors[f].row(match.row, lateral, vertical, height, holding=bool(captured[f]),
                                                     past_end=match.past_end)
             except Refused as refused:
                 out[j] = refused
                 live[f] = False
-                executor.halt(torch.as_tensor(~live, device=device))
+                loop.halt(~live)
                 if s == 0:                                  # the cycle starts with every column said
                     held = correctors[f].held
                     step[f] = held[min(last_heard_row(start * every, every), len(held) - 1)]
@@ -479,22 +456,12 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
             states[f].append(flown)
         if not live.any():
             break
-        spoken.say(step)
-        heard = torch.full((len(flying),), s * interval, dtype=f64, device=device)
-        between = [[] for _ in flying]
-        for cycle in range(1, step_cycles + 1):
-            executor.cycle(spoken.at(heard), torch.full_like(heard, executor.count * params.cycle_s))
-            if cycle % row_cycles == 0 and cycle < step_cycles:   # a 2 s row between two Δ rows
-                now = executor.now()
-                for f in np.nonzero(live)[0]:
-                    between[f].append(_flown_row(now, int(f)))
-        done = executor.done.cpu().numpy()
-        cycles = executor.done_cycle.cpu().numpy()
-        limit = executor.time_limit_s.cpu().numpy()
-        for f in range(len(flying)):
-            if live[f] and done[f]:
-                live[f] = False
-                timed_out[f] = (cycles[f] + 1) * params.cycle_s >= limit[f]   # the executor's own test
+        rows, done = loop.step(step)
+        between = [[*rows[f, :-1]] if live[f] else [] for f in range(len(flying))]   # the 2 s rows between two Δ rows
+        now = rows[:, -1]
+        ended = live & done
+        timed_out |= ended & loop.timed_out()
+        live &= ~done
         s += 1
     for f, j in enumerate(flying):
         if out[j] is not None:

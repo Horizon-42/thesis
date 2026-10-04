@@ -645,3 +645,14 @@ the executor's files and the labeller's) that reads it again with the same words
 1e-6 m; `require_conforming_closed_loop` asks for it before `executor_replay --closed-loop`, which refuses sentences of
 other executor parameters, flies each from its first predicted step on the time clock and requires each flight to fly its
 stored states again.
+
+**The start of a closed loop** (vocabulary §6 item 5, D67, §12.1 A26; `autopilot/start.py`, 2026-10-04): `start(instructions,
+split, Δ, sentences, params, words, most_go_arounds=…)` takes closed-loop sentences as `closed_loop_sentences` gives them
+and returns a `Loop` at each flight's first predicted step — the flight rebuilt and compared with its stored signals
+(`flights.rebuild_series`), its aircraft and approach speed by the replay's rule, its time limit (`start.time_limit_s`: the
+observed time left from the first predicted step to the end of its labelled sentence × the timeout factor) and 900 s for
+each go-around up to the most given. `Loop.step(words [B, 5])` flies one Δ row and gives the states of the 2 s rows
+flown (`STATE_COLUMNS`) and the flights done; a go-around beyond the most refuses the row by name (`GoAroundBeyondMost`)
+before anything is flown; `Loop.outcome(f)` is `judge.outcome_of` on what the executor recorded. The closed-loop reading
+builds its `Loop` from the same pieces, so its sentences said through `start` give back their stored states and the
+replay's outcome (`tests/test_start.py`). The artefact's formats do not change.
