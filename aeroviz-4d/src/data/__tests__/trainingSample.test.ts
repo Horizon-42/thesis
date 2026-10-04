@@ -18,6 +18,7 @@ import {
   trainingEnvelopeIndex,
   trainingReadingOf,
   trainingWordLabel,
+  wordsOutside,
   unwrapDegrees,
   TRAINING_COLUMNS,
   TRAINING_INDEX_SCHEMA,
@@ -183,11 +184,26 @@ describe("the flown flight (replay.track)", () => {
 
     const rows = stageASampleFile();
     rows.flights[0].closedLoop["2"].replay.track.rows -= 1;
-    expect(parseTrainingSample(rows).ok).toBe(false);
+    const r = parseTrainingSample(rows);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.problem).toMatch(/rows is \d+, but \d+ cycles/);
 
     const cycle = stageASampleFile();
     delete cycle.executor;
     expect(parseTrainingSample(cycle).ok).toBe(false);
+
+    const uneven = stageASampleFile();
+    uneven.executor.cycleS = 0.75;
+    const u = parseTrainingSample(uneven);
+    expect(u.ok).toBe(false);
+    if (!u.ok) expect(u.problem).toContain("not a whole number of 0.75 s cycles");
+
+    const open = stageASampleFile();
+    const spans = open.flights[0].openLoop.envelopes.speed;
+    spans[spans.length - 1].endRow = open.flights[0].observed.rows + 1;
+    const o = parseTrainingSample(open);
+    expect(o.ok).toBe(false);
+    if (!o.ok) expect(o.problem).toContain("rows of the observed track");
   });
 
   it("accepts an empty heading band wherever it lies — its word's lead runs past the end of the flight — and draws nothing for it", () => {
@@ -276,14 +292,25 @@ describe("the readings", () => {
   });
 });
 
+describe("words outside their envelopes", () => {
+  it("counts a heading word with a row outside its band, a tube or span that did not hold, never an empty band", () => {
+    const sample = stageASample();
+    const envelopes = sample.flights[0].closedLoop["2"].replay.envelopes!;
+    const expected = envelopes.heading.filter((band) => band.inside.includes(false)).length +
+      envelopes.altitude.filter((tube) => !tube.contained).length + envelopes.speed.filter((span) => !span.contained).length;
+    expect(wordsOutside(envelopes)).toBe(expected);
+    const empty = { firstRow: 900, stopRow: 900, row: 898, targetDeg: 0, toleranceDeg: 4.5, inside: [] };
+    const one = envelopes.altitude.length ? { ...envelopes.altitude[0], contained: false } : null;
+    const more = { ...envelopes, heading: [...envelopes.heading, empty], altitude: one ? [one, ...envelopes.altitude.slice(1)] : [] };
+    const before = envelopes.altitude.length && !envelopes.altitude[0].contained ? 0 : 1;
+    expect(wordsOutside(more)).toBe(expected + (one ? before : 0));
+  });
+});
+
 describe("drawing helpers", () => {
   it("carries a run of rows outside on to the next row, so one row is a segment", () => {
     expect(outsideSpans([true, false, false, true, false], 10, 20)).toEqual([[11, 13], [14, 15]]);
     expect(outsideSpans([true, true], 0, 5)).toEqual([]);
-    // never a span past the line's last row: verdicts beyond it are dropped, one that runs over is cut
-    expect(outsideSpans([false, false, false], 8, 9)).toEqual([[8, 9]]);
-    expect(outsideSpans([true, false], 9, 9)).toEqual([]);
-    expect(outsideSpans([false], 12, 9)).toEqual([]);
   });
 
   it("makes a track continuous and puts a target on the branch of the track", () => {

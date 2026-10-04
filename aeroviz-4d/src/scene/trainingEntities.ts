@@ -232,6 +232,7 @@ export function placeAircraft(entity: Cesium.Entity, pose: TrainingAircraftPose)
 export function marker(
   id: string, name: string, position: Cesium.Cartesian3, css: string, size: number, label?: string,
   labelOffset: Cesium.Cartesian2 = new Cesium.Cartesian2(0, 18),
+  labelOrigin: Cesium.HorizontalOrigin = Cesium.HorizontalOrigin.CENTER,
 ): EntityOptions {
   return {
     id, name, position,
@@ -241,7 +242,7 @@ export function marker(
     },
     label: label === undefined ? undefined : {
       text: label, font: "600 12px sans-serif", fillColor: colour(css), outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
-      style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: labelOffset,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: labelOffset, horizontalOrigin: labelOrigin,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
   };

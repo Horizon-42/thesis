@@ -89,11 +89,11 @@ def fly_segment(batch: replay.Batch, inputs: FlightInputs, j: int, sentence: Clo
 
 
 def last_state(result: FlownSegment) -> int:
-    """The last flown state drawn: the stop's last state; the outcome's (a dynamics failure's failed state left out, as
-    the export leaves it out)."""
+    """The last flown state drawn: the stop's last state; the outcome's (`training_flights.last_state_cycle`, the
+    export's rule)."""
     if result.verdict is None:
         return int(result.flown.done_cycle[0]) + 1
-    return result.verdict.end_row - 1 if result.verdict.outcome == "dynamics_failure" else result.verdict.end_row
+    return training_flights.last_state_cycle(result.verdict.outcome, result.verdict.end_row)
 
 
 def apart_from_stored(result: FlownSegment, sentence: ClosedLoopSentence, batch: replay.Batch, j: int,

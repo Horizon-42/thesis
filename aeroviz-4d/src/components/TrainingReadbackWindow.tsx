@@ -38,7 +38,7 @@ import {
   TRAINING_WORD_COLOR,
   trainingOutcomeColour,
 } from "../utils/trainingWordColors";
-import { closedCycleTimeS, sentenceWordAt, trainingBandLabel, type TrainingColumn, type TrainingReading, type TrainingSelection } from "../data/trainingSample";
+import { closedCycleTimeS, sentenceWordAt, trainingBandLabel, wordsOutside, type TrainingColumn, type TrainingReading, type TrainingSelection } from "../data/trainingSample";
 import { autopilotColour, type TrainingAutopilotSegment } from "../data/trainingAutopilot";
 import { checkMark, crossingText, replayText, segmentEndText, TRAINING_OUTCOME_TAG } from "../data/trainingText";
 import useMeasuredWidth from "../hooks/useMeasuredWidth";
@@ -148,7 +148,10 @@ export default function TrainingReadbackWindow(props: TrainingReadbackWindowProp
                       at {replay.crossing.decision.heightMslM.toFixed(0)} m MSL
                     </>
                   )}
-                {replay.flewTheSentence ? "" : ` · did not fly the sentence (${replay.notReached} words not reached)`}
+                {/* landed but not as said: the words that left their envelopes (the outcome says the rest) */}
+                {replay.outcome === "landed" && !replay.flewTheSentence && replay.envelopes !== null
+                  ? ` · landed, but ${wordsOutside(replay.envelopes)} words left their envelopes` : ""}
+                {replay.notReached > 0 ? ` · ${replay.notReached} words said after the landing` : ""}
               </p>
             ) : null}
             {live !== null ? (
