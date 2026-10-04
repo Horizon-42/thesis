@@ -16,11 +16,12 @@ refused.
 WHEN THE OBSERVED WORDS ARE SAID (D42, D45, D46). The observed words are the open-loop reading's at the data's 2 s rows
 (not the Δ grid of `labeller.interval`), each with its 2 s time. The observed time of the matched point is the time at
 which the observed aircraft was there (`ObservedPath.match`). At each Δ row the reading says every observed word whose
-time is not more than Δ/2 after the matched point's observed time and that was not said before (`reached_row`): a word
+time is less than Δ/2 after the matched point's observed time and that was not said before (`reached_row`; a word
+exactly Δ/2 after waits for the next row, as the Δ grid puts a tie on the later row): a word
 comes at the Δ row nearest the place where the observed aircraft heard it, and its mean lateness is zero (D45). Of
 several words of a column, the last (`last_words`). While the flown aircraft is behind the observed one the observed
 words wait; ahead of it, they come sooner. The first predicted step says every column (rule 1): the observed words in
-force Δ/2 after its observed time. A heading word is said in the frame where it is heard (D46, §3.3): the observed word
+force before Δ/2 after its observed time. A heading word is said in the frame where it is heard (D46, §3.3): the observed word
 says an absolute track (its class under the course of the runway in force at its 2 s row), and the row that says it
 gives the class nearest that track minus the course of the runway in force at that row — the observed runway words up
 to there are said with it, the runway column first. A heading word is said when the observed word in force or the
@@ -124,7 +125,7 @@ class ClosedLoopSentence:
     #: [M, 2] bool: the rows where §4.9 makes no heading / angle correction (`Corrector.row`; the readings of D34)
     uncorrectable: np.ndarray
     #: [M] the last 2 s row of the open-loop reading, from the sentence's first row, whose words have been said at each
-    #: said row (D45: the last whose time is not more than Δ/2 after the matched point's)
+    #: said row (D45: the last whose time is less than Δ/2 after the matched point's)
     observed_row: np.ndarray
     #: [M] the matched point's observed time at each said row, in 2 s rows from the sentence's first row (the first
     #: predicted step: its own observed time)
@@ -189,9 +190,9 @@ class ObservedPath:
 
 
 def reached_row(row: float, every: int) -> int:
-    """The last 2 s row whose observed time is not more than Δ/2 (``every`` 2 s rows) after the matched point's observed
-    time ``row`` (in 2 s rows, D45)."""
-    return int(math.floor(row + every / 2.0))
+    """The last 2 s row whose observed time is less than Δ/2 (``every`` 2 s rows) after the matched point's observed
+    time ``row`` (in 2 s rows, D45: a row exactly Δ/2 after waits, as a tie goes to the later row on the Δ grid)."""
+    return int(math.ceil(row + every / 2.0)) - 1
 
 
 def uncorrected_m(errors: np.ndarray, uncorrectable: np.ndarray) -> float:
@@ -263,7 +264,7 @@ class Corrector:
 
     def row(self, matched_row: float, lateral_m: float, vertical_m: float, height_m: float, *, holding: bool,
             past_end: bool) -> tuple[np.ndarray, np.ndarray]:
-        """The next said row's words and which are corrections: the observed words not said before up to Δ/2 after the
+        """The next said row's words and which are corrections: the observed words not said before up to (not at) Δ/2 after the
         matched point's observed time ``matched_row`` (the first predicted step: after its own), and the corrections from
         the errors, the flown height there, whether the executor holds the level in force (``holding``) and whether the
         matched point is past the end of the observed path (``past_end``, module docstring); refused when the grammar

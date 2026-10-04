@@ -609,9 +609,10 @@ executor parameters' sha it was flown with; `summary.json` counts the flights wi
 refused on the row interval, refused by the closed loop — the grammar read at the flown height), the correction words per
 column, the D34 readings, the rows past the end and the lateness of the observed heading words. The reading says each
 observed word at the PLACE where the observed aircraft heard it, not at its time (D42): the words of the 2 s open-loop
-reading (not the Δ grid), each said at the first Δ row whose matched observed time is not more than Δ/2 before the word's
+reading (not the Δ grid), each said at the first Δ row whose matched observed time is less than Δ/2 before the word's
 2 s time (D45: the nearest row; of several, each column's last word), so the words wait while the flown aircraft is
-behind; the first predicted step says the words in force Δ/2 after its observed time. A heading word is said in the frame
+behind (a tie goes to the later row, as on the Δ grid, A14); the first predicted step says the words in force before Δ/2
+after its observed time. A heading word is said in the frame
 where it is heard (D46), when the observed word in force or the correction changes and its track differs from the one the
 executor holds; a change of runway alone says none. Past the end of the observed path (D44) e_y is measured against the
 last segment's line, there is no e_h, no correction is said (one in force ends: Claude's reading) and the rows count as

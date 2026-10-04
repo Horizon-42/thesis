@@ -243,7 +243,7 @@ def test_a_closed_loop_sentence_flown_again_gives_its_states(monkeypatch):
 
 
 def test_a_go_around_at_the_first_predicted_step_and_a_short_sentence_are_refused():
-    """The go-around in force in the 2 s words the first predicted step says (Δ/2 after its observed time, D45)."""
+    """The go-around in force in the 2 s words the first predicted step says (those before Δ/2 after its observed time; a tie waits, D45, A14)."""
     batch, inputs, words = _batch(4.0)
     reading, sentence = batch.readings[0], batch.sentences[0]
     first = sentence.first_row + closed_loop.start_row(4.0) * 2
@@ -254,8 +254,8 @@ def test_a_go_around_at_the_first_predicted_step_and_a_short_sentence_are_refuse
         return replace(reading, words=grid)
 
     short = replay.Sentence(grid=sentence.grid[:5], instructions=[], first_row=sentence.first_row)
-    assert closed_loop.refusal(sentence, gone(first + 2), 4.0, 2.0) is None        # heard at the second row
-    for case, reason in (((gone(first + 1), sentence), "go-around at the first predicted step"),
+    assert closed_loop.refusal(sentence, gone(first + 1), 4.0, 2.0) is None        # a tie: heard at the second row
+    for case, reason in (((gone(first), sentence), "go-around at the first predicted step"),
                          ((reading, short), "too short")):
         batch.readings[0], batch.sentences[0] = case
         (result,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
@@ -464,9 +464,13 @@ def test_the_matched_point_has_the_observed_time_of_its_place():
     assert path.match(50.0, 0.0, 500.0).row == pytest.approx(0.5)
     assert path.match(150.0, 3.0, 500.0).row == pytest.approx(2.5)
     assert path.match(260.0, 0.0, 500.0).row == pytest.approx(4.0)
-    # D45 "not more than Δ/2 after": at Δ = 2 s a word 1 s after the matched point is reached, 1.2 s after not yet; at
-    # Δ = 8 s, 4 s after (a tie) is reached, 4.2 s after not
-    assert [closed_loop.reached_row(row, every) for row, every in ((2.5, 1), (2.4, 1), (7.0, 4), (6.9, 4))] == [3, 2, 9, 8]
+    # D45 "less than Δ/2 after": at Δ = 2 s a word 0.8 s after the matched point is reached, 1 s after (a tie) waits; at
+    # Δ = 8 s, 3.8 s after is reached, 4 s after waits
+    assert [closed_loop.reached_row(row, every) for row, every in ((2.6, 1), (2.5, 1), (7.1, 4), (7.0, 4))] == [3, 2, 9, 8]
+    # A14: on a row of the grid the closed loop reaches what the Δ grid puts on that row (a tie on the later row)
+    for every in (1, 2, 4):
+        for k in range(4):
+            assert closed_loop.reached_row(k * every, every) == k * every + (every + 1) // 2 - 1
 
 
 def test_past_the_end_of_the_observed_path_its_last_segment_goes_on_without_a_height():
