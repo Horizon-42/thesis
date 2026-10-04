@@ -248,7 +248,7 @@ def test_the_speed_is_unspecified_from_the_capture_row_unless_a_hold_ends_far_en
     far = np.linspace(40000.0, 300.0, 200)
     near = np.linspace(9000.0, 300.0, 200)
     kept = read_speed(time, speed, far, 60, one, words)
-    assert [words.speed_mps(i.value) for i in kept.instructions] == [120.0, 90.0, None]
+    assert [words.speed_mps(i.value) for i in kept.instructions] == [120.0, 115.0, 110.0, 105.0, 100.0, 95.0, 90.0, None]
     # the 90 m/s hold ends 9.3 km or more out; the deceleration's first rows still fit the hold's
     # straight piece within the 1.5 m/s fit tolerance
     assert 140 <= kept.unspecified_row <= 145
@@ -257,6 +257,42 @@ def test_the_speed_is_unspecified_from_the_capture_row_unless_a_hold_ends_far_en
     assert 50 <= dropped.unspecified_row <= 53
     # a capture row inside the 90 m/s hold, no hold ending far out: "unspecified" from the capture row itself
     assert read_speed(time, speed, near, 100, one, words).unspecified_row == 100
+
+
+# ---- speed words in steps (D43)
+def _speeds(reading, words):
+    return [(i.row, words.speed_mps(i.value)) for i in reading.instructions]
+
+
+def test_a_deceleration_of_40_mps_from_hold_to_hold_says_its_eight_steps_where_the_speed_comes_nearer_to_each():
+    """§4.5 rule 3 (D43): each grid value from the word in force to the target, in order, at the first row of the run
+    where the smoothed speed is nearer to it than to the value before; the last is the next hold's value."""
+    one, words = spec(), Words(spec())
+    speed = np.concatenate((np.full(40, 130.0), 130.0 - np.arange(1, 41) * 1.0, np.full(40, 90.0)))
+    time = np.arange(len(speed)) * INSTRUCTION_STEP_S
+    reading = read_speed(time, speed, np.full(len(speed), 40000.0), None, one, words)
+    said = _speeds(reading, words)
+    assert [v for _, v in said] == [130.0, 125.0, 120.0, 115.0, 110.0, 105.0, 100.0, 95.0, 90.0]
+    (run,) = [piece for piece in reading.pieces if piece.kind == "transition"]
+    for (row, value), (_, before) in zip(said[1:], said[:-1]):
+        nearer = [r for r in range(run.start, len(speed)) if abs(speed[r] - value) < abs(speed[r] - before)]
+        assert row == nearer[0]
+
+
+def test_a_run_that_turns_without_a_hold_steps_to_the_grid_value_nearest_the_turn_and_noise_says_nothing_back():
+    one, words = spec(), Words(spec())
+    down = 100.0 - np.arange(1, 15) * 1.0                              # to 86 m/s, then back up without a hold
+    noise = np.where(np.arange(30) % 2, 0.6, -0.6)                     # inside the fit tolerance
+    speed = np.concatenate((np.full(30, 100.0), down, down[::-1][1:], [100.0], np.full(30, 100.0) + noise))
+    time = np.arange(len(speed)) * INSTRUCTION_STEP_S
+    said = _speeds(read_speed(time, speed, np.full(len(speed), 40000.0), None, one, words), words)
+    assert [v for _, v in said] == [100.0, 95.0, 90.0, 85.0, 90.0, 95.0, 100.0]
+    wobbly = 110.0 - np.arange(60) * 0.5 + np.where(np.arange(60) % 2, 1.2, -1.2)    # one deceleration with noise
+    speed = np.concatenate((np.full(30, 110.0), wobbly, np.full(30, 80.0)))
+    said = _speeds(read_speed(np.arange(len(speed)) * INSTRUCTION_STEP_S, speed, np.full(len(speed), 40000.0), None,
+                              one, words), words)
+    values = [v for _, v in said]
+    assert values == sorted(values, reverse=True) and values[-1] == 80.0 and len(set(values)) == len(values)
 
 
 def _first_step(words):

@@ -2,7 +2,8 @@
 
 The executor takes no information beyond the vocabulary (the user's rule, 2026-09-24) and the procedure standards:
 the roll rate p is the standards' 5°/s (`ROLL_RATE_DEG_S`); the executor makes no turn of its own (D2, D27), so no
-time constant of one; the turn rates, the bank limit, the speed changes' pace and the level bands are the vocabulary's,
+time constant of one; the turn rates, the bank limit, the speed word's rate (a_max, D43), "unspecified"'s pace and the
+level bands are the vocabulary's,
 read at run time; a
 word takes effect when it is said. The judge's decision-altitude check has no parameter (design §5.8, D38: the
 evaluation module's vertical bound and the FAS cone); each candidate's
@@ -94,7 +95,8 @@ def main(argv: list[str] | None = None) -> int:
         },
         "from_the_vocabulary": {"turn_rate_max_deg_s": spec.turn_rate_max_deg_s,
                                 "turn_bank_max_deg": spec.turn_bank_max_deg, "heading_lead_s": spec.heading_lead_s,
-                                "speed_change_mps2": speed_change_mps2(spec),
+                                "speed_word_accel_mps2": spec.speed_accel_max_mps2,
+                                "unspecified_pace_mps2": speed_change_mps2(spec),
                                 "narrowest_level_band_m": float(Words(spec).altitude_tolerances.min()),
                                 "lined_up_deg": spec.lined_up_deg, "landing_max_height_m": spec.landing_max_height_m},
         "from_the_runway": {

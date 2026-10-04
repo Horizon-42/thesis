@@ -427,7 +427,10 @@ or the flight is refused — `read.admit` is the one gate the labeller, the meas
 with go-arounds is read APPROACH BY APPROACH (D26): each go-around row is the row of its climb word, the descent that
 reaches it says "no level-off", each approach has its own capture row, "unspecified" and speed words, row 0 says the
 first low pass's runway and the runway word that ends a go-around the next approach's; the sentence file keeps each
-go-around's row and the row its runway is said again (`go_around_offsets`). A flight's `typecode` is its OWN ICAO type
+go-around's row and the row its runway is said again (`go_around_offsets`). A change of speed says its STEPS (D43,
+`labeller.speed.run_steps`): each 5 m/s grid value from the word in force to the run's target, at the first row where the
+smoothed speed is nearer to it than to the value before, the target at the latest at the run's last row; the executor
+flies a speed word at a_max (`speed_accel_max_mps2`) and "unspecified" at its own pace a_U (`autopilot.speed`). A flight's `typecode` is its OWN ICAO type
 (`source["resolved_typecode"]`) or null; the default `TSConfig` keeps flights without aircraft dynamics (C31). **Since
 artefact v6 (2026-10-02, the user) every row is on the UTC clock's even seconds** (`data.dataset.on_utc_steps`); a
 sentence is put on a coarser row interval Δ (2, 4, 8 s, D25) by `labeller.interval.on_interval` on the UTC multiples of Δ,

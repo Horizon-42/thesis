@@ -241,8 +241,9 @@ frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `t
 `executor_spec --instructions <artefact> --dir <new dir> --word-clock {time,distance,track}` (`ts-executor-spec-v7`)
 refuses a dirty tree, an existing directory and labeller code without a passed record against the artefact's reference;
 p = `ROLL_RATE_DEG_S` (5°/s, FAA Order 8260.3G App. E §4 ¶6.a, ICAO Doc 8168 Vol II); the executor makes no turn of its own,
-so it has no time constant of one. Nothing is measured from data: the turn rates, the bank limit, the speed changes' pace
-(a speed step over the shortest speed hold, 0.25 m/s²) and the level bands are the vocabulary's, read at run time; each
+so it has no time constant of one. Nothing is measured from data: the turn rates, the bank limit, the speed word's rate
+(a_max, the speed envelope's largest acceleration: a speed word is a step of one grid value, D43), "unspecified"'s pace (a
+speed step over the shortest speed hold, 0.25 m/s²) and the level bands are the vocabulary's, read at run time; each
 candidate's published TCH, glidepath angle and DA are read at replay (`autopilot/runway_data.py`) and recorded in
 `measurements.json`; the decision-altitude check takes no parameter (D38); the design's fixed choices (Δt, τ_γ, the γ̇
 factor, the timeout factor) are module constants written into `measurements.json`. It writes the spec's reference tracks

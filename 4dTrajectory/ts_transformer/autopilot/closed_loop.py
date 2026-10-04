@@ -124,6 +124,7 @@ class Match(NamedTuple):
     lateral_m: float            # e_y, right of the observed track positive
     vertical_m: float           # e_h, the flown height minus the observed one
     row: float                  # the matched point's observed time, in the path's rows from its first (D42)
+    along_m: float              # the matched point's distance along the path from its first row
 
 
 class ObservedPath:
@@ -140,6 +141,8 @@ class ObservedPath:
         # to the first row at its second (when it arrived); past the path's end, its last row
         self.arrived = np.flatnonzero(moved)
         self.left = np.append(self.arrived[1:] - 1, len(e_m) - 1)
+        #: the distance along the path at every row (a held position adds nothing)
+        self.along_rows = np.concatenate(([0.0], np.cumsum(np.hypot(np.diff(e_m), np.diff(n_m)))))
         self.segment = min(int(moved[: first + 1].sum()) - 1, len(self.e) - 2)
 
     def _nearest(self, i: int, e_m: float, n_m: float) -> tuple[float, float]:
@@ -162,7 +165,8 @@ class ObservedPath:
         lateral = ((e_m - self.e[i]) * dn - (n_m - self.n[i]) * de) / math.hypot(de, dn)   # right of the track positive
         row = (float(self.left[-1]) if i == len(self.e) - 2 and t >= 1.0
                else float(self.left[i] + t * (self.arrived[i + 1] - self.left[i])))
-        return Match(lateral, height_m - (self.height[i] + t * (self.height[i + 1] - self.height[i])), row)
+        along = self.along_rows[self.arrived[i]] + t * math.hypot(de, dn)
+        return Match(lateral, height_m - (self.height[i] + t * (self.height[i + 1] - self.height[i])), row, along)
 
 
 def uncorrected_m(errors: np.ndarray, uncorrectable: np.ndarray) -> float:

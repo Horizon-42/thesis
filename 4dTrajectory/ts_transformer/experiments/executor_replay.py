@@ -23,6 +23,10 @@ each row adds the largest |e_y| and |e_h| against the observed path and the corr
 cell of the readout the flights that left the observed path by more than `LEFT_THE_PATH_M` and the correction words for
 each sentence. The labelled flights without a closed-loop sentence are counted.
 
+Open or closed loop, each row also counts its sentence's speed words (other than "unspecified") and the largest distance
+along the observed path between the flown aircraft and the observed aircraft of the same time before "unspecified"
+(`along_columns`), and each cell their mean, percentiles and the flights farther than `FAR_ALONG_M` (design §11.12, D43).
+
 The VAL replay waits for the user's go-ahead and runs from a clean tree. Development runs use train.
 
     python run_ts.py executor_replay --split train --per-airport 20 --row-interval-s 2 \\
@@ -59,7 +63,8 @@ from ts_transformer.data.lateral_eligibility import default_evaluation_report_pa
 from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
 from ts_transformer.inference.forecast import Forecast
 from ts_transformer.instructions.artefact import SPLITS, closed_loop_path, load_closed_loop
-from ts_transformer.instructions.words import COLUMNS
+from ts_transformer.instructions.labeller.interval import in_force
+from ts_transformer.instructions.words import COLUMNS, SPEED, UNCHANGED, Words
 from ts_transformer.instructions.readout import STRATA, stratum
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.outputs.envelope import control_contract
@@ -76,6 +81,9 @@ KINDS = ("without go-around", "with go-around")
 #: A closed-loop flight that goes farther than this from its observed path, laterally, LEFT the path: a reading of the
 #: A9 smoke build (design §11.11) that A10 compares against (§14.2 A10), not a criterion (D7).
 LEFT_THE_PATH_M = 300.0
+#: A flight farther than this along the path from the observed aircraft of the same time, before "unspecified": the
+#: reading of design §11.12 that A11 compares against (§14.2 A11), not a criterion (D7).
+FAR_ALONG_M = 1000.0
 
 
 def executor_forecast(flown: Flown, index: int, verdict: Outcome | Verdict, inputs: Any,
@@ -145,6 +153,11 @@ def readout_table(rows: list[dict[str, Any]], *, closed_loop_rows: bool) -> dict
             "observed_passes": len(paired),
             "replay_passes_where_observed_passes": _share(sum(r["replay_verdict"] == "pass" for r in paired), len(paired)),
         }
+        along = [r["largest_along_m"] for r in members if r["largest_along_m"] is not None]
+        table[group][airport][part][kind]["along_the_path"] = {
+            "speed_words_per_sentence": sum(r["speed_words"] for r in members) / len(members),
+            "flights": len(along), "largest_along_m": _percentiles(along),
+            "farther_than_1_km": sum(a > FAR_ALONG_M for a in along)}
         if closed_loop_rows:
             table[group][airport][part][kind]["closed_loop"] = {
                 "left_the_path": sum(r["largest_lateral_m"] > LEFT_THE_PATH_M for r in members),
@@ -197,7 +210,7 @@ def require_same_grading(replayed: dict[str, Any], observed: dict[str, Any], air
 
 def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any, *, chunk: int, device: torch.device,
                 records: Path, split: str, checkpoint: str, extra_summary: dict[str, Any],
-                per_flight: Callable[[replay.Batch, Flown, list[Verdict]], list[dict[str, Any]]] | None = None,
+                per_flight: Callable[[replay.Batch, Flown, list[Verdict]], list[dict[str, Any]]],
                 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Fly and judge one airport's flights, write their records (``checkpoint`` and ``extra_summary`` name what flew
     them), grade them; one row each, and the report. ``per_flight`` adds columns to the rows, read off each chunk's
@@ -208,7 +221,7 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
         flown, verdicts = replay.fly_batch(part, params, words, device=device)
         inputs = part.inputs(device)
         aligned = replay.flight_alignment(part, flown, verdicts)
-        more = [{} for _ in verdicts] if per_flight is None else per_flight(part, flown, verdicts)
+        more = per_flight(part, flown, verdicts)
         for j, verdict in enumerate(verdicts):
             counted = replay.word_results(verdict)
             series = part.series[j]
@@ -242,6 +255,39 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
     for row in rows:
         row["replay_verdict"] = by_key[row["flight_key"]]["verdict"] if row["recorded"] else "no record: failed at once"
     return rows, graded
+
+
+def _percentiles(values: list[float]) -> dict[str, float] | None:
+    return {f"p{q}": float(np.percentile(values, q)) for q in (50, 90)} if values else None
+
+
+def along_columns(words: Words) -> Callable[[replay.Batch, Flown, list[Verdict]], list[dict[str, Any]]]:
+    """The rows' speed columns (design §11.12, §14.2 A11): each flown sentence's speed words other than "unspecified",
+    and the largest distance along the observed path between the flown aircraft (its matched point, the closed loop's
+    forward search, `closed_loop.ObservedPath`) and the observed aircraft of the same time, on the Δ rows before
+    "unspecified" is in force, while both fly (None: no such row)."""
+    def columns(part: replay.Batch, flown: Flown, verdicts: list[Verdict]) -> list[dict[str, Any]]:
+        out = []
+        every = int(round(part.row_interval_s / words.spec.step_s))
+        cycles = int(round(part.row_interval_s / flown.cycle_s))
+        for j, verdict in enumerate(verdicts):
+            grid, signals = part.sentences[j].grid, part.signals[j]
+            speed = grid[:, SPEED]
+            said = int(((speed != UNCHANGED) & (speed != words.speed_unspecified)).sum())
+            held = in_force(grid)[:, SPEED] == words.speed_unspecified
+            before = int(np.argmax(held)) if held.any() else len(grid)
+            span = len(part.readings[j].words) - part.sentences[j].first_row
+            rows = [k for k in range(before) if k * every < span and k * cycles <= verdict.end_row]
+            largest = None
+            if rows:
+                track = flown_track(flown.states[j, : rows[-1] * cycles + 1].cpu().numpy(), part.geometries[j])
+                path = closed_loop.ObservedPath(signals.e_m[:span], signals.n_m[:span], np.zeros(span), 0)
+                largest = max(abs(path.match(float(track["e"][k * cycles]), float(track["n"][k * cycles]), 0.0).along_m
+                                  - float(path.along_rows[k * every])) for k in rows)
+            out.append({"speed_words": said, "largest_along_m": largest})
+        return out
+
+    return columns
 
 
 def closed_loop_columns(stored: dict[int, closed_loop.Stored]
@@ -300,7 +346,8 @@ def main(argv: list[str] | None = None) -> int:
                         groups=(replay.OWN, replay.STAND_IN), row_interval_s=args.row_interval_s)
     print(f"{batch.drawn['flights']} {args.split} flights ({batch.drawn['by_group']}; not flown "
           f"{batch.drawn['excluded']}), {time.perf_counter() - started:.0f}s", flush=True)
-    per_flight = None
+    along = along_columns(words)
+    per_flight = along
     if args.closed_loop:
         closed_loop.require_conforming_closed_loop(instructions)
         path = closed_loop_path(instructions, args.split, args.row_interval_s)
@@ -317,7 +364,10 @@ def main(argv: list[str] | None = None) -> int:
         batch.drawn["without_a_closed_loop_sentence"] = missing
         print(f"{len(batch.sentences)} closed-loop sentences flown from the first predicted step, {missing} flights "
               f"without one", flush=True)
-        per_flight = closed_loop_columns(stored)
+        closed = closed_loop_columns(stored)
+
+        def per_flight(part: replay.Batch, flown: Flown, verdicts: list[Verdict]) -> list[dict[str, Any]]:
+            return [{**a, **c} for a, c in zip(along(part, flown, verdicts), closed(part, flown, verdicts))]
 
     out.mkdir(parents=True)
     rows: list[dict[str, Any]] = []
@@ -360,8 +410,11 @@ def main(argv: list[str] | None = None) -> int:
                     closed = (f"  left the path {cell['closed_loop']['left_the_path']}, heading corrections a "
                               f"sentence {cell['closed_loop']['correction_words_per_sentence']['heading']:.1f}"
                               if args.closed_loop else "")
+                    speed = cell["along_the_path"]
+                    along = (f"  speed words a sentence {speed['speed_words_per_sentence']:.1f}, along the path "
+                             f"{speed['largest_along_m']}, farther than 1 km {speed['farther_than_1_km']}")
                     print(f"  {group:18s} {airport:5s} {part:12s} {kind:17s} n={cell['flights']:5d}  {shares}  "
-                          f"{cell['outcomes']}{closed}")
+                          f"{cell['outcomes']}{closed}{along}")
     print(f"→ {out / 'replay.json'}")
     return 0
 

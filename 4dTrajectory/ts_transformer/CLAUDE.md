@@ -155,7 +155,8 @@ of the package, not a migration in progress.
   `instruction_conformance`), which every later runner asks for; candidates = the manifest's CIFP runway geometry; one
   gate (`read.admit`) for labelling and measuring; a sentence's words align with the FIRST `len(words)` rows of its
   signals (it ends before the landing); a flight with go-arounds is read approach by approach (D26); since v6
-  (2026-10-02) every row is on the UTC even seconds; `--spec-from` keeps another artefact's spec (C30).
+  (2026-10-02) every row is on the UTC even seconds; a change of speed says its 5 m/s steps, flown at a_max (D43);
+  `--spec-from` keeps another artefact's spec (C30).
 - **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v1`; design §4.9, D32): each
   split × row interval — the open-loop words flown from the first predicted step by an executor spec, each said where the
   observed aircraft heard it (D42), with heading and angle corrections, to the executor's end; the flown states, the errors against the observed path and the rows that allow no correction

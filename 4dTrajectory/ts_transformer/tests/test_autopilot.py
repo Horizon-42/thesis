@@ -441,14 +441,17 @@ def _downwind():
 
 def test_a_downwind_base_final_sentence_is_flown_onto_the_final_by_its_words_and_lands():
     """D2, D3: the words alone — the turn onto the final said word by word, the final held by class 0, the descent by
-    "no level-off" at the class's angle — bring the aircraft to the runway (said where the observed aircraft was: the
-    distance clock); the DA check passes and every word is inside its envelope. Nothing captures (no such mode exists)."""
+    "no level-off" at the class's angle — bring the aircraft to the runway, said on the sentence's own clock (the speed
+    words' steps carry the observed changes of speed, D43); the DA check passes and every word is inside its envelope.
+    Nothing captures (no such mode exists). The turns leave the flown aircraft 90-odd metres right of the line: inside
+    the FAS cone, the offset the closed loop corrects."""
     from ts_transformer.autopilot.executor import MODES
 
     signals, _ = _downwind()
-    flown, verdict, reading = _fly_sentence(signals)
+    flown, verdict, reading = _fly_sentence(signals, clock="time")
     assert verdict.outcome == "landed" and verdict.flew_the_sentence
-    assert abs(verdict.crossing["cross_m"]) < 60.0 and 0.0 < verdict.crossing["height_m"] < 100.0
+    assert abs(verdict.crossing["cross_m"]) < verdict.crossing["decision"]["cone_half_width_m"]
+    assert 0.0 < verdict.crossing["height_m"] < 100.0
     assert verdict.crossing["decision"]["passed"]
     # against the runway's real 15 m TCH the open-loop drift fails the DA check (D38): the closed loop's to correct
     from ts_transformer.autopilot.judge import outcome_of
@@ -456,14 +459,17 @@ def test_a_downwind_base_final_sentence_is_flown_onto_the_final_by_its_words_and
     real = outcome_of(flown, 0, instruction_airport(), vertical_paths(instruction_airport()), spec())
     assert real.outcome == "unstable_at_minimums" and real.crossing["decision"]["above_glidepath_m"] > 22.0
     assert set(MODES) == {"go_around", "level_captured"}
-    assert not any(verdict.limits[name]["cycles"] for name in ("thrust_max", "thrust_min", "stall", "load_factor"))
+    # the 5 m/s steps at the test spec's a_max (2.5 m/s²) slow faster than an A320's clean drag and thrust floor allow:
+    # the thrust floor binds and is counted (D43), nothing else does
+    assert verdict.limits["thrust_min"]["cycles"] > 0
+    assert not any(verdict.limits[name]["cycles"] for name in ("thrust_max", "stall", "load_factor"))
     assert all(h["inside"] == h["rows"] for h in verdict.words["heading"] if h["rows"])
 
 
 def test_class_0_holds_the_course_and_keeps_the_offset_the_turn_left():
     """§3.3: "a word of class 0 gives no lateral correction. The aircraft keeps its lateral offset until the model says
-    a word of ±5°" — on the time clock the executor's turn onto the final ends 300-odd metres right of the line (it
-    flies the words at its own pace), and it stays there to the threshold: no law brings it back (D2, D3)."""
+    a word of ±5°" — on the time clock the executor's turn onto the final ends 90-odd metres right of the line, and it
+    stays there to the threshold, where it crosses at that offset: no law brings it back (D2, D3)."""
     from ts_transformer.autopilot.judge import flown_track
     from ts_transformer.instructions.airport import relative_to_runway
 
@@ -474,8 +480,8 @@ def test_class_0_holds_the_course_and_keeps_the_offset_the_turn_left():
     relative = relative_to_runway(track["e"], track["n"], track["track"], track["height"], geometry.candidates[0])
     last_word = max(i.row for i in reading.instructions if i.column == HEADING)
     right = relative.right_of_course_m[last_word * 2 + 20:]           # 20 s after the last heading word (class 0)
-    assert right.min() > 200.0 and right.max() - right.min() < 1.0
-    assert verdict.outcome == "crossed_off_runway" and verdict.crossing["cross_m"] == pytest.approx(right[-1], abs=1.0)
+    assert right.min() > 50.0 and right.max() - right.min() < 1.0
+    assert verdict.crossing["cross_m"] == pytest.approx(right[-1], abs=1.0)
 
 
 def test_no_level_off_flies_the_class_angle_without_levelling_off():
@@ -887,7 +893,7 @@ def test_two_events_at_one_row_follow_the_tables_order():
                            "unstable_at_minimums", "landed", "crossed_other_runway")
     one, geometry = spec(), instruction_airport()
     signals, _ = _downwind()
-    flown, verdict, _ = _fly_sentence(signals)
+    flown, verdict, _ = _fly_sentence(signals, clock="time")
     states = flown.states[0, : verdict.end_row + 1].numpy()
     track = flown_track(states, geometry)
     last = verdict.end_row
@@ -967,7 +973,9 @@ def test_the_word_count_leaves_out_the_words_the_judge_did_not_judge():
 
 
 # ---- speed
-def test_a_speed_word_is_flown_at_the_vocabularys_pace_both_ways():
+def test_a_speed_word_is_flown_at_a_max_both_ways_and_unspecified_at_its_own_pace():
+    """§5.6 (D43): a speed word is a step, flown at a_max both ways into the last band's exponential approach; under a
+    go-around a speed word too; "unspecified" under G holds the airspeed it was heard at, back up at a_U."""
     from ts_transformer.autopilot.frame import Kinematics
     from ts_transformer.autopilot.speed import Speed, speed_change_mps2
 
@@ -981,15 +989,39 @@ def test_a_speed_word_is_flown_at_the_vocabularys_pace_both_ways():
                                 torch.tensor([go_around]), torch.ones(1, dtype=F64), aero,
                                 torch.tensor([50_000.0], dtype=F64))[0][0])
 
-    assert rate(70.0) == pytest.approx(-speed_change_mps2(one)) and rate(110.0) == pytest.approx(speed_change_mps2(one))
-    # D27: under a go-around a speed word is flown; "unspecified" holds the airspeed the go-around was heard at
-    assert rate(70.0, go_around=True) == pytest.approx(-speed_change_mps2(one))
+    a_max = one.speed_accel_max_mps2
+    assert rate(85.0) == pytest.approx(-a_max) and rate(95.0) == pytest.approx(a_max)
+    assert rate(88.0) == pytest.approx(-2.0 * a_max / one.speed_tolerance_mps)     # inside the last band: exponential
+    assert rate(85.0, go_around=True) == pytest.approx(-a_max)
     speed.hear_go_around(torch.tensor([True]), state)
     assert rate(math.nan, go_around=True, unspecified=True) == pytest.approx(0.0)
     slower = Kinematics(*(torch.tensor([v], dtype=F64) for v in (0.0, 0.0, 100.0, 80.0, 90.0, 0.0, 80.0, 60000.0)))
     assert float(speed.rate(slower, torch.tensor([math.nan], dtype=F64), torch.tensor([True]), torch.tensor([True]),
                             torch.ones(1, dtype=F64), aero, torch.tensor([50_000.0], dtype=F64))[0][0]) == \
-        pytest.approx(speed_change_mps2(one))                                # back up to the held 90 m/s
+        pytest.approx(speed_change_mps2(one))                                # back up to the held 90 m/s at a_U
+
+
+def test_a_speed_step_is_made_in_seconds_and_the_thrust_limit_binds_where_the_aircraft_cannot_slow_at_a_max():
+    """D43: a step of 5 m/s down, then back up, on the downwind: the law asks a_max and the step is made in seconds, not
+    the 20 s of a_U; an A320's clean drag and its thrust floor cannot slow it at a_max, and the replay sees the thrust
+    limit bind on those cycles."""
+    from ts_transformer.instructions.labeller.interval import in_force
+
+    words = Words(spec())
+    a_max = words.spec.speed_accel_max_mps2
+    signals, reading = _downwind()
+    grid = reading.words[:60].copy()
+    held = int(in_force(grid)[10, SPEED])
+    grid[10:, SPEED] = UNCHANGED
+    grid[10, SPEED], grid[30, SPEED] = held - 1, held
+    flown, _, _ = _fly_sentence(signals, grid, clock="time")
+    airspeed = flown.states[0, :, 3].numpy()
+    wanted, rate = flown.wanted[0, :, 2].numpy(), np.diff(airspeed)
+    assert wanted[20] == pytest.approx(-a_max) and wanted[60] == pytest.approx(a_max)     # rows 10 and 30
+    start = airspeed[20]
+    assert abs(airspeed[20 + 12] - (start - 5.0)) < 1.0                  # 5 m/s down within 12 s
+    short = (wanted[20:30] <= -a_max + 1e-9) & (rate[20:30] > -a_max + 0.05)
+    assert short.any() and flown.limits["thrust_min"][0, 20:30].numpy()[short].all()
 
 
 def test_the_pilots_own_speed_is_reached_by_the_threshold():
@@ -1266,7 +1298,7 @@ def test_a_batch_readout_counts_what_was_flown_and_how_far_it_lies_from_the_obse
     from ts_transformer.autopilot import replay
 
     signals, reading = _downwind()
-    flown, verdict, _ = _fly_sentence(signals)
+    flown, verdict, _ = _fly_sentence(signals, clock="time")
     batch = _batch(signals, reading)
     summary = replay.summary([verdict])
     judged = replay.word_results(verdict)[0]
@@ -1295,8 +1327,8 @@ def test_a_replayed_flight_becomes_a_control_record_and_the_readout_reads_no_cri
     assert forecast.control_parameterization == EXECUTOR_DYNAMICS.control_thrust_parameterization
     base = {"airport": "KXXX", "group": "own dynamics", "stratum": "vectored", "words_not_reached": 0,
             "heading_words_not_judged": 0, "heading_words_told_with_a_skipped_word": {"judged": 0, "inside": 0},
-            "crossing": None}
-    rows = [{**base, "kind": "with go-around", "outcome": "landed",
+            "crossing": None, "speed_words": 2, "largest_along_m": None}
+    rows = [{**base, "kind": "with go-around", "outcome": "landed", "speed_words": 4, "largest_along_m": 1500.0,
              "words": [("heading", True)] * 9 + [("altitude", False)], "observed_verdict": "pass",
              "replay_verdict": "pass", "crossing": {"decision": {"passed": True}}},
             {**base, "kind": "without go-around", "outcome": "unstable_at_minimums", "words": None,
@@ -1308,6 +1340,8 @@ def test_a_replayed_flight_becomes_a_control_record_and_the_readout_reads_no_cri
     assert cell["decision_checks"] == {"n": 2, "no_da_point": 1, "passed": 1}
     assert table["own dynamics"]["KXXX"]["vectored"]["with go-around"]["flights"] == 1
     assert "clears" not in cell
+    assert cell["along_the_path"] == {"speed_words_per_sentence": 3.0, "flights": 1,
+                                      "largest_along_m": {"p50": 1500.0, "p90": 1500.0}, "farther_than_1_km": 1}
 
 
 def _observed_series(geometry):

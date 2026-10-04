@@ -50,11 +50,11 @@ def test_the_matched_point_moves_forward_and_a_path_that_crosses_itself_does_not
     e_h the flown height above the observed one."""
     e, n, height = _loop_path()
     path = ObservedPath(e, n, height, 0)
-    lateral, vertical, _ = path.match(500.0, 10.0, 990.0)        # over the crossing, on the first leg: 10 m left of east
+    lateral, vertical, *_ = path.match(500.0, 10.0, 990.0)        # over the crossing, on the first leg: 10 m left of east
     assert lateral == pytest.approx(-10.0) and vertical == pytest.approx(990.0 - (1000.0 - 10.0))
     path.match(1010.0, 250.0, 0.0)                              # the north leg, 10 m right of it
     path.match(750.0, 490.0, 0.0)                               # the west leg
-    lateral, _, _ = path.match(505.0, 5.0, 0.0)                 # over the crossing again: now on the south leg
+    lateral, *_ = path.match(505.0, 5.0, 0.0)                 # over the crossing again: now on the south leg
     assert lateral == pytest.approx(-5.0)                       # 5 m east of southbound is left of it
     assert path.segment > len(e) - 25
 
@@ -62,7 +62,7 @@ def test_the_matched_point_moves_forward_and_a_path_that_crosses_itself_does_not
 def test_a_flown_position_behind_the_matched_point_keeps_it():
     e, n, height = _loop_path()
     path = ObservedPath(e, n, height, 10)
-    lateral, _, _ = path.match(100.0, -30.0, 0.0)               # behind segment 10 (e = 500), 30 m right of east
+    lateral, *_ = path.match(100.0, -30.0, 0.0)               # behind segment 10 (e = 500), 30 m right of east
     assert lateral == pytest.approx(30.0) and path.segment == 10
 
 
@@ -329,7 +329,7 @@ def test_no_angle_correction_while_the_executor_holds_the_level_reached_by_a_des
 def test_a_repeated_observed_position_is_no_segment():
     """A row at the position of the one before (here the last) gives no segment of zero length to measure against."""
     path = ObservedPath(np.array([0.0, 100.0, 200.0, 200.0]), np.zeros(4), np.full(4, 500.0), 0)
-    lateral, vertical, _ = path.match(250.0, -10.0, 510.0)
+    lateral, vertical, *_ = path.match(250.0, -10.0, 510.0)
     assert lateral == pytest.approx(10.0) and vertical == pytest.approx(10.0)
 
 
@@ -541,3 +541,25 @@ def test_a_flown_aircraft_ahead_hears_the_go_around_before_the_threshold_where_t
     assert sentence.states[go, 0] > 0.0          # at the observed time it is past the threshold (e = 0) already
     _, moved, _, replayed = _replayed(batch, inputs, sentence, params, words, monkeypatch)
     assert moved.sentences[0].go_arounds == 1 and replayed.modes["go_around"][0].any()
+
+
+def test_the_replay_reads_the_speed_words_and_how_far_along_the_path_the_flown_aircraft_is(monkeypatch):
+    """§11.12, A11: each flown sentence's speed words other than "unspecified", and the largest distance along the observed
+    path from the observed aircraft of the same time before "unspecified" — told 70 m/s on the 100 m/s downwind (the
+    open loop, the time clock), the flown aircraft falls far behind."""
+    from ts_transformer.experiments.executor_replay import along_columns
+    from ts_transformer.tests.test_autopilot import vertical_paths
+
+    params = _params()
+    read = {}
+    for name, speeds in (("observed", None), ("slow", {0: 70.0})):
+        batch, inputs, words = _batch(speeds=speeds)
+        batch.vertical_paths[0] = vertical_paths(batch.geometries[0])
+        monkeypatch.setattr(replay.Batch, "inputs", lambda self, device, inputs=executor_inputs(
+            batch.signals[0], batch.geometries[0]): inputs)
+        flown = replay.fly_sentences(batch, params, words, device=CPU)
+        (read[name],) = along_columns(words)(batch, flown, replay.judge_batch(batch, flown, words))
+        speed = batch.sentences[0].grid[:, SPEED]
+        assert read[name]["speed_words"] == int(((speed != UNCHANGED) & (speed != words.speed_unspecified)).sum())
+    assert read["slow"]["speed_words"] == 1
+    assert read["slow"]["largest_along_m"] > 1000.0 > read["observed"]["largest_along_m"]

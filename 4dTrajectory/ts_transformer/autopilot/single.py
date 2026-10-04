@@ -470,11 +470,13 @@ class Speed:
         floor = self.margin * math.sqrt(2.0 * load * state.mass_kg * GRAVITY_MPS2 / (density * aero[0] * aero[1]))
         landing = _clamp((speed * speed - own * own) / (2.0 * _clamp(straight_m, 1.0)), self.pace_mps2,
                          self.accel_max_mps2)
-        slowing = landing if force.unspecified and not go_around else self.pace_mps2
+        # a speed word at a_max both ways (D43); "unspecified" at its own pace, slowing to land at the landing rate
+        rising = self.pace_mps2 if force.unspecified else self.accel_max_mps2
+        slowing = landing if force.unspecified and not go_around else rising
 
         def toward(reference: float) -> float:
-            tau = self.band_mps / (self.pace_mps2 if reference > speed else slowing)
-            return _max(_clamp((reference - speed) / tau, high=self.pace_mps2), -slowing)
+            tau = self.band_mps / (rising if reference > speed else slowing)
+            return _min(_max((reference - speed) / tau, -slowing), rising)
 
         return toward(_max(wanted, floor)), toward(wanted), {"stall_floor": floor > wanted}
 
