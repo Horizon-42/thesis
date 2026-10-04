@@ -38,12 +38,15 @@ import torch
 
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED
 
-#: The own state (D5, D23, D58): no frame, no MSL height.
-OWN_FEATURES = ("height_above_elevation", "ground_speed", "vertical_rate")
+#: The own state (D5, D23, D58, D60): no frame, no MSL height; ``no_motion`` is 1 at row 0 only.
+OWN_FEATURES = ("height_above_elevation", "ground_speed", "vertical_rate", "no_motion")
+#: The inputs that come from the motion in the 2 s before a row (D25): 0 at row 0, which has no state before it (D60).
+OWN_MOTION_FEATURES = ("ground_speed", "vertical_rate")
 #: A candidate vector (D23, D24): the aircraft in the frame of the candidate, the height above its glidepath, the
 #: landings on it in the 30 min before the step.
 CANDIDATE_FEATURES = ("before_threshold", "right_of_final", "height_above_threshold", "motion_minus_course_sin",
                       "motion_minus_course_cos", "height_above_glidepath", "landings_30min")
+CANDIDATE_MOTION_FEATURES = ("motion_minus_course_sin", "motion_minus_course_cos")
 #: The runway constants of the variant ``constants`` (D39).
 RUNWAY_CONSTANT_FEATURES = ("length", "threshold_elevation")
 VARIANTS = {"full": CANDIDATE_FEATURES, "constants": CANDIDATE_FEATURES + RUNWAY_CONSTANT_FEATURES}
@@ -97,6 +100,14 @@ class SentenceRows:
         # the aircraft's own seconds: a UTC time in float32 has a step of 128 s and loses the rows (§2, D16)
         if self.time_s[0] != 0.0 or np.any(np.diff(self.time_s.astype(np.float32)) <= 0.0):
             raise ValueError(f"{self.flight_key}: the row times are not seconds from row 0, increasing in float32")
+        # D60: row 0 has no state 2 s before it — its motion inputs are 0 and `no_motion` says so; no other row has it
+        no_motion = self.own[:, OWN_FEATURES.index("no_motion")]
+        motion = [OWN_FEATURES.index(name) for name in OWN_MOTION_FEATURES]
+        candidate_motion = [CANDIDATE_FEATURES.index(name) for name in CANDIDATE_MOTION_FEATURES]
+        if (no_motion[0] != 1.0 or np.any(no_motion[1:] != 0.0) or np.any(self.own[0, motion] != 0.0)
+                or np.any(self.candidates[0][:, candidate_motion] != 0.0)):
+            raise ValueError(f"{self.flight_key}: row 0 must have no motion (0, `no_motion` 1) and no other row "
+                             f"`no_motion` (D60)")
         # D23: nothing is in force up to and with the first predicted step, so no input there comes from R
         said = slice(0, self.first_step + 1)
         if (np.any(self.runway_in_force[said] != -1) or np.any(self.words_in_force[said] != -1)

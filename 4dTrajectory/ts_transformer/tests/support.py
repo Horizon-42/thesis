@@ -261,18 +261,24 @@ def executor_inputs(signals, geometry, row=0, mass_kg=62000.0):
 def prior_sentence(rng, words, *, candidates=3, rows=30, first_step=8, airport="KXXX", split="train",
                    variant="full", flight_key=None, interval_s=2.0):
     """A synthetic `prior.batch.SentenceRows` of ``words``' spec: random inputs, and words with a pattern a model can
-    learn — at the first predicted step a word in every column (the runway: a candidate drawn at random); after it, a
+    learn (row 0 without motion, D60) — at the first predicted step a word in every column (the runway: a candidate drawn at random); after it, a
     heading word where the first own-state input is positive (its class from the second), "unchanged" elsewhere, and
     now and then a word of another column. The words in force follow what was said, from the row after the first
     predicted step."""
     import numpy as np
 
     from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, RUNWAY, SPEED, UNCHANGED
-    from ts_transformer.prior.batch import IN_FORCE_WORDS, OWN_FEATURES, SentenceRows, variant_features
+    from ts_transformer.prior.batch import (
+        CANDIDATE_FEATURES, CANDIDATE_MOTION_FEATURES, IN_FORCE_WORDS, OWN_FEATURES, OWN_MOTION_FEATURES, SentenceRows,
+        variant_features,
+    )
 
     counts = words.class_counts()
     width = len(variant_features(variant))
     own = rng.normal(size=(rows, len(OWN_FEATURES))).astype(np.float32)
+    own[:, OWN_FEATURES.index("no_motion")] = 0.0
+    own[0, [OWN_FEATURES.index(name) for name in OWN_MOTION_FEATURES]] = 0.0
+    own[0, OWN_FEATURES.index("no_motion")] = 1.0
     targets = np.full((rows, 5), UNCHANGED, dtype=np.int64)
     targets[first_step] = [rng.integers(candidates), rng.integers(counts["heading"]),
                            rng.integers(counts["altitude"] - 1), rng.integers(1, counts["angle"]),
@@ -298,9 +304,11 @@ def prior_sentence(rng, words, *, candidates=3, rows=30, first_step=8, airport="
         words_in_force[r] = np.where(before[ALTITUDE:] != UNCHANGED, before[ALTITUDE:], words_in_force[r - 1])
         said_at = np.where(before != UNCHANGED, (r - 1) * interval_s, said_at)
         since[r] = np.log1p((r * interval_s - said_at) / 2.0) / 5.0
+    candidate_vectors = rng.normal(size=(rows, candidates, width)).astype(np.float32)
+    candidate_vectors[0][:, [CANDIDATE_FEATURES.index(name) for name in CANDIDATE_MOTION_FEATURES]] = 0.0
     return SentenceRows(
         flight_key=flight_key or f"{airport}:{split}:{int(rng.integers(1 << 30))}", airport=airport, split=split,
         first_step=first_step, time_s=np.arange(rows, dtype=np.float32) * interval_s, own=own,
-        candidates=rng.normal(size=(rows, candidates, width)).astype(np.float32),
+        candidates=candidate_vectors,
         runway_in_force=runway_in_force, go_around=np.zeros(rows, dtype=bool), heading_in_force=heading_in_force,
         words_in_force=words_in_force, since=since, targets=targets)

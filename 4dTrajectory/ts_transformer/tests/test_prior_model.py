@@ -10,6 +10,7 @@ from torch import nn
 
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, Words
 from ts_transformer.prior.batch import (
+    CANDIDATE_FEATURES, OWN_FEATURES,
     RUNWAY_FIXED_CLASSES, RUNWAY_GO_AROUND_CLASS, RUNWAY_UNCHANGED_CLASS, SentenceRows, collate, require_words,
     target_classes,
 )
@@ -182,6 +183,16 @@ def test_a_sentence_is_refused_at_the_boundary(words):
         targets[first + 2, RUNWAY] = bad
         with pytest.raises(ValueError, match="runway word"):
             changed(sentence, targets=targets)
+    no_motion = OWN_FEATURES.index("no_motion")
+    for row, column, value in ((0, no_motion, 0.0), (5, no_motion, 1.0), (0, OWN_FEATURES.index("ground_speed"), 0.7)):
+        own = sentence.own.copy()
+        own[row, column] = value
+        with pytest.raises(ValueError, match="D60"):
+            changed(sentence, own=own)
+    vectors = sentence.candidates.copy()
+    vectors[0, 1, CANDIDATE_FEATURES.index("motion_minus_course_cos")] = 1.0
+    with pytest.raises(ValueError, match="D60"):
+        changed(sentence, candidates=vectors)
     with pytest.raises(ValueError, match="seconds from row 0"):
         changed(sentence, time_s=sentence.time_s + 1.76e9)
     own = sentence.own.copy()
