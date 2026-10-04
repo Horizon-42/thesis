@@ -12,7 +12,7 @@ That text was moved there verbatim on 2026-09-16 (this file had reached 118 KB),
 and the 09-14…09-17 additions were placed there the same way on 09-18. The evidence
 behind each line — measurements, campaign results, the causes already ruled out — lives in
 `docs/reference/ENGINEERING_NOTES.md` for the one-tier paths up to 2026-09-10, and in the design and readout
-documents the line names after that; **the two-tier model's status is `docs/two_tier/two_tier_stage_notes.zh.md`**;
+documents the line names after that; **the two-tier model's design and status: `docs/two_tier/design/outline.md`** (each document's §0);
 mechanism and result tables of the one-tier paths in the package `README.md`; history in the repo's
 `docs/CHANGELOG.md` (2026-07-19, 07-20 ×2; the move itself: 2026-09-16).
 Read the notes before designing an experiment or touching the loss, rollout or output layer.
@@ -467,7 +467,7 @@ time-limit slack; touch-and-goes and landings that were not the last (a low go-a
 listed; a loop that left the 30 km crop is unseen; v2 adds, inside a labelled sentence, the time to the clearance /
 capture turn of the approach that followed, and every go-around's first 150 m of climb against 200 ft per NM (R40).
 `instruction_word_frames` / `instruction_final_approach` read an instruction artefact for the next design's evidence
-(`docs/two_tier/two_tier_design.md` §11): heading and level words per airport, absolute against the labelled runway's
+(`docs/two_tier/design/vocabulary.md` §9): heading and level words per airport, absolute against the labelled runway's
 frame, and each course's offset from the heading grid (R48); the clearance and "descend to land" rows, and the height
 over the published glidepath after the capture row (R49).
 **Every Training export writes the attitude each track is drawn in** (`experiments/training_attitude.py`, 2026-09-30): heading,
@@ -523,13 +523,13 @@ generation v5, augmented v3, window-generation v2; frontend AV42).
 | doing this | read first |
 |---|---|
 | finding any document (what is current, what is history, where the archived lines' documents went) | `docs/README.md` |
-| picking up the two-tier model (the current line) | `docs/two_tier/two_tier_stage_notes.zh.md` (status, artefacts, decisions, next step), then W2 |
+| picking up the two-tier model (the current line) | `docs/two_tier/design/outline.md` (the documents, their public interfaces, the plan; each document's §0 has its status), then W2 |
 | designing a one-tier experiment / changing loss, rollout, output layer | `docs/reference/ENGINEERING_NOTES.md` (evidence up to 2026-09-10) |
 | checking what a one-tier campaign settled | `docs/history/OPEN_ITEMS_2026-09-18.md` (up to 2026-09-18) and the defaults table above |
 | putting the procedure constraint into TRAINING as a hard constraint, or the lazy-network / gate question | `docs/history/2026-09_constraints/2026-09-08_hard_constraints_survey_and_integration_plan.md` §3 — a literature survey with formulas; its H0–H6 plan was never built (papers in repo `docs/literature/procedure_hard_constraints/`). The two-tier model's procedure constraint is a decode mask: post-training design §3 |
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
 | comparing airports or quoting an ADE | `data/approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
 | predicting the landing runway (runway intent), multi-runway scheduling | `docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` (status by stage R0–R4: W1). The separation rules themselves: `inference/runway_schedule.py` and repo `docs/literature/arrival_separation/` |
-| building or reading the **two-tier model** (a prior that says controller-like words, an executor that flies them; later several aircraft with separation masks) | the stage notes, then **`docs/two_tier/two_tier_framework.zh.md`** (layers, packages, artefacts, gates), **`docs/two_tier/instruction_vocabulary_design.zh.md`** (the words, envelopes, labeller, values), **`docs/two_tier/executor_design.zh.md`**, **`docs/two_tier/prior_design.zh.md`**, **`docs/two_tier/post_training_design.zh.md`**, **`docs/two_tier/multi_aircraft_design.zh.md`** (several aircraft: scenes, augmentation, separation, sequencing; draft); readouts `docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md`. Plans v2 / v3, the intent-code plan and the 09-16 feasibility doc are SUPERSEDED — only their measurements are citable: W2 |
+| building or reading the **two-tier model** (a prior that says controller-like words, an executor that flies them; later several aircraft with separation masks) | **`docs/two_tier/design/`**: `outline.md` (the documents, the principles, the plan), `vocabulary.md` (stage A: words, labeller, executor, judge; public interface §6), `prior.md` (stage B; public interface §7), `post_training.md` (stage C, with the multi-aircraft work; outline). The `instruction-v3` design documents and stage notes are archived in `archive/two_tier_v3_2026_10/docs/`; the single document before the split in `docs/history/2026-10_two_tier_design/`. Plans v2 / v3, the intent-code plan and the 09-16 feasibility doc are SUPERSEDED — only their measurements are citable: W2 |
 | the full text behind any line of this index | `docs/reference/*.md`, by ID |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |

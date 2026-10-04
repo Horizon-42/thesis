@@ -2,7 +2,7 @@
 
 **用途**：压缩上下文之前的交接文档。写明此刻每个阶段做到了哪里、产物在哪、关键数字、用户做过的决定、接下来按什么顺序做。
 设计本身在各自的设计文档里，这里只给结论和指路；历史看 git 和 `docs/CHANGELOG.md`。**阶段小结与按优先级的待办**：
-[进度报告 2026-09-27](readouts/2026-09-27_progress_report.zh.md)（单机一段做完；先做要改代码并重跑回放 / 实验的事）。
+[进度报告 2026-09-27](../../../docs/two_tier/readouts/2026-09-27_progress_report.zh.md)（单机一段做完；先做要改代码并重跑回放 / 实验的事）。
 
 路径都相对 `4dTrajectory/`（`outputs/…`）或 `4dTrajectory/ts_transformer/`（`docs/…`、包名），除非写明是仓库根目录。
 
@@ -16,7 +16,7 @@
 真实起点掉的是退回 base 的"下降晚、太高"（先验读数 §17）。**用户 2026-09-27 定：直接用第 7 轮 = augmented**；每轮多放真实起点（400 + 200）留给
 下一次第二阶段（后训练设计 §5、§8）。代码都已合并进 dev-two-tier（第二阶段 `4b2521c6`，文档整理 `60cf127f`）。
 
-**下一代设计（2026-10-03，讨论中，未实现）**：[`two_tier_design.md`](two_tier_design.md)（英文，按 ASD-STE100 写）。用户定：跑道第一步就说（预计跑道）、删掉"许可"、
+**下一代设计（2026-10-03，讨论中，未实现）**：[`two_tier_design.md`](../../../docs/history/2026-10_two_tier_design/two_tier_design.md)（英文，按 ASD-STE100 写）。用户定：跑道第一步就说（预计跑道）、删掉"许可"、
 复飞并进跑道列、模型用航向词自己飞上五边、截获后执行器仍只飞词、LPV 只作判定、"未指定"速度从截获行起、先验去掉机场向量并改用所指跑道的坐标系；
 网格（航向 5°、四个下降档）先量或粗标一次再定；设计定下之前不设测试和测量标准。开放项见该文档 §0.2。实现后整条链（base → landing → augmented → traffic）从头重训。
 之后又定了 D8–D21（航向网格对齐所指跑道、不锁跑道、复飞的作用、真实复飞标进来、行间隔消融、RoPE 按秒、指纹只绑格式等，见该文档 §0.1）。
@@ -34,7 +34,7 @@
 | 1 词表 | **定稿**：读法 `instruction-v3`（航向词逐行标注、5° 一档、提前 4 s 说）；规格 `145d6911e75b`，在按运行日划分的训练集上测量 | `docs/two_tier/instruction_vocabulary_design.zh.md` |
 | 2 标注器 | **完成**：现行句子产物 `outputs/POOLED/instruction_language/v6_20261002/`（行取在 UTC 偶数秒上，规格沿用 v5，§9；`dev-scene-time-grid` 已合并 `2636022a`，2026-10-02）；v5 `v5_20260926/` 仍能打开（§5）；标注器源码指纹 `55f6f0bcd6ee`；测试日不打开 | 包 `instructions/` |
 | 3 执行器 | **2026-10-01 改成按航迹核对、三种执行方式，已合并**（`e2ec272b`，用户让我合并；执行器设计 §12.2–§12.5：一批单机、一批多机（各架从自己的周期起，`halt`）、单条（`autopilot/single.py`，前端 live 用）；规格旁边 `conformance/` 存 250 架参照航迹，代码改了跑 R42 `executor_conformance` 约 30 s，过了写 `passed-<代码指纹前 12 位>.json`，现行代码 `passed-a5b1a9a99a6d.json`；窗口闭环一批一个执行器，正式批次快 37 %、逐行相同）。**完成，只用词表**，词表以外只读被指跑道公布的 TCH 和下滑角（"下降至落地"入口前不低于下滑道下沿，截获后在下滑道下方平飞）；每种机型按公布的最大着陆重量飞（§2）。现行规格 `outputs/POOLED/executor/v11_20260927/`（p = 5°/s，落地按跑道本身判，两个新结局） | `docs/two_tier/executor_design.zh.md`（2026-09-26 按实现重写，§14 关键代码索引）；包 `autopilot/`（`README.md`） |
-| 4 回放门 | v11 训练集、验证集每格都过：训练集落地 99.63 %、词在包络内 97.54 %、evaluation 98.30 %；验证集 99.90 / 97.50 / 98.46 % | 执行器设计 §11，[v11 读数](readouts/2026-09-27_executor_v11_readout.zh.md) |
+| 4 回放门 | v11 训练集、验证集每格都过：训练集落地 99.63 %、词在包络内 97.54 %、evaluation 98.30 %；验证集 99.90 / 97.50 / 98.46 % | 执行器设计 §11，[v11 读数](../../../docs/two_tier/readouts/2026-09-27_executor_v11_readout.zh.md) |
 | 5 先验 | 第三版第 0 步、第 1 步（单机）、单机自由生成完成；**base 模型** `prior/v3_step1_20260924/full_s1337`（§3） | `docs/two_tier/prior_design.zh.md`、`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md` §3–§5 |
 | 6 后训练 | 第一阶段**采用**（landing，`prior/v3_rl_20260925/grpo_s1337/round_01`）；闭环监督微调（CAT-K）不采用；第二阶段上一版不采用（§4.3），**第二阶段完成，采用第 7 轮 = augmented**（用户 2026-09-27；§4.4、§9） | `docs/two_tier/post_training_design.zh.md`；读数文档（`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md`）§6–§16 |
 | 7 多机 | **设计已确认**（用户 2026-09-27 回答多机设计 §9 第 1–16 项，2026-09-28 又定第 17–20 项）。**M0 完成**：第 1–4 步已合并（`852b395f`：CWT 表、失去间隔的判定——IFR 照原文、目视 = 7-4-4 c 只默认目视进近许可，检查和奖励用它——场景的步、观测航迹普查）；第 5 步已合并（`6165c52a`：场景闭环 `experiments/traffic_loop.py`，所有航班一起照标注的词飞，被结束 3.93 % 对记录 2.76 %，按执行器多加的 1.17 个百分点判过线，间隔作硬检查）；第 6 步已合并（`bd016193`：两条间隔屏蔽 `inference/separation_masks.py`，拿掉 0.32 % 的标注速度词和许可词，按合计判过线，处处硬用，兜底不屏蔽）。**M1 完成**、已合并（`fecac5b2`：base 在有前机的步上速度词每步负对数似然多 0.0077、忙的步上航向词多 0.0104，对齐阶段与机场后，集中在 KSJC、KSMF；只记录）。**M2 完成**、待合并（分支 `dev-multi-aircraft` `31814869`：先验按每架自己的行号读、单机逐位不变；17 维边特征，速度取相邻两行的位置差；场景样本；训练与读数 runner，检查点 v4 记下边特征代码的哈希）。场景模型**没有学会用别的飞机**：第一次（`outputs/POOLED/prior/m2_scene_20260928/scene_s1337`）选择集每步 0.2880 对 base 0.2839；按 base 的批大小再训一次（`scene_acc4_s1337`，设计 §9 第 21 项）0.2868，有前机的步上仍没有一处比 base 好，速度词的差距原样还在。**下一步**（§9 第 22 项，设计 §2.5、§6.2、§6.6 已改）：不再做场景预训练，交互交给后训练——起点是单机模型加上每层一个初始为零的交通注意力（开始时与单机模型相同到舍入）；M3 就是这个起点在多机闭环里的表现，然后 M4。起点用 augmented（用户 2026-09-28 定，§9 第 23 项）。**M3 真实场景读完**（§6.6 第 1–5 步完成，分支 `dev-multi-aircraft` `de9a539a`，待合并）：起点模型指挥一架、其余照记录回放，目视读法下 11.5 % 的样本失去间隔（被引导 21.6 %、直线 4.0 %），照标注的词飞 4.9 %，记录 2.6 %；扩充场景上 23.9 %（插一架 37.6 %）。M4 的代码写完、审查过（`traffic_reward`，R32，一轮一轮跑）；第一次正式运行（`e76ca5ff`）跑完第 2 轮后停下，换多进程说话的新代码（设计 §6.6 第 12–13 项，一轮约 2.7 → 1.4 小时）从第 0 轮重跑：`outputs/POOLED/prior/m4_traffic_20260929/`，选中的仍是第 0 轮（读数 `readouts/2026-09-29_m4_traffic.zh.md`）。**第二次运行**（每轮过 3 遍、按配对标准误选轮，§6.6 第 6 步细节第 14 条）`m4_passes_20260929/` 跑完（2026-09-30 10:48Z，读数 `readouts/2026-09-30_m4_passes.zh.md`）：选中第 5 轮（扩充奖励 +0.0155 ± 0.0072，2.14 倍），但与第一次运行逐句比第 1–7 轮分不出差别——挪得更多、奖励没跟上，遍数不再加。**第 7 步（窗口内由模型指挥）在写**：分支 `dev-m4-window`，7.1–7.5 写完、opus 审查过（设计 §6.6 第 7 步）。**M3 第二遍读完**（2026-09-30，`window_generation_20260930`，读数 `readouts/2026-09-30_m3_window.zh.md`）：起点模型同时指挥窗口里的每一架，失去间隔 13.4 %（标注的词 4.9 %，记录 3.8 %）；同样的航班比只指挥一架多 1.7 ± 0.7 个百分点，四分之三与另一架由模型指挥的飞机；同一窗口各架奖励相关 0.05。扩充窗口（7.5）读完：失去间隔 19.8 %（插一架 24.0 %、压缩 20.2 %、挪起点 13.7 %）；第 5 轮放进窗口读：奖励 +0.0120 ± 0.0034、失去间隔 −1.49 ± 0.33 个百分点（读数 §4–§5）。用户 2026-09-30 定 7.6 从第 5 轮起、取值按建议。**7.6（M4 在窗口里训练）跑完**（分支 `dev-m4-window` `cbfdc5f2` + 读数 runner R39 `4ab15733`，待合并；2026-09-30 22:33Z → 10-01 15:04Z，读数 `readouts/2026-10-01_m4_window.zh.md`）：选中第 5 轮，扩充窗口奖励比起点 +0.0252 ± 0.0087（2.9 倍），好处主要在压紧流量的窗口；真实窗口 8 轮都没有变化；选中轮的数偏高（8 轮里挑最高的，各轮平均 +0.013）。**验证集**（每窗口 4 次）：window r5 对 traffic r5 真实窗口没有变化、扩充 +0.0038 ± 0.0030 → **多机这一段的模型用 traffic r5**（用户 2026-10-01）；window r5 已发布（名字 window）；`dev-m4-window` 已合并。**7.7 读完**（2026-10-02，读数 `readouts/2026-10-02_window_rewind.zh.md`，产物 `outputs/POOLED/traffic/window_rewind_{real,aug}_20261001/`，只读、带校验和）：真实 294 个事件、扩充 477 个，对照全部逐位相同；负责的那架"从头"重新说，8 次里至少一次救回来的事件真实 69.6 %（158 / 227）、扩充 54.2 %（194 / 358），都过三分之一线 → 按事先定的读法：模型接手时说得出好的选项，只是挑不出来；倒回 120 s 是 41.7 % / 37.9 %；"从头"都救不回来的真实 69 个、扩充 164 个（多是直线进近、同一条进近前后、开口不到 2 分钟就失去间隔的），在训练日用合并后的代码重新找来训练（8.4），7.8 的回溯暂缓（用户 2026-10-02，接手看 §9 开头）。**第 8 步复飞**（在做）：R40 v2 做完（`dev-go-around` `4a4d947c`，`outputs/POOLED/traffic/go_arounds_v2_20261002/`：复飞到重新开始截获转弯 p50 421 s / p95 598 s）；做法已定（多机设计 §6.6 第 8 步细节第 6–9 条），开发按第 13 条 | `docs/two_tier/multi_aircraft_design.zh.md`（§6.4–§6.6 开发顺序与进度，§8 取值，§9 已定的事）；读数 `readouts/2026-09-27_parallel_runway_separation.md`（英文）、`readouts/2026-09-28_labelled_traffic.zh.md`、`readouts/2026-09-28_separation_masks.zh.md`、`readouts/2026-09-28_m1_interaction.zh.md`、`readouts/2026-09-28_m2_scene_prior.zh.md`、`readouts/2026-09-28_m3_free_generation.zh.md`、`readouts/2026-09-30_m3_window.zh.md` |
@@ -56,7 +56,7 @@
 | landing（第一阶段，采用） | `outputs/POOLED/prior/v3_rl_20260925/grpo_s1337/round_01/` | 第二阶段的起点 |
 | **augmented（第二阶段，采用第 7 轮）** | `outputs/POOLED/prior/v3_stage2_clip_20260926/aug_s1337/round_07/`（运行：`run.sh`、`run.log`、`aug_s1337/{config,history,choice}.json`、`round_NN/`、`val_{kept,stage1}{,_aug}_400x4/`） | §4.4；第 0 步用 `v3_stage2_restart_20260926/stage0_check_train/check.json`（屏蔽没改）；诊断 `v3_stage2_lineup_diagnosis_20260927/` |
 | MVA 图 | 仓库 `data/MVA/2026-09-26/{MSY,RDU,NCT,T75}_MVA_{FUS3,FUS5}.{xml,pdf}`（不进 git） | 出处 `docs/literature/minimum_vectoring_altitude/`；读取 `prior/mva.py` |
-| v11 上的验证集读数 | `outputs/POOLED/prior/v3_reread_v11_20260927/`（`val_{landing,base}{,_masked}_400x4`、`val_augmented{,_aug}_400x4`、`val_landing_masked_aug_400x4`） | [v11 读数](readouts/2026-09-27_executor_v11_readout.zh.md) §3，`run.sh` |
+| v11 上的验证集读数 | `outputs/POOLED/prior/v3_reread_v11_20260927/`（`val_{landing,base}{,_masked}_400x4`、`val_augmented{,_aug}_400x4`、`val_landing_masked_aug_400x4`） | [v11 读数](../../../docs/two_tier/readouts/2026-09-27_executor_v11_readout.zh.md) §3，`run.sh` |
 | v10 上的诊断与验证集读数 | `outputs/POOLED/prior/v3_reread_v10_20260926/`（`diagnosis_train_400`、`val_{stage1,base}{,_masked}_400x4`） | 读数文档 §13，`run.sh` |
 | v9 上的验证集读数 | `outputs/POOLED/prior/v3_reread_v9_20260926/val_{stage1,base}{,_masked}_400x4/` | 读数文档 §11，`run.sh` |
 | 重建脚本 | `outputs/POOLED/rebuild_20260926/run.sh` | 信号 → 规格 → 标注 → 执行器规格 → 训练集回放 |
@@ -108,11 +108,11 @@
   朝越过点、贴着管子最陡的一侧下降，照标注的词重飞训练集 2.45 % 被判低于下沿（41 / 49 架真实飞机在同一位置在下滑道上）。v10 读
   被指跑道公布的下滑角，入口前不低于下滑道 − 60 m（后训练检查的下沿；前馈按航迹与跑道航向夹角的余弦）：被判 49 → 4（剩下的是数据
   本身），落地不变。
-- **v11**（2026-09-27 合并 `2f460c77`；执行器设计 §5.3.5、§8.3，[v11 读数](readouts/2026-09-27_executor_v11_readout.zh.md)）：
+- **v11**（2026-09-27 合并 `2f460c77`；执行器设计 §5.3.5、§8.3，[v11 读数](../../../docs/two_tier/readouts/2026-09-27_executor_v11_readout.zh.md)）：
   - 判定：飞到另一条跑道的入口自成结局 `crossed_other_runway`；截获了、在中线上但越过入口太高自成结局 `crossed_too_high`
     （`crossed_off_runway` 只剩横向偏出）；"落地"的横向判据收紧到跑道本身（最后进近航道半宽约 106.7 m 与 harvest 判据取小）；
   - 下滑道下限起作用时有自己的模式 `glidepath_floor`；
-  - 截获后在公布下滑道下方平飞（最平一档 1.80° → 1.70°，真实 1.19°；[最平两档的读数](readouts/2026-09-27_shallow_class_law.zh.md)）；
+  - 截获后在公布下滑道下方平飞（最平一档 1.80° → 1.70°，真实 1.19°；[最平两档的读数](../../../docs/two_tier/readouts/2026-09-27_shallow_class_law.zh.md)）；
     下滑道上方的平缓档仍比真实飞机陡（执行器设计 §16）；
   - p = 5°/s；源码指纹按代码逻辑算。
 - **留下没做的**：审查记下的两点（2026-09-24）——复飞期间说的词执行器不理；只有第一次截获结束词的判定窗口。多翻襟型别
@@ -467,11 +467,11 @@
    不跑，留给下一次第二阶段；为它备好的 `outputs/POOLED/prior/v3_stage2_real400_20260927/run.sh`（只有脚本）和分离的工作树 `stage2-real400`
    （`120781bd`）用不上了，删不删问用户。还要问用户：删工作树 `stage2-restart` 和分支 `dev-stage2-restart`（先 unlink 数据软链接）。发布到前端要用户
    同意（导出已由另一个会话接上模型自己的程序屏蔽，`51703aa7`）。
-3. **航向提前量 L 的消融：做完**（2026-09-27，[消融读数](readouts/2026-09-27_heading_lead_ablation.zh.md)，
+3. **航向提前量 L 的消融：做完**（2026-09-27，[消融读数](../../../docs/two_tier/readouts/2026-09-27_heading_lead_ablation.zh.md)，
    `outputs/POOLED/analyses/heading_lead_ablation_20260927/`）。训练集回放门的原样本（1,904 架自有动力学），24 格逐格重标、重飞，参考格与
    v10 的回放逐架一致。**L = 4 s、坡度上限 32° 不变**（L 4 与 6 s 分不出，2 与 8 s、25° 都更差）→ 词表、句子产物、先验不动，第二级不做、
    不因 L 重训。**p 5°/s 与 8°/s 读不出差别**（3°/s 太慢）；**v11 改成 5°/s**（用户 2026-09-27）。
-4. **下一版执行器规格 v11：做完**（2026-09-27，合并 `2f460c77`，[v11 读数](readouts/2026-09-27_executor_v11_readout.zh.md)）：两个回放门每格都过；
+4. **下一版执行器规格 v11：做完**（2026-09-27，合并 `2f460c77`，[v11 读数](../../../docs/two_tier/readouts/2026-09-27_executor_v11_readout.zh.md)）：两个回放门每格都过；
    base / landing / augmented 在 v11 上重读，七组里六组的落地率与 v10 相差 ≤ 0.43 个百分点，landing 扩充起点 −0.70；叠加层已重新导出、
    后端已重启（§7）。
 5. **不重训**（用户 2026-09-27）：v11 的判定在不到 1.4 % 的句子上改变了奖励（过另一条跑道的入口就结束、横向判据收紧），量出来的落地率
