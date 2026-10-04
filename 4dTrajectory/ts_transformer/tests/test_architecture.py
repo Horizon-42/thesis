@@ -685,15 +685,15 @@ def test_the_instructions_package_sits_below_the_models():
                 assert module in INSTRUCTIONS_MAY_IMPORT, f"{rel} imports {name}"
 
 
-def test_only_the_runners_and_the_executor_reach_the_instructions_package():
-    """The instruction language is consumed by the runners and the executor (`autopilot/`), which flies its words
-    (framework document §2; the prior, which learns to say them, comes back in stage B of two-tier v4)."""
+def test_only_the_runners_the_executor_and_the_prior_reach_the_instructions_package():
+    """The instruction language is consumed by the runners, the executor (`autopilot/`), which flies its words, and the
+    prior (`prior/`), which learns to say them (outline §1)."""
     for path in _module_files():
         if path.is_relative_to(INSTRUCTIONS):
             continue
         rel = path.relative_to(TS_DIR).as_posix()
         if any(name.split(".")[0] == "instructions" for name in _imported_names(path)):
-            assert rel.startswith(("experiments/", "autopilot/")), f"{rel} imports the instructions package"
+            assert rel.startswith(("experiments/", "autopilot/", "prior/")), f"{rel} imports the instructions package"
 
 
 AUTOPILOT = TS_DIR / "autopilot"
@@ -747,3 +747,36 @@ def test_the_executor_laws_never_reach_the_runway_data():
         todo += [name for name in _imported_names(path) if name.startswith("autopilot.")
                  and (TS_DIR / (name.replace(".", "/") + ".py")).is_file()]
     assert {"autopilot.lateral", "autopilot.plant", "autopilot.sentence"} <= seen
+
+
+PRIOR = TS_DIR / "prior"
+#: The prior sits on the instruction language (outline §1, prior design §1): inside the package it reads the words, the
+#: grammar, the artefact and the candidates' geometry (`instructions/`), the day split the artefact was dealt by, the
+#: plain utilities and itself — never the executor or the judge (`autopilot/`: only the runners join the two), a model of
+#: the prediction paths, the training plane or a runner.
+PRIOR_MAY_IMPORT = ("prior.", "instructions.", "data.day_split", "io_utils", "repo_layout")
+
+
+def test_the_prior_reads_only_the_instruction_language():
+    groups = {p.name for p in TS_DIR.iterdir() if (p / "__init__.py").is_file()} | {p.stem for p in TS_DIR.glob("*.py")}
+    files = [path for path in PRIOR.rglob("*.py") if "__pycache__" not in path.parts]
+    assert files, "the prior package is empty; this test would pass vacuously"
+    for path in files:
+        rel = path.relative_to(TS_DIR).as_posix()
+        for name in _imported_names(path):
+            if name.split(".")[0] not in groups or name == "prior":
+                continue
+            allowed = any((name == item[:-1] or name.startswith(item)) if item.endswith(".") else
+                          (name == item or name.startswith(item + ".")) for item in PRIOR_MAY_IMPORT)
+            assert allowed, f"{rel} imports {name}"
+
+
+def test_only_the_runners_reach_the_prior():
+    """`instructions/` and `autopilot/` import no model package (their own tests above); nothing else but a runner
+    imports the prior."""
+    for path in _module_files():
+        if path.is_relative_to(PRIOR):
+            continue
+        rel = path.relative_to(TS_DIR).as_posix()
+        if any(name.split(".")[0] == "prior" for name in _imported_names(path)):
+            assert rel.startswith("experiments/"), f"{rel} imports the prior"

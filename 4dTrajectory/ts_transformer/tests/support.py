@@ -238,3 +238,51 @@ def executor_inputs(signals, geometry, row=0, mass_kg=62000.0):
         aero_params=torch.tensor([[aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall]], dtype=f64),
         frame_params=torch.tensor([[tlat, tlon, candidate.elevation_m, 0.0]], dtype=f64),
         max_thrust_n=torch.tensor([aircraft.engine.max_thrust_total_n], dtype=f64))
+
+
+def prior_sentence(rng, words, *, candidates=3, rows=30, first_step=8, airport="KXXX", split="train",
+                   variant="full", flight_key=None, interval_s=2.0):
+    """A synthetic `prior.batch.SentenceRows` of ``words``' spec: random inputs, and words with a pattern a model can
+    learn — at the first predicted step a word in every column (the runway: a candidate drawn at random); after it, a
+    heading word where the first own-state input is positive (its class from the second), "unchanged" elsewhere, and
+    now and then a word of another column. The words in force follow what was said, from the row after the first
+    predicted step."""
+    import numpy as np
+
+    from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, RUNWAY, SPEED, UNCHANGED
+    from ts_transformer.prior.batch import IN_FORCE_WORDS, OWN_FEATURES, SentenceRows, variant_features
+
+    counts = words.class_counts()
+    width = len(variant_features(variant))
+    own = rng.normal(size=(rows, len(OWN_FEATURES))).astype(np.float32)
+    targets = np.full((rows, 5), UNCHANGED, dtype=np.int64)
+    targets[first_step] = [rng.integers(candidates), rng.integers(counts["heading"]),
+                           rng.integers(counts["altitude"] - 1), rng.integers(1, counts["angle"]),
+                           rng.integers(counts["speed"])]
+    for r in range(first_step + 1, rows):
+        if own[r, 0] > 0.0:
+            targets[r, HEADING] = int(abs(own[r, 1]) * 4) % counts["heading"]
+        if rng.random() < 0.1:
+            column = int(rng.choice([ALTITUDE, ANGLE, SPEED]))
+            targets[r, column] = rng.integers(counts[("altitude", "angle", "speed")[column - ALTITUDE]] - 1)
+    runway_in_force = np.full(rows, -1, dtype=np.int64)
+    heading_in_force = np.zeros((rows, 2), dtype=np.float32)
+    words_in_force = np.full((rows, len(IN_FORCE_WORDS)), -1, dtype=np.int64)
+    since = np.zeros((rows, 5), dtype=np.float32)
+    said_at = np.full(5, np.nan)
+    for r in range(first_step + 1, rows):
+        before = targets[r - 1]
+        runway_in_force[r] = before[RUNWAY] if before[RUNWAY] != UNCHANGED else runway_in_force[r - 1]
+        heading_in_force[r] = heading_in_force[r - 1]
+        if before[HEADING] != UNCHANGED:
+            angle = np.radians(words.heading_relative_deg(int(before[HEADING])))
+            heading_in_force[r] = (np.sin(angle), np.cos(angle))
+        words_in_force[r] = np.where(before[ALTITUDE:] != UNCHANGED, before[ALTITUDE:], words_in_force[r - 1])
+        said_at = np.where(before != UNCHANGED, (r - 1) * interval_s, said_at)
+        since[r] = np.log1p((r * interval_s - said_at) / 2.0) / 5.0
+    return SentenceRows(
+        flight_key=flight_key or f"{airport}:{split}:{int(rng.integers(1 << 30))}", airport=airport, split=split,
+        first_step=first_step, time_s=np.arange(rows, dtype=np.float32) * interval_s, own=own,
+        candidates=rng.normal(size=(rows, candidates, width)).astype(np.float32),
+        runway_in_force=runway_in_force, go_around=np.zeros(rows, dtype=bool), heading_in_force=heading_in_force,
+        words_in_force=words_in_force, since=since, targets=targets)
