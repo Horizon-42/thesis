@@ -11,12 +11,10 @@ voice, one meaning for each word, and technical names that §2 defines. The word
 the STE dictionary. Units are SI only (m, m/s, deg, s). Values in feet, knots or nautical miles occur only in
 quotations of regulations, with the SI value given one time.
 
-**Relation to the current documents.** This design is NOT implemented. The current code implements reading
-`instruction-v3` (spec `145d6911e75b`) and executor spec `v11_20260927`. The Chinese documents describe that code:
-[vocabulary](instruction_vocabulary_design.zh.md), [executor](executor_design.zh.md), [prior](prior_design.zh.md),
-[post-training](post_training_design.zh.md), [multi-aircraft](multi_aircraft_design.zh.md). When the code of this design
-is merged, this document replaces the vocabulary and executor documents. Paths are relative to
-`4dTrajectory/ts_transformer/` unless they start with `4dTrajectory/` or the repository root.
+**Scope of this document.** This document is complete: it gives every rule of the design, and it needs no other design
+document. The code is on the branch `dev-two-tier-v4` (§0.3, §14). The evidence (§11) cites the readouts and the data it
+comes from. Paths are relative to `4dTrajectory/ts_transformer/` unless they start with `4dTrajectory/` or the
+repository root.
 
 ---
 
@@ -26,26 +24,26 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 
 | # | Item | State | Source |
 |---|---|---|---|
-| D1 | Merge the approach column into the runway column. The runway word is the expected runway. The model says it at the first predicted step. "Cleared" is not a word. "Go-around" is a value of the runway column | Decided | User, 2026-10-03 |
+| D1 | The runway column says the expected runway and "go-around". There is no approach column and no word "cleared". The model says the runway at the first predicted step | Decided | User, 2026-10-03 |
 | D2 | The model flies the aircraft to the runway with heading words. No executor law turns the aircraft onto the final | Decided | User, 2026-10-03 |
 | D3 | After the aircraft is on the final, the executor continues to fly the words of the model. The LPV minimums are a judgement only. The model must learn to land or to go around | Decided | User, 2026-10-03 |
-| D4 | The speed value "unspecified" starts at the capture row of the labeller, not at a clearance | Decided | User, 2026-10-03 |
+| D4 | The speed value "unspecified" starts at the capture row of the labeller | Decided | User, 2026-10-03 |
 | D5 | Prior inputs are in the frame of the runway in force. The prior has no airport embedding, no absolute position and no absolute direction | Decided | User, 2026-10-03 |
-| D6 | The grids of the words (heading 5°, four descent classes) stay as they are now. A measurement or a rough labelling decides if they are sufficient | Decided | User, 2026-10-03 |
+| D6 | The grids of the words: heading 5°, four descent classes. A measurement or a rough labelling decides if they are sufficient (D35) | Decided | User, 2026-10-03 |
 | D7 | This document sets no test criteria and no measurement criteria. The user sets them after the design is settled | Decided | User, 2026-10-03 |
 | D8 | The heading grid is aligned to the course of the runway in force (§3.3) | Decided | User, 2026-10-03 |
-| D9 | The executor laws in §5.7 are removed, the glidepath floor included | Decided | User, 2026-10-03 |
+| D9 | The executor has none of the laws of §5.7, the glidepath floor included | Decided | User, 2026-10-03 |
 | D10 | Go-around is an event: "abandon this approach". It does not change the runway in force; a runway word ends it. Its effects on the executor, the judge and the masks: §3.2 | Decided | User, 2026-10-03 |
-| D11 | The labeller stage includes an ablation of the row interval: 2 s now, larger intervals possible (§4.8) | Decided. Values: D25. Readings: D34 | User, 2026-10-03 |
+| D11 | The labeller stage includes an ablation of the row interval Δ (§4.8) | Decided. Values: D25. Readings: D34 | User, 2026-10-03 |
 | D12 | No runway lock. While G is false the model can change the runway at any time; the judge reads R at the crossing (§3.2) | Decided | User, 2026-10-03 |
 | D13 | The prior gets the height above the published glidepath of R at each step (§6.1) | Decided | User, 2026-10-03 |
 | D14 | While G is true: "no level-off" is not permitted (rule 5), and the procedure mask "no climb below the entry height" does not apply (§3.7) | Decided | User, 2026-10-03 |
 | D15 | The spec measurement gives each value that it fits from data with rounder candidates and the fit that each leaves; the user chooses (§3.5) | Decided | User, 2026-10-03 |
 | D16 | The prior has no row position embedding and no input "time from row 0". The time attention uses RoPE with the row's time in seconds (§6.1) | Decided | User, 2026-10-03 |
-| D17 | Every column keeps the input "time since this column said its word in force", in seconds; the runway column's too (§6.1) | Decided | User, 2026-10-03 |
+| D17 | Every column has the input "time since this column said its word in force", in seconds; the runway column too (§6.1) | Decided | User, 2026-10-03 |
 | D18 | The labeller reads the real go-arounds inside a sentence and says "go-around" at the go-around point (§4.6) | Decided | User, 2026-10-03 |
 | D19 | After a labelled go-around, the runway word that ends G is at the first level-off after the go-around climb, and not later than the row of the next "no level-off" (§4.6) | Decided | User, 2026-10-03 |
-| D20 | This design is a new version: it is developed on a new branch in a new worktree. Artefacts `v1`–`v6`, the executor specs and every prior are superseded and are not kept readable. The running experiments keep their own checkouts | Decided | User, 2026-10-03 |
+| D20 | This design is a new version, on its own branch and worktree. It reads no artefact, executor spec or prior that an earlier version made (`v1`–`v6`). The running experiments keep their own checkouts | Decided | User, 2026-10-03 |
 | D21 | Identities bind format and data rules only. A code identity is a behaviour check on fixed inputs, never a hash of source bytes; data are identified by their flights, never by the bytes of a manifest (§9.2) | Decided | User, 2026-10-03 |
 | D22 | Altitude words use the grid "optimal 40 levels" of the altitude-grid proposal: 60 m steps from 0 to 1,260 m, 120 m steps to 2,700 m, 450 m steps to 5,400 m (§3.4) | Decided | User, 2026-10-03 |
 | D23 | How the prior gets the frame of R (D5) and the glidepath height (D13). The own state of the aircraft has no frame. Every position and direction is in the candidate vectors, each in the frame of its own candidate. R is an input only as its candidate vector. No input of a row up to the first predicted step is computed from R. Each candidate vector has the height above its own glidepath; the value of R is the input of D13 (§6.1) | Decided | User, 2026-10-03 |
@@ -55,26 +53,26 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | D27 | "Go-around" changes no target of another column. A row that says "go-around" while "no level-off" is in force also says a level above the aircraft (rule 6). The executor keeps the heading word in force; it does not fly the course of R. While G is true, "unspecified" holds the airspeed (§3.2, §3.7, §5.4–§5.6) | Decided | User, 2026-10-03 |
 | D28 | The vocabulary has one climb word. Its angle is a value of the executor. While G is true, the executor climbs at the steady climb angle that the thrust limit permits, not more than 3° and not less than 1.885° (200 ft per NM). While G is false, it climbs at the nominal angle of the climb class; that value comes from the spec measurement with D15 (§3.5, §5.5) | Decided (the range 1.885°–3° and the nominal from D15: the user; the thrust rule inside the range: Claude's proposal) | User, 2026-10-03 |
 | D29 | Post-training starts from the base model in the multi-aircraft setting "one aircraft commanded". There is no single-aircraft post-training stage (§7) | Decided | User, 2026-10-03 |
-| D30 | The post-training reward comes only from the outcome: 1 for `landed` without a go-around; 0.9ⁿ for `landed` after n go-arounds; 0 for every other outcome and for every loss of separation. No payment for a go-around without a landing. No mask on where "go-around" can be said (D10). The step-8.9 reward of the multi-aircraft design is not used (§7) | Decided | User, 2026-10-03 |
+| D30 | The post-training reward comes only from the outcome: 1 for `landed` without a go-around; 0.9ⁿ for `landed` after n go-arounds; 0 for every other outcome and for every loss of separation. No payment for a go-around without a landing. No mask on where "go-around" can be said (D10) (§7) | Decided | User, 2026-10-03 |
 | D31 | Multi-aircraft inputs and judgements (§8): the landing context of every aircraft of a scene counts the landings of the closed loop; D23 holds for every aircraft of a scene, with a test; "established on the final" is a function of one row, the same for every aircraft (its rule: O6). The prior's training stops on the select days (§6.3) | Decided | User, 2026-10-03 |
 | D32 | Closed-loop reading. The labeller flies its sentence with the executor. When the flown path leaves the observed path by more than a tolerance, it says a correction word, and the observed word again when the flown path is back. The prior trains on the flown states of these sentences (§4.9, §6.1). Tolerances: lateral 30 m, vertical 15 m | Decided | User, 2026-10-03 |
 | D33 | While G is true, no crossing of a threshold is an event: of R or of another candidate (§3.2, §5.8) | Decided | User, 2026-10-03 |
 | D34 | The ablation of the row interval reads, at each Δ: the correction words of the closed-loop reading for each flight and each column; the errors left where §4.9 makes no correction; the replay outcomes. The user compares the Δ values on these readings (§4.8) | Decided | User, 2026-10-03 |
-| D35 | No finer grids. A finer grid does not remove the drift of open-loop words (§11.9); the closed-loop reading does (D32). The heading grid stays 5°, the descent classes stay (D6) | Decided | User, 2026-10-03 |
+| D35 | No finer grids. A finer grid does not remove the drift of open-loop words (§11.9); the closed-loop reading does (D32). The grids are those of D6 | Decided | User, 2026-10-03 |
 | D36 | The teacher-forced data term of the post-training uses single-aircraft samples of the closed-loop sentences, not scene samples. The flown states keep the observed path, not the observed time (§4.9), so two aircraft of one scene do not keep their observed spacing (§7, §8) | Decided | User, 2026-10-04 |
 | D37 | Branch training. Each training aircraft is spoken one time. When its reward is less than 1, it is spoken again from saved states at its first predicted step and every 120 s after it, before the event that ended it. Each branch group compares only the words after its branch point (§7) | Decided | User, 2026-10-04 |
 | D38 | The DA check uses one definition with the evaluation module. Vertical: within ±22 m of the published glidepath of R, the bound of `evaluation/thresholds.py` (`RNAV_TERMINAL_VERTICAL_BOUND_M`, ICAO Doc 9613). Lateral: inside the FAS cone at the distance of the DA point. Neither is a parameter (§5.8) | Decided | User, 2026-10-04 |
 | D39 | The prior's design is chosen by leave-one-airport-out cross-validation (5 folds: train on four airports, read the fifth). Two variants: `full` (§6.1) and `constants` (`full` and, in each candidate vector, the runway's length and threshold elevation). `constants` is chosen only if it is better by more than twice the seed scale (§6.3) | Decided | User, 2026-10-04 |
-| D40 | Hyperparameters: the values of `instruction-v3` are the start (configuration A). The same folds compare four configurations (A, a smaller model, a larger model, a stronger regularization); the one with the fewest parameters within twice the seed scale of the best is chosen (§6.3) | Decided | User, 2026-10-04 |
+| D40 | Hyperparameters: configuration A (§6.3) is the start. The same folds compare four configurations (A, a smaller model, a larger model, a stronger regularization); the one with the fewest parameters within twice the seed scale of the best is chosen (§6.3) | Decided | User, 2026-10-04 |
 | D41 | The design runs at an airport that is not in the training data: the number of candidates is not fixed; every input has a fixed physical scale, never a statistic of the training data; each fold of D39 flies the full closed loop at its held-out airport. The altitude grid limits this to airports whose approach levels lie in its 60 m segment (§6.4) | Decided | User, 2026-10-04 |
 | D42 | The closed-loop reading says each observed word at the place where the observed aircraft heard it, not at the time: at the first Δ row at which the matched point of the flown aircraft has reached that place. The correction words do not change. The flight ends when the executor is done or at the time limit of the replay (§4.9) | Decided | User, 2026-10-04 |
-| D43 | Speed words in steps. In a change of speed, the labeller says each grid value on the way, where the observed speed comes nearer to it than to the value before. The executor changes the speed of a speed word at the largest acceleration of the speed envelope (a_max, a value of the spec). The rate of a change thus comes from the words, as the turn rate comes from the heading words. "Unspecified" keeps its rate (§3.6, §4.5, §5.6) | Decided | User, 2026-10-04 |
+| D43 | Speed words in steps. In a change of speed, the labeller says each grid value on the way, where the observed speed comes nearer to it than to the value before. The executor changes the speed of a speed word at the largest acceleration of the speed envelope (a_max, a value of the spec). The rate of a change thus comes from the words, as the turn rate comes from the heading words. "Unspecified" has its own rate (§3.6, §4.5, §5.6) | Decided | User, 2026-10-04 |
 
 ### 0.2 Open items, in the order of discussion
 
 | # | Item | Proposal | §  |
 |---|---|---|---|
-| O6 | Replacement for the clearance mask of the multi-aircraft loop; the rule "established on the final" of the separation judge and masks (D31) | Discuss with §8 | 8 |
+| O6 | A mask for the spacing on the final (this design has no clearance word to hold back); the rule "established on the final" of the separation judge and the masks (D31) | Discuss with §8 | 8 |
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
 
 ### 0.3 Implementation
@@ -117,7 +115,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
    code (`instructions/envelope.py`). A containment rate is always given with the width of its envelope.
 7. **Inputs give only what a controller knows before the step.** Labelled words are targets of the prior, never
    inputs, except the words said before the step.
-8. **No compatibility.** A changed word, spec or payload gets a new name. The new code refuses the old artefacts.
+8. **No compatibility.** A changed word, spec or payload gets a new name. The code refuses an artefact of another name.
 
 ---
 
@@ -125,7 +123,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 
 | Term | Meaning |
 |---|---|
-| Row, step | One line of a sentence. A row is Δ = 2 s now, on even UTC seconds (artefact `v6_20261002`); the ablation of §4.8 also reads Δ = 4 and 8 s (D25) |
+| Row, step | One line of a sentence. A row is Δ seconds, on the UTC multiples of Δ: 2 s, or 4 or 8 s in the ablation of §4.8 (D25) |
 | Sentence | The rows of one flight, from its first row to the row before the landing |
 | Column | One kind of word in a row. A row has five columns (§3.1) |
 | Word | The value of one column in one row. The value "unchanged" means that the column says nothing new |
@@ -147,7 +145,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | Correction word | A word that the closed-loop reading adds to bring the flown path back to the observed path (§4.9) |
 | Matched point | The point of the observed path nearest to the flown position, searched forward from the matched point of the row before (§4.9). The closed-loop reading compares the flown state with the observed path there, and says the observed words there (D42) |
 | First predicted step | The row 16 s after row 0 (`N_LOOK` = 8 rows at 2 s). The prior observes the rows before it and says nothing there |
-| Executor cycle | 1 s. The executor hears the words at the start of each 2 s row |
+| Executor cycle | 1 s. The executor hears the words at the start of each row |
 | Labeller | The program that reads a sentence from an observed track (`instructions/labeller/`) |
 | Judge | The part of the executor package that classifies what the executor flew (`autopilot/judge.py`) |
 | Decision altitude (DA) | The published DA of the LPV minimums of R, as a height above the threshold (`Runway.decision_height_above_threshold_m`) |
@@ -168,8 +166,7 @@ is merged, this document replaces the vocabulary and executor documents. Paths a
 | 3 | Angle | level; descent 1–4; climb | 7 |
 | 4 | Speed | target ground speed, 5 m/s grid, 20–250 m/s (47 values); "unspecified" | 49 |
 
-The approach column of reading `instruction-v3` does not exist (D1). In one row the prior says the columns in the order
-of the table. A later column sees the values that the earlier columns said in the same row.
+In one row the prior says the columns in the order of the table. A later column sees the values that the earlier columns said in the same row.
 
 ### 3.2 Runway column
 
@@ -182,8 +179,8 @@ loop uses R for the relations between aircraft (§8).
 instrument approach is made"). Thus the runway is known before the approach clearance. The approach clearance is an
 authorization ("CLEARED (Type of) APPROACH − ATC authorization for an aircraft to execute a specific instrument approach
 procedure", Pilot/Controller Glossary). After it, the aircraft flies the procedure (AIM 5-5-4 a.3). The labeller cannot
-see when a controller gave it: the data has no radio. In `instruction-v3` the labeller computed the clearance from the
-start of the turn onto the final. This design has no clearance word. The model says the turns with heading words (D2).
+see when a controller gave it: the data has no radio. Thus this design has no clearance word. The model says the turns
+with heading words (D2).
 
 **States.** The column keeps two states: R (the runway in force) and G (the go-around state).
 
@@ -204,13 +201,13 @@ aircraft back. Its effects:
 | Who | Effect of "go-around" |
 |---|---|
 | Executor (§5.4–§5.6, D27, D28) | "Go-around" changes no target. While G is true, a climb word climbs at the go-around angle (1.885°–3°), not at the nominal angle of the climb class, and "unspecified" holds the airspeed. The climb comes from the level that the go-around row says (rule 6). The heading word in force stays |
-| Judge (§5.8, D33) | While G is true, no crossing of a threshold is an event, of R or of another candidate (not a landing and not a failure): the flight continues. A go-around before the DA point answers a failed DA check. The time limit of the flight grows by 900 s (multi-aircraft design §6.6 step 8, the user 2026-10-02) |
+| Judge (§5.8, D33) | While G is true, no crossing of a threshold is an event, of R or of another candidate (not a landing and not a failure): the flight continues. A go-around before the DA point answers a failed DA check. The time limit of the flight grows by 900 s (the user, 2026-10-02) |
 | Masks (§3.7, D14, D27) | Rule 5: no "no level-off" while G is true. Rule 6: a go-around row with "no level-off" in force also says a level above the aircraft. The procedure mask "no climb below the entry height" does not apply while G is true |
 | Prior (§6.1) | G is an input: the aircraft is in a missed approach |
 | Multi-aircraft (§8) | The decision is explicit: it can be counted and rewarded, and the separation judge can treat the aircraft as no longer on the approach (open with O6) |
 
-A runway word ends G. The model can say R again or another candidate ("expect runway k" again). This keeps the step-8
-sequence of the multi-aircraft design (approach → go-around → approach) in one column.
+A runway word ends G. The model can say R again or another candidate ("expect runway k" again). Thus one column says
+the sequence approach → go-around → approach.
 
 **Why "go-around" changes no target (D27).** The model flies the final with its own heading and altitude words (D2,
 D3). An executor target for a go-around would replace a word of the model that is in force: a climb against "no
@@ -237,16 +234,17 @@ Class 36 is the opposite direction (downwind). Classes 18 and 54 are the two bas
 It keeps that absolute target until the next heading word. A change of R does not turn the aircraft. The prior gets the
 heading in force as the sine and cosine of its angle relative to the course of the current R (§6.1), not as a class.
 
-**Reading (unchanged from `instruction-v3`, except the frame and the end).** Each row gets the grid value nearest to the
-smoothed track 4 s later (the lead L). A new word occurs when the value changes. A continuous turn is a series of words
-2 s apart. Turn rate shows in the time between the words. The heading words now continue to the end of the sentence.
-They describe the turn onto the final and the final itself (§4.3).
+**Reading.** At each row, the labeller takes the smoothed track L = 4 s later (the lead; near the end, the track of the
+last row). The word is the grid value, relative to the course of R at that row, nearest to that track. A new word is
+said where that track leaves the target in force by more than half a step (2.5°). Thus a continuous turn is a series of
+words, one for each 5°, and the time between the words gives the turn rate. The words continue from row 0 to the last
+row of the sentence: they describe the turns onto the final and the final itself (§4.3).
 
 **Envelope.** A word said at row r: from row r + L to the next heading word + L, the track is within ±4.5° of θ
-(`envelope.heading_words_inside`). The rows of a word continue to the end of the sentence. There is no cut at a
-clearance or a capture.
+(`envelope.heading_words_inside`). The rows of a word continue to the next heading word or to the end of the
+sentence.
 
-**Grid (D6, D35).** The grid stays 5°. A word of class 0 gives no lateral correction: the aircraft keeps its lateral
+**Grid (D6, D35).** The grid is 5°. A word of class 0 gives no lateral correction: the aircraft keeps its lateral
 offset until the model says a word of ±5°. The corrections come from the closed-loop reading (D32, §4.9), not from a
 finer grid (§11.9).
 
@@ -264,15 +262,14 @@ The direction comes from T and the present height. The angle column says how ste
 | 3 | 3,150, …, 5,400 m | 450 m | 225 m |
 
 The steps and the break points are constants of the vocabulary and go into the spec. A word is the nearest level; its
-meaning stays an absolute height, the same at every airport and from every position. The grid comes from the proposal
-[altitude_word_grid.zh.md](altitude_word_grid.zh.md): an exact dynamic-programming fit of at most three uniform
-segments that makes the squared rounding error of the observed level-offs smallest for 40 levels (§11.7).
+meaning is an absolute height, the same at every airport and from every position. The grid is an exact
+dynamic-programming fit of at most three uniform segments that makes the squared rounding error of the observed
+level-offs smallest for 40 levels (§11.7).
 
-**Why a coarser grid higher up.** (1) The `instruction-v3` grid used 116 of its 182 classes; 99.7 % of the level words
-are under 3,000 m. (2) A controller assigns a pressure altitude; the geometric height of one assigned level moves from
-day to day by about height × ΔT / 273 (ΔT: the day's temperature deviation; the model does not see it). At KRDU this is
-about 15 m at 600–900 m and about 90 m at 2,000–3,000 m ([vocabulary design](instruction_vocabulary_design.zh.md)
-§2.4). A fine step high up only divides this spread.
+**Why a coarser grid higher up.** (1) 99.7 % of the level words are under 3,000 m (§11.7). (2) A controller assigns a
+pressure altitude; the geometric height of one assigned level moves from day to day by about height × ΔT / 273 (ΔT: the
+day's temperature deviation; the model does not see it). At KRDU this is about 15 m at 600–900 m and about 90 m at
+2,000–3,000 m (§11.7). A fine step high up only divides this spread.
 
 **What a coarse segment costs.** In segment 3 two assigned levels 1,000 ft (304.8 m) apart can round to one word, and
 a small change of level inside one step has no word. Such words are rare (above 2,700 m: approximately 0.3 % of the
@@ -280,9 +277,8 @@ words, mostly the entry level at row 0). The 1,000 ft between opposite base legs
 altitude, where the step is 60 m. At an airport above approximately 600 m elevation the final approach uses the 120 m
 segment (§6.4).
 
-**"No level-off".** "Descend at the angle in force. Do not level off." The judge stops the flight at the threshold or
-at the ground. This value replaces "descend to land" of `instruction-v3`. The name changes because the meaning changes:
-the executor has no special law for it (§5.5, §5.7).
+**"No level-off".** "Descend at the angle in force. Do not level off." The executor flies the nominal angle of the
+class in force and has no other law for it (§5.5, §5.7). The judge stops the flight at the threshold or at the ground.
 
 **Why MSL and not height above the threshold.** Controllers assign MSL levels. Relative to the threshold elevation, the
 level distributions of the five airports become less similar, not more (§11.2). KSJC has 28 % of its level words on
@@ -290,8 +286,8 @@ levels that the other four airports almost never use. This is airspace, not fram
 
 **Envelope.** The tube from the row of the word: max(T, h0 − s·tan γ_hi) − ε ≤ h ≤ max(T, h0 − s·tan γ_lo) + ε while
 it descends, T ± ε after it arrives (s is the horizontal distance flown from the row of the word). ε depends on the
-segment of T: half its step plus the fit residual 10 m, that is 40 / 70 / 235 m (in `instruction-v3`, 25 m for every
-level). For "no level-off" there is no lower bound T. A new angle word starts a new tube. A containment rate is given
+segment of T: half its step plus the fit residual 10 m, that is 40 / 70 / 235 m. For "no level-off" there is no lower
+bound T. A new angle word starts a new tube. A containment rate is given
 with these widths (principle 6). The level detection of the labeller does not use ε (§4.4).
 
 ### 3.5 Angle column
@@ -305,9 +301,9 @@ with these widths (principle 6). The level detection of the labeller does not us
 | Descent 4 | 4.41° | 3.74° to 10° |
 | Climb | No angle in the word. The executor's angle (D28): the nominal of D15 while G is false (fitted: 1.32°); 1.885°–3° while G is true | 0.5° to 15° climb (the labeller's range of a climb piece) |
 
-The four descent classes come from a length-weighted k-means on the train days (spec `145d6911e75b`). The grid stays
-(D6, D35). With D3 the model holds the glidepath with these classes; the closed-loop reading gives the corrections
-(D32, §4.9).
+The four descent classes are a length-weighted k-means of the descent pieces of the train days. The values of the
+table come from the fit on artefact `v6_20261002` (spec `145d6911e75b`); the spec measurement fits them again (D15).
+With D3 the model holds the glidepath with these classes; the closed-loop reading gives the corrections (D32, §4.9).
 
 **Rounder values (D15).** The spec measurement gives each value that it fits from data (the descent centres and edges,
 the climb centre) with rounder candidates (for example to 0.5°, 0.25°, 0.1°) and, for each candidate, the fit that it
@@ -342,7 +338,7 @@ capture row (D4, §4.5).
 step of 5 m/s, and the time between the words gives the rate of the change, as the time between the heading words
 gives the rate of a turn. The executor makes each step at a_max (§5.6).
 
-**Envelope (unchanged).** A transition is monotone (a step back ≤ 5 m/s) with acceleration ≤ a_max (1.4 m/s², spec).
+**Envelope.** A transition is monotone (a step back ≤ 5 m/s) with acceleration ≤ a_max (1.4 m/s², spec).
 After it, the speed stays within V ± 5 m/s. "Unspecified" checks only the range.
 
 **Wind (O8, open).** At constant airspeed, the ground speed changes when the aircraft turns in wind. Such a change can
@@ -351,8 +347,7 @@ become a speed word that no controller said. A check against the surface winds o
 ### 3.7 Grammar rules
 
 The labeller checks these rules. The prior applies them as masks when it decodes (`instructions/grammar.py`). The
-labeller identity hash must include `grammar.py` (code-health follow-up, row "`instructions/grammar.py` is outside the
-labeller sha").
+labeller conformance (§9.2) covers them.
 
 1. At the first predicted step, each column says a value. The runway column says a candidate.
 2. The runway column follows the table of §3.2.
@@ -365,11 +360,17 @@ labeller sha").
    aircraft (D27). Rule 3 then makes the same row say "climb". With rules 5 and 6, "no level-off" is never in force
    while G is true, so every climb of a go-around has a target from an altitude word.
 
-**Masks while G is true (D14).** Only one mask stops a go-around: the procedure rule "no climb after the aircraft is
-below the entry height before the join". It does not apply while G is true; the current code already lifts it while a
-go-around is in force (`prior/procedure.py:126` `climb_barred`), and its stretch starts again after the go-around. The
-other procedure masks are lower limits (the glidepath lower edge inside the FAF, the DA before the join). A go-around
-climbs above them, so they stay. The vocabulary rules 1–4 stay.
+**Procedure masks.** The prior also decodes under three masks from the procedure of R (principle 3). The first two
+block the altitude and angle words that would take the aircraft below a lower limit; the third blocks the climb:
+
+- inside the FAF and the LPV cone: the glidepath lower edge, the published glidepath − 60 m (nowhere else: the RNAV
+  floors outside the FAF disagree with 10–14 % of the recorded tracks);
+- before the join (the first row inside that region): the published DA;
+- once the aircraft is below the entry height before the join: no climb.
+
+**Masks while G is true (D14).** Only one mask stops a go-around: "no climb below the entry height". It does not apply
+while G is true, and its stretch starts again after the go-around. The other two masks are lower limits; a go-around
+climbs above them, so they apply. Rules 1–4 apply while G is true as at every row.
 
 ### 3.8 Example
 
@@ -395,19 +396,25 @@ check (§5.8). The table is the labelled sentence. The prior observes rows 0–7
 
 ## 4 Labeller
 
-The labeller reads one sentence from one observed flight (`instructions/labeller/read.read_flight`). This section gives
-only what differs from `instruction-v3` and what stays the same. The detailed rules of the readings that stay are in the
-[vocabulary design](instruction_vocabulary_design.zh.md) §3.
+The labeller reads one sentence from one observed flight (`instructions/labeller/read.read_flight`), in two passes. The
+open-loop reading (§4.1–§4.8) reads the observed words from the observed track. The closed-loop reading (§4.9) flies
+them with the executor and adds the correction words; its sentences are the training sentences.
 
-### 4.1 Signals, cut and gate (unchanged)
+### 4.1 Signals, cut and gate
 
-- Signals come from the ts data plane (`build_series`): read-time repair, MSL, 2 s rows on even UTC seconds, the airport
-  frame. Test days are sealed: the labeller never opens them (contract C32).
-- The sentence ends before the first crossing of a threshold plane that meets the landing screen of the harvest
-  (lateral ≤ 1,000 m and ≤ half the spacing to a parallel runway; height ≤ 100 m; `read.landing_passages`).
-- The labeller refuses a flight that crosses and then comes back before the threshold, a flight with a bad raw ground
-  speed, and the other refusals of `instruction-v3`.
-- Smoothing: track 6 s, altitude 10 s, ground speed 10 s, centred.
+- **Signals** come from the ts data plane (`build_series`): the altitude repaired at read time, MSL, 2 s rows on even
+  UTC seconds, the airport frame. The test days are sealed: the labeller never opens them (contract C32).
+- **Smoothing:** centred moving means of the track (6 s), the altitude (10 s) and the ground speed (10 s). The flown
+  distance is the integral of the smoothed ground speed.
+- **Cut** (`read.admit`). A landing passage is a row where the flight crosses the threshold plane of its landed runway
+  inside the landing screen of the harvest: lateral ≤ 1,000 m and ≤ half the spacing to a parallel runway, height
+  ≤ 100 m, both interpolated between the two rows (`read.landing_passages`). The sentence ends before the last landing
+  passage after which the flight does not come back before the threshold.
+- **Gate.** The labeller refuses a flight, with its reason, when: its rows are not 2 s apart; its landed runway is not
+  a candidate; fewer than two rows remain before the threshold; a raw ground speed is outside 15–350 m/s; a smoothed
+  ground speed is outside the speed words (20–250 m/s ± 5 m/s); a landing passage that it comes back from is not inside
+  the low pass of a go-around (§4.6); a go-around point is on the runway (§4.6). The readings of §4.2–§4.7 add their own
+  refusals.
 
 ### 4.2 Runway word
 
@@ -419,51 +426,81 @@ glidepath angle or an LPV DA is refused before labelling (the judge needs all th
 
 ### 4.3 Heading words
 
-- Frame: the course of the landed runway (D8).
-- Reading: the per-row reading of §3.3, from row 0 to the last row of the sentence. In `instruction-v3` the words
-  stopped at the clearance row. Now they also cover the turn onto the final and the final itself.
-- Removed: the clearance placement (`read_lateral`: the turn onset and the convergence test), and the turn check of the
-  capture turn (`turn_check` as an envelope of a clearance).
-- Kept for other uses: the capture row (`capture_row`), for D4 and for the readout groups (straight-in, vectored).
+- **Frame:** the course of R at each row (D8): the runway of the first approach, then, from the runway word that ends
+  a go-around, the runway of the next approach (§4.2, §4.6).
+- **Reading:** §3.3, at every row from row 0 to the last row of the sentence. A word in force keeps its track when R
+  changes; only a new word reads the new course. After a change of R, a new word with the class in force cannot be said:
+  the flight is refused.
+- **Capture row** (D4, D26): the first row of an approach from which the track stays in the capture corridor of its
+  runway, before the threshold, to the end of the approach. The landing approach must end in the corridor; otherwise
+  the flight is refused. An approach that ends at a go-around row outside the corridor has no capture row.
+- **Strata of the readouts.** A flight is vectored when, before the capture row of its landing approach, the net turns
+  of its runs of rows that turn one way faster than 0.2°/s add up to 90° or more. Otherwise it is straight-in.
 
 ### 4.4 Altitude and angle words
 
-Piecewise-linear fit of the smoothed altitude against distance (residual ≤ 10 m), as in `instruction-v3`. One change
-follows from D22. In `instruction-v3` a piece is level when its rows lie within 25 m of the nearest 30 m level
-(`instructions/labeller/vertical.py:60`); with 60–450 m steps that test would miss real level-offs (a level at 630 m is
-30 m from both neighbours) or swallow descents. So the two questions separate:
+**Pieces.** The smoothed altitude is fitted against the flown distance by straight pieces. From the first row of a
+piece, the piece grows as long as the least-squares line through its rows keeps every residual within 10 m (the fit
+residual). A piece has at least two rows.
 
-1. **Is the piece level?** At least 20 s, and every row within 25 m of the piece's own median. This is a physical test
-   with a constant of the labeller; it does not use the grid.
-2. **Which word?** The nearest level of the grid to the median.
+1. **Level.** A piece is level when it lasts at least 20 s and every row is within 25 m of the piece's own median. This
+   test is physical and does not use the grid: a test against the 60–450 m steps would miss a level between two grid
+   levels (a level at 630 m is 30 m from both neighbours) or take a slow descent for a level. The word of a level is the
+   grid level nearest to its median. Consecutive level pieces with the same word are one level.
+2. **Move.** Every other piece is a move, with its path angle (descending positive). Consecutive moves in one direction
+   are a run.
 
-Two level pieces in a row with the same word merge. Moving pieces give the level words and the angle words. A move
-between two levels that round to the same word gives no level word (it cannot be said; §3.4). The last descent of
-each approach gives "no level-off" when it reaches the end of the approach: the threshold, or the go-around row (D26,
-§4.6). The tube of §3.4 checks each word, with the ε of its segment.
+**Words.**
+
+1. A level at row 0 says its level and the angle "level".
+2. A run says its altitude word at its first row: the word of the next level; the grid level nearest to the height
+   where the direction changes without a level; or "no level-off" when the run is the last descent of its approach (it
+   reaches the threshold, or the go-around row; D26, §4.6). A run whose word is the word in force (a move between two
+   heights that round to one level) says nothing: the word cannot be said (§3.4).
+3. Each move says its angle class where the class differs from the class in force: the descent class whose range holds
+   the angle, or "climb" for a climb of 0.5° to 15° (§3.5).
+4. A step is two levels with different words and no move between them. The altitude word is said at the last row of
+   the first level. Its angle is read from there to the first row within 10 m of the height of the second level.
+5. The flight is refused when it climbs at the end of the sentence, when a level is outside the grid, when an angle is
+   outside the classes, or when a level word is on the wrong side of the height where its run starts (by more than its
+   ε).
+
+The tube of §3.4 checks each word, with the ε of its segment.
 
 ### 4.5 Speed words
 
-The reading of `instruction-v3` stays, with three changes. (1) "Unspecified" starts at the capture row, not at the
-clearance row (D4). (2) Each approach has its own reading (D26): speed words before its capture row, "unspecified" from
-its capture row to the end of the approach. An approach that ends at a go-around row outside the capture corridor has
-no capture row; its speed word in force stays. After the go-around row, the reading of the next approach starts. (3) A change
-of speed says each step on the way (D43, below). The two exceptions stay, with the new anchor:
+**Pieces.** The smoothed ground speed is fitted against time by straight pieces, as the altitude (§4.4), with every
+residual within 1.5 m/s. A piece is a hold when it lasts at least 20 s, its slope is at most 0.1 m/s², and every row is
+within ±5 m/s of the grid value nearest to its median. A hold that follows a hold and stays inside the band of its value
+is the same hold. Every other piece is a transition, accelerating or decelerating. Consecutive transitions in one
+direction are a run. The target of a run is the value of the next hold; or the grid value nearest to the speed where the
+direction changes without a hold; or, when the run continues into "unspecified" or to the end of the approach, the grid
+value nearest to the speed at its last row before that.
+
+**Words.**
+
+1. Row 0 says the value of the hold that starts there, or else the grid value nearest to the smoothed speed there.
+2. A hold that follows another hold says its value at its first row.
+3. **Steps (D43).** In a run, the labeller says each grid value from the word in force to the target, in order. It says
+   a grid value at the first row at which the smoothed speed is nearer to that value than to the value before it, and
+   the target at the latest at the last row of the run. Thus, in a change of speed, the word in force is approximately
+   the grid value nearest to the observed speed. Inside a run the labeller says no value in the other direction, so the
+   noise of the speed gives no words.
+4. A target outside the grid (20–250 m/s) refuses the flight.
+
+**"Unspecified" (D4, D26).** Each approach has its own reading. "Unspecified" starts at the capture row of the
+approach, with two exceptions:
 
 1. A hold of at least 30 s that ends at or after the capture row, and ends 9,260 m (5 NM, 7110.65BB 5-7-1 b.4) or
    more before the threshold, keeps the speed word in force. "Unspecified" starts at the end of the last such hold.
-2. A deceleration that started less than 20 s before that row is already the pilot's speed. "Unspecified" starts where
-   it started.
+2. A change of speed under way at that row, which started less than 20 s before it, is already the pilot's speed.
+   "Unspecified" starts where it started.
 
-**Steps (D43).** The pieces, the holds and the runs of `instruction-v3` stay. A run is a sequence of transitions in one
-direction. Its target is the target of the next hold, or the grid value nearest to the speed where the direction
-changes without a hold. In a run, the labeller says each grid value from the word in force to the target, in order. It
-says a grid value at the first row at which the smoothed observed speed is nearer to that value than to the value
-before it. It says the target at the latest at the last row of the run. Thus, in a change of speed, the word in force is
-approximately the grid value nearest to the observed speed. Inside a run, the labeller says no value in the other
-direction, so noise of the speed gives no words.
+From that row to the end of the approach the column says no other word. An approach that ends at a go-around row
+outside the capture corridor has no capture row: its speed words continue to its end, without "unspecified". The
+reading of the next approach starts at the go-around row.
 
-Why:
+**Why steps (D43):**
 
 - A speed word gives a target, not a rate. The rate of a real change of speed is a choice of the pilot or the
   controller. On the smoke artefact it is 0.24 m/s² in level flight and 0.19 m/s² in a descent (median), and it changes
@@ -480,18 +517,24 @@ Why:
 
 ### 4.6 Go-around words (D18, D19)
 
-**The data.** R40 v2 (`go_around_census`, readout `readouts/2026-10-01_go_arounds.zh.md` §3) found 109 go-arounds on the
-training days. In 73 of them the go-around point is inside a labelled sentence of `v5`: `instruction-v3` read the first
-approach and the climb as heading and altitude words, and put the clearance at the second capture. In 11 more the
-point is inside the arrival slice, but the labeller refused the flight. In 23 the go-around point is before the sentence
-(the aircraft left 25 km; the slice starts at its return). Without a go-around word the prior gives the word a
-probability of approximately 1e−11 (the 9.4 readouts).
+**The data.** The training days hold 109 go-arounds (R40 v2, `go_around_census`; §11.6). In 73 the go-around point
+lies inside a labelled sentence of artefact `v5`. In 11 more it lies inside the arrival slice of a flight that crosses
+a threshold plane in its low pass; the gate of §4.1 reads these as go-arounds. In 23 it lies before the sentence: the
+aircraft left the 25 km slice, and the slice starts at its return.
 
 **The reading.**
 
-1. The labeller finds a go-around with the rule of R40: a low pass on the final of a runway end, down from a level held
-   for 20 s at least 150 m higher, then up to a level held for 20 s at least 150 m higher. The rule moves from the runner
-   into `instructions/labeller/` (the labeller cannot import a runner), with its tests.
+1. **The go-around** (`instructions/labeller/go_around.py`).
+   - A low pass is a run of rows (gaps of at most 3 rows) on the final of one candidate: at most 500 m from its
+     centreline, from 10 km before its threshold to 3 km past it, at most 600 m above it, with at least 1 km of
+     progress along the landing direction between its first and last rows (it flies the final; it does not cross it).
+     Two passes on two candidates with common rows (close parallels) are one pass, on the candidate with the smaller
+     median offset. The lowest row of the pass is the go-around point.
+   - A low pass is a go-around when, before it (since the previous pass), the aircraft held a level for at least 20 s at
+     least 150 m above the go-around point, and after it (before the next pass or the end) held a level for at least
+     20 s at least 150 m above the point. The last pass of a sentence (the landing approach) is never a go-around.
+   - A go-around point past the threshold and at most 15 m above it is on the runway: a touch-and-go, or a landing
+     balked in the flare. The vocabulary cannot say that landing, so the flight is refused.
 2. The go-around row is the first row of the climb after the low pass: the row where the altitude reading starts the
    climb run, with its level word and its climb word (D26). The runway column says "go-around" in that row; G becomes
    true. A go-around without a climb word is refused, with its reason.
@@ -500,7 +543,8 @@ probability of approximately 1e−11 (the 9.4 readouts).
 4. The runway word that ends G (D19): at the first level-off after the go-around climb, and not later than the row of
    the next "no level-off" (rule 5). It says the runway of the next approach: the runway on which the flight landed,
    after its last go-around.
-5. A flight that the labeller refused only because it crossed a threshold and came back is read again with this rule.
+5. A landing passage that the flight comes back from must lie inside the low pass of a go-around; otherwise the
+   flight is refused (§4.1).
 6. Each approach is read separately (D26): the last descent that reaches the go-around row says "no level-off" (§4.4);
    the capture row and "unspecified" belong to the approach (§4.5); the first row says the runway of the first low pass
    (§4.2).
@@ -515,33 +559,32 @@ level-off" and "unspecified" in force, and there the prior would give "go-around
 check needs it (D3). With each approach read separately, "go-around" occurs with "no level-off" and "unspecified" in
 force, as on a real final.
 
-**Not in this version.** The 23 go-arounds before their sentence need a longer arrival slice, and 9 sentences of `v5`
+**Not read.** The 23 go-arounds before their sentence need a longer arrival slice, and 9 sentences of `v5`
 end at a low go-around that the harvest took for the landing (it takes the best-aligned crossing under 100 m, not the
 last; R40 v2 §5). Both are changes of the harvest or of the data plane, which other lines (evaluation, the optimizer,
 the one-tier models) share.
 
 ### 4.7 Assembly and artefact
 
-- All words go on the row grid (2 s now; §4.8). A word equal to the word in force is not a word. The first row says all five columns.
+- All words go on the row grid (Δ; §4.8). A word equal to the word in force is not a word. The first row says all five columns.
   Two different words in one column in one row: refused.
-- The artefact has a new reading name and a new spec format (principle 8). The spec records the grids, the classes, the
-  tolerances and the reading. The labeller identity hash covers the reading code and `grammar.py`.
+- The reading is named `instruction-v4`. The spec records the grids, the classes, the tolerances and the reading name.
+  The labeller conformance (§9.2) checks the reading code, the grammar included.
 - The open-loop sentences are the input of the closed-loop reading (§4.9). The training sentences of the prior are the
   closed-loop sentences with their flown states.
-- The new code refuses artefacts `v1`–`v6` and every prior trained on them.
+- The code refuses an artefact of another reading name, and every prior trained on one (principle 8).
 
 ### 4.8 Row interval: an ablation (D11)
 
-**What the row interval Δ sets.** Δ is 2 s now: the resample step of the data plane. Δ sets the grid of the words, how
+**What the row interval Δ sets.** The data plane gives a row every 2 s. Δ sets the grid of the words, how
 often the prior speaks and the executor hears, the length of a sentence (median 154 rows at 2 s) and the step of a
-multi-aircraft scene. Each column changes its word at only 1–2 % of the 2 s rows ([prior design](prior_design.zh.md)
-§1), so a larger Δ can be sufficient. The user asked to measure this at the labeller stage, before the prior trains.
+multi-aircraft scene. Each column changes its word at only 1–2 % of the 2 s rows (artefact `v6_20261002`), so a larger
+Δ can be sufficient. The ablation measures this at the labeller stage, before the prior trains.
 
-**How the ablation changes only Δ.** The labeller reads each flight at the 2 s rows of the data, as now. Then it puts
+**How the ablation changes only Δ.** The labeller reads each flight at the 2 s rows of the data. Then it puts
 the words on a Δ grid:
 
-1. The Δ rows are the rows on UTC multiples of Δ (the rule of artefact `v6_20261002` for Δ = 2 s), so the aircraft of a
-   scene stay on one grid.
+1. The Δ rows are the rows on UTC multiples of Δ, so the aircraft of a scene are on one grid.
 2. At each Δ row, each column says the word in force at that 2 s row if it differs from the word in force at the
    previous Δ row. Inside one interval, only the last word of a column stays.
 3. The first Δ row says all five columns. The grammar rules (§3.7) are checked again on the Δ grid.
@@ -706,35 +749,61 @@ executor uses only the vocabulary; a parameter mined from data shows that it doe
 
 The executor laws do not read the TCH, the glidepath angle or the DA. Only the judge reads them (§5.8).
 
-### 5.3 One cycle (unchanged)
+### 5.3 One cycle
 
-The outer loop changes the words in force to three wanted rates: track rate, path-angle rate, airspeed rate. The inner
-loop inverts the point-mass equations for bank, load factor and thrust, in this order: bank limit 32° and roll rate
-p = 5°/s, load factor in [0.5, 2.0], stall floor 1.10·V_stall(n), thrust in [−0.2, 1.0]·T_max. One cycle is 1 s,
-integrated with RK4 under zero-order hold. Details: [executor design](executor_design.zh.md) §2, §3, §7.
+The laws of §5.4–§5.6 change the words in force into three wanted rates: the track rate χ̇*, the path-angle rate γ̇*
+and the airspeed rate V̇*. The inner loop solves the point-mass equations of the ts control path
+(`aerodynamic_model.torch_dynamics`) for the three controls that give these rates:
+
+```
+A = −χ̇*·V·cos γ / g          (= n·sin φ; compass and mathematical turns have opposite signs)
+B =  γ̇*·V / g + cos γ        (= n·cos φ)
+φ = atan2(A, B),   n = B / cos φ
+T = m·(V̇* + g·sin γ) + D(V, n, h)
+```
+
+D is the drag of the dynamics' own polar at the commanded load factor and the ISA density at the height. The limits act
+in this order, each on the value that it bounds:
+
+1. Bank: not more than the bank limit (32°, spec), and changed at not more than the roll rate p = 5°/s. Then
+   n = B / cos φ keeps γ̇*: a limited bank costs turn rate, not the path.
+2. Load factor: in [0.5, 2.0].
+3. Stall floor: the speed law asks for no airspeed below 1.10·V_stall(n) at that load factor (§5.6).
+4. Thrust: in [−0.2, 1.0]·T_max. The drag polar is clean: it has no flaps, no landing gear and no speedbrakes. The
+   negative part of the range stands for these devices. A limited thrust costs airspeed rate.
+
+One cycle is 1 s: the controls are held (zero-order hold), and RK4 integrates the point-mass equations. Layer 1 of the
+judge records each limit that bound (§5.8).
 
 ### 5.4 Lateral law
 
-- **Heading words** (unchanged law, new conversion). When the executor hears a heading word, it sets the absolute target
-  θ = course(R) + 5k°. It turns so that the track arrives at θ L = 4 s after the hearing time. The rate is the smallest
-  of |e| / (time to go), the stopping rate √(2·g·p·|e| / V) and the turn-rate limit 4.7°/s (`lateral.word_rate`). The
-  first word turns in the shorter direction. A later word continues from the target before it (a series of words never
-  reverses a turn).
+- **Heading words.** When the executor hears a heading word, it sets the absolute target θ = course(R) + 5k° and keeps
+  it until the next heading word. The word says the track L = 4 s later, so the executor turns to arrive at θ at that
+  time. The track rate is the smallest of three rates (`lateral.word_rate`): the error e divided by the time left until
+  L runs out (not less than two cycles; after that, the executor holds θ); the stopping rate √(2·g·p·|e| / V), the
+  fastest rate whose bank the executor can still take out before e is gone (it cannot know which word ends a turn); and
+  the turn-rate limit 4.7°/s. The first word turns in the shorter direction. A later word measures e from the target
+  before it, so a series of words never reverses a turn while the aircraft lags behind it.
 - **Go-around (D27).** "Go-around" does not change the heading target. The executor keeps flying the heading word in
   force. The model turns the aircraft with heading words, as at every other row.
 - Nothing else. There is no capture state, no turn onto the final, no centreline tracking (§5.7).
 
 ### 5.5 Vertical law
 
-The inner path-angle loop stays: γ̇* = sat((γ_ref − γ) / τ_γ, ±γ̇_max), τ_γ = 2 s (executor design §5.1). The modes:
+The inner path-angle loop: γ̇* = sat((γ_ref − γ) / τ_γ, ±γ̇_max), τ_γ = 2 s. γ̇_max is twice the smallest rate that keeps
+an entry into the steepest descent class inside its tube: 2 × V·γ_lo² / (2ε), with γ_lo the lower edge of the steepest
+class and ε the narrowest level band of the grid. The modes choose γ_ref (climbing positive):
 
 | Words in force | Mode | γ_ref |
 |---|---|---|
-| Level T + level | Hold | Altitude hold law, τ_h = 8 s (executor design §5.5) |
+| Level T + level | Hold | −(h − T) / (V·τ_h), τ_h = 4·τ_γ = 8 s; within the nominal angle of the steepest descent class and the climb angle (γ_GA while G is true) |
 | Level T + descent class | Descend to T | −nominal angle of the class; level-off starts at V·γ²/(2·γ̇_max) above T |
 | Level T + climb, G false | Climb to T | +nominal angle of the climb class (D15, D28); level-off as above |
 | Level T + climb, G true | Go-around climb to T | +γ_GA, the go-around angle (below); level-off as above |
 | "No level-off" + descent class | Descend | −nominal angle of the class; no level-off |
+
+A target that the executor has captured (its level-off started) stays captured until a new altitude word or angle word,
+so the mode does not change back and forth at the level.
 
 **The go-around angle (D28).** γ_GA = min(3°, max(1.885°, γ_T)). γ_T is the steady climb angle at the thrust limit and
 the present airspeed: sin γ_T = (T_max − D) / (m·g), with the drag D of the present state at load factor 1 (the
@@ -753,33 +822,35 @@ V_ref = V_g / cos γ (ground speed to airspeed without wind), not below 1.10·V_
 changes at a_max, the largest acceleration of the speed envelope (§3.6, a value of the spec), and goes exponentially
 into the last 5 m/s. A speed word is a step of 5 m/s (D43), so the executor makes each step in a few seconds; the rate
 of a longer change comes from the words. Where the thrust limits cannot give a_max, the thrust limit binds (§5.3), and
-the replay counts it. "Unspecified" is the published approach speed of the type at the published maximum landing
-mass. The deceleration to it is the larger of a_U = 0.25 m/s² (a speed step of 5 m/s divided by the minimum hold of
+the replay counts it. "Unspecified" is the published approach speed of the type (an indicated airspeed at the maximum
+landing mass), scaled by √(m / maximum landing mass) to the mass of the aircraft and flown as the true airspeed at the
+present density. The deceleration to it is the larger of a_U = 0.25 m/s² (a speed step of 5 m/s divided by the minimum hold of
 20 s) and the rate that reaches it at the threshold of R, not more than a_max. While G is true,
 "unspecified" means the pilot's own speed in a missed approach: the executor holds the airspeed that the aircraft has
-at the go-around row (D27; Claude's reading, not checked in the regulation text). This replaces no word of the model:
-a speed word of the model replaces it at any row.
+at the go-around row (D27; Claude's reading, not checked in the regulation text). A speed word of the model ends it at
+any row.
 
-### 5.7 Removed laws (D9)
+### 5.7 What the executor does not do (D9)
 
-| Law in `v11` | Where | Why it goes |
-|---|---|---|
-| Runway lock after a clearance or a capture | `executor.runway_locked`, `lateral.Lateral.rate` | No clearance word; D12 |
-| Capture state and the capture turn (an arc tangent to the final, planned at 1.53°/s) | `lateral.py:284`, executor design §4.4 | D2 |
-| Heading bend of ±4.5° and the own intercept at 30° after a clearance | `lateral.py:293`, executor design §4.3 | D2 |
-| Centreline tracking after capture | executor design §4.5 | D3 |
-| "Descend to land": aim at the TCH crossing point, the tube limit, the exit from the tube, not below the crossing height | `vertical.py:140`, executor design §5.3.1–§5.3.3 | D3 |
-| Glidepath floor (published glidepath − 60 m) and level flight below the glidepath after capture | `vertical.py:74`, executor design §5.3.4–§5.3.5 | D3, D9 |
+The executor has no law of its own for the approach. It has:
+
+- no runway lock (D12);
+- no capture state, no turn onto the final, no heading bend and no own intercept (D2);
+- no centreline tracking (D3);
+- no special law for "no level-off": no aim at the threshold crossing point and no tube limit (D3);
+- no glidepath floor and no level flight below the glidepath (D3, D9).
+
+The words do these things. Only the judge and the masks read the procedure (principles 2 and 3).
 
 ### 5.8 Judge
 
-**Layer 1, each cycle (unchanged).** The wanted rates, the rates given, and the limit that bound.
+**Layer 1, each cycle.** The wanted rates, the rates given, and the limit that bound.
 
-**Layer 2, each word (changed).** The labeller's checks on the flown track, from the row where the executor heard the
+**Layer 2, each word.** The labeller's checks on the flown track, from the row where the executor heard the
 word: heading words to the end of the flight (§3.3); altitude and angle words in their tubes; speed words in their
-spans. The checks of the clearance and of the corridor go.
+spans.
 
-**Layer 3, each flight (changed).** A crossing of R is an approach crossing when G is false and the aircraft crosses the
+**Layer 3, each flight.** A crossing of R is an approach crossing when G is false and the aircraft crosses the
 threshold plane of R lined up: track within 30° of the course, lateral offset inside the landing screen (≤ 1,000 m and
 ≤ half the spacing to a parallel). The runway limit is the FAS half-width at the threshold (106.7 m), and not more than
 half the spacing to a parallel. The judge gives the first outcome that occurs. At one row it uses the order of the table.
@@ -796,8 +867,7 @@ half the spacing to a parallel. The judge gives the first outcome that occurs. A
 | `timeout` | None of these within the time limit (the remaining observed time × 1.5, plus 900 s for each go-around) |
 
 A crossing that is not lined up (for example, abeam the threshold on a downwind) is not an event. While G is true, no
-crossing is an event, of R or of another candidate (D33): the flight continues. `crossed_without_capture` goes, because the executor has no capture
-state.
+crossing is an event, of R or of another candidate (D33): the flight continues.
 
 **The DA check (D3, D38).** At the DA point the judge checks that the aircraft is stable:
 
@@ -814,7 +884,7 @@ The regulation basis: the missed approach starts at the DA (AIM 5-4-21 b: "Obsta
 protection for missed approach is predicated on the missed approach being initiated at the decision altitude"). If
 the model says "go-around" before the DA point, the flight continues (§3.2).
 
-**Quality** stays with the evaluation module (lateral, vertical and speed gates). The judge does not repeat it.
+**Quality** belongs to the evaluation module (lateral, vertical and speed gates). The judge does not repeat it.
 
 ---
 
@@ -830,21 +900,20 @@ the model says "go-around" before the DA point, the flight continues (§3.2).
   ground speed and its vertical rate.
 - **Frame (D5, D23).** Every position and every direction is in the candidate vectors. Each candidate vector gives the
   aircraft in the frame of that candidate: the distance to its threshold along its course, the offset right of its
-  final, the height above its threshold, the motion direction minus its course (sine, cosine), as now
-  (`instructions.airport.relative_to_runway`, `prior/data.py:198`). "The frame of R" is the candidate vector of R, which
-  the prior gets as the runway in force (`prior/model.py:388` `_runway`, as now). There is no second set of values
-  relative to R.
+  final, the height above its threshold, the motion direction minus its course (sine, cosine)
+  (`instructions.airport.relative_to_runway`). "The frame of R" is the candidate vector of R, which the prior gets as
+  the runway in force. There is no second set of values relative to R.
 - **No input is computed from R before R is said (D23).** The first predicted step says R. The inputs of the rows before
   it and of the first predicted step itself use no value computed from R. (The heads of a row see the runway that the
   same row said, §3.1; that is an output, not an input of the row.) The reason: the artefact writes the runway word at
   row 0 (§4.7), and its value is the runway on which the flight landed. An input of these rows computed from it gives
   the answer of the first predicted step, and in closed loop the same input does not exist. A test: a change of the
   runway word of a sentence leaves the inputs of rows 0 to `N_LOOK` the same, bit for bit.
-- **Removed (D5, D24):** the airport embedding (`prior/model.py:312`), the absolute position E, N and the absolute
-  motion direction (`prior/data.py:63`), and the whole table of candidate constants (`prior/data.py:70`): the absolute
-  threshold position, the course, the elevation and the length.
+- **No airport identity (D5, D24).** The prior has no airport embedding, no absolute position (E, N), no absolute
+  motion direction, and no table of candidate constants (the absolute threshold position, the course, the elevation,
+  the length).
 - **Candidates (D24).** A candidate vector has only values that change with the aircraft: the values of the frame above,
-  the glidepath height below, and the landings on the candidate in the 30 min before the step (as now). It has no
+  the glidepath height below, and the landings on the candidate in the 30 min before the step. It has no
   constant of its runway. Such a constant identifies the runway:
   - In the candidate table of `v6_20261002`, the pair (length, elevation) is different for 24 of the 25 candidates. The
     length alone tells the left runway of KRDU from the right one (05L / 23R 3,048 m, 05R / 23L 2,286 m).
@@ -859,7 +928,7 @@ the model says "go-around" before the DA point, the flight continues (§3.2).
   no aircraft type. The elevation is the MSL height minus the height above the threshold. Which of two parallel runways
   is the left one shows at each step in the offsets right of their finals (the value of the left runway is always
   larger). The relative positions of all candidates together still show the layout of the airport. That is real
-  geometry and stays; only the held-out airports of D39 can measure how much the prior uses it. A constant comes back
+  geometry, and the prior has it; only the held-out airports of D39 can measure how much the prior uses it. A constant comes back
   only as the variant `constants` of D39.
 - **Words in force:** the runway in force as its candidate vector ("none yet" up to the first predicted step), the
   go-around state G, the heading in force as the sine and cosine of its angle relative to the course of R, the other
@@ -872,10 +941,8 @@ the model says "go-around" before the DA point, the flight continues (§3.2).
   (principle 2). The value is only meaningful near the final; the model also has the offset from the final to weigh it.
 - **Motion (D25).** The ground speed, the vertical rate and the motion direction (in each candidate vector, minus its
   course) come from the displacement in the 2 s before the row, at every row interval Δ (§4.8). Only past positions
-  give them; never the fitted track, ground speed or vertical rate of the signals, which use 7.5 s of the future (as
-  now, `prior/data.py:163` `_motion`).
-- **Time (D16).** No row position embedding (`prior/model.py:313`) and no input "time from row 0" (`prior/data.py:63`
-  `time`): both measure the time since the aircraft entered the 25 km slice, a cut of the data, and a long sentence (a
+  give them; never the fitted track, ground speed or vertical rate of the signals, which use 7.5 s of the future.
+- **Time (D16).** No row position embedding and no input "time from row 0": both measure the time since the aircraft entered the 25 km slice, a cut of the data, and a long sentence (a
   go-around adds up to 900 s) reaches rows that training seldom saw. The causal time attention gives the order. RoPE in
   the time attention gives how far back each earlier row is: the rotation of a row's query and key uses its time in
   seconds, so the attention reads only time differences. Seconds, not rows, so that every row interval of D11 reads the
@@ -884,8 +951,8 @@ the model says "go-around" before the DA point, the flight continues (§3.2).
   the row-by-row cache of the speaker (`Prior.extend`): a key is rotated once, when it is written. The RoPE base is set
   at implementation.
 - **Time since each word (D17).** Each column has the input "time since this column said its word in force"
-  (`since`, now `log1p(rows) / 5`, counted from the first predicted step at the earliest). It is in seconds, for every
-  column, so that every row interval of D11 reads the same time. The runway column's value is, in the labelled data, the time since the first predicted step, because a
+  (`since`): log(1 + t / 2 s) / 5, with t in seconds, counted from the first predicted step at the earliest. It is in
+  seconds for every column, so that every row interval of D11 reads the same time. The runway column's value is, in the labelled data, the time since the first predicted step, because a
   labelled sentence says its runway only there, and again only at the runway word that ends a go-around (D19, D26). In closed loop it is the time since the runway was given or given again
   (a change of runway, or the runway word that ends a go-around), so it measures a real fact.
 
@@ -897,7 +964,7 @@ predicted step masks "unchanged" in each column and "go-around" in the runway co
 
 ### 6.3 Training
 
-Teacher forcing on the new artefact, split by operating day (`data/day_split_20260924.json`; test days sealed). KAUS is
+Teacher forcing on the closed-loop sentences of the artefact, split by operating day (`data/day_split_20260924.json`; test days sealed). KAUS is
 a held-out test airport only: it is read one time, at the end of the whole chain.
 
 **Stop on the select days (D31).** The training keeps the epoch with the smallest per-step loss on the select days. The
@@ -914,7 +981,7 @@ The goal is a new airport, so the folds are airports, not days. All runs use the
 
 | Step | Runs | Training runs |
 |---|---|---|
-| 1 | Variant `full`, four configurations, each on the 5 folds. A: the start. B: d_model 128, feed-forward 512. C: d_model 256, feed-forward 1,024. D: dropout 0.2, weight decay 0.05. The layers and the learning rate stay | 20 |
+| 1 | Variant `full`, four configurations, each on the 5 folds. A: the start. B: d_model 128, feed-forward 512. C: d_model 256, feed-forward 1,024. D: dropout 0.2, weight decay 0.05. B, C and D have the layers and the learning rate of A | 20 |
 | 2 | The seed scale: configuration A with a second seed, on the 5 folds | 5 |
 | 3 | Variant `constants` with the configuration chosen in step 1, on the 5 folds | 5 |
 | 4 | The base: the chosen configuration and variant on all five airports, stopped on their select days; the validation days read one time | 1 |
@@ -964,9 +1031,9 @@ the limit.
 
 ## 7 Post-training (outline)
 
-1. **One stage, from the base model, with one aircraft commanded (D29).** The closed loop is the multi-aircraft window
-   loop with one commanded aircraft (R37 `--commanded one`, multi-aircraft design §6.6 step 9.4). The model speaks for
-   one aircraft; the other aircraft fly their records. The start model is the base model with a traffic attention whose
+1. **One stage, from the base model, with one aircraft commanded (D29).** The closed loop is a window of 20 minutes of
+   recorded traffic with one commanded aircraft. The model speaks for that aircraft; the other aircraft fly their
+   records. The start model is the base model with a traffic attention whose
    output is zero (§8). There is no single-aircraft stage. The reasons:
    - The single-aircraft closed loop is a special case of this loop. With no other aircraft in its window, the
      commanded aircraft says and flies what single-aircraft free generation does, with the same loss and gradients.
@@ -981,7 +1048,7 @@ the limit.
    |---|---|
    | `landed`, no go-around, on a runway of the airport's present landing direction | 1 |
    | `landed` after n go-arounds, on such a runway | 0.9ⁿ |
-   | Every other outcome; every loss of separation (multi-aircraft design §3.4) | 0 |
+   | Every other outcome; every loss of separation (the separation judge, §8) | 0 |
 
    "The airport's present landing direction": a runway within 90° of a runway with a landing in the 30 min before the
    first predicted step. The reward gives "a reward for a go-around that the DA check needs" without a term of its own.
@@ -999,22 +1066,22 @@ the limit.
    help them land. A stage with every aircraft of a window commanded (item 8) decides for itself if it pays for that
    help.
 3. **Masks.** The vocabulary rules (§3.7); the procedure masks (glidepath lower edge inside the FAF, DA before the
-   join, no climb back; D14 while G is true); the separation masks (§8, O6). The masks stay with the model
-   (`procedure_masks.json`, contract C35).
+   join, no climb back; D14 while G is true); the separation masks (§8, O6). A prior records the masks that it was
+   trained under (`procedure_masks.json`, contract C35) and speaks under them.
 4. **Windows.** Real windows and augmented windows of the train days: B (a moved start: a turn about the airport, a
-   height change and a speed change, post-training design §4), A (one inserted aircraft that flies its record), D (the
-   leader moved) (multi-aircraft design §5, step 9.4). The counts are set at stage C.
+   height change and a speed change), A (one inserted aircraft that flies its record), D (the aircraft ahead moved). The
+   counts are set at stage C.
 5. **Loss**: the clipped-ratio surrogate (ε = 0.2) with the advantage inside each branch group (item 9); the pull to
    the base model (0.04, the KL on the sampled words, masked distribution); the teacher-forced data term (1) on
    single-aircraft samples of the closed-loop sentences of the train days (D36); the traffic attention has its own
    learning rate. One pass over the sentences of a round.
 6. **Go-around sampling first.** Before the training, measure the probability that the base model gives "go-around" on
    the final (with D26 the data has go-arounds with "no level-off" and "unspecified" in force). If the model says
-   "go-around" by itself, the training uses no probes. If it does not, the probes of the multi-aircraft design (8.10)
+   "go-around" by itself, the training uses no probes. If it does not, probes (a cross-entropy on a forced "go-around" at chosen steps)
    are discussed with the evidence of §11.6: a cross-entropy on a forced word teaches the word, not when to say it.
 7. **Selection.** On the select days; the validation days are read one time for each stage. The airport
    generalization of the design is chosen in stage B (D39) and tested at the end on KAUS.
-8. **Later, optional.** A stage with every aircraft of a window commanded (multi-aircraft design 7.6, 9.5) starts from
+8. **Later, optional.** A stage with every aircraft of a window commanded starts from
    the model of item 7.
 9. **Branch training (D37).** The samples of a round:
    1. Each training window (one commanded aircraft) is spoken one time: the first sentence.
@@ -1050,18 +1117,25 @@ the limit.
 
 ## 8 Multi-aircraft (outline)
 
-- **Time.** A scene puts its aircraft on one UTC grid: a scene step is one instant for every aircraft (multi-aircraft
-  design §2.1). That is the layout of the data, not a model input, and D16 does not change it. RoPE runs along each
+- **Time.** A scene puts its aircraft on one UTC grid: a scene step is one instant for every aircraft. That is the layout of the data, not a model input, and D16 does not change it. RoPE runs along each
   aircraft's own rows; the attention among the aircraft and the traffic attention read one scene step, which is one
   instant, and use no position. Edge features are relative (the approach clock is a distance; the closest-approach time
-  is a time difference). The landing context counts the landings in the 30 min before the step's UTC time, as now.
+  is a time difference). The landing context counts the landings in the 30 min before the step's UTC time.
 - R exists at every step for every aircraft from its first predicted step on. Before it, no input reads the aircraft's
-  R (D23), the edge features included. Thus the relations of the edge features (`inference/scene_edges.py`: the
-  approach clock, the same runway, the parallel runways) and the separation judge (`inference/separation.py`) have a
-  runway at every step.
-- The clearance mask (`inference/separation_masks.py:131`) blocks "cleared" while a cleared aircraft ahead is too close.
-  This design has no "cleared" word. A replacement is open (O6).
-- The speed-word mask stays.
+  R (D23), the edge features included. Thus the relations of the edge features (the approach clock, the same runway,
+  the parallel runways) and the separation judge have a runway at every step.
+- **Separation judge** (`inference/separation.py`, reading VISUAL): the radar minima of 7110.65BB with the rules for
+  visual approaches (7-4-4 c), never visual separation. Parallel runways at least 2,500 ft (762 m) apart are free once
+  both aircraft are turned in (within 30° of the course, each on its own side of the midline); closer pairs count as one
+  runway; established crossing finals are not judged.
+- **Spacing on the final.** This design has no word "cleared", so no mask can hold a clearance back. A mask that keeps
+  an aircraft from the final too close behind another is open (O6).
+- **Speed-word mask.** It applies only when the aircraft and the aircraft next ahead on the approach clock (the same
+  runway, or a pair that counts as one runway) are both established on their finals (O6), and while the aircraft is
+  more than 9,260 m (5 NM) from its threshold (7110.65BB 5-7-1 b.4). Both aircraft are predicted to the time when the
+  aircraft ahead crosses its threshold, each along its course toward its speed target at the rate of the executor
+  (§5.6). A speed word whose predicted gap is then less than the required distance is masked. When every word falls
+  short, nothing is masked.
 - The traffic attention (initial output zero) on the base model is the start of the post-training (D29, §7).
 - **Landing context (D31).** In the closed loop, the landing context of every aircraft of the scene, the replayed
   aircraft included, counts the landings that occur in the loop: the recorded landings of the replayed aircraft and of
@@ -1075,7 +1149,7 @@ the limit.
 - **D23 in a scene (D31).** At the rows up to the first predicted step of an aircraft, no input of any aircraft and no
   edge feature uses a value computed from that aircraft's R. A test: a change of one aircraft's runway word leaves all
   inputs and edge features of the scene at those rows the same, bit for bit.
-- **Established on the final (D31, O6).** The separation judge (multi-aircraft design §3.2: the in-trail rule, who is
+- **Established on the final (D31, O6).** The separation judge (the in-trail rule: which aircraft is
   responsible) and the separation masks must know if an aircraft is established on the final of its R. This comes from
   a function of one row: the state of the aircraft at that row and its R. It is the same for every aircraft
   (commanded, labelled, replayed). It does not come from the capture row, which uses later rows (§2), and not from an
@@ -1088,7 +1162,7 @@ the limit.
 
 ### 9.1 Gates
 
-Each stage keeps a gate: the labeller (completeness, envelope containment with envelope width), the replay (the
+Each stage has a gate: the labeller (completeness, envelope containment with envelope width), the replay (the
 executor flies the labelled sentences), the prior (teacher-forced likelihood against baselines, free generation), the
 post-training, the multi-aircraft stages. The user sets the criteria of each gate after the design is settled (D7).
 This document sets none.
@@ -1099,18 +1173,18 @@ This document sets none.
 and the data rules (the sealed test days). Code is identified by what it does on fixed inputs (a conformance check), not
 by the bytes of its source. Data are identified by their flights, not by the bytes of a file they came from.
 
-| # | Identity in `instruction-v3` | Decision | Where (stage) |
+| # | What | Its identity | Stage |
 |---|---|---|---|
-| 1 | Vocabulary spec sha (grids, classes, tolerances, reading name) | Keep. It is the format | A |
-| 2 | Labeller source hash over bytes (`instructions/artefact.py:132`, checked by `require_current_labeller` and `load_sentences`) | Remove. Replace it by the labeller conformance (§14.2 A3): a fixed reference sample labelled again by today's code gives the same words. The conformance covers the closed-loop reading too (D32): with the artefact's executor spec, the same correction words and the same flown states, within the tolerance of the executor conformance. The artefact records which code wrote it as information | A |
-| 3 | Executor spec: the parameters' sha and the conformance of the reference tracks (C33) | Keep. It is the model for #2 and #6 | A |
-| 4 | Each airport's arrival manifest bytes (`arrival_manifest_sha256s`) | Remove as a check. The artefact keeps the signals; a consumer that rebuilds a flight from the harvest compares it row by row with the stored signals (`autopilot/flights.py` `require_same_flight`, kept) | A |
-| 5 | Prior → artefact: spec sha, labeller sha, day split, candidate table (C34) | Keep the spec sha, the day split and the candidate table. Replace the labeller sha by the artefact's identity: the sha256 of its sentence files | B |
-| 6 | Edge source hash (`EDGE_SOURCES`) | Remove. Replace it by a conformance check: the edge features of fixed reference scenes are the same | C |
-| 7 | Procedure masks: the set name, the checkpoint sha, the digests of the procedure data (C35) | Keep. The procedure data are the format of the masks | B |
-| 8 | Window readouts: the code version and the conformance R44 | Keep | C |
-| 9 | The frontend pins the vocabulary spec sha; the pin of the single-flight executor | Replace by the reading name | D |
-| 10 | The day split file and the sealed test days (C32) | Keep. It is a data rule | A |
+| 1 | The vocabulary (grids, classes, tolerances, reading name) | The spec sha. It is the format | A |
+| 2 | The labeller, open-loop and closed-loop reading | The labeller conformance (§14.2 A3): a fixed reference sample, labelled again by the code on disk, gives the same words; for the closed-loop reading (D32), with the artefact's executor spec, the same correction words and the same flown states within the tolerance of the executor conformance. The artefact records which code wrote it, as information | A |
+| 3 | The executor | The sha of the spec's parameters and the conformance of its reference tracks (C33) | A |
+| 4 | The flights of an artefact | The stored signals. A consumer that rebuilds a flight from the harvest compares it row by row with them (`autopilot/flights.py` `require_same_flight`). No byte hash of an arrival manifest | A |
+| 5 | The artefact of a prior | The spec sha, the day split, the candidate table and the sha256 of the sentence files | B |
+| 6 | The edge features of a scene | A conformance check: fixed reference scenes give the same edge features | C |
+| 7 | The procedure masks of a prior | The set name, the checkpoint sha and the digests of the procedure data (C35). The procedure data are the format of the masks | B |
+| 8 | A window readout | The code version and the conformance R44 | C |
+| 9 | What the frontend reads | The reading name | D |
+| 10 | The day split and the sealed test days (C32) | The day split file. It is a data rule | A |
 
 ---
 
@@ -1118,8 +1192,8 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 
 | Item | Value | Source |
 |---|---|---|
-| Row | 2 s, on even UTC seconds; the ablation also reads 4 and 8 s | Artefact `v6_20261002`; D11, D25 |
-| Observation of the prior | 16 s (8, 4, 2 rows at Δ = 2, 4, 8 s) | Prior design §10 (`N_LOOK`); D25 |
+| Row | Δ = 2 s, on even UTC seconds; the ablation also reads 4 and 8 s | D11, D25 |
+| Observation of the prior | 16 s (8, 4, 2 rows at Δ = 2, 4, 8 s) | `N_LOOK`; D25 |
 | Motion inputs of the prior | Displacement in the 2 s before the row, at every Δ | D25 |
 | Executor cycle | 1 s | Fixed choice |
 | Heading grid | 5°, relative to the course of R | Spec (grid); D8 (frame) |
@@ -1127,7 +1201,7 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | Heading tolerance | 4.5° | Half grid 2.5° + 2° |
 | Turn-rate limit | 4.7°/s | Spec, measured (p99.9) |
 | Bank limit | 32° | Spec, measured (p99.9) |
-| Roll rate p | 5°/s | Source cited in executor design §9 |
+| Roll rate p | 5°/s | FAA Order 8260.3G Appendix E §4 ¶6.a ("roll-in rates of up to five degrees per second") |
 | Level grid | 60 m to 1,260 m, 120 m to 2,700 m, 450 m to 5,400 m MSL; 40 levels | D22 (fit of the altitude-grid proposal) |
 | Level envelope ε | half the segment's step + 10 m: 40 / 70 / 235 m | D22 |
 | Level detection | ≥ 20 s, rows within 25 m of the piece's median | Labeller constant (§4.4) |
@@ -1245,6 +1319,11 @@ p50 / p95 / largest: the chosen grid (40 levels) 17 / 30 / 58 m; the same shape 
 `instruction-v3` grid (30 m, 182 classes) has at most 15 m. These numbers come from a one-off script of that proposal;
 the spec measurement of stage A gives them again from a runner (§14.2 A3). The proposal did not fly the grid: the replay
 of stage A does.
+
+- In `v6_20261002`, 99.7 % of the level words are under 3,000 m; its 30 m grid used 116 of its 182 classes.
+- The geometric height of one assigned pressure level moves from day to day by about height × ΔT / 273 (ΔT: the day's
+  temperature deviation). At KRDU this is about 15 m at 600–900 m and about 90 m at 2,000–3,000 m (vocabulary design
+  §2.4).
 
 ### 11.8 The post-training in traffic
 
