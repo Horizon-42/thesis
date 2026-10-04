@@ -83,17 +83,18 @@ The decision numbers are shared by all documents (outline §3).
 
 | Part | State |
 |---|---|
-| Stage A: vocabulary, labeller, identities, executor, judge, replay, closed-loop reading (§12.1) | Built on `dev-two-tier-v4`, each milestone reviewed: A0 `e57c62d8` + `d2917c06`; A1–A3 `63639a54` + review fixes `feaf9558`, `d1e277f7`; A4–A6 `330ffbaf` + review fixes `c7603a4c`; A7 `14eb7946`; A8 `05f00be7` + review fixes in `c41ce7af`; A9 `c41ce7af` + review fixes `2e182e8d`, `983f2847`; D38 and D34 `6d1e8c4a` + review fixes `fdc3b832`; A10 `4ac34679` + review fixes `d1258c00`; A11 `efcbb5dc` + review fixes `0c0778c8`; A12 `b8077c34` + review fixes `b5b76c5a`; A13 `47865c8e` + review fixes `249804bd`, `b8994f58`; A14 `66daefa2` + review fix `ab295b18`. Smoke build of A12 and A13 (80 flights an airport and split, from the open-loop reading again, in the ignored `smoke_v4/data/a12/` of the worktree): the labeller's, the executor's and the closed loop's conformance checks pass; the closed loop read at Δ = 2, 4 and 8 s; the replays ran at Δ = 2 and 4 s open loop and 2, 4, 8 s closed loop; the turn readout of A13 ran on train and select; the full ts suite passes (1,523). Reports: `readouts/2026-10-04_stage_a_a8_a9_report.zh.md`, `readouts/2026-10-04_stage_a_a10_a11_report.zh.md`, `readouts/2026-10-04_stage_a_a12_a13_report.zh.md`. The closed loop of A14 built again in `smoke_v4/data/a14/`; the full ts suite at `ab295b18` passes (1,524). Claude's check of stage A (§12.2) at `ab295b18`: `readouts/2026-10-04_stage_a_check.zh.md` — items 2, 4, 5 pass; items 1 and 3 hold with points for the user (the motion input 2 s before a row is not stored at Δ = 4 and 8 s). The user's decisions on the check: D48–D52 and A15. A15 `4a2f4fc5` (three review rounds); smoke `smoke_v4/data/a15/`: the three conformance checks pass, the closed-loop sentences and the replays equal A14's on every Δ row, the replays pass on every 2 s row; the rule of D50 held at Δ = 2 s and broke at 4 and 8 s only on overshoot rows; the full ts suite passes (1,535). Report: `readouts/2026-10-04_stage_a_a15_report.zh.md`. A16 (D53, the overshoot corrected in its row) `3e70b4f3`, reviewed; smoke `smoke_v4/data/a16/`: the conformance checks pass, the rule of D50 holds on every row at Δ = 2, 4, 8 s, Δ = 2 s unchanged; the full ts suite passes (1,535). Report: `readouts/2026-10-04_stage_a_a16_report.zh.md`. A17 and A18 `688e945e`; A18's formal build stopped for D58. A19 + A20 (D57, D58) `220e858e`, reviewed (one break fixed: the publisher's mirrors of the executor names); the full ts suite passes (1,542). The spec measurement on all train days (scratch, 44,703 flights, code `220e858e`): the grid fitted on the level-offs above E is the grid of D22 itself; the rows of D56 unchanged. Report: `readouts/2026-10-04_stage_a_a19_a20_report.zh.md`. The first build of A21 (`v8_20261004`, `v13_20261004`, 13:36Z) finished before D61 and is superseded. A22 (D61, D62) `0c07f92f` + second-review fix `df84cbf1`, reviewed twice; the full ts suite passes at `0c07f92f` and at `df84cbf1` (1,547 each); `apply` on the one definition of the rules gives the old answers (reason and detail) on 60,000 random rows and the reviewers' 2.5 million; the superseded closed-loop files rewrite through the new reader and writer identically |
+| Stage A: vocabulary, labeller, identities, executor, judge, replay, closed-loop reading (§12.1) | Built on `dev-two-tier-v4`, each milestone reviewed: A0 `e57c62d8` + `d2917c06`; A1–A3 `63639a54` + review fixes `feaf9558`, `d1e277f7`; A4–A6 `330ffbaf` + review fixes `c7603a4c`; A7 `14eb7946`; A8 `05f00be7` + review fixes in `c41ce7af`; A9 `c41ce7af` + review fixes `2e182e8d`, `983f2847`; D38 and D34 `6d1e8c4a` + review fixes `fdc3b832`; A10 `4ac34679` + review fixes `d1258c00`; A11 `efcbb5dc` + review fixes `0c0778c8`; A12 `b8077c34` + review fixes `b5b76c5a`; A13 `47865c8e` + review fixes `249804bd`, `b8994f58`; A14 `66daefa2` + review fix `ab295b18`. Smoke build of A12 and A13 (80 flights an airport and split, from the open-loop reading again, in the ignored `smoke_v4/data/a12/` of the worktree): the labeller's, the executor's and the closed loop's conformance checks pass; the closed loop read at Δ = 2, 4 and 8 s; the replays ran at Δ = 2 and 4 s open loop and 2, 4, 8 s closed loop; the turn readout of A13 ran on train and select; the full ts suite passes (1,523). Reports: `readouts/2026-10-04_stage_a_a8_a9_report.zh.md`, `readouts/2026-10-04_stage_a_a10_a11_report.zh.md`, `readouts/2026-10-04_stage_a_a12_a13_report.zh.md`. The closed loop of A14 built again in `smoke_v4/data/a14/`; the full ts suite at `ab295b18` passes (1,524). Claude's check of stage A (§12.2) at `ab295b18`: `readouts/2026-10-04_stage_a_check.zh.md` — items 2, 4, 5 pass; items 1 and 3 hold with points for the user (the motion input 2 s before a row is not stored at Δ = 4 and 8 s). The user's decisions on the check: D48–D52 and A15. A15 `4a2f4fc5` (three review rounds); smoke `smoke_v4/data/a15/`: the three conformance checks pass, the closed-loop sentences and the replays equal A14's on every Δ row, the replays pass on every 2 s row; the rule of D50 held at Δ = 2 s and broke at 4 and 8 s only on overshoot rows; the full ts suite passes (1,535). Report: `readouts/2026-10-04_stage_a_a15_report.zh.md`. A16 (D53, the overshoot corrected in its row) `3e70b4f3`, reviewed; smoke `smoke_v4/data/a16/`: the conformance checks pass, the rule of D50 holds on every row at Δ = 2, 4, 8 s, Δ = 2 s unchanged; the full ts suite passes (1,535). Report: `readouts/2026-10-04_stage_a_a16_report.zh.md`. A17 and A18 `688e945e`; A18's formal build stopped for D58. A19 + A20 (D57, D58) `220e858e`, reviewed (one break fixed: the publisher's mirrors of the executor names); the full ts suite passes (1,542). The spec measurement on all train days (scratch, 44,703 flights, code `220e858e`): the grid fitted on the level-offs above E is the grid of D22 itself; the rows of D56 unchanged. Report: `readouts/2026-10-04_stage_a_a19_a20_report.zh.md`. The first build of A21 (`v8_20261004`, `v13_20261004`, 13:36Z) finished before D61 and is superseded. A22 (D61, D62) `0c07f92f` + second-review fix `df84cbf1`, reviewed twice; the full ts suite passes at `0c07f92f` and at `df84cbf1` (1,547 each); `apply` on the one definition of the rules gives the old answers (reason and detail) on 60,000 random rows and the reviewers' 2.5 million; the superseded closed-loop files rewrite through the new reader and writer identically. A21's formal artefact built from `9a986c09` (2026-10-04 15:35–16:41Z): `instruction_language/v9_20261004`, `executor/v14_20261004`, read-only with `SHA256SUMS`; equal bit for bit to the build before D61 in every signal, sentence and closed-loop array; report `readouts/2026-10-04_stage_a_a21_report.zh.md`. Claude's check of A15–A22 (§12.2): all five items pass, `readouts/2026-10-04_stage_a_check_a15_a22.zh.md` |
 
 ### 0.4 Plan
 
-1. A0–A20 and A22 are done; the formal build of A18 was stopped for D58; the spec measurement on all train days with A19
-   and A20 is done and the user chose the fitted grid (D59). Now A21: the formal artefact and the readings of D34 at
-   Δ = 2, 4, 8 s (§12.1). The build of A21 that started on 2026-10-04 at 13:36Z (`v8_20261004`, `v13_20261004`) was made
-   before D61 and is superseded; the rebuild into `v9_<date>` / `v14_<date>` waits for disk space (the user's go to
-   delete the superseded directories).
-2. Claude checks A15–A22 and the formal artefact (§12.2).
-3. The user compares the readings of D34 and chooses Δ (D7, D11). The replay of the val days waits for the user.
+1. A0–A22 are done, and A21's formal artefact is built (`instruction_language/v9_20261004`, `executor/v14_20261004`,
+   read-only with `SHA256SUMS`; report `readouts/2026-10-04_stage_a_a21_report.zh.md`).
+2. Claude's check of A15–A22 and the formal artefact (§12.2) is done: all five items pass
+   (`readouts/2026-10-04_stage_a_check_a15_a22.zh.md`); one point of wording for the user (D45's "mean lateness zero").
+3. A23: the Training view of stage A (§12.1, outline §6), so that the user sees the words, the closed-loop sentences
+   at Δ = 2, 4, 8 s and the executor in the frontend.
+4. The user compares the readings of D34 and chooses Δ (D7, D11), before or after A23. The replay of the val days waits
+   for the user.
 
 ---
 
@@ -1310,7 +1311,7 @@ of Claude's check (`readouts/2026-10-04_stage_a_check.zh.md` §2), those of A15�
 
 | Milestone | What it built | Decisions |
 |---|---|---|
-| A0 | The archive of the modules of the old vocabulary that stage A does not rewrite (`archive/two_tier_v3_2026_10/`, with a `README.md`: what moved, why, which stage brings each part back; the backend tests that use the two-tier code fail until stage D) | D20 |
+| A0 | The archive of the modules of the old vocabulary that stage A does not rewrite (`archive/two_tier_v3_2026_10/`, with a `README.md`: what moved, why, which stage brings each part back; the backend tests that use the two-tier code fail until A23) | D20 |
 | A1 | The vocabulary: five columns, the runway/G table, heading classes relative to the course of R, the altitude grid, grammar rules 1–5 as one function for the labeller and the speaker | D1, D8, D10, D12, D14, D22 |
 | A2 | The labeller: heading words from row 0 to the end, the go-around reading, the level test without the grid, "unspecified" from the capture row, the Δ grid; candidates without TCH, glidepath angle or LPV DA refused | D4, D11, D18, D19, D25 |
 | A3 | The artefact and the identities: the labeller conformance (§7.2 #2), no byte checks of the arrival manifests, the sentences schema, the spec measurement with its rounding candidates and the level rounding errors | D15, D21 |
@@ -1377,7 +1378,10 @@ days done (§9.5); the user chose the fitted grid (D59). After A18; together wit
   gives the grid candidates and their rounding errors, and the rows of D56 again (they must not change). The user
   chooses the grid (D55).
 
-**A21. The formal artefact (D56, D58, D59, D61).** After A22.
+**A21. The formal artefact (D56, D58, D59, D61).** Done: built from `9a986c09` on 2026-10-04 15:35–16:41Z into
+`v9_20261004` / `v14_20261004` (report `readouts/2026-10-04_stage_a_a21_report.zh.md`); its signals, sentences and
+closed-loop files equal the build before D61 bit for bit (A22 changed no word and no state), which is deleted with the
+user's go. After A22.
 
 - The formal artefact, from a clean checkout, into new directories:
   `4dTrajectory/outputs/POOLED/instruction_language/v9_<date>/` (signals of every development flight, the spec with
@@ -1418,10 +1422,34 @@ sentence changes.
   class; the labeller, executor and closed-loop conformance checks pass.
 - The key code index (§11) follows the moves.
 
+**A23. The Training view of stage A (outline §6).** After A21. The user sees the words, the closed-loop sentences and
+the executor of this stage in the frontend.
+
+- **Backend.** The live executor (`aeroviz_backend/autopilot_segment/`) on the new executor: `autopilot/single.py` with
+  the executor spec of the formal artefact (`executor/v14_20261004`). It flies the words of this vocabulary from a
+  state (five columns; a heading word with the course of R, D46; a level at T + E, D58; speed words in steps, D43) and
+  imports no `prior/`. The backend tests that A0 left failing (`aeroviz_backend/tests/test_single_executor.py`,
+  `test_autopilot_segment.py`, the route in `test_http_server.py`) are rewritten and pass.
+- **Export** (the archived R11 and R13, rewritten). For each airport, a random sample of select flights and of train
+  flights (seed 1337; the sizes stated in the export): the observed track; the open-loop sentence on the 2 s rows; at
+  Δ = 2, 4 and 8 s the closed-loop sentence, each correction word marked, and its flown states; the judge's outcome and
+  the DA check (its point, its vertical and lateral values); the attitudes. New schema names; its own index beside the
+  old one (outline §6 item 3).
+- **Frontend** (`aeroviz-4d`, the Training view). The five columns (runway and G, heading relative to the course of R,
+  altitude above E, angle, speed); the correction words marked; a choice of Δ; the flown path beside the observed one;
+  the outcome and the DA point; a click on a word flies its segment live with the new executor. It refuses the old
+  schema names.
+- **Publication and view.** The intent in `docs/experiments/intents.json`; the sets published for the five airports;
+  a test stack from the worktree for the user (outline §6 items 4, 5).
+- **Tests.** The backend's; the export (a sample written and read again); the frontend's readers (Vitest) on fixtures
+  that the export writes; a live segment equals the export's flown states from the same state with the same words
+  (the executor conformance tolerance); the browser check (outline §6 item 6).
+
 ### 12.2 Claude's check of stage A
 
 The check of A0–A14 is done (`readouts/2026-10-04_stage_a_check.zh.md`, at `ab295b18`; its points became D48–D52).
-After A21, Claude checks A15–A22 and the formal artefact. The formal runs of stage B wait for this check (outline §4):
+After A21, Claude checks A15–A22 and the formal artefact. The formal runs of stage B wait for this check (outline §4).
+Done at `9a986c09`: all five items pass (`readouts/2026-10-04_stage_a_check_a15_a22.zh.md`).
 
 1. D48–D56 against the code: done at `688e945e`. D57, D58, D59, D61 and D62, and the code changed after `688e945e`,
    against the code of the formal build of A21.
@@ -1436,3 +1464,5 @@ After A21, Claude checks A15–A22 and the formal artefact. The formal runs of s
    changed; the superseded directories of A18 and of the build before D61 deleted; the `SHA256SUMS` beside the formal
    data match.
 5. Nothing in the archive was edited after the move.
+6. After A23: the published sets open and play in the browser; a live segment equals the export's flown states; the
+   old Training index and its sets are unchanged; the backend tests pass (outline §6).
