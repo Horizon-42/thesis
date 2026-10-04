@@ -161,9 +161,9 @@ def read_interval(drawn: replay.Drawn, readings: list[Reading], observed: dict[i
     for first in range(0, len(flown_batch.sentences), chunk):
         part = replay.subset(flown_batch, list(range(first, min(first + chunk, len(flown_batch.sentences)))))
         flown = replay.fly_sentences(part, params, words, device=device)
-        check(part, flown, [])                       # refused unless every flight flies its stored states again
-        for j, index in enumerate(part.indices):
-            ended = outcome_of(flown, j, part.geometries[j], spec)
+        judged = [outcome_of(flown, j, part.geometries[j], spec) for j in range(len(part.indices))]
+        check(part, flown, judged)          # refused unless every flight flies its stored states again to its outcome
+        for j, (index, ended) in enumerate(zip(part.indices, judged)):
             crossing = ended.crossing
             rows.append({"dataset_id": part.signals[j].dataset_id, "airport": part.signals[j].airport,
                          "stratum": stratum(part.readings[j]), "group": part.groups[j],
