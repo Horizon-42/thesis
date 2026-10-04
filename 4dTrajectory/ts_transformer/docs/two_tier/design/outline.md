@@ -93,10 +93,10 @@ they came from. Each document lists the identities of its parts.
 |---|---|---|
 | Outline | D7, D20, D21, D55 | — |
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62 | O8 |
-| Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60 | — |
+| Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63 | — |
 | Post-training | D29–D31, D36, D37 | O6 |
 
-The next free numbers: D63, O9.
+The next free numbers: D64, O9.
 
 ---
 
@@ -150,8 +150,14 @@ sections that it names.
 8. Do not touch the checkouts of running experiments (`.claude/worktrees/step9-run` and others) or the main checkout.
 9. A defect that you find outside the milestone goes to `docs/code-health-followups.md` (an entry and a table row), not
    into the change.
-10. At each milestone, update §0.3 of the stage's document (state, commit). At the end of a stage, update the key code
-    index of its document to the new code.
+10. §0.3 of the stage's document is the implementer's log, and the only part of a design document that the implementer
+    writes (the user, 2026-10-04): at each milestone, the state and the commits, and each reading that the implementer
+    made where the design says nothing (a reading is a proposal until the user decides). The implementer changes no
+    other part of a design document: not the decisions, the design sections, the plan, the values or the key code
+    index. A gap in the design, or a reading that needs a change of the design, goes to the user; Claude writes the
+    text that the user decides. The log is committed to `dev-two-tier` (the user's checkout), with explicit paths. At
+    the end of a stage, the report gives the new code index, and Claude puts it into the key code index of the
+    document.
 11. The branches are not merged into `dev-two-tier` before stage D: the backend's live executor
     (`aeroviz_backend/autopilot_segment/`) and the frontend's Training view read the old format until then. The user
     merges.
