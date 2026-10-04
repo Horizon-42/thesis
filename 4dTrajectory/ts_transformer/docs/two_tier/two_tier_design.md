@@ -80,6 +80,7 @@ repository root.
 | D54 | The descent classes are a k-means on tan(angle) of the descent pieces, with each piece weighted by the square of its length. A piece flown at the nominal angle of its class ends length · \|tan a − tan c\| from its observed end, so the k-means makes the sum of the squared end-of-piece height errors smallest; D15 gives the same error for each candidate. The climb nominal is the length-weighted median of the climb pieces (§3.5) | Decided | User, 2026-10-04 |
 | D55 | A value that a runner fits from data and the user chooses (D15) is measured on all train days, in a scratch directory, directly after the milestone that writes the runner; the user chooses before a later milestone reads the value. A smoke build uses the chosen spec, and its flights are a random sample for each airport and split (seed 1337), not the first flights of the sorted flight keys (a key starts with the callsign, so the first flights are mostly one airline). Why: the smoke of stage A fitted its own spec on approximately 400 train flights, 373 of them one airline, with one climb piece; every smoke reading of A9–A16 used it (§14.1 rules 7 and 12) | Decided | User, 2026-10-04 |
 | D56 | The values of D15, chosen: the candidate rounded to 0.25° of the spec measurement on all train days (stage A code at `42f3ff62`, 44,703 train flights, 227,559 descent pieces, 1,339 climb pieces). Descent nominals 1.5 / 2.5 / 3.0 / 4.5°, edges −0.5 / 2.0 / 2.75 / 3.75 / 10°; climb nominal (G false) 1.5°. End-of-piece height error p50 / p90: 15.0 / 51.0 m (fitted 1.51 / 2.45 / 3.09 / 4.45°: 14.7 / 47.8 m). Descent 3 is the published 3.0° glidepath of 24 of the 25 candidate runways (§3.5, §10) | Decided | User, 2026-10-04 |
+| D57 | One word clock: `time`. An open-loop sentence is said on its own rows, as a closed-loop sentence and a sentence of the prior are. The clocks `distance` and `track` (an open-loop word said where the flown aircraft reaches the observed track) are removed with the next change of the executor spec, not in the formal build of A18 (A19). Why: no training sentence and no reading of D34 uses them; the closed-loop reading has the one rule of the place (D42, D45); the clock is a parameter of the executor spec, so a change of it gives a new spec identity and a rebuild of the closed-loop data that it does not change (D21); and the batch and the single-flight executors each carry it. The question "how far do the observed words alone carry a flight" is read, when a readout needs it, with the closed-loop reading with no corrections (§4.9) | Decided | User, 2026-10-04 |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -87,7 +88,6 @@ repository root.
 |---|---|---|---|
 | O6 | A mask for the spacing on the final (this design has no clearance word to hold back); the rule "established on the final" of the separation judge and the masks (D31) | Discuss with §8 | 8 |
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
-| O9 | The word clock of an open-loop replay. The executor spec chooses `time`, `distance` or `track` (`autopilot/sentence.py` `CLOCKS`); the formal executor spec `v12_20261004` uses `track`: a word is said at the row whose observed point is nearest the flown aircraft (forward, at most 60 s ahead, at most one row a cycle). It serves only the open-loop replays and the reference flights of the executor conformance. The closed-loop reading says its words at its own matched point (D42), and a closed-loop sentence is said on its own rows, so no training sentence and no reading of D34 uses it | At the next change of the executor spec: `time` only (an open-loop sentence said on its own rows), the other two clocks removed. Until then the value is part of the executor spec | 5.8, 9.2 |
 
 ### 0.3 Implementation
 
@@ -101,7 +101,8 @@ repository root.
 ### 0.4 Plan
 
 1. Stage A (§14.2), on the branch `dev-two-tier-v4`, by another agent: A0–A17 are done; A18 builds the formal artefact
-   with the spec of D56 and makes the readings of D34 at Δ = 2, 4, 8 s.
+   with the spec of D56 and makes the readings of D34 at Δ = 2, 4, 8 s. A19 (D57, one word clock) comes with the next
+   change of the executor spec.
 2. Claude checks A15–A18 and the formal artefact (§14.6).
 3. The user compares the readings of D34 and chooses Δ (D7, D11). The replay of the val days waits for the user.
 4. Stages B, C, D (§14.3–§14.5): the prior from the start, the post-training and the multi-aircraft work, the frontend.
@@ -1238,7 +1239,7 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 |---|---|---|---|
 | 1 | The vocabulary (grids, classes, tolerances, reading name) | The spec sha. It is the format | A |
 | 2 | The labeller, open-loop and closed-loop reading | The labeller conformance: the artefact holds a reference sample (`conformance/`; train, seed 1337, 50 labelled and 10 refused flights for each airport, with their signals); `instruction_conformance` labels it again with the code on disk and requires the same words and the same refusals, on the 2 s rows and on the Δ grid at Δ = 4 and 8 s (D49). The closed-loop reading (D32) has its own reference sample (train, seed 1337, 10 flights for each airport, at each Δ of the artefact): with the artefact's executor spec, the same correction words and the same flown states on the 2 s rows (D51), within the tolerance of the executor conformance. Each check writes a passed record named by a digest of the code by its logic; a runner that labels, reads the closed loop or replays sentences requires the passed record of the code on disk. The artefact records which code wrote it, as information | A |
-| 3 | The executor | The sha of the spec's parameters and the conformance of its reference tracks (C33): the spec's labelled train flights, flown again in every way the executor flies (single-aircraft batch, multi-aircraft batch, single flight) within 1e-6 m. The open-loop sentences of these flights are said on the spec's word clock (O9) | A |
+| 3 | The executor | The sha of the spec's parameters and the conformance of its reference tracks (C33): the spec's labelled train flights, flown again in every way the executor flies (single-aircraft batch, multi-aircraft batch, single flight) within 1e-6 m. The open-loop sentences of these flights are said on their own rows (D57) | A |
 | 4 | The flights of an artefact | The stored signals. A consumer that rebuilds a flight from the harvest compares it row by row with them (`autopilot/flights.py` `require_same_flight`). No byte hash of an arrival manifest | A |
 | 5 | The artefact of a prior | The spec sha, the day split, the candidate table and the sha256 of the sentence files | B |
 | 6 | The edge features of a scene | A conformance check: fixed reference scenes give the same edge features | C |
@@ -1286,7 +1287,7 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | Closed-loop reading past the end of the observed path | no correction (one in force ends); lateral error for the readouts, no vertical error | D44 |
 | Turn rate of a heading word | the smallest of: the error over the time left until L (not less than two cycles), the stopping rate √(2·g·p·\|e\| / V), the turn-rate limit | §5.4; D47 |
 | Δ grid of the open-loop reading | each 2 s word on the nearest Δ row (a tie: the later row) | D45 |
-| Word clock of an open-loop replay | `track` (executor spec `v12_20261004`) | O9 |
+| Word clock of a replay | `time`: a sentence is said on its own rows (the formal executor spec `v12_20261004` has `track` until A19) | D57 |
 
 ---
 
@@ -1690,6 +1691,18 @@ of Claude's check (`readouts/2026-10-04_stage_a_check.zh.md` §2), those of A15�
   (item 4) of train (400 flights an airport, seed 1337) and select (every labelled flight). The val replay waits for the
   user (as for every executor before). The data are made read-only with a `SHA256SUMS` beside them. The report gives
   the readings side by side; it sets no criterion (D7).
+
+**A19. One word clock (D57).** With the next change of the executor spec, not before: the executor spec
+`v12_20261004` is in the formal artefact of A18, and a new spec needs a new closed-loop reading.
+
+- Remove the clocks `distance` and `track`: `autopilot/sentence.py` (`DistanceClock`, `TrackClock`, `CLOCKS`),
+  `autopilot/single.py` (`word_clock`), `autopilot/replay.py` (`word_clock`), `ExecutorParams.word_clock`,
+  `executor_spec --word-clock`. A replay and the reference flights of the executor conformance say a sentence on its own
+  rows. A new executor spec schema name (§14.1 rule 5).
+- Tests: the tests of the two clocks go with them; an open-loop replay says each word on its own row; the batch and the
+  single-flight executors give the same flown states on the conformance flights.
+- The readout "the observed words alone" is not built here. When a readout needs it, it is the closed-loop reading with
+  no corrections (a runner setting).
 
 ### 14.3 Stage B: prior
 
