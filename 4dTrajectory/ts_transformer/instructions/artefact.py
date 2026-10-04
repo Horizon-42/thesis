@@ -190,7 +190,7 @@ def write_sentences(directory: Path, split: str, spec: VocabularySpec, readings:
         words=np.concatenate([r.words for r in readings]).astype(np.int16),
         signal_index=np.asarray(signal_index, dtype=np.int64),
         runway_index=np.array([r.runway_index for r in readings], dtype=np.int64),
-        stratum=np.array([stratum(r) for r in readings], dtype=np.str_).reshape(-1),
+        stratum=np.array([stratum(r) for r in readings], dtype=np.str_),
         capture_row=np.array([r.capture_row for r in readings], dtype=np.int64),
         unspecified_row=np.array([r.unspecified_row for r in readings], dtype=np.int64),
         go_around_offsets=np.concatenate(([0], np.cumsum(counts))).astype(np.int64),
