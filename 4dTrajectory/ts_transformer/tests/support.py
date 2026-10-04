@@ -405,3 +405,36 @@ def prior_artefact(directory, interval_s=2.0, airports=("KXXX",)):
         write_closed_loop(closed_loop_path(directory, split, interval_s), spec, executor_params_sha256="test",
                           row_interval_s=interval_s, start_row=sentences[0].start, sentences=sentences)
     return words, records
+
+
+def closed_loop_flight(interval_s: float = 2.0):
+    """A synthetic flight on its closed-loop sentence at ``interval_s``, set up as the Training export and the live
+    executor set a set's flight up (`experiments.training_flights.closed_loop_batch`): the downwind, base and final of
+    `test_closed_loop`, read in closed loop (`closed_loop.read`). Returns a namespace: ``batch``, the replay batch of
+    one flight from its first predicted step — whose inputs are fixed, a synthetic flight having no data-plane series —
+    ``inputs``, its executor inputs there, ``sentence``, its stored `ClosedLoopSentence`, ``params``, ``words``, and the
+    observed flight as labelled: ``signals`` (from its first row), ``reading`` and ``geometry``."""
+    import dataclasses
+    from types import SimpleNamespace
+
+    import torch
+
+    from ts_transformer.autopilot import closed_loop, replay
+    from ts_transformer.tests import test_closed_loop
+
+    batch, inputs, words = test_closed_loop._batch(interval_s)
+    params = test_closed_loop._params()
+    (sentence,) = closed_loop.read(batch, inputs, params, words, device=torch.device("cpu"))
+    replayed, missing = closed_loop.replay_batch(batch, {0: sentence}, words)
+    assert not missing
+
+    @dataclasses.dataclass
+    class FixedInputs(replay.Batch):
+        fixed: object = None
+
+        def inputs(self, device):
+            return self.fixed
+
+    fixed = FixedInputs(**{f.name: getattr(replayed, f.name) for f in dataclasses.fields(replay.Batch)}, fixed=inputs)
+    return SimpleNamespace(batch=fixed, inputs=inputs, sentence=sentence, params=params, words=words,
+                           signals=batch.signals[0], reading=batch.readings[0], geometry=batch.geometries[0])
