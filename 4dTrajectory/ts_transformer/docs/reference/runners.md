@@ -1446,7 +1446,8 @@ faster than 0.2°/s, `turn_runs`) and way: the change of e_y (the closed loop's 
 30 s after its end row (A13 as written; it holds what earlier turns left — a 90° turn makes an along-track lead lateral),
 and the turn's OWN part (the change of the flown-minus-observed displacement at the same time over those rows, on the
 right of the observed track at the later row; Claude's reading), each also toward the outside of the turn, and the way's
-e_y at the turn's start; not measured where the later row lies past the observed flight or the way's flight. `turns.json`
+e_y at the turn's start, and whether the next turn starts before the read row (`overlaps_next`, counted per cell); not measured
+where the later row lies past the observed flight or the way's flight. `turns.json`
 (`ts-executor-turns-readout-v1`) holds every turn (with its group) and the table by stratum × ground-speed band (0–70,
 70–85, 85–100, ≥ 100 m/s): per way, |change| and |own| p50 / p90 / mean and their outward parts; and over the turns
 measured in every way, the same and the paired differences of the own outward part — executor ways minus exact words (the

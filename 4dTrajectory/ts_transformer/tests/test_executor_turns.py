@@ -99,6 +99,11 @@ def test_three_ways_and_the_control_fly_at_the_observed_speed_and_read_the_offse
         assert first[way]["start_lateral_m"] == pytest.approx(0.0, abs=0.5)
         assert second[way]["change_m"] > 0.0 > second[way]["own_m"]             # carried from the first turn
         assert second[way]["start_lateral_m"] == pytest.approx(first[way]["change_m"], abs=1.0)
+        # a left turn: right is outward — the change ends outside, the turn's own part inside
+        assert second[way]["outward_m"] == pytest.approx(second[way]["change_m"])
+        assert second[way]["own_outward_m"] == pytest.approx(second[way]["own_m"])
+    assert not first["overlaps_next"] and first["next_start_row"] == second["start_row"]
+    assert second["next_start_row"] is None
     # information, pinned: the fixture's track leads its positions by 1 s (each 2 s segment flown at its first row's
     # track), so even the observed track integrated (the control) ends 99 m inside each turn; the words add 20 m and
     # 17 m; the executor takes back 14 m and 20 m
@@ -118,12 +123,17 @@ def test_the_outside_of_a_turn_and_a_flight_that_ends_before_it_is_read():
     shift = np.where(np.arange(len(signals.e_m)) > start, 50.0, 0.0)       # 50 m right of the track after the start
     outside = (signals.e_m + shift * np.cos(right), signals.n_m - shift * np.sin(right))
     short = (signals.e_m[:later_start + 5], signals.n_m[:later_start + 5])
-    flown = {"executor": [outside], "executor_no_stopping": [outside], "exact_words": [outside], "observed_track": [short]}
+    # 30 m right from the read row itself (the end + 30 s): read there, not a row early
+    late = np.where(np.arange(len(signals.e_m)) >= stop + 15, 30.0, 0.0)
+    at_read_row = (signals.e_m + late * np.cos(right), signals.n_m - late * np.sin(right))
+    flown = {"executor": [outside], "executor_no_stopping": [at_read_row], "exact_words": [outside],
+             "observed_track": [short]}
     first, second = executor_turns.turn_rows(batch, flown, words)
     assert turned < 0.0                                                       # a left turn: its outside is right
     for name in ("change_m", "own_m"):
         assert first["executor"][name] == pytest.approx(50.0, abs=1.0)
     assert first["executor"]["outward_m"] == pytest.approx(50.0, abs=1.0) == first["executor"]["own_outward_m"]
+    assert first["executor_no_stopping"]["change_m"] == pytest.approx(30.0, abs=1.0)
     assert second["observed_track"] is None and second["executor"] is not None
     table = executor_turns.readout_table([first, second])
     assert table["all"]["all"]["turns"] == 2 and table["all"]["all"]["paired"]["turns"] == 1
@@ -134,7 +144,7 @@ def test_the_readout_reads_each_way_by_stratum_and_speed_band():
     def record(part, speed, change, own, turned=-90.0):
         way = {"start_lateral_m": 0.0, "change_m": change, "outward_m": -math.copysign(1.0, turned) * change,
                "own_m": own, "own_outward_m": -math.copysign(1.0, turned) * own}
-        return {"stratum": part, "ground_speed_mps": speed, "turn_deg": turned,
+        return {"stratum": part, "ground_speed_mps": speed, "turn_deg": turned, "overlaps_next": speed > 90.0,
                 "executor": way, "executor_no_stopping": way, "exact_words": {**way, "own_outward_m": 5.0},
                 "observed_track": None}
 
@@ -143,6 +153,7 @@ def test_the_readout_reads_each_way_by_stratum_and_speed_band():
     table = executor_turns.readout_table(records)
     cell = table["vectored"]["85-100 m/s"]
     assert cell["turns"] == 2 and cell["executor"]["measured"] == 2 and cell["observed_track"]["not_measured"] == 2
+    assert cell["overlapping_the_next"] == 2 and table["straight-in"]["all"]["overlapping_the_next"] == 0
     assert cell["executor"]["abs_change_m"]["p50"] == pytest.approx(60.0)
     assert cell["executor"]["outward_m"]["mean"] == pytest.approx(40.0)     # a left turn: right is outward
     assert cell["executor"]["own_outward_m"]["mean"] == pytest.approx(20.0)

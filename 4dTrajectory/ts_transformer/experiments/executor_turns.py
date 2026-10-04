@@ -36,7 +36,9 @@ THE READOUT. The turns are the observed flight's runs of 2 s rows that turn one 
   flown exactly, as every way flies the observed ground speed) over the same rows, projected on the right of the observed
   track at the later row.
 - each also toward the outside of the turn (``*_outward_m``: positive where the flown path ends outside the observed
-  turn), and the way's e_y at the turn's start.
+  turn), and the way's e_y at the turn's start;
+- whether the next turn starts before the read row (``overlaps_next``: then both numbers hold part of the next turn;
+  each cell counts them).
 
 A turn whose end + `AFTER_S` lies past the observed flight, or past the end of a way's flight (a crossing, the ground, a
 dynamics failure), is not measured for that way. Per stratum (straight-in / vectored, `instructions.readout`) and band of
@@ -226,9 +228,9 @@ def observed_positions(sentence: replay.Sentence, signals: FlightSignals, row_s:
     return _integrated(tracks, signals, cycle_s, int(round(row_s / cycle_s)))
 
 
-def offsets_m(signals: FlightSignals, span: int, e_m: np.ndarray, n_m: np.ndarray, every: int) -> np.ndarray:
-    """e_y of flown positions at the sentence's rows (``every`` 2 s rows apart, from row 0) against the observed path of
-    the first ``span`` 2 s rows: the closed loop's matched point, searched forward row by row."""
+def offsets_m(signals: FlightSignals, span: int, e_m: np.ndarray, n_m: np.ndarray) -> np.ndarray:
+    """e_y of flown positions at the observed rows (one per row from row 0) against the observed path of the first
+    ``span`` rows: the closed loop's matched point, searched forward row by row."""
     path = ObservedPath(signals.e_m[:span], signals.n_m[:span], np.zeros(span), 0)
     return np.array([path.match(float(e), float(n), 0.0).lateral_m for e, n in zip(e_m, n_m)])
 
@@ -248,15 +250,16 @@ def turn_rows(batch: replay.Batch, flown: dict[str, Flown | list[tuple[np.ndarra
     """One record per turn of ``batch``'s flights (module docstring); ``flown`` each way's flight: a `Flown` of ways (a)
     and (b), the positions at the sentence's rows of way (c) and the control."""
     row_s = batch.row_interval_s
+    if row_s != words.spec.step_s:
+        raise ValueError(f"the turns are read on the data's {words.spec.step_s:g} s rows, not {row_s:g} s")
     after = int(round(AFTER_S / row_s))
-    every = int(round(row_s / words.spec.step_s))
     out = []
     for j, signals in enumerate(batch.signals):
         reading, sentence = batch.readings[j], batch.sentences[j]
-        span = min((len(reading.words) - sentence.first_row) // every, len(sentence.grid))
-        observed_e, observed_n = signals.e_m[::every][:span], signals.n_m[::every][:span]
+        span = min(len(reading.words) - sentence.first_row, len(sentence.grid))
+        observed_e, observed_n = signals.e_m[:span], signals.n_m[:span]
         # the observed track at each row, and the unit vector to its right (east, north)
-        right = np.radians(signals.track_deg[::every][:span])
+        right = np.radians(signals.track_deg[:span])
         right_e, right_n = np.cos(right), -np.sin(right)
         positions = {}
         for way in WAYS:
@@ -272,12 +275,17 @@ def turn_rows(batch: replay.Batch, flown: dict[str, Flown | list[tuple[np.ndarra
             # a flight's rows up to its end, and up to a state the dynamics left (a dynamics failure)
             finite = np.isfinite(e_m) & np.isfinite(n_m)
             rows = min(span, len(e_m), int(np.argmin(finite)) if not finite.all() else len(e_m))
-            positions[way] = (e_m[:rows], n_m[:rows], offsets_m(signals, span * every, e_m[:rows], n_m[:rows], every))
-        for start, stop, turned, speed in turns(signals, span * every, words):
-            first, later = start // every, -(-(stop + after * every) // every)    # on the sentence's rows
+            positions[way] = (e_m[:rows], n_m[:rows], offsets_m(signals, span, e_m[:rows], n_m[:rows]))
+        found = turns(signals, span, words)
+        for k, (start, stop, turned, speed) in enumerate(found):
+            first, later = start, stop + after
+            # the next turn starting before the read row: this record's own part holds some of it
+            next_start = found[k + 1][0] if k + 1 < len(found) else None
             record: dict[str, Any] = {"dataset_id": reading.dataset_id, "airport": reading.airport,
                                       "group": batch.groups[j], "stratum": stratum(reading), "start_row": start,
-                                      "end_row": stop, "turn_deg": turned, "ground_speed_mps": speed}
+                                      "end_row": stop, "turn_deg": turned, "ground_speed_mps": speed,
+                                      "next_start_row": next_start,
+                                      "overlaps_next": next_start is not None and next_start <= later}
             outward = -math.copysign(1.0, turned)       # a right turn's outside is left of the track
             for way in WAYS:
                 e_m, n_m, lateral = positions[way]
@@ -325,7 +333,8 @@ def readout_table(records: list[dict[str, Any]]) -> dict[str, Any]:
                        and band in (band_name(r["ground_speed_mps"]), "all")]
             paired = [r for r in members if all(r[way] is not None for way in WAYS)]
             table.setdefault(part, {})[band] = {
-                "turns": len(members), **_ways(members),
+                "turns": len(members), "overlapping_the_next": sum(1 for r in members if r["overlaps_next"]),
+                **_ways(members),
                 "paired": {"turns": len(paired), **_ways(paired),
                            **{f"{way}_minus_{base}_own_outward_m": _summary(
                                [r[way]["own_outward_m"] - r[base]["own_outward_m"] for r in paired])
