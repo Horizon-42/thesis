@@ -33,7 +33,7 @@ from ts_transformer.instructions.artefact import (
 )
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, load_checkpoint
-from ts_transformer.prior.procedure import PROCEDURE_MASKS, airport_finals, procedure_digests
+from ts_transformer.prior.procedure import PROCEDURE_MASKS, ProcedureMasks, airport_finals, procedure_digests
 from ts_transformer.prior.selection import kept
 from ts_transformer.prior.source import airport_landings, artefact_identity
 from ts_transformer.repo_layout import REPO_ROOT, git_state
@@ -49,6 +49,51 @@ from ts_transformer.prior.speaker import MOST_GO_AROUNDS, Position, Speaker, go_
 
 #: The temperature of free generation: the model's own distribution (the masks applied).
 TEMPERATURE = 1.0
+#: The format of a readout's files (``config.json``, ``sentences.npz``; `read_sentences`). v1 (B6): the words the
+#: procedure masks blocked at each row (``blocked_<column>``).
+FREE_GENERATION_SCHEMA = "ts-prior-free-generation-v1"
+#: The arrays of ``sentences.npz``.
+SENTENCES_FIELDS = {"schema", "index", "sample", "offsets", "words", "go_around_probability", "go_around_permitted",
+                    "on_final", "state_offsets", "states", *(f"blocked_{COLUMNS[c]}" for c in ProcedureMasks.columns)}
+
+
+@dataclass(frozen=True)
+class Stored:
+    """One sentence of a readout as `read_sentences` gives it back: its flight's place in the split's signals, its
+    sample, its words, its states on the 2 s rows from row 0 and its rows' probability and permission of "go-around",
+    place on the final and blocked words (`Generated`'s arrays); its row of ``sentences.jsonl``."""
+
+    index: int
+    sample: int
+    words: np.ndarray
+    states: np.ndarray
+    go_around_probability: np.ndarray
+    go_around_permitted: np.ndarray
+    on_final: np.ndarray
+    blocked: dict[int, np.ndarray]
+    row: dict[str, Any]
+
+
+def read_sentences(out: Path) -> tuple[dict[str, Any], list[Stored]]:
+    """A readout's config and its sentences in the order written, refused unless they are this format's."""
+    config = json.loads((out / "config.json").read_text(encoding="utf-8"))
+    with np.load(out / "sentences.npz") as arrays:
+        data = {name: arrays[name] for name in arrays.files}
+    if config["schema"] != FREE_GENERATION_SCHEMA or set(data) != SENTENCES_FIELDS \
+            or str(data["schema"]) != FREE_GENERATION_SCHEMA:
+        raise ValueError(f"{out} is not a {FREE_GENERATION_SCHEMA} readout")
+    rows = [json.loads(line) for line in (out / "sentences.jsonl").read_text(encoding="utf-8").splitlines()]
+    stored = []
+    for k, row in enumerate(rows):
+        said = slice(int(data["offsets"][k]), int(data["offsets"][k + 1]))
+        states = slice(int(data["state_offsets"][k]), int(data["state_offsets"][k + 1]))
+        if (int(data["index"][k]), int(data["sample"][k])) != (row["index"], row["sample"]):
+            raise ValueError(f"{out}: sentence {k} of sentences.npz is not the one of sentences.jsonl")
+        stored.append(Stored(int(data["index"][k]), int(data["sample"][k]), data["words"][said], data["states"][states],
+                             data["go_around_probability"][said], data["go_around_permitted"][said],
+                             data["on_final"][said],
+                             {c: data[f"blocked_{COLUMNS[c]}"][said] for c in ProcedureMasks.columns}, row))
+    return config, stored
 
 
 @dataclass
@@ -68,6 +113,9 @@ class Generated:
     go_around_probability: np.ndarray  # [M]: of "go-around" in the distribution each runway word was drawn from
     go_around_permitted: np.ndarray    # [M] bool: the masks permitted "go-around" (G false, D68's bound not met)
     on_final: np.ndarray               # [M] bool: inside the region of the runway in force (the FAF and the LPV cone)
+    #: by column the procedure masks rule (`ProcedureMasks.columns`): [M, words] bool, the classes they blocked at each
+    #: row (`Speaker.procedure_blocked`)
+    blocked: dict[int, np.ndarray]
 
 
 def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
@@ -124,6 +172,7 @@ def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Map
     probability: list[list[float]] = [[] for _ in order]
     permitted: list[list[bool]] = [[] for _ in order]
     on_final: list[list[bool]] = [[] for _ in order]
+    blocked: list[list[dict[int, np.ndarray]]] = [[] for _ in order]
     alive = np.ones(count, dtype=bool)
     t = start
     while alive.any():
@@ -138,6 +187,7 @@ def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Map
             probability[b].append(float(speaker.go_around_probability[-1][b]))
             permitted[b].append(bool(speaker.go_around_permitted[-1][b]))
             on_final[b].append(bool(final.inside(np.array(at.e_m[b]), np.array(at.n_m[b]))))
+            blocked[b].append({c: mask[b] for c, mask in speaker.procedure_blocked[-1].items()})
         alive &= ~done
         # a done flight is halted and keeps, as its inputs, the finite state of the row it ended in: the executor flies
         # a done flight on (a non-finite state is one of its ends) and the speaker still says its rows
@@ -157,7 +207,8 @@ def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Map
                              crossing=outcome.crossing, timed_out=bool(timed_out[b]),
                              go_arounds=int(speaker.go_arounds[b]), go_around_probability=np.array(probability[b]),
                              go_around_permitted=np.array(permitted[b], dtype=bool),
-                             on_final=np.array(on_final[b], dtype=bool)))
+                             on_final=np.array(on_final[b], dtype=bool),
+                             blocked={c: np.array([row[c] for row in blocked[b]], dtype=bool) for c in blocked[b][0]}))
     return out
 
 
@@ -282,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
 
     out.mkdir(parents=True)
     write_json_atomic(out / "config.json", {
+        "schema": FREE_GENERATION_SCHEMA,
         "written_utc": utc_now(), "prior": str(prior_dir), "prior_run": checkpoint.run,
         "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"), "identity": checkpoint.identity,
         "instructions": str(instructions), "executor": str(executor_dir), "checks": opened["checks"],
@@ -302,14 +354,15 @@ def main(argv: list[str] | None = None) -> int:
 
     sentences_only = [g for _, g in generated]
     np.savez_compressed(
-        out / "sentences.npz", index=np.array([g.index for g in sentences_only]),
+        out / "sentences.npz", schema=np.array(FREE_GENERATION_SCHEMA), index=np.array([g.index for g in sentences_only]),
         sample=np.array([s for s, _ in generated]), offsets=offsets([g.words for g in sentences_only]),
         words=np.concatenate([g.words for g in sentences_only]),
         go_around_probability=np.concatenate([g.go_around_probability for g in sentences_only]),
         go_around_permitted=np.concatenate([g.go_around_permitted for g in sentences_only]),
         on_final=np.concatenate([g.on_final for g in sentences_only]),
         state_offsets=offsets([g.states for g in sentences_only]),
-        states=np.concatenate([g.states for g in sentences_only]))
+        states=np.concatenate([g.states for g in sentences_only]),
+        **{f"blocked_{COLUMNS[c]}": np.concatenate([g.blocked[c] for g in sentences_only]) for c in ProcedureMasks.columns})
     # free generation starts from every flight; the readout gives the flights outside the prior's selection apart (D75)
     airports_of = {i: flights[i]["airport"] for i in drawn}
     grids = {i: sentences[i].grid for i in drawn}

@@ -86,7 +86,7 @@ def test_the_readout_by_airport_and_stratum():
         return Generated(index=index, words=np.array(words), states=np.zeros((1, 6)), outcome=outcome, crossing=None,
                          timed_out=outcome == "timeout", go_arounds=go_arounds,
                          go_around_probability=np.array(probability), go_around_permitted=np.ones(len(words), bool),
-                         on_final=np.array(on_final))
+                         on_final=np.array(on_final), blocked={})
 
     u = UNCHANGED
     generated = [sentence(0, "landed", [[0, 1, 2, 1, 3], [u, 2, u, u, u]], 0, [0.0, 0.1], [False, True]),
@@ -252,6 +252,18 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch):
     assert [r["sample"] for r in rows] == [0, 1] and {r["index"] for r in rows} == {0}
     with np.load(out / "sentences.npz") as arrays:
         assert arrays["offsets"][-1] == len(arrays["words"]) == sum(r["rows"] for r in rows)
+    # B6: read back by the format's reader, each sentence with the words the procedure masks blocked at each of its rows
+    from ts_transformer.instructions.grammar import column_words
+    from ts_transformer.prior.procedure import ProcedureMasks
+
+    _, read_back = runner.read_sentences(out)
+    assert [(s.index, s.sample) for s in read_back] == [(0, 0), (0, 1)] and [s.row for s in read_back] == rows
+    for s in read_back:
+        assert len(s.words) == s.row["rows"] and set(s.blocked) == set(ProcedureMasks.columns)
+        for column, mask in s.blocked.items():
+            classes = list(column_words(column, words, len(geometry.candidates)))
+            assert mask.shape == (len(s.words), len(classes))
+            assert not any(mask[r, classes.index(int(s.words[r, column]))] for r in range(len(s.words)))
     config = json.loads((out / "config.json").read_text())
     assert config["checks"] == {"stub": True} and config["chunk"] == 400 and config["identity"] == identity
     assert config["selection"] == "landed"                             # the prior's own rule (D75)
@@ -268,6 +280,11 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch):
     for airports in (["KZZZ"], [geometry.code, "KZZZ"]):
         with pytest.raises(SystemExit):                                # an airport not the artefact's
             runner.main([*argv[:-3], "--airports", *airports, "--out", str(tmp_path / "unknown"), "--smoke"])
+    config_text = (out / "config.json").read_text()
+    (out / "config.json").write_text(config_text.replace(runner.FREE_GENERATION_SCHEMA, "ts-prior-free-generation-v0"))
+    with pytest.raises(ValueError, match=runner.FREE_GENERATION_SCHEMA):                 # another format, by name
+        runner.read_sentences(out)
+    (out / "config.json").write_text(config_text)
     (prior / "config.json").write_text(json.dumps({"schema": "ts-prior-checkpoint-v6", "identity": identity}))
     with pytest.raises(SystemExit, match="ts-prior-checkpoint-v6"):                # a prior of another format, by name
         runner.main([*argv[:-3], "--out", str(tmp_path / "older"), "--smoke"])

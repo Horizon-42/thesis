@@ -97,6 +97,9 @@ class Speaker:
         self.go_around_probability: list[np.ndarray] = []
         #: per row said: whether the masks permitted each aircraft "go-around" (no G in force, the bound of D68 not met)
         self.go_around_permitted: list[np.ndarray] = []
+        #: per row said: for each column the procedure masks rule (`ProcedureMasks.columns`), ``[B, words]`` the words
+        #: they blocked, under the runway and G after the row's runway word (the Training view shows them, §12 B6)
+        self.procedure_blocked: list[dict[int, np.ndarray]] = []
         #: the go-arounds each aircraft has said (D68: a caller bounds them with `go_around_bound`)
         self.go_arounds = np.zeros(len(finals), dtype=np.int64)
 
@@ -140,6 +143,9 @@ class Speaker:
             chosen = torch.multinomial(drawn, 1, generator=self.generator)
             g = self.model.after_choice(column, g, chosen, tokens)
             said = np.concatenate((said, class_words(column, chosen.cpu().numpy())), axis=1)
+        runway, go_around = self._runway_after(said[:, RUNWAY])
+        self.procedure_blocked.append({c: ~self.procedure.permitted(c, runway, go_around, at.e_m, at.n_m, at.height_m)
+                                       for c in self.procedure.columns})
         for heard, step, height, time_s in zip(self.heard, said, at.height_m, row.time_s[:, 0].tolist()):
             heard.hear(step, float(height), time_s)
         self.go_arounds += said[:, RUNWAY] == RUNWAY_GO_AROUND

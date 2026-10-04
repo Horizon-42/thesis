@@ -340,3 +340,23 @@ def test_after_its_second_go_around_a_flight_may_not_say_another(words):
         assert (said[:, RUNWAY] != UNCHANGED).all() and (speaker.go_arounds <= MOST_GO_AROUNDS).all()
     assert (speaker.go_arounds == MOST_GO_AROUNDS).all()
     assert go_around_bound(np.array([0, 1, 2]), words, 2)[:, 1].tolist() == [True, True, False]
+
+
+def test_the_speaker_records_the_words_the_procedure_masks_blocked_and_says_none_of_them(words):
+    """B6: at each row said, for each column the procedure masks rule, the words they blocked (the Training view shows
+    them): never "unchanged", never a word said; before the join the DA blocks the levels below it."""
+    model, rows = setup(words, count=4)
+    speaker, said = speak(model, rows, words, seed=5, count_rows=20)
+    assert len(speaker.procedure_blocked) == 20
+    for r, blocked in enumerate(speaker.procedure_blocked):
+        assert set(blocked) == set(ProcedureMasks.columns)
+        for column, mask in blocked.items():
+            classes = list(column_words(column, words, 2))
+            assert mask.shape == (4, len(classes)) and not mask[:, classes.index(UNCHANGED)].any()
+            for b in range(4):
+                assert not mask[b, classes.index(int(said[b, r, column]))]
+    da = finals()[0].decision_m
+    below = [v for v in range(words.n_altitude_levels) if words.altitude_level_m(v) < da - words.altitude_tolerance_m(v)]
+    assert below
+    classes = list(column_words(ALTITUDE, words, 2))
+    assert all(speaker.procedure_blocked[0][ALTITUDE][:, classes.index(v)].all() for v in below)
