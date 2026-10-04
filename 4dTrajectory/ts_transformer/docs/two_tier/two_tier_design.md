@@ -73,9 +73,9 @@ repository root.
 | D47 | The turn law of the executor stays (§5.4). The measurement of A13: the words alone (the 5° grid and the lead) end a turn approximately 35 m inside the observed turn; the executor gives back approximately 18 m of it; the stopping-rate limit changes approximately 3 m (§11.14). The readout of a turn is its own part (the change of the displacement from the observed aircraft of the same time); the change of e_y is read beside it, because it holds the offsets that earlier turns left | Decided | User, 2026-10-04 |
 | D48 | The 2 s reading follows D46 too. After a change of R, a heading word whose class is the class in force is said, because its absolute track differs from the track in force. No flight is refused for it (§4.3) | Decided | User, 2026-10-04 (Claude's check of stage A, §3 item 2) |
 | D49 | The labeller conformance also covers the Δ grid: its reference sample stores the sentences at Δ = 4 and 8 s, and the check compares them again with the code on disk (§9.2) | Decided | User, 2026-10-04 (check §3 item 3) |
-| D50 | The closed-loop reading does not keep every row inside the tolerances of D32. A correction is one class and needs time to bring the flown path back (§11.11); in the stage A smoke 10–25 % of the correctable rows are more than 30 m off laterally. The check of §14.6 reads that the corrections bring the flown path back inside the tolerances, not that every row is inside them (§14.6) | Decided | User, 2026-10-04 (check §3 item 4) |
-| D51 | The closed-loop artefact stores, for each row from the first predicted step, the flown position 2 s before the row (east, north, MSL height), at every Δ. The executor flies 1 s cycles, so the value exists; at Δ = 2 s it is the row before. The motion input of D25 is read from it; stage B does not fly a sentence again to get it (§4.8, §4.9) | Decided | User, 2026-10-04 (check §3 item 1) |
-| D52 | The band of an altitude level is half the larger gap to its two neighbours + the fit residual 10 m. Inside a segment this is half its step + 10 m; the top level of a segment takes the larger gap above it (1,260 m: 70 m; 2,700 m: 235 m), so every height said as a level is inside its band. "No level-off" takes the band of the lowest level, 40 m (§3.4) | Decided | User, 2026-10-04 (check §3 item 5) |
+| D50 | The closed-loop reading does not keep every row inside the tolerances of D32. A correction is one class and needs time to bring the flown path back (§11.11: a 100 m offset takes approximately 20 s at one 5° class); in the stage A smoke 10–25 % of the correctable rows are more than 30 m off laterally. The check of §14.6 is a rule on the stored data: on every row where §4.9 permits a correction, \|e_y\| > Y is followed by a heading correction in force after that row, and \|e_h\| > H by an angle correction. The p90 of \|e_y\| at the last row is information. The share of the correctable rows outside the tolerances is a reading of the ablation (D34), not a check (§4.8, §14.6) | Decided | User, 2026-10-04 (check §3 item 4) |
+| D51 | The closed-loop artefact stores the flown states on the data's 2 s rows at every Δ, with the Δ rows marked. Observed and flown rows are then on one grid, and stage B builds the motion input of D25 with one piece of code for both. The artefact stores raw states, not a derived input, so a change of the motion window needs no rebuild. The replay check of a closed-loop sentence compares on the 2 s rows. At Δ = 2 s nothing changes (§4.8, §4.9) | Decided | User, 2026-10-04 (check §3 item 1) |
+| D52 | ε of a level = half the larger gap to its neighbouring levels + 10 m: 40 m for 0–1,200 m, 70 m for 1,260–2,580 m, 235 m for 2,700–5,400 m. A level's band then covers the largest rounding error of its word; the top level of a segment collects the heights up to half the next segment's step above it. One band for both sides (a one-sided band would differ at two levels only). "No level-off" has ε = 40 m: it has no level, so no rounding to cover; its tube's width comes mainly from the edges of the angle class (§3.4, §10) | Decided | User, 2026-10-04 (check §3 item 5) |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -306,11 +306,11 @@ levels that the other four airports almost never use. This is airspace, not fram
 
 **Envelope.** The tube from the row of the word: max(T, h0 − s·tan γ_hi) − ε ≤ h ≤ max(T, h0 − s·tan γ_lo) + ε while
 it descends, T ± ε after it arrives (s is the horizontal distance flown from the row of the word). ε depends on the
-level (D52): half the larger gap to its two neighbours plus the fit residual 10 m. Inside a segment that is half its
-step + 10 m, 40 / 70 / 235 m. The top level of a segment takes the larger gap above it: 1,260 m has 70 m and 2,700 m has
-235 m, because the heights up to the middle of that gap are said as that level (with half the segment's own step, a
-level held at 1,301–1,320 m or 2,771–2,925 m would be outside the band of its own word). For "no level-off" there is no
-lower bound T, and ε is the band of the lowest level, 40 m. A new angle word starts a new tube. A containment rate is given
+level (D52): **ε of a level = half the larger gap to its neighbouring levels + 10 m** (the fit residual). That gives
+40 m for 0–1,200 m, 70 m for 1,260–2,580 m and 235 m for 2,700–5,400 m. The band covers the largest rounding error of
+the word: the top level of a segment collects the heights up to half the next segment's step above it (60 m above
+1,260 m, 225 m above 2,700 m). For "no level-off" there is no lower bound T, and **ε = 40 m**: the word has no level, so
+no rounding to cover, and the tube's width comes mainly from the edges of the angle class. A new angle word starts a new tube. A containment rate is given
 with these widths (principle 6). The level detection of the labeller does not use ε (§4.4).
 
 ### 3.5 Angle column
@@ -644,7 +644,9 @@ longer shows how well a Δ carries a flight. At each Δ the ablation reads inste
 1. the correction words of the closed-loop reading, for each flight and each column;
 2. the errors left where §4.9 makes no correction (a level hold, a climb, no steeper or shallower class): the largest
    |e_y| and |e_h| for each flight;
-3. the replay outcomes (§5.8).
+3. the share of the rows where §4.9 permits a correction and the flown path is outside the tolerances (|e_y| > Y,
+   |e_h| > H; D50);
+4. the replay outcomes (§5.8).
 
 The user compares the Δ values on these readings; this document sets no threshold (D7).
 
@@ -652,8 +654,8 @@ The user compares the Δ values on these readings; this document sets no thresho
 it would be the mean over Δ. In a 3°/s turn, the direction of that mean is approximately 12° behind the track at
 Δ = 8 s (3° at 2 s). The ablation would then compare a coarser input as well as a longer interval. With the
 displacement in the 2 s before the row, only the interval changes. The data has a row every 2 s, and in closed loop the
-executor has a state every 1 s, so the value exists at every Δ; the closed-loop artefact stores it (D51). At Δ = 2 s it
-is the value of now.
+executor has a state every 1 s, so the value exists at every Δ; the closed-loop artefact stores the flown states on
+the 2 s rows (D51). At Δ = 2 s it is the value of now.
 
 ### 4.9 Closed-loop reading (D32)
 
@@ -772,8 +774,8 @@ the fit starts no correction.
 It reads the open-loop artefact and the executor spec.
 
 **Artefact.** For each split and each Δ: the closed-loop sentences (each correction word marked as a correction); the
-flown states on the rows (position in the airport frame, MSL height, track, ground speed, vertical rate); on each row
-from the first predicted step, the flown position 2 s before it (D51); the count of
+flown states on the data's 2 s rows, with the Δ rows marked (position in the airport frame, MSL height, track, ground
+speed, vertical rate; D51); the count of
 correction words for each column; the flights without a training sentence, by reason.
 
 ---
@@ -1252,7 +1254,7 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | Bank limit | 32° | Spec, measured (p99.9) |
 | Roll rate p | 5°/s | FAA Order 8260.3G Appendix E §4 ¶6.a ("roll-in rates of up to five degrees per second") |
 | Level grid | 60 m to 1,260 m, 120 m to 2,700 m, 450 m to 5,400 m MSL; 40 levels | D22 (fit of the altitude-grid proposal) |
-| Level envelope ε | half the segment's step + 10 m: 40 / 70 / 235 m | D22 |
+| Level envelope ε | half the larger gap to the neighbouring levels + 10 m: 40 m (0–1,200 m), 70 m (1,260–2,580 m), 235 m (2,700–5,400 m); "no level-off" 40 m | D22, D52 |
 | Level detection | ≥ 20 s, rows within 25 m of the piece's median | Labeller constant (§4.4) |
 | Descent classes | edges −0.5 / 1.52 / 2.59 / 3.74 / 10°; nominal 0.92 / 2.13 / 3.06 / 4.41° | Spec, k-means on train days |
 | Climb word | One class; a climb piece is 0.5–15° (labeller); executor angle while G is false: the nominal of D15 (fitted 1.32°) | Spec; D15, D28 |
@@ -1904,23 +1906,27 @@ holds this milestone into `dev-two-tier-v4`.
   as information. Then the full ts suite again, and the report.
 
 **A15. The decisions on Claude's check of stage A (D48, D49, D51; the check's §3 item 6).** After A14. D50 and D52
-change no code (the band of D52 is in `instructions/words.py` since A1).
+change no code (the band of D52 is in `instructions/words.py` since A1). The tolerances Y and H are not restated in a
+test: their one source is the spec, which the spec sha identifies (D21), and §10 records them.
 
 - 2 s reading (`instructions/labeller/lateral.py`, `instructions/labeller/sentence.py`): after a change of R, a heading
   word whose class is the class in force is said; the refusal "heading word repeated after a runway change" goes (D48).
-- Closed-loop artefact (`autopilot/closed_loop.py`, `instructions/artefact.py`): for each row from the first predicted
-  step, the flown position 2 s before it (east, north, MSL height), taken from the executor's cycle 2 s before the row.
-  A new closed-loop format name; the closed-loop conformance compares it too (D51).
+- Closed-loop artefact (`autopilot/closed_loop.py`, `instructions/artefact.py`): the flown states on the data's 2 s
+  rows, with the Δ rows marked (D51); the observed rows before the first predicted step on the same grid. A new
+  closed-loop format name. The replay of a closed-loop sentence and the closed-loop conformance compare on the 2 s
+  rows.
 - Labeller conformance (`instructions/conformance.py`): the reference sample also stores each sentence on the Δ grid at
   Δ = 4 and 8 s (`labeller/interval.on_interval`); the check compares them again. A new reference format name (D49).
-- Tests: at Δ = 2 s the position 2 s before a flown row is the state of the row before; at Δ = 4 and 8 s it is the
-  state that the executor flies 2 s before the row (a sentence flown again cycle by cycle); the 2 s reading of a
-  flight that changes to a runway 6° off and keeps its class says the word, and the executor flies the new track; the labeller conformance finds a change of the Δ grid's rule (the tie of D45); the
-  tolerances of D32 pinned (lateral 30 m, vertical 15 m); `tests/test_architecture.py`: no module of the executor's
-  laws (`autopilot/lateral.py`, `vertical.py`, `speed.py`, `executor.py`, `single.py`) imports the runway data (D9).
+- Tests: at Δ = 2 s the stored states are those of A14; at Δ = 4 and 8 s the states on the Δ rows are those of A14
+  and the rows between are the states the executor flies there; a closed-loop sentence replays to its states on every
+  2 s row; the 2 s reading of a flight that changes to a runway 6° off and keeps its class says the word, and the
+  executor flies the new track; the labeller conformance finds a change of the Δ grid's rule (the tie of D45);
+  `tests/test_architecture.py`: no module of the executor's laws (`autopilot/lateral.py`, `vertical.py`, `speed.py`,
+  `executor.py`, `single.py`) imports the runway data (D9).
 - The smoke build again (a new smoke directory): the labeller, the executor and the closed-loop conformance; how many
   flights the 2 s reading refused for the repeated heading word before, and how many it says now; the closed-loop
-  replays at Δ = 2, 4, 8 s; as information. Then the full ts suite again, and the report.
+  replays at Δ = 2, 4, 8 s; the rule of D50 on the stored rows; as information. Then the full ts suite again, and the
+  report.
 
 ### 14.3 Stage B: prior
 
@@ -2034,8 +2040,9 @@ frontend reads the reading name, not the spec sha (§9.2 #9). After stage D the 
 3. The smoke build: both conformance checks pass; the replay at Δ = 2 and 4 runs to its end; a labelled go-around
    flies as a go-around (G, the climb from its level word, a new runway word, a landing after it); at each go-around
    row, "no level-off" and "unspecified" are in force where the approach reached them (D26); the closed-loop sentences
-   at Δ = 2 and 4 replay to their flown states, and their corrections bring the flown paths back inside the tolerances
-   of the observed paths, except where §4.9 permits no correction (D32, D50); the observed words of a closed-loop sentence follow the matched
+   at Δ = 2 and 4 replay to their flown states, and on every row where §4.9 permits a correction, |e_y| > Y is
+   followed by a heading correction in force after that row and |e_h| > H by an angle correction (D32, D50; the p90
+   of |e_y| at the last row as information); the observed words of a closed-loop sentence follow the matched
    point (D42), and a labelled go-around is in its closed-loop sentence and flies as
    a go-around; a change of speed says its steps, and the executor makes each step at a_max (D43); each observed word of
    a closed-loop sentence comes at the Δ row nearest to its place (D45); no correction past the end of the observed path
