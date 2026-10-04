@@ -251,7 +251,7 @@ p = `ROLL_RATE_DEG_S` (5°/s, FAA Order 8260.3G App. E §4 ¶6.a, ICAO Doc 8168 
 so it has no time constant of one. Nothing is measured from data: the turn rates, the bank limit, the speed word's rate
 (a_max, the speed envelope's largest acceleration: a speed word is a step of one grid value, D43), "unspecified"'s pace (a
 speed step over the shortest speed hold, 0.25 m/s²) and the level bands are the vocabulary's, read at run time; each
-candidate's published TCH, glidepath angle and DA are read at replay (`autopilot/runway_data.py`) and recorded in
+candidate's published TCH, glidepath angle and DA are the artefact's (`candidates.json`, D61) and recorded in
 `measurements.json`; the decision-altitude check takes no parameter (D38); the design's fixed choices (Δt, τ_γ, the γ̇
 factor, the timeout factor) are module constants written into `measurements.json`. It writes the spec's reference tracks
 and passed record with it (R42).

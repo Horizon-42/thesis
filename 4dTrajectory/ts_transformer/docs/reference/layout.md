@@ -472,9 +472,10 @@ entry ⇒ the publication is blocked** before any predict/CZML work; `--refresh-
 ### L30 · `instructions/`: the second layer's language, below every model
 
 2026-09-23; v4 since 2026-10-03 (`docs/two_tier/design/vocabulary.md` §3, §4). The instruction vocabulary (`spec`, `words`:
-five columns, "go-around" in the runway column), the grammar (`grammar.apply`: the rules of design §3.7 in ONE function,
-which the labeller checks every row with and a speaker masks with), the per-step signals in the airport frame (`signals`,
-`airport`), the envelopes (`envelope`, the one implementation the labeller and the executor's judge share), the piecewise
+five columns, "go-around" in the runway column), the grammar (`grammar._rules`: the rules of vocabulary §3.7 written ONCE, on one
+row for `apply`, which the labeller checks every row with, and on arrays for `column_mask`, a speaker's mask of a column
+given the later columns' permitted words, D62), the per-step signals in the airport frame (`signals`, `airport`: each
+candidate's `VerticalPath` and `published_glidepath_height_m`, D61), the envelopes (`envelope`, the one implementation the labeller and the executor's judge share), the piecewise
 fit, the labeller (`labeller/`: `records`, `lateral`, `vertical`, `speed`, `go_around`, `sentence`, `interval` — a
 sentence on a coarser row interval — and `read`), the labeller's conformance (`conformance`, C30), the measurements
 (`measure`), the artefact (`artefact`, the closed-loop file format included, C38), the readout and the eye-check
@@ -501,8 +502,8 @@ design's order, each recorded), `lateral` / `vertical` / `speed` (the three laws
 glidepath floor; "go-around" changes no target, a climb under G at the thrust-limited angle within 1.885°–3°),
 `params` (the executor's parameters and the constraints on them), `executor` (the cycle loop, `fly`; a multi-aircraft batch
 by `start_cycle`), `single` (the single flight in plain floats, mirroring the batch operation for operation), `judge` (the
-outcomes and their order, the decision-altitude check with the evaluation's bounds, the words), `runway_data` (each
-candidate's published TCH, glidepath angle and DA, read only by the judge), `replay` (who is flown — own dynamics or a
+outcomes and their order, the decision-altitude check with the evaluation's bounds — each candidate's published TCH,
+glidepath angle and DA from `candidates.json`, D61 — the words), `replay` (who is flown — own dynamics or a
 stand-in's; a flight without aircraft dynamics is counted, never flown, C31 — drawing, a sentence on a row interval,
 flying and reading a batch), `conformance` (the spec's reference tracks and their check, C33), `closed_loop` (the
 labeller's closed-loop reading and its conformance, C38) and `spec` (`ts-executor-spec-v8`, C33). It may import the data

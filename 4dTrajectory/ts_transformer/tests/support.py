@@ -75,6 +75,19 @@ def raised_airport(geometry, elevation_m: float):
     return AirportGeometry.from_dict(data)
 
 
+#: The test airports' runways' published TCH, glidepath and decision altitude (the fleet's DAs above the threshold run
+#: 61–129 m), each candidate's vertical path in `candidates.json` (D61).
+TEST_TCH_M, TEST_GLIDEPATH_DEG, TEST_DA_M = 15.0, 3.0, 60.0
+TEST_VERTICAL_PATH = {"crossing_height_m": TEST_TCH_M, "glidepath_deg": TEST_GLIDEPATH_DEG, "decision_height_m": TEST_DA_M}
+
+
+def with_vertical_path(geometry, path):
+    """``geometry`` with every candidate's published vertical path ``path`` (an `instructions.airport.VerticalPath`)."""
+    from dataclasses import replace
+
+    return replace(geometry, candidates=tuple(replace(c, vertical_path=path) for c in geometry.candidates))
+
+
 #: `instruction_airport`'s field elevation E, MSL m.
 INSTRUCTION_AIRPORT_ELEVATION_M = 60.0
 
@@ -89,7 +102,7 @@ def instruction_airport():
     return AirportGeometry.from_dict({
         "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": INSTRUCTION_AIRPORT_ELEVATION_M},
         "candidates": [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0,
-                        "elevation_m": 100.0, "length_m": 3000.0}],
+                        "elevation_m": 100.0, "length_m": 3000.0, "vertical_path": TEST_VERTICAL_PATH}],
         "runway_ends": [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0}],
     })
 
@@ -172,7 +185,8 @@ def parallel_airport():
             {"ident": "09L", "threshold_e_m": 0.0, "threshold_n_m": PARALLEL_SPACING_M, "course_deg": 90.0}]
     return AirportGeometry.from_dict({
         "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": INSTRUCTION_AIRPORT_ELEVATION_M},
-        "candidates": [{**end, "elevation_m": 100.0, "length_m": 3000.0} for end in ends], "runway_ends": ends,
+        "candidates": [{**end, "elevation_m": 100.0, "length_m": 3000.0, "vertical_path": TEST_VERTICAL_PATH}
+                       for end in ends], "runway_ends": ends,
     })
 
 

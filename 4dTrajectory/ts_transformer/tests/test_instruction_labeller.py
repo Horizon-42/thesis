@@ -409,10 +409,144 @@ def test_rules_3_and_4_the_level_and_the_angle_agree():
     assert not grammar.step_allowed(_state(), _step(altitude=words.altitude_no_level_off), 900.0, words, 1)  # rule 4
 
 
-def test_the_runway_mask_follows_the_table():
-    assert grammar.runway_words_allowed(None, 3).tolist() == [True, True, True, False]
-    assert grammar.runway_words_allowed(_state(runway=1), 3).tolist() == [True, False, True, True]
-    assert grammar.runway_words_allowed(_state(runway=1, go_around=True), 3).tolist() == [True, True, True, False]
+def test_each_broken_rule_says_what_it_found():
+    """The labeller counts refusals by reason; the detail says which of the rules that share a reason broke."""
+    words = Words(spec())
+    for in_force, step, found in (
+            (None, _step(runway=0), "first step incomplete: no word for ['heading', 'altitude', 'angle', 'speed']"),
+            (_state(), _step(runway=5), "runway word not permitted: 5 is not a candidate of 2"),
+            (_state(), _step(runway=0), "runway word not permitted: runway 0 is already in force"),
+            (_state(go_around=True), _step(runway=RUNWAY_GO_AROUND),
+             "runway word not permitted: go-around while a go-around is in force")):
+        with pytest.raises(grammar.Ungrammatical) as refused:
+            grammar.apply(in_force, step, 900.0, words, 2)
+        assert str(refused.value) == found
+    with pytest.raises(ValueError, match="altitude class -2 outside"):
+        grammar.apply(_state(), _step(altitude=-2), 900.0, words, 2)
+
+
+def test_a_height_that_is_not_a_number_compares_with_nothing():
+    """A height that is not a number makes every comparison with it false, as `apply` always read it: no direction is
+    needed (rule 3), and a level said with "go-around" is not "not above" it (rule 6)."""
+    words = Words(spec())
+    nan = float("nan")
+    assert grammar.step_allowed(_state(), _step(altitude=words.altitude_index(600.0)), nan, words, 1)
+    final = _state(altitude=words.altitude_no_level_off, angle=3)
+    go = _step(runway=RUNWAY_GO_AROUND, altitude=words.altitude_index(1200.0), angle=words.angle_climb)
+    assert grammar.step_allowed(final, go, nan, words, 1)
+    with pytest.raises(grammar.Ungrammatical, match="go-around without a level above"):
+        grammar.apply(final, _step(runway=RUNWAY_GO_AROUND), nan, words, 1)
+
+
+def _small_spec():
+    """A vocabulary small enough to say every row: 3 heading classes, 3 levels (0, 600, 1,200 m), 2 descent classes,
+    3 speeds."""
+    return spec(heading_step_deg=120.0, heading_tolerance_deg=62.0, altitude_segment_steps_m=(600.0,),
+                altitude_segment_tops_m=(1200.0,), descent_angle_edges_deg=(-0.5, 2.5, 10.0),
+                descent_angle_centres_deg=(1.5, 3.0), speed_min_mps=20.0, speed_max_mps=30.0)
+
+
+def _completions_pass(in_force, prefix, column, height, words, candidates, permitted):
+    """D62's definition: for each word of ``column``, whether some words of the later columns, each among ``permitted``
+    (`column_words` order), make the row pass `apply` — every completion tried."""
+    import itertools
+
+    later = range(column + 1, 5)
+    choices = [[v for v, ok in zip(grammar.column_words(c, words, candidates), permitted[c]) if ok] for c in later]
+    out = []
+    for word in grammar.column_words(column, words, candidates):
+        out.append(any(grammar.step_allowed(in_force, [*prefix, word, *rest], height, words, candidates)
+                       for rest in itertools.product(*choices)))
+    return out
+
+
+def _all_permitted(words, candidates, column, rng=None):
+    sizes = {c: len(grammar.column_words(c, words, candidates)) for c in range(column + 1, 5)}
+    if rng is None:
+        return {c: np.ones(n, bool) for c, n in sizes.items()}
+    return {c: rng.random(n) < 0.5 for c, n in sizes.items()}
+
+
+def test_the_column_mask_is_every_completion_through_apply_on_every_row_of_a_small_vocabulary():
+    """D62: on a small vocabulary, every state in force (and none: the first step), every word of the earlier columns,
+    three heights, every column: the mask is the definition — some completion of the later columns passes `apply` —
+    with every later word permitted and with random permitted words."""
+    import itertools
+
+    words, candidates = Words(_small_spec()), 2
+    rng = np.random.default_rng(7)
+    states = [None] + [grammar.InForce(r, g, 0, a, angle, 0) for r in range(candidates) for g in (False, True)
+                       for a in range(words.altitude_no_level_off + 1) for angle in range(words.n_descent + 2)]
+    checked = 0
+    for column in range(5):
+        prefixes = list(itertools.product(*(grammar.column_words(c, words, candidates) for c in range(column))))
+        for state in states:
+            for height in (100.0, 620.0, 1250.0):
+                for draw in (None, rng):
+                    permitted = _all_permitted(words, candidates, column, draw)
+                    mask = grammar.column_mask([state] * len(prefixes), np.array(prefixes).reshape(len(prefixes), column),
+                                               column, np.full(len(prefixes), height), [candidates] * len(prefixes),
+                                               words, {c: np.tile(p, (len(prefixes), 1)) for c, p in permitted.items()})
+                    for k, prefix in enumerate(prefixes):
+                        expected = _completions_pass(state, list(prefix), column, height, words, candidates, permitted)
+                        assert mask[k].tolist() == expected, (column, state, height, prefix)
+                        checked += 1
+    assert checked > 20_000
+
+
+def test_the_column_mask_is_every_completion_through_apply_on_random_rows_of_the_chosen_vocabulary():
+    """D62 on the spec of D59 (`instruction_spec`'s grid and classes): random states, earlier words and heights, a batch
+    of aircraft with different numbers of candidates; with every later word permitted where the completions are few
+    enough to try them all, and with a few random permitted words in every column."""
+    words = Words(spec())
+    rng = np.random.default_rng(11)
+    for column in range(5):
+        for few in (False, True):
+            if column < 2 and not few:
+                continue                                       # 72 × 42 × 6 × 48 completions: too many to try
+            batch = 6
+            candidates = [int(rng.integers(1, 4)) for _ in range(batch)]
+            in_force = [None if rng.random() < 0.2 else grammar.InForce(
+                int(rng.integers(0, n)), bool(rng.random() < 0.3), int(rng.integers(0, words.n_heading)),
+                int(rng.integers(0, words.altitude_no_level_off + 1)), int(rng.integers(0, words.n_descent + 2)),
+                int(rng.integers(0, words.speed_unspecified + 1))) for n in candidates]
+            prefix = np.array([[int(rng.choice(grammar.column_words(c, words, n))) for c in range(column)]
+                               for n in candidates]).reshape(batch, column)
+            height = rng.uniform(0.0, 3000.0, batch)
+            most = max(candidates)
+            permitted = {c: (rng.random((batch, len(grammar.column_words(c, words, most)))) < 4.0 / len(
+                grammar.column_words(c, words, most))) if few else np.ones((batch, len(grammar.column_words(c, words, most))),
+                                                                          bool) for c in range(column + 1, 5)}
+            mask = grammar.column_mask(in_force, prefix, column, height, candidates, words, permitted)
+            assert mask.shape == (batch, len(grammar.column_words(column, words, most)))
+            for j in range(batch):
+                mine = {c: p[j][: len(grammar.column_words(c, words, candidates[j]))] for c, p in permitted.items()}
+                expected = _completions_pass(in_force[j], prefix[j].tolist(), column, height[j], words, candidates[j],
+                                             mine)
+                own = len(grammar.column_words(column, words, candidates[j]))
+                assert mask[j, :own].tolist() == expected, (column, few, j)
+                assert not mask[j, own:].any()                 # a candidate the airport does not have
+
+
+def test_a_level_below_is_permitted_under_a_level_angle_and_then_only_a_descent_class():
+    """D62: with the level angle in force, a level below the aircraft is permitted (a descent class in the angle column
+    makes the row grammatical); said, the angle column permits only the descent classes. When the caller permits no
+    descent class, that level is not permitted."""
+    words = Words(spec())
+    lower = words.altitude_index(600.0)
+    state = _state()                                              # level 900 m, the level angle
+    altitude = grammar.column_mask([state], np.array([[UNCHANGED, UNCHANGED]]), ALTITUDE, np.array([900.0]), [1],
+                                   words)[0]
+    assert altitude[lower + 1]                                    # position 0 is "unchanged"
+    angle = grammar.column_mask([state], np.array([[UNCHANGED, UNCHANGED, lower]]), ANGLE, np.array([900.0]), [1],
+                                words)[0]
+    descents = {c + 1 for c in range(1, words.n_descent + 1)}
+    assert {k for k, ok in enumerate(angle) if ok} == descents
+    no_descent = np.ones(words.n_descent + 3, bool)
+    no_descent[[c + 1 for c in range(1, words.n_descent + 1)]] = False
+    blocked = grammar.column_mask([state], np.array([[UNCHANGED, UNCHANGED]]), ALTITUDE, np.array([900.0]), [1], words,
+                                  {ANGLE: no_descent[None, :]})[0]
+    assert not blocked[lower + 1] and blocked[words.altitude_index(900.0) + 1]
 
 
 # ---- the altitude words above the airport elevation (D58)

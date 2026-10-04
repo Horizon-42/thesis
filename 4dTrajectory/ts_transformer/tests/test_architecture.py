@@ -728,14 +728,19 @@ def test_only_the_runners_reach_the_executor_for_now():
             assert rel.startswith("experiments/"), f"{rel} imports the executor"
 
 
-#: The modules of the executor's laws (vocabulary §5.4–§5.7): they fly words only, so none reaches the runway data — the
-#: published glidepaths and decision altitudes the judge and the replay read (D3, D9).
+#: The modules of the executor's laws (vocabulary §5.4–§5.7): they fly words only, so none reads the runway data — the
+#: published glidepaths and decision altitudes the judge reads (D3, D9).
 EXECUTOR_LAW_MODULES = ("lateral", "vertical", "speed", "executor", "single")
+#: The names a module reads a vertical path through (`instructions.airport`, D61).
+VERTICAL_PATH_NAMES = {"VerticalPath", "vertical_path", "published_glidepath_height_m", "glidepath_height_m"}
 
 
-def test_the_executor_laws_never_reach_the_runway_data():
-    """D9: no law of §5.7 (a glidepath floor, an intercept, a capture of the final): no module the laws import, inside
-    the executor package and through each other, imports `autopilot.runway_data`."""
+def test_the_executor_laws_never_read_a_vertical_path():
+    """D9, D61: no law of §5.7 (a glidepath floor, an intercept, a capture of the final): no module the laws import,
+    inside the executor package and through each other, names a candidate's vertical path or the published glidepath
+    (the judge reads them; it is not a law)."""
+    import ast
+
     seen, todo = set(), [f"autopilot.{name}" for name in EXECUTOR_LAW_MODULES]
     while todo:
         module = todo.pop()
@@ -743,7 +748,11 @@ def test_the_executor_laws_never_reach_the_runway_data():
             continue
         seen.add(module)
         path = TS_DIR / (module.replace(".", "/") + ".py")
-        assert module != "autopilot.runway_data", f"an executor law reaches the runway data (through {sorted(seen)})"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        names |= {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+        names |= {alias.name for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) for alias in node.names}
+        assert not names & VERTICAL_PATH_NAMES, f"{module} reads a vertical path ({sorted(names & VERTICAL_PATH_NAMES)})"
         todo += [name for name in _imported_names(path) if name.startswith("autopilot.")
                  and (TS_DIR / (name.replace(".", "/") + ".py")).is_file()]
     assert {"autopilot.lateral", "autopilot.plant", "autopilot.sentence"} <= seen

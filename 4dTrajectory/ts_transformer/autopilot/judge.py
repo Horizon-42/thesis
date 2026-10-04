@@ -31,10 +31,10 @@ of R or of another candidate (D33): the flight flies on.
 THE DECISION-ALTITUDE CHECK (D3, D38). The approach of an approach crossing is the run of cycles before it with R the
 crossed runway and G false; its DA POINT is the first state row of that run where the aircraft, on R's final (before the
 threshold, lined up, within the landing screen's lateral limit), descends through the decision altitude (the row before
-it above, this one at or below; `runway_data.VerticalPath.decision_height_m`). There the lateral offset must lie inside
+it above, this one at or below; the candidate's `VerticalPath.decision_height_m`, from `candidates.json`, D61). There the lateral offset must lie inside
 the FAS cone at that distance (`flight_scenarios.fas_geometry`, FAA Order 8260.58D Formula 3-1-1) and the height within
 the evaluation module's vertical bound (`evaluation.thresholds.RNAV_TERMINAL_VERTICAL_BOUND_M`, ±22 m, ICAO Doc 9613) of
-the published glidepath, the straight-line reference (`instructions.airport.glidepath_height_m`). Neither is a parameter:
+the published glidepath, the straight-line reference (`instructions.airport.published_glidepath_height_m`). Neither is a parameter:
 one definition with the evaluation (D38). Quality beyond that is the evaluation module's.
 
 Layer 2, every word: the sentence's words checked against what was FLOWN, with the labeller's own checks. The flown
@@ -57,11 +57,10 @@ from final_approach.crossing import bracket_fraction
 from flight_scenarios.fas_geometry import course_halfwidth_m, fas_course_geometry
 from ts_transformer.autopilot.executor import LIMITS, Flown
 from ts_transformer.autopilot.frame import ALT, GAMMA, LAT, LON, MASS, PSI, SPEED
-from ts_transformer.autopilot.runway_data import VerticalPath
 from ts_transformer.autopilot.sentence import row_at
 from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import (
-    AirportGeometry, RunwayRelative, curvature_radius_m, glidepath_height_m, landing_cross_limit_m, relative_to_runway,
+    AirportGeometry, RunwayRelative, landing_cross_limit_m, published_glidepath_height_m, relative_to_runway,
 )
 from ts_transformer.instructions.labeller.read import Smoothed, smooth
 from ts_transformer.instructions.labeller.records import Instruction
@@ -132,7 +131,7 @@ def _crossing(relative: RunwayRelative, row: int, runway_index: int) -> dict[str
             "at_row": float(row - 1 + fraction), "runway_index": runway_index}
 
 
-def decision_check(relative: RunwayRelative, rows: range, geometry: AirportGeometry, index: int, path: VerticalPath,
+def decision_check(relative: RunwayRelative, rows: range, geometry: AirportGeometry, index: int,
                    spec: VocabularySpec) -> dict[str, Any] | None:
     """The decision-altitude check on candidate ``index`` over the state ``rows`` of one approach (module docstring):
     None when the aircraft never descends through the DA on its final there."""
@@ -140,13 +139,13 @@ def decision_check(relative: RunwayRelative, rows: range, geometry: AirportGeome
     height, off = relative.height_above_threshold_m, relative.track_minus_course_deg
     limit = landing_cross_limit_m(geometry, index, spec.landing_cross_limit_m, spec.parallel_course_delta_deg)
     candidate = geometry.candidates[index]
+    path = candidate.vertical_path
     for row in rows:
         if row == 0 or not (before[row] > 0.0 and abs(off[row]) <= spec.lined_up_deg and abs(right[row]) <= limit
                             and height[row - 1] > path.decision_height_m >= height[row]):
             continue
         cone = float(course_halfwidth_m(float(before[row]), fas_course_geometry(candidate.length_m)))
-        glidepath = float(glidepath_height_m(before[row], path.crossing_height_m, path.glidepath_deg,
-                                             curvature_radius_m(geometry.frame.lat0, candidate.course_deg)))
+        glidepath = float(published_glidepath_height_m(geometry, index, before[row]))
         lateral_ok = abs(float(right[row])) <= cone
         vertical_ok = abs(float(height[row]) - glidepath) <= RNAV_TERMINAL_VERTICAL_BOUND_M
         return {"row": row, "right_m": float(right[row]), "cone_half_width_m": cone,
@@ -156,7 +155,7 @@ def decision_check(relative: RunwayRelative, rows: range, geometry: AirportGeome
 
 
 def _outcome(states: np.ndarray, track: dict[str, np.ndarray], runway_cycle: np.ndarray, go_around_cycle: np.ndarray,
-             stalled: np.ndarray, geometry: AirportGeometry, paths: Sequence[VerticalPath], spec: VocabularySpec,
+             stalled: np.ndarray, geometry: AirportGeometry, spec: VocabularySpec,
              ) -> tuple[str, int, dict[str, Any] | None]:
     """``runway_cycle`` / ``go_around_cycle``: R and G during each cycle (one fewer than the state rows); ``stalled``
     per state row: the dynamics' stall cut-off having bound in the cycle that ended at the row. The events (module
@@ -199,7 +198,7 @@ def _outcome(states: np.ndarray, track: dict[str, np.ndarray], runway_cycle: np.
                 start = row - 1                            # the approach: the cycles before it under R, G false
                 while start > 0 and runway_cycle[start - 1] == index and not go_around_cycle[start - 1]:
                     start -= 1
-                decision = decision_check(relative, range(start + 1, row + 1), geometry, index, paths[index], spec)
+                decision = decision_check(relative, range(start + 1, row + 1), geometry, index, spec)
                 crossing["decision"] = decision
                 passed = decision is not None and decision["passed"]
                 events.append((row, "landed" if passed else "unstable_at_minimums", crossing))
@@ -286,27 +285,25 @@ class Outcome:
     limits: dict[str, dict[str, float]]
 
 
-def outcome_of(flown: Flown, index: int, geometry: AirportGeometry, paths: Sequence[VerticalPath],
-               spec: VocabularySpec) -> Outcome:
-    """Flight ``index`` of ``flown``: its outcome, the state row it is read at, the crossing and the limits; ``paths``
-    its airport's candidates' vertical paths (`runway_data.published_vertical_paths`)."""
+def outcome_of(flown: Flown, index: int, geometry: AirportGeometry, spec: VocabularySpec) -> Outcome:
+    """Flight ``index`` of ``flown``: its outcome, the state row it is read at, the crossing and the limits (the
+    decision-altitude check on each candidate's vertical path in ``geometry``, D61)."""
     last = int(flown.done_cycle[index]) + 1
     states = flown.states[index, : last + 1].cpu().numpy()
     track = flown_track(states, geometry)
     stalled = np.concatenate(([False], flown.limits["stall"][index, :last].cpu().numpy()))
     outcome, end_row, crossing = _outcome(states, track, flown.runway[index, :last].cpu().numpy(),
                                           flown.modes["go_around"][index, :last].cpu().numpy(), stalled, geometry,
-                                          paths, spec)
+                                          spec)
     return Outcome(outcome, end_row, crossing, _limits(flown, index, states, end_row))
 
 
-def judge(flown: Flown, index: int, geometry: AirportGeometry, paths: Sequence[VerticalPath],
-          instructions: Sequence[Instruction], sentence_step_s: float, observed: FlightSignals, spec: VocabularySpec,
+def judge(flown: Flown, index: int, geometry: AirportGeometry, instructions: Sequence[Instruction], sentence_step_s: float, observed: FlightSignals, spec: VocabularySpec,
           words: Words) -> Verdict:
     """Flight ``index`` of ``flown``: its outcome, its limits, and its words — ``instructions`` the sentence the
     executor flew (rows ``sentence_step_s`` apart; a heading word's ``info["target_deg"]`` the compass track it says
     under the runway in force), ``observed`` the flight's observed signals (its clock and identity)."""
-    ended = outcome_of(flown, index, geometry, paths, spec)
+    ended = outcome_of(flown, index, geometry, spec)
     outcome, end_row, crossing, limits = ended.outcome, ended.end_row, ended.crossing, ended.limits
     smoothed = read_flown(flown, index, outcome, end_row, geometry, observed, spec)
     if smoothed is None:

@@ -177,7 +177,7 @@ def fly_single(batch: replay.Batch, params: ExecutorParams, words: Words) -> lis
             if executor.done:
                 break
         flown = executor.flown()
-        verdict = judge(flown, 0, batch.geometries[j], batch.vertical_paths[j], sentence_flown.instructions,
+        verdict = judge(flown, 0, batch.geometries[j], sentence_flown.instructions,
                         batch.row_interval_s, batch.signals[j], spec, words)
         out += flight_results(flown, [verdict])
     return out
@@ -365,7 +365,7 @@ def input_digests(batch: replay.Batch, params: ExecutorParams, words: Words) -> 
                  np.array([[c.threshold_e_m, c.threshold_n_m, c.course_deg, c.elevation_m] for c in geometry.candidates]),
                  np.array([geometry.elevation_m]),
                  np.array([[float(getattr(path, f.name)) for f in dataclasses.fields(path)]
-                           for path in batch.vertical_paths[j]], dtype=np.float64)]
+                           for path in (c.vertical_path for c in geometry.candidates)], dtype=np.float64)]
         digest = hashlib.sha256()
         for part in parts:
             array = np.ascontiguousarray(part.cpu().numpy() if isinstance(part, torch.Tensor) else part)

@@ -31,9 +31,10 @@ import numpy as np
 import torch
 
 from ts_transformer.autopilot import closed_loop, replay
-from ts_transformer.autopilot.closed_loop import ClosedLoopSentence
 from ts_transformer.autopilot.spec import params_sha256
-from ts_transformer.instructions.artefact import CLOSED_LOOP_DIRECTORY, CLOSED_LOOP_SCHEMA, SPLITS, write_closed_loop
+from ts_transformer.instructions.artefact import (
+    CLOSED_LOOP_DIRECTORY, CLOSED_LOOP_SCHEMA, SPLITS, ClosedLoopSentence, write_closed_loop,
+)
 from ts_transformer.instructions.labeller.interval import interval_rows
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.io_utils import utc_now, write_json_atomic
@@ -152,16 +153,7 @@ def main(argv: list[str] | None = None) -> int:
             write_closed_loop(staging / f"{split}_{interval:g}s.npz", words.spec,
                               executor_params_sha256=params_sha256(params), row_interval_s=interval,
                               start_row=closed_loop.start_row(interval),
-                              signal_index=[batch.indices[j] for j, _ in kept],
-                              first_row=[batch.sentences[j].first_row for j, _ in kept],
-                              grids=[r.grid for _, r in kept], corrections=[r.correction for _, r in kept],
-                              states=[r.states for _, r in kept], on_interval=[r.on_interval for _, r in kept],
-                              lateral_m=[r.lateral_m for _, r in kept],
-                              vertical_m=[r.vertical_m for _, r in kept],
-                              uncorrectable=[r.uncorrectable for _, r in kept],
-                              observed_row=[r.observed_row for _, r in kept],
-                              matched_row=[r.matched_row for _, r in kept],
-                              timed_out=[r.timed_out for _, r in kept])
+                              sentences={batch.indices[j]: r for j, r in kept})
             numbers = summarise(results, drawn.description["excluded"], batch.drawn["refused_on_interval"], lateness,
                                 outside)
             summary["splits"][split]["intervals"][f"{interval:g}"] = numbers

@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import math
-from dataclasses import replace
+from dataclasses import fields, replace
 
 import numpy as np
 import pytest
 import torch
 
 from ts_transformer.autopilot import closed_loop, replay
-from ts_transformer.autopilot.closed_loop import ClosedLoopSentence, Corrector, ObservedPath
+from ts_transformer.autopilot.closed_loop import Corrector, ObservedPath
+from ts_transformer.instructions.artefact import ClosedLoopSentence, closed_loop_sentences
 from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
@@ -192,7 +193,7 @@ def _batch(interval_s=2.0, legs=DOWNWIND_BASE_FINAL, track_deg=270.0, altitude_m
     sentence = replay.sentence_on_interval(reading, signals, interval_s, geometry, words)
     observed = replay.from_row(signals, sentence.first_row)
     batch = replay.Batch(indices=[0], signals=[observed], series=[None], readings=[reading], sentences=[sentence],
-                         row_interval_s=interval_s, geometries=[geometry], vertical_paths=[()],
+                         row_interval_s=interval_s, geometries=[geometry],
                          approach_ias_mps=[approach_speed_ias_mps("A320", 62000.0)], groups=[replay.OWN], drawn={})
     start = closed_loop.start_row(interval_s) * int(round(interval_s / one.step_s))
     return batch, executor_inputs(observed, geometry, start), words
@@ -224,18 +225,9 @@ def test_a_flight_whose_words_leave_an_offset_is_brought_back_by_heading_correct
     assert np.abs(sentence.lateral_m[-len(sentence.lateral_m) // 4:]).max() < words.spec.closed_loop_lateral_m
 
 
-def _flown(sentence):
-    """A closed-loop sentence's flown 2 s rows, from its first predicted step (D51: `Stored.states`)."""
-    return sentence.states[int(np.flatnonzero(sentence.on_interval)[sentence.start]):]
-
-
 def _replayed(batch, inputs, sentence, params, words, monkeypatch):
-    """``sentence`` flown again as the replay flies it (`replay_batch`, `replay.fly_sentences` on the time clock)."""
-    stored = {7: closed_loop.Stored(grid=sentence.grid, correction=sentence.correction,
-                                    first_row=batch.sentences[0].first_row, states=_flown(sentence),
-                                    lateral_m=sentence.lateral_m, vertical_m=sentence.vertical_m,
-                                    uncorrectable=sentence.uncorrectable, observed_row=sentence.observed_row,
-                                    matched_row=sentence.matched_row)}
+    """``sentence`` flown again as the replay flies it (`replay_batch`, `replay.fly_sentences`)."""
+    stored = {7: sentence}
     batch.indices[0] = 7
     moved, missing = closed_loop.replay_batch(batch, stored, words)
     monkeypatch.setattr(replay.Batch, "inputs", lambda self, device: inputs)
@@ -245,8 +237,7 @@ def _replayed(batch, inputs, sentence, params, words, monkeypatch):
 @pytest.mark.parametrize("interval_s", [2.0, 4.0, 8.0])
 def test_a_closed_loop_sentence_flown_again_gives_its_states_on_every_2_s_row(monkeypatch, interval_s):
     """D51: the states are on the data's 2 s rows from the sentence's first row to its last said row, its Δ rows marked;
-    the replay flies a closed-loop sentence on the time clock (the runner sets it, whatever the spec's) through every 2 s
-    row of it, between the Δ rows too."""
+    the replay flies a closed-loop sentence on its own rows through every 2 s row of it, between the Δ rows too."""
     batch, inputs, words = _batch(interval_s)
     params = _params()
     (sentence,) = closed_loop.read(batch, inputs, params, words, device=CPU)
@@ -255,9 +246,9 @@ def test_a_closed_loop_sentence_flown_again_gives_its_states_on_every_2_s_row(mo
     assert np.array_equal(np.flatnonzero(sentence.on_interval), np.arange(sentence.start + len(sentence.grid)) * every)
     _, _, _, flown = _replayed(batch, inputs, sentence, params, words, monkeypatch)
     track = flown_track(flown.states[0].numpy(), batch.geometries[0])
-    at = np.arange(len(_flown(sentence))) * 2                    # the cycle starting each 2 s row
+    at = np.arange(len(sentence.flown_states)) * 2                    # the cycle starting each 2 s row
     again = np.column_stack([track["e"][at], track["n"][at], track["height"][at]])
-    assert np.abs(again - _flown(sentence)[:, :3]).max() < 1e-9
+    assert np.abs(again - sentence.flown_states[:, :3]).max() < 1e-9
 
 
 @pytest.mark.parametrize("interval_s", [4.0, 8.0])
@@ -273,7 +264,7 @@ def test_the_marked_rows_are_the_said_rows_and_the_rows_between_are_flown(interv
     path = ObservedPath(signals.e_m[:span], signals.n_m[:span], smoothed.altitude_m, start * every)
     marked = sentence.states[sentence.on_interval][start:]
     assert np.allclose([path.match(*row[:3]).lateral_m for row in marked], sentence.lateral_m, atol=1e-9)
-    flown = _flown(sentence)
+    flown = sentence.flown_states
     assert len(flown) == (len(sentence.grid) - 1) * every + 1
     middle = flown[every // 2::every][: len(sentence.grid) - 1, :2]          # the 2 s row halfway between two Δ rows
     chord = 0.5 * (flown[:-every:every, :2] + flown[every::every, :2])
@@ -311,38 +302,23 @@ def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(t
     params = _params()
     (sentence,) = closed_loop.read(batch, inputs, params, words, device=CPU)
     path = tmp_path / "train_4s.npz"
-    write_closed_loop(path, words.spec, executor_params_sha256="x", row_interval_s=4.0, start_row=sentence.start,
-                      signal_index=[7], first_row=[batch.sentences[0].first_row], grids=[sentence.grid],
-                      corrections=[sentence.correction], states=[sentence.states],
-                      on_interval=[sentence.on_interval], lateral_m=[sentence.lateral_m],
-                      vertical_m=[sentence.vertical_m], uncorrectable=[sentence.uncorrectable],
-                      observed_row=[sentence.observed_row], matched_row=[sentence.matched_row],
-                      timed_out=[sentence.timed_out])
+    assert sentence.first_row == batch.sentences[0].first_row
+    write = dict(executor_params_sha256="x", row_interval_s=4.0, start_row=sentence.start)
+    write_closed_loop(path, words.spec, **write, sentences={7: sentence})
     with pytest.raises(ValueError, match="nothing to write"):
-        write_closed_loop(tmp_path / "empty.npz", words.spec, executor_params_sha256="x", row_interval_s=4.0,
-                          start_row=sentence.start, signal_index=[], first_row=[], grids=[], corrections=[], states=[],
-                          on_interval=[], lateral_m=[], vertical_m=[], uncorrectable=[], observed_row=[], matched_row=[],
-                          timed_out=[])
+        write_closed_loop(tmp_path / "empty.npz", words.spec, **write, sentences={})
     with pytest.raises(FileExistsError):
-        write_closed_loop(path, words.spec, executor_params_sha256="x", row_interval_s=4.0, start_row=sentence.start,
-                          signal_index=[7], first_row=[batch.sentences[0].first_row], grids=[sentence.grid],
-                          corrections=[sentence.correction], states=[sentence.states],
-                          on_interval=[sentence.on_interval], lateral_m=[sentence.lateral_m],
-                          vertical_m=[sentence.vertical_m], uncorrectable=[sentence.uncorrectable],
-                      observed_row=[sentence.observed_row], matched_row=[sentence.matched_row],
-                      timed_out=[sentence.timed_out])
-    stored = closed_loop.stored_sentences(load_closed_loop(path, words.spec))
-    assert list(stored) == [7] and np.array_equal(stored[7].grid, sentence.grid)
-    assert np.array_equal(stored[7].states, _flown(sentence))
+        write_closed_loop(path, words.spec, **write, sentences={7: sentence})
     with pytest.raises(ValueError, match="Δ rows marked"):
-        write_closed_loop(tmp_path / "unmarked.npz", words.spec, executor_params_sha256="x", row_interval_s=4.0,
-                          start_row=sentence.start, signal_index=[7], first_row=[batch.sentences[0].first_row],
-                          grids=[sentence.grid], corrections=[sentence.correction], states=[sentence.states],
-                          on_interval=[np.roll(sentence.on_interval, 1)], lateral_m=[sentence.lateral_m],
-                          vertical_m=[sentence.vertical_m], uncorrectable=[sentence.uncorrectable],
-                          observed_row=[sentence.observed_row], matched_row=[sentence.matched_row],
-                          timed_out=[sentence.timed_out])
-    assert np.array_equal(stored[7].uncorrectable, sentence.uncorrectable)
+        write_closed_loop(tmp_path / "unmarked.npz", words.spec, **write,
+                          sentences={7: replace(sentence, on_interval=np.roll(sentence.on_interval, 1))})
+    # D61, vocabulary §6 item 3: the reader gives back every field written — the words, the marks, all the states
+    stored = closed_loop_sentences(load_closed_loop(path, words.spec))
+    assert list(stored) == [7] and set(fields(stored[7])) == set(fields(sentence))
+    for name in (f.name for f in fields(sentence)):
+        assert np.array_equal(getattr(stored[7], name), getattr(sentence, name), equal_nan=name == "vertical_m"), name
+    assert np.array_equal(stored[7].flown_states,
+                          sentence.states[int(np.flatnonzero(sentence.on_interval)[sentence.start]):])
     _, moved, missing, flown = _replayed(batch, inputs, sentence, params, words, monkeypatch)
     assert missing == 0 and moved.sentences[0].first_row == batch.sentences[0].first_row + sentence.start * 2
     assert moved.signals[0].e_m[0] == batch.signals[0].e_m[sentence.start * 2]
@@ -352,11 +328,7 @@ def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(t
     assert row["uncorrected_vertical_m"] == closed_loop.uncorrected_m(sentence.vertical_m, sentence.uncorrectable[:, 1])
     assert row["uncorrected_lateral_m"] != row["uncorrected_vertical_m"]
     assert sum(row["correction_words"].values()) == int(sentence.correction.sum())
-    stored[7] = closed_loop.Stored(grid=sentence.grid, correction=sentence.correction, first_row=0,
-                                   states=_flown(sentence) + [1.0, 0, 0, 0, 0, 0],
-                                   lateral_m=sentence.lateral_m, vertical_m=sentence.vertical_m,
-                                   uncorrectable=sentence.uncorrectable, observed_row=sentence.observed_row,
-                                   matched_row=sentence.matched_row)
+    stored[7] = replace(sentence, states=sentence.states + [1.0, 0, 0, 0, 0, 0])
     with pytest.raises(ValueError, match="from its closed-loop states"):
         closed_loop_columns(stored, 2.0)(moved, flown, [None])
 
@@ -421,7 +393,7 @@ def test_the_rule_of_d50_reads_a_word_moved_across_a_runway_word_in_its_new_fram
     grid[1, RUNWAY], grid[3, RUNWAY], grid[3, HEADING] = RUNWAY_GO_AROUND, 1, 1
     n = len(grid)
     sentence = ClosedLoopSentence(
-        grid=grid, correction=np.zeros((n, 5), bool), states=np.zeros((n, 6)), on_interval=np.ones(n, bool),
+        first_row=0, grid=grid, correction=np.zeros((n, 5), bool), states=np.zeros((n, 6)), on_interval=np.ones(n, bool),
         lateral_m=np.array([0.0, 0.0, 0.0, 0.0, -60.0]), vertical_m=np.zeros(n),
         uncorrectable=np.array([[True, True], *[[False, True]] * (n - 1)]),
         observed_row=np.array([0, 1, 2, 3, 3]), matched_row=np.zeros(n), start=0, timed_out=False)
@@ -444,7 +416,7 @@ def test_an_overshoot_takes_the_opposite_correction_in_its_row_and_the_rule_of_d
     grid = np.array([r[0] for r in rows])
     n = len(grid)
     sentence = ClosedLoopSentence(
-        grid=grid, correction=np.array([r[1] for r in rows]), states=np.zeros((n, 6)), on_interval=np.ones(n, bool),
+        first_row=0, grid=grid, correction=np.array([r[1] for r in rows]), states=np.zeros((n, 6)), on_interval=np.ones(n, bool),
         lateral_m=np.array([0.0, 60.0, -60.0, -60.0, 0.0]), vertical_m=np.zeros(n),
         uncorrectable=np.array([[True, True], *[[False, True]] * (n - 1)]), observed_row=np.zeros(n, dtype=int),
         matched_row=np.zeros(n), start=0, timed_out=False)
@@ -523,10 +495,7 @@ def test_the_conformance_check_passes_the_same_reading_and_finds_every_change(tm
 def test_the_replay_refuses_a_sentence_of_another_first_row(monkeypatch):
     batch, inputs, words = _batch()
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
-    stored = {0: closed_loop.Stored(grid=sentence.grid, correction=sentence.correction, first_row=3,
-                                    states=_flown(sentence), lateral_m=sentence.lateral_m,
-                                    vertical_m=sentence.vertical_m, uncorrectable=sentence.uncorrectable,
-                                    observed_row=sentence.observed_row, matched_row=sentence.matched_row)}
+    stored = {0: replace(sentence, first_row=3)}
     with pytest.raises(ValueError, match="starts at 2 s row 3"):
         closed_loop.replay_batch(batch, stored, words)
 
@@ -539,7 +508,7 @@ def test_read_chunked_puts_each_result_in_its_place(monkeypatch):
     short = replay.Sentence(grid=batch.sentences[0].grid[:9], instructions=[], first_row=0)
     batch = replay.Batch(indices=[0, 1, 2], signals=batch.signals * 3, series=[None] * 3, readings=batch.readings * 3,
                          sentences=[short, batch.sentences[0], batch.sentences[0]], row_interval_s=2.0,
-                         geometries=batch.geometries * 3, vertical_paths=[()] * 3,
+                         geometries=batch.geometries * 3,
                          approach_ias_mps=batch.approach_ias_mps * 3, groups=batch.groups * 3, drawn={})
     monkeypatch.setattr(closed_loop, "start_inputs", lambda part, step_s, device: closed_loop._rows(
         closed_loop.FlightInputs(*(torch.cat([getattr(inputs, n)] * len(part.sentences)) for n in (
@@ -752,7 +721,7 @@ def test_the_observed_heading_words_of_a_turn_are_said_at_the_nearest_row_on_ave
         # the runner's readout reads the same from the sentence and the reading from its first row
         n = len(said_rows)
         sentence = ClosedLoopSentence(
-            grid=np.array([r[0] for r in said_rows]), correction=np.array([r[1] for r in said_rows]),
+            first_row=0, grid=np.array([r[0] for r in said_rows]), correction=np.array([r[1] for r in said_rows]),
             states=np.zeros((n, 6)), on_interval=np.ones(n, bool), lateral_m=np.zeros(n), vertical_m=np.zeros(n), uncorrectable=np.ones((n, 2), bool),
             observed_row=np.array([r[2] for r in said_rows]), matched_row=np.array([r[3] for r in said_rows]), start=0,
             timed_out=False)
@@ -814,13 +783,11 @@ def test_the_replay_reads_the_speed_words_and_how_far_along_the_path_the_flown_a
     path from the observed aircraft of the same time before "unspecified" — told 70 m/s on the 100 m/s downwind (the
     open loop, the time clock), the flown aircraft falls far behind."""
     from ts_transformer.experiments.executor_replay import along_columns
-    from ts_transformer.tests.test_autopilot import vertical_paths
 
     params = _params()
     read = {}
     for name, speeds, interval_s in (("observed", None, 2.0), ("slow", {0: 70.0}, 2.0), ("slow_4", {0: 70.0}, 4.0)):
         batch, inputs, words = _batch(interval_s, speeds=speeds)
-        batch.vertical_paths[0] = vertical_paths(batch.geometries[0])
         monkeypatch.setattr(replay.Batch, "inputs", lambda self, device, inputs=executor_inputs(
             batch.signals[0], batch.geometries[0]): inputs)
         flown = replay.fly_sentences(batch, params, words, device=CPU)

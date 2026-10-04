@@ -9,7 +9,8 @@ from geokit import METRES_PER_DEG_LAT, NM_M, metres_per_deg_lon
 
 from ts_transformer.experiments import approach_clock_figure as figure
 from ts_transformer.inference.runway_schedule import Separation, parallel_relations
-from ts_transformer.instructions.airport import RunwayCandidate, relative_to_runway
+from ts_transformer.instructions.airport import RunwayCandidate, VerticalPath, relative_to_runway
+from ts_transformer.tests.support import TEST_VERTICAL_PATH
 
 COURSE_DEG = 225.0     # a compass course, near KRDU's 23s (225.03°)
 
@@ -43,7 +44,8 @@ def test_along_nm_is_a_thresholds_position_along_the_landing_direction_from_the_
 
 
 def test_before_threshold_is_how_far_the_aircraft_still_is_before_it_along_the_course():
-    candidate = RunwayCandidate("23L", 1_000.0, -2_000.0, COURSE_DEG, 130.0, 3_000.0)
+    candidate = RunwayCandidate("23L", 1_000.0, -2_000.0, COURSE_DEG, 130.0, 3_000.0,
+                                VerticalPath(**TEST_VERTICAL_PATH))
     ue, un = unit(COURSE_DEG)
     # 6,000 m back along the course from the threshold, 300 m to one side: 6,000 m before it
     e = candidate.threshold_e_m - 6_000.0 * ue + 300.0 * un

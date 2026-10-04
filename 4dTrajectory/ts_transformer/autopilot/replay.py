@@ -39,7 +39,6 @@ from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S
 from ts_transformer.autopilot.judge import Outcome, Verdict, flown_track, judge
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.autopilot.runway_data import VerticalPath, published_vertical_paths
 from ts_transformer.autopilot.sentence import Sentences
 from ts_transformer.autopilot.spec import load_spec, require_conforming_executor
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
@@ -115,8 +114,7 @@ class Batch:
     readings: list[Reading]         # the labeller's readings (the data's step)
     sentences: list[Sentence]       # what is flown, on ``row_interval_s``
     row_interval_s: float
-    geometries: list[AirportGeometry]
-    vertical_paths: list[tuple[VerticalPath, ...]]  # each flight's candidates' vertical paths (`published_vertical_paths`)
+    geometries: list[AirportGeometry]               # with each candidate's vertical path (`candidates.json`, D61)
     approach_ias_mps: list[float]
     groups: list[str]               # OWN or STAND_IN, per flight
     drawn: dict[str, Any]           # the sample's description: pool, read, exclusions, per airport
@@ -178,7 +176,6 @@ class Drawn:
     series: list[FlightSeries]
     groups: list[str]
     geometries: dict[str, AirportGeometry]
-    vertical_paths: dict[str, tuple[VerticalPath, ...]]
     description: dict[str, Any]
 
 
@@ -215,17 +212,14 @@ def draw_flights(directory: Path, split: str, candidates: list[int], *, per_airp
     short = {airport: need for airport, need in wanted.items() if need and per_airport}
     if short:
         raise ValueError(f"the {split} split holds too few eligible flights: {short} short")
-    paths = {code: published_vertical_paths(geometry) for code, geometry in geometries.items()}
     return Drawn(indices=[i for i, _, _ in taken], signals=[signals[i] for i, _, _ in taken],
                  series=[s for _, s, _ in taken], groups=[g for _, _, g in taken], geometries=geometries,
-                 vertical_paths=paths,
                  description={"split": split, "seed": seed, "per_airport": per_airport or "every labelled flight",
                               "groups": list(groups), "pool": len(order), "read": read,
                               "excluded": dict(excluded.most_common()), "flights": len(taken),
                               "by_group": dict(Counter(g for _, _, g in taken)),
                               "threshold_crossing_heights_m": {
-                                  code: dict(zip((c.ident for c in geometry.candidates),
-                                                 (path.crossing_height_m for path in paths[code])))
+                                  code: {c.ident: c.vertical_path.crossing_height_m for c in geometry.candidates}
                                   for code, geometry in geometries.items()}})
 
 
@@ -249,7 +243,6 @@ def batch_of(drawn: Drawn, keep: list[int], readings: list[Reading], row_interva
                  signals=[from_row(drawn.signals[i], s.first_row) for i, s in zip(flights, sentences)],
                  series=[drawn.series[i] for i in flights], readings=kept_readings, sentences=sentences,
                  row_interval_s=row_interval_s, geometries=[drawn.geometries[drawn.signals[i].airport] for i in flights],
-                 vertical_paths=[drawn.vertical_paths[drawn.signals[i].airport] for i in flights],
                  approach_ias_mps=[flight_approach_ias_mps(drawn.series[i], drawn.groups[i]) for i in flights],
                  groups=[drawn.groups[i] for i in flights],
                  drawn={**drawn.description, "row_interval_s": row_interval_s,
@@ -288,7 +281,6 @@ def subset(batch: Batch, indices: list[int]) -> Batch:
                  series=[batch.series[i] for i in indices],
                  readings=[batch.readings[i] for i in indices], sentences=[batch.sentences[i] for i in indices],
                  row_interval_s=batch.row_interval_s, geometries=[batch.geometries[i] for i in indices],
-                 vertical_paths=[batch.vertical_paths[i] for i in indices],
                  approach_ias_mps=[batch.approach_ias_mps[i] for i in indices], groups=[batch.groups[i] for i in indices],
                  drawn=batch.drawn)
 
@@ -323,7 +315,7 @@ def fly_sentences(batch: Batch, params: ExecutorParams, words: Words, *, device:
 
 
 def judge_batch(batch: Batch, flown: Flown, words: Words) -> list[Verdict]:
-    return [judge(flown, j, batch.geometries[j], batch.vertical_paths[j], batch.sentences[j].instructions,
+    return [judge(flown, j, batch.geometries[j], batch.sentences[j].instructions,
                   batch.row_interval_s, batch.signals[j], words.spec, words) for j in range(len(batch.sentences))]
 
 
