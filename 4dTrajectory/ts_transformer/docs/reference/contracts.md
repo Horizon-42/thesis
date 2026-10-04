@@ -406,7 +406,8 @@ nothing reads the CIFP after the first runner — and every runway end the harve
 E is `reference.elevation_m`), `spec.json` + `measurements.json`,
 `sentences_{train,select,val}.npz` + `labels.json` + `readout.{json,md}`, `conformance/` (below) and, once an executor spec
 flies them, `closed_loop/` (C38). Every file code reads back carries its format's name (`SIGNALS_SCHEMA`,
-`CANDIDATES_SCHEMA`, `SPEC_SCHEMA` `ts-instruction-spec-v7`, `SENTENCES_SCHEMA` `ts-instruction-sentences-v4`) and is
+`CANDIDATES_SCHEMA`, `SPEC_SCHEMA` `ts-instruction-spec-v7`, `SENTENCES_SCHEMA` `ts-instruction-sentences-v5`: since A27 (D70) each sentence's stratum by its name, `readout.stratum`
+of its reading — for readouts and strata, never an input) and is
 refused under any other; **a name changes with its file's shape**, in the same change (2026-09-24, the user's rule). The
 spec's sha covers every word, grid, class, tolerance and the reading rule (`instructions.spec.READING_RULE`,
 `instruction-v6`: the level words above E, read from the smoothed MSL height minus E, E = `candidates.json`
@@ -417,10 +418,11 @@ missing or extra key and another reading rule — no compatibility.
 **The labeller is identified by what it reads, never by its source** (design D21, 2026-10-03; until v3 `spec.json`
 recorded `labeller_source_sha256` and every runner refused other code): `instruction_labels` writes `conformance/` — a
 fixed reference sample (`instructions.conformance`: train, seed 1337, 50 labelled and 10 refused flights an airport, their
-signals, outcomes and word grids; since A15 (v2; v3 since A20, D58), `ts-instruction-conformance-reference-v3`, each labelled sentence's word
+signals, outcomes and word grids; since A15 (v2; v3 since A20, D58; v4 since A27, D70: a labelled flight's record holds its
+stratum), `ts-instruction-conformance-reference-v4`, each labelled sentence's word
 grid also on its UTC Δ grid at 4 and 8 s, `labeller.interval.on_utc_grid`, or why that grid refuses it, D49) — and a
 `passed-<code12>.json` is written for each labeller code that reads it again the same, on the 2 s rows and every Δ grid (`check`, runner `instruction_conformance`, from a clean checkout; the code is named by the LOGIC of
-`LABELLER_MODULES`, `io_utils.logic_sha256`). `require_conforming_labeller` asks for it before labelling, measuring a spec
+`LABELLER_MODULES`, `io_utils.logic_sha256`; since A27 `readout.py` among them, its `stratum` stored). `require_conforming_labeller` asks for it before labelling, measuring a spec
 or replaying; the sentence files record which code wrote them, as information.
 
 A sentence's words line up row for row with the FIRST `len(words)` rows of its flight's signals (`signal_index` names

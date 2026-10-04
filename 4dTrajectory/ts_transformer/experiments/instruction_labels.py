@@ -50,7 +50,7 @@ def _label(flights: list[Any], spec_data: dict[str, Any], geometry_data: dict[st
                              "status": "refused", "reason": refusal.reason, "detail": refusal.detail}))
             continue
         record = flight_record(reading, words)
-        reading.checks = {}
+        reading.checks = {"turning_deg": reading.checks["turning_deg"]}   # what the stratum of the sentence file reads (D70)
         results.append(("labelled", reading, record))
     return results
 
