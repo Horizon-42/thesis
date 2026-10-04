@@ -1603,6 +1603,7 @@ The code of this design (stage A). Line numbers are at the end of A9 on `dev-two
 | A15: the labeller reference on the Δ grids (D49) | `instructions/conformance.py:47` `INTERVALS_S`, `:81` `sentences_of` |
 | A15: closed-loop states on the 2 s rows (D51) | `instructions/artefact.py:230` `write_closed_loop` (lengths and marks), `autopilot/closed_loop.py` `read` |
 | A15: the rule of D50 and D34's third reading | `autopilot/closed_loop.py:215` `observed_tracks`, `:227` `outside_rows`; `experiments/instruction_closed_loop.py` `summarise` (`outside_the_tolerance`) |
+| A16 (`3e70b4f3`): an overshoot corrected in its row (D53) | `autopilot/closed_loop.py:330` `Corrector.row` (lateral; the angle just below) |
 
 ---
 
