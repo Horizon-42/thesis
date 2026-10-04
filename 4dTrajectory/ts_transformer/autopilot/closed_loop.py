@@ -25,7 +25,10 @@ refused, as the row interval refuses it (`labeller.interval` item 4).
 THE COMPARISON (`ObservedPath.match`). The observed path is the observed flight at the data's 2 s rows, its positions
 as observed and its height and track as the labeller reads them (`labeller.read.smooth`). The matched point is the point
 of the path nearest the flown position, searched forward from the row before's: the matched segment advances while the
-next segment is no farther from the flown position, so a path that crosses itself does not jump. At the matched point the lateral error
+next segment is no farther from the flown position, so a path that crosses itself does not jump. Past the path's end (an
+observed slice stops short of the threshold, the flown aircraft flies on to it) the path goes on along its last segment's
+line, its height on that segment's slope (Claude's reading of §4.9 beyond the observed path: without it the frozen last
+height reads the last few hundred metres of a descent as "too low"). At the matched point the lateral error
 e_y is the flown position's distance from the path perpendicular to the observed track there (right positive), the
 vertical error e_h the flown height minus the observed height. A difference along the path (in time) is not corrected,
 so the speed words stay the observed ones.
@@ -163,10 +166,18 @@ class ObservedPath:
         i = self.segment
         de, dn = self.e[i + 1] - self.e[i], self.n[i + 1] - self.n[i]
         lateral = ((e_m - self.e[i]) * dn - (n_m - self.n[i]) * de) / math.hypot(de, dn)   # right of the track positive
-        row = (float(self.left[-1]) if i == len(self.e) - 2 and t >= 1.0
-               else float(self.left[i] + t * (self.arrived[i + 1] - self.left[i])))
-        along = self.along_rows[self.arrived[i]] + t * math.hypot(de, dn)
-        return Match(lateral, height_m - (self.height[i] + t * (self.height[i + 1] - self.height[i])), row, along)
+        last = i == len(self.e) - 2 and t >= 1.0
+        row = float(self.left[-1]) if last else float(self.left[i] + t * (self.arrived[i + 1] - self.left[i]))
+        if last:                                   # past the end: on along the last segment's line (module docstring)
+            t = ((e_m - self.e[i]) * de + (n_m - self.n[i]) * dn) / (de * de + dn * dn)
+        along = float(self.along_rows[self.arrived[i]]) + t * math.hypot(de, dn)
+        return Match(lateral, height_m - float(self.height[i] + t * (self.height[i + 1] - self.height[i])), row, along)
+
+
+def reached_row(row: float, every: int) -> int:
+    """The last open-loop Δ row (``every`` data rows apart) whose observed time is not later than the matched point's
+    observed time ``row`` (in data rows, D42)."""
+    return int(math.floor(row / every))
 
 
 def uncorrected_m(errors: np.ndarray, uncorrectable: np.ndarray) -> float:
@@ -354,7 +365,7 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
             match = paths[f].match(flown[0], flown[1], flown[2])
             lateral, vertical = match.lateral_m, match.vertical_m
             try:
-                words_row, mask = correctors[f].row(int(math.floor(match.row / every)), lateral, vertical, flown[2],
+                words_row, mask = correctors[f].row(reached_row(match.row, every), lateral, vertical, flown[2],
                                                     holding=bool(captured[f]))
             except Refused as refused:
                 out[j] = refused
@@ -418,7 +429,7 @@ def read_chunked(batch: Batch, params: ExecutorParams, words: Words, *, chunk: i
 # apart than the executor's conformance bound. A check that passes, from a clean checkout, writes
 # ``passed-<code>.json``: what `require_conforming_closed_loop` asks for before closed-loop sentences are read. The
 # code is named by the logic of the executor's files and the labeller's (`closed_loop_code_sha256`).
-REFERENCE_SCHEMA = "ts-closed-loop-conformance-reference-v1"
+REFERENCE_SCHEMA = "ts-closed-loop-conformance-reference-v2"
 PASSED_SCHEMA = "ts-closed-loop-conformance-passed-v1"
 REFERENCE_SPLIT, REFERENCE_PER_AIRPORT, REFERENCE_SEED = "train", 10, 1337
 CONFORMANCE = "conformance"

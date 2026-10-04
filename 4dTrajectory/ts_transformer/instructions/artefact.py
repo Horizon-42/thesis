@@ -209,7 +209,9 @@ def load_sentences(directory: Path, split: str, spec: VocabularySpec) -> dict[st
 #: `autopilot.closed_loop`): per split and row interval, the words said from the first predicted step, which are
 #: corrections, the states on every row (observed before that step, flown from it) and the errors against the observed
 #: path.
-CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v1"
+#: v2 (A10, D42): `observed_row` and `timed_out` (the flight ends when the executor is done, not at the open-loop
+#: sentence's last row).
+CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v2"
 #: Every array a closed-loop file holds.
 CLOSED_LOOP_FIELDS = {"schema", "spec_sha256", "executor_params_sha256", "row_interval_s", "start_row", "signal_index",
                       "first_row", "offsets", "state_offsets", "words", "correction", "states", "lateral_m",

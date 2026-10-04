@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -442,6 +443,18 @@ def test_the_matched_point_has_the_observed_time_of_its_place():
     assert path.match(50.0, 0.0, 500.0).row == pytest.approx(0.5)
     assert path.match(150.0, 3.0, 500.0).row == pytest.approx(2.5)
     assert path.match(260.0, 0.0, 500.0).row == pytest.approx(4.0)
+    # D42 "not later than": a matched point just short of a Δ row has not reached it
+    assert [closed_loop.reached_row(row, every) for row, every in ((2.9, 1), (3.0, 1), (7.9, 4), (8.0, 4))] == [2, 3, 1, 2]
+
+
+def test_past_the_end_of_the_observed_path_its_last_segment_goes_on():
+    """An observed slice stops short of the threshold: past its end the path goes on along its last segment's line, its
+    height on that segment's slope, so a flown aircraft on the observed descent reads e_h = 0, not "too low"."""
+    e = np.arange(5) * 100.0
+    path = ObservedPath(e, np.zeros(5), 500.0 - e * 0.05, 0)
+    match = path.match(700.0, 4.0, 500.0 - 700.0 * 0.05)
+    assert match.vertical_m == pytest.approx(0.0) and match.lateral_m == pytest.approx(-4.0)
+    assert match.row == 4.0 and match.along_m == pytest.approx(700.0)
 
 
 def test_the_observed_words_wait_while_the_flown_aircraft_is_behind():
@@ -456,6 +469,9 @@ def test_the_observed_words_wait_while_the_flown_aircraft_is_behind():
     assert int(said[HEADING]) == words.n_heading - 1 and added[HEADING]
     said, added = corrector.row(1, 50.0, 0.0, 900.0, holding=False)            # the word, where it was heard
     assert int(said[HEADING]) == 2 and not added[HEADING] and corrector.observed_row == 1
+    corrector.row(3, 0.0, 0.0, 900.0, holding=False)
+    said, _ = corrector.row(2, 0.0, 0.0, 900.0, holding=False)                 # a matched point back: no row twice
+    assert (said == UNCHANGED).all() and corrector.observed_row == 3
 
 
 def test_a_flown_aircraft_ahead_passes_two_observed_rows_in_one_and_hears_the_last_word_of_each_column():
@@ -512,6 +528,8 @@ def test_a_flown_aircraft_behind_hears_the_turn_where_the_observed_one_did_and_f
     flown = sentence.states[start + heard, :2]
     assert math.dist(flown, (observed.e_m[turn], observed.n_m[turn])) < 250.0         # within one row's flight
     assert len(sentence.grid) > len(open_grid) - start and not sentence.timed_out
+    (short,) = closed_loop.read(batch, inputs, replace(_params(), timeout_factor=1.0), words, device=CPU)
+    assert short.timed_out and len(short.grid) == len(open_grid) - start         # the limit: the observed time
     assert np.abs(sentence.lateral_m[-len(sentence.lateral_m) // 4:]).max() < words.spec.closed_loop_lateral_m
     assert -2.0 * 75.0 < sentence.states[-1, 0] <= 0.0               # its last row starts one row before the threshold
 

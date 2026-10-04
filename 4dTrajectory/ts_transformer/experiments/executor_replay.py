@@ -157,10 +157,10 @@ def readout_table(rows: list[dict[str, Any]], *, closed_loop_rows: bool) -> dict
         table[group][airport][part][kind]["along_the_path"] = {
             "speed_words_per_sentence": sum(r["speed_words"] for r in members) / len(members),
             "flights": len(along), "largest_along_m": _percentiles(along),
-            "farther_than_1_km": sum(a > FAR_ALONG_M for a in along)}
+            "farther_than_1_km": sum(1 for a in along if a > FAR_ALONG_M)}
         if closed_loop_rows:
             table[group][airport][part][kind]["closed_loop"] = {
-                "left_the_path": sum(r["largest_lateral_m"] > LEFT_THE_PATH_M for r in members),
+                "left_the_path": sum(1 for r in members if r["largest_lateral_m"] > LEFT_THE_PATH_M),
                 "correction_words_per_sentence": {column: sum(r["correction_words"][column] for r in members)
                                                   / len(members) for column in COLUMNS}}
     return table

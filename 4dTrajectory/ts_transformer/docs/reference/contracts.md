@@ -597,7 +597,7 @@ refuses both.
 2026-10-04 (`autopilot/closed_loop.py`, `instructions/artefact.py` `write_closed_loop` / `load_closed_loop`, runner
 `instruction_closed_loop` R50; design §4.9, D32–D34, D42). `<artefact>/closed_loop/` is written once, from a clean checkout,
 with an executor spec (C33): for each split and each row interval given (D25), `<split>_<Δ>s.npz`
-(`ts-instruction-closed-loop-v1`, refused unless every field is there and its spec sha is the artefact's): each flown
+(`ts-instruction-closed-loop-v2`, refused unless every field is there and its spec sha is the artefact's): each flown
 flight's words from its first predicted step (Δ row 16 s / Δ; row 0 says every column), which words the reading added
 (`correction`), its states on every Δ row (observed before the first predicted step, flown from it: airport-frame e/n,
 MSL height, track, ground speed, vertical rate), its errors against the observed path (`lateral_m` right positive,
