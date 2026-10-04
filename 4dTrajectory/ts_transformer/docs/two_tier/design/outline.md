@@ -93,10 +93,10 @@ they came from. Each document lists the identities of its parts.
 |---|---|---|
 | Outline | D7, D20, D21, D55 | — |
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62 | O8 |
-| Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60 | — |
+| Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63 | — |
 | Post-training | D29–D31, D36, D37 | O6 |
 
-The next free numbers: D63, O9.
+The next free numbers: D64, O9.
 
 ---
 

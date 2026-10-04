@@ -41,6 +41,7 @@ The decision numbers are shared by all documents (outline §3).
 | D41 | The design runs at an airport that is not in the training data: the number of candidates is not fixed; every input has a fixed physical scale, never a statistic of the training data; each fold of D39 flies the full closed loop at its held-out airport. The altitude words are above the airport elevation (D58), so the levels of an approach lie in the 60 m segment at any airport (§6) | Decided | User, 2026-10-04 |
 | D58 | The prior's own height is the height above the airport elevation E, as the altitude words are (vocabulary, D58). The prior gets neither E nor the MSL height (D24), so it cannot know where the round MSL levels that controllers assign lie (§2). (The words: D58 in the vocabulary) | Decided | User, 2026-10-04 |
 | D60 | Row 0 of an aircraft has no motion inputs: no state 2 s before it is stored. There, the ground speed, the vertical rate and the motion direction in each candidate vector (sine, cosine) are 0, and the own input `no_motion` is 1 (0 at every other row). The same at every Δ, in training, in closed loop and in a loop of several aircraft. Not the fitted values of the data, which use 7.5 s after the row (§2) | Decided | User, 2026-10-04, on Claude's proposal |
+| D63 | The identity of a prior's data (§8, item 1) also holds the landings that the candidate vectors count: for each airport, the sha256 of each landing's flight, runway and time, in time order, and of the number of landings left out on the sealed test days. The landings come from the airport's tracks roster, outside the artefact: without them, a changed roster would change the inputs and leave the identity the same. By their flights, never by the bytes of the roster (D21). A run that reads the landings again computes the digest again and refuses a difference (§2, §8) | Decided | User, 2026-10-04, on the reading of the stage B agent |
 
 ### 0.2 Open items
 
@@ -128,6 +129,12 @@ None.
   (the value of the left runway is always larger). The relative positions of all candidates together still show the
   layout of the airport. That is real geometry, and the prior has it; only the held-out airports of D39 can measure how
   much the prior uses it. A constant comes back only as the variant `constants` of D39.
+- **Landings (D63).** Offline, the landings come from the airport's tracks roster: every flight that the harvest
+  assigned to a candidate, with a sentence or without one, less the landings on the sealed test days (C32). A flight
+  never counts its own landing: a closed-loop sentence can fly past the time at which the observed aircraft landed, and
+  the runway of that landing is the answer of the runway word. In a loop, the caller gives the landings that the loop
+  knows. The roster is outside the artefact, so the identity of a prior's data holds a digest of the landings (§8,
+  item 1).
 - **Words in force:** the runway in force as its candidate vector ("none yet" up to the first predicted step), the
   go-around state G, the heading in force as the sine and cosine of its angle relative to the course of R, the other
   columns as embeddings, and the time since each column said its word (D17).
@@ -299,7 +306,7 @@ sets its criteria (D7). The identities follow D21 (outline §3):
 
 | # | What | Its identity |
 |---|---|---|
-| 1 | The artefact of a prior | The spec sha, the day split, the candidate table and the sha256 of the sentence files |
+| 1 | The artefact of a prior | The spec sha, the day split, the candidate table, the sha256 of the sentence files, and the landings that the candidate vectors count (D63): for each airport, the sha256 of each landing's flight, runway and time, in time order, and of the number left out on the sealed test days. A run that reads the landings again computes the digest again and refuses a difference |
 | 2 | The procedure masks of a prior | The set name, the checkpoint sha and the digests of the procedure data (C35). The procedure data are the format of the masks |
 
 ---
@@ -376,7 +383,7 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
   the campaign of B5 and writes the choice), `prior_free_generation` (the prior speaks, the executor flies). New code;
   the archived runners of the same names stay as they are.
 
-**B1. Data** (§2, §7 item 2; D13, D17, D23–D25, D32, D41, D60).
+**B1. Data** (§2, §7 item 2; D13, D17, D23–D25, D32, D41, D60, D63).
 
 - The rows: before the first predicted step, the observed states; from it on, the flown states of the closed-loop
   sentences, on the rows of the chosen Δ.
@@ -391,13 +398,16 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
   since each column said its word, in seconds.
 - The targets: the five columns of the closed-loop sentence.
 - Every scale is a constant in SI units (D41). A flight without a training sentence (vocabulary §6, item 3) is not read.
+- The landings from each airport's tracks roster, less the sealed test days, never a flight's own (§2, D63); their
+  digest in the identity of the data (§8, item 1).
 - Tests: a change of the runway word leaves the inputs of the rows up to the first predicted step the same, bit for bit
   (D23); the glidepath height against a hand computation; the motion from the 2 s displacement at Δ = 2, 4, 8 s; at row
   0 the motion inputs 0 and `no_motion` 1 at Δ = 2, 4, 8 s, also when the data have a 2 s row before row 0, and
   `no_motion` 0 at every other row (D60); a change of the stored track, ground speed and vertical rate of the states
   changes no input (only positions and heights give the motion); the flown states from the first predicted step on; a
   permutation of the candidates permutes their vectors and nothing else; an airport with more candidates than any
-  training airport is read.
+  training airport is read; a change of a landing's time or runway in the roster changes the digest of the landings, and
+  a change of another field of the roster does not; a run refuses landings whose digest differs from the identity (D63).
 
 **B2. Model** (§2, §3; D16, D41).
 
