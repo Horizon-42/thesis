@@ -205,13 +205,14 @@ def run_runner(tmp_path, monkeypatch, *more, airports=("KXXX",)):
     _, records = prior_artefact(artefact, interval_s=4.0, airports=airports)
     landings = {code: roster_landings(records[code], ("09", "09L"), fixture_days()) for code in airports}
     checked = []
-    monkeypatch.setattr(prior_train, "require_conforming_closed_loop", checked.append)
+    monkeypatch.setattr(prior_train, "require_conforming_closed_loop", lambda *given: checked.append(given) or (None, {"checks": {"stub": True}}, None))
     monkeypatch.setattr(prior_train, "airport_landings", lambda geometries, days: landings)
     procedures = tmp_path / "procedures"
     for code in airports:
         procedure_root(procedures, code, ("09", "09L"))
     out = tmp_path / "run"
-    argv = ["--instructions", str(artefact), "--row-interval-s", "4", "--variant", "full", "--out", str(out),
+    argv = ["--instructions", str(artefact), "--row-interval-s", "4", "--executor", str(tmp_path / "executor"),
+            "--variant", "full", "--out", str(out),
             "--sample", "1", "--device", "cpu", "--procedure-root", str(procedures / "procedures"),
             "--d-model", "32", "--layers", "1", "--heads", "4", "--feedforward", "64", "--max-epochs", "2",
             "--warmup-steps", "1", *more]
@@ -225,11 +226,11 @@ def test_the_runner_trains_a_smoke_run_into_a_new_directory(tmp_path, monkeypatc
     from ts_transformer.prior.source import artefact_identity
 
     artefact, landings, out, argv, checked = run_runner(tmp_path, monkeypatch)
-    assert checked == [artefact]
+    assert checked == [(artefact, tmp_path / "executor")]
     assert {p.name for p in out.iterdir()} == {"checkpoint.pt", "config.json", "memory.json", "history.json",
                                               "procedure_masks.json"}
     config = json.loads((out / "config.json").read_text())
-    assert config["sample"] == {"per_airport_and_split": 1, "seed": 1337}
+    assert config["sample"] == {"per_airport_and_split": 1, "seed": 1337} and config["checks"] == {"stub": True}
     assert config["sentences"] == {"train": 1, "select": 1}
     memory = json.loads((out / "memory.json").read_text())
     assert memory["batches"][0]["sentences"] == 1 and memory["gpu_peak_reserved_bytes"] is None

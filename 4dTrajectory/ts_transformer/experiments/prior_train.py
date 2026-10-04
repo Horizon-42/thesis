@@ -2,7 +2,8 @@
 cross-validation (D39) with ``--held-out``, stopped on the select days of its training airports (D31).
 
 Reads the sentence artefact through the vocabulary's public interface at one row interval (``--row-interval-s``), only
-for closed-loop code that passed its reference (`autopilot.closed_loop.require_conforming_closed_loop`), and each
+after the closed-loop check with the artefact's executor spec (``--executor``) passes in this process
+(`autopilot.closed_loop.require_conforming_closed_loop`, D69, D73), and each
 airport's landings from its tracks roster (D63). Never reads the validation days. Before training it checks the memory
 at the formal size: the largest batches, one forward and backward pass each on the device, and refuses
 a run that would not fit (``memory.json``).
@@ -18,7 +19,8 @@ checkpoint's sha256, the CIFP procedure documents' digests) and, for a fold, ``h
 the held-out airport's select days: the fold's score, §5).
 
     python run_ts.py prior_train --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> \\
-        --row-interval-s 2 --variant full --out <a new directory> [--held-out KSJC] [--sample 200]
+        --row-interval-s 2 --executor 4dTrajectory/outputs/POOLED/executor/<spec> \\
+        --variant full --out <a new directory> [--held-out KSJC] [--sample 200]
 """
 
 from __future__ import annotations
@@ -67,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--instructions", type=Path, required=True)
     parser.add_argument("--row-interval-s", type=float, required=True)
+    parser.add_argument("--executor", type=Path, required=True,
+                        help="the directory of the artefact's executor spec: the closed-loop check flies with it (D69, D73)")
     parser.add_argument("--variant", required=True, choices=sorted(VARIANTS))
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     parser.add_argument("--held-out", default=None, help="the fold's held-out airport (D39); none: every airport")
@@ -83,13 +87,13 @@ def main(argv: list[str] | None = None) -> int:
     for item in fields(TrainConfig):
         parser.add_argument(f"--{item.name.replace('_', '-')}", type=type(item.default), default=item.default)
     args = parser.parse_args(argv)
-    instructions, out = _absolute(args.instructions), _absolute(args.out)
+    instructions, executor, out = _absolute(args.instructions), _absolute(args.executor), _absolute(args.out)
     if out.exists():
         parser.error(f"{out} exists; a training run is never overwritten")
     git = git_state()
     if git["dirty"] and args.sample is None and not args.memory_check_only:
         parser.error("a run that is not a smoke run needs a clean tree")
-    require_conforming_closed_loop(instructions)
+    _, opened, _ = require_conforming_closed_loop(instructions, executor)   # D69: the checks run here (D73)
     device = torch.device(args.device)
 
     geometries = load_candidates(instructions)
@@ -117,7 +121,8 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True)
     write_json_atomic(out / "memory.json", memory)
     write_json_atomic(out / "config.json", {
-        "schema": CHECKPOINT_SCHEMA, "written_utc": utc_now(), "instructions": str(instructions),
+        "schema": CHECKPOINT_SCHEMA, "written_utc": utc_now(), "instructions": str(instructions), "executor": str(executor),
+        "checks": opened["checks"],
         "identity": identity, "run": run.to_dict(), "model_config": model.config.to_dict(),
         "train_config": config.to_dict(), "git": git, "device": str(device),
         "sample": sample,

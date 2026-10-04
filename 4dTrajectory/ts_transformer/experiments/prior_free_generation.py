@@ -12,18 +12,30 @@ it (its crossing, its time limit with 900 s for each go-around, or the dynamics)
 
 from __future__ import annotations
 
+import argparse
+import json
 import math
 from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
 import torch
 
+from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S
-from ts_transformer.autopilot.start import Loop
+from ts_transformer.autopilot.start import Loop, start
 from ts_transformer.instructions.airport import AirportGeometry
-from ts_transformer.instructions.artefact import ClosedLoopSentence
+from ts_transformer.instructions.artefact import (
+    ClosedLoopSentence, closed_loop_path, closed_loop_sentences, load_candidates, load_closed_loop, load_day_split,
+    load_sentences, load_spec, signals_flights,
+)
+from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
+from ts_transformer.prior.checkpoint import load_checkpoint
+from ts_transformer.prior.procedure import PROCEDURE_MASKS, airport_finals, procedure_digests
+from ts_transformer.prior.source import airport_landings, artefact_identity
+from ts_transformer.repo_layout import REPO_ROOT, git_state
 from ts_transformer.instructions.labeller.interval import interval_rows
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, UNCHANGED, Words
 from ts_transformer.prior.batch import row_tensors
@@ -32,6 +44,10 @@ from ts_transformer.prior.landings import LandingIndex, utc_s
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import Final
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS, Position, Speaker, go_around_bound
+
+
+#: The temperature of free generation: the model's own distribution (the masks applied).
+TEMPERATURE = 1.0
 
 
 @dataclass
@@ -56,8 +72,8 @@ class Generated:
 def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
                   flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
                   landings: Mapping[str, LandingIndex], finals: Mapping[str, Sequence[Final]], words: Words, *,
-                  interval_s: float, variant: str, generator: torch.Generator, device: torch.device
-                  ) -> list[Generated]:
+                  interval_s: float, variant: str, generator: torch.Generator, device: torch.device,
+                  temperature: float = 1.0) -> list[Generated]:
     """The closed loop of the flights ``order`` of ``loop`` (`autopilot.start.start`; module docstring): ``sentences``
     and ``flights`` (their records in the split's signals) by their place in the signals."""
     if loop.most_go_arounds != MOST_GO_AROUNDS:
@@ -70,7 +86,7 @@ def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Map
     elevations = np.array([g.elevation_m for g in flight_geometries])
     limit = float(loop.executor.time_limit_s.max()) + GO_AROUND_EXTRA_S * loop.most_go_arounds
     speaker = Speaker(model, words, [finals[g.code] for g in flight_geometries],
-                      capacity=start + math.ceil(limit / interval_s) + 2, generator=generator)
+                      capacity=start + math.ceil(limit / interval_s) + 2, generator=generator, temperature=temperature)
     entry = np.array([utc_s(flights[i]["entry_time_utc"]) for i in order])
     first_rows = np.array([sentences[i].first_row for i in order])
     keys = [own_flight_key(flights[i]) for i in order]
@@ -172,3 +188,127 @@ def readout(generated: Sequence[Generated], airports: Mapping[int, str], strata:
             "go_around_probability_on_final": {"rows": int(len(final)),
                                                "mean": float(final.mean()) if len(final) else None}}
     return out
+
+
+def draw(sentences: Mapping[int, ClosedLoopSentence], flights: Sequence[Mapping[str, Any]], airports: Sequence[str],
+         per_airport: int, seed: int) -> list[int]:
+    """At most ``per_airport`` flights of each of ``airports`` with a closed-loop sentence, drawn at random with ``seed``
+    (D55: never the first in order), by their place in the split's signals, in order."""
+    rng = np.random.default_rng(seed)
+    out: list[int] = []
+    for airport in airports:
+        pool = np.array(sorted(i for i in sentences if flights[i]["airport"] == airport))
+        out += sorted(rng.choice(pool, size=min(per_airport, len(pool)), replace=False).tolist())
+    return out
+
+
+def main(argv: list[str] | None = None) -> int:
+    """`python run_ts.py prior_free_generation --prior <a prior_train run> --instructions <artefact> --executor <spec>
+    --split select --airports KSJC --out <a new directory>`: free generation of a prior at the airports given (a fold's
+    held-out airport, or every airport of the base) on a split's flights: ``--per-airport`` flights drawn at random
+    (seed), each spoken ``--samples`` times. Writes into ``--out`` (new, never over an existing one; a clean tree unless
+    ``--smoke``): ``config.json``, ``sentences.jsonl`` (one row a sentence: its flight, sample, outcome, crossing, the
+    go-arounds), ``sentences.npz`` (the words, the states, the probability and permission of "go-around" and the rows on
+    the final, each sentence's by its offsets) and ``readout.json`` (`readout`, all samples together)."""
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
+    parser.add_argument("--prior", type=Path, required=True, help="a prior_train run's directory")
+    parser.add_argument("--instructions", type=Path, required=True)
+    parser.add_argument("--executor", type=Path, required=True, help="the directory of the artefact's executor spec")
+    parser.add_argument("--split", required=True, choices=("train", "select", "val"),
+                        help="a fold reads select (its held-out airport), the base its one val readout")
+    parser.add_argument("--airports", nargs="+", default=None, help="the airports spoken at (default: every one)")
+    parser.add_argument("--per-airport", type=int, default=200)
+    parser.add_argument("--samples", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=1337)
+    parser.add_argument("--chunk", type=int, default=400, help="flights flown in one loop")
+    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--out", type=Path, required=True, help="a new directory")
+    parser.add_argument("--smoke", action="store_true", help="SMOKE: allowed from a tree with changes; recorded")
+    args = parser.parse_args(argv)
+    absolute = [p if p.is_absolute() else REPO_ROOT / p for p in (args.prior, args.instructions, args.executor, args.out)]
+    prior_dir, instructions, executor_dir, out = absolute
+    if out.exists():
+        parser.error(f"{out} exists; a readout is never overwritten")
+    git = git_state()
+    if git["dirty"] and not args.smoke:
+        parser.error("a readout that is not a smoke needs a clean tree")
+    _, opened, _ = require_conforming_closed_loop(instructions, executor_dir)   # D69: the checks run here (D73)
+    device = torch.device(args.device)
+
+    geometries = load_candidates(instructions)
+    landings = airport_landings(geometries, load_day_split(instructions))
+    trained = json.loads((prior_dir / "config.json").read_text(encoding="utf-8"))
+    interval_s = float(trained["identity"]["row_interval_s"])
+    checkpoint = load_checkpoint(prior_dir / "checkpoint.pt", artefact_identity(instructions, interval_s, landings))
+    masks = json.loads((prior_dir / "procedure_masks.json").read_text(encoding="utf-8"))
+    if masks != {"set": PROCEDURE_MASKS, "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"),
+                 "procedure_data": procedure_digests(geometries)}:
+        raise SystemExit(f"{prior_dir}: the prior's procedure masks are not {PROCEDURE_MASKS} on today's procedure data "
+                         f"(§8 item 2)")
+    model = checkpoint.model.to(device)
+    finals = {code: airport_finals(geometry) for code, geometry in geometries.items()}
+    spec = load_spec(instructions)
+    sentences = closed_loop_sentences(load_closed_loop(closed_loop_path(instructions, args.split, interval_s), spec))
+    flights = signals_flights(instructions, args.split)
+    labelled_file = load_sentences(instructions, args.split, spec)
+    strata = dict(zip(labelled_file["signal_index"].tolist(), labelled_file["stratum"].tolist()))
+    airports = args.airports or sorted(geometries)
+    unknown = sorted(set(airports) - set(geometries))
+    if unknown:
+        parser.error(f"airports {unknown} are not the artefact's {sorted(geometries)}")
+    empty = sorted(set(airports) - {flights[i]["airport"] for i in sentences})
+    if empty:
+        parser.error(f"airports {empty} have no closed-loop sentence in {args.split}")
+    drawn = draw(sentences, flights, airports, args.per_airport, args.seed)
+
+    generated: list[tuple[int, Generated]] = []
+    for sample in range(args.samples):
+        for begin in range(0, len(drawn), args.chunk):
+            chunk = drawn[begin: begin + args.chunk]
+            loop, order = start(instructions, args.split, interval_s, {i: sentences[i] for i in chunk}, executor_dir,
+                                most_go_arounds=MOST_GO_AROUNDS, device=device)
+            generator = torch.Generator(device=device).manual_seed(args.seed + 1_000_003 * sample + begin)
+            generated += [(sample, g) for g in speak_and_fly(
+                model, loop, order, sentences, dict(enumerate(flights)), geometries, landings, finals, loop.words,
+                interval_s=interval_s, variant=model.config.variant, generator=generator, device=device,
+                temperature=TEMPERATURE)]
+            print(f"sample {sample}: {begin + len(chunk)} of {len(drawn)} flights", flush=True)
+
+    out.mkdir(parents=True)
+    write_json_atomic(out / "config.json", {
+        "written_utc": utc_now(), "prior": str(prior_dir), "prior_run": checkpoint.run,
+        "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"), "identity": checkpoint.identity,
+        "instructions": str(instructions), "executor": str(executor_dir), "checks": opened["checks"],
+        "split": args.split, "row_interval_s": interval_s, "airports": airports, "per_airport": args.per_airport,
+        "samples": args.samples, "seed": args.seed, "chunk": args.chunk, "temperature": TEMPERATURE, "drawn": len(drawn),
+        "procedure_masks": PROCEDURE_MASKS, "most_go_arounds": MOST_GO_AROUNDS, "git": git, "smoke": args.smoke,
+        "device": str(device)})
+    with open(out / "sentences.jsonl", "w", encoding="utf-8") as rows:
+        for sample, g in generated:
+            rows.write(json.dumps({"index": g.index, "dataset_id": flights[g.index]["dataset_id"],
+                                   "airport": flights[g.index]["airport"], "stratum": strata[g.index], "sample": sample,
+                                   "outcome": g.outcome, "crossing": g.crossing, "timed_out": g.timed_out,
+                                   "go_arounds": g.go_arounds, "rows": len(g.words)}) + "\n")
+
+    def offsets(items):
+        return np.concatenate(([0], np.cumsum([len(item) for item in items]))).astype(np.int64)
+
+    sentences_only = [g for _, g in generated]
+    np.savez_compressed(
+        out / "sentences.npz", index=np.array([g.index for g in sentences_only]),
+        sample=np.array([s for s, _ in generated]), offsets=offsets([g.words for g in sentences_only]),
+        words=np.concatenate([g.words for g in sentences_only]),
+        go_around_probability=np.concatenate([g.go_around_probability for g in sentences_only]),
+        go_around_permitted=np.concatenate([g.go_around_permitted for g in sentences_only]),
+        on_final=np.concatenate([g.on_final for g in sentences_only]),
+        state_offsets=offsets([g.states for g in sentences_only]),
+        states=np.concatenate([g.states for g in sentences_only]))
+    write_json_atomic(out / "readout.json", readout(
+        sentences_only, {i: flights[i]["airport"] for i in drawn}, strata,
+        {i: sentences[i].grid for i in drawn}))
+    print(json.dumps({"out": str(out), "sentences": len(generated)}))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
