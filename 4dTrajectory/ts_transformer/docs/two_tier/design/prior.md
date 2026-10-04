@@ -12,7 +12,8 @@ against the STE dictionary. Units are SI only (m, m/s, deg, s). Values in feet, 
 quotations of regulations, with the SI value given one time.
 
 **Scope of this document.** This document is complete for its part. The principles and the shared rules are in the
-outline (`outline.md`). The code of stage B is not written yet (§0.3); the code that it replaces is archived (§11).
+outline (`outline.md`). The code of stage B is on the branch `dev-two-tier-v4-prior` (§0.3); the code that it
+replaces is archived (§11).
 Paths in backticks are relative to `4dTrajectory/ts_transformer/` unless they start with `4dTrajectory/` or name the
 repository root; `readouts/` is `docs/two_tier/readouts/`. The documents of the earlier design (`*_design.zh.md`,
 `two_tier_framework.zh.md`, `two_tier_stage_notes.zh.md`) are in `archive/two_tier_v3_2026_10/docs/`.
@@ -309,8 +310,12 @@ The rules, fixed before the runs:
   airport (top-1); free generation at the held-out airport (200 flights × 2 sentences): its outcomes (vocabulary §6,
   item 6) and the words for each column.
 
-The cost, Claude's estimate before the smoke of B3: approximately 50 min for one run on four fifths of the data, so
-approximately 25 h of GPU for steps 1–3, and 1–2 h for the free generation of the folds.
+The cost, Claude's estimate from the smoke of B3 (`v9_20261004`, Δ = 2 s, configuration A): approximately 45 s an
+epoch on a fold and 55 s on all five airports, so at most approximately 25 min for one run of 30 epochs, and
+approximately 13 h of GPU for the 31 runs if each run costs as much as A (B is smaller, C is larger). The runs use
+Δ = 4 s, where a sentence has half the rows. Before B5, the memory check and the time are measured again at Δ = 4 s
+with configurations A and C (§0.3); that measurement replaces this estimate. The free generation of the folds is not
+measured on real data: Claude's estimate before the smoke, 1–2 h.
 
 ## 6 Running at a new airport
 
