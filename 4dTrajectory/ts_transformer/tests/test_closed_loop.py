@@ -533,10 +533,10 @@ def _reference(tmp_path, monkeypatch, results):
     target.parent.mkdir(parents=True)
     monkeypatch.setattr(closed_loop, "_reference_results",
                         lambda instructions, p, w, intervals, device: {2.0: (["KXXX:test"], [sentence])})
-    closed_loop.write_reference(tmp_path, params, words, [2.0], git={"dirty": False}, target=target)
+    closed_loop.write_reference(tmp_path, params, words, [2.0], git={"dirty": True}, target=target)
     monkeypatch.setattr(closed_loop, "_reference_results",
                         lambda instructions, p, w, intervals, device: {2.0: results(sentence)})
-    return closed_loop.check(tmp_path, params, words, git={"dirty": False})
+    return closed_loop.check(tmp_path, params, words)
 
 
 def test_the_conformance_check_passes_the_same_reading_and_finds_every_change(tmp_path, monkeypatch):
@@ -560,6 +560,32 @@ def test_the_conformance_check_passes_the_same_reading_and_finds_every_change(tm
     assert not flags.passed and "the uncorrectable differ" in str(flags.mismatches)
     refused = _reference(tmp_path / "refused", monkeypatch, lambda s: (["KXXX:test"], [Refused("too short")]))
     assert not refused.passed
+
+
+def test_reading_closed_loop_sentences_runs_the_checks_and_refuses_a_difference_by_name(tmp_path, monkeypatch):
+    """D69, D73: `require_conforming_closed_loop` opens the executor spec (the labeller's and the executor's checks) and
+    reads the closed-loop reference again, every time: alike, it returns what `open_executor` returns and writes nothing;
+    a reading off the reference is refused by name."""
+    from dataclasses import replace
+
+    _reference(tmp_path, monkeypatch, lambda s: (["KXXX:test"], [s]))
+    batch, inputs, words = _batch()
+    monkeypatch.setattr(replay, "CHECKED", {})
+    monkeypatch.setattr(replay, "open_executor",
+                        lambda executor, instructions: (_params(), {"sha256": "e", "checks": {"executor": "x"}}, words))
+    before = sorted(p.name for p in (tmp_path / closed_loop.CLOSED_LOOP_DIRECTORY / closed_loop.CONFORMANCE).iterdir())
+    params, record, opened_words = closed_loop.require_conforming_closed_loop(tmp_path, tmp_path / "executor")
+    assert params == _params() and opened_words is words and record["sha256"] == "e"
+    assert record["checks"]["executor"] == "x" and record["checks"]["closed_loop"]["flights"] == 1
+    assert sorted(p.name for p in (tmp_path / closed_loop.CLOSED_LOOP_DIRECTORY / closed_loop.CONFORMANCE).iterdir()) \
+        == before
+    monkeypatch.setattr(closed_loop, "_reference_results", lambda instructions, p, w, intervals, device: {
+        2.0: (["KXXX:test"], [replace(s, states=s.states + 1e-3) for s in [closed_loop.read(batch, inputs, _params(),
+                                                                                             words, device=CPU)[0]]])})
+    closed_loop.require_conforming_closed_loop(tmp_path, tmp_path / "executor")     # checked once in this process
+    replay.CHECKED.clear()                                                          # a new process checks again
+    with pytest.raises(ValueError, match=f"reads {tmp_path.name}'s closed-loop reference otherwise: 2 s"):
+        closed_loop.require_conforming_closed_loop(tmp_path, tmp_path / "executor")
 
 
 def test_the_replay_refuses_a_sentence_of_another_first_row(monkeypatch):
@@ -869,3 +895,62 @@ def test_the_replay_reads_the_speed_words_and_how_far_along_the_path_the_flown_a
     assert read["slow"]["speed_words"] == read["slow_4"]["speed_words"] == 1
     assert read["slow"]["largest_along_m"] > 1000.0 > read["observed"]["largest_along_m"]
     assert read["slow_4"]["largest_along_m"] == pytest.approx(read["slow"]["largest_along_m"], rel=0.1)
+
+
+def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(tmp_path, monkeypatch):
+    """`instruction_closed_loop --workers N` reads each split (drawn once, every row interval in turn) in its own process:
+    the files and the summary are those of one process. Synthetic flights have no harvest: their draw and executor inputs stand in."""
+    import json as json_module
+
+    from ts_transformer.autopilot.flights import FlightInputs
+    from ts_transformer.experiments import instruction_closed_loop as runner
+    from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals
+    from ts_transformer.tests.test_instruction_conformance import _artefact as labelled_artefact
+
+    clean = {"head": "h", "dirty": False}
+
+    def draw(directory, split, one, words, *, per_airport, seed, groups):
+        stored, signals, geometries = load_sentences(directory, split, one), load_signals(directory, split), \
+            load_candidates(directory)
+        indices = [int(i) for i in stored["signal_index"]]
+        readings = [read_flight(signals[i], geometries[signals[i].airport], one, words) for i in indices]
+        return replay.Drawn(indices=indices, signals=[signals[i] for i in indices], series=[None] * len(indices),
+                            groups=[replay.OWN] * len(indices), geometries=geometries,
+                            description={"split": split, "excluded": {}, "flights": len(indices)}), readings
+
+    def inputs(batch, step_s, *, device):
+        start = closed_loop.start_row(batch.row_interval_s) * int(round(batch.row_interval_s / step_s))
+        parts = [executor_inputs(s, g, start) for s, g in zip(batch.signals, batch.geometries)]
+        return FlightInputs(*(torch.cat([getattr(p, name) for p in parts])
+                              for name in ("initial_state", "aero_params", "frame_params", "max_thrust_n")))
+
+    words = Words(spec())
+    monkeypatch.setattr(replay, "open_executor",
+                        lambda executor, instructions: (_params(), {"sha256": "e", "checks": {}}, words))
+    monkeypatch.setattr(replay, "draw_readings", draw)
+    monkeypatch.setattr(replay, "flight_approach_ias_mps", lambda series, group: approach_speed_ias_mps("A320", 62000.0))
+    monkeypatch.setattr(closed_loop, "start_inputs", inputs)
+    monkeypatch.setattr(runner, "git_state", lambda: clean)
+    monkeypatch.setattr(runner, "POOL_OPTIONS", {"start_method": "fork"})
+    read = {}
+    for workers in (1, 2):
+        directory = labelled_artefact(tmp_path / f"w{workers}", monkeypatch)
+        assert runner.main(["--instructions", str(directory), "--executor", str(tmp_path), "--row-interval-s", "2", "8",
+                            "--workers", str(workers)]) == 0
+        files = sorted(p.name for p in (directory / "closed_loop").glob("*.npz"))
+        summary = json_module.loads((directory / "closed_loop" / "summary.json").read_text(encoding="utf-8"))
+        summary.pop("written_utc")
+        arrays = {}
+        for name in files:
+            with np.load(directory / "closed_loop" / name) as data:
+                arrays[name] = {key: data[key] for key in data.files}
+        read[workers] = (files, summary, arrays)
+    assert read[1][0] == read[2][0] == ["select_2s.npz", "select_8s.npz", "train_2s.npz", "train_8s.npz",
+                                        "val_2s.npz", "val_8s.npz"]
+    assert read[1][1] == read[2][1] and list(read[2][1]["splits"]) == ["train", "select", "val"]
+    for name in read[1][0]:
+        for key, value in read[1][2][name].items():
+            assert np.array_equal(value, read[2][2][name][key], equal_nan=value.dtype.kind == "f"), (name, key)
+    with pytest.raises(SystemExit):
+        runner.main(["--instructions", str(tmp_path / "w1"), "--executor", str(tmp_path), "--row-interval-s", "2",
+                     "--workers", "0"])

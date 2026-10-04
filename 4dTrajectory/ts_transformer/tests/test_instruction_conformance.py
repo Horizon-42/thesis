@@ -1,5 +1,5 @@
 """The labelling runner and the labeller's conformance (vocabulary §7.2 #2, D21; `instructions.conformance`): the reference
-written with the sentences, read again by today's code, the passed record that later runners ask for."""
+written with the sentences, read again by the code in the process before every use (D73)."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def _artefact(directory: Path, monkeypatch, *, straight_in: bool = False) -> Pat
     directory.mkdir()
     write_signals(directory, flights, {"note": "test"}, fixture_days())
     write_candidates(directory, {"KXXX": instruction_airport()})
-    write_spec(directory, spec(), {"n": 1}, {"labeller_code_sha256": conformance.labeller_code_sha256(), "git": CLEAN})
+    write_spec(directory, spec(), {"n": 1}, {"git": CLEAN})
     monkeypatch.setattr(instruction_labels, "CHUNK", 2)
     monkeypatch.setattr(instruction_labels, "git_state", lambda: CLEAN)
     assert instruction_labels.main(["--dir", str(directory), "--workers", "1"]) == 0
@@ -48,7 +48,7 @@ def test_the_labels_runner_maps_each_sentence_to_its_signals_row_and_writes_the_
     directory = _artefact(tmp_path / "a", monkeypatch)
     train = load_sentences(directory, "train", spec())
     assert train["signal_index"].tolist() == [0, 2]
-    assert str(train["labeller_code_sha256"]) == conformance.labeller_code_sha256()
+    assert "labeller_code_sha256" not in train                                  # D73: no digest of code
     labels = json.loads((directory / "labels.json").read_text(encoding="utf-8"))
     assert [r["dataset_id"] for r in labels["train"]["labelled"]] == ["KXXX:a", "KXXX:c"]
     assert [(r["dataset_id"], r["reason"]) for r in labels["train"]["refused"]] == [("KXXX:b", "impossible ground speed")]
@@ -64,23 +64,21 @@ def test_the_labels_runner_maps_each_sentence_to_its_signals_row_and_writes_the_
         instruction_labels.main(["--dir", str(directory), "--workers", "1"])
 
 
-def test_the_conformance_passes_on_the_same_code_and_writes_the_record_runners_ask_for(tmp_path, monkeypatch):
-    directory = _artefact(tmp_path / "a", monkeypatch)
-    with pytest.raises(ValueError, match="has not been checked"):
-        conformance.require_conforming_labeller(directory)
-    checked = conformance.check(directory, git=CLEAN)
-    assert checked.passed and checked.flights == 3
-    with pytest.raises(RuntimeError, match="clean checkout"):
-        conformance.write_passed(directory, conformance.check(directory, git={"head": "h", "dirty": True}),
-                                 git={"head": "h", "dirty": True})
-    path = conformance.write_passed(directory, checked, git=CLEAN)
-    assert path.name == f"passed-{conformance.labeller_code_sha256()[:12]}.json"
-    conformance.require_conforming_labeller(directory)
-    # another labeller code: its own record is missing
-    monkeypatch.setattr(conformance, "labeller_code_sha256", lambda: "f" * 64)
-    with pytest.raises(ValueError, match="has not been checked"):
-        conformance.require_conforming_labeller(directory)
+def test_the_check_runs_where_the_labeller_is_used_and_refuses_a_difference_by_name(tmp_path, monkeypatch):
+    """D73: `require_conforming_labeller` reads the reference again every time — the labeller in the process reads it as
+    it was read: it passes with nothing run beforehand and writes nothing; a rule that moves the words is refused by
+    name."""
+    from ts_transformer.instructions.labeller import lateral
 
+    directory = _artefact(tmp_path / "a", monkeypatch)
+    before = sorted(p.name for p in (directory / conformance.DIRECTORY).iterdir())
+    checked = conformance.require_conforming_labeller(directory)
+    assert checked.passed and checked.flights == 3
+    assert sorted(p.name for p in (directory / conformance.DIRECTORY).iterdir()) == before == [
+        "reference.json", "reference.npz"]
+    monkeypatch.setattr(lateral, "_snap", lambda value, step: np.floor(value / step) * step)
+    with pytest.raises(ValueError, match="the labeller reads 2 of a's 3 reference flights otherwise: KXXX:a"):
+        conformance.require_conforming_labeller(directory)
 
 def test_the_conformance_fails_when_a_labeller_rule_changes(tmp_path, monkeypatch):
     from ts_transformer.instructions.labeller import lateral, read
@@ -88,11 +86,9 @@ def test_the_conformance_fails_when_a_labeller_rule_changes(tmp_path, monkeypatc
     directory = _artefact(tmp_path / "a", monkeypatch)
     # the heading grid read toward the lower cell: the words move
     monkeypatch.setattr(lateral, "_snap", lambda value, step: np.floor(value / step) * step)
-    checked = conformance.check(directory, git=CLEAN)
+    checked = conformance.check(directory)
     assert set(checked.mismatches) == {"KXXX:a", "KXXX:c"}
     assert all("the words differ (2 s rows)" in problems for problems in checked.mismatches.values())
-    with pytest.raises(ValueError, match="read otherwise"):
-        conformance.write_passed(directory, checked, git=CLEAN)
     monkeypatch.undo()
     # a refusal that moves is found too: the ground-speed refusal no longer refuses
     original = read.admit
@@ -100,7 +96,7 @@ def test_the_conformance_fails_when_a_labeller_rule_changes(tmp_path, monkeypatc
     def lenient(signals, geometry, one):
         return original(signals, geometry, spec(ground_speed_floor_mps=5.0))
     monkeypatch.setattr(read, "admit", lenient)
-    checked = conformance.check(directory, git=CLEAN)
+    checked = conformance.check(directory)
     assert checked.mismatches["KXXX:b"] == [
         "reason: 'ground speed outside the speed words', the reference 'impossible ground speed'"]
 
@@ -119,7 +115,7 @@ def test_the_conformance_reads_the_interval_grids_and_finds_a_change_of_their_ru
         assert {"words_2s", "words_4s", "words_8s"} <= set(data.files)
         assert len(data["word_offsets_4s"]) == 3 and data["word_offsets_4s"][-1] > 0
     monkeypatch.setattr(interval, "last_heard_row", lambda row, every: int(row + every / 2.0))
-    checked = conformance.check(directory, git=CLEAN)
+    checked = conformance.check(directory)
     assert set(checked.mismatches) == {"KXXX:a", "KXXX:c"}
     problems = {p for found in checked.mismatches.values() for p in found}
     assert "the words differ (2 s rows)" not in problems and "the words differ (4 s rows)" in problems
@@ -142,9 +138,9 @@ def test_a_delta_grid_that_refuses_a_sentence_is_held_as_its_reason_and_no_rows(
     assert all(o["interval_refusals"] == {"8": "too short"} for o in reference["outcomes"] if o["status"] == "labelled")
     with np.load(directory / "conformance" / "reference.npz") as data:
         assert data["word_offsets_8s"].tolist() == [0, 0, 0] and data["word_offsets_4s"][-1] > 0
-    assert conformance.check(directory, git=CLEAN).passed
+    assert conformance.check(directory).passed
     monkeypatch.setattr(conformance, "on_utc_grid", original)
-    checked = conformance.check(directory, git=CLEAN)
+    checked = conformance.check(directory)
     assert set(checked.mismatches) == {"KXXX:a", "KXXX:c"}
     assert all(any(p.startswith("interval_refusals") for p in found) and "the words differ (8 s rows)" in found
                for found in checked.mismatches.values())
@@ -156,10 +152,10 @@ def test_a_reference_of_another_schema_or_spec_is_refused(tmp_path, monkeypatch)
     payload = json.loads(path.read_text(encoding="utf-8"))
     path.write_text(json.dumps({**payload, "schema": "ts-instruction-conformance-reference-v0"}), encoding="utf-8")
     with pytest.raises(ValueError, match=f"is not a {conformance.REFERENCE_SCHEMA} file"):
-        conformance.check(directory, git=CLEAN)
+        conformance.check(directory)
     path.write_text(json.dumps({**payload, "spec_sha256": "0" * 64}), encoding="utf-8")
     with pytest.raises(ValueError, match="read with spec 000000000000"):
-        conformance.check(directory, git=CLEAN)
+        conformance.check(directory)
 
 
 def test_the_draw_takes_labelled_and_refused_flights_of_every_airport(monkeypatch):
@@ -173,12 +169,6 @@ def test_the_draw_takes_labelled_and_refused_flights_of_every_airport(monkeypatc
     assert sorted(picked) == [("KAAA", "labelled"), ("KAAA", "labelled"), ("KAAA", "refused"),
                               ("KBBB", "labelled"), ("KBBB", "labelled"), ("KBBB", "refused")]
 
-
-def test_the_code_name_covers_the_code_that_decides_a_sentence_file_only():
-    covered = {label for label, _ in conformance.labeller_code_files()}
-    assert {"spec.py", "words.py", "grammar.py", "envelope.py", "labeller/read.py", "labeller/go_around.py",
-            "labeller/interval.py", "readout.py", "final_approach.crossing"} <= covered      # readout: the stratum (D70)
-    assert not covered & {"artefact.py", "figures.py", "measure.py", "conformance.py", "__init__.py"}
 
 
 def test_the_sentence_file_stores_each_flight_s_stratum_from_the_one_definition(tmp_path, monkeypatch):
@@ -212,9 +202,9 @@ def test_a_changed_stratum_fails_the_conformance_by_name(tmp_path, monkeypatch):
     from ts_transformer.instructions import readout
 
     directory = _artefact(tmp_path / "a", monkeypatch, straight_in=True)
-    assert conformance.check(directory, git=CLEAN).passed
+    assert conformance.check(directory).passed
     monkeypatch.setattr(readout, "VECTORED_TURN_DEG", 1000.0)       # every flight straight-in: the vectored ones move
-    checked = conformance.check(directory, git=CLEAN)
+    checked = conformance.check(directory)
     assert checked.mismatches == {flight: ["stratum: 'straight-in', the reference 'vectored'"]
                                   for flight in ("KXXX:a", "KXXX:c")}
 

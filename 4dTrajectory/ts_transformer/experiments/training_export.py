@@ -11,8 +11,9 @@ formal replay row, and must give it back.
 CHECKED, NOT TRUSTED. Every flight is read again by the labeller and must give its stored sentence (words and runway);
 every closed-loop sentence is flown again here from its first predicted step (`training_flights`, the setup the live
 executor shares; `replay.fly_batch`) and must give its stored states on every 2 s row (within the executor conformance's bound) and its
-formal replay row's outcome. The executor spec opens only for the code that conforms to it (`replay.open_executor`), the
-closed-loop sentences only for the code that reads them as they were read (`closed_loop.require_conforming_closed_loop`).
+formal replay row's outcome. The executor spec opens, and the closed-loop sentences are read, only for the code in the
+process that passes the labeller's, the executor's and the closed loop's checks, run here first
+(`closed_loop.require_conforming_closed_loop`, D73).
 
 WRITES a set ``<root>/<airport>/training/<set-id>/sample.json`` and its entry in ``<root>/<airport>/training/index_v4.json``
 (`training_files`), never the instruction-v3 view's ``training/index.json``; refused when the set exists. Every airport
@@ -373,8 +374,7 @@ def main(argv: list[str] | None = None) -> int:
     git = git_state()
     if git["dirty"]:
         parser.error("the tree has uncommitted changes; a Training set is exported from a commit")
-    params, record, words = replay.open_executor(executor, instructions)
-    closed_loop.require_conforming_closed_loop(instructions)
+    params, record, words = closed_loop.require_conforming_closed_loop(instructions, executor)
     spec = words.spec
     signals_record = json.loads((instructions / "signals.json").read_text(encoding="utf-8"))
     airports = args.airports or sorted({source["airport"] for source in signals_record["sources"]})

@@ -234,7 +234,7 @@ class SetUpTest(unittest.TestCase):
 
         one = flight(2.0)
         backend = AutopilotSegmentBackend(airports_root=self.root)
-        with mock.patch("ts_transformer.autopilot.replay.open_executor",
+        with mock.patch("ts_transformer.autopilot.closed_loop.require_conforming_closed_loop",
                         return_value=(one.params, {"sha256": "another"}, one.words)):
             with self.assertRaisesRegex(ValueError, "the set was exported with fixture"):
                 backend.executor_for(self.sample)

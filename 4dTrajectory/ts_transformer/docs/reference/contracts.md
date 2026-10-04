@@ -406,7 +406,8 @@ nothing reads the CIFP after the first runner — and every runway end the harve
 E is `reference.elevation_m`), `spec.json` + `measurements.json`,
 `sentences_{train,select,val}.npz` + `labels.json` + `readout.{json,md}`, `conformance/` (below) and, once an executor spec
 flies them, `closed_loop/` (C38). Every file code reads back carries its format's name (`SIGNALS_SCHEMA`,
-`CANDIDATES_SCHEMA`, `SPEC_SCHEMA` `ts-instruction-spec-v7`, `SENTENCES_SCHEMA` `ts-instruction-sentences-v5`: since A27 (D70) each sentence's stratum by its name, `readout.stratum`
+`CANDIDATES_SCHEMA`, `SPEC_SCHEMA` `ts-instruction-spec-v8`, `SENTENCES_SCHEMA` `ts-instruction-sentences-v6` (v8 / v6 since A29, D73: no digest of
+code in either): since A27 (D70) each sentence's stratum by its name, `readout.stratum`
 of its reading — for readouts and strata, never an input) and is
 refused under any other; **a name changes with its file's shape**, in the same change (2026-09-24, the user's rule). The
 spec's sha covers every word, grid, class, tolerance and the reading rule (`instructions.spec.READING_RULE`,
@@ -419,11 +420,14 @@ missing or extra key and another reading rule — no compatibility.
 recorded `labeller_source_sha256` and every runner refused other code): `instruction_labels` writes `conformance/` — a
 fixed reference sample (`instructions.conformance`: train, seed 1337, 50 labelled and 10 refused flights an airport, their
 signals, outcomes and word grids; since A15 (v2; v3 since A20, D58; v4 since A27, D70: a labelled flight's record holds its
-stratum), `ts-instruction-conformance-reference-v4`, each labelled sentence's word
-grid also on its UTC Δ grid at 4 and 8 s, `labeller.interval.on_utc_grid`, or why that grid refuses it, D49) — and a
-`passed-<code12>.json` is written for each labeller code that reads it again the same, on the 2 s rows and every Δ grid (`check`, runner `instruction_conformance`, from a clean checkout; the code is named by the LOGIC of
-`LABELLER_MODULES`, `io_utils.logic_sha256`; since A27 `readout.py` among them, its `stratum` stored). `require_conforming_labeller` asks for it before labelling, measuring a spec
-or replaying; the sentence files record which code wrote them, as information.
+stratum; v5 since A29, D73: no digest of code), `ts-instruction-conformance-reference-v5`, each labelled sentence's word
+grid also on its UTC Δ grid at 4 and 8 s, `labeller.interval.on_utc_grid`, or why that grid refuses it, D49), in the run
+that writes the labels. **Since A29 (D73, 2026-10-04) there is no passed record and no digest of code**: every process
+that uses the labeller on an artefact reads the reference again first, on the 2 s rows and every Δ grid
+(`require_conforming_labeller` → `check`, 1.7 s on a formal artefact: opening an executor spec for it, a replay, the closed
+loop, the backend at its start, the figures), and a difference refuses by name; `instruction_conformance` runs the same
+check as information. (Until A29 a `passed-<code12>.json` per labeller code, named by the logic of `LABELLER_MODULES`,
+stood in for the check.)
 
 A sentence's words line up row for row with the FIRST `len(words)` rows of its flight's signals (`signal_index` names
 the flight): the sentence ends before its landing — the harvest's and the evaluator's condition (`read.landing_passages`:
@@ -511,26 +515,25 @@ split's test).
 ### C33 · the executor spec: written once, opened for executor code that flies its reference tracks within the bounds
 
 2026-09-24 (`autopilot/spec.py`, `autopilot/replay.py`), **changed 2026-10-01 (the user): the executor is checked by what
-it flies, not by its source**; v4 (`ts-executor-spec-v8`, vocabulary §5, §7.2 #3, §12.1 A4–A6, A19, A20: one word clock — a
-sentence said on its own rows, D57 — and a level word flown at T + E MSL, D58). An executor spec is a directory
+it flies, not by its source**, **and since A29 (D73, 2026-10-04) every time it is opened**; v5 (`ts-executor-spec-v9`,
+vocabulary §5, §7.2 #3, §12.1 A4–A6, A19, A20, A29: one word clock — a sentence said on its own rows, D57 — a level word
+flown at T + E MSL, D58 — and no digest of code, D73). An executor spec is a directory
 written once (`spec.json` + `measurements.json`, an existing file refuses): the parameters under their own sha
 (`ExecutorParams`: cycle, roll rate, τ_γ, γ̇_max factor, timeout factor — every value from the vocabulary, the
 procedure standards or a fixed choice, nothing from data; the decision-altitude check has none, D38), the vocabulary spec
-sha it was measured against, and `source`: the logic hash of the executor code that measured it (`executor_source_sha256`
-over `executor_source_files`: every `autopilot/` module but `spec.py` plus the repository modules they import directly, by
-module name — `evaluation.thresholds` among them; each file's LOGIC, docstrings and comments free). Beside it,
+sha it was measured against, and `source` (the git state and the labeller check's count, information). Beside it,
 `conformance/` (`autopilot/conformance.py`, runner `executor_conformance`, R42): the REFERENCE TRACKS — 50 labelled train
 flights an airport (the replay's draw, seed 1337, own dynamics) flown on their labelled words by the code that measured
-the spec, every cycle and every verdict, with each flight's input digest — and one `passed-<code12>.json` for each
-executor code that flew them again within the bounds in EVERY way the executor flies (single-aircraft batch,
-multi-aircraft batch with staggered starts, the single-flight executor): states ≤ 1e-6 m horizontally and vertically,
-other floats ≤ 1e-6, every limit, mode, done cycle, outcome and word verdict equal. `replay.open_executor` refuses a spec of
-another schema or vocabulary, and opens it only for executor code with a passed record against its reference
-(`spec.require_conforming_executor`) and labeller code with one against the artefact's (C30); `replay.open_spec` opens it
-without, for the check itself. **A code change whose tracks stay within the bounds needs one check (~30 s), and no spec,
-training or readout is redone; one that leaves them needs a new spec.** `executor_spec` writes a new spec's reference and
-passed record with it, from a clean checkout. Every `autopilot/` module counts, so a change to `closed_loop.py` or
-`replay.py` asks for the check too.
+the spec in the run that writes it, every cycle and every verdict, with each flight's input digest (a digest of DATA: the
+inputs the flight is flown from). `replay.open_executor` refuses a spec of another schema or vocabulary, then runs the
+labeller's check (C30) and the executor's (`conformance.require_conforming_executor`, ~27 s on a formal spec): the
+reference flown again in EVERY way the executor flies (single-aircraft batch, multi-aircraft batch with staggered starts,
+the single-flight executor), states ≤ 1e-6 m horizontally and vertically, other floats ≤ 1e-6, every limit, mode, done
+cycle, outcome and word verdict equal — a difference refuses by name, the largest differences are printed for the run's
+log; `replay.open_spec` opens it without, for the check itself. **A code change whose tracks stay within the bounds opens
+everything with nothing run beforehand, and no spec, training or readout is redone; one that leaves them needs a new
+spec.** No passed record, no digest of code (until A29 a `passed-<code12>.json` named by the logic of every `autopilot/`
+module stood in for the check), no clean-checkout rule for a check; `executor_conformance` runs it as information.
 
 ### C34 · a prior checkpoint belongs to one sentence artefact
 
@@ -607,9 +610,9 @@ refuses both.
 2026-10-04 (`autopilot/closed_loop.py`, `instructions/artefact.py` `write_closed_loop` / `load_closed_loop` /
 `closed_loop_sentences` — since A22 (D61) the public reader: each sentence a `ClosedLoopSentence` with its first row, words,
 correction marks, all its states on the 2 s rows (`STATE_COLUMNS`) with the Δ rows marked — runner
-`instruction_closed_loop` R50; design §4.9, D32–D34, D42, D44–D46). `<artefact>/closed_loop/` is written once, from a clean checkout,
+`instruction_closed_loop` R50; design §4.9, D32–D34, D42, D44–D46). `<artefact>/closed_loop/` is written once, from a clean checkout (it records the commit),
 with an executor spec (C33): for each split and each row interval given (D25), `<split>_<Δ>s.npz`
-(`ts-instruction-closed-loop-v5`, refused unless every field is there and its spec sha is the artefact's): each flown
+(`ts-instruction-closed-loop-v6` since A29, D73; refused unless every field is there and its spec sha is the artefact's): each flown
 flight's words from its first predicted step (Δ row 16 s / Δ; row 0 says every column), which words the reading added
 (`correction`), its states on the data's 2 s rows from its first row to its last said row, its Δ rows marked
 (`on_interval`, D51, since A15; v3 stored the Δ rows only), observed before the first predicted step, flown from it — a
@@ -642,15 +645,20 @@ spec's `closed_loop_lateral_m`; vertically `closed_loop_final_vertical_m`, H_fin
 `closed_loop_vertical_m`, 15 m, elsewhere — one definition, `closed_loop.vertical_tolerance_m`, which the rule of D50 and
 the readings of D34 read at each row, D66), ending under half of it, at a sign change or at a new observed word;
 a level hold is the executor's capture of the level in force (Claude's reading). `conformance/` holds a reference sample
-(train, seed 1337, 10 flights an airport, every row interval written) and a `passed-<code12>.json` per code (the logic of
-the executor's files and the labeller's) that reads it again with the same words, flags and refusals and states within
-1e-6 m; `require_conforming_closed_loop` asks for it before `executor_replay --closed-loop`, which refuses sentences of
+(train, seed 1337, 10 flights an airport, every row interval written), written with the sentences; every process that
+reads closed-loop sentences or flies them again first calls `require_conforming_closed_loop(artefact, executor_dir)` (D69,
+D73): it opens the spec (the labeller's and the executor's checks) and reads the reference again — the same words, flags
+and refusals and states within 1e-6 m (16.5 s on a formal artefact) — refusing by name, and returns what
+`replay.open_executor` returns; no passed record (until A29 one per code, named by a digest of the executor's and the
+labeller's logic). So `executor_replay --closed-loop`, which refuses sentences of
 other executor parameters, flies each from its first predicted step on the time clock and requires each flight to fly its
 stored states again.
 
 **The start of a closed loop** (vocabulary §6 item 5, D67, §12.1 A26; `autopilot/start.py`, 2026-10-04): `start(instructions,
-split, Δ, sentences, params, words, most_go_arounds=…)` takes closed-loop sentences as `closed_loop_sentences` gives them
-and returns a `Loop` at each flight's first predicted step — the flight rebuilt and compared with its stored signals
+split, Δ, sentences, executor_dir, most_go_arounds=…)` takes closed-loop sentences as `closed_loop_sentences` gives them and
+the executor spec's DIRECTORY (since A28, D71: it opens the spec itself with `replay.open_executor` — the spec's vocabulary
+against the artefact's, the labeller and executor conformance — so no caller handles executor parameters; the words are the
+artefact's) and returns a `Loop` at each flight's first predicted step — the flight rebuilt and compared with its stored signals
 (`flights.rebuild_series`), its aircraft and approach speed by the replay's rule, its time limit (`start.time_limit_s`: the
 observed time left from the first predicted step to the end of its labelled sentence × the timeout factor) and 900 s for
 each go-around up to the most given. `Loop.step(words [B, 5])` flies one Δ row and gives the states of the 2 s rows

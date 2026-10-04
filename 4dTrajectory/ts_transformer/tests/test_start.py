@@ -34,10 +34,23 @@ def _params():
                           timeout_factor=1.5)
 
 
+def _executor(directory, artefact, params, vocabulary_sha256, *, reference=True):
+    """An executor spec at ``directory`` measured against ``vocabulary_sha256``; with ``reference``, its reference
+    tracks written with it (the artefact's flight from row 0, `conformance.draw_reference_batch` standing in for the
+    draw: no harvest), so opening it flies them again (D73)."""
+    from ts_transformer.autopilot import conformance
+    from ts_transformer.autopilot import spec as executor_spec
+
+    executor_spec.write_spec(directory, params, vocabulary_sha256, {}, {"git": {"head": "x", "dirty": False}})
+    if reference:
+        conformance.write_reference(directory, artefact, batch=conformance.draw_reference_batch(artefact, None, None))
+    return directory
+
+
 def _artefact(tmp_path, monkeypatch, interval_s):
-    """A tmp artefact of one labelled flight (no harvest behind it: its rebuild, aircraft and approach speed stand in),
-    its closed-loop sentence read at ``interval_s``, written into the artefact and read back as the reader gives it, and
-    the batch it was read from."""
+    """A tmp artefact of one labelled flight (no harvest behind it: its rebuild, aircraft and approach speed stand in) with
+    its labeller reference, its closed-loop sentence read at ``interval_s``, written into the artefact and read back as
+    the reader gives it, the batch it was read from and the executor spec that flew it, with its reference tracks."""
     directory = tmp_path / "artefact"
     spec = labelled_instruction_artefact(directory)
     words = Words(spec)
@@ -64,6 +77,17 @@ def _artefact(tmp_path, monkeypatch, interval_s):
     monkeypatch.setattr(start_module, "flight_inputs",
                         lambda series, anchors, device: executor_inputs(signals, geometry, anchors[0]))
     monkeypatch.setattr(replay.Batch, "inputs", lambda self, device: inputs)
+    from ts_transformer.autopilot import conformance
+    from ts_transformer.instructions import conformance as labeller
+
+    labeller.write_reference(directory, [signals], [labeller.labelled_record(reading)], [reading],
+                             git={"head": "x", "dirty": False})
+    flown = replay.sentence_on_interval(reading, signals, spec.step_s, geometry, words)
+    reference = replay.Batch(indices=[0], signals=[signals], series=[None], readings=[reading], sentences=[flown],
+                             row_interval_s=spec.step_s, geometries=[geometry], approach_ias_mps=[A320_IAS],
+                             groups=[replay.OWN], drawn={"split": "train"})
+    monkeypatch.setattr(conformance, "draw_reference_batch", lambda instructions, words, draw: reference)
+    _executor(tmp_path / "executor", directory, _params(), spec.sha256)
     return directory, words, batch, stored, anchor
 
 
@@ -74,7 +98,7 @@ def test_a_stored_sentence_said_through_the_start_gives_its_states_and_its_outco
     reading's."""
     directory, words, batch, stored, anchor = _artefact(tmp_path, monkeypatch, interval_s)
     params = _params()
-    loop, order = start(directory, "train", interval_s, {0: stored}, params, words, most_go_arounds=0, device=CPU)
+    loop, order = start(directory, "train", interval_s, {0: stored}, tmp_path / "executor", most_go_arounds=0, device=CPU)
     assert order == [0]
     limit = (len(batch.readings[0].words) - anchor) * words.spec.step_s * params.timeout_factor   # §5.8, written out
     assert float(loop.executor.time_limit_s[0]) == limit
@@ -101,13 +125,12 @@ def test_a_go_around_beyond_the_most_given_is_refused_by_name(tmp_path, monkeypa
     """D67: each flight may say the most go-arounds the loop was started with; one more refuses the row by name before
     anything is flown, and the time limit grows by 900 s for each one heard."""
     directory, words, _, stored, _ = _artefact(tmp_path, monkeypatch, 2.0)
-    params = _params()
     climb = np.full((1, 5), UNCHANGED, dtype=np.int64)
     climb[0, [RUNWAY, ALTITUDE, ANGLE]] = RUNWAY_GO_AROUND, words.altitude_index(1500.0), words.angle_climb
     again = np.full((1, 5), UNCHANGED, dtype=np.int64)
     again[0, RUNWAY] = 0
     for most in (0, 1):
-        loop, _ = start(directory, "train", 2.0, {0: stored}, params, words, most_go_arounds=most, device=CPU)
+        loop, _ = start(directory, "train", 2.0, {0: stored}, tmp_path / "executor", most_go_arounds=most, device=CPU)
         loop.step(stored.grid[:1])
         before = float(loop.executor.time_limit_s[0])
         if most == 0:
@@ -122,13 +145,13 @@ def test_a_go_around_beyond_the_most_given_is_refused_by_name(tmp_path, monkeypa
             loop.step(climb)
         assert loop.go_arounds[0] == 1
     # a halted flight's words are not heard either
-    loop, _ = start(directory, "train", 2.0, {0: stored}, params, words, most_go_arounds=0, device=CPU)
+    loop, _ = start(directory, "train", 2.0, {0: stored}, tmp_path / "executor", most_go_arounds=0, device=CPU)
     loop.step(stored.grid[:1])
     loop.halt(np.array([True]))
     loop.step(climb)
     assert loop.go_arounds[0] == 0
     # a done flight's words are not heard: its go-around is no go-around
-    loop, _ = start(directory, "train", 2.0, {0: stored}, params, words, most_go_arounds=0, device=CPU)
+    loop, _ = start(directory, "train", 2.0, {0: stored}, tmp_path / "executor", most_go_arounds=0, device=CPU)
     with pytest.raises(ValueError, match="not done"):
         loop.outcome(0)
     for row in stored.grid:
@@ -144,18 +167,29 @@ def test_the_start_refuses_sentences_not_read_under_its_artefact_split_and_execu
     split or another flight is refused)."""
     directory, words, _, stored, _ = _artefact(tmp_path, monkeypatch, 4.0)
     with pytest.raises(ValueError, match="no sentence"):
-        start(directory, "train", 4.0, {}, _params(), words, most_go_arounds=0, device=CPU)
+        start(directory, "train", 4.0, {}, tmp_path / "executor", most_go_arounds=0, device=CPU)
     with pytest.raises(ValueError, match="does not start at row 8 of 2 s"):
-        start(directory, "train", 2.0, {0: stored}, _params(), words, most_go_arounds=0, device=CPU)
+        start(directory, "train", 2.0, {0: stored}, tmp_path / "executor", most_go_arounds=0, device=CPU)
+    other_params = _executor(tmp_path / "other_params", directory, replace(_params(), timeout_factor=2.0),
+                             words.spec.sha256)
     with pytest.raises(ValueError, match="flown by executor parameters"):
-        start(directory, "train", 4.0, {0: stored}, replace(_params(), timeout_factor=2.0), words, most_go_arounds=0,
-              device=CPU)
+        start(directory, "train", 4.0, {0: stored}, other_params, most_go_arounds=0, device=CPU)
     moved = replace(stored, states=stored.states + np.array([1.0, 0, 0, 0, 0, 0]))     # another flight's rows
     with pytest.raises(ValueError, match="its observed rows differ"):
-        start(directory, "train", 4.0, {0: moved}, _params(), words, most_go_arounds=0, device=CPU)
-    other = Words(type(words.spec).from_dict({**words.spec.to_dict(), "closed_loop_lateral_m": 20.0}))
-    with pytest.raises(ValueError, match="another vocabulary"):
-        start(directory, "train", 4.0, {0: stored}, _params(), other, most_go_arounds=0, device=CPU)
+        start(directory, "train", 4.0, {0: moved}, tmp_path / "executor", most_go_arounds=0, device=CPU)
+    # D71, D73: the start opens the spec itself — one measured against another vocabulary, or one whose reference tracks
+    # the code in the process does not fly within the bounds, is refused by name
+    other_vocabulary = _executor(tmp_path / "other_vocabulary", directory, _params(), "0" * 64, reference=False)
+    with pytest.raises(ValueError, match="the executor spec was measured against vocabulary 000000000000"):
+        start(directory, "train", 4.0, {0: stored}, other_vocabulary, most_go_arounds=0, device=CPU)
+    off = _executor(tmp_path / "off", directory, _params(), words.spec.sha256)
+    with np.load(off / "conformance" / "reference.npz") as data:
+        arrays = {name: data[name] for name in data.files}
+    arrays["states"][:, -1, 2] += 1.0                                  # its last height a metre off what is flown
+    with (off / "conformance" / "reference.npz").open("wb") as handle:
+        np.savez_compressed(handle, **arrays)
+    with pytest.raises(ValueError, match="the executor flies off's reference tracks otherwise: batch: KXXX:a"):
+        start(directory, "train", 4.0, {0: stored}, off, most_go_arounds=0, device=CPU)
     with pytest.raises(ValueError, match="negative"):
         Loop(executor_inputs(load_signals(directory, "train")[0], load_candidates(directory)["KXXX"]),
              [load_candidates(directory)["KXXX"]], [A320_IAS], [100.0], _params(), words, interval_s=4.0,
@@ -169,8 +203,8 @@ def test_the_start_check_runner_says_stored_sentences_through_the_start(tmp_path
     from ts_transformer.experiments import closed_loop_start_check as runner
 
     directory, words, _, _, _ = _artefact(tmp_path, monkeypatch, interval_s)
-    (row,) = runner.check_interval(directory, "train", interval_s, _params(), words, per_airport=0, seed=1337,
-                                   chunk=8, device=CPU)
+    (row,) = runner.check_interval(directory, "train", interval_s, tmp_path / "executor", words, per_airport=0,
+                                   seed=1337, chunk=8, device=CPU)
     assert row["same_rows"] and row["position_m"] == 0.0 and row["other_columns"] == 0.0 and runner.passes(row)
     assert not runner.passes({**row, "position_m": 2e-6}) and not runner.passes({**row, "done_at_last_row": False})
 
@@ -191,8 +225,8 @@ def test_the_start_check_samples_each_airport_alike():
 def test_the_start_check_runner_exits_1_on_a_failed_flight_and_never_overwrites(tmp_path, monkeypatch):
     from ts_transformer.experiments import closed_loop_start_check as runner
 
-    monkeypatch.setattr(replay, "open_executor", lambda executor, instructions: (_params(), {"sha256": "e"}, None))
-    monkeypatch.setattr(closed_loop, "require_conforming_closed_loop", lambda instructions: None)
+    monkeypatch.setattr(closed_loop, "require_conforming_closed_loop",
+                        lambda instructions, executor: (_params(), {"sha256": "e", "checks": {}}, None))
     good = {"dataset_id": "KXXX:a", "same_rows": True, "position_m": 0.0, "other_columns": 0.0,
             "done_at_last_row": True, "timed_out_as_stored": True}
     argv = ["--instructions", str(tmp_path), "--executor", str(tmp_path), "--split", "train", "--row-interval-s", "2"]

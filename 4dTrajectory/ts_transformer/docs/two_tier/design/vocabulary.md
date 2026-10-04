@@ -1552,7 +1552,10 @@ the code with it. The artefact's formats do not change.
   before and after a run; the clean-checkout rule of a check; `executor_conformance --write-reference`. A reference
   is written only in the run that writes what it pins (the labeller's with the labels, the executor's with its
   spec, the closed loop's with the closed-loop reading). Each format that held a code digest gets a new name. The
-  index lines of the ts `CLAUDE.md` and their reference text (C30, C33) follow.
+  index lines of the ts `CLAUDE.md` and their reference text (C30, C33) follow, and the key code index (§11).
+- Also deleted: code that stayed only because the digest covered it. The `override` hook of `outputs/base.py`
+  answers None on every path and stayed because `data/dataset.py`, which asks it, was in the executor's digest; the
+  hook and its call go.
 - Tests: a check that finds a difference refuses by name in each place that runs it; a change of the code that
   keeps the behaviour opens everything with nothing run beforehand; no module of `instructions/`, `autopilot/`,
   `prior/`, the runners or the backend computes a digest of code (`tests/test_architecture.py`).
@@ -1587,6 +1590,6 @@ Done at `9a986c09`: all five items pass (`readouts/2026-10-04_stage_a_check_a15_
    old Training index and its sets are unchanged; the backend tests pass (outline §6).
 7. After A24 and A26–A30: D66, D67, D69–D71 and D73 against the code (A26's test of the stored states run again on
    the artefact of A30, through the start of A28; the labeller conformance of A30 compares the strata; no digest of
-   code in the code or in the artefact); the spec of the formal artefact holds the chosen H_final and its
+   code in the code, the artefact or the key code index); the spec of the formal artefact holds the chosen H_final and its
    measurement records the choice; the readings of D34 exist for every Δ, split and airport and equal A25's; the
    artefacts of A21 and A25 deleted with the user's go.

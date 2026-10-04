@@ -10,10 +10,9 @@ evaluation module's vertical bound and the FAS cone); each candidate's
 published vertical path and decision altitude (the artefact's `candidates.json`, D61) are recorded in
 ``measurements.json`` as the spec is written. Nothing is measured from data. The design's fixed choices are module
 constants below. Writes ``spec.json`` + ``measurements.json`` into
-``--dir`` (never over an existing file), from a clean tree only: the spec records the commit it was measured at and the
-executor code's logic hash; then the spec's reference tracks, flown by that code, and its passed record
-(`autopilot.conformance`) — a spec is opened only for executor code that flies them within the bounds (executor design
-§12.3).
+``--dir`` (never over an existing file), from a clean tree only: the spec records the commit it was measured at; then, in
+the same run, the spec's reference tracks, flown by that code (`autopilot.conformance`) — every process that opens the
+spec flies them again first and is refused by name off them (executor design §12.3, D73).
 
     python run_ts.py executor_spec \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> \\
@@ -31,9 +30,9 @@ from pathlib import Path
 from ts_transformer.autopilot import conformance
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.speed import speed_change_mps2
-from ts_transformer.autopilot.spec import executor_source_sha256, params_sha256, write_spec
+from ts_transformer.autopilot.spec import params_sha256, write_spec
 from ts_transformer.instructions.artefact import load_candidates, load_spec
-from ts_transformer.instructions.conformance import labeller_code_sha256, require_conforming_labeller
+from ts_transformer.instructions.conformance import require_conforming_labeller
 from ts_transformer.instructions.words import Words
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
@@ -71,8 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     git = git_state()
     if git["dirty"]:
         parser.error("the tree has uncommitted changes; an executor spec is measured at a commit")
-    require_conforming_labeller(instructions)
-    executor, labeller = executor_source_sha256(), labeller_code_sha256()
+    labeller = require_conforming_labeller(instructions)
     spec = load_spec(instructions)
 
     params = ExecutorParams(cycle_s=CYCLE_S, bank_rate_deg_s=ROLL_RATE_DEG_S,
@@ -81,8 +79,6 @@ def main(argv: list[str] | None = None) -> int:
     params.check(spec, spec.step_s)
     print(f"the standards' roll rate p {ROLL_RATE_DEG_S:g}°/s", flush=True)
 
-    if executor_source_sha256() != executor or labeller_code_sha256() != labeller:
-        raise SystemExit("the executor's or the labeller's code changed while the spec was measured; measure again")
     measurements = {
         "from_the_standards": {
             "bank_rate_deg_s": {"value": ROLL_RATE_DEG_S,
@@ -105,19 +101,20 @@ def main(argv: list[str] | None = None) -> int:
         "fixed": {"cycle_s": CYCLE_S, "path_time_constant_s": PATH_TIME_CONSTANT_S, "path_rate_factor": PATH_RATE_FACTOR,
                   "timeout_factor": TIMEOUT_FACTOR},
     }
-    source = {"executor_source_sha256": executor, "python": platform.python_version(), "labeller_code_sha256": labeller,
-              "instructions": artefact_name, "git": git}
+    source = {"python": platform.python_version(), "instructions": artefact_name, "git": git,
+              "labeller_check": {"flights": labeller.flights, "read_otherwise": len(labeller.mismatches)}}
     write_spec(directory, params, spec.sha256, measurements, source)
     print(f"executor spec {params_sha256(params)[:12]} → {directory}")
     for name, value in asdict(params).items():
         print(f"  {name:26s} {value}")
-    # its reference tracks, flown by the code that measured it, and the record that this code flies them in every way
+    # its reference tracks, flown by the code that measured it in this run (D73), and this code flies them alike in
+    # every way it flies
     print(f"reference tracks → {conformance.write_reference(directory, instructions)}", flush=True)
     checked = conformance.check(directory, instructions)
-    if not all(d.passed for d in checked.differences.values()):
+    if not checked.passed:
         raise SystemExit(f"the code that measured the spec does not fly its own reference alike in every way: "
-                         f"{ {mode: d.summary() for mode, d in checked.differences.items()} }")
-    print(f"passed → {conformance.write_passed(directory, checked)}")
+                         f"{checked.summary()}")
+    print(f"flown alike in every way: {checked.summary()}")
     return 0
 
 

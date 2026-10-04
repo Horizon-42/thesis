@@ -76,7 +76,9 @@ PREDICTOR = "executor"
 HORIZON = "sentence"
 #: v6 (two-tier v4): the outcomes of vocabulary §5.8 (`unstable_at_minimums`, the decision-altitude check on a crossing), the
 #: row interval, the sentences with a go-around apart, no gate.
-REPLAY_SCHEMA = "ts-executor-replay-v7"
+#: v8 (A29, D73): the checks the run ran before its work (``checks``: the labeller's, the executor's and, for closed-loop
+#: sentences, the closed loop's largest differences), as information.
+REPLAY_SCHEMA = "ts-executor-replay-v8"
 #: The kinds of sentence the readout reads apart.
 KINDS = ("without go-around", "with go-around")
 #: A closed-loop flight that goes farther than this from its observed path, laterally, LEFT the path: a reading of the
@@ -336,7 +338,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{out} exists; a readout is never overwritten")
     if args.split != "train" and git_state()["dirty"]:
         parser.error(f"the {args.split} replay (stage 4) runs from a clean tree")
-    params, record, words = replay.open_executor(executor, instructions)
+    # the checks every reader runs (D73): the labeller's and the executor's, and for closed-loop sentences the closed loop's
+    params, record, words = (closed_loop.require_conforming_closed_loop(instructions, executor) if args.closed_loop
+                             else replay.open_executor(executor, instructions))
     spec = words.spec
     started = time.perf_counter()
     batch = replay.draw(instructions, args.split, spec, words, per_airport=args.per_airport, seed=args.seed,
@@ -346,7 +350,6 @@ def main(argv: list[str] | None = None) -> int:
     along = along_columns(words)
     per_flight = along
     if args.closed_loop:
-        closed_loop.require_conforming_closed_loop(instructions)
         path = closed_loop_path(instructions, args.split, args.row_interval_s)
         if not path.exists():
             parser.error(f"{path} does not exist: the closed-loop reading wrote no sentence there "
@@ -392,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
     table = readout_table(rows, closed_loop_rows=args.closed_loop)
     write_json_atomic(out / "replay.json", {
         "schema": REPLAY_SCHEMA, "written_utc": utc_now(), "split": args.split, "row_interval_s": args.row_interval_s,
-        "closed_loop": args.closed_loop,
+        "closed_loop": args.closed_loop, "checks": record["checks"],
         "executor_spec_sha256": record["sha256"], "vocabulary_spec_sha256": spec.sha256, "params": asdict(params),
         "envelope_widths": envelope_widths(words), "drawn": batch.drawn, "strata": list(STRATA), "kinds": list(KINDS),
         "readout": table, "flights": rows, "git": git_state(), "elapsed_s": time.perf_counter() - started})

@@ -26,7 +26,8 @@ from geokit import FT_M, KT_MS, NM_M
 #: (D58; instruction-v4 read them as MSL), the go-around read from the track (D18, D19), "unspecified" from the capture
 #: row (D4); since instruction-v6 the closed-loop reading's vertical tolerance in the final descent (D66, a field of its own).
 READING_RULE = "instruction-v6"
-SPEC_SCHEMA = "ts-instruction-spec-v7"
+#: The spec file's format: v8 (A29, D73) records no digest of the labeller's code beside the spec.
+SPEC_SCHEMA = "ts-instruction-spec-v8"
 
 #: FAA JO 7110.65BB 5-9-2 TBL 5-9-1: the largest final-approach interception angle 2 NM or
 #: more outside the approach gate — the judge's "lined up" (vocabulary §5.8).

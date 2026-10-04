@@ -82,7 +82,8 @@ from ts_transformer.instructions.words import HEADING, Words, wrap180
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-READOUT_SCHEMA = "ts-executor-turns-readout-v1"
+#: v2 (A29, D73): the checks the run ran before its work, as information.
+READOUT_SCHEMA = "ts-executor-turns-readout-v2"
 #: The three ways of vocabulary §12.1 A13 and the control (module docstring).
 WAYS = ("executor", "executor_no_stopping", "exact_words", "observed_track")
 #: The paired differences of the own outward part read over the turns measured in every way: the heading law (each
@@ -380,7 +381,8 @@ def main(argv: list[str] | None = None) -> int:
     table = readout_table(records)
     write_json_atomic(out / "turns.json", {
         "schema": READOUT_SCHEMA, "written_utc": utc_now(), "split": args.split, "row_interval_s": ROW_INTERVAL_S,
-        "after_s": AFTER_S, "executor_spec_sha256": record["sha256"], "vocabulary_spec_sha256": words.spec.sha256,
+        "after_s": AFTER_S, "executor_spec_sha256": record["sha256"], "checks": record["checks"],
+        "vocabulary_spec_sha256": words.spec.sha256,
         "drawn": batch.drawn, "ways": list(WAYS), "readout": table, "turns": records, "git": git_state(),
         "elapsed_s": time.perf_counter() - started})
     for part, bands in table.items():

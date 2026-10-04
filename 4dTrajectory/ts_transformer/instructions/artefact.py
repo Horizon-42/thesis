@@ -7,17 +7,17 @@
                                              where it came from
 ``candidates.json``                          every airport's candidate runways and runway ends (its geometry)
 ``sentences_<split>.npz`` + ``labels.json``  the sentences, and every flight's outcome
-``conformance/``                             the labeller's reference sample and its passed records
+``conformance/``                             the labeller's reference sample, written with the labels
                                              (`instructions.conformance`)
 ``closed_loop/``                             the closed-loop sentences of every split and row interval, flown by an
                                              executor spec (`write_closed_loop`), with ``summary.json`` and their
-                                             reference sample and passed records (``conformance/``,
+                                             reference sample (``conformance/``,
                                              `autopilot.closed_loop`)
 
 A reader checks the spec's sha against the sentences it opens and refuses a mismatch — the
-sentence files carry the sha they were read with. The LABELLER is not named by its source here
-(vocabulary §7.2, D21): which code wrote the sentences is recorded as information, and a runner that
-labels, or reads sentences for a replay, asks the conformance for a passed record of today's code.
+sentence files carry the sha they were read with. The LABELLER is never named by its source (vocabulary
+§7.2, D21, D73): a process that uses it on an artefact runs its check against the artefact's reference
+first (`instructions.conformance.require_conforming_labeller`), and nothing records a digest of code.
 The arrival manifests' sha256s are recorded as information too; a flight rebuilt from the harvest
 is compared row by row with its stored signals (`autopilot.flights.require_same_flight`). Nothing
 here is ever overwritten.
@@ -46,7 +46,8 @@ from ts_transformer.io_utils import utc_now, write_bytes_atomic, write_json_atom
 #: v4 (instruction-v5, D58): the altitude words are levels above the airport elevation E, not MSL.
 #: v5 (A27, D70): each sentence's stratum by its name (`readout.STRATA`, from `readout.stratum`): for readouts and strata,
 #: never an input (it reads the turns before the capture row).
-SENTENCES_SCHEMA = "ts-instruction-sentences-v5"
+#: v6 (A29, D73): no digest of the labeller's code.
+SENTENCES_SCHEMA = "ts-instruction-sentences-v6"
 #: v3 (A22, D61): each candidate carries its published vertical path (TCH, glidepath angle, DA above the threshold).
 CANDIDATES_SCHEMA = "ts-instruction-candidates-v3"
 #: The splits an artefact holds: the development operating days (the internal selection set is its
@@ -130,7 +131,7 @@ def load_candidates(directory: Path) -> dict[str, AirportGeometry]:
 
 
 def write_spec(directory: Path, spec: VocabularySpec, measurements: dict[str, Any], source: dict[str, Any]) -> None:
-    """``source``: the git state the spec was measured at and the labeller code that measured it (information)."""
+    """``source``: the git state the spec was measured at (information; no digest of code, D73)."""
     write_json_atomic(_fresh(directory / "spec.json"),
                       {"schema": SPEC_SCHEMA, "sha256": spec.sha256, "spec": spec.to_dict(), "source": source})
     write_json_atomic(_fresh(directory / "measurements.json"), {"spec_sha256": spec.sha256, **measurements})
@@ -170,13 +171,12 @@ def load_spec(directory: Path) -> VocabularySpec:
 
 
 def write_sentences(directory: Path, split: str, spec: VocabularySpec, readings: Sequence[Reading],
-                    signal_index: Sequence[int], labeller_code_sha256: str) -> None:
+                    signal_index: Sequence[int]) -> None:
     """The labelled flights' sentences, in the order given; ``signal_index`` is each one's
     position in ``signals_<split>.npz``. A sentence's words line up row for row with the first
     ``len(words)`` rows of its signals (the rows before the threshold crossing). Sentence ``k``'s
     go-arounds are ``go_around_row[go_around_offsets[k]: go_around_offsets[k + 1]]`` (and the rows the
-    runway is said again, ``runway_again_row``, alike); ``stratum`` is each one's stratum by name (D70). ``labeller_code_sha256``
-    names the code that read them (`instructions.conformance.labeller_code_sha256`): information, never checked."""
+    runway is said again, ``runway_again_row``, alike); ``stratum`` is each one's stratum by name (D70)."""
     lengths = np.array([len(r.words) for r in readings], dtype=np.int64)
     counts = np.array([len(r.go_around_rows) for r in readings], dtype=np.int64)
     instructions = [(f, i.column, i.value, i.row) for f, r in enumerate(readings) for i in r.instructions]
@@ -185,7 +185,6 @@ def write_sentences(directory: Path, split: str, spec: VocabularySpec, readings:
         _fresh(directory / f"sentences_{split}.npz"),
         schema=np.array(SENTENCES_SCHEMA),
         spec_sha256=np.array(spec.sha256),
-        labeller_code_sha256=np.array(labeller_code_sha256),
         offsets=np.concatenate(([0], np.cumsum(lengths))).astype(np.int64),
         words=np.concatenate([r.words for r in readings]).astype(np.int16),
         signal_index=np.asarray(signal_index, dtype=np.int64),
@@ -227,7 +226,8 @@ def load_sentences(directory: Path, split: str, spec: VocabularySpec) -> dict[st
 #: point's observed time; `vertical_m` NaN past the end of the observed path.
 #: v4 (A15, D51): the states on every 2 s row, the Δ rows marked (`on_interval`).
 #: v5 (A20, D58): the altitude words are levels above the airport elevation E (the states stay MSL).
-CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v5"
+#: v6 (A29, D73): the directory's summary records no digest of code (the files and the summary share the name).
+CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v6"
 #: Every array a closed-loop file holds.
 CLOSED_LOOP_FIELDS = {"schema", "spec_sha256", "executor_params_sha256", "row_interval_s", "start_row", "signal_index",
                       "first_row", "offsets", "state_offsets", "words", "correction", "states", "on_interval",

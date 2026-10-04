@@ -147,30 +147,32 @@ of the package, not a migration in progress.
 - **A replay finds a checkpoint's manifests by the digest it recorded**
   (`repo_layout.checkpoint_arrival_manifests`): the live harvest or a FROZEN generation
   (`harvest-v5-20260823` holds every checkpoint of 2026-08-24..09-23); never by path (C29).
-- **The instruction sentence artefact** (`instructions/`; v4: reading `instruction-v6`, spec `ts-instruction-spec-v7`,
-  sentences `ts-instruction-sentences-v5`, each with its stratum, D70; the altitude words are heights above the airport elevation E, D58): one spec sha, written once and refused on a sha mismatch; the LABELLER is
-  identified by what it reads, never by its source (design D21): `conformance/` holds a reference sample (its sentences
-  on the 2 s rows and on the Δ grid at 4 and 8 s, D49) and a
-  `passed-<code>.json` per labeller code that reads it again the same (`instructions/conformance.py`, runner
-  `instruction_conformance`), which every later runner asks for; candidates = the manifest's CIFP runway geometry; one
+- **The instruction sentence artefact** (`instructions/`; v4: reading `instruction-v6`, spec `ts-instruction-spec-v8`,
+  sentences `ts-instruction-sentences-v6`, each with its stratum, D70; the altitude words are heights above the airport elevation E, D58): one spec sha, written once and refused on a sha mismatch; the LABELLER is
+  identified by what it reads, never by its source (design D21, D73): `conformance/` holds a reference sample (its
+  sentences on the 2 s rows and on the Δ grid at 4 and 8 s, D49), written with the labels, and every process that uses the
+  labeller on the artefact reads it again first (`instructions/conformance.py` `require_conforming_labeller`, 1.7 s) —
+  no passed record, no digest of code; candidates = the manifest's CIFP runway geometry; one
   gate (`read.admit`) for labelling and measuring; a sentence's words align with the FIRST `len(words)` rows of its
   signals (it ends before the landing); a flight with go-arounds is read approach by approach (D26); since v6
   (2026-10-02) every row is on the UTC even seconds; a change of speed says its 5 m/s steps, flown at a_max (D43);
   `--spec-from` keeps another artefact's spec (C30).
-- **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v5`; vocabulary §4.9, D32): each
+- **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v6`; vocabulary §4.9, D32): each
   split × row interval — the 2 s open-loop words flown from the first predicted step by an executor spec, each said at the
   Δ row nearest where the observed aircraft heard it (D42, D45), a heading word in the frame where it is heard (D46), with
   heading and angle corrections (none past the end of the observed path, D44), to the executor's end; the flown states on the data's 2 s rows, the Δ rows marked (D51), the errors against the observed path and the rows that allow no correction
-  (D34); written once by `instruction_closed_loop` with its own reference and passed record, read only for code that
-  passed it (`closed_loop.require_conforming_closed_loop`); a speaker's closed loop starts where the reading does,
+  (D34); written once by `instruction_closed_loop` with its own reference, read only after the labeller's, the executor's
+  and the closed loop's checks run in the reading process (`closed_loop.require_conforming_closed_loop(artefact,
+  executor_dir)`, D69, D73); a speaker's closed loop starts where the reading does,
   through `autopilot/start.py` (`start`, `Loop.step`, D67) (C38).
 - **An executor spec opens only for executor code that flies its reference tracks within the bounds** (2026-10-01, the
-  user: checked by what it flies, not by its source; `ts-executor-spec-v8`: a sentence said on its own rows, D57; a level
-  word flown at T + E MSL, D58): `conformance/` beside the spec — 250
-  labelled train flights flown by the spec's code — and a `passed-<code>.json` per executor code that flew them again in
-  every way (single-aircraft batch, multi-aircraft batch, single flight) within 1e-6 m (`spec.require_conforming_executor`,
-  runner `executor_conformance`); a code change that stays within the bounds needs one ~30 s check and nothing is
-  retrained; the vocabulary binds by its spec sha, the labeller by its conformance; the judge's decision-altitude check
+  user: checked by what it flies, not by its source; D73: checked every time it is opened; `ts-executor-spec-v9`: a
+  sentence said on its own rows, D57; a level word flown at T + E MSL, D58): `conformance/` beside the spec — 250
+  labelled train flights flown by the spec's code in the run that wrote the spec — and every process that opens the spec
+  (`replay.open_executor`: the replay, the start, the closed loop, the backend at its start) flies them again in every way
+  (single-aircraft batch, multi-aircraft batch, single flight) within 1e-6 m first (`conformance.require_conforming_executor`,
+  ~27 s), refused by name otherwise; no passed record, no digest of code, no clean-checkout rule for a check; a code change
+  that stays within the bounds opens everything and nothing is retrained; the vocabulary binds by its spec sha, the labeller by its conformance; the judge's decision-altitude check
   has no parameter (D38: the evaluation's ±22 m and the FAS cone) (C33). **C34 (a prior belongs to one sentence
   artefact), C35 (a prior speaks under its procedure's masks) and C37 (the traffic prior) describe the instruction-v3
   prior, archived with it** (`archive/two_tier_v3_2026_10/prior/`); the v4 prior is stage B (`docs/two_tier/design/prior.md` §12).
@@ -358,9 +360,9 @@ THIS code's schema only, no compatibility) (R8). **Stage B's intent-code queue**
 ARCHIVED 2026-09-20 (R9 is its record); `manoeuvre_lockstep --cohort` stayed (B0's re-read on the B cohort = the
 grid's L60_D60 cohort). **The two-tier model, v4** (design `docs/two_tier/design/vocabulary.md`, plan §12): `instruction_signals` →
 `instruction_spec` (measured on TRAIN only) → `instruction_labels` (writes the labeller's reference) →
-`instruction_conformance` (the passed record every later step asks for) (R10) → `executor_spec` (no value from data; writes
-its reference tracks and passed record; clean tree) (R12) → `instruction_closed_loop` (the closed-loop sentences of every
-split at each row interval, their reference and passed record; clean tree; `--check` re-checks) (R50) →
+`instruction_conformance` (runs the labeller's check; information) (R10) → `executor_spec` (no value from data; writes its
+reference tracks with it; clean tree) (R12) → `instruction_closed_loop` (the closed-loop sentences of every split at each
+row interval and their reference, `--workers` a split a process; clean tree; `--check` runs the readers' checks) (R50) →
 `executor_replay` (`--row-interval-s`, `--closed-loop`; no criterion is read; select and val from a clean tree) (R12);
 `executor_conformance` checks a spec's reference after an `autopilot/` change (R42); `executor_turns` measures the
 executor's turn against the exact words (A13, R51); `final_descent_tolerance` reads the closed loop and its replay of one

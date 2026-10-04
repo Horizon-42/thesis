@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+import re
 import sys
 
 TS_DIR = Path(__file__).resolve().parents[1]
@@ -840,3 +841,85 @@ def test_the_prior_runners_take_from_autopilot_only_what_its_interface_lists():
                                       "import ts_transformer.autopilot.closed_loop\n") == [
         "from autopilot.closed_loop import read", "from autopilot.replay import Batch", "from autopilot import flights",
         "import autopilot.closed_loop"]
+
+
+#: D73 (no code fingerprint): the trees where a check of the labeller, the executor or the closed loop runs, and the
+#: package's own helpers they import.
+NO_CODE_DIGEST_TREES = ("instructions", "autopilot", "prior", "experiments")
+NO_CODE_DIGEST_FILES = ("io_utils.py", "repo_layout.py")
+#: Names of the retired code digests and their helpers, as identifiers or as text (a payload key is text).
+CODE_DIGEST_NAMES = ("logic", "logic_sha256", "executor_source_files", "executor_source_sha256", "labeller_code_files",
+                     "labeller_code_sha256", "closed_loop_code_sha256", "checker_sha256", "code_sha256",
+                     "REACHED_MODULES", "UNHASHED_IMPORTS", "passed_path", "write_passed")
+#: The modules that may locate themselves (``Path(__file__)`` for a root on ``sys.path`` or the repository's root) —
+#: none of them reads a source file.
+LOCATES_ITSELF = ("4dTrajectory/ts_transformer/repo_layout.py", "4dTrajectory/ts_transformer/experiments/__main__.py",
+                  "aeroviz_backend/http_server.py", "aeroviz_backend/paths.py")
+
+
+def _reads_code(node: ast.AST) -> bool:
+    """Whether ``node`` can read Python source: `inspect` or `ast.unparse`, a module's ``__file__`` or ``__code__``,
+    `importlib`'s ``find_spec`` (a module's file), or a ``.py`` name or glob."""
+    if isinstance(node, ast.Attribute) and node.attr in ("getsource", "getsourcelines", "getsourcefile", "unparse",
+                                                        "__file__", "__code__", "find_spec", "origin"):
+        return True
+    if isinstance(node, ast.Name) and node.id in ("__file__", "find_spec", "getsource"):
+        return True
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        names = [alias.name for alias in node.names] + ([node.module] if isinstance(node, ast.ImportFrom) else [])
+        return any(name in ("inspect", "getsource", "unparse") for name in names if name)
+    # a glob of modules, or a bare path to one, handed to a call (a docstring or a message naming a script is neither)
+    return isinstance(node, ast.Call) and any(
+        isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+        and ("*.py" in arg.value or re.fullmatch(r"[\w./-]+\.py", arg.value) is not None) for arg in node.args)
+
+
+def _code_digest_findings(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    relative = path.relative_to(REPO_ROOT).as_posix()
+    found = [] if relative in LOCATES_ITSELF else [f"line {n.lineno}: reads code" for n in ast.walk(tree)
+                                                   if _reads_code(n) and hasattr(n, "lineno")]
+    for n in ast.walk(tree):
+        name = (n.id if isinstance(n, ast.Name) else n.attr if isinstance(n, ast.Attribute)
+                else n.name if isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.alias)) else None)
+        if name in CODE_DIGEST_NAMES:
+            found.append(f"line {n.lineno}: names {name}")
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value in CODE_DIGEST_NAMES:
+            found.append(f"line {n.lineno}: the text {n.value!r}")
+    return sorted(set(found))
+
+
+def test_no_module_where_the_checks_run_computes_a_digest_of_code():
+    """D73: the labeller, the executor and the closed loop are checked by what they do, every time; no module of
+    `instructions/`, `autopilot/`, `prior/`, the runners, the backend or the helpers they share reads Python source or
+    names a code digest (as an identifier or as a payload's key)."""
+    files = [path for tree in NO_CODE_DIGEST_TREES for path in sorted((TS_DIR / tree).rglob("*.py"))]
+    files += [TS_DIR / name for name in NO_CODE_DIGEST_FILES] + sorted((REPO_ROOT / "aeroviz_backend").rglob("*.py"))
+    files = [path for path in files if "tests" not in path.relative_to(REPO_ROOT).parts]
+    assert any(path.parent.name == "autopilot" for path in files) and any(p.name == "io_utils.py" for p in files)
+    offending = {path.relative_to(REPO_ROOT).as_posix(): found for path in files if (found := _code_digest_findings(path))}
+    assert not offending, offending
+
+
+def test_the_digest_scan_finds_every_way_of_reading_source(tmp_path):
+    """Each way a module could digest its own code or another's is found; reading data is not."""
+    shapes = ["import hashlib\nfrom pathlib import Path\nd = hashlib.sha256(Path(__file__).read_text().encode())\n",
+              "with open(__file__) as f:\n    text = f.read()\n",
+              "here = Path(__file__)\ntext = here.read_text()\n",
+              "files = sorted(PACKAGE.glob('*.py'))\n",
+              "import geokit\npath = geokit.__file__\n",
+              "import importlib.util\norigin = importlib.util.find_spec('geokit').origin\n",
+              "from inspect import getsource\n",
+              "record = {'code_sha256': digest}\n",
+              "from ts_transformer.io_utils import logic\n"]
+    for k, source in enumerate(shapes):
+        (tmp_path / f"m{k}.py").write_text(source)
+    found = {}
+    for k in range(len(shapes)):
+        path = tmp_path / f"m{k}.py"
+        tree = ast.parse(path.read_text())
+        found[k] = any(_reads_code(n) for n in ast.walk(tree)) or any(
+            (isinstance(n, ast.Constant) and n.value in CODE_DIGEST_NAMES)
+            or (isinstance(n, ast.alias) and n.name in CODE_DIGEST_NAMES) for n in ast.walk(tree))
+    assert all(found.values()), found
+    assert not any(_reads_code(n) for n in ast.walk(ast.parse("Path('data.json').read_text()\nx = 'run_ts.py'\n")))

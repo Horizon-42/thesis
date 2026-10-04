@@ -1,8 +1,8 @@
 """The closed-loop reading (vocabulary §4.9, D32, §12.1 A9; `autopilot.closed_loop`): every labelled flight of every split
 flown on its open-loop words by an executor spec, with the correction words its flown path needs, at each row interval
 of the ablation — written into the instruction artefact as ``closed_loop/`` (never over an existing one), with its
-reference sample and the passed record of the code that wrote it; ``--check`` reads that reference again with the code
-on disk and writes its passed record.
+reference sample, written in the same run; ``--check`` runs the checks every reader runs (`require_conforming_closed_loop`:
+the labeller's, the executor's and the closed loop's, D73) and writes nothing.
 
 Who: the replay's flights (`replay.group_of`): on their own dynamics or on a stand-in's; a flight with no identified type,
 no aircraft dynamics or no published approach speed gives no training sentence. Each split's flights are counted by
@@ -11,6 +11,13 @@ correction words for each column, the flights with any correction, the largest |
 the flights done at their time limit, and the lateness of the observed heading words (A12: the matched point's observed
 time at the row that says a word minus the word's 2 s time, s; information). Written from a clean tree only (the artefact records the
 commit).
+
+``--workers N`` reads the SPLITS (`read_split`: the split drawn once, then read at every row interval in turn) in up to N
+processes, the largest split (train) first; a split is the same reading in a worker as in one process (read in chunks of
+``--chunk``), so the files and the summary are the same whatever N. A worker reads one split and ends (its memory goes
+back), so the peak printed is the split's; a split that fails stops the splits not yet started, and its name is in the
+error. (A worker for each split and row interval was tried first: it drew the train split three times over, 12 min each,
+and three train draws at once ran the host out of memory.)
 
     python run_ts.py instruction_closed_loop --row-interval-s 2 4 8 \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> \\
@@ -22,7 +29,10 @@ from __future__ import annotations
 
 import argparse
 import os
+import resource
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import get_context
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -41,6 +51,9 @@ from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 SEED = 1337
+#: How the workers start (`--workers`): spawned, as the other runners' pools, one split each (tests fork, so their
+#: stand-ins carry over; a forked pool takes no task limit).
+POOL_OPTIONS = {"start_method": "spawn", "max_tasks_per_child": 1}
 
 
 def _percentiles(values: list[float]) -> dict[str, float] | None:
@@ -106,75 +119,108 @@ def read_interval(drawn: replay.Drawn, readings: list[Any], interval_s: float, p
                                      lateness, outside)
 
 
+def read_split(instructions: Path, executor: Path, split: str, intervals_s: list[float], staging: Path, *, chunk: int,
+               device: str) -> tuple[str, dict[str, Any], dict[float, dict[str, Any]], float]:
+    """One split (module docstring): its labelled flights drawn once and read in closed loop at each of ``intervals_s``
+    in turn, each interval's sentences written into ``staging`` before the next is read (none when no flight keeps one:
+    the numbers say why). Returns the split, the draw's description, the numbers by interval and the process's peak
+    memory (GB, Linux's ``ru_maxrss`` in KiB)."""
+    params, _, words = replay.open_executor(executor, instructions)
+    drawn, readings = replay.draw_readings(instructions, split, words.spec, words, per_airport=0, seed=SEED,
+                                           groups=(replay.OWN, replay.STAND_IN))
+    numbers = {}
+    for interval_s in intervals_s:
+        batch, results, numbers[interval_s] = read_interval(drawn, readings, interval_s, params, words, chunk=chunk,
+                                                            device=torch.device(device))
+        kept = [(j, r) for j, r in enumerate(results) if isinstance(r, ClosedLoopSentence)]
+        if kept:
+            write_closed_loop(staging / f"{split}_{interval_s:g}s.npz", words.spec,
+                              executor_params_sha256=params_sha256(params), row_interval_s=interval_s,
+                              start_row=closed_loop.start_row(interval_s),
+                              sentences={batch.indices[j]: r for j, r in kept})
+        del batch, results, kept
+    return split, drawn.description, numbers, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--instructions", type=Path, required=True)
     parser.add_argument("--executor", type=Path, required=True, help="the executor spec directory")
     parser.add_argument("--row-interval-s", type=float, nargs="+", default=None,
                         help="the row intervals of the ablation (vocabulary §4.8, D25: 2, 4, 8 s)")
-    parser.add_argument("--check", action="store_true", help="read the reference again and write the passed record")
+    parser.add_argument("--check", action="store_true", help="run the readers' checks against the artefact; write nothing")
     parser.add_argument("--chunk", type=int, default=256)
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--workers", type=int, default=1, help="splits read in up to this many processes (module docstring)")
     args = parser.parse_args(argv)
+    if args.workers < 1:
+        parser.error("--workers must be at least 1")
     instructions = args.instructions if args.instructions.is_absolute() else REPO_ROOT / args.instructions
     executor = args.executor if args.executor.is_absolute() else REPO_ROOT / args.executor
+    if args.check:
+        closed_loop.require_conforming_closed_loop(instructions, executor)        # refused by name on a difference
+        print("conforming")
+        return 0
     git = git_state()
     if git["dirty"]:
-        parser.error("the tree has uncommitted changes; the closed-loop reading is written and checked at a commit")
+        parser.error("the tree has uncommitted changes; the closed-loop reading is written at a commit (it records it)")
     params, record, words = replay.open_executor(executor, instructions)
-    if args.check:
-        checked = closed_loop.check(instructions, params, words, git=git)
-        print(f"{checked.flights} reference flights read again by code {checked.code_sha256[:12]}; largest state "
-              f"difference {checked.largest_state_difference_m:.3g} m; {len(checked.mismatches)} read otherwise")
-        for name, problems in list(checked.mismatches.items())[:20]:
-            print(f"  {name}: " + "; ".join(problems[:6]))
-        if not checked.passed:
-            print("NOT conforming: no passed record written")
-            return 1
-        print(f"conforming → {closed_loop.write_passed(instructions, checked)}")
-        return 0
     if args.row_interval_s is None:
         parser.error("--row-interval-s is required to write the closed-loop reading")
     for interval in args.row_interval_s:
         interval_rows(interval, words.spec.step_s)                      # refused unless it divides 16 s
+    if len(set(args.row_interval_s)) != len(args.row_interval_s):
+        parser.error(f"--row-interval-s {args.row_interval_s} names a row interval twice")
     target = instructions / CLOSED_LOOP_DIRECTORY
     if target.exists():
         parser.error(f"{target} exists; the closed-loop reading is never overwritten")
     staging = instructions / f".{CLOSED_LOOP_DIRECTORY}.writing-{os.getpid()}"
     staging.mkdir()
-    device, started = torch.device(args.device), time.perf_counter()
+    started = time.perf_counter()
     summary: dict[str, Any] = {"schema": CLOSED_LOOP_SCHEMA, "written_utc": utc_now(), "git": git,
                                "executor": executor.relative_to(REPO_ROOT).as_posix()
                                if executor.is_relative_to(REPO_ROOT) else str(executor),
                                "executor_spec_sha256": record["sha256"], "executor_params_sha256": params_sha256(params),
-                               "code_sha256": closed_loop.closed_loop_code_sha256(),
-                               "row_intervals_s": args.row_interval_s, "splits": {}}
+                               "checks": record["checks"], "row_intervals_s": args.row_interval_s, "splits": {}}
+    done: dict[str, tuple[dict[str, Any], dict[float, dict[str, Any]]]] = {}
+
+    def finished(split: str, drawn: dict[str, Any], numbers: dict[float, dict[str, Any]], peak_gb: float) -> None:
+        done[split] = (drawn, numbers)
+        for interval, one in numbers.items():
+            print(f"{split} {interval:g} s: {one['sentences']} sentences, corrections {one['correction_words']}, "
+                  f"without a sentence {one['without_a_sentence']}", flush=True)
+        print(f"{split}: peak {peak_gb:.1f} GB, {time.perf_counter() - started:.0f}s", flush=True)
+
+    intervals = list(args.row_interval_s)
+    if args.workers == 1:
+        for split in SPLITS:                                       # SPLITS: train, the largest, first
+            finished(*read_split(instructions, executor, split, intervals, staging, chunk=args.chunk,
+                                 device=args.device))
+    else:
+        options = dict(POOL_OPTIONS)
+        with ProcessPoolExecutor(max_workers=args.workers, mp_context=get_context(options.pop("start_method")),
+                                 **options) as pool:
+            futures = {pool.submit(read_split, instructions, executor, split, intervals, staging, chunk=args.chunk,
+                                   device=args.device): split for split in SPLITS}
+            for future in as_completed(futures):
+                try:
+                    finished(*future.result())
+                except BaseException as error:                    # stop the splits not yet started, name the split
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    raise SystemExit(f"the split {futures[future]} failed: {error!r}") from error
     for split in SPLITS:
-        drawn, readings = replay.draw_readings(instructions, split, words.spec, words, per_airport=0, seed=SEED,
-                                               groups=(replay.OWN, replay.STAND_IN))
-        summary["splits"][split] = {"drawn": drawn.description, "intervals": {}}
-        for interval in args.row_interval_s:
-            batch, results, numbers = read_interval(drawn, readings, interval, params, words, chunk=args.chunk,
-                                                    device=device)
-            summary["splits"][split]["intervals"][f"{interval:g}"] = numbers
-            kept = [(j, r) for j, r in enumerate(results) if isinstance(r, ClosedLoopSentence)]
-            if not kept:                                       # nothing to write: the summary says why
-                continue
-            write_closed_loop(staging / f"{split}_{interval:g}s.npz", words.spec,
-                              executor_params_sha256=params_sha256(params), row_interval_s=interval,
-                              start_row=closed_loop.start_row(interval),
-                              sentences={batch.indices[j]: r for j, r in kept})
-            print(f"{split} {interval:g} s: {numbers['sentences']} sentences, corrections "
-                  f"{numbers['correction_words']}, without a sentence {numbers['without_a_sentence']}, "
-                  f"{time.perf_counter() - started:.0f}s", flush=True)
+        drawn, numbers = done[split]
+        summary["splits"][split] = {"drawn": drawn, "intervals": {
+            f"{interval:g}": numbers[interval] for interval in intervals}}
     write_json_atomic(staging / "summary.json", summary)
     closed_loop.write_reference(instructions, params, words, args.row_interval_s, git=git,
                                 target=staging / closed_loop.CONFORMANCE)
     staging.rename(target)
-    checked = closed_loop.check(instructions, params, words, git=git)
+    checked = closed_loop.check(instructions, params, words)
     if not checked.passed:
         raise SystemExit(f"the code that wrote the reference reads it otherwise: {checked.mismatches}")
-    print(f"→ {target}; passed → {closed_loop.write_passed(instructions, checked)}")
+    print(f"→ {target} (its reference read again: {checked.flights} flights, largest state difference "
+          f"{checked.largest_state_difference_m:.2g} m)")
     return 0
 
 

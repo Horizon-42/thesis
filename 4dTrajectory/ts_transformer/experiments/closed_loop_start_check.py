@@ -27,7 +27,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from ts_transformer.autopilot import closed_loop, replay
+from ts_transformer.autopilot import closed_loop
 from ts_transformer.autopilot.conformance import ROUNDOFF, STATE_BOUND_M
 from ts_transformer.autopilot.start import start
 from ts_transformer.instructions.artefact import (
@@ -38,7 +38,8 @@ from ts_transformer.instructions.words import RUNWAY, RUNWAY_GO_AROUND, UNCHANGE
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-CHECK_SCHEMA = "ts-closed-loop-start-check-v1"
+#: v2 (A29, D73): the checks the run ran before its work, as information.
+CHECK_SCHEMA = "ts-closed-loop-start-check-v2"
 
 
 def sample(airports: list[str], per_airport: int, seed: int) -> list[int]:
@@ -60,7 +61,7 @@ def sample(airports: list[str], per_airport: int, seed: int) -> list[int]:
     return sorted(chosen)
 
 
-def check_interval(instructions: Path, split: str, interval_s: float, params: Any, words: Any, *, per_airport: int,
+def check_interval(instructions: Path, split: str, interval_s: float, executor: Path, words: Any, *, per_airport: int,
                    seed: int, chunk: int, device: torch.device) -> list[dict[str, Any]]:
     """One row interval's flights said through the start (module docstring), ``chunk`` at a time: one row each."""
     stored = closed_loop_sentences(load_closed_loop(closed_loop_path(instructions, split, interval_s), words.spec))
@@ -70,15 +71,15 @@ def check_interval(instructions: Path, split: str, interval_s: float, params: An
     out = []
     for first in range(0, len(chosen), chunk):
         out += _check_chunk(instructions, split, interval_s, {i: stored[i] for i in chosen[first: first + chunk]},
-                            signals, params, words, device=device)
+                            signals, executor, device=device)
     return out
 
 
 def _check_chunk(instructions: Path, split: str, interval_s: float, chosen: dict[int, Any], signals: list[Any],
-                 params: Any, words: Any, *, device: torch.device) -> list[dict[str, Any]]:
+                 executor: Path, *, device: torch.device) -> list[dict[str, Any]]:
     most = max(int((s.grid[:, RUNWAY] == RUNWAY_GO_AROUND).sum()) for s in chosen.values())
-    loop, order = start(instructions, split, interval_s, chosen, params, words, most_go_arounds=most, device=device)
-    every = interval_rows(interval_s, words.spec.step_s)
+    loop, order = start(instructions, split, interval_s, chosen, executor, most_go_arounds=most, device=device)
+    every = interval_rows(interval_s, loop.words.spec.step_s)
     flown: list[list[np.ndarray]] = [[row] for row in loop.rows()]
     done_at = np.full(len(order), -1)
     for k in range(max(len(chosen[i].grid) for i in order)):
@@ -132,12 +133,11 @@ def main(argv: list[str] | None = None) -> int:
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
     if out.exists():
         parser.error(f"{out} exists; a check is never overwritten")
-    params, record, words = replay.open_executor(executor, instructions)
-    closed_loop.require_conforming_closed_loop(instructions)
+    _, record, words = closed_loop.require_conforming_closed_loop(instructions, executor)
     started = time.perf_counter()
     intervals = {}
     for interval in args.row_interval_s:
-        rows = check_interval(instructions, args.split, interval, params, words, per_airport=args.per_airport,
+        rows = check_interval(instructions, args.split, interval, executor, words, per_airport=args.per_airport,
                               seed=args.seed, chunk=args.chunk, device=torch.device(args.device))
         failed = [r["dataset_id"] for r in rows if not passes(r)]
         intervals[f"{interval:g}"] = {"flights": len(rows), "failed": failed,
@@ -149,7 +149,8 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True)
     write_json_atomic(out / "check.json", {
         "schema": CHECK_SCHEMA, "written_utc": utc_now(), "git": git_state(), "instructions": str(instructions),
-        "executor": str(executor), "executor_spec_sha256": record["sha256"], "split": args.split,
+        "executor": str(executor), "executor_spec_sha256": record["sha256"], "checks": record["checks"],
+        "split": args.split,
         "per_airport": args.per_airport, "seed": args.seed, "bounds": {"position_m": STATE_BOUND_M,
                                                                        "other_columns": ROUNDOFF},
         "intervals": intervals})
