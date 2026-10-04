@@ -16,11 +16,11 @@
 | 一次性实验的复核（v4 基线） | 已做 | §3 |
 | 重复夹具合并、测试之间互相导入的清理（冷文件） | 已做，28 个测试文件 + 新模块 `support_prediction.py` | §4 |
 | B 类中 `eta_error_readout`、`latent_probe`、`latent_fan_readout` 搬进 archive（用户：「B 类的也搬进去」） | 已做 | 同一归档目录；`test_two_head_duration` 里属于前者的 2 个测试摘出，见 §3 |
-| `chain_sensitivity`（用户：「搬进 archive」）、B 类中的 `eta_calibration` | **没搬，等用户**：搬了会让活代码失去测试或失去输入的产生者 | §3 |
+| `chain_sensitivity`（用户：「搬进 archive」）、B 类中的 `eta_calibration` | **没搬；用户看了理由后决定：先保留**（搬了会让活代码失去测试或失去输入的产生者） | §3 |
 | C 类其余、`runway_hypotheses` | 按用户决定先不动 | §3 |
 | 热文件里测试互相导入的清理 | 没做，等 v4 开发告一段落 | §4 |
 | 各测试文件的运行时间、分层标记 | **没测，没做** | §5 |
-| 金丝雀测试（旧 checkpoint 仍能加载）去留 | 等用户决定 | §4 |
+| 金丝雀测试（旧 checkpoint 仍能加载）去留 | 用户决定：**先保留**，等明确授权这类兼容或改成按名字拒绝 | §4 |
 
 ## 1. 规模与方法
 
@@ -131,7 +131,7 @@ R0b 的 runner。`runners.md` 没收录；唯一导入它的是已搬走的 `run
 ## 7. 接下来（按优先级）
 
 1. 把本分支报告给用户合并（用户决定后 worktree 与分支再清理）。
-2. 用户决定：`eta_calibration` 与 `chain_sensitivity` 怎么办（见 §3：要么保留，要么先为 `receding.py` 单独补一份针对活接口的测试、为校准表另找产生者，再搬）；`runway_hypotheses` 搬不搬。
+2. `eta_calibration`、`chain_sensitivity`：用户决定先保留。重新提起的条件：为 `inference/receding.py` 补一份针对活接口的测试（原测试用例逐条对应）、为校准表找到别的产生者。`runway_hypotheses` 搬不搬，没问过，仍待定。
 3. 两层队列空闲时测一次耗时，再据此打分层标记。
-4. 用户决定金丝雀测试的去留。
+4. 金丝雀测试：用户决定先保留。
 5. v4 阶段 A 告一段落后，清理热文件里测试互相导入的那一批（§4 没做的第 1 条）。
