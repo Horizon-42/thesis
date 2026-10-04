@@ -39,15 +39,36 @@ def test_each_split_draws_per_stratum_flights_flown_at_every_row_interval_seeded
         export.choose(rows, "KAAA", 6, 1337)
 
 
-def test_the_words_of_a_sentence_are_its_events_with_the_corrections_marked():
+def test_the_words_of_a_sentence_are_its_events_decoded_with_the_corrections_marked():
+    """Each word as the views show it, decoded by `Words` (the views decode nothing): the runway's candidate or
+    go-around, a heading relative to the course of the runway in force and its track, a level above E and in MSL or "no
+    level-off", an angle's nominal, a speed or "unspecified"."""
+    from ts_transformer.instructions.words import Words
+    from ts_transformer.tests.support import instruction_airport, instruction_spec
+
+    words, geometry = Words(instruction_spec()), instruction_airport()
     grid = np.full((3, 5), UNCHANGED)
-    grid[0] = [0, 2, 10, 0, 5]
-    grid[2, 1] = 3
+    grid[0] = [0, 2, 10, 0, words.speed_unspecified]
+    grid[2, 1], grid[2, 2], grid[2, 0] = 3, words.altitude_no_level_off, -2
     correction = np.zeros((3, 5), bool)
     correction[2, 1] = True
-    assert export.events(grid) == [{"row": 0, "column": c, "value": int(grid[0, c]), "correction": False}
-                                   for c in range(5)] + [{"row": 2, "column": 1, "value": 3, "correction": False}]
-    assert export.events(grid, correction)[-1] == {"row": 2, "column": 1, "value": 3, "correction": True}
+    said = export.events(grid, None, geometry, words)
+    assert [(e["row"], e["column"], e["value"], e["correction"]) for e in said] == [
+        (0, 0, 0, False), (0, 1, 2, False), (0, 2, 10, False), (0, 3, 0, False), (0, 4, words.speed_unspecified, False),
+        (2, 0, -2, False), (2, 1, 3, False), (2, 2, words.altitude_no_level_off, False)]
+    course = geometry.candidates[0].course_deg
+    step = words.spec.heading_step_deg
+    assert said[0]["says"] == {"runway": geometry.candidates[0].ident, "runwayIndex": 0}
+    assert said[1]["says"] == {"relativeDeg": 2 * step, "trackDeg": round((course + 2 * step) % 360.0, 3)}
+    level = words.altitude_level_m(10)
+    assert said[2]["says"] == {"noLevelOff": False, "levelM": level, "mslM": round(level + geometry.elevation_m, 1)}
+    assert said[3]["says"] == {"angleDeg": 0.0, "climb": False, "level": True}
+    assert said[4]["says"] == {"speedMps": None}
+    # go-around changes no runway: the heading word after it is still relative to candidate 0's course
+    assert said[5]["says"] == {"goAround": True}
+    assert said[6]["says"]["trackDeg"] == round((course + 3 * step) % 360.0, 3)
+    assert said[7]["says"] == {"noLevelOff": True, "levelM": None, "mslM": None}
+    assert export.events(grid, correction, geometry, words)[6]["correction"] is True
 
 
 def test_a_heading_band_is_the_judges_rows_and_verdicts():
@@ -160,7 +181,8 @@ def stage_a_fixture() -> tuple[dict, dict]:
         flown, (verdict,) = replay.fly_batch(item.batch, item.params, words, device=torch.device("cpu"))
         replayed = export.replay_payload(flown, 0, verdict, item.batch, item.sentence, {"outcome": verdict.outcome},
                                          item.inputs.aero_params[0].numpy(), words.spec, words)
-        flight["closedLoop"][f"{interval:g}"] = export.closed_loop_payload(item.sentence, replayed, interval, geometry)
+        flight["closedLoop"][f"{interval:g}"] = export.closed_loop_payload(item.sentence, replayed, interval, geometry,
+                                                                              words)
     source = {"instructions": "fixture/instruction_language", "executor": "fixture/executor", "specSha256": "fixture",
               "executorSpecSha256": "fixture", "git": {"head": "fixture", "dirty": False}}
     cohort = {"splits": {"train": 1, "select": 0}, "perStratum": 1, "strata": list(export.STRATA), "seed": 1337,
