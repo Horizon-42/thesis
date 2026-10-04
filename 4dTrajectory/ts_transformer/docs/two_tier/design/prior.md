@@ -45,6 +45,7 @@ The decision numbers are shared by all documents (outline §3).
 | D64 | The word rules of the procedure masks (§4). They block a word when it is said and never block "unchanged". Inside the region (the FAF and the LPV cone of R) a level T only where T ≥ the glidepath lower edge − ε(T), and "no level-off" not where the aircraft is more than ε("no level-off") below the edge. Wherever the aircraft is not inside the region (before the join, or after it when the aircraft has left the region), a level T only where T ≥ DA − ε(T). Before the join, once the aircraft has been below the entry height by more than the band ε of the level nearest the entry height, no level above the aircraft's height + ε and no climb class. A go-around clears the join and the passage below the entry height; while G is true neither is kept | Decided | User, 2026-10-04, on the proposals of the stage B agent and Claude's review |
 | D65 | The inputs and the model where §2 left them open: the fixed scales of §9 (the height above the glidepath as asinh(h / 100 m)); the candidate tokens reach a row through one attention over them whose weights sum to one; the RoPE base is 10,000; the variant `constants` gives the threshold elevation MSL; the runway column's `since` starts again at a candidate word, not at "go-around" (§2) | Decided | User, 2026-10-04, on the proposals of the stage B agent and Claude's review |
 | D68 | Free generation lets a flight say at most 2 go-arounds. After its second, the runner forbids "go-around" in the runway column (a mask of a caller, §4), and it gives 2 as the most go-arounds to the start of the closed loop (vocabulary §6, item 5; D67). The readout counts the flights that reached the bound. Why: the executor lays out the time that go-arounds add (900 s each) when it starts, and the number that a model says is not known before; no closed-loop sentence of `v9_20261004` at Δ = 2 s has more than one go-around (train 68 of 40,534 sentences, select 12 of 6,199, val 20 of 9,750); 2 lets a model say one more than the data, and no flight goes around without end (B4) | Decided | User, 2026-10-04, on the report of the stage B agent |
+| D72 | The readout's probability of "go-around" on the final (B4, B5) is read on the rows on the final (inside the region of the runway in force, D64) where the masks permit "go-around": not while G is true, not after the bound of D68. The probability is that of the distribution the speaker draws the runway word from, the masks applied. Why: at a row where the word is masked, its probability is 0 because of the mask, not the model, and would pull the mean down | Decided | User, 2026-10-04, on the proposal of the stage B agent |
 
 ### 0.2 Open items
 
@@ -90,6 +91,7 @@ changed); 3 (the runway head's class order) is a detail of the code. The code fo
    | After A21 of stage A (the formal artefact), and again after A25 (the formal artefact with the vertical tolerance of the final descent, D66) | B1–B4 on a sample of the formal artefact at Δ = 2 s: the smoke run of B3, its time and the memory check at the formal size; free generation with the executor of the formal artefact |
    | After A26 of stage A (the start of a closed loop, D67), merged into this branch | Free generation of B4 (the speaker with the executor and the judge, through the start), on synthetic artefacts and on the formal artefact |
    | After A27 of stage A (each flight's stratum in the sentence file, D70), merged into this branch | B4's readout by stratum |
+   | After A28 of stage A (the start opens the executor spec, D71), merged into this branch | The main of the free-generation runner of B4 (it gives the start the directory of the executor spec) |
    | After A23 of stage A (the Training view of stage A), merged into this branch | B6's export and view, on the smoke sets of B3 and B4 |
    | After Claude's check of stage A and the user's choice of Δ (outline §4) | B5; B6's publication of the folds and the base; B7 |
 
@@ -487,7 +489,7 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
 - Tests: the stop reads only the select days; a fold never reads its held-out airport in training.
 
 **B4. Speaking and free generation** (§4, §7 item 3; vocabulary §6 items 2, 3, 5, 6; D14, D33, D38, D52, D62, D64,
-D67–D70).
+D67–D72).
 
 - The masks of §4: the grammar; the procedure masks of D64 (the glidepath lower edge inside the region, the DA outside
   it, no climb back with the band of the level nearest the entry height; never "unchanged"; the climb mask lifted while
@@ -496,11 +498,12 @@ D67–D70).
 - The closed loop: the prior speaks, the executor flies, the judge decides (D33, D38); 900 s more time at each
   go-around; the observed rows before the first predicted step, the executor's states after it. The executor is started
   and flown a row at a time through the start of a closed loop (vocabulary §6, item 5; D67), and the outcome is the
-  judge's (item 6). Before it reads closed-loop sentences, the runner calls the check of item 3 (D69); it imports
-  nothing else of `autopilot/`. At most 2 go-arounds a flight (D68).
+  judge's (item 6). The runner gives the start the directory of the executor spec, which the start opens and checks
+  (D71). Before it reads closed-loop sentences, the runner calls the check of item 3 (D69); it imports nothing else
+  of `autopilot/`. At most 2 go-arounds a flight (D68).
 - The readout: the outcomes for each airport and each stratum of the flight (straight-in or vectored, as the sentence
   file stores it: vocabulary §6, item 3; D70); the words for each column against the labelled ones; the go-arounds said
-  and the flights that reached the bound of D68; the probability of "go-around" on the final.
+  and the flights that reached the bound of D68; the probability of "go-around" on the final (D72).
 - Tests: one flight spoken and flown to its outcome; each mask; G; the time limit; the same seed gives the same
   sentence; no row reaches a column with no permitted word (D62); a procedure mask never blocks "unchanged", also when
   the word in force breaks a limit; a level below the DA is blocked after the join when the aircraft has left the LPV
@@ -517,7 +520,7 @@ D67–D70).
   airport (200 flights × 2).
 - `prior_select` applies the rules of §5 and writes the choice. Then the base on all five airports, and its one
   validation readout: the teacher-forced loss, the free generation, the share of the labelled words that the masks
-  block, the probability of "go-around" on the final.
+  block, the probability of "go-around" on the final (D72).
 - No criterion is applied: the user reads the results (D7).
 
 **B6. The Training view of stage B (outline §6).** After A23 is on this branch; the publication of the folds and the
