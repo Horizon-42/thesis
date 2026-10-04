@@ -41,7 +41,7 @@ from ts_transformer.autopilot.sentence import Spoken
 from ts_transformer.autopilot.spec import params_sha256
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import (
-    ClosedLoopSentence, closed_loop_path, load_candidates, load_sentences, load_signals, load_spec,
+    CLOSED_LOOP_SCHEMA, ClosedLoopSentence, closed_loop_path, load_candidates, load_sentences, load_signals, load_spec,
 )
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.labeller.interval import OBSERVATION_S, interval_rows
@@ -162,16 +162,19 @@ def start(instructions: Path, split: str, interval_s: float, sentences: Mapping[
         raise ValueError("no sentence to start")
     if load_spec(instructions).sha256 != spec.sha256:
         raise ValueError(f"{instructions} holds another vocabulary than the words given")
-    with np.load(closed_loop_path(instructions, split, interval_s)) as data:
-        flown_by = str(data["executor_params_sha256"])
-    if flown_by != params_sha256(params):
-        raise ValueError(f"the {split} closed-loop sentences at {interval_s:g} s were flown by executor parameters "
-                         f"{flown_by[:12]}, not {params_sha256(params)[:12]}")
     first = start_row(interval_s)
     every = interval_rows(interval_s, spec.step_s)
     order = sorted(sentences)
     if any(sentences[i].start != first for i in order):
         raise ValueError(f"a sentence does not start at row {first} of {interval_s:g} s")
+    path = closed_loop_path(instructions, split, interval_s)
+    with np.load(path) as data:
+        schema, flown_by = str(data["schema"]), str(data["executor_params_sha256"])
+    if schema != CLOSED_LOOP_SCHEMA:
+        raise ValueError(f"{path} is not a {CLOSED_LOOP_SCHEMA} file")
+    if flown_by != params_sha256(params):
+        raise ValueError(f"the {split} closed-loop sentences at {interval_s:g} s were flown by executor parameters "
+                         f"{flown_by[:12]}, not {params_sha256(params)[:12]}")
     signals = load_signals(instructions, split)
     geometries = load_candidates(instructions)
     flights = [signals[i] for i in order]

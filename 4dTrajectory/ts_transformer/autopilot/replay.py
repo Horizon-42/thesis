@@ -285,11 +285,6 @@ def subset(batch: Batch, indices: list[int]) -> Batch:
                  drawn=batch.drawn)
 
 
-def remaining_observed_s(reading: Reading, first_row: int, step_s: float) -> float:
-    """The observed time from the 2 s row ``first_row`` to the end of the labeller's reading (a row per ``step_s``)."""
-    return (len(reading.words) - first_row) * step_s
-
-
 def time_limit_s(observed_rows: int, first_row: int, params: ExecutorParams, step_s: float) -> float:
     """A flight's time limit before its go-arounds (vocabulary §5.8): the observed time from its 2 s row ``first_row`` to
     the end of its labelled sentence of ``observed_rows`` rows, × the timeout factor — the one definition the replay, the

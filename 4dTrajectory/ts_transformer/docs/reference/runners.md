@@ -1492,12 +1492,12 @@ side (refused unless their specs differ only in H_final and a split's readouts d
 ### R53 · `run_ts.py closed_loop_start_check` — stored closed-loop sentences said through the start of a closed loop give back their states (vocabulary §12.1 A26, §12.2 item 7, D67)
 
 2026-10-04 (`experiments/closed_loop_start_check.py`, `autopilot/start.py`). `closed_loop_start_check --instructions <artefact>
---executor <spec dir> --split train|select|val --row-interval-s 2 4 8 [--per-airport 50] [--seed 1337] --out <new dir>`:
+--executor <spec dir> --split train|select|val --row-interval-s 2 4 8 [--per-airport 50] [--seed 1337] [--chunk 2048] --out <new dir>`:
 refused unless the executor and closed-loop conformance records of the code on disk exist. For each Δ, the artefact's stored
-closed-loop sentences of the split (`--per-airport` of each airport, seeded; 0 every one) are started together through
+closed-loop sentences of the split (`--per-airport` of each airport, seeded; 0 every one; an airport with fewer refused) are started `--chunk` at a time through
 `start.start` — rebuilt from the harvest, their aircraft and approach speeds by the replay's rule, their time limits from
 the sentence file — and said row by row (each its own rows, then "unchanged"). Each flight must give back its stored
-states on every 2 s row (position and height within `STATE_BOUND_M`, the other columns within `ROUNDOFF`), be done at its
+states on every 2 s row while it flies (position and height within `STATE_BOUND_M`, the other columns — the track wrapped — within `ROUNDOFF`), be done at its
 sentence's last row and time out as stored; `check.json` (`ts-closed-loop-start-check-v1`) holds every flight; exit 1 when
 any fails. The test of A26 on the artefact of A25 (§12.2 item 7).
 

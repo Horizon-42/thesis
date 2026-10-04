@@ -4,11 +4,12 @@ closed-loop reading did, with the flights rebuilt from the harvest, their aircra
 rule and their time limits from the sentence file (what `tests/test_start.py` stands in for).
 
 For each ``--row-interval-s``: the artefact's closed-loop sentences of ``--split`` (`artefact.closed_loop_sentences`),
-``--per-airport`` of each airport in a permutation seeded by ``--seed`` (0: every one), started together
-(`start.start`, the most go-arounds the most any of them says) and said row by row — each flight's own rows, then
-"unchanged" once its sentence has ended. Per flight: the largest difference of the position and height (columns 0–2)
-and of the other columns between the flown 2 s rows and the stored ones; whether it is done exactly at its sentence's
-last row; and whether it timed out as stored. Refused (exit 1) unless every flight is within the executor conformance's
+``--per-airport`` of each airport in a permutation seeded by ``--seed`` (0: every one; an airport with fewer is refused),
+started ``--chunk`` flights together (`start.start`, the most go-arounds the most any of them says) and said row by row —
+each flight's own rows, then "unchanged" once its sentence has ended; a flight's 2 s rows are kept while it flies, so one
+done early has fewer rows than stored. Per flight: the largest difference of the position and height (columns 0–2) and
+of the other columns (the track wrapped to ±180°) between the flown 2 s rows and the stored ones; whether it is done
+exactly at its sentence's last row; and whether it timed out as stored. Refused (exit 1) unless every flight is within the executor conformance's
 bound (`STATE_BOUND_M`; other columns `ROUNDOFF`), done at its last row and timed out as stored. Writes ``check.json``.
 
     python run_ts.py closed_loop_start_check --instructions <artefact> --executor <spec> --split train \\
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +34,7 @@ from ts_transformer.instructions.artefact import (
     SPLITS, closed_loop_path, closed_loop_sentences, load_closed_loop, load_signals,
 )
 from ts_transformer.instructions.labeller.interval import interval_rows
-from ts_transformer.instructions.words import RUNWAY, RUNWAY_GO_AROUND, UNCHANGED
+from ts_transformer.instructions.words import RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, wrap180
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
@@ -41,9 +43,14 @@ CHECK_SCHEMA = "ts-closed-loop-start-check-v1"
 
 def sample(airports: list[str], per_airport: int, seed: int) -> list[int]:
     """The places (in ``airports``' order) of the first ``per_airport`` of each airport in a permutation seeded by
-    ``seed`` (0: every one), sorted."""
+    ``seed`` (0: every one), sorted; refused for an airport with fewer."""
+    if per_airport < 0:
+        raise ValueError(f"--per-airport {per_airport} is negative")
     if not per_airport:
         return list(range(len(airports)))
+    short = {a: n for a, n in Counter(airports).items() if n < per_airport}
+    if short:
+        raise ValueError(f"airports with fewer than {per_airport} closed-loop sentences: {short}")
     left = {airport: per_airport for airport in set(airports)}
     chosen = []
     for k in np.random.default_rng(seed).permutation(len(airports)).tolist():
@@ -54,12 +61,21 @@ def sample(airports: list[str], per_airport: int, seed: int) -> list[int]:
 
 
 def check_interval(instructions: Path, split: str, interval_s: float, params: Any, words: Any, *, per_airport: int,
-                   seed: int, device: torch.device) -> list[dict[str, Any]]:
-    """One row interval's flights said through the start (module docstring): one row each."""
+                   seed: int, chunk: int, device: torch.device) -> list[dict[str, Any]]:
+    """One row interval's flights said through the start (module docstring), ``chunk`` at a time: one row each."""
     stored = closed_loop_sentences(load_closed_loop(closed_loop_path(instructions, split, interval_s), words.spec))
     signals = load_signals(instructions, split)
     keys = sorted(stored)
-    chosen = {keys[k]: stored[keys[k]] for k in sample([signals[i].airport for i in keys], per_airport, seed)}
+    chosen = [keys[k] for k in sample([signals[i].airport for i in keys], per_airport, seed)]
+    out = []
+    for first in range(0, len(chosen), chunk):
+        out += _check_chunk(instructions, split, interval_s, {i: stored[i] for i in chosen[first: first + chunk]},
+                            signals, params, words, device=device)
+    return out
+
+
+def _check_chunk(instructions: Path, split: str, interval_s: float, chosen: dict[int, Any], signals: list[Any],
+                 params: Any, words: Any, *, device: torch.device) -> list[dict[str, Any]]:
     most = max(int((s.grid[:, RUNWAY] == RUNWAY_GO_AROUND).sum()) for s in chosen.values())
     loop, order = start(instructions, split, interval_s, chosen, params, words, most_go_arounds=most, device=device)
     every = interval_rows(interval_s, words.spec.step_s)
@@ -72,7 +88,7 @@ def check_interval(instructions: Path, split: str, interval_s: float, params: An
                 said[f] = chosen[i].grid[k]
         rows, done = loop.step(said)
         for f, i in enumerate(order):
-            if k < len(chosen[i].grid) - 1:
+            if k < len(chosen[i].grid) - 1 and not done[f]:       # kept while it flies: an early end shows
                 flown[f] += list(rows[f])
         done_at = np.where(done & (done_at < 0), k, done_at)
     timed_out = loop.timed_out()
@@ -82,10 +98,13 @@ def check_interval(instructions: Path, split: str, interval_s: float, params: An
         expected = sentence.states[sentence.start * every:]
         got = np.array(flown[f])
         same_shape = got.shape == expected.shape
+        apart = got - expected if same_shape else None
+        if same_shape:
+            apart[:, 3] = wrap180(apart[:, 3])                     # the track, compass degrees
         out.append({"index": i, "dataset_id": signals[i].dataset_id, "airport": signals[i].airport,
                     "rows": len(sentence.grid), "same_rows": same_shape,
-                    "position_m": float(np.abs(got[:, :3] - expected[:, :3]).max()) if same_shape else None,
-                    "other_columns": float(np.abs(got[:, 3:] - expected[:, 3:]).max()) if same_shape else None,
+                    "position_m": float(np.abs(apart[:, :3]).max()) if same_shape else None,
+                    "other_columns": float(np.abs(apart[:, 3:]).max()) if same_shape else None,
                     "done_at_last_row": bool(done_at[f] == len(sentence.grid) - 1),
                     "timed_out_as_stored": bool(timed_out[f]) == sentence.timed_out})
     return out
@@ -104,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--row-interval-s", type=float, nargs="+", required=True)
     parser.add_argument("--per-airport", type=int, default=50, help="0: every closed-loop sentence of the split")
     parser.add_argument("--seed", type=int, default=1337)
+    parser.add_argument("--chunk", type=int, default=2048, help="flights started together")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     args = parser.parse_args(argv)
@@ -118,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     intervals = {}
     for interval in args.row_interval_s:
         rows = check_interval(instructions, args.split, interval, params, words, per_airport=args.per_airport,
-                              seed=args.seed, device=torch.device(args.device))
+                              seed=args.seed, chunk=args.chunk, device=torch.device(args.device))
         failed = [r["dataset_id"] for r in rows if not passes(r)]
         intervals[f"{interval:g}"] = {"flights": len(rows), "failed": failed,
                                       "largest_position_m": max(r["position_m"] or 0.0 for r in rows),

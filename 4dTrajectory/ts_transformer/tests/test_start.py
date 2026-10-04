@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 import torch
@@ -12,8 +14,6 @@ from ts_transformer.autopilot.judge import outcome_of
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
 from ts_transformer.autopilot.start import GoAroundBeyondMost, Loop, start
-from dataclasses import replace
-
 from ts_transformer.autopilot.spec import params_sha256
 from ts_transformer.instructions.artefact import (
     CLOSED_LOOP_DIRECTORY, ClosedLoopSentence, closed_loop_path, closed_loop_sentences, load_candidates, load_closed_loop,
@@ -76,7 +76,7 @@ def test_a_stored_sentence_said_through_the_start_gives_its_states_and_its_outco
     params = _params()
     loop, order = start(directory, "train", interval_s, {0: stored}, params, words, most_go_arounds=0, device=CPU)
     assert order == [0]
-    limit = replay.remaining_observed_s(batch.readings[0], anchor, words.spec.step_s) * params.timeout_factor
+    limit = (len(batch.readings[0].words) - anchor) * words.spec.step_s * params.timeout_factor   # §5.8, written out
     assert float(loop.executor.time_limit_s[0]) == limit
     flown = [loop.rows()[0]]
     for k, row in enumerate(stored.grid):
@@ -121,6 +121,12 @@ def test_a_go_around_beyond_the_most_given_is_refused_by_name(tmp_path, monkeypa
         with pytest.raises(GoAroundBeyondMost, match="beyond the most 1"):
             loop.step(climb)
         assert loop.go_arounds[0] == 1
+    # a halted flight's words are not heard either
+    loop, _ = start(directory, "train", 2.0, {0: stored}, params, words, most_go_arounds=0, device=CPU)
+    loop.step(stored.grid[:1])
+    loop.halt(np.array([True]))
+    loop.step(climb)
+    assert loop.go_arounds[0] == 0
     # a done flight's words are not heard: its go-around is no go-around
     loop, _ = start(directory, "train", 2.0, {0: stored}, params, words, most_go_arounds=0, device=CPU)
     with pytest.raises(ValueError, match="not done"):
@@ -134,11 +140,11 @@ def test_a_go_around_beyond_the_most_given_is_refused_by_name(tmp_path, monkeypa
 
 def test_the_start_refuses_sentences_not_read_under_its_artefact_split_and_executor(tmp_path, monkeypatch):
     """The sentences are tied to what they were read under: the vocabulary, the executor parameters of the artefact's
-    closed-loop file, the row interval, and the flight (its observed rows are its stored signals)."""
+    closed-loop file, the row interval, and the flight (its observed rows are its stored signals: a sentence of another
+    split or another flight is refused)."""
     directory, words, _, stored, _ = _artefact(tmp_path, monkeypatch, 4.0)
     with pytest.raises(ValueError, match="no sentence"):
         start(directory, "train", 4.0, {}, _params(), words, most_go_arounds=0, device=CPU)
-    (directory / CLOSED_LOOP_DIRECTORY / "train_2s.npz").symlink_to(closed_loop_path(directory, "train", 4.0))
     with pytest.raises(ValueError, match="does not start at row 8 of 2 s"):
         start(directory, "train", 2.0, {0: stored}, _params(), words, most_go_arounds=0, device=CPU)
     with pytest.raises(ValueError, match="flown by executor parameters"):
@@ -164,7 +170,7 @@ def test_the_start_check_runner_says_stored_sentences_through_the_start(tmp_path
 
     directory, words, _, _, _ = _artefact(tmp_path, monkeypatch, interval_s)
     (row,) = runner.check_interval(directory, "train", interval_s, _params(), words, per_airport=0, seed=1337,
-                                   device=CPU)
+                                   chunk=8, device=CPU)
     assert row["same_rows"] and row["position_m"] == 0.0 and row["other_columns"] == 0.0 and runner.passes(row)
     assert not runner.passes({**row, "position_m": 2e-6}) and not runner.passes({**row, "done_at_last_row": False})
 
@@ -176,3 +182,23 @@ def test_the_start_check_samples_each_airport_alike():
     chosen = sample(airports, 2, 1337)
     assert len(chosen) == 4 and sorted(airports[k] for k in chosen) == ["A", "A", "B", "B"] and chosen == sorted(chosen)
     assert sample(airports, 0, 1337) == list(range(8)) and sample(airports, 2, 1337) == chosen
+    with pytest.raises(ValueError, match="fewer than 4"):
+        sample(airports, 4, 1337)
+    with pytest.raises(ValueError, match="negative"):
+        sample(airports, -1, 1337)
+
+
+def test_the_start_check_runner_exits_1_on_a_failed_flight_and_never_overwrites(tmp_path, monkeypatch):
+    from ts_transformer.experiments import closed_loop_start_check as runner
+
+    monkeypatch.setattr(replay, "open_executor", lambda executor, instructions: (_params(), {"sha256": "e"}, None))
+    monkeypatch.setattr(closed_loop, "require_conforming_closed_loop", lambda instructions: None)
+    good = {"dataset_id": "KXXX:a", "same_rows": True, "position_m": 0.0, "other_columns": 0.0,
+            "done_at_last_row": True, "timed_out_as_stored": True}
+    argv = ["--instructions", str(tmp_path), "--executor", str(tmp_path), "--split", "train", "--row-interval-s", "2"]
+    for name, rows, code in (("ok", [good], 0), ("bad", [good, {**good, "dataset_id": "KXXX:b", "same_rows": False,
+                                                                     "position_m": None, "other_columns": None}], 1)):
+        monkeypatch.setattr(runner, "check_interval", lambda *a, rows=rows, **k: rows)
+        assert runner.main([*argv, "--out", str(tmp_path / name)]) == code
+    with pytest.raises(SystemExit):
+        runner.main([*argv, "--out", str(tmp_path / "ok")])
