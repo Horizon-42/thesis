@@ -21,7 +21,7 @@ from ts_transformer.autopilot.judge import OUTCOMES, flown_track
 from ts_transformer.experiments import training_export as export
 from ts_transformer.instructions import training_files
 from ts_transformer.instructions.spec import READING_RULE
-from ts_transformer.instructions.words import COLUMNS, HEADING, UNCHANGED
+from ts_transformer.instructions.words import COLUMNS, HEADING, RUNWAY_GO_AROUND, UNCHANGED
 from ts_transformer.tests.support import closed_loop_flight
 from ts_transformer.tests.test_training_export import FIXTURE_SET, FIXTURES, stage_a_fixture
 
@@ -351,6 +351,14 @@ def ts_strings(path: Path, name: str) -> list[str]:
     return re.findall(r'"([^"]*)"', match.group(1))
 
 
+def ts_number(path: Path, name: str) -> float:
+    """A `export const NAME = <number>` of a frontend file."""
+    match = re.search(rf"export const {name} = (-?[0-9.]+);", path.read_text(encoding="utf-8"))
+    if match is None:
+        raise AssertionError(f"{path.name} has no number constant {name}")
+    return float(match.group(1))
+
+
 class MirrorTest(unittest.TestCase):
     def test_the_frontend_reads_the_names_the_backend_and_the_export_write(self):
         autopilot, sample = FRONTEND / "trainingAutopilot.ts", FRONTEND / "trainingSample.ts"
@@ -364,6 +372,8 @@ class MirrorTest(unittest.TestCase):
         self.assertEqual(ts_strings(sample, "TRAINING_OUTCOMES"), list(OUTCOMES))
         self.assertEqual(ts_strings(sample, "TRAINING_SPLITS"), list(training_files.SPLITS))
         self.assertEqual(ts_strings(sample, "TRAINING_STRATA"), list(export.STRATA))
+        self.assertEqual(ts_number(sample, "TRAINING_UNCHANGED"), UNCHANGED)
+        self.assertEqual(ts_number(sample, "TRAINING_RUNWAY_GO_AROUND"), RUNWAY_GO_AROUND)
 
 
 if __name__ == "__main__":
