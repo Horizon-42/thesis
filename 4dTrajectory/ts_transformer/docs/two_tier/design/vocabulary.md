@@ -91,7 +91,10 @@ The decision numbers are shared by all documents (outline §3).
    read-only with `SHA256SUMS`; report `readouts/2026-10-04_stage_a_a21_report.zh.md`).
 2. Claude's check of A15–A22 and the formal artefact (§12.2) is done: all five items pass
    (`readouts/2026-10-04_stage_a_check_a15_a22.zh.md`); one point of wording for the user (D45's "mean lateness zero").
-3. The user compares the readings of D34 and chooses Δ (D7, D11). The replay of the val days waits for the user.
+3. A23: the Training view of stage A (§12.1, outline §6), so that the user sees the words, the closed-loop sentences
+   at Δ = 2, 4, 8 s and the executor in the frontend.
+4. The user compares the readings of D34 and chooses Δ (D7, D11), before or after A23. The replay of the val days waits
+   for the user.
 
 ---
 
@@ -1308,7 +1311,7 @@ of Claude's check (`readouts/2026-10-04_stage_a_check.zh.md` §2), those of A15�
 
 | Milestone | What it built | Decisions |
 |---|---|---|
-| A0 | The archive of the modules of the old vocabulary that stage A does not rewrite (`archive/two_tier_v3_2026_10/`, with a `README.md`: what moved, why, which stage brings each part back; the backend tests that use the two-tier code fail until stage D) | D20 |
+| A0 | The archive of the modules of the old vocabulary that stage A does not rewrite (`archive/two_tier_v3_2026_10/`, with a `README.md`: what moved, why, which stage brings each part back; the backend tests that use the two-tier code fail until A23) | D20 |
 | A1 | The vocabulary: five columns, the runway/G table, heading classes relative to the course of R, the altitude grid, grammar rules 1–5 as one function for the labeller and the speaker | D1, D8, D10, D12, D14, D22 |
 | A2 | The labeller: heading words from row 0 to the end, the go-around reading, the level test without the grid, "unspecified" from the capture row, the Δ grid; candidates without TCH, glidepath angle or LPV DA refused | D4, D11, D18, D19, D25 |
 | A3 | The artefact and the identities: the labeller conformance (§7.2 #2), no byte checks of the arrival manifests, the sentences schema, the spec measurement with its rounding candidates and the level rounding errors | D15, D21 |
@@ -1419,6 +1422,29 @@ sentence changes.
   class; the labeller, executor and closed-loop conformance checks pass.
 - The key code index (§11) follows the moves.
 
+**A23. The Training view of stage A (outline §6).** After A21. The user sees the words, the closed-loop sentences and
+the executor of this stage in the frontend.
+
+- **Backend.** The live executor (`aeroviz_backend/autopilot_segment/`) on the new executor: `autopilot/single.py` with
+  the executor spec of the formal artefact (`executor/v14_20261004`). It flies the words of this vocabulary from a
+  state (five columns; a heading word with the course of R, D46; a level at T + E, D58; speed words in steps, D43) and
+  imports no `prior/`. The backend tests that A0 left failing (`aeroviz_backend/tests/test_single_executor.py`,
+  `test_autopilot_segment.py`, the route in `test_http_server.py`) are rewritten and pass.
+- **Export** (the archived R11 and R13, rewritten). For each airport, a random sample of select flights and of train
+  flights (seed 1337; the sizes stated in the export): the observed track; the open-loop sentence on the 2 s rows; at
+  Δ = 2, 4 and 8 s the closed-loop sentence, each correction word marked, and its flown states; the judge's outcome and
+  the DA check (its point, its vertical and lateral values); the attitudes. New schema names; its own index beside the
+  old one (outline §6 item 3).
+- **Frontend** (`aeroviz-4d`, the Training view). The five columns (runway and G, heading relative to the course of R,
+  altitude above E, angle, speed); the correction words marked; a choice of Δ; the flown path beside the observed one;
+  the outcome and the DA point; a click on a word flies its segment live with the new executor. It refuses the old
+  schema names.
+- **Publication and view.** The intent in `docs/experiments/intents.json`; the sets published for the five airports;
+  a test stack from the worktree for the user (outline §6 items 4, 5).
+- **Tests.** The backend's; the export (a sample written and read again); the frontend's readers (Vitest) on fixtures
+  that the export writes; a live segment equals the export's flown states from the same state with the same words
+  (the executor conformance tolerance); the browser check (outline §6 item 6).
+
 ### 12.2 Claude's check of stage A
 
 The check of A0–A14 is done (`readouts/2026-10-04_stage_a_check.zh.md`, at `ab295b18`; its points became D48–D52).
@@ -1438,3 +1464,5 @@ Done at `9a986c09`: all five items pass (`readouts/2026-10-04_stage_a_check_a15_
    changed; the superseded directories of A18 and of the build before D61 deleted; the `SHA256SUMS` beside the formal
    data match.
 5. Nothing in the archive was edited after the move.
+6. After A23: the published sets open and play in the browser; a live segment equals the export's flown states; the
+   old Training index and its sets are unchanged; the backend tests pass (outline §6).

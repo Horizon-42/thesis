@@ -22,10 +22,10 @@ repository root; `readouts/` is `docs/two_tier/readouts/`. The documents of the 
 
 | Document | Part | Stage | State |
 |---|---|---|---|
-| `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge | A | Built on `dev-two-tier-v4`; the formal artefact next (vocabulary §0.4) |
-| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport | B | Not started; it starts in parallel with the end of stage A (§4) |
-| `post_training.md` | The post-training in windows of traffic; the multi-aircraft work | C | Not started; outline |
-| This outline | The principles, the shared rules, the plan; the frontend and the backend (§6) | D | Not started |
+| `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge; their Training view | A | Built on `dev-two-tier-v4`, the formal artefact built; the Training view of stage A next (vocabulary §0.4) |
+| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport; its Training view | B | Built in parallel with the end of stage A, on `dev-two-tier-v4-prior` (prior §0.3) |
+| `post_training.md` | The post-training in windows of traffic; the multi-aircraft work; its Training view | C | Not started; outline |
+| This outline | The principles, the shared rules, the plan; the rules of each stage's Training view (§6) | — | — |
 
 **Dependencies.** The documents depend on each other as the code does. The vocabulary reads no other document. The
 prior reads the vocabulary. The post-training reads the vocabulary and the prior. Each document reads another only
@@ -33,8 +33,8 @@ through that document's public interface and its decisions:
 
 | Public interface | What it gives | Read by |
 |---|---|---|
-| Vocabulary §6 | The vocabulary spec, the grammar, the sentence artefact, the candidates and their geometry, the executor, the judge, the row grid | Prior, post-training, stage D |
-| Prior §7 | The checkpoint, the inputs of a row, the speaker, the teacher-forced loss, a place for an added module | Post-training, stage D |
+| Vocabulary §6 | The vocabulary spec, the grammar, the sentence artefact, the candidates and their geometry, the executor, the judge, the row grid | Prior, post-training |
+| Prior §7 | The checkpoint, the inputs of a row, the speaker, the teacher-forced loss, a place for an added module | Post-training |
 
 A document never cites another document's other sections; every document reads this outline. A change of a public
 interface is a change of a format: it gets a new name (principle 8), and every document that reads it changes with it.
@@ -104,14 +104,18 @@ The next free numbers: D66, O9.
 
 1. Stage A (vocabulary §0.4): A19 and A20, the user's choice of the altitude grid, A22 (the vertical path of each
    candidate, the state columns and the grammar's column mask in the public interface, D61, D62), A21 (the formal
-   artefact and the readings of D34), Claude's check. The user compares the readings of D34 and chooses Δ (D7, D11).
+   artefact and the readings of D34), Claude's check, A23 (the Training view of stage A). The user compares the
+   readings of D34 and chooses Δ (D7, D11).
 2. Stage B (prior §0.4): the prior from the start, chosen by cross-validation over the airports, and the base model.
    Stage B is developed in parallel with the end of stage A (the user, 2026-10-04). A milestone of stage B starts when
    the parts of stage A that it reads are on `dev-two-tier-v4`. The formal runs of stage B wait for Claude's check of
-   stage A and the user's choice of Δ.
-3. Stage C (post-training §0.4): the post-training in windows of traffic with one aircraft commanded.
-4. Stage D (§6): the frontend and the backend.
-5. The user merges the branch.
+   stage A and the user's choice of Δ. It ends with the Training view of stage B (prior B6).
+3. Stage C (post-training §0.4): the post-training in windows of traffic with one aircraft commanded. It ends with the
+   Training view of stage C.
+4. Each stage ends with its own Training view (§6): the backend's live executor, the export and the frontend follow the
+   stage, so that the user sees what the stage does in the frontend (the user, 2026-10-04). There is no separate
+   frontend stage.
+5. The user merges (§5 rule 11).
 
 ---
 
@@ -125,7 +129,7 @@ sections that it names.
    from `dev-two-tier-v4`. The merges go in one direction:
    - before a milestone that a new design commit holds, the branch of the stage merges `dev-two-tier`;
    - when stage A commits a part that a milestone of stage B reads, `dev-two-tier-v4-prior` merges `dev-two-tier-v4`;
-   - at the end of stage B (prior B6), `dev-two-tier-v4` merges `dev-two-tier-v4-prior`.
+   - at the end of stage B (prior B7), `dev-two-tier-v4` merges `dev-two-tier-v4-prior`.
 
    Stage B never changes the code of `instructions/` or `autopilot/`. A defect in it goes to stage A, through the user;
    stage B gets the correction with the next merge. The ignored data trees of each worktree (`data`,
@@ -158,9 +162,11 @@ sections that it names.
     text that the user decides. The log is committed to `dev-two-tier` (the user's checkout), with explicit paths. At
     the end of a stage, the report gives the new code index, and Claude puts it into the key code index of the
     document.
-11. The branches are not merged into `dev-two-tier` before stage D: the backend's live executor
-    (`aeroviz_backend/autopilot_segment/`) and the frontend's Training view read the old format until then. The user
-    merges.
+11. The user merges a branch into `dev-two-tier`, not before the Training view of its stage (§6): before it, the
+    backend's live executor (`aeroviz_backend/autopilot_segment/`) and the Training view of the branch do not work. A
+    merge also moves the main checkout's services to the new formats; the sets published in the old formats stay on
+    disk, and the new frontend does not read them (principle 8). Until the user merges, the user sees a stage on a test
+    stack from its worktree (§6).
 12. A value that a runner fits from data and the user chooses (D15) is measured on all train days in a scratch
     directory, directly after the milestone that writes the runner. This measurement is not a formal build: it writes
     nothing under `4dTrajectory/outputs/`. Report the fitted values and their candidates to the user, and wait for the
@@ -171,8 +177,29 @@ sections that it names.
 
 ---
 
-## 6 Stage D: frontend and backend (outline)
+## 6 The Training view of each stage
 
-The Training exports and the backend's live executor (`aeroviz_backend/autopilot_segment/`) on the new format; the
-frontend reads the reading name, not the spec sha: what the frontend reads is identified by the reading name (D21).
-After stage D the user merges the branch.
+Each stage ends with a milestone that brings the frontend and the backend to that stage (the user, 2026-10-04):
+vocabulary A23, prior B6, and the Training view of the post-training (post-training §8). The user sees each stage in
+the frontend before the next one builds on it. The rules for these milestones:
+
+1. **What follows the stage.** The backend's live executor (`aeroviz_backend/autopilot_segment/`, a click on a word
+   flies its segment), the Training export of the stage's results, and the frontend's Training view (`aeroviz-4d`). The
+   archived exports and display code (`archive/two_tier_v3_2026_10/`: `instructions/training_files.py`,
+   `instructions/display.py`, the `*_training_export.py` runners, `experiments/training_attitude.py`) come back,
+   rewritten, in the stage that needs them.
+2. **Formats.** Every changed export format gets a new schema name, and the frontend refuses an old one (principle 8).
+   The frontend reads the reading name and the format names, not the spec sha (D21). The fixtures of the frontend's
+   tests are written by the export code, not by hand.
+3. **Beside the old sets.** The worktree's `aeroviz-4d/public/data/airports` is a link to the live data (§5 rule 1).
+   A stage's export writes its own index under a new name beside `training/index.json`; the old index and its sets
+   stay unchanged, so the Training view of the main checkout keeps working until the user merges.
+4. **Publication.** The intent of each published set is in `docs/experiments/intents.json`, committed before the
+   export. Train and select flights; val flights only from a readout that a plan already makes (the base model's one
+   validation readout, prior B5), never a new read of the val days.
+5. **The user's view.** A test stack from the stage's worktree: the backend and vite on their own ports (§5 rule 13 for
+   the memory). The report gives the address and the stop command (`kill $(lsof -t -iTCP:<port> -sTCP:LISTEN)`). The
+   main checkout's services are not touched (§5 rule 8).
+6. **The check.** A published set opens and plays in the browser, and a live segment equals the flown states of the
+   export from the same state with the same words (the executor conformance tolerance). The browser check runs in a
+   one-shot subagent that returns a short verdict; HTTP 200 is not "it loads".

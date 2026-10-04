@@ -71,16 +71,17 @@ changed); 3 (the runway head's class order) is a detail of the code. The code fo
 ### 0.4 Plan
 
 1. Stage B is developed in parallel with the end of stage A (the user, 2026-10-04), on its own branch (outline §5
-   rule 1). B0–B6 (§12): the package, the data, the model, the training, the speaking and free generation, the
-   cross-validation and the base model. A milestone starts when the parts of stage A that it reads are on
-   `dev-two-tier-v4` (outline §4):
+   rule 1). B0–B7 (§12): the package, the data, the model, the training, the speaking and free generation, the
+   cross-validation and the base model, the Training view of stage B, the close. A milestone starts when the parts of
+   stage A that it reads are on `dev-two-tier-v4` (outline §4):
 
    | When | What |
    |---|---|
    | Now | B0. B2 and the training loop of B3, tested on synthetic inputs. The words of each column and their number come from the vocabulary spec (vocabulary §6, item 1), never from constants of the prior |
    | After A19, A20 and A22 of stage A (the altitude words above E, the new format names, the executor that flies T + E; the vertical path of each candidate in `candidates.json`, the reader of a closed-loop file, D61; the grammar's column mask, D62) | B1, tested on synthetic artefacts (`tests/support.py`). The speaker and the masks of B4 |
    | After A21 of stage A (the formal artefact) | B1–B4 on a sample of the formal artefact at Δ = 2 s: the smoke run of B3, its time and the memory check at the formal size; free generation with the executor of the formal artefact |
-   | After Claude's check of stage A and the user's choice of Δ (outline §4) | B5, B6 |
+   | After A23 of stage A (the Training view of stage A), merged into this branch | B6's export and view, on the smoke sets of B3 and B4 |
+   | After Claude's check of stage A and the user's choice of Δ (outline §4) | B5; B6's publication of the folds and the base; B7 |
 
 2. Then the post-training (`post_training.md`).
 
@@ -88,8 +89,8 @@ changed); 3 (the runway head's class order) is a detail of the code. The code fo
 
 ## 1 Scope
 
-- **This document owns** the package `prior/` (the inputs, the model, the training, the speaker and its masks) and its
-  runners.
+- **This document owns** the package `prior/` (the inputs, the model, the training, the speaker and its masks), its
+  runners, and the Training view of its results (B6, outline §6).
 - **It reads** the outline (the principles, the shared decisions D7, D20, D21, D55, the rules of the implementation)
   and the vocabulary's public interface (vocabulary §6): the vocabulary spec and the grammar (items 1, 2), the sentence
   artefact (item 3), the candidates and their geometry (item 4) and the row grid (item 7). The package `prior/` does
@@ -497,7 +498,25 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
   block, the probability of "go-around" on the final.
 - No criterion is applied: the user reads the results (D7).
 
-**B6. Close of stage B.** The full ts suite passes (run detached). §0.3 (the log) and `docs/reference/runners.md` are
+**B6. The Training view of stage B (outline §6).** After A23 is on this branch; the publication of the folds and the
+base after B5. The user sees what the prior says and how the executor flies it.
+
+- **Export** (the archived prior Training exports, rewritten). For each flight of the sample: the observed rows before
+  the first predicted step; the sentences that the prior says in free generation and their flown states (several
+  sentences of one flight side by side); the closed-loop sentence of the same flight; the outcome and the DA check of
+  each; at each row, the words that the procedure masks blocked; the region, the glidepath lower edge, the DA and the
+  entry height of R. Sets: each fold of B5 at its held-out airport (the flights of its free generation), and the base
+  model (its one validation readout). Before B5, a smoke set from the smoke model of B3 checks the view. New schema
+  names; its own index beside the old one (outline §6 item 3).
+- **Frontend.** The Training view of A23 with the prior's sentences: the five columns, a choice of sentence, the
+  blocked words at a row, the procedure's limits drawn, the outcome. A click on a word flies its segment live with the
+  executor of A23.
+- **Publication and view.** The intent of each set in `docs/experiments/intents.json`; a test stack from the worktree
+  (outline §6 items 4, 5).
+- **Tests.** The export (a sample written and read again); the frontend's readers on fixtures that the export writes;
+  a live segment equals the export's flown states; the browser check (outline §6 item 6).
+
+**B7. Close of stage B.** The full ts suite passes (run detached). §0.3 (the log) and `docs/reference/runners.md` are
 updated; the report gives the new code index for §11 (outline §5 rule 10). `dev-two-tier-v4` merges
 `dev-two-tier-v4-prior` (outline §5 rule 1). Report to the user: the commits, the readings of each fold and of the base,
 the choice and its rule, and what stage C needs.
