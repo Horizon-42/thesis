@@ -44,6 +44,7 @@ The decision numbers are shared by all documents (outline §3).
 | D63 | The identity of a prior's data (§8, item 1) also holds the landings that the candidate vectors count: for each airport, the sha256 of each landing's flight, runway and time, in time order, and of the number of landings left out on the sealed test days. The landings come from the airport's tracks roster, outside the artefact: without them, a changed roster would change the inputs and leave the identity the same. By their flights, never by the bytes of the roster (D21). A run that reads the landings again computes the digest again and refuses a difference (§2, §8) | Decided | User, 2026-10-04, on the reading of the stage B agent |
 | D64 | The word rules of the procedure masks (§4). They block a word when it is said and never block "unchanged". Inside the region (the FAF and the LPV cone of R) a level T only where T ≥ the glidepath lower edge − ε(T), and "no level-off" not where the aircraft is more than ε("no level-off") below the edge. Wherever the aircraft is not inside the region (before the join, or after it when the aircraft has left the region), a level T only where T ≥ DA − ε(T). Before the join, once the aircraft has been below the entry height by more than the band ε of the level nearest the entry height, no level above the aircraft's height + ε and no climb class. A go-around clears the join and the passage below the entry height; while G is true neither is kept | Decided | User, 2026-10-04, on the proposals of the stage B agent and Claude's review |
 | D65 | The inputs and the model where §2 left them open: the fixed scales of §9 (the height above the glidepath as asinh(h / 100 m)); the candidate tokens reach a row through one attention over them whose weights sum to one; the RoPE base is 10,000; the variant `constants` gives the threshold elevation MSL; the runway column's `since` starts again at a candidate word, not at "go-around" (§2) | Decided | User, 2026-10-04, on the proposals of the stage B agent and Claude's review |
+| D68 | Free generation lets a flight say at most 2 go-arounds. After its second, the runner forbids "go-around" in the runway column (a mask of a caller, §4), and it gives 2 as the most go-arounds to the start of the closed loop (vocabulary §6, item 5; D67). The readout counts the flights that reached the bound. Why: the executor lays out the time that go-arounds add (900 s each) when it starts, and the number that a model says is not known before; no closed-loop sentence of `v9_20261004` at Δ = 2 s has more than one go-around (train 68 of 40,534 sentences, select 12 of 6,199, val 20 of 9,750); 2 lets a model say one more than the data, and no flight goes around without end (B4) | Decided | User, 2026-10-04, on the report of the stage B agent |
 
 ### 0.2 Open items
 
@@ -60,7 +61,7 @@ A proposal is a reading where the design says nothing; it holds only until the u
 | B2: the model (`prior/model.py`), a sentence's rows and their batch (`prior/batch.py`), the checkpoint `ts-prior-checkpoint-v6` (`prior/checkpoint.py`); `no_motion` (D60) | Done on synthetic sentences, `f3070978`, `de7d4994`. Full ts suite at `f3070978`: 1,559 passed |
 | B3: the training loop (`prior/train.py`), the data of a run or a fold (`prior/runs.py`), the runner `prior_train` | The loop done on synthetic sentences, `f3070978`. The runner (one run or one fold; the memory check of the largest batches before training; `--sample` a smoke run, D55) on synthetic artefacts, `849e9cde` (reviewed); `--memory-check-only`, `5a214031`. The smoke on the formal artefact `v9_20261004` at Δ = 2 s (`98a5a9aa`, configuration A, 2.17 M parameters, variant `full`, all five airports, 200 sentences of each airport and split, seed 1337, 3 epochs, in the scratchpad): 1.8–1.9 s an epoch for 1,000 train and 1,000 select sentences; the select loss 18.74, 17.43, 15.41 per step (still in the warm-up); loading the train and select splits approximately 1 min 50 s. The memory check at the formal size (40,534 train sentences, 7.56 M rows; the longest 770 rows): the largest batches 128 × 128 rows and 8 × 770 rows, 8 candidates; GPU 1.86 GB reserved (7.55 GB free); host 3.9 GB. Claude's estimate from the smoke: approximately 55 s an epoch on all five airports, 45 s on a fold; at most approximately 25 min a run of 30 epochs |
 | B1: the inputs of a row (`prior/inputs.py`: `state_inputs`, `Heard`; a sentence and a loop use both), the landings (`prior/landings.py`), the artefact as sentences and the identity of the data (`prior/source.py`) | Done on synthetic artefacts, `278b626b`; the landings digest as D63, `ff514325` |
-| B4: the speaker (`prior/speaker.py`), the procedure masks (`prior/procedure.py`, set `procedure-masks-v4`) | Done on synthetic inputs, `278b626b`; the finals read on KRDU's CIFP. The masks and the glidepath scale as D64 and D65, with B4's tests of D64, `07f3f49b` (reviewed). Free generation (the speaker with the executor, the judge, the time limit) waits for A21 |
+| B4: the speaker (`prior/speaker.py`), the procedure masks (`prior/procedure.py`, set `procedure-masks-v4`) | Done on synthetic inputs, `278b626b`; the finals read on KRDU's CIFP. The masks and the glidepath scale as D64 and D65, with B4's tests of D64, `07f3f49b` (reviewed). The bound of D68 (the speaker counts each aircraft's go-arounds; `go_around_bound`, the caller's mask after the second), `26d05dab`. Free generation (through the start of a closed loop, D67) waits for A26 on `dev-two-tier-v4` |
 | The full ts suite | `8fbc4f96` (with `07f3f49b`): 1,607 passed; `849e9cde`: 1,610 passed |
 | B6: the Training view of stage B | Waits for A23 of stage A, merged into `dev-two-tier-v4`; then its export and view on the smoke sets of B3 and B4; the publication of the folds and the base after B5 |
 | B5, B7 (the close of stage B) | Wait for Claude's check of stage A and the user's choice of Δ |
@@ -81,6 +82,7 @@ changed); 3 (the runway head's class order) is a detail of the code. The code fo
    | Now | B0. B2 and the training loop of B3, tested on synthetic inputs. The words of each column and their number come from the vocabulary spec (vocabulary §6, item 1), never from constants of the prior |
    | After A19, A20 and A22 of stage A (the altitude words above E, the new format names, the executor that flies T + E; the vertical path of each candidate in `candidates.json`, the reader of a closed-loop file, D61; the grammar's column mask, D62) | B1, tested on synthetic artefacts (`tests/support.py`). The speaker and the masks of B4 |
    | After A21 of stage A (the formal artefact), and again after A25 (the formal artefact with the vertical tolerance of the final descent, D66) | B1–B4 on a sample of the formal artefact at Δ = 2 s: the smoke run of B3, its time and the memory check at the formal size; free generation with the executor of the formal artefact |
+   | After A26 of stage A (the start of a closed loop, D67), merged into this branch | Free generation of B4 (the speaker with the executor and the judge, through the start), on synthetic artefacts and on the formal artefact |
    | After A23 of stage A (the Training view of stage A), merged into this branch | B6's export and view, on the smoke sets of B3 and B4 |
    | After Claude's check of stage A and the user's choice of Δ (outline §4) | B5; B6's publication of the folds and the base; B7 |
 
@@ -95,7 +97,8 @@ changed); 3 (the runway head's class order) is a detail of the code. The code fo
 - **It reads** the outline (the principles, the shared decisions D7, D20, D21, D55, the rules of the implementation)
   and the vocabulary's public interface (vocabulary §6): the vocabulary spec and the grammar (items 1, 2), the sentence
   artefact (item 3), the candidates and their geometry (item 4) and the row grid (item 7). The package `prior/` does
-  not import the executor or the judge (items 5, 6): a runner joins them (free generation, B4).
+  not import the executor or the judge (items 5, 6): a runner joins them through the start of a closed loop (item 5,
+  D67; free generation, B4).
 - **It gives** the public interface of §7, and nothing else, to the post-training.
 
 ---
@@ -258,7 +261,8 @@ A prior records the set of procedure masks that it was trained under (`procedure
 under it.
 
 **Masks of a caller.** The loop that runs the speaker can give a set of forbidden words for each column (§7, item 3).
-The speaker applies them as it applies the others. The prior does not know what they mean.
+The speaker applies them as it applies the others. The prior does not know what they mean. Free generation gives one:
+"go-around" after a flight's second go-around (D68).
 
 ## 5 Training
 
@@ -367,6 +371,7 @@ sets its criteria (D7). The identities follow D21 (outline §3):
 | Procedure masks | Glidepath lower edge: published glidepath − 60 m inside the FAF and the LPV cone; the DA wherever the aircraft is not inside them; no climb before the join, once more than ε of the level nearest the entry height below the entry height; never "unchanged" blocked | §4, D64 |
 | Input scales | Distances asinh(d / 1 km); heights / 1 km; height above a glidepath asinh(h / 100 m); ground speed / 100 m/s; vertical rate / 10 m/s; landings in 30 min / 10; length / 1 km and threshold elevation MSL / 1 km (`constants`) | D41, D65 |
 | RoPE base | 10,000 (heads 32 wide: periods 6.3 s to approximately 35,000 s) | D65 |
+| Go-arounds of a flight in free generation | At most 2; after the second, "go-around" is masked | D68 |
 
 ---
 
@@ -473,21 +478,27 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
 - A smoke run on a sample of the formal artefact; it gives the time of one run for the cost of B5.
 - Tests: the stop reads only the select days; a fold never reads its held-out airport in training.
 
-**B4. Speaking and free generation** (§4, §7 item 3; vocabulary §6 items 2, 5, 6; D14, D33, D38, D52, D62, D64).
+**B4. Speaking and free generation** (§4, §7 item 3; vocabulary §6 items 2, 5, 6; D14, D33, D38, D52, D62, D64, D67,
+D68).
 
 - The masks of §4: the grammar; the procedure masks of D64 (the glidepath lower edge inside the region, the DA outside
   it, no climb back with the band of the level nearest the entry height; never "unchanged"; the climb mask lifted while
   G is true and a go-around clearing the join, D14), a level checked with the band ε of its level (D52); the masks of a
   caller.
 - The closed loop: the prior speaks, the executor flies, the judge decides (D33, D38); 900 s more time at each
-  go-around; the observed rows before the first predicted step, the executor's states after it.
+  go-around; the observed rows before the first predicted step, the executor's states after it. The executor is started
+  and flown a row at a time through the start of a closed loop (vocabulary §6, item 5; D67), and the outcome is the
+  judge's (item 6); the runner imports nothing else of `autopilot/`. At most 2 go-arounds a flight (D68).
 - The readout: the outcomes for each airport and each kind of approach; the words for each column against the
-  labelled ones; the go-arounds said; the probability of "go-around" on the final.
+  labelled ones; the go-arounds said and the flights that reached the bound of D68; the probability of "go-around" on
+  the final.
 - Tests: one flight spoken and flown to its outcome; each mask; G; the time limit; the same seed gives the same
   sentence; no row reaches a column with no permitted word (D62); a procedure mask never blocks "unchanged", also when
   the word in force breaks a limit; a level below the DA is blocked after the join when the aircraft has left the LPV
   cone; an aircraft at the level nearest the entry height, less than its ε below it, may still climb; after a go-around
-  the join and the passage below the entry height start again (D64).
+  the join and the passage below the entry height start again (D64); after a flight's second go-around, "go-around"
+  is masked (D68); the runners of `prior/` import from `autopilot/` only the modules of vocabulary §6 items 5 and 6
+  (`tests/test_architecture.py`).
 
 **B5. Cross-validation and the base** (D39, D40, D41).
 
