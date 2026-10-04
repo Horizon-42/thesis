@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -118,6 +118,10 @@ class Batch:
     approach_ias_mps: list[float]
     groups: list[str]               # OWN or STAND_IN, per flight
     drawn: dict[str, Any]           # the sample's description: pool, read, exclusions, per airport
+    #: the flights the row interval refused, by reason in the order first met (the description writes them by count;
+    #: parts of a split add up to the whole's order of a tie, `instruction_closed_loop.merge_tallies`); a batch built
+    #: by hand refuses none
+    refused_seen: Counter = field(default_factory=Counter)
 
     def inputs(self, device: torch.device) -> FlightInputs:
         return flight_inputs(self.series, [s.first_row for s in self.sentences], device=device)
@@ -196,15 +200,32 @@ class Drawn:
     groups: list[str]
     geometries: dict[str, AirportGeometry]
     description: dict[str, Any]
+    #: the flights not drawn, by group in the order first met (the description writes them by count; parts of a split
+    #: add up to the whole's order of a tie, `merge_descriptions`)
+    excluded_seen: Counter
+
+
+def part_of(order: list[int], part: tuple[int, int]) -> list[int]:
+    """Part ``k`` of ``n`` of a drawing order: its ``k``-th of ``n`` consecutive blocks, sizes differing by at most one
+    — the parts in turn are the whole order."""
+    k, n = part
+    if not 0 <= k < n:
+        raise ValueError(f"part {k} of {n} does not exist")
+    return order[k * len(order) // n: (k + 1) * len(order) // n]
 
 
 def draw_flights(directory: Path, split: str, candidates: list[int], *, per_airport: int, seed: int,
-                 groups: tuple[str, ...] = (OWN,)) -> Drawn:
+                 groups: tuple[str, ...] = (OWN,), part: tuple[int, int] = (0, 1)) -> Drawn:
     """Of the split's signals at ``candidates``, the first ``per_airport`` of ``groups`` per airport (0: every
-    one), in a seeded permutation."""
+    one), in a seeded permutation; ``part`` ``(k, n)`` draws only the ``k``-th of ``n`` consecutive blocks of that
+    permutation (`part_of`; every flight only, ``per_airport`` 0): the parts' flights in turn are the whole draw's, and
+    their descriptions add up to its (`merge_descriptions`)."""
+    if part[1] > 1 and per_airport:
+        raise ValueError("a split is drawn in parts only with every flight (per_airport 0): a cap per airport is the "
+                         "whole permutation's")
     geometries = load_candidates(directory)
     signals = load_signals(directory, split)
-    order = [int(i) for i in np.random.default_rng(seed).permutation(sorted(candidates))]
+    order = part_of([int(i) for i in np.random.default_rng(seed).permutation(sorted(candidates))], part)
     wanted = {airport: per_airport or len(order) for airport in geometries}
     taken: list[tuple[int, FlightSeries, str]] = []
     excluded: Counter = Counter()
@@ -233,13 +254,36 @@ def draw_flights(directory: Path, split: str, candidates: list[int], *, per_airp
         raise ValueError(f"the {split} split holds too few eligible flights: {short} short")
     return Drawn(indices=[i for i, _, _ in taken], signals=[signals[i] for i, _, _ in taken],
                  series=[s for _, s, _ in taken], groups=[g for _, _, g in taken], geometries=geometries,
-                 description={"split": split, "seed": seed, "per_airport": per_airport or "every labelled flight",
+                 excluded_seen=excluded, description={"split": split, "seed": seed, "per_airport": per_airport or "every labelled flight",
                               "groups": list(groups), "pool": len(order), "read": read,
                               "excluded": dict(excluded.most_common()), "flights": len(taken),
                               "by_group": dict(Counter(g for _, _, g in taken)),
                               "threshold_crossing_heights_m": {
                                   code: {c.ident: c.vertical_path.crossing_height_m for c in geometry.candidates}
                                   for code, geometry in geometries.items()}})
+
+
+#: A draw's description (`draw_flights`): the fields every part of a split shares, and those its parts add up.
+SHARED_DESCRIPTION = ("split", "seed", "per_airport", "groups", "threshold_crossing_heights_m")
+ADDED_DESCRIPTION = ("pool", "read", "flights")
+
+
+def merge_descriptions(parts: list[tuple[dict[str, Any], Counter]]) -> dict[str, Any]:
+    """The description of a split drawn whole, from its parts' (`draw_flights`, in order: each its description and its
+    ``excluded_seen``), as the whole draw writes it, text included: the shared fields are each part's, the numbers
+    added, the exclusions by count (a tie in the order first met over the parts in turn, as over the whole draw) and the
+    groups in the order first met. Refused unless every part is a description of one draw with exactly these fields."""
+    names = {*SHARED_DESCRIPTION, *ADDED_DESCRIPTION, "excluded", "by_group"}
+    first = parts[0][0]
+    for description, seen in parts:
+        if set(description) != names or any(description[name] != first[name] for name in SHARED_DESCRIPTION):
+            raise ValueError(f"the parts are not of one draw with the fields {sorted(names)}")
+        if description["excluded"] != dict(seen.most_common()):
+            raise ValueError("a part's exclusions are not its description's")
+    merged = {name: sum(d[name] for d, _ in parts) for name in ADDED_DESCRIPTION}
+    merged["excluded"] = dict(sum((seen for _, seen in parts), Counter()).most_common())
+    merged["by_group"] = dict(sum((Counter(d["by_group"]) for d, _ in parts), Counter()))
+    return {name: merged[name] if name in merged else first[name] for name in first}
 
 
 def batch_of(drawn: Drawn, keep: list[int], readings: list[Reading], row_interval_s: float, words: Words) -> Batch:
@@ -265,7 +309,7 @@ def batch_of(drawn: Drawn, keep: list[int], readings: list[Reading], row_interva
                  approach_ias_mps=[flight_approach_ias_mps(drawn.series[i], drawn.groups[i]) for i in flights],
                  groups=[drawn.groups[i] for i in flights],
                  drawn={**drawn.description, "row_interval_s": row_interval_s,
-                        "refused_on_interval": dict(refused.most_common())})
+                        "refused_on_interval": dict(refused.most_common())}, refused_seen=refused)
 
 
 def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per_airport: int, seed: int,
@@ -277,12 +321,12 @@ def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per
 
 
 def draw_readings(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per_airport: int, seed: int,
-                  groups: tuple[str, ...] = (OWN,)) -> tuple[Drawn, list[Reading]]:
+                  groups: tuple[str, ...] = (OWN,), part: tuple[int, int] = (0, 1)) -> tuple[Drawn, list[Reading]]:
     """`draw`'s flights and their readings, each re-read and checked against its stored sentence, before any row
-    interval."""
+    interval; ``part`` as `draw_flights`."""
     sentences = load_sentences(directory, split, spec)
     stored = {int(index): k for k, index in enumerate(sentences["signal_index"])}
-    drawn = draw_flights(directory, split, list(stored), per_airport=per_airport, seed=seed, groups=groups)
+    drawn = draw_flights(directory, split, list(stored), per_airport=per_airport, seed=seed, groups=groups, part=part)
     readings = []
     for i, flight in zip(drawn.indices, drawn.signals):
         reading = read_flight(flight, drawn.geometries[flight.airport], spec, words)
@@ -301,7 +345,7 @@ def subset(batch: Batch, indices: list[int]) -> Batch:
                  readings=[batch.readings[i] for i in indices], sentences=[batch.sentences[i] for i in indices],
                  row_interval_s=batch.row_interval_s, geometries=[batch.geometries[i] for i in indices],
                  approach_ias_mps=[batch.approach_ias_mps[i] for i in indices], groups=[batch.groups[i] for i in indices],
-                 drawn=batch.drawn)
+                 drawn=batch.drawn, refused_seen=batch.refused_seen)
 
 
 def time_limit_s(observed_rows: int, first_row: int, params: ExecutorParams, step_s: float) -> float:

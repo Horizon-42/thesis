@@ -227,11 +227,14 @@ def load_sentences(directory: Path, split: str, spec: VocabularySpec) -> dict[st
 #: v4 (A15, D51): the states on every 2 s row, the Δ rows marked (`on_interval`).
 #: v5 (A20, D58): the altitude words are levels above the airport elevation E (the states stay MSL).
 #: v6 (A29, D73): the directory's summary records no digest of code (the files and the summary share the name).
-CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v6"
+#: v7 (A31, D74): each sentence's outcome by its name — the judge's (`autopilot.judge.outcome_of`, vocabulary §5.8) on what
+#: the reading's executor flew to its end; for readouts and selection, never an input.
+CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v7"
 #: Every array a closed-loop file holds.
 CLOSED_LOOP_FIELDS = {"schema", "spec_sha256", "executor_params_sha256", "row_interval_s", "start_row", "signal_index",
                       "first_row", "offsets", "state_offsets", "words", "correction", "states", "on_interval",
-                      "lateral_m", "vertical_m", "uncorrectable", "observed_row", "matched_row", "timed_out"}
+                      "lateral_m", "vertical_m", "uncorrectable", "observed_row", "matched_row", "timed_out",
+                      "outcome"}
 #: The directory inside the artefact that holds them, written once (`closed_loop_path`).
 CLOSED_LOOP_DIRECTORY = "closed_loop"
 
@@ -269,6 +272,9 @@ class ClosedLoopSentence:
     #: predicted step: its own observed time, D42)
     matched_row: np.ndarray
     timed_out: bool             # the executor was done in the cycle that reached its time limit
+    #: the judge's outcome of what the reading's executor flew, from the first predicted step to its end, by name
+    #: (vocabulary §5.8, D74: later rows decide it — for readouts and selection, never an input)
+    outcome: str
 
     @property
     def flown_states(self) -> np.ndarray:
@@ -310,7 +316,8 @@ def write_closed_loop(path: Path, spec: VocabularySpec, *, executor_params_sha25
         uncorrectable=np.concatenate([r.uncorrectable for r in kept]).astype(bool),
         observed_row=np.concatenate([r.observed_row for r in kept]).astype(np.int64),
         matched_row=np.concatenate([r.matched_row for r in kept]).astype(np.float64),
-        timed_out=np.asarray([r.timed_out for r in kept], dtype=bool))
+        timed_out=np.asarray([r.timed_out for r in kept], dtype=bool),
+        outcome=np.asarray([r.outcome for r in kept], dtype=np.str_))
 
 
 def load_closed_loop(path: Path, spec: VocabularySpec) -> dict[str, np.ndarray]:
@@ -328,7 +335,7 @@ def load_closed_loop(path: Path, spec: VocabularySpec) -> dict[str, np.ndarray]:
 def closed_loop_sentences(data: dict[str, np.ndarray]) -> dict[int, ClosedLoopSentence]:
     """A loaded closed-loop file's sentences (`load_closed_loop`) by their flight's place in the split's signals
     (vocabulary §6 item 3): each its first row, its words and correction marks, all its states on the 2 s rows from its
-    first row with the Δ rows marked, and its readings."""
+    first row with the Δ rows marked, its readings and its outcome (D74)."""
     out = {}
     for k, index in enumerate(data["signal_index"].tolist()):
         rows = slice(int(data["offsets"][k]), int(data["offsets"][k + 1]))
@@ -338,5 +345,5 @@ def closed_loop_sentences(data: dict[str, np.ndarray]) -> dict[int, ClosedLoopSe
             correction=data["correction"][rows], states=data["states"][states], on_interval=data["on_interval"][states],
             lateral_m=data["lateral_m"][rows], vertical_m=data["vertical_m"][rows],
             uncorrectable=data["uncorrectable"][rows], observed_row=data["observed_row"][rows],
-            matched_row=data["matched_row"][rows], timed_out=bool(data["timed_out"][k]))
+            matched_row=data["matched_row"][rows], timed_out=bool(data["timed_out"][k]), outcome=str(data["outcome"][k]))
     return out

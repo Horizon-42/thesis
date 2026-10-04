@@ -152,8 +152,9 @@ def read_interval(drawn: replay.Drawn, readings: list[Reading], observed: dict[i
     """One row interval: the closed-loop reading of every drawn flight, its split numbers, and each sentence flown again
     and judged (module docstring); ``observed`` each flight's observed DA check by its artefact index."""
     spec = words.spec
-    batch, results, numbers = instruction_closed_loop.read_interval(drawn, readings, interval_s, params, words,
+    batch, results, counted = instruction_closed_loop.read_interval(drawn, readings, interval_s, params, words,
                                                                     chunk=chunk, device=device)
+    numbers = instruction_closed_loop.summarise(counted, drawn.description["excluded"])
     stored = {batch.indices[j]: r for j, r in enumerate(results) if isinstance(r, ClosedLoopSentence)}
     flown_batch, _ = closed_loop.replay_batch(batch, stored, words)
     check = closed_loop_columns(stored, spec.step_s)
@@ -161,9 +162,9 @@ def read_interval(drawn: replay.Drawn, readings: list[Reading], observed: dict[i
     for first in range(0, len(flown_batch.sentences), chunk):
         part = replay.subset(flown_batch, list(range(first, min(first + chunk, len(flown_batch.sentences)))))
         flown = replay.fly_sentences(part, params, words, device=device)
-        check(part, flown, [])                       # refused unless every flight flies its stored states again
-        for j, index in enumerate(part.indices):
-            ended = outcome_of(flown, j, part.geometries[j], spec)
+        judged = [outcome_of(flown, j, part.geometries[j], spec) for j in range(len(part.indices))]
+        check(part, flown, judged)          # refused unless every flight flies its stored states again to its outcome
+        for j, (index, ended) in enumerate(zip(part.indices, judged)):
             crossing = ended.crossing
             rows.append({"dataset_id": part.signals[j].dataset_id, "airport": part.signals[j].airport,
                          "stratum": stratum(part.readings[j]), "group": part.groups[j],

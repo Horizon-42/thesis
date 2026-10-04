@@ -118,6 +118,7 @@ def test_a_stored_sentence_said_through_the_start_gives_its_states_and_its_outco
     replayed = outcome_of(replay.fly_sentences(moved, params, words, device=CPU), 0, batch.geometries[0], words.spec)
     assert loop.outcome(0).outcome == replayed.outcome
     assert loop.outcome(0).crossing == replayed.crossing
+    assert stored.outcome == replayed.outcome           # D74: the reading's outcome, stored, is the replay's and the start's
     assert bool(loop.timed_out()[0]) == stored.timed_out
 
 
@@ -207,6 +208,7 @@ def test_the_start_check_runner_says_stored_sentences_through_the_start(tmp_path
                                    seed=1337, chunk=8, device=CPU)
     assert row["same_rows"] and row["position_m"] == 0.0 and row["other_columns"] == 0.0 and runner.passes(row)
     assert not runner.passes({**row, "position_m": 2e-6}) and not runner.passes({**row, "done_at_last_row": False})
+    assert row["outcome_as_stored"] and not runner.passes({**row, "outcome_as_stored": False})          # D74
 
 
 def test_the_start_check_samples_each_airport_alike():
@@ -228,7 +230,7 @@ def test_the_start_check_runner_exits_1_on_a_failed_flight_and_never_overwrites(
     monkeypatch.setattr(closed_loop, "require_conforming_closed_loop",
                         lambda instructions, executor: (_params(), {"sha256": "e", "checks": {}}, None))
     good = {"dataset_id": "KXXX:a", "same_rows": True, "position_m": 0.0, "other_columns": 0.0,
-            "done_at_last_row": True, "timed_out_as_stored": True}
+            "done_at_last_row": True, "timed_out_as_stored": True, "outcome_as_stored": True}
     argv = ["--instructions", str(tmp_path), "--executor", str(tmp_path), "--split", "train", "--row-interval-s", "2"]
     for name, rows, code in (("ok", [good], 0), ("bad", [good, {**good, "dataset_id": "KXXX:b", "same_rows": False,
                                                                      "position_m": None, "other_columns": None}], 1)):
