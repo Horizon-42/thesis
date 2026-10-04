@@ -113,7 +113,7 @@ of the package, not a migration in progress.
 - A new loss term goes in the strategy's `loss_component_names`, or `KeyError` after the slow
   dataset build (C7).
 - A latent run's total KL says nothing about WHERE it is spent: read the `component_kl_*` split,
-  `mean_displacement_sigma`, `active_units_0p05` (`run_ts.py latent_readout` / `latent_probe`);
+  `mean_displacement_sigma`, `active_units_0p05` (`run_ts.py latent_readout`);
   the `component_*` numbers sum to `component_kl_nats_per_flight`, not the charged KL (C8).
 - A turn-rate supervision term reads the RHS (`heading_rate_rad_s` on `actual_controls`), never
   `g·tan φ / V` (C9).
@@ -340,10 +340,7 @@ pooled checkpoint's bin cannot be published per airport (R1). `eta_calibration` 
 head alone, half A fits the deployed δ and half B measures, a single cut's coverage carries cut
 noise (sd ≈ 0.05, sign flips), the table is a sidecar never in `data_provenance` (R2).
 `quantile_fan_readout` — B3; the geometric column is a readout, not a coverage guarantee;
-`cal.hit*` is in-sample on val (R3). `eta_error_readout` — B0; vectored and straight-in errors differ several-fold,
-so one pooled ETA interval cannot serve both (R4). `latent_probe` — L2.f;
-`--limit N` is a prefix (a smoke test); the posterior reads the future (R5). `latent_fan_readout`
-— 4(a); the RANDOM fan is the reading, not a footnote (R6). **`manoeuvre_codebook` / `manoeuvre_readout` /
+`cal.hit*` is in-sample on val (R3). **`manoeuvre_codebook` / `manoeuvre_readout` /
 `manoeuvre_prior` / `manoeuvre_prior_readout` / `manoeuvre_gates` / `manoeuvre_code_atlas`** —
 ARCHIVED 2026-09-20 (`archive/manoeuvre_codes_2026_09/`; R7 is their record). **Plan v3's
 stage A** (2026-09-18, the manoeuvre line, not `instruction-v3`): `plan_cohort --arms` writes one development cohort PER CELL from one load (an arm's

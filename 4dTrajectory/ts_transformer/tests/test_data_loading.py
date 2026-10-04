@@ -15,29 +15,20 @@ import ts_transformer.data.splits as splits
 import ts_transformer.cli.benchmark_batch as batch_probe
 from ts_transformer.config import TSConfig
 from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
+from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer
 from ts_transformer.data.splits import (
     cross_validation_folds,
     split_by_flight,
     split_name_for_dataset_id,
 )
-from ts_transformer.data.synthetic import synthetic_arrivals
 # Imported, never restated: a schema version pinned by hand in a fixture is a version
 # the fixture cannot check, and this one gates every loader that reads the roster.
 from trajectory_data_process.harvest.arrivals import (
     SCHEMA_VERSION as ARRIVAL_MANIFEST_SCHEMA,
 )
+from ts_transformer.tests.support_prediction import series as _series
 
 AIRPORT, RUNWAY = "KRDU", "05L"
-
-
-def _series(n_flights=8, **config_overrides):
-    """Synthetic KRDU arrivals, built into FlightSeries. Returns ``(series, config)``."""
-    config = TSConfig(**config_overrides)
-    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3)
-    series, report = build_series(flights, config, airport=AIRPORT)
-    assert report.built == n_flights, report.format()
-    return series, config
 
 
 def _write_arrival_manifest(root: Path, ids: list[str], *, airport: str = "KRDU") -> Path:

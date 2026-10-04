@@ -27,6 +27,7 @@ from ts_transformer.data.synthetic import synthetic_arrivals
 from flight_scenarios.runway_target import find_threshold
 from ts_transformer.tests.support import fake_data_provenance
 from ts_transformer.training.train import load_checkpoint, train
+from ts_transformer.tests.support_prediction import series as _series
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -38,15 +39,6 @@ def _frame() -> frames.ENUFrame:
 def _state(*, lat=35.90, lon=-78.85, alt=900.0, V=90.0, psi=0.5, gamma=-0.05, m=60_000.0):
     return GeodeticState(latitude=lat, longitude=lon, altitude=alt, V=V, psi=psi,
                          gamma=gamma, m=m)
-
-
-def _series(n_flights=8, **config_overrides):
-    """Synthetic KRDU arrivals, built into FlightSeries. Returns ``(series, config)``."""
-    config = TSConfig(**config_overrides)
-    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3)
-    series, report = build_series(flights, config, airport=AIRPORT)
-    assert report.built == n_flights, report.format()
-    return series, config
 
 
 # ── Channel contract ─────────────────────────────────────────────────────────

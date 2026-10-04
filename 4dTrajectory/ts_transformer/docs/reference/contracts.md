@@ -155,7 +155,7 @@ rebased — same rule, new IDs.
   `component_kl_nats_per_flight`, NOT to the charged `kl_nats_per_flight`** (free bits and
   the mixture estimator separate the two). Read them with `run_ts.py latent_readout
   --history <run>/history.json` (which needs no `--arm`: this is the epoch-1 reading), or off
-  a checkpoint with `run_ts.py latent_probe`; the gate sentence is
+  a checkpoint with the archived `latent_probe` (`archive/one_tier_oneoffs_2026_10/`); the gate sentence is
   `outputs.control.latent.displacement_verdict` and its ruler `DEAD_MEAN_DISPLACEMENT_SIGMA`, so no
   surface restates either. A scalar auxiliary target concentrates the information in ONE
   dimension, so on such an arm the median displacement can miss what `component_kl_per_dim`
@@ -383,8 +383,9 @@ frozen roots, the file whose bytes hash to the recorded digest; none raises by a
 digest. The arrival loader reads a non-current schema only when the bytes are a frozen
 generation's, so a frozen roster is read AS WRITTEN (the checkpoint's data is not converted).
 Users: `experiments/support.checkpoint_manifests`, `anytime_curve.load_arm` (and through it
-`latent_probe`, `chain_sensitivity`), `control_capacity_ceiling`, `clock_attribution`,
-`predictability_report`, `control_basis_oracle` (teacher fit), `runway_hypotheses`.
+`chain_sensitivity`; the archived `latent_probe`),
+`predictability_report`, `control_basis_oracle` (teacher fit), `runway_hypotheses` (and the archived
+`control_capacity_ceiling`, `clock_attribution`: `archive/one_tier_oneoffs_2026_10/`).
 `predict` / `evaluate-fit` take `--data` explicitly — pass the frozen root's manifests there.
 New training always reads the live root (`repo_layout.HARVEST_ROOT`, the one definition; the
 four runners that restated it import it).
