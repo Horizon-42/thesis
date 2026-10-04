@@ -1,5 +1,14 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-04 — `run_all_tests.sh` runs its three groups at once, on pytest-xdist workers
+
+- The user's goal was speed. Measured: the ts_transformer suite (1,531 tests) 15.5 min serial -> 2.8-3.2 min on 8-16 workers; the
+  whole script 192 s wall, exit 0 (ts_transformer 1529 passed / 2 skipped, modeling + backend 1005 passed, aeroviz-4d/python 161 passed).
+  Groups: ts_transformer (`TS_TEST_WORKERS`, default 8), the other modeling suites (`MODELING_TEST_WORKERS`, 6), aeroviz-4d/python
+  (`FRONTEND_TEST_WORKERS`, 2); 0 = that group serial. `OMP_NUM_THREADS` / `MKL_NUM_THREADS` 1 per worker; no test file changed.
+- 16 workers were no faster than 8 here (single tests ran 2x slower under contention). In a worktree the git-ignored `data/` and
+  `aeroviz-4d/public/data/airports` must be linked (three tests read them; read-only).
+
 ### 2026-10-04 — Three one-tier readouts archived; the test fixtures of the one-tier paths gathered
 
 - The user ("chain_sensitivity 搬进 archive；B 类的也搬进去"): `eta_error_readout`, `latent_probe`, `latent_fan_readout` and their tests

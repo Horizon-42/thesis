@@ -82,6 +82,7 @@ gets a new ID here and ONE new line in the index.**
 
 - Env spec backups (regenerate `aeroviz` if ever needed): `.env-backup/aeroviz-pip-freeze.txt`,
   `aeroviz-conda-explicit.txt`, `aeroviz-environment.yml`.
+- `pytest-xdist` 3.8.0 (+ `execnet` 2.1.2) was pip-installed into `aeroviz` on 2026-10-04 for `run_all_tests.sh`; the backups above predate it.
 
 ### E10 · GPU
 
