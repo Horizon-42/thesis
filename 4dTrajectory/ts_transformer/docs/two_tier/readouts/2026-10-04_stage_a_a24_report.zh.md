@@ -52,6 +52,8 @@
 - 目录：`.claude/worktrees/two-tier-v4-a24/smoke_v4/data/a24/`（git 忽略，不在 `4dTrajectory/outputs/` 下）：`h15`、`h10`、`h7.5`、`h5` 各有
   `instructions/`（信号与候选跑道以只读链接指向 v9，spec、标注、标注器一致性重新生成）、`executor/`（执行器 spec 与一致性）、`train/`、`select/`
   （`readout.json` 和每个 Δ 的 `interval_<Δ>s.json`），并排表在 `table/table.{json,md}`；共 576 MB。脚本 `h.sh`、日志 `h*.log`。
+  **2026-10-05 已删除**（按你的决定，随 worktree 和分支 `dev-two-tier-v4-a24` 一起；它们的信号链接指向的 v9 当时已删，产物已打不开）。
+  本报告的数字是这些读数留下的唯一记录。
 - 时间：四个值并行，各一个 torch 线程，17:52–18:11Z；每个值 train 约 3.5 分钟、select 约 9.5 分钟。
 
 ## 3 读数
