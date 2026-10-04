@@ -18,30 +18,15 @@ from ts_transformer.config import (
     PREDICTION_CONTROL,
     TSConfig,
 )
-from ts_transformer.data.dataset import Normalizer, build_series
+from ts_transformer.data.dataset import Normalizer
 from ts_transformer.inference.forecast import forecast_approach, forecast_approaches
 from ts_transformer.backbone.adapters import build_model
 from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.state.model import StatePrediction
-from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.tests.support_prediction import series as _series
+from ts_transformer.tests.support_prediction import identity_normalizer as _identity_normalizer
 
 AIRPORT, RUNWAY = "KRDU", "05L"
-
-
-def _series(n_flights=8, **config_overrides):
-    """Synthetic KRDU arrivals, built into FlightSeries. Returns ``(series, config)``."""
-    config = TSConfig(**config_overrides)
-    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3)
-    series, report = build_series(flights, config, airport=AIRPORT)
-    assert report.built == n_flights, report.format()
-    return series, config
-
-
-def _identity_normalizer() -> Normalizer:
-    return Normalizer(
-        mean=np.zeros(len(ch.CHANNELS), dtype=np.float64),
-        std=np.ones(len(ch.CHANNELS), dtype=np.float64),
-    )
 
 
 # ── Forecast ─────────────────────────────────────────────────────────────────

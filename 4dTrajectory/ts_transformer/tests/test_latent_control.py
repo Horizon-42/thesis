@@ -75,24 +75,7 @@ from ts_transformer.experiments.latent_readout import kept_epoch_latent, readout
 from ts_transformer.experiments.latent_readout import main as readout_main
 from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.tests.support import dynamics_context
-
-
-def _config(**overrides) -> TSConfig:
-    settings = dict(
-        prediction_output=PREDICTION_CONTROL,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
-        n_segments=8,
-        d_model=16,
-        d_ff=32,
-        e_layers=1,
-        n_heads=2,
-        dropout=0.0,
-        latent_dim=4,
-    )
-    settings.update(overrides)
-    return TSConfig(**settings)
+from ts_transformer.tests.support_prediction import latent_config as _config
 
 
 def _history(config: TSConfig, batch: int) -> torch.Tensor:

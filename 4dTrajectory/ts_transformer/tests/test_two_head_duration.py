@@ -56,7 +56,7 @@ from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.training.train import load_checkpoint, train
 
 from ts_transformer.tests.support import dynamics_context
-from ts_transformer.tests.test_duration_quantiles import _config
+from ts_transformer.tests.support_prediction import quantile_config as _config
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -466,7 +466,7 @@ def test_the_calibration_runner_takes_a_two_head_checkpoint(tmp_path: Path, monk
     `test_the_record_carries_the_point_duration_and_the_quantile_interval`, which runs
     `duration_quantile_predictions` against a trained one.
     """
-    from ts_transformer.tests.test_eta_calibration import _cohort, _metadata, _stubbed_runner
+    from ts_transformer.tests.support_prediction import eta_cohort as _cohort, eta_metadata as _metadata, eta_stubbed_runner as _stubbed_runner
 
     samples = _cohort(400, narrow_s=10.0)
     runner = _stubbed_runner(monkeypatch, samples, split_seed=1,

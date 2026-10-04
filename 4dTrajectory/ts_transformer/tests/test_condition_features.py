@@ -40,8 +40,7 @@ from ts_transformer.config import (
     recipe_settings,
 )
 from ts_transformer.data.batch_contract import unpack_batch
-from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
-from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer
 from ts_transformer.outputs.conditioning import (
     CONDITION_FEATURE_SETS,
     CONDITION_WIDTH,
@@ -52,6 +51,7 @@ from ts_transformer.outputs.control.forecast import dynamics_batch
 from ts_transformer.outputs.control.supervision import probe_dynamics
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
 from ts_transformer.run_naming import run_display_name, run_parameter_rows, run_slug
+from ts_transformer.tests.support_prediction import series_for as _series
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 RATIOS = {"control_condition_features": CONTROL_CONDITION_FEATURES_RATIOS}
@@ -74,14 +74,6 @@ def _config(**overrides) -> TSConfig:
     )
     settings.update(overrides)
     return TSConfig(**settings)
-
-
-def _series(config: TSConfig, n_flights: int = 2):
-    series, report = build_series(
-        synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3), config, airport=AIRPORT
-    )
-    assert report.built == n_flights, report.format()
-    return series
 
 
 def _named(features: str, mass_kg: float, thrust_n: float, aero) -> dict[str, float]:

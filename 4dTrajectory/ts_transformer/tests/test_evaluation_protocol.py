@@ -92,13 +92,6 @@ def _run_development_cohort_train_cli(
     return result, captured
 
 
-def _series(n_flights=8, **config_overrides):
-    """Synthetic KRDU arrivals, built into FlightSeries. Returns ``(series, config)``."""
-    config = TSConfig(**config_overrides)
-    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3)
-    series, report = build_series(flights, config, airport=AIRPORT)
-    assert report.built == n_flights, report.format()
-    return series, config
 def test_test_release_is_checkpoint_bound_and_one_shot_per_flight(tmp_path):
     checkpoint = tmp_path / "checkpoint.pt"
     checkpoint.write_bytes(b"frozen checkpoint")

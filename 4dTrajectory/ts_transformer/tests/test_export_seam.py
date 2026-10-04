@@ -20,12 +20,11 @@ from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     PREDICTION_CONTROL,
-    TSConfig,
     control_recipe,
 )
 from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
 from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from ts_transformer.data.dataset import Normalizer, build_series
+from ts_transformer.data.dataset import Normalizer
 from evaluation.metrics import evaluate_batch
 from evaluation.records import load_records, record_from_dict
 from ts_transformer.inference.export import (
@@ -36,22 +35,13 @@ from ts_transformer.geometry.metrics import RAW_KINEMATIC_METRIC_KEYS
 from ts_transformer.backbone.adapters import build_model
 from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.state.model import StatePrediction
-from ts_transformer.data.synthetic import synthetic_arrivals
 # Imported, never restated: a schema version pinned by hand in a fixture is a version
 # the fixture cannot check, and this one gates every loader that reads the roster.
 from ts_transformer.tests.support import terminal_contexts
 from ts_transformer.training.train import load_checkpoint, train
+from ts_transformer.tests.support_prediction import series as _series
 
 AIRPORT, RUNWAY = "KRDU", "05L"
-
-
-def _series(n_flights=8, **config_overrides):
-    """Synthetic KRDU arrivals, built into FlightSeries. Returns ``(series, config)``."""
-    config = TSConfig(**config_overrides)
-    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3)
-    series, report = build_series(flights, config, airport=AIRPORT)
-    assert report.built == n_flights, report.format()
-    return series, config
 
 
 # ── Export seam ──────────────────────────────────────────────────────────────

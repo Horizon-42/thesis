@@ -13,7 +13,6 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -43,49 +42,15 @@ from ts_transformer.inference.calibration import (
     render,
     write_conformal_table,
 )
-from ts_transformer.config import DURATION_HEAD_POINT, DURATION_HEAD_QUANTILE, DURATION_QUANTILES
+from ts_transformer.config import DURATION_HEAD_POINT, DURATION_QUANTILES
 
-from ts_transformer.tests.test_duration_quantiles import _config  # the tiny quantile-head config
-
-CHECKPOINT_SHA = "b" * 64
-
-
-def _covariates(tortuosity: float = 1.0, established: bool = False) -> dict:  # noqa: D401
-    return {
-        "route_tortuosity": tortuosity,
-        "established_at_anchor": established,
-        "remaining_path_m": 12_000.0,
-        "anchor_range_m": 12_000.0,
-        "anchor_cross_track_m": 0.0,
-    }
-
-
-def _cohort(
-    count: int, *, narrow_s: float, seed: int = 0, tortuosity: float = 1.0,
-    spread: float = 60.0, key_prefix: str = "flight",
-) -> list[CalibrationSample]:
-    """Flights whose head emits the TRUE quantiles of a N(400, 60) truth, narrowed by
-    ``narrow_s``, while their OWN truth is drawn with standard deviation ``spread``.
-
-    With ``spread == 60`` the head is right and the score of a narrowed interval is the
-    true-interval score plus the narrowing, whose (1 − α) quantile is 0 by definition — so δ
-    must come back as ``narrow_s``, whatever else changes. A larger ``spread`` makes the
-    same head wrong for those flights, which is how a stratum that needs a much wider
-    interval than the pooled one is built.
-    """
-    rng = np.random.default_rng(seed)
-    truth = rng.normal(400.0, spread, size=count)
-    exact = np.array([400.0 + 60.0 * _z(tau) for tau in DURATION_QUANTILES])
-    narrowing = np.array([+narrow_s, +narrow_s, 0.0, -narrow_s, -narrow_s])
-    return [
-        CalibrationSample(
-            key=f"KRDU:{key_prefix}{index:04d}",
-            quantiles_s=exact + narrowing,
-            truth_final_time_s=float(value),
-            covariates=_covariates(tortuosity),
-        )
-        for index, value in enumerate(truth)
-    ]
+from ts_transformer.tests.support_prediction import quantile_config as _config  # the tiny quantile-head config
+from ts_transformer.tests.support_prediction import eta_covariates as _covariates
+from ts_transformer.tests.support_prediction import eta_cohort as _cohort
+from ts_transformer.tests.support_prediction import eta_metadata as _metadata
+from ts_transformer.tests.support_prediction import eta_runner as _runner
+from ts_transformer.tests.support_prediction import eta_stubbed_runner as _stubbed_runner
+from ts_transformer.tests.support_prediction import ETA_CHECKPOINT_SHA as CHECKPOINT_SHA
 
 
 def replace_covariates(sample: CalibrationSample, **overrides) -> CalibrationSample:
@@ -96,13 +61,6 @@ def replace_covariates(sample: CalibrationSample, **overrides) -> CalibrationSam
         truth_final_time_s=sample.truth_final_time_s,
         covariates=_covariates(**overrides),
     )
-
-
-def _z(tau: float) -> float:
-    """The standard normal quantile, without scipy."""
-    from statistics import NormalDist
-
-    return NormalDist().inv_cdf(tau)
 
 
 # ── the arithmetic ──────────────────────────────────────────────────────────
@@ -344,13 +302,6 @@ def test_the_readout_prints_both_halves_coverage():
 
 # ── the sidecar ─────────────────────────────────────────────────────────────
 
-def _metadata(tmp_path: Path, sha: str = CHECKPOINT_SHA) -> Path:
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    path = tmp_path / "checkpoint_metadata.json"
-    path.write_text(json.dumps({"checkpoint_sha256": sha, "schema_version": "x"}))
-    return path
-
-
 def test_the_table_round_trips_through_the_checkpoint_metadata(tmp_path: Path):
     table = calibrate(
         _cohort(400, narrow_s=10.0), split_seed=1, split="val",
@@ -453,12 +404,6 @@ def test_no_metadata_and_no_table_both_read_as_uncalibrated(tmp_path: Path):
 
 # ── the runner's refusals ───────────────────────────────────────────────────
 
-def _runner():
-    import importlib.util
-
-    return importlib.import_module("ts_transformer.experiments.eta_calibration")
-
-
 def test_the_runner_refuses_every_split_but_val(tmp_path: Path):
     runner = _runner()
     for split in ("test", "train"):
@@ -493,38 +438,6 @@ def test_the_runner_refuses_a_probe_half_seed_unless_it_is_a_readout(
                      "--out", str(tmp_path / "out"), "--half-seed", "2024"])
     message = capsys.readouterr().err
     assert "--half-seed" in message and "--readout-only" in message
-
-
-def _stubbed_runner(monkeypatch, samples: list[CalibrationSample], split_seed: int,
-                    duration_head: str = DURATION_HEAD_QUANTILE):
-    """The runner with its checkpoint load, cohort rebuild and forward pass replaced.
-
-    Those three are what make the real thing need a trained model and the arrival manifests,
-    and they decide none of what is under test here: which seed cuts the halves, and whether
-    the checkpoint's sidecar is written, are `main`'s own control flow. ``duration_head`` is
-    the one config field it reads (B1.b's `two-head` calibrates the same way).
-    """
-    runner = _runner()
-    truths = {sample.key: sample.truth_final_time_s for sample in samples}
-    covariates = {sample.key: sample.covariates for sample in samples}
-    arm = SimpleNamespace(
-        config=SimpleNamespace(duration_head=duration_head,
-                               resolved_split_seed=split_seed),
-        airports=("KRDU",), model=object(), normalizer=object(),
-    )
-    monkeypatch.setattr(runner, "resolve_device", lambda _name: "cpu")
-    monkeypatch.setattr(runner, "load_arm", lambda *args, **kwargs: arm)
-    monkeypatch.setattr(runner, "cohort_series", lambda _arm, _grid: [
-        SimpleNamespace(dataset_id=sample.key) for sample in samples
-    ])
-    monkeypatch.setattr(runner, "default_anchor", lambda _config: 0)
-    monkeypatch.setattr(runner, "duration_quantile_predictions", lambda *args, **kwargs:
-                        np.stack([sample.quantiles_s for sample in samples]))
-    monkeypatch.setattr(runner, "truth_duration_s",
-                        lambda item, _anchor: truths[item.dataset_id])
-    monkeypatch.setattr(runner, "approach_difficulty", lambda item, _anchor:
-                        SimpleNamespace(to_dict=lambda: covariates[item.dataset_id]))
-    return runner
 
 
 def test_readout_only_writes_the_table_and_leaves_the_sidecar_byte_for_byte(

@@ -3,23 +3,33 @@
 问题：`4dTrajectory/ts_transformer/tests/` 里哪些测试必须留、哪些多余、设置合不合理。
 这份文档记录结论、依据、已经做了什么、还剩什么，换一个会话也能接着做。
 
+**基线换过一次。** 审查是在 `dev-two-tier`（`47ac23a4`）上做的；之后用户要求不在 `dev-two-tier` 上开发，把
+`dev-two-tier-v4` 合进自己的分支再整理。v4 把 instruction-v3 的先验和多机测试连同代码一起归档了
+（`archive/two_tier_v3_2026_10/`），所以下面的数字和分类都以**合并 v4 之后**为准；审查时的旧数字只在 §1 列出对照。
+
 ## 0. 状态
 
 | 项 | 状态 | 在哪 |
 |---|---|---|
-| A 类（已收尾的一次性实验）搬进 archive | 已做，未合并 | 分支 `dev-archive-one-tier-oneoffs`，提交 `f0e527e6`，worktree `.claude/worktrees/archive-oneoffs`；`dev-two-tier` 已前进到 `c47fcf2a`，合并前要先变基 |
-| B 类（有文档、无活代码依赖，共 5 个 runner） | 等用户判断，先不动 | §3 |
-| C 类（被别的代码导入，不能单独搬） | 先不动（用户决定） | §3 |
-| `runway_hypotheses`（R0b runner） | 等用户决定 | §3 |
-| 各测试文件的运行时间 | **没测过** | §5 |
-| 夹具重复、导入方式、分层标记 | 只提了建议，没动 | §4 |
-| `two_tier_v3_2026_10` 缺顶层 README，`test_architecture` 一项失败 | 已有的问题，不是这次造成的，没修 | §6 |
+| A 类（已收尾的一次性实验）搬进 archive | 已做 | 分支 `dev-archive-one-tier-oneoffs`，提交 `f0e527e6`；归档目录 `archive/one_tier_oneoffs_2026_10/` |
+| 把 `dev-two-tier-v4` 合进该分支 | 已做 | 合并提交 `045439a7`，无冲突 |
+| 一次性实验的复核（v4 基线） | 已做 | §3 |
+| 重复夹具合并、测试之间互相导入的清理（冷文件） | 已做，28 个测试文件 + 新模块 `support_prediction.py` | §4 |
+| B 类、C 类、`runway_hypotheses` | 按用户决定先不动，等判断 | §3 |
+| 热文件里测试互相导入的清理 | 没做，等 v4 开发告一段落 | §4 |
+| 各测试文件的运行时间、分层标记 | **没测，没做** | §5 |
+| 金丝雀测试（旧 checkpoint 仍能加载）去留 | 等用户决定 | §4 |
 
 ## 1. 规模与方法
 
-- 147 个文件，47,388 行，约 1,737 个测试函数（按 `def test_` 数，参数化展开后更多）；全套约 55 分钟（出自项目记忆）。
-- 没有 `pytest.ini`，没有 slow 之类的标记；只有 `test_end_to_end.py` 的两个 `skipif`。
-- 方法是**静态判断**，没有跑套件，也没有测耗时：另一个会话当时正在跑 pytest，占着 CPU。
+| | 审查时（`dev-two-tier`） | 合并 v4 后（A 类已搬走） |
+|---|---|---|
+| 测试文件 | 147 | 100 |
+| 行数 | 47,388 | 36,038 |
+| 测试函数（按 `def test_`） | 约 1,737 | 1,364 |
+
+- 全套约 55 分钟（出自项目记忆，是旧基线上的数）。没有 `pytest.ini`，没有 slow 之类的标记；只有 `test_end_to_end.py` 的两个 `skipif`。
+- 方法是**静态判断**，没有跑全套，也没有测耗时：另一个会话一直在跑 pytest，占着 CPU。
 - 判断一个 runner 是否还活着，用四个信号：`docs/reference/runners.md` 是否收录、有没有活代码导入、`docs/experiments/intents.json` 与两层设计文档是否提到、模块自己的说明。
 - 不能用的两个信号：
   - 「`run_ts.py --list` 里有」——`experiments/__main__.py` 用 `pkgutil` 自动发现 `experiments/` 下所有模块，文件在就会列出。
@@ -27,14 +37,16 @@
 
 ## 2. 必须保留的
 
-这些守着现行契约，删了就没人把关：
+这些守着现行契约，删了就没人把关。以合并 v4 后的文件为准：
 
-- 两层模型主线：`prior`、`instructions`、`autopilot`、`executor_conformance`、各个 `traffic_*`，以及 `window/prior/instruction_training_export`、`training_overlays`。
-- 发布与身份：`publish_ts_experiment_trajectories`（60 个测试，是通往前端的闸门）、`eligible_set_identity`、`day_split`（封存测试日）、`checkpoint_data_generation`、`lateral_eligibility`。
+- 两层模型阶段 A（v4）：`closed_loop`、`start`、`final_descent_tolerance`、`instruction_*`（`vocabulary`、`labeller`、`conformance`）、`autopilot`、`executor_*`、`training_export`。这几组正在被 v4 的各分支频繁修改。
+- 发布与身份：`publish_ts_experiment_trajectories`（60 个测试，是通往前端的闸门）、`eligible_set_identity`、`day_split`、`checkpoint_data_generation`、`lateral_eligibility`。
 - 物理与契约：`control_constraints`、`control_inverse_dynamics`、`state_objective`、`channel_contract`、`supervision_terms`、`config_contract`、`run_naming`、`final_approach_geometry`。
 - 结构守卫：`architecture`、`import_boundaries`、`frontend_mirrors`、`guidance_skeleton_mirrors`。几乎不花时间；`frontend_mirrors` 防的是新输出类型先发布、前端镜像没更新，导致每个机场的选择器整个变空（发生过两次）。
 
-## 3. 一次性实验的分类
+审查时列在这里的 `prior`、`traffic_*`、`window_*` 测试，v4 已随 v3 一起归档，不再在 `tests/` 里。
+
+## 3. 一次性实验的分类（以合并 v4 后为准）
 
 ### A 类：已搬（`archive/one_tier_oneoffs_2026_10/`）
 
@@ -46,48 +58,60 @@
 | `overfit_diagnostic` | 状态路径：小样本能否过拟合 | `test_ts_overfit_diagnostic` |
 | `clock_attribution` | 控制路径：误差按时长、几何、时钟拆开 | `test_ts_clock_attribution` |
 | `control_capacity_ceiling` | 控制路径：逐航班的能力上限 | `test_ts_control_capacity_ceiling` |
-| `runway_intent_r0` + `_readout` | 跑道意图 R0：只靠因果上下文能否说出落哪条跑道 | `test_runway_intent_r0` |
-| `runway_intent_r11` + `_readout` | 跑道意图 R1.1：对称候选的列表式打分头 | `test_runway_intent_r11` |
+| `runway_intent_r0` + `_readout` | 跑道意图 R0 | `test_runway_intent_r0` |
+| `runway_intent_r11` + `_readout` | 跑道意图 R1.1 | `test_runway_intent_r11` |
 
-两个读数器必须跟着搬：它们读对应 runner 的输出文件，留下就成了读不到数据的 runner。
+两个读数器必须跟着搬：它们读对应 runner 的输出文件。
 
 ### 审查时先列入、核对后收回的：三个图 runner
 
-`approach_clock_figure`、`approach_legs_figure`、`scene_sample_figure` 画的是已提交的 `docs/two_tier/figures/*.svg`，测试负责让 SVG 和代码保持一致（`test_prior_scene` 还用到其中一个）。**它们是活的，不搬。** 早先说「文档里没有引用」是错的——当时只按模块名搜，漏了图文件本身。
+`approach_clock_figure`、`approach_legs_figure`、`scene_sample_figure` 画的是已提交的 `docs/two_tier/figures/*.svg`，测试负责让 SVG 和代码保持一致。**它们是活的，不搬。** 早先说「文档里没有引用」是错的——当时只按模块名搜，漏了图文件本身。v4 基线上这三张图仍在。
 
 ### B 类：有文档、没有活代码导入，等用户判断
 
 | runner | `runners.md` | 备注 |
 |---|---|---|
-| `heading_lead_ablation` | R23 | 对应 executor v11，已合并 |
 | `eta_error_readout` | R4 | |
 | `latent_fan_readout` | R6 | |
 | `latent_probe` | R5 | `intents.json` 提到 1 次；依赖 `anytime_curve` |
 | `eta_calibration` | R2 | `intents.json` 提到 2 次；依赖 `anytime_curve` |
 
+`heading_lead_ablation`（审查时的 B 类）已被 v4 归档，不在此列。
+
 ### C 类：被耦合住，不能单独搬
 
-| 模块 | 被谁导入 |
+| 模块 | 状态 |
 |---|---|
-| `runway_intent_r1`（含 `_readout`） | `run_naming.py`；R1.1 的 runner |
-| `chain_sensitivity` | `publish_ts_experiment_trajectories.py` |
-| `anytime_curve` | `eta_calibration`、`chain_sensitivity`、`latent_probe` |
-| `lead_time_error` | `data/anchor_grid.py` |
-| `control_basis_oracle` | 两次检查对「有没有导入者」结果不同，**没核实清楚**；`intents.json` 提到 1 次 |
+| `runway_intent_r1`（含 `_readout`） | `run_naming.py` 导入 r1；R1.1 的 runner 已归档但读它们 |
+| `anytime_curve` | `eta_calibration`、`chain_sensitivity`、`latent_probe` 共用；`runners.md` R1 收录 |
+| `lead_time_error` | `data/anchor_grid.py` 导入 |
+| `control_basis_oracle` | **已核实是活的**：`cli/common.py` 和 `config.py` 的报错信息让用户去跑它，`outputs/control/basis_fit.py` 读它的输出（拟合教师表，C23）。审查时「两次检查结果不同」的疑点由此了结 |
+| `chain_sensitivity` | **v4 基线上情况变了**：发布脚本里只剩一行注释提到它（审查时当成了「导入」），没有活代码导入，`runners.md` 没收录。按 A 类判据现在符合；发布脚本对已归档代码留镜像注释有先例（`manoeuvre_readout`）。用户说过 C 类先不动，所以**没搬，等判断** |
 
 `frame_ablation` 是活的（`runners.md` R8、`intents.json` 6 处、两层格子队列在调），不是候选。
 
 ### 另一个悬着的：`runway_hypotheses`
 
-R0b 的 runner。唯一导入它的是已搬走的 `runway_intent_r0_readout`，现在没有活代码读它；只有 `data/runway_context.py` 的一句注释提到名字。不在批准名单里，没动。
+R0b 的 runner。`runners.md` 没收录；唯一导入它的是已搬走的 `runway_intent_r0_readout`；`data/runway_context.py` 里只有一句注释提到名字。不在批准名单里，没动。
 
-## 4. 设置上的问题（只提了建议，没动）
+## 4. 设置上的问题
 
-1. **没有分层。** 想只跑「快的契约测试」做不到。慢的候选：`ts_pipeline`（3 折、12 轮、带 subprocess）、`end_to_end`、`anchor_grid_selection`（10 轮训练）、`latent_control`（1046 行）、`publish_*`、`two_tier_v3_grid`。拆分前必须先量耗时（§5）。
-2. **夹具重复。** `tests/support.py` 已存在，但 `_series` 在 25 个文件里各定义一遍，`_config` 19 次，`_row` 11 次。同名不一定同内容，合并前要逐个核对。
-3. **导入方式脆弱。** `tests/` 没有 `__init__.py`，靠命名空间包被当作 `ts_transformer.tests` 导入，共 64 处；`test_two_head_duration` 还借用另一个测试文件的配置；4 个文件仍自带 `sys.path` 前导，而 `conftest.py` 已经做了。
+**已做（冷文件，即 v4 各分支不在改的）：**
+
+- 新增 `tests/support_prediction.py`，放单层预测测试共用的夹具。`support.py` 仍是两层线的夹具；分开是因为 v4 的几个分支（`dev-two-tier-v4-prior`、`dev-step9-one-commanded`）都在改 `support.py`，往里追加会和它们冲突。
+- 搬进去的只有两类：几个文件里**逐字相同**的（`_series` 14 处、`_series(config, n)` 4 处、`_config` 3 处、`_identity_normalizer` 3 处，先用 AST 逐一核对相同再搬），以及**被别的测试文件导入**的（`quantile_config`、`latent_config`、`given_cta_config`、ETA 校准的 `_cohort` 等一组）。名字相同但内容不同的（`_config` 其余 16 种，`_state`、`_row` 等）不是同一个东西，没合并。
+- 原文件用原来的名字导入（`series as _series`），调用处一个字没改。涉及 28 个测试文件，371 个测试函数的语法树和 HEAD 比对：25 个文件完全相同；另 3 个（`test_auto_batch`、`test_ts_predictability_report`、`test_two_head_duration`）只差函数里的一行导入语句，是预期的引用改动。
+- 因搬走而不再用到的导入已清掉。`test_evaluation_protocol` 里的 `_series` 本来就没人用，是死代码，只去掉了导入。
+- 测试文件之间互相导入是个隐患：`--import-mode=importlib` 下，一个测试模块被另一个测试模块导入，会被加载两次。
+
+**没做：**
+
+1. **热文件里的测试互相导入**：`test_closed_loop` ← `test_instruction_labeller`（`GO_AROUND_LEGS`）、`test_instruction_conformance`（`_artefact`）；`test_executor_turns`、`test_training_export` ← `test_closed_loop`（`_batch`、`_params`）；`test_executor_conformance` ← `test_autopilot`；`test_instruction_vocabulary` ← `test_instruction_labeller`。这些文件近三天每个都有多次提交（`test_closed_loop` 23 次、`test_autopilot` 17 次），搬走会和 v4 各分支冲突。等阶段 A 告一段落再做。
+2. **没有分层**：想只跑「快的契约测试」做不到。慢的候选：`ts_pipeline`（3 折、12 轮、带 subprocess）、`end_to_end`、`anchor_grid_selection`（10 轮训练）、`latent_control`（1046 行）、`publish_*`、`two_tier_v3_grid`。拆分前必须先量耗时（§5）。
+3. **`sys.path` 前导**：审查时数到 4 个文件，核对后其中三个是各有用处的（`final_approach_geometry`、`guidance_skeleton_mirrors` 要加别的包路径，`import_boundaries` 是子进程里的），`test_architecture` 那处与 `conftest.py` 重复，但同一个测试文件在检查「没人把包目录放进 `sys.path`」，留着不影响。**没有可删的。**
 4. **两个「金丝雀」测试**（`test_end_to_end.py` 的 `skipif` 两个）：要求带已退役字段的旧 checkpoint 仍能加载，文件不在本机时静默跳过。这和项目规则「兼容是禁用词、按名字拒绝」冲突，也可能是用户特许保留的。**要不要留，用户决定。**
-5. **价值偏低的小文件：** `test_arm_readout`（1 个测试，断言整段表格输出的精确字符串）、`test_experiment_index`（测 legacy 运行目录）、`test_review_2026_09_09`（文件名是日期，内容是 review 的回归点，应归到各自模块的测试里）、`test_batch_benchmark`、`test_metrics_spread`。
+5. **价值偏低的小文件：** `test_arm_readout`（1 个测试，断言整段表格输出的精确字符串）、`test_experiment_index`（测 legacy 运行目录）、`test_review_2026_09_09`（文件名是日期，内容是 review 的回归点）、`test_batch_benchmark`、`test_metrics_spread`。它们测的是仍在用的代码，归档会让这些代码没有测试，所以不搬；要不要把 review 回归点并进各模块的测试文件，等用户说。
+6. **没有按子系统分目录。** 100 个文件平铺，但文档和别的会话的命令里到处写着 `tests/test_xxx.py` 的路径，分目录要改一大批引用，又会和 v4 各分支的测试改动冲突；没做，需要的话再议。
 
 ## 5. 没测过的：耗时
 
@@ -96,20 +120,16 @@ R0b 的 runner。唯一导入它的是已搬走的 `runway_intent_r0_readout`，
 - 在两层队列和 GPU 都空闲时，后台跑一次 `pytest ... --durations=0`，输出写进文件；按「长时间运行脱离会话」的做法（`nohup setsid`，脚本里 `echo $$ > pid`，用 Monitor 按 PID 监视）。
 - 跑之前先看内存、GPU 和有没有实验在跑。
 
-## 6. 已有的失败
-
-`tests/test_architecture.py::test_nothing_live_imports_the_archive` 在没改动的 `dev-two-tier`（`47ac23a4`）上就失败：`archive/two_tier_v3_2026_10/` 只有 `docs/README.md`，没有顶层 `README.md`，而测试要求每个归档目录都有。这是提交 `a534a2d9` 把设计文档归档时留下的，与这次搬迁无关，没修。
-
-## 7. 没动的地方
+## 6. 没动的地方
 
 - `outputs/control/forecast.py` 的一句注释举了 `clock_attribution` 当例子：活代码里的注释，等该文件下次真正修改时一起改。
 - `docs/code-health-followups.md` 第 6 条引用 `experiments/runway_intent_r0.py:180`：当时核实过的发现，保留。
 - 以上两处也记在 `archive/one_tier_oneoffs_2026_10/docs/cut_sections.md` 末尾。
 
-## 8. 接下来（按优先级）
+## 7. 接下来（按优先级）
 
-1. 把 `dev-archive-one-tier-oneoffs` 变基到最新 `dev-two-tier`，报告给用户合并（用户决定后 worktree 与分支再清理）。
-2. 用户判断 B 类、`runway_hypotheses` 与 `control_basis_oracle`；决定后同样按「模块连同旧测试原样搬」处理。
+1. 把本分支报告给用户合并（用户决定后 worktree 与分支再清理）。
+2. 用户判断 B 类、`chain_sensitivity`、`runway_hypotheses`；决定后同样按「模块连同旧测试原样搬」处理。
 3. 两层队列空闲时测一次耗时，再据此打分层标记。
 4. 用户决定金丝雀测试的去留。
-5. 夹具合并与导入清理（机械活，逐个核对同名夹具是否真的相同）。
+5. v4 阶段 A 告一段落后，清理热文件里测试互相导入的那一批（§4 没做的第 1 条）。

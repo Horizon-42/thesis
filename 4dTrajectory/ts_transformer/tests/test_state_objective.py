@@ -18,13 +18,7 @@ from ts_transformer.geometry.metrics import (
 from ts_transformer.outputs.state.model import StatePrediction
 from ts_transformer.outputs.state.loss import state_prediction_loss_components
 from ts_transformer.training.objective import prediction_loss
-
-
-def _identity_normalizer() -> Normalizer:
-    return Normalizer(
-        mean=np.zeros(len(ch.CHANNELS), dtype=np.float64),
-        std=np.ones(len(ch.CHANNELS), dtype=np.float64),
-    )
+from ts_transformer.tests.support_prediction import identity_normalizer as _identity_normalizer
 
 
 def test_prediction_loss_adds_scaled_final_time_error():

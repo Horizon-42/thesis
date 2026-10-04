@@ -14,27 +14,17 @@ from ts_transformer.config import (
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     PREDICTION_CONTROL,
-    TSConfig,
 )
-from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
+from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer
 from ts_transformer.training.fixed_anchor_validation import (
     fixed_anchor_common_grid_ade_metrics,
     fixed_anchor_common_truth,
 )
 from ts_transformer.backbone.adapters import build_model
-from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.training.objective import prediction_loss
+from ts_transformer.tests.support_prediction import series as _series
 
 AIRPORT, RUNWAY = "KRDU", "05L"
-
-
-def _series(n_flights=8, **config_overrides):
-    """Synthetic KRDU arrivals, built into FlightSeries. Returns ``(series, config)``."""
-    config = TSConfig(**config_overrides)
-    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3)
-    series, report = build_series(flights, config, airport=AIRPORT)
-    assert report.built == n_flights, report.format()
-    return series, config
 
 
 def test_formal_common_grid_selector_returns_only_lean_position_time_metrics():
