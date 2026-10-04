@@ -145,6 +145,13 @@ def fly_single(batch: replay.Batch, inputs: FlightInputs, j: int, params: Execut
     return flown, stopped
 
 
+def last_state_cycle(outcome: str, end_row: int) -> int:
+    """The last flown state a flight is drawn to: the judge's outcome row, but for a dynamics failure the state before
+    it (the failed state is left out). One rule for the export's ``replay.track`` and the live answer's track; the
+    frontend mirrors it (`trainingSample.ts` `lastStateCycle`)."""
+    return end_row - 1 if outcome == "dynamics_failure" else end_row
+
+
 def crossing_payload(verdict: Verdict, flown: Flown, j: int, geometry: AirportGeometry) -> dict[str, Any] | None:
     """A verdict's threshold crossing as the Training view draws it (None: no crossing): where it crossed, at which
     cycle from the first predicted step and which candidate; for an approach crossing the decision-altitude check (D38)

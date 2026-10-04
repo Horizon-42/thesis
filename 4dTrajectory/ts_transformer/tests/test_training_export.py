@@ -288,3 +288,12 @@ def test_the_set_s_batch_holds_no_view_into_the_loaded_closed_loop_file(monkeypa
     assert not np.shares_memory(batch.sentences[0].grid, whole) and not np.shares_memory(sentence.grid, whole)
     with pytest.raises(ValueError, match="1 of the set's flights have no closed-loop sentence at 2 s"):
         training_flights.closed_loop_batch(flights, {}, 2.0, one.words)
+
+
+def test_a_flight_is_drawn_to_its_outcome_s_state_but_a_dynamics_failure_s_state_before_it():
+    """One rule for the export's flown track and the live answer's (the frontend's `lastStateCycle` mirrors it)."""
+    from ts_transformer.autopilot.judge import OUTCOMES
+    from ts_transformer.experiments.training_flights import last_state_cycle
+
+    assert [last_state_cycle(outcome, 300) for outcome in OUTCOMES] == [
+        299 if outcome == "dynamics_failure" else 300 for outcome in OUTCOMES]

@@ -578,13 +578,11 @@ export function outsideSpans(inside: boolean[], firstRow: number, lastRow: numbe
     const closes = start !== null && (ok || offset === inside.length - 1);
     if (!closes) return;
     const first = firstRow + start!;
-    start = null;
-    // a verdict past the line's last row has nothing to draw
-    if (first > lastRow) return;
     const last = Math.min(firstRow + (ok ? offset - 1 : offset) + 1, lastRow);
     spans.push(last > first ? [first, last] : [Math.max(first - 1, 0), first]);
+    start = null;
   });
-  return spans.filter(([first, last]) => last > first && last <= lastRow);
+  return spans.filter(([first, last]) => last > first);
 }
 
 /** Track degrees made continuous (no jump of more than 180° between neighbours), and — with a ``reference`` — shifted by
@@ -833,6 +831,8 @@ function parseOpenLoop(reader: Reader, observedRows: number, candidates: Trainin
   if (rows !== observedRows) reader.fail(`rows is ${rows}, but the observed track has ${observedRows}`);
   const words = parseGrid(reader, "words", rows);
   const events = parseEvents(reader, words, candidates, false);
+  const envelopes = parseEnvelopes(reader.child("envelopes"));
+  requireWithin(reader.child("envelopes"), envelopes, observedRows, "the observed track");
   const kinds = reader.children("kinds").map((item) => ({
     row: item.integer("row", 0, rows - 1), column: item.integer("column", 0, TRAINING_COLUMNS.length - 1),
     // why the labeller said it (`labeller.records.Instruction.kind`): free text for readouts, many writers, no list
@@ -843,8 +843,7 @@ function parseOpenLoop(reader: Reader, observedRows: number, candidates: Trainin
   }
   return {
     rows, words, events, kinds, captureRow: reader.integer("captureRow", 0, rows), unspecifiedRow: reader.integer("unspecifiedRow", 0, rows),
-    goAroundRows: reader.numbers("goAroundRows"), runwayAgainRows: reader.numbers("runwayAgainRows"),
-    envelopes: parseEnvelopes(reader.child("envelopes")),
+    goAroundRows: reader.numbers("goAroundRows"), runwayAgainRows: reader.numbers("runwayAgainRows"), envelopes,
   };
 }
 
@@ -866,17 +865,17 @@ export function readCrossing(reader: Reader, candidateCount: number): TrainingCr
   };
 }
 
-/** Every row a judge's envelope ends at lies within the flown track (the export guarantees it) — but for a heading band whose
- *  word's lead runs past the end of the flight: it is empty (`firstRow == stopRow`, no verdicts), may lie anywhere, and is
- *  not drawn. */
-function requireWithin(reader: Reader, envelopes: TrainingEnvelopes, rows: number): void {
+/** Every row an envelope ends at lies within the track it judged (``rows``, named ``track``; the export guarantees it) —
+ *  but for a heading band whose word's lead runs past the track's end: it is empty (`firstRow == stopRow`, no verdicts),
+ *  may lie anywhere, and is not drawn. So no drawing helper meets a row past its line. */
+function requireWithin(reader: Reader, envelopes: TrainingEnvelopes, rows: number, track: string): void {
   const ends = [
     ...envelopes.heading.filter((band) => band.stopRow > band.firstRow).map((band) => ["heading stopRow", band.stopRow] as const),
     ...envelopes.altitude.map((tube) => ["altitude endRow", tube.endRow] as const),
     ...envelopes.speed.map((span) => ["speed endRow", span.endRow] as const),
   ];
   const past = ends.find(([, row]) => row > rows);
-  if (past) reader.fail(`an envelope's ${past[0]} is ${past[1]}, past the ${rows} rows of the flown track (replay.track)`);
+  if (past) reader.fail(`an envelope's ${past[0]} is ${past[1]}, past the ${rows} rows of ${track}`);
 }
 
 function parseReplay(
@@ -896,7 +895,7 @@ function parseReplay(
     track.fail(`rows is ${rows}, but ${lastCycle} cycles of ${cycleS} s are ${Math.floor((lastCycle * cycleS) / stepS + 1e-9) + 1} rows of ${stepS} s`);
   }
   const judged = envelopes === null ? null : parseEnvelopes(envelopes);
-  if (judged !== null) requireWithin(envelopes!, judged, rows);
+  if (judged !== null) requireWithin(envelopes!, judged, rows, "the flown track (replay.track)");
   return {
     replay: {
       outcome, endCycle, crossing: crossing === null ? null : readCrossing(crossing, candidates.length),
@@ -1009,6 +1008,10 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
     const frame = sample.child("airportFrame");
     const cycleS = sample.child("executor").number("cycleS");
     if (!(cycleS > 0)) sample.fail(`executor.cycleS is ${cycleS}, not a positive length`);
+    // a 2 s row is a whole number of cycles (the export's int(round(step / cycle)) must not round)
+    if (!Number.isInteger(vocabulary.stepS / cycleS)) {
+      sample.fail(`a ${vocabulary.stepS} s row is not a whole number of ${cycleS} s cycles`);
+    }
     const flights = sample.children("flights").map((flight) => parseFlight(flight, vocabulary, candidates, cycleS));
     const keys = new Set(flights.map((flight) => flight.flightKey));
     if (keys.size !== flights.length) sample.fail("two flights carry one flight key: a flight is its key");

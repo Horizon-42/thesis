@@ -215,7 +215,7 @@ def replay_payload(flown: Flown, j: int, verdict: Verdict, part: replay.Batch, s
                            smoothed.ground_speed_mps, geometry, spec, words)
     # the flight to its outcome on the 2 s rows (the stored states end at the sentence's last said row): its last state
     # the outcome's — a dynamics failure's failed state left out, as the live executor draws it
-    last = verdict.end_row - 1 if verdict.outcome == "dynamics_failure" else verdict.end_row
+    last = training_flights.last_state_cycle(verdict.outcome, verdict.end_row)
     cycles = np.arange(0, last + 1, int(round(spec.step_s / flown.cycle_s)))
     whole = flown_track(flown.states[j, : last + 1].cpu().numpy(), geometry)
     states = flown.states[j, cycles].cpu().numpy()
