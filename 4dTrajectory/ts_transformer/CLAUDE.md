@@ -359,7 +359,8 @@ grid's L60_D60 cohort). **The two-tier model, v4** (design `docs/two_tier/design
 `instruction_spec` (measured on TRAIN only) → `instruction_labels` (writes the labeller's reference) →
 `instruction_conformance` (runs the labeller's check; information) (R10) → `executor_spec` (no value from data; writes its
 reference tracks with it; clean tree) (R12) → `instruction_closed_loop` (the closed-loop sentences of every split at each
-row interval and their reference, `--workers` a split a process; clean tree; `--check` runs the readers' checks) (R50) →
+row interval and their reference, `--workers` a split a process, `--train-parts` train in parts with the same files and
+summary; clean tree; `--check` runs the readers' checks) (R50) →
 `executor_replay` (`--row-interval-s`, `--closed-loop`; no criterion is read; select and val from a clean tree) (R12);
 `executor_conformance` checks a spec's reference after an `autopilot/` change (R42); `executor_turns` measures the
 executor's turn against the exact words (A13, R51); `final_descent_tolerance` reads the closed loop and its replay of one

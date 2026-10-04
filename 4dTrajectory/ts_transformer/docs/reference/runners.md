@@ -1395,7 +1395,12 @@ the observed heading words said — the matched point's observed time at the row
 mean and percentiles, information), then the reference sample (train, 10 flights an
 airport, every Δ written), read again before it ends. Written in a staging directory and renamed: an existing
 `closed_loop/` refuses. `--workers N` (2026-10-04) reads the splits in up to N processes, each split drawn once (the
-serial path's reading: the same files). `--check` runs the checks every reader runs (`require_conforming_closed_loop`:
+serial path's reading: the same files); `--train-parts P` (2026-10-05) cuts train into P consecutive blocks of its one
+seeded permutation (`replay.part_of`), each drawn and read in its own process, and puts their sentences, their draw's
+description and their numbers together in order (`join_parts`, `replay.merge_descriptions`, `merge_tallies`): the files and
+the summary, its text included, are those of train read whole. Measured 2026-10-05 on A25's artefact: a sixth of train
+draws in 126 s and reads at Δ 2 s in 84 s with a 3.9 GB peak (train whole: 1,837 s, 14.4 GB); A30 ran `--workers 4
+--train-parts 8`. `--check` runs the checks every reader runs (`require_conforming_closed_loop`:
 the labeller's, the executor's, the closed loop's, D73) and writes nothing; there is no passed record. The observed words are said where the observed aircraft heard
 them (D42, A10), at the nearest Δ row (D45, A12); a sentence has the flown rows.
 
