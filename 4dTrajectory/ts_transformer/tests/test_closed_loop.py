@@ -406,13 +406,20 @@ def test_a_sentence_that_reaches_its_time_limit_stores_the_timeout_the_replay_gi
 def test_the_runner_counts_the_flights_without_a_sentence_by_reason():
     """§4.9: a flight the replay does not fly (no dynamics, …), one the row interval refuses and one the closed loop
     refuses give no training sentence, each counted by its reason."""
-    from ts_transformer.experiments.instruction_closed_loop import summarise
+    from ts_transformer.experiments.instruction_closed_loop import merge_tallies, summarise, tally
 
     batch, inputs, words = _batch()
+    batch = replace(batch, drawn={"refused_on_interval": {"too short": 1}})
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     lateness = closed_loop.heading_lateness_rows(sentence, batch.readings[0].words[batch.sentences[0].first_row:]) * 2.0
-    numbers = summarise([sentence, Refused("go-around at the first predicted step")],
-                        {"no aircraft dynamics": 3}, {"too short": 1}, [lateness], [_outside(batch, sentence, words)])
+    counted = tally(batch, [sentence, Refused("go-around at the first predicted step")], words)
+    numbers = summarise(counted, {"no aircraft dynamics": 3})
+    # a split read in parts: each part's tally in order gives the numbers of the whole
+    whole = replay.subset(batch, [0, 0, 0])
+    first, second = replay.subset(batch, [0, 0]), replace(replay.subset(batch, [0]), drawn={"refused_on_interval": {}})
+    gone = Refused("go-around at the first predicted step")
+    assert summarise(merge_tallies([tally(first, [sentence, gone], words), tally(second, [sentence], words)]), {}) \
+        == summarise(tally(whole, [sentence, gone, sentence], words), {})
     assert numbers["sentences"] == 1
     assert numbers["outcomes"] == {sentence.outcome: 1}                                             # D74
     assert numbers["without_a_sentence"] == {
@@ -945,8 +952,10 @@ def test_the_replay_reads_the_speed_words_and_how_far_along_the_path_the_flown_a
 
 
 def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(tmp_path, monkeypatch):
-    """`instruction_closed_loop --workers N` reads each split (drawn once, every row interval in turn) in its own process:
-    the files and the summary are those of one process. Synthetic flights have no harvest: their draw and executor inputs stand in."""
+    """`instruction_closed_loop --workers N` reads each split (drawn once, every row interval in turn) in its own process,
+    and ``--train-parts P`` the train split in P parts of its draw: the files and the summary are those of one process
+    reading each split whole. Synthetic flights have no harvest: their draw (in parts, as `replay.part_of` cuts it) and
+    executor inputs stand in."""
     import json as json_module
 
     from ts_transformer.autopilot.flights import FlightInputs
@@ -956,14 +965,17 @@ def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(
 
     clean = {"head": "h", "dirty": False}
 
-    def draw(directory, split, one, words, *, per_airport, seed, groups):
+    def draw(directory, split, one, words, *, per_airport, seed, groups, part=(0, 1)):
         stored, signals, geometries = load_sentences(directory, split, one), load_signals(directory, split), \
             load_candidates(directory)
-        indices = [int(i) for i in stored["signal_index"]]
+        indices = replay.part_of([int(i) for i in stored["signal_index"]], part)
         readings = [read_flight(signals[i], geometries[signals[i].airport], one, words) for i in indices]
-        return replay.Drawn(indices=indices, signals=[signals[i] for i in indices], series=[None] * len(indices),
-                            groups=[replay.OWN] * len(indices), geometries=geometries,
-                            description={"split": split, "excluded": {}, "flights": len(indices)}), readings
+        n = len(indices)
+        return replay.Drawn(indices=indices, signals=[signals[i] for i in indices], series=[None] * n,
+                            groups=[replay.OWN] * n, geometries=geometries,
+                            description={"split": split, "seed": seed, "per_airport": per_airport, "groups": list(groups),
+                                         "threshold_crossing_heights_m": {}, "pool": 2 * n, "read": 2 * n, "flights": n,
+                                         "excluded": {"no aircraft dynamics": n}, "by_group": {"own": n}}), readings
 
     def inputs(batch, step_s, *, device):
         start = closed_loop.start_row(batch.row_interval_s) * int(round(batch.row_interval_s / step_s))
@@ -980,10 +992,12 @@ def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(
     monkeypatch.setattr(runner, "git_state", lambda: clean)
     monkeypatch.setattr(runner, "POOL_OPTIONS", {"start_method": "fork"})
     read = {}
-    for workers in (1, 2):
-        directory = labelled_artefact(tmp_path / f"w{workers}", monkeypatch)
+    runs = ((1, 1), (2, 1), (1, 2), (2, 3))                                   # (workers, train parts)
+    for workers, parts in runs:
+        directory = labelled_artefact(tmp_path / f"w{workers}p{parts}", monkeypatch, straight_in=True)
         assert runner.main(["--instructions", str(directory), "--executor", str(tmp_path), "--row-interval-s", "2", "8",
-                            "--workers", str(workers)]) == 0
+                            "--workers", str(workers), "--train-parts", str(parts)]) == 0
+        assert not (directory / "closed_loop" / runner.PARTS).exists()
         files = sorted(p.name for p in (directory / "closed_loop").glob("*.npz"))
         summary = json_module.loads((directory / "closed_loop" / "summary.json").read_text(encoding="utf-8"))
         summary.pop("written_utc")
@@ -991,13 +1005,46 @@ def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(
         for name in files:
             with np.load(directory / "closed_loop" / name) as data:
                 arrays[name] = {key: data[key] for key in data.files}
-        read[workers] = (files, summary, arrays)
-    assert read[1][0] == read[2][0] == ["select_2s.npz", "select_8s.npz", "train_2s.npz", "train_8s.npz",
-                                        "val_2s.npz", "val_8s.npz"]
-    assert read[1][1] == read[2][1] and list(read[2][1]["splits"]) == ["train", "select", "val"]
-    for name in read[1][0]:
-        for key, value in read[1][2][name].items():
-            assert np.array_equal(value, read[2][2][name][key], equal_nan=value.dtype.kind == "f"), (name, key)
-    with pytest.raises(SystemExit):
-        runner.main(["--instructions", str(tmp_path / "w1"), "--executor", str(tmp_path), "--row-interval-s", "2",
-                     "--workers", "0"])
+        read[workers, parts] = (files, summary, arrays)
+    whole = read[1, 1]
+    assert whole[0] == ["select_2s.npz", "select_8s.npz", "train_2s.npz", "train_8s.npz", "val_2s.npz", "val_8s.npz"]
+    assert list(whole[1]["splits"]) == ["train", "select", "val"]
+    train = whole[1]["splits"]["train"]
+    assert train["drawn"]["flights"] == 3 and train["intervals"]["2"]["sentences"] == 3
+    assert train["drawn"]["excluded"] == {"no aircraft dynamics": 3} and train["drawn"]["pool"] == 6
+    for run in runs[1:]:
+        files, summary, arrays = read[run]
+        assert files == whole[0] and summary == whole[1], run
+        for name in files:
+            assert list(arrays[name]) == list(whole[2][name]), (run, name)
+            for key, value in whole[2][name].items():
+                assert np.array_equal(value, arrays[name][key], equal_nan=value.dtype.kind == "f"), (run, name, key)
+    for bad in (["--workers", "0"], ["--train-parts", "0"]):
+        with pytest.raises(SystemExit):
+            runner.main(["--instructions", str(tmp_path / "w1p1"), "--executor", str(tmp_path), "--row-interval-s", "2",
+                         *bad])
+
+
+def test_a_split_is_drawn_in_parts_of_its_one_permutation_and_their_descriptions_add_up(tmp_path):
+    """`replay.part_of`: the parts in turn are the whole order, sizes differing by at most one; a part that does not
+    exist and a part with a cap per airport are refused; `merge_descriptions` adds the counts and refuses parts of
+    different draws."""
+    order = list(range(10, 27))
+    for n in (1, 2, 3, 5, 17):
+        parts = [replay.part_of(order, (k, n)) for k in range(n)]
+        assert [i for p in parts for i in p] == order and max(map(len, parts)) - min(map(len, parts)) <= 1
+    for bad in ((3, 3), (-1, 2)):
+        with pytest.raises(ValueError, match="does not exist"):
+            replay.part_of(order, bad)
+    with pytest.raises(ValueError, match="only with every flight"):
+        replay.draw_flights(tmp_path, "train", order, per_airport=5, seed=1, part=(0, 2))
+    shared = {"split": "train", "seed": 1, "per_airport": "every labelled flight", "groups": ["own"],
+              "threshold_crossing_heights_m": {"KXXX": {"RW27": 15.0}}}
+    first = {**shared, "pool": 9, "read": 9, "flights": 7, "excluded": {"a": 1, "b": 1}, "by_group": {"own": 7}}
+    second = {**shared, "pool": 8, "read": 8, "flights": 5, "excluded": {"b": 3}, "by_group": {"own": 4, "stand-in": 1}}
+    merged = replay.merge_descriptions([first, second])
+    assert merged == {**shared, "pool": 17, "read": 17, "flights": 12, "excluded": {"b": 4, "a": 1},
+                      "by_group": {"own": 11, "stand-in": 1}}
+    assert list(merged["excluded"]) == ["b", "a"]                                   # by count, as a draw writes it
+    with pytest.raises(ValueError, match="not of one draw"):
+        replay.merge_descriptions([first, {**second, "seed": 2}])

@@ -198,13 +198,27 @@ class Drawn:
     description: dict[str, Any]
 
 
+def part_of(order: list[int], part: tuple[int, int]) -> list[int]:
+    """Part ``k`` of ``n`` of a drawing order: its ``k``-th of ``n`` consecutive blocks, sizes differing by at most one
+    — the parts in turn are the whole order."""
+    k, n = part
+    if not 0 <= k < n:
+        raise ValueError(f"part {k} of {n} does not exist")
+    return order[k * len(order) // n: (k + 1) * len(order) // n]
+
+
 def draw_flights(directory: Path, split: str, candidates: list[int], *, per_airport: int, seed: int,
-                 groups: tuple[str, ...] = (OWN,)) -> Drawn:
+                 groups: tuple[str, ...] = (OWN,), part: tuple[int, int] = (0, 1)) -> Drawn:
     """Of the split's signals at ``candidates``, the first ``per_airport`` of ``groups`` per airport (0: every
-    one), in a seeded permutation."""
+    one), in a seeded permutation; ``part`` ``(k, n)`` draws only the ``k``-th of ``n`` consecutive blocks of that
+    permutation (`part_of`; every flight only, ``per_airport`` 0): the parts' flights in turn are the whole draw's, and
+    their descriptions add up to its (`merge_descriptions`)."""
+    if part[1] > 1 and per_airport:
+        raise ValueError("a split is drawn in parts only with every flight (per_airport 0): a cap per airport is the "
+                         "whole permutation's")
     geometries = load_candidates(directory)
     signals = load_signals(directory, split)
-    order = [int(i) for i in np.random.default_rng(seed).permutation(sorted(candidates))]
+    order = part_of([int(i) for i in np.random.default_rng(seed).permutation(sorted(candidates))], part)
     wanted = {airport: per_airport or len(order) for airport in geometries}
     taken: list[tuple[int, FlightSeries, str]] = []
     excluded: Counter = Counter()
@@ -242,6 +256,23 @@ def draw_flights(directory: Path, split: str, candidates: list[int], *, per_airp
                                   for code, geometry in geometries.items()}})
 
 
+#: A draw's description: the fields every part of a split shares, and the counts its parts add up (`merge_descriptions`).
+SHARED_DESCRIPTION = ("split", "seed", "per_airport", "groups", "threshold_crossing_heights_m")
+ADDED_DESCRIPTION = ("pool", "read", "flights")
+COUNTED_DESCRIPTION = ("excluded", "by_group")
+
+
+def merge_descriptions(parts: list[dict[str, Any]]) -> dict[str, Any]:
+    """The description of a split drawn whole, from those of its parts (`draw_flights`, in order): the shared fields
+    are each part's, the counts added (a count dict by count, as a draw writes it)."""
+    if any(set(d) != set(parts[0]) or any(d[name] != parts[0][name] for name in SHARED_DESCRIPTION) for d in parts):
+        raise ValueError("the parts are not of one draw")
+    added = {name: sum(d[name] for d in parts) for name in ADDED_DESCRIPTION}
+    counted = {name: dict(sum((Counter(d[name]) for d in parts), Counter()).most_common()) for name in COUNTED_DESCRIPTION}
+    return {name: added[name] if name in added else counted[name] if name in counted else parts[0][name]
+            for name in parts[0]}
+
+
 def batch_of(drawn: Drawn, keep: list[int], readings: list[Reading], row_interval_s: float, words: Words) -> Batch:
     """The flights of ``drawn`` at ``keep`` flown from ``readings`` (one per kept flight, in that order), each sentence
     on ``row_interval_s`` (`sentence_on_interval`); a flight whose sentence the row interval refuses is left out and
@@ -277,12 +308,12 @@ def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per
 
 
 def draw_readings(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per_airport: int, seed: int,
-                  groups: tuple[str, ...] = (OWN,)) -> tuple[Drawn, list[Reading]]:
+                  groups: tuple[str, ...] = (OWN,), part: tuple[int, int] = (0, 1)) -> tuple[Drawn, list[Reading]]:
     """`draw`'s flights and their readings, each re-read and checked against its stored sentence, before any row
-    interval."""
+    interval; ``part`` as `draw_flights`."""
     sentences = load_sentences(directory, split, spec)
     stored = {int(index): k for k, index in enumerate(sentences["signal_index"])}
-    drawn = draw_flights(directory, split, list(stored), per_airport=per_airport, seed=seed, groups=groups)
+    drawn = draw_flights(directory, split, list(stored), per_airport=per_airport, seed=seed, groups=groups, part=part)
     readings = []
     for i, flight in zip(drawn.indices, drawn.signals):
         reading = read_flight(flight, drawn.geometries[flight.airport], spec, words)
