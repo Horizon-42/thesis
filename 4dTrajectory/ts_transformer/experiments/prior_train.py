@@ -20,7 +20,7 @@ the held-out airport's select days: the fold's score, §5).
 
     python run_ts.py prior_train --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> \\
         --row-interval-s 2 --executor 4dTrajectory/outputs/POOLED/executor/<spec> \\
-        --variant full --out <a new directory> [--held-out KSJC] [--sample 200]
+        --variant full --selection landed --out <a new directory> [--held-out KSJC] [--sample 200]
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, save_checkpoint
 from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, procedure_digests
 from ts_transformer.prior.runs import SAMPLE_SEED, Run, held_out_sentences, run_data, sampled_run_data
+from ts_transformer.prior.selection import RULES, selection_totals
 from ts_transformer.prior.source import ArtefactSource, airport_landings, artefact_identity
 from ts_transformer.prior.train import TrainConfig, evaluate, largest_batch_memory, train
 from ts_transformer.repo_layout import REPO_ROOT, git_state
@@ -72,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--executor", type=Path, required=True,
                         help="the directory of the artefact's executor spec: the closed-loop check flies with it (D69, D73)")
     parser.add_argument("--variant", required=True, choices=sorted(VARIANTS))
+    parser.add_argument("--selection", required=True, choices=RULES,
+                        help="the sentences trained and stopped on (D75): every run of B5 reads `landed`")
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     parser.add_argument("--held-out", default=None, help="the fold's held-out airport (D39); none: every airport")
     parser.add_argument("--sample", type=int, default=None,
@@ -98,10 +101,12 @@ def main(argv: list[str] | None = None) -> int:
 
     geometries = load_candidates(instructions)
     landings = airport_landings(geometries, load_day_split(instructions))
-    source = ArtefactSource(instructions, args.row_interval_s, args.variant, landings)
+    source = ArtefactSource(instructions, args.row_interval_s, args.variant, landings, args.selection)
     run = Run(tuple(sorted(geometries)), args.held_out)
     data = run_data(source, run) if args.sample is None else sampled_run_data(source, run, args.sample)
-    identity = artefact_identity(instructions, args.row_interval_s, landings)
+    identity = artefact_identity(instructions, args.row_interval_s, landings, args.selection)
+    # the artefact's sentences that the rule keeps and leaves out, each split, every airport (the run's own: "sentences")
+    print(json.dumps({"artefact_selection": selection_totals(identity["selection"])}), flush=True)
     config = TrainConfig(**{item.name: getattr(args, item.name) for item in fields(TrainConfig)})
     torch.manual_seed(config.seed)
     model = Prior(PriorConfig.from_words(source.words, args.variant,

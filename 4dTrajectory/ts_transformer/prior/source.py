@@ -2,8 +2,9 @@
 closed-loop sentences of one row interval Δ, and the artefact's identity that a checkpoint records.
 
 Read-only, through the vocabulary's public interface (vocabulary §6 items 3, 4): the spec, the day split, the
-candidates and their vertical paths (`candidates.json`), the split's flight records and its closed-loop file. A flight
-without a closed-loop sentence is not read (§12 B1). The test days are never asked for: the artefact holds only the
+candidates and their vertical paths (`candidates.json`), the split's flight records, its sentence file (the strata)
+and its closed-loop file (the sentences and their outcomes). A flight without a closed-loop sentence is not read (§12
+B1), nor one the selection leaves out (D75, `prior.selection`). The test days are never asked for: the artefact holds only the
 development splits, and the prior asks only for train, select and (for the base's one readout) val. Whether today's
 code may read the closed-loop sentences (their passed conformance record) is the runner's check: it imports the
 executor, the prior does not.
@@ -18,27 +19,44 @@ from typing import Any, Mapping
 from ts_transformer.data.day_split import DaySplit
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import (
-    SPLITS, closed_loop_path, closed_loop_sentences, load_candidates, load_closed_loop, load_day_split, load_spec,
-    signals_flights,
+    SPLITS, closed_loop_path, closed_loop_sentences, load_candidates, load_closed_loop, load_day_split, load_sentences,
+    load_spec, signals_flights,
 )
 from ts_transformer.instructions.words import Words
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.prior.batch import SentenceRows
 from ts_transformer.prior.inputs import sentence_rows
 from ts_transformer.prior.landings import LandingIndex, read_roster_landings
+from ts_transformer.prior.selection import Stored, kept, require_rule, selection_record
 from ts_transformer.repo_layout import tracks_manifest_path
 
 
-def artefact_identity(directory: Path, interval_s: float, landings: Mapping[str, LandingIndex]) -> dict[str, Any]:
-    """§8 item 1 (D21): the spec sha, the day split, the candidate table (`candidates.json`, the vertical paths in it)
-    and the sha256 of the closed-loop sentence files of Δ = ``interval_s``, every development split; and the landings the
-    candidate vectors count (`LandingIndex.digest`, by their flights: an input read from the tracks rosters, outside the
-    artefact — Claude's addition to §8 item 1, so that a changed roster changes the identity)."""
+def stored_sentences(directory: Path, interval_s: float, split: str) -> list[Stored]:
+    """What the selection reads of each closed-loop sentence of ``split`` at Δ (vocabulary §6 item 3): its flight's
+    airport, its stratum (D70, the sentence file) and its stored outcome (D74, the closed-loop file)."""
+    spec = load_spec(directory)
+    data = load_closed_loop(closed_loop_path(directory, split, interval_s), spec)
+    labelled = load_sentences(directory, split, spec)
+    strata = dict(zip(labelled["signal_index"].tolist(), labelled["stratum"].tolist()))
+    flights = signals_flights(directory, split)
+    return [Stored(split, flights[index]["airport"], strata[index], str(outcome))
+            for index, outcome in zip(data["signal_index"].tolist(), data["outcome"].tolist())]
+
+
+def artefact_identity(directory: Path, interval_s: float, landings: Mapping[str, LandingIndex],
+                      selection: str) -> dict[str, Any]:
+    """§8 item 1 (D21, D63, D75): the spec sha, the day split, the candidate table (`candidates.json`, the vertical paths
+    in it), the sha256 of the closed-loop sentence files of Δ = ``interval_s``, every development split; the landings
+    the candidate vectors count (`LandingIndex.digest`, by their flights); and the selection — its rule and, for each
+    split, airport, stratum and outcome, the sentences kept and left out (`prior.selection.selection_record` of the rule
+    ``selection``)."""
     return {"spec_sha256": load_spec(directory).sha256, "day_split": load_day_split(directory).to_dict(),
             "candidates": json.loads((directory / "candidates.json").read_text(encoding="utf-8")),
             "row_interval_s": interval_s,
             "sentence_files": {split: file_sha256(closed_loop_path(directory, split, interval_s)) for split in SPLITS},
-            "landings": {code: index.digest() for code, index in sorted(landings.items())}}
+            "landings": {code: index.digest() for code, index in sorted(landings.items())},
+            "selection": selection_record(selection, (s for split in SPLITS
+                                                     for s in stored_sentences(directory, interval_s, split)))}
 
 
 def airport_landings(geometries: Mapping[str, AirportGeometry], days: DaySplit) -> dict[str, LandingIndex]:
@@ -48,12 +66,13 @@ def airport_landings(geometries: Mapping[str, AirportGeometry], days: DaySplit) 
 
 
 class ArtefactSource:
-    """The closed-loop sentences of an artefact at one Δ, as `SentenceRows` of a variant (module docstring); each
-    split's file is read once, on first use."""
+    """The closed-loop sentences of an artefact at one Δ that the rule ``selection`` keeps (D75), as `SentenceRows` of a
+    variant (module docstring); each split's file is read once, on first use. The artefact is not changed."""
 
-    def __init__(self, directory: Path, interval_s: float, variant: str,
-                 landings: Mapping[str, LandingIndex]) -> None:
+    def __init__(self, directory: Path, interval_s: float, variant: str, landings: Mapping[str, LandingIndex],
+                 selection: str) -> None:
         self.directory, self.interval_s, self.variant = directory, interval_s, variant
+        self.selection = require_rule(selection)
         self.words = Words(load_spec(directory))
         self.geometries = load_candidates(directory)
         if set(landings) != set(self.geometries):
@@ -77,6 +96,8 @@ class ArtefactSource:
         # every airport of the artefact, also one with no sentence in this split (a small split can have none)
         out: dict[str, list[SentenceRows]] = {code: [] for code in self.geometries}
         for index, sentence in stored.items():
+            if not kept(self.selection, sentence.outcome):
+                continue
             flight = flights[index]
             code = flight["airport"]
             out[code].append(sentence_rows(

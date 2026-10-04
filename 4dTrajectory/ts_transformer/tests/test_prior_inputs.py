@@ -248,18 +248,19 @@ def test_the_artefact_source_reads_every_sentence_and_its_identity(tmp_path):
     directory = tmp_path / "artefact"
     words, records = prior_artefact(directory, interval_s=4.0)
     days = fixture_days()
-    source = ArtefactSource(directory, 4.0, "full", {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), days)})
+    source = ArtefactSource(directory, 4.0, "full", {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), days)},
+                            "all")
     for split in ("train", "select", "val"):
         sentences = source.sentences(split, "KXXX")
         assert [s.flight_key for s in sentences] == [f["dataset_id"] for f in signals_flights(directory, split)]
         assert {s.split for s in sentences} == {split} and sentences[1].go_around.any()
     with pytest.raises(ValueError, match="development splits"):
         source.sentences("test", "KXXX")
-    identity = artefact_identity(directory, 4.0, source.landings)
+    identity = artefact_identity(directory, 4.0, source.landings, "all")
     assert identity["spec_sha256"] == words.spec.sha256 and set(identity["sentence_files"]) == {"train", "select", "val"}
     assert identity["candidates"]["airports"]["KXXX"]["candidates"][0]["vertical_path"]["crossing_height_m"] == TEST_TCH_M
     with pytest.raises(ValueError, match="landings of"):
-        ArtefactSource(directory, 4.0, "full", {})
+        ArtefactSource(directory, 4.0, "full", {}, "all")
 
 
 def test_in_a_turn_the_motion_is_the_2_s_displacement_not_the_rows():
@@ -369,9 +370,81 @@ def test_a_run_refuses_landings_whose_digest_differs_from_the_identity(tmp_path)
     landings = {"KXXX": roster_landings(records, ("09", "09L"), days)}
     model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64))
     path = tmp_path / "checkpoint.pt"
-    save_checkpoint(path, model, model.state_dict(), identity=artefact_identity(directory, 2.0, landings),
+    save_checkpoint(path, model, model.state_dict(), identity=artefact_identity(directory, 2.0, landings, "landed"),
                     run={"airports": ["KXXX"], "held_out": None}, train_config={})
-    load_checkpoint(path, artefact_identity(directory, 2.0, landings))
+    load_checkpoint(path, artefact_identity(directory, 2.0, landings, "landed"))
     moved = [{**records[0], "landing_time_utc": records[0]["landing_time_utc"].replace(":00Z", ":04Z")}, *records[1:]]
     with pytest.raises(ValueError, match=r"\['landings'\] differ"):
-        load_checkpoint(path, artefact_identity(directory, 2.0, {"KXXX": roster_landings(moved, ("09", "09L"), days)}))
+        load_checkpoint(path, artefact_identity(directory, 2.0, {"KXXX": roster_landings(moved, ("09", "09L"), days)},
+                                                "landed"))
+
+
+# ---- the selection of the base's sentences (B8, D75)
+
+def test_landed_keeps_exactly_the_landed_sentences_and_all_keeps_every_one():
+    from ts_transformer.autopilot.judge import OUTCOMES
+    from ts_transformer.prior.selection import LANDING, Stored, kept, selection_record
+
+    assert LANDING == OUTCOMES[0] == "landed"                       # the mirror of the judge's name (D74)
+    stored = [Stored("train", "KXXX", "vectored", "landed"), Stored("train", "KXXX", "vectored", "crossed_too_high"),
+              Stored("train", "KYYY", "straight-in", "landed"), Stored("select", "KXXX", "vectored", "timeout")]
+    assert [kept("landed", s.outcome) for s in stored] == [True, False, True, False]
+    assert all(kept("all", s.outcome) for s in stored)
+    record = selection_record("landed", stored)
+    assert record["rule"] == "landed"
+    assert record["counts"]["train"]["KXXX"]["vectored"] == {"landed": {"kept": 1, "left_out": 0},
+                                                             "crossed_too_high": {"kept": 0, "left_out": 1}}
+    total = sum(cell["kept"] + cell["left_out"] for split in record["counts"].values() for airport in split.values()
+                for stratum in airport.values() for cell in stratum.values())
+    assert total == len(stored)
+    assert selection_record("all", stored)["counts"]["select"]["KXXX"]["vectored"]["timeout"] == {"kept": 1, "left_out": 0}
+    with pytest.raises(ValueError, match="selection rule"):
+        kept("some", "landed")
+
+
+def test_the_source_reads_only_the_selected_sentences_and_the_identity_counts_every_one(tmp_path):
+    """B8: under `landed` the source gives each split's first flight (landed) and not its second (high at the
+    threshold); under `all` both. The identity's counts, by split, airport, stratum and outcome, add up to the closed-loop
+    file's sentences, and only the selection's part of the identity differs between the rules. In train the first flight
+    is made vectored and the closed-loop file holds its sentences in the other order: each sentence's stratum is its own
+    flight's, not its place's."""
+    from ts_transformer.instructions.artefact import (
+        SPLITS, closed_loop_path, closed_loop_sentences, load_closed_loop, load_spec, write_closed_loop,
+    )
+    from ts_transformer.prior.selection import selection_totals
+
+    directory = tmp_path / "artefact"
+    _, records = prior_artefact(directory, interval_s=4.0, outcomes=("landed", "crossed_too_high"))
+    spec = load_spec(directory)
+    with np.load(directory / "sentences_train.npz") as arrays:
+        labelled = {name: arrays[name] for name in arrays.files}
+    labelled["stratum"] = np.array(["vectored", *labelled["stratum"][1:].tolist()], dtype=np.str_)
+    np.savez_compressed(directory / "sentences_train.npz", **labelled)
+    path = closed_loop_path(directory, "train", 4.0)
+    data = load_closed_loop(path, spec)
+    stored = closed_loop_sentences(data)
+    path.unlink()
+    write_closed_loop(path, spec, executor_params_sha256=str(data["executor_params_sha256"]), row_interval_s=4.0,
+                      start_row=int(data["start_row"]), sentences={1: stored[1], 0: stored[0]})
+    landings = {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), fixture_days())}
+    landed = ArtefactSource(directory, 4.0, "full", landings, "landed")
+    every = ArtefactSource(directory, 4.0, "full", landings, "all")
+    for split in SPLITS:
+        flights = signals_flights(directory, split)
+        assert [s.flight_key for s in landed.sentences(split, "KXXX")] == [flights[0]["dataset_id"]]
+        assert sorted(s.flight_key for s in every.sentences(split, "KXXX")) == [f["dataset_id"] for f in flights]
+    identity = artefact_identity(directory, 4.0, landings, "landed")
+    record = identity["selection"]
+    assert record["rule"] == "landed"
+    assert record["counts"]["train"]["KXXX"] == {"vectored": {"landed": {"kept": 1, "left_out": 0}},
+                                                 "straight-in": {"crossed_too_high": {"kept": 0, "left_out": 1}}}
+    for split in SPLITS:
+        cells = [cell for stratum in record["counts"][split]["KXXX"].values() for cell in stratum.items()]
+        assert sum(c["kept"] + c["left_out"] for _, c in cells) == len(
+            load_closed_loop(closed_loop_path(directory, split, 4.0), spec)["signal_index"])
+        assert {o: sum(c["kept"] for name, c in cells if name == o) for o in ("landed", "crossed_too_high")} == {
+            "landed": 1, "crossed_too_high": 0}
+    assert selection_totals(record) == {split: {"kept": 1, "left_out": 1} for split in SPLITS}
+    other = artefact_identity(directory, 4.0, landings, "all")
+    assert selection_totals(other["selection"]) == {split: {"kept": 2, "left_out": 0} for split in SPLITS}
+    assert {k for k in identity if identity[k] != other[k]} == {"selection"}

@@ -32,8 +32,9 @@ from ts_transformer.instructions.artefact import (
     load_sentences, load_spec, signals_flights,
 )
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.prior.checkpoint import load_checkpoint
+from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, load_checkpoint
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, airport_finals, procedure_digests
+from ts_transformer.prior.selection import kept
 from ts_transformer.prior.source import airport_landings, artefact_identity
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 from ts_transformer.instructions.labeller.interval import interval_rows
@@ -209,7 +210,8 @@ def main(argv: list[str] | None = None) -> int:
     (seed), each spoken ``--samples`` times. Writes into ``--out`` (new, never over an existing one; a clean tree unless
     ``--smoke``): ``config.json``, ``sentences.jsonl`` (one row a sentence: its flight, sample, outcome, crossing, the
     go-arounds), ``sentences.npz`` (the words, the states, the probability and permission of "go-around" and the rows on
-    the final, each sentence's by its offsets) and ``readout.json`` (`readout`, all samples together)."""
+    the final, each sentence's by its offsets) and ``readout.json`` (`readout`, all samples together, the flights the
+    prior's selection keeps and those it leaves out apart, D75)."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--prior", type=Path, required=True, help="a prior_train run's directory")
     parser.add_argument("--instructions", type=Path, required=True)
@@ -238,8 +240,12 @@ def main(argv: list[str] | None = None) -> int:
     geometries = load_candidates(instructions)
     landings = airport_landings(geometries, load_day_split(instructions))
     trained = json.loads((prior_dir / "config.json").read_text(encoding="utf-8"))
+    if trained["schema"] != CHECKPOINT_SCHEMA:
+        raise SystemExit(f"{prior_dir}: a {trained['schema']!r} prior, not {CHECKPOINT_SCHEMA!r}")
     interval_s = float(trained["identity"]["row_interval_s"])
-    checkpoint = load_checkpoint(prior_dir / "checkpoint.pt", artefact_identity(instructions, interval_s, landings))
+    selection = trained["identity"]["selection"]["rule"]               # the prior's own rule (D75), checked below
+    checkpoint = load_checkpoint(prior_dir / "checkpoint.pt",
+                                 artefact_identity(instructions, interval_s, landings, selection))
     masks = json.loads((prior_dir / "procedure_masks.json").read_text(encoding="utf-8"))
     if masks != {"set": PROCEDURE_MASKS, "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"),
                  "procedure_data": procedure_digests(geometries)}:
@@ -279,7 +285,8 @@ def main(argv: list[str] | None = None) -> int:
         "written_utc": utc_now(), "prior": str(prior_dir), "prior_run": checkpoint.run,
         "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"), "identity": checkpoint.identity,
         "instructions": str(instructions), "executor": str(executor_dir), "checks": opened["checks"],
-        "split": args.split, "row_interval_s": interval_s, "airports": airports, "per_airport": args.per_airport,
+        "split": args.split, "row_interval_s": interval_s, "selection": selection, "airports": airports,
+        "per_airport": args.per_airport,
         "samples": args.samples, "seed": args.seed, "chunk": args.chunk, "temperature": TEMPERATURE, "drawn": len(drawn),
         "procedure_masks": PROCEDURE_MASKS, "most_go_arounds": MOST_GO_AROUNDS, "git": git, "smoke": args.smoke,
         "device": str(device)})
@@ -303,9 +310,14 @@ def main(argv: list[str] | None = None) -> int:
         on_final=np.concatenate([g.on_final for g in sentences_only]),
         state_offsets=offsets([g.states for g in sentences_only]),
         states=np.concatenate([g.states for g in sentences_only]))
-    write_json_atomic(out / "readout.json", readout(
-        sentences_only, {i: flights[i]["airport"] for i in drawn}, strata,
-        {i: sentences[i].grid for i in drawn}))
+    # free generation starts from every flight; the readout gives the flights outside the prior's selection apart (D75)
+    airports_of = {i: flights[i]["airport"] for i in drawn}
+    grids = {i: sentences[i].grid for i in drawn}
+    inside = [g for g in sentences_only if kept(selection, sentences[g.index].outcome)]
+    outside = [g for g in sentences_only if not kept(selection, sentences[g.index].outcome)]
+    write_json_atomic(out / "readout.json", {
+        "selection": selection, "inside": readout(inside, airports_of, strata, grids),
+        "outside": readout(outside, airports_of, strata, grids)})
     print(json.dumps({"out": str(out), "sentences": len(generated)}))
     return 0
 

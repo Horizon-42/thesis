@@ -326,12 +326,13 @@ def prior_sentence(rng, words, *, candidates=3, rows=30, first_step=8, airport="
 PRIOR_ARTEFACT_ROWS = 30
 
 
-def prior_closed_loop_sentence(signals, words, *, interval_s, first_row=0, go_around=False):
+def prior_closed_loop_sentence(signals, words, *, interval_s, first_row=0, go_around=False, outcome="landed"):
     """A closed-loop sentence of ``signals`` (a straight-in onto `parallel_airport`'s "09", descending) at Δ =
     ``interval_s``, built by hand (`instructions.artefact.ClosedLoopSentence`): its states are the observed ones from its
     2 s row ``first_row`` (a stand-in for flown ones); its words a grammatical sentence — at the first predicted step
     "09", the course, "no level-off" with the descent class of 3°, the speed; a heading word and a speed word later;
-    with ``go_around`` a go-around (a level above and the climb) and "09" again to end it."""
+    with ``go_around`` a go-around (a level above and the climb) and "09" again to end it; its stored outcome (D74)
+    ``outcome``, by the judge's name (not judged: the states are the observed ones)."""
     import numpy as np
 
     from ts_transformer.instructions.artefact import ClosedLoopSentence
@@ -356,21 +357,23 @@ def prior_closed_loop_sentence(signals, words, *, interval_s, first_row=0, go_ar
         first_row=first_row, start=start, grid=grid, correction=np.zeros((said, 5), dtype=bool), states=states,
         on_interval=on_interval_rows(count, every), lateral_m=np.zeros(said), vertical_m=np.zeros(said),
         uncorrectable=np.zeros((said, 2), dtype=bool), observed_row=np.arange(said), matched_row=np.arange(said) * 1.0,
-        timed_out=False)
+        timed_out=False, outcome=outcome)
 
 
-def prior_artefact(directory, interval_s=2.0, airports=("KXXX",)):
+def prior_artefact(directory, interval_s=2.0, airports=("KXXX",), outcomes=("landed", "landed")):
     """A tmp instruction artefact at ``directory`` (created) as the prior reads it (vocabulary §6 items 3, 4): at each of
     ``airports`` (`parallel_airport` under that code) two straight-in flights onto "09" on each development split (the
-    second with a go-around), the spec, the candidates with their vertical paths, and each split's closed-loop file at
-    Δ = ``interval_s`` (`prior_closed_loop_sentence`). Returns ``(words, roster records by airport)``: the tracks
+    second with a go-around), the spec, the candidates with their vertical paths, each split's sentence file (the
+    labeller's reading, for the strata) and its closed-loop file at Δ = ``interval_s`` (`prior_closed_loop_sentence`;
+    the first and second flight's stored outcomes ``outcomes``). Returns ``(words, roster records by airport)``: the tracks
     roster's records of the flights' landings (`prior.landings`)."""
     from dataclasses import replace
 
     from ts_transformer.instructions.airport import AirportGeometry
     from ts_transformer.instructions.artefact import (
-        SPLITS, closed_loop_path, write_candidates, write_closed_loop, write_signals, write_spec,
+        SPLITS, closed_loop_path, write_candidates, write_closed_loop, write_sentences, write_signals, write_spec,
     )
+    from ts_transformer.instructions.labeller.read import read_flight
     from ts_transformer.instructions.words import Words
 
     spec = instruction_spec()
@@ -389,12 +392,16 @@ def prior_artefact(directory, interval_s=2.0, airports=("KXXX",)):
     directory.mkdir(parents=True)
     write_signals(directory, flights, {"counts": {}, "test_days": {"flights_not_opened": 0}, "sources": []},
                   fixture_days())
-    write_candidates(directory, {code: AirportGeometry.from_dict({**parallel_airport().to_dict(), "code": code})
-                                 for code in airports})
+    geometries = {code: AirportGeometry.from_dict({**parallel_airport().to_dict(), "code": code}) for code in airports}
+    write_candidates(directory, geometries)
     write_spec(directory, spec, {"n": 1}, {"git": {"head": "test", "dirty": False}})
+    for split in SPLITS:
+        write_sentences(directory, split, spec, [read_flight(f, geometries[f.airport], spec) for f in flights[split]],
+                        range(len(flights[split])))
     (directory / "closed_loop").mkdir()
     for split in SPLITS:
-        sentences = {k: prior_closed_loop_sentence(flight, words, interval_s=interval_s, go_around=k % 2 == 1)
+        sentences = {k: prior_closed_loop_sentence(flight, words, interval_s=interval_s, go_around=k % 2 == 1,
+                                                   outcome=outcomes[k % 2])
                      for k, flight in enumerate(flights[split])}
         write_closed_loop(closed_loop_path(directory, split, interval_s), spec, executor_params_sha256="test",
                           row_interval_s=interval_s, start_row=sentences[0].start, sentences=sentences)

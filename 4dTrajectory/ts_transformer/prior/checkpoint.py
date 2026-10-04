@@ -1,8 +1,8 @@
 """The prior's checkpoint (prior design §7 item 1, §8): a format with its own name, and the identity of the artefact
 it was trained on.
 
-The identity (§8 item 1, D21) is the spec sha, the day split, the candidate table and the sha256 of the sentence
-files; milestone B1 builds it from the artefact. A checkpoint opens only for the same identity, compared whole: a
+The identity (§8 item 1, D21) is the spec sha, the day split, the candidate table, the sha256 of the sentence
+files, the landings (D63) and the selection of the sentences (D75); `prior.source.artefact_identity` builds it. A checkpoint opens only for the same identity, compared whole: a
 prior of another artefact is refused by what differs, never read with a guess (principle 8). The run (its airports and
 its held-out airport, `runs.Run`) and the training configuration are recorded beside it.
 """
@@ -19,7 +19,8 @@ from ts_transformer.prior.model import Prior, PriorConfig
 
 #: The prior of two-tier v4 (prior design, 2026-10-04): five columns, no airport or row-position embedding, RoPE on
 #: seconds, candidate tokens of any number. The checkpoints of the instruction-v3 prior (v3–v5) are not opened.
-CHECKPOINT_SCHEMA = "ts-prior-checkpoint-v6"
+#: v7 (B8, D75): the identity holds the selection of the sentences (`prior.selection.selection_record`).
+CHECKPOINT_SCHEMA = "ts-prior-checkpoint-v7"
 
 
 class Checkpoint(NamedTuple):

@@ -206,12 +206,14 @@ def test_flights_done_at_different_rows_end_apart_and_never_feed_a_state_that_is
 def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch):
     """`main` on A26's synthetic artefact: every live root replaced (the landings, the CIFP finals and digests, the
     closed-loop check, the identity of a one-split artefact), a prior written as `prior_train` writes one; two samples of
-    the one flight, the files read back."""
+    the one flight, the files read back. The flight's stored outcome is set to a landing and its generated ones are
+    not: the readout puts it inside the prior's selection by the stored outcome (D75)."""
+    import dataclasses
     import json
 
     from ts_transformer.experiments import prior_free_generation as runner
     from ts_transformer.io_utils import file_sha256
-    from ts_transformer.prior.checkpoint import save_checkpoint
+    from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, save_checkpoint
     from ts_transformer.prior.procedure import PROCEDURE_MASKS
 
     directory, words, _, stored, _ = test_start._artefact(tmp_path, monkeypatch, 4.0)
@@ -220,13 +222,16 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch):
     landings = {geometry.code: LandingIndex(tuple(c.ident for c in geometry.candidates),
                                             (Landing(utc_s(flight["landing_time_utc"]), geometry.candidates[0].ident,
                                                      flight["dataset_id"].split(":", 1)[1]),), 0)}
-    identity = {"row_interval_s": 4.0, "artefact": "synthetic"}
+    identity = {"row_interval_s": 4.0, "artefact": "synthetic", "selection": {"rule": "landed"}}
     digests = {geometry.code: {c.ident: "0" * 64 for c in geometry.candidates}}
     checked = []
     monkeypatch.setattr(runner, "airport_landings", lambda geometries, days: landings)
-    monkeypatch.setattr(runner, "artefact_identity", lambda d, interval, given: identity)
+    monkeypatch.setattr(runner, "artefact_identity", lambda d, interval, given, rule: identity)
     monkeypatch.setattr(runner, "require_conforming_closed_loop", lambda *given: checked.append(given) or (None, {"checks": {"stub": True}}, None))
     monkeypatch.setattr(runner, "procedure_digests", lambda geometries: digests)
+    read = runner.closed_loop_sentences
+    monkeypatch.setattr(runner, "closed_loop_sentences", lambda data: {
+        index: dataclasses.replace(sentence, outcome="landed") for index, sentence in read(data).items()})
     monkeypatch.setattr(runner, "airport_finals", lambda g: tuple(Final(g, k, 9_000.0, fas_course_geometry(c.length_m))
                                                                   for k, c in enumerate(g.candidates)))
     prior = tmp_path / "prior"
@@ -235,7 +240,7 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch):
     model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64))
     save_checkpoint(prior / "checkpoint.pt", model, model.state_dict(), identity=identity,
                     run={"airports": [geometry.code], "held_out": None, "sample": None}, train_config={})
-    (prior / "config.json").write_text(json.dumps({"identity": identity}))
+    (prior / "config.json").write_text(json.dumps({"schema": CHECKPOINT_SCHEMA, "identity": identity}))
     (prior / "procedure_masks.json").write_text(json.dumps({
         "set": PROCEDURE_MASKS, "checkpoint_sha256": file_sha256(prior / "checkpoint.pt"), "procedure_data": digests}))
     out = tmp_path / "readout"
@@ -249,15 +254,24 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch):
         assert arrays["offsets"][-1] == len(arrays["words"]) == sum(r["rows"] for r in rows)
     config = json.loads((out / "config.json").read_text())
     assert config["checks"] == {"stub": True} and config["chunk"] == 400 and config["identity"] == identity
+    assert config["selection"] == "landed"                             # the prior's own rule (D75)
     assert config["checkpoint_sha256"] == file_sha256(prior / "checkpoint.pt")
     readout = json.loads((out / "readout.json").read_text())
-    (stratum,) = readout[geometry.code]
-    assert readout[geometry.code][stratum]["sentences"] == 2
+    # free generation starts from every flight; the flights outside the prior's selection are given apart (D75), by
+    # their stored outcome, not the generated one
+    assert all(r["outcome"] != "landed" for r in rows)
+    assert readout["selection"] == "landed" and readout["outside"] == {}
+    (stratum,) = readout["inside"][geometry.code]
+    assert readout["inside"][geometry.code][stratum]["sentences"] == 2
     with pytest.raises(SystemExit):
         runner.main(argv)                                              # never over an existing readout
     for airports in (["KZZZ"], [geometry.code, "KZZZ"]):
         with pytest.raises(SystemExit):                                # an airport not the artefact's
             runner.main([*argv[:-3], "--airports", *airports, "--out", str(tmp_path / "unknown"), "--smoke"])
+    (prior / "config.json").write_text(json.dumps({"schema": "ts-prior-checkpoint-v6", "identity": identity}))
+    with pytest.raises(SystemExit, match="ts-prior-checkpoint-v6"):                # a prior of another format, by name
+        runner.main([*argv[:-3], "--out", str(tmp_path / "older"), "--smoke"])
+    (prior / "config.json").write_text(json.dumps({"schema": CHECKPOINT_SCHEMA, "identity": identity}))
     (prior / "procedure_masks.json").write_text(json.dumps({"set": "another", "checkpoint_sha256": "", "procedure_data": {}}))
     with pytest.raises(SystemExit, match="procedure masks"):
         runner.main([*argv[:-3], "--out", str(tmp_path / "other"), "--smoke"])

@@ -193,16 +193,18 @@ def procedure_root(tmp_path, airport, runways):
     return root
 
 
-def run_runner(tmp_path, monkeypatch, *more, airports=("KXXX",)):
+def run_runner(tmp_path, monkeypatch, *more, airports=("KXXX",), selection="landed", outcomes=("landed", "landed")):
     """`prior_train.main` on a synthetic artefact of ``airports``: every write root under tmp, the landings from the
     artefact's roster records (never a live roster), the closed-loop check of the runner stubbed (the synthetic artefact
-    has no reference). Returns ``(artefact, landings, out, argv, checked)``."""
+    has no reference), under the rule ``selection`` (D75), the artefact's first and second flight of each split and
+    airport of stored outcomes ``outcomes``. Returns ``(artefact, landings, out, argv, checked)``."""
     from ts_transformer.experiments import prior_train
+    from ts_transformer.io_utils import file_sha256
     from ts_transformer.prior.landings import roster_landings
     from ts_transformer.tests.support import fixture_days, prior_artefact
 
     artefact = tmp_path / "artefact"
-    _, records = prior_artefact(artefact, interval_s=4.0, airports=airports)
+    _, records = prior_artefact(artefact, interval_s=4.0, airports=airports, outcomes=outcomes)
     landings = {code: roster_landings(records[code], ("09", "09L"), fixture_days()) for code in airports}
     checked = []
     monkeypatch.setattr(prior_train, "require_conforming_closed_loop", lambda *given: checked.append(given) or (None, {"checks": {"stub": True}}, None))
@@ -210,13 +212,16 @@ def run_runner(tmp_path, monkeypatch, *more, airports=("KXXX",)):
     procedures = tmp_path / "procedures"
     for code in airports:
         procedure_root(procedures, code, ("09", "09L"))
+    files = {path: file_sha256(path) for path in sorted(artefact.rglob("*")) if path.is_file()}
     out = tmp_path / "run"
     argv = ["--instructions", str(artefact), "--row-interval-s", "4", "--executor", str(tmp_path / "executor"),
-            "--variant", "full", "--out", str(out),
+            "--variant", "full", "--selection", selection, "--out", str(out),
             "--sample", "1", "--device", "cpu", "--procedure-root", str(procedures / "procedures"),
             "--d-model", "32", "--layers", "1", "--heads", "4", "--feedforward", "64", "--max-epochs", "2",
             "--warmup-steps", "1", *more]
     assert prior_train.main(argv) == 0
+    # B8, D75: the selection is applied as the sentences are read; the artefact is never changed
+    assert {path: file_sha256(path) for path in sorted(artefact.rglob("*")) if path.is_file()} == files
     return artefact, landings, out, argv, checked
 
 
@@ -236,11 +241,30 @@ def test_the_runner_trains_a_smoke_run_into_a_new_directory(tmp_path, monkeypatc
     assert memory["batches"][0]["sentences"] == 1 and memory["gpu_peak_reserved_bytes"] is None
     masks = json.loads((out / "procedure_masks.json").read_text())
     assert set(masks["procedure_data"]["KXXX"]) == {"09", "09L"}
-    loaded = load_checkpoint(out / "checkpoint.pt", artefact_identity(artefact, 4.0, landings))
+    loaded = load_checkpoint(out / "checkpoint.pt", artefact_identity(artefact, 4.0, landings, "landed"))
     assert loaded.model.config.d_model == 32
     assert loaded.run["sample"] == config["sample"]                  # a smoke checkpoint says so itself
     with pytest.raises(SystemExit):
         prior_train.main(argv)                                       # never over an existing run
+
+
+def test_a_landed_run_trains_on_the_landed_sentences_and_a_run_under_another_rule_is_refused(tmp_path, monkeypatch):
+    """B8, D75: of two flights a split, the second's stored outcome not a landing, `landed` trains and stops on the
+    first alone and records the counts; the checkpoint is refused against the identity of `all`, by name."""
+    from ts_transformer.instructions.artefact import SPLITS
+    from ts_transformer.prior.checkpoint import load_checkpoint
+    from ts_transformer.prior.selection import selection_totals
+    from ts_transformer.prior.source import artefact_identity
+
+    artefact, landings, out, _, _ = run_runner(tmp_path, monkeypatch, "--sample", "2",
+                                               outcomes=("landed", "crossed_too_high"))
+    config = json.loads((out / "config.json").read_text())
+    assert config["sentences"] == {"train": 1, "select": 1}
+    assert config["identity"]["selection"]["rule"] == "landed"
+    assert selection_totals(config["identity"]["selection"]) == {split: {"kept": 1, "left_out": 1} for split in SPLITS}
+    load_checkpoint(out / "checkpoint.pt", artefact_identity(artefact, 4.0, landings, "landed"))
+    with pytest.raises(ValueError, match=r"\['selection'\] differ"):
+        load_checkpoint(out / "checkpoint.pt", artefact_identity(artefact, 4.0, landings, "all"))
 
 
 def test_the_memory_check_only_writes_the_check_and_trains_nothing(tmp_path, monkeypatch):
