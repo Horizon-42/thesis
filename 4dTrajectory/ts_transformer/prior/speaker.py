@@ -53,6 +53,21 @@ def class_words(column: int, classes: np.ndarray) -> np.ndarray:
     return classes - 1
 
 
+#: The most go-arounds a flight may say in free generation (D68); a caller forbids "go-around" after them
+#: (`go_around_bound`).
+MOST_GO_AROUNDS = 2
+
+
+def go_around_bound(go_arounds: np.ndarray, words: Words, most_candidates: int,
+                    most: int = MOST_GO_AROUNDS) -> np.ndarray:
+    """A caller's mask of the runway column (`column_words` order) for aircraft that have said ``go_arounds`` go-arounds:
+    "go-around" forbidden to those that have said ``most`` (D68), every other word permitted."""
+    words_of = column_words(RUNWAY, words, most_candidates)
+    out = np.ones((len(go_arounds), len(words_of)), dtype=bool)
+    out[:, list(words_of).index(RUNWAY_GO_AROUND)] = np.asarray(go_arounds) < most
+    return out
+
+
 class Speaker:
     """A batch of aircraft the prior speaks to, all at the same row. `observe` encodes the rows before the first
     predicted step; `speak` says the next row (the first predicted step first)."""
@@ -78,6 +93,8 @@ class Speaker:
         #: the next row from it, so the speaker and the inputs never keep two copies
         self.heard = [Heard(finals_b[0].geometry, words) for finals_b in finals]
         self.forbidden: dict[int, list[np.ndarray]] = {c: [] for c in range(len(COLUMNS))}
+        #: the go-arounds each aircraft has said (D68: a caller bounds them with `go_around_bound`)
+        self.go_arounds = np.zeros(len(finals), dtype=np.int64)
 
     @torch.no_grad()
     def observe(self, rows: RowTensors, positions: Sequence[Position]) -> None:
@@ -117,6 +134,7 @@ class Speaker:
             said = np.concatenate((said, class_words(column, chosen.cpu().numpy())), axis=1)
         for heard, step, height, time_s in zip(self.heard, said, at.height_m, row.time_s[:, 0].tolist()):
             heard.hear(step, float(height), time_s)
+        self.go_arounds += said[:, RUNWAY] == RUNWAY_GO_AROUND
         return said
 
     @property

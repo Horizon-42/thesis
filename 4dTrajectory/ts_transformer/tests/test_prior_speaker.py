@@ -317,3 +317,26 @@ def test_the_runway_column_asks_the_masks_under_each_runway_word(words):
             found = True
             break
         assert mask[w] == found, (word, mask[w], found)
+
+
+
+def test_after_its_second_go_around_a_flight_may_not_say_another(words):
+    """D68: a caller that permits in the runway column only "go-around" and the candidates (never "unchanged") makes
+    each flight alternate go-around and a runway word; with the bound of D68 as a caller mask too, no flight says more
+    than 2 go-arounds, and every flight says exactly 2."""
+    from ts_transformer.prior.speaker import MOST_GO_AROUNDS, go_around_bound
+
+    model, rows = setup(words, count=3, rows=40)
+    count = rows.present.shape[0]
+    speaker = Speaker(model, words, [finals()] * count, capacity=rows.present.shape[1],
+                      generator=torch.Generator().manual_seed(4))
+    first = int(rows.first[0].nonzero()[0, 0])
+    speaker.observe(rows.between(0, first), [position(count, r) for r in range(first)])
+    no_unchanged = np.ones((count, 4), dtype=bool)
+    no_unchanged[:, 0] = False
+    for r in range(first, first + 12):
+        caller = {RUNWAY: no_unchanged & go_around_bound(speaker.go_arounds, words, 2)}
+        said = speaker.speak(rows.between(r, r + 1), position(count, r), caller)
+        assert (said[:, RUNWAY] != UNCHANGED).all() and (speaker.go_arounds <= MOST_GO_AROUNDS).all()
+    assert (speaker.go_arounds == MOST_GO_AROUNDS).all()
+    assert go_around_bound(np.array([0, 1, 2]), words, 2)[:, 1].tolist() == [True, True, False]
