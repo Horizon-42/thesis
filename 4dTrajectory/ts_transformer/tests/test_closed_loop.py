@@ -872,8 +872,8 @@ def test_the_replay_reads_the_speed_words_and_how_far_along_the_path_the_flown_a
 
 
 def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(tmp_path, monkeypatch):
-    """`instruction_closed_loop --workers N` reads each cell (a split at a row interval) in its own process: the files and
-    the summary are those of one process. Synthetic flights have no harvest: their draw and executor inputs stand in."""
+    """`instruction_closed_loop --workers N` reads each split (drawn once, every row interval in turn) in its own process:
+    the files and the summary are those of one process. Synthetic flights have no harvest: their draw and executor inputs stand in."""
     import json as json_module
 
     from ts_transformer.autopilot.flights import FlightInputs
