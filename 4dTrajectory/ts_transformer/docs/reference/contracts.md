@@ -434,7 +434,8 @@ flies a speed word at a_max (`speed_accel_max_mps2`) and "unspecified" at its ow
 (`source["resolved_typecode"]`) or null; the default `TSConfig` keeps flights without aircraft dynamics (C31). **Since
 artefact v6 (2026-10-02, the user) every row is on the UTC clock's even seconds** (`data.dataset.on_utc_steps`); a
 sentence is put on a coarser row interval Δ (2, 4, 8 s, D25) by `labeller.interval.on_interval` on the UTC multiples of Δ,
-never stored. A spec is the vocabulary's format, not the data's: `instruction_spec --spec-from <artefact>`
+never stored: each 2 s word on the NEAREST Δ row, a tie on the later (D45), a heading word moved across a runway word in
+the frame where it is heard (D46: the class nearest its absolute track under the new course; no refusal). A spec is the vocabulary's format, not the data's: `instruction_spec --spec-from <artefact>`
 (`artefact.keep_spec`) keeps another artefact's spec byte for byte, and `spec_from.json` says so.
 
 ### C31 · the aircraft filter: drop a flight only where dynamics are used
@@ -595,20 +596,26 @@ refuses both.
 ### C38 · the closed-loop sentences: flown by an executor spec, corrected toward the observed path, checked by what they read
 
 2026-10-04 (`autopilot/closed_loop.py`, `instructions/artefact.py` `write_closed_loop` / `load_closed_loop`, runner
-`instruction_closed_loop` R50; design §4.9, D32–D34, D42). `<artefact>/closed_loop/` is written once, from a clean checkout,
+`instruction_closed_loop` R50; design §4.9, D32–D34, D42, D44–D46). `<artefact>/closed_loop/` is written once, from a clean checkout,
 with an executor spec (C33): for each split and each row interval given (D25), `<split>_<Δ>s.npz`
-(`ts-instruction-closed-loop-v2`, refused unless every field is there and its spec sha is the artefact's): each flown
+(`ts-instruction-closed-loop-v3`, refused unless every field is there and its spec sha is the artefact's): each flown
 flight's words from its first predicted step (Δ row 16 s / Δ; row 0 says every column), which words the reading added
 (`correction`), its states on every Δ row (observed before the first predicted step, flown from it: airport-frame e/n,
 MSL height, track, ground speed, vertical rate), its errors against the observed path (`lateral_m` right positive,
-`vertical_m`), the rows where §4.9 makes no heading / angle correction (`uncorrectable`, D34), the open-loop Δ row each
-row's observed words reach (`observed_row`, D42), whether each flight was done at its time limit (`timed_out`) and the
+`vertical_m`, NaN past the end of the observed path), the rows where §4.9 makes no heading / angle correction
+(`uncorrectable`, D34), the last 2 s row of the open-loop reading whose words each row has said (`observed_row`) and the
+matched point's observed time there (`matched_row`, 2 s rows), whether each flight was done at its time limit (`timed_out`) and the
 executor parameters' sha it was flown with; `summary.json` counts the flights without a sentence by reason (not flown by `replay.group_of`,
 refused on the row interval, refused by the closed loop — the grammar read at the flown height), the correction words per
-column and the D34 readings. The reading says each observed word at the PLACE where the observed aircraft heard it, not at
-its time (D42): at each Δ row the words of every open-loop row whose time is not later than the matched point's observed
-time and not said before (of several, each column's last word), so the words wait while the flown aircraft is behind;
-a heading word that would be heard under another course than it was said under refuses the flight. The flight runs until
+column, the D34 readings, the rows past the end and the lateness of the observed heading words. The reading says each
+observed word at the PLACE where the observed aircraft heard it, not at its time (D42): the words of the 2 s open-loop
+reading (not the Δ grid), each said at the first Δ row whose matched observed time is not more than Δ/2 before the word's
+2 s time (D45: the nearest row; of several, each column's last word), so the words wait while the flown aircraft is
+behind; the first predicted step says the words in force Δ/2 after its observed time. A heading word is said in the frame
+where it is heard (D46), when the observed word in force or the correction changes and its track differs from the one the
+executor holds; a change of runway alone says none. Past the end of the observed path (D44) e_y is measured against the
+last segment's line, there is no e_h, no correction is said (one in force ends: Claude's reading) and the rows count as
+rows without correction. The flight runs until
 the executor is done or reaches the replay's time limit (`replay.time_limits_s`: the remaining observed time from the
 sentence's first row × 1.5, plus 900 s a go-around), so a sentence has the flown rows and its replay the same limit. It adds one-class heading
 corrections beyond 30 m and one-class angle corrections beyond 15 m under a descent class (the spec's

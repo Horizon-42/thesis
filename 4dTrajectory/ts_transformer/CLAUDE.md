@@ -157,9 +157,10 @@ of the package, not a migration in progress.
   signals (it ends before the landing); a flight with go-arounds is read approach by approach (D26); since v6
   (2026-10-02) every row is on the UTC even seconds; a change of speed says its 5 m/s steps, flown at a_max (D43);
   `--spec-from` keeps another artefact's spec (C30).
-- **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v2`; design §4.9, D32): each
-  split × row interval — the open-loop words flown from the first predicted step by an executor spec, each said where the
-  observed aircraft heard it (D42), with heading and angle corrections, to the executor's end; the flown states, the errors against the observed path and the rows that allow no correction
+- **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v3`; design §4.9, D32): each
+  split × row interval — the 2 s open-loop words flown from the first predicted step by an executor spec, each said at the
+  Δ row nearest where the observed aircraft heard it (D42, D45), a heading word in the frame where it is heard (D46), with
+  heading and angle corrections (none past the end of the observed path, D44), to the executor's end; the flown states, the errors against the observed path and the rows that allow no correction
   (D34); written once by `instruction_closed_loop` with its own reference and passed record, read only for code that
   passed it (`closed_loop.require_conforming_closed_loop`) (C38).
 - **An executor spec opens only for executor code that flies its reference tracks within the bounds** (2026-10-01, the
@@ -359,7 +360,8 @@ grid's L60_D60 cohort). **The two-tier model, v4** (design `docs/two_tier/two_ti
 its reference tracks and passed record; clean tree) (R12) → `instruction_closed_loop` (the closed-loop sentences of every
 split at each row interval, their reference and passed record; clean tree; `--check` re-checks) (R50) →
 `executor_replay` (`--row-interval-s`, `--closed-loop`; no criterion is read; select and val from a clean tree) (R12);
-`executor_conformance` checks a spec's reference after an `autopilot/` change (R42); `instruction_figures` draws val pages
+`executor_conformance` checks a spec's reference after an `autopilot/` change (R42); `executor_turns` measures the
+executor's turn against the exact words (A13, R51); `instruction_figures` draws val pages
 (R10). **Archived with instruction-v3** (`archive/two_tier_v3_2026_10/`, its README; their manual entries stay as the
 record): the Training exports and the attitude they draw (R11, R13), `executor_sensitivity` (R12), the prior and its
 post-training (R15–R22, R35, R38), `heading_lead_ablation` (R23), the multi-aircraft runners (R24–R39, R41, R43–R45),

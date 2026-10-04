@@ -1408,7 +1408,7 @@ their rows within 60 m, and at the capture row the deviation and the shares more
 
 ### R50 · `run_ts.py instruction_closed_loop` — the closed-loop reading: every labelled flight flown on its words with the corrections its flown path needs (design §4.9)
 
-2026-10-04 (design §4.9, D32–D34, D42, §14.2 A9–A10; contract C38; `autopilot/closed_loop.py`). `instruction_closed_loop
+2026-10-04 (design §4.9, D32–D34, D42, D44–D46, §14.2 A9–A10, A12; contract C38; `autopilot/closed_loop.py`). `instruction_closed_loop
 --instructions <artefact> --executor <spec dir> --row-interval-s 2 4 [8] [--chunk 256] [--device cpu]`, from a clean tree,
 after `executor_spec`: refused unless the executor code passes the spec's reference and the labeller code the artefact's;
 every Δ must divide the 16 s observation. For each split (train, select, val) it draws every labelled flight
@@ -1416,14 +1416,43 @@ every Δ must divide the 16 s observation. For each split (train, select, val) i
 sentence on each Δ and reads it in closed loop in chunks (`closed_loop.read_chunked`), writes
 `<artefact>/closed_loop/<split>_<Δ>s.npz` and `summary.json` (the flights without a sentence by reason, the correction words
 per column, the flights with a correction, the largest |e_y| / |e_h| and those on the rows without a correction (D34), the
-last row's |e_y|, the flights done at their time limit), then the reference sample (train, 10 flights an
+last row's |e_y|, the flights done at their time limit, the rows past the end of the observed path, and the lateness of
+the observed heading words said — the matched point's observed time at the row that says a word minus the word's 2 s time,
+mean and percentiles, information), then the reference sample (train, 10 flights an
 airport, every Δ written) and, after checking it with the same code, its passed record. Written in a staging directory and
 renamed: an existing `closed_loop/` refuses. `--check` reads the reference again with the code on disk and writes its passed
 record (after a change to `autopilot/` or the labeller). The observed words are said where the observed aircraft heard
-them (D42, A10); a sentence has the flown rows.
+them (D42, A10), at the nearest Δ row (D45, A12); a sentence has the flown rows.
 
     python run_ts.py instruction_closed_loop --row-interval-s 2 4 8 \
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> \
         --executor 4dTrajectory/outputs/POOLED/executor/<name>
     python run_ts.py executor_replay --closed-loop --split train --per-airport 30 --row-interval-s 2 \
         --instructions <artefact> --executor <spec> --out <new dir>
+
+### R51 · `run_ts.py executor_turns` — the turn of the executor measured: how much of the offset after a turn is the heading law's, how much the words' (design §14.2 A13)
+
+2026-10-04 (design §5.4, §4.3, §11.9, §14.2 A13; `experiments/executor_turns.py`). `executor_turns --instructions
+<artefact> --executor <spec dir> --split train [--per-airport N] [--seed 1337] [--chunk 500] --out <new dir>` (another
+split from a clean tree): the replay's flights (`replay.draw`), their open-loop sentences at Δ = 2 s, flown from the first
+row on the time clock in three ways — `executor` (the executor at the observed ground speed: the airspeed set at each
+cycle's start so that the ground speed is the observed one, and moved within the cycle to the observed one at its end in
+place of the speed law), `executor_no_stopping` (the same, without the stopping-rate limit of §5.4) and `exact_words` (each
+heading word's track reached 4 s after the word, linearly, at the observed ground speed, from the observed position at row
+0), with a CONTROL `observed_track` (the observed track integrated the same way: what integration and the data's own
+track-against-position agreement leave). The settings of the first two live in the runner (subclasses of `Executor`,
+`Lateral`, `Speed`); the executor's laws do not change. For each observed turn (runs of the labeller's smoothed track
+faster than 0.2°/s, `turn_runs`) and way: the change of e_y (the closed loop's matched point) from the turn's start row to
+30 s after its end row (A13 as written; it holds what earlier turns left — a 90° turn makes an along-track lead lateral),
+and the turn's OWN part (the change of the flown-minus-observed displacement at the same time over those rows, on the
+right of the observed track at the later row; Claude's reading), each also toward the outside of the turn, and the way's
+e_y at the turn's start; not measured where the later row lies past the observed flight or the way's flight. `turns.json`
+(`ts-executor-turns-readout-v1`) holds every turn (with its group) and the table by stratum × ground-speed band (0–70,
+70–85, 85–100, ≥ 100 m/s): per way, |change| and |own| p50 / p90 / mean and their outward parts; and over the turns
+measured in every way, the same and the paired differences of the own outward part — executor ways minus exact words (the
+heading law), exact words minus the control (the words). On the test fixture the control itself leaves 99 m per 90° turn:
+the fixture's track leads its positions by 1 s. Information for the user's decision on the heading law (D7).
+
+    python run_ts.py executor_turns --split train \
+        --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> \
+        --executor 4dTrajectory/outputs/POOLED/executor/<name> --out <new dir>
