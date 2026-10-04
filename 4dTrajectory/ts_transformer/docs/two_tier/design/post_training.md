@@ -38,6 +38,7 @@ The decision numbers are shared by all documents (outline §3).
 | # | Item | Proposal | §  |
 |---|---|---|---|
 | O6 | A mask for the spacing on the final (this design has no clearance word to hold back); the rule "established on the final" of the separation judge and the masks (D31) | Discuss with §3 | 3 |
+| O9 | The most go-arounds of a flight in the loops of the post-training: the start of a closed loop takes this number and lays out the time that go-arounds add (vocabulary §6, item 5; D67). The prior's free generation uses 2 (prior D68); D30 already makes a chain of go-arounds cost reward | Decide with §2 | 2 |
 
 ### 0.3 Implementation
 
