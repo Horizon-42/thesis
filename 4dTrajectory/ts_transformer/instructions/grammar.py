@@ -135,6 +135,15 @@ def _tables(words: Words) -> tuple[np.ndarray, np.ndarray]:
     return levels, bands
 
 
+def _require_altitudes(values: Any, words: Words) -> None:
+    """An altitude word outside the grid ("unchanged" to "no level-off") is refused by name, in `apply` and in
+    `column_mask` alike: it is no word of the vocabulary."""
+    values = np.asarray(values)
+    outside = values[(values < UNCHANGED) | (values > words.altitude_no_level_off)]
+    if len(outside):
+        raise ValueError(f"altitude class {int(outside[0])} outside 0..{words.altitude_no_level_off}")
+
+
 def _rules(ops: Any, words: Words, first: Any, in_runway: Any, in_go: Any, in_altitude: Any, in_angle: Any,
            runway: Any, heading: Any, altitude: Any, angle: Any, speed: Any, height: Any, candidates: Any
            ) -> tuple[Any, Any, Any, Any, Any]:
@@ -187,8 +196,7 @@ def apply(in_force: InForce | None, step: Sequence[int], height_m: float, words:
     step = [int(v) for v in step]
     if len(step) != len(COLUMNS):
         raise ValueError(f"a step has {len(COLUMNS)} words, got {len(step)}")
-    if not UNCHANGED <= step[ALTITUDE] <= words.altitude_no_level_off:
-        raise ValueError(f"altitude class {step[ALTITUDE]} outside 0..{words.altitude_no_level_off}")
+    _require_altitudes(step[ALTITUDE], words)
     before = InForce(UNCHANGED, False, UNCHANGED, UNCHANGED, UNCHANGED, UNCHANGED) if in_force is None else in_force
     code, runway, go_around, altitude, angle = _rules(
         _ONE, words, in_force is None, before.runway, before.go_around, before.altitude, before.angle, *step,
@@ -235,6 +243,8 @@ def column_mask(in_force: Sequence[InForce | None], said: np.ndarray, column: in
     column c]``, `column_words` order; every word where not given), make the row pass `apply` (module docstring)."""
     batch = len(in_force)
     said = np.asarray(said, dtype=np.int64).reshape(batch, column)
+    if column > ALTITUDE:
+        _require_altitudes(said[:, ALTITUDE], words)
     later = list(range(column + 1, len(COLUMNS)))
     permitted = dict(permitted or {})
     if set(permitted) - set(later):
