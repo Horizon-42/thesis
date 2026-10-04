@@ -73,9 +73,10 @@ repository root.
 | D47 | The turn law of the executor stays (§5.4). The measurement of A13: the words alone (the 5° grid and the lead) end a turn approximately 35 m inside the observed turn; the executor gives back approximately 18 m of it; the stopping-rate limit changes approximately 3 m (§11.14). The readout of a turn is its own part (the change of the displacement from the observed aircraft of the same time); the change of e_y is read beside it, because it holds the offsets that earlier turns left | Decided | User, 2026-10-04 |
 | D48 | The 2 s reading follows D46 too. After a change of R, a heading word whose class is the class in force is said, because its absolute track differs from the track in force. No flight is refused for it (§4.3) | Decided | User, 2026-10-04 (Claude's check of stage A, §3 item 2) |
 | D49 | The labeller conformance also covers the Δ grid: its reference sample stores the sentences at Δ = 4 and 8 s, and the check compares them again with the code on disk (§9.2) | Decided | User, 2026-10-04 (check §3 item 3) |
-| D50 | The closed-loop reading does not keep every row inside the tolerances of D32. A correction is one class and needs time to bring the flown path back (§11.11: a 100 m offset takes approximately 20 s at one 5° class); in the stage A smoke 10–25 % of the correctable rows are more than 30 m off laterally. The check of §14.6 is a rule on the stored data: on every row where §4.9 permits a correction, \|e_y\| > Y is followed by a heading correction in force after that row, and \|e_h\| > H by an angle correction. The p90 of \|e_y\| at the last row is information. The share of the correctable rows outside the tolerances is a reading of the ablation (D34), not a check (§4.8, §14.6) | Decided | User, 2026-10-04 (check §3 item 4) |
+| D50 | The closed-loop reading does not keep every row inside the tolerances of D32. A correction is one class and needs time to bring the flown path back (§11.11: a 100 m offset takes approximately 20 s at one 5° class); in the stage A smoke 10–25 % of the correctable rows are more than 30 m off laterally. The check of §14.6 is a rule on the stored data: on every row where §4.9 permits a correction, \|e_y\| > Y is followed by a heading correction in force after that row, and \|e_h\| > H by an angle correction. The p90 of \|e_y\| at the last row is information. The share of the correctable rows outside the tolerances is a reading of the ablation (D34), not a check (§4.8, §14.6). Since D53 the reading keeps it on every row | Decided | User, 2026-10-04 (check §3 item 4) |
 | D51 | The closed-loop artefact stores the flown states on the data's 2 s rows at every Δ, with the Δ rows marked. Observed and flown rows are then on one grid, and stage B builds the motion input of D25 with one piece of code for both. The artefact stores raw states, not a derived input, so a change of the motion window needs no rebuild. The replay check of a closed-loop sentence compares on the 2 s rows. At Δ = 2 s nothing changes (§4.8, §4.9) | Decided | User, 2026-10-04 (check §3 item 1) |
 | D52 | ε of a level = half the larger gap to its neighbouring levels + 10 m: 40 m for 0–1,200 m, 70 m for 1,260–2,580 m, 235 m for 2,700–5,400 m. A level's band then covers the largest rounding error of its word; the top level of a segment collects the heights up to half the next segment's step above it. One band for both sides (a one-sided band would differ at two levels only). "No level-off" has ε = 40 m: it has no level, so no rounding to cover; its tube's width comes mainly from the edges of the angle class (§3.4, §10) | Decided | User, 2026-10-04 (check §3 item 5) |
+| D53 | An overshoot. When a correction is in force and the error changes its sign while it is more than the tolerance (the flown aircraft crossed the observed path in one row), the labeller says the opposite correction in the same row: one class toward the path from the observed word. When the error changes its sign and is within the tolerance, it says the observed word again. Laterally and vertically alike. The rule of D50 then holds on every row (§4.9, §14.6). Why: a correction ends at a sign change so that it does not push the aircraft further on the other side; waiting one row to correct that side adds a lag of one row Δ that comes from the reading, not from Δ, and the ablation compares Δ (A15 smoke: every break of D50 at Δ = 4 and 8 s was such a row) | Decided | User, 2026-10-04 |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -98,7 +99,7 @@ repository root.
 1. Stage A (§14.2): write the vocabulary, the labeller, the identities, the executor, the judge and the replay on the
    branch `dev-two-tier-v4`, milestones A0–A14, each with tests and a code review. Another agent does this.
 2. Claude checks the result of stage A against this document (§14.6). Then A15 (§14.2) from the decisions on the
-   check (D48–D52).
+   check (D48–D52), and A16 (D53).
 3. The user chooses the fitted values of D15 (the turn law of the executor stays, D47). Then the formal artefact is
    built, and the
    readings of D34 are made at each row interval of the ablation (D11, D25: 2, 4, 8 s). The user compares them (D7).
@@ -744,7 +745,9 @@ observed time (D36).
 
 1. When |e_y| > Y (the lateral tolerance), and the row says no new observed heading word, the labeller says the
    heading class one step (5°) from the observed word in force, toward the observed path.
-2. When |e_y| < Y / 2, or e_y changes its sign, the labeller says the observed word in force again.
+2. When |e_y| < Y / 2, or e_y changes its sign, the labeller says the observed word in force again — except an
+   overshoot (D53): when e_y changes its sign and |e_y| > Y, it says the opposite correction in the same row (item 1
+   toward the other side).
 3. A new observed heading word ends a correction. The labeller says the observed word, and the comparison continues.
 
 **Vertical correction.**
@@ -755,8 +758,9 @@ observed time (D36).
 2. When e_h > H (too high), the labeller says the next steeper descent class. When e_h < −H (too low), it says the next
    shallower descent class. From descent 4 there is no steeper class, and from descent 1 no shallower one: then there is
    no correction.
-3. When |e_h| < H / 2, or e_h changes its sign, the labeller says the observed angle class in force again. A new
-   observed altitude word or angle word ends a correction.
+3. When |e_h| < H / 2, or e_h changes its sign, the labeller says the observed angle class in force again — except an
+   overshoot (D53): when e_h changes its sign and |e_h| > H, it says the opposite correction in the same row (item 2,
+   where that class exists). A new observed altitude word or angle word ends a correction.
 
 **The words.** A correction word is an ordinary word of its column (§3.3, §3.5). The grammar (§3.7) checks it. The
 envelopes of the closed-loop sentence are checked on the flown states. The envelopes of the observed words on the
@@ -1932,6 +1936,16 @@ test: their one source is the spec, which the spec sha identifies (D21), and §1
   flights the 2 s reading refused for the repeated heading word before, and how many it says now; the closed-loop
   replays at Δ = 2, 4, 8 s; the rule of D50 on the stored rows; as information. Then the full ts suite again, and the
   report.
+
+**A16. An overshoot corrected in the same row (D53).** After A15.
+
+- Closed loop (`autopilot/closed_loop.py` `Corrector.row`): when a correction is in force and the error changes its sign
+  while |e_y| > Y (|e_h| > H, the class existing), the opposite correction in the same row; otherwise as before.
+- Tests: the overshoot case (e_y 0, +60, −60, −60, 0 at Y = 30 m) says the opposite correction at the overshoot row and
+  the rule of D50 holds; an overshoot within the tolerance says the observed word; the vertical case alike.
+- The smoke build again (a new smoke directory), its conformance, the closed-loop replays at Δ = 2, 4, 8 s; against
+  A15: which sentences changed, the rule of D50 (0 breaks), the readings of D34; as information. Then the full ts suite
+  again, and the report.
 
 ### 14.3 Stage B: prior
 
