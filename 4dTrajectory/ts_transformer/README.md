@@ -397,9 +397,9 @@ then refuses to evaluate test again from the same experiment directory, includin
 partially failed test stage.
 
 The four `run_ts_*.py` scripts above (repo root, alongside this package) are the general
-ones. The rest — kinematic-loss/overfit diagnostics for the state path, and the control
-path's own drivers (`run_ts.py control_basis_oracle`, `run_ts.py control_capacity_ceiling`,
-…) — are indexed with dates and one-line purposes in
+ones. The rest — the control
+path's own drivers (`run_ts.py control_basis_oracle`, …; the finished state-path diagnostics and
+`control_capacity_ceiling` are in `archive/one_tier_oneoffs_2026_10/`) — are indexed with dates and one-line purposes in
 [`docs/history/2026-08_control_path/control_parameter_prediction.zh.md`](docs/history/2026-08_control_path/control_parameter_prediction.zh.md) (§7)
 rather than duplicated here.
 

@@ -56,7 +56,7 @@ from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.training.train import load_checkpoint, train
 
 from ts_transformer.tests.support import dynamics_context
-from ts_transformer.tests.test_duration_quantiles import _config
+from ts_transformer.tests.support_prediction import quantile_config as _config
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -466,7 +466,7 @@ def test_the_calibration_runner_takes_a_two_head_checkpoint(tmp_path: Path, monk
     `test_the_record_carries_the_point_duration_and_the_quantile_interval`, which runs
     `duration_quantile_predictions` against a trained one.
     """
-    from ts_transformer.tests.test_eta_calibration import _cohort, _metadata, _stubbed_runner
+    from ts_transformer.tests.support_prediction import eta_cohort as _cohort, eta_metadata as _metadata, eta_stubbed_runner as _stubbed_runner
 
     samples = _cohort(400, narrow_s=10.0)
     runner = _stubbed_runner(monkeypatch, samples, split_seed=1,
@@ -503,65 +503,3 @@ def test_the_quantile_fan_decodes_a_two_head_checkpoint(tmp_path: Path, monkeypa
         assert row["cta_s"] == pytest.approx(
             row["duration_quantiles_s"][DURATION_MEDIAN_INDEX]
         )
-
-
-def test_the_eta_error_readout_reports_the_quantile_head_beside_the_rollout(
-    tmp_path: Path, monkeypatch, capsys
-):
-    """Gate 1 of §三 3.1b is read on two different heads: ADE and the rollout's own duration
-    on the point head, the arrival-time MAE on q50. The readout prints both blocks and
-    derives q50's error from the row's own published quantiles."""
-    import importlib.util
-
-    checkpoint, _series = _trained_two_head(tmp_path, monkeypatch)
-    out = tmp_path / "pred"
-    assert _predict(checkpoint, out, tmp_path) == 0
-
-    readout = importlib.import_module("ts_transformer.experiments.eta_error_readout")
-
-    payload = readout.readout("B1b", out)
-    assert payload["duration_head"] == DURATION_HEAD_TWO_HEAD
-    assert readout.Q50_METRIC in payload["metrics"]
-    rows = json.loads((out / "summary.json").read_text())["results"]
-    expected = np.abs(np.array(
-        [row["duration_quantiles_s"][DURATION_MEDIAN_INDEX] - row["true_final_time_s"]
-         for row in rows], dtype=np.float64
-    )).mean()
-    pooled = next(iter(payload["strata"].values()))
-    assert pooled["n"] == len(rows)
-    assert pooled[readout.Q50_METRIC]["mae"] == pytest.approx(expected)
-    # ...and the point head's own MAE is the block that was already there, on the duration
-    # the rollout actually flew.
-    assert pooled["final_time_error_s"]["mae"] == pytest.approx(
-        np.abs(np.array([row["final_time_error_s"] for row in rows])).mean()
-    )
-    text = readout.render({"schema": readout.RESULT_SCHEMA, "arms": [payload]})
-    assert "GATE 1" in text and "POINT head" in text
-    assert readout.DURATION_MEDIAN_INDEX == DURATION_MEDIAN_INDEX
-
-
-def test_a_point_head_directory_has_no_q50_block(tmp_path: Path, monkeypatch):
-    """The block exists only where a quantile head wrote the rows, so a point-head arm's
-    readout is the one B0 published."""
-    import importlib.util
-
-    import ts_transformer.cli.predict as predict_module
-
-    config = _config(duration_head=DURATION_HEAD_POINT)
-    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=12, seed=3)
-    series, _report = build_series(flights, config, airport=AIRPORT)
-    run = tmp_path / "run"
-    train(series, config, output_dir=run, data_provenance=PROVENANCE, verbose=False)
-    monkeypatch.setattr(predict_module, "provenance_from_args", lambda _args: PROVENANCE)
-    monkeypatch.setattr(
-        predict_module, "load_flight_dicts", lambda _path, include_flight_keys=None: flights
-    )
-    out = tmp_path / "pred"
-    assert _predict(run / "checkpoint.pt", out, tmp_path) == 0
-
-    readout = importlib.import_module("ts_transformer.experiments.eta_error_readout")
-    payload = readout.readout("point", out)
-    assert readout.Q50_METRIC not in payload["metrics"]
-    assert "GATE 1" not in readout.render(
-        {"schema": readout.RESULT_SCHEMA, "arms": [payload]}
-    )

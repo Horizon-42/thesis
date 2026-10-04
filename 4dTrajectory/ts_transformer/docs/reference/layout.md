@@ -360,6 +360,15 @@ is a namespace package under the package). A `_config` / `_series` recipe with i
 defaults stays in its file: two helpers with the same name and different defaults are two
 helpers, not one copied.
 
+**2026-10-04: the one-tier prediction fixtures have their own module, `tests/support_prediction.py`**
+(`support.py` keeps the two-tier line's: instruction artefacts, executor, closed loop). It holds the helpers that were
+byte-identical in several files (`series` ×14, `series_for` ×4, `control_config` ×3, `identity_normalizer` ×3) and the
+ones another test file imported (`quantile_config`, `latent_config`, `given_cta_config`, the ETA-calibration cohort and
+runner stubs): a test module imported by a test module is loaded twice under `--import-mode=importlib`. A test file
+imports them under the name it always used (`series as _series`), so no call site changed; a test file never imports
+another test file. The two-tier files that still do (`test_closed_loop`, `test_autopilot`, `test_instruction_*`,
+`test_executor_*`, `test_training_export`) are being edited on the development line and were left for the end of that work.
+
 ### L22 · `ts_transformer` is a package; every import is qualified
 
 **`ts_transformer` is a PACKAGE (2026-09-09, review §4.1), and every import is qualified:**

@@ -11,21 +11,12 @@ import torch
 
 import ts_transformer.experiments.predictability_report as predictability_report
 from ts_transformer.config import PREDICTION_CONTROL, TSConfig
-from ts_transformer.data.dataset import Normalizer, build_series
+from ts_transformer.data.dataset import Normalizer
 from ts_transformer.backbone.adapters import build_model
-from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.outputs.envelope import THRUST_FRACTION_CONTRACT
+from ts_transformer.tests.support_prediction import series as _series
 
 AIRPORT, RUNWAY = "KRDU", "05L"
-
-
-def _series(n_flights=8, **config_overrides):
-    """Synthetic KRDU arrivals, built into FlightSeries. Returns ``(series, config)``."""
-    config = TSConfig(**config_overrides)
-    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3)
-    series, report = build_series(flights, config, airport=AIRPORT)
-    assert report.built == n_flights, report.format()
-    return series, config
 
 
 def test_common_grid_resampling_uses_explicit_nonuniform_control_clock():

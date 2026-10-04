@@ -18,10 +18,6 @@ import torch
 
 from ts_transformer.data.batch_contract import model_forward
 from ts_transformer.config import (
-    CONTROL_DURATION_UNIFORM,
-    CONTROL_STATE_CLOCK_OBSERVED,
-    CONTROL_STATE_LOSS_GRID_FIXED_DT,
-    CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CTA_CONDITIONING_GIVEN,
     DURATION_HEAD_POINT,
     DURATION_HEAD_QUANTILE,
@@ -41,26 +37,9 @@ from ts_transformer.run_naming import run_display_name, run_slug
 from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.training.train import load_checkpoint, train
 from ts_transformer.tests.support import dynamics_context
+from ts_transformer.tests.support_prediction import quantile_config as _config
 
 AIRPORT, RUNWAY = "KRDU", "05L"
-
-
-def _config(**overrides) -> TSConfig:
-    settings = dict(
-        prediction_output="control",
-        duration_head=DURATION_HEAD_QUANTILE,
-        control_duration_parameterization=CONTROL_DURATION_UNIFORM,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
-        checkpoint_selection_metric="fixed-anchor-common-grid-ade",
-        control_rollout_integrator_dt_s=0.5,
-        seq_len=8, n_segments=4, d_model=16, n_heads=4, d_ff=32, e_layers=1,
-        final_time_scale_s=2.0, device="cpu", horizon_mode="normalized",
-        epochs=1, patience=1, batch_size=8, dropout=0.0,
-    )
-    settings.update(overrides)
-    return TSConfig(**settings)
 
 
 # ── the head ────────────────────────────────────────────────────────────────

@@ -134,7 +134,7 @@ def test_fit_evaluation_is_bound_to_the_exact_checkpoint(tmp_path):
 
 def test_a_given_cta_checkpoint_is_refused_not_run_as_the_oracle(tmp_path):
     """The reports run the model on `forecast.dynamics_batch`, which hands a `cta=given` decoder the truth duration."""
-    from ts_transformer.tests.test_cta_conditioning import _config as given_cta_config
+    from ts_transformer.tests.support_prediction import given_cta_config
 
     with pytest.raises(ValueError, match="would be handed the truth duration"):
         report.require_no_given_cta(given_cta_config(), tmp_path / "checkpoint.pt")

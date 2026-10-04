@@ -65,7 +65,7 @@ python run_ts.py pipeline --airport KRDU
 conda run -n aeroviz python clean_pipeline_data.py --airport KRDU --dry-run
 conda run -n aeroviz python clean_pipeline_data.py --airport KRDU
 
-./run_all_tests.sh                   # every Python suite, two pytest runs (env via the resolver); exit 0 expected
+./run_all_tests.sh                   # every Python suite: 3 pytest groups at once, each on xdist workers (~3 min, was ~15 min serial for ts); exit 0 expected
 ./start_aeroviz_fullstack.sh         # supervisor: frontend + backend
 cd aeroviz-4d && npm run dev         # frontend only — more commands in aeroviz-4d/CLAUDE.md
 ```
