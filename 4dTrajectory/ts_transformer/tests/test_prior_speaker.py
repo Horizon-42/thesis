@@ -42,9 +42,9 @@ def level_words(words, heights):
     return [words.altitude_index(h) for h in heights]
 
 
-def permitted(m, words, column, *, e, height, runway=0, go_around=False, in_force=UNCHANGED, n=0.0):
-    return m.permitted(column, np.array([runway]), np.array([go_around]), np.array([in_force]), np.array([e]),
-                       np.array([n]), np.array([height]))[0]
+def permitted(m, words, column, *, e, height, runway=0, go_around=False, n=0.0):
+    return m.permitted(column, np.array([runway]), np.array([go_around]), np.array([e]), np.array([n]),
+                       np.array([height]))[0]
 
 
 def test_the_glidepath_lower_edge_binds_inside_the_faf_and_the_cone(words):
@@ -60,9 +60,26 @@ def test_the_glidepath_lower_edge_binds_inside_the_faf_and_the_cone(words):
     assert ok[1 + words.altitude_no_level_off]
     low = permitted(m, words, ALTITUDE, e=e, height=edge - words.altitude_tolerance_m(words.altitude_no_level_off) - 1)
     assert not low[1 + words.altitude_no_level_off]
-    # outside the cone (2 km right of the final) the edge does not bind, nor the DA once joined
-    outside = permitted(m, words, ALTITUDE, e=e, n=-2_000.0, height=edge + 200.0)
-    assert outside[1 + level_words(words, [0.0])[0]]
+    # inside the region only the edge binds, not the DA: 500 m before the threshold the edge is below the DA, and level
+    # 0 is permitted there
+    near = float(final.glidepath_m(np.array(500.0))) - GLIDEPATH_BELOW_M
+    assert near < final.decision_m - words.altitude_tolerance_m(0)
+    m.track(np.array([-500.0]), np.array([0.0]), np.array([near + 30.0]), np.array([False]))
+    assert permitted(m, words, ALTITUDE, e=-500.0, height=near + 30.0)[1 + level_words(words, [0.0])[0]]
+
+def test_a_level_below_the_da_is_blocked_after_the_join_when_the_aircraft_has_left_the_cone(words):
+    """D64: the DA binds wherever the aircraft is not inside the region — also after the join, out of the LPV cone."""
+    final = finals()[0]
+    m = masks(words)
+    e = -5_000.0
+    edge = float(final.glidepath_m(np.array(5_000.0))) - GLIDEPATH_BELOW_M
+    m.track(np.array([e]), np.array([0.0]), np.array([edge + 100.0]), np.array([False]))
+    assert m.joined[0, 0]
+    low = level_words(words, [final.decision_m - 100.0, final.decision_m + 60.0])
+    out = permitted(m, words, ALTITUDE, e=e, n=-2_000.0, height=edge + 100.0)       # 2 km right of the final
+    assert not out[1 + low[0]] and out[1 + low[1]]
+    for v in range(words.n_altitude_levels):
+        assert out[1 + v] == (words.altitude_level_m(v) >= final.decision_m - words.altitude_tolerance_m(v))
 
 
 def test_before_the_join_the_decision_altitude_binds(words):
@@ -93,15 +110,40 @@ def test_no_climb_below_the_entry_height_before_the_join_and_none_of_it_while_g(
     assert permitted(m, words, ANGLE, e=e, height=final.entry_m + 200.0)[1 + words.angle_climb]
 
 
-def test_unchanged_only_where_the_word_in_force_still_passes(words):
+def test_a_procedure_mask_never_blocks_unchanged(words):
+    """D64: a mask blocks a word when it is said, never "unchanged" — also where the word in force breaks a limit (a
+    level under the edge, the aircraft sunk under it with "no level-off" in force, under the DA, a climb barred)."""
     final = finals()[0]
     m = masks(words)
     e = -5_000.0
     edge = float(final.glidepath_m(np.array(5_000.0))) - GLIDEPATH_BELOW_M
-    m.track(np.array([e]), np.array([0.0]), np.array([edge + 200.0]), np.array([False]))
-    below, above = level_words(words, [edge - 150.0, edge + 150.0])
-    assert not permitted(m, words, ALTITUDE, e=e, height=edge + 200.0, in_force=below)[0]
-    assert permitted(m, words, ALTITUDE, e=e, height=edge + 200.0, in_force=above)[0]
+    for height in (edge - 200.0, edge + 200.0):
+        m.track(np.array([e]), np.array([0.0]), np.array([height]), np.array([False]))
+        assert permitted(m, words, ALTITUDE, e=e, height=height)[0] and permitted(m, words, ANGLE, e=e, height=height)[0]
+    sunk = permitted(m, words, ALTITUDE, e=e, height=edge - 200.0)
+    assert not sunk[1 + words.altitude_no_level_off] and sunk[0]
+    far = ProcedureMasks([finals()], words)
+    far.track(np.array([-20_000.0]), np.array([0.0]), np.array([final.entry_m - 300.0]), np.array([False]))
+    barred = permitted(far, words, ANGLE, e=-20_000.0, height=final.entry_m - 300.0)
+    assert not barred[1 + words.angle_climb] and barred[0]
+
+
+@pytest.mark.parametrize("faf_m, segment_band_m", [(FAF_M, 40.0), (26_000.0, 70.0)])
+def test_at_the_level_nearest_the_entry_height_the_aircraft_may_still_climb(words, faf_m, segment_band_m):
+    """D64: "no climb" starts once the aircraft has been below the entry height by more than the band ε of the level
+    nearest it — an aircraft held at that level, up to half a step below the entry height, has not passed under it. A
+    FAF 26 km out puts the entry height in the 120 m segment (ε 70 m), not the 60 m one (ε 40 m)."""
+    geometry = parallel_airport()
+    final = Final(geometry, 0, faf_m, fas_course_geometry(3000.0))
+    nearest = words.altitude_index(final.entry_m)
+    band = words.altitude_tolerance_m(nearest)
+    assert band == segment_band_m
+    e = -faf_m - 10_000.0
+    for below, barred in ((band - 1.0, False), (band + 1.0, True)):
+        m = ProcedureMasks([(final, Final(geometry, 1, faf_m, fas_course_geometry(3000.0)))], words)
+        height = final.entry_m - below
+        m.track(np.array([e]), np.array([0.0]), np.array([height]), np.array([False]))
+        assert permitted(m, words, ANGLE, e=e, height=height)[1 + words.angle_climb] == (not barred), below
 
 
 def test_the_threshold_tolerance_mirrors_the_optimizers():

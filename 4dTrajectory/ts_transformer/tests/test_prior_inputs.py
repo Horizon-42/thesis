@@ -148,7 +148,7 @@ def test_the_height_above_the_glidepath_against_a_hand_computation():
     d = -e                                                     # "09": threshold at the origin, course 090°
     radius = curvature_radius_m(35.0, 90.0)
     glidepath = TEST_TCH_M + d * np.tan(np.radians(TEST_GLIDEPATH_DEG)) + d * d / (2 * radius)
-    expected = ((h - 100.0) - glidepath) / GLIDEPATH_HEIGHT_SCALE_M
+    expected = np.arcsinh(((h - 100.0) - glidepath) / GLIDEPATH_HEIGHT_SCALE_M)                 # D65
     assert candidate(rows, 0, "height_above_glidepath")[j] == pytest.approx(expected, rel=1e-5)
     assert own(rows, "height_above_elevation")[j] == pytest.approx((h - INSTRUCTION_AIRPORT_ELEVATION_M) / 1000.0)
 

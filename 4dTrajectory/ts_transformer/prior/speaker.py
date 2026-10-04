@@ -168,8 +168,7 @@ class Speaker:
         width = len(column_words(column, self.words, int(self.n_candidates.max())))
         out = np.ones((len(self.in_force), width), dtype=bool)
         if column in self.procedure.columns:
-            altitude = np.array([UNCHANGED if f is None else f.altitude for f in self.in_force])
-            out &= self.procedure.permitted(column, runway, go_around, altitude, at.e_m, at.n_m, at.height_m)
+            out &= self.procedure.permitted(column, runway, go_around, at.e_m, at.n_m, at.height_m)
         if column in caller:
             out &= caller[column]
         return out
