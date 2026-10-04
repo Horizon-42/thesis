@@ -45,7 +45,7 @@ repository root.
 | D19 | After a labelled go-around, the runway word that ends G is at the first level-off after the go-around climb, and not later than the row of the next "no level-off" (§4.6) | Decided | User, 2026-10-03 |
 | D20 | This design is a new version, on its own branch and worktree. It reads no artefact, executor spec or prior that an earlier version made (`v1`–`v6`). The running experiments keep their own checkouts | Decided | User, 2026-10-03 |
 | D21 | Identities bind format and data rules only. A code identity is a behaviour check on fixed inputs, never a hash of source bytes; data are identified by their flights, never by the bytes of a manifest (§9.2) | Decided | User, 2026-10-03 |
-| D22 | Altitude words use the grid "optimal 40 levels" of the altitude-grid proposal: 60 m steps from 0 to 1,260 m, 120 m steps to 2,700 m, 450 m steps to 5,400 m (§3.4) | Decided | User, 2026-10-03 |
+| D22 | Altitude words use the grid "optimal 40 levels" of the altitude-grid proposal: 60 m steps from 0 to 1,260 m, 120 m steps to 2,700 m, 450 m steps to 5,400 m (§3.4). Since D58 the heights are above the airport elevation, and the grid is fitted again on them | Decided | User, 2026-10-03 |
 | D23 | How the prior gets the frame of R (D5) and the glidepath height (D13). The own state of the aircraft has no frame. Every position and direction is in the candidate vectors, each in the frame of its own candidate. R is an input only as its candidate vector. No input of a row up to the first predicted step is computed from R. Each candidate vector has the height above its own glidepath; the value of R is the input of D13 (§6.1) | Decided | User, 2026-10-03 |
 | D24 | A candidate vector has no constant of its runway: no length, no elevation, no layout relative to R. Such a value comes back only as a variant that D39 selects (§6.1) | Decided | User, 2026-10-03 |
 | D25 | The ablation reads Δ = 2, 4, 8 s: each divides the 16 s observation of the prior. At each Δ, the motion inputs of a row come from the 2 s before the row (§4.8, §6.1) | Decided | User, 2026-10-03 |
@@ -80,6 +80,8 @@ repository root.
 | D54 | The descent classes are a k-means on tan(angle) of the descent pieces, with each piece weighted by the square of its length. A piece flown at the nominal angle of its class ends length · \|tan a − tan c\| from its observed end, so the k-means makes the sum of the squared end-of-piece height errors smallest; D15 gives the same error for each candidate. The climb nominal is the length-weighted median of the climb pieces (§3.5) | Decided | User, 2026-10-04 |
 | D55 | A value that a runner fits from data and the user chooses (D15) is measured on all train days, in a scratch directory, directly after the milestone that writes the runner; the user chooses before a later milestone reads the value. A smoke build uses the chosen spec, and its flights are a random sample for each airport and split (seed 1337), not the first flights of the sorted flight keys (a key starts with the callsign, so the first flights are mostly one airline). Why: the smoke of stage A fitted its own spec on approximately 400 train flights, 373 of them one airline, with one climb piece; every smoke reading of A9–A16 used it (§14.1 rules 7 and 12) | Decided | User, 2026-10-04 |
 | D56 | The values of D15, chosen: the candidate rounded to 0.25° of the spec measurement on all train days (stage A code at `42f3ff62`, 44,703 train flights, 227,559 descent pieces, 1,339 climb pieces). Descent nominals 1.5 / 2.5 / 3.0 / 4.5°, edges −0.5 / 2.0 / 2.75 / 3.75 / 10°; climb nominal (G false) 1.5°. End-of-piece height error p50 / p90: 15.0 / 51.0 m (fitted 1.51 / 2.45 / 3.09 / 4.45°: 14.7 / 47.8 m). Descent 3 is the published 3.0° glidepath of 24 of the 25 candidate runways (§3.5, §10) | Decided | User, 2026-10-04 |
+| D57 | One word clock: `time`. An open-loop sentence is said on its own rows, as a closed-loop sentence and a sentence of the prior are. The clocks `distance` and `track` (an open-loop word said where the flown aircraft reaches the observed track) are removed with the next change of the executor spec, not in the formal build of A18 (A19). Why: no training sentence and no reading of D34 uses them; the closed-loop reading has the one rule of the place (D42, D45); the clock is a parameter of the executor spec, so a change of it gives a new spec identity and a rebuild of the closed-loop data that it does not change (D21); and the batch and the single-flight executors each carry it. The question "how far do the observed words alone carry a flight" is read, when a readout needs it, with the closed-loop reading with no corrections (§4.9) | Decided | User, 2026-10-04 |
+| D58 | The altitude words are heights above the airport elevation E (the published field elevation, one value for each airport, `candidates.json` `reference.elevation_m`), not MSL. The labeller reads them from the height above E; the executor flies a level T at T + E MSL; the prior's own height is above E (§6.1). E, not the threshold of R: R can change during a sentence, and the thresholds of one airport differ by up to 28 m (KSTL 160.8–188.4 m). The spec measurement fits the grid of D22 again on the level-offs above E, with the D22 grid among the candidates; the user chooses (D55). Why: at a high airport (KDEN, approximately 1,650 m) the MSL words of an approach are far from what the five training airports (1–188 m) said for the same manoeuvre, and they fall in the coarse segments of the grid; and the day-to-day spread of the geometric height of an assigned level grows with the height above the altimeter-setting source, the airport. The cost: the round MSL levels that controllers assign fall on different words at each airport (3,000 ft MSL: 900 m at KMSY, 780 m at KRDU, 720 m at KSTL), and the prior does not get E (D24; only the variant `constants` of D39) (§3.4) | Decided | User, 2026-10-04 |
 
 ### 0.2 Open items, in the order of discussion
 
@@ -99,13 +101,12 @@ repository root.
 
 ### 0.4 Plan
 
-1. Stage A (§14.2): write the vocabulary, the labeller, the identities, the executor, the judge and the replay on the
-   branch `dev-two-tier-v4`, milestones A0–A14, each with tests and a code review. Another agent does this.
-2. Claude checks the result of stage A against this document (§14.6). Then A15 (§14.2) from the decisions on the
-   check (D48–D52), A16 (D53), A17 (D55) and A18 (D56: the chosen spec, the formal artefact).
-3. The spec measurement on all train days, in a scratch directory, gives the candidates of D15 (D55); the user
-   chooses them (the turn law of the executor stays, D47). Then the formal artefact is built, and the readings of
-   D34 are made at each row interval of the ablation (D11, D25: 2, 4, 8 s). The user compares them (D7).
+1. Stage A (§14.2), on the branch `dev-two-tier-v4`, by another agent: A0–A18 are done; the formal build of A18 was
+   stopped for D58. A19 and A20 (one word clock; the altitude words above the airport), then the spec measurement on all
+   train days, and the user chooses the grid (D55, D58). Then A21: the formal artefact and the readings of D34 at
+   Δ = 2, 4, 8 s.
+2. Claude checks A15–A21 and the formal artefact (§14.6).
+3. The user compares the readings of D34 and chooses Δ (D7, D11). The replay of the val days waits for the user.
 4. Stages B, C, D (§14.3–§14.5): the prior from the start, the post-training and the multi-aircraft work, the frontend.
 5. The user merges the branch.
 
@@ -163,6 +164,7 @@ repository root.
 | Executor cycle | 1 s. The executor hears the words at the start of each row |
 | Labeller | The program that reads a sentence from an observed track (`instructions/labeller/`) |
 | Judge | The part of the executor package that classifies what the executor flew (`autopilot/judge.py`) |
+| Airport elevation (E) | The published elevation of the airport (`candidates.json` `reference.elevation_m`). The altitude words are heights above it (D58) |
 | Decision altitude (DA) | The published DA of the LPV minimums of R, as a height above the threshold (`Runway.decision_height_above_threshold_m`) |
 | DA point | The first flown row where the aircraft, on the final of R and with G false, descends through the DA |
 | Final approach segment (FAS) cone | The LPV lateral containment: half-width 106.7 m (350 ft) at the threshold, larger with distance (FAA Order 8260.58D Formula 3-1-1, `flight_scenarios/fas_geometry.py`) |
@@ -177,7 +179,7 @@ repository root.
 |---|---|---|---|
 | 0 | Runway | a candidate runway (pointer), "go-around" | candidates of the airport + 2 |
 | 1 | Heading | relative heading, 5° grid (72 values) | 73 |
-| 2 | Altitude | target level, geometric MSL, 40 levels on three segments (60 / 120 / 450 m steps), 0–5,400 m; "no level-off" | 42 |
+| 2 | Altitude | target level, geometric height above the airport elevation, 40 levels on three segments (60 / 120 / 450 m steps), 0–5,400 m; "no level-off" | 42 |
 | 3 | Angle | level; descent 1–4; climb | 7 |
 | 4 | Speed | target ground speed, 5 m/s grid, 20–250 m/s (47 values); "unspecified" | 49 |
 
@@ -274,10 +276,15 @@ finer grid (§11.9).
 
 ### 3.4 Altitude column
 
-**Meaning.** "Descend (or climb) to level T and keep it" (7110.65BB 4-5-7, DESCEND AND MAINTAIN). T is geometric MSL.
-The direction comes from T and the present height. The angle column says how steep.
+**Meaning.** "Descend (or climb) to level T and keep it" (7110.65BB 4-5-7, DESCEND AND MAINTAIN). T is a geometric
+height above the airport elevation E (D58); the executor flies it at T + E MSL. The direction comes from T and the
+present height. The angle column says how steep. In this section a height is a height above E.
 
-**Grid (D22).** 40 levels on three segments, each segment uniform:
+**Reference (D58).** E is one value for each airport: the published field elevation. It is not the threshold of R: R
+can change during a sentence, and a level word must not change its meaning with it (as a heading word keeps its track,
+§3.3); and the thresholds of one airport differ by up to 28 m (KSTL 160.8–188.4 m), about half a step of the grid.
+
+**Grid (D22, D58).** 40 levels on three segments, each segment uniform:
 
 | Segment | Levels | Step | Largest rounding error |
 |---|---|---|---|
@@ -286,27 +293,40 @@ The direction comes from T and the present height. The angle column says how ste
 | 3 | 3,150, …, 5,400 m | 450 m | 225 m |
 
 The steps and the break points are constants of the vocabulary and go into the spec. A word is the nearest level; its
-meaning is an absolute height, the same at every airport and from every position. The grid is an exact
-dynamic-programming fit of at most three uniform segments that makes the squared rounding error of the observed
-level-offs smallest for 40 levels (§11.7).
+meaning is a height above the airport, the same at every airport and from every position. The grid of the table is an
+exact dynamic-programming fit on MSL level-offs: at most three uniform segments, break points on a 15 m grid, steps from
+a fixed set of 15–600 m, that make the squared rounding error of the observed level-offs smallest for 40 levels (§11.7).
+The spec measurement makes the same fit on the level-offs above E of the train days and writes it beside the grid of
+the table, each with its rounding error; the user chooses (D55, D58).
 
 **Why a coarser grid higher up.** (1) 99.7 % of the level words are under 3,000 m (§11.7). (2) A controller assigns a
-pressure altitude; the geometric height of one assigned level moves from day to day by about height × ΔT / 273 (ΔT: the
-day's temperature deviation; the model does not see it). At KRDU this is about 15 m at 600–900 m and about 90 m at
-2,000–3,000 m (§11.7). A fine step high up only divides this spread.
+pressure altitude, which the altimeter setting of the airport makes correct at the airport. The geometric height of one
+assigned level moves from day to day by about h × ΔT / 273, with h the height above the airport and ΔT the day's
+temperature deviation (the model does not see it); ICAO gives its cold-temperature corrections by the height above the
+altimeter-setting source (Claude's reading, the text not checked). At KRDU (E = 133 m) this is about 15 m at 600–900 m
+MSL and about 90 m at 2,000–3,000 m MSL (§11.7). A fine step high up only divides this spread.
 
 **What a coarse segment costs.** In segment 3 two assigned levels 1,000 ft (304.8 m) apart can round to one word, and
 a small change of level inside one step has no word. Such words are rare (above 2,700 m: approximately 0.3 % of the
 words, mostly the entry level at row 0). The 1,000 ft between opposite base legs (7110.65BB 5-9-1 b) is at low
-altitude, where the step is 60 m. At an airport above approximately 600 m elevation the final approach uses the 120 m
-segment (§6.4).
+altitude, where the step is 60 m. Because the heights are above the airport, the final approach lies in the 60 m
+segment at every airport (§6.4).
 
 **"No level-off".** "Descend at the angle in force. Do not level off." The executor flies the nominal angle of the
 class in force and has no other law for it (§5.5, §5.7). The judge stops the flight at the threshold or at the ground.
 
-**Why MSL and not height above the threshold.** Controllers assign MSL levels. Relative to the threshold elevation, the
-level distributions of the five airports become less similar, not more (§11.2). KSJC has 28 % of its level words on
-levels that the other four airports almost never use. This is airspace, not frame.
+**Why above the airport and not MSL (D58).** A word must mean the same manoeuvre at every airport (principle 4). In MSL,
+a high airport is outside what the training airports said: at KDEN (E approximately 1,650 m) an intercept of the final
+600–900 m above the airport is at approximately 2,250–2,550 m MSL, a height that the five training airports (E = 1–188
+m) use only far out, and it falls in the 120 m segment, a downwind in the 450 m segment. Above E, the same manoeuvre is
+the same word, in the 60 m segment. The spread of an assigned level also grows with the height above the airport, not
+above the sea (the grid above). The cost: controllers assign round MSL levels, and above E one assigned level is a
+different word at each airport (3,000 ft MSL: 900 m at KMSY, 780 m at KRDU, 720 m at KSTL). The prior does not get E
+(D24), so it cannot know where the round MSL levels lie; its level words spread over one to three steps more. This
+changes where the aircraft levels by at most one to three steps; the final is held with angle words and the corrections
+of §4.9, not with level words. The level words of the five airports differ mainly by their airspace in both frames
+(§11.2: KSJC has 28 % of its level words on levels that the other four airports almost never use); that measurement
+covers only airports between 1 and 188 m.
 
 **Envelope.** The tube from the row of the word: max(T, h0 − s·tan γ_hi) − ε ≤ h ≤ max(T, h0 − s·tan γ_lo) + ε while
 it descends, T ± ε after it arrives (s is the horizontal distance flown from the row of the word). ε depends on the
@@ -337,14 +357,13 @@ under the same rule: the same flights and a median piece angle of 2.98° against
 the weight at 0.92°) is not in the new pieces.
 With D3 the model holds the glidepath with these classes; the closed-loop reading gives the corrections (D32, §4.9).
 
-**Rounder values (D15).** The spec measurement gives each value that it fits from data (the descent centres and edges,
-the climb centre) with rounder candidates (for example to 0.5°, 0.25°, 0.1°) and, for each candidate, the fit that it
-leaves: the end-of-piece height error that the measurement already reports (`instructions/measure.py`
-`fit_descent_classes`), and the same for the climb pieces. The user chooses (criteria: D7). Two facts for that choice:
-24 of the 25 candidate runways publish a 3.0° glidepath (§11.4), and with D3 the model holds the final with an angle
-word, so a centre of 3.06° flies 10 m from a 3.0° glidepath in 10 km; the k-means with three classes put a centre at
-3.006°. The values that the measurement takes as percentiles are already rounded by their rules (turn rates to
-0.1°/s, the bank limit to 1°, the corridor to 5 m, 0.05° and 1°, the acceleration to 0.1 m/s²).
+**Rounder values (D15, D56).** The spec measurement writes each value that it fits from data (the descent nominals and
+edges, the climb nominal) with candidates rounded to 0.5°, 0.25° and 0.1°, and for each candidate the end-of-piece
+height error that it leaves on the descent and on the climb pieces (`instructions/measure.py` `rounding_candidates`).
+The spec takes the row that the user chose (`instruction_spec --candidate`; D56: 0.25°). Descent 3 is then the 3.0°
+glidepath that 24 of the 25 candidate runways publish (§11.4). The values that the measurement takes as percentiles
+are rounded by their own rules (turn rates to 0.1°/s, the bank limit to 1°, the corridor to 5 m, 0.05° and 1°, the
+acceleration to 0.1 m/s²).
 
 **Climb (D28).** The vocabulary has one climb word: "climb". The word has no angle. The angle is a value of the
 executor (§5.5), from the state G:
@@ -353,9 +372,9 @@ executor (§5.5), from the state G:
   limit permits at the present airspeed, not more than 3° and not less than 1.885°. 1.885° is the minimum gradient of a
   missed approach, 200 ft per NM (AIM 5-4-21 b). 3° is the upper limit. The real go-around climbs are steeper (§11.6),
   so the 3° limit usually applies.
-- **G false.** The executor climbs at the nominal angle of the climb class. The spec measurement fits it from the climb
-  pieces of the train days, with rounder candidates (D15); the user chooses. The train days have 1,498 climb pieces
-  among 233,649 vertical pieces (0.6 %); their length-weighted median is 1.32°.
+- **G false.** The executor climbs at the nominal angle of the climb class, 1.5° (D56): the length-weighted median of
+  the climb pieces of the train days (1.47°), rounded to 0.25°. The train days have 1,339 climb pieces against 227,559
+  descent pieces (0.6 %).
 
 The labeller does not read a go-around angle: a climb piece is a climb when its angle is 0.5° to 15°, in and out of G.
 
@@ -383,13 +402,14 @@ labeller conformance (§9.2) covers them.
 
 1. At the first predicted step, each column says a value. The runway column says a candidate.
 2. The runway column follows the table of §3.2.
-3. When a new level T needs a direction that the angle in force does not give (level, or the opposite direction), the
-   same row says an angle of the correct direction.
+3. In a row that says an altitude word or an angle word, the level T in force and the angle in force agree at the
+   height of the aircraft: a T more than its ε (§3.4) below the aircraft needs a descent class, a T more than its ε
+   above it needs the climb class.
 4. "No level-off" needs a descent class in force or in the same row.
 5. "No level-off" is not permitted while G is true (D14). The model first says a runway word, which ends G; in the same
    row (the runway column comes first) or later it can say "no level-off".
-6. A row that says "go-around" while "no level-off" is in force also says a level T above the present height of the
-   aircraft (D27). Rule 3 then makes the same row say "climb". With rules 5 and 6, "no level-off" is never in force
+6. A row that says "go-around" while "no level-off" is in force also says a level T more than its ε above the present
+   height of the aircraft (D27). Rule 3 then makes the same row say "climb". With rules 5 and 6, "no level-off" is never in force
    while G is true, so every climb of a go-around has a target from an altitude word.
 
 **Procedure masks.** The prior also decodes under three masks from the procedure of R (principle 3). The first two
@@ -407,15 +427,15 @@ climbs above them, so they apply. Rules 1–4 apply while G is true as at every 
 ### 3.8 Example
 
 A KRDU arrival that lands on 23R (course 225.0°). At row 0 it is on the left downwind of 23R: 3.0 km before the
-threshold, 5.0 km left of the final, track 045°, level at 1,200 m MSL, 115 m/s. Only rows with a word are shown; an empty
-cell is "unchanged". Relative headings are given in degrees.
+threshold, 5.0 km left of the final, track 045°, level at 1,080 m above the airport (E = 133 m; 1,213 m MSL), 115 m/s.
+Only rows with a word are shown; an empty cell is "unchanged". Relative headings and heights above the airport are given.
 
 | t (s) | Runway | Heading | Altitude | Angle | Speed | What happens |
 |---|---|---|---|---|---|---|
-| 0 | 23R | +180 | 1,200 m | level | 115 m/s | Expected runway 23R. Downwind, level |
+| 0 | 23R | +180 | 1,080 m | level | 115 m/s | Expected runway 23R. Downwind, level |
 | 40 | | | | | 105 m/s | Speed reduction |
 | 106–134 | | +175 … +90 (one word each row) | | | | Left turn onto the base leg, 4 s before the track |
-| 120 | | | 900 m | descent 2 | | Descend to 900 m |
+| 120 | | | 780 m | descent 2 | | Descend to 780 m above the airport |
 | 156–200 | | +85 … 0 (one word each row) | | | | Left turn onto the final, with heading words (D2) |
 | 204 | | | | | unspecified | Capture row; the pilot's own speed (D4) |
 | 210 | | | no level-off | descent 3 | | Final descent |
@@ -435,11 +455,12 @@ them with the executor and adds the correction words; its sentences are the trai
 ### 4.1 Signals, cut and gate
 
 - **Signals** come from the ts data plane (`build_series`): the altitude repaired at read time, MSL, 2 s rows on even
-  UTC seconds, the airport frame. The test days are sealed: the labeller never opens them (contract C32).
+  UTC seconds, the airport frame. The test days are sealed: the labeller never opens them (contract C32). The labeller
+  reads the altitude words from the height above the airport elevation, MSL − E (D58).
 - **Smoothing:** centred moving means of the track (6 s), the altitude (10 s) and the ground speed (10 s). The flown
   distance is the integral of the smoothed ground speed.
 - **Cut** (`read.admit`). A landing passage is a row where the flight crosses the threshold plane of its landed runway
-  inside the landing screen of the harvest: lateral ≤ 1,000 m and ≤ half the spacing to a parallel runway, height
+  inside the landing screen of the harvest: lateral ≤ 1,000 m and ≤ half the spacing to a parallel runway (a candidate whose course is within 5°), height
   ≤ 100 m, both interpolated between the two rows (`read.landing_passages`). The sentence ends before the last landing
   passage after which the flight does not come back before the threshold.
 - **Gate.** The labeller refuses a flight, with its reason, when: its rows are not 2 s apart; its landed runway is not
@@ -471,7 +492,7 @@ glidepath angle or an LPV DA is refused before labelling (the judge needs all th
 
 ### 4.4 Altitude and angle words
 
-**Pieces.** The smoothed altitude is fitted against the flown distance by straight pieces. From the first row of a
+**Pieces.** The smoothed height above the airport elevation is fitted against the flown distance by straight pieces. From the first row of a
 piece, the piece grows as long as the least-squares line through its rows keeps every residual within 10 m (the fit
 residual). A piece has at least two rows.
 
@@ -497,7 +518,7 @@ residual). A piece has at least two rows.
    outside the classes, or when a level word is on the wrong side of the height where its run starts (by more than its
    ε).
 
-The tube of §3.4 checks each word, with the ε of its segment.
+The tube of §3.4 checks each word, with the ε of its level (D52).
 
 ### 4.5 Speed words
 
@@ -572,9 +593,11 @@ aircraft left the 25 km slice, and the slice starts at its return.
    true. A go-around without a climb word is refused, with its reason.
 3. The climb is read as altitude and angle words, as every climb. Its level word and its climb word are in the
    go-around row (rule 6). While G is true the executor flies the climb at the go-around angle (D28, §5.5).
-4. The runway word that ends G (D19): at the first level-off after the go-around climb, and not later than the row of
-   the next "no level-off" (rule 5). It says the runway of the next approach: the runway on which the flight landed,
-   after its last go-around.
+4. The runway word that ends G (D19): at the first level after the go-around row held at least 150 m above the go-around
+   point (a level flown at the low point before the climb is not it), and not later than the row of the next "no
+   level-off" (rule 5). It says the runway of the next approach: the runway on which the flight landed, after its last
+   go-around. A go-around without such a row, or whose row comes at or after the next go-around row, is refused ("go-around
+   not ended").
 5. A landing passage that the flight comes back from must lie inside the low pass of a go-around; otherwise the
    flight is refused (§4.1).
 6. Each approach is read separately (D26): the last descent that reaches the go-around row says "no level-off" (§4.4);
@@ -622,7 +645,8 @@ the words on a Δ grid:
    heading word that moves across a runway word is said in the frame where it is heard (D46, §3.3).
 3. The first Δ row says all five columns. The grammar rules (§3.7) are checked again on the Δ grid. The rounding keeps
    the order of the words, and the words of one 2 s row stay in one Δ row (a level word and its angle word, a
-   go-around row).
+   go-around row). A "go-around" and the runway word that ends it in one Δ row cancel. A sentence in a go-around at its
+   first Δ row is refused (it cannot say a runway there). A word that goes past the last Δ row is not said.
 
 **Why the nearest row (D45).** A word put on the next Δ row is late by (Δ − 2)/2 on average, and a word said when the
 matched point has passed its place (§4.9) is late by Δ/2 more: approximately 1 s at Δ = 2 s, 3 s at 4 s and 7 s at 8 s.
@@ -690,7 +714,8 @@ also gives.
    rows before it stay observed.
 2. The aircraft flies with its own dynamics or with a stand-in's, by the rule of the replay (`autopilot/replay.py`
    `group_of`). A flight that the replay does not fly (no identified type, no aircraft dynamics, or no published approach
-   speed) gives no training sentence. The artefact counts these flights by reason.
+   speed) gives no training sentence. Nor does a sentence with fewer than two rows from the first predicted step, or in
+   a go-around at it. The artefact counts these flights by reason.
 3. At each row, the labeller finds the matched point, then decides the words of the row: the observed words that the
    matched point has reached ("When the observed words are said", below) and the correction words. The executor hears
    them together.
@@ -709,6 +734,8 @@ the matched point:
 - the lateral error e_y is the distance of the flown position from the observed path, perpendicular to the observed
   track there (positive to the right);
 - the vertical error e_h is the flown height minus the observed height.
+
+The observed height and track are those that the labeller reads (smoothed, §4.1); the positions are as observed.
 
 The reference is the matched point, not the observed point at the same time. Thus a difference along the path (a
 difference of time) is not corrected, and the speed words stay the observed ones.
@@ -735,12 +762,13 @@ predicted step says every column (rule 1): the observed words in force before Δ
 
 Why:
 
-- A word gives a target, not a rate. A speed word does not tell how fast to change the speed, and the executor changes
-  the speed at its own fixed rate (§5.6). Thus the flown aircraft moves ahead of the observed aircraft along the path,
-  or falls behind it. The comparison does not correct this difference.
+- A word gives a target, not a time. The speed steps (D43) give the rate of a change of speed, but the steps, the
+  dynamics and the 5 m/s grid still leave a difference along the path: the flown aircraft moves ahead of the observed
+  aircraft, or falls behind it (closed loop, select, Δ = 2 s, vectored: p50 221 m, p90 348 m; §11.13). The comparison
+  does not correct this difference.
 - A turn word must come where the observed aircraft turned. A word said at the observed time comes where the flown
-  aircraft is at that time: 2 km ahead along the path before a turn of 90° gives a lateral offset of 2 km after the
-  turn. One correction class removes such an offset too slowly (§11.11).
+  aircraft is at that time: an aircraft d ahead along the path before a turn of 90° is d to the side after the turn.
+  One correction class closes 6–9 m/s, too slowly for such an offset (§11.11).
 - The controller gives a turn at a place, not at a time. The prior learns from the flown states when to say a word, so
   the words must agree with the flown states.
 - A go-around word said at the observed time can come after the flown aircraft has crossed the threshold. Said at the
@@ -761,8 +789,10 @@ observed time (D36).
 **Vertical correction.**
 
 1. Only while a descent class is in force (toward a level or with "no level-off"). During a level hold the level word
-   is the target; its rounding to the grid (§3.4) is not corrected. A climb has one class, so a climb gets no
-   correction.
+   is the target; its rounding to the grid (§3.4) is not corrected. A level hold is the executor's: the level in force
+   is captured (its level-off has started, §5.5). A level reached by a descent says no angle word, so the descent class
+   stays in force there, and the capture, not the angle word, tells the hold. In a level hold no correction starts, and
+   one in force ends. A climb has one class, so a climb gets no correction.
 2. When e_h > H (too high), the labeller says the next steeper descent class. When e_h < −H (too low), it says the next
    shallower descent class. From descent 4 there is no steeper class, and from descent 1 no shallower one: then there is
    no correction.
@@ -770,11 +800,12 @@ observed time (D36).
    overshoot (D53): when e_h changes its sign and |e_h| > H, it says the opposite correction in the same row (item 2,
    where that class exists). A new observed altitude word or angle word ends a correction.
 
-**The words.** A correction word is an ordinary word of its column (§3.3, §3.5). The grammar (§3.7) checks it. The
-envelopes of the closed-loop sentence are checked on the flown states. The envelopes of the observed words on the
-observed track stay as the readout of the open-loop reading. The capture row, the runway words and the go-around rows
-come from the open-loop reading: the decisions come from the observed track; the closed-loop reading only adds
-corrections. The executor reads only words (D2, D3).
+**The words.** A correction word is an ordinary word of its column (§3.3, §3.5). The grammar (§3.7) checks each row at
+the flown height; a row that it refuses refuses the flight (counted by reason). The envelopes of the closed-loop
+sentence are checked on the flown states. The envelopes of the observed words on the observed track stay as the readout
+of the open-loop reading. The capture row, the runway words and the go-around rows come from the open-loop reading: the
+decisions come from the observed track; the closed-loop reading only adds corrections. The executor reads only words
+(D2, D3).
 
 **Tolerances (D32).** Y = 30 m and H = 15 m, constants of the labeller in the spec. With Y = 30 m the flown path ends
 within approximately 30 m of the observed path, which ends 2 m from the centreline (median), far inside the runway
@@ -807,6 +838,7 @@ executor uses only the vocabulary; a parameter mined from data shows that it doe
 | The vocabulary spec | Grids, nominal angles, tolerances, lead, turn-rate limit, bank limit, speed change rate |
 | The words of each row | The targets |
 | The course of each candidate runway (`candidates.json`) | Conversion of heading words (§5.4) |
+| The airport elevation E (`candidates.json`) | Conversion of level words: a level T is flown at T + E MSL (§5.5, D58) |
 | The distance to the threshold of R | The deceleration to the approach speed (§5.6) |
 | The aircraft: aerodynamic data, installed thrust, published maximum landing mass, published approach speed | Dynamics and "unspecified" speed |
 
@@ -855,7 +887,8 @@ judge records each limit that bound (§5.8).
 
 The inner path-angle loop: γ̇* = sat((γ_ref − γ) / τ_γ, ±γ̇_max), τ_γ = 2 s. γ̇_max is twice the smallest rate that keeps
 an entry into the steepest descent class inside its tube: 2 × V·γ_lo² / (2ε), with γ_lo the lower edge of the steepest
-class and ε the narrowest level band of the grid. The modes choose γ_ref (climbing positive):
+class and ε the narrowest level band of the grid. A level T is the height T + E MSL (D58); h is the height of the
+aircraft above E. The modes choose γ_ref (climbing positive):
 
 | Words in force | Mode | γ_ref |
 |---|---|---|
@@ -887,11 +920,12 @@ into the last 5 m/s. A speed word is a step of 5 m/s (D43), so the executor make
 of a longer change comes from the words. Where the thrust limits cannot give a_max, the thrust limit binds (§5.3), and
 the replay counts it. "Unspecified" is the published approach speed of the type (an indicated airspeed at the maximum
 landing mass), scaled by √(m / maximum landing mass) to the mass of the aircraft and flown as the true airspeed at the
-present density. The deceleration to it is the larger of a_U = 0.25 m/s² (a speed step of 5 m/s divided by the minimum hold of
-20 s) and the rate that reaches it at the threshold of R, not more than a_max. While G is true,
-"unspecified" means the pilot's own speed in a missed approach: the executor holds the airspeed that the aircraft has
-at the go-around row (D27; Claude's reading, not checked in the regulation text). A speed word of the model ends it at
-any row.
+present density. A flight on a stand-in's dynamics has the stand-in's mass, so it takes the published speed of its own
+type unscaled. The deceleration to it is the larger of a_U = 0.25 m/s² (a speed step of 5 m/s divided by the minimum
+hold of 20 s) and the rate that reaches it over the straight-line distance to the threshold of R, not more than a_max.
+While G is true, "unspecified" means the pilot's own speed in a missed approach: the executor holds the airspeed that
+the aircraft has at the go-around row (D27; Claude's reading, not checked in the regulation text). A speed word of the
+model ends it at any row.
 
 ### 5.7 What the executor does not do (D9)
 
@@ -959,8 +993,9 @@ the model says "go-around" before the DA point, the flight continues (§3.2).
   From the first predicted step on, every input that comes from a state (the own state, the candidate vectors, the
   motion) comes from the flown states of the closed-loop reading (§4.9), not from the observed track. The words in
   force are those of the closed-loop sentence, corrections included. In closed loop the states come from the executor.
-- **Own state (D5, D23).** The own state of the aircraft has no frame: its MSL height (the level words are MSL), its
-  ground speed and its vertical rate.
+- **Own state (D5, D23, D58).** The own state of the aircraft has no frame: its height above the airport elevation (the
+  level words are above it), its ground speed and its vertical rate. No MSL height: with it, the airport elevation (a
+  constant of the airport) would be an input (D24).
 - **Frame (D5, D23).** Every position and every direction is in the candidate vectors. Each candidate vector gives the
   aircraft in the frame of that candidate: the distance to its threshold along its course, the offset right of its
   final, the height above its threshold, the motion direction minus its course (sine, cosine)
@@ -982,13 +1017,16 @@ the model says "go-around" before the DA point, the flight continues (§3.2).
     length alone tells the left runway of KRDU from the right one (05L / 23R 3,048 m, 05R / 23L 2,286 m).
   - The spacing of parallel runways is different at each airport: KRDU 1,068 m, KSJC 213 m, KSMF 1,827 m, KSTL 397 /
     855 / 1,251 m. A layout relative to R is a code of the airport when R is known.
-  - The runway-intent study found this channel (R1.1, gradient-boosted trees, split by day; [plan](../history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md)
+  - The runway-intent study found this channel (R1.1, gradient-boosted trees, split by day; [plan](../2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md)
     §15): with a constant of each runway (`prior_share`), the trees recognised "30L" and were right on only 53 / 59 % of
     the flights on the two KSJC days with 30L closed. Without it (R1.1b) they were right on 96.8 / 97.6 %. For the prior,
     R46 shows that it uses an airport identity when it gets one (§11.1).
 
   The constants are also not necessary. The length is a cause only together with the aircraft type, and the prior has
-  no aircraft type. The elevation is the MSL height minus the height above the threshold. Which of two parallel runways
+  no aircraft type. The elevation is not needed: the words and the own height are above the airport, and each candidate
+  gives the height above its own threshold. (The own height minus a candidate's height above its threshold is that
+  threshold's height relative to E: 0–28 m at the five airports, a small constant of the runway that two physical inputs
+  give together.) Which of two parallel runways
   is the left one shows at each step in the offsets right of their finals (the value of the left runway is always
   larger). The relative positions of all candidates together still show the layout of the airport. That is real
   geometry, and the prior has it; only the held-out airports of D39 can measure how much the prior uses it. A constant comes back
@@ -1071,7 +1109,7 @@ come from:
 
 | What the airport needs | Source |
 |---|---|
-| Candidate runways and their geometry: threshold, course, TCH, glidepath angle, LPV DA | FAA CIFP and the runway data (§4.2 refuses a candidate without them) |
+| Candidate runways and their geometry: threshold, course, TCH, glidepath angle, LPV DA; the airport elevation | FAA CIFP and the runway data (§4.2 refuses a candidate without them) |
 | The procedure data for the procedure masks: the FAF, the LPV cone | FAA CIFP procedure details |
 | The landings in the 30 min before the step | The airport's tracks (offline) or a live surveillance feed |
 | The dynamics of each aircraft type | Independent of the airport |
@@ -1085,10 +1123,11 @@ The design makes sure of three more points:
 3. **The check is a flight.** Each fold of D39 runs the full closed loop at its held-out airport (the prior speaks,
    the executor flies, the judge decides), as well as the teacher-forced loss. The final test on KAUS is the same.
 
-**Known limit: the altitude grid.** The altitude words are MSL, and the 60 m steps reach to 1,260 m (§3.4). At an
-airport whose elevation is above approximately 600 m, the levels of the final approach fall in the 120 m segment,
-coarser than at the five training airports. The five airports and KAUS lie below 200 m, so this design does not meet
-the limit.
+**Heights and speeds at a high airport.** The altitude words are above the airport elevation (D58), so a level word means
+the same height above the airport, and the final approach lies in the 60 m segment, at every airport. The speed words
+are ground speeds: at a high airport one indicated airspeed is a larger ground speed (at E = 1,650 m approximately
+8 %, about 6 m/s at an approach speed of 70 m/s: one step). The speed words of a high airport thus lie about one step
+above those of the training airports for the same phase. The five airports and KAUS lie below 200 m.
 
 ---
 
@@ -1225,10 +1264,10 @@ the limit.
 
 ### 9.1 Gates
 
-Each stage has a gate: the labeller (completeness, envelope containment with envelope width), the replay (the
-executor flies the labelled sentences), the prior (teacher-forced likelihood against baselines, free generation), the
-post-training, the multi-aircraft stages. The user sets the criteria of each gate after the design is settled (D7).
-This document sets none.
+Each stage has a gate: the labeller (completeness, envelope containment with envelope width), the replay (the executor
+flies the closed-loop sentences; §4.8, reading 4), the prior (teacher-forced likelihood against baselines, free
+generation), the post-training, the multi-aircraft stages. The user sets the criteria of each gate after the design is
+settled (D7). This document sets none.
 
 ### 9.2 Identities (D21)
 
@@ -1239,8 +1278,8 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | # | What | Its identity | Stage |
 |---|---|---|---|
 | 1 | The vocabulary (grids, classes, tolerances, reading name) | The spec sha. It is the format | A |
-| 2 | The labeller, open-loop and closed-loop reading | The labeller conformance (§14.2 A3): a fixed reference sample, labelled again by the code on disk, gives the same words, on the 2 s rows and on the Δ grid at Δ = 4 and 8 s (D49); for the closed-loop reading (D32), with the artefact's executor spec, the same correction words and the same flown states within the tolerance of the executor conformance. The artefact records which code wrote it, as information | A |
-| 3 | The executor | The sha of the spec's parameters and the conformance of its reference tracks (C33) | A |
+| 2 | The labeller, open-loop and closed-loop reading | The labeller conformance: the artefact holds a reference sample (`conformance/`; train, seed 1337, 50 labelled and 10 refused flights for each airport, with their signals); `instruction_conformance` labels it again with the code on disk and requires the same words and the same refusals, on the 2 s rows and on the Δ grid at Δ = 4 and 8 s (D49). The closed-loop reading (D32) has its own reference sample (train, seed 1337, 10 flights for each airport, at each Δ of the artefact): with the artefact's executor spec, the same correction words and the same flown states on the 2 s rows (D51), within the tolerance of the executor conformance. Each check writes a passed record named by a digest of the code by its logic; a runner that labels, reads the closed loop or replays sentences requires the passed record of the code on disk. The artefact records which code wrote it, as information | A |
+| 3 | The executor | The sha of the spec's parameters and the conformance of its reference tracks (C33): the spec's labelled train flights, flown again in every way the executor flies (single-aircraft batch, multi-aircraft batch, single flight) within 1e-6 m. The open-loop sentences of these flights are said on their own rows (D57) | A |
 | 4 | The flights of an artefact | The stored signals. A consumer that rebuilds a flight from the harvest compares it row by row with them (`autopilot/flights.py` `require_same_flight`). No byte hash of an arrival manifest | A |
 | 5 | The artefact of a prior | The spec sha, the day split, the candidate table and the sha256 of the sentence files | B |
 | 6 | The edge features of a scene | A conformance check: fixed reference scenes give the same edge features | C |
@@ -1265,7 +1304,8 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | Turn-rate limit | 4.7°/s | Spec, measured (p99.9) |
 | Bank limit | 32° | Spec, measured (p99.9) |
 | Roll rate p | 5°/s | FAA Order 8260.3G Appendix E §4 ¶6.a ("roll-in rates of up to five degrees per second") |
-| Level grid | 60 m to 1,260 m, 120 m to 2,700 m, 450 m to 5,400 m MSL; 40 levels | D22 (fit of the altitude-grid proposal) |
+| Altitude reference | The airport elevation E; a level T is T + E MSL | D58 |
+| Level grid | 60 m to 1,260 m, 120 m to 2,700 m, 450 m to 5,400 m above E; 40 levels; fitted again on the level-offs above E, the user chooses | D22 (fit of the altitude-grid proposal, on MSL), D58 |
 | Level envelope ε | half the larger gap to the neighbouring levels + 10 m: 40 m (0–1,200 m), 70 m (1,260–2,580 m), 235 m (2,700–5,400 m); "no level-off" 40 m | D22, D52 |
 | Level detection | ≥ 20 s, rows within 25 m of the piece's median | Labeller constant (§4.4) |
 | Descent classes | edges −0.5 / 2.0 / 2.75 / 3.75 / 10°; nominal 1.5 / 2.5 / 3.0 / 4.5° | Spec; k-means on the train days, weight length² (D54), rounded to 0.25° (D56) |
@@ -1281,13 +1321,14 @@ by the bytes of its source. Data are identified by their flights, not by the byt
 | Landed lateral limit | FAS half-width at the threshold, 106.7 m | FAA Order 8260.58D Formula 3-1-1 |
 | Lined up | track within 30° of the course | 7110.65BB 5-9-2, TBL 5-9-1 |
 | DA check | vertical ±22 m of the published glidepath; lateral inside the FAS cone at the DA distance | D38 (`evaluation/thresholds.py`; FAA Order 8260.58D Formula 3-1-1) |
-| Time limit | remaining observed time × 1.5 | Fixed choice |
-| Closed-loop reading: tolerances | lateral Y = 30 m, vertical H = 15 m; a correction ends below half the tolerance or at a change of sign | D32 |
+| Time limit | remaining observed time × 1.5, plus 900 s for each go-around | Fixed choice; the 900 s: the user, 2026-10-02 |
+| Closed-loop reading: tolerances | lateral Y = 30 m, vertical H = 15 m; a correction ends below half the tolerance or at a change of sign; a change of sign beyond the tolerance says the opposite correction in the same row | D32, D53 |
 | Closed-loop reading: correction | heading: one class (5°) toward the observed path; angle: the next descent class | D32 |
 | Closed-loop reading: observed words | at the first Δ row whose matched observed time is less than Δ/2 before the word's 2 s time (the Δ row nearest to its place; a tie: the later row); a heading word in the frame where it is heard | D42, D45, D46 |
 | Closed-loop reading past the end of the observed path | no correction (one in force ends); lateral error for the readouts, no vertical error | D44 |
-| Turn law of the executor | unchanged after A13 | D47 |
+| Turn rate of a heading word | the smallest of: the error over the time left until L (not less than two cycles), the stopping rate √(2·g·p·\|e\| / V), the turn-rate limit | §5.4; D47 |
 | Δ grid of the open-loop reading | each 2 s word on the nearest Δ row (a tie: the later row) | D45 |
+| Word clock of a replay | `time`: a sentence is said on its own rows (the formal executor spec `v12_20261004` has `track` until A19) | D57 |
 
 ---
 
@@ -1299,9 +1340,14 @@ All counts in §11.2–§11.4 come from two runners on the train split of artefa
 (§11.4; output `4dTrajectory/outputs/POOLED/analyses/final_approach_20261003/final_approach.json`). Each output gives
 the same numbers for each airport too. `docs/reference/runners.md` R48, R49 give the definitions.
 
+The smoke builds of §11.9 and §11.11–§11.14 took the first 80 sorted flight keys of each airport and split (a key starts
+with the callsign: approximately 400 train flights, 373 of them one airline), and each fitted its spec on its own train
+flights (the A9 smoke: descent nominals 1.51 / 2.36 / 3.08 / 4.36°, the climb 4.24° from one climb piece). Their numbers
+show how the mechanisms act; they are not numbers of the formal artefact (D55).
+
 ### 11.1 The prior uses its airport embedding (R46)
 
-[Readout](readouts/2026-10-03_airport_embedding.zh.md). On the validation days, a replacement of the airport embedding
+[Readout](../../two_tier/readouts/2026-10-03_airport_embedding.zh.md). On the validation days, a replacement of the airport embedding
 with the mean of the four other embeddings increases the teacher-forced loss by 0.024 (base) and 0.028 (augmented) for
 each step. It decreases the landed share in free generation by 5.8 and 8.0 points. Approximately 60 % of the increase is
 in the heading column. The five embeddings are almost orthogonal: an identity table, not a property of the airports.
@@ -1361,9 +1407,9 @@ largest).
 
 - The 9.4 readouts: the start model gives the go-around word approximately 1e−11 at a probe. With a cross-entropy
   weight of 10–100 on the probes, the model says go-around, but 88 of its 108 own go-arounds end worse than round 0
-  ([readout](readouts/2026-10-03_9_4_weights.zh.md)).
+  ([readout](../../two_tier/readouts/2026-10-03_9_4_weights.zh.md)).
 - R40 v2: 105 real go-arounds on the training days; from the go-around to the next turn onto the final, median 421 s,
-  p95 598 s ([readout](readouts/2026-10-01_go_arounds.zh.md)).
+  p95 598 s ([readout](../../two_tier/readouts/2026-10-01_go_arounds.zh.md)).
 - Words in force at the 70 real go-arounds inside the train sentences of `v5`, where each sentence is one
   approach to the landing (R40 v2 joined to the `v5` sentences; a one-off script, 2026-10-03): "descend to land" 0 of
   70; a level 70 of 70 (median 450 m MSL; the go-around heights above the threshold p10 / p50 / p90 90 / 236 / 481 m);
@@ -1382,9 +1428,10 @@ From the proposal [altitude_word_grid.zh.md](altitude_word_grid.zh.md) (`v6_2026
 read on 3,964 validation flights; continuous level-off heights). Rounding error of the level words other than row 0,
 p50 / p95 / largest: the chosen grid (40 levels) 17 / 30 / 58 m; the same shape with steps doubling and break points at
 1,200 and 2,400 m (44 levels) 17 / 38 / 79 m; a uniform grid of 48 levels over the range 35 / 55 / 57 m. The
-`instruction-v3` grid (30 m, 182 classes) has at most 15 m. These numbers come from a one-off script of that proposal;
-the spec measurement of stage A gives them again from a runner (§14.2 A3). The proposal did not fly the grid: the replay
-of stage A does.
+`instruction-v3` grid (30 m, 182 classes) has at most 15 m. These numbers come from a one-off script of that proposal.
+The spec measurement gives them from a runner (`instruction_spec`, `level_rounding`): on all train days with the labeller
+of stage A (code at `42f3ff62`, 25,654 level words), 16 / 34 / 223 m; the largest is in the 450 m segment. These are MSL
+heights; since D58 the measurement reads the heights above the airport elevation (A20).
 
 - In `v6_20261002`, 99.7 % of the level words are under 3,000 m; its 30 m grid used 116 of its 182 classes.
 - The geometric height of one assigned pressure level moves from day to day by about height × ΔT / 273 (ΔT: the day's
@@ -1574,44 +1621,35 @@ Checked on 2026-10-03 in the local PDF files (`docs/literature/runway_assignment
 
 ## 13 Key code index
 
-The code of this design (stage A). Line numbers are at the end of A9 on `dev-two-tier-v4`; paths are relative to
-`4dTrajectory/ts_transformer/`.
+The current code that this design changes. Line numbers are at `dev-two-tier` `26e96c5e`.
 
 | What | Where |
 |---|---|
-| Columns; "go-around" in the runway column | `instructions/words.py:20` `COLUMNS`, `:24` `RUNWAY_GO_AROUND` |
-| Heading classes relative to the course of R | `instructions/words.py:80` `heading_class`, `:84` `heading_track_deg` |
-| The 40 levels, their bands | `instructions/words.py:47` `altitude_tolerances`, `:89` `altitude_index` |
-| Grammar: rules 1–6 and the runway/G table, one function | `instructions/grammar.py:58` `apply`, `:127` `runway_words_allowed` |
-| Approaches; capture row per approach; heading words relative to the R of each row | `instructions/labeller/lateral.py:32` `Approach`, `:53` `capture_row`, `:71` `per_step_words`, `:105` `read_lateral` |
-| Level test by the piece's own median; held height; the go-around climb and the final descent before it (D26); tubes | `instructions/labeller/vertical.py:65` `vertical_pieces`, `:86` `held_altitude`, `:122` `climb_after`, `:133` `read_vertical`, `:236` `tube_bounds`, `:267` `tube_checks` |
-| Speed words per approach; "unspecified" from the capture row | `instructions/labeller/speed.py:90` `read_speed` |
-| Go-around rule (R40's, on the rows) | `instructions/labeller/go_around.py:62` `low_passes`, `:109` `go_arounds` |
-| Landing cut, go-arounds in the gate, approaches, runway words (D19, D26) | `instructions/labeller/read.py:59` `ApproachReading`, `:126` `admit`, `:168` `flight_go_arounds`, `:185` `runway_again_rows`, `:208` `read_flight` |
-| Row interval (D11, D25); a heading word across a runway change | `instructions/labeller/interval.py:51` `first_interval_row`, `:75` `on_interval` |
-| Labeller conformance (§9.2 #2) | `instructions/conformance.py:59` `labeller_code_sha256`, `:150` `check`, `:204` `require_conforming_labeller` |
-| The words in force at each go-around row (readout) | `instructions/readout.py:30` `go_around_in_force` |
-| Heading envelope | `instructions/envelope.py:31` `heading_words_inside` |
-| Straight-line glidepath (D13, the DA check) | `instructions/airport.py:183` `glidepath_height_m` |
-| Closed-loop sentences on disk | `instructions/artefact.py:212` `CLOSED_LOOP_SCHEMA`, `:225` `write_closed_loop`, `:255` `load_closed_loop` |
-| Heading law; conversion with the course of R ("go-around" changes no target, D27) | `autopilot/lateral.py:52` `word_rate`, `:127` `Lateral.word_error`, `:154` `Lateral.rate` |
-| Vertical modes; the go-around angle (D28) | `autopilot/vertical.py:49` `GO_AROUND_MIN_RAD`, `:54` `go_around_angle_rad`, `:88` `Vertical.rate` |
-| "Unspecified" under G holds the go-around row's airspeed | `autopilot/speed.py:71` `Speed.hear_go_around`, `:76` `Speed.rate` |
-| The cycle; go-around time; approach crossing ends the flight | `autopilot/executor.py:60` `GO_AROUND_EXTRA_S`, `:160` `Executor.cycle` |
-| R and G per row | `autopilot/sentence.py:89` `_filled` |
-| Outcomes, their order; the DA check (D38); no crossing is an event under G (D33) | `autopilot/judge.py:75` `OUTCOMES`, `:78` `EVENT_ORDER`, `:136` `decision_check` (D38: `evaluation/thresholds.py` `RNAV_TERMINAL_VERTICAL_BOUND_M`, repository root), `:159` `_outcome`, `:321` `judge` |
-| TCH, glidepath, DA read by the judge | `autopilot/runway_data.py:25` `VerticalPath` |
-| A sentence on Δ; the readout | `autopilot/replay.py:77` `sentence_on_interval`, `:88` `instructions_of`, `:233` `batch_of`, `:398` `summary`; `experiments/executor_replay.py:110` `readout_table` |
-| Closed-loop reading (D32): the matched point, the corrections, the rows without one (D34), the flight, its conformance, its replay | `autopilot/closed_loop.py:107` `ObservedPath`, `:140` `uncorrected_m`, `:149` `Corrector`, `:239` `read`, `:327` `read_chunked`, `:355` `closed_loop_code_sha256`, `:429` `check`, `:498` `require_conforming_closed_loop`, `:540` `replay_batch`; `experiments/instruction_closed_loop.py:74` `main`; `experiments/executor_replay.py:236` `closed_loop_columns` |
-| Clearance mask (stage C) | archived: `archive/two_tier_v3_2026_10/inference/separation_masks.py` |
-| Prior: airport embedding, inputs (stage B) | archived: `archive/two_tier_v3_2026_10/prior/model.py`, `prior/data.py` |
-| FAS cone; DA above the threshold | `flight_scenarios/fas_geometry.py:46` `fas_course_geometry`; `trajectory_data_process/harvest/airports.py:169` (repository root) |
-| A15 (line numbers at `4a2f4fc5`): one test of "the same track" (D46, D48) | `instructions/words.py:173` `same_track`; the 2 s sentence `instructions/labeller/sentence.py:23` `assemble` |
-| A15: a sentence on its UTC Δ grid; the Δ rows of the 2 s rows (D49, D51) | `instructions/labeller/interval.py:95` `on_utc_grid`, `:68` `on_interval_rows` |
-| A15: the labeller reference on the Δ grids (D49) | `instructions/conformance.py:47` `INTERVALS_S`, `:81` `sentences_of` |
-| A15: closed-loop states on the 2 s rows (D51) | `instructions/artefact.py:230` `write_closed_loop` (lengths and marks), `autopilot/closed_loop.py` `read` |
-| A15: the rule of D50 and D34's third reading | `autopilot/closed_loop.py:215` `observed_tracks`, `:227` `outside_rows`; `experiments/instruction_closed_loop.py` `summarise` (`outside_the_tolerance`) |
-| A16 (`3e70b4f3`): an overshoot corrected in its row (D53) | `autopilot/closed_loop.py:330` `Corrector.row` (lateral; the angle just below) |
+| Columns; the approach classes | `instructions/words.py:16`, `:20`–`:23` |
+| Absolute heading classes | `instructions/words.py:56` `heading_index`, `:59` `heading_deg` |
+| "Descend to land" value | `instructions/words.py:37` |
+| Approach transitions (decode rule) | `instructions/grammar.py:30` `APPROACH_NEXT`, `:53` `approach_words_allowed` |
+| Row rules (altitude and angle) | `instructions/grammar.py:36` `step_allowed` |
+| Capture row | `instructions/labeller/lateral.py:48` `capture_row` |
+| Heading words cut at the clearance | `instructions/labeller/lateral.py:85` `per_step_words`, `:130` `read_lateral` |
+| Clearance at the turn onset | `instructions/labeller/lateral.py:116` `capture_turn_onset` |
+| "Unspecified" anchored to the clearance | `instructions/labeller/speed.py:83` `read_speed` (`join_row`) |
+| Heading envelope | `instructions/envelope.py:19` `heading_word_rows`, `:31` `heading_words_inside` |
+| Convergence and corridor | `instructions/envelope.py:78` `heading_converges`, `:96` `corridor` |
+| Tube checks | `instructions/labeller/vertical.py:169` `tube_bounds`, `:200` `tube_checks` |
+| Landing screen | `instructions/labeller/read.py:61` `landing_passages` |
+| Heading law | `autopilot/lateral.py:99` `word_rate` |
+| Capture start, wait, bend, lock | `autopilot/lateral.py:262` `Lateral.rate` (`:284` capture start, `:293` wait) |
+| Vertical modes; glidepath floor; go-around climb | `autopilot/vertical.py:140` `Vertical.rate`, `:74` `GLIDEPATH_BELOW_M`, `:81` `GO_AROUND_CLIMB_GRADIENT` |
+| Runway lock | `autopilot/executor.py:149` `runway_locked` |
+| TCH and glidepath read by the executor | `autopilot/runway_data.py:26` `VerticalPath`, `:51` `published_vertical_paths` |
+| Outcomes | `autopilot/judge.py:82` `OUTCOMES`, `:126` `runway_lateral_limit_m`, `:144` `_outcome` |
+| FAS cone | `flight_scenarios/fas_geometry.py:46` `fas_course_geometry` (repository root) |
+| DA above the threshold | `trajectory_data_process/harvest/airports.py:169` (repository root) |
+| Prior: airport embedding, position embedding, candidate sum | `prior/model.py:312`, `:313`, `:382`, `:385` |
+| Prior: step, relative and candidate features | `prior/data.py:63`, `:64`, `:70` |
+| Clearance mask | `inference/separation_masks.py:131` `clearance_check` |
+| Edge features | `inference/scene_edges.py:51` `EDGE_FEATURES` |
 
 ---
 
@@ -1622,24 +1660,25 @@ Read the design sections that a milestone names before you start it.
 
 ### 14.1 Branch and rules
 
-1. Make the branch from `dev-two-tier` at the commit that holds this section:
-   `git worktree add -b dev-two-tier-v4 .claude/worktrees/two-tier-v4 dev-two-tier`. In the worktree, link the ignored
-   data trees with absolute links: `data`, `trajectory_data_process/outputs`, `4dTrajectory/outputs`,
-   `aeroviz-4d/public/data/airports`. These links point at LIVE data.
+1. The branch is `dev-two-tier-v4`, in the worktree `.claude/worktrees/two-tier-v4`, made from `dev-two-tier`. Before a
+   milestone that a new design commit holds, merge `dev-two-tier` into it. The ignored data trees of the worktree
+   (`data`, `trajectory_data_process/outputs`, `4dTrajectory/outputs`, `aeroviz-4d/public/data/airports`) are absolute
+   links to LIVE data.
 2. Each milestone: read the code that it changes; write the code and its tests; run the milestone's test files; get a
    code review from a separate reviewer (code only, never documents); correct; commit with explicit paths. Never use
    `git add -A`. Before each commit, read `git diff --cached --stat`.
 3. A test never writes under a live root. A test that calls a runner's `main()` gives every write root a tmp path
    (`tests/support.py` `labelled_instruction_artefact` is an example).
-4. Run single test files in the foreground. Run the full ts suite (approximately 55 min) only at the end of the stage,
-   detached (`nohup setsid`, the script writes its own PID file).
-5. No compatibility (principle 8). Every changed format gets a new name: reading `instruction-v4`, spec schema
-   `ts-instruction-spec-v5`, sentences schema `ts-instruction-sentences-v3`, executor spec schema `ts-executor-spec-v7`.
-   The new code refuses an old artefact by its name. No `.get(key, default)` fallbacks, no branches on a schema version.
+4. Run single test files in the foreground. Run the full ts suite (approximately 55 min, detached: `nohup setsid`, the
+   script writes its own PID file) at the end of each milestone that changes code, before its report, and before a
+   formal build.
+5. No compatibility (principle 8). Every changed format gets a new name (the reading name, each schema name; the
+   names are constants of the code). The new code refuses an old artefact by its name. No `.get(key, default)`
+   fallbacks, no branches on a schema version.
 6. SI units only. A value from a regulation has its paragraph in a comment and is defined one time.
-7. No formal data build and no formal readout. A smoke build (a stated limit for each airport) goes to a tmp or
-   scratch directory. It uses the spec that the user chose (D15), and its flights are a random sample for each
-   airport and split, seed 1337 (D55). The formal artefact, the replay gate and every criterion wait for the user
+7. A formal build or a formal readout only where the user orders it (A18). A smoke build (a stated limit for each
+   airport) goes to a tmp or scratch directory. It uses the spec that the user chose (D15), and its flights are a random
+   sample for each airport and split, seed 1337 (D55). The replay of the val days and every criterion wait for the user
    (D7). Never write into an existing directory under `4dTrajectory/outputs/`.
 8. Do not touch the checkouts of running experiments (`.claude/worktrees/step9-run` and others) or the main checkout.
 9. A defect that you find outside the milestone goes to `docs/code-health-followups.md` (an entry and a table row), not
@@ -1654,332 +1693,80 @@ Read the design sections that a milestone names before you start it.
 
 ### 14.2 Stage A: vocabulary, labeller, identities, executor, judge, replay
 
-**A0. Archive.** Move to `archive/two_tier_v3_2026_10/`, unmodified and with their tests, the modules that belong to
-the old vocabulary and that stage A does not rewrite. Write a `README.md` there: what moved, why (D20), the last commit
-before the move, which stage brings each part back. The list:
+A0–A17 are done (§0.3 gives the commits; the reports are in `readouts/`). The rules are in the design sections above;
+the table gives what each milestone built. The module and the test that carry each decision of A0–A14 are in the table
+of Claude's check (`readouts/2026-10-04_stage_a_check.zh.md` §2), those of A15–A17 in their reports.
 
-- `prior/` (the whole package; stage B brings it back, rewritten);
-- every `experiments/prior_*.py` and `experiments/traffic_*.py`, `experiments/window_training_export.py`,
-  `inference/separation_masks.py`, `inference/scene_edges.py` (stages B and C);
-- the Training exports: `experiments/instruction_training_export.py`, `experiments/executor_training_export.py`,
-  `experiments/training_attitude.py`, `instructions/training_files.py`, `instructions/display.py` (stage D);
-- the readouts of old artefacts: `experiments/go_around_census.py` (R40; A2 moves its detection rule into the
-  labeller), `experiments/instruction_word_frames.py` (R48), `experiments/instruction_final_approach.py` (R49),
-  `experiments/heading_lead_ablation.py` (R23).
+| Milestone | What it built | Decisions |
+|---|---|---|
+| A0 | The archive of the modules of the old vocabulary that stage A does not rewrite (`archive/two_tier_v3_2026_10/`, with a `README.md`: what moved, why, which stage brings each part back; the backend tests that use the two-tier code fail until stage D) | D20 |
+| A1 | The vocabulary: five columns, the runway/G table, heading classes relative to the course of R, the altitude grid, grammar rules 1–5 as one function for the labeller and the speaker | D1, D8, D10, D12, D14, D22 |
+| A2 | The labeller: heading words from row 0 to the end, the go-around reading, the level test without the grid, "unspecified" from the capture row, the Δ grid; candidates without TCH, glidepath angle or LPV DA refused | D4, D11, D18, D19, D25 |
+| A3 | The artefact and the identities: the labeller conformance (§9.2 #2), no byte checks of the arrival manifests, the sentences schema, the spec measurement with its rounding candidates and the level rounding errors | D15, D21 |
+| A4 | The executor without the laws of §5.7; heading words converted with the course of R when heard; the go-around; the words heard at each Δ row; the same in `autopilot/single.py` | D2, D3, D9, D10, D27 |
+| A5 | The judge: the outcomes of §5.8 in their order, no event while G is true, the time limit + 900 s for each go-around, the DA check | D3, D33 |
+| A6 | The executor spec (`ts-executor-spec-v7`) and its conformance; `executor_replay --row-interval-s` | D21 |
+| A7 | The close of the first part: the full suite, the report `readouts/2026-10-03_stage_a_report.zh.md` | — |
+| A8 | Each approach read separately; rule 6; "go-around" changes no target; the go-around angle | D26–D28 |
+| A9 | The closed-loop reading (`autopilot/closed_loop.py`, runner `instruction_closed_loop`) and its conformance; the replay of closed-loop sentences; the DA check with the bounds of D38; the readings of D34 | D32–D34, D38 |
+| A10 | The observed words said at the place; the flight to the end of the executor or the time limit | D42 |
+| A11 | Speed words in steps; the executor at a_max | D43 |
+| A12 | Each word on the nearest Δ row; a heading word in the frame where it is heard; no correction past the end of the observed path | D44–D46 |
+| A13 | The turn measurement (`experiments/executor_turns.py`, R51); the user kept the turn law | D47 |
+| A14 | A tie at the later row in the closed loop too | D45 |
+| A15 | A heading word of the class in force after a change of R; the flown states on the 2 s rows; the Δ grid in the labeller conformance; the architecture test that the executor's laws do not import the runway data | D48, D49, D51 |
+| A16 | An overshoot corrected in its row | D53 |
+| A17 | The smoke sample random for each airport and split | D55 |
 
-Remove their names from `experiments/__main__.py` `NOT_RUNNERS` where they occur. If a later milestone breaks another
-module that stage A does not rewrite, archive it in that milestone and add it to the README. `tests/test_architecture.py`
-must pass. Note in the README that the backend tests under `aeroviz_backend/tests/` that use the two-tier code
-(`test_single_executor.py`, `test_autopilot_segment.py`, `test_http_server.py` where it calls that route) fail until
-stage D.
+**A18. The chosen spec (D56).** Done: `experiments/instruction_spec.py` `--candidate NAME` (required when the runner
+measures) takes the descent nominals and edges and the climb nominal of that row of `rounding_candidates` (`fitted`,
+`0.5`, `0.25`, `0.1`); `measurements.json` records the chosen row beside the fitted values. Its formal build was stopped
+for D58 (the user, 2026-10-04): the directories `4dTrajectory/outputs/POOLED/instruction_language/v7_20261004/` and
+`4dTrajectory/outputs/POOLED/executor/v12_20261004/` are superseded. They are deleted with the user's go, never kept
+beside the formal artefact of A21.
 
-**A1. Vocabulary** (§3; `instructions/spec.py`, `words.py`, `grammar.py`).
+**A19. One word clock (D57).** Together with A20: A20 changes the executor, and one rebuild serves both.
 
-- Columns: `("runway", "heading", "altitude", "angle", "speed")`. The approach column and its constants go.
-- Runway column: the candidate pointer plus the value "go-around". The states R and G and the table of §3.2.
-- Heading column: class k is the relative heading 5k° from the course of the runway in force (D8). `Words` gets the
-  conversions both ways with the course as an argument; there is no absolute heading class any more.
-- Altitude column: the grid of D22 (§3.4): 40 levels on three uniform segments, with the steps and break points as
-  spec constants; `Words` maps a height to the nearest level and a level to its height, and gives the ε of a level's
-  segment. The value "descend to land" becomes "no level-off", the index after the levels.
-- Angle and speed columns: unchanged.
-- Grammar rules 1–6 of §3.7 and the runway/G table of §3.2, as one function that the labeller checks and the speaker
-  masks with. There is no runway lock (D12).
-- Spec: reading `instruction-v4`, schema `ts-instruction-spec-v5`; the spec sha over the format fields, as now.
-- Tests: the conversion relative ↔ absolute at several courses (KSTL 122.3°, wrap at 0°/360°); every row of the
-  runway/G table, permitted and refused; rules 5 and 6; the first step.
+- Remove the clocks `distance` and `track`: `autopilot/sentence.py` (`DistanceClock`, `TrackClock`, `CLOCKS`),
+  `autopilot/single.py` (`word_clock`), `autopilot/replay.py` (`word_clock`), `ExecutorParams.word_clock`,
+  `executor_spec --word-clock`. A replay and the reference flights of the executor conformance say a sentence on its own
+  rows. A new executor spec schema name (§14.1 rule 5).
+- Tests: the tests of the two clocks go with them; an open-loop replay says each word on its own row; the batch and the
+  single-flight executors give the same flown states on the conformance flights.
+- The readout "the observed words alone" is not built here. When a readout needs it, it is the closed-loop reading with
+  no corrections (a runner setting).
 
-**A2. Labeller** (§4; `instructions/labeller/`).
+**A20. The altitude words above the airport (D58).** After A18; together with A19.
 
-- Heading words (§4.3): the per-row reading in the frame of the landed runway, from row 0 to the last row. No clearance
-  placement, no capture-turn check. `capture_row` stays (for "unspecified" and the readout groups).
-- Go-around (§4.6, D18, D19): move the detection rule of `experiments/go_around_census.py` (the low pass, the levels
-  held 20 s, 150 m below and above) into a new module `instructions/labeller/go_around.py` with its tests (move the
-  relevant tests from `tests/test_go_around_census.py`). Say "go-around" at the first row of the climb (the row of the
-  climb word, D26); read the climb as altitude and angle words; say the runway of the next approach at the first
-  level-off after the climb, not later than the next "no level-off". Read each approach separately (D26, §4.6 item 6):
-  "no level-off" for the last descent that reaches the go-around row, a capture row and "unspecified" for each approach,
-  the runway of the first low pass at the first row. A flight that `instruction-v3` refused only because it crossed and came back is read with this
-  rule. The landing cut is the last qualifying crossing, not one that a go-around follows.
-- Altitude and angle (§4.4): the level test no longer uses the grid (rows within 25 m of the piece's own median, at
-  least 20 s); the word is the nearest level; level pieces with the same word merge; a move between two levels with the
-  same word gives no level word; the tube uses the ε of the word's segment; the name "no level-off".
-- Speed (§4.5): "unspecified" starts at the capture row, with the two exceptions re-anchored (D4).
-- Assembly (§4.7): five columns; the grammar of A1 checked on the 2 s rows.
-- Row interval (§4.8, D11): a pure function that puts a 2 s sentence on a grid of Δ (a multiple of 2 s, rows on UTC
-  multiples of Δ), keeping the last word of a column inside an interval, the first Δ row saying all five columns, and
-  the grammar checked again. It refuses a Δ that does not divide 16 s (D25). Its tests: Δ = 2 gives the sentence back;
-  Δ = 4 and 8 on hand-built sentences; Δ = 6 is refused.
-- Candidates: refuse a candidate without TCH, glidepath angle or LPV DA before labelling (§4.2).
-- Tests: a level at the middle of two 60 m levels is found as level; a slow descent inside one 450 m step is not a
-  level; synthetic flights (`tests/support.py` `fly_legs`, `instruction_flight`) for a downwind–base–final with
-  heading words to the end; a go-around and a second approach (the go-around row, the runway word's row, rule 5);
-  "unspecified" at the capture row with each exception.
+- Vocabulary (`instructions/words.py`, `instructions/spec.py`): a level is a height above the airport elevation E;
+  `Words` maps a height above E to its level and a level to its height, with E as an argument (as the course for the
+  heading words). E is `reference.elevation_m` of the airport in `candidates.json`. A new reading name and new names for
+  every changed format (§14.1 rule 5).
+- Labeller (`instructions/labeller/`): the altitude words from the smoothed height above E; the tubes of §3.4 and grammar
+  rules 3 and 6 on the height above E. The path angles, the level detection and the pieces do not depend on a constant
+  offset, so the descent and climb classes of D56 stay.
+- Executor (`autopilot/vertical.py`, `autopilot/executor.py`, `autopilot/single.py`) and judge (layer 2): a level T is
+  flown and judged at T + E MSL. The DA check, the crossings and the ground contact keep their MSL and threshold
+  references. The closed-loop reading keeps e_h (a difference) and stores MSL heights (D51).
+- Spec measurement (`instructions/measure.py`, `experiments/instruction_spec.py`): the grid fit of §3.4 as a step of the
+  runner: on the level-offs above E of the train days (row 0 apart), at most three uniform segments, break points on a
+  15 m grid, steps from 15, 30, 45, 60, 75, 90, 120, 150, 180, 240, 300, 450 and 600 m, 40 levels, the smallest sum of
+  squared rounding errors (exact dynamic programming). It writes this fit and the grid of D22, each with its rounding
+  error of the level words (p50 / p95 / largest). `--grid NAME` (required when the runner measures, as `--candidate`)
+  takes the chosen grid into the spec; `measurements.json` records it.
+- Tests: two airports with different E give one word for one height above E; the executor levels a word T at T + E MSL;
+  rules 3 and 6 at an airport with E = 188 m; the grid fit finds a known grid in synthetic level-offs; `--grid` refuses
+  a name that is not in the rows.
+- Then (§14.1 rule 12): the spec measurement on all train days in a scratch directory, with A19 and A20. The report
+  gives the grid candidates and their rounding errors, and the rows of D56 again (they must not change). The user
+  chooses the grid (D55).
 
-**A3. Artefact and identities** (§9.2, D21; `instructions/artefact.py`, `instructions/measure.py`, runners).
+**A21. The formal artefact (D56, D58).** After the user's choice of the grid.
 
-- Remove `labeller_source_sha256`, `require_current_labeller` and the labeller check in `load_sentences`.
-- Labeller conformance: when `instruction_labels` writes the artefact, it also writes `conformance/`: a fixed sample of
-  250 labelled train flights (seed 1337, every airport) with their signals and their words. A new runner
-  `instruction_conformance` labels them again with today's code and requires the same words and the same refusals,
-  word for word; it writes `conformance/passed-<code>.json`, where `<code>` is a digest of the labeller's code by its
-  logic (as `autopilot/spec.py` does for the executor). Any runner that labels, or reads sentences for a replay,
-  requires a passed record for today's code.
-- Arrival manifests: remove the byte checks of the manifest (`arrival_manifest_sha256s` stays as recorded information
-  only). `autopilot/flights.py` `require_same_flight` stays.
-- Sentences schema `ts-instruction-sentences-v3`: five columns; per sentence the runway, the capture row, the go-around
-  rows; no `join_row`.
-- The spec measurement (D15): for the descent centres and edges and the climb centre, write the fitted value and the
-  candidates rounded to 0.5°, 0.25° and 0.1°, each with the end-of-piece height error that it leaves (the existing
-  `fit_descent_classes` error, and the same for the climb pieces). Also write the distribution of the climb angles
-  (D15, D28). The spec keeps the fitted values until the user chooses.
-- The spec measurement also writes the rounding error of the level words (row 0 apart, p50 / p95 / largest) under the
-  grid of D22 and under a uniform 30 m grid, on the train flights, so that §11.7 comes from a runner.
-- Runners kept and changed: `instruction_signals`, `instruction_spec`, `instruction_labels`, `instruction_figures`.
-- Tests: the conformance passes on a tmp artefact and fails when a labeller rule changes; an old artefact is refused by
-  its schema name.
-
-**A4. Executor** (§5; `autopilot/`).
-
-- Remove the laws of §5.7: the runway lock (`Executor.runway_locked`), the capture state and turn, the heading bend and
-  own intercept, the centreline tracking, every special law of "descend to land", the glidepath floor and the level
-  flight below the glidepath. The executor laws no longer read the TCH or the glidepath (`runway_data` stays for the
-  judge).
-- Heading: convert each heading word with the course of R at the hearing time; keep the absolute target until the
-  next heading word (§3.3, §5.4).
-- Go-around (§5.4–§5.6, D27, D28): G from the runway column; while G is true a climb word climbs at the go-around
-  angle (the thrust-limited steady climb angle within 1.885°–3°); the heading word in force stays; "unspecified"
-  holds the airspeed; a runway word ends G. No mode climbs without an altitude word.
-- Vertical modes of §5.5; speed law unchanged (§5.6).
-- Row interval: the executor hears the words at the start of each row of Δ (the word clocks of `autopilot/sentence.py`
-  take Δ, not the spec's 2 s).
-- Port every change to the single-flight executor `autopilot/single.py` (the conformance flies it too).
-- Tests: the heading conversion and a runway change that does not turn the aircraft; a go-around (the go-around angle,
-  the heading word in force kept, end by a runway word); "no level-off" flies the class angle without a level-off;
-  nothing captures or locks.
-
-**A5. Judge** (§5.8; `autopilot/judge.py`).
-
-- The outcomes of the §5.8 table, in the order of the table: `dynamics_failure`, `ground_contact`, `crossed_too_high`,
-  `crossed_off_runway`, `unstable_at_minimums`, `landed`, `crossed_other_runway`, `timeout`. The four crossing outcomes
-  of R need an approach crossing (G false, lined up within 30°, inside the landing screen). `crossed_without_capture`
-  goes.
-- A crossing while G is true is not an event. The time limit grows by 900 s at each go-around
-  (`Executor.extend_time_limit`).
-- The DA check: at the DA point, the lateral offset against the FAS cone at that distance
-  (`flight_scenarios/fas_geometry.py`) and the height against the published glidepath, straight-line reference
-  (§11.4). The bounds of D38: ±22 m imported from `evaluation/thresholds.py`, and the FAS cone itself. They are not
-  parameters.
-- Layer 2: the heading words to the end of the flight; the clearance and corridor checks go.
-- Tests: each outcome on a hand-built flown track; the order of two events at one row; a go-around low pass that is not
-  an event; the DA check pass and fail.
-
-**A6. Executor spec, conformance and replay.**
-
-- `executor_spec`: schema `ts-executor-spec-v7`; the parameters and the conformance reference
-  (250 flights) as now; `executor_conformance` as now (§9.2 #3).
-- `executor_replay`: a new option `--row-interval-s` (default 2; a multiple of 2): the sentences go through the A2
-  projection before they are flown. The summary gives each outcome, the words inside their envelopes (with the
-  envelope widths), the go-around sentences apart, for each airport and pooled. It requires the labeller and the
-  executor conformance records.
-- Smoke only (14.1 rule 7): build a smoke artefact (for example 30 flights for each airport) in a scratch directory,
-  pass both conformance checks, and run the replay at Δ = 2 and 4 to its end. No criterion is read.
-
-**A7. Close of stage A.** The full ts suite passes (run detached). §0.3 and §13 are updated. Report to the user: the
-commits, the archive list, the smoke results (as information, not as a verdict), and what stage B needs.
-
-**A8. Go-around reading and the go-around in the executor (D26–D28).** First merge the `dev-two-tier` commit that
-holds this milestone into `dev-two-tier-v4`.
-
-- Labeller (§4.2, §4.4–§4.6): read each approach separately. `vertical.py`: the last descent that reaches a go-around
-  row says "no level-off". `lateral.py` `capture_row`: one per approach, to the end of the approach; an approach that
-  ends at a go-around row outside the corridor has no capture row and is not refused for it. `speed.py` `read_speed`:
-  one reading per approach. `read.py`: the first row says the runway of the first low pass; the go-around row is the
-  first row of the climb; a go-around without a climb word is refused, with its reason.
-- Grammar (§3.7): rule 6, in the one function that the labeller checks and the speaker masks with.
-- Executor (`autopilot/`, and `autopilot/single.py`): remove "fly the course of R after a go-around" and the climb with
-  "no level-off" in force; the go-around angle of §5.5 (γ_T from the dynamics at each cycle, limited to 1.885°–3°);
-  the nominal climb angle while G is false. "Unspecified" holds the airspeed while G is true, as now.
-- Names: keep the names of §14.1 rule 5. No formal artefact exists yet. Delete the smoke artefact of A6 (it was made
-  by superseded code) and build it again.
-- Tests: a synthetic flight with a go-around and a second approach: "no level-off" and "unspecified" in force at the
-  go-around row; "go-around", the level word and "climb" in one row; the first row's runway is the low-pass runway when
-  the flight lands on another runway; rule 6 refuses a go-around row without a level while "no level-off" is in force.
-  Executor: the heading word in force stays after "go-around"; the go-around angle is 3° with ample thrust, γ_T between
-  the limits, and a 1.885° reference when the thrust is short; "go-around" alone starts no climb.
-- Smoke: the replay at Δ = 2 and 4 to its end; each labelled go-around flies as a go-around (G, the climb from its
-  level word, a new runway word, a landing after it). A readout of the smoke artefact gives, for each go-around row,
-  the altitude and speed words in force (the counts of §11.6 for the new labeller), as information.
-- Then the full ts suite again (as A7), and the report.
-
-**A9. Closed-loop reading (D32, D33).** After A8.
-
-- Module in `autopilot/` (§4.9, "Where the code goes"): for one flight, it flies the sentence of a row interval with
-  the executor from the first predicted step and returns the closed-loop sentence (correction words marked) and the
-  flown states on the rows. The comparison, the lateral and the vertical corrections exactly as in §4.9.
-- Spec: the two tolerances Y = 30 m and H = 15 m are labeller constants of the instruction spec (D32).
-- Runner: after `executor_spec`, a runner writes the closed-loop sentences and the flown states for each split and each
-  Δ of the ablation into the artefact, with the counts of correction words and the flights without a training sentence
-  by reason (§4.9, "Artefact"). Sentences schema: a new name (principle 8).
-- Labeller conformance (§9.2 #2): it covers the closed-loop reading, with the artefact's executor spec.
-- Judge (D33): while G is true, no crossing is an event, of R or of another candidate.
-- DA check (D38): the vertical bound imported from `evaluation/thresholds.py` (`RNAV_TERMINAL_VERTICAL_BOUND_M`), the
-  lateral bound the FAS cone at the DA distance; the two required DA parameters of the executor spec go (A5 built them).
-  Tests: a flight 21 m above the glidepath at the DA point passes, 23 m fails; inside and outside the cone.
-- `executor_replay` flies the closed-loop sentences. It reports, besides the outcomes: for each flight, the largest
-  |e_y| and |e_h| against the observed path, and the correction words for each column. Replaying a closed-loop sentence
-  gives its flown states again (a test).
-- Tests: a synthetic flight whose open-loop words leave a lateral offset gets heading corrections of one class toward
-  the path and ends within the tolerance; the correction ends below Y / 2 and at a change of sign; a new observed word
-  ends a correction; a final descent that is too high gets the next steeper class, and the observed class again; no
-  vertical correction during a level hold or a climb; a path that crosses itself keeps the forward matched point; a
-  flight without dynamics gives no training sentence and is counted; the rows before the first predicted step stay
-  observed; a crossing of another runway while G is true is not an event.
-- Smoke: the closed-loop reading at Δ = 2 and 4 on the smoke artefact; the replay of its sentences; as information,
-  the outcomes, the largest errors against the observed path and the correction words for each flight.
-- Then the full ts suite again, and the report.
-
-**A10. Observed words at the place (D42).** After A9.
-
-- `autopilot/closed_loop.py`: at each Δ row, the observed words of each open-loop Δ row whose observed time is not
-  later than the observed time of the matched point, and that were not said before; when one Δ row passes more than one
-  of these rows, the last word of each column (§4.9, "When the observed words are said"). One matched point for each
-  row serves the comparison and the words (`ObservedPath.match`, the forward search). The corrections do not change: a
-  row that says a new observed word of a column ends a correction of that column, as before.
-- The flight ends when the executor is done or at the time limit of the replay (§5.8: the remaining observed time ×
-  1.5, plus 900 s for each go-around), not at the last row of the open-loop sentence. The closed-loop sentence has the
-  flown rows.
-- The replay of a closed-loop sentence does not change: the sentence is said on its own rows and gives its flown states
-  again (the test of A9).
-- The closed-loop conformance (§9.2 #2) gets a new reference from the new code. The closed-loop sentences of the A9
-  smoke build come from superseded code: delete them and write them again.
-- Tests: a flown aircraft behind the observed one hears a turn word where the observed aircraft heard it, not at the
-  observed time, and ends within Y of the path; a flown aircraft ahead passes two observed heading words in one Δ row
-  and hears the last one; the observed words wait while the flown aircraft is behind; the first predicted step says
-  every column; a flown aircraft ahead of the observed one hears a go-around word before the threshold where the
-  observed aircraft went around before it (synthetic flights); a flight longer than the observed time is not cut at the
-  end of the open-loop sentence.
-- Smoke: the closed-loop reading at Δ = 2 and 4 and the replay of its sentences (train 30 flights for each airport,
-  select every flight). As information: the readouts of A9 and, for each stratum, the number of flights that leave the
-  observed path by more than 300 m and the correction words for each sentence (compare §11.11).
-- Then the full ts suite again, and the report.
-
-**A11. Speed words in steps (D43).** After A10, or together with it.
-
-- Labeller (`instructions/labeller/speed.py`): the steps of §4.5. The pieces, the holds, the runs and their targets,
-  "unspecified" and its two exceptions, and the reading for each approach (D26) do not change.
-- Executor (`autopilot/speed.py`, and `autopilot/single.py` in the same way): a speed word changes the speed at the
-  spec's a_max (`speed_accel_max_mps2`); "unspecified" keeps a_U = 0.25 m/s² and the rate to the threshold, not more than
-  a_max. The spec gets no new value.
-- Δ grid: two steps in one Δ row keep the last one (§4.8, as now).
-- Tests: a deceleration of 40 m/s from a hold to a hold gives 8 words, each at the first row where the smoothed speed is
-  nearer to it than to the value before, the last one the target of the hold; a run that changes direction without a
-  hold ends at the grid value nearest to the speed where it changes; noise inside a run gives no word in the other
-  direction; the executor makes a step of 5 m/s at a_max and records the thrust limit where the dynamics cannot give
-  a_max; "unspecified" decelerates as before.
-- The labeller, executor and closed-loop conformance references are made again (the code changes). Smoke: build again
-  from the open-loop reading; the readouts of A10 and, for each stratum, the speed words for each sentence and the
-  largest difference along the path from the observed aircraft of the same time before "unspecified" (compare §11.12),
-  as information.
-- Then the full ts suite again, and the report.
-
-**A12. The nearest row, the frame of a heading word, nothing past the end (D44, D45, D46).** After A11.
-
-- Δ grid (`instructions/labeller/interval.py`): each word of the 2 s reading on the nearest Δ row (a tie: the later
-  row); a heading word that moves across a runway word in the frame where it is heard (D46). The refusal of a heading
-  word across a change of course goes.
-- Closed loop (`autopilot/closed_loop.py`): the observed words from the 2 s open-loop reading, with their 2 s times; a
-  word said at the first Δ row whose matched observed time is not more than Δ/2 before its time; the first predicted
-  step says the words in force Δ/2 after its observed time; a heading word in the frame where it is heard (D46). The
-  refusal "closed loop: heading word across a runway change" goes. Past the end of the observed path: no correction,
-  and the rows count as rows without correction (D44).
-- Tests: the rounding at Δ = 4 and 8 s (a word 2 s after a Δ row goes to that row, 2 s before a Δ row to that row, a tie
-  to the later row; the order of the words is kept); a heading word heard after a change to a parallel runway keeps its
-  class, and after a change to a runway 6° off it gets the class of its absolute track; a flight with a long stretch past
-  the end of its observed path gets no correction there; the mean lateness of the heading words of a synthetic turn is
-  near zero at Δ = 2, 4 and 8 s.
-- The labeller and closed-loop conformance references are made again. Smoke: build again; the readouts of A11 and, for
-  each Δ, the lateness of the observed heading words (the matched observed time of the row that says a word, minus the
-  word's 2 s time), as information (compare §11.13).
-- Then the full ts suite again, and the report.
-
-**A13. The turn of the executor: a measurement (before the formal artefact).** After A12.
-
-- The question: how much of the lateral offset after a turn comes from the heading law of the executor (§5.4), and how
-  much from the words (the 5° grid, the lead)?
-- A runner (`experiments/`, with tests): the open-loop sentences of the smoke artefact at Δ = 2 s, flown on the time
-  clock in three ways: (a) the executor, its airspeed set to the observed ground speed at every cycle; (b) as (a), with
-  the stopping-rate limit lifted; (c) the exact model of the heading words (each word's track reached L after the word,
-  at the observed ground speed; §11.9). The settings of (a) and (b) belong to the runner only; the laws of the executor
-  do not change.
-- The readout: for each turn (a run of rows that turn one way faster than 0.2°/s, §4.3), the change of the lateral
-  offset from the observed path across the turn (from the row before the turn to 30 s after its end), for (a), (b) and
-  (c); by stratum and by band of ground speed; as information.
-- The user decides from the readout if the heading law changes. A change uses only values of the vocabulary (§5.1). It
-  comes before the formal artefact, because every closed-loop sentence depends on the executor.
-
-**A14. A tie in the closed loop at the later row (D45).** After A13.
-
-- Closed loop (`autopilot/closed_loop.py`): a word is said at the first Δ row whose matched observed time is less than
-  Δ/2 before its 2 s time; the first predicted step says the words in force before Δ/2 after its observed time (as the
-  Δ grid puts a tie at the later row).
-- Tests: at Δ = 4 and 8 s a word exactly Δ/2 after the matched time waits for the next row; the first predicted step
-  and the refusal of a go-around at it read the same row.
-- The closed-loop reading of the smoke build again (a new smoke directory), its conformance, the closed-loop replays;
-  as information. Then the full ts suite again, and the report.
-
-**A15. The decisions on Claude's check of stage A (D48, D49, D51; the check's §3 item 6).** After A14. D50 and D52
-change no code (the band of D52 is in `instructions/words.py` since A1). The tolerances Y and H are not restated in a
-test: their one source is the spec, which the spec sha identifies (D21), and §10 records them.
-
-- 2 s reading (`instructions/labeller/lateral.py`, `instructions/labeller/sentence.py`): after a change of R, a heading
-  word whose class is the class in force is said; the refusal "heading word repeated after a runway change" goes (D48).
-- Closed-loop artefact (`autopilot/closed_loop.py`, `instructions/artefact.py`): the flown states on the data's 2 s
-  rows, with the Δ rows marked (D51); the observed rows before the first predicted step on the same grid. A new
-  closed-loop format name. The replay of a closed-loop sentence and the closed-loop conformance compare on the 2 s
-  rows.
-- Labeller conformance (`instructions/conformance.py`): the reference sample also stores each sentence on the Δ grid at
-  Δ = 4 and 8 s (`labeller/interval.on_interval`); the check compares them again. A new reference format name (D49).
-- Tests: at Δ = 2 s the stored states are those of A14; at Δ = 4 and 8 s the states on the Δ rows are those of A14
-  and the rows between are the states the executor flies there; a closed-loop sentence replays to its states on every
-  2 s row; the 2 s reading of a flight that changes to a runway 6° off and keeps its class says the word, and the
-  executor flies the new track; the labeller conformance finds a change of the Δ grid's rule (the tie of D45);
-  `tests/test_architecture.py`: no module of the executor's laws (`autopilot/lateral.py`, `vertical.py`, `speed.py`,
-  `executor.py`, `single.py`) imports the runway data (D9).
-- The smoke build again (a new smoke directory): the labeller, the executor and the closed-loop conformance; how many
-  flights the 2 s reading refused for the repeated heading word before, and how many it says now; the closed-loop
-  replays at Δ = 2, 4, 8 s; the rule of D50 on the stored rows; as information. Then the full ts suite again, and the
-  report.
-
-**A16. An overshoot corrected in the same row (D53).** After A15.
-
-- Closed loop (`autopilot/closed_loop.py` `Corrector.row`): when a correction is in force and the error changes its sign
-  while |e_y| > Y (|e_h| > H, the class existing), the opposite correction in the same row; otherwise as before.
-- Tests: the overshoot case (e_y 0, +60, −60, −60, 0 at Y = 30 m) says the opposite correction at the overshoot row and
-  the rule of D50 holds; an overshoot within the tolerance says the observed word; the vertical case alike.
-- The smoke build again (a new smoke directory), its conformance, the closed-loop replays at Δ = 2, 4, 8 s; against
-  A15: which sentences changed, the rule of D50 (0 breaks), the readings of D34; as information. Then the full ts suite
-  again, and the report.
-
-**A17. The smoke sample (D55).** After A16.
-
-- `experiments/instruction_signals.py` `build_jobs`: `--limit N` takes a random sample of N flights for each airport
-  and split (seed 1337), not the first N of the sorted keys. The artefact records the seed beside the limit.
-- Tests: a limit takes the same flights at each run; from a key list whose first N keys share one callsign, the sample
-  also holds other callsigns; a limit of 0 takes all flights.
-- No smoke build in this milestone. The next smoke uses the spec that the user chose under D15 (§14.1 rule 7).
-
-**A18. The chosen spec and the formal artefact (D56).** After A17.
-
-- `experiments/instruction_spec.py`: `--candidate NAME` (required when the runner measures): the spec takes the descent
-  nominals and edges and the climb nominal of that row of `rounding_candidates` (`fitted`, `0.5`, `0.25`, `0.1`);
-  `measurements.json` records the chosen row beside the fitted values. Tests: the spec holds the chosen row; a name not
-  in the rows is refused.
-- The formal artefact (the user, 2026-10-04: "完成正式数据的读数"), from a clean checkout, into new directories:
-  `4dTrajectory/outputs/POOLED/instruction_language/v7_20261004/` (signals of every development flight, the spec with
-  `--candidate 0.25`, labels, the labeller conformance, the closed-loop reading at Δ = 2, 4, 8 s on every split) and
-  `4dTrajectory/outputs/POOLED/executor/v12_20261004/` (the executor spec, word clock `track` as in the smokes, its
-  conformance).
+- The formal artefact, from a clean checkout, into new directories:
+  `4dTrajectory/outputs/POOLED/instruction_language/v8_<date>/` (signals of every development flight, the spec with `--candidate 0.25` and the chosen `--grid`, labels, the labeller
+  conformance, the closed-loop reading at Δ = 2, 4, 8 s on every split) and
+  `4dTrajectory/outputs/POOLED/executor/v13_<date>/` (the executor spec, its conformance).
 - The readings of D34 at Δ = 2, 4, 8 s: the closed-loop summary of every split (items 1–3) and the closed-loop replays
   (item 4) of train (400 flights an airport, seed 1337) and select (every labelled flight). The val replay waits for the
   user (as for every executor before). The data are made read-only with a `SHA256SUMS` beside them. The report gives
@@ -1987,8 +1774,9 @@ test: their one source is the spec, which the spec sha identifies (D21), and §1
 
 ### 14.3 Stage B: prior
 
-**Start.** After Claude's check of stage A (§14.6). The code is written and tested on the smoke artefact at Δ = 2 s.
-The formal runs of B5 need the formal artefact (§0.4 item 3) and the chosen Δ. The rules of §14.1 apply.
+**Start.** After Claude's check of stage A (§14.6). The code is written and tested on a sample of the formal artefact
+of A21 at Δ = 2 s, read-only. The smoke artefacts of stage A are not used: their spec is not the spec of D56 and D58
+(D55). The formal runs of B5 need the chosen Δ (§0.4 item 3). The rules of §14.1 apply.
 
 **Written from §6, not patched from the archive.** The archived `prior/` (`archive/two_tier_v3_2026_10/prior/`) stays
 unchanged. A part of it comes back only where its logic fits §6, rewritten into the new modules: the row-by-row encoding
@@ -2011,7 +1799,7 @@ the aircraft attention of a one-aircraft scene, the checkpoint formats `v3`–`v
 
 - The rows: before the first predicted step, the observed states; from it on, the flown states of the closed-loop
   sentences, on the rows of the chosen Δ.
-- The own state: MSL height, ground speed, vertical rate; the motion from the displacement in the 2 s before the row.
+- The own state: height above the airport elevation (D58), ground speed, vertical rate; the motion from the displacement in the 2 s before the row.
 - One vector for each candidate: the distance before its threshold along its course, the offset right of its final,
   the height above its threshold, the motion direction minus its course (sine, cosine), the height above its glidepath
   (straight-line reference), the landings on it in the 30 min before the step. No constant of the runway, except in the
@@ -2041,7 +1829,7 @@ the aircraft attention of a one-aircraft scene, the checkpoint formats `v3`–`v
 - Teacher forcing; the airports of a run (all, or a fold without its held-out airport); the stop on the select days;
   the validation days not read.
 - Before a formal run: the check at the formal size of the host memory and the GPU memory of the largest batch.
-- A smoke run on the smoke artefact; it gives the time of one run for the cost of B5.
+- A smoke run on a sample of the formal artefact; it gives the time of one run for the cost of B5.
 - Tests: the stop reads only the select days; a fold never reads its held-out airport in training.
 
 **B4. Speaking and free generation** (§3.7, §5.8; D14, D22, D33, D38).
@@ -2089,20 +1877,20 @@ not built (D30). A later stage with every aircraft of a window commanded is opti
 The Training exports and the backend's live executor (`aeroviz_backend/autopilot_segment/`) on the new format; the
 frontend reads the reading name, not the spec sha (§9.2 #9). After stage D the user merges the branch.
 
-### 14.6 What Claude checks at the end of stage A
+### 14.6 What Claude checks before stage B
 
-1. Each decision that stage A carries (D1–D22, the Δ values of D25, D26–D28, D32, D33, D38 and D42–D47) against the code: the module and the
-   test that carry it (a table in the report).
-2. The targeted tests and the full suite pass on the branch head (run again, not read from the report).
-3. The smoke build: both conformance checks pass; the replay at Δ = 2 and 4 runs to its end; a labelled go-around
-   flies as a go-around (G, the climb from its level word, a new runway word, a landing after it); at each go-around
-   row, "no level-off" and "unspecified" are in force where the approach reached them (D26); the closed-loop sentences
-   at Δ = 2 and 4 replay to their flown states, and on every row where §4.9 permits a correction, |e_y| > Y is
-   followed by a heading correction in force after that row and |e_h| > H by an angle correction (D32, D50; the p90
-   of |e_y| at the last row as information); the observed words of a closed-loop sentence follow the matched
-   point (D42), and a labelled go-around is in its closed-loop sentence and flies as
-   a go-around; a change of speed says its steps, and the executor makes each step at a_max (D43); each observed word of
-   a closed-loop sentence comes at the Δ row nearest to its place (D45); no correction past the end of the observed path
-   (D44); a heading word moved across a runway word is in the frame where it is heard (D46); the readout of A13 exists.
-4. No write under a live root, and no existing directory under `4dTrajectory/outputs/` changed.
+The check of A0–A14 is done (`readouts/2026-10-04_stage_a_check.zh.md`, at `ab295b18`; its points became D48–D52).
+Before stage B, Claude checks A15–A21 and the formal artefact:
+
+1. D48–D56 against the code: done at `688e945e`. D57 and D58, and the code changed after `688e945e`, against the code of
+   the formal build of A21.
+2. The targeted tests of A15–A21 pass on the commit of the formal build (run again); the full suite of that commit
+   passed (§14.1 rule 4; its log).
+3. The formal artefact: the spec holds the values of D56 and the grid that the user chose (D58), and its measurement
+   records both choices; the labeller, the executor and the closed-loop conformance records pass for the code of the
+   build; at each Δ, the closed-loop sentences of the replays give their flown states again on the 2 s rows, and the
+   rule of D50 holds on every stored row; the readings of D34 (items 1–4) exist for every Δ, each split that A21 reads
+   and each airport.
+4. No write under a live root except the new directories of A21; no existing directory under `4dTrajectory/outputs/`
+   changed; the superseded directories of A18 deleted; the `SHA256SUMS` beside the formal data match.
 5. Nothing in the archive was edited after the move.

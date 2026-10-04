@@ -5,7 +5,7 @@
 决断高度、切入前跌破入口高度之后再爬升——飞出来的航迹再查一遍。
 
 预训练、单机自由生成（后训练用的闭环就是它）见[先验设计](prior_design.zh.md) §7、§9.1；每次运行的结果见
-[先验的读数](readouts/2026-09-24_prior_readouts.zh.md)；词和执行器见[指令词表设计](instruction_vocabulary_design.zh.md)、
+[先验的读数](../../../docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md)；词和执行器见[指令词表设计](instruction_vocabulary_design.zh.md)、
 [执行器设计](executor_design.zh.md)。本文只写现行的设计；设计是怎么改过来的，看 git 历史和 `docs/CHANGELOG.md`。
 
 **模型的名字**（用户 2026-09-25 定 base，2026-09-26 要求其余也用简短的英文名，避免称呼混淆）：

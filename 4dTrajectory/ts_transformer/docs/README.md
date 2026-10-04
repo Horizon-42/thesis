@@ -6,8 +6,9 @@
 
 | 要做的事 | 读 |
 |---|---|
-| 接手两层模型（现行研究线，v4） | [`two_tier/two_tier_design.md`](two_tier/two_tier_design.md)：§0 现状与每条决定，§14 分阶段的计划，§13 关键代码索引；阶段报告：[`two_tier/readouts/2026-10-03_stage_a_report.zh.md`](two_tier/readouts/2026-10-03_stage_a_report.zh.md)、[`two_tier/readouts/2026-10-04_stage_a_a8_a9_report.zh.md`](two_tier/readouts/2026-10-04_stage_a_a8_a9_report.zh.md) |
-| 两层模型的设计 | [`two_tier/two_tier_design.md`](two_tier/two_tier_design.md) §3–§9（词表、标注器、执行器、先验、后训练、多机）。instruction-v3 的记录（代码已归档到 `archive/two_tier_v3_2026_10/`，设计文档引用其中的推导和测量）：[`two_tier_stage_notes`](two_tier/two_tier_stage_notes.zh.md)、[`two_tier_framework`](two_tier/two_tier_framework.zh.md)、[`instruction_vocabulary_design`](two_tier/instruction_vocabulary_design.zh.md)、[`executor_design`](two_tier/executor_design.zh.md)、[`prior_design`](two_tier/prior_design.zh.md)、[`post_training_design`](two_tier/post_training_design.zh.md)、[`multi_aircraft_design`](two_tier/multi_aircraft_design.zh.md)；对照实验：[`continuous_segment_ablation_design`](two_tier/continuous_segment_ablation_design.zh.md)（连续片段代替指令词，不用标注器；草稿，决定项待确认） |
+| 接手两层模型（现行研究线） | [`two_tier/design/outline.md`](two_tier/design/outline.md)：设计由哪几份文档组成、文档之间只经公共接口往来、共同的原则与规则、各阶段计划；每个阶段做到哪在各文档的 §0 |
+| 两层模型的设计（英文） | [`outline`](two_tier/design/outline.md) → [`vocabulary`](two_tier/design/vocabulary.md)（阶段 A：词表、标注器、执行器、判定；公共接口 §6）→ [`prior`](two_tier/design/prior.md)（阶段 B；公共接口 §7）→ [`post_training`](two_tier/design/post_training.md)（阶段 C：后训练与多机，大纲） |
+| 两层模型被取代的设计 | `instruction-v3` 及以前的中文设计（框架、词表、执行器、先验、后训练、多机）、阶段笔记和对照实验草稿（连续片段代替指令词）：[`../archive/two_tier_v3_2026_10/docs/`](../archive/two_tier_v3_2026_10/docs/README.md)；拆分以前的单份设计 `two_tier_design.md` 和高度网格提案：[`history/2026-10_two_tier_design/`](history/README.md) |
 | 两层模型的读数 | [`two_tier/readouts/2026-09-24_prior_readouts.zh.md`](two_tier/readouts/2026-09-24_prior_readouts.zh.md)（先验、后训练、重建后的重读）；词表第一版的读数 `two_tier/readouts/2026-09-23_instruction_labels_readout.zh.md`（记录）；多机：平行跑道与交叉跑道上的间隔（英文，附航迹实例）[`two_tier/readouts/2026-09-27_parallel_runway_separation.md`](two_tier/readouts/2026-09-27_parallel_runway_separation.md)；新颖性评估与投稿建议（与自动驾驶的异同）[`two_tier/readouts/2026-09-28_novelty_assessment.zh.md`](two_tier/readouts/2026-09-28_novelty_assessment.zh.md) |
 | 包的契约、默认值、布局、runner、陷阱的全文 | [`reference/`](reference/)，按编号查（`grep -n '^### C7 ·' reference/*.md`）；单模型路径 2026-09-10 以前的证据在 [`reference/ENGINEERING_NOTES.md`](reference/ENGINEERING_NOTES.md) |
 | 发布一次实验 | [`experiments/intents.json`](experiments/intents.json)（没有条目，发布脚本拒绝）和代码仍在的实验的配置（`experiments/*_arms.json`） |
@@ -19,7 +20,8 @@
 ```text
 docs/
   README.md            本文件
-  two_tier/            现行设计：文件名不带日期，只写最终设计，原地改（历史交给 git 和 docs/CHANGELOG.md）
+  two_tier/            两层模型
+    design/            现行设计（英文）：大纲 + 词表 + 先验 + 后训练，文件名不带日期，只写最终设计，原地改（历史交给 git 和 docs/CHANGELOG.md）
     readouts/          带日期的读数，只追加
     figures/           设计文档的示意图；每张由一个 runner 画（`python run_ts.py <名字>`，脚本在 experiments/，测试核对图与脚本一致），不手改
   reference/           CLAUDE.md 索引的全文（P C D S G H L R T W 编号）+ ENGINEERING_NOTES.md

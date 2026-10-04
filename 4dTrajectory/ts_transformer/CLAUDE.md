@@ -12,8 +12,7 @@ That text was moved there verbatim on 2026-09-16 (this file had reached 118 KB),
 and the 09-14…09-17 additions were placed there the same way on 09-18. The evidence
 behind each line — measurements, campaign results, the causes already ruled out — lives in
 `docs/reference/ENGINEERING_NOTES.md` for the one-tier paths up to 2026-09-10, and in the design and readout
-documents the line names after that; **the two-tier model (v4) is `docs/two_tier/two_tier_design.md`** — §0 its
-status and decisions, §14 its plan; its stage reports are in `docs/two_tier/readouts/`;
+documents the line names after that; **the two-tier model's design and status: `docs/two_tier/design/outline.md`** (each document's §0);
 mechanism and result tables of the one-tier paths in the package `README.md`; history in the repo's
 `docs/CHANGELOG.md` (2026-07-19, 07-20 ×2; the move itself: 2026-09-16).
 Read the notes before designing an experiment or touching the loss, rollout or output layer.
@@ -52,7 +51,7 @@ of the package, not a migration in progress.
   Only the rule guidance stayed live, as `outputs/guidance/`. Their numbers:
   `archive/plan_head_2026_09/docs/2026-09-09_plan_and_guidance_design.md` §12, `archive/two_tier_v2_2026_09/docs/2026-09-17_two_tier_plan_v2.zh.md` §10–§12 (P3, P4, P9).
 - **`manoeuvre` — the first attempt at a second layer, a learned code; it is not the second layer that exists** (the
-  instruction words: `instructions/`, `autopilot/`, design `docs/two_tier/two_tier_design.md`). The
+  instruction words: `instructions/`, `autopilot/`, design `docs/two_tier/design/vocabulary.md`). The
   **intent-code** layer (a learned FSQ code per segment, the executor conditioned on it, a causal
   prior over codes) is **ARCHIVED 2026-09-20**: `archive/manoeuvre_codes_2026_09/` (README there;
   tokenizer, sequences, prior, readout, `plan_token.py`, gates T/X/P/E/S copied to
@@ -355,7 +354,7 @@ for every lookback — reading (a) from L−1 confounds lookback with starting p
 protocol-none baseline on the common flights (§3.3 rows A3 / B / B1, the seed line named, never typed in; it reads
 THIS code's schema only, no compatibility) (R8). **Stage B's intent-code queue** (`two_tier_b_queue`, 2026-09-19):
 ARCHIVED 2026-09-20 (R9 is its record); `manoeuvre_lockstep --cohort` stayed (B0's re-read on the B cohort = the
-grid's L60_D60 cohort). **The two-tier model, v4** (design `docs/two_tier/two_tier_design.md` §14): `instruction_signals` →
+grid's L60_D60 cohort). **The two-tier model, v4** (design `docs/two_tier/design/vocabulary.md`, plan §12): `instruction_signals` →
 `instruction_spec` (measured on TRAIN only) → `instruction_labels` (writes the labeller's reference) →
 `instruction_conformance` (the passed record every later step asks for) (R10) → `executor_spec` (no value from data; writes
 its reference tracks and passed record; clean tree) (R12) → `instruction_closed_loop` (the closed-loop sentences of every
@@ -415,13 +414,13 @@ post-training (R15–R22, R35, R38), `heading_lead_ablation` (R23), the multi-ai
 | doing this | read first |
 |---|---|
 | finding any document (what is current, what is history, where the archived lines' documents went) | `docs/README.md` |
-| picking up the two-tier model (the current line) | `docs/two_tier/two_tier_design.md` (§0 status and decisions, §14 the plan by stage), the latest stage report in `docs/two_tier/readouts/`, then W2 |
+| picking up the two-tier model (the current line) | `docs/two_tier/design/outline.md` (the documents, their public interfaces, the plan; each document's §0 has its status), then W2 |
 | designing a one-tier experiment / changing loss, rollout, output layer | `docs/reference/ENGINEERING_NOTES.md` (evidence up to 2026-09-10) |
 | checking what a one-tier campaign settled | `docs/history/OPEN_ITEMS_2026-09-18.md` (up to 2026-09-18) and the defaults table above |
 | putting the procedure constraint into TRAINING as a hard constraint, or the lazy-network / gate question | `docs/history/2026-09_constraints/2026-09-08_hard_constraints_survey_and_integration_plan.md` §3 — a literature survey with formulas; its H0–H6 plan was never built (papers in repo `docs/literature/procedure_hard_constraints/`). The two-tier model's procedure constraint is a decode mask: post-training design §3 |
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
 | comparing airports or quoting an ADE | `data/approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
 | predicting the landing runway (runway intent), multi-runway scheduling | `docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` (status by stage R0–R4: W1). The separation rules themselves: `inference/runway_schedule.py` and repo `docs/literature/arrival_separation/` |
-| building or reading the **two-tier model** (a prior that says controller-like words, an executor that flies them; later several aircraft with separation masks) | `docs/two_tier/two_tier_design.md` §3–§9 (vocabulary, labeller, executor, prior, post-training, multi-aircraft) and its key code index §13. The Chinese framework / vocabulary / executor / prior / post-training / multi-aircraft documents and `two_tier_stage_notes.zh.md` describe instruction-v3: its record, cited by the design for derivations and evidence; W2 |
+| building or reading the **two-tier model** (a prior that says controller-like words, an executor that flies them; later several aircraft with separation masks) | **`docs/two_tier/design/`**: `outline.md` (the documents, the principles, the plan), `vocabulary.md` (stage A: words, labeller, executor, judge; public interface §6), `prior.md` (stage B; public interface §7), `post_training.md` (stage C, with the multi-aircraft work; outline). The `instruction-v3` design documents and stage notes are archived in `archive/two_tier_v3_2026_10/docs/`; the single document before the split in `docs/history/2026-10_two_tier_design/`. Plans v2 / v3, the intent-code plan and the 09-16 feasibility doc are SUPERSEDED — only their measurements are citable: W2 |
 | the full text behind any line of this index | `docs/reference/*.md`, by ID |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |

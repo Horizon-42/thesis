@@ -7,7 +7,7 @@
 
 本文定**词表**与**标注器**（从观测航迹读出句子）。执行器见[执行器设计](executor_design.zh.md)，先验怎么用这些词见
 [先验设计](prior_design.zh.md)，两层的整体结构见[两层框架](two_tier_framework.zh.md)。
-现行句子产物的读数在产物目录的 `readout.md` 和[先验读数](readouts/2026-09-24_prior_readouts.zh.md) §3。
+现行句子产物的读数在产物目录的 `readout.md` 和[先验读数](../../../docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md) §3。
 
 **单位**：词表、标注、包络、约束和正文只用米、米/秒、度、秒，与数据管线、`flight_scenarios` 和动力学
 模型一致。管制原文里的英尺、节、海里、英尺/分钟只出现在 §9 的原文引用里，并在那里一次性换成米制。
@@ -546,7 +546,7 @@ LPV 的航道宽度只用来评估飞出的航迹。与管制、程序的高度�
 - 速度容差允许的到达时刻散布：±5 % 容差下 p50 28 s、p90 56 s，KRDU 6,834 架（此前的分析）。
 - 机场参考点：`trajectory_data_process/config/runway_thresholds.json`；候选跑道几何：各机场
   `trajectory_data_process/outputs/harvest/<ICAO>/arrivals/manifest.json` 的 `runway_targets`。
-- 词表第一版（`instruction-v2`）在开发集上的读数：[标注读数](readouts/2026-09-23_instruction_labels_readout.zh.md)（记录，数值已不是现行的）。
+- 词表第一版（`instruction-v2`）在开发集上的读数：[标注读数](../../../docs/two_tier/readouts/2026-09-23_instruction_labels_readout.zh.md)（记录，数值已不是现行的）。
 
 ---
 
@@ -573,6 +573,6 @@ LPV 的航道宽度只用来评估飞出的航迹。与管制、程序的高度�
 - 代价：航向词不再是一条条管制指令；雷达引导的航班每架约 34 条航向词。现行产物（训练集）每架航向词均值：直线进近 3.0，
   雷达引导 33.7。
 - **现行航向律下重量**（2026-09-27，执行器 v10、"听到后正好 L 秒到"；训练集回放门的 1,904 架自有动力学航班逐格重标、重飞；
-  [消融读数](readouts/2026-09-27_heading_lead_ablation.zh.md)）：L 4 与 6 s 在落地、evaluation、离观测航迹的距离上分不出（evaluation
+  [消融读数](../../../docs/two_tier/readouts/2026-09-27_heading_lead_ablation.zh.md)）：L 4 与 6 s 在落地、evaluation、离观测航迹的距离上分不出（evaluation
   98.4 / 98.1 %，门都 10 / 10），2 s（τ_ψ 到了下限）与 8 s（evaluation 97.3 %、航向词更晚跟上）都更差，所以 L 留在 4 s。同一次量了
   坡度上限：25° 下照标注的词重飞，航向词在包络内 98.0 → 90.7 %（真实转弯有超过 25° 的），`turn_bank_max_deg` 留在量出的 32°。

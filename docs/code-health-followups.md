@@ -143,6 +143,7 @@ added three entries (the rows after the performance index's).
 | Three shared ts modules are listed as runners: `traffic_go_around`, `traffic_window_events`, `training_attitude` (10-02) | open | new; see the entry | no: `run_ts.py --list` only |
 | The edge and executor fingerprints hash row-placement and data-plane code (10-02) | open | new; see the entry | no: a check — but the fix changes what the stored checkpoints and passed records name |
 | Readout headers mix configuration, data and code version in one file under one format version (10-03) | partly | the window readout split (multi-aircraft design 9.9, branch `dev-step9-one-commanded` `1e3bd470`; shared `experiments/code_version.py`); the other readouts open, see the entry | no: readouts only |
+| Two ATC constants in `instructions/spec.py` that nothing reads (2026-10-04) | open | delete `ATC_SPEED_COMPLIANCE_MPS` and `ATC_MIN_DESCENT_RATE_MPS` | no: nothing reads them |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -755,3 +756,10 @@ On v6 train after the capture row the observed median is +6 m over the flat line
 the executor's floor binds anywhere before the threshold. The next design removes the executor's floor (two-tier design
 D9); the masks can take the d²/(2R) term with their next procedure set.
 
+## Two ATC constants in `instructions/spec.py` that nothing reads (2026-10-04)
+
+**Verified** (Claude's check of the two-tier design doc against `dev-two-tier-v4` `688e945e`; the same two lines are on
+`dev-two-tier`). `ATC_SPEED_COMPLIANCE_MPS` (10 kt) and `ATC_MIN_DESCENT_RATE_MPS` (500 ft/min) are defined with their
+regulation comments, and no module, runner or test reads them (`command grep -rn` over `4dTrajectory/` and
+`aeroviz_backend/`). **Judgement**: delete them with the next change of `instructions/spec.py`; a constant that binds
+nothing reads as a rule the vocabulary applies.
