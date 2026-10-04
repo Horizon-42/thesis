@@ -291,16 +291,15 @@ def along_columns(words: Words) -> Callable[[replay.Batch, Flown, list[Verdict]]
     return columns
 
 
-def closed_loop_columns(stored: dict[int, closed_loop.Stored]
+def closed_loop_columns(stored: dict[int, closed_loop.Stored], step_s: float
                         ) -> Callable[[replay.Batch, Flown, list[Verdict]], list[dict[str, Any]]]:
     """The rows' closed-loop columns: each flight's largest |e_y| and |e_h| and its correction words per column — after
-    checking that it flew its stored states again (each Δ row's position and height within `STATE_BOUND_M`)."""
+    checking that it flew its stored states again (each 2 s row's position and height within `STATE_BOUND_M`, D51)."""
     def columns(part: replay.Batch, flown: Flown, verdicts: list[Verdict]) -> list[dict[str, Any]]:
         out = []
         for j, index in enumerate(part.indices):
             sentence = stored[index]
-            cycles = int(round(part.row_interval_s / flown.cycle_s))
-            rows = np.arange(len(sentence.grid)) * cycles
+            rows = np.arange(len(sentence.states)) * int(round(step_s / flown.cycle_s))
             track = flown_track(flown.states[j, : rows[-1] + 1].cpu().numpy(), part.geometries[j])
             again = np.column_stack([track["e"][rows], track["n"][rows], track["height"][rows]])
             apart = float(np.abs(again - sentence.states[:, :3]).max())
@@ -365,7 +364,7 @@ def main(argv: list[str] | None = None) -> int:
         batch.drawn["without_a_closed_loop_sentence"] = missing
         print(f"{len(batch.sentences)} closed-loop sentences flown from the first predicted step, {missing} flights "
               f"without one", flush=True)
-        closed = closed_loop_columns(stored)
+        closed = closed_loop_columns(stored, words.spec.step_s)
 
         def per_flight(part: replay.Batch, flown: Flown, verdicts: list[Verdict]) -> list[dict[str, Any]]:
             return [{**a, **c} for a, c in zip(along(part, flown, verdicts), closed(part, flown, verdicts))]

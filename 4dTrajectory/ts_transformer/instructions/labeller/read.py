@@ -220,9 +220,8 @@ def read_flight(signals: FlightSignals, geometry: AirportGeometry, spec: Vocabul
     runway_rows = np.full(n_rows, runways[0], dtype=np.int64)
     for row, runway in zip(again, runways[1:]):
         runway_rows[row:] = runway
-    lateral = read_lateral(smoothed.track_deg, list(flight.relatives),
-                           [candidate.course_deg for candidate in geometry.candidates], approaches, runway_rows, spec,
-                           words)
+    courses = [candidate.course_deg for candidate in geometry.candidates]
+    lateral = read_lateral(smoothed.track_deg, list(flight.relatives), courses, approaches, runway_rows, spec, words)
 
     # the runway column (module docstring), and each approach's speed reading on its own rows
     idents = [geometry.candidates[runway].ident for runway in runways]
@@ -245,7 +244,7 @@ def read_flight(signals: FlightSignals, geometry: AirportGeometry, spec: Vocabul
                                                  unspecified))
     instructions += [*lateral.instructions, *vertical.instructions]
     held = held_altitude(vertical.pieces, smoothed.altitude_m)
-    grid, kept = assemble(n_rows, instructions, held, words, len(geometry.candidates))
+    grid, kept = assemble(n_rows, instructions, held, words, courses)
 
     # every check runs on the sentence as kept: a word the assembly dropped is not judged
     landing = approach_readings[-1]

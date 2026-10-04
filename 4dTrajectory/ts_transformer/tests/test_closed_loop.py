@@ -15,7 +15,7 @@ from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
 from ts_transformer.instructions.labeller.interval import in_force, last_heard_row, on_interval
-from ts_transformer.instructions.labeller.read import read_flight
+from ts_transformer.instructions.labeller.read import read_flight, smooth, truncated
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, ANGLE_LEVEL, HEADING, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words,
@@ -201,9 +201,9 @@ def test_a_flight_whose_words_leave_an_offset_is_brought_back_by_heading_correct
     start, every = sentence.start, int(round(interval_s / 2.0))
     assert start == 16 / interval_s and (sentence.grid[0] != UNCHANGED).all() and not sentence.correction[0].any()
     observed = batch.signals[0]
-    rows = np.arange(start) * every
-    assert np.array_equal(sentence.states[:start, :3], np.column_stack([observed.e_m[rows], observed.n_m[rows],
-                                                                       observed.altitude_m[rows]]))
+    rows = np.arange(start * every)                                    # the observed 2 s rows (D51)
+    assert np.array_equal(sentence.states[:start * every, :3], np.column_stack([observed.e_m[rows], observed.n_m[rows],
+                                                                               observed.altitude_m[rows]]))
     corrected = sentence.correction[:, HEADING]
     assert corrected.any()
     in_force = closed_loop.in_force(sentence.grid)[:, HEADING]
@@ -217,10 +217,15 @@ def test_a_flight_whose_words_leave_an_offset_is_brought_back_by_heading_correct
     assert np.abs(sentence.lateral_m[-len(sentence.lateral_m) // 4:]).max() < words.spec.closed_loop_lateral_m
 
 
+def _flown(sentence):
+    """A closed-loop sentence's flown 2 s rows, from its first predicted step (D51: `Stored.states`)."""
+    return sentence.states[int(np.flatnonzero(sentence.on_interval)[sentence.start]):]
+
+
 def _replayed(batch, inputs, sentence, params, words, monkeypatch):
     """``sentence`` flown again as the replay flies it (`replay_batch`, `replay.fly_sentences` on the time clock)."""
     stored = {7: closed_loop.Stored(grid=sentence.grid, correction=sentence.correction,
-                                    first_row=batch.sentences[0].first_row, states=sentence.states[sentence.start:],
+                                    first_row=batch.sentences[0].first_row, states=_flown(sentence),
                                     lateral_m=sentence.lateral_m, vertical_m=sentence.vertical_m,
                                     uncorrectable=sentence.uncorrectable, observed_row=sentence.observed_row,
                                     matched_row=sentence.matched_row)}
@@ -230,17 +235,42 @@ def _replayed(batch, inputs, sentence, params, words, monkeypatch):
     return stored, moved, missing, replay.fly_sentences(moved, params, words, device=CPU)
 
 
-def test_a_closed_loop_sentence_flown_again_gives_its_states(monkeypatch):
-    """The replay flies a closed-loop sentence on the time clock (the runner sets it, whatever the spec's)."""
-    batch, inputs, words = _batch()
+@pytest.mark.parametrize("interval_s", [2.0, 4.0, 8.0])
+def test_a_closed_loop_sentence_flown_again_gives_its_states_on_every_2_s_row(monkeypatch, interval_s):
+    """D51: the states are on the data's 2 s rows from the sentence's first row to its last said row, its Δ rows marked;
+    the replay flies a closed-loop sentence on the time clock (the runner sets it, whatever the spec's) through every 2 s
+    row of it, between the Δ rows too."""
+    batch, inputs, words = _batch(interval_s)
     params = _params()
     (sentence,) = closed_loop.read(batch, inputs, params, words, device=CPU)
-    rows = len(sentence.grid)
+    every = int(round(interval_s / 2.0))
+    assert len(sentence.states) == (sentence.start + len(sentence.grid) - 1) * every + 1
+    assert np.array_equal(np.flatnonzero(sentence.on_interval), np.arange(sentence.start + len(sentence.grid)) * every)
     _, _, _, flown = _replayed(batch, inputs, sentence, params, words, monkeypatch)
     track = flown_track(flown.states[0].numpy(), batch.geometries[0])
-    at = np.arange(rows) * 2                                     # the cycle starting each row
+    at = np.arange(len(_flown(sentence))) * 2                    # the cycle starting each 2 s row
     again = np.column_stack([track["e"][at], track["n"][at], track["height"][at]])
-    assert np.abs(again - sentence.states[sentence.start:, :3]).max() < 1e-9
+    assert np.abs(again - _flown(sentence)[:, :3]).max() < 1e-9
+
+
+@pytest.mark.parametrize("interval_s", [4.0, 8.0])
+def test_the_marked_rows_are_the_said_rows_and_the_rows_between_are_flown(interval_s):
+    """D51: at Δ = 4 and 8 s the marked 2 s rows hold the states the reading compared (the said rows' e_y is read from
+    them), and the rows between hold the executor's states there: in the turns, off the chord of their two Δ rows."""
+    batch, inputs, words = _batch(interval_s)
+    (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
+    every, start = int(round(interval_s / 2.0)), sentence.start
+    signals = batch.signals[0]
+    span = len(batch.readings[0].words) - batch.sentences[0].first_row
+    smoothed = smooth(truncated(signals, span), words.spec)
+    path = ObservedPath(signals.e_m[:span], signals.n_m[:span], smoothed.altitude_m, start * every)
+    marked = sentence.states[sentence.on_interval][start:]
+    assert np.allclose([path.match(*row[:3]).lateral_m for row in marked], sentence.lateral_m, atol=1e-9)
+    flown = _flown(sentence)
+    assert len(flown) == (len(sentence.grid) - 1) * every + 1
+    middle = flown[every // 2::every][: len(sentence.grid) - 1, :2]          # the 2 s row halfway between two Δ rows
+    chord = 0.5 * (flown[:-every:every, :2] + flown[every::every, :2])
+    assert np.abs(middle - chord).max() > 1.0
 
 
 def test_a_go_around_at_the_first_predicted_step_and_a_short_sentence_are_refused():
@@ -276,42 +306,52 @@ def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(t
     path = tmp_path / "train_4s.npz"
     write_closed_loop(path, words.spec, executor_params_sha256="x", row_interval_s=4.0, start_row=sentence.start,
                       signal_index=[7], first_row=[batch.sentences[0].first_row], grids=[sentence.grid],
-                      corrections=[sentence.correction], states=[sentence.states], lateral_m=[sentence.lateral_m],
+                      corrections=[sentence.correction], states=[sentence.states],
+                      on_interval=[sentence.on_interval], lateral_m=[sentence.lateral_m],
                       vertical_m=[sentence.vertical_m], uncorrectable=[sentence.uncorrectable],
                       observed_row=[sentence.observed_row], matched_row=[sentence.matched_row],
                       timed_out=[sentence.timed_out])
     with pytest.raises(ValueError, match="nothing to write"):
         write_closed_loop(tmp_path / "empty.npz", words.spec, executor_params_sha256="x", row_interval_s=4.0,
                           start_row=sentence.start, signal_index=[], first_row=[], grids=[], corrections=[], states=[],
-                          lateral_m=[], vertical_m=[], uncorrectable=[], observed_row=[], matched_row=[],
+                          on_interval=[], lateral_m=[], vertical_m=[], uncorrectable=[], observed_row=[], matched_row=[],
                           timed_out=[])
     with pytest.raises(FileExistsError):
         write_closed_loop(path, words.spec, executor_params_sha256="x", row_interval_s=4.0, start_row=sentence.start,
                           signal_index=[7], first_row=[batch.sentences[0].first_row], grids=[sentence.grid],
-                          corrections=[sentence.correction], states=[sentence.states], lateral_m=[sentence.lateral_m],
+                          corrections=[sentence.correction], states=[sentence.states],
+                          on_interval=[sentence.on_interval], lateral_m=[sentence.lateral_m],
                           vertical_m=[sentence.vertical_m], uncorrectable=[sentence.uncorrectable],
                       observed_row=[sentence.observed_row], matched_row=[sentence.matched_row],
                       timed_out=[sentence.timed_out])
     stored = closed_loop.stored_sentences(load_closed_loop(path, words.spec))
     assert list(stored) == [7] and np.array_equal(stored[7].grid, sentence.grid)
-    assert np.array_equal(stored[7].states, sentence.states[sentence.start:])
+    assert np.array_equal(stored[7].states, _flown(sentence))
+    with pytest.raises(ValueError, match="Δ rows marked"):
+        write_closed_loop(tmp_path / "unmarked.npz", words.spec, executor_params_sha256="x", row_interval_s=4.0,
+                          start_row=sentence.start, signal_index=[7], first_row=[batch.sentences[0].first_row],
+                          grids=[sentence.grid], corrections=[sentence.correction], states=[sentence.states],
+                          on_interval=[np.roll(sentence.on_interval, 1)], lateral_m=[sentence.lateral_m],
+                          vertical_m=[sentence.vertical_m], uncorrectable=[sentence.uncorrectable],
+                          observed_row=[sentence.observed_row], matched_row=[sentence.matched_row],
+                          timed_out=[sentence.timed_out])
     assert np.array_equal(stored[7].uncorrectable, sentence.uncorrectable)
     _, moved, missing, flown = _replayed(batch, inputs, sentence, params, words, monkeypatch)
     assert missing == 0 and moved.sentences[0].first_row == batch.sentences[0].first_row + sentence.start * 2
     assert moved.signals[0].e_m[0] == batch.signals[0].e_m[sentence.start * 2]
-    (row,) = closed_loop_columns(stored)(moved, flown, [None])
+    (row,) = closed_loop_columns(stored, 2.0)(moved, flown, [None])
     assert row["largest_lateral_m"] == pytest.approx(float(np.abs(sentence.lateral_m).max()))
     assert row["uncorrected_lateral_m"] == closed_loop.uncorrected_m(sentence.lateral_m, sentence.uncorrectable[:, 0])
     assert row["uncorrected_vertical_m"] == closed_loop.uncorrected_m(sentence.vertical_m, sentence.uncorrectable[:, 1])
     assert row["uncorrected_lateral_m"] != row["uncorrected_vertical_m"]
     assert sum(row["correction_words"].values()) == int(sentence.correction.sum())
     stored[7] = closed_loop.Stored(grid=sentence.grid, correction=sentence.correction, first_row=0,
-                                   states=sentence.states[sentence.start:] + [1.0, 0, 0, 0, 0, 0],
+                                   states=_flown(sentence) + [1.0, 0, 0, 0, 0, 0],
                                    lateral_m=sentence.lateral_m, vertical_m=sentence.vertical_m,
                                    uncorrectable=sentence.uncorrectable, observed_row=sentence.observed_row,
                                    matched_row=sentence.matched_row)
     with pytest.raises(ValueError, match="from its closed-loop states"):
-        closed_loop_columns(stored)(moved, flown, [None])
+        closed_loop_columns(stored, 2.0)(moved, flown, [None])
 
 
 def test_the_runner_counts_the_flights_without_a_sentence_by_reason():
@@ -323,7 +363,7 @@ def test_the_runner_counts_the_flights_without_a_sentence_by_reason():
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     lateness = closed_loop.heading_lateness_rows(sentence, batch.readings[0].words[batch.sentences[0].first_row:]) * 2.0
     numbers = summarise([sentence, Refused("go-around at the first predicted step")],
-                        {"no aircraft dynamics": 3}, {"too short": 1}, [lateness])
+                        {"no aircraft dynamics": 3}, {"too short": 1}, [lateness], [_outside(batch, sentence, words)])
     assert numbers["sentences"] == 1
     assert numbers["without_a_sentence"] == {
         "not flown": {"no aircraft dynamics": 3}, "refused on the row interval": {"too short": 1},
@@ -331,6 +371,79 @@ def test_the_runner_counts_the_flights_without_a_sentence_by_reason():
     assert numbers["correction_words"]["heading"] == int(sentence.correction[:, HEADING].sum()) > 0
     assert numbers["heading_word_lateness_s"]["n"] == len(lateness) > 0
     assert numbers["heading_word_lateness_s"]["mean"] == pytest.approx(float(lateness.mean()))
+    lateral = numbers["outside_the_tolerance"]["lateral"]
+    assert lateral["outside"] > 0 and lateral["without_a_correction_toward_the_path"] == 0        # D50: the rule holds
+    assert lateral["correctable_rows"] == int((~sentence.uncorrectable[:, 0]).sum())
+
+
+def _outside(batch, sentence, words):
+    return closed_loop.outside_rows(sentence, batch.readings[0].words, batch.sentences[0].first_row, words,
+                                    [c.course_deg for c in batch.geometries[0].candidates])
+
+
+def test_the_rule_of_d50_reads_the_direction_of_the_correction_in_force():
+    """D50 (§14.6): on a correctable row with |e_y| > Y a heading correction toward the path is in force after it, read
+    from the stored sentence and its open-loop reading. Taken away (the observed words alone), the rule breaks on
+    exactly the rows that were outside; turned away from the path, too — a word that only cancels a correction, or one
+    on the wrong side, answers nothing."""
+    batch, inputs, words = _batch()
+    (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
+    correctable, outside, breaks = _outside(batch, sentence, words)["lateral"]
+    assert outside.any() and not breaks.any()
+    assert np.array_equal(outside, ~sentence.uncorrectable[:, 0] & (np.abs(sentence.lateral_m)
+                                                                    > words.spec.closed_loop_lateral_m))
+    observed = batch.readings[0].words[batch.sentences[0].first_row:]
+    for heading, name in ((in_force(observed)[sentence.observed_row, HEADING], "the observed words"),
+                          ((2 * in_force(observed)[sentence.observed_row, HEADING].astype(int)
+                            - in_force(sentence.grid)[:, HEADING].astype(int)) % words.n_heading, "away")):
+        grid = sentence.grid.copy()
+        grid[:, HEADING] = heading
+        assert np.array_equal(_outside(batch, replace(sentence, grid=grid), words)["lateral"][2], outside), name
+
+
+def test_the_rule_of_d50_reads_a_word_moved_across_a_runway_word_in_its_new_frame():
+    """D46 + D50: an observed heading word said under runway 0 (course 90°, class +5° → 95°) and heard after the runway
+    word of runway 1 (course 92°) is said as class +5° there (97°): 2° right of its observed track, but no correction —
+    left of the path it answers nothing, and the rule counts the row."""
+    words = Words(spec())
+    observed = np.full((6, 5), UNCHANGED, dtype=np.int16)
+    observed[0, :] = [0, 0, words.altitude_index(900.0), ANGLE_LEVEL, words.speed_index(70.0)]
+    observed[1, RUNWAY], observed[2, HEADING], observed[3, RUNWAY] = RUNWAY_GO_AROUND, 1, 1
+    grid = np.full((5, 5), UNCHANGED, dtype=np.int16)
+    grid[0] = observed[0]
+    grid[1, RUNWAY], grid[3, RUNWAY], grid[3, HEADING] = RUNWAY_GO_AROUND, 1, 1
+    n = len(grid)
+    sentence = ClosedLoopSentence(
+        grid=grid, correction=np.zeros((n, 5), bool), states=np.zeros((n, 6)), on_interval=np.ones(n, bool),
+        lateral_m=np.array([0.0, 0.0, 0.0, 0.0, -60.0]), vertical_m=np.zeros(n),
+        uncorrectable=np.array([[True, True], *[[False, True]] * (n - 1)]),
+        observed_row=np.array([0, 1, 2, 3, 3]), matched_row=np.zeros(n), start=0, timed_out=False)
+    _, outside, breaks = closed_loop.outside_rows(sentence, observed, 0, words, [90.0, 92.0])["lateral"]
+    assert outside.tolist() == [False, False, False, False, True] and breaks.tolist() == outside.tolist()
+    corrected = grid.copy()
+    corrected[4, HEADING] = 2                                       # one class right of 97°: toward the path
+    _, _, breaks = closed_loop.outside_rows(replace(sentence, grid=corrected), observed, 0, words, [90.0, 92.0])["lateral"]
+    assert not breaks.any()
+
+
+def test_the_rule_of_d50_sees_the_row_an_overshoot_cancels_a_correction():
+    """§4.9 ends a correction when e_y changes sign and starts the other one a row later: the overshoot row answers
+    nothing, and the rule of D50 counts it (a word that cancels a correction is no correction toward the path)."""
+    words = Words(spec())
+    corrector = Corrector(_grid([_first(words, 900.0, ANGLE_LEVEL), *[{}] * 5]), 0, 0, 1, words, [90.0])
+    rows = [corrector.row(s, e_y, 0.0, 900.0, holding=False, past_end=False)
+            for s, e_y in enumerate((0.0, 60.0, -60.0, -60.0, 0.0))]
+    grid = np.array([r[0] for r in rows])
+    n = len(grid)
+    sentence = ClosedLoopSentence(
+        grid=grid, correction=np.array([r[1] for r in rows]), states=np.zeros((n, 6)), on_interval=np.ones(n, bool),
+        lateral_m=np.array([0.0, 60.0, -60.0, -60.0, 0.0]), vertical_m=np.zeros(n),
+        uncorrectable=np.array([[True, True], *[[False, True]] * (n - 1)]), observed_row=np.zeros(n, dtype=int),
+        matched_row=np.zeros(n), start=0, timed_out=False)
+    observed = _grid([_first(words, 900.0, ANGLE_LEVEL), *[{}] * 5])
+    _, outside, breaks = closed_loop.outside_rows(sentence, observed, 0, words, [90.0])["lateral"]
+    assert outside.tolist() == [False, True, True, True, False] and breaks.tolist() == [False, False, True, False, False]
+
 
 
 def test_no_angle_correction_while_the_executor_holds_the_level_reached_by_a_descent():
@@ -397,7 +510,7 @@ def test_the_replay_refuses_a_sentence_of_another_first_row(monkeypatch):
     batch, inputs, words = _batch()
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     stored = {0: closed_loop.Stored(grid=sentence.grid, correction=sentence.correction, first_row=3,
-                                    states=sentence.states[sentence.start:], lateral_m=sentence.lateral_m,
+                                    states=_flown(sentence), lateral_m=sentence.lateral_m,
                                     vertical_m=sentence.vertical_m, uncorrectable=sentence.uncorrectable,
                                     observed_row=sentence.observed_row, matched_row=sentence.matched_row)}
     with pytest.raises(ValueError, match="starts at 2 s row 3"):
@@ -626,7 +739,7 @@ def test_the_observed_heading_words_of_a_turn_are_said_at_the_nearest_row_on_ave
         n = len(said_rows)
         sentence = ClosedLoopSentence(
             grid=np.array([r[0] for r in said_rows]), correction=np.array([r[1] for r in said_rows]),
-            states=np.zeros((n, 6)), lateral_m=np.zeros(n), vertical_m=np.zeros(n), uncorrectable=np.ones((n, 2), bool),
+            states=np.zeros((n, 6)), on_interval=np.ones(n, bool), lateral_m=np.zeros(n), vertical_m=np.zeros(n), uncorrectable=np.ones((n, 2), bool),
             observed_row=np.array([r[2] for r in said_rows]), matched_row=np.array([r[3] for r in said_rows]), start=0,
             timed_out=False)
         assert np.allclose(closed_loop.heading_lateness_rows(sentence, grid[first_row:]) * 2.0, lateness)

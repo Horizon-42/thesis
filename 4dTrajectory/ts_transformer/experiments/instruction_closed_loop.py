@@ -50,10 +50,15 @@ def _percentiles(values: list[float]) -> dict[str, float] | None:
 
 
 def summarise(results: list[ClosedLoopSentence | Any], excluded: dict[str, int],
-              refused_on_interval: dict[str, int], heading_lateness_s: list[np.ndarray]) -> dict[str, Any]:
-    """One split's numbers at one row interval (module docstring); ``heading_lateness_s`` each sentence's
-    (`closed_loop.heading_lateness_rows`, in seconds)."""
+              refused_on_interval: dict[str, int], heading_lateness_s: list[np.ndarray],
+              outside: list[dict[str, np.ndarray]]) -> dict[str, Any]:
+    """One split's numbers at one row interval (module docstring); ``heading_lateness_s`` and ``outside`` each sentence's
+    (`closed_loop.heading_lateness_rows`, in seconds; `closed_loop.outside_rows`)."""
     read = [r for r in results if isinstance(r, ClosedLoopSentence)]
+    counts = {name: np.zeros(3, dtype=np.int64) for name in ("lateral", "vertical")}
+    for rows_of in outside:
+        for name, rows in rows_of.items():
+            counts[name] += rows.sum(axis=1)
     lateness = np.concatenate([np.zeros(0), *heading_lateness_s])
     refused = Counter(r.reason for r in results if not isinstance(r, ClosedLoopSentence))
     corrections = np.array([r.correction.sum(axis=0) for r in read]).reshape(-1, len(COLUMNS))
@@ -71,6 +76,12 @@ def summarise(results: list[ClosedLoopSentence | Any], excluded: dict[str, int],
             "uncorrected_vertical_m": _percentiles([closed_loop.uncorrected_m(r.vertical_m, r.uncorrectable[:, 1])
                                                     for r in read]),
             "last_row_lateral_m": _percentiles([float(abs(r.lateral_m[-1])) for r in read]),
+            # D34 reading 3 and the rule of D50: the correctable rows, those outside the tolerance, and of those the
+            # rows after which no correction toward the path is in force
+            "outside_the_tolerance": {name: {"correctable_rows": int(c[0]), "outside": int(c[1]),
+                                             "share": float(c[1] / c[0]) if c[0] else None,
+                                             "without_a_correction_toward_the_path": int(c[2])}
+                                      for name, c in counts.items()},
             "timed_out": sum(1 for r in read if r.timed_out),
             # D44: the rows past the end of the observed path (no observed height there)
             "rows_past_the_end": int(sum(np.isnan(r.vertical_m).sum() for r in read)),
@@ -132,9 +143,11 @@ def main(argv: list[str] | None = None) -> int:
             kept = [(j, r) for j, r in enumerate(results) if isinstance(r, ClosedLoopSentence)]
             lateness = [closed_loop.heading_lateness_rows(r, batch.readings[j].words[batch.sentences[j].first_row:])
                         * words.spec.step_s for j, r in kept]
+            outside = [closed_loop.outside_rows(r, batch.readings[j].words, batch.sentences[j].first_row, words,
+                                                [c.course_deg for c in batch.geometries[j].candidates]) for j, r in kept]
             if not kept:                                       # nothing to write: the summary says why
                 summary["splits"][split]["intervals"][f"{interval:g}"] = summarise(
-                    results, drawn.description["excluded"], batch.drawn["refused_on_interval"], lateness)
+                    results, drawn.description["excluded"], batch.drawn["refused_on_interval"], lateness, outside)
                 continue
             write_closed_loop(staging / f"{split}_{interval:g}s.npz", words.spec,
                               executor_params_sha256=params_sha256(params), row_interval_s=interval,
@@ -142,13 +155,15 @@ def main(argv: list[str] | None = None) -> int:
                               signal_index=[batch.indices[j] for j, _ in kept],
                               first_row=[batch.sentences[j].first_row for j, _ in kept],
                               grids=[r.grid for _, r in kept], corrections=[r.correction for _, r in kept],
-                              states=[r.states for _, r in kept], lateral_m=[r.lateral_m for _, r in kept],
+                              states=[r.states for _, r in kept], on_interval=[r.on_interval for _, r in kept],
+                              lateral_m=[r.lateral_m for _, r in kept],
                               vertical_m=[r.vertical_m for _, r in kept],
                               uncorrectable=[r.uncorrectable for _, r in kept],
                               observed_row=[r.observed_row for _, r in kept],
                               matched_row=[r.matched_row for _, r in kept],
                               timed_out=[r.timed_out for _, r in kept])
-            numbers = summarise(results, drawn.description["excluded"], batch.drawn["refused_on_interval"], lateness)
+            numbers = summarise(results, drawn.description["excluded"], batch.drawn["refused_on_interval"], lateness,
+                                outside)
             summary["splits"][split]["intervals"][f"{interval:g}"] = numbers
             print(f"{split} {interval:g} s: {numbers['sentences']} sentences, corrections "
                   f"{numbers['correction_words']}, without a sentence {numbers['without_a_sentence']}, "

@@ -726,3 +726,24 @@ def test_only_the_runners_reach_the_executor_for_now():
         rel = path.relative_to(TS_DIR).as_posix()
         if any(name.split(".")[0] == "autopilot" for name in _imported_names(path)):
             assert rel.startswith("experiments/"), f"{rel} imports the executor"
+
+
+#: The modules of the executor's laws (design §5.4–§5.7): they fly words only, so none reaches the runway data — the
+#: published glidepaths and decision altitudes the judge and the replay read (D3, D9).
+EXECUTOR_LAW_MODULES = ("lateral", "vertical", "speed", "executor", "single")
+
+
+def test_the_executor_laws_never_reach_the_runway_data():
+    """D9: no law of §5.7 (a glidepath floor, an intercept, a capture of the final): no module the laws import, inside
+    the executor package and through each other, imports `autopilot.runway_data`."""
+    seen, todo = set(), [f"autopilot.{name}" for name in EXECUTOR_LAW_MODULES]
+    while todo:
+        module = todo.pop()
+        if module in seen:
+            continue
+        seen.add(module)
+        path = TS_DIR / (module.replace(".", "/") + ".py")
+        assert module != "autopilot.runway_data", f"an executor law reaches the runway data (through {sorted(seen)})"
+        todo += [name for name in _imported_names(path) if name.startswith("autopilot.")
+                 and (TS_DIR / (name.replace(".", "/") + ".py")).is_file()]
+    assert {"autopilot.lateral", "autopilot.plant", "autopilot.sentence"} <= seen

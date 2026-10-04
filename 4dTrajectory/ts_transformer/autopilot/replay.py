@@ -48,7 +48,7 @@ from ts_transformer.instructions import artefact
 from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals
 from ts_transformer.instructions.conformance import require_conforming_labeller
-from ts_transformer.instructions.labeller.interval import first_interval_row, later_utc, on_interval
+from ts_transformer.instructions.labeller.interval import later_utc, on_utc_grid
 from ts_transformer.instructions.labeller.read import Reading, read_flight
 from ts_transformer.instructions.labeller.records import Instruction, Refused
 from ts_transformer.instructions.signals import ROW_FIELDS, FlightSignals
@@ -76,12 +76,11 @@ class Sentence:
 
 def sentence_on_interval(reading: Reading, signals: FlightSignals, interval_s: float, geometry: AirportGeometry,
                          words: Words) -> Sentence:
-    """A labelled flight's sentence on the row interval (module docstring): `on_interval` on its UTC grid, read at the
+    """A labelled flight's sentence on the row interval (module docstring): `on_utc_grid`, read at the
     heights the labeller checked its words at; its words as instructions on the new rows."""
-    step_s = words.spec.step_s
-    first = first_interval_row(signals.entry_time_utc, interval_s, step_s)
     courses = [candidate.course_deg for candidate in geometry.candidates]
-    grid = on_interval(reading.words, first, interval_s, step_s, reading.held_altitude_m, words, courses)
+    first, grid = on_utc_grid(reading.words, signals.entry_time_utc, interval_s, words.spec.step_s,
+                              reading.held_altitude_m, words, courses)
     return Sentence(grid=grid, instructions=instructions_of(grid, geometry, words), first_row=first)
 
 

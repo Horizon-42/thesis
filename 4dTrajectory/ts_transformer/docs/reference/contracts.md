@@ -412,8 +412,9 @@ missing or extra key and another reading rule — no compatibility.
 **The labeller is identified by what it reads, never by its source** (design D21, 2026-10-03; until v3 `spec.json`
 recorded `labeller_source_sha256` and every runner refused other code): `instruction_labels` writes `conformance/` — a
 fixed reference sample (`instructions.conformance`: train, seed 1337, 50 labelled and 10 refused flights an airport, their
-signals, outcomes and word grids) — and a `passed-<code12>.json` is written for each labeller code that reads it again
-the same (`check`, runner `instruction_conformance`, from a clean checkout; the code is named by the LOGIC of
+signals, outcomes and word grids; since A15, `ts-instruction-conformance-reference-v2`, each labelled sentence's word
+grid also on its UTC Δ grid at 4 and 8 s, `labeller.interval.on_utc_grid`, or why that grid refuses it, D49) — and a
+`passed-<code12>.json` is written for each labeller code that reads it again the same, on the 2 s rows and every Δ grid (`check`, runner `instruction_conformance`, from a clean checkout; the code is named by the LOGIC of
 `LABELLER_MODULES`, `io_utils.logic_sha256`). `require_conforming_labeller` asks for it before labelling, measuring a spec
 or replaying; the sentence files record which code wrote them, as information.
 
@@ -598,16 +599,23 @@ refuses both.
 2026-10-04 (`autopilot/closed_loop.py`, `instructions/artefact.py` `write_closed_loop` / `load_closed_loop`, runner
 `instruction_closed_loop` R50; design §4.9, D32–D34, D42, D44–D46). `<artefact>/closed_loop/` is written once, from a clean checkout,
 with an executor spec (C33): for each split and each row interval given (D25), `<split>_<Δ>s.npz`
-(`ts-instruction-closed-loop-v3`, refused unless every field is there and its spec sha is the artefact's): each flown
+(`ts-instruction-closed-loop-v4`, refused unless every field is there and its spec sha is the artefact's): each flown
 flight's words from its first predicted step (Δ row 16 s / Δ; row 0 says every column), which words the reading added
-(`correction`), its states on every Δ row (observed before the first predicted step, flown from it: airport-frame e/n,
-MSL height, track, ground speed, vertical rate), its errors against the observed path (`lateral_m` right positive,
+(`correction`), its states on the data's 2 s rows from its first row to its last said row, its Δ rows marked
+(`on_interval`, D51, since A15; v3 stored the Δ rows only), observed before the first predicted step, flown from it — a
+flown row between two Δ rows the executor's state at the end of its cycle there (airport-frame e/n, MSL height, track,
+ground speed, vertical rate); the replay check compares every 2 s row, its errors against the observed path (`lateral_m` right positive,
 `vertical_m`, NaN past the end of the observed path), the rows where §4.9 makes no heading / angle correction
 (`uncorrectable`, D34), the last 2 s row of the open-loop reading whose words each row has said (`observed_row`) and the
 matched point's observed time there (`matched_row`, 2 s rows), whether each flight was done at its time limit (`timed_out`) and the
 executor parameters' sha it was flown with; `summary.json` counts the flights without a sentence by reason (not flown by `replay.group_of`,
 refused on the row interval, refused by the closed loop — the grammar read at the flown height), the correction words per
-column, the D34 readings, the rows past the end and the lateness of the observed heading words. The reading says each
+column, the D34 readings (since A15 also `outside_the_tolerance`: per column the correctable rows, those outside Y / H —
+the share is D34's third reading — and of those the rows after which no correction TOWARD the path is in force
+(`without_a_correction_toward_the_path`, `closed_loop.outside_rows`, read from the stored sentence and its open-loop
+reading: the heading word in force on the path's side of the observed word's track, the angle class steeper when too
+high): the rule of D50 that §14.6 checks. §4.9 ends a correction when the error changes sign and starts the other one a
+row later, so an overshoot row counts there), the rows past the end and the lateness of the observed heading words. The reading says each
 observed word at the PLACE where the observed aircraft heard it, not at its time (D42): the words of the 2 s open-loop
 reading (not the Δ grid), each said at the first Δ row whose matched observed time is less than Δ/2 before the word's
 2 s time (D45: the nearest row; of several, each column's last word), so the words wait while the flown aircraft is

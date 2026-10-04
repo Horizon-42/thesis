@@ -18,7 +18,7 @@
    of the R in force at the Δ row (the same class when R did not change, or changed to a parallel runway). A Δ row says
    a heading word when a new heading word of the step rows goes to it and its track differs from the track the Δ rows
    have in force — also when its class is the class in force, said under another course (Claude's reading: a class
-   says a track only with its course; the step rows refuse that case, `labeller.lateral`, the Δ rows cannot). A change
+   says a track only with its course; the step rows say it too, D48, `labeller.sentence`). A change
    of R alone says no heading word (the executor keeps its absolute track, §3.3).
 
 Δ must be a whole number of steps and divide the prior's 16 s observation (D25: Δ = 2, 4, 8 s; 6 s is refused); at
@@ -36,7 +36,7 @@ import numpy as np
 from ts_transformer.data.day_split import parse_utc
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.labeller.sentence import check_grammar
-from ts_transformer.instructions.words import HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words, wrap180
+from ts_transformer.instructions.words import HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words, same_track
 
 
 #: The prior's observation before its first predicted step, s (design §2, `N_LOOK` = 8 rows at 2 s): every Δ divides it,
@@ -65,6 +65,11 @@ def first_interval_row(entry_time_utc: str, interval_s: float, step_s: float) ->
     return next(row for row in range(every) if round(seconds + row * step_s) % round(interval_s) == 0)
 
 
+def on_interval_rows(n_rows: int, every: int) -> np.ndarray:
+    """[n_rows] bool: which of a sentence's step rows, from its first Δ row, are its Δ rows (every ``every``-th, D51)."""
+    return np.arange(n_rows) % every == 0
+
+
 def last_heard_row(row: float, every: int) -> int:
     """The last step row whose time is less than Δ/2 (``every`` step rows) after ``row`` (in step rows): the last word a
     Δ row at ``row`` says (item 2, D45: a word exactly between two Δ rows goes to the later one). The closed-loop reading
@@ -85,6 +90,14 @@ def in_force(grid: np.ndarray) -> np.ndarray:
     written = grid != UNCHANGED
     last = np.maximum.accumulate(np.where(written, np.arange(len(grid))[:, None], 0), axis=0)
     return np.take_along_axis(grid, last, axis=0)
+
+
+def on_utc_grid(grid: np.ndarray, entry_time_utc: str, interval_s: float, step_s: float, altitude_m: np.ndarray,
+                words: Words, courses_deg: Sequence[float]) -> tuple[int, np.ndarray]:
+    """A labelled sentence on its UTC Δ grid (`first_interval_row` of its first row's UTC time, then `on_interval`): the
+    2 s row of its first Δ row and its words there. The replay and the labeller conformance read it alike (D49)."""
+    first = first_interval_row(entry_time_utc, interval_s, step_s)
+    return first, on_interval(grid, first, interval_s, step_s, altitude_m, words, courses_deg)
 
 
 def on_interval(grid: np.ndarray, first_row: int, interval_s: float, step_s: float, altitude_m: np.ndarray,
@@ -117,7 +130,7 @@ def on_interval(grid: np.ndarray, first_row: int, interval_s: float, step_s: flo
             continue
         source = said[step]
         wanted = courses_deg[runway[source]] + words.heading_relative_deg(int(force[step, HEADING]))
-        if track is None or abs(float(wrap180(wanted - track))) > 1e-9:
+        if track is None or not same_track(wanted, track):
             out[position, HEADING] = words.heading_class(wanted, courses_deg[runway[step]])
             track = courses_deg[runway[step]] + words.heading_relative_deg(int(out[position, HEADING]))
     check_grammar(out, np.asarray(altitude_m)[rows], words, len(courses_deg))

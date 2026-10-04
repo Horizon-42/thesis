@@ -86,7 +86,7 @@ def test_the_conformance_fails_when_a_labeller_rule_changes(tmp_path, monkeypatc
     monkeypatch.setattr(lateral, "_snap", lambda value, step: np.floor(value / step) * step)
     checked = conformance.check(directory, git=CLEAN)
     assert set(checked.mismatches) == {"KXXX:a", "KXXX:c"}
-    assert all("the words differ" in problems for problems in checked.mismatches.values())
+    assert all("the words differ (2 s rows)" in problems for problems in checked.mismatches.values())
     with pytest.raises(ValueError, match="read otherwise"):
         conformance.write_passed(directory, checked, git=CLEAN)
     monkeypatch.undo()
@@ -99,6 +99,51 @@ def test_the_conformance_fails_when_a_labeller_rule_changes(tmp_path, monkeypatc
     checked = conformance.check(directory, git=CLEAN)
     assert checked.mismatches["KXXX:b"] == [
         "reason: 'ground speed outside the speed words', the reference 'impossible ground speed'"]
+
+
+def test_the_conformance_reads_the_interval_grids_and_finds_a_change_of_their_rule(tmp_path, monkeypatch):
+    """D49: the reference holds each labelled sentence on its UTC Δ grid at 4 and 8 s beside its 2 s rows, and the
+    check finds a change of the Δ grid's own rule — a tie read at the earlier row (D45) — which leaves the 2 s words as
+    they are."""
+    from ts_transformer.instructions.labeller import interval
+
+    directory = _artefact(tmp_path / "a", monkeypatch)
+    reference = json.loads((directory / "conformance" / "reference.json").read_text(encoding="utf-8"))
+    assert reference["intervals"] == ["2", "4", "8"]
+    assert all(o["interval_refusals"] == {} for o in reference["outcomes"] if o["status"] == "labelled")
+    with np.load(directory / "conformance" / "reference.npz") as data:
+        assert {"words_2s", "words_4s", "words_8s"} <= set(data.files)
+        assert len(data["word_offsets_4s"]) == 3 and data["word_offsets_4s"][-1] > 0
+    monkeypatch.setattr(interval, "last_heard_row", lambda row, every: int(row + every / 2.0))
+    checked = conformance.check(directory, git=CLEAN)
+    assert set(checked.mismatches) == {"KXXX:a", "KXXX:c"}
+    problems = {p for found in checked.mismatches.values() for p in found}
+    assert "the words differ (2 s rows)" not in problems and "the words differ (4 s rows)" in problems
+
+
+def test_a_delta_grid_that_refuses_a_sentence_is_held_as_its_reason_and_no_rows(tmp_path, monkeypatch):
+    """D49: a Δ grid that refuses a labelled sentence is in the reference as its reason (no rows); the check reads the
+    same, and finds a grid that no longer refuses."""
+    from ts_transformer.instructions.labeller import interval
+
+    original = interval.on_utc_grid
+
+    def refuse_8(grid, entry, interval_s, *rest):
+        if interval_s == 8.0:
+            raise conformance.Refused("too short", "no row on the 8 s grid")
+        return original(grid, entry, interval_s, *rest)
+    monkeypatch.setattr(conformance, "on_utc_grid", refuse_8)
+    directory = _artefact(tmp_path / "a", monkeypatch)
+    reference = json.loads((directory / "conformance" / "reference.json").read_text(encoding="utf-8"))
+    assert all(o["interval_refusals"] == {"8": "too short"} for o in reference["outcomes"] if o["status"] == "labelled")
+    with np.load(directory / "conformance" / "reference.npz") as data:
+        assert data["word_offsets_8s"].tolist() == [0, 0, 0] and data["word_offsets_4s"][-1] > 0
+    assert conformance.check(directory, git=CLEAN).passed
+    monkeypatch.setattr(conformance, "on_utc_grid", original)
+    checked = conformance.check(directory, git=CLEAN)
+    assert set(checked.mismatches) == {"KXXX:a", "KXXX:c"}
+    assert all(any(p.startswith("interval_refusals") for p in found) and "the words differ (8 s rows)" in found
+               for found in checked.mismatches.values())
 
 
 def test_a_reference_of_another_schema_or_spec_is_refused(tmp_path, monkeypatch):

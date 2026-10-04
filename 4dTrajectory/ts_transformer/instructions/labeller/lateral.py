@@ -7,7 +7,8 @@ force by more than half a step (`per_step_words`). A word therefore says where t
 continuous turn is a run of words at the pace it was flown, and nothing is inserted: no hold, no split, no intercept
 word. The words run from row 0 to the sentence's last row — they describe the turn onto the final and the final itself
 (D2); there is no clearance. A word in force keeps the track it said when R changes (the executor keeps it, §5.4): only
-a new word reads the new course.
+a new word reads the new course — and it is said also when its class is the class in force, its track being another
+(D48).
 
 The CAPTURE ROW (`capture_row`, design §2) of an approach (D26) is the first row from which the track stays in the
 capture corridor of its runway to the end of the approach. It uses later rows, so it is never an input; only the
@@ -114,12 +115,8 @@ def read_lateral(track: np.ndarray, relatives: list[RunwayRelative], courses_deg
                                 {"relative_deg": words.heading_relative_deg(words.heading_index(target)),
                                  "target_deg": float((courses[row] + target) % 360.0)})
                     for row, target in said]
-    # under one course a new word is always another class; after R changes course it can be the class in force, which
-    # the sentence cannot say again (`sentence.assemble`: a word equal to the one in force is no instruction)
-    for before, after in zip(instructions, instructions[1:]):
-        if after.value == before.value:
-            raise Refused("heading word repeated after a runway change",
-                          f"class {after.value} at row {after.row}, in force since row {before.row}")
+    # under one course a new word is always another class; after R changes course it can be the class in force, said
+    # again because its track differs (D48: `sentence.assemble` keeps a heading word whose track is new)
     captures = [capture_row(relatives[a.runway_index], a.first, a.end, spec) for a in approaches]
     landing = captures[-1]
     if landing is None:

@@ -226,7 +226,7 @@ def test_a_step_between_two_levels_is_issued_at_the_first_levels_end_with_its_ow
         (ALTITUDE, 0, words.altitude_index(900.0)), (ANGLE, 0, ANGLE_LEVEL),
         (ALTITUDE, 29, words.altitude_index(960.0)), (ANGLE, 29, words.angle_climb)]
     grid, _ = assemble(60, [Instruction(RUNWAY, 0, 0, "i"), Instruction(HEADING, 18, 0, "i"),
-                            Instruction(SPEED, 16, 0, "i"), *reading.instructions], altitude, words, 1)
+                            Instruction(SPEED, 16, 0, "i"), *reading.instructions], altitude, words, [90.0])
     assert grid[29, ANGLE] == words.angle_climb
 
 
@@ -304,24 +304,28 @@ def test_the_assembly_drops_repeats_and_refuses_conflicts_and_an_empty_first_ste
     words = Words(spec())
     altitude = np.full(10, 900.0)
     base = _first_step(words)
-    grid, kept = assemble(10, [*base, Instruction(HEADING, 18, 4, "repeat")], altitude, words, 1)
+    grid, kept = assemble(10, [*base, Instruction(HEADING, 18, 4, "repeat")], altitude, words, [90.0])
     assert grid[4, HEADING] == UNCHANGED and len(kept) == 5 and grid.shape == (10, 5)
     with pytest.raises(Refused, match="two instructions in one step"):
-        assemble(10, [*base, Instruction(HEADING, 20, 0, "clash")], altitude, words, 1)
+        assemble(10, [*base, Instruction(HEADING, 20, 0, "clash")], altitude, words, [90.0])
     with pytest.raises(Refused, match="two instructions in one step"):
         assemble(10, [*base, Instruction(HEADING, 18, 4, "repeat"), Instruction(HEADING, 30, 4, "other")], altitude,
-                 words, 1)
+                 words, [90.0])
     with pytest.raises(Refused, match="first step incomplete"):
-        assemble(10, base[:-1], altitude, words, 1)
+        assemble(10, base[:-1], altitude, words, [90.0])
+    with pytest.raises(Refused, match=r"first step incomplete: no word for \['runway'\]"):
+        assemble(10, base[1:], altitude, words, [90.0])
+    with pytest.raises(Refused, match=r"first step incomplete: no word for \['heading'\]"):
+        assemble(10, [base[0], *base[2:], Instruction(HEADING, 18, 4, "later")], altitude, words, [90.0])
     with pytest.raises(Refused, match="altitude and angle incompatible"):
-        assemble(10, [*base, Instruction(ALTITUDE, 5, 3, "descend with a level angle")], altitude, words, 1)
+        assemble(10, [*base, Instruction(ALTITUDE, 5, 3, "descend with a level angle")], altitude, words, [90.0])
 
 
 def test_the_runway_said_again_after_a_go_around_is_kept():
     words = Words(spec())
     instructions = [*_first_step(words), Instruction(RUNWAY, RUNWAY_GO_AROUND, 3, "go-around"),
                     Instruction(RUNWAY, 0, 6, "runway again")]
-    grid, kept = assemble(10, instructions, np.full(10, 900.0), words, 1)
+    grid, kept = assemble(10, instructions, np.full(10, 900.0), words, [90.0])
     assert [(int(r), int(grid[r, RUNWAY])) for r in np.nonzero(grid[:, RUNWAY] != UNCHANGED)[0]] == [
         (0, 0), (3, RUNWAY_GO_AROUND), (6, 0)]
 
@@ -719,15 +723,31 @@ def test_two_go_arounds_are_three_approaches_each_with_its_own_words():
     assert all(a.first <= a.capture_row < a.end for a in reading.approaches[1:])
 
 
-def test_a_heading_word_of_the_class_in_force_after_a_runway_change_is_refused():
-    """§4.3: under one course a new word is always another class; after R changes course the track can need the class
-    in force again, which the sentence cannot say (a word equal to the one in force is no instruction)."""
+def test_a_heading_word_of_the_class_in_force_after_a_runway_change_is_said():
+    """D48 (§4.3): under one course a new word is always another class; after R changes course the track can need the
+    class in force again, and the sentence says it, because its track is another."""
     one, words = spec(), Words(spec())
     track = np.concatenate((np.full(20, 90.0), np.full(20, 93.0)))
     relatives = [_relative(40, 0, course, track, 0.0) for course in (90.0, 92.0)]
     runway_rows = np.where(np.arange(40) < 10, 0, 1)
-    with pytest.raises(Refused, match="heading word repeated after a runway change"):
-        read_lateral(track, relatives, [90.0, 92.0], [Approach(0, 40, 1)], runway_rows, one, words)
+    lateral = read_lateral(track, relatives, [90.0, 92.0], [Approach(0, 40, 1)], runway_rows, one, words)
+    assert [(i.row, i.value) for i in lateral.instructions][0] == (0, 0)
+    (row, value), = [(i.row, i.value) for i in lateral.instructions[1:]]
+    assert value == 0 and 10 < row < 20 and lateral.instructions[1].info["target_deg"] == 92.0
+
+
+def test_the_assembly_says_the_class_in_force_again_under_another_course_and_drops_it_under_the_same():
+    """D48: a heading word is its absolute track. After a runway word to a course 6° off the class in force is said
+    again; to a parallel runway (the same course) it says nothing new and is dropped."""
+    words = Words(spec())
+    base = _first_step(words)
+    again = [Instruction(RUNWAY, RUNWAY_GO_AROUND, 3, "go-around"), Instruction(RUNWAY, 1, 6, "runway again"),
+             Instruction(HEADING, 18, 7, "per-step")]
+    altitude = np.full(10, 900.0)
+    grid, kept = assemble(10, [*base, *again], altitude, words, [90.0, 96.0])
+    assert grid[7, HEADING] == 18 and len(kept) == 8
+    grid, kept = assemble(10, [*base, *again], altitude, words, [90.0, 90.0])
+    assert grid[7, HEADING] == UNCHANGED and len(kept) == 7
 
 
 def test_a_step_up_from_a_level_is_a_go_around_climb():

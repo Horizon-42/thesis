@@ -165,6 +165,17 @@ def wrap180(angle_deg):
     return (np.asarray(angle_deg) + 180.0) % 360.0 - 180.0
 
 
+#: Two tracks a heading word says are one track within this (degrees): the courses of two candidates and a class's
+#: relative heading add up the same only to the last digits of a float.
+SAME_TRACK_DEG = 1e-9
+
+
+def same_track(a_deg: float, b_deg: float) -> bool:
+    """Whether two compass tracks are one (`SAME_TRACK_DEG`): the one test of "a heading word says nothing new" (the
+    2 s sentence, the Δ grid and the closed loop, D46, D48)."""
+    return abs(float(wrap180(a_deg - b_deg))) <= SAME_TRACK_DEG
+
+
 def compass_from_math_rad(psi_rad):
     """Math-ENU heading (0 = East, counter-clockwise) → compass degrees (0 = North, clockwise)."""
     return (90.0 - np.degrees(psi_rad)) % 360.0

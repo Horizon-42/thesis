@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
             futures = [pool.submit(_label, flights[i: i + CHUNK], spec.to_dict(), geometry_data) for i in range(0, len(flights), CHUNK)]
             readings, indices, records, refusals = [], [], [], []
             outcomes: list[dict[str, Any]] = []          # every flight's conformance record, in signal order
-            grids: list[np.ndarray | None] = []
+            labelled: list[Any] = []                     # every flight's reading, None where refused
             for chunk, future in enumerate(futures):
                 for offset, (status, reading, record) in enumerate(future.result()):
                     if status == "labelled":
@@ -154,11 +154,11 @@ def main(argv: list[str] | None = None) -> int:
                         indices.append(chunk * CHUNK + offset)
                         records.append(record)
                         outcomes.append(conformance.labelled_record(reading))
-                        grids.append(reading.words)
+                        labelled.append(reading)
                     else:
                         refusals.append(record)
                         outcomes.append(reading)             # the refusal's conformance record
-                        grids.append(None)
+                        labelled.append(None)
             print(f"  {split}: {len(readings)} labelled, {len(refusals)} refused, "
                   f"{time.perf_counter() - started:.0f}s", flush=True)
             if not readings:
@@ -167,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise SystemExit("the labeller's code changed while the workers read; label again")
             write_sentences(directory, split, spec, readings, indices, code)
             if split == conformance.SPLIT:
-                conformance.write_reference(directory, flights, outcomes, grids, code_sha256=code, git=git_state())
+                conformance.write_reference(directory, flights, outcomes, labelled, code_sha256=code, git=git_state())
             summary[split] = {**summarise(records, refusals),
                               "class_usage": class_usage(np.concatenate([r.words for r in readings]), words)}
             labels[split] = {"labelled": records, "refused": refusals}

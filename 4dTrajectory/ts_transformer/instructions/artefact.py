@@ -33,6 +33,7 @@ import numpy as np
 
 from ts_transformer.data.day_split import DEVELOPMENT_SPLITS, DaySplit, landing_day
 from ts_transformer.instructions.airport import AirportGeometry
+from ts_transformer.instructions.labeller.interval import interval_rows, on_interval_rows
 from ts_transformer.instructions.labeller.read import Reading
 from ts_transformer.instructions.signals import SIGNALS_SCHEMA, FlightSignals, pack_signals, unpack_signals
 from ts_transformer.instructions.spec import SPEC_SCHEMA, VocabularySpec
@@ -213,11 +214,11 @@ def load_sentences(directory: Path, split: str, spec: VocabularySpec) -> dict[st
 #: sentence's last row).
 #: v3 (A12, D44–D46): the observed words from the 2 s reading, `observed_row` a 2 s row, `matched_row` the matched
 #: point's observed time; `vertical_m` NaN past the end of the observed path.
-CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v3"
+CLOSED_LOOP_SCHEMA = "ts-instruction-closed-loop-v4"
 #: Every array a closed-loop file holds.
 CLOSED_LOOP_FIELDS = {"schema", "spec_sha256", "executor_params_sha256", "row_interval_s", "start_row", "signal_index",
-                      "first_row", "offsets", "state_offsets", "words", "correction", "states", "lateral_m",
-                      "vertical_m", "uncorrectable", "observed_row", "matched_row", "timed_out"}
+                      "first_row", "offsets", "state_offsets", "words", "correction", "states", "on_interval",
+                      "lateral_m", "vertical_m", "uncorrectable", "observed_row", "matched_row", "timed_out"}
 #: The directory inside the artefact that holds them, written once (`closed_loop_path`).
 CLOSED_LOOP_DIRECTORY = "closed_loop"
 
@@ -229,13 +230,14 @@ def closed_loop_path(directory: Path, split: str, row_interval_s: float) -> Path
 def write_closed_loop(path: Path, spec: VocabularySpec, *, executor_params_sha256: str, row_interval_s: float,
                       start_row: int, signal_index: Sequence[int], first_row: Sequence[int],
                       grids: Sequence[np.ndarray], corrections: Sequence[np.ndarray], states: Sequence[np.ndarray],
-                      lateral_m: Sequence[np.ndarray], vertical_m: Sequence[np.ndarray],
+                      on_interval: Sequence[np.ndarray], lateral_m: Sequence[np.ndarray], vertical_m: Sequence[np.ndarray],
                       uncorrectable: Sequence[np.ndarray], observed_row: Sequence[np.ndarray],
                       matched_row: Sequence[np.ndarray], timed_out: Sequence[bool]) -> None:
     """One split's closed-loop sentences at one row interval, in the order given. Sentence ``k``'s words are
     ``words[offsets[k]: offsets[k + 1]]`` (from its first predicted step, `start_row` rows after its first row on the
     interval's grid, which is its signals' 2 s row ``first_row[k]``), its states ``states[state_offsets[k]:
-    state_offsets[k + 1]]`` (every row from its first: observed before ``start_row``, flown from it); ``uncorrectable``
+    state_offsets[k + 1]]`` (every 2 s row from its first row to its last said row: observed before ``start_row``, flown
+    from it, D51) and ``on_interval`` which of them are its Δ rows; ``uncorrectable``
     ``[rows, 2]`` the rows where the reading makes no heading / angle correction (D34); ``observed_row`` the last 2 s
     row of the open-loop reading (from ``first_row[k]``) whose words each row has said, ``matched_row`` the matched
     point's observed time there (2 s rows, D42, D45); ``vertical_m`` NaN past the end of the observed path (D44);
@@ -244,8 +246,12 @@ def write_closed_loop(path: Path, spec: VocabularySpec, *, executor_params_sha25
         raise ValueError(f"no closed-loop sentence for {path.name}: nothing to write")
     lengths = np.array([len(grid) for grid in grids], dtype=np.int64)
     state_lengths = np.array([len(rows) for rows in states], dtype=np.int64)
-    if not np.array_equal(state_lengths, lengths + start_row):
-        raise ValueError("every sentence's states cover its rows before the first predicted step and its words")
+    every = interval_rows(row_interval_s, spec.step_s)
+    marks = [np.asarray(rows, dtype=bool) for rows in on_interval]
+    if (not np.array_equal(state_lengths, (lengths + start_row - 1) * every + 1)
+            or not all(np.array_equal(rows, on_interval_rows(len(rows), every)) for rows in marks)):
+        raise ValueError("every sentence's states cover its 2 s rows from its first row to its last said row, its Δ rows "
+                         "marked: the rows before the first predicted step and one Δ row for each word row")
     np.savez_compressed(
         _fresh(path),
         schema=np.array(CLOSED_LOOP_SCHEMA), spec_sha256=np.array(spec.sha256),
@@ -255,7 +261,8 @@ def write_closed_loop(path: Path, spec: VocabularySpec, *, executor_params_sha25
         offsets=np.concatenate(([0], np.cumsum(lengths))).astype(np.int64),
         state_offsets=np.concatenate(([0], np.cumsum(state_lengths))).astype(np.int64),
         words=np.concatenate(grids).astype(np.int16), correction=np.concatenate(corrections).astype(bool),
-        states=np.concatenate(states).astype(np.float64), lateral_m=np.concatenate(lateral_m).astype(np.float64),
+        states=np.concatenate(states).astype(np.float64), on_interval=np.concatenate(marks),
+        lateral_m=np.concatenate(lateral_m).astype(np.float64),
         vertical_m=np.concatenate(vertical_m).astype(np.float64),
         uncorrectable=np.concatenate(uncorrectable).astype(bool),
         observed_row=np.concatenate(observed_row).astype(np.int64),
