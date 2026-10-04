@@ -49,7 +49,11 @@ None.
 
 | Part | State |
 |---|---|
-| Stage B: prior (§12) | Not started |
+| B0: the package `prior/` and its import rules (`tests/test_architecture.py`: `prior/` reads only `instructions/`, the day split and the plain utilities; only the runners import it) | Done, `f3070978`. The runners `prior_train`, `prior_free_generation` and `prior_select` are written with the milestones that give them their inputs (B1 with B3, B4, B5) |
+| B2: the model (`prior/model.py`), a sentence's rows and their batch (`prior/batch.py`), the checkpoint `ts-prior-checkpoint-v6` (`prior/checkpoint.py`) | Done on synthetic sentences, `f3070978`. Claude's readings: the candidate tokens reach a row through one attention over them whose weights sum to one, not the sum of §11 (a sum grows with the number of candidates, D41); the RoPE base is 10,000 (a head of 32: periods from 6.3 s to approximately 35,000 s); the runway head's classes are "unchanged", "go-around", then the candidates. The checkpoint's identity (§8) is handed in; B1 builds it from the artefact |
+| B3: the training loop (`prior/train.py`) and the data of a run or fold (`prior/runs.py`) | The loop done on synthetic sentences, `f3070978`. The smoke run, its time and the memory check at the formal size wait for A21 |
+| B1; B4 (the speaker, the masks, free generation) | Wait for A19 and A20 of stage A |
+| B5, B6 | Wait for Claude's check of stage A and the user's choice of Δ |
 
 ### 0.4 Plan
 
