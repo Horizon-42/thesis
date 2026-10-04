@@ -53,10 +53,19 @@ None.
 
 ### 0.4 Plan
 
-1. Stage B starts after stage A, Claude's check of it and the user's choice of Δ (outline §4).
-2. B0–B6 (§12): the package, the data, the model, the training, the speaking and free generation, the cross-validation
-   and the base model.
-3. Then the post-training (`post_training.md`).
+1. Stage B is developed in parallel with the end of stage A (the user, 2026-10-04), on its own branch (outline §5
+   rule 1). B0–B6 (§12): the package, the data, the model, the training, the speaking and free generation, the
+   cross-validation and the base model. A milestone starts when the parts of stage A that it reads are on
+   `dev-two-tier-v4` (outline §4):
+
+   | When | What |
+   |---|---|
+   | Now | B0. B2 and the training loop of B3, tested on synthetic inputs. The words of each column and their number come from the vocabulary spec (vocabulary §6, item 1), never from constants of the prior |
+   | After A19 and A20 of stage A (the altitude words above E, the new format names, the executor that flies T + E) | B1, tested on synthetic artefacts (`tests/support.py`). The speaker and the masks of B4 |
+   | After A21 of stage A (the formal artefact) | B1–B4 on a sample of the formal artefact at Δ = 2 s: the smoke run of B3, its time and the memory check at the formal size; free generation with the executor of the formal artefact |
+   | After Claude's check of stage A and the user's choice of Δ (outline §4) | B5, B6 |
+
+2. Then the post-training (`post_training.md`).
 
 ---
 
@@ -324,9 +333,12 @@ The code that this design replaces, archived by stage A unchanged.
 
 ## 12 Implementation plan: stage B
 
-**Start.** After stage A and Claude's check of it (outline §4). The code is written and tested on a sample of the formal
-artefact of A21 at Δ = 2 s, read-only. The smoke artefacts of stage A are not used: their spec is not the spec of D56
-and D58 (D55). The formal runs of B5 need the chosen Δ (D11). The rules of outline §5 apply.
+**Start.** In parallel with the end of stage A, on the branch `dev-two-tier-v4-prior` (outline §5 rule 1); §0.4 gives
+when each milestone starts. Until the formal artefact of A21 exists, the tests use synthetic inputs and artefacts. Then
+the code is tested on a sample of the formal artefact at Δ = 2 s, read-only. The smoke artefacts of stage A are not
+used: their spec is not the spec of D56 and D58 (D55). The formal runs of B5 need Claude's check of stage A and the
+chosen Δ (D11). Stage B changes no code of `instructions/` or `autopilot/`; it reads them only through the
+vocabulary's public interface (vocabulary §6). The rules of outline §5 apply.
 
 **Written from this document, not patched from the archive.** The archived `prior/`
 (`archive/two_tier_v3_2026_10/prior/`) stays unchanged. A part of it comes back only where its logic fits this document,
@@ -407,5 +419,5 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
 - No criterion is applied: the user reads the results (D7).
 
 **B6. Close of stage B.** The full ts suite passes (run detached). §0.3, §11 and `docs/reference/runners.md` are
-updated. Report to the user: the commits, the readings of each fold and of the base, the choice and its rule, and what
-stage C needs.
+updated. `dev-two-tier-v4` merges `dev-two-tier-v4-prior` (outline §5 rule 1). Report to the user: the commits, the
+readings of each fold and of the base, the choice and its rule, and what stage C needs.
