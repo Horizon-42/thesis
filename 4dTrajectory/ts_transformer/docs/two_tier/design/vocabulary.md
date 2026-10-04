@@ -1374,10 +1374,10 @@ beside the formal artefact of A21.
   user (as for every executor before). The data are made read-only with a `SHA256SUMS` beside them. The report gives
   the readings side by side; it sets no criterion (D7).
 
-### 12.2 What Claude checks before stage B
+### 12.2 Claude's check of stage A
 
 The check of A0–A14 is done (`readouts/2026-10-04_stage_a_check.zh.md`, at `ab295b18`; its points became D48–D52).
-Before stage B, Claude checks A15–A21 and the formal artefact:
+After A21, Claude checks A15–A21 and the formal artefact. The formal runs of stage B wait for this check (outline §4):
 
 1. D48–D56 against the code: done at `688e945e`. D57 and D58, and the code changed after `688e945e`, against the code of
    the formal build of A21.

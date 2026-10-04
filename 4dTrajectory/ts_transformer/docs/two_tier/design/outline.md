@@ -23,7 +23,7 @@ repository root; `readouts/` is `docs/two_tier/readouts/`. The documents of the 
 | Document | Part | Stage | State |
 |---|---|---|---|
 | `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge | A | Built on `dev-two-tier-v4`; the formal artefact next (vocabulary §0.4) |
-| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport | B | Not started |
+| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport | B | Not started; it starts in parallel with the end of stage A (§4) |
 | `post_training.md` | The post-training in windows of traffic; the multi-aircraft work | C | Not started; outline |
 | This outline | The principles, the shared rules, the plan; the frontend and the backend (§6) | D | Not started |
 
@@ -105,6 +105,9 @@ The next free numbers: D59, O9.
 1. Stage A (vocabulary §0.4): A19 and A20, the user's choice of the altitude grid, A21 (the formal artefact and the
    readings of D34), Claude's check. The user compares the readings of D34 and chooses Δ (D7, D11).
 2. Stage B (prior §0.4): the prior from the start, chosen by cross-validation over the airports, and the base model.
+   Stage B is developed in parallel with the end of stage A (the user, 2026-10-04). A milestone of stage B starts when
+   the parts of stage A that it reads are on `dev-two-tier-v4`. The formal runs of stage B wait for Claude's check of
+   stage A and the user's choice of Δ.
 3. Stage C (post-training §0.4): the post-training in windows of traffic with one aircraft commanded.
 4. Stage D (§6): the frontend and the backend.
 5. The user merges the branch.
@@ -116,10 +119,17 @@ The next free numbers: D59, O9.
 These rules hold at every stage. The plan of each stage is in its document; before a milestone, read the design
 sections that it names.
 
-1. The branch is `dev-two-tier-v4`, in the worktree `.claude/worktrees/two-tier-v4`, made from `dev-two-tier`. Before a
-   milestone that a new design commit holds, merge `dev-two-tier` into it. The ignored data trees of the worktree
-   (`data`, `trajectory_data_process/outputs`, `4dTrajectory/outputs`, `aeroviz-4d/public/data/airports`) are absolute
-   links to LIVE data.
+1. The branches. Stage A is on `dev-two-tier-v4`, in the worktree `.claude/worktrees/two-tier-v4`, made from
+   `dev-two-tier`. Stage B is on `dev-two-tier-v4-prior`, in the worktree `.claude/worktrees/two-tier-v4-prior`, made
+   from `dev-two-tier-v4`. The merges go in one direction:
+   - before a milestone that a new design commit holds, the branch of the stage merges `dev-two-tier`;
+   - when stage A commits a part that a milestone of stage B reads, `dev-two-tier-v4-prior` merges `dev-two-tier-v4`;
+   - at the end of stage B (prior B6), `dev-two-tier-v4` merges `dev-two-tier-v4-prior`.
+
+   Stage B never changes the code of `instructions/` or `autopilot/`. A defect in it goes to stage A, through the user;
+   stage B gets the correction with the next merge. The ignored data trees of each worktree (`data`,
+   `trajectory_data_process/outputs`, `4dTrajectory/outputs`, `aeroviz-4d/public/data/airports`) are absolute links to
+   LIVE data.
 2. Each milestone: read the code that it changes; write the code and its tests; run the milestone's test files; get a
    code review from a separate reviewer (code only, never documents); correct; commit with explicit paths. Never use
    `git add -A`. Before each commit, read `git diff --cached --stat`.
@@ -141,12 +151,16 @@ sections that it names.
    into the change.
 10. At each milestone, update §0.3 of the stage's document (state, commit). At the end of a stage, update the key code
     index of its document to the new code.
-11. The branch is not merged before stage D: the backend's live executor (`aeroviz_backend/autopilot_segment/`) and the
-    frontend's Training view read the old format until then. The user merges.
+11. The branches are not merged into `dev-two-tier` before stage D: the backend's live executor
+    (`aeroviz_backend/autopilot_segment/`) and the frontend's Training view read the old format until then. The user
+    merges.
 12. A value that a runner fits from data and the user chooses (D15) is measured on all train days in a scratch
     directory, directly after the milestone that writes the runner. This measurement is not a formal build: it writes
     nothing under `4dTrajectory/outputs/`. Report the fitted values and their candidates to the user, and wait for the
     choice before a later milestone reads the value (D55).
+13. Two stages run on one host. Before a full ts suite, a smoke build, a measurement or a run on the GPU, read the free
+    memory, the GPU memory and the running jobs. Do not start a job that can stop or slow a formal build, a full-train
+    measurement or a formal campaign of the other stage.
 
 ---
 
