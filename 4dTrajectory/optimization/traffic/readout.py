@@ -24,7 +24,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scenario_batch import sidecar_filename  # noqa: E402
-from traffic import rules  # noqa: E402
+from traffic import M2_MODE, rules  # noqa: E402
 
 #: A slot later than its ETA by more than this is "delayed" (the approach clock's round trip leaves ~1e-7 s).
 _DELAY_TOLERANCE_S = 1e-3
@@ -72,19 +72,20 @@ def readout(batch_dir: Path, sidecar_suffix: str = "_traffic.json") -> dict:
 
 
 def blocks_readout(m2_dir: Path) -> dict:
-    """An M2 run (``blocks.json`` and one directory per block): aircraft, the schedule's delays, the
+    """An M2 run (its ``summary.json``, mode ``M2_MODE``, with every block): aircraft, the schedule's delays, the
     outcomes (a failed solve split by its delay: none, or some; ``slot_failed`` — the slot's fixed-time
     solve on the ETA's IAF failed, no other IAF is tried), and the flown aircraft with a loss left after the
     block's final check — one it answers for, one it does not."""
-    index = json.loads((m2_dir / "blocks.json").read_text(encoding="utf-8"))
+    summary = json.loads((m2_dir / "summary.json").read_text(encoding="utf-8"))
+    if summary["mode"] != M2_MODE:
+        raise ValueError(f"{m2_dir}: mode {summary['mode']!r}, not an M2 run")
     outcomes, delays = Counter(), []
     left = {reading: {"answered": 0, "not_answered": 0} for reading in (rules.VISUAL, rules.IFR)}
     aircraft = scheduled = 0
-    failed_blocks = [b["label"] for b in index["blocks"] if "error" in b]
-    for entry in index["blocks"]:
-        if "error" in entry:
+    failed_blocks = [b["label"] for b in summary["blocks"] if "error" in b]
+    for block in summary["blocks"]:
+        if "error" in block:
             continue
-        block = json.loads((m2_dir / entry["label"] / "summary.json").read_text(encoding="utf-8"))["block"]
         aircraft += block["aircraft"]
         scheduled += block["scheduled"]
         delay = {slot["flight_key"]: slot["delay_s"] for slot in block["slots"]}
@@ -103,7 +104,7 @@ def blocks_readout(m2_dir: Path) -> dict:
                 for kind in ("answered", "not_answered"):
                     left[reading][kind] += losses[reading][kind] > 0
     return {
-        "blocks": len(index["blocks"]),
+        "blocks": len(summary["blocks"]),
         "failed_blocks": failed_blocks,
         "aircraft": aircraft,
         "scheduled": scheduled,
@@ -117,7 +118,8 @@ def blocks_readout(m2_dir: Path) -> dict:
 def main() -> None:
     for arg in sys.argv[1:]:
         print(arg)
-        found = blocks_readout(Path(arg)) if (Path(arg) / "blocks.json").is_file() else readout(Path(arg))
+        mode = json.loads((Path(arg) / "summary.json").read_text(encoding="utf-8"))["mode"]
+        found = blocks_readout(Path(arg)) if mode == M2_MODE else readout(Path(arg))
         print(json.dumps(found, indent=1))
 
 

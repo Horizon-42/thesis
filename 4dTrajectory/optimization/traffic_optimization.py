@@ -8,7 +8,8 @@
 
 M1: a seeded sample of the airport's arrivals (stated in ``summary.json``), each flown in the recorded
 traffic. M2: every arrival landing (in its record) inside each block, scheduled and flown in slot order
-(``traffic.block``); one directory per block. Each scenario is built as the constrained batch builds it
+(``traffic.block``); the records of every block in one directory, one ``summary.json`` (its ``blocks``: each
+block's schedule and final check). Each scenario is built as the constrained batch builds it
 (runway-threshold target, shortest IAF). Every solved one gets the usual ``*_states.json`` +
 ``*_eval.json`` (the record of its last successful solve, so ``evaluation`` grades it unchanged) and a
 ``*_traffic.json`` sidecar (``traffic.loop.TRAFFIC_RECORD_SCHEMA``). The recorded traffic is read once, in
@@ -21,7 +22,6 @@ import argparse
 import json
 import random
 import sys
-import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -53,6 +53,7 @@ from scenario_optimization import (  # noqa: E402
     DEFAULT_PROCEDURE_ROOT,
     shipped_evaluation,
 )
+from traffic import M1_MODE, M2_MODE  # noqa: E402
 from traffic.block import BLOCK_RECORD_SCHEMA, fly_block  # noqa: E402
 from traffic.loop import TRAFFIC_RECORD_SCHEMA, LoopSettings, fly_in_traffic  # noqa: E402
 from trajectory_data_process.harvest.utc import parse_iso_utc_s  # noqa: E402
@@ -133,15 +134,17 @@ def block_scenarios(flights: list[dict], traffic: Traffic, airport: str, start_u
 
 def _fly_one_block(payload: tuple[str, list[FlightScenario], Traffic, dict[str, Any]]):
     """Process-pool worker: one block (``traffic.block.fly_block``); results as picklable dicts. A block
-    that raises is returned as its error, so one block never ends the run."""
+    that raises is returned as its error, with a failed record for each of its aircraft, so one block never
+    ends the run and never leaves the roster."""
     label, scenarios, traffic, params = payload
     try:
         flown, summary = fly_block(scenarios, traffic, procedure_root=params["procedure_root"],
                                    settings=LoopSettings(**params["settings"]), max_duration=params["max_duration"],
                                    rollout_dt_s=params["rollout_dt_s"], solve_options=params["solve_options"])
     except Exception as exc:  # noqa: BLE001 — batch tool: one failed block is recorded, the others go on
-        return label, [], {"aircraft": len(scenarios), "scheduled": 0, "eta_failed": 0, "slot_failed": 0,
-                           "error": f"{type(exc).__name__}: {str(exc).partition(chr(10))[0][:200]}"}
+        error = f"{type(exc).__name__}: {str(exc).partition(chr(10))[0][:200]}"
+        return label, [(s, None, None, f"block failed: {error}") for s in scenarios], {
+            "aircraft": len(scenarios), "scheduled": 0, "eta_failed": 0, "slot_failed": 0, "error": error}
     out = []
     for f in flown:
         if f.result is None:
@@ -153,8 +156,12 @@ def _fly_one_block(payload: tuple[str, list[FlightScenario], Traffic, dict[str, 
     return label, out, summary
 
 
-def _run_blocks(args, settings: LoopSettings, config: dict[str, Any]) -> None:
-    manifest = Path(args.harvest_root) / args.airport / "arrivals" / "manifest.json"
+def _run_blocks(args, settings: LoopSettings, manifest: Path, config: dict[str, Any]) -> None:
+    out = Path(args.output_dir)
+    old_layout = sorted(p.name for p in (*out.glob("block_*"), *out.glob("blocks.json")))
+    if old_layout:
+        raise SystemExit(f"{out} holds an M2 run of the per-block layout ({', '.join(old_layout)}): "
+                         "use a new directory")
     flights = load_model_arrivals(manifest)
     traffic = traffic_from_arrivals(flights)
     first = parse_iso_utc_s(args.block_start)
@@ -170,41 +177,33 @@ def _run_blocks(args, settings: LoopSettings, config: dict[str, Any]) -> None:
             "rollout_dt_s": args.rollout_dt,
             "solve_options": {"verbose": False, "max_iterations": args.max_iterations}}))
     del flights
-    out_root = Path(args.output_dir)
-    out_root.mkdir(parents=True, exist_ok=True)
-    (out_root / "blocks.json").unlink(missing_ok=True)          # the index is written last: no stale one
-    for stale in out_root.glob("block_*"):                     # this run's directories are rewritten below
-        if stale.name not in {label for label, *_ in payloads}:
-            shutil.rmtree(stale)
-    blocks = []
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "summary.json").unlink(missing_ok=True)              # written last: never a stale one beside new records
+    _clear_stale_records(out, sidecar_suffix=TRAFFIC_SUFFIX)
+    rows, blocks = {}, {}
     limit_solver_threads()
     with ProcessPoolExecutor(max_workers=resolve_jobs(args.jobs, len(payloads))) as pool:
         for future in as_completed([pool.submit(_fly_one_block, payload) for payload in payloads]):
             label, flown, summary = future.result()
-            out = out_root / label
-            out.mkdir(parents=True, exist_ok=True)
-            _clear_stale_records(out, sidecar_suffix=TRAFFIC_SUFFIX)
-            rows = []
+            rows[label] = []
             for index, (scenario, record, evaluation, error) in enumerate(flown):
                 if error is not None:
-                    rows.append(write_failed_record(out, scenario, index, error, optimization_config=config,
-                                                    references_dir=None))
+                    rows[label].append(write_failed_record(out, scenario, index, error, optimization_config=config,
+                                                           references_dir=None))
                     continue
-                rows.append(write_solved_record(out, scenario, index, record, evaluation, optimization_config=config,
-                                                references_dir=None, sidecar_suffix=TRAFFIC_SUFFIX)[1])
-            summary["skipped_no_dynamics"] = skipped[label]
-            (out / "summary.json").write_text(json.dumps({
-                "mode": "traffic:m2", "optimization_config": config, "block": summary,
-                "total": len(rows), "solved": sum(r["status"] == "solved" for r in rows),
-                "failed": sum(r["status"] != "solved" for r in rows), "results": rows}, indent=1), encoding="utf-8")
-            blocks.append({"label": label, **{k: summary[k] for k in ("aircraft", "scheduled", "eta_failed",
-                                                                         "slot_failed")},
-                           **({"error": summary["error"]} if "error" in summary else {})})
+                rows[label].append(write_solved_record(out, scenario, index, record, evaluation,
+                                                       optimization_config=config, references_dir=None,
+                                                       sidecar_suffix=TRAFFIC_SUFFIX)[1])
+            blocks[label] = {"label": label, **summary, "skipped_no_dynamics": skipped[label]}
             print(f"{'✗' if 'error' in summary else '✓'} {label}: {summary['scheduled']}/{summary['aircraft']} "
-                  f"scheduled -> {out}")
-    blocks.sort(key=lambda b: b["label"])
-    (out_root / "blocks.json").write_text(json.dumps({"mode": "traffic:m2", "optimization_config": config,
-                                                      "blocks": blocks}, indent=1), encoding="utf-8")
+                  f"scheduled")
+    results = [row for label in sorted(rows) for row in rows[label]]
+    (out / "summary.json").write_text(json.dumps({
+        "mode": M2_MODE, "optimization_config": config, "total": len(results),
+        "solved": sum(r["status"] == "solved" for r in results),
+        "failed": sum(r["status"] != "solved" for r in results), "results": results,
+        "blocks": [blocks[label] for label in sorted(blocks)]}, indent=1), encoding="utf-8")
+    print(f"✓ {len(blocks)} block(s), {len(results)} record(s) -> {out}")
 
 
 def main() -> None:
@@ -243,12 +242,13 @@ def main() -> None:
         constrained_iaf=True, fitting=DEFAULT_FITTING, n_segments=DEFAULT_N_SEGMENTS,
         n_seg_per_phase=DEFAULT_N_SEG_PER_PHASE, state_substeps=None, max_duration_s=args.max_duration,
         rollout_dt_s=args.rollout_dt, max_iterations=args.max_iterations, iaf_selection="shortest")
-    if args.mode == "m2":
-        config["traffic"] = {"schema": BLOCK_RECORD_SCHEMA, **asdict(settings),
-                             "blocks": {"start": args.block_start, "block_s": args.block_s, "count": args.blocks}}
-        _run_blocks(args, settings, config)
-        return
     manifest = Path(args.harvest_root) / args.airport / "arrivals" / "manifest.json"
+    if args.mode == "m2":
+        config["traffic"] = {"schema": BLOCK_RECORD_SCHEMA, **asdict(settings), "selection": {
+            "manifest": str(manifest),
+            "blocks": {"start": args.block_start, "block_s": args.block_s, "count": args.blocks}}}
+        _run_blocks(args, settings, manifest, config)
+        return
     scenarios, selection = window_scenarios(manifest, args.airport, args.sample, args.seed, args.max_duration)
     config["traffic"] = {"schema": TRAFFIC_RECORD_SCHEMA, **asdict(settings), "selection": selection}
     run_batch(
@@ -256,7 +256,7 @@ def main() -> None:
         params={"procedure_root": args.procedure_root, "settings": asdict(settings),
                 "max_duration": args.max_duration, "rollout_dt_s": args.rollout_dt,
                 "solve_options": {"verbose": False, "max_iterations": args.max_iterations}},
-        optimization_config=config, mode="traffic:m1", progress=" [traffic M1]", jobs=args.jobs,
+        optimization_config=config, mode=M1_MODE, progress=" [traffic M1]", jobs=args.jobs,
         scenarios_label=f"{args.airport} sample {selection['sample']} seed {args.seed}",
         references_dir=None, resume=args.resume, sidecar_suffix=TRAFFIC_SUFFIX,
     )

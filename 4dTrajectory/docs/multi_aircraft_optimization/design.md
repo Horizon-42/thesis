@@ -405,6 +405,7 @@ branch and worktree, with a review before each commit.
 | T7 | Evaluation of the commanded records and the CZML comparison (a new category) | The frontend shows a published window; checked in the browser | T6 | Done (§8.3): one M1 sample, KRDU (user, 2026-10-05); frontend by a sonnet agent |
 | T8 | M2 (§5.6) | A readout like T5 for 5 blocks | T6, MD9 | Done (§8.2) |
 | T9 | M3 design (§5.7) | Only if T8 leaves losses that the order cannot remove | T8 | Not started |
+| T10 | M2 in the viewer (the user, 2026-10-06): (a) one directory and one `summary.json` per M2 run; (b) the builder and the frontend show a run as one scene (§9); (c) one KRDU run published | Builder and frontend tests; the publication validator; checked in the browser | T7, T8 | In progress: (a) built; (b) a sonnet agent |
 
 ### 8.1 T5 readout (KRDU, seed 11, 50 windows; the reviewed M1 code with the retry of MD13, scratch output)
 
@@ -444,9 +445,10 @@ branch and worktree, with a review before each commit.
 
 - **Runner.** `4dTrajectory/optimization/traffic_optimization.py m1 --airport <ICAO> --sample N --seed S
   --output-dir …` (a seeded sample of the airport's arrivals, stated in `summary.json`), and `… m2 --airport
-  <ICAO> --block-start <UTC> --block-s 3600 --blocks N --output-dir …` (one directory per block, each with
-  its `summary.json`; `blocks.json` indexes them); the readout is `python -m traffic.readout <dir>` from
-  `4dTrajectory/optimization` (it reads either kind).
+  <ICAO> --block-start <UTC> --block-s 3600 --blocks N --output-dir …` (the records of every block in one
+  directory; one `summary.json`, mode `traffic:m2`, with `results` for every block and `blocks`: each block's
+  schedule, outcomes and final check). The `mode` values are `traffic.M1_MODE` and `traffic.M2_MODE`. The
+  readout is `python -m traffic.readout <dir>` from `4dTrajectory/optimization` (it reads either mode).
 - **M2 sidecar.** The M1 sidecar plus `slot` (ETA, CTA, delay) and `block_final` (the final check), schema
   `optimization-traffic-block-v2`.
 - **Directory.** `4dTrajectory/outputs/<ICAO>/traffic_m1_<category>/` (M1) and
@@ -458,6 +460,16 @@ branch and worktree, with a review before each commit.
   the losses per iteration and reading, the recorded aircraft (by `flight_key`), the flight times. Its schema
   name is `optimization-traffic-v2`. Settle every field before step T6 starts. A later change gets a new
   schema name; no reader accepts two versions (root `CLAUDE.md`, the compatibility rule).
+- **Viewer, M1** (AV46 in `aeroviz-4d/docs/35-viewer-reference.md`): each group with its own neighbours,
+  on its own clock.
+- **Viewer, M2: one scene.** All aircraft of an M2 run fly on ONE clock: the scene starts at the earliest
+  entry of its groups (`S`). Each group (solved or not) gets `scene: {startOffsetS, outcome, delayS}`
+  (`startOffsetS` = its entry − `S`; its result paths are written on the scene clock, its reference is shifted
+  by the same offset). The index gets `scene: {startUtc, background: {recorded, startOffsetsS}}`: the recorded
+  aircraft that the flown aircraft saw and that are not groups (records outside the scheduled set), each
+  once. The viewer shows every group of a scene (no sample), the background in the neighbours' pink under
+  the same rules as M1 (model budget, the Reference switch, clipped to the clock). The roster for the entry
+  times is `optimization_config.traffic.selection.manifest`, as in M1.
 - **Summary.** `summary.json` per directory: the configuration (with `h_c`, `W`, `κ`, `K_max`, the reading),
   the outcome counts, the counts of §5.2 item 4, §4.1 item 5, MD10 and MD11, and the largest frame error.
 
