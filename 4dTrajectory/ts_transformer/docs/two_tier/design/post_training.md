@@ -108,7 +108,8 @@ A proposal is a reading where the design says nothing; it holds only until the u
    with a traffic attention whose output is zero (§3; prior §7, item 5). There is no single-aircraft stage. The reasons:
    - The single-aircraft closed loop is a special case of this loop. With no other aircraft in its window, the
      commanded aircraft says and flies what single-aircraft free generation does, with the same loss and gradients.
-     Approximately 45 % of the train flights have no leader in the air at their first predicted step (§6.1).
+     On the train days of A34's artefact, 60 % of the windows have no leader in the air at their first predicted
+     step, and 29 % have no other aircraft at all (C1's census, §6.1).
    - A single-aircraft reward does not see when an aircraft lands, so it does not limit the spread of the landing times.
      In traffic, that spread puts the aircraft into the sequence of the other aircraft (§6.1).
    - Without a capture law (D2, D3), the base model must learn more to land. It learns it one time, in the loop where
@@ -322,7 +323,13 @@ From the multi-aircraft readouts of `instruction-v3` (`readouts/2026-09-28_m3_fr
   the landing times; they do not show that those rewards make it.
 - In the window loop with one commanded aircraft and no other aircraft, the words, the flown states, the loss and the
   gradients are the same as in single-aircraft free generation and training (tests of step 9.4). On the train days,
-  approximately 45 % of the flights have no leader in the air at their first predicted step.
+  approximately 45 % of the flights have no leader in the air at their first predicted step (instruction-v3's
+  definition, not the census's below; the two are not compared).
+- C1's census on A34's artefact (`instruction_language/v12_20261005`, Δ = 4 s; code `1b4d3cea`, in a scratch
+  directory; stage C log §3): 40,530 train windows and 6,199 select windows. A leader in the air is the aircraft next
+  ahead on the approach clock at the first predicted step, on the commanded flight's recorded runway or a runway
+  separated as one. Train: 40.1 % of the windows have a leader (59.9 % none), and 29.4 % have no other aircraft at
+  all; by airport, a leader in 25 % (KSMF) to 54 % (KSJC) of the windows. Select: 39.3 % and 28.5 %.
 
 ### 6.2 Cost and credit of the post-training
 
