@@ -56,7 +56,7 @@ changed); 3 (the runway head's class order) is a detail of the code. The code fo
 | After A36 of stage A (`split_flights`, the closed-loop part of A23's export as one function), merged into this branch | B6's export of the closed-loop sentences beside the prior's own, through `split_flights` at the prior's Δ; stage B does not change A23's code |
 | After A32 of stage A (the corrections of Claude's review, vocabulary D77–D84), merged into this branch | The reader of item 3 with the later-row fields apart (D82), the start that reads no sample after the first predicted step (D77) and the candidates decided by no flight (D78), followed in `prior/` and its runners; the tests on synthetic artefacts again |
 
-## 3 Specifications of the milestones that are done (was §12: B0–B4, B8)
+## 3 Specifications of the milestones that are done (was §12: B0–B4, B8–B11)
 
 **B0. Package and layout.**
 
@@ -171,3 +171,55 @@ writes is settled before the experiment runs.
   original says, bit for bit, in a batch of the same layout; a module that reads the input of item 5 gets it from the
   speaker, and a module whose output is zero changes no word; free generation through the moved function of a loop's
   row gives the same inputs, bit for bit, as before the move.
+
+**B10. The corrections of Claude's check of stage B** Moved here from the design on 2026-10-05, after B10 was done (`e4e7ba42`; its item of outline D109 in `df68c927`). (`readouts/2026-10-05_stage_b_check.zh.md`; D64, D72, D85,
+D105–D108). Now; before B5's formal campaign, because it changes free generation and the campaign runner. On synthetic
+artefacts; then B3's smoke and free generation on A34's artefact again. The report gives the names of the new parts
+for the column "Code" of §7.
+
+- D85: no printed text, log or summary of the prior shows a reading of the val days before the base's one validation
+  readout: `prior_train` prints the selection of train and select only (the identity keeps every split, D75). A
+  validation readout of the base is exported only when it is the one that the claim of the val read names (its output
+  and the base's run).
+- D105: the function of a loop's row takes each aircraft's landings; `Landing` and the construction of a
+  `LandingIndex` from given landings are public; the index refuses a landing on a sealed test day.
+- D106: (1) the step of a speaker's closed loop as one module under `experiments/`, with `flight_numbers` moved into it;
+  free generation calls it; (2) the function that opens a prior run, used by every runner of the prior; (3) the rows of
+  a sentence a loop said as one batch with its targets; (4) the join of records; (5) the motion of rows in §7; (6) the
+  speaker's state named in §7.
+- D107: the speaker and the log-probability under records refuse a model of which any module is in training mode (not
+  only the top module).
+- D108: the campaign's behaviour check before each step in place of the comparison of the commit.
+- The speaker changes nothing before a row is said (as vocabulary D80 for the start): the state of the procedure
+  masks, the cache and the records change only after every column of the row has a word; `observe` is refused after
+  the first `speak`; both refuse a row not later than the last row encoded, observed or said.
+- D64: at the row whose runway word ends G, the procedure masks keep the row's state (G is false after that word):
+  the join and the passage below the entry height start again at that row, not one row later.
+- D72: "on the final" is the region of the runway in force before the row, the runway under which the speaker drew
+  the word.
+- Free generation's memory at the formal size (outline §5 rule 13): a chunk in which one sentence reaches the time of
+  its go-arounds (the cache of every aircraft of the chunk grows with it), measured on the GPU before B5.
+- Tests: a change of the observed samples after the first predicted step and of the time limit changes no input of a
+  loop's row (vocabulary D90); D23's test also changes the flight's record (its runway and landing time) and its own
+  landing in the index; in free generation, a change of every field that it must not read (the stored flown states,
+  the words, the correction marks, the withheld fields of vocabulary D82, the landing time, the own landing) changes
+  no word, state or record of a flight (the readout itself reads the stratum, the stored outcome and the mark, D75, D111); the loop's rows equal the sentence's rows at Δ = 8 s too; a smoke of the validation
+  readout reads no outcome of a val sentence (a test that fails on such a read); the export of a val readout (refused
+  unless claimed); the frontend's fixtures of stage B written by the export, the index by its own writer; a refused row
+  leaves the speaker as it was; a module in training mode inside an eval model is refused; free generation through the
+  shared step gives the same words, states and readout, bit for bit, as before the move.
+- Outline D109, after vocabulary A39 is on this branch: the prior's sets give the Training view's reader and live
+  segment their splits; a set exported from the base's claimed validation readout gives val too, and only it. Tests: a
+  val set of a claimed readout opens and flies live; any other set with a val flight is refused.
+
+**B11. The selection leaves out flights with a faulty observed track (D111).** Moved here from the design on 2026-10-05, after B11 was done (`df68c927`). After vocabulary A40 is on the stage A
+line that stage B merges; before B5's formal campaign. `prior/selection.py`: `landed` also leaves out a flight that
+stage A's `instructions/faults.py` marks; the selection record counts them apart (by split, airport and stratum). The
+change of the record is a change of the identity of a run's data (the checkpoint's schema; one new name with B10's
+changes, as both come before B5). The mark is read like the stored outcome (D75): it keeps or leaves a sentence and
+never reaches an input. Of the val days, the marks are counted in the identity and never printed (D85, as B10). Free
+generation's readout gives the flights left out for a faulty track apart from those left out by their outcome (a
+flight with a faulty start fails whatever is said: vocabulary D111). The report gives the selection's names for §7
+item 4 if they change. Tests: a marked flight that landed is left out under `landed` and kept under `all`; the record
+counts it apart; a change of a flight's mark changes no input of its rows; a marked flight's free generation is
+unchanged; the readout counts the two reasons apart.
