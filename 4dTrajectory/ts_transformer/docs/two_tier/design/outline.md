@@ -181,7 +181,9 @@ sections that it names.
     (the user, 2026-10-04): at each milestone, the state and the commits, and each reading that the implementer made
     where the design says nothing (a reading is a proposal until the user decides). The log is a file in `readouts/`
     (stage A: `readouts/2026-10-05_stage_a_implementation_log.md`), not a section of the design document; §0.3 of the
-    design document holds only a short status table (part, state), which the implementer keeps current. The implementer
+    design document holds only a short status table (part, state), which the implementer keeps current. The design
+    document keeps the specifications of the milestones that are not done and the check items that are not done: they
+    are the plan that the implementer follows. When a milestone is done, Claude moves its specification to the log. The implementer
     changes no other part of a design document: not the decisions, the design sections, the plan, the values or the key
     code index. (Stage B's log is still prior §0.3 and moves to a file in `readouts/` the same way.) A gap in the design, or a reading that needs a change of the design, goes to the user; Claude writes the
     text that the user decides. The log is committed to `dev-two-tier` (the user's checkout), with explicit paths. At
