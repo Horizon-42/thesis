@@ -23,7 +23,7 @@ repository root; `readouts/` is `docs/two_tier/readouts/`. The documents of the 
 | Document | Part | Stage | State |
 |---|---|---|---|
 | `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge; their Training view | A | Built on `dev-two-tier-v4` and merged into `dev-two-tier`; the formal artefact `v11_20261004` and the Training view done; the corrections of Claude's review (A32–A35, D77–D85) next (vocabulary §0.4) |
-| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport; its Training view | B | Built in parallel with the end of stage A, on `dev-two-tier-v4-prior` (prior §0.3); B9 (the interface for stage C, D96) before B5's formal campaign |
+| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport; its Training view | B | Built in parallel with the end of stage A, on `dev-two-tier-v4-prior` (prior §0.3); B9 (the interface for stage C, D96) done; Claude's check of stage B done, its corrections B10 (D105–D108) before B5's formal campaign |
 | `post_training.md` | The post-training in windows of traffic; the multi-aircraft work; its Training view | C | Design complete; built in parallel with the end of stage B, on `dev-two-tier-v4-post` (post-training §0.3, D95); not started |
 | This outline | The principles, the shared rules, the plan; the rules of each stage's Training view (§6) | — | — |
 
@@ -37,7 +37,7 @@ through that document's public interface and its decisions:
 | Public interface | What it gives | Read by |
 |---|---|---|
 | Vocabulary §6 | The vocabulary spec, the grammar, the sentence artefact and the stored signals, the candidates and their geometry, the executor and the start of a closed loop, the judge, the row grid | Prior, post-training |
-| Prior §7 | The checkpoint, the inputs of a row, the speaker, the teacher-forced loss, a place for an added module, the region of a final; with the code of each item | Post-training |
+| Prior §7 | The checkpoint, the inputs of a row, the speaker, the teacher-forced loss, a place for an added module, the region of a final, the step of a speaker's closed loop; with the code of each item | Post-training |
 
 A document never cites another document's other sections; every document reads this outline. A change of a public
 interface is a change of a format: it gets a new name (principle 8), and every document that reads it changes with it.
@@ -98,10 +98,10 @@ they came from. Each document lists the identities of its parts.
 |---|---|---|
 | Outline | D7, D20, D21, D55, D85, D95 | — |
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102 | O8 |
-| Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96 | — |
-| Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103, D104 | — |
+| Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108 | — |
+| Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107 | — |
 
-The next free numbers: D105, O13.
+The next free numbers: D109, O13.
 
 ---
 
@@ -120,8 +120,9 @@ The next free numbers: D105, O13.
 2. Stage B (prior §0.4): the prior from the start, chosen by cross-validation over the airports, and the base model.
    Stage B is developed in parallel with the end of stage A (the user, 2026-10-04). A milestone of stage B starts when
    the parts of stage A that it reads are on `dev-two-tier-v4`. The formal runs of stage B wait for Claude's check of
-   stage A, the user's choice of Δ and A34's artefact. B9 (the interface for stage C, prior D96) comes before B5's
-   formal campaign (D95). It ends with the Training view of stage B (prior B6).
+   stage A, the user's choice of Δ and A34's artefact. B9 (the interface for stage C, prior D96) and B10 (the
+   corrections of Claude's check of stage B, prior D105–D108) come before B5's formal campaign (D95). It ends with the
+   Training view of stage B (prior B6).
 3. Stage C (post-training §0.4): the post-training in windows of traffic with one aircraft commanded. Stage C is
    developed in parallel with the end of stage B (D95). A milestone of stage C starts when the parts of stages A and B
    that it reads are on its branch; what it needs of their public interfaces is made by them (vocabulary D97, prior
