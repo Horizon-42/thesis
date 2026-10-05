@@ -23,7 +23,7 @@ repository root; `readouts/` is `docs/two_tier/readouts/`. The documents of the 
 | Document | Part | Stage | State |
 |---|---|---|---|
 | `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge; their Training view | A | Built on `dev-two-tier-v4` and merged into `dev-two-tier` (`a804633e`: A0–A40); the formal artefact `v12_20261005` / `v17_20261005` and the Training view (`closed_loop_v12_20261005`) done; Claude's check of A32–A40 done; A41 and the deletion of the superseded artefacts left (vocabulary §0.4) |
-| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport; its Training view | B | Built in parallel with the end of stage A, on `dev-two-tier-v4-prior` (prior §0.3); B9 (the interface for stage C, D96) done; Claude's check of stage B done, its corrections B10 (D105–D108) before B5's formal campaign |
+| `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport; its Training view | B | Built in parallel with the end of stage A, on `dev-two-tier-v4-prior` (prior §0.3); B9 (the interface for stage C, D96) done; Claude's check of stage B done, its corrections B10 (D105–D108) before B5's formal campaign; B5 running; Claude's second check done, its corrections B12 (D119–D122) after B5 |
 | `post_training.md` | The post-training in windows of traffic; the multi-aircraft work; its Training view | C | Design complete; built in parallel with the end of stage B, on `dev-two-tier-v4-post` (post-training §0.3, D95); C0–C5 and C7 done on synthetic artefacts; C6 and C8–C12 left |
 | This outline | The principles, the shared rules, the plan; the rules of each stage's Training view (§6) | — | — |
 
@@ -99,10 +99,10 @@ they came from. Each document lists the identities of its parts.
 |---|---|---|
 | Outline | D7, D20, D21, D55, D85, D95, D109 | — |
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102, D111 | O8 |
-| Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108, D111, D118 | — |
+| Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108, D111, D118–D122 | — |
 | Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107, D110, D112–D117 | — |
 
-The next free numbers: D119, O13.
+The next free numbers: D123, O13.
 
 ---
 
@@ -122,8 +122,10 @@ The next free numbers: D119, O13.
    Stage B is developed in parallel with the end of stage A (the user, 2026-10-04). A milestone of stage B starts when
    the parts of stage A that it reads are on `dev-two-tier-v4`. The formal runs of stage B waited for Claude's check of
    stage A (done: `readouts/2026-10-05_stage_a_check_a32_a40.zh.md`), the user's choice of Δ (4 s) and A34's artefact. B9 (the interface for stage C, prior D96) and B10 (the
-   corrections of Claude's check of stage B, prior D105–D108) come before B5's formal campaign (D95). It ends with the
-   Training view of stage B (prior B6).
+   corrections of Claude's check of stage B, prior D105–D108) come before B5's formal campaign (D95). B5 runs since
+   2026-10-05; Claude's second check of stage B is done (`readouts/2026-10-05_stage_b_check_2.zh.md`), its corrections
+   B12 (prior D119–D122) are made on stage B's branch and merged after B5. It ends with the Training view of stage B
+   (prior B6).
 3. Stage C (post-training §0.4): the post-training in windows of traffic with one aircraft commanded. Stage C is
    developed in parallel with the end of stage B (D95). A milestone of stage C starts when the parts of stages A and B
    that it reads are on its branch; what it needs of their public interfaces is made by them (vocabulary D97, prior
