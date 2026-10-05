@@ -124,6 +124,9 @@ class WindowLoop:
         #: each window's commanded aircraft, other aircraft and judged scene at the loop's next row, kept from the judge
         #: after a row flown: the same state, aircraft and words in force that the next row's mask and tokens read
         self._next: dict[int, tuple[AircraftAt, AircraftAt, AircraftAt, Any]] = {}
+        #: each window's tokens at every row, observed and said (``[N, features]`` each): the loss reads the words said
+        #: with the same input of the traffic module (post-training C7)
+        self._tokens: list[list[np.ndarray]] = [[] for _ in self.order]
 
     # ---- the aircraft of a row
     def _own(self, b: int) -> AircraftAt:
@@ -141,9 +144,13 @@ class WindowLoop:
         return AircraftAt.of([(window.commanded.key, tuple(at[:3]), tuple(before[:3]), known, runway,
                                window.commanded.category, False, go_around)])
 
-    def _tokens(self, owns: Sequence[AircraftAt], others: Sequence[AircraftAt]):
-        return traffic_of([[tokens(own, other, g, self.separations[g.code], self.step_s)]
-                           for own, other, g in zip(owns, others, self.geometries)], self.device)
+    def _traffic(self, owns: Sequence[AircraftAt], others: Sequence[AircraftAt]):
+        """The traffic module's input of the row (each window's tokens, recorded for the loss)."""
+        rows = [tokens(own, other, g, self.separations[g.code], self.step_s)
+                for own, other, g in zip(owns, others, self.geometries)]
+        for b, row in enumerate(rows):
+            self._tokens[b].append(row)
+        return traffic_of([[row] for row in rows], self.device)
 
     def _scene(self, b: int, own: AircraftAt, others: AircraftAt):
         g = self.geometries[b]
@@ -168,7 +175,7 @@ class WindowLoop:
         t = self.speaking.t
         owns = [self._own(b) for b in range(len(self.order))]
         others = [w.others_at(t) for w in self.windows]
-        self.speaking.observe(self._tokens(owns, others))
+        self.speaking.observe(self._traffic(owns, others))
 
     def step(self, numbers: np.ndarray) -> np.ndarray:
         """Say and fly one row of every window (``numbers`` ``[B, 5]``, `SpeakingLoop.step`), then judge the
@@ -177,7 +184,7 @@ class WindowLoop:
         kept = [self._next[b] if b in self._next else None for b in range(len(self.order))]
         owns = [k[0] if k is not None else self._own(b) for b, k in enumerate(kept)]
         others = [k[1] if k is not None else w.others_at(t) for k, w in zip(kept, self.windows)]
-        said = self.speaking.step(numbers, {SPEED: self._speed_masks(owns, others)}, self._tokens(owns, others))
+        said = self.speaking.step(numbers, {SPEED: self._speed_masks(owns, others)}, self._traffic(owns, others))
         self._next = {}
         ended = np.zeros(len(self.order), dtype=bool)
         for b in np.flatnonzero(self.speaking.alive):
@@ -193,6 +200,41 @@ class WindowLoop:
             self.speaking.end(ended)
         return said
 
+    def copy(self, windows: Sequence[int]) -> WindowLoop:
+        """A loop of copies of the windows ``windows`` (places in ``order``, repeats permitted; post-training D94): the
+        closed loop's own copy (`SpeakingLoop.copy`: the executor's loop, the speaker, the inputs and their records) and
+        the window's own state — its scene, landings, separation judge, speed-mask counts and recorded tokens. Flown on
+        with the same numbers, a copy says what its original says (D94); the loop copied is unchanged."""
+        index = list(windows)
+        out = object.__new__(WindowLoop)
+        out.speaking = self.speaking.copy(index)
+        out.order, out.words, out.device = [self.order[i] for i in index], self.words, self.device
+        out.windows, out.landings = [self.windows[i] for i in index], [self.landings[i] for i in index]
+        out.step_s, out.every, out.separations = self.step_s, self.every, self.separations
+        out.geometries, out.finals = [self.geometries[i] for i in index], [self.finals[i] for i in index]
+        out.keys, out.speed_words = [self.keys[i] for i in index], self.speed_words
+        out.loss, out.loss_step = [self.loss[i] for i in index], [self.loss_step[i] for i in index]
+        out.other, out.speed_mask_rows = [self.other[i] for i in index], self.speed_mask_rows[index].copy()
+        out._next = {k: self._next[i] for k, i in enumerate(index) if i in self._next}
+        out._tokens = [list(self._tokens[i]) for i in index]
+        return out
+
+    def end_step(self, b: int) -> int:
+        """The Δ row at which window ``b`` ended (post-training §2 item 9, t_E): the row of its loss of separation, or
+        the row after the last one said to its commanded aircraft (its judged outcome or its time limit)."""
+        if self.speaking.alive[b]:
+            raise ValueError(f"window {b} is still flown")
+        if self.loss_step[b] is not None:
+            return self.loss_step[b]
+        return self.speaking.start + len(self.speaking.said(b))
+
+    def samples(self, split: str) -> list[tuple[Any, Any, list[np.ndarray]]]:
+        """Each window's sentence for the loss (post-training C7): its rows with the words said as targets
+        (`SpeakingLoop.sentences`), the speaker's records of them and its tokens at each of those rows."""
+        permitted = self.speaking.permitted()
+        return [(rows, permitted.select([b]), self._tokens[b][: len(rows.time_s)])
+                for b, rows in enumerate(self.speaking.sentences(split))]
+
     def run(self, numbers: Sequence[np.random.Generator]) -> list[WindowResult]:
         """Fly every window to its end, ``numbers`` each window's source of random numbers (five a row said, as free
         generation draws them); the windows' ends."""
@@ -200,6 +242,10 @@ class WindowLoop:
             raise ValueError(f"{len(numbers)} sources of random numbers for {len(self.order)} windows")
         while self.speaking.observing:
             self.observe()
+        return self.finish(numbers)
+
+    def finish(self, numbers: Sequence[np.random.Generator]) -> list[WindowResult]:
+        """Say and fly every window from its present row to its end, ``numbers`` each window's source (five a row)."""
         while self.speaking.alive.any():
             self.step(np.stack([n.random(len(COLUMNS)) for n in numbers]))
         return self.results()
