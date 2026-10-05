@@ -126,7 +126,7 @@ Use the design `prior.md` (decisions, §2–§8) and the vocabulary's public int
 - The seed scale and the rules of the choice are fixed before the runs (§5).
 - KAUS is read one time, at the end of the whole chain.
 
-**Speaking and free generation (prior §4, §12 B4).**
+**Speaking and free generation (prior §4; B4's specification: `readouts/2026-10-05_stage_b_implementation_log.md` §3).**
 
 - The procedure masks read the procedure data and the state at the step only. They never block "unchanged" (D64).
 - Free generation starts through the start of a closed loop (vocabulary D67, D77): the start state uses no sample after
