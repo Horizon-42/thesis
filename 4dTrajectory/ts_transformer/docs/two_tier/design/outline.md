@@ -158,7 +158,9 @@ sections that it names.
    requested from the stage that owns it, through the user (vocabulary A36, D97; prior D96). The ignored data trees of each worktree (`data`,
    `trajectory_data_process/outputs`, `4dTrajectory/outputs`, `aeroviz-4d/public/data/airports`) are absolute links to
    LIVE data.
-2. Each milestone: read the code that it changes; write the code and its tests; run the milestone's test files; get a
+2. Each milestone: read the code that it changes; write the code and its tests; run the milestone's test files; when it
+   changes `autopilot/` or `instructions/`, run the checks of vocabulary D73 on the formal artefact through their runners
+   (`closed_loop_start_check` runs all three first) and give their largest differences in the log; get a
    code review from a separate reviewer (code only, never documents); correct; commit with explicit paths. Never use
    `git add -A`. Before each commit, read `git diff --cached --stat`.
 3. A test never writes under a live root. A test that calls a runner's `main()` gives every write root a tmp path
