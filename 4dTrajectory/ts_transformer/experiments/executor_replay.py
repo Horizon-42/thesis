@@ -53,7 +53,7 @@ from ts_transformer.autopilot import closed_loop, replay
 from ts_transformer.autopilot.conformance import STATE_BOUND_M
 from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.autopilot.executor import Flown
-from ts_transformer.autopilot.judge import CROSSINGS, Outcome, Verdict
+from ts_transformer.autopilot.judge import CROSSINGS, TIMEOUT, Outcome, Verdict
 from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
 from ts_transformer.autopilot.spec import params_sha256
 from ts_transformer.data.channels import channels_from_states
@@ -62,7 +62,7 @@ from ts_transformer.data.lateral_eligibility import default_evaluation_report_pa
 from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
 from ts_transformer.inference.forecast import Forecast
 from ts_transformer.instructions.artefact import (
-    SPLITS, ClosedLoopSentence, closed_loop_path, closed_loop_sentences,
+    READ_SPLITS, ClosedLoopSentence, closed_loop_path, closed_loop_sentences,
 )
 from ts_transformer.instructions.labeller.interval import in_force
 from ts_transformer.instructions.words import COLUMNS, SPEED, UNCHANGED, Words
@@ -109,7 +109,7 @@ def executor_forecast(flown: Flown, index: int, verdict: Outcome | Verdict, inpu
         times=float(series.times[anchor]) + offsets, values=values, normalized_progress=offsets / offsets[-1],
         anchor=anchor,
         final_time_s=float(offsets[-1]), predicted_final_time_s=float(offsets[-1]), horizon_mode=HORIZON, passes=1,
-        truncated_at_threshold=verdict.outcome in CROSSINGS, horizon_capped=verdict.outcome == "timeout",
+        truncated_at_threshold=verdict.outcome in CROSSINGS, horizon_capped=verdict.outcome == TIMEOUT,
         sample_durations_s=np.full(end, dt), segment_durations_s=np.full(end, dt),
         controls=newtons.cpu().numpy().astype(np.float64), commands=commands.cpu().numpy().astype(np.float64),
         control_parameterization=contract, geodetic_values=geodetic,
@@ -322,7 +322,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--instructions", type=Path, required=True)
     parser.add_argument("--executor", type=Path, required=True, help="the executor spec directory")
-    parser.add_argument("--split", choices=SPLITS, required=True)
+    parser.add_argument("--split", choices=READ_SPLITS, required=True,
+                        help="train or select: the val days are read once, in the stage's validation readout (D85)")
     parser.add_argument("--per-airport", type=int, default=0, help="0: every labelled flight of the split")
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--row-interval-s", type=float, default=2.0,

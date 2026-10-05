@@ -17,6 +17,7 @@ from ts_transformer.autopilot import closed_loop
 from ts_transformer.autopilot.conformance import STATE_BOUND_M
 from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.instructions.words import COLUMNS, HEADING, UNCHANGED
+from ts_transformer.instructions import training_files
 from ts_transformer.prior import training_files as prior_files
 from ts_transformer.tests import test_start
 from ts_transformer.tests.test_prior_free_generation import generate
@@ -39,7 +40,7 @@ class SyntheticBackend(AutopilotSegmentBackend):
     """The service on the export's synthetic set: its flight is the artefact's synthetic one (no artefact on disk)."""
 
     def __init__(self, root, flown):
-        super().__init__(airports_root=root)
+        super().__init__(splits=training_files.SPLITS, airports_root=root)       # stage A's sets' splits (D109)
         self.flown = flown
 
     def executor_for(self, sample):

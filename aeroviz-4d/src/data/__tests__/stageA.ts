@@ -6,7 +6,7 @@
 import indexFile from "./fixtures/stage_a/index_v4.json";
 import sampleFile from "./fixtures/stage_a/fixture_set/sample.json";
 import answersFile from "./fixtures/stage_a/autopilot_segment.json";
-import { parseTrainingSample, trainingSelectionOf, type TrainingSample, type TrainingSelection } from "../trainingSample";
+import { parseTrainingSample, TRAINING_SPLITS, trainingSelectionOf, type TrainingSample, type TrainingSelection } from "../trainingSample";
 import type { TrainingAutopilotRequest } from "../trainingAutopilot";
 
 export const stageAIndex = (): Record<string, any> => structuredClone(indexFile) as Record<string, any>;
@@ -18,7 +18,7 @@ export const SET_ID = "fixture_set";
 export const FLIGHT_KEY = "KXXX:test_fixture";
 
 export function stageASample(): TrainingSample {
-  const parsed = parseTrainingSample(stageASampleFile());
+  const parsed = parseTrainingSample(stageASampleFile(), TRAINING_SPLITS);
   if (!parsed.ok) throw new Error(parsed.problem);
   return parsed.value;
 }

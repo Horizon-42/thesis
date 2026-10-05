@@ -36,6 +36,8 @@ from typing import Any
 import numpy as np
 import torch
 
+from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG
+from trajectory_data_process.harvest.airports import load_airport
 from ts_transformer.autopilot import closed_loop, replay
 from ts_transformer.autopilot.conformance import STATE_BOUND_M
 from ts_transformer.autopilot.executor import Flown
@@ -60,7 +62,8 @@ from ts_transformer.instructions.spec import READING_RULE, SPEC_SCHEMA, Vocabula
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, ANGLE_LEVEL, COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words,
 )
-from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
+from ts_transformer.io_utils import file_sha256
+from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 #: The row intervals of the ablation (D25), each a closed-loop sentence of every exported flight.
 ROW_INTERVALS_S = (2.0, 4.0, 8.0)
@@ -280,6 +283,25 @@ def vocabulary_block(spec: VocabularySpec, words: Words) -> dict[str, Any]:
             "rowIntervalsS": list(ROW_INTERVALS_S)}
 
 
+def candidate_hae_minus_msl_m(runway_ends_from: dict[str, str], geometry: AirportGeometry) -> dict[str, float]:
+    """Each candidate's HAE − MSL offset, metres by ident, from the published runway data its candidates were read from
+    (the artefact's ``signals.json`` ``runway_ends_from``: the runway configuration and the CIFP, refused unless the
+    files are those, by sha256): what the data plane subtracts from the reported heights of a flight landing there. A
+    flight's MSL height plus its runway's offset is the height its aircraft reported — the ellipsoid height Cesium draws
+    in. Refused by name for a candidate the published data gives no offset (D78: a candidate needs no arrival, so the
+    arrival manifest's runway targets cannot give it)."""
+    for name, path in (("config", DEFAULT_CONFIG), ("cifp", DEFAULT_CIFP)):
+        if file_sha256(path) != runway_ends_from[f"{name}_sha256"]:
+            raise ValueError(f"{path} is not the {name} the artefact's candidates were read from "
+                             f"(sha256 {runway_ends_from[f'{name}_sha256'][:12]} recorded)")
+    published = {str(runway.ident).upper(): float(runway.hae_minus_msl_m)
+                 for runway in load_airport(geometry.code, config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways}
+    missing = [c.ident for c in geometry.candidates if c.ident not in published]
+    if missing:
+        raise ValueError(f"{geometry.code}: the published runway data gives no height offset for candidate(s) {missing}")
+    return {c.ident: published[c.ident] for c in geometry.candidates}
+
+
 def candidates_block(geometry: AirportGeometry, hae_minus_msl_m: dict[str, float]) -> list[dict[str, Any]]:
     out = []
     for index, candidate in enumerate(geometry.candidates):
@@ -419,7 +441,7 @@ def main(argv: list[str] | None = None) -> int:
         payload, count = build_airport(airport, instructions, params, words, per_stratum=args.per_stratum,
                                        seed=args.seed, device=torch.device(args.device))
         geometry = payload.pop("geometry")
-        hae = files.runway_hae_minus_msl_m(signals_record["sources"], airport, arrival_manifest_path(airport))
+        hae = candidate_hae_minus_msl_m(signals_record["runway_ends_from"], geometry)
         cohort = {"splits": {split: 2 * args.per_stratum for split in files.SPLITS}, "perStratum": args.per_stratum,
                   "strata": list(STRATA), "seed": args.seed,
                   "drawnFrom": "a seeded permutation, per split and stratum, of the flights with a closed-loop sentence "

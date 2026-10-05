@@ -60,8 +60,12 @@ export const TRAINING_COLUMN_INDEX = Object.fromEntries(
 export const TRAINING_UNCHANGED = -1;
 /** MIRROR of `instructions.words.RUNWAY_GO_AROUND`: the runway column's word that sends the flight around. */
 export const TRAINING_RUNWAY_GO_AROUND = -2;
-/** MIRROR of `training_files.SPLITS`. */
-export const TRAINING_SPLITS = ["train", "select"] as const;
+/** MIRROR of `instructions.artefact.SPLITS`: every split a set's flight may be of. Which of them a set may hold is its
+ *  caller's to say (outline D109): `TRAINING_SPLITS` for stage A's sets. */
+export const TRAINING_SET_SPLITS = ["train", "select", "val"] as const;
+export type TrainingSplit = (typeof TRAINING_SET_SPLITS)[number];
+/** MIRROR of `training_files.SPLITS`: the splits stage A's own sets hold. */
+export const TRAINING_SPLITS = ["train", "select"] as const satisfies readonly TrainingSplit[];
 /** MIRROR of `training_export.STRATA`. */
 export const TRAINING_STRATA = ["straight-in", "vectored"] as const;
 export type TrainingStratum = (typeof TRAINING_STRATA)[number];
@@ -323,7 +327,7 @@ export interface TrainingFlight {
   flightKey: string;
   /** The id part of the flight key (the callsign): a label only — a flight is its key. */
   callsign: string;
-  split: (typeof TRAINING_SPLITS)[number];
+  split: TrainingSplit;
   stratum: TrainingStratum;
   kind: string;
   /** null: the flight's identity is unresolved. */
@@ -987,7 +991,7 @@ function parseClosedLoop(
  *  lists the one Δ its prior said at: `trainingPriorSample.ts`). */
 export function parseFlight(
   reader: Reader, vocabulary: TrainingVocabulary, candidates: TrainingCandidate[], cycleS: number,
-  closedIntervals: readonly number[],
+  closedIntervals: readonly number[], splits: readonly TrainingSplit[],
 ): TrainingFlight {
   const runwayIndex = reader.integer("runwayIndex", 0, candidates.length - 1);
   const runway = reader.string("runway");
@@ -1007,7 +1011,7 @@ export function parseFlight(
   const closedLoop = Object.fromEntries(expected.map((key) => [
     key, parseClosedLoop(closedReader.child(key), key, vocabulary, candidates, observed, haeMinusMslM, cycleS)]));
   return {
-    datasetId: reader.string("datasetId"), flightKey, callsign: flightKey.split("_")[0], split: reader.oneOf("split", TRAINING_SPLITS),
+    datasetId: reader.string("datasetId"), flightKey, callsign: flightKey.split("_")[0], split: reader.oneOf("split", splits),
     stratum: reader.oneOf("stratum", TRAINING_STRATA), kind: reader.string("kind"), typecode: reader.nullableString("typecode"),
     group: reader.string("group"), runway, runwayIndex, entryTimeUtc: reader.string("entryTimeUtc"), haeMinusMslM, observed,
     openLoop: parseOpenLoop(reader.child("openLoop"), observed.tS.length, candidates), closedLoop,
@@ -1015,8 +1019,8 @@ export function parseFlight(
 }
 
 /** Parse a set's sample. A schema other than `TRAINING_SAMPLE_SCHEMA` is refused whole, naming the one found and the one
- *  expected. */
-export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
+ *  expected; a flight of a split not in `splits` (the caller's: `TRAINING_SPLITS` for stage A's sets, outline D109) too. */
+export function parseTrainingSample(raw: unknown, splits: readonly TrainingSplit[]): Parsed<TrainingSample> {
   return attempt(() => {
     const sample = Reader.of(raw, "sample");
     sample.oneOf("schema", [TRAINING_SAMPLE_SCHEMA]);
@@ -1030,7 +1034,8 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
     if (!Number.isInteger(vocabulary.stepS / cycleS)) {
       sample.fail(`a ${vocabulary.stepS} s row is not a whole number of ${cycleS} s cycles`);
     }
-    const flights = sample.children("flights").map((flight) => parseFlight(flight, vocabulary, candidates, cycleS, vocabulary.rowIntervalsS));
+    const flights = sample.children("flights").map((flight) => parseFlight(flight, vocabulary, candidates, cycleS,
+      vocabulary.rowIntervalsS, splits));
     const keys = new Set(flights.map((flight) => flight.flightKey));
     if (keys.size !== flights.length) sample.fail("two flights carry one flight key: a flight is its key");
     return {
@@ -1068,9 +1073,11 @@ export async function fetchTrainingIndex(airportCode: string): Promise<Parsed<Tr
   return parsed;
 }
 
-/** A set's sample, refused unless it is the set and airport asked for. */
-export async function fetchTrainingSample(airportCode: string, file: string, setId: string): Promise<Parsed<TrainingSample>> {
-  const parsed = parseTrainingSample(await fetchJson<unknown>(trainingFilePath(airportCode, file)));
+/** A set's sample, refused unless it is the set and airport asked for and its flights are of ``splits`` (the caller's). */
+export async function fetchTrainingSample(
+  airportCode: string, file: string, setId: string, splits: readonly TrainingSplit[],
+): Promise<Parsed<TrainingSample>> {
+  const parsed = parseTrainingSample(await fetchJson<unknown>(trainingFilePath(airportCode, file)), splits);
   if (parsed.ok && (parsed.value.airport !== airportCode || parsed.value.setId !== setId)) {
     return { ok: false, problem: `${file} holds set ${parsed.value.setId} of ${parsed.value.airport}, not ${setId} of ${airportCode}` };
   }

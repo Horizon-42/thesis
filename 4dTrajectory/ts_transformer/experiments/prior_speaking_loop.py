@@ -24,6 +24,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import torch
 
+from ts_transformer.autopilot.judge import TIMEOUT
 from ts_transformer.autopilot.start import Loop
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import ClosedLoopSentence
@@ -210,6 +211,27 @@ class SpeakingLoop:
                 since=np.stack([r.since[b, 0] for r in rows]), targets=targets))
         return out
 
+    def copy(self, flights: Sequence[int]) -> SpeakingLoop:
+        """A loop of copies of the flights ``flights`` (places in ``order``, repeats permitted; post-training D94): the
+        start's own copy of its flights (`Loop.copy`, vocabulary D97), the speaker's (`Speaker.copy`), the inputs'
+        (`LoopRows.select`) and every record. Flown on with the same numbers, masks and input of the added modules, a
+        copy says what its original says and flies it within the executor's bound (vocabulary D97 (3)); the loop copied
+        is unchanged."""
+        index = list(flights)
+        out = object.__new__(SpeakingLoop)
+        out.loop, out.speaker, out.rows_of = self.loop.copy(index), self.speaker.copy(index), self.rows_of.select(index)
+        out.order, out.words, out.every, out.start, out.t = [self.order[i] for i in index], self.words, self.every, \
+            self.start, self.t
+        out.flights, out.geometries = [self.flights[i] for i in index], [self.geometries[i] for i in index]
+        out.finals = [self.finals[i] for i in index]
+        out.observed, out.alive, out.ended = self.observed[index].copy(), self.alive[index].copy(), self.ended[index].copy()
+        out.current = None if self.current is None else self.current[index].copy()
+        out.before = None if self.before is None else self.before[index].copy()
+        out._inputs = [RowTensors(*(value[index] for value in row)) for row in self._inputs]
+        for name in ("_said", "_flown", "_probability", "_permitted", "_on_final", "_blocked"):
+            setattr(out, name, [list(getattr(self, name)[i]) for i in index])
+        return out
+
     def said(self, flight: int) -> np.ndarray:
         """``[M, 5]`` the words said to ``flight`` (its place in ``order``) from its first predicted step to the row it
         ended in (or the row said last)."""
@@ -234,13 +256,12 @@ class SpeakingLoop:
         if open_:
             raise ValueError(f"flights {open_} are still flown or were ended by the caller: no judge's outcome "
                              f"(`said`, `states`)")
-        timed_out = self.loop.timed_out()
         out = []
         for b in flights:
-            outcome = self.loop.outcome(b)
+            outcome = self.loop.outcome(b)          # why it ended: the judge's (vocabulary D90)
             said = self._said[b]
             out.append(Generated(index=self.order[b], words=self.said(b), states=self.states(b),
-                                 outcome=outcome.outcome, crossing=outcome.crossing, timed_out=bool(timed_out[b]),
+                                 outcome=outcome.outcome, crossing=outcome.crossing, timed_out=outcome.outcome == TIMEOUT,
                                  # the go-arounds of its own words: the speaker says an ended flight's rows too
                                  go_arounds=int(sum(row[RUNWAY] == RUNWAY_GO_AROUND for row in said)),
                                  go_around_probability=np.array(self._probability[b]),

@@ -75,7 +75,7 @@ The commits, dates, branches, test counts and measurements of every milestone ar
 | B9 (D96) | Done, reviewed twice: `1204fd8f`, `6a68ac67`, `0b050797`, `bb86a39f`, `5313b6cd`; full suite passed; the names for §7's "Code" column in the log §1 |
 | D90 / A37 | `Loop.executor` stays public (D90 narrowed): the gap is closed; stage B follows the changed A37 after its merge (the log §1) |
 | Claude's check of stage B | Done at `5313b6cd` (`readouts/2026-10-05_stage_b_check.zh.md`): no leak into the inputs; the corrections are B10 (D105–D108) |
-| B10 | Planned (§12): before B5's formal campaign |
+| B10 | Done (`e4e7ba42`, reviewed twice; full suite passed); D109 waits for A39, the loop's copy for A38; the names for §7 in the log §1 |
 | B11 (D111) | Planned (§12): after vocabulary A40, before B5's formal campaign |
 | B5, B7 | Wait for B10, B11, A34's artefact and Claude's check of stage A (§0.4) |
 
@@ -95,7 +95,7 @@ Proposals (where the design says nothing): none open.
    | Now, before B5's formal campaign (the user, 2026-10-05) | B9: the interface for the post-training (D96), on synthetic artefacts. Its change of free generation's draws comes before any formal free generation: a payload that an experiment writes is settled before the experiment runs |
    | Now, before B5's formal campaign (the user, 2026-10-05) | B10: the corrections of Claude's check of stage B (D105–D108), on synthetic artefacts; then B3's smoke and free generation on A34's artefact again. Its changes of free generation (the masks of D64 at the row that ends G, the region of D72, the shared step) come before any formal free generation |
    | Now: stage A's line is merged (`dev-two-tier-v4` at `ed2530ae`, the user, 2026-10-05: A37–A40) | Stage B merges it and follows stage A's changes (`requests_from_a_to_designer.md` §2): A37 — the reason a flight ended from the judge's outcome (`judge.TIMEOUT`, vocabulary D90), the export's runway offset from `training_export.candidate_hae_minus_msl_m`; A38 — the copy of the closed loop's step (D106 (1)) takes the loop's own copy (`Loop.copy`), and a halted flight hears no words; A39 — B10's item of outline D109 with the splits given to the backend's service and to the frontend's reader. Then B11 (D111) |
-   | After B10, B11, Claude's check of stage A (with A32–A37, vocabulary §12.2 item 8; A38 changes no artefact and does not hold B5) and the user's choice of Δ (outline §4); A32 holds vocabulary D86 (the export gives val flights for the base's validation readout) | B5; B6's publication of the folds and the base (the base's val set after vocabulary A39, outline D109); B7 |
+   | After B10 and B11 (Claude's check of stage A, A32–A40, is done: `readouts/2026-10-05_stage_a_check_a32_a40.zh.md`; Δ = 4 s is chosen, vocabulary D11; A34's artefact exists); A32 holds vocabulary D86 (the export gives val flights for the base's validation readout) | B5; B6's publication of the folds and the base (the base's val set after vocabulary A39, outline D109); B7 |
 
 2. The post-training (`post_training.md`) is developed in parallel with the end of stage B, on its own branch, made
    from this one (outline §4, §5 rule 1; D95). It reads only §7; it merges this branch when B9 is committed.

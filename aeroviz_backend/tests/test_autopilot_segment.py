@@ -19,7 +19,7 @@ from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.conformance import STATE_BOUND_M
 from ts_transformer.autopilot.judge import OUTCOMES, flown_track
 from ts_transformer.experiments import training_export as export
-from ts_transformer.instructions import training_files
+from ts_transformer.instructions import artefact, training_files
 from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.words import COLUMNS, HEADING, RUNWAY_GO_AROUND, UNCHANGED
 from ts_transformer.tests.support import closed_loop_flight
@@ -135,9 +135,12 @@ class PayloadTest(unittest.TestCase):
 
 
 # ---- the service
-def set_up_set(root: Path) -> dict:
-    """The fixture set (`test_training_export.stage_a_fixture`, the export's own output) written under ``root``."""
+def set_up_set(root: Path, split: str | None = None) -> dict:
+    """The fixture set (`test_training_export.stage_a_fixture`, the export's own output) written under ``root``;
+    ``split``: its flights' split, changed to it."""
     index, sample = stage_a_fixture()
+    if split is not None:
+        sample["flights"] = [{**item, "split": split} for item in sample["flights"]]
     training = root / sample["airport"] / "training"
     training.mkdir(parents=True)
     training_files.write_set(training, sample["airport"], index["sets"][0], training_files.serialise(sample), [])
@@ -161,7 +164,7 @@ class BackendTest(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
         self.sample = set_up_set(self.root)
-        self.backend = SyntheticBackend(airports_root=self.root)
+        self.backend = SyntheticBackend(splits=training_files.SPLITS, airports_root=self.root)
         self.airport, self.key = self.sample["airport"], self.sample["flights"][0]["flightKey"]
 
     def tearDown(self):
@@ -233,7 +236,7 @@ class SetUpTest(unittest.TestCase):
         from unittest import mock
 
         one = flight(2.0)
-        backend = AutopilotSegmentBackend(airports_root=self.root)
+        backend = AutopilotSegmentBackend(splits=training_files.SPLITS, airports_root=self.root)
         with mock.patch("ts_transformer.autopilot.closed_loop.require_conforming_closed_loop",
                         return_value=(one.params, {"sha256": "another"}, one.words)):
             with self.assertRaisesRegex(ValueError, "the set was exported with fixture"):
@@ -255,7 +258,7 @@ class SetUpTest(unittest.TestCase):
             one = flight(interval)
             return one.batch, [one.sentence]
 
-        backend = AutopilotSegmentBackend(airports_root=self.root)
+        backend = AutopilotSegmentBackend(splits=training_files.SPLITS, airports_root=self.root)
         one = flight(2.0)
         with mock.patch.object(AutopilotSegmentBackend, "executor_for",
                                return_value=(Path("i"), Path("x"), one.params, {"sha256": "fixture"}, one.words)), \
@@ -264,14 +267,12 @@ class SetUpTest(unittest.TestCase):
                 mock.patch.object(training_flights, "closed_loop_batch", closed_loop_batch):
             backend.warm_up(log=lambda line: None)
             key = self.sample["flights"][0]["datasetId"]
-            self.assertEqual(drawn, [("train", (key,)), ("select", ())])
-            self.assertEqual(built, [("flights of train", 2.0), ("flights of train", 4.0), ("flights of train", 8.0),
-                                     ("flights of select", 2.0), ("flights of select", 4.0),
-                                     ("flights of select", 8.0)])
+            self.assertEqual(drawn, [("train", (key,))])                 # none of a split it holds no flight of
+            self.assertEqual(built, [("flights of train", 2.0), ("flights of train", 4.0), ("flights of train", 8.0)])
             answer = backend.fly({"clientId": "p", "seq": 1, "airport": self.sample["airport"], "setId": FIXTURE_SET,
                                   "flightKey": self.sample["flights"][0]["flightKey"], "rowIntervalS": 4,
                                   "column": "heading", "row": 0})
-            self.assertEqual((len(drawn), len(built), answer["rowIntervalS"]), (2, 6, 4.0))   # kept, not drawn again
+            self.assertEqual((len(drawn), len(built), answer["rowIntervalS"]), (1, 3, 4.0))   # kept, not drawn again
 
 
 class RefusalTest(unittest.TestCase):
@@ -283,7 +284,7 @@ class RefusalTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as name:
             sample = set_up_set(Path(name))
-            backend = AutopilotSegmentBackend(airports_root=Path(name))
+            backend = AutopilotSegmentBackend(splits=training_files.SPLITS, airports_root=Path(name))
             failing = mock.Mock(side_effect=ValueError("the executor flies v17's reference tracks otherwise"))
             with mock.patch("ts_transformer.autopilot.closed_loop.require_conforming_closed_loop", failing):
                 with self.assertRaisesRegex(ValueError, "reference tracks otherwise"):
@@ -296,6 +297,138 @@ class RefusalTest(unittest.TestCase):
             one = flight(2.0)
             with self.assertRaisesRegex(RequestRefused, "not 'val'"):
                 backend.set_flown(sample, "val", 2.0, Path("i"), one.params, one.words)
+
+
+    def test_a_flight_of_another_split_is_refused_before_any_check_runs(self):
+        """A37: a request for a set's flight of a split other than train and select is refused by name before the
+        checks of its artefact and executor spec run (they open the val days' data for nothing)."""
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as name:
+            sample = set_up_set(Path(name), split="val")
+            backend = AutopilotSegmentBackend(splits=training_files.SPLITS, airports_root=Path(name))
+            checks = mock.Mock(side_effect=AssertionError("the checks ran"))
+            request = {"clientId": "page", "seq": 1, "airport": sample["airport"], "setId": FIXTURE_SET,
+                       "flightKey": sample["flights"][0]["flightKey"], "rowIntervalS": 2.0, "column": "heading",
+                       "row": 0}
+            with mock.patch("ts_transformer.autopilot.closed_loop.require_conforming_closed_loop", checks):
+                with self.assertRaisesRegex(RequestRefused, "not 'val'"):
+                    backend.fly(request)
+            self.assertEqual(checks.call_count, 0)
+
+
+class CallersSplitsTest(unittest.TestCase):
+    """D109, A39: the splits a set's flights may be of come from whoever builds the service — stage A's sets give train
+    and select and refuse a val flight (above); a caller that permits val opens a val flight and flies it live."""
+
+    def test_the_splits_are_some_of_the_artefacts(self):
+        for splits in ((), ("train", "test"), ("validation",)):
+            with self.subTest(splits=splits), self.assertRaisesRegex(ValueError, "some of the artefact's splits"):
+                AutopilotSegmentBackend(splits=splits, airports_root=Path("nowhere"))
+        self.assertEqual(AutopilotSegmentBackend(splits=training_files.SPLITS, airports_root=Path("x")).splits,
+                         ("train", "select"))
+
+    def test_stage_a_s_own_services_give_train_and_select(self):
+        """The server's service and `check_live`'s are stage A's (`stage_a_service`): a widened one would open val."""
+        from unittest import mock
+
+        from aeroviz_backend.autopilot_segment import check_live
+
+        self.assertEqual(AeroVizBackendApp().autopilot_segment_backend().splits, training_files.SPLITS)
+        seen = []
+
+        def training_set(backend, airport, set_id):
+            seen.append(backend.splits)
+            raise NotListed("stop here")
+
+        with tempfile.TemporaryDirectory() as name, mock.patch.object(AutopilotSegmentBackend, "training_set",
+                                                                      training_set):
+            with self.assertRaises(NotListed):
+                check_live.main(["--set-id", "x", "--out", str(Path(name) / "out"), "--airport", "KXXX",
+                                 "--root", name])
+        self.assertEqual(seen, [training_files.SPLITS])
+
+    def test_a_service_that_permits_val_warms_up_only_the_splits_a_set_holds(self):
+        from unittest import mock
+
+        from ts_transformer.experiments import training_flights
+
+        one = flight(2.0)
+        for split, expected in ((None, ["train"]), ("val", ["val"])):
+            with self.subTest(split=split), tempfile.TemporaryDirectory() as name:
+                set_up_set(Path(name), split=split)
+                drawn = []
+                backend = AutopilotSegmentBackend(splits=("train", "select", "val"), airports_root=Path(name))
+                with mock.patch.object(AutopilotSegmentBackend, "executor_for",
+                                       return_value=(Path("i"), Path("x"), one.params, {"sha256": "f"}, one.words)), \
+                        mock.patch.object(training_flights, "open_flights",
+                                          lambda instructions, split, ids, words: drawn.append(split) or split), \
+                        mock.patch.object(training_flights, "stored_closed_loop", lambda *args: {}), \
+                        mock.patch.object(training_flights, "closed_loop_batch",
+                                          lambda *args: (flight(args[4]).batch, [flight(args[4]).sentence])):
+                    backend.warm_up(log=lambda line: None)
+                self.assertEqual(drawn, expected)
+
+    def test_a_caller_that_permits_val_opens_a_val_flight_and_flies_it_as_the_set_flew_it(self):
+        from unittest import mock
+
+        from ts_transformer.experiments import training_flights
+
+        with tempfile.TemporaryDirectory() as name:
+            sample = set_up_set(Path(name), split="val")
+            key = sample["flights"][0]["flightKey"]
+            request = {"clientId": "page", "seq": 1, "airport": sample["airport"], "setId": FIXTURE_SET,
+                       "flightKey": key, "rowIntervalS": 2.0, "column": "heading", "row": 0}
+            # the service's own setup of a val flight: drawn from the artefact's val split and kept
+            drawn = []
+
+            def open_flights(instructions, split, ids, words):
+                drawn.append((split, tuple(ids)))
+                return f"flights of {split}"
+
+            def closed_loop_batch(instructions, split, flights, stored, interval, params, words):
+                one = flight(interval)
+                return one.batch, [one.sentence]
+
+            one = flight(2.0)
+            backend = AutopilotSegmentBackend(splits=("train", "select", "val"), airports_root=Path(name))
+            with mock.patch.object(AutopilotSegmentBackend, "executor_for",
+                                   return_value=(Path("i"), Path("x"), one.params, {"sha256": "fixture"}, one.words)), \
+                    mock.patch.object(training_flights, "open_flights", open_flights), \
+                    mock.patch.object(training_flights, "stored_closed_loop", lambda *args: {}), \
+                    mock.patch.object(training_flights, "closed_loop_batch", closed_loop_batch):
+                answer = backend.fly(request)
+                backend.fly({**request, "seq": 2})
+            self.assertEqual(drawn, [("val", (sample["flights"][0]["datasetId"],))])
+            self.assertEqual((answer["flightKey"], answer["rowIntervalS"]), (key, 2.0))
+            self.assertLess(max(answer["stored"]["horizontalM"], answer["stored"]["verticalM"]), STATE_BOUND_M)
+            # the same set behind stage A's service: refused by name before any check runs
+            stage_a = AutopilotSegmentBackend(splits=training_files.SPLITS, airports_root=Path(name))
+            with self.assertRaisesRegex(RequestRefused, "not 'val'"):
+                stage_a.fly(request)
+
+
+class CheckLiveTest(unittest.TestCase):
+    """`check_live.compare`: a live answer against the sample's closed-loop sentence of the same flight and Δ."""
+
+    @staticmethod
+    def case(offset_m: float = 0.0, stored_m: float = 0.0, end: str = "landed"):
+        closed = {"flownFromRow": 2, "states": {"rows": 6, "eM": [0.0] * 6, "nM": [0.0] * 6, "heightMslM": [500.0] * 6},
+                  "replay": {"outcome": "landed", "endCycle": 7, "crossing": {"heightM": 15.0}}}
+        answer = {"executor": {"cycleS": 1.0}, "track": {"cycle": [0, 1, 2, 3, 4], "eM": [offset_m] * 5, "nM": [0.0] * 5,
+                                                          "altitudeMslM": [500.0] * 5},
+                  "stored": {"horizontalM": stored_m, "verticalM": 0.0},
+                  "segment": {"end": end, "endCycle": 7}, "crossing": {"heightM": 15.0}}
+        return answer, closed
+
+    def test_a_live_answer_differs_by_name_past_the_rounding_the_bound_or_the_outcome(self):
+        from aeroviz_backend.autopilot_segment.check_live import ROUNDING_M, compare
+
+        self.assertEqual(compare(*self.case(offset_m=0.09), 2.0, True), [])
+        self.assertRegex(compare(*self.case(offset_m=ROUNDING_M + 0.01), 2.0, False)[0], r"^cycle 0: .* row 2$")
+        self.assertRegex(compare(*self.case(stored_m=2.0 * STATE_BOUND_M), 2.0, False)[0], "artefact's stored states")
+        self.assertRegex(compare(*self.case(end="ground_contact"), 2.0, True)[0], "ended ground_contact at cycle 7")
+        self.assertEqual(compare(*self.case(end="ground_contact"), 2.0, False), [])     # not its column's last word
 
 
 class FakeAutopilot:
@@ -335,7 +468,7 @@ def autopilot_fixture() -> list[dict]:
     column's last heading word flown to its outcome — wall-clock fields fixed."""
     with tempfile.TemporaryDirectory() as directory:
         sample = set_up_set(Path(directory))
-        backend = SyntheticBackend(airports_root=Path(directory))
+        backend = SyntheticBackend(splits=training_files.SPLITS, airports_root=Path(directory))
         events = sample["flights"][0]["closedLoop"]["2"]["events"]
         heading = [e["row"] for e in events if e["column"] == HEADING]
         answers = []
@@ -395,6 +528,7 @@ class MirrorTest(unittest.TestCase):
         self.assertEqual(ts_constant(sample, "TRAINING_READING_RULE"), READING_RULE)
         self.assertEqual(ts_strings(sample, "TRAINING_OUTCOMES"), list(OUTCOMES))
         self.assertEqual(ts_strings(sample, "TRAINING_SPLITS"), list(training_files.SPLITS))
+        self.assertEqual(ts_strings(sample, "TRAINING_SET_SPLITS"), list(artefact.SPLITS))
         self.assertEqual(ts_strings(sample, "TRAINING_STRATA"), list(export.STRATA))
         self.assertEqual(ts_number(sample, "TRAINING_UNCHANGED"), UNCHANGED)
         self.assertEqual(ts_number(sample, "TRAINING_RUNWAY_GO_AROUND"), RUNWAY_GO_AROUND)

@@ -27,7 +27,9 @@ LAT, LON, ALT, SPEED, PSI, GAMMA, MASS = (STATE_NAMES.index(name) for name in
 
 
 def compass_deg(psi_rad: torch.Tensor) -> torch.Tensor:
-    """Math-convention heading → compass degrees in [0, 360) (`instructions.words.compass_from_math_rad`)."""
+    """Math-convention heading → compass degrees in [0, 360] (`instructions.words.compass_from_math_rad`): a heading a
+    hair below 0° comes out 360.0, kept so that the executor's numbers stay as they are (every law wraps an angle);
+    a stored row writes it as 0° (`flights.compass_track`, D82)."""
     return torch.remainder(90.0 - torch.rad2deg(psi_rad), 360.0)
 
 

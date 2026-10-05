@@ -35,7 +35,7 @@ from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import COMPARISON_AIRPORTS_ROOT
 
-from aeroviz_backend.autopilot_segment.backend import AutopilotSegmentBackend
+from aeroviz_backend.autopilot_segment.backend import stage_a_service
 
 AIRPORTS = ("KMSY", "KRDU", "KSJC", "KSMF", "KSTL")
 #: The sample's positions and heights are written at 0.1 m: a live state on the same row is within half of it, and
@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.flights_per_airport < 0:
         parser.error(f"--flights-per-airport {args.flights_per_airport}: a number of flights, 0 for every one")
     args.out.mkdir(parents=True, exist_ok=False)
-    backend = AutopilotSegmentBackend(airports_root=args.root)
+    backend = stage_a_service(args.root)
     started, seq, segments, differing, by_end, flown = time.perf_counter(), 0, 0, [], {}, {}
     for airport in args.airport:
         _, sample = backend.training_set(airport, args.set_id)

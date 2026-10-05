@@ -19,7 +19,9 @@ end before the landing) end within `LOOK_S` of its first predicted step is count
 ``--workers N --parts P``: train in P parts — consecutive blocks of the one seeded permutation it is drawn in
 (`replay.part_of`) — each drawn once and read at every rule in its own process, up to N at once
 (`instruction_closed_loop.POOL_OPTIONS`); the parts' numbers are put together in their order
-(`instruction_closed_loop.merge_tallies`), so the readout is the same whatever N and P.
+(`instruction_closed_loop.merge_tallies`), so the readout is the same whatever N and P up to float rounding: each part
+flies its flights in chunks of other flights (``--chunk``), and a batch's arithmetic depends on its members (A30: train
+states read in parts 1e-12 m apart; a rounding can move a discrete step, so a word or an outcome can change).
 
     python run_ts.py start_rules --instructions <scratch artefact> --executor <its executor spec> --row-interval-s 4 \\
         --workers 4 --parts 8 --out <new dir>

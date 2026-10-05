@@ -1556,6 +1556,50 @@ def test_a_crossing_of_another_candidate_and_the_stall_cut_off_end_the_flight_in
         assert steps == done // 2 + 1 and loop.outcome(0).outcome == outcome
 
 
+def test_a_copy_of_a_staggered_batch_flies_as_its_originals():
+    """D97 (2): `Executor.take` of a multi-aircraft batch (each flight from its own cycle) — taken while one flight flies
+    and one still waits for its first cycle, in the other order — flies on as the originals do, and records it alike."""
+    from dataclasses import fields
+
+    from ts_transformer.autopilot.conformance import STATE_BOUND_M
+    from ts_transformer.autopilot.executor import Executor
+    from ts_transformer.autopilot.lateral import Runways
+
+    geometry = _end_airport()
+    first, approach, first_grid, words = _east_flight(geometry, 75.0, e_m=-21500.0, height_m=1500.0)
+    second, _, second_grid, _ = _east_flight(geometry, 80.0, e_m=-18000.0, height_m=1200.0)
+    first_grid[0, HEADING] = words.heading_class(150.0, 90.0)                  # a turn right while the other waits
+    grids = [first_grid, second_grid]
+    params = _params()
+    inputs = FlightInputs(**{f.name: torch.cat([getattr(first, f.name), getattr(second, f.name)])
+                             for f in fields(FlightInputs)})
+    executor = Executor(inputs, Runways.of([geometry] * 2, spec(), dtype=F64, device=CPU),
+                        AirportCharts.of([geometry] * 2, dtype=F64, device=CPU),
+                        torch.tensor([approach, approach + 6.0], dtype=F64), params, words, step_s=2.0,   # apart
+                        time_limit_s=torch.tensor([120.0, 150.0], dtype=F64), start_cycle=torch.tensor([0, 9]),
+                        reserve_s=0.0)
+
+    def fly(flying: Executor, picks: list[int], cycles: int | None = None) -> None:
+        sentences = Sentences([grids[i] for i in picks], words, step_s=2.0, device=CPU)
+        while flying.count < flying.cycles and not bool(flying.done.all()) and (cycles is None or cycles > 0):
+            sentence_s = flying.own_cycle().clamp(min=0).to(F64) * params.cycle_s
+            flying.cycle(sentences.at(sentence_s), sentence_s)
+            cycles = None if cycles is None else cycles - 1
+
+    fly(executor, [0, 1], cycles=5)
+    assert int(executor.own_cycle()[1]) < 0                                     # the second has not started
+    copy = executor.take(torch.tensor([1, 0]))
+    fly(executor, [0, 1])
+    fly(copy, [1, 0])
+    one, other = executor.flown(), copy.flown()
+    for j, i in enumerate([1, 0]):
+        assert int(one.done_cycle[i]) == int(other.done_cycle[j])
+        cycles = min(one.states.shape[1], other.states.shape[1])
+        assert float((one.states[i, :cycles] - other.states[j, :cycles]).abs().max()) <= STATE_BOUND_M
+        assert torch.equal(one.runway[i, :min(one.runway.shape[1], other.runway.shape[1])],
+                           other.runway[j, :min(one.runway.shape[1], other.runway.shape[1])])
+
+
 def test_the_bank_starts_level_and_moves_at_the_roll_rate_from_the_first_cycle():
     """D84: the bank starts at 0 and its limit and roll rate hold from the first cycle — a heading word 90° right at the
     first row banks by at most p · Δt in each cycle, the first included, in the three ways to fly."""
@@ -1634,6 +1678,26 @@ def test_the_behaviour_check_refuses_a_law_that_reads_a_vertical_path(monkeypatc
 
     monkeypatch.setattr(lateral.Runways, "of", classmethod(of))
     monkeypatch.setattr(lateral.Lateral, "rate", reads_the_tch)
+    found = differences()
+    assert not found.passed and "states" in str(found.mismatches), found.summary()
+
+    # A37: a law that reads the dynamics' frame (`FlightInputs.frame_params`: the chart's origin, which ``moved`` moves;
+    # before D81 it held the landed runway's threshold and TCH) is found too
+    from ts_transformer.autopilot import executor as executor_module
+
+    original_init = executor_module.Executor.__init__
+
+    def init(self, inputs, *args, **kwargs):
+        original_init(self, inputs, *args, **kwargs)
+        self.lateral.frame = inputs.frame_params                      # the law's own copy of the frame
+
+    def reads_the_frame(self, state, relative_deg, issued, runway, runways, time_s, *, fresh=None):
+        rate = original_rate(self, state, relative_deg, issued, runway, runways, time_s, fresh=fresh)
+        return rate + 1e-3 * self.frame[:, 2]                         # the chart origin's height
+
+    monkeypatch.setattr(lateral.Runways, "of", classmethod(original_of))
+    monkeypatch.setattr(executor_module.Executor, "__init__", init)
+    monkeypatch.setattr(lateral.Lateral, "rate", reads_the_frame)
     found = differences()
     assert not found.passed and "states" in str(found.mismatches), found.summary()
 

@@ -974,10 +974,47 @@ def test_a_step_up_from_a_level_is_a_go_around_climb():
         climb_after(groups[:2], 30, 40, one)
 
 
-def test_the_figures_runner_draws_a_labelled_flight(tmp_path, monkeypatch):
+def test_the_figures_runner_draws_a_labelled_select_flight_and_never_reads_val(tmp_path, monkeypatch, capsys):
+    """A41, D85: the pages come from the select days; the runner takes no split, so val is never read."""
     from ts_transformer.experiments import instruction_figures
+    from ts_transformer.instructions.artefact import load_signals
     from ts_transformer.tests.support import labelled_instruction_artefact
 
-    labelled_instruction_artefact(tmp_path / "artefact", split="val")
+    labelled_instruction_artefact(tmp_path / "artefact", split="select")
     monkeypatch.setattr(instruction_figures, "require_conforming_labeller", lambda directory: None)
+    read = []
+    monkeypatch.setattr(instruction_figures, "load_signals",
+                        lambda directory, split: read.append(split) or load_signals(directory, split))
     assert instruction_figures.main(["--dir", str(tmp_path / "artefact"), "--count", "2"]) == 0
+    assert read == ["select"] and len(list((tmp_path / "artefact" / "figures").glob("*.png"))) == 1
+    with pytest.raises(SystemExit):
+        instruction_figures.main(["--dir", str(tmp_path / "other"), "--split", "val"])
+    assert "unrecognized arguments: --split val" in capsys.readouterr().err
+
+
+# ---- the readout of the labeller's runner (outline D85)
+def test_the_labellers_readout_gives_only_counts_for_the_val_days():
+    """A37, D85: `readout.json`, `readout.md` and the printed text (the same text) show every number of train and select
+    and, of val, only the flights labelled and refused — no refusal reason, no stratum, airport or word count."""
+    import json
+
+    from ts_transformer.experiments.instruction_labels import render, shown
+    from ts_transformer.instructions.readout import class_usage, flight_record, summarise
+
+    one, words = spec(), Words(spec())
+    legs = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (20, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
+            (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
+    reading = read_flight(instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0)), instruction_airport(), one,
+                          words)
+    refused = {"dataset_id": "KXXX:r", "airport": "KXXX", "status": "refused", "reason": "a val-only reason",
+               "detail": ""}
+    numbers = {**summarise([flight_record(reading, words)], [refused]), "class_usage": class_usage(reading.words, words)}
+    summary = {split: numbers for split in ("train", "select", "val")}
+    out = shown(summary)
+    assert out["train"] == numbers and out["select"] == numbers
+    assert set(out["val"]) == {"labelled", "refused", "readings"} and (out["val"]["labelled"], out["val"]["refused"]) \
+        == (1, 1)
+    text = render(out, one)
+    assert "| val | 1 | 1 |" in text and "## train" in text and "## select" in text and "## val" not in text
+    assert text.count("a val-only reason") == 1                            # train + select's reasons, not val's
+    assert "D85" in text and json.loads(json.dumps(out))["val"]["readings"].startswith("not shown")

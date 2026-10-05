@@ -1,31 +1,21 @@
 # 阶段 C：当前命令
 
 只放最新一条命令，新命令整份覆盖，不是日志（过程记在 `readouts/2026-10-05_stage_c_implementation_log.md`）。
-2026-10-05，Claude 写，用户转发。
+2026-10-05，Claude 写，用户转发。上一条（跟进 D105–D107、D110）已做完（`3725565c`、`0168d457`）。
 
 ```
-C 阶段：跟进 B 阶段复审的决定（D105–D107、D110）。
-依据：post_training.md §0.1 D105、D107、D110，§0.4 计划表，§8 C0、C4、C7；
-prior.md §7（第 2、3、4、7 项，D106、D107）；复审记录 readouts/2026-10-05_stage_b_check.zh.md §2 第 2–5 条。
+普查：回放的飞机里带故障观测航迹的有多少（vocabulary D111）。
+依据：post_training.md §8 C1 最后一条普查、§0.4 计划表对应的那一行；vocabulary.md D111、§6 第 3 项
+（instructions/faults.py 的 faulty_flights / track_faults）。
 
-现在就做（合成产物）：
-1. 合进 dev-two-tier（202b38d0）。
-2. D105：每个窗口给出它场景里的落地。
-   - 插入机按平移后的时间计，被移动的机按移动后的时间计；
-   - 不含测试日；
-   - 真实窗口的落地等于 roster 的落地。
-   测试：A 窗口计入插入机，D 窗口按移动后的时间计。
-
-B10 合进 dev-two-tier-v4-prior、再合进本分支之后：
-3. 删掉 post/motion.py，改用 prior §7 第 2 项的 motion；C1、C2 的结果必须逐位不变。
-4. PRIOR_INTERFACE 补上 B10 的名字；C 的运行器只允许导入 §7 第 7 项那个模块里列出的名字（C0）。
-5. C7：B10 之后 masked_log_probability 会拒绝训练模式。确认比值和 KL 都在 eval 模式下调用它，
-   测试要覆盖这种拒绝（D107）。
-6. C4：窗口循环走 §7 第 7 项的共用闭环模块，带 D105 的落地，
-   测试按 C4 的规格写（包括无他机的窗口与自由生成逐位相同）。
-   C6 还要等 A38 的 Loop 副本。
-
-每一步：单文件测试 → 独立审查（只审代码）→ 修正 → 用显式路径提交。
-不改 instructions/、autopilot/、prior/，也不改 B 的共用模块；缺什么接口，通过用户向 B 提出。
-报告：提交号、测试数，以及你的读法（作为提议）。
+1. 等 B 阶段把 A 阶段合并后的线（ed2530ae，含 A40）合进 dev-two-tier-v4-prior，
+   再把 dev-two-tier-v4-prior 和 dev-two-tier（e258e7b7）合进本分支。
+2. 在 post_windows 的普查里加上 C1 这一条。按机场和划分（train、select）分别数：
+   - 有被标记的回放飞机在空中的窗口数；
+   - 回放飞机读到故障点的场景步数（该行本身是故障点，或它的 2 s 运动读到故障点），以及这些步上的 token 数；
+   - 所有飞机都按记录飞时，间隔丧失的总数；其中，在事件步或事件前 2 Δ 内有一方读到故障点的有多少。
+3. 在 A34 产物的 train 和 select 上，在 scratch 目录里跑（outline §5 规则 7、12）；不读 val，不写 outputs/。
+4. 改代码的步骤：单文件测试 → 独立审查（只审代码）→ 修正 → 用显式路径提交。
+5. 报告：提交号和上面的计数表。不设判据，由用户决定要不要为这些步或窗口定规则。
+不改 instructions/、autopilot/、prior/，也不改 B 的共用模块。
 ```

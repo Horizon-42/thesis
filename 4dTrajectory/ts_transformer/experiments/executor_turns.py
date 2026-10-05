@@ -72,7 +72,7 @@ from ts_transformer.autopilot.lateral import Lateral, Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import Sentences, WordsNow
 from ts_transformer.autopilot.speed import Speed
-from ts_transformer.instructions.artefact import SPLITS
+from ts_transformer.instructions.artefact import READ_SPLITS
 from ts_transformer.instructions.labeller.lateral import turn_runs
 from ts_transformer.instructions.labeller.read import smooth, truncated
 from ts_transformer.instructions.readout import STRATA, stratum
@@ -344,7 +344,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--instructions", type=Path, required=True)
     parser.add_argument("--executor", type=Path, required=True, help="the executor spec directory")
-    parser.add_argument("--split", choices=SPLITS, required=True)
+    parser.add_argument("--split", choices=READ_SPLITS, required=True,
+                        help="train or select: the val days are read once, in the stage's validation readout (D85)")
     parser.add_argument("--per-airport", type=int, default=0, help="0: every labelled flight of the split")
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--chunk", type=int, default=500)

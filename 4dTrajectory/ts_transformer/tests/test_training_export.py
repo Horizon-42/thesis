@@ -47,6 +47,29 @@ def test_each_split_draws_per_stratum_flights_with_a_sentence_at_every_row_inter
         export.choose(indices, strata, records, "KAAA", 6, 1337)
 
 
+def test_the_airports_draw_reads_each_flights_stratum_by_its_signal_index_in_any_row_order(monkeypatch):
+    """A37: `build_airport` takes each flight's stratum from the sentence file by signal index — a file whose rows are
+    not in signal order (here reversed) draws the same flights, each of its own stratum."""
+    from types import SimpleNamespace
+
+    strata, records = _strata("KAAA", [("straight-in", 6), ("vectored", 5)])
+    order = sorted(strata)
+    for rows in (order, order[::-1]):
+        drawn = {}
+        monkeypatch.setattr(export, "load_sentences", lambda directory, split, spec, fields: {
+            "signal_index": np.array(rows), "stratum": np.array([strata[i] for i in rows])})
+        monkeypatch.setattr(export, "closed_loop_indices", lambda directory, split, interval, spec: set(strata))
+        monkeypatch.setattr(export, "signals_flights", lambda directory, split: records)
+        monkeypatch.setattr(export, "split_flights", lambda directory, split, chosen, intervals, params, words, *, device:
+                            (drawn.setdefault(split, list(chosen)) and [], "geometry"))
+        export.build_airport("KAAA", None, None, SimpleNamespace(spec=None), per_stratum=3, seed=1337, device=None)
+        if rows is order:
+            first = dict(drawn)
+        assert drawn == first
+    by_id = {r["dataset_id"]: strata[k] for k, r in enumerate(records)}
+    assert [by_id[d] for d in first["train"]] == ["straight-in"] * 3 + ["vectored"] * 3
+
+
 def test_the_words_of_a_sentence_are_its_events_decoded_with_the_corrections_marked():
     """Each word as the views show it, decoded by `Words` (the views decode nothing): the runway's candidate or
     go-around, a heading relative to the course of the runway in force and its track, a level above E and in MSL or "no
@@ -152,15 +175,30 @@ def test_a_listed_set_of_another_format_is_refused_by_name(tmp_path):
         files.listed_set(training, "KAAA", "set_a")
 
 
-def test_the_datum_is_the_artefacts_own_manifests(tmp_path):
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps({"runway_targets": {"09": {"hae_minus_msl_m": -33.0}}}), encoding="utf-8")
-    recorded = hashlib.sha256(manifest.read_bytes()).hexdigest()
-    sources = [{"airport": "KAAA", "arrival_manifest_sha256": recorded}]
-    assert files.runway_hae_minus_msl_m(sources, "KAAA", manifest) == {"09": -33.0}
-    manifest.write_text(json.dumps({"runway_targets": {"09": {"hae_minus_msl_m": -32.0}}}), encoding="utf-8")
-    with pytest.raises(ValueError, match="not the arrival manifest"):
-        files.runway_hae_minus_msl_m(sources, "KAAA", manifest)
+def test_each_candidates_height_offset_comes_from_the_published_runway_data(tmp_path, monkeypatch):
+    """The export's HAE − MSL offset of each candidate comes from the published runway data its candidates were read
+    from (A37, D78: a candidate needs no arrival), refused by name when those files changed (by sha256) or when the data
+    gives a candidate no offset."""
+    from types import SimpleNamespace
+
+    from ts_transformer.tests.support import instruction_airport
+
+    config, cifp = tmp_path / "runway_thresholds.json", tmp_path / "FAACIFP18"
+    config.write_text("{}", encoding="utf-8")
+    cifp.write_text("cifp", encoding="utf-8")
+    monkeypatch.setattr(export, "DEFAULT_CONFIG", config)
+    monkeypatch.setattr(export, "DEFAULT_CIFP", cifp)
+    published = [SimpleNamespace(ident="09", hae_minus_msl_m=-33.0), SimpleNamespace(ident="27", hae_minus_msl_m=-34.0)]
+    monkeypatch.setattr(export, "load_airport", lambda code, config_file, cifp_file: SimpleNamespace(runways=published))
+    recorded = {"config_sha256": hashlib.sha256(config.read_bytes()).hexdigest(),
+                "cifp_sha256": hashlib.sha256(cifp.read_bytes()).hexdigest()}
+    geometry = instruction_airport()                                      # one candidate, 09
+    assert export.candidate_hae_minus_msl_m(recorded, geometry) == {"09": -33.0}
+    with pytest.raises(ValueError, match="is not the cifp the artefact's candidates were read from"):
+        export.candidate_hae_minus_msl_m({**recorded, "cifp_sha256": "0" * 64}, geometry)
+    published.pop(0)
+    with pytest.raises(ValueError, match=r"KXXX: the published runway data gives no height offset for candidate\(s\) \['09'\]"):
+        export.candidate_hae_minus_msl_m(recorded, geometry)
 
 
 # ---- the frontend's fixtures, written by the export code (outline §6 item 2)

@@ -41,13 +41,13 @@ import torch
 
 from flight_scenarios.fas_geometry import course_halfwidth_m
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
-from ts_transformer.autopilot.judge import ALT, LAT, LON, flown_track
+from ts_transformer.autopilot.judge import ALT, LAT, LON, TIMEOUT, flown_track
 from ts_transformer.autopilot.start import start
 from ts_transformer.experiments import training_flights
 from ts_transformer.experiments.prior_free_generation import FREE_GENERATION_SCHEMA, Stored, read_sentences
 from ts_transformer.experiments.training_attitude import attitude_payload, executor_attitude
 from ts_transformer.experiments.training_export import (
-    FORMATS, candidates_block, events, split_flights, vocabulary_block,
+    FORMATS, candidate_hae_minus_msl_m, candidates_block, events, split_flights, vocabulary_block,
 )
 from ts_transformer.instructions import training_files as stage_a_files
 from ts_transformer.instructions.airport import AirportGeometry, RunwayCandidate
@@ -63,7 +63,7 @@ from ts_transformer.prior.procedure import (
     GLIDEPATH_BELOW_M, PROCEDURE_MASKS, Final, airport_finals,
 )
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
-from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
+from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 #: The points along each final its region's outline and its glidepath lower edge are drawn with.
 OUTLINE_POINTS = 61
@@ -179,7 +179,6 @@ def fly_again(instructions: Path, executor: Path, split: str, interval_s: float,
     first = sentences[order[0]].rows.start
     flown = step_words(loop, [by_index[i].words for i in order])
     ended = np.ceil((loop.executor.done_cycle.cpu().numpy() + 1) / loop.row_cycles).astype(int)
-    timed_out = loop.timed_out()
     executed = loop.executor.flown()
     aero = loop.executor.inputs.aero_params.cpu().numpy()
     out = {}
@@ -191,10 +190,11 @@ def fly_again(instructions: Path, executor: Path, split: str, interval_s: float,
             raise ValueError(f"{item.row['dataset_id']} sample {item.sample}: flown again {distance:.3g} from its "
                              f"readout's states")
         outcome = loop.outcome(b)
-        if (outcome.outcome, bool(timed_out[b]), int(loop.go_arounds[b])) != (
+        timed_out = outcome.outcome == TIMEOUT                      # why it ended: the judge's (vocabulary D90)
+        if (outcome.outcome, timed_out, int(loop.go_arounds[b])) != (
                 item.row["outcome"], item.row["timed_out"], item.row["go_arounds"]):
             raise ValueError(f"{item.row['dataset_id']} sample {item.sample}: flown again to {outcome.outcome} "
-                             f"(timeout {bool(timed_out[b])}, {int(loop.go_arounds[b])} go-arounds), the readout's "
+                             f"(timeout {timed_out}, {int(loop.go_arounds[b])} go-arounds), the readout's "
                              f"{item.row['outcome']} ({item.row['timed_out']}, {item.row['go_arounds']})")
         # the flight to its outcome on the 2 s rows from the first predicted step, as A23 draws a replay
         last = training_flights.last_state_cycle(outcome.outcome, outcome.end_row)
@@ -206,7 +206,7 @@ def fly_again(instructions: Path, executor: Path, split: str, interval_s: float,
             "events": events(item.words, None, geometry, words), "firstRow": sentence.rows.first_row, "startRow": first,
             # the row of the readout's states the executor flew from (the first predicted step)
             "flownFromRow": first * every,
-            "outcome": outcome.outcome, "endCycle": int(outcome.end_row), "timedOut": bool(timed_out[b]),
+            "outcome": outcome.outcome, "endCycle": int(outcome.end_row), "timedOut": timed_out,
             "goArounds": int(loop.go_arounds[b]),
             "crossing": training_flights.crossing_payload(outcome, executed, b, geometry),
             "track": {"rows": len(cycles), "lastCycle": int(last), "eM": stage_a_files.rounded(whole["e"][cycles], 1),
@@ -364,7 +364,7 @@ def main(argv: list[str] | None = None) -> int:
     for airport in airports:
         flights, geometry = build_airport(airport, readout, stored, params, words, per_airport=args.per_airport,
                                           seed=args.seed, device=torch.device(args.device))
-        hae = stage_a_files.runway_hae_minus_msl_m(signals_record["sources"], airport, arrival_manifest_path(airport))
+        hae = candidate_hae_minus_msl_m(signals_record["runway_ends_from"], geometry)
         cohort = cohort_block(readout, len(flights), args.per_airport, args.seed,
                               len({s.index for s in stored if s.row["airport"] == airport}))
         sample = sample_of(args.set_id, geometry, hae, source, model, cohort, words, params.cycle_s,
