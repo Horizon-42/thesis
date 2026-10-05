@@ -10,7 +10,7 @@ miles occur only in quoted text, with the SI value beside them.
 | Item | Value |
 |---|---|
 | Base commit | `dev-two-tier` `a804633e` |
-| Code written | Branch `dev-optimizer-multi-aircraft`: T0 (`bbb18c52`, `5e3826f9`); T1–T6, M1 (`b5f4cd1a`); F9/F10/F13 (`18d73bd0`); T8, M2 (§5.6, §8.2, this commit) |
+| Code written | Branch `dev-optimizer-multi-aircraft`: T0 (`bbb18c52`, `5e3826f9`); T1–T6, M1 (`b5f4cd1a`); F9/F10/F13 (`18d73bd0`); T8, M2 (`958c4b71`); MD13 (`c7f2b99e`); T7 (`78ce2fcb`); T10a (`4e6c3ad0`). T10b, T11: in work |
 | Companion document | `code_review.md` (findings F1 to F13). Step T0 of this design needs F4, F5, F6 (item 3) and F7 |
 | Model of the scenario | The two-tier post-training "one aircraft commanded" (`ts_transformer/docs/two_tier/design/post_training.md` D29, D93) |
 | Dependency on `ts_transformer` | Two pure modules, read-only, through one adapter (§6, §7). No other import. No shared output |
@@ -56,7 +56,7 @@ project rule. A decided row says "Decided" with the option, the person and the d
 - The choice of the runway. Each aircraft lands on the runway of its record.
 - Wind. The dynamics have no wind.
 - ATC speed instructions inside the FAF or 5 NM (9,260 m) (7110.65BB 5-7-1 b4). The optimizer does not
-  model instructions. §10 item 3 lists this as an open question.
+  model instructions. §11 item 3 lists this as an open question.
 
 ## 2. Terms
 
@@ -315,7 +315,7 @@ method of lazy constraint generation.
 
 One NLP for all aircraft of a conflict cluster. It needs common node times for all aircraft, so the phase
 durations become fixed or shared. Design it only if M2 leaves losses that a sequential order cannot
-remove. §10 item 1 records the open questions.
+remove. §11 item 1 records the open questions.
 
 ## 6. Decoupling from `ts_transformer`
 
@@ -405,7 +405,8 @@ branch and worktree, with a review before each commit.
 | T7 | Evaluation of the commanded records and the CZML comparison (a new category) | The frontend shows a published window; checked in the browser | T6 | Done (§8.3): one M1 sample, KRDU (user, 2026-10-05); frontend by a sonnet agent |
 | T8 | M2 (§5.6) | A readout like T5 for 5 blocks | T6, MD9 | Done (§8.2) |
 | T9 | M3 design (§5.7) | Only if T8 leaves losses that the order cannot remove | T8 | Not started |
-| T10 | M2 in the viewer (the user, 2026-10-06): (a) one directory and one `summary.json` per M2 run; (b) the builder and the frontend show a run as one scene (§9); (c) one KRDU run published | Builder and frontend tests; the publication validator; checked in the browser | T7, T8 | In progress: (a) built; (b) a sonnet agent |
+| T10 | M2 in the viewer (the user, 2026-10-06): (a) one directory and one `summary.json` per M2 run; (b) the builder and the frontend show a run as one scene (§9); (c) one KRDU run published | Builder and frontend tests; the publication validator; checked in the browser | T7, T8 | In progress: (a) built; (b) a sonnet agent, reviewed; (c) the run is in `4dTrajectory/outputs/KRDU/traffic_m2_runway_cons/` |
+| T11 | The Optimize task's multi-aircraft mode (§10; the user, 2026-10-06) | Backend and frontend tests; one M1 job and one 15-min M2 job on a test stack, checked in the browser | T10 | Design written (§10); the code: a sonnet agent (the user's order) |
 
 ### 8.1 T5 readout (KRDU, seed 11, 50 windows; the reviewed M1 code with the retry of MD13, scratch output)
 
@@ -473,7 +474,82 @@ branch and worktree, with a review before each commit.
 - **Summary.** `summary.json` per directory: the configuration (with `h_c`, `W`, `κ`, `K_max`, the reading),
   the outcome counts, the counts of §5.2 item 4, §4.1 item 5, MD10 and MD11, and the largest frame error.
 
-## 10. Open questions
+## 10. Interactive mode: the Optimize task
+
+The user, 2026-10-06: the Optimize task gets a multi-aircraft mode of two kinds, one aircraft controlled (M1)
+and all aircraft controlled (M2). This section is the design (step T11). A sonnet agent writes the code (the
+user's order). Claude reviews it.
+
+### 10.1 What the user does
+
+1. In the Optimize task, the user selects the mode: `Single aircraft` (the present mode, not changed),
+   `Multi-aircraft: one controlled` (M1) or `Multi-aircraft: all controlled` (M2).
+2. The user selects a UTC day. The panel shows the arrivals of the airport on that day, from the arrivals
+   roster: landing time, callsign, runway, type.
+3. M1: the user selects one arrival. M2: the user sets a block, a start time (UTC) and a length. The panel
+   shows how many arrivals land in the block.
+4. The user starts the job. The panel shows the progress (aircraft done of the total, the aircraft in work)
+   and a Cancel button.
+5. When the job is done, the viewer shows the scene (§10.4). The panel shows one row per controlled aircraft
+   (callsign, runway, outcome, and for M2 the delay) and one summary line (the outcome counts; for M2 also
+   the delays and the losses left after the final check). A click on a row selects that flight.
+6. A new job, a change of mode, or leaving the Optimize task cancels a running job and removes the scene.
+
+### 10.2 Decisions
+
+These are Claude's choices for this design. The user can change them.
+
+| ID | Question | Choice | Reason |
+|---|---|---|---|
+| IM1 | Which aircraft can be controlled | Recorded arrivals only, built as the batch builds them: the record's start, the runway-threshold target, the constrained solve on the shortest IAF | The judge needs a record: a flight key, a runway, a type with a wake category. A hand-set aircraft has none of them |
+| IM2 | The solver settings | The batch defaults (`LoopSettings`, `max_duration` 2000 s, rollout step 0.5 s, IPOPT cap 3000), shown read-only | The same code and settings as T5 and T8, so an interactive result compares with the batch |
+| IM3 | Block length (M2) | 15, 30 or 60 min; 30 min by default | A block is serial. T8: a 1-hour block takes up to about 10 min |
+| IM4 | Where a job runs | One process per job, separate from the resident single-aircraft worker, at `nice 10`; one job per backend at a time | casadi is not thread-safe; a long job must not block the single-aircraft optimizer; the box also runs the two-tier experiments |
+| IM5 | Which traffic a job reads | Only the roster rows whose arrival slice overlaps the job's time span plus `max_duration`, and only their tracks (`load_model_arrivals_subset`) | The batch reads the whole roster (4.2 GB peak). The live backend must not |
+| IM6 | Where the result goes | A job directory in the backend's cache, not `public/data`: the batch records and `summary.json` (mode `traffic:m1` or `traffic:m2`), the evaluation report, and the comparison builder's files (§9). No `categories.json`. The backend keeps the last 5 job directories | A job result is not a publication. The frontend reads the same files as a published category |
+| IM7 | How the frontend shows the result | The comparison layer (AV46 for M1, AV47 for M2), fed from the job's files instead of `public/data` | One renderer for published and interactive results |
+
+### 10.3 Backend
+
+- `GET /traffic/arrivals?airport=<ICAO>&date=<YYYY-MM-DD>`: the roster rows that land on that UTC day (flight
+  key, callsign, runway, type, entry and landing UTC). It reads only the roster.
+- `POST /traffic/jobs` with `{mode: "m1", airport, flightKey}` or `{mode: "m2", airport, blockStartUtc,
+  blockS}`: starts a job and returns `{jobId}`. 409 when a job runs. 400 for a bad request (an unknown flight
+  key, a block length other than 900, 1800 or 3600 s).
+- `GET /traffic/jobs/<jobId>`: `{state: running | done | failed | cancelled, progress: {done, total, current},
+  error}`.
+- `GET /traffic/jobs/<jobId>/files/<name>`: one file of the job directory that the comparison index lists (the
+  index, the CZML files, the evaluation report). 404 for any other name.
+- `POST /traffic/jobs/<jobId>/cancel`: stops the job process and its process group.
+- The job process is `python 4dTrajectory/optimization/traffic_job.py --spec <file> --out <dir>`. It reads the
+  near traffic (IM5), builds the scenarios as the batch does, flies M1 (`traffic.loop.fly_in_traffic`) or M2
+  (`traffic.block.fly_block`), writes the records and `summary.json` with the batch writers, runs the
+  evaluation and the comparison builder into `<dir>`, and writes `progress.json` after each aircraft
+  (`fly_block` gets an optional progress callback). Its last write is `state.json`: `done`, or `failed` with
+  the reason.
+- The backend does not hot-reload. Test this mode on a separate backend (the worktree, a free port) with the
+  worktree's frontend, never on the live backend (8765).
+
+### 10.4 Frontend
+
+- A mode selector in the Optimize panel. The single-aircraft mode stays as it is.
+- The comparison layer gets a source: a published category (as now) or a job (the base URL
+  `/traffic/jobs/<jobId>/files/`). It runs in the Evaluate task for a category and in the Optimize task for a
+  job.
+- While a job runs, the panel reads `GET /traffic/jobs/<jobId>` every 2 s.
+- The scene is the one of AV46 (M1: the controlled aircraft, its record, its neighbours) or AV47 (M2: one clock,
+  every controlled aircraft, the background).
+
+### 10.5 Tests and checks
+
+- Backend: the job manager (one job at a time, cancel stops the process group, only listed files are served,
+  the last 5 jobs kept) on a fake job process; the job runner (the near-traffic selection reads no other
+  track; a fake solve end to end into a tmp directory; the progress file).
+- Frontend: the mode selector, the job lifecycle (start, poll, cancel on a change of mode and on leaving the
+  task), the comparison layer fed from a job.
+- One M1 job and one 15-min M2 job on the test stack, checked in the browser.
+
+## 11. Open questions
 
 1. **M3.** Common node times for all aircraft; disjunction branches for pairs that change order; the size
    of a conflict cluster. Not designed.
@@ -485,7 +561,7 @@ branch and worktree, with a review before each commit.
 4. **Losses that the commanded aircraft does not answer for** (§5.2 item 4). The optimizer could also avoid
    them. This design does not, to match two-tier D93. The counts show if this choice matters.
 
-## 11. Key code index
+## 12. Key code index
 
 | What | Where |
 |---|---|
@@ -501,7 +577,7 @@ branch and worktree, with a review before each commit.
 | The traffic package | `4dTrajectory/optimization/traffic/`: `scene.py` (recorded traffic), `frame.py`, `runways.py` (D92 geometry), `rules.py` (the only `ts_transformer` import), `check.py` (the judge on a replay), `rows.py`, `loop.py` (M1), `readout.py`; the runner `traffic_optimization.py` |
 | Two-tier decisions read here | `4dTrajectory/ts_transformer/docs/two_tier/design/post_training.md` D29, D30, D92, D93; `vocabulary.md` D11, D23, D25, D111 |
 
-## 12. Regulation sources
+## 13. Regulation sources
 
 All values come from FAA JO 7110.65BB Change 3 (2026-07-09), as encoded in `runway_schedule.py:159-222` and
 quoted to the paragraph in `docs/literature/arrival_separation/README.md` §2 (§2.1 to §2.9). This design adds
