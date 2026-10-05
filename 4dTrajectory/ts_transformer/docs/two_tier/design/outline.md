@@ -97,11 +97,11 @@ they came from. Each document lists the identities of its parts.
 | Document | Decisions | Open items |
 |---|---|---|
 | Outline | D7, D20, D21, D55, D85, D95 | — |
-| Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97 | O8 |
+| Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102 | O8 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96 | — |
-| Post-training | D29–D31, D36, D37, D76, D91–D94, D98 | — |
+| Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103, D104 | — |
 
-The next free numbers: D99, O13.
+The next free numbers: D105, O13.
 
 ---
 
@@ -185,7 +185,7 @@ sections that it names.
     document keeps the specifications of the milestones that are not done and the check items that are not done: they
     are the plan that the implementer follows. When a milestone is done, Claude moves its specification to the log. The implementer
     changes no other part of a design document: not the decisions, the design sections, the plan, the values or the key
-    code index. (Stage B's log is still prior §0.3 and moves to a file in `readouts/` the same way.) A gap in the design, or a reading that needs a change of the design, goes to the user; Claude writes the
+    code index. (Stage B: `readouts/2026-10-05_stage_b_implementation_log.md`.) A gap in the design, or a reading that needs a change of the design, goes to the user; Claude writes the
     text that the user decides. The log is committed to `dev-two-tier` (the user's checkout), with explicit paths. At
     the end of a stage, the report gives the new code index, and Claude puts it into the key code index of the
     document.
