@@ -102,6 +102,32 @@ def evaluate(model: Prior, sentences: Sequence[SentenceRows], tokens_per_batch: 
             "steps": steps}
 
 
+def masked_log_probability(model: Prior, rows: RowTensors, permitted: Any, extra: Any = None) -> torch.Tensor:
+    """``[B, R, 5]``: the log-probability of the words ``rows.targets`` at each asked row, under the speaker's records
+    ``permitted`` (`speaker.Permitted`: the words every mask permitted at each row it said, and its temperature),
+    teacher-forced with the caller's input of the added modules ``extra``, with gradients (D96 item 3); 0 at a row that
+    is not asked. An aircraft's k-th asked row reads the record of the k-th row the speaker said to it. At the
+    parameters that spoke, the probability is the one the speaker drew the word from (within the float tolerance); a
+    word the record blocks has probability 0."""
+    logits = model(rows, extra)
+    count, length = rows.asked.shape
+    said = permitted.masks[0].shape[1]
+    asked = rows.asked.cpu().numpy()
+    if (asked.sum(axis=1) > said).any():
+        raise ValueError(f"an aircraft has more asked rows than the {said} rows of its records")
+    out = logits[0].new_zeros((count, length, len(logits)))
+    for column, logit in enumerate(logits):
+        record = np.ones((count, length, logit.shape[-1]), dtype=bool)
+        for b in range(count):
+            where = np.flatnonzero(asked[b])
+            record[b, where] = permitted.masks[column][b, : len(where), : logit.shape[-1]]
+        masked = logit.masked_fill(~torch.as_tensor(record, device=logit.device), float("-inf"))
+        log_p = torch.log_softmax(masked / permitted.temperature, dim=-1)
+        chosen = log_p.gather(-1, rows.targets[..., column: column + 1])[..., 0]
+        out[..., column] = torch.where(rows.asked, chosen, torch.zeros_like(chosen))
+    return out
+
+
 @torch.no_grad()
 def first_step_runway(model: Prior, sentences: Sequence[SentenceRows], tokens_per_batch: int, device: torch.device
                       ) -> dict[str, Any]:

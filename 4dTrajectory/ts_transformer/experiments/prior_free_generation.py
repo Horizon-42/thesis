@@ -48,9 +48,10 @@ from ts_transformer.prior.speaker import MOST_GO_AROUNDS, Position, Speaker, go_
 TEMPERATURE = 1.0
 #: The predicted rows the speaker's cache has room for at first (it grows as the flights need, `model.Past.grown`).
 FIRST_ROWS = 128
-#: The format of a readout's files (``config.json``, ``sentences.npz``; `read_sentences`). v1 (B6): the words the
+#: The format of a readout's files (``config.json``, ``sentences.npz``; `read_sentences`). v2 (B9, D96): each flight's
+#: words drawn with its own random numbers (`flight_numbers`), whatever the batch. v1 (B6): the words the
 #: procedure masks blocked at each row (``blocked_<column>``).
-FREE_GENERATION_SCHEMA = "ts-prior-free-generation-v1"
+FREE_GENERATION_SCHEMA = "ts-prior-free-generation-v2"
 #: The arrays of ``sentences.npz``.
 SENTENCES_FIELDS = {"schema", "index", "sample", "offsets", "words", "go_around_probability", "go_around_permitted",
                     "on_final", "state_offsets", "states", *(f"blocked_{COLUMNS[c]}" for c in ProcedureMasks.columns)}
@@ -119,13 +120,22 @@ class Generated:
     blocked: dict[int, np.ndarray]
 
 
+def flight_numbers(seed: int, sample: int, index: int) -> np.random.Generator:
+    """A flight's own source of random numbers in free generation (§4 "Drawing", D96): from the seed, the sample and
+    its place in the split's signals — the same whatever flights share its batch."""
+    return np.random.default_rng([seed, sample, index])
+
+
 def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
                   flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
                   landings: Mapping[str, LandingIndex], finals: Mapping[str, Sequence[Final]], words: Words, *,
-                  interval_s: float, variant: str, generator: torch.Generator, device: torch.device,
+                  interval_s: float, variant: str, numbers: Sequence[np.random.Generator], device: torch.device,
                   temperature: float = 1.0) -> list[Generated]:
     """The closed loop of the flights ``order`` of ``loop`` (`autopilot.start.start`; module docstring): ``sentences``
-    and ``flights`` (their records in the split's signals) by their place in the signals."""
+    and ``flights`` (their records in the split's signals) by their place in the signals; ``numbers`` each flight's
+    source of random numbers, in ``order`` (`flight_numbers`: five a row said, D96)."""
+    if len(numbers) != len(order):
+        raise ValueError(f"{len(numbers)} sources of random numbers for {len(order)} flights")
     if loop.most_go_arounds != MOST_GO_AROUNDS:
         raise ValueError(f"the loop was started for {loop.most_go_arounds} go-arounds a flight, the bound is "
                          f"{MOST_GO_AROUNDS} (D68)")
@@ -136,7 +146,7 @@ def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Map
     # the cache's first room: the observed rows and some predicted ones (it grows as the flights need; the loop's time
     # limit is not the speaker's to read, vocabulary D90)
     speaker = Speaker(model, words, [finals[g.code] for g in flight_geometries], capacity=start + FIRST_ROWS,
-                      generator=generator, temperature=temperature)
+                      temperature=temperature)
     # the inputs of a row: the prior's one function of a loop's row (D96 item 4)
     rows_of = LoopRows(flight_geometries, landings, [own_flight_key(flights[i]) for i in order],
                        np.array([utc_s(flights[i]["entry_time_utc"]) for i in order]),
@@ -165,7 +175,7 @@ def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Map
     while alive.any():
         tensors, at = row(t, current, before, True)
         caller = {RUNWAY: go_around_bound(speaker.go_arounds, words, int(speaker.n_candidates.max()))}
-        words_row = speaker.speak(tensors, at, caller)
+        words_row = speaker.speak(tensors, at, np.stack([n.random(len(COLUMNS)) for n in numbers]), caller)
         rows, done = loop.step(words_row)
         for b in np.flatnonzero(alive):
             final = finals[flight_geometries[b].code][speaker.in_force[b].runway]
@@ -317,10 +327,10 @@ def main(argv: list[str] | None = None) -> int:
             chunk = drawn[begin: begin + args.chunk]
             loop, order = start(instructions, args.split, interval_s, {i: sentences[i] for i in chunk}, executor_dir,
                                 most_go_arounds=MOST_GO_AROUNDS, device=device)
-            generator = torch.Generator(device=device).manual_seed(args.seed + 1_000_003 * sample + begin)
             generated += [(sample, g) for g in speak_and_fly(
                 model, loop, order, sentences, dict(enumerate(flights)), geometries, landings, finals, loop.words,
-                interval_s=interval_s, variant=model.config.variant, generator=generator, device=device,
+                interval_s=interval_s, variant=model.config.variant,
+                numbers=[flight_numbers(args.seed, sample, i) for i in order], device=device,
                 temperature=TEMPERATURE)]
             print(f"sample {sample}: {begin + len(chunk)} of {len(drawn)} flights", flush=True)
 
@@ -333,6 +343,8 @@ def main(argv: list[str] | None = None) -> int:
         "split": args.split, "row_interval_s": interval_s, "selection": selection, "airports": airports,
         "per_airport": args.per_airport,
         "samples": args.samples, "seed": args.seed, "chunk": args.chunk, "temperature": TEMPERATURE, "drawn": len(drawn),
+        "numbers": "each flight's own: numpy default_rng([seed, sample, its place in the split's signals]), five "
+                   "uniform numbers a row said (D96)",
         "procedure_masks": PROCEDURE_MASKS, "most_go_arounds": MOST_GO_AROUNDS, "git": git, "smoke": args.smoke,
         "device": str(device)})
     with open(out / "sentences.jsonl", "w", encoding="utf-8") as rows:

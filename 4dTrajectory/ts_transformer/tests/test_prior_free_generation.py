@@ -9,7 +9,7 @@ import torch
 
 from flight_scenarios.fas_geometry import fas_course_geometry
 from ts_transformer.autopilot.start import start
-from ts_transformer.experiments.prior_free_generation import speak_and_fly
+from ts_transformer.experiments.prior_free_generation import flight_numbers, speak_and_fly
 from ts_transformer.instructions.artefact import load_candidates, signals_flights
 from ts_transformer.instructions.grammar import apply
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED
@@ -43,7 +43,7 @@ def generate(tmp_path, monkeypatch, *, interval_s=4.0, seed=0, most=MOST_GO_AROU
     torch.manual_seed(0)
     model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64))
     (generated,) = speak_and_fly(model, loop, order, {0: stored}, flights, geometries, landings, finals, words,
-                                 interval_s=interval_s, variant="full", generator=torch.Generator().manual_seed(seed),
+                                 interval_s=interval_s, variant="full", numbers=[flight_numbers(seed, 0, 0)],
                                  device=CPU)
     return generated, stored, words, geometry
 
@@ -118,13 +118,13 @@ def test_the_loop_gives_the_speaker_the_rows_the_sentence_gives(tmp_path, monkey
     rows = []
     observe, speak = Speaker.observe, Speaker.speak
 
-    def observed(self, tensors, positions):
+    def observed(self, tensors, positions, extra=None):
         rows.append(tensors)
-        return observe(self, tensors, positions)
+        return observe(self, tensors, positions, extra)
 
-    def spoken(self, tensors, at, caller=None):
+    def spoken(self, tensors, at, numbers, caller=None, extra=None):
         rows.append(tensors)
-        return speak(self, tensors, at, caller)
+        return speak(self, tensors, at, numbers, caller, extra)
 
     monkeypatch.setattr(Speaker, "observe", observed)
     monkeypatch.setattr(Speaker, "speak", spoken)
@@ -179,7 +179,7 @@ class FakeLoop:
 
 
 def test_flights_done_at_different_rows_end_apart_and_never_feed_a_state_that_is_not_a_number(tmp_path, monkeypatch):
-    from ts_transformer.experiments.prior_free_generation import speak_and_fly
+    from ts_transformer.experiments.prior_free_generation import flight_numbers, speak_and_fly
 
     directory, words, _, stored, _ = test_start._artefact(tmp_path, monkeypatch, 4.0)
     record = signals_flights(directory, "train")[0]
@@ -200,9 +200,9 @@ def test_flights_done_at_different_rows_end_apart_and_never_feed_a_state_that_is
     class LateGoAround(runner.Speaker):
         """Says "go-around" for flight 0 once it is done (row 3 on): words the executor never hears."""
 
-        def speak(self, row, at, caller=None):
+        def speak(self, row, at, numbers, caller=None, extra=None):
             made.append(self)
-            said = super().speak(row, at, caller)
+            said = super().speak(row, at, numbers, caller, extra)
             if len(self.go_around_probability) > 3 and self.go_arounds[0] < MOST_GO_AROUNDS:
                 said[0, RUNWAY] = RUNWAY_GO_AROUND
                 self.go_arounds[0] += 1
@@ -213,7 +213,8 @@ def test_flights_done_at_different_rows_end_apart_and_never_feed_a_state_that_is
     torch.manual_seed(0)
     model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64))
     a, b = speak_and_fly(model, loop, [0, 1], {0: stored, 1: stored}, flights, geometries, landings, finals, words,
-                         interval_s=4.0, variant="full", generator=torch.Generator().manual_seed(1), device=CPU)
+                         interval_s=4.0, variant="full",
+                         numbers=[flight_numbers(1, 0, i) for i in (0, 1)], device=CPU)
     assert (len(a.words), len(b.words)) == (3, 6)
     # its own words' go-arounds, none of those said after it was done
     assert a.go_arounds == int((a.words[:, RUNWAY] == RUNWAY_GO_AROUND).sum()) < made[0].go_arounds[0]
