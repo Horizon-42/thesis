@@ -15,6 +15,7 @@ import CesiumViewerComponent from "./components/CesiumViewer";
 import WorkbenchShell from "./components/WorkbenchShell";
 import TrainingSentenceBar from "./components/TrainingSentenceBar";
 import TrainingScene from "./components/TrainingScene";
+import TrainingPriorScene from "./components/TrainingPriorScene";
 import WorkbenchLeftDock from "./components/WorkbenchLeftDock";
 import AirportLocalTerrainDemoPage from "./components/AirportLocalTerrainDemoPage";
 import ChartAnnotatedPage from "./components/ChartAnnotatedPage";
@@ -85,6 +86,7 @@ function FlightApp() {
       <CesiumViewerComponent />
       {/* The Training scene is a leaf: it follows the chart cursor, and the shell must not re-render with it. */}
       <TrainingScene />
+      <TrainingPriorScene />
 
       {/* Layer 1: the workbench shell — top context bar + a per-task left dock over the
           overlay host (clicks fall through to the globe; each dock re-enables them). */}

@@ -101,6 +101,21 @@ class AeroVizBackendApp:
                 return 400, {"ok": False, "error": str(exc)}
         return 404, {"ok": False, "error": "not found"}
 
+    def _autopilot(self, fly: Any) -> tuple[int, dict[str, Any], str | None]:
+        """The executor flies one word's segment of a Training flight, live: a request the view cannot make is a 400, a set
+        or flight not listed a 404, one a newer request from the same page superseded a 409, and anything else that stops
+        a listed flight a 500 with its reason."""
+        try:
+            return 200, fly(), None
+        except RequestRefused as exc:
+            return 400, {"ok": False, "error": str(exc)}, None
+        except NotListed as exc:
+            return 404, {"ok": False, "error": str(exc)}, None
+        except Superseded as exc:
+            return 409, {"ok": False, "error": str(exc)}, None
+        except Exception as exc:
+            return 500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"}, None
+
     def handle_post(
         self,
         path: str,
@@ -129,19 +144,9 @@ class AeroVizBackendApp:
         if path == "/dynamics-comparison/history/clear":
             return 200, self.dynamics_comparison_backend.clear(payload), None
         if path == "/autopilot/segment":
-            # the executor flies one word's segment of a Training flight, live: a request the view cannot make is a
-            # 400, a set or flight not listed a 404, one a newer request from the same page superseded a 409, and
-            # anything else that stops a listed flight a 500 with its reason
-            try:
-                return 200, self.autopilot_segment_backend().fly(payload), None
-            except RequestRefused as exc:
-                return 400, {"ok": False, "error": str(exc)}, None
-            except NotListed as exc:
-                return 404, {"ok": False, "error": str(exc)}, None
-            except Superseded as exc:
-                return 409, {"ok": False, "error": str(exc)}, None
-            except Exception as exc:
-                return 500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"}, None
+            return self._autopilot(lambda: self.autopilot_segment_backend().fly(payload))
+        if path == "/autopilot/prior-segment":     # the same, on a sentence of a Training set of stage B
+            return self._autopilot(lambda: self.autopilot_segment_backend().prior.fly(payload))
         return 404, {"ok": False, "error": "not found"}, None
 
 
