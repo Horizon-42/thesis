@@ -177,9 +177,12 @@ def test_the_present_landing_direction():
     noon = utc_s(f"{days.days['train'][0]}T12:00:00Z")
     index = LandingIndex(("09", "09L"), (Landing(noon - 600.0, "09L", "x"), Landing(noon + 60.0, "09", "own")), 0, days)
     assert present_runways(index, geometry, noon, "own").tolist() == [True, True]
-    assert present_runways(index, geometry, noon - 700.0, "own").tolist() == [False, False]   # none in the 30 min
+    assert present_runways(index, geometry, noon - 700.0, "own").tolist() == [True, True]     # none in the 30 min: all
     alone = LandingIndex(("09", "09L"), (Landing(noon - 60.0, "09", "own"),), 0, days)
-    assert present_runways(alone, geometry, noon, "own").tolist() == [False, False]           # its own: not counted
+    assert present_runways(alone, geometry, noon, "own").tolist() == [True, True]             # its own is not counted
+    turned = replace(geometry, candidates=(geometry.candidates[0], replace(geometry.candidates[1], course_deg=270.0)))
+    opposite = LandingIndex(("09", "09L"), (Landing(noon - 600.0, "09", "x"), Landing(noon + 60.0, "09", "own")), 0, days)
+    assert present_runways(opposite, turned, noon, "own").tolist() == [True, False]          # 180° from the landing
 
 
 def test_the_window_loop_reads_no_time_limit():

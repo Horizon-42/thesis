@@ -8,7 +8,9 @@
 
 **The present landing direction**: a runway within 90° of a runway with a landing in the 30 min before the first
 predicted step — the landings of the window's scene (D105), without the commanded aircraft's own (D31), counted by the
-prior's index (`LandingIndex.counts_before`, whose window is the same 30 min, prior §7 item 2).
+prior's index (`LandingIndex.counts_before`, whose window is the same 30 min, prior §7 item 2). With no landing in the 30
+min, every runway is of it: there is no direction to break (the user, 2026-10-05; on A34's artefact 2.8 % of the train
+windows).
 """
 
 from __future__ import annotations
@@ -30,10 +32,12 @@ LANDED = "landed"
 
 def present_runways(landings: LandingIndex, geometry: AirportGeometry, time_s: float, without: str) -> np.ndarray:
     """``[candidates]`` bool: the runways of the present landing direction at ``time_s`` (module docstring), from
-    ``landings`` without the flight ``without``'s own. With no landing in the 30 min, no runway is of it."""
+    ``landings`` without the flight ``without``'s own; every runway when no landing is in the 30 min."""
     counts = landings.counts_before(np.array([time_s]), without=without)[0]
     courses = {c.ident: c.course_deg for c in geometry.candidates}
     landed = [courses[ident] for ident, count in zip(landings.runways, counts) if count > 0]
+    if not landed:
+        return np.ones(len(geometry.candidates), dtype=bool)
     return np.array([any(abs(float(wrap180(c.course_deg - course))) <= PRESENT_DIRECTION_DEG for course in landed)
                      for c in geometry.candidates], dtype=bool)
 

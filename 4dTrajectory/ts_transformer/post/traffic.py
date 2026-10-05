@@ -29,7 +29,7 @@ from ts_transformer.instructions.airport import AirportGeometry, relative_to_run
 from ts_transformer.post.established import established
 from ts_transformer.prior.inputs import motion
 from ts_transformer.post.runways import approach_clock_m
-from ts_transformer.post.scene import AircraftAt
+from ts_transformer.post.scene import AircraftAt, Window
 from ts_transformer.prior.procedure import Final
 
 #: The reading of the separation judge in the loops of stage C (post-training §3).
@@ -82,3 +82,19 @@ def commanded_loss(scene: Traffic, over_threshold: np.ndarray, separation: Separ
         if loss is not None and 0 in loss.responsible:
             return loss
     return None
+
+
+def loss_at_first_step(window: Window, separation: Separation, finals: Sequence[Final], step_s: float, *,
+                       recorded_runway: bool) -> Loss | None:
+    """The loss of separation that ``window``'s commanded aircraft answers for at its first predicted step, on its record
+    (C1's census, for the user's decision on windows that open inside a loss). With ``recorded_runway`` False the
+    aircraft has no runway in force there, as in the loop (its first runway word is said at that step); with it True,
+    its recorded runway is in force (what the first row judged after its runway word can show at most)."""
+    own = window.commanded
+    time_s = window.first_step_s
+    key, at, before, known, _, category, _, _ = own.at_step(time_s, window.scene.interval_s)
+    runway = own.runway_index if recorded_runway else -1
+    aircraft = joined(AircraftAt.of([(key, at, before, known, runway, category, False, False)]),
+                      window.scene.others_at(time_s, own.key))
+    scene = traffic(aircraft, window.scene.geometry, separation, finals, step_s)
+    return commanded_loss(scene, aircraft.last_step, separation)

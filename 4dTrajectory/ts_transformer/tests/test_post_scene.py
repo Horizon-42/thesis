@@ -15,7 +15,7 @@ from ts_transformer.post.scene import (
     INSERTED, INSERTED_SUFFIX, LEADER_MOVED, REAL, airport_scenes, census, inserted_window, leader_moved_window,
     near_day_cut, next_ahead, real_windows, recorded,
 )
-from ts_transformer.tests.post_support import categories, scene_artefact, straight_in, train_noon
+from ts_transformer.tests.post_support import categories, finals, scene_artefact, straight_in, train_noon
 from ts_transformer.tests.support import INSTRUCTION_STEP_S
 
 DELTA = 4.0
@@ -177,6 +177,7 @@ def test_the_census_runner_writes_its_census_and_the_edge_reference(built, tmp_p
     directory = built[0]
     monkeypatch.setattr(post_windows, "airport_scenes",
                         lambda *a, **k: post_scene.airport_scenes(*a, **k, category_of=categories))
+    monkeypatch.setattr(post_windows, "airport_finals", lambda geometry, root: finals(geometry))
     out = tmp_path / "census"
     assert post_windows.main(["--instructions", str(directory), "--interval-s", "4", "--out", str(out)]) == 0
     record = json.loads((out / "census.json").read_text())
@@ -184,6 +185,8 @@ def test_the_census_runner_writes_its_census_and_the_edge_reference(built, tmp_p
     assert record["splits"]["train"]["airports"]["KXXX"]["windows"] == 4
     assert record["splits"]["select"]["airports"]["KXXX"]["windows"] == 1
     assert record["edges_reference"]["max_difference"] == 0.0 and (out / "conformance" / "edges.npz").is_file()
+    lost = record["splits"]["train"]["lost_at_first_step"]["KXXX"]
+    assert lost["without_runway"] == lost["with_recorded_runway"] == 0          # 120 s apart: no loss
     sampled = tmp_path / "sampled"
     post_windows.main(["--instructions", str(directory), "--interval-s", "4", "--out", str(sampled),
                        "--splits", "train", "--sample", "2"])
@@ -255,3 +258,24 @@ def test_a_recorded_aircraft_reads_its_g_from_its_labelled_sentence(built, monke
     assert key == "KXXX:b"
     assert np.array_equal(moved.scene.flight(key).go_around, b.go_around)
     assert [bool(moved.scene.flight(key).at_step(t + shift, DELTA)[7]) for t in inside] == [True, False]
+
+
+def test_a_window_that_opens_inside_a_loss_of_separation_is_found(built):
+    """C1's census for the user: the commanded aircraft, on its record, at its first predicted step — a copy of itself
+    8 s ahead is inside 3 NM and 1,000 ft; the stream 120 s apart is not."""
+    from ts_transformer.post.scene import MovedScene
+    from ts_transformer.post.traffic import loss_at_first_step
+
+    directory, spec, scenes, signals, geometries = built
+    separation, fin = airport_separation(geometries["KXXX"]), finals(geometries["KXXX"])
+    windows = real_windows(directory, "train", spec, DELTA, scenes, signals)
+    for with_runway in (False, True):
+        assert loss_at_first_step(windows[1], separation, fin, INSTRUCTION_STEP_S, recorded_runway=with_runway) is None
+    own = windows[1].commanded
+    key = own.key + INSERTED_SUFFIX
+    ahead = replace(windows[1], kind=INSERTED, moved=((key, -8.0),),
+                    scene=MovedScene(windows[1].scene, added=(replace(scenes["KXXX"].flights[1], go_around=np.zeros_like(
+                        own.go_around)).shifted(-8.0, DELTA, key=key),)))
+    for with_runway in (False, True):
+        loss = loss_at_first_step(ahead, separation, fin, INSTRUCTION_STEP_S, recorded_runway=with_runway)
+        assert loss is not None and 0 in loss.responsible
