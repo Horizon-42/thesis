@@ -78,6 +78,7 @@ A proposal is a reading where the design says nothing; it holds only until the u
    | After A34's artefact (vocabulary §0.4) | C1 and C2 also on a sample of A34's artefact, read-only; C1's census on all train days in a scratch directory (outline §5 rule 12, D55); the user chooses the counts of each kind of window |
    | After B9 of stage B (prior D96) is merged into this branch | C5; C7 on synthetic artefacts and models, except the join of the records of first sentences and continuations |
    | After B10 of stage B (prior D105–D107) is merged into this branch | C4; the join of records of C7 |
+   | After stage A's merged line (`ed2530ae`, with vocabulary A40) reaches this branch through stage B (outline §5 rule 1) | The census of the recorded aircraft with a faulty observed track (C1), on A34's train and select days in a scratch directory; the counts go to the user |
    | After the copy of a loop and the test of a flight in a batch (vocabulary D97, A38) reach this branch through stage B | C6 |
    | After B5's base and Claude's check of stage B | C8. Then C10, after the user sets its criteria (D7) |
    | After the moved start of vocabulary D97 | C9 (window B) |
@@ -433,6 +434,14 @@ aircraft, the rewards of steps 8.9 and 9.4, the formats of `instruction-v3`. No 
   aircraft at the first predicted step, the share with a leader in the air on the same runway or a runway that counts
   as one, and the windows near the cut between two operating days. Measured on all train days in a scratch directory
   after C1; the user chose the count of each kind of window in a round on it (D100).
+- The recorded aircraft with a faulty observed track (vocabulary D111: the marks of `instructions/faults.py`), in the
+  census, for each airport and split (train, select): the windows with a marked recorded aircraft in the air; the
+  scene steps at which a recorded aircraft reads a faulty point (its row is one, or its 2 s motion reads one), and the
+  tokens of the traffic attention at those steps; and, with every aircraft on its record, the losses of separation
+  (the separation judge, reading VISUAL) of a pair in which one aircraft reads a faulty point at the event's step or in
+  the 2 Δ before it, against all losses. A recorded aircraft's jump can make a loss that did not occur (reward 0, D30)
+  and a token with a motion of hundreds of m/s. No criterion is applied: the user decides from the counts whether such
+  steps or windows need a rule (Claude's check of stage B, 2026-10-05).
 - Tests: a window never reads a test day (C32) or a flight of another split; its other aircraft at a step are exactly
   the flights in the air then; a recorded aircraft's motion comes from its 2 s displacement (a change of its stored
   track, ground speed or vertical rate changes nothing); its R is absent before its first predicted step; the steps are
