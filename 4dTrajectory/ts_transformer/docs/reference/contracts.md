@@ -452,6 +452,14 @@ never stored: each 2 s word on the NEAREST Δ row, a tie on the later (D45), a h
 the frame where it is heard (D46: the class nearest its absolute track under the new course; no refusal). A spec is the vocabulary's format, not the data's: `instruction_spec --spec-from <artefact>`
 (`artefact.keep_spec`) keeps another artefact's spec byte for byte, and `spec_from.json` says so.
 
+**The faults of an observed track** (A40, D111, 2026-10-05; `instructions/faults.py`): `track_faults(signals)` marks the points
+of a flight's stored track no aircraft flies — a 2 s step more than `JUMP_RATIO` (3) times the median of the up to
+`AROUND_STEPS` (5) steps on each side (a jump), less than a third of it (a held position), a turn over `REVERSAL_DEG`
+(120°) between two consecutive moves (a reversal) — and `faulty_flights(artefact, split)` gives a split's marked flights
+by their place in the signals. Read when the artefact is read; the artefact is not changed. On A34's artefact at Δ = 4 s:
+train 498 of 40,530 closed-loop sentences marked (469 landed), select 177 of 6,199 (157 landed); held positions are most
+of them. Stage B's selection `landed` leaves them out (prior D111, B11).
+
 ### C31 · the aircraft filter: drop a flight only where dynamics are used
 
 2026-09-24 (user decisions: "去掉 all 的 A320 回退", then "ts 用2 按需丢弃"). The retired `all` filter

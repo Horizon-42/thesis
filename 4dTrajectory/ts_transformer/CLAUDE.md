@@ -157,7 +157,8 @@ of the package, not a migration in progress.
   gate (`read.admit`) for labelling and measuring; a sentence's words align with the FIRST `len(words)` rows of its
   signals (it ends before the landing); a flight with go-arounds is read approach by approach (D26); since v6
   (2026-10-02) every row is on the UTC even seconds; a change of speed says its 5 m/s steps, flown at a_max (D43);
-  `--spec-from` keeps another artefact's spec (C30).
+  `--spec-from` keeps another artefact's spec; a flight's observed-track faults (jump, held position, reversal) are
+  marked when read, `instructions/faults.py`, D111 (C30).
 - **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v8`; vocabulary §4.9, D32; read as
   `rows` apart from `withheld`, D82 — the observed rows' velocity by the spec's start rule, D77): each
   split × row interval — the 2 s open-loop words flown from the first predicted step by an executor spec, each said at the
