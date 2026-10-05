@@ -81,11 +81,11 @@ def _with_module(base, weights=True):
     return model.eval()
 
 
-def _window_loop(s, model, windows):
+def _window_loop(s, model, windows, faults=None):
     loop, order = s["loop"]()
     return WindowLoop(model, loop, order, windows, {0: s["stored"]}, s["flights"], s["geometries"],
                       {s["geometry"].code: s["roster"]}, s["finals"], s["words"], interval_s=DELTA, variant="full",
-                      edges_reference=s["reference"], device=CPU)
+                      edges_reference=s["reference"], faults={s["geometry"].code: faults or {}}, device=CPU)
 
 
 def test_a_window_without_other_aircraft_is_free_generation_bit_for_bit(setup):
@@ -189,3 +189,27 @@ def test_the_window_loop_reads_no_time_limit():
     """Vocabulary D90: the loop's end is the executor's; nothing here names the time limit."""
     source = open(post_window_loop.__file__, encoding="utf-8").read()
     assert "time_limit" not in source and "timed_out" not in source
+
+
+
+def test_a_window_reports_the_faulty_points_its_recorded_aircraft_read(setup):
+    """D114: the steps at which a recorded aircraft reads a faulty point, and whether the loss's other aircraft reads
+    one at the event or in the 2 Δ before it — an inserted aircraft keeps its source's faults under its own key."""
+    s = setup
+    (window,) = s["windows"]
+    own = window.scene.flights[0]
+    key = own.key + INSERTED_SUFFIX
+    copy_ahead = own.shifted(-8.0, DELTA, key=key)
+    ahead = replace(window, kind=INSERTED, moved=((key, -8.0),), scene=MovedScene(window.scene, added=(copy_ahead,)))
+    clean = _window_loop(s, _with_module(s["base"]), [ahead]).run([flight_numbers(7, 0, 0)])[0]
+    assert clean.outcome == LOST_SEPARATION and clean.faulty_steps == 0 and not clean.loss_reads_fault
+    event = window.step_s(clean.loss_step)
+    row = int(round((event - copy_ahead.start_s) / copy_ahead.step_s))
+    marked = _window_loop(s, _with_module(s["base"]), [ahead], faults={own.key: frozenset({row})})
+    (result,) = marked.run([flight_numbers(7, 0, 0)])
+    assert result.loss_step == clean.loss_step and result.loss_reads_fault and result.faulty_steps == 1
+    far_row = row - 9                       # 18 s before the event: read inside the window, not in the 2 Δ before it
+    assert far_row - 1 >= int(round((window.row0_s - copy_ahead.start_s) / copy_ahead.step_s))
+    early = _window_loop(s, _with_module(s["base"]), [ahead], faults={own.key: frozenset({far_row})})
+    (far,) = early.run([flight_numbers(7, 0, 0)])
+    assert far.faulty_steps == 1 and not far.loss_reads_fault                 # read once, but not near the event

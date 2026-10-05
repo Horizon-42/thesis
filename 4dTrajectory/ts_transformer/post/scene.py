@@ -201,6 +201,10 @@ class Scene:
     def with_flights(self, flights: Sequence[Recorded]) -> Scene:
         return Scene(self.geometry, self.split, flights, self.interval_s)
 
+    def flight(self, key: str) -> Recorded:
+        """The flight ``key`` of the scene."""
+        return self.flights[self.index[key]]
+
     def in_air(self, time_s: float) -> list[Recorded]:
         """The flights in the air at ``time_s`` (from their first row to their last), in the scene's order."""
         return [self.flights[k] for k in np.flatnonzero((self.start_s <= time_s) & (time_s <= self.end_s))]

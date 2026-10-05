@@ -63,7 +63,8 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
                  places: Sequence[int], sentences: Mapping[int, ClosedLoopSentence], flights: Mapping[int, Mapping[str, Any]],
                  geometries: Mapping[str, AirportGeometry], rosters: Mapping[str, LandingIndex],
                  finals: Mapping[str, Sequence[Final]], words: Words, *, interval_s: float, variant: str,
-                 edges_reference: Path, device: torch.device, seed: int, round_: int, split: str,
+                 edges_reference: Path, faults: Mapping[str, Mapping[str, frozenset[int]]], device: torch.device,
+                 seed: int, round_: int, split: str,
                  continuations: int = CONTINUATIONS) -> BranchRound:
     """One batch ``windows`` of a round (module docstring), ``places`` their places in the round (the key of their random
     numbers); ``start_loop`` starts the closed loop of given flights (their places in the split's signals,
@@ -78,7 +79,7 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
         loop, started = start_loop([order[b] for b in batch])
         return WindowLoop(model, loop, started, [windows[b] for b in batch], sentences, flights, geometries, rosters,
                           finals, words, interval_s=interval_s, variant=variant, edges_reference=edges_reference,
-                          device=device)
+                          faults=faults, device=device)
 
     everything = list(range(len(windows)))
     first = window_loop(everything)

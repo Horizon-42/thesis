@@ -27,7 +27,8 @@ def _round(s, model, windows, continuations=2, round_=0, places=(0,)):
     return branch_round(model, lambda flights: s["loop"](), windows, list(places), {0: s["stored"]}, s["flights"],
                         s["geometries"], {s["geometry"].code: s["roster"]}, s["finals"], s["words"], interval_s=DELTA,
                         variant="full",
-                        edges_reference=s["reference"], device=CPU, seed=1337, round_=round_, split="train",
+                        edges_reference=s["reference"], faults={s["geometry"].code: {}}, device=CPU, seed=1337,
+                        round_=round_, split="train",
                         continuations=continuations)
 
 

@@ -12,7 +12,11 @@ scene, row by row:
   (D110), with the aircraft's runway and G in force before the row's words;
 - **the separation judge** after each row the executor flew (`post.traffic.commanded_loss`, VISUAL): a loss of
   separation that the commanded aircraft answers for ends its window there (D93);
-- **the reward** of D30 (`post.reward`), its present landing direction from the window's landings (D105).
+- **the reward** of D30 (`post.reward`), its present landing direction from the window's landings (D105);
+- **the faulty points** of the recorded aircraft (D114; vocabulary D111, C1's census): the steps at which a recorded
+  aircraft reads one (`post.fault_census.reads_fault`: its row or the row before it is a fault row), and whether the
+  other aircraft of a loss reads one at the event's step or in the 2 Δ before it (the commanded aircraft flies on the
+  executor: it has none). No rule is applied: they are reported.
 
 A window ends where its commanded aircraft is done (the judge's outcome) or loses separation. No time limit is read here
 (vocabulary D90): the executor ends a flight. A window without other aircraft says and flies what free generation says
@@ -38,10 +42,11 @@ from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, SPEED, Words
 from ts_transformer.post.conformance import Checked, require_conforming_edges
 from ts_transformer.post.edges import tokens
+from ts_transformer.post.fault_census import STEPS_BEFORE_EVENT, reads_fault
 from ts_transformer.post.landings import roster_key, window_landings
 from ts_transformer.post.reward import present_runways, reward
 from ts_transformer.post.runways import airport_separation
-from ts_transformer.post.scene import AircraftAt, Window, utc_s
+from ts_transformer.post.scene import INSERTED_SUFFIX, AircraftAt, Window, utc_s
 from ts_transformer.post.speed_mask import along_course_speeds, speed_check
 from ts_transformer.post.traffic import commanded_loss, joined
 from ts_transformer.post.traffic import traffic as separation_traffic
@@ -83,6 +88,8 @@ class WindowResult:
     words: np.ndarray
     states: np.ndarray
     speed_mask_rows: int
+    faulty_steps: int               # D114: the steps at which a recorded aircraft reads a faulty point
+    loss_reads_fault: bool          # D114: the loss's other aircraft reads one at the event or in the 2 Δ before it
 
 
 class WindowLoop:
@@ -95,7 +102,8 @@ class WindowLoop:
                  sentences: Mapping[int, ClosedLoopSentence], flights: Mapping[int, Mapping[str, Any]],
                  geometries: Mapping[str, AirportGeometry], rosters: Mapping[str, LandingIndex],
                  finals: Mapping[str, Sequence[Final]], words: Words, *, interval_s: float, variant: str,
-                 edges_reference: Path, device: torch.device) -> None:
+                 edges_reference: Path, faults: Mapping[str, Mapping[str, frozenset[int]]], device: torch.device
+                 ) -> None:
         checked_edges(edges_reference)
         if loop.most_go_arounds != MOST_GO_AROUNDS:
             raise ValueError(f"the loop was started for {loop.most_go_arounds} go-arounds a flight, not {MOST_GO_AROUNDS} "
@@ -121,6 +129,11 @@ class WindowLoop:
         self.loss_step: list[int | None] = [None] * len(self.order)
         self.other: list[str | None] = [None] * len(self.order)
         self.speed_mask_rows = np.zeros(len(self.order), dtype=np.int64)
+        #: each window's marked recorded aircraft (D114), by key: their fault rows (an inserted aircraft keeps its
+        #: source's, under its own key)
+        self.faults = [_window_faults(w, faults[w.scene.geometry.code]) for w in self.windows]
+        #: each window's steps read so far, with the keys of the recorded aircraft reading a faulty point there
+        self._reading: list[dict[int, frozenset[str]]] = [{} for _ in self.order]
         #: each window's commanded aircraft, other aircraft and judged scene at the loop's next row, kept from the judge
         #: after a row flown: the same state, aircraft and words in force that the next row's mask and tokens read
         self._next: dict[int, tuple[AircraftAt, AircraftAt, AircraftAt, Any]] = {}
@@ -157,6 +170,15 @@ class WindowLoop:
         aircraft = joined(own, others)
         return aircraft, separation_traffic(aircraft, g, self.separations[g.code], self.finals[b], self.step_s)
 
+    def _read(self, b: int, t: int, others: AircraftAt) -> None:
+        """Window ``b``'s step ``t``: the recorded aircraft that read a faulty point there (once a step, D114)."""
+        if t in self._reading[b]:
+            return
+        time_s = self.windows[b].step_s(t)
+        scene = self.windows[b].scene
+        self._reading[b][t] = frozenset(key for key in others.keys if key in self.faults[b] and bool(reads_fault(
+            scene.flight(key), np.array([time_s]), self.faults[b][key])[0]))
+
     def _speed_masks(self, owns: Sequence[AircraftAt], others: Sequence[AircraftAt]) -> np.ndarray:
         """``[B, words]`` the speed-word mask of each window at the start of the row (D110); every word for a window
         whose aircraft is no longer flown."""
@@ -175,6 +197,8 @@ class WindowLoop:
         t = self.speaking.t
         owns = [self._own(b) for b in range(len(self.order))]
         others = [w.others_at(t) for w in self.windows]
+        for b, other in enumerate(others):
+            self._read(b, t, other)
         self.speaking.observe(self._traffic(owns, others))
 
     def step(self, numbers: np.ndarray) -> np.ndarray:
@@ -184,6 +208,8 @@ class WindowLoop:
         kept = [self._next[b] if b in self._next else None for b in range(len(self.order))]
         owns = [k[0] if k is not None else self._own(b) for b, k in enumerate(kept)]
         others = [k[1] if k is not None else w.others_at(t) for k, w in zip(kept, self.windows)]
+        for b in np.flatnonzero(self.speaking.alive):
+            self._read(b, t, others[b])
         said = self.speaking.step(numbers, {SPEED: self._speed_masks(owns, others)}, self._traffic(owns, others))
         self._next = {}
         ended = np.zeros(len(self.order), dtype=bool)
@@ -191,6 +217,7 @@ class WindowLoop:
             own, others_next = self._own(b), self.windows[b].others_at(t + 1)
             aircraft, scene = self._scene(b, own, others_next)
             self._next[b] = (own, others_next, aircraft, scene)
+            self._read(b, t + 1, others_next)
             loss = commanded_loss(scene, aircraft.last_step, self.separations[self.geometries[b].code])
             if loss is not None:
                 partner = loss.j if loss.i == 0 else loss.i
@@ -215,6 +242,7 @@ class WindowLoop:
         out.keys, out.speed_words = [self.keys[i] for i in index], self.speed_words
         out.loss, out.loss_step = [self.loss[i] for i in index], [self.loss_step[i] for i in index]
         out.other, out.speed_mask_rows = [self.other[i] for i in index], self.speed_mask_rows[index].copy()
+        out.faults, out._reading = [self.faults[i] for i in index], [dict(self._reading[i]) for i in index]
         out._next = {k: self._next[i] for k, i in enumerate(index) if i in self._next}
         out._tokens = [list(self._tokens[i]) for i in index]
         return out
@@ -271,5 +299,21 @@ class WindowLoop:
                 index=index, kind=window.kind, outcome=outcome, loss=self.loss[b], loss_step=self.loss_step[b],
                 other=self.other[b], reward=reward(outcome, landed, go_arounds, present, self.loss[b] is not None),
                 go_arounds=go_arounds, words=said, states=self.speaking.states(b),
-                speed_mask_rows=int(self.speed_mask_rows[b])))
+                speed_mask_rows=int(self.speed_mask_rows[b]),
+                faulty_steps=sum(bool(keys) for keys in self._reading[b].values()),
+                loss_reads_fault=self.loss_step[b] is not None and any(
+                    self.other[b] in self._reading[b][step]
+                    for step in range(self.loss_step[b] - STEPS_BEFORE_EVENT, self.loss_step[b] + 1)
+                    if step in self._reading[b])))
         return out
+
+
+def _window_faults(window: Window, faults: Mapping[str, frozenset[int]]) -> dict[str, frozenset[int]]:
+    """The fault rows of a window's marked recorded aircraft, by their key in its scene: its airport's ``faults`` (by
+    the flights' keys), and an inserted aircraft's under its own key (its record is its source's)."""
+    out = {key: rows for key, rows in faults.items() if key != window.commanded.key}
+    for key, _ in window.moved:
+        source = key.removesuffix(INSERTED_SUFFIX)
+        if source != key and source in faults:
+            out[key] = faults[source]
+    return out
