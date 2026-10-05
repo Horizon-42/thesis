@@ -185,7 +185,7 @@ sections that it names.
     document keeps the specifications of the milestones that are not done and the check items that are not done: they
     are the plan that the implementer follows. When a milestone is done, Claude moves its specification to the log. The implementer
     changes no other part of a design document: not the decisions, the design sections, the plan, the values or the key
-    code index. (Stage B's log is still prior §0.3 and moves to a file in `readouts/` the same way.) A gap in the design, or a reading that needs a change of the design, goes to the user; Claude writes the
+    code index. (Stage B: `readouts/2026-10-05_stage_b_implementation_log.md`.) A gap in the design, or a reading that needs a change of the design, goes to the user; Claude writes the
     text that the user decides. The log is committed to `dev-two-tier` (the user's checkout), with explicit paths. At
     the end of a stage, the report gives the new code index, and Claude puts it into the key code index of the
     document.
