@@ -94,7 +94,9 @@ changed); 3 (the runway head's class order) is a detail of the code. The code fo
    | After A31 of stage A (each closed-loop sentence's outcome, vocabulary D74), merged into this branch | B8 (the selection of the base's sentences, D75), on synthetic artefacts; on the formal artefact after A30 |
    | After A28 of stage A (the start opens the executor spec, D71), merged into this branch | The main of the free-generation runner of B4 (it gives the start the directory of the executor spec) |
    | After A23 of stage A (the Training view of stage A), merged into this branch | B6's export and view, on the smoke sets of B3 and B4 |
-   | After Claude's check of stage A and the user's choice of Δ (outline §4) | B5; B6's publication of the folds and the base; B7 |
+   | After A32 of stage A (the corrections of Claude's review, vocabulary D77–D84), merged into this branch | The reader of item 3 with the later-row fields apart (D82), the start that reads no sample after the first predicted step (D77) and the candidates decided by no flight (D78), followed in `prior/` and its runners; the tests on synthetic artefacts again |
+   | After A34 of stage A (the formal artefact with D77–D84) | The smoke of B3, free generation and the check at the formal size at Δ = 4 s again, on A34's artefact (the candidates of an airport can change, D78); the formal runs read A34's artefact |
+   | After Claude's check of stage A (with A32–A35, vocabulary §12.2 item 8) and the user's choice of Δ (outline §4) | B5; B6's publication of the folds and the base; B7 |
 
 2. Then the post-training (`post_training.md`).
 

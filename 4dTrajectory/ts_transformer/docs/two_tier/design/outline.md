@@ -22,7 +22,7 @@ repository root; `readouts/` is `docs/two_tier/readouts/`. The documents of the 
 
 | Document | Part | Stage | State |
 |---|---|---|---|
-| `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge; their Training view | A | Built on `dev-two-tier-v4`, the formal artefact built; the Training view of stage A next (vocabulary §0.4) |
+| `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge; their Training view | A | Built on `dev-two-tier-v4` and merged into `dev-two-tier`; the formal artefact `v11_20261004` and the Training view done; the corrections of Claude's review (A32–A35, D77–D85) next (vocabulary §0.4) |
 | `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport; its Training view | B | Built in parallel with the end of stage A, on `dev-two-tier-v4-prior` (prior §0.3) |
 | `post_training.md` | The post-training in windows of traffic; the multi-aircraft work; its Training view | C | Not started; outline |
 | This outline | The principles, the shared rules, the plan; the rules of each stage's Training view (§6) | — | — |
@@ -80,6 +80,7 @@ both, each with its part. A new decision or open item takes the next free number
 | D7 | The design documents set no test criteria and no measurement criteria. The user sets them after the design is settled | Decided | User, 2026-10-03 |
 | D20 | This design is a new version, on its own branch and worktree. It reads no artefact, executor spec or prior that an earlier version made (`v1`–`v6`). The running experiments keep their own checkouts | Decided | User, 2026-10-03 |
 | D21 | Identities bind format and data rules only. A code identity is a behaviour check on fixed inputs, never a hash of source bytes; data are identified by their flights, never by the bytes of a manifest (vocabulary §7.2, prior §8, post-training §4) | Decided | User, 2026-10-03 |
+| D85 | A readout that serves a choice of the user reports the train and select days only. Where a build needs the validation days (the closed-loop sentences of val), it writes them, but no report, summary or printed text shows a reading of them before the stage's one validation readout. Why: the user chose Δ = 4 s (vocabulary D11) on a report that showed the val rows of the readings of D34 (`readouts/2026-10-04_stage_a_a25_report.zh.md`); the train and select rows give the same order, but the validation days are read one time for each stage | Decided | User, 2026-10-05, on Claude's review of stage A |
 | D55 | A value that a runner fits from data and the user chooses (D15) is measured on all train days, in a scratch directory, directly after the milestone that writes the runner; the user chooses before a later milestone reads the value. A smoke build uses the chosen spec, and its flights are a random sample for each airport and split (seed 1337), not the first flights of the sorted flight keys (a key starts with the callsign, so the first flights are mostly one airline). Why: the smoke of stage A fitted its own spec on approximately 400 train flights, 373 of them one airline, with one climb piece; every smoke reading of A9–A16 used it (§5 rules 7 and 12) | Decided | User, 2026-10-04 |
 
 **The identity rule (D21)** (the user, 2026-10-02 and 2026-10-03). An identity binds the format (what the words and the
@@ -91,12 +92,12 @@ they came from. Each document lists the identities of its parts.
 
 | Document | Decisions | Open items |
 |---|---|---|
-| Outline | D7, D20, D21, D55 | — |
-| Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74 | O8 |
+| Outline | D7, D20, D21, D55, D85 | — |
+| Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84 | O8, O10 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75 | — |
 | Post-training | D29–D31, D36, D37, D76 | O6, O9 |
 
-The next free numbers: D77, O10.
+The next free numbers: D86, O11.
 
 ---
 
@@ -108,11 +109,13 @@ The next free numbers: D77, O10.
    the user chooses), A26 (the start of a closed loop in the public interface, D67), A27 (each flight's stratum in
    the sentence file, D70), A25 (the formal artefact again), A28 (the start opens the executor spec, D71), A29 (no code
    fingerprint, D73), A31 (each closed-loop sentence's outcome, D74), A30 (the formal artefact once more), A23 (the
-   Training view of stage A). The user compares the readings of D34 and chooses Δ (D7, D11).
+   Training view of stage A). The user compares the readings of D34 and chooses Δ (D7, D11): Δ = 4 s. Then the
+   corrections of Claude's review of 2026-10-05 (vocabulary D77–D84, D85): A32 (the code), A33 (the measurements; the
+   user chooses the start rule of D77), A34 (the formal artefact once more), A35 (the Training sets again).
 2. Stage B (prior §0.4): the prior from the start, chosen by cross-validation over the airports, and the base model.
    Stage B is developed in parallel with the end of stage A (the user, 2026-10-04). A milestone of stage B starts when
    the parts of stage A that it reads are on `dev-two-tier-v4`. The formal runs of stage B wait for Claude's check of
-   stage A and the user's choice of Δ. It ends with the Training view of stage B (prior B6).
+   stage A, the user's choice of Δ and A34's artefact. It ends with the Training view of stage B (prior B6).
 3. Stage C (post-training §0.4): the post-training in windows of traffic with one aircraft commanded. It ends with the
    Training view of stage C.
 4. Each stage ends with its own Training view (§6): the backend's live executor, the export and the frontend follow the
