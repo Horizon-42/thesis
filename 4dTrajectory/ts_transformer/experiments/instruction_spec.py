@@ -171,11 +171,11 @@ def main(argv: list[str] | None = None) -> int:
     corridor = measure.fit_corridor(second["aligned_offset_m"], second["aligned_distance_m"])
     fits = {k: measure.fit_descent_classes(angle, length, k) for k in measure.DESCENT_CLASS_COUNTS}
     chosen = fits[measure.DESCENT_CLASSES]
-    climbs = angle < measure.DESCENT_FLOOR_DEG
-    order = np.argsort(-angle[climbs])
-    cumulative = np.cumsum(length[climbs][order]) / length[climbs].sum()
-    climb_centre = float(-angle[climbs][order][np.searchsorted(cumulative, 0.5)])
-    candidates = measure.rounding_candidates(angle, length, chosen["centres_deg"], chosen["edges_deg"], climb_centre)
+    climb, climb_length, climb_counts = measure.climb_pieces(angle, length, first["move_go_around"],
+                                                             provisional.climb_angle_max_deg)
+    climb_centre = measure.climb_centre(climb, climb_length)
+    candidates = measure.rounding_candidates(angle, length, chosen["centres_deg"], chosen["edges_deg"], climb,
+                                             climb_length, climb_centre)
     grids_m = measure.grid_candidates(first["level_height_m"])
     measured = measure.MeasuredValues(
         turn_rate_max_deg_s=measure.round_up(float(np.percentile(first["turn_row_rate_deg_s"], 99.9)), 0.1),
@@ -208,7 +208,8 @@ def main(argv: list[str] | None = None) -> int:
             "corridor_course_tolerance_deg": f"p99 of |track − course| on the last {measure.FINAL_MEASURE_M:.0f} m flown, up to 1°",
             "descent_angle_classes": f"{measure.DESCENT_CLASSES} classes, weighted k-means on tan(angle), weight = length², "
                                      f"the row {args.candidate!r} of rounding_candidates (the user's choice, D15)",
-            "climb_angle_centre_deg": f"length-weighted median of the climb pieces, the row {args.candidate!r}",
+            "climb_angle_centre_deg": "length-weighted median of the climb pieces with G false, at most the climb "
+                                      f"class's largest angle (A33; climb_pieces), the row {args.candidate!r}",
             "speed_accel_max_mps2": "p99.9 of |acceleration| on transition rows, up to 0.1",
             "closed_loop_final_vertical_m": "the user's choice of H_final (D66), from the measurement of A24 — not "
                                             "measured here",
@@ -220,12 +221,12 @@ def main(argv: list[str] | None = None) -> int:
                                                   for t in measure.LEVEL_FIT_TOLERANCES_M},
         },
         "pass_a": {name: measure.percentiles(values) for name, values in first.items()
-                   if name not in ("move_angle_deg", "move_length_m", "level_height_m")},
+                   if name not in ("move_angle_deg", "move_length_m", "move_go_around", "level_height_m")},
         "move_pieces": {"angle_deg": measure.percentiles(angle), "length_m": measure.percentiles(length),
-                        "climb_pieces": int(climbs.sum())},
+                        "climb_pieces": climb_counts},
         "descent_class_fits": {str(k): v for k, v in fits.items()},
         "rounding_candidates": candidates,
-        "climb_angles": measure.climb_distribution(angle, length),
+        "climb_angles": measure.climb_distribution(climb, climb_length),
         "grid_candidates": grids_m,
         "corridor_fit": corridor,
         "heading_grids": _grid_table(grid_rows, grids),
@@ -241,6 +242,8 @@ def main(argv: list[str] | None = None) -> int:
         e = fit["end_height_error_m"]
         print(f"  descent K={k}: centres {[round(c, 2) for c in fit['centres_deg']]}  end-height error p50 "
               f"{e['p50']:.1f} m, p95 {e['p95']:.1f} m")
+    print(f"  climb pieces {climb_counts['climb_pieces']}: {climb_counts['kept']} fitted on, left out "
+          f"{climb_counts['left_out']}")
     for name, row in measurements["rounding_candidates"].items():
         print(f"  rounded {name:>6}: descent end-height error p50 {row['descent_end_height_error_m']['p50']:.1f} m, "
               f"climb {row['climb_centre_deg']}° p50 {row['climb_end_height_error_m']['p50']:.1f} m")

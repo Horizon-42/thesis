@@ -138,14 +138,21 @@ def start_velocity(signals: FlightSignals, rows: Sequence[int], rule: str, geome
         return (spread * (x - x_mean[:, None])).sum(axis=1) / (spread * spread).sum(axis=1)
 
     east, north, up = slope(signals.e_m), slope(signals.n_m), slope(signals.altitude_m)
-    # the airport frame's metres → metres on the ground at the row (`AirportENUFrame`: an equirectangular chart)
+    to_east, to_north = ground_scale(signals, rows, geometry)
+    return np.column_stack([east * to_east, north * to_north, up])
+
+
+def ground_scale(signals: FlightSignals, rows: Sequence[int], geometry: AirportGeometry) -> tuple[np.ndarray, np.ndarray]:
+    """Metres on the ground per metre of the airport frame, east and north, at each of the observed flight's ``rows``
+    (`AirportENUFrame`: an equirectangular chart; the WGS84 radii of curvature at the row's latitude and height, D87)."""
+    rows = np.asarray(rows, dtype=np.int64)
     frame = geometry.frame
     lat_deg = frame.lat0 + signals.n_m[rows] / METRES_PER_DEG_LAT
     radii = np.array([wgs84_curvature_radii(float(lat)) for lat in lat_deg]).reshape(-1, 2)
     height = signals.altitude_m[rows]
     to_east = np.radians(1.0 / frame.m_per_deg_lon) * (radii[:, 1] + height) * np.cos(np.radians(lat_deg))
     to_north = np.radians(1.0 / METRES_PER_DEG_LAT) * (radii[:, 0] + height)
-    return np.column_stack([east * to_east, north * to_north, up])
+    return to_east, to_north
 
 
 def observed_rows(signals: FlightSignals, rows: Sequence[int], rule: str, geometry: AirportGeometry) -> np.ndarray:

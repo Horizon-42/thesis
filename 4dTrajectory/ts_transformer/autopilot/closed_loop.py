@@ -358,12 +358,17 @@ class Corrector:
         return word
 
 
-def start_inputs(batch: Batch, params: ExecutorParams, step_s: float, *, device: torch.device) -> FlightInputs:
-    """Every flight's physical context at its first predicted step (`flights.flight_inputs` at that 2 s row, its start
-    state by the executor spec's start rule, D77)."""
+def first_predicted_rows(batch: Batch, step_s: float) -> list[int]:
+    """Each flight's first predicted step: the 2 s row of its observed flight (from row 0) the closed loop starts at."""
     every, start = interval_rows(batch.row_interval_s, step_s), start_row(batch.row_interval_s)
-    return flight_inputs(batch.series, batch.observed, [s.first_row + start * every for s in batch.sentences],
-                         batch.geometries, params.start_rule, device=device)
+    return [s.first_row + start * every for s in batch.sentences]
+
+
+def start_inputs(batch: Batch, params: ExecutorParams, step_s: float, *, device: torch.device) -> FlightInputs:
+    """Every flight's physical context at its first predicted step (`flights.flight_inputs` at that 2 s row,
+    `first_predicted_rows`; its start state by the executor spec's start rule, D77)."""
+    return flight_inputs(batch.series, batch.observed, first_predicted_rows(batch, step_s), batch.geometries,
+                         params.start_rule, device=device)
 
 
 def _rows(inputs: FlightInputs, flights: list[int]) -> FlightInputs:

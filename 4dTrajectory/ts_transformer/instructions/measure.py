@@ -20,7 +20,8 @@ import numpy as np
 from final_approach.assign import LandingScreen
 from ts_transformer.instructions import envelope
 from ts_transformer.instructions.labeller.lateral import per_step_words, turn_runs
-from ts_transformer.instructions.labeller.read import Admitted
+from ts_transformer.instructions.labeller.read import Admitted, read_heights
+from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.labeller.vertical import MOVE, vertical_pieces
 from ts_transformer.instructions.piecewise import fit_pieces
 from ts_transformer.instructions.spec import (
@@ -165,7 +166,9 @@ def build_spec(measured: MeasuredValues, *, closed_loop_final_vertical_m: float)
 def provisional_spec() -> VocabularySpec:
     """The spec the first measurements read with, before anything is measured: the measured
     fields at stand-in values that satisfy the spec's own invariants. Only `measure_flight`
-    uses it, and only for the fields that do not depend on what it measures."""
+    uses it, and only for the fields that do not depend on what it measures — but for one approximation (A33): the rows
+    G is true on (`read.read_heights`) are read under its altitude grid (D22's), and a go-around's level-off read
+    under a grid fitted in the same pass could end G at another row."""
     return build_spec(MeasuredValues(
         turn_rate_max_deg_s=10.0, turn_bank_max_deg=45.0,
         corridor_half_width_m=500.0, corridor_widening_deg=0.0, corridor_course_tolerance_deg=10.0,
@@ -200,7 +203,7 @@ def measure_flight(flight: Admitted, spec: VocabularySpec, elevation_m: float) -
         *(f"heading_wander_deg_band{h:g}" for h in FREE_HOLD_HALF_RANGES_DEG),
         *(f"level_wander_m_fit{t:g}" for t in LEVEL_FIT_TOLERANCES_M),
         "turn_mean_rate_deg_s", "turn_row_rate_deg_s", "turn_row_bank_deg", "speed_wander_mps", "transition_accel_mps2",
-        "final_course_error_deg", "move_angle_deg", "move_length_m", "level_height_m",
+        "final_course_error_deg", "move_angle_deg", "move_length_m", "move_go_around", "level_height_m",
     )}
     for half_range in FREE_HOLD_HALF_RANGES_DEG:
         for start, stop in _free_holds(track, spec.rows(FREE_HOLD_MIN_S), half_range):
@@ -228,10 +231,22 @@ def measure_flight(flight: Admitted, spec: VocabularySpec, elevation_m: float) -
             out["transition_accel_mps2"] += list(np.abs(np.diff(rows)) / spec.step_s)
     final = distance[-1] - distance <= FINAL_MEASURE_M
     out["final_course_error_deg"] += list(np.abs(relative.track_minus_course_deg[final]))
-    for piece in vertical_pieces(distance, smoothed.altitude_m - elevation_m, spec, Words(spec)):
+    height = smoothed.altitude_m - elevation_m
+    words = Words(spec)
+    spans: list[tuple[int, int]] | None = []            # the rows G is true on: none without a go-around
+    pieces = None
+    if flight.go_arounds:
+        try:                                # G's rows as the labeller reads them (D19)
+            vertical, again = read_heights(flight, height, spec, words)
+            spans, pieces = list(zip(vertical.go_around_rows, again)), vertical.pieces
+        except Refused:                     # the labeller refuses the vertical reading of a go-around: G is not known
+            spans = None
+    for piece in pieces if pieces is not None else vertical_pieces(distance, height, spec, words):
         if piece.kind == MOVE:
             out["move_angle_deg"].append(piece.angle_deg)
             out["move_length_m"].append(float(distance[piece.stop - 1] - distance[piece.start]))
+            out["move_go_around"].append(math.nan if spans is None
+                                         else float(any(first <= piece.start < end for first, end in spans)))
         elif piece.start > 0:               # a level word other than row 0's: the height above E it is held at (§9.5)
             out["level_height_m"].append(piece.median_m)
     return {name: np.asarray(values, dtype=np.float64) for name, values in out.items()}
@@ -325,17 +340,49 @@ def descent_end_error(angle_deg: np.ndarray, length_m: np.ndarray, centres_deg: 
     return percentiles(length_m[keep] * np.abs(np.tan(np.radians(angle_deg[keep])) - centre_tan))
 
 
+#: Why a climb piece (`move_go_around`, the move pieces climbing more than the descent floor) is not one the climb
+#: nominal is fitted on (A33): flown while G is true (D28: at the go-around angle), in a flight with a go-around whose
+#: vertical reading the labeller refuses (G not known), or climbing more than the climb class's largest angle.
+CLIMB_LEFT_OUT = ("G true", "vertical reading refused", "above the climb class")
+
+
+def climb_pieces(angle_deg: np.ndarray, length_m: np.ndarray, go_around: np.ndarray,
+                 climb_angle_max_deg: float) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """The climb pieces the climb nominal is fitted on (D54, A33): the move pieces climbing (``angle_deg`` below the
+    descent floor; the climb angle positive) with G false (``go_around`` 0; NaN where G is not known: a flight with a
+    go-around whose vertical reading the labeller refuses; `measure_flight`) and at most the
+    climb class's largest angle — the climbs the labeller says "climb" for, flown at the nominal (D28). Returns their
+    climb angles and lengths, and the climb pieces counted by `CLIMB_LEFT_OUT` (each piece under its first reason)."""
+    climbs = angle_deg < DESCENT_FLOOR_DEG
+    unknown = climbs & np.isnan(go_around)
+    in_g = climbs & ~unknown & (go_around == 1.0)
+    above = climbs & ~unknown & ~in_g & (-angle_deg > climb_angle_max_deg)
+    kept = climbs & ~unknown & ~in_g & ~above
+    counts = {"climb_pieces": int(climbs.sum()), "kept": int(kept.sum()),
+              "left_out": dict(zip(CLIMB_LEFT_OUT, (int(in_g.sum()), int(unknown.sum()), int(above.sum()))))}
+    return -angle_deg[kept], length_m[kept], counts
+
+
+def climb_centre(climb_deg: np.ndarray, length_m: np.ndarray) -> float:
+    """The climb nominal (D54): the length-weighted median of the climb pieces (`climb_pieces`); refused without one."""
+    if not len(climb_deg):
+        raise ValueError("no climb piece with G false inside the climb class to fit the climb nominal on")
+    order = np.argsort(climb_deg)
+    cumulative = np.cumsum(length_m[order]) / length_m.sum()
+    return float(climb_deg[order][np.searchsorted(cumulative, 0.5)])
+
+
 def climb_end_error(climb_deg: np.ndarray, length_m: np.ndarray, centre_deg: float) -> dict[str, float]:
     """The same error for the climb pieces (``climb_deg`` climbing positive) flown at one climb angle."""
     return percentiles(length_m * np.abs(np.tan(np.radians(climb_deg)) - math.tan(math.radians(centre_deg))))
 
 
 def rounding_candidates(angle_deg: np.ndarray, length_m: np.ndarray, centres_deg: Sequence[float],
-                        edges_deg: Sequence[float], climb_centre_deg: float) -> dict[str, Any]:
+                        edges_deg: Sequence[float], climb_deg: np.ndarray, climb_length_m: np.ndarray,
+                        climb_centre_deg: float) -> dict[str, Any]:
     """D15: the fitted descent centres and inner edges and the fitted climb centre, and each rounded to every step of
-    `ROUNDING_STEPS_DEG` (the outer edges are choices and stay), with the end-of-piece height error each leaves."""
-    climbs = angle_deg < DESCENT_FLOOR_DEG
-    climb_deg, climb_length = -angle_deg[climbs], length_m[climbs]
+    `ROUNDING_STEPS_DEG` (the outer edges are choices and stay), with the end-of-piece height error each leaves on the
+    descent pieces (``angle_deg``, ``length_m``) and on the climb pieces (`climb_pieces`)."""
     rows = {"fitted": (list(centres_deg), list(edges_deg), climb_centre_deg)}
     for name, step in zip(CANDIDATE_NAMES[1:], ROUNDING_STEPS_DEG):
         rows[name] = ([round(round(c / step) * step, 9) for c in centres_deg],
@@ -343,7 +390,7 @@ def rounding_candidates(angle_deg: np.ndarray, length_m: np.ndarray, centres_deg
                              round(round(climb_centre_deg / step) * step, 9))
     return {name: {"descent_centres_deg": centres, "descent_edges_deg": edges,
                    "descent_end_height_error_m": descent_end_error(angle_deg, length_m, centres, edges),
-                   "climb_centre_deg": climb, "climb_end_height_error_m": climb_end_error(climb_deg, climb_length, climb)}
+                   "climb_centre_deg": climb, "climb_end_height_error_m": climb_end_error(climb_deg, climb_length_m, climb)}
             for name, (centres, edges, climb) in rows.items()}
 
 
@@ -358,16 +405,14 @@ def candidate_values(candidates: dict[str, Any], name: str) -> dict[str, Any]:
             "climb_angle_centre_deg": round(row["climb_centre_deg"], 2)}
 
 
-def climb_distribution(angle_deg: np.ndarray, length_m: np.ndarray) -> dict[str, Any]:
-    """O12: the climb pieces' angles (climbing positive): count, length-weighted percentiles, and the length in each
-    `CLIMB_BIN_DEG` bin up to the climb class's 15° (whether they form two groups)."""
-    climbs = angle_deg < DESCENT_FLOOR_DEG
-    climb, length = -angle_deg[climbs], length_m[climbs]
+def climb_distribution(climb: np.ndarray, length: np.ndarray) -> dict[str, Any]:
+    """O12: the angles of the climb pieces (`climb_pieces`, climbing positive): count, length-weighted percentiles, and
+    the length in each `CLIMB_BIN_DEG` bin up to the climb class's 15° (whether they form two groups)."""
     order = np.argsort(climb)
     cumulative = np.cumsum(length[order]) / length.sum()
     edges = np.arange(0.0, SUGGESTED["climb_angle_max_deg"] + CLIMB_BIN_DEG, CLIMB_BIN_DEG)
     counts, _ = np.histogram(climb, bins=edges, weights=length)
-    return {"pieces": int(climbs.sum()), "angle_deg": percentiles(climb),
+    return {"pieces": len(climb), "angle_deg": percentiles(climb),
             "length_weighted_deg": {f"p{p:g}": float(climb[order][np.searchsorted(cumulative, p / 100.0)])
                                     for p in (10, 25, 50, 75, 90)},
             "length_m_by_bin": {f"{low:g}-{high:g}": float(c) for low, high, c in zip(edges, edges[1:], counts)}}

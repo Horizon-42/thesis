@@ -206,6 +206,17 @@ def runway_again_rows(found: Sequence[GoAround], go_around_rows: list[int], vert
     return out
 
 
+def read_heights(flight: Admitted, height_m: np.ndarray, spec: VocabularySpec,
+                 words: Words) -> tuple[VerticalReading, list[int]]:
+    """An admitted flight's vertical reading (`vertical.read_vertical`) on ``height_m``, its smoothed heights above E,
+    and the row of the runway word that ends each go-around (`runway_again_rows`): G is true from each go-around row to
+    its runway word (D19). Refused as `read_flight` refuses them."""
+    found = list(flight.go_arounds)
+    vertical = read_vertical(flight.smoothed.distance_m, height_m, spec, words, [item.point for item in found])
+    again = runway_again_rows(found, vertical.go_around_rows, vertical, height_m, flight.signals.n_rows, spec, words)
+    return vertical, again
+
+
 def read_flight(signals: FlightSignals, geometry: AirportGeometry, spec: VocabularySpec,
                 words: Words | None = None) -> Reading:
     words = words or Words(spec)
@@ -214,9 +225,8 @@ def read_flight(signals: FlightSignals, geometry: AirportGeometry, spec: Vocabul
     found = list(flight.go_arounds)
     n_rows = signals.n_rows
     height = smoothed.altitude_m - geometry.elevation_m          # the altitude words: heights above E (D58)
-    vertical = read_vertical(smoothed.distance_m, height, spec, words, [item.point for item in found])
+    vertical, again = read_heights(flight, height, spec, words)
     rows = vertical.go_around_rows
-    again = runway_again_rows(found, rows, vertical, height, n_rows, spec, words)
     runways = [item.low_pass.candidate for item in found] + [flight.runway_index]
     approaches = [Approach(first, end, runway) for first, end, runway in zip([0, *again], [*rows, n_rows], runways)]
     runway_rows = np.full(n_rows, runways[0], dtype=np.int64)
