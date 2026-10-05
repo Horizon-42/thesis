@@ -121,6 +121,13 @@ class Match(NamedTuple):
     past_end: bool              # past the end of the path (D44: e_h NaN, no correction)
 
 
+#: A turn of the observed path at a vertex above this is a reversal (D83, `ObservedPath._at_vertex`): there the two
+#: normals nearly cancel and their sum gives no side, so the matched segment's line gives it. No aircraft turns this
+#: much between two observed positions seconds apart; such a vertex is a fault of the observed track (repo
+#: docs/open-items.md, 2026-10-05). Claude's value, on the user's order to change the rule (2026-10-05).
+REVERSAL_TURN_DEG = 170.0
+
+
 class ObservedPath:
     """An observed flight's path at the data's rows, and the forward search of the matched point (module docstring)."""
 
@@ -155,16 +162,19 @@ class ObservedPath:
         and ``other`` is the segment on its far side (D83): the smaller distance to the two, on the nearer one's side —
         the other segment's when its own nearest point is not the shared vertex; else the vertex is the nearest point of
         both (the outside of the turn) and the side is that of the sum of their normals, or the matched segment's where
-        the normals cancel (a reversal). Claude's reading of "the side from the sum of their normals" (A37)."""
+        the path turns more than `REVERSAL_TURN_DEG` there (a reversal). Claude's reading of "the side from the sum of
+        their normals" (A37)."""
         t_other, d_other = self._nearest(other, e_m, n_m)
         if t_other != (1.0 if other < vertex else 0.0):          # the other's nearest point is not the shared vertex
             return math.copysign(d_other, self._across(other, e_m, n_m))
-        normal_e = normal_n = 0.0
+        units = []
         for k in (vertex - 1, vertex):
             de, dn = self.e[k + 1] - self.e[k], self.n[k + 1] - self.n[k]
-            normal_e, normal_n = normal_e + dn / math.hypot(de, dn), normal_n - de / math.hypot(de, dn)
-        if math.hypot(normal_e, normal_n) < 1e-9:
+            units.append((de / math.hypot(de, dn), dn / math.hypot(de, dn)))
+        (e0, n0), (e1, n1) = units
+        if math.degrees(math.acos(min(max(e0 * e1 + n0 * n1, -1.0), 1.0))) > REVERSAL_TURN_DEG:
             return math.copysign(distance, self._across(matched, e_m, n_m))
+        normal_e, normal_n = 0.0 + n0 + n1, 0.0 - e0 - e1        # their normals' sum (right), from 0.0: a zero's sign kept
         return math.copysign(distance, (e_m - self.e[vertex]) * normal_e + (n_m - self.n[vertex]) * normal_n)
 
     def match(self, e_m: float, n_m: float, height_m: float) -> Match:

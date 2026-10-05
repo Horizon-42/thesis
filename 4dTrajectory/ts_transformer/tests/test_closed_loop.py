@@ -11,7 +11,7 @@ import pytest
 import torch
 
 from ts_transformer.autopilot import closed_loop, replay
-from ts_transformer.autopilot.closed_loop import Corrector, ObservedPath
+from ts_transformer.autopilot.closed_loop import REVERSAL_TURN_DEG, Corrector, ObservedPath
 from ts_transformer.instructions.artefact import ClosedLoopSentence, SentenceRows, Withheld, closed_loop_sentences
 from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.autopilot.params import ExecutorParams
@@ -145,6 +145,17 @@ def test_e_y_at_a_vertex_behind_the_matched_segment_is_the_smaller_distance_on_i
     for north, side in ((5.0, 1.0), (-5.0, -1.0)):           # north is right of the westbound segment 2
         assert ObservedPath(back_e, back_n, np.zeros(5), 2).match(205.0, north, 0.0).lateral_m == pytest.approx(
             side * math.hypot(5.0, 5.0))
+    # a near-reversal (over REVERSAL_TURN_DEG: the normals nearly cancel): the matched segment's side too. 2 m south and
+    # 5 m past the tip of a left turn (mirrored: a right turn) — the vertex the nearest point of both segments — is left
+    # of the turned segment 2 where the sum of the normals says right: 1° below REVERSAL_TURN_DEG the sum's side, 1°
+    # above it and at 175° the matched segment's
+    for turn, side in ((REVERSAL_TURN_DEG - 1.0, 1.0), (REVERSAL_TURN_DEG + 1.0, -1.0), (175.0, -1.0)):
+        for mirror in (1.0, -1.0):
+            c, k = math.cos(math.radians(turn)), mirror * math.sin(math.radians(turn))
+            near_e = np.array([0.0, 100.0, 200.0, 200.0 + 100.0 * c, 200.0 + 200.0 * c])
+            near = ObservedPath(near_e, np.array([0.0, 0.0, 0.0, 100.0 * k, 200.0 * k]), np.zeros(5), 2)
+            assert near.match(205.0, -2.0 * mirror, 0.0).lateral_m == pytest.approx(
+                side * mirror * math.hypot(5.0, 2.0))
 
 
 # ---- the corrections
