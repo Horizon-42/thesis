@@ -448,3 +448,36 @@ def test_the_source_reads_only_the_selected_sentences_and_the_identity_counts_ev
     other = artefact_identity(directory, 4.0, landings, "all")
     assert selection_totals(other["selection"]) == {split: {"kept": 2, "left_out": 0} for split in SPLITS}
     assert {k for k in identity if identity[k] != other[k]} == {"selection"}
+
+
+@pytest.mark.parametrize("interval_s", [2.0, 4.0])
+def test_a_loop_s_row_is_the_sentence_s_row_bit_for_bit(interval_s):
+    """D96 item 4: `LoopRows`, told a sentence's states on the 2 s rows and walked with its words heard, gives each Δ
+    row's inputs as `sentence_rows` gives them (the training's rows), bit for bit."""
+    import torch
+
+    from ts_transformer.prior.batch import collate
+    from ts_transformer.prior.inputs import Heard, own_flight_key
+    from ts_transformer.prior.landings import utc_s
+    from ts_transformer.prior.loop import LoopRows
+
+    words, signals, record, index = flight_and_index()
+    rows = prior_closed_loop_sentence(signals, words, interval_s=interval_s, go_around=True).rows
+    geometry = parallel_airport()
+    expected = collate([rows_of(rows, record, index, words, interval_s)], torch.device("cpu"))
+    every = int(round(interval_s / words.spec.step_s))
+    loop = LoopRows([geometry], {geometry.code: index}, [own_flight_key(record)],
+                    np.array([utc_s(record["entry_time_utc"])]), np.array([rows.first_row]), rows.start,
+                    variant="full", interval_s=interval_s, step_s=words.spec.step_s, device=torch.device("cpu"))
+    heard = Heard(geometry, words)
+    for t in range(rows.start + len(rows.grid)):
+        r = t * every
+        got, at = loop(t, rows.states[r: r + 1], rows.states[max(r - 1, 0): max(r - 1, 0) + 1], r > 0, [heard])
+        for name, value in zip(got._fields, got):
+            if name == "targets":                    # the words to come: the training's, not an input
+                continue
+            want = getattr(expected.between(t, t + 1), name)
+            assert torch.equal(value, want), (t, name)
+        assert at.height_m[0] == rows.states[r, 2] - geometry.elevation_m
+        if t >= rows.start:
+            heard.hear(rows.grid[t - rows.start], float(rows.states[r, 2] - geometry.elevation_m), t * interval_s)

@@ -3,9 +3,9 @@
 `speak_and_fly` is the closed loop of a batch of flights started at their first predicted step through the start of a
 closed loop (vocabulary §6 item 5, D67: `autopilot.start`): the rows before the first predicted step are the flight's
 observed rows (the closed-loop sentence's states there); from it on, at each Δ row, the inputs come from the states the
-executor flew (D32, §2) through the prior's one input function (`prior.inputs.state_inputs`, `prior.inputs.Heard`,
-`prior.batch.row_tensors`), the speaker says the row under its masks and a caller's — the bound of D68, "go-around"
-forbidden after a flight's second — and the loop flies it for Δ seconds. A flight ends when the executor is done with
+executor flew (D32, §2) through the prior's one function of a loop's row (`prior.loop.LoopRows`, D96), the speaker
+says the row under its masks and a caller's — the bound of D68, "go-around" forbidden after a flight's second — and the
+loop flies it for Δ seconds. A flight ends when the executor is done with
 it (its crossing, its time limit with 900 s for each go-around, or the dynamics); its outcome is the judge's
 (`Loop.outcome`, item 6). The runner imports nothing else of `autopilot/` (`tests/test_architecture.py`, D69).
 """
@@ -36,9 +36,9 @@ from ts_transformer.prior.source import airport_landings, artefact_identity
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 from ts_transformer.instructions.labeller.interval import interval_rows
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
-from ts_transformer.prior.batch import row_tensors
-from ts_transformer.prior.inputs import own_flight_key, state_inputs
+from ts_transformer.prior.inputs import own_flight_key
 from ts_transformer.prior.landings import LandingIndex, utc_s
+from ts_transformer.prior.loop import LoopRows
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import Final
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS, Position, Speaker, go_around_bound
@@ -133,33 +133,18 @@ def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Map
     every, start = interval_rows(interval_s, step_s), sentences[order[0]].rows.start
     count = len(order)
     flight_geometries = [geometries[flights[i]["airport"]] for i in order]
-    elevations = np.array([g.elevation_m for g in flight_geometries])
     # the cache's first room: the observed rows and some predicted ones (it grows as the flights need; the loop's time
     # limit is not the speaker's to read, vocabulary D90)
     speaker = Speaker(model, words, [finals[g.code] for g in flight_geometries], capacity=start + FIRST_ROWS,
                       generator=generator, temperature=temperature)
-    entry = np.array([utc_s(flights[i]["entry_time_utc"]) for i in order])
-    first_rows = np.array([sentences[i].rows.first_row for i in order])
-    keys = [own_flight_key(flights[i]) for i in order]
+    # the inputs of a row: the prior's one function of a loop's row (D96 item 4)
+    rows_of = LoopRows(flight_geometries, landings, [own_flight_key(flights[i]) for i in order],
+                       np.array([utc_s(flights[i]["entry_time_utc"]) for i in order]),
+                       np.array([sentences[i].rows.first_row for i in order]), start, variant=variant,
+                       interval_s=interval_s, step_s=step_s, device=device)
 
     def row(t: int, at: np.ndarray, before: np.ndarray, known: bool) -> tuple[Any, Position]:
-        """The inputs of Δ row ``t`` of every flight at the states ``at`` [B, 6] with ``before`` the 2 s row before."""
-        utc = entry + (first_rows + t * every) * step_s
-        own, candidates = [], []
-        for b, geometry in enumerate(flight_geometries):
-            counts = landings[geometry.code].counts_before(utc[b: b + 1], without=keys[b])
-            index = [landings[geometry.code].runways.index(c.ident) for c in geometry.candidates]
-            o, c = state_inputs(at[b: b + 1, :3], before[b: b + 1, :3], np.array([known]), counts[:, index], geometry,
-                                variant, step_s)
-            own.append(o[0])
-            candidates.append(c[0])
-        heard = [h.inputs(t * interval_s) for h in speaker.heard]
-        tensors = row_tensors(np.full(count, t * interval_s), np.stack(own), candidates,
-                              np.array([h[0] for h in heard]), np.array([h[1] for h in heard]),
-                              np.stack([h[2] for h in heard]), np.stack([h[3] for h in heard]),
-                              np.stack([h[4] for h in heard]), np.full(count, t == start), np.full(count, t >= start),
-                              device)
-        return tensors, Position(at[:, 0], at[:, 1], at[:, 2] - elevations)
+        return rows_of(t, at, before, known, speaker.heard)
 
     # the observed rows before the first predicted step
     observed = np.stack([sentences[i].rows.states[: start * every] for i in order])     # [B, start·every, 6]
