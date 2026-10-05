@@ -174,7 +174,8 @@ of the package, not a migration in progress.
   way ``moved``; v9: a
   sentence said on its own rows, D57; a level word flown at T + E MSL, D58): `conformance/` beside the spec — 250
   labelled train flights flown by the spec's code in the run that wrote the spec — and every process that opens the spec
-  (`replay.open_executor`: the replay, the start, the closed loop, the backend at its start) flies them again in every way
+  (`replay.open_executor`: the replay, the start, the closed loop, every runner; **not the backend**, which runs no check at its
+  start and refuses an answer past the bound from the stored states instead, D73, A43) flies them again in every way
   (single-aircraft batch, multi-aircraft batch, single flight) within 1e-6 m first (`conformance.require_conforming_executor`,
   ~27 s), refused by name otherwise; no passed record, no digest of code, no clean-checkout rule for a check; a code change
   that stays within the bounds opens everything and nothing is retrained; the vocabulary binds by its spec sha, the labeller by its conformance; the judge's decision-altitude check
