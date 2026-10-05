@@ -832,7 +832,7 @@ PRIOR_INTERFACE = {
     "prior.procedure": {"PROCEDURE_MASKS", "procedure_digests", "airport_finals", "Final"},
     "prior.inputs": {"state_inputs", "sentence_rows", "own_flight_key"},
     "prior.loop": {"LoopRows"},
-    "prior.landings": {"LandingIndex"},
+    "prior.landings": {"Landing", "LandingIndex"},
     "prior.source": {"airport_landings", "ArtefactSource"},
     "prior.speaker": {"Speaker", "Position", "go_around_bound", "MOST_GO_AROUNDS", "draw", "Permitted"},
     "prior.train": {"batch_nll", "masked_log_probability"},
