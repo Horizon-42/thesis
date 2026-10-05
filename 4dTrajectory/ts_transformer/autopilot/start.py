@@ -32,6 +32,7 @@ after the first predicted step; the observed rows a sentence stores before it ar
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -167,8 +168,28 @@ class Loop:
         return np.stack(flown, axis=1), executor.done.cpu().numpy()
 
     def halt(self, flights: np.ndarray) -> None:
-        """Hold ``flights`` (``[B]`` bool) from the next cycle on (`Executor.halt`)."""
+        """Hold ``flights`` (``[B]`` bool) from the next cycle on (`Executor.halt`; vocabulary §6 item 5, D97 (2)): a
+        halted flight is held where it is (its state, bank and laws' state kept, its recorded command repeating the
+        last), hears no words, and does not become done (one done already stays done)."""
         self.executor.halt(torch.as_tensor(flights, device=self.executor.state.device))
+
+    def copy(self, flights: Sequence[int]) -> Loop:
+        """A loop of copies of the flights ``flights`` (repeats permitted; vocabulary §6 item 5, D97 (2)): everything the
+        loop holds of them — the executor's state and its record for the judge (`Executor.take`), the words said
+        (`Spoken.take`), the grammar's words in force, the go-arounds heard, and the time limits, which stay the loop's
+        (D90). Flown on with the same words, a copy flies what its original flies and gets the same outcome; the loop
+        copied is unchanged."""
+        index = np.asarray(flights)
+        if index.ndim != 1 or not len(index) or index.dtype.kind not in "iu":     # no bool mask, as `halt` takes
+            raise ValueError(f"a copy takes one or more of the loop's flights by index, got {flights!r}")
+        out = copy.copy(self)
+        out.executor = self.executor.take(torch.as_tensor(index, device=self.executor.state.device))
+        out.spoken = self.spoken.take(index)
+        out.geometries = [self.geometries[i] for i in index]
+        out.go_arounds = self.go_arounds[index].copy()
+        out.grammar = [self.grammar[i] for i in index]          # InForce is frozen: shared, never changed in place
+        out._flown = None
+        return out
 
     def outcome(self, flight: int) -> Outcome:
         """Flight ``flight``'s outcome, read by the judge off what the executor recorded (`judge.outcome_of`); refused for a

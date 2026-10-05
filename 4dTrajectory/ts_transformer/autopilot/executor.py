@@ -34,8 +34,9 @@ one it flew — where a closed loop that once flew it in an executor of its own 
 
 from __future__ import annotations
 
+import copy
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any
 
 import torch
@@ -140,6 +141,43 @@ class Executor:
     def halt(self, flights: torch.Tensor) -> None:
         """Hold the flights ``flights`` (``[B]`` bool) from the next cycle on (module docstring)."""
         self.halted = self.halted | flights.to(self.halted.device)
+
+    def take(self, flights: torch.Tensor) -> Executor:
+        """A copy of the flights ``flights`` (``[K]`` long, repeats permitted; vocabulary §6 item 5, D97 (2)): everything
+        the executor holds of them — their inputs, runways and charts, time limits and reserve, first cycles, state,
+        bank, the laws' state, done and halted, end cycles and the record so far — and nothing of the other flights. The
+        cycles flown and their layout are the batch's. Flown on, each copy flies as its original would (a flight's
+        states do not depend on the other flights of its batch, D97 (3))."""
+        flights = torch.as_tensor(flights, dtype=torch.long, device=self.state.device)
+        if flights.ndim != 1 or not len(flights) or bool(((flights < 0) | (flights >= len(self.state))).any()):
+            raise ValueError(f"a copy takes one or more of the batch's {len(self.state)} flights, got {flights.tolist()}")
+
+        def pick(rows: torch.Tensor) -> torch.Tensor:
+            return rows[flights].clone()
+
+        def picked(record: Any) -> Any:                  # a dataclass of per-flight tensors
+            return type(record)(**{f.name: pick(getattr(record, f.name)) for f in fields(record)})
+
+        out = copy.copy(self)
+        out.inputs, out.runways, out.charts = picked(self.inputs), picked(self.runways), picked(self.charts)
+        out.plant = Plant(out.inputs)
+        for name in ("time_limit_s", "most_s", "start", "state", "bank", "runway_issued", "done", "done_cycle",
+                     "halted", "last_command"):
+            setattr(out, name, pick(getattr(self, name)))
+        out.staggered = bool((out.start != 0).any())
+        for name in ("lateral", "vertical", "speed"):
+            law = copy.copy(getattr(self, name))
+            for held in law.PER_FLIGHT:
+                value = getattr(law, held)
+                setattr(law, held, None if value is None else pick(value))   # the lateral word before any is heard
+            setattr(out, name, law)
+        out.speed.approach_ias_mps = pick(self.speed.approach_ias_mps)
+        out.states, out.commands, out.wanted, out.sentence_times, out.runway_rows = (
+            [pick(rows) for rows in record]
+            for record in (self.states, self.commands, self.wanted, self.sentence_times, self.runway_rows))
+        out.limits = {name: [pick(rows) for rows in record] for name, record in self.limits.items()}
+        out.modes = {name: [pick(rows) for rows in record] for name, record in self.modes.items()}
+        return out
 
     def own_cycle(self) -> torch.Tensor:
         """``[B]`` long: each flight's own cycle about to be flown (negative: it has not started)."""

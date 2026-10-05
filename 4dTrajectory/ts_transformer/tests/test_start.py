@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import fields, replace
 
 import numpy as np
 import pytest
@@ -10,6 +10,7 @@ import torch
 
 from ts_transformer.autopilot import closed_loop, replay, start as start_module
 from ts_transformer.autopilot.conformance import STATE_BOUND_M
+from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.frame import read_state
 from ts_transformer.autopilot.judge import TIMEOUT, outcome_of
 from ts_transformer.autopilot.params import ExecutorParams
@@ -21,7 +22,9 @@ from ts_transformer.instructions.artefact import (
     load_signals, write_closed_loop,
 )
 from ts_transformer.instructions.labeller.read import read_flight
-from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
+from ts_transformer.instructions.words import (
+    ALTITUDE, ANGLE, HEADING, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words,
+)
 from ts_transformer.tests.support import executor_inputs, labelled_instruction_artefact
 
 CPU = torch.device("cpu")
@@ -225,6 +228,147 @@ def test_a_row_the_grammar_refuses_is_refused_by_name_with_nothing_changed(tmp_p
             loop.step(row)
         assert refused.value.reason == "word outside its column"
         assert (loop.steps, loop.executor.count, len(loop.spoken.grid)) == before
+
+
+# ---- the interface for the post-training (D97 (2), (3)): a copy of chosen flights, a flight alone and in a batch. The
+# bound (the user, 2026-10-05, on A38's measurement: a flight alone against in chunks of 2048 differed by <= 7.9e-10 m,
+# chunks of 1000 against 2048 not at all): words, done and outcome exact, states within STATE_BOUND_M.
+#: The Δ rows of the schedules below: B's go-around held from row 3 to the runway again at row 8, C's two turns (150°
+#: right, then 150° more: past 180°, said word by word), D halted at row 9.
+GO_AROUND_ROW, AGAIN_ROW, TURN_ROWS, HALT_ROW = 3, 8, (2, 4), 9
+
+
+def _schedules(tmp_path, monkeypatch, interval_s=2.0):
+    """One stored flight said four ways from its first predicted step — A its stored sentence, B the same with a
+    go-around (speed unspecified) held for five rows, C the same with two heading turns of 150° each, D as A and halted
+    at `HALT_ROW` — and a loop of any of them: ``(loop_of(ways), row_of(way, k))``."""
+    directory, words, batch, stored, _ = _artefact(tmp_path, monkeypatch, interval_s)
+    one, _ = start(directory, "train", interval_s, {0: stored}, tmp_path / "executor", most_go_arounds=1, device=CPU)
+    inputs, limit, geometry = one.executor.inputs, float(one.executor.time_limit_s[0]), batch.geometries[0]
+    grid = stored.rows.grid.astype(np.int64)
+    unchanged = np.full(5, UNCHANGED, dtype=np.int64)
+    climb, again = unchanged.copy(), unchanged.copy()
+    climb[[RUNWAY, ALTITUDE, ANGLE, SPEED]] = (RUNWAY_GO_AROUND, words.altitude_index(1500.0), words.angle_climb,
+                                               words.speed_unspecified)
+    again[RUNWAY] = 0
+    step = words.spec.heading_step_deg
+    turned = {row: (int(grid[0, HEADING]) + int(round(150.0 * (n + 1) / step))) % words.n_heading
+              for n, row in enumerate(TURN_ROWS)}
+
+    def row_of(way: str, k: int) -> np.ndarray:
+        if way == "B" and GO_AROUND_ROW <= k < AGAIN_ROW:
+            return climb.copy() if k == GO_AROUND_ROW else unchanged.copy()
+        if way == "B" and k == AGAIN_ROW:
+            return again.copy()
+        row = grid[k].copy() if k < len(grid) else unchanged.copy()
+        if way == "C" and k in turned:
+            row[HEADING] = turned[k]
+        return row
+
+    def loop_of(ways: str) -> Loop:
+        many = FlightInputs(**{f.name: getattr(inputs, f.name).expand(len(ways), *getattr(inputs, f.name).shape[1:])
+                               .clone() for f in fields(FlightInputs)})
+        return Loop(many, [geometry] * len(ways), [A320_IAS] * len(ways), [limit] * len(ways), _params(), words,
+                    interval_s=interval_s, most_go_arounds=1, device=CPU)
+
+    return loop_of, row_of
+
+
+def _fly(loop: Loop, ways: str, row_of, k: int, *, until_done: bool = False, steps: int = 0
+         ) -> tuple[list[np.ndarray], int]:
+    """``loop`` flown from its step ``k`` on, each flight's words its way's (way D halted at `HALT_ROW`): ``steps``
+    steps, or until every flight is done or halted; the 2 s rows of each step and the next step."""
+    flown = []
+    executor = loop.executor
+    while (until_done and not bool((executor.done | executor.halted).all())) or len(flown) < steps:
+        assert k < 5000, "never done"
+        if k == HALT_ROW:
+            loop.halt(np.array([way == "D" for way in ways]))
+        rows, _ = loop.step(np.stack([row_of(way, k) for way in ways]))
+        flown.append(rows)
+        k += 1
+    return flown, k
+
+
+def _same_flight(a_rows, a_loop, a, b_rows, b_loop, b):
+    """Flight ``a`` of one loop and ``b`` of another flew alike: states within STATE_BOUND_M; done, halted, end cycle,
+    time limit, go-arounds and outcome exact."""
+    for x, y in zip(a_rows, b_rows):
+        assert np.abs(x[a] - y[b]).max() <= STATE_BOUND_M
+    one, other = a_loop.executor, b_loop.executor
+    for name in ("done", "halted", "done_cycle", "time_limit_s"):
+        assert getattr(one, name)[a].item() == getattr(other, name)[b].item(), name
+    assert a_loop.go_arounds[a] == b_loop.go_arounds[b]
+    assert bool(one.done[a]) != bool(one.halted[a])             # each flight ends, or is held
+    if bool(one.done[a]):
+        assert a_loop.outcome(a) == b_loop.outcome(b)
+
+
+def _same_record(original: Loop, i: int, copy: Loop, j: int) -> None:
+    """The flown record of flight ``i`` and of its copy ``j`` (`Executor.flown`), over the cycles both flew: every field,
+    states and commands within STATE_BOUND_M, the rest exact."""
+    one, other = original.executor.flown(), copy.executor.flown()
+    assert int(one.done_cycle[i]) == int(other.done_cycle[j])
+    for name in ("states", "commands", "wanted", "runway", "sentence_s", "limits", "modes"):
+        x, y = getattr(one, name), getattr(other, name)
+        pairs = [(x[k], y[k]) for k in x] if isinstance(x, dict) else [(x, y)]
+        for a, b in pairs:
+            cycles = min(a.shape[1], b.shape[1])
+            a, b = a[i, :cycles], b[j, :cycles]
+            if a.dtype.is_floating_point:
+                assert float(torch.nan_to_num(a - b).abs().max()) <= STATE_BOUND_M, name
+                assert torch.equal(a.isnan(), b.isnan()), name
+            else:
+                assert torch.equal(a, b), name
+
+
+def test_a_copy_of_chosen_flights_flies_as_its_originals(tmp_path, monkeypatch):
+    """D97 (2): copied at two Δ rows — in B's go-around (G and speed "unspecified" in force) and C's turn past 180°,
+    every flight flying; and when the first flight is done, D halted (its record, its go-around, its hold come with it) —
+    each flight taken, one twice, and flown on with the same words, each copy flies what its original flies, records it
+    alike and ends with its outcome; copying changes nothing of the loop copied."""
+    loop_of, row_of = _schedules(tmp_path, monkeypatch)
+    ways, taken = "ABCD", [2, 0, 3, 1, 1]
+    copied_ways = "".join(ways[i] for i in taken)
+    loop = loop_of(ways)
+    rows, k = _fly(loop, ways, row_of, 0, steps=5)
+    assert loop.go_arounds[1] == 1 and not bool(loop.executor.done.any())
+    copies = []
+    executor = loop.executor
+    while not bool((executor.done | executor.halted).all()):
+        if k == 5 or (bool(executor.done.any()) and len(copies) == 1):
+            before = (loop.rows().copy(), executor.count, loop.spoken.steps, loop.go_arounds.copy(),
+                      executor.time_limit_s.clone(), executor.done.clone(), executor.halted.clone())
+            copy = loop.copy(taken)
+            copies.append((k, copy))
+            assert np.array_equal(before[0], loop.rows()) and before[1:3] == (executor.count, loop.spoken.steps)
+            assert np.array_equal(before[3], loop.go_arounds) and torch.equal(before[4], executor.time_limit_s)
+            assert torch.equal(before[5], executor.done) and torch.equal(before[6], executor.halted)
+            for name in ("done", "done_cycle", "halted", "time_limit_s"):
+                assert torch.equal(getattr(copy.executor, name), getattr(executor, name)[taken]), name
+        flown, k = _fly(loop, ways, row_of, k, steps=1)
+        rows += flown
+    assert len(copies) == 2 and copies[1][0] > HALT_ROW and bool(copies[1][1].executor.halted[2])
+    for at, copy in copies:
+        copied, _ = _fly(copy, copied_ways, row_of, at, until_done=True)
+        for j, i in enumerate(taken):
+            _same_flight(rows[at:], loop, i, copied, copy, j)
+            _same_record(loop, i, copy, j)
+    for wrong in ([], [4], [-1], [True, False, True], [0.9]):
+        with pytest.raises(ValueError, match="a copy takes one or more"):
+            loop.copy(wrong)
+
+
+def test_a_flights_states_do_not_depend_on_the_other_flights_of_its_loop(tmp_path, monkeypatch):
+    """D97 (3), on the CPU: each flight flown alone and in a batch with the others flies alike."""
+    loop_of, row_of = _schedules(tmp_path, monkeypatch)
+    together = loop_of("ABCD")
+    rows, _ = _fly(together, "ABCD", row_of, 0, until_done=True)
+    for i, way in enumerate("ABCD"):
+        alone = loop_of(way)
+        own, _ = _fly(alone, way, row_of, 0, until_done=True)
+        assert len(own) <= len(rows)
+        _same_flight(own, alone, 0, rows, together, i)
 
 
 def test_the_start_refuses_sentences_not_read_under_its_artefact_split_and_executor(tmp_path, monkeypatch):

@@ -682,6 +682,13 @@ artefact's) and returns a `Loop` at each flight's first predicted step — the f
 observed time left from the first predicted step to the end of its labelled sentence × the timeout factor) and 900 s for
 each go-around up to the most given. `Loop.step(words [B, 5])` flies one Δ row and gives the states of the 2 s rows
 flown (`STATE_COLUMNS`) and the flights done; a go-around beyond the most refuses the row by name (`GoAroundBeyondMost`)
-before anything is flown; `Loop.outcome(f)` is `judge.outcome_of` on what the executor recorded. The closed-loop reading
+before anything is flown; `Loop.outcome(f)` is `judge.outcome_of` on what the executor recorded. `Loop.halt(flights)`
+holds flights (held where they are, their recorded command repeating, hearing no words, never becoming done); `Loop.copy(flights)` (A38, D97 (2)) is a loop
+of copies of chosen flights, repeats permitted, with everything the loop holds of them (`Executor.take`, `Spoken.take`, the
+grammar's words in force, the go-arounds, the time limits, which stay hidden, D90): flown on with the same words, a copy
+flies what its original flies and gets its outcome. A flight's states do not depend on the other flights of its loop
+(D97 (3)): measured on A34's artefact (train, Δ = 4 s, CPU) the batch's composition changes nothing, its size (a flight
+alone against chunks of 2048) moves states by <= 7.9e-10 m; the tests hold words, done and outcome exact and states within
+`STATE_BOUND_M` (the user, 2026-10-05). The closed-loop reading
 builds its `Loop` from the same pieces, so its sentences said through `start` give back their stored states and the
 replay's outcome (`tests/test_start.py`). The artefact's formats do not change.

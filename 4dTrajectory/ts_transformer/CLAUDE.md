@@ -166,7 +166,7 @@ of the package, not a migration in progress.
   (D34); written once by `instruction_closed_loop` with its own reference, read only after the labeller's, the executor's
   and the closed loop's checks run in the reading process (`closed_loop.require_conforming_closed_loop(artefact,
   executor_dir)`, D69, D73); a speaker's closed loop starts where the reading does,
-  through `autopilot/start.py` (`start`, `Loop.step`, D67) (C38).
+  through `autopilot/start.py` (`start`, `Loop.step`, D67; `Loop.copy`, `Loop.halt`, D97) (C38).
 - **An executor spec opens only for executor code that flies its reference tracks within the bounds** (2026-10-01, the
   user: checked by what it flies, not by its source; D73: checked every time it is opened; `ts-executor-spec-v10`: the
   start rule a parameter, D77; a flight ended where the judge ends it, D79; the chart at the airport, D81, checked by the
