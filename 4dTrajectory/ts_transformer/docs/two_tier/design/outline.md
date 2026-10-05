@@ -24,7 +24,7 @@ repository root; `readouts/` is `docs/two_tier/readouts/`. The documents of the 
 |---|---|---|---|
 | `vocabulary.md` | The words, the labeller (open-loop and closed-loop reading), the executor, the judge; their Training view | A | Built on `dev-two-tier-v4` and merged into `dev-two-tier`; the formal artefact `v11_20261004` and the Training view done; the corrections of Claude's review (A32–A35, D77–D85) next (vocabulary §0.4) |
 | `prior.md` | The prior: inputs, outputs, decoding and its masks, training, a new airport; its Training view | B | Built in parallel with the end of stage A, on `dev-two-tier-v4-prior` (prior §0.3); B9 (the interface for stage C, D96) before B5's formal campaign |
-| `post_training.md` | The post-training in windows of traffic; the multi-aircraft work; its Training view | C | Design complete except O12; built in parallel with the end of stage B, on `dev-two-tier-v4-post` (post-training §0.3, D95); not started |
+| `post_training.md` | The post-training in windows of traffic; the multi-aircraft work; its Training view | C | Design complete; built in parallel with the end of stage B, on `dev-two-tier-v4-post` (post-training §0.3, D95); not started |
 | This outline | The principles, the shared rules, the plan; the rules of each stage's Training view (§6) | — | — |
 
 How a stage is reviewed against its design (leaks, what each consumer may read, the procedure, a checklist for each
@@ -99,9 +99,9 @@ they came from. Each document lists the identities of its parts.
 | Outline | D7, D20, D21, D55, D85, D95 | — |
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97 | O8 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96 | — |
-| Post-training | D29–D31, D36, D37, D76, D91–D94 | O12 |
+| Post-training | D29–D31, D36, D37, D76, D91–D94, D98 | — |
 
-The next free numbers: D98, O13.
+The next free numbers: D99, O13.
 
 ---
 

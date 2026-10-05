@@ -10,8 +10,7 @@ voice, one meaning for each word, and technical names that the terms define. The
 against the STE dictionary. Units are SI only (m, m/s, deg, s). Values in feet, knots or nautical miles occur only in
 quotations of regulations, with the SI value given one time.
 
-**Scope of this document.** This document is complete for its part, except O12 (what the traffic attention reads of
-another aircraft, §3). The principles and the shared rules are in the outline (`outline.md`). The code of stage C is on
+**Scope of this document.** This document is complete for its part. The principles and the shared rules are in the outline (`outline.md`). The code of stage C is on
 the branch `dev-two-tier-v4-post` (§0.3; outline §5 rule 1); the code that it replaces is archived (§7). Paths in
 backticks are relative to `4dTrajectory/ts_transformer/` unless they start with `4dTrajectory/` or name the repository
 root; `readouts/` is `docs/two_tier/readouts/`. The documents of the earlier design (`*_design.zh.md`,
@@ -37,12 +36,11 @@ The decision numbers are shared by all documents (outline §3).
 | D92 | "Established on the final" (D31) is a function of one row: G is false, the aircraft is inside the region of the final of R (inside the FAF and the LPV cone: the region of the prior's procedure masks, prior D64, prior §7 item 6), and its track is within 30° of the course of R (the judge's "lined up", 7110.65BB 5-9-2, TBL 5-9-1). After "go-around" the aircraft is not established until a runway word ends G. This stage has no mask for the spacing on the final: the reward teaches it (D30: 0 for a loss of separation), and the speed-word mask stays (§3). The rule is Claude's reading; C3 cites the regulation text that it reads ("established", the in-trail rule) to its paragraph (O6 until then) | Decided | User, 2026-10-05, on Claude's proposal |
 | D93 | A window has no length of its own. It starts at the commanded aircraft's row 0 and ends where the commanded aircraft is done (the judge's outcome, its time limit included: vocabulary §6 items 5 and 6) or has a loss of separation that it answers for. At each step, its other aircraft are every other flight of the airport and the split in the air at that time, replayed along its record (§3). The 20 minutes of §2 item 1 are a typical length, not a bound. Stage C reads no time limit (vocabulary D90). Why: with two go-arounds (D91), a flight can fly for more than 20 minutes after its first predicted step; a cut at 20 minutes would leave it without traffic or end it early | Decided | User, 2026-10-05 |
 | D94 | How branch training (D37) gets the state at a branch point, and its test. A round has two passes. First, every window is spoken one time, each with its own random numbers (from the seed, the round and the window). Then the windows whose reward is less than 1 are spoken again with the random numbers of their first sentence, and at each branch point the state of the window is copied K = 8 times: the loop of the executor (vocabulary §6 item 5, D97), the speaker (prior §7 item 3, D96) and the window's own state (its step, its separation judge, its landings). Each copy continues with its own random numbers (from the seed, the round, the window, the branch point and k). The second pass is checked against the first: the same words and the same flown states up to the last branch point; a window that differs is counted, reported and gives no sample in the round. The test of D37 item 4: a continuation with the random numbers of the first sentence says the same words and flies the same states as the first sentence, bit for bit; the probabilities can differ in their last bits when the batch differs (§6.4). Why: the copies spend the extra speaking only after the branch points (§2 item 9), and only the windows that need a branch are spoken again, so no state of a window that lands is saved | Decided | User, 2026-10-05, on Claude's report of stage C's readiness |
+| D98 | The traffic attention reads each other aircraft as a token from its recorded state only: its edge features to the commanded aircraft (§3) and its own motion (the 2 s displacement). The prior runs only on the commanded aircraft. The commanded aircraft's landing context is the prior's count of the landings before the step without its own landing (prior §7 item 2); with one commanded aircraft, that is the rule of D31. Why: the recorded states are data, computed one time for a window; the prior's hidden state of a recorded aircraft would change each round with the prior's weights, and it would need words said to that aircraft (a flight without a sentence has none) and a landing context from the loop (O12 until then) | Decided | User, 2026-10-05, on Claude's proposal |
 
 ### 0.2 Open items
 
-| # | Item | Proposal | §  |
-|---|---|---|---|
-| O12 | What the traffic attention reads of another aircraft at a step. (a) A token from its recorded state only: its edge features to the commanded aircraft and its own motion. The prior runs only on the commanded aircraft; the commanded aircraft's landing context is the prior's count of the landings before the step without its own landing (prior §7 item 2), and D31 holds with no more code. (b) The prior's hidden state of that aircraft, from the prior run over its recorded rows and words: every recorded aircraft then needs words said (a flight without a sentence has none) and a landing context from the loop (D31), and its hidden states change each round with the prior's weights | (a). The user decides (asked 2026-10-05) | 3 |
+None.
 
 ### 0.3 Implementation
 
@@ -225,8 +223,9 @@ A proposal is a reading where the design says nothing; it holds only until the u
 - **Traffic attention.** At each layer of the prior, a module (prior §7, item 5) reads the other aircraft of the step:
   an attention from the commanded aircraft's row to one token for each other aircraft. Its output starts at zero, and
   it gives zero when the step has no other aircraft, so that a window without traffic is free generation (§2 item 1).
-  The speaker passes it the tokens of each row (prior §7, item 3). It has its own learning rate (§2 item 5). What a
-  token holds: O12. The start of the post-training is the base with this module (D29, §2).
+  The speaker passes it the tokens of each row (prior §7, item 3). It has its own learning rate (§2 item 5). A token is
+  the other aircraft's edge features to the commanded aircraft and its own motion, from its recorded state only (D98).
+  The start of the post-training is the base with this module (D29, §2).
 - **Edge features.** For each other aircraft at each step, what it is to the commanded aircraft: the archived set (§7),
   rewritten: its place in the commanded aircraft's frame (ahead, to the left) and its height difference; its position
   on the approach clock less the commanded aircraft's, and whether the two can be compared; the relation of the two
@@ -240,7 +239,7 @@ A proposal is a reading where the design says nothing; it holds only until the u
   the aircraft before the window, and the landing of a commanded aircraft when it lands in the loop. The recorded
   landing of a commanded aircraft is never in it: that landing is the future of the commanded aircraft. Through the
   traffic attention, a commanded aircraft that flies later than its record would read a landing on its own landed
-  runway. With O12 (a), only the commanded aircraft has inputs, and its landing context is the prior's count of the
+  runway. With D98, only the commanded aircraft has inputs, and its landing context is the prior's count of the
   landings before the step without its own landing (prior §7, item 2): the recorded aircraft land at their recorded
   times, and the commanded aircraft's landing ends its window.
 - **States in a scene (D32, D36).** A scene occurs only in the closed loop. The commanded aircraft flies with the
@@ -277,6 +276,7 @@ identities follow D21 (outline §3):
 | Window | One commanded aircraft, from its row 0 to its end; its other aircraft every flight of the airport and the split in the air at each step; typically 20 minutes | D29, D93 |
 | Branch points | The first predicted step and every 120 s after it, before the event; K = 8 continuations, copied from a second pass with the first sentence's random numbers | D37, D94 |
 | Established on the final | G false, inside the FAF and the LPV cone of R, track within 30° of the course of R | D92 |
+| A token of the traffic attention | The other aircraft's edge features to the commanded aircraft and its own motion, from its recorded state | D98 |
 | Loss | Clipped ratio ε = 0.2; pull to the base model 0.04; teacher-forced data term 1 | §2 item 5 |
 | Present landing direction | A runway within 90° of a runway with a landing in the 30 min before the first predicted step | §2 item 2 |
 
@@ -437,10 +437,10 @@ aircraft, the rewards of steps 8.9 and 9.4, the formats of `instruction-v3`. No 
   reward table of §2 item 2; the commanded aircraft's landing context never counts its own landing (D31); the loop
   reads no time limit (vocabulary D90).
 
-**C5. The traffic attention** (§3; O12 decides what a token holds).
+**C5. The traffic attention** (§3; D98).
 
-- The module of §3 at each layer through prior §7 item 5, its input passed by the speaker (prior D96); its own learning
-  rate.
+- The module of §3 at each layer through prior §7 item 5, its input passed by the speaker (prior D96): the tokens of
+  D98; its own learning rate.
 - Tests: with the module added at its start, every output of the base is the same, bit for bit; with no other aircraft
   its output is zero at any weights; a permutation of the other aircraft changes nothing.
 
