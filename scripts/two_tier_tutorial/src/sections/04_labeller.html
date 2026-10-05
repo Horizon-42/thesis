@@ -1,0 +1,29 @@
+<section id="s-labeller">
+<h2 id="labeller" data-toc="4 The labeller">4 The labeller</h2>
+<p>The labeller reads one sentence from one observed flight. It works in two passes. The <t zh="开环读取">open-loop reading</t> (this section) reads the observed words from the observed track. The <t zh="闭环读取">closed-loop reading</t> (section 7) flies these words with the executor and adds correction words. The sentences of the closed-loop reading are the training sentences.</p>
+
+<h3 id="l-signals" class="toc">4.1 Signals and the gate</h3>
+<p>The labeller reads <t zh="信号">signals</t> from the data plane of the project: positions in the airport frame, geometric height above sea level, and rows of 2 s on even UTC seconds. It smooths the track (6 s), the altitude (10 s) and the ground speed (10 s). The <t zh="封存的测试日">test days</t> are sealed: the labeller never opens them.</p>
+<p>A <b>gate</b> refuses a flight, with a reason, when the flight cannot be said in the vocabulary. Examples: a landing runway that is not a candidate, a ground speed outside 15–350 m/s, a level outside the grid, or a go-around point on the runway. On the train days of the formal artefact, 44,338 flights were read, and 365 were refused. On the train and select days together, the most frequent reason was an impossible ground speed (166 flights).</p>
+
+<h3 id="l-heading" class="toc">4.2 The heading reading</h3>
+<p>At each row, the labeller takes the smoothed track <b>L = 4 s later</b> (the <t zh="提前量">lead</t>). The word is the grid value, relative to the course of R, that is nearest to that track. A new word is said when that track leaves the word in force by <b>more than half a step</b> (2.5°). So a continuous turn becomes one word for each 5°. The time between the words gives the turn rate.</p>
+<div data-demo="heading_reading" data-title="From a track to heading words"></div>
+<p>Noise below half a step says nothing. This is a <t zh="滞回">hysteresis</t>: the track must move 2.5° away from the word in force before the labeller says a new word. The <b>capture row</b> is the first row from which the track stays in the capture corridor of the runway to the end of the approach. The corridor is 20 m + d·tan 0.45° wide, and the track must be within 2° of the course. The capture row uses later rows, so it is never an input of a model.</p>
+<p>A flight is <b>vectored</b> when, before the capture row, its turns add up to 90° or more. Otherwise it is <b>straight-in</b>. On the train days, a straight-in sentence has about 5 heading words, and a vectored sentence has about 42 (open-loop reading at 2 s; <code>readout.md</code> of the artefact).</p>
+
+<h3 id="l-vertical" class="toc">4.3 Altitude, angle and speed pieces</h3>
+<ul>
+<li><b>Pieces.</b> The labeller fits straight pieces to the smoothed height against the distance flown. A piece grows while a least-squares line keeps every residual within 10 m.</li>
+<li><b>Level.</b> A piece is level when it lasts at least 20 s and every row stays within 25 m of its median. The word is the grid level nearest to the median.</li>
+<li><b>Move.</b> Every other piece is a move with a path angle. A run of moves says its altitude word at its first row: the next level, or “no level-off” for the last descent of an approach. Each move says its angle class.</li>
+<li><b>Speed.</b> The labeller fits pieces to the ground speed with the same method. A <em>hold</em> lasts at least 20 s within ±5 m/s of a grid value. A <em>transition</em> says each grid value on the way (section 2.4). “Unspecified” starts at the capture row, with two exceptions that keep an assigned speed longer.</li>
+<li><b>Go-around.</b> A low pass is a run of rows on the final of one candidate, at most 600 m high. It is a go-around when the aircraft held a level at least 150 m above the lowest point both before and after the pass. The runway column says “go-around” in the row of the climb word. The labeller reads each approach separately (<span class="pill d">D26</span>): the words before a go-around must not tell a model that the approach will fail.</li>
+</ul>
+
+<h3 id="l-delta" class="toc">4.4 The row interval Δ</h3>
+<p>The data has a row every 2 s. The labeller reads each flight at 2 s. Then it puts the words on a grid of Δ seconds, so that one reading gives every Δ. Each word goes to the <b>nearest</b> Δ row (<span class="pill d">D45</span>). A word exactly between two rows goes to the later row. When one row holds several words of a column, it says the last one.</p>
+<div data-demo="delta_grid" data-title="The same turn on a 2 s, 4 s and 8 s grid"></div>
+<p>Why the nearest row and not the next row? A word put on the next row is late by (Δ − 2)/2 on average. At 70–100 m/s, 3 s of lateness leaves 200–300 m of lateral offset after a turn of 90°. The ablation would then measure the rounding and not the row interval. The user compared the readings of the three intervals and chose Δ = 4 s (<span class="pill d">D11</span>). A sentence at Δ = 4 s has about 89 rows. At Δ = 2 s it has about 179 rows (train, formal artefact).</p>
+<figure class="paper" data-fig="fig07_delta_grid"></figure>
+</section>

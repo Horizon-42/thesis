@@ -1,0 +1,67 @@
+<section id="s-executor">
+<h2 id="executor" data-toc="5 The executor">5 The executor</h2>
+<p>The executor is an autopilot that flies the words with the <t zh="质点动力学">point-mass dynamics</t> of the project. It has <b>no state that the words do not give</b> and no law that makes a track from the runway or from a procedure (principles 1–3). It is a deliberate choice that the executor is simple. A parameter that was mined from data would mean that the executor does not generalise.</p>
+<table>
+<thead><tr><th>The executor reads</th><th>It uses it for</th></tr></thead>
+<tbody>
+<tr><td>The vocabulary spec</td><td>Grids, nominal angles, lead, turn-rate limit, bank limit, speed-change rate</td></tr>
+<tr><td>The words of each row</td><td>The targets</td></tr>
+<tr><td>The course of each candidate runway</td><td>The conversion of heading words</td></tr>
+<tr><td>The airport elevation E</td><td>The conversion of level words (T + E)</td></tr>
+<tr><td>The distance to the threshold of R</td><td>The slow-down to the approach speed</td></tr>
+<tr><td>The aircraft: aerodynamics, thrust, landing mass, approach speed</td><td>The dynamics and the speed “unspecified”</td></tr>
+</tbody></table>
+<p>It does <b>not</b> read the threshold crossing height, the glidepath angle or the decision altitude. Only the judge reads them. A behaviour check proves this: if the executor flies the reference tracks again with every candidate’s vertical path changed and the frame’s origin moved, the states stay the same (<span class="pill d">D81</span>).</p>
+
+<h3 id="e-cycle" class="toc">5.1 One cycle: from wanted rates to controls</h3>
+<p>Each cycle lasts 1 s. The three laws below change the words in force into three <em>wanted rates</em>: the <t zh="航迹角速率">track rate</t> χ̇*, the path-angle rate γ̇* and the airspeed rate V̇*. An exact inversion of the point-mass equations then gives the three controls: <t zh="坡度">bank</t>, <t zh="载荷系数">load factor</t> and <t zh="推力">thrust</t>.</p>
+<pre class="out" style="font-family:var(--mono)">A = −χ̇*·V·cos γ / g        (= n·sin φ)
+B =  γ̇*·V / g + cos γ       (= n·cos φ)
+φ = atan2(A, B),   n = B / cos φ
+T = m·(V̇* + g·sin γ) + D(V, n, h)</pre>
+<p>The limits act in a fixed order. (1) Bank: at most 32°, and changed at most 5°/s from the first cycle. (2) Load factor: between 0.5 and 2.0. (3) Stall floor: the speed law asks for no airspeed below 1.10 times the stall speed at that load factor. (4) Thrust: between −20 % and 100 % of the installed thrust. The drag polar is clean: no flaps, no landing gear and no speedbrakes. The negative part of the thrust range stands for these devices. A limited bank costs turn rate, never path angle.</p>
+<div data-demo="inverse_cycle" data-title="One cycle: rates in, controls out"></div>
+
+<h3 id="e-lateral" class="toc">5.2 The lateral law</h3>
+<p>When the executor hears a heading word, it sets the absolute target θ = course(R) + 5k° and keeps it until the next heading word. The word says the track <b>L = 4 s later</b>. So the executor turns to arrive on θ at that time. The track rate is the <b>smallest of three rates</b>:</p>
+<ol>
+<li>the error divided by the time left until the lead runs out (not less than two cycles; after that, the executor holds θ);</li>
+<li>the <b>stopping rate</b> √(2·g·p·|e| / V): the fastest rate whose bank the executor can still take out before the error is gone. Here p is the roll rate. The executor cannot know which word ends a turn;</li>
+<li>the turn-rate limit of 4.7°/s.</li>
+</ol>
+<p>A new word measures its error from the target before it, so a series of words never reverses a turn while the aircraft lags behind. There is nothing else: no capture state, no turn onto the final and no centreline tracking.</p>
+<div data-demo="lateral_law" data-title="The lateral law: three rates, one bank"></div>
+
+<h3 id="e-vertical" class="toc">5.3 The vertical law</h3>
+<p>The inner loop turns a reference path angle into a rate: γ̇* = sat((γ_ref − γ)/τ_γ, ±γ̇max), with τ_γ = 2 s. The modes choose γ_ref:</p>
+<table>
+<thead><tr><th>Words in force</th><th>Mode</th><th>Reference γ_ref</th></tr></thead>
+<tbody>
+<tr><td>level T and level</td><td>Hold</td><td>−(h − T)/(V·τ_h), with τ_h = 8 s, inside the angles that the words know</td></tr>
+<tr><td>level T and a descent class</td><td>Descend to T</td><td>−nominal angle of the class; the level-off starts at V·γ²/(2·γ̇max) above T</td></tr>
+<tr><td>level T and climb, G false</td><td>Climb to T</td><td>+nominal climb angle; level-off as above</td></tr>
+<tr><td>level T and climb, G true</td><td>Go-around climb</td><td>+γ_GA, the go-around angle</td></tr>
+<tr><td>“no level-off” and a descent class</td><td>Descend, no level-off</td><td>−nominal angle of the class</td></tr>
+</tbody></table>
+<p>A target that the executor has captured stays captured until a new altitude word or angle word arrives. So the mode does not change back and forth at the level.</p>
+<div data-demo="vertical_law" data-title="The vertical law: capture, level-off, go-around climb"></div>
+
+<h3 id="e-speed" class="toc">5.4 The speed law</h3>
+<p>A speed word gives a ground speed. The executor flies it as the airspeed V_g / cos γ, but not below 1.10 times the stall speed. The speed changes at <b>a_max = 1.4 m/s²</b>, and it goes exponentially into the last 5 m/s, so the change is monotone and does not pass the target. A speed word is a step of 5 m/s, so the executor makes each step in a few seconds. The rate of a longer change comes from the words.</p>
+<p>The word “unspecified” is the published approach speed of the aircraft type. The executor scales it by √(m / maximum landing mass) and flies it as a true airspeed. It slows down to this speed at 0.25 m/s². If a larger rate is needed to reach it over the straight-line distance to the threshold, it uses that rate, but not more than a_max. While G is true, “unspecified” holds the airspeed that the aircraft had at the go-around row. Section 2.4 has the demo of the speed steps.</p>
+
+<h3 id="e-not" class="toc">5.5 What the executor does not do</h3>
+<ul>
+<li>It has no runway lock (<span class="pill d">D12</span>).</li>
+<li>It has no capture state, no turn onto the final, no heading bend and no own intercept (<span class="pill d">D2</span>).</li>
+<li>It has no centreline tracking (<span class="pill d">D3</span>).</li>
+<li>It has no special law for “no level-off”: no aim at the threshold and no tube limit.</li>
+<li>It has no glidepath floor and no level flight below the glidepath (<span class="pill d">D9</span>).</li>
+</ul>
+<p>The words do these things. Only the judge and the masks read the procedure.</p>
+
+<h3 id="e-start" class="toc">5.6 The start, the three ways to fly, and the check</h3>
+<p>A closed loop starts at the first predicted step, from the observed state of that row. The start reads <b>no sample after that row</b> (<span class="pill d">D77</span>). It takes the position and the height of the row. It takes the airspeed, the track and the path angle from the 2 s before the row (the rule <code>displacement-2s</code>, chosen by the user). The start bank is 0.</p>
+<p>The code has three ways to fly: a single-aircraft batch, a multi-aircraft batch (each flight starts at its own cycle), and a single flight in plain floats. They must give the same states. A <t zh="一致性检查">conformance check</t> flies 250 labelled train flights in every way and requires the same states within 1e-6 m. It runs every time that a process opens an executor. There is no digest of code (<span class="pill d">D73</span>). Section 8 explains this rule.</p>
+<figure class="paper" data-fig="fig04_executor_laws"></figure>
+</section>

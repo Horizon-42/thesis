@@ -1,0 +1,31 @@
+<section id="s-code">
+<h2 id="code" data-toc="11 Code map">11 Code map</h2>
+<p>All paths are relative to <code>4dTrajectory/ts_transformer/</code>. Stage A is on <code>dev-two-tier</code>. Stage B is on <code>dev-two-tier-v4-prior</code> and stage C on <code>dev-two-tier-v4-post</code>. Their worktrees are in <code>.claude/worktrees/</code>. Open the file, find the function.</p>
+<table>
+<thead><tr><th>Idea</th><th>Where</th><th>What to look for</th></tr></thead>
+<tbody>
+<tr><td>Words, grids, tolerances</td><td><code>instructions/words.py</code>, <code>spec.py</code></td><td><code>Words</code>, <code>grid_levels</code>, <code>VocabularySpec</code></td></tr>
+<tr><td>Grammar</td><td><code>instructions/grammar.py</code></td><td><code>_rules</code> (one definition), <code>apply</code>, <code>column_mask</code></td></tr>
+<tr><td>Envelopes</td><td><code>instructions/envelope.py</code></td><td>The tube of a word; one code for labeller, judge and display</td></tr>
+<tr><td>Heading reading</td><td><code>instructions/labeller/lateral.py</code></td><td><code>per_step_words</code>, <code>capture_row</code></td></tr>
+<tr><td>Altitude, angle, speed reading</td><td><code>instructions/labeller/vertical.py</code>, <code>speed.py</code>, <code>go_around.py</code></td><td>Pieces, levels, steps, low pass</td></tr>
+<tr><td>Row grid</td><td><code>instructions/labeller/interval.py</code></td><td>The nearest-row rule</td></tr>
+<tr><td>Artefact, readers</td><td><code>instructions/artefact.py</code>, <code>faults.py</code></td><td><code>closed_loop_sentences</code>, <code>SentenceRows</code>, <code>Withheld</code></td></tr>
+<tr><td>Executor, one cycle</td><td><code>autopilot/executor.py</code>, <code>inverse.py</code></td><td><code>attitude</code>, <code>thrust</code></td></tr>
+<tr><td>The three laws</td><td><code>autopilot/lateral.py</code>, <code>vertical.py</code>, <code>speed.py</code></td><td><code>word_rate</code>, <code>Vertical.rate</code>, <code>Speed.rate</code></td></tr>
+<tr><td>The start and the loop</td><td><code>autopilot/start.py</code></td><td><code>start</code>, <code>Loop.step</code>, <code>copy</code>, <code>halt</code></td></tr>
+<tr><td>Judge</td><td><code>autopilot/judge.py</code>, <code>ends.py</code></td><td><code>OUTCOMES</code>, <code>decision_check</code></td></tr>
+<tr><td>Closed-loop reading</td><td><code>autopilot/closed_loop.py</code></td><td><code>Corrector</code>, <code>ObservedPath.match</code>, <code>read</code></td></tr>
+<tr><td>Conformance checks</td><td><code>instructions/conformance.py</code>, <code>autopilot/conformance.py</code></td><td><code>require_conforming_*</code></td></tr>
+<tr><td>Prior: model</td><td><code>prior/model.py</code></td><td><code>Prior</code>, <code>rope_angles</code>, <code>CandidatePool</code>, <code>add_at_each_layer</code></td></tr>
+<tr><td>Prior: inputs</td><td><code>prior/inputs.py</code>, <code>batch.py</code>, <code>landings.py</code></td><td><code>OWN_FEATURES</code>, <code>CANDIDATE_FEATURES</code>, <code>motion</code></td></tr>
+<tr><td>Prior: speaker and masks</td><td><code>prior/speaker.py</code>, <code>procedure.py</code></td><td><code>Speaker.speak</code>, <code>draw</code>, <code>ProcedureMasks</code></td></tr>
+<tr><td>Prior: training</td><td><code>prior/train.py</code>, <code>selection.py</code>, <code>source.py</code></td><td><code>batch_nll</code>, <code>TrainConfig</code>, the rule <code>landed</code></td></tr>
+<tr><td>Prior: loop step</td><td><code>experiments/prior_speaking_loop.py</code></td><td><code>SpeakingLoop</code></td></tr>
+<tr><td>Post: window, reward</td><td><code>post/scene.py</code>, <code>reward.py</code>, <code>established.py</code></td><td><code>reward</code>, <code>present_runways</code></td></tr>
+<tr><td>Post: branches, loss</td><td><code>post/branches.py</code>, <code>loss.py</code></td><td><code>branch_points</code>, <code>Group.advantages</code>, <code>surrogate</code>, <code>pull_to_base</code></td></tr>
+<tr><td>Post: traffic</td><td><code>post/edges.py</code>, <code>traffic_attention.py</code>, <code>speed_mask.py</code></td><td><code>TOKEN_FEATURES</code>, <code>TrafficAttention</code>, <code>ramp_distance_m</code></td></tr>
+<tr><td>Separation judge</td><td><code>inference/separation.py</code>, <code>runway_schedule.py</code></td><td><code>IFR</code> and <code>VISUAL</code> readings</td></tr>
+</tbody></table>
+<p>Read the tests too. <code>tests/test_architecture.py</code> holds the import rules. The tests of each module show its contract with small inputs.</p>
+</section>
