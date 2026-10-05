@@ -84,7 +84,7 @@ Proposals (where the design says nothing): none open.
    |---|---|
    | After A34 of stage A (the formal artefact with D77–D84) | The smoke of B3, free generation and the check at the formal size at Δ = 4 s again, on A34's artefact (the candidates of an airport can change, D78); the formal runs read A34's artefact |
    | Now, before B5's formal campaign (the user, 2026-10-05) | B9: the interface for the post-training (D96), on synthetic artefacts. Its change of free generation's draws comes before any formal free generation: a payload that an experiment writes is settled before the experiment runs |
-   | After Claude's check of stage A (with A32–A36, vocabulary §12.2 item 8) and the user's choice of Δ (outline §4); A32 holds vocabulary D86 (the export gives val flights for the base's validation readout) | B5; B6's publication of the folds and the base; B7 |
+   | After Claude's check of stage A (with A32–A37, vocabulary §12.2 item 8; A38 changes no artefact and does not hold B5) and the user's choice of Δ (outline §4); A32 holds vocabulary D86 (the export gives val flights for the base's validation readout) | B5; B6's publication of the folds and the base; B7 |
 
 2. The post-training (`post_training.md`) is developed in parallel with the end of stage B, on its own branch, made
    from this one (outline §4, §5 rule 1; D95). It reads only §7; it merges this branch when B9 is committed.
