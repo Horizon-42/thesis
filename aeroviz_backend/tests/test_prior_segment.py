@@ -46,7 +46,7 @@ class SyntheticBackend(AutopilotSegmentBackend):
         params, words = test_start._params(), self.flown.words
         return Path("fixture/instruction_language"), Path("fixture/executor"), params, {"sha256": "fixture"}, words
 
-    def set_flown(self, sample, split, interval_s, instructions, words, opened=None):
+    def set_flown(self, sample, split, interval_s, instructions, params, words, opened=None):
         return self.flown.set
 
 
@@ -73,7 +73,7 @@ def world(tmp_path_factory):
     batch, missing = closed_loop.replay_batch(spy["batch"], {0: stored}, words)
     assert not missing
     flown = Flown()
-    flown.words, flown.set = words, SetFlown(batch, [stored])
+    flown.words, flown.set = words, SetFlown(batch, [stored], test_start._params())
     monkeypatch.undo()
     return {"root": root, "entry": index["sets"][0], "sample": sample, "readouts": readouts, "flown": flown, "geometry": geometry}
 

@@ -72,7 +72,8 @@ def on_words(batch: replay.Batch, j: int, sentence: Any, grid: np.ndarray, words
     sentences = list(batch.sentences)
     sentences[j] = told
     return (dataclasses.replace(batch, sentences=sentences),
-            dataclasses.replace(sentence, grid=grid, correction=np.zeros(grid.shape, dtype=bool)))
+            dataclasses.replace(sentence, rows=dataclasses.replace(sentence.rows, grid=grid,
+                                                                   correction=np.zeros(grid.shape, dtype=bool))))
 
 
 class PriorSegments:
@@ -109,9 +110,9 @@ class PriorSegments:
                 with self.backend._lock:
                     try:
                         sample = self.listed(airport, entry["id"])
-                        instructions, _, _, _, words = self.backend.executor_for(sample)
+                        instructions, _, params, _, words = self.backend.executor_for(sample)
                         self.backend.set_flown(sample, sample["cohort"]["split"], float(sample["model"]["rowIntervalS"]),
-                                               instructions, words)
+                                               instructions, params, words)
                     except Exception as error:   # noqa: BLE001 — a prefetch: logged by type; a request gets it whole
                         log(f"prior warm-up: {airport} {entry['id']} skipped — {type(error).__name__}: "
                             f"{str(error).split('; ')[0]}")
@@ -165,7 +166,7 @@ class PriorSegments:
             heard = row * int(round(interval / params.cycle_s))
             if heard > ended:
                 raise RequestRefused(f"the word at Δ row {row} is said at cycle {heard}, after the flight's outcome at cycle {ended}")
-            flown_set = backend.set_flown(sample, item["split"], interval, instructions, words)
+            flown_set = backend.set_flown(sample, item["split"], interval, instructions, params, words)
             opened = time.perf_counter()
             j = flown_set.position[item["datasetId"]]
             batch, inputs, sentence = flown_set.batch, flown_set.inputs, flown_set.sentences[j]
