@@ -9,8 +9,10 @@ aircraft of the batch, with a mask of the real ones.
 A sample without a scene (the single-aircraft samples of the data term, D36) gives the model no traffic (``extra``
 None): every row then has no other aircraft.
 
-**The module** (`TrafficAttention`): a token network shared by the tokens, then an attention from the row (its query,
-after a layer norm) to the row's own tokens, with ``heads`` heads. Its output layer starts at zero, so the prior with the
+**The modules** (`TrafficAttention`, one at each layer): one token network shared by the layers (`TrafficTokens`,
+D116) — the tokens of a step are embedded once in a forward pass, by the first layer's module, which keeps them on the
+input for the layers after it — then, in each layer, its own attention from the row (its query, after a layer norm) to
+the row's own tokens, with ``heads`` heads. Its output layer starts at zero, so the prior with the
 module added gives every output of the base, bit for bit (the start of the post-training, D29); and where a row has no
 other aircraft the output is zero at any weights, so a window without traffic is free generation (§2 item 1). The
 attention is a weighted sum over the tokens, so the order of the other aircraft changes nothing but the summation order.
@@ -21,7 +23,7 @@ attention is a weighted sum over the tokens, so the order of the other aircraft 
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable, Sequence
 
 import numpy as np
@@ -31,8 +33,9 @@ from torch import nn
 from ts_transformer.post.edges import EDGES_SCHEMA, TOKEN_FEATURES
 from ts_transformer.prior.model import Prior
 
-#: The name of this module's shape and input (a post-trained checkpoint's identity holds it, §4 item 3).
-TRAFFIC_ATTENTION_SCHEMA = "post-traffic-attention-v1"
+#: The name of this module's shape and input (a post-trained checkpoint's identity holds it, §4 item 3). v2 (D116): one
+#: token network shared by the layers.
+TRAFFIC_ATTENTION_SCHEMA = "post-traffic-attention-v2"
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,8 @@ class Traffic:
 
     tokens: torch.Tensor
     present: torch.Tensor
+    #: the tokens embedded by the shared token network in the present forward pass (the first layer's module sets it)
+    embedded: torch.Tensor | None = field(default=None, init=False, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.tokens.dim() != 4 or self.tokens.shape[-1] != len(TOKEN_FEATURES):
@@ -79,16 +84,27 @@ def traffic_of(rows: Sequence[Sequence[np.ndarray]], device: torch.device) -> Tr
     return Traffic(torch.as_tensor(tokens, device=device), torch.as_tensor(present, device=device))
 
 
-class TrafficAttention(nn.Module):
-    """One layer's module (module docstring): ``forward(x, extra)`` → ``[B, R, d]``."""
+class TrafficTokens(nn.Module):
+    """The token network that the layers share (D116): a token's features → ``[d]``."""
 
     def __init__(self, d: int, config: TrafficConfig) -> None:
         super().__init__()
+        self.net = nn.Sequential(nn.Linear(len(TOKEN_FEATURES), config.hidden), nn.GELU(), nn.Linear(config.hidden, d))
+
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        return self.net(tokens)
+
+
+class TrafficAttention(nn.Module):
+    """One layer's module (module docstring): ``forward(x, extra)`` → ``[B, R, d]``. ``first``: the first layer's,
+    which embeds the step's tokens with the shared ``tokens`` network for every layer of the forward pass."""
+
+    def __init__(self, d: int, config: TrafficConfig, tokens: TrafficTokens, *, first: bool) -> None:
+        super().__init__()
         if d % config.heads:
             raise ValueError(f"{config.heads} heads do not divide the prior's width {d}")
-        self.heads = config.heads
-        self.token = nn.Sequential(nn.Linear(len(TOKEN_FEATURES), config.hidden), nn.GELU(),
-                                   nn.Linear(config.hidden, d))
+        self.heads, self.first = config.heads, first
+        self.tokens = tokens
         self.norm = nn.LayerNorm(d)
         self.query, self.key, self.value = nn.Linear(d, d), nn.Linear(d, d), nn.Linear(d, d)
         self.out = nn.Linear(d, d)
@@ -103,7 +119,9 @@ class TrafficAttention(nn.Module):
             raise ValueError(f"traffic of {tuple(extra.tokens.shape[:2])} rows for {(batch, rows)} rows")
         head = d // self.heads
         others = extra.tokens.shape[2]
-        embedded = self.token(extra.tokens.to(x.dtype))                                    # [B, R, N, d]
+        if self.first:                      # once a forward pass: the layers after it read what it embedded
+            object.__setattr__(extra, "embedded", self.tokens(extra.tokens.to(x.dtype)))   # [B, R, N, d]
+        embedded = extra.embedded
         q = self.query(self.norm(x)).reshape(batch, rows, self.heads, head)
         k = self.key(embedded).reshape(batch, rows, others, self.heads, head)
         v = self.value(embedded).reshape(batch, rows, others, self.heads, head)
@@ -117,8 +135,9 @@ class TrafficAttention(nn.Module):
 
 
 def add_traffic_attention(model: Prior, config: TrafficConfig) -> None:
-    """Add a `TrafficAttention` at each layer of ``model`` (prior §7 item 5)."""
-    model.add_at_each_layer(lambda _: TrafficAttention(model.config.d_model, config))
+    """Add a `TrafficAttention` at each layer of ``model`` (prior §7 item 5), all of them on one `TrafficTokens`."""
+    tokens = TrafficTokens(model.config.d_model, config)
+    model.add_at_each_layer(lambda i: TrafficAttention(model.config.d_model, config, tokens, first=i == 0))
 
 
 def traffic_modules(model: Prior) -> list[TrafficAttention]:
@@ -132,7 +151,7 @@ def traffic_modules(model: Prior) -> list[TrafficAttention]:
 def parameter_groups(model: Prior, prior_lr: float, traffic_lr: float) -> list[dict[str, Any]]:
     """The optimizer's parameter groups (§2 item 5): the prior's own parameters at ``prior_lr``, the traffic modules' at
     ``traffic_lr``; every parameter in exactly one group."""
-    traffic: list[nn.Parameter] = [p for m in traffic_modules(model) for p in m.parameters()]
+    traffic: list[nn.Parameter] = list({id(p): p for m in traffic_modules(model) for p in m.parameters()}.values())
     ids = {id(p) for p in traffic}
     own: Iterable[nn.Parameter] = [p for p in model.parameters() if id(p) not in ids]
     return [{"params": list(own), "lr": prior_lr, "name": "prior"},

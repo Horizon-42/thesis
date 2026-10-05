@@ -140,6 +140,7 @@ def update_loss(model: Prior, start: PassStart, base: Prior, samples: Samples, d
     reward, words, clipped = surrogate(log_p, start_log_p, samples.advantage, samples.counted)
     kl = pull_to_base(log_p, base_log_p, samples.counted)
     teacher = data_term(model, data)
+    object.__setattr__(samples.traffic, "embedded", None)        # the input keeps no embedded tokens and their graph
     return LossParts(reward + KL_WEIGHT * kl + DATA_WEIGHT * teacher, reward, kl, teacher, words, clipped)
 
 

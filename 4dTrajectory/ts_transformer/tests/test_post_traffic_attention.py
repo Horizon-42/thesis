@@ -11,7 +11,8 @@ import torch
 from ts_transformer.instructions.words import Words
 from ts_transformer.post.edges import TOKEN_FEATURES
 from ts_transformer.post.traffic_attention import (
-    TRAFFIC_ATTENTION_SCHEMA, Traffic, TrafficAttention, TrafficConfig, add_traffic_attention, parameter_groups,
+    TRAFFIC_ATTENTION_SCHEMA, Traffic, TrafficAttention, TrafficConfig, TrafficTokens, add_traffic_attention,
+    parameter_groups,
     traffic_modules, traffic_of,
 )
 from ts_transformer.prior.batch import collate
@@ -159,5 +160,27 @@ def test_the_traffic_input_is_padded_and_masked():
     with pytest.raises(ValueError, match="same number of rows"):
         traffic_of([tokens[0], tokens[1][:1]], CPU)
     with pytest.raises(ValueError, match="heads"):
-        TrafficAttention(30, CONFIG)
+        TrafficAttention(30, CONFIG, TrafficTokens(30, CONFIG), first=True)
     assert CONFIG.to_dict()["schema"] == TRAFFIC_ATTENTION_SCHEMA
+
+
+def test_one_token_network_shared_by_the_layers_embeds_a_step_once():
+    """D116: every layer's module holds the same token network; a forward pass embeds the tokens once (the first
+    layer's module), and the layers after it read what it embedded."""
+    base, rows, rng = _setup(seed=5)
+    model = _with_module(base)
+    _randomize(model)
+    modules = traffic_modules(model)
+    assert len(modules) == SMALL["layers"] > 1
+    assert all(m.tokens is modules[0].tokens for m in modules) and [m.first for m in modules] == [True, False]
+    calls = []
+    modules[0].tokens.register_forward_hook(lambda module, inputs, output: calls.append(output.shape))
+    extra = _traffic(rng, 3, rows.present.shape[1])
+    with torch.no_grad():
+        first = model(rows, extra)
+        assert len(calls) == 1                                           # once for the two layers
+        again = model(rows, extra)                                       # the same input again: embedded again, alike
+    assert len(calls) == 2 and all(torch.equal(a, b) for a, b in zip(first, again))
+    shared = {id(p) for p in modules[0].tokens.parameters()}
+    counted = [id(p) for g in parameter_groups(model, 1e-4, 1e-3) for p in g["params"]]
+    assert shared <= set(counted) and len(counted) == len(set(counted))  # the shared parameters once
