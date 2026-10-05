@@ -1,5 +1,14 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-06 — Multi-aircraft optimization T7: traffic windows published to the comparison view
+
+- Viewer + builder (`78ce2fcb`, AV46): a `traffic:m1` summary publishes each solved group with its recorded neighbours
+  (`traffic.recorded`, `traffic.startOffsetsS` from the summary's arrivals roster); the frontend draws them pink at their
+  real time, clipped to the groups' clock, under the model budget. Built by a sonnet agent, reviewed (opus) twice.
+- Published (the user's order 2026-10-05): `4dTrajectory/outputs/KRDU/traffic_m1_runway_cons/` (read-only, SHA256SUMS)
+  and comparison category `traffic_m1_runway_cons` (50 groups; categories.json: this key only). The 5173 dev server
+  needs a restart to serve it (AV5).
+
 ### 2026-10-05 — Multi-aircraft optimization: a failed re-solve is retried once with the other branch (MD13)
 
 - The user's decision (MD13 (b)): in `traffic/loop.py` (M1, and M2 through it) a re-solve that fails is solved once

@@ -14,7 +14,7 @@ miles occur only in quoted text, with the SI value beside them.
 | Companion document | `code_review.md` (findings F1 to F13). Step T0 of this design needs F4, F5, F6 (item 3) and F7 |
 | Model of the scenario | The two-tier post-training "one aircraft commanded" (`ts_transformer/docs/two_tier/design/post_training.md` D29, D93) |
 | Dependency on `ts_transformer` | Two pure modules, read-only, through one adapter (§6, §7). No other import. No shared output |
-| Decision state | MD1, MD2, MD3 decided by the user (2026-10-05). MD4–MD6, MD9, MD10, MD12: built as recommended (Claude, within the rules). MD13 decided by the user (2026-10-05). MD7, MD8: T5 measured (§8.1), the user decides. MD11: not built (open). T7: the user asked for one published M1 sample (2026-10-05) |
+| Decision state | MD1, MD2, MD3 decided by the user (2026-10-05). MD4–MD6, MD9, MD10, MD12: built as recommended (Claude, within the rules). MD13 decided by the user (2026-10-05). MD7, MD8: T5 measured (§8.1), the user decides. MD11: not built (open). T7: one M1 sample published (the user, 2026-10-05; §8.3) |
 
 ### 0.2 Decisions
 
@@ -402,7 +402,7 @@ branch and worktree, with a review before each commit.
 | T4 | Baseline census: judge the baseline replays of a seeded sample of windows (no rows) | A readout to the user: windows with a loss that the commanded aircraft answers for, by reading, kind and airport; recorded aircraft per window; the frame error of §4.4 | T1, T3, MD5, MD6 | Done inside T5 (the baseline round of each window) |
 | T5 | Rows and loop (§5.3, §5.4) on 50 windows with a loss | A readout: outcome counts, iterations, rows, flight time change, solve time per window, memory. The user then decides MD7 and MD8 | T2, T4 | Done (§8.1); the user decides MD7, MD8 |
 | T6 | Traffic batch, records, resume (§9) | Full optimizer suite passes. Preflight on the real size: time and memory per window measured, disk estimate checked before the start | T5, MD7, MD8 | Done: `traffic_optimization.py`, `run_batch` sidecars; the preflight at the real size is open |
-| T7 | Evaluation of the commanded records and the CZML comparison (a new category) | The frontend shows a published window; checked in the browser | T6 | In progress: one M1 sample, KRDU (user, 2026-10-05); frontend by a sonnet agent |
+| T7 | Evaluation of the commanded records and the CZML comparison (a new category) | The frontend shows a published window; checked in the browser | T6 | Done (§8.3): one M1 sample, KRDU (user, 2026-10-05); frontend by a sonnet agent |
 | T8 | M2 (§5.6) | A readout like T5 for 5 blocks | T6, MD9 | Done (§8.2) |
 | T9 | M3 design (§5.7) | Only if T8 leaves losses that the order cannot remove | T8 | Not started |
 
@@ -422,6 +422,23 @@ branch and worktree, with a review before each commit.
 - Outcomes: 58 `separated_at_baseline` (the CTA solve alone keeps separation); 6 `separated` after re-solves; 1 `unresolved`; 9 `solve_failed` (3 at no delay, 6 delayed; IPOPT's cap, as in M1); 3 `slot_failed` (the CTA solve on the ETA's IAF failed; no other IAF is tried). 10 re-solves failed and were retried with the other branch (MD13); 3 retries solved.
 - After the block's final check, 16 flown aircraft have a VISUAL loss they answer for and 6 a VISUAL loss they do not answer for; IFR: 27 and 19.
 - The outputs are in a scratch directory: a measurement of the method, not a published result.
+
+### 8.3 T7 publication (KRDU, seed 11, 50 windows; code `78ce2fcb`)
+
+- Output: `4dTrajectory/outputs/KRDU/traffic_m1_runway_cons/` (records, sidecars, `summary.json`,
+  `evaluation_report.json` and `.html`, the run logs, `SHA256SUMS`; read-only). The same outcomes as §8.1.
+- Category `traffic_m1_runway_cons` in `aeroviz-4d/public/data/airports/KRDU/comparison/` (4 CZML files, 50
+  groups). `categories.json` got this one key and no other change (checked against a copy taken before the
+  write). The evaluation: 46 pass, 4 fail.
+- The viewer (AV46 in `aeroviz-4d/docs/35-viewer-reference.md`): each shown group with its recorded
+  neighbours in pink, at their real time relative to the commanded aircraft, clipped to the groups' clock.
+- Browser check (2026-10-06, the branch's frontend on a test port; Evaluate view, Result source
+  Optimization): the category loads without errors; the pink neighbours move on their approaches with the
+  commanded aircraft, some already in the air at the clock start, none held at a runway end; the Flights
+  table shows each window's outcome; the Reference switch hides the neighbours too; another category
+  shows none.
+- A running dev server does not serve files that were published after it started (AV5): the frontend on
+  5173 shows the category only after a restart.
 
 ## 9. Outputs and records
 
