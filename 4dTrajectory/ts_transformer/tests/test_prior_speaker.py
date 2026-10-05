@@ -164,7 +164,7 @@ SMALL = {"d_model": 32, "layers": 2, "heads": 4, "feedforward": 64}
 
 def setup(words, seed=0, count=4, first_step=8, rows=40):
     torch.manual_seed(seed)
-    model = Prior(PriorConfig.from_words(words, "full", **SMALL))
+    model = Prior(PriorConfig.from_words(words, "full", **SMALL)).eval()
     rng = np.random.default_rng(seed)
     sentences = [prior_sentence(rng, words, candidates=2, rows=rows, first_step=first_step) for _ in range(count)]
     return model, collate(sentences, CPU)
@@ -409,7 +409,12 @@ def test_the_log_probability_under_the_records_is_the_probability_the_speaker_dr
     from ts_transformer.prior.train import masked_log_probability
 
     model, rows = setup(words, seed=3, count=4)
-    speaker, said = speak_with(model, rows, words, list(range(4)), 20)
+    speaker = Speaker(model, words, [finals()] * 4, capacity=8)
+    first = int(rows.first[0].nonzero()[0, 0])
+    speaker.observe(rows.between(0, first), [spread(4, r) for r in range(first)])
+    drawn_numbers = numbers(11, 4, 20)
+    said = np.stack([speaker.speak(rows.between(r, r + 1), spread(4, r), drawn_numbers[r - first])
+                     for r in range(first, first + 20)], axis=1)
     first = int(rows.first[0].nonzero()[0, 0])
     part = rows.between(0, first + 20)
     targets = part.targets.clone()
@@ -430,7 +435,7 @@ def test_the_log_probability_under_the_records_is_the_probability_the_speaker_dr
     blocked = [k for k in np.flatnonzero(~record.masks[ALTITUDE][0, 0]) if k != 0]
     assert blocked
     targets[0, first, ALTITUDE] = int(blocked[0])
-    every = Permitted(tuple(np.ones_like(m) for m in record.masks), record.time_s, record.temperature)
+    every = Permitted(tuple(np.ones_like(m) for m in record.masks), record.time_s, record.own, record.temperature)
     with torch.no_grad():
         changed = part._replace(targets=targets)
         assert masked_log_probability(model, changed, record)[0, first, ALTITUDE] == float("-inf")
@@ -440,6 +445,13 @@ def test_the_log_probability_under_the_records_is_the_probability_the_speaker_dr
         later = part._replace(time_s=part.time_s + 1000.0)
         with pytest.raises(ValueError, match="no record of the rows"):
             masked_log_probability(model, later, record)
+        with pytest.raises(ValueError, match="another aircraft's records"):          # the records of other aircraft
+            masked_log_probability(model, changed, record.select([3, 2, 1, 0]))
+        # rows asked from 5 rows after the first said: each reads its own row's record
+        asked = told.asked.clone()
+        asked[:, first: first + 5] = False
+        torch.testing.assert_close(masked_log_probability(model, told._replace(asked=asked), record)[:, first + 5:].exp(),
+                                   drawn[:, 5:], rtol=1e-4, atol=1e-6)
 
 
 def test_a_copy_continued_with_the_same_inputs_and_numbers_says_what_the_original_says(words):
@@ -520,7 +532,7 @@ def test_records_of_airports_with_other_numbers_of_candidates_go_with_their_airc
     from ts_transformer.prior.train import masked_log_probability
 
     torch.manual_seed(7)
-    model = Prior(PriorConfig.from_words(words, "full", **SMALL))
+    model = Prior(PriorConfig.from_words(words, "full", **SMALL)).eval()
     rng = np.random.default_rng(7)
     sentences = [prior_sentence(rng, words, candidates=k, rows=40, first_step=8) for k in (2, 1)]
     rows = collate(sentences, CPU)
@@ -535,24 +547,50 @@ def test_records_of_airports_with_other_numbers_of_candidates_go_with_their_airc
     for r in range(13, 20):
         at = spread(2, r)
         said.append(copy.speak(alone.between(r, r + 1), Position(*(v[[1, 1]] for v in at)), drawn[r - 8][[1, 1]]))
-    record = copy.permitted()
-    assert record.masks[RUNWAY].shape[-1] == 4 and not record.masks[RUNWAY][:, 5:, 3].any()   # no candidate 2 after
+    copied = copy.permitted()
+    assert copied.masks[RUNWAY].shape[-1] == 4 and not copied.masks[RUNWAY][:, 5:, 3].any()   # no candidate 2 after
+    for r in range(13, 20):                                     # the original speaks on: the 2-candidate aircraft's rows
+        speaker.speak(rows.between(r, r + 1), spread(2, r), drawn[r - 8])
+    original = speaker.permitted().select([0])
+    first_ = copied.select([0])
+    record = Permitted(tuple(np.concatenate(pair) for pair in zip(first_.masks, original.masks)),
+                       np.concatenate([first_.time_s, original.time_s]), np.concatenate([first_.own, original.own]),
+                       first_.temperature)
     # the copy's first aircraft scored first in a batch with the 2-candidate aircraft (4 runway classes); its words: the
     # original's aircraft 1 to row 12, the copy's from row 13
     told = [said[k][1] for k in range(5)] + [said[k][0] for k in range(5, 12)]
     batch = collate([sentences[1], sentences[0]], CPU).between(0, 20)
     targets = batch.targets.clone()
     targets[0, 8:20] = torch.as_tensor(target_classes(np.stack(told)))
-    drawn_probability = np.concatenate([np.stack(speaker.drawn_probability)[:, 1],
-                                        np.stack(copy.drawn_probability)[5:, 0]])
+    batch = batch._replace(targets=targets)
     with torch.no_grad():
-        log_p = masked_log_probability(model, batch._replace(targets=targets), record)
-    torch.testing.assert_close(log_p[0, 8:20].exp(), torch.as_tensor(drawn_probability, dtype=torch.float32),
-                               rtol=1e-4, atol=1e-6)
-    # a record wider than the batch is refused only when it permits a class past it
-    narrow = collate([sentences[1]] * 2, CPU).between(0, 20)
-    masked_log_probability(model, narrow._replace(targets=narrow.targets), record)        # 3 classes: allowed
-    wide = Permitted(tuple(m.copy() for m in record.masks), record.time_s, record.temperature)
-    wide.masks[RUNWAY][:, 0, 3] = True
-    with pytest.raises(ValueError, match="past the batch"):
-        masked_log_probability(model, narrow, wide)
+        log_p = masked_log_probability(model, batch, record)
+        torch.testing.assert_close(log_p[0, 8:20].exp(), torch.as_tensor(np.stack(copy.drawn_probability)[:, 0],
+                                                                         dtype=torch.float32), rtol=1e-4, atol=1e-6)
+        # a record narrower than the batch's classes permits none of the extra ones (here: 3 of 4 runway classes)
+        narrow = Permitted(tuple(m[..., :3] if c == RUNWAY else m for c, m in enumerate(record.masks)), record.time_s,
+                           record.own, record.temperature)
+        torch.testing.assert_close(masked_log_probability(model, batch, narrow)[0], log_p[0])
+        # one wider than the batch is refused only when it permits a class past it
+        alone_batch = collate([sentences[1]] * 2, CPU).between(0, 20)
+        masked_log_probability(model, alone_batch, copied)                    # 4 wide, 3 classes: allowed
+        wide = Permitted(tuple(m.copy() for m in copied.masks), copied.time_s, copied.own, copied.temperature)
+        wide.masks[RUNWAY][:, 0, 3] = True
+        with pytest.raises(ValueError, match="past the batch"):
+            masked_log_probability(model, alone_batch, wide)
+
+
+def test_the_speaker_refuses_a_training_model_and_a_row_not_after_the_last(words):
+    model, rows = setup(words, seed=8, count=2)
+    with pytest.raises(ValueError, match="training"):
+        Speaker(model.train(), words, [finals()] * 2, capacity=8)
+    speaker = Speaker(model.eval(), words, [finals()] * 2, capacity=8)
+    first = int(rows.first[0].nonzero()[0, 0])
+    speaker.observe(rows.between(0, first), [position(2, r) for r in range(first)])
+    speaker.speak(rows.between(first, first + 1), position(2, first), numbers(1, 2, 1)[0])
+    with pytest.raises(ValueError, match="time order"):
+        speaker.speak(rows.between(first, first + 1), position(2, first), numbers(1, 2, 1)[0])
+    model.train()
+    with pytest.raises(ValueError, match="training"):
+        speaker.speak(rows.between(first + 1, first + 2), position(2, first + 1), numbers(1, 2, 1)[0])
+    model.eval()

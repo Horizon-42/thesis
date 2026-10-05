@@ -41,7 +41,7 @@ def generate(tmp_path, monkeypatch, *, interval_s=4.0, seed=0, most=MOST_GO_AROU
     finals = {geometry.code: tuple(Final(geometry, k, 9_000.0, fas_course_geometry(c.length_m))
                                    for k, c in enumerate(geometry.candidates))}
     torch.manual_seed(0)
-    model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64))
+    model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64)).eval()
     (generated,) = speak_and_fly(model, loop, order, {0: stored}, flights, geometries, landings, finals, words,
                                  interval_s=interval_s, variant="full", numbers=[flight_numbers(seed, 0, 0)],
                                  device=CPU)
@@ -211,7 +211,7 @@ def test_flights_done_at_different_rows_end_apart_and_never_feed_a_state_that_is
     made = []
     monkeypatch.setattr(runner, "Speaker", LateGoAround)
     torch.manual_seed(0)
-    model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64))
+    model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64)).eval()
     a, b = speak_and_fly(model, loop, [0, 1], {0: stored, 1: stored}, flights, geometries, landings, finals, words,
                          interval_s=4.0, variant="full",
                          numbers=[flight_numbers(1, 0, i) for i in (0, 1)], device=CPU)

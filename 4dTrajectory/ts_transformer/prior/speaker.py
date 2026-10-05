@@ -96,17 +96,20 @@ class Permitted:
     """The words every mask permitted at each row a speaker said (D96 item 3): for each column ``[B, rows, classes]``
     bool (the heads' class order; a class past an aircraft's own — a runway class of a candidate its airport does not
     have, or one past the width of the batch it was said in — is False), each row's time (``time_s`` [B, rows], the
-    aircraft's own seconds, as its inputs give it) and the temperature it drew with. The caller keeps it and gives it
-    back (`train.masked_log_probability`); it does not read it."""
+    aircraft's own seconds, as its inputs give it), each row's own-state inputs (``own`` [B, rows, features]: which
+    aircraft and row a record is, checked where it is read) and the temperature it drew with. The caller keeps it and
+    gives it back (`train.masked_log_probability`); it does not read it."""
 
     masks: tuple[np.ndarray, ...]
     time_s: np.ndarray
+    own: np.ndarray
     temperature: float
 
     def select(self, indices: Sequence[int]) -> Permitted:
         """The rows of the aircraft ``indices`` (repeats permitted), in that order."""
         indices = list(indices)
-        return Permitted(tuple(mask[indices] for mask in self.masks), self.time_s[indices], self.temperature)
+        return Permitted(tuple(mask[indices] for mask in self.masks), self.time_s[indices], self.own[indices],
+                         self.temperature)
 
 
 def runway_after(word: np.ndarray, in_force: Sequence[InForce | None], n_candidates: np.ndarray
@@ -133,11 +136,13 @@ class Speaker:
         cache has room for at first (it grows as a sentence needs, `model.Past.grown`)."""
         if not temperature > 0.0:
             raise ValueError(f"temperature {temperature}: it must be positive")
+        if model.training:
+            raise ValueError("the speaker's model is training (dropout on): a speaker speaks in eval mode")
         for finals_b in finals:
             geometry = finals_b[0].geometry
             if [f.index for f in finals_b] != list(range(len(geometry.candidates))):
                 raise ValueError(f"{geometry.code}: the finals are not one for each candidate, in the pointer's order")
-        self.model, self.words = model.eval(), words
+        self.model, self.words = model, words
         self.procedure = ProcedureMasks(finals, words)
         self.n_candidates = np.array([len(f) for f in finals], dtype=np.int64)
         self.temperature = temperature
@@ -158,6 +163,7 @@ class Speaker:
         #: (`permitted` stacks them; the runway column's width is the batch's, padded with False when stacked)
         self.permitted_rows: list[tuple[np.ndarray, ...]] = []
         self.permitted_times: list[np.ndarray] = []
+        self.permitted_own: list[np.ndarray] = []
         #: per row said: ``[B, 5]`` the probability of each word said in the distribution it was drawn from
         self.drawn_probability: list[np.ndarray] = []
         #: the go-arounds each aircraft has said (D68: a caller bounds them with `go_around_bound`)
@@ -189,6 +195,8 @@ class Speaker:
         if numbers.shape != (len(self.heard), len(COLUMNS)) or not ((numbers >= 0.0) & (numbers < 1.0)).all():
             raise ValueError(f"the numbers of a row: [{len(self.heard)}, {len(COLUMNS)}] in [0, 1), not "
                              f"{numbers.shape}")
+        if self.permitted_times and not (row.time_s[:, 0].cpu().numpy() > self.permitted_times[-1]).all():
+            raise ValueError("a row said at or before the time of the row said last: rows are said in time order")
         caller = dict(caller or {})
         self.procedure.track(at.e_m, at.n_m, at.height_m, self._go_around())
         h, tokens, self.past = self.model.extend(row, self.past, extra)
@@ -224,6 +232,7 @@ class Speaker:
         self.go_arounds += said[:, RUNWAY] == RUNWAY_GO_AROUND
         self.permitted_rows.append(tuple(permitted_row))
         self.permitted_times.append(row.time_s[:, 0].cpu().numpy().copy())
+        self.permitted_own.append(row.own[:, 0].cpu().numpy().copy())
         self.drawn_probability.append(drawn_row)
         return said
 
@@ -236,7 +245,8 @@ class Speaker:
             width = max(row[c].shape[1] for row in self.permitted_rows)
             masks.append(np.stack([np.pad(row[c], ((0, 0), (0, width - row[c].shape[1]))) for row in self.permitted_rows],
                                   axis=1))
-        return Permitted(tuple(masks), np.stack(self.permitted_times, axis=1), self.temperature)
+        return Permitted(tuple(masks), np.stack(self.permitted_times, axis=1), np.stack(self.permitted_own, axis=1),
+                         self.temperature)
 
     def copy(self, indices: Sequence[int]) -> Speaker:
         """A speaker of the aircraft ``indices`` of this one (repeats permitted), in that order (D96 item 5): their cache,
@@ -257,6 +267,7 @@ class Speaker:
         out.procedure_blocked = [{c: mask[indices] for c, mask in row.items()} for row in self.procedure_blocked]
         out.permitted_rows = [tuple(mask[indices] for mask in row) for row in self.permitted_rows]
         out.permitted_times = [row[indices] for row in self.permitted_times]
+        out.permitted_own = [row[indices] for row in self.permitted_own]
         out.drawn_probability = [row[indices] for row in self.drawn_probability]
         out.go_arounds = self.go_arounds[indices].copy()
         return out

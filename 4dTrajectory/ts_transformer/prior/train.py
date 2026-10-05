@@ -107,15 +107,16 @@ def masked_log_probability(model: Prior, rows: RowTensors, permitted: Permitted,
     """``[B, R, 5]``: the log-probability of the words ``rows.targets`` at each asked row, under the speaker's records
     ``permitted`` (`speaker.Permitted`: the words every mask permitted at each row it said, the rows' times, the
     temperature), teacher-forced with the caller's input of the added modules ``extra``, with gradients (D96 item 3); 0
-    at a row that is not asked. Each asked row reads the record of the row said at its time (refused when there is
-    none: records and rows of other aircraft or other rows); a record narrower than the batch's classes permits none of
+    at a row that is not asked. Each asked row reads the record of the row said at its time, refused when there is
+    none or when its own-state inputs are not the record's (records of another aircraft or another row); the caller
+    keeps records and rows of the same aircraft in the same order. A record narrower than the batch's classes permits none of
     the extra classes, one wider is refused unless its extra classes are all blocked. At the parameters that spoke, the
     probability is the one the speaker drew the word from (within the float tolerance); a word the record blocks has
     probability 0."""
     count, length = rows.asked.shape
     if permitted.time_s.shape[0] != count:
         raise ValueError(f"records of {permitted.time_s.shape[0]} aircraft for a batch of {count}")
-    asked, times = rows.asked.cpu().numpy(), rows.time_s.cpu().numpy()
+    asked, times, own = rows.asked.cpu().numpy(), rows.time_s.cpu().numpy(), rows.own.cpu().numpy()
     said = []                                   # for each aircraft, (its asked rows, the record row of each)
     for b in range(count):
         where = np.flatnonzero(asked[b])
@@ -123,7 +124,11 @@ def masked_log_probability(model: Prior, rows: RowTensors, permitted: Permitted,
         missing = [float(times[b, r]) for r in where if float(times[b, r]) not in at]
         if missing:
             raise ValueError(f"aircraft {b}: no record of the rows at {missing[:3]} s")
-        said.append((where, np.array([at[float(times[b, r])] for r in where], dtype=np.int64)))
+        rows_said = np.array([at[float(times[b, r])] for r in where], dtype=np.int64)
+        if not np.array_equal(own[b, where], permitted.own[b, rows_said]):
+            raise ValueError(f"aircraft {b}: its rows' inputs are not those its records were said with (another "
+                             f"aircraft's records, or another sentence)")
+        said.append((where, rows_said))
     logits = model(rows, extra)
     out = logits[0].new_zeros((count, length, len(logits)))
     for column, logit in enumerate(logits):
