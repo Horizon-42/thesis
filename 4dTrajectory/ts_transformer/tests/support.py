@@ -248,9 +248,13 @@ def labelled_instruction_artefact(directory, split="train"):
             (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
     flight = instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0), dataset_id="KXXX:a", split=split)
     directory.mkdir(parents=True)
+    # ``runway_ends_from``: the shape of `instruction_signals.runway_ends_from()` (a mirror: the real artefacts record the
+    # runway configuration and the CIFP the candidates were read from; `training_export.candidate_hae_minus_msl_m` reads it)
     write_signals(directory, {split: [flight]},
                   {"counts": {split: {"built_usable": 1}}, "test_days": {"flights_not_opened": 0},
-                   "sources": [{"airport": "KXXX", "arrival_manifest_sha256": "0" * 64}]}, fixture_days())
+                   "sources": [{"airport": "KXXX", "arrival_manifest_sha256": "0" * 64}],
+                   "runway_ends_from": {"config": "fixture/runway_thresholds.json", "config_sha256": "0" * 64,
+                                        "cifp": "fixture/FAACIFP18", "cifp_sha256": "0" * 64}}, fixture_days())
     write_candidates(directory, {"KXXX": instruction_airport()})
     spec = instruction_spec()
     write_spec(directory, spec, {"n": 1}, {"git": {"head": "test", "dirty": False}})
