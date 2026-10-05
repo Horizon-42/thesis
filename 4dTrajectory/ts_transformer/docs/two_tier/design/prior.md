@@ -53,11 +53,13 @@ The decision numbers are shared by all documents (outline §3).
 | D108 | B5's campaign runs on a clean checkout. Before each step it runs a behaviour check of the prior's code on fixed inputs: on the CPU with one thread, two steps of training on a fixed synthetic batch and some rows said by the speaker with fixed numbers; the losses, the words and the probabilities are compared, bit for bit, with those that the campaign recorded at its start, and a difference stops the campaign by name. The commit of each step is recorded as information and never compared. Why: results of different code are comparable once the code is shown to behave the same on fixed inputs, never by an equal commit (the user, 2026-10-02); no code fingerprint guards a run (the user, 2026-10-04) | Decided | User, 2026-10-05, on Claude's check of stage B |
 | D111 | The selection `landed` (D75) also leaves out a flight that stage A marks as having a faulty observed track (vocabulary D111, §6 item 3), whatever its outcome; `all` keeps every sentence. The run's record gives, for each split, airport and stratum, the sentences left out for a faulty track apart from those left out by their outcome (§8 item 1). Free generation and the post-training's starts are not changed (the user: the post-training may start from flights that do not land). Why: the closed-loop sentences of some flights with ADS-B faults land, and their observed rows — which the prior reads — hold the fault | Decided | User, 2026-10-05 |
 | D118 | Stage B's readings of B9–B11, accepted by the user: (1) a faulty flight that also did not land is left out for its fault (the mark is asked first); (2) the identity of a prior's data also holds the sha256 of each split's stored signals (§8 item 1): the faulty-track marks are read from the signals, so a reader before the claim of the val read (`open_prior`) checks the val marks by the files' sha256 without reading them (D85) — the training run itself reads val's outcomes and marks to count its identity, held and never shown (D120); it binds data, not code — it changes only when the artefact is built again, when the sentence files' sha256 changes too, so no change of code refuses a prior unless it changes which flights the selection keeps; (3) the claim of the val read names its readout relative to the repository; the base's one validation readout is two readers, each with its own claim (`prior_validation`: the teacher-forced loss and the masks on the labelled words; `prior_free_generation`: the free generation, whose set the Training view opens, D109); (4) the claimed validation set flies on a second service of stage A's live segment that permits val alone (outline D109), so stage A's code is not changed; (5) after the claim, the val readers count val's selection again and refuse a difference before they read (with (2), only a change of stage A's fault rule that moves no train or select mark can cause it; nothing is written, so the claim may be run again, D119); (6) a flight that the caller ends (post-training D93) gets the caller's outcome: the closed loop's step gives its words and states and refuses to give it an outcome of the judge; (7) D108's behaviour check takes the artefact's vocabulary spec and its first airport's finals as its fixed inputs, and covers two steps of training, the speaker, the input functions, the variant `constants`, the first-step runway and the closed loop's step on a straight-flying stand-in; the campaign also compares its own settings (the seeds, the selection, the configurations, free generation, the temperature, D68's bound); (8) a flight's random numbers in free generation come from numpy `default_rng([seed, sample, index])`; the log-probability under records is 0 at a row not asked, and an asked row reads the record said at its time, its own-state inputs checked against the record's. Free generation and the validation readout write the identity without the val counts (D85) | Decided | User, 2026-10-05 |
-| D119 | The one val read of a reader (D85, D118 item 3) is spent when the reader has written its readout. A reader claims the val read before it reads, and the claim names its output; a claim whose output holds no written readout (a run that stopped before it wrote: a crash, a kill) may be run again to the same output, and only to it. A runner checks its own options before it claims. A copy of a prior's run directory could read val again: a deliberate bypass, which the claim does not guard (it guards against accidents). B5's code spends the claim when it is written: if a val readout of B5 stops before it writes, Claude reports it and the user decides on the claim file (milestone B12 changes the code). Why: a claim spent at once refused the base's val readouts for ever after a crash, and the campaign's resume could not complete its last steps (Claude's second check of stage B, `readouts/2026-10-05_stage_b_check_2.zh.md` §2 item 1) | Decided | User, 2026-10-05, on Claude's second check of stage B |
+| D119 | The one val read of a reader (D85, D118 item 3) is spent when the reader has written its readout. A reader claims the val read before it reads, and the claim names its output; a claim whose output holds no written readout (a run that stopped before it wrote: a crash, a kill) may be run again to the same output, and only to it. A runner checks its own options before it claims; a rerun repeats the same read (D128). A copy of a prior's run directory could read val again: a deliberate bypass, which the claim does not guard (it guards against accidents). Why: a claim spent at once refused the base's val readouts for ever after a crash, and the campaign's resume could not complete its last steps (Claude's second check of stage B, `readouts/2026-10-05_stage_b_check_2.zh.md` §2 item 1) | Decided | User, 2026-10-05, on Claude's second check of stage B |
 | D120 | The identity of a prior run's data holds the counts of the selection of every split (§8 item 1), val included: the training run counts them. No text shows the val counts before the base's one validation readout (D85): the readouts write `checkpoint.readable_identity` (train and select only), and a report or summary reads no `identity.selection.counts.val` of a run's `config.json` or checkpoint. Why: they are counts of stage A's closed-loop sentences on val (outcomes, faulty-track marks); no input, stop or choice reads them; a change of the format after B5 would refuse B5's checkpoints (Claude's second check, §2 item 2) | Decided | User, 2026-10-05, on Claude's second check of stage B |
 | D121 | The speaker draws from the masked distribution at a temperature: the logits divided by it before the softmax (§4). Free generation, the readouts and the campaign of stage B use 1, the model's own distribution. The records of the permitted words hold the temperature, the log-probability under records uses it, and one batch of records has one temperature (§7 items 3, 4). A caller may set another (the post-training) | Decided | User, 2026-10-05, on Claude's second check of stage B |
 | D122 | The procedure masks keep, for each candidate, whether the aircraft has joined (been inside its region) and whether it has been below its entry height before the join, from its row 0 or from its last go-around (D64), whatever runway was in force at those rows: a change of runway outside a go-around starts neither again, and the new runway has the rows flown under the one before. Why: on the select days, none of the 5,861 sentences of `landed` at Δ = 4 s changes its runway outside a go-around, and the two readings differ on 0 rows (Claude's second check, §3 item 5): it bears on free generation | Decided | User, 2026-10-05, on Claude's second check of stage B |
 | D126 | §7 item 8 lists the function of stage B's Training export that the post-training's window export imports (`procedure_block`); the post-training imports exactly this name. Names only: no code changes. (The part of the vocabulary: D126 there) | Decided | User, 2026-10-05, on stage C's request |
+| D127 | The live segment of a prior sentence (B6, outline D109) is checked as stage A's segments are (vocabulary D73): the export writes each prior sentence's flown track unrounded, in its own sample format, and the backend refuses an answer whose states lie farther than the executor's bound (`STATE_BOUND_M`) from them (stage A's `fly.refuse_past_bound`), or whose outcome or end cycle differs from the sentence's (exact). Why: the export wrote the track to 0.1 m, so the 1e-6 m bound could not be applied and the prior's live answer was never refused, and it had no check of the outcome (stage B's request, checked in Claude's check of B12); a value that a later step computes from is not rounded for display (the user's rule) | Decided | User, 2026-10-06 |
+| D128 | A rerun of a val read (D119) repeats the same read: the claim records the reader's options (free generation: its airports, flights of each airport, samples, seed and chunk; the validation readout: its split), and a rerun with other options is refused by name. A runner that finds its output with its readout written while the claim is not marked spent marks it spent, then refuses. The claim file is written whole (atomically) and held under an exclusive lock while the reader runs, so two runs to one output cannot both read. B5's claims (written by B12's code, spent when its readouts are written) need no options: the export and the backend read only their output. Why: free generation writes its val sentences before its readout, so a run stopped between them leaves val results on disk while the claim may be run again; with the same options a rerun computes the same read, so nothing can be chosen after val has been seen; a kill between the readout and the spent mark left the claim open for good (Claude's check of B12, `readouts/2026-10-06_stage_b_b12_check.zh.md` §2 items 1, 2, 6, 7) | Decided | User, 2026-10-06, on Claude's check of B12 |
 
 ### 0.2 Open items
 
@@ -70,25 +72,25 @@ The commits, test counts and measurements of every milestone are in `readouts/20
 
 | Part | State |
 |---|---|
-| B0–B4, B8–B11 | Done, each reviewed. The code is on `dev-two-tier-v4-prior` (worktree `.claude/worktrees/two-tier-v4-prior`) and in `dev-two-tier` at `44f6000f`. B9: `1204fd8f`–`5313b6cd`; B10: `e4e7ba42`; B11 and outline D109: `df68c927`; stage A's line A37–A42 followed: `c072e355`, `89845fa6`, `5818fbbf` |
+| B0–B4, B8–B12 | Done, each reviewed. The code is on `dev-two-tier-v4-prior` (worktree `.claude/worktrees/two-tier-v4-prior`) and in `dev-two-tier` (B12 merged at `2190fe0a`). B9: `1204fd8f`–`5313b6cd`; B10: `e4e7ba42`; B11 and outline D109: `df68c927`; B12: `39d02ef8`; stage A's line A37–A43 followed: `c072e355`, `89845fa6`, `5818fbbf`, `1777b3ec` |
 | B6 | The export, the frontend and the live segment are done and checked on smoke sets (`b079ebef`, `ce601bd7`, `aac93945`, `201b4afd`, `a280d984`; the claimed val set `df68c927`). The publication of B5's sets waits for B5 |
-| B5 | Running since 2026-10-05 20:10 UTC: `4dTrajectory/outputs/POOLED/prior/prior_base_20261005`, on the artefact `v12_20261005` and the executor `v17_20261005` at Δ = 4 s, from `dev-two-tier` at `deaf9690` (`44f6000f` and its intent) |
-| B12 | Ordered (`notes/stage_b.md`); on `dev-two-tier-v4-prior`, merged into `dev-two-tier` after B5 |
-| B7 | After B5, B12 and B6's publication |
-| Claude's checks | At `5313b6cd` (`readouts/2026-10-05_stage_b_check.zh.md`; corrections B10, D105–D108) and at `44f6000f` (`readouts/2026-10-05_stage_b_check_2.zh.md`; corrections B12, D119–D122). Neither found a leak into an input, a mask or a choice |
+| B5 | Running since 2026-10-05 22:40 UTC: `4dTrajectory/outputs/POOLED/prior/prior_base_20261006` (`ts-prior-campaign-v3`), on the artefact `v12_20261005` and the executor `v17_20261005` at Δ = 4 s, from `dev-two-tier` at `278ffcfc` (B12's code). The first campaign, `prior_base_20261005`, was stopped by the user at its step 17, to run on B12's code |
+| B13 | Ordered (`notes/stage_b.md`); on `dev-two-tier-v4-prior`, merged into `dev-two-tier` after B5 |
+| B7 | After B5, B13 and B6's publication |
+| Claude's checks | At `5313b6cd` (`readouts/2026-10-05_stage_b_check.zh.md`; corrections B10, D105–D108) at `44f6000f` (`readouts/2026-10-05_stage_b_check_2.zh.md`; corrections B12, D119–D122), and of B12 at `2190fe0a` (`readouts/2026-10-06_stage_b_b12_check.zh.md`; corrections B13, D127, D128). None found a leak into an input, a mask or a choice |
 
 Proposals (where the design says nothing): none open.
 
 ### 0.4 Plan
 
-1. **B5** (running, §12). A report of it reads no val count of a run's identity (D120). If a val readout stops after its
-   claim, the user decides on the claim file (D119).
-2. **B12** (now, §12), on stage B's branch. No code goes into `dev-two-tier` while B5 runs: B5's guard before each step
-   does not see every change of the code (B12 item 2), and B12's behaviour check gives another answer, which would stop
-   B5.
-3. **B6's publication**, after B5: the set of each fold at its held-out airport and the base's claimed val set (outline
-   D109).
-4. **B7**, after B5, B12 and B6's publication.
+1. **B5** (running, §12). A report of it reads no val count of a run's identity (D120). A val readout that stops before
+   it writes its readout is run again to the same output (D119; B5 runs B12's code).
+2. **B13** (now, §12), on stage B's branch. No code goes into `dev-two-tier` while B5 runs: B13's behaviour check gives
+   another answer, which would stop B5 before its next step, and a resume of B5 needs B12's code. B5's results stay
+   valid under B13: it changes no input, model, training, draw or choice.
+3. **B6's publication**, after B5 and B13 (the export of D127): the set of each fold at its held-out airport and the
+   base's claimed val set (outline D109).
+4. **B7**, after B5, B13 and B6's publication.
 5. The post-training (`post_training.md`) is built in parallel on its own branch (outline §4, D95). It reads only §7;
    its formal runs wait for B5's base.
 
@@ -395,18 +397,18 @@ above those of the training airports for the same phase. The five airports and K
 The post-training and its code use this document only through these items and the decisions (the D numbers). Its
 code imports from `prior/` only the names in the column "Code" (an architecture test, post-training C0); everything
 else in `prior/` can change without a change of the post-training. Item 7 is a module under `experiments/`, which the
-post-training's runners and its window loop import by the names given. "B12" marks a change that milestone B12 makes;
+post-training's runners and its window loop import by the names given. "B13" marks a change that milestone B13 makes;
 its report gives the names that change, and Claude writes them here.
 
 | # | Item | What it gives | Code |
 |---|---|---|---|
-| 1 | The checkpoint | A trained prior in a format with its own name; its identity (§8); the set of procedure masks that it speaks under (§8 item 2); one function that opens a prior run: the checkpoint, the identity of its data and the check of its procedure masks (D106) | `prior/checkpoint.py` `load_checkpoint`, `CHECKPOINT_SCHEMA`; `prior/model.py` `Prior`; `prior/procedure.py` `PROCEDURE_MASKS`, `procedure_digests`; `prior/checkpoint.py` `open_prior`, `OpenedPrior` (the function that opens a prior run); the identity as a readout shows it and the one val read (D85, D118, D119): `prior/checkpoint.py` `readable_identity`, `validation_claim`, `holds_claim`; `prior/source.py` `require_selection_of` |
-| 2 | The inputs of a row | One function from the states on the data's 2 s rows (observed before the first predicted step, flown from it), the words said, the candidates and the landings before the step to the inputs of a row (§2). Training, free generation and a loop of several aircraft use the same function: for the sentences of the artefact; and in a loop, from each aircraft's states, its own landings (D105) and the speaker's words in force, the inputs of the next Δ row and the position that the masks read (D96). The landings: from the tracks roster, less the sealed test days (the index refuses them, D105), counted before a time without a given flight's own landing (D63). The motion of rows: the 2 s displacement, with the velocities east and north (D106) | `prior/inputs.py` `state_inputs`, `sentence_rows`, `own_flight_key`, `motion` (the motion of rows); `prior/loop.py` `LoopRows` (`select`; one `LandingIndex` for each aircraft; one first predicted step for the batch, B12); `prior/landings.py` `Landing`, `LandingIndex`; `prior/source.py` `airport_landings` |
-| 3 | The speaker | Says one row from the inputs of the row, column by column, with a cache from row to row; under the masks of §4, the masks of a caller included; draws each word with the caller's random numbers at a temperature (§4, D96, D121); refuses a row whose mark of the first predicted step is not the aircraft's own (no word in force), before it changes anything (B12); passes the caller's input of the added modules to the model; records the permitted words of each row and column; gives a copy of chosen aircraft (D96); refuses a model with any module in training mode (D107). A loop reads, and does not change, the words in force, the go-arounds said and the number of candidates (D106) | `prior/speaker.py` `Speaker` (`observe`, `speak`, `permitted`, `copy`; `heard`, `in_force`, `go_arounds`, `n_candidates`: read only), `Position`, `Permitted` (`select`, `join`: the join of several records), `draw`, `go_around_bound`, `MOST_GO_AROUNDS` |
+| 1 | The checkpoint | A trained prior in a format with its own name; its identity (§8); the set of procedure masks that it speaks under (§8 item 2); one function that opens a prior run: the checkpoint, the identity of its data and the check of its procedure masks (D106) | `prior/checkpoint.py` `load_checkpoint`, `CHECKPOINT_SCHEMA`; `prior/model.py` `Prior`; `prior/procedure.py` `PROCEDURE_MASKS`, `procedure_digests`; `prior/checkpoint.py` `open_prior`, `OpenedPrior` (the function that opens a prior run); the identity as a readout shows it and the one val read (D85, D118, D119, D128): `prior/checkpoint.py` `readable_identity`, `validation_claim`, `holds_claim`, `written_claim`, `spend_validation_claim`, `CLAIM_SPENT_BY`; `prior/source.py` `require_selection_of` |
+| 2 | The inputs of a row | One function from the states on the data's 2 s rows (observed before the first predicted step, flown from it), the words said, the candidates and the landings before the step to the inputs of a row (§2). Training, free generation and a loop of several aircraft use the same function: for the sentences of the artefact; and in a loop, from each aircraft's states, its own landings (D105) and the speaker's words in force, the inputs of the next Δ row and the position that the masks read (D96). The landings: from the tracks roster, less the sealed test days (the index refuses them, D105), counted before a time without a given flight's own landing (D63). The motion of rows: the 2 s displacement, with the velocities east and north (D106) | `prior/inputs.py` `state_inputs`, `sentence_rows`, `own_flight_key`, `motion` (the motion of rows); `prior/loop.py` `LoopRows` (`select`; one `LandingIndex` for each aircraft; one first predicted step for the batch, an int); `prior/landings.py` `Landing`, `LandingIndex`; `prior/source.py` `airport_landings` |
+| 3 | The speaker | Says one row from the inputs of the row, column by column, with a cache from row to row; under the masks of §4, the masks of a caller included; draws each word with the caller's random numbers at a temperature (§4, D96, D121); refuses a row whose mark of the first predicted step is not the aircraft's own (no word in force), before it changes anything; gives the row's words to the caller's last step (`accept`: a closed loop's executor) before it keeps the row, so a row the caller refuses leaves the speaker as it was; passes the caller's input of the added modules to the model; records the permitted words of each row and column; gives a copy of chosen aircraft (D96); refuses a model with any module in training mode (D107). A loop reads, and does not change, the words in force, the go-arounds said and the number of candidates (D106) | `prior/speaker.py` `Speaker` (`observe(rows, positions, extra)`, `speak(row, at, numbers, caller, extra, accept)`, `permitted`, `copy`; `heard`, `in_force`, `go_arounds`, `n_candidates`: read only), `Position`, `Permitted` (`select`, `join`: the join of several records), `draw`, `go_around_bound`, `MOST_GO_AROUNDS` |
 | 4 | The teacher-forced loss | The loss of each step and each column for a batch of sentences (§5); the sentences of a split under a selection rule (D75) as batches; the log-probability of given words under the speaker's records of the permitted words, with the input of the added modules, with gradients (D96), refused for a model with any module in training mode (D107); the rows of a sentence that a loop said, with its words as targets, as one batch (D106) | `prior/train.py` `batch_nll`, `masked_log_probability`; `prior/source.py` `ArtefactSource`; `prior/selection.py` `require_rule`, `kept(rule, outcome, faulty)`, `left_out`, `side`, `SIDES`, `REASONS`, `CELL` (a record's cells `kept`, `left_out_fault`, `left_out_outcome`; D111); `prior/batch.py` `collate`, `RowTensors`; the rows of a sentence a loop said: `SpeakingLoop.sentences` (item 7) |
 | 5 | A place in each layer | A module added at each layer whose output starts at zero leaves every output of the prior unchanged until it learns. Its input is what the caller gives the model and the speaker (item 3) | `prior/model.py` `Prior.add_at_each_layer` |
 | 6 | The region of a final | For each candidate, whether a position is inside the FAF and the LPV cone: the region of the procedure masks (D64) and of the rows "on the final" (D72) | `prior/procedure.py` `airport_finals`, `Final.inside` |
-| 7 | The step of a speaker's closed loop | The closed loop of a speaker and the executor, one Δ row at a time (D106): the observed rows that the start of the closed loop gives back (vocabulary §6 item 5: `start_moved`'s, a moved start's moved rows; never the stored sentence's, B12), then the inputs of each row, the speaker with the caller's numbers, masks and input of the added modules, the executor's step through the start of a closed loop, the flights done halted, a flight ended by the caller; a copy of its state for chosen flights; free generation's random numbers of a flight. Free generation and the post-training's window loop use it | `experiments/prior_speaking_loop.py` `SpeakingLoop` (the start's observed rows as an argument, B12; `copy(flights)` on the loop's own `Loop.copy`; `said(b)`, `states(b)`; `generated(flights)`, which refuses a flight the caller ended, D118), `Generated`; free generation's numbers `flight_numbers` |
+| 7 | The step of a speaker's closed loop | The closed loop of a speaker and the executor, one Δ row at a time (D106): the observed rows that the start of the closed loop gives back (vocabulary §6 item 5: `start_moved`'s, a moved start's moved rows; never read from the stored sentence), then the inputs of each row, the speaker with the caller's numbers, masks and input of the added modules, the executor's step through the start of a closed loop, the flights done halted, a flight ended by the caller; a copy of its state for chosen flights; free generation's random numbers of a flight. Free generation and the post-training's window loop use it | `experiments/prior_speaking_loop.py` `SpeakingLoop` (`SpeakingLoop(model, loop, order, sentences, observed, flights, geometries, landings, finals, words, *, interval_s, variant, device, temperature)`: `observed` the start's rows; the executor flies a row inside the speaker's `accept`, so a refused row leaves the loop as it was; `copy(flights)` on the loop's own `Loop.copy`; `said(b)`, `states(b)`; `generated(flights)`, which refuses a flight the caller ended, D118), `Generated`; free generation's numbers `flight_numbers` |
 | 8 | The Training export's procedure block | The block of a set that gives each candidate's region, glidepath lower edge, DA and entry height, as stage B's sets give it (D126) | `experiments/prior_training_export.py` `procedure_block` |
 
 ---
@@ -459,17 +461,17 @@ measured sizes belong to that prior and are not a baseline of this one.
 
 ## 11 Key code index
 
-At `44f6000f` (the code of B5). Paths relative to `4dTrajectory/ts_transformer/`.
+At `278ffcfc` (B12; the code that B5 runs). Paths relative to `4dTrajectory/ts_transformer/`.
 
 | What | Where |
 |---|---|
 | The features of a row: own, candidate, the variant `constants`, the words in force | `prior/batch.py:42`, `:47`, `:51`, `:54` |
 | A sentence's rows and targets (checked on construction); the heads' classes; a batch | `prior/batch.py:68` `SentenceRows`, `:150` `target_classes`, `:183` `collate` |
-| The motion of rows (D25, D60) | `prior/inputs.py:59` `motion` |
-| The inputs from the states (D13, D23, D24, D58, the scales of D41/D65) | `prior/inputs.py:85` `state_inputs` |
-| The words in force and `since` (D17), through the grammar | `prior/inputs.py:120` `Heard` |
-| A closed-loop sentence's rows: the inputs before the row's words | `prior/inputs.py:164` `sentence_rows` |
-| The flight's own key in the roster | `prior/inputs.py:203` `own_flight_key` |
+| The motion of rows (D25, D60) | `prior/inputs.py:60` `motion` |
+| The inputs from the states (D13, D23, D24, D58, the scales of D41/D65) | `prior/inputs.py:86` `state_inputs` |
+| The words in force and `since` (D17), through the grammar | `prior/inputs.py:121` `Heard` |
+| A closed-loop sentence's rows: the inputs before the row's words | `prior/inputs.py:165` `sentence_rows` |
+| The flight's own key in the roster | `prior/inputs.py:204` `own_flight_key` |
 | The landings: the index, its digest, the count in [t − 30 min, t) without the own landing, the roster | `prior/landings.py:38` `LandingIndex`, `:64` `digest`, `:71` `counts_before`, `:90` `roster_landings` |
 | A loop's row (D96 item 4, D105) | `prior/loop.py:31` `LoopRows` |
 | The model: RoPE, a layer's causal time attention with its cache, the candidate pool, the first layer's input, a column's logits | `prior/model.py:96` `rope_angles`, `:155` `Layer.extend`, `:184` `CandidatePool`, `:198` `Prior`, `:246` `Prior._inputs`, `:266` `Prior.column_logits` |
@@ -477,16 +479,17 @@ At `44f6000f` (the code of B5). Paths relative to `4dTrajectory/ts_transformer/`
 | The loss of each row and column; the per-step loss; the training loop and its stop (D31) | `prior/train.py:72` `step_nll`, `:92` `evaluate`, `:172` `train` |
 | Configuration A's training values (D40) | `prior/train.py:34` `TrainConfig` |
 | The log-probability under records (D96 item 3); the first-step runway | `prior/train.py:106` `masked_log_probability`, `:152` `first_step_runway` |
-| The speaker: the bound of D68, the draw, the records, observe, speak, copy, the masks of a row | `prior/speaker.py:72` `go_around_bound`, `:82` `draw`, `:95` `Permitted`, `:152` `Speaker`, `:208` `observe`, `:224` `speak`, `:298` `copy`, `:347` `_allowed` |
+| The speaker: the bound of D68, the draw, the records, observe, speak (with `accept`), copy, the masks of a row | `prior/speaker.py:72` `go_around_bound`, `:82` `draw`, `:95` `Permitted`, `:152` `Speaker`, `:208` `observe`, `:230` `speak`, `:316` `copy`, `:365` `_allowed` |
 | A final (region, edge, DA, entry height); the finals from the CIFP; the procedure masks (D64, D14, D122) | `prior/procedure.py:54` `Final`, `:84` `Final.inside`, `:95` `airport_finals`, `:119` `ProcedureMasks`, `:178` `permitted` |
 | The selection (D75, D111) and its record | `prior/selection.py:51` `left_out`, `:80` `selection_record` |
 | The identity of the data (§8 item 1); the val recount after the claim | `prior/source.py:45` `artefact_identity`, `:68` `require_selection_of` |
 | The artefact as sentences of a selection | `prior/source.py:87` `ArtefactSource` |
 | A run's data and a fold's held-out sentences (D39) | `prior/runs.py:51` `RunData`, `:78` `held_out_sentences` |
-| The checkpoint; the claim of the val read; the identity a readout shows; opening a prior run | `prior/checkpoint.py:65` `load_checkpoint`, `:98` `claim_validation_read`, `:112` `readable_identity`, `:130` `open_prior` |
-| The step of a speaker's closed loop (§7 item 7) and a flight's numbers | `experiments/prior_speaking_loop.py:76` `SpeakingLoop`, `:140` `SpeakingLoop.step`, `:46` `flight_numbers` |
-| The runners: training, free generation and its readout, the validation readout, the choice, the campaign, the behaviour check, the export | `experiments/prior_train.py:69`, `experiments/prior_free_generation.py:162`, `:120` `readout`, `experiments/prior_validation.py:94` `masks_readout`, `experiments/prior_select.py:113` `choose_configuration`, `:124` `choose_variant`, `experiments/prior_campaign.py:119` `plan`, `:242` `run_campaign`, `experiments/prior_behaviour.py:171` `behaviour`, `experiments/prior_training_export.py:169` `fly_again` |
-| The backend's live segment of a prior sentence | `aeroviz_backend/autopilot_segment/prior.py:82` `PriorSegments` |
+| The checkpoint; the claim of the val read, its spent mark, a written claim (D119); the identity a readout shows; opening a prior run | `prior/checkpoint.py:65` `load_checkpoint`, `:103` `claim_validation_read`, `:126` `spend_validation_claim`, `:136` `written_claim`, `:146` `readable_identity`, `:164` `open_prior` |
+| The step of a speaker's closed loop (§7 item 7) and a flight's numbers | `experiments/prior_speaking_loop.py:78` `SpeakingLoop`, `:148` `SpeakingLoop.step`, `:48` `flight_numbers` |
+| The runners: training, free generation and its readout, the validation readout, the choice, the campaign, the behaviour check | `experiments/prior_train.py:69`, `experiments/prior_free_generation.py:164`, `:122` `readout`, `experiments/prior_validation.py:95` `masks_readout`, `experiments/prior_select.py:119` `choose_configuration`, `:130` `choose_variant`, `experiments/prior_campaign.py:120` `plan`, `:246` `run_campaign`, `experiments/prior_behaviour.py:246` `behaviour` |
+| The Training export: the procedure block (§7 item 8), a prior sentence flown again | `experiments/prior_training_export.py:91` `procedure_block`, `:170` `fly_again` |
+| The backend's live segment of a prior sentence and its comparison with the export (D127) | `aeroviz_backend/autopilot_segment/prior.py:83` `PriorSegments`, `:54` `apart_from_exported` |
 
 ---
 
@@ -509,9 +512,10 @@ The formal runs read `v12_20261005` / `v17_20261005` at Δ = 4 s. The rules of o
 | B10 | The corrections of Claude's check of stage B; the base's val set (outline D109) | D64, D72, D85, D105–D108 | Done |
 | B11 | The selection leaves out flights with a faulty observed track | D111, D118 | Done |
 | B5 | Cross-validation and the base | D39–D41, D75, D108 | Running |
-| B12 | The corrections of Claude's second check of stage B | D108, D119–D122 | Ordered |
-| B6 | The Training view of stage B | Outline §6, D109 | The view done; the publication after B5 |
-| B7 | The close of stage B | — | After B5, B12, B6 |
+| B12 | The corrections of Claude's second check of stage B | D108, D119–D122 | Done |
+| B13 | The corrections of Claude's check of B12 | D108, D127, D128 | Ordered |
+| B6 | The Training view of stage B | Outline §6, D109, D127 | The view done; the publication after B5 and B13 |
+| B7 | The close of stage B | — | After B5, B13, B6 |
 
 The specifications of the milestones that are done are in `readouts/2026-10-05_stage_b_implementation_log.md` §3.
 
@@ -527,42 +531,37 @@ The specifications of the milestones that are done are in `readouts/2026-10-05_s
   runway at the held-out airport, the free generation at the held-out airport (§5).
 - No criterion is applied: the user reads the results (D7).
 
-**B12. The corrections of Claude's second check of stage B** (`readouts/2026-10-05_stage_b_check_2.zh.md`; D108,
-D119–D122). On stage B's branch, on synthetic artefacts; merged into `dev-two-tier` only after B5 has ended: its
-behaviour check gives another answer, so a campaign started before it stops by name under it (§0.4). The report gives
-the changed names for §7 items 2, 3 and 7.
+**B13. The corrections of Claude's check of B12** (`readouts/2026-10-06_stage_b_b12_check.zh.md`; D108, D127,
+D128). On stage B's branch, on synthetic artefacts; merged into `dev-two-tier` only after B5 has ended: its behaviour
+check gives another answer, so B5 would stop under it. It changes no input, model, training, draw or choice, so B5's
+results stay valid. The report gives the changed names for §7.
 
-- D119: a claim of the val read whose output holds no written readout may be run again to the same output (both
-  readers, `prior_validation` and `prior_free_generation`); free generation checks its options (`--airports`) before
-  it claims. The export and the backend take a val readout only when it is written and claimed.
-- D108's guard (D118 item 7): the campaign's settings (the seeds, the selection, the configurations, free generation,
-  the temperature, D68's bound) come from the code on the disk — the process of the behaviour check gives them in its
-  answer —, not from the campaign's own process. The behaviour check also covers `inputs.sentence_rows` on a fixed
-  synthetic sentence (with a flight key of the real format), the selection (`kept`, `left_out`) over every rule ×
-  outcome × mark, and `prior_select`'s rules on a fixed table of scores (a tie of parameters, a score at exactly twice
-  the seed scale, a seed scale of 0). The campaign's format gets a new name.
-- The speaker (§7 item 3): a row whose mark of the first predicted step differs, for an aircraft, from "no word in
-  force" is refused; `observe` refuses positions that are not one for each row and each aircraft; both before any
-  change.
-- The step of a speaker's closed loop (§7 item 7): `SpeakingLoop` takes the observed rows before the first predicted
-  step as the start gives them back (`start_moved`'s; `NO_MOVE` is `start` bit for bit) and refuses rows of another
-  shape; of a sentence it reads only its first row and its first predicted step. Free generation gives it the rows of
-  `start_moved` with `NO_MOVE`: its words, states and readout stay the same, bit for bit (a test). A row that the
-  executor refuses (vocabulary D80) leaves the speaker, the loop's records and its row as they were.
-- `LoopRows` takes one first predicted step for the batch.
-- `prior_select` refuses a score that is not finite, by name; it checks every training value of a fold against its
-  arm (the learning rate, the weight decay, the patience, the epochs, the warm-up, the clip, the padded rows of a batch,
-  the RoPE base); the campaign's selection rule has one definition.
-- D121, D122: no change of the code; a test holds D122 (a change of runway outside a go-around keeps the join and the
-  passage of the candidate).
-- `prior/inputs.py`'s docstring and `tests/test_prior_inputs.py` name what the motion must not read as §2 does.
-- Tests: the D23 test and free generation's test of the fields it must not read, with a flight key of the real format
-  (`<airport>:<id>_<runway>_<icao24>_<landing time>`), its runway and time changed with the own landing; free
-  generation's test gives the changed sentences to the start too; `prior_train` prints train and select only (its
-  output tested); the val readers refuse every read of val before the claim (the sentences, the stored outcomes, the
-  faulty-track marks); a fold through the runner: a change of the held-out airport's data leaves the checkpoint the
-  same; the choice at its edges; the campaign's settings from a second process; the speaker's two refusals; a moved
-  start's rows reach the inputs of the first predicted step.
+- D128: the claim records the reader's options (free generation: its airports, flights of each airport, samples, seed
+  and chunk; the validation readout: its split); a rerun to the same output with other options is refused by name; a
+  runner that finds its output with its readout written and the claim not marked spent marks it spent, then refuses;
+  the claim file is written whole (a temporary file linked to its name) and held under an exclusive lock while the
+  reader runs. Free generation refuses a negative seed and a repeated airport before it claims. A spent claim without
+  options (B5's, written by B12's code) is read for its output only.
+- D108's guard: in the behaviour check, the fixed sentence has landings in the 30 min before its rows on two or more
+  candidates, its own landing between two of its rows and another landing at the same second on another runway; the
+  speaking loop's aircraft each have their own landing index, with landings before their rows; the answer also holds
+  `kept` and `side` over every rule × outcome × mark, the campaign's plan of steps for a fixed record (each step's
+  runner and arguments) and free generation's draw of flights from a fixed set. On a resume, the campaign's refusal
+  names what differs from its start record. The comment of the choice's fixed table says which configurations are
+  within.
+- D127: the export writes each prior sentence's flown track unrounded (its sample format gets a new name; the
+  frontend's reader and fixtures follow); the backend's `apart_from_exported` calls stage A's
+  `fly.refuse_past_bound(…, "the readout's flown states")` and refuses an outcome or an end cycle that differs from the
+  sentence's. The export calls `checkpoint.written_claim` (one definition of a written claim) and refuses by name a val
+  output without its readout before it reads any of its files.
+- Tests: a kill between the readout and the spent mark (both readers); free generation's val path to its end on a
+  synthetic artefact with val days (the spent mark, a rerun after a crash with the same and with other options, the
+  recount after the claim); a second run to one output refused while the first holds the lock; the backend against a
+  real claim file (no stand-in for `written_claim`); the val set opened once by two threads; D127's refusals (a state
+  past the bound, another outcome, another end cycle); `LoopRows`' refusal of a start that is not one int; a change of
+  each new part of the behaviour answer changes the answer.
+- Not ordered: tying the observed rows to the `Loop` that the start returns (a change of stage A's start); stage C
+  passes them as the start gives them.
 
 **B6. The Training view of stage B (outline §6).** The user sees what the prior says and how the executor flies it.
 
@@ -570,12 +569,13 @@ the changed names for §7 items 2, 3 and 7.
   step; the sentences that the prior says in free generation and their flown states (several sentences of one flight
   side by side); the closed-loop sentence of the same flight; the outcome and the DA check of each; at each row, the
   words that the procedure masks blocked; the region, the glidepath lower edge, the DA and the entry height of R. Every
-  prior sentence is flown again and must equal its readout's states within the executor's bound. Sets: each fold of B5
+  prior sentence is flown again and must equal its readout's states within the executor's bound; its track is written
+  unrounded (D127). Sets: each fold of B5
   at its held-out airport (the flights of its free generation), and the base model (its one validation readout, only
   when claimed, outline D109). Its own schema names and its own index beside stage A's (outline §6 item 3).
 - **Frontend.** The Training view of stage A with the prior's sentences: the five columns, a choice of sentence, the
   blocked words at a row, the procedure's limits drawn, the outcome. A click on a word flies its segment live with the
-  executor of stage A; the base's val set opens and flies live, and no other set with a val flight opens (outline
+  executor of stage A, refused past the executor's bound from the exported track or with another outcome (D127); the base's val set opens and flies live, and no other set with a val flight opens (outline
   D109).
 - **Publication and view** (after B5). The intent of each set in `docs/experiments/intents.json`; a test stack from the
   worktree; the browser check (outline §6 items 4–6).

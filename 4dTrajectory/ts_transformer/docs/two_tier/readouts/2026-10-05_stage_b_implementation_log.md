@@ -57,7 +57,7 @@ changed); 3 (the runway head's class order) is a detail of the code. The code fo
 | After A36 of stage A (`split_flights`, the closed-loop part of A23's export as one function), merged into this branch | B6's export of the closed-loop sentences beside the prior's own, through `split_flights` at the prior's Δ; stage B does not change A23's code |
 | After A32 of stage A (the corrections of Claude's review, vocabulary D77–D84), merged into this branch | The reader of item 3 with the later-row fields apart (D82), the start that reads no sample after the first predicted step (D77) and the candidates decided by no flight (D78), followed in `prior/` and its runners; the tests on synthetic artefacts again |
 
-## 3 Specifications of the milestones that are done (was §12: B0–B4, B8–B11)
+## 3 Specifications of the milestones that are done (was §12: B0–B4, B8–B12)
 
 **B0. Package and layout.**
 
@@ -224,3 +224,40 @@ flight with a faulty start fails whatever is said: vocabulary D111). The report 
 item 4 if they change. Tests: a marked flight that landed is left out under `landed` and kept under `all`; the record
 counts it apart; a change of a flight's mark changes no input of its rows; a marked flight's free generation is
 unchanged; the readout counts the two reasons apart.
+
+**B12. The corrections of Claude's second check of stage B** Moved here from the design on 2026-10-06, after B12 was done (`39d02ef8`, merged into `dev-two-tier` at `2190fe0a`). (`readouts/2026-10-05_stage_b_check_2.zh.md`; D108,
+D119–D122). On stage B's branch, on synthetic artefacts; merged into `dev-two-tier` only after B5 has ended: its
+behaviour check gives another answer, so a campaign started before it stops by name under it (§0.4). The report gives
+the changed names for §7 items 2, 3 and 7.
+
+- D119: a claim of the val read whose output holds no written readout may be run again to the same output (both
+  readers, `prior_validation` and `prior_free_generation`); free generation checks its options (`--airports`) before
+  it claims. The export and the backend take a val readout only when it is written and claimed.
+- D108's guard (D118 item 7): the campaign's settings (the seeds, the selection, the configurations, free generation,
+  the temperature, D68's bound) come from the code on the disk — the process of the behaviour check gives them in its
+  answer —, not from the campaign's own process. The behaviour check also covers `inputs.sentence_rows` on a fixed
+  synthetic sentence (with a flight key of the real format), the selection (`kept`, `left_out`) over every rule ×
+  outcome × mark, and `prior_select`'s rules on a fixed table of scores (a tie of parameters, a score at exactly twice
+  the seed scale, a seed scale of 0). The campaign's format gets a new name.
+- The speaker (§7 item 3): a row whose mark of the first predicted step differs, for an aircraft, from "no word in
+  force" is refused; `observe` refuses positions that are not one for each row and each aircraft; both before any
+  change.
+- The step of a speaker's closed loop (§7 item 7): `SpeakingLoop` takes the observed rows before the first predicted
+  step as the start gives them back (`start_moved`'s; `NO_MOVE` is `start` bit for bit) and refuses rows of another
+  shape; of a sentence it reads only its first row and its first predicted step. Free generation gives it the rows of
+  `start_moved` with `NO_MOVE`: its words, states and readout stay the same, bit for bit (a test). A row that the
+  executor refuses (vocabulary D80) leaves the speaker, the loop's records and its row as they were.
+- `LoopRows` takes one first predicted step for the batch.
+- `prior_select` refuses a score that is not finite, by name; it checks every training value of a fold against its
+  arm (the learning rate, the weight decay, the patience, the epochs, the warm-up, the clip, the padded rows of a batch,
+  the RoPE base); the campaign's selection rule has one definition.
+- D121, D122: no change of the code; a test holds D122 (a change of runway outside a go-around keeps the join and the
+  passage of the candidate).
+- `prior/inputs.py`'s docstring and `tests/test_prior_inputs.py` name what the motion must not read as §2 does.
+- Tests: the D23 test and free generation's test of the fields it must not read, with a flight key of the real format
+  (`<airport>:<id>_<runway>_<icao24>_<landing time>`), its runway and time changed with the own landing; free
+  generation's test gives the changed sentences to the start too; `prior_train` prints train and select only (its
+  output tested); the val readers refuse every read of val before the claim (the sentences, the stored outcomes, the
+  faulty-track marks); a fold through the runner: a change of the held-out airport's data leaves the checkpoint the
+  same; the choice at its edges; the campaign's settings from a second process; the speaker's two refusals; a moved
+  start's rows reach the inputs of the first predicted step.

@@ -1,27 +1,27 @@
 # 阶段 B：当前命令
 
 只放最新一条命令，新命令整份覆盖，不是日志（过程记在 `readouts/2026-10-05_stage_b_implementation_log.md`）。
-2026-10-05，Claude 写，用户转发。上一条的第 1–5 步已做完（`5818fbbf`、`b24c11be`）；它的 A43 部分并入下面第 1 步。
+2026-10-06，Claude 写，用户转发。上一条（A43 的钩子、B12）已做完（`1777b3ec`、`39d02ef8`，B12 已合进 dev-two-tier `2190fe0a`）。
 
 ```
-B5 在跑（主树 dev-two-tier，prior_base_20261005）。本条全部在 dev-two-tier-v4-prior 上做，B5 结束前不合进 dev-two-tier。
-依据：prior.md §0.1 D119–D122，§12 B12（逐条照做），§7 第 3、7 项；复审报告 readouts/2026-10-05_stage_b_check_2.zh.md。
+B13：B12 复审的修正。B5 在跑（主树 dev-two-tier，prior_base_20261006，B12 的代码）。
+本条全部在 dev-two-tier-v4-prior 上做，B5 结束前不合进 dev-two-tier：B13 的行为检查答案会变，合进去 B5 就会在下一步前停下。
+依据：prior.md §0.1 D127、D128，§12 B13（逐条照做）；复审报告 readouts/2026-10-06_stage_b_b12_check.zh.md。
 
-B5 期间的规矩：
-- 不碰主树的代码，不用 GPU；只跑单文件测试和 B 的测试，全量套件等 B5 结束。
-- 主树上只改你的实现日志，改完立刻用显式路径提交（B5 每步之前查树是否干净，树一脏它就停）。
+B5 期间的规矩：不碰主树的代码，不用 GPU；只跑单文件测试和 B 的测试，全量套件等 B5 结束；
+主树上只改你的实现日志，改完立刻用显式路径提交（树一脏 B5 就停）。
 
-1. 先做上一条剩下的 A43 部分：把 dev-two-tier-v4（60bbc901 或更新）合进本分支，然后改你自己的钩子
-   aeroviz_backend/autopilot_segment/prior.py：
-   - 第 204 行的注释改成 "# before the set is opened (A37)"；
-   - 第 158 行预热外面那层 with self.backend._lock: 去掉（A 的预热已不拿请求锁，每个集合用自己的锁）；
-   - apart_from_exported 算完距离后调 fly.refuse_past_bound(horizontal_m, vertical_m, flight, against)，
-     against 写 "the readout's flown states"，测试照 A 的写法补一条。
-2. B12（prior §12）：D119 的重跑和 --airports 先查；D108 的守卫（设置由行为检查的进程给出，行为检查加上
-   sentence_rows、选择规则、prior_select 的规则，战役格式换新名）；说话器的两处拒绝；SpeakingLoop 接收起点
-   给回的观测行（自由生成用 start_moved 的 NO_MOVE，结果逐位不变）、执行器拒绝的行不留痕迹；LoopRows 一个首步；
-   prior_select 的拒绝和核对；D122 的测试；inputs.py 的说明文字；§12 列的各项测试。
-3. 每步：单文件测试 → 独立审查（只审代码）→ 用显式路径提交。
-4. 重写 requests_from_b_to_designer.md；报告：提交号、测试数，§7 第 3、7 项改了的名字和签名。
-不改 instructions/、autopilot/，也不改 A 阶段的运行器。
+1. D128：登记记下读数器的参数，重跑参数不同按名字拒绝；发现读数已写出而登记未标已用，先补标再拒绝；
+   登记文件原子写、运行期间独占锁；自由生成在登记前拒绝负种子和重复机场。B5 的登记（B12 写的、已用、无参数）只按输出读。
+2. D108 的守卫：行为检查的固定句子和说话循环要有真正计入的落地（30 分钟窗口内、多个候选、自身落地夹在两行之间、
+   同一秒另一跑道的落地；三架各用自己的索引）；答案加上 kept、side、战役 plan 给出的各步参数、自由生成的 draw；
+   续跑时的报错写明与开始记录哪里不同；改 prior_behaviour.py 那条说错的注释。每个新加部分各做一个"改了答案就变"的测试。
+3. D127：导出按原值写先验句子的飞行轨迹（样本格式换新名，前端读取和夹具跟进，夹具由导出写）；
+   后端 apart_from_exported 调 A 的 fly.refuse_past_bound(…, "the readout's flown states")，结果或结束周期不同也拒绝；
+   导出改调 checkpoint.written_claim，没有读数的 val 输出在读任何文件前按名字拒绝。
+4. §12 B13 列的测试全部补上。
+5. 每步：单文件测试 → 独立审查（只审代码）→ 用显式路径提交。
+6. 重写 requests_from_b_to_designer.md（§1 第 1、2 条随旧战役作废；§3 第 1、2 条已定为 D127）；
+   报告：提交号、测试数、§7 改了的名字和签名。
+不改 instructions/、autopilot/，也不改 A 阶段的代码和运行器。
 ```
