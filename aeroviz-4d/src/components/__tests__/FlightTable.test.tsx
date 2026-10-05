@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { FlightComparisonDatum } from "../../hooks/useFlightComparisonData";
 
-type Optional = "landedRunway" | "trafficOutcome";
+type Optional = "landedRunway" | "trafficOutcome" | "trafficDelayS";
 type Datum = Omit<FlightComparisonDatum, Optional> & Partial<Pick<FlightComparisonDatum, Optional>>;
 
 const { appState, comparisonData } = vi.hoisted(() => ({
@@ -199,5 +199,20 @@ describe("FlightTable", () => {
     expect(screen.getByText("UPS1276").getAttribute("title")).toBe(`${UPS} — traffic: separated`);
     expect(screen.getByText("FDX1738").getAttribute("title"))
       .toBe(`${FDX} — optimized but missed the target (off target) — traffic: solve_failed`);
+  });
+
+  it("adds a scene group's delay (rounded) to its row's info text, and none when it has no slot", () => {
+    comparisonData.comparisonActive = true;
+    comparisonData.byFlightKey = new Map<string, Datum>([
+      [UPS, { initialVMps: 141.85, massKg: 66300, resultTimeS: 576, status: "solved",
+              trafficOutcome: "separated_at_baseline", trafficDelayS: 12.5 }],
+      [FDX, { initialVMps: 148.7, massKg: 77800, resultTimeS: null, status: "failed",
+              trafficOutcome: "BaselineFailed: slot solve", trafficDelayS: null }],
+    ]);
+    render(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
+    fireEvent.click(screen.getByRole("button", { name: /Flights/ }));
+    expect(screen.getByText("UPS1276").getAttribute("title")).toBe(`${UPS} — traffic: separated_at_baseline — delay 13 s`);
+    expect(screen.getByText("FDX1738").getAttribute("title"))
+      .toBe(`${FDX} — optimization failed — traffic: BaselineFailed: slot solve`);
   });
 });

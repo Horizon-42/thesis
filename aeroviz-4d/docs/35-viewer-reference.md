@@ -913,3 +913,44 @@ tearing the layer down — or a reload — removes them with the other sources, 
 nothing. The neighbours follow the Reference switch and show their callsign on hover. The outcome (`separated`,
 `solve_failed`, …) is in the flight list row's tooltip (`<flight_key> — <label> — traffic: <outcome>`), only while the
 comparison is active.
+
+### AV47 · an M2 run as one scene: every group on one clock, the background once (2026-10-06)
+
+Contract: `4dTrajectory/docs/multi_aircraft_optimization/design.md` §9 "Viewer, M2: one scene". An M1 run is a set of
+independent windows (AV46); an M2 run (`traffic_optimization.py m2`: the scheduled blocks of one directory, one
+`summary.json` of mode `traffic:m2`) is ONE scene, because its aircraft are scheduled against each other.
+
+Builder (`build_scenario_comparison_czml.py`; no flags, everything from the summary). `traffic:m1` and `traffic:m2` are the
+only `traffic:` modes it publishes (MIRRORS of `traffic/__init__.py` `M1_MODE`, `M2_MODE`; any other is refused by name). The
+roster is `optimization_config.traffic.selection.manifest` (current arrivals schema only, as AV46). The scene clock starts at
+`S` = the **earliest `entry_time_utc` of all groups, solved and unsolved**; every group's entry is read from the roster and
+cross-checked against its record (a solved group's states file, an unsolved group's eval file; a different entry means the
+roster is not the one the run flew; a group the roster lacks is refused by name). Each group (solved or not) gets
+`scene: {startOffsetS, outcome, delayS}`: `startOffsetS` its entry minus `S` (to the millisecond); a **solved** group takes the
+`outcome` and `slot.delay_s` of its block sidecar (schema exactly `optimization-traffic-block-v2`, a MIRROR of `traffic/block.py`
+`BLOCK_RECORD_SCHEMA`; a missing or other-schema sidecar is refused by name); an **unsolved** group takes the row's `reason`
+as its outcome (a row without one is refused) and its delay from `summary.blocks[].slots` by `flight_key` (`null`: it has no
+slot). **Its optimizer and simulator paths are written on the scene clock** (their times plus `startOffsetS`; the record's own
+`finalTimeS` is still its flight time). The index gets `scene: {startUtc, background: {recorded, startOffsetsS}}`: the
+background is the union of the solved sidecars' `recorded` minus every group (a group is never background), sorted, each once,
+as `ref-<flight_key>` ids with roster entry minus `S` (negative: already there before the scene starts); a key the roster
+lacks is refused by name. The `categories.json` entry carries the base fields only (key, label, dir, groups, constrained). A
+group of a scene index carries `scene` and never `traffic`.
+
+Frontend (`isComparisonIndex`: an index with `scene` has it on every group, an index without has it on none; a group with
+both `scene` and `traffic` is refused). `selectComparisonGroups` shows **every group of a scene — no sample, and the runway
+selector cuts nothing** (a group left out would leave the others' separation unexplained). The backend serves each reference on
+its own entry clock; `sceneReferencePackets` moves each scene group's reference by its `startOffsetS` (ids stay the flight
+keys), and a reference is **available only while it flies** (on a shared clock one that has landed must not hold at its
+runway for the rest of the scene). The viewer clock is the groups' spans on the scene clock: the result files' clocks (written
+on it) and the shifted references' spans, **not** the backend's document clock (it is the unshifted references'). The background
+is requested once for the whole scene (in requests of at most `MAX_FLIGHT_KEYS_PER_REQUEST`), drawn once per aircraft (entity
+`traffic-scene/<flight_key>`) in the neighbours' pink under the same rules as AV46: `DEFAULT_MODEL_BUDGET` aircraft models,
+the Reference switch, availability clipped to the clock (a background aircraft that enters after the clock stop is not even
+loaded; no clock is an error). The group references are one backend request, so a scene of more than 1000 groups is refused by
+the backend's key limit (the M1 sample path is cut to the sample count). The flight list tooltip of a scene group:
+`<flight_key> — <label, if any> — traffic: <outcome> — delay <delayS rounded> s` (no delay part when `delayS` is null).
+
+Measured on the 12-group KRDU example (one 30-minute block): 12 groups (1 unsolved), 23 background aircraft, scene start
+`2026-05-21T17:47:18.959Z`, group entries 0 .. 2076 s after it, groups' spans 0 .. 2501 s (the last result path ends at
+2368 s); `check-publication` reports 0 errors.

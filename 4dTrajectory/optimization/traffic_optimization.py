@@ -143,8 +143,11 @@ def _fly_one_block(payload: tuple[str, list[FlightScenario], Traffic, dict[str, 
                                    rollout_dt_s=params["rollout_dt_s"], solve_options=params["solve_options"])
     except Exception as exc:  # noqa: BLE001 — batch tool: one failed block is recorded, the others go on
         error = f"{type(exc).__name__}: {str(exc).partition(chr(10))[0][:200]}"
-        return label, [(s, None, None, f"block failed: {error}") for s in scenarios], {
-            "aircraft": len(scenarios), "scheduled": 0, "eta_failed": 0, "slot_failed": 0, "error": error}
+        failed = f"block failed: {error}"
+        return label, [(s, None, None, failed) for s in scenarios], {   # the shape of fly_block's summary
+            "aircraft": len(scenarios), "scheduled": 0, "eta_failed": 0, "slot_failed": 0,
+            "schedule_speed_mps": None, "slots": [], "outcomes": {s.source["flight_key"]: failed for s in scenarios},
+            "final_losses": {}, "error": error}
     out = []
     for f in flown:
         if f.result is None:

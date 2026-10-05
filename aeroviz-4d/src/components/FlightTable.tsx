@@ -99,12 +99,16 @@ export default function FlightTable({ flightIds, flightSummaries }: FlightTableP
                 ? comparisonOutcome(comparison, resultKind)
                 : null;
               const callsign = summary?.callsign ?? id;
-              // The row's info text: the flight, its outcome, and a traffic window's outcome.
+              // The row's info text: the flight, its outcome, a traffic window's or scene group's outcome, and
+              // a scene group's delay (none when it has no slot).
               const info = [
                 id,
                 outcome?.label,
                 comparisonActive && comparison?.trafficOutcome
                   ? `traffic: ${comparison.trafficOutcome}`
+                  : undefined,
+                comparisonActive && comparison?.trafficDelayS != null
+                  ? `delay ${Math.round(comparison.trafficDelayS)} s`
                   : undefined,
               ].filter(Boolean).join(" — ");
               return (

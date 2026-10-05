@@ -51,10 +51,11 @@ function group(key: string, runway: string, recorded: string[], startOffsetsS: n
   };
 }
 
-function indexOf(groups: unknown[]) {
+function indexOf(groups: unknown[], scene?: unknown) {
   return {
     schemaVersion: "comparison-v2-generation", generation: "g", epoch: EPOCH, startHidden: true,
     referenceSource: "canonicalObserved", evaluationReport: "r.json", groups,
+    ...(scene ? { scene } : {}),
   };
 }
 
@@ -75,10 +76,23 @@ const NEIGHBOUR_DURATION_S = 300;
 const REFERENCE_DURATION_S = 200;
 
 /** Answers the index, the comparison CZMLs and the backend's arrival window; records each backend request's keys. */
-function serve(groups: unknown[], requests: string[][], { withClock = true }: { withClock?: boolean } = {}) {
+function serve(
+  groups: unknown[],
+  requests: string[][],
+  { withClock = true, scene, resultClockS, backendClockS = REFERENCE_DURATION_S }:
+    { withClock?: boolean; scene?: unknown; resultClockS?: number; backendClockS?: number } = {},
+) {
   router.serve = async (url: string) => {
-    if (url.endsWith("/comparison_index.json")) return indexOf(groups);
-    if (url.endsWith(".czml")) return [{ id: "document", name: "result", version: "1.0" }];
+    if (url.endsWith("/comparison_index.json")) return indexOf(groups, scene);
+    if (url.endsWith(".czml")) {
+      return [{
+        id: "document", name: "result", version: "1.0",
+        ...(resultClockS === undefined ? {} : { clock: {
+          interval: `${EPOCH}/${epochPlus(resultClockS).toString()}`, currentTime: EPOCH,
+          multiplier: 60, range: "LOOP_STOP", step: "SYSTEM_CLOCK_MULTIPLIER",
+        } }),
+      }];
+    }
     const keys = new URL(url, "http://backend").searchParams.getAll("flight_key");
     requests.push(keys);
     return {
@@ -88,7 +102,7 @@ function serve(groups: unknown[], requests: string[][], { withClock = true }: { 
           id: "document", name: "observed", version: "1.0",
           ...(withClock ? {
             clock: {
-              interval: `${EPOCH}/${epochPlus(REFERENCE_DURATION_S).toString()}`, currentTime: EPOCH,
+              interval: `${EPOCH}/${epochPlus(backendClockS).toString()}`, currentTime: EPOCH,
               multiplier: 60, range: "LOOP_STOP", step: "SYSTEM_CLOCK_MULTIPLIER",
             },
           } : {}),
@@ -131,6 +145,9 @@ beforeEach(() => {
   requests = [];
   appState.viewer = viewer;
   appState.selectedRunway = null;
+  appState.trajectorySampleCount = 0;
+  appState.trajectoryComparisonCategory = "traffic_m1_runway";
+  appState.layers = { trajectories: true };
   appState.trajectoryComparisonKinds = { ...appState.trajectoryComparisonKinds, reference: true };
 });
 
@@ -323,5 +340,175 @@ describe("useComparisonTrajectoryLayer with a traffic window", () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(requests).toEqual([[A]]);
     expect(trafficSource(viewer)).toBeUndefined();
+  });
+  it("reloads a traffic window's category when the sample count changes (only a scene ignores it)", async () => {
+    const [a1] = sampleKeys("A", 1);
+    serve([group(A, "05L", [a1], [10]), group(B, "05R", [a1], [20])], requests);
+
+    const { rerender } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    const first = trafficSource(viewer)!;
+    appState.trajectorySampleCount = 1;
+    rerender();
+    await waitFor(() => expect(viewer.dataSources.remove).toHaveBeenCalledWith(first, true));
+  });
+});
+
+// ── An M2 run as one scene ───────────────────────────────────────────────────
+
+/** A scene group: no `traffic` of its own; its place on the scene clock. */
+function sceneGroup(key: string, runway: string, startOffsetS: number) {
+  const { traffic: _traffic, ...plain } = group(key, runway, [], []);
+  return { ...plain, scene: { startOffsetS, outcome: "separated", delayS: 0 } };
+}
+
+function sceneOf(background: string[], startOffsetsS: number[]) {
+  return {
+    startUtc: "2026-05-21T17:47:18.959Z",
+    background: { recorded: background.map((key) => `ref-${key}`), startOffsetsS },
+  };
+}
+
+const referenceSource = (viewer: Viewer) =>
+  viewer.sources.find((source) => source.entities.values.some((entity) => entity.id === A));
+const referenceEntity = (viewer: Viewer, key: string) => referenceSource(viewer)!.entities.getById(key)!;
+const spanSeconds = (entity: Cesium.Entity): [number, number] => [
+  Cesium.JulianDate.secondsDifference(entity.availability!.start, epochPlus(0)),
+  Cesium.JulianDate.secondsDifference(entity.availability!.stop, epochPlus(0)),
+];
+
+describe("useComparisonTrajectoryLayer with an M2 scene", () => {
+  it("shows every group, whatever the sample count and the runway selector", async () => {
+    appState.trajectorySampleCount = 1;
+    appState.selectedRunway = "05L";
+    serve([sceneGroup(A, "05L", 0), sceneGroup(B, "05R", 500)], requests, { scene: sceneOf([], []) });
+
+    const { result } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(result.current.isLoaded).toBe(true));
+    expect(requests).toEqual([[A, B]]);
+    expect(result.current.flightIds.sort()).toEqual([A, B]);
+  });
+
+  it("draws each group's reference on the scene clock, at its offset, and only while it flies", async () => {
+    serve([sceneGroup(A, "05L", 0), sceneGroup(B, "05R", 500)], requests, { scene: sceneOf([], []) });
+
+    renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(referenceSource(viewer)).toBeDefined());
+    // the backend serves both at their own entry (0 .. 200 s); B enters 500 s into the scene
+    expect(spanSeconds(referenceEntity(viewer, A))).toEqual([0, REFERENCE_DURATION_S]);
+    expect(spanSeconds(referenceEntity(viewer, B))).toEqual([500, 500 + REFERENCE_DURATION_S]);
+    const lonAt = (key: string, seconds: number) => Cesium.Math.toDegrees(Cesium.Cartographic.fromCartesian(
+      referenceEntity(viewer, key).position!.getValue(epochPlus(seconds))!).longitude);
+    expect(lonAt(B, 500)).toBeCloseTo(-78.0, 6);                       // B's first sample, 500 s in
+    expect(lonAt(B, 600)).toBeCloseTo(-77.5, 4);                       // half way along its 200 s track at 600 s
+  });
+
+  it("loads the background once for the whole scene, not once per group", async () => {
+    const [bg1, bg2] = sampleKeys("G", 2);
+    serve([sceneGroup(A, "05L", 0), sceneGroup(B, "05R", 500)], requests,
+      { scene: sceneOf([bg1, bg2], [10, 20]) });
+
+    renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    expect(trafficIds(viewer).sort()).toEqual([`traffic-scene/${bg1}`, `traffic-scene/${bg2}`].sort());
+    expect(requests).toEqual([[A, B], [bg1, bg2]]);                    // one request for the background
+  });
+
+  it("puts the background on the scene clock and clips it to the clock like a traffic window's neighbours", async () => {
+    const [before, inside, after] = sampleKeys("G", 3);
+    // The groups span 0..700 s on the scene clock (B's shifted reference ends last). The background (300 s long)
+    // enters 100 s before it, 650 s into it, 900 s after its start.
+    serve([sceneGroup(A, "05L", 0), sceneGroup(B, "05R", 500)], requests,
+      { scene: sceneOf([before, inside, after], [-100, 650, 900]), resultClockS: 650, backendClockS: 900 });
+
+    renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    const end = 500 + REFERENCE_DURATION_S;
+    expect(spanSeconds(trafficSource(viewer)!.entities.getById(`traffic-scene/${before}`)!)).toEqual([0, REFERENCE_DURATION_S]);
+    expect(spanSeconds(trafficSource(viewer)!.entities.getById(`traffic-scene/${inside}`)!)).toEqual([650, end]);
+    expect(trafficSource(viewer)!.entities.getById(`traffic-scene/${after}`)).toBeUndefined();     // after the stop: not loaded
+  });
+
+  it("takes the viewer clock from the groups' spans on the scene clock, shifted references included", async () => {
+    const [bg] = sampleKeys("G", 1);
+    // The result files' clock stops at 650 s, the backend's own document clock at 900 s; the shifted reference of B
+    // ends at 700 s. The scene clock is 0 .. 700: the longest group span, not the backend's unshifted document.
+    serve([sceneGroup(A, "05L", 0), sceneGroup(B, "05R", 500)], requests,
+      { scene: sceneOf([bg], [900]), resultClockS: 650, backendClockS: 900 });
+
+    renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(viewer.clock.stopTime).toBeDefined());
+    expect(Cesium.JulianDate.secondsDifference(viewer.clock.startTime as Cesium.JulianDate, epochPlus(0))).toBe(0);
+    expect(Cesium.JulianDate.secondsDifference(viewer.clock.stopTime as Cesium.JulianDate, epochPlus(0))).toBe(700);
+  });
+
+  it("gives only the references' model budget of the background an aircraft model", async () => {
+    const background = sampleKeys("G", DEFAULT_MODEL_BUDGET + 10);
+    serve([sceneGroup(A, "05L", 0)], requests, { scene: sceneOf(background, background.map(() => 10)) });
+
+    renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    const now = Cesium.JulianDate.now();
+    expect(trafficSource(viewer)!.entities.values.filter((e) => e.model!.show!.getValue(now))).toHaveLength(DEFAULT_MODEL_BUDGET);
+  });
+
+  it("shows the background and the references with the Reference switch", async () => {
+    const [bg] = sampleKeys("G", 1);
+    serve([sceneGroup(A, "05L", 0)], requests, { scene: sceneOf([bg], [10]) });
+
+    const { rerender } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)?.show).toBe(true));
+    expect(referenceSource(viewer)!.show).toBe(true);
+
+    appState.trajectoryComparisonKinds = { ...appState.trajectoryComparisonKinds, reference: false };
+    rerender();
+    await waitFor(() => expect(trafficSource(viewer)!.show).toBe(false));
+    expect(referenceSource(viewer)!.show).toBe(false);
+  });
+
+  it("draws no background source for a scene without one", async () => {
+    serve([sceneGroup(A, "05L", 0)], requests, { scene: sceneOf([], []) });
+
+    const { result } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(result.current.isLoaded).toBe(true));
+    expect(result.current.error).toBeNull();
+    expect(trafficSource(viewer)).toBeUndefined();
+    expect(requests).toEqual([[A]]);
+  });
+
+  it("does not reload when the runway selector or the sample count changes: they change nothing in a scene", async () => {
+    const [bg] = sampleKeys("G", 1);
+    serve([sceneGroup(A, "05L", 0), sceneGroup(B, "05R", 500)], requests, { scene: sceneOf([bg], [10]), resultClockS: 650 });
+    const answer = router.serve;
+    let fetches = 0;
+    router.serve = (url: string) => { fetches += 1; return answer(url); };
+
+    const { rerender, result } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(trafficSource(viewer)).toBeDefined());
+    await waitFor(() => expect(viewer.clock.stopTime).toBeDefined());
+    const [asked, clockStop, removed] = [fetches, viewer.clock.stopTime, viewer.dataSources.remove.mock.calls.length];
+
+    appState.selectedRunway = "05R";
+    rerender();
+    appState.trajectorySampleCount = 1;
+    rerender();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+
+    expect(fetches).toBe(asked);                                       // nothing refetched
+    expect(viewer.dataSources.remove.mock.calls).toHaveLength(removed);  // nothing torn down
+    expect(viewer.clock.stopTime).toBe(clockStop);                     // the clock not reset
+    expect(result.current.flightIds.sort()).toEqual([A, B]);           // every group still there
+  });
+
+  it("still reloads a scene when its category is left for another", async () => {
+    serve([sceneGroup(A, "05L", 0)], requests, { scene: sceneOf([], []) });
+    const { rerender } = renderHook(() => useComparisonTrajectoryLayer());
+    await waitFor(() => expect(referenceSource(viewer)).toBeDefined());
+    const first = referenceSource(viewer);
+
+    appState.trajectoryComparisonCategory = "other_category";
+    rerender();
+    await waitFor(() => expect(viewer.dataSources.remove).toHaveBeenCalledWith(first, true));
+    appState.trajectoryComparisonCategory = "traffic_m1_runway";
   });
 });

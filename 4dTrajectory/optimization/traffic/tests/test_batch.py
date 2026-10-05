@@ -23,7 +23,8 @@ def _scenario(flight_id):
     initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass.max_takeoff_kg)
     return FlightScenario(initial, A320, aero_params_for_aircraft(A320), {
         "id": flight_id, "icao24": "ad7f04", "landing_time_utc": "2026-06-18T21:37:36Z", "arr_airport": "KRDU",
-        "runway": "05L", "target_source": "runway_threshold", "window_s": 15.0}, TARGET)
+        "runway": "05L", "target_source": "runway_threshold", "window_s": 15.0,
+        "flight_key": f"{flight_id}_05L_ad7f04_20260618T213736Z"}, TARGET)
 
 
 def _worker(payload):
@@ -166,6 +167,11 @@ def test_a_failing_block_gives_each_aircraft_a_failed_record(monkeypatch):
     label, flown, summary = to._fly_one_block(("block_03", [_scenario("AAA1"), _scenario("BBB2")], None, {
         "procedure_root": "r", "settings": {}, "max_duration": 1.0, "rollout_dt_s": 0.5, "solve_options": {}}))
     assert [f[3] for f in flown] == ["block failed: RuntimeError: casadi"] * 2 and summary["error"] == "RuntimeError: casadi"
+    # the shape of fly_block's summary, so every reader of `blocks` reads a failed block too
+    from traffic import block
+    _flown, ok = block.fly_block([], to.Traffic("KRDU", (), {}), procedure_root="r", settings=block.LoopSettings(),
+                                 max_duration=1.0, rollout_dt_s=0.5, solve_options={})
+    assert set(ok) <= set(summary) and summary["slots"] == [] and summary["final_losses"] == {}
 
 
 def test_an_m2_run_refuses_a_directory_of_the_per_block_layout_before_reading_the_roster(monkeypatch, tmp_path):

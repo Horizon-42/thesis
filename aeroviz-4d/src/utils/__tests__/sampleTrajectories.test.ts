@@ -95,3 +95,34 @@ describe("selectComparisonGroups", () => {
     expect([...sel.shownEntityIds].sort()).toEqual([...sel.groups[0].entities].sort());
   });
 });
+
+describe("selectComparisonGroups for a scene (an M2 run)", () => {
+  const scene = { startUtc: "2026-05-21T17:47:18.959Z", background: { recorded: [], startOffsetsS: [] } };
+  const groupScene = { startOffsetS: 0, outcome: "separated", delayS: 0 };
+  const sceneIndex: ComparisonIndex = {
+    ...INDEX,
+    scene,
+    groups: [
+      group({ group: "A_05L", runway: "05L", scene: groupScene }),
+      group({ group: "B_05R", runway: "05R", scene: groupScene, czml: "comparison_KRDU_05R.czml" }),
+      group({ group: "C_05L", runway: "05L", scene: groupScene }),
+      group({ group: "D_05R", runway: "05R", scene: groupScene, status: "failed", entities: ["ref-D_05R"],
+              czml: "comparison_KRDU_05R.czml" }),
+    ],
+  };
+
+  it("shows every group: the sample count and the runway selector cut nothing", () => {
+    for (const [runway, count] of [[null, 1], ["05L", 1], ["05R", 2], [null, 0]] as const) {
+      const selection = selectComparisonGroups(sceneIndex, runway, count, seededRng());
+      expect(selection.groups.map((g) => g.group)).toEqual(["A_05L", "B_05R", "C_05L", "D_05R"]);
+    }
+    expect(selectComparisonGroups(sceneIndex, null, 1).files.sort())
+      .toEqual(["comparison_KRDU_05L.czml", "comparison_KRDU_05R.czml"]);
+  });
+
+  it("still samples and filters an index without a scene", () => {
+    const plain = { ...sceneIndex, scene: undefined };
+    expect(selectComparisonGroups(plain, null, 1, seededRng()).groups).toHaveLength(1);
+    expect(selectComparisonGroups(plain, "05R", 0).groups.map((g) => g.group)).toEqual(["B_05R", "D_05R"]);
+  });
+});

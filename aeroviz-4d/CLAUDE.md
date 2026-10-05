@@ -171,6 +171,10 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   epoch by it, per shown group); drawn pink `COMPARISON_TRAFFIC_COLOR`, the references' model budget, the clock stays the groups' own span and each neighbour's availability is clipped to it on purpose (airborne at the clock start: shown mid-flight; entering after the clock stop: not loaded; no clock: an error); their keys
   are requested in arrival-window requests of at most `MAX_FLIGHT_KEYS_PER_REQUEST` (1000); an unsolved row has no `traffic`; the `categories.json`
   entry carries no new field (AV46).
+- **An M2 run's index is ONE scene** (a `--summary` of mode `traffic:m2`): index `scene: {startUtc, background: {recorded, startOffsetsS}}`, every group
+  `scene: {startOffsetS, outcome, delayS}` (never with `traffic`); the clock starts at the earliest group entry (solved and unsolved), result paths are written
+  on it, the frontend shows every group (no sample, no runway filter), shifts each reference by its offset (available only while it flies), takes the clock
+  from the groups' spans on the scene clock, and loads the background once (pink, model budget, clipped to the clock) (AV47).
 - `states_schema` dispatches on record keys: `opt-`/`sim-` entities, or `pred-` plus `look-` for
   predictions (AV14).
 - **Predictions never get the off-target bake** (`mark_off_target = off_target and schema ==

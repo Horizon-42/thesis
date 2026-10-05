@@ -399,6 +399,54 @@ export function isComparisonTraffic(value: unknown): value is ComparisonTraffic 
   );
 }
 
+/**
+ * A group of an M2 run shown as ONE scene (`build_scenario_comparison_czml.py` over a `traffic:m2` summary; absent
+ * on every other group): `startOffsetS` is the group's entry minus the scene start (its result paths are already
+ * written on the scene clock; its reference, served on its own entry clock, is shifted by this), `outcome` its
+ * sidecar's outcome (an unsolved group's reason), `delayS` its scheduled delay (null: it has no slot).
+ */
+export interface ComparisonGroupScene {
+  startOffsetS: number;
+  outcome: string;
+  delayS: number | null;
+}
+
+/**
+ * The scene an index describes (present only on an M2 run): `startUtc` the earliest group entry, `background` the
+ * recorded aircraft that are not groups — `recorded[i]` the `ref-<flight_key>` reference id, entering
+ * `startOffsetsS[i]` seconds after the scene start (negative: already there).
+ */
+export interface ComparisonScene {
+  startUtc: string;
+  background: { recorded: string[]; startOffsetsS: number[] };
+}
+
+export function isComparisonGroupScene(value: unknown): value is ComparisonGroupScene {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    isFiniteNumber(candidate.startOffsetS) &&
+    typeof candidate.outcome === "string" &&
+    (candidate.delayS === null || isFiniteNumber(candidate.delayS))
+  );
+}
+
+export function isComparisonScene(value: unknown): value is ComparisonScene {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  const background = candidate.background as Record<string, unknown> | null | undefined;
+  return (
+    typeof candidate.startUtc === "string" &&
+    !!background &&
+    typeof background === "object" &&
+    Array.isArray(background.recorded) &&
+    background.recorded.every((id) => typeof id === "string" && id.startsWith("ref-")) &&
+    Array.isArray(background.startOffsetsS) &&
+    background.startOffsetsS.length === background.recorded.length &&
+    background.startOffsetsS.every(isFiniteNumber)
+  );
+}
+
 /** One flight's comparison group: the entity ids of its (up to) three coloured paths. */
 export interface ComparisonGroup {
   /** Unique group key, `${flightId}_${runway}`. */
@@ -440,8 +488,10 @@ export interface ComparisonGroup {
   massKg?: number | null;
   /** CZML entity ids belonging to this group (e.g. ref-/opt-/sim-`${group}`). */
   entities: string[];
-  /** The recorded aircraft around this commanded flight; traffic-window categories only. */
+  /** The recorded aircraft around this commanded flight; traffic-window (M1) categories only. */
   traffic?: ComparisonTraffic;
+  /** This group's place in the scene of an M2 run; scene categories only (never with `traffic`). */
+  scene?: ComparisonGroupScene;
   /** The CZML file (within `comparison/`) that holds this group's entities. */
   czml: string;
 }
@@ -536,6 +586,8 @@ export interface ComparisonIndex {
   prediction?: PredictionAccuracyStats;
   /** Immutable report artifact committed by this same index generation. */
   evaluationReport: string;
+  /** An M2 run as one scene: present, and then EVERY group carries its `scene`; absent, and none does. */
+  scene?: ComparisonScene;
 }
 
 export function isComparisonGroup(value: unknown): value is ComparisonGroup {
@@ -560,7 +612,8 @@ export function isComparisonGroup(value: unknown): value is ComparisonGroup {
       candidate.observedRunwayVerdict === "indeterminate") &&
     Array.isArray(candidate.entities) &&
     candidate.entities.every((entity) => typeof entity === "string") &&
-    (candidate.traffic === undefined || isComparisonTraffic(candidate.traffic))
+    (candidate.traffic === undefined || isComparisonTraffic(candidate.traffic)) &&
+    (candidate.scene === undefined || (isComparisonGroupScene(candidate.scene) && candidate.traffic === undefined))
   );
 }
 
@@ -577,7 +630,11 @@ export function isComparisonIndex(value: unknown): value is ComparisonIndex {
       (DATASET_SPLITS as readonly unknown[]).includes(candidate.datasetSplit)) &&
     typeof candidate.evaluationReport === "string" &&
     Array.isArray(candidate.groups) &&
-    candidate.groups.every(isComparisonGroup)
+    candidate.groups.every(isComparisonGroup) &&
+    (candidate.scene === undefined
+      ? candidate.groups.every((group: ComparisonGroup) => group.scene === undefined)
+      : isComparisonScene(candidate.scene) &&
+        candidate.groups.every((group: ComparisonGroup) => group.scene !== undefined))
   );
 }
 

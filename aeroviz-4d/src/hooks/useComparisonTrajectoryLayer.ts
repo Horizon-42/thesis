@@ -35,6 +35,9 @@ import { PREDICTION_OTHER_RUNWAY_COLOR } from "../utils/trajectoryRenderModel";
 import { selectComparisonGroups } from "../utils/sampleTrajectories";
 import {
   TRAFFIC_DOCUMENT_PACKET,
+  sceneBackgroundKeys,
+  sceneReferencePackets,
+  scenePackets,
   trafficFlightKeys,
   trafficPackets,
   type TimedCzmlPacket,
@@ -338,17 +341,20 @@ export function availabilityByEntityId(czml: unknown): Map<string, Cesium.TimeIn
 
 type ClockBounds = { start: Cesium.JulianDate | null; stop: Cesium.JulianDate | null };
 
+function includeSpan(start: Cesium.JulianDate, stop: Cesium.JulianDate, bounds: ClockBounds): void {
+  if (!bounds.start || Cesium.JulianDate.lessThan(start, bounds.start)) {
+    bounds.start = start.clone();
+  }
+  if (!bounds.stop || Cesium.JulianDate.greaterThan(stop, bounds.stop)) {
+    bounds.stop = stop.clone();
+  }
+}
+
 function includeClock(
   clock: Cesium.DataSourceClock | undefined,
   bounds: ClockBounds,
 ): void {
-  if (!clock) return;
-  if (!bounds.start || Cesium.JulianDate.lessThan(clock.startTime, bounds.start)) {
-    bounds.start = clock.startTime.clone();
-  }
-  if (!bounds.stop || Cesium.JulianDate.greaterThan(clock.stopTime, bounds.stop)) {
-    bounds.stop = clock.stopTime.clone();
-  }
+  if (clock) includeSpan(clock.startTime, clock.stopTime, bounds);
 }
 
 /**
@@ -397,7 +403,21 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
   const [loadVersion, setLoadVersion] = useState(0);
   const [state, setState] = useState<ComparisonTrajectoryLayerState>(emptyState);
 
+  // The runway selector and the sample count choose WHICH groups of an index are drawn, so a change reloads — except
+  // for a scene (an M2 run), which draws every group whatever they say: there they change nothing, and a reload would
+  // refetch everything and reset the clock. The load effect therefore does not list them; this one reloads it.
+  const sceneLoadedRef = useRef(false);
+  const selectionRef = useRef({ selectedRunway, trajectorySampleCount });
+  const [selectionVersion, setSelectionVersion] = useState(0);
   useEffect(() => {
+    const previous = selectionRef.current;
+    if (previous.selectedRunway === selectedRunway && previous.trajectorySampleCount === trajectorySampleCount) return;
+    selectionRef.current = { selectedRunway, trajectorySampleCount };
+    if (!sceneLoadedRef.current) setSelectionVersion((version) => version + 1);
+  }, [selectedRunway, trajectorySampleCount]);
+
+  useEffect(() => {
+    sceneLoadedRef.current = false;
     if (!viewer || !enabled || !trajectoryComparisonCategory) {
       setState(emptyState());
       return;
@@ -420,6 +440,7 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
           throw new Error(`${activeAirportCode}/${categoryDir} comparison index is invalid`);
         }
         if (cancelled) return;
+        sceneLoadedRef.current = rawIndex.scene !== undefined;
 
         const selection = selectComparisonGroups(
           rawIndex,
@@ -435,11 +456,16 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
           return;
         }
 
+        const scene = rawIndex.scene;
         const flightKeys = selection.groups.map((group) => group.group);
         const referenceResponse = await fetchArrivalWindow(activeAirportCode, flightKeys);
+        // A scene's references are served on their own entry clocks and drawn on the scene's.
+        const referenceCzml = scene
+          ? sceneReferencePackets(referenceResponse.czml, selection.groups)
+          : referenceResponse.czml;
         const referenceSource = await new Cesium.CzmlDataSource(
           `comparison-reference-${categoryDir}`,
-        ).load(referenceResponse.czml);
+        ).load(referenceCzml);
         if (cancelled || !isCesiumViewerUsable(viewer)) return;
 
         const referenceIds = referenceSource.entities.values
@@ -450,14 +476,24 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
           null,
           DEFAULT_MODEL_BUDGET,
         ).modelIds;
+        const bounds: ClockBounds = { start: null, stop: null };
+        const referenceAvailability = scene ? availabilityByEntityId(referenceCzml) : null;
         for (const entity of referenceSource.entities.values) {
           applyComparisonReferenceRenderModel(entity, modelIds);
+          const span = referenceAvailability?.get(entity.id);
+          if (span) {
+            // On a shared clock a reference that has landed must not hold at its runway for the rest of the scene,
+            // and its span is part of the scene's clock.
+            entity.availability = span;
+            includeSpan(span.start, span.stop, bounds);
+          }
         }
         addDataSourceHidden(viewer, referenceSource);
         added.push(referenceSource);
 
-        const bounds: ClockBounds = { start: null, stop: null };
-        includeClock(referenceSource.clock, bounds);
+        // The backend's document clock is the unshifted references' (0 .. the longest); a scene's clock is the
+        // groups' spans on the scene clock, taken above.
+        if (!scene) includeClock(referenceSource.clock, bounds);
         const statusByGroup = new Map(
           selection.groups.map((group) => [group.group, group.status]),
         );
@@ -496,13 +532,16 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
         }
         if (cancelled) return;
 
-        // The recorded aircraft of the shown traffic windows: each group's own copies, on its clock.
+        // The recorded aircraft around the shown groups: each traffic window's own copies on its clock (M1), or the
+        // scene's background, loaded once, on the scene clock (M2).
         const trafficByKey = await fetchTrafficPackets(
           activeAirportCode,
-          trafficFlightKeys(selection.groups),
+          scene ? sceneBackgroundKeys(scene) : trafficFlightKeys(selection.groups),
         );
         if (cancelled) return;
-        const neighbours = trafficPackets(selection.groups, trafficByKey);
+        const neighbours = scene
+          ? scenePackets(scene, trafficByKey)
+          : trafficPackets(selection.groups, trafficByKey);
         let trafficSource: Cesium.CzmlDataSource | null = null;
         if (neighbours.length > 0) {
           if (!bounds.start || !bounds.stop) {
@@ -578,6 +617,7 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
 
     return () => {
       cancelled = true;
+      sceneLoadedRef.current = false;
       if (isCesiumViewerUsable(viewer)) {
         for (const source of added) viewer.dataSources.remove(source, true);
         viewer.trackedEntity = undefined;
@@ -595,8 +635,7 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
     enabled,
     activeAirportCode,
     trajectoryComparisonCategory,
-    selectedRunway,
-    trajectorySampleCount,
+    selectionVersion,
     setSelectedFlightId,
     setTrajectoryDataSource,
   ]);

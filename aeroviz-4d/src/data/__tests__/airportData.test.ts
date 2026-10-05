@@ -248,6 +248,59 @@ describe("a traffic window's group", () => {
   });
 });
 
+describe("an M2 scene's index", () => {
+  const scene = {
+    startUtc: "2026-05-21T17:47:18.959Z",
+    background: { recorded: ["ref-SWA1_23L_aaaaaa_20260521T181000Z", "ref-SWA2_32_bbbbbb_20260521T182000Z"],
+                  startOffsetsS: [-60.25, 1199.75] },
+  };
+  const groupScene = { startOffsetS: 309.75, outcome: "separated_at_baseline", delayS: 12.5 };
+  const group = { group: "X_23L", flightId: "X", runway: "23L", airport: "KRDU", czml: "c.czml", status: "solved",
+                  entities: ["ref-X_23L", "sim-X_23L"], scene: groupScene };
+  /** `withScene` null: an index without a scene block. */
+  const index = (groups: unknown[], withScene: unknown = scene) => ({
+    schemaVersion: "comparison-v2-generation", generation: "g", epoch: "2026-10-06T00:00:00Z", startHidden: true,
+    referenceSource: "canonicalObserved", evaluationReport: "r.json", groups,
+    ...(withScene === null ? {} : { scene: withScene }),
+  });
+
+  it("is read with its scene block, a null delay (no slot) included", () => {
+    expect(isComparisonIndex(index([group]))).toBe(true);
+    expect(isComparisonIndex(index([{ ...group, scene: { ...groupScene, delayS: null } }]))).toBe(true);
+  });
+
+  it("holds a scene on the index and on EVERY group, or on neither", () => {
+    const { scene: _scene, ...plain } = group;
+    expect(isComparisonIndex(index([group], null))).toBe(false);            // a group's scene without the index's
+    expect(isComparisonIndex(index([plain]))).toBe(false);                       // the index's scene, a group without
+    expect(isComparisonIndex(index([group, plain]))).toBe(false);
+    expect(isComparisonIndex(index([plain], null))).toBe(true);
+  });
+
+  it("is never a traffic window as well", () => {
+    const traffic = { outcome: "separated", recorded: ["ref-A_05L_a00001_20260501T000300Z"], startOffsetsS: [1] };
+    expect(isComparisonIndex(index([{ ...group, traffic }]))).toBe(false);
+  });
+
+  it("refuses a malformed scene rather than drawing a guess", () => {
+    for (const broken of [
+      { ...scene, startUtc: 3 },
+      { ...scene, background: { ...scene.background, recorded: ["SWA1_23L_aaaaaa_20260521T181000Z", "ref-B"] } },
+      { ...scene, background: { ...scene.background, startOffsetsS: [1] } },
+      { ...scene, background: { ...scene.background, startOffsetsS: [1, "2"] } },
+      { startUtc: scene.startUtc },
+    ]) {
+      expect(isComparisonIndex(index([group], broken))).toBe(false);
+    }
+    for (const broken of [
+      { ...groupScene, startOffsetS: "309.75" }, { ...groupScene, outcome: 1 },
+      { ...groupScene, delayS: "12" }, { startOffsetS: 1, outcome: "x" },
+    ]) {
+      expect(isComparisonIndex(index([{ ...group, scene: broken }]))).toBe(false);
+    }
+  });
+});
+
 describe("experiment intent and parameter rows", () => {
   const base = {
     key: "experiment_run_val",

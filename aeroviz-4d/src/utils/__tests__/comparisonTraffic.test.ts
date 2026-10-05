@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import * as Cesium from "cesium";
-import type { ComparisonGroup } from "../../data/airportData";
+import type { ComparisonGroup, ComparisonScene } from "../../data/airportData";
 import {
   TRAFFIC_DOCUMENT_PACKET,
+  sceneBackgroundEntityId,
+  sceneBackgroundKeys,
+  scenePackets,
+  sceneReferencePackets,
   trafficEntityId,
   trafficFlightKey,
   trafficFlightKeys,
@@ -115,5 +119,43 @@ describe("trafficPackets", () => {
   it("refuses a recorded aircraft the backend did not serve, by group and flight", () => {
     expect(() => trafficPackets([group(A, ["GONE_05L_e00005_20260501T000200Z"], [1])], packets))
       .toThrow(`${A}: the backend served no arrival-window track for recorded aircraft GONE_05L_e00005_20260501T000200Z`);
+  });
+});
+
+describe("a scene (an M2 run)", () => {
+  const scene: ComparisonScene = {
+    startUtc: "2026-05-21T17:47:18.959Z",
+    background: { recorded: [`ref-${EARLIER}`, `ref-${LATER}`], startOffsetsS: [-60.25, 1199.75] },
+  };
+
+  it("puts each background aircraft once on the scene clock, under an id no group's copy has", () => {
+    expect(sceneBackgroundKeys(scene)).toEqual([EARLIER, LATER]);
+    const [earlier, later] = scenePackets(scene, packets);
+    expect(earlier.id).toBe(sceneBackgroundEntityId(EARLIER));
+    expect(later.id).toBe(sceneBackgroundEntityId(LATER));
+    expect(earlier.position.epoch).toBe("2026-04-01T07:58:59.750Z");
+    expect(later.position.epoch).toBe("2026-04-01T08:19:59.750Z");
+    expect(sceneBackgroundEntityId(EARLIER)).not.toBe(trafficEntityId(A, EARLIER));
+    expect(packets.get(LATER)!.position.epoch).toBe(EPOCH);          // the source packet is not moved
+  });
+
+  it("refuses a background aircraft the backend did not serve, by key", () => {
+    expect(() => scenePackets(scene, new Map([[EARLIER, packets.get(EARLIER)!]])))
+      .toThrow(`the backend served no arrival-window track for background aircraft ${LATER}`);
+  });
+
+  it("shifts each scene group's reference by its offset and leaves the document and other packets alone", () => {
+    const sceneGroup = (key: string, startOffsetS: number): ComparisonGroup =>
+      ({ ...group(key, [], [], false), scene: { startOffsetS, outcome: "separated", delayS: 0 } });
+    const czml = [{ id: "document", name: "observed" }, packet(A), packet(B), packet(LATER)];
+    const shifted = sceneReferencePackets(czml, [sceneGroup(A, 0), sceneGroup(B, 630.25)]) as TimedCzmlPacket[];
+
+    expect(shifted[0]).toBe(czml[0]);                                     // the document packet
+    expect(shifted.map((p) => p.id)).toEqual(["document", A, B, LATER]);   // ids stay the flight keys
+    expect(shifted[1].position.epoch).toBe("2026-04-01T08:00:00.000Z");   // offset 0: the same instant
+    expect(shifted[2].position.epoch).toBe("2026-04-01T08:10:30.250Z");
+    expect(shifted[2].orientation?.epoch).toBe("2026-04-01T08:10:30.250Z");
+    expect(shifted[3]).toBe(czml[3]);                                     // not a scene group's
+    expect((czml[2] as TimedCzmlPacket).position.epoch).toBe(EPOCH);      // the source is not moved
   });
 });
