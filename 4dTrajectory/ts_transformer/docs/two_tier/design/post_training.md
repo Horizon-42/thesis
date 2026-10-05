@@ -64,6 +64,7 @@ A proposal is a reading where the design says nothing; it holds only until the u
 | D105 (the landings of a window's scene) | Done, reviewed: `00e81c88` (log §10) |
 | After B10 (notes/stage_c.md steps 3–6) | Done, reviewed: `3725565c` (motion, names, D107), `0168d457` (C4); log §11 |
 | The user's answers on P19, P20 | P19 (a quiet window: every runway present) and P20's count in `a1fdd2a8`; P20 decided (a window that opens inside a loss is left out of the draw) in `2bb77065` (log §12, §13) |
+| C1's census of the faulty tracks (vocabulary D111) | Done, reviewed: `35289115`; the counts on A34's artefact for the user (log §14) |
 | C6 | Waits for A38 (vocabulary D97: the copy of a loop) on this branch |
 | C8–C12 | Wait for B5's base, Claude's check of stage B, the moved start (C9) and the user's criteria (D7) |
 
