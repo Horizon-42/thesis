@@ -133,8 +133,9 @@ def test_the_surrogate_clips_and_reads_only_the_counted_rows():
     moved = log_start + torch.log(torch.tensor(1.5))                       # every ratio 1.5: past the clip
     loss, words, clipped = surrogate(moved, log_start, advantage, counted)
     assert words == 3 * 5 and clipped == 15
-    # sample 0: A = 1 > 0, the clip caps r at 1.2; sample 1: A = −1 < 0, min(−1.5, −1.2) = −1.5
-    assert loss.item() == pytest.approx(0.5 * (-(1.0 + CLIP) * 5 + 1.5 * 5))
+    # sample 0 (2 rows): A = 1 > 0, the clip caps r at 1.2; sample 1 (1 row): A = −1 < 0, min(−1.5, −1.2) = −1.5 — the
+    # batch's sum over its 3 counted rows, divided by 3 (D115)
+    assert loss.item() == pytest.approx((2 * -(1.0 + CLIP) * 5 + 1.5 * 5) / 3)
     log_p = log_start.clone().requires_grad_(True)
     surrogate(log_p, log_start, advantage, counted)[0].backward()
     assert (log_p.grad[~counted] == 0).all() and (log_p.grad[counted] != 0).all()
@@ -214,3 +215,17 @@ def test_the_surrogate_and_the_kl_refuse_a_model_in_training_mode_and_the_data_t
     first = data_term(model, data)
     torch.manual_seed(2)
     assert not torch.equal(first, data_term(model, data))         # dropout on: another seed, another loss
+
+
+
+def test_every_counted_row_weighs_the_same_in_the_surrogate_and_the_pull():
+    """D115: a sample of one counted row and one of three — each row weighs a quarter, not a sample a half."""
+    log_start = torch.log(torch.full((2, 3, 5), 0.5))
+    counted = torch.tensor([[True, False, False], [True, True, True]])
+    advantage = torch.tensor([[4.0, 0.0, 0.0], [0.0, 0.0, 0.0]])            # only the short sample's row carries one
+    loss, words, _ = surrogate(log_start, log_start, advantage, counted)
+    assert words == 4 * 5 and loss.item() == pytest.approx(-4.0 * 5 / 4)
+    gap = torch.zeros(2, 3, 5)
+    gap[0, 0] = 0.3                                                          # the pull on the short sample's row only
+    expected = (5 * (np.exp(-0.3) + 0.3 - 1.0)) / 4
+    assert pull_to_base(log_start + gap, log_start, counted).item() == pytest.approx(expected)

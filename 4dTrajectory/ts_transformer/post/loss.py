@@ -21,7 +21,8 @@ has no traffic module.
 
 **Which words count.** A sample's rows carry an advantage and a mark of the rows it applies to (``counted``: in a branch
 group, the rows after the branch point, §2 item 9; branch training C6 makes them). The surrogate and the pull read the
-counted rows only; each sample's sum is divided by its counted rows (a loss per step), and the samples are averaged.
+counted rows only; a batch's sum over its counted words is divided by its counted rows, so every counted row weighs the
+same (D115; a continuation from a late branch point weighs no more for each of its words than a whole first sentence).
 
 **Dropout** (the user, 2026-10-05): off in the ratio and the pull — the words are scored in eval mode, the distribution
 they were drawn from — and on in the data term (training mode).
@@ -91,11 +92,11 @@ class PassStart:
             parameter.requires_grad_(False)
 
 
-def _per_sample(values: torch.Tensor, counted: torch.Tensor) -> torch.Tensor:
-    """The mean over samples of each sample's sum over its counted words ``values`` [B, R, 5], per counted row."""
-    rows = counted.sum(dim=1).to(values.dtype)
+def _per_row(values: torch.Tensor, counted: torch.Tensor) -> torch.Tensor:
+    """The batch's sum over its counted words ``values`` [B, R, 5] divided by its counted rows: every counted row weighs
+    the same (D115)."""
     kept = torch.where(counted[..., None], values, torch.zeros_like(values))      # a row not counted adds nothing
-    return (kept.sum(dim=(1, 2)) / rows).mean()
+    return kept.sum() / counted.sum().to(values.dtype)
 
 
 def surrogate(log_p: torch.Tensor, start_log_p: torch.Tensor, advantage: torch.Tensor, counted: torch.Tensor,
@@ -106,13 +107,13 @@ def surrogate(log_p: torch.Tensor, start_log_p: torch.Tensor, advantage: torch.T
     a = advantage[..., None]
     loss = -torch.minimum(ratio * a, torch.clamp(ratio, 1.0 - clip, 1.0 + clip) * a)
     words = counted[..., None].expand_as(ratio)
-    return _per_sample(loss, counted), int(words.sum()), int(((ratio - 1.0).abs() > clip)[words].sum())
+    return _per_row(loss, counted), int(words.sum()), int(((ratio - 1.0).abs() > clip)[words].sum())
 
 
 def pull_to_base(log_p: torch.Tensor, base_log_p: torch.Tensor, counted: torch.Tensor) -> torch.Tensor:
     """The pull to the base on the counted words (module docstring)."""
     gap = base_log_p - log_p
-    return _per_sample(torch.exp(gap) - gap - 1.0, counted)
+    return _per_row(torch.exp(gap) - gap - 1.0, counted)
 
 
 def data_term(model: Prior, rows: RowTensors) -> torch.Tensor:
