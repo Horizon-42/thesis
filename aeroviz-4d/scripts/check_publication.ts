@@ -44,7 +44,7 @@ import {
   indexCzmlFiles,
   type PublicationFinding,
 } from "../src/utils/checkPublication";
-import { parseTrainingSample, TRAINING_INDEX_FILE } from "../src/data/trainingSample";
+import { TRAINING_INDEX_FILE } from "../src/data/trainingSample";
 
 const FRONTEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PUBLISHED_ROOT = path.join(FRONTEND_ROOT, "public", "data", "airports");
@@ -222,8 +222,8 @@ async function checkTraining(root: string, airport: string, server: string | nul
       else {
         // HTTP 200 is not "it loads": the SERVED body goes through the same reader.
         const body = await servedJson(`${serverRoot}/${entry.file}`);
-        const answered = body.ok ? parseTrainingSample(body.value) : body;
-        if (!answered.ok) findings.push({ level: "error", category: entry.id, message: `server: ${entry.file}: ${answered.problem}` });
+        if (!body.ok) findings.push({ level: "error", category: entry.id, message: `server: ${entry.file}: ${body.problem}` });
+        else findings.push(...checkTrainingSet(entry.id, body.value).findings.map((finding) => ({ ...finding, message: `server: ${entry.file}: ${finding.message}` })));
       }
     }
   }

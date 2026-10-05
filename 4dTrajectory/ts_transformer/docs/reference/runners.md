@@ -1503,8 +1503,8 @@ root. The live executor (`aeroviz_backend/autopilot_segment/`) shares the flight
 a shared module, not a runner) and `python -m aeroviz_backend.autopilot_segment.check_live --set-id <set> --out <dir>
 [--flights-per-airport N --seed S]` flies every word of a published set against its sample, or of a seeded sample of
 each airport's flights (the user, 2026-10-05: check on a sample; outline §6 item 6). The backend keeps a failed check for
-its (artefact, executor spec) and refuses at once with its reason, and refuses a flight of a split other than train and
-select. The frontend's fixtures
+its (artefact, executor spec) and refuses at once with its reason, and refuses a flight of a split its caller does not
+give (A39, D109: the server and `check_live` give stage A's train and select; the frontend's reader likewise). The frontend's fixtures
 (`aeroviz-4d/src/data/__tests__/fixtures/stage_a/`) are written by this code (`AEROVIZ_WRITE_FIXTURES=1`, tests
 `test_training_export.py` and `aeroviz_backend/tests/test_autopilot_segment.py`).
 
