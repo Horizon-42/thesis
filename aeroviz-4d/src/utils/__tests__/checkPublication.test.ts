@@ -15,7 +15,7 @@ import {
   checkTrainingSetAgrees,
 } from "../checkPublication";
 import {
-  parseTrainingIndex, parseTrainingSample, TRAINING_INDEX_SCHEMA, TRAINING_SAMPLE_SCHEMA, type TrainingSetEntry,
+  parseTrainingIndex, parseTrainingSample, TRAINING_SPLITS, TRAINING_INDEX_SCHEMA, TRAINING_SAMPLE_SCHEMA, type TrainingSetEntry,
 } from "../../data/trainingSample";
 import { SET_ID, stageAIndex, stageASampleFile } from "../../data/__tests__/stageA";
 
@@ -166,7 +166,7 @@ describe("checkComparisonIndex", () => {
 
 function readable() {
   const index = parseTrainingIndex(stageAIndex());
-  const sample = parseTrainingSample(stageASampleFile());
+  const sample = parseTrainingSample(stageASampleFile(), TRAINING_SPLITS);
   if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
   return { index: index.value, entry: index.value.sets.find((item) => item.id === SET_ID)!, sample: sample.value };
 }
@@ -203,6 +203,11 @@ describe("the Training export's checks", () => {
     expect(value).toBeNull();
     expect(findings[0].category).toBe(SET_ID);
     expect(findings[0].message).toContain("flownFromRow");
+    const val = stageASampleFile();
+    val.flights = val.flights.map((flight: Record<string, unknown>) => ({ ...flight, split: "val" }));
+    const sealed = checkTrainingSet(SET_ID, val);                // stage A's sets hold train and select only (D109)
+    expect(sealed.value).toBeNull();
+    expect(sealed.findings[0].message).toContain("not one of train, select");
     const old = checkTrainingSet(SET_ID, { ...stageASampleFile(), schema: "aeroviz-training-sample-v8" });
     expect(old.findings[0].message).toContain(`sample.schema is "aeroviz-training-sample-v8", not one of ${TRAINING_SAMPLE_SCHEMA}`);
   });

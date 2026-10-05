@@ -11,8 +11,10 @@ and the executor spec it was exported from, and the flight's split. Which senten
 spec opens, and its closed-loop sentences are flown again, only after the labeller's, the executor's (the single-flight
 executor included) and the closed loop's checks pass in this process (`closed_loop.require_conforming_closed_loop`, D73),
 run at the warm-up; a check that fails is kept for its (artefact, executor spec) and every later request for them is
-refused at once with its reason (the checks are not run again for each click). A flight of a split other than train and
-select is refused (outline §6 item 4: a set's flights are train's and select's).
+refused at once with its reason (the checks are not run again for each click). The splits a set's flights may be of
+come from whoever builds the service (D109): stage A's own sets give train and select (`training_files.SPLITS`, outline
+§6 item 4), stage B's prior set of the claimed validation readout val too (prior B10); a flight of another split is
+refused before any check runs.
 
 WARMED UP AT START (`warm_up`, which the server runs in a thread): every stage-A set is opened ahead of the first
 request — its flights drawn and read again, each Δ's closed-loop sentences set up — which a first request would
@@ -25,7 +27,7 @@ import json
 import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +37,7 @@ from ts_transformer.autopilot import closed_loop, replay
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.experiments import training_flights
 from ts_transformer.instructions import training_files
-from ts_transformer.instructions.artefact import ClosedLoopSentence
+from ts_transformer.instructions.artefact import SPLITS, ClosedLoopSentence
 from ts_transformer.instructions.words import COLUMNS, Words
 from ts_transformer.io_utils import utc_now
 from ts_transformer.repo_layout import COMPARISON_AIRPORTS_ROOT, REPO_ROOT
@@ -55,6 +57,12 @@ def _field(record: dict[str, Any], name: str) -> Any:
     return record[name]
 
 
+def _require_split(split: str, splits: Sequence[str]) -> None:
+    """A set's flights are of ``splits``, the service's caller's (D109): another split is refused by name."""
+    if split not in splits:
+        raise RequestRefused(f"a set's flights are of {tuple(splits)}, not {split!r}")
+
+
 def _whole(value: Any, what: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise RequestRefused(f"{what} must be a whole number, got {value!r}")
@@ -72,11 +80,21 @@ class SetFlown:
         self.aero = self.inputs.aero_params.cpu().numpy()
 
 
+def stage_a_service(airports_root: Path = COMPARISON_AIRPORTS_ROOT) -> AutopilotSegmentBackend:
+    """The service of stage A's own sets (the server's, `check_live`'s): their flights are train's and select's
+    (`training_files.SPLITS`, D109) — the one place that choice is written."""
+    return AutopilotSegmentBackend(splits=training_files.SPLITS, airports_root=airports_root)
+
+
 class AutopilotSegmentBackend:
     """``fly(payload)`` for ``POST /autopilot/segment``: ``{clientId, seq, airport, setId, flightKey, rowIntervalS,
-    column, row}``."""
+    column, row}``. ``splits``: the splits the sets' flights may be of (D109; stage A's sets: `training_files.SPLITS`),
+    of the artefact's (`instructions.artefact.SPLITS`)."""
 
-    def __init__(self, *, airports_root: Path = COMPARISON_AIRPORTS_ROOT) -> None:
+    def __init__(self, *, splits: Sequence[str], airports_root: Path = COMPARISON_AIRPORTS_ROOT) -> None:
+        if not splits or not set(splits) <= set(SPLITS):
+            raise ValueError(f"a set's flights are of some of the artefact's splits {SPLITS}, not {tuple(splits)}")
+        self.splits = tuple(splits)
         self.airports_root = Path(airports_root)
         self._lock = threading.Lock()
         # each page's highest request number (`clientId` → `seq`): a lower one waiting or flying is superseded by it
@@ -123,10 +141,9 @@ class AutopilotSegmentBackend:
                   words: Words, opened: dict[tuple[Path, str, tuple[str, ...]], training_flights.SetFlights] | None = None
                   ) -> SetFlown:
         """The set's flights of ``split`` on their closed-loop sentences at ``interval_s``, set up the first time they
-        are asked for (``opened``: the flights drawn for another Δ of the same warm-up, reused); refused for a split
-        other than train and select."""
-        if split not in training_files.SPLITS:          # outline §6 item 4
-            raise RequestRefused(f"a set's flights are of {training_files.SPLITS}, not {split!r}")
+        are asked for (``opened``: the flights drawn for another Δ of the same warm-up, reused); refused for a split not
+        in the service's ``splits``, its caller's (D109)."""
+        _require_split(split, self.splits)
         ids = tuple(item["datasetId"] for item in sample["flights"] if item["split"] == split)
         key = (instructions, split, ids, interval_s)
         if key not in self._flown:
@@ -159,7 +176,8 @@ class AutopilotSegmentBackend:
                         _, sample = self.training_set(airport, entry["id"])
                         instructions, _, params, _, words = self.executor_for(sample)
                         opened: dict = {}
-                        for split in training_files.SPLITS:
+                        held = {item["split"] for item in sample["flights"]}
+                        for split in (split for split in self.splits if split in held):    # none it holds no flight of
                             for interval in sample["vocabulary"]["rowIntervalsS"]:
                                 self.set_flown(sample, split, float(interval), instructions, params, words, opened)
                     except Exception as error:   # noqa: BLE001 — a prefetch: logged by type; a request gets it whole
@@ -206,6 +224,7 @@ class AutopilotSegmentBackend:
             if len(items) != 1:
                 raise NotListed(f"Training set {set_id} at {airport} has no flight {flight_key}")
             item = items[0]
+            _require_split(item["split"], self.splits)      # before any check runs (A37)
             instructions, executor, params, record, words = self.executor_for(sample)
             flown_set = self.set_flown(sample, item["split"], float(interval), instructions, params, words)
             opened = time.perf_counter()

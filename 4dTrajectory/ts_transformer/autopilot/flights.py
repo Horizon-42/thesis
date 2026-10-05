@@ -155,13 +155,20 @@ def ground_scale(signals: FlightSignals, rows: Sequence[int], geometry: AirportG
     return to_east, to_north
 
 
+def compass_track(track_deg: np.ndarray) -> np.ndarray:
+    """A track in [0°, 360°), as every stored row holds it (D82): a remainder of exactly 360° (a value a hair below 0°)
+    is 0°."""
+    track = np.remainder(np.asarray(track_deg, dtype=np.float64), 360.0)
+    return np.where(track >= 360.0, 0.0, track)
+
+
 def observed_rows(signals: FlightSignals, rows: Sequence[int], rule: str, geometry: AirportGeometry) -> np.ndarray:
     """The observed flight's `instructions.artefact.STATE_COLUMNS` at its 2 s ``rows`` (what a closed-loop sentence holds
     before its first predicted step): the position and MSL height of each row, and the track (compass, [0°, 360°)),
     ground speed and vertical rate by the start rule (`start_velocity`, D77, D82)."""
     rows = np.asarray(rows, dtype=np.int64)
     velocity = start_velocity(signals, rows, rule, geometry)
-    track = np.remainder(np.degrees(np.arctan2(velocity[:, 0], velocity[:, 1])), 360.0)
+    track = compass_track(np.degrees(np.arctan2(velocity[:, 0], velocity[:, 1])))
     return np.column_stack([signals.e_m[rows], signals.n_m[rows], signals.altitude_m[rows], track,
                             np.hypot(velocity[:, 0], velocity[:, 1]), velocity[:, 2]])
 

@@ -157,7 +157,8 @@ of the package, not a migration in progress.
   gate (`read.admit`) for labelling and measuring; a sentence's words align with the FIRST `len(words)` rows of its
   signals (it ends before the landing); a flight with go-arounds is read approach by approach (D26); since v6
   (2026-10-02) every row is on the UTC even seconds; a change of speed says its 5 m/s steps, flown at a_max (D43);
-  `--spec-from` keeps another artefact's spec (C30).
+  `--spec-from` keeps another artefact's spec; a flight's observed-track faults (jump, held position, reversal) are
+  marked when read, `instructions/faults.py`, D111 (C30).
 - **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v8`; vocabulary §4.9, D32; read as
   `rows` apart from `withheld`, D82 — the observed rows' velocity by the spec's start rule, D77): each
   split × row interval — the 2 s open-loop words flown from the first predicted step by an executor spec, each said at the
@@ -166,7 +167,7 @@ of the package, not a migration in progress.
   (D34); written once by `instruction_closed_loop` with its own reference, read only after the labeller's, the executor's
   and the closed loop's checks run in the reading process (`closed_loop.require_conforming_closed_loop(artefact,
   executor_dir)`, D69, D73); a speaker's closed loop starts where the reading does,
-  through `autopilot/start.py` (`start`, `Loop.step`, D67) (C38).
+  through `autopilot/start.py` (`start`, `Loop.step`, D67; `Loop.copy`, `Loop.halt`, `start_moved`, D97) (C38).
 - **An executor spec opens only for executor code that flies its reference tracks within the bounds** (2026-10-01, the
   user: checked by what it flies, not by its source; D73: checked every time it is opened; `ts-executor-spec-v10`: the
   start rule a parameter, D77; a flight ended where the judge ends it, D79; the chart at the airport, D81, checked by the

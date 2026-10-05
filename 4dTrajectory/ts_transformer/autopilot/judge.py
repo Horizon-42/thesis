@@ -73,8 +73,10 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import HEADING, Words, compass_from_math_rad
 
+#: The outcome of a flight with no event before its executor was done (§5.8): it reached its time limit.
+TIMEOUT = "timeout"
 OUTCOMES = ("landed", "unstable_at_minimums", "crossed_too_high", "crossed_off_runway", "crossed_other_runway",
-            "ground_contact", "timeout", "dynamics_failure")
+            "ground_contact", TIMEOUT, "dynamics_failure")
 #: Which event is the outcome when two happen at the same row: the order of the design's table (§5.8).
 EVENT_ORDER = ("dynamics_failure", "ground_contact", "crossed_too_high", "crossed_off_runway", "unstable_at_minimums",
                "landed", "crossed_other_runway")
@@ -196,7 +198,7 @@ def _outcome(states: np.ndarray, track: dict[str, np.ndarray], runway_cycle: np.
                 events.append((row, "landed" if passed else "unstable_at_minimums", crossing))
             break
     if not events:
-        return "timeout", rows - 1, None
+        return TIMEOUT, rows - 1, None
     row, kind, crossing = min(events, key=lambda event: (event[0], EVENT_ORDER.index(event[1])))
     return kind, row, crossing
 

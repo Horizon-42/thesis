@@ -175,6 +175,16 @@ describe("TrainingPanel", () => {
       expect(await screen.findByText("KXXX:test")).toBeTruthy();
     });
 
+    it("refuses a set with a val flight: the panel opens stage A's sets, train and select (D109)", async () => {
+      const sample = stageASampleFile();
+      sample.flights = sample.flights.map((flight: Record<string, unknown>) => ({ ...flight, split: "val" }));
+      serve({ [INDEX_PATH]: stageAIndex(), [SAMPLE_PATH]: sample });
+      render(<TrainingPanel hidden={false} />);
+      expect(await screen.findByText("Set fixture_set cannot be read.")).toBeTruthy();
+      expect(screen.getByText(/split is "val", not one of train, select/)).toBeTruthy();
+      expect(lastPublished()).toBeNull();
+    });
+
     it("refuses a set of another schema by name, and the others stay untouched", async () => {
       serve({ [INDEX_PATH]: stageAIndex(), [SAMPLE_PATH]: { ...stageASampleFile(), schema: "aeroviz-training-sample-v8" } });
       render(<TrainingPanel hidden={false} />);

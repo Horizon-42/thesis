@@ -23,6 +23,7 @@ import numpy as np
 
 from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import AirportGeometry
+from ts_transformer.instructions.artefact import READ_SPLITS
 from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.words import wrap180
 from ts_transformer.io_utils import utc_now
@@ -40,8 +41,8 @@ INDEX_FILE = "index_v4.json"
 SAMPLE_SCHEMA = "aeroviz-training-sample-v10"
 SAMPLE_FILE = "sample.json"
 SET_KIND = "closed-loop-readback"
-#: The splits a set draws from (outline §6 item 4): train and select; val only from a readout a plan already makes.
-SPLITS = ("train", "select")
+#: The splits a set draws from (outline §6 item 4, D85): the splits a readout reads.
+SPLITS = READ_SPLITS
 
 
 class NotListed(ValueError):
@@ -140,20 +141,6 @@ def candidates_sha256(geometry: AirportGeometry) -> str:
     set, information for its reader."""
     canonical = json.dumps(geometry.to_dict(), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def runway_hae_minus_msl_m(signals_sources: Sequence[dict[str, Any]], airport: str, manifest: Path) -> dict[str, float]:
-    """Each runway's HAE − MSL offset at ``airport``, metres by ident: what the data plane subtracted from the reported
-    heights of the flights assigned to that runway (the arrival manifest's ``runway_targets``). A flight's MSL height
-    plus its OWN runway's offset is the height its aircraft reported — the ellipsoid height Cesium draws in — so every
-    track drawn for a flight adds that one number. ``manifest`` is refused unless it is the one the artefact's signals
-    were read from (``signals_sources``: `signals.json`'s ``sources``, with each manifest's sha256)."""
-    (recorded,) = [source["arrival_manifest_sha256"] for source in signals_sources if source["airport"] == airport]
-    data = manifest.read_bytes()
-    if hashlib.sha256(data).hexdigest() != recorded:
-        raise ValueError(f"{manifest} is not the arrival manifest the artefact's signals were read from "
-                         f"(sha256 {recorded[:12]} recorded)")
-    return {ident: float(target["hae_minus_msl_m"]) for ident, target in json.loads(data)["runway_targets"].items()}
 
 
 # ---- writing

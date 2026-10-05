@@ -70,7 +70,7 @@ correction: every word that is not an observed word said at its row), the states
 sentence's first row to its last said row, the Δ rows marked (D51) — observed before the first predicted step, flown
 from it (position in the airport frame, MSL height, track, ground speed, vertical rate; a flown 2 s row between two Δ
 rows is the executor's state at the end of its cycle there) — e_y, e_h at each said row, the matched point's observed time and the last 2 s row whose
-observed words have been said at each row, whether the flight was done at its time limit, and its OUTCOME (D74: the
+observed words have been said at each row, whether its outcome is a timeout (D90), and its OUTCOME (D74: the
 judge's, `judge.outcome_of`, on what the reading's executor flew from the first predicted step to its end). Flown
 again from the same state on its own rows (the replay: `replay_batch`, under the same time limit), a
 closed-loop sentence gives the same states on every 2 s row.
@@ -91,6 +91,7 @@ import torch
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.conformance import DEVICE, ROUNDOFF, STATE_BOUND_M
 from ts_transformer.autopilot.flights import FlightInputs, flight_inputs, observed_rows
+from ts_transformer.autopilot.judge import TIMEOUT
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.replay import Batch, subset
 from ts_transformer.autopilot.spec import params_sha256
@@ -120,6 +121,13 @@ class Match(NamedTuple):
     past_end: bool              # past the end of the path (D44: e_h NaN, no correction)
 
 
+#: A turn of the observed path at a vertex above this is a reversal (D83, `ObservedPath._at_vertex`): there the two
+#: normals nearly cancel and their sum gives no side, so the matched segment's line gives it. No aircraft turns this
+#: much between two observed positions seconds apart; such a vertex is a fault of the observed track (repo
+#: docs/open-items.md, 2026-10-05). Claude's value, on the user's order to change the rule (2026-10-05).
+REVERSAL_TURN_DEG = 170.0
+
+
 class ObservedPath:
     """An observed flight's path at the data's rows, and the forward search of the matched point (module docstring)."""
 
@@ -144,6 +152,31 @@ class ObservedPath:
         t = min(max(((e_m - self.e[i]) * de + (n_m - self.n[i]) * dn) / (de * de + dn * dn), 0.0), 1.0)
         return t, math.hypot(e_m - self.e[i] - t * de, n_m - self.n[i] - t * dn)
 
+    def _across(self, i: int, e_m: float, n_m: float) -> float:
+        """The signed distance of a position from segment ``i``'s line, right of the track positive."""
+        de, dn = self.e[i + 1] - self.e[i], self.n[i + 1] - self.n[i]
+        return ((e_m - self.e[i]) * dn - (n_m - self.n[i]) * de) / math.hypot(de, dn)
+
+    def _at_vertex(self, vertex: int, matched: int, other: int, e_m: float, n_m: float, distance: float) -> float:
+        """e_y where the matched segment's nearest point is ``vertex`` (between segments ``vertex`` − 1 and ``vertex``)
+        and ``other`` is the segment on its far side (D83): the smaller distance to the two, on the nearer one's side —
+        the other segment's when its own nearest point is not the shared vertex; else the vertex is the nearest point of
+        both (the outside of the turn) and the side is that of the sum of their normals, or the matched segment's where
+        the path turns more than `REVERSAL_TURN_DEG` there (a reversal). Claude's reading of "the side from the sum of
+        their normals" (A37)."""
+        t_other, d_other = self._nearest(other, e_m, n_m)
+        if t_other != (1.0 if other < vertex else 0.0):          # the other's nearest point is not the shared vertex
+            return math.copysign(d_other, self._across(other, e_m, n_m))
+        units = []
+        for k in (vertex - 1, vertex):
+            de, dn = self.e[k + 1] - self.e[k], self.n[k + 1] - self.n[k]
+            units.append((de / math.hypot(de, dn), dn / math.hypot(de, dn)))
+        (e0, n0), (e1, n1) = units
+        if math.degrees(math.acos(min(max(e0 * e1 + n0 * n1, -1.0), 1.0))) > REVERSAL_TURN_DEG:
+            return math.copysign(distance, self._across(matched, e_m, n_m))
+        normal_e, normal_n = 0.0 + n0 + n1, 0.0 - e0 - e1        # their normals' sum (right), from 0.0: a zero's sign kept
+        return math.copysign(distance, (e_m - self.e[vertex]) * normal_e + (n_m - self.n[vertex]) * normal_n)
+
     def match(self, e_m: float, n_m: float, height_m: float) -> Match:
         """A flown position and height against the path (module docstring): the matched segment moves forward while the
         next one is no farther from the position, never back."""
@@ -155,11 +188,19 @@ class ObservedPath:
             self.segment, t, distance = self.segment + 1, t_next, next_distance
         i = self.segment
         de, dn = self.e[i + 1] - self.e[i], self.n[i + 1] - self.n[i]
-        across = ((e_m - self.e[i]) * dn - (n_m - self.n[i]) * de) / math.hypot(de, dn)    # right of the track positive
+        across = self._across(i, e_m, n_m)
         last = i == len(self.e) - 2 and t >= 1.0
-        # the distance from the path's segment (D83), on the side of the path the position is; past the end, from the
-        # last segment's line (D44)
-        lateral = across if last else math.copysign(distance, across)
+        # the distance from the path's segments (D83), on the side of the path the position is; at a vertex the two
+        # segments around it (`_at_vertex`; the matched point stays where it is: it never moves back); past the end,
+        # from the last segment's line (D44)
+        if last:
+            lateral = across
+        elif t == 0.0 and i > 0:
+            lateral = self._at_vertex(i, i, i - 1, e_m, n_m, distance)
+        elif t == 1.0:                                           # a segment's end that is not the path's
+            lateral = self._at_vertex(i + 1, i, i + 1, e_m, n_m, distance)
+        else:
+            lateral = math.copysign(distance, across)
         row = float(self.left[-1]) if last else float(self.left[i] + t * (self.arrived[i + 1] - self.left[i]))
         if last:                       # past the end: on along the last segment's line, no height (module docstring)
             t = ((e_m - self.e[i]) * de + (n_m - self.n[i]) * dn) / (de * de + dn * dn)
@@ -431,7 +472,6 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
                 [batch.approach_ias_mps[j] for j in flying], limits, params, words, interval_s=interval,
                 most_go_arounds=go_arounds, device=device)       # the start of a closed loop (D67)
     live = np.ones(len(flying), dtype=bool)
-    timed_out = np.zeros(len(flying), dtype=bool)
     s = 0
     now = loop.rows()
     while live.any():
@@ -469,8 +509,6 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
         rows, done = loop.step(step)
         between = [[*rows[f, :-1]] if live[f] else [] for f in range(len(flying))]   # the 2 s rows between two Δ rows
         now = rows[:, -1]
-        ended = live & done
-        timed_out |= ended & loop.timed_out()
         live &= ~done
         s += 1
     for f, j in enumerate(flying):
@@ -488,7 +526,8 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
                               go_around_rows=np.asarray(reading.go_around_rows, dtype=np.int64),
                               stratum=stratum(reading),
                               outcome=loop.outcome(f).outcome,      # the judge's, on what it flew (D74)
-                              timed_out=bool(timed_out[f]), lateral_m=lateral, vertical_m=vertical,
+                              timed_out=loop.outcome(f).outcome == TIMEOUT,     # the judge's too (D90)
+                              lateral_m=lateral, vertical_m=vertical,
                               uncorrectable=np.array(blocked[f], dtype=bool),
                               observed_row=np.array(reached[f], dtype=np.int64),
                               matched_row=np.array(matched[f], dtype=np.float64)))

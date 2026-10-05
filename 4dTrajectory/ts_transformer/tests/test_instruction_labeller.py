@@ -981,3 +981,31 @@ def test_the_figures_runner_draws_a_labelled_flight(tmp_path, monkeypatch):
     labelled_instruction_artefact(tmp_path / "artefact", split="val")
     monkeypatch.setattr(instruction_figures, "require_conforming_labeller", lambda directory: None)
     assert instruction_figures.main(["--dir", str(tmp_path / "artefact"), "--count", "2"]) == 0
+
+
+# ---- the readout of the labeller's runner (outline D85)
+def test_the_labellers_readout_gives_only_counts_for_the_val_days():
+    """A37, D85: `readout.json`, `readout.md` and the printed text (the same text) show every number of train and select
+    and, of val, only the flights labelled and refused — no refusal reason, no stratum, airport or word count."""
+    import json
+
+    from ts_transformer.experiments.instruction_labels import render, shown
+    from ts_transformer.instructions.readout import class_usage, flight_record, summarise
+
+    one, words = spec(), Words(spec())
+    legs = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (20, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
+            (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
+    reading = read_flight(instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0)), instruction_airport(), one,
+                          words)
+    refused = {"dataset_id": "KXXX:r", "airport": "KXXX", "status": "refused", "reason": "a val-only reason",
+               "detail": ""}
+    numbers = {**summarise([flight_record(reading, words)], [refused]), "class_usage": class_usage(reading.words, words)}
+    summary = {split: numbers for split in ("train", "select", "val")}
+    out = shown(summary)
+    assert out["train"] == numbers and out["select"] == numbers
+    assert set(out["val"]) == {"labelled", "refused", "readings"} and (out["val"]["labelled"], out["val"]["refused"]) \
+        == (1, 1)
+    text = render(out, one)
+    assert "| val | 1 | 1 |" in text and "## train" in text and "## select" in text and "## val" not in text
+    assert text.count("a val-only reason") == 1                            # train + select's reasons, not val's
+    assert "D85" in text and json.loads(json.dumps(out))["val"]["readings"].startswith("not shown")

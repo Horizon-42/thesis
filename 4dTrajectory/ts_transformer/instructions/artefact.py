@@ -54,6 +54,10 @@ CANDIDATES_SCHEMA = "ts-instruction-candidates-v4"
 #: The splits an artefact holds: the development operating days (the internal selection set is its
 #: own split, so no reader carves it out of train by another rule).
 SPLITS = DEVELOPMENT_SPLITS
+#: The splits whose readings no readout, summary or printed text shows (outline D85): read once, in the stage's validation
+#: readout; their files are written and counted as every split's. `READ_SPLITS`: the splits a readout reads.
+SEALED_READINGS = ("val",)
+READ_SPLITS = tuple(split for split in SPLITS if split not in SEALED_READINGS)
 
 
 def _fresh(path: Path) -> Path:
@@ -301,7 +305,7 @@ class Withheld:
     stratum: str                # `readout.STRATA` (D70)
     #: the judge's outcome of what the reading's executor flew, from the first predicted step to its end, by name (D74)
     outcome: str
-    timed_out: bool             # the executor was done in the cycle that reached its time limit
+    timed_out: bool             # the judge's outcome is "timeout" (D90: no reader holds the time limit)
     lateral_m: np.ndarray       # [M] e_y at each said row (D83)
     vertical_m: np.ndarray      # [M] e_h at each said row (NaN past the end of the observed path, D44)
     #: [M, 2] bool: the rows where §4.9 makes no heading / angle correction (the readings of D34)

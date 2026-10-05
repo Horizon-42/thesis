@@ -452,6 +452,14 @@ never stored: each 2 s word on the NEAREST Δ row, a tie on the later (D45), a h
 the frame where it is heard (D46: the class nearest its absolute track under the new course; no refusal). A spec is the vocabulary's format, not the data's: `instruction_spec --spec-from <artefact>`
 (`artefact.keep_spec`) keeps another artefact's spec byte for byte, and `spec_from.json` says so.
 
+**The faults of an observed track** (A40, D111, 2026-10-05; `instructions/faults.py`): `track_faults(signals)` marks the points
+of a flight's stored track no aircraft flies — a 2 s step more than `JUMP_RATIO` (3) times the median of the up to
+`AROUND_STEPS` (5) steps on each side (a jump), less than a third of it (a held position), a turn over `REVERSAL_DEG`
+(120°) between two consecutive moves (a reversal) — and `faulty_flights(artefact, split)` gives a split's marked flights
+by their place in the signals. Read when the artefact is read; the artefact is not changed. On A34's artefact at Δ = 4 s:
+train 498 of 40,530 closed-loop sentences marked (469 landed), select 177 of 6,199 (157 landed); held positions are most
+of them. Stage B's selection `landed` leaves them out (prior D111, B11).
+
 ### C31 · the aircraft filter: drop a flight only where dynamics are used
 
 2026-09-24 (user decisions: "去掉 all 的 A320 回退", then "ts 用2 按需丢弃"). The retired `all` filter
@@ -682,6 +690,18 @@ artefact's) and returns a `Loop` at each flight's first predicted step — the f
 observed time left from the first predicted step to the end of its labelled sentence × the timeout factor) and 900 s for
 each go-around up to the most given. `Loop.step(words [B, 5])` flies one Δ row and gives the states of the 2 s rows
 flown (`STATE_COLUMNS`) and the flights done; a go-around beyond the most refuses the row by name (`GoAroundBeyondMost`)
-before anything is flown; `Loop.outcome(f)` is `judge.outcome_of` on what the executor recorded. The closed-loop reading
+before anything is flown; `Loop.outcome(f)` is `judge.outcome_of` on what the executor recorded. `Loop.halt(flights)`
+holds flights (held where they are, their recorded command repeating, hearing no words, never becoming done); `Loop.copy(flights)` (A38, D97 (2)) is a loop
+of copies of chosen flights, repeats permitted, with everything the loop holds of them (`Executor.take`, `Spoken.take`, the
+grammar's words in force, the go-arounds, the time limits, which stay hidden, D90): flown on with the same words, a copy
+flies what its original flies and gets its outcome. A flight's states do not depend on the other flights of its loop
+(D97 (3)): measured on A34's artefact (train, Δ = 4 s, CPU) the batch's composition changes nothing, its size (a flight
+alone against chunks of 2048) moves states by <= 7.9e-10 m; the tests hold words, done and outcome exact and states within
+`STATE_BOUND_M` (the user, 2026-10-05). `start_moved(…, moves)` (A38, D97 (4)) starts each flight from a moved
+start: the flight checked against its stored signals unmoved, then its observed rows to the first predicted step turned
+about the airport reference, raised, and stretched about the first predicted step by the speed scale (positions and
+heights: the path angle kept) (`Move`, `moved_signals`); the start rule gives the state from the moved rows (so the
+speed follows the frame's ground scale at the moved rows, D87), the moved rows come back, the time limit is the
+flight's own (the user, 2026-10-05); `NO_MOVE` is `start` bit for bit. The closed-loop reading
 builds its `Loop` from the same pieces, so its sentences said through `start` give back their stored states and the
 replay's outcome (`tests/test_start.py`). The artefact's formats do not change.

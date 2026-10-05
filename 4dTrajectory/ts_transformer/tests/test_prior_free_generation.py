@@ -25,7 +25,8 @@ CPU = torch.device("cpu")
 
 def generate(tmp_path, monkeypatch, *, interval_s=4.0, seed=0, most=MOST_GO_AROUNDS, spy=None, speaking=False):
     """One flight of A26's synthetic artefact spoken and flown (`speak_and_fly`): ``(generated, stored, words,
-    geometry)``; with ``speaking``, the `SpeakingLoop` flown to its end instead of the sentence."""
+    geometry)``; with ``speaking``, the `SpeakingLoop` flown to its end instead of the sentence ("start": at its first
+    predicted step)."""
     directory, words, batch, stored, _ = test_start._artefact(tmp_path, monkeypatch, interval_s)
     loop, order = start(directory, "train", interval_s, {0: stored}, tmp_path / "executor", most_go_arounds=most,
                         device=CPU)
@@ -54,6 +55,8 @@ def generate(tmp_path, monkeypatch, *, interval_s=4.0, seed=0, most=MOST_GO_AROU
         numbers = flight_numbers(seed, 0, 0)
         while loop_.observing:
             loop_.observe()
+        if speaking == "start":                                   # at its first predicted step, for the caller
+            return loop_, model
         while loop_.alive.any():
             loop_.step(numbers.random((1, len(COLUMNS))))
         return loop_, model
@@ -584,3 +587,40 @@ def test_a_flight_the_caller_ends_is_halted_and_keeps_its_sentence_to_the_row_it
         loop.generated()
     (done,) = loop.generated([0])                                       # the others' records, the judge's outcome
     assert np.array_equal(done.words, loop.said(0)) and np.array_equal(done.states, loop.states(0))
+
+
+def test_a_copy_of_the_loop_says_and_flies_what_its_original_does(tmp_path, monkeypatch):
+    """D106 item 1 (post-training D94, on vocabulary D97's `Loop.copy`): copies of a flight taken after three rows — one
+    flown first with other numbers (it shares nothing with the original: the original then flies as a loop never copied
+    does), one flown after the original with its numbers (it says the original's words and flies its states within the
+    executor's bound, vocabulary D97 (3), to the same outcome) — and a copy taken before the first predicted step."""
+    from ts_transformer.autopilot.conformance import STATE_BOUND_M
+
+    numbers = np.random.default_rng(7).random((2000, len(COLUMNS)))
+    other = np.random.default_rng(8).random((2000, len(COLUMNS)))
+
+    def fly(loop, draws, start=0):
+        k = start
+        while loop.alive.any():
+            loop.step(np.repeat(draws[k][None], len(loop.order), axis=0))
+            k += 1
+        return loop
+
+    def same(a, b):
+        assert np.array_equal(a.said(0), b.said(0)) and a.states(0).shape == b.states(0).shape
+        assert np.allclose(a.states(0), b.states(0), rtol=0.0, atol=STATE_BOUND_M, equal_nan=True)
+        assert a.generated()[0].outcome == b.generated()[0].outcome
+
+    plain = fly(generate(tmp_path / "plain", monkeypatch, interval_s=4.0, speaking="start")[0], numbers)
+    original = generate(tmp_path / "copied", monkeypatch, interval_s=4.0, speaking="start")[0]
+    for k in range(3):
+        original.step(numbers[k][None])
+    diverged, twin = original.copy([0, 0]), original.copy([0])
+    fly(diverged, other, 3)                                    # another sentence, flown before the original goes on
+    assert not np.array_equal(diverged.said(0), plain.said(0))
+    fly(original, numbers, 3)
+    assert np.array_equal(original.said(0), plain.said(0)) and np.array_equal(original.states(0), plain.states(0))
+    same(fly(twin, numbers, 3), original)
+    observing = generate(tmp_path / "observing", monkeypatch, interval_s=4.0, speaking="start")[0]
+    early = observing.copy([0])                                # (here at the first predicted step: `observe` is done)
+    same(fly(early, numbers), plain)

@@ -39,6 +39,7 @@ import {
   unwrapDegrees,
   TRAINING_OUTCOMES,
   TRAINING_READING_RULE,
+  TRAINING_SPLITS,
   readCrossing,
   type TrainingCandidate,
   type TrainingClosedLoop,
@@ -386,7 +387,7 @@ export function parseTrainingPriorSample(raw: unknown): Parsed<TrainingPriorSamp
     }
     const flights = sample.children("flights").map((flight): TrainingPriorFlight => {
       // a prior set's flights carry the closed-loop sentence at the prior's Δ only
-      const head = parseFlight(flight, vocabulary, candidates, cycleS, [model.rowIntervalS]);
+      const head = parseFlight(flight, vocabulary, candidates, cycleS, [model.rowIntervalS], TRAINING_SPLITS);
       const sentences = flight.children("prior").map((item) => parseSentence(item, head, model, candidates, vocabulary, cycleS));
       if (sentences.length === 0) flight.fail("prior holds no sentence");
       return { head, sentences };
