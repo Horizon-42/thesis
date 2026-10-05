@@ -69,7 +69,7 @@ A proposal is a reading where the design says nothing; it holds only until the u
 
    | When | What |
    |---|---|
-   | Now | C0. C1 and C2 on synthetic artefacts (`tests/support.py`). C3 |
+   | Now | C0. C1 and C2 on synthetic artefacts (`tests/support.py`). C3. The landings of a window (D105): each window gives the landings that its scene has (the inserted aircraft's at its shifted time, the moved aircraft's at its moved time), on synthetic artefacts; given to the prior after B10 |
    | After A34's artefact (vocabulary §0.4) | C1 and C2 also on a sample of A34's artefact, read-only; C1's census on all train days in a scratch directory (outline §5 rule 12, D55); the user chooses the counts of each kind of window |
    | After B9 and B10 of stage B (prior D96, D105–D107) are on `dev-two-tier-v4-prior` and merged into this branch; after the parts of vocabulary D97 that a milestone reads (the stored signals, the copy of a loop, the test of a flight in a batch) reach this branch through stage B | C4, C5, C6, C7 on synthetic artefacts and the smoke model of B3 |
    | After B5's base and Claude's check of stage B | C8. Then C10, after the user sets its criteria (D7) |
@@ -395,11 +395,13 @@ aircraft, the rewards of steps 8.9 and 9.4, the formats of `instruction-v3`. No 
 - A new package `post/`: the scene and its steps, the edge features, "established", the separation masks, the traffic
   module, the reward, the branch groups and the loss. It reads `instructions/` and the names of prior §7; it does not
   import `autopilot/`. The window loop, which joins the speaker, the start of a closed loop and the scene, is a module
-  shared by the runners of stage C (under `experiments/`, not a runner), as a runner joins a model to the executor.
+  shared by the runners of stage C (under `experiments/`, not a runner), as a runner joins a model to the executor; it
+  runs the commanded aircraft through the prior's step of a speaker's closed loop (prior §7 item 7, D106).
   The separation judge stays in `inference/separation.py`.
 - The architecture test (`tests/test_architecture.py`, read by the names imported, as prior D69's test): `post/` imports
   from `prior/` only the names of prior §7; the runners of stage C import from `autopilot/` only the names of
-  vocabulary §6 and from `prior/` only those of prior §7.
+  vocabulary §6, from `prior/` only those of prior §7, and from the module of prior §7 item 7 only its names given
+  there. After each merge of stage B, the test's list follows prior §7's "Code" column (B9's and B10's names).
 - The runners: `post_windows` (the windows and their census, C1), `post_train` (the rounds, C10), `post_readout` (a
   window readout), `post_training_export` (C11). New code; the archived runners stay as they are.
 
