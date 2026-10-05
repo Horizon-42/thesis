@@ -13,11 +13,11 @@ State of 2026-10-05. Branch `dev-two-tier-v4-post` at `69531aa3`: C0–C7 and C9
    speed scale within 1 ± 0.1, each uniform. With them, D113 leaves out 107 of 40,530 train windows B (0.26 %).
 2. **The readings of C6, C9 and D114** (log §15: P26, P27, P29, P30). Each is built as written. None changes a result
    the user has seen.
-3. **Do the windows of a round share their flights?** (C10; log §16, P32.) A, D and B are built from the same real
-   windows as the round's real windows, so a round of 4N windows covers about N flights. The other choice: each kind
-   drawn on its own.
 
-## 2 For the design of C10 (log §15, P31)
+## 2 For the design of C10 (log §15, P31; log §16)
+
+- **The windows of a round share their flights** (the user, 2026-10-05, P32): A, D and B are built from the round's real
+  windows, as `post_train` does; the design text (§2 item 4, D100) does not say it yet.
 
 - **The rounds feed the loss branch point by branch point.** A round's groups are large: the reviewer's estimate is
   several MB a group, tens of GB for a round held at once.

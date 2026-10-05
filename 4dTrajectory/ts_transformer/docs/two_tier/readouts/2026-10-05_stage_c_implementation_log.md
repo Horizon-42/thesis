@@ -437,7 +437,7 @@ a short window (the flight inserted 8 s ahead of itself, lost at its first row);
 
 - **P32. The windows of a round share their flights**: A, D and B are built from the same real windows that the real
   windows of the round are drawn from, so a round of 4N windows covers about N flights. D100 does not say whether each
-  kind is a draw of its own. For the user.
+  kind is a draw of its own. **The user, 2026-10-05: they share flights, as built.**
 - **P33. A shortfall does not stop a round** (a kind with fewer windows than its count: the counts then differ from
   D100's equal counts); the record shows it.
 - **P34. `rounds` is a setting of the campaign**: a campaign cannot be extended by more rounds after it ends.
