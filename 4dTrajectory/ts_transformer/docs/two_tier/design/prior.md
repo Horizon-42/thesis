@@ -68,7 +68,7 @@ The commits, dates, branches, test counts and measurements of every milestone ar
 | B5's tools | Built on synthetic artefacts: the first-step runway at the held-out airport, the base's validation readout, the campaign runner |
 | B6 | Started 2026-10-05 (the log §1) |
 | B9 (D96) | Done, reviewed twice: `1204fd8f`, `6a68ac67`, `0b050797`, `bb86a39f`, `5313b6cd`; full suite passed; the names for §7's "Code" column in the log §1 |
-| D90 / A37 | Stage B follows after A37's merge; a flight's end, flown record and aero parameters have no accessor yet: a gap for the user (the log §1) |
+| D90 / A37 | `Loop.executor` stays public (D90 narrowed): the gap is closed; stage B follows the changed A37 after its merge (the log §1) |
 | B5, B7 | Wait for A34's artefact and Claude's check of stage A (§0.4) |
 
 Proposals (where the design says nothing): none open.
