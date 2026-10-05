@@ -20,12 +20,15 @@
 5. 停住，等 B5 的命令。报告：提交号、测试数。
 不改 instructions/、autopilot/，也不改 A 阶段的运行器。
 
-另（A43 合进 dev-two-tier-v4、用户转告你之后再做，不早）：A 阶段的后端启动时不再跑一致性检查（D73），
+另（A43 已在 dev-two-tier-v4 的 60bbc901；把它合进本分支之后做）：A 阶段的后端启动时不再跑一致性检查（D73），
 你的钩子里有一条注释从此说错了，改它：
    文件 aeroviz_backend/autopilot_segment/prior.py 第 204 行
    旧：_require_split(item["split"], service.splits)       # before any check runs (A37): `executor_for` runs the conformance
    新：_require_split(item["split"], service.splits)       # before the set is opened (A37)
 同一个文件第 158 行的 `with self.backend._lock:`（你的预热）也一起看：A 的预热已经不拿请求锁，
 每个集合用自己的锁（set_flown），请求只等自己要的那个集合；你的预热照这样去掉这一层 with（只是同样的理由）。
+还有一处：你钩子里的 apart_from_exported（prior.py）现在不拒绝；A43 在 fly.py 里写了唯一的一处界
+refuse_past_bound(horizontal_m, vertical_m, flight, against)，超过 STATE_BOUND_M 就按名字拒绝（ExecutorDiffers）。
+apart_from_exported 算完距离后调它（against 写"the readout's flown states"），测试照 A 的写法补一条。
 单文件测试 → 独立审查 → 用显式路径提交，报告提交号。
 ```
