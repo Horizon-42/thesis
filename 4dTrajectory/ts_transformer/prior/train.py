@@ -27,6 +27,7 @@ from ts_transformer.instructions.words import COLUMNS, RUNWAY
 from ts_transformer.prior.batch import RowTensors, SentenceRows, collate, require_words
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.runs import RunData
+from ts_transformer.prior.speaker import Permitted
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,49 @@ def evaluate(model: Prior, sentences: Sequence[SentenceRows], tokens_per_batch: 
     per_column = (total / steps).cpu().numpy()
     return {"loss_per_step": float(per_column.sum()), "per_column": dict(zip(COLUMNS, per_column.tolist())),
             "steps": steps}
+
+
+def masked_log_probability(model: Prior, rows: RowTensors, permitted: Permitted, extra: Any = None) -> torch.Tensor:
+    """``[B, R, 5]``: the log-probability of the words ``rows.targets`` at each asked row, under the speaker's records
+    ``permitted`` (`speaker.Permitted`: the words every mask permitted at each row it said, the rows' times, the
+    temperature), teacher-forced with the caller's input of the added modules ``extra``, with gradients (D96 item 3); 0
+    at a row that is not asked. Each asked row reads the record of the row said at its time, refused when there is
+    none or when its own-state inputs are not the record's (records of another aircraft or another row); the caller
+    keeps records and rows of the same aircraft in the same order. A record narrower than the batch's classes permits none of
+    the extra classes, one wider is refused unless its extra classes are all blocked. At the parameters that spoke, the
+    probability is the one the speaker drew the word from (within the float tolerance); a word the record blocks has
+    probability 0."""
+    count, length = rows.asked.shape
+    if permitted.time_s.shape[0] != count:
+        raise ValueError(f"records of {permitted.time_s.shape[0]} aircraft for a batch of {count}")
+    asked, times, own = rows.asked.cpu().numpy(), rows.time_s.cpu().numpy(), rows.own.cpu().numpy()
+    said = []                                   # for each aircraft, (its asked rows, the record row of each)
+    for b in range(count):
+        where = np.flatnonzero(asked[b])
+        at = {float(t): k for k, t in enumerate(permitted.time_s[b])}
+        missing = [float(times[b, r]) for r in where if float(times[b, r]) not in at]
+        if missing:
+            raise ValueError(f"aircraft {b}: no record of the rows at {missing[:3]} s")
+        rows_said = np.array([at[float(times[b, r])] for r in where], dtype=np.int64)
+        if not np.array_equal(own[b, where], permitted.own[b, rows_said]):
+            raise ValueError(f"aircraft {b}: its rows' inputs are not those its records were said with (another "
+                             f"aircraft's records, or another sentence)")
+        said.append((where, rows_said))
+    logits = model(rows, extra)
+    out = logits[0].new_zeros((count, length, len(logits)))
+    for column, logit in enumerate(logits):
+        width, stored = logit.shape[-1], permitted.masks[column]
+        if stored.shape[-1] > width and stored[..., width:].any():
+            raise ValueError(f"column {COLUMNS[column]}: the records permit a class past the batch's {width}")
+        stored = np.pad(stored[..., :width], ((0, 0), (0, 0), (0, max(0, width - stored.shape[-1]))))
+        record = np.ones((count, length, width), dtype=bool)
+        for b, (where, rows_said) in enumerate(said):
+            record[b, where] = stored[b, rows_said]
+        masked = logit.masked_fill(~torch.as_tensor(record, device=logit.device), float("-inf"))
+        log_p = torch.log_softmax(masked / permitted.temperature, dim=-1)
+        chosen = log_p.gather(-1, rows.targets[..., column: column + 1])[..., 0]
+        out[..., column] = torch.where(rows.asked, chosen, torch.zeros_like(chosen))
+    return out
 
 
 @torch.no_grad()

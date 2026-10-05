@@ -164,7 +164,7 @@ SMALL = {"d_model": 32, "layers": 2, "heads": 4, "feedforward": 64}
 
 def setup(words, seed=0, count=4, first_step=8, rows=40):
     torch.manual_seed(seed)
-    model = Prior(PriorConfig.from_words(words, "full", **SMALL))
+    model = Prior(PriorConfig.from_words(words, "full", **SMALL)).eval()
     rng = np.random.default_rng(seed)
     sentences = [prior_sentence(rng, words, candidates=2, rows=rows, first_step=first_step) for _ in range(count)]
     return model, collate(sentences, CPU)
@@ -174,13 +174,26 @@ def position(count, row):
     return Position(np.full(count, -15_000.0 + 140.0 * row), np.zeros(count), np.full(count, 700.0 - 4.0 * row))
 
 
-def speak(model, rows, words, *, seed, caller=None, count_rows=20):
+def spread(count, row):
+    """Each aircraft its own place: aircraft b 4 km nearer the threshold and 40 m lower than b − 1 (their masks
+    differ)."""
+    b = np.arange(count)
+    return Position(-15_000.0 + 140.0 * row + 4_000.0 * b, np.zeros(count), 700.0 - 4.0 * row - 40.0 * b)
+
+
+def numbers(seed, count, rows):
+    """Each aircraft's own uniform numbers, ``[rows, count, 5]``: aircraft b's from (seed, b) alone (D96)."""
+    return np.stack([np.random.default_rng([seed, b]).random((rows, len(COLUMNS))) for b in range(count)], axis=1)
+
+
+def speak(model, rows, words, *, seed, caller=None, count_rows=20, extra=None):
     count = rows.present.shape[0]
-    speaker = Speaker(model, words, [finals()] * count, capacity=rows.present.shape[1],
-                      generator=torch.Generator().manual_seed(seed))
+    speaker = Speaker(model, words, [finals()] * count, capacity=rows.present.shape[1])
     first = int(rows.first[0].nonzero()[0, 0])
-    speaker.observe(rows.between(0, first), [position(count, r) for r in range(first)])
-    said = [speaker.speak(rows.between(r, r + 1), position(count, r), caller) for r in range(first, first + count_rows)]
+    speaker.observe(rows.between(0, first), [position(count, r) for r in range(first)], extra)
+    drawn = numbers(seed, count, count_rows)
+    said = [speaker.speak(rows.between(r, r + 1), position(count, r), drawn[r - first], caller, extra)
+            for r in range(first, first + count_rows)]
     return speaker, np.stack(said, axis=1)
 
 
@@ -282,8 +295,7 @@ def test_the_runway_column_asks_the_masks_under_each_runway_word(words):
     from itertools import product
 
     model, rows = setup(words, count=1)
-    speaker = Speaker(model, words, [finals()], capacity=rows.present.shape[1],
-                      generator=torch.Generator().manual_seed(0))
+    speaker = Speaker(model, words, [finals()], capacity=rows.present.shape[1])
     final = finals()[0]
     edge = float(final.glidepath_m(np.array(5_000.0))) - GLIDEPATH_BELOW_M
     at = Position(np.array([-5_000.0]), np.array([0.0]), np.array([edge + 60.0]))
@@ -323,15 +335,15 @@ def test_after_its_second_go_around_a_flight_may_not_say_another(words):
 
     model, rows = setup(words, count=3, rows=40)
     count = rows.present.shape[0]
-    speaker = Speaker(model, words, [finals()] * count, capacity=rows.present.shape[1],
-                      generator=torch.Generator().manual_seed(4))
+    speaker = Speaker(model, words, [finals()] * count, capacity=rows.present.shape[1])
     first = int(rows.first[0].nonzero()[0, 0])
     speaker.observe(rows.between(0, first), [position(count, r) for r in range(first)])
     no_unchanged = np.ones((count, 4), dtype=bool)
     no_unchanged[:, 0] = False
+    drawn = numbers(4, count, 12)
     for r in range(first, first + 12):
         caller = {RUNWAY: no_unchanged & go_around_bound(speaker.go_arounds, words, 2)}
-        said = speaker.speak(rows.between(r, r + 1), position(count, r), caller)
+        said = speaker.speak(rows.between(r, r + 1), position(count, r), drawn[r - first], caller)
         assert (said[:, RUNWAY] != UNCHANGED).all() and (speaker.go_arounds <= MOST_GO_AROUNDS).all()
     assert (speaker.go_arounds == MOST_GO_AROUNDS).all()
     assert go_around_bound(np.array([0, 1, 2]), words, 2)[:, 1].tolist() == [True, True, False]
@@ -355,3 +367,230 @@ def test_the_speaker_records_the_words_the_procedure_masks_blocked_and_says_none
     assert below
     classes = list(column_words(ALTITUDE, words, 2))
     assert all(speaker.procedure_blocked[0][ALTITUDE][:, classes.index(v)].all() for v in below)
+
+
+# ---- B9: the interface for the post-training (D96)
+
+def subset(rows, indices):
+    """The rows of the aircraft ``indices`` of a batch, in that order."""
+    return type(rows)(*(value[list(indices)] for value in rows))
+
+
+def speak_with(model, rows, words, ids, count_rows, *, seed=11, extra=None):
+    """The aircraft ``ids`` of ``rows`` spoken together, each with its own numbers (`numbers`: aircraft b's from (seed,
+    b)); the speaker and ``[B, rows, 5]`` words."""
+    speaker = Speaker(model, words, [finals()] * len(ids), capacity=8)
+    part = subset(rows, ids)
+    first = int(part.first[0].nonzero()[0, 0])
+    speaker.observe(part.between(0, first), [position(len(ids), r) for r in range(first)], extra)
+    drawn = numbers(seed, max(ids) + 1, count_rows)[:, list(ids)]
+    said = [speaker.speak(part.between(r, r + 1), position(len(ids), r), drawn[r - first], None, extra)
+            for r in range(first, first + count_rows)]
+    return speaker, np.stack(said, axis=1)
+
+
+def test_an_aircraft_says_the_same_words_alone_and_in_a_batch(words):
+    """D96 item 2: an aircraft's words depend on its own numbers and inputs only. Each of 6 aircraft spoken alone and
+    in the batch of all 6 says the same words at every row (a difference could come only from a number within the float
+    tolerance of a boundary, post-training §6.4: counted, none on this batch)."""
+    model, rows = setup(words, seed=2, count=6)
+    _, together = speak_with(model, rows, words, list(range(6)), 25)
+    differ = sum(int((speak_with(model, rows, words, [b], 25)[1][0] != together[b]).any(axis=-1).sum()) for b in range(6))
+    assert differ == 0
+    _, reversed_ = speak_with(model, rows, words, list(range(5, -1, -1)), 25)
+    assert np.array_equal(reversed_[::-1], together)
+
+
+def test_the_log_probability_under_the_records_is_the_probability_the_speaker_drew_from(words):
+    """D96 item 3: teacher-forced on the words the speaker said, under its records of the permitted words, the
+    probability of each word is the one it was drawn from (the encodings agree within the float tolerance); a word a
+    record blocks has probability 0; gradients flow."""
+    from ts_transformer.prior.batch import target_classes
+    from ts_transformer.prior.train import masked_log_probability
+
+    model, rows = setup(words, seed=3, count=4)
+    speaker = Speaker(model, words, [finals()] * 4, capacity=8)
+    first = int(rows.first[0].nonzero()[0, 0])
+    speaker.observe(rows.between(0, first), [spread(4, r) for r in range(first)])
+    drawn_numbers = numbers(11, 4, 20)
+    said = np.stack([speaker.speak(rows.between(r, r + 1), spread(4, r), drawn_numbers[r - first])
+                     for r in range(first, first + 20)], axis=1)
+    first = int(rows.first[0].nonzero()[0, 0])
+    part = rows.between(0, first + 20)
+    targets = part.targets.clone()
+    targets[:, first:] = torch.as_tensor(target_classes(said))
+    told = part._replace(targets=targets)
+    log_p = masked_log_probability(model, told, speaker.permitted())
+    drawn = torch.as_tensor(np.stack(speaker.drawn_probability, axis=1), dtype=torch.float32)
+    torch.testing.assert_close(log_p[:, first:].exp(), drawn, rtol=1e-4, atol=1e-6)
+    assert (log_p[:, :first] == 0).all()
+    log_p[:, first:].sum().backward()
+    grads = [p.grad for p in model.parameters() if p.grad is not None]
+    assert grads and all(torch.isfinite(g).all() for g in grads) and any(g.abs().sum() > 0 for g in grads)
+    # a word the records block (not "unchanged", which the model blocks itself at the first step): probability 0 under
+    # the records, positive under records that permit every word
+    from ts_transformer.prior.speaker import Permitted
+
+    record = speaker.permitted()
+    blocked = [k for k in np.flatnonzero(~record.masks[ALTITUDE][0, 0]) if k != 0]
+    assert blocked
+    targets[0, first, ALTITUDE] = int(blocked[0])
+    every = Permitted(tuple(np.ones_like(m) for m in record.masks), record.time_s, record.own, record.temperature)
+    with torch.no_grad():
+        changed = part._replace(targets=targets)
+        assert masked_log_probability(model, changed, record)[0, first, ALTITUDE] == float("-inf")
+        assert torch.isfinite(masked_log_probability(model, changed, every)[0, first, ALTITUDE])
+        with pytest.raises(ValueError, match="records of 3 aircraft"):
+            masked_log_probability(model, changed, record.select([0, 1, 2]))
+        later = part._replace(time_s=part.time_s + 1000.0)
+        with pytest.raises(ValueError, match="no record of the rows"):
+            masked_log_probability(model, later, record)
+        with pytest.raises(ValueError, match="another aircraft's records"):          # the records of other aircraft
+            masked_log_probability(model, changed, record.select([3, 2, 1, 0]))
+        # rows asked from 5 rows after the first said: each reads its own row's record
+        asked = told.asked.clone()
+        asked[:, first: first + 5] = False
+        torch.testing.assert_close(masked_log_probability(model, told._replace(asked=asked), record)[:, first + 5:].exp(),
+                                   drawn[:, 5:], rtol=1e-4, atol=1e-6)
+
+
+def test_a_copy_continued_with_the_same_inputs_and_numbers_says_what_the_original_says(words):
+    """D96 item 5: a copy of every aircraft (the same layout) continued with the same inputs and numbers says the same
+    words with the same probabilities, bit for bit; a copy of chosen aircraft, repeated, carries their state: records,
+    words in force, go-arounds, procedure masks."""
+    model, rows = setup(words, seed=4, count=4, rows=50)
+    speaker = Speaker(model, words, [finals()] * 4, capacity=8)
+    first = int(rows.first[0].nonzero()[0, 0])
+    speaker.observe(rows.between(0, first), [spread(4, r) for r in range(first)])
+    drawn = numbers(5, 4, 30)
+    for r in range(first, first + 10):
+        speaker.speak(rows.between(r, r + 1), spread(4, r), drawn[r - first])
+    assert not (speaker.procedure.joined == speaker.procedure.joined[0]).all()      # the aircraft's masks differ
+    twin = speaker.copy(range(4))
+    picked = speaker.copy([2, 2, 0])
+    assert np.array_equal(picked.permitted().masks[ALTITUDE], speaker.permitted().masks[ALTITUDE][[2, 2, 0]])
+    assert picked.in_force == [speaker.in_force[i] for i in (2, 2, 0)]
+    assert np.array_equal(picked.go_arounds, speaker.go_arounds[[2, 2, 0]])
+    assert np.array_equal(picked.procedure.joined, speaker.procedure.joined[[2, 2, 0]])
+    chosen = subset(rows, [2, 2, 0])
+    for r in range(first + 10, first + 30):
+        a = speaker.speak(rows.between(r, r + 1), spread(4, r), drawn[r - first])
+        b = twin.speak(rows.between(r, r + 1), spread(4, r), drawn[r - first])
+        assert np.array_equal(a, b) and np.array_equal(speaker.drawn_probability[-1], twin.drawn_probability[-1])
+        at = spread(4, r)
+        c = picked.speak(chosen.between(r, r + 1), Position(*(v[[2, 2, 0]] for v in at)), drawn[r - first][[2, 2, 0]])
+        assert np.array_equal(c, a[[2, 2, 0]])        # another layout: the same words (none near a boundary here)
+    assert np.array_equal(speaker.permitted().masks[RUNWAY], twin.permitted().masks[RUNWAY])
+
+
+class Recorder(torch.nn.Module):
+    """An added module (§7 item 5) whose output is zero; it keeps every input of the caller it is given."""
+
+    def __init__(self, seen):
+        super().__init__()
+        self.seen = seen
+
+    def forward(self, x, extra):
+        self.seen.append(extra)
+        return torch.zeros_like(x)
+
+
+def test_the_speaker_gives_the_added_modules_the_caller_s_input_and_a_zero_module_changes_no_word(words):
+    """D96 item 1: every layer's added module gets the caller's input at every row the speaker encodes or says; one
+    whose output is zero changes no word."""
+    model, rows = setup(words, seed=6, count=3)
+    _, plain = speak_with(model, rows, words, [0, 1, 2], 15)
+    seen = []
+    model.add_at_each_layer(lambda i: Recorder(seen))
+    token = object()
+    _, added = speak_with(model, rows, words, [0, 1, 2], 15, extra=token)
+    assert np.array_equal(added, plain)
+    assert len(seen) == len(model.layers) * (1 + 15) and all(item is token for item in seen)   # observe once, 15 rows
+
+
+def test_draw_takes_the_first_class_whose_cumulative_probability_passes_the_number():
+    from ts_transformer.prior.speaker import draw
+
+    probabilities = torch.tensor([[0.25, 0.0, 0.5, 0.25]] * 6, dtype=torch.float32)     # exact in binary
+    numbers_ = np.array([0.0, 0.2499, 0.25, 0.7499, 0.75, 0.999999999])
+    assert draw(probabilities, numbers_)[:, 0].tolist() == [0, 0, 2, 2, 3, 3]     # never class 1 (probability 0)
+    one = torch.tensor([[0.0, 1.0, 0.0]])
+    assert draw(one, np.array([0.999999999]))[:, 0].tolist() == [1]
+    # a float sum short of 1: a number past it says the last class of positive probability, never a zero one
+    short = torch.tensor([[0.3, 0.6999999, 0.0]], dtype=torch.float32)
+    assert draw(short, np.array([0.99999999]))[:, 0].tolist() == [1]
+
+
+def test_records_of_airports_with_other_numbers_of_candidates_go_with_their_aircraft(words):
+    """The runway column's width is a batch's (2 + its most candidates): a speaker of a 2-candidate and a 1-candidate
+    aircraft, a copy of the 1-candidate one twice spoken on in a batch of its own width, gives its records; under them
+    the log-probability of its words, scored in a batch beside a 2-candidate aircraft, is the probability it drew."""
+    import dataclasses
+
+    from ts_transformer.prior.batch import target_classes
+    from ts_transformer.prior.speaker import Permitted
+    from ts_transformer.prior.train import masked_log_probability
+
+    torch.manual_seed(7)
+    model = Prior(PriorConfig.from_words(words, "full", **SMALL)).eval()
+    rng = np.random.default_rng(7)
+    sentences = [prior_sentence(rng, words, candidates=k, rows=40, first_step=8) for k in (2, 1)]
+    rows = collate(sentences, CPU)
+    one = dataclasses.replace(parallel_airport(), candidates=parallel_airport().candidates[:1])
+    finals_one = (Final(one, 0, FAF_M, fas_course_geometry(3000.0)),)
+    speaker = Speaker(model, words, [finals(), finals_one], capacity=8)
+    speaker.observe(rows.between(0, 8), [spread(2, r) for r in range(8)])
+    drawn = numbers(9, 2, 20)
+    said = [speaker.speak(rows.between(r, r + 1), spread(2, r), drawn[r - 8]) for r in range(8, 13)]
+    copy = speaker.copy([1, 1])
+    alone = collate([sentences[1]] * 2, CPU)                                   # the copy's own width: 1 candidate
+    for r in range(13, 20):
+        at = spread(2, r)
+        said.append(copy.speak(alone.between(r, r + 1), Position(*(v[[1, 1]] for v in at)), drawn[r - 8][[1, 1]]))
+    copied = copy.permitted()
+    assert copied.masks[RUNWAY].shape[-1] == 4 and not copied.masks[RUNWAY][:, 5:, 3].any()   # no candidate 2 after
+    for r in range(13, 20):                                     # the original speaks on: the 2-candidate aircraft's rows
+        speaker.speak(rows.between(r, r + 1), spread(2, r), drawn[r - 8])
+    original = speaker.permitted().select([0])
+    first_ = copied.select([0])
+    record = Permitted(tuple(np.concatenate(pair) for pair in zip(first_.masks, original.masks)),
+                       np.concatenate([first_.time_s, original.time_s]), np.concatenate([first_.own, original.own]),
+                       first_.temperature)
+    # the copy's first aircraft scored first in a batch with the 2-candidate aircraft (4 runway classes); its words: the
+    # original's aircraft 1 to row 12, the copy's from row 13
+    told = [said[k][1] for k in range(5)] + [said[k][0] for k in range(5, 12)]
+    batch = collate([sentences[1], sentences[0]], CPU).between(0, 20)
+    targets = batch.targets.clone()
+    targets[0, 8:20] = torch.as_tensor(target_classes(np.stack(told)))
+    batch = batch._replace(targets=targets)
+    with torch.no_grad():
+        log_p = masked_log_probability(model, batch, record)
+        torch.testing.assert_close(log_p[0, 8:20].exp(), torch.as_tensor(np.stack(copy.drawn_probability)[:, 0],
+                                                                         dtype=torch.float32), rtol=1e-4, atol=1e-6)
+        # a record narrower than the batch's classes permits none of the extra ones (here: 3 of 4 runway classes)
+        narrow = Permitted(tuple(m[..., :3] if c == RUNWAY else m for c, m in enumerate(record.masks)), record.time_s,
+                           record.own, record.temperature)
+        torch.testing.assert_close(masked_log_probability(model, batch, narrow)[0], log_p[0])
+        # one wider than the batch is refused only when it permits a class past it
+        alone_batch = collate([sentences[1]] * 2, CPU).between(0, 20)
+        masked_log_probability(model, alone_batch, copied)                    # 4 wide, 3 classes: allowed
+        wide = Permitted(tuple(m.copy() for m in copied.masks), copied.time_s, copied.own, copied.temperature)
+        wide.masks[RUNWAY][:, 0, 3] = True
+        with pytest.raises(ValueError, match="past the batch"):
+            masked_log_probability(model, alone_batch, wide)
+
+
+def test_the_speaker_refuses_a_training_model_and_a_row_not_after_the_last(words):
+    model, rows = setup(words, seed=8, count=2)
+    with pytest.raises(ValueError, match="training"):
+        Speaker(model.train(), words, [finals()] * 2, capacity=8)
+    speaker = Speaker(model.eval(), words, [finals()] * 2, capacity=8)
+    first = int(rows.first[0].nonzero()[0, 0])
+    speaker.observe(rows.between(0, first), [position(2, r) for r in range(first)])
+    speaker.speak(rows.between(first, first + 1), position(2, first), numbers(1, 2, 1)[0])
+    with pytest.raises(ValueError, match="time order"):
+        speaker.speak(rows.between(first, first + 1), position(2, first), numbers(1, 2, 1)[0])
+    model.train()
+    with pytest.raises(ValueError, match="training"):
+        speaker.speak(rows.between(first + 1, first + 2), position(2, first + 1), numbers(1, 2, 1)[0])
+    model.eval()

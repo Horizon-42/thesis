@@ -137,6 +137,17 @@ class ProcedureMasks:
                                 for v in levels])
         self.bands = np.array([words.altitude_tolerance_m(int(v)) for v in levels])
 
+    def select(self, indices: Sequence[int]) -> ProcedureMasks:
+        """The masks of the aircraft ``indices`` (repeats permitted), in that order, with their state (a speaker's copy,
+        D96 item 5)."""
+        indices = list(indices)
+        out = object.__new__(ProcedureMasks)
+        out.finals, out.words = [self.finals[i] for i in indices], self.words
+        out.joined, out.dipped = self.joined[indices].copy(), self.dipped[indices].copy()
+        out.entry_low = self.entry_low[indices].copy()
+        out.levels, out.bands = self.levels, self.bands
+        return out
+
     def track(self, e: np.ndarray, n: np.ndarray, height_m: np.ndarray, go_around: np.ndarray) -> None:
         """Each aircraft's joined and dipped taken on to its newest row at ``(e, n)``, ``height_m`` above E, with G
         ``go_around`` in force before the row (while G, nothing is kept: the stretch starts again after it)."""

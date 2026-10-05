@@ -127,6 +127,12 @@ class Heard:
         self.track_deg = 0.0
         self.said_s = np.zeros(len(COLUMNS))
 
+    def copy(self) -> Heard:
+        """The same words in force, apart from this one's (a speaker's copy, D96 item 5)."""
+        out = Heard(self.geometry, self.words)
+        out.state, out.track_deg, out.said_s = self.state, self.track_deg, self.said_s.copy()
+        return out
+
     def hear(self, step: np.ndarray, height_m: float, time_s: float) -> None:
         """The row ``step`` said at ``time_s`` (the aircraft's own seconds) to the aircraft ``height_m`` above E."""
         self.state = apply(self.state, step, height_m, self.words, len(self.geometry.candidates))
