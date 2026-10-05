@@ -5,37 +5,16 @@ names a public interface must give, and the questions that only the user can dec
 it is rewritten in full each time, never appended to, and an item leaves when it is done. The evidence and the commits
 are in the implementation log (`readouts/2026-10-05_stage_c_implementation_log.md`, cited by §).
 
-State of 2026-10-05. Branch `dev-two-tier-v4-post` at `1945e19c` + the merge of `6d5f2cc7`: C0–C7 and C9 built and reviewed, the code of C10, C8 and C11's export and live segment too; D112–D117 and stage B's round (D111, D118–D122) followed.
+State of 2026-10-06. **No open request.** Every item of the note of 2026-10-05 is resolved:
 
-## 1 Questions for the user
+| Item | Resolved by |
+|---|---|
+| Window B's ranges (P28) | Post-training D123 (`51f9a404`) |
+| The readings of C6, C9, D114 and C10 (P26, P27, P29–P31, P33–P36, P38, P39) | Post-training D125 |
+| A round's windows share their flights (P32); the loss branch point by branch point; D113 at the draw; one command of a flight a batch (P31) | Post-training D124 |
+| The Training export's rows in vocabulary §6 and prior §7 | Vocabulary §6 item 8, prior §7 item 8, D126 |
+| P37: a window set carries no per-row speaker records | Post-training D125 (the window view does not show them) |
+| The window view (P42–P44, log §19) | Post-training D129, as proposed; ordered in `notes/stage_c.md` |
 
-1. **Window B's ranges** (C9; log §15, P28): a turn about the airport reference within ±15°, a height within ±300 m, a
-   speed scale within 1 ± 0.1, each uniform. With them, D113 leaves out 107 of 40,530 train windows B (0.26 %).
-2. **The readings of C6, C9 and D114** (log §15: P26, P27, P29, P30). Each is built as written. None changes a result
-   the user has seen.
-
-## 2 For the design of C10 (log §15, P31; log §16)
-
-- **The windows of a round share their flights** (the user, 2026-10-05, P32): A, D and B are built from the round's real
-  windows, as `post_train` does; the design text (§2 item 4, D100) does not say it yet.
-
-- **The rounds feed the loss branch point by branch point.** A round's groups are large: the reviewer's estimate is
-  several MB a group, tens of GB for a round held at once.
-- **Window B's D113 check happens at the draw.** It needs the moved start: `post_window_loop.moved_commanded`, whose
-  rows equal what `start_moved` gives back.
-- **A batch commands each flight once.** So a real window and its A, B or D go to different batches; `start_loop` maps
-  each window's move.
-
-## 3 For the design text
-
-- **Vocabulary §6 and prior §7: a row for the Training export** (the user, 2026-10-05). Stage C imports stage A's
-  `training_export` (`FORMATS`, `candidate_hae_minus_msl_m`, `candidates_block`, `events`, `split_flights`,
-  `vocabulary_block`), `training_flights` (`crossing_payload`, `last_state_cycle`), `training_attitude`
-  (`attitude_payload`, `executor_attitude`) and stage B's `prior_training_export` `procedure_block` — the names
-  `tests/test_architecture.py` TRAINING_EXPORT_NAMES lists.
-- **P37 (log §17)**: a window set carries no speaker's per-row records; stage B's loop gives them only for a flight the
-  executor ended.
-
-## 4 The plan
-
-C11's code next (the user's order of 2026-10-05). The formal C8 (`post_profile`) and C10 (`post_train`) wait for B5's base and Claude's check of stage B, C10 also for the user's criteria; C12 after C10.
+The plan: C11's last points (D129) now; then B13 when stage B commits it. The formal C8 (`post_profile`) and C10
+(`post_train`) wait for B5's base and Claude's check of stage B, C10 also for the user's criteria; C12 after C10.
