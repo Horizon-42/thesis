@@ -270,9 +270,12 @@ def model_block(readout: dict[str, Any], prior_dir: str) -> dict[str, Any]:
 
 def source_block(readout_dir: str, readout: dict[str, Any], words: Words, opened: dict[str, Any], git: dict[str, Any],
                  *, smoke: bool, device: str) -> dict[str, Any]:
-    """What the set was exported from, and the checks the export ran (D73)."""
+    """What the set was exported from, and the checks the export ran (D73). The artefact and the executor spec are named
+    relative to the repository (`repo_relative`): the live executor opens them from its own checkout, never from the
+    worktree a readout happened to run in."""
     return {"readout": readout_dir, "readoutGit": readout["git"], "readoutSmoke": readout["smoke"],
-            "instructions": readout["instructions"], "executor": readout["executor"], "specSha256": words.spec.sha256,
+            "instructions": repo_relative(Path(readout["instructions"])),
+            "executor": repo_relative(Path(readout["executor"])), "specSha256": words.spec.sha256,
             "executorSpecSha256": opened["sha256"], "checks": opened["checks"], "git": git, "smoke": smoke,
             "device": device}
 

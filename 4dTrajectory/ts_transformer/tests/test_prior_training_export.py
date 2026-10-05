@@ -327,3 +327,16 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
 
 def finals_of(geometry):
     return tuple(Final(geometry, k, 9_000.0, fas_course_geometry(c.length_m)) for k, c in enumerate(geometry.candidates))
+
+
+def test_the_set_names_the_artefact_and_the_executor_relative_to_the_repository():
+    """A readout run in a worktree records its absolute paths; the set names them from the repository, so the live
+    executor opens them from its own checkout."""
+    from ts_transformer.repo_layout import REPO_ROOT
+
+    readout = fixture_readout("KXXX", instructions=str(REPO_ROOT / "4dTrajectory/outputs/POOLED/instruction_language/v"),
+                              executor=str(REPO_ROOT / "4dTrajectory/outputs/POOLED/executor/v"))
+    source = export.source_block("r", readout, Words(instruction_spec()), {"sha256": "s", "checks": {}}, {}, smoke=True,
+                                 device="cpu")
+    assert (source["instructions"], source["executor"]) == ("4dTrajectory/outputs/POOLED/instruction_language/v",
+                                                            "4dTrajectory/outputs/POOLED/executor/v")
