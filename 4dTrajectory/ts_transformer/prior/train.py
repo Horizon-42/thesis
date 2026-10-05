@@ -23,7 +23,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from ts_transformer.instructions.words import COLUMNS
+from ts_transformer.instructions.words import COLUMNS, RUNWAY
 from ts_transformer.prior.batch import RowTensors, SentenceRows, collate, require_words
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.runs import RunData
@@ -100,6 +100,21 @@ def evaluate(model: Prior, sentences: Sequence[SentenceRows], tokens_per_batch: 
     per_column = (total / steps).cpu().numpy()
     return {"loss_per_step": float(per_column.sum()), "per_column": dict(zip(COLUMNS, per_column.tolist())),
             "steps": steps}
+
+
+@torch.no_grad()
+def first_step_runway(model: Prior, sentences: Sequence[SentenceRows], tokens_per_batch: int, device: torch.device
+                      ) -> dict[str, Any]:
+    """The runway word of the first predicted step (§5: a readout of a fold, not used for the choice): of
+    ``sentences``, how many the model's most probable runway class there (the head's own, teacher-forced up to that
+    row; the runway head reads no column before it) is the labelled one."""
+    model.eval()
+    right = 0
+    for group in length_groups([s.rows for s in sentences], tokens_per_batch, None):
+        rows = collate([sentences[i] for i in group], device)
+        runway = model(rows)[RUNWAY]
+        right += int((runway[rows.first].argmax(dim=-1) == rows.targets[..., RUNWAY][rows.first]).sum())
+    return {"sentences": len(sentences), "top1": right, "share": right / len(sentences)}
 
 
 class TrainResult(NamedTuple):

@@ -68,6 +68,19 @@ def go_around_bound(go_arounds: np.ndarray, words: Words, most_candidates: int,
     return out
 
 
+def runway_after(word: np.ndarray, in_force: Sequence[InForce | None], n_candidates: np.ndarray
+                 ) -> tuple[np.ndarray, np.ndarray]:
+    """The runway and G in force after each aircraft's runway word ``word``, its words in force ``in_force`` before the
+    row (the runway in force for "unchanged" and "go-around"; at the first predicted step, where those are never said,
+    candidate 0 stands for the procedure masks of a row that says no candidate — `column_mask` refuses such a row). A
+    candidate beyond an aircraft's own airport (a batch of airports of different sizes) is never permitted to it
+    (`column_mask`); its procedure masks are read on the airport's last candidate, a stand-in that decides nothing."""
+    runway = np.array([w if w >= 0 else (f.runway if f is not None else 0) for w, f in zip(word, in_force)])
+    go_around = np.array([w == RUNWAY_GO_AROUND or (w == UNCHANGED and f is not None and f.go_around)
+                          for w, f in zip(word, in_force)])
+    return np.minimum(runway, np.asarray(n_candidates) - 1), go_around
+
+
 class Speaker:
     """A batch of aircraft the prior speaks to, all at the same row. `observe` encodes the rows before the first
     predicted step; `speak` says the next row (the first predicted step first)."""
@@ -184,15 +197,7 @@ class Speaker:
         return out
 
     def _runway_after(self, word: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """The runway and G in force after each aircraft's runway word ``word`` (the runway in force for "unchanged"
-        and "go-around"; at the first predicted step, where those are never said, candidate 0 stands for the
-        procedure masks of a row that says no candidate — `column_mask` refuses such a row). A candidate beyond an
-        aircraft's own airport (a batch of airports of different sizes) is never permitted to it (`column_mask`); its
-        procedure masks are read on the airport's last candidate, a stand-in that decides nothing."""
-        runway = np.array([w if w >= 0 else (f.runway if f is not None else 0) for w, f in zip(word, self.in_force)])
-        go_around = np.array([w == RUNWAY_GO_AROUND or (w == UNCHANGED and f is not None and f.go_around)
-                              for w, f in zip(word, self.in_force)])
-        return np.minimum(runway, self.n_candidates - 1), go_around
+        return runway_after(word, self.in_force, self.n_candidates)
 
     def _others(self, column: int, runway: np.ndarray, go_around: np.ndarray, at: Position,
                 caller: Mapping[int, np.ndarray]) -> np.ndarray:

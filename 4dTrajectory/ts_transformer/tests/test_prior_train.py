@@ -281,6 +281,32 @@ def test_a_fold_trains_without_its_held_out_airport_and_scores_it_on_its_select_
     assert config["sentences"] == {"train": 2, "select": 2}         # KXXX's alone
     held_out = json.loads((out / "held_out.json").read_text())
     assert held_out["airport"] == "KYYY" and held_out["steps"] > 0 and np.isfinite(held_out["loss_per_step"])
+    assert held_out["first_step_runway"]["sentences"] == 2                   # §5: a readout of a fold
+
+
+def test_the_first_step_runway_counts_the_sentences_whose_top_class_is_the_labelled_one(words):
+    """§5's first-step runway: a model whose runway head puts its largest logit on the labelled class at the first
+    predicted step scores every sentence, one that puts it on another class none; only the first step is read."""
+    from ts_transformer.instructions.words import RUNWAY
+    from ts_transformer.prior.train import first_step_runway
+
+    rng = np.random.default_rng(0)
+    sentences = [prior_sentence(rng, words, candidates=3, rows=20, first_step=6) for _ in range(5)]
+
+    class Oracle(nn.Module):
+        def __init__(self, shift):
+            super().__init__()
+            self.shift = shift
+
+        def forward(self, rows):
+            classes = 2 + 3                                                  # unchanged, go-around, 3 candidates
+            target = (rows.targets[..., RUNWAY] + torch.where(rows.first, self.shift, 0)) % classes
+            runway = nn.functional.one_hot(target, classes).float()
+            runway[~rows.first] = nn.functional.one_hot((target[~rows.first] + 1) % classes, classes).float()
+            return [runway]
+
+    assert first_step_runway(Oracle(0), sentences, 4096, CPU) == {"sentences": 5, "top1": 5, "share": 1.0}
+    assert first_step_runway(Oracle(1), sentences, 4096, CPU)["top1"] == 0
 
 
 def test_the_memory_check_takes_the_batch_of_the_most_row_candidates(words):

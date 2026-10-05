@@ -44,7 +44,7 @@ from ts_transformer.prior.procedure import PROCEDURE_MASKS, procedure_digests
 from ts_transformer.prior.runs import SAMPLE_SEED, Run, held_out_sentences, run_data, sampled_run_data
 from ts_transformer.prior.selection import RULES, selection_totals
 from ts_transformer.prior.source import ArtefactSource, airport_landings, artefact_identity
-from ts_transformer.prior.train import TrainConfig, evaluate, largest_batch_memory, train
+from ts_transformer.prior.train import TrainConfig, evaluate, first_step_runway, largest_batch_memory, train
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: The GPU must hold the largest batches' reserved peak and the training state this many times over: the batches of a
@@ -147,9 +147,12 @@ def main(argv: list[str] | None = None) -> int:
         "procedure_data": procedure_digests(geometries, root=args.procedure_root)})
     if run.held_out is not None:
         model.load_state_dict(result.state)
-        held_out = evaluate(model, held_out_sentences(source, run), config.tokens_per_batch, device)
-        write_json_atomic(out / "held_out.json", {"airport": run.held_out, **held_out})
-        print(f"held out {run.held_out}: {held_out['loss_per_step']:.4f} per step")
+        sentences = held_out_sentences(source, run)
+        held_out = evaluate(model, sentences, config.tokens_per_batch, device)
+        runway = first_step_runway(model, sentences, config.tokens_per_batch, device)
+        write_json_atomic(out / "held_out.json", {"airport": run.held_out, **held_out, "first_step_runway": runway})
+        print(f"held out {run.held_out}: {held_out['loss_per_step']:.4f} per step, first-step runway "
+              f"{runway['top1']} of {runway['sentences']}")
     print(json.dumps({"out": str(out), "best_epoch": result.best_epoch}))
     return 0
 
