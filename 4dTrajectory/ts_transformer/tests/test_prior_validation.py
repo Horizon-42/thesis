@@ -63,6 +63,7 @@ def test_the_masks_on_a_go_around_read_g_and_the_runway_after_the_word(tmp_path,
 def base_prior(tmp_path, monkeypatch, *, held_out=None):
     """A synthetic artefact (two val flights, the second's stored outcome not a landing), a base prior written as
     `prior_train` writes one, every live root of the runner replaced. Returns ``(artefact, prior directory)``."""
+    from ts_transformer.prior import checkpoint as opening
     from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, save_checkpoint
     from ts_transformer.prior.landings import roster_landings
     from ts_transformer.prior.model import Prior, PriorConfig
@@ -75,8 +76,9 @@ def base_prior(tmp_path, monkeypatch, *, held_out=None):
     landings = {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), fixture_days())}
     digests = {"KXXX": {"09": "0" * 64, "09L": "0" * 64}}
     monkeypatch.setattr(runner, "require_conforming_closed_loop", lambda *given: (None, {"checks": {"stub": True}}, None))
-    monkeypatch.setattr(runner, "airport_landings", lambda geometries, days: landings)
-    monkeypatch.setattr(runner, "procedure_digests", lambda geometries, root: digests)
+    # the prior opens through `checkpoint.open_prior`: its live roots replaced there
+    monkeypatch.setattr(opening, "airport_landings", lambda geometries, days: landings)
+    monkeypatch.setattr(opening, "procedure_digests", lambda geometries, root: digests)
     monkeypatch.setattr(runner, "airport_finals", lambda geometry, root: finals_of(geometry))
     monkeypatch.setattr(runner, "git_state", lambda: {"head": "fixture", "dirty": False})
     identity = artefact_identity(artefact, 2.0, landings, "landed")
@@ -125,6 +127,31 @@ def test_a_smoke_reads_the_select_days_never_the_val_days(tmp_path, monkeypatch)
     assert runner.main([*argv, "--split", "select", "--smoke", "--out", str(tmp_path / "c")]) == 0
     assert json.loads((tmp_path / "c" / "readout.json").read_text())["split"] == "select"
     assert not list(prior.glob("val_read_*"))                                         # val not read
+
+
+def test_a_smoke_reads_no_outcome_of_a_val_sentence(tmp_path, monkeypatch):
+    """D85: before the base's one validation readout, nothing reads the val days' sentences — not their stored outcomes
+    for the identity either (`checkpoint.open_prior` compares the val counts by the val file's sha256): every read of
+    val's closed-loop sentences fails here, and the smoke runs."""
+    from ts_transformer.instructions import artefact as artefact_module
+    from ts_transformer.prior import source as source_module
+
+    artefact, prior = base_prior(tmp_path, monkeypatch)
+    read = artefact_module.closed_loop_sentences
+    opened = []
+
+    def guarded(directory, split, *args, **kwargs):
+        opened.append(split)
+        if split == "val":
+            raise AssertionError("a val closed-loop sentence read")
+        return read(directory, split, *args, **kwargs)
+
+    monkeypatch.setattr(source_module, "closed_loop_sentences", guarded)
+    monkeypatch.setattr(runner, "closed_loop_sentences", guarded)
+    argv = ["--prior", str(prior), "--instructions", str(artefact), "--executor", str(tmp_path / "executor"),
+            "--device", "cpu", "--split", "select", "--smoke", "--out", str(tmp_path / "c")]
+    assert runner.main(argv) == 0
+    assert set(opened) == {"train", "select"}
 
 
 def test_the_readout_is_the_base_s_alone(tmp_path, monkeypatch):

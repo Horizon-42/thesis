@@ -1,6 +1,7 @@
 """B5's campaign and its choices (prior §5, §12 B5): the rules of §5 on synthetic scores, a fold read only when it is
 complete and its own, the plan of the 31 runs, a whole campaign flown with a stand-in for the runners (the choices made
-by `prior_select` itself), a resume after a kill, and the refusals of another commit or other inputs."""
+by `prior_select` itself), a resume after a kill, the refusal of other inputs, and the behaviour check before each step
+in place of a commit (D108)."""
 
 from __future__ import annotations
 
@@ -17,6 +18,11 @@ SEEDS = (1337, 2024)
 AIRPORTS = ("KAAA", "KBBB", "KCCC", "KDDD", "KEEE")
 #: The parameters of each configuration's stand-in (B smaller than A, C larger, D as A).
 PARAMETERS = {"A": 2_000_000, "B": 1_000_000, "C": 4_000_000, "D": 2_000_000}
+
+
+def same(instructions):
+    """The stand-in of the behaviour check (`prior_behaviour`): the code behaves as at the start."""
+    return {"train_loss": ["0x1p+0"], "words": [[0]]}
 
 
 def scores(**given):
@@ -140,17 +146,23 @@ def test_a_campaign_runs_every_step_once_makes_its_choices_and_resumes_after_a_k
     monkeypatch.setattr(campaign_module, "load_candidates", lambda instructions: dict.fromkeys(AIRPORTS))
     campaign = tmp_path / "campaign"
     git = {"head": "a" * 40, "dirty": False}
-    rec = campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, git)
+    rec = campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, git,
+                                        behaviour=same)
     killed = StandIn(fail_at="B_full_s1337/KCCC")
     with pytest.raises(SystemExit, match="B_full_s1337/KCCC failed"):
-        campaign_module.run_campaign(campaign, rec, "cpu", killed, lambda line: None, lambda: git)
-    rec = campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, git)
+        campaign_module.run_campaign(campaign, rec, "cpu", killed, lambda line: None, lambda: git, behaviour=same)
+    # resumed from another commit whose code behaves the same: the commit is information (D108)
+    later = {"head": "c" * 40, "dirty": False}
+    rec = campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, later,
+                                        behaviour=same)
     runner = StandIn()
-    campaign_module.run_campaign(campaign, rec, "cpu", runner, lambda line: None, lambda: git)
+    campaign_module.run_campaign(campaign, rec, "cpu", runner, lambda line: None, lambda: later, behaviour=same)
     assert json.loads((campaign / "campaign.json").read_text())["running"] is None
     assert runner.ran[0] == "B_full_s1337/KCCC"                         # the killed step again, first
     assert not set(runner.ran) & set(killed.ran[:-1])                  # nothing done is run again
     stored = json.loads((campaign / "campaign.json").read_text())
+    assert stored["schema"] == campaign_module.CAMPAIGN_SCHEMA and stored["behaviour"] == same(None)
+    assert [s["git"]["head"][0] for s in stored["steps"]] == ["a"] * len(killed.ran) + ["c"] * len(runner.ran)
     assert [a["step"] for a in stored["aborted"]] == ["B_full_s1337/KCCC"]
     assert (campaign / "B_full_s1337" / Path(stored["aborted"][0]["moved_to"]).name).exists()
     configuration = json.loads((campaign / "choice_configuration.json").read_text())
@@ -162,20 +174,18 @@ def test_a_campaign_runs_every_step_once_makes_its_choices_and_resumes_after_a_k
     assert len(trained) == 31 + 1                                      # 31 runs, the killed one twice
 
 
-def test_a_resume_with_another_commit_or_other_inputs_is_refused(tmp_path, monkeypatch):
+def test_a_resume_with_other_inputs_is_refused(tmp_path, monkeypatch):
     monkeypatch.setattr(campaign_module, "load_candidates", lambda instructions: dict.fromkeys(AIRPORTS))
     campaign = tmp_path / "campaign"
     git = {"head": "a" * 40, "dirty": False}
-    campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, git)
-    with pytest.raises(SystemExit, match="one commit"):
-        campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0,
-                                      {"head": "b" * 40, "dirty": False})
+    campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, git, behaviour=same)
     with pytest.raises(SystemExit, match="row_interval_s"):
-        campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 2.0, git)
+        campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 2.0, git, behaviour=same)
     (tmp_path / "other").mkdir()
     (tmp_path / "other" / "file").write_text("x")
     with pytest.raises(SystemExit, match="is no campaign"):
-        campaign_module.open_campaign(tmp_path / "other", tmp_path / "artefact", tmp_path / "executor", 4.0, git)
+        campaign_module.open_campaign(tmp_path / "other", tmp_path / "artefact", tmp_path / "executor", 4.0, git,
+                                      behaviour=same)
 
 
 def test_a_smoke_campaign_tells_every_runner_it_is_a_smoke_and_a_formal_one_none(tmp_path):
@@ -195,19 +205,61 @@ def test_a_smoke_campaign_tells_every_runner_it_is_a_smoke_and_a_formal_one_none
                for s in smoke if s.runner == "prior_free_generation")
 
 
-def test_a_campaign_stops_when_its_tree_moves_and_refuses_a_resume_while_its_step_runs(tmp_path, monkeypatch):
+def test_a_campaign_stops_when_its_code_behaves_otherwise_or_its_tree_has_changes(tmp_path, monkeypatch):
+    """D108: before each step the behaviour check on fixed inputs, compared with the campaign's start; a difference
+    stops it by name, as uncommitted changes do (a formal campaign runs on a clean checkout). A resume while its step
+    runs is refused."""
     monkeypatch.setattr(campaign_module, "load_candidates", lambda instructions: dict.fromkeys(AIRPORTS))
     campaign = tmp_path / "campaign"
     git = {"head": "a" * 40, "dirty": False}
-    rec = campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, git)
+    rec = campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, git,
+                                        behaviour=same)
     runner = StandIn()
-    for moved in ({"head": "b" * 40, "dirty": False}, {"head": "a" * 40, "dirty": True}):
-        with pytest.raises(SystemExit, match="the tree moved"):
-            campaign_module.run_campaign(campaign, rec, "cpu", runner, lambda line: None, lambda: moved)
-    assert runner.ran == []                                            # nothing ran on another tree
+    with pytest.raises(SystemExit, match=r"behaves otherwise.*\['words'\]"):
+        campaign_module.run_campaign(campaign, rec, "cpu", runner, lambda line: None, lambda: git,
+                                     behaviour=lambda i: {**same(i), "words": [[1]]})
+    with pytest.raises(SystemExit, match="uncommitted changes"):
+        campaign_module.run_campaign(campaign, rec, "cpu", runner, lambda line: None,
+                                     lambda: {"head": "a" * 40, "dirty": True}, behaviour=same)
+    with monkeypatch.context() as patch:                                # the campaign's own settings changed
+        patch.setattr(campaign_module, "FREE_GENERATION", {**campaign_module.FREE_GENERATION, "samples": 3})
+        with pytest.raises(SystemExit, match=r"sets \['free_generation'\] otherwise"):
+            campaign_module.run_campaign(campaign, rec, "cpu", runner, lambda line: None, lambda: git, behaviour=same)
+        with pytest.raises(SystemExit, match="free_generation"):
+            campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, git,
+                                          behaviour=same)
+    assert runner.ran == []                                            # nothing ran
     stored = json.loads((campaign / "campaign.json").read_text())
     stored["running"] = {"step": "A_full_s1337/KAAA", "pid": 4242, "utc": "x"}
     (campaign / "campaign.json").write_text(json.dumps(stored))
     monkeypatch.setattr(campaign_module, "alive_step", lambda running: True)
     with pytest.raises(SystemExit, match="still runs as PID 4242"):
         campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, git)
+
+
+def test_the_behaviour_check_gives_one_answer_and_sees_a_change_of_the_training_or_the_speaker(monkeypatch):
+    """D108: `prior_behaviour` on fixed inputs gives the same answer twice; a change of the training's loss or of the
+    speaker's draw changes it."""
+    from ts_transformer.experiments import prior_behaviour
+    from ts_transformer.instructions.words import Words
+    from ts_transformer.prior import speaker as speaker_module
+    from ts_transformer.prior import train as train_module
+    from ts_transformer.tests.support import fixture_days, instruction_spec
+    from ts_transformer.tests.test_prior_speaker import finals
+
+    words, days = Words(instruction_spec()), fixture_days()
+    answer = prior_behaviour.behaviour(words, finals(), days)
+    assert answer == prior_behaviour.behaviour(words, finals(), days)
+    assert {"train_config", "model_config", "first_step_runway", "constants_loss", "heard", "inputs",
+            "speaking_loop"} <= set(answer)
+    assert [len(w) for w in answer["speaking_loop"]["words"]] == [3, 5, 7]       # each flight to the row it ended in
+    assert len(answer["train_loss"]) == 2 and len(answer["words"]) == prior_behaviour.SAID
+    with monkeypatch.context() as patch:
+        nll = train_module.step_nll
+        patch.setattr(train_module, "step_nll", lambda logits, rows: nll(logits, rows) * 1.0001)
+        changed = prior_behaviour.behaviour(words, finals(), days)
+        assert changed["train_loss"] != answer["train_loss"]
+    with monkeypatch.context() as patch:
+        patch.setattr(speaker_module, "draw", lambda probabilities, numbers: probabilities.argmax(-1, keepdim=True))
+        changed = prior_behaviour.behaviour(words, finals(), days)
+        assert changed["train_loss"] == answer["train_loss"] and changed["words"] != answer["words"]

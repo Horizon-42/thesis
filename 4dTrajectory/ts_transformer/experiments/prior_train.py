@@ -105,8 +105,11 @@ def main(argv: list[str] | None = None) -> int:
     run = Run(tuple(sorted(geometries)), args.held_out)
     data = run_data(source, run) if args.sample is None else sampled_run_data(source, run, args.sample)
     identity = artefact_identity(instructions, args.row_interval_s, landings, args.selection)
-    # the artefact's sentences that the rule keeps and leaves out, each split, every airport (the run's own: "sentences")
-    print(json.dumps({"artefact_selection": selection_totals(identity["selection"])}), flush=True)
+    # the artefact's sentences that the rule keeps and leaves out in train and select, every airport (the run's own:
+    # "sentences"); the identity keeps every split, but nothing shows a reading of the val days before the base's one
+    # validation readout (D85)
+    totals = selection_totals(identity["selection"])
+    print(json.dumps({"artefact_selection": {split: totals[split] for split in ("train", "select")}}), flush=True)
     config = TrainConfig(**{item.name: getattr(args, item.name) for item in fields(TrainConfig)})
     torch.manual_seed(config.seed)
     model = Prior(PriorConfig.from_words(source.words, args.variant,

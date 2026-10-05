@@ -310,3 +310,13 @@ class Prior(nn.Module):
             if layer.added is not None:
                 raise ValueError(f"layer {i} has an added module already")
             layer.added = make(i)
+
+
+def require_eval(model: nn.Module, who: str) -> None:
+    """Refuse ``model`` when any of its modules is in training mode (D107): the speaker speaks with dropout off, and the
+    log-probability under its records is that of the policy that spoke only with dropout off (an added module in
+    training mode inside an eval model is refused too). ``who``: the caller, named in the refusal."""
+    training = [name or "the model" for name, module in model.named_modules() if module.training]
+    if training:
+        raise ValueError(f"{who}: the prior's modules {training[:3]}{' …' if len(training) > 3 else ''} are in training "
+                         f"mode (dropout on); {who} reads the model in eval mode (D107)")

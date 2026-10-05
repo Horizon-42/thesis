@@ -14,7 +14,8 @@ it. The word rules (D64), each level T checked with the band ε of its level (`W
 
 A mask blocks a word when it is said, never "unchanged" (D64). **While G is true (D14)** rule 3 does not apply; a
 go-around clears the join and the passage below the entry height, and while G is true neither is kept. Rules 1 and 2
-are lower limits and apply.
+are lower limits and apply. At the row whose runway word ends G, G is false after the word: the join and the passage
+start again at that row (its masks read the row's own state, `permitted`, and keep it, `after_row`), not one row later.
 
 Heights are above the airport elevation E, as the level words are (D58). The vertical path (TCH, glidepath angle, DA)
 is the artefact's (`candidates.json`, D61); the FAF and the LPV cone are the FAA CIFP procedure's (prior §6:
@@ -44,8 +45,9 @@ GLIDEPATH_BELOW_M = 60.0
 #: `scenario_optimization._FRAME_ANCHOR_TOLERANCE_M` (not on this package's import path); `tests/test_prior_speaker.py`
 #: checks the two agree.
 THRESHOLD_TOLERANCE_M = 150.0
-#: The name of this set of masks, recorded beside a prior (§8 item 2).
-PROCEDURE_MASKS = "procedure-masks-v4"
+#: The name of this set of masks, recorded beside a prior (§8 item 2). v5 (B10, D64): the row whose runway word ends G
+#: reads and keeps its own state.
+PROCEDURE_MASKS = "procedure-masks-v5"
 
 
 @dataclass(frozen=True)
@@ -126,6 +128,8 @@ class ProcedureMasks:
         width = max(len(f) for f in self.finals)
         self.joined = np.zeros((len(self.finals), width), dtype=bool)
         self.dipped = np.zeros((len(self.finals), width), dtype=bool)
+        #: each aircraft's newest row was taken on under G (its joined and dipped cleared, not kept)
+        self.cleared = np.zeros(len(self.finals), dtype=bool)
         #: each aircraft's entry heights less the band of the level nearest them: below this, it passed under (rule 3)
         self.entry_low = np.full((len(self.finals), width), np.nan)
         for b, finals_b in enumerate(self.finals):
@@ -144,6 +148,7 @@ class ProcedureMasks:
         out = object.__new__(ProcedureMasks)
         out.finals, out.words = [self.finals[i] for i in indices], self.words
         out.joined, out.dipped = self.joined[indices].copy(), self.dipped[indices].copy()
+        out.cleared = self.cleared[indices].copy()
         out.entry_low = self.entry_low[indices].copy()
         out.levels, out.bands = self.levels, self.bands
         return out
@@ -151,13 +156,24 @@ class ProcedureMasks:
     def track(self, e: np.ndarray, n: np.ndarray, height_m: np.ndarray, go_around: np.ndarray) -> None:
         """Each aircraft's joined and dipped taken on to its newest row at ``(e, n)``, ``height_m`` above E, with G
         ``go_around`` in force before the row (while G, nothing is kept: the stretch starts again after it)."""
+        self.cleared = np.asarray(go_around, dtype=bool).copy()
         for b, finals in enumerate(self.finals):
             if go_around[b]:
                 self.joined[b], self.dipped[b] = False, False
                 continue
-            for k, final in enumerate(finals):
-                self.joined[b, k] |= bool(final.inside(e[b], n[b]))
-                self.dipped[b, k] |= bool(height_m[b] < self.entry_low[b, k]) and not self.joined[b, k]
+            self._take(b, e[b], n[b], height_m[b])
+
+    def after_row(self, e: np.ndarray, n: np.ndarray, height_m: np.ndarray, go_around: np.ndarray) -> None:
+        """The newest row said, with G ``go_around`` in force after its runway word: an aircraft whose word ended G keeps
+        the row's own joined and dipped (D64: the stretch starts again at that row)."""
+        for b in np.flatnonzero(self.cleared & ~np.asarray(go_around, dtype=bool)):
+            self._take(b, e[b], n[b], height_m[b])
+        self.cleared = self.cleared & np.asarray(go_around, dtype=bool)
+
+    def _take(self, b: int, e: float, n: float, height_m: float) -> None:
+        for k, final in enumerate(self.finals[b]):
+            self.joined[b, k] |= bool(final.inside(e, n))
+            self.dipped[b, k] |= bool(height_m < self.entry_low[b, k]) and not self.joined[b, k]
 
     def permitted(self, column: int, runway: np.ndarray, go_around: np.ndarray, e: np.ndarray, n: np.ndarray,
                   height_m: np.ndarray) -> np.ndarray:
@@ -168,7 +184,11 @@ class ProcedureMasks:
         out = np.ones((count, len(column_words(column, self.words, 1))), dtype=bool)
         for b in range(count):
             k = int(runway[b])
-            barred = bool(self.dipped[b, k] and not self.joined[b, k] and not go_around[b])
+            joined, dipped = self.joined[b, k], self.dipped[b, k]
+            if self.cleared[b] and not go_around[b]:       # the row's word ends G: the row's own state (D64)
+                joined = bool(self.finals[b][k].inside(e[b], n[b]))
+                dipped = bool(height_m[b] < self.entry_low[b, k]) and not joined
+            barred = bool(dipped and not joined and not go_around[b])
             if column == ANGLE:
                 out[b, 1 + self.words.angle_climb] = not barred
                 continue

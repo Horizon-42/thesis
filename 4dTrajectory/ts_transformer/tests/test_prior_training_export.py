@@ -126,35 +126,39 @@ FIXTURES = Path(__file__).resolve().parents[3] / "aeroviz-4d" / "src" / "data" /
 FIXTURE_SET = "fixture_set"
 
 
-def stage_b_fixture(tmp_path, monkeypatch) -> tuple[dict, dict]:
-    """A set of one synthetic flight (A26's artefact: `test_start._artefact`) written by the export's own functions: its
-    observed track and open-loop sentence, its closed-loop sentence at Δ = 4 s flown again (A23's functions, as stage
-    A's function will give it), and two sentences of an untrained prior (seeds 0 and 1), each flown again. The observed
-    attitude is the no-airframe one (a synthetic flight has no data-plane series)."""
+def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
+    """A set of one synthetic flight (A26's artefact: `test_start._artefact`) written by the export itself (`main`, its
+    set into a tmp root by `training_files.write_set`, the index by its own writer): two sentences of an untrained prior
+    (seeds 0 and 1), each flown again, and the flight's head — its observed track, open-loop sentence and closed-loop
+    sentence at Δ = 4 s flown again — as stage A's export gives it (`split_flights`; here built by stage A's functions:
+    a synthetic flight has no harvest series, and its observed attitude is the no-airframe one). The live roots are
+    replaced as in the runner's test; the paths and times written are fixed names. ``(index, sample)`` as read back,
+    with ``texts`` their files' texts too."""
+    from types import SimpleNamespace
+
     from ts_transformer.autopilot import closed_loop, replay
     from ts_transformer.experiments import training_export as stage_a
-    from ts_transformer.instructions.artefact import load_signals
+    from ts_transformer.instructions.artefact import load_candidates, load_signals
     from ts_transformer.instructions.labeller.read import read_flight
+    from ts_transformer.io_utils import file_sha256
     from ts_transformer.tests import test_start
 
-    said, spies = [], []
+    stored_sentences, spies = [], []
     for sample in (0, 1):
         spy = {}
         generated, stored, words, geometry = generate(tmp_path / f"s{sample}", monkeypatch, interval_s=4.0, seed=sample,
                                                       spy=spy)
-        (payload,) = export.fly_again(spy["directory"], tmp_path / f"s{sample}" / "executor", "train", 4.0,
-                                      {0: stored}, [stored_of(generated, spy["flights"][0], sample)], words,
-                                      device=CPU)
-        said.append(payload)
+        stored_sentences.append(stored_of(generated, spy["flights"][0], sample))
         spies.append(spy)
     spy = spies[0]
-    (signals,) = load_signals(spy["directory"], "train")
+    directory, executor = spy["directory"], tmp_path / "s0" / "executor"
+    (signals,) = load_signals(directory, "train")
     reading = read_flight(signals, geometry, words.spec, words)
     attitude = {"headingDeg": signals.track_deg,
                 "pathAngleDeg": np.degrees(np.arctan2(signals.vertical_rate_mps, signals.ground_speed_mps)),
                 "bankRightDeg": None, "attackDeg": None}
-    flight = stage_a.flight_head(signals, f"{signals.dataset_id}_fixture", "train", "vectored", "without go-around",
-                                 "own", reading, geometry, attitude, words)
+    head = stage_a.flight_head(signals, f"{signals.dataset_id}_fixture", "train", "vectored", "without go-around",
+                               "own", reading, geometry, attitude, words)
     stored = spy["stored"]
     batch, missing = closed_loop.replay_batch(spy["batch"], {0: stored}, words)        # as the formal replay flies it
     assert not missing
@@ -162,18 +166,39 @@ def stage_b_fixture(tmp_path, monkeypatch) -> tuple[dict, dict]:
     replayed = stage_a.replay_payload(flown, 0, verdict, batch, stored,
                                       batch.inputs(test_start._params().start_rule, CPU).aero_params[0].numpy(),
                                       words.spec, words)
-    flight["closedLoop"]["4"] = stage_a.closed_loop_payload(stored, replayed, 4.0, geometry, words)
-    flight["prior"] = said
-    finals_ = tuple(Final(geometry, k, 9_000.0, fas_course_geometry(c.length_m)) for k, c in enumerate(geometry.candidates))
-    readout = fixture_readout(geometry.code)
-    source = export.source_block("fixture/readout", readout, words, {"sha256": "fixture", "checks": {}},
-                                 {"head": "fixture", "dirty": False}, smoke=True, device="cpu")
-    model = export.model_block(readout, "fixture/prior")
-    cohort = export.cohort_block(readout, 1, 1, 1337, 1)
-    sample = export.sample_of(FIXTURE_SET, geometry, {c.ident: -33.0 for c in geometry.candidates}, source, model,
-                              cohort, words, test_start._params().cycle_s, finals_, [flight])
-    index = {"schema": files.INDEX_SCHEMA, "writtenUtc": "fixture", "airport": geometry.code,
-             "sets": [export.index_entry(FIXTURE_SET, sample)]}
+    head["closedLoop"]["4"] = stage_a.closed_loop_payload(stored, replayed, 4.0, geometry, words)
+    prior, readout_dir, root = tmp_path / "prior", tmp_path / "readout", tmp_path / "airports"
+    prior.mkdir()
+    (prior / "checkpoint.pt").write_bytes(b"a checkpoint")
+    readout = fixture_readout(geometry.code, instructions=str(directory), executor=str(executor), prior=str(prior),
+                              checkpoint_sha256=file_sha256(prior / "checkpoint.pt"))
+    names = {readout_dir: "fixture/readout", Path(directory): "fixture/instruction_language", executor: "fixture/executor",
+             prior: "fixture/prior"}
+    with monkeypatch.context() as patch:
+        patch.setattr(export, "read_sentences", lambda out: (readout, stored_sentences))
+        patch.setattr(export, "require_conforming_closed_loop",
+                      lambda *given: (test_start._params(), {"sha256": "fixture", "checks": {}}, words))
+        patch.setattr(export, "open_prior", lambda prior_dir, instructions: SimpleNamespace(
+            checkpoint=SimpleNamespace(identity=readout["identity"]), interval_s=4.0,
+            geometries=load_candidates(directory)))
+        patch.setattr(export, "airport_finals", lambda g: finals_of(g))
+        patch.setattr(export, "split_flights", lambda instructions, split, ids, intervals, params, words_, device: (
+            [head], load_candidates(directory)[geometry.code]))
+        patch.setattr(export.stage_a_files, "runway_hae_minus_msl_m",
+                      lambda sources, airport, manifest: {c.ident: -33.0 for c in geometry.candidates})
+        patch.setattr(export, "repo_relative", lambda path: names[path])
+        patch.setattr(export, "git_state", lambda: {"head": "fixture", "dirty": False})
+        patch.setattr(files, "utc_now", lambda: "fixture")
+        assert export.main(["--readout", str(readout_dir), "--set-id", FIXTURE_SET, "--root", str(root),
+                            "--per-airport", "1", "--smoke"]) == 0
+    training = root / geometry.code / "training"
+    entry, sample = files.listed_set(training, geometry.code, FIXTURE_SET)
+    index = json.loads((training / files.INDEX_FILE).read_text(encoding="utf-8"))
+    assert index["sets"] == [entry]
+    if texts:
+        return index, sample, {files.INDEX_FILE: (training / files.INDEX_FILE).read_text(encoding="utf-8"),
+                               f"{FIXTURE_SET}/{files.SAMPLE_FILE}":
+                                   (training / FIXTURE_SET / files.SAMPLE_FILE).read_text(encoding="utf-8")}
     return index, sample
 
 
@@ -209,11 +234,10 @@ def test_a_set_is_written_beside_the_other_indexes_and_read_again(tmp_path, monk
 
 
 def test_the_frontend_fixtures_are_what_the_export_writes(tmp_path, monkeypatch):
-    """The fixture the frontend's readers are tested on is the export's own output today; a change of the export moves
-    it, and this test says so until it is written again (``AEROVIZ_WRITE_FIXTURES=1``)."""
-    index, sample = stage_b_fixture(tmp_path, monkeypatch)
-    texts = {files.INDEX_FILE: json.dumps(index, indent=1) + "\n",
-             f"{FIXTURE_SET}/{files.SAMPLE_FILE}": json.dumps(sample, separators=(",", ":"), allow_nan=False) + "\n"}
+    """The fixture the frontend's readers are tested on is the export's own output today, the files its writers write
+    (the sample by the export, the index by `training_files.write_set`); a change of the export moves it, and this test
+    says so until it is written again (``AEROVIZ_WRITE_FIXTURES=1``)."""
+    index, sample, texts = stage_b_fixture(tmp_path, monkeypatch, texts=True)
     if os.environ.get("AEROVIZ_WRITE_FIXTURES") == "1":
         for name, text in texts.items():
             (FIXTURES / name).parent.mkdir(parents=True, exist_ok=True)
@@ -269,10 +293,13 @@ def test_the_flights_of_an_airport_are_a_seeded_draw_of_the_readout_s():
 def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monkeypatch):
     """`main` on the synthetic artefact: every live root replaced (the closed-loop check, the identity, the landings, the
     CIFP finals and digests, A23's part — a head with no closed-loop sentence — and the datum); a readout of two samples;
-    a set written into a tmp root, read again; refused: a smoke readout without --smoke, another identity, masks of
-    another checkpoint, an airport not in the readout, a set already written."""
+    a set written into a tmp root, read again; refused: a smoke readout without --smoke, another identity, another
+    checkpoint, an airport not in the readout, a set already written, a val readout the prior's claim does not name
+    (D85)."""
+    from types import SimpleNamespace
+
     from ts_transformer.instructions.artefact import load_candidates
-    from ts_transformer.prior.procedure import PROCEDURE_MASKS
+    from ts_transformer.io_utils import file_sha256
     from ts_transformer.tests import test_start
 
     stored, spy = [], {}
@@ -284,16 +311,16 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
     directory, executor = spy["directory"], tmp_path / "artefacts" / "s1" / "executor"
     prior = tmp_path / "prior"
     prior.mkdir()
-    digests = {geometry.code: {c.ident: "0" * 64 for c in geometry.candidates}}
-    (prior / "procedure_masks.json").write_text(json.dumps({"set": PROCEDURE_MASKS, "checkpoint_sha256": "fixture",
-                                                            "procedure_data": digests}))
-    readout = fixture_readout(geometry.code, instructions=str(directory), executor=str(executor), prior=str(prior))
+    (prior / "checkpoint.pt").write_bytes(b"a checkpoint")
+    readout = fixture_readout(geometry.code, instructions=str(directory), executor=str(executor), prior=str(prior),
+                              checkpoint_sha256=file_sha256(prior / "checkpoint.pt"))
     monkeypatch.setattr(export, "read_sentences", lambda out: (readout, stored))
     monkeypatch.setattr(export, "require_conforming_closed_loop",
                         lambda *given: (test_start._params(), {"sha256": "spec", "checks": {"stub": True}}, words))
-    monkeypatch.setattr(export, "airport_landings", lambda geometries, days: {})
-    monkeypatch.setattr(export, "artefact_identity", lambda d, interval, landings, rule: {"fixture": True})
-    monkeypatch.setattr(export, "procedure_digests", lambda geometries: digests)
+    # the prior as `checkpoint.open_prior` opens it (its own checks: tests/test_prior_validation.py)
+    opened = SimpleNamespace(checkpoint=SimpleNamespace(identity={"fixture": True}), interval_s=4.0,
+                             geometries=load_candidates(directory))
+    monkeypatch.setattr(export, "open_prior", lambda prior_dir, instructions: opened)
     monkeypatch.setattr(export, "airport_finals", lambda g: finals_of(g))
     monkeypatch.setattr(export, "split_flights", lambda instructions, split, ids, intervals, params, words_, device: (
         [{"datasetId": i, "runway": "09", "closedLoop": {}} for i in ids], load_candidates(directory)[geometry.code]))
@@ -304,6 +331,8 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
             "--smoke"]
     with pytest.raises(SystemExit):                                     # a smoke readout makes only a smoke set
         export.main(argv[:-1])
+    build, built = export.build_airport, []
+    monkeypatch.setattr(export, "build_airport", lambda *a, **k: built.append(build(*a, **k)) or built[-1])
     assert export.main(argv) == 0
     training = root / geometry.code / "training"
     entry, sample = files.listed_set(training, geometry.code, "one")
@@ -314,15 +343,26 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
         export.main(argv)
     with pytest.raises(SystemExit):
         export.main([*argv, "--airports", "KZZZ"])
-    monkeypatch.setattr(export, "artefact_identity", lambda d, interval, landings, rule: {"fixture": False})
+    monkeypatch.setattr(opened.checkpoint, "identity", {"fixture": False})              # its data changed
     with pytest.raises(SystemExit, match="identity"):
-        export.main([*argv[:5], "two", *argv[6:]])
-    monkeypatch.setattr(export, "artefact_identity", lambda d, interval, landings, rule: {"fixture": True})
-    (prior / "procedure_masks.json").write_text(json.dumps({"set": PROCEDURE_MASKS, "checkpoint_sha256": "another",
-                                                            "procedure_data": digests}))
-    with pytest.raises(SystemExit, match="procedure"):
-        export.main([*argv[:5], "two", *argv[6:]])
+        export.main([*argv[:3], "two", *argv[4:]])
+    monkeypatch.setattr(opened.checkpoint, "identity", {"fixture": True})
+    (prior / "checkpoint.pt").write_bytes(b"another checkpoint")                        # its prior changed
+    with pytest.raises(SystemExit, match="checkpoint"):
+        export.main([*argv[:3], "two", *argv[4:]])
+    (prior / "checkpoint.pt").write_bytes(b"a checkpoint")
+    # a readout of the val days: only the one the prior's claim of its val read names (D85)
+    readout.update(split="val", smoke=False)
+    with pytest.raises(SystemExit, match="D85"):
+        export.main([*argv[:3], "val", *argv[4:]])
+    (prior / "val_read_prior_free_generation.json").write_text(json.dumps({"out": str(tmp_path / "another")}))
+    with pytest.raises(SystemExit, match="D85"):
+        export.main([*argv[:3], "val", *argv[4:]])
     assert sorted(p.relative_to(root) for p in root.rglob("*")) == before                # nothing more written
+    (prior / "val_read_prior_free_generation.json").write_text(json.dumps({"out": str(tmp_path / "readout")}))
+    # the claimed one is exported (its flights as the train readout's: the synthetic artefact has no val sentences)
+    monkeypatch.setattr(export, "build_airport", lambda *a, **k: built[0])
+    assert export.main([*argv[:3], "val", *argv[4:]]) == 0
 
 
 def finals_of(geometry):

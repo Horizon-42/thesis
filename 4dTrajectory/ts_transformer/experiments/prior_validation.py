@@ -13,8 +13,8 @@ THE MASKS ON THE LABELLED WORDS. Each val closed-loop sentence's rows (D82) walk
 (`prior.speaker.Speaker`): the procedure masks take on every Δ row's state (observed before the first predicted step,
 flown from it), with G of the words in force before the row (`ProcedureMasks.track`); at each word row, each altitude and
 angle word said is checked against the masks under the runway and G after the row's runway word
-(`prior.speaker.runway_after`), and the row is then heard (`prior.inputs.Heard`, the grammar's walk). "Unchanged" is
-never counted (the masks never block it, D64).
+(`prior.speaker.runway_after`), and the row is then heard (`prior.inputs.Heard`, the grammar's walk) and its state kept
+when its word ended G (`ProcedureMasks.after_row`, D64). "Unchanged" is never counted (the masks never block it, D64).
 
     python run_ts.py prior_validation --prior <the base's prior_train run> --instructions <artefact> \\
         --executor <its executor spec> --out <a new directory>
@@ -34,24 +34,23 @@ from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.instructions.artefact import STATE_COLUMNS
 from ts_transformer.instructions.artefact import SentenceRows as ClosedLoopRows
-from ts_transformer.instructions.artefact import (
-    closed_loop_sentences, load_candidates, load_day_split, load_spec, signals_flights,
-)
+from ts_transformer.instructions.artefact import closed_loop_sentences, load_spec, signals_flights
 from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.labeller.interval import interval_rows, on_interval_rows
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, claim_validation_read, load_checkpoint
+from ts_transformer.prior.checkpoint import claim_validation_read, open_prior
 from ts_transformer.prior.inputs import Heard
-from ts_transformer.prior.procedure import PROCEDURE_MASKS, Final, ProcedureMasks, airport_finals, procedure_digests
+from ts_transformer.prior.procedure import PROCEDURE_MASKS, Final, ProcedureMasks, airport_finals
 from ts_transformer.prior.selection import kept
-from ts_transformer.prior.source import ArtefactSource, airport_landings, artefact_identity
+from ts_transformer.prior.source import ArtefactSource
 from ts_transformer.prior.speaker import runway_after
 from ts_transformer.prior.train import evaluate
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: The format of the readout's files (``config.json``, ``readout.json``).
-VALIDATION_SCHEMA = "ts-prior-validation-v1"
+#: v2 (B10): the masks of D64 keep the row whose runway word ends G (`ProcedureMasks.after_row`).
+VALIDATION_SCHEMA = "ts-prior-validation-v2"
 #: The columns of a state row the masks read (`STATE_COLUMNS`).
 POSITION = [STATE_COLUMNS.index(name) for name in ("e_m", "n_m", "height_m")]
 
@@ -86,6 +85,7 @@ def blocked_by_masks(rows: ClosedLoopRows, finals: Sequence[Final], words: Words
             out[column][0] += 1
             out[column][1] += int(not permitted[classes[column].index(word)])
         heard.hear(row, float(height[0]), t * interval_s)
+        masks.after_row(e, n, height, go_around)
     return {column: (said, blocked) for column, (said, blocked) in out.items()}
 
 
@@ -129,25 +129,14 @@ def main(argv: list[str] | None = None) -> int:
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("a readout that is not a smoke needs a clean tree")
-    trained = json.loads((prior_dir / "config.json").read_text(encoding="utf-8"))
-    if trained["schema"] != CHECKPOINT_SCHEMA:
-        raise SystemExit(f"{prior_dir}: a {trained['schema']!r} prior, not {CHECKPOINT_SCHEMA!r}")
-    if trained["run"]["held_out"] is not None:
-        raise SystemExit(f"{prior_dir} is a fold (held out {trained['run']['held_out']}): the validation readout is the "
-                         f"base's (§12 B5)")
     _, opened, _ = require_conforming_closed_loop(instructions, executor_dir)   # D69: the checks run here (D73)
     device = torch.device(args.device)
-    geometries = load_candidates(instructions)
-    landings = airport_landings(geometries, load_day_split(instructions))
-    interval_s = float(trained["identity"]["row_interval_s"])
-    selection = trained["identity"]["selection"]["rule"]
-    checkpoint = load_checkpoint(prior_dir / "checkpoint.pt",
-                                 artefact_identity(instructions, interval_s, landings, selection))
-    masks = json.loads((prior_dir / "procedure_masks.json").read_text(encoding="utf-8"))
-    if masks != {"set": PROCEDURE_MASKS, "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"),
-                 "procedure_data": procedure_digests(geometries, root=args.procedure_root)}:
-        raise SystemExit(f"{prior_dir}: the prior's procedure masks are not {PROCEDURE_MASKS} on today's procedure data "
-                         f"(§8 item 2)")
+    prior = open_prior(prior_dir, instructions, procedure_root=args.procedure_root)   # §7 item 1 (D106)
+    if prior.config["run"]["held_out"] is not None:
+        raise SystemExit(f"{prior_dir} is a fold (held out {prior.config['run']['held_out']}): the validation readout is "
+                         f"the base's (§12 B5)")
+    geometries, landings, interval_s = prior.geometries, prior.landings, prior.interval_s
+    selection, checkpoint = prior.selection, prior.checkpoint
     if checkpoint.run["sample"] is not None and not args.smoke:
         raise SystemExit(f"{prior_dir} is a smoke prior (a sample of the sentences): no formal readout")
     model = checkpoint.model.to(device)

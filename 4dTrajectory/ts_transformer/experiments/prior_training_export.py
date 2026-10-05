@@ -11,8 +11,10 @@ CHECKED, NOT TRUSTED. Each sentence is flown again through the start of a closed
 own words, and must give the readout's states on every 2 s row (within the executor conformance's bound) and its outcome,
 timeout and go-arounds. The executor spec opens, and the closed-loop sentences are read, only for the code that passes
 the labeller's, the executor's and the closed loop's checks, run here first (`require_conforming_closed_loop`, D69,
-D73). The artefact's identity is computed again and must be the readout's; the procedure data must be the prior's
-(`procedure_masks.json`).
+D73). The readout's prior opens as every runner of the prior opens it (`checkpoint.open_prior`: today's artefact
+identity, its procedure masks on today's procedure data) and must be the checkpoint and identity the readout records.
+A readout of the val days is exported only when it is the one the prior's claim of its val read names (D85): the base's
+one validation readout.
 
 THE CLOSED-LOOP SENTENCE of each flight at the prior's Δ, with its head (the observed track, the open-loop sentence), is
 A23's payload, built and flown again by A23's code (`training_export.split_flights`, A36; the prior's runner imports
@@ -49,17 +51,17 @@ from ts_transformer.experiments.training_export import (
 )
 from ts_transformer.instructions import training_files as stage_a_files
 from ts_transformer.instructions.airport import AirportGeometry, RunwayCandidate
-from ts_transformer.instructions.artefact import STATE_COLUMNS, ClosedLoopSentence, load_candidates, load_day_split
+from ts_transformer.instructions.artefact import STATE_COLUMNS, ClosedLoopSentence
 from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.labeller.interval import interval_rows
 from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
+from ts_transformer.io_utils import file_sha256
 from ts_transformer.prior import training_files as files
-from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA
+from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, open_prior, validation_claim
 from ts_transformer.prior.procedure import (
-    GLIDEPATH_BELOW_M, PROCEDURE_MASKS, Final, airport_finals, procedure_digests,
+    GLIDEPATH_BELOW_M, PROCEDURE_MASKS, Final, airport_finals,
 )
-from ts_transformer.prior.source import airport_landings, artefact_identity
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
 
@@ -340,18 +342,19 @@ def main(argv: list[str] | None = None) -> int:
     instructions, executor = Path(readout["instructions"]), Path(readout["executor"])
     interval = float(readout["row_interval_s"])
     params, opened, words = require_conforming_closed_loop(instructions, executor)   # D69: the checks run here (D73)
-    geometries = load_candidates(instructions)
-    identity = artefact_identity(instructions, interval, airport_landings(geometries, load_day_split(instructions)),
-                                 readout["selection"])
-    if identity != readout["identity"]:
-        raise SystemExit(f"{instructions}: its identity is not the readout's (its data changed since the readout)")
     prior_dir = Path(readout["prior"])
-    masks = json.loads((prior_dir / "procedure_masks.json").read_text(encoding="utf-8"))
-    if readout["procedure_masks"] != PROCEDURE_MASKS or masks != {
-            "set": PROCEDURE_MASKS, "checkpoint_sha256": readout["checkpoint_sha256"],
-            "procedure_data": procedure_digests(geometries)}:
-        raise SystemExit(f"{readout_dir}: the readout was not said under {PROCEDURE_MASKS} on today's procedure data by "
-                         f"its prior's checkpoint ({prior_dir / 'procedure_masks.json'})")
+    prior = open_prior(prior_dir, instructions)        # today's identity and procedure masks (§7 item 1, D106)
+    geometries = prior.geometries
+    if (prior.checkpoint.identity != readout["identity"] or prior.interval_s != interval
+            or file_sha256(prior_dir / "checkpoint.pt") != readout["checkpoint_sha256"]
+            or readout["procedure_masks"] != PROCEDURE_MASKS):
+        raise SystemExit(f"{readout_dir}: not said by {prior_dir}'s checkpoint on this artefact's identity under "
+                         f"{PROCEDURE_MASKS} (its data or its prior changed since the readout)")
+    if readout["split"] == "val":           # the base's one validation readout, and only it (D85)
+        claimed = validation_claim(prior_dir, "prior_free_generation")
+        if claimed is None or claimed.resolve() != readout_dir.resolve():
+            raise SystemExit(f"{readout_dir}: a readout of the val days that {prior_dir}'s claim of its val read does "
+                             f"not name ({claimed}); only the base's one validation readout is exported (D85)")
     signals_record = json.loads((instructions / "signals.json").read_text(encoding="utf-8"))
     started = time.perf_counter()
     existing = {airport: files.read_index(args.root / airport / "training", airport, args.set_id) for airport in airports}

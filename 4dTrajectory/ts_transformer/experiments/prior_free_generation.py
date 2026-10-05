@@ -1,13 +1,11 @@
 """Free generation (prior design §12 B4): the prior speaks, the executor flies, the judge decides.
 
-`speak_and_fly` is the closed loop of a batch of flights started at their first predicted step through the start of a
-closed loop (vocabulary §6 item 5, D67: `autopilot.start`): the rows before the first predicted step are the flight's
-observed rows (the closed-loop sentence's states there); from it on, at each Δ row, the inputs come from the states the
-executor flew (D32, §2) through the prior's one function of a loop's row (`prior.loop.LoopRows`, D96), the speaker
-says the row under its masks and a caller's — the bound of D68, "go-around" forbidden after a flight's second — and the
-loop flies it for Δ seconds. A flight ends when the executor is done with
-it (its crossing, its time limit with 900 s for each go-around, or the dynamics); its outcome is the judge's
-(`Loop.outcome`, item 6). The runner imports nothing else of `autopilot/` (`tests/test_architecture.py`, D69).
+`speak_and_fly` flies a batch of flights started at their first predicted step through the start of a closed loop
+(vocabulary §6 item 5, D67: `autopilot.start`) in the step of a speaker's closed loop (`prior_speaking_loop`, §7 item 7,
+D106: the observed rows, then at each Δ row the inputs from the flown states, the speaker under its masks and the bound
+of D68, the executor's step), with each flight's own random numbers (`flight_numbers`, D96) and its airport's roster
+landings (D105), to the end of every flight; its outcome is the judge's (`Loop.outcome`, item 6). The runner imports
+nothing else of `autopilot/` (`tests/test_architecture.py`, D69).
 """
 
 from __future__ import annotations
@@ -24,34 +22,26 @@ import torch
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.autopilot.start import Loop, start
+from ts_transformer.experiments.prior_speaking_loop import Generated, SpeakingLoop, flight_numbers
 from ts_transformer.instructions.airport import AirportGeometry
-from ts_transformer.instructions.artefact import (
-    ClosedLoopSentence, closed_loop_sentences, load_candidates, load_day_split, load_spec, signals_flights,
-)
+from ts_transformer.instructions.artefact import ClosedLoopSentence, closed_loop_sentences, load_spec, signals_flights
+from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, claim_validation_read, load_checkpoint
-from ts_transformer.prior.procedure import PROCEDURE_MASKS, ProcedureMasks, airport_finals, procedure_digests
-from ts_transformer.prior.selection import kept
-from ts_transformer.prior.source import airport_landings, artefact_identity
-from ts_transformer.repo_layout import REPO_ROOT, git_state
-from ts_transformer.instructions.labeller.interval import interval_rows
-from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
-from ts_transformer.prior.inputs import own_flight_key
-from ts_transformer.prior.landings import LandingIndex, utc_s
-from ts_transformer.prior.loop import LoopRows
+from ts_transformer.prior.checkpoint import claim_validation_read, open_prior
+from ts_transformer.prior.landings import LandingIndex
 from ts_transformer.prior.model import Prior
-from ts_transformer.prior.procedure import Final
-from ts_transformer.prior.speaker import MOST_GO_AROUNDS, Position, Speaker, go_around_bound
-
+from ts_transformer.prior.procedure import PROCEDURE_MASKS, Final, ProcedureMasks, airport_finals
+from ts_transformer.prior.selection import kept
+from ts_transformer.prior.speaker import MOST_GO_AROUNDS
+from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: The temperature of free generation: the model's own distribution (the masks applied).
 TEMPERATURE = 1.0
-#: The predicted rows the speaker's cache has room for at first (it grows as the flights need, `model.Past.grown`).
-FIRST_ROWS = 128
-#: The format of a readout's files (``config.json``, ``sentences.npz``; `read_sentences`). v2 (B9, D96): each flight's
+#: The format of a readout's files (``config.json``, ``sentences.npz``; `read_sentences`). v3 (B10): "on the final" under
+#: the runway in force before the row (D72), the masks of `procedure-masks-v5` (D64). v2 (B9, D96): each flight's
 #: words drawn with its own random numbers (`flight_numbers`), whatever the batch. v1 (B6): the words the
 #: procedure masks blocked at each row (``blocked_<column>``).
-FREE_GENERATION_SCHEMA = "ts-prior-free-generation-v2"
+FREE_GENERATION_SCHEMA = "ts-prior-free-generation-v3"
 #: The arrays of ``sentences.npz``.
 SENTENCES_FIELDS = {"schema", "index", "sample", "offsets", "words", "go_around_probability", "go_around_permitted",
                     "on_final", "state_offsets", "states", *(f"blocked_{COLUMNS[c]}" for c in ProcedureMasks.columns)}
@@ -98,117 +88,28 @@ def read_sentences(out: Path) -> tuple[dict[str, Any], list[Stored]]:
     return config, stored
 
 
-@dataclass
-class Generated:
-    """One flight's free sentence: the words said from its first predicted step to the row it was done in, its states on
-    the 2 s rows from its row 0 (observed before the first predicted step, flown from it; D51's layout), and the judge's
-    outcome."""
-
-    index: int                         # the flight's place in the split's signals
-    words: np.ndarray                  # [M, 5]
-    #: [rows, 6] `STATE_COLUMNS` on the 2 s rows from row 0, to the first row at or after the cycle the executor was done in
-    states: np.ndarray
-    outcome: str
-    crossing: dict[str, Any] | None
-    timed_out: bool
-    go_arounds: int
-    go_around_probability: np.ndarray  # [M]: of "go-around" in the distribution each runway word was drawn from
-    go_around_permitted: np.ndarray    # [M] bool: the masks permitted "go-around" (G false, D68's bound not met)
-    on_final: np.ndarray               # [M] bool: inside the region of the runway in force (the FAF and the LPV cone)
-    #: by column the procedure masks rule (`ProcedureMasks.columns`): [M, words] bool, the classes they blocked at each
-    #: row (`Speaker.procedure_blocked`)
-    blocked: dict[int, np.ndarray]
-
-
-def flight_numbers(seed: int, sample: int, index: int) -> np.random.Generator:
-    """A flight's own source of random numbers in free generation (§4 "Drawing", D96): from the seed, the sample and
-    its place in the split's signals — the same whatever flights share its batch."""
-    return np.random.default_rng([seed, sample, index])
-
-
 def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
                   flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
                   landings: Mapping[str, LandingIndex], finals: Mapping[str, Sequence[Final]], words: Words, *,
-                  interval_s: float, variant: str, numbers: Sequence[np.random.Generator], device: torch.device,
-                  temperature: float = 1.0) -> list[Generated]:
+                  interval_s: float, variant: str, numbers: Sequence[np.random.Generator],
+                  device: torch.device, temperature: float = 1.0) -> list[Generated]:
     """The closed loop of the flights ``order`` of ``loop`` (`autopilot.start.start`; module docstring): ``sentences``
-    and ``flights`` (their records in the split's signals) by their place in the signals; ``numbers`` each flight's
-    source of random numbers, in ``order`` (`flight_numbers`: five a row said, D96)."""
+    and ``flights`` (their records in the split's signals) by their place in the signals; ``landings`` each airport's
+    roster landings (each flight is given its airport's, D105); ``numbers`` each flight's source of random numbers, in
+    ``order`` (`flight_numbers`: five a row said, D96)."""
     if len(numbers) != len(order):
         raise ValueError(f"{len(numbers)} sources of random numbers for {len(order)} flights")
     if loop.most_go_arounds != MOST_GO_AROUNDS:
         raise ValueError(f"the loop was started for {loop.most_go_arounds} go-arounds a flight, the bound is "
                          f"{MOST_GO_AROUNDS} (D68)")
-    step_s = words.spec.step_s
-    every, start = interval_rows(interval_s, step_s), sentences[order[0]].rows.start
-    count = len(order)
-    flight_geometries = [geometries[flights[i]["airport"]] for i in order]
-    # the cache's first room: the observed rows and some predicted ones (it grows as the flights need; the loop's time
-    # limit is not the speaker's to read, vocabulary D90)
-    speaker = Speaker(model, words, [finals[g.code] for g in flight_geometries], capacity=start + FIRST_ROWS,
-                      temperature=temperature)
-    # the inputs of a row: the prior's one function of a loop's row (D96 item 4)
-    rows_of = LoopRows(flight_geometries, landings, [own_flight_key(flights[i]) for i in order],
-                       np.array([utc_s(flights[i]["entry_time_utc"]) for i in order]),
-                       np.array([sentences[i].rows.first_row for i in order]), start, variant=variant,
-                       interval_s=interval_s, step_s=step_s, device=device)
-
-    def row(t: int, at: np.ndarray, before: np.ndarray, known: bool) -> tuple[Any, Position]:
-        return rows_of(t, at, before, known, speaker.heard)
-
-    # the observed rows before the first predicted step
-    observed = np.stack([sentences[i].rows.states[: start * every] for i in order])     # [B, start·every, 6]
-    for t in range(start):
-        r = t * every
-        tensors, at = row(t, observed[:, r], observed[:, max(r - 1, 0)], r > 0)
-        speaker.observe(tensors, [at])
-    # from the first predicted step on: the flown states
-    current, before = loop.rows(), observed[:, start * every - 1]
-    said: list[list[np.ndarray]] = [[] for _ in order]
-    flown: list[list[np.ndarray]] = [[current[b]] for b in range(count)]
-    probability: list[list[float]] = [[] for _ in order]
-    permitted: list[list[bool]] = [[] for _ in order]
-    on_final: list[list[bool]] = [[] for _ in order]
-    blocked: list[list[dict[int, np.ndarray]]] = [[] for _ in order]
-    alive = np.ones(count, dtype=bool)
-    t = start
-    while alive.any():
-        tensors, at = row(t, current, before, True)
-        caller = {RUNWAY: go_around_bound(speaker.go_arounds, words, int(speaker.n_candidates.max()))}
-        words_row = speaker.speak(tensors, at, np.stack([n.random(len(COLUMNS)) for n in numbers]), caller)
-        rows, done = loop.step(words_row)
-        for b in np.flatnonzero(alive):
-            final = finals[flight_geometries[b].code][speaker.in_force[b].runway]
-            said[b].append(words_row[b])
-            flown[b] += list(rows[b])
-            probability[b].append(float(speaker.go_around_probability[-1][b]))
-            permitted[b].append(bool(speaker.go_around_permitted[-1][b]))
-            on_final[b].append(bool(final.inside(np.array(at.e_m[b]), np.array(at.n_m[b]))))
-            blocked[b].append({c: mask[b] for c, mask in speaker.procedure_blocked[-1].items()})
-        alive &= ~done
-        # a done flight is halted and keeps, as its inputs, the finite state of the row it ended in: the executor flies
-        # a done flight on (a non-finite state is one of its ends) and the speaker still says its rows
-        loop.halt(~alive)
-        before = np.where(alive[:, None], rows[:, -2] if every > 1 else current, before)
-        current = np.where(alive[:, None], rows[:, -1], current)
-        t += 1
-    timed_out = loop.timed_out()
-    # each flight's flown 2 s rows to the first at or after the end of the cycle it was done in
-    ended = np.ceil((loop.executor.done_cycle.cpu().numpy() + 1) / loop.row_cycles).astype(int)
-    out = []
-    for b, i in enumerate(order):
-        outcome = loop.outcome(b)
-        out.append(Generated(index=i, words=np.array(said[b], dtype=np.int64),
-                             states=np.concatenate((observed[b], np.array(flown[b][: ended[b] + 1]))),
-                             outcome=outcome.outcome,
-                             crossing=outcome.crossing, timed_out=bool(timed_out[b]),
-                             # the go-arounds of its own words: the speaker says a done flight's rows too (above)
-                             go_arounds=int(sum(row[RUNWAY] == RUNWAY_GO_AROUND for row in said[b])),
-                             go_around_probability=np.array(probability[b]),
-                             go_around_permitted=np.array(permitted[b], dtype=bool),
-                             on_final=np.array(on_final[b], dtype=bool),
-                             blocked={c: np.array([row[c] for row in blocked[b]], dtype=bool) for c in blocked[b][0]}))
-    return out
+    speaking = SpeakingLoop(model, loop, order, sentences, flights, geometries,
+                            [landings[flights[i]["airport"]] for i in order], finals, words,
+                            interval_s=interval_s, variant=variant, device=device, temperature=temperature)
+    while speaking.observing:
+        speaking.observe()
+    while speaking.alive.any():
+        speaking.step(np.stack([n.random(len(COLUMNS)) for n in numbers]))
+    return speaking.generated()
 
 
 def readout(generated: Sequence[Generated], airports: Mapping[int, str], strata: Mapping[int, str],
@@ -217,9 +118,9 @@ def readout(generated: Sequence[Generated], airports: Mapping[int, str], strata:
     as the sentence file stores it, D70): the sentences and their outcomes; the words said in each column for each
     sentence, beside the labelled closed-loop sentence's (``labelled``: by the flight's place, its words from the first
     predicted step); the go-arounds said and the sentences that reached the bound of D68; the probability of
-    "go-around" on the rows on the final (inside the region of the runway in force) where the masks permitted it (not
-    while G, not after the bound: Claude's reading of "on the final", a proposal), and those rows. No criterion is
-    applied (D7)."""
+    "go-around" on the rows on the final (inside the region of the runway in force before the row, under which the
+    speaker drew the word) where the masks permitted it (not while G, not after the bound; D72), and those rows. No
+    criterion is applied (D7)."""
     groups: dict[tuple[str, str], list[Generated]] = {}
     for g in generated:
         groups.setdefault((airports[g.index], strata[g.index]), []).append(g)
@@ -287,20 +188,9 @@ def main(argv: list[str] | None = None) -> int:
     _, opened, _ = require_conforming_closed_loop(instructions, executor_dir)   # D69: the checks run here (D73)
     device = torch.device(args.device)
 
-    geometries = load_candidates(instructions)
-    landings = airport_landings(geometries, load_day_split(instructions))
-    trained = json.loads((prior_dir / "config.json").read_text(encoding="utf-8"))
-    if trained["schema"] != CHECKPOINT_SCHEMA:
-        raise SystemExit(f"{prior_dir}: a {trained['schema']!r} prior, not {CHECKPOINT_SCHEMA!r}")
-    interval_s = float(trained["identity"]["row_interval_s"])
-    selection = trained["identity"]["selection"]["rule"]               # the prior's own rule (D75), checked below
-    checkpoint = load_checkpoint(prior_dir / "checkpoint.pt",
-                                 artefact_identity(instructions, interval_s, landings, selection))
-    masks = json.loads((prior_dir / "procedure_masks.json").read_text(encoding="utf-8"))
-    if masks != {"set": PROCEDURE_MASKS, "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"),
-                 "procedure_data": procedure_digests(geometries)}:
-        raise SystemExit(f"{prior_dir}: the prior's procedure masks are not {PROCEDURE_MASKS} on today's procedure data "
-                         f"(§8 item 2)")
+    prior = open_prior(prior_dir, instructions)        # its record, checkpoint and procedure masks (§7 item 1, D106)
+    geometries, landings, interval_s = prior.geometries, prior.landings, prior.interval_s
+    selection, checkpoint = prior.selection, prior.checkpoint           # the prior's own rule (D75)
     model = checkpoint.model.to(device)
     finals = {code: airport_finals(geometry) for code, geometry in geometries.items()}
     spec = load_spec(instructions)

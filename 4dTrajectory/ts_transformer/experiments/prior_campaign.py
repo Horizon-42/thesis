@@ -17,8 +17,12 @@ THE STEPS, in order (each a runner of the prior, run as its own process, its out
 Every training run reads the sentences of the selection `landed` (D75). No criterion is applied to the readouts: the
 user reads them (D7).
 
-ONE COMMIT. The campaign records the commit it started from (``campaign.json``); it runs from a clean tree, and a
-resume from another commit or with other inputs is refused by name (the design: one campaign from one commit).
+ONE BEHAVIOUR (D108). The campaign runs on a clean checkout. At its start it runs the behaviour check of the prior's
+code on fixed inputs (`prior_behaviour`, its own process: two steps of training on a fixed synthetic set and some rows
+said with fixed numbers, on the CPU with one thread) and records the answer (``campaign.json``); before each step it
+runs the check again, and an answer that differs, bit for bit, stops the campaign by name. The commit of each step is
+recorded as information and never compared (results of different code are comparable once the code is shown to
+behave the same on fixed inputs, never by an equal commit). A resume with other inputs is refused by name.
 
 SMOKE (``--smoke N``): every step at a small size, to check the chain on the formal artefact before the campaign —
 each training run on a random sample of N sentences of each airport and split (`prior_train --sample`), each free
@@ -46,13 +50,16 @@ import time
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Sequence
 
+from ts_transformer.experiments.prior_free_generation import TEMPERATURE
 from ts_transformer.experiments.prior_select import CONFIGURATIONS, arm_name
 from ts_transformer.instructions.artefact import load_candidates
 from ts_transformer.io_utils import utc_now, write_json_atomic
+from ts_transformer.prior.speaker import MOST_GO_AROUNDS
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-#: The format of ``campaign.json``.
-CAMPAIGN_SCHEMA = "ts-prior-campaign-v1"
+#: The format of ``campaign.json``. v2 (B10, D108): the answer of the behaviour check and each step's commit (no commit
+#: of the campaign compared).
+CAMPAIGN_SCHEMA = "ts-prior-campaign-v2"
 #: The two seeds of §5 (the second: step 2's seed scale). The values are Claude's (§0.3).
 SEEDS = (1337, 2024)
 #: §5's configurations (`prior_select.CONFIGURATIONS`) as `prior_train`'s flags of the same names.
@@ -174,10 +181,39 @@ def alive_step(running: dict[str, Any] | None) -> bool:
     return cmdline.exists() and b"run_ts.py" in cmdline.read_bytes()
 
 
+def run_behaviour(instructions: str) -> dict[str, Any]:
+    """The behaviour check of the prior's code on the disk now (`prior_behaviour`, its own process: not the code this
+    process loaded): its answer; a check that fails stops the campaign with its error."""
+    done = subprocess.run([sys.executable, str(REPO_ROOT / "run_ts.py"), "prior_behaviour", "--instructions",
+                           instructions], cwd=REPO_ROOT, capture_output=True, text=True)
+    if done.returncode != 0:
+        raise SystemExit(f"the behaviour check failed (exit {done.returncode}):\n{done.stderr[-2000:]}")
+    return json.loads(done.stdout.strip().splitlines()[-1])
+
+
+def settings() -> dict[str, Any]:
+    """What the campaign's code decides of its steps beside the prior's code (the behaviour check): the seeds, the
+    selection, each configuration's flags, the free generation of a fold and of a smoke, free generation's temperature
+    and bound of go-arounds (D68). Recorded at the start and compared at a resume and before each step."""
+    return {"seeds": list(SEEDS), "selection": SELECTION,
+            "configurations": {name: list(flags) for name, flags in CONFIGURATION_FLAGS.items()},
+            "free_generation": FREE_GENERATION, "smoke_flights": SMOKE_FLIGHTS, "temperature": TEMPERATURE,
+            "most_go_arounds": MOST_GO_AROUNDS}
+
+
+def require_settings(campaign: Path, record: dict[str, Any]) -> None:
+    stored, now = record["settings"], settings()
+    if stored != now:
+        differ = sorted(key for key in set(stored) | set(now)
+                        if key not in stored or key not in now or stored[key] != now[key])
+        raise SystemExit(f"{campaign}: the campaign's code sets {differ} otherwise than at its start; stopped")
+
+
 def open_campaign(campaign: Path, instructions: Path, executor: Path, interval_s: float, git: dict[str, Any],
-                  smoke: int | None = None) -> dict[str, Any]:
-    """The campaign's record: written at its start, or read again on a resume and refused unless it is of the same
-    inputs, the same smoke and the same commit, and no step of it still runs."""
+                  smoke: int | None = None, behaviour: Callable[[str], dict[str, Any]] = run_behaviour
+                  ) -> dict[str, Any]:
+    """The campaign's record: written at its start with the answer of the behaviour check (``behaviour``), or read again
+    on a resume and refused unless it is of the same inputs and the same smoke, and no step of it still runs."""
     record = {"instructions": str(instructions), "executor": str(executor), "row_interval_s": interval_s,
               "smoke": None if smoke is None else {"sample": smoke, "flights": SMOKE_FLIGHTS}}
     path = campaign / "campaign.json"
@@ -188,9 +224,7 @@ def open_campaign(campaign: Path, instructions: Path, executor: Path, interval_s
         changed = sorted(k for k, v in record.items() if stored[k] != v)
         if changed:
             raise SystemExit(f"{campaign}: started with other {changed}; a campaign is resumed with its own inputs")
-        if stored["git"]["head"] != git["head"]:
-            raise SystemExit(f"{campaign}: started at {stored['git']['head'][:12]}, this tree is at "
-                             f"{git['head'][:12]}; a campaign runs from one commit")
+        require_settings(campaign, stored)
         if alive_step(stored["running"]):
             raise SystemExit(f"{campaign}: its step {stored['running']['step']} still runs as PID "
                              f"{stored['running']['pid']}; stop it first")
@@ -199,19 +233,19 @@ def open_campaign(campaign: Path, instructions: Path, executor: Path, interval_s
         raise SystemExit(f"{campaign} exists and is no campaign")
     campaign.mkdir(parents=True, exist_ok=True)
     record = {"schema": CAMPAIGN_SCHEMA, "written_utc": utc_now(), **record, "git": git,
-              "airports": sorted(load_candidates(instructions)), "seeds": list(SEEDS), "selection": SELECTION,
-              "configurations": {name: list(flags) for name, flags in CONFIGURATION_FLAGS.items()},
-              "free_generation": FREE_GENERATION, "aborted": [], "running": None}
+              "airports": sorted(load_candidates(instructions)), "seeds": list(SEEDS), "settings": settings(),
+              "behaviour": behaviour(str(instructions)), "steps": [], "aborted": [], "running": None}
     write_json_atomic(path, record)
     return record
 
 
 def run_campaign(campaign: Path, record: dict[str, Any], device: str,
                  runner: Callable[[Step, Path, Callable[[int], None]], int], log: Callable[[str], None],
-                 tree: Callable[[], dict[str, Any]]) -> None:
+                 tree: Callable[[], dict[str, Any]], behaviour: Callable[[str], dict[str, Any]] = run_behaviour) -> None:
     """Every step not yet done, in order, one at a time (module docstring); the plan read again after each step (a
-    choice adds the steps after it). Before each step the tree (``tree``: `git_state`) must still be the campaign's
-    commit, clean unless a smoke. Stops at the first step that fails, naming its log."""
+    choice adds the steps after it). Before each step the tree (``tree``: `git_state`) must be clean unless a smoke,
+    and the behaviour check (``behaviour``) must give the campaign's answer (D108); the step's commit is recorded.
+    Stops at the first step that fails, naming its log."""
     (campaign / "logs").mkdir(exist_ok=True)
 
     def save() -> None:
@@ -224,9 +258,17 @@ def run_campaign(campaign: Path, record: dict[str, Any], device: str,
             break
         step = pending[0]
         now = tree()
-        if now["head"] != record["git"]["head"] or (now["dirty"] and record["smoke"] is None):
-            raise SystemExit(f"the tree moved from {record['git']['head'][:12]} (now {now['head'][:12]}, dirty "
-                             f"{now['dirty']}) before {step.name}; a campaign runs from one commit on a clean checkout")
+        if now["dirty"] and record["smoke"] is None:
+            raise SystemExit(f"the tree has uncommitted changes before {step.name}; a campaign runs on a clean checkout")
+        require_settings(campaign, record)
+        answer = behaviour(record["instructions"])
+        if answer != record["behaviour"]:
+            stored = record["behaviour"]
+            differ = sorted(key for key in set(answer) | set(stored)
+                            if key not in answer or key not in stored or answer[key] != stored[key])
+            raise SystemExit(f"before {step.name}: the prior's code behaves otherwise than at the campaign's start "
+                             f"({differ} differ on the fixed inputs of `prior_behaviour`, D108); stopped")
+        record["steps"].append({"step": step.name, "git": now, "utc": utc_now()})      # information, never compared
         if step.out.exists():                      # left by a crash or a kill: moved aside, recorded, run again
             aside = step.out.with_name(f"{step.out.name}.aborted-{utc_now().replace(':', '')}")
             step.out.rename(aside)
