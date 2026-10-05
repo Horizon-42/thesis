@@ -3,10 +3,13 @@ a published stage-A set, at every Δ, flown through the backend's own request pa
 compared with what the set's sample shows of the same flight —
 
 - the flown states on the 2 s rows both have, against the sample's closed-loop states (written at 0.1 m, so within the
-  rounding, `ROUNDING_M`) and against the artefact's stored states (`stored`, within the executor conformance's bound
-  `STATE_BOUND_M`);
+  rounding, `ROUNDING_M`); against the artefact's stored states the service itself refuses an answer past the executor
+  conformance's bound (`fly.apart_from_stored`, D73);
 - a word flown to its outcome (its column's last): the outcome and the crossing with its decision-altitude check, equal
   to the sample's replay.
+
+It is a runner: before its work it runs the labeller's, the executor's and the closed loop's checks for each set's
+artefact and executor spec (`closed_loop.require_conforming_closed_loop`, once a process, D73), which the service does not.
 
     python -m aeroviz_backend.autopilot_segment.check_live --set-id <set> --out <directory> [--airport KRDU …]
         [--flights-per-airport N --seed S]
@@ -30,12 +33,13 @@ import numpy as np
 
 import aeroviz_backend.paths  # noqa: F401 — `ts_transformer` lives under 4dTrajectory/
 
-from ts_transformer.autopilot.conformance import STATE_BOUND_M
+from ts_transformer.autopilot import closed_loop
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.io_utils import utc_now, write_json_atomic
-from ts_transformer.repo_layout import COMPARISON_AIRPORTS_ROOT
+from ts_transformer.repo_layout import COMPARISON_AIRPORTS_ROOT, REPO_ROOT
 
 from aeroviz_backend.autopilot_segment.backend import stage_a_service
+from aeroviz_backend.autopilot_segment.errors import ExecutorDiffers
 
 AIRPORTS = ("KMSY", "KRDU", "KSJC", "KSMF", "KSTL")
 #: The sample's positions and heights are written at 0.1 m: a live state on the same row is within half of it, and
@@ -58,8 +62,6 @@ def compare(answer: dict[str, Any], closed: dict[str, Any], step_s: float, to_ou
         if not np.abs(apart).max() <= ROUNDING_M:       # a NaN differs too
             differ.append(f"cycle {cycle}: {apart} m from the sample's row {row}")
             break
-    if not (answer["stored"]["horizontalM"] <= STATE_BOUND_M and answer["stored"]["verticalM"] <= STATE_BOUND_M):
-        differ.append(f"{answer['stored']} from the artefact's stored states")
     if to_outcome:
         replayed = closed["replay"]
         if (answer["segment"]["end"], answer["segment"]["endCycle"]) != (replayed["outcome"], replayed["endCycle"]):
@@ -87,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
     started, seq, segments, differing, by_end, flown = time.perf_counter(), 0, 0, [], {}, {}
     for airport in args.airport:
         _, sample = backend.training_set(airport, args.set_id)
+        closed_loop.require_conforming_closed_loop(REPO_ROOT / sample["source"]["instructions"],
+                                                   REPO_ROOT / sample["source"]["executor"])
         flights = sample["flights"]
         if args.flights_per_airport:
             order = np.random.default_rng(args.seed).permutation(len(flights))[:args.flights_per_airport]
@@ -99,10 +103,16 @@ def main(argv: list[str] | None = None) -> int:
                     last[event["column"]] = event["row"]
                 for event in closed["events"]:
                     seq += 1
-                    answer = backend.fly({"clientId": "check_live", "seq": seq, "airport": airport,
-                                          "setId": args.set_id, "flightKey": flight["flightKey"],
-                                          "rowIntervalS": float(interval), "column": COLUMNS[event["column"]],
-                                          "row": event["row"]})
+                    try:
+                        answer = backend.fly({"clientId": "check_live", "seq": seq, "airport": airport,
+                                              "setId": args.set_id, "flightKey": flight["flightKey"],
+                                              "rowIntervalS": float(interval), "column": COLUMNS[event["column"]],
+                                              "row": event["row"]})
+                    except ExecutorDiffers as error:        # the service's own refusal (D73): a segment that differs
+                        segments += 1
+                        differing.append({"airport": airport, "flightKey": flight["flightKey"], "rowIntervalS": interval,
+                                          "column": COLUMNS[event["column"]], "row": event["row"], "differ": [str(error)]})
+                        continue
                     segments += 1
                     by_end[answer["segment"]["end"]] = by_end.get(answer["segment"]["end"], 0) + 1
                     differ = compare(answer, closed, sample["vocabulary"]["stepS"], last[event["column"]] == event["row"])
@@ -114,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = {"checkedUtc": utc_now(), "setId": args.set_id, "airports": args.airport,
                "flightsPerAirport": args.flights_per_airport or "every flight", "seed": args.seed,
                "flights": {airport: len(keys) for airport, keys in flown.items()}, "segments": segments,
-               "differing": len(differing), "ends": by_end, "roundingM": ROUNDING_M, "stateBoundM": STATE_BOUND_M,
+               "differing": len(differing), "ends": by_end, "roundingM": ROUNDING_M,
                "seconds": round(time.perf_counter() - started, 1)}
     write_json_atomic(args.out / "check.json", {**summary, "flightKeys": flown, "segmentsDiffering": differing})
     print(json.dumps(summary))

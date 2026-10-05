@@ -222,17 +222,19 @@ def part_of(order: list[int], part: tuple[int, int]) -> list[int]:
 
 
 def draw_flights(directory: Path, split: str, candidates: list[int], *, per_airport: int, seed: int,
-                 groups: tuple[str, ...] = (OWN,), part: tuple[int, int] = (0, 1), at_most: bool = False) -> Drawn:
+                 groups: tuple[str, ...] = (OWN,), part: tuple[int, int] = (0, 1), at_most: bool = False,
+                 signals: list[FlightSignals] | None = None) -> Drawn:
     """Of the split's signals at ``candidates``, the first ``per_airport`` of ``groups`` per airport (0: every
     one), in a seeded permutation — refused when an airport has fewer, unless ``at_most`` (as many as it has);
     ``part`` ``(k, n)`` draws only the ``k``-th of ``n`` consecutive blocks of that
     permutation (`part_of`; every flight only, ``per_airport`` 0): the parts' flights in turn are the whole draw's, and
-    their descriptions add up to its (`merge_descriptions`)."""
+    their descriptions add up to its (`merge_descriptions`). ``signals``: the split's signals when the caller has them
+    loaded already (`artefact.load_signals`; read here when not)."""
     if part[1] > 1 and per_airport:
         raise ValueError("a split is drawn in parts only with every flight (per_airport 0): a cap per airport is the "
                          "whole permutation's")
     geometries = load_candidates(directory)
-    signals = load_signals(directory, split)
+    signals = load_signals(directory, split) if signals is None else signals
     order = part_of([int(i) for i in np.random.default_rng(seed).permutation(sorted(candidates))], part)
     wanted = {airport: per_airport or len(order) for airport in geometries}
     taken: list[tuple[int, FlightSeries, str]] = []
