@@ -108,9 +108,11 @@ def test_the_readout_reads_the_val_days_once_and_gives_the_flights_outside_the_s
     # the landed val flight alone (its word rows from the first predicted step): the selection of D75
     assert teacher["pooled"]["steps"] == teacher["airports"]["KXXX"]["steps"] == PRIOR_ARTEFACT_ROWS
     masks = readout["masks_on_labelled_words"]
-    assert set(masks["inside"]["KXXX"]) == set(masks["outside"]["KXXX"]) == {"altitude", "angle"}
+    assert set(masks["inside"]["KXXX"]) == set(masks["outside_outcome"]["KXXX"]) == {"altitude", "angle"}
+    assert masks["outside_fault"] == {}
     config = json.loads((tmp_path / "readout" / "config.json").read_text())
     assert config["checks"] == {"stub": True} and config["selection"] == "landed"
+    assert set(config["identity"]["selection"]["counts"]) == {"train", "select"}       # no val count shown (D85)
     with pytest.raises(ValueError, match="read by prior_validation already"):     # read once (D85), wherever written
         runner.main([*argv, "--out", str(tmp_path / "again")])
     assert not (tmp_path / "again").exists()
@@ -160,3 +162,49 @@ def test_the_readout_is_the_base_s_alone(tmp_path, monkeypatch):
         runner.main(["--prior", str(prior), "--instructions", str(artefact), "--executor", str(tmp_path / "executor"),
                      "--out", str(tmp_path / "readout"), "--device", "cpu"])
     assert not (tmp_path / "readout").exists()
+
+
+def test_the_masks_readout_gives_a_flight_with_a_faulty_track_apart(tmp_path):
+    """D111: a val flight stage A marks as faulty is counted under `outside_fault`, whatever its outcome; the flight
+    left out by its outcome stays under `outside_outcome`."""
+    from ts_transformer.instructions.artefact import closed_loop_sentences, load_spec, signals_flights
+
+    artefact = tmp_path / "artefact"
+    words, _ = prior_artefact(artefact, interval_s=2.0, outcomes=("landed", "crossed_too_high"))
+    sentences = closed_loop_sentences(artefact, "val", 2.0, load_spec(artefact))
+    finals = {"KXXX": finals_of(parallel_airport())}
+    args = (sentences, signals_flights(artefact, "val"), finals, words, 2.0, "landed")
+    plain, marked = runner.masks_readout(*args, {}), runner.masks_readout(*args, {0: ("a fault",)})
+    assert plain["outside_fault"] == {} and plain["inside"] and plain["outside_outcome"]
+    assert marked["outside_fault"] == plain["inside"] and marked["inside"] == {}
+    assert marked["outside_outcome"] == plain["outside_outcome"]
+
+
+def test_after_its_claim_the_val_readout_refuses_val_marks_that_are_not_the_prior_s(tmp_path, monkeypatch):
+    """D85, D111: the identity's val counts are compared by the val readers after the claim of the val read, from the
+    artefact's outcomes and marks (a mark comes from the val signals, which no sha256 of the identity holds)."""
+    from ts_transformer.prior import source as source_module
+
+    artefact, prior = base_prior(tmp_path, monkeypatch)
+    monkeypatch.setattr(source_module, "faulty_flights", lambda d, split: {0: ("a fault",)} if split == "val" else {})
+    argv = ["--prior", str(prior), "--instructions", str(artefact), "--executor", str(tmp_path / "executor"),
+            "--device", "cpu", "--out", str(tmp_path / "readout")]
+    with pytest.raises(ValueError, match="faulty-track marks changed"):
+        runner.main(argv)
+    assert (prior / "val_read_prior_validation.json").exists() and not (tmp_path / "readout").exists()
+
+
+def test_a_claim_names_its_readout_relative_to_the_repository(tmp_path):
+    """D85: the claim of the val read names the readout as `repo_layout.repo_relative` does — relative inside the
+    repository, so a worktree removed after its campaign leaves the name valid; as given outside it."""
+    from ts_transformer.prior.checkpoint import claim_validation_read, validation_claim
+    from ts_transformer.repo_layout import REPO_ROOT
+
+    inside, outside = tmp_path / "inside", tmp_path / "outside"
+    inside.mkdir()
+    outside.mkdir()
+    claim_validation_read(inside, "reader", REPO_ROOT / "4dTrajectory/outputs/POOLED/prior/x/base/free_generation")
+    assert validation_claim(inside, "reader") == "4dTrajectory/outputs/POOLED/prior/x/base/free_generation"
+    claim_validation_read(outside, "reader", tmp_path / "readout")
+    assert validation_claim(outside, "reader") == str(tmp_path / "readout")
+    assert validation_claim(outside, "another") is None

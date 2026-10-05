@@ -25,23 +25,28 @@ from ts_transformer.autopilot.start import Loop, start
 from ts_transformer.experiments.prior_speaking_loop import Generated, SpeakingLoop, flight_numbers
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import ClosedLoopSentence, closed_loop_sentences, load_spec, signals_flights
+from ts_transformer.instructions.faults import faulty_flights
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.prior.checkpoint import claim_validation_read, open_prior
+from ts_transformer.prior.checkpoint import claim_validation_read, open_prior, readable_identity
+from ts_transformer.prior.source import require_selection_of
+from ts_transformer.prior.training_files import CLAIM_READER
 from ts_transformer.prior.landings import LandingIndex
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, Final, ProcedureMasks, airport_finals
-from ts_transformer.prior.selection import kept
+from ts_transformer.prior.selection import SIDES, side
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: The temperature of free generation: the model's own distribution (the masks applied).
 TEMPERATURE = 1.0
-#: The format of a readout's files (``config.json``, ``sentences.npz``; `read_sentences`). v3 (B10): "on the final" under
+#: The format of a readout's files (``config.json``, ``sentences.npz``, ``readout.json``; `read_sentences`). v4 (B11,
+#: D111): ``readout.json`` by side (`selection.SIDES`: the flights left out for a faulty track apart), the identity without
+#: the val counts (D85). v3 (B10): "on the final" under
 #: the runway in force before the row (D72), the masks of `procedure-masks-v5` (D64). v2 (B9, D96): each flight's
 #: words drawn with its own random numbers (`flight_numbers`), whatever the batch. v1 (B6): the words the
 #: procedure masks blocked at each row (``blocked_<column>``).
-FREE_GENERATION_SCHEMA = "ts-prior-free-generation-v3"
+FREE_GENERATION_SCHEMA = "ts-prior-free-generation-v4"
 #: The arrays of ``sentences.npz``.
 SENTENCES_FIELDS = {"schema", "index", "sample", "offsets", "words", "go_around_probability", "go_around_permitted",
                     "on_final", "state_offsets", "states", *(f"blocked_{COLUMNS[c]}" for c in ProcedureMasks.columns)}
@@ -162,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
     ``--smoke``): ``config.json``, ``sentences.jsonl`` (one row a sentence: its flight, sample, outcome, crossing, the
     go-arounds), ``sentences.npz`` (the words, the states, the probability and permission of "go-around" and the rows on
     the final, each sentence's by its offsets) and ``readout.json`` (`readout`, all samples together, the flights the
-    prior's selection keeps and those it leaves out apart, D75)."""
+    prior's selection keeps and those it leaves out for each reason apart: `selection.SIDES`, D75, D111)."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--prior", type=Path, required=True, help="a prior_train run's directory")
     parser.add_argument("--instructions", type=Path, required=True)
@@ -197,7 +202,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.split == "val":                     # the base's one validation readout (D85): never a smoke, read once
         if args.smoke or checkpoint.run["held_out"] is not None or checkpoint.run["sample"] is not None:
             parser.error("the validation days are read only by the base's formal readout (D85)")
-        claim_validation_read(prior_dir, "prior_free_generation", out)
+        claim_validation_read(prior_dir, CLAIM_READER, out)
+        require_selection_of(instructions, interval_s, checkpoint.identity, args.split)
     sentences = closed_loop_sentences(instructions, args.split, interval_s, spec)
     flights = signals_flights(instructions, args.split)
     # withheld from the model (D82), read for the readout: each flight's stratum (D70) and stored outcome (D74)
@@ -228,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
     write_json_atomic(out / "config.json", {
         "schema": FREE_GENERATION_SCHEMA,
         "written_utc": utc_now(), "prior": str(prior_dir), "prior_run": checkpoint.run,
-        "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"), "identity": checkpoint.identity,
+        "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"), "identity": readable_identity(checkpoint.identity),
         "instructions": str(instructions), "executor": str(executor_dir), "checks": opened["checks"],
         "split": args.split, "row_interval_s": interval_s, "selection": selection, "airports": airports,
         "per_airport": args.per_airport,
@@ -258,14 +264,16 @@ def main(argv: list[str] | None = None) -> int:
         state_offsets=offsets([g.states for g in sentences_only]),
         states=np.concatenate([g.states for g in sentences_only]),
         **{f"blocked_{COLUMNS[c]}": np.concatenate([g.blocked[c] for g in sentences_only]) for c in ProcedureMasks.columns})
-    # free generation starts from every flight; the readout gives the flights outside the prior's selection apart (D75)
+    # free generation starts from every flight; the readout gives the flights outside the prior's selection apart, by
+    # why the selection leaves them out: a faulty observed track (D111; such a flight's start can fail whatever is
+    # said) or the stored outcome (D75)
     airports_of = {i: flights[i]["airport"] for i in drawn}
     grids = {i: sentences[i].rows.grid for i in drawn}
-    inside = [g for g in sentences_only if kept(selection, sentences[g.index].withheld.outcome)]
-    outside = [g for g in sentences_only if not kept(selection, sentences[g.index].withheld.outcome)]
-    write_json_atomic(out / "readout.json", {
-        "selection": selection, "inside": readout(inside, airports_of, strata, grids),
-        "outside": readout(outside, airports_of, strata, grids)})
+    faulty = faulty_flights(instructions, args.split)
+    sides = {g.index: side(selection, sentences[g.index].withheld.outcome, g.index in faulty) for g in sentences_only}
+    write_json_atomic(out / "readout.json", {"selection": selection, **{
+        name: readout([g for g in sentences_only if sides[g.index] == name], airports_of, strata, grids)
+        for name in SIDES}})
     print(json.dumps({"out": str(out), "sentences": len(generated)}))
     return 0
 

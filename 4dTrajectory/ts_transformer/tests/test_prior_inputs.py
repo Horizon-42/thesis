@@ -420,20 +420,43 @@ def test_landed_keeps_exactly_the_landed_sentences_and_all_keeps_every_one():
     from ts_transformer.prior.selection import LANDING, Stored, kept, selection_record
 
     assert LANDING == OUTCOMES[0] == "landed"                       # the mirror of the judge's name (D74)
-    stored = [Stored("train", "KXXX", "vectored", "landed"), Stored("train", "KXXX", "vectored", "crossed_too_high"),
-              Stored("train", "KYYY", "straight-in", "landed"), Stored("select", "KXXX", "vectored", "timeout")]
-    assert [kept("landed", s.outcome) for s in stored] == [True, False, True, False]
-    assert all(kept("all", s.outcome) for s in stored)
+    stored = [Stored("train", "KXXX", "vectored", "landed", False),
+              Stored("train", "KXXX", "vectored", "crossed_too_high", False),
+              Stored("train", "KYYY", "straight-in", "landed", False), Stored("select", "KXXX", "vectored", "timeout", False)]
+    assert [kept("landed", s.outcome, s.faulty) for s in stored] == [True, False, True, False]
+    assert all(kept("all", s.outcome, s.faulty) for s in stored)
     record = selection_record("landed", stored)
     assert record["rule"] == "landed"
-    assert record["counts"]["train"]["KXXX"]["vectored"] == {"landed": {"kept": 1, "left_out": 0},
-                                                             "crossed_too_high": {"kept": 0, "left_out": 1}}
-    total = sum(cell["kept"] + cell["left_out"] for split in record["counts"].values() for airport in split.values()
+    assert record["counts"]["train"]["KXXX"]["vectored"] == {
+        "landed": {"kept": 1, "left_out_fault": 0, "left_out_outcome": 0},
+        "crossed_too_high": {"kept": 0, "left_out_fault": 0, "left_out_outcome": 1}}
+    total = sum(sum(cell.values()) for split in record["counts"].values() for airport in split.values()
                 for stratum in airport.values() for cell in stratum.values())
     assert total == len(stored)
-    assert selection_record("all", stored)["counts"]["select"]["KXXX"]["vectored"]["timeout"] == {"kept": 1, "left_out": 0}
+    assert selection_record("all", stored)["counts"]["select"]["KXXX"]["vectored"]["timeout"] == {
+        "kept": 1, "left_out_fault": 0, "left_out_outcome": 0}
     with pytest.raises(ValueError, match="selection rule"):
-        kept("some", "landed")
+        kept("some", "landed", False)
+
+
+def test_landed_leaves_out_a_flight_with_a_faulty_track_whatever_its_outcome_and_counts_it_apart():
+    """D111: a marked flight is left out under `landed` — landed or not, for its fault — and kept under `all`; the
+    record counts it apart from the sentences left out by their outcome; the readouts' sides say why."""
+    from ts_transformer.prior.selection import Stored, kept, selection_record, selection_totals, side
+
+    stored = [Stored("train", "KXXX", "vectored", "landed", True), Stored("train", "KXXX", "vectored", "landed", False),
+              Stored("train", "KXXX", "vectored", "timeout", True), Stored("train", "KXXX", "vectored", "timeout", False)]
+    assert [kept("landed", s.outcome, s.faulty) for s in stored] == [False, True, False, False]
+    assert all(kept("all", s.outcome, s.faulty) for s in stored)
+    assert [side("landed", s.outcome, s.faulty) for s in stored] == ["outside_fault", "inside", "outside_fault",
+                                                                     "outside_outcome"]
+    cells = selection_record("landed", stored)["counts"]["train"]["KXXX"]["vectored"]
+    assert cells == {"landed": {"kept": 1, "left_out_fault": 1, "left_out_outcome": 0},
+                     "timeout": {"kept": 0, "left_out_fault": 1, "left_out_outcome": 1}}
+    assert selection_totals(selection_record("landed", stored)) == {
+        "train": {"kept": 1, "left_out_fault": 2, "left_out_outcome": 1}}
+    assert selection_totals(selection_record("all", stored)) == {
+        "train": {"kept": 4, "left_out_fault": 0, "left_out_outcome": 0}}
 
 
 def test_the_source_reads_only_the_selected_sentences_and_the_identity_counts_every_one(tmp_path):
@@ -470,17 +493,19 @@ def test_the_source_reads_only_the_selected_sentences_and_the_identity_counts_ev
     identity = artefact_identity(directory, 4.0, landings, "landed")
     record = identity["selection"]
     assert record["rule"] == "landed"
-    assert record["counts"]["train"]["KXXX"] == {"vectored": {"landed": {"kept": 1, "left_out": 0}},
-                                                 "straight-in": {"crossed_too_high": {"kept": 0, "left_out": 1}}}
+    assert record["counts"]["train"]["KXXX"] == {
+        "vectored": {"landed": {"kept": 1, "left_out_fault": 0, "left_out_outcome": 0}},
+        "straight-in": {"crossed_too_high": {"kept": 0, "left_out_fault": 0, "left_out_outcome": 1}}}
     for split in SPLITS:
         cells = [cell for stratum in record["counts"][split]["KXXX"].values() for cell in stratum.items()]
-        assert sum(c["kept"] + c["left_out"] for _, c in cells) == len(
+        assert sum(sum(c.values()) for _, c in cells) == len(
             load_closed_loop(closed_loop_path(directory, split, 4.0), spec)["signal_index"])
         assert {o: sum(c["kept"] for name, c in cells if name == o) for o in ("landed", "crossed_too_high")} == {
             "landed": 1, "crossed_too_high": 0}
-    assert selection_totals(record) == {split: {"kept": 1, "left_out": 1} for split in SPLITS}
+    assert selection_totals(record) == {split: {"kept": 1, "left_out_fault": 0, "left_out_outcome": 1} for split in SPLITS}
     other = artefact_identity(directory, 4.0, landings, "all")
-    assert selection_totals(other["selection"]) == {split: {"kept": 2, "left_out": 0} for split in SPLITS}
+    assert selection_totals(other["selection"]) == {split: {"kept": 2, "left_out_fault": 0, "left_out_outcome": 0}
+                                                    for split in SPLITS}
     assert {k for k in identity if identity[k] != other[k]} == {"selection"}
 
 
@@ -542,3 +567,55 @@ def test_each_aircraft_of_a_loop_counts_its_own_landings():
     assert torch.equal(got.candidates[0, ..., other], got.candidates[1, ..., other]) and torch.equal(got.own[0], got.own[1])
     picked, _ = loop.select([1, 0])(5, at, before, True, [Heard(geometry, words), Heard(geometry, words)])
     assert torch.equal(picked.candidates[0], got.candidates[1]) and torch.equal(picked.candidates[1], got.candidates[0])
+
+
+def test_the_source_leaves_out_a_marked_flight_under_landed_and_its_mark_changes_no_input(tmp_path, monkeypatch):
+    """D111 through the artefact: stage A marks the first flight of train (landed) as having a faulty track. Under
+    `landed` the source leaves it out and the identity counts it apart; under `all` it is read, and its rows — the
+    mark is never an input — are the rows of the same flight unmarked, bit for bit."""
+    from ts_transformer.prior import source as source_module
+
+    directory = tmp_path / "artefact"
+    _, records = prior_artefact(directory, interval_s=4.0, outcomes=("landed", "crossed_too_high"))
+    landings = {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), fixture_days())}
+    plain = ArtefactSource(directory, 4.0, "full", landings, "all").sentences("train", "KXXX")
+    monkeypatch.setattr(source_module, "faulty_flights",
+                        lambda d, split: {0: ("a fault",)} if split == "train" else {})
+    assert ArtefactSource(directory, 4.0, "full", landings, "landed").sentences("train", "KXXX") == []
+    marked = ArtefactSource(directory, 4.0, "full", landings, "all").sentences("train", "KXXX")
+    assert [s.flight_key for s in marked] == [s.flight_key for s in plain]
+    for a, b in zip(plain, marked):
+        for name in ("time_s", "own", "candidates", "runway_in_force", "go_around", "heading_in_force",
+                     "words_in_force", "since", "targets"):
+            assert np.array_equal(getattr(a, name), getattr(b, name)), name
+    cells = artefact_identity(directory, 4.0, landings, "landed")["selection"]["counts"]["train"]["KXXX"]
+    assert sum(c["left_out_fault"] for stratum in cells.values() for c in stratum.values()) == 1
+    assert sum(c["left_out_outcome"] for stratum in cells.values() for c in stratum.values()) == 1
+
+
+def test_the_val_readers_recount_the_selection_and_the_identity_binds_the_signals(tmp_path, monkeypatch):
+    """D85, D111: after the claim, a val reader recounts the split's selection from today's outcomes and marks
+    (`source.require_selection_of`): the same counts pass, a changed mark is refused, a split with no sentence is refused
+    by name; the identity holds each split's stored signals (`signals_files`), from which the marks are read, so a
+    changed val signals file refuses a prior before any claim (`checkpoint.open_prior` compares the identity)."""
+    from ts_transformer.instructions.artefact import SPLITS
+    from ts_transformer.prior import source as source_module
+    from ts_transformer.prior.source import require_selection_of
+
+    directory = tmp_path / "artefact"
+    _, records = prior_artefact(directory, interval_s=4.0, outcomes=("landed", "crossed_too_high"))
+    landings = {"KXXX": roster_landings(records["KXXX"], ("09", "09L"), fixture_days())}
+    identity = artefact_identity(directory, 4.0, landings, "landed")
+    assert set(identity["signals_files"]) == set(SPLITS)
+    require_selection_of(directory, 4.0, identity, "val")
+    with monkeypatch.context() as patch:                      # an artefact with no val sentence
+        patch.setattr(source_module, "stored_sentences", lambda d, interval, split: [])
+        with pytest.raises(ValueError, match="no closed-loop sentence of val"):
+            require_selection_of(directory, 4.0, identity, "val")
+    monkeypatch.setattr(source_module, "faulty_flights", lambda d, split: {0: ("a fault",)} if split == "val" else {})
+    with pytest.raises(ValueError, match="faulty-track marks changed"):
+        require_selection_of(directory, 4.0, identity, "val")
+    signals = directory / "signals_val.npz"
+    signals.write_bytes(signals.read_bytes() + b"\0")
+    assert artefact_identity(directory, 4.0, landings, "landed", counted=("train", "select"))["signals_files"]["val"] != \
+        identity["signals_files"]["val"]

@@ -45,6 +45,7 @@ import {
   type TrainingClosedLoop,
   type TrainingCrossing,
   type TrainingEvent,
+  type TrainingSplit,
   type TrainingFlight,
   type TrainingOutcome,
   type TrainingSelection,
@@ -55,11 +56,11 @@ import {
 
 /** MIRROR of the exporter's `INDEX_SCHEMA` (`ts_transformer/prior/training_files.py`): the airport's index of prior sets.
  *  A name changes with its file's shape, on both sides, in the same change. */
-export const TRAINING_PRIOR_INDEX_SCHEMA = "aeroviz-training-prior-index-v1";
+export const TRAINING_PRIOR_INDEX_SCHEMA = "aeroviz-training-prior-index-v2";
 /** MIRROR of `INDEX_FILE`: an index of its own beside stage A's `index_v4.json`, which this reader never reads. */
-export const TRAINING_PRIOR_INDEX_FILE = "index_prior_v1.json";
+export const TRAINING_PRIOR_INDEX_FILE = "index_prior_v2.json";
 /** MIRROR of `SAMPLE_SCHEMA`: a prior set's sample. */
-export const TRAINING_PRIOR_SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v1";
+export const TRAINING_PRIOR_SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v2";
 /** MIRROR of `SET_KIND`: the flights of one free-generation readout. */
 export const TRAINING_PRIOR_SET_KIND = "prior-free-generation";
 /** MIRROR of the procedure masks' columns (`prior.procedure.ProcedureMasks.columns`, by `COLUMNS` name): the blocked words are
@@ -91,8 +92,17 @@ export interface TrainingPriorCohort {
   drawnFrom: string;
 }
 
+/** The claim of the val read a set was exported under (outline D109): the base's one validation readout. */
+export interface TrainingPriorValidationClaim {
+  reader: string;
+  prior: string;
+  readout: string;
+}
+
 export interface TrainingPriorSource {
   readout: string;
+  /** null for every set but the base's one validation readout, whose flights are of val (D109). */
+  validationClaim: TrainingPriorValidationClaim | null;
   instructions: string;
   executor: string;
   smoke: boolean;
@@ -217,19 +227,48 @@ function parseCohort(reader: Reader): TrainingPriorCohort {
 
 function parseSource(reader: Reader): TrainingPriorSource {
   const git = reader.child("git");
+  const claim = reader.nullableChild("validationClaim");
   return {
-    readout: reader.string("readout"), instructions: reader.string("instructions"), executor: reader.string("executor"),
+    readout: reader.string("readout"),
+    validationClaim: claim === null ? null : { reader: claim.string("reader"), prior: claim.string("prior"), readout: claim.string("readout") }, instructions: reader.string("instructions"), executor: reader.string("executor"),
     smoke: reader.boolean("smoke"), git: { head: git.string("head"), dirty: git.boolean("dirty") },
   };
+}
+
+/** MIRROR of `instructions.artefact.SEALED_READINGS`: the splits whose readings are read once, in the stage's validation
+ *  readout (outline D85) — the splits of a claimed set's flights, and only them (D109). */
+export const TRAINING_SEALED_SPLITS = ["val"] as const;
+/** MIRROR of `prior.training_files.CLAIM_READER` (the export writes it as ``validationClaim.reader``). */
+export const TRAINING_PRIOR_CLAIM_READER = "prior_free_generation";
+
+/** The splits a set's flights may be of (outline D109): the sealed readings alone for the set that holds a claim, stage A's
+ *  for every other. A claimed set must be a sealed-split set and a sealed-split set must be claimed; a claim must say what
+ *  the export writes (the reader, the set's own prior and readout); anything else is refused by name. */
+export function trainingPriorSplits(
+  cohort: TrainingPriorCohort, source: TrainingPriorSource, model: TrainingPriorModel, reader: Reader,
+): readonly TrainingSplit[] {
+  const claim = source.validationClaim;
+  const sealed = (TRAINING_SEALED_SPLITS as readonly string[]).includes(cohort.split);
+  if (claim !== null && !sealed) reader.fail(`the set holds a validation claim but its cohort.split is "${cohort.split}", not one of ${TRAINING_SEALED_SPLITS}`);
+  if (claim === null && sealed) reader.fail(`the set is of split "${cohort.split}" but holds no validationClaim`);
+  if (claim === null) return TRAINING_SPLITS;
+  if (claim.reader !== TRAINING_PRIOR_CLAIM_READER) reader.fail(`validationClaim.reader is "${claim.reader}", expected "${TRAINING_PRIOR_CLAIM_READER}"`);
+  if (claim.prior !== model.prior) reader.fail(`validationClaim.prior is "${claim.prior}", not the set's model.prior "${model.prior}"`);
+  if (claim.readout !== source.readout) reader.fail(`validationClaim.readout is "${claim.readout}", not the set's source.readout "${source.readout}"`);
+  return TRAINING_SEALED_SPLITS;
 }
 
 function parseSetEntry(entry: Reader): TrainingPriorSetEntry {
   entry.oneOf("kind", [TRAINING_PRIOR_SET_KIND]);
   entry.oneOf("readingRule", [TRAINING_READING_RULE]);
+  const cohort = parseCohort(entry.child("cohort"));
+  const source = parseSource(entry.child("source"));
+  const model = parseModel(entry.child("model"));
+  trainingPriorSplits(cohort, source, model, entry);
   return {
     id: entry.string("id"), title: entry.string("title"), file: entry.string("file"), flights: entry.count("flights"),
-    sentences: entry.count("sentences"), formats: parseFormats(entry), model: parseModel(entry.child("model")),
-    cohort: parseCohort(entry.child("cohort")), source: parseSource(entry.child("source")),
+    sentences: entry.count("sentences"), formats: parseFormats(entry), model,
+    cohort, source,
   };
 }
 
@@ -385,9 +424,12 @@ export function parseTrainingPriorSample(raw: unknown): Parsed<TrainingPriorSamp
     if (!vocabulary.rowIntervalsS.includes(model.rowIntervalS)) {
       sample.fail(`the prior speaks at Δ ${model.rowIntervalS} s, which is none of the vocabulary's [${vocabulary.rowIntervalsS.join(", ")}]`);
     }
+    const cohort = parseCohort(sample.child("cohort"));
+    const source = parseSource(sample.child("source"));
+    const splits = trainingPriorSplits(cohort, source, model, sample);
     const flights = sample.children("flights").map((flight): TrainingPriorFlight => {
       // a prior set's flights carry the closed-loop sentence at the prior's Δ only
-      const head = parseFlight(flight, vocabulary, candidates, cycleS, [model.rowIntervalS], TRAINING_SPLITS);
+      const head = parseFlight(flight, vocabulary, candidates, cycleS, [model.rowIntervalS], splits);
       const sentences = flight.children("prior").map((item) => parseSentence(item, head, model, candidates, vocabulary, cycleS));
       if (sentences.length === 0) flight.fail("prior holds no sentence");
       return { head, sentences };
@@ -397,7 +439,7 @@ export function parseTrainingPriorSample(raw: unknown): Parsed<TrainingPriorSamp
     return {
       setId: sample.string("setId"), airport: sample.string("airport"), executor: { cycleS }, formats: parseFormats(sample),
       vocabulary, airportFrame: { code: frame.string("code"), lat: frame.number("lat"), lon: frame.number("lon"), elevationM: frame.number("elevationM") },
-      candidates, model, cohort: parseCohort(sample.child("cohort")), source: parseSource(sample.child("source")),
+      candidates, model, cohort, source,
       procedure: parseProcedure(sample, candidates), flights,
     };
   });

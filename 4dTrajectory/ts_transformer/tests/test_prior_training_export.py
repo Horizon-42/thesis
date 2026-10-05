@@ -124,6 +124,8 @@ def test_the_blocked_words_are_written_as_the_vocabulary_s_values():
 # ---- a set written and read again; the frontend's fixtures
 FIXTURES = Path(__file__).resolve().parents[3] / "aeroviz-4d" / "src" / "data" / "__tests__" / "fixtures" / "stage_b"
 FIXTURE_SET = "fixture_set"
+#: The set of the base's claimed validation readout (outline D109): val flights.
+FIXTURE_VAL_SET = "fixture_val"
 
 
 def with_runway_ends(directory: Path) -> None:
@@ -181,8 +183,9 @@ def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
     (prior / "checkpoint.pt").write_bytes(b"a checkpoint")
     readout = fixture_readout(geometry.code, instructions=str(directory), executor=str(executor), prior=str(prior),
                               checkpoint_sha256=file_sha256(prior / "checkpoint.pt"))
+    val_dir = tmp_path / "readout_val"
     names = {readout_dir: "fixture/readout", Path(directory): "fixture/instruction_language", executor: "fixture/executor",
-             prior: "fixture/prior"}
+             prior: "fixture/prior", val_dir: "fixture/readout_val"}
     with monkeypatch.context() as patch:
         patch.setattr(export, "read_sentences", lambda out: (readout, stored_sentences))
         patch.setattr(export, "require_conforming_closed_loop",
@@ -198,17 +201,36 @@ def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
         patch.setattr(export, "repo_relative", lambda path: names[path])
         patch.setattr(export, "git_state", lambda: {"head": "fixture", "dirty": False})
         patch.setattr(files, "utc_now", lambda: "fixture")
+        build, built = export.build_airport, []
+        patch.setattr(export, "build_airport", lambda *a, **k: built.append(build(*a, **k)) or built[-1])
         assert export.main(["--readout", str(readout_dir), "--set-id", FIXTURE_SET, "--root", str(root),
+                            "--per-airport", "1", "--smoke"]) == 0
+        # the base's one validation readout, claimed (D85): its set holds val flights (outline D109). Its flights are
+        # the train set's, given the split val (the synthetic artefact has no val sentences to fly again).
+        heads, geometry_ = built[0]
+        val_heads = [{**json.loads(json.dumps(h)), "split": "val"} for h in heads]
+        readout.update(split="val", smoke=False)
+        (prior / "val_read_prior_free_generation.json").write_text(json.dumps({"out": str(val_dir)}))
+        patch.setattr(export, "build_airport", lambda *a, **k: (val_heads, geometry_))
+        assert export.main(["--readout", str(val_dir), "--set-id", FIXTURE_VAL_SET, "--root", str(root),
                             "--per-airport", "1", "--smoke"]) == 0
     training = root / geometry.code / "training"
     entry, sample = files.listed_set(training, geometry.code, FIXTURE_SET)
+    val_entry, _ = files.listed_set(training, geometry.code, FIXTURE_VAL_SET)
     index = json.loads((training / files.INDEX_FILE).read_text(encoding="utf-8"))
-    assert index["sets"] == [entry]
+    assert index["sets"] == [entry, val_entry]
+    assert sample["source"]["validationClaim"] is None
+    assert val_entry["source"]["validationClaim"] == {"reader": "prior_free_generation", "prior": "fixture/prior",
+                                                      "readout": "fixture/readout_val"}
     if texts:
-        return index, sample, {files.INDEX_FILE: (training / files.INDEX_FILE).read_text(encoding="utf-8"),
-                               f"{FIXTURE_SET}/{files.SAMPLE_FILE}":
-                                   (training / FIXTURE_SET / files.SAMPLE_FILE).read_text(encoding="utf-8")}
+        return index, sample, {name: (training / name).read_text(encoding="utf-8")
+                               for name in (files.INDEX_FILE, f"{FIXTURE_SET}/{files.SAMPLE_FILE}",
+                                            f"{FIXTURE_VAL_SET}/{files.SAMPLE_FILE}")}
     return index, sample
+
+
+#: A readout's identity as a fixture: a selection (`checkpoint.readable_identity` reads its counts) and a stand-in.
+FIXTURE_IDENTITY = {"fixture": True, "selection": {"rule": "landed", "counts": {"train": {}, "select": {}}}}
 
 
 def fixture_readout(airport, **more):
@@ -216,7 +238,7 @@ def fixture_readout(airport, **more):
     from ts_transformer.prior.procedure import PROCEDURE_MASKS
 
     return {"smoke": True, "instructions": "fixture/instruction_language", "executor": "fixture/executor",
-            "split": "train", "row_interval_s": 4.0, "selection": "landed", "identity": {"fixture": True},
+            "split": "train", "row_interval_s": 4.0, "selection": "landed", "identity": FIXTURE_IDENTITY,
             "prior": "fixture/prior", "prior_run": {"airports": [airport], "held_out": None, "sample": None},
             "checkpoint_sha256": "fixture", "procedure_masks": PROCEDURE_MASKS, "temperature": 1.0,
             "most_go_arounds": 2, "git": {"head": "fixture", "dirty": False}, "samples": 2, "seed": 1337, **more}
@@ -328,7 +350,7 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
     monkeypatch.setattr(export, "require_conforming_closed_loop",
                         lambda *given: (test_start._params(), {"sha256": "spec", "checks": {"stub": True}}, words))
     # the prior as `checkpoint.open_prior` opens it (its own checks: tests/test_prior_validation.py)
-    opened = SimpleNamespace(checkpoint=SimpleNamespace(identity={"fixture": True}), interval_s=4.0,
+    opened = SimpleNamespace(checkpoint=SimpleNamespace(identity=FIXTURE_IDENTITY), interval_s=4.0,
                              geometries=load_candidates(directory))
     monkeypatch.setattr(export, "open_prior", lambda prior_dir, instructions: opened)
     monkeypatch.setattr(export, "airport_finals", lambda g: finals_of(g))
@@ -353,10 +375,10 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
         export.main(argv)
     with pytest.raises(SystemExit):
         export.main([*argv, "--airports", "KZZZ"])
-    monkeypatch.setattr(opened.checkpoint, "identity", {"fixture": False})              # its data changed
+    monkeypatch.setattr(opened.checkpoint, "identity", {**FIXTURE_IDENTITY, "fixture": False})              # its data changed
     with pytest.raises(SystemExit, match="identity"):
         export.main([*argv[:3], "two", *argv[4:]])
-    monkeypatch.setattr(opened.checkpoint, "identity", {"fixture": True})
+    monkeypatch.setattr(opened.checkpoint, "identity", FIXTURE_IDENTITY)
     (prior / "checkpoint.pt").write_bytes(b"another checkpoint")                        # its prior changed
     with pytest.raises(SystemExit, match="checkpoint"):
         export.main([*argv[:3], "two", *argv[4:]])
@@ -387,6 +409,6 @@ def test_the_set_names_the_artefact_and_the_executor_relative_to_the_repository(
     readout = fixture_readout("KXXX", instructions=str(REPO_ROOT / "4dTrajectory/outputs/POOLED/instruction_language/v"),
                               executor=str(REPO_ROOT / "4dTrajectory/outputs/POOLED/executor/v"))
     source = export.source_block("r", readout, Words(instruction_spec()), {"sha256": "s", "checks": {}}, {}, smoke=True,
-                                 device="cpu")
+                                 device="cpu", claim=None)
     assert (source["instructions"], source["executor"]) == ("4dTrajectory/outputs/POOLED/instruction_language/v",
                                                             "4dTrajectory/outputs/POOLED/executor/v")

@@ -21,7 +21,7 @@ A23's payload, built and flown again by A23's code (`training_export.split_fligh
 from `autopilot/` only what D69 lists): checked against its stored states and outcome, on any split (vocabulary D86).
 
 WRITES a set ``<root>/<airport>/training/<set-id>/sample.json`` and its entry in
-``<root>/<airport>/training/index_prior_v1.json`` (`prior.training_files`); refused when the set exists. Every airport is
+``<root>/<airport>/training/index_prior_v2.json`` (`prior.training_files`); refused when the set exists. Every airport is
 built before any is written. From a clean tree (the set records the commit) unless ``--smoke``.
 
     python run_ts.py prior_training_export --readout <a prior_free_generation directory> --set-id <id> --per-airport 10
@@ -58,7 +58,7 @@ from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.prior import training_files as files
-from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, open_prior, validation_claim
+from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, holds_claim, open_prior, readable_identity, validation_claim
 from ts_transformer.prior.procedure import (
     GLIDEPATH_BELOW_M, PROCEDURE_MASKS, Final, airport_finals,
 )
@@ -268,11 +268,13 @@ def model_block(readout: dict[str, Any], prior_dir: str) -> dict[str, Any]:
 
 
 def source_block(readout_dir: str, readout: dict[str, Any], words: Words, opened: dict[str, Any], git: dict[str, Any],
-                 *, smoke: bool, device: str) -> dict[str, Any]:
+                 *, smoke: bool, device: str, claim: dict[str, str] | None) -> dict[str, Any]:
     """What the set was exported from, and the checks the export ran (D73). The artefact and the executor spec are named
     relative to the repository (`repo_relative`): the live executor opens them from its own checkout, never from the
-    worktree a readout happened to run in."""
+    worktree a readout happened to run in. ``claim``: the claim of the val read the set was exported under (outline
+    D109: its flights are of val), None for every other set."""
     return {"readout": readout_dir, "readoutGit": readout["git"], "readoutSmoke": readout["smoke"],
+            "validationClaim": claim,
             "instructions": repo_relative(Path(readout["instructions"])),
             "executor": repo_relative(Path(readout["executor"])), "specSha256": words.spec.sha256,
             "executorSpecSha256": opened["sha256"], "checks": opened["checks"], "git": git, "smoke": smoke,
@@ -345,21 +347,25 @@ def main(argv: list[str] | None = None) -> int:
     prior_dir = Path(readout["prior"])
     prior = open_prior(prior_dir, instructions)        # today's identity and procedure masks (§7 item 1, D106)
     geometries = prior.geometries
-    if (prior.checkpoint.identity != readout["identity"] or prior.interval_s != interval
+    if (readable_identity(prior.checkpoint.identity) != readout["identity"] or prior.interval_s != interval
             or file_sha256(prior_dir / "checkpoint.pt") != readout["checkpoint_sha256"]
             or readout["procedure_masks"] != PROCEDURE_MASKS):
         raise SystemExit(f"{readout_dir}: not said by {prior_dir}'s checkpoint on this artefact's identity under "
                          f"{PROCEDURE_MASKS} (its data or its prior changed since the readout)")
+    claim = None
     if readout["split"] == "val":           # the base's one validation readout, and only it (D85)
-        claimed = validation_claim(prior_dir, "prior_free_generation")
-        if claimed is None or claimed.resolve() != readout_dir.resolve():
+        claimed = validation_claim(prior_dir, files.CLAIM_READER)
+        if not holds_claim(prior_dir, files.CLAIM_READER, readout_dir):
             raise SystemExit(f"{readout_dir}: a readout of the val days that {prior_dir}'s claim of its val read does "
                              f"not name ({claimed}); only the base's one validation readout is exported (D85)")
+        claim = {"reader": files.CLAIM_READER, "prior": repo_relative(prior_dir),
+                 "readout": repo_relative(readout_dir)}
     signals_record = json.loads((instructions / "signals.json").read_text(encoding="utf-8"))
     started = time.perf_counter()
     existing = {airport: files.read_index(args.root / airport / "training", airport, args.set_id) for airport in airports}
     model = model_block(readout, repo_relative(prior_dir))
-    source = source_block(repo_relative(readout_dir), readout, words, opened, git, smoke=args.smoke, device=args.device)
+    source = source_block(repo_relative(readout_dir), readout, words, opened, git, smoke=args.smoke, device=args.device,
+                          claim=claim)
     built = {}
     for airport in airports:
         flights, geometry = build_airport(airport, readout, stored, params, words, per_airport=args.per_airport,

@@ -6,7 +6,7 @@ Not a runner, and torch-free: everything here raises `ValueError` (a set that is
 never `SystemExit` — a server thread would let that escape its handler and drop the request unanswered.
 
 **Beside the other sets (outline §6 item 3).** A prior set is ``<airport>/training/<set-id>/sample.json``
-(`SAMPLE_SCHEMA`), listed in ``<airport>/training/index_prior_v1.json`` (`INDEX_FILE`, `INDEX_SCHEMA`) — an index of its
+(`SAMPLE_SCHEMA`), listed in ``<airport>/training/index_prior_v2.json`` (`INDEX_FILE`, `INDEX_SCHEMA`) — an index of its
 own beside stage A's ``index_v4.json`` and the instruction-v3 view's ``index.json``, which this code never reads or
 writes. A set or the index entry of one is never overwritten, and the index is rewritten only while it is still what the
 run read at its start (`require_index_unchanged`).
@@ -25,11 +25,18 @@ from ts_transformer.io_utils import utc_now
 #: together. A name changes with its file's shape, on both sides, in the same change. Index v1 / sample v1 (B6,
 #: 2026-10-05): the flights of one free-generation readout — the observed track, the open-loop sentence, the closed-loop
 #: sentence at the prior's Δ and the sentences the prior said, flown again, with the words the procedure masks blocked.
-INDEX_SCHEMA = "aeroviz-training-prior-index-v1"
-INDEX_FILE = "index_prior_v1.json"
-SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v1"
+#: Index v2 / sample v2 (B10, outline D109): a set's source names the claim of the val read it was exported under
+#: (``validationClaim``: null for every set but the base's one validation readout, whose flights are of val); the
+#: readers give val to that set alone.
+INDEX_SCHEMA = "aeroviz-training-prior-index-v2"
+INDEX_FILE = "index_prior_v2.json"
+SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v2"
 SAMPLE_FILE = "sample.json"
 SET_KIND = "prior-free-generation"
+#: The reader of the val days whose claim a set's ``validationClaim`` names (`checkpoint.claim_validation_read`): the
+#: base's one validation free generation. The export writes it, the backend's live service checks it; the frontend's
+#: `TRAINING_PRIOR_CLAIM_READER` is its MIRROR.
+CLAIM_READER = "prior_free_generation"
 
 
 class NotListed(ValueError):

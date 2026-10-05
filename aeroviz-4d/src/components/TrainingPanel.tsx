@@ -89,7 +89,7 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
   const [setId, setSetId] = useState<string | null>(null);
   const [setState, setSetState] = useState<SetState>({ status: "idle" });
   /** The details page while it is open: its section, and the control that opened it (the focus goes back there). */
-  /** Whose sets the panel shows: stage A's (`index_v4.json`) or stage B's prior sets (`index_prior_v1.json`, offered only where
+  /** Whose sets the panel shows: stage A's (`index_v4.json`) or stage B's prior sets (`index_prior_v2.json`, offered only where
    *  the airport has the file). */
   const [viewing, setViewing] = useState<"stageA" | "prior">("stageA");
   const priorIndex = useTrainingPriorIndex(activeAirportCode || null);

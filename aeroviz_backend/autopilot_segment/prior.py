@@ -3,7 +3,7 @@ flown live by the same single-flight executor as stage A's (`backend.AutopilotSe
 numbering, executor spec and flown-set caches this shares).
 
 WHICH SENTENCE. The request names a prior set (``airport``, ``setId``: `prior.training_files.listed_set`, the airport's
-``training/index_prior_v1.json``), a flight of it (``flightKey``) and ``sentence``: a sample number of the flight's
+``training/index_prior_v2.json``), a flight of it (``flightKey``) and ``sentence``: a sample number of the flight's
 ``prior`` list (the prior's own sentence) or ``"closedLoop"`` (the flight's closed-loop sentence at the prior's Δ, which
 is stage A's). The sentence's Δ is the set's ``model.rowIntervalS``.
 
@@ -30,8 +30,11 @@ import numpy as np
 
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.judge import flown_track
+from ts_transformer.instructions.artefact import SEALED_READINGS
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.io_utils import utc_now
+from ts_transformer.prior.checkpoint import validation_claim
+from ts_transformer.repo_layout import REPO_ROOT
 from ts_transformer.prior import training_files as prior_files
 
 from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused, Superseded
@@ -82,6 +85,51 @@ class PriorSegments:
 
     def __init__(self, backend: Any) -> None:
         self.backend = backend
+        self._val: Any = None
+
+    def splits_of(self, sample: dict[str, Any]) -> tuple[str, ...]:
+        """The splits the set's flights may be of (outline D109): the claimed validation set's are the sealed readings
+        (val) alone, every other set's are the service's. A claim on a set that is not val, or a val set with no claim,
+        is refused by name."""
+        claim, split = sample["source"]["validationClaim"], sample["cohort"]["split"]
+        if claim is not None and split not in SEALED_READINGS:
+            raise RequestRefused(f"set {sample['setId']} holds a validation claim but its cohort.split is {split!r}, "
+                                 f"not one of {SEALED_READINGS}")
+        if claim is None and split in SEALED_READINGS:
+            raise RequestRefused(f"set {sample['setId']} is of split {split!r} but holds no validationClaim")
+        if claim is None:
+            return tuple(self.backend.splits)
+        if claim["reader"] != prior_files.CLAIM_READER:
+            raise RequestRefused(f"set {sample['setId']}: validationClaim.reader is {claim['reader']!r}, expected {prior_files.CLAIM_READER!r}")
+        if claim["prior"] != sample["model"]["prior"]:
+            raise RequestRefused(f"set {sample['setId']}: validationClaim.prior is {claim['prior']!r}, not the set's "
+                                 f"model.prior {sample['model']['prior']!r}")
+        if claim["readout"] != sample["source"]["readout"]:
+            raise RequestRefused(f"set {sample['setId']}: validationClaim.readout is {claim['readout']!r}, not the set's "
+                                 f"source.readout {sample['source']['readout']!r}")
+        return SEALED_READINGS
+
+    def val_service(self) -> Any:
+        """The service that flies a claimed validation set's flights (outline D109): its splits are the sealed readings
+        alone, its caches its own. Made on first use (`AutopilotSegmentBackend.__init__` builds this object)."""
+        from aeroviz_backend.autopilot_segment.backend import AutopilotSegmentBackend
+
+        if self._val is None:
+            self._val = AutopilotSegmentBackend(splits=SEALED_READINGS, airports_root=self.backend.airports_root)
+        return self._val
+
+    def flying(self, sample: dict[str, Any]) -> Any:
+        """The service whose splits are the set's: the validation service for a claimed set, else the backend. A claimed
+        set is flown only when the prior's run holds the claim it names, on disk (D85)."""
+        self.splits_of(sample)
+        claim = sample["source"]["validationClaim"]
+        if claim is None:
+            return self.backend
+        held = validation_claim(REPO_ROOT / claim["prior"], claim["reader"])      # repository-relative names
+        if held != claim["readout"]:
+            raise RequestRefused(f"set {sample['setId']}: the prior {claim['prior']} holds no claim of {claim['readout']} "
+                                 f"by {claim['reader']} (it holds {held})")
+        return self.val_service()
 
     def listed(self, airport: str, set_id: str) -> dict[str, Any]:
         """The prior set's sample (`prior.training_files.listed_set`)."""
@@ -110,9 +158,10 @@ class PriorSegments:
                 with self.backend._lock:
                     try:
                         sample = self.listed(airport, entry["id"])
+                        service = self.flying(sample)
                         instructions, _, params, _, words = self.backend.executor_for(sample)
-                        self.backend.set_flown(sample, sample["cohort"]["split"], float(sample["model"]["rowIntervalS"]),
-                                               instructions, params, words)
+                        service.set_flown(sample, sample["cohort"]["split"], float(sample["model"]["rowIntervalS"]),
+                                          instructions, params, words)
                     except Exception as error:   # noqa: BLE001 — a prefetch: logged by type; a request gets it whole
                         log(f"prior warm-up: {airport} {entry['id']} skipped — {type(error).__name__}: "
                             f"{str(error).split('; ')[0]}")
@@ -123,7 +172,7 @@ class PriorSegments:
         log(f"prior warm-up: {opened_sets} sets ready in {time.perf_counter() - started:.1f} s")
 
     def fly(self, payload: dict[str, Any]) -> dict[str, Any]:
-        from aeroviz_backend.autopilot_segment.backend import _field, _whole
+        from aeroviz_backend.autopilot_segment.backend import _field, _require_split, _whole
 
         backend = self.backend
         client = str(_field(payload, "clientId"))
@@ -151,6 +200,8 @@ class PriorSegments:
             if len(items) != 1:
                 raise NotListed(f"Training set {set_id} at {airport} has no flight {flight_key}")
             item = items[0]
+            service = self.flying(sample)
+            _require_split(item["split"], service.splits)       # before any check runs (A37): `executor_for` runs the conformance
             if which == CLOSED_LOOP:
                 said = None
             else:
@@ -166,7 +217,7 @@ class PriorSegments:
             heard = row * int(round(interval / params.cycle_s))
             if heard > ended:
                 raise RequestRefused(f"the word at Δ row {row} is said at cycle {heard}, after the flight's outcome at cycle {ended}")
-            flown_set = backend.set_flown(sample, item["split"], interval, instructions, params, words)
+            flown_set = service.set_flown(sample, item["split"], interval, instructions, params, words)
             opened = time.perf_counter()
             j = flown_set.position[item["datasetId"]]
             batch, inputs, sentence = flown_set.batch, flown_set.inputs, flown_set.sentences[j]

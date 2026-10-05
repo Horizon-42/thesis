@@ -1,7 +1,7 @@
 /**
  * useTrainingPriorIndex.ts
  * ------------------------
- * The airport's index of prior sets (`training/index_prior_v1.json`): absent (none exported — the panel offers nothing),
+ * The airport's index of prior sets (`training/index_prior_v2.json`): absent (none exported — the panel offers nothing),
  * invalid (named on screen), or ready. Stage A's index is the panel's own; this one is read beside it.
  */
 

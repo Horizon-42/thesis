@@ -35,22 +35,24 @@ from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
 from ts_transformer.instructions.artefact import STATE_COLUMNS
 from ts_transformer.instructions.artefact import SentenceRows as ClosedLoopRows
 from ts_transformer.instructions.artefact import closed_loop_sentences, load_spec, signals_flights
+from ts_transformer.instructions.faults import faulty_flights
 from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.labeller.interval import interval_rows, on_interval_rows
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.prior.checkpoint import claim_validation_read, open_prior
+from ts_transformer.prior.checkpoint import claim_validation_read, open_prior, readable_identity
 from ts_transformer.prior.inputs import Heard
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, Final, ProcedureMasks, airport_finals
-from ts_transformer.prior.selection import kept
-from ts_transformer.prior.source import ArtefactSource
+from ts_transformer.prior.selection import SIDES, side
+from ts_transformer.prior.source import ArtefactSource, require_selection_of
 from ts_transformer.prior.speaker import runway_after
 from ts_transformer.prior.train import evaluate
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: The format of the readout's files (``config.json``, ``readout.json``).
-#: v2 (B10): the masks of D64 keep the row whose runway word ends G (`ProcedureMasks.after_row`).
-VALIDATION_SCHEMA = "ts-prior-validation-v2"
+#: v3 (B11, D111): ``readout.json``'s masks counted by side (`selection.SIDES`: the flights left out for a faulty track
+#: apart); the identity without the val counts (D85). v2 (B10): the masks of D64 keep the row whose runway word ends G.
+VALIDATION_SCHEMA = "ts-prior-validation-v3"
 #: The columns of a state row the masks read (`STATE_COLUMNS`).
 POSITION = [STATE_COLUMNS.index(name) for name in ("e_m", "n_m", "height_m")]
 
@@ -90,16 +92,17 @@ def blocked_by_masks(rows: ClosedLoopRows, finals: Sequence[Final], words: Words
 
 
 def masks_readout(sentences: Mapping[int, Any], flights: Sequence[Mapping[str, Any]],
-                  finals: Mapping[str, Sequence[Final]], words: Words, interval_s: float, selection: str
-                  ) -> dict[str, Any]:
-    """The share of the labelled words the masks block, ``{"inside" | "outside": {airport: {column: {said, blocked,
-    share}}}}``, the sentences inside and outside the prior's selection apart (their stored outcome, D75)."""
-    counts: dict[str, dict[str, dict[str, list[int]]]] = {"inside": {}, "outside": {}}
+                  finals: Mapping[str, Sequence[Final]], words: Words, interval_s: float, selection: str,
+                  faulty: Mapping[int, Any]) -> dict[str, Any]:
+    """The share of the labelled words the masks block, ``{side: {airport: {column: {said, blocked, share}}}}``, the
+    sentences inside the prior's selection and outside it for each reason apart (`selection.SIDES`: the stored outcome,
+    D75; a faulty observed track, ``faulty`` the marked flights by their place in the signals, D111)."""
+    counts: dict[str, dict[str, dict[str, list[int]]]] = {name: {} for name in SIDES}
     for index, sentence in sentences.items():
         airport = flights[index]["airport"]
-        side = "inside" if kept(selection, sentence.withheld.outcome) else "outside"
+        where = side(selection, sentence.withheld.outcome, index in faulty)
         for column, (said, blocked) in blocked_by_masks(sentence.rows, finals[airport], words, interval_s).items():
-            cell = counts[side].setdefault(airport, {}).setdefault(COLUMNS[column], [0, 0])
+            cell = counts[where].setdefault(airport, {}).setdefault(COLUMNS[column], [0, 0])
             cell[0] += said
             cell[1] += blocked
     return {side: {airport: {column: {"said": said, "blocked": blocked, "share": blocked / said if said else None}
@@ -144,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     tokens = int(checkpoint.train_config["tokens_per_batch"])
     if args.split == "val":
         claim_validation_read(prior_dir, "prior_validation", out)
+        require_selection_of(instructions, interval_s, checkpoint.identity, args.split)
     source = ArtefactSource(instructions, interval_s, variant, landings, selection)
     airports = sorted(geometries)
     loss = {airport: evaluate(model, source.sentences(args.split, airport), tokens, device) for airport in airports}
@@ -151,11 +155,12 @@ def main(argv: list[str] | None = None) -> int:
     spec = load_spec(instructions)
     finals = {code: airport_finals(geometry, root=args.procedure_root) for code, geometry in geometries.items()}
     blocked = masks_readout(closed_loop_sentences(instructions, args.split, interval_s, spec),
-                            signals_flights(instructions, args.split), finals, source.words, interval_s, selection)
+                            signals_flights(instructions, args.split), finals, source.words, interval_s, selection,
+                            faulty_flights(instructions, args.split))
     out.mkdir(parents=True)
     write_json_atomic(out / "config.json", {
         "schema": VALIDATION_SCHEMA, "written_utc": utc_now(), "prior": str(prior_dir),
-        "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"), "identity": checkpoint.identity,
+        "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"), "identity": readable_identity(checkpoint.identity),
         "instructions": str(instructions), "executor": str(executor_dir), "checks": opened["checks"],
         "row_interval_s": interval_s, "selection": selection, "variant": variant, "procedure_masks": PROCEDURE_MASKS,
         "tokens_per_batch": tokens, "git": git, "smoke": args.smoke, "device": str(device)})

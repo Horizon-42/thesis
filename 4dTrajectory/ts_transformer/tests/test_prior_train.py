@@ -261,7 +261,8 @@ def test_a_landed_run_trains_on_the_landed_sentences_and_a_run_under_another_rul
     config = json.loads((out / "config.json").read_text())
     assert config["sentences"] == {"train": 1, "select": 1}
     assert config["identity"]["selection"]["rule"] == "landed"
-    assert selection_totals(config["identity"]["selection"]) == {split: {"kept": 1, "left_out": 1} for split in SPLITS}
+    assert selection_totals(config["identity"]["selection"]) == {
+        split: {"kept": 1, "left_out_fault": 0, "left_out_outcome": 1} for split in SPLITS}
     load_checkpoint(out / "checkpoint.pt", artefact_identity(artefact, 4.0, landings, "landed"))
     with pytest.raises(ValueError, match=r"\['selection'\] differ"):
         load_checkpoint(out / "checkpoint.pt", artefact_identity(artefact, 4.0, landings, "all"))

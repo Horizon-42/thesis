@@ -19,14 +19,18 @@ import {
 import { wordUnreached } from "../trainingSample";
 import { readingRowAt, sentenceColumnRuns, trainingReadingOf, TRAINING_READING_RULE, TRAINING_SAMPLE_SCHEMA } from "../trainingSample";
 import { allowedWords, blockedWordName } from "../../components/training/TrainingPriorSession";
-import { PRIOR_SET_ID, stageBIndex, stageBSample, stageBSampleFile } from "./stageB";
+import { PRIOR_SET_ID, PRIOR_VAL_SET_ID, stageBIndex, stageBSample, stageBSampleFile, stageBValSampleFile } from "./stageB";
+import { TRAINING_SET_SPLITS, TRAINING_SPLITS } from "../trainingSample";
 
 describe("the index", () => {
   it("is read: one set with its model, cohort and source", () => {
     const parsed = parseTrainingPriorIndex(stageBIndex());
     if (!parsed.ok) throw new Error(parsed.problem);
     expect(parsed.value.rejected).toEqual([]);
-    const [set] = parsed.value.sets;
+    const [set, valSet] = parsed.value.sets;
+    expect(valSet).toMatchObject({ id: PRIOR_VAL_SET_ID, cohort: { split: "val" } });
+    expect(valSet.source.validationClaim).toMatchObject({ reader: "prior_free_generation" });
+    expect(set.source.validationClaim).toBeNull();
     expect(set).toMatchObject({ id: PRIOR_SET_ID, file: "fixture_set/sample.json", flights: 1, sentences: 2 });
     expect(set.model.rowIntervalS).toBe(4);
     expect(set.cohort.samples).toBe(2);
@@ -44,10 +48,81 @@ describe("the index", () => {
     index.sets.push({ ...index.sets[0], id: "old_rule", readingRule: "instruction-v3" });
     const parsed = parseTrainingPriorIndex(index);
     if (!parsed.ok) throw new Error(parsed.problem);
-    expect(parsed.value.sets.map((set) => set.id)).toEqual([PRIOR_SET_ID]);
+    expect(parsed.value.sets.map((set) => set.id)).toEqual([PRIOR_SET_ID, PRIOR_VAL_SET_ID]);
     expect(parsed.value.rejected.map((item) => item.id)).toEqual(["stage_a_kind", "old_rule"]);
     expect(parsed.value.rejected[0].problem).toContain(`not one of ${TRAINING_PRIOR_SET_KIND}`);
     expect(parsed.value.rejected[1].problem).toContain(`not one of ${TRAINING_READING_RULE}`);
+  });
+});
+
+describe("a set's splits (outline D109)", () => {
+  const val = (flights: Record<string, any>) => flights.flights.map((f: Record<string, any>) => f.split);
+
+  it("gives the claimed val set its val flights, and only it", () => {
+    const file = stageBValSampleFile();
+    expect(val(file)).toEqual(["val"]);
+    const parsed = parseTrainingPriorSample(file);
+    if (!parsed.ok) throw new Error(parsed.problem);
+    expect(parsed.value.flights.map((f) => f.head.split)).toEqual(["val"]);
+    expect(TRAINING_SET_SPLITS).toContain("val");
+    expect(TRAINING_SPLITS).not.toContain("val");
+  });
+
+  it("refuses a val flight in the unclaimed train set, by split name", () => {
+    const file = stageBSampleFile();
+    file.flights[0].split = "val";
+    const parsed = parseTrainingPriorSample(file);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.problem).toContain("val");
+  });
+
+  it("refuses a val set without a claim and a train set with one, by name", () => {
+    const unclaimed = stageBValSampleFile();
+    unclaimed.source.validationClaim = null;
+    const a = parseTrainingPriorSample(unclaimed);
+    expect(a.ok).toBe(false);
+    if (!a.ok) expect(a.problem).toContain('is of split "val" but holds no validationClaim');
+    const claimed = stageBSampleFile();
+    claimed.source.validationClaim = stageBValSampleFile().source.validationClaim;
+    const b = parseTrainingPriorSample(claimed);
+    expect(b.ok).toBe(false);
+    if (!b.ok) expect(b.problem).toContain('holds a validation claim but its cohort.split is "train"');
+    const index = stageBIndex();
+    index.sets[1].source.validationClaim = null;
+    const parsed = parseTrainingPriorIndex(index);
+    if (!parsed.ok) throw new Error(parsed.problem);
+    expect(parsed.value.rejected.map((item) => item.id)).toEqual([PRIOR_VAL_SET_ID]);
+    expect(parsed.value.rejected[0].problem).toContain("holds no validationClaim");
+  });
+
+  it("refuses a train flight in the claimed val set, by split name", () => {
+    const file = stageBValSampleFile();
+    file.flights[0].split = "train";
+    const parsed = parseTrainingPriorSample(file);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.problem).toContain("train");
+  });
+
+  it("refuses a claim that does not say what the export writes, in the sample and the index entry", () => {
+    for (const [field, text] of [["reader", "expected"], ["prior", "model.prior"], ["readout", "source.readout"]] as const) {
+      const file = stageBValSampleFile();
+      file.source.validationClaim[field] = "forged";
+      const parsed = parseTrainingPriorSample(file);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.problem).toContain(`validationClaim.${field}`);
+      const index = stageBIndex();
+      index.sets[1].source.validationClaim[field] = "forged";
+      const read = parseTrainingPriorIndex(index);
+      if (!read.ok) throw new Error(read.problem);
+      expect(read.value.rejected.map((item) => item.id)).toEqual([PRIOR_VAL_SET_ID]);
+      expect(read.value.rejected[0].problem).toContain(text);
+    }
+  });
+
+  it("refuses a claim whose fields are not strings", () => {
+    const file = stageBValSampleFile();
+    file.source.validationClaim.readout = 3;
+    expect(parseTrainingPriorSample(file).ok).toBe(false);
   });
 });
 
