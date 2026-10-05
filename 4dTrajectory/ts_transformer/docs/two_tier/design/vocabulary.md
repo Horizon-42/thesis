@@ -116,7 +116,7 @@ The commits, dates, branches and test counts of every milestone are in
 | A34 (D77–D87) | Built from `dev-two-tier-v4-a32` into `instruction_language/v12_20261005`, `executor/v17_20261005` (read-only, `SHA256SUMS`); the start check passed; the report against A30 in work |
 | A37 (D80, D83, D85, D90) | Done on `dev-two-tier-v4-a37`: `e7e01461`, `b41b24a5` (D90 narrowed), `89729d66` (a turn over 170° at a vertex is a reversal), reviewed; checked on A34's artefact by sample; v12's readout written again (val counts only) |
 | A35 | Done: `closed_loop_v12_20261005` published (5 airports × 40 flights), live check by sample 0 differing, browser check passed |
-| A38 (D97) | In work on `dev-two-tier-v4-a38`: (3) measured (alone vs batch ≤ 7.9e-10 m; the user: states within 1e-6 m), (1)–(3) in review; (4) next |
+| A38 (D97) | In work on `dev-two-tier-v4-a38`: (1)–(3) `b6ee4958`, reviewed; (4) the moved start in work (the user's two readings given) |
 | A39 (outline D109) | Done: `658e4717` on `dev-two-tier-v4-a39` (from A37's tip), reviewed; waits for the merge |
 
 
