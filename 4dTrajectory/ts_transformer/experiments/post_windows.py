@@ -1,7 +1,8 @@
 """Stage C's windows and their census (post-training §8 C1, C2; outline §5 rule 12, D55): for each airport and split
 (train, select), the windows of recorded traffic at one Δ, the other aircraft at their first predicted step, the share
 with a leader in the air, the windows that admit window D, those near the cut between two operating days and those
-that open inside a loss of separation (at the first predicted step, on the record); and,
+that open inside a loss of separation (at the first predicted step, on the record), and the recorded aircraft with a
+faulty observed track (vocabulary D111, `post.fault_census`); and,
 with the train split, the reference of the edge features (post-training §4 item 1), read again at once.
 
 The user chooses the count of each kind of window in a round from this census (§2 item 4); a window that opens inside
@@ -25,7 +26,9 @@ import numpy as np
 from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 from ts_transformer.instructions.artefact import load_candidates, load_day_split, load_spec
 from ts_transformer.io_utils import utc_now, write_json_atomic
+from ts_transformer.instructions.faults import faulty_flights
 from ts_transformer.post.conformance import REFERENCE_SEED, reference_steps, require_conforming_edges, write_edge_reference
+from ts_transformer.post.fault_census import fault_census, fault_rows
 from ts_transformer.post.runways import airport_separation
 from ts_transformer.post.scene import airport_scenes, census, inserted_window, leader_moved_window, real_windows
 from ts_transformer.post.traffic import loss_at_first_step, opens_inside_loss
@@ -118,7 +121,11 @@ def main(argv: list[str] | None = None) -> int:
                 mine = [w for w in windows if w.scene.geometry.code == code]
                 chosen += [mine[int(k)] for k in sorted(rng.choice(len(mine), min(args.sample, len(mine)), replace=False))]
             windows = chosen
+        marked = {code: {} for code in geometries}
+        for index, found in faulty_flights(instructions, split).items():
+            marked[signals[index].airport][signals[index].dataset_id] = fault_rows(found)
         record["splits"][split] = {"airports": census(windows, separations, days),
+                                   "faults": fault_census(windows, marked, separations, finals, spec.step_s),
                                    "augmented": draw_checks(windows, separations, finals, spec.step_s, SAMPLE_SEED),
                                    "lost_at_first_step": first_step_losses(windows, separations, finals, spec.step_s)}
         if split == "train":
