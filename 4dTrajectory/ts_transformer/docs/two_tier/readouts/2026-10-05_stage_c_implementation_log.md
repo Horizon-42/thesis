@@ -414,3 +414,61 @@ The faulty-track counts of §14 are unchanged.
 - **P31. For C10**: the groups of a round are large (the reviewer's estimate: several MB a group, tens of GB for a round
   held at once) — the loss is fed branch point by branch point; window B's D113 check at the draw uses `moved_commanded`;
   `start_loop` maps each window's move.
+
+## 16 The code of C10 and C8 before B5's base (2026-10-05)
+
+The user's order of 2026-10-05: write the code of C8, C10 and C11 now, tested on synthetic artefacts; the formal runs
+wait for B5's base (and C10 for the user's criteria). `dev-two-tier` merged first.
+
+| Step | Commit | What |
+|---|---|---|
+| C10, C8 | `69531aa3` | `experiments/post_train.py`: the rounds as one campaign (the draw by kind with D113, batches that command each flight once, the two passes with informative groups written per batch, one pass of the loss streamed over them, the selection readout on fixed select windows with fixed numbers, `round.json`, the checkpoint `ts-post-checkpoint-v1`, then the groups deleted); clean tree unless a smoke, an intent before a formal launch, the checks at the start; resumable, every random number keyed by the seed and the round. `experiments/post_profile.py`: one batch under cProfile by part, the round timed by part, the GPU's peak memory by part, the groups' bytes. `post/loss.py`: `one_pass` takes its pairs as a stream |
+
+Reviewed (no bug; fixed before the commit: the groups deleted after the round's checkpoint, an empty data term refused
+by name, the GPU peak reset for each part). A bug that the resume test found before the review: the traffic modules'
+starting weights came from torch's unseeded generator, so a resumed campaign was not the campaign run through; the start
+model and each pass's dropout are now seeded (the test: bit for bit on the CPU).
+
+Tests: the C10 and C8 files with the loss, branch and architecture tests, 52 + 6 passed. The tests of a whole round fly
+a short window (the flight inserted 8 s ahead of itself, lost at its first row); the real window's whole flight is
+`test_post_branches`. The full suite waits: B5's campaign is running (a free generation) beside another session's tests.
+
+**Proposals.**
+
+- **P32. The windows of a round share their flights**: A, D and B are built from the same real windows that the real
+  windows of the round are drawn from, so a round of 4N windows covers about N flights. D100 does not say whether each
+  kind is a draw of its own. **The user, 2026-10-05: they share flights, as built.**
+- **P33. A shortfall does not stop a round** (a kind with fewer windows than its count: the counts then differ from
+  D100's equal counts); the record shows it.
+- **P34. `rounds` is a setting of the campaign**: a campaign cannot be extended by more rounds after it ends.
+- **P35. The groups at the formal size** (the reviewer's estimate: 5–9 MB a group, several GB a batch's file): read the
+  profile's `groups_bytes` first; then, if needed, drop the uninformative groups inside `branch_round` and store each
+  first sentence once.
+- **P36. The data term reads every train sentence of the base's selection into memory** (as stage B's training): the
+  profile measures it.
+
+## 17 C11 parts 1–2; the order of `notes/stage_c.md` on stage B's round (2026-10-05)
+
+| Step | Commit | What |
+|---|---|---|
+| C11 parts 1–2 | `1945e19c` | `experiments/post_training_export.py` (the windows of a campaign's rounds flown with fixed numbers: the commanded flight's head from stage A, the traffic on its records, window B's moved observed rows, each round's sentence with the window's end), `post/training_files.py` (`aeroviz-training-window-index-v1` / `-sample-v1`, `index_post_v1.json`), `aeroviz_backend/autopilot_segment/window.py` (`POST /autopilot/window-segment`: window B from its moved start, a window ended at a loss stopped there unjudged). Reviewed three times (window B's moved rows written into the set; the lost window's live segment cut at the loss) |
+| Stage B's round, steps 1–3 | `6d5f2cc7`, merged into the branch | `dev-two-tier-v4-prior` (89845fa6 and later) and `dev-two-tier` merged; PRIOR_INTERFACE takes prior §7's new names (`readable_identity`, `validation_claim`, `holds_claim`, `require_selection_of`, `left_out`, `side`, `SIDES`, `REASONS`, `CELL`), each checked to exist (a new test, the reviewer's). No other change was needed: stage C takes the format names by import, calls no `kept`, reads its data term through `ArtefactSource` and takes a window ended at a loss from `said`/`states` (D118 item 6). Reviewed, no defect |
+
+The user's decision of 2026-10-05: stage A's and stage B's Training export is listed in vocabulary §6 and prior §7, and
+stage C imports exactly those names (`tests/test_architecture.py` TRAINING_EXPORT_NAMES): stage A's
+`training_export` (`FORMATS`, `candidate_hae_minus_msl_m`, `candidates_block`, `events`, `split_flights`,
+`vocabulary_block`), `training_flights` (`crossing_payload`, `last_state_cycle`), `training_attitude`
+(`attitude_payload`, `executor_attitude`), and stage B's `prior_training_export` `procedure_block`. The rows of §6 and §7
+are the designer's to write (requests file).
+
+Tests: stage C's files, the architecture test and the backend's window and prior segments on the merged branch, 136
+passed. The full suite waits for B5 (outline §5 rule 13). Step 6 waits for B12.
+
+**Proposals.**
+
+- **P37. The speaker's per-row records are not in a window set** (the probability of "go-around", the blocked words):
+  stage B's loop gives them only for a flight the executor ended (`generated`). If the view needs them for windows ended
+  at a loss, stage B's loop would give them for an ended flight too.
+- **P38. A window set's `procedure` block is stage B's `procedure_block`**; the three copies of the set-file helpers
+  (stages A, B, C) could become one module with the names as arguments (a follow-up, not built).
+- **P39. The temperature (D121)**: stage C's loop draws at temperature 1, as stage B's runs; no other value is proposed.

@@ -5,7 +5,7 @@ names a public interface must give, and the questions that only the user can dec
 it is rewritten in full each time, never appended to, and an item leaves when it is done. The evidence and the commits
 are in the implementation log (`readouts/2026-10-05_stage_c_implementation_log.md`, cited by §).
 
-State of 2026-10-05. Branch `dev-two-tier-v4-post` at `2c60de9c`: C0–C7 and C9 built and reviewed; D112–D117 followed.
+State of 2026-10-05. Branch `dev-two-tier-v4-post` at `1945e19c` + the merge of `6d5f2cc7`: C0–C7 and C9 built and reviewed, the code of C10, C8 and C11's export and live segment too; D112–D117 and stage B's round (D111, D118–D122) followed.
 
 ## 1 Questions for the user
 
@@ -14,7 +14,10 @@ State of 2026-10-05. Branch `dev-two-tier-v4-post` at `2c60de9c`: C0–C7 and C9
 2. **The readings of C6, C9 and D114** (log §15: P26, P27, P29, P30). Each is built as written. None changes a result
    the user has seen.
 
-## 2 For the design of C10 (log §15, P31)
+## 2 For the design of C10 (log §15, P31; log §16)
+
+- **The windows of a round share their flights** (the user, 2026-10-05, P32): A, D and B are built from the round's real
+  windows, as `post_train` does; the design text (§2 item 4, D100) does not say it yet.
 
 - **The rounds feed the loss branch point by branch point.** A round's groups are large: the reviewer's estimate is
   several MB a group, tens of GB for a round held at once.
@@ -23,6 +26,16 @@ State of 2026-10-05. Branch `dev-two-tier-v4-post` at `2c60de9c`: C0–C7 and C9
 - **A batch commands each flight once.** So a real window and its A, B or D go to different batches; `start_loop` maps
   each window's move.
 
-## 3 The plan
+## 3 For the design text
 
-C8 and C10 wait for B5's base and Claude's check of stage B. C11 and C12 come after C10.
+- **Vocabulary §6 and prior §7: a row for the Training export** (the user, 2026-10-05). Stage C imports stage A's
+  `training_export` (`FORMATS`, `candidate_hae_minus_msl_m`, `candidates_block`, `events`, `split_flights`,
+  `vocabulary_block`), `training_flights` (`crossing_payload`, `last_state_cycle`), `training_attitude`
+  (`attitude_payload`, `executor_attitude`) and stage B's `prior_training_export` `procedure_block` — the names
+  `tests/test_architecture.py` TRAINING_EXPORT_NAMES lists.
+- **P37 (log §17)**: a window set carries no speaker's per-row records; stage B's loop gives them only for a flight the
+  executor ended.
+
+## 4 The plan
+
+C11's code next (the user's order of 2026-10-05). The formal C8 (`post_profile`) and C10 (`post_train`) wait for B5's base and Claude's check of stage B, C10 also for the user's criteria; C12 after C10.
