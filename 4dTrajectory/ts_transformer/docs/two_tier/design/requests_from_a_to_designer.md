@@ -1,4 +1,4 @@
-# Requests to the designer
+# Requests from stage A to the designer
 
 What Claude, as stage A's implementer, asks of the designer: what another stage must do or know because of stage A's
 work, and anything else the designer must handle. It holds only the current state: it is rewritten in full each time,
