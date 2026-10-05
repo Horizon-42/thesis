@@ -1,4 +1,4 @@
-# Stage A: implementation log (vocabulary document §0.3, §0.4, §12.1 A18–A37, §12.2)
+# Stage A: implementation log (vocabulary document §0.3, §0.4, §12.1 A0–A43, §12.2)
 
 Moved verbatim from `design/vocabulary.md` on 2026-10-05 (branch `docs-vocabulary-slim`): the design document keeps
 the rules, and this file keeps the state, the commits, the milestone specifications and the checks of stage A.
@@ -29,6 +29,10 @@ design document.
 | A39 (D109) | Done 2026-10-05 on `dev-two-tier-v4-a39` (A37's tip `89729d66` + dev-two-tier `9e44a687`, merge `0126f7ff`; beside A38's branch, §0.4): **`658e4717`**, reviewed twice. Backend: `AutopilotSegmentBackend(*, splits, airports_root)` — the splits from whoever builds the service, some of the artefact's; `set_flown` and each request refuse another split before any check runs; the warm-up opens only the permitted splits a set holds flights of; `stage_a_service` the one place stage A's train and select are written (the server, `check_live`). Frontend: `parseTrainingSample(raw, splits)`, `fetchTrainingSample(…, splits)`, `TRAINING_SET_SPLITS` (mirror of `artefact.SPLITS`); the panel, `checkTrainingSet` and `scripts/check_publication.ts` give stage A's `TRAINING_SPLITS` (the script's one-argument call was the first review's finding). Tests: stage A's services, panel and publication check refuse a val flight; a caller that permits val opens a val flight and flies it live within `STATE_BOUND_M` of the set's states; A23's sets and fixtures byte for byte the same. Backend + export tests 150, vitest 693, both tsc configs pass. No set exported or rebuilt. Stage B's part is prior B10 |
 | A40 (D111) | Done 2026-10-05 on `dev-two-tier-v4-a40` (from A38's tip `98c5e010`): **`b2553aac`**, reviewed twice. `instructions/faults.py`: `track_faults(signals)` (a jump: a 2 s step over 3× the median of up to 5 steps each side, never itself, fewer at the ends; a held position: under a third of it; a reversal: a turn over 120° between two consecutive moves; refused for a track under three rows or a non-finite position), `faulty_flights(artefact, split)` keyed by the place in the split's signals. On A34's artefact at Δ = 4 s: train 498 of 40,530 closed-loop sentences marked (469 landed), select 177 of 6,199 (157), most held positions; 11/14 and 5/6 of the dynamics failures. Stage B's part is B11 (`design/requests_from_a_to_designer.md`) |
 | Merge (the user, 2026-10-05) | `dev-two-tier-v4` fast-forwarded `58fd8a2b` → `b2553aac` (A37, A38, A40) and `dev-two-tier-v4-a39` merged into it: **`ed2530ae`** (clean; A39 and dev-two-tier `9e44a687`'s design). The full suite on the merged tree passes (1578 + 1012 + 161, 1 skipped), both tsc configs and vitest (693) pass |
+| A41 (D85) | Done on `dev-two-tier-v4-a41` (`dev-two-tier` `1d24e285` merged in): `706aa2bd`, reviewed; `instruction_figures` draws select pages, `executor_turns --split` takes `READ_SPLITS`, both tested; the A34 report's §6 without val numbers; the two runners' test files pass (the full suite not run: the session's permission check refused it). Merged (the user, 2026-10-05): `dev-two-tier-v4` fast-forwarded to `706aa2bd`, `dev-two-tier` merge `362234ee` |
+| Superseded artefacts | The user's go (2026-10-05) to delete `instruction_language/v11_20261004`, `executor/v16_20261004` and `closed_loop_v11_20261004` (5 airports, and their `index_v4.json` entries): each target looked at, nothing still refers to them; **deleted 2026-10-05** by the user (Claude's script; the session's permission check had refused Claude's delete): 2.3 GB + 4.4 GB + 5 × ~7 MB, each `index_v4.json` lists only `closed_loop_v12_20261005`; the publication check after it: 5 airports, 1 Training set each, readable, 0 errors |
+| A42 (stage B's request, `requests_from_b_to_designer.md` §2) | Done 2026-10-05, by Claude at the user's word: `06b8fde1` on `dev-two-tier-v4-a42` (`dev-two-tier` `62c35e30` inside) — `tests/support.py` `labelled_instruction_artefact` records `runway_ends_from` in the synthetic `signals.json`, the shape of `instruction_signals.runway_ends_from()` (`training_export.candidate_hae_minus_msl_m` reads it); 260 tests of the files that use the fixture and of the backend passed, one independent review with no finding, A23's fixtures byte for byte the same; `dev-two-tier-v4` fast-forwarded to `06b8fde1`. The comment on stage B's hook (`backend.py`, `index_prior_v1.json`) is on B's branch only: stage B changes it (`notes/stage_b.md`). The worktrees and branches `dev-two-tier-v4-a38`…`-a42`, `docs-prior-slim` and `docs-vocabulary-slim` removed (merged, clean); `two-tier-v4-a32` and `two-tier-v4-a37` stay: their ignored scratch (`smoke_v4/data/a33` 603 MB, `a34`, `a37`, `a38`) is the evidence the A33, A34, A37 and A38 reports cite |
+| A43 (D73) | Done 2026-10-05 by Claude at the user's word: `60bbc901` on `dev-two-tier-v4-a43`, `dev-two-tier-v4` fast-forwarded to it, the worktree and branch removed. The backend opens a spec with `replay.open_spec` and runs no check at its start; each answer is refused by name (`ExecutorDiffers`) past `STATE_BOUND_M` from the stored states or, flown to its outcome, with another outcome than stored (`fly.refuse_past_bound`, `apart_from_stored`); each set and split opened under its own lock, off the request lock, its flights drawn once for all Δ; one read of a split's signals for all sets of an artefact in a warm-up (`backend.Opened`; `draw_flights` / `open_flights` take `signals`); `check_live` runs the three checks itself and records a refusal as a difference; the page says "the backend is opening the set" after 2 s. One independent review (no deadlock, no unsafe shared state, stage B's calls unchanged; its points fixed: the outcome check, the per-set lock, the warm-up's signals released before stage B's warm-up, tests that could not fail). Tests: backend 30, vitest 695, both tsc; full suite ts 1580 + 1 skipped, modeling + backend 1018, aeroviz-4d python 161. Warm-up of the five sets of `closed_loop_v12_20261005` (one thread, a shared machine): before 149.6 s (KMSY 91.8 s with the checks, the others 14.1–14.6 s), after 78.5–82.0 s (12.1–22.8 s a set); `check_live` by sample on the new code (1 flight an airport, seed 4242): 1,362 segments, 0 differing |
 
 ## 2 Plan (was §0.4)
 
@@ -56,7 +60,33 @@ design document.
 3. D86 (the export reads no formal replay row, so it can give val flights) goes into A32's code.
 4. The replay of the val days waits for the user.
 
-## 3 Milestones A18–A37 (was §12.1)
+## 3 Milestones A0–A43 (was §12.1)
+
+**A0–A17.** What each built (moved from the design document's §12.1, 2026-10-05). The module and the test that carry
+each decision of A0–A14 are in the table of Claude's check (`readouts/2026-10-04_stage_a_check.zh.md` §2), those of
+A15–A17 in their reports.
+
+| Milestone | What it built | Decisions |
+|---|---|---|
+| A0 | The archive of the modules of the old vocabulary that stage A does not rewrite (`archive/two_tier_v3_2026_10/`, with a `README.md`: what moved, why, which stage brings each part back; the backend tests that use the two-tier code fail until A23) | D20 |
+| A1 | The vocabulary: five columns, the runway/G table, heading classes relative to the course of R, the altitude grid, grammar rules 1–5 as one function for the labeller and the speaker | D1, D8, D10, D12, D14, D22 |
+| A2 | The labeller: heading words from row 0 to the end, the go-around reading, the level test without the grid, "unspecified" from the capture row, the Δ grid; candidates without TCH, glidepath angle or LPV DA refused | D4, D11, D18, D19, D25 |
+| A3 | The artefact and the identities: the labeller conformance (§7.2 #2), no byte checks of the arrival manifests, the sentences schema, the spec measurement with its rounding candidates and the level rounding errors | D15, D21 |
+| A4 | The executor without the laws of §5.7; heading words converted with the course of R when heard; the go-around; the words heard at each Δ row; the same in `autopilot/single.py` | D2, D3, D9, D10, D27 |
+| A5 | The judge: the outcomes of §5.8 in their order, no event while G is true, the time limit + 900 s for each go-around, the DA check | D3, D33 |
+| A6 | The executor spec (`ts-executor-spec-v7`) and its conformance; `executor_replay --row-interval-s` | D21 |
+| A7 | The close of the first part: the full suite, the report `readouts/2026-10-03_stage_a_report.zh.md` | — |
+| A8 | Each approach read separately; rule 6; "go-around" changes no target; the go-around angle | D26–D28 |
+| A9 | The closed-loop reading (`autopilot/closed_loop.py`, runner `instruction_closed_loop`) and its conformance; the replay of closed-loop sentences; the DA check with the bounds of D38; the readings of D34 | D32–D34, D38 |
+| A10 | The observed words said at the place; the flight to the end of the executor or the time limit | D42 |
+| A11 | Speed words in steps; the executor at a_max | D43 |
+| A12 | Each word on the nearest Δ row; a heading word in the frame where it is heard; no correction past the end of the observed path | D44–D46 |
+| A13 | The turn measurement (`experiments/executor_turns.py`, R51); the user kept the turn law | D47 |
+| A14 | A tie at the later row in the closed loop too | D45 |
+| A15 | A heading word of the class in force after a change of R; the flown states on the 2 s rows; the Δ grid in the labeller conformance; the architecture test that the executor's laws do not import the runway data | D48, D49, D51 |
+| A16 | An overshoot corrected in its row | D53 |
+| A17 | The smoke sample random for each airport and split | D55 |
+
 
 **A18. The chosen spec (D56).** Done: `experiments/instruction_spec.py` `--candidate NAME` (required when the runner
 measures) takes the descent nominals and edges and the climb nominal of that row of `rounding_candidates` (`fitted`,
@@ -451,6 +481,49 @@ tip of the stage A line that stage B merges (§0.4 rule of the branches).
   change at the vocabulary's a_max, a level-off), a jump, a held position and a reversal are each marked with their
   reason and row; at the rule's edges (a step of exactly 3 times) the definition decides as written. On A34's artefact
   (a check, not a test): the counts of D111 at Δ = 4 s.
+
+**A41. The val days read once (D85; Claude's check of A32–A40, `readouts/2026-10-05_stage_a_check_a32_a40.zh.md` §2
+items 1 and 2).** Code, tests and one report only; no artefact is built again. On its own branch from
+`dev-two-tier-v4`, after `dev-two-tier` is merged into it (outline §5 rule 1).
+
+- `experiments/instruction_figures.py` draws its pages from the select days, not from val; `experiments/executor_turns.py`
+  `--split` takes `READ_SPLITS` only (train or select). The validation days are read in the stage's one validation
+  readout (D85), which names its own runner.
+- The A34 report (`readouts/2026-10-05_stage_a_a34_report.zh.md`, the section on A37's check on the artefact): remove
+  the numbers of the val days (the count of differing val sentences, the turn of the val flight, the val sample check)
+  and say "val: not shown (D85)". The scratch files that hold them stay where they are and are not linked.
+- The index lines of the runners say select: the `instruction_figures` line of `4dTrajectory/ts_transformer/CLAUDE.md`
+  and its entry in `docs/reference/runners.md`.
+- Tests: each of the two runners refuses a val split by name. A later check of a code change runs on train and select.
+
+**A43. The backend runs no conformance check at its start (D73; the user, 2026-10-05;
+`notes/report_to_designer_backend_checks.md`).** Code, tests and docs only; no artefact is built again. On its own
+branch from `dev-two-tier-v4`, after A42.
+
+- `aeroviz_backend/autopilot_segment/backend.py`: `executor_for` opens the spec with `replay.open_spec` (no check of the
+  code; the check that the spec belongs to the set's artefact and spec sha stays); `closed_loop.require_conforming_closed_loop`
+  is no longer called there, and the `_failed` record of failed checks goes. `warm_up` opens the sets as before.
+- One definition of the refusal, in `autopilot_segment/fly.py` beside `apart_from_stored`: an answer whose live flight is
+  farther from the stored states than `STATE_BOUND_M`, horizontally or vertically, is refused by name, with both
+  distances, the set and the reason that is meant (the executor code does not fly the set as it was exported: export the
+  set again, or restore the code). The backend's `fly` and stage B's hook (`aeroviz_backend/autopilot_segment/prior.py`,
+  which calls `apart_from_stored` as well) both use it. `check_live` runs the three checks itself before its work, as a
+  runner does (`closed_loop.require_conforming_closed_loop`), and keeps its comparison.
+- The warm-up: the signals of one split are loaded one time for all the sets of one artefact (the five sets read
+  `v12_20261005`: 18 s of the 150 s measured); a request never waits for the warm-up of the sets that it does not need
+  (the warm-up opens a set under that set's own lock; a request for a set that is not open yet opens it itself). Stage
+  B's hook calls `_lock`, `_claim`, `_latest`, `_require_split`, `executor_for` and `set_flown` of the backend: keep their
+  names and meanings, or say what changes, so that stage B follows after the merge.
+- The page (`aeroviz-4d/src/data/trainingAutopilot.ts`, `TrainingAutopilotStatus.tsx`): when an answer takes more than
+  2 s, the status says that the backend is opening the set; a refusal shows as an error with its reason. No timeout is
+  added.
+- The docs: the module docstring of `backend.py`, `docs/reference/contracts.md` C33, and the index line of
+  `4dTrajectory/ts_transformer/CLAUDE.md` ("the backend at its start").
+- Tests: the backend's `warm_up` and `fly` call none of the three checks (a spy on `replay.open_executor`); a flight
+  flown by an executor whose law is changed by more than the bound is refused by name on its first request; a request for
+  a set that the warm-up has not opened yet is answered without waiting for the other sets; the page's status message.
+  The existing backend tests, A23's fixtures and stage B's hook tests stay.
+- The log gives the warm-up seconds of each set of `closed_loop_v12_20261005` before and after.
 
 ## 4 Claude's check of stage A (was §12.2)
 
