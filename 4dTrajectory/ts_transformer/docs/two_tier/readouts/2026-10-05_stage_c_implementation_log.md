@@ -22,6 +22,7 @@ Branch `dev-two-tier-v4-post`, worktree `.claude/worktrees/two-tier-v4-post`, ma
 | The user's choices from C1's census | Decided: real : A : D = 1 : 1 : 1 in a round (§7). Open: the shifts of A and D (§4 P7) |
 | C5, C7 | Done on synthetic artefacts and models, `3171da69` (reviewed), after B9 and `dev-two-tier` were merged (`52224585`, `68407e13`); §9 |
 | C4, C6 | Wait for B10 (prior D105, D106: each aircraft's landings, the shared step of the closed loop) and A38 (vocabulary D97: the copy of a loop) on this branch |
+| D105: the landings of a window's scene | Done, `00e81c88` (reviewed), after `dev-two-tier` `202b38d0` was merged (`65b4d782` merged as well); §10 |
 | C8–C12 | Wait for B5's base, Claude's check of stage B, the moved start (C9) and the user's criteria (D7) |
 
 ## 2 C0–C3 (2026-10-05)
@@ -210,3 +211,27 @@ smoke free generation and a test backend were running; no formal build).
 
 **Requests to stage B** (through the user; in B10 as prior D105, D106): each aircraft's landings in `LoopRows`; the
 closed loop's step as one module under `experiments/` with ``extra``, caller masks, an end by the caller and a copy.
+
+## 10 The order of `notes/stage_c.md` (2026-10-05): steps 1–2
+
+1. `dev-two-tier` merged into this branch (up to `65b4d782`, `202b38d0` included).
+2. **D105** — `00e81c88`, reviewed by an independent reviewer (no bug; its two test gaps added). `post/landings.py`
+   `window_landings(window, roster, days)`: a real window gives the roster's index itself; window A adds the inserted
+   aircraft's landing at its source's roster landing plus the window's shift, under its own key (`…+inserted`), the
+   source's landing kept; window D moves the leader's roster landing by its shift; a landing a shift puts on a sealed
+   test day is left out and counted in `sealed`; the commanded aircraft's own landing stays in the index (the loop's row
+   leaves it out by its key). `Landing` added to `PRIOR_INTERFACE` (prior §7 item 2). Tests: `test_post_landings.py`
+   (6) and `test_architecture.py`, 39 passed; the full ts suite on 8 workers at `00e81c88`: 1,718 passed, 1 skipped,
+   8 min 23 s (stage B's campaign smoke was running on the GPU; no formal build).
+
+Steps 3–6 (the motion of prior §7 item 2, B10's names, C7's refusal of training mode, C4 through the shared step) wait
+for B10 on `dev-two-tier-v4-prior` (at `5313b6cd` it is not there).
+
+**Proposals.**
+
+- **P17. A shifted landing on a day outside the day split** (no data that day) is counted: only a sealed test day is
+  left out (D105). `roster_landings` refuses a landing on an unlisted day; a shift of at most ±180 s (A) or ±120 s (D)
+  from a flight of a listed day can reach an unlisted day only at the edge of the data. B10's index decides it when it
+  refuses test days itself.
+- **P18. The landing that A inserts** is its source's roster landing shifted (on the source's runway), not the signals'
+  landing time; the roster's time is the one a real window counts.
