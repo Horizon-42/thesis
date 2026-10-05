@@ -75,7 +75,7 @@ The commits, dates, branches, test counts and measurements of every milestone ar
 | B9 (D96) | Done, reviewed twice: `1204fd8f`, `6a68ac67`, `0b050797`, `bb86a39f`, `5313b6cd`; full suite passed; the names for §7's "Code" column in the log §1 |
 | D90 / A37 | `Loop.executor` stays public (D90 narrowed): the gap is closed; stage B follows the changed A37 after its merge (the log §1) |
 | Claude's check of stage B | Done at `5313b6cd` (`readouts/2026-10-05_stage_b_check.zh.md`): no leak into the inputs; the corrections are B10 (D105–D108) |
-| B10 | Planned (§12): before B5's formal campaign |
+| B10 | Done (`e4e7ba42`, reviewed twice; full suite passed); D109 waits for A39, the loop's copy for A38; the names for §7 in the log §1 |
 | B11 (D111) | Planned (§12): after vocabulary A40, before B5's formal campaign |
 | B5, B7 | Wait for B10, B11, A34's artefact and Claude's check of stage A (§0.4) |
 
