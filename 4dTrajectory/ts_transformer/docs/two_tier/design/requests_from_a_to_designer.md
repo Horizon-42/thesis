@@ -27,20 +27,13 @@ and the base does not learn from it; nothing is rebuilt. Prior D111 and mileston
     that do not land).
 - **Size on A34's artefact** (Δ = 4 s, closed-loop sentences): train 498 of 40,530 marked, 469 of them landed;
   select 177 of 6,199, 157 landed. Most are held positions. With `landed`, train keeps 39,154 instead of 39,623.
-- **When:** after A40 (`b2553aac`, branch `dev-two-tier-v4-a40`, done and reviewed) is merged into the stage A line
-  that stage B merges, and before B5's formal campaign.
+- **When:** now — A40 (`b2553aac`) is on `dev-two-tier-v4` (`ed2530ae`) — and before B5's formal campaign.
 
-## 2 Stage B to follow when stage A's branches are merged (the user merges)
+## 2 Stage B to follow: stage A's line is merged
 
-None of these is on `dev-two-tier-v4` yet (it is at `58fd8a2b`). They wait for the user's merge:
-
-| Branch | Commits | Contents |
-|---|---|---|
-| `dev-two-tier-v4-a38` | `e7e01461`, `b41b24a5`, `89729d66` (A37), `b6ee4958`, `98c5e010` (A38) | A37 and A38 |
-| `dev-two-tier-v4-a39` | A37's three, the merge `0126f7ff` of dev-two-tier `9e44a687`, `658e4717` (A39) | A37 and A39 |
-| `dev-two-tier-v4-a40` | A38's branch + `b2553aac` (A40) | A37, A38 and A40 |
-
-What stage B's code must follow after the merge:
+`dev-two-tier-v4` is at `ed2530ae` (the user merged it on 2026-10-05). It holds A37 (`e7e01461`, `b41b24a5`,
+`89729d66`), A38 (`b6ee4958`, `98c5e010`), A39 (`658e4717`) and A40 (`b2553aac`). Stage B merges it into
+`dev-two-tier-v4-prior` and follows:
 
 - **A37 (D90 narrowed, D85):**
   - `Loop.timed_out()` is gone. Read why a flight ended from the judge: `loop.outcome(f).outcome == judge.TIMEOUT`.
