@@ -33,6 +33,10 @@ def test_the_fewest_parameters_within_twice_the_seed_scale_of_the_best():
     assert choice["within"] == ["C"] and choice["chosen"] == "C"
     # B within as well: the fewest parameters
     assert choose_configuration(scores(**{**base, "B_full_s1337": 1.52}), SEEDS)["chosen"] == "B"
+    # A and D have one shape: of the two, the lower score (the user, 2026-10-05)
+    tie = dict(A_full_s1337=1.53, A_full_s2024=1.55, B_full_s1337=1.60, C_full_s1337=1.70, D_full_s1337=1.50)
+    assert choose_configuration(scores(**tie), SEEDS)["chosen"] == "D"
+    assert choose_configuration(scores(**{**tie, "D_full_s1337": 1.54}), SEEDS)["chosen"] == "A"
 
 
 def test_constants_only_when_better_than_full_by_more_than_twice_the_seed_scale():
@@ -41,26 +45,39 @@ def test_constants_only_when_better_than_full_by_more_than_twice_the_seed_scale(
     assert choose_variant(scores(**base, B_constants_s1337=1.43), "B", SEEDS)["chosen"] == "constants"  # by 0.05
 
 
-def write_fold(run: Path, airport: str, loss: float, parameters: int, *, held_out: str | None = None,
-               identity: str = "artefact") -> None:
+def write_fold(run: Path, airport: str, loss: float, configuration: str = "A", variant: str = "full",
+               seed: int = SEEDS[0], *, held_out: str | None = None, rule: str = "landed", **changed) -> None:
+    """A fold's files as `prior_train` writes them, of its arm (``changed``: values of its shape or training)."""
+    values = {**select_module.configuration_values(configuration), **changed}
     run.mkdir(parents=True)
-    (run / "config.json").write_text(json.dumps({"run": {"airports": list(AIRPORTS), "held_out": held_out or airport},
-                                                 "sample": None, "parameters": parameters, "identity": identity}))
+    (run / "config.json").write_text(json.dumps({
+        "run": {"airports": list(AIRPORTS), "held_out": held_out or airport}, "sample": None,
+        "parameters": PARAMETERS[configuration],
+        "model_config": {**{k: values[k] for k in select_module.SHAPE_FIELDS}, "variant": variant},
+        "train_config": {**{k: values[k] for k in select_module.TRAIN_FIELDS}, "seed": seed},
+        "identity": {"artefact": "fixture", "selection": {"rule": rule}}}))
     (run / "held_out.json").write_text(json.dumps({"airport": held_out or airport, "loss_per_step": loss}))
 
 
-def test_a_fold_is_read_only_complete_and_as_the_fold_it_is_named(tmp_path):
+def test_a_fold_is_read_only_complete_and_as_the_fold_of_its_arm(tmp_path):
     for k, airport in enumerate(AIRPORTS):
-        write_fold(tmp_path / "A_full_s1337" / airport, airport, 1.0 + k, 2_000_000)
-    assert select_module.arm_score(tmp_path, "A_full_s1337", AIRPORTS)["score"] == pytest.approx(3.0)
+        write_fold(tmp_path / "A_full_s1337" / airport, airport, 1.0 + k)
+    assert select_module.arm_score(tmp_path, "A", "full", 1337, AIRPORTS)["score"] == pytest.approx(3.0)
     (tmp_path / "A_full_s1337" / "KEEE" / "held_out.json").unlink()
     with pytest.raises(ValueError, match="not complete"):
-        select_module.arm_score(tmp_path, "A_full_s1337", AIRPORTS)
-    write_fold(tmp_path / "B_full_s1337" / "KAAA", "KAAA", 1.0, 1, held_out="KBBB")
-    with pytest.raises(ValueError, match="a fold of KBBB, not KAAA"):
-        select_module.arm_score(tmp_path, "B_full_s1337", ["KAAA"])
+        select_module.arm_score(tmp_path, "A", "full", 1337, AIRPORTS)
     with pytest.raises(ValueError, match="a formal run in a smoke campaign"):
-        select_module.arm_score(tmp_path, "A_full_s1337", AIRPORTS[:4], smoke=True)
+        select_module.arm_score(tmp_path, "A", "full", 1337, AIRPORTS[:4], smoke=True)
+    write_fold(tmp_path / "B_full_s1337" / "KAAA", "KAAA", 1.0, "B", held_out="KBBB")
+    with pytest.raises(ValueError, match="a fold of KBBB, not KAAA"):
+        select_module.arm_score(tmp_path, "B", "full", 1337, ["KAAA"])
+    # a fold of another arm: another variant, seed, shape or training value, or the selection `all`
+    for name, kwargs in {"variant": {"variant": "constants"}, "seed": {"seed": 2024}, "shape": {"d_model": 128},
+                         "weight decay": {"weight_decay": 0.01}, "selection": {"rule": "all"}}.items():
+        run = tmp_path / name / "D_full_s1337" / "KAAA"
+        write_fold(run, "KAAA", 1.0, "D", **kwargs)
+        with pytest.raises(ValueError, match="not a fold of D_full_s1337"):
+            select_module.arm_score(tmp_path / name, "D", "full", 1337, ["KAAA"])
 
 
 def record(tmp_path, smoke=None):
@@ -96,8 +113,9 @@ class StandIn:
     def __init__(self, fail_at: str | None = None):
         self.ran, self.fail_at = [], fail_at
 
-    def __call__(self, step, log):
+    def __call__(self, step, log, started):
         self.ran.append(step.name)
+        started(4242)
         log.write_text("stand-in")
         if step.name == self.fail_at:
             step.out.mkdir(parents=True)           # a kill: the directory without its last file
@@ -106,10 +124,12 @@ class StandIn:
             return select_module.main(list(step.argv))
         if step.runner == "prior_train" and step.name.startswith("base/"):
             step.out.mkdir(parents=True)
-            step.done.write_text("checkpoint")
+            (step.out / "checkpoint.pt").write_text("checkpoint")
+            step.done.write_text("{}")
         elif step.runner == "prior_train":
             arm, airport = step.name.split("/")
-            write_fold(step.out, airport, self.LOSS[arm], PARAMETERS[arm[0]])
+            configuration, variant, seed = arm.split("_")
+            write_fold(step.out, airport, self.LOSS[arm], configuration, variant, int(seed[1:]))
         else:
             step.out.mkdir(parents=True)
             step.done.write_text("{}")
@@ -123,10 +143,11 @@ def test_a_campaign_runs_every_step_once_makes_its_choices_and_resumes_after_a_k
     rec = campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, git)
     killed = StandIn(fail_at="B_full_s1337/KCCC")
     with pytest.raises(SystemExit, match="B_full_s1337/KCCC failed"):
-        campaign_module.run_campaign(campaign, rec, "cpu", killed, lambda line: None)
+        campaign_module.run_campaign(campaign, rec, "cpu", killed, lambda line: None, lambda: git)
     rec = campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, git)
     runner = StandIn()
-    campaign_module.run_campaign(campaign, rec, "cpu", runner, lambda line: None)
+    campaign_module.run_campaign(campaign, rec, "cpu", runner, lambda line: None, lambda: git)
+    assert json.loads((campaign / "campaign.json").read_text())["running"] is None
     assert runner.ran[0] == "B_full_s1337/KCCC"                         # the killed step again, first
     assert not set(runner.ran) & set(killed.ran[:-1])                  # nothing done is run again
     stored = json.loads((campaign / "campaign.json").read_text())
@@ -172,3 +193,21 @@ def test_a_smoke_campaign_tells_every_runner_it_is_a_smoke_and_a_formal_one_none
             assert "--smoke" in step.argv
     assert all(s.argv[s.argv.index("--per-airport") + 1] == str(campaign_module.SMOKE_FLIGHTS)
                for s in smoke if s.runner == "prior_free_generation")
+
+
+def test_a_campaign_stops_when_its_tree_moves_and_refuses_a_resume_while_its_step_runs(tmp_path, monkeypatch):
+    monkeypatch.setattr(campaign_module, "load_candidates", lambda instructions: dict.fromkeys(AIRPORTS))
+    campaign = tmp_path / "campaign"
+    git = {"head": "a" * 40, "dirty": False}
+    rec = campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, git)
+    runner = StandIn()
+    for moved in ({"head": "b" * 40, "dirty": False}, {"head": "a" * 40, "dirty": True}):
+        with pytest.raises(SystemExit, match="the tree moved"):
+            campaign_module.run_campaign(campaign, rec, "cpu", runner, lambda line: None, lambda: moved)
+    assert runner.ran == []                                            # nothing ran on another tree
+    stored = json.loads((campaign / "campaign.json").read_text())
+    stored["running"] = {"step": "A_full_s1337/KAAA", "pid": 4242, "utc": "x"}
+    (campaign / "campaign.json").write_text(json.dumps(stored))
+    monkeypatch.setattr(campaign_module, "alive_step", lambda running: True)
+    with pytest.raises(SystemExit, match="still runs as PID 4242"):
+        campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, git)

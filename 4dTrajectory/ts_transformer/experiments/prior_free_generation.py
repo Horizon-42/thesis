@@ -31,7 +31,7 @@ from ts_transformer.instructions.artefact import (
     ClosedLoopSentence, closed_loop_sentences, load_candidates, load_day_split, load_spec, signals_flights,
 )
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, load_checkpoint
+from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, claim_validation_read, load_checkpoint
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, ProcedureMasks, airport_finals, procedure_digests
 from ts_transformer.prior.selection import kept
 from ts_transformer.prior.source import airport_landings, artefact_identity
@@ -308,6 +308,10 @@ def main(argv: list[str] | None = None) -> int:
     model = checkpoint.model.to(device)
     finals = {code: airport_finals(geometry) for code, geometry in geometries.items()}
     spec = load_spec(instructions)
+    if args.split == "val":                     # the base's one validation readout (D85): never a smoke, read once
+        if args.smoke or checkpoint.run["held_out"] is not None or checkpoint.run["sample"] is not None:
+            parser.error("the validation days are read only by the base's formal readout (D85)")
+        claim_validation_read(prior_dir, "prior_free_generation", out)
     sentences = closed_loop_sentences(instructions, args.split, interval_s, spec)
     flights = signals_flights(instructions, args.split)
     # withheld from the model (D82), read for the readout: each flight's stratum (D70) and stored outcome (D74)

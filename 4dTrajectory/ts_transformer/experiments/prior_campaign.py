@@ -37,7 +37,9 @@ recorded in ``campaign.json``, and the step runs again. Each step's output goes 
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
+import signal
 import subprocess
 import sys
 import time
@@ -53,13 +55,10 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state
 CAMPAIGN_SCHEMA = "ts-prior-campaign-v1"
 #: The two seeds of §5 (the second: step 2's seed scale). The values are Claude's (§0.3).
 SEEDS = (1337, 2024)
-#: §5's configurations, as `prior_train`'s flags that differ from configuration A (its defaults, D40; heads 32 wide).
-CONFIGURATION_FLAGS = {
-    "A": (),
-    "B": ("--d-model", "128", "--heads", "4", "--feedforward", "512"),
-    "C": ("--d-model", "256", "--heads", "8", "--feedforward", "1024"),
-    "D": ("--dropout", "0.2", "--weight-decay", "0.05"),
-}
+#: §5's configurations (`prior_select.CONFIGURATIONS`) as `prior_train`'s flags of the same names.
+CONFIGURATION_FLAGS = {name: tuple(item for key, value in values.items()
+                                   for item in (f"--{key.replace('_', '-')}", str(value)))
+                       for name, values in CONFIGURATIONS.items()}
 #: The free generation of a fold at its held-out airport (§5: 200 flights × 2) and of the base on the val days.
 FREE_GENERATION = {"per_airport": 200, "samples": 2, "seed": 1337}
 #: A smoke campaign's free generation: flights of each airport.
@@ -136,13 +135,15 @@ def plan(campaign: Path, record: dict[str, Any], device: str) -> list[Step]:
                       (*common, "--row-interval-s", f"{record['row_interval_s']:g}", "--variant", variant,
                        "--selection", SELECTION, "--seed", str(first), "--device", device,
                        *CONFIGURATION_FLAGS[configuration], *sample, "--out", str(base / "run")),
-                      base / "run", base / "run" / "checkpoint.pt"))
+                      base / "run", base / "run" / "procedure_masks.json"))       # `prior_train`'s last file
+    # the base's one validation readout reads the val days; a smoke never does: it reads the select days (D85)
+    split = "select" if smoke else "val"
     steps.append(Step("base/validation", "prior_validation",
-                      ("--prior", str(base / "run"), *common, "--device", device, *smoke,
+                      ("--prior", str(base / "run"), *common, "--split", split, "--device", device, *smoke,
                        "--out", str(base / "validation")),
                       base / "validation", base / "validation" / "readout.json"))
     steps.append(Step("base/free_generation", "prior_free_generation",
-                      ("--prior", str(base / "run"), *common, "--split", "val",
+                      ("--prior", str(base / "run"), *common, "--split", split,
                        "--per-airport", str(flights), "--samples", str(FREE_GENERATION["samples"]),
                        "--seed", str(FREE_GENERATION["seed"]), "--device", device, *smoke,
                        "--out", str(base / "free_generation")),
@@ -150,17 +151,33 @@ def plan(campaign: Path, record: dict[str, Any], device: str) -> list[Step]:
     return steps
 
 
-def run_step(step: Step, log: Path) -> int:
-    """``python run_ts.py <runner> <argv>`` from the repository, its output into ``log``; its exit code."""
+def run_step(step: Step, log: Path, started: Callable[[int], None]) -> int:
+    """``python run_ts.py <runner> <argv>`` from the repository, its output into ``log``; its exit code. ``started``
+    is told the child's PID; the child is stopped if this process is stopped (it never runs on alone)."""
     with open(log, "w", encoding="utf-8") as stream:
-        return subprocess.run([sys.executable, str(REPO_ROOT / "run_ts.py"), step.runner, *step.argv], cwd=REPO_ROOT,
-                              stdout=stream, stderr=subprocess.STDOUT, check=False).returncode
+        child = subprocess.Popen([sys.executable, str(REPO_ROOT / "run_ts.py"), step.runner, *step.argv], cwd=REPO_ROOT,
+                                 stdout=stream, stderr=subprocess.STDOUT)
+        started(child.pid)
+        try:
+            return child.wait()
+        finally:
+            if child.poll() is None:
+                child.terminate()
+                child.wait()
+
+
+def alive_step(running: dict[str, Any] | None) -> bool:
+    """Whether the child a campaign recorded as running is a live `run_ts.py` process (a killed campaign's child)."""
+    if running is None:
+        return False
+    cmdline = Path(f"/proc/{running['pid']}/cmdline")
+    return cmdline.exists() and b"run_ts.py" in cmdline.read_bytes()
 
 
 def open_campaign(campaign: Path, instructions: Path, executor: Path, interval_s: float, git: dict[str, Any],
                   smoke: int | None = None) -> dict[str, Any]:
     """The campaign's record: written at its start, or read again on a resume and refused unless it is of the same
-    inputs, the same smoke and the same commit."""
+    inputs, the same smoke and the same commit, and no step of it still runs."""
     record = {"instructions": str(instructions), "executor": str(executor), "row_interval_s": interval_s,
               "smoke": None if smoke is None else {"sample": smoke, "flights": SMOKE_FLIGHTS}}
     path = campaign / "campaign.json"
@@ -174,6 +191,9 @@ def open_campaign(campaign: Path, instructions: Path, executor: Path, interval_s
         if stored["git"]["head"] != git["head"]:
             raise SystemExit(f"{campaign}: started at {stored['git']['head'][:12]}, this tree is at "
                              f"{git['head'][:12]}; a campaign runs from one commit")
+        if alive_step(stored["running"]):
+            raise SystemExit(f"{campaign}: its step {stored['running']['step']} still runs as PID "
+                             f"{stored['running']['pid']}; stop it first")
         return stored
     if campaign.exists() and any(campaign.iterdir()):
         raise SystemExit(f"{campaign} exists and is no campaign")
@@ -181,32 +201,49 @@ def open_campaign(campaign: Path, instructions: Path, executor: Path, interval_s
     record = {"schema": CAMPAIGN_SCHEMA, "written_utc": utc_now(), **record, "git": git,
               "airports": sorted(load_candidates(instructions)), "seeds": list(SEEDS), "selection": SELECTION,
               "configurations": {name: list(flags) for name, flags in CONFIGURATION_FLAGS.items()},
-              "free_generation": FREE_GENERATION, "aborted": []}
+              "free_generation": FREE_GENERATION, "aborted": [], "running": None}
     write_json_atomic(path, record)
     return record
 
 
-def run_campaign(campaign: Path, record: dict[str, Any], device: str, runner: Callable[[Step, Path], int],
-                 log: Callable[[str], None]) -> None:
+def run_campaign(campaign: Path, record: dict[str, Any], device: str,
+                 runner: Callable[[Step, Path, Callable[[int], None]], int], log: Callable[[str], None],
+                 tree: Callable[[], dict[str, Any]]) -> None:
     """Every step not yet done, in order, one at a time (module docstring); the plan read again after each step (a
-    choice adds the steps after it). Stops at the first step that fails, naming its log."""
+    choice adds the steps after it). Before each step the tree (``tree``: `git_state`) must still be the campaign's
+    commit, clean unless a smoke. Stops at the first step that fails, naming its log."""
     (campaign / "logs").mkdir(exist_ok=True)
+
+    def save() -> None:
+        write_json_atomic(campaign / "campaign.json", record)
+
     while True:
         steps = plan(campaign, record, device)
         pending = [step for step in steps if not step.done.exists()]
         if not pending:
             break
         step = pending[0]
+        now = tree()
+        if now["head"] != record["git"]["head"] or (now["dirty"] and record["smoke"] is None):
+            raise SystemExit(f"the tree moved from {record['git']['head'][:12]} (now {now['head'][:12]}, dirty "
+                             f"{now['dirty']}) before {step.name}; a campaign runs from one commit on a clean checkout")
         if step.out.exists():                      # left by a crash or a kill: moved aside, recorded, run again
             aside = step.out.with_name(f"{step.out.name}.aborted-{utc_now().replace(':', '')}")
             step.out.rename(aside)
             record["aborted"].append({"step": step.name, "moved_to": str(aside), "utc": utc_now()})
-            write_json_atomic(campaign / "campaign.json", record)
+            save()
             log(f"{step.name}: an unfinished output moved aside to {aside.name}")
         started = time.perf_counter()
         log(f"{step.name}: {step.runner} ({len(steps) - len(pending) + 1} of {len(steps)} planned so far)")
         logfile = campaign / "logs" / f"{step.name.replace('/', '__')}.log"
-        code = runner(step, logfile)
+
+        def running(pid: int, name: str = step.name) -> None:
+            record["running"] = {"step": name, "pid": pid, "utc": utc_now()}
+            save()
+
+        code = runner(step, logfile, running)
+        record["running"] = None
+        save()
         if code != 0 or not step.done.exists():
             raise SystemExit(f"{step.name} failed (exit {code}); its log: {logfile}")
         log(f"{step.name}: done in {time.perf_counter() - started:.0f} s")
@@ -228,8 +265,18 @@ def main(argv: list[str] | None = None) -> int:
     git = git_state()
     if git["dirty"] and args.smoke is None:
         parser.error("the tree has uncommitted changes; a campaign runs from one commit on a clean checkout")
+    # one process for a campaign: a second launch on the directory is refused while this one holds the lock
+    campaign.parent.mkdir(parents=True, exist_ok=True)
+    lock = open(campaign.parent / f".{campaign.name}.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        parser.error(f"{campaign} is run by another process")
+    # a stop (SIGTERM) unwinds through `run_step`, which stops the step's child
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(f"stopped (signal {signum})"))
     record = open_campaign(campaign, instructions, executor, args.row_interval_s, git, args.smoke)
-    run_campaign(campaign, record, args.device, run_step, lambda line: print(f"{utc_now()} {line}", flush=True))
+    run_campaign(campaign, record, args.device, run_step, lambda line: print(f"{utc_now()} {line}", flush=True),
+                 git_state)
     return 0
 
 

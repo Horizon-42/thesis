@@ -297,6 +297,12 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch):
     assert readout["inside"][geometry.code][stratum]["sentences"] == 2
     with pytest.raises(SystemExit):
         runner.main(argv)                                              # never over an existing readout
+    smoke_on_val = [*argv[:-1]]
+    smoke_on_val[smoke_on_val.index("train")] = "val"
+    smoke_on_val[smoke_on_val.index(str(out))] = str(tmp_path / "val")
+    with pytest.raises(SystemExit):                                    # a smoke never reads the val days (D85)
+        runner.main([*smoke_on_val, "--smoke"])
+    assert not list(prior.glob("val_read_*"))
     for airports in (["KZZZ"], [geometry.code, "KZZZ"]):
         with pytest.raises(SystemExit):                                # an airport not the artefact's
             runner.main([*argv[:-3], "--airports", *airports, "--out", str(tmp_path / "unknown"), "--smoke"])

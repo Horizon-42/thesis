@@ -4,8 +4,10 @@ share of the labelled words of every val sentence that the procedure masks block
 sentences inside and outside the selection apart. The free generation of the readout (and its probability of
 "go-around" on the final, D72) is `prior_free_generation --split val`.
 
-The validation days are read once for each stage (D85): the readout goes into a new directory, of the base alone (a
-prior trained on every airport, no held-out airport), from a clean tree unless ``--smoke``.
+The validation days are read once for each stage (D85): the readout is the base's alone (a prior trained on every
+airport, no held-out airport), from a clean tree, and marks the prior's run as read (`claim_validation_read`) before it
+reads; a second one is refused by name. A smoke (``--smoke``, a tree with changes) never reads the validation days:
+it reads the select days (``--split select``), so the chain is checked before the one readout.
 
 THE MASKS ON THE LABELLED WORDS. Each val closed-loop sentence's rows (D82) walked as a speaker walks them
 (`prior.speaker.Speaker`): the procedure masks take on every Δ row's state (observed before the first predicted step,
@@ -30,6 +32,7 @@ import torch
 
 from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
+from ts_transformer.instructions.artefact import STATE_COLUMNS
 from ts_transformer.instructions.artefact import SentenceRows as ClosedLoopRows
 from ts_transformer.instructions.artefact import (
     closed_loop_sentences, load_candidates, load_day_split, load_spec, signals_flights,
@@ -38,7 +41,7 @@ from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.labeller.interval import interval_rows, on_interval_rows
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, load_checkpoint
+from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, claim_validation_read, load_checkpoint
 from ts_transformer.prior.inputs import Heard
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, Final, ProcedureMasks, airport_finals, procedure_digests
 from ts_transformer.prior.selection import kept
@@ -49,8 +52,8 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: The format of the readout's files (``config.json``, ``readout.json``).
 VALIDATION_SCHEMA = "ts-prior-validation-v1"
-#: The tokens of a batch of the teacher-forced loss (the training's default; it changes no number).
-TOKENS_PER_BATCH = 16384
+#: The columns of a state row the masks read (`STATE_COLUMNS`).
+POSITION = [STATE_COLUMNS.index(name) for name in ("e_m", "n_m", "height_m")]
 
 
 def blocked_by_masks(rows: ClosedLoopRows, finals: Sequence[Final], words: Words, interval_s: float
@@ -61,7 +64,7 @@ def blocked_by_masks(rows: ClosedLoopRows, finals: Sequence[Final], words: Words
                                                                                                words.spec.step_s))):
         raise ValueError("the sentence's Δ rows are not marked as its row interval's")
     geometry = finals[0].geometry
-    states = rows.states[rows.on_interval]
+    states = rows.states[rows.on_interval][:, POSITION]
     masks = ProcedureMasks([finals], words)
     heard = Heard(geometry, words)
     candidates = len(geometry.candidates)
@@ -113,8 +116,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True, help="a new directory")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--procedure-root", type=Path, default=DEFAULT_PROCEDURE_ROOT)
-    parser.add_argument("--smoke", action="store_true", help="SMOKE: allowed from a tree with changes; recorded")
+    parser.add_argument("--split", default="val", choices=("val", "select"),
+                        help="val: the one readout (D85); select: a smoke's, which never reads val")
+    parser.add_argument("--smoke", action="store_true", help="SMOKE: allowed from a tree with changes; reads select")
     args = parser.parse_args(argv)
+    if args.smoke != (args.split == "select"):
+        parser.error("the formal readout reads the val days, a smoke the select days (D85)")
     prior_dir, instructions, executor_dir, out = (path if path.is_absolute() else REPO_ROOT / path
                                                   for path in (args.prior, args.instructions, args.executor, args.out))
     if out.exists():
@@ -141,26 +148,30 @@ def main(argv: list[str] | None = None) -> int:
                  "procedure_data": procedure_digests(geometries, root=args.procedure_root)}:
         raise SystemExit(f"{prior_dir}: the prior's procedure masks are not {PROCEDURE_MASKS} on today's procedure data "
                          f"(§8 item 2)")
+    if checkpoint.run["sample"] is not None and not args.smoke:
+        raise SystemExit(f"{prior_dir} is a smoke prior (a sample of the sentences): no formal readout")
     model = checkpoint.model.to(device)
     variant = model.config.variant
+    tokens = int(checkpoint.train_config["tokens_per_batch"])
+    if args.split == "val":
+        claim_validation_read(prior_dir, "prior_validation", out)
     source = ArtefactSource(instructions, interval_s, variant, landings, selection)
     airports = sorted(geometries)
-    loss = {airport: evaluate(model, source.sentences("val", airport), TOKENS_PER_BATCH, device) for airport in airports}
-    pooled = evaluate(model, [s for airport in airports for s in source.sentences("val", airport)], TOKENS_PER_BATCH,
-                      device)
+    loss = {airport: evaluate(model, source.sentences(args.split, airport), tokens, device) for airport in airports}
+    pooled = evaluate(model, [s for airport in airports for s in source.sentences(args.split, airport)], tokens, device)
     spec = load_spec(instructions)
     finals = {code: airport_finals(geometry, root=args.procedure_root) for code, geometry in geometries.items()}
-    blocked = masks_readout(closed_loop_sentences(instructions, "val", interval_s, spec),
-                            signals_flights(instructions, "val"), finals, source.words, interval_s, selection)
+    blocked = masks_readout(closed_loop_sentences(instructions, args.split, interval_s, spec),
+                            signals_flights(instructions, args.split), finals, source.words, interval_s, selection)
     out.mkdir(parents=True)
     write_json_atomic(out / "config.json", {
         "schema": VALIDATION_SCHEMA, "written_utc": utc_now(), "prior": str(prior_dir),
         "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"), "identity": checkpoint.identity,
         "instructions": str(instructions), "executor": str(executor_dir), "checks": opened["checks"],
         "row_interval_s": interval_s, "selection": selection, "variant": variant, "procedure_masks": PROCEDURE_MASKS,
-        "tokens_per_batch": TOKENS_PER_BATCH, "git": git, "smoke": args.smoke, "device": str(device)})
+        "tokens_per_batch": tokens, "git": git, "smoke": args.smoke, "device": str(device)})
     write_json_atomic(out / "readout.json", {
-        "schema": VALIDATION_SCHEMA, "split": "val", "selection": selection,
+        "schema": VALIDATION_SCHEMA, "split": args.split, "selection": selection,
         "teacher_forced": {"pooled": pooled, "airports": loss}, "masks_on_labelled_words": blocked})
     print(json.dumps({"out": str(out), "loss_per_step": pooled["loss_per_step"]}))
     return 0

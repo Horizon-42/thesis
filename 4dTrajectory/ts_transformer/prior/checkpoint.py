@@ -15,6 +15,7 @@ from typing import Any, Mapping, NamedTuple
 
 import torch
 
+from ts_transformer.io_utils import utc_now
 from ts_transformer.prior.model import Prior, PriorConfig
 
 #: The prior of two-tier v4 (prior design, 2026-10-04): five columns, no airport or row-position embedding, RoPE on
@@ -60,3 +61,16 @@ def load_checkpoint(path: Path, identity: Mapping[str, Any]) -> Checkpoint:
     model = Prior(PriorConfig.from_dict(payload["model_config"]))
     model.load_state_dict(payload["state"], strict=True)
     return Checkpoint(model.eval(), payload["identity"], payload["run"], payload["train_config"])
+
+
+def claim_validation_read(prior_dir: Path, reader: str, out: Path) -> None:
+    """The validation days are read once for each stage (D85): a reader of them (``reader``, a runner's name) marks the
+    prior's run as read (``val_read_<reader>.json``, created once) before it reads them, and is refused by name when it
+    was read already."""
+    path = prior_dir / f"val_read_{reader}.json"
+    try:
+        with open(path, "x", encoding="utf-8") as stream:
+            json.dump({"reader": reader, "out": str(out), "utc": utc_now()}, stream)
+    except FileExistsError:
+        raise ValueError(f"{prior_dir}: its validation days were read by {reader} already ({path.name}); they are read "
+                         f"once (D85)") from None
