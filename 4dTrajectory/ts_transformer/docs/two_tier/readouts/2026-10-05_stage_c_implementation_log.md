@@ -472,3 +472,25 @@ passed. The full suite waits for B5 (outline §5 rule 13). Step 6 waits for B12.
 - **P38. A window set's `procedure` block is stage B's `procedure_block`**; the three copies of the set-file helpers
   (stages A, B, C) could become one module with the names as arguments (a follow-up, not built).
 - **P39. The temperature (D121)**: stage C's loop draws at temperature 1, as stage B's runs; no other value is proposed.
+
+## 18 Step 6 of `notes/stage_c.md`, after B12 (2026-10-06)
+
+| Step | Commit | What |
+|---|---|---|
+| Merge | `814056cd` | `dev-two-tier` with B12 (`39d02ef8`) and A43; the conflict in `aeroviz_backend/autopilot_segment/backend.py` resolved to A43's warm-up with the window sets warmed after stage B's; `window.py`'s warm-up follows A43 (each set under its own lock, never the request lock) |
+| Step 6 | `963ee427` | `WindowLoop` hands `start_moved`'s observed rows to `SpeakingLoop` as they are; `moved_sentences` deleted; the free-generation comparison starts through `start_moved(NO_MOVE)` |
+
+Both reviewed by an independent reviewer, no defect. Tests: stage C's files, the architecture test and the backend's
+window segment, 125 passed. The full suite waits for B5 (outline §5 rule 13).
+
+Readings for step 6, as proposals:
+
+- **The first-step mark**: stage C builds none. Every row is from `SpeakingLoop`'s `LoopRows` and the speaker's own state,
+  copies included (branch training), so the speaker's new refusal holds without a change in stage C.
+- **P40. A refused row** (`start.RowRefused`, the speaker's `accept`): B12 leaves the speaking loop as it was; the window
+  loop records its tokens, speed-mask rows and faulty reads of a row before the step, so a caller that caught a refusal
+  and went on would hold one row more. Today a refusal ends the run; records after the step if stage C ever retries one.
+- **P41. The live check of a window's segment**: as stage B's (`prior.apart_from_exported`), the window's answer is
+  compared with the export's track written to 0.1 m and not refused past a bound (A43's refusal is against unrounded
+  stored states). A refusal at the rounding is a question for stages B and C together (stage B's requests).
+- **The temperature (D121)**: 1, the speaking loop's default; no other value is proposed (P39).
