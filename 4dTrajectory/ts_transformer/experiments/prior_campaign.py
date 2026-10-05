@@ -55,7 +55,9 @@ from ts_transformer.experiments.prior_free_generation import TEMPERATURE
 from ts_transformer.experiments.prior_select import CONFIGURATIONS, SELECTION, arm_name
 from ts_transformer.instructions.artefact import load_candidates
 from ts_transformer.io_utils import utc_now, write_json_atomic
+from ts_transformer.prior.checkpoint import settle_written_claim
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
+from ts_transformer.prior.training_files import CLAIM_READER
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: The format of ``campaign.json``. v2 (B10, D108): the answer of the behaviour check and each step's commit (no commit
@@ -71,6 +73,8 @@ CONFIGURATION_FLAGS = {name: tuple(item for key, value in values.items()
 FREE_GENERATION = {"per_airport": 200, "samples": 2, "seed": 1337, "chunk": 400}
 #: A smoke campaign's free generation: flights of each airport.
 SMOKE_FLIGHTS = 5
+#: The readers of the val days: each claims the base's val read under its runner's name (D119, D128).
+VAL_READERS = ("prior_validation", CLAIM_READER)
 
 
 class Step(NamedTuple):
@@ -202,13 +206,15 @@ def settings() -> dict[str, Any]:
             "most_go_arounds": MOST_GO_AROUNDS}
 
 
-def require_settings(campaign: Path, answer: dict[str, Any]) -> None:
-    """The settings of the code on the disk (the behaviour check's ``answer``) are those this process plans with."""
-    disk, here = answer["settings"], settings()
-    if disk != here:
-        differ = sorted(key for key in set(disk) | set(here)
-                        if key not in disk or key not in here or disk[key] != here[key])
-        raise SystemExit(f"{campaign}: the code on the disk sets {differ} otherwise than this campaign's process; stopped")
+def require_settings(campaign: Path, answer: dict[str, Any], given_by: str) -> None:
+    """The settings of ``answer`` (a behaviour check's: ``given_by`` says whose, the code on the disk's now or the
+    campaign's start record) are those this process plans with."""
+    there, here = answer["settings"], settings()
+    if there != here:
+        differ = sorted(key for key in set(there) | set(here)
+                        if key not in there or key not in here or there[key] != here[key])
+        raise SystemExit(f"{campaign}: {given_by} sets {differ} otherwise than this campaign's process "
+                         f"({ {k: (there.get(k), here.get(k)) for k in differ} }); stopped")
 
 
 def open_campaign(campaign: Path, instructions: Path, executor: Path, interval_s: float, git: dict[str, Any],
@@ -226,7 +232,7 @@ def open_campaign(campaign: Path, instructions: Path, executor: Path, interval_s
         changed = sorted(k for k, v in record.items() if stored[k] != v)
         if changed:
             raise SystemExit(f"{campaign}: started with other {changed}; a campaign is resumed with its own inputs")
-        require_settings(campaign, stored["behaviour"])
+        require_settings(campaign, stored["behaviour"], "the campaign's start record")
         if alive_step(stored["running"]):
             raise SystemExit(f"{campaign}: its step {stored['running']['step']} still runs as PID "
                              f"{stored['running']['pid']}; stop it first")
@@ -235,12 +241,23 @@ def open_campaign(campaign: Path, instructions: Path, executor: Path, interval_s
         raise SystemExit(f"{campaign} exists and is no campaign")
     campaign.mkdir(parents=True, exist_ok=True)
     answer = behaviour(str(instructions))
-    require_settings(campaign, answer)
+    require_settings(campaign, answer, "the code on the disk")
     record = {"schema": CAMPAIGN_SCHEMA, "written_utc": utc_now(), **record, "git": git,
               "airports": sorted(load_candidates(instructions)), "seeds": list(SEEDS), "behaviour": answer,
               "steps": [], "aborted": [], "running": None}
     write_json_atomic(path, record)
     return record
+
+
+def settle_val_steps(campaign: Path, record: dict[str, Any], steps: Sequence[Step]) -> None:
+    """A formal campaign's done steps of the base's val readers (`VAL_READERS`): a claim left unmarked by a step
+    killed between its readout and the mark is marked spent (`checkpoint.settle_written_claim`, D128) — a done step is
+    never run again."""
+    if record["smoke"] is not None:
+        return
+    for step in steps:
+        if step.runner in VAL_READERS and step.name.startswith("base/") and step.done.exists():
+            settle_written_claim(campaign / "base" / "run", step.runner, step.out)
 
 
 def run_campaign(campaign: Path, record: dict[str, Any], device: str,
@@ -257,6 +274,7 @@ def run_campaign(campaign: Path, record: dict[str, Any], device: str,
 
     while True:
         steps = plan(campaign, record, device)
+        settle_val_steps(campaign, record, steps)
         pending = [step for step in steps if not step.done.exists()]
         if not pending:
             break

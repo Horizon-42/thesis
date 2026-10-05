@@ -309,7 +309,8 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch, caps
     with pytest.raises(SystemExit):
         runner.main([*argv[:-3], "--out", str(tmp_path / "stopped"), "--smoke"])
     assert "a run that stopped" in capsys.readouterr().err
-    for wrong in (["--airports", "KZZZ"], ["--chunk", "0"], ["--samples", "0"], ["--per-airport", "0"]):
+    for wrong in (["--airports", "KZZZ"], ["--chunk", "0"], ["--samples", "0"], ["--per-airport", "0"], ["--seed", "-1"],
+                  ["--airports", geometry.code, geometry.code]):
         with pytest.raises(SystemExit):
             runner.main([*argv[:6], "--split", "val", *wrong, "--device", "cpu", "--out", str(tmp_path / "val")])
     assert not list(prior.glob("val_read_*"))
@@ -368,6 +369,38 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch, caps
     for airports in (["KZZZ"], [geometry.code, "KZZZ"]):
         with pytest.raises(SystemExit):                                # an airport not the artefact's
             runner.main([*argv[:-3], "--airports", *airports, "--out", str(tmp_path / "unknown"), "--smoke"])
+    # D119, D128: the val branch to its end — the artefact's train flight read as the val days' (it has none). The read
+    # claimed above stopped at its first read of val: a rerun with other options is refused, with the same ones it runs
+    claim = prior / "val_read_prior_free_generation.json"
+    for name in ("closed_loop_sentences", "signals_flights", "faulty_flights", "start_moved"):
+        monkeypatch.setattr(runner, name, lambda directory, split, *given, _real=getattr(runner, name), **named:
+                            _real(directory, "train" if split == "val" else split, *given, **named))
+    recounts = []
+    monkeypatch.setattr(runner, "require_selection_of", lambda *given: recounts.append((given[-1], claim.exists())))
+    val = [*argv[:6], "--split", "val", "--device", "cpu", "--out", str(tmp_path / "val")]
+    assert json.loads(claim.read_text())["options"] == {
+        "airports": [geometry.code], "per_airport": 200, "samples": 2, "seed": 1337, "chunk": 400, "device": "cpu",
+        "temperature": runner.TEMPERATURE, "most_go_arounds": MOST_GO_AROUNDS}
+    capsys.readouterr()
+    with pytest.raises(ValueError, match=r"other \['samples'\]"):
+        runner.main([*val, "--samples", "1"])
+    spend = runner.spend_validation_claim
+
+    def killed(*given):
+        raise KeyboardInterrupt("killed between the readout and the spent mark")
+
+    monkeypatch.setattr(runner, "spend_validation_claim", killed)
+    with pytest.raises(KeyboardInterrupt):
+        runner.main(val)
+    assert (tmp_path / "val" / "readout.json").exists() and "spent_utc" not in json.loads(claim.read_text())
+    assert recounts == [("val", True)]                                 # the recount after the claim
+    monkeypatch.setattr(runner, "spend_validation_claim", spend)
+    with pytest.raises(SystemExit):                                    # the readout found written: marked spent first
+        runner.main(val)
+    assert "spent_utc" in json.loads(claim.read_text())
+    (tmp_path / "val").rename(tmp_path / "val_archived")               # moved away: the read stays spent
+    with pytest.raises(ValueError, match="read by prior_free_generation already"):
+        runner.main(val)
     config_text = (out / "config.json").read_text()
     (out / "config.json").write_text(config_text.replace(runner.FREE_GENERATION_SCHEMA, "ts-prior-free-generation-v0"))
     with pytest.raises(ValueError, match=runner.FREE_GENERATION_SCHEMA):                 # another format, by name

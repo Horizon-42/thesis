@@ -40,8 +40,8 @@ from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.labeller.interval import interval_rows, on_interval_rows
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.prior.checkpoint import (CLAIM_SPENT_BY, claim_validation_read, open_prior, readable_identity,
-                                             spend_validation_claim)
+from ts_transformer.prior.checkpoint import (CLAIM_SPENT_BY, claim_validation_read, lock_val_read, open_prior,
+                                             readable_identity, settle_written_claim, spend_validation_claim)
 from ts_transformer.prior.inputs import Heard
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, Final, ProcedureMasks, airport_finals
 from ts_transformer.prior.selection import SIDES, side
@@ -128,6 +128,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("the formal readout reads the val days, a smoke the select days (D85)")
     prior_dir, instructions, executor_dir, out = (path if path.is_absolute() else REPO_ROOT / path
                                                   for path in (args.prior, args.instructions, args.executor, args.out))
+    # the val read's lock, before the output is looked at, kept to the end (D128)
+    if not (prior_dir / "config.json").is_file():
+        parser.error(f"{prior_dir} is no prior_train run (no config.json)")
+    held = lock_val_read(prior_dir, "prior_validation") if args.split == "val" else None  # noqa: F841
+    if out.exists() and args.split == "val":
+        settle_written_claim(prior_dir, "prior_validation", out)          # a kill after its readout (D128)
     if out.exists() and not (out / CLAIM_SPENT_BY).exists():
         parser.error(f"{out} exists without its {CLAIM_SPENT_BY}: a run that stopped; move it aside "
                      f"({out.name}.aborted-<UTC>, outline E8) and run again to the same output")
@@ -150,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
     variant = model.config.variant
     tokens = int(checkpoint.train_config["tokens_per_batch"])
     if args.split == "val":
-        claim_validation_read(prior_dir, "prior_validation", out)
+        claim_validation_read(prior_dir, "prior_validation", out, {"split": args.split, "device": str(device)})
         require_selection_of(instructions, interval_s, checkpoint.identity, args.split)
     source = ArtefactSource(instructions, interval_s, variant, landings, selection)
     airports = sorted(geometries)

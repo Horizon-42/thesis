@@ -16,9 +16,11 @@ identity as `readable_identity` gives it: no val count.
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 from pathlib import Path
-from typing import Any, Mapping, NamedTuple, Sequence
+from typing import IO, Any, Mapping, NamedTuple, Sequence
 
 import torch
 
@@ -94,33 +96,69 @@ def validation_claim(prior_dir: Path, reader: str) -> str | None:
     return json.loads(path.read_text(encoding="utf-8"))["out"] if path.exists() else None
 
 
-def holds_claim(prior_dir: Path, reader: str, out: Path) -> bool:
-    """Whether the prior's run holds a claim by ``reader`` of its val read naming the output ``out`` (named as
-    `claim_validation_read` names it)."""
-    return validation_claim(prior_dir, reader) == repo_relative(out)
-
-
-def claim_validation_read(prior_dir: Path, reader: str, out: Path) -> None:
-    """The validation days are read once for each stage (D85): a reader of them (``reader``, a runner's name) marks the
-    prior's run as read (``val_read_<reader>.json``, created once) before it reads them, naming its output. The read is
-    spent when the reader has written its readout (D119): its `CLAIM_SPENT_BY` in the output, and the claim marked
-    spent (`spend_validation_claim`) — so an output moved away later opens nothing. A claim not spent (a run that
-    stopped before it wrote) may be run again to the same output, and only to it; any other read is refused by name.
-    The output is named relative to the repository (`repo_relative`): the same name from any checkout, also once the
-    worktree the readout ran in is gone."""
-    path = prior_dir / f"val_read_{reader}.json"
+def lock_val_read(prior_dir: Path, reader: str) -> IO[str]:
+    """The exclusive lock of ``reader``'s val read of the prior's run (D128): a reader of val takes it before it looks
+    at its output and keeps it to its end (the open lock is returned); a second run while it is held is refused by
+    name. The kernel lets it go when the process ends, however it ends."""
+    lock = open(prior_dir / f".val_read_{reader}.lock", "w", encoding="utf-8")
     try:
-        with open(path, "x", encoding="utf-8") as stream:
-            json.dump({"reader": reader, "out": repo_relative(out), "utc": utc_now()}, stream)
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock.close()
+        raise ValueError(f"{prior_dir}: another run holds the claim of {reader}'s val read; one run at a time "
+                         f"(D128)") from None
+    return lock
+
+
+def claim_validation_read(prior_dir: Path, reader: str, out: Path, options: Mapping[str, Any]) -> None:
+    """The validation days are read once for each stage (D85): a reader of them (``reader``, a runner's name), holding
+    the read's lock (`lock_val_read`), claims the prior's run's val read (``val_read_<reader>.json``) before it reads
+    them, naming its output and its ``options`` — what decides the read (D128). The claim file is written whole (a
+    temporary file linked to its name). The read is spent when the reader has written its readout (D119): its
+    `CLAIM_SPENT_BY` in the output, and the claim marked spent (`spend_validation_claim`) — so an output moved away
+    later opens nothing; a readout found written under a claim not marked spent (a kill between the two) is marked
+    spent here (`settle_written_claim`), then refused. A claim not spent (a run that stopped before it wrote) may be run
+    again to the same output with the same options, and only so (D128: the rerun is the same read); any other read is
+    refused by name. The output is named relative to the repository (`repo_relative`): the same name from any checkout,
+    also once the worktree the readout ran in is gone."""
+    options = json.loads(json.dumps(dict(options)))
+    path = prior_dir / f"val_read_{reader}.json"
+    written = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    written.write_text(json.dumps({"reader": reader, "out": repo_relative(out), "options": options, "utc": utc_now()}),
+                       encoding="utf-8")
+    try:
+        os.link(written, path)                     # whole, or not at all (D128)
         return
     except FileExistsError:
         record = json.loads(path.read_text(encoding="utf-8"))
+    finally:
+        written.unlink()
     if record["out"] != repo_relative(out):
         raise ValueError(f"{prior_dir}: its validation days were claimed by {reader} for {record['out']} ({path.name}); "
                          f"a claim is run again only to its own output (D85, D119)")
-    if "spent_utc" in record or (out / CLAIM_SPENT_BY).exists():
+    settle_written_claim(prior_dir, reader, out)                # killed between the readout and the mark (D128)
+    if "spent_utc" in json.loads(path.read_text(encoding="utf-8")):
         raise ValueError(f"{prior_dir}: its validation days were read by {reader} already ({record['out']}); they are "
                          f"read once (D85)")
+    if "options" not in record:
+        raise ValueError(f"{prior_dir}: the claim of {reader} for {record['out']} records no options (written before "
+                         f"D128): its rerun is not the same read by the code; the user decides on the claim file")
+    if record["options"] != options:
+        differ = sorted(k for k in set(record["options"]) | set(options) if record["options"].get(k) != options.get(k))
+        raise ValueError(f"{prior_dir}: the claim of {reader} for {record['out']} was made with other {differ} "
+                         f"({ {k: record['options'].get(k) for k in differ} }); a rerun is the same read (D128)")
+
+
+def settle_written_claim(prior_dir: Path, reader: str, out: Path) -> None:
+    """A claim of ``out`` not marked spent whose readout (`CLAIM_SPENT_BY`) is written there (a kill between the two)
+    is marked spent (D128): a reader does so, under the read's lock, before it refuses the output, and the campaign
+    for its done val steps."""
+    path = prior_dir / f"val_read_{reader}.json"
+    if not path.exists() or not (out / CLAIM_SPENT_BY).exists():
+        return
+    record = json.loads(path.read_text(encoding="utf-8"))
+    if record["out"] == repo_relative(out) and "spent_utc" not in record:
+        spend_validation_claim(prior_dir, reader, out)
 
 
 def spend_validation_claim(prior_dir: Path, reader: str, out: Path) -> None:
@@ -131,6 +169,12 @@ def spend_validation_claim(prior_dir: Path, reader: str, out: Path) -> None:
     if record["out"] != repo_relative(out) or not (out / CLAIM_SPENT_BY).exists():
         raise ValueError(f"{prior_dir}: the claim of {reader} names {record['out']}; {out} holds no {CLAIM_SPENT_BY}")
     write_json_atomic(path, {**record, "spent_utc": utc_now()})
+
+
+def holds_written_claim(prior_dir: Path, reader: str, out: Path) -> bool:
+    """Whether the prior's run holds a claim by ``reader`` naming ``out`` with its readout written there (`written_claim`;
+    a claim of B12's code without options is read for its output alone, D128)."""
+    return written_claim(prior_dir, reader) == repo_relative(out)
 
 
 def written_claim(prior_dir: Path, reader: str) -> str | None:

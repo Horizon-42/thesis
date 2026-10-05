@@ -50,7 +50,7 @@ from ts_transformer.prior.landings import Landing, LandingIndex
 from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.procedure import Final, airport_finals
 from ts_transformer.prior.runs import Run, RunData
-from ts_transformer.prior.selection import RULES, left_out
+from ts_transformer.prior.selection import RULES, kept, left_out, side
 from ts_transformer.prior.speaker import Position, Speaker
 from ts_transformer.prior.train import TrainConfig, batch_nll, first_step_runway, train
 from ts_transformer.repo_layout import REPO_ROOT
@@ -162,11 +162,15 @@ def speaking(model: Prior, words: Words, finals: Sequence[Final], days: DaySplit
     flights = {b: {"airport": geometry.code, "entry_time_utc": f"{days.days['train'][0]}T11:50:00Z",
                    "dataset_id": f"{geometry.code}:L{b}"} for b in range(count)}
     runways = tuple(c.ident for c in geometry.candidates)
-    landings = LandingIndex(runways, tuple(Landing(noon + 10.0 * b, runways[0], f"L{b}") for b in range(count)), 0,
-                            days)
+    # each aircraft its own landings (D105): the three flights' own landings after their rows (a scene's), and others
+    # in the 30 min before its rows, on each candidate, one more than the aircraft before it
+    landings = [LandingIndex(runways, tuple(sorted(
+        (*(Landing(noon - 1_500.0 + 60.0 * k, runways[k % len(runways)], f"O{b}{k}") for k in range(3 + b)),
+         *(Landing(noon + 10.0 * a, runways[0], f"L{a}") for a in range(count))), key=lambda landing: landing.time_s)),
+        0, days) for b in range(count)]
     observed = {b: states[b, : start * every] for b in range(count)}
     loop = SpeakingLoop(model, Straight(states[:, -1], every, 2), list(range(count)), rows, observed, flights,
-                        {geometry.code: geometry}, [landings] * count, {geometry.code: finals}, words, interval_s=4.0,
+                        {geometry.code: geometry}, landings, {geometry.code: finals}, words, interval_s=4.0,
                         variant="full", device=torch.device("cpu"))
     while loop.observing:
         loop.observe()
@@ -183,20 +187,25 @@ def fixed_sentence(said: Sequence[Sequence[int]], geometry: AirportGeometry, wor
     """The inputs and targets of a fixed closed-loop sentence (`inputs.sentence_rows`, both variants) at Δ = 4 s: the
     words ``said`` from its first predicted step (`FIRST`) where the speaker said them (`behaviour`'s first aircraft:
     the same heights, so the grammar takes them), a flight key of the real format
-    (``<airport>:<id>_<runway>_<icao24>_<landing time>``) whose own landing the landings hold."""
+    (``<airport>:<id>_<runway>_<icao24>_<landing time>``) whose own landing the landings hold between two of its rows on
+    the last candidate, with another landing at the same second on the first, others in the 30 min before its rows on
+    each candidate, one at a row's time and one exactly 30 min before a row (the window's two edges)."""
     every, rows = 2, (FIRST + len(said) - 1) * 2 + 1
     states = np.zeros((rows, len(STATE_COLUMNS)))
     states[:, STATE_COLUMNS.index("e_m")] = -15_000.0 + 200.0 * np.arange(rows)
     states[:, STATE_COLUMNS.index("height_m")] = geometry.elevation_m + 900.0 - 5.0 * np.arange(rows)
     day = days.days["train"][0]
-    runway = geometry.candidates[0].ident
+    runway = geometry.candidates[-1].ident
     flight = {"airport": geometry.code, "entry_time_utc": f"{day}T11:50:00Z",
-              "dataset_id": f"{geometry.code}:BEH123_{runway}_abc123_{day.replace('-', '')}T120500Z"}
-    noon = float(np.datetime64(f"{day}T12:00:00", "s").astype(np.int64))
+              "dataset_id": f"{geometry.code}:BEH123_{runway}_abc123_{day.replace('-', '')}T115031Z"}
+    entry = float(np.datetime64(f"{day}T11:50:00", "s").astype(np.int64))
     runways = tuple(c.ident for c in geometry.candidates)
-    landings = LandingIndex(runways, (*(Landing(noon - 300.0 + 60.0 * k, runways[k % len(runways)], f"L{k}")
-                                        for k in range(8)),
-                                      Landing(noon + 300.0, runway, flight["dataset_id"].partition(":")[2])), 0, days)
+    own = entry + 31.0                # between two of its Δ rows (2 s row 3 at 11:50:06, a Δ row every 4 s from it)
+    landings = LandingIndex(runways, tuple(sorted(
+        (*(Landing(entry - 1_700.0 + 97.0 * k, runways[k % len(runways)], f"L{k}") for k in range(17)),
+         Landing(own, runway, flight["dataset_id"].partition(":")[2]), Landing(own, runways[0], "SAME_SECOND"),
+         Landing(entry + 14.0, runways[0], "AT_A_ROW"), Landing(entry + 18.0 - 1_800.0, runways[-1], "WINDOW_EDGE")),
+        key=lambda landing: landing.time_s)), 0, days)
     sentence = ClosedLoopRows(first_row=3, start=FIRST, grid=np.array(said, dtype=np.int16),
                               correction=np.zeros((len(said), len(COLUMNS)), dtype=bool), states=states,
                               on_interval=on_interval_rows(rows, every))
@@ -209,11 +218,40 @@ def fixed_sentence(said: Sequence[Sequence[int]], geometry: AirportGeometry, wor
 
 
 def selection_rules() -> dict[str, Any]:
-    """Why each rule leaves a sentence out (`selection.left_out`, None: kept) for every stored outcome of the judge
-    and each mark of a faulty track."""
-    return {rule: {outcome: {str(faulty): left_out(rule, outcome, faulty) for faulty in (False, True)}
-                   for outcome in OUTCOMES}
-            for rule in RULES}
+    """For every rule, stored outcome of the judge and mark of a faulty track: why the rule leaves a sentence out
+    (`selection.left_out`, None: kept), whether it keeps it (`selection.kept`, what training reads) and its side
+    (`selection.side`, what the readouts read)."""
+    return {name: {rule: {outcome: {str(faulty): function(rule, outcome, faulty) for faulty in (False, True)}
+                          for outcome in OUTCOMES}
+                   for rule in RULES}
+            for name, function in (("left_out", left_out), ("kept", kept), ("side", side))}
+
+
+def campaign_plan() -> list[list[Any]]:
+    """`prior_campaign.plan` of a fixed formal record, both choices made (configuration B, variant `constants`): each
+    step's name, runner and arguments (the campaign's directory as ``<campaign>``)."""
+    import tempfile
+
+    from ts_transformer.experiments.prior_campaign import SEEDS, plan
+
+    record = {"instructions": "artefact", "executor": "executor", "row_interval_s": 4.0, "airports": ["KAAA", "KBBB"],
+              "seeds": list(SEEDS), "smoke": None}
+    with tempfile.TemporaryDirectory() as directory:
+        campaign = Path(directory)
+        for step, chosen in (("configuration", "B"), ("variant", "constants")):
+            (campaign / f"choice_{step}.json").write_text(json.dumps({"chosen": chosen}), encoding="utf-8")
+        return [[step.name, step.runner, [str(a).replace(directory, "<campaign>") for a in step.argv]]
+                for step in plan(campaign, record, "cuda")]
+
+
+def free_generation_draw() -> list[int]:
+    """`prior_free_generation.draw` on a fixed set: 30 flights of three airports (KBBB's even places without a
+    sentence), 4 of each, seed 1337."""
+    from ts_transformer.experiments.prior_free_generation import draw
+
+    flights = [{"airport": ("KAAA", "KBBB", "KCCC")[i % 3]} for i in range(30)]
+    sentences = {i: None for i in range(30) if not (i % 3 == 1 and i % 2 == 0)}
+    return draw(sentences, flights, ["KAAA", "KBBB", "KCCC"], 4, SEED)
 
 
 def select_rules() -> dict[str, Any]:
@@ -231,7 +269,8 @@ def select_rules() -> dict[str, Any]:
         return out
 
     parameters = {"A": 100, "B": 200, "C": 300, "D": 100}
-    tie = table({"A": 1.25, "B": 1.0, "C": 1.5, "D": 1.125}, parameters, 1.5)       # scale 0.25: A and D within
+    # scale 0.25: all four within 1.5 (C at exactly it); A and D tie in parameters, D the lower score
+    tie = table({"A": 1.25, "B": 1.0, "C": 1.5, "D": 1.125}, parameters, 1.5)
     edge = table({"A": 1.5, "B": 1.0, "C": 2.0, "D": 1.75}, parameters, 1.75)       # A at exactly best + 2 · 0.25
     zero = table({"A": 1.25, "B": 1.0, "C": 1.5, "D": 1.125}, parameters, 1.25)     # scale 0: B alone
     variant_edge = {**table({"A": 1.5}, parameters, 1.625),                         # scale 0.125: 0.25 is not more
@@ -286,6 +325,7 @@ def behaviour(words: Words, finals: Sequence[Final], days: DaySplit) -> dict[str
     from ts_transformer.experiments.prior_campaign import settings
 
     return {"settings": settings(), "selection": selection_rules(), "select_rules": select_rules(),
+            "campaign_plan": campaign_plan(), "free_generation_draw": free_generation_draw(),
             "sentence_rows": sentence,
             "train_config": asdict(TrainConfig()), "model_config": model.config.to_dict(),
             "first_step_runway": runway, "constants_loss": hexed(nll / asked),

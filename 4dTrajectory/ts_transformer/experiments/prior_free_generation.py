@@ -28,8 +28,8 @@ from ts_transformer.instructions.artefact import ClosedLoopSentence, closed_loop
 from ts_transformer.instructions.faults import faulty_flights
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.prior.checkpoint import (CLAIM_SPENT_BY, claim_validation_read, open_prior, readable_identity,
-                                             spend_validation_claim)
+from ts_transformer.prior.checkpoint import (CLAIM_SPENT_BY, claim_validation_read, lock_val_read, open_prior,
+                                             readable_identity, settle_written_claim, spend_validation_claim)
 from ts_transformer.prior.source import require_selection_of
 from ts_transformer.prior.training_files import CLAIM_READER
 from ts_transformer.prior.landings import LandingIndex
@@ -187,14 +187,24 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     absolute = [p if p.is_absolute() else REPO_ROOT / p for p in (args.prior, args.instructions, args.executor, args.out)]
     prior_dir, instructions, executor_dir, out = absolute
+    # the val read's lock, before the output is looked at, kept to the end (D128)
+    if not (prior_dir / "config.json").is_file():
+        parser.error(f"{prior_dir} is no prior_train run (no config.json)")
+    held = lock_val_read(prior_dir, CLAIM_READER) if args.split == "val" else None  # noqa: F841
+    if out.exists() and args.split == "val":
+        settle_written_claim(prior_dir, CLAIM_READER, out)                # a kill after its readout (D128)
     if out.exists() and not (out / CLAIM_SPENT_BY).exists():
         parser.error(f"{out} exists without its {CLAIM_SPENT_BY}: a run that stopped; move it aside "
                      f"({out.name}.aborted-<UTC>, outline E8) and run again to the same output")
     if out.exists():
         parser.error(f"{out} exists; a readout is never overwritten")
     small = [name for name in ("per_airport", "samples", "chunk") if getattr(args, name) < 1]
-    if small:                                   # options are checked before the val read is claimed (D119)
+    if small:                                   # options are checked before the val read is claimed (D119, D128)
         parser.error(f"--{small[0].replace('_', '-')} is at least 1")
+    if args.seed < 0:
+        parser.error(f"--seed is not negative, got {args.seed}")
+    if args.airports is not None and len(set(args.airports)) != len(args.airports):
+        parser.error(f"--airports names an airport twice: {args.airports}")
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("a readout that is not a smoke needs a clean tree")
@@ -214,7 +224,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.split == "val":                     # the base's one validation readout (D85): never a smoke, read once
         if args.smoke or checkpoint.run["held_out"] is not None or checkpoint.run["sample"] is not None:
             parser.error("the validation days are read only by the base's formal readout (D85)")
-        claim_validation_read(prior_dir, CLAIM_READER, out)
+        claim_validation_read(prior_dir, CLAIM_READER, out, {      # what decides the read (D128)
+            "airports": airports, "per_airport": args.per_airport, "samples": args.samples, "seed": args.seed,
+            "chunk": args.chunk, "device": str(device), "temperature": TEMPERATURE, "most_go_arounds": MOST_GO_AROUNDS})
         require_selection_of(instructions, interval_s, checkpoint.identity, args.split)
     sentences = closed_loop_sentences(instructions, args.split, interval_s, spec)
     flights = signals_flights(instructions, args.split)

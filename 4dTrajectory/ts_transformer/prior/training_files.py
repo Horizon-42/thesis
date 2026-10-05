@@ -28,9 +28,11 @@ from ts_transformer.io_utils import utc_now
 #: Index v2 / sample v2 (B10, outline D109): a set's source names the claim of the val read it was exported under
 #: (``validationClaim``: null for every set but the base's one validation readout, whose flights are of val); the
 #: readers give val to that set alone.
+#: Sample v3 (B13, D127): each prior sentence's flown track written unrounded (the live segment is checked against it
+#: within the executor's bound).
 INDEX_SCHEMA = "aeroviz-training-prior-index-v2"
 INDEX_FILE = "index_prior_v2.json"
-SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v2"
+SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v3"
 SAMPLE_FILE = "sample.json"
 SET_KIND = "prior-free-generation"
 #: The reader of the val days whose claim a set's ``validationClaim`` names (`checkpoint.claim_validation_read`): the
