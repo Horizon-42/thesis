@@ -27,8 +27,8 @@ and the base does not learn from it; nothing is rebuilt. Prior D111 and mileston
     that do not land).
 - **Size on A34's artefact** (Δ = 4 s, closed-loop sentences): train 498 of 40,530 marked, 469 of them landed;
   select 177 of 6,199, 157 landed. Most are held positions. With `landed`, train keeps 39,154 instead of 39,623.
-- **When:** after A40 is on the stage A line that stage B merges (it is in review now, branch `dev-two-tier-v4-a40`),
-  and before B5's formal campaign.
+- **When:** after A40 (`b2553aac`, branch `dev-two-tier-v4-a40`, done and reviewed) is merged into the stage A line
+  that stage B merges, and before B5's formal campaign.
 
 ## 2 Stage B to follow when stage A's branches are merged (the user merges)
 
@@ -38,7 +38,7 @@ None of these is on `dev-two-tier-v4` yet (it is at `58fd8a2b`). They wait for t
 |---|---|---|
 | `dev-two-tier-v4-a38` | `e7e01461`, `b41b24a5`, `89729d66` (A37), `b6ee4958`, `98c5e010` (A38) | A37 and A38 |
 | `dev-two-tier-v4-a39` | A37's three, the merge `0126f7ff` of dev-two-tier `9e44a687`, `658e4717` (A39) | A37 and A39 |
-| `dev-two-tier-v4-a40` | A38's branch + A40 (in review) | A40 |
+| `dev-two-tier-v4-a40` | A38's branch + `b2553aac` (A40) | A37, A38 and A40 |
 
 What stage B's code must follow after the merge:
 

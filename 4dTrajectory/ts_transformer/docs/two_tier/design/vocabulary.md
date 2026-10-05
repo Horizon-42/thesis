@@ -119,7 +119,7 @@ The commits, dates, branches and test counts of every milestone are in
 | A35 | Done: `closed_loop_v12_20261005` published (5 airports × 40 flights), live check by sample 0 differing, browser check passed |
 | A38 (D97) | Done on `dev-two-tier-v4-a38`: (1)–(3) `b6ee4958`, (4) `98c5e010`, reviewed; A34's checks and the full suite pass; waits for the merge |
 | A39 (outline D109) | Done: `658e4717` on `dev-two-tier-v4-a39` (from A37's tip), reviewed; waits for the merge |
-| A40 (D111) | Planned: code and tests only; before prior B11 |
+| A40 (D111) | Done: `b2553aac` on `dev-two-tier-v4-a40` (from A38's tip), reviewed; waits for the merge, then prior B11 |
 
 
 ### 0.4 Plan
