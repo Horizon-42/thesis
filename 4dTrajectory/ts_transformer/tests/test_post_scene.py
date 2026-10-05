@@ -91,8 +91,9 @@ def test_a_recorded_aircraft_moves_by_its_displacement_only(built):
     flight = signals[0]
     changed = replace(flight, track_deg=flight.track_deg + 33.0, ground_speed_mps=flight.ground_speed_mps * 3.0,
                       vertical_rate_mps=-flight.vertical_rate_mps)
-    a = recorded(flight, geometries["KXXX"], DELTA, INSTRUCTION_STEP_S, categories)
-    b = recorded(changed, geometries["KXXX"], DELTA, INSTRUCTION_STEP_S, categories)
+    none = np.zeros(flight.n_rows, dtype=bool)
+    a = recorded(flight, geometries["KXXX"], DELTA, INSTRUCTION_STEP_S, none, categories)
+    b = recorded(changed, geometries["KXXX"], DELTA, INSTRUCTION_STEP_S, none, categories)
     for time_s in (a.start_s, a.start_s + 2.0, a.first_step_s + 40.0, a.end_s):
         assert a.at_step(time_s, DELTA) == b.at_step(time_s, DELTA)
     key, at, before, known, *_ = a.at_step(a.start_s, DELTA)
@@ -207,3 +208,61 @@ def test_the_census_runner_writes_its_census_and_the_edge_reference(built, tmp_p
     with pytest.raises(SystemExit):
         post_windows.main(["--instructions", str(directory), "--interval-s", "4", "--out", str(tmp_path / "v"),
                            "--splits", "val"])
+
+
+def test_g_is_true_after_each_labelled_go_around_up_to_its_runway_word():
+    from ts_transformer.post.scene import go_around_rows
+
+    assert np.flatnonzero(go_around_rows(20, [3, 10], [6, 12])).tolist() == [4, 5, 6, 11, 12]
+    assert not go_around_rows(5, [], []).any()
+    with pytest.raises(ValueError, match="later row"):
+        go_around_rows(20, [6], [6])
+    with pytest.raises(ValueError, match="later row"):
+        go_around_rows(20, [6], [20])
+
+
+def test_a_recorded_aircraft_reads_its_g_from_its_labelled_sentence(built, monkeypatch):
+    """The user's decision (2026-10-05): a recorded flight with a sentence has G from its labelled go-around rows; one
+    without has G false. A recorded aircraft in G is not established, wherever it is."""
+    from ts_transformer.post.established import established
+    from ts_transformer.tests.post_support import finals
+
+    directory, spec, _, _, geometries = built
+    real = post_scene.load_sentences
+
+    def with_a_go_around(d, split, s, fields):
+        data = dict(real(d, split, s, fields))
+        if split == "train":           # flight b (signal index 1): a go-around at row 100, its runway said at row 140
+            # the sentences in another order than the signals: G must follow the signal index, not the sentence's place
+            data["signal_index"] = data["signal_index"][::-1].copy()
+            counts = np.zeros(len(data["signal_index"]), dtype=np.int64)
+            counts[list(data["signal_index"]).index(1)] = 1
+            data["go_around_offsets"] = np.concatenate(([0], np.cumsum(counts)))
+            data["go_around_row"], data["runway_again_row"] = np.array([100]), np.array([140])
+        return data
+
+    monkeypatch.setattr(post_scene, "load_sentences", with_a_go_around)
+    scenes, _ = airport_scenes(directory, "train", spec, DELTA, geometries, categories)
+    flights = {f.key: f for f in scenes["KXXX"].flights}
+    assert np.flatnonzero(flights["KXXX:b"].go_around).tolist() == list(range(101, 141))
+    assert not flights["KXXX:a"].go_around.any() and not flights["KXXX:c"].go_around.any()
+    b = flights["KXXX:b"]
+    inside = [b.start_s + 2.0 * row for row in (120, 150)]               # on the final, lined up; in G at row 120
+    seen = [post_scene.AircraftAt.of([b.at_step(t, DELTA)]) for t in inside]
+    assert [bool(s.go_around[0]) for s in seen] == [True, False]
+    fin = finals(geometries["KXXX"])
+    assert [bool(established(s, geometries["KXXX"], fin, 2.0)[0]) for s in seen] == [False, True]
+    # commanded, b carries no labelled G (its G is its words' in the loop); a window refuses a commanded record with G
+    windows = real_windows(directory, "train", spec, DELTA, scenes, post_scene.load_signals(directory, "train"))
+    assert not windows[1].commanded.go_around.any()
+    with pytest.raises(ValueError, match="words in force"):
+        replace(windows[1], commanded=b)
+    # moved (window D of c, whose leader is b), b keeps G with its rows
+    from ts_transformer.post.runways import airport_separation
+
+    moved = leader_moved_window(windows[2], airport_separation(geometries["KXXX"]), np.random.default_rng(3),
+                                shift_s=(-60.0, 60.0))
+    (key, shift), = moved.moved
+    assert key == "KXXX:b"
+    assert np.array_equal(moved.scene.flight(key).go_around, b.go_around)
+    assert [bool(moved.scene.flight(key).at_step(t + shift, DELTA)[7]) for t in inside] == [True, False]

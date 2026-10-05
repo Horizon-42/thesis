@@ -90,4 +90,5 @@ def at_step(rng: np.random.Generator, count: int, runway: int = 0):
 
     at = np.column_stack((rng.uniform(-20_000, 0, count), rng.uniform(-3_000, 3_000, count), rng.uniform(300, 2_000, count)))
     before = at - np.column_stack((rng.uniform(100, 160, count), rng.uniform(-20, 20, count), rng.uniform(-6, 2, count)))
-    return AircraftAt.of([(f"X{k}", tuple(at[k]), tuple(before[k]), True, runway, "F", False) for k in range(count)])
+    return AircraftAt.of([(f"X{k}", tuple(at[k]), tuple(before[k]), True, runway, "F", False, False)
+                          for k in range(count)])

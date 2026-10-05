@@ -106,7 +106,8 @@ def test_a_permutation_of_the_other_aircraft_permutes_their_tokens():
     order = rng.permutation(7)
     permuted = AircraftAt(keys=tuple(others.keys[k] for k in order), at=others.at[order], before=others.before[order],
                           known=others.known[order], runway_index=others.runway_index[order],
-                          category=tuple(others.category[k] for k in order), last_step=others.last_step[order])
+                          category=tuple(others.category[k] for k in order), last_step=others.last_step[order],
+                          go_around=others.go_around[order])
     assert np.array_equal(tokens(own, others, geometry, separation, 2.0)[order],
                           tokens(own, permuted, geometry, separation, 2.0))
 
@@ -132,11 +133,11 @@ def test_an_unknown_motion_gives_the_flag_and_zeros():
 def test_the_runway_features_read_the_rules():
     geometry = airport()
     separation = airport_separation(geometry)
-    own = AircraftAt.of([("me", (-12_000.0, 0.0, 800.0), (-12_150.0, 0.0, 803.0), True, 0, "F", False)])
+    own = AircraftAt.of([("me", (-12_000.0, 0.0, 800.0), (-12_150.0, 0.0, 803.0), True, 0, "F", False, False)])
     others = AircraftAt.of([
-        ("ahead", (-6_000.0, 0.0, 500.0), (-6_150.0, 0.0, 503.0), True, 0, "F", False),
-        ("parallel", (-15_000.0, 891.0, 900.0), (-15_150.0, 891.0, 903.0), True, 1, "F", False),
-        ("unsaid", (-9_000.0, 0.0, 700.0), (-9_150.0, 0.0, 703.0), True, -1, "F", False)])
+        ("ahead", (-6_000.0, 0.0, 500.0), (-6_150.0, 0.0, 503.0), True, 0, "F", False, False),
+        ("parallel", (-15_000.0, 891.0, 900.0), (-15_150.0, 891.0, 903.0), True, 1, "F", False, False),
+        ("unsaid", (-9_000.0, 0.0, 700.0), (-9_150.0, 0.0, 703.0), True, -1, "F", False, False)])
     got = tokens(own, others, geometry, separation, 2.0)
     assert got[0, F["same"]] == 1.0 and got[1, F["dependent"]] == 1.0
     assert got[0, F["clock_ahead"]] == pytest.approx(np.arcsinh(6_000.0 / SCALE_M), abs=1e-6)

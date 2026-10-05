@@ -7,6 +7,8 @@ import numpy as np
 import pytest
 from geokit import NM_M
 
+from dataclasses import replace
+
 from ts_transformer.inference.separation import RADAR_OR_VERTICAL, IN_TRAIL
 from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.spec import ATC_NO_SPEED_ASSIGNMENT_DISTANCE_M
@@ -23,11 +25,12 @@ SPEC = instruction_spec()
 WORDS = Words(SPEC)
 
 
-def _one(key, e, n=0.0, h=600.0, *, track_deg=90.0, speed=75.0, runway=0, known=True, category="F", last=False):
+def _one(key, e, n=0.0, h=600.0, *, track_deg=90.0, speed=75.0, runway=0, known=True, category="F", last=False,
+         go_around=False):
     """One aircraft at ``(e, n, h)`` that moved ``speed`` m/s on ``track_deg`` in the 2 s before."""
     angle = np.radians(track_deg)
     before = (e - 2.0 * speed * np.sin(angle), n - 2.0 * speed * np.cos(angle), h + 3.0) if known else (0.0, 0.0, 0.0)
-    return (key, (e, n, h), before, known, runway, category, last)
+    return (key, (e, n, h), before, known, runway, category, last, go_around)
 
 
 def _set(*items):
@@ -38,11 +41,12 @@ def test_established_is_g_false_inside_the_region_and_lined_up():
     geometry = airport()
     fin = finals(geometry)
     aircraft = _set(_one("in", -5_000.0), _one("beyond_faf", -(FAF_M + 500.0)), _one("off", -5_000.0, n=2_000.0),
-                    _one("turning", -5_000.0, track_deg=90.0 + 31.0), _one("lined", -5_000.0, track_deg=90.0 - 29.0),
+                    _one("turning", -5_000.0, track_deg=90.0 + 21.0), _one("lined", -5_000.0, track_deg=90.0 - 19.0),
                     _one("no_runway", -5_000.0, runway=-1), _one("row0", -5_000.0, known=False))
-    got = established(aircraft, np.zeros(7, dtype=bool), geometry, fin, SPEC, 2.0)
-    assert got.tolist() == [True, False, False, False, True, False, False]
-    assert not established(aircraft, np.ones(7, dtype=bool), geometry, fin, SPEC, 2.0).any()       # G true
+    got = established(aircraft, geometry, fin, 2.0)
+    assert got.tolist() == [True, False, False, False, True, False, False]           # within 20° (TBL 5-9-1)
+    in_go_around = replace(aircraft, go_around=np.ones(7, dtype=bool))
+    assert not established(in_go_around, geometry, fin, 2.0).any()                    # G true
 
 
 def test_established_reads_one_row_and_is_the_same_for_every_aircraft():
@@ -51,13 +55,13 @@ def test_established_reads_one_row_and_is_the_same_for_every_aircraft():
     rng = np.random.default_rng(0)
     items = [_one(f"a{k}", float(rng.uniform(-9_500, 0)), float(rng.uniform(-400, 400)),
                   track_deg=float(rng.uniform(40, 140)), runway=int(rng.integers(0, 2))) for k in range(40)]
-    together = established(_set(*items), np.zeros(40, dtype=bool), geometry, fin, SPEC, 2.0)
-    alone = [bool(established(_set(item), np.zeros(1, dtype=bool), geometry, fin, SPEC, 2.0)[0]) for item in items]
+    together = established(_set(*items), geometry, fin, 2.0)
+    alone = [bool(established(_set(item), geometry, fin, 2.0)[0]) for item in items]
     assert together.tolist() == alone and together.any() and not together.all()
     # the commanded aircraft (first of a joined set) reads the same as a recorded one
     own = _set(items[3])
     both = joined(own, _set(*items[3:5]))
-    assert established(both, np.zeros(3, dtype=bool), geometry, fin, SPEC, 2.0)[0] == together[3]
+    assert established(both, geometry, fin, 2.0)[0] == together[3]
 
 
 def test_the_judge_on_v4_makes_the_joining_commanded_aircraft_answer():
@@ -65,7 +69,7 @@ def test_the_judge_on_v4_makes_the_joining_commanded_aircraft_answer():
     separation, fin = airport_separation(geometry), finals(geometry)
     leader = _one("leader", -6_000.0, h=500.0)                                  # established on 09
     joiner = _one("me", -7_000.0, n=-3_000.0, h=600.0, track_deg=45.0)           # turning in, not established
-    scene = traffic(joined(_set(joiner), _set(leader)), np.zeros(2, dtype=bool), geometry, separation, fin, SPEC, 2.0)
+    scene = traffic(joined(_set(joiner), _set(leader)), geometry, separation, fin, 2.0)
     assert scene.established.tolist() == [False, True]
     assert scene.runway == ("09", "09")
     assert scene.along_m[1] - scene.along_m[0] == pytest.approx(1_000.0)
@@ -74,11 +78,11 @@ def test_the_judge_on_v4_makes_the_joining_commanded_aircraft_answer():
     # the same two the other way round: the recorded aircraft joins behind an established commanded one — not ours
     me = _one("me", -6_000.0, h=500.0)
     other = _one("other", -7_000.0, n=-3_000.0, h=600.0, track_deg=45.0)
-    scene = traffic(joined(_set(me), _set(other)), np.zeros(2, dtype=bool), geometry, separation, fin, SPEC, 2.0)
+    scene = traffic(joined(_set(me), _set(other)), geometry, separation, fin, 2.0)
     assert commanded_loss(scene, np.zeros(2, dtype=bool), separation) is None
     # in trail on one final, the aircraft behind answers
     scene = traffic(joined(_set(_one("me", -7_000.0)), _set(_one("lead", -3_000.0, h=300.0))),
-                    np.zeros(2, dtype=bool), geometry, separation, fin, SPEC, 2.0)
+                    geometry, separation, fin, 2.0)
     loss = commanded_loss(scene, np.zeros(2, dtype=bool), separation)
     assert loss.kind == IN_TRAIL and loss.responsible == (0,)
 
@@ -88,11 +92,11 @@ def test_the_wake_at_the_threshold_counts_only_when_the_commanded_aircraft_follo
     separation, fin = airport_separation(geometry), finals(geometry)
     heavy = _one("heavy", -50.0, h=115.0, category="B", last=True)              # over its threshold now
     me = _one("me", -50.0 - 6.0 * NM_M, h=600.0, category="F")                   # 6 NM behind: B → F needs 5 NM
-    scene = traffic(joined(_set(me), _set(heavy)), np.zeros(2, dtype=bool), geometry, separation, fin, SPEC, 2.0)
+    scene = traffic(joined(_set(me), _set(heavy)), geometry, separation, fin, 2.0)
     assert scene.established.tolist() == [False, True]                           # 6 NM out: beyond the FAF
     assert commanded_loss(scene, np.array([False, True]), separation) is None
     close = _one("me", -50.0 - 4.0 * NM_M, h=500.0, category="F")                # 4 NM behind, inside the FAF
-    scene = traffic(joined(_set(close), _set(heavy)), np.zeros(2, dtype=bool), geometry, separation, fin, SPEC, 2.0)
+    scene = traffic(joined(_set(close), _set(heavy)), geometry, separation, fin, 2.0)
     assert scene.established.all()
     loss = commanded_loss(scene, np.array([False, True]), separation)
     assert loss is not None and loss.responsible == (0,)
@@ -108,7 +112,7 @@ def _speed_scene(me_e, leader_e, *, me_speed=75.0, leader_speed=65.0, me_track=9
     separation, fin = airport_separation(geometry), finals(geometry, FAR_FAF_M)
     aircraft = joined(_set(_one("me", me_e, h=700.0, speed=me_speed, track_deg=me_track)),
                       _set(_one("leader", leader_e, h=400.0, speed=leader_speed, category=leader_category)))
-    scene = traffic(aircraft, np.zeros(2, dtype=bool), geometry, separation, fin, SPEC, 2.0)
+    scene = traffic(aircraft, geometry, separation, fin, 2.0)
     return scene, along_course_speeds(aircraft, scene, 2.0), separation
 
 
@@ -141,7 +145,7 @@ def test_the_speed_mask_masks_nothing_outside_its_conditions_or_when_every_word_
     separation, fin = airport_separation(geometry), finals(geometry, FAR_FAF_M)
     aircraft = joined(_set(_one("me", -12_000.0, h=700.0)),
                       _set(_one("joiner", -10_000.0, n=-1_500.0, h=650.0, track_deg=50.0), _one("lead", -6_000.0, h=400.0)))
-    scene = traffic(aircraft, np.zeros(3, dtype=bool), geometry, separation, fin, SPEC, 2.0)
+    scene = traffic(aircraft, geometry, separation, fin, 2.0)
     assert scene.established.tolist() == [True, False, True]
     check = speed_check(scene, along_course_speeds(aircraft, scene, 2.0), separation, WORDS, n)
     assert not check.applies and np.array_equal(check.permitted, every)

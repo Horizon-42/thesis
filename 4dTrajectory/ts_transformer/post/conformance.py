@@ -113,7 +113,7 @@ def _aircraft(at, before, known, runway, category) -> AircraftAt:
                       before=np.asarray(before, dtype=np.float64).reshape(-1, 3), known=np.asarray(known, dtype=bool),
                       runway_index=np.asarray(runway, dtype=np.int64),
                       category=tuple(None if c == "" else str(c) for c in category),
-                      last_step=np.zeros(count, dtype=bool))
+                      last_step=np.zeros(count, dtype=bool), go_around=np.zeros(count, dtype=bool))
 
 
 def require_conforming_edges(path: Path) -> Checked:

@@ -25,7 +25,6 @@ import numpy as np
 from ts_transformer.inference.runway_schedule import Separation
 from ts_transformer.inference.separation import VISUAL, Loss, Traffic, losses, wake_at_threshold
 from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
-from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.post.established import established
 from ts_transformer.post.motion import motion
 from ts_transformer.post.runways import approach_clock_m
@@ -44,12 +43,13 @@ def joined(own: AircraftAt, others: AircraftAt) -> AircraftAt:
                       before=np.concatenate((own.before, others.before)),
                       known=np.concatenate((own.known, others.known)),
                       runway_index=np.concatenate((own.runway_index, others.runway_index)),
-                      category=own.category + others.category, last_step=np.concatenate((own.last_step, others.last_step)))
+                      category=own.category + others.category, last_step=np.concatenate((own.last_step, others.last_step)),
+                      go_around=np.concatenate((own.go_around, others.go_around)))
 
 
-def traffic(aircraft: AircraftAt, go_around: np.ndarray, geometry: AirportGeometry, separation: Separation,
-            finals: Sequence[Final], spec: VocabularySpec, step_s: float) -> Traffic:
-    """`separation.Traffic` of ``aircraft`` at one step (module docstring); ``go_around`` each one's G."""
+def traffic(aircraft: AircraftAt, geometry: AirportGeometry, separation: Separation, finals: Sequence[Final],
+            step_s: float) -> Traffic:
+    """`separation.Traffic` of ``aircraft`` at one step (module docstring), each one's G its ``go_around``."""
     moving = motion(aircraft.at, aircraft.before, aircraft.known, step_s)
     count = len(aircraft)
     along, off_course, right = np.full(count, np.nan), np.full(count, np.nan), np.full(count, np.nan)
@@ -67,7 +67,7 @@ def traffic(aircraft: AircraftAt, go_around: np.ndarray, geometry: AirportGeomet
         right[k] = float(relative.right_of_course_m)
     return Traffic(e_m=aircraft.at[:, 0].copy(), n_m=aircraft.at[:, 1].copy(), height_m=aircraft.at[:, 2].copy(),
                    runway=tuple(runways), along_m=along, track_minus_course_deg=off_course, right_of_course_m=right,
-                   established=established(aircraft, go_around, geometry, finals, spec, step_s), category=aircraft.category)
+                   established=established(aircraft, geometry, finals, step_s), category=aircraft.category)
 
 
 def commanded_loss(scene: Traffic, over_threshold: np.ndarray, separation: Separation) -> Loss | None:

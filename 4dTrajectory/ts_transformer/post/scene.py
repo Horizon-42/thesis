@@ -5,7 +5,11 @@ positions in the airport frame and its MSL heights on the 2 s UTC rows, from the
 the last row before the observed threshold crossing. Nothing else of the signals is kept: their track, ground speed and
 vertical rate are fits that use later rows, so a recorded aircraft's motion is its 2 s displacement (`post.motion`).
 Its R is the runway of its record, in force only at the steps after its own first predicted step (D23; the commanded
-aircraft's runway word, said at its first predicted step, is in force from its next row: the same rule). A flight's
+aircraft's runway word, said at its first predicted step, is in force from its next row: the same rule). Its G (the
+go-around state, D92) comes from the labeller's reading of its record where it has a sentence: true at the rows after
+each labelled go-around row up to the row where the runway is said again, as a word said at a row is in force from the
+next (the user's decision, 2026-10-05); a flight without a sentence has G false. The labelled rows are a withheld
+field (vocabulary §6 item 3): only the separation judge and the masks read G, never a model input. A flight's
 first predicted step is `OBSERVATION_S` after its first row on the Δ grid (vocabulary §6 item 7; the sentence's first
 row, `labeller.interval.first_interval_row`).
 
@@ -40,7 +44,7 @@ import numpy as np
 from ts_transformer.data.day_split import DaySplit, landing_day, operating_day_span_s, parse_utc
 from ts_transformer.inference.runway_schedule import Separation, wake_category
 from ts_transformer.instructions.airport import AirportGeometry
-from ts_transformer.instructions.artefact import closed_loop_indices, load_signals
+from ts_transformer.instructions.artefact import closed_loop_indices, load_sentences, load_signals
 from ts_transformer.instructions.labeller.interval import OBSERVATION_S, first_interval_row, interval_rows
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
@@ -73,6 +77,7 @@ class Recorded:
     e_m: np.ndarray
     n_m: np.ndarray
     height_m: np.ndarray
+    go_around: np.ndarray           # [rows] bool: G at each row (module docstring)
 
     @property
     def end_s(self) -> float:
@@ -86,14 +91,14 @@ class Recorded:
             raise ValueError(f"{self.key} has no row at {time_s:.1f}")
         return int(round(row))
 
-    def at_step(self, time_s: float, interval_s: float) -> tuple[str, tuple, tuple, bool, int, str | None, bool]:
+    def at_step(self, time_s: float, interval_s: float) -> tuple[str, tuple, tuple, bool, int, str | None, bool, bool]:
         """Its fields of `AircraftAt` at ``time_s`` (a step of a scene at Δ = ``interval_s``): its R only after its own
-        first predicted step (module docstring)."""
+        first predicted step, its G (module docstring)."""
         row = self.row_at(time_s)
         before = (self.e_m[row - 1], self.n_m[row - 1], self.height_m[row - 1]) if row else (0.0, 0.0, 0.0)
         return (self.key, (self.e_m[row], self.n_m[row], self.height_m[row]), before, row > 0,
                 self.runway_index if time_s > self.first_step_s else -1, self.category,
-                time_s + interval_s > self.end_s)
+                time_s + interval_s > self.end_s, bool(self.go_around[row]))
 
     def shifted(self, shift_s: float, interval_s: float, key: str | None = None) -> Recorded:
         """The same record ``shift_s`` later (a whole number of Δ = ``interval_s``, so that its rows stay on the grid)."""
@@ -103,9 +108,23 @@ class Recorded:
                        first_step_s=self.first_step_s + shift_s, landing_s=self.landing_s + shift_s)
 
 
-def recorded(signals: FlightSignals, geometry: AirportGeometry, interval_s: float, step_s: float,
+def go_around_rows(rows: int, go_around: Sequence[int], runway_again: Sequence[int]) -> np.ndarray:
+    """``[rows]`` bool: G at each row from a labelled sentence's go-around rows and the rows where the runway is said
+    again (module docstring): true after each go-around row, up to and including its runway's row."""
+    if len(go_around) != len(runway_again) or any(not 0 <= g < a < rows for g, a in zip(go_around, runway_again)):
+        raise ValueError(f"each go-around is ended by its runway word, at a later row of the {rows} rows")
+    out = np.zeros(rows, dtype=bool)
+    for g, a in zip(go_around, runway_again):
+        out[g + 1:a + 1] = True
+    return out
+
+
+def recorded(signals: FlightSignals, geometry: AirportGeometry, interval_s: float, step_s: float, go_around: np.ndarray,
              category_of: Callable[[str], str] = wake_category) -> Recorded:
-    """A flight's stored signals as a scene replays it (module docstring); its type's CWT category by ``category_of``."""
+    """A flight's stored signals as a scene replays it (module docstring): ``go_around`` its G at each row
+    (`go_around_rows`; every row false for a flight without a sentence), its type's CWT category by ``category_of``."""
+    if np.shape(go_around) != np.shape(signals.time_s):
+        raise ValueError(f"{signals.dataset_id}: G is given for each of its rows")
     if signals.airport != geometry.code:
         raise ValueError(f"{signals.dataset_id} lands at {signals.airport}, not {geometry.code}")
     times = np.asarray(signals.time_s, dtype=np.float64)
@@ -119,15 +138,17 @@ def recorded(signals: FlightSignals, geometry: AirportGeometry, interval_s: floa
                     start_s=start, step_s=step_s, first_step_s=start + first * step_s + OBSERVATION_S,
                     landing_s=utc_s(signals.landing_time_utc),
                     e_m=np.asarray(signals.e_m, dtype=np.float64), n_m=np.asarray(signals.n_m, dtype=np.float64),
-                    height_m=np.asarray(signals.altitude_m, dtype=np.float64))
+                    height_m=np.asarray(signals.altitude_m, dtype=np.float64),
+                    go_around=np.asarray(go_around, dtype=bool))
 
 
 @dataclass(frozen=True)
 class AircraftAt:
     """Aircraft of a window at one step: their states at the step and at the 2 s row before (``[N, 3]``: e, n, MSL
     height; the row before 0 where it does not exist), whether that row exists (their motion is known, `post.motion`),
-    their R (candidate index; −1 where not in force, D23), their CWT categories and whether the step is their last in
-    the air (the last step before their threshold crossing)."""
+    their R (candidate index; −1 where not in force, D23), their CWT categories, whether the step is their last in the
+    air (the last step before their threshold crossing) and their G (D92: the commanded aircraft's from its words in
+    force, a recorded aircraft's from its labelled sentence)."""
 
     keys: tuple[str, ...]
     at: np.ndarray
@@ -136,24 +157,29 @@ class AircraftAt:
     runway_index: np.ndarray
     category: tuple[str | None, ...]
     last_step: np.ndarray
+    go_around: np.ndarray
 
     def __post_init__(self) -> None:
         count = len(self.keys)
         if (self.at.shape != (count, 3) or self.before.shape != (count, 3)
-                or not all(len(v) == count for v in (self.known, self.runway_index, self.category, self.last_step))):
+                or not all(len(v) == count for v in (self.known, self.runway_index, self.category, self.last_step,
+                                                     self.go_around))):
             raise ValueError("every field of an AircraftAt holds one value for each aircraft")
+        if not all(np.asarray(v).dtype == bool for v in (self.known, self.last_step, self.go_around)):
+            raise ValueError("known, last_step and go_around of an AircraftAt are bool arrays")
 
     def __len__(self) -> int:
         return len(self.keys)
 
     @classmethod
-    def of(cls, items: Sequence[tuple[str, tuple, tuple, bool, int, str | None, bool]]) -> AircraftAt:
-        """From ``(key, at, before, known, runway_index, category, last_step)`` for each aircraft."""
+    def of(cls, items: Sequence[tuple[str, tuple, tuple, bool, int, str | None, bool, bool]]) -> AircraftAt:
+        """From ``(key, at, before, known, runway_index, category, last_step, go_around)`` for each aircraft."""
         return cls(keys=tuple(i[0] for i in items), at=np.array([i[1] for i in items], dtype=np.float64).reshape(-1, 3),
                    before=np.array([i[2] for i in items], dtype=np.float64).reshape(-1, 3),
                    known=np.array([i[3] for i in items], dtype=bool),
                    runway_index=np.array([i[4] for i in items], dtype=np.int64),
-                   category=tuple(i[5] for i in items), last_step=np.array([i[6] for i in items], dtype=bool))
+                   category=tuple(i[5] for i in items), last_step=np.array([i[6] for i in items], dtype=bool),
+                   go_around=np.array([i[7] for i in items], dtype=bool))
 
 
 class Scene:
@@ -218,7 +244,8 @@ class MovedScene:
 @dataclass(frozen=True)
 class Window:
     """One window (module docstring): its kind, the commanded flight (its record, from which the start of a closed loop
-    rebuilds it), its scene of the other aircraft and, for an augmented window, the flights moved (key, shift s)."""
+    rebuilds it, without its labelled G: its G is its words' in the loop), its scene of the other aircraft and, for an
+    augmented window, the flights moved (key, shift s)."""
 
     kind: str
     commanded: Recorded
@@ -229,6 +256,9 @@ class Window:
     def __post_init__(self) -> None:
         if self.kind not in WINDOW_KINDS:
             raise ValueError(f"a window is one of {WINDOW_KINDS}, not {self.kind!r}")
+        if self.commanded.go_around.any():
+            raise ValueError(f"{self.commanded.key}: the commanded aircraft's G comes from its words in force, never from "
+                             "its labelled sentence (a withheld field)")
 
     @property
     def row0_s(self) -> float:
@@ -250,12 +280,21 @@ class Window:
 def airport_scenes(directory: Path, split: str, spec: VocabularySpec, interval_s: float,
                    geometries: Mapping[str, AirportGeometry], category_of: Callable[[str], str] = wake_category
                    ) -> tuple[dict[str, Scene], list[FlightSignals]]:
-    """Each airport's scene of ``split`` (its signals, the artefact's checks: C32), and the split's signals in order."""
+    """Each airport's scene of ``split`` (its signals, the artefact's checks: C32; each flight's G from its labelled
+    sentence, module docstring), and the split's signals in order."""
     interval_rows(interval_s, spec.step_s)
     signals = load_signals(directory, split)
+    labelled = load_sentences(directory, split, spec, ("signal_index", "go_around_offsets", "go_around_row",
+                                                       "runway_again_row"))
+    offsets = labelled["go_around_offsets"]
+    go_around = [np.zeros(s.n_rows, dtype=bool) for s in signals]          # no sentence, or no go-around: G false
+    for k, index in enumerate(labelled["signal_index"].tolist()):
+        rows = slice(int(offsets[k]), int(offsets[k + 1]))
+        go_around[index] = go_around_rows(signals[index].n_rows, labelled["go_around_row"][rows].tolist(),
+                                          labelled["runway_again_row"][rows].tolist())
     flights: dict[str, list[Recorded]] = {code: [] for code in geometries}
-    for s in signals:
-        flights[s.airport].append(recorded(s, geometries[s.airport], interval_s, spec.step_s, category_of))
+    for s, g in zip(signals, go_around):
+        flights[s.airport].append(recorded(s, geometries[s.airport], interval_s, spec.step_s, g, category_of))
     return {code: Scene(geometries[code], split, items, interval_s) for code, items in flights.items()}, signals
 
 
@@ -266,7 +305,8 @@ def real_windows(directory: Path, split: str, spec: VocabularySpec, interval_s: 
     windows = []
     for index in sorted(closed_loop_indices(directory, split, interval_s, spec)):
         scene = scenes[signals[index].airport]
-        windows.append(Window(REAL, scene.flights[scene.index[signals[index].dataset_id]], index, scene))
+        own = scene.flights[scene.index[signals[index].dataset_id]]
+        windows.append(Window(REAL, replace(own, go_around=np.zeros_like(own.go_around)), index, scene))
     return windows
 
 
