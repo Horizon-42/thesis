@@ -23,7 +23,7 @@ import * as Cesium from "cesium";
 import { useApp, useTrainingCursor } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { useTrainingWindowLayers } from "../data/trainingWindowLayers";
-import { trainingWindowOriginOf, type TrainingWindowOrigin, type TrainingWindowRole } from "../data/trainingWindowSample";
+import { trainingWindowOriginOf, windowShiftText, type TrainingWindowOrigin, type TrainingWindowRole } from "../data/trainingWindowSample";
 import { TRAINING_FAILURE_COLOR, trainingOutcomeColour } from "../utils/trainingWordColors";
 import { TRAINING_OUTCOME_TAG } from "../data/trainingText";
 import { airLine, entityGroup, lonLatHeights, marker } from "../scene/trainingEntities";
@@ -65,7 +65,7 @@ function drawTrafficTracks(viewer: Cesium.Viewer, origin: TrainingWindowOrigin) 
   const lost = origin.sentence.end.loss?.other ?? null;
   for (const aircraft of origin.window.traffic) {
     const hue = aircraft.key === lost ? TRAINING_FAILURE_COLOR : TRAINING_WINDOW_ROLE_COLOR[aircraft.role];
-    group.add(airLine(ENTITY.track(aircraft.key), `${aircraft.key} (${aircraft.role}${aircraft.shiftS === null ? "" : `, shifted ${aircraft.shiftS} s`}) · runway ${aircraft.runway}`,
+    group.add(airLine(ENTITY.track(aircraft.key), `${aircraft.key} (${aircraft.role}${aircraft.shiftS === null ? "" : `, shifted ${windowShiftText(aircraft.shiftS)}`}) · runway ${aircraft.runway}`,
       Cesium.Cartesian3.fromDegreesArrayHeights(lonLatHeights(aircraft)), hue, 1.5, 0.6));
   }
   return group;

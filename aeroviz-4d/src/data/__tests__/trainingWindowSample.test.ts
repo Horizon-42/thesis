@@ -12,6 +12,7 @@ import {
   trainingWindowOriginOf,
   TRAINING_WINDOW_INDEX_SCHEMA,
   TRAINING_WINDOW_SAMPLE_SCHEMA,
+  windowShiftText,
 } from "../trainingWindowSample";
 import { TRAINING_LOST_SEPARATION } from "../trainingSample";
 import { positionAt } from "../../hooks/useTrainingWindowLayer";
@@ -149,5 +150,14 @@ describe("where an aircraft is at a time", () => {
     expect(positionAt(track, 0)).toEqual([0, 10, 100]);
     expect(positionAt(track, -1)).toBeNull();
     expect(positionAt(track, 4.5)).toBeNull();
+  });
+});
+
+describe("a window's shift in time (D129)", () => {
+  it("reads in days from a day, in hours from an hour, else in seconds", () => {
+    expect(windowShiftText(-4_409_144)).toBe("−51.0 d");
+    expect(windowShiftText(7_200)).toBe("+2.0 h");
+    expect(windowShiftText(-20)).toBe("−20 s");
+    expect(windowShiftText(0)).toBe("+0 s");
   });
 });

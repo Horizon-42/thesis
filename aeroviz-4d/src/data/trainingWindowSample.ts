@@ -478,6 +478,16 @@ export async function fetchTrainingWindowSample(airportCode: string, file: strin
   return parsed;
 }
 
+/** A shift in time as a window shows it (D129): in days from a day, in hours from an hour, else in seconds — window A
+ *  inserts a flight of another time, often days away. */
+export function windowShiftText(seconds: number): string {
+  const sign = seconds < 0 ? "−" : "+";
+  const size = Math.abs(seconds);
+  if (size >= 86_400) return `${sign}${(size / 86_400).toFixed(1)} d`;
+  if (size >= 3_600) return `${sign}${(size / 3_600).toFixed(1)} h`;
+  return `${sign}${size.toFixed(0)} s`;
+}
+
 // ── a round's sentence as the stage-A views read it ──────────────────────────
 
 /** What a derived flight stands for: the set's window and the round. */

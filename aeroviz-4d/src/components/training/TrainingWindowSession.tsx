@@ -16,13 +16,14 @@
  */
 
 import { useEffect, useState } from "react";
-import { useApp } from "../../context/AppContext";
+import { useApp, useTrainingCursor } from "../../context/AppContext";
 import useTrainingWindowAutopilot from "../../hooks/useTrainingWindowAutopilot";
 import { setTrainingWindowLayer, useTrainingWindowLayers } from "../../data/trainingWindowLayers";
 import {
   fetchTrainingWindowSample,
   trainingWindowFlightView,
   trainingWindowSelectionOf,
+  windowShiftText,
   type TrainingWindow,
   type TrainingWindowRound,
   type TrainingWindowSample,
@@ -98,7 +99,7 @@ function WindowEnd({ window, sentence }: { window: TrainingWindow; sentence: Tra
         <div><dt>Start moved</dt><dd>turned {move.turnDeg.toFixed(1)}° about the airport · {move.heightM >= 0 ? "+" : ""}{move.heightM.toFixed(0)} m · speed × {move.speedScale.toFixed(3)}</dd></div>
       ) : null}
       {window.moved.length > 0 ? (
-        <div><dt>Moved</dt><dd>{window.moved.map(([key, shift]) => `${key} by ${shift >= 0 ? "+" : ""}${shift.toFixed(0)} s`).join("; ")}</dd></div>
+        <div><dt>Moved</dt><dd>{window.moved.map(([key, shift]) => `${key} by ${windowShiftText(shift)}`).join("; ")}</dd></div>
       ) : null}
       <div>
         <dt>Other aircraft</dt>
@@ -136,6 +137,22 @@ function WindowEnd({ window, sentence }: { window: TrainingWindow; sentence: Tra
       </div>
     </dl>
   );
+}
+
+/** The cursor at the window's row 0 when a window or round comes on screen (D129), so the other aircraft show from the
+ *  start (the cursor resets to the flight's row 0, which is before the window's, with the flight on screen). A LEAF: it
+ *  reads the Training cursor, which moves on every chart hover; once set, the cursor is the user's. ``flightKey``: the
+ *  derived flight of the window and round — the cursor is set only once that flight is the one on screen (the session
+ *  publishes it after this leaf's effect has run), never on the flight before. */
+export function WindowCursorStart({ flightKey, row0S }: { flightKey: string; row0S: number }) {
+  const { trainingSelection } = useApp();
+  const { setTrainingCursorS } = useTrainingCursor();
+  const onScreen = trainingSelection?.flight.flightKey === flightKey;
+  // the setter belongs to the flight on screen (a new window or round, a new setter): set once for each
+  useEffect(() => {
+    if (onScreen) setTrainingCursorS(row0S);
+  }, [onScreen, setTrainingCursorS, row0S]);
+  return null;
 }
 
 /** One line of the window list: the commanded flight, the kind, and each round's end. */
@@ -223,7 +240,9 @@ export default function TrainingWindowSession({ airport, sets }: { airport: stri
                 <button type="button" className={item.index === place ? "active" : undefined} title={`${item.head.flightKey} · ${windowSummary(item)}`}
                   onClick={() => setPlaced({ setId: sample.setId, index: item.index })}>
                   <span className="training-flight-callsign">{item.head.callsign}</span>
-                  <span className="training-flight-runway">{item.head.runway}</span>
+                  <span className="training-flight-runway" title="the runway the flight landed on in the record (a round's sentence may say another)">
+                    recorded {item.head.runway}
+                  </span>
                   <span className="training-flight-stratum">{item.kind}</span>
                   <span className="training-flight-executor">
                     {item.rounds.filter((s) => s.outcome === "landed").length}/{item.rounds.length} landed · {item.traffic.length} other
@@ -236,6 +255,9 @@ export default function TrainingWindowSession({ airport, sets }: { airport: stri
             <RoundTable window={window} round={shown} onSelect={setRound} />
           )}
           {window === null || sentence === null ? null : <WindowEnd window={window} sentence={sentence} />}
+          {window === null || shown === null ? null : (
+            <WindowCursorStart flightKey={trainingWindowFlightView(sample, window, shown).flightKey} row0S={window.row0S} />
+          )}
           <fieldset className="training-layers">
             <legend>Draw (window)</legend>
             <label title="the other aircraft where their records have them at the cursor's time">
