@@ -187,11 +187,12 @@ def check(directory: Path) -> Checked:
     if payload["intervals"] != interval_names(words):
         raise ValueError(f"the reference holds the row intervals {payload['intervals']}, this code reads "
                          f"{interval_names(words)}")
+    # C32: the reference's flights are train's — checked on their records before any array of theirs is opened
+    require_split_days(load_day_split(directory), SPLIT, payload["flights"])
     with np.load(directory / DIRECTORY / "reference.npz") as data:
         arrays = {name: data[name] for name in data.files}
     flights = unpack_signals({name[len("signal_"):]: value for name, value in arrays.items() if name.startswith("signal_")},
                              payload["flights"])
-    require_split_days(load_day_split(directory), SPLIT, flights)           # C32: the reference's flights are train's
     checked = Checked(flights=len(flights))
     labelled = 0
     for flight, expected in zip(flights, payload["outcomes"], strict=True):

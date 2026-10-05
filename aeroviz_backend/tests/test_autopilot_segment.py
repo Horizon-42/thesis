@@ -135,9 +135,12 @@ class PayloadTest(unittest.TestCase):
 
 
 # ---- the service
-def set_up_set(root: Path) -> dict:
-    """The fixture set (`test_training_export.stage_a_fixture`, the export's own output) written under ``root``."""
+def set_up_set(root: Path, split: str | None = None) -> dict:
+    """The fixture set (`test_training_export.stage_a_fixture`, the export's own output) written under ``root``;
+    ``split``: its flights' split, changed to it."""
     index, sample = stage_a_fixture()
+    if split is not None:
+        sample["flights"] = [{**item, "split": split} for item in sample["flights"]]
     training = root / sample["airport"] / "training"
     training.mkdir(parents=True)
     training_files.write_set(training, sample["airport"], index["sets"][0], training_files.serialise(sample), [])
@@ -296,6 +299,47 @@ class RefusalTest(unittest.TestCase):
             one = flight(2.0)
             with self.assertRaisesRegex(RequestRefused, "not 'val'"):
                 backend.set_flown(sample, "val", 2.0, Path("i"), one.params, one.words)
+
+
+    def test_a_flight_of_another_split_is_refused_before_any_check_runs(self):
+        """A37: a request for a set's flight of a split other than train and select is refused by name before the
+        checks of its artefact and executor spec run (they open the val days' data for nothing)."""
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as name:
+            sample = set_up_set(Path(name), split="val")
+            backend = AutopilotSegmentBackend(airports_root=Path(name))
+            checks = mock.Mock(side_effect=AssertionError("the checks ran"))
+            request = {"clientId": "page", "seq": 1, "airport": sample["airport"], "setId": FIXTURE_SET,
+                       "flightKey": sample["flights"][0]["flightKey"], "rowIntervalS": 2.0, "column": "heading",
+                       "row": 0}
+            with mock.patch("ts_transformer.autopilot.closed_loop.require_conforming_closed_loop", checks):
+                with self.assertRaisesRegex(RequestRefused, "not 'val'"):
+                    backend.fly(request)
+            self.assertEqual(checks.call_count, 0)
+
+
+class CheckLiveTest(unittest.TestCase):
+    """`check_live.compare`: a live answer against the sample's closed-loop sentence of the same flight and Δ."""
+
+    @staticmethod
+    def case(offset_m: float = 0.0, stored_m: float = 0.0, end: str = "landed"):
+        closed = {"flownFromRow": 2, "states": {"rows": 6, "eM": [0.0] * 6, "nM": [0.0] * 6, "heightMslM": [500.0] * 6},
+                  "replay": {"outcome": "landed", "endCycle": 7, "crossing": {"heightM": 15.0}}}
+        answer = {"executor": {"cycleS": 1.0}, "track": {"cycle": [0, 1, 2, 3, 4], "eM": [offset_m] * 5, "nM": [0.0] * 5,
+                                                          "altitudeMslM": [500.0] * 5},
+                  "stored": {"horizontalM": stored_m, "verticalM": 0.0},
+                  "segment": {"end": end, "endCycle": 7}, "crossing": {"heightM": 15.0}}
+        return answer, closed
+
+    def test_a_live_answer_differs_by_name_past_the_rounding_the_bound_or_the_outcome(self):
+        from aeroviz_backend.autopilot_segment.check_live import ROUNDING_M, compare
+
+        self.assertEqual(compare(*self.case(offset_m=0.09), 2.0, True), [])
+        self.assertRegex(compare(*self.case(offset_m=ROUNDING_M + 0.01), 2.0, False)[0], r"^cycle 0: .* row 2$")
+        self.assertRegex(compare(*self.case(stored_m=2.0 * STATE_BOUND_M), 2.0, False)[0], "artefact's stored states")
+        self.assertRegex(compare(*self.case(end="ground_contact"), 2.0, True)[0], "ended ground_contact at cycle 7")
+        self.assertEqual(compare(*self.case(end="ground_contact"), 2.0, False), [])     # not its column's last word
 
 
 class FakeAutopilot:

@@ -165,7 +165,7 @@ points on a 15 m grid, steps of 15–600 m, 40 levels, the least sum of squared 
 programming, `measure.fit_altitude_grid`) beside the grid of D22, each with the rounding error of the level words
 (`grid_candidates`); the spec takes the row the user chose, `--grid fitted|d22` (required when measuring, as
 `--candidate`), recorded as `chosen_grid`. `instruction_labels --dir` reads
-train, select and val with that spec and writes the sentences, `labels.json`, the readout (with, at each go-around row,
+train, select and val with that spec and writes the sentences, `labels.json`, the readout (of val only the flights labelled and refused, since A37, D85; with, at each go-around row,
 the words in force — vocabulary §9.4 — and whether its low pass lies past the threshold) and the labeller's reference
 sample `conformance/` (C30), in the same run. `instruction_conformance --dir` reads that reference again with the code on
 disk and prints the differences (information, exit 1 on any): since A29 (D73) every runner that uses the labeller on the
@@ -225,7 +225,7 @@ candidate's published TCH, glidepath angle and DA are the artefact's (`candidate
 `measurements.json`; the decision-altitude check takes no parameter (D38); the design's fixed choices (Δt, τ_γ, the γ̇
 factor, the timeout factor) are module constants written into `measurements.json`. It writes the spec's reference tracks
 with it, in the same run, and flies them again in every way before it ends (R42).
-`executor_replay --instructions --executor --split {train,select,val} --out <new dir> [--per-airport 0 = every flight]
+`executor_replay --instructions --executor --split {train,select} --out <new dir> [--per-airport 0 = every flight]
 [--seed] [--chunk 500] [--row-interval-s 2|4|8] [--closed-loop]` is the readout: own-dynamics flights and a stand-in's
 (the performance index's substitute) reported apart, a flight without aircraft dynamics counted (C31); each sentence put on
 the row interval (design §4.8: the UTC multiples of Δ; a sentence the interval refuses is counted,
@@ -239,8 +239,7 @@ R50): each from its first predicted step on the time clock, refused for another 
 required to fly its stored states again to its stored outcome (D74); each row adds the largest |e_y| and |e_h|, those on the rows without a correction
 (D34) and the correction words per column, and each cell of the table the flights that left the observed path by more
 than 300 m (`LEFT_THE_PATH_M`, the reading of vocabulary §9.7) and the correction words per sentence. Every replay's time
-limit is the remaining observed time from the sentence's first row × 1.5 (`replay.time_limits_s`), not its rows. Select and val run from a clean tree; **the val replay waits for the user's
-go-ahead**. Every write refuses an existing directory. Tests: `tests/test_autopilot.py`, `tests/test_closed_loop.py` (every
+limit is the remaining observed time from the sentence's first row × 1.5 (`replay.time_limits_s`), not its rows. Select runs from a clean tree; **val is refused** (since A37, outline D85: the val days are read once, in the stage's validation readout). Every write refuses an existing directory. Tests: `tests/test_autopilot.py`, `tests/test_closed_loop.py` (every
 write into `tmp_path`). `executor_sensitivity` is archived (`archive/two_tier_v3_2026_10/experiments/`).
 
 ### R13 · publishing the executor and the prior: `executor_training_export`, `prior_training_export`, `publish_ts_experiment_trajectories.py --executor-replay`
@@ -1468,7 +1467,7 @@ side (refused unless their specs differ only in H_final and a split's readouts d
 ### R53 · `run_ts.py closed_loop_start_check` — stored closed-loop sentences said through the start of a closed loop give back their states (vocabulary §12.1 A26, §12.2 item 7, D67)
 
 2026-10-04 (`experiments/closed_loop_start_check.py`, `autopilot/start.py`). `closed_loop_start_check --instructions <artefact>
---executor <spec dir> --split train|select|val --row-interval-s 2 4 8 [--per-airport 50] [--seed 1337] [--chunk 2048] --out <new dir>`:
+--executor <spec dir> --split train|select --row-interval-s 2 4 8 [--per-airport 50] [--seed 1337] [--chunk 2048] --out <new dir>`:
 the labeller's, the executor's and the closed loop's checks run first in the process (`start.start` opens the spec,
 D73; the run records their largest differences). For each Δ, the artefact's stored
 closed-loop sentences of the split (`--per-airport` of each airport, seeded; 0 every one; an airport with fewer refused) are started `--chunk` at a time through
@@ -1526,7 +1525,8 @@ predicted step: on the flights that turn there (more than 5° between the observ
 in metres on the ground, `flights.ground_scale`) the distance of the rule's start track (`flights.start_velocity`) from the
 direction of the 8 s after (a readout of the future, never an input), pooled and by airport. Train is drawn in `--parts`
 consecutive blocks of its one seeded permutation, each drawn once and read at every rule in its own process (up to
-`--workers`), put together in order (`merge_tallies`): the readout is the same whatever N and P. No criterion is read (D7):
+`--workers`), put together in order (`merge_tallies`): the readout is the same whatever N and P up to float rounding (a
+part flies its flights in other chunks; a rounding can move a discrete step). No criterion is read (D7):
 the user chooses (D55). Tests: `tests/test_start_rules.py`.
 
     python run_ts.py start_rules --row-interval-s 4 --workers 4 --parts 8 \

@@ -30,9 +30,10 @@ import torch
 
 from ts_transformer.autopilot import closed_loop
 from ts_transformer.autopilot.conformance import ROUNDOFF, STATE_BOUND_M
+from ts_transformer.autopilot.judge import TIMEOUT
 from ts_transformer.autopilot.start import start
 from ts_transformer.instructions.artefact import (
-    SPLITS, closed_loop_sentences, load_signals,
+    READ_SPLITS, closed_loop_sentences, load_signals,
 )
 from ts_transformer.instructions.labeller.interval import interval_rows
 from ts_transformer.instructions.words import RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, wrap180
@@ -93,7 +94,6 @@ def _check_chunk(instructions: Path, split: str, interval_s: float, chosen: dict
             if k < len(chosen[i].rows.grid) - 1 and not done[f]:       # kept while it flies: an early end shows
                 flown[f] += list(rows[f])
         done_at = np.where(done & (done_at < 0), k, done_at)
-    timed_out = loop.timed_out()
     out = []
     for f, i in enumerate(order):
         sentence, withheld = chosen[i].rows, chosen[i].withheld
@@ -108,7 +108,7 @@ def _check_chunk(instructions: Path, split: str, interval_s: float, chosen: dict
                     "position_m": float(np.abs(apart[:, :3]).max()) if same_shape else None,
                     "other_columns": float(np.abs(apart[:, 3:]).max()) if same_shape else None,
                     "done_at_last_row": bool(done_at[f] == len(sentence.grid) - 1),
-                    "timed_out_as_stored": bool(timed_out[f]) == withheld.timed_out,
+                    "timed_out_as_stored": (bool(done[f]) and loop.outcome(f).outcome == TIMEOUT) == withheld.timed_out,
                     "outcome_as_stored": bool(done[f]) and loop.outcome(f).outcome == withheld.outcome})
     return out
 
@@ -122,7 +122,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--instructions", type=Path, required=True)
     parser.add_argument("--executor", type=Path, required=True, help="the executor spec directory")
-    parser.add_argument("--split", choices=SPLITS, required=True)
+    parser.add_argument("--split", choices=READ_SPLITS, required=True,
+                        help="train or select: the val days are read once, in the stage's validation readout (D85)")
     parser.add_argument("--row-interval-s", type=float, nargs="+", required=True)
     parser.add_argument("--per-airport", type=int, default=50, help="0: every closed-loop sentence of the split")
     parser.add_argument("--seed", type=int, default=1337)

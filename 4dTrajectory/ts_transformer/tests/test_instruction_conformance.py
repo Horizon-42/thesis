@@ -168,6 +168,10 @@ def test_the_check_refuses_a_reference_flight_of_another_split_s_day(tmp_path, m
     path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ValueError, match="lands on a select day, not a train day"):
         conformance.check(directory)
+    # A37: on its record, before any array of the reference is opened
+    (directory / conformance.DIRECTORY / "reference.npz").unlink()
+    with pytest.raises(ValueError, match="lands on a select day, not a train day"):
+        conformance.check(directory)
 
 
 def test_the_draw_takes_labelled_and_refused_flights_of_every_airport_and_the_go_arounds_besides(monkeypatch):

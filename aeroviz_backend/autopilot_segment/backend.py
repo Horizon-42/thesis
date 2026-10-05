@@ -54,6 +54,12 @@ def _field(record: dict[str, Any], name: str) -> Any:
     return record[name]
 
 
+def _require_split(split: str) -> None:
+    """A set's flights are of `training_files.SPLITS` (outline §6 item 4, D85): another split is refused by name."""
+    if split not in training_files.SPLITS:
+        raise RequestRefused(f"a set's flights are of {training_files.SPLITS}, not {split!r}")
+
+
 def _whole(value: Any, what: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise RequestRefused(f"{what} must be a whole number, got {value!r}")
@@ -122,8 +128,7 @@ class AutopilotSegmentBackend:
         """The set's flights of ``split`` on their closed-loop sentences at ``interval_s``, set up the first time they
         are asked for (``opened``: the flights drawn for another Δ of the same warm-up, reused); refused for a split
         other than train and select."""
-        if split not in training_files.SPLITS:          # outline §6 item 4
-            raise RequestRefused(f"a set's flights are of {training_files.SPLITS}, not {split!r}")
+        _require_split(split)
         ids = tuple(item["datasetId"] for item in sample["flights"] if item["split"] == split)
         key = (instructions, split, ids, interval_s)
         if key not in self._flown:
@@ -202,6 +207,7 @@ class AutopilotSegmentBackend:
             if len(items) != 1:
                 raise NotListed(f"Training set {set_id} at {airport} has no flight {flight_key}")
             item = items[0]
+            _require_split(item["split"])                   # before any check runs (A37)
             instructions, executor, params, record, words = self.executor_for(sample)
             flown_set = self.set_flown(sample, item["split"], float(interval), instructions, params, words)
             opened = time.perf_counter()

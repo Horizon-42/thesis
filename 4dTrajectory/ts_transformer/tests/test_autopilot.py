@@ -1637,6 +1637,26 @@ def test_the_behaviour_check_refuses_a_law_that_reads_a_vertical_path(monkeypatc
     found = differences()
     assert not found.passed and "states" in str(found.mismatches), found.summary()
 
+    # A37: a law that reads the dynamics' frame (`FlightInputs.frame_params`: the chart's origin, which ``moved`` moves;
+    # before D81 it held the landed runway's threshold and TCH) is found too
+    from ts_transformer.autopilot import executor as executor_module
+
+    original_init = executor_module.Executor.__init__
+
+    def init(self, inputs, *args, **kwargs):
+        original_init(self, inputs, *args, **kwargs)
+        self.lateral.frame = inputs.frame_params                      # the law's own copy of the frame
+
+    def reads_the_frame(self, state, relative_deg, issued, runway, runways, time_s, *, fresh=None):
+        rate = original_rate(self, state, relative_deg, issued, runway, runways, time_s, fresh=fresh)
+        return rate + 1e-3 * self.frame[:, 2]                         # the chart origin's height
+
+    monkeypatch.setattr(lateral.Runways, "of", classmethod(original_of))
+    monkeypatch.setattr(executor_module.Executor, "__init__", init)
+    monkeypatch.setattr(lateral.Lateral, "rate", reads_the_frame)
+    found = differences()
+    assert not found.passed and "states" in str(found.mismatches), found.summary()
+
 
 def test_each_start_rule_gives_the_ground_velocity_of_a_flight_flown_straight_and_level():
     """D77: a flight at a constant ground velocity (60 m/s east, 80 m/s north, 2 m/s up: track 36.87°, compass) gives that

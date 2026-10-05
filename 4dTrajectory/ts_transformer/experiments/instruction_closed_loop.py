@@ -50,7 +50,7 @@ import torch
 from ts_transformer.autopilot import closed_loop, replay
 from ts_transformer.autopilot.spec import params_sha256
 from ts_transformer.instructions.artefact import (
-    CLOSED_LOOP_DIRECTORY, CLOSED_LOOP_SCHEMA, SPLITS, ClosedLoopSentence, closed_loop_sentences,
+    CLOSED_LOOP_DIRECTORY, CLOSED_LOOP_SCHEMA, SEALED_READINGS, SPLITS, ClosedLoopSentence, closed_loop_sentences,
     write_closed_loop,
 )
 from ts_transformer.instructions.labeller.interval import interval_rows
@@ -132,10 +132,6 @@ def _percentiles(values: np.ndarray) -> dict[str, float] | None:
         return None
     return {f"p{q}": float(np.percentile(values, q)) for q in (50, 90, 95, 99)} | {"max": float(values.max()),
                                                                                    "n": len(values)}
-
-
-#: The splits whose readings no summary and no printed text shows (outline D85): their sentences are written, and counted.
-SEALED_READINGS = ("val",)
 
 
 def sealed_summary(counted: Tally) -> dict[str, Any]:

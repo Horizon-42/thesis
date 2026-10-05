@@ -84,12 +84,13 @@ def test_the_matched_point_moves_forward_and_a_path_that_crosses_itself_does_not
 
 
 def test_a_flown_position_behind_the_matched_point_keeps_it():
-    """The matched point never moves back; behind it, e_y is the distance from the matched segment (D83), not from the
-    segment's line extended back."""
+    """The matched point never moves back; behind it, e_y is the distance from the path's segments (D83), not from the
+    segment's line extended back: at the vertex the matched point stays at, the smaller of the two segments around it
+    (A37) — here the one before, from e = 450 to 500."""
     e, n, height = _loop_path()
     path = ObservedPath(e, n, height, 10)
-    lateral, *_ = path.match(100.0, -30.0, 0.0)               # behind segment 10 (e = 500), 30 m right of east
-    assert lateral == pytest.approx(math.hypot(400.0, 30.0)) and path.segment == 10
+    lateral, *_ = path.match(100.0, -30.0, 0.0)               # behind segment 10 (e = 500 to 550), 30 m right of east
+    assert lateral == pytest.approx(math.hypot(350.0, 30.0)) and path.segment == 10    # segment 9 starts at e = 450
 
 
 def test_e_y_at_the_outside_of_a_turn_is_the_distance_from_the_path():
@@ -102,6 +103,48 @@ def test_e_y_at_the_outside_of_a_turn_is_the_distance_from_the_path():
     assert lateral == pytest.approx(math.hypot(30.0, 40.0)) and lateral > 0.0
     inside = ObservedPath(e, n, np.zeros(5), 1).match(150.0, 20.0, 0.0)     # left of the first leg, along it: as before
     assert inside.lateral_m == pytest.approx(-20.0)
+
+
+def test_e_y_at_a_vertex_behind_the_matched_segment_is_the_smaller_distance_on_its_side():
+    """A37, D83: matched on the segment after a vertex (it never moves back), a position the vertex is the nearest point
+    of segment i is measured against segment i − 1 too: the smaller distance, on the nearer segment's side; where the
+    vertex is the nearest point of both (the outside of the turn), on the side of the sum of their normals."""
+    e = np.array([0.0, 100.0, 200.0, 200.0, 200.0])            # east 200 m, then north: a left turn at (200, 0)
+    n = np.array([0.0, 0.0, 0.0, 100.0, 200.0])
+    # matched on the northbound segment (row 2 on): a position 5 m south of the eastbound leg, 10 m before the vertex
+    south = ObservedPath(e, n, np.zeros(5), 2).match(190.0, -5.0, 0.0)
+    assert south.lateral_m == pytest.approx(5.0)                # right of the eastbound leg, 5 m (not 11.2 m left)
+    back = ObservedPath(e, n, np.zeros(5), 2).match(150.0, -3.0, 0.0)          # 50 m before the vertex, 3 m south
+    assert back.lateral_m == pytest.approx(3.0)
+    outside = ObservedPath(e, n, np.zeros(5), 2).match(205.0, -5.0, 0.0)       # south-east of the vertex
+    assert outside.lateral_m == pytest.approx(math.hypot(5.0, 5.0))           # as far as the vertex, right of the turn
+    for path in (ObservedPath(e, n, np.zeros(5), 2),):
+        path.match(190.0, -5.0, 0.0)
+        assert path.segment == 2                                 # the matched point stays (it never moves back)
+    # a left turn of 135° (more than 90°: there segment 2's own side is the wrong one on the outside of the turn)
+    c, k = math.cos(math.radians(135.0)), math.sin(math.radians(135.0))
+    sharp_e, sharp_n = np.array([0.0, 100.0, 200.0, 200.0 + 100.0 * c, 200.0 + 200.0 * c]), np.array([0, 0, 0, 100 * k, 200 * k])
+    sharp = ObservedPath(sharp_e, sharp_n, np.zeros(5), 2).match(201.0, -3.0, 0.0)
+    assert sharp.lateral_m == pytest.approx(math.hypot(1.0, 3.0))          # right of the path, as far as the vertex
+    # the matched point at the far end of its segment (the next segment rounded farther from the shared vertex, so the
+    # search stopped there; `match`'s branch for t = 1): the same vertex rule, with the segment ahead
+    ahead = ObservedPath(sharp_e, sharp_n, np.zeros(5), 1)
+    assert ahead._at_vertex(2, 1, 2, 201.0, -3.0, math.hypot(1.0, 3.0)) == pytest.approx(math.hypot(1.0, 3.0))
+    # past segment 1's end but beside segment 2: segment 2's distance and side (its own nearest point is inside it)
+    beside = (5.0 * 100.0 * k - 20.0 * 100.0 * c) / 100.0                 # right of segment 2, 17.7 m
+    assert ahead._at_vertex(2, 1, 2, 205.0, 20.0, math.hypot(5.0, 20.0)) == pytest.approx(beside) and beside > 0.0
+    # through `match`: a sharp turn where the search stops at segment 1's end (segment 2 rounds farther from the shared
+    # vertex): the vertex rule gives the outside's side (segment 1's alone would give the other)
+    found_e = np.array([-49.9353376713203, 64.6364306847856, 179.2081990408915, 75.26840705546014, -28.671384929971197])
+    found_n = np.array([97658.23678408828] * 3 + [97706.4364702519, 97754.6361564155])
+    stops = ObservedPath(found_e, found_n, np.zeros(5), 1)
+    found = stops.match(202.25326014026516, 97696.83302642421, 0.0)
+    assert stops.segment == 1 and found.lateral_m == pytest.approx(44.9527, abs=1e-4)
+    # a reversal (the normals cancel): the matched segment's side
+    back_e, back_n = np.array([0.0, 100.0, 200.0, 100.0, 0.0]), np.zeros(5)
+    for north, side in ((5.0, 1.0), (-5.0, -1.0)):           # north is right of the westbound segment 2
+        assert ObservedPath(back_e, back_n, np.zeros(5), 2).match(205.0, north, 0.0).lateral_m == pytest.approx(
+            side * math.hypot(5.0, 5.0))
 
 
 # ---- the corrections
@@ -1133,6 +1176,21 @@ def test_a_split_is_drawn_in_parts_of_its_one_permutation_and_their_descriptions
         replay.merge_descriptions([first, (first[0], Counter({"no identified type": 1}))])
 
 
+def test_a_stored_track_is_in_0_to_360_degrees_and_a_remainder_of_360_is_0():
+    """D82, A37: a track a hair below 0° has a remainder of exactly 360° in floats; every stored row writes it as 0°
+    (`flights.compass_track`: the observed rows, and the flown rows of `start.state_rows`)."""
+    from ts_transformer.autopilot.flights import compass_track
+    from ts_transformer.autopilot.frame import Kinematics
+    from ts_transformer.autopilot.start import state_rows
+
+    assert np.remainder(-1e-14, 360.0) == 360.0                                  # the case itself
+    assert compass_track(np.array([-1e-14, 0.0, 359.5, 360.0, 720.5])).tolist() == [0.0, 0.0, 359.5, 0.0, 0.5]
+    one = torch.tensor([1.0], dtype=torch.float64)
+    state = Kinematics(*(one if f.name != "track_deg" else torch.tensor([360.0], dtype=torch.float64)
+                         for f in fields(Kinematics)))
+    assert state_rows(state)[0, 3] == 0.0
+
+
 @pytest.mark.parametrize("interval_s", [2.0, 4.0, 8.0])
 def test_no_start_state_and_no_stored_observed_row_reads_a_sample_after_the_first_predicted_step(interval_s):
     """D77: the start state and the observed rows a closed-loop sentence stores take their velocity from the rows at or
@@ -1166,8 +1224,72 @@ def test_no_start_state_and_no_stored_observed_row_reads_a_sample_after_the_firs
         assert np.array_equal(read["observed"].rows.states[:start], observed_rows(signals, rows, rule, geometry))
         tracks = read["observed"].rows.states[:, 3]
         assert ((0.0 <= tracks) & (tracks < 360.0)).all()                                       # D82
+    # A37: the formal rules read the positions and heights only — the data plane's track, ground speed and vertical rate
+    # changed on every row (before the first predicted step too) change no start state and no stored observed row
+    channels = replace(signals, track_deg=signals.track_deg + 37.0, ground_speed_mps=signals.ground_speed_mps * 1.3,
+                       vertical_rate_mps=signals.vertical_rate_mps - 4.0)
+    for rule in FORMAL_START_RULES:
+        assert np.array_equal(start_state(signals, first, rule, geometry, 62000.0),
+                              start_state(channels, first, rule, geometry, 62000.0)), rule
+        assert np.array_equal(observed_rows(signals, rows, rule, geometry), observed_rows(channels, rows, rule, geometry))
+    assert not np.array_equal(start_state(signals, first, "centred-fit-15s", geometry, 62000.0),
+                              start_state(channels, first, "centred-fit-15s", geometry, 62000.0))   # the data plane's own
     earlier = replace(signals, e_m=np.where(np.arange(signals.n_rows) == first - 1, signals.e_m + 300.0, signals.e_m))
     assert not np.array_equal(start_state(signals, first, "displacement-2s", geometry, 62000.0),
                               start_state(earlier, first, "displacement-2s", geometry, 62000.0))
     zero, one = (start_state(signals, row, "trailing-fit-15s", geometry, 62000.0) for row in (0, 1))
     assert np.array_equal(zero[3:6], one[3:6])                    # row 0 alone in its window: rows 0 and 1, as row 1
+
+
+def test_a_references_go_around_flights_are_drawn_after_the_others_among_those_not_drawn(monkeypatch):
+    """A37 (§7.2 #2, #3): the references' draw takes up to ``go_around_per_airport`` more flights whose sentence has a
+    go-around, among those the first draw did not take, after them, at most that many (`draw_flights` ``at_most``);
+    refused in parts (each part would draw them)."""
+    from types import SimpleNamespace
+
+    #: six labelled flights (signal indices 0–5), with a go-around in the sentences of 1, 2 and 4
+    sentences = {"signal_index": np.arange(6), "go_around_offsets": np.array([0, 0, 1, 2, 2, 3, 3]),
+                 "words": np.zeros((6, 5), dtype=np.int16), "offsets": np.arange(7), "runway_index": np.zeros(6)}
+    calls = []
+
+    def draw_flights(directory, split, keys, *, per_airport, seed, groups, part=(0, 1), at_most=False):
+        calls.append((list(keys), per_airport, at_most))
+        taken = list(keys)[:per_airport]
+        return replay.Drawn(indices=taken, signals=[SimpleNamespace(airport="KXXX", dataset_id=f"KXXX:{i}") for i in taken],
+                            series=[None] * len(taken), groups=[replay.OWN] * len(taken), geometries={"KXXX": None},
+                            description={"flights": len(taken)}, excluded_seen=Counter())
+
+    monkeypatch.setattr(replay, "load_sentences", lambda directory, split, spec_: sentences)
+    monkeypatch.setattr(replay, "draw_flights", draw_flights)
+    monkeypatch.setattr(replay, "read_flight", lambda flight, geometry, spec_, words: SimpleNamespace(
+        words=np.zeros((1, 5), dtype=np.int16), runway_index=0))
+    drawn, readings = replay.draw_readings(None, "train", None, None, per_airport=2, seed=1, go_around_per_airport=2)
+    assert calls == [([0, 1, 2, 3, 4, 5], 2, False), ([2, 4], 2, True)]      # 1 was drawn already
+    assert drawn.indices == [0, 1, 2, 4] and len(readings) == 4
+    assert drawn.description["go_around_flights"] == {"flights": 2}
+    with pytest.raises(ValueError, match="not drawn in parts"):
+        replay.draw_readings(None, "train", None, None, per_airport=2, seed=1, go_around_per_airport=2, part=(0, 2))
+
+
+def test_the_readers_two_parts_have_their_names():
+    """D82, A37: what a model may read (the rows) and what it must not (the withheld fields), by name."""
+    assert [f.name for f in fields(ClosedLoopSentence)] == ["rows", "withheld"]
+    assert [f.name for f in fields(SentenceRows)] == ["first_row", "start", "grid", "correction", "states", "on_interval"]
+    assert [f.name for f in fields(Withheld)] == [
+        "runway", "runway_index", "landing_time_utc", "capture_row", "go_around_rows", "stratum", "outcome", "timed_out",
+        "lateral_m", "vertical_m", "uncorrectable", "observed_row", "matched_row"]
+
+
+@pytest.mark.parametrize("runner", ["executor_replay", "closed_loop_start_check", "final_descent_tolerance"])
+def test_a_readout_that_serves_a_choice_reads_train_or_select_only(runner, capsys):
+    """A37, D85: the val days are read once, in the stage's validation readout; a readout runner refuses them."""
+    import importlib
+
+    from ts_transformer.instructions.artefact import READ_SPLITS, SEALED_READINGS
+
+    assert READ_SPLITS == ("train", "select") and SEALED_READINGS == ("val",)
+    module = importlib.import_module(f"ts_transformer.experiments.{runner}")
+    with pytest.raises(SystemExit) as exited:
+        module.main(["--instructions", "i", "--executor", "e", "--split", "val", "--row-interval-s", "4",
+                     "--out", "o"])
+    assert exited.value.code == 2 and "invalid choice: 'val'" in capsys.readouterr().err

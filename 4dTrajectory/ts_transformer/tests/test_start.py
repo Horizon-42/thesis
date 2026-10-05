@@ -10,7 +10,7 @@ import torch
 
 from ts_transformer.autopilot import closed_loop, replay, start as start_module
 from ts_transformer.autopilot.conformance import STATE_BOUND_M
-from ts_transformer.autopilot.judge import outcome_of
+from ts_transformer.autopilot.judge import TIMEOUT, outcome_of
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
 from ts_transformer.autopilot.start import GoAroundBeyondMost, Loop, RowRefused, start
@@ -97,13 +97,13 @@ def _artefact(tmp_path, monkeypatch, interval_s):
 def test_a_stored_sentence_said_through_the_start_gives_its_states_and_its_outcome(tmp_path, monkeypatch, interval_s):
     """D67: the words of a closed-loop sentence, said row by row through the start, give back its stored states on the 2 s
     rows from the first predicted step and the outcome its replay is judged to; the time limit is the closed-loop
-    reading's."""
+    reading's, and the loop gives it to no caller (D90): whether the flight timed out is the judge's outcome."""
     directory, words, batch, stored, anchor = _artefact(tmp_path, monkeypatch, interval_s)
     params = _params()
     loop, order = start(directory, "train", interval_s, {0: stored}, tmp_path / "executor", most_go_arounds=0, device=CPU)
     assert order == [0]
     limit = (len(batch.readings[0].words) - anchor) * words.spec.step_s * params.timeout_factor   # §5.8, written out
-    assert float(loop.executor.time_limit_s[0]) == limit
+    assert float(loop._executor.time_limit_s[0]) == limit
     flown = [loop.rows()[0]]
     for k, row in enumerate(stored.rows.grid):
         rows, done = loop.step(row[None, :])
@@ -121,7 +121,8 @@ def test_a_stored_sentence_said_through_the_start_gives_its_states_and_its_outco
     assert loop.outcome(0).outcome == replayed.outcome
     assert loop.outcome(0).crossing == replayed.crossing
     assert stored.withheld.outcome == replayed.outcome           # D74: the reading's outcome, stored, is the replay's and the start's
-    assert bool(loop.timed_out()[0]) == stored.withheld.timed_out
+    assert (loop.outcome(0).outcome == TIMEOUT) == stored.withheld.timed_out
+    assert not hasattr(loop, "executor") and not hasattr(loop, "timed_out")     # D90: no time limit to read
 
 
 def test_a_go_around_beyond_the_most_given_is_refused_by_name(tmp_path, monkeypatch):
@@ -135,14 +136,14 @@ def test_a_go_around_beyond_the_most_given_is_refused_by_name(tmp_path, monkeypa
     for most in (0, 1):
         loop, _ = start(directory, "train", 2.0, {0: stored}, tmp_path / "executor", most_go_arounds=most, device=CPU)
         loop.step(stored.rows.grid[:1])
-        before = float(loop.executor.time_limit_s[0])
+        before = float(loop._executor.time_limit_s[0])
         if most == 0:
             with pytest.raises(GoAroundBeyondMost, match="beyond the most 0"):
                 loop.step(climb)
-            assert loop.steps == 1 and loop.executor.count == 2 and loop.go_arounds[0] == 0      # nothing flown
+            assert loop.steps == 1 and loop._executor.count == 2 and loop.go_arounds[0] == 0      # nothing flown
             continue
         loop.step(climb)
-        assert float(loop.executor.time_limit_s[0]) == before + 900.0 and loop.go_arounds[0] == 1
+        assert float(loop._executor.time_limit_s[0]) == before + 900.0 and loop.go_arounds[0] == 1
         loop.step(again)
         with pytest.raises(GoAroundBeyondMost, match="beyond the most 1"):
             loop.step(climb)
@@ -180,18 +181,27 @@ def test_a_row_the_grammar_refuses_is_refused_by_name_with_nothing_changed(tmp_p
     no_level_off[0, ALTITUDE] = words.altitude_no_level_off
     for row, reason in ((climb, "runway word not permitted"), (outside, "word outside its column"),
                         (no_level_off, "no level-off")):
-        before = (loop.steps, loop.executor.count, loop.go_arounds.copy(), list(loop.grammar),
-                  float(loop.executor.time_limit_s[0]), len(loop.spoken.grid), loop.spoken.value.clone())
+        before = (loop.steps, loop._executor.count, loop.go_arounds.copy(), list(loop.grammar),
+                  float(loop._executor.time_limit_s[0]), len(loop.spoken.grid), loop.spoken.value.clone())
         with pytest.raises(RowRefused, match="flight 0 at row 2") as refused:
             loop.step(row)
         assert refused.value.reason.startswith(reason), refused.value.reason
-        after = (loop.steps, loop.executor.count, loop.go_arounds.copy(), list(loop.grammar),
-                 float(loop.executor.time_limit_s[0]), len(loop.spoken.grid), loop.spoken.value.clone())
+        after = (loop.steps, loop._executor.count, loop.go_arounds.copy(), list(loop.grammar),
+                 float(loop._executor.time_limit_s[0]), len(loop.spoken.grid), loop.spoken.value.clone())
         assert after[:2] == before[:2] and np.array_equal(after[2], before[2]) and after[3:6] == before[3:6]
         assert torch.equal(after[6], before[6])                         # the words said: unchanged too
-    # a halted flight's words are not read by the grammar ("go-around" while G is true passes)
+    # a halted flight's words are not read by the grammar ("go-around" while G is true passes) ...
     loop.halt(np.array([True]))
     loop.step(climb)
+    # ... but their values are (D80): a word outside its column, or a runway that is no candidate, refused by name
+    runway = np.full((1, 5), UNCHANGED, dtype=np.int64)
+    runway[0, RUNWAY] = len(loop.geometries[0].candidates)
+    for row in (outside, runway):
+        before = (loop.steps, loop._executor.count, len(loop.spoken.grid))
+        with pytest.raises(RowRefused, match="flight 0 at row 3") as refused:
+            loop.step(row)
+        assert refused.value.reason == "word outside its column"
+        assert (loop.steps, loop._executor.count, len(loop.spoken.grid)) == before
 
 
 def test_the_start_refuses_sentences_not_read_under_its_artefact_split_and_executor(tmp_path, monkeypatch):

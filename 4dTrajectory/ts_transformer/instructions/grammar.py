@@ -154,6 +154,15 @@ def _require_words(step: Sequence[int], words: Words) -> None:
             raise ValueError(f"{COLUMNS[column]} class {step[column]} outside 0..{counts[COLUMNS[column]] - 1}")
 
 
+def require_values(step: Sequence[int], words: Words, n_candidates: int) -> None:
+    """Every word of ``step`` is a value of its column (vocabulary D80): the runway column "unchanged", "go-around" or one
+    of the airport's ``n_candidates`` candidates, the others their words (`_require_words`); refused by name
+    (`ValueError`). The rules are not read: a done or halted flight's row is checked here and not by them (D80, D87)."""
+    _require_words(step, words)
+    if not (step[RUNWAY] in (UNCHANGED, RUNWAY_GO_AROUND) or 0 <= step[RUNWAY] < n_candidates):
+        raise ValueError(f"runway value {step[RUNWAY]} is neither unchanged, go-around nor one of {n_candidates} candidates")
+
+
 def _rules(ops: Any, words: Words, first: Any, in_runway: Any, in_go: Any, in_altitude: Any, in_angle: Any,
            runway: Any, heading: Any, altitude: Any, angle: Any, speed: Any, height: Any, candidates: Any
            ) -> tuple[Any, Any, Any, Any, Any]:

@@ -40,7 +40,7 @@ import torch
 
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S, Executor
-from ts_transformer.autopilot.flights import FlightInputs, flight_inputs, observed_rows, rebuild_series
+from ts_transformer.autopilot.flights import FlightInputs, compass_track, flight_inputs, observed_rows, rebuild_series
 from ts_transformer.autopilot.frame import AirportCharts, Kinematics
 from ts_transformer.autopilot.judge import Outcome, outcome_of
 from ts_transformer.autopilot.lateral import Runways
@@ -51,7 +51,7 @@ from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import (
     CLOSED_LOOP_SCHEMA, ClosedLoopSentence, closed_loop_path, load_candidates, load_sentences, load_signals,
 )
-from ts_transformer.instructions.grammar import InForce, Ungrammatical, apply
+from ts_transformer.instructions.grammar import InForce, Ungrammatical, apply, require_values
 from ts_transformer.instructions.labeller.interval import OBSERVATION_S, interval_rows
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, Words
@@ -80,14 +80,17 @@ def state_rows(state: Kinematics) -> np.ndarray:
     speed, vertical rate."""
     speed, gamma = state.speed_mps.cpu().numpy(), state.gamma_rad.cpu().numpy()
     return np.column_stack([state.e_m.cpu().numpy(), state.n_m.cpu().numpy(), state.height_m.cpu().numpy(),
-                            state.track_deg.cpu().numpy(), state.ground_speed_mps.cpu().numpy(),
+                            compass_track(state.track_deg.cpu().numpy()), state.ground_speed_mps.cpu().numpy(),
                             speed * np.sin(gamma)]).astype(np.float64)
 
 
 class Loop:
     """Flights flown from their first predicted step a Δ row at a time (module docstring): ``inputs`` their state and
     physical context there, ``geometries`` their airports', ``approach_ias_mps`` their approach speeds,
-    ``time_limits_s`` their time limits before the go-arounds, ``most_go_arounds`` the most go-arounds one may say."""
+    ``time_limits_s`` their time limits before the go-arounds, ``most_go_arounds`` the most go-arounds one may say.
+    A caller reads the states of the rows flown and which flights are done (`step`), and why a flight ended from the
+    judge's outcome (`outcome`); the executor, and with it the time limit, is the loop's own (D90: the time limit is a
+    function of the observed landing time)."""
 
     def __init__(self, inputs: FlightInputs, geometries: Sequence[AirportGeometry], approach_ias_mps: Sequence[float],
                  time_limits_s: Sequence[float], params: ExecutorParams, words: Words, *, interval_s: float,
@@ -98,7 +101,7 @@ class Loop:
         self.params, self.words, self.interval_s = params, words, interval_s
         self.geometries = list(geometries)
         self.most_go_arounds = most_go_arounds
-        self.executor = Executor(
+        self._executor = Executor(
             inputs, Runways.of(self.geometries, words.spec, dtype=f64, device=device),
             AirportCharts.of(self.geometries, dtype=f64, device=device),
             torch.tensor(list(approach_ias_mps), dtype=f64, device=device), params, words, step_s=interval_s,
@@ -117,7 +120,7 @@ class Loop:
 
     def rows(self) -> np.ndarray:
         """Every flight's state now (at the start of the next row) as `STATE_COLUMNS` rows, ``[B, 6]``."""
-        return state_rows(self.executor.now())
+        return state_rows(self._executor.now())
 
     def step(self, words_row: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Every flight's words of the next Δ row (``[B, 5]``) flown for Δ seconds: the states of the 2 s rows flown
@@ -125,7 +128,7 @@ class Loop:
         (`RowRefused`) or a go-around beyond the most given (`GoAroundBeyondMost`) refuses the step by name, before
         anything changes (module docstring)."""
         row = np.asarray(words_row, dtype=np.int64)
-        executor, cycle_s = self.executor, self.params.cycle_s
+        executor, cycle_s = self._executor, self.params.cycle_s
         if row.shape != (len(self.geometries), len(COLUMNS)):
             raise ValueError(f"a step is [{len(self.geometries)}, {len(COLUMNS)}] words, got {list(row.shape)}")
         flying = ~(executor.done | executor.halted).cpu().numpy()     # a done or halted flight's words are not heard
@@ -134,6 +137,11 @@ class Loop:
         if len(beyond):
             raise GoAroundBeyondMost(f"flight(s) {beyond.tolist()} said a go-around beyond the most "
                                      f"{self.most_go_arounds} at row {self.steps}")
+        for f in range(len(row)):                       # every flight's row, a done or halted one's too (D80)
+            try:
+                require_values(row[f], self.words, len(self.geometries[f].candidates))
+            except ValueError as error:
+                raise RowRefused(f"flight {f} at row {self.steps}: {error}", "word outside its column") from None
         height = executor.now().height_m.cpu().numpy()
         grammar = list(self.grammar)
         for f in np.flatnonzero(flying):
@@ -143,8 +151,6 @@ class Loop:
                                    len(geometry.candidates))
             except Ungrammatical as error:
                 raise RowRefused(f"flight {f} at row {self.steps}: {error}", error.reason) from None
-            except ValueError as error:                 # a word outside its column
-                raise RowRefused(f"flight {f} at row {self.steps}: {error}", "word outside its column") from None
         self.spoken.say(row)                              # validates the row before it changes anything
         self.grammar = grammar
         self.go_arounds += go_around
@@ -161,21 +167,20 @@ class Loop:
 
     def halt(self, flights: np.ndarray) -> None:
         """Hold ``flights`` (``[B]`` bool) from the next cycle on (`Executor.halt`)."""
-        self.executor.halt(torch.as_tensor(flights, device=self.executor.state.device))
+        self._executor.halt(torch.as_tensor(flights, device=self._executor.state.device))
 
-    def timed_out(self) -> np.ndarray:
-        """``[B]`` bool: the flights done at their time limit (the executor's own test)."""
-        executor = self.executor
-        return ((executor.done_cycle.cpu().numpy() + 1) * self.params.cycle_s
-                >= executor.time_limit_s.cpu().numpy()) & executor.done.cpu().numpy()
+    def captured(self) -> np.ndarray:
+        """``[B]`` bool: the flights whose vertical law holds a captured level (what the closed-loop reading's corrections
+        read, §4.9)."""
+        return self._executor.vertical.captured.cpu().numpy()
 
     def outcome(self, flight: int) -> Outcome:
         """Flight ``flight``'s outcome, read by the judge off what the executor recorded (`judge.outcome_of`); refused for a
         flight not done (a halted flight is never done)."""
-        if not bool(self.executor.done[flight]):
+        if not bool(self._executor.done[flight]):
             raise ValueError(f"flight {flight} is not done: it has no outcome yet")
         if self._flown is None:
-            self._flown = self.executor.flown()
+            self._flown = self._executor.flown()
         return outcome_of(self._flown, flight, self.geometries[flight], self.words.spec)
 
 
