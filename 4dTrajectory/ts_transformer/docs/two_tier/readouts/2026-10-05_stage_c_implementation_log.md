@@ -324,3 +324,49 @@ inside 3 NM and 1,000 ft of the commanded aircraft at its first predicted step. 
 
 Tests: `test_post_scene.py`, 13 passed; the full ts suite on 8 workers at `2bb77065`: 1,749 passed, 1 skipped, 7 min
 17 s (another session's suite was running beside it; a first run was stopped from outside and run again).
+
+## 14 C1's census of the recorded aircraft with a faulty observed track (vocabulary D111; 2026-10-05)
+
+The order of `notes/stage_c.md` (the census of D111): stage A's line (`ed2530ae`, A40's `instructions/faults.py`)
+reached this branch through stage B (`dev-two-tier-v4-prior` `c58d7772` merged, `fdfa81d3`; `dev-two-tier` with it).
+
+**Commit** `35289115` (reviewed by an independent reviewer; fixed: the skipped steps widened by the offset of a pair
+separated as one): `post/fault_census.py` `fault_census`, `window_faults`, `reads_fault`; `experiments/post_windows.py`
+the census's block `faults` (`instructions.faults.faulty_flights`, vocabulary §6 item 3). Tests:
+`test_post_fault_census.py`, `test_post_scene.py`, `test_architecture.py`, 53 passed; the full ts suite on 8 workers at
+`35289115`: 1,782 passed, 1 skipped, 8 min 43 s.
+
+**The census** on A34's artefact (v12, Δ 4 s), train and select, in the scratchpad, from the committed code on a clean
+tree, 11 min 22 s; val not read, nothing under `outputs/`. Over each real window's steps from the commanded aircraft's
+row 0 to the end of its record:
+
+| Split | Airport | Windows | With a marked recorded aircraft in the air | Steps | Steps reading a faulty point | Tokens reading one | Losses on the records | Of them with a faulty point at or 2 Δ before the event |
+|---|---|---|---|---|---|---|---|---|
+| train | KMSY | 4,808 | 172 | 447,581 | 113 | 137 | 16 | 0 |
+| train | KRDU | 11,864 | 413 | 1,174,512 | 291 | 327 | 345 | 0 |
+| train | KSJC | 9,101 | 49 | 721,363 | 39 | 40 | 333 | 0 |
+| train | KSMF | 5,377 | 112 | 547,412 | 86 | 90 | 321 | 1 |
+| train | KSTL | 9,380 | 316 | 945,384 | 267 | 320 | 359 | 1 |
+| train | all | 40,530 | 1,062 (2.6 %) | 3,836,252 | 796 (0.02 %) | 914 | 1,374 (3.4 % of windows) | 2 |
+| select | KMSY | 657 | 25 | 61,408 | 11 | 11 | 2 | 0 |
+| select | KRDU | 1,916 | 175 | 192,745 | 218 | 251 | 74 | 1 |
+| select | KSJC | 1,516 | 111 | 130,476 | 38 | 43 | 66 | 0 |
+| select | KSMF | 844 | 60 | 85,394 | 59 | 67 | 46 | 0 |
+| select | KSTL | 1,266 | 60 | 127,866 | 81 | 99 | 46 | 0 |
+| select | all | 6,199 | 431 (7.0 %) | 597,889 | 407 (0.07 %) | 471 | 234 (3.8 %) | 1 |
+
+No criterion is applied (D7); the user decides whether such steps or windows need a rule.
+
+**Proposals** (readings of the order and of C1's last item):
+
+- **P23. Reading a faulty point**: a recorded aircraft reads one at a step when its row there is one of D111's fault
+  rows or the row before it is (its 2 s motion reads the step that starts there). A fault's own row counts as the order
+  says ("the row itself is a faulty point"), though for a jump or a held stretch its position and its motion are sound:
+  the counts lean high by about one step for each fault (the reviewer).
+- **P24. The steps counted**: each real window's steps from the commanded aircraft's row 0 to the end of its record
+  (the census reads records; a loop flies longer or shorter).
+- **P25. The losses on the records**: each window's first loss that the commanded aircraft answers for after its first
+  predicted step (the event that would end the window, D93), the commanded aircraft on its record (its recorded runway
+  after its first predicted step, its labelled G); "with a faulty point" when either aircraft of the pair reads one at
+  the event's step or in the 2 Δ before it. A step with no other aircraft within 8 NM widened by 2,500 ft (the largest
+  minimum, and the offset of a pair separated as one) is not judged.
