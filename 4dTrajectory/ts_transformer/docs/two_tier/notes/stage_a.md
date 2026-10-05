@@ -1,30 +1,25 @@
 # 阶段 A：当前命令
 
 只放最新一条命令，新命令整份覆盖，不是日志（过程记在 `readouts/2026-10-05_stage_a_implementation_log.md`）。
-2026-10-05，Claude 写，用户转发。
+2026-10-05，Claude 写，用户转发。上一条（A42 和清理）已做完（`dev-two-tier-v4` 在 `06b8fde1`）。
 
 ```
-A41：val 日只读一次（D85）。
-依据：vocabulary.md §12.1 A41、D85；复审记录 readouts/2026-10-05_stage_a_check_a32_a40.zh.md §2 第 1、2 条。
+A43：后端启动时不再跑一致性检查（D73 改了；用户 2026-10-05）。
+依据：vocabulary.md §12.1 A43、D73（最后几句）、D71；notes/report_to_designer_backend_checks.md（实测和用户的意见）。
 
-1. 把 dev-two-tier（含 a804633e 之后的文档提交）合进 dev-two-tier-v4，在 dev-two-tier-v4-a41 上做。
-2. 只改代码、测试和一份报告：
-   - experiments/instruction_figures.py：页面从 select 日取，不再取 val；
-   - experiments/executor_turns.py：--split 只允许 READ_SPLITS（train、select）；
-   - readouts/2026-10-05_stage_a_a34_report.zh.md 末节（A37 的代码在产物上的检查）：删去 val 的数字
-     （val 的一句差异、val 那架航班的拐点转角、val 的抽样核对结果），写"val：不展示（D85）"；
-   - 4dTrajectory/ts_transformer/CLAUDE.md 里 instruction_figures 一行、docs/reference/runners.md 里它的条目：写 select；
-   - vocabulary.md §0.3 里 A34 一行写着"报告在做"，改成报告已写成（readouts/2026-10-05_stage_a_a34_report.zh.md）。
-3. 测试：两个运行器按名字拒绝 val。
-4. 审查（只审代码）→ 提交 → 报告提交号。不建任何产物，不读 val。
-
-另：删除被取代的产物（用户 2026-10-05 同意；与 A41 无先后）。
-1. 删除前逐个看一眼目标，只删下面这些，不删别的：
-   - 4dTrajectory/outputs/POOLED/instruction_language/v11_20261004（2.3 GB）；
-   - 4dTrajectory/outputs/POOLED/executor/v16_20261004（4.4 GB）；
-   - 五个机场（KMSY、KRDU、KSJC、KSMF、KSTL）training/ 下的 closed_loop_v11_20261004 目录，
-     以及各自 index_v4.json 里它的条目（closed_loop_v12_20261005 的条目和目录不动）。
-2. 删完后：跑发布检查（aeroviz-4d/scripts/check_publication.ts），确认 v12 集合仍能读；
-   在 vocabulary.md §0.3 里记一行（删了什么、哪天、用户同意）。
-3. 不重启服务；重启由用户做。
+1. 把 dev-two-tier（含本条的提交）合进 dev-two-tier-v4，在新分支 dev-two-tier-v4-a43 上做。
+2. 代码、测试、文档；不建产物，不重跑任何数据：
+   - backend.py 的 executor_for 改用 replay.open_spec（不跑检查；规格与产物、规格 sha 的核对保留），
+     不再调 closed_loop.require_conforming_closed_loop，去掉 _failed；
+   - fly.py 里 apart_from_stored 旁边写唯一的一处拒绝：活航段离存储状态超过 STATE_BOUND_M（水平或垂直）就按名字拒绝，
+     带上两个距离、集合和该怎么办；后端的 fly 和 B 的钩子（aeroviz_backend/autopilot_segment/prior.py，也调
+     apart_from_stored）都用它；check_live 自己在开头跑三个检查，像别的运行器一样；
+   - warm_up：同一产物的各集合只读一次 signals；请求不等别的集合的预热（预热用各集合自己的锁，请求遇到没开的集合自己开）；
+     B 的钩子在用 _lock、_claim、_latest、_require_split、executor_for、set_flown：名字和意思保持不变，要变就写明；
+   - 页面（trainingAutopilot.ts、TrainingAutopilotStatus.tsx）：答复超过 2 s，状态里写"后端正在打开这个集合"；
+     拒绝作为带原因的错误显示；不加超时；
+   - 文档：backend.py 的模块说明、docs/reference/contracts.md 的 C33、ts_transformer/CLAUDE.md 里那一行（"the backend at its start"）。
+3. 测试按 A43 的规格写（预热和 fly 都不调三个检查；改了一条律的执行器在第一次请求就被按名字拒绝；
+   没预热完的集合的请求不等别的集合；页面的状态消息）。A23 的集合和夹具、B 的钩子的测试照旧要过。
+4. 审查（只审代码）→ 提交 → 在日志里记每个集合预热的秒数（改前改后）→ 报告提交号。
 ```

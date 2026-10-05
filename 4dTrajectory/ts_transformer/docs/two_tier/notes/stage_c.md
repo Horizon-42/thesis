@@ -1,28 +1,23 @@
 # 阶段 C：当前命令
 
 只放最新一条命令，新命令整份覆盖，不是日志（过程记在 `readouts/2026-10-05_stage_c_implementation_log.md`）。
-2026-10-05，Claude 写，用户转发。上一条（D111 故障航迹普查）已做完（`35289115`）；requests 文件 §1–§3 已由设计和用户处理
-（`80b0af59`、`f16c1997`）。
+2026-10-05，Claude 写，用户转发。上一条（跟进 D114–D117、C6、C9）已做完（见实现日志 `17017a55` 一行）。
 
 ```
-跟进 D114–D117，然后做 C6、C9。
-依据：post_training.md D94、D103、D113–D117，§8 C5、C6、C7、C9，§0.4 计划表；vocabulary.md D97（Loop.copy、
-start_moved）；prior.md §7（Speaker.copy）。
+跟进 B 阶段这一轮（B10 收尾、跟进 A37–A41、B11，D118）。
+依据：prior.md §0.1 D111、D118，§7（"代码"列，本轮的名字已写入），§8 第 1 项；post_training.md C0。
 
-1. 把 dev-two-tier（f16c1997 或更新）合进本分支。
-2. 跟进设计（改代码）：
-   - D115：裁剪比值项和对 base 的拉回项，整批计数词之和除以整批计数行数（不再逐样本除）；
-   - D116：traffic 模块改为各层共用一个 token 网络，每步 token 只编码一次，各层保留自己的注意力；
-     C5 的测试（初始输出为 0 时 prior 逐位不变、无交通输出 0、交换其他飞机顺序不变）照旧要过；
-   - D114：窗口读数里报告读到故障点的步数，以及事件步或事件前 2 Δ 内有故障点的间隔丧失数（沿用 C1 普查的定义）。
-3. C6（分支训练，D94）：两遍；随机数由种子、轮次、窗口、分支点、k 决定；第二遍与第一遍核对，不一致的窗口计数、
-   报告、本轮不出样本；分支点上复制 loop、speaker 和窗口自身状态（Loop.copy、Speaker.copy）；
-   同一分支点的所有窗口的续说合成一批；按 §8 C6 写测试。
-4. C9（B 类窗口）：经 start_moved 移动起点；转角、高度变化、速度变化的范围写成提议给用户；
-   C1 普查加上 B 类窗口（D113 的规则同样适用）。
-5. 每步：单文件测试 → 独立审查（只审代码）→ 修正 → 用显式路径提交；全量测试前按 outline §5 规则 13 看资源
-   （B5 的正式 campaign 在 GPU 上跑）。
-6. 更新 post_training.md §0.3 状态表（C6 已不再等 A38）和实现日志；requests 文件重写为当前状态。
-7. 报告：提交号、测试结果、C9 的范围提议和其他读法。
+1. 把 dev-two-tier-v4-prior（89845fa6 或更新）和 dev-two-tier（249aacfb 或更新）合进本分支。
+2. tests/test_architecture.py 的 PRIOR_INTERFACE 按 prior §7"代码"列补齐本轮的名字：
+   - checkpoint：readable_identity、validation_claim、holds_claim；source：require_selection_of；
+   - selection：kept(rule, outcome, faulty)、left_out、side、SIDES、REASONS、CELL；
+   - §7 第 7 项：SpeakingLoop 的 copy、said、states、generated。
+3. 跟进改名和签名：
+   - 格式新名：检查点 ts-prior-checkpoint-v8、自由生成 v4、验证读数 v3、procedure-masks-v5；
+   - 用到 kept 的地方改成新签名；数据项经 ArtefactSource 读，D111 的故障航班自动剔除；
+   - 被调用方结束的航班（D93 的间隔丧失）：用 said/states 取它的句子，不要找 generated 要判定结果（D118 第 6 条）。
+4. C 的测试和全量 ts 套件照旧要过（全量前按 outline §5 规则 13 看资源）。
+   每步：单文件测试 → 独立审查（只审代码）→ 用显式路径提交。
+5. 报告：提交号、测试结果，以及你的读法（作为提议）。
 不改 instructions/、autopilot/、prior/，也不改 B 的共用模块。
 ```
