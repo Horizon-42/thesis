@@ -1,17 +1,16 @@
 # 阶段 A：当前命令
 
 只放最新一条命令，新命令整份覆盖，不是日志（过程记在 `readouts/2026-10-05_stage_a_implementation_log.md`）。
-2026-10-05，Claude 写，用户转发。上一条（A41、删除被取代的产物）已做完。
+2026-10-05，Claude 写，用户转发。上一条（B 阶段请求的两处小改动）已由 Claude 按用户的话做完，A 只剩收尾。
 
 ```
-两处小改动（B 阶段的请求，requests_from_b_to_designer.md §2；用户 2026-10-05 同意由 A 改）。
-只改代码注释和测试辅助；不建产物，不重跑任何东西。
-
-1. 把 dev-two-tier（249aacfb 或更新）合进 dev-two-tier-v4，在新分支上做。
-2. aeroviz_backend/autopilot_segment/backend.py 第 107 行附近，B 的钩子（self.prior = PriorSegments(self)）的注释：
-   不再写 index_prior_v1.json，改为引用 prior.training_files.INDEX_FILE，不写文件版本号。
-3. tests/support.py 的 labelled_instruction_artefact：在合成的 signals.json 里写上 runway_ends_from，
-   字段和真实产物的一致（training_export.candidate_hae_minus_msl_m 读的就是它）。
-4. A 自己的测试和夹具照旧要通过（A23 的集合和夹具逐字节不变）。
-5. 审查（只审代码）→ 用显式路径提交 → 报告提交号。之后 B 会删掉它测试里的替身。
+收尾，不写代码。
+1. tests/support.py 的 labelled_instruction_artefact 里的 runway_ends_from 已写好：
+   dev-two-tier-v4-a42，提交 06b8fde1（单独一个文件，测试 260 个通过，一次独立审查无意见）。
+   把 dev-two-tier-v4 快进到 dev-two-tier-v4-a42。
+2. 另一处（B 钩子行 backend.py 第 107 行附近的注释）不由 A 改：这一行只在 B 的分支上，A 的线上没有；
+   已改派给 B（notes/stage_b.md 第 3 条）。
+3. 快进后清理已合并的工作树和分支：dev-two-tier-v4-a41、dev-two-tier-v4-a42（各自的 .claude/worktrees/ 目录），
+   以及 a32、a37–a40 里已合并而没删的。先看每个目标是否已合并、工作树是否干净，再删。
+4. 在日志里记一行：做了什么、提交号。报告。
 ```
