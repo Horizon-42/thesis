@@ -188,3 +188,29 @@ def test_samples_refuse_rows_that_are_not_said_or_carry_nothing():
         _samples(rows, permitted, traffic, counted=none)
     with pytest.raises(ValueError, match="beside the rows"):
         _samples(rows, permitted, traffic, advantage=torch.ones(1, 1))
+
+
+def test_the_surrogate_and_the_kl_refuse_a_model_in_training_mode_and_the_data_term_runs_in_it():
+    """D107: `masked_log_probability` refuses a model with any module in training mode; `update_loss` scores the words
+    in eval mode (a model left in training mode is put there), refuses a base in training mode, and its data term runs
+    with dropout on."""
+    base = _base()
+    model = _trained(base)
+    rows, permitted, _, traffic = _spoken(model)
+    traffic_modules(model)[0].train()                             # one module in training mode, the rest in eval
+    with pytest.raises(ValueError, match="training"):
+        masked_log_probability(model, rows, permitted, traffic)
+    rng = np.random.default_rng(9)
+    data = collate([prior_sentence(rng, WORDS, candidates=2, rows=LENGTH, first_step=FIRST) for _ in range(4)], CPU)
+    start = PassStart(_trained(base))                             # the model that spoke (its weights), in eval mode
+    model.train()                                                 # left in training mode: the loss puts it in eval
+    parts = update_loss(model, start, base, _samples(rows, permitted, traffic), data)
+    assert torch.isfinite(parts.loss) and parts.clipped == 0 and not model.training
+    base.train()
+    with pytest.raises(ValueError, match="training"):
+        update_loss(model, start, base, _samples(rows, permitted, traffic), data)
+    base.eval()
+    torch.manual_seed(1)
+    first = data_term(model, data)
+    torch.manual_seed(2)
+    assert not torch.equal(first, data_term(model, data))         # dropout on: another seed, another loss

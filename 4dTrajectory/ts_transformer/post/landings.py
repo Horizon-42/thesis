@@ -10,7 +10,8 @@ roster less the sealed test days) with the window's changes:
   on the same runway, under the inserted aircraft's own key (`scene.INSERTED_SUFFIX`);
 - window D: the moved aircraft's roster landing moved by its shift.
 
-A landing that a shift puts on a sealed test day is left out and counted with the index's sealed landings (C32). The
+A landing that a shift puts on a sealed test day is left out and counted with the index's sealed landings (C32); one
+that a shift puts on a day outside the day split is refused by the index itself (`LandingIndex`, prior D105). The
 commanded aircraft's own landing stays in the index: the function of a loop's row leaves it out by its key (D31, D63).
 """
 
@@ -19,7 +20,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timezone
 
-from ts_transformer.data.day_split import DaySplit, landing_day
+from ts_transformer.data.day_split import landing_day
 from ts_transformer.post.scene import INSERTED, INSERTED_SUFFIX, LEADER_MOVED, REAL, Window
 from ts_transformer.prior.inputs import own_flight_key
 from ts_transformer.prior.landings import Landing, LandingIndex
@@ -30,12 +31,8 @@ def roster_key(dataset_id: str, airport: str) -> str:
     return own_flight_key({"dataset_id": dataset_id, "airport": airport})
 
 
-def _on_test_day(time_s: float, days: DaySplit) -> bool:
-    return landing_day(datetime.fromtimestamp(time_s, tz=timezone.utc).isoformat()) in days.days["test"]
-
-
-def window_landings(window: Window, roster: LandingIndex, days: DaySplit) -> LandingIndex:
-    """``window``'s landings (module docstring) from its airport's ``roster`` landings."""
+def window_landings(window: Window, roster: LandingIndex) -> LandingIndex:
+    """``window``'s landings (module docstring) from its airport's ``roster`` landings (with their day split)."""
     if window.kind == REAL:
         return roster
     if len(window.moved) != 1:
@@ -53,9 +50,9 @@ def window_landings(window: Window, roster: LandingIndex, days: DaySplit) -> Lan
     else:
         raise ValueError(f"no landings for a window {window.kind}")
     sealed = roster.sealed
-    if _on_test_day(changed.time_s, days):
+    if landing_day(datetime.fromtimestamp(changed.time_s, tz=timezone.utc).isoformat()) in roster.days.days["test"]:
         sealed += 1
     else:
         landings[changed.flight_key] = changed
     kept = sorted(landings.values(), key=lambda landing: (landing.time_s, landing.flight_key))
-    return LandingIndex(roster.runways, tuple(kept), sealed)
+    return LandingIndex(roster.runways, tuple(kept), sealed, roster.days)

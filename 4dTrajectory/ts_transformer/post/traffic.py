@@ -5,7 +5,8 @@ a window at one step, and the event of a window.
 less the course of that runway, its distance right of the runway's extended centreline, whether it is established and
 its CWT category. Here they come from vocabulary §6 item 4 (`instructions.airport.relative_to_runway` on the
 candidates of the artefact), from "established" (`post.established`, D92) and from the 2 s displacement before the row
-(`post.motion`); the reading is `VISUAL` (7110.65BB 7-4-4 c with visual approach clearances, never visual separation).
+(`prior.inputs.motion`, prior §7 item 2); the reading is `VISUAL` (7110.65BB 7-4-4 c with visual approach
+clearances, never visual separation).
 
 The commanded aircraft is aircraft 0 of the `Traffic`, the other aircraft follow in the scene's order. **The event of a
 window** is the first loss of separation for which the commanded aircraft answers (`commanded_loss`): a pair that
@@ -26,7 +27,7 @@ from ts_transformer.inference.runway_schedule import Separation
 from ts_transformer.inference.separation import VISUAL, Loss, Traffic, losses, wake_at_threshold
 from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
 from ts_transformer.post.established import established
-from ts_transformer.post.motion import motion
+from ts_transformer.prior.inputs import motion
 from ts_transformer.post.runways import approach_clock_m
 from ts_transformer.post.scene import AircraftAt
 from ts_transformer.prior.procedure import Final

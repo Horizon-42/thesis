@@ -825,12 +825,13 @@ POST = TS_DIR / "post"
 POST_MAY_IMPORT = ("post.", "instructions.", "inference.separation", "inference.runway_schedule", "data.day_split",
                    "io_utils", "repo_layout")
 #: Prior §7, the column "Code": the names stage C may import from `prior/` (in `post/` and in its runners); B9's names
-#: (prior D96) as stage B's log gives them for that column: `LoopRows`, `draw`, `Permitted`, `masked_log_probability`.
+#: (prior D96) and B10's (D105–D107: the function that opens a prior run, the motion of rows) as B9's log and B10's code
+#: give them, where §7 still reads "new, B9/B10".
 PRIOR_INTERFACE = {
-    "prior.checkpoint": {"load_checkpoint", "CHECKPOINT_SCHEMA"},
+    "prior.checkpoint": {"load_checkpoint", "CHECKPOINT_SCHEMA", "open_prior", "OpenedPrior"},
     "prior.model": {"Prior"},
     "prior.procedure": {"PROCEDURE_MASKS", "procedure_digests", "airport_finals", "Final"},
-    "prior.inputs": {"state_inputs", "sentence_rows", "own_flight_key"},
+    "prior.inputs": {"state_inputs", "sentence_rows", "own_flight_key", "motion"},
     "prior.loop": {"LoopRows"},
     "prior.landings": {"Landing", "LandingIndex"},
     "prior.source": {"airport_landings", "ArtefactSource"},
@@ -894,12 +895,12 @@ def test_stage_c_takes_from_the_prior_only_the_names_of_its_interface():
         refused = _prior_imports_refused(path.read_text(encoding="utf-8"))
         assert not refused, f"{path.relative_to(TS_DIR)}: {refused}"
     assert not _prior_imports_refused("from ts_transformer.prior.procedure import Final, airport_finals\n")
-    assert _prior_imports_refused("from ts_transformer.prior.inputs import motion\n"
+    assert _prior_imports_refused("from ts_transformer.prior.inputs import Heard\n"
                                   "from ts_transformer.prior import speaker\n"
                                   "import ts_transformer.prior.model\n"
                                   "from ts_transformer import prior\n"
                                   "from .. import prior\n") == [
-        "from prior.inputs import motion", "from prior import speaker", "import prior.model",
+        "from prior.inputs import Heard", "from prior import speaker", "import prior.model",
         "from ts_transformer import prior", "from .. import prior"]
 
 
@@ -910,6 +911,56 @@ def test_only_the_runners_reach_the_post_training():
         rel = path.relative_to(TS_DIR).as_posix()
         if any(name.split(".")[0] == "post" for name in _imported_names(path)):
             assert rel.startswith("experiments/"), f"{rel} imports the post-training"
+
+
+#: Prior §7 item 7: the module of the step of a speaker's closed loop (D106), and the names stage C's runners take from
+#: it; no other module of `experiments/` but stage C's own (`post_*`).
+SPEAKING_LOOP = "experiments.prior_speaking_loop"
+SPEAKING_LOOP_NAMES = {"SpeakingLoop", "Generated", "flight_numbers"}
+
+
+def _experiments_imports_refused(source: str) -> list[str]:
+    """Each import of ``source`` from `experiments/` that is neither a stage C module (`post_*`) nor a name of prior §7
+    item 7's module, by the names imported; a relative import is refused outright (a runner's imports are qualified,
+    L1)."""
+    refused = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.level:
+            refused += [f"from {'.' * node.level}{node.module or ''} import {a.name}" for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            module = _package_relative(node.module)
+            if module.split(".")[0] != "experiments":
+                continue
+            if module == "experiments":
+                refused += [f"from experiments import {a.name}" for a in node.names if not a.name.startswith("post_")]
+            elif module == SPEAKING_LOOP:
+                refused += [f"from {module} import {a.name}" for a in node.names if a.name not in SPEAKING_LOOP_NAMES]
+            elif not module.split(".")[1].startswith("post_"):
+                refused += [f"from {module} import {a.name}" for a in node.names]
+        elif isinstance(node, ast.Import):
+            refused += [f"import {_package_relative(a.name)}" for a in node.names
+                        if _package_relative(a.name).split(".")[0] == "experiments"
+                        and not _package_relative(a.name).startswith("experiments.post_")]
+    return refused
+
+
+def test_the_stage_c_runners_take_from_experiments_only_the_shared_step_of_the_loop():
+    """Post-training §8 C0 (prior §7 item 7, D106): the runners of stage C import from `experiments/` only stage C's own
+    modules and, of the step of a speaker's closed loop, only the names that prior §7 item 7 gives."""
+    for path in _post_runners():
+        refused = _experiments_imports_refused(path.read_text(encoding="utf-8"))
+        assert not refused, f"{path.name}: {refused}"
+    assert not _experiments_imports_refused("from ts_transformer.experiments.prior_speaking_loop import SpeakingLoop\n"
+                                            "from ts_transformer.experiments.post_window_loop import WindowLoop\n")
+    assert _experiments_imports_refused("from ts_transformer.experiments.prior_speaking_loop import FIRST_ROWS\n"
+                                        "from ts_transformer.experiments.prior_free_generation import speak\n"
+                                        "from ts_transformer.experiments import training_flights\n"
+                                        "import ts_transformer.experiments.prior_train\n"
+                                        "from .prior_speaking_loop import FIRST_ROWS\n"
+                                        "from . import prior_train\n") == [
+        "from experiments.prior_speaking_loop import FIRST_ROWS", "from experiments.prior_free_generation import speak",
+        "from experiments import training_flights", "import experiments.prior_train",
+        "from .prior_speaking_loop import FIRST_ROWS", "from . import prior_train"]
 
 
 def test_the_stage_c_runners_take_from_autopilot_only_what_its_interface_lists():

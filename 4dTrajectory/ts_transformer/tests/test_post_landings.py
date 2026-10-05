@@ -43,14 +43,14 @@ def _count(index, time_s, without):
 def test_a_real_window_counts_the_rosters_landings(built):
     windows, roster, days, _ = built
     for window in windows:
-        assert window_landings(window, roster, days) is roster
+        assert window_landings(window, roster) is roster
 
 
 def test_window_a_counts_the_inserted_aircraft_at_its_shifted_time(built):
     windows, roster, days, _ = built
     window = inserted_window(windows[0], np.random.default_rng(1337), landing_shift_s=(-120.0, 120.0), apart_s=3_600.0)
     (key, shift), = window.moved
-    landings = window_landings(window, roster, days)
+    landings = window_landings(window, roster)
     source = next(x for x in roster.landings if x.flight_key == "far")
     added = next(x for x in landings.landings if x.flight_key == roster_key(key, "KXXX"))
     assert added.flight_key == "far" + INSERTED_SUFFIX
@@ -67,7 +67,7 @@ def test_window_d_counts_the_moved_aircraft_at_its_moved_time(built):
     window = leader_moved_window(windows[1], airport_separation(geometries["KXXX"]), np.random.default_rng(1337),
                                  shift_s=(-60.0, 60.0))
     (key, shift), = window.moved
-    landings = window_landings(window, roster, days)
+    landings = window_landings(window, roster)
     before = next(x for x in roster.landings if x.flight_key == roster_key(key, "KXXX"))
     after = next(x for x in landings.landings if x.flight_key == before.flight_key)
     assert after.time_s == before.time_s + shift and len(landings.landings) == len(roster.landings)
@@ -88,7 +88,7 @@ def test_a_landing_shifted_onto_a_test_day_is_left_out(built):
     shift = round((test_noon - landing.time_s) / DELTA) * DELTA
     moved = replace(window, kind="D", scene=MovedScene(window.scene, replaced={"KXXX:a": leader.shifted(shift, DELTA)}),
                     moved=(("KXXX:a", shift),))
-    landings = window_landings(moved, roster, days)
+    landings = window_landings(moved, roster)
     assert "a" not in {x.flight_key for x in landings.landings}
     assert landings.sealed == roster.sealed + 1
 
@@ -96,7 +96,7 @@ def test_a_landing_shifted_onto_a_test_day_is_left_out(built):
 def test_a_window_moves_one_flight(built):
     windows, roster, days, _ = built
     with pytest.raises(ValueError, match="moves one flight"):
-        window_landings(replace(windows[0], kind="A", moved=()), roster, days)
+        window_landings(replace(windows[0], kind="A", moved=()), roster)
 
 
 def test_an_inserted_landing_on_a_test_day_is_left_out_and_a_flight_missing_from_the_roster_fails(built):
@@ -108,8 +108,8 @@ def test_an_inserted_landing_on_a_test_day_is_left_out_and_a_flight_missing_from
     key = "KXXX:far" + INSERTED_SUFFIX
     inserted = replace(window, kind="A", moved=((key, shift),),
                        scene=MovedScene(window.scene, added=(source.shifted(shift, DELTA, key=key),)))
-    landings = window_landings(inserted, roster, days)
+    landings = window_landings(inserted, roster)
     assert landings.landings == roster.landings and landings.sealed == roster.sealed + 1
     missing = replace(roster, landings=tuple(x for x in roster.landings if x.flight_key != "far"))
     with pytest.raises(KeyError):
-        window_landings(inserted, missing, days)
+        window_landings(inserted, missing)

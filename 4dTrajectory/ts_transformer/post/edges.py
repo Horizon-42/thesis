@@ -4,8 +4,8 @@ one step, what it is to the commanded aircraft (the edge features) and its own m
 **When.** At each step of the window, one instant for every aircraft: the commanded aircraft's row and each other
 aircraft's row at that time. Nothing is carried from step to step, and no value of a later row is read.
 
-**Motion** is each aircraft's displacement in the 2 s before the row (`post.motion`, as the prior's motion inputs). An
-aircraft's row 0 has no row before it: its motion is unknown, the pair's ``motion_unknown`` is 1 and every feature that
+**Motion** is each aircraft's displacement in the 2 s before the row (`prior.inputs.motion`, prior §7 item 2: the
+prior's own motion inputs). An aircraft's row 0 has no row before it: its motion is unknown, the pair's ``motion_unknown`` is 1 and every feature that
 reads a motion is 0; a commanded aircraft whose motion is unknown or zero has no frame (``front``, ``left`` and the
 direction 0).
 
@@ -43,7 +43,7 @@ from ts_transformer.inference.runway_schedule import (
     DEPENDENT, FAA_RADAR_NM, INDEPENDENT, SAME, SINGLE, UNRELATED, Separation,
 )
 from ts_transformer.instructions.airport import AirportGeometry
-from ts_transformer.post.motion import motion
+from ts_transformer.prior.inputs import motion
 from ts_transformer.post.runways import approach_clock_m
 from ts_transformer.post.scene import AircraftAt
 

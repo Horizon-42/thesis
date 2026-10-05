@@ -10,13 +10,11 @@ import pytest
 from ts_transformer.data.day_split import SealedDay
 from ts_transformer.instructions.artefact import load_candidates, load_day_split
 from ts_transformer.post import scene as post_scene
-from ts_transformer.post.motion import motion
 from ts_transformer.post.runways import airport_separation
 from ts_transformer.post.scene import (
     INSERTED, INSERTED_SUFFIX, LEADER_MOVED, REAL, airport_scenes, census, inserted_window, leader_moved_window,
     near_day_cut, next_ahead, real_windows, recorded,
 )
-from ts_transformer.prior.inputs import motion as prior_motion
 from ts_transformer.tests.post_support import categories, scene_artefact, straight_in, train_noon
 from ts_transformer.tests.support import INSTRUCTION_STEP_S
 
@@ -37,15 +35,6 @@ def built(tmp_path):
     geometries = load_candidates(tmp_path / "art")
     scenes, signals = airport_scenes(tmp_path / "art", "train", spec, DELTA, geometries, categories)
     return tmp_path / "art", spec, scenes, signals, geometries
-
-
-def test_the_motion_of_a_scene_is_the_priors_motion():
-    rng = np.random.default_rng(0)
-    at, before = rng.normal(size=(50, 3)) * 500.0, rng.normal(size=(50, 3)) * 500.0
-    known = rng.random(50) > 0.2
-    ours, theirs = motion(at, before, known, 2.0), prior_motion(at, before, known, 2.0)
-    for name in ("ground_speed_mps", "vertical_rate_mps", "track_deg", "known"):
-        assert np.array_equal(getattr(ours, name), getattr(theirs, name)), name
 
 
 def test_a_scene_holds_its_split_only_and_never_a_test_day(built, tmp_path):

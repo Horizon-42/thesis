@@ -30,7 +30,7 @@ from ts_transformer.inference.separation import Traffic
 from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.spec import ATC_NO_SPEED_ASSIGNMENT_DISTANCE_M
 from ts_transformer.instructions.words import SPEED, UNCHANGED, Words
-from ts_transformer.post.motion import motion
+from ts_transformer.prior.inputs import motion
 from ts_transformer.post.scene import AircraftAt
 
 

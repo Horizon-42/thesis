@@ -3,7 +3,8 @@
 **A recorded flight** (`Recorded`) is a flight's stored signals (vocabulary §6 item 3, D97) as a scene replays it: its
 positions in the airport frame and its MSL heights on the 2 s UTC rows, from the entry of the arrival slice (row 0) to
 the last row before the observed threshold crossing. Nothing else of the signals is kept: their track, ground speed and
-vertical rate are fits that use later rows, so a recorded aircraft's motion is its 2 s displacement (`post.motion`).
+vertical rate are fits that use later rows, so a recorded aircraft's motion is its 2 s displacement
+(`prior.inputs.motion`, prior §7 item 2).
 Its R is the runway of its record, in force only at the steps after its own first predicted step (D23; the commanded
 aircraft's runway word, said at its first predicted step, is in force from its next row: the same rule). Its G (the
 go-around state, D92) comes from the labeller's reading of its record where it has a sentence: true at the rows after
@@ -145,7 +146,7 @@ def recorded(signals: FlightSignals, geometry: AirportGeometry, interval_s: floa
 @dataclass(frozen=True)
 class AircraftAt:
     """Aircraft of a window at one step: their states at the step and at the 2 s row before (``[N, 3]``: e, n, MSL
-    height; the row before 0 where it does not exist), whether that row exists (their motion is known, `post.motion`),
+    height; the row before 0 where it does not exist), whether that row exists (their motion is known, `prior.inputs.motion`),
     their R (candidate index; −1 where not in force, D23), their CWT categories, whether the step is their last in the
     air (the last step before their threshold crossing) and their G (D92: the commanded aircraft's from its words in
     force, a recorded aircraft's from its labelled sentence)."""

@@ -128,9 +128,9 @@ def data_term(model: Prior, rows: RowTensors) -> torch.Tensor:
 
 def update_loss(model: Prior, start: PassStart, base: Prior, samples: Samples, data: RowTensors) -> LossParts:
     """One update's loss (module docstring): ``model`` the model trained (its traffic modules added), ``start`` the
-    model that spoke the samples, ``base`` the base checkpoint, ``data`` a batch of single-aircraft samples."""
-    if base.training:
-        raise ValueError("the base scores the words in eval mode")
+    model that spoke the samples, ``base`` the base checkpoint, ``data`` a batch of single-aircraft samples. The words
+    are scored in eval mode (``model`` is put there; a base or a pass-start copy with any module in training mode is
+    refused by `masked_log_probability`, D107)."""
     model.eval()
     log_p = masked_log_probability(model, samples.rows, samples.permitted, samples.traffic)
     with torch.no_grad():

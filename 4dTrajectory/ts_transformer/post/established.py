@@ -10,8 +10,8 @@ An aircraft is established on the final of its R at a row when (D92):
    interception less than 2 NM from the approach gate, which holds inside the FAF (the user's decision, 2026-10-05; the
    judge's lined-up angle, 30°, is the table's other row).
 
-The track is the direction of the 2 s displacement before the row (`post.motion`), as for every motion of a scene; an
-aircraft whose motion is unknown (its row 0) is not established. A row without R in force is not established. Only
+The track is the direction of the 2 s displacement before the row (`prior.inputs.motion`, prior §7 item 2), as for
+every motion of a scene; an aircraft whose motion is unknown (its row 0) is not established. A row without R in force is not established. Only
 the separation judge and the masks read it; it is not an executor law, and it reads no later row (not the capture row,
 vocabulary §6 item 3) and no executor state.
 """
@@ -24,7 +24,7 @@ import numpy as np
 
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.words import wrap180
-from ts_transformer.post.motion import motion
+from ts_transformer.prior.inputs import motion
 from ts_transformer.post.scene import AircraftAt
 from ts_transformer.prior.procedure import Final
 
