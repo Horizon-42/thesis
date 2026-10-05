@@ -72,6 +72,7 @@ A proposal is a reading where the design says nothing; it holds only until the u
 | The user's answers on P19, P20 | P19 (a quiet window: every runway present) and P20's count in `a1fdd2a8`; P20 decided (a window that opens inside a loss is left out of the draw) in `2bb77065` (log §12, §13) |
 | C1's census of the faulty tracks (vocabulary D111) | Done, reviewed: `35289115`; the counts on A34's artefact for the user (log §14) |
 | C6, C9; D114–D116 | Done on synthetic artefacts, reviewed: C6 `a81d0a5a`, D115 `9f089780`, D116 `20adc232`, D114 `66b8d4db`, C9 `2c60de9c`; C9's census on A34's artefact (log §15) |
+| C10, C8 (code) | `post_train`, `post_profile` written and reviewed on synthetic artefacts (`69531aa3`, log §16); their formal runs wait for B5's base, C10's also for the user's criteria |
 | C8–C12 | Wait for B5's base, Claude's check of stage B, the moved start (C9) and the user's criteria (D7) |
 
 ### 0.4 Plan
