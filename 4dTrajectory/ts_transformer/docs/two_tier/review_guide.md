@@ -25,6 +25,8 @@ voice, one meaning for each word. The words were not checked one by one against 
 | Leak | Information that reaches an input but that the input must not have: the future of the flight, a sealed day, an identity of the airport, or procedure data where the design forbids it |
 | Latent leak | A leak that no consumer reads today, but that nothing in the code stops |
 | Channel | A path from a source of data to a consumer: a value, a field of an object, a set, a file |
+| Train days, select days | The days that a training reads. The gradients come from the train days. The select days are read in every epoch: they stop the training and choose the epoch, the round or a setting (the "validation" of a one-tier run is this set) |
+| Validation days (val) | Days that no training and no choice reads. They are read one time for each stage, in the stage's validation readout, to give the number that the stage reports (outline D85) |
 | Sealed day | A test day (contract C32). No code opens, labels, counts or reads it, except the final test |
 | Seam | Shared code that more than one stage uses (the data plane, `flight_scenarios/`, the start of a closed loop) |
 
@@ -43,7 +45,9 @@ voice, one meaning for each word. The words were not checked one by one against 
 4. **A value fitted from data comes from the train days only.** Check the split of every fit: grids, classes, limits,
    rules, hyperparameters, the stop of a training. The select days choose. The validation days are read one time for
    each stage. A readout that serves a choice of the user shows the train and select days only (outline D85). The test
-   days are sealed.
+   days are sealed. When a rule seals a split, search every runner for the split (its name, each `--split` option); do not
+   trust the list of runners that an order names (stage A: `instruction_figures` and `executor_turns` still read val
+   after A37 had changed the runners of its list). A check of a code change runs on the train and select days.
 5. **Check what a component holds, not only what it reads.** An object that holds a forbidden value is a channel, also
    when no law reads it today (vocabulary D81: the landed runway in the executor's frame).
 6. **Check by behaviour, not by names.** A test that scans names misses a value read through `getattr`, a dictionary or
@@ -203,6 +207,8 @@ Use the design `post_training.md` and the public interfaces of the vocabulary (�
 | The executor flew on after a crossing of another runway or the stall cut-off, which the judge takes as the end | End of a flight | 8 | D79 |
 | The first cycle of a flight had no roll-rate limit | Design mismatch | 9 | D84 |
 | The lateral error used the extended line of a segment, not the path | Design mismatch | 9 | D83 |
+| Two runners (`instruction_figures`, `executor_turns`) still read the val days after D85 had been applied to the runners of its list; a correction's own check and report also showed val flights (check of A32–A40) | Split | 4 | Vocabulary A41 |
+| The design said that an executor's states are the same bit for bit in batches of different size (from a smoke of 395 flights); a sample of 200 flights showed differences up to 7.9e-10 m (check of A32–A40) | A claim without a measurement at the size and the layout that it applies to | 11 | Vocabulary D97 (3); post-training D94 and §6.4: the states are within `STATE_BOUND_M` |
 
 **What the review found clean (examples of channels to trace):** each law of the executor read only what vocabulary
 §5.2 lists; the mass was the published landing mass of the type and the "unspecified" speed its published approach
