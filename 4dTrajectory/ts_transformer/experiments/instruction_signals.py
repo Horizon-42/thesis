@@ -19,11 +19,10 @@ no flight decides a candidate. Beside them go every runway end the harvest build
 counted (``counts.<split>.not_a_candidate``, by runway). Writes ``signals_{train,select,val}.npz``, ``signals.json``
 (with the day split) and ``candidates.json`` into a NEW directory.
 
-``--list-candidates`` builds nothing: for each airport, the candidates this code takes, the ends it adds and removes
-against the former rule — the arrival manifest's ``runway_targets``, every end with an arrival on any day, the rule of
-``v11_20261004`` and before, taken again on the same manifests (the user's choice, 2026-10-05: no former format is read)
-— and the eligible arrivals of each such end by split, the test days' only counted, from the roster (C32), written as
-JSON to ``--out`` (A33).
+``--list-candidates`` builds nothing: for each airport, its candidates and the runway ends with arrivals that are no
+candidate (their flights would be refused), each with its eligible arrivals by split — the test days' only counted, from
+the roster (C32) — written as JSON to ``--out`` (A33). No former rule is kept here (the user, 2026-10-05): a comparison
+with an earlier artefact is a readout's.
 
     python run_ts.py instruction_signals --out 4dTrajectory/outputs/POOLED/instruction_language/<name>
     python run_ts.py instruction_signals --list-candidates --out <scratch>/candidates.json
@@ -89,27 +88,24 @@ def keys_by_day(provenance: dict[str, Any], manifests: dict[str, Path], days: Da
     return result
 
 
-def former_candidates(manifests: dict[str, Path]) -> dict[str, set[str]]:
-    """The former rule's candidates of each airport (``--list-candidates``): the ends of its arrival manifest's
-    ``runway_targets`` — every end with an arrival on any day."""
-    return {airport: {str(ident).upper() for ident in json.loads(path.read_text(encoding="utf-8"))["runway_targets"]}
-            for airport, path in manifests.items()}
+def runway_ends_from() -> dict[str, str]:
+    """The runway configuration and CIFP the candidates and runway ends come from, by path and sha256 (information)."""
+    return {"config": str(DEFAULT_CONFIG), "config_sha256": file_sha256(DEFAULT_CONFIG),
+            "cifp": str(DEFAULT_CIFP), "cifp_sha256": file_sha256(DEFAULT_CIFP)}
 
 
-def candidate_changes(geometries: dict[str, AirportGeometry], before: dict[str, set[str]],
-                      arrivals: list[tuple[str, str, str, str]]) -> dict[str, Any]:
-    """For each airport (``--list-candidates``): the candidates of ``geometries``, the ends added and removed against
-    ``before`` (each airport's former candidates, `former_candidates`), and the eligible arrivals of each of those ends by
-    split (``arrivals``: `eligible_arrivals`)."""
+def candidate_listing(geometries: dict[str, AirportGeometry], arrivals: list[tuple[str, str, str, str]]
+                      ) -> dict[str, Any]:
+    """For each airport (``--list-candidates``): its candidates and the runway ends with arrivals that are no candidate,
+    each with its eligible arrivals by split (``arrivals``: `eligible_arrivals`)."""
     counts: Counter = Counter((airport, runway, split) for split, airport, _key, runway in arrivals)
     out = {}
     for airport in sorted(geometries):
-        now = {c.ident for c in geometries[airport].candidates}
-        old = before[airport]
-        out[airport] = {"candidates": sorted(now),
-                        **{name: {ident: {split: counts[(airport, ident, split)] for split in DAY_SPLITS}
-                                  for ident in sorted(ends)} for name, ends in (("added", now - old),
-                                                                                ("removed", old - now))}}
+        candidates = {c.ident for c in geometries[airport].candidates}
+        landed = {runway for _split, at, _key, runway in arrivals if at == airport}
+        out[airport] = {name: {ident: {split: counts[(airport, ident, split)] for split in DAY_SPLITS}
+                               for ident in sorted(ends)}
+                        for name, ends in (("candidates", candidates), ("not_candidates", landed - candidates))}
     return out
 
 
@@ -163,7 +159,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--out", type=Path, required=True, help="a new directory (with --list-candidates: a new file)")
     parser.add_argument("--list-candidates", action="store_true",
-                        help="build nothing: the candidates against the former rule's, with their arrivals by split (D78)")
+                        help="build nothing: the candidates and the ends with arrivals that are none, their arrivals by "
+                             "split (D78)")
     parser.add_argument("--airports", nargs="+", default=None, help="default: every harvested airport")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--limit", type=int, default=0,
@@ -193,13 +190,12 @@ def main(argv: list[str] | None = None) -> int:
     runways = {a: load_airport(a, config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways for a in airports}
     geometries = {a: airport_geometry(a, runways[a]) for a in airports}
     if args.list_candidates:
-        changes = candidate_changes(geometries, former_candidates(manifests),
-                                    eligible_arrivals(provenance, manifests, days))
-        write_json_atomic(out, {"written_utc": utc_now(),
-                                "against": "the former rule: each arrival manifest's runway_targets",
-                                "manifests": {a: str(m) for a, m in manifests.items()}, "airports": changes})
-        for airport, change in changes.items():
-            print(f"{airport}: {change['candidates']}; added {change['added']}; removed {change['removed']}")
+        listing = candidate_listing(geometries, eligible_arrivals(provenance, manifests, days))
+        write_json_atomic(out, {"written_utc": utc_now(), "manifests": {a: str(m) for a, m in manifests.items()},
+                                "runway_ends_from": runway_ends_from(), "day_split": PINNED_DAY_SPLIT.name,
+                                "airports": listing})
+        for airport, listed in listing.items():
+            print(f"{airport}: candidates {listed['candidates']}; no candidate {listed['not_candidates']}")
         print(f"→ {out}")
         return 0
 
@@ -247,8 +243,7 @@ def main(argv: list[str] | None = None) -> int:
                            "skipped": dict(skipped[split]), "too_short_for_one_window": unusable[split],
                            "not_a_candidate": dict(sorted(not_candidate[split].items()))}
                    for split in SPLITS},
-        "runway_ends_from": {"config": str(DEFAULT_CONFIG), "config_sha256": file_sha256(DEFAULT_CONFIG),
-                             "cifp": str(DEFAULT_CIFP), "cifp_sha256": file_sha256(DEFAULT_CIFP)},
+        "runway_ends_from": runway_ends_from(),
         # the sealed days' flights, counted from the roster; the ones the per-flight split (`data.splits`, the
         # other ts models') also holds out are the flights no model on either line has seen
         "test_days": {"flights_not_opened": len(keys["test"]),

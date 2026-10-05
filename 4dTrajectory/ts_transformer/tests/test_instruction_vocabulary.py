@@ -227,22 +227,29 @@ def test_a_flight_landed_on_no_candidate_is_refused_and_counted_by_runway(monkey
 
 def test_a_flight_added_or_removed_on_any_day_changes_no_candidate(tmp_path):
     """D78: no flight decides a candidate — the candidates are the published ends whatever the arrivals; the listing for
-    the user (`instruction_signals --list-candidates`) compares them with the former rule (each manifest's
-    ``runway_targets``) and counts each added or removed end's arrivals by split, test days only counted."""
-    from ts_transformer.experiments.instruction_signals import candidate_changes, former_candidates
-
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps({"runway_targets": {"23r": {}, "32": {}}}), encoding="utf-8")
-    assert former_candidates({"KRDU": manifest}) == {"KRDU": {"23R", "32"}}
+    the user (`instruction_signals --list-candidates`) gives each candidate's arrivals by split and the ends with
+    arrivals that are none (their flights refused), test days only counted, the runway idents upper-case as the
+    geometry's."""
+    from ts_transformer.experiments.instruction_signals import candidate_listing, eligible_arrivals
 
     ends = [_guided(ident="23R", lat=35.8937988, lon=-78.7779999, course_deg=225.3),
             _guided(ident="05L", lat=35.8753, lon=-78.7970, course_deg=45.3)]
     geometry = airport_geometry("KRDU", ends)
-    arrivals = [("train", "KRDU", "a", "23R"), ("test", "KRDU", "b", "05L"), ("val", "KRDU", "c", "32")]
-    changes = candidate_changes({"KRDU": geometry}, {"KRDU": {"23R", "32"}}, arrivals)["KRDU"]
-    assert changes["candidates"] == ["05L", "23R"]
-    assert changes["added"] == {"05L": {"test": 1, "val": 0, "select": 0, "train": 0}}
-    assert changes["removed"] == {"32": {"test": 0, "val": 1, "select": 0, "train": 0}}
+    days = fixture_days()
+    records = [{"flight_key": key, "runway": runway, "landing_time_utc": landing_on(split)}
+               for key, runway, split in (("a", "23r", "train"), ("b", "32", "val"), ("c", "23R", "test"))]
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"records": records}), encoding="utf-8")
+    provenance = {"manifests": [{"airport": "KRDU", "source_records": [{"flight_key": k} for k in ("a", "b", "c")]}]}
+    arrivals = eligible_arrivals(provenance, {"KRDU": manifest}, days)
+    assert arrivals == [("train", "KRDU", "a", "23R"), ("val", "KRDU", "b", "32"), ("test", "KRDU", "c", "23R")]
+    arrivals += [("train", "KSJC", "d", "30L"), ("train", "KSJC", "e", "23R")]          # another airport's
+    listed = candidate_listing({"KRDU": geometry}, arrivals)["KRDU"]
+    zero = {"test": 0, "val": 0, "select": 0, "train": 0}
+    assert listed["candidates"] == {"05L": zero, "23R": {**zero, "train": 1, "test": 1}}
+    assert listed["not_candidates"] == {"32": {**zero, "val": 1}}
+    assert candidate_listing({"KRDU": geometry}, [])["KRDU"] == {"candidates": {"05L": zero, "23R": zero},
+                                                                 "not_candidates": {}}                     # D78
 
 
 def test_each_candidate_carries_its_published_vertical_path_into_candidates_json(tmp_path):
