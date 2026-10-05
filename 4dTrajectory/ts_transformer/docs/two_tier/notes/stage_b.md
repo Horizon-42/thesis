@@ -19,4 +19,13 @@
 4. 把 requests_from_b_to_designer.md 重写为当前状态（已处理的项删掉）。
 5. 停住，等 B5 的命令。报告：提交号、测试数。
 不改 instructions/、autopilot/，也不改 A 阶段的运行器。
+
+另（A43 合进 dev-two-tier-v4、用户转告你之后再做，不早）：A 阶段的后端启动时不再跑一致性检查（D73），
+你的钩子里有一条注释从此说错了，改它：
+   文件 aeroviz_backend/autopilot_segment/prior.py 第 204 行
+   旧：_require_split(item["split"], service.splits)       # before any check runs (A37): `executor_for` runs the conformance
+   新：_require_split(item["split"], service.splits)       # before the set is opened (A37)
+同一个文件第 158 行的 `with self.backend._lock:`（你的预热）也一起看：A 的预热已经不拿请求锁，
+每个集合用自己的锁（set_flown），请求只等自己要的那个集合；你的预热照这样去掉这一层 with（只是同样的理由）。
+单文件测试 → 独立审查 → 用显式路径提交，报告提交号。
 ```
