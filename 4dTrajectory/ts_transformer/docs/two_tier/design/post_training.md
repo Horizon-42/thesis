@@ -51,6 +51,9 @@ The decision numbers are shared by all documents (outline §3).
 | D115 | Every counted row weighs the same in the surrogate and in the pull to the base: the sum over a batch's counted words is divided by the batch's counted rows, not each sample by its own. Why: divided sample by sample, a continuation from a late branch point (few counted rows) weighs as much as a whole first sentence, so each of its words weighs more (the stage C implementer's proposal P13) | Decided | User, 2026-10-05 |
 | D116 | The traffic attention has one token network shared by the layers: the tokens of a step are embedded once, and each layer keeps its own attention over them. Why: with a token network in each layer, each layer embeds every padded token, and the memory grows with the layers × B·R·N_max (N_max the most other aircraft of the batch): the reviewer's estimate at configuration A, B = 64, R = 300, N_max = 30 was approximately 9 GB, more than the GPU (P16). C8 measures the memory at the formal size | Decided | User, 2026-10-05 |
 | D117 | The stage C implementer's readings P1, P2, P4–P6, P8, P11, P12, P14, P15, P18, P21–P25 (stage C log §4, §9, §10, §11, §14) are accepted as built. Among them: a recorded aircraft's R is in force from the step after its first predicted step (P1); the motion of every aircraft, the commanded one too, is the 2 s displacement before the row, and an aircraft at its row 0 is not established (P2); a recorded aircraft is over its threshold at its last step in the air (P4); a recorded leader's speed target is its present speed along its course, and the speed-word mask never blocks "unchanged" or "unspecified" (P5); the tokens' features and fixed scales (P6); the census's definitions (P8, P24, P25); the ratio and the pull word by word, each word clipped on its own (P11); the ratio's denominator a frozen copy of the model at the start of the pass, through `masked_log_probability` (P12); the pull on the counted words only (P14); no traffic gives the module no input and zero output (P15); an inserted landing is its source's roster landing shifted (P18); a lost window's go-arounds from its own words (P21); a done flight's tokens computed and never used, its speed mask open (P22); a faulty point read at the fault's row or the row after it (P23) | Decided | User, 2026-10-05, on Claude's review of the readings |
+| D123 | Window B's move (§2 item 4, C9): a turn about the airport reference within ±15°, a change of height within ±300 m and a scale of the speed within 1 ± 0.1, each drawn uniformly. With them, D113 leaves out 107 of 40,530 train windows B (0.26 %; select 15 of 6,199) on A34's artefact (stage C log §15, P28) | Decided | User, 2026-10-05, on the stage C implementer's proposal P28 |
+| D124 | The windows of a round share their flights: windows A, D and B are built from the round's own real windows, so a round of 4N windows covers about N flights. A batch commands each flight once (a loop holds each flight once), so a real window and its A, B or D go to different batches. D113 is checked at the draw, for window B on its moved record (the rows that the moved start gives back). The loss reads a round's branch groups branch point by branch point, never the whole round at once (a group is several MB; a round tens of GB) (stage C log §15, §16: P27, P31, P32) | Decided | User, 2026-10-05 (P32); the rest on the stage C implementer's readings |
+| D125 | The stage C implementer's readings P26, P27, P29–P31, P33–P36, P38 and P39 (stage C log §15–§17) are accepted as built. Among them: a window's random numbers are keyed by its place in the round (P26); a continuation starts at its branch row, the second pass is checked on the words before the last branch point and on the positions and heights of the 2 s rows up to it, and a window that differs gives none of its groups (P30); D114's steps are counted from row 0, only the loss's other aircraft checked (P29); a kind with fewer windows than its count does not stop the round, and the record shows it (P33); the number of rounds is a setting of the campaign (P34); C8 measures the groups' bytes and the data term's memory before the formal run (P35, P36); the window set's `procedure` block is stage B's (P38); the loop draws at temperature 1 (P39, prior D121). A window set carries no per-row speaker records (the probability of "go-around", the blocked words); the window view does not show them (P37) | Decided | User, 2026-10-05, on Claude's review of the readings |
 
 ### 0.2 Open items
 
@@ -157,7 +160,8 @@ A proposal is a reading where the design says nothing; it holds only until the u
 4. **Windows.** Real windows and augmented windows of the train days: B (a moved start: a turn about the airport, a
    height change and a speed change; the start of vocabulary §6 item 5, D97), A (one inserted aircraft that flies its
    record), D (the aircraft ahead moved). Real, A and D in equal counts in a round (D100, on C1's census; D55); B after C9.
-   A window that opens inside a loss of separation is left out of the draw (D113).
+   A window that opens inside a loss of separation is left out of the draw (D113). The kinds share the round's flights
+   (D124); window B's move: D123.
 5. **Loss**: the clipped-ratio surrogate (ε = 0.2) with the advantage inside each branch group (item 9); the pull to
    the base model (0.04, the KL on the sampled words, masked distribution); the teacher-forced data term (1) on
    single-aircraft samples of the closed-loop sentences of the train days in the base's selection `landed` (D36,
@@ -541,8 +545,8 @@ aircraft, the rewards of steps 8.9 and 9.4, the formats of `instruction-v3`. No 
 
 **C9. Window B** (§2 item 4). After the moved start of vocabulary D97.
 
-- Moved starts through the start of a closed loop; the ranges of the turn, the height change and the speed change are
-  the implementer's proposals for the user; windows B in the census of C1.
+- Moved starts through the start of a closed loop; the ranges of the turn, the height change and the speed change:
+  D123; windows B in the census of C1.
 - Tests: the prior reads the moved observed rows that the start gives back; D23 holds; a move of zero gives the window
   without the move, bit for bit.
 
@@ -551,6 +555,8 @@ aircraft, the rewards of steps 8.9 and 9.4, the formats of `instruction-v3`. No 
 - The rounds as one campaign from one commit on a clean checkout: in each round the windows drawn (C1's counts), the
   two passes of D94, the training of C7, the selection readout on the select days; resumable. The validation days are
   read one time, for the chosen round. The intents in `docs/experiments/intents.json` before the launch.
+- A round's windows share their flights; a batch commands each flight once; D113 at the draw; the loss fed branch
+  point by branch point (D124).
 
 **C11. The Training view of stage C (outline §6).** The last milestone of the stage. The window export (the archived
 `experiments/window_training_export.py`, R36, rewritten): windows of recorded traffic with the commanded aircraft
