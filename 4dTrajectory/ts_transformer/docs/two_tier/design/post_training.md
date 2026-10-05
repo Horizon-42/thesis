@@ -43,7 +43,7 @@ The decision numbers are shared by all documents (outline §3).
 | D103 | The augmented windows A and D (§2 item 4), drawn only from real windows. A: a flight of the same airport and split whose recorded landing is more than 3,600 s from the commanded flight's, its record shifted by a whole number of Δ so that it lands within ±180 s of the commanded flight's recorded landing. D: the aircraft next ahead on the approach clock at the first predicted step, its record shifted by a whole number of Δ within ±120 s, never 0 | Decided | User, 2026-10-05, on the stage C implementer's proposal P7 |
 | D104 | The reference of the edge features' conformance (§4 item 1) is written by the formal census (`post_windows`) beside its output, `conformance/edges.npz`, with the geometry of its airports, so that the check reads fixed inputs: 10 windows of each airport (train, seed 1337), steps every 60 s from the first predicted step while the record lasts, tolerance 1e-6 (float32 tokens). Every later process that computes edge features reads it by its path and runs the check first, as the references of the labeller and the executor are written beside the artefact that they were written from (vocabulary §7.2). The formal census is a formal build: it waits for the user's order (outline §5 rule 7) | Decided | User, 2026-10-05, on the stage C implementer's proposal P9 |
 | D105 | The landings that the commanded aircraft's inputs count follow the window's scene (§3 "Landing context"): the tracks roster's landings with the window's changes — an inserted aircraft's landing (A) added at its shifted time, a moved aircraft's landing (D) moved by its shift — less the commanded aircraft's own landing (D31) and never a landing on a sealed test day (C32). A real window counts the roster's landings, so a window without other aircraft reads what free generation reads (§2 item 1). The present landing direction of the reward (§2 item 2) reads the same landings. The window loop gives them to the prior's function of a loop's row for each aircraft (prior D105). Why: with one index for each airport, the inserted aircraft's landing was not counted and the moved leader's was counted at its time before the move: the commanded aircraft read a value of the record that the augmentation changed — one landing on one candidate, up to 120 s in D and to the end of the window in A, in two thirds of the windows (D100) (Claude's check of stage B, `readouts/2026-10-05_stage_b_check.zh.md`) | Decided | User, 2026-10-05, on Claude's check of stage B |
-| D107 | The clipped-ratio surrogate and the pull to the base (the KL) are computed with dropout off (eval mode), the base's side always; the teacher-forced data term with the dropout of the base's training (0.1). The speaker and the log-probability under records refuse a model with any module in training mode (prior D107), so each step of the training computes the two kinds of terms in their own mode (the data term is a batch of its own, D36). Why: the speaker speaks with dropout off, so the ratio and the KL score the policy that spoke only with dropout off; with dropout on, at the parameters that spoke, the ratio was off by 3 % on average and by up to 0.18–0.26 for one word, and 22.5 % of the rows (5 words) fell outside the clipping band ε = 0.2 (configuration A, random weights; Claude's check of stage B): clipped for noise, in the two terms that carry the reward. The data term is the base's own loss, which reached its select optimum with dropout 0.1. Claude's reasoning; not measured on a post-training run | Decided | User, 2026-10-05, on Claude's recommendation |
+| D107 | The clipped-ratio surrogate and the pull to the base (the KL) are computed with dropout off (eval mode), the base's side always; the teacher-forced data term with the dropout of the base's training (its configuration's: 0.1 in A, B and C, 0.2 in D; prior D40). The speaker and the log-probability under records refuse a model with any module in training mode (prior D107), so each step of the training computes the two kinds of terms in their own mode (the data term is a batch of its own, D36). Why: the speaker speaks with dropout off, so the ratio and the KL score the policy that spoke only with dropout off; with dropout on, at the parameters that spoke, the ratio was off by 3 % on average and by up to 0.18–0.26 for one word, and 22.5 % of the rows (5 words) fell outside the clipping band ε = 0.2 (configuration A, random weights; Claude's check of stage B): clipped for noise, in the two terms that carry the reward. The data term is the base's own loss, which reached its select optimum with that dropout. Claude's reasoning; not measured on a post-training run | Decided | User, 2026-10-05, on Claude's recommendation |
 | D110 | A mask of a caller (the speed-word mask, §3) is computed once for a row, from the state at the start of the row; it does not change with the row's own runway word. A row that says "go-around" thus keeps the speed mask that "established" (D92) gave before the word, though the aircraft is not established after it. Why: the speaker asks the procedure masks for each runway word, but a caller's masks are fixed for the row (prior §4); the effect is small: the mask never blocks "unchanged" or "unspecified", so the row always has a speed word, and it acts only on rows where the aircraft and the one ahead are both established (Claude's check of stage B) | Decided | User, 2026-10-05, on Claude's check of stage B |
 
 ### 0.2 Open items
@@ -61,6 +61,7 @@ A proposal is a reading where the design says nothing; it holds only until the u
 | C0–C3 | Done on synthetic artefacts, reviewed: `1b4d3cea` (code), `86fc86d6` (the regulation text of C3); the user's decisions of 2026-10-05 (20°, a recorded aircraft's G, real : A : D = 1 : 1 : 1; log §7) in `ca15a2e5` |
 | C1, C2 on A34's artefact | Smoke and the census of all train days done (log §3); the counts chosen (log §7) |
 | C5, C7 | Done on synthetic artefacts and models, reviewed: `3171da69` (B9 and `dev-two-tier` merged first; log §9) |
+| D105 (the landings of a window's scene) | Done, reviewed: `00e81c88` (log §10) |
 | C4, C6 | Wait for B10 (prior D105, D106) and A38 (vocabulary D97) on this branch |
 | C8–C12 | Wait for B5's base, Claude's check of stage B, the moved start (C9) and the user's criteria (D7) |
 
@@ -73,7 +74,9 @@ A proposal is a reading where the design says nothing; it holds only until the u
    |---|---|
    | Now | C0. C1 and C2 on synthetic artefacts (`tests/support.py`). C3. The landings of a window (D105): each window gives the landings that its scene has (the inserted aircraft's at its shifted time, the moved aircraft's at its moved time), on synthetic artefacts; given to the prior after B10 |
    | After A34's artefact (vocabulary §0.4) | C1 and C2 also on a sample of A34's artefact, read-only; C1's census on all train days in a scratch directory (outline §5 rule 12, D55); the user chooses the counts of each kind of window |
-   | After B9 and B10 of stage B (prior D96, D105–D107) are on `dev-two-tier-v4-prior` and merged into this branch; after the parts of vocabulary D97 that a milestone reads (the stored signals, the copy of a loop, the test of a flight in a batch) reach this branch through stage B | C4, C5, C6, C7 on synthetic artefacts and the smoke model of B3 |
+   | After B9 of stage B (prior D96) is merged into this branch | C5; C7 on synthetic artefacts and models, except the join of the records of first sentences and continuations |
+   | After B10 of stage B (prior D105–D107) is merged into this branch | C4; the join of records of C7 |
+   | After the copy of a loop and the test of a flight in a batch (vocabulary D97, A38) reach this branch through stage B | C6 |
    | After B5's base and Claude's check of stage B | C8. Then C10, after the user sets its criteria (D7) |
    | After the moved start of vocabulary D97 | C9 (window B) |
    | After C10 | C11, C12 |
@@ -106,7 +109,8 @@ A proposal is a reading where the design says nothing; it holds only until the u
    with a traffic attention whose output is zero (§3; prior §7, item 5). There is no single-aircraft stage. The reasons:
    - The single-aircraft closed loop is a special case of this loop. With no other aircraft in its window, the
      commanded aircraft says and flies what single-aircraft free generation does, with the same loss and gradients.
-     Approximately 45 % of the train flights have no leader in the air at their first predicted step (§6.1).
+     On the train days of A34's artefact, 60 % of the windows have no leader in the air at their first predicted
+     step, and 29 % have no other aircraft at all (C1's census, §6.1).
    - A single-aircraft reward does not see when an aircraft lands, so it does not limit the spread of the landing times.
      In traffic, that spread puts the aircraft into the sequence of the other aircraft (§6.1).
    - Without a capture law (D2, D3), the base model must learn more to land. It learns it one time, in the loop where
@@ -320,7 +324,13 @@ From the multi-aircraft readouts of `instruction-v3` (`readouts/2026-09-28_m3_fr
   the landing times; they do not show that those rewards make it.
 - In the window loop with one commanded aircraft and no other aircraft, the words, the flown states, the loss and the
   gradients are the same as in single-aircraft free generation and training (tests of step 9.4). On the train days,
-  approximately 45 % of the flights have no leader in the air at their first predicted step.
+  approximately 45 % of the flights have no leader in the air at their first predicted step (instruction-v3's
+  definition, not the census's below; the two are not compared).
+- C1's census on A34's artefact (`instruction_language/v12_20261005`, Δ = 4 s; code `1b4d3cea`, in a scratch
+  directory; stage C log §3): 40,530 train windows and 6,199 select windows. A leader in the air is the aircraft next
+  ahead on the approach clock at the first predicted step, on the commanded flight's recorded runway or a runway
+  separated as one. Train: 40.1 % of the windows have a leader (59.9 % none), and 29.4 % have no other aircraft at
+  all; by airport, a leader in 25 % (KSMF) to 54 % (KSJC) of the windows. Select: 39.3 % and 28.5 %.
 
 ### 6.2 Cost and credit of the post-training
 
@@ -420,7 +430,7 @@ aircraft, the rewards of steps 8.9 and 9.4, the formats of `instruction-v3`. No 
 - The census (`post_windows`, outline §5 rule 12): for each airport and split (train, select), the windows, the other
   aircraft at the first predicted step, the share with a leader in the air on the same runway or a runway that counts
   as one, and the windows near the cut between two operating days. Measured on all train days in a scratch directory
-  after C1; the user chooses the count of each kind of window in a round.
+  after C1; the user chose the count of each kind of window in a round on it (D100).
 - Tests: a window never reads a test day (C32) or a flight of another split; its other aircraft at a step are exactly
   the flights in the air then; a recorded aircraft's motion comes from its 2 s displacement (a change of its stored
   track, ground speed or vertical rate changes nothing); its R is absent before its first predicted step; the steps are
@@ -428,8 +438,9 @@ aircraft, the rewards of steps 8.9 and 9.4, the formats of `instruction-v3`. No 
 
 **C2. Edge features** (§3, §4 item 1; D23, D31).
 
-- The features of §3 for every other aircraft at each step, at fixed SI scales; the conformance references (fixed
-  scenes of the train days, seed 1337) written with the code; the check run by every process that computes them.
+- The features of §3 for every other aircraft at each step, at fixed SI scales; the conformance reference (fixed
+  scenes of the train days, seed 1337) written by the census beside its output (D104); the check run by every process
+  that computes them.
 - Tests: no feature uses a later row (a change of any row after the step changes nothing); D23 in a scene (a change of
   one aircraft's runway word changes no input and no edge feature up to its first predicted step, bit for bit); a
   permutation of the other aircraft permutes their features; an aircraft whose motion is unknown gives the flag and
@@ -453,8 +464,7 @@ aircraft, the rewards of steps 8.9 and 9.4, the formats of `instruction-v3`. No 
 - The commanded aircraft through the prior's step of a speaker's closed loop (prior §7 item 7, D106), which joins the
   start of a closed loop (vocabulary §6 item 5; the most go-arounds 2, D91), the prior's one function of a loop's row
   (prior §7 item 2) with the window's landings (D105) and the speaker with the random numbers of D94, the masks of a
-  caller (D91, the speed-word mask) and the traffic module's input; the window ends a flight at the event of D93; the
-  scene step by step; the separation judge at each step; the end of the window (D93); the reward of D30, with the
+  caller (D91, the speed-word mask) and the traffic module's input; the scene step by step; the separation judge at each step; the end of the window (D93); the reward of D30, with the
   present landing direction from the window's landings (D105). The motion of a recorded aircraft from prior §7 item 2
   (D106): the mirror `post/motion.py` is deleted.
 - Tests: a window with no other aircraft says and flies what the prior's free generation says and flies for the same
