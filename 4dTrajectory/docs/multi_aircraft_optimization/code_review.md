@@ -12,7 +12,7 @@ Style: ASD-STE100 (Simplified Technical English). Units: SI.
 | Findings | 13 (F1 to F13). 11 are verified on the code. 2 are judgement (F12 speed, F13 study scripts) |
 | Findings that the multi-aircraft design needs first | F4, F5, F6, F7 (see `design.md` §8, step T0) |
 | Fixed (branch `dev-optimizer-multi-aircraft`) | F7 `bbb18c52`; F1–F6, F8 (documented), F11 `5e3826f9`; F9, F10, F13 and F12 step 1 in the commit after the multi-aircraft M1 |
-| Open | F12 step 2 as measured: a reused solver per aircraft type (needs the user's decision) |
+| Not now | F12 step 2 as measured: a reused solver per aircraft type (the user, 2026-10-05: not now) |
 | Decision state | The user accepted all 13 findings for a fix (2026-10-05): F4 to F7 first (step T0 of `design.md`), then F1, F2, F3, F8, F11; F12 measured first; then F9, F10, F13. The fixes go on their own branch, with a review at each step. Still open inside the findings: the IPOPT cap value of F8, and the target module of F4 |
 
 A finding is **verified** when this review read the code line and the line shows the defect. A finding is

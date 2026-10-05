@@ -1,8 +1,9 @@
 """Judged losses as smooth NLP rows on the commanded aircraft's nodes (design §5.3).
 
 The judge decides the kind of each loss; the rows against one recorded aircraft use ONE branch, chosen
-by :func:`branch_for` and kept by the loop for the rest of the window (a branch changes only from
-vertical to horizontal, when an in-trail loss with that aircraft appears):
+by :func:`branch_for` and kept by the loop for the rest of the window (a branch changes from vertical to
+horizontal when an in-trail loss with that aircraft appears, and to :func:`other_branch` when a re-solve
+fails and its retry solves):
 
   * ``horizontal`` — ``(n − n_j(t))² + (e − e_j(t))² ≥ (S·(1 + κ))²`` on the nodes within the row window
     of a loss time: in trail on one final, and the horizontal branch of "radar or vertical" / diagonal;
@@ -74,6 +75,18 @@ def branch_for(conflicts: list[Conflict]) -> Branch:
     worst = min(conflicts, key=lambda c: max(c.distance_m / c.required_m, c.vertical_m / VERTICAL_M))
     if worst.distance_m / worst.required_m >= worst.vertical_m / VERTICAL_M:
         return Branch(HORIZONTAL)
+    return Branch(VERTICAL, 1.0 if worst.above else -1.0)
+
+
+def other_branch(branch: Branch, conflicts: list[Conflict]) -> Branch | None:
+    """The other branch for the present position losses with one aircraft (judged on the solve the retry
+    starts from), or None when they allow only one (an in-trail loss: only horizontal separation counts).
+    Vertical takes the side of the tightest of them."""
+    if any(c.kind == rules.IN_TRAIL for c in conflicts):
+        return None
+    if branch.family == VERTICAL:
+        return Branch(HORIZONTAL)
+    worst = min(conflicts, key=lambda c: max(c.distance_m / c.required_m, c.vertical_m / VERTICAL_M))
     return Branch(VERTICAL, 1.0 if worst.above else -1.0)
 
 

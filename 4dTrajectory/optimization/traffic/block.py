@@ -33,8 +33,9 @@ from .check import FlownTrack, check, make_window
 from .loop import BaselineFailed, LoopSettings, fly_in_traffic
 from .scene import RecordedFlight, Traffic
 
-#: The schema of an M2 sidecar: the M1 sidecar plus ``slot`` and ``block_final``.
-BLOCK_RECORD_SCHEMA = "optimization-traffic-block-v1"
+#: The schema of an M2 sidecar: the M1 sidecar (``loop.TRAFFIC_RECORD_SCHEMA``) plus ``slot`` and
+#: ``block_final``.
+BLOCK_RECORD_SCHEMA = "optimization-traffic-block-v2"
 
 
 @dataclass(frozen=True)

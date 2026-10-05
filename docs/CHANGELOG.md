@@ -1,5 +1,16 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-05 — Multi-aircraft optimization: a failed re-solve is retried once with the other branch (MD13)
+
+- The user's decision (MD13 (b)): in `traffic/loop.py` (M1, and M2 through it) a re-solve that fails is solved once
+  more with the other branch for each recorded aircraft with a position loss in that round (`rows.other_branch`;
+  none for an aircraft with an in-trail loss rowed in any round; a vertical side from that round's losses; Claude's
+  reading: an aircraft whose rows already hold keeps its branch). The flip is kept only after the retry solves.
+  Sidecars record each attempt (`rows_next` / `rows_retry`, `retried_branches`, `retry_error`, `next_solve_s` per
+  attempt): schemas renamed `optimization-traffic-v2` / `optimization-traffic-block-v2`.
+- T5 again (50 KRDU windows): 43 separated at baseline, 4 separated (the retry saved 1, landing +101 s), 3
+  solve_failed (both attempts at the IPOPT cap). F12 step 2 (a reused solver): not now (the user).
+
 ### 2026-10-05 — Multi-aircraft optimization M2: a block of arrivals, scheduled, then flown in slot order
 
 - `4dTrajectory/optimization/traffic/block.py`, runner `traffic_optimization.py m2` (design §5.6, the user's MD1): ETA by a

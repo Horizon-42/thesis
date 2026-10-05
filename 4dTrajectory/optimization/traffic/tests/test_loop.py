@@ -16,7 +16,8 @@ def _check(*conflicts):
     return Check(np.arange(0.0, 10.0), tuple(conflicts), 0)
 
 
-def _run(monkeypatch, visual_checks, *, fail_solve_at=None, max_rounds=5, baseline_error=None, fixed=None):
+def _run(monkeypatch, visual_checks, *, fail_solve_at=None, max_rounds=5, baseline_error=None, fixed=None,
+         recorded=("OTHER",)):
     """Run the loop with ``visual_checks`` as the judge's successive VISUAL answers (IFR: no loss)."""
     solves, solves_fixed = [], []
 
@@ -28,7 +29,7 @@ def _run(monkeypatch, visual_checks, *, fail_solve_at=None, max_rounds=5, baseli
     def solve(pc, *_a, initial_guess, fixed_duration_s, extra_rows=None, **_k):
         solves.append(initial_guess)
         solves_fixed.append(fixed_duration_s)
-        if fail_solve_at == len(solves):
+        if len(solves) in (fail_solve_at if isinstance(fail_solve_at, set) else {fail_solve_at}):
             raise ValueError("collocation free-time optimization failed: Infeasible_Problem_Detected")
         return SimpleNamespace(pc=pc, dense_times=[1.0, 2.0], decision_vector=f"x{len(solves)}",
                                final_time=100.0 + len(solves))
@@ -38,8 +39,8 @@ def _run(monkeypatch, visual_checks, *, fail_solve_at=None, max_rounds=5, baseli
         shortest_iaf_solve=shortest, solve_iaf=solve,
         iaf_result=lambda solve, *a, **k: SimpleNamespace(final_time_s=solve.final_time, simulator_states=[]),
     )
-    window = SimpleNamespace(recorded=[SimpleNamespace(flight_key="OTHER", lat_deg=np.array([35.0]), runway="09",
-                                                       end_utc_s=100.0)],
+    window = SimpleNamespace(recorded=[SimpleNamespace(flight_key=key, lat_deg=np.array([35.0]), runway="09",
+                                                       end_utc_s=100.0) for key in recorded],
                              flight_key="OWN", uncategorised_types=(), runways={}, runway="09", t0_utc_s=0.0,
                              rules=SimpleNamespace(along_nm={"09": 0.0}, speed_mps=70.0),
                              frame=SimpleNamespace(east_scale_error=lambda lats: 0.002))
@@ -79,10 +80,71 @@ def test_a_moving_loss_is_unresolved_after_max_rounds(monkeypatch):
     assert side["outcome"] == loop.UNRESOLVED and len(solves) == 2 and len(side["rounds"]) == 3
 
 
-def test_a_failed_re_solve_keeps_the_last_good_record(monkeypatch):
-    result, side, _solves = _run(monkeypatch, [_check(Conflict(5.0, 0, **LOSS))], fail_solve_at=1)
+def test_a_failed_re_solve_is_retried_once_with_the_other_branch(monkeypatch):
+    result, side, solves = _run(monkeypatch, [_check(Conflict(5.0, 0, **LOSS)), _check()], fail_solve_at=1)
+    first = side["rounds"][0]
+    assert side["outcome"] == loop.SEPARATED and len(solves) == 2               # the retry solved
+    assert first["retried_branches"] == {"OTHER": {"family": "vertical", "sign": 1.0}}
+    assert [r["family"] for r in first["rows_next"]] == ["horizontal"]          # the failed attempt
+    assert [r["family"] for r in first["rows_retry"]] == ["vertical"]
+    assert "Infeasible" in first["next_solve_error"] and len(first["next_solve_s"]) == 2
+    assert side["branches"] == {"OTHER": {"family": "vertical", "sign": 1.0}}       # kept after the retry
+
+
+def test_a_failed_retry_keeps_the_last_good_record_and_branch(monkeypatch):
+    result, side, _solves = _run(monkeypatch, [_check(Conflict(5.0, 0, **LOSS))], fail_solve_at={1, 2})
+    first = side["rounds"][0]
     assert side["outcome"] == loop.SOLVE_FAILED and result.final_time_s == 100.0
-    assert "Infeasible" in side["rounds"][0]["next_solve_error"]
+    assert "Infeasible" in first["retry_error"] and len(first["next_solve_s"]) == 2
+    assert first["retried_branches"] == {"OTHER": {"family": "vertical", "sign": 1.0}}
+    assert side["branches"] == {"OTHER": {"family": "horizontal", "sign": 1.0}}     # no solve held the flip
+
+
+def test_the_vertical_side_comes_from_the_present_losses(monkeypatch):
+    """Round 1 has the commanded aircraft below OTHER; round 2's solve has it above, then fails: the
+    retry's vertical branch takes the side of round 2's loss."""
+    below = dict(LOSS, distance_m=5000.0, vertical_m=200.0, above=False)
+    above = dict(LOSS, distance_m=5000.0, vertical_m=200.0, above=True)
+    _r, side, _s = _run(monkeypatch, [_check(Conflict(5.0, 0, **below)), _check(Conflict(6.0, 0, **above)),
+                                      _check()], fail_solve_at=2)
+    assert side["rounds"][1]["retried_branches"] == {"OTHER": {"family": "vertical", "sign": 1.0}}
+
+
+def test_a_vertical_branch_flips_to_horizontal(monkeypatch):
+    vertical = dict(LOSS, distance_m=1000.0, vertical_m=250.0, above=False)        # vertical is the larger margin
+    _r, side, _s = _run(monkeypatch, [_check(Conflict(5.0, 0, **vertical)), _check()], fail_solve_at=1)
+    assert [r["family"] for r in side["rounds"][0]["rows_next"]] == ["vertical"]
+    assert side["rounds"][0]["retried_branches"] == {"OTHER": {"family": "horizontal", "sign": 1.0}}
+
+
+def test_only_an_aircraft_in_loss_now_and_not_in_trail_flips(monkeypatch):
+    """OTHER (radar or vertical) and SECOND (in trail) both in loss: only OTHER flips; in round 2 only
+    SECOND is in loss, so a failure there has nothing to flip."""
+    trail = Conflict(5.0, 1, rules.IN_TRAIL, 5556.0, 4000.0, 100.0, True, True)
+    _r, side, solves = _run(monkeypatch, [_check(Conflict(5.0, 0, **LOSS), trail), _check(trail)],
+                            fail_solve_at={1, 3}, recorded=("OTHER", "SECOND"))
+    assert side["rounds"][0]["retried_branches"] == {"OTHER": {"family": "vertical", "sign": 1.0}}
+    assert side["outcome"] == loop.SOLVE_FAILED and "retried_branches" not in side["rounds"][1]
+
+
+def test_an_earlier_in_trail_loss_keeps_the_branch_horizontal(monkeypatch):
+    """Round 1: in trail with OTHER (rowed, horizontal). Round 2: only a radar-or-vertical loss with OTHER,
+    and its re-solve fails: the rowed in-trail loss still forbids the vertical branch, so no retry."""
+    trail = Conflict(5.0, 0, rules.IN_TRAIL, 5556.0, 4000.0, 100.0, True, True)
+    _r, side, solves = _run(monkeypatch, [_check(trail), _check(Conflict(40.0, 0, **LOSS))], fail_solve_at=2)
+    assert side["outcome"] == loop.SOLVE_FAILED and len(solves) == 2 and "retried_branches" not in side["rounds"][1]
+
+
+def test_a_wake_only_failure_is_not_retried(monkeypatch):
+    wake = Conflict(5.0, 0, rules.AT_THRESHOLD, 9260.0, 4000.0, 100.0, True, True)
+    _r, side, solves = _run(monkeypatch, [_check(wake)], fail_solve_at=1)
+    assert side["outcome"] == loop.SOLVE_FAILED and len(solves) == 1 and "retried_branches" not in side["rounds"][0]
+
+
+def test_an_in_trail_loss_has_no_other_branch_to_retry(monkeypatch):
+    trail = Conflict(5.0, 0, rules.IN_TRAIL, 5556.0, 4000.0, 100.0, True, True)
+    _result, side, solves = _run(monkeypatch, [_check(trail)], fail_solve_at=1)
+    assert side["outcome"] == loop.SOLVE_FAILED and len(solves) == 1 and "retry_error" not in side["rounds"][0]
 
 
 def test_a_failed_baseline_is_its_own_error(monkeypatch):

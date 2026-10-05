@@ -6,8 +6,11 @@ same IAF is solved again from the last solution, until no such loss is left or `
 are spent. A loss that comes back at the same instant (rows hold only at the nodes; between them, or
 through replay drift, the record can still be short) asks for twice its margin in the next round. A recorded aircraft already in loss at the window start gets no rows
 until its first instant without a loss (MD10). The rows against one aircraft keep one branch for the whole
-window (``rows.branch_for``; vertical becomes horizontal only when an in-trail loss with it appears).
-A re-solve that fails ends the window with the last good solve as its record.
+window (``rows.branch_for``; vertical becomes horizontal when an in-trail loss with it appears).
+A re-solve that fails is tried once more with the other branch (the user's decision, 2026-10-05, MD13)
+for each aircraft with a position loss in this round that permits one; the side of a vertical branch
+comes from those losses (Claude's reading: an aircraft whose rows already hold keeps its branch). When
+the retry fails too, the window ends with the last good solve as its record.
 """
 
 from __future__ import annotations
@@ -25,10 +28,10 @@ from scenario_replay import ScenarioOptimization
 
 from . import rules
 from .check import Check, Conflict, FlownTrack, Window, check, make_window
-from .rows import Branch, branch_for, extra_rows, row_spec
+from .rows import Branch, branch_for, extra_rows, other_branch, row_spec
 from .scene import Traffic
 
-TRAFFIC_RECORD_SCHEMA = "optimization-traffic-v1"
+TRAFFIC_RECORD_SCHEMA = "optimization-traffic-v2"
 SEPARATED_AT_BASELINE, SEPARATED, UNRESOLVED, SOLVE_FAILED, WAKE_AT_FIXED_TIME = (
     "separated_at_baseline", "separated", "unresolved", "solve_failed", "wake_at_fixed_time")
 
@@ -116,6 +119,23 @@ def fly_in_traffic(
     except ValueError as exc:
         raise BaselineFailed(str(exc).partition("\n")[0]) from exc
     window = make_window(scenario, traffic, procedure_root=procedure_root, horizon_s=max_duration)
+
+    def solve(last, rowed, doublings, branches, rows_field):
+        """One re-solve of the IAF with the rows of ``rowed`` under ``branches``, warm from ``last``; its
+        rows go to ``rounds[-1][rows_field]``, its time to ``rounds[-1]["next_solve_s"]`` (one per attempt)."""
+        specs = [row_spec(c, window, margin=settings.margin * 2 ** doublings[key],
+                          branch=None if c.kind == rules.AT_THRESHOLD else branches[c.other])
+                 for key, c in rowed.items()]
+        rounds[-1][rows_field] = [asdict(s) for s in specs]
+        started = time.perf_counter()
+        try:
+            solved = so.solve_iaf(
+                last.pc, scenario, target, aircraft, min_speed_ms, max_duration=max_duration,
+                extra_rows=extra_rows(specs, window, last.dense_times, row_window_s=settings.row_window_s),
+                initial_guess=last.decision_vector, **solve_kw)
+            return solved, record(solved)
+        finally:
+            rounds[-1].setdefault("next_solve_s", []).append(round(time.perf_counter() - started, 3))
     flown = FlownTrack.from_samples(result.simulator_states)
     judged = check(window, flown, reading=settings.reading, step_s=settings.step_s)
     starts = free_from(judged, len(window.recorded))
@@ -145,22 +165,25 @@ def fly_in_traffic(
         for key, c in {(c.other, c.t_s, c.kind): c for c in active_rowable}.items():
             doublings[key] = doublings[key] + 1 if key in rowed else 0
             rowed.setdefault(key, c)
-        specs = [row_spec(c, window, margin=settings.margin * 2 ** doublings[key],
-                          branch=None if c.kind == rules.AT_THRESHOLD else branches[c.other])
-                 for key, c in rowed.items()]
-        rounds[-1]["rows_next"] = [asdict(s) for s in specs]
-        started = time.perf_counter()
         try:
-            best = so.solve_iaf(
-                best.pc, scenario, target, aircraft, min_speed_ms, max_duration=max_duration,
-                extra_rows=extra_rows(specs, window, best.dense_times, row_window_s=settings.row_window_s),
-                initial_guess=best.decision_vector, **solve_kw)
-            next_result = record(best)
+            best, next_result = solve(best, rowed, doublings, branches, "rows_next")
         except ValueError as exc:
             rounds[-1]["next_solve_error"] = str(exc).partition("\n")[0][:200]
-            outcome = SOLVE_FAILED
-            break
-        rounds[-1]["next_solve_s"] = round(time.perf_counter() - started, 3)
+            now = [c for c in active_rowable if c.kind != rules.AT_THRESHOLD]
+            in_trail = {c.other for c in rowed.values() if c.kind == rules.IN_TRAIL}   # rowed in any round
+            flipped = {k: b for k, b in ((k, other_branch(branches[k], [c for c in now if c.other == k]))
+                                         for k in sorted({c.other for c in now} - in_trail)) if b is not None}
+            if not flipped:
+                outcome = SOLVE_FAILED
+                break
+            rounds[-1]["retried_branches"] = {window.recorded[k].flight_key: asdict(b) for k, b in flipped.items()}
+            try:
+                best, next_result = solve(best, rowed, doublings, {**branches, **flipped}, "rows_retry")
+            except ValueError as retry_exc:
+                rounds[-1]["retry_error"] = str(retry_exc).partition("\n")[0][:200]
+                outcome = SOLVE_FAILED
+                break
+            branches = {**branches, **flipped}
         result = next_result
         flown = FlownTrack.from_samples(result.simulator_states)
         judged = check(window, flown, reading=settings.reading, step_s=settings.step_s)
