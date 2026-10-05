@@ -5,18 +5,28 @@ The identity (§8 item 1, D21) is the spec sha, the day split, the candidate tab
 files, the landings (D63) and the selection of the sentences (D75); `prior.source.artefact_identity` builds it. A checkpoint opens only for the same identity, compared whole: a
 prior of another artefact is refused by what differs, never read with a guess (principle 8). The run (its airports and
 its held-out airport, `runs.Run`) and the training configuration are recorded beside it.
+
+`open_prior` opens a prior run as every runner of the prior does (§7 item 1, D106 item 2): its record, its checkpoint
+for the artefact's identity and its procedure masks on today's procedure data (§8 item 2). It reads no stored outcome of
+a val sentence (D85): the selection's val counts are compared by the val sentence file's sha256.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Mapping, NamedTuple
+from typing import Any, Mapping, NamedTuple, Sequence
 
 import torch
 
-from ts_transformer.io_utils import utc_now
+from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
+from ts_transformer.instructions.airport import AirportGeometry
+from ts_transformer.instructions.artefact import SPLITS, load_candidates, load_day_split
+from ts_transformer.io_utils import file_sha256, utc_now
+from ts_transformer.prior.landings import LandingIndex
 from ts_transformer.prior.model import Prior, PriorConfig
+from ts_transformer.prior.procedure import PROCEDURE_MASKS, procedure_digests
+from ts_transformer.prior.source import airport_landings, artefact_identity
 
 #: The prior of two-tier v4 (prior design, 2026-10-04): five columns, no airport or row-position embedding, RoPE on
 #: seconds, candidate tokens of any number. The checkpoints of the instruction-v3 prior (v3–v5) are not opened.
@@ -47,20 +57,31 @@ def save_checkpoint(path: Path, model: Prior, state: Mapping[str, torch.Tensor],
                     **{name: dict(record) for name, record in records.items()}}, file)
 
 
-def load_checkpoint(path: Path, identity: Mapping[str, Any]) -> Checkpoint:
+def load_checkpoint(path: Path, identity: Mapping[str, Any], *, counted: Sequence[str] = SPLITS) -> Checkpoint:
     """The prior at ``path`` on the CPU, in eval mode — refused unless it is a `CHECKPOINT_SCHEMA` checkpoint of the
-    artefact ``identity``."""
+    artefact ``identity``. ``identity`` may count the selection of the splits ``counted`` only
+    (`source.artefact_identity`): the stored counts of the others are not compared, their sentence files' sha256 are."""
     payload = torch.load(path, map_location="cpu", weights_only=True)
     if payload["schema"] != CHECKPOINT_SCHEMA:
         raise ValueError(f"{path} is a {payload['schema']!r} checkpoint, not {CHECKPOINT_SCHEMA!r}")
-    if payload["identity"] != dict(identity):
-        stored = payload["identity"]
+    stored = payload["identity"]
+    if set(counted) != set(SPLITS):
+        counts = {split: cells for split, cells in stored["selection"]["counts"].items() if split in counted}
+        stored = {**stored, "selection": {**stored["selection"], "counts": counts}}
+    if stored != dict(identity):
         differ = sorted(key for key in set(stored) | set(identity)
                         if key not in stored or key not in identity or stored[key] != identity[key])
         raise ValueError(f"{path} was trained on another artefact: {differ} differ")
     model = Prior(PriorConfig.from_dict(payload["model_config"]))
     model.load_state_dict(payload["state"], strict=True)
     return Checkpoint(model.eval(), payload["identity"], payload["run"], payload["train_config"])
+
+
+def validation_claim(prior_dir: Path, reader: str) -> Path | None:
+    """The output a reader of the validation days (`claim_validation_read`) claimed for the prior's run, None when
+    nothing was claimed."""
+    path = prior_dir / f"val_read_{reader}.json"
+    return Path(json.loads(path.read_text(encoding="utf-8"))["out"]) if path.exists() else None
 
 
 def claim_validation_read(prior_dir: Path, reader: str, out: Path) -> None:
@@ -74,3 +95,38 @@ def claim_validation_read(prior_dir: Path, reader: str, out: Path) -> None:
     except FileExistsError:
         raise ValueError(f"{prior_dir}: its validation days were read by {reader} already ({path.name}); they are read "
                          f"once (D85)") from None
+
+
+class OpenedPrior(NamedTuple):
+    """A prior run as `open_prior` opens it."""
+
+    directory: Path
+    config: dict[str, Any]                    # the run's ``config.json``
+    checkpoint: Checkpoint
+    geometries: dict[str, AirportGeometry]    # the artefact's candidates, by airport
+    landings: dict[str, LandingIndex]         # each airport's roster landings (D63)
+    interval_s: float
+    selection: str                            # the run's selection rule (D75)
+
+
+def open_prior(prior_dir: Path, instructions: Path, *, procedure_root: Path = DEFAULT_PROCEDURE_ROOT) -> OpenedPrior:
+    """A prior run (``prior_train``'s directory) on the artefact ``instructions`` (module docstring): refused unless its
+    record is a `CHECKPOINT_SCHEMA` run, its checkpoint is of the artefact's identity at its Δ and selection (the val
+    days' outcomes unread, D85), and its procedure masks are `PROCEDURE_MASKS` on today's procedure data (§8 item 2)."""
+    config = json.loads((prior_dir / "config.json").read_text(encoding="utf-8"))
+    if config["schema"] != CHECKPOINT_SCHEMA:
+        raise ValueError(f"{prior_dir}: a {config['schema']!r} prior, not {CHECKPOINT_SCHEMA!r}")
+    interval_s = float(config["identity"]["row_interval_s"])
+    selection = config["identity"]["selection"]["rule"]
+    geometries = load_candidates(instructions)
+    landings = airport_landings(geometries, load_day_split(instructions))
+    counted = ("train", "select")
+    checkpoint = load_checkpoint(prior_dir / "checkpoint.pt",
+                                 artefact_identity(instructions, interval_s, landings, selection, counted=counted),
+                                 counted=counted)
+    masks = json.loads((prior_dir / "procedure_masks.json").read_text(encoding="utf-8"))
+    if masks != {"set": PROCEDURE_MASKS, "checkpoint_sha256": file_sha256(prior_dir / "checkpoint.pt"),
+                 "procedure_data": procedure_digests(geometries, root=procedure_root)}:
+        raise ValueError(f"{prior_dir}: the prior's procedure masks are not {PROCEDURE_MASKS} on today's procedure data "
+                         f"(§8 item 2)")
+    return OpenedPrior(prior_dir, config, checkpoint, geometries, landings, interval_s, selection)

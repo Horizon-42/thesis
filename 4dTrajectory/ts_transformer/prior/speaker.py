@@ -43,7 +43,7 @@ from ts_transformer.instructions.grammar import InForce, column_mask, column_wor
 from ts_transformer.instructions.words import COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
 from ts_transformer.prior.batch import RUNWAY_FIXED_CLASSES, RUNWAY_GO_AROUND_CLASS, RowTensors
 from ts_transformer.prior.inputs import Heard
-from ts_transformer.prior.model import Past, Prior
+from ts_transformer.prior.model import Past, Prior, require_eval
 from ts_transformer.prior.procedure import Final, ProcedureMasks
 
 
@@ -111,6 +111,30 @@ class Permitted:
         return Permitted(tuple(mask[indices] for mask in self.masks), self.time_s[indices], self.own[indices],
                          self.temperature)
 
+    @staticmethod
+    def join(records: Sequence[Permitted]) -> Permitted:
+        """The records of several speakers (or copies) as one, their aircraft in the order given (D106 item 4): each
+        column as wide as the widest record's, the rows as many as the longest's; a padded class is not permitted, a
+        padded row has no time (NaN: no row asked matches it) and no inputs. One temperature for all."""
+        if not records:
+            raise ValueError("no records to join")
+        if any(r.temperature != records[0].temperature for r in records):
+            raise ValueError(f"records drawn at the temperatures {sorted({r.temperature for r in records})}: one batch "
+                             f"has one")
+        rows = max(r.time_s.shape[1] for r in records)
+
+        def padded(value: np.ndarray, width: int, fill: Any) -> np.ndarray:
+            pad = [(0, 0), (0, rows - value.shape[1])] + ([(0, width - value.shape[2])] if value.ndim == 3 else [])
+            return np.pad(value, pad, constant_values=fill)
+
+        masks = []
+        for c in range(len(COLUMNS)):
+            width = max(r.masks[c].shape[2] for r in records)
+            masks.append(np.concatenate([padded(r.masks[c], width, False) for r in records]))
+        own = np.concatenate([padded(r.own, r.own.shape[2], 0.0) for r in records])
+        return Permitted(tuple(masks), np.concatenate([padded(r.time_s, 0, np.nan) for r in records]), own,
+                         records[0].temperature)
+
 
 def runway_after(word: np.ndarray, in_force: Sequence[InForce | None], n_candidates: np.ndarray
                  ) -> tuple[np.ndarray, np.ndarray]:
@@ -127,7 +151,10 @@ def runway_after(word: np.ndarray, in_force: Sequence[InForce | None], n_candida
 
 class Speaker:
     """A batch of aircraft the prior speaks to, all at the same row. `observe` encodes the rows before the first
-    predicted step; `speak` says the next row (the first predicted step first)."""
+    predicted step; `speak` says the next row (the first predicted step first). Rows come in time order, each later
+    than the last encoded or said; no row is observed after the first is said. A refused row changes nothing: the
+    cache, the procedure masks, the words heard and the records change only once every column of it has a word (as
+    vocabulary D80 for the start)."""
 
     def __init__(self, model: Prior, words: Words, finals: Sequence[Sequence[Final]], *, capacity: int,
                  temperature: float = 1.0) -> None:
@@ -136,20 +163,19 @@ class Speaker:
         cache has room for at first (it grows as a sentence needs, `model.Past.grown`)."""
         if not temperature > 0.0:
             raise ValueError(f"temperature {temperature}: it must be positive")
-        if model.training:
-            raise ValueError("the speaker's model is training (dropout on): a speaker speaks in eval mode")
+        require_eval(model, "the speaker")
         for finals_b in finals:
             geometry = finals_b[0].geometry
             if [f.index for f in finals_b] != list(range(len(geometry.candidates))):
                 raise ValueError(f"{geometry.code}: the finals are not one for each candidate, in the pointer's order")
         self.model, self.words = model, words
         self.procedure = ProcedureMasks(finals, words)
-        self.n_candidates = np.array([len(f) for f in finals], dtype=np.int64)
+        self._n_candidates = np.array([len(f) for f in finals], dtype=np.int64)
         self.temperature = temperature
         self.past = model.no_past(len(finals), capacity)
-        #: each aircraft's words in force (`inputs.Heard`, the training sentences' own walk): a loop reads the inputs of
-        #: the next row from it, so the speaker and the inputs never keep two copies
-        self.heard = [Heard(finals_b[0].geometry, words) for finals_b in finals]
+        # each aircraft's words in force (`inputs.Heard`, the training sentences' own walk): a loop reads the inputs of
+        # the next row from it (`heard`, a copy: the speaker's own changes only as it says a row)
+        self._heard = [Heard(finals_b[0].geometry, words) for finals_b in finals]
         self.forbidden: dict[int, list[np.ndarray]] = {c: [] for c in range(len(COLUMNS))}
         #: per row said: each aircraft's probability of "go-around" in the distribution its runway word was drawn from
         #: (the masks applied; the readout's "probability of go-around", §12 B4)
@@ -166,8 +192,17 @@ class Speaker:
         self.permitted_own: list[np.ndarray] = []
         #: per row said: ``[B, 5]`` the probability of each word said in the distribution it was drawn from
         self.drawn_probability: list[np.ndarray] = []
-        #: the go-arounds each aircraft has said (D68: a caller bounds them with `go_around_bound`)
-        self.go_arounds = np.zeros(len(finals), dtype=np.int64)
+        # the go-arounds each aircraft has said (D68: a caller bounds them with `go_around_bound`; `go_arounds`)
+        self._go_arounds = np.zeros(len(finals), dtype=np.int64)
+        # each aircraft's time of the last row encoded or said: a row comes later
+        self._last_s = np.full(len(finals), -np.inf)
+
+    def _in_time_order(self, time_s: torch.Tensor) -> np.ndarray:
+        """``[B, R]`` the rows' times, refused unless each aircraft's come after its last row and after each other."""
+        times = time_s.cpu().numpy().astype(np.float64)
+        if not ((times[:, 0] > self._last_s).all() and (np.diff(times, axis=1) > 0).all()):
+            raise ValueError("a row at or before the time of the last row encoded or said: rows come in time order")
+        return times
 
     @torch.no_grad()
     def observe(self, rows: RowTensors, positions: Sequence[Position], extra: Any = None) -> None:
@@ -175,11 +210,15 @@ class Speaker:
         procedure masks take them on. ``extra``: the caller's input of the added modules (§7 item 5)."""
         if rows.first.any():
             raise ValueError("observed rows hold no first predicted step: the speaker says it")
-        if self.model.training:
-            raise ValueError("the speaker's model is training (dropout on): it speaks in eval mode")
-        _, _, self.past = self.model.extend(rows, self.past, extra)
+        if self.permitted_rows:
+            raise ValueError("a row was said: the rows before the first predicted step are observed before it")
+        require_eval(self.model, "the speaker")
+        times = self._in_time_order(rows.time_s)
+        procedure = self.procedure.select(range(len(self._heard)))
         for at in positions:
-            self.procedure.track(at.e_m, at.n_m, at.height_m, self._go_around())
+            procedure.track(at.e_m, at.n_m, at.height_m, self._go_around())
+        _, _, past = self.model.extend(rows, self.past, extra)
+        self.past, self.procedure, self._last_s = past, procedure, times[:, -1]
 
     @torch.no_grad()
     def speak(self, row: RowTensors, at: Position, numbers: np.ndarray, caller: Mapping[int, np.ndarray] | None = None,
@@ -189,24 +228,24 @@ class Speaker:
         masks of a caller, by column; ``extra``: the caller's input of the added modules (§7 item 5)."""
         if row.present.shape[1] != 1:
             raise ValueError(f"a speaker says one row at a time, not {row.present.shape[1]}")
-        if self.model.training:
-            raise ValueError("the speaker's model is training (dropout on): it speaks in eval mode")
+        require_eval(self.model, "the speaker")
         numbers = np.asarray(numbers, dtype=np.float64)
-        if numbers.shape != (len(self.heard), len(COLUMNS)) or not ((numbers >= 0.0) & (numbers < 1.0)).all():
-            raise ValueError(f"the numbers of a row: [{len(self.heard)}, {len(COLUMNS)}] in [0, 1), not "
+        if numbers.shape != (len(self._heard), len(COLUMNS)) or not ((numbers >= 0.0) & (numbers < 1.0)).all():
+            raise ValueError(f"the numbers of a row: [{len(self._heard)}, {len(COLUMNS)}] in [0, 1), not "
                              f"{numbers.shape}")
-        if self.permitted_times and not (row.time_s[:, 0].cpu().numpy() > self.permitted_times[-1]).all():
-            raise ValueError("a row said at or before the time of the row said last: rows are said in time order")
+        times = self._in_time_order(row.time_s)
         caller = dict(caller or {})
-        self.procedure.track(at.e_m, at.n_m, at.height_m, self._go_around())
-        h, tokens, self.past = self.model.extend(row, self.past, extra)
+        # every change is made on copies, and kept only once every column of the row has a word
+        procedure = self.procedure.select(range(len(self._heard)))
+        procedure.track(at.e_m, at.n_m, at.height_m, self._go_around())
+        h, tokens, past = self.model.extend(row, self.past, extra)
         g = h
         count = len(self.in_force)
         said = np.zeros((count, 0), dtype=np.int64)
-        permitted_row, drawn_row = [], np.zeros((count, len(COLUMNS)))
+        permitted_row, forbidden_row, drawn_row = [], [], np.zeros((count, len(COLUMNS)))
         for column in range(len(COLUMNS)):
             logits = self.model.column_logits(column, g, tokens, row.valid, row.first)[:, 0]
-            allowed = self._allowed(column, said, at, caller)
+            allowed = self._allowed(column, said, at, caller, procedure)
             permitted = torch.as_tensor(allowed[:, : logits.shape[-1]], device=logits.device)
             if allowed[:, logits.shape[-1]:].any():
                 raise ValueError(f"column {COLUMNS[column]}: a mask permits a word the model has no class for")
@@ -214,22 +253,30 @@ class Speaker:
             if torch.isneginf(masked).all(dim=-1).any():
                 raise ValueError(f"column {COLUMNS[column]}: an aircraft has no permitted word (D62)")
             probabilities = torch.softmax(logits, dim=-1)
-            self.forbidden[column].append(probabilities.masked_fill(permitted, 0.0).sum(dim=-1).cpu().numpy())
+            forbidden_row.append(probabilities.masked_fill(permitted, 0.0).sum(dim=-1).cpu().numpy())
             drawn = torch.softmax(masked / self.temperature, dim=-1)
             if column == RUNWAY:
-                self.go_around_probability.append(drawn[:, RUNWAY_GO_AROUND_CLASS].cpu().numpy())
-                self.go_around_permitted.append(permitted[:, RUNWAY_GO_AROUND_CLASS].cpu().numpy())
+                go_around_drawn = drawn[:, RUNWAY_GO_AROUND_CLASS].cpu().numpy()
+                go_around_permitted = permitted[:, RUNWAY_GO_AROUND_CLASS].cpu().numpy()
             chosen = draw(drawn, numbers[:, column])
             permitted_row.append(permitted.cpu().numpy())
             drawn_row[:, column] = drawn.gather(-1, chosen)[:, 0].double().cpu().numpy()
             g = self.model.after_choice(column, g, chosen, tokens)
             said = np.concatenate((said, class_words(column, chosen.cpu().numpy())), axis=1)
         runway, go_around = self._runway_after(said[:, RUNWAY])
-        self.procedure_blocked.append({c: ~self.procedure.permitted(c, runway, go_around, at.e_m, at.n_m, at.height_m)
-                                       for c in self.procedure.columns})
-        for heard, step, height, time_s in zip(self.heard, said, at.height_m, row.time_s[:, 0].tolist()):
-            heard.hear(step, float(height), time_s)
-        self.go_arounds += said[:, RUNWAY] == RUNWAY_GO_AROUND
+        blocked = {c: ~procedure.permitted(c, runway, go_around, at.e_m, at.n_m, at.height_m) for c in procedure.columns}
+        heard = [aircraft.copy() for aircraft in self._heard]
+        for heard_b, step, height, time_s in zip(heard, said, at.height_m, row.time_s[:, 0].tolist()):
+            heard_b.hear(step, float(height), time_s)
+        procedure.after_row(at.e_m, at.n_m, at.height_m, go_around)      # a row that ends G starts the stretch (D64)
+        # the row is said: kept
+        self.past, self.procedure, self._heard, self._last_s = past, procedure, heard, times[:, 0]
+        self._go_arounds = self._go_arounds + (said[:, RUNWAY] == RUNWAY_GO_AROUND)
+        for column, value in enumerate(forbidden_row):
+            self.forbidden[column].append(value)
+        self.go_around_probability.append(go_around_drawn)
+        self.go_around_permitted.append(go_around_permitted)
+        self.procedure_blocked.append(blocked)
         self.permitted_rows.append(tuple(permitted_row))
         self.permitted_times.append(row.time_s[:, 0].cpu().numpy().copy())
         self.permitted_own.append(row.own[:, 0].cpu().numpy().copy())
@@ -256,11 +303,11 @@ class Speaker:
         out = object.__new__(Speaker)
         out.model, out.words, out.temperature = self.model, self.words, self.temperature
         out.procedure = self.procedure.select(indices)
-        out.n_candidates = self.n_candidates[indices].copy()
+        out._n_candidates = self._n_candidates[indices].copy()
         index = torch.as_tensor(indices, device=self.past[0].keys.device)
         out.past = [Past(p.keys[index].clone(), p.values[index].clone(), p.present[index].clone(), p.rows)
                     for p in self.past]
-        out.heard = [self.heard[i].copy() for i in indices]
+        out._heard = [self._heard[i].copy() for i in indices]
         out.forbidden = {c: [row[indices] for row in rows] for c, rows in self.forbidden.items()}
         out.go_around_probability = [row[indices] for row in self.go_around_probability]
         out.go_around_permitted = [row[indices] for row in self.go_around_permitted]
@@ -269,51 +316,71 @@ class Speaker:
         out.permitted_times = [row[indices] for row in self.permitted_times]
         out.permitted_own = [row[indices] for row in self.permitted_own]
         out.drawn_probability = [row[indices] for row in self.drawn_probability]
-        out.go_arounds = self.go_arounds[indices].copy()
+        out._go_arounds = self._go_arounds[indices].copy()
+        out._last_s = self._last_s[indices].copy()
         return out
+
+    # ---- what a loop reads of the speaker, and does not change (§7 item 3, D106 item 6)
+    @property
+    def heard(self) -> tuple[Heard, ...]:
+        """Each aircraft's words in force as the inputs read them (`inputs.Heard`, `prior.loop.LoopRows`): copies."""
+        return tuple(heard.copy() for heard in self._heard)
 
     @property
     def in_force(self) -> list[InForce | None]:
         """Each aircraft's words in force (the grammar's), None before its first predicted step."""
-        return [heard.state for heard in self.heard]
+        return [heard.state for heard in self._heard]
+
+    @property
+    def go_arounds(self) -> np.ndarray:
+        """The go-arounds each aircraft has said (a copy)."""
+        return self._go_arounds.copy()
+
+    @property
+    def n_candidates(self) -> np.ndarray:
+        """Each aircraft's number of candidates (a copy)."""
+        return self._n_candidates.copy()
 
     def _go_around(self) -> np.ndarray:
         return np.array([f is not None and f.go_around for f in self.in_force])
 
-    def _allowed(self, column: int, said: np.ndarray, at: Position, caller: Mapping[int, np.ndarray]) -> np.ndarray:
+    def _allowed(self, column: int, said: np.ndarray, at: Position, caller: Mapping[int, np.ndarray],
+                 procedure: ProcedureMasks) -> np.ndarray:
         """``[B, words]``: the words of ``column`` that every mask permits, after the row's earlier words ``said``
         (module docstring)."""
         if column != RUNWAY:
             runway, go_around = self._runway_after(said[:, RUNWAY])
-            later = {c: self._others(c, runway, go_around, at, caller) for c in range(column + 1, len(COLUMNS))}
-            return (column_mask(self.in_force, said, column, at.height_m, self.n_candidates, self.words, later)
-                    & self._others(column, runway, go_around, at, caller))
+            later = {c: self._others(c, runway, go_around, at, caller, procedure)
+                     for c in range(column + 1, len(COLUMNS))}
+            return (column_mask(self.in_force, said, column, at.height_m, self._n_candidates, self.words, later)
+                    & self._others(column, runway, go_around, at, caller, procedure))
         # a runway word is permitted where some permitted heading word of the row can follow it: the grammar asked at
         # the heading column after it, with the later columns' masks under the runway and G it leaves (exact, and one
         # heading column's work for each runway word, not the whole row's)
         count = len(self.in_force)
-        runway_words = column_words(RUNWAY, self.words, int(self.n_candidates.max()))
+        runway_words = column_words(RUNWAY, self.words, int(self._n_candidates.max()))
         out = np.zeros((count, len(runway_words)), dtype=bool)
         for w, word in enumerate(runway_words):
             runway, go_around = self._runway_after(np.full(count, word))
-            later = {c: self._others(c, runway, go_around, at, caller) for c in range(HEADING + 1, len(COLUMNS))}
-            heading = column_mask(self.in_force, np.full((count, 1), word), HEADING, at.height_m, self.n_candidates,
+            later = {c: self._others(c, runway, go_around, at, caller, procedure)
+                     for c in range(HEADING + 1, len(COLUMNS))}
+            heading = column_mask(self.in_force, np.full((count, 1), word), HEADING, at.height_m, self._n_candidates,
                                   self.words, later)
-            out[:, w] = (heading & self._others(HEADING, runway, go_around, at, caller)).any(axis=1)
+            out[:, w] = (heading & self._others(HEADING, runway, go_around, at, caller, procedure)).any(axis=1)
         if RUNWAY in caller:
             out &= caller[RUNWAY]
         return out
 
     def _runway_after(self, word: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        return runway_after(word, self.in_force, self.n_candidates)
+        return runway_after(word, self.in_force, self._n_candidates)
 
     def _others(self, column: int, runway: np.ndarray, go_around: np.ndarray, at: Position,
-                caller: Mapping[int, np.ndarray]) -> np.ndarray:
-        """The words of ``column`` the procedure masks and the caller's permit."""
-        width = len(column_words(column, self.words, int(self.n_candidates.max())))
+                caller: Mapping[int, np.ndarray], procedure: ProcedureMasks) -> np.ndarray:
+        """The words of ``column`` the procedure masks (``procedure``, the row's) and the caller's permit."""
+        width = len(column_words(column, self.words, int(self._n_candidates.max())))
         out = np.ones((len(self.in_force), width), dtype=bool)
-        if column in self.procedure.columns:
-            out &= self.procedure.permitted(column, runway, go_around, at.e_m, at.n_m, at.height_m)
+        if column in procedure.columns:
+            out &= procedure.permitted(column, runway, go_around, at.e_m, at.n_m, at.height_m)
         if column in caller:
             out &= caller[column]
         return out

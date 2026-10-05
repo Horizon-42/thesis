@@ -44,22 +44,27 @@ SINCE_DIVISOR = 5.0
 
 
 class Motion(NamedTuple):
-    """The motion of rows (module docstring): ``ground_speed_mps``, ``vertical_rate_mps``, ``track_deg`` (compass) and
-    ``known`` (False at an aircraft's row 0), each ``[rows]``."""
+    """The motion of rows (module docstring): ``ground_speed_mps``, ``vertical_rate_mps``, ``track_deg`` (compass),
+    ``known`` (False at an aircraft's row 0) and the velocity east and north (``east_mps``, ``north_mps``: the
+    post-training's edge features, D106), each ``[rows]``; every value 0 where the motion is not known."""
 
     ground_speed_mps: np.ndarray
     vertical_rate_mps: np.ndarray
     track_deg: np.ndarray
     known: np.ndarray
+    east_mps: np.ndarray
+    north_mps: np.ndarray
 
 
 def motion(at: np.ndarray, before: np.ndarray, known: np.ndarray, step_s: float) -> Motion:
     """The motion of rows from their states ``at`` and the states of the 2 s row before each (``before``; both ``[rows,
-    3]``: e, n, height), where ``known`` (row 0 of an aircraft has none: its motion is 0, D60)."""
+    3]``: e, n, height), where ``known`` (row 0 of an aircraft has none: its motion is 0, D60). The one definition of
+    §7 item 2: the prior's inputs and a loop's other aircraft (post-training D98) read it."""
     de, dn, dh = (at - before).T
     known = np.asarray(known, dtype=bool)
     return Motion(np.where(known, np.hypot(de, dn) / step_s, 0.0), np.where(known, dh / step_s, 0.0),
-                  np.where(known, np.degrees(np.arctan2(de, dn)) % 360.0, 0.0), known)
+                  np.where(known, np.degrees(np.arctan2(de, dn)) % 360.0, 0.0), known,
+                  np.where(known, de / step_s, 0.0), np.where(known, dn / step_s, 0.0))
 
 
 def since_input(seconds: np.ndarray) -> np.ndarray:

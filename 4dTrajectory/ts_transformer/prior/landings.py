@@ -3,7 +3,9 @@ number of landings on that candidate in the 30 min before the step.
 
 Offline, the landings are the harvest's tracks roster of the airport (`repo_layout.tracks_manifest_path`): every
 record the harvest assigned to a runway, whether or not its flight has a sentence — less every landing on a sealed test
-day (contract C32: a test day is never counted as context). In a loop the caller gives the landings the loop knows.
+day (contract C32: a test day is never counted as context). In a loop the caller gives each aircraft the landings the
+loop knows (D105: a window's scene, built from the roster's `Landing`s); the index refuses a landing on a sealed test
+day by itself, whoever builds it.
 A flight never counts its own landing (`LandingIndex.counts_before`): a closed-loop sentence flies on to the threshold and its
 last rows can fall after the time the observed aircraft landed, and the runway it landed on is the answer.
 """
@@ -13,12 +15,13 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Mapping
 
 import numpy as np
 
-from ts_transformer.data.day_split import DaySplit, landing_day, parse_utc
+from ts_transformer.data.day_split import DaySplit, landing_day, operational_day, parse_utc
 
 #: The window of the landings input, s (§2).
 LANDINGS_WINDOW_S = 30.0 * 60.0
@@ -33,16 +36,20 @@ class Landing:
 
 @dataclass(frozen=True)
 class LandingIndex:
-    """One airport's landings on its candidates, sorted by time; ``sealed``: the test-day landings left out."""
+    """One airport's landings on its candidates, sorted by time; ``sealed``: the test-day landings left out; ``days``: the
+    day split, by which a landing on a sealed test day (or on a day outside the split) is refused (C32, D105)."""
 
     runways: tuple[str, ...]
     landings: tuple[Landing, ...]
     sealed: int
+    days: DaySplit
 
     def __post_init__(self) -> None:
         times = [landing.time_s for landing in self.landings]
         if times != sorted(times):
             raise ValueError("the landings are not in time order")
+        for landing in self.landings:       # `SealedDay` on a test day, `KeyError` on a day outside the split
+            self.days.development_split(operational_day(datetime.fromtimestamp(landing.time_s, timezone.utc)))
         unknown = {landing.runway for landing in self.landings} - set(self.runways)
         if unknown:
             raise ValueError(f"landings on {sorted(unknown)}, not candidates {self.runways}")
@@ -93,7 +100,7 @@ def roster_landings(records: Iterable[Mapping], runways: Iterable[str], days: Da
             continue
         kept.append(Landing(utc_s(record["landing_time_utc"]), record["runway"], record["flight_key"]))
     kept.sort(key=lambda landing: (landing.time_s, landing.flight_key))
-    return LandingIndex(wanted, tuple(kept), sealed)
+    return LandingIndex(wanted, tuple(kept), sealed, days)
 
 
 def read_roster_landings(tracks_manifest: Path, runways: Iterable[str], days: DaySplit) -> LandingIndex:

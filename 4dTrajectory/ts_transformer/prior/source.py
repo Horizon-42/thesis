@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from ts_transformer.data.day_split import DaySplit
 from ts_transformer.instructions.airport import AirportGeometry
@@ -38,19 +38,22 @@ def stored_sentences(directory: Path, interval_s: float, split: str) -> list[Sto
             for index, sentence in closed_loop_sentences(directory, split, interval_s, load_spec(directory)).items()]
 
 
-def artefact_identity(directory: Path, interval_s: float, landings: Mapping[str, LandingIndex],
-                      selection: str) -> dict[str, Any]:
+def artefact_identity(directory: Path, interval_s: float, landings: Mapping[str, LandingIndex], selection: str, *,
+                      counted: Sequence[str] = SPLITS) -> dict[str, Any]:
     """§8 item 1 (D21, D63, D75): the spec sha, the day split, the candidate table (`candidates.json`, the vertical paths
     in it), the sha256 of the closed-loop sentence files of Δ = ``interval_s``, every development split; the landings
     the candidate vectors count (`LandingIndex.digest`, by their flights); and the selection — its rule and, for each
     split, airport, stratum and outcome, the sentences kept and left out (`prior.selection.selection_record` of the rule
-    ``selection``)."""
+    ``selection``). The selection's counts read the stored outcomes of the splits ``counted`` only: a run's own record
+    counts every split, a reader that must not read the val days' outcomes (D85: before the base's one validation
+    readout) counts train and select, and `checkpoint.load_checkpoint` compares the rest by the sentence files'
+    sha256."""
     return {"spec_sha256": load_spec(directory).sha256, "day_split": load_day_split(directory).to_dict(),
             "candidates": json.loads((directory / "candidates.json").read_text(encoding="utf-8")),
             "row_interval_s": interval_s,
             "sentence_files": {split: file_sha256(closed_loop_path(directory, split, interval_s)) for split in SPLITS},
             "landings": {code: index.digest() for code, index in sorted(landings.items())},
-            "selection": selection_record(selection, (s for split in SPLITS
+            "selection": selection_record(selection, (s for split in SPLITS if split in counted
                                                      for s in stored_sentences(directory, interval_s, split)))}
 
 

@@ -59,6 +59,21 @@ def test_the_landings_index_refuses_a_day_outside_the_split():
         roster_landings([record("A", "05L", "2031-01-01T12:00:00Z")], ("05L",), fixture_days())
 
 
+def test_an_index_built_from_given_landings_refuses_a_sealed_test_day_by_itself():
+    """D105, C32: a loop's caller builds each aircraft's landings from `Landing`s (a window's scene); the index refuses
+    a landing on a sealed test day, or on a day outside the split, whoever built it."""
+    from ts_transformer.data.day_split import SealedDay
+
+    days = fixture_days()
+    on = {split: utc_s(f"{days.days[split][0]}T12:00:00Z") for split in ("train", "val", "test")}
+    index = LandingIndex(("05L",), (Landing(on["train"], "05L", "A"), Landing(on["val"], "05L", "B")), 0, days)
+    assert [landing.flight_key for landing in index.landings] == ["A", "B"]
+    with pytest.raises(SealedDay):
+        LandingIndex(("05L",), (Landing(on["train"], "05L", "A"), Landing(on["test"], "05L", "T")), 0, days)
+    with pytest.raises(KeyError, match="not in this day split"):
+        LandingIndex(("05L",), (Landing(utc_s("2031-01-01T12:00:00Z"), "05L", "A"),), 0, days)
+
+
 # ---- the inputs of a sentence's rows (B1)
 
 INTERVALS = (2.0, 4.0, 8.0)
@@ -111,6 +126,20 @@ def test_the_motion_comes_from_the_2_s_displacement_and_row_0_has_none(interval_
             assert candidate(rows, 0, "motion_minus_course_cos")[j] == pytest.approx(1.0)
 
 
+def test_the_motion_s_velocity_east_and_north_is_the_2_s_displacement():
+    """D106 item 5: the motion of rows gives the velocity east and north (the post-training's edge features) from the
+    same displacement as the ground speed and the direction; 0 where the motion is not known (D60)."""
+    from ts_transformer.prior.inputs import motion
+
+    at = np.array([[100.0, 50.0, 900.0], [130.0, 10.0, 895.0], [7.0, 7.0, 7.0]])
+    before = np.array([[90.0, 50.0, 901.0], [100.0, 50.0, 900.0], [0.0, 0.0, 0.0]])
+    move = motion(at, before, np.array([True, True, False]), 2.0)
+    assert move.east_mps.tolist() == [5.0, 15.0, 0.0] and move.north_mps.tolist() == [0.0, -20.0, 0.0]
+    assert np.allclose(np.hypot(move.east_mps, move.north_mps), move.ground_speed_mps, rtol=1e-15, atol=0.0)
+    assert np.allclose(move.track_deg[:2], np.degrees(np.arctan2(move.east_mps, move.north_mps))[:2] % 360.0)
+    assert move.vertical_rate_mps.tolist() == [-0.5, -2.5, 0.0]
+
+
 def test_only_positions_and_heights_give_the_motion():
     """The stored track, ground speed and vertical rate (on observed rows, a fit with 7.5 s of the future) change no
     input."""
@@ -126,12 +155,17 @@ def test_only_positions_and_heights_give_the_motion():
 
 @pytest.mark.parametrize("interval_s", INTERVALS)
 def test_a_change_of_the_runway_word_leaves_the_rows_up_to_the_first_predicted_step_bit_for_bit(interval_s):
-    """D23: the artefact writes the landed runway at the first predicted step; no input up to that step reads it."""
+    """D23: the artefact writes the landed runway at the first predicted step; no input up to that step reads it — nor
+    the flight record's runway and landing time, nor its own landing in the index (another runway, 600 s earlier)."""
     words, signals, record, index = flight_and_index()
     sentence = prior_closed_loop_sentence(signals, words, interval_s=interval_s, go_around=True).rows
     grid = sentence.grid.copy()
     grid[0, RUNWAY], grid[20, RUNWAY] = 1, 1
-    a, b = (rows_of(s, record, index, words, interval_s) for s in (sentence, replace(sentence, grid=grid)))
+    (own,) = index.landings
+    moved = LandingIndex(index.runways, (Landing(own.time_s - 600.0, "09L", own.flight_key),), index.sealed, index.days)
+    other = {**record, "runway": "09L", "landing_time_utc": "2026-06-01T00:00:00Z"}
+    a = rows_of(sentence, record, index, words, interval_s)
+    b = rows_of(replace(sentence, grid=grid), other, moved, words, interval_s)
     upto = slice(0, a.first_step + 1)
     for name in ("time_s", "own", "candidates", "runway_in_force", "go_around", "heading_in_force", "words_in_force",
                  "since"):
@@ -235,13 +269,13 @@ def test_a_flight_never_counts_its_own_landing():
     sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
     entry = utc_s(record["entry_time_utc"])
     index = LandingIndex(("09", "09L"), (Landing(entry + 10.0, "09L", "OTHER"), Landing(entry + 20.0, "09", "Ftrain1")),
-                         0)
+                         0, fixture_days())
     rows = rows_of(sentence, record, index, words, 2.0)
     assert not candidate(rows, 0, "landings_30min").any()
     counted = candidate(rows, 1, "landings_30min")
     assert not counted[:6].any() and (counted[6:] == 0.1).all()      # row 5 is at 10 s: [t − 30 min, t) excludes it
     with pytest.raises(ValueError, match="does not land in the index"):
-        rows_of(sentence, record, LandingIndex(("09", "09L"), (), 0), words, 2.0)
+        rows_of(sentence, record, LandingIndex(("09", "09L"), (), 0, fixture_days()), words, 2.0)
 
 
 def test_the_artefact_source_reads_every_sentence_and_its_identity(tmp_path):
@@ -321,7 +355,7 @@ def test_the_rows_utc_time_is_the_flights_entry_and_its_2_s_rows():
     sentence = prior_closed_loop_sentence(signals, words, interval_s=4.0, first_row=1).rows
     entry = utc_s(record["entry_time_utc"])
     index = LandingIndex(("09", "09L"), (Landing(entry + 13.0, "09L", "OTHER"),
-                                         Landing(entry + 3_600.0, "09", "Ftrain1")), 0)
+                                         Landing(entry + 3_600.0, "09", "Ftrain1")), 0, fixture_days())
     counted = candidate(rows_of(sentence, record, index, words, 4.0), 1, "landings_30min")
     # Δ row 3 is signals row 7, at entry + 14 s: the first after the landing at 13 s
     assert not counted[:3].any() and (counted[3:] == 0.1).all()
@@ -450,7 +484,7 @@ def test_the_source_reads_only_the_selected_sentences_and_the_identity_counts_ev
     assert {k for k in identity if identity[k] != other[k]} == {"selection"}
 
 
-@pytest.mark.parametrize("interval_s", [2.0, 4.0])
+@pytest.mark.parametrize("interval_s", INTERVALS)
 def test_a_loop_s_row_is_the_sentence_s_row_bit_for_bit(interval_s):
     """D96 item 4: `LoopRows`, told a sentence's states on the 2 s rows and walked with its words heard, gives each Δ
     row's inputs as `sentence_rows` gives them (the training's rows), bit for bit."""
@@ -466,7 +500,7 @@ def test_a_loop_s_row_is_the_sentence_s_row_bit_for_bit(interval_s):
     geometry = parallel_airport()
     expected = collate([rows_of(rows, record, index, words, interval_s)], torch.device("cpu"))
     every = int(round(interval_s / words.spec.step_s))
-    loop = LoopRows([geometry], {geometry.code: index}, [own_flight_key(record)],
+    loop = LoopRows([geometry], [index], [own_flight_key(record)],
                     np.array([utc_s(record["entry_time_utc"])]), np.array([rows.first_row]), rows.start,
                     variant="full", interval_s=interval_s, step_s=words.spec.step_s, device=torch.device("cpu"))
     heard = Heard(geometry, words)
@@ -481,3 +515,30 @@ def test_a_loop_s_row_is_the_sentence_s_row_bit_for_bit(interval_s):
         assert at.height_m[0] == rows.states[r, 2] - geometry.elevation_m
         if t >= rows.start:
             heard.hear(rows.grid[t - rows.start], float(rows.states[r, 2] - geometry.elevation_m), t * interval_s)
+
+
+def test_each_aircraft_of_a_loop_counts_its_own_landings():
+    """D105: two aircraft of one airport at one place and time, given other landings, read other landing inputs and
+    nothing else different; `select` keeps each aircraft's own."""
+    import torch
+
+    from ts_transformer.prior.inputs import Heard, own_flight_key
+    from ts_transformer.prior.loop import LoopRows
+
+    words, signals, record, index = flight_and_index()
+    rows = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
+    geometry = parallel_airport()
+    entry = utc_s(record["entry_time_utc"])
+    scene = LandingIndex(index.runways, tuple(sorted((*index.landings, Landing(entry + 1.0, "09L", "INSERTED")),
+                                                     key=lambda landing: landing.time_s)), 0, fixture_days())
+    loop = LoopRows([geometry, geometry], [index, scene], [own_flight_key(record)] * 2, np.array([entry, entry]),
+                    np.array([rows.first_row] * 2), rows.start, variant="full", interval_s=2.0,
+                    step_s=words.spec.step_s, device=torch.device("cpu"))
+    at, before = rows.states[[5, 5]], rows.states[[4, 4]]
+    got, _ = loop(5, at, before, True, [Heard(geometry, words), Heard(geometry, words)])
+    landings = CANDIDATE_FEATURES.index("landings_30min")
+    assert got.candidates[0, 0, 1, landings] == 0.0 and got.candidates[1, 0, 1, landings] == 0.1    # 09L
+    other = [k for k in range(got.candidates.shape[-1]) if k != landings]
+    assert torch.equal(got.candidates[0, ..., other], got.candidates[1, ..., other]) and torch.equal(got.own[0], got.own[1])
+    picked, _ = loop.select([1, 0])(5, at, before, True, [Heard(geometry, words), Heard(geometry, words)])
+    assert torch.equal(picked.candidates[0], got.candidates[1]) and torch.equal(picked.candidates[1], got.candidates[0])

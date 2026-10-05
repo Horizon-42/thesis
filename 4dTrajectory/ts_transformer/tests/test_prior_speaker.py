@@ -110,6 +110,29 @@ def test_no_climb_below_the_entry_height_before_the_join_and_none_of_it_while_g(
     assert permitted(m, words, ANGLE, e=e, height=final.entry_m + 200.0)[1 + words.angle_climb]
 
 
+def test_the_row_whose_runway_word_ends_g_starts_the_stretch_again(words):
+    """D64: at the row whose runway word ends G (G false after it), the masks read the row's own state — below the
+    entry height before the join, "no climb" binds at that row — and keep it after the row, not one row later; a row
+    whose word keeps G keeps nothing."""
+    final = finals()[0]
+    e, low, high = -20_000.0, final.entry_m - 100.0, final.entry_m + 200.0
+    climb = 1 + words.angle_climb
+    up = 1 + level_words(words, [low + 300.0])[0]
+    m = masks(words)
+    m.track(np.array([e]), np.array([0.0]), np.array([low]), np.array([True]))         # a row under G
+    assert permitted(m, words, ANGLE, e=e, height=low, go_around=True)[climb]         # its word keeps G
+    assert not permitted(m, words, ANGLE, e=e, height=low)[climb]                     # its word ends G: this row
+    assert not permitted(m, words, ALTITUDE, e=e, height=low)[up]
+    m.after_row(np.array([e]), np.array([0.0]), np.array([low]), np.array([False]))
+    m.track(np.array([e]), np.array([0.0]), np.array([high]), np.array([False]))
+    assert not permitted(m, words, ANGLE, e=e, height=high)[climb]                    # kept: it passed below
+    kept_g = masks(words)
+    kept_g.track(np.array([e]), np.array([0.0]), np.array([low]), np.array([True]))
+    kept_g.after_row(np.array([e]), np.array([0.0]), np.array([low]), np.array([True]))
+    kept_g.track(np.array([e]), np.array([0.0]), np.array([high]), np.array([False]))
+    assert permitted(kept_g, words, ANGLE, e=e, height=high)[climb]                   # nothing kept under G
+
+
 def test_a_procedure_mask_never_blocks_unchanged(words):
     """D64: a mask blocks a word when it is said, never "unchanged" — also where the word in force breaks a limit (a
     level under the edge, the aircraft sunk under it with "no level-off" in force, under the DA, a climb barred)."""
@@ -300,7 +323,7 @@ def test_the_runway_column_asks_the_masks_under_each_runway_word(words):
     edge = float(final.glidepath_m(np.array(5_000.0))) - GLIDEPATH_BELOW_M
     at = Position(np.array([-5_000.0]), np.array([0.0]), np.array([edge + 60.0]))
     speaker.procedure.track(at.e_m, at.n_m, at.height_m, np.array([False]))
-    speaker.heard[0].state = InForce(runway=0, go_around=False, heading=0, altitude=words.altitude_index(900.0),
+    speaker._heard[0].state = InForce(runway=0, go_around=False, heading=0, altitude=words.altitude_index(900.0),
                                      angle=words.angle_index(3.0), speed=words.speed_index(75.0))
     between = [v for v in range(words.n_altitude_levels)
                if final.decision_m < words.altitude_level_m(v) < edge - words.altitude_tolerance_m(v)]
@@ -308,12 +331,12 @@ def test_the_runway_column_asks_the_masks_under_each_runway_word(words):
     altitude = np.zeros((1, 2 + words.n_altitude_levels), dtype=bool)
     altitude[0, [1 + v for v in between]] = True
     caller = {ALTITUDE: altitude}
-    mask = speaker._allowed(RUNWAY, np.zeros((1, 0), dtype=np.int64), at, caller)[0]
+    mask = speaker._allowed(RUNWAY, np.zeros((1, 0), dtype=np.int64), at, caller, speaker.procedure)[0]
     runway_words = column_words(RUNWAY, words, 2)
     assert mask[list(runway_words).index(1)] and not mask[list(runway_words).index(UNCHANGED)]
     for w, word in enumerate(runway_words):
         runway, go_around = speaker._runway_after(np.array([word]))
-        others = {c: speaker._others(c, runway, go_around, at, caller)[0] for c in range(1, len(COLUMNS))}
+        others = {c: speaker._others(c, runway, go_around, at, caller, speaker.procedure)[0] for c in range(1, len(COLUMNS))}
         options = [column_words(c, words, 2)[others[c]] for c in range(1, len(COLUMNS))]
         found = False
         for rest in product(*options):
@@ -324,7 +347,6 @@ def test_the_runway_column_asks_the_masks_under_each_runway_word(words):
             found = True
             break
         assert mask[w] == found, (word, mask[w], found)
-
 
 
 def test_after_its_second_go_around_a_flight_may_not_say_another(words):
@@ -502,6 +524,7 @@ def test_the_speaker_gives_the_added_modules_the_caller_s_input_and_a_zero_modul
     _, plain = speak_with(model, rows, words, [0, 1, 2], 15)
     seen = []
     model.add_at_each_layer(lambda i: Recorder(seen))
+    model.eval()                                            # D107: the added modules too
     token = object()
     _, added = speak_with(model, rows, words, [0, 1, 2], 15, extra=token)
     assert np.array_equal(added, plain)
@@ -594,3 +617,106 @@ def test_the_speaker_refuses_a_training_model_and_a_row_not_after_the_last(words
     with pytest.raises(ValueError, match="training"):
         speaker.speak(rows.between(first + 1, first + 2), position(2, first + 1), numbers(1, 2, 1)[0])
     model.eval()
+
+
+def test_what_a_loop_reads_of_the_speaker_does_not_change_it(words):
+    """D106 item 6: the words in force, the go-arounds said and the number of candidates a loop reads are copies."""
+    model, rows = setup(words, seed=9, count=2)
+    speaker = Speaker(model, words, [finals()] * 2, capacity=8)
+    first = int(rows.first[0].nonzero()[0, 0])
+    speaker.observe(rows.between(0, first), [position(2, r) for r in range(first)])
+    said = speaker.speak(rows.between(first, first + 1), position(2, first), numbers(1, 2, 1)[0])
+    in_force = speaker.in_force
+    heard, go_arounds, candidates = speaker.heard, speaker.go_arounds, speaker.n_candidates
+    heard[0].hear(said[1], 500.0, 99.0)                      # another row heard by the copy
+    go_arounds[:] = 7
+    candidates[:] = 0
+    assert speaker.in_force == in_force and (speaker.go_arounds == 0).all() and (speaker.n_candidates == 2).all()
+    assert heard[0].state != in_force[0] or heard[0].said_s.max() == 99.0
+    assert speaker.heard[0].said_s.max() < 99.0
+
+
+def test_a_refused_row_leaves_the_speaker_as_it_was(words):
+    """A row refused after the speaker began it (here: no word of a column permitted, D62) changes nothing — its cache,
+    procedure masks, words heard, go-arounds and records — so the next row is said as by a speaker that never saw it
+    (a copy taken before), bit for bit."""
+    model, rows = setup(words, seed=10, count=2)
+    speaker = Speaker(model, words, [finals()] * 2, capacity=8)
+    first = int(rows.first[0].nonzero()[0, 0])
+    speaker.observe(rows.between(0, first), [spread(2, r) for r in range(first)])
+    drawn = numbers(3, 2, 6)
+    for r in range(first, first + 3):
+        speaker.speak(rows.between(r, r + 1), spread(2, r), drawn[r - first])
+    twin = speaker.copy(range(2))
+    r = first + 3
+    nothing = np.zeros((2, 1 + words.n_heading), dtype=bool)
+    with pytest.raises(ValueError, match="no permitted word"):
+        speaker.speak(rows.between(r, r + 1), spread(2, r), drawn[3], {HEADING: nothing})
+    assert [p.rows for p in speaker.past] == [p.rows for p in twin.past]
+    assert speaker.in_force == twin.in_force and np.array_equal(speaker.go_arounds, twin.go_arounds)
+    for name in ("joined", "dipped", "cleared"):
+        assert np.array_equal(getattr(speaker.procedure, name), getattr(twin.procedure, name)), name
+    assert len(speaker.drawn_probability) == len(twin.drawn_probability) == 3
+    assert all(len(rows_) == 3 for rows_ in speaker.forbidden.values()) and len(speaker.procedure_blocked) == 3
+    a = speaker.speak(rows.between(r, r + 1), spread(2, r), drawn[3])
+    b = twin.speak(rows.between(r, r + 1), spread(2, r), drawn[3])
+    assert np.array_equal(a, b) and np.array_equal(speaker.drawn_probability[-1], twin.drawn_probability[-1])
+
+
+def test_a_module_in_training_mode_inside_an_eval_model_is_refused(words):
+    """D107: the speaker and the log-probability under its records refuse a model of which any module is in training
+    mode — an added module too; the teacher-forced loss (`batch_nll`) does not."""
+    from ts_transformer.prior.train import batch_nll, masked_log_probability
+
+    model, rows = setup(words, seed=11, count=2)
+    model.layers[1].train()
+    with pytest.raises(ValueError, match="D107"):
+        Speaker(model, words, [finals()] * 2, capacity=8)
+    model.eval()
+    speaker = Speaker(model, words, [finals()] * 2, capacity=8)
+    first = int(rows.first[0].nonzero()[0, 0])
+    speaker.observe(rows.between(0, first), [spread(2, r) for r in range(first)])
+    speaker.speak(rows.between(first, first + 1), spread(2, first), numbers(1, 2, 1)[0])
+    model.add_at_each_layer(lambda i: Recorder([]))                       # added modules, in training mode
+    with pytest.raises(ValueError, match="D107"):
+        speaker.speak(rows.between(first + 1, first + 2), spread(2, first + 1), numbers(1, 2, 1)[0])
+    told = rows.between(0, first + 1)
+    with pytest.raises(ValueError, match="D107"):
+        masked_log_probability(model, told, speaker.permitted())
+    batch_nll(model, told)                                                # the data term reads either mode
+    model.eval()
+    masked_log_probability(model, told._replace(targets=told.targets), speaker.permitted())
+
+
+def test_rows_come_in_time_order_and_none_is_observed_after_one_is_said(words):
+    model, rows = setup(words, seed=12, count=2)
+    speaker = Speaker(model, words, [finals()] * 2, capacity=8)
+    first = int(rows.first[0].nonzero()[0, 0])
+    speaker.observe(rows.between(0, first - 1), [spread(2, r) for r in range(first - 1)])
+    with pytest.raises(ValueError, match="time order"):                   # not after the last observed row
+        speaker.observe(rows.between(first - 2, first - 1), [spread(2, first - 2)])
+    speaker.observe(rows.between(first - 1, first), [spread(2, first - 1)])
+    with pytest.raises(ValueError, match="time order"):                   # the first row said: after it too
+        speaker.speak(rows.between(first - 1, first)._replace(first=rows.between(first, first + 1).first),
+                      spread(2, first - 1), numbers(1, 2, 1)[0])
+    speaker.speak(rows.between(first, first + 1), spread(2, first), numbers(1, 2, 1)[0])
+    with pytest.raises(ValueError, match="observed before it"):
+        speaker.observe(rows.between(first + 1, first + 2)._replace(first=torch.zeros_like(rows.first[:, :1])),
+                        [spread(2, first + 1)])
+
+
+def test_the_speaker_keeps_the_row_whose_runway_word_ends_g(words):
+    """D64 through the speaker: a row said under G whose runway word (a candidate) ends it, below the entry height before
+    the join, is kept as the masks' state — the passage below the entry height starts at that row."""
+    model, rows = setup(words, seed=13, count=1)
+    speaker = Speaker(model, words, [finals()], capacity=8)
+    first = int(rows.first[0].nonzero()[0, 0])
+    speaker.observe(rows.between(0, first), [position(1, r) for r in range(first)])
+    speaker._heard[0].state = InForce(runway=0, go_around=True, heading=0, altitude=words.altitude_index(900.0),
+                                     angle=words.angle_index(3.0), speed=words.speed_index(75.0))
+    low = finals()[0].entry_m - 100.0
+    at = Position(np.array([-20_000.0]), np.array([0.0]), np.array([low]))
+    runway_words = column_words(RUNWAY, words, 2)
+    said = speaker.speak(rows.between(first + 1, first + 2), at, numbers(1, 1, 1)[0], {RUNWAY: (runway_words == 0)[None]})
+    assert said[0, RUNWAY] == 0 and not speaker.in_force[0].go_around
+    assert speaker.procedure.dipped[0, 0] and not speaker.procedure.cleared[0]

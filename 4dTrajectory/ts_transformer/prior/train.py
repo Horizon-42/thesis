@@ -25,7 +25,7 @@ from torch import nn
 
 from ts_transformer.instructions.words import COLUMNS, RUNWAY
 from ts_transformer.prior.batch import RowTensors, SentenceRows, collate, require_words
-from ts_transformer.prior.model import Prior
+from ts_transformer.prior.model import Prior, require_eval
 from ts_transformer.prior.runs import RunData
 from ts_transformer.prior.speaker import Permitted
 
@@ -112,7 +112,9 @@ def masked_log_probability(model: Prior, rows: RowTensors, permitted: Permitted,
     keeps records and rows of the same aircraft in the same order. A record narrower than the batch's classes permits none of
     the extra classes, one wider is refused unless its extra classes are all blocked. At the parameters that spoke, the
     probability is the one the speaker drew the word from (within the float tolerance); a word the record blocks has
-    probability 0."""
+    probability 0. Refused for a model with any module in training mode (D107): the teacher-forced loss
+    (`batch_nll`) is not."""
+    require_eval(model, "the log-probability under the speaker's records")
     count, length = rows.asked.shape
     if permitted.time_s.shape[0] != count:
         raise ValueError(f"records of {permitted.time_s.shape[0]} aircraft for a batch of {count}")
