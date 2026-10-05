@@ -117,6 +117,7 @@ The commits, dates, branches and test counts of every milestone are in
 | A37 (D80, D83, D85, D90) | Done on `dev-two-tier-v4-a37`: `e7e01461`, `b41b24a5` (D90 narrowed), `89729d66` (a turn over 170° at a vertex is a reversal), reviewed; checked on A34's artefact by sample; v12's readout written again (val counts only) |
 | A35 | Done: `closed_loop_v12_20261005` published (5 airports × 40 flights), live check by sample 0 differing, browser check passed |
 | A38 (D97) | Planned: after A37, on its branch line |
+| A39 (outline D109) | Planned: code and tests only; before the publication of stage B's base (prior B5, B6) |
 
 
 ### 0.4 Plan
@@ -131,6 +132,8 @@ The milestones that are not done are specified in §12.1; the done ones, and the
 4. A35: A23's Training sets again from A34's artefact; then the user merges, and the superseded artefacts are
    deleted with the user's go.
 5. Claude's check of A32–A38 (§12.2 item 8), and the replay of the val days (waits for the user).
+6. A39: the Training view's splits from the caller (outline D109), code and tests only; before stage B publishes its
+   base (prior B5, B6).
 
 ---
 
@@ -1438,6 +1441,16 @@ start); code and tests only; no artefact is built again.
   runs before the move. The two readings of D97 (4) (how a change of speed moves the rows; whether the time limit stays
   the flight's own) go to the user before the code is reviewed.
 - The executor conformance and the closed-loop check of A34's artefact pass with A38's code (nothing changes).
+
+**A39. The Training view's splits from the caller (outline D109).** Code and tests only; no set is exported again.
+
+- The frontend's reader of a set's flights (`aeroviz-4d/src/data/trainingSample.ts`, `TRAINING_SPLITS` in `parseFlight`)
+  and the backend's flights of a set (`aeroviz_backend/autopilot_segment/backend.py` `set_flown`) take the splits that
+  a set may hold from their caller. Stage A's own sets give train and select, as now; stage B's prior sets give val too,
+  for a set exported from the base's claimed validation readout (prior B10).
+- Tests: stage A's sets refuse a val flight, as now; a caller that permits val opens a val flight and flies its
+  segment live, equal to the set's flown states within the executor conformance tolerance; A23's sets and fixtures are
+  byte for byte the same.
 
 ### 12.2 Claude's check of stage A
 

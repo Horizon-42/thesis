@@ -86,6 +86,7 @@ both, each with its part. A new decision or open item takes the next free number
 | D85 | A readout that serves a choice of the user reports the train and select days only. Where a build needs the validation days (the closed-loop sentences of val), it writes them, but no report, summary or printed text shows a reading of them before the stage's one validation readout. Why: the user chose Δ = 4 s (vocabulary D11) on a report that showed the val rows of the readings of D34 (`readouts/2026-10-04_stage_a_a25_report.zh.md`); the train and select rows give the same order, but the validation days are read one time for each stage | Decided | User, 2026-10-05, on Claude's review of stage A |
 | D95 | Stage C is developed in parallel with the end of stage B (the user, 2026-10-05), on its own branch and worktree (§5 rule 1), by its own implementer; Claude writes its design and runs the project. Stage C never changes the code of `instructions/`, `autopilot/` or `prior/`. What it needs of them is a change of their public interfaces, made by their own stages (vocabulary D97, prior D96): code only, so that nothing of stage A is built again (the user, 2026-10-05); the changes of stage B before B5's formal campaign, because they change the draws of free generation. The formal runs of stage C wait for B5's base | Decided | User, 2026-10-05 |
 | D55 | A value that a runner fits from data and the user chooses (D15) is measured on all train days, in a scratch directory, directly after the milestone that writes the runner; the user chooses before a later milestone reads the value. A smoke build uses the chosen spec, and its flights are a random sample for each airport and split (seed 1337), not the first flights of the sorted flight keys (a key starts with the callsign, so the first flights are mostly one airline). Why: the smoke of stage A fitted its own spec on approximately 400 train flights, 373 of them one airline, with one climb piece; every smoke reading of A9–A16 used it (§5 rules 7 and 12) | Decided | User, 2026-10-04 |
+| D109 | The Training view opens the set of the base model's one validation readout (§6 item 4, prior B6) as it opens the others, and a click on a word flies its segment live: the backend rebuilds the val flight and flies the words that the readout already flew (the same states within the executor conformance tolerance), so it gives no new reading of the val days. Only that set: the frontend's reader and the backend's live segment take the splits a set may hold from its caller (stage A's own sets: train and select; stage B's prior sets: also val, for a set exported from the claimed validation readout, prior B10). Why: the export could write that set, but A23's reader and live segment accepted train and select only, so the planned publication did not open (Claude's check of stage B, 2026-10-05; vocabulary A39) | Decided | User, 2026-10-05 |
 
 **The identity rule (D21)** (the user, 2026-10-02 and 2026-10-03). An identity binds the format (what the words and the
 payloads mean) and the data rules (the sealed test days). Code is identified by what it does on fixed inputs (a
@@ -96,12 +97,12 @@ they came from. Each document lists the identities of its parts.
 
 | Document | Decisions | Open items |
 |---|---|---|
-| Outline | D7, D20, D21, D55, D85, D95 | — |
+| Outline | D7, D20, D21, D55, D85, D95, D109 | — |
 | Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86–D90, D97, D102 | O8 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75, D96, D105–D108 | — |
 | Post-training | D29–D31, D36, D37, D76, D91–D94, D98–D101, D103–D105, D107 | — |
 
-The next free numbers: D109, O13.
+The next free numbers: D110, O13.
 
 ---
 
@@ -224,7 +225,8 @@ the frontend before the next one builds on it. The rules for these milestones:
    stay unchanged, so the Training view of the main checkout keeps working until the user merges.
 4. **Publication.** The intent of each published set is in `docs/experiments/intents.json`, committed before the
    export. Train and select flights; val flights only from a readout that a plan already makes (the base model's one
-   validation readout, prior B5), never a new read of the val days.
+   validation readout, prior B5), never a new read of the val days. That set opens and flies live as the others do
+   (D109).
 5. **The user's view.** A test stack from the stage's worktree: the backend and vite on their own ports (§5 rule 13 for
    the memory). The report gives the address and the stop command (`kill $(lsof -t -iTCP:<port> -sTCP:LISTEN)`). The
    main checkout's services are not touched (§5 rule 8).

@@ -92,7 +92,7 @@ Proposals (where the design says nothing): none open.
    | After A34 of stage A (the formal artefact with D77–D84) | The smoke of B3, free generation and the check at the formal size at Δ = 4 s again, on A34's artefact (the candidates of an airport can change, D78); the formal runs read A34's artefact |
    | Now, before B5's formal campaign (the user, 2026-10-05) | B9: the interface for the post-training (D96), on synthetic artefacts. Its change of free generation's draws comes before any formal free generation: a payload that an experiment writes is settled before the experiment runs |
    | Now, before B5's formal campaign (the user, 2026-10-05) | B10: the corrections of Claude's check of stage B (D105–D108), on synthetic artefacts; then B3's smoke and free generation on A34's artefact again. Its changes of free generation (the masks of D64 at the row that ends G, the region of D72, the shared step) come before any formal free generation |
-   | After B10, Claude's check of stage A (with A32–A37, vocabulary §12.2 item 8; A38 changes no artefact and does not hold B5) and the user's choice of Δ (outline §4); A32 holds vocabulary D86 (the export gives val flights for the base's validation readout) | B5; B6's publication of the folds and the base; B7 |
+   | After B10, Claude's check of stage A (with A32–A37, vocabulary §12.2 item 8; A38 changes no artefact and does not hold B5) and the user's choice of Δ (outline §4); A32 holds vocabulary D86 (the export gives val flights for the base's validation readout) | B5; B6's publication of the folds and the base (the base's val set after vocabulary A39, outline D109); B7 |
 
 2. The post-training (`post_training.md`) is developed in parallel with the end of stage B, on its own branch, made
    from this one (outline §4, §5 rule 1; D95). It reads only §7; it merges this branch when B9 is committed.
@@ -510,6 +510,9 @@ for the column "Code" of §7.
   unless claimed); the frontend's fixtures of stage B written by the export, the index by its own writer; a refused row
   leaves the speaker as it was; a module in training mode inside an eval model is refused; free generation through the
   shared step gives the same words, states and readout, bit for bit, as before the move.
+- Outline D109, after vocabulary A39 is on this branch: the prior's sets give the Training view's reader and live
+  segment their splits; a set exported from the base's claimed validation readout gives val too, and only it. Tests: a
+  val set of a claimed readout opens and flies live; any other set with a val flight is refused.
 
 **B6. The Training view of stage B (outline §6).** After A23 is on this branch; the publication of the folds and the
 base after B5. The user sees what the prior says and how the executor flies it.
