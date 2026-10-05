@@ -1,0 +1,71 @@
+<section id="s-words">
+<h2 id="words" data-toc="2 The vocabulary">2 The vocabulary</h2>
+<p>The vocabulary is the language between the two parts. It has <b>five columns</b>. A <t zh="行（步）">row</t> is one line of a sentence, and a row is Δ seconds long. In each row, a column says one <t zh="词（指令词）">word</t> or says nothing. “Nothing” has its own value: <em>unchanged</em>.</p>
+<table>
+<thead><tr><th>#</th><th>Column</th><th>What a word says</th><th class="num">Classes</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>Runway</td><td>“Expect this runway”: a candidate runway of the airport. Or “go-around”.</td><td class="num">candidates + 2</td></tr>
+<tr><td>1</td><td>Heading</td><td>“Fly this track”: a track relative to the course of the runway, on a 5° grid.</td><td class="num">73</td></tr>
+<tr><td>2</td><td>Altitude</td><td>“Descend or climb to this level”: a height above the airport, 40 levels. Or “no level-off”.</td><td class="num">42</td></tr>
+<tr><td>3</td><td>Angle</td><td>How steep: level, four descent classes, or climb.</td><td class="num">7</td></tr>
+<tr><td>4</td><td>Speed</td><td>“Hold this ground speed”: a 5 m/s grid from 20 to 250 m/s. Or “unspecified”.</td><td class="num">49</td></tr>
+</tbody></table>
+<p class="src">Classes include the value “unchanged”. Source: vocabulary §3.1.</p>
+<p>A speaker says the columns in this order. A later column sees the words that the earlier columns said in the same row. The <t zh="第一个预测步">first predicted step</t> is the row 16 s after row 0. The rows before it are observed only. At the first predicted step, every column says a value.</p>
+<p>The row interval Δ is 2, 4 or 8 s. The user chose <b>Δ = 4 s</b> (<span class="pill d">D11</span>). A speaker says a row, and the executor hears it, every 4 s. The executor itself runs one <t zh="周期">cycle</t> every 1 s.</p>
+
+<div data-demo="sentence" data-title="A real sentence: a vectored approach to KRDU 23R"></div>
+
+<p>The table above the figure shows the words of the rows that were said. Move the slider. At row 0 all five columns say a word. After that, most cells are empty. The heading column changes most often, because a turn is a series of 5° steps. Orange words are <t zh="修正词">correction words</t>. Section 7 explains them.</p>
+<figure class="paper" data-fig="fig03_sentence_example"></figure>
+
+<h3 id="w-heading" class="toc">2.1 Heading words are relative to the runway</h3>
+<p>A heading word says: <em>fly track θ and keep it</em>, with θ = course(R) + 5k°. R is the <t zh="生效跑道">runway in force</t> and k is the class of the word. The <t zh="航向">heading</t> classes go round the full circle. Class 0 is the course of the runway: the <t zh="最后进近段">final</t>. Class 36 is the opposite direction: the downwind. Classes 18 and 54 are the two base legs.</p>
+<p>There are two reasons for a relative grid (<span class="pill d">D8</span>). Both were measured on the train split.</p>
+<ol>
+<li><b>The final must be on the grid.</b> The capture corridor allows 2° from the course. The courses of KSTL are 2.3° from the nearest absolute 5° value. With absolute words, no word could hold a KSTL final.</li>
+<li><b>The same manoeuvre gets the same word at all airports.</b> This helps a model to use the data of one airport at another airport.</li>
+</ol>
+<div data-demo="heading_frame" data-title="One word, an absolute track"></div>
+<p>The executor converts a heading word to an absolute track when it hears the word. It keeps that track until the next heading word. A change of runway does not turn the aircraft.</p>
+
+<h3 id="w-altitude" class="toc">2.2 Altitude words are heights above the airport</h3>
+<p>An altitude word says: <em>descend or climb to level T and keep it</em>. T is a <b>geometric height above the airport elevation E</b> (<span class="pill d">D58</span>). The executor flies the level at T + E above sea level. The grid has <b>40 levels on three segments</b>. The steps are 60 m up to 1,260 m, 120 m up to 2,700 m, and 450 m up to 5,400 m.</p>
+<p>A coarse grid high up is enough: 99.7 % of the level words are under 3,000 m. A fine step high up would only divide the day-to-day spread of an assigned level. The word <b>“no level-off”</b> has no level. It means: descend at the angle in force, and do not stop. It is the word of the final descent.</p>
+<p>Why above the airport and not above sea level? A word must mean the same manoeuvre at every airport (principle 4). At a high airport, such as KDEN, the levels of a final approach are far above what the five training airports (1–188 m) used. Above E, the final approach lies in the 60 m segment at every airport. The cost: a round level such as 3,000 ft MSL is a different word at each airport. The second part of the demo shows this.</p>
+<div data-demo="altitude_grid" data-title="The altitude grid and the band of each level"></div>
+<p>The blue band is the <t zh="容差带">tolerance</t> ε of a level (<span class="pill d">D52</span>): half the larger gap to the neighbouring levels, plus 10 m. It is 40 m, 70 m or 235 m. The <t zh="包络">envelope</t> of a word is a tube around the descent to its level. Principle 6 requires that every containment rate comes with the width of the tube.</p>
+
+<h3 id="w-angle" class="toc">2.3 Angle words say how steep</h3>
+<p>The angle column has seven values: unchanged, level, four descent classes and one climb. The four descent classes come from a <t zh="k 均值聚类">k-means</t> fit on tan(angle) of the descent pieces of all train days. Each piece counts with the square of its length (<span class="pill d">D54</span>). The user chose the values rounded to 0.25° (<span class="pill d">D56</span>).</p>
+<table>
+<thead><tr><th>Class</th><th class="num">Nominal angle</th><th class="num">Range</th></tr></thead>
+<tbody>
+<tr><td>Descent 1</td><td class="num">1.5°</td><td class="num">−0.5° to 2.0°</td></tr>
+<tr><td>Descent 2</td><td class="num">2.5°</td><td class="num">2.0° to 2.75°</td></tr>
+<tr><td>Descent 3</td><td class="num">3.0°</td><td class="num">2.75° to 3.75°</td></tr>
+<tr><td>Descent 4</td><td class="num">4.5°</td><td class="num">3.75° to 10°</td></tr>
+<tr><td>Climb</td><td class="num">1.25° (executor value)</td><td class="num">0.5° to 15° climb</td></tr>
+</tbody></table>
+<p>Descent 3 is the 3.0° <t zh="下滑道">glidepath</t> that 24 of the 25 candidate runways publish. The vocabulary has <b>one climb word</b>. The word has no angle: the angle is a value of the executor. While a go-around is in force, the executor climbs at the steepest steady angle that its thrust permits. This angle is not less than 1.885° and not more than 3°.</p>
+<div data-demo="angle_classes" data-title="A piece of a real descent becomes a class"></div>
+
+<h3 id="w-speed" class="toc">2.4 Speed words are steps</h3>
+<p>A speed word says: <em>hold ground speed V</em>. Controllers assign indicated airspeed, but the data has no airspeed and no wind. So the words use ground speed. The word <b>“unspecified”</b> means that the pilot flies the approach speed of the aircraft type. In a labelled sentence, “unspecified” starts at the <t zh="截获行">capture row</t>.</p>
+<p>A change of speed says <b>each grid value on the way</b> (<span class="pill d">D43</span>). Each speed word is then a step of 5 m/s. The time between the words gives the rate of the change, in the same way that the time between heading words gives the rate of a turn. Why? A target word gives no rate. Take one target word and a fixed rate of the executor. Then, in 31 % of the flights, the flown aircraft moves more than 1 km ahead of the observed aircraft along the path (an estimate on the smoke artefact).</p>
+<div data-demo="speed_steps" data-title="Speed words in steps and the distance along the path"></div>
+
+<h3 id="w-runway" class="toc">2.5 The runway column and the go-around</h3>
+<p>The runway column keeps two states: R, the runway in force, and G, the <t zh="复飞">go-around</t> state. The executor uses R for two things only: to convert heading words, and to find the distance for the slow-down to the approach speed. The judge uses R for the landing.</p>
+<table>
+<thead><tr><th>Word said</th><th>R after it</th><th>G after it</th><th>Permitted when</th></tr></thead>
+<tbody>
+<tr><td>candidate k, at the first predicted step</td><td>k</td><td>false</td><td>always; the first step must say a candidate</td></tr>
+<tr><td>candidate k, later, G false</td><td>k</td><td>false</td><td>k ≠ R (a word in force is not said again)</td></tr>
+<tr><td>candidate k, G true</td><td>k</td><td>false</td><td>any candidate, R included; it ends the go-around</td></tr>
+<tr><td>go-around</td><td>R (no change)</td><td>true</td><td>G false, after the first predicted step</td></tr>
+</tbody></table>
+<p>There is no <em>clearance</em> word and no runway lock. The labeller cannot see when a controller gave a clearance, because the data has no radio. So the model says the turns with heading words (<span class="pill d">D2</span>). While G is false, the model can change the runway at any time (<span class="pill d">D12</span>).</p>
+<p>“Go-around” means <em>abandon this approach</em> (<span class="pill d">D10</span>). It changes <b>no target of another column</b> (<span class="pill d">D27</span>). The heading word in force stays. A climb word now climbs at the go-around angle, and “unspecified” holds the airspeed. The judge ignores every threshold crossing while G is true. The time limit of the flight grows by 900 s. A runway word ends G, so one column can say the sequence approach → go-around → approach.</p>
+<figure class="paper" data-fig="fig02_vocabulary_grids"></figure>
+</section>

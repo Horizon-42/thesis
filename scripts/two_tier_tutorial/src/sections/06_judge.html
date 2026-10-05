@@ -1,0 +1,21 @@
+<section id="s-judge">
+<h2 id="judge" data-toc="6 The judge">6 The judge</h2>
+<p>The judge classifies what the executor flew. It works on three layers. Layer 1 records, in each cycle, which limit bound. Layer 2 checks each word against the flown track, with the same envelope code as the labeller. Layer 3 decides the outcome of the flight.</p>
+<p>An <b>approach crossing</b> is a crossing of the threshold plane of R with G false. The aircraft must be <em>lined up</em>: its track is within 30° of the course, and its offset is inside the landing screen. The judge gives the <b>first</b> event. At one row, it uses the order of this table.</p>
+<table>
+<thead><tr><th>Outcome</th><th>Condition</th></tr></thead>
+<tbody>
+<tr><td><code>dynamics_failure</code></td><td>A state is not finite, there is no airspeed, or the stall cut-off of the dynamics binds</td></tr>
+<tr><td><code>ground_contact</code></td><td>Below the threshold elevation of R while before the threshold</td></tr>
+<tr><td><code>crossed_too_high</code></td><td>An approach crossing higher than 100 m above the threshold</td></tr>
+<tr><td><code>crossed_off_runway</code></td><td>An approach crossing at ≤ 100 m, outside the runway limit (106.7 m)</td></tr>
+<tr><td><code>unstable_at_minimums</code></td><td>An approach crossing at ≤ 100 m inside the runway limit, after a failed DA check</td></tr>
+<tr><td><code>landed</code></td><td>The same, after a DA check that passed</td></tr>
+<tr><td><code>crossed_other_runway</code></td><td>G false: the plane of another candidate crossed, lined up, inside that runway’s own limit</td></tr>
+<tr><td><code>timeout</code></td><td>None of these within the time limit (the remaining observed time × 1.5, plus 900 s for each go-around)</td></tr>
+</tbody></table>
+<p>The <t zh="决断高度检查">decision-altitude check</t> (DA check) has no parameter (<span class="pill d">D38</span>). At the <em>DA point</em> (the first row where the aircraft on the final descends through the DA), the height must be within ±22 m of the published glidepath. The lateral offset must be inside the <t zh="最后进近段锥形区">FAS cone</t>. The ±22 m value is the vertical bound of the evaluation module (ICAO Doc 9613). The cone is the lateral containment of an LPV approach (FAA Order 8260.58D). A “go-around” said <em>before</em> the DA point is not an event: the flight continues. So a go-around is a possible answer to an unstable approach. The reason is the regulation: the missed approach begins at the DA.</p>
+<div data-demo="judge" data-title="Which outcome? Set the crossing"></div>
+<p>The judge does <b>not</b> grade quality (lateral, vertical and speed gates). That belongs to the evaluation module. The executor ends a flight where the judge ends it (<span class="pill d">D79</span>): nothing is flown or said after the end.</p>
+<figure class="paper" data-fig="fig15_judge_outcomes"></figure>
+</section>

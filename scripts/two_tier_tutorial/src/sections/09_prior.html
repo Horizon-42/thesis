@@ -1,0 +1,75 @@
+<section id="s-prior">
+<h2 id="prior" data-toc="9 The prior">9 The prior</h2>
+<p>The prior is the upper part of the model: a language model of the controller. At each row, it says one row of five words for each aircraft, and the executor flies them. Stage B builds it. The code is on the branch <code>dev-two-tier-v4-prior</code>. This section explains its inputs, its network, its decoding with masks, and its training.</p>
+<div class="note warn"><p><b>Status.</b> The code and its tests are done. The formal campaign (cross-validation and the base model, milestone B5) waits for the review of stage A and stage B. So this page shows <b>no result of a trained v4 prior</b>. The demos of this section use made-up numbers where they say so.</p></div>
+
+<h3 id="p-inputs" class="toc">9.1 What the prior sees</h3>
+<p>The rule is principle 7: an input gives only what a controller knows <em>before</em> the step. The rows before the first predicted step are observed. From the first predicted step on, every input that comes from a state comes from the <em>flown</em> states of the closed-loop sentence, as in the closed loop where the executor makes the states.</p>
+<ul>
+<li><b>Own state.</b> The height above the airport elevation, the ground speed, the vertical rate, and a flag <code>no_motion</code> that is 1 at row 0 only (<span class="pill d">D58</span>, <span class="pill d">D60</span>). No MSL height and no absolute position.</li>
+<li><b>Candidate vectors.</b> For each candidate runway: the aircraft in the frame of that runway (distance to the threshold, offset right of the final, height above the threshold, direction of motion minus the course), the <b>height above its published glidepath</b> (<span class="pill d">D13</span>), and the landings on it in the last 30 minutes. There is no constant of the runway (<span class="pill d">D24</span>).</li>
+<li><b>Words in force.</b> The runway in force as its candidate vector, the state G, the heading in force (sine and cosine of the angle relative to the course), the other columns as embeddings, and the <b>time since each column said its word</b> (<span class="pill d">D17</span>).</li>
+<li><b>Motion.</b> From the displacement in the 2 s before the row, at every Δ (<span class="pill d">D25</span>). Never the fitted track, ground speed or vertical rate of the signals: a fit over 15 s uses 7.5 s of the future.</li>
+</ul>
+<p>Every input has a <b>fixed physical scale</b> in SI units (<span class="pill d">D41</span>): distances as asinh(d / 1 km), heights over 1 km, the height above a glidepath as asinh(h / 100 m), speeds over 100 m/s. No input uses a mean or a spread of the training data, because a new airport has none.</p>
+<p><b>No input is computed from R before R is said.</b> The artefact writes the runway word at row 0, and its value is the runway on which the flight landed. An input of the rows before the first predicted step that uses it would give away the answer of the first predicted step (<span class="pill d">D23</span>). A test checks it: a change of the runway word of a sentence leaves the inputs of these rows the same, bit for bit.</p>
+<div data-demo="inputs_quiz" data-title="Can the prior see this?"></div>
+<p>Evidence for principle 4: in an earlier prior, the replacement of the airport embedding with the mean of the four other embeddings raised the loss by 0.024 for each step and lowered the landed share in free generation by 5.8 points. The five embeddings were almost orthogonal: an identity table, not a property of the airports (readout R46). The v4 prior has no airport embedding.</p>
+
+<h3 id="p-candidates" class="toc">9.2 Candidate tokens: any number of runways</h3>
+<p>Each candidate vector goes through <b>one shared network</b> and becomes a <t zh="词元">token</t>. The tokens reach a row through one <t zh="注意力">attention</t> whose weights sum to 1. A sum would grow with the number of candidates. An attention does not. The runway head also points at the candidate tokens, so the model has no fixed number of runway slots (<span class="pill d">D41</span>). A new airport can have 2 or 8 candidates.</p>
+<div data-demo="candidate_pool" data-title="KRDU candidates: the vectors that a row reads"></div>
+
+<h3 id="p-network" class="toc">9.3 The network</h3>
+<p>The network has <b>no airport embedding, no row-position embedding and no input “time from row 0”</b>. A row is the sum of: the projected own state, the time since each column’s word, G, the heading in force, an embedding for each other column’s word in force, the runway in force as its candidate token, and the attention over the candidate tokens.</p>
+<ul>
+<li><b>Layers.</b> Each layer is pre-normed and residual: a <b>causal time attention</b>, then a module that a caller can add (section 10), then a feed-forward network. A row reads the rows before it and itself.</li>
+<li><b><t zh="旋转位置编码">RoPE</t>.</b> The query and the key of a row are rotated by an angle that grows with the time of the row <em>in seconds</em>. So the attention reads only time differences (<span class="pill d">D16</span>). Seconds, not rows, so that every Δ reads the same time.</li>
+<li><b>Cache.</b> A speaker that adds one row at a time keeps each layer’s rotated keys and values, and encodes only the new rows. A key is rotated one time, when it is written.</li>
+<li><b>Five heads in the order of the columns.</b> Column k’s head reads the hidden state plus the embeddings of the words that the earlier columns chose <em>in this row</em>. The runway head scores each candidate token by q·token/√d, after “unchanged” and “go-around”. At the first predicted step, “unchanged” (and “go-around”) are impossible.</li>
+</ul>
+<div data-demo="rope" data-title="RoPE: only the time difference counts"></div>
+<p>Configuration A of the design: <code>d_model</code> 192, 4 layers, 6 heads of width 32, feed-forward 768, dropout 0.1. It has <b>2,165,741 parameters</b> (counted from the code). The RoPE base is 10,000.</p>
+<figure class="paper" data-fig="fig08_prior_architecture"></figure>
+
+<h3 id="p-decoding" class="toc">9.4 Decoding: the speaker, the masks and the draw</h3>
+<p>The <t zh="说话者">speaker</t> says a row column by column. A word is said only where <b>every mask permits it</b>:</p>
+<ol>
+<li>the model’s own masks (“unchanged” at the first predicted step, a padded candidate);</li>
+<li>the <b>grammar</b> (section 3), with the look-ahead of <span class="pill d">D62</span>;</li>
+<li>the <b>procedure masks</b> (section 9.5);</li>
+<li>the <b>masks of a caller</b>: a set of forbidden words for each column that the prior does not understand. Free generation gives one: “go-around” after the second go-around (<span class="pill d">D68</span>).</li>
+</ol>
+<p><b>The draw.</b> The caller gives one uniform random number for each aircraft, row and column. The speaker takes the word where the cumulative probability, in the class order of the heads, first passes the number (<span class="pill d">D96</span>). So the words of an aircraft depend only on its own numbers and inputs. This is what branch training needs (section 10.3). The speaker also records the words that all masks permitted, so that a later loss can score the <em>same masked distribution</em> that the speaker drew from.</p>
+<div data-demo="speaker" data-title="Say a row: model, masks, draw"></div>
+<figure class="paper" data-fig="fig10_decoding"></figure>
+
+<h3 id="p-masks" class="toc">9.5 The procedure masks</h3>
+<p>The prior speaks under three masks that come from the procedure of R (principle 3). The <b>region</b> is inside the FAF and the LPV cone of R. The <b>join</b> is the first row inside it.</p>
+<ol>
+<li><b>The glidepath lower edge</b>, inside the region: the published glidepath − 60 m. A level T is blocked where T &lt; edge − ε(T). “No level-off” is blocked where the aircraft is already more than ε below the edge. Outside the FAF, the floors of the RNAV procedures disagree with 10–14 % of the recorded tracks, so the edge acts only inside the region.</li>
+<li><b>The DA</b>, wherever the aircraft is not inside the region. A level T is blocked below DA − ε(T).</li>
+<li><b>No climb</b>, before the join, once the aircraft has been below the entry height (the glidepath at the FAF) by more than the band of the level nearest to it. No level above the aircraft’s height + ε, and no climb class.</li>
+</ol>
+<p><b>A mask blocks a word when it is said, and never “unchanged”</b> (<span class="pill d">D64</span>). A word in force was permitted when it was said. A mask that made the speaker change it would fly the glidepath floor that the executor does not have. Whether to correct or to go around is the model’s decision, and the DA check judges it. While G is true, the “no climb” mask does not apply (<span class="pill d">D14</span>).</p>
+<div data-demo="procedure_masks" data-title="The three masks on the real KRDU 23R final"></div>
+<figure class="paper" data-fig="fig09_procedure_masks"></figure>
+
+<h3 id="p-training" class="toc">9.6 Training and the choice of the design</h3>
+<p><b><t zh="教师强制">Teacher forcing</t>.</b> The prior trains on the closed-loop sentences of the artefact. The loss is the cross-entropy of the five columns at every asked row (a row at or after the first predicted step). Each head reads the truth of the columns before it. The loss for each step is the sum over the asked rows and columns, divided by the asked rows.</p>
+<p><b>Which sentences.</b> The base learns only from sentences whose own words land (<code>landed</code>, <span class="pill d">D75</span>). About 2.2–2.6 % of the sentences do not land when their own words are flown, mostly high at the DA. Their last words would teach an end that does not land. Flights with a faulty observed track are left out too (<span class="pill d">D111</span>). The artefact is not changed: the selection happens when the sentences are read. The excluded flights come back in the post-training as starts of closed loops.</p>
+<p><b>Stop.</b> The training keeps the epoch with the smallest per-step loss on the <b>select</b> days. It never reads the validation days. They are read one time for each stage (<span class="pill d">D85</span>).</p>
+<p><b><t zh="交叉验证">Cross-validation</t> by airport.</b> The goal is a new airport. So a fold trains on the train days of four airports and reads the select days of the fifth. The campaign has 31 runs. The rules are fixed before the runs:</p>
+<ul>
+<li>The score of a run is the mean, over the 5 folds, of the per-step loss on the held-out airport.</li>
+<li>The seed scale is the absolute difference between two seeds of configuration A.</li>
+<li>Configuration: among those within twice the seed scale of the best, take the one with the <b>fewest parameters</b>.</li>
+<li>Variant: “constants” (with the length and the threshold elevation of each runway) only if it is lower than “full” by more than twice the seed scale.</li>
+</ul>
+<div data-demo="cv_rule" data-title="The rule that chooses the design (example numbers)"></div>
+<figure class="paper" data-fig="fig11_cv_design"></figure>
+
+<h3 id="p-airport" class="toc">9.7 A new airport</h3>
+<p>The prior has no identity of an airport. A new airport needs only data that the five airports also come from: the candidate runways with their threshold, course, TCH, glidepath angle and DA, and the airport elevation (from the FAA CIFP); the FAF and the LPV cone for the masks; the landings in the last 30 minutes (from the airport’s tracks or a live feed); and the dynamics of each aircraft type, which do not depend on the airport. Every fold of the cross-validation flies the full closed loop at its held-out airport. The final test is KAUS.</p>
+<p>One limit is stated. Speed words are ground speeds. At a high airport, one indicated airspeed is a larger ground speed (about 8 % at E = 1,650 m, one step). The five airports and KAUS all lie below 200 m.</p>
+</section>

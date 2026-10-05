@@ -1,0 +1,36 @@
+<section id="s-glossary">
+<h2 id="glossary" data-toc="14 Glossary">14 Glossary</h2>
+<table>
+<thead><tr><th>Term</th><th>中文</th><th>Meaning in this design</th></tr></thead>
+<tbody>
+<tr><td>Row, step</td><td>行，步</td><td>One line of a sentence, Δ seconds long, on UTC multiples of Δ</td></tr>
+<tr><td>Word</td><td>词，指令词</td><td>The value of one column in one row; “unchanged” says nothing new</td></tr>
+<tr><td>Sentence</td><td>句子</td><td>The rows of one flight</td></tr>
+<tr><td>Word in force</td><td>生效词</td><td>The last word that a column said</td></tr>
+<tr><td>Runway in force (R)</td><td>生效跑道</td><td>The candidate runway that the runway column said last</td></tr>
+<tr><td>Go-around state (G)</td><td>复飞状态</td><td>True after “go-around”, false after a runway word</td></tr>
+<tr><td>Candidate runway</td><td>候选跑道</td><td>A runway end with a published vertical path; no flight decides a candidate</td></tr>
+<tr><td>Capture row</td><td>截获行</td><td>First row from which the track stays in the capture corridor to the end of the approach</td></tr>
+<tr><td>First predicted step</td><td>第一个预测步</td><td>The row 16 s after row 0</td></tr>
+<tr><td>Open-loop reading</td><td>开环读取</td><td>The words read from the observed track alone</td></tr>
+<tr><td>Closed-loop reading</td><td>闭环读取</td><td>The words with correction words, from the flight of the executor</td></tr>
+<tr><td>Matched point</td><td>匹配点</td><td>The point of the observed path nearest to the flown position, searched forward</td></tr>
+<tr><td>Correction word</td><td>修正词</td><td>A word added when the flown path leaves the observed path by more than a tolerance</td></tr>
+<tr><td>Envelope</td><td>包络</td><td>The tube or span in which a word must hold, with its width stated</td></tr>
+<tr><td>Executor</td><td>执行器</td><td>The autopilot that flies the words</td></tr>
+<tr><td>Judge</td><td>裁判</td><td>The code that classifies the flown flight</td></tr>
+<tr><td>Decision altitude (DA)</td><td>决断高度</td><td>The published height at which a missed approach must start</td></tr>
+<tr><td>FAF</td><td>最终进近定位点</td><td>Final approach fix</td></tr>
+<tr><td>FAS cone</td><td>最终进近段锥形区</td><td>The lateral containment of an LPV final</td></tr>
+<tr><td>Prior, speaker</td><td>先验模型，说话者</td><td>The language model of the controller and its decoder</td></tr>
+<tr><td>Mask</td><td>掩码</td><td>A set of words that a speaker must not say in a column</td></tr>
+<tr><td>Teacher forcing</td><td>教师强制</td><td>Training in which each head reads the true words of the earlier columns</td></tr>
+<tr><td>RoPE</td><td>旋转位置编码</td><td>Rotary position embedding, here on the time in seconds</td></tr>
+<tr><td>Post-training</td><td>后训练</td><td>Training of the prior in a closed loop with a reward</td></tr>
+<tr><td>Advantage</td><td>优势</td><td>The reward of a sentence minus the mean reward of its group</td></tr>
+<tr><td>Branch training</td><td>分支训练</td><td>Credit assignment that copies the state at branch points and gives the advantage to the words after them</td></tr>
+<tr><td>Approach clock</td><td>进近时钟</td><td>The distance along the final, used to order and compare aircraft</td></tr>
+<tr><td>Operating day</td><td>运行日</td><td>The landing day of a flight (UTC − 9 h); the unit of the data split</td></tr>
+<tr><td>Conformance check</td><td>一致性检查</td><td>A check that code gives the same results on fixed inputs, run each time the code is used</td></tr>
+</tbody></table>
+</section>

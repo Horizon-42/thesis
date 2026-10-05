@@ -1,0 +1,25 @@
+<section id="s-status">
+<h2 id="status" data-toc="12 Status and open questions">12 Status and open questions</h2>
+<p>This table follows the status tables of the three design documents (2026-10-05). It is a snapshot. The design documents are the source of record.</p>
+<table>
+<thead><tr><th>Stage</th><th>Part</th><th>State</th></tr></thead>
+<tbody>
+<tr><td>A</td><td>Vocabulary, labeller, executor, judge</td><td>Built and merged into <code>dev-two-tier</code>. Formal artefact <code>v12_20261005</code> with executor <code>v17_20261005</code>. The Training view in the frontend is published. The val days are read one time, in the stage’s validation readout.</td></tr>
+<tr><td>B</td><td>Prior</td><td>The code of B0–B4 and B8–B11 is done, with tests. The interface for stage C (B9) is done. The campaign B5 (31 runs), the base model and the Training view of the prior (B6) wait.</td></tr>
+<tr><td>C</td><td>Post-training</td><td>The code of C0–C7 and C9 is built on synthetic artefacts. C8 and C10–C12 (the formal runs, and the Training view of this stage) wait for the base model.</td></tr>
+</tbody></table>
+<p><b>Rules that protect the results.</b></p>
+<ul>
+<li>The design documents set no test criteria. The user sets them after the design is settled (<span class="pill d">D7</span>).</li>
+<li>A readout that serves a choice of the user shows only the train and select days (<span class="pill d">D85</span>).</li>
+<li>A formal build or readout runs only where the user orders it.</li>
+<li>No compatibility: a changed format gets a new name, and the code refuses an artefact of another name.</li>
+</ul>
+<p><b>Limits that the design states.</b></p>
+<ul>
+<li>Speed words are ground speeds. Wind can make a speed word at a turn that no controller said (open item O8).</li>
+<li>The speed-word mask of the post-training acts in a narrow band (<span class="pill d">D101</span>).</li>
+<li>The recorded traffic of a scene lacks aircraft outside the 25 km slice and aircraft of other splits.</li>
+<li>The observed slice ends before the threshold. The closed-loop reading gives no correction there (<span class="pill d">D44</span>).</li>
+</ul>
+</section>
