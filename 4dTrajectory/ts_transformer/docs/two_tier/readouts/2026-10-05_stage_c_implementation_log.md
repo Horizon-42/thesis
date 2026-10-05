@@ -287,3 +287,20 @@ generation does: words, states and the speaker's probabilities bit for bit, with
 **Test gaps (the reviewer's)**, for the runner tests on real data (C8, C10): a batch of several windows (two airports,
 one lost and one done, padding across windows) — A26's synthetic artefact has one flight; the speed mask acting in the
 loop — a random prior does not fly a final.
+
+## 12 The user's answers on P19 and P20 (2026-10-05)
+
+- **P19 decided: with no landing in the 30 min before the first predicted step, every runway is of the present
+  landing direction** (no direction to break). `a1fdd2a8` `post/reward.py` `present_runways` (reviewed; tested: no
+  landing gives every runway, the commanded aircraft's own landing alone gives every runway, a runway 180° from a landing
+  is not present). For the design author: §2 item 2's text.
+- **P20: the user asked for a count first.** `a1fdd2a8` `post/traffic.py` `loss_at_first_step` and the census's
+  `lost_at_first_step` (`experiments/post_windows.py`, finals from `airport_finals`, `--procedure-root`): the commanded
+  aircraft on its record at its first predicted step, judged without a runway in force (the loop's state there) and with
+  its recorded runway. On A34's artefact (v12, Δ 4 s, the scratchpad, 21 s): train 58 of 40,530 windows (0.14 %) without
+  a runway (KRDU 37, KSTL 11, KSJC 7, KSMF 3, KMSY 0), 26 (0.06 %) with the recorded runway; select 12 and 6 of 6,199;
+  every one `radar_or_vertical` (the general minimum, not in trail). For the user: keep such windows (the first row
+  judged decides), or leave them out of the draw (stated in the readouts).
+
+Tests: `test_post_scene.py`, `test_post_window_loop.py`, `test_architecture.py`, 53 passed; the full ts suite on 8
+workers at `a1fdd2a8`: 1,749 passed, 1 skipped, 5 min 26 s.
