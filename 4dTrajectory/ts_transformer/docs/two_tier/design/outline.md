@@ -27,6 +27,9 @@ repository root; `readouts/` is `docs/two_tier/readouts/`. The documents of the 
 | `post_training.md` | The post-training in windows of traffic; the multi-aircraft work; its Training view | C | Not started; outline |
 | This outline | The principles, the shared rules, the plan; the rules of each stage's Training view (§6) | — | — |
 
+How a stage is reviewed against its design (leaks, what each consumer may read, the procedure, a checklist for each
+stage) is in the review guide, `docs/two_tier/review_guide.md`; it is not a design document.
+
 **Dependencies.** The documents depend on each other as the code does. The vocabulary reads no other document. The
 prior reads the vocabulary. The post-training reads the vocabulary and the prior. Each document reads another only
 through that document's public interface and its decisions:
