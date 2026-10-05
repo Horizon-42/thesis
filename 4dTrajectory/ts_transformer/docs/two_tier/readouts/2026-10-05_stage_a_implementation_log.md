@@ -452,6 +452,35 @@ tip of the stage A line that stage B merges (§0.4 rule of the branches).
   reason and row; at the rule's edges (a step of exactly 3 times) the definition decides as written. On A34's artefact
   (a check, not a test): the counts of D111 at Δ = 4 s.
 
+**A43. The backend runs no conformance check at its start (D73; the user, 2026-10-05;
+`notes/report_to_designer_backend_checks.md`).** Code, tests and docs only; no artefact is built again. On its own
+branch from `dev-two-tier-v4`, after A42.
+
+- `aeroviz_backend/autopilot_segment/backend.py`: `executor_for` opens the spec with `replay.open_spec` (no check of the
+  code; the check that the spec belongs to the set's artefact and spec sha stays); `closed_loop.require_conforming_closed_loop`
+  is no longer called there, and the `_failed` record of failed checks goes. `warm_up` opens the sets as before.
+- One definition of the refusal, in `autopilot_segment/fly.py` beside `apart_from_stored`: an answer whose live flight is
+  farther from the stored states than `STATE_BOUND_M`, horizontally or vertically, is refused by name, with both
+  distances, the set and the reason that is meant (the executor code does not fly the set as it was exported: export the
+  set again, or restore the code). The backend's `fly` and stage B's hook (`aeroviz_backend/autopilot_segment/prior.py`,
+  which calls `apart_from_stored` as well) both use it. `check_live` runs the three checks itself before its work, as a
+  runner does (`closed_loop.require_conforming_closed_loop`), and keeps its comparison.
+- The warm-up: the signals of one split are loaded one time for all the sets of one artefact (the five sets read
+  `v12_20261005`: 18 s of the 150 s measured); a request never waits for the warm-up of the sets that it does not need
+  (the warm-up opens a set under that set's own lock; a request for a set that is not open yet opens it itself). Stage
+  B's hook calls `_lock`, `_claim`, `_latest`, `_require_split`, `executor_for` and `set_flown` of the backend: keep their
+  names and meanings, or say what changes, so that stage B follows after the merge.
+- The page (`aeroviz-4d/src/data/trainingAutopilot.ts`, `TrainingAutopilotStatus.tsx`): when an answer takes more than
+  2 s, the status says that the backend is opening the set; a refusal shows as an error with its reason. No timeout is
+  added.
+- The docs: the module docstring of `backend.py`, `docs/reference/contracts.md` C33, and the index line of
+  `4dTrajectory/ts_transformer/CLAUDE.md` ("the backend at its start").
+- Tests: the backend's `warm_up` and `fly` call none of the three checks (a spy on `replay.open_executor`); a flight
+  flown by an executor whose law is changed by more than the bound is refused by name on its first request; a request for
+  a set that the warm-up has not opened yet is answered without waiting for the other sets; the page's status message.
+  The existing backend tests, A23's fixtures and stage B's hook tests stay.
+- The log gives the warm-up seconds of each set of `closed_loop_v12_20261005` before and after.
+
 ## 4 Claude's check of stage A (was §12.2)
 
 ### 12.2 Claude's check of stage A
