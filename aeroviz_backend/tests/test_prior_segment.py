@@ -68,9 +68,10 @@ class Flown:
 
 @pytest.fixture(autouse=True)
 def claim_on_disk(monkeypatch):
-    """The prior's run holds the claim the fixture's val set names (the fixture's paths are not on disk)."""
+    """The prior's run holds the claim the fixture's val set names, its readout written (the fixture's paths are not on
+    disk: `checkpoint.written_claim` stood in for)."""
     held = {REPO_ROOT / "fixture/prior": "fixture/readout_val"}
-    monkeypatch.setattr(prior_segments, "validation_claim",
+    monkeypatch.setattr(prior_segments, "written_claim",
                         lambda prior_dir, reader: held[prior_dir] if prior_dir in held else None)
     return held
 
@@ -220,10 +221,10 @@ def test_a_claim_the_disk_does_not_hold_or_a_forged_claim_is_refused_by_name(wor
     backend = CheckedBackend(world["root"], world["flown"])
     held = dict(claim_on_disk)
     claim_on_disk.clear()                                            # the prior's run holds no claim
-    with pytest.raises(RequestRefused, match="holds no claim of"):
+    with pytest.raises(RequestRefused, match="holds no written claim of"):
         backend.prior.fly(request(world, setId=FIXTURE_VAL_SET, flightKey=flight, clientId="disk"))
     claim_on_disk[REPO_ROOT / "fixture/prior"] = REPO_ROOT / "fixture/another_readout"      # another readout's claim
-    with pytest.raises(RequestRefused, match="holds no claim of"):
+    with pytest.raises(RequestRefused, match="holds no written claim of"):
         backend.prior.fly(request(world, setId=FIXTURE_VAL_SET, flightKey=flight, clientId="other"))
     claim_on_disk.update(held)
     for field, message in (("reader", "validationClaim.reader"), ("prior", "validationClaim.prior"),

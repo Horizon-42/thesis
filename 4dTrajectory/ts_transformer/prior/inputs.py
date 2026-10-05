@@ -7,8 +7,9 @@ of a final, logarithmic out to the 25 km of the slice.
 
 **Motion** (D25, D60): the ground speed, the vertical rate and the direction of motion of a row come from the
 displacement between the 2 s row before it and the row, at every Δ — only positions and heights, never the stored
-track, ground speed or vertical rate (on the observed rows a fit that reads 7.5 s after the row). Row 0 of an aircraft
-has no state before it: its motion is 0 and ``no_motion`` 1.
+track, ground speed or vertical rate of the states (on the observed rows the velocity of the start rule, vocabulary D77,
+which at row 0 reads the row after it; the signals hold a fit over 15 s centred on the row, 7.5 s of it after). Row 0 of
+an aircraft has no state before it: its motion is 0 and ``no_motion`` 1.
 """
 
 from __future__ import annotations

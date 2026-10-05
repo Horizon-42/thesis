@@ -13,8 +13,8 @@ a campaign's fold runs (`experiments/prior_campaign.py`) and written as a choice
 
 A fold is read only when it is complete and of the campaign: its held-out airport the fold's; its variant, seed, shape
 and training values its arm's (`CONFIGURATIONS`, the rest configuration A's: `PriorConfig`'s and `TrainConfig`'s
-defaults); its sentences the selection `landed` (D75); every fold of one arm with one number of parameters, every run
-of the campaign of one data identity. No criterion on the readouts of the
+defaults); its sentences the selection `landed` (D75); its held-out loss finite; every fold of one arm with one number of
+parameters, every run of the campaign of one data identity. No criterion on the readouts of the
 folds is applied (D7): they are not read here.
 
     python run_ts.py prior_select --campaign <a prior_campaign directory> --step configuration
@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -44,10 +45,12 @@ CONFIGURATIONS = {
     "C": {"d_model": 256, "heads": 8, "feedforward": 1024},
     "D": {"dropout": 0.2, "weight_decay": 0.05},
 }
-#: The values a fold's run records of its shape and training that a configuration sets.
-SHAPE_FIELDS = ("d_model", "layers", "heads", "feedforward", "dropout")
-TRAIN_FIELDS = ("learning_rate", "weight_decay")
+#: The values a fold's run records of its shape and training, each its arm's: configuration A's but those its
+#: configuration sets (the seed is the arm's own, checked apart).
+SHAPE_FIELDS = ("d_model", "layers", "heads", "feedforward", "dropout", "rope_base")
+TRAIN_FIELDS = tuple(f.name for f in fields(TrainConfig) if f.name != "seed")
 STEPS = ("configuration", "variant")
+#: The selection rule every run of the campaign trains under (D75): the one definition (`prior_campaign` reads it).
 SELECTION = "landed"
 
 
@@ -93,7 +96,10 @@ def arm_score(campaign: Path, configuration: str, variant: str, seed: int, airpo
             raise ValueError(f"{run}: not a fold of {arm} (variant {config['model_config']['variant']}, seed "
                              f"{config['train_config']['seed']}, {recorded}, selection "
                              f"{config['identity']['selection']['rule']})")
-        folds[airport] = float(held_out["loss_per_step"])
+        loss = float(held_out["loss_per_step"])
+        if not math.isfinite(loss):
+            raise ValueError(f"{run}: the held-out loss is {loss}, not a finite score")
+        folds[airport] = loss
         parameters.add(int(config["parameters"]))
         identities.append(config["identity"])
     if len(parameters) != 1:

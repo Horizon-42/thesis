@@ -34,7 +34,7 @@ from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.instructions.artefact import SEALED_READINGS
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.io_utils import utc_now
-from ts_transformer.prior.checkpoint import validation_claim
+from ts_transformer.prior.checkpoint import written_claim
 from ts_transformer.repo_layout import REPO_ROOT
 from ts_transformer.prior import training_files as prior_files
 
@@ -123,15 +123,16 @@ class PriorSegments:
 
     def flying(self, sample: dict[str, Any]) -> Any:
         """The service whose splits are the set's: the validation service for a claimed set, else the backend. A claimed
-        set is flown only when the prior's run holds the claim it names, on disk (D85)."""
+        set is flown only when the prior's run holds the claim it names, on disk, with its readout written (D85,
+        D119)."""
         self.splits_of(sample)
         claim = sample["source"]["validationClaim"]
         if claim is None:
             return self.backend
-        held = validation_claim(REPO_ROOT / claim["prior"], claim["reader"])      # repository-relative names
+        held = written_claim(REPO_ROOT / claim["prior"], claim["reader"])         # repository-relative names
         if held != claim["readout"]:
-            raise RequestRefused(f"set {sample['setId']}: the prior {claim['prior']} holds no claim of {claim['readout']} "
-                                 f"by {claim['reader']} (it holds {held})")
+            raise RequestRefused(f"set {sample['setId']}: the prior {claim['prior']} holds no written claim of "
+                                 f"{claim['readout']} by {claim['reader']} (it holds {held})")
         return self.val_service()
 
     def listed(self, airport: str, set_id: str) -> dict[str, Any]:

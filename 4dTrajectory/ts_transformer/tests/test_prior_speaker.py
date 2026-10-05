@@ -611,11 +611,12 @@ def test_the_speaker_refuses_a_training_model_and_a_row_not_after_the_last(words
     first = int(rows.first[0].nonzero()[0, 0])
     speaker.observe(rows.between(0, first), [position(2, r) for r in range(first)])
     speaker.speak(rows.between(first, first + 1), position(2, first), numbers(1, 2, 1)[0])
+    speaker.speak(rows.between(first + 1, first + 2), position(2, first + 1), numbers(1, 2, 1)[0])
     with pytest.raises(ValueError, match="time order"):
-        speaker.speak(rows.between(first, first + 1), position(2, first), numbers(1, 2, 1)[0])
+        speaker.speak(rows.between(first + 1, first + 2), position(2, first + 1), numbers(1, 2, 1)[0])
     model.train()
     with pytest.raises(ValueError, match="training"):
-        speaker.speak(rows.between(first + 1, first + 2), position(2, first + 1), numbers(1, 2, 1)[0])
+        speaker.speak(rows.between(first + 2, first + 3), position(2, first + 2), numbers(1, 2, 1)[0])
     model.eval()
 
 
@@ -720,3 +721,78 @@ def test_the_speaker_keeps_the_row_whose_runway_word_ends_g(words):
     said = speaker.speak(rows.between(first + 1, first + 2), at, numbers(1, 1, 1)[0], {RUNWAY: (runway_words == 0)[None]})
     assert said[0, RUNWAY] == 0 and not speaker.in_force[0].go_around
     assert speaker.procedure.dipped[0, 0] and not speaker.procedure.cleared[0]
+
+
+def test_the_speaker_refuses_a_row_marked_first_otherwise_and_positions_not_one_for_each_row(words):
+    """B12 (§7 item 3): `observe` refuses positions that are not one for each row and each aircraft; `speak` refuses a
+    row whose mark of the first predicted step is not, for an aircraft, whether nothing is in force yet (a later row
+    marked first would draw without "unchanged" while its record permits it). Both before any change."""
+    import torch
+
+    model, rows = setup(words, seed=14, count=2)
+    speaker = Speaker(model, words, [finals()] * 2, capacity=8)
+    first = int(rows.first[0].nonzero()[0, 0])
+    with pytest.raises(ValueError, match="one for each of the"):
+        speaker.observe(rows.between(0, first), [position(2, r) for r in range(first - 1)])
+    with pytest.raises(ValueError, match="one for each of the"):
+        speaker.observe(rows.between(0, first), [position(1, r) for r in range(first)])
+    speaker.observe(rows.between(0, first), [position(2, r) for r in range(first)])      # the refusals changed nothing
+    unmarked = rows.between(first, first + 1)._replace(first=torch.zeros_like(rows.first[:, :1]))
+    with pytest.raises(ValueError, match="mark of the first predicted step"):
+        speaker.speak(unmarked, position(2, first), numbers(1, 2, 1)[0])
+    assert not speaker.permitted_rows and all(state is None for state in speaker.in_force)
+    speaker.speak(rows.between(first, first + 1), position(2, first), numbers(1, 2, 1)[0])
+    marked = rows.between(first + 1, first + 2)._replace(first=rows.between(first, first + 1).first)
+    with pytest.raises(ValueError, match=r"aircraft \[0, 1\]: the row's mark of the first predicted step"):
+        speaker.speak(marked, position(2, first + 1), numbers(1, 2, 1)[0])
+    assert len(speaker.permitted_rows) == 1
+    speaker.speak(rows.between(first + 1, first + 2), position(2, first + 1), numbers(1, 2, 1)[0])
+
+
+def test_a_row_the_caller_refuses_leaves_the_speaker_as_it_was(words):
+    """B12 (§7 item 7, vocabulary D80): when the caller's last step (`accept`: a closed loop's executor) refuses the
+    row's words, the speaker keeps nothing of it; the row said again then says what a speaker never refused says."""
+    model, rows = setup(words, seed=15, count=2)
+    first = int(rows.first[0].nonzero()[0, 0])
+
+    def said(refuse):
+        speaker = Speaker(model, words, [finals()] * 2, capacity=8)
+        speaker.observe(rows.between(0, first), [position(2, r) for r in range(first)])
+        out = []
+        for r in range(first, first + 4):
+            if refuse and r == first + 1:
+                def no(words_row):
+                    raise ValueError("the executor refuses the row")
+                with pytest.raises(ValueError, match="executor refuses"):
+                    speaker.speak(rows.between(r, r + 1), position(2, r), numbers(3, 2, 4)[r - first], accept=no)
+                assert len(speaker.permitted_rows) == 1 and len(speaker.drawn_probability) == 1
+            out.append(speaker.speak(rows.between(r, r + 1), position(2, r), numbers(3, 2, 4)[r - first]))
+        return np.stack(out), np.stack(speaker.drawn_probability), speaker.go_arounds
+
+    a, b = said(False), said(True)
+    assert np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1]) and np.array_equal(a[2], b[2])
+
+
+def test_a_change_of_runway_outside_a_go_around_keeps_each_candidate_s_join_and_passage(words):
+    """D122: the masks keep, for each candidate, its join and its passage below its entry height before the join from
+    row 0 or the last go-around, whatever runway was in force at those rows — a change of runway outside a go-around
+    starts neither again (the new runway has the rows flown under the one before); a go-around does."""
+    finals_b = finals()
+    masks = ProcedureMasks([finals_b], words)
+    far = np.array([-40_000.0]), np.array([0.0])
+    low = np.array([masks.entry_low[0, 1] - 50.0])                   # under candidate 1's entry height, not joined
+    masks.track(*far, low, np.array([False]))                       # a row flown under runway 0 in force
+    masks.after_row(*far, low, np.array([False]))
+    assert masks.dipped[0, 1] and not masks.joined[0, 1]
+    climb = 1 + words.angle_climb
+    # the runway changes to candidate 1 (no go-around): its passage, made under runway 0, bars the climb
+    assert not masks.permitted(ANGLE, np.array([1]), np.array([False]), *far, low)[0, climb]
+    assert ProcedureMasks([finals_b], words).permitted(ANGLE, np.array([1]), np.array([False]), *far, low)[0, climb]
+    grid = [(e, n) for e in np.arange(-20_000.0, 0.0, 250.0) for n in np.arange(-3_000.0, 3_000.0, 100.0)
+            if finals_b[1].inside(np.array(e), np.array(n)) and not finals_b[0].inside(np.array(e), np.array(n))]
+    e, n = (np.array([value]) for value in grid[0])                  # inside candidate 1's region alone
+    masks.track(e, n, low, np.array([False]))
+    masks.after_row(e, n, low, np.array([False]))
+    assert masks.joined[0, 1] and not masks.joined[0, 0]             # joined under runway 0 in force: kept for 1
+    masks.track(*far, low, np.array([True]))                        # a go-around starts both again
+    assert not masks.joined.any() and not masks.dipped.any()

@@ -58,7 +58,8 @@ from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.prior import training_files as files
-from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, holds_claim, open_prior, readable_identity, validation_claim
+from ts_transformer.prior.checkpoint import (CHECKPOINT_SCHEMA, CLAIM_SPENT_BY, holds_claim, open_prior,
+                                             readable_identity, validation_claim)
 from ts_transformer.prior.procedure import (
     GLIDEPATH_BELOW_M, PROCEDURE_MASKS, Final, airport_finals,
 )
@@ -358,6 +359,9 @@ def main(argv: list[str] | None = None) -> int:
         if not holds_claim(prior_dir, files.CLAIM_READER, readout_dir):
             raise SystemExit(f"{readout_dir}: a readout of the val days that {prior_dir}'s claim of its val read does "
                              f"not name ({claimed}); only the base's one validation readout is exported (D85)")
+        if not (readout_dir / CLAIM_SPENT_BY).exists():
+            raise SystemExit(f"{readout_dir}: a read of the val days that stopped before it wrote its "
+                             f"{CLAIM_SPENT_BY}; only a written readout is exported (D119)")
         claim = {"reader": files.CLAIM_READER, "prior": repo_relative(prior_dir),
                  "readout": repo_relative(readout_dir)}
     signals_record = json.loads((instructions / "signals.json").read_text(encoding="utf-8"))

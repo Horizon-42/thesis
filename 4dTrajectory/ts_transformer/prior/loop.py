@@ -32,17 +32,19 @@ class LoopRows:
     """The inputs of each Δ row of a batch of aircraft in a loop (module docstring). For each aircraft: its airport's
     geometry, its landings (D105: an index of landings on its airport's candidates), its key in the tracks rosters
     (`inputs.own_flight_key`: its own landing, which its landings hold, left out), the UTC time of its 2 s row 0
-    (``entry_utc_s``), the 2 s row of the signals its Δ row 0 is (``first_rows``) and its first predicted step's Δ row
-    (``start``)."""
+    (``entry_utc_s``) and the 2 s row of the signals its Δ row 0 is (``first_rows``); ``start`` the first predicted
+    step's Δ row, one for the batch (a row is the first step of every aircraft or of none)."""
 
     def __init__(self, geometries: Sequence[AirportGeometry], landings: Sequence[LandingIndex], keys: Sequence[str],
-                 entry_utc_s: np.ndarray, first_rows: np.ndarray, start: np.ndarray | int, *, variant: str,
+                 entry_utc_s: np.ndarray, first_rows: np.ndarray, start: int, *, variant: str,
                  interval_s: float, step_s: float, device: torch.device) -> None:
         self.geometries, self.landings, self.keys = list(geometries), list(landings), list(keys)
         count = len(self.geometries)
         self.entry_utc_s = np.asarray(entry_utc_s, dtype=np.float64)
         self.first_rows = np.asarray(first_rows, dtype=np.int64)
-        self.start = np.broadcast_to(np.asarray(start, dtype=np.int64), (count,)).copy()
+        if not isinstance(start, (int, np.integer)) or isinstance(start, bool):
+            raise ValueError(f"the first predicted step is one Δ row for the batch, got {start!r}")
+        self.start = int(start)
         if not (len(self.landings) == len(self.keys) == len(self.entry_utc_s) == len(self.first_rows) == count):
             raise ValueError("one index of landings, key, entry time and first row for each aircraft")
         self.variant, self.interval_s, self.step_s, self.device = variant, interval_s, step_s, device
@@ -71,7 +73,8 @@ class LoopRows:
         tensors = row_tensors(np.full(count, t * self.interval_s), np.stack(own), candidates,
                               np.array([w[0] for w in words]), np.array([w[1] for w in words]),
                               np.stack([w[2] for w in words]), np.stack([w[3] for w in words]),
-                              np.stack([w[4] for w in words]), t == self.start, t >= self.start, self.device)
+                              np.stack([w[4] for w in words]), np.full(count, t == self.start),
+                              np.full(count, t >= self.start), self.device)
         return tensors, Position(at[:, POSITION[0]], at[:, POSITION[1]], at[:, POSITION[2]] - self.elevations)
 
     def select(self, indices: Sequence[int]) -> LoopRows:
@@ -79,5 +82,5 @@ class LoopRows:
         indices = list(indices)
         return LoopRows([self.geometries[i] for i in indices], [self.landings[i] for i in indices],
                         [self.keys[i] for i in indices],
-                        self.entry_utc_s[indices], self.first_rows[indices], self.start[indices], variant=self.variant,
+                        self.entry_utc_s[indices], self.first_rows[indices], self.start, variant=self.variant,
                         interval_s=self.interval_s, step_s=self.step_s, device=self.device)

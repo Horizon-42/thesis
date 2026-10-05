@@ -21,8 +21,9 @@ PARAMETERS = {"A": 2_000_000, "B": 1_000_000, "C": 4_000_000, "D": 2_000_000}
 
 
 def same(instructions):
-    """The stand-in of the behaviour check (`prior_behaviour`): the code behaves as at the start."""
-    return {"train_loss": ["0x1p+0"], "words": [[0]]}
+    """The stand-in of the behaviour check (`prior_behaviour`): the code behaves as at the start, its settings those of
+    the code this process loaded."""
+    return {"train_loss": ["0x1p+0"], "words": [[0]], "settings": campaign_module.settings()}
 
 
 def scores(**given):
@@ -49,6 +50,21 @@ def test_constants_only_when_better_than_full_by_more_than_twice_the_seed_scale(
     base = dict(A_full_s1337=1.50, A_full_s2024=1.52, B_full_s1337=1.48)        # seed scale 0.02
     assert choose_variant(scores(**base, B_constants_s1337=1.45), "B", SEEDS)["chosen"] == "full"   # by 0.03
     assert choose_variant(scores(**base, B_constants_s1337=1.43), "B", SEEDS)["chosen"] == "constants"  # by 0.05
+
+
+def test_the_choices_at_their_edges():
+    """§5 at its edges, on scores a float holds exactly: a score at exactly twice the seed scale of the best is within;
+    a seed scale of 0 leaves the best alone; `constants` better by exactly twice the seed scale is not chosen, and with a
+    seed scale of 0 it is when lower at all."""
+    edge = dict(A_full_s1337=1.5, A_full_s2024=1.75, B_full_s1337=1.0, C_full_s1337=2.0, D_full_s1337=1.75)
+    choice = choose_configuration(scores(**edge), SEEDS)                 # scale 0.25: A at exactly 1.0 + 0.5
+    assert choice["seed_scale"] == 0.25 and choice["within"] == ["A", "B"] and choice["chosen"] == "B"
+    choice = choose_configuration(scores(**{**edge, "B_full_s1337": 1.75, "A_full_s2024": 1.5}), SEEDS)  # scale 0
+    assert choice["seed_scale"] == 0.0 and choice["within"] == ["A"] and choice["chosen"] == "A"
+    base = dict(A_full_s1337=1.5, A_full_s2024=1.625)                    # scale 0.125
+    assert choose_variant(scores(**base, A_constants_s1337=1.25), "A", SEEDS)["chosen"] == "full"   # by exactly 0.25
+    zero = dict(A_full_s1337=1.5, A_full_s2024=1.5)
+    assert choose_variant(scores(**zero, A_constants_s1337=1.375), "A", SEEDS)["chosen"] == "constants"
 
 
 def write_fold(run: Path, airport: str, loss: float, configuration: str = "A", variant: str = "full",
@@ -79,11 +95,18 @@ def test_a_fold_is_read_only_complete_and_as_the_fold_of_its_arm(tmp_path):
         select_module.arm_score(tmp_path, "B", "full", 1337, ["KAAA"])
     # a fold of another arm: another variant, seed, shape or training value, or the selection `all`
     for name, kwargs in {"variant": {"variant": "constants"}, "seed": {"seed": 2024}, "shape": {"d_model": 128},
-                         "weight decay": {"weight_decay": 0.01}, "selection": {"rule": "all"}}.items():
+                         "rope base": {"rope_base": 500.0}, "weight decay": {"weight_decay": 0.01},
+                         "patience": {"patience": 5}, "epochs": {"max_epochs": 40}, "warm-up": {"warmup_steps": 100},
+                         "clip": {"clip_norm": 0.5}, "batch": {"tokens_per_batch": 8_192},
+                         "selection": {"rule": "all"}}.items():
         run = tmp_path / name / "D_full_s1337" / "KAAA"
         write_fold(run, "KAAA", 1.0, "D", **kwargs)
         with pytest.raises(ValueError, match="not a fold of D_full_s1337"):
             select_module.arm_score(tmp_path / name, "D", "full", 1337, ["KAAA"])
+    # a fold whose held-out loss is not a number is refused by name, not left out of the choice
+    write_fold(tmp_path / "nan" / "A_full_s1337" / "KAAA", "KAAA", float("nan"))
+    with pytest.raises(ValueError, match="not a finite score"):
+        select_module.arm_score(tmp_path / "nan", "A", "full", 1337, ["KAAA"])
 
 
 def record(tmp_path, smoke=None):
@@ -221,13 +244,19 @@ def test_a_campaign_stops_when_its_code_behaves_otherwise_or_its_tree_has_change
     with pytest.raises(SystemExit, match="uncommitted changes"):
         campaign_module.run_campaign(campaign, rec, "cpu", runner, lambda line: None,
                                      lambda: {"head": "a" * 40, "dirty": True}, behaviour=same)
-    with monkeypatch.context() as patch:                                # the campaign's own settings changed
+    # the code on the disk sets another temperature (the behaviour check's process gives the settings, D108): stopped
+    disk = {**same(None), "settings": {**campaign_module.settings(), "temperature": 0.5}}
+    with pytest.raises(SystemExit, match=r"behaves otherwise.*\['settings'\]"):
+        campaign_module.run_campaign(campaign, rec, "cpu", runner, lambda line: None, lambda: git,
+                                     behaviour=lambda i: disk)
+    with monkeypatch.context() as patch:            # this process plans with other settings than the disk's: refused
         patch.setattr(campaign_module, "FREE_GENERATION", {**campaign_module.FREE_GENERATION, "samples": 3})
-        with pytest.raises(SystemExit, match=r"sets \['free_generation'\] otherwise"):
-            campaign_module.run_campaign(campaign, rec, "cpu", runner, lambda line: None, lambda: git, behaviour=same)
-        with pytest.raises(SystemExit, match="free_generation"):
+        with pytest.raises(SystemExit, match=r"sets \['free_generation'\] otherwise than this campaign's process"):
             campaign_module.open_campaign(campaign, tmp_path / "artefact", tmp_path / "executor", 4.0, git,
                                           behaviour=same)
+        with pytest.raises(SystemExit, match="free_generation"):
+            campaign_module.open_campaign(tmp_path / "new", tmp_path / "artefact", tmp_path / "executor", 4.0, git,
+                                          behaviour=lambda i: {**same(i), "settings": disk["settings"]})
     assert runner.ran == []                                            # nothing ran
     stored = json.loads((campaign / "campaign.json").read_text())
     stored["running"] = {"step": "A_full_s1337/KAAA", "pid": 4242, "utc": "x"}
@@ -263,3 +292,44 @@ def test_the_behaviour_check_gives_one_answer_and_sees_a_change_of_the_training_
         patch.setattr(speaker_module, "draw", lambda probabilities, numbers: probabilities.argmax(-1, keepdim=True))
         changed = prior_behaviour.behaviour(words, finals(), days)
         assert changed["train_loss"] == answer["train_loss"] and changed["words"] != answer["words"]
+
+
+def test_the_behaviour_check_covers_the_sentence_rows_the_selection_the_choices_and_the_settings(monkeypatch):
+    """B12 (D108): the answer changes when the training sentences' inputs (`inputs.sentence_rows`: the landings counted
+    at another UTC), the selection (`selection.left_out`) or a rule of `prior_select` (the seed scale) changes; its
+    settings are the campaign's as a second process loads them."""
+    import os
+    import subprocess
+    import sys
+
+    from ts_transformer.experiments import prior_behaviour
+    from ts_transformer.instructions.words import Words
+    from ts_transformer.prior import inputs as inputs_module
+    from ts_transformer.prior import selection as selection_module
+    from ts_transformer.repo_layout import REPO_ROOT
+    from ts_transformer.tests.support import fixture_days, instruction_spec
+    from ts_transformer.tests.test_prior_speaker import finals
+
+    words, days = Words(instruction_spec()), fixture_days()
+    answer = prior_behaviour.behaviour(words, finals(), days)
+    assert {"settings", "selection", "select_rules", "sentence_rows"} <= set(answer)
+    assert answer["selection"]["landed"]["landed"] == {"False": None, "True": "fault"}
+    assert answer["select_rules"]["tie"]["chosen"] == "D" and answer["select_rules"]["zero"]["within"] == ["B"]
+    assert answer["select_rules"]["edge"]["within"] == ["A", "B"]
+    assert answer["select_rules"]["variant_edge"]["chosen"] == "full"
+    assert answer["select_rules"]["variant_zero"]["chosen"] == "constants"
+    for patch_it, key in ((lambda patch: patch.setattr(inputs_module, "utc_s",
+                                                       lambda text, real=inputs_module.utc_s: real(text) + 600.0),
+                           "sentence_rows"),
+                          (lambda patch: patch.setattr(selection_module, "LANDING", "crossed_too_high"), "selection"),
+                          (lambda patch: patch.setattr(select_module, "seed_scale", lambda scores, seeds: 0.0),
+                           "select_rules")):
+        with monkeypatch.context() as patch:
+            patch_it(patch)
+            changed = prior_behaviour.behaviour(words, finals(), days)
+        assert changed[key] != answer[key] and changed["train_loss"] == answer["train_loss"], key
+    loaded = subprocess.run([sys.executable, "-c", "import json; from ts_transformer.experiments.prior_campaign import "
+                             "settings; print(json.dumps(settings()))"], cwd=REPO_ROOT,
+                            env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}, capture_output=True, text=True,
+                            check=True)
+    assert json.loads(loaded.stdout) == answer["settings"] == campaign_module.settings()

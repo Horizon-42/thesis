@@ -4,8 +4,10 @@ holds a copy of it.
 
 A `SpeakingLoop` holds a batch of flights started at their first predicted step through the start of a closed loop
 (vocabulary §6 item 5, D67: `autopilot.start`; the most go-arounds of a flight is the loop's, D68). The rows before the
-first predicted step are the flight's observed rows (the closed-loop sentence's states there, D82: its rows alone), each
-encoded by `observe` one at a time, as the speaker reads them. From the first predicted step on, `step` says one row:
+first predicted step are the flight's observed rows as the start gives them back (`start.start_moved`'s: a moved
+start's moved rows; with `NO_MOVE`, the closed-loop sentence's, bit for bit), each encoded by `observe` one at a time,
+as the speaker reads them; of the closed-loop sentence the loop reads only its first row and its first predicted step
+(D82: its rows alone). From the first predicted step on, `step` says one row:
 the inputs from the states the executor flew (D32, §2) through the prior's one function of a loop's row
 (`prior.loop.LoopRows`, D96 item 4, with each flight's own landings, D105), the speaker under its masks, the bound of D68
 ("go-around" forbidden after a flight's last) and the caller's masks, with the caller's random numbers and input of the
@@ -27,7 +29,7 @@ import torch
 from ts_transformer.autopilot.judge import TIMEOUT
 from ts_transformer.autopilot.start import Loop
 from ts_transformer.instructions.airport import AirportGeometry
-from ts_transformer.instructions.artefact import ClosedLoopSentence
+from ts_transformer.instructions.artefact import STATE_COLUMNS, ClosedLoopSentence
 from ts_transformer.instructions.labeller.interval import interval_rows
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
 from ts_transformer.prior.batch import RowTensors, SentenceRows
@@ -74,12 +76,13 @@ class Generated:
 
 
 class SpeakingLoop:
-    """The closed loop of the flights ``order`` of ``loop`` (module docstring). ``sentences`` and ``flights`` (their
-    records in the split's signals: airport, entry time, key) by their place in the signals; ``landings`` each flight's,
+    """The closed loop of the flights ``order`` of ``loop`` (module docstring). ``sentences``, ``observed`` (each
+    flight's observed rows before its first predicted step as the start gave them back, `STATE_COLUMNS`) and
+    ``flights`` (their records in the split's signals: airport, entry time, key) by their place in the signals; ``landings`` each flight's,
     in ``order`` (D105); ``finals`` each airport's (the procedure masks)."""
 
     def __init__(self, model: Prior, loop: Loop, order: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
-                 flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
+                 observed: Mapping[int, np.ndarray], flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
                  landings: Sequence[LandingIndex], finals: Mapping[str, Sequence[Final]], words: Words, *,
                  interval_s: float, variant: str, device: torch.device, temperature: float = 1.0) -> None:
         self.loop, self.order, self.words = loop, list(order), words
@@ -97,7 +100,12 @@ class SpeakingLoop:
                                 np.array([utc_s(f["entry_time_utc"]) for f in self.flights]),
                                 np.array([r.first_row for r in rows]), self.start, variant=variant,
                                 interval_s=interval_s, step_s=words.spec.step_s, device=device)
-        self.observed = np.stack([r.states[: self.start * self.every] for r in rows])     # [B, start·every, 6]
+        shape = (self.start * self.every, len(STATE_COLUMNS))
+        wrong = [i for i in self.order if np.shape(observed[i]) != shape]
+        if wrong:
+            raise ValueError(f"flights {wrong[:5]}: observed rows of shape {np.shape(observed[wrong[0]])}, not the {shape} "
+                             f"before the first predicted step (the start's, `start_moved`)")
+        self.observed = np.stack([observed[i] for i in self.order])                 # [B, start·every, 6]
         #: the Δ row the next `observe` or `step` reads
         self.t = 0
         #: the flights still flown: not done by the executor, not ended by the caller
@@ -142,7 +150,8 @@ class SpeakingLoop:
         """Say one row of every flight and fly it (module docstring): ``numbers`` ``[B, 5]`` the caller's uniform
         numbers (`Speaker.speak`), ``caller`` its masks by column (the runway column's joined with the bound of D68),
         ``extra`` its input of the added modules. ``[B, 5]`` the words said (an ended flight's too, which are not its
-        sentence's)."""
+        sentence's). A row the executor refuses (`start.RowRefused`, `start.GoAroundBeyondMost`) is refused whole: the
+        loop is as it was."""
         if self.observing:
             raise ValueError(f"{self.start - self.t} observed rows are still to be encoded (`observe`)")
         if not self.alive.any():
@@ -153,8 +162,12 @@ class SpeakingLoop:
                                 self.loop.most_go_arounds)
         masks[RUNWAY] = bound & masks[RUNWAY] if RUNWAY in masks else bound
         before = self.speaker.in_force            # the runway in force under which the row's runway word is drawn
-        words_row = self.speaker.speak(tensors, at, numbers, masks, extra)
-        rows, done = self.loop.step(words_row)
+        flown: list[tuple[np.ndarray, np.ndarray]] = []
+        # the executor flies the row before the speaker keeps it: a row it refuses (vocabulary D80) leaves the speaker,
+        # the records and the loop's row as they were
+        words_row = self.speaker.speak(tensors, at, numbers, masks, extra,
+                                       accept=lambda said: flown.append(self.loop.step(said)))
+        (rows, done), = flown
         self._inputs.append(_on_cpu(tensors))
         for b in np.flatnonzero(self.alive):
             final = self.finals[b][before[b].runway] if before[b] is not None else None
