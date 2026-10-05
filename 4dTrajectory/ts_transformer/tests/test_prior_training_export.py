@@ -128,14 +128,6 @@ FIXTURE_SET = "fixture_set"
 FIXTURE_VAL_SET = "fixture_val"
 
 
-def with_runway_ends(directory: Path) -> None:
-    """The synthetic artefact's ``signals.json`` given the published runway data its candidates were read from
-    (``runway_ends_from``, which the real artefacts record): a stand-in; the tests replace the offset read from it."""
-    path = directory / "signals.json"
-    record = json.loads(path.read_text(encoding="utf-8"))
-    path.write_text(json.dumps({**record, "runway_ends_from": {"fixture": "the published runway data"}}), encoding="utf-8")
-
-
 def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
     """A set of one synthetic flight (A26's artefact: `test_start._artefact`) written by the export itself (`main`, its
     set into a tmp root by `training_files.write_set`, the index by its own writer): two sentences of an untrained prior
@@ -179,7 +171,6 @@ def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
     head["closedLoop"]["4"] = stage_a.closed_loop_payload(stored, replayed, 4.0, geometry, words)
     prior, readout_dir, root = tmp_path / "prior", tmp_path / "readout", tmp_path / "airports"
     prior.mkdir()
-    with_runway_ends(Path(directory))
     (prior / "checkpoint.pt").write_bytes(b"a checkpoint")
     readout = fixture_readout(geometry.code, instructions=str(directory), executor=str(executor), prior=str(prior),
                               checkpoint_sha256=file_sha256(prior / "checkpoint.pt"))
@@ -340,7 +331,6 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
                                                  seed=sample, spy=spy)
         stored.append(stored_of(generated, spy["flights"][0], sample))
     directory, executor = spy["directory"], tmp_path / "artefacts" / "s1" / "executor"
-    with_runway_ends(Path(directory))
     prior = tmp_path / "prior"
     prior.mkdir()
     (prior / "checkpoint.pt").write_bytes(b"a checkpoint")

@@ -104,7 +104,7 @@ class AutopilotSegmentBackend:
         #: the checks that failed, by (artefact, executor spec): their reason, given back at once
         self._failed: dict[tuple[Path, Path], str] = {}
         self._flown: dict[tuple[Path, str, tuple[str, ...], float], SetFlown] = {}
-        # the Training sets of stage B (``index_prior_v1.json``), flown on this backend's caches and lock
+        # the Training sets of stage B (`prior.training_files.INDEX_FILE`), flown on this backend's caches and lock
         self.prior = PriorSegments(self)
 
     def training_set(self, airport: str, set_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
