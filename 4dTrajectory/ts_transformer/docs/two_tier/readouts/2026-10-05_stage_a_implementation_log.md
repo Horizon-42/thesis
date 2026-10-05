@@ -361,7 +361,11 @@ replays of train (400 an airport) and select at each Δ, the start check), into 
 (D85): the candidates of each airport; at each Δ, the readings of D34, the outcomes and the landed share; the sentences
 that changed, by cause (the start, the end, the candidates, e_y).
 
-**A35.** Not done: its specification is in the design document (vocabulary §12.1) until it is done.
+**A35. The Training sets of stage A again (A23, outline §6).** From A34's artefact: its intent in
+`docs/experiments/intents.json` first; `training_export` into a new set beside `closed_loop_v11_20261004`; `check_live`
+over the new set; the browser check by a one-shot agent; a test stack for the user. After the user's merge,
+`v11_20261004`, `v16_20261004` and the set `closed_loop_v11_20261004` are deleted with the user's go (the backend's
+live executor reads the artefact of its set, so they go together).
 
 **A36. One function for the closed-loop part of the export (stage B's Training view, prior B6).** Before A32, on the
 branch `dev-two-tier-v4-a36`, made from `dev-two-tier`; Claude fast-forwards `dev-two-tier-v4` on the user's word,
@@ -382,7 +386,71 @@ no artefact and no published set changes.
   gone from its scratchpad: `/tmp/claude-1000/-home-supercomputing-studys-thesis/7767b9f9-586d-4d01-9b82-2949db171a8a/scratchpad/split_flights.patch`;
   13 export tests passed with it).
 
-**A37.** Not done: its specification is in the design document (vocabulary §12.1) until it is done.
+**A37. The corrections of the second review of A32–A36 (D85, D90; the review guide).** On the user's word
+(2026-10-05), beside A34 and A35, on a new branch `dev-two-tier-v4-a37` from `dev-two-tier-v4` (`58fd8a2b`). Code and
+tests only; no format of a sentence, a closed-loop file or a spec changes, and no artefact is built again.
+
+- D85: the labeller's readout (`experiments/instruction_labels.py`: `readout.json`, `readout.md`, the printed text) gives
+  counts only for the val days (labelled, refused); the readouts that serve a choice (`final_descent_tolerance`,
+  `executor_replay`, `closed_loop_start_check`) take `--split` train or select only. Then, on the user's go, the two
+  readout files of A34's artefact are written again by the corrected code (val counts only) and its `SHA256SUMS` is
+  written again; no other file of the artefact changes.
+- D80: `Loop.step` checks every flight's row against the values of its columns, a done or halted flight's row
+  included, before anything changes (D87 item 2 exempts such a row from the grammar, not from the values).
+- D90: `Loop.timed_out()` is removed; the closed-loop reading's `timed_out` comes from the judge's outcome. `Loop.executor` stays public (the end cycle, the flown record and the aero parameters of item 5 are read from it); undo the rename to `_executor`, and `captured()` goes if it came only with the rename.
+- D83: at a vertex, e_y is the smaller distance to the two segments around the matched point, and its side comes from
+  the sum of their normals; the matched point does not move back.
+- The export: a candidate's height offset (HAE − MSL) from published data, or a refusal by name, not from the
+  manifest's `runway_targets` (D78: a candidate can have no arrival). The backend refuses a split other than train and
+  select before it runs a check.
+- Small points: a track of exactly 360° written as 0°; the day check before the reference's arrays are opened; R55's
+  text "the same whatever the parts" said to rounding.
+- Tests that can fail: D77 with the stored track, ground speed and vertical rate changed on every row, for every
+  formal rule; D81 with a test law that reads the frame; D82's field names of the rows and the withheld fields; D85's
+  printed text; the draw of the references' go-around flights; `build_airport`'s draw with signal indices not in row
+  order; `check_live`; the backend's refusal order.
+- The check that nothing changes: with A37's code, the labeller, executor and closed-loop checks of A34's artefact
+  pass, and the closed-loop sentences of every split and Δ of A34's artefact read again in memory equal the stored
+  ones. If any differs, stop and report: the artefact would need a build again.
+
+**A38. The interface for the post-training (D97).** After A37, on its branch line (both change `Loop` and the
+start); code and tests only; no artefact is built again.
+
+- (1) §6 item 3 names `load_signals` and `signals_flights`; no code change.
+- (3) first: the measurement of D97 (3) on A34's artefact (train, Δ = 4 s, with the flights whose states differed in
+  A30). If a flight's states are not the same bit for bit alone and in a batch, the largest difference goes to the user
+  before the tests of (2) and (3) are written.
+- (2) `Loop`: a copy of chosen flights, repeats permitted; `Loop.halt` in item 5. Tests: a copy flown on with the same
+  words flies what the original flies, with the same outcome — for flights with heading turns, with a go-around, and
+  with a flight already done; bit for bit, or within the bound of (3) that the user accepts.
+- (3) The test: a flight's states alone and in a batch of others, on the CPU.
+- (4) The start with moved starts (after (1)–(3) if need be). Tests: a move of zero gives the start without a move, bit
+  for bit; the moved observed rows give the moved start state by the start rule; the check against the stored signals
+  runs before the move. The two readings of D97 (4) (how a change of speed moves the rows; whether the time limit stays
+  the flight's own) go to the user before the code is reviewed.
+- The executor conformance and the closed-loop check of A34's artefact pass with A38's code (nothing changes).
+
+**A39. The Training view's splits from the caller (outline D109).** Code and tests only; no set is exported again.
+
+- The frontend's reader of a set's flights (`aeroviz-4d/src/data/trainingSample.ts`, `TRAINING_SPLITS` in `parseFlight`)
+  and the backend's flights of a set (`aeroviz_backend/autopilot_segment/backend.py` `set_flown`) take the splits that
+  a set may hold from their caller. Stage A's own sets give train and select, as now; stage B's prior sets give val too,
+  for a set exported from the base's claimed validation readout (prior B10).
+- Tests: stage A's sets refuse a val flight, as now; a caller that permits val opens a val flight and flies its
+  segment live, equal to the set's flown states within the executor conformance tolerance; A23's sets and fixtures are
+  byte for byte the same.
+
+**A40. The faults of an observed track (D111).** Code and tests only; no artefact is built again. Its own branch from the
+tip of the stage A line that stage B merges (§0.4 rule of the branches).
+
+- `instructions/faults.py` (torch-free, in `instructions/` so that every reader may call it): the faults of one flight's
+  stored signals, with their reasons (a jump, a held position, a reversal) and rows; the rule's constants named once
+  (the ratio 3, the 5 steps on each side, the 120°); a function that gives, for a split of an artefact, the flights
+  marked. §6 item 3 names them.
+- Tests: synthetic tracks — a clean track marks nothing (a turn of a holding pattern at the standard rate, a speed
+  change at the vocabulary's a_max, a level-off), a jump, a held position and a reversal are each marked with their
+  reason and row; at the rule's edges (a step of exactly 3 times) the definition decides as written. On A34's artefact
+  (a check, not a test): the counts of D111 at Δ = 4 s.
 
 ## 4 Claude's check of stage A (was §12.2)
 
@@ -413,4 +481,14 @@ Done at `9a986c09`: all five items pass (`readouts/2026-10-04_stage_a_check_a15_
    code index); the spec of the formal artefact holds the chosen H_final and its measurement records the choice;
    the readings of D34 exist for every Δ, split and airport and equal A25's; the artefacts of A21 and A25 deleted
    with the user's go.
-Item 8 is not done: it is in the design document (vocabulary §12.2) until it is done.
+8. After A32–A38 (A39 and A40 added): D77–D90 and D97 against the code; A38's tests (the copy, a flight alone and in a batch, the
+   moved start, a move of zero); A36's sample equal to A23's byte for byte; A32's tests fail on the code before it (`dev-two-tier-v4` at `cf549e47`);
+   the behaviour check of D81 passes on A34's executor spec; A34's candidates are the published ends of each airport;
+   no start state and no stored observed row reads a sample after the first predicted step (on A34's artefact: the
+   observed samples after it changed, the start the same); no reading of the val days in A34's report or summaries;
+   A35's set opens and plays, and its live segments equal its export; the superseded artefacts deleted with the user's
+   go.
+   Done at `ed2530ae` (2026-10-05): `readouts/2026-10-05_stage_a_check_a32_a40.zh.md`. No channel to a model's input; two
+   readings of the val days outside the design (A41); the design text corrected (D83, D97, §6, post-training D94). Not
+   run again by Claude, accepted from the log: A36's byte equality and the failing of A32's tests on the code before it.
+   The superseded artefacts wait for the user's go.

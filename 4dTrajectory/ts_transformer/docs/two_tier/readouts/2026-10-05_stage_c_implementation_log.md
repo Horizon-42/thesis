@@ -304,3 +304,23 @@ loop — a random prior does not fly a final.
 
 Tests: `test_post_scene.py`, `test_post_window_loop.py`, `test_architecture.py`, 53 passed; the full ts suite on 8
 workers at `a1fdd2a8`: 1,749 passed, 1 skipped, 5 min 26 s.
+
+## 13 P20 decided: a window that opens inside a loss is left out of the draw (2026-10-05)
+
+The user, on §12's count: such windows are left out. `2bb77065` (reviewed; the A and D counts pinned in the runner
+test): `post/traffic.py` `opens_inside_loss` — the commanded aircraft on its record at its first predicted step, with
+no runway in force (the loop's state there, the larger count; a reading), loses separation that it answers for; real
+and augmented windows alike, each judged on its own scene. The census counts the windows the draw keeps
+(`experiments/post_windows.py` `draw_checks`: `real_kept`, `A_kept`, `D_kept`). On A34's artefact (v12, Δ 4 s, the
+scratchpad):
+
+| Split | Real kept | A kept | D kept |
+|---|---|---|---|
+| train | 40,472 of 40,530 (58 out) | 38,448 of 40,530 (2,082 out, 5.1 %) | 14,930 of 16,234 (1,304 out, 8.0 %) |
+| select | 6,187 of 6,199 | 5,940 of 6,199 | 2,245 of 2,438 |
+
+The augmented windows lose more: the shifts of D103 (A within ±180 s, D within ±120 s) often put the moved aircraft
+inside 3 NM and 1,000 ft of the commanded aircraft at its first predicted step. For the user: whether D103's ranges stay.
+
+Tests: `test_post_scene.py`, 13 passed; the full ts suite on 8 workers at `2bb77065`: 1,749 passed, 1 skipped, 7 min
+17 s (another session's suite was running beside it; a first run was stopped from outside and run again).
