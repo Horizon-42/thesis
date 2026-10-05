@@ -135,7 +135,8 @@ The milestones that are not done are specified in §12.1; the done ones, and the
    runs of stage B no longer wait for it.
 3. A41: the val days read once (D85); code, tests and one report; no artefact is built again.
 4. The superseded artefacts (`instruction_language/v11_20261004`, `executor/v16_20261004`, the published set
-   `closed_loop_v11_20261004`) are deleted with the user's go.
+   `closed_loop_v11_20261004` and its index entries) are deleted, with the user's go (2026-10-05); stage A does it
+   (`notes/stage_a.md`).
 5. The replay of the val days, the stage's one validation readout, waits for the user.
 
 ---
@@ -1415,4 +1416,5 @@ items 1 and 2).** Code, tests and one report only; no artefact is built again. O
 
 Items 1–8 are done (the log §4). Item 8, A32–A40 at `ed2530ae`: `readouts/2026-10-05_stage_a_check_a32_a40.zh.md`. Open
 from it: A41 (§12.1); the superseded artefacts (`instruction_language/v11_20261004`, `executor/v16_20261004` and the
-published set `closed_loop_v11_20261004`) are deleted with the user's go; the replay of the val days waits for the user.
+published set `closed_loop_v11_20261004`) are deleted by stage A, with the user's go (2026-10-05); the replay of the val
+days waits for the user.
