@@ -1,5 +1,14 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-06 — Multi-aircraft optimization T10: an M2 run published as one scene
+
+- `4e6c3ad0`: an M2 run writes one directory and one summary.json (mode traffic:m2); `87f5f2f2`: the builder and the
+  viewer show it as one scene (every controlled aircraft on one clock, the background in pink; AV47).
+- Published: `4dTrajectory/outputs/KRDU/traffic_m2_runway_cons/` (read-only, SHA256SUMS; the T8 numbers again) and
+  category `traffic_m2_runway_cons` (77 groups, 48 background aircraft, about 5 h). Checked in the browser.
+- The user's review: the traffic colours had no legend, and M1 drew all windows at once — design §9 now says one
+  window at a time and a three-entry legend (built with T11, the Optimize task's multi-aircraft mode, design §10).
+
 ### 2026-10-06 — Multi-aircraft optimization T7: traffic windows published to the comparison view
 
 - Viewer + builder (`78ce2fcb`, AV46): a `traffic:m1` summary publishes each solved group with its recorded neighbours

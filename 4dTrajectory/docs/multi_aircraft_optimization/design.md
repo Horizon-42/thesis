@@ -405,7 +405,7 @@ branch and worktree, with a review before each commit.
 | T7 | Evaluation of the commanded records and the CZML comparison (a new category) | The frontend shows a published window; checked in the browser | T6 | Done (§8.3): one M1 sample, KRDU (user, 2026-10-05); frontend by a sonnet agent |
 | T8 | M2 (§5.6) | A readout like T5 for 5 blocks | T6, MD9 | Done (§8.2) |
 | T9 | M3 design (§5.7) | Only if T8 leaves losses that the order cannot remove | T8 | Not started |
-| T10 | M2 in the viewer (the user, 2026-10-06): (a) one directory and one `summary.json` per M2 run; (b) the builder and the frontend show a run as one scene (§9); (c) one KRDU run published | Builder and frontend tests; the publication validator; checked in the browser | T7, T8 | In progress: (a) built; (b) a sonnet agent, reviewed; (c) the run is in `4dTrajectory/outputs/KRDU/traffic_m2_runway_cons/` |
+| T10 | M2 in the viewer (the user, 2026-10-06): (a) one directory and one `summary.json` per M2 run; (b) the builder and the frontend show a run as one scene (§9); (c) one KRDU run published | Builder and frontend tests; the publication validator; checked in the browser | T7, T8 | Done (§8.4): (a) `4e6c3ad0`; (b) `87f5f2f2`; (c) published. The legend and M1's one window: in work with T11 |
 | T11 | The Optimize task's multi-aircraft mode (§10; the user, 2026-10-06) | Backend and frontend tests; one M1 job and one 15-min M2 job on a test stack, checked in the browser | T10 | Design written (§10); the code: a sonnet agent (the user's order) |
 
 ### 8.1 T5 readout (KRDU, seed 11, 50 windows; the reviewed M1 code with the retry of MD13, scratch output)
@@ -442,6 +442,20 @@ branch and worktree, with a review before each commit.
 - A running dev server does not serve files that were published after it started (AV5): the frontend on
   5173 shows the category only after a restart.
 
+### 8.4 T10 publication (KRDU, the five 1-hour blocks of §8.2; code `4e6c3ad0` run, `87f5f2f2` viewer)
+
+- Output: `4dTrajectory/outputs/KRDU/traffic_m2_runway_cons/` (one directory, one `summary.json` of mode
+  `traffic:m2`, the evaluation, the run logs, `SHA256SUMS`; read-only). The outcomes are those of §8.2, the
+  same numbers. The evaluation: 61 pass, 16 fail.
+- Category `traffic_m2_runway_cons`: one scene of 77 groups over 17,885 s (the scene starts at
+  2026-05-21 14:55:39 UTC) and 48 background aircraft; `categories.json` got this key only.
+- Browser check (2026-10-06, a clean checkout of `87f5f2f2` on a test port): the scene loads; the Flights table
+  holds all 77 aircraft; one clock of about 5 h; each optimized path with its record beside it; landed aircraft
+  leave the scene; tooltips with the outcome and the delay (33 aircraft delayed); the runway selector and the
+  sample count do not reload it.
+- The user's review (2026-10-06): no legend for the traffic colours, and M1 drew all its windows at once
+  (§9 viewer contracts, fixed with T11).
+
 ## 9. Outputs and records
 
 - **Runner.** `4dTrajectory/optimization/traffic_optimization.py m1 --airport <ICAO> --sample N --seed S
@@ -461,8 +475,12 @@ branch and worktree, with a review before each commit.
   the losses per iteration and reading, the recorded aircraft (by `flight_key`), the flight times. Its schema
   name is `optimization-traffic-v2`. Settle every field before step T6 starts. A later change gets a new
   schema name; no reader accepts two versions (root `CLAUDE.md`, the compatibility rule).
-- **Viewer, M1** (AV46 in `aeroviz-4d/docs/35-viewer-reference.md`): each group with its own neighbours,
-  on its own clock.
+- **Viewer, M1** (AV46 in `aeroviz-4d/docs/35-viewer-reference.md`): one window at a time — the selected
+  flight's group (the first by default), with its controlled aircraft, its record and only its own neighbours.
+  The other windows stay in the Flights table. All windows at once on overlapping clocks put one window's
+  neighbours beside another window's controlled aircraft (the user found this, 2026-10-06).
+- **Legend** (both traffic modes): "Controlled aircraft — optimized path", "Controlled aircraft — its record"
+  (white), "Recorded traffic — not controlled" (pink; M2: outside the scheduled set).
 - **Viewer, M2: one scene.** All aircraft of an M2 run fly on ONE clock: the scene starts at the earliest
   entry of its groups (`S`). Each group (solved or not) gets `scene: {startOffsetS, outcome, delayS}`
   (`startOffsetS` = its entry − `S`; its result paths are written on the scene clock, its reference is shifted
