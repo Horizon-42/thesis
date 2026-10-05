@@ -75,7 +75,7 @@ def world(tmp_path_factory):
     flown = Flown()
     flown.words, flown.set = words, SetFlown(batch, [stored])
     monkeypatch.undo()
-    return {"root": root, "sample": sample, "readouts": readouts, "flown": flown, "geometry": geometry}
+    return {"root": root, "entry": index["sets"][0], "sample": sample, "readouts": readouts, "flown": flown, "geometry": geometry}
 
 
 def request(world, **changes):
@@ -95,11 +95,10 @@ def test_every_word_of_a_prior_sentence_flown_live_is_the_exported_flight(world)
     batch, inputs = flown.set.batch, flown.set.inputs
     params = test_start._params()
     for said, readout in zip(sample["flights"][0]["prior"], world["readouts"]):
-        every = int(round(4.0 / flown.words.spec.step_s))
         reference = readout.states[said["flownFromRow"]:]
         grid = np.array(said["words"], dtype=np.int16)
         told, sentence = prior_segments.on_words(batch, 0, flown.set.sentences[0], grid, flown.words)
-        last = {column: row for row, column in zip(*np.nonzero(grid != UNCHANGED)[::-1])}
+        last = {int(column): int(row) for row, column in zip(*np.nonzero(grid != UNCHANGED))}
         for row, column in zip(*np.nonzero(grid != UNCHANGED)):
             result = fly_segment(told, inputs, 0, sentence, int(column), int(row), params, flown.words, lambda: False)
             end = int(result.flown.done_cycle[0]) + 2
@@ -110,9 +109,11 @@ def test_every_word_of_a_prior_sentence_flown_live_is_the_exported_flight(world)
                 assert float(np.abs(live[name][cycles] - reference[:rows, index]).max()) < STATE_BOUND_M, (said["sample"], row, column, name)
             apart = prior_segments.apart_from_exported(result, said["track"], told, 0, flown.words.spec.step_s)
             assert max(apart["horizontalM"], apart["verticalM"]) < ROUNDING_M
+            # a column's last word has no stop: it is flown on to the judge's outcome (an earlier word is too, when its
+            # stop lies past the flight's end)
+            assert last[int(column)] != int(row) or result.verdict is not None, (said["sample"], row, column)
             if result.verdict is not None:
                 assert result.verdict.outcome == said["outcome"] and int(result.verdict.end_row) == said["endCycle"]
-        assert last, "the sentence says words"
 
 
 def every_cycles(flown, params):
@@ -149,6 +150,19 @@ def test_a_request_the_view_cannot_make_is_refused_and_a_set_flight_or_sentence_
     said = world["sample"]["flights"][0]["prior"][0]
     with pytest.raises(RequestRefused, match="after the flight's outcome"):       # a word said after the outcome has no segment
         backend.prior.fly(request(world, clientId="f", row=said["track"]["lastCycle"] // 4 + 1))
+    # an in-sentence word said after the outcome: the set read with the sentence's outcome at cycle 40
+    late = {**world["sample"], "setId": "late"}
+    late["flights"] = [{**late["flights"][0], "prior": [
+        {**said, "track": {**said["track"], "lastCycle": 40}}, *late["flights"][0]["prior"][1:]]}]
+    training = world["root"].parent / "late_airports" / late["airport"] / "training"
+    if not training.exists():
+        training.mkdir(parents=True)
+        prior_files.write_set(training, late["airport"], {**world["entry"], "id": "late", "file": "late/sample.json"},
+                              prior_files.serialise(late), [])
+    behind = SyntheticBackend(world["root"].parent / "late_airports", world["flown"])
+    after = next(e for e in said["events"] if e["row"] * 4 > 40 and e["column"] == HEADING)
+    with pytest.raises(RequestRefused, match="after the flight's outcome at cycle 40"):
+        behind.prior.fly(request(world, setId="late", clientId="g", row=after["row"]))
     with pytest.raises(NotListed, match="has no flight"):
         backend.prior.fly(request(world, flightKey="nobody", clientId="b"))
     with pytest.raises(NotListed, match="no prior sentence 7"):
@@ -215,6 +229,11 @@ def test_the_frontend_reads_the_names_the_backend_and_the_export_write():
     assert ts_constant(sample, "TRAINING_PRIOR_SET_KIND") == prior_files.SET_KIND
     assert ts_constant(autopilot, "TRAINING_PRIOR_AUTOPILOT_SCHEMA") == prior_segments.SCHEMA
     assert ts_constant(autopilot, "TRAINING_PRIOR_CLOSED_LOOP") == prior_segments.CLOSED_LOOP
+    # the columns the procedure masks rule (`ProcedureMasks.columns`), by name
+    from ts_transformer.prior.procedure import ProcedureMasks
+    import re
+    listed = re.search(r"export const TRAINING_PRIOR_BLOCKED_COLUMNS = \[([^\]]*)\]", sample.read_text(encoding="utf-8"))
+    assert re.findall(r'"([^"]*)"', listed.group(1)) == [COLUMNS[c] for c in ProcedureMasks.columns]
 
 
 def test_the_frontend_fixture_of_an_answer_is_what_the_service_answers(world):

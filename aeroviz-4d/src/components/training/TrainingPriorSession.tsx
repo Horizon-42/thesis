@@ -48,14 +48,14 @@ type SetState =
 /** The most allowed words a blocked column lists before it counts the rest. */
 const ALLOWED_SHOWN = 10;
 
-/** What a word of a masked column is, in words: an altitude word is a level above the airport elevation E or "no level-off";
+/** What a word of a masked column is, in words: an altitude word is a level above the airport elevation E (not MSL, as the 3D labels are) or "no level-off";
  *  an angle word is a class. */
 export function blockedWordName(column: TrainingPriorBlockedColumn, value: number, vocabulary: TrainingVocabulary): string {
   if (column === "angle") return vocabulary.angleClasses[value].name;
   return value === vocabulary.noLevelOff ? "no level-off" : `${vocabulary.altitudeLevelsM[value]} m`;
 }
 
-/** The words of a masked column the procedure left allowed at a row, given the ones it blocked. */
+/** The words of a masked column the procedure masks leave permitted at a row (the grammar may still forbid some), given the ones it blocked. */
 export function allowedWords(column: TrainingPriorBlockedColumn, blocked: number[], vocabulary: TrainingVocabulary): number[] {
   const total = column === "angle" ? vocabulary.angleClasses.length : vocabulary.noLevelOff + 1;
   const out = new Set(blocked);
@@ -152,12 +152,12 @@ function RowInspector({ sample, flight, sentence }: { sample: TrainingPriorSampl
         {TRAINING_PRIOR_BLOCKED_COLUMNS.map((column) => {
           const blocked = sentence.blocked[column][row];
           const allowed = allowedWords(column, blocked, sample.vocabulary);
-          const shown = allowed.slice(0, ALLOWED_SHOWN).map((value) => blockedWordName(column, value, sample.vocabulary)).join(", ");
+          const listed = allowed.slice(0, ALLOWED_SHOWN).map((value) => blockedWordName(column, value, sample.vocabulary)).join(", ");
           return (
             <div key={column}>
-              <dt>Blocked · {column}</dt>
+              <dt>Blocked · {column}{column === "altitude" ? " (levels above airport elevation)" : ""}</dt>
               <dd title={`blocked: ${blocked.map((value) => blockedWordName(column, value, sample.vocabulary)).join(", ") || "none"}`}>
-                {blocked.length === 0 ? "none blocked" : `${blocked.length} blocked`} · {allowed.length === 0 ? "none allowed" : `allowed: ${shown}${allowed.length > ALLOWED_SHOWN ? ` … +${allowed.length - ALLOWED_SHOWN}` : ""}`}
+                {blocked.length === 0 ? "none blocked" : `${blocked.length} blocked`} · {allowed.length === 0 ? "none permitted" : `permitted by the procedure masks: ${listed}${allowed.length > ALLOWED_SHOWN ? ` … +${allowed.length - ALLOWED_SHOWN}` : ""}`}
               </dd>
             </div>
           );
@@ -198,6 +198,10 @@ export default function TrainingPriorSession({ airport, sets }: { airport: strin
 
   const sample = state.status === "ready" ? state.sample : null;
   const flight = sample?.flights.find((item) => item.head.flightKey === flightKey) ?? null;
+  // a set that has just opened may still hold the last set's choice for one render (the reset below runs after it): the
+  // sentence shown is one the flight has, else its first
+  const shown: TrainingPriorWhich = flight === null || which === "closedLoop" || flight.sentences.some((item) => item.sample === which)
+    ? which : flight.sentences[0].sample;
 
   // a set opens on its first flight and that flight's first sentence, read at the prior's Δ
   useEffect(() => {
@@ -213,11 +217,11 @@ export default function TrainingPriorSession({ airport, sets }: { airport: strin
       setTrainingSelection(null);
       return;
     }
-    setTrainingSelection(trainingPriorSelectionOf(sample, trainingPriorFlightView(sample, flight, which)));
-  }, [sample, flight, which, setTrainingSelection]);
+    setTrainingSelection(trainingPriorSelectionOf(sample, trainingPriorFlightView(sample, flight, shown)));
+  }, [sample, flight, shown, setTrainingSelection]);
   useEffect(() => () => setTrainingSelection(null), [setTrainingSelection]);
 
-  const origin = flight === null || sample === null ? undefined : trainingPriorOriginOf(trainingPriorFlightView(sample, flight, which));
+  const origin = flight === null || sample === null ? undefined : trainingPriorOriginOf(trainingPriorFlightView(sample, flight, shown));
   const said = origin?.sentence ?? null;
 
   return (
@@ -256,7 +260,7 @@ export default function TrainingPriorSession({ airport, sets }: { airport: strin
               </li>
             ))}
           </ul>
-          {flight === null ? null : <SentenceTable sample={sample} flight={flight} which={which} onSelect={setWhich} />}
+          {flight === null ? null : <SentenceTable sample={sample} flight={flight} which={shown} onSelect={setWhich} />}
           {flight === null || said === null ? (
             <p className="training-note">The closed-loop sentence is the reading's, with no probabilities or masks: pick a prior sentence for them.</p>
           ) : <RowInspector sample={sample} flight={flight} sentence={said} />}

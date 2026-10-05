@@ -92,6 +92,10 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
    *  the airport has the file). */
   const [viewing, setViewing] = useState<"stageA" | "prior">("stageA");
   const priorIndex = useTrainingPriorIndex(activeAirportCode || null);
+  // the switch is offered where the airport has prior sets (or a prior index to complain about); an airport with none shows
+  // stage A whatever was chosen at the last one
+  const priorOffered = (priorIndex.status === "ready" && priorIndex.index.sets.length > 0) || priorIndex.status === "invalid";
+  const showing = priorOffered ? viewing : "stageA";
   const [shownDetails, setShownDetails] = useState<{ section: string; opener: HTMLElement } | null>(null);
   const show = useCallback((section: string) => setShownDetails((open) => (open === null ? null : { ...open, section })), []);
   const close = useCallback(() => setShownDetails(null), []);
@@ -174,24 +178,24 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
         {/* Everything read ONCE — what the module is, the vocabulary, the readouts — is on the details page, so the
             list keeps the dock's height. */}
         <button type="button" className="training-details-open" aria-haspopup="dialog" aria-label="Training details"
-          title="Training details" onClick={details.open("overview")} disabled={sample === null || viewing === "prior"}>
+          title="Training details" onClick={details.open("overview")} disabled={sample === null || showing === "prior"}>
           ⓘ
         </button>
       </header>
 
-      {priorIndex.status === "ready" && priorIndex.index.sets.length > 0 || priorIndex.status === "invalid" ? (
+      {priorOffered ? (
         <label className="training-field" title="Stage A: flights read back through the closed loop. Stage B: the sentences the prior said, flown by the executor.">
           <span>Sets of</span>
-          <select value={viewing} onChange={(event) => setViewing(event.target.value as "stageA" | "prior")}>
+          <select value={showing} onChange={(event) => setViewing(event.target.value as "stageA" | "prior")}>
             <option value="stageA">Stage A · read-back</option>
             <option value="prior">Stage B · prior</option>
           </select>
         </label>
       ) : null}
-      {viewing === "prior" && priorIndex.status === "invalid" ? (
+      {showing === "prior" && priorIndex.status === "invalid" ? (
         <ProblemBox title={`${trainingPriorIndexPath(airport)} cannot be read.`} detail={priorIndex.problem} />
       ) : null}
-      {viewing === "prior" && priorIndex.status === "ready" && activeAirportCode ? (
+      {showing === "prior" && priorIndex.status === "ready" && activeAirportCode ? (
         <>
           {priorIndex.index.rejected.map((item) => (
             <ProblemBox key={item.id} title={`Entry ${item.id} was rejected.`} detail={item.problem} />
@@ -200,7 +204,7 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
         </>
       ) : null}
 
-      {viewing === "prior" ? null : <>
+      {showing === "prior" ? null : <>
       {indexState.status === "loading" ? <p className="training-note" role="status">Reading {trainingIndexPath(airport)} …</p> : null}
       {indexState.status === "absent" ? <EmptyState airport={airport} /> : null}
       {indexState.status === "invalid" ? (

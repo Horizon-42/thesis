@@ -454,6 +454,12 @@ export function lastStateCycle(outcome: TrainingOutcome, endCycle: number): numb
   return outcome === "dynamics_failure" ? endCycle - 1 : endCycle;
 }
 
+/** A word said at Δ row ``row`` after the judge's outcome (its cycle is past the flight's last state): the flight the judge read
+ *  never hears it, so it has no segment to fly (the backend refuses it). */
+export function wordUnreached(closed: TrainingClosedLoop, row: number): boolean {
+  return (row * closed.rowIntervalS) / closed.cycleS > lastStateCycle(closed.replay.outcome, closed.replay.endCycle);
+}
+
 /** One word of a column and the rows it is in force: from its row to the next word of its column (or the sentence's end). */
 export interface TrainingWordRun {
   row: number;

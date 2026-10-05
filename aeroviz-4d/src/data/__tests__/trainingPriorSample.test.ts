@@ -7,13 +7,16 @@ import { describe, expect, it } from "vitest";
 import {
   parseTrainingPriorIndex,
   parseTrainingPriorSample,
+  runwayInForce,
   trainingPriorFlightView,
   trainingPriorOriginOf,
+  TRAINING_PRIOR_BLOCKED_COLUMNS,
   trainingPriorSelectionOf,
   TRAINING_PRIOR_INDEX_SCHEMA,
   TRAINING_PRIOR_SAMPLE_SCHEMA,
   TRAINING_PRIOR_SET_KIND,
 } from "../trainingPriorSample";
+import { wordUnreached } from "../trainingSample";
 import { readingRowAt, sentenceColumnRuns, trainingReadingOf, TRAINING_READING_RULE, TRAINING_SAMPLE_SCHEMA } from "../trainingSample";
 import { allowedWords, blockedWordName } from "../../components/training/TrainingPriorSession";
 import { PRIOR_SET_ID, stageBIndex, stageBSample, stageBSampleFile } from "./stageB";
@@ -153,5 +156,45 @@ describe("the blocked words", () => {
     const everything = Array.from({ length: vocabulary.noLevelOff + 1 }, (_, value) => value);
     expect(allowedWords("altitude", everything.slice(1), vocabulary)).toEqual([0]);
     expect(allowedWords("angle", [], vocabulary)).toHaveLength(vocabulary.angleClasses.length);
+  });
+});
+
+describe("the words said after the outcome", () => {
+  it("are counted as not reached, by their cycle against the flight's last state", () => {
+    const sample = stageBSample();
+    const flight = sample.flights[0];
+    const sentence = flight.sentences[0];
+    const view = trainingPriorFlightView(sample, flight, 0);
+    const closed = view.closedLoop["4"];
+    const after = sentence.events.filter((event) => (event.row * 4) / closed.cycleS > sentence.endCycle).length;
+    expect(closed.replay.notReached).toBe(after);
+    expect(closed.replay.flewTheSentence).toBe(after === 0);
+    // an outcome at cycle 40 leaves every word of a later row unreached; a dynamics failure's last state is one before its row
+    const early = { ...closed, replay: { ...closed.replay, endCycle: 40 } };
+    expect(wordUnreached(early, 10)).toBe(false);
+    expect(wordUnreached(early, 11)).toBe(true);
+    expect(wordUnreached({ ...early, replay: { ...early.replay, outcome: "dynamics_failure" } }, 10)).toBe(true);
+  });
+});
+
+describe("the runway in force", () => {
+  const sample = stageBSample();
+  const events = sample.flights[0].sentences[0].events;
+
+  it("is the last runway word at or before the row, the first said before any", () => {
+    const runway = events.filter((event) => event.column === 0 && event.says.column === "runway" && !event.says.goAround);
+    expect(runwayInForce(events, 0)).toBe((runway[0].says as { runwayIndex: number }).runwayIndex);
+    const synthetic = [
+      { row: 0, column: 0, value: 1, correction: false, says: { column: "runway", goAround: false, runway: "B", runwayIndex: 1 } },
+      { row: 3, column: 0, value: -2, correction: false, says: { column: "runway", goAround: true } },
+      { row: 5, column: 0, value: 0, correction: false, says: { column: "runway", goAround: false, runway: "A", runwayIndex: 0 } },
+    ] as typeof events;
+    expect([0, 3, 4, 5, 9].map((row) => runwayInForce(synthetic, row))).toEqual([1, 1, 1, 0, 0]);
+  });
+});
+
+describe("the columns the procedure masks rule", () => {
+  it("are the names the export writes its blocked words under", () => {
+    expect(Object.keys(stageBSampleFile().flights[0].prior[0].blocked)).toEqual([...TRAINING_PRIOR_BLOCKED_COLUMNS]);
   });
 });

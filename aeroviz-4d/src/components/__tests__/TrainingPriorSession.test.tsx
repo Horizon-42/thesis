@@ -106,3 +106,42 @@ describe("the prior's sets in the Training panel", () => {
     expect(screen.getByText(new RegExp(`not one of ${TRAINING_PRIOR_SAMPLE_SCHEMA}`))).toBeTruthy();
   });
 });
+
+describe("choices that outlive a set or an airport", () => {
+  beforeEach(() => {
+    appState.cursorS = 0;
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    appState.activeAirportCode = "KXXX";
+  });
+
+  it("switches to a set with fewer sentences of a shared flight without a render that has the old choice", async () => {
+    const index = stageBIndex();
+    index.sets.push({ ...index.sets[0], id: "set_b", file: "set_b/sample.json" });
+    const other = stageBSampleFile();
+    other.setId = "set_b";
+    other.flights[0].prior = other.flights[0].prior.slice(0, 1);          // the same flight, one sentence
+    serve({ [INDEX_PATH]: index, [SAMPLE_PATH]: stageBSampleFile(), "data/airports/KXXX/training/set_b/sample.json": other });
+    await openPriorSets();
+    fireEvent.click(await screen.findByRole("button", { name: "prior · sample 1" }));
+    await waitFor(() => expect(lastPublished().flight.flightKey).toContain("~prior-1"));
+    fireEvent.change(screen.getByLabelText("Set"), { target: { value: "set_b" } });
+    await waitFor(() => expect(lastPublished()?.setId).toBe("set_b"));
+    expect(lastPublished().flight.flightKey).toContain("~prior-0");
+    expect(screen.queryByRole("button", { name: "prior · sample 1" })).toBeNull();
+  });
+
+  it("falls back to stage A at an airport that has no prior sets", async () => {
+    serve({ [INDEX_PATH]: stageBIndex(), [SAMPLE_PATH]: stageBSampleFile() });
+    const view = render(<TrainingPanel hidden={false} />);
+    fireEvent.change(await screen.findByLabelText("Sets of"), { target: { value: "prior" } });
+    await screen.findByRole("table", { name: "The flight's sentences" });
+    appState.activeAirportCode = "KYYY";
+    view.rerender(<TrainingPanel hidden={false} key="other" />);
+    expect(await screen.findByText(/No Training export for KYYY yet/)).toBeTruthy();
+    expect(screen.queryByLabelText("Sets of")).toBeNull();
+  });
+});

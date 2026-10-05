@@ -74,6 +74,7 @@ import {
 import {
   closedCycleTimeS,
   correctionCount,
+  wordUnreached,
   formatSeconds,
   readingRowAt,
   readingRowTimeS,
@@ -341,7 +342,7 @@ export default function TrainingSentenceBar() {
         <span className="training-sentence-cursor-readout">
           t = {formatSeconds(cursorS)} s · {cursorRow === null ? "before the sentence" : `row ${cursorRow}`}
         </span>
-        <button type="button" className="training-autopilot-fly" disabled={closed === null || focusRun === null || flyingHere}
+        <button type="button" className="training-autopilot-fly" disabled={closed === null || focusRun === null || flyingHere || wordUnreached(closed, focusRun.row)}
           title={closed === null
             ? "The live executor flies closed-loop sentences: choose a Δ."
             : focusRun === null
@@ -433,11 +434,15 @@ export default function TrainingSentenceBar() {
                     (kind === undefined ? "" : ` — labelled as ${kind}`) +
                     `, said at row ${run.row} (${formatSeconds(timeOf(run.row))} s), in force to ${formatSeconds(timeOf(run.endRow))} s` +
                     (held === null ? "" : `\nthe judge: ${held ? "held" : "not held"} ${checkMark(held)}`) +
+                    (closed !== null && wordUnreached(closed, run.row) ? "\nsaid after the flight's outcome: the executor never hears it" : "") +
                     (closed !== null && column !== "runway" && closed.lateralM[run.row] !== null
                       ? `\nflown path vs observed when said: ${Math.abs(closed.lateralM[run.row]!).toFixed(1)} m lateral` +
                         (closed.verticalM[run.row] === null ? "" : `, ${closed.verticalM[run.row]!.toFixed(1)} m vertical`) : "");
                   const selected = selectedColumn && cursorRow !== null && run.row <= cursorRow && cursorRow < run.endRow;
+                  // said after the judge's outcome: no segment to fly, so it cannot be picked
+                  const unreached = closed !== null && wordUnreached(closed, run.row);
                   const choose = () => {
+                    if (unreached) return;
                     if (selected) {
                       setFocusColumn(null);
                       setTrainingPick(null);
@@ -451,6 +456,7 @@ export default function TrainingSentenceBar() {
                   return (
                     <g key={`${column}-${run.row}`} role="button" tabIndex={0} aria-label={title} aria-pressed={selected}
                       className={`training-sentence-band${event.correction ? " correction" : ""}`} onClick={choose}
+                      aria-disabled={unreached || undefined} style={unreached ? { opacity: 0.3, cursor: "not-allowed" } : undefined}
                       onKeyDown={(keyEvent) => {
                         if (keyEvent.key === "Enter" || keyEvent.key === " ") choose();
                       }}>

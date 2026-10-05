@@ -7,7 +7,7 @@
  *  • THE PROCEDURE'S LIMITS (`procedure` switch), per candidate runway: the outline of the region the masks rule (inside the FAF
  *    and the LPV cone) on the ground, the glidepath lower edge along the course (a line at its height), the DA point where the
  *    glidepath reaches the decision height and the entry point at the FAF — every coordinate the exporter's, none computed
- *    here. The runway the flight lands on is drawn in the designated colour, the others in the candidates' grey.
+ *    here. The runway in force at the cursor's row in the sentence on screen (its own runway words, not the observed flight's) is drawn in the designated colour, the others in the candidates' grey.
  *  • THE FLIGHT'S OTHER SENTENCES (`otherSentences` switch): the flown path of every sentence of the flight but the one on
  *    screen — the prior's other samples in their outcome's colour, the closed-loop sentence in the executor's teal — thin and
  *    faded, so the sentences can be read side by side.
@@ -17,10 +17,10 @@
 
 import { useEffect } from "react";
 import * as Cesium from "cesium";
-import { useApp } from "../context/AppContext";
+import { useApp, useTrainingCursor } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { useTrainingPriorLayers } from "../data/trainingPriorLayers";
-import { trainingPriorOriginOf, type TrainingPriorOrigin } from "../data/trainingPriorSample";
+import { runwayInForce, trainingPriorOriginOf, type TrainingPriorOrigin } from "../data/trainingPriorSample";
 import {
   TRAINING_CANDIDATE_COLOR,
   TRAINING_DESIGNATED_COLOR,
@@ -87,7 +87,11 @@ export default function useTrainingProcedureLayer(): void {
   const layers = useTrainingPriorLayers();
   const flight = mode === "training" && trainingSelection !== null ? trainingSelection.flight : null;
   const origin = flight === null ? undefined : trainingPriorOriginOf(flight);
-  const designated = flight === null ? -1 : flight.runwayIndex;
+  const { trainingCursorS } = useTrainingCursor();
+  // the runway the masks act on: the one in force at the cursor's row in the sentence on screen
+  const closed = flight === null || origin === undefined ? null : flight.closedLoop[String(origin.sample.model.rowIntervalS)];
+  const designated = closed === null ? -1
+    : runwayInForce(closed.events, Math.max(Math.floor((trainingCursorS - closed.startS) / closed.rowIntervalS + 1e-9), 0));
 
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || origin === undefined || !layers.procedure) return;

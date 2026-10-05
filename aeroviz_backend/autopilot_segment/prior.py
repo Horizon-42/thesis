@@ -30,7 +30,7 @@ import numpy as np
 
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.judge import flown_track
-from ts_transformer.instructions.words import COLUMNS, UNCHANGED
+from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.io_utils import utc_now
 from ts_transformer.prior import training_files as prior_files
 

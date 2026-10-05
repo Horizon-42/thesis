@@ -49,6 +49,7 @@ import {
   type TrainingSelection,
   type TrainingTrack,
   type TrainingVocabulary,
+  wordUnreached,
 } from "./trainingSample";
 
 /** MIRROR of the exporter's `INDEX_SCHEMA` (`ts_transformer/prior/training_files.py`): the airport's index of prior sets.
@@ -60,7 +61,9 @@ export const TRAINING_PRIOR_INDEX_FILE = "index_prior_v1.json";
 export const TRAINING_PRIOR_SAMPLE_SCHEMA = "aeroviz-training-prior-sample-v1";
 /** MIRROR of `SET_KIND`: the flights of one free-generation readout. */
 export const TRAINING_PRIOR_SET_KIND = "prior-free-generation";
-/** The columns the procedure masks rule; the blocked words are listed under these names (the exporter's `blocked`). */
+/** MIRROR of the procedure masks' columns (`prior.procedure.ProcedureMasks.columns`, by `COLUMNS` name): the blocked words are
+ *  listed under these names (the exporter's `blocked`); the reader refuses any other set of names, and
+ *  `test_prior_segment.py` pins them there. */
 export const TRAINING_PRIOR_BLOCKED_COLUMNS = ["altitude", "angle"] as const;
 export type TrainingPriorBlockedColumn = (typeof TRAINING_PRIOR_BLOCKED_COLUMNS)[number];
 
@@ -452,12 +455,12 @@ export function trainingPriorOriginOf(flight: TrainingFlight): TrainingPriorOrig
 }
 
 /** A sentence the prior said as stage A's closed-loop sentence at Δ, so the sentence bar, the read-back window and the 3D
- *  layers read it unchanged. No envelope was judged on it (the judge's envelopes are the closed-loop sentence's own), the
- *  reading added no word, and the export refuses a sentence whose flight was not done at its last word: every word was said
- *  before the outcome. */
+ *  layers read it unchanged. No envelope was judged on it (the judge's envelopes are the closed-loop sentence's own) and the
+ *  reading added no word. The executor flies on to the sentence's last word, which can lie past the judge's outcome (a crossing
+ *  of another runway): `notReached` counts the words said after it (`wordUnreached`). */
 function closedLoopOf(model: TrainingPriorModel, flight: TrainingFlight, sentence: TrainingPriorSentence): TrainingClosedLoop {
   const closed = flight.closedLoop[String(model.rowIntervalS)];
-  return {
+  const result = {
     rowIntervalS: model.rowIntervalS, firstRow: sentence.firstRow, startRow: sentence.startRow, flownFromRow: sentence.flownFromRow,
     startS: closed.startS, words: sentence.words, events: sentence.events,
     lateralM: sentence.words.map(() => null), verticalM: sentence.words.map(() => null), timedOut: sentence.timedOut,
@@ -467,6 +470,17 @@ function closedLoopOf(model: TrainingPriorModel, flight: TrainingFlight, sentenc
       envelopes: null,
     },
   };
+  const notReached = sentence.events.filter((event) => wordUnreached(result, event.row)).length;
+  return { ...result, replay: { ...result.replay, flewTheSentence: notReached === 0, notReached } };
+}
+
+/** The runway in force at Δ row ``row`` of a sentence: the last runway word (not a go-around) said at or before it, else the
+ *  first one said; the masks act on this runway, whatever the observed flight landed on. */
+export function runwayInForce(events: TrainingEvent[], row: number): number {
+  const runways = events.filter((event) => event.column === 0 && event.says.column === "runway" && !event.says.goAround);
+  const said = runways.filter((event) => event.row <= row);
+  const event = said.length > 0 ? said[said.length - 1] : runways[0];
+  return (event.says as { runwayIndex: number }).runwayIndex;
 }
 
 /** The flight as the views draw it with ``which`` of its sentences read at the prior's Δ. Another sentence is another flight
