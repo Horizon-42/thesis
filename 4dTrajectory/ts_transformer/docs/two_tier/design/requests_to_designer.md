@@ -1,12 +1,13 @@
-# Stage A → stage B: what stage B must do or know
+# Requests to the designer
 
-A note from stage A's implementer to stage B's designer. It holds only the current state: it is rewritten in full
-each time, never appended to, and an item leaves when stage B has done it. The decisions themselves are in the design
-documents (cited by D number); this note says what follows for stage B and where stage A's code is.
+What Claude, as stage A's implementer, asks of the designer: what another stage must do or know because of stage A's
+work, and anything else the designer must handle. It holds only the current state: it is rewritten in full each time,
+never appended to, and an item leaves when it is done. The decisions themselves are in the design documents (cited by
+D number); this note says what follows from them and where stage A's code is.
 
 State of 2026-10-05.
 
-## 1 To do: B11, the selection leaves out flights with a faulty observed track (D111)
+## 1 Stage B to do: B11, the selection leaves out flights with a faulty observed track (D111)
 
 The user (2026-10-05): a flight whose stored observed track has a faulty point is marked when the artefact is read,
 and the base does not learn from it; nothing is rebuilt. Prior D111 and milestone B11 hold stage B's part.
@@ -29,7 +30,7 @@ and the base does not learn from it; nothing is rebuilt. Prior D111 and mileston
 - **When:** after A40 is on the stage A line that stage B merges (it is in review now, branch `dev-two-tier-v4-a40`),
   and before B5's formal campaign.
 
-## 2 To follow when stage A's branches are merged (the user merges)
+## 2 Stage B to follow when stage A's branches are merged (the user merges)
 
 None of these is on `dev-two-tier-v4` yet (it is at `58fd8a2b`). They wait for the user's merge:
 
@@ -70,7 +71,7 @@ What stage B's code must follow after the merge:
   - Frontend: `parseTrainingSample(raw, splits)` and `fetchTrainingSample(…, splits)`. `TRAINING_SET_SPLITS` is every
     split a set may hold, and `TRAINING_SPLITS` is stage A's.
 
-## 3 To know
+## 3 Stage B to know
 
 - **A34's artefact `instruction_language/v12_20261005` / `executor/v17_20261005` stays.**
   - A37's code was checked on it by sample.
