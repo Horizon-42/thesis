@@ -171,7 +171,8 @@ sample `conformance/` (C30), in the same run. `instruction_conformance --dir` re
 disk and prints the differences (information, exit 1 on any): since A29 (D73) every runner that uses the labeller on the
 artefact (`instruction_figures`, `executor_spec`, `executor_replay`, `instruction_closed_loop`, the start, the backend)
 runs the same check itself first; there is no passed record. `instruction_figures --dir [--count 24] [--seed 1337]` draws a seeded half
-straight-in / half vectored sample of VAL flights into `figures/` with an `index.csv` for a verdict column. Every step
+straight-in / half vectored sample of SELECT flights into `figures/` with an `index.csv` for a verdict column (never
+val: the val days are read once, in the stage's validation readout, D85; A41). Every step
 refuses to write over an existing file.
 
     python run_ts.py instruction_signals --out <artefact> --limit 80     # a smoke build; no --limit for the formal one
@@ -1416,8 +1417,8 @@ them (D42, A10), at the nearest Δ row (D45, A12); a sentence has the flown rows
 ### R51 · `run_ts.py executor_turns` — the turn of the executor measured: how much of the offset after a turn is the heading law's, how much the words' (vocabulary §12.1 A13)
 
 2026-10-04 (vocabulary §5.4, §4.3, §9.6, §12.1 A13; `experiments/executor_turns.py`). `executor_turns --instructions
-<artefact> --executor <spec dir> --split train [--per-airport N] [--seed 1337] [--chunk 500] --out <new dir>` (another
-split from a clean tree): the replay's flights (`replay.draw`), their open-loop sentences at Δ = 2 s, flown from the first
+<artefact> --executor <spec dir> --split train [--per-airport N] [--seed 1337] [--chunk 500] --out <new dir>` (`--split` train
+or select — val refused by name, D85, A41; select from a clean tree): the replay's flights (`replay.draw`), their open-loop sentences at Δ = 2 s, flown from the first
 row, said on their own rows, in three ways — `executor` (the executor at the observed ground speed: the airspeed set at each
 cycle's start so that the ground speed is the observed one, and moved within the cycle to the observed one at its end in
 place of the speed law), `executor_no_stopping` (the same, without the stopping-rate limit of §5.4) and `exact_words` (each

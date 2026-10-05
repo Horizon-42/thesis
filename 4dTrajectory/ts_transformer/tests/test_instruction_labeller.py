@@ -974,13 +974,22 @@ def test_a_step_up_from_a_level_is_a_go_around_climb():
         climb_after(groups[:2], 30, 40, one)
 
 
-def test_the_figures_runner_draws_a_labelled_flight(tmp_path, monkeypatch):
+def test_the_figures_runner_draws_a_labelled_select_flight_and_never_reads_val(tmp_path, monkeypatch, capsys):
+    """A41, D85: the pages come from the select days; the runner takes no split, so val is never read."""
     from ts_transformer.experiments import instruction_figures
+    from ts_transformer.instructions.artefact import load_signals
     from ts_transformer.tests.support import labelled_instruction_artefact
 
-    labelled_instruction_artefact(tmp_path / "artefact", split="val")
+    labelled_instruction_artefact(tmp_path / "artefact", split="select")
     monkeypatch.setattr(instruction_figures, "require_conforming_labeller", lambda directory: None)
+    read = []
+    monkeypatch.setattr(instruction_figures, "load_signals",
+                        lambda directory, split: read.append(split) or load_signals(directory, split))
     assert instruction_figures.main(["--dir", str(tmp_path / "artefact"), "--count", "2"]) == 0
+    assert read == ["select"] and len(list((tmp_path / "artefact" / "figures").glob("*.png"))) == 1
+    with pytest.raises(SystemExit):
+        instruction_figures.main(["--dir", str(tmp_path / "other"), "--split", "val"])
+    assert "unrecognized arguments: --split val" in capsys.readouterr().err
 
 
 # ---- the readout of the labeller's runner (outline D85)
