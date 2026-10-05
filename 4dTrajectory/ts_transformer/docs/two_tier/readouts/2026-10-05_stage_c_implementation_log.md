@@ -494,3 +494,36 @@ Readings for step 6, as proposals:
   compared with the export's track written to 0.1 m and not refused past a bound (A43's refusal is against unrounded
   stored states). A refusal at the rounding is a question for stages B and C together (stage B's requests).
 - **The temperature (D121)**: 1, the speaking loop's default; no other value is proposed (P39).
+
+## 19 The refused row (P40), C11 part 3 and the test stack (2026-10-06)
+
+| Step | Commit | What |
+|---|---|---|
+| The order of `notes/stage_c.md` (P40) | `57578005` | A row the executor refuses (vocabulary D80) leaves the window's records as they were: its tokens and speed-mask count are kept only with the row. Reviewed, correct |
+| C11 part 3 | `dfae102f` | The frontend's Training view of the windows (`aeroviz-4d/src/data/trainingWindowSample.ts`, `trainingWindowAutopilot.ts`, `hooks/useTrainingWindowLayer.ts`, `components/training/TrainingWindowSession.tsx`, "Stage C · windows" in the panel); `TrainingFlownEnd` with a loss of separation for the views (stage A's reader still takes only the judge's outcomes); the fixtures written by the export and the service. Reviewed twice (fixed: stage A's live hook also flew window flights; window B keeps the head's observed track, its moved start drawn on its own; a new set or airport never shows the old window) |
+
+Tests: vitest 739 passed (103 files), tsc clean; stage C's Python files and the backend's window segment pass.
+
+**A smoke on real data** (scratch only; nothing under `outputs/` or the published airports written, checked by the files'
+times): the user's instruction was to copy the labelled data and read it only. A copy of A34's artefact and its
+executor spec is refused by name — the executor's reference names its artefact's and its own path (the check works as
+meant) — so they were read in place (every check only reads) and the copies deleted; the prior is a read-only copy of
+B5's one finished fold (`prior_base_20261006/A_full_s1337/KMSY`, a fold model, not the base).
+
+- `post_train --smoke`, one round, 5 train windows (real 2, A, D, B), K 2, on the CPU: 218 s, every check passed
+  (labeller 336 flights, executor within its bounds, closed loop 258 flights at 0 m); the selection readout's reward
+  1.0 at KMSY, KRDU, KSJC, KSMF and 0.0 at KSTL (one window each); no informative group at this size (no update).
+- `post_training_export --smoke`: 10 windows at KRDU (3 flights; real, A, D, B), rounds start and 0, 0.7 MB, 220 s.
+- A test stack (vite 5183, backend 8771, the worktree's airports link pointed at a scratch tree of links to the live
+  files with the set's own `training/`): the backend warmed the set in 1.2 s; the browser check (a one-shot subagent)
+  passed every step it could see — the set opens, the window block for each kind, the traffic tracks in their roles'
+  colours, window B's moved start, a live segment flown (14 ms, 10 ms), no console error. The loss line was not seen:
+  every window of this set landed.
+
+**Readings and follow-ups, as proposals.**
+
+- **P42.** The list names a window's recorded runway; the round's sentence may say another (seen at KRDU: recorded 23R,
+  said 23L). The list could say "recorded".
+- **P43.** Window A inserts a flight of another time: its shift is often days (−4,409,144 s ≈ 51 d in the smoke), shown
+  in seconds; days or hours would read better.
+- **P44.** The cursor starts at the commanded flight's row 0, before the window's row 0, so no other aircraft shows there.
