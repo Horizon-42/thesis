@@ -38,7 +38,7 @@ from ts_transformer.prior.selection import kept
 from ts_transformer.prior.source import airport_landings, artefact_identity
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 from ts_transformer.instructions.labeller.interval import interval_rows
-from ts_transformer.instructions.words import COLUMNS, RUNWAY, UNCHANGED, Words
+from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, UNCHANGED, Words
 from ts_transformer.prior.batch import row_tensors
 from ts_transformer.prior.inputs import own_flight_key, state_inputs
 from ts_transformer.prior.landings import LandingIndex, utc_s
@@ -83,6 +83,8 @@ def read_sentences(out: Path) -> tuple[dict[str, Any], list[Stored]]:
             or str(data["schema"]) != FREE_GENERATION_SCHEMA:
         raise ValueError(f"{out} is not a {FREE_GENERATION_SCHEMA} readout")
     rows = [json.loads(line) for line in (out / "sentences.jsonl").read_text(encoding="utf-8").splitlines()]
+    if len(rows) != len(data["index"]):
+        raise ValueError(f"{out}: sentences.jsonl holds {len(rows)} sentences, sentences.npz {len(data['index'])}")
     stored = []
     for k, row in enumerate(rows):
         said = slice(int(data["offsets"][k]), int(data["offsets"][k + 1]))
@@ -205,7 +207,9 @@ def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Map
                              states=np.concatenate((observed[b], np.array(flown[b][: ended[b] + 1]))),
                              outcome=outcome.outcome,
                              crossing=outcome.crossing, timed_out=bool(timed_out[b]),
-                             go_arounds=int(speaker.go_arounds[b]), go_around_probability=np.array(probability[b]),
+                             # the go-arounds of its own words: the speaker says a done flight's rows too (above)
+                             go_arounds=int(sum(row[RUNWAY] == RUNWAY_GO_AROUND for row in said[b])),
+                             go_around_probability=np.array(probability[b]),
                              go_around_permitted=np.array(permitted[b], dtype=bool),
                              on_final=np.array(on_final[b], dtype=bool),
                              blocked={c: np.array([row[c] for row in blocked[b]], dtype=bool) for c in blocked[b][0]}))

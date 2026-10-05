@@ -1,0 +1,70 @@
+{
+ "schema": "aeroviz-training-prior-index-v1",
+ "writtenUtc": "fixture",
+ "airport": "KXXX",
+ "sets": [
+  {
+   "id": "fixture_set",
+   "kind": "prior-free-generation",
+   "readingRule": "instruction-v6",
+   "title": "Stage B \u00b7 prior (landed) \u00b7 free generation at \u0394 4 s \u00b7 train",
+   "file": "fixture_set/sample.json",
+   "flights": 1,
+   "sentences": 2,
+   "formats": {
+    "spec": "ts-instruction-spec-v8",
+    "sentences": "ts-instruction-sentences-v6",
+    "closedLoop": "ts-instruction-closed-loop-v7",
+    "candidates": "ts-instruction-candidates-v3",
+    "executorSpec": "ts-executor-spec-v9",
+    "freeGeneration": "ts-prior-free-generation-v1",
+    "checkpoint": "ts-prior-checkpoint-v7"
+   },
+   "model": {
+    "prior": "fixture/prior",
+    "run": {
+     "airports": [
+      "KXXX"
+     ],
+     "held_out": null,
+     "sample": null
+    },
+    "checkpointSha256": "fixture",
+    "selection": "landed",
+    "rowIntervalS": 4.0,
+    "temperature": 1.0,
+    "mostGoArounds": 2,
+    "procedureMasks": "procedure-masks-v4"
+   },
+   "cohort": {
+    "split": "train",
+    "flights": 1,
+    "perAirport": 1,
+    "seed": 1337,
+    "samples": 2,
+    "readoutSeed": 1337,
+    "readoutFlights": 1,
+    "drawnFrom": "a seeded draw of the airport's flights in the free-generation readout (itself a seeded draw)"
+   },
+   "source": {
+    "readout": "fixture/readout",
+    "readoutGit": {
+     "head": "fixture",
+     "dirty": false
+    },
+    "readoutSmoke": true,
+    "instructions": "fixture/instruction_language",
+    "executor": "fixture/executor",
+    "specSha256": "b723906dc9442fbc80676062a4f42274688a3d2f5ad7c606c4503c12821ca96e",
+    "executorSpecSha256": "fixture",
+    "checks": {},
+    "git": {
+     "head": "fixture",
+     "dirty": false
+    },
+    "smoke": true,
+    "device": "cpu"
+   }
+  }
+ ]
+}

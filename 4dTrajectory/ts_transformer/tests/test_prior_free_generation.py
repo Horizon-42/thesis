@@ -23,7 +23,7 @@ CPU = torch.device("cpu")
 
 
 def generate(tmp_path, monkeypatch, *, interval_s=4.0, seed=0, most=MOST_GO_AROUNDS, spy=None):
-    directory, words, _, stored, _ = test_start._artefact(tmp_path, monkeypatch, interval_s)
+    directory, words, batch, stored, _ = test_start._artefact(tmp_path, monkeypatch, interval_s)
     loop, order = start(directory, "train", interval_s, {0: stored}, tmp_path / "executor", most_go_arounds=most,
                         device=CPU)
     flights = {0: signals_flights(directory, "train")[0]}
@@ -36,7 +36,8 @@ def generate(tmp_path, monkeypatch, *, interval_s=4.0, seed=0, most=MOST_GO_AROU
                                             (Landing(entry + 30.0, geometry.candidates[0].ident, "OTHER"),
                                              Landing(landing, geometry.candidates[0].ident, key)), 0)}
     if spy is not None:
-        spy.update(flights=flights, geometry=geometry, landings=landings, stored=stored, words=words)
+        spy.update(flights=flights, geometry=geometry, landings=landings, stored=stored, words=words, batch=batch,
+                   directory=directory)
     finals = {geometry.code: tuple(Final(geometry, k, 9_000.0, fas_course_geometry(c.length_m))
                                    for k, c in enumerate(geometry.candidates))}
     torch.manual_seed(0)
@@ -193,11 +194,29 @@ def test_flights_done_at_different_rows_end_apart_and_never_feed_a_state_that_is
                                    for k, c in enumerate(geometry.candidates))}
     first = stored.states[stored.start * 2]
     loop = FakeLoop([first, first], [3, 6], 2, MOST_GO_AROUNDS)
+    from ts_transformer.experiments import prior_free_generation as runner
+    from ts_transformer.instructions.words import RUNWAY, RUNWAY_GO_AROUND
+
+    class LateGoAround(runner.Speaker):
+        """Says "go-around" for flight 0 once it is done (row 3 on): words the executor never hears."""
+
+        def speak(self, row, at, caller=None):
+            made.append(self)
+            said = super().speak(row, at, caller)
+            if len(self.go_around_probability) > 3 and self.go_arounds[0] < MOST_GO_AROUNDS:
+                said[0, RUNWAY] = RUNWAY_GO_AROUND
+                self.go_arounds[0] += 1
+            return said
+
+    made = []
+    monkeypatch.setattr(runner, "Speaker", LateGoAround)
     torch.manual_seed(0)
     model = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64))
     a, b = speak_and_fly(model, loop, [0, 1], {0: stored, 1: stored}, flights, geometries, landings, finals, words,
                          interval_s=4.0, variant="full", generator=torch.Generator().manual_seed(1), device=CPU)
     assert (len(a.words), len(b.words)) == (3, 6)
+    # its own words' go-arounds, none of those said after it was done
+    assert a.go_arounds == int((a.words[:, RUNWAY] == RUNWAY_GO_AROUND).sum()) < made[0].go_arounds[0]
     assert loop.halted.all()
     assert np.isfinite(a.states).all() and np.isfinite(b.states).all()   # trimmed to the row each was done in
     assert len(a.states) == (stored.start + 3) * 2 + 1 and len(b.states) == (stored.start + 6) * 2 + 1
@@ -285,6 +304,11 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match=runner.FREE_GENERATION_SCHEMA):                 # another format, by name
         runner.read_sentences(out)
     (out / "config.json").write_text(config_text)
+    lines = (out / "sentences.jsonl").read_text()
+    (out / "sentences.jsonl").write_text(lines.splitlines(keepends=True)[0])
+    with pytest.raises(ValueError, match="holds 1 sentences"):                          # a sentence missing
+        runner.read_sentences(out)
+    (out / "sentences.jsonl").write_text(lines)
     (prior / "config.json").write_text(json.dumps({"schema": "ts-prior-checkpoint-v6", "identity": identity}))
     with pytest.raises(SystemExit, match="ts-prior-checkpoint-v6"):                # a prior of another format, by name
         runner.main([*argv[:-3], "--out", str(tmp_path / "older"), "--smoke"])
