@@ -149,6 +149,13 @@ order of symbol creation. Thus with `extra_rows=None`, the change must not creat
 present symbols. Check this with a behaviour test: solve a fixed set of scenarios before and after the
 change; the final times and the states must be bit-identical.
 
+**Done** (branch `dev-optimizer-multi-aircraft`). The built form is simpler than the proposal:
+`extra_rows(nodes, times)` only (no `phase_of_node`; the caller selects nodes by
+`last_dense_state_times_s`), default `no_extra_rows`, one `_append_rows` helper for all rows, and
+`last_decision_vector` for a warm start. No objective hook. A one-sided caller row takes `ca.inf`
+(the optimizer's `_INF` is a finite 1e9 that IPOPT enforces). Gate: 20 KRDU flights, unconstrained
+and constrained, base code against changed code: 40 of 40 solves bit-identical.
+
 ### F8 · Two different interactive IPOPT caps (verified, P2)
 
 - `aeroviz_backend/optimization_backend.py:50`: `DEFAULT_MAX_ITERATIONS = 1000`. The HTTP request default

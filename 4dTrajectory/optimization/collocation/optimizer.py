@@ -103,6 +103,20 @@ _FAC_ALIGN_TIGHT_DEG = 10.0
 # ``approach_constraints`` (the one source); only NLP-side knowledge (decision symbols, the
 # terminal ψ branch) lives here.
 
+def _append_rows(g, lbg, ubg, rows):
+    """Append ``(expr, lb, ub)`` rows to the NLP's constraint list and its bounds."""
+    for expr, lb, ub in rows:
+        g.append(expr)
+        k = int(expr.shape[0])
+        lbg += [lb] * k
+        ubg += [ub] * k
+
+
+def no_extra_rows(nodes, times):
+    """The default ``extra_rows``: the caller adds nothing."""
+    return []
+
+
 def _terminal_pin_rows(last_node, tgt_z):
     """Full-state equality pinning the trajectory's last node onto the target."""
     return [(last_node - ca.DM(tgt_z), 0.0, 0.0)]
@@ -170,18 +184,17 @@ def _fac_alignment_rows(nodes, join, tight_rad, loose_rad):
     return [(dev - limit, -_INF, 0.0), (-dev - limit, -_INF, 0.0)]
 
 
-def dense_node_times(
-    phase_durations_s: list[float], phase_nseg: list[int], phase_msub: list[int]
-) -> list[float]:
+def dense_node_times(phase_durations_s: list, phase_nseg: list[int], phase_msub: list[int]) -> list:
     """The time of every dense collocation node, phase by phase (t=0 excluded).
 
     Within phase ``p`` the ``n_seg·m_sub`` nodes are evenly spaced over that phase's
     OWN duration — node step ``(T_p / n_seg) / m_sub`` — so across phases the spacing
     is non-uniform (durations are free decision variables and ``m_sub`` is auto-selected
     per phase). Pure list arithmetic, exported so the batch's plan serializer stamps the
-    solver's real timeline instead of assuming an even spread.
+    solver's real timeline instead of assuming an even spread. The durations may be numbers
+    or casadi symbols: the same arithmetic gives the nodes' symbolic times (``extra_rows``).
     """
-    times: list[float] = []
+    times = []
     start = 0.0
     for duration, n_seg, m_sub in zip(phase_durations_s, phase_nseg, phase_msub):
         count = n_seg * m_sub
@@ -308,6 +321,8 @@ class CollocationOptimizer:
         self.aero_params = aero_params_for_aircraft(aircraft)
         # Outputs of the most recent solve.
         self.segment_durations_s: list[float] | None = None
+        # The raw solution of the most recent solve (a warm start: pass it as ``initial_guess``).
+        self.last_decision_vector: np.ndarray | None = None
         self.last_dense_states_geo: np.ndarray | None = None
         # Per-node times of the dense states above (excludes t=0). NOT uniform: each
         # phase has its own duration AND its own auto-selected substep count, so an
@@ -318,10 +333,14 @@ class CollocationOptimizer:
 
     # ------------------------------------------------------------------ public
     def optimize_free_time(self, initial_state, target_state, max_duration, initial_guess=None,
-                           cold_start: bool | None = None):
+                           cold_start: bool | None = None, extra_rows=no_extra_rows):
         """Minimum-time solve; returns ``(final_time, controls (Nc,3), states (Nc,6))`` (geodetic
         degrees at the control-segment endpoints). ``self.segment_durations_s`` holds the matching
         per-segment durations.
+
+        ``extra_rows(nodes, times)`` adds the caller's constraint rows (see ``_build``);
+        ``self.last_decision_vector`` is the solution to pass back as ``initial_guess`` to a solve
+        of the same decision layout (the same mode and ``max_duration``).
 
         Cold start: an ill-conditioned (non-normalized) scheme seeds the free-time NLP with a
         fixed-time solution at ``max_duration`` (a dynamically-feasible trajectory to shrink along),
@@ -334,7 +353,8 @@ class CollocationOptimizer:
             cold_start = self.scheme not in _schemes._NORMALIZED_SCHEMES
         cold_s = 0.0
         seed_error = None
-        nlp, lbw, ubw, lbg, ubg, x0, layout = self._build(initial_state, target_state, max_duration)
+        nlp, lbw, ubw, lbg, ubg, x0, layout = self._build(
+            initial_state, target_state, max_duration, extra_rows=extra_rows)
         if initial_guess is not None:
             x0 = list(initial_guess)
         elif cold_start:
@@ -359,13 +379,14 @@ class CollocationOptimizer:
         }
         return self._extract(np.array(sol["x"]).reshape(-1), layout)
 
-    def optimize_trajectory(self, initial_state, target_state, duration=None, initial_guess=None):
-        """Fixed-time solve at ``duration`` (``Σ Tₚ = duration``); same return shape as
-        :meth:`optimize_free_time`. Defaults to the construction ``max_duration``."""
+    def optimize_trajectory(self, initial_state, target_state, duration=None, initial_guess=None,
+                            extra_rows=no_extra_rows):
+        """Fixed-time solve at ``duration`` (``Σ Tₚ = duration``); same return shape and
+        ``extra_rows`` as :meth:`optimize_free_time`. Defaults to the construction ``max_duration``."""
         fixed = self.max_duration if duration is None else duration
         started = time.perf_counter()
         nlp, lbw, ubw, lbg, ubg, x0, layout = self._build(
-            initial_state, target_state, fixed, fixed_duration=fixed)
+            initial_state, target_state, fixed, fixed_duration=fixed, extra_rows=extra_rows)
         if initial_guess is not None:
             x0 = list(initial_guess)
         solver = _components._make_nlp_solver(nlp, self.solver_backend, self.verbose, self.max_iterations)
@@ -387,7 +408,13 @@ class CollocationOptimizer:
             raise ValueError(f"fixed-time seed failed: {solver.stats().get('return_status', 'unknown')}")
         return np.array(sol["x"]).reshape(-1)
 
-    def _build(self, initial_state, target_state, max_duration, fixed_duration=None):
+    def _build(self, initial_state, target_state, max_duration, fixed_duration=None, extra_rows=no_extra_rows):
+        """The NLP. ``extra_rows(nodes, times)`` -> ``[(expr, lb, ub)]`` adds the caller's rows (the
+        procedure families' contract) after every other row: ``nodes`` are all dense state nodes in
+        solve order, in the scheme's decision coordinates (metric ``(n, e, h, V, psi, gamma)`` from
+        the target for the normalized schemes); ``times`` their symbolic times from the start
+        (``dense_node_times`` of the duration symbols; the last one is the total time). A one-sided
+        row takes ``ca.inf`` as its open bound (``_INF`` is a finite 1e9 that IPOPT enforces)."""
         make_dynamics, make_defect = _schemes._DEFECT_SCHEMES[self.scheme]
         dynamics = make_dynamics()
         ip = _components._geodetic_state_to_decision(initial_state)
@@ -538,11 +565,7 @@ class CollocationOptimizer:
                     nodes, join,
                     math.radians(_FAC_ALIGN_TIGHT_DEG), math.radians(self.max_intercept_deg),
                 )
-            for expr, lb, ub in rows:
-                g.append(expr)
-                k = int(expr.shape[0])
-                lbg += [lb] * k
-                ubg += [ub] * k
+            _append_rows(g, lbg, ubg, rows)
 
             w += controls
             lbw += control_lb * n_seg
@@ -587,6 +610,9 @@ class CollocationOptimizer:
         g.append(bank_expr)
         lbg.append(bank_lb)
         ubg.append(bank_ub)
+
+        all_nodes = [node for phase in phase_nodes for node in phase]
+        _append_rows(g, lbg, ubg, extra_rows(all_nodes, dense_node_times(durations, phase_nseg, phase_msub)))
 
         # Objective. FREE time: minimise Σ Tp, with control effort a light 1e-3 tie-breaker (the
         # time term dominates). FIXED time: no time term, so control effort is the PRIMARY objective
@@ -724,6 +750,7 @@ class CollocationOptimizer:
             seg_durations += [float(durations[p]) / n_seg] * n_seg
             base += cpp + spp
         self.segment_durations_s = seg_durations
+        self.last_decision_vector = x
         self.last_dense_states_geo = np.array(dense)
         self.last_dense_state_times_s = dense_node_times(
             [float(d) for d in durations], phase_nseg, phase_msub
