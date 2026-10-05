@@ -21,7 +21,8 @@ PACKAGE = "ts_transformer.experiments"
 #: Modules here that are not runners: shared code the runners import. The multi-aircraft loop's shared modules and a
 #: readout's code version moved to `archive/two_tier_v3_2026_10/` (two-tier v4, stage A0). The Training view's shared
 #: modules (A23): the attitude and the set's flights, which the export and the backend's live executor both import.
-NOT_RUNNERS = {"__main__", "prior_speaking_loop", "support", "training_attitude", "training_flights"}
+#: The step of a speaker's closed loop (prior §7 item 7, B10) and stage C's window loop (post-training C4).
+NOT_RUNNERS = {"__main__", "post_window_loop", "prior_speaking_loop", "support", "training_attitude", "training_flights"}
 
 
 def runner_names() -> list[str]:
