@@ -60,9 +60,9 @@ class AeroVizBackendApp:
     def autopilot_segment_backend(self) -> Any:
         with self._autopilot_segment_lock:
             if self._autopilot_segment_backend is None:
-                from aeroviz_backend.autopilot_segment.backend import AutopilotSegmentBackend
+                from aeroviz_backend.autopilot_segment.backend import stage_a_service
 
-                self._autopilot_segment_backend = AutopilotSegmentBackend()
+                self._autopilot_segment_backend = stage_a_service()
             return self._autopilot_segment_backend
 
     def handle_get(self, path: str) -> tuple[int, Any]:
@@ -401,9 +401,9 @@ def main() -> None:
     if args.training_airports_root is None:
         app = AeroVizBackendApp()
     else:
-        from aeroviz_backend.autopilot_segment.backend import AutopilotSegmentBackend
+        from aeroviz_backend.autopilot_segment.backend import stage_a_service
 
-        app = AeroVizBackendApp(autopilot_segment_backend=AutopilotSegmentBackend(airports_root=args.training_airports_root))
+        app = AeroVizBackendApp(autopilot_segment_backend=stage_a_service(args.training_airports_root))
     http_server = ThreadingHTTPServer(
         (args.host, args.port),
         make_request_handler(app),

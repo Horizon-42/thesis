@@ -14,7 +14,7 @@ import { trainingReadingOf, type TrainingColumn } from "../../data/trainingSampl
 import type { TrainingLayers } from "../../context/AppContext";
 import { TRAINING_WORD_COLOR } from "../../utils/trainingWordColors";
 import { requestOf, stageAAnswers, stageASampleFile, stageASelection } from "../../data/__tests__/stageA";
-import { parseTrainingSample, trainingSelectionOf } from "../../data/trainingSample";
+import { parseTrainingSample, TRAINING_SPLITS, trainingSelectionOf } from "../../data/trainingSample";
 
 const ALL: TrainingLayers = { headingBands: true, vertical: true, candidates: true };
 const selection = stageASelection();
@@ -150,7 +150,7 @@ describe("TrainingReadbackWindow", () => {
     file.flights[0].closedLoop["2"].replay.crossing = null;
     file.flights[0].closedLoop["2"].replay.envelopes = null;
     file.flights[0].closedLoop["2"].replay.outcome = "ground_contact";
-    const parsed = parseTrainingSample(file);
+    const parsed = parseTrainingSample(file, TRAINING_SPLITS);
     if (!parsed.ok) throw new Error(parsed.problem);
     const bare = trainingSelectionOf(parsed.value, parsed.value.flights[0]);
     const reading = trainingReadingOf(bare.flight, bare.vocabulary.stepS, 2);

@@ -1542,6 +1542,14 @@
         "val_augmented_400x4": "augmented 模型（post-training 第 2 阶段第 7 轮）在自己的 procedure masks 下、真实起点：val 每机场 400 架 × 4 句，加同一行起的真实词。",
         "val_augmented_aug_400x4": "同一个 augmented 模型从增广起点说（旋转、抬高、加速，种子 1337）：没有真实的后续航迹，所以只看 evaluation 通过率，不给 ADE / FDE；前端画的白色航迹是原航班在真实位置飞的，不是模型起飞的那个移动后的起点。"
       }
+    },
+    "closed_loop_v12_20261005": {
+      "title": "两层模型 · 阶段 A 的 Training 集（v12 / v17：起点只读第一个预测步之前的行）",
+      "intent": "阶段 A 第二次评审后的正式产物（v12_20261005 / v17_20261005，A34）在前端长什么样：每个机场 train 和 select 各 20 架（直入、引导各 10 架，种子 1337），每架的观测航迹、开环句子与包络，以及 Δ = 2、4、8 s 的闭环句子在本地重飞（必须逐行回到存下的状态和结局）。和 closed_loop_v11_20261004 比，变的是起点（只用第一个预测步及之前的行，displacement-2s，D77）、执行器在裁判结束的地方结束（D79）、横向误差量到航迹的线段（D83）、爬升名义角 1.25°。不读 val（D85）。",
+      "design": "vocabulary §12.1 A35（A23 的导出，R54 experiments/training_export.py）；产物 4dTrajectory/outputs/POOLED/instruction_language/v12_20261005 + executor/v17_20261005",
+      "runs": {
+        "closed_loop_v12_20261005": "五个机场的 Training 集，index_v4.json 里与 closed_loop_v11_20261004 并列；后端的实时执行器读同一份产物。"
+      }
     }
   }
 }

@@ -9,6 +9,24 @@ change you are making go in `docs/code-health-followups.md` instead.
 
 ---
 
+- **观测航迹里有不可能的位置点（ADS-B 跳点 / 跨缺口插值），未修（2026-10-05，用户：先记为未决项）。**
+  两个相邻 2 s 行之间航迹转向超过 120°（每秒 60° 以上，真实飞机做不到）的航班：v12_20261005 的 train 44,703 架里
+  53 架，select 6,913 架里 21 架（val 未数）。例：KSJC CPJ007（2 s 内向后跳 1,719 m，约 860 m/s）、KSTL DAL1400
+  （以约 7 m/s 倒退数行、步长相同，像跨缺口的线性插值）、KSMF SWA1414（2 s 内由南向北反向）。
+  - 已有的一道关：标注器已按 "impossible ground speed" 拒绝一部分（v12 的 train + select 共 166 架）；上面的 74 架是
+    在全部信号里数的，没有分开已被拒的和有句子的。
+  - 影响：这些点在信号、标注和闭环读数的观测路径里。A37 的拐点规则（D83）在这 3 架的近乎掉头处曾把 e_y 判成相反
+    符号；已改为转角超过 170° 按掉头处理（`autopilot/closed_loop.py` `REVERSAL_TURN_DEG`），A34 的产物不用重建。
+  - **A34 的 26 km 误差和动力学失败也来自这类点（2026-10-05 查）**：KMSY N12EC（train 8 s）第一个预测步前 2 s 内位置跳 959 m，
+    起点规则 displacement-2s 只看这一步，起点地速 478 m/s，飞离 26 km 超时（A30 的居中 15 s 拟合平滑掉了，落地）；
+    KSMF SWA3140、KSTL DAL1400（select）路径里有近乎掉头的点，匹配点卡在那里不再前进，修正拉不回来，漂到 24–26 km
+    超时（A30 也超时，只漂 2–3 km）。A34 每格 4–14 条动力学失败（A30 0–1）共 53 条，起点地速都只有 7–58 m/s（进近
+    正常约 70–130 m/s），第一个预测步前多有 150–790 m 的 2 s 大步（19 条 > 400 m）：像位置停更几秒后补跳，2 s 的窗正落在
+    停更上（Claude 的读法，未逐条核）。输出：`.claude/worktrees/two-tier-v4-a37/smoke_v4/data/a37/big_lateral.txt`。
+  - 未定（用户）：修在哪里——harvest 的读取时修复（像高度离群值那样，影响所有使用者）、只在指令信号构建处，或标注器
+    按名拒绝这类航班；哪种都要重建 A34 的产物。“不可能”的界线（转角、隐含速度）也要定。
+  - 数据：`.claude/worktrees/two-tier-v4-a37/smoke_v4/data/a37/vertex.json`（3 架的拐点）；数法见阶段 A 实现日志 A37 行。
+
 - **KAUS 测试机场：数据齐了，代码还没接（2026-09-27）。** 数据在 `trajectory_data_process/outputs/harvest-heldout/KAUS`
   （TD27），不在 live 根，默认的机场列表看不到它——这是故意的。要用它做测试时：
   - `prior/mva.py`：`FACILITY` 加 `"KAUS": "AUS"`，`CHARTS_DATE` 改为 `2026-09-27`（五个机场的图逐字节不变）；

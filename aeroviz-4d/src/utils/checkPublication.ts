@@ -32,6 +32,7 @@ import {
   parseTrainingIndex,
   parseTrainingSample,
   TRAINING_INDEX_FILE,
+  TRAINING_SPLITS,
   type TrainingIndex,
   type TrainingSample,
   type TrainingSetEntry,
@@ -247,7 +248,7 @@ export function checkTrainingIndex(manifest: unknown): TrainingChecked<TrainingI
 
 /** One set's file, through the panel's own reader. */
 export function checkTrainingSet(setId: string, raw: unknown): TrainingChecked<TrainingSample> {
-  const parsed = parseTrainingSample(raw);
+  const parsed = parseTrainingSample(raw, TRAINING_SPLITS);            // the index_v4 sets are stage A's (D109)
   return parsed.ok
     ? { findings: [], value: parsed.value }
     : { findings: [{ level: "error", category: setId, message: `set: ${parsed.problem}` }], value: null };
