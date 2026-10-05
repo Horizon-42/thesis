@@ -4,7 +4,7 @@ a speaker's (the prior's free generation, the post-training) one way in.
 
 `start` takes closed-loop sentences of the artefact as the artefact's reader gives them (`instructions.artefact.
 closed_loop_sentences`: a split and a row interval Δ), the directory of the executor spec and the most go-arounds a flight
-may say. It opens the spec itself as the replay and the backend do (`replay.open_executor`, D71: the spec measured against
+may say. It opens the spec itself as the replay does (`replay.open_executor`, D71: the spec measured against
 the artefact's vocabulary, the labeller and the executor conformance), so no caller handles executor parameters; the
 words are the artefact's vocabulary's. For each sentence's flight: the flight rebuilt from the harvest and compared row by row with the stored signals
 (`flights.rebuild_series`, vocabulary §7.2 #4); its aircraft — its own dynamics or a stand-in's — and its approach speed,

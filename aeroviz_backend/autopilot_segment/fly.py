@@ -12,7 +12,12 @@ is said. The column's last word is flown on to the outcome, and judged there —
 its stop (a heading word said in the sentence's last rows, its lead past the flight's end). The flight is flown from the sentence's
 first predicted step, so the aircraft is where the sentence's earlier words took it; the answer returns the part from the
 word on. Nothing is precomputed: the flight is flown again, and then compared with the artefact's stored flown states on
-the 2 s rows (`apart_from_stored`), which the export's flown states are too.
+the 2 s rows (`apart_from_stored`), which the export's flown states are too, and refused by name when it is farther from
+them than the executor conformance's bound (`refuse_past_bound`), or, flown to its outcome, ends otherwise than the
+artefact's stored outcome says. The backend runs no check of the code at its start (vocabulary D73, A43): this is what it
+checks of what it shows — the flown positions and heights and the end. What these do not see (a change of the judge's
+decision-altitude check or of a limit or mode that moves no state) is seen by the checks that run where the code changes
+and by `check_live`.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ts_transformer.autopilot import replay
+from ts_transformer.autopilot.conformance import STATE_BOUND_M
 from ts_transformer.autopilot.executor import Flown
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.judge import Verdict, flown_track
@@ -32,7 +38,7 @@ from ts_transformer.experiments import training_flights
 from ts_transformer.instructions.artefact import ClosedLoopSentence
 from ts_transformer.instructions.words import HEADING, UNCHANGED, Words
 
-from aeroviz_backend.autopilot_segment.errors import RequestRefused, Superseded
+from aeroviz_backend.autopilot_segment.errors import ExecutorDiffers, RequestRefused, Superseded
 
 
 @dataclass(frozen=True)
@@ -97,10 +103,23 @@ def last_state(result: FlownSegment) -> int:
     return training_flights.last_state_cycle(result.verdict.outcome, result.verdict.end_row)
 
 
+def refuse_past_bound(horizontal_m: float, vertical_m: float, flight: str, against: str) -> None:
+    """A live flight's largest horizontal and vertical distance from the flown states it is compared with (``against``:
+    what they are) is within the executor conformance's bound, `STATE_BOUND_M`, or refused by name (`ExecutorDiffers`;
+    D73, A43): the one definition, for the service (`apart_from_stored`) and for stage B's hook (`prior.py`)."""
+    if horizontal_m > STATE_BOUND_M or vertical_m > STATE_BOUND_M:
+        raise ExecutorDiffers(
+            f"{flight}: the live executor flies {horizontal_m:.3g} m horizontally and {vertical_m:.3g} m vertically from "
+            f"{against}, past {STATE_BOUND_M:g} m: the executor code does not fly this set as it was exported; export "
+            f"the set again, or restore the code")
+
+
 def apart_from_stored(result: FlownSegment, sentence: ClosedLoopSentence, batch: replay.Batch, j: int,
                       step_s: float) -> dict[str, float | int]:
     """The live flight against the artefact's stored flown states on the 2 s rows both have (from the first predicted
-    step to the last state flown): how many and the largest horizontal and vertical distance."""
+    step to the last state flown): how many and the largest horizontal and vertical distance. Refused by name
+    (`ExecutorDiffers`) when either is past `STATE_BOUND_M` (`refuse_past_bound`) or when a flight flown to its outcome
+    ends otherwise than the stored sentence's outcome (D74): the checks of what the service shows (D73, A43)."""
     step_cycles = int(round(step_s / result.flown.cycle_s))
     stored = sentence.rows.flown_states
     rows = min(len(stored), last_state(result) // step_cycles + 1)
@@ -110,4 +129,10 @@ def apart_from_stored(result: FlownSegment, sentence: ClosedLoopSentence, batch:
     vertical = float(np.abs(track["height"][cycles] - stored[:rows, 2]).max())
     if not (np.isfinite(horizontal) and np.isfinite(vertical)):
         raise ValueError(f"the live flight is {horizontal} m / {vertical} m from the stored states: a non-finite state")
+    flight = batch.signals[j].dataset_id
+    refuse_past_bound(horizontal, vertical, flight, "the artefact's stored states")
+    if result.verdict is not None and result.verdict.outcome != sentence.withheld.outcome:
+        raise ExecutorDiffers(f"{flight}: the live flight ends {result.verdict.outcome}, the artefact's stored outcome is "
+                              f"{sentence.withheld.outcome}: the executor or the judge code does not fly this set as it "
+                              f"was exported; export the set again, or restore the code")
     return {"rows": int(rows), "horizontalM": horizontal, "verticalM": vertical}

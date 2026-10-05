@@ -48,12 +48,14 @@ class SetFlights:
     readings: list[Reading]
 
 
-def open_flights(instructions: Path, split: str, dataset_ids: Sequence[str], words: Words) -> SetFlights:
+def open_flights(instructions: Path, split: str, dataset_ids: Sequence[str], words: Words, *,
+                 signals: list[FlightSignals] | None = None) -> SetFlights:
     """The flights ``dataset_ids`` of ``split``, in that order: drawn (`replay.draw_flights`, the flight's own airframe
     or its stand-in), each read again by the labeller and refused by name unless it gives its stored sentence — its words
-    and its runway."""
+    and its runway. ``signals``: the split's signals when the caller has them loaded already (a warm-up opens several
+    sets of one artefact); read here when not."""
     spec = words.spec
-    signals = load_signals(instructions, split)
+    signals = load_signals(instructions, split) if signals is None else signals
     by_id = {flight.dataset_id: i for i, flight in enumerate(signals)}
     missing = [d for d in dataset_ids if d not in by_id]
     if missing:
@@ -61,7 +63,7 @@ def open_flights(instructions: Path, split: str, dataset_ids: Sequence[str], wor
     sentences = load_sentences(instructions, split, spec)
     stored = {int(index): k for k, index in enumerate(sentences["signal_index"])}
     drawn = replay.draw_flights(instructions, split, [by_id[d] for d in dataset_ids], per_airport=0, seed=0,
-                                groups=(replay.OWN, replay.STAND_IN))
+                                groups=(replay.OWN, replay.STAND_IN), signals=signals)
     # the draw permutes; put the flights back in the order asked, and refuse one it left out (no airframe)
     at = {flight.dataset_id: k for k, flight in enumerate(drawn.signals)}
     if sorted(at) != sorted(dataset_ids):
