@@ -113,7 +113,7 @@ The commits, dates, branches and test counts of every milestone are in
 | A32 (D77–D87) | Done on `dev-two-tier-v4-a32`, reviewed |
 | A33 (D55, D77, D78, D54) | Done; report `readouts/2026-10-05_stage_a_a33_report.zh.md`; the user's readings are D88 |
 | A34 (D77–D87) | Built from `dev-two-tier-v4-a32` into `instruction_language/v12_20261005`, `executor/v17_20261005` (read-only, `SHA256SUMS`); the start check passed; the report against A30 in work |
-| A37 (D80, D83, D85, D90) | In work on `dev-two-tier-v4-a37` (from `58fd8a2b`): code and tests written, in review |
+| A37 (D80, D83, D85, D90) | Code `e7e01461` on `dev-two-tier-v4-a37`, reviewed; the check that nothing changes on A34's artefact and the full suite next |
 | A35 | After A37's review: the export from A34's artefact |
 | A38 (D97) | Planned: after A37, on its branch line |
 
