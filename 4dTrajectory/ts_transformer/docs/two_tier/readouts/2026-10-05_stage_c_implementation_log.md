@@ -414,3 +414,35 @@ The faulty-track counts of §14 are unchanged.
 - **P31. For C10**: the groups of a round are large (the reviewer's estimate: several MB a group, tens of GB for a round
   held at once) — the loss is fed branch point by branch point; window B's D113 check at the draw uses `moved_commanded`;
   `start_loop` maps each window's move.
+
+## 16 The code of C10 and C8 before B5's base (2026-10-05)
+
+The user's order of 2026-10-05: write the code of C8, C10 and C11 now, tested on synthetic artefacts; the formal runs
+wait for B5's base (and C10 for the user's criteria). `dev-two-tier` merged first.
+
+| Step | Commit | What |
+|---|---|---|
+| C10, C8 | `69531aa3` | `experiments/post_train.py`: the rounds as one campaign (the draw by kind with D113, batches that command each flight once, the two passes with informative groups written per batch, one pass of the loss streamed over them, the selection readout on fixed select windows with fixed numbers, `round.json`, the checkpoint `ts-post-checkpoint-v1`, then the groups deleted); clean tree unless a smoke, an intent before a formal launch, the checks at the start; resumable, every random number keyed by the seed and the round. `experiments/post_profile.py`: one batch under cProfile by part, the round timed by part, the GPU's peak memory by part, the groups' bytes. `post/loss.py`: `one_pass` takes its pairs as a stream |
+
+Reviewed (no bug; fixed before the commit: the groups deleted after the round's checkpoint, an empty data term refused
+by name, the GPU peak reset for each part). A bug that the resume test found before the review: the traffic modules'
+starting weights came from torch's unseeded generator, so a resumed campaign was not the campaign run through; the start
+model and each pass's dropout are now seeded (the test: bit for bit on the CPU).
+
+Tests: the C10 and C8 files with the loss, branch and architecture tests, 52 + 6 passed. The tests of a whole round fly
+a short window (the flight inserted 8 s ahead of itself, lost at its first row); the real window's whole flight is
+`test_post_branches`. The full suite waits: B5's campaign is running (a free generation) beside another session's tests.
+
+**Proposals.**
+
+- **P32. The windows of a round share their flights**: A, D and B are built from the same real windows that the real
+  windows of the round are drawn from, so a round of 4N windows covers about N flights. D100 does not say whether each
+  kind is a draw of its own. **The user, 2026-10-05: they share flights, as built.**
+- **P33. A shortfall does not stop a round** (a kind with fewer windows than its count: the counts then differ from
+  D100's equal counts); the record shows it.
+- **P34. `rounds` is a setting of the campaign**: a campaign cannot be extended by more rounds after it ends.
+- **P35. The groups at the formal size** (the reviewer's estimate: 5–9 MB a group, several GB a batch's file): read the
+  profile's `groups_bytes` first; then, if needed, drop the uninformative groups inside `branch_round` and store each
+  first sentence once.
+- **P36. The data term reads every train sentence of the base's selection into memory** (as stage B's training): the
+  profile measures it.

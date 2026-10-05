@@ -1,0 +1,17 @@
+<section id="s-grammar">
+<h2 id="grammar" data-toc="3 The grammar">3 The grammar</h2>
+<p>Not every row of five words is a good row. The <t zh="语法">grammar</t> has six rules. They make sure that a row is consistent with the words in force and with the height of the aircraft.</p>
+<ol>
+<li>At the first predicted step, each column says a value. The runway column says a candidate.</li>
+<li>The runway column follows the table of section 2.5.</li>
+<li>When a row says an altitude word or an angle word, the level in force and the angle in force must agree at the height of the aircraft. A level that is more than its tolerance <em>below</em> the aircraft needs a descent class. A level that is more than its tolerance <em>above</em> needs the climb class.</li>
+<li>“No level-off” needs a descent class in force, or in the same row.</li>
+<li>“No level-off” is not permitted while G is true (<span class="pill d">D14</span>). A runway word must end G first.</li>
+<li>A row that says “go-around” while “no level-off” is in force must also say a level above the aircraft (<span class="pill d">D27</span>). Rule 3 then makes the same row say “climb”.</li>
+</ol>
+<p>With rules 5 and 6, “no level-off” is never in force while G is true. Every climb of a go-around has a target from an altitude word.</p>
+<p><b>One function, two uses.</b> The labeller <em>checks</em> a row with the grammar. The speaker uses the same function as a <t zh="掩码">mask</t> when it decodes (<span class="pill d">D62</span>). A speaker says a row column by column. A word of a column is permitted when <em>some words of the later columns</em> make the row pass. A check that sets the later columns to “unchanged” would refuse good words. For example, a level below the aircraft is grammatical when the angle column says a descent class. The function exists once, in <code>instructions/grammar.py</code>. A second copy in the prior would break the one definition.</p>
+
+<div data-demo="grammar" data-title="Say a row, then see which words a column permits"></div>
+<div class="note"><p><b>Check it yourself.</b> This demo is a JavaScript port of the Python grammar. The page was built with a test: 4,000 random rows and 120 random masks gave the same answers in Python and in JavaScript. The same test covers the heading reading and the lateral law of the next sections.</p></div>
+</section>

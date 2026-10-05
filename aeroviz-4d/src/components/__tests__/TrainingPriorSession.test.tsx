@@ -1,6 +1,6 @@
 /**
  * The Training panel over a prior set of stage B: the switch to the prior's sets appears only where the airport has
- * `index_prior_v1.json`; a set is read, its flights and — side by side — the closed-loop sentence and each sentence the prior
+ * `index_prior_v2.json`; a set is read, its flights and — side by side — the closed-loop sentence and each sentence the prior
  * said are listed with their outcomes; a click publishes that sentence as the flight on screen; the row inspector shows the
  * probability of go-around and the words the procedure blocked at the cursor's row; a set of another schema is refused by name.
  */
@@ -31,7 +31,7 @@ import TrainingPanel from "../TrainingPanel";
 import { TRAINING_PRIOR_SAMPLE_SCHEMA } from "../../data/trainingPriorSample";
 import { stageBIndex, stageBSample, stageBSampleFile } from "../../data/__tests__/stageB";
 
-const INDEX_PATH = "data/airports/KXXX/training/index_prior_v1.json";
+const INDEX_PATH = "data/airports/KXXX/training/index_prior_v2.json";
 const SAMPLE_PATH = "data/airports/KXXX/training/fixture_set/sample.json";
 
 function jsonResponse(body: unknown) {

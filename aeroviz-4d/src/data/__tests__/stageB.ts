@@ -1,11 +1,12 @@
 /**
  * The stage-B fixtures the Python code WRITES (`4dTrajectory/ts_transformer/tests/test_prior_training_export.py` writes
- * `fixtures/stage_b/index_prior_v1.json` and `fixture_set/sample.json`; `aeroviz_backend/tests/test_prior_segment.py` writes
+ * `fixtures/stage_b/index_prior_v2.json`, `fixture_set/sample.json` (train) and `fixture_val/sample.json` (the claimed validation set); `aeroviz_backend/tests/test_prior_segment.py` writes
  * `autopilot_prior_segment.json`; they are never edited by hand): the airport's index of prior sets, a set's sample and two
  * live answers of the backend on a sentence the prior said. A test that needs a broken file changes a clone of one of them.
  */
-import indexFile from "./fixtures/stage_b/index_prior_v1.json";
+import indexFile from "./fixtures/stage_b/index_prior_v2.json";
 import sampleFile from "./fixtures/stage_b/fixture_set/sample.json";
+import valSampleFile from "./fixtures/stage_b/fixture_val/sample.json";
 import answersFile from "./fixtures/stage_b/autopilot_prior_segment.json";
 import { parseTrainingPriorSample, trainingPriorFlightView, trainingPriorSelectionOf, type TrainingPriorSample, type TrainingPriorWhich } from "../trainingPriorSample";
 import type { TrainingAutopilotRequest } from "../trainingAutopilot";
@@ -13,9 +14,11 @@ import type { TrainingSelection } from "../trainingSample";
 
 export const stageBIndex = (): Record<string, any> => structuredClone(indexFile) as Record<string, any>;
 export const stageBSampleFile = (): Record<string, any> => structuredClone(sampleFile) as Record<string, any>;
+export const stageBValSampleFile = (): Record<string, any> => structuredClone(valSampleFile) as Record<string, any>;
 export const stageBAnswers = (): Array<Record<string, any>> => structuredClone(answersFile) as Array<Record<string, any>>;
 
 export const PRIOR_SET_ID = "fixture_set";
+export const PRIOR_VAL_SET_ID = "fixture_val";
 
 export function stageBSample(): TrainingPriorSample {
   const parsed = parseTrainingPriorSample(stageBSampleFile());

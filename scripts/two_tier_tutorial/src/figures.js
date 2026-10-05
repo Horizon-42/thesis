@@ -1,0 +1,31 @@
+/* The paper figures: file name, kind and the suggested caption. The captions are on this page only, never in the image files. */
+(function () {
+  const TT = window.TT = window.TT || { demos: {} };
+  TT.figs = {
+    fig01_architecture: { n: 1, kind: 'diagram', alt: 'Block diagram of the two-tier model', caption: 'The two-tier model. The labeller reads sentences from observed tracks. The prior says one row of words for each aircraft. The executor flies only these words, and the judge classifies the flight. The post-training closes the loop with a reward. The letters mark the stage that builds each part.' },
+    fig02_vocabulary_grids: { n: 2, kind: 'real data and sketch', alt: 'The grids of the five columns', caption: 'The grids of the vocabulary. (a) Heading words in 5° steps, relative to the course of the runway in force. (b) Tolerance ε of the 40 altitude levels, on three segments. (c) The four descent classes with their edges. (d) Speed words as steps of 5 m/s, and the speed that the executor flies at a_max = 1.4 m/s².' },
+    fig03_sentence_example: { n: 3, kind: 'real data', alt: 'A real sentence on its flight', caption: 'A real sentence of an arrival to runway 23R of KRDU (train split, Δ = 4 s). (a) Plan view. (b) Height above the airport and the altitude words. (c) Ground speed and the speed words. (d) The words that each row says; orange marks correction words.' },
+    fig04_executor_laws: { n: 4, kind: 'sketch', alt: 'The lateral, vertical and speed laws', caption: 'The three laws of the executor, in a kinematic sketch. (a)–(c) Lateral law: a heading word of 90°, the three rates and the bank. (d)–(e) Vertical law: a descent to a level with descent class 2. (f) Speed law: speed words in steps of 5 m/s.' },
+    fig05_closed_loop_real: { n: 5, kind: 'real data', alt: 'Errors and correction words of a real flight', caption: 'The closed-loop reading on the flight of Fig. 3. (a) Lateral error and the heading correction words. (b) Vertical error, with H = 15 m and H_final = 10 m. (c) The observed words and the correction words of the heading and angle columns.' },
+    fig06_corrections_effect: { n: 6, kind: 'sketch', alt: 'Paths and errors with and without correction words', caption: 'The effect of the correction words, in a sketch with a pilot model. (a) The observed path and the paths flown with and without corrections. (b) The lateral error against time; the dots are correction words.' },
+    fig07_delta_grid: { n: 7, kind: 'real data', alt: 'Heading words on three row intervals', caption: 'The heading words of one real flight on the 2 s rows of the data and on the grids of Δ = 2, 4 and 8 s. Each word goes to the nearest row; the orange lines show the move of a word.' },
+    fig08_prior_architecture: { n: 8, kind: 'diagram', alt: 'Network of the prior', caption: 'The network of the prior. The inputs are summed, pass four layers, and give a hidden state. Five heads say the words in the order of the columns. The module added at each layer is empty at the start of the post-training.' },
+    fig09_procedure_masks: { n: 9, kind: 'real geometry', alt: 'Procedure masks on the final of KRDU 23R', caption: 'The procedure masks on the final of KRDU runway 23R (published values). (a) Inside the region, the lower edge blocks the low levels. (b) Before the join, after a dip below the entry height, the no-climb mask blocks levels above the aircraft, and the DA blocks the lowest level.' },
+    fig10_decoding: { n: 10, kind: 'illustration', alt: 'One column of the speaker', caption: 'One column of the speaker. (a) The probabilities of the model; the masks block two words. (b) The probabilities after the masks. (c) The word is the one where the cumulative probability first passes the random number u. The probabilities are an illustration.' },
+    fig11_cv_design: { n: 11, kind: 'diagram', alt: 'Cross-validation by airport', caption: 'Cross-validation by airport and the four steps of the campaign. (a) Each fold trains on four airports and reads the fifth. (b) The steps, with the number of training runs (31 in total).' },
+    fig12_post_training_loop: { n: 12, kind: 'diagram', alt: 'The post-training loop', caption: 'The post-training loop in a window of recorded traffic. The prior speaks for one aircraft, the executor flies, and the judges give the outcome. The reward gives the advantages of the branch groups. The update has three terms.' },
+    fig13_branch_training: { n: 13, kind: 'illustration', alt: 'Branch groups of one window', caption: 'Branch training for one window whose first sentence failed. At each branch point, eight continuations start from a copy of the state. The advantage of a sentence is its reward minus the mean of its group. The outcomes of the continuations are a random illustration.' },
+    fig14_traffic_features: { n: 14, kind: 'diagram', alt: 'Approach clock and relative geometry', caption: 'Traffic in the post-training. (a) The gap on the approach clock and the prediction of the speed-word mask. (b) The geometry that the edge features of another aircraft describe.' },
+    fig15_judge_outcomes: { n: 15, kind: 'diagram', alt: 'The outcomes of the judge', caption: 'The outcomes of the judge, in the order in which it asks its questions. The first event is the outcome.' },
+  };
+  TT.buildFigures = () => {
+    document.querySelectorAll('figure.paper[data-fig]').forEach(f => {
+      const id = f.dataset.fig, d = TT.figs[id]; if (!d) { f.textContent = 'missing figure ' + id; return; }
+      f.replaceChildren(
+        TT.el('div', { class: 'row', style: 'margin:0 0 6px' }, [TT.el('span', { class: 'pill', text: 'Paper figure' }), TT.el('span', { class: 'fignum', text: 'Figure ' + d.n }), TT.el('span', { class: 'src', text: d.kind })]),
+        TT.el('img', { src: `figures/png/${id}.png`, alt: d.alt, loading: 'lazy' }),
+        TT.el('div', { class: 'links' }, [TT.el('span', {}, [TT.el('b', { text: 'Files: ' })]), TT.el('a', { href: `figures/png/${id}.png`, text: id + '.png (300 dpi)' }), TT.el('a', { href: `figures/pdf/${id}.pdf`, text: id + '.pdf (vector)' })]),
+        TT.el('details', {}, [TT.el('summary', { text: 'Suggested caption (not in the image)' }), TT.el('p', { text: d.caption })]));
+    });
+  };
+})();

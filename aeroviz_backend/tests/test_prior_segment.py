@@ -18,13 +18,16 @@ from ts_transformer.autopilot.conformance import STATE_BOUND_M
 from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.instructions.words import COLUMNS, HEADING, UNCHANGED
 from ts_transformer.instructions import training_files
+from ts_transformer.instructions.artefact import SEALED_READINGS
 from ts_transformer.prior import training_files as prior_files
 from ts_transformer.tests import test_start
 from ts_transformer.tests.test_prior_free_generation import generate
-from ts_transformer.tests.test_prior_training_export import FIXTURE_SET, stage_b_fixture
+from ts_transformer.tests.test_prior_training_export import FIXTURE_SET, FIXTURE_VAL_SET, stage_b_fixture
 
 from aeroviz_backend.autopilot_segment import prior as prior_segments
-from aeroviz_backend.autopilot_segment.backend import AutopilotSegmentBackend, SetFlown
+from ts_transformer.repo_layout import REPO_ROOT
+
+from aeroviz_backend.autopilot_segment.backend import AutopilotSegmentBackend, SetFlown, stage_a_service
 from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused, Superseded
 from aeroviz_backend.autopilot_segment.fly import fly_segment
 from aeroviz_backend.http_server import AeroVizBackendApp
@@ -42,6 +45,8 @@ class SyntheticBackend(AutopilotSegmentBackend):
     def __init__(self, root, flown):
         super().__init__(splits=training_files.SPLITS, airports_root=root)       # stage A's sets' splits (D109)
         self.flown = flown
+        val = SyntheticValBackend(root, flown)
+        self.prior.val_service = lambda: val        # the validation service is a synthetic one too
 
     def executor_for(self, sample):
         params, words = test_start._params(), self.flown.words
@@ -51,8 +56,23 @@ class SyntheticBackend(AutopilotSegmentBackend):
         return self.flown.set
 
 
+class SyntheticValBackend(SyntheticBackend):
+    def __init__(self, root, flown):
+        AutopilotSegmentBackend.__init__(self, splits=SEALED_READINGS, airports_root=root)
+        self.flown = flown
+
+
 class Flown:
     pass
+
+
+@pytest.fixture(autouse=True)
+def claim_on_disk(monkeypatch):
+    """The prior's run holds the claim the fixture's val set names (the fixture's paths are not on disk)."""
+    held = {REPO_ROOT / "fixture/prior": "fixture/readout_val"}
+    monkeypatch.setattr(prior_segments, "validation_claim",
+                        lambda prior_dir, reader: held[prior_dir] if prior_dir in held else None)
+    return held
 
 
 @pytest.fixture(scope="module")
@@ -61,11 +81,14 @@ def world(tmp_path_factory):
     readouts' unrounded states of the two sentences the set holds (seeds 0 and 1: the same synthetic flight)."""
     tmp = tmp_path_factory.mktemp("prior")
     monkeypatch = pytest.MonkeyPatch()
-    index, sample = stage_b_fixture(tmp / "fixture", monkeypatch)
+    index, sample, texts = stage_b_fixture(tmp / "fixture", monkeypatch, texts=True)
+    val_sample = json.loads(texts[f"{FIXTURE_VAL_SET}/{prior_files.SAMPLE_FILE}"])
     root = tmp / "airports"
     training = root / sample["airport"] / "training"
     training.mkdir(parents=True)
     prior_files.write_set(training, sample["airport"], index["sets"][0], prior_files.serialise(sample), [])
+    prior_files.write_set(training, sample["airport"], index["sets"][1], prior_files.serialise(val_sample),
+                          [index["sets"][0]])
     readouts = []
     for seed in (0, 1):
         spy = {}
@@ -76,7 +99,7 @@ def world(tmp_path_factory):
     flown = Flown()
     flown.words, flown.set = words, SetFlown(batch, [stored], test_start._params())
     monkeypatch.undo()
-    return {"root": root, "entry": index["sets"][0], "sample": sample, "readouts": readouts, "flown": flown, "geometry": geometry}
+    return {"root": root, "entry": index["sets"][0], "sample": sample, "val_sample": val_sample, "readouts": readouts, "flown": flown, "geometry": geometry}
 
 
 def request(world, **changes):
@@ -137,6 +160,86 @@ def test_a_request_flies_the_sentence_it_names_and_says_what_it_flew(world):
     assert answer["sentence"] == prior_segments.CLOSED_LOOP and answer["stored"]["horizontalM"] < STATE_BOUND_M
 
 
+class ExecutorChecked(Exception):
+    """What a conformance check that failed would raise."""
+
+
+class CheckedBackend(SyntheticBackend):
+    def executor_for(self, sample):
+        raise ExecutorChecked("the executor conformance ran")
+
+
+def write_extra_set(world, name, sample):
+    """``sample`` as set ``name`` of its own airports root (beside the world's, whose files stay as they are)."""
+    root = world["root"].parent / name
+    training = root / sample["airport"] / "training"
+    training.mkdir(parents=True)
+    entry = {**world["entry"], "id": name, "file": f"{name}/sample.json",
+             "cohort": sample["cohort"], "source": sample["source"]}
+    prior_files.write_set(training, sample["airport"], entry, prior_files.serialise({**sample, "setId": name}), [])
+    return root
+
+
+def test_the_claimed_validation_set_flies_its_val_flights(world):
+    """D109: the set exported from the base's one validation readout holds val flights and the service, built with
+    stage A's splits, flies them; the set's splits are the sealed readings alone."""
+    backend = SyntheticBackend(world["root"], world["flown"])
+    val = world["val_sample"]
+    assert val["source"]["validationClaim"] is not None and val["cohort"]["split"] in SEALED_READINGS
+    assert {item["split"] for item in val["flights"]} == set(SEALED_READINGS)
+    assert backend.prior.splits_of(val) == SEALED_READINGS and not set(SEALED_READINGS) & set(backend.splits)
+    assert set(backend.prior.splits_of(world["sample"])) == set(backend.splits)
+    answer = backend.prior.fly(request(world, setId=FIXTURE_VAL_SET, flightKey=val["flights"][0]["flightKey"]))
+    assert answer["setId"] == FIXTURE_VAL_SET and answer["segment"]["column"] == HEADING
+
+
+def test_a_val_flight_of_an_unclaimed_set_is_refused_before_any_executor_check(world):
+    """An unclaimed set's val flight, and a claim on a set that is not val (and a val set with no claim), are refused by
+    name; the split is refused before `executor_for` runs the conformance check (this backend's would raise)."""
+    train = world["sample"]
+    flight = {**train["flights"][0], "split": SEALED_READINGS[0]}
+    stray = write_extra_set(world, "stray", {**train, "flights": [flight]})
+    backend = CheckedBackend(stray, world["flown"])
+    with pytest.raises(RequestRefused, match="'val'"):
+        backend.prior.fly(request(world, setId="stray"))
+    with pytest.raises(ExecutorChecked):             # a train flight of the unclaimed set does reach the check
+        CheckedBackend(world["root"], world["flown"]).prior.fly(request(world, clientId="train"))
+    claim = world["val_sample"]["source"]["validationClaim"]
+    claimed = write_extra_set(world, "claimed_train", {**train, "source": {**train["source"], "validationClaim": claim}})
+    with pytest.raises(RequestRefused, match="holds a validation claim but its cohort.split is 'train'"):
+        CheckedBackend(claimed, world["flown"]).prior.fly(request(world, setId="claimed_train"))
+    val = world["val_sample"]
+    bare = write_extra_set(world, "bare_val", {**val, "source": {**val["source"], "validationClaim": None}})
+    with pytest.raises(RequestRefused, match="holds no validationClaim"):
+        CheckedBackend(bare, world["flown"]).prior.fly(request(world, setId="bare_val", flightKey=val["flights"][0]["flightKey"]))
+
+
+def test_a_claim_the_disk_does_not_hold_or_a_forged_claim_is_refused_by_name(world, claim_on_disk):
+    val = world["val_sample"]
+    flight = val["flights"][0]["flightKey"]
+    backend = CheckedBackend(world["root"], world["flown"])
+    held = dict(claim_on_disk)
+    claim_on_disk.clear()                                            # the prior's run holds no claim
+    with pytest.raises(RequestRefused, match="holds no claim of"):
+        backend.prior.fly(request(world, setId=FIXTURE_VAL_SET, flightKey=flight, clientId="disk"))
+    claim_on_disk[REPO_ROOT / "fixture/prior"] = REPO_ROOT / "fixture/another_readout"      # another readout's claim
+    with pytest.raises(RequestRefused, match="holds no claim of"):
+        backend.prior.fly(request(world, setId=FIXTURE_VAL_SET, flightKey=flight, clientId="other"))
+    claim_on_disk.update(held)
+    for field, message in (("reader", "validationClaim.reader"), ("prior", "validationClaim.prior"),
+                           ("readout", "validationClaim.readout")):
+        forged = {**val, "source": {**val["source"], "validationClaim": {**val["source"]["validationClaim"], field: "forged"}}}
+        root = write_extra_set(world, f"forged_{field}", forged)
+        with pytest.raises(RequestRefused, match=message):
+            CheckedBackend(root, world["flown"]).prior.fly(request(world, setId=f"forged_{field}", flightKey=flight, clientId=field))
+
+
+def test_the_production_validation_service_flies_the_sealed_readings_and_is_built_once(tmp_path):
+    prior = stage_a_service(tmp_path).prior
+    service = prior.val_service()
+    assert tuple(service.splits) == SEALED_READINGS and prior.val_service() is service
+
+
 def test_a_request_the_view_cannot_make_is_refused_and_a_set_flight_or_sentence_not_listed_is_not_listed(world):
     backend = SyntheticBackend(world["root"], world["flown"])
     for changes, message in [({"column": "flaps"}, "none of"), ({"row": -1}, "whole number"),
@@ -178,14 +281,14 @@ def test_a_request_the_view_cannot_make_is_refused_and_a_set_flight_or_sentence_
 def test_the_warm_up_opens_every_listed_prior_set_and_says_what_it_skipped(world, tmp_path):
     lines = []
     SyntheticBackend(world["root"], world["flown"]).prior.warm_up(lines.append)
-    assert any("fixture_set" in line and "flights opened" in line for line in lines) and "1 sets ready" in lines[-1]
+    assert any("fixture_set" in line and "flights opened" in line for line in lines) and "2 sets ready" in lines[-1]
     broken = tmp_path / "KXXX" / "training"
     broken.mkdir(parents=True)
     (broken / prior_files.INDEX_FILE).write_text(json.dumps({"schema": "aeroviz-training-prior-index-v0", "airport": "KXXX",
                                                              "sets": []}))
     lines = []
     SyntheticBackend(tmp_path, world["flown"]).prior.warm_up(lines.append)
-    assert "skipped" in lines[0] and "prior-index-v1" in lines[0] and "0 sets ready" in lines[-1]
+    assert "skipped" in lines[0] and prior_files.INDEX_SCHEMA in lines[0] and "0 sets ready" in lines[-1]
 
 
 class FakeAutopilot:

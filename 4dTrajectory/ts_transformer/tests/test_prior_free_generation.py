@@ -313,9 +313,19 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch):
     # free generation starts from every flight; the flights outside the prior's selection are given apart (D75), by
     # their stored outcome, not the generated one
     assert all(r["outcome"] != "landed" for r in rows)
-    assert readout["selection"] == "landed" and readout["outside"] == {}
+    assert readout["selection"] == "landed" and readout["outside_outcome"] == readout["outside_fault"] == {}
     (stratum,) = readout["inside"][geometry.code]
     assert readout["inside"][geometry.code][stratum]["sentences"] == 2
+    # D111: the flight marked as having a faulty track — landed, its stored outcome — is given apart for its fault
+    monkeypatch.setattr(runner, "faulty_flights", lambda d, split: {0: ("a fault",)})
+    assert runner.main([*argv[:-2], str(tmp_path / "marked"), "--smoke"]) == 0
+    marked = json.loads((tmp_path / "marked" / "readout.json").read_text())
+    assert marked["inside"] == marked["outside_outcome"] == {}
+    assert marked["outside_fault"][geometry.code][stratum]["sentences"] == 2
+    # the mark keeps or leaves a sentence in the selection, never an input: the marked flight says and flies the same
+    with np.load(out / "sentences.npz") as a, np.load(tmp_path / "marked" / "sentences.npz") as b:
+        assert a.files == b.files and all(np.array_equal(a[name], b[name]) for name in a.files)
+    monkeypatch.setattr(runner, "faulty_flights", lambda d, split: {})
     with pytest.raises(SystemExit):
         runner.main(argv)                                              # never over an existing readout
     smoke_on_val = [*argv[:-1]]

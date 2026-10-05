@@ -1,0 +1,34 @@
+<section id="s-closed">
+<h2 id="closed" data-toc="7 The closed-loop reading">7 The closed-loop reading</h2>
+<p>The open-loop reading gives the <em>observed</em> words. These words say directions and angles. They do not say positions. Real flights stay on their paths because of the guidance of the aircraft (LOC, LPV) and the radar of the controller. Their corrections are smaller than half a grid step, so the open-loop reading shows none: in the smoke artefact, the last heading word is class 0 in every sentence.</p>
+<p>If the executor flies these words alone, the errors of the directions add up over 10–25 km. In a smoke test with an exact model of the words, 47 % of the vectored flights ended more than 106.7 m from the centreline. A finer grid does not help, because the real corrections are smaller than any grid step.</p>
+<p>The closed-loop reading puts the missing corrections into words. <b>The labeller flies its own sentence with the executor.</b> When the flown path leaves the observed path by more than a tolerance, it adds a correction word. When the flown path is back, it says the observed word again (<span class="pill d">D32</span>). A model that trains on these sentences reads the flown states. So it learns “an offset gives a correction word” from states that its own closed loop also gives.</p>
+
+<h3 id="c-match" class="toc">7.1 The matched point: said where, not when</h3>
+<p>The labeller compares the flown state with the observed path at the <t zh="匹配点">matched point</t>: the point of the observed path that is nearest to the flown position. The search goes forward from the matched point of the row before, so a path that crosses itself does not make a jump. There:</p>
+<ul>
+<li>the <b>lateral error</b> e_y is the signed distance from the observed path, positive to the right;</li>
+<li>the <b>vertical error</b> e_h is the flown height minus the observed height.</li>
+</ul>
+<p>The reference is the matched point and <em>not</em> the observed point at the same time. A difference along the path is a difference of time. The comparison does not correct it. The observed words are said where the observed aircraft heard them (<span class="pill d">D42</span>): at the Δ row nearest to the place where the matched point reaches the word. The controller gives a turn at a place, not at a time. An aircraft that is <em>d</em> ahead along the path before a turn of 90° is <em>d</em> to the side after it.</p>
+<div data-demo="matched_point" data-title="The matched point and the place of a word"></div>
+
+<h3 id="c-rules" class="toc">7.2 The correction rules</h3>
+<table>
+<thead><tr><th></th><th>Starts when</th><th>The word</th><th>Ends when</th></tr></thead>
+<tbody>
+<tr><td><b>Heading</b></td><td>|e_y| &gt; Y = 30 m, and the row says no new observed heading word</td><td>The class one step (5°) from the observed word, toward the path</td><td>|e_y| &lt; Y/2, or e_y changes sign, or a new observed heading word arrives</td></tr>
+<tr><td><b>Angle</b></td><td>|e_h| &gt; H = 15 m (H_final = 10 m while “no level-off” is in force), and a descent class is in force</td><td>The next steeper class (too high) or shallower class (too low)</td><td>|e_h| &lt; H/2, or e_h changes sign, or a new observed altitude or angle word arrives</td></tr>
+</tbody></table>
+<p>An <b>overshoot</b> (<span class="pill d">D53</span>) is a change of sign while the error is still larger than the tolerance. The labeller then says the opposite correction in the same row. Waiting one row would add a lag that comes from the reading and not from Δ.</p>
+<p>No correction is possible in some rows: a row that says a new observed word, a level hold, a climb, and the rows past the end of the observed path (<span class="pill d">D44</span>). A correction is one class and needs time to work. A 100 m offset takes about 20 s to fix with one 5° class. So the flown path can stay outside the tolerance for some rows (<span class="pill d">D50</span>).</p>
+<div data-demo="closed_loop_sim" data-title="Corrections off and on, in a sketch"></div>
+<p>The sketch shows the mechanism. During the turn, a new observed word arrives in every row, so no correction can start. The error grows while the executor turns in a different way from the pilot. After the turn, the correction starts. With corrections on, the error returns under the tolerance. With corrections off, it stays.</p>
+
+<figure class="paper" data-fig="fig06_corrections_effect"></figure>
+<h3 id="c-real" class="toc">7.3 A real flight</h3>
+<p>This is the same reading on a real flight of the artefact. The orange dots mark the rows where the labeller added a word.</p>
+<div data-demo="real_corrections" data-title="Real corrections on a KRDU arrival"></div>
+<p>Over all train sentences at Δ = 4 s, 45 % of the heading words and 75 % of the angle words are correction words. These are numbers of this artefact. They show that the corrections carry a large part of the information of a sentence.</p>
+<figure class="paper" data-fig="fig05_closed_loop_real"></figure>
+</section>
