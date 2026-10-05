@@ -217,6 +217,57 @@ def test_the_frontend_fixtures_are_what_the_export_writes():
     assert any(event["correction"] for event in flight["closedLoop"]["2"]["events"])
 
 
+def test_split_flights_gives_the_row_intervals_asked_and_reads_the_stratum_off_the_first(monkeypatch, tmp_path):
+    """`split_flights` (A36, stage B's export calls it with its own Δ): only the Δ given are set up and flown, in their
+    order, and the flight's stratum and kind are its rows' at the first Δ given; ``formal_rows`` reads the Δ asked."""
+    from types import SimpleNamespace
+
+    import torch
+
+    from ts_transformer.autopilot import replay
+    from ts_transformer.experiments import training_flights
+    from ts_transformer.tests.support import closed_loop_flight
+
+    flown = {interval: closed_loop_flight(interval) for interval in (4.0, 8.0)}
+    one = flown[4.0]
+    signals, geometry, words = one.signals, one.geometry, one.words
+    outcomes = {interval: replay.fly_batch(item.batch, item.params, words, device=torch.device("cpu"))[1][0].outcome
+                for interval, item in flown.items()}
+    series = SimpleNamespace(scenario=SimpleNamespace(source={"flight_key": f"{signals.dataset_id}_key"}))
+    flights = SimpleNamespace(drawn=SimpleNamespace(signals=[signals], series=[series], groups=["own"],
+                                                    geometries={geometry.code: geometry}),
+                              readings=[one.reading])
+    asked = []
+    monkeypatch.setattr(training_flights, "open_flights", lambda *args: flights)
+    monkeypatch.setattr(training_flights, "stored_closed_loop", lambda *args: {})
+    monkeypatch.setattr(training_flights, "closed_loop_batch", lambda drawn, stored, interval, words: (
+        asked.append(interval) or (flown[interval].batch, [flown[interval].sentence])))
+    monkeypatch.setattr(export, "observed_attitude", lambda series: {
+        "headingDeg": signals.track_deg, "bankRightDeg": None, "attackDeg": None,
+        "pathAngleDeg": np.degrees(np.arctan2(signals.vertical_rate_mps, signals.ground_speed_mps))})
+    rows = {4.0: {signals.dataset_id: {"stratum": "straight-in", "kind": "with go-around", "outcome": outcomes[4.0]}},
+            8.0: {signals.dataset_id: {"stratum": "vectored", "kind": "without go-around", "outcome": outcomes[8.0]}}}
+    (flight,), got = export.split_flights(Path("artefact"), "train", [signals.dataset_id], rows, one.params, words,
+                                          device=torch.device("cpu"))
+    assert asked == [4.0, 8.0] and list(flight["closedLoop"]) == ["4", "8"] and got is geometry
+    assert [flight["closedLoop"][k]["replay"]["outcome"] for k in ("4", "8")] == [outcomes[4.0], outcomes[8.0]]
+    assert (flight["stratum"], flight["kind"]) == ("straight-in", "with go-around")
+    (flight,), _ = export.split_flights(Path("artefact"), "train", [signals.dataset_id], {8.0: rows[8.0]}, one.params,
+                                        words, device=torch.device("cpu"))
+    assert asked[2:] == [8.0] and list(flight["closedLoop"]) == ["8"] and flight["stratum"] == "vectored"
+    with pytest.raises(ValueError, match="at least one row interval"):
+        export.split_flights(Path("artefact"), "train", [signals.dataset_id], {}, one.params, words,
+                             device=torch.device("cpu"))
+
+    replays = tmp_path / "replay-closed-train-4s"
+    replays.mkdir()
+    (replays / "replay.json").write_text(json.dumps({"closed_loop": True, "row_interval_s": 4.0, "split": "train",
+                                                     "flights": [{"dataset_id": "F0"}]}), encoding="utf-8")
+    assert export.formal_rows(tmp_path, "train", (4.0,)) == {4.0: {"F0": {"dataset_id": "F0"}}}
+    with pytest.raises(FileNotFoundError):                       # the default reads every Δ of the ablation
+        export.formal_rows(tmp_path, "train")
+
+
 def test_a_flight_flown_again_is_refused_unless_it_gives_its_stored_states_and_its_formal_outcome():
     import dataclasses
 
