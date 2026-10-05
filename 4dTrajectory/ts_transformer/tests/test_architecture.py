@@ -826,20 +826,32 @@ POST_MAY_IMPORT = ("post.", "instructions.", "inference.separation", "inference.
                    "io_utils", "repo_layout")
 #: Prior §7, the column "Code": the names stage C may import from `prior/` (in `post/` and in its runners); B9's names
 #: (prior D96) and B10's (D105–D107: the function that opens a prior run, the motion of rows) as B9's log and B10's code
-#: give them, where §7 still reads "new, B9/B10".
+#: give them, where §7 still reads "new, B9/B10"; the round of D111 and D118–D122 (items 1 and 4: the identity as a readout
+#: shows it, the one val read, the selection's cells). Item 7's names are methods of `SpeakingLoop`, which no import shows.
 PRIOR_INTERFACE = {
-    "prior.checkpoint": {"load_checkpoint", "CHECKPOINT_SCHEMA", "open_prior", "OpenedPrior"},
+    "prior.checkpoint": {"load_checkpoint", "CHECKPOINT_SCHEMA", "open_prior", "OpenedPrior", "readable_identity",
+                         "validation_claim", "holds_claim"},
     "prior.model": {"Prior"},
     "prior.procedure": {"PROCEDURE_MASKS", "procedure_digests", "airport_finals", "Final"},
     "prior.inputs": {"state_inputs", "sentence_rows", "own_flight_key", "motion"},
     "prior.loop": {"LoopRows"},
     "prior.landings": {"Landing", "LandingIndex"},
-    "prior.source": {"airport_landings", "ArtefactSource"},
+    "prior.source": {"airport_landings", "ArtefactSource", "require_selection_of"},
     "prior.speaker": {"Speaker", "Position", "go_around_bound", "MOST_GO_AROUNDS", "draw", "Permitted"},
     "prior.train": {"batch_nll", "masked_log_probability"},
-    "prior.selection": {"require_rule", "kept"},
+    "prior.selection": {"require_rule", "kept", "left_out", "side", "SIDES", "REASONS", "CELL"},
     "prior.batch": {"collate", "RowTensors"},
 }
+
+
+
+def test_every_name_of_the_prior_interface_exists():
+    """A name `PRIOR_INTERFACE` lists is one its module has: a misspelt entry would let no import through and pass."""
+    import importlib
+
+    missing = [f"{module}.{name}" for module, names in PRIOR_INTERFACE.items()
+               for name in names if not hasattr(importlib.import_module(f"ts_transformer.{module}"), name)]
+    assert not missing, missing
 
 
 def _prior_imports_refused(source: str) -> list[str]:
