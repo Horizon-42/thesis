@@ -19,8 +19,7 @@ from typing import Any, Mapping
 from ts_transformer.data.day_split import DaySplit
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import (
-    SPLITS, closed_loop_path, closed_loop_sentences, load_candidates, load_closed_loop, load_day_split, load_sentences,
-    load_spec, signals_flights,
+    SPLITS, closed_loop_path, closed_loop_sentences, load_candidates, load_day_split, load_spec, signals_flights,
 )
 from ts_transformer.instructions.words import Words
 from ts_transformer.io_utils import file_sha256
@@ -33,14 +32,10 @@ from ts_transformer.repo_layout import tracks_manifest_path
 
 def stored_sentences(directory: Path, interval_s: float, split: str) -> list[Stored]:
     """What the selection reads of each closed-loop sentence of ``split`` at Δ (vocabulary §6 item 3): its flight's
-    airport, its stratum (D70, the sentence file) and its stored outcome (D74, the closed-loop file)."""
-    spec = load_spec(directory)
-    data = load_closed_loop(closed_loop_path(directory, split, interval_s), spec)
-    labelled = load_sentences(directory, split, spec)
-    strata = dict(zip(labelled["signal_index"].tolist(), labelled["stratum"].tolist()))
+    airport, and of the withheld fields (D82) its stratum (D70) and its stored outcome (D74)."""
     flights = signals_flights(directory, split)
-    return [Stored(split, flights[index]["airport"], strata[index], str(outcome))
-            for index, outcome in zip(data["signal_index"].tolist(), data["outcome"].tolist())]
+    return [Stored(split, flights[index]["airport"], sentence.withheld.stratum, sentence.withheld.outcome)
+            for index, sentence in closed_loop_sentences(directory, split, interval_s, load_spec(directory)).items()]
 
 
 def artefact_identity(directory: Path, interval_s: float, landings: Mapping[str, LandingIndex],
@@ -90,17 +85,16 @@ class ArtefactSource:
         return self._split[split][airport]
 
     def _read(self, split: str) -> dict[str, list[SentenceRows]]:
-        stored = closed_loop_sentences(load_closed_loop(closed_loop_path(self.directory, split, self.interval_s),
-                                                        self.words.spec))
+        stored = closed_loop_sentences(self.directory, split, self.interval_s, self.words.spec)
         flights = signals_flights(self.directory, split)
         # every airport of the artefact, also one with no sentence in this split (a small split can have none)
         out: dict[str, list[SentenceRows]] = {code: [] for code in self.geometries}
         for index, sentence in stored.items():
-            if not kept(self.selection, sentence.outcome):
+            if not kept(self.selection, sentence.withheld.outcome):
                 continue
             flight = flights[index]
             code = flight["airport"]
-            out[code].append(sentence_rows(
-                sentence, flight, self.geometries[code], self.landings[code], self.words, interval_s=self.interval_s,
+            out[code].append(sentence_rows(           # the rows alone are an input (D82)
+                sentence.rows, flight, self.geometries[code], self.landings[code], self.words, interval_s=self.interval_s,
                 split=split, variant=self.variant))
         return out

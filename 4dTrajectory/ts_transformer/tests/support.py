@@ -352,7 +352,7 @@ def prior_closed_loop_sentence(signals, words, *, interval_s, first_row=0, go_ar
     ``outcome``, by the judge's name (not judged: the states are the observed ones)."""
     import numpy as np
 
-    from ts_transformer.instructions.artefact import ClosedLoopSentence
+    from ts_transformer.instructions.artefact import ClosedLoopSentence, SentenceRows, Withheld
     from ts_transformer.instructions.labeller.interval import OBSERVATION_S, interval_rows, on_interval_rows
     from ts_transformer.instructions.words import RUNWAY_GO_AROUND, UNCHANGED
 
@@ -371,10 +371,13 @@ def prior_closed_loop_sentence(signals, words, *, interval_s, first_row=0, go_ar
         grid[12, [0, 2, 3]] = [RUNWAY_GO_AROUND, words.altitude_index(height + 300.0), words.angle_climb]
         grid[20, 0] = 0
     return ClosedLoopSentence(
-        first_row=first_row, start=start, grid=grid, correction=np.zeros((said, 5), dtype=bool), states=states,
-        on_interval=on_interval_rows(count, every), lateral_m=np.zeros(said), vertical_m=np.zeros(said),
-        uncorrectable=np.zeros((said, 2), dtype=bool), observed_row=np.arange(said), matched_row=np.arange(said) * 1.0,
-        timed_out=False, outcome=outcome)
+        rows=SentenceRows(first_row=first_row, start=start, grid=grid, correction=np.zeros((said, 5), dtype=bool),
+                          states=states, on_interval=on_interval_rows(count, every)),
+        withheld=Withheld(runway=signals.runway, runway_index=0, landing_time_utc=signals.landing_time_utc,
+                          capture_row=-1, go_around_rows=np.zeros(0, dtype=np.int64), stratum="straight-in",
+                          outcome=outcome, timed_out=False, lateral_m=np.zeros(said), vertical_m=np.zeros(said),
+                          uncorrectable=np.zeros((said, 2), dtype=bool), observed_row=np.arange(said),
+                          matched_row=np.arange(said) * 1.0))
 
 
 def prior_artefact(directory, interval_s=2.0, airports=("KXXX",), outcomes=("landed", "landed")):
@@ -421,7 +424,7 @@ def prior_artefact(directory, interval_s=2.0, airports=("KXXX",), outcomes=("lan
                                                    outcome=outcomes[k % 2])
                      for k, flight in enumerate(flights[split])}
         write_closed_loop(closed_loop_path(directory, split, interval_s), spec, executor_params_sha256="test",
-                          row_interval_s=interval_s, start_row=sentences[0].start, sentences=sentences)
+                          row_interval_s=interval_s, start_row=sentences[0].rows.start, sentences=sentences)
     return words, records
 
 

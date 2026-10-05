@@ -94,7 +94,7 @@ def test_the_motion_comes_from_the_2_s_displacement_and_row_0_has_none(interval_
     words, signals, record, index = flight_and_index()
     every = int(interval_s / 2)
     for first_row in (0, 1):            # D60: also when the data have a 2 s row before row 0
-        sentence = prior_closed_loop_sentence(signals, words, interval_s=interval_s, first_row=first_row)
+        sentence = prior_closed_loop_sentence(signals, words, interval_s=interval_s, first_row=first_row).rows
         rows = rows_of(sentence, record, index, words, interval_s)
         assert own(rows, "no_motion")[0] == 1.0 and not own(rows, "no_motion")[1:].any()
         assert own(rows, "ground_speed")[0] == 0.0 and own(rows, "vertical_rate")[0] == 0.0
@@ -115,7 +115,7 @@ def test_only_positions_and_heights_give_the_motion():
     """The stored track, ground speed and vertical rate (on observed rows, a fit with 7.5 s of the future) change no
     input."""
     words, signals, record, index = flight_and_index()
-    sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0)
+    sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
     states = sentence.states.copy()
     for name in ("track_deg", "ground_speed_mps", "vertical_rate_mps"):
         states[:, STATE_COLUMNS.index(name)] += 17.0
@@ -128,7 +128,7 @@ def test_only_positions_and_heights_give_the_motion():
 def test_a_change_of_the_runway_word_leaves_the_rows_up_to_the_first_predicted_step_bit_for_bit(interval_s):
     """D23: the artefact writes the landed runway at the first predicted step; no input up to that step reads it."""
     words, signals, record, index = flight_and_index()
-    sentence = prior_closed_loop_sentence(signals, words, interval_s=interval_s, go_around=True)
+    sentence = prior_closed_loop_sentence(signals, words, interval_s=interval_s, go_around=True).rows
     grid = sentence.grid.copy()
     grid[0, RUNWAY], grid[20, RUNWAY] = 1, 1
     a, b = (rows_of(s, record, index, words, interval_s) for s in (sentence, replace(sentence, grid=grid)))
@@ -141,7 +141,7 @@ def test_a_change_of_the_runway_word_leaves_the_rows_up_to_the_first_predicted_s
 
 def test_the_height_above_the_glidepath_against_a_hand_computation():
     words, signals, record, index = flight_and_index()
-    sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0)
+    sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
     rows = rows_of(sentence, record, index, words, 2.0)
     j = 20
     e, h = sentence.states[j, STATE_COLUMNS.index("e_m")], sentence.states[j, STATE_COLUMNS.index("height_m")]
@@ -155,7 +155,7 @@ def test_the_height_above_the_glidepath_against_a_hand_computation():
 
 def test_the_rows_from_the_first_predicted_step_are_the_flown_states():
     words, signals, record, index = flight_and_index()
-    sentence = prior_closed_loop_sentence(signals, words, interval_s=4.0)
+    sentence = prior_closed_loop_sentence(signals, words, interval_s=4.0).rows
     states = sentence.states.copy()
     flown = int(np.flatnonzero(sentence.on_interval)[sentence.start])
     states[flown:, STATE_COLUMNS.index("height_m")] += 50.0
@@ -168,7 +168,7 @@ def test_the_rows_from_the_first_predicted_step_are_the_flown_states():
 
 def test_the_words_in_force_follow_the_sentence_through_a_go_around():
     words, signals, record, index = flight_and_index()
-    sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0, go_around=True)
+    sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0, go_around=True).rows
     rows = rows_of(sentence, record, index, words, 2.0)
     s = rows.first_step
     assert (rows.runway_in_force[: s + 1] == -1).all() and (rows.runway_in_force[s + 1:] == 0).all()
@@ -193,7 +193,7 @@ def permuted_airport(geometry, order):
 
 def test_a_permutation_of_the_candidates_permutes_their_vectors_and_nothing_else():
     words, signals, record, index = flight_and_index()
-    sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0)
+    sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
     swapped = sentence.grid.copy()
     swapped[0, RUNWAY] = 1                                     # "09" is candidate 1 of the permuted airport
     a = rows_of(sentence, record, index, words, 2.0)
@@ -216,13 +216,13 @@ def test_an_airport_with_more_candidates_than_any_training_airport_is_read():
     index = roster_landings([{"flight_key": "Ftrain1", "outcome": "assigned", "runway": "09",
                               "landing_time_utc": record["landing_time_utc"]}],
                             [c.ident for c in geometry.candidates], fixture_days())
-    rows = rows_of(prior_closed_loop_sentence(signals, words, interval_s=2.0), record, index, words, 2.0, geometry)
+    rows = rows_of(prior_closed_loop_sentence(signals, words, interval_s=2.0).rows, record, index, words, 2.0, geometry)
     assert rows.candidates.shape[1] == 9
 
 
 def test_the_constants_variant_adds_the_length_and_the_threshold_elevation():
     words, signals, record, index = flight_and_index()
-    sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0)
+    sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
     full, constants = (rows_of(sentence, record, index, words, 2.0, variant=v) for v in ("full", "constants"))
     assert np.array_equal(constants.candidates[..., : full.candidates.shape[2]], full.candidates)
     assert constants.candidates[3, 0, -2:] == pytest.approx([3.0, 0.1])
@@ -232,7 +232,7 @@ def test_a_flight_never_counts_its_own_landing():
     """Its own landing is the answer (a closed-loop sentence can fly past the observed landing time): here it is put 20 s
     after the entry, inside the rows, and still never counted; another flight's landing on "09L" is."""
     words, signals, record, _ = flight_and_index()
-    sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0)
+    sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
     entry = utc_s(record["entry_time_utc"])
     index = LandingIndex(("09", "09L"), (Landing(entry + 10.0, "09L", "OTHER"), Landing(entry + 20.0, "09", "Ftrain1")),
                          0)
@@ -270,7 +270,7 @@ def test_in_a_turn_the_motion_is_the_2_s_displacement_not_the_rows():
     signals = instruction_flight(*fly_legs([(160, 3.0, 75.0, -1.5)], 90.0, 750.0, -400.0, 0.0),
                                  dataset_id="KXXX:Ftrain1", split="train")
     _, _, record, index = flight_and_index()
-    sentence = prior_closed_loop_sentence(signals, words, interval_s=8.0)
+    sentence = prior_closed_loop_sentence(signals, words, interval_s=8.0).rows
     rows = rows_of(sentence, record, index, words, 8.0)
     e, n = (sentence.states[:, STATE_COLUMNS.index(name)] for name in ("e_m", "n_m"))
     for j in (2, 7):
@@ -299,7 +299,7 @@ def test_a_heading_word_keeps_the_track_it_was_heard_with_and_reads_against_the_
     geometry = crossing_airport()
     index = roster_landings([{"flight_key": "Ftrain1", "outcome": "assigned", "runway": "09",
                               "landing_time_utc": record["landing_time_utc"]}], ("09", "18"), fixture_days())
-    sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0)
+    sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
     grid = sentence.grid.copy()
     grid[10, RUNWAY] = 1
     grid[15, HEADING] = words.heading_index(-10.0)
@@ -318,7 +318,7 @@ def test_the_rows_utc_time_is_the_flights_entry_and_its_2_s_rows():
     """The landings window is read at each Δ row's UTC time: the entry plus 2 s for each signals row, the sentence's
     first row included — at Δ = 4 s from signals row 1, Δ row j is signals row 1 + 2j."""
     words, signals, record, _ = flight_and_index()
-    sentence = prior_closed_loop_sentence(signals, words, interval_s=4.0, first_row=1)
+    sentence = prior_closed_loop_sentence(signals, words, interval_s=4.0, first_row=1).rows
     entry = utc_s(record["entry_time_utc"])
     index = LandingIndex(("09", "09L"), (Landing(entry + 13.0, "09L", "OTHER"),
                                          Landing(entry + 3_600.0, "09", "Ftrain1")), 0)
@@ -422,7 +422,7 @@ def test_the_source_reads_only_the_selected_sentences_and_the_identity_counts_ev
     np.savez_compressed(directory / "sentences_train.npz", **labelled)
     path = closed_loop_path(directory, "train", 4.0)
     data = load_closed_loop(path, spec)
-    stored = closed_loop_sentences(data)
+    stored = closed_loop_sentences(directory, "train", 4.0, spec)
     path.unlink()
     write_closed_loop(path, spec, executor_params_sha256=str(data["executor_params_sha256"]), row_interval_s=4.0,
                       start_row=int(data["start_row"]), sentences={1: stored[1], 0: stored[0]})

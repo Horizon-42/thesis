@@ -43,7 +43,7 @@ def test_a_sentence_flown_again_gives_its_readout_s_states_and_outcome(tmp_path,
     (payload,) = export.fly_again(spy["directory"], tmp_path / "executor", "train", interval_s, {0: stored}, [item],
                                   words, device=CPU)
     assert payload["outcome"] == generated.outcome and payload["words"] == generated.words.tolist()
-    assert payload["flownFromRow"] == stored.start * int(round(interval_s / words.spec.step_s))
+    assert payload["flownFromRow"] == stored.rows.start * int(round(interval_s / words.spec.step_s))
     flown = generated.states[payload["flownFromRow"]:]
     track = payload["track"]
     assert track["rows"] == len(track["eM"]) == len(track["heightMslM"]) == len(payload["attitude"]["headingDeg"])
@@ -159,8 +159,9 @@ def stage_b_fixture(tmp_path, monkeypatch) -> tuple[dict, dict]:
     batch, missing = closed_loop.replay_batch(spy["batch"], {0: stored}, words)        # as the formal replay flies it
     assert not missing
     flown, (verdict,) = replay.fly_batch(batch, test_start._params(), words, device=CPU)
-    replayed = stage_a.replay_payload(flown, 0, verdict, batch, stored, {"outcome": stored.outcome},
-                                      batch.inputs(CPU).aero_params[0].numpy(), words.spec, words)
+    replayed = stage_a.replay_payload(flown, 0, verdict, batch, stored,
+                                      batch.inputs(test_start._params().start_rule, CPU).aero_params[0].numpy(),
+                                      words.spec, words)
     flight["closedLoop"]["4"] = stage_a.closed_loop_payload(stored, replayed, 4.0, geometry, words)
     flight["prior"] = said
     finals_ = tuple(Final(geometry, k, 9_000.0, fas_course_geometry(c.length_m)) for k, c in enumerate(geometry.candidates))
@@ -294,8 +295,7 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
     monkeypatch.setattr(export, "artefact_identity", lambda d, interval, landings, rule: {"fixture": True})
     monkeypatch.setattr(export, "procedure_digests", lambda geometries: digests)
     monkeypatch.setattr(export, "airport_finals", lambda g: finals_of(g))
-    monkeypatch.setattr(export, "formal_rows", lambda executor, split, intervals: {})
-    monkeypatch.setattr(export, "split_flights", lambda instructions, split, ids, rows, params, words_, device: (
+    monkeypatch.setattr(export, "split_flights", lambda instructions, split, ids, intervals, params, words_, device: (
         [{"datasetId": i, "runway": "09", "closedLoop": {}} for i in ids], load_candidates(directory)[geometry.code]))
     monkeypatch.setattr(export.stage_a_files, "runway_hae_minus_msl_m",
                         lambda sources, airport, manifest: {c.ident: -33.0 for c in geometry.candidates})

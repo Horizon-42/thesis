@@ -56,11 +56,11 @@ def test_one_flight_spoken_and_flown_to_its_outcome(tmp_path, monkeypatch, inter
     assert (generated.words[0] != UNCHANGED).all()                       # the first predicted step says every column
     state = None
     for row, words_row in enumerate(generated.words):                      # every row passes the grammar
-        height = generated.states[(stored.start + row) * every, 2] - geometry.elevation_m
+        height = generated.states[(stored.rows.start + row) * every, 2] - geometry.elevation_m
         state = apply(state, words_row, float(height), words, len(geometry.candidates))
     # the observed rows, then the flown ones from the first predicted step; one row of states for each word row
-    assert np.array_equal(generated.states[: stored.start * every], stored.states[: stored.start * every])
-    said_rows = (stored.start + len(generated.words) - 1) * every + 1          # the states to the last row's start
+    assert np.array_equal(generated.states[: stored.rows.start * every], stored.rows.states[: stored.rows.start * every])
+    said_rows = (stored.rows.start + len(generated.words) - 1) * every + 1          # the states to the last row's start
     assert said_rows < len(generated.states) <= said_rows + every
     assert np.isfinite(generated.states[:said_rows]).all()
     assert generated.go_arounds <= MOST_GO_AROUNDS
@@ -131,12 +131,12 @@ def test_the_loop_gives_the_speaker_the_rows_the_sentence_gives(tmp_path, monkey
     spy = {}
     generated, stored, words, geometry = generate(tmp_path, monkeypatch, interval_s=interval_s, spy=spy)
     every = int(round(interval_s / words.spec.step_s))
-    count = (stored.start + len(generated.words) - 1) * every + 1
-    sentence = replace(stored, grid=generated.words.astype(np.int16), states=generated.states[:count],
+    count = (stored.rows.start + len(generated.words) - 1) * every + 1
+    sentence = replace(stored.rows, grid=generated.words.astype(np.int16), states=generated.states[:count],
                        on_interval=on_interval_rows(count, every))
     expected = collate([sentence_rows(sentence, spy["flights"][0], geometry, spy["landings"][geometry.code], words,
                                       interval_s=interval_s, split="train", variant="full")], CPU)
-    assert len(rows) == stored.start + len(generated.words)
+    assert len(rows) == stored.rows.start + len(generated.words)
     assert expected.candidates[..., 6].abs().sum() > 0                  # a landing counted: the UTC times are read
     for r, row in enumerate(rows):
         for name in row._fields:
@@ -192,7 +192,7 @@ def test_flights_done_at_different_rows_end_apart_and_never_feed_a_state_that_is
                                                   for k, key in enumerate(keys)), 0)}
     finals = {geometry.code: tuple(Final(geometry, k, 9_000.0, fas_course_geometry(c.length_m))
                                    for k, c in enumerate(geometry.candidates))}
-    first = stored.states[stored.start * 2]
+    first = stored.rows.states[stored.rows.start * 2]
     loop = FakeLoop([first, first], [3, 6], 2, MOST_GO_AROUNDS)
     from ts_transformer.experiments import prior_free_generation as runner
     from ts_transformer.instructions.words import RUNWAY, RUNWAY_GO_AROUND
@@ -219,7 +219,7 @@ def test_flights_done_at_different_rows_end_apart_and_never_feed_a_state_that_is
     assert a.go_arounds == int((a.words[:, RUNWAY] == RUNWAY_GO_AROUND).sum()) < made[0].go_arounds[0]
     assert loop.halted.all()
     assert np.isfinite(a.states).all() and np.isfinite(b.states).all()   # trimmed to the row each was done in
-    assert len(a.states) == (stored.start + 3) * 2 + 1 and len(b.states) == (stored.start + 6) * 2 + 1
+    assert len(a.states) == (stored.rows.start + 3) * 2 + 1 and len(b.states) == (stored.rows.start + 6) * 2 + 1
 
 
 def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch):
@@ -249,8 +249,9 @@ def test_the_runner_writes_its_sentences_and_readout(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "require_conforming_closed_loop", lambda *given: checked.append(given) or (None, {"checks": {"stub": True}}, None))
     monkeypatch.setattr(runner, "procedure_digests", lambda geometries: digests)
     read = runner.closed_loop_sentences
-    monkeypatch.setattr(runner, "closed_loop_sentences", lambda data: {
-        index: dataclasses.replace(sentence, outcome="landed") for index, sentence in read(data).items()})
+    monkeypatch.setattr(runner, "closed_loop_sentences", lambda *given: {
+        index: dataclasses.replace(sentence, withheld=dataclasses.replace(sentence.withheld, outcome="landed"))
+        for index, sentence in read(*given).items()})
     monkeypatch.setattr(runner, "airport_finals", lambda g: tuple(Final(g, k, 9_000.0, fas_course_geometry(c.length_m))
                                                                   for k, c in enumerate(g.candidates)))
     prior = tmp_path / "prior"

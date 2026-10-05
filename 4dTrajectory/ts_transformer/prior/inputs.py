@@ -18,7 +18,8 @@ from typing import Any, Mapping, NamedTuple
 import numpy as np
 
 from ts_transformer.instructions.airport import AirportGeometry, published_glidepath_height_m, relative_to_runway
-from ts_transformer.instructions.artefact import STATE_COLUMNS, ClosedLoopSentence
+from ts_transformer.instructions.artefact import STATE_COLUMNS
+from ts_transformer.instructions.artefact import SentenceRows as ClosedLoopRows
 from ts_transformer.instructions.grammar import InForce, apply
 from ts_transformer.instructions.labeller.interval import interval_rows, on_interval_rows
 from ts_transformer.instructions.words import COLUMNS, HEADING, RUNWAY, UNCHANGED, Words
@@ -149,11 +150,13 @@ class Heard:
         return self.geometry.candidates[self.state.runway].course_deg
 
 
-def sentence_rows(sentence: ClosedLoopSentence, flight: Mapping[str, Any], geometry: AirportGeometry,
+def sentence_rows(sentence: ClosedLoopRows, flight: Mapping[str, Any], geometry: AirportGeometry,
                   landings: LandingIndex, words: Words, *, interval_s: float, split: str, variant: str) -> SentenceRows:
-    """The inputs and targets of one closed-loop sentence on its Δ rows (§2, §7 item 2): ``flight`` its record in the
-    split's signals (`instructions.artefact.signals_flights`), ``landings`` its airport's (the flight's own is left out
-    here). Rows before the first predicted step are observed, rows from it are flown (the artefact's states, D32)."""
+    """The inputs and targets of one closed-loop sentence on its Δ rows (§2, §7 item 2): ``sentence`` its rows alone —
+    what a model may read, never the withheld fields (vocabulary D82) — ``flight`` its record in the split's signals
+    (`instructions.artefact.signals_flights`; its entry time and its key, by which its own landing is left out of
+    ``landings``, its airport's). Rows before the first predicted step are observed, rows from it are flown (the
+    artefact's states, D32)."""
     every = interval_rows(interval_s, words.spec.step_s)
     if not np.array_equal(sentence.on_interval, on_interval_rows(len(sentence.states), every)):
         raise ValueError(f"{flight['dataset_id']}: the sentence's Δ rows are not every {every}-th 2 s row")

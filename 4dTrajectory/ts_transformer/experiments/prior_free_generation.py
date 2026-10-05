@@ -28,8 +28,7 @@ from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S
 from ts_transformer.autopilot.start import Loop, start
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import (
-    ClosedLoopSentence, closed_loop_path, closed_loop_sentences, load_candidates, load_closed_loop, load_day_split,
-    load_sentences, load_spec, signals_flights,
+    ClosedLoopSentence, closed_loop_sentences, load_candidates, load_day_split, load_spec, signals_flights,
 )
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.checkpoint import CHECKPOINT_SCHEMA, load_checkpoint
@@ -131,7 +130,7 @@ def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Map
         raise ValueError(f"the loop was started for {loop.most_go_arounds} go-arounds a flight, the bound is "
                          f"{MOST_GO_AROUNDS} (D68)")
     step_s = words.spec.step_s
-    every, start = interval_rows(interval_s, step_s), sentences[order[0]].start
+    every, start = interval_rows(interval_s, step_s), sentences[order[0]].rows.start
     count = len(order)
     flight_geometries = [geometries[flights[i]["airport"]] for i in order]
     elevations = np.array([g.elevation_m for g in flight_geometries])
@@ -139,7 +138,7 @@ def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Map
     speaker = Speaker(model, words, [finals[g.code] for g in flight_geometries],
                       capacity=start + math.ceil(limit / interval_s) + 2, generator=generator, temperature=temperature)
     entry = np.array([utc_s(flights[i]["entry_time_utc"]) for i in order])
-    first_rows = np.array([sentences[i].first_row for i in order])
+    first_rows = np.array([sentences[i].rows.first_row for i in order])
     keys = [own_flight_key(flights[i]) for i in order]
 
     def row(t: int, at: np.ndarray, before: np.ndarray, known: bool) -> tuple[Any, Position]:
@@ -162,7 +161,7 @@ def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Map
         return tensors, Position(at[:, 0], at[:, 1], at[:, 2] - elevations)
 
     # the observed rows before the first predicted step
-    observed = np.stack([sentences[i].states[: start * every] for i in order])          # [B, start·every, 6]
+    observed = np.stack([sentences[i].rows.states[: start * every] for i in order])     # [B, start·every, 6]
     for t in range(start):
         r = t * every
         tensors, at = row(t, observed[:, r], observed[:, max(r - 1, 0)], r > 0)
@@ -309,10 +308,10 @@ def main(argv: list[str] | None = None) -> int:
     model = checkpoint.model.to(device)
     finals = {code: airport_finals(geometry) for code, geometry in geometries.items()}
     spec = load_spec(instructions)
-    sentences = closed_loop_sentences(load_closed_loop(closed_loop_path(instructions, args.split, interval_s), spec))
+    sentences = closed_loop_sentences(instructions, args.split, interval_s, spec)
     flights = signals_flights(instructions, args.split)
-    labelled_file = load_sentences(instructions, args.split, spec)
-    strata = dict(zip(labelled_file["signal_index"].tolist(), labelled_file["stratum"].tolist()))
+    # withheld from the model (D82), read for the readout: each flight's stratum (D70) and stored outcome (D74)
+    strata = {i: sentence.withheld.stratum for i, sentence in sentences.items()}
     airports = args.airports or sorted(geometries)
     unknown = sorted(set(airports) - set(geometries))
     if unknown:
@@ -369,9 +368,9 @@ def main(argv: list[str] | None = None) -> int:
         **{f"blocked_{COLUMNS[c]}": np.concatenate([g.blocked[c] for g in sentences_only]) for c in ProcedureMasks.columns})
     # free generation starts from every flight; the readout gives the flights outside the prior's selection apart (D75)
     airports_of = {i: flights[i]["airport"] for i in drawn}
-    grids = {i: sentences[i].grid for i in drawn}
-    inside = [g for g in sentences_only if kept(selection, sentences[g.index].outcome)]
-    outside = [g for g in sentences_only if not kept(selection, sentences[g.index].outcome)]
+    grids = {i: sentences[i].rows.grid for i in drawn}
+    inside = [g for g in sentences_only if kept(selection, sentences[g.index].withheld.outcome)]
+    outside = [g for g in sentences_only if not kept(selection, sentences[g.index].withheld.outcome)]
     write_json_atomic(out / "readout.json", {
         "selection": selection, "inside": readout(inside, airports_of, strata, grids),
         "outside": readout(outside, airports_of, strata, grids)})

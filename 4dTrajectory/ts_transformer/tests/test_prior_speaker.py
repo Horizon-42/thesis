@@ -254,17 +254,12 @@ def test_the_finals_read_from_the_cifp_for_an_airport_of_the_artefact():
     """`airport_finals` on KRDU's live data (read only): one final for each candidate, its FAF 5–20 km out, the entry
     height above the DA; a candidate whose CIFP threshold is more than the tolerance away is refused; one procedure
     document digest for each candidate."""
-    import json
-
     from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG
     from trajectory_data_process.harvest.airports import load_airport
     from ts_transformer.instructions.airport import airport_geometry
     from ts_transformer.prior.procedure import airport_finals, procedure_digests
-    from ts_transformer.repo_layout import HARVEST_ROOT
 
-    manifest = HARVEST_ROOT / "KRDU" / "arrivals" / "manifest.json"
-    geometry = airport_geometry("KRDU", json.loads(manifest.read_text(encoding="utf-8"))["runway_targets"],
-                                load_airport("KRDU", config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways)
+    geometry = airport_geometry("KRDU", load_airport("KRDU", config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways)
     finals_ = airport_finals(geometry)
     assert [f.index for f in finals_] == list(range(len(geometry.candidates)))
     for final in finals_:

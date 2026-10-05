@@ -16,8 +16,7 @@ D73). The artefact's identity is computed again and must be the readout's; the p
 
 THE CLOSED-LOOP SENTENCE of each flight at the prior's Δ, with its head (the observed track, the open-loop sentence), is
 A23's payload, built and flown again by A23's code (`training_export.split_flights`, A36; the prior's runner imports
-from `autopilot/` only what D69 lists). Until A32 (vocabulary D86) that function reads the formal replay's rows, so a
-set is made only from a readout of a split with a formal replay (select).
+from `autopilot/` only what D69 lists): checked against its stored states and outcome, on any split (vocabulary D86).
 
 WRITES a set ``<root>/<airport>/training/<set-id>/sample.json`` and its entry in
 ``<root>/<airport>/training/index_prior_v1.json`` (`prior.training_files`); refused when the set exists. Every airport is
@@ -46,7 +45,7 @@ from ts_transformer.experiments import training_flights
 from ts_transformer.experiments.prior_free_generation import FREE_GENERATION_SCHEMA, Stored, read_sentences
 from ts_transformer.experiments.training_attitude import attitude_payload, executor_attitude
 from ts_transformer.experiments.training_export import (
-    FORMATS, candidates_block, events, formal_rows, split_flights, vocabulary_block,
+    FORMATS, candidates_block, events, split_flights, vocabulary_block,
 )
 from ts_transformer.instructions import training_files as stage_a_files
 from ts_transformer.instructions.airport import AirportGeometry, RunwayCandidate
@@ -175,7 +174,7 @@ def fly_again(instructions: Path, executor: Path, split: str, interval_s: float,
                         most_go_arounds=MOST_GO_AROUNDS, device=device)
     by_index = {s.index: s for s in stored}
     every = interval_rows(interval_s, words.spec.step_s)
-    first = sentences[order[0]].start
+    first = sentences[order[0]].rows.start
     flown = step_words(loop, [by_index[i].words for i in order])
     ended = np.ceil((loop.executor.done_cycle.cpu().numpy() + 1) / loop.row_cycles).astype(int)
     timed_out = loop.timed_out()
@@ -184,7 +183,7 @@ def fly_again(instructions: Path, executor: Path, split: str, interval_s: float,
     out = {}
     for b, index in enumerate(order):
         item, sentence, geometry = by_index[index], sentences[index], loop.geometries[b]
-        states = np.concatenate((sentence.states[: first * every], np.array(flown[b][: ended[b] + 1])))
+        states = np.concatenate((sentence.rows.states[: first * every], np.array(flown[b][: ended[b] + 1])))
         distance = apart(states, item.states)
         if not distance <= STATE_BOUND_M:                  # a NaN state is refused too
             raise ValueError(f"{item.row['dataset_id']} sample {item.sample}: flown again {distance:.3g} from its "
@@ -202,7 +201,7 @@ def fly_again(instructions: Path, executor: Path, split: str, interval_s: float,
         at = executed.states[b, cycles].cpu().numpy()
         out[index] = {
             "sample": item.sample, "rows": len(item.words), "words": item.words.astype(int).tolist(),
-            "events": events(item.words, None, geometry, words), "firstRow": sentence.first_row, "startRow": first,
+            "events": events(item.words, None, geometry, words), "firstRow": sentence.rows.first_row, "startRow": first,
             # the row of the readout's states the executor flew from (the first predicted step)
             "flownFromRow": first * every,
             "outcome": outcome.outcome, "endCycle": int(outcome.end_row), "timedOut": bool(timed_out[b]),
@@ -242,9 +241,7 @@ def build_airport(airport: str, readout: dict[str, Any], stored: Sequence[Stored
     indices = chosen_flights(stored, airport, per_airport, seed)
     mine = [s for s in stored if s.index in indices]
     ids = [next(s.row["dataset_id"] for s in mine if s.index == i) for i in indices]
-    # until A32 (vocabulary D86) A23's function reads the formal replay's rows: a split with a formal replay only
-    heads, geometry = split_flights(instructions, split, ids, formal_rows(executor, split, (interval,)), params, words,
-                                    device=device)
+    heads, geometry = split_flights(instructions, split, ids, (interval,), params, words, device=device)
     stored_loop = training_flights.stored_closed_loop(instructions, split, interval, words)
     sentences = {i: training_flights.owned_sentence(stored_loop[i]) for i in indices}
     del stored_loop
