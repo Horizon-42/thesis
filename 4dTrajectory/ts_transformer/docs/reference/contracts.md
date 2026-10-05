@@ -399,10 +399,11 @@ order and never overwritten (`instructions.artefact._fresh` refuses an existing 
 OPERATING DAY (C32) — a test day's tracks are never opened, and `write_signals` / `load_signals` refuse a test-day flight
 or one filed under another split; each flight carries `entry_time_utc` (row 0) and `landing_time_utc` — built by
 `build_series` + `usable_series` under the default `TSConfig`, so the population is the models'), `candidates.json`
-(each airport's candidate runways: the arrival manifest's `runway_targets`, the FAA CIFP runway geometry the modeling
-target is built from: position, elevation, true course, and since A22 (D61, `ts-instruction-candidates-v3`) each
-candidate's published vertical path `VerticalPath` — TCH, glidepath angle and DA above the threshold, read once from
-the harvest's runway data by the first runner, which refuses a candidate without them; the judge reads them from here,
+(each airport's candidate runways — since A32 (D78, `ts-instruction-candidates-v4`) every runway end that publishes a
+vertical path in the harvest's FAA CIFP runway data, decided by no flight (a flight landed on another end is refused by
+name and counted); before, the arrival manifest's `runway_targets` — their position, elevation, true course, and since
+A22 (D61) each candidate's published vertical path `VerticalPath` — TCH, glidepath angle and DA above the threshold, read
+once from the harvest's runway data by the first runner; the judge reads them from here,
 nothing reads the CIFP after the first runner — and every runway end the harvest builds, which the landing rule reads;
 E is `reference.elevation_m`), `spec.json` + `measurements.json`,
 `sentences_{train,select,val}.npz` + `labels.json` + `readout.{json,md}`, `conformance/` (below) and, once an executor spec
@@ -450,6 +451,14 @@ sentence is put on a coarser row interval Δ (2, 4, 8 s, D25) by `labeller.inter
 never stored: each 2 s word on the NEAREST Δ row, a tie on the later (D45), a heading word moved across a runway word in
 the frame where it is heard (D46: the class nearest its absolute track under the new course; no refusal). A spec is the vocabulary's format, not the data's: `instruction_spec --spec-from <artefact>`
 (`artefact.keep_spec`) keeps another artefact's spec byte for byte, and `spec_from.json` says so.
+
+**The faults of an observed track** (A40, D111, 2026-10-05; `instructions/faults.py`): `track_faults(signals)` marks the points
+of a flight's stored track no aircraft flies — a 2 s step more than `JUMP_RATIO` (3) times the median of the up to
+`AROUND_STEPS` (5) steps on each side (a jump), less than a third of it (a held position), a turn over `REVERSAL_DEG`
+(120°) between two consecutive moves (a reversal) — and `faulty_flights(artefact, split)` gives a split's marked flights
+by their place in the signals. Read when the artefact is read; the artefact is not changed. On A34's artefact at Δ = 4 s:
+train 498 of 40,530 closed-loop sentences marked (469 landed), select 177 of 6,199 (157 landed); held positions are most
+of them. Stage B's selection `landed` leaves them out (prior D111, B11).
 
 ### C31 · the aircraft filter: drop a flight only where dynamics are used
 
@@ -518,7 +527,16 @@ split's test).
 2026-09-24 (`autopilot/spec.py`, `autopilot/replay.py`), **changed 2026-10-01 (the user): the executor is checked by what
 it flies, not by its source**, **and since A29 (D73, 2026-10-04) every time it is opened**; v5 (`ts-executor-spec-v9`,
 vocabulary §5, §7.2 #3, §12.1 A4–A6, A19, A20, A29: one word clock — a sentence said on its own rows, D57 — a level word
-flown at T + E MSL, D58 — and no digest of code, D73). An executor spec is a directory
+flown at T + E MSL, D58 — and no digest of code, D73); v6 (`ts-executor-spec-v10`, A32): the start rule among the
+parameters (`start_rule`, D77: the start state's velocity from the observed rows at or before its row, `flights.start_state`;
+the user's choice from A33, only a rule of `FORMAL_START_RULES` is written or opened), the flight ended where the judge
+ends it (`autopilot/ends.py`, D79), the bank's limits from the first cycle (D84), the dynamics' chart at the airport
+reference (D81); the reference tracks (`ts-executor-conformance-reference-v6`) hold up to 10 train flights an airport
+with a labelled go-around besides the 50, and the check flies a fourth way, ``moved`` (every candidate's vertical path
+changed and the chart moved: the same states, commands, limits and end cycles, the behaviour check of D81 that
+replaced the scan of names in `tests/test_architecture.py`; its states horizontally within their own bound,
+`MOVED_HORIZONTAL_BOUND_M` 1e-4 m, the user's choice in A33: moving the chart's origin sideways changes the rounding by up
+to 2.2e-6 m on real flights, every discrete value the same; vertically within 1e-6 m as every way). An executor spec is a directory
 written once (`spec.json` + `measurements.json`, an existing file refuses): the parameters under their own sha
 (`ExecutorParams`: cycle, roll rate, τ_γ, γ̇_max factor, timeout factor — every value from the vocabulary, the
 procedure standards or a fixed choice, nothing from data; the decision-altitude check has none, D38), the vocabulary spec
@@ -609,11 +627,17 @@ refuses both.
 ### C38 · the closed-loop sentences: flown by an executor spec, corrected toward the observed path, checked by what they read
 
 2026-10-04 (`autopilot/closed_loop.py`, `instructions/artefact.py` `write_closed_loop` / `load_closed_loop` /
-`closed_loop_sentences` — since A22 (D61) the public reader: each sentence a `ClosedLoopSentence` with its first row, words,
-correction marks, all its states on the 2 s rows (`STATE_COLUMNS`) with the Δ rows marked — runner
+`closed_loop_sentences(artefact, split, Δ, spec)` — since A22 (D61) the public reader; since A32 (D82) each sentence a
+`ClosedLoopSentence` of two parts: `rows` (`SentenceRows`: its first row, words, correction marks, all its states on the
+2 s rows, `STATE_COLUMNS`, with the Δ rows marked — what a model may read) and `withheld` (`Withheld`: the landed runway
+and its index and the landing time from the signals' records, the capture row, go-around rows and stratum from the
+sentence file, the outcome, `timed_out`, e_y, e_h, the matched and observed rows and the rows without a correction —
+never an input) — runner
 `instruction_closed_loop` R50; design §4.9, D32–D34, D42, D44–D46). `<artefact>/closed_loop/` is written once, from a clean checkout (it records the commit),
 with an executor spec (C33): for each split and each row interval given (D25), `<split>_<Δ>s.npz`
-(`ts-instruction-closed-loop-v7` since A31, D74; refused unless every field is there and its spec sha is the artefact's): each flown
+(`ts-instruction-closed-loop-v7` since A31, D74; v8 since A32: the observed rows' velocity by the spec's start rule, D77,
+the track in [0°, 360°), the flight ended where the judge ends it, D79, e_y from the path's segments, D83; refused unless
+every field is there and its spec sha is the artefact's): each flown
 flight's words from its first predicted step (Δ row 16 s / Δ; row 0 says every column), which words the reading added
 (`correction`), its states on the data's 2 s rows from its first row to its last said row, its Δ rows marked
 (`on_interval`, D51, since A15; v3 stored the Δ rows only), observed before the first predicted step, flown from it — a
@@ -666,6 +690,18 @@ artefact's) and returns a `Loop` at each flight's first predicted step — the f
 observed time left from the first predicted step to the end of its labelled sentence × the timeout factor) and 900 s for
 each go-around up to the most given. `Loop.step(words [B, 5])` flies one Δ row and gives the states of the 2 s rows
 flown (`STATE_COLUMNS`) and the flights done; a go-around beyond the most refuses the row by name (`GoAroundBeyondMost`)
-before anything is flown; `Loop.outcome(f)` is `judge.outcome_of` on what the executor recorded. The closed-loop reading
+before anything is flown; `Loop.outcome(f)` is `judge.outcome_of` on what the executor recorded. `Loop.halt(flights)`
+holds flights (held where they are, their recorded command repeating, hearing no words, never becoming done); `Loop.copy(flights)` (A38, D97 (2)) is a loop
+of copies of chosen flights, repeats permitted, with everything the loop holds of them (`Executor.take`, `Spoken.take`, the
+grammar's words in force, the go-arounds, the time limits, which stay hidden, D90): flown on with the same words, a copy
+flies what its original flies and gets its outcome. A flight's states do not depend on the other flights of its loop
+(D97 (3)): measured on A34's artefact (train, Δ = 4 s, CPU) the batch's composition changes nothing, its size (a flight
+alone against chunks of 2048) moves states by <= 7.9e-10 m; the tests hold words, done and outcome exact and states within
+`STATE_BOUND_M` (the user, 2026-10-05). `start_moved(…, moves)` (A38, D97 (4)) starts each flight from a moved
+start: the flight checked against its stored signals unmoved, then its observed rows to the first predicted step turned
+about the airport reference, raised, and stretched about the first predicted step by the speed scale (positions and
+heights: the path angle kept) (`Move`, `moved_signals`); the start rule gives the state from the moved rows (so the
+speed follows the frame's ground scale at the moved rows, D87), the moved rows come back, the time limit is the
+flight's own (the user, 2026-10-05); `NO_MOVE` is `start` bit for bit. The closed-loop reading
 builds its `Loop` from the same pieces, so its sentences said through `start` give back their stored states and the
 replay's outcome (`tests/test_start.py`). The artefact's formats do not change.

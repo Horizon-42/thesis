@@ -3,17 +3,18 @@ flights the frontend's Training view reads: the observed track, the open-loop se
 Δ = 2, 4, 8 s the closed-loop sentence (each correction word marked) with its flown states, the judge's outcome and the
 decision-altitude check, each flown again here; the attitudes; the envelopes of every word (the views compute none).
 
-WHO. Of each split (`training_files.SPLITS`), per airport, ``--per-stratum`` straight-in and as many vectored flights,
-in a permutation seeded by ``--seed`` of the flights the formal closed-loop replays flew at every Δ (the executor spec's
-``replay-closed-<split>-<Δ>s``: train's 400 an airport, select's every labelled flight) — so each exported flight has a
-formal replay row, and must give it back.
+WHO (D86: no formal replay row is read). Of each split (`training_files.SPLITS`: train and select; `split_flights` takes
+any split, val included, for a readout that a plan makes, outline §6 item 4), per airport, ``--per-stratum``
+straight-in and as many vectored flights, in a permutation seeded by ``--seed`` of the flights with a closed-loop sentence
+at every Δ (`choose`), each one's stratum the sentence file's (D70) and its kind whether its sentence has a go-around.
 
 CHECKED, NOT TRUSTED. Every flight is read again by the labeller and must give its stored sentence (words and runway);
 every closed-loop sentence is flown again here from its first predicted step (`training_flights`, the setup the live
-executor shares; `replay.fly_batch`) and must give its stored states on every 2 s row (within the executor conformance's bound) and its
-formal replay row's outcome. The executor spec opens, and the closed-loop sentences are read, only for the code in the
+executor shares, after the start's refusals; `replay.fly_batch`) and must give its stored states on every 2 s row
+(within the executor conformance's bound) and its stored outcome (D74). The executor spec opens, and the closed-loop sentences are read, only for the code in the
 process that passes the labeller's, the executor's and the closed loop's checks, run here first
-(`closed_loop.require_conforming_closed_loop`, D73).
+(`closed_loop.require_conforming_closed_loop`, D73). One split's chosen flights, from their head to each Δ's closed-loop
+sentence flown again, are `split_flights` (A36): the Training export of the prior calls it with its own Δ.
 
 WRITES a set ``<root>/<airport>/training/<set-id>/sample.json`` and its entry in ``<root>/<airport>/training/index_v4.json``
 (`training_files`), never the instruction-v3 view's ``training/index.json``; refused when the set exists. Every airport
@@ -35,6 +36,8 @@ from typing import Any
 import numpy as np
 import torch
 
+from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG
+from trajectory_data_process.harvest.airports import load_airport
 from ts_transformer.autopilot import closed_loop, replay
 from ts_transformer.autopilot.conformance import STATE_BOUND_M
 from ts_transformer.autopilot.executor import Flown
@@ -45,46 +48,43 @@ from ts_transformer.experiments import training_flights
 from ts_transformer.experiments.training_attitude import attitude_payload, executor_attitude, observed_attitude
 from ts_transformer.instructions import training_files as files
 from ts_transformer.instructions.airport import AirportGeometry
-from ts_transformer.instructions.artefact import CANDIDATES_SCHEMA, CLOSED_LOOP_SCHEMA, SENTENCES_SCHEMA, ClosedLoopSentence
+from ts_transformer.instructions.artefact import (
+    CANDIDATES_SCHEMA, CLOSED_LOOP_SCHEMA, SENTENCES_SCHEMA, ClosedLoopSentence, closed_loop_indices, load_sentences,
+    signals_flights,
+)
 from ts_transformer.instructions.labeller.read import Reading, admit
 from ts_transformer.instructions.labeller.records import Instruction
 from ts_transformer.instructions.labeller.speed import span_checks
 from ts_transformer.instructions.labeller.vertical import tube_bounds, tube_checks
+from ts_transformer.instructions.readout import KINDS, STRATA as READOUT_STRATA
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import READING_RULE, SPEC_SCHEMA, VocabularySpec
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, ANGLE_LEVEL, COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words,
 )
-from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
+from ts_transformer.io_utils import file_sha256
+from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 #: The row intervals of the ablation (D25), each a closed-loop sentence of every exported flight.
 ROW_INTERVALS_S = (2.0, 4.0, 8.0)
-#: The strata a split's flights are drawn by (the replay's `stratum`), each ``--per-stratum`` flights.
-STRATA = ("straight-in", "vectored")
+#: The strata a split's flights are drawn by (the sentence file's, D70), each ``--per-stratum`` flights.
+STRATA = READOUT_STRATA
 
 
-def formal_rows(executor: Path, split: str) -> dict[float, dict[str, dict[str, Any]]]:
-    """The formal closed-loop replay's rows of ``split`` at each Δ, by dataset id."""
-    out = {}
-    for interval in ROW_INTERVALS_S:
-        payload = json.loads((executor / f"replay-closed-{split}-{interval:g}s" / "replay.json").read_text(encoding="utf-8"))
-        if not payload["closed_loop"] or payload["row_interval_s"] != interval or payload["split"] != split:
-            raise ValueError(f"{executor} replay-closed-{split}-{interval:g}s is not the closed-loop replay of {split} "
-                             f"at {interval:g} s")
-        out[interval] = {row["dataset_id"]: row for row in payload["flights"]}
-    return out
-
-
-def choose(rows: dict[float, dict[str, dict[str, Any]]], airport: str, per_stratum: int, seed: int
-           ) -> list[str]:
-    """The airport's flights of the split (module docstring): ``per_stratum`` of each stratum among those flown at every
-    Δ, in a seeded permutation of their sorted ids; refused when a stratum has too few."""
-    common = set.intersection(*(set(by_id) for by_id in rows.values()))
+def choose(indices: list[set[int]], strata: dict[int, str], records: list[dict[str, Any]], airport: str,
+           per_stratum: int, seed: int) -> list[str]:
+    """The airport's flights of the split (module docstring): ``per_stratum`` of each stratum (``strata``: the sentence
+    file's by signal index, D70) among those with a closed-loop sentence at every Δ (``indices``: each Δ's flights,
+    `artefact.closed_loop_indices`; ``records``: the split's flight records, `artefact.signals_flights`), in a seeded
+    permutation of their sorted ids; refused when a stratum has too few."""
+    common = set.intersection(*indices)
     chosen = []
     for stratum in STRATA:
-        pool = sorted(d for d in common if rows[2.0][d]["airport"] == airport and rows[2.0][d]["stratum"] == stratum)
+        pool = sorted(records[i]["dataset_id"] for i in common
+                      if records[i]["airport"] == airport and strata[i] == stratum)
         if len(pool) < per_stratum:
-            raise ValueError(f"{airport}: {len(pool)} {stratum} flights flown at every row interval, {per_stratum} asked")
+            raise ValueError(f"{airport}: {len(pool)} {stratum} flights with a closed-loop sentence at every row interval, "
+                             f"{per_stratum} asked")
         order = np.random.default_rng(seed).permutation(len(pool))
         chosen += [pool[i] for i in order[:per_stratum]]
     return chosen
@@ -187,25 +187,25 @@ def flight_head(flight: FlightSignals, flight_key: str, split: str, stratum: str
 
 def flown_states_row_cycles(sentence: ClosedLoopSentence, cycle_s: float, step_s: float) -> np.ndarray:
     """The cycle of each flown 2 s row of a stored sentence, from its first predicted step (the replay's cycle 0)."""
-    return np.arange(len(sentence.flown_states)) * int(round(step_s / cycle_s))
+    return np.arange(len(sentence.rows.flown_states)) * int(round(step_s / cycle_s))
 
 
 def replay_payload(flown: Flown, j: int, verdict: Verdict, part: replay.Batch, sentence: ClosedLoopSentence,
-                   formal: dict[str, Any], aero: np.ndarray, spec: VocabularySpec, words: Words) -> dict[str, Any]:
+                   aero: np.ndarray, spec: VocabularySpec, words: Words) -> dict[str, Any]:
     """The closed-loop sentence flown again (module docstring): refused unless it gives its stored states on every 2 s
-    row and its formal row's outcome; its outcome, crossing and decision-altitude check with the DA point's place, the
+    row and its stored outcome (D74, D86); its outcome, crossing and decision-altitude check with the DA point's place, the
     flight to its outcome on the 2 s rows from the first predicted step (``track``, with its attitude) and the judge's
     envelopes on it (refused unless they end within it)."""
     geometry = part.geometries[j]
     rows = flown_states_row_cycles(sentence, flown.cycle_s, spec.step_s)
     track = flown_track(flown.states[j, : rows[-1] + 1].cpu().numpy(), geometry)
     again = np.column_stack([track["e"][rows], track["n"][rows], track["height"][rows]])
-    apart = float(np.abs(again - sentence.flown_states[:, :3]).max())
+    apart = float(np.abs(again - sentence.rows.flown_states[:, :3]).max())
     if not apart <= STATE_BOUND_M:                     # a NaN state is refused too
         raise ValueError(f"{part.signals[j].dataset_id}: flown again {apart:.3g} m from its closed-loop states")
-    if verdict.outcome != formal["outcome"] or verdict.outcome != sentence.outcome:
-        raise ValueError(f"{part.signals[j].dataset_id}: flown again to {verdict.outcome}, the formal replay to "
-                         f"{formal['outcome']}, stored {sentence.outcome}")
+    if verdict.outcome != sentence.withheld.outcome:
+        raise ValueError(f"{part.signals[j].dataset_id}: flown again to {verdict.outcome}, stored "
+                         f"{sentence.withheld.outcome}")
     crossing = training_flights.crossing_payload(verdict, flown, j, geometry)
     judged = None
     smoothed = read_flown(flown, j, verdict.outcome, verdict.end_row, geometry, part.signals[j], spec)
@@ -240,8 +240,11 @@ def replay_payload(flown: Flown, j: int, verdict: Verdict, part: replay.Batch, s
             "attitude": attitude_payload(executor_attitude(flown, j, cycles, aero)), "envelopes": judged}
 
 
-def closed_loop_payload(sentence: ClosedLoopSentence, replayed: dict[str, Any], interval_s: float,
+def closed_loop_payload(stored: ClosedLoopSentence, replayed: dict[str, Any], interval_s: float,
                         geometry: AirportGeometry, words: Words) -> dict[str, Any]:
+    """A closed-loop sentence as the Training view draws it: its rows, and — for the view's readouts, never a model's
+    input — what is withheld (D82)."""
+    sentence, withheld = stored.rows, stored.withheld
     states = sentence.states
     lat, lon = geometry.frame.latlon_from_horizontal(states[:, 0], states[:, 1])
     return {"rowIntervalS": interval_s, "firstRow": sentence.first_row, "startRow": sentence.start,
@@ -253,10 +256,10 @@ def closed_loop_payload(sentence: ClosedLoopSentence, replayed: dict[str, Any], 
                        "heightMslM": files.rounded(states[:, 2], 1), "trackDeg": files.rounded(states[:, 3], 2),
                        "groundSpeedMps": files.rounded(states[:, 4], 2), "verticalRateMps": files.rounded(states[:, 5], 2),
                        "onInterval": [int(v) for v in sentence.on_interval]},
-            "lateralM": files.nullable(sentence.lateral_m, 1), "verticalM": files.nullable(sentence.vertical_m, 1),
-            "uncorrectable": sentence.uncorrectable.astype(int).tolist(),
-            "observedRow": [int(v) for v in sentence.observed_row], "matchedRow": files.rounded(sentence.matched_row, 2),
-            "timedOut": bool(sentence.timed_out), "replay": replayed}
+            "lateralM": files.nullable(withheld.lateral_m, 1), "verticalM": files.nullable(withheld.vertical_m, 1),
+            "uncorrectable": withheld.uncorrectable.astype(int).tolist(),
+            "observedRow": [int(v) for v in withheld.observed_row], "matchedRow": files.rounded(withheld.matched_row, 2),
+            "timedOut": bool(withheld.timed_out), "replay": replayed}
 
 
 # ---- the set's head
@@ -278,6 +281,25 @@ def vocabulary_block(spec: VocabularySpec, words: Words) -> dict[str, Any]:
                       "unspecified": words.speed_unspecified, "toleranceMps": spec.speed_tolerance_mps},
             "closedLoopLateralM": spec.closed_loop_lateral_m, "closedLoopVerticalM": spec.closed_loop_vertical_m,
             "rowIntervalsS": list(ROW_INTERVALS_S)}
+
+
+def candidate_hae_minus_msl_m(runway_ends_from: dict[str, str], geometry: AirportGeometry) -> dict[str, float]:
+    """Each candidate's HAE − MSL offset, metres by ident, from the published runway data its candidates were read from
+    (the artefact's ``signals.json`` ``runway_ends_from``: the runway configuration and the CIFP, refused unless the
+    files are those, by sha256): what the data plane subtracts from the reported heights of a flight landing there. A
+    flight's MSL height plus its runway's offset is the height its aircraft reported — the ellipsoid height Cesium draws
+    in. Refused by name for a candidate the published data gives no offset (D78: a candidate needs no arrival, so the
+    arrival manifest's runway targets cannot give it)."""
+    for name, path in (("config", DEFAULT_CONFIG), ("cifp", DEFAULT_CIFP)):
+        if file_sha256(path) != runway_ends_from[f"{name}_sha256"]:
+            raise ValueError(f"{path} is not the {name} the artefact's candidates were read from "
+                             f"(sha256 {runway_ends_from[f'{name}_sha256'][:12]} recorded)")
+    published = {str(runway.ident).upper(): float(runway.hae_minus_msl_m)
+                 for runway in load_airport(geometry.code, config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways}
+    missing = [c.ident for c in geometry.candidates if c.ident not in published]
+    if missing:
+        raise ValueError(f"{geometry.code}: the published runway data gives no height offset for candidate(s) {missing}")
+    return {c.ident: published[c.ident] for c in geometry.candidates}
 
 
 def candidates_block(geometry: AirportGeometry, hae_minus_msl_m: dict[str, float]) -> list[dict[str, Any]]:
@@ -324,44 +346,78 @@ def index_entry(set_id: str, sample: dict[str, Any]) -> dict[str, Any]:
             "cohort": sample["cohort"], "source": sample["source"]}
 
 
-def build_airport(airport: str, instructions: Path, executor: Path, params: Any, words: Words, *, per_stratum: int,
+def heads(flights: training_flights.SetFlights, stored: dict[int, ClosedLoopSentence], split: str,
+          geometry: AirportGeometry, words: Words) -> dict[str, dict[str, Any]]:
+    """Each flight's head (`flight_head`) by dataset id: its stratum its stored closed-loop sentence's (the sentence
+    file's, D70) and its kind whether that sentence says a go-around."""
+    drawn, out = flights.drawn, {}
+    for j, (index, flight, series, reading) in enumerate(zip(drawn.indices, drawn.signals, drawn.series,
+                                                             flights.readings)):
+        sentence = stored[index]
+        said_go_around = bool((sentence.rows.grid[:, RUNWAY] == RUNWAY_GO_AROUND).any())
+        out[flight.dataset_id] = flight_head(flight, series.scenario.source["flight_key"], split,
+                                             sentence.withheld.stratum, KINDS[said_go_around], drawn.groups[j], reading,
+                                             geometry, observed_attitude(series), words)
+    return out
+
+
+def split_flights(instructions: Path, split: str, chosen: list[str], intervals: tuple[float, ...], params: Any,
+                  words: Words, *, device: torch.device) -> tuple[list[dict[str, Any]], AirportGeometry]:
+    """The payloads of the flights ``chosen`` of ``split`` (one airport's; any split), in that order: each one's head
+    (`flight_head`, its stratum the stored sentence's at the first Δ given, D70, and its kind whether that closed-loop
+    sentence says a go-around) and its closed-loop sentence at
+    each Δ of ``intervals``, flown again against its stored states and outcome (`replay_payload`, D86). Shared with the
+    Training export of the prior (`experiments/prior_training_export.py`)."""
+    spec = words.spec
+    if not intervals or not chosen:
+        raise ValueError(f"{split}: split_flights needs at least one row interval and one flight")
+    flights = training_flights.open_flights(instructions, split, chosen, words)
+    drawn = flights.drawn
+    airports = sorted({flight.airport for flight in drawn.signals})
+    if len(airports) != 1:
+        raise ValueError(f"{split}: the chosen flights land at {airports}, not at one airport")
+    geometry = drawn.geometries[airports[0]]
+    having = [closed_loop_indices(instructions, split, interval, spec) for interval in intervals]
+    missing = sorted(flight.dataset_id for index, flight in zip(drawn.indices, drawn.signals)
+                     if any(index not in one for one in having))
+    if missing:
+        raise ValueError(f"{split}: {missing[:3]} have no closed-loop sentence at every row interval of {list(intervals)}")
+    per_flight: dict[str, dict[str, Any]] = {}
+    for interval in intervals:          # one Δ's sentences loaded at a time (a sentence read is a view into its file)
+        stored = training_flights.stored_closed_loop(instructions, split, interval, words)
+        if not per_flight:
+            per_flight = heads(flights, stored, split, geometry, words)
+        batch, sentences = training_flights.closed_loop_batch(instructions, split, flights, stored, interval, params,
+                                                              words)
+        del stored
+        flown, verdicts = replay.fly_batch(batch, params, words, device=device)
+        aero = batch.inputs(params.start_rule, device).aero_params.cpu().numpy()
+        for j, (flight, verdict) in enumerate(zip(batch.signals, verdicts)):
+            replayed = replay_payload(flown, j, verdict, batch, sentences[j], aero[j], spec, words)
+            per_flight[flight.dataset_id]["closedLoop"][f"{interval:g}"] = closed_loop_payload(
+                sentences[j], replayed, interval, geometry, words)
+    return [per_flight[d] for d in chosen], geometry
+
+
+def build_airport(airport: str, instructions: Path, params: Any, words: Words, *, per_stratum: int,
                   seed: int, device: torch.device) -> tuple[dict[str, Any], int]:
     """The airport's set payload (without its head) and how many flights it holds."""
-    spec = words.spec
     flights_out: list[dict[str, Any]] = []
     geometry: AirportGeometry | None = None
     for split in files.SPLITS:
-        rows = formal_rows(executor, split)
-        chosen = choose(rows, airport, per_stratum, seed)
-        flights = training_flights.open_flights(instructions, split, chosen, words)
-        drawn, readings = flights.drawn, flights.readings
-        geometry = drawn.geometries[airport]
-        per_flight: dict[str, dict[str, Any]] = {}
-        for j, (flight, series, reading) in enumerate(zip(drawn.signals, drawn.series, readings)):
-            formal = rows[2.0][flight.dataset_id]
-            per_flight[flight.dataset_id] = flight_head(
-                flight, series.scenario.source["flight_key"], split, formal["stratum"], formal["kind"], drawn.groups[j],
-                reading, geometry, observed_attitude(series), words)
-        for interval in ROW_INTERVALS_S:
-            stored = training_flights.stored_closed_loop(instructions, split, interval, words)
-            batch, sentences = training_flights.closed_loop_batch(flights, stored, interval, words)
-            flown, verdicts = replay.fly_batch(batch, params, words, device=device)
-            aero = batch.inputs(device).aero_params.cpu().numpy()
-            for j, (flight, verdict) in enumerate(zip(batch.signals, verdicts)):
-                dataset_id = flight.dataset_id
-                sentence = sentences[j]
-                replayed = replay_payload(flown, j, verdict, batch, sentence, rows[interval][dataset_id], aero[j], spec,
-                                          words)
-                per_flight[dataset_id]["closedLoop"][f"{interval:g}"] = closed_loop_payload(
-                    sentence, replayed, interval, geometry, words)
-        flights_out += [per_flight[d] for d in chosen]
+        labelled = load_sentences(instructions, split, words.spec, ("signal_index",))
+        strata = dict(zip(labelled["signal_index"].tolist(), labelled["stratum"].tolist()))
+        chosen = choose([closed_loop_indices(instructions, split, interval, words.spec) for interval in ROW_INTERVALS_S],
+                        strata, signals_flights(instructions, split), airport, per_stratum, seed)
+        payloads, geometry = split_flights(instructions, split, chosen, ROW_INTERVALS_S, params, words, device=device)
+        flights_out += payloads
     return {"flights": flights_out, "geometry": geometry}, len(flights_out)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--instructions", type=Path, required=True)
-    parser.add_argument("--executor", type=Path, required=True, help="the executor spec directory with its replays")
+    parser.add_argument("--executor", type=Path, required=True, help="the executor spec directory")
     parser.add_argument("--set-id", required=True)
     parser.add_argument("--root", type=Path, default=REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airports")
     parser.add_argument("--airports", nargs="+", default=None, help="default: every airport of the artefact")
@@ -382,14 +438,14 @@ def main(argv: list[str] | None = None) -> int:
     existing = {airport: files.read_index(args.root / airport / "training", airport, args.set_id) for airport in airports}
     built = {}
     for airport in airports:
-        payload, count = build_airport(airport, instructions, executor, params, words, per_stratum=args.per_stratum,
+        payload, count = build_airport(airport, instructions, params, words, per_stratum=args.per_stratum,
                                        seed=args.seed, device=torch.device(args.device))
         geometry = payload.pop("geometry")
-        hae = files.runway_hae_minus_msl_m(signals_record["sources"], airport, arrival_manifest_path(airport))
+        hae = candidate_hae_minus_msl_m(signals_record["runway_ends_from"], geometry)
         cohort = {"splits": {split: 2 * args.per_stratum for split in files.SPLITS}, "perStratum": args.per_stratum,
                   "strata": list(STRATA), "seed": args.seed,
-                  "drawnFrom": "a seeded permutation, per split and stratum, of the flights the formal closed-loop "
-                               "replays flew at every row interval (train: 400 an airport; select: every labelled flight)"}
+                  "drawnFrom": "a seeded permutation, per split and stratum, of the flights with a closed-loop sentence "
+                               "at every row interval"}
         source = {"instructions": repo_relative(instructions), "executor": repo_relative(executor),
                   "specSha256": spec.sha256, "executorSpecSha256": record["sha256"], "git": git}
         sample = sample_of(args.set_id, geometry, hae, source, cohort, words, params.cycle_s, payload["flights"])

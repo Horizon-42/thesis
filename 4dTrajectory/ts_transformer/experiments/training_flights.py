@@ -6,9 +6,10 @@ the Training sets, which the executor does not know.
 
 A flight is drawn by its dataset id, read again by the labeller and checked against its stored sentence, then set up on
 its closed-loop sentence at the row interval Δ from its first predicted step — `closed_loop.replay_batch`, as the formal
-replay set it up. `fly_single` flies one of them with the single-flight executor, driven as
-`autopilot.conformance.fly_single` drives it (a Δ row's words heard on the cycle that starts it), optionally stopped
-before a cycle.
+replay sets it up — after the start's refusals (`autopilot.start.require_startable`, D67: the closed-loop file flown by
+the spec's parameters, each sentence's observed rows its flight's by the start rule), so its state there is the start's
+(`flights.start_state`, D77). `fly_single` flies one of them with the single-flight executor's one loop
+(`autopilot.single.fly`, the executor check's), optionally stopped before a cycle.
 """
 
 from __future__ import annotations
@@ -28,9 +29,8 @@ from ts_transformer.autopilot.judge import Verdict
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.instructions.airport import AirportGeometry
-from ts_transformer.instructions.artefact import (
-    ClosedLoopSentence, closed_loop_path, closed_loop_sentences, load_closed_loop, load_sentences, load_signals,
-)
+from ts_transformer.autopilot.start import require_startable
+from ts_transformer.instructions.artefact import ClosedLoopSentence, closed_loop_sentences, load_sentences, load_signals
 from ts_transformer.instructions.labeller.read import Reading, read_flight
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import Words
@@ -91,58 +91,45 @@ def owned_signals(flight: FlightSignals) -> FlightSignals:
 def owned_sentence(sentence: ClosedLoopSentence) -> ClosedLoopSentence:
     """A closed-loop sentence with arrays of its own (`closed_loop_sentences` gives views into the split's file, ~0.1–0.7
     GB loaded, which a kept view would keep alive whole)."""
-    return dataclasses.replace(sentence, **{f.name: getattr(sentence, f.name).copy()
-                                            for f in dataclasses.fields(sentence)
-                                            if isinstance(getattr(sentence, f.name), np.ndarray)})
+    def owned(part: Any) -> Any:
+        return dataclasses.replace(part, **{f.name: getattr(part, f.name).copy() for f in dataclasses.fields(part)
+                                            if isinstance(getattr(part, f.name), np.ndarray)})
+    return ClosedLoopSentence(rows=owned(sentence.rows), withheld=owned(sentence.withheld))
 
 
 def stored_closed_loop(instructions: Path, split: str, interval_s: float, words: Words) -> dict[int, ClosedLoopSentence]:
-    """The split's closed-loop sentences at ``interval_s``, by their flight's place in the split's signals."""
-    return closed_loop_sentences(load_closed_loop(closed_loop_path(instructions, split, interval_s), words.spec))
+    """The split's closed-loop sentences at ``interval_s``, by their flight's place in the split's signals (the reader of
+    vocabulary §6 item 3, D82)."""
+    return closed_loop_sentences(instructions, split, interval_s, words.spec)
 
 
-def closed_loop_batch(flights: SetFlights, stored: dict[int, ClosedLoopSentence], interval_s: float, words: Words
+def closed_loop_batch(instructions: Path, split: str, flights: SetFlights, stored: dict[int, ClosedLoopSentence],
+                      interval_s: float, params: ExecutorParams, words: Words
                       ) -> tuple[replay.Batch, list[ClosedLoopSentence]]:
-    """The flights on their closed-loop sentences at ``interval_s`` from their first predicted step, as the formal
-    replay flew them (`replay.batch_of`, `closed_loop.replay_batch`), and each one's stored sentence; refused when a
-    flight has none."""
+    """The flights of ``split`` on their closed-loop sentences at ``interval_s`` from their first predicted step (module
+    docstring: `replay.batch_of`, `closed_loop.replay_batch`, after the start's refusals), and each one's stored
+    sentence; refused when a flight has none."""
     batch = replay.batch_of(flights.drawn, list(range(len(flights.readings))), flights.readings, interval_s, words)
     # the set's sentences copied BEFORE the batch is built on them: its words grids would be views into the file
     owned = {index: owned_sentence(stored[index]) for index in batch.indices if index in stored}
-    batch, missing = closed_loop.replay_batch(batch, owned, words)
-    if missing or len(batch.indices) != len(flights.readings):
-        raise ValueError(f"{len(flights.readings) - len(batch.indices)} of the set's flights have no closed-loop sentence "
+    if len(owned) != len(flights.readings):
+        raise ValueError(f"{len(flights.readings) - len(owned)} of the set's flights have no closed-loop sentence "
                          f"at {interval_s:g} s (refused on the interval: {batch.drawn['refused_on_interval']})")
+    require_startable(instructions, split, interval_s, owned, dict(zip(flights.drawn.indices, flights.drawn.signals)),
+                      flights.drawn.geometries, params, words)
+    batch, _ = closed_loop.replay_batch(batch, owned, words)
     return batch, [owned[index] for index in batch.indices]
 
 
 def fly_single(batch: replay.Batch, inputs: FlightInputs, j: int, params: ExecutorParams, words: Words, *,
                stop_cycle: int | None = None, superseded: Callable[[], bool] = lambda: False) -> tuple[Flown, bool]:
-    """Flight ``j`` of ``batch`` (``inputs``: the batch's, `replay.Batch.inputs`) with the single-flight executor, driven
-    as `autopilot.conformance.fly_single` drives it — its time limit and reserve, a Δ row's words heard on the cycle that
-    starts it — to its end, or stopped before cycle ``stop_cycle``: the flown record (stopped: ``done_cycle`` the last
-    cycle flown) and whether the stop ended it. ``superseded`` is asked before each cycle; when it says so,
-    `InterruptedError`."""
+    """Flight ``j`` of ``batch`` (``inputs``: the batch's, `replay.Batch.inputs`) with the single-flight executor's one
+    loop (`single.fly`) — its time limit and reserve — to its end, or stopped before cycle ``stop_cycle``."""
     limits, reserve = replay.time_limits_s(batch, params, words.spec.step_s), replay.reserve_s(batch)
     flight = FlightInputs(**{f.name: getattr(inputs, f.name)[j: j + 1] for f in dataclasses.fields(FlightInputs)})
-    executor = single.SingleExecutor(flight, batch.geometries[j], batch.approach_ias_mps[j], params, words,
-                                     step_s=batch.row_interval_s, time_limit_s=limits[j], reserve_s=reserve)
-    sentence = single.Sentence(batch.sentences[j].grid, words, step_s=batch.row_interval_s)
-    stopped = False
-    for cycle in range(executor.cycles):
-        if stop_cycle is not None and cycle >= stop_cycle:
-            stopped = True
-            break
-        if superseded():
-            raise InterruptedError(f"superseded after {cycle} cycles")
-        sentence_s = cycle * params.cycle_s
-        executor.cycle(sentence.at(sentence_s), sentence_s)
-        if executor.done:
-            break
-    flown = executor.flown()
-    if stopped:
-        flown = dataclasses.replace(flown, done_cycle=torch.full_like(flown.done_cycle, executor.count - 1))
-    return flown, stopped
+    return single.fly(flight, batch.geometries[j], batch.approach_ias_mps[j], batch.sentences[j].grid, params, words,
+                      step_s=batch.row_interval_s, time_limit_s=limits[j], reserve_s=reserve, stop_cycle=stop_cycle,
+                      superseded=superseded)
 
 
 def last_state_cycle(outcome: str, end_row: int) -> int:

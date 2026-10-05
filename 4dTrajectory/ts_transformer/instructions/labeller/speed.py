@@ -150,6 +150,8 @@ def read_speed(time: np.ndarray, speed: np.ndarray, before_threshold_m: np.ndarr
             say(value, row, "target" if value == target_index else "run")
     if capture_row is None:
         return SpeedReading(instructions=instructions, pieces=pieces, unspecified_row=None)
+    if unspecified_row >= len(speed):             # a hold that runs to the approach's last row: no row says it
+        raise Refused("unspecified past the approach", f"row {unspecified_row} of an approach of {len(speed)} rows")
     instructions.append(Instruction(SPEED, words.speed_unspecified, unspecified_row,
                                     "initial" if unspecified_row == 0 else "unspecified"))
     return SpeedReading(instructions=instructions, pieces=pieces, unspecified_row=unspecified_row)

@@ -18,7 +18,7 @@ import torch
 from aircraft.aero_params import aero_params_for_aircraft
 from flight_scenarios.scenario import aircraft_for_code
 from ts_transformer.autopilot import inverse
-from ts_transformer.autopilot.flights import FlightInputs
+from ts_transformer.autopilot.flights import FlightInputs, frame_params
 from ts_transformer.autopilot.frame import AirportCharts, compass_deg, read_state, wrap180
 from ts_transformer.autopilot.plant import Plant
 from ts_transformer.autopilot.sentence import Sentences
@@ -212,7 +212,7 @@ def _params(**changes):
     from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
 
     base = ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, path_time_constant_s=2.0, path_rate_factor=2.0,
-                          timeout_factor=1.5)
+                          timeout_factor=1.5, start_rule="trailing-fit-8s")
     return replace(base, **changes)
 
 
@@ -224,7 +224,8 @@ def test_the_parameters_are_checked_against_the_designs_constraints():
                             (dict(timeout_factor=0.0), "positive"),
                             (dict(path_rate_factor=0.0), "positive"),
                             (dict(cycle_s=math.nan), "finite"),
-                            (dict(bank_rate_deg_s=math.nan), "finite")):
+                            (dict(bank_rate_deg_s=math.nan), "finite"),
+                            (dict(start_rule="fit-4s"), "start rule 'fit-4s' is none of")):
         with pytest.raises(ValueError, match=message):
             replace(params, **change).check(one, 2.0)
     with pytest.raises(ValueError, match="row interval 2.5 s"):
@@ -332,12 +333,10 @@ def _physics(signals, geometry, approach_ias=None):
     gamma = math.atan2(signals.vertical_rate_mps[0], signals.ground_speed_mps[0])
     state = [lat, lon, signals.altitude_m[0], signals.ground_speed_mps[0] / math.cos(gamma),
              math.radians(90.0 - signals.track_deg[0]), gamma, mass]
-    candidate = geometry.candidates[0]
-    tlat, tlon = geometry.frame.latlon_from_horizontal(candidate.threshold_e_m, candidate.threshold_n_m)
     inputs = FlightInputs(
         initial_state=torch.tensor([state], dtype=F64),
         aero_params=torch.tensor([[aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall]], dtype=F64),
-        frame_params=torch.tensor([[tlat, tlon, candidate.elevation_m, 0.0]], dtype=F64),
+        frame_params=torch.tensor(np.array([frame_params(geometry)]), dtype=F64),           # the airport's chart (D81)
         max_thrust_n=torch.tensor([aircraft.engine.max_thrust_total_n], dtype=F64))
     return (inputs, Runways.of([geometry], spec(), dtype=F64, device=CPU),
             AirportCharts.of([geometry], dtype=F64, device=CPU),
@@ -1116,11 +1115,25 @@ def test_the_executor_spec_is_written_once_with_no_digest_of_code(tmp_path):
     for broken, message in (({**stored, "params": {**stored["params"], "bank_rate_deg_s": 9.0}}, "do not hash"),
                             ({**stored, "params": {k: v for k, v in stored["params"].items()
                                                    if k != "timeout_factor"}}, "missing"),
-                            ({**stored, "schema": "ts-executor-spec-v8"},
+                            ({**stored, "schema": "ts-executor-spec-v9"},
                              f"is not a {executor_spec.EXECUTOR_SPEC_SCHEMA} file")):
         (tmp_path / "spec.json").write_text(json.dumps(broken))
         with pytest.raises(ValueError, match=message):
             executor_spec.load_spec(tmp_path)
+    # D77: the start rule is a parameter of the spec; the centred fit (A33's comparison only) is no spec's — not written,
+    # and not opened
+    centred = replace(params, start_rule="centred-fit-15s")
+    with pytest.raises(ValueError, match="start rule 'centred-fit-15s' is none of"):
+        executor_spec.write_spec(tmp_path / "centred", centred, "vocabulary", {}, source)
+    (tmp_path / "spec.json").write_text(json.dumps({**stored, "params": executor_spec.params_to_dict(centred),
+                                                    "sha256": executor_spec.params_sha256(centred)}))
+    with pytest.raises(ValueError, match="start rule 'centred-fit-15s' is none of"):
+        executor_spec.load_spec(tmp_path)
+    from ts_transformer.experiments import executor_spec as runner
+
+    with pytest.raises(SystemExit):                     # the runner takes a formal rule only
+        runner.main(["--instructions", str(tmp_path), "--dir", str(tmp_path / "new"), "--start-rule", "centred-fit-15s"])
+    assert not (tmp_path / "new").exists()
 
 
 def test_an_executor_spec_is_opened_only_against_its_own_vocabulary_and_after_both_checks(tmp_path, monkeypatch):
@@ -1163,8 +1176,8 @@ def test_the_decision_altitude_check_reads_candidates_json_as_the_harvest_publis
     runways = tuple(load_airport("KRDU", config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways)
     guided = [r for r in runways if r.threshold_crossing_height_m is not None and r.published_glidepath_deg is not None
               and r.published_minima.vertically_guided]
-    targets = {r.ident: {"lat": r.lat, "lon": r.lon, "elevation_msl_m": 120.0, "course_deg": r.course_deg} for r in guided}
-    built = airport_geometry("KRDU", targets, runways)
+    built = airport_geometry("KRDU", runways)
+    assert [c.ident for c in built.candidates] == sorted(r.ident.upper() for r in guided)       # D78
     write_candidates(tmp_path, {"KRDU": built})
     stored = load_candidates(tmp_path)["KRDU"]
     by_ident = {r.ident: r for r in guided}
@@ -1209,8 +1222,8 @@ def _batch(signals, reading, interval_s=2.0):
 
     geometry, words = instruction_airport(), Words(spec())
     sentence = replay.sentence_on_interval(reading, signals, interval_s, geometry, words)
-    return replay.Batch(indices=[0], signals=[replay.from_row(signals, sentence.first_row)], series=[],
-                        readings=[reading],
+    return replay.Batch(indices=[0], signals=[replay.from_row(signals, sentence.first_row)], observed=[signals],
+                        series=[], readings=[reading],
                         sentences=[sentence], row_interval_s=interval_s, geometries=[downwind_airport(geometry)],
                         approach_ias_mps=[], groups=[replay.OWN], drawn={})
 
@@ -1440,3 +1453,285 @@ def test_a_multi_aircraft_batch_with_go_arounds_flies_each_as_it_flies_alone():
         assert torch.equal(together.states[j, :done + 2], solo.states[0, :done + 2])
         for name in solo.modes:
             assert torch.equal(together.modes[name][j, :done + 1], solo.modes[name][0, :done + 1]), name
+
+
+# ---- where a flight ends (D79), the bank from the first cycle (D84), the airport's chart (D81)
+def _end_airport():
+    """`instruction_airport` with a second candidate "09B" on 09's centreline, 3 km before its threshold, its course 10°
+    off 09's (not a parallel, still lined up for a flight on 09's final, which crosses 09B's threshold plane first); the
+    reference point moved 1.5 km east and 0.8 km north of 09's threshold (the airport frame's origin is no threshold)."""
+    from ts_transformer.instructions.airport import AirportGeometry
+
+    geometry = instruction_airport()
+    data = geometry.to_dict()
+    other = {**data["candidates"][0], "ident": "09B", "threshold_e_m": -3000.0, "course_deg": 80.0}
+    data["candidates"].append(other)
+    data["runway_ends"].append({key: other[key] for key in ("ident", "threshold_e_m", "threshold_n_m", "course_deg")})
+    for item in (*data["candidates"], *data["runway_ends"]):
+        item["threshold_e_m"] -= 1500.0
+        item["threshold_n_m"] -= 800.0
+    return AirportGeometry.from_dict(data)
+
+
+def _east_flight(geometry, speed_mps, *, e_m=-6500.0, height_m=400.0, track_deg=90.0):
+    """One A320 flying east level from ``e_m`` on 09's centreline at ``height_m`` MSL: its inputs (the airport's chart,
+    D81), approach speed and a sentence of one row — runway 09, its course, its level, its speed."""
+    from ts_transformer.autopilot.speed import approach_speed_ias_mps
+
+    words = Words(spec())
+    aircraft = aircraft_for_code("A320")
+    aero = aero_params_for_aircraft(aircraft)
+    lat, lon = geometry.frame.latlon_from_horizontal(e_m, -800.0)                 # on 09's centreline
+    inputs = FlightInputs(
+        initial_state=torch.tensor([[lat, lon, height_m, speed_mps, math.radians(90.0 - track_deg), 0.0, 62000.0]],
+                                   dtype=F64),
+        aero_params=torch.tensor([[aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall]], dtype=F64),
+        frame_params=torch.tensor(np.array([frame_params(geometry)]), dtype=F64),
+        max_thrust_n=torch.tensor([aircraft.engine.max_thrust_total_n], dtype=F64))
+    grid = np.array([[0, words.heading_class(90.0, 90.0), words.altitude_index(height_m - geometry.elevation_m), 0,
+                      words.speed_index(max(speed_mps, words.spec.speed_min_mps))]], dtype=np.int64)
+    return inputs, approach_speed_ias_mps("A320", 62000.0), grid, words
+
+
+def _three_ways(geometry, inputs, approach, grid, words, *, limit_s=200.0):
+    """The flight flown in each of the executor's three ways, each to its end: ``{way: (done cycle, Flown)}``."""
+    from ts_transformer.autopilot import single
+    from ts_transformer.autopilot.executor import Executor, fly
+    from ts_transformer.autopilot.lateral import Runways
+
+    params = _params()
+    runways, charts = Runways.of([geometry], spec(), dtype=F64, device=CPU), AirportCharts.of([geometry], dtype=F64,
+                                                                                            device=CPU)
+    ias, limit = torch.tensor([approach], dtype=F64), torch.tensor([limit_s], dtype=F64)
+    out = {}
+    flown = fly(inputs, Sentences([grid], words, step_s=2.0, device=CPU), runways, charts, ias, params, words,
+                time_limit_s=limit, reserve_s=0.0)
+    out["batch"] = (int(flown.done_cycle[0]), flown)
+    staggered = Executor(inputs, runways, charts, ias, params, words, step_s=2.0, time_limit_s=limit,
+                         start_cycle=torch.tensor([3]), reserve_s=0.0)
+    sentences = Sentences([grid], words, step_s=2.0, device=CPU)
+    for _ in range(staggered.cycles):
+        sentence_s = staggered.own_cycle().clamp(min=0).to(F64) * params.cycle_s
+        staggered.cycle(sentences.at(sentence_s), sentence_s)
+        if bool(staggered.done.all()):
+            break
+    flown = staggered.flown()
+    out["staggered"] = (int(flown.done_cycle[0]), flown)
+    flown, _ = single.fly(inputs, geometry, approach, grid, params, words, step_s=2.0, time_limit_s=limit_s,
+                          reserve_s=0.0)
+    out["single"] = (int(flown.done_cycle[0]), flown)
+    return out
+
+
+def test_a_crossing_of_another_candidate_and_the_stall_cut_off_end_the_flight_in_every_way():
+    """D79: the executor ends a flight where the judge ends it — a lined-up crossing of another candidate with G false
+    ends it at that cycle, and so does a cycle the dynamics' stall cut-off bound in — in the single-aircraft batch, the
+    multi-aircraft batch and the single flight alike; the start's `Loop.step` gives it as done there."""
+    from ts_transformer.autopilot.judge import outcome_of
+    from ts_transformer.autopilot.start import Loop
+
+    geometry = _end_airport()
+    for speed_mps, outcome in ((75.0, "crossed_other_runway"), (40.0, "dynamics_failure")):
+        inputs, approach, grid, words = _east_flight(geometry, speed_mps)
+        ends = _three_ways(geometry, inputs, approach, grid, words)
+        cycles = {way: cycle for way, (cycle, _) in ends.items()}
+        assert len(set(cycles.values())) == 1, cycles
+        done = cycles["batch"]
+        for way, (_, flown) in ends.items():
+            ended = outcome_of(flown, 0, geometry, words.spec)
+            assert (ended.outcome, ended.end_row) == (outcome, done + 1), way      # the judge's end is the executor's
+        if outcome == "crossed_other_runway":
+            assert done == pytest.approx(2000.0 / 75.0, abs=1.5)        # at 09B's plane, 2 km on: not flown on to 09
+        else:
+            assert done == 0                                            # the first cycle stalls
+        loop = Loop(inputs, [geometry], [approach], [200.0], _params(), words, interval_s=2.0, most_go_arounds=0,
+                    device=CPU)
+        row, steps = grid[0], 0
+        while True:
+            _, finished = loop.step(row[None, :])
+            steps += 1
+            if finished[0]:
+                break
+            row = np.full(5, UNCHANGED, dtype=np.int64)
+        assert steps == done // 2 + 1 and loop.outcome(0).outcome == outcome
+
+
+def test_a_copy_of_a_staggered_batch_flies_as_its_originals():
+    """D97 (2): `Executor.take` of a multi-aircraft batch (each flight from its own cycle) — taken while one flight flies
+    and one still waits for its first cycle, in the other order — flies on as the originals do, and records it alike."""
+    from dataclasses import fields
+
+    from ts_transformer.autopilot.conformance import STATE_BOUND_M
+    from ts_transformer.autopilot.executor import Executor
+    from ts_transformer.autopilot.lateral import Runways
+
+    geometry = _end_airport()
+    first, approach, first_grid, words = _east_flight(geometry, 75.0, e_m=-21500.0, height_m=1500.0)
+    second, _, second_grid, _ = _east_flight(geometry, 80.0, e_m=-18000.0, height_m=1200.0)
+    first_grid[0, HEADING] = words.heading_class(150.0, 90.0)                  # a turn right while the other waits
+    grids = [first_grid, second_grid]
+    params = _params()
+    inputs = FlightInputs(**{f.name: torch.cat([getattr(first, f.name), getattr(second, f.name)])
+                             for f in fields(FlightInputs)})
+    executor = Executor(inputs, Runways.of([geometry] * 2, spec(), dtype=F64, device=CPU),
+                        AirportCharts.of([geometry] * 2, dtype=F64, device=CPU),
+                        torch.tensor([approach, approach + 6.0], dtype=F64), params, words, step_s=2.0,   # apart
+                        time_limit_s=torch.tensor([120.0, 150.0], dtype=F64), start_cycle=torch.tensor([0, 9]),
+                        reserve_s=0.0)
+
+    def fly(flying: Executor, picks: list[int], cycles: int | None = None) -> None:
+        sentences = Sentences([grids[i] for i in picks], words, step_s=2.0, device=CPU)
+        while flying.count < flying.cycles and not bool(flying.done.all()) and (cycles is None or cycles > 0):
+            sentence_s = flying.own_cycle().clamp(min=0).to(F64) * params.cycle_s
+            flying.cycle(sentences.at(sentence_s), sentence_s)
+            cycles = None if cycles is None else cycles - 1
+
+    fly(executor, [0, 1], cycles=5)
+    assert int(executor.own_cycle()[1]) < 0                                     # the second has not started
+    copy = executor.take(torch.tensor([1, 0]))
+    fly(executor, [0, 1])
+    fly(copy, [1, 0])
+    one, other = executor.flown(), copy.flown()
+    for j, i in enumerate([1, 0]):
+        assert int(one.done_cycle[i]) == int(other.done_cycle[j])
+        cycles = min(one.states.shape[1], other.states.shape[1])
+        assert float((one.states[i, :cycles] - other.states[j, :cycles]).abs().max()) <= STATE_BOUND_M
+        assert torch.equal(one.runway[i, :min(one.runway.shape[1], other.runway.shape[1])],
+                           other.runway[j, :min(one.runway.shape[1], other.runway.shape[1])])
+
+
+def test_the_bank_starts_level_and_moves_at_the_roll_rate_from_the_first_cycle():
+    """D84: the bank starts at 0 and its limit and roll rate hold from the first cycle — a heading word 90° right at the
+    first row banks by at most p · Δt in each cycle, the first included, in the three ways to fly."""
+    from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
+
+    geometry = _end_airport()
+    inputs, approach, grid, words = _east_flight(geometry, 75.0, e_m=-21500.0, height_m=1500.0)
+    grid[0, HEADING] = words.heading_class(180.0, 90.0)                       # turn right to south
+    for way, (_, flown) in _three_ways(geometry, inputs, approach, grid, words, limit_s=30.0).items():
+        bank = np.concatenate(([0.0], flown.commands[0, :20, 1].numpy()))
+        assert np.abs(np.diff(bank)).max() <= math.radians(ROLL_RATE_DEG_S) * 1.0 + 1e-12, way
+        assert abs(bank[1]) == pytest.approx(math.radians(ROLL_RATE_DEG_S)), way             # it does roll at once
+
+
+def test_the_executor_inputs_hold_the_airport_s_chart_not_the_landed_runway(monkeypatch):
+    """D81: the chart the dynamics integrate in is the airport reference at E — the same for flights landed on two
+    runways of one airport — and no input holds the landed runway's threshold or TCH."""
+    from ts_transformer.autopilot.flights import flight_inputs
+
+    geometry = _end_airport()
+    signals = instruction_flight(*fly_legs([(30, 0.0, 75.0, 0.0)], 90.0, 400.0, -5000.0, 0.0))
+    aircraft = aircraft_for_code("A320")
+
+    def series(runway):
+        scenario = SimpleNamespace(dynamics=lambda purpose: (aircraft, aero_params_for_aircraft(aircraft)),
+                                   initial=SimpleNamespace(m=62000.0), source={"runway": runway})
+        return SimpleNamespace(dataset_id=signals.dataset_id, scenario=scenario)
+
+    inputs = flight_inputs([series("09"), series("09B")], [signals, signals], [8, 8], [geometry, geometry],
+                           "trailing-fit-8s", device=CPU)
+    expected = [geometry.frame.lat0, geometry.frame.lon0, geometry.elevation_m, 0.0]
+    assert inputs.frame_params.tolist() == [expected, expected]
+    assert torch.equal(inputs.initial_state[0], inputs.initial_state[1])
+    for c in geometry.candidates:                                      # no threshold, no threshold crossing height
+        lat, lon = geometry.frame.latlon_from_horizontal(c.threshold_e_m, c.threshold_n_m)
+        assert not np.isclose(inputs.frame_params[:, :2].numpy(), [lat, lon], rtol=0.0, atol=1e-5).all(axis=1).any()
+        assert (inputs.frame_params[:, 2] != c.elevation_m + c.vertical_path.crossing_height_m).all()
+
+
+def test_the_behaviour_check_refuses_a_law_that_reads_a_vertical_path(monkeypatch):
+    """D81: the way ``moved`` (every candidate's vertical path changed, the dynamics' chart moved) flies the executor's
+    flights as the single-aircraft batch does — and finds a test law that reads the threshold crossing height."""
+    from ts_transformer.autopilot import conformance, lateral, replay
+    from ts_transformer.tests.test_closed_loop import _batch
+
+    batch, _, words = _batch()
+    batch.geometries = [downwind_airport(batch.geometries[0])]
+    from ts_transformer.tests.support import executor_inputs
+
+    monkeypatch.setattr(replay.Batch, "inputs", lambda self, rule, device: executor_inputs(
+        self.observed[0], self.geometries[0], self.sentences[0].first_row))
+    params = _params()
+
+    def differences():
+        reference = conformance.fly_batch(batch, params, words)
+        moved = conformance.fly_moved(batch, params, words)
+        difference = conformance.Difference(expected=1)
+        for ref, result in zip(reference, moved):
+            conformance.compare(ref, replace(result, verdict=ref.verdict), difference, "KXXX:test",
+                                bounds_m=conformance.STATE_BOUNDS_M["moved"])
+        return difference
+
+    clean = differences()
+    assert clean.passed and clean.horizontal_m < 1e-6, clean.summary()
+    original_of, original_rate = lateral.Runways.of.__func__, lateral.Lateral.rate
+
+    def of(cls, geometries, spec, *, dtype, device):
+        runways = original_of(cls, geometries, spec, dtype=dtype, device=device)
+        object.__setattr__(runways, "tch", torch.tensor([[c.vertical_path.crossing_height_m for c in g.candidates]
+                                                         for g in geometries], dtype=dtype, device=device))
+        return runways
+
+    def reads_the_tch(self, state, relative_deg, issued, runway, runways, time_s, *, fresh=None):
+        rate = original_rate(self, state, relative_deg, issued, runway, runways, time_s, fresh=fresh)
+        return rate + 1e-3 * runways.tch.gather(1, runway[:, None])[:, 0]
+
+    monkeypatch.setattr(lateral.Runways, "of", classmethod(of))
+    monkeypatch.setattr(lateral.Lateral, "rate", reads_the_tch)
+    found = differences()
+    assert not found.passed and "states" in str(found.mismatches), found.summary()
+
+    # A37: a law that reads the dynamics' frame (`FlightInputs.frame_params`: the chart's origin, which ``moved`` moves;
+    # before D81 it held the landed runway's threshold and TCH) is found too
+    from ts_transformer.autopilot import executor as executor_module
+
+    original_init = executor_module.Executor.__init__
+
+    def init(self, inputs, *args, **kwargs):
+        original_init(self, inputs, *args, **kwargs)
+        self.lateral.frame = inputs.frame_params                      # the law's own copy of the frame
+
+    def reads_the_frame(self, state, relative_deg, issued, runway, runways, time_s, *, fresh=None):
+        rate = original_rate(self, state, relative_deg, issued, runway, runways, time_s, fresh=fresh)
+        return rate + 1e-3 * self.frame[:, 2]                         # the chart origin's height
+
+    monkeypatch.setattr(lateral.Runways, "of", classmethod(original_of))
+    monkeypatch.setattr(executor_module.Executor, "__init__", init)
+    monkeypatch.setattr(lateral.Lateral, "rate", reads_the_frame)
+    found = differences()
+    assert not found.passed and "states" in str(found.mismatches), found.summary()
+
+
+def test_each_start_rule_gives_the_ground_velocity_of_a_flight_flown_straight_and_level():
+    """D77: a flight at a constant ground velocity (60 m/s east, 80 m/s north, 2 m/s up: track 36.87°, compass) gives that
+    velocity back by every rule — the airport frame's metres turned into metres on the ground at the row (WGS84) — and
+    the start state its airspeed, math heading and path angle."""
+    from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon, wgs84_curvature_radii
+    from ts_transformer.autopilot.flights import start_state, start_velocity
+    from ts_transformer.autopilot.params import FORMAL_START_RULES
+    from ts_transformer.instructions.signals import FlightSignals
+
+    geometry = instruction_airport()
+    frame, rows = geometry.frame, 40
+    t = np.arange(rows) * 2.0
+    height = 1000.0 + 2.0 * t
+    lat_deg, lon_deg = [frame.lat0 + 0.05], [frame.lon0]              # 5.5 km north of the reference, then on
+    for k in range(1, rows):                                          # 2 s steps on the ellipsoid at the row's height
+        radius_m, radius_n = wgs84_curvature_radii(lat_deg[-1])
+        lat_deg.append(lat_deg[-1] + math.degrees(80.0 * 2.0 / (radius_m + height[k - 1])))
+        lon_deg.append(lon_deg[-1] + math.degrees(60.0 * 2.0 / ((radius_n + height[k - 1])
+                                                                * math.cos(math.radians(lat_deg[-2])))))
+    north_m = (np.array(lat_deg) - frame.lat0) * METRES_PER_DEG_LAT       # the airport frame's equirectangular metres
+    east_m = (np.array(lon_deg) - frame.lon0) * metres_per_deg_lon(frame.lat0)
+    signals = FlightSignals("KXXX:v", "KXXX", "09", "A320", "2026-06-01T11:00:00Z", "2026-06-01T12:00:00Z", t, east_m,
+                            north_m, height, np.full(rows, 36.87), np.full(rows, 100.0), np.full(rows, 2.0))
+    for rule in FORMAL_START_RULES:
+        velocity = start_velocity(signals, [20, 30], rule, geometry)
+        assert velocity == pytest.approx(np.array([[60.0, 80.0, 2.0]] * 2), abs=0.01), rule
+        state = start_state(signals, 20, rule, geometry, 62000.0)
+        assert state[3] == pytest.approx(math.sqrt(100.0 ** 2 + 2.0 ** 2), abs=0.05)
+        assert math.degrees(state[4]) == pytest.approx(math.degrees(math.atan2(80.0, 60.0)), abs=0.03)    # math: from east
+        assert math.degrees(state[5]) == pytest.approx(math.degrees(math.atan2(2.0, 100.0)), abs=0.03)
+    with pytest.raises(ValueError, match="start rule 'fit-4s' is none of"):
+        start_velocity(signals, [20], "fit-4s", geometry)
+

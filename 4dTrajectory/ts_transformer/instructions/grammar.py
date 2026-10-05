@@ -43,7 +43,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from ts_transformer.instructions.words import (
-    ALTITUDE, ANGLE_LEVEL, COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words,
+    ALTITUDE, ANGLE, ANGLE_LEVEL, COLUMNS, HEADING, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words,
 )
 
 
@@ -144,6 +144,25 @@ def _require_altitudes(values: Any, words: Words) -> None:
         raise ValueError(f"altitude class {int(outside[0])} outside 0..{words.altitude_no_level_off}")
 
 
+def _require_words(step: Sequence[int], words: Words) -> None:
+    """A heading, altitude, angle or speed word outside its column's words ("unchanged" to the column's last class) is
+    refused by name in `apply` (vocabulary D80): it is no word of the vocabulary. The runway column's values are the
+    rules' own (rules 1, 2)."""
+    counts = words.class_counts()
+    for column in (HEADING, ALTITUDE, ANGLE, SPEED):
+        if not UNCHANGED <= step[column] < counts[COLUMNS[column]]:
+            raise ValueError(f"{COLUMNS[column]} class {step[column]} outside 0..{counts[COLUMNS[column]] - 1}")
+
+
+def require_values(step: Sequence[int], words: Words, n_candidates: int) -> None:
+    """Every word of ``step`` is a value of its column (vocabulary D80): the runway column "unchanged", "go-around" or one
+    of the airport's ``n_candidates`` candidates, the others their words (`_require_words`); refused by name
+    (`ValueError`). The rules are not read: a done or halted flight's row is checked here and not by them (D80, D87)."""
+    _require_words(step, words)
+    if not (step[RUNWAY] in (UNCHANGED, RUNWAY_GO_AROUND) or 0 <= step[RUNWAY] < n_candidates):
+        raise ValueError(f"runway value {step[RUNWAY]} is neither unchanged, go-around nor one of {n_candidates} candidates")
+
+
 def _rules(ops: Any, words: Words, first: Any, in_runway: Any, in_go: Any, in_altitude: Any, in_angle: Any,
            runway: Any, heading: Any, altitude: Any, angle: Any, speed: Any, height: Any, candidates: Any
            ) -> tuple[Any, Any, Any, Any, Any]:
@@ -196,7 +215,7 @@ def apply(in_force: InForce | None, step: Sequence[int], height_m: float, words:
     step = [int(v) for v in step]
     if len(step) != len(COLUMNS):
         raise ValueError(f"a step has {len(COLUMNS)} words, got {len(step)}")
-    _require_altitudes(step[ALTITUDE], words)
+    _require_words(step, words)
     before = InForce(UNCHANGED, False, UNCHANGED, UNCHANGED, UNCHANGED, UNCHANGED) if in_force is None else in_force
     code, runway, go_around, altitude, angle = _rules(
         _ONE, words, in_force is None, before.runway, before.go_around, before.altitude, before.angle, *step,

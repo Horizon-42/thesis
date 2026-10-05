@@ -157,13 +157,15 @@ rows the labeller admits (`read.admit`; the refusals are counted in `measurement
 `spec.json` (`measure.SUGGESTED` + `MeasuredValues`, the git state) with `measurements.json`: each value it fits from
 data beside its rounder candidates and the fit each leaves (design D15) — the spec takes the row the user chose,
 `--candidate fitted|0.5|0.25|0.1` (required when measuring, refused with `--spec-from`; A18, D56: the formal artefact
-uses 0.25), recorded as `chosen_candidate` — the climb angles' distribution, and the altitude grid (A20, D58): fitted
+uses 0.25), recorded as `chosen_candidate`; since A33 the climb nominal is the length-weighted median of the climb pieces
+with G false (G's rows as the labeller reads them, `read.read_heights`, D19) and at most the climb class's 15° (`measure.climb_pieces`;
+the others counted in `move_pieces.climb_pieces`) — the climb angles' distribution, and the altitude grid (A20, D58): fitted
 on the level-offs above the airport elevation E (row 0 apart; at most three uniform segments from 0 to 5,400 m, break
 points on a 15 m grid, steps of 15–600 m, 40 levels, the least sum of squared rounding errors by exact dynamic
 programming, `measure.fit_altitude_grid`) beside the grid of D22, each with the rounding error of the level words
 (`grid_candidates`); the spec takes the row the user chose, `--grid fitted|d22` (required when measuring, as
 `--candidate`), recorded as `chosen_grid`. `instruction_labels --dir` reads
-train, select and val with that spec and writes the sentences, `labels.json`, the readout (with, at each go-around row,
+train, select and val with that spec and writes the sentences, `labels.json`, the readout (of val only the flights labelled and refused, since A37, D85; with, at each go-around row,
 the words in force — vocabulary §9.4 — and whether its low pass lies past the threshold) and the labeller's reference
 sample `conformance/` (C30), in the same run. `instruction_conformance --dir` reads that reference again with the code on
 disk and prints the differences (information, exit 1 on any): since A29 (D73) every runner that uses the labeller on the
@@ -209,8 +211,10 @@ frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `t
 ### R12 · the executor: `executor_spec` → `executor_replay`
 
 2026-09-24; v4 since 2026-10-03 (`docs/two_tier/design/vocabulary.md` §5, §12.1 A4–A6, A9, A19; layout L31, contract C33).
-`executor_spec --instructions <artefact> --dir <new dir>` (`ts-executor-spec-v9`; since A19 no `--word-clock`: a sentence is
-said on its own rows, D57; since A29 no digest of code, D73)
+`executor_spec --instructions <artefact> --dir <new dir> --start-rule <rule>` (`ts-executor-spec-v10`; since A19 no
+`--word-clock`: a sentence is said on its own rows, D57; since A29 no digest of code, D73; since A32 the start rule, D77,
+required: `displacement-2s`, `trailing-fit-8s` or `trailing-fit-15s` — the user's choice from A33, recorded under
+`measurements.json` ``chosen``; the centred fit is refused)
 refuses a dirty tree, an existing directory and a labeller that reads the artefact's reference otherwise (its check runs
 first);
 p = `ROLL_RATE_DEG_S` (5°/s, FAA Order 8260.3G App. E §4 ¶6.a, ICAO Doc 8168 Vol II); the executor makes no turn of its own,
@@ -221,7 +225,7 @@ candidate's published TCH, glidepath angle and DA are the artefact's (`candidate
 `measurements.json`; the decision-altitude check takes no parameter (D38); the design's fixed choices (Δt, τ_γ, the γ̇
 factor, the timeout factor) are module constants written into `measurements.json`. It writes the spec's reference tracks
 with it, in the same run, and flies them again in every way before it ends (R42).
-`executor_replay --instructions --executor --split {train,select,val} --out <new dir> [--per-airport 0 = every flight]
+`executor_replay --instructions --executor --split {train,select} --out <new dir> [--per-airport 0 = every flight]
 [--seed] [--chunk 500] [--row-interval-s 2|4|8] [--closed-loop]` is the readout: own-dynamics flights and a stand-in's
 (the performance index's substitute) reported apart, a flight without aircraft dynamics counted (C31); each sentence put on
 the row interval (design §4.8: the UTC multiples of Δ; a sentence the interval refuses is counted,
@@ -235,8 +239,7 @@ R50): each from its first predicted step on the time clock, refused for another 
 required to fly its stored states again to its stored outcome (D74); each row adds the largest |e_y| and |e_h|, those on the rows without a correction
 (D34) and the correction words per column, and each cell of the table the flights that left the observed path by more
 than 300 m (`LEFT_THE_PATH_M`, the reading of vocabulary §9.7) and the correction words per sentence. Every replay's time
-limit is the remaining observed time from the sentence's first row × 1.5 (`replay.time_limits_s`), not its rows. Select and val run from a clean tree; **the val replay waits for the user's
-go-ahead**. Every write refuses an existing directory. Tests: `tests/test_autopilot.py`, `tests/test_closed_loop.py` (every
+limit is the remaining observed time from the sentence's first row × 1.5 (`replay.time_limits_s`), not its rows. Select runs from a clean tree; **val is refused** (since A37, outline D85: the val days are read once, in the stage's validation readout). Every write refuses an existing directory. Tests: `tests/test_autopilot.py`, `tests/test_closed_loop.py` (every
 write into `tmp_path`). `executor_sensitivity` is archived (`archive/two_tier_v3_2026_10/experiments/`).
 
 ### R13 · publishing the executor and the prior: `executor_training_export`, `prior_training_export`, `publish_ts_experiment_trajectories.py --executor-replay`
@@ -1464,7 +1467,7 @@ side (refused unless their specs differ only in H_final and a split's readouts d
 ### R53 · `run_ts.py closed_loop_start_check` — stored closed-loop sentences said through the start of a closed loop give back their states (vocabulary §12.1 A26, §12.2 item 7, D67)
 
 2026-10-04 (`experiments/closed_loop_start_check.py`, `autopilot/start.py`). `closed_loop_start_check --instructions <artefact>
---executor <spec dir> --split train|select|val --row-interval-s 2 4 8 [--per-airport 50] [--seed 1337] [--chunk 2048] --out <new dir>`:
+--executor <spec dir> --split train|select --row-interval-s 2 4 8 [--per-airport 50] [--seed 1337] [--chunk 2048] --out <new dir>`:
 the labeller's, the executor's and the closed loop's checks run first in the process (`start.start` opens the spec,
 D73; the run records their largest differences). For each Δ, the artefact's stored
 closed-loop sentences of the split (`--per-airport` of each airport, seeded; 0 every one; an airport with fewer refused) are started `--chunk` at a time through
@@ -1482,23 +1485,49 @@ any fails. The test of A26 on the artefact of A25 (§12.2 item 7).
 
 2026-10-04, two-tier v4 milestone A23 (outline §6). Per airport, `--per-stratum` (default 10) straight-in and as many
 vectored flights of train and of select (`training_files.SPLITS`), a seeded (`--seed`, 1337) permutation per split and
-stratum of the flights the formal closed-loop replays (`<executor>/replay-closed-<split>-<Δ>s`) flew at every Δ — so each
-has a formal row to give back. Each flight: the observed track and its attitude; the open-loop sentence on the 2 s rows
+stratum of the flights with a closed-loop sentence at every Δ (since A32, D86: no formal replay row is read; the stratum
+the sentence file's, D70; `split_flights`, A36, takes any split — val for a readout a plan makes — and the Δ asked; stage
+B's export calls it). Each flight: the observed track and its attitude; the open-loop sentence on the 2 s rows
 with the labeller's envelopes; at Δ = 2, 4, 8 s the closed-loop sentence (each correction word marked; every word with
 what it says, decoded by `Words`), its stored states, and its replay flown again here (`training_flights.closed_loop_batch`
-+ `replay.fly_batch`) — refused unless every 2 s row is within `STATE_BOUND_M` of the stored states and the outcome is the
-formal row's — with the judge's crossing, decision-altitude check and DA point, attitudes and envelopes on the flown track.
++ `replay.fly_batch`, after the start's refusals, `start.require_startable`) — refused unless every 2 s row is within
+`STATE_BOUND_M` of the stored states and the outcome is the stored one (D74, D86) — with the judge's crossing,
+decision-altitude check and DA point, attitudes and envelopes on the flown track.
 
-Writes `<root>/<airport>/training/<set-id>/sample.json` (`aeroviz-training-sample-v9`) and its entry in
+Writes `<root>/<airport>/training/<set-id>/sample.json` (`aeroviz-training-sample-v10` since A32: the same shape from
+the closed-loop format v8; a v9 set is refused by the view) and its entry in
 `<root>/<airport>/training/index_v4.json` (`aeroviz-training-index-v2`) — a NEW index beside the instruction-v3 view's
 `training/index.json`, never read or written; a listed set is never overwritten; every airport is built before any is
 written; from a clean tree. `--root` defaults to the frontend's public airports (the live data): a trial goes to a scratch
 root. The live executor (`aeroviz_backend/autopilot_segment/`) shares the flights' setup (`experiments/training_flights.py`,
-a shared module, not a runner) and `python -m aeroviz_backend.autopilot_segment.check_live --set-id <set> --out <dir>`
-flies every word of a published set against its sample (outline §6 item 6). The frontend's fixtures
+a shared module, not a runner) and `python -m aeroviz_backend.autopilot_segment.check_live --set-id <set> --out <dir>
+[--flights-per-airport N --seed S]` flies every word of a published set against its sample, or of a seeded sample of
+each airport's flights (the user, 2026-10-05: check on a sample; outline §6 item 6). The backend keeps a failed check for
+its (artefact, executor spec) and refuses at once with its reason, and refuses a flight of a split its caller does not
+give (A39, D109: the server and `check_live` give stage A's train and select; the frontend's reader likewise). The frontend's fixtures
 (`aeroviz-4d/src/data/__tests__/fixtures/stage_a/`) are written by this code (`AEROVIZ_WRITE_FIXTURES=1`, tests
 `test_training_export.py` and `aeroviz_backend/tests/test_autopilot_segment.py`).
 
 Measured on `v9_20261004` / `v14_20261004` into a scratch root (nothing published; the export waits for A25's artefact,
 D66): 5 airports × 40 flights in ~2 min CPU, ~5 MB a sample; on KRDU's 4-flight trial 781 live segments 0 m from the
 stored states, crossings equal to the export's.
+
+### R55 · `run_ts.py start_rules` — the start rules of D77 measured for the user's choice (vocabulary §12.1 A33, D55, D77)
+
+2026-10-05 (`experiments/start_rules.py`). `start_rules --instructions <artefact> --executor <spec dir> --row-interval-s 4
+[--rules …] [--workers N --parts P] [--chunk 2048] [--device cpu] --out <new dir>`: every labelled TRAIN flight (train only,
+D85; own dynamics or a stand-in's) read in closed loop at one Δ in memory (`instruction_closed_loop.read_interval`, nothing
+written into the artefact) once for each start rule (`autopilot.params.START_RULES`; `centred-fit-15s` — the data plane's
+centred fit, no rule of a formal spec — for the comparison only), the spec's executor parameters with that rule in place of
+its own. Per rule (`readout.json`, `ts-start-rules-readout-v1`): the closed loop's numbers (`instruction_closed_loop.summarise`:
+the readings of D34 1–3 and the outcomes, D74), the outcomes and landed share by airport, and the start track at the first
+predicted step: on the flights that turn there (more than 5° between the observed directions of the 8 s before and after,
+in metres on the ground, `flights.ground_scale`) the distance of the rule's start track (`flights.start_velocity`) from the
+direction of the 8 s after (a readout of the future, never an input), pooled and by airport. Train is drawn in `--parts`
+consecutive blocks of its one seeded permutation, each drawn once and read at every rule in its own process (up to
+`--workers`), put together in order (`merge_tallies`): the readout is the same whatever N and P up to float rounding (a
+part flies its flights in other chunks; a rounding can move a discrete step). No criterion is read (D7):
+the user chooses (D55). Tests: `tests/test_start_rules.py`.
+
+    python run_ts.py start_rules --row-interval-s 4 --workers 4 --parts 8 \
+        --instructions <scratch artefact> --executor <its executor spec> --out <new dir>

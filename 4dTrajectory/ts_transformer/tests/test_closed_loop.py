@@ -11,8 +11,8 @@ import pytest
 import torch
 
 from ts_transformer.autopilot import closed_loop, replay
-from ts_transformer.autopilot.closed_loop import Corrector, ObservedPath
-from ts_transformer.instructions.artefact import ClosedLoopSentence, closed_loop_sentences
+from ts_transformer.autopilot.closed_loop import REVERSAL_TURN_DEG, Corrector, ObservedPath
+from ts_transformer.instructions.artefact import ClosedLoopSentence, SentenceRows, Withheld, closed_loop_sentences
 from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
@@ -23,17 +23,37 @@ from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, ANGLE_LEVEL, HEADING, RUNWAY, RUNWAY_GO_AROUND, SPEED, UNCHANGED, Words,
 )
 from ts_transformer.tests.support import (
-    executor_inputs, fly_legs, instruction_airport, instruction_flight, instruction_spec as spec,
+    closed_loop_artefact, executor_inputs, fly_legs, instruction_airport, instruction_flight, instruction_spec as spec,
 )
 
 CPU = torch.device("cpu")
+
+
+def _sentence(*, grid, correction, states, on_interval, lateral_m, vertical_m, uncorrectable, observed_row, matched_row,
+              first_row=0, start=0, timed_out=False, outcome="landed"):
+    """A closed-loop sentence built by hand: its rows apart from what is withheld (D82), the withheld fields of the
+    labelled flight a synthetic one's."""
+    return ClosedLoopSentence(
+        rows=SentenceRows(first_row=first_row, start=start, grid=grid, correction=correction, states=states,
+                          on_interval=on_interval),
+        withheld=Withheld(runway="09", runway_index=0, landing_time_utc="2026-07-01T12:00:00+00:00", capture_row=0,
+                          go_around_rows=np.zeros(0, dtype=np.int64), stratum="straight-in", outcome=outcome,
+                          timed_out=timed_out, lateral_m=lateral_m, vertical_m=vertical_m, uncorrectable=uncorrectable,
+                          observed_row=observed_row, matched_row=matched_row))
+
+
+def _changed(sentence, **changes):
+    """``sentence`` with ``changes``, each to its rows or to what is withheld (D82), by its name."""
+    rows = {name: value for name, value in changes.items() if name in {f.name for f in fields(SentenceRows)}}
+    held = {name: value for name, value in changes.items() if name not in rows}
+    return ClosedLoopSentence(rows=replace(sentence.rows, **rows), withheld=replace(sentence.withheld, **held))
 
 
 def _params():
     from ts_transformer.experiments.executor_spec import ROLL_RATE_DEG_S
 
     return ExecutorParams(cycle_s=1.0, bank_rate_deg_s=ROLL_RATE_DEG_S, path_time_constant_s=2.0, path_rate_factor=2.0,
-                          timeout_factor=1.5)
+                          timeout_factor=1.5, start_rule="trailing-fit-8s")
 
 
 # ---- the comparison
@@ -64,10 +84,78 @@ def test_the_matched_point_moves_forward_and_a_path_that_crosses_itself_does_not
 
 
 def test_a_flown_position_behind_the_matched_point_keeps_it():
+    """The matched point never moves back; behind it, e_y is the distance from the path's segments (D83), not from the
+    segment's line extended back: at the vertex the matched point stays at, the smaller of the two segments around it
+    (A37) — here the one before, from e = 450 to 500."""
     e, n, height = _loop_path()
     path = ObservedPath(e, n, height, 10)
-    lateral, *_ = path.match(100.0, -30.0, 0.0)               # behind segment 10 (e = 500), 30 m right of east
-    assert lateral == pytest.approx(30.0) and path.segment == 10
+    lateral, *_ = path.match(100.0, -30.0, 0.0)               # behind segment 10 (e = 500 to 550), 30 m right of east
+    assert lateral == pytest.approx(math.hypot(350.0, 30.0)) and path.segment == 10    # segment 9 starts at e = 450
+
+
+def test_e_y_at_the_outside_of_a_turn_is_the_distance_from_the_path():
+    """D83: at a vertex of the observed path, a flown position on the outside of the turn is as far from the path as it
+    is from the vertex — not from the line of the segment it is matched on — and on its side: right of a left turn."""
+    e = np.array([0.0, 100.0, 200.0, 200.0, 200.0])            # east 200 m, then north: a left turn at (200, 0)
+    n = np.array([0.0, 0.0, 0.0, 100.0, 200.0])
+    path = ObservedPath(e, n, np.zeros(5), 1)
+    lateral, *_ = path.match(230.0, -40.0, 0.0)                # beyond the vertex, south-east of it: outside the turn
+    assert lateral == pytest.approx(math.hypot(30.0, 40.0)) and lateral > 0.0
+    inside = ObservedPath(e, n, np.zeros(5), 1).match(150.0, 20.0, 0.0)     # left of the first leg, along it: as before
+    assert inside.lateral_m == pytest.approx(-20.0)
+
+
+def test_e_y_at_a_vertex_behind_the_matched_segment_is_the_smaller_distance_on_its_side():
+    """A37, D83: matched on the segment after a vertex (it never moves back), a position the vertex is the nearest point
+    of segment i is measured against segment i − 1 too: the smaller distance, on the nearer segment's side; where the
+    vertex is the nearest point of both (the outside of the turn), on the side of the sum of their normals."""
+    e = np.array([0.0, 100.0, 200.0, 200.0, 200.0])            # east 200 m, then north: a left turn at (200, 0)
+    n = np.array([0.0, 0.0, 0.0, 100.0, 200.0])
+    # matched on the northbound segment (row 2 on): a position 5 m south of the eastbound leg, 10 m before the vertex
+    south = ObservedPath(e, n, np.zeros(5), 2).match(190.0, -5.0, 0.0)
+    assert south.lateral_m == pytest.approx(5.0)                # right of the eastbound leg, 5 m (not 11.2 m left)
+    back = ObservedPath(e, n, np.zeros(5), 2).match(150.0, -3.0, 0.0)          # 50 m before the vertex, 3 m south
+    assert back.lateral_m == pytest.approx(3.0)
+    outside = ObservedPath(e, n, np.zeros(5), 2).match(205.0, -5.0, 0.0)       # south-east of the vertex
+    assert outside.lateral_m == pytest.approx(math.hypot(5.0, 5.0))           # as far as the vertex, right of the turn
+    for path in (ObservedPath(e, n, np.zeros(5), 2),):
+        path.match(190.0, -5.0, 0.0)
+        assert path.segment == 2                                 # the matched point stays (it never moves back)
+    # a left turn of 135° (more than 90°: there segment 2's own side is the wrong one on the outside of the turn)
+    c, k = math.cos(math.radians(135.0)), math.sin(math.radians(135.0))
+    sharp_e, sharp_n = np.array([0.0, 100.0, 200.0, 200.0 + 100.0 * c, 200.0 + 200.0 * c]), np.array([0, 0, 0, 100 * k, 200 * k])
+    sharp = ObservedPath(sharp_e, sharp_n, np.zeros(5), 2).match(201.0, -3.0, 0.0)
+    assert sharp.lateral_m == pytest.approx(math.hypot(1.0, 3.0))          # right of the path, as far as the vertex
+    # the matched point at the far end of its segment (the next segment rounded farther from the shared vertex, so the
+    # search stopped there; `match`'s branch for t = 1): the same vertex rule, with the segment ahead
+    ahead = ObservedPath(sharp_e, sharp_n, np.zeros(5), 1)
+    assert ahead._at_vertex(2, 1, 2, 201.0, -3.0, math.hypot(1.0, 3.0)) == pytest.approx(math.hypot(1.0, 3.0))
+    # past segment 1's end but beside segment 2: segment 2's distance and side (its own nearest point is inside it)
+    beside = (5.0 * 100.0 * k - 20.0 * 100.0 * c) / 100.0                 # right of segment 2, 17.7 m
+    assert ahead._at_vertex(2, 1, 2, 205.0, 20.0, math.hypot(5.0, 20.0)) == pytest.approx(beside) and beside > 0.0
+    # through `match`: a sharp turn where the search stops at segment 1's end (segment 2 rounds farther from the shared
+    # vertex): the vertex rule gives the outside's side (segment 1's alone would give the other)
+    found_e = np.array([-49.9353376713203, 64.6364306847856, 179.2081990408915, 75.26840705546014, -28.671384929971197])
+    found_n = np.array([97658.23678408828] * 3 + [97706.4364702519, 97754.6361564155])
+    stops = ObservedPath(found_e, found_n, np.zeros(5), 1)
+    found = stops.match(202.25326014026516, 97696.83302642421, 0.0)
+    assert stops.segment == 1 and found.lateral_m == pytest.approx(44.9527, abs=1e-4)
+    # a reversal (the normals cancel): the matched segment's side
+    back_e, back_n = np.array([0.0, 100.0, 200.0, 100.0, 0.0]), np.zeros(5)
+    for north, side in ((5.0, 1.0), (-5.0, -1.0)):           # north is right of the westbound segment 2
+        assert ObservedPath(back_e, back_n, np.zeros(5), 2).match(205.0, north, 0.0).lateral_m == pytest.approx(
+            side * math.hypot(5.0, 5.0))
+    # a near-reversal (over REVERSAL_TURN_DEG: the normals nearly cancel): the matched segment's side too. 2 m south and
+    # 5 m past the tip of a left turn (mirrored: a right turn) — the vertex the nearest point of both segments — is left
+    # of the turned segment 2 where the sum of the normals says right: 1° below REVERSAL_TURN_DEG the sum's side, 1°
+    # above it and at 175° the matched segment's
+    for turn, side in ((REVERSAL_TURN_DEG - 1.0, 1.0), (REVERSAL_TURN_DEG + 1.0, -1.0), (175.0, -1.0)):
+        for mirror in (1.0, -1.0):
+            c, k = math.cos(math.radians(turn)), mirror * math.sin(math.radians(turn))
+            near_e = np.array([0.0, 100.0, 200.0, 200.0 + 100.0 * c, 200.0 + 200.0 * c])
+            near = ObservedPath(near_e, np.array([0.0, 0.0, 0.0, 100.0 * k, 200.0 * k]), np.zeros(5), 2)
+            assert near.match(205.0, -2.0 * mirror, 0.0).lateral_m == pytest.approx(
+                side * mirror * math.hypot(5.0, 2.0))
 
 
 # ---- the corrections
@@ -222,11 +310,11 @@ def _batch(interval_s=2.0, legs=DOWNWIND_BASE_FINAL, track_deg=270.0, altitude_m
         reading = replace(reading, words=grid[:rows], held_height_m=reading.held_height_m[:rows])
     sentence = replay.sentence_on_interval(reading, signals, interval_s, geometry, words)
     observed = replay.from_row(signals, sentence.first_row)
-    batch = replay.Batch(indices=[0], signals=[observed], series=[None], readings=[reading], sentences=[sentence],
-                         row_interval_s=interval_s, geometries=[geometry],
+    batch = replay.Batch(indices=[0], signals=[observed], observed=[signals], series=[None], readings=[reading],
+                         sentences=[sentence], row_interval_s=interval_s, geometries=[geometry],
                          approach_ias_mps=[approach_speed_ias_mps("A320", 62000.0)], groups=[replay.OWN], drawn={})
     start = closed_loop.start_row(interval_s) * int(round(interval_s / one.step_s))
-    return batch, executor_inputs(observed, geometry, start), words
+    return batch, executor_inputs(signals, geometry, sentence.first_row + start), words
 
 
 @pytest.mark.parametrize("interval_s", [2.0, 4.0])
@@ -236,23 +324,23 @@ def test_a_flight_whose_words_leave_an_offset_is_brought_back_by_heading_correct
     batch, inputs, words = _batch(interval_s)
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     assert isinstance(sentence, ClosedLoopSentence)
-    start, every = sentence.start, int(round(interval_s / 2.0))
-    assert start == 16 / interval_s and (sentence.grid[0] != UNCHANGED).all() and not sentence.correction[0].any()
+    start, every = sentence.rows.start, int(round(interval_s / 2.0))
+    assert start == 16 / interval_s and (sentence.rows.grid[0] != UNCHANGED).all() and not sentence.rows.correction[0].any()
     observed = batch.signals[0]
     rows = np.arange(start * every)                                    # the observed 2 s rows (D51)
-    assert np.array_equal(sentence.states[:start * every, :3], np.column_stack([observed.e_m[rows], observed.n_m[rows],
+    assert np.array_equal(sentence.rows.states[:start * every, :3], np.column_stack([observed.e_m[rows], observed.n_m[rows],
                                                                                observed.altitude_m[rows]]))
-    corrected = sentence.correction[:, HEADING]
+    corrected = sentence.rows.correction[:, HEADING]
     assert corrected.any()
-    in_force = closed_loop.in_force(sentence.grid)[:, HEADING]
+    in_force = closed_loop.in_force(sentence.rows.grid)[:, HEADING]
     reading = batch.readings[0].words[batch.sentences[0].first_row:]
-    observed_held = closed_loop.in_force(reading)[sentence.observed_row, HEADING]
+    observed_held = closed_loop.in_force(reading)[sentence.withheld.observed_row, HEADING]
     steps = (in_force.astype(int) - observed_held.astype(int)) % words.n_heading
     assert set(steps.tolist()) <= {0, 1, words.n_heading - 1}  # at most one class from the observed word
     # inside a turn every row says a new observed word, which ends a correction (§4.9): the offset the turns leave is
     # taken out on the straight legs after them, and the final is flown within the tolerance
-    assert np.abs(sentence.lateral_m).max() > words.spec.closed_loop_lateral_m
-    assert np.abs(sentence.lateral_m[-len(sentence.lateral_m) // 4:]).max() < words.spec.closed_loop_lateral_m
+    assert np.abs(sentence.withheld.lateral_m).max() > words.spec.closed_loop_lateral_m
+    assert np.abs(sentence.withheld.lateral_m[-len(sentence.withheld.lateral_m) // 4:]).max() < words.spec.closed_loop_lateral_m
 
 
 def _replayed(batch, inputs, sentence, params, words, monkeypatch):
@@ -260,7 +348,7 @@ def _replayed(batch, inputs, sentence, params, words, monkeypatch):
     stored = {7: sentence}
     batch.indices[0] = 7
     moved, missing = closed_loop.replay_batch(batch, stored, words)
-    monkeypatch.setattr(replay.Batch, "inputs", lambda self, device: inputs)
+    monkeypatch.setattr(replay.Batch, "inputs", lambda self, rule, device: inputs)
     return stored, moved, missing, replay.fly_sentences(moved, params, words, device=CPU)
 
 
@@ -272,13 +360,13 @@ def test_a_closed_loop_sentence_flown_again_gives_its_states_on_every_2_s_row(mo
     params = _params()
     (sentence,) = closed_loop.read(batch, inputs, params, words, device=CPU)
     every = int(round(interval_s / 2.0))
-    assert len(sentence.states) == (sentence.start + len(sentence.grid) - 1) * every + 1
-    assert np.array_equal(np.flatnonzero(sentence.on_interval), np.arange(sentence.start + len(sentence.grid)) * every)
+    assert len(sentence.rows.states) == (sentence.rows.start + len(sentence.rows.grid) - 1) * every + 1
+    assert np.array_equal(np.flatnonzero(sentence.rows.on_interval), np.arange(sentence.rows.start + len(sentence.rows.grid)) * every)
     _, _, _, flown = _replayed(batch, inputs, sentence, params, words, monkeypatch)
     track = flown_track(flown.states[0].numpy(), batch.geometries[0])
-    at = np.arange(len(sentence.flown_states)) * 2                    # the cycle starting each 2 s row
+    at = np.arange(len(sentence.rows.flown_states)) * 2                    # the cycle starting each 2 s row
     again = np.column_stack([track["e"][at], track["n"][at], track["height"][at]])
-    assert np.abs(again - sentence.flown_states[:, :3]).max() < 1e-9
+    assert np.abs(again - sentence.rows.flown_states[:, :3]).max() < 1e-9
 
 
 @pytest.mark.parametrize("interval_s", [4.0, 8.0])
@@ -287,16 +375,16 @@ def test_the_marked_rows_are_the_said_rows_and_the_rows_between_are_flown(interv
     them), and the rows between hold the executor's states there: in the turns, off the chord of their two Δ rows."""
     batch, inputs, words = _batch(interval_s)
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
-    every, start = int(round(interval_s / 2.0)), sentence.start
+    every, start = int(round(interval_s / 2.0)), sentence.rows.start
     signals = batch.signals[0]
     span = len(batch.readings[0].words) - batch.sentences[0].first_row
     smoothed = smooth(truncated(signals, span), words.spec)
     path = ObservedPath(signals.e_m[:span], signals.n_m[:span], smoothed.altitude_m, start * every)
-    marked = sentence.states[sentence.on_interval][start:]
-    assert np.allclose([path.match(*row[:3]).lateral_m for row in marked], sentence.lateral_m, atol=1e-9)
-    flown = sentence.flown_states
-    assert len(flown) == (len(sentence.grid) - 1) * every + 1
-    middle = flown[every // 2::every][: len(sentence.grid) - 1, :2]          # the 2 s row halfway between two Δ rows
+    marked = sentence.rows.states[sentence.rows.on_interval][start:]
+    assert np.allclose([path.match(*row[:3]).lateral_m for row in marked], sentence.withheld.lateral_m, atol=1e-9)
+    flown = sentence.rows.flown_states
+    assert len(flown) == (len(sentence.rows.grid) - 1) * every + 1
+    middle = flown[every // 2::every][: len(sentence.rows.grid) - 1, :2]          # the 2 s row halfway between two Δ rows
     chord = 0.5 * (flown[:-every:every, :2] + flown[every::every, :2])
     assert np.abs(middle - chord).max() > 1.0
 
@@ -325,21 +413,24 @@ def test_each_outcome_is_stored_by_name_and_a_file_of_the_former_format_is_refus
     """D74: the reading's outcome of each sentence — a landing and every kind of failure of the judge (§5.8) — is written
     by its name and read back with its sentence; a closed-loop file of the former format (no outcome) is refused by name."""
     from ts_transformer.autopilot.judge import OUTCOMES
-    from ts_transformer.instructions.artefact import CLOSED_LOOP_SCHEMA, load_closed_loop, write_closed_loop
+    from ts_transformer.instructions.artefact import (
+        CLOSED_LOOP_SCHEMA, closed_loop_path, load_closed_loop, write_closed_loop,
+    )
 
     batch, inputs, words = _batch(4.0)
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
-    assert sentence.outcome in OUTCOMES
-    path = tmp_path / "train_4s.npz"
-    write_closed_loop(path, words.spec, executor_params_sha256="x", row_interval_s=4.0, start_row=sentence.start,
-                      sentences={k: replace(sentence, outcome=name) for k, name in enumerate(OUTCOMES)})
-    stored = closed_loop_sentences(load_closed_loop(path, words.spec))
-    assert [stored[k].outcome for k in range(len(OUTCOMES))] == list(OUTCOMES)
+    assert sentence.withheld.outcome in OUTCOMES
+    directory = closed_loop_artefact(tmp_path / "artefact", batch, words.spec, copies=len(OUTCOMES))
+    path = closed_loop_path(directory, "train", 4.0)
+    write_closed_loop(path, words.spec, executor_params_sha256="x", row_interval_s=4.0, start_row=sentence.rows.start,
+                      sentences={k: _changed(sentence, outcome=name) for k, name in enumerate(OUTCOMES)})
+    stored = closed_loop_sentences(directory, "train", 4.0, words.spec)
+    assert [stored[k].withheld.outcome for k in range(len(OUTCOMES))] == list(OUTCOMES)
     assert set(OUTCOMES) >= {"landed", "unstable_at_minimums", "crossed_too_high", "crossed_off_runway",
                              "crossed_other_runway", "ground_contact", "timeout", "dynamics_failure"}
     with np.load(path) as data:
-        former = {name: data[name] for name in data.files if name != "outcome"}
-    former["schema"] = np.array("ts-instruction-closed-loop-v6")
+        former = {name: data[name] for name in data.files}
+    former["schema"] = np.array("ts-instruction-closed-loop-v7")             # the same fields, the former format
     np.savez_compressed(tmp_path / "former.npz", **former)
     with pytest.raises(ValueError, match=f"is not a {CLOSED_LOOP_SCHEMA} file"):
         load_closed_loop(tmp_path / "former.npz", words.spec)
@@ -350,14 +441,15 @@ def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(t
     batch flies each from its first predicted step (its sentence and observed flight moved there) and the replay's check
     finds the stored states again."""
     from ts_transformer.experiments.executor_replay import closed_loop_columns
-    from ts_transformer.instructions.artefact import load_closed_loop, write_closed_loop
+    from ts_transformer.instructions.artefact import closed_loop_path, write_closed_loop
 
     batch, inputs, words = _batch(4.0)
     params = _params()
     (sentence,) = closed_loop.read(batch, inputs, params, words, device=CPU)
-    path = tmp_path / "train_4s.npz"
-    assert sentence.first_row == batch.sentences[0].first_row
-    write = dict(executor_params_sha256="x", row_interval_s=4.0, start_row=sentence.start)
+    directory = closed_loop_artefact(tmp_path / "artefact", batch, words.spec, copies=8)
+    path = closed_loop_path(directory, "train", 4.0)
+    assert sentence.rows.first_row == batch.sentences[0].first_row
+    write = dict(executor_params_sha256="x", row_interval_s=4.0, start_row=sentence.rows.start)
     write_closed_loop(path, words.spec, **write, sentences={7: sentence})
     with pytest.raises(ValueError, match="nothing to write"):
         write_closed_loop(tmp_path / "empty.npz", words.spec, **write, sentences={})
@@ -365,29 +457,46 @@ def test_the_closed_loop_file_round_trips_and_a_replay_flies_its_stored_states(t
         write_closed_loop(path, words.spec, **write, sentences={7: sentence})
     with pytest.raises(ValueError, match="Δ rows marked"):
         write_closed_loop(tmp_path / "unmarked.npz", words.spec, **write,
-                          sentences={7: replace(sentence, on_interval=np.roll(sentence.on_interval, 1))})
-    # D61, vocabulary §6 item 3: the reader gives back every field written — the words, the marks, all the states
-    stored = closed_loop_sentences(load_closed_loop(path, words.spec))
-    assert list(stored) == [7] and set(fields(stored[7])) == set(fields(sentence))
-    for name in (f.name for f in fields(sentence)):
-        assert np.array_equal(getattr(stored[7], name), getattr(sentence, name), equal_nan=name == "vertical_m"), name
-    assert np.array_equal(stored[7].flown_states,
-                          sentence.states[int(np.flatnonzero(sentence.on_interval)[sentence.start]):])
+                          sentences={7: _changed(sentence, on_interval=np.roll(sentence.rows.on_interval, 1))})
+    # D61, D82, vocabulary §6 item 3: the reader gives back every field written — the words, the marks, all the states —
+    # and apart from them what is withheld: the reading's own, the labelled ones joined from the sentence file
+    stored = closed_loop_sentences(directory, "train", 4.0, words.spec)
+    assert list(stored) == [7] and [f.name for f in fields(stored[7])] == ["rows", "withheld"]
+    for part in ("rows", "withheld"):
+        for name in (f.name for f in fields(getattr(sentence, part))):
+            assert np.array_equal(getattr(getattr(stored[7], part), name), getattr(getattr(sentence, part), name),
+                                  equal_nan=name == "vertical_m"), (part, name)
+    assert (stored[7].withheld.runway, stored[7].withheld.stratum) == ("09", "vectored")
+    from ts_transformer.instructions.artefact import closed_loop_indices
+
+    assert closed_loop_indices(directory, "train", 4.0, words.spec) == {7}
+    misnamed = closed_loop_path(directory, "train", 8.0)                    # a 4 s file under the 8 s name
+    misnamed.write_bytes(path.read_bytes())
+    with pytest.raises(ValueError, match="holds sentences at 4 s, not 8 s"):
+        closed_loop_indices(directory, "train", 8.0, words.spec)
+    with pytest.raises(ValueError, match="holds sentences at 4 s, not 8 s"):
+        closed_loop_sentences(directory, "train", 8.0, words.spec)
+    with pytest.raises(ValueError, match="holds sentences at 4 s, not 2 s"):
+        closed_loop_sentences(directory, "train", 2.0, words.spec, path=path)        # a part file of another Δ
+    with pytest.raises(ValueError, match="is not a ts-instruction-closed-loop-v8 file read with spec"):
+        closed_loop_indices(directory, "train", 4.0, spec(closed_loop_final_vertical_m=5.0))  # another vocabulary
+    assert np.array_equal(stored[7].rows.flown_states,
+                          sentence.rows.states[int(np.flatnonzero(sentence.rows.on_interval)[sentence.rows.start]):])
     _, moved, missing, flown = _replayed(batch, inputs, sentence, params, words, monkeypatch)
-    assert missing == 0 and moved.sentences[0].first_row == batch.sentences[0].first_row + sentence.start * 2
-    assert moved.signals[0].e_m[0] == batch.signals[0].e_m[sentence.start * 2]
+    assert missing == 0 and moved.sentences[0].first_row == batch.sentences[0].first_row + sentence.rows.start * 2
+    assert moved.signals[0].e_m[0] == batch.signals[0].e_m[sentence.rows.start * 2]
     verdicts = replay.judge_batch(moved, flown, words)
-    assert verdicts[0].outcome == sentence.outcome                                  # D74: the replay's is the stored
+    assert verdicts[0].outcome == sentence.withheld.outcome                                  # D74: the replay's is the stored
     (row,) = closed_loop_columns(stored, 2.0)(moved, flown, verdicts)
-    assert row["largest_lateral_m"] == pytest.approx(float(np.abs(sentence.lateral_m).max()))
-    assert row["uncorrected_lateral_m"] == closed_loop.uncorrected_m(sentence.lateral_m, sentence.uncorrectable[:, 0])
-    assert row["uncorrected_vertical_m"] == closed_loop.uncorrected_m(sentence.vertical_m, sentence.uncorrectable[:, 1])
+    assert row["largest_lateral_m"] == pytest.approx(float(np.abs(sentence.withheld.lateral_m).max()))
+    assert row["uncorrected_lateral_m"] == closed_loop.uncorrected_m(sentence.withheld.lateral_m, sentence.withheld.uncorrectable[:, 0])
+    assert row["uncorrected_vertical_m"] == closed_loop.uncorrected_m(sentence.withheld.vertical_m, sentence.withheld.uncorrectable[:, 1])
     assert row["uncorrected_lateral_m"] != row["uncorrected_vertical_m"]
-    assert sum(row["correction_words"].values()) == int(sentence.correction.sum())
-    stored[7] = replace(sentence, outcome="ground_contact" if sentence.outcome != "ground_contact" else "landed")
-    with pytest.raises(ValueError, match=f"flown again to {sentence.outcome}, stored {stored[7].outcome}"):
+    assert sum(row["correction_words"].values()) == int(sentence.rows.correction.sum())
+    stored[7] = _changed(sentence, outcome="ground_contact" if sentence.withheld.outcome != "ground_contact" else "landed")
+    with pytest.raises(ValueError, match=f"flown again to {sentence.withheld.outcome}, stored {stored[7].withheld.outcome}"):
         closed_loop_columns(stored, 2.0)(moved, flown, verdicts)
-    stored[7] = replace(sentence, states=sentence.states + [1.0, 0, 0, 0, 0, 0])
+    stored[7] = _changed(sentence, states=sentence.rows.states + [1.0, 0, 0, 0, 0, 0])
     with pytest.raises(ValueError, match="from its closed-loop states"):
         closed_loop_columns(stored, 2.0)(moved, flown, verdicts)
 
@@ -399,9 +508,9 @@ def test_a_sentence_that_reaches_its_time_limit_stores_the_timeout_the_replay_gi
     batch, inputs, words = _batch(interval_s, cut=120)
     params = _params()
     (sentence,) = closed_loop.read(batch, inputs, params, words, device=CPU)
-    assert sentence.timed_out and sentence.outcome == "timeout"
+    assert sentence.withheld.timed_out and sentence.withheld.outcome == "timeout"
     _, moved, _, flown = _replayed(batch, inputs, sentence, params, words, monkeypatch)
-    assert replay.judge_batch(moved, flown, words)[0].outcome == sentence.outcome
+    assert replay.judge_batch(moved, flown, words)[0].outcome == sentence.withheld.outcome
 
 
 def test_the_runner_counts_the_flights_without_a_sentence_by_reason():
@@ -422,16 +531,16 @@ def test_the_runner_counts_the_flights_without_a_sentence_by_reason():
     assert summarise(merge_tallies([tally(first, [sentence, gone], words), tally(second, [sentence], words)]), {}) \
         == summarise(tally(whole, [sentence, gone, sentence], words), {})
     assert numbers["sentences"] == 1
-    assert numbers["outcomes"] == {sentence.outcome: 1}                                             # D74
+    assert numbers["outcomes"] == {sentence.withheld.outcome: 1}                                             # D74
     assert numbers["without_a_sentence"] == {
         "not flown": {"no aircraft dynamics": 3}, "refused on the row interval": {"too short": 1},
         "refused by the closed loop": {"go-around at the first predicted step": 1}}
-    assert numbers["correction_words"]["heading"] == int(sentence.correction[:, HEADING].sum()) > 0
+    assert numbers["correction_words"]["heading"] == int(sentence.rows.correction[:, HEADING].sum()) > 0
     assert numbers["heading_word_lateness_s"]["n"] == len(lateness) > 0
     assert numbers["heading_word_lateness_s"]["mean"] == pytest.approx(float(lateness.mean()))
     lateral = numbers["outside_the_tolerance"]["lateral"]
     assert lateral["outside"] > 0 and lateral["without_a_correction_toward_the_path"] == 0        # D50: the rule holds
-    assert lateral["correctable_rows"] == int((~sentence.uncorrectable[:, 0]).sum())
+    assert lateral["correctable_rows"] == int((~sentence.withheld.uncorrectable[:, 0]).sum())
 
 
 def _outside(batch, sentence, words):
@@ -448,15 +557,15 @@ def test_the_rule_of_d50_reads_the_direction_of_the_correction_in_force():
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     correctable, outside, breaks = _outside(batch, sentence, words)["lateral"]
     assert outside.any() and not breaks.any()
-    assert np.array_equal(outside, ~sentence.uncorrectable[:, 0] & (np.abs(sentence.lateral_m)
+    assert np.array_equal(outside, ~sentence.withheld.uncorrectable[:, 0] & (np.abs(sentence.withheld.lateral_m)
                                                                     > words.spec.closed_loop_lateral_m))
     observed = batch.readings[0].words[batch.sentences[0].first_row:]
-    for heading, name in ((in_force(observed)[sentence.observed_row, HEADING], "the observed words"),
-                          ((2 * in_force(observed)[sentence.observed_row, HEADING].astype(int)
-                            - in_force(sentence.grid)[:, HEADING].astype(int)) % words.n_heading, "away")):
-        grid = sentence.grid.copy()
+    for heading, name in ((in_force(observed)[sentence.withheld.observed_row, HEADING], "the observed words"),
+                          ((2 * in_force(observed)[sentence.withheld.observed_row, HEADING].astype(int)
+                            - in_force(sentence.rows.grid)[:, HEADING].astype(int)) % words.n_heading, "away")):
+        grid = sentence.rows.grid.copy()
         grid[:, HEADING] = heading
-        assert np.array_equal(_outside(batch, replace(sentence, grid=grid), words)["lateral"][2], outside), name
+        assert np.array_equal(_outside(batch, _changed(sentence, grid=grid), words)["lateral"][2], outside), name
 
 
 def test_the_readings_of_d34_read_the_vertical_tolerance_in_force_at_each_row():
@@ -472,7 +581,7 @@ def test_the_readings_of_d34_read_the_vertical_tolerance_in_force_at_each_row():
         rows.append(corrector.row(k, 0.0, e_h, height, holding=False, past_end=False))
         uncorrectable.append(corrector.uncorrectable.copy())
     n = len(rows)
-    sentence = ClosedLoopSentence(
+    sentence = _sentence(
         first_row=0, grid=np.array([r[0] for r in rows]), correction=np.array([r[1] for r in rows]),
         states=np.zeros((n, 6)), on_interval=np.ones(n, bool), lateral_m=np.zeros(n), vertical_m=np.array(errors),
         uncorrectable=np.array(uncorrectable), observed_row=np.arange(n), matched_row=np.arange(n, dtype=float),
@@ -490,14 +599,14 @@ def test_a_closed_loop_flight_with_h_final_differs_only_in_its_final_descent():
         batch, inputs, words = _batch(final_vertical_m=final_vertical_m)
         (readings[final_vertical_m],) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     before, after = readings[15.0], readings[5.0]
-    final = in_force(before.grid)[:, ALTITUDE] == words.altitude_no_level_off
+    final = in_force(before.rows.grid)[:, ALTITUDE] == words.altitude_no_level_off
     first = int(np.argmax(final))
-    assert final.any() and np.array_equal(in_force(after.grid)[:first + 1, ALTITUDE], in_force(before.grid)[:first + 1, ALTITUDE])
-    assert np.array_equal(before.grid[:first + 1], after.grid[:first + 1])
-    assert np.array_equal(before.correction[:first + 1], after.correction[:first + 1])
+    assert final.any() and np.array_equal(in_force(after.rows.grid)[:first + 1, ALTITUDE], in_force(before.rows.grid)[:first + 1, ALTITUDE])
+    assert np.array_equal(before.rows.grid[:first + 1], after.rows.grid[:first + 1])
+    assert np.array_equal(before.rows.correction[:first + 1], after.rows.correction[:first + 1])
     every = int(round(2.0 / words.spec.step_s))
-    assert np.array_equal(before.states[:(before.start + first) * every + 1], after.states[:(after.start + first) * every + 1])
-    assert after.correction[first:, ANGLE].sum() > before.correction[first:, ANGLE].sum()
+    assert np.array_equal(before.rows.states[:(before.rows.start + first) * every + 1], after.rows.states[:(after.rows.start + first) * every + 1])
+    assert after.rows.correction[first:, ANGLE].sum() > before.rows.correction[first:, ANGLE].sum()
 
 
 def test_the_rule_of_d50_reads_a_word_moved_across_a_runway_word_in_its_new_frame():
@@ -512,7 +621,7 @@ def test_the_rule_of_d50_reads_a_word_moved_across_a_runway_word_in_its_new_fram
     grid[0] = observed[0]
     grid[1, RUNWAY], grid[3, RUNWAY], grid[3, HEADING] = RUNWAY_GO_AROUND, 1, 1
     n = len(grid)
-    sentence = ClosedLoopSentence(
+    sentence = _sentence(
         first_row=0, grid=grid, correction=np.zeros((n, 5), bool), states=np.zeros((n, 6)), on_interval=np.ones(n, bool),
         lateral_m=np.array([0.0, 0.0, 0.0, 0.0, -60.0]), vertical_m=np.zeros(n),
         uncorrectable=np.array([[True, True], *[[False, True]] * (n - 1)]),
@@ -521,7 +630,7 @@ def test_the_rule_of_d50_reads_a_word_moved_across_a_runway_word_in_its_new_fram
     assert outside.tolist() == [False, False, False, False, True] and breaks.tolist() == outside.tolist()
     corrected = grid.copy()
     corrected[4, HEADING] = 2                                       # one class right of 97°: toward the path
-    _, _, breaks = closed_loop.outside_rows(replace(sentence, grid=corrected), observed, 0, words, [90.0, 92.0])["lateral"]
+    _, _, breaks = closed_loop.outside_rows(_changed(sentence, grid=corrected), observed, 0, words, [90.0, 92.0])["lateral"]
     assert not breaks.any()
 
 
@@ -535,7 +644,7 @@ def test_an_overshoot_takes_the_opposite_correction_in_its_row_and_the_rule_of_d
             for s, e_y in enumerate((0.0, 60.0, -60.0, -60.0, 0.0))]
     grid = np.array([r[0] for r in rows])
     n = len(grid)
-    sentence = ClosedLoopSentence(
+    sentence = _sentence(
         first_row=0, grid=grid, correction=np.array([r[1] for r in rows]), states=np.zeros((n, 6)), on_interval=np.ones(n, bool),
         lateral_m=np.array([0.0, 60.0, -60.0, -60.0, 0.0]), vertical_m=np.zeros(n),
         uncorrectable=np.array([[True, True], *[[False, True]] * (n - 1)]), observed_row=np.zeros(n, dtype=int),
@@ -547,7 +656,7 @@ def test_an_overshoot_takes_the_opposite_correction_in_its_row_and_the_rule_of_d
     cancelled = grid.copy()
     cancelled[2, HEADING] = 0                                    # the observed word: the correction only cancelled
     cancelled[3, HEADING] = 1
-    _, _, breaks = closed_loop.outside_rows(replace(sentence, grid=cancelled), observed, 0, words, [90.0])["lateral"]
+    _, _, breaks = closed_loop.outside_rows(_changed(sentence, grid=cancelled), observed, 0, words, [90.0])["lateral"]
     assert breaks.tolist() == [False, False, True, False, False]
 
 
@@ -590,26 +699,24 @@ def _reference(tmp_path, monkeypatch, results):
 
 
 def test_the_conformance_check_passes_the_same_reading_and_finds_every_change(tmp_path, monkeypatch):
-    from dataclasses import replace
-
     assert _reference(tmp_path / "same", monkeypatch, lambda s: (["KXXX:test"], [s])).passed
     moved = _reference(tmp_path / "moved", monkeypatch, lambda s: (["KXXX:test"], [
-        replace(s, states=s.states + [0.0, 0.0, 1e-3, 0.0, 0.0, 0.0])]))
+        _changed(s, states=s.rows.states + [0.0, 0.0, 1e-3, 0.0, 0.0, 0.0])]))
     assert not moved.passed and moved.largest_state_difference_m == pytest.approx(1e-3)
     lost = _reference(tmp_path / "nan", monkeypatch, lambda s: (["KXXX:test"], [
-        replace(s, vertical_m=np.where(np.arange(len(s.vertical_m)) == 3, np.nan, s.vertical_m))]))
+        _changed(s, vertical_m=np.where(np.arange(len(s.withheld.vertical_m)) == 3, np.nan, s.withheld.vertical_m))]))
     assert not lost.passed
     shorter = _reference(tmp_path / "shape", monkeypatch, lambda s: (["KXXX:test"], [
-        replace(s, grid=s.grid[:-1], correction=s.correction[:-1], states=s.states[:-1], lateral_m=s.lateral_m[:-1],
-                vertical_m=s.vertical_m[:-1])]))
+        _changed(s, grid=s.rows.grid[:-1], correction=s.rows.correction[:-1], states=s.rows.states[:-1], lateral_m=s.withheld.lateral_m[:-1],
+                vertical_m=s.withheld.vertical_m[:-1])]))
     assert not shorter.passed
     other = _reference(tmp_path / "other", monkeypatch, lambda s: (["KXXX:other"], [s]))
     assert not other.passed and "other flights" in str(other.mismatches)
     flags = _reference(tmp_path / "flags", monkeypatch, lambda s: (["KXXX:test"], [
-        replace(s, uncorrectable=~s.uncorrectable)]))
+        _changed(s, uncorrectable=~s.withheld.uncorrectable)]))
     assert not flags.passed and "the uncorrectable differ" in str(flags.mismatches)
     judged = _reference(tmp_path / "outcome", monkeypatch, lambda s: (["KXXX:test"], [
-        replace(s, outcome="timeout" if s.outcome != "timeout" else "landed")]))
+        _changed(s, outcome="timeout" if s.withheld.outcome != "timeout" else "landed")]))
     assert not judged.passed and "outcome" in str(judged.mismatches)                              # D74
     refused = _reference(tmp_path / "refused", monkeypatch, lambda s: (["KXXX:test"], [Refused("too short")]))
     assert not refused.passed
@@ -619,8 +726,6 @@ def test_reading_closed_loop_sentences_runs_the_checks_and_refuses_a_difference_
     """D69, D73: `require_conforming_closed_loop` opens the executor spec (the labeller's and the executor's checks) and
     reads the closed-loop reference again, every time: alike, it returns what `open_executor` returns and writes nothing;
     a reading off the reference is refused by name."""
-    from dataclasses import replace
-
     _reference(tmp_path, monkeypatch, lambda s: (["KXXX:test"], [s]))
     batch, inputs, words = _batch()
     monkeypatch.setattr(replay, "CHECKED", {})
@@ -633,7 +738,7 @@ def test_reading_closed_loop_sentences_runs_the_checks_and_refuses_a_difference_
     assert sorted(p.name for p in (tmp_path / closed_loop.CLOSED_LOOP_DIRECTORY / closed_loop.CONFORMANCE).iterdir()) \
         == before
     monkeypatch.setattr(closed_loop, "_reference_results", lambda instructions, p, w, intervals, device: {
-        2.0: (["KXXX:test"], [replace(s, states=s.states + 1e-3) for s in [closed_loop.read(batch, inputs, _params(),
+        2.0: (["KXXX:test"], [_changed(s, states=s.rows.states + 1e-3) for s in [closed_loop.read(batch, inputs, _params(),
                                                                                              words, device=CPU)[0]]])})
     closed_loop.require_conforming_closed_loop(tmp_path, tmp_path / "executor")     # checked once in this process
     replay.CHECKED.clear()                                                          # a new process checks again
@@ -644,7 +749,7 @@ def test_reading_closed_loop_sentences_runs_the_checks_and_refuses_a_difference_
 def test_the_replay_refuses_a_sentence_of_another_first_row(monkeypatch):
     batch, inputs, words = _batch()
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
-    stored = {0: replace(sentence, first_row=3)}
+    stored = {0: _changed(sentence, first_row=3)}
     with pytest.raises(ValueError, match="starts at 2 s row 3"):
         closed_loop.replay_batch(batch, stored, words)
 
@@ -655,19 +760,20 @@ def test_read_chunked_puts_each_result_in_its_place(monkeypatch):
     params = _params()
     (alone,) = closed_loop.read(batch, inputs, params, words, device=CPU)
     short = replay.Sentence(grid=batch.sentences[0].grid[:9], instructions=[], first_row=0)
-    batch = replay.Batch(indices=[0, 1, 2], signals=batch.signals * 3, series=[None] * 3, readings=batch.readings * 3,
+    batch = replay.Batch(indices=[0, 1, 2], signals=batch.signals * 3, observed=batch.observed * 3, series=[None] * 3,
+                         readings=batch.readings * 3,
                          sentences=[short, batch.sentences[0], batch.sentences[0]], row_interval_s=2.0,
                          geometries=batch.geometries * 3,
                          approach_ias_mps=batch.approach_ias_mps * 3, groups=batch.groups * 3, drawn={})
-    monkeypatch.setattr(closed_loop, "start_inputs", lambda part, step_s, device: closed_loop._rows(
+    monkeypatch.setattr(closed_loop, "start_inputs", lambda part, params, step_s, device: closed_loop._rows(
         closed_loop.FlightInputs(*(torch.cat([getattr(inputs, n)] * len(part.sentences)) for n in (
             "initial_state", "aero_params", "frame_params", "max_thrust_n"))), list(range(len(part.sentences)))))
     for chunk in (1, 3):                    # 3: the refused flight ahead of the flown ones in one reading (D74's index)
         results = closed_loop.read_chunked(batch, params, words, chunk=chunk, device=CPU)
         assert isinstance(results[0], Refused)
         for result in results[1:]:
-            assert np.array_equal(result.grid, alone.grid) and np.array_equal(result.states, alone.states)
-            assert result.outcome == alone.outcome
+            assert np.array_equal(result.rows.grid, alone.rows.grid) and np.array_equal(result.rows.states, alone.rows.states)
+            assert result.withheld.outcome == alone.withheld.outcome
 
 
 def test_the_rows_without_a_correction_are_marked_for_the_ablation():
@@ -700,7 +806,7 @@ def test_the_rows_without_a_correction_are_marked_for_the_ablation():
     assert closed_loop.uncorrected_m(np.array([5.0, -40.0, 9.0]), np.array([True, False, True])) == 9.0
     batch, inputs, words = _batch()
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
-    assert sentence.uncorrectable.shape == (len(sentence.grid), 2) and sentence.uncorrectable[0].all()
+    assert sentence.withheld.uncorrectable.shape == (len(sentence.rows.grid), 2) and sentence.withheld.uncorrectable[0].all()
 
 
 # ---- the observed words at the place (D42)
@@ -765,14 +871,14 @@ def test_a_flight_whose_observed_path_ends_early_gets_no_correction_past_its_end
     batch, inputs, words = _batch(cut=30)
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     assert isinstance(sentence, ClosedLoopSentence)
-    past = np.isnan(sentence.vertical_m)
+    past = np.isnan(sentence.withheld.vertical_m)
     assert past.sum() > 20 and past[int(np.argmax(past)):].all()          # from the end of the path to the threshold
-    observed = closed_loop.in_force(batch.readings[0].words[batch.sentences[0].first_row:])[sentence.observed_row]
-    held = closed_loop.in_force(sentence.grid)
+    observed = closed_loop.in_force(batch.readings[0].words[batch.sentences[0].first_row:])[sentence.withheld.observed_row]
+    held = closed_loop.in_force(sentence.rows.grid)
     assert np.array_equal(held[past][:, [HEADING, ANGLE]], observed[past][:, [HEADING, ANGLE]])  # the observed words
-    assert sentence.correction[past].sum() <= 2 and sentence.uncorrectable[past].all()  # at most a correction ended
-    assert np.isfinite(sentence.lateral_m).all()
-    assert closed_loop.largest_m(sentence.vertical_m) == float(np.abs(sentence.vertical_m[~past]).max())
+    assert sentence.rows.correction[past].sum() <= 2 and sentence.withheld.uncorrectable[past].all()  # at most a correction ended
+    assert np.isfinite(sentence.withheld.lateral_m).all()
+    assert closed_loop.largest_m(sentence.withheld.vertical_m) == float(np.abs(sentence.withheld.vertical_m[~past]).max())
 
 
 def test_the_observed_words_wait_while_the_flown_aircraft_is_behind():
@@ -871,7 +977,7 @@ def test_the_observed_heading_words_of_a_turn_are_said_at_the_nearest_row_on_ave
         assert abs(lateness.mean()) < 0.5
         # the runner's readout reads the same from the sentence and the reading from its first row
         n = len(said_rows)
-        sentence = ClosedLoopSentence(
+        sentence = _sentence(
             first_row=0, grid=np.array([r[0] for r in said_rows]), correction=np.array([r[1] for r in said_rows]),
             states=np.zeros((n, 6)), on_interval=np.ones(n, bool), lateral_m=np.zeros(n), vertical_m=np.zeros(n), uncorrectable=np.ones((n, 2), bool),
             observed_row=np.array([r[2] for r in said_rows]), matched_row=np.array([r[3] for r in said_rows]), start=0,
@@ -886,20 +992,20 @@ def test_a_flown_aircraft_behind_hears_the_turn_where_the_observed_one_did_and_f
     batch, inputs, words = _batch(speeds={0: 70.0})
     (sentence,) = closed_loop.read(batch, inputs, _params(), words, device=CPU)
     assert isinstance(sentence, ClosedLoopSentence)
-    open_grid, start = batch.sentences[0].grid, sentence.start
+    open_grid, start = batch.sentences[0].grid, sentence.rows.start
     turn = start + int(np.argmax(open_grid[start + 1:, HEADING] != UNCHANGED)) + 1      # the first turn word
-    heard = int(np.argmax(sentence.observed_row >= turn))
-    assert sentence.observed_row[heard] == turn and int(sentence.grid[heard, HEADING]) == int(open_grid[turn, HEADING])
-    assert not sentence.correction[heard, HEADING]
+    heard = int(np.argmax(sentence.withheld.observed_row >= turn))
+    assert sentence.withheld.observed_row[heard] == turn and int(sentence.rows.grid[heard, HEADING]) == int(open_grid[turn, HEADING])
+    assert not sentence.rows.correction[heard, HEADING]
     assert start + heard > turn + 5                                     # behind: more than 10 s after the observed time
     observed = batch.signals[0]
-    flown = sentence.states[start + heard, :2]
+    flown = sentence.rows.states[start + heard, :2]
     assert math.dist(flown, (observed.e_m[turn], observed.n_m[turn])) < 250.0         # within one row's flight
-    assert len(sentence.grid) > len(open_grid) - start and not sentence.timed_out
+    assert len(sentence.rows.grid) > len(open_grid) - start and not sentence.withheld.timed_out
     (short,) = closed_loop.read(batch, inputs, replace(_params(), timeout_factor=1.0), words, device=CPU)
-    assert short.timed_out and len(short.grid) == len(open_grid) - start         # the limit: the observed time
-    assert np.abs(sentence.lateral_m[-len(sentence.lateral_m) // 4:]).max() < words.spec.closed_loop_lateral_m
-    assert -2.0 * 75.0 < sentence.states[-1, 0] <= 0.0               # its last row starts one row before the threshold
+    assert short.withheld.timed_out and len(short.rows.grid) == len(open_grid) - start         # the limit: the observed time
+    assert np.abs(sentence.withheld.lateral_m[-len(sentence.withheld.lateral_m) // 4:]).max() < words.spec.closed_loop_lateral_m
+    assert -2.0 * 75.0 < sentence.rows.states[-1, 0] <= 0.0               # its last row starts one row before the threshold
 
 
 def test_a_flown_aircraft_ahead_hears_the_go_around_before_the_threshold_where_the_observed_one_went_around(
@@ -917,14 +1023,14 @@ def test_a_flown_aircraft_ahead_hears_the_go_around_before_the_threshold_where_t
     params = _params()
     (sentence,) = closed_loop.read(batch, inputs, params, words, device=CPU)
     assert isinstance(sentence, ClosedLoopSentence)
-    start = sentence.start
-    (heard,) = np.flatnonzero(sentence.grid[:, RUNWAY] == RUNWAY_GO_AROUND)
-    assert sentence.observed_row[heard] >= go > sentence.observed_row[heard - 1]     # the first row that reaches it
+    start = sentence.rows.start
+    (heard,) = np.flatnonzero(sentence.rows.grid[:, RUNWAY] == RUNWAY_GO_AROUND)
+    assert sentence.withheld.observed_row[heard] >= go > sentence.withheld.observed_row[heard - 1]     # the first row that reaches it
     assert start + heard < go - 5                                     # ahead: more than 10 s before the observed time
     observed = batch.signals[0]
-    flown = sentence.states[start + heard, :2]
+    flown = sentence.rows.states[start + heard, :2]
     assert flown[0] < 0.0 and math.dist(flown, (observed.e_m[go], observed.n_m[go])) < 250.0   # before the threshold
-    assert sentence.states[go, 0] > 0.0          # at the observed time it is past the threshold (e = 0) already
+    assert sentence.rows.states[go, 0] > 0.0          # at the observed time it is past the threshold (e = 0) already
     _, moved, _, replayed = _replayed(batch, inputs, sentence, params, words, monkeypatch)
     assert moved.sentences[0].go_arounds == 1 and replayed.modes["go_around"][0].any()
 
@@ -939,8 +1045,8 @@ def test_the_replay_reads_the_speed_words_and_how_far_along_the_path_the_flown_a
     read = {}
     for name, speeds, interval_s in (("observed", None, 2.0), ("slow", {0: 70.0}, 2.0), ("slow_4", {0: 70.0}, 4.0)):
         batch, inputs, words = _batch(interval_s, speeds=speeds)
-        monkeypatch.setattr(replay.Batch, "inputs", lambda self, device, inputs=executor_inputs(
-            batch.signals[0], batch.geometries[0]): inputs)
+        monkeypatch.setattr(replay.Batch, "inputs", lambda self, rule, device, inputs=executor_inputs(
+            batch.observed[0], batch.geometries[0], batch.sentences[0].first_row): inputs)
         flown = replay.fly_sentences(batch, params, words, device=CPU)
         (read[name],) = along_columns(words)(batch, flown, replay.judge_batch(batch, flown, words))
         grid = batch.sentences[0].grid
@@ -966,7 +1072,7 @@ def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(
 
     clean = {"head": "h", "dirty": False}
 
-    def draw(directory, split, one, words, *, per_airport, seed, groups, part=(0, 1)):
+    def draw(directory, split, one, words, *, per_airport, seed, groups, part=(0, 1), go_around_per_airport=0):
         stored, signals, geometries = load_sentences(directory, split, one), load_signals(directory, split), \
             load_candidates(directory)
         indices = replay.part_of([int(i) for i in stored["signal_index"]], part)
@@ -978,9 +1084,10 @@ def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(
                                          "threshold_crossing_heights_m": {}, "pool": 2 * n, "read": 2 * n, "flights": n,
                                          "excluded": {"no aircraft dynamics": n}, "by_group": {"own": n}}), readings
 
-    def inputs(batch, step_s, *, device):
+    def inputs(batch, params, step_s, *, device):
         start = closed_loop.start_row(batch.row_interval_s) * int(round(batch.row_interval_s / step_s))
-        parts = [executor_inputs(s, g, start) for s, g in zip(batch.signals, batch.geometries)]
+        parts = [executor_inputs(o, g, sentence.first_row + start)
+                 for o, g, sentence in zip(batch.observed, batch.geometries, batch.sentences)]
         return FlightInputs(*(torch.cat([getattr(p, name) for p in parts])
                               for name in ("initial_state", "aero_params", "frame_params", "max_thrust_n")))
 
@@ -1013,6 +1120,11 @@ def test_the_runner_reads_the_same_files_and_summary_with_any_number_of_workers(
     train = whole[1]["splits"]["train"]
     assert train["drawn"]["flights"] == 3 and train["intervals"]["2"]["sentences"] == 3
     assert train["drawn"]["excluded"] == {"no aircraft dynamics": 3} and train["drawn"]["pool"] == 6
+    # D85: of val, the flights drawn and the sentences written, no reading
+    val = whole[1]["splits"]["val"]
+    assert set(val["drawn"]) == {"flights", "readings"} and val["drawn"]["flights"] >= 1
+    assert all(set(one) == {"sentences", "readings"} and one["sentences"] == val["drawn"]["flights"]
+               for one in val["intervals"].values())
     for run in runs[1:]:
         files, summary, arrays = read[run]
         assert files == whole[0] and json_module.dumps(summary) == json_module.dumps(whole[1]), run   # text too
@@ -1073,3 +1185,122 @@ def test_a_split_is_drawn_in_parts_of_its_one_permutation_and_their_descriptions
         replay.merge_descriptions([first, ({**first[0], "new": 1}, first[1])])
     with pytest.raises(ValueError, match="not its description's"):
         replay.merge_descriptions([first, (first[0], Counter({"no identified type": 1}))])
+
+
+def test_a_stored_track_is_in_0_to_360_degrees_and_a_remainder_of_360_is_0():
+    """D82, A37: a track a hair below 0° has a remainder of exactly 360° in floats; every stored row writes it as 0°
+    (`flights.compass_track`: the observed rows, and the flown rows of `start.state_rows`)."""
+    from ts_transformer.autopilot.flights import compass_track
+    from ts_transformer.autopilot.frame import Kinematics
+    from ts_transformer.autopilot.start import state_rows
+
+    assert np.remainder(-1e-14, 360.0) == 360.0                                  # the case itself
+    assert compass_track(np.array([-1e-14, 0.0, 359.5, 360.0, 720.5])).tolist() == [0.0, 0.0, 359.5, 0.0, 0.5]
+    one = torch.tensor([1.0], dtype=torch.float64)
+    state = Kinematics(*(one if f.name != "track_deg" else torch.tensor([360.0], dtype=torch.float64)
+                         for f in fields(Kinematics)))
+    assert state_rows(state)[0, 3] == 0.0
+
+
+@pytest.mark.parametrize("interval_s", [2.0, 4.0, 8.0])
+def test_no_start_state_and_no_stored_observed_row_reads_a_sample_after_the_first_predicted_step(interval_s):
+    """D77: the start state and the observed rows a closed-loop sentence stores take their velocity from the rows at or
+    before the first predicted step, by each formal start rule — moving every sample after it changes neither; the
+    rows before are what moves them (the window, cut at the flight's row 0: row 0 takes the line through rows 0 and 1)."""
+    from ts_transformer.autopilot.flights import observed_rows, start_state
+    from ts_transformer.autopilot.params import FORMAL_START_RULES
+
+    batch, _, words = _batch(interval_s)
+    signals, geometry = batch.observed[0], batch.geometries[0]
+    every = int(round(interval_s / 2.0))
+    first = batch.sentences[0].first_row + closed_loop.start_row(interval_s) * every
+    later = replace(signals, **{name: np.where(np.arange(signals.n_rows) > first, getattr(signals, name) + shift,
+                                               getattr(signals, name))
+                                for name, shift in (("e_m", 300.0), ("n_m", -200.0), ("altitude_m", 50.0),
+                                                    ("track_deg", 20.0), ("ground_speed_mps", 9.0),
+                                                    ("vertical_rate_mps", 3.0))})
+    rows = batch.sentences[0].first_row + np.arange(closed_loop.start_row(interval_s) * every)
+    for rule in FORMAL_START_RULES:
+        params = replace(_params(), start_rule=rule)
+        assert np.array_equal(start_state(signals, first, rule, geometry, 62000.0),
+                              start_state(later, first, rule, geometry, 62000.0)), rule
+        assert np.array_equal(observed_rows(signals, rows, rule, geometry), observed_rows(later, rows, rule, geometry))
+        read = {}
+        for name, flight in (("observed", signals), ("later", later)):
+            moved = replace(batch, observed=[flight])
+            (read[name],) = closed_loop.read(moved, executor_inputs(flight, geometry, first, rule=rule), params, words,
+                                             device=CPU)
+        start = closed_loop.start_row(interval_s) * every
+        assert np.array_equal(read["observed"].rows.states[:start], read["later"].rows.states[:start]), rule
+        assert np.array_equal(read["observed"].rows.states[:start], observed_rows(signals, rows, rule, geometry))
+        tracks = read["observed"].rows.states[:, 3]
+        assert ((0.0 <= tracks) & (tracks < 360.0)).all()                                       # D82
+    # A37: the formal rules read the positions and heights only — the data plane's track, ground speed and vertical rate
+    # changed on every row (before the first predicted step too) change no start state and no stored observed row
+    channels = replace(signals, track_deg=signals.track_deg + 37.0, ground_speed_mps=signals.ground_speed_mps * 1.3,
+                       vertical_rate_mps=signals.vertical_rate_mps - 4.0)
+    for rule in FORMAL_START_RULES:
+        assert np.array_equal(start_state(signals, first, rule, geometry, 62000.0),
+                              start_state(channels, first, rule, geometry, 62000.0)), rule
+        assert np.array_equal(observed_rows(signals, rows, rule, geometry), observed_rows(channels, rows, rule, geometry))
+    assert not np.array_equal(start_state(signals, first, "centred-fit-15s", geometry, 62000.0),
+                              start_state(channels, first, "centred-fit-15s", geometry, 62000.0))   # the data plane's own
+    earlier = replace(signals, e_m=np.where(np.arange(signals.n_rows) == first - 1, signals.e_m + 300.0, signals.e_m))
+    assert not np.array_equal(start_state(signals, first, "displacement-2s", geometry, 62000.0),
+                              start_state(earlier, first, "displacement-2s", geometry, 62000.0))
+    zero, one = (start_state(signals, row, "trailing-fit-15s", geometry, 62000.0) for row in (0, 1))
+    assert np.array_equal(zero[3:6], one[3:6])                    # row 0 alone in its window: rows 0 and 1, as row 1
+
+
+def test_a_references_go_around_flights_are_drawn_after_the_others_among_those_not_drawn(monkeypatch):
+    """A37 (§7.2 #2, #3): the references' draw takes up to ``go_around_per_airport`` more flights whose sentence has a
+    go-around, among those the first draw did not take, after them, at most that many (`draw_flights` ``at_most``);
+    refused in parts (each part would draw them)."""
+    from types import SimpleNamespace
+
+    #: six labelled flights (signal indices 0–5), with a go-around in the sentences of 1, 2 and 4
+    sentences = {"signal_index": np.arange(6), "go_around_offsets": np.array([0, 0, 1, 2, 2, 3, 3]),
+                 "words": np.zeros((6, 5), dtype=np.int16), "offsets": np.arange(7), "runway_index": np.zeros(6)}
+    calls = []
+
+    def draw_flights(directory, split, keys, *, per_airport, seed, groups, part=(0, 1), at_most=False):
+        calls.append((list(keys), per_airport, at_most))
+        taken = list(keys)[:per_airport]
+        return replay.Drawn(indices=taken, signals=[SimpleNamespace(airport="KXXX", dataset_id=f"KXXX:{i}") for i in taken],
+                            series=[None] * len(taken), groups=[replay.OWN] * len(taken), geometries={"KXXX": None},
+                            description={"flights": len(taken)}, excluded_seen=Counter())
+
+    monkeypatch.setattr(replay, "load_sentences", lambda directory, split, spec_: sentences)
+    monkeypatch.setattr(replay, "draw_flights", draw_flights)
+    monkeypatch.setattr(replay, "read_flight", lambda flight, geometry, spec_, words: SimpleNamespace(
+        words=np.zeros((1, 5), dtype=np.int16), runway_index=0))
+    drawn, readings = replay.draw_readings(None, "train", None, None, per_airport=2, seed=1, go_around_per_airport=2)
+    assert calls == [([0, 1, 2, 3, 4, 5], 2, False), ([2, 4], 2, True)]      # 1 was drawn already
+    assert drawn.indices == [0, 1, 2, 4] and len(readings) == 4
+    assert drawn.description["go_around_flights"] == {"flights": 2}
+    with pytest.raises(ValueError, match="not drawn in parts"):
+        replay.draw_readings(None, "train", None, None, per_airport=2, seed=1, go_around_per_airport=2, part=(0, 2))
+
+
+def test_the_readers_two_parts_have_their_names():
+    """D82, A37: what a model may read (the rows) and what it must not (the withheld fields), by name."""
+    assert [f.name for f in fields(ClosedLoopSentence)] == ["rows", "withheld"]
+    assert [f.name for f in fields(SentenceRows)] == ["first_row", "start", "grid", "correction", "states", "on_interval"]
+    assert [f.name for f in fields(Withheld)] == [
+        "runway", "runway_index", "landing_time_utc", "capture_row", "go_around_rows", "stratum", "outcome", "timed_out",
+        "lateral_m", "vertical_m", "uncorrectable", "observed_row", "matched_row"]
+
+
+@pytest.mark.parametrize("runner", ["executor_replay", "closed_loop_start_check", "final_descent_tolerance"])
+def test_a_readout_that_serves_a_choice_reads_train_or_select_only(runner, capsys):
+    """A37, D85: the val days are read once, in the stage's validation readout; a readout runner refuses them."""
+    import importlib
+
+    from ts_transformer.instructions.artefact import READ_SPLITS, SEALED_READINGS
+
+    assert READ_SPLITS == ("train", "select") and SEALED_READINGS == ("val",)
+    module = importlib.import_module(f"ts_transformer.experiments.{runner}")
+    with pytest.raises(SystemExit) as exited:
+        module.main(["--instructions", "i", "--executor", "e", "--split", "val", "--row-interval-s", "4",
+                     "--out", "o"])
+    assert exited.value.code == 2 and "invalid choice: 'val'" in capsys.readouterr().err

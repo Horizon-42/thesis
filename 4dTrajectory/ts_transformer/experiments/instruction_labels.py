@@ -2,7 +2,8 @@
 with the spec of step 2, and write the sentences and the readout (vocabulary §4.7).
 
 Writes ``sentences_{train,select,val}.npz``, ``labels.json``, ``readout.json`` and ``readout.md``
-into the signals directory (never over an existing file), and the labeller's conformance reference
+into the signals directory (never over an existing file; the readout and the printed text give only the counts of a
+split of `SEALED_READINGS`, outline D85), and the labeller's conformance reference
 ``conformance/`` (`instructions.conformance`: a fixed sample of the train flights and what this code
 read), in the run that writes what it pins; every later process that uses the labeller on the artefact runs the
 check against it first (`require_conforming_labeller`, D73). The candidate
@@ -24,7 +25,9 @@ import numpy as np
 
 from ts_transformer.instructions import conformance
 from ts_transformer.instructions.airport import AirportGeometry
-from ts_transformer.instructions.artefact import SPLITS, load_candidates, load_signals, load_spec, write_sentences
+from ts_transformer.instructions.artefact import (
+    READ_SPLITS, SEALED_READINGS, SPLITS, load_candidates, load_signals, load_spec, write_sentences,
+)
 from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.readout import class_usage, flight_record, summarise
@@ -64,15 +67,26 @@ def _pct(value: float | None) -> str:
     return "—" if value is None else f"{100 * value:.1f} %"
 
 
+def shown(summary: dict[str, Any]) -> dict[str, Any]:
+    """What the readout shows of each split's numbers (``readout.json``, ``readout.md``, the printed text): of a split of
+    `SEALED_READINGS` (outline D85) its counts only, the flights labelled and refused."""
+    return {split: ({"labelled": numbers["labelled"], "refused": numbers["refused"],
+                     "readings": "not shown: read once, in the stage's validation readout (D85)"}
+                    if split in SEALED_READINGS else numbers)
+            for split, numbers in summary.items()}
+
+
 def render(summary: dict[str, Any], spec: VocabularySpec) -> str:
+    """``readout.md`` of the numbers the readout shows (`shown`)."""
     lines = [f"# 指令标注读数（spec `{spec.sha256[:12]}`，{spec.reading_rule}）", ""]
     lines += ["## 1 完整性", "", "| 划分 | 成功 | 拒绝 |", "|---|---|---|"]
     for split in SPLITS:
         s = summary[split]
         lines.append(f"| {split} | {s['labelled']} | {s['refused']} |")
-    lines += ["", f"拒绝原因（{' + '.join(SPLITS)}）：", ""]
+    lines += ["", f"{' + '.join(SEALED_READINGS)}：只列数目，不列读数（D85）。",
+              "", f"拒绝原因（{' + '.join(READ_SPLITS)}）：", ""]
     reasons: dict[str, int] = {}
-    for split in SPLITS:
+    for split in READ_SPLITS:
         for reason, count in summary[split]["refusal_reasons"].items():
             reasons[reason] = reasons.get(reason, 0) + count
     lines += [f"- {reason}：{count}" for reason, count in sorted(reasons.items(), key=lambda kv: -kv[1])] or ["- 无"]
@@ -110,7 +124,7 @@ def render(summary: dict[str, Any], spec: VocabularySpec) -> str:
                        f"{_pct(v['contained_share'])} | {_pct(v['band_row_share'])} |")
         return out
 
-    for split in SPLITS:
+    for split in READ_SPLITS:
         s = summary[split]
         lines += ["", f"## {split}", ""]
         lines += group_rows("句子长度（第 0 步之后的指令数，每架）",
@@ -173,8 +187,8 @@ def main(argv: list[str] | None = None) -> int:
                                                   "written_utc": utc_now(), **labels})
     write_json_atomic(directory / "readout.json", {"spec_sha256": spec.sha256, "written_utc": utc_now(),
                                                    "columns": list(COLUMNS), "elapsed_s": time.perf_counter() - started,
-                                                   **summary})
-    text = render(summary, spec)
+                                                   **shown(summary)})
+    text = render(shown(summary), spec)
     (directory / "readout.md").write_text(text, encoding="utf-8")
     print(text)
     return 0

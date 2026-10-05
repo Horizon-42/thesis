@@ -49,7 +49,7 @@ from ts_transformer.autopilot.spec import params_sha256
 from ts_transformer.experiments import instruction_closed_loop
 from ts_transformer.experiments.executor_replay import closed_loop_columns
 from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
-from ts_transformer.instructions.artefact import ClosedLoopSentence
+from ts_transformer.instructions.artefact import READ_SPLITS, ClosedLoopSentence
 from ts_transformer.instructions.labeller.interval import in_force
 from ts_transformer.instructions.labeller.read import Reading
 from ts_transformer.instructions.readout import stratum
@@ -90,9 +90,10 @@ def observed_decision(signals: FlightSignals, reading: Reading, geometry: Airpor
 def final_descents(sentence: ClosedLoopSentence, words: Words) -> dict[str, int]:
     """A closed-loop sentence's final descents (runs of said rows with "no level-off" in force, D66), their rows, and
     the angle correction words said in them and in the whole sentence."""
-    final = in_force(sentence.grid)[:, ALTITUDE] == words.altitude_no_level_off
+    rows = sentence.rows
+    final = in_force(rows.grid)[:, ALTITUDE] == words.altitude_no_level_off
     starts = final & ~np.concatenate(([False], final[:-1]))
-    angle = sentence.correction[:, ANGLE]
+    angle = rows.correction[:, ANGLE]
     return {"final_descents": int(starts.sum()), "final_descent_rows": int(final.sum()),
             "final_descent_angle_corrections": int((angle & final).sum()), "angle_corrections": int(angle.sum())}
 
@@ -292,7 +293,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--instructions", type=Path, default=None)
     parser.add_argument("--executor", type=Path, default=None, help="the executor spec directory")
-    parser.add_argument("--split", choices=("train", "select"), default=None)
+    parser.add_argument("--split", choices=READ_SPLITS, default=None)
     parser.add_argument("--per-airport", type=int, default=0, help="0: every labelled flight of the split")
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--row-interval-s", type=float, nargs="+", default=None,

@@ -11,7 +11,16 @@ one the laws can fly:
 - the sentence's row interval (the data's step, or a coarser Δ, vocabulary §4.8) a whole number of cycles (the executor
   hears a row's words on the cycle that starts it);
 - ``τ_γ ≥ 2 Δt`` (the vocabulary's bank limit is checked against the grader's where it is flown,
-  `inverse.attitude`).
+  `inverse.attitude`);
+- the start rule one of `START_RULES` (D77).
+
+THE START RULE (vocabulary D77): how the executor's start state takes its airspeed, track and path angle from the
+observed 2 s rows at or before the row it starts at (`flights.start_kinematics`), and how the stored observed rows of a
+closed-loop sentence take their track, ground speed and vertical rate. A rule is a least-squares line through the rows of
+the seconds before the row: ``displacement-2s`` (the row and the one before), ``trailing-fit-8s``, ``trailing-fit-15s``.
+``centred-fit-15s`` is the data plane's own velocity (a fit over 15 s centred on each sample, which reads up to 7.5 s
+after the row): measured beside the others for the user's choice only (A33), and never written into a spec by
+`experiments/executor_spec.py` (`FORMAL_START_RULES`).
 """
 
 from __future__ import annotations
@@ -21,6 +30,12 @@ from dataclasses import dataclass
 
 from ts_transformer.instructions.spec import VocabularySpec
 
+#: Each start rule's window, the seconds before the row its line is fitted through (None: the data plane's centred fit).
+START_RULES: dict[str, float | None] = {"displacement-2s": 2.0, "trailing-fit-8s": 8.0, "trailing-fit-15s": 15.0,
+                                         "centred-fit-15s": None}
+#: The rules an executor spec may hold (`experiments/executor_spec.py`); the centred fit is A33's comparison only.
+FORMAL_START_RULES = ("displacement-2s", "trailing-fit-8s", "trailing-fit-15s")
+
 
 @dataclass(frozen=True)
 class ExecutorParams:
@@ -29,6 +44,7 @@ class ExecutorParams:
     path_time_constant_s: float    # τ_γ, the path-angle inner loop
     path_rate_factor: float        # γ̇_max as a multiple of the tube's lower bound (§5.1)
     timeout_factor: float          # the flight's own remaining time × this (§8.3)
+    start_rule: str                # how the start state reads the observed rows before it (D77, `START_RULES`)
 
     def check(self, spec: VocabularySpec, row_interval_s: float) -> None:
         positive = (self.cycle_s, self.bank_rate_deg_s, self.path_time_constant_s, self.path_rate_factor,
@@ -40,3 +56,5 @@ class ExecutorParams:
                 raise ValueError(f"the sentence's {name} {seconds:g} s is not a whole number of {self.cycle_s:g} s cycles")
         if self.path_time_constant_s < 2.0 * self.cycle_s:
             raise ValueError(f"τ_γ {self.path_time_constant_s:g} s is under 2 Δt")
+        if self.start_rule not in START_RULES:
+            raise ValueError(f"start rule {self.start_rule!r} is none of {tuple(START_RULES)}")

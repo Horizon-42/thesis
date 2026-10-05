@@ -20,14 +20,16 @@ from dataclasses import asdict, fields
 from pathlib import Path
 from typing import Any
 
-from ts_transformer.autopilot.params import ExecutorParams
+from ts_transformer.autopilot.params import FORMAL_START_RULES, ExecutorParams
 from ts_transformer.io_utils import write_json_atomic
 
 #: v8 (vocabulary §12.1 A19, A20): one word clock — a sentence is said on its own rows, no ``word_clock``
 #: parameter (D57) — and a level word flown at T + E MSL, E the airport elevation (D58); the laws of §5 otherwise as v7
 #: (no capture, no landing aim, no glidepath floor, no parameter of the decision-altitude check, D38).
 #: v9 (A29, D73): no digest of the executor's or the labeller's code beside the parameters.
-EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v9"
+#: v10 (A32): the start rule (D77) among the parameters; the flight ends where the judge ends it (D79), the bank's limits
+#: from the first cycle (D84), the frame at the airport reference (D81).
+EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v10"
 
 
 def params_to_dict(params: ExecutorParams) -> dict[str, Any]:
@@ -56,6 +58,8 @@ def _fresh(path: Path) -> Path:
 
 def write_spec(directory: Path, params: ExecutorParams, vocabulary_sha256: str, measurements: dict[str, Any],
                source: dict[str, Any]) -> None:
+    if params.start_rule not in FORMAL_START_RULES:
+        raise ValueError(f"start rule {params.start_rule!r} is none of {FORMAL_START_RULES}: no spec holds another (D77)")
     directory.mkdir(parents=True, exist_ok=True)
     sha = params_sha256(params)
     write_json_atomic(_fresh(directory / "spec.json"), {
@@ -72,6 +76,9 @@ def load_spec(directory: Path) -> tuple[ExecutorParams, dict[str, Any]]:
     params = params_from_dict(record["params"])
     if params_sha256(params) != record["sha256"]:
         raise ValueError(f"{directory / 'spec.json'}: the params do not hash to the recorded sha")
+    if params.start_rule not in FORMAL_START_RULES:
+        raise ValueError(f"{directory / 'spec.json'}: start rule {params.start_rule!r} is none of {FORMAL_START_RULES} "
+                         f"(D77: the centred fit is A33's comparison only)")
     return params, record
 
 

@@ -10,14 +10,15 @@ Each cycle, in the design's order of limits:
 4. the inverse sets the thrust for it (`autopilot.inverse.thrust`: the thrust box);
 5. the plant integrates the cycle (`autopilot.plant`).
 
-The first cycle's bank is not rate-limited: step 0's words describe what the aircraft is already doing,
-so a flight entering the slice in a turn keeps turning instead of rolling level first.
+The bank starts at 0 and its limit and roll rate hold from the first cycle (vocabulary §5.3, D84).
 
-A flight is DONE at the end of the cycle in which it makes an APPROACH CROSSING of the runway in force R (vocabulary §5.8:
-the go-around state G false, the threshold plane crossed lined up — the track within the vocabulary's lined-up angle of
-the course — and within the landing screen's lateral limit, `lateral.Runways`), is below R's threshold elevation while
-before it, leaves the dynamics (a non-finite state or no airspeed), or reaches its time limit; the batch stops when every
-flight is done. A crossing while G is true is not an end: the flight flies on. Each go-around word heard gives its
+A flight is DONE at the end of the cycle in which the judge ends it (vocabulary §5.8, D79; the tests are `ends`, the
+judge's own): an APPROACH CROSSING of the runway in force R (the go-around state G false, the threshold plane crossed
+lined up — the track within the vocabulary's lined-up angle of the course — and within the landing screen's lateral
+limit, `lateral.Runways`), below R's threshold elevation while before it, a lined-up crossing of another candidate with G
+false inside that runway's own limit, a dynamics failure (a non-finite state, no airspeed, or the stall cut-off bound in
+the cycle) — or its time limit; the batch stops when every flight is done. A crossing while G is true is not an end: the
+flight flies on. Each go-around word heard gives its
 flight `GO_AROUND_EXTRA_S` more time (`extend_time_limit`; the cycles are laid out for ``reserve_s``). What each outcome
 means is judged afterwards (`autopilot.judge`), from the recorded states and the runway and go-around state of every
 cycle.
@@ -25,8 +26,7 @@ cycle.
 THREE WAYS TO FLY (executor design §12.4), each checked against the spec's reference tracks
 (`experiments/executor_conformance.py`): a SINGLE-AIRCRAFT BATCH starts every flight at the batch's cycle 0; a
 MULTI-AIRCRAFT BATCH gives each flight its own start cycle (``start_cycle``) — before it the flight waits (its state,
-its bank and every law's state are held, its rows are not its own), its first cycle is its own cycle 0 (the bank
-unlimited, the heading word anchored afresh, its time and time limit counted from it), and `flown` hands each flight's
+its bank and every law's state are held, its rows are not its own), its first cycle is its own cycle 0 (the heading word anchored afresh, its time and time limit counted from it), and `flown` hands each flight's
 rows from its own cycle 0, so it reads as the flight flown alone; the SINGLE FLIGHT is `autopilot.single`, plain Python.
 A flight can also be HALTED (`halt`): from then on it is held as a waiting flight is, its command row repeating the last
 one it flew — where a closed loop that once flew it in an executor of its own would have stopped that executor.
@@ -34,13 +34,14 @@ one it flew — where a closed loop that once flew it in an executor of its own 
 
 from __future__ import annotations
 
+import copy
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any
 
 import torch
 
-from ts_transformer.autopilot import inverse
+from ts_transformer.autopilot import ends, inverse
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.frame import AirportCharts, Kinematics, read_state
 from ts_transformer.autopilot.lateral import Lateral, Runways, relative
@@ -141,6 +142,43 @@ class Executor:
         """Hold the flights ``flights`` (``[B]`` bool) from the next cycle on (module docstring)."""
         self.halted = self.halted | flights.to(self.halted.device)
 
+    def take(self, flights: torch.Tensor) -> Executor:
+        """A copy of the flights ``flights`` (``[K]`` long, repeats permitted; vocabulary §6 item 5, D97 (2)): everything
+        the executor holds of them — their inputs, runways and charts, time limits and reserve, first cycles, state,
+        bank, the laws' state, done and halted, end cycles and the record so far — and nothing of the other flights. The
+        cycles flown and their layout are the batch's. Flown on, each copy flies as its original would (a flight's
+        states do not depend on the other flights of its batch, D97 (3))."""
+        flights = torch.as_tensor(flights, dtype=torch.long, device=self.state.device)
+        if flights.ndim != 1 or not len(flights) or bool(((flights < 0) | (flights >= len(self.state))).any()):
+            raise ValueError(f"a copy takes one or more of the batch's {len(self.state)} flights, got {flights.tolist()}")
+
+        def pick(rows: torch.Tensor) -> torch.Tensor:
+            return rows[flights].clone()
+
+        def picked(record: Any) -> Any:                  # a dataclass of per-flight tensors
+            return type(record)(**{f.name: pick(getattr(record, f.name)) for f in fields(record)})
+
+        out = copy.copy(self)
+        out.inputs, out.runways, out.charts = picked(self.inputs), picked(self.runways), picked(self.charts)
+        out.plant = Plant(out.inputs)
+        for name in ("time_limit_s", "most_s", "start", "state", "bank", "runway_issued", "done", "done_cycle",
+                     "halted", "last_command"):
+            setattr(out, name, pick(getattr(self, name)))
+        out.staggered = bool((out.start != 0).any())
+        for name in ("lateral", "vertical", "speed"):
+            law = copy.copy(getattr(self, name))
+            for held in law.PER_FLIGHT:
+                value = getattr(law, held)
+                setattr(law, held, None if value is None else pick(value))   # the lateral word before any is heard
+            setattr(out, name, law)
+        out.speed.approach_ias_mps = pick(self.speed.approach_ias_mps)
+        out.states, out.commands, out.wanted, out.sentence_times, out.runway_rows = (
+            [pick(rows) for rows in record]
+            for record in (self.states, self.commands, self.wanted, self.sentence_times, self.runway_rows))
+        out.limits = {name: [pick(rows) for rows in record] for name, record in self.limits.items()}
+        out.modes = {name: [pick(rows) for rows in record] for name, record in self.modes.items()}
+        return out
+
     def own_cycle(self) -> torch.Tensor:
         """``[B]`` long: each flight's own cycle about to be flown (negative: it has not started)."""
         return self.count - self.start
@@ -169,15 +207,13 @@ class Executor:
             own = self.own_cycle()
             waiting, fresh = own < 0, own == 0
             frozen = waiting | self.halted
-            limited = torch.full_like(self.bank, math.radians(params.bank_rate_deg_s))
-            bank_rate: float | torch.Tensor = torch.where(fresh, torch.full_like(self.bank, math.inf), limited)
             time_s: float | torch.Tensor = own.to(self.state.dtype) * params.cycle_s
         else:
             waiting = fresh = None
             if bool(self.halted.any()):
                 frozen = self.halted
-            bank_rate = math.inf if cycle == 0 else math.radians(params.bank_rate_deg_s)
             time_s = cycle * params.cycle_s
+        bank_rate = math.radians(params.bank_rate_deg_s)          # from the first cycle (D84)
         held = self._held() if frozen is not None else []
         # a go-around heard this cycle gives its flight more time (`extend_time_limit`), not while it waits or is held
         issued = force.issued_step[:, RUNWAY]
@@ -190,7 +226,7 @@ class Executor:
         self.speed.hear_go_around(heard_go_around, now)
         track_rate = self.lateral.rate(now, force.heading_rel_deg, force.issued_step[:, HEADING], force.runway,
                                        self.runways, time_s, fresh=fresh)
-        e0, n0, course, elevation, landing_limit = self.runways.pointed(force.runway)
+        e0, n0, course, elevation = self.runways.pointed(force.runway)
         before, right, _off_course = relative(now, e0, n0, course)
         gamma_rate, gamma_wanted, vertical_modes = self.vertical.rate(now, force.level_m, self.charts.elevation_m,
                                                                       force.no_level_off,
@@ -231,15 +267,20 @@ class Executor:
             self.modes[name].append(value)
 
         after = read_state(self.state, self.charts)
-        past, right_after, off_after = relative(after, e0, n0, course)
-        # an approach crossing of R (vocabulary §5.8): G false, lined up, inside the landing screen at the interpolated
-        # crossing — the judge reads the same rows (`judge._outcome`)
-        fraction = (before / (before - past)).clamp(0.0, 1.0)
-        crossed = ((before > 0.0) & (past <= 0.0) & ~force.go_around
-                   & (off_after.abs() <= self.words.spec.lined_up_deg)
-                   & ((right + fraction * (right_after - right)).abs() <= landing_limit))
-        ended = (crossed | ((past > 0.0) & (after.height_m < elevation)) | ~torch.isfinite(self.state).all(dim=1)
-                 | (after.speed_mps <= 0.0))
+        # where the judge ends the flight (vocabulary §5.8, D79; `ends`, the judge's tests on the same rows): a crossing
+        # of a candidate's plane, interpolated, an approach crossing of R or a crossing of another candidate
+        runways = self.runways
+        all_before, all_right, _ = runways.relative(now)
+        all_past, all_right_after, all_off_after = runways.relative(after)
+        fraction = (all_before / (all_before - all_past)).clamp(0.0, 1.0)
+        in_force = torch.arange(all_before.shape[1], device=all_before.device)[None, :] == force.runway[:, None]
+        approach, other = ends.crossing_ends(all_right + fraction * (all_right_after - all_right), all_off_after,
+                                             force.go_around[:, None], in_force, runways.landing_limit_m,
+                                             runways.on_runway_m, self.words.spec)
+        crossed = (ends.plane_crossed(all_before, all_past) & (approach | other)).any(dim=1)
+        past = relative(after, e0, n0, course)[0]
+        ended = (crossed | ends.ground_contact(past, after.height_m - elevation)
+                 | ends.dynamics_failure(torch.isfinite(self.state).all(dim=1), after.speed_mps, limits["stall"]))
         if self.staggered:
             finished = (ended | ((own + 1).to(self.state.dtype) * params.cycle_s >= self.time_limit_s)) & ~frozen
             self.done_cycle = torch.where(finished & ~self.done, own, self.done_cycle)

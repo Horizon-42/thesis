@@ -8,7 +8,7 @@ import {
   nearestBranch,
   outsideSpans,
   parseTrainingIndex,
-  parseTrainingSample,
+  parseTrainingSample, TRAINING_SET_SPLITS, TRAINING_SPLITS,
   readingRowAt,
   readingRowTimeS,
   sentenceColumnRuns,
@@ -73,22 +73,39 @@ describe("the sample", () => {
   });
 
   it("refuses an old sample schema by name", () => {
-    const parsed = parseTrainingSample({ ...stageASampleFile(), schema: "aeroviz-training-sample-v8" });
+    const parsed = parseTrainingSample({ ...stageASampleFile(), schema: "aeroviz-training-sample-v8" }, TRAINING_SPLITS);
     expect(parsed).toEqual({
       ok: false, problem: `sample.schema is "aeroviz-training-sample-v8", not one of ${TRAINING_SAMPLE_SCHEMA}`,
     });
   });
 
   it("refuses another reading rule", () => {
-    const parsed = parseTrainingSample({ ...stageASampleFile(), readingRule: "instruction-v3" });
+    const parsed = parseTrainingSample({ ...stageASampleFile(), readingRule: "instruction-v3" }, TRAINING_SPLITS);
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.problem).toContain(`not one of ${TRAINING_READING_RULE}`);
+  });
+
+  it("takes the splits a set may hold from its caller: stage A's refuse a val flight, a caller that permits val reads it (D109)", () => {
+    const file = stageASampleFile();
+    file.flights = file.flights.map((flight: Record<string, unknown>) => ({ ...flight, split: "val" }));
+    const stageA = parseTrainingSample(file, TRAINING_SPLITS);
+    expect(stageA.ok).toBe(false);
+    if (!stageA.ok) expect(stageA.problem).toContain("not one of train, select");
+    const permitted = parseTrainingSample(file, TRAINING_SET_SPLITS);
+    expect(permitted.ok).toBe(true);
+    if (permitted.ok) {
+      expect(permitted.value.flights.map((flight) => flight.split)).toEqual(file.flights.map(() => "val"));
+      const asStageA = parseTrainingSample(stageASampleFile(), TRAINING_SPLITS);
+      if (!asStageA.ok) throw new Error(asStageA.problem);
+      // the same flights otherwise: only the split differs
+      expect(permitted.value.flights.map(({ split, ...rest }) => rest)).toEqual(asStageA.value.flights.map(({ split, ...rest }) => rest));
+    }
   });
 
   it("refuses a vocabulary of six columns", () => {
     const file = stageASampleFile();
     file.vocabulary.columns = ["runway", "approach", "heading", "altitude", "angle", "speed"];
-    const parsed = parseTrainingSample(file);
+    const parsed = parseTrainingSample(file, TRAINING_SPLITS);
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.problem).toContain("expected [runway, heading, altitude, angle, speed] in that order");
   });
@@ -96,19 +113,19 @@ describe("the sample", () => {
   it("checks the bookkeeping: events are the grid's words; the closed loops are the set's Δ", () => {
     const events = stageASampleFile();
     events.flights[0].closedLoop["4"].events.pop();
-    const a = parseTrainingSample(events);
+    const a = parseTrainingSample(events, TRAINING_SPLITS);
     expect(a.ok).toBe(false);
     if (!a.ok) expect(a.problem).toContain("events are not the");
 
     const missing = stageASampleFile();
     delete missing.flights[0].closedLoop["8"];
-    const b = parseTrainingSample(missing);
+    const b = parseTrainingSample(missing, TRAINING_SPLITS);
     expect(b.ok).toBe(false);
     if (!b.ok) expect(b.problem).toContain("closedLoop is listed at [2, 4] s, expected the set's [2, 4, 8]");
 
     const rows = stageASampleFile();
     rows.flights[0].closedLoop["2"].flownFromRow += 1;
-    const c = parseTrainingSample(rows);
+    const c = parseTrainingSample(rows, TRAINING_SPLITS);
     expect(c.ok).toBe(false);
     if (!c.ok) expect(c.problem).toContain("flownFromRow");
   });
@@ -116,12 +133,12 @@ describe("the sample", () => {
   it("refuses an unknown outcome and a rows grid that is not the vocabulary's 2 s from 0", () => {
     const outcome = stageASampleFile();
     outcome.flights[0].closedLoop["2"].replay.outcome = "went_around";
-    const a = parseTrainingSample(outcome);
+    const a = parseTrainingSample(outcome, TRAINING_SPLITS);
     expect(a.ok).toBe(false);
 
     const times = stageASampleFile();
     times.flights[0].observed.timeS[3] += 1;
-    const b = parseTrainingSample(times);
+    const b = parseTrainingSample(times, TRAINING_SPLITS);
     expect(b.ok).toBe(false);
     if (!b.ok) expect(b.problem).toContain("timeS[3]");
   });
@@ -131,7 +148,7 @@ describe("the sample", () => {
     file.flights[0].closedLoop["2"].replay.envelopes = null;
     file.flights[0].closedLoop["4"].replay.crossing.decision = null;
     file.flights[0].closedLoop["8"].replay.crossing = null;
-    const parsed = parseTrainingSample(file);
+    const parsed = parseTrainingSample(file, TRAINING_SPLITS);
     if (!parsed.ok) throw new Error(parsed.problem);
     const [flight] = parsed.value.flights;
     expect(flight.closedLoop["2"].replay.envelopes).toBeNull();
@@ -166,42 +183,42 @@ describe("the flown flight (replay.track)", () => {
   it("refuses an envelope that ends past the track, a track that is not the stored states, and a last cycle that is not the outcome's", () => {
     const past = stageASampleFile();
     past.flights[0].closedLoop["2"].replay.envelopes.speed[0].endRow = 300;
-    const a = parseTrainingSample(past);
+    const a = parseTrainingSample(past, TRAINING_SPLITS);
     expect(a.ok).toBe(false);
     if (!a.ok) expect(a.problem).toContain("an envelope's");
 
     const apart = stageASampleFile();
     apart.flights[0].closedLoop["4"].replay.track.eM[5] += 2;
-    const b = parseTrainingSample(apart);
+    const b = parseTrainingSample(apart, TRAINING_SPLITS);
     expect(b.ok).toBe(false);
     if (!b.ok) expect(b.problem).toContain("replay.track and states are one flight");
 
     const last = stageASampleFile();
     last.flights[0].closedLoop["8"].replay.track.lastCycle -= 1;
-    const c = parseTrainingSample(last);
+    const c = parseTrainingSample(last, TRAINING_SPLITS);
     expect(c.ok).toBe(false);
     if (!c.ok) expect(c.problem).toContain("lastCycle is");
 
     const rows = stageASampleFile();
     rows.flights[0].closedLoop["2"].replay.track.rows -= 1;
-    const r = parseTrainingSample(rows);
+    const r = parseTrainingSample(rows, TRAINING_SPLITS);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.problem).toMatch(/rows is \d+, but \d+ cycles/);
 
     const cycle = stageASampleFile();
     delete cycle.executor;
-    expect(parseTrainingSample(cycle).ok).toBe(false);
+    expect(parseTrainingSample(cycle, TRAINING_SPLITS).ok).toBe(false);
 
     const uneven = stageASampleFile();
     uneven.executor.cycleS = 0.75;
-    const u = parseTrainingSample(uneven);
+    const u = parseTrainingSample(uneven, TRAINING_SPLITS);
     expect(u.ok).toBe(false);
     if (!u.ok) expect(u.problem).toContain("not a whole number of 0.75 s cycles");
 
     const open = stageASampleFile();
     const spans = open.flights[0].openLoop.envelopes.speed;
     spans[spans.length - 1].endRow = open.flights[0].observed.rows + 1;
-    const o = parseTrainingSample(open);
+    const o = parseTrainingSample(open, TRAINING_SPLITS);
     expect(o.ok).toBe(false);
     if (!o.ok) expect(o.problem).toContain("rows of the observed track");
   });
@@ -211,7 +228,7 @@ describe("the flown flight (replay.track)", () => {
     const bands = file.flights[0].closedLoop["2"].replay.envelopes.heading;
     bands.push({ ...bands[0], row: 900, firstRow: 902, stopRow: 902, inside: [] });
     file.flights[0].openLoop.envelopes.heading.push({ ...file.flights[0].openLoop.envelopes.heading[0], row: 900, firstRow: 902, stopRow: 902, inside: [] });
-    const parsed = parseTrainingSample(file);
+    const parsed = parseTrainingSample(file, TRAINING_SPLITS);
     if (!parsed.ok) throw new Error(parsed.problem);
     const empty = parsed.value.flights[0].closedLoop["2"].replay.envelopes!.heading.slice(-1)[0];
     expect(empty.inside).toEqual([]);

@@ -9,8 +9,10 @@ no aircraft dynamics or no published approach speed gives no training sentence. 
 reason in ``closed_loop/summary.json`` — not flown, refused on the row interval, refused by the closed loop — beside the
 correction words for each column, the flights with any correction, the largest |e_y| and |e_h| per flight (percentiles),
 the flights done at their time limit, and the lateness of the observed heading words (A12: the matched point's observed
-time at the row that says a word minus the word's 2 s time, s; information). Written from a clean tree only (the artefact records the
-commit).
+time at the row that says a word minus the word's 2 s time, s; information). The val days are written as every split is,
+but no reading of them is shown (outline D85: they are read once, in the stage's validation readout): of val, the summary
+and the printed text give only the flights drawn and the sentences written at each row interval (`SEALED_READINGS`).
+Written from a clean tree only (the artefact records the commit).
 
 ``--workers N`` reads the splits in up to N processes (`read_part`: drawn once, then read at every row interval in turn),
 the largest split (train) first; ``--train-parts P`` cuts train into P parts — consecutive blocks of the one seeded
@@ -48,7 +50,7 @@ import torch
 from ts_transformer.autopilot import closed_loop, replay
 from ts_transformer.autopilot.spec import params_sha256
 from ts_transformer.instructions.artefact import (
-    CLOSED_LOOP_DIRECTORY, CLOSED_LOOP_SCHEMA, SPLITS, ClosedLoopSentence, closed_loop_sentences, load_closed_loop,
+    CLOSED_LOOP_DIRECTORY, CLOSED_LOOP_SCHEMA, SEALED_READINGS, SPLITS, ClosedLoopSentence, closed_loop_sentences,
     write_closed_loop,
 )
 from ts_transformer.instructions.labeller.interval import interval_rows
@@ -97,15 +99,17 @@ def tally(batch: replay.Batch, results: list[ClosedLoopSentence | Any], words: A
             outside[name] += rows.sum(axis=1)
     lateness = [closed_loop.heading_lateness_rows(r, batch.readings[j].words[batch.sentences[j].first_row:])
                 * words.spec.step_s for j, r in kept]
+    said, withheld = [r.rows for r in read], [r.withheld for r in read]
     return Tally(
-        corrections=np.array([r.correction.sum(axis=0) for r in read], dtype=np.int64).reshape(-1, len(COLUMNS)),
-        largest_lateral_m=np.array([closed_loop.largest_m(r.lateral_m) for r in read]),
-        largest_vertical_m=np.array([closed_loop.largest_m(r.vertical_m) for r in read]),
-        uncorrected_lateral_m=np.array([closed_loop.uncorrected_m(r.lateral_m, r.uncorrectable[:, 0]) for r in read]),
-        uncorrected_vertical_m=np.array([closed_loop.uncorrected_m(r.vertical_m, r.uncorrectable[:, 1]) for r in read]),
-        last_row_lateral_m=np.array([float(abs(r.lateral_m[-1])) for r in read]),
-        timed_out=np.array([r.timed_out for r in read], dtype=bool), outcomes=[r.outcome for r in read],
-        rows_past_the_end=int(sum(np.isnan(r.vertical_m).sum() for r in read)),
+        corrections=np.array([r.correction.sum(axis=0) for r in said], dtype=np.int64).reshape(-1, len(COLUMNS)),
+        largest_lateral_m=np.array([closed_loop.largest_m(w.lateral_m) for w in withheld]),
+        largest_vertical_m=np.array([closed_loop.largest_m(w.vertical_m) for w in withheld]),
+        uncorrected_lateral_m=np.array([closed_loop.uncorrected_m(w.lateral_m, w.uncorrectable[:, 0]) for w in withheld]),
+        uncorrected_vertical_m=np.array([closed_loop.uncorrected_m(w.vertical_m, w.uncorrectable[:, 1])
+                                         for w in withheld]),
+        last_row_lateral_m=np.array([float(abs(w.lateral_m[-1])) for w in withheld]),
+        timed_out=np.array([w.timed_out for w in withheld], dtype=bool), outcomes=[w.outcome for w in withheld],
+        rows_past_the_end=int(sum(np.isnan(w.vertical_m).sum() for w in withheld)),
         refused=Counter(r.reason for r in results if not isinstance(r, ClosedLoopSentence)),
         refused_on_interval=batch.refused_seen,
         lateness_s=np.concatenate([np.zeros(0), *lateness]), outside=outside)
@@ -128,6 +132,11 @@ def _percentiles(values: np.ndarray) -> dict[str, float] | None:
         return None
     return {f"p{q}": float(np.percentile(values, q)) for q in (50, 90, 95, 99)} | {"max": float(values.max()),
                                                                                    "n": len(values)}
+
+
+def sealed_summary(counted: Tally) -> dict[str, Any]:
+    """What the summary shows of a split of `SEALED_READINGS` at one row interval: the sentences written (D85)."""
+    return {"sentences": len(counted.outcomes), "readings": "not shown: read once, in the stage's validation readout (D85)"}
 
 
 def summarise(counted: Tally, excluded: dict[str, int]) -> dict[str, Any]:
@@ -208,8 +217,10 @@ def read_part(instructions: Path, executor: Path, split: str, part: tuple[int, i
             resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6)
 
 
-def join_parts(staging: Path, split: str, tallies: list[dict[float, Tally]], params: Any, words: Any) -> None:
-    """A split read in parts (``tallies``: each part's, in order): each interval's part files put together in order into
+def join_parts(instructions: Path, staging: Path, split: str, tallies: list[dict[float, Tally]], params: Any,
+               words: Any) -> None:
+    """A split of ``instructions`` read in parts (``tallies``: each part's, in order): each interval's part files put
+    together in order into
     the split's file, as the split read whole writes it, and taken away. Refused unless a part has a file exactly when
     its tally counts a sentence, and the split's file holds every sentence the tallies count."""
     for interval_s in tallies[0]:
@@ -220,7 +231,7 @@ def join_parts(staging: Path, split: str, tallies: list[dict[float, Tally]], par
             if path.exists() != bool(counted[interval_s].outcomes):
                 raise ValueError(f"{path.name}: a part's file is there exactly when its tally counts a sentence")
             if path.exists():
-                sentences.update(closed_loop_sentences(load_closed_loop(path, words.spec)))
+                sentences.update(closed_loop_sentences(instructions, split, interval_s, words.spec, path=path))
                 written.append(path)
         if len(sentences) != sum(len(counted[interval_s].outcomes) for counted in tallies):
             raise ValueError(f"{split} {interval_s:g} s: the parts' files do not hold the sentences their tallies count")
@@ -309,13 +320,21 @@ def main(argv: list[str] | None = None) -> int:
                     raise SystemExit(f"the split {split} (part {k + 1} of {n}) failed: {error!r}") from error
     for split in SPLITS:
         if parts[split] > 1:
-            join_parts(staging, split, [done[split][k][1] for k in range(parts[split])], params, words)
+            join_parts(instructions, staging, split, [done[split][k][1] for k in range(parts[split])], params, words)
         drawn = replay.merge_descriptions([done[split][k][0] for k in range(parts[split])])
-        numbers = {interval: summarise(merge_tallies([done[split][k][1][interval] for k in range(parts[split])]),
-                                       drawn["excluded"]) for interval in intervals}
-        for interval, one in numbers.items():
-            print(f"{split} {interval:g} s: {one['sentences']} sentences, corrections {one['correction_words']}, "
-                  f"without a sentence {one['without_a_sentence']}, outcomes {one['outcomes']}", flush=True)
+        tallied = {interval: merge_tallies([done[split][k][1][interval] for k in range(parts[split])])
+                   for interval in intervals}
+        if split in SEALED_READINGS:                       # D85: written and counted, never read here
+            numbers = {interval: sealed_summary(counted) for interval, counted in tallied.items()}
+            drawn = {"flights": drawn["flights"], "readings": numbers[intervals[0]]["readings"]}
+            for interval, one in numbers.items():
+                print(f"{split} {interval:g} s: {one['sentences']} sentences written (readings not shown, D85)",
+                      flush=True)
+        else:
+            numbers = {interval: summarise(counted, drawn["excluded"]) for interval, counted in tallied.items()}
+            for interval, one in numbers.items():
+                print(f"{split} {interval:g} s: {one['sentences']} sentences, corrections {one['correction_words']}, "
+                      f"without a sentence {one['without_a_sentence']}, outcomes {one['outcomes']}", flush=True)
         summary["splits"][split] = {"drawn": drawn, "intervals": {
             f"{interval:g}": numbers[interval] for interval in intervals}}
     if any(n > 1 for n in parts.values()):

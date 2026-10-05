@@ -16,6 +16,7 @@ and the judge reads the flown track at rows (`judge.words_said`).
 
 from __future__ import annotations
 
+import copy
 import math
 from dataclasses import dataclass
 from typing import Sequence
@@ -154,6 +155,17 @@ class Spoken:
     def steps(self) -> int:
         """Steps said, from the batch's first."""
         return len(self.grid)
+
+    def take(self, flights: np.ndarray) -> Spoken:
+        """A copy of the flights ``flights`` (``[K]``, repeats permitted): the words they were said, in force and
+        when each was issued (`Executor.take`'s, for the words)."""
+        out = copy.copy(self)
+        index = torch.as_tensor(flights, dtype=torch.long, device=self.device)
+        out.value, out.issued, out.runway = (rows[index].clone() for rows in (self.value, self.issued, self.runway))
+        out.start = self.start[flights].copy()
+        out.staggered = bool((out.start != 0).any())
+        out.grid = [row[flights].copy() for row in self.grid]
+        return out
 
     def say(self, row: np.ndarray) -> None:
         """The next step's words, ``[B, 5]``; a flight's first step must write every column, and before it what is

@@ -27,8 +27,8 @@ vertical path) gets a non-finite state, as the torch rollout writes NaN, and is 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from typing import Sequence
+from dataclasses import dataclass, replace
+from typing import Callable, Sequence
 
 import numpy as np
 import torch
@@ -39,6 +39,8 @@ from aerodynamic_model.torch_dynamics import (
 )
 from aerodynamic_model.torch_scaled_transport_chart_dynamics import SCALED_TRANSPORT_CHART_REFERENCE_UNITS
 from geokit import METRES_PER_DEG_LAT, WGS84_A, WGS84_E2
+from ts_transformer.autopilot import ends
+from ts_transformer.autopilot.ends import runway_lateral_limit_m
 from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S, LIMITS, MODES, Flown
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.inverse import BANK_MAX_RAD, LOAD_FACTOR_MAX, LOAD_FACTOR_MIN
@@ -130,11 +132,13 @@ class Runway:
     course_deg: float
     elevation_m: float
     landing_limit_m: float
+    on_runway_m: float
 
 
 def runways_of(geometry: AirportGeometry, spec: VocabularySpec) -> tuple[Runway, ...]:
     return tuple(Runway(c.threshold_e_m, c.threshold_n_m, c.course_deg, c.elevation_m,
-                        landing_cross_limit_m(geometry, index, spec.landing_cross_limit_m, spec.parallel_course_delta_deg))
+                        landing_cross_limit_m(geometry, index, spec.landing_cross_limit_m, spec.parallel_course_delta_deg),
+                        runway_lateral_limit_m(geometry, index, spec))
                  for index, c in enumerate(geometry.candidates))
 
 
@@ -462,7 +466,7 @@ class SingleExecutor:
         params, cycle = self.params, self.count
         now = self.now()
         self.sentence_times.append(sentence_s)
-        bank_rate = math.inf if cycle == 0 else math.radians(params.bank_rate_deg_s)
+        bank_rate = math.radians(params.bank_rate_deg_s)          # from the first cycle (D84)
         issued = force.issued_step[RUNWAY]
         if force.go_around and issued != self.runway_issued and not self.done:
             if self.time_limit_s + GO_AROUND_EXTRA_S > self.most_s:
@@ -512,14 +516,22 @@ class SingleExecutor:
             self.modes[name].append(modes[name])
 
         after = self.chart.read(self.state)
-        past, right_after, off_after = relative(after, runway)
-        # `executor.Executor.cycle`'s approach crossing of R: G false, lined up, inside the landing screen
-        fraction_crossed = _clamp(_divide(before, before - past), 0.0, 1.0)
-        crossed = (before > 0.0 and past <= 0.0 and not force.go_around
-                   and abs(off_after) <= self.words.spec.lined_up_deg
-                   and abs(right + fraction_crossed * (right_after - right)) <= runway.landing_limit_m)
-        finished = (crossed or (past > 0.0 and after.height_m < runway.elevation_m)
-                    or not all(math.isfinite(value) for value in self.state) or after.speed_mps <= 0.0
+        # `executor.Executor.cycle`'s ends, the judge's tests (`ends`, D79): a crossing of any candidate's plane
+        crossed = False
+        for index, candidate in enumerate(self.runways):
+            was, right_was, _ = relative(now, candidate)
+            past, right_after, off_after = relative(after, candidate)
+            if not ends.plane_crossed(was, past):
+                continue
+            fraction_crossed = _clamp(_divide(was, was - past), 0.0, 1.0)
+            approach, other = ends.crossing_ends(right_was + fraction_crossed * (right_after - right_was), off_after,
+                                                 force.go_around, index == force.runway, candidate.landing_limit_m,
+                                                 candidate.on_runway_m, self.words.spec)
+            crossed = crossed or bool(approach or other)
+        past = relative(after, runway)[0]
+        finished = (crossed or bool(ends.ground_contact(past, after.height_m - runway.elevation_m))
+                    or bool(ends.dynamics_failure(all(math.isfinite(value) for value in self.state), after.speed_mps,
+                                                  stalled))
                     or (cycle + 1) * params.cycle_s >= self.time_limit_s)
         if finished and not self.done:
             self.done_cycle = cycle
@@ -539,3 +551,32 @@ class SingleExecutor:
                      runway=torch.tensor([self.runway_rows], dtype=torch.long),
                      done_cycle=torch.tensor([self.done_cycle], dtype=torch.long), sentence_s=rows(self.sentence_times),
                      cycle_s=self.params.cycle_s)
+
+
+def fly(inputs: FlightInputs, geometry: AirportGeometry, approach_ias_mps: float, grid: np.ndarray,
+        params: ExecutorParams, words: Words, *, step_s: float, time_limit_s: float, reserve_s: float,
+        stop_cycle: int | None = None, superseded: Callable[[], bool] = lambda: False) -> tuple[Flown, bool]:
+    """One flight's sentence ``grid`` (rows ``step_s`` apart) flown alone, a row's words heard on the cycle that starts
+    it, to its end — or stopped before cycle ``stop_cycle``: the flown record (stopped: ``done_cycle`` the last cycle
+    flown) and whether the stop ended it. ``superseded`` is asked before each cycle; when it says so, `InterruptedError`.
+    The one single-flight loop: the executor's check (`conformance.fly_single`) and the live executor
+    (`experiments.training_flights.fly_single`) drive it."""
+    executor = SingleExecutor(inputs, geometry, approach_ias_mps, params, words, step_s=step_s,
+                              time_limit_s=time_limit_s, reserve_s=reserve_s)
+    sentence = Sentence(grid, words, step_s=step_s)
+    stopped = False
+    for cycle in range(executor.cycles):
+        if stop_cycle is not None and cycle >= stop_cycle:
+            stopped = True
+            break
+        if superseded():
+            raise InterruptedError(f"superseded after {cycle} cycles")
+        sentence_s = cycle * params.cycle_s
+        executor.cycle(sentence.at(sentence_s), sentence_s)
+        if executor.done:
+            break
+    flown = executor.flown()
+    if stopped:
+        flown = replace(flown, done_cycle=torch.full_like(flown.done_cycle, executor.count - 1))
+    return flown, stopped
+

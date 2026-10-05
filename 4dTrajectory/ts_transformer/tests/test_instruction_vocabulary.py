@@ -18,9 +18,10 @@ from ts_transformer.instructions import envelope, measure
 from ts_transformer.instructions.airport import AirportGeometry, airport_geometry, relative_to_runway, vertical_path
 from ts_transformer.instructions.artefact import (
     CANDIDATES_SCHEMA, SENTENCES_SCHEMA, keep_spec, load_candidates, load_day_split, load_sentences, load_signals,
-    load_spec, write_candidates, write_sentences, write_signals, write_spec,
+    load_spec, signals_flights, write_candidates, write_sentences, write_signals, write_spec,
 )
 from ts_transformer.instructions.labeller.read import admit, read_flight
+from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.piecewise import fit_pieces, moving_average
 from ts_transformer.instructions.signals import FlightSignals, signals_from_series
 from ts_transformer.instructions.spec import SPEC_SCHEMA, VocabularySpec
@@ -175,28 +176,81 @@ def test_compass_and_math_headings_round_trip():
 def _guided(**fields):
     """A harvest `Runway` stand-in that publishes a vertical path (TCH 15 m, 3°, DA 60 m above the threshold)."""
     published = {"threshold_crossing_height_m": 15.0, "published_glidepath_deg": 3.0,
-                 "decision_height_above_threshold_m": 60.0,
+                 "decision_height_above_threshold_m": 60.0, "elevation_msl_m": 124.7,
                  "published_minima": SimpleNamespace(vertically_guided=True, note="LPV")}
     return SimpleNamespace(**{**published, **fields})
 
 
-def test_the_candidates_are_the_published_geometry_with_the_configured_length():
+def test_the_candidates_are_the_ends_with_a_published_vertical_path_with_the_configured_length():
+    """D78: the candidates are the runway ends that publish a vertical path, whatever landed where; an end without one
+    is a runway end, no candidate."""
+    unguided = SimpleNamespace(vertically_guided=False, note="LNAV only")
     ends = [_guided(ident="23R", lat=35.8937988, lon=-78.7779999, course_deg=225.3),
-            _guided(ident="05L", lat=35.8753, lon=-78.7970, course_deg=45.3)]
-    geometry = airport_geometry("KRDU", {"23R": {"lat": 35.8937988, "lon": -78.7779999, "elevation_msl_m": 124.7,
-                                                 "course_deg": 225.3}}, ends)
+            _guided(ident="05L", lat=35.8753, lon=-78.7970, course_deg=45.3, published_minima=unguided)]
+    geometry = airport_geometry("KRDU", ends)
     (candidate,) = geometry.candidates
     assert candidate.ident == "23R"
-    assert candidate.course_deg == pytest.approx(225.3)
+    assert candidate.course_deg == pytest.approx(225.3) and candidate.elevation_m == pytest.approx(124.7)
     assert candidate.length_m == pytest.approx(3048.0)
     assert (candidate.threshold_e_m, candidate.threshold_n_m) == pytest.approx((843.0, 1683.0), abs=15.0)
     assert [end.ident for end in geometry.runway_ends] == ["05L", "23R"]      # every runway end, not only candidates
     assert AirportGeometry.from_dict(geometry.to_dict()) == geometry
     with pytest.raises(KeyError):
         geometry.candidate_index("05L")
-    with pytest.raises(KeyError, match="not runway ends the harvest builds"):
-        airport_geometry("KRDU", {"23R": {"lat": 35.8937988, "lon": -78.7779999, "elevation_msl_m": 124.7,
-                                          "course_deg": 225.3}}, ends[1:])
+    both = airport_geometry("KRDU", [ends[0], _guided(ident="05L", lat=35.8753, lon=-78.7970, course_deg=45.3)])
+    assert [c.ident for c in both.candidates] == ["05L", "23R"]
+
+
+def test_a_flight_landed_on_no_candidate_is_refused_and_counted_by_runway(monkeypatch):
+    """D78: the signals runner's chunk keeps the flights landed on a candidate; one landed on another end is refused,
+    counted by its runway, and counted in no other number (its type, its dynamics)."""
+    from ts_transformer.data import dataset
+    from ts_transformer.experiments import instruction_signals
+    from ts_transformer.instructions import signals as signals_module
+    from ts_transformer.training import train
+
+    def flight(key, runway, typecode, dynamics):
+        source = {"runway": runway, "resolved_typecode": typecode, "no_dynamics_reason": "none in the index"}
+        return SimpleNamespace(dataset_id=key, scenario=SimpleNamespace(source=source, has_dynamics=dynamics))
+
+    built = [flight("a", "09", "A320", True), flight("b", "27", "B738", False), flight("c", "27", "B738", True),
+             flight("d", "09", "E75L", False)]
+    monkeypatch.setattr(dataset, "load_flight_dicts", lambda manifests, include_flight_keys, verbose: [])
+    monkeypatch.setattr(dataset, "build_series", lambda flights, config, row_start: (
+        built, SimpleNamespace(to_dict=lambda: {"skipped": {}})))
+    monkeypatch.setattr(train, "usable_series", lambda series, config, verbose: series)
+    monkeypatch.setattr(signals_module, "signals_from_series", lambda item, geometry: item.dataset_id)
+    signals, _, short, typecodes, without_dynamics, not_candidate = instruction_signals._build(
+        instruction_airport().to_dict(), "manifest.json", ["a", "b", "c", "d"])
+    assert signals == ["a", "d"] and short == 0 and not_candidate == {"27": 2}
+    assert typecodes == {"A320": 1, "E75L": 1} and without_dynamics == {"none in the index": 1}
+
+
+def test_a_flight_added_or_removed_on_any_day_changes_no_candidate(tmp_path):
+    """D78: no flight decides a candidate — the candidates are the published ends whatever the arrivals; the listing for
+    the user (`instruction_signals --list-candidates`) gives each candidate's arrivals by split and the ends with
+    arrivals that are none (their flights refused), test days only counted, the runway idents upper-case as the
+    geometry's."""
+    from ts_transformer.experiments.instruction_signals import candidate_listing, eligible_arrivals
+
+    ends = [_guided(ident="23R", lat=35.8937988, lon=-78.7779999, course_deg=225.3),
+            _guided(ident="05L", lat=35.8753, lon=-78.7970, course_deg=45.3)]
+    geometry = airport_geometry("KRDU", ends)
+    days = fixture_days()
+    records = [{"flight_key": key, "runway": runway, "landing_time_utc": landing_on(split)}
+               for key, runway, split in (("a", "23r", "train"), ("b", "32", "val"), ("c", "23R", "test"))]
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"records": records}), encoding="utf-8")
+    provenance = {"manifests": [{"airport": "KRDU", "source_records": [{"flight_key": k} for k in ("a", "b", "c")]}]}
+    arrivals = eligible_arrivals(provenance, {"KRDU": manifest}, days)
+    assert arrivals == [("train", "KRDU", "a", "23R"), ("val", "KRDU", "b", "32"), ("test", "KRDU", "c", "23R")]
+    arrivals += [("train", "KSJC", "d", "30L"), ("train", "KSJC", "e", "23R")]          # another airport's
+    listed = candidate_listing({"KRDU": geometry}, arrivals)["KRDU"]
+    zero = {"test": 0, "val": 0, "select": 0, "train": 0}
+    assert listed["candidates"] == {"05L": zero, "23R": {**zero, "train": 1, "test": 1}}
+    assert listed["not_candidates"] == {"32": {**zero, "val": 1}}
+    assert candidate_listing({"KRDU": geometry}, [])["KRDU"] == {"candidates": {"05L": zero, "23R": zero},
+                                                                 "not_candidates": {}}                     # D78
 
 
 def test_each_candidate_carries_its_published_vertical_path_into_candidates_json(tmp_path):
@@ -204,10 +258,8 @@ def test_each_candidate_carries_its_published_vertical_path_into_candidates_json
     geometry, refuses a candidate without them (§4.2), and `candidates.json` holds them; the old format is refused."""
     from ts_transformer.instructions.airport import VerticalPath
 
-    target = {"23R": {"lat": 35.8937988, "lon": -78.7779999, "elevation_msl_m": 124.7, "course_deg": 225.3}}
     end = dict(ident="23R", lat=35.8937988, lon=-78.7779999, course_deg=225.3)
-    geometry = airport_geometry("KRDU", target, [_guided(**end, threshold_crossing_height_m=16.5,
-                                                         published_glidepath_deg=3.1)])
+    geometry = airport_geometry("KRDU", [_guided(**end, threshold_crossing_height_m=16.5, published_glidepath_deg=3.1)])
     assert geometry.candidates[0].vertical_path == VerticalPath(16.5, 3.1, 60.0)
     write_candidates(tmp_path, {"KRDU": geometry})
     assert load_candidates(tmp_path)["KRDU"] == geometry
@@ -219,9 +271,10 @@ def test_each_candidate_carries_its_published_vertical_path_into_candidates_json
                                                       encoding="utf-8")
     with pytest.raises(ValueError, match=f"is not a {CANDIDATES_SCHEMA} file"):
         load_candidates(tmp_path / "old")
+    unguided = _guided(**end, published_minima=SimpleNamespace(vertically_guided=False, note="LNAV only"))
+    assert airport_geometry("KRDU", [unguided]).candidates == ()       # D78: no vertical path, no candidate
     with pytest.raises(ValueError, match="publishes no decision altitude"):
-        airport_geometry("KRDU", target, [_guided(**end, published_minima=SimpleNamespace(vertically_guided=False,
-                                                                                            note="LNAV only"))])
+        vertical_path("KRDU", unguided)
     with pytest.raises(ValueError, match="publishes no threshold crossing height or glidepath"):
         vertical_path("KRDU", _guided(**end, threshold_crossing_height_m=None))
 
@@ -425,14 +478,78 @@ def test_every_fitted_angle_comes_with_rounder_candidates_and_the_fit_each_leave
     angle = np.concatenate((rng.normal(3.0, 0.2, 300), rng.normal(1.0, 0.2, 300), rng.normal(-1.5, 0.3, 40)))
     length = rng.uniform(500.0, 3000.0, len(angle))
     fit = measure.fit_descent_classes(angle, length, 4)
-    rows = measure.rounding_candidates(angle, length, fit["centres_deg"], fit["edges_deg"], 1.47)
+    climb, climb_length, _ = measure.climb_pieces(angle, length, np.zeros(len(angle)), 15.0)
+    rows = measure.rounding_candidates(angle, length, fit["centres_deg"], fit["edges_deg"], climb, climb_length, 1.47)
     assert set(rows) == {"fitted", "0.5", "0.25", "0.1"}
     assert rows["fitted"]["descent_end_height_error_m"] == pytest.approx(fit["end_height_error_m"])
     assert rows["0.5"]["climb_centre_deg"] == 1.5 and rows["0.1"]["climb_centre_deg"] == 1.5
     assert all(c * 4 == round(c * 4) for c in rows["0.25"]["descent_centres_deg"])
     assert rows["0.5"]["descent_edges_deg"][0] == measure.DESCENT_FLOOR_DEG
-    climbs = measure.climb_distribution(angle, length)
+    climbs = measure.climb_distribution(climb, climb_length)
     assert climbs["pieces"] == 40 and 1.0 < climbs["length_weighted_deg"]["p50"] < 2.0
+    assert rows["fitted"]["climb_end_height_error_m"] == pytest.approx(measure.climb_end_error(climb, climb_length, 1.47))
+
+
+GLIDE = 70.0 * np.tan(np.radians(3.0))
+#: Level eastbound at 840 m, a climb at 3 m/s (G false) to 900 m, then the labeller tests' go-around: a 3° descent on the
+#: final of 09, a climb straight ahead at 8 m/s (G true, read as two pieces), a level-off (G ends there), a downwind with
+#: a climb at 3 m/s in it (G false again), and a second approach. ``climb`` the downwind's climb: (rows, m/s).
+def climb_then_go_around(climb=(15, 3.0)):
+    return [(30, 0, 70, 0), (20, 0, 70, 3.0), (60, 0, 70, 0), (89, 0, 70, -GLIDE), (40, 0, 70, 8.0), (10, 0, 70, 0),
+            (30, -6, 70, 0), (60, 0, 70, 0), (climb[0], 0, 70, climb[1]), (95, 0, 70, 0), (30, -6, 70, 0),
+            (20, 0, 70, 0), (104, 0, 70, -GLIDE)]
+
+
+#: Without a go-around: a climb at 40 m/s (past the climb class) and a downwind, a base and a final.
+STEEP_CLIMB = [(30, 0, 70, 0), (6, 0, 70, 40.0), (60, 0, 70, 0), (30, -6, 70, 0), (100, 0, 70, 0), (30, -6, 70, 0),
+               (20, 0, 70, 0), (104, 0, 70, -GLIDE)]
+
+
+def test_the_climb_nominal_is_fitted_on_the_climbs_with_g_false_inside_the_climb_class():
+    """A33 (D54, D28, D19): each move piece says whether G is true at its first row, as the labeller reads the flight
+    (from the go-around row to the runway word that ends it); the climb nominal is the length-weighted median of the
+    climbs with G false and at most the climb class's largest angle — a go-around's climb (flown at the go-around angle),
+    a climb in a flight whose vertical reading is refused (G not known) and a climb past the class are left out and
+    counted."""
+    airport = instruction_airport()
+    provisional = measure.provisional_spec()
+
+    def measured(legs, altitude_m):
+        flight = instruction_flight(*fly_legs(legs, 90.0, altitude_m, -400.0, 0.0))
+        arrays = measure.measure_flight(admit(flight, airport, provisional), provisional, airport.elevation_m)
+        climbing = arrays["move_angle_deg"] < measure.DESCENT_FLOOR_DEG
+        counted = measure.climb_pieces(arrays["move_angle_deg"], arrays["move_length_m"], arrays["move_go_around"],
+                                       provisional.climb_angle_max_deg)
+        return flight, arrays["move_go_around"][climbing].tolist(), -arrays["move_angle_deg"][climbing], counted
+
+    flight, go_around, angles, (climb, length, counts) = measured(climb_then_go_around(), 840.0)
+    reading = read_flight(flight, airport, instruction_spec())
+    assert len(reading.go_around_rows) == 1                                           # the labeller reads one go-around
+    assert go_around == [0.0, 1.0, 1.0, 0.0]          # the first climb, the go-around's, the downwind's after G ends
+    assert climb.tolist() == [angles[0], angles[3]] and all(2.0 < c < 2.6 for c in climb)     # 3 m/s at 70 m/s
+    assert counts == {"climb_pieces": 4, "kept": 2,
+                      "left_out": {"G true": 2, "vertical reading refused": 0, "above the climb class": 0}}
+    # a go-around in a flight whose vertical reading the labeller refuses (a climb past the class): G is not known
+    flight, go_around, angles, (climb, _, counts) = measured(climb_then_go_around((6, 40.0)), 840.0)
+    with pytest.raises(Refused, match="path angle out of range"):
+        read_flight(flight, airport, instruction_spec())
+    assert np.isnan(go_around).all() and len(go_around) == 5 and len(climb) == 0
+    assert counts["left_out"] == {"G true": 0, "vertical reading refused": 5, "above the climb class": 0}
+    # without a go-around G is false whatever the labeller says of the reading; the climb past the class is left out
+    flight, go_around, angles, (climb, _, counts) = measured(STEEP_CLIMB, 700.0)
+    assert go_around == [0.0, 0.0] and (angles > 15.0).all() and len(climb) == 0
+    assert counts["left_out"] == {"G true": 0, "vertical reading refused": 0, "above the climb class": 2}
+    with pytest.raises(ValueError, match="no climb piece"):
+        measure.climb_centre(climb, np.zeros(0))
+
+    angle = -np.array([1.0, 2.0, 3.0, 4.0, 16.0, 5.0, 6.0, 0.2])     # 0.2° climbs less than the descent floor: a descent
+    lengths = np.array([1000.0, 1000.0, 3000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0])
+    go_around = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, np.nan, 0.0])
+    climb, length, counts = measure.climb_pieces(angle, lengths, go_around, 15.0)
+    assert climb.tolist() == [1.0, 2.0, 3.0, 4.0]
+    assert counts == {"climb_pieces": 7, "kept": 4,
+                      "left_out": {"G true": 1, "vertical reading refused": 1, "above the climb class": 1}}
+    assert measure.climb_centre(climb, length) == 3.0           # 3° holds half the length; the plain median is 2.5°
 
 
 def test_the_grid_fit_finds_a_known_grid_in_synthetic_level_offs():
@@ -555,6 +672,18 @@ def test_a_spec_is_kept_for_new_rows_byte_for_byte(tmp_path):
     with pytest.raises(ValueError, match="built under"):
         keep_spec(tmp_path / "old", tmp_path / "other_rows", {})
     assert not (tmp_path / "other_rows" / "spec.json").exists()
+    # C32 (A32): a source whose train days are not train days here — the same days dealt otherwise — is refused
+    from ts_transformer.data.day_split import split_days
+
+    days = fixture_days()
+    other = split_days(sorted(days.listed), 7)
+    shared = sorted(set(days.days["train"]) & set(other.days["train"]))
+    flight = replace(_signals("KXXX:a", 5), landing_time_utc=f"{shared[0]}T12:00:00Z")
+    (tmp_path / "dealt_otherwise").mkdir()
+    write_signals(tmp_path / "dealt_otherwise", {"train": [flight]}, {"config": config}, other)
+    with pytest.raises(ValueError, match="measured on train days that are not train days here"):
+        keep_spec(tmp_path / "old", tmp_path / "dealt_otherwise", {})
+    assert not (tmp_path / "dealt_otherwise" / "spec.json").exists()
 
 
 def test_the_artefact_holds_development_days_only_and_each_flight_on_its_own_split(tmp_path):
@@ -572,6 +701,12 @@ def test_the_artefact_holds_development_days_only_and_each_flight_on_its_own_spl
     (tmp_path / "c" / "signals.json").write_text(json.dumps(record), encoding="utf-8")
     with pytest.raises(SealedDay):
         load_signals(tmp_path / "c", "train")
+    with pytest.raises(SealedDay):                    # A32: the flight records without the arrays too (C32)
+        signals_flights(tmp_path / "c", "train")
+    record["splits"]["train"]["flights"][0]["landing_time_utc"] = landing_on("val")
+    (tmp_path / "c" / "signals.json").write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(ValueError, match="lands on a val day, not a train day"):
+        signals_flights(tmp_path / "c", "train")
     with pytest.raises(ValueError, match="holds the splits"):
         load_signals(tmp_path / "c", "test")
     # every split is checked before the first file is written: nothing is left half-written
@@ -615,9 +750,6 @@ def test_the_landing_constants_are_the_harvest_s_and_the_parallel_limit_mirrors_
     assert one.landing_max_height_m == LandingScreen().max_crossing_height_m
     assert one.parallel_course_delta_deg == MAX_PARALLEL_COURSE_DELTA_DEG
 
-    def targets(runways):
-        return {r.ident: {"lat": r.lat, "lon": r.lon, "elevation_msl_m": 0.0, "course_deg": r.course_deg}
-                for r in runways}
     def guided(code, runways):
         """The runway ends that publish a vertical path: only they can be candidates (D61)."""
         out = []
@@ -631,7 +763,8 @@ def test_the_landing_constants_are_the_harvest_s_and_the_parallel_limit_mirrors_
 
     for code in ("KMSY", "KRDU", "KSJC", "KSMF", "KSTL"):
         runways = tuple(load_airport(code, config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways)
-        geometry = airport_geometry(code, targets(guided(code, runways)), runways)      # every end a parallel partner
+        geometry = airport_geometry(code, runways)                                       # every end a parallel partner
+        assert [c.ident for c in geometry.candidates] == sorted(r.ident.upper() for r in guided(code, runways))  # D78
         for runway in guided(code, runways):
             mine = landing_cross_limit_m(geometry, geometry.candidate_index(runway.ident), one.landing_cross_limit_m,
                                          one.parallel_course_delta_deg)
@@ -639,7 +772,8 @@ def test_the_landing_constants_are_the_harvest_s_and_the_parallel_limit_mirrors_
             assert mine == pytest.approx(theirs, abs=1.0), (code, runway.ident)
     # a runway whose parallel partner is not a candidate (no published target) is still capped by it
     runways = tuple(load_airport("KSJC", config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways)
-    alone = airport_geometry("KSJC", targets(r for r in runways if r.ident == "30L"), runways)
+    whole = airport_geometry("KSJC", runways)
+    alone = replace(whole, candidates=tuple(c for c in whole.candidates if c.ident == "30L"))
     assert landing_cross_limit_m(alone, 0, one.landing_cross_limit_m, one.parallel_course_delta_deg) == pytest.approx(
         _runway_bracket_cross_limit(next(r for r in runways if r.ident == "30L"), runways, fallback_m=1000.0), abs=1.0)
 
@@ -652,7 +786,9 @@ def test_the_spec_takes_the_chosen_row_of_the_rounding_candidates_and_refuses_an
     rng = np.random.default_rng(0)
     angle = np.concatenate((rng.uniform(0.5, 5.0, 400), -rng.uniform(1.0, 2.0, 20)))
     length = rng.uniform(500.0, 5000.0, len(angle))
-    candidates = measure.rounding_candidates(angle, length, [1.51, 2.45, 3.09, 4.45], [-0.5, 1.98, 2.77, 3.77, 10.0], 1.47)
+    climb, climb_length, _ = measure.climb_pieces(angle, length, np.zeros(len(angle)), 15.0)
+    candidates = measure.rounding_candidates(angle, length, [1.51, 2.45, 3.09, 4.45], [-0.5, 1.98, 2.77, 3.77, 10.0],
+                                             climb, climb_length, 1.47)
     assert list(candidates) == list(measure.CANDIDATE_NAMES)
     assert measure.candidate_values(candidates, "0.25") == {
         "descent_angle_edges_deg": (-0.5, 2.0, 2.75, 3.75, 10.0), "descent_angle_centres_deg": (1.5, 2.5, 3.0, 4.5),

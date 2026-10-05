@@ -12,7 +12,7 @@ import pytest
 from ts_transformer.instructions import conformance
 from ts_transformer.instructions.artefact import load_sentences, write_candidates, write_signals, write_spec
 from ts_transformer.tests.support import (
-    fixture_days, fly_legs, instruction_airport, instruction_flight, instruction_spec as spec,
+    fixture_days, fly_legs, instruction_airport, instruction_flight, instruction_spec as spec, landing_on,
 )
 
 LEGS = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (20, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
@@ -158,16 +158,39 @@ def test_a_reference_of_another_schema_or_spec_is_refused(tmp_path, monkeypatch)
         conformance.check(directory)
 
 
-def test_the_draw_takes_labelled_and_refused_flights_of_every_airport(monkeypatch):
+def test_the_check_refuses_a_reference_flight_of_another_split_s_day(tmp_path, monkeypatch):
+    """C32 (A32): the check reads the reference's flights only if each lands on a train day of the artefact's split."""
+    directory = _artefact(tmp_path / "a", monkeypatch)
+    assert conformance.check(directory).passed
+    path = directory / conformance.DIRECTORY / "reference.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["flights"][0]["landing_time_utc"] = landing_on("select")
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="lands on a select day, not a train day"):
+        conformance.check(directory)
+    # A37: on its record, before any array of the reference is opened
+    (directory / conformance.DIRECTORY / "reference.npz").unlink()
+    with pytest.raises(ValueError, match="lands on a select day, not a train day"):
+        conformance.check(directory)
+
+
+def test_the_draw_takes_labelled_and_refused_flights_of_every_airport_and_the_go_arounds_besides(monkeypatch):
+    """§7.2 #2: the first labelled and refused flights of each airport, then up to `GO_AROUND_PER_AIRPORT` more labelled
+    flights with a go-around of each airport not drawn already — as many as there are."""
     monkeypatch.setattr(conformance, "PER_AIRPORT", 2)
     monkeypatch.setattr(conformance, "REFUSED_PER_AIRPORT", 1)
-    flights = [type("F", (), {"airport": airport})() for airport in ["KAAA"] * 6 + ["KBBB"] * 4]
-    statuses = ["labelled", "refused"] * 5
-    chosen = conformance.draw(flights, statuses)
-    assert chosen == sorted(chosen) and chosen == conformance.draw(flights, statuses)
+    monkeypatch.setattr(conformance, "GO_AROUND_PER_AIRPORT", 2)
+    flights = [type("F", (), {"airport": airport})() for airport in ["KAAA"] * 10 + ["KBBB"] * 4]
+    statuses = ["labelled", "refused"] * 7
+    go_arounds = [status == "labelled" for status in statuses]          # every labelled flight has a go-around
+    chosen = conformance.draw(flights, statuses, go_arounds)
+    assert chosen == sorted(chosen) and chosen == conformance.draw(flights, statuses, go_arounds)
     picked = [(flights[i].airport, statuses[i]) for i in chosen]
-    assert sorted(picked) == [("KAAA", "labelled"), ("KAAA", "labelled"), ("KAAA", "refused"),
-                              ("KBBB", "labelled"), ("KBBB", "labelled"), ("KBBB", "refused")]
+    # KAAA: 2 labelled + 1 refused + 2 more with a go-around; KBBB has only 2 labelled, both drawn already: none more
+    assert sorted(picked) == [("KAAA", "labelled")] * 4 + [("KAAA", "refused")] + \
+        [("KBBB", "labelled")] * 2 + [("KBBB", "refused")]
+    without = conformance.draw(flights, statuses, [False] * len(flights))     # no go-around: the usual draw alone
+    assert len(without) == 6 and set(without) < set(chosen)
 
 
 

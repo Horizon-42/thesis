@@ -165,7 +165,7 @@ def fly_way(batch: replay.Batch, params: ExecutorParams, words: Words, *, stoppi
     speed = torch.tensor(np.array([observed_speed_mps(s, cycles, params.cycle_s) for s in batch.signals]),
                          dtype=f64, device=device)
     executor = ObservedSpeedExecutor(
-        batch.inputs(device), Runways.of(batch.geometries, words.spec, dtype=f64, device=device),
+        batch.inputs(params.start_rule, device), Runways.of(batch.geometries, words.spec, dtype=f64, device=device),
         AirportCharts.of(batch.geometries, dtype=f64, device=device),
         torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words, step_s=batch.row_interval_s,
         time_limit_s=torch.tensor(limits, dtype=f64, device=device), reserve_s=replay.reserve_s(batch),

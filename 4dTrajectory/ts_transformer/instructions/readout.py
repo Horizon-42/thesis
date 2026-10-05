@@ -20,6 +20,8 @@ from ts_transformer.instructions.words import (
 
 VECTORED_TURN_DEG = 90.0
 STRATA = ("straight-in", "vectored")
+#: A flight's kind: whether its sentence has a go-around (the replay's rows and the Training export, by it).
+KINDS = ("without go-around", "with go-around")
 
 
 def stratum(reading: Reading) -> str:

@@ -36,6 +36,7 @@ import { isMissingJsonAsset } from "../utils/fetchJson";
 import {
   fetchTrainingIndex,
   fetchTrainingSample,
+  TRAINING_SPLITS,
   trainingIndexPath,
   type TrainingIndex,
   type TrainingSample,
@@ -142,7 +143,7 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
     }
     let live = true;
     setSetState({ status: "loading" });
-    fetchTrainingSample(activeAirportCode, entry.file, entry.id)
+    fetchTrainingSample(activeAirportCode, entry.file, entry.id, TRAINING_SPLITS)      // stage A's sets (D109)
       .then((parsed) => {
         if (!live) return;
         if (parsed.ok) setSetState({ status: "ready", sample: parsed.value });

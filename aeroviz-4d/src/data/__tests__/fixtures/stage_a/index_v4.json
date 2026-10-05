@@ -13,9 +13,9 @@
    "formats": {
     "spec": "ts-instruction-spec-v8",
     "sentences": "ts-instruction-sentences-v6",
-    "closedLoop": "ts-instruction-closed-loop-v7",
-    "candidates": "ts-instruction-candidates-v3",
-    "executorSpec": "ts-executor-spec-v9"
+    "closedLoop": "ts-instruction-closed-loop-v8",
+    "candidates": "ts-instruction-candidates-v4",
+    "executorSpec": "ts-executor-spec-v10"
    },
    "cohort": {
     "splits": {

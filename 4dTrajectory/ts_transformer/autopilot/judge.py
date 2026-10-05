@@ -55,6 +55,9 @@ import numpy as np
 from evaluation.thresholds import RNAV_TERMINAL_VERTICAL_BOUND_M
 from final_approach.crossing import bracket_fraction
 from flight_scenarios.fas_geometry import course_halfwidth_m, fas_course_geometry
+from ts_transformer.autopilot.ends import (
+    crossing_ends, dynamics_failure, ground_contact, plane_crossed, runway_lateral_limit_m,
+)
 from ts_transformer.autopilot.executor import LIMITS, Flown
 from ts_transformer.autopilot.frame import ALT, GAMMA, LAT, LON, MASS, PSI, SPEED
 from ts_transformer.autopilot.sentence import row_at
@@ -70,8 +73,10 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import HEADING, Words, compass_from_math_rad
 
+#: The outcome of a flight with no event before its executor was done (§5.8): it reached its time limit.
+TIMEOUT = "timeout"
 OUTCOMES = ("landed", "unstable_at_minimums", "crossed_too_high", "crossed_off_runway", "crossed_other_runway",
-            "ground_contact", "timeout", "dynamics_failure")
+            "ground_contact", TIMEOUT, "dynamics_failure")
 #: Which event is the outcome when two happen at the same row: the order of the design's table (§5.8).
 EVENT_ORDER = ("dynamics_failure", "ground_contact", "crossed_too_high", "crossed_off_runway", "unstable_at_minimums",
                "landed", "crossed_other_runway")
@@ -113,15 +118,6 @@ def flown_track(states: np.ndarray, geometry: AirportGeometry) -> dict[str, np.n
             "ground_speed": speed * np.cos(gamma), "vertical_rate": speed * np.sin(gamma)}
 
 
-def runway_lateral_limit_m(geometry: AirportGeometry, index: int, spec: VocabularySpec) -> float:
-    """How far off candidate ``index``'s centreline an approach crossing may lie and still be ON the runway: its final
-    approach segment's full-scale course half-width at the threshold (FAA Order 8260.58D Formula 3-1-1,
-    `flight_scenarios.fas_geometry`; 350 ft = 106.7 m on every candidate here), and never beyond the harvest's limit
-    (`landing_cross_limit_m`: 1,000 m, half the spacing to a parallel)."""
-    return min(fas_course_geometry(geometry.candidates[index].length_m).course_width_m,
-               landing_cross_limit_m(geometry, index, spec.landing_cross_limit_m, spec.parallel_course_delta_deg))
-
-
 def _crossing(relative: RunwayRelative, row: int, runway_index: int) -> dict[str, Any]:
     """The crossing of ``relative``'s threshold plane between state rows ``row − 1`` and ``row``, interpolated."""
     before, right, height = relative.before_threshold_m, relative.right_of_course_m, relative.height_above_threshold_m
@@ -159,37 +155,35 @@ def _outcome(states: np.ndarray, track: dict[str, np.ndarray], runway_cycle: np.
              ) -> tuple[str, int, dict[str, Any] | None]:
     """``runway_cycle`` / ``go_around_cycle``: R and G during each cycle (one fewer than the state rows); ``stalled``
     per state row: the dynamics' stall cut-off having bound in the cycle that ended at the row. The events (module
-    docstring), the earliest the outcome."""
+    docstring; their tests `ends`, which the executor reads too, D79), the earliest the outcome."""
     rows = len(states)
     runway_row = np.concatenate((runway_cycle[:1], runway_cycle))[:rows]
     go_around_row = np.concatenate((go_around_cycle[:1], go_around_cycle))[:rows]
     relatives = [relative_to_runway(track["e"], track["n"], track["track"], track["height"], candidate)
                  for candidate in geometry.candidates]
     events: list[tuple[int, str, dict[str, Any] | None]] = []
-    bad = np.nonzero(~np.isfinite(states).all(axis=1) | (states[:, SPEED] <= 0.0) | stalled)[0]
+    bad = np.nonzero(dynamics_failure(np.isfinite(states).all(axis=1), states[:, SPEED], stalled))[0]
     if len(bad):
         events.append((int(bad[0]), "dynamics_failure", None))
     before_r = np.array([relatives[k].before_threshold_m[r] for r, k in enumerate(runway_row)])
     height_r = np.array([relatives[k].height_above_threshold_m[r] for r, k in enumerate(runway_row)])
-    ground = np.nonzero((before_r > 0.0) & (height_r < 0.0))[0]
+    ground = np.nonzero(ground_contact(before_r, height_r))[0]
     if len(ground):
         events.append((int(ground[0]), "ground_contact", None))
     for index, relative in enumerate(relatives):
         before = relative.before_threshold_m
         landing_limit = landing_cross_limit_m(geometry, index, spec.landing_cross_limit_m, spec.parallel_course_delta_deg)
         on_runway_m = runway_lateral_limit_m(geometry, index, spec)
-        for row in (np.nonzero((before[:-1] > 0.0) & (before[1:] <= 0.0))[0] + 1).tolist():
-            if go_around_row[row]:
-                continue                                   # D33: no crossing is an event while G is true
+        for row in (np.nonzero(plane_crossed(before[:-1], before[1:]))[0] + 1).tolist():
             crossing = _crossing(relative, row, index)
-            lined_up = abs(float(relative.track_minus_course_deg[row])) <= spec.lined_up_deg
-            if runway_row[row] != index:
-                if lined_up and abs(crossing["cross_m"]) <= on_runway_m:
-                    events.append((row, "crossed_other_runway", crossing))
-                    break
-                continue
-            if not lined_up or abs(crossing["cross_m"]) > landing_limit:
-                continue                                   # not an approach crossing: no event
+            approach, other = crossing_ends(crossing["cross_m"], float(relative.track_minus_course_deg[row]),
+                                            bool(go_around_row[row]), bool(runway_row[row] == index), landing_limit,
+                                            on_runway_m, spec)
+            if other:
+                events.append((row, "crossed_other_runway", crossing))
+                break
+            if not approach:
+                continue                       # no event: G true (D33), not lined up, or outside the landing screen
             if crossing["height_m"] > spec.landing_max_height_m:
                 events.append((row, "crossed_too_high", crossing))
             elif abs(crossing["cross_m"]) > on_runway_m:
@@ -204,7 +198,7 @@ def _outcome(states: np.ndarray, track: dict[str, np.ndarray], runway_cycle: np.
                 events.append((row, "landed" if passed else "unstable_at_minimums", crossing))
             break
     if not events:
-        return "timeout", rows - 1, None
+        return TIMEOUT, rows - 1, None
     row, kind, crossing = min(events, key=lambda event: (event[0], EVENT_ORDER.index(event[1])))
     return kind, row, crossing
 
@@ -254,8 +248,8 @@ def words_said(flown: Flown, index: int, instructions: Sequence[Instruction], se
     """Each word (its ``row`` a sentence row, ``sentence_step_s`` apart) at the flown row where the executor heard it,
     as the executor looked it up (`sentence.Sentences.at`, one reading of a sentence time, `sentence.row_at`): the first
     cycle that starts a sentence row whose sentence time's row reaches the word's; the flown row is that cycle on the
-    data's step. Only the cycles before the outcome's state row ``end_row`` count (an outcome that does not stop the
-    executor — another runway, a stall — leaves cycles after it that are not the flight's)."""
+    data's step. Only the cycles before the outcome's state row ``end_row`` count (the executor ends a flight at its
+    outcome, D79: a record flown on past it is not the flight's)."""
     last = min(int(flown.done_cycle[index]) + 1, max(end_row, 1))
     sentence_rows = int(round(sentence_step_s / flown.cycle_s))
     data_rows = int(round(spec.step_s / flown.cycle_s))

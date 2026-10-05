@@ -152,21 +152,26 @@ of the package, not a migration in progress.
   identified by what it reads, never by its source (design D21, D73): `conformance/` holds a reference sample (its
   sentences on the 2 s rows and on the Δ grid at 4 and 8 s, D49), written with the labels, and every process that uses the
   labeller on the artefact reads it again first (`instructions/conformance.py` `require_conforming_labeller`, 1.7 s) —
-  no passed record, no digest of code; candidates = the manifest's CIFP runway geometry; one
+  no passed record, no digest of code; candidates = the runway ends with a published vertical path, no flight decides
+  one (D78, `ts-instruction-candidates-v4`); one
   gate (`read.admit`) for labelling and measuring; a sentence's words align with the FIRST `len(words)` rows of its
   signals (it ends before the landing); a flight with go-arounds is read approach by approach (D26); since v6
   (2026-10-02) every row is on the UTC even seconds; a change of speed says its 5 m/s steps, flown at a_max (D43);
-  `--spec-from` keeps another artefact's spec (C30).
-- **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v7`; vocabulary §4.9, D32): each
+  `--spec-from` keeps another artefact's spec; a flight's observed-track faults (jump, held position, reversal) are
+  marked when read, `instructions/faults.py`, D111 (C30).
+- **The closed-loop sentences** (`<artefact>/closed_loop/`, `ts-instruction-closed-loop-v8`; vocabulary §4.9, D32; read as
+  `rows` apart from `withheld`, D82 — the observed rows' velocity by the spec's start rule, D77): each
   split × row interval — the 2 s open-loop words flown from the first predicted step by an executor spec, each said at the
   Δ row nearest where the observed aircraft heard it (D42, D45), a heading word in the frame where it is heard (D46), with
   heading and angle corrections (none past the end of the observed path, D44), to the executor's end, and its outcome by name (the judge's on what it flew, D74 — for readouts and selection, never an input); the flown states on the data's 2 s rows, the Δ rows marked (D51), the errors against the observed path and the rows that allow no correction
   (D34); written once by `instruction_closed_loop` with its own reference, read only after the labeller's, the executor's
   and the closed loop's checks run in the reading process (`closed_loop.require_conforming_closed_loop(artefact,
   executor_dir)`, D69, D73); a speaker's closed loop starts where the reading does,
-  through `autopilot/start.py` (`start`, `Loop.step`, D67) (C38).
+  through `autopilot/start.py` (`start`, `Loop.step`, D67; `Loop.copy`, `Loop.halt`, `start_moved`, D97) (C38).
 - **An executor spec opens only for executor code that flies its reference tracks within the bounds** (2026-10-01, the
-  user: checked by what it flies, not by its source; D73: checked every time it is opened; `ts-executor-spec-v9`: a
+  user: checked by what it flies, not by its source; D73: checked every time it is opened; `ts-executor-spec-v10`: the
+  start rule a parameter, D77; a flight ended where the judge ends it, D79; the chart at the airport, D81, checked by the
+  way ``moved``; v9: a
   sentence said on its own rows, D57; a level word flown at T + E MSL, D58): `conformance/` beside the spec — 250
   labelled train flights flown by the spec's code in the run that wrote the spec — and every process that opens the spec
   (`replay.open_executor`: the replay, the start, the closed loop, the backend at its start) flies them again in every way
@@ -367,7 +372,7 @@ executor's turn against the exact words (A13, R51); `final_descent_tolerance` re
 H_final artefact in memory and puts several side by side (A24, D66, R52); `closed_loop_start_check` says stored
 closed-loop sentences through `autopilot/start.py` and requires their stored states back (A26, D67, R53); `training_export` writes the Training sets of stage A beside the old ones (`training/index_v4.json`, sample
 v9; every closed-loop sentence flown again against its stored states and formal outcome; the live executor shares its
-setup, `experiments/training_flights.py`, and `aeroviz_backend.autopilot_segment.check_live` checks a set against it) (R54); `instruction_figures` draws val pages
+setup, `experiments/training_flights.py`, and `aeroviz_backend.autopilot_segment.check_live` checks a set against it) (R54); `start_rules` reads the train closed loop at one Δ once for each start rule of D77 (A33, R55); `instruction_figures` draws val pages
 (R10). **Archived with instruction-v3** (`archive/two_tier_v3_2026_10/`, its README; their manual entries stay as the
 record): the instruction-v3 Training exports (R11, R13; the attitude module came back unchanged for A23, R54), `executor_sensitivity` (R12), the prior and its
 post-training (R15–R22, R35, R38), `heading_lead_ablation` (R23), the multi-aircraft runners (R24–R39, R41, R43–R45),

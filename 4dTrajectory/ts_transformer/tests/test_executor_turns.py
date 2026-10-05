@@ -74,7 +74,7 @@ def test_three_ways_and_the_control_fly_at_the_observed_speed_and_read_the_offse
     def flown_ways(speeds):
         batch, _, words = _batch(speeds=speeds)
         inputs = executor_inputs(batch.signals[0], batch.geometries[0])         # the observed state at row 0
-        monkeypatch.setattr(replay.Batch, "inputs", lambda self, device: inputs)
+        monkeypatch.setattr(replay.Batch, "inputs", lambda self, rule, device: inputs)
         sentence, signals = batch.sentences[0], batch.signals[0]
         return batch, words, {
             "executor": executor_turns.fly_way(batch, params, words, stopping=True, device=CPU),
