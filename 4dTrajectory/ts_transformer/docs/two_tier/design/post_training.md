@@ -62,7 +62,8 @@ A proposal is a reading where the design says nothing; it holds only until the u
 | C1, C2 on A34's artefact | Smoke and the census of all train days done (log §3); the counts chosen (log §7) |
 | C5, C7 | Done on synthetic artefacts and models, reviewed: `3171da69` (B9 and `dev-two-tier` merged first; log §9) |
 | D105 (the landings of a window's scene) | Done, reviewed: `00e81c88` (log §10) |
-| C4, C6 | Wait for B10 (prior D105, D106) and A38 (vocabulary D97) on this branch |
+| After B10 (notes/stage_c.md steps 3–6) | Done, reviewed: `3725565c` (motion, names, D107), `0168d457` (C4); log §11 |
+| C6 | Waits for A38 (vocabulary D97: the copy of a loop) on this branch |
 | C8–C12 | Wait for B5's base, Claude's check of stage B, the moved start (C9) and the user's criteria (D7) |
 
 ### 0.4 Plan

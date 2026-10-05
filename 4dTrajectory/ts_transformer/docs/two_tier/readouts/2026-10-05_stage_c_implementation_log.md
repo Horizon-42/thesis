@@ -21,7 +21,8 @@ Branch `dev-two-tier-v4-post`, worktree `.claude/worktrees/two-tier-v4-post`, ma
 | C3: "established", the separation judge on v4, the speed-word mask, the regulation text | Code `1b4d3cea` (reviewed); the text `86fc86d6` (`docs/literature/arrival_separation/README.md` §8); the user's decisions of 2026-10-05 (§7) in `ca15a2e5` (reviewed) |
 | The user's choices from C1's census | Decided: real : A : D = 1 : 1 : 1 in a round (§7). Open: the shifts of A and D (§4 P7) |
 | C5, C7 | Done on synthetic artefacts and models, `3171da69` (reviewed), after B9 and `dev-two-tier` were merged (`52224585`, `68407e13`); §9 |
-| C4, C6 | Wait for B10 (prior D105, D106: each aircraft's landings, the shared step of the closed loop) and A38 (vocabulary D97: the copy of a loop) on this branch |
+| C4 | Done on synthetic artefacts, `0168d457` (reviewed), after B10 was merged (`b6914acc`); §11 |
+| C6 | Waits for A38 (vocabulary D97: the copy of a loop) on this branch |
 | D105: the landings of a window's scene | Done, `00e81c88` (reviewed), after `dev-two-tier` `202b38d0` was merged (`65b4d782` merged as well); §10 |
 | C8–C12 | Wait for B5's base, Claude's check of stage B, the moved start (C9) and the user's criteria (D7) |
 
@@ -235,3 +236,54 @@ for B10 on `dev-two-tier-v4-prior` (at `5313b6cd` it is not there).
   refuses test days itself.
 - **P18. The landing that A inserts** is its source's roster landing shifted (on the source's runway), not the signals'
   landing time; the roster's time is the one a real window counts.
+
+## 11 The order of `notes/stage_c.md`: steps 3–6, after B10 (2026-10-05)
+
+On the user's word ("B10 合进来了"): `dev-two-tier-v4-prior` at `e4e7ba42` (B10) merged into this branch (`b6914acc`),
+then `dev-two-tier` (`b1068f66`).
+
+**Commits.**
+
+- `3725565c` (steps 3–5, reviewed; the relative imports past the new rule fixed): `post/motion.py` deleted, `post/`
+  reads `prior.inputs.motion` (prior §7 item 2); `post/landings.py` on B10's `LandingIndex` (its day split: a landing a
+  shift puts on a test day left out and counted as sealed, one on a day outside the split refused by the index — P17
+  settled by B10); `PRIOR_INTERFACE` with B10's names (`open_prior`, `OpenedPrior`, `motion`); stage C's runners take
+  from `experiments/` only `post_*` modules and `prior_speaking_loop`'s `SpeakingLoop`, `Generated`, `flight_numbers`
+  (prior §7 item 7), relative imports refused; C7's own check of the base dropped (B10's `masked_log_probability`
+  refuses any module in training mode, D107) and D107 tested.
+- `0168d457` (step 6, C4, reviewed): `experiments/post_window_loop.py` `WindowLoop`, `WindowResult`, `checked_edges`,
+  `LOST_SEPARATION`; `post/reward.py` `reward`, `present_runways`, `LANDED` (a mirror of the judge's literal, pinned).
+
+**C1 and C2 unchanged bit for bit** (step 3; A34's artefact v12, Δ 4 s, the scratchpad): the old and the new motion
+equal on all 10,076,052 train and select rows; the full census's edge reference read again with the largest
+difference 0.0; the census run again — its splits and every array of its reference equal.
+
+**Tests.** The stage C files and `test_architecture.py`: 79 passed at `3725565c`; `test_post_window_loop.py` and
+`test_architecture.py`: 40 passed at `0168d457`. The full ts suite on 8 workers at `0168d457`: 1,748 passed, 1
+skipped, 4 min 51 s (no other job running).
+
+**C4 as built.** Each window's commanded aircraft through B10's `SpeakingLoop` with the window's landings (D105). At
+every row, observed and said, the tokens of the window's step as the traffic module's input, with the commanded
+aircraft's runway and G in force before the row's words; with each row said, the speed-word mask from the state at the
+start of the row (D110); after each row flown, the separation judge, a loss the commanded aircraft answers for ending
+the window (`SpeakingLoop.end`, outcome `lost_separation`, reward 0). The judged scene of a row flown is kept for the
+next row's mask and tokens (the reviewer's estimate before the cache: 3–4 ms a window-row in Python, approximately
+40 min a pass of 2,048 windows × 300 rows without the executor). A window without other aircraft says and flies what free
+generation does: words, states and the speaker's probabilities bit for bit, with any weights of the traffic module.
+
+**Proposals.**
+
+- **P19. The present landing direction with no landing in the 30 min** (§2 item 2, read literally): no runway is of it,
+  so a landing earns 0. On A34's artefact (Δ 4 s, the real rosters): 1,119 of 40,530 train windows (2.8 %; select 3.0 %)
+  have no landing in the 30 min before the first predicted step; in 1,379 (3.4 %; select 3.9 %) the recorded runway is
+  not of the present direction. For the user (asked): every runway present when there is no landing; or as now.
+- **P20. The judge runs after each row the executor flew**, never on the observed rows or on the state at the first
+  predicted step. A window that opens inside a loss (the recorded traffic breaks the rules every hour at four of the
+  five airports, readout 2026-09-27) is judged lost one row later, reward 0, whatever is said. For the user (asked).
+- **P21.** A lost window's go-arounds are counted from its own words (the judge gives none).
+- **P22.** The traffic module's input of a flight no longer flown is still computed (the speaker says a batch together)
+  and never enters its sentence; its speed mask permits every word.
+
+**Test gaps (the reviewer's)**, for the runner tests on real data (C8, C10): a batch of several windows (two airports,
+one lost and one done, padding across windows) — A26's synthetic artefact has one flight; the speed mask acting in the
+loop — a random prior does not fly a final.
