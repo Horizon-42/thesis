@@ -370,3 +370,47 @@ No criterion is applied (D7); the user decides whether such steps or windows nee
   after its first predicted step, its labelled G); "with a faulty point" when either aircraft of the pair reads one at
   the event's step or in the 2 Δ before it. A step with no other aircraft within 8 NM widened by 2,500 ft (the largest
   minimum, and the offset of a pair separated as one) is not judged.
+
+## 15 The order of `notes/stage_c.md`: D114–D117, C6, C9 (2026-10-05)
+
+`dev-two-tier` merged (`99d5af3d`, `092bb30d`). Each step reviewed by an independent reviewer, its findings fixed before
+its commit.
+
+| Step | Commit | What |
+|---|---|---|
+| C6 | `a81d0a5a` | Branch training (D37, D94): `post/branches.py` (the numbers, the branch points, `Group`, `samples`, `STATE_BOUND_M` a pinned mirror); `experiments/post_branches.py` `branch_round` (the two passes, K copies at each branch point flown as one batch, the second pass checked against the first, a differing window counted and without groups, a window halted after its last branch point); `WindowLoop.copy`, `end_step`, `samples`, `finish`, each row's tokens recorded. The review's bug fixed before the commit: the numbers keyed by the window's place in the round, not in its batch |
+| D115 | `9f089780` | Every counted row weighs the same in the surrogate and the pull (the batch's sum over its counted rows) |
+| D116 | `20adc232` | One token network shared by the layers (`TrafficTokens`), a step's tokens embedded once a forward pass by the first layer's module; `post-traffic-attention-v2`; `update_loss` clears the embedding after use |
+| D114 | `66b8d4db` | `WindowResult.faulty_steps` and `loss_reads_fault` (C1's census definitions); `WindowLoop(faults=…)` |
+| C9 | `2c60de9c` | Window B: `post/scene.py` `StartMove`, `moved_start_window`; the window loop speaks from the start's observed rows (`start_moved`); `moved_commanded` for D113 at the draw; the census's windows B |
+
+Tests: each step's files (C6 6, D115 9, D116 16, D114 13, C9 70 with the files it touches); the full ts suite on 8
+workers at `2c60de9c`: 1,795 passed, 1 skipped, 6 min 41 s (the GPU idle, no formal job running).
+
+**C9's census** on A34's artefact (v12, Δ 4 s, the scratchpad, from `2c60de9c` on a clean tree, 8 min 26 s): windows B
+drawn from a generator of their own (A's and D's draws, and their counts, are unchanged), kept unless they open inside
+a loss on the moved record (D113):
+
+| Split | Real kept | A kept | D kept | B kept |
+|---|---|---|---|---|
+| train | 40,472 of 40,530 | 38,448 of 40,530 | 14,930 of 16,234 | 40,423 of 40,530 (107 out, 0.26 %) |
+| select | 6,187 of 6,199 | 5,940 of 6,199 | 2,245 of 2,438 | 6,184 of 6,199 |
+
+The faulty-track counts of §14 are unchanged.
+
+**Proposals.**
+
+- **P26.** A window's random numbers are keyed by its place in the round (a round's windows are flown in batches).
+- **P27.** The windows of one batch command different flights (a loop holds each flight once): a real window and its A,
+  B or D go to different batches.
+- **P28. Window B's ranges** (C9: the implementer's proposal, for the user): a turn about the airport reference within
+  ±15°, a height within ±300 m, a speed scale within 1 ± 0.1, each uniform.
+- **P29. D114's readings**: the steps are counted over all rows from row 0, each once; only the loss's other aircraft is
+  checked (the commanded aircraft flies on the executor); an inserted aircraft keeps its source's fault rows, a D-moved
+  leader's move with its record.
+- **P30. C6's details**: a continuation starts at its branch row (that row's words are its first); the second pass is
+  checked on the words before each window's last branch point and the positions and heights of its 2 s rows up to it;
+  a differing window drops all its groups.
+- **P31. For C10**: the groups of a round are large (the reviewer's estimate: several MB a group, tens of GB for a round
+  held at once) — the loss is fed branch point by branch point; window B's D113 check at the draw uses `moved_commanded`;
+  `start_loop` maps each window's move.
