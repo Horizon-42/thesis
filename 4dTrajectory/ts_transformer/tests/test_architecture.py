@@ -824,17 +824,18 @@ POST = TS_DIR / "post"
 #: prediction paths, the training plane or a runner; and of the prior only the names of prior §7 (`PRIOR_INTERFACE`).
 POST_MAY_IMPORT = ("post.", "instructions.", "inference.separation", "inference.runway_schedule", "data.day_split",
                    "io_utils", "repo_layout")
-#: Prior §7, the column "Code": the names stage C may import from `prior/` (in `post/` and in its runners). B9 adds its
-#: names (prior D96) when it is merged.
+#: Prior §7, the column "Code": the names stage C may import from `prior/` (in `post/` and in its runners); B9's names
+#: (prior D96) as stage B's log gives them for that column: `LoopRows`, `draw`, `Permitted`, `masked_log_probability`.
 PRIOR_INTERFACE = {
     "prior.checkpoint": {"load_checkpoint", "CHECKPOINT_SCHEMA"},
     "prior.model": {"Prior"},
     "prior.procedure": {"PROCEDURE_MASKS", "procedure_digests", "airport_finals", "Final"},
     "prior.inputs": {"state_inputs", "sentence_rows", "own_flight_key"},
+    "prior.loop": {"LoopRows"},
     "prior.landings": {"LandingIndex"},
     "prior.source": {"airport_landings", "ArtefactSource"},
-    "prior.speaker": {"Speaker", "Position", "go_around_bound", "MOST_GO_AROUNDS"},
-    "prior.train": {"batch_nll"},
+    "prior.speaker": {"Speaker", "Position", "go_around_bound", "MOST_GO_AROUNDS", "draw", "Permitted"},
+    "prior.train": {"batch_nll", "masked_log_probability"},
     "prior.selection": {"require_rule", "kept"},
     "prior.batch": {"collate", "RowTensors"},
 }
