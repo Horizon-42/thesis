@@ -4,7 +4,7 @@ Turns an **LPV** approach (segments + FAS geometry) into a set of inequality con
 `g(z) ≤ 0` over the optimizer's state nodes. Started as a teaching scaffold; the numbered
 TODOs ①–⑩ are now **implemented** (the numbering is kept below as a map of the math). It is the
 **single source** of the corridor / glidepath / floor / course math — the optimizer
-(`collocation.optimizer`) and the backend (`aeroviz_backend.procedure_segments`) consume these
+(`collocation.optimizer`) and the procedure bridge (`procedure.segments`) consume these
 functions and constants; nothing is re-derived elsewhere.
 
 Design sources: [`../../docs/optimization_constraint_design.md`](../../docs/optimization_constraint_design.md)
@@ -14,7 +14,7 @@ and [`../../docs/lpv_final_segment.en.html`](../../docs/lpv_final_segment.en.htm
 
 ## 1. The one idea you must keep in mind: the `(n, e)` frame
 
-We optimize with the **`trapezoidalNormalizedFullTransport`** scheme, so the decision state at
+We optimize with a **normalized full-transport** scheme (default `hermiteSimpsonNormalizedFullTransport`), so the decision state at
 each node is **already metric**, in one frame anchored at the **target = LTP**:
 
 ```
@@ -194,7 +194,7 @@ Because the functions are backend-agnostic (§2b), the bridge is direct — **no
 `ca.Function` callback, no finite differences**. The consumer is
 `collocation.optimizer.CollocationOptimizer(segments=[...])`:
 
-1. The backend (`aeroviz_backend.procedure_segments.build_constraint_segments`) converts every
+1. The procedure bridge (`procedure.segments.build_constraint_segments`) converts every
    fix once with `TargetFrame` (frame anchored at the **target = the LTP**) and builds one
    `SegmentSpec` per procedure leg. The optimizer validates the anchoring at construction (the
    final segment must end at the `(n, e)` origin).

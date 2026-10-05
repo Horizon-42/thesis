@@ -19,7 +19,7 @@ def test_the_mirrored_constants_equal_their_owners():
     from geokit import NM_M
 
     import scenario_optimization
-    from aeroviz_backend import procedure_segments
+    from procedure import segments as procedure_segments
 
     assert RNP_HALF_WIDTH_M == procedure_segments._DEFAULT_RNP_NM * NM_M
     assert THRESHOLD_TOLERANCE_M == scenario_optimization._FRAME_ANCHOR_TOLERANCE_M

@@ -396,8 +396,8 @@ branch and worktree, with a review before each commit.
 | The optimizer, its build and the row contract | `4dTrajectory/optimization/collocation/optimizer.py:89-94`, `:320` (`optimize_free_time`), `:362` (`optimize_trajectory`), `:390` (`_build`), `:524-545` (row dispatcher), `:173` (`dense_node_times`) |
 | The metric normalization (the frame) | `4dTrajectory/optimization/collocation/schemes.py` `_normalization_cb` |
 | Final approach geometry | `4dTrajectory/optimization/approach_constraints/lateral.py:142` (`fac_cross_track`), `:150` (`fac_distance_to_ltp`), `:177` (`lpv_corridor_violation`) |
-| Constrained solve and replay | `4dTrajectory/optimization/scenario_optimization.py:1222` (`_solve_iaf`), `:343` (`rollout_controls`), `:559` (`_run_batch`) |
-| Procedure bridge (moves in F4) | `aeroviz_backend/procedure_segments.py:109` (`build_constraint_segments`), `aeroviz_backend/procedure_constraint.py:170` |
+| Constrained solve, replay, batch | `4dTrajectory/optimization/scenario_optimization.py:359` (`_solve_iaf`), `scenario_replay.py:141` (`rollout_controls`), `scenario_batch.py:134` (`run_batch`) |
+| Procedure bridge (moved in F4) | `4dTrajectory/optimization/procedure/segments.py:104` (`build_constraint_segments`), `procedure/constraint.py:170`, `procedure/iaf.py` |
 | Scenario, identity, datum | `flight_scenarios/scenario.py:131` (`FlightScenario`), `flight_scenarios/identity.py:39` (`flight_key`), `flight_scenarios/build.py:328` (`load_model_arrivals`), `flight_scenarios/datum.py:79` (`flight_to_msl`) |
 | Arrival slice time origin | `trajectory_data_process/harvest/arrivals.py:142`, `:365-376` |
 | Separation judge | `4dTrajectory/ts_transformer/inference/separation.py:91` (`Traffic`), `:122` (`Loss`), `:162` (`Judged`), `:185` (`judged_pairs`), `:231` (`losses`), `:255` (`wake_at_threshold`) |

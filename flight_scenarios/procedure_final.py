@@ -5,7 +5,7 @@ The procedure documents are the frontend's ``procedure-details/<uid>.json`` file
 indexed by ``index.json``.  Two consumers resolve them:
 
 * the optimizer's constrained-IAF mode (``4dTrajectory/optimization/scenario_optimization``)
-  builds the whole leg chain from ``aeroviz_backend.procedure_constraint``;
+  builds the whole leg chain from ``4dTrajectory/optimization/procedure`` (``ProcedureConstraint``);
 * the learned model (``4dTrajectory/ts_transformer``) needed ONE number per runway — how far
   back from the threshold the FAF sits — to gate a final-approach constraint at the FAF
   (that gate was deleted on 2026-09-09; the read stays for the tests that cross-check it);

@@ -31,8 +31,8 @@ from common import LoadFactorControl
 from least_squares_transcription_optimizor import LeastSquaresTranscriptionOptimizor
 from single_shooting_optimizor import SingleShootingOptimizor
 from simulator import Control
-from aeroviz_backend.procedure_constraint import ProcedureConstraint
-from aeroviz_backend.procedure_segments import build_constraint_segments
+from procedure.constraint import ProcedureConstraint
+from procedure.segments import build_constraint_segments
 from aeroviz_backend.trajectory_playback import (
     build_optimized_trajectory_playback,
     playback_terminal_drift_m,
@@ -177,8 +177,6 @@ class OptimizationBackend:
                 target_state.longitude,
                 target_state.altitude,
             )
-            if not constraint_segments:
-                raise ValueError("the procedureConstraint produced no legs")
             constraints_enforced = True
             # Debug: dump exactly what is being optimized (start / target / the procedure legs),
             # so a failed multiphase solve can be reproduced from the server log.

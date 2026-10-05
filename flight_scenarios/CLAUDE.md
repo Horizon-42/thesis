@@ -60,7 +60,7 @@ Everything below is a contract this seam owns; getting one wrong is silent, not 
   Cesium merges same-id packets — per-runway files had up to 128 duplicate ids, two flights
   garbled into one entity).
 - The same function produces the ts record stems, the optimizer's record filenames
-  (`_scenario_filename` wraps it), the CZML group key (via the record filename stem), the
+  (`scenario_batch.scenario_filename` wraps it), the CZML group key (via the record filename stem), the
   observed-layer entity ids (`generate_czml`, which RAISES on a duplicate identity), and the
   comparison reference lookup — so they cannot drift. `aeroviz-4d/python/flight_identity.py` is
   a deliberate MIRROR (frontend tooling must not import the modeling tree); both copies are

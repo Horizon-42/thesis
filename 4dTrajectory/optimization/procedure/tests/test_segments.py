@@ -5,10 +5,9 @@ import math
 import numpy as np
 import pytest
 
-from aeroviz_backend import paths  # noqa: F401  (puts the optimization dir on sys.path)
-from aeroviz_backend.procedure_constraint import ProcedureConstraint
+from procedure.constraint import ProcedureConstraint
 from flight_scenarios import procedure_final
-from aeroviz_backend.procedure_segments import build_constraint_segments
+from procedure.segments import build_constraint_segments
 
 import approach_constraints as ac
 from geokit import DEG2RAD, FT_M, WGS84_A
@@ -91,6 +90,13 @@ def test_threshold_waypoint_maps_to_origin():
 
 def _lon_e_metres_east(e_m: float) -> float:
     return TARGET_LON + e_m / (DEG2RAD * WGS84_A * math.cos(math.radians(TARGET_LAT)))
+
+
+def test_a_procedure_without_a_leg_is_refused():
+    payload = _payload()
+    payload["waypoints"] = payload["waypoints"][:1]
+    with pytest.raises(ValueError, match="no leg to constrain"):
+        build_constraint_segments(ProcedureConstraint.from_payload(payload), TARGET_LAT, TARGET_LON, TARGET_ALT)
 
 
 def test_warns_on_excessive_pfaf_intercept():

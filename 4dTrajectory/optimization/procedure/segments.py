@@ -1,10 +1,7 @@
 """Translate a canonical :class:`ProcedureConstraint` into constraints-package ``SegmentSpec``s.
 
-This bridge lives in the backend on purpose: it depends on *both* the request-side
-:mod:`aeroviz_backend.procedure_constraint` and the optimizer-side ``approach_constraints`` package
-(``4dTrajectory/optimization/approach_constraints``). The optimizer itself depends only on ``approach_constraints``,
-so the dependency direction stays clean (backend → {constraints, optimizer}; optimizer →
-constraints; constraints → nothing).
+The one construction of a procedure's legs for every constrained solve: the backend's multiphase
+request and the batch's constrained-IAF mode both call :func:`build_constraint_segments`.
 
 Geometry, all in the target-anchored ``(n, e)`` metric frame (origin = the LTP = the optimizer
 target), matching the optimizer's Normalized decision state:
@@ -22,17 +19,15 @@ target), matching the optimizer's Normalized decision state:
 
 from __future__ import annotations
 
-import math
 import warnings
 
 import numpy as np
 
-from aeroviz_backend import paths  # noqa: F401  (puts the optimization dir on sys.path)
 from geokit import FT_M, NM_M
 
 import approach_constraints as ac
 from approach_constraints import geometry as _geo
-from aeroviz_backend.procedure_constraint import ProcedureConstraint
+from .constraint import ProcedureConstraint
 # The FAS cone (FPAP/GARP distances, course width) is defined ONCE in the data→modeling
 # seam, because the learned model's final-approach corridor evaluates the same cone.
 from flight_scenarios.fas_geometry import fas_course_geometry
@@ -122,12 +117,12 @@ def build_constraint_segments(
     Fixes are in the target ``(n,e)`` frame — the frame the optimizer solves in (it validates the
     anchoring at construction). The optimizer maps one PHASE per segment and prepends an
     unconstrained start→first-fix transition phase when the start is away from the first fix, so
-    the start does NOT need to coincide with the procedure. Returns ``[]`` if the procedure has
-    fewer than two waypoints.
+    the start does NOT need to coincide with the procedure. A procedure with fewer than two
+    waypoints has no leg and is refused.
     """
     wps = pc.waypoints
     if len(wps) < 2:
-        return []
+        raise ValueError(f"procedure {pc.procedure_uid!r} has {len(wps)} waypoint(s): no leg to constrain")
     frame = ac.TargetFrame(target_lat_deg, target_lon_deg)
     ne = [frame.to_ne(wp.lat_deg, wp.lon_deg) for wp in wps]
 

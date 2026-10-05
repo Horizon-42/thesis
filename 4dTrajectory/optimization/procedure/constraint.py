@@ -9,7 +9,7 @@ directly.
 It carries only what a path/altitude/speed constraint needs: an ordered list of
 waypoints (position + altitude window + speed), the final-approach course and the
 coded glidepath. The one canonical altitude type (:class:`AltitudeWindow`) and the
-one canonical CIFP→window conversion live here too, so the backend never invents a
+one canonical CIFP→window conversion live here too, so neither the backend nor the batch invents a
 second interpretation of the coded data.
 """
 
@@ -216,7 +216,7 @@ class ProcedureConstraint:
         Reads a single approach branch (the requested one, else the base branch,
         else the first ``final`` branch) directly from the coded legs. Unlike the
         frontend builder it does not follow cross-branch continuation — it is the
-        backend's own minimal reader of the canonical fields (handy for tests and
+        optimizer side's own minimal reader of the canonical fields (handy for tests and
         for understanding a bundled procedure without the frontend).
         """
         branch = _select_branch(document, branch_id)

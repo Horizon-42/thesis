@@ -1,5 +1,25 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-05 — Optimizer T0 for the multi-aircraft work: caller rows, the procedure package, the batch split by job
+
+- Design and review: `4dTrajectory/docs/multi_aircraft_optimization/` (`design.md`, `code_review.md` F1–F13; the user accepted
+  all 13 on 2026-10-05). Branch `dev-optimizer-multi-aircraft`.
+- F7: `CollocationOptimizer` takes `extra_rows(nodes, times)` (the procedure families' row contract on every dense node and its
+  symbolic time) and keeps `last_decision_vector` for a warm start.
+- F4/F5: `aeroviz_backend/procedure_constraint.py` and `procedure_segments.py` moved to `4dTrajectory/optimization/procedure/`
+  (`constraint`, `segments`, and `iaf` from `scenario_optimization`); the optimizer imports nothing from the backend;
+  `build_constraint_segments` refuses a procedure without a leg (both callers' own checks gone). The IAF ranking proxy is the
+  horizontal path length (the 3D one read an uncoded IAF altitude as 0 ft): on the 43 multi-IAF documents of the five
+  K-airports every IAF order is unchanged. Two ts_transformer lines name the new path (the mirror test, a comment; user OK).
+- F6: `scenario_optimization.py` (1,634 lines) split: `scenario_replay` (records, rollout), `scenario_batch` (`run_batch`,
+  resume, sweep, filenames), `scenario_references`; the solves, workers and CLI stay. F2: `--dt`/`dt` and the constrained
+  path's `n_segments` removed (no solve read them). F3: the IAF airport is the scenario's `arr_airport` (`--airport` and its
+  KRDU fallback removed; the runner no longer passes it), `window_s` and a failed record's `reason` required. F11: the
+  resume's dead identity compare removed (the file is named by the flight_key). F8: the backend's own 1000-iteration HTTP
+  default documented (K4). `simulate_controls` removed (no caller).
+- Gates: 20 KRDU flights (unconstrained + constrained-IAF shortest) solve bit-identically to the base code after each step
+  (40/40); an end-to-end CLI batch (3 scenarios, both modes, reference records) writes 21 byte-identical files; 532 tests pass.
+
 ### 2026-10-04 — `run_all_tests.sh` runs its three groups at once, on pytest-xdist workers
 
 - The user's goal was speed. Measured: the ts_transformer suite (1,531 tests) 15.5 min serial -> 2.8-3.2 min on 8-16 workers; the

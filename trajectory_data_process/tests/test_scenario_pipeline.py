@@ -300,7 +300,7 @@ def test_footprint_estimate_tracks_outputs_and_existing_artifacts(tmp_path, monk
 
 
 def test_runner_and_batch_share_the_reference_cache_contract():
-    # run_scenario_optimization validates reference caches that scenario_optimization
+    # run_scenario_optimization validates reference caches that scenario_references
     # writes. Both now IMPORT the whole contract — schema string, hash primitive, and
     # record→track path mapping — from evaluation_export, so this seam test pins that
     # neither side has regrown a restated copy.
@@ -309,9 +309,9 @@ def test_runner_and_batch_share_the_reference_cache_contract():
 
     sys.path.insert(0, str(_Path(__file__).resolve().parents[2] / "4dTrajectory" / "optimization"))
     import evaluation_export as ee
-    import scenario_optimization as so
+    import scenario_references as refs
 
-    assert optimize.REFERENCE_CACHE_SCHEMA == so.REFERENCE_CACHE_SCHEMA == ee.REFERENCE_CACHE_SCHEMA
-    assert optimize.OBSERVED_TRACKS_DIR == so.OBSERVED_TRACKS_DIR == ee.OBSERVED_TRACKS_DIR
+    assert optimize.REFERENCE_CACHE_SCHEMA == refs.REFERENCE_CACHE_SCHEMA == ee.REFERENCE_CACHE_SCHEMA
+    assert optimize.OBSERVED_TRACKS_DIR == refs.OBSERVED_TRACKS_DIR == ee.OBSERVED_TRACKS_DIR
     assert optimize.observed_track_path is ee.observed_track_path
     assert optimize.file_sha256 is ee.file_sha256
