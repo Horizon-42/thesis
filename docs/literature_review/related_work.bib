@@ -1,6 +1,6 @@
 % Related-work references for the thesis (see related_work_reading_list.md).
 % Metadata verified against each PDF's first page or the folder README under docs/literature/.
-% Entries with a `note` still need a check against the published version before submission.
+% Entries whose `note` mentions the repo PDF cite the published version; the PDF in the repo is a preprint of it.
 
 % ---------- 2.1 Trajectory prediction ----------
 
@@ -30,8 +30,10 @@
   author      = {{EUROCONTROL}},
   title       = {User Manual for the Base of Aircraft Data ({BADA}) Revision 3.7},
   institution = {EUROCONTROL Experimental Centre},
+  type        = {EEC Technical/Scientific Report},
+  number      = {2009-003},
   year        = {2009},
-  note        = {Title and report number to be checked against the PDF}
+  month       = mar
 }
 
 @article{zeng2020deep,
@@ -146,7 +148,7 @@
   year          = {2017},
   eprint        = {1711.10561},
   archiveprefix = {arXiv},
-  note          = {arXiv v1; the combined version appeared in J. Comput. Phys. 378 (2019) and should be cited instead if that is the version used}
+  note          = {arXiv-only. Parts I and II were later merged into a differently titled paper, "Physics-informed neural networks: A deep learning framework for solving forward and inverse problems involving nonlinear partial differential equations", J. Comput. Phys. 378 (2019); cite that one instead if it is the version you rely on}
 }
 
 @inproceedings{cui2020dkm,
@@ -154,6 +156,7 @@
   title     = {Deep Kinematic Models for Kinematically Feasible Vehicle Trajectory Predictions},
   booktitle = {IEEE International Conference on Robotics and Automation (ICRA)},
   year      = {2020},
+  pages     = {10563--10569},
   doi       = {10.1109/ICRA40945.2020.9197560}
 }
 
@@ -208,13 +211,16 @@
 }
 
 @inproceedings{fioretto2020lagrangian,
-  author        = {Fioretto, Ferdinando and Mak, Terrence W. K. and Van Hentenryck, Pascal},
-  title         = {Lagrangian Duality for Constrained Deep Learning},
-  booktitle     = {European Conference on Machine Learning and Principles and Practice of Knowledge Discovery in Databases (ECML PKDD)},
-  year          = {2020},
-  eprint        = {2001.09394},
-  archiveprefix = {arXiv},
-  note          = {Author order to be checked against the published version}
+  author    = {Fioretto, Ferdinando and Van Hentenryck, Pascal and Mak, Terrence W. K. and Tran, Cuong and Baldo, Federico and Lombardi, Michele},
+  title     = {Lagrangian Duality for Constrained Deep Learning},
+  booktitle = {Machine Learning and Knowledge Discovery in Databases: Applied Data Science and Demo Track (ECML PKDD 2020)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {12565},
+  pages     = {118--135},
+  publisher = {Springer},
+  year      = {2021},
+  doi       = {10.1007/978-3-030-67670-4_8},
+  note      = {The repo PDF is arXiv:2001.09394 v2, which lists only three authors (Fioretto, Van Hentenryck, Mak)}
 }
 
 @inproceedings{chamon2020pac,
@@ -226,20 +232,24 @@
   archiveprefix = {arXiv}
 }
 
-@misc{xiao2021barriernet,
-  author        = {Xiao, Wei and Hasani, Ramin and Li, Xiao and Rus, Daniela},
-  title         = {{BarrierNet}: A Safety-Guaranteed Layer for Neural Networks},
-  year          = {2021},
-  eprint        = {2111.11277},
-  archiveprefix = {arXiv},
-  note          = {arXiv v1 as stored in the repo; the journal version (IEEE T-RO 2023) has a different title and author list, check before citing it instead}
+@article{xiao2023barriernet,
+  author  = {Xiao, Wei and Wang, Tsun-Hsuan and Hasani, Ramin and Chahine, Makram and Amini, Alexander and Li, Xiao and Rus, Daniela},
+  title   = {{BarrierNet}: Differentiable Control Barrier Functions for Learning of Safe Robot Control},
+  journal = {IEEE Transactions on Robotics},
+  year    = {2023},
+  volume  = {39},
+  number  = {3},
+  pages   = {2289--2307},
+  doi     = {10.1109/TRO.2023.3249564},
+  note    = {The repo PDF is arXiv:2111.11277 v1, titled "BarrierNet: A Safety-Guaranteed Layer for Neural Networks" with four authors}
 }
 
 @inproceedings{kervadec2022logbarrier,
   author        = {Kervadec, Hoel and Dolz, Jose and Yuan, Jing and Desrosiers, Christian and Granger, Eric and Ben Ayed, Ismail},
   title         = {Constrained Deep Networks: Lagrangian Optimization via Log-Barrier Extensions},
-  booktitle     = {International Conference on Pattern Recognition (ICPR)},
+  booktitle     = {30th European Signal Processing Conference (EUSIPCO)},
   year          = {2022},
+  pages         = {962--966},
   eprint        = {1904.04205},
   archiveprefix = {arXiv}
 }
@@ -269,7 +279,10 @@
   title   = {A Study of Tradeoffs in Scheduling Terminal-Area Operations},
   journal = {Proceedings of the IEEE},
   year    = {2008},
-  note    = {Volume and pages to be checked against the PDF}
+  volume  = {96},
+  number  = {12},
+  pages   = {2081--2095},
+  doi     = {10.1109/JPROC.2008.2006145}
 }
 
 @inproceedings{kim2026maltp,
@@ -281,13 +294,16 @@
   archiveprefix = {arXiv}
 }
 
-@misc{jung2023inferring,
+@article{jung2025inferring,
   author        = {Jung, Soyeon and Hardy, Amelia and Kochenderfer, Mykel J.},
   title         = {Inferring Traffic Models in Terminal Airspace from Flight Tracks and Procedures},
-  year          = {2023},
+  journal       = {Journal of Aerospace Information Systems},
+  year          = {2025},
+  volume        = {22},
+  number        = {8},
+  doi           = {10.2514/1.I011503},
   eprint        = {2303.09981},
-  archiveprefix = {arXiv},
-  note          = {v3, 2025; the PDF states no venue}
+  archiveprefix = {arXiv}
 }
 
 @inproceedings{groot2022relstate,
@@ -344,4 +360,151 @@
   year          = {2024},
   eprint        = {2403.03372},
   archiveprefix = {arXiv}
+}
+
+% ---------- Added: dynamics, trajectory optimisation, scheduling ----------
+
+@article{mondoloni2020prediction,
+  author  = {Mondoloni, St{\'e}phane and Rozen, Nicholas},
+  title   = {Aircraft Trajectory Prediction and Synchronization for Air Traffic Management Applications},
+  journal = {Progress in Aerospace Sciences},
+  year    = {2020},
+  volume  = {119},
+  pages   = {100640}
+}
+
+@article{hong2015vectored,
+  author  = {Hong, Sungkwon and Lee, Keumjin},
+  title   = {Trajectory Prediction for Vectored Area Navigation Arrivals},
+  journal = {Journal of Aerospace Information Systems},
+  year    = {2015},
+  volume  = {12},
+  number  = {7},
+  pages   = {490--502},
+  doi     = {10.2514/1.I010245}
+}
+
+@techreport{weitz2015pointmass,
+  author      = {Weitz, Lesley A.},
+  title       = {Derivation of a Point-Mass Aircraft Model used for Fast-Time Simulation},
+  institution = {The MITRE Corporation},
+  type        = {MITRE Technical Report},
+  number      = {MTR150184},
+  year        = {2015},
+  month       = apr
+}
+
+@inproceedings{garciaheras2013simulator,
+  author    = {Garc{\'i}a-Heras Carretero, Javier and S{\'a}ez Nieto, Francisco Javier and Rom{\'a}n Cord{\'o}n, Ricardo},
+  title     = {Aircraft Trajectory Simulator Using a Three Degrees of Freedom Aircraft Point Mass Model},
+  booktitle = {3rd International Conference on Application and Theory of Automation in Command and Control Systems (ATACCS)},
+  address   = {Naples, Italy},
+  year      = {2013}
+}
+
+@techreport{peters2012tgf,
+  author      = {Peters, Mark and Konyak, Michael A.},
+  title       = {The Engineering Analysis and Design of the Aircraft Dynamics Model for the {FAA} Target Generation Facility},
+  institution = {FAA William J. Hughes Technical Center},
+  number      = {99162-01},
+  year        = {2012},
+  month       = oct
+}
+
+@article{betts1998survey,
+  author  = {Betts, John T.},
+  title   = {Survey of Numerical Methods for Trajectory Optimization},
+  journal = {Journal of Guidance, Control, and Dynamics},
+  year    = {1998},
+  volume  = {21},
+  number  = {2},
+  doi     = {10.2514/2.4231}
+}
+
+@article{hargraves1987direct,
+  author  = {Hargraves, C. R. and Paris, S. W.},
+  title   = {Direct Trajectory Optimization Using Nonlinear Programming and Collocation},
+  journal = {Journal of Guidance},
+  year    = {1987},
+  volume  = {10},
+  number  = {4},
+  pages   = {338--342},
+  doi     = {10.2514/3.20223}
+}
+
+@article{kelly2017introduction,
+  author  = {Kelly, Matthew},
+  title   = {An Introduction to Trajectory Optimization: How to Do Your Own Direct Collocation},
+  journal = {SIAM Review},
+  year    = {2017},
+  volume  = {59},
+  number  = {4},
+  pages   = {849--904},
+  doi     = {10.1137/16M1062569}
+}
+
+@article{bock1984multiple,
+  author  = {Bock, H. G. and Plitt, K. J.},
+  title   = {A Multiple Shooting Algorithm for Direct Solution of Optimal Control Problems},
+  journal = {IFAC Proceedings Volumes},
+  year    = {1984},
+  volume  = {17},
+  number  = {2},
+  pages   = {1603--1608},
+  doi     = {10.1016/S1474-6670(17)61205-9},
+  note    = {9th IFAC World Congress, Budapest}
+}
+
+@article{gardi2019multiobjective,
+  author  = {Gardi, Alessandro and Sabatini, Roberto and Kistan, Trevor},
+  title   = {Multiobjective {4D} Trajectory Optimization for Integrated Avionics and Air Traffic Management Systems},
+  journal = {IEEE Transactions on Aerospace and Electronic Systems},
+  year    = {2019},
+  volume  = {55},
+  number  = {1},
+  pages   = {170--181},
+  doi     = {10.1109/TAES.2018.2849238}
+}
+
+@article{gui2024decision,
+  author  = {Gui, Dongdong and Le, Meilong and Huang, Zhouchun and D'Ariano, Andrea},
+  title   = {A Decision Support Framework for Aircraft Arrival Scheduling and Trajectory Optimization in Terminal Maneuvering Areas},
+  journal = {Aerospace},
+  year    = {2024},
+  volume  = {11},
+  number  = {5},
+  pages   = {405},
+  doi     = {10.3390/aerospace11050405}
+}
+
+@misc{zhang2025datadrivenmpc,
+  author        = {Zhang, Yi and Long, Yushen and Huang, Liping and Zhang, Yicheng and Zhang, Sheng and Yin, Yifang},
+  title         = {A Data-Driven Model Predictive Control Framework for Multi-Aircraft {TMA} Routing Under Travel Time Uncertainty},
+  year          = {2025},
+  eprint        = {2511.19452},
+  archiveprefix = {arXiv}
+}
+
+% ---------- Optimisation toolchain (PDFs added to 4dTrajectory/docs/traditional/) ----------
+
+@article{wachter2006ipopt,
+  author  = {W{\"a}chter, Andreas and Biegler, Lorenz T.},
+  title   = {On the Implementation of an Interior-Point Filter Line-Search Algorithm for Large-Scale Nonlinear Programming},
+  journal = {Mathematical Programming},
+  year    = {2006},
+  volume  = {106},
+  number  = {1},
+  pages   = {25--57},
+  doi     = {10.1007/s10107-004-0559-y}
+}
+
+@article{andersson2019casadi,
+  author  = {Andersson, Joel A. E. and Gillis, Joris and Horn, Greg and Rawlings, James B. and Diehl, Moritz},
+  title   = {{CasADi}: A Software Framework for Nonlinear Optimization and Optimal Control},
+  journal = {Mathematical Programming Computation},
+  year    = {2019},
+  volume  = {11},
+  number  = {1},
+  pages   = {1--36},
+  doi     = {10.1007/s12532-018-0139-4}
 }
