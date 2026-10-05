@@ -93,11 +93,11 @@ they came from. Each document lists the identities of its parts.
 | Document | Decisions | Open items |
 |---|---|---|
 | Outline | D7, D20, D21, D55, D85 | — |
-| Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84 | O8, O10, O11 |
+| Vocabulary | D1–D4, D6, D8–D12, D14, D15, D18, D19, D22, D25–D28, D32–D35, D38, D42–D54, D56–D59, D61, D62, D66, D67, D69–D71, D73, D74, D77–D84, D86 | O8, O10 |
 | Prior | D5, D13, D14, D16, D17, D23–D25, D31, D39–D41, D58, D60, D63–D65, D68, D72, D75 | — |
 | Post-training | D29–D31, D36, D37, D76 | O6, O9 |
 
-The next free numbers: D86, O12.
+The next free numbers: D87, O12.
 
 ---
 
@@ -112,7 +112,7 @@ The next free numbers: D86, O12.
    Training view of stage A). The user compares the readings of D34 and chooses Δ (D7, D11): Δ = 4 s. Then the
    corrections of Claude's review of 2026-10-05 (vocabulary D77–D84, D85): A36 first (one function of A23's export
    for stage B's Training view, prior B6), A32 (the code), A33 (the measurements; the user chooses the start rule of
-   D77), A34 (the formal artefact once more), A35 (the Training sets again). O11 is decided before stage B's B5.
+   D77), A34 (the formal artefact once more), A35 (the Training sets again); D86 (the export reads no formal replay row) in A32.
 2. Stage B (prior §0.4): the prior from the start, chosen by cross-validation over the airports, and the base model.
    Stage B is developed in parallel with the end of stage A (the user, 2026-10-04). A milestone of stage B starts when
    the parts of stage A that it reads are on `dev-two-tier-v4`. The formal runs of stage B wait for Claude's check of
