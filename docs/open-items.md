@@ -22,8 +22,7 @@ change you are making go in `docs/code-health-followups.md` instead.
     KSMF SWA3140、KSTL DAL1400（select）路径里有近乎掉头的点，匹配点卡在那里不再前进，修正拉不回来，漂到 24–26 km
     超时（A30 也超时，只漂 2–3 km）。A34 每格 4–14 条动力学失败（A30 0–1）共 53 条，起点地速都只有 7–58 m/s（进近
     正常约 70–130 m/s），第一个预测步前多有 150–790 m 的 2 s 大步（19 条 > 400 m）：像位置停更几秒后补跳，2 s 的窗正落在
-    停更上（Claude 的读法，未逐条核）。数据：`.claude/worktrees/two-tier-v4-a37/smoke_v4/data/a37/` 之外，命令与输出在
-    本会话；可按需重查。
+    停更上（Claude 的读法，未逐条核）。输出：`.claude/worktrees/two-tier-v4-a37/smoke_v4/data/a37/big_lateral.txt`。
   - 未定（用户）：修在哪里——harvest 的读取时修复（像高度离群值那样，影响所有使用者）、只在指令信号构建处，或标注器
     按名拒绝这类航班；哪种都要重建 A34 的产物。“不可能”的界线（转角、隐含速度）也要定。
   - 数据：`.claude/worktrees/two-tier-v4-a37/smoke_v4/data/a37/vertex.json`（3 架的拐点）；数法见阶段 A 实现日志 A37 行。
