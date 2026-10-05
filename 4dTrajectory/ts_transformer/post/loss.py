@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Iterable, Sequence
 
 import torch
 
@@ -144,16 +144,14 @@ def update_loss(model: Prior, start: PassStart, base: Prior, samples: Samples, d
     return LossParts(reward + KL_WEIGHT * kl + DATA_WEIGHT * teacher, reward, kl, teacher, words, clipped)
 
 
-def one_pass(model: Prior, base: Prior, optimizer: torch.optim.Optimizer, batches: Sequence[Samples],
-             data: Sequence[RowTensors]) -> list[LossParts]:
+def one_pass(model: Prior, base: Prior, optimizer: torch.optim.Optimizer,
+             pairs: Iterable[tuple[Samples, RowTensors]]) -> list[LossParts]:
     """One pass over a round's samples (§2 item 5): the model at the start of the pass is the one that spoke them; each
-    batch of samples is paired with a batch of the data term (refused before any update unless there is one for each);
-    one optimizer step for each. The parts of each update, detached."""
-    if len(batches) != len(data):
-        raise ValueError(f"{len(batches)} batches of samples and {len(data)} batches of the data term: one for each")
+    batch of samples paired with a batch of the data term, drawn from ``pairs`` one at a time (a round's samples need
+    not be held at once); one optimizer step for each. The parts of each update, detached."""
     start = PassStart(model)
     out = []
-    for samples, rows in zip(batches, data):
+    for samples, rows in pairs:
         parts = update_loss(model, start, base, samples, rows)
         optimizer.zero_grad(set_to_none=True)
         parts.loss.backward()

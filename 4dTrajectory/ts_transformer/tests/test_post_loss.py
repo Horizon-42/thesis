@@ -161,16 +161,20 @@ def test_one_update_and_one_pass():
     assert parts.clipped == 0 and torch.isfinite(parts.loss)
     optimizer = torch.optim.AdamW(parameter_groups(model, prior_lr=1e-4, traffic_lr=1e-3))
     before = [p.detach().clone() for p in model.parameters()]
-    passed = one_pass(model, base, optimizer, [samples, samples], [data, data])
+    drawn = []
+
+    def pairs():                                                            # drawn one at a time, after the pass starts
+        for k in range(2):
+            drawn.append(k)
+            yield samples, data
+
+    passed = one_pass(model, base, optimizer, pairs())
+    assert drawn == [0, 1]
     assert len(passed) == 2 and passed[1].clipped >= 0
     assert any(not torch.equal(a, p) for a, p in zip(before, model.parameters()))
     assert not model.training
     summary = stacked(passed)
     assert summary["words"] == 2 * parts.words and 0.0 <= summary["clipped_share"] <= 1.0
-    after = [p.detach().clone() for p in model.parameters()]
-    with pytest.raises(ValueError, match="one for each"):
-        one_pass(model, base, optimizer, [samples], [data, data])          # one data batch for each update
-    assert all(torch.equal(a, p) for a, p in zip(after, model.parameters()))   # refused before any update
     nan = torch.zeros(1, 2, 5)
     nan[0, 0] = float("nan")                                                # a row not counted that holds a NaN
     assert torch.isfinite(pull_to_base(nan, torch.zeros(1, 2, 5), torch.tensor([[False, True]])))
