@@ -39,9 +39,21 @@ DELTA = 4.0
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
+    """`window_setup` for a test."""
+    return window_setup(tmp_path, monkeypatch)
+
+
+def window_setup(tmp_path, monkeypatch):
     """A26's one-flight artefact: its window (no other aircraft), its roster (the flight's landing and another one), the
     finals, a prior and an edge reference written for the test."""
-    directory, words, _, stored, _ = test_start._artefact(tmp_path, monkeypatch, DELTA)
+    directory, words, batch, stored, _ = test_start._artefact(tmp_path, monkeypatch, DELTA)
+    # A26's stand-in gives the start state of the artefact's flight whatever flight it is given; a window B moves it,
+    # so the start of a closed loop here reads the flight given (its moved rows)
+    from ts_transformer.autopilot import start as start_module
+    from ts_transformer.tests.support import executor_inputs
+
+    monkeypatch.setattr(start_module, "flight_inputs", lambda series, flights, anchors, airports, rule, device:
+                        executor_inputs(flights[0], airports[0], anchors[0], rule=rule))
     flights = {0: signals_flights(directory, "train")[0]}
     geometries = load_candidates(directory)
     geometry = geometries[flights[0]["airport"]]
@@ -70,7 +82,7 @@ def setup(tmp_path, monkeypatch):
 
     return dict(directory=directory, words=words, stored=stored, flights=flights, geometries=geometries,
                 geometry=geometry, roster=roster, finals=finals, windows=windows, reference=reference, base=base,
-                loop=loop, moved_loop=moved_loop, key=key)
+                loop=loop, moved_loop=moved_loop, key=key, batch=batch)
 
 
 def _with_module(base, weights=True):

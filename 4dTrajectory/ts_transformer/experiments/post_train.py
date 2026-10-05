@@ -178,22 +178,23 @@ def split_data(instructions: Path, split: str, words: Words, interval_s: float, 
 
 
 def open_context(prior_dir: Path, instructions: Path, executor: Path, edges_reference: Path, device: torch.device,
-                 procedure_root: Path) -> Context:
+                 procedure_root: Path, *, data: bool = True) -> Context:
     """The context of a campaign: the base opened (`open_prior`: its artefact, Δ, selection and procedure masks), the
-    finals of its procedure data, the train and select splits, and the data term's sentences."""
+    finals of its procedure data, the train and select splits, and the data term's sentences (none for a caller that
+    trains nothing, ``data`` False: the export of the Training view)."""
     prior = open_prior(prior_dir, instructions, procedure_root=procedure_root)
     words = Words(load_spec(instructions))
     source = ArtefactSource(instructions, prior.interval_s, prior.checkpoint.model.config.variant, prior.landings,
                             prior.selection)
-    data = [s for code in sorted(prior.geometries) for s in source.sentences("train", code)]
-    if not data:
+    sentences = [s for code in sorted(prior.geometries) for s in source.sentences("train", code)] if data else []
+    if data and not sentences:
         raise ValueError(f"no train sentence in the base's selection {prior.selection!r}: no data term (D36, D76)")
     return Context(instructions, executor, edges_reference, device, words, prior.interval_s,
                    prior.checkpoint.model, prior.checkpoint.identity, prior.geometries, prior.landings,
                    {code: airport_finals(g, root=procedure_root) for code, g in prior.geometries.items()},
                    {split: split_data(instructions, split, words, prior.interval_s, prior.geometries)
                     for split in ("train", "select")},
-                   data)
+                   sentences)
 
 
 # ---- the draw
@@ -417,6 +418,29 @@ def start_model(context: Context, settings: Settings) -> tuple[Prior, torch.opti
     model.to(context.device).eval()
     return model, torch.optim.AdamW(parameter_groups(model, settings.prior_lr, settings.traffic_lr),
                                     weight_decay=settings.weight_decay)
+
+
+def settings_of(record: Mapping[str, Any]) -> Settings:
+    """A campaign's settings as its ``campaign.json`` records them."""
+    return Settings(**record["inputs"]["settings"])
+
+
+def round_model(context: Context, settings: Settings, out: Path, round_: int | None) -> Prior:
+    """The model of campaign ``out`` after round ``round_`` (its checkpoint), or at its start (None: the base with
+    zero-output traffic modules, D29), in eval mode; a checkpoint is refused unless its identity is this campaign's on
+    this base, under today's procedure masks (§4 item 3)."""
+    model, _ = start_model(context, settings)
+    if round_ is None:
+        return model
+    state = torch.load(out / f"round_{round_}" / "checkpoint.pt", weights_only=False, map_location=context.device)
+    held = state["identity"]
+    expected = {"schema": POST_CHECKPOINT_SCHEMA, "base": context.base_identity, "procedure_masks": PROCEDURE_MASKS,
+                "traffic": TrafficConfig(settings.traffic_hidden, settings.traffic_heads).to_dict(),
+                "seed": settings.seed}
+    if {k: held[k] for k in expected} != expected or len(held["rounds"]) != round_ + 1:
+        raise ValueError(f"{out}/round_{round_}: a checkpoint of another base, masks, traffic shape, seed or round")
+    model.load_state_dict(state["model"])
+    return model.eval()
 
 
 def run_campaign(out: Path, settings: Settings, context: Context) -> None:

@@ -917,11 +917,21 @@ def test_only_the_runners_reach_the_post_training():
 #: it; no other module of `experiments/` but stage C's own (`post_*`).
 SPEAKING_LOOP = "experiments.prior_speaking_loop"
 SPEAKING_LOOP_NAMES = {"SpeakingLoop", "Generated", "flight_numbers"}
+#: The Training export of stage A (A23, A36) and of stage B (B6), which stage C's export reuses (post-training C11): the
+#: user's decision of 2026-10-05 lists them in vocabulary §6 and prior §7 (rows the designer writes,
+#: `requests_from_c_to_designer.md`); by module, the names taken (a module imported whole: the module's own name).
+TRAINING_EXPORT_NAMES = {
+    "experiments.training_flights": {"crossing_payload", "last_state_cycle"},
+    "experiments.training_export": {"FORMATS", "candidate_hae_minus_msl_m", "candidates_block", "events",
+                                    "split_flights", "vocabulary_block"},
+    "experiments.training_attitude": {"attitude_payload", "executor_attitude"},
+    "experiments.prior_training_export": {"procedure_block"},
+}
 
 
 def _experiments_imports_refused(source: str) -> list[str]:
-    """Each import of ``source`` from `experiments/` that is neither a stage C module (`post_*`) nor a name of prior §7
-    item 7's module, by the names imported; a relative import is refused outright (a runner's imports are qualified,
+    """Each import of ``source`` from `experiments/` that is neither a stage C module (`post_*`), a name of prior §7
+    item 7's module nor a name of the Training export (`TRAINING_EXPORT_NAMES`), by the names imported; a relative import is refused outright (a runner's imports are qualified,
     L1)."""
     refused = []
     for node in ast.walk(ast.parse(source)):
@@ -933,6 +943,9 @@ def _experiments_imports_refused(source: str) -> list[str]:
                 continue
             if module == "experiments":
                 refused += [f"from experiments import {a.name}" for a in node.names if not a.name.startswith("post_")]
+            elif module in TRAINING_EXPORT_NAMES:
+                refused += [f"from {module} import {a.name}" for a in node.names
+                            if a.name not in TRAINING_EXPORT_NAMES[module]]
             elif module == SPEAKING_LOOP:
                 refused += [f"from {module} import {a.name}" for a in node.names if a.name not in SPEAKING_LOOP_NAMES]
             elif not module.split(".")[1].startswith("post_"):
@@ -952,15 +965,18 @@ def test_the_stage_c_runners_take_from_experiments_only_the_shared_step_of_the_l
         assert not refused, f"{path.name}: {refused}"
     assert not _experiments_imports_refused("from ts_transformer.experiments.prior_speaking_loop import SpeakingLoop\n"
                                             "from ts_transformer.experiments.post_window_loop import WindowLoop\n")
+    assert not _experiments_imports_refused("from ts_transformer.experiments.training_flights import last_state_cycle\n"
+                                            "from ts_transformer.experiments.training_export import split_flights\n")
     assert _experiments_imports_refused("from ts_transformer.experiments.prior_speaking_loop import FIRST_ROWS\n"
                                         "from ts_transformer.experiments.prior_free_generation import speak\n"
                                         "from ts_transformer.experiments import training_flights\n"
+                                        "from ts_transformer.experiments.training_export import main\n"
                                         "import ts_transformer.experiments.prior_train\n"
                                         "from .prior_speaking_loop import FIRST_ROWS\n"
                                         "from . import prior_train\n") == [
         "from experiments.prior_speaking_loop import FIRST_ROWS", "from experiments.prior_free_generation import speak",
-        "from experiments import training_flights", "import experiments.prior_train",
-        "from .prior_speaking_loop import FIRST_ROWS", "from . import prior_train"]
+        "from experiments import training_flights", "from experiments.training_export import main",
+        "import experiments.prior_train", "from .prior_speaking_loop import FIRST_ROWS", "from . import prior_train"]
 
 
 def test_the_stage_c_runners_take_from_autopilot_only_what_its_interface_lists():

@@ -229,6 +229,10 @@ class Scene:
         """The flights in the air at ``time_s`` but ``without`` (the commanded flight's key)."""
         return AircraftAt.of([f.at_step(time_s, self.interval_s) for f in self.in_air(time_s) if f.key != without])
 
+    def between(self, start_s: float, end_s: float) -> list[Recorded]:
+        """The flights in the air at some time from ``start_s`` to ``end_s``, in the scene's order."""
+        return [self.flights[k] for k in np.flatnonzero((self.start_s <= end_s) & (self.end_s >= start_s))]
+
 
 class MovedScene:
     """A scene of an augmented window: its airport's scene (``base``, shared, never copied) with flights replaced by
@@ -260,6 +264,10 @@ class MovedScene:
 
     def others_at(self, time_s: float, without: str) -> AircraftAt:
         return AircraftAt.of([f.at_step(time_s, self.interval_s) for f in self.in_air(time_s) if f.key != without])
+
+    def between(self, start_s: float, end_s: float) -> list[Recorded]:
+        return ([f for f in self.base.between(start_s, end_s) if f.key not in self.replaced]
+                + [f for f in self.moved_flights if f.start_s <= end_s and f.end_s >= start_s])
 
 
 @dataclass(frozen=True)

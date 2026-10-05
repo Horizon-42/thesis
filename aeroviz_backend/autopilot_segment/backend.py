@@ -46,6 +46,7 @@ from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused, 
 from aeroviz_backend.autopilot_segment.fly import apart_from_stored, fly_segment
 from aeroviz_backend.autopilot_segment.payload import SCHEMA, segment_payload
 from aeroviz_backend.autopilot_segment.prior import PriorSegments
+from aeroviz_backend.autopilot_segment.window import WindowSegments
 
 #: An airport as the frontend's directories name it; the request's airport is a path segment.
 AIRPORT_CODE = re.compile(r"[A-Z0-9]{3,4}")
@@ -106,6 +107,8 @@ class AutopilotSegmentBackend:
         self._flown: dict[tuple[Path, str, tuple[str, ...], float], SetFlown] = {}
         # the Training sets of stage B (`prior.training_files.INDEX_FILE`), flown on this backend's caches and lock
         self.prior = PriorSegments(self)
+        # the window sets of stage C (`post.training_files.INDEX_FILE`), on the same caches and lock
+        self.window = WindowSegments(self)
 
     def training_set(self, airport: str, set_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
         """The set's index entry and sample (`training_files.listed_set`)."""
@@ -189,6 +192,7 @@ class AutopilotSegmentBackend:
                     f"{time.perf_counter() - began:.1f} s")
         log(f"autopilot warm-up: {opened_sets} sets ready in {time.perf_counter() - started:.1f} s")
         self.prior.warm_up(log)
+        self.window.warm_up(log)
 
     def _claim(self, client: str, seq: int) -> None:
         """Make ``seq`` the page's latest request — unless the page already sent a later one."""
