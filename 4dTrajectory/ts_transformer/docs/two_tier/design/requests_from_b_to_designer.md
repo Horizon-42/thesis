@@ -5,24 +5,21 @@ A must change for stage B, and the design text that stage B's work now needs. It
 rewritten in full each time, never appended to, and an item leaves when it is done. The evidence and the commits are in
 the implementation log (`readouts/2026-10-05_stage_b_implementation_log.md` §1).
 
-State of 2026-10-05. Branch `dev-two-tier-v4-prior` at `0a8ad371` (`dev-two-tier` at `931f4e5d` merged): B0–B4, B6,
-B8, B9, B10 and B11 done and reviewed; stage A's line (A37–A41) followed; full suite passed. Stopped before B5.
+State of 2026-10-05. Branch `dev-two-tier-v4-prior` at `5818fbbf` (`dev-two-tier-v4` at `06b8fde1` with A42 and
+`dev-two-tier` at `65c77ecd` merged): B0–B4, B6, B8, B9, B10 and B11 done and reviewed; stage A's line (A37–A42)
+followed; the stand-in for A42 deleted. Stopped before B5.
 
 ## 1 Readings for the user to decide
 
-None. The eight readings of the last round are decided (D118).
+None.
 
 ## 2 For stage A
 
-None open. The two changes ordered in `notes/stage_a.md` (the comment on stage B's hook in `backend.py`;
-`runway_ends_from` in the synthetic artefact of `tests/support.py`) are not yet on `dev-two-tier-v4`. When they are,
-stage B merges them and deletes its stand-in (`tests/test_prior_training_export.py` `with_runway_ends`).
+None.
 
 ## 3 For the design text
 
-None. §7's column "Code" was checked against the code at `0a8ad371`: every name it gives exists, with the signatures it
-gives (`kept(rule, outcome, faulty)`, `SpeakingLoop.copy(flights)`, `said`, `states`, `generated(flights)`,
-`LandingIndex` with its day split, the speaker's state read only). §8 item 1 holds the signals files.
+None. §7's column "Code" matches the code.
 
 ## 4 The plan
 
