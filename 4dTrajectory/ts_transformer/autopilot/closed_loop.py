@@ -465,7 +465,7 @@ def read(batch: Batch, inputs: FlightInputs, params: ExecutorParams, words: Word
     s = 0
     now = loop.rows()
     while live.any():
-        captured = loop.captured()
+        captured = loop.executor.vertical.captured.cpu().numpy()
         step = np.full((len(flying), len(COLUMNS)), UNCHANGED, dtype=np.int64)
         for f, j in enumerate(flying):
             if not live[f]:

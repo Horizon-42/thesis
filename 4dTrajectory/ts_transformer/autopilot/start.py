@@ -89,8 +89,9 @@ class Loop:
     physical context there, ``geometries`` their airports', ``approach_ias_mps`` their approach speeds,
     ``time_limits_s`` their time limits before the go-arounds, ``most_go_arounds`` the most go-arounds one may say.
     A caller reads the states of the rows flown and which flights are done (`step`), and why a flight ended from the
-    judge's outcome (`outcome`); the executor, and with it the time limit, is the loop's own (D90: the time limit is a
-    function of the observed landing time)."""
+    judge's outcome (`outcome`; the loop has no ``timed_out()``, D90: the time limit is a function of the observed
+    landing time). ``executor`` is public: a caller reads its end cycle (``done_cycle``), its flown record (``flown()``)
+    and the aero parameters (``inputs.aero_params``) (vocabulary §6 item 5)."""
 
     def __init__(self, inputs: FlightInputs, geometries: Sequence[AirportGeometry], approach_ias_mps: Sequence[float],
                  time_limits_s: Sequence[float], params: ExecutorParams, words: Words, *, interval_s: float,
@@ -101,7 +102,7 @@ class Loop:
         self.params, self.words, self.interval_s = params, words, interval_s
         self.geometries = list(geometries)
         self.most_go_arounds = most_go_arounds
-        self._executor = Executor(
+        self.executor = Executor(
             inputs, Runways.of(self.geometries, words.spec, dtype=f64, device=device),
             AirportCharts.of(self.geometries, dtype=f64, device=device),
             torch.tensor(list(approach_ias_mps), dtype=f64, device=device), params, words, step_s=interval_s,
@@ -120,7 +121,7 @@ class Loop:
 
     def rows(self) -> np.ndarray:
         """Every flight's state now (at the start of the next row) as `STATE_COLUMNS` rows, ``[B, 6]``."""
-        return state_rows(self._executor.now())
+        return state_rows(self.executor.now())
 
     def step(self, words_row: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Every flight's words of the next Δ row (``[B, 5]``) flown for Δ seconds: the states of the 2 s rows flown
@@ -128,7 +129,7 @@ class Loop:
         (`RowRefused`) or a go-around beyond the most given (`GoAroundBeyondMost`) refuses the step by name, before
         anything changes (module docstring)."""
         row = np.asarray(words_row, dtype=np.int64)
-        executor, cycle_s = self._executor, self.params.cycle_s
+        executor, cycle_s = self.executor, self.params.cycle_s
         if row.shape != (len(self.geometries), len(COLUMNS)):
             raise ValueError(f"a step is [{len(self.geometries)}, {len(COLUMNS)}] words, got {list(row.shape)}")
         flying = ~(executor.done | executor.halted).cpu().numpy()     # a done or halted flight's words are not heard
@@ -167,20 +168,15 @@ class Loop:
 
     def halt(self, flights: np.ndarray) -> None:
         """Hold ``flights`` (``[B]`` bool) from the next cycle on (`Executor.halt`)."""
-        self._executor.halt(torch.as_tensor(flights, device=self._executor.state.device))
-
-    def captured(self) -> np.ndarray:
-        """``[B]`` bool: the flights whose vertical law holds a captured level (what the closed-loop reading's corrections
-        read, §4.9)."""
-        return self._executor.vertical.captured.cpu().numpy()
+        self.executor.halt(torch.as_tensor(flights, device=self.executor.state.device))
 
     def outcome(self, flight: int) -> Outcome:
         """Flight ``flight``'s outcome, read by the judge off what the executor recorded (`judge.outcome_of`); refused for a
         flight not done (a halted flight is never done)."""
-        if not bool(self._executor.done[flight]):
+        if not bool(self.executor.done[flight]):
             raise ValueError(f"flight {flight} is not done: it has no outcome yet")
         if self._flown is None:
-            self._flown = self._executor.flown()
+            self._flown = self.executor.flown()
         return outcome_of(self._flown, flight, self.geometries[flight], self.words.spec)
 
 
