@@ -367,6 +367,7 @@ def solve_iaf(
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     extra_rows=no_extra_rows,
     initial_guess=None,
+    fixed_duration_s: float | None = None,
 ) -> IafSolve:
     """Full CONSTRAINED solve from the scenario's OBSERVED start to the runway via one IAF path.
 
@@ -376,7 +377,8 @@ def solve_iaf(
     procedure's first fix (pre-FAF legs are unpinned, altitude-only), then each procedure leg with
     its corridor / glidepath / floor. Raises on infeasibility. ``n_seg_per_phase`` sets the control
     segments PER leg (the multiphase mesh: n_seg_per_phase × legs). ``extra_rows`` and
-    ``initial_guess`` go to ``CollocationOptimizer.optimize_free_time`` (the traffic loop's re-solves).
+    ``initial_guess`` go to the optimizer (the traffic loop's re-solves). ``fixed_duration_s`` makes
+    it a fixed-time solve (``optimize_trajectory``): a flight to a controlled time of arrival (M2).
     """
     segments = build_constraint_segments(
         pc, target.latitude, target.longitude, target.altitude,
@@ -391,8 +393,12 @@ def solve_iaf(
         max_iterations=max_iterations,
         verbose=verbose,
     )
-    final_time, node_control, _ = optimizer.optimize_free_time(
-        start_state, target, max_duration, initial_guess=initial_guess, extra_rows=extra_rows)
+    if fixed_duration_s is None:
+        final_time, node_control, _ = optimizer.optimize_free_time(
+            start_state, target, max_duration, initial_guess=initial_guess, extra_rows=extra_rows)
+    else:
+        final_time, node_control, _ = optimizer.optimize_trajectory(
+            start_state, target, fixed_duration_s, initial_guess=initial_guess, extra_rows=extra_rows)
     return IafSolve(
         float(final_time), pc, start_state, node_control,
         optimizer.last_dense_states_geo, list(optimizer.last_dense_state_times_s),

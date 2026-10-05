@@ -29,8 +29,8 @@ from .rows import Branch, branch_for, extra_rows, row_spec
 from .scene import Traffic
 
 TRAFFIC_RECORD_SCHEMA = "optimization-traffic-v1"
-SEPARATED_AT_BASELINE, SEPARATED, UNRESOLVED, SOLVE_FAILED = (
-    "separated_at_baseline", "separated", "unresolved", "solve_failed")
+SEPARATED_AT_BASELINE, SEPARATED, UNRESOLVED, SOLVE_FAILED, WAKE_AT_FIXED_TIME = (
+    "separated_at_baseline", "separated", "unresolved", "solve_failed", "wake_at_fixed_time")
 
 
 class BaselineFailed(ValueError):
@@ -90,18 +90,28 @@ def fly_in_traffic(
     max_duration: float,
     rollout_dt_s: float,
     solve_options: dict[str, Any],
+    fixed_duration_s: float | None = None,
+    warm: Any = None,
 ) -> tuple[ScenarioOptimization, dict[str, Any]]:
     """The commanded scenario flown in its traffic: its record (the last solve that succeeded) and the
     traffic sidecar (outcome, rounds with their rows, losses by reading). ``solve_options`` go to
-    ``so.solve_iaf``. Raises :class:`BaselineFailed` when the baseline itself fails."""
+    ``so.solve_iaf``. M2 passes ``fixed_duration_s`` (a flight to a CTA: every solve is fixed-time, so
+    a wake-at-the-threshold loss cannot be rowed — it ends the window as ``wake_at_fixed_time``) and
+    ``warm`` (the ETA solve: the baseline flies its IAF from its solution). Raises
+    :class:`BaselineFailed` when the baseline itself fails."""
+    solve_kw = {**solve_options, "fixed_duration_s": fixed_duration_s}
     def record(solve):
         return so.iaf_result(solve, scenario, aircraft, target=target, candidates=len(paths),
                              rollout_dt_s=rollout_dt_s, selection="shortestPath")
 
     try:
         target, paths, aircraft, min_speed_ms = so.iaf_setup(scenario, procedure_root)
-        best = so.shortest_iaf_solve(scenario, target, paths, aircraft, min_speed_ms,
-                                     max_duration=max_duration, **solve_options)
+        if warm is None:
+            best = so.shortest_iaf_solve(scenario, target, paths, aircraft, min_speed_ms,
+                                         max_duration=max_duration, **solve_kw)
+        else:
+            best = so.solve_iaf(warm.pc, scenario, target, aircraft, min_speed_ms, max_duration=max_duration,
+                                initial_guess=warm.decision_vector, **solve_kw)
         result = record(best)
     except ValueError as exc:
         raise BaselineFailed(str(exc).partition("\n")[0]) from exc
@@ -116,16 +126,23 @@ def fly_in_traffic(
     branches: dict[int, Branch] = {}
     while True:
         active = [c for c in judged.conflicts if c.responsible and c.t_s >= starts[c.other]]
+        if fixed_duration_s is not None:          # the landing time is fixed: a wake loss is no row
+            active_rowable = [c for c in active if c.kind != rules.AT_THRESHOLD]
+        else:
+            active_rowable = active
         rounds.append({"final_time_s": result.final_time_s,
-                       "losses": _losses(judged, window, set(active)), "background_losses": judged.background})
+                       "losses": _losses(judged, window, set(active_rowable)), "background_losses": judged.background})
         if not active:
             outcome = SEPARATED_AT_BASELINE if len(rounds) == 1 else SEPARATED
+            break
+        if not active_rowable:
+            outcome = WAKE_AT_FIXED_TIME
             break
         if len(rounds) > settings.max_rounds:
             outcome = UNRESOLVED
             break
-        branches = _branches(active, branches)
-        for key, c in {(c.other, c.t_s, c.kind): c for c in active}.items():
+        branches = _branches(active_rowable, branches)
+        for key, c in {(c.other, c.t_s, c.kind): c for c in active_rowable}.items():
             doublings[key] = doublings[key] + 1 if key in rowed else 0
             rowed.setdefault(key, c)
         specs = [row_spec(c, window, margin=settings.margin * 2 ** doublings[key],
@@ -137,7 +154,7 @@ def fly_in_traffic(
             best = so.solve_iaf(
                 best.pc, scenario, target, aircraft, min_speed_ms, max_duration=max_duration,
                 extra_rows=extra_rows(specs, window, best.dense_times, row_window_s=settings.row_window_s),
-                initial_guess=best.decision_vector, **solve_options)
+                initial_guess=best.decision_vector, **solve_kw)
             next_result = record(best)
         except ValueError as exc:
             rounds[-1]["next_solve_error"] = str(exc).partition("\n")[0][:200]

@@ -16,17 +16,18 @@ def _check(*conflicts):
     return Check(np.arange(0.0, 10.0), tuple(conflicts), 0)
 
 
-def _run(monkeypatch, visual_checks, *, fail_solve_at=None, max_rounds=5, baseline_error=None):
+def _run(monkeypatch, visual_checks, *, fail_solve_at=None, max_rounds=5, baseline_error=None, fixed=None):
     """Run the loop with ``visual_checks`` as the judge's successive VISUAL answers (IFR: no loss)."""
-    solves = []
+    solves, solves_fixed = [], []
 
     def shortest(*_a, **_k):
         if baseline_error:
             raise ValueError(baseline_error)
         return SimpleNamespace(pc="IAF", dense_times=[1.0, 2.0], decision_vector="x0", final_time=100.0)
 
-    def solve(pc, *_a, initial_guess, extra_rows, **_k):
+    def solve(pc, *_a, initial_guess, fixed_duration_s, extra_rows=None, **_k):
         solves.append(initial_guess)
+        solves_fixed.append(fixed_duration_s)
         if fail_solve_at == len(solves):
             raise ValueError("collocation free-time optimization failed: Infeasible_Problem_Detected")
         return SimpleNamespace(pc=pc, dense_times=[1.0, 2.0], decision_vector=f"x{len(solves)}",
@@ -50,8 +51,9 @@ def _run(monkeypatch, visual_checks, *, fail_solve_at=None, max_rounds=5, baseli
     monkeypatch.setattr(loop, "extra_rows", lambda specs, *a, **k: specs)
     result, side = loop.fly_in_traffic(
         SimpleNamespace(), None, procedure_root="root", settings=loop.LoopSettings(max_rounds=max_rounds),
-        max_duration=2000.0, rollout_dt_s=0.5, solve_options={})
-    return result, side, solves
+        max_duration=2000.0, rollout_dt_s=0.5, solve_options={},
+        fixed_duration_s=fixed, warm=SimpleNamespace(pc="IAF", decision_vector="warm") if fixed else None)
+    return result, side, (solves if fixed is None else (solves, solves_fixed))
 
 
 def test_a_loss_removed_by_one_re_solve_is_separated(monkeypatch):
@@ -126,3 +128,14 @@ def test_a_branch_is_kept_across_rounds_until_an_in_trail_loss(monkeypatch):
     families = [{r["family"] for r in rnd["rows_next"]} for rnd in side["rounds"][:3]]
     assert families == [{"vertical"}, {"vertical"}, {"horizontal"}]
     assert side["branches"] == {"OTHER": {"family": "horizontal", "sign": 1.0}}
+
+
+def test_at_a_fixed_time_the_baseline_is_warm_and_a_wake_loss_gets_no_row(monkeypatch):
+    wake = Conflict(5.0, 0, rules.AT_THRESHOLD, 9260.0, 4000.0, 100.0, True, True)
+    trail = Conflict(4.0, 0, rules.IN_TRAIL, 5556.0, 4000.0, 100.0, True, True)
+    _result, side, (solves, fixed) = _run(monkeypatch, [_check(trail, wake), _check(wake)], fixed=300.0)
+    assert solves == ["warm", "x1"] and fixed == [300.0, 300.0]       # warm baseline; every solve at the CTA
+    assert [r["family"] for r in side["rounds"][0]["rows_next"]] == ["horizontal"]   # no landing_after row
+    assert side["outcome"] == loop.WAKE_AT_FIXED_TIME
+    rowed = {loss[2]: loss[7] for loss in side["rounds"][0]["losses"]}
+    assert rowed == {rules.IN_TRAIL: True, rules.AT_THRESHOLD: False}

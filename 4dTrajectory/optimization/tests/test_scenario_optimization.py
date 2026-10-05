@@ -67,6 +67,10 @@ def _fake_optimizer(dense_states_geo, final_time, controls, *, on_init=None,
         def optimize_free_time(self, initial, tgt, max_duration, **_solve_kwargs):
             return final_time, controls, None
 
+        def optimize_trajectory(self, initial, tgt, duration, **_solve_kwargs):
+            self.fixed_duration = duration
+            return duration, controls, None
+
     return FakeOptimizer
 
 
@@ -789,6 +793,11 @@ def test_solve_iaf_feeds_the_optimizer_a_segment_list(monkeypatch):
     assert captured["scheme"] == "trapezoidalNormalizedFullTransport"
     assert captured["state_substeps"] == 6
     assert captured["n_seg_per_phase"] == 5
+
+    # a flight to a controlled time of arrival is a fixed-time solve (M2)
+    fixed = so.solve_iaf(pc, scenario, target, A320, 60.0, max_duration=600.0, verbose=False,
+                         fixed_duration_s=321.0)
+    assert fixed.final_time == 321.0
 
 
 def test_procedure_threshold_agreement_accepts_the_cifp_rounding_gap():

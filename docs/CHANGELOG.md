@@ -1,5 +1,17 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-05 — Multi-aircraft optimization M2: a block of arrivals, scheduled, then flown in slot order
+
+- `4dTrajectory/optimization/traffic/block.py`, runner `traffic_optimization.py m2` (design §5.6, the user's MD1): ETA by a
+  free-time solve; a first-come-first-served schedule on the FAA minima with every record outside the scheduled set frozen
+  into it (`block.place`; `runway_schedule.schedule` has no frozen slots); each aircraft flown to its CTA by a fixed-time,
+  warm-started solve through the M1 loop, seeing the replays before it and the records outside; a final check of the
+  block. `solve_iaf(fixed_duration_s=…)`, `fly_in_traffic(fixed_duration_s=…, warm=…)`; in fixed time a wake loss at
+  the threshold gets no row (`wake_at_fixed_time`). `scenario_batch.write_solved_record` / `write_failed_record` are
+  run_batch's writer, shared. M2 sidecars: schema `optimization-traffic-block-v1`. The runner is now `m1` / `m2`.
+- T8, five 1-hour KRDU blocks (77 aircraft, 5 min 41 s on 5 workers): 58 separated at baseline, 4 after re-solves,
+  1 unresolved, 11 solve_failed, 3 slot_failed; delays median 0 s, max 252 s. Reviewed (opus) + re-verified.
+
 ### 2026-10-05 — The six older optimizers archived; studies moved; the collocation envelope named once
 
 - `code_review.md` F13/F10/F9/F12 (`4dTrajectory/docs/multi_aircraft_optimization/`): `transcription_optimizor`,

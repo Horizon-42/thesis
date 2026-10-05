@@ -36,7 +36,7 @@ def resolve_jobs(jobs: int, n_tasks: int) -> int:
     return max(1, min(workers, n_tasks)) if n_tasks else 1
 
 
-def _limit_solver_threads() -> None:
+def limit_solver_threads() -> None:
     """Pin each worker's BLAS/OpenMP pools to one thread to avoid oversubscription.
 
     With ``spawn`` (the macOS default) child processes inherit ``os.environ``, so
@@ -135,6 +135,57 @@ def _resumable_record(
     return (name, row)
 
 
+def write_failed_record(
+    out: Path, scenario: FlightScenario, index: int, error: str, *,
+    optimization_config: dict[str, Any], references_dir: str | None,
+) -> dict[str, Any]:
+    """An unsolved scenario's eval record (empty lists — how the evaluation computes the solve rate);
+    returns its summary row."""
+    eval_name = eval_filename(scenario_filename(scenario, index))
+    failed_record = failed_evaluation_record(
+        scenario.initial, scenario.target, scenario.source, error, subject="optimized",
+    )
+    failed_record["optimization_config"] = optimization_config
+    if references_dir:
+        failed_record["reference_file"] = f"{references_dir}/{reference_filename(scenario_filename(scenario, index))}"
+    (out / eval_name).write_text(json.dumps(failed_record, separators=(",", ":"), allow_nan=False), encoding="utf-8")
+    return _summary_record(scenario, status="failed", states_file=None, eval_file=eval_name,
+                           final_time_s=None, reason=error)
+
+
+def write_solved_record(
+    out: Path, scenario: FlightScenario, index: int, result_dict: dict[str, Any], eval_dict: dict[str, Any], *,
+    optimization_config: dict[str, Any], references_dir: str | None, sidecar_suffix: str | None,
+) -> tuple[Path, dict[str, Any]]:
+    """A solved scenario's ``*_states.json`` + ``*_eval.json`` (+ the sidecar ``result_dict["sidecar"]``
+    when ``sidecar_suffix``); returns the states path and the summary row."""
+    name = scenario_filename(scenario, index)
+    eval_name = eval_filename(name)
+    path = out / name
+    if sidecar_suffix:
+        result_dict = dict(result_dict)
+        (out / sidecar_filename(name, sidecar_suffix)).write_text(
+            json.dumps(result_dict.pop("sidecar"), separators=(",", ":"), allow_nan=False), encoding="utf-8")
+    path.write_text(json.dumps(result_dict, separators=(",", ":")), encoding="utf-8")
+    eval_dict = dict(eval_dict)
+    eval_dict["states_ref"] = {"file": name, "key": "simulator_states"}
+    eval_dict["states"] = []
+    eval_dict["optimization_config"] = optimization_config
+    if references_dir:
+        eval_dict["reference_file"] = f"{references_dir}/{reference_filename(name)}"
+    (out / eval_name).write_text(json.dumps(eval_dict, separators=(",", ":"), allow_nan=False), encoding="utf-8")
+    # The roster quotes the EVAL record's final_time_s — the replay's LAST sample. A
+    # guard-truncated replay ends earlier than the planned NLP horizon, and resumed
+    # rows are rebuilt from the eval record, so quoting the plan's horizon here made
+    # a fresh row disagree with the same flight's resumed row.
+    row = _summary_record(scenario, status="solved", states_file=name, eval_file=eval_name,
+                          final_time_s=float(eval_dict["final_time_s"]), reason=None)
+    chosen_iaf = result_dict["source"].get("chosenIaf")
+    if chosen_iaf is not None:
+        row["chosenIaf"] = chosen_iaf
+    return path, row
+
+
 def run_batch(
     scenarios: list[FlightScenario],
     *,
@@ -165,7 +216,7 @@ def run_batch(
     the IPOPT solve is CPU-bound C++; a pool sidesteps the GIL entirely. All file IO
     and logging stay in the parent (collected as workers finish). Per-scenario ORDER
     varies with worker count, and a pooled run additionally pins each worker's BLAS
-    pools to one thread (:func:`_limit_solver_threads`) while a serial run does not —
+    pools to one thread (:func:`limit_solver_threads`) while a serial run does not —
     a borderline scenario can tip between solving and ``Maximum_Iterations_Exceeded``
     across that difference (a known open item; do not read bit-identical output into
     ``--jobs``).
@@ -211,59 +262,19 @@ def run_batch(
     ) -> None:
         index, flight_id, result_dict, eval_dict, error = record
         scenario = scenarios[index]
-        name = scenario_filename(scenario, index)
-        eval_name = eval_filename(name)
-        reference_file = (
-            f"{references_dir}/{reference_filename(name)}" if references_dir else None
-        )
         if error is not None:
             failures.append((flight_id, error))
-            # Unsolved configurations still get an evaluation record (empty lists) —
-            # that is how the evaluation batch computes the solve rate.
-            failed_record = failed_evaluation_record(
-                scenario.initial, scenario.target, scenario.source, error,
-                subject="optimized",
-            )
-            failed_record["optimization_config"] = optimization_config
-            if reference_file:
-                failed_record["reference_file"] = reference_file
-            (out / eval_name).write_text(
-                json.dumps(failed_record, separators=(",", ":"), allow_nan=False), encoding="utf-8"
-            )
-            records[index] = _summary_record(
-                scenario, status="failed", states_file=None, eval_file=eval_name,
-                final_time_s=None, reason=error,
-            )
+            records[index] = write_failed_record(out, scenario, index, error, optimization_config=optimization_config,
+                                                 references_dir=references_dir)
             print(f"✗ {flight_id}: skipped ({error.split(':', 1)[0]})")
             return
-        path = out / name
-        if sidecar_suffix:
-            result_dict = dict(result_dict)
-            (out / sidecar_filename(name, sidecar_suffix)).write_text(
-                json.dumps(result_dict.pop("sidecar"), separators=(",", ":"), allow_nan=False), encoding="utf-8")
-        path.write_text(json.dumps(result_dict, separators=(",", ":")), encoding="utf-8")
-        eval_dict = dict(eval_dict)
-        eval_dict["states_ref"] = {"file": name, "key": "simulator_states"}
-        eval_dict["states"] = []
-        eval_dict["optimization_config"] = optimization_config
-        if reference_file:
-            eval_dict["reference_file"] = reference_file
-        (out / eval_name).write_text(
-            json.dumps(eval_dict, separators=(",", ":"), allow_nan=False), encoding="utf-8"
-        )
+        path, row = write_solved_record(out, scenario, index, result_dict, eval_dict,
+                                        optimization_config=optimization_config, references_dir=references_dir,
+                                        sidecar_suffix=sidecar_suffix)
         written.append(path)
-        # The roster quotes the EVAL record's final_time_s — the replay's LAST sample. A
-        # guard-truncated replay ends earlier than the planned NLP horizon, and resumed
-        # rows are rebuilt from the eval record, so quoting the plan's horizon here made
-        # a fresh row disagree with the same flight's resumed row.
-        row = _summary_record(
-            scenario, status="solved", states_file=name, eval_file=eval_name,
-            final_time_s=float(eval_dict["final_time_s"]), reason=None,
-        )
-        chosen_iaf = result_dict["source"].get("chosenIaf")
+        chosen_iaf = row.get("chosenIaf")
         if chosen_iaf is not None:
-            row["chosenIaf"] = chosen_iaf
-            print(f"✓ {name}: IAF {chosen_iaf}, T={result_dict['final_time_s']:.1f}s")
+            print(f"✓ {path.name}: IAF {chosen_iaf}, T={result_dict['final_time_s']:.1f}s")
         else:
             print(
                 f"✓ {path.name}: optimizer {len(result_dict['optimizer_states'])} states, "
@@ -278,7 +289,7 @@ def run_batch(
         for payload in payloads:
             _handle(worker(payload))
     else:
-        _limit_solver_threads()
+        limit_solver_threads()
         print(f"… solving {len(payloads)} scenario(s){progress} "
               f"across {workers} worker process(es)")
         with ProcessPoolExecutor(max_workers=workers) as pool:

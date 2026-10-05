@@ -10,7 +10,7 @@ miles occur only in quoted text, with the SI value beside them.
 | Item | Value |
 |---|---|
 | Base commit | `dev-two-tier` `a804633e` |
-| Code written | Branch `dev-optimizer-multi-aircraft`: T0 (`bbb18c52`, `5e3826f9`); T1–T6, M1 (§8, this commit). M2 (T8) not started |
+| Code written | Branch `dev-optimizer-multi-aircraft`: T0 (`bbb18c52`, `5e3826f9`); T1–T6, M1 (`b5f4cd1a`); F9/F10/F13 (`18d73bd0`); T8, M2 (§5.6, §8.2, this commit) |
 | Companion document | `code_review.md` (findings F1 to F13). Step T0 of this design needs F4, F5, F6 (item 3) and F7 |
 | Model of the scenario | The two-tier post-training "one aircraft commanded" (`ts_transformer/docs/two_tier/design/post_training.md` D29, D93) |
 | Dependency on `ts_transformer` | Two pure modules, read-only, through one adapter (§6, §7). No other import. No shared output |
@@ -280,18 +280,31 @@ method of lazy constraint generation.
 
 ### 5.6 M2: a block of arrivals
 
-1. **Block.** All arrivals of one airport whose windows overlap one time interval (for example 1 h). All of
-   them need a scenario: prepare the block with `--max-per-runway 0` for that interval only.
-2. **ETA.** The baseline threshold time of each aircraft: `t0 + T_baseline`.
-3. **L0 schedule.** `runway_schedule.schedule` (`runway_schedule.py:363`) with one `Arrival` per aircraft:
-   its record's runway only, `logp = 0`, its category, its ETA; order `fcfs_by_eta`. The result is one
-   slot (a controlled time of arrival, CTA) per aircraft. The speed of the time minima is MD9.
-4. **Fixed-time solve.** Each aircraft flies to its CTA: `optimize_trajectory(duration = CTA − t0)`.
-   A CTA that the procedure corridor cannot absorb fails the solve. Count these aircraft with their delay.
-5. **Priority order.** Solve the aircraft in slot order. For aircraft `m`, the traffic is: the replays of
-   the aircraft before it in the order, and the records of the flights outside the block. Run the loop of
-   §5.4 with this traffic.
-6. **Final check.** Judge all replays of the block together. Report every loss that remains.
+`traffic/block.py`, runner `traffic_optimization.py m2`.
+
+1. **Block.** The arrivals of one airport whose recorded landing is inside one time interval (for example
+   1 h). Each is built as a scenario as in M1. An arrival without a dynamics model stays a record.
+2. **ETA.** Each aircraft's free-time baseline without traffic (the shortest feasible IAF): `t0 + T`. An
+   aircraft whose ETA solve fails stays a record.
+3. **L0 schedule.** First come first served by ETA, each aircraft on its record's runway, each placed at the
+   earliest time that every minimum allows (`runway_schedule.earliest_time`) against the slots placed before
+   it and against the recorded landings of all arrivals outside the scheduled set (frozen slots: those
+   aircraft fly their records). `runway_schedule.schedule` has no argument for frozen slots, so
+   `block.place` repeats its loop for one runway per arrival. The result is one slot (a controlled time of
+   arrival, CTA) per aircraft; the slot order is this placement order. The minima are timed at one speed for
+   the block: the slowest target speed of its aircraft (`faa_separation` takes one speed). This is a
+   choice for M2; MD9 for M2 stays open.
+4. **Fixed-time solve.** Each aircraft flies to its CTA: a fixed-time solve (`solve_iaf(fixed_duration_s =
+   CTA − t0)`) on the IAF of its ETA solve, started from that solution. A CTA later than `t0 + max_duration`
+   is refused. A CTA that the procedure corridor cannot absorb fails the solve; the readout counts these
+   failures with their delay. In fixed time the landing time is a constant, so a wake loss at the threshold
+   gets no row: a window that is left with only such losses ends as `wake_at_fixed_time`.
+5. **Priority order.** The aircraft fly in slot order. For aircraft `m`, the traffic is: the replays of the
+   aircraft before it, and the records of every arrival outside the scheduled set. An aircraft whose slot
+   solve fails flies its record for the aircraft after it (its slot was already used by the schedule; the
+   readout reports it). An aircraft never sees the aircraft after it.
+6. **Final check.** Each flown aircraft is judged against all the others (replays and records): the losses
+   it answers for, the losses with it that it does not answer for, and the background near it.
 
 ### 5.7 M3: one joint NLP (not designed)
 
@@ -385,7 +398,7 @@ branch and worktree, with a review before each commit.
 | T5 | Rows and loop (§5.3, §5.4) on 50 windows with a loss | A readout: outcome counts, iterations, rows, flight time change, solve time per window, memory. The user then decides MD7 and MD8 | T2, T4 | Done (§8.1); the user decides MD7, MD8 |
 | T6 | Traffic batch, records, resume (§9) | Full optimizer suite passes. Preflight on the real size: time and memory per window measured, disk estimate checked before the start | T5, MD7, MD8 | Done: `traffic_optimization.py`, `run_batch` sidecars; the preflight at the real size is open |
 | T7 | Evaluation of the commanded records and the CZML comparison (a new category) | The frontend shows a published window; checked in the browser | T6 | Not started (frontend: a sonnet agent) |
-| T8 | M2 (§5.6) | A readout like T5 for 5 blocks | T6, MD9 | Not started |
+| T8 | M2 (§5.6) | A readout like T5 for 5 blocks | T6, MD9 | Done (§8.2) |
 | T9 | M3 design (§5.7) | Only if T8 leaves losses that the order cannot remove | T8 | Not started |
 
 ### 8.1 T5 readout (KRDU, seed 11, 50 windows; the reviewed M1 code, scratch output)
@@ -397,11 +410,24 @@ branch and worktree, with a review before each commit.
 - `W` = 15 s and `W` = 60 s gave the same outcomes (before the margin doubling). Before the review fixes of §5.3 the same 50 windows gave 1 separated and 6 failures.
 - The outputs are in a scratch directory, not in `4dTrajectory/outputs`: a measurement of the method, not a published result.
 
+### 8.2 T8 readout (KRDU, five 1-hour blocks from 2026-05-21 15:00 UTC; the reviewed M2 code, scratch output)
+
+- Cost: 5 blocks on 5 workers in 5 min 41 s wall time (one worker per block; inside a block the aircraft fly in slot order, so a block is serial); the largest resident memory is 4.2 GB (the parent).
+- 77 aircraft (9 to 24 per block), all scheduled. Delay: median 0 s, largest 252 s; 17 aircraft delayed by more than 60 s.
+- Outcomes: 58 `separated_at_baseline` (the CTA solve alone keeps separation); 4 `separated` after re-solves; 1 `unresolved`; 11 `solve_failed` (5 at no delay, 6 delayed: IPOPT's cap, as in M1, §10 item 1); 3 `slot_failed` (the CTA solve on the ETA's IAF failed; no other IAF is tried).
+- After the block's final check, 19 flown aircraft have a VISUAL loss they answer for and 6 a VISUAL loss they do not answer for; IFR: 29 and 18.
+- Before the review fixes of §5.6 (records frozen into the schedule, a warm CTA solve, no wake row in fixed time) the same blocks gave 53 `separated_at_baseline`, 15 `solve_failed` and 3 failed slot or ETA solves.
+- The outputs are in a scratch directory: a measurement of the method, not a published result.
+
 ## 9. Outputs and records
 
-- **Runner.** `4dTrajectory/optimization/traffic_optimization.py --airport <ICAO> --sample N --seed S
-  --output-dir …` (a seeded sample of the airport's arrivals, stated in `summary.json`); the readout is
-  `python -m traffic.readout <dir>` from `4dTrajectory/optimization`.
+- **Runner.** `4dTrajectory/optimization/traffic_optimization.py m1 --airport <ICAO> --sample N --seed S
+  --output-dir …` (a seeded sample of the airport's arrivals, stated in `summary.json`), and `… m2 --airport
+  <ICAO> --block-start <UTC> --block-s 3600 --blocks N --output-dir …` (one directory per block, each with
+  its `summary.json`; `blocks.json` indexes them); the readout is `python -m traffic.readout <dir>` from
+  `4dTrajectory/optimization` (it reads either kind).
+- **M2 sidecar.** The M1 sidecar plus `slot` (ETA, CTA, delay) and `block_final` (the final check), schema
+  `optimization-traffic-block-v1`.
 - **Directory.** `4dTrajectory/outputs/<ICAO>/traffic_m1_<category>/` (M1) and
   `4dTrajectory/outputs/<ICAO>/traffic_m2_<category>/` (M2). The existing directories
   `runway`, `fitted_adsb`, `runway_cons` stay unchanged.

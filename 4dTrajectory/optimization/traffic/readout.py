@@ -1,6 +1,6 @@
 """The readout of a traffic batch: what ``summary.json`` and the ``*_traffic.json`` sidecars say.
 
-    python -m traffic.readout <batch output dir> [...]      (from 4dTrajectory/optimization)
+    python -m traffic.readout <batch output dir> [...]      (from 4dTrajectory/optimization; an M1 or M2 run)
 
 Counts every window of the roster: solved windows by outcome (a window whose baseline solve failed has
 no sidecar and counts as ``baseline_failed``; any other failure as ``error``), the re-solves spent, the
@@ -24,6 +24,10 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scenario_batch import sidecar_filename  # noqa: E402
+from traffic import rules  # noqa: E402
+
+#: A slot later than its ETA by more than this is "delayed" (the approach clock's round trip leaves ~1e-7 s).
+_DELAY_TOLERANCE_S = 1e-3
 
 
 def readout(batch_dir: Path, sidecar_suffix: str = "_traffic.json") -> dict:
@@ -67,10 +71,54 @@ def readout(batch_dir: Path, sidecar_suffix: str = "_traffic.json") -> dict:
     }
 
 
+def blocks_readout(m2_dir: Path) -> dict:
+    """An M2 run (``blocks.json`` and one directory per block): aircraft, the schedule's delays, the
+    outcomes (a failed solve split by its delay: none, or some; ``slot_failed`` — the slot's fixed-time
+    solve on the ETA's IAF failed, no other IAF is tried), and the flown aircraft with a loss left after the
+    block's final check — one it answers for, one it does not."""
+    index = json.loads((m2_dir / "blocks.json").read_text(encoding="utf-8"))
+    outcomes, delays = Counter(), []
+    left = {reading: {"answered": 0, "not_answered": 0} for reading in (rules.VISUAL, rules.IFR)}
+    aircraft = scheduled = 0
+    failed_blocks = [b["label"] for b in index["blocks"] if "error" in b]
+    for entry in index["blocks"]:
+        if "error" in entry:
+            continue
+        block = json.loads((m2_dir / entry["label"] / "summary.json").read_text(encoding="utf-8"))["block"]
+        aircraft += block["aircraft"]
+        scheduled += block["scheduled"]
+        delay = {slot["flight_key"]: slot["delay_s"] for slot in block["slots"]}
+        delays += list(delay.values())
+        for key, outcome in block["outcomes"].items():
+            if outcome.startswith("BaselineFailed: ETA"):
+                outcomes["eta_failed"] += 1
+            elif outcome.startswith("BaselineFailed: slot"):
+                outcomes["slot_failed"] += 1
+            elif outcome == "solve_failed":
+                outcomes["solve_failed_" + ("delayed" if delay[key] > _DELAY_TOLERANCE_S else "undelayed")] += 1
+            else:
+                outcomes[outcome] += 1
+        for losses in block["final_losses"].values():
+            for reading in left:
+                for kind in ("answered", "not_answered"):
+                    left[reading][kind] += losses[reading][kind] > 0
+    return {
+        "blocks": len(index["blocks"]),
+        "failed_blocks": failed_blocks,
+        "aircraft": aircraft,
+        "scheduled": scheduled,
+        "delay_s": ({"median": float(np.median(delays)), "max": float(max(delays)),
+                     "delayed_over_60s": sum(d > 60.0 for d in delays)} if delays else {}),
+        "outcomes": dict(outcomes),
+        "flown_aircraft_with_a_loss_left_after_the_block": left,
+    }
+
+
 def main() -> None:
     for arg in sys.argv[1:]:
         print(arg)
-        print(json.dumps(readout(Path(arg)), indent=1))
+        found = blocks_readout(Path(arg)) if (Path(arg) / "blocks.json").is_file() else readout(Path(arg))
+        print(json.dumps(found, indent=1))
 
 
 if __name__ == "__main__":

@@ -18,8 +18,12 @@ if str(_TS_PARENT) not in sys.path:
 
 from ts_transformer.inference.runway_schedule import (  # noqa: E402
     FAA_VERTICAL_FT,
+    Arrival,
     Separation,
+    Slot,
+    earliest_time,
     faa_separation,
+    fcfs_by_eta,
     wake_category,
 )
 from ts_transformer.inference.separation import (  # noqa: E402
@@ -38,7 +42,8 @@ from ts_transformer.inference.separation import (  # noqa: E402
 
 __all__ = [
     "AT_THRESHOLD", "DIAGONAL", "FAA_VERTICAL_FT", "IFR", "IN_TRAIL", "RADAR_OR_VERTICAL", "VISUAL",
-    "Loss", "Scene", "Separation", "category", "judge", "separation",
+    "Arrival", "Loss", "Scene", "Separation", "Slot", "category", "earliest_time", "fcfs_by_eta", "judge",
+    "separation",
 ]
 
 

@@ -78,3 +78,26 @@ def test_the_sweep_removes_an_orphan_sidecar_and_the_readout_counts_the_roster(t
     assert found["uncategorised_types"] == ["ZZZZ"] and found["background_losses_at_baseline"] == 2
     assert found["windows_with_an_answered_ifr_loss"] == {"baseline": 2, "final": 0}
     assert found["runways_without_a_coded_final"] == ["32"]
+
+
+def test_the_m2_readout_counts_blocks(tmp_path):
+    import json
+    from traffic.readout import blocks_readout
+    (tmp_path / "blocks.json").write_text(json.dumps({"blocks": [{"label": "block_00"}]}))
+    (tmp_path / "block_00").mkdir()
+    none = {"answered": 0, "not_answered": 0, "background": 0}
+    (tmp_path / "block_00" / "summary.json").write_text(json.dumps({"block": {
+        "aircraft": 4, "scheduled": 3,
+        "slots": [{"flight_key": "A", "delay_s": 0.0}, {"flight_key": "B", "delay_s": 80.0},
+                  {"flight_key": "D", "delay_s": 0.0}],
+        "outcomes": {"A": "separated_at_baseline", "B": "separated", "D": "solve_failed",
+                     "C": "BaselineFailed: ETA solve: x"},
+        "final_losses": {"A": {"visual": none, "ifr": dict(none, answered=3)},
+                         "B": {"visual": dict(none, not_answered=1), "ifr": none}}}}))
+    found = blocks_readout(tmp_path)
+    assert found["aircraft"] == 4 and found["scheduled"] == 3 and found["failed_blocks"] == []
+    assert found["delay_s"] == {"median": 0.0, "max": 80.0, "delayed_over_60s": 1}
+    assert found["outcomes"] == {"separated_at_baseline": 1, "separated": 1, "solve_failed_undelayed": 1,
+                                 "eta_failed": 1}
+    assert found["flown_aircraft_with_a_loss_left_after_the_block"] == {
+        "visual": {"answered": 0, "not_answered": 1}, "ifr": {"answered": 1, "not_answered": 0}}
