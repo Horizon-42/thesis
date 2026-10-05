@@ -73,6 +73,7 @@ A proposal is a reading where the design says nothing; it holds only until the u
 | C1's census of the faulty tracks (vocabulary D111) | Done, reviewed: `35289115`; the counts on A34's artefact for the user (log §14) |
 | C6, C9; D114–D116 | Done on synthetic artefacts, reviewed: C6 `a81d0a5a`, D115 `9f089780`, D116 `20adc232`, D114 `66b8d4db`, C9 `2c60de9c`; C9's census on A34's artefact (log §15) |
 | C10, C8 (code) | `post_train`, `post_profile` written and reviewed on synthetic artefacts (`69531aa3`, log §16); their formal runs wait for B5's base, C10's also for the user's criteria |
+| C11 (parts 1–2); stage B's round | The window export and its live segment (`1945e19c`); prior §7's new names (`6d5f2cc7`); log §17. C11's frontend view and test stack next; step 6 of the order after B12 |
 | C8–C12 | Wait for B5's base, Claude's check of stage B, the moved start (C9) and the user's criteria (D7) |
 
 ### 0.4 Plan
