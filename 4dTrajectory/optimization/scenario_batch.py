@@ -54,7 +54,12 @@ def _limit_solver_threads() -> None:
 # — shared with ts_transformer/inference/export.py, which writes the same directory shape.
 
 
-def _clear_stale_records(out: Path, keep: set[str] | None = None) -> None:
+def sidecar_filename(states_name: str, suffix: str) -> str:
+    """``<flight>_states.json`` → ``<flight><suffix>`` (a batch's per-record sidecar)."""
+    return states_name.removesuffix(_STATES_SUFFIX) + suffix
+
+
+def _clear_stale_records(out: Path, keep: set[str] | None = None, sidecar_suffix: str | None = None) -> None:
     """Delete leftover per-trajectory records from a previous batch in ``out``.
 
     A fresh batch writes one ``*_states.json`` + ``*_eval.json`` per CURRENT scenario;
@@ -68,11 +73,8 @@ def _clear_stale_records(out: Path, keep: set[str] | None = None) -> None:
     WHICH files survive, it never turns the sweep off.
     """
     keep = keep or set()
-    stale = [
-        path
-        for path in sorted(out.glob(f"*{_STATES_SUFFIX}")) + sorted(out.glob(f"*{_EVAL_SUFFIX}"))
-        if path.name not in keep
-    ]
+    suffixes = (_STATES_SUFFIX, _EVAL_SUFFIX) + ((sidecar_suffix,) if sidecar_suffix else ())
+    stale = [path for suffix in suffixes for path in sorted(out.glob(f"*{suffix}")) if path.name not in keep]
     for path in stale:
         path.unlink()
     if stale:
@@ -81,7 +83,7 @@ def _clear_stale_records(out: Path, keep: set[str] | None = None) -> None:
 
 def _resumable_record(
     out: Path, scenario: FlightScenario, index: int,
-    expected_config: dict[str, Any],
+    expected_config: dict[str, Any], sidecar_suffix: str | None = None,
 ) -> tuple[str, dict[str, Any]] | None:
     """The summary row for one scenario's already-complete record pair, or ``None``.
 
@@ -121,6 +123,8 @@ def _resumable_record(
         ))
     if not (out / name).is_file():
         return None
+    if sidecar_suffix and not (out / sidecar_filename(name, sidecar_suffix)).is_file():
+        return None
     row = _summary_record(
         scenario, status="solved", states_file=name, eval_file=eval_path.name,
         final_time_s=float(final_time), reason=None,
@@ -144,6 +148,7 @@ def run_batch(
     scenarios_label: str | None,
     references_dir: str | None,
     resume: bool,
+    sidecar_suffix: str | None = None,
 ) -> list[Path]:
     """The ONE batch driver behind both public entry points (unconstrained +
     constrained-IAF).
@@ -168,6 +173,10 @@ def run_batch(
     Infeasible / failed scenarios are **skipped and logged** (a real landings file mixes
     feasible approaches with too-slow or noisy ones), so one bad scenario never aborts
     the batch. A summary of failures is printed at the end.
+
+    ``sidecar_suffix``: a worker's solved ``result_dict`` carries a ``"sidecar"`` payload, written
+    beside the record as ``<flight><sidecar_suffix>`` (not into the states file); resume and the
+    stale sweep treat it as part of the record.
     """
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -178,17 +187,19 @@ def run_batch(
     if resume:
         pending = []
         for index, scenario in enumerate(scenarios):
-            found = _resumable_record(out, scenario, index, optimization_config)
+            found = _resumable_record(out, scenario, index, optimization_config, sidecar_suffix)
             if found is None:
                 pending.append(index)
                 continue
             name, row = found
             records[index] = row
             resumed_files.update({name, eval_filename(name)})
+            if sidecar_suffix:
+                resumed_files.add(sidecar_filename(name, sidecar_suffix))
         if records:
             print(f"… resuming: {len(records)} record(s) already complete, "
                   f"{len(pending)} to solve")
-    _clear_stale_records(out, keep=resumed_files)
+    _clear_stale_records(out, keep=resumed_files, sidecar_suffix=sidecar_suffix)
     payloads = [(index, scenarios[index], params) for index in pending]
     workers = resolve_jobs(jobs, len(payloads))
 
@@ -226,6 +237,10 @@ def run_batch(
             print(f"✗ {flight_id}: skipped ({error.split(':', 1)[0]})")
             return
         path = out / name
+        if sidecar_suffix:
+            result_dict = dict(result_dict)
+            (out / sidecar_filename(name, sidecar_suffix)).write_text(
+                json.dumps(result_dict.pop("sidecar"), separators=(",", ":"), allow_nan=False), encoding="utf-8")
         path.write_text(json.dumps(result_dict, separators=(",", ":")), encoding="utf-8")
         eval_dict = dict(eval_dict)
         eval_dict["states_ref"] = {"file": name, "key": "simulator_states"}

@@ -10,11 +10,11 @@ miles occur only in quoted text, with the SI value beside them.
 | Item | Value |
 |---|---|
 | Base commit | `dev-two-tier` `a804633e` |
-| Code written | None. This document is the design only |
+| Code written | Branch `dev-optimizer-multi-aircraft`: T0 (`bbb18c52`, `5e3826f9`); T1–T6, M1 (§8, this commit). M2 (T8) not started |
 | Companion document | `code_review.md` (findings F1 to F13). Step T0 of this design needs F4, F5, F6 (item 3) and F7 |
 | Model of the scenario | The two-tier post-training "one aircraft commanded" (`ts_transformer/docs/two_tier/design/post_training.md` D29, D93) |
 | Dependency on `ts_transformer` | Two pure modules, read-only, through one adapter (§6, §7). No other import. No shared output |
-| Decision state | MD1, MD2, MD3 decided by the user (2026-10-05). MD4 to MD12 open (§0.2). Steps T0 to T9 (§8) are not started |
+| Decision state | MD1, MD2, MD3 decided by the user (2026-10-05). MD4–MD6, MD9, MD10, MD12: built as recommended (Claude, within the rules). MD7, MD8: T5 measured (§8.1), the user decides. MD11: not built (open) |
 
 ### 0.2 Decisions
 
@@ -26,15 +26,15 @@ project rule. A decided row says "Decided" with the option, the person and the d
 | MD1 | Scope of the first stage | (a) M1 only: one optimized aircraft in recorded traffic. (b) M1 and M2 | **Decided: (b), M1 and M2** (user, 2026-10-05). M1 comes first in the plan, because M2 runs the M1 loop for each aircraft (§5.6) |
 | MD2 | Which reading of the separation rules makes the constraint rows | (a) `VISUAL` makes the rows, `IFR` is reported beside it. (b) `IFR` makes the rows | **Decided: (a)** (user, 2026-10-05). It is the reading that the two-tier closed loop uses (`separation.py` docstring, user 2026-09-27, provisional). Then the two results compare |
 | MD3 | How the optimizer gets the separation rules | (a) Read-only import of `ts_transformer.inference.separation` and `.runway_schedule` through one adapter. (b) Move the two modules to a neutral top-level package first | **Decided: (a)** (user, 2026-10-05). (b) stays a proposal (§7, R2): it needs a change in `ts_transformer` and the agreement of its stage owner |
-| MD4 | Source of the recorded traffic | (a) The arrivals manifest (`arrivals/manifest.json`), every flight, not only the scenario sample. (b) The tracks roster with all outcomes | (a). Only (a) has the runway target that the datum conversion needs (`flight_scenarios/datum.py:63`) |
-| MD5 | Scenario category for the first stage | (a) `runway_cons` (procedure-constrained). (b) `runway`. (c) both | (a). The "established" test reads the final approach geometry. The constrained solve already flies it |
-| MD6 | Check step `h_c` of the judge on the replay | 1 s, 2 s, 4 s (the scene step Δ of the two-tier design, vocabulary D11) | 1 s for the loop. Report the 4 s result beside it, for comparison with the two-tier readouts |
-| MD7 | Row window `W` (the time around a judged loss that gets rows) and the row margin `κ` | `W` in {30, 60, 120} s; `κ` in {0, 1, 2} % | Measure on the first 50 windows (step T5), then choose. Start value: `W` = 60 s, `κ` = 1 % (§4.4 shows why `κ` > 0) |
-| MD8 | Largest number of loop iterations `K_max` | 3, 5, 8 | 5. Measure the distribution in step T5 |
-| MD9 | Speed that changes a distance minimum into a time minimum (wake at the threshold, the M2 schedule) | (a) One approach speed per airport, as `runway_schedule.faa_separation(speed_mps=…)`. (b) The follower's published approach speed at its mass (K10 in `optimizer_reference.md`) | (b) for the optimizer. It is the speed that the solve pins at the threshold. State the difference to the two-tier value |
-| MD10 | A window that starts in a loss (the record already has the loss at the first check step) | (a) No rows for that pair until its first step without loss; count the window. (b) Refuse the window | (a), with the count in the summary |
-| MD11 | Recorded aircraft with a faulty observed point (two-tier vocabulary D111) | (a) Count only: the summary reports the losses whose recorded aircraft has a jump at the loss step. (b) Mark with the D111 function | (a) now. The D111 function reads the two-tier artefact (`instructions/faults.py:25`), not a track. (b) needs that function moved to a neutral module |
-| MD12 | The runway in force of a recorded aircraft | (a) Its record's runway for the whole window. (b) As the two-tier design: only from its own first predicted step (vocabulary D23) | (a). The optimizer has no predicted steps. State the difference in every comparison |
+| MD4 | Source of the recorded traffic | (a) The arrivals manifest (`arrivals/manifest.json`), every flight, not only the scenario sample. (b) The tracks roster with all outcomes | (a), built. Only (a) has the runway target that the datum conversion needs (`flight_scenarios/datum.py:63`) |
+| MD5 | Scenario category for the first stage | (a) `runway_cons` (procedure-constrained). (b) `runway`. (c) both | (a), built. The "established" test reads the final approach geometry. The constrained solve already flies it |
+| MD6 | Check step `h_c` of the judge on the replay | 1 s, 2 s, 4 s (the scene step Δ of the two-tier design, vocabulary D11) | 1 s, built, on UTC multiples (one grid for every aircraft). A 4 s result is not built yet |
+| MD7 | Row window `W` (the time around a judged loss that gets rows) and the row margin `κ` | `W` in {30, 60, 120} s; `κ` in {0, 1, 2} % | T5 (§8.1): `W` = 15 s and 60 s gave the same outcomes on 50 KRDU windows. Built: `W` = 60 s, `κ` = 1 %, and a loss that comes back at the same instant asks for twice its margin. The user decides |
+| MD8 | Largest number of loop iterations `K_max` | 3, 5, 8 | 5, built. T5: no window needed more than 2 re-solves (§8.1). The user decides |
+| MD9 | Speed that changes a distance minimum into a time minimum (wake at the threshold, the M2 schedule) | (a) One approach speed per airport, as `runway_schedule.faa_separation(speed_mps=…)`. (b) The follower's published approach speed at its mass (K10 in `optimizer_reference.md`) | (b), built for M1: each window's minima are timed at the commanded aircraft's target speed. M2's schedule needs one speed per block (`faa_separation` takes one): open |
+| MD10 | A window that starts in a loss (the record already has the loss at the first check step) | (a) No rows for that pair until its first step without loss; count the window. (b) Refuse the window | (a), built; the readout counts these windows |
+| MD11 | Recorded aircraft with a faulty observed point (two-tier vocabulary D111) | (a) Count only: the summary reports the losses whose recorded aircraft has a jump at the loss step. (b) Mark with the D111 function | (a) is NOT built yet: no jump count. The D111 function reads the two-tier artefact (`instructions/faults.py:25`), not a track. (b) needs that function moved to a neutral module |
+| MD12 | The runway in force of a recorded aircraft | (a) Its record's runway for the whole window. (b) As the two-tier design: only from its own first predicted step (vocabulary D23) | (a), built. The optimizer has no predicted steps. State the difference in every comparison |
 
 ## 1. Purpose and scope
 
@@ -160,6 +160,14 @@ project rule. A decided row says "Decided" with the option, the person and the d
   checks one runway of each airport in both conventions.
 - D92 is a two-tier decision that this design reads. If the two-tier code gets a public function for it,
   replace this computation with that function (§7, R3).
+- The region of D92 is the LPV cone from the FAF to its apex at the GARP: it continues past the threshold.
+  A replay ends some centimetres past the threshold, and the aircraft must stay established there. (A
+  lower bound at the threshold made the commanded aircraft "not established" at its own landing and
+  responsible for an arrival on a crossing runway: T5 found it.)
+- A runway without an RNAV(GPS) procedure has no coded final, so nobody is established on it. A runway
+  with a procedure whose FAF does not read is an error, not a missing final.
+- The CWT category comes from the identity resolver's ICAO type. A type that the CWT tables do not list
+  gets `None` (the judge then applies the radar minimum alone) and is named in the sidecar.
 
 ### 4.4 Frame error
 
@@ -195,8 +203,12 @@ M2 adds level L0 before L1: a landing schedule (§5.6).
    `optimization_config` and its target agree (the resume rule, O9). Do not overwrite that record.
 2. Replay the controls (`rollout_controls`). The replay is the trajectory that `evaluation` grades. The judge
    reads the replay, not the plan.
-3. At each check step in the window, build `Traffic` for every aircraft present and call
-   `separation.judged_pairs` and `separation.losses` for `VISUAL` and for `IFR`.
+3. At each check instant, build `Traffic` for the aircraft present and call `separation.losses`, and
+   `wake_at_threshold` behind each aircraft that is over its threshold at that instant. The instants are the
+   UTC multiples of `h_c`, the window's start and end, and every landing in the window. The judge sees the
+   recorded aircraft within 30 km of the commanded one: every minimum is shorter than half of that (the
+   largest, 8 NM = 14.8 km), and an aircraft between two others on one final is near both, so the cut
+   changes no loss that involves the commanded aircraft.
 4. Keep the losses with the commanded aircraft in `Loss.responsible` (two-tier D93: "a loss of separation
    that it answers for"). Count the other losses that touch the commanded aircraft. Do not make rows for
    them. Do not count losses between two recorded aircraft as the optimizer's losses. Report them as
@@ -204,8 +216,11 @@ M2 adds level L0 before L1: a landing schedule (§5.6).
 
 ### 5.3 Constraint rows
 
-The judge decides the kind of each loss. The NLP gets a smooth row for that kind. The kind of a row does
-not change after it is added.
+The judge decides the kind of each loss. The NLP gets a smooth row for that kind. The rows against one
+recorded aircraft use one branch for the whole window. The branch is horizontal when any loss with that
+aircraft is in trail. Else it is the larger-margin branch at the tightest instant. It changes only from
+vertical to horizontal, when an in-trail loss appears later. (A branch chosen at each check instant gave
+one node contradictory rows, above and below, or both branches: review finding, fixed.)
 
 | Loss kind (`separation.py:82`) | Row on the commanded node `k` and the recorded aircraft `j` | Notes |
 |---|---|---|
@@ -217,12 +232,21 @@ not change after it is added.
   other one for that row. The record of the window states the branch of each row.
 - **Node times.** The time of node `k` in phase `P` is `t_k = t0 + Σ_{p<P} T_p + (i/N_P)·T_P`. It is affine in
   the phase durations. `code_review.md` F7 makes it available to the caller.
-- **Recorded positions at a node time.** `n_j(t_k)`, `e_j(t_k)`, `h_j(t_k)` are casadi interpolants of the
-  recorded track in the commanded frame, evaluated at the symbolic `t_k`. Step T2 verifies that an inline
-  linear interpolant takes an `SX` argument and gives a correct derivative. If it does not, the user decides
-  between `MX` for the NLP and frozen node times (§10 item 1).
+- **Recorded positions at a node time.** `n_j(t_k)`, `e_j(t_k)`, `h_j(t_k)` are `casadi.pw_lin` of the
+  recorded track in the commanded frame, at the symbolic `t_k`, over a slice that reaches two row windows
+  beyond the losses. T2: an inline casadi interpolant cannot take an `SX` argument (casadi 3.7.2:
+  "eval_sx not defined"); `pw_lin` can, its values equal `np.interp`, and its derivatives agree with finite
+  differences. About 10 `SX` nodes per knot.
+- **An aircraft that is not in the air.** Before its first sample (its entry into the arrival slice) and after
+  its last (its landing) the recorded aircraft holds its end position, and a presence weight `a(t)` ramps
+  from 0 to 1 over 10 s and relaxes the row: `gap² + S'²·a ≥ S'²`, `σ·(h − h_j) + 2·V'·a ≥ V'`. A re-solve
+  can then wait for a landing. (An extrapolated track kept a landed aircraft flying; a ramp that moved it
+  away swept it across a final: both found and replaced.)
 - **Which nodes get rows.** The nodes whose time in the last solve is inside `[τ − W, τ + W]` around a judged
-  loss at time `τ` (MD7). Rows accumulate over the iterations of one window.
+  loss at time `τ` (MD7). One node gets one row per family and aircraft (the largest bound). Rows
+  accumulate over the rounds of one window. A loss that comes back at the same instant asks for twice its
+  margin in the next round: rows hold only at the nodes, and between nodes (or through replay drift) the
+  record can still be some metres short.
 
 ### 5.4 L3: the loop
 
@@ -232,15 +256,19 @@ For one window:
 2. Add the rows of §5.3 for each such loss.
 3. Solve again. Use the last solution as the initial guess (`initial_guess`, `optimizer.py:320`).
    Keep the objective of the baseline (minimum time).
-4. If the solve fails, the outcome is `solve_failed`. Keep the IPOPT status.
+4. If the solve fails, the outcome is `solve_failed`. Keep the IPOPT status, and keep the last good solve
+   as the window's record.
 5. Replay and judge (L2). If no loss has the commanded aircraft responsible, the outcome is `separated`.
 6. `i = i + 1`. If `i = K_max` (MD8), the outcome is `unresolved`. Else go to step 2.
 
 A pair in loss at the first check step gets no rows until its first check step without loss (MD10). The
 window then has the flag `starts_in_loss`.
 
-Each window record has: the outcome, the iterations, the rows by kind and branch, the losses at each
-iteration (`VISUAL` and `IFR`), the flight time of the baseline and of the final solve, and the solve times.
+Each window record has: the outcome, the rounds (the flight time, every loss with whether it counted, the
+rows of the next solve, its solve time or its error), the branch per aircraft, the IFR losses at the
+baseline and at the end, the recorded aircraft, MD10's start instants, the types without a category, the
+runways without a coded final, and the largest frame error. A baseline that fails raises
+`BaselineFailed`: the batch writes a failed record, and the readout counts it as `baseline_failed`.
 
 ### 5.5 Why a loop and not all rows at once
 
@@ -347,21 +375,33 @@ one side calls code of the other side for Q3.
 Each step has a gate. A step starts after the gate of the step before it passes. Code goes on its own
 branch and worktree, with a review before each commit.
 
-| Step | Work | Gate | Needs |
-|---|---|---|---|
-| T0 | Prerequisites: F7 (`extra_rows`, node times), F4 (procedure bridge out of the backend), F5 (one constrained solve function), F6 item 3 (batch driver module) | All optimizer and backend tests pass. A fixed set of scenarios (20 `runway`, 20 `runway_cons`) solves bit-identical before and after | User accepts F4 to F7 |
-| T1 | Traffic assembly (§4.1, §4.2): interval index, frame conversion | Test: the commanded flight's own record, read as traffic, gives its scenario's initial position at `t0` within 1 mm in the frame and in MSL | T0 |
-| T2 | Spike: inline casadi interpolant in `SX` at a symbolic node time | Derivative equals a finite difference within 1e-6 relative on 10 random tracks. If not: user decision (§10 item 1) | T0 |
-| T3 | Adapter (§6.2), architecture test, behaviour pins, the inputs of §4.3 | Pins pass; the course check passes on one runway per airport | MD12 |
-| T4 | Baseline census: judge the baseline replays of a seeded sample of windows (no rows) | A readout to the user: windows with a loss that the commanded aircraft answers for, by reading, kind and airport; recorded aircraft per window; the frame error of §4.4 | T1, T3, MD5, MD6 |
-| T5 | Rows and loop (§5.3, §5.4) on 50 windows with a loss | A readout: outcome counts, iterations, rows, flight time change, solve time per window, memory. The user then decides MD7 and MD8 | T2, T4 |
-| T6 | Traffic batch, records, resume (§9) | Full optimizer suite passes. Preflight on the real size: time and memory per window measured, disk estimate checked before the start | T5, MD7, MD8 |
-| T7 | Evaluation of the commanded records and the CZML comparison (a new category) | The frontend shows a published window; checked in the browser | T6 |
-| T8 | M2 (§5.6) | A readout like T5 for 5 blocks | T6, MD9 |
-| T9 | M3 design (§5.7) | Only if T8 leaves losses that the order cannot remove | T8 |
+| Step | Work | Gate | Needs | State |
+|---|---|---|---|---|
+| T0 | Prerequisites: F7 (`extra_rows`, node times), F4 (procedure bridge out of the backend), F5 (one constrained solve function), F6 item 3 (batch driver module) | All optimizer and backend tests pass. A fixed set of scenarios (20 `runway`, 20 `runway_cons`) solves bit-identical before and after | User accepts F4 to F7 | Done: `bbb18c52`, `5e3826f9`; 40/40 solves bit-identical, 21 batch files byte-identical |
+| T1 | Traffic assembly (§4.1, §4.2): interval index, frame conversion | Test: the commanded flight's own record, read as traffic, gives its scenario's initial position at `t0` within 1 mm in the frame and in MSL | T0 | Done: 200 KRDU scenarios, largest gap 0.000 mm horizontal and vertical |
+| T2 | Spike: inline casadi interpolant in `SX` at a symbolic node time | Derivative equals a finite difference within 1e-6 relative on 10 random tracks. If not: user decision (§10 item 1) | T0 | Done: inline interpolant fails in `SX`; `pw_lin` passes (§5.3) |
+| T3 | Adapter (§6.2), architecture test, behaviour pins, the inputs of §4.3 | Pins pass; the course check passes on one runway per airport | MD12 | Done: `traffic/rules.py`, `traffic/tests/test_rules.py` (pins, import boundary, no torch) |
+| T4 | Baseline census: judge the baseline replays of a seeded sample of windows (no rows) | A readout to the user: windows with a loss that the commanded aircraft answers for, by reading, kind and airport; recorded aircraft per window; the frame error of §4.4 | T1, T3, MD5, MD6 | Done inside T5 (the baseline round of each window) |
+| T5 | Rows and loop (§5.3, §5.4) on 50 windows with a loss | A readout: outcome counts, iterations, rows, flight time change, solve time per window, memory. The user then decides MD7 and MD8 | T2, T4 | Done (§8.1); the user decides MD7, MD8 |
+| T6 | Traffic batch, records, resume (§9) | Full optimizer suite passes. Preflight on the real size: time and memory per window measured, disk estimate checked before the start | T5, MD7, MD8 | Done: `traffic_optimization.py`, `run_batch` sidecars; the preflight at the real size is open |
+| T7 | Evaluation of the commanded records and the CZML comparison (a new category) | The frontend shows a published window; checked in the browser | T6 | Not started (frontend: a sonnet agent) |
+| T8 | M2 (§5.6) | A readout like T5 for 5 blocks | T6, MD9 | Not started |
+| T9 | M3 design (§5.7) | Only if T8 leaves losses that the order cannot remove | T8 | Not started |
+
+### 8.1 T5 readout (KRDU, seed 11, 50 windows; the reviewed M1 code, scratch output)
+
+- Cost: 50 windows on 8 workers in 1 min 31 s wall time; the largest resident memory is 4.2 GB (the parent, which reads the manifest once). The traffic of KRDU is 24,202 arrivals, read in 21–33 s.
+- Outcomes: 43 `separated_at_baseline`; 3 `separated` after 1 or 2 re-solves (the landing 34 s to 43 s later); 4 `solve_failed` (IPOPT `Maximum_Iterations_Exceeded` on long "radar or vertical" losses: §10 item 1). No window needed more than 2 re-solves.
+- Windows with a counted VISUAL loss: 7 at the baseline, 4 at the end (the 4 failures). Windows with an IFR loss that the commanded aircraft answers for: 17 at the baseline, 15 at the end (IFR is stricter and makes no rows, MD2). Windows with a VISUAL loss that it does not answer for (no rows, §5.2 item 4): 2 and 2.
+- No window starts in a loss (MD10). No type without a CWT category. 92 loss instants between recorded aircraft near the commanded one at the baselines (background). The largest frame error is 0.30 %, inside κ = 1 %.
+- `W` = 15 s and `W` = 60 s gave the same outcomes (before the margin doubling). Before the review fixes of §5.3 the same 50 windows gave 1 separated and 6 failures.
+- The outputs are in a scratch directory, not in `4dTrajectory/outputs`: a measurement of the method, not a published result.
 
 ## 9. Outputs and records
 
+- **Runner.** `4dTrajectory/optimization/traffic_optimization.py --airport <ICAO> --sample N --seed S
+  --output-dir …` (a seeded sample of the airport's arrivals, stated in `summary.json`); the readout is
+  `python -m traffic.readout <dir>` from `4dTrajectory/optimization`.
 - **Directory.** `4dTrajectory/outputs/<ICAO>/traffic_m1_<category>/` (M1) and
   `4dTrajectory/outputs/<ICAO>/traffic_m2_<category>/` (M2). The existing directories
   `runway`, `fitted_adsb`, `runway_cons` stay unchanged.
@@ -376,9 +416,10 @@ branch and worktree, with a review before each commit.
 
 ## 10. Open questions
 
-1. **Interpolant in `SX`.** If step T2 fails: (a) build the NLP in `MX`, or (b) freeze the phase durations of
-   the last solve, so that node times are numbers and recorded positions are constants. (b) cannot move the
-   landing time, which is the main way to keep in-trail spacing. Thus (b) is weak for M1.
+1. **Re-solves that hit the IPOPT cap.** T5: 4 of 7 windows with a counted loss end `solve_failed` with
+   `Maximum_Iterations_Exceeded`, all on long "radar or vertical" losses. Options: (a) soft rows (a slack
+   per row and a penalty in the objective: needs an objective hook in the optimizer); (b) on a failure,
+   try the other branch once; (c) accept and report. Not decided.
 2. **M3.** Common node times for all aircraft; disjunction branches for pairs that change order; the size
    of a conflict cluster. Not designed.
 3. **The objective in traffic.** M1 keeps minimum time. A delay then appears only where a row forces it.
@@ -402,6 +443,7 @@ branch and worktree, with a review before each commit.
 | Arrival slice time origin | `trajectory_data_process/harvest/arrivals.py:142`, `:365-376` |
 | Separation judge | `4dTrajectory/ts_transformer/inference/separation.py:91` (`Traffic`), `:122` (`Loss`), `:162` (`Judged`), `:185` (`judged_pairs`), `:231` (`losses`), `:255` (`wake_at_threshold`) |
 | Minima, CWT, schedule | `4dTrajectory/ts_transformer/inference/runway_schedule.py:63` (`Separation`), `:183-222` (constants), `:260` (`wake_category`), `:269` (`faa_separation`), `:313` (`earliest_time`), `:363` (`schedule`), `:386` (`violations`) |
+| The traffic package | `4dTrajectory/optimization/traffic/`: `scene.py` (recorded traffic), `frame.py`, `runways.py` (D92 geometry), `rules.py` (the only `ts_transformer` import), `check.py` (the judge on a replay), `rows.py`, `loop.py` (M1), `readout.py`; the runner `traffic_optimization.py` |
 | Two-tier decisions read here | `4dTrajectory/ts_transformer/docs/two_tier/design/post_training.md` D29, D30, D92, D93; `vocabulary.md` D11, D23, D25, D111 |
 
 ## 12. Regulation sources

@@ -1,5 +1,22 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-05 — Multi-aircraft optimization M1: one optimized aircraft in its airport's recorded traffic
+
+- `4dTrajectory/optimization/traffic/` + runner `traffic_optimization.py` (design `4dTrajectory/docs/multi_aircraft_optimization/design.md`
+  §5.1–5.4, decisions MD1–MD3 by the user): the constrained (shortest-IAF) solve, its replay judged by the two-tier
+  separation rules (VISUAL makes rows, IFR reported) against every recorded arrival of the airport, losses the commanded
+  aircraft answers for turned into rows (`casadi.pw_lin` of the recorded track at the symbolic node times; one branch per
+  aircraft; a landed / not-yet-entered aircraft relaxed by a presence weight; the wake at the threshold as a linear
+  landing-time row), warm re-solves until separated or K_max. `run_batch` gained a per-record sidecar (`*_traffic.json`).
+  `scenario_optimization` exposes `iaf_setup`, `solve_iaf` (with `extra_rows`, `initial_guess`), `shortest_iaf_solve`,
+  `iaf_result`.
+- Gates: T1 own record at the start = scenario initial state on 200 KRDU scenarios (0.000 mm); T2 casadi's inline interpolant
+  cannot take SX, `pw_lin` can; T5 on 50 KRDU windows: 43 separated at baseline, 3 separated after 1–2 re-solves
+  (landing 34–43 s later), 4 `solve_failed` (IPOPT cap on long radar-or-vertical losses); 1 min 31 s on 8 workers, 4.2 GB.
+- Three reviews (opus) found and fixed: the commanded aircraft "not established" at its own landing (the LPV cone continues
+  past the threshold), branches re-chosen per check step (contradictory rows), an extrapolated / swept absent aircraft, a
+  non-finite sidecar value aborting a batch, two losses at one instant merged.
+
 ### 2026-10-05 — Optimizer T0 for the multi-aircraft work: caller rows, the procedure package, the batch split by job
 
 - Design and review: `4dTrajectory/docs/multi_aircraft_optimization/` (`design.md`, `code_review.md` F1–F13; the user accepted

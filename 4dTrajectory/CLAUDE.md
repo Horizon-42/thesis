@@ -44,6 +44,9 @@ restrictions, HSL): repo `docs/open-items.md`, "Optimizer".
 - `docs/direct_collocation_hermite_simpson.zh.md` §5 and `geodetic_dynamics_transport.zh.html`
   describe the OLD HS-planner + RK4-polish pipeline (kept, historically inaccurate) (O12).
 
+- **Multi-aircraft (`optimization/traffic/`)**: only `traffic/rules.py` imports `ts_transformer` (the separation
+  rules, read-only); its tests pin the rules and the boundary — never import ts elsewhere in the optimizer (O13).
+
 ## Key defaults & constants (current)
 
 - Mesh: `collocation/optimizer.py` `DEFAULT_N_SEGMENTS = 8`, `DEFAULT_N_SEG_PER_PHASE = 3`

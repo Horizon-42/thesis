@@ -138,6 +138,14 @@ gets a new ID here and ONE new line in the index.**
 - Stale docs (historically inaccurate, kept): `4dTrajectory/docs/direct_collocation_hermite_simpson.zh.md`
   §5 and `geodetic_dynamics_transport.zh.html` describe the old HS-planner + RK4-polish pipeline.
 
+### O13 · the multi-aircraft package reads ts_transformer through one module
+
+- **`optimization/traffic/` (multi-aircraft M1, 2026-10-05) imports `ts_transformer` ONLY in `traffic/rules.py`**,
+  read-only, and only `inference.separation` + `inference.runway_schedule` (pure, no torch). `traffic/tests/test_rules.py`
+  pins the rules' results on fixed scenes and checks the import boundary (AST) and that importing the adapter loads no
+  torch: a rule change on the two-tier side fails there. Design and readout:
+  `docs/multi_aircraft_optimization/design.md`; runner `optimization/traffic_optimization.py`.
+
 ## Key defaults & constants (current)
 
 ### K1 · mesh

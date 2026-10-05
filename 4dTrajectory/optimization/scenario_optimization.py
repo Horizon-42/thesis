@@ -46,6 +46,7 @@ from collocation.optimizer import (  # noqa: E402
     _FRAME_ANCHOR_TOLERANCE_M,
     DEFAULT_N_SEGMENTS,
     DEFAULT_N_SEG_PER_PHASE,
+    no_extra_rows,
 )
 from geokit import haversine_m  # noqa: E402
 from procedure.iaf import iaf_paths, path_length_m  # noqa: E402
@@ -204,10 +205,10 @@ def _optimize_one_scenario(
     except Exception as exc:  # noqa: BLE001 — batch tool: skip + log per-scenario failures
         return (index, flight_id, None, None,
                 f"{type(exc).__name__}: {str(exc).splitlines()[0][:90]}")
-    return (index, flight_id, result.to_dict(), _shipped_evaluation(result), None)
+    return (index, flight_id, result.to_dict(), shipped_evaluation(result), None)
 
 
-def _shipped_evaluation(result: ScenarioOptimization) -> dict[str, Any]:
+def shipped_evaluation(result: ScenarioOptimization) -> dict[str, Any]:
     """The eval record as the worker ships it to the parent: states emptied.
 
     The parent writes the rollout once (the states file) and points the eval record at
@@ -282,7 +283,7 @@ DEFAULT_PROCEDURE_ROOT = _PROCEDURE_ROOT  # flight_scenarios.procedure_final own
 
 
 @dataclass
-class _IafSolve:
+class IafSolve:
     """One feasible IAF candidate's solve, kept while searching for the fastest."""
     final_time: float
     pc: Any                 # the IAF→runway ProcedureConstraint (carries the chosen IAF)
@@ -291,6 +292,7 @@ class _IafSolve:
     dense_states: Any       # the optimizer's dense planned states
     dense_times: Any        # the dense states' OWN times (non-uniform across phases)
     segment_durations: Any  # per-control-segment durations (multiphase non-uniform)
+    decision_vector: Any    # the raw NLP solution: the warm start of a re-solve of the same IAF
 
 
 def _resolve_procedure_path(procedure_root: str | Path, airport: str, runway: str) -> Path:
@@ -334,7 +336,7 @@ def _require_procedure_threshold_agrees(target: GeodeticState, paths: list) -> f
     return gap_m
 
 
-def _iaf_setup(scenario: FlightScenario, procedure_root: str | Path):
+def iaf_setup(scenario: FlightScenario, procedure_root: str | Path):
     """Shared prologue for the IAF optimizers: resolve the runway's RNAV(GPS) procedure and return
     ``(target, iaf_paths, aircraft, min_speed_ms)``. ``target`` is the scenario's own
     authoritative threshold state, unmodified — the procedure is validated against it (see
@@ -356,14 +358,16 @@ def _iaf_setup(scenario: FlightScenario, procedure_root: str | Path):
     return target, paths, aircraft, min_speed_ms
 
 
-def _solve_iaf(
+def solve_iaf(
     pc, scenario: FlightScenario, target: GeodeticState, aircraft: Any, min_speed_ms: float,
     *, max_duration: float, verbose: bool,
     fitting: str = DEFAULT_FITTING,
     state_substeps: int | None = None,
     n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE,
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
-) -> _IafSolve:
+    extra_rows=no_extra_rows,
+    initial_guess=None,
+) -> IafSolve:
     """Full CONSTRAINED solve from the scenario's OBSERVED start to the runway via one IAF path.
 
     Uses ``procedure.segments.build_constraint_segments`` (constraint geometry) and the **multiphase**
@@ -371,7 +375,8 @@ def _solve_iaf(
     ADS-B track), NOT a synthetic IAF state: the optimiser flies a free transition from there to the
     procedure's first fix (pre-FAF legs are unpinned, altitude-only), then each procedure leg with
     its corridor / glidepath / floor. Raises on infeasibility. ``n_seg_per_phase`` sets the control
-    segments PER leg (the multiphase mesh: n_seg_per_phase × legs).
+    segments PER leg (the multiphase mesh: n_seg_per_phase × legs). ``extra_rows`` and
+    ``initial_guess`` go to ``CollocationOptimizer.optimize_free_time`` (the traffic loop's re-solves).
     """
     segments = build_constraint_segments(
         pc, target.latitude, target.longitude, target.altitude,
@@ -386,16 +391,17 @@ def _solve_iaf(
         max_iterations=max_iterations,
         verbose=verbose,
     )
-    final_time, node_control, _ = optimizer.optimize_free_time(start_state, target, max_duration)
-    return _IafSolve(
+    final_time, node_control, _ = optimizer.optimize_free_time(
+        start_state, target, max_duration, initial_guess=initial_guess, extra_rows=extra_rows)
+    return IafSolve(
         float(final_time), pc, start_state, node_control,
         optimizer.last_dense_states_geo, list(optimizer.last_dense_state_times_s),
-        list(optimizer.segment_durations_s),
+        list(optimizer.segment_durations_s), optimizer.last_decision_vector,
     )
 
 
-def _iaf_result(
-    best: _IafSolve, scenario: FlightScenario, aircraft: Any,
+def iaf_result(
+    best: IafSolve, scenario: FlightScenario, aircraft: Any,
     *, target: GeodeticState, candidates: int, rollout_dt_s: float, selection: str,
 ) -> ScenarioOptimization:
     """Assemble the chosen IAF solve into a :class:`ScenarioOptimization` (dense export + rollout).
@@ -453,13 +459,13 @@ def optimize_scenario_min_time_iaf(
     Infeasible IAFs are skipped; the scenario fails only if every IAF fails. For a cheap
     alternative that solves once, see :func:`optimize_scenario_shortest_iaf`.
     """
-    target, paths, aircraft, min_speed_ms = _iaf_setup(scenario, procedure_root)
+    target, paths, aircraft, min_speed_ms = iaf_setup(scenario, procedure_root)
 
-    best: _IafSolve | None = None
+    best: IafSolve | None = None
     attempts: list[tuple[str, str]] = []
     for pc in paths:
         try:
-            candidate = _solve_iaf(
+            candidate = solve_iaf(
                 pc, scenario, target, aircraft, min_speed_ms,
                 max_duration=max_duration, verbose=verbose,
                 fitting=fitting, state_substeps=state_substeps,
@@ -476,9 +482,27 @@ def optimize_scenario_min_time_iaf(
             f"all {len(paths)} IAF(s) infeasible for "
             f"{scenario.source.get('id')}: {attempts[:4]}"
         )
-    return _iaf_result(
+    return iaf_result(
         best, scenario, aircraft,
         target=target, candidates=len(paths), rollout_dt_s=rollout_dt_s, selection="minTime",
+    )
+
+
+def shortest_iaf_solve(
+    scenario: FlightScenario, target: GeodeticState, paths: list, aircraft: Any, min_speed_ms: float,
+    **solve_options: Any,
+) -> IafSolve:
+    """The solve of the shortest feasible IAF path (shortest horizontal polyline first; an
+    infeasible one falls through to the next). Raises when every IAF fails."""
+    attempts: list[tuple[str, str]] = []
+    for pc in sorted(paths, key=path_length_m):    # shortest path first
+        try:
+            return solve_iaf(pc, scenario, target, aircraft, min_speed_ms, **solve_options)
+        except Exception as exc:  # noqa: BLE001 — fall through to the next-shortest IAF
+            attempts.append((pc.waypoints[0].ident, type(exc).__name__))
+    raise ValueError(
+        f"all {len(paths)} IAF(s) infeasible (shortest-first) for "
+        f"{scenario.source.get('id')}: {attempts[:4]}"
     )
 
 
@@ -502,29 +526,17 @@ def optimize_scenario_shortest_iaf(
     robust — if the shortest IAF turns out infeasible it falls through to the next-shortest, so
     the scenario fails only if every IAF fails. The exact full-search remains available above.
     """
-    target, paths, aircraft, min_speed_ms = _iaf_setup(scenario, procedure_root)
-
-    attempts: list[tuple[str, str]] = []
-    for pc in sorted(paths, key=path_length_m):    # shortest path first
-        try:
-            best = _solve_iaf(
-                pc, scenario, target, aircraft, min_speed_ms,
-                max_duration=max_duration, verbose=verbose,
-                fitting=fitting, state_substeps=state_substeps,
-                n_seg_per_phase=n_seg_per_phase, max_iterations=max_iterations,
-            )
-        except Exception as exc:  # noqa: BLE001 — fall through to the next-shortest IAF
-            attempts.append((pc.waypoints[0].ident, type(exc).__name__))
-            continue
-        return _iaf_result(
-            best, scenario, aircraft,
-            target=target, candidates=len(paths), rollout_dt_s=rollout_dt_s,
-            selection="shortestPath",
-        )
-
-    raise ValueError(
-        f"all {len(paths)} IAF(s) infeasible (shortest-first) for "
-        f"{scenario.source.get('id')}: {attempts[:4]}"
+    target, paths, aircraft, min_speed_ms = iaf_setup(scenario, procedure_root)
+    best = shortest_iaf_solve(
+        scenario, target, paths, aircraft, min_speed_ms,
+        max_duration=max_duration, verbose=verbose,
+        fitting=fitting, state_substeps=state_substeps,
+        n_seg_per_phase=n_seg_per_phase, max_iterations=max_iterations,
+    )
+    return iaf_result(
+        best, scenario, aircraft,
+        target=target, candidates=len(paths), rollout_dt_s=rollout_dt_s,
+        selection="shortestPath",
     )
 
 
@@ -549,7 +561,7 @@ def _optimize_one_scenario_iaf(
     except Exception as exc:  # noqa: BLE001 — skip + log per-scenario failures
         return (index, flight_id, None, None,
                 f"{type(exc).__name__}: {str(exc).splitlines()[0][:90]}")
-    return (index, flight_id, result.to_dict(), _shipped_evaluation(result), None)
+    return (index, flight_id, result.to_dict(), shipped_evaluation(result), None)
 
 
 def optimize_scenarios_constrained_iaf(

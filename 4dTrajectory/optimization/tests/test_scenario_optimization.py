@@ -62,8 +62,9 @@ def _fake_optimizer(dense_states_geo, final_time, controls, *, on_init=None,
             )
             if segment_durations_s is not None:
                 self.segment_durations_s = segment_durations_s
+            self.last_decision_vector = None
 
-        def optimize_free_time(self, initial, tgt, max_duration):
+        def optimize_free_time(self, initial, tgt, max_duration, **_solve_kwargs):
             return final_time, controls, None
 
     return FakeOptimizer
@@ -746,7 +747,7 @@ def _wp(ident, lat, lon, *, alt_ft=None, fix_id=None):
 
 def test_solve_iaf_feeds_the_optimizer_a_segment_list(monkeypatch):
     # SEAM regression: build_constraint_segments returns a plain LIST of SegmentSpec
-    # (its old (segments, spans) tuple return is gone). _solve_iaf must pass that list
+    # (its old (segments, spans) tuple return is gone). solve_iaf must pass that list
     # through to CollocationOptimizer(segments=...) verbatim — a stale 2-tuple unpack
     # here broke EVERY constrained batch (ValueError for != 2 legs, and for exactly
     # 2 legs a lone SegmentSpec reached the optimizer -> TypeError).
@@ -772,7 +773,7 @@ def test_solve_iaf_feeds_the_optimizer_a_segment_list(monkeypatch):
             n_seg_per_phase=kwargs.get("n_seg_per_phase")),
         segment_durations_s=[10.0],
     ))
-    solve = so._solve_iaf(pc, scenario, target, A320, 60.0,
+    solve = so.solve_iaf(pc, scenario, target, A320, 60.0,
                           max_duration=600.0, verbose=False)
     assert solve.final_time == 100.0
     assert isinstance(captured["segments"], list) and len(captured["segments"]) >= 2
@@ -782,7 +783,7 @@ def test_solve_iaf_feeds_the_optimizer_a_segment_list(monkeypatch):
     assert captured["n_seg_per_phase"] == so.DEFAULT_N_SEG_PER_PHASE
 
     # --fitting / --state-substeps / --n-seg-per-phase all reach the CONSTRAINED path
-    so._solve_iaf(pc, scenario, target, A320, 60.0,
+    so.solve_iaf(pc, scenario, target, A320, 60.0,
                   max_duration=600.0, verbose=False,
                   fitting="trapezoidal", state_substeps=6, n_seg_per_phase=5)
     assert captured["scheme"] == "trapezoidalNormalizedFullTransport"

@@ -1,0 +1,169 @@
+"""M1: one optimized aircraft in recorded traffic (design §5.4).
+
+The commanded scenario is solved as the constrained batch solves it (the shortest feasible IAF); its
+replay is judged against the recorded traffic; each loss it answers for becomes rows (``rows``); the
+same IAF is solved again from the last solution, until no such loss is left or ``max_rounds`` re-solves
+are spent. A loss that comes back at the same instant (rows hold only at the nodes; between them, or
+through replay drift, the record can still be short) asks for twice its margin in the next round. A recorded aircraft already in loss at the window start gets no rows
+until its first instant without a loss (MD10). The rows against one aircraft keep one branch for the whole
+window (``rows.branch_for``; vertical becomes horizontal only when an in-trail loss with it appears).
+A re-solve that fails ends the window with the last good solve as its record.
+"""
+
+from __future__ import annotations
+
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+import scenario_optimization as so
+from flight_scenarios import FlightScenario
+from scenario_replay import ScenarioOptimization
+
+from . import rules
+from .check import Check, Conflict, FlownTrack, Window, check, make_window
+from .rows import Branch, branch_for, extra_rows, row_spec
+from .scene import Traffic
+
+TRAFFIC_RECORD_SCHEMA = "optimization-traffic-v1"
+SEPARATED_AT_BASELINE, SEPARATED, UNRESOLVED, SOLVE_FAILED = (
+    "separated_at_baseline", "separated", "unresolved", "solve_failed")
+
+
+class BaselineFailed(ValueError):
+    """The window's baseline solve failed: no record, no traffic sidecar."""
+
+
+@dataclass(frozen=True)
+class LoopSettings:
+    """The loop's parameters (design MD6–MD8; start values until step T5 measures them)."""
+
+    step_s: float = 1.0               # MD6: the judge's check step (on UTC multiples)
+    row_window_s: float = 60.0        # MD7 W: a loss gets rows on the nodes within this of it
+    margin: float = 0.01              # MD7 κ: a row asks for the minimum × (1 + κ)
+    max_rounds: int = 5               # MD8 K_max: re-solves before "unresolved"
+    reading: str = rules.VISUAL       # MD2: the reading that makes rows; IFR is reported beside it
+
+
+def free_from(baseline: Check, count: int) -> list[float]:
+    """Per recorded aircraft, the first instant from which its losses get rows: 0, or — for one in
+    loss at the first check instant — its first instant without a loss (MD10)."""
+    times: list[set[float]] = [set() for _ in range(count)]
+    for c in baseline.conflicts:
+        times[c.other].add(c.t_s)
+    first = float(baseline.times_s[0])
+    return [next((float(t) for t in baseline.times_s if float(t) not in ts), float("inf")) if first in ts else 0.0
+            for ts in times]
+
+
+def _losses(found: Check, window: Window, active: set) -> list[list[Any]]:
+    """``[t, other, kind, required, distance, vertical, responsible, rowed]`` per loss (``rowed``: it
+    counts for the loop — the commanded aircraft answers for it and MD10 does not exclude it)."""
+    return [[round(c.t_s, 3), window.recorded[c.other].flight_key, c.kind, round(c.required_m, 1),
+             round(c.distance_m, 1), round(c.vertical_m, 1), c.responsible, c in active] for c in found.conflicts]
+
+
+def _branches(active: list[Conflict], branches: dict[int, Branch]) -> dict[int, Branch]:
+    """The branch per aircraft after this round: kept once chosen; vertical becomes horizontal when an
+    in-trail loss with that aircraft appears."""
+    out = dict(branches)
+    by_other: dict[int, list[Conflict]] = {}
+    for c in active:
+        if c.kind != rules.AT_THRESHOLD:
+            by_other.setdefault(c.other, []).append(c)
+    for other, group in by_other.items():
+        chosen = branch_for(group)
+        if other not in out or any(c.kind == rules.IN_TRAIL for c in group):
+            out[other] = chosen
+    return out
+
+
+def fly_in_traffic(
+    scenario: FlightScenario,
+    traffic: Traffic,
+    *,
+    procedure_root: str | Path,
+    settings: LoopSettings = LoopSettings(),
+    max_duration: float,
+    rollout_dt_s: float,
+    solve_options: dict[str, Any],
+) -> tuple[ScenarioOptimization, dict[str, Any]]:
+    """The commanded scenario flown in its traffic: its record (the last solve that succeeded) and the
+    traffic sidecar (outcome, rounds with their rows, losses by reading). ``solve_options`` go to
+    ``so.solve_iaf``. Raises :class:`BaselineFailed` when the baseline itself fails."""
+    def record(solve):
+        return so.iaf_result(solve, scenario, aircraft, target=target, candidates=len(paths),
+                             rollout_dt_s=rollout_dt_s, selection="shortestPath")
+
+    try:
+        target, paths, aircraft, min_speed_ms = so.iaf_setup(scenario, procedure_root)
+        best = so.shortest_iaf_solve(scenario, target, paths, aircraft, min_speed_ms,
+                                     max_duration=max_duration, **solve_options)
+        result = record(best)
+    except ValueError as exc:
+        raise BaselineFailed(str(exc).partition("\n")[0]) from exc
+    window = make_window(scenario, traffic, procedure_root=procedure_root, horizon_s=max_duration)
+    flown = FlownTrack.from_samples(result.simulator_states)
+    judged = check(window, flown, reading=settings.reading, step_s=settings.step_s)
+    starts = free_from(judged, len(window.recorded))
+    ifr_baseline = check(window, flown, reading=rules.IFR, step_s=settings.step_s)
+    rounds: list[dict[str, Any]] = []
+    rowed: dict[tuple[int, float, str], Conflict] = {}   # (other, instant, kind) -> the loss, first-seen order
+    doublings: dict[tuple[int, float, str], int] = {}    # how many rounds that loss came back after its rows
+    branches: dict[int, Branch] = {}
+    while True:
+        active = [c for c in judged.conflicts if c.responsible and c.t_s >= starts[c.other]]
+        rounds.append({"final_time_s": result.final_time_s,
+                       "losses": _losses(judged, window, set(active)), "background_losses": judged.background})
+        if not active:
+            outcome = SEPARATED_AT_BASELINE if len(rounds) == 1 else SEPARATED
+            break
+        if len(rounds) > settings.max_rounds:
+            outcome = UNRESOLVED
+            break
+        branches = _branches(active, branches)
+        for key, c in {(c.other, c.t_s, c.kind): c for c in active}.items():
+            doublings[key] = doublings[key] + 1 if key in rowed else 0
+            rowed.setdefault(key, c)
+        specs = [row_spec(c, window, margin=settings.margin * 2 ** doublings[key],
+                          branch=None if c.kind == rules.AT_THRESHOLD else branches[c.other])
+                 for key, c in rowed.items()]
+        rounds[-1]["rows_next"] = [asdict(s) for s in specs]
+        started = time.perf_counter()
+        try:
+            best = so.solve_iaf(
+                best.pc, scenario, target, aircraft, min_speed_ms, max_duration=max_duration,
+                extra_rows=extra_rows(specs, window, best.dense_times, row_window_s=settings.row_window_s),
+                initial_guess=best.decision_vector, **solve_options)
+            next_result = record(best)
+        except ValueError as exc:
+            rounds[-1]["next_solve_error"] = str(exc).partition("\n")[0][:200]
+            outcome = SOLVE_FAILED
+            break
+        rounds[-1]["next_solve_s"] = round(time.perf_counter() - started, 3)
+        result = next_result
+        flown = FlownTrack.from_samples(result.simulator_states)
+        judged = check(window, flown, reading=settings.reading, step_s=settings.step_s)
+    ifr_final = check(window, flown, reading=rules.IFR, step_s=settings.step_s)
+    lats = [flown.lat_deg] + [f.lat_deg for f in window.recorded]
+    sidecar = {
+        "schema": TRAFFIC_RECORD_SCHEMA,
+        "flight_key": window.flight_key,
+        "settings": asdict(settings),
+        "outcome": outcome,
+        "rounds": rounds,
+        "branches": {window.recorded[k].flight_key: asdict(b) for k, b in branches.items()},
+        "ifr_losses": {"baseline": _losses(ifr_baseline, window, set()),
+                       "final": _losses(ifr_final, window, set())},
+        "recorded": [f.flight_key for f in window.recorded],
+        # MD10: the first instant that gets rows; null — in loss at every instant of the baseline
+        "starts_in_loss": {f.flight_key: (t if t != float("inf") else None)
+                           for f, t in zip(window.recorded, starts) if t > 0.0},
+        "uncategorised_types": list(window.uncategorised_types),
+        "runways_without_faf": sorted(r.ident for r in window.runways.values() if r.d_faf_m is None),
+        "frame_east_error_max": window.frame.east_scale_error(np.concatenate(lats)),
+    }
+    return result, sidecar
