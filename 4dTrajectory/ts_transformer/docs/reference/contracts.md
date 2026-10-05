@@ -523,10 +523,12 @@ flown at T + E MSL, D58 — and no digest of code, D73); v6 (`ts-executor-spec-v
 parameters (`start_rule`, D77: the start state's velocity from the observed rows at or before its row, `flights.start_state`;
 the user's choice from A33, only a rule of `FORMAL_START_RULES` is written or opened), the flight ended where the judge
 ends it (`autopilot/ends.py`, D79), the bank's limits from the first cycle (D84), the dynamics' chart at the airport
-reference (D81); the reference tracks (`ts-executor-conformance-reference-v5`) hold up to 10 train flights an airport
+reference (D81); the reference tracks (`ts-executor-conformance-reference-v6`) hold up to 10 train flights an airport
 with a labelled go-around besides the 50, and the check flies a fourth way, ``moved`` (every candidate's vertical path
 changed and the chart moved: the same states, commands, limits and end cycles, the behaviour check of D81 that
-replaced the scan of names in `tests/test_architecture.py`). An executor spec is a directory
+replaced the scan of names in `tests/test_architecture.py`; its states horizontally within their own bound,
+`MOVED_HORIZONTAL_BOUND_M` 1e-4 m, the user's choice in A33: moving the chart's origin sideways changes the rounding by up
+to 2.2e-6 m on real flights, every discrete value the same; vertically within 1e-6 m as every way). An executor spec is a directory
 written once (`spec.json` + `measurements.json`, an existing file refuses): the parameters under their own sha
 (`ExecutorParams`: cycle, roll rate, τ_γ, γ̇_max factor, timeout factor — every value from the vocabulary, the
 procedure standards or a fixed choice, nothing from data; the decision-altitude check has none, D38), the vocabulary spec

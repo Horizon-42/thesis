@@ -157,7 +157,9 @@ rows the labeller admits (`read.admit`; the refusals are counted in `measurement
 `spec.json` (`measure.SUGGESTED` + `MeasuredValues`, the git state) with `measurements.json`: each value it fits from
 data beside its rounder candidates and the fit each leaves (design D15) — the spec takes the row the user chose,
 `--candidate fitted|0.5|0.25|0.1` (required when measuring, refused with `--spec-from`; A18, D56: the formal artefact
-uses 0.25), recorded as `chosen_candidate` — the climb angles' distribution, and the altitude grid (A20, D58): fitted
+uses 0.25), recorded as `chosen_candidate`; since A33 the climb nominal is the length-weighted median of the climb pieces
+with G false (G's rows as the labeller reads them, `read.read_heights`, D19) and at most the climb class's 15° (`measure.climb_pieces`;
+the others counted in `move_pieces.climb_pieces`) — the climb angles' distribution, and the altitude grid (A20, D58): fitted
 on the level-offs above the airport elevation E (row 0 apart; at most three uniform segments from 0 to 5,400 m, break
 points on a 15 m grid, steps of 15–600 m, 40 levels, the least sum of squared rounding errors by exact dynamic
 programming, `measure.fit_altitude_grid`) beside the grid of D22, each with the rounding error of the level words
@@ -1510,3 +1512,22 @@ select. The frontend's fixtures
 Measured on `v9_20261004` / `v14_20261004` into a scratch root (nothing published; the export waits for A25's artefact,
 D66): 5 airports × 40 flights in ~2 min CPU, ~5 MB a sample; on KRDU's 4-flight trial 781 live segments 0 m from the
 stored states, crossings equal to the export's.
+
+### R55 · `run_ts.py start_rules` — the start rules of D77 measured for the user's choice (vocabulary §12.1 A33, D55, D77)
+
+2026-10-05 (`experiments/start_rules.py`). `start_rules --instructions <artefact> --executor <spec dir> --row-interval-s 4
+[--rules …] [--workers N --parts P] [--chunk 2048] [--device cpu] --out <new dir>`: every labelled TRAIN flight (train only,
+D85; own dynamics or a stand-in's) read in closed loop at one Δ in memory (`instruction_closed_loop.read_interval`, nothing
+written into the artefact) once for each start rule (`autopilot.params.START_RULES`; `centred-fit-15s` — the data plane's
+centred fit, no rule of a formal spec — for the comparison only), the spec's executor parameters with that rule in place of
+its own. Per rule (`readout.json`, `ts-start-rules-readout-v1`): the closed loop's numbers (`instruction_closed_loop.summarise`:
+the readings of D34 1–3 and the outcomes, D74), the outcomes and landed share by airport, and the start track at the first
+predicted step: on the flights that turn there (more than 5° between the observed directions of the 8 s before and after,
+in metres on the ground, `flights.ground_scale`) the distance of the rule's start track (`flights.start_velocity`) from the
+direction of the 8 s after (a readout of the future, never an input), pooled and by airport. Train is drawn in `--parts`
+consecutive blocks of its one seeded permutation, each drawn once and read at every rule in its own process (up to
+`--workers`), put together in order (`merge_tallies`): the readout is the same whatever N and P. No criterion is read (D7):
+the user chooses (D55). Tests: `tests/test_start_rules.py`.
+
+    python run_ts.py start_rules --row-interval-s 4 --workers 4 --parts 8 \
+        --instructions <scratch artefact> --executor <its executor spec> --out <new dir>

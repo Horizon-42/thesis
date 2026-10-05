@@ -21,6 +21,7 @@ from ts_transformer.instructions.artefact import (
     load_spec, signals_flights, write_candidates, write_sentences, write_signals, write_spec,
 )
 from ts_transformer.instructions.labeller.read import admit, read_flight
+from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.piecewise import fit_pieces, moving_average
 from ts_transformer.instructions.signals import FlightSignals, signals_from_series
 from ts_transformer.instructions.spec import SPEC_SCHEMA, VocabularySpec
@@ -477,14 +478,78 @@ def test_every_fitted_angle_comes_with_rounder_candidates_and_the_fit_each_leave
     angle = np.concatenate((rng.normal(3.0, 0.2, 300), rng.normal(1.0, 0.2, 300), rng.normal(-1.5, 0.3, 40)))
     length = rng.uniform(500.0, 3000.0, len(angle))
     fit = measure.fit_descent_classes(angle, length, 4)
-    rows = measure.rounding_candidates(angle, length, fit["centres_deg"], fit["edges_deg"], 1.47)
+    climb, climb_length, _ = measure.climb_pieces(angle, length, np.zeros(len(angle)), 15.0)
+    rows = measure.rounding_candidates(angle, length, fit["centres_deg"], fit["edges_deg"], climb, climb_length, 1.47)
     assert set(rows) == {"fitted", "0.5", "0.25", "0.1"}
     assert rows["fitted"]["descent_end_height_error_m"] == pytest.approx(fit["end_height_error_m"])
     assert rows["0.5"]["climb_centre_deg"] == 1.5 and rows["0.1"]["climb_centre_deg"] == 1.5
     assert all(c * 4 == round(c * 4) for c in rows["0.25"]["descent_centres_deg"])
     assert rows["0.5"]["descent_edges_deg"][0] == measure.DESCENT_FLOOR_DEG
-    climbs = measure.climb_distribution(angle, length)
+    climbs = measure.climb_distribution(climb, climb_length)
     assert climbs["pieces"] == 40 and 1.0 < climbs["length_weighted_deg"]["p50"] < 2.0
+    assert rows["fitted"]["climb_end_height_error_m"] == pytest.approx(measure.climb_end_error(climb, climb_length, 1.47))
+
+
+GLIDE = 70.0 * np.tan(np.radians(3.0))
+#: Level eastbound at 840 m, a climb at 3 m/s (G false) to 900 m, then the labeller tests' go-around: a 3° descent on the
+#: final of 09, a climb straight ahead at 8 m/s (G true, read as two pieces), a level-off (G ends there), a downwind with
+#: a climb at 3 m/s in it (G false again), and a second approach. ``climb`` the downwind's climb: (rows, m/s).
+def climb_then_go_around(climb=(15, 3.0)):
+    return [(30, 0, 70, 0), (20, 0, 70, 3.0), (60, 0, 70, 0), (89, 0, 70, -GLIDE), (40, 0, 70, 8.0), (10, 0, 70, 0),
+            (30, -6, 70, 0), (60, 0, 70, 0), (climb[0], 0, 70, climb[1]), (95, 0, 70, 0), (30, -6, 70, 0),
+            (20, 0, 70, 0), (104, 0, 70, -GLIDE)]
+
+
+#: Without a go-around: a climb at 40 m/s (past the climb class) and a downwind, a base and a final.
+STEEP_CLIMB = [(30, 0, 70, 0), (6, 0, 70, 40.0), (60, 0, 70, 0), (30, -6, 70, 0), (100, 0, 70, 0), (30, -6, 70, 0),
+               (20, 0, 70, 0), (104, 0, 70, -GLIDE)]
+
+
+def test_the_climb_nominal_is_fitted_on_the_climbs_with_g_false_inside_the_climb_class():
+    """A33 (D54, D28, D19): each move piece says whether G is true at its first row, as the labeller reads the flight
+    (from the go-around row to the runway word that ends it); the climb nominal is the length-weighted median of the
+    climbs with G false and at most the climb class's largest angle — a go-around's climb (flown at the go-around angle),
+    a climb in a flight whose vertical reading is refused (G not known) and a climb past the class are left out and
+    counted."""
+    airport = instruction_airport()
+    provisional = measure.provisional_spec()
+
+    def measured(legs, altitude_m):
+        flight = instruction_flight(*fly_legs(legs, 90.0, altitude_m, -400.0, 0.0))
+        arrays = measure.measure_flight(admit(flight, airport, provisional), provisional, airport.elevation_m)
+        climbing = arrays["move_angle_deg"] < measure.DESCENT_FLOOR_DEG
+        counted = measure.climb_pieces(arrays["move_angle_deg"], arrays["move_length_m"], arrays["move_go_around"],
+                                       provisional.climb_angle_max_deg)
+        return flight, arrays["move_go_around"][climbing].tolist(), -arrays["move_angle_deg"][climbing], counted
+
+    flight, go_around, angles, (climb, length, counts) = measured(climb_then_go_around(), 840.0)
+    reading = read_flight(flight, airport, instruction_spec())
+    assert len(reading.go_around_rows) == 1                                           # the labeller reads one go-around
+    assert go_around == [0.0, 1.0, 1.0, 0.0]          # the first climb, the go-around's, the downwind's after G ends
+    assert climb.tolist() == [angles[0], angles[3]] and all(2.0 < c < 2.6 for c in climb)     # 3 m/s at 70 m/s
+    assert counts == {"climb_pieces": 4, "kept": 2,
+                      "left_out": {"G true": 2, "vertical reading refused": 0, "above the climb class": 0}}
+    # a go-around in a flight whose vertical reading the labeller refuses (a climb past the class): G is not known
+    flight, go_around, angles, (climb, _, counts) = measured(climb_then_go_around((6, 40.0)), 840.0)
+    with pytest.raises(Refused, match="path angle out of range"):
+        read_flight(flight, airport, instruction_spec())
+    assert np.isnan(go_around).all() and len(go_around) == 5 and len(climb) == 0
+    assert counts["left_out"] == {"G true": 0, "vertical reading refused": 5, "above the climb class": 0}
+    # without a go-around G is false whatever the labeller says of the reading; the climb past the class is left out
+    flight, go_around, angles, (climb, _, counts) = measured(STEEP_CLIMB, 700.0)
+    assert go_around == [0.0, 0.0] and (angles > 15.0).all() and len(climb) == 0
+    assert counts["left_out"] == {"G true": 0, "vertical reading refused": 0, "above the climb class": 2}
+    with pytest.raises(ValueError, match="no climb piece"):
+        measure.climb_centre(climb, np.zeros(0))
+
+    angle = -np.array([1.0, 2.0, 3.0, 4.0, 16.0, 5.0, 6.0, 0.2])     # 0.2° climbs less than the descent floor: a descent
+    lengths = np.array([1000.0, 1000.0, 3000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0])
+    go_around = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, np.nan, 0.0])
+    climb, length, counts = measure.climb_pieces(angle, lengths, go_around, 15.0)
+    assert climb.tolist() == [1.0, 2.0, 3.0, 4.0]
+    assert counts == {"climb_pieces": 7, "kept": 4,
+                      "left_out": {"G true": 1, "vertical reading refused": 1, "above the climb class": 1}}
+    assert measure.climb_centre(climb, length) == 3.0           # 3° holds half the length; the plain median is 2.5°
 
 
 def test_the_grid_fit_finds_a_known_grid_in_synthetic_level_offs():
@@ -721,7 +786,9 @@ def test_the_spec_takes_the_chosen_row_of_the_rounding_candidates_and_refuses_an
     rng = np.random.default_rng(0)
     angle = np.concatenate((rng.uniform(0.5, 5.0, 400), -rng.uniform(1.0, 2.0, 20)))
     length = rng.uniform(500.0, 5000.0, len(angle))
-    candidates = measure.rounding_candidates(angle, length, [1.51, 2.45, 3.09, 4.45], [-0.5, 1.98, 2.77, 3.77, 10.0], 1.47)
+    climb, climb_length, _ = measure.climb_pieces(angle, length, np.zeros(len(angle)), 15.0)
+    candidates = measure.rounding_candidates(angle, length, [1.51, 2.45, 3.09, 4.45], [-0.5, 1.98, 2.77, 3.77, 10.0],
+                                             climb, climb_length, 1.47)
     assert list(candidates) == list(measure.CANDIDATE_NAMES)
     assert measure.candidate_values(candidates, "0.25") == {
         "descent_angle_edges_deg": (-0.5, 2.0, 2.75, 3.75, 10.0), "descent_angle_centres_deg": (1.5, 2.5, 3.0, 4.5),
