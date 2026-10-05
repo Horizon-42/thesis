@@ -75,6 +75,25 @@ def test_row_by_row_gives_what_the_whole_sentence_gives(words):
         torch.testing.assert_close(row_by_row[finite], whole[column][finite], rtol=1e-5, atol=1e-5)
 
 
+def test_a_past_that_outgrows_its_room_grows_and_gives_the_same_rows(words):
+    """The speaker's cache grows as a sentence needs (`Past.grown`): row by row from a room of 2 rows, the logits are
+    those of a room for the whole sentence, and the room is at least the rows."""
+    model = small_prior(words)
+    rows = collate(sentences(words), CPU)
+    count = rows.present.shape[1]
+    with torch.no_grad():
+        outputs = []
+        for capacity in (count, 2):
+            past, pieces = model.no_past(rows.present.shape[0], capacity), []
+            for r in range(count):
+                part = rows.between(r, r + 1)
+                h_part, tokens_part, past = model.extend(part, past)
+                pieces.append(model.logits(h_part, tokens_part, part.valid, part.targets, part.first)[0])
+            outputs.append(torch.cat(pieces, dim=1))
+            assert all(p.keys.shape[2] >= count and p.rows == count for p in past)
+    torch.testing.assert_close(outputs[1], outputs[0], rtol=0, atol=0, equal_nan=True)
+
+
 def test_a_shift_of_every_time_changes_no_output(words):
     model = small_prior(words)
     rows = collate(sentences(words), CPU)

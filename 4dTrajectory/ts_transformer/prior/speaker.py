@@ -88,8 +88,8 @@ class Speaker:
     def __init__(self, model: Prior, words: Words, finals: Sequence[Sequence[Final]], *, capacity: int,
                  generator: torch.Generator, temperature: float = 1.0) -> None:
         """``finals``: each aircraft's airport's finals, one for each candidate in the pointer's order (the procedure
-        masks it speaks under, §4, kept fresh for this batch: their state is this batch's); ``capacity``: the most rows
-        any aircraft will have."""
+        masks it speaks under, §4, kept fresh for this batch: their state is this batch's); ``capacity``: the rows the
+        cache has room for at first (it grows as a sentence needs, `model.Past.grown`)."""
         if not temperature > 0.0:
             raise ValueError(f"temperature {temperature}: it must be positive")
         for finals_b in finals:

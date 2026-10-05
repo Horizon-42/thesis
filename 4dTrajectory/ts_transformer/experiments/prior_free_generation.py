@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,7 +23,6 @@ import numpy as np
 import torch
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
-from ts_transformer.autopilot.executor import GO_AROUND_EXTRA_S
 from ts_transformer.autopilot.start import Loop, start
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import (
@@ -48,6 +46,8 @@ from ts_transformer.prior.speaker import MOST_GO_AROUNDS, Position, Speaker, go_
 
 #: The temperature of free generation: the model's own distribution (the masks applied).
 TEMPERATURE = 1.0
+#: The predicted rows the speaker's cache has room for at first (it grows as the flights need, `model.Past.grown`).
+FIRST_ROWS = 128
 #: The format of a readout's files (``config.json``, ``sentences.npz``; `read_sentences`). v1 (B6): the words the
 #: procedure masks blocked at each row (``blocked_<column>``).
 FREE_GENERATION_SCHEMA = "ts-prior-free-generation-v1"
@@ -134,9 +134,10 @@ def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Map
     count = len(order)
     flight_geometries = [geometries[flights[i]["airport"]] for i in order]
     elevations = np.array([g.elevation_m for g in flight_geometries])
-    limit = float(loop.executor.time_limit_s.max()) + GO_AROUND_EXTRA_S * loop.most_go_arounds
-    speaker = Speaker(model, words, [finals[g.code] for g in flight_geometries],
-                      capacity=start + math.ceil(limit / interval_s) + 2, generator=generator, temperature=temperature)
+    # the cache's first room: the observed rows and some predicted ones (it grows as the flights need; the loop's time
+    # limit is not the speaker's to read, vocabulary D90)
+    speaker = Speaker(model, words, [finals[g.code] for g in flight_geometries], capacity=start + FIRST_ROWS,
+                      generator=generator, temperature=temperature)
     entry = np.array([utc_s(flights[i]["entry_time_utc"]) for i in order])
     first_rows = np.array([sentences[i].rows.first_row for i in order])
     keys = [own_flight_key(flights[i]) for i in order]

@@ -121,6 +121,13 @@ class Past(NamedTuple):
     present: torch.Tensor
     rows: int
 
+    def grown(self, capacity: int) -> Past:
+        """The same rows with room for ``capacity`` (new storage: a line that outgrows its room is moved, never cut)."""
+        extra = capacity - self.keys.shape[2]
+        pad = self.keys.new_zeros((*self.keys.shape[:2], extra, self.keys.shape[3]))
+        return Past(torch.cat((self.keys, pad), dim=2), torch.cat((self.values, pad), dim=2),
+                    torch.cat((self.present, self.present.new_zeros((self.present.shape[0], extra))), dim=1), self.rows)
+
     @classmethod
     def nothing(cls, batch: int, heads: int, head: int, capacity: int, like: torch.Tensor) -> Past:
         """No rows yet, room for ``capacity`` (``like``: a tensor of the device and dtype)."""
@@ -152,8 +159,8 @@ class Layer(nn.Module):
         batch, rows, d = x.shape
         head = d // self.heads
         start, end = past.rows, past.rows + rows
-        if end > past.keys.shape[2]:
-            raise ValueError(f"{end} rows, the past holds {past.keys.shape[2]}")
+        if end > past.keys.shape[2]:                 # a line longer than its room: twice the room, or the rows
+            past = past.grown(max(end, 2 * past.keys.shape[2]))
         y = self.time_norm(x)
         q, k, v = self.time_qkv(y).reshape(batch, rows, 3, self.heads, head).permute(2, 0, 3, 1, 4)
         cos, sin = rope_angles(time_s, head, self.rope_base)
