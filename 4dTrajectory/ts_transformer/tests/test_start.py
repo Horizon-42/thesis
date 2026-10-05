@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import fields, replace
 
 import numpy as np
@@ -15,7 +16,7 @@ from ts_transformer.autopilot.frame import read_state
 from ts_transformer.autopilot.judge import TIMEOUT, outcome_of
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
-from ts_transformer.autopilot.start import GoAroundBeyondMost, Loop, RowRefused, start
+from ts_transformer.autopilot.start import NO_MOVE, GoAroundBeyondMost, Loop, Move, RowRefused, start, start_moved
 from ts_transformer.autopilot.spec import params_sha256
 from ts_transformer.instructions.artefact import (
     CLOSED_LOOP_DIRECTORY, ClosedLoopSentence, closed_loop_path, closed_loop_sentences, load_candidates,
@@ -369,6 +370,142 @@ def test_a_flights_states_do_not_depend_on_the_other_flights_of_its_loop(tmp_pat
         own, _ = _fly(alone, way, row_of, 0, until_done=True)
         assert len(own) <= len(rows)
         _same_flight(own, alone, 0, rows, together, i)
+
+
+# ---- moved starts (D97 (4)): the user's readings (2026-10-05) — positions and heights stretched about the first predicted
+# step, the time limit the flight's own
+def _moved_artefact(tmp_path, monkeypatch, interval_s=4.0):
+    """`_artefact` with the start's physical context built from the flights it is given (the moved ones), not from the
+    stored synthetic flight."""
+    directory, words, batch, stored, anchor = _artefact(tmp_path, monkeypatch, interval_s)
+    monkeypatch.setattr(start_module, "flight_inputs", lambda series, flights, anchors, airports, rule, device:
+                        executor_inputs(flights[0], batch.geometries[0], anchors[0], rule=rule))
+    return directory, words, batch, stored, anchor
+
+
+def _started(directory, stored, tmp_path, interval_s, move=None):
+    if move is None:
+        loop, _ = start(directory, "train", interval_s, {0: stored}, tmp_path / "executor", most_go_arounds=0, device=CPU)
+        return loop, None
+    loop, _, observed = start_moved(directory, "train", interval_s, {0: stored}, tmp_path / "executor", {0: move},
+                                    most_go_arounds=0, device=CPU)
+    return loop, observed[0]
+
+
+def test_a_move_of_zero_is_the_start_without_a_move_bit_for_bit(tmp_path, monkeypatch):
+    """D97 (4): `NO_MOVE` gives the start, its observed rows the stored sentence's, and the same flight, bit for bit."""
+    from ts_transformer.autopilot.flights import START_RULES, start_state, start_velocity
+    from ts_transformer.autopilot.start import moved_signals
+    from ts_transformer.instructions.signals import ROW_FIELDS
+    from ts_transformer.tests.support import START_RULE
+
+    directory, words, batch, stored, anchor = _moved_artefact(tmp_path, monkeypatch)
+    signals, geometry = batch.observed[0], batch.geometries[0]
+    for row in (anchor, 60, 120, 200, 221):            # the cut and the identity, for every start rule (at 221 a
+        # stretch by 1.0 would change heights' last bits: the move skips a part that is zero)
+        same = moved_signals(signals, row, NO_MOVE)
+        assert same.n_rows == row + 1
+        for name in ROW_FIELDS:
+            assert np.array_equal(getattr(same, name), getattr(signals, name)[: row + 1]), name
+        for rule in START_RULES:
+            assert np.array_equal(start_velocity(same, [row], rule, geometry), start_velocity(signals, [row], rule, geometry))
+    plain, _ = _started(directory, stored, tmp_path, 4.0)
+    zero, observed = _started(directory, stored, tmp_path, 4.0, NO_MOVE)
+    mass = float(plain.executor.inputs.initial_state[0, 6])
+    assert np.array_equal(zero.executor.inputs.initial_state[0].numpy(),
+                          start_state(signals, anchor, START_RULE, geometry, mass))      # the unmoved, uncut flight's
+    for f in fields(FlightInputs):
+        assert torch.equal(getattr(plain.executor.inputs, f.name), getattr(zero.executor.inputs, f.name)), f.name
+    assert torch.equal(plain.executor.time_limit_s, zero.executor.time_limit_s)
+    every = int(round(4.0 / words.spec.step_s))
+    assert np.array_equal(observed, stored.rows.states[: stored.rows.start * every])
+    for row in stored.rows.grid:
+        a, _ = plain.step(row[None, :])
+        b, _ = zero.step(row[None, :])
+        assert np.array_equal(a, b)
+
+
+def test_the_moved_observed_rows_give_the_moved_start_state_by_the_start_rule(tmp_path, monkeypatch):
+    """D97 (4): a turn about the airport reference, a change of height and of speed move the observed rows to the first
+    predicted step (`moved_signals`), and the start is the start rule's state and rows on them — exactly; so the start
+    lies as far from the reference on a bearing turned by δ, raised by Δh, its speed scaled by 1 + κ with the path angle
+    kept and its track turned — up to the airport frame's ground scale, which the start rule reads at each row's
+    latitude and height (D87: within 1e-3 here) — and the time limit stays the flight's own."""
+    from ts_transformer.autopilot.flights import observed_rows, start_state
+    from ts_transformer.autopilot.start import moved_signals
+    from ts_transformer.tests.support import START_RULE
+
+    directory, words, batch, stored, anchor = _moved_artefact(tmp_path, monkeypatch)
+    frame, geometry = batch.geometries[0].frame, batch.geometries[0]
+    move = Move(turn_deg=10.0, height_m=100.0, speed_scale=1.04)
+    plain, _ = _started(directory, stored, tmp_path, 4.0)
+    moved, observed = _started(directory, stored, tmp_path, 4.0, move)
+    every = int(round(4.0 / words.spec.step_s))
+    shifted = moved_signals(batch.observed[0], anchor, move)
+    mass = float(plain.executor.inputs.initial_state[0, 6])
+    assert np.array_equal(moved.executor.inputs.initial_state[0].numpy(),
+                          start_state(shifted, anchor, START_RULE, geometry, mass))
+    assert np.array_equal(observed, observed_rows(shifted, stored.rows.first_row + np.arange(stored.rows.start * every),
+                                                  START_RULE, geometry))
+    (lat0, lon0, h0, v0, psi0, gamma0, _), (lat1, lon1, h1, v1, psi1, gamma1, _) = (
+        loop.executor.inputs.initial_state[0].tolist() for loop in (plain, moved))
+    (e0, n0), (e1, n1) = (frame.horizontal_from_latlon(lat, lon) for lat, lon in ((lat0, lon0), (lat1, lon1)))
+    assert math.hypot(e1, n1) == pytest.approx(math.hypot(e0, n0), abs=1e-6)
+    bearing = lambda e, n: math.degrees(math.atan2(e, n))  # noqa: E731 — compass
+    assert (bearing(e1, n1) - bearing(e0, n0)) % 360.0 == pytest.approx(10.0, abs=1e-9)
+    assert h1 == pytest.approx(h0 + 100.0, abs=1e-9)
+    assert v1 == pytest.approx(v0 * 1.04, rel=1e-3) and gamma1 == pytest.approx(gamma0, abs=1e-3)
+    assert math.remainder(psi0 - psi1 - math.radians(10.0), 2 * math.pi) == pytest.approx(0.0, abs=1e-3)
+    assert torch.equal(plain.executor.time_limit_s, moved.executor.time_limit_s)
+    before = stored.rows.states[: stored.rows.start * every]          # the unmoved observed rows
+    assert np.allclose(observed[:, 2] - observed[-1, 2], 1.04 * (before[:, 2] - before[-1, 2]), atol=1e-6)
+    assert np.allclose(np.mod(observed[:, 3] - before[:, 3] + 180.0, 360.0) - 180.0, 10.0, atol=0.1)
+    assert np.allclose(observed[:, 4], 1.04 * before[:, 4], rtol=1e-3)
+
+
+def test_a_move_stretches_heights_with_positions_and_keeps_the_path_angle_for_every_start_rule(tmp_path, monkeypatch):
+    """D97 (4), the user's reading: the speed change stretches positions and heights about the first predicted step, so
+    the start rule reads the speed scaled and the path angle kept — in a descent (row 120) and in a turn (row 200), for
+    every start rule (the centred fit reads the data plane's track, ground speed and vertical rate, turned and scaled
+    alike) — up to the frame's ground scale at the moved rows (D87; a 30° turn here: within 0.5 %)."""
+    from ts_transformer.autopilot.flights import START_RULES, start_state
+    from ts_transformer.autopilot.start import moved_signals
+
+    _, _, batch, _, _ = _moved_artefact(tmp_path, monkeypatch)
+    signals, geometry = batch.observed[0], batch.geometries[0]
+    move = Move(turn_deg=30.0, height_m=200.0, speed_scale=1.05)
+    for row in (120, 200):
+        moved = moved_signals(signals, row, move)
+        h0, h1 = signals.altitude_m[: row + 1], moved.altitude_m
+        assert np.allclose(h1 - h1[row], 1.05 * (h0 - h0[row]), atol=1e-9) and h1[row] == pytest.approx(h0[row] + 200.0)
+        assert np.allclose(moved.track_deg, signals.track_deg[: row + 1] + 30.0)          # unwrapped, turned
+        across = moved_signals(signals, row, Move(turn_deg=120.0)).track_deg       # past 360°: still unwrapped
+        assert np.allclose(across, signals.track_deg[: row + 1] + 120.0) and across.max() > 360.0
+        assert np.allclose(moved.ground_speed_mps, 1.05 * signals.ground_speed_mps[: row + 1])
+        for rule in START_RULES:
+            _, _, _, v0, psi0, gamma0, _ = start_state(signals, row, rule, geometry, 62000.0)
+            _, _, _, v1, psi1, gamma1, _ = start_state(moved, row, rule, geometry, 62000.0)
+            assert v1 == pytest.approx(1.05 * v0, rel=5e-3), (row, rule)
+            assert gamma1 == pytest.approx(gamma0, abs=5e-4), (row, rule)
+            assert math.degrees(math.remainder(psi0 - psi1, 2 * math.pi)) == pytest.approx(30.0, abs=0.2), (row, rule)
+
+
+def test_a_moved_start_refuses_a_sentence_not_its_flights_and_a_wrong_move(tmp_path, monkeypatch):
+    """D97 (4): a sentence whose observed rows are not its flight's is refused with a move too (that the check reads the
+    flight unmoved: the moved start of a valid sentence starts, above), and a move is one per flight, finite, its speed
+    scale positive."""
+    directory, words, _, stored, _ = _moved_artefact(tmp_path, monkeypatch)
+    states = stored.rows.states.copy()
+    states[0, 0] += 1.0
+    other = replace(stored, rows=replace(stored.rows, states=states))
+    with pytest.raises(ValueError, match="its observed rows differ"):
+        start_moved(directory, "train", 4.0, {0: other}, tmp_path / "executor", {0: Move(turn_deg=5.0)},
+                    most_go_arounds=0, device=CPU)
+    with pytest.raises(ValueError, match="a move for each flight"):
+        start_moved(directory, "train", 4.0, {0: stored}, tmp_path / "executor", {}, most_go_arounds=0, device=CPU)
+    for wrong in (dict(turn_deg=math.nan), dict(height_m=math.inf), dict(speed_scale=0.0), dict(speed_scale=-1.0)):
+        with pytest.raises(ValueError, match="a move is finite"):
+            Move(**wrong)
 
 
 def test_the_start_refuses_sentences_not_read_under_its_artefact_split_and_executor(tmp_path, monkeypatch):

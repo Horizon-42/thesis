@@ -33,6 +33,8 @@ after the first predicted step; the observed rows a sentence stores before it ar
 from __future__ import annotations
 
 import copy
+import math
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -54,8 +56,51 @@ from ts_transformer.instructions.artefact import (
 )
 from ts_transformer.instructions.grammar import InForce, Ungrammatical, apply, require_values
 from ts_transformer.instructions.labeller.interval import OBSERVATION_S, interval_rows
-from ts_transformer.instructions.signals import FlightSignals
+from ts_transformer.instructions.signals import ROW_FIELDS, FlightSignals
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, Words
+
+
+@dataclass(frozen=True)
+class Move:
+    """A moved start (vocabulary §6 item 5, D97 (4)): a flight's observed rows up to its first predicted step turned
+    about the airport reference by ``turn_deg`` (compass, clockwise: a bearing β becomes β + δ), raised by ``height_m``,
+    and their displacements from the first predicted step's row stretched by ``speed_scale`` (1 + κ) — positions and
+    heights alike, so the speed the start rule reads scales and the path angle is kept (the user, 2026-10-05). The
+    flight's time limit stays its own (the user, 2026-10-05). `NO_MOVE` moves nothing."""
+
+    turn_deg: float = 0.0
+    height_m: float = 0.0
+    speed_scale: float = 1.0
+
+    def __post_init__(self) -> None:
+        if not all(math.isfinite(v) for v in (self.turn_deg, self.height_m, self.speed_scale)) or self.speed_scale <= 0:
+            raise ValueError(f"a move is finite with a positive speed scale, got {self}")
+
+
+NO_MOVE = Move()
+
+
+def moved_signals(signals: FlightSignals, row: int, move: Move) -> FlightSignals:
+    """The observed flight to its 2 s row ``row`` (the first predicted step: no later row is kept) moved by ``move``
+    (`Move`): positions turned about the airport frame's origin (the airport reference, D81), heights raised, then both
+    stretched about row ``row``; the data plane's fits (track, ground speed, vertical rate) turned and scaled alike. A
+    part of the move that is zero is not applied, so `NO_MOVE` keeps every row bit for bit."""
+    kept = replace(signals, **{name: getattr(signals, name)[: row + 1] for name in ROW_FIELDS})
+    e, n, h = (np.array(getattr(kept, name), dtype=np.float64) for name in ("e_m", "n_m", "altitude_m"))
+    track, ground, vertical = (np.array(getattr(kept, name), dtype=np.float64)
+                               for name in ("track_deg", "ground_speed_mps", "vertical_rate_mps"))
+    if move.turn_deg:
+        c, s = math.cos(math.radians(move.turn_deg)), math.sin(math.radians(move.turn_deg))
+        e, n = e * c + n * s, n * c - e * s
+        track = track + move.turn_deg                     # unwrapped along time, as the field is
+    if move.height_m:
+        h = h + move.height_m
+    if move.speed_scale != 1.0:
+        k = move.speed_scale
+        e, n, h = (v[row] + k * (v - v[row]) for v in (e, n, h))
+        ground, vertical = ground * k, vertical * k
+    return replace(kept, e_m=e, n_m=n, altitude_m=h, track_deg=track, ground_speed_mps=ground,
+                   vertical_rate_mps=vertical)
 
 
 class GoAroundBeyondMost(ValueError):
@@ -240,6 +285,21 @@ def start(instructions: Path, split: str, interval_s: float, sentences: Mapping[
     gives them), in the order of their keys, and that order (module docstring), flown by the executor spec in the
     directory ``executor``. Refused unless the spec opens for this artefact (`replay.open_executor`) and the sentences
     may be started (`require_startable`)."""
+    loop, order, _ = start_moved(instructions, split, interval_s, sentences, executor, {i: NO_MOVE for i in sentences},
+                                 most_go_arounds=most_go_arounds, device=device)
+    return loop, order
+
+
+def start_moved(instructions: Path, split: str, interval_s: float, sentences: Mapping[int, ClosedLoopSentence],
+                executor: Path, moves: Mapping[int, Move], *, most_go_arounds: int, device: torch.device
+                ) -> tuple[Loop, list[int], dict[int, np.ndarray]]:
+    """`start` with each flight's start moved (D97 (4)): ``moves`` its `Move` by the same keys as ``sentences``. Each
+    flight is checked against its stored signals before it is moved (`require_startable`); its observed rows to the
+    first predicted step are moved (`moved_signals`), and the start rule gives its state from them; its time limit is its
+    own. Returns the loop, the order, and each flight's moved observed rows before its first predicted step
+    (`STATE_COLUMNS`, as a closed-loop sentence stores them: a speaker reads them). `NO_MOVE` is `start` bit for bit."""
+    if set(moves) != set(sentences):
+        raise ValueError(f"a move for each flight: moves for {sorted(moves)[:5]}, sentences of {sorted(sentences)[:5]}")
     params, _, words = replay.open_executor(executor, instructions)
     spec = words.spec
     first = start_row(interval_s)
@@ -257,8 +317,12 @@ def start(instructions: Path, split: str, interval_s: float, sentences: Mapping[
     lengths = dict(zip(labelled["signal_index"].tolist(), np.diff(labelled["offsets"]).tolist()))
     anchors = [sentences[i].rows.first_row + first * every for i in order]
     airports = [geometries[f.airport] for f in flights]
-    loop = Loop(flight_inputs(series, flights, anchors, airports, params.start_rule, device=device), airports,
+    moved = [moved_signals(flight, anchor, moves[i]) for i, flight, anchor in zip(order, flights, anchors)]
+    observed = {i: observed_rows(flight, sentences[i].rows.first_row + np.arange(first * every), params.start_rule,
+                                 airport)
+                for i, flight, airport in zip(order, moved, airports)}
+    loop = Loop(flight_inputs(series, moved, anchors, airports, params.start_rule, device=device), airports,
                 [replay.flight_approach_ias_mps(s, g) for s, g in zip(series, groups)],
                 [replay.time_limit_s(int(lengths[i]), anchor, params, spec.step_s) for i, anchor in zip(order, anchors)],
                 params, words, interval_s=interval_s, most_go_arounds=most_go_arounds, device=device)
-    return loop, order
+    return loop, order, observed

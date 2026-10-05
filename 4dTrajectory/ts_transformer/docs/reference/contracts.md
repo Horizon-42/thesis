@@ -689,6 +689,11 @@ grammar's words in force, the go-arounds, the time limits, which stay hidden, D9
 flies what its original flies and gets its outcome. A flight's states do not depend on the other flights of its loop
 (D97 (3)): measured on A34's artefact (train, Δ = 4 s, CPU) the batch's composition changes nothing, its size (a flight
 alone against chunks of 2048) moves states by <= 7.9e-10 m; the tests hold words, done and outcome exact and states within
-`STATE_BOUND_M` (the user, 2026-10-05). The closed-loop reading
+`STATE_BOUND_M` (the user, 2026-10-05). `start_moved(…, moves)` (A38, D97 (4)) starts each flight from a moved
+start: the flight checked against its stored signals unmoved, then its observed rows to the first predicted step turned
+about the airport reference, raised, and stretched about the first predicted step by the speed scale (positions and
+heights: the path angle kept) (`Move`, `moved_signals`); the start rule gives the state from the moved rows (so the
+speed follows the frame's ground scale at the moved rows, D87), the moved rows come back, the time limit is the
+flight's own (the user, 2026-10-05); `NO_MOVE` is `start` bit for bit. The closed-loop reading
 builds its `Loop` from the same pieces, so its sentences said through `start` give back their stored states and the
 replay's outcome (`tests/test_start.py`). The artefact's formats do not change.
