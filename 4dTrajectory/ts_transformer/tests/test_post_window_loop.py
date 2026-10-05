@@ -12,7 +12,7 @@ import torch
 
 from flight_scenarios.fas_geometry import fas_course_geometry
 from ts_transformer.autopilot.judge import OUTCOMES
-from ts_transformer.autopilot.start import NO_MOVE, start, start_moved
+from ts_transformer.autopilot.start import NO_MOVE, start_moved
 from ts_transformer.experiments import post_window_loop
 from ts_transformer.experiments.post_window_loop import LOST_SEPARATION, WindowLoop, start_move_of
 from ts_transformer.experiments.prior_free_generation import speak_and_fly
@@ -72,17 +72,13 @@ def window_setup(tmp_path, monkeypatch):
     torch.manual_seed(0)
     base = Prior(PriorConfig.from_words(words, "full", d_model=32, layers=1, heads=4, feedforward=64)).eval()
 
-    def loop():
-        return start(directory, "train", DELTA, {0: stored}, tmp_path / "executor", most_go_arounds=MOST_GO_AROUNDS,
-                     device=CPU)
-
     def moved_loop(move):
         return start_moved(directory, "train", DELTA, {0: stored}, tmp_path / "executor", {0: move},
                            most_go_arounds=MOST_GO_AROUNDS, device=CPU)
 
     return dict(directory=directory, words=words, stored=stored, flights=flights, geometries=geometries,
                 geometry=geometry, roster=roster, finals=finals, windows=windows, reference=reference, base=base,
-                loop=loop, moved_loop=moved_loop, key=key, batch=batch)
+                moved_loop=moved_loop, key=key, batch=batch)
 
 
 def _with_module(base, weights=True):
@@ -110,8 +106,8 @@ def test_a_window_without_other_aircraft_is_free_generation_bit_for_bit(setup):
     whatever the traffic module's weights."""
     s = setup
     assert len(s["windows"]) == 1 and not len(s["windows"][0].others_at(10))
-    loop, order = s["loop"]()
-    (free,) = speak_and_fly(s["base"], loop, order, {0: s["stored"]}, s["flights"], s["geometries"],
+    loop, order, observed = s["moved_loop"](NO_MOVE)
+    (free,) = speak_and_fly(s["base"], loop, order, {0: s["stored"]}, observed, s["flights"], s["geometries"],
                             {s["geometry"].code: s["roster"]}, s["finals"], s["words"], interval_s=DELTA,
                             variant="full", numbers=[flight_numbers(7, 0, 0)], device=CPU)
     windows = _window_loop(s, _with_module(s["base"]), s["windows"])
@@ -120,9 +116,9 @@ def test_a_window_without_other_aircraft_is_free_generation_bit_for_bit(setup):
     assert window.outcome == free.outcome and window.go_arounds == free.go_arounds and window.loss is None
     assert window.speed_mask_rows == 0
     # the speaker's probabilities too, bit for bit: free generation's loop as `speak_and_fly` runs it
-    loop, order = s["loop"]()
-    speaking = SpeakingLoop(s["base"], loop, order, {0: s["stored"]}, s["flights"], s["geometries"], [s["roster"]],
-                            s["finals"], s["words"], interval_s=DELTA, variant="full", device=CPU)
+    loop, order, observed = s["moved_loop"](NO_MOVE)
+    speaking = SpeakingLoop(s["base"], loop, order, {0: s["stored"]}, observed, s["flights"], s["geometries"],
+                            [s["roster"]], s["finals"], s["words"], interval_s=DELTA, variant="full", device=CPU)
     numbers = flight_numbers(7, 0, 0)
     while speaking.observing:
         speaking.observe()

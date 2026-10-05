@@ -2,7 +2,8 @@
 shared by the runners of stage C, not a runner.
 
 Each window's commanded aircraft is flown from the observed rows that the start gives back (`autopilot.start.start_moved`:
-window B's moved, every other window's its stored rows, vocabulary D97 (4); C9) through the prior's step of a speaker's
+window B's moved, every other window's its stored rows, vocabulary D97 (4); C9), which the speaking loop takes as they
+are (prior §7 item 7, B12), through the prior's step of a speaker's
 closed loop (prior §7 item 7,
 `prior_speaking_loop.SpeakingLoop`: the start of a closed loop, the prior's one function of a loop's row with each
 window's own landings, D105, the speaker, the executor; the most go-arounds of a flight 2, D91). The loop adds the
@@ -28,7 +29,7 @@ permits every word.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -41,7 +42,6 @@ from ts_transformer.inference.separation import Loss
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import ClosedLoopSentence
 from ts_transformer.instructions.grammar import column_words
-from ts_transformer.instructions.labeller.interval import interval_rows
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, SPEED, Words
 from ts_transformer.post.conformance import Checked, require_conforming_edges
 from ts_transformer.post.edges import tokens
@@ -115,10 +115,8 @@ class WindowLoop:
             raise ValueError("one window for each flight of the loop, in its order")
         self.order, self.windows, self.words, self.device = list(order), list(windows), words, device
         self.landings = [window_landings(w, rosters[w.scene.geometry.code]) for w in self.windows]
-        every = interval_rows(interval_s, words.spec.step_s)
-        self.speaking = SpeakingLoop(model, loop, order, moved_sentences(sentences, observed, order, every), flights,
-                                     geometries, self.landings, finals, words, interval_s=interval_s, variant=variant,
-                                     device=device)
+        self.speaking = SpeakingLoop(model, loop, order, sentences, observed, flights, geometries, self.landings, finals,
+                                     words, interval_s=interval_s, variant=variant, device=device)
         self.step_s = words.spec.step_s
         self.every = self.speaking.every
         self.geometries = [w.scene.geometry for w in self.windows]
@@ -328,23 +326,6 @@ def start_move_of(window: Window) -> Move:
     """The start's move of ``window``'s commanded aircraft (`autopilot.start.Move`): window B's, `NO_MOVE` otherwise."""
     move = window.start_move
     return Move(move.turn_deg, move.height_m, move.speed_scale)
-
-
-def moved_sentences(sentences: Mapping[int, ClosedLoopSentence], observed: Mapping[int, np.ndarray],
-                    order: Sequence[int], every: int) -> dict[int, ClosedLoopSentence]:
-    """The flights ``order``'s closed-loop sentences with their observed rows before the first predicted step as the start
-    gave them back (``observed``, `autopilot.start.start_moved`: a moved start's moved, every other its stored rows;
-    the rows alone are read, D82); ``every`` the 2 s rows of a Δ row."""
-    if set(observed) != set(order):
-        raise ValueError("the start's observed rows for each flight of the loop")
-    out = {}
-    for i in order:
-        rows = sentences[i].rows
-        moved = np.asarray(observed[i], dtype=np.float64)
-        if moved.shape != (rows.start * every, rows.states.shape[1]):
-            raise ValueError(f"flight {i}: the start's observed rows are not its rows before its first predicted step")
-        out[i] = replace(sentences[i], rows=replace(rows, states=np.concatenate((moved, rows.states[len(moved):]))))
-    return out
 
 
 def moved_commanded(window: Window, signals, step_s: float) -> Recorded:
