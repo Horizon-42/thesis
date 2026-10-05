@@ -59,7 +59,8 @@ def same_prefix(a: np.ndarray, b: np.ndarray, rows: int, bound_m: float) -> bool
     return bool(np.max(np.abs(a[:rows, :3] - b[:rows, :3]), initial=0.0) <= bound_m)
 
 
-def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop, list[int]]], windows: Sequence[Window],
+def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop, list[int], dict[int, np.ndarray]]],
+                 windows: Sequence[Window],
                  places: Sequence[int], sentences: Mapping[int, ClosedLoopSentence], flights: Mapping[int, Mapping[str, Any]],
                  geometries: Mapping[str, AirportGeometry], rosters: Mapping[str, LandingIndex],
                  finals: Mapping[str, Sequence[Final]], words: Words, *, interval_s: float, variant: str,
@@ -67,8 +68,9 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
                  seed: int, round_: int, split: str,
                  continuations: int = CONTINUATIONS) -> BranchRound:
     """One batch ``windows`` of a round (module docstring), ``places`` their places in the round (the key of their random
-    numbers); ``start_loop`` starts the closed loop of given flights (their places in the split's signals,
-    `autopilot.start.start`) and returns it with its order."""
+    numbers); ``start_loop`` starts the closed loop of given flights (their places in the split's signals) with their
+    windows' moves (`autopilot.start.start_moved`, `post_window_loop.start_move_of`) and returns it with its order and
+    the observed rows it gave back."""
     order = [w.signal_index for w in windows]
     if order != sorted(set(order)):
         raise ValueError("the windows of a batch command different flights, in the order of their places in the signals")
@@ -76,10 +78,10 @@ def branch_round(model: Prior, start_loop: Callable[[Sequence[int]], tuple[Loop,
         raise ValueError("one place in the round for each window of the batch, each its own")
 
     def window_loop(batch: Sequence[int]) -> WindowLoop:
-        loop, started = start_loop([order[b] for b in batch])
+        loop, started, observed = start_loop([order[b] for b in batch])
         return WindowLoop(model, loop, started, [windows[b] for b in batch], sentences, flights, geometries, rosters,
                           finals, words, interval_s=interval_s, variant=variant, edges_reference=edges_reference,
-                          faults=faults, device=device)
+                          faults=faults, observed=observed, device=device)
 
     everything = list(range(len(windows)))
     first = window_loop(everything)

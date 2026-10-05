@@ -12,9 +12,9 @@ import torch
 
 from flight_scenarios.fas_geometry import fas_course_geometry
 from ts_transformer.autopilot.judge import OUTCOMES
-from ts_transformer.autopilot.start import start
+from ts_transformer.autopilot.start import NO_MOVE, start, start_moved
 from ts_transformer.experiments import post_window_loop
-from ts_transformer.experiments.post_window_loop import LOST_SEPARATION, WindowLoop
+from ts_transformer.experiments.post_window_loop import LOST_SEPARATION, WindowLoop, start_move_of
 from ts_transformer.experiments.prior_free_generation import speak_and_fly
 from ts_transformer.experiments.prior_speaking_loop import SpeakingLoop, flight_numbers
 from ts_transformer.instructions.artefact import load_candidates, load_day_split, load_spec, signals_flights
@@ -64,9 +64,13 @@ def setup(tmp_path, monkeypatch):
         return start(directory, "train", DELTA, {0: stored}, tmp_path / "executor", most_go_arounds=MOST_GO_AROUNDS,
                      device=CPU)
 
+    def moved_loop(move):
+        return start_moved(directory, "train", DELTA, {0: stored}, tmp_path / "executor", {0: move},
+                           most_go_arounds=MOST_GO_AROUNDS, device=CPU)
+
     return dict(directory=directory, words=words, stored=stored, flights=flights, geometries=geometries,
                 geometry=geometry, roster=roster, finals=finals, windows=windows, reference=reference, base=base,
-                loop=loop, key=key)
+                loop=loop, moved_loop=moved_loop, key=key)
 
 
 def _with_module(base, weights=True):
@@ -82,10 +86,11 @@ def _with_module(base, weights=True):
 
 
 def _window_loop(s, model, windows, faults=None):
-    loop, order = s["loop"]()
+    loop, order, observed = s["moved_loop"](start_move_of(windows[0]))
     return WindowLoop(model, loop, order, windows, {0: s["stored"]}, s["flights"], s["geometries"],
                       {s["geometry"].code: s["roster"]}, s["finals"], s["words"], interval_s=DELTA, variant="full",
-                      edges_reference=s["reference"], faults={s["geometry"].code: faults or {}}, device=CPU)
+                      edges_reference=s["reference"], faults={s["geometry"].code: faults or {}}, observed=observed,
+                      device=CPU)
 
 
 def test_a_window_without_other_aircraft_is_free_generation_bit_for_bit(setup):
@@ -213,3 +218,59 @@ def test_a_window_reports_the_faulty_points_its_recorded_aircraft_read(setup):
     early = _window_loop(s, _with_module(s["base"]), [ahead], faults={own.key: frozenset({far_row})})
     (far,) = early.run([flight_numbers(7, 0, 0)])
     assert far.faulty_steps == 1 and not far.loss_reads_fault                 # read once, but not near the event
+
+
+
+def test_a_zero_move_starts_from_the_stored_rows_bit_for_bit(setup):
+    """C9: the start without a move gives back the sentence's stored observed rows, bit for bit; a window flown
+    through it says and flies what free generation does (the first test above runs that path)."""
+    s = setup
+    _, _, observed = s["moved_loop"](NO_MOVE)
+    rows = s["stored"].rows
+    assert np.array_equal(observed[0], rows.states[: len(observed[0])])
+    assert start_move_of(s["windows"][0]) == NO_MOVE
+
+
+def test_window_b_speaks_from_its_moved_observed_rows_and_reads_no_runway_before_its_first_step(setup):
+    """C9: the prior reads the moved observed rows that the start gives back; D23 holds (no runway in force for the
+    commanded aircraft at any observed row)."""
+    from ts_transformer.post.scene import moved_start_window
+
+    s = setup
+    (window,) = s["windows"]
+    moved = moved_start_window(window, np.random.default_rng(1), turn_deg=15.0, height_m=300.0, speed_scale=0.1)
+    _, _, observed = s["moved_loop"](start_move_of(moved))
+    loop = _window_loop(s, _with_module(s["base"]), [moved])
+    assert np.array_equal(loop.speaking.observed[0], observed[0])
+    assert not np.array_equal(observed[0], s["stored"].rows.states[: len(observed[0])])
+    while loop.speaking.observing:
+        assert loop._own(0).runway_index.tolist() == [-1]                 # D23: nothing said, no runway in force
+        loop.observe()
+    plain = _window_loop(s, _with_module(s["base"]), [window])
+    while plain.speaking.observing:
+        plain.observe()
+    for each in (loop, plain):                                              # one row said: a sentence to read
+        each.step(np.full((1, len(COLUMNS)), 0.5))
+    (moved_rows,), (plain_rows,) = loop.speaking.sentences("train"), plain.speaking.sentences("train")
+    start = s["stored"].rows.start
+    assert not np.array_equal(moved_rows.own[:start], plain_rows.own[:start])   # its inputs are the moved rows'
+
+
+
+def test_window_bs_moved_record_is_the_starts_moved_rows(setup):
+    """C9, D113: the record the draw judges window B on (`moved_commanded`) holds, before its first predicted step, the
+    observed rows the start gives back, and its first predicted step's row; its category is the window's."""
+    from ts_transformer.experiments.post_window_loop import moved_commanded
+    from ts_transformer.instructions.artefact import load_signals
+    from ts_transformer.post.scene import moved_start_window
+
+    s = setup
+    (window,) = s["windows"]
+    moved = moved_start_window(window, np.random.default_rng(2), turn_deg=15.0, height_m=300.0, speed_scale=0.1)
+    _, _, observed = s["moved_loop"](start_move_of(moved))
+    (signals,) = load_signals(s["directory"], "train")
+    record = moved_commanded(moved, signals, s["words"].spec.step_s)
+    first_row = s["stored"].rows.first_row
+    rows = slice(first_row, first_row + len(observed[0]))
+    assert np.array_equal(np.column_stack((record.e_m[rows], record.n_m[rows], record.height_m[rows])), observed[0][:, :3])
+    assert record.category == window.commanded.category and record.row_at(moved.first_step_s) == len(record.e_m) - 1

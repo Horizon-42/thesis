@@ -4,8 +4,8 @@ the reward's present landing direction count.
 A window's landings are its airport's roster landings (`prior.landings.LandingIndex`, prior §7 item 2: the tracks
 roster less the sealed test days) with the window's changes:
 
-- a real window: the roster's landings, unchanged — so a window without other aircraft reads what free generation reads
-  (§2 item 1);
+- a real window, and window B (only its commanded aircraft's start is moved): the roster's landings, unchanged — so a
+  window without other aircraft reads what free generation reads (§2 item 1);
 - window A: the inserted aircraft's landing added, at its source flight's roster landing shifted by the window's shift,
   on the same runway, under the inserted aircraft's own key (`scene.INSERTED_SUFFIX`);
 - window D: the moved aircraft's roster landing moved by its shift.
@@ -21,7 +21,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 
 from ts_transformer.data.day_split import landing_day
-from ts_transformer.post.scene import INSERTED, INSERTED_SUFFIX, LEADER_MOVED, REAL, Window
+from ts_transformer.post.scene import INSERTED, INSERTED_SUFFIX, LEADER_MOVED, MOVED_START, REAL, Window
 from ts_transformer.prior.inputs import own_flight_key
 from ts_transformer.prior.landings import Landing, LandingIndex
 
@@ -33,7 +33,7 @@ def roster_key(dataset_id: str, airport: str) -> str:
 
 def window_landings(window: Window, roster: LandingIndex) -> LandingIndex:
     """``window``'s landings (module docstring) from its airport's ``roster`` landings (with their day split)."""
-    if window.kind == REAL:
+    if window.kind in (REAL, MOVED_START):
         return roster
     if len(window.moved) != 1:
         raise ValueError(f"a window {window.kind} moves one flight, not {len(window.moved)}")

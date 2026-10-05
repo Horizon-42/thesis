@@ -19,18 +19,22 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 
 from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
+from ts_transformer.experiments.post_window_loop import moved_commanded
 from ts_transformer.instructions.artefact import load_candidates, load_day_split, load_spec
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.instructions.faults import faulty_flights
 from ts_transformer.post.conformance import REFERENCE_SEED, reference_steps, require_conforming_edges, write_edge_reference
 from ts_transformer.post.fault_census import fault_census, fault_rows
 from ts_transformer.post.runways import airport_separation
-from ts_transformer.post.scene import airport_scenes, census, inserted_window, leader_moved_window, real_windows
+from ts_transformer.post.scene import (
+    airport_scenes, census, inserted_window, leader_moved_window, moved_start_window, real_windows,
+)
 from ts_transformer.post.traffic import loss_at_first_step, opens_inside_loss
 from ts_transformer.prior.procedure import airport_finals
 from ts_transformer.repo_layout import REPO_ROOT, git_state
@@ -46,6 +50,9 @@ SAMPLE_SEED = 1337
 A_LANDING_SHIFT_S = (-180.0, 180.0)
 A_APART_S = 3_600.0
 D_SHIFT_S = (-120.0, 120.0)
+#: The implementer's proposals for window B's moved start (post-training §8 C9), for the user: a turn about the airport
+#: reference within ±`B_TURN_DEG`, a change of height within ±`B_HEIGHT_M`, a speed scale within 1 ± `B_SPEED_SCALE`.
+B_TURN_DEG, B_HEIGHT_M, B_SPEED_SCALE = 15.0, 300.0, 0.1
 
 
 def first_step_losses(windows, separations, finals, step_s: float) -> dict:
@@ -58,8 +65,8 @@ def first_step_losses(windows, separations, finals, step_s: float) -> dict:
         code = window.scene.geometry.code
         counted = out.setdefault(code, {"without_runway": 0, "with_recorded_runway": 0,
                                         "kinds": {"without_runway": Counter(), "with_recorded_runway": Counter()}})
-        for name, recorded in (("without_runway", False), ("with_recorded_runway", True)):
-            loss = loss_at_first_step(window, separations[code], finals[code], step_s, recorded_runway=recorded)
+        for name, with_runway in (("without_runway", False), ("with_recorded_runway", True)):
+            loss = loss_at_first_step(window, separations[code], finals[code], step_s, recorded_runway=with_runway)
             if loss is not None:
                 counted[name] += 1
                 counted["kinds"][name][loss.kind] += 1
@@ -67,15 +74,17 @@ def first_step_losses(windows, separations, finals, step_s: float) -> dict:
             for code, counted in out.items()}
 
 
-def draw_checks(windows, separations, finals, step_s: float, seed: int) -> dict:
-    """For each airport: how many windows a draw of A and of D gives (the drawing run once over every window), and how
-    many of them the draw keeps — those that do not open inside a loss (`post.traffic.opens_inside_loss`); the same for
-    the real windows."""
-    rng = np.random.default_rng(seed)
+def draw_checks(windows, separations, finals, step_s: float, seed: int, signals) -> dict:
+    """For each airport: how many windows a draw of A, of D and of B gives (the drawing run once over every window),
+    and how many of them the draw keeps — those that do not open inside a loss (`post.traffic.opens_inside_loss`, D113;
+    window B with its commanded aircraft on its moved record); the same for the real windows. B is drawn from a generator
+    of its own, so that A's and D's draws do not change."""
+    rng, moves = np.random.default_rng(seed), np.random.default_rng([seed, 1])
+    by_key = {s.dataset_id: s for s in signals}
     out: dict[str, dict] = {}
     for window in windows:
         code = window.scene.geometry.code
-        counted = out.setdefault(code, {"real_kept": 0, "A": 0, "A_kept": 0, "D": 0, "D_kept": 0})
+        counted = out.setdefault(code, {"real_kept": 0, "A": 0, "A_kept": 0, "D": 0, "D_kept": 0, "B": 0, "B_kept": 0})
         counted["real_kept"] += not opens_inside_loss(window, separations[code], finals[code], step_s)
         drawn = {"A": inserted_window(window, rng, landing_shift_s=A_LANDING_SHIFT_S, apart_s=A_APART_S),
                  "D": leader_moved_window(window, separations[code], rng, shift_s=D_SHIFT_S)}
@@ -83,6 +92,10 @@ def draw_checks(windows, separations, finals, step_s: float, seed: int) -> dict:
             if augmented is not None:
                 counted[kind] += 1
                 counted[f"{kind}_kept"] += not opens_inside_loss(augmented, separations[code], finals[code], step_s)
+        moved = moved_start_window(window, moves, turn_deg=B_TURN_DEG, height_m=B_HEIGHT_M, speed_scale=B_SPEED_SCALE)
+        counted["B"] += 1
+        counted["B_kept"] += not opens_inside_loss(replace(moved, commanded=moved_commanded(
+            moved, by_key[window.commanded.key], step_s)), separations[code], finals[code], step_s)
     return out
 
 
@@ -110,7 +123,8 @@ def main(argv: list[str] | None = None) -> int:
                     "spec_sha256": spec.sha256, "row_interval_s": args.interval_s, "sample": args.sample,
                     "sample_seed": SAMPLE_SEED if args.sample else None, "git": git_state(),
                     "proposals": {"A_landing_shift_s": A_LANDING_SHIFT_S, "A_apart_s": A_APART_S,
-                                  "D_shift_s": D_SHIFT_S}, "splits": {}}
+                                  "D_shift_s": D_SHIFT_S, "B_turn_deg": B_TURN_DEG, "B_height_m": B_HEIGHT_M,
+                                  "B_speed_scale": B_SPEED_SCALE}, "splits": {}}
     out.mkdir(parents=True)
     for split in args.splits:
         scenes, signals = airport_scenes(instructions, split, spec, args.interval_s, geometries)
@@ -126,7 +140,8 @@ def main(argv: list[str] | None = None) -> int:
             marked[signals[index].airport][signals[index].dataset_id] = fault_rows(found)
         record["splits"][split] = {"airports": census(windows, separations, days),
                                    "faults": fault_census(windows, marked, separations, finals, spec.step_s),
-                                   "augmented": draw_checks(windows, separations, finals, spec.step_s, SAMPLE_SEED),
+                                   "augmented": draw_checks(windows, separations, finals, spec.step_s, SAMPLE_SEED,
+                                                            signals),
                                    "lost_at_first_step": first_step_losses(windows, separations, finals, spec.step_s)}
         if split == "train":
             path = out / "conformance" / "edges.npz"

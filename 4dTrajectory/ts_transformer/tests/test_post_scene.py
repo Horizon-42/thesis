@@ -190,6 +190,8 @@ def test_the_census_runner_writes_its_census_and_the_edge_reference(built, tmp_p
     augmented = record["splits"]["train"]["augmented"]["KXXX"]
     assert augmented["real_kept"] == 4 and augmented["A"] == 4 and augmented["D"] == 2       # the draw's order pinned
     assert augmented["A_kept"] <= augmented["A"] and augmented["D_kept"] <= augmented["D"]
+    assert augmented["B"] == 4 and augmented["B_kept"] <= augmented["B"]                    # window B for every window
+    assert record["proposals"]["B_turn_deg"] == post_windows.B_TURN_DEG
     sampled = tmp_path / "sampled"
     post_windows.main(["--instructions", str(directory), "--interval-s", "4", "--out", str(sampled),
                        "--splits", "train", "--sample", "2"])
@@ -284,3 +286,26 @@ def test_a_window_that_opens_inside_a_loss_of_separation_is_found(built):
         assert loss is not None and 0 in loss.responsible
     assert opens_inside_loss(ahead, separation, fin, INSTRUCTION_STEP_S)                   # left out of the draw
     assert not opens_inside_loss(windows[1], separation, fin, INSTRUCTION_STEP_S)
+
+
+def test_window_b_moves_the_commanded_aircrafts_start_within_its_ranges(built):
+    """C9: a turn, a height and a speed scale drawn in their ranges; drawn only from a real window; B, and only B, has
+    a move."""
+    from ts_transformer.post.scene import MOVED_START, NO_START_MOVE, Window, moved_start_window
+
+    directory, spec, scenes, signals, _ = built
+    window = real_windows(directory, "train", spec, DELTA, scenes, signals)[0]
+    rng = np.random.default_rng(1337)
+    moves = [moved_start_window(window, rng, turn_deg=15.0, height_m=300.0, speed_scale=0.1) for _ in range(200)]
+    assert all(w.kind == MOVED_START and w.scene is window.scene and w.commanded is window.commanded for w in moves)
+    turns, heights, speeds = (np.array([getattr(w.start_move, name) for w in moves])
+                              for name in ("turn_deg", "height_m", "speed_scale"))
+    assert np.abs(turns).max() <= 15.0 and np.abs(heights).max() <= 300.0 and np.abs(speeds - 1.0).max() <= 0.1
+    assert np.abs(turns).max() > 10.0 and np.abs(heights).max() > 200.0                       # the whole range is drawn
+    assert window.start_move == NO_START_MOVE
+    with pytest.raises(ValueError, match="real window"):
+        moved_start_window(moves[0], rng, turn_deg=15.0, height_m=300.0, speed_scale=0.1)
+    with pytest.raises(ValueError, match="window B, and only it"):
+        Window(MOVED_START, window.commanded, window.signal_index, window.scene)
+    with pytest.raises(ValueError, match="window B, and only it"):
+        replace(window, start_move=moves[0].start_move)

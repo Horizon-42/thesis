@@ -24,8 +24,10 @@ the base's selection or not, D76) and its scene: at each step from the commanded
 of the airport and the split in the air then (D93: the window has no length of its own; it ends where the loop ends
 it). Augmented windows: A, one recorded flight of the same airport and split from another time inserted with its
 record shifted in time; D, the aircraft next ahead on the approach clock at the first predicted step with its record
-shifted in time (§2 item 4). A shift is a whole number of Δ, so every row stays on the UTC grid. B (a moved start) waits
-for vocabulary D97's moved start (C9).
+shifted in time (§2 item 4). A shift is a whole number of Δ, so every row stays on the UTC grid. B, the commanded
+aircraft's start moved (C9): its observed rows up to the first predicted step turned about the airport reference, raised
+and their speed scaled, by the start of a closed loop (vocabulary §6 item 5, D97 (4)); the window holds the move as
+three numbers (`StartMove`), and the loop's caller gives them to the start (`autopilot.start.Move`).
 
 What is drawn from the record — the commanded aircraft's landed runway and landing time, the order on the approach
 clock at the first predicted step — chooses windows and fills the census. It is never an input of the prior.
@@ -52,8 +54,8 @@ from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.post.runways import approach_clock_m
 
 #: The kinds of window (§2 item 4): real, an inserted aircraft, the aircraft ahead moved. B comes with C9.
-REAL, INSERTED, LEADER_MOVED = "real", "A", "D"
-WINDOW_KINDS = (REAL, INSERTED, LEADER_MOVED)
+REAL, INSERTED, LEADER_MOVED, MOVED_START = "real", "A", "D", "B"
+WINDOW_KINDS = (REAL, INSERTED, LEADER_MOVED, MOVED_START)
 #: The key of an inserted flight: its own key with this suffix, so that it never stands for the flight it came from.
 INSERTED_SUFFIX = "+inserted"
 
@@ -141,6 +143,20 @@ def recorded(signals: FlightSignals, geometry: AirportGeometry, interval_s: floa
                     e_m=np.asarray(signals.e_m, dtype=np.float64), n_m=np.asarray(signals.n_m, dtype=np.float64),
                     height_m=np.asarray(signals.altitude_m, dtype=np.float64),
                     go_around=np.asarray(go_around, dtype=bool))
+
+
+@dataclass(frozen=True)
+class StartMove:
+    """Window B's move of the commanded aircraft's start (C9; vocabulary D97 (4), `autopilot.start.Move`, which
+    `post/` does not import): a turn about the airport reference (compass degrees, clockwise), a change of height (m)
+    and a scale of the speed (the displacements before the first predicted step stretched about it)."""
+
+    turn_deg: float = 0.0
+    height_m: float = 0.0
+    speed_scale: float = 1.0
+
+
+NO_START_MOVE = StartMove()
 
 
 @dataclass(frozen=True)
@@ -257,10 +273,14 @@ class Window:
     signal_index: int               # the commanded flight's place in the split's signals (its sentence's index)
     scene: Scene | MovedScene
     moved: tuple[tuple[str, float], ...] = field(default=())
+    #: window B's move of the commanded aircraft's start (`StartMove`; every other window moves nothing)
+    start_move: StartMove = field(default_factory=lambda: NO_START_MOVE)
 
     def __post_init__(self) -> None:
         if self.kind not in WINDOW_KINDS:
             raise ValueError(f"a window is one of {WINDOW_KINDS}, not {self.kind!r}")
+        if (self.kind == MOVED_START) != (self.start_move != NO_START_MOVE):
+            raise ValueError("window B, and only it, moves its commanded aircraft's start")
         if self.commanded.go_around.any():
             raise ValueError(f"{self.commanded.key}: the commanded aircraft's G comes from its words in force, never from "
                              "its labelled sentence (a withheld field)")
@@ -434,3 +454,18 @@ def census(windows: Sequence[Window], separation: Mapping[str, Separation], days
             "longest_record_s": longest,
         }
     return out
+
+
+def moved_start_window(window: Window, rng: np.random.Generator, *, turn_deg: float, height_m: float,
+                       speed_scale: float) -> Window:
+    """Window B from the real ``window``: its commanded aircraft's start moved by a turn drawn uniformly in
+    [−``turn_deg``, ``turn_deg``], a height in [−``height_m``, ``height_m``] and a speed scale in
+    [1 − ``speed_scale``, 1 + ``speed_scale``]. The ranges are proposals for the user (post-training §8 C9). Whether
+    it opens inside a loss of separation is read where its loop is started (the moved start is the start's)."""
+    if window.kind != REAL:
+        raise ValueError(f"window B is drawn from a real window, not from a window {window.kind}")
+    if not (turn_deg >= 0.0 and height_m >= 0.0 and 0.0 <= speed_scale < 1.0):
+        raise ValueError("the ranges of a moved start are non-negative, the speed's less than 1")
+    move = StartMove(float(rng.uniform(-turn_deg, turn_deg)), float(rng.uniform(-height_m, height_m)),
+                     float(rng.uniform(1.0 - speed_scale, 1.0 + speed_scale)))
+    return replace(window, kind=MOVED_START, start_move=move)

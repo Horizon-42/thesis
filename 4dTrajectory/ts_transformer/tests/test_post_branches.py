@@ -13,6 +13,7 @@ import torch
 from ts_transformer.autopilot.conformance import STATE_BOUND_M as EXECUTOR_BOUND_M
 from ts_transformer.experiments import post_branches
 from ts_transformer.experiments.post_branches import branch_round, same_prefix
+from ts_transformer.experiments.post_window_loop import start_move_of
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.post.branches import (
     STATE_BOUND_M, branch_points, continuation_numbers, first_numbers, samples,
@@ -24,7 +25,8 @@ from ts_transformer.tests.test_post_window_loop import CPU, DELTA, _window_loop,
 
 
 def _round(s, model, windows, continuations=2, round_=0, places=(0,)):
-    return branch_round(model, lambda flights: s["loop"](), windows, list(places), {0: s["stored"]}, s["flights"],
+    return branch_round(model, lambda flights: s["moved_loop"](start_move_of(windows[0])), windows, list(places),
+                        {0: s["stored"]}, s["flights"],
                         s["geometries"], {s["geometry"].code: s["roster"]}, s["finals"], s["words"], interval_s=DELTA,
                         variant="full",
                         edges_reference=s["reference"], faults={s["geometry"].code: {}}, device=CPU, seed=1337,

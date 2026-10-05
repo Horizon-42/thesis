@@ -1,7 +1,9 @@
 """The window loop of the post-training (post-training §2 items 1–3, §8 C4; D29–D31, D91, D93, D105, D110): a module
 shared by the runners of stage C, not a runner.
 
-Each window's commanded aircraft is flown through the prior's step of a speaker's closed loop (prior §7 item 7,
+Each window's commanded aircraft is flown from the observed rows that the start gives back (`autopilot.start.start_moved`:
+window B's moved, every other window's its stored rows, vocabulary D97 (4); C9) through the prior's step of a speaker's
+closed loop (prior §7 item 7,
 `prior_speaking_loop.SpeakingLoop`: the start of a closed loop, the prior's one function of a loop's row with each
 window's own landings, D105, the speaker, the executor; the most go-arounds of a flight 2, D91). The loop adds the
 scene, row by row:
@@ -26,19 +28,20 @@ permits every word.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
 import torch
 
-from ts_transformer.autopilot.start import Loop
+from ts_transformer.autopilot.start import Loop, Move, moved_signals
 from ts_transformer.experiments.prior_speaking_loop import SpeakingLoop
 from ts_transformer.inference.separation import Loss
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import ClosedLoopSentence
 from ts_transformer.instructions.grammar import column_words
+from ts_transformer.instructions.labeller.interval import interval_rows
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, RUNWAY_GO_AROUND, SPEED, Words
 from ts_transformer.post.conformance import Checked, require_conforming_edges
 from ts_transformer.post.edges import tokens
@@ -46,7 +49,7 @@ from ts_transformer.post.fault_census import STEPS_BEFORE_EVENT, reads_fault
 from ts_transformer.post.landings import roster_key, window_landings
 from ts_transformer.post.reward import present_runways, reward
 from ts_transformer.post.runways import airport_separation
-from ts_transformer.post.scene import INSERTED_SUFFIX, AircraftAt, Window, utc_s
+from ts_transformer.post.scene import INSERTED_SUFFIX, AircraftAt, Recorded, Window, recorded, utc_s
 from ts_transformer.post.speed_mask import along_course_speeds, speed_check
 from ts_transformer.post.traffic import commanded_loss, joined
 from ts_transformer.post.traffic import traffic as separation_traffic
@@ -102,8 +105,8 @@ class WindowLoop:
                  sentences: Mapping[int, ClosedLoopSentence], flights: Mapping[int, Mapping[str, Any]],
                  geometries: Mapping[str, AirportGeometry], rosters: Mapping[str, LandingIndex],
                  finals: Mapping[str, Sequence[Final]], words: Words, *, interval_s: float, variant: str,
-                 edges_reference: Path, faults: Mapping[str, Mapping[str, frozenset[int]]], device: torch.device
-                 ) -> None:
+                 edges_reference: Path, faults: Mapping[str, Mapping[str, frozenset[int]]],
+                 observed: Mapping[int, np.ndarray], device: torch.device) -> None:
         checked_edges(edges_reference)
         if loop.most_go_arounds != MOST_GO_AROUNDS:
             raise ValueError(f"the loop was started for {loop.most_go_arounds} go-arounds a flight, not {MOST_GO_AROUNDS} "
@@ -112,8 +115,10 @@ class WindowLoop:
             raise ValueError("one window for each flight of the loop, in its order")
         self.order, self.windows, self.words, self.device = list(order), list(windows), words, device
         self.landings = [window_landings(w, rosters[w.scene.geometry.code]) for w in self.windows]
-        self.speaking = SpeakingLoop(model, loop, order, sentences, flights, geometries, self.landings, finals, words,
-                                     interval_s=interval_s, variant=variant, device=device)
+        every = interval_rows(interval_s, words.spec.step_s)
+        self.speaking = SpeakingLoop(model, loop, order, moved_sentences(sentences, observed, order, every), flights,
+                                     geometries, self.landings, finals, words, interval_s=interval_s, variant=variant,
+                                     device=device)
         self.step_s = words.spec.step_s
         self.every = self.speaking.every
         self.geometries = [w.scene.geometry for w in self.windows]
@@ -317,3 +322,36 @@ def _window_faults(window: Window, faults: Mapping[str, frozenset[int]]) -> dict
         if source != key and source in faults:
             out[key] = faults[source]
     return out
+
+
+def start_move_of(window: Window) -> Move:
+    """The start's move of ``window``'s commanded aircraft (`autopilot.start.Move`): window B's, `NO_MOVE` otherwise."""
+    move = window.start_move
+    return Move(move.turn_deg, move.height_m, move.speed_scale)
+
+
+def moved_sentences(sentences: Mapping[int, ClosedLoopSentence], observed: Mapping[int, np.ndarray],
+                    order: Sequence[int], every: int) -> dict[int, ClosedLoopSentence]:
+    """The flights ``order``'s closed-loop sentences with their observed rows before the first predicted step as the start
+    gave them back (``observed``, `autopilot.start.start_moved`: a moved start's moved, every other its stored rows;
+    the rows alone are read, D82); ``every`` the 2 s rows of a Δ row."""
+    if set(observed) != set(order):
+        raise ValueError("the start's observed rows for each flight of the loop")
+    out = {}
+    for i in order:
+        rows = sentences[i].rows
+        moved = np.asarray(observed[i], dtype=np.float64)
+        if moved.shape != (rows.start * every, rows.states.shape[1]):
+            raise ValueError(f"flight {i}: the start's observed rows are not its rows before its first predicted step")
+        out[i] = replace(sentences[i], rows=replace(rows, states=np.concatenate((moved, rows.states[len(moved):]))))
+    return out
+
+
+def moved_commanded(window: Window, signals, step_s: float) -> Recorded:
+    """Window B's commanded aircraft on its moved record (`autopilot.start.moved_signals`, vocabulary D97 (4)): its
+    observed rows to its first predicted step moved as the start moves them (no later row is kept) — what the rule of
+    D113 judges at its first predicted step."""
+    anchor = window.commanded.row_at(window.first_step_s)
+    moved = moved_signals(signals, anchor, start_move_of(window))
+    return recorded(moved, window.scene.geometry, window.scene.interval_s, step_s,
+                    np.zeros(len(moved.time_s), dtype=bool), lambda _: window.commanded.category)
