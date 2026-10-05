@@ -14,18 +14,18 @@ miles occur only in quoted text, with the SI value beside them.
 | Companion document | `code_review.md` (findings F1 to F13). Step T0 of this design needs F4, F5, F6 (item 3) and F7 |
 | Model of the scenario | The two-tier post-training "one aircraft commanded" (`ts_transformer/docs/two_tier/design/post_training.md` D29, D93) |
 | Dependency on `ts_transformer` | Two pure modules, read-only, through one adapter (§6, §7). No other import. No shared output |
-| Decision state | 12 open decisions (§0.2). Steps T0 to T9 (§8) are not started |
+| Decision state | MD1, MD2, MD3 decided by the user (2026-10-05). MD4 to MD12 open (§0.2). Steps T0 to T9 (§8) are not started |
 
 ### 0.2 Decisions
 
 Each decision is open until the user decides. "Rec." is Claude's recommendation. A recommendation is not a
-project rule.
+project rule. A decided row says "Decided" with the option, the person and the date.
 
 | ID | Question | Options | Rec. |
 |---|---|---|---|
-| MD1 | Scope of the first stage | (a) M1 only: one optimized aircraft in recorded traffic. (b) M1 and M2 | (a). M1 is the direct counterpart of the two-tier D29 and does not need a schedule |
-| MD2 | Which reading of the separation rules makes the constraint rows | (a) `VISUAL` makes the rows, `IFR` is reported beside it. (b) `IFR` makes the rows | (a). It is the reading that the two-tier closed loop uses (`separation.py` docstring, user 2026-09-27, provisional). Then the two results compare |
-| MD3 | How the optimizer gets the separation rules | (a) Read-only import of `ts_transformer.inference.separation` and `.runway_schedule` through one adapter. (b) Move the two modules to a neutral top-level package first | (a) now. (b) needs a change in `ts_transformer` and the agreement of its stage owner |
+| MD1 | Scope of the first stage | (a) M1 only: one optimized aircraft in recorded traffic. (b) M1 and M2 | **Decided: (b), M1 and M2** (user, 2026-10-05). M1 comes first in the plan, because M2 runs the M1 loop for each aircraft (§5.6) |
+| MD2 | Which reading of the separation rules makes the constraint rows | (a) `VISUAL` makes the rows, `IFR` is reported beside it. (b) `IFR` makes the rows | **Decided: (a)** (user, 2026-10-05). It is the reading that the two-tier closed loop uses (`separation.py` docstring, user 2026-09-27, provisional). Then the two results compare |
+| MD3 | How the optimizer gets the separation rules | (a) Read-only import of `ts_transformer.inference.separation` and `.runway_schedule` through one adapter. (b) Move the two modules to a neutral top-level package first | **Decided: (a)** (user, 2026-10-05). (b) stays a proposal (§7, R2): it needs a change in `ts_transformer` and the agreement of its stage owner |
 | MD4 | Source of the recorded traffic | (a) The arrivals manifest (`arrivals/manifest.json`), every flight, not only the scenario sample. (b) The tracks roster with all outcomes | (a). Only (a) has the runway target that the datum conversion needs (`flight_scenarios/datum.py:63`) |
 | MD5 | Scenario category for the first stage | (a) `runway_cons` (procedure-constrained). (b) `runway`. (c) both | (a). The "established" test reads the final approach geometry. The constrained solve already flies it |
 | MD6 | Check step `h_c` of the judge on the replay | 1 s, 2 s, 4 s (the scene step Δ of the two-tier design, vocabulary D11) | 1 s for the loop. Report the 4 s result beside it, for comparison with the two-tier readouts |
@@ -250,7 +250,7 @@ needs discrete facts (the runway relation, "established", who is responsible) th
 decide. The loop gives the discrete part to the judge and the continuous part to the NLP. This is the
 method of lazy constraint generation.
 
-### 5.6 M2: a block of arrivals (after MD1)
+### 5.6 M2: a block of arrivals
 
 1. **Block.** All arrivals of one airport whose windows overlap one time interval (for example 1 h). All of
    them need a scenario: prepare the block with `--max-per-runway 0` for that interval only.
@@ -332,8 +332,8 @@ one side calls code of the other side for Q3.
 
 | ID | Code | Verdict | Reason |
 |---|---|---|---|
-| R1 | `ts_transformer/inference/separation.py` (judge) and `runway_schedule.py` (minima, CWT, schedule) | Reuse now, read-only, through §6.2 (MD3 a) | Pure, tested (`tests/test_separation.py`, `tests/test_runway_schedule.py`), every value cited to 7110.65BB. A second copy would break the single-source rule |
-| R2 | The same two modules moved to a neutral top-level package (for example `separation_rules/`) | Propose to the user (MD3 b) | Removes the only `ts_transformer` import. Needs a change in `ts_transformer` and the stage owner's agreement |
+| R1 | `ts_transformer/inference/separation.py` (judge) and `runway_schedule.py` (minima, CWT, schedule) | Reuse now, read-only, through §6.2 (MD3, decided) | Pure, tested (`tests/test_separation.py`, `tests/test_runway_schedule.py`), every value cited to 7110.65BB. A second copy would break the single-source rule |
+| R2 | The same two modules moved to a neutral top-level package (for example `separation_rules/`) | A proposal only (MD3 decided (a)) | Removes the only `ts_transformer` import. Needs a change in `ts_transformer` and the stage owner's agreement |
 | R3 | The two-tier "established" function (D92) | Later, when it is public | Today this design computes D92 from its own procedure geometry (§4.3). Two computations of one rule can drift. A behaviour test that compares them on fixed rows removes the risk |
 | R4 | `ts_transformer/instructions/faults.py` (D111) | Not now (MD11) | It reads the two-tier artefact (`FlightSignals`), not a track. Its array part could move to a neutral module |
 | R5 | `collocation.CollocationOptimizer`, `approach_constraints` | Reuse, with the F7 extension | The separation rows use the same row contract as the procedure rows |
@@ -352,12 +352,12 @@ branch and worktree, with a review before each commit.
 | T0 | Prerequisites: F7 (`extra_rows`, node times), F4 (procedure bridge out of the backend), F5 (one constrained solve function), F6 item 3 (batch driver module) | All optimizer and backend tests pass. A fixed set of scenarios (20 `runway`, 20 `runway_cons`) solves bit-identical before and after | User accepts F4 to F7 |
 | T1 | Traffic assembly (§4.1, §4.2): interval index, frame conversion | Test: the commanded flight's own record, read as traffic, gives its scenario's initial position at `t0` within 1 mm in the frame and in MSL | T0 |
 | T2 | Spike: inline casadi interpolant in `SX` at a symbolic node time | Derivative equals a finite difference within 1e-6 relative on 10 random tracks. If not: user decision (§10 item 1) | T0 |
-| T3 | Adapter (§6.2), architecture test, behaviour pins, the inputs of §4.3 | Pins pass; the course check passes on one runway per airport | MD2, MD3, MD12 |
+| T3 | Adapter (§6.2), architecture test, behaviour pins, the inputs of §4.3 | Pins pass; the course check passes on one runway per airport | MD12 |
 | T4 | Baseline census: judge the baseline replays of a seeded sample of windows (no rows) | A readout to the user: windows with a loss that the commanded aircraft answers for, by reading, kind and airport; recorded aircraft per window; the frame error of §4.4 | T1, T3, MD5, MD6 |
 | T5 | Rows and loop (§5.3, §5.4) on 50 windows with a loss | A readout: outcome counts, iterations, rows, flight time change, solve time per window, memory. The user then decides MD7 and MD8 | T2, T4 |
 | T6 | Traffic batch, records, resume (§9) | Full optimizer suite passes. Preflight on the real size: time and memory per window measured, disk estimate checked before the start | T5, MD7, MD8 |
 | T7 | Evaluation of the commanded records and the CZML comparison (a new category) | The frontend shows a published window; checked in the browser | T6 |
-| T8 | M2 (§5.6) | A readout like T5 for 5 blocks | MD1 b, MD9 |
+| T8 | M2 (§5.6) | A readout like T5 for 5 blocks | T6, MD9 |
 | T9 | M3 design (§5.7) | Only if T8 leaves losses that the order cannot remove | T8 |
 
 ## 9. Outputs and records
