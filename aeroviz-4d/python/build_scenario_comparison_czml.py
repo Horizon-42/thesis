@@ -27,6 +27,10 @@ Two modes:
   ``--start-visible``); the frontend reads ``comparison_index.json`` (one record per group, with
   its ``initialState`` and the CZML file + entity ids it owns), samples a subset, and reveals
   only those. The reference is resolved by flight key in the canonical observed datasource.
+  A summary of mode ``traffic:m1`` (traffic windows of ``traffic_optimization.py m1``) publishes each
+  solved group's ``<flight_key>_traffic.json`` too: its index record carries ``traffic``, the window's
+  outcome and the recorded aircraft around the commanded one (their ``ref-`` ids, and when each enters
+  relative to the commanded entry, read from the arrivals roster the summary names).
 """
 
 from __future__ import annotations
@@ -60,6 +64,21 @@ from geokit import haversine_m
 # way, in this package's flight_identity module — see its docstring for the shared pin.)
 STATES_SUFFIX = "_states.json"
 EVAL_SUFFIX = "_eval.json"
+# MIRROR of `4dTrajectory/optimization/scenario_batch.py` `sidecar_filename` (the name rule: a record's
+# `_states.json` stem plus the suffix) and `4dTrajectory/optimization/traffic_optimization.py`
+# `TRAFFIC_SUFFIX` (the suffix). Pinned by the traffic mirror test.
+TRAFFIC_SUFFIX = "_traffic.json"
+# MIRROR of `4dTrajectory/optimization/traffic/loop.py` `TRAFFIC_RECORD_SCHEMA`: the only sidecar
+# schema this builder reads; any other (an M2 block sidecar included) is refused by name. Pinned by
+# the traffic mirror test.
+TRAFFIC_SCHEMA = "optimization-traffic-v2"
+# MIRROR of the `mode` that `4dTrajectory/optimization/traffic_optimization.py` (m1) stamps on its
+# `summary.json`: a summary of this mode is a set of traffic windows and publishes their sidecars.
+TRAFFIC_MODE = "traffic:m1"
+# MIRROR of `trajectory_data_process/harvest/arrivals.py` `SCHEMA_VERSION`: the only arrivals roster
+# whose `entry_time_utc` (the first kept sample's own time, to the millisecond) places two flights on
+# one clock; an older roster is refused by name.
+ARRIVALS_SCHEMA_VERSION = "harvest-arrivals-v7-measured-crossing-in-slice"
 
 # A fixed display epoch (state times are offsets in seconds from it), matching the
 # convention generate_czml uses. The relative motion is what matters, not the wall clock.
@@ -518,6 +537,93 @@ def _flight_facts(
     return (float(v) if v is not None else None), (float(m) if m is not None else None)
 
 
+def _utc(text: str) -> datetime:
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def load_entry_times(manifest_path: str | Path) -> dict[str, datetime]:
+    """``flight_key`` -> ``entry_time_utc`` for every flight of an ``arrivals/manifest.json``.
+
+    The arrival window is the window the frontend resolves every reference through
+    (`window=arrival`, rostered by this manifest), and each flight's CZML there has ``t = 0`` at
+    its OWN entry. The entry time is what puts two such flights on one real clock.
+    """
+    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    if manifest.get("schema_version") != ARRIVALS_SCHEMA_VERSION:
+        raise ValueError(
+            f"{manifest_path}: arrivals roster schema {manifest.get('schema_version')!r}, "
+            f"this builder reads {ARRIVALS_SCHEMA_VERSION!r} only"
+        )
+    return {row["flight_key"]: _utc(row["entry_time_utc"]) for row in manifest["records"]}
+
+
+def summary_entry_times(summary: dict[str, Any]) -> dict[str, datetime] | None:
+    """The entry times of a traffic summary's arrivals roster; ``None`` for a summary of no traffic mode.
+
+    A summary of mode `TRAFFIC_MODE` names the roster its windows were drawn from
+    (``optimization_config.traffic.selection.manifest``), so the publication needs no argument
+    for it, and its groups must all publish their traffic (`build_runway_comparison`).
+    """
+    mode = summary.get("mode")
+    if isinstance(mode, str) and mode.startswith("traffic:") and mode != TRAFFIC_MODE:
+        raise ValueError(
+            f"summary mode {mode!r}: this builder publishes {TRAFFIC_MODE!r} windows only "
+            "(an M2 block summary is not a plain category)"
+        )
+    if mode != TRAFFIC_MODE:
+        return None
+    return load_entry_times(summary["optimization_config"]["traffic"]["selection"]["manifest"])
+
+
+def _traffic_index_block(
+    group: str,
+    states_file: str,
+    states_dir: Path,
+    entry_times: dict[str, datetime],
+    state_data: dict[str, Any],
+) -> dict[str, Any]:
+    """The index record's ``traffic`` block of one window, from its ``<group>_traffic.json``.
+
+    ``recorded`` names each recorded aircraft by the logical reference id the group's own
+    reference carries (``ref-<flight_key>``, resolved by the frontend in the arrival window of
+    the canonical observed datasource); ``startOffsetsS`` is, for each, the seconds its entry
+    comes after the commanded aircraft's (negative: already in the scene), so the frontend can
+    put it at its real time on the group's clock, where ``t = 0`` is the commanded entry.
+    """
+    path = states_dir / (states_file.removesuffix(STATES_SUFFIX) + TRAFFIC_SUFFIX)
+    if not path.is_file():
+        raise ValueError(f"{group}: traffic sidecar {path.name} is missing from {states_dir}")
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    if sidecar.get("schema") != TRAFFIC_SCHEMA:
+        raise ValueError(
+            f"{group}: traffic sidecar {path.name} has schema {sidecar.get('schema')!r}, "
+            f"this builder reads {TRAFFIC_SCHEMA!r} only"
+        )
+    if sidecar["flight_key"] != group:
+        raise ValueError(f"{group}: traffic sidecar {path.name} belongs to {sidecar['flight_key']!r}")
+    if group not in entry_times:
+        raise ValueError(f"{group}: not in the arrivals manifest the traffic offsets are read from")
+    entry = entry_times[group]
+    if _utc(state_data["source"]["entry_time_utc"]) != entry:
+        raise ValueError(
+            f"{group}: the arrivals manifest puts its entry at {entry.isoformat()}, its record at "
+            f"{state_data['source']['entry_time_utc']}; the manifest is not the one this run flew"
+        )
+    unknown = [key for key in sidecar["recorded"] if key not in entry_times]
+    if unknown:
+        raise ValueError(
+            f"{group}: {len(unknown)} recorded flight_key(s) are not in the arrivals manifest "
+            f"(the arrival window the frontend resolves references in): {unknown}"
+        )
+    return {
+        "outcome": sidecar["outcome"],
+        "recorded": [f"ref-{key}" for key in sidecar["recorded"]],
+        "startOffsetsS": [
+            round((entry_times[key] - entry).total_seconds(), 3) for key in sidecar["recorded"]
+        ],
+    }
+
+
 def build_runway_comparison(
     results: list[dict[str, Any]],
     states_dir: str | Path,
@@ -529,6 +635,7 @@ def build_runway_comparison(
     verdicts: dict[str, dict[str, Any]] | None = None,
     include_reference_entities: bool = True,
     landed_verdicts: dict[str, dict[str, Any]] | None = None,
+    traffic_entry_times: dict[str, datetime] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Combined CZML for one runway **plus** its index records (every flight on one map).
 
@@ -557,6 +664,11 @@ def build_runway_comparison(
     layer's entity ids ARE flight_keys — so a duplicated callsign can no longer resolve
     to the wrong namesake's track. Entities are ``show=False`` when ``start_hidden`` so
     the frontend renders only the groups it samples.
+
+    ``traffic_entry_times`` (an arrivals manifest's ``load_entry_times``): every SOLVED group is a
+    traffic window — it must have its ``<group>_traffic.json``, and its index record gains the
+    ``traffic`` block (`_traffic_index_block`). An unsolved group (its baseline failed: a failed
+    record, no sidecar) has no traffic block and is not refused. ``None``: no traffic.
 
     Returns ``(czml_packets, index_records)``. Each index record describes one group:
     its id, flight id, runway, status, initial state, and the entity ids that belong to it.
@@ -722,6 +834,9 @@ def build_runway_comparison(
             if landed is not None:
                 record["landedRunway"] = landed["runway"]
                 record["observedRunwayVerdict"] = observed_verdict
+            if traffic_entry_times is not None:
+                record["traffic"] = _traffic_index_block(
+                    group, states_file, states_dir, traffic_entry_times, state_data)
             index_records.append(record)
         else:
             if include_reference_entities:
@@ -1035,6 +1150,7 @@ def publish_comparison_batch(
     """Build and atomically publish one complete comparison generation. ``landed_runway_report``:
     the evaluation report of the flights graded again on the runway they landed on
     (`build_runway_comparison`'s ``landed_verdicts``); the published report stays the category's.
+    A summary of mode `TRAFFIC_MODE` is a set of traffic windows (`summary_entry_times`).
 
     Every CZML and the report receive an immutable generation suffix. They are
     written first; ``comparison_index.json`` is atomically replaced last and is therefore
@@ -1060,6 +1176,7 @@ def publish_comparison_batch(
     unknown = sorted(set(landed_verdicts or ()) - set(verdicts))
     if unknown:
         raise ValueError(f"the landed-runway report grades flights the category does not hold: {unknown[:3]}")
+    entry_times = summary_entry_times(summary)
     groups = group_results_by_runway(summary, fallback_airport=airport)
     index: dict[str, Any] = {
         "schemaVersion": "comparison-v2-generation",
@@ -1087,6 +1204,7 @@ def publish_comparison_batch(
                     verdicts=verdicts,
                     include_reference_entities=False,
                     landed_verdicts=landed_verdicts,
+                    traffic_entry_times=entry_times,
                 )
                 suffix = f"_p{part_index + 1:03d}" if len(parts) > 1 else ""
                 out_path = (

@@ -99,6 +99,14 @@ export default function FlightTable({ flightIds, flightSummaries }: FlightTableP
                 ? comparisonOutcome(comparison, resultKind)
                 : null;
               const callsign = summary?.callsign ?? id;
+              // The row's info text: the flight, its outcome, and a traffic window's outcome.
+              const info = [
+                id,
+                outcome?.label,
+                comparisonActive && comparison?.trafficOutcome
+                  ? `traffic: ${comparison.trafficOutcome}`
+                  : undefined,
+              ].filter(Boolean).join(" — ");
               return (
                 <tr
                   key={id}
@@ -108,7 +116,7 @@ export default function FlightTable({ flightIds, flightSummaries }: FlightTableP
                 >
                   <td
                     className={`flight-table-id${outcome ? ` flight-table-${outcome.style}` : ""}`}
-                    title={outcome ? `${id} — ${outcome.label}` : id}
+                    title={info}
                   >
                     {callsign}
                   </td>

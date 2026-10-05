@@ -20,6 +20,8 @@ export interface FlightComparisonDatum {
   status: ComparisonGroup["status"];
   /** The runway it landed on when that is not the observed flight's (status `otherRunway`, or a fail there). */
   landedRunway: string | null;
+  /** The traffic window's outcome (`separated`, `solve_failed`, …); null outside a traffic window. */
+  trafficOutcome: string | null;
 }
 
 export interface FlightComparisonData {
@@ -79,6 +81,7 @@ export function useFlightComparisonData(): FlightComparisonData {
             resultTimeS: group.status !== "failed" ? group.finalTimeS : null,
             status: group.status,
             landedRunway: group.landedRunway ?? null,
+            trafficOutcome: group.traffic?.outcome ?? null,
           });
         }
         setByFlightKey(map);

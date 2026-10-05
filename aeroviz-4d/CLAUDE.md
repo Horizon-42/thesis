@@ -165,6 +165,12 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **`otherRunway`** = a two-tier generation sentence that passed on ANOTHER runway than the observed flight's (the
   landed-runway grading, `--landed-runway-report`): light sky blue, never the pass green; the frontend must learn a status
   before any index carries it (an unknown status refuses the whole index) (AV41).
+- **A traffic window's index group may carry `traffic: {outcome, recorded, startOffsetsS}`** (a `--summary` of mode `traffic:m1`, any other `traffic:` mode refused: its sidecars
+  are required for every solved row, its arrivals roster is the one the summary names; no flags): the recorded neighbours as `ref-<flight_key>`
+  ids, each with the seconds it enters after the commanded aircraft (no CZML holds an absolute time, so the frontend shifts each neighbour's
+  epoch by it, per shown group); drawn pink `COMPARISON_TRAFFIC_COLOR`, the references' model budget, the clock stays the groups' own span and each neighbour's availability is clipped to it on purpose (airborne at the clock start: shown mid-flight; entering after the clock stop: not loaded; no clock: an error); their keys
+  are requested in arrival-window requests of at most `MAX_FLIGHT_KEYS_PER_REQUEST` (1000); an unsolved row has no `traffic`; the `categories.json`
+  entry carries no new field (AV46).
 - `states_schema` dispatches on record keys: `opt-`/`sim-` entities, or `pred-` plus `look-` for
   predictions (AV14).
 - **Predictions never get the off-target bake** (`mark_off_target = off_target and schema ==

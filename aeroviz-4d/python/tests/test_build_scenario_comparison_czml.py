@@ -1,6 +1,7 @@
 """Tests for the scenario-comparison CZML builder (single + per-runway batch)."""
 
 import json
+import re
 
 import pytest
 from pathlib import Path
@@ -1326,3 +1327,207 @@ def test_a_landed_runway_report_grading_a_flight_the_category_lacks_is_refused(t
             landed_runway_report={"trajectories": [{"file": "X_05L_eval.json", "runway": "05R", "solved": True,
                                                     "verdict": "pass"}]})
 
+
+
+# ── Traffic windows (4dTrajectory/optimization/traffic_optimization.py m1) ────
+
+COMMANDED = "AFR074_05L_a1b2c3_20260501T000300Z"
+EARLIER = "DAL1312_05L_d4e5f6_20260501T000100Z"      # already in the scene when the commanded one enters
+LATER = "UPS22_05R_a7b8c9_20260501T000500Z"         # enters after it
+ENTRY_UTC = {
+    COMMANDED: "2026-05-01T00:00:10.250Z",
+    EARLIER: "2026-05-01T00:00:00.901Z",
+    LATER: "2026-05-01T00:01:41.000Z",
+}
+
+
+def _write_traffic_window(directory: Path, *, entry: str = ENTRY_UTC[COMMANDED], sidecar: dict | None = None,
+                          write_sidecar: bool = True) -> list[dict]:
+    """One window in ``directory``: its states file, its sidecar, and the summary row naming them."""
+    state_data = {**STATE_DATA, "source": {**STATE_DATA["source"], "entry_time_utc": entry}}
+    (directory / f"{COMMANDED}_states.json").write_text(json.dumps(state_data), encoding="utf-8")
+    if write_sidecar:
+        (directory / f"{COMMANDED}_traffic.json").write_text(json.dumps(sidecar or {
+            "schema": comparison_builder.TRAFFIC_SCHEMA, "flight_key": COMMANDED,
+            "outcome": "separated", "recorded": [EARLIER, LATER],
+        }), encoding="utf-8")
+    return [{"id": "AFR074", "runway": "05L", "status": "solved",
+             "states_file": f"{COMMANDED}_states.json", "eval_file": f"{COMMANDED}_eval.json"}]
+
+
+def _write_arrivals_manifest(directory: Path, entries: dict[str, str] = ENTRY_UTC,
+                             schema_version: str | None = comparison_builder.ARRIVALS_SCHEMA_VERSION) -> Path:
+    path = directory / "manifest.json"
+    path.write_text(json.dumps({"schema_version": schema_version, "records": [
+        {"flight_key": key, "entry_time_utc": entry} for key, entry in entries.items()]}), encoding="utf-8")
+    return path
+
+
+def _traffic_index(directory: Path, results: list[dict], entries: dict[str, str] = ENTRY_UTC) -> list[dict]:
+    _czml, index = build_runway_comparison(
+        results, directory, [], airport="KRDU", include_reference_entities=False,
+        traffic_entry_times=comparison_builder.load_entry_times(_write_arrivals_manifest(directory, entries)))
+    return index
+
+
+def test_a_traffic_window_carries_its_outcome_the_recorded_aircraft_and_when_each_enters(tmp_path):
+    index = _traffic_index(tmp_path, _write_traffic_window(tmp_path))
+
+    assert [record["group"] for record in index] == [COMMANDED]
+    # `recorded` is the logical reference id the group's own reference carries (`ref-<flight_key>`);
+    # the offsets are the seconds each enters after the commanded aircraft, to the millisecond.
+    assert index[0]["traffic"] == {
+        "outcome": "separated",
+        "recorded": [f"ref-{EARLIER}", f"ref-{LATER}"],
+        "startOffsetsS": [-9.349, 90.75],
+    }
+    assert f"ref-{COMMANDED}" in index[0]["entities"]
+
+
+def test_a_batch_without_traffic_entry_times_has_no_traffic_block(tmp_path):
+    results = _write_traffic_window(tmp_path)
+    _czml, index = build_runway_comparison(results, tmp_path, [], airport="KRDU", include_reference_entities=False)
+    assert "traffic" not in index[0]
+
+
+def test_a_missing_traffic_sidecar_is_refused_by_name(tmp_path):
+    results = _write_traffic_window(tmp_path, write_sidecar=False)
+    with pytest.raises(ValueError, match=f"{COMMANDED}: traffic sidecar {COMMANDED}_traffic.json is missing"):
+        _traffic_index(tmp_path, results)
+
+
+@pytest.mark.parametrize("schema", ["optimization-traffic-v1", "optimization-traffic-block-v2", None])
+def test_a_traffic_sidecar_of_another_schema_is_refused_by_name(tmp_path, schema):
+    sidecar = {"flight_key": COMMANDED, "outcome": "separated", "recorded": []}
+    if schema is not None:
+        sidecar["schema"] = schema
+    results = _write_traffic_window(tmp_path, sidecar=sidecar)
+    with pytest.raises(ValueError, match=f"{COMMANDED}_traffic.json has schema {schema!r}, this builder reads "
+                                         f"'optimization-traffic-v2' only"):
+        _traffic_index(tmp_path, results)
+
+
+def test_a_traffic_sidecar_of_another_flight_is_refused(tmp_path):
+    results = _write_traffic_window(tmp_path, sidecar={
+        "schema": comparison_builder.TRAFFIC_SCHEMA, "flight_key": EARLIER, "outcome": "separated", "recorded": []})
+    with pytest.raises(ValueError, match=f"belongs to {EARLIER!r}"):
+        _traffic_index(tmp_path, results)
+
+
+def test_a_recorded_flight_the_arrival_window_does_not_hold_is_refused_by_name(tmp_path):
+    results = _write_traffic_window(tmp_path)
+    entries = {key: entry for key, entry in ENTRY_UTC.items() if key != LATER}
+    with pytest.raises(ValueError, match=f"1 recorded flight_key.*not in the arrivals manifest.*{LATER}"):
+        _traffic_index(tmp_path, results, entries)
+
+
+def test_a_manifest_that_is_not_the_one_the_run_flew_is_refused(tmp_path):
+    results = _write_traffic_window(tmp_path)
+    entries = {**ENTRY_UTC, COMMANDED: "2026-05-01T00:00:08.000Z"}      # an older roster: entry 2 s early
+    with pytest.raises(ValueError, match="the manifest is not the one this run flew"):
+        _traffic_index(tmp_path, results, entries)
+
+
+def test_an_unsolved_row_is_a_group_without_traffic_and_is_not_refused(tmp_path):
+    # Its M1 baseline failed: a failed record and no sidecar. The solved window beside it keeps its block.
+    results = _write_traffic_window(tmp_path) + [{
+        "id": "BAW9", "runway": "05L", "status": "failed", "eval_file": "BAW9_05L_b00009_20260501T000900Z_eval.json"}]
+    index = {record["flightId"]: record for record in _traffic_index(tmp_path, results)}
+    assert index["BAW9"]["status"] == "failed" and "traffic" not in index["BAW9"]
+    assert index["AFR074"]["traffic"]["outcome"] == "separated"
+
+
+def test_the_traffic_mirrors_are_the_sources_constants():
+    # Read as text, not imported: the optimizer modules pull in casadi, and this package must not
+    # depend on the modeling tree (same rule as the precision mirror above).
+    root = Path(__file__).resolve().parents[3]
+    optimization = root / "4dTrajectory" / "optimization"
+    assert f'TRAFFIC_RECORD_SCHEMA = "{comparison_builder.TRAFFIC_SCHEMA}"' in \
+        (optimization / "traffic" / "loop.py").read_text(encoding="utf-8")
+    assert f'TRAFFIC_SUFFIX = "{comparison_builder.TRAFFIC_SUFFIX}"' in \
+        (optimization / "traffic_optimization.py").read_text(encoding="utf-8")
+    assert f'mode="{comparison_builder.TRAFFIC_MODE}"' in \
+        (optimization / "traffic_optimization.py").read_text(encoding="utf-8")
+    # the name rule the sidecar path is built by: the states name without its suffix, plus the sidecar's
+    assert "states_name.removesuffix(_STATES_SUFFIX) + suffix" in \
+        (optimization / "scenario_batch.py").read_text(encoding="utf-8")
+    assert f'SCHEMA_VERSION = "{comparison_builder.ARRIVALS_SCHEMA_VERSION}"' in \
+        (root / "trajectory_data_process" / "harvest" / "arrivals.py").read_text(encoding="utf-8")
+
+
+def test_the_frontends_flight_key_request_limit_is_the_backends():
+    # The frontend splits the recorded aircraft's keys into requests of at most this many; the backend
+    # refuses a longer list outright.
+    root = Path(__file__).resolve().parents[3]
+    frontend = re.search(r"MAX_FLIGHT_KEYS_PER_REQUEST = (\d+);",
+                         (root / "aeroviz-4d" / "src" / "data" / "observedTracks.ts").read_text(encoding="utf-8"))
+    backend = re.search(r"MAX_TRAJECTORIES_PER_RESPONSE = (\d+)\n",
+                        (root / "aeroviz_backend" / "observed_trajectories.py").read_text(encoding="utf-8"))
+    assert frontend and backend and frontend.group(1) == backend.group(1)
+
+
+def _run_cli(monkeypatch, *argv: str) -> None:
+    import sys
+    monkeypatch.setattr(sys, "argv", ["build_scenario_comparison_czml.py", *argv])
+    comparison_builder.main()
+
+
+def _publish(monkeypatch, directory: Path, results: list[dict], manifest: Path, *, mode: str | None) -> Path:
+    """Run the CLI over a summary of ``results`` (a traffic summary names its roster); returns the category dir."""
+    summary = {"total": len(results), "solved": len(results), "failed": 0, "results": results}
+    if mode is not None:
+        summary["mode"] = mode
+        summary["optimization_config"] = {"traffic": {"selection": {"manifest": str(manifest)}}}
+    (directory / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    (directory / "evaluation_report.json").write_text(json.dumps({
+        "total": 1, "solved": 1, "successful": 1, "success_rate": 1.0, "lateral_m": None, "final_time_s": None,
+        "trajectories": []}), encoding="utf-8")
+    out = directory / "comparison" / "traffic_m1_runway"
+    _run_cli(monkeypatch, "--summary", str(directory / "summary.json"), "--output-dir", str(out), "--airport", "KRDU",
+             "--evaluation-report", str(directory / "evaluation_report.json"), "--category", "traffic_m1_runway",
+             "--category-label", "Traffic M1 (runway)")
+    return out
+
+
+def test_a_traffic_summary_publishes_its_traffic_with_the_entry_fields_existing_categories_use(monkeypatch, tmp_path):
+    out = _publish(monkeypatch, tmp_path, _write_traffic_window(tmp_path), _write_arrivals_manifest(tmp_path),
+                   mode=comparison_builder.TRAFFIC_MODE)
+
+    index = json.loads((out / "comparison_index.json").read_text(encoding="utf-8"))
+    assert index["groups"][0]["traffic"]["recorded"] == [f"ref-{EARLIER}", f"ref-{LATER}"]
+    # ONLY the fields existing categories carry: `isComparisonCategory` rejects nothing here, and one
+    # category it rejected would empty the whole airport's picker.
+    categories = json.loads((tmp_path / "comparison" / "categories.json").read_text(encoding="utf-8"))["categories"]
+    assert categories == [{"key": "traffic_m1_runway", "label": "Traffic M1 (runway)", "dir": "traffic_m1_runway",
+                           "groups": 1, "constrained": False}]
+
+
+def test_a_traffic_summary_requires_its_sidecars(monkeypatch, tmp_path):
+    results = _write_traffic_window(tmp_path, write_sidecar=False)
+    with pytest.raises(ValueError, match=f"{COMMANDED}: traffic sidecar {COMMANDED}_traffic.json is missing"):
+        _publish(monkeypatch, tmp_path, results, _write_arrivals_manifest(tmp_path), mode=comparison_builder.TRAFFIC_MODE)
+    assert not (tmp_path / "comparison" / "traffic_m1_runway" / "comparison_index.json").exists()   # nothing committed
+
+
+def test_a_summary_of_another_mode_is_published_as_before_sidecars_or_not(monkeypatch, tmp_path):
+    out = _publish(monkeypatch, tmp_path, _write_traffic_window(tmp_path), _write_arrivals_manifest(tmp_path), mode=None)
+    assert "traffic" not in json.loads((out / "comparison_index.json").read_text(encoding="utf-8"))["groups"][0]
+
+
+@pytest.mark.parametrize("mode", ["traffic:m2", "traffic:"])
+def test_a_traffic_summary_of_another_kind_is_refused_by_name_not_published_as_a_plain_category(monkeypatch, tmp_path, mode):
+    with pytest.raises(ValueError, match=f"summary mode {mode!r}: this builder publishes 'traffic:m1' windows only"):
+        _publish(monkeypatch, tmp_path, _write_traffic_window(tmp_path), _write_arrivals_manifest(tmp_path), mode=mode)
+    assert not (tmp_path / "comparison" / "traffic_m1_runway" / "comparison_index.json").exists()
+
+
+@pytest.mark.parametrize("schema_version", ["harvest-arrivals-v6-cifp-leg-vertical", None])
+def test_an_arrivals_roster_of_another_schema_is_refused_by_name(monkeypatch, tmp_path, schema_version):
+    manifest = _write_arrivals_manifest(tmp_path, schema_version=schema_version)
+    if schema_version is None:                                  # a roster that names no schema at all
+        document = json.loads(manifest.read_text(encoding="utf-8"))
+        del document["schema_version"]
+        manifest.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(ValueError, match=f"arrivals roster schema {schema_version!r}, this builder reads "
+                                         f"'{comparison_builder.ARRIVALS_SCHEMA_VERSION}' only"):
+        _publish(monkeypatch, tmp_path, _write_traffic_window(tmp_path), manifest, mode=comparison_builder.TRAFFIC_MODE)

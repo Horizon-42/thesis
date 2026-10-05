@@ -17,8 +17,10 @@ import {
   type ComparisonGroup,
 } from "../data/airportData";
 import {
+  MAX_FLIGHT_KEYS_PER_REQUEST,
   isObservedTrajectoryResponse,
   observedReferenceTracksUrl,
+  type ObservedTrajectoryResponse,
 } from "../data/observedTracks";
 import { AEROVIZ_BACKEND_URL } from "../pilot/pilotClient";
 import { addDataSourceHidden } from "../utils/cesiumDataSource";
@@ -32,8 +34,15 @@ import { OBSERVED_VERDICT_COLORS } from "../utils/observedVerdictColors";
 import { PREDICTION_OTHER_RUNWAY_COLOR } from "../utils/trajectoryRenderModel";
 import { selectComparisonGroups } from "../utils/sampleTrajectories";
 import {
+  TRAFFIC_DOCUMENT_PACKET,
+  trafficFlightKeys,
+  trafficPackets,
+  type TimedCzmlPacket,
+} from "../utils/comparisonTraffic";
+import {
   COMPARISON_KIND_ALPHA,
   COMPARISON_KIND_COLORS,
+  COMPARISON_TRAFFIC_COLOR,
   DEFAULT_MODEL_BUDGET,
   TRAJECTORY_PATH_WIDTH,
   planTrajectoryModels,
@@ -206,6 +215,75 @@ export function applyComparisonReferenceRenderModel(
   }
 }
 
+/**
+ * Apply the recorded-traffic contract: the recorded aircraft around a commanded flight, in ONE colour
+ * (`COMPARISON_TRAFFIC_COLOR`) on the track and, mixed in, on the aircraft model. Only the `modelIds` carry
+ * a model (the references' budget, `planTrajectoryModels`): the rest stay tracks.
+ */
+export function applyComparisonTrafficRenderModel(
+  entity: Cesium.Entity,
+  modelIds: ReadonlySet<string>,
+): void {
+  const color = cssColor(COMPARISON_TRAFFIC_COLOR, COMPARISON_KIND_ALPHA.reference);
+  if (entity.path) {
+    entity.path.width = new Cesium.ConstantProperty(TRAJECTORY_PATH_WIDTH);
+    entity.path.material = new Cesium.ColorMaterialProperty(color);
+  }
+  if (entity.label) {
+    entity.label.fillColor = new Cesium.ConstantProperty(color);
+    entity.label.show = new Cesium.ConstantProperty(false);
+  }
+  if (entity.model) {
+    entity.model.show = new Cesium.ConstantProperty(modelIds.has(entity.id));
+    entity.model.color = new Cesium.ConstantProperty(color.withAlpha(1));
+    entity.model.colorBlendMode = new Cesium.ConstantProperty(Cesium.ColorBlendMode.MIX);
+    entity.model.colorBlendAmount = new Cesium.ConstantProperty(0.5);
+    entity.model.runAnimations = new Cesium.ConstantProperty(false);
+  }
+}
+
+/**
+ * The backend's arrival window for these flight keys. A comparison group is drawn from records anchored
+ * at terminal-ring entry, and a full-track answer to the same request has a different time origin that
+ * nothing downstream can tell — it just renders the group kilometres ahead of its own reference — so
+ * anything but the arrival window is refused here rather than drawn as a silently wrong overlay.
+ */
+async function fetchArrivalWindow(
+  airport: string,
+  flightKeys: string[],
+): Promise<ObservedTrajectoryResponse> {
+  const url = observedReferenceTracksUrl({ backendUrl: AEROVIZ_BACKEND_URL, airport, flightKeys });
+  const response = await fetchJson<unknown>(url);
+  if (!isObservedTrajectoryResponse(response)) {
+    throw new Error(`${url} is not an observed-trajectories-v2 response`);
+  }
+  if (response.trackWindow !== "arrival") {
+    throw new Error(
+      `${url} returned the "${response.trackWindow}" track window; ` +
+        "the comparison reference requires the arrival window",
+    );
+  }
+  return response;
+}
+
+/** The arrival-window packet of every recorded aircraft the shown groups list, by flight key. */
+async function fetchTrafficPackets(
+  airport: string,
+  flightKeys: string[],
+): Promise<Map<string, TimedCzmlPacket>> {
+  const packets = new Map<string, TimedCzmlPacket>();
+  for (let start = 0; start < flightKeys.length; start += MAX_FLIGHT_KEYS_PER_REQUEST) {
+    const response = await fetchArrivalWindow(
+      airport,
+      flightKeys.slice(start, start + MAX_FLIGHT_KEYS_PER_REQUEST),
+    );
+    for (const packet of response.czml as TimedCzmlPacket[]) {
+      if (packet.id !== "document") packets.set(packet.id, packet);
+    }
+  }
+  return packets;
+}
+
 /** Prefixes that mark a result entity (exact references use their bare flight key). */
 export function isComparisonEntity(entity: Cesium.Entity | undefined): entity is Cesium.Entity {
   const id = entity?.id;
@@ -258,9 +336,11 @@ export function availabilityByEntityId(czml: unknown): Map<string, Cesium.TimeIn
   return out;
 }
 
+type ClockBounds = { start: Cesium.JulianDate | null; stop: Cesium.JulianDate | null };
+
 function includeClock(
   clock: Cesium.DataSourceClock | undefined,
-  bounds: { start: Cesium.JulianDate | null; stop: Cesium.JulianDate | null },
+  bounds: ClockBounds,
 ): void {
   if (!clock) return;
   if (!bounds.start || Cesium.JulianDate.lessThan(clock.startTime, bounds.start)) {
@@ -269,6 +349,21 @@ function includeClock(
   if (!bounds.stop || Cesium.JulianDate.greaterThan(clock.stopTime, bounds.stop)) {
     bounds.stop = clock.stopTime.clone();
   }
+}
+
+/**
+ * A recorded neighbour's availability cut to the viewer's clock, on purpose: the clock is the groups' own span
+ * (the neighbours never move it), so a neighbour airborne at the clock start shows from there, mid-flight, and
+ * one that enters after the clock stop — or left before its start — is not shown (an empty collection).
+ */
+export function clipAvailabilityToClock(
+  availability: Cesium.TimeIntervalCollection,
+  clockStart: Cesium.JulianDate,
+  clockStop: Cesium.JulianDate,
+): Cesium.TimeIntervalCollection {
+  return availability.intersect(
+    new Cesium.TimeIntervalCollection([new Cesium.TimeInterval({ start: clockStart, stop: clockStop })]),
+  );
 }
 
 export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
@@ -295,6 +390,8 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
 
   const resultSourcesRef = useRef<Cesium.CzmlDataSource[]>([]);
   const referenceSourceRef = useRef<Cesium.CzmlDataSource | null>(null);
+  const trafficSourceRef = useRef<Cesium.CzmlDataSource | null>(null);
+  const trafficIdsRef = useRef<Set<string>>(new Set());
   const shownResultIdsRef = useRef<Set<string>>(new Set());
   const referenceIdsRef = useRef<Set<string>>(new Set());
   const [loadVersion, setLoadVersion] = useState(0);
@@ -339,25 +436,7 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
         }
 
         const flightKeys = selection.groups.map((group) => group.group);
-        const referenceUrl = observedReferenceTracksUrl({
-          backendUrl: AEROVIZ_BACKEND_URL,
-          airport: activeAirportCode,
-          flightKeys,
-        });
-        const referenceResponse = await fetchJson<unknown>(referenceUrl);
-        if (!isObservedTrajectoryResponse(referenceResponse)) {
-          throw new Error(`${referenceUrl} is not an observed-trajectories-v2 response`);
-        }
-        // The comparison groups are drawn from records anchored at terminal-ring entry.
-        // A full-track reference answers the same request with a different time origin and
-        // nothing downstream can tell — it just renders the group kilometres ahead of its
-        // own reference — so refuse it here rather than draw a silently wrong overlay.
-        if (referenceResponse.trackWindow !== "arrival") {
-          throw new Error(
-            `${referenceUrl} returned the "${referenceResponse.trackWindow}" track window; ` +
-              "the comparison reference requires the arrival window",
-          );
-        }
+        const referenceResponse = await fetchArrivalWindow(activeAirportCode, flightKeys);
         const referenceSource = await new Cesium.CzmlDataSource(
           `comparison-reference-${categoryDir}`,
         ).load(referenceResponse.czml);
@@ -377,10 +456,7 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
         addDataSourceHidden(viewer, referenceSource);
         added.push(referenceSource);
 
-        const bounds = { start: null, stop: null } as {
-          start: Cesium.JulianDate | null;
-          stop: Cesium.JulianDate | null;
-        };
+        const bounds: ClockBounds = { start: null, stop: null };
         includeClock(referenceSource.clock, bounds);
         const statusByGroup = new Map(
           selection.groups.map((group) => [group.group, group.status]),
@@ -420,7 +496,51 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
         }
         if (cancelled) return;
 
+        // The recorded aircraft of the shown traffic windows: each group's own copies, on its clock.
+        const trafficByKey = await fetchTrafficPackets(
+          activeAirportCode,
+          trafficFlightKeys(selection.groups),
+        );
+        if (cancelled) return;
+        const neighbours = trafficPackets(selection.groups, trafficByKey);
+        let trafficSource: Cesium.CzmlDataSource | null = null;
+        if (neighbours.length > 0) {
+          if (!bounds.start || !bounds.stop) {
+            throw new Error(
+              "the comparison carries no clock to cut the recorded aircraft's availability to",
+            );
+          }
+          // Cut to the clock, and a neighbour with nothing left is not loaded at all.
+          const availability = availabilityByEntityId(neighbours);
+          const clipped = new Map<string, Cesium.TimeIntervalCollection>();
+          for (const neighbour of neighbours) {
+            const interval = clipAvailabilityToClock(
+              availability.get(neighbour.id)!, bounds.start, bounds.stop);
+            if (!interval.isEmpty) clipped.set(neighbour.id, interval);
+          }
+          const shown = neighbours.filter((neighbour) => clipped.has(neighbour.id));
+          if (shown.length > 0) {
+            trafficSource = await new Cesium.CzmlDataSource(
+              `comparison-traffic-${categoryDir}`,
+            ).load([TRAFFIC_DOCUMENT_PACKET, ...shown]);
+            if (cancelled || !isCesiumViewerUsable(viewer)) return;
+            const neighbourModelIds = planTrajectoryModels(
+              shown.map((neighbour) => neighbour.id),
+              null,
+              DEFAULT_MODEL_BUDGET,
+            ).modelIds;
+            for (const entity of trafficSource.entities.values) {
+              entity.availability = clipped.get(entity.id)!;
+              applyComparisonTrafficRenderModel(entity, neighbourModelIds);
+            }
+            addDataSourceHidden(viewer, trafficSource);
+            added.push(trafficSource);
+          }
+        }
+
         referenceSourceRef.current = referenceSource;
+        trafficSourceRef.current = trafficSource;
+        trafficIdsRef.current = new Set(trafficSource?.entities.values.map((entity) => entity.id));
         resultSourcesRef.current = resultSources;
         shownResultIdsRef.current = selection.shownEntityIds;
         referenceIdsRef.current = new Set(referenceIds);
@@ -464,6 +584,8 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
       }
       resultSourcesRef.current = [];
       referenceSourceRef.current = null;
+      trafficSourceRef.current = null;
+      trafficIdsRef.current = new Set();
       shownResultIdsRef.current = new Set();
       referenceIdsRef.current = new Set();
       setTrajectoryDataSource(null);
@@ -482,6 +604,9 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
   useEffect(() => {
     const referenceSource = referenceSourceRef.current;
     if (referenceSource) referenceSource.show = visible && trajectoryComparisonKinds.reference;
+    // The recorded neighbours are recorded tracks too: they follow the Reference switch.
+    const trafficSource = trafficSourceRef.current;
+    if (trafficSource) trafficSource.show = visible && trajectoryComparisonKinds.reference;
     for (const source of resultSourcesRef.current) {
       source.show = visible;
       for (const entity of source.entities.values) {
@@ -516,7 +641,8 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
       const picked = viewer.scene.pick(position);
       const entity = picked && picked.id;
       return isComparisonEntity(entity) ||
-        (entity instanceof Cesium.Entity && referenceIdsRef.current.has(entity.id))
+        (entity instanceof Cesium.Entity &&
+          (referenceIdsRef.current.has(entity.id) || trafficIdsRef.current.has(entity.id)))
         ? entity
         : null;
     };

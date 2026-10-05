@@ -216,6 +216,38 @@ describe("airportData helpers", () => {
   });
 });
 
+describe("a traffic window's group", () => {
+  const traffic = {
+    outcome: "separated",
+    recorded: ["ref-DAL1312_05L_d4e5f6_20260501T000100Z", "ref-UPS22_05R_a7b8c9_20260501T000500Z"],
+    startOffsetsS: [-9.349, 90.75],
+  };
+  const group = { group: "X_05L", flightId: "X", runway: "05L", airport: "KRDU", czml: "c.czml", status: "solved",
+                  entities: ["ref-X_05L", "sim-X_05L"], traffic };
+  const index = (groups: unknown[]) => ({
+    schemaVersion: "comparison-v2-generation", generation: "g", epoch: "2026-10-05T00:00:00Z", startHidden: true,
+    referenceSource: "canonicalObserved", evaluationReport: "r.json", groups,
+  });
+
+  it("is read with its traffic block, and a group without one is still a group", () => {
+    expect(isComparisonIndex(index([group]))).toBe(true);
+    const { traffic: _traffic, ...plain } = group;
+    expect(isComparisonIndex(index([plain]))).toBe(true);
+  });
+
+  it("refuses a malformed traffic block rather than drawing a guess", () => {
+    for (const broken of [
+      { ...traffic, outcome: 3 },
+      { ...traffic, recorded: ["UPS22_05R_a7b8c9_20260501T000500Z", traffic.recorded[1]] },   // not a ref- id
+      { ...traffic, startOffsetsS: [90.75] },                                                // one offset short
+      { ...traffic, startOffsetsS: [-9.349, "90.75"] },
+      { outcome: "separated", recorded: traffic.recorded },                                  // no offsets
+    ]) {
+      expect(isComparisonIndex(index([{ ...group, traffic: broken }]))).toBe(false);
+    }
+  });
+});
+
 describe("experiment intent and parameter rows", () => {
   const base = {
     key: "experiment_run_val",

@@ -374,6 +374,31 @@ export interface ComparisonInitialState {
   m?: number;
 }
 
+/**
+ * A traffic window's recorded aircraft (`build_scenario_comparison_czml.py --traffic-sidecars`; absent
+ * on every other group): the window's `outcome`, and the aircraft recorded around the commanded one —
+ * `recorded[i]` the `ref-<flight_key>` reference id (resolved in the arrival window like the group's own
+ * reference), entering `startOffsetsS[i]` seconds after the commanded aircraft (negative: already there).
+ */
+export interface ComparisonTraffic {
+  outcome: string;
+  recorded: string[];
+  startOffsetsS: number[];
+}
+
+export function isComparisonTraffic(value: unknown): value is ComparisonTraffic {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.outcome === "string" &&
+    Array.isArray(candidate.recorded) &&
+    candidate.recorded.every((id) => typeof id === "string" && id.startsWith("ref-")) &&
+    Array.isArray(candidate.startOffsetsS) &&
+    candidate.startOffsetsS.length === candidate.recorded.length &&
+    candidate.startOffsetsS.every(isFiniteNumber)
+  );
+}
+
 /** One flight's comparison group: the entity ids of its (up to) three coloured paths. */
 export interface ComparisonGroup {
   /** Unique group key, `${flightId}_${runway}`. */
@@ -415,6 +440,8 @@ export interface ComparisonGroup {
   massKg?: number | null;
   /** CZML entity ids belonging to this group (e.g. ref-/opt-/sim-`${group}`). */
   entities: string[];
+  /** The recorded aircraft around this commanded flight; traffic-window categories only. */
+  traffic?: ComparisonTraffic;
   /** The CZML file (within `comparison/`) that holds this group's entities. */
   czml: string;
 }
@@ -532,7 +559,8 @@ export function isComparisonGroup(value: unknown): value is ComparisonGroup {
       candidate.observedRunwayVerdict === "pass" || candidate.observedRunwayVerdict === "fail" ||
       candidate.observedRunwayVerdict === "indeterminate") &&
     Array.isArray(candidate.entities) &&
-    candidate.entities.every((entity) => typeof entity === "string")
+    candidate.entities.every((entity) => typeof entity === "string") &&
+    (candidate.traffic === undefined || isComparisonTraffic(candidate.traffic))
   );
 }
 

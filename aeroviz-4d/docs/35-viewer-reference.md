@@ -863,3 +863,53 @@ indeterminate on another runway.
   从第一个预测步数起，读入时加上 `startS`；答案必须是句子条上那个词的一段，否则按名字拒绝。标注句不飞。
 - 删掉的：叠加层（执行器回放、先验预测）、模型自己的句子、多机窗口、增强起点、程序掩码、approach 列的捕获转弯和走廊。
 - 测试：Vitest 用 Python 写出的夹具（`src/data/__tests__/fixtures/stage_a/`，经 `stageA.ts` 读），不手写、不手改。
+
+### AV46 · a traffic window's `traffic` field: the recorded aircraft around the commanded one, on its clock (2026-10-05)
+
+`build_scenario_comparison_czml.py` publishes the windows of `4dTrajectory/optimization/traffic_optimization.py m1` with no
+extra argument: **a `--summary` whose `mode` is `traffic:m1`** (a MIRROR of what `traffic_optimization.py` stamps) requires
+every SOLVED group's `<flight_key>_traffic.json` (the path is the group's states file name without `_states.json` plus
+`_traffic.json`, as `scenario_batch.sidecar_filename` builds it; schema exactly `optimization-traffic-v2`, a MIRROR of
+`traffic/loop.py` `TRAFFIC_RECORD_SCHEMA`) and reads the arrivals roster the summary names
+(`optimization_config.traffic.selection.manifest`). Refused by name: a missing sidecar, another schema, another flight's
+sidecar, a roster whose `schema_version` is not the current `harvest-arrivals-v7-measured-crossing-in-slice` (a MIRROR of
+`trajectory_data_process/harvest/arrivals.py` `SCHEMA_VERSION`), a recorded `flight_key` the roster lacks, a roster whose
+entry time for the commanded flight differs from the record's `source.entry_time_utc` (not the harvest the run flew). An
+UNSOLVED row (its baseline failed: a failed record, no sidecar) gets no `traffic` field and is not refused. A summary of any
+other mode is published as before — except that any other `traffic:` mode (an M2 block summary, `traffic:m2`) is refused by
+name, not published as a plain category. The group's index entry gains `traffic: {outcome, recorded, startOffsetsS}`:
+
+- `recorded[i]` is `ref-<flight_key>` of a recorded aircraft, the logical reference id the group's own reference carries,
+  resolved by the frontend in the ARRIVAL window of the canonical observed datasource (AV12), not in the full-track
+  `trajectories.czml` (the real KRDU file also holds all 507 distinct keys of the 50-window sample).
+- `startOffsetsS[i]` is the seconds that aircraft's `entry_time_utc` comes after the commanded aircraft's (negative: already in
+  the scene), to the millisecond, from the roster. **Why it exists:** no CZML holds an absolute time — every flight of
+  `trajectories.czml` and of the arrival window starts at the same fixed epoch at its own `t = 0` (its own terminal-ring
+  entry in the arrival window). The group's own reference needs no shift (the commanded record is on the same kind of
+  origin), but a recorded neighbour drawn unshifted would start at the commanded entry.
+
+The `categories.json` entry carries only the fields every entry carries (key, label, dir, groups, constrained): a field the
+picker's guard did not list would empty the airport's picker for everyone (AV6). The index's extra field is ignored by guards
+that do not know it (dev-two-tier's `isComparisonIndex` accepts the built index); this frontend's `isComparisonGroup`
+shape-checks it (`outcome` a string, `recorded` all `ref-` ids, `startOffsetsS` finite numbers of the same length) and
+refuses the index otherwise.
+
+Frontend (`utils/comparisonTraffic.ts`, `useComparisonTrajectoryLayer`): the keys of every shown group's `recorded` are
+requested from the backend with `window=arrival` (the same `fetchArrivalWindow` as the references), **split into requests of
+at most `MAX_FLIGHT_KEYS_PER_REQUEST` = 1000 keys** (`data/observedTracks.ts`, a MIRROR of the backend's
+`MAX_TRAJECTORIES_PER_RESPONSE`, pinned by a builder test; the default 200-group sample would otherwise exceed it). Each shown
+group gets its own copy of each neighbour, id `traffic-<group>/<flight_key>`, with `position.epoch` (and the orientation's)
+moved by `startOffsetsS[i]`, in its own data source, **pink `COMPARISON_TRAFFIC_COLOR` `rgb(255, 110, 199)`** on track and
+aircraft model (no other comparison colour). Only `DEFAULT_MODEL_BUDGET` (20) neighbours carry an aircraft model
+(`planTrajectoryModels`, as the references; `model.show`), the rest stay tracks; the budget is planned over the neighbours
+that are drawn (see the clip below), not over those cut away. Each neighbour has an availability interval
+(it vanishes when its track ends). **The neighbours never move the viewer clock — its bounds stay the groups' own spans — and
+each neighbour's availability is clipped to that clock on purpose** (`clipAvailabilityToClock`): a neighbour airborne at the
+clock start shows from there, mid-flight; one that enters after the clock stop is not shown — it is not even loaded (its copy is dropped before the data source is
+built); a comparison with neighbours but no clock to cut them to is an error, not an uncut draw (offsets of the 50-window sample
+run from -914 s to +1997 s against groups of about 445 s, so some neighbours of every window are cut). A flight listed by two shown groups is drawn twice,
+once on each group's clock; a group not in the sample (the runway selector, the sample count) has no neighbours loaded, and
+tearing the layer down — or a reload — removes them with the other sources, a teardown during the neighbours' fetch loads
+nothing. The neighbours follow the Reference switch and show their callsign on hover. The outcome (`separated`,
+`solve_failed`, …) is in the flight list row's tooltip (`<flight_key> — <label> — traffic: <outcome>`), only while the
+comparison is active.
