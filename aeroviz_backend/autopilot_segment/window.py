@@ -52,11 +52,16 @@ SCHEMA = "aeroviz-autopilot-window-segment-v1"
 START = "start"
 
 
+def move_of(move: dict[str, float]) -> Move:
+    """A window's ``startMove`` (``turnDeg``, ``heightM``, ``speedScale``) as `autopilot.start.Move`."""
+    return Move(turn_deg=move["turnDeg"], height_m=move["heightM"], speed_scale=move["speedScale"])
+
+
 def moved_start(batch: replay.Batch, j: int, move: dict[str, float], rule: str) -> tuple[replay.Batch, Any]:
     """Flight ``j`` of ``batch`` with its observed rows to its first predicted step moved by ``move`` (a window's
-    ``startMove``: `autopilot.start.Move`'s fields), and the batch's inputs from them (the start rule ``rule``)."""
+    ``startMove``, `move_of`), and the batch's inputs from them (the start rule ``rule``)."""
     observed = list(batch.observed)
-    observed[j] = moved_signals(observed[j], batch.sentences[j].first_row, Move(**move))
+    observed[j] = moved_signals(observed[j], batch.sentences[j].first_row, move_of(move))
     moved = dataclasses.replace(batch, observed=observed)
     return moved, moved.inputs(rule, replay_device())
 
@@ -91,7 +96,7 @@ def fly_window_segment(batch: replay.Batch, inputs: Any, j: int, sentence: Any, 
 
 def is_moved(move: dict[str, float]) -> bool:
     """Whether a window's ``startMove`` moves anything (`Move`'s zero: no turn, no height, speed scale 1)."""
-    return dataclasses.astuple(Move(**move)) != (0.0, 0.0, 1.0)
+    return dataclasses.astuple(move_of(move)) != (0.0, 0.0, 1.0)
 
 
 class WindowSegments:

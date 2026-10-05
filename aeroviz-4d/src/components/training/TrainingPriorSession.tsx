@@ -31,7 +31,7 @@ import {
   type TrainingPriorWhich,
   type TrainingPriorBlockedColumn,
 } from "../../data/trainingPriorSample";
-import { readingRowAt, readingRowTimeS, trainingReadingOf, type TrainingVocabulary } from "../../data/trainingSample";
+import { readingRowAt, readingRowTimeS, trainingReadingOf, type TrainingFlownEnd, type TrainingVocabulary } from "../../data/trainingSample";
 import { checkMark, TRAINING_OUTCOME_TAG, TRAINING_OUTCOME_TEXT, decisionText, crossingText } from "../../data/trainingText";
 import {
   TRAINING_DECISION_FAIL_COLOR,
@@ -64,7 +64,7 @@ export function allowedWords(column: TrainingPriorBlockedColumn, blocked: number
 
 /** How a sentence ended, as one line of the table: the outcome in its colour, the DA check, the go-arounds, its length. */
 function SentenceLine({ outcome, crossing, goArounds, words, endS, label, active, onSelect, title }: {
-  outcome: TrainingPriorSentence["outcome"]; crossing: TrainingPriorSentence["crossing"]; goArounds: number | null; words: number;
+  outcome: TrainingFlownEnd; crossing: TrainingPriorSentence["crossing"]; goArounds: number | null; words: number;
   endS: number; label: string; active: boolean; onSelect: () => void; title: string;
 }) {
   const decision = crossing?.decision ?? null;

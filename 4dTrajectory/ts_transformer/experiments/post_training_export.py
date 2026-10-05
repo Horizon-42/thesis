@@ -41,7 +41,7 @@ import argparse
 import json
 import time
 from collections import Counter
-from dataclasses import asdict, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -199,6 +199,12 @@ def traffic_payload(window: Window, end_s: float, hae_minus_msl_m: dict[str, flo
     return out
 
 
+def start_move_payload(window: Window) -> dict[str, float]:
+    """A window's start move as the set writes it (unrounded: the live executor moves the start with it again)."""
+    move = window.start_move
+    return {"turnDeg": move.turn_deg, "heightM": move.height_m, "speedScale": move.speed_scale}
+
+
 def start_payload(window: Window, observed: np.ndarray) -> dict[str, Any] | None:
     """Window B's observed rows before its first predicted step as its start moved them (``observed``: `start_moved`'s,
     `STATE_COLUMNS` on the 2 s rows from the sentence's first row) — what the view draws in place of the head's observed
@@ -219,7 +225,7 @@ def window_payload(window: Window, rounds: Sequence[str | int], said: Sequence[d
     longest = max(len(s["track"]["eM"]) for s in said)
     end_s = window.first_step_s + (longest - 1) * step_s
     return {"datasetId": window.commanded.key, "kind": window.kind, "row0S": window.row0_s,
-            "firstStepS": round(window.first_step_s - window.row0_s, 3), "startMove": asdict(window.start_move),
+            "firstStepS": round(window.first_step_s - window.row0_s, 3), "startMove": start_move_payload(window),
             "movedStart": start_payload(window, observed),
             "moved": [[key, shift] for key, shift in window.moved],
             "traffic": traffic_payload(window, end_s, hae_minus_msl_m),

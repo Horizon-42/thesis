@@ -11,7 +11,7 @@ import {
   TRAINING_AUTOPILOT_SEGMENT_END,
   type TrainingAutopilotView,
 } from "./trainingAutopilot";
-import type { TrainingColumn, TrainingCrossing, TrainingDecision, TrainingOutcome, TrainingReplay } from "./trainingSample";
+import type { TrainingColumn, TrainingCrossing, TrainingDecision, TrainingFlownEnd, TrainingReplay } from "./trainingSample";
 
 /** The five columns as the views name them. */
 export const TRAINING_COLUMN_LABEL: Record<TrainingColumn, string> = {
@@ -28,7 +28,7 @@ export const TRAINING_COLUMN_MEANING: Record<TrainingColumn, string> = {
 };
 
 /** How the executor's flight ended (the judge's outcomes, `autopilot/judge.py`), in words. */
-export const TRAINING_OUTCOME_TEXT: Record<TrainingOutcome, string> = {
+export const TRAINING_OUTCOME_TEXT: Record<TrainingFlownEnd, string> = {
   landed: "landed: crossed the threshold lined up, inside the runway limit, after a decision-altitude check that passed",
   unstable_at_minimums: "crossed the threshold on the runway, but unstable at minimums: the decision-altitude check failed or had no point",
   crossed_too_high: "crossed the threshold on the runway's centreline, too high to land",
@@ -37,10 +37,11 @@ export const TRAINING_OUTCOME_TEXT: Record<TrainingOutcome, string> = {
   ground_contact: "reached the threshold's elevation before the threshold",
   timeout: "did not get there within its time limit",
   dynamics_failure: "left the dynamics (a non-finite state, no airspeed or a stall)",
+  lost_separation: "lost separation from another aircraft of its window: ended there (a window of stage C)",
 };
 
 /** The same, as a short tag: the flight list, the bar's chip. */
-export const TRAINING_OUTCOME_TAG: Record<TrainingOutcome, string> = {
+export const TRAINING_OUTCOME_TAG: Record<TrainingFlownEnd, string> = {
   landed: "landed",
   unstable_at_minimums: "unstable at minimums",
   crossed_too_high: "too high",
@@ -49,6 +50,7 @@ export const TRAINING_OUTCOME_TAG: Record<TrainingOutcome, string> = {
   ground_contact: "ground contact",
   timeout: "timed out",
   dynamics_failure: "dynamics failure",
+  lost_separation: "lost separation",
 };
 
 export function checkMark(ok: boolean): string {

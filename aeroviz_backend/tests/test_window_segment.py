@@ -5,6 +5,8 @@ the window and round are chosen by the request, a word after the window's end is
 and the frontend reads the names the backend writes. The set is the export's own synthetic one
 (`test_post_training_export.stage_c_fixture`)."""
 
+import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -197,3 +199,60 @@ def test_a_lost_window_s_last_word_ends_at_the_loss(world):
     answer = backend.window.fly(request(world, window=1, seq=9, row=row, column=COLUMNS[column]))
     assert answer["windowEnd"]["loss"]["other"].endswith(INSERTED_SUFFIX) and answer["crossing"] is None
     assert answer["segment"]["end"] == SEGMENT_END and answer["segment"]["endCycle"] == lost["track"]["lastCycle"]
+
+
+FIXTURES = FRONTEND / "__tests__" / "fixtures" / "stage_c"
+
+
+def window_answers(world):
+    """The live answers the frontend's reader is tested on: the real window's first word (its segment stopped at the next
+    word of its column, or flown to its outcome) and the lost window's last word (stopped at its loss), as the service
+    answers them (the times written as fixed names)."""
+    backend = SyntheticBackend(world["root"], world["flown"], world["setup"]["words"])
+    out = []
+    for seq, place in enumerate((0, 1), start=1):
+        said = world["sample"]["windows"][place]["rounds"][0]
+        grid = np.array(said["words"])
+        cells = [(int(r), int(c)) for r, c in zip(*np.nonzero(grid != UNCHANGED))]
+        if not cells:
+            continue
+        row, column = cells[0] if place == 0 else cells[-1]
+        answer = backend.window.fly(request(world, window=place, seq=seq, row=row, column=COLUMNS[column]))
+        out.append({**answer, "computedUtc": "fixture", "timing": {key: 0 for key in answer["timing"]}})
+    return out
+
+
+def test_the_frontend_fixtures_of_the_live_answers_are_what_the_service_answers(world):
+    """The answers the frontend's reader is tested on are the service's own today (``AEROVIZ_WRITE_FIXTURES=1`` writes them
+    again after a change)."""
+    text = json.dumps(window_answers(world), separators=(",", ":"), allow_nan=False)
+    path = FIXTURES / "autopilot_window_segment.json"
+    if os.environ.get("AEROVIZ_WRITE_FIXTURES") == "1":
+        path.write_text(text, encoding="utf-8")
+    assert path.read_text(encoding="utf-8") == text, f"{path} is not what the service answers now: AEROVIZ_WRITE_FIXTURES=1"
+
+
+def ts_constant(path, name):
+    import re
+    match = re.search(rf'export const {name} = "([^"]*)"', path.read_text(encoding="utf-8"))
+    assert match is not None, f"{path.name} has no string constant {name}"
+    return match.group(1)
+
+
+def test_the_frontend_reads_the_names_the_backend_and_the_export_write():
+    import re
+
+    from ts_transformer.experiments import post_training_export
+    from ts_transformer.experiments.post_window_loop import LOST_SEPARATION
+    from ts_transformer.post.scene import WINDOW_KINDS
+
+    sample, autopilot = FRONTEND / "trainingWindowSample.ts", FRONTEND / "trainingWindowAutopilot.ts"
+    assert ts_constant(sample, "TRAINING_WINDOW_INDEX_SCHEMA") == post_files.INDEX_SCHEMA
+    assert ts_constant(sample, "TRAINING_WINDOW_INDEX_FILE") == post_files.INDEX_FILE
+    assert ts_constant(sample, "TRAINING_WINDOW_SAMPLE_SCHEMA") == post_files.SAMPLE_SCHEMA
+    assert ts_constant(sample, "TRAINING_WINDOW_SET_KIND") == post_files.SET_KIND
+    assert ts_constant(sample, "TRAINING_WINDOW_START") == post_training_export.START == window_segments.START
+    assert ts_constant(autopilot, "TRAINING_WINDOW_AUTOPILOT_SCHEMA") == window_segments.SCHEMA
+    assert ts_constant(FRONTEND / "trainingSample.ts", "TRAINING_LOST_SEPARATION") == LOST_SEPARATION
+    kinds = re.search(r"export const TRAINING_WINDOW_KINDS = \[([^\]]*)\]", sample.read_text(encoding="utf-8"))
+    assert re.findall(r'"([^"]*)"', kinds.group(1)) == list(WINDOW_KINDS)

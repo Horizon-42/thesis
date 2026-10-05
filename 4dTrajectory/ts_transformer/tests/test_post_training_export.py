@@ -4,7 +4,9 @@ artefact (the fixture of `test_post_window_loop`); every write root under tmp.""
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, replace
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -22,6 +24,8 @@ from ts_transformer.tests.test_post_window_loop import CPU, DELTA, setup, window
 
 #: The window set the frontend's readers and the backend's test read (`stage_c_fixture`).
 FIXTURE_SET = "fixture-windows"
+#: Where the frontend's readers find it (written by `test_the_frontend_fixtures_are_what_the_export_writes`).
+FIXTURES = Path(__file__).resolve().parents[3] / "aeroviz-4d" / "src" / "data" / "__tests__" / "fixtures" / "stage_c"
 
 
 def head_of(s):
@@ -218,3 +222,17 @@ def stage_c_fixture(tmp_path, monkeypatch, *, texts=False):
         out["texts"] = {name: (training / name).read_text(encoding="utf-8")
                         for name in (files.INDEX_FILE, f"{FIXTURE_SET}/{files.SAMPLE_FILE}")}
     return out
+
+
+def test_the_frontend_fixtures_are_what_the_export_writes(tmp_path, monkeypatch):
+    """The fixture the frontend's readers are tested on is the export's own output today, the files its writers write (the
+    sample by the export, the index by `training_files.write_set`); a change of the export moves it, and this test says so
+    until it is written again (``AEROVIZ_WRITE_FIXTURES=1``)."""
+    texts = stage_c_fixture(tmp_path, monkeypatch, texts=True)["texts"]
+    if os.environ.get("AEROVIZ_WRITE_FIXTURES") == "1":
+        for name, text in texts.items():
+            (FIXTURES / name).parent.mkdir(parents=True, exist_ok=True)
+            (FIXTURES / name).write_text(text, encoding="utf-8")
+    for name, text in texts.items():
+        assert (FIXTURES / name).read_text(encoding="utf-8") == text, (
+            f"{FIXTURES / name} is not what the export writes now: AEROVIZ_WRITE_FIXTURES=1 writes it again")
