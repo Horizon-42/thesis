@@ -45,6 +45,8 @@ The decision numbers are shared by all documents (outline §3).
 | D105 | The landings that the commanded aircraft's inputs count follow the window's scene (§3 "Landing context"): the tracks roster's landings with the window's changes — an inserted aircraft's landing (A) added at its shifted time, a moved aircraft's landing (D) moved by its shift — less the commanded aircraft's own landing (D31) and never a landing on a sealed test day (C32). A real window counts the roster's landings, so a window without other aircraft reads what free generation reads (§2 item 1). The present landing direction of the reward (§2 item 2) reads the same landings. The window loop gives them to the prior's function of a loop's row for each aircraft (prior D105). Why: with one index for each airport, the inserted aircraft's landing was not counted and the moved leader's was counted at its time before the move: the commanded aircraft read a value of the record that the augmentation changed — one landing on one candidate, up to 120 s in D and to the end of the window in A, in two thirds of the windows (D100) (Claude's check of stage B, `readouts/2026-10-05_stage_b_check.zh.md`) | Decided | User, 2026-10-05, on Claude's check of stage B |
 | D107 | The clipped-ratio surrogate and the pull to the base (the KL) are computed with dropout off (eval mode), the base's side always; the teacher-forced data term with the dropout of the base's training (its configuration's: 0.1 in A, B and C, 0.2 in D; prior D40). The speaker and the log-probability under records refuse a model with any module in training mode (prior D107), so each step of the training computes the two kinds of terms in their own mode (the data term is a batch of its own, D36). Why: the speaker speaks with dropout off, so the ratio and the KL score the policy that spoke only with dropout off; with dropout on, at the parameters that spoke, the ratio was off by 3 % on average and by up to 0.18–0.26 for one word, and 22.5 % of the rows (5 words) fell outside the clipping band ε = 0.2 (configuration A, random weights; Claude's check of stage B): clipped for noise, in the two terms that carry the reward. The data term is the base's own loss, which reached its select optimum with that dropout. Claude's reasoning; not measured on a post-training run | Decided | User, 2026-10-05, on Claude's recommendation |
 | D110 | A mask of a caller (the speed-word mask, §3) is computed once for a row, from the state at the start of the row; it does not change with the row's own runway word. A row that says "go-around" thus keeps the speed mask that "established" (D92) gave before the word, though the aircraft is not established after it. Why: the speaker asks the procedure masks for each runway word, but a caller's masks are fixed for the row (prior §4); the effect is small: the mask never blocks "unchanged" or "unspecified", so the row always has a speed word, and it acts only on rows where the aircraft and the one ahead are both established (Claude's check of stage B) | Decided | User, 2026-10-05, on Claude's check of stage B |
+| D112 | With no landing in the 30 min before the first predicted step, every runway is of the airport's present landing direction (§2 item 2): there is no direction to break. Why: read literally, no runway would be of it and every landing would earn 0; on A34's artefact (Δ = 4 s) 1,119 of 40,530 train windows (2.8 %; select 3.0 %) have no landing in those 30 min (stage C log §11, P19) | Decided | User, 2026-10-05, on the stage C implementer's proposal P19 |
+| D113 | A window that opens inside a loss of separation is left out of the draw: the commanded aircraft on its record at its first predicted step, with no runway in force (the loop's state there), loses separation that it answers for. The rule holds for real and augmented windows alike, each judged on its own scene; the readouts state the windows left out. Why: the judge runs only after a row that the executor flew, so such a window would be judged lost one row later, reward 0, whatever is said. On A34's artefact (Δ = 4 s) the draw leaves out 58 of 40,530 real train windows, 2,082 of 40,530 A (5.1 %) and 1,304 of 16,234 D (8.0 %) (stage C log §12, §13, P20) | Decided | User, 2026-10-05, on the stage C implementer's count |
 
 ### 0.2 Open items
 
@@ -64,6 +66,7 @@ A proposal is a reading where the design says nothing; it holds only until the u
 | D105 (the landings of a window's scene) | Done, reviewed: `00e81c88` (log §10) |
 | After B10 (notes/stage_c.md steps 3–6) | Done, reviewed: `3725565c` (motion, names, D107), `0168d457` (C4); log §11 |
 | The user's answers on P19, P20 | P19 (a quiet window: every runway present) and P20's count in `a1fdd2a8`; P20 decided (a window that opens inside a loss is left out of the draw) in `2bb77065` (log §12, §13) |
+| C1's census of the faulty tracks (vocabulary D111) | Done, reviewed: `35289115`; the counts on A34's artefact for the user (log §14) |
 | C6 | Waits for A38 (vocabulary D97: the copy of a loop) on this branch |
 | C8–C12 | Wait for B5's base, Claude's check of stage B, the moved start (C9) and the user's criteria (D7) |
 
@@ -127,7 +130,7 @@ A proposal is a reading where the design says nothing; it holds only until the u
    | Every other outcome; every loss of separation (the separation judge, §3) | 0 |
 
    "The airport's present landing direction": a runway within 90° of a runway with a landing in the 30 min before the
-   first predicted step. The reward gives "a reward for a go-around that the DA check needs" without a term of its own.
+   first predicted step; with no landing in those 30 min, every runway (D112). The reward gives "a reward for a go-around that the DA check needs" without a term of its own.
    An unstable approach that continues ends as `unstable_at_minimums`: 0. A go-around before the DA point continues the
    flight with 900 s more time (vocabulary §6, item 6); a landing then gives 0.9. Thus the model gains from a go-around
    only when the go-around changes a probable failure into a probable landing: with the same probability p of a landing
@@ -148,6 +151,7 @@ A proposal is a reading where the design says nothing; it holds only until the u
 4. **Windows.** Real windows and augmented windows of the train days: B (a moved start: a turn about the airport, a
    height change and a speed change; the start of vocabulary §6 item 5, D97), A (one inserted aircraft that flies its
    record), D (the aircraft ahead moved). Real, A and D in equal counts in a round (D100, on C1's census; D55); B after C9.
+   A window that opens inside a loss of separation is left out of the draw (D113).
 5. **Loss**: the clipped-ratio surrogate (ε = 0.2) with the advantage inside each branch group (item 9); the pull to
    the base model (0.04, the KL on the sampled words, masked distribution); the teacher-forced data term (1) on
    single-aircraft samples of the closed-loop sentences of the train days in the base's selection `landed` (D36,
@@ -306,7 +310,7 @@ identities follow D21 (outline §3):
 | Windows of a round | Real : A : D = 1 : 1 : 1; B after C9 | D100 |
 | A token of the traffic attention | The other aircraft's edge features to the commanded aircraft and its own motion, from its recorded state | D98 |
 | Loss | Clipped ratio ε = 0.2; pull to the base model 0.04; teacher-forced data term 1 | §2 item 5 |
-| Present landing direction | A runway within 90° of a runway with a landing in the 30 min before the first predicted step | §2 item 2 |
+| Present landing direction | A runway within 90° of a runway with a landing in the 30 min before the first predicted step; every runway with no such landing | §2 item 2, D112 |
 
 ---
 
@@ -435,7 +439,7 @@ aircraft, the rewards of steps 8.9 and 9.4, the formats of `instruction-v3`. No 
   scene's steps, from the commanded aircraft's row 0 to its end (D93).
 - The augmented windows A (one recorded flight of the same airport and split, from another time, inserted with its
   record shifted in time) and D (the aircraft next ahead on the approach clock at the first predicted step, its record
-  shifted in time). The shifts: D103.
+  shifted in time). The shifts: D103. A window that opens inside a loss of separation is left out of the draw (D113).
 - The census (`post_windows`, outline §5 rule 12): for each airport and split (train, select), the windows, the other
   aircraft at the first predicted step, the share with a leader in the air on the same runway or a runway that counts
   as one, and the windows near the cut between two operating days. Measured on all train days in a scratch directory
