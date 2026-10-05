@@ -166,3 +166,13 @@ def test_the_readout_reads_each_way_by_stratum_and_speed_band():
     assert paired["turns"] == 2
     assert paired["executor_minus_exact_words_own_outward_m"]["mean"] == pytest.approx(20.0 - 5.0)
     assert paired["exact_words_minus_observed_track_own_outward_m"]["mean"] == pytest.approx(5.0 - 20.0)
+
+
+def test_the_runner_refuses_the_val_days_by_name(tmp_path, capsys):
+    """A41, D85: ``--split`` takes train or select; the val days are read once, in the stage's validation readout."""
+    for split in ("val", "test"):
+        with pytest.raises(SystemExit):
+            executor_turns.main(["--instructions", str(tmp_path), "--executor", str(tmp_path), "--split", split,
+                                 "--out", str(tmp_path / "out")])
+        err = capsys.readouterr().err
+        assert f"argument --split: invalid choice: '{split}'" in err and "train" in err and "select" in err

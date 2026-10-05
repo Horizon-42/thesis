@@ -1,5 +1,6 @@
-"""Instruction labeller, the check by eye: draw a seeded sample of VAL flights with their
-sentences (half straight-in, half vectored) into ``figures/`` of the artefact directory.
+"""Instruction labeller, the check by eye: draw a seeded sample of SELECT flights with their
+sentences (half straight-in, half vectored) into ``figures/`` of the artefact directory. The val days are read once, in
+the stage's validation readout (outline D85), never here.
 
 Each page: the plan view with the heading words (relative to the runway's course), the go-arounds and the capture, the altitude against distance
 flown with the altitude and angle words and their tubes, the ground speed against time with the
@@ -42,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     spec = load_spec(directory)
     words = Words(spec)
     geometries = load_candidates(directory)
-    flights = load_signals(directory, "val")
+    flights = load_signals(directory, "select")
     rng = np.random.default_rng(args.seed)
     wanted = {stratum: args.count // 2 for stratum in STRATA}
     chosen = []

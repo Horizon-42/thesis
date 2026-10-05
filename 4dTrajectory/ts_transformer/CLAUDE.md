@@ -372,7 +372,7 @@ executor's turn against the exact words (A13, R51); `final_descent_tolerance` re
 H_final artefact in memory and puts several side by side (A24, D66, R52); `closed_loop_start_check` says stored
 closed-loop sentences through `autopilot/start.py` and requires their stored states back (A26, D67, R53); `training_export` writes the Training sets of stage A beside the old ones (`training/index_v4.json`, sample
 v9; every closed-loop sentence flown again against its stored states and formal outcome; the live executor shares its
-setup, `experiments/training_flights.py`, and `aeroviz_backend.autopilot_segment.check_live` checks a set against it) (R54); `start_rules` reads the train closed loop at one Δ once for each start rule of D77 (A33, R55); `instruction_figures` draws val pages
+setup, `experiments/training_flights.py`, and `aeroviz_backend.autopilot_segment.check_live` checks a set against it) (R54); `start_rules` reads the train closed loop at one Δ once for each start rule of D77 (A33, R55); `instruction_figures` draws select pages
 (R10). **Archived with instruction-v3** (`archive/two_tier_v3_2026_10/`, its README; their manual entries stay as the
 record): the instruction-v3 Training exports (R11, R13; the attitude module came back unchanged for A23, R54), `executor_sensitivity` (R12), the prior and its
 post-training (R15–R22, R35, R38), `heading_lead_ablation` (R23), the multi-aircraft runners (R24–R39, R41, R43–R45),
