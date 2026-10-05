@@ -94,6 +94,7 @@ The decision numbers are shared by all documents (outline §3).
 |---|---|---|---|
 | O8 | Speed words in ground speed: wind can make speed words at turns | A check on data, later | 3.6 |
 | O10 | The positions and heights of the observed 2 s rows are interpolated between the raw samples around each row, so a row reads the sample after it: p50 0.81 s, p99 1.69 s, at most 13.1 s later (KRDU, 300 train flights; Claude's review, 2026-10-05). Across a gap, the interpolation draws a line toward a later sample | Keep: the position of a row is where the aircraft was at that time, not a prediction, and the next sample is less than one row away on 99 % of the rows. A check on data of the rows whose next sample is more than one row away, later; the user decides | 4.1, 6 |
+| O11 | The base's one validation readout (prior B5) exports val flights beside their closed-loop sentences (outline §6 item 4). A23's export reads the formal closed-loop replay's rows (`executor/<spec>/replay-closed-<split>-<Δ>s/replay.json`) to draw its flights, to take each flight's stratum and to check the outcome of the flight flown again; the formal replays are of train and select only (the replay of the val days waits for the user), so the export cannot give a val flight | Two ways: (1) the closed-loop replay of val at the chosen Δ in A34, on the user's go; (2) the export takes no formal row: it draws from the flights of the sentence files, takes the stratum from the sentence file (D70) and checks the flight flown again against the stored states and the stored outcome (D74), for every split. Claude's proposal: (2), one definition of the outcome (D74) and no read of the val days beyond B5's readout. Decided before B5 | 6, 12.1 |
 
 ### 0.3 Implementation
 
@@ -115,17 +116,22 @@ The decision numbers are shared by all documents (outline §3).
    published from it (`closed_loop_v11_20261004`). The user chose H_final = 10 m (D66) and Δ = 4 s (D11), the latter on
    the readings of D34 of A25, which A30 gives again.
 2. Claude's review of stage A (2026-10-05; the user's question: data leaks, and information that the executor must not
-   have) gave D77–D84 and outline D85. Their corrections come before the formal runs of stage B, which read the
-   artefact of A34:
-   1. A32: the corrections in the code (§12.1), on a new branch; nothing is built.
-   2. A33: the measurements for the user's choices, on all train days, in a scratch directory (D55): the start rule
+   have) gave D77–D84 and outline D85. Their corrections, and one request of stage B (A36), come before the formal runs
+   of stage B, which read the artefact of A34:
+   1. A36 first (§12.1): the export of A23 gives the closed-loop part of chosen flights as one function
+      (`split_flights`), for stage B's Training view (prior B6); a change of the code only, output unchanged. On its
+      own branch, so that B6 does not wait for A32.
+   2. A32: the corrections in the code (§12.1), on a new branch; nothing is built.
+   3. A33: the measurements for the user's choices, on all train days, in a scratch directory (D55): the start rule
       of D77, the candidates of D78, the climb nominal. The user chooses the start rule.
-   3. A34: the formal artefact once more, with A32's code and the chosen rule (`v12_<date>`, `v17_<date>`). Its report
+   4. A34: the formal artefact once more, with A32's code and the chosen rule (`v12_<date>`, `v17_<date>`). Its report
       reads train and select only (D85).
-   4. A35: A23's Training sets again, from A34's artefact. Then the user merges, and `v11_20261004`,
+   5. A35: A23's Training sets again, from A34's artefact. Then the user merges, and `v11_20261004`,
       `v16_20261004` and the sets of `closed_loop_v11_20261004` are deleted with the user's go.
-   5. Claude's check of A32–A35 (§12.2, item 8).
-3. The replay of the val days waits for the user.
+   6. Claude's check of A32–A36 (§12.2, item 8).
+3. O11 (the val flights of the base's validation readout in the export) is decided before stage B's B5; its code goes
+   into A32 (way 2) or A34 (way 1).
+4. The replay of the val days waits for the user.
 
 ---
 
@@ -1676,6 +1682,25 @@ over the new set; the browser check by a one-shot agent; a test stack for the us
 `v11_20261004`, `v16_20261004` and the set `closed_loop_v11_20261004` are deleted with the user's go (the backend's
 live executor reads the artefact of its set, so they go together).
 
+**A36. One function for the closed-loop part of the export (stage B's Training view, prior B6).** Before A32, on the
+branch `dev-two-tier-v4-a36`, made from `dev-two-tier`; Claude fast-forwards `dev-two-tier-v4` on the user's word,
+and stage B merges it (outline §5 rule 1: stage B does not change stage A's code). A change of the code only: no format,
+no artefact and no published set changes.
+
+- `experiments/training_export.py`: `split_flights(instructions, split, chosen, rows, params, words, *, device)` gives,
+  for the flights `chosen` of one split and one airport, in that order, each flight's payload — its head
+  (`flight_head`: the observed track, the open-loop sentence) and, at each Δ of `rows`, its closed-loop sentence flown
+  again (`replay_payload`, against the stored states and the formal replay's row) — and the airport's geometry. It is
+  the body of the loop over the splits in `build_airport`, moved unchanged; `build_airport` calls it. The stratum and
+  the kind of a flight are read from the rows of the first Δ given (today `2.0`).
+- `formal_rows(executor, split, intervals=ROW_INTERVALS_S)`: the Δ values to read; the default is today's.
+- Stage B's export (`experiments/prior_training_export.py`) calls `split_flights` with the prior's Δ, for example
+  `(4.0,)`. A32 changes the function with the rest of A23's code (D77, D82; O11).
+- Tests: A23's export tests pass unchanged, and a sample written before and after the change is the same, byte for
+  byte; `split_flights` with one Δ gives that Δ only. Stage B's session wrote a reference patch (90 lines; it can be
+  gone from its scratchpad: `/tmp/claude-1000/-home-supercomputing-studys-thesis/7767b9f9-586d-4d01-9b82-2949db171a8a/scratchpad/split_flights.patch`;
+  13 export tests passed with it).
+
 ### 12.2 Claude's check of stage A
 
 The check of A0–A14 is done (`readouts/2026-10-04_stage_a_check.zh.md`, at `ab295b18`; its points became D48–D52).
@@ -1703,7 +1728,7 @@ Done at `9a986c09`: all five items pass (`readouts/2026-10-04_stage_a_check_a15_
    code index); the spec of the formal artefact holds the chosen H_final and its measurement records the choice;
    the readings of D34 exist for every Δ, split and airport and equal A25's; the artefacts of A21 and A25 deleted
    with the user's go.
-8. After A32–A35: D77–D85 against the code; A32's tests fail on the code before it (`dev-two-tier-v4` at `cf549e47`);
+8. After A32–A36: D77–D85 against the code; A36's sample equal to A23's byte for byte; O11 as the user decided; A32's tests fail on the code before it (`dev-two-tier-v4` at `cf549e47`);
    the behaviour check of D81 passes on A34's executor spec; A34's candidates are the published ends of each airport;
    no start state and no stored observed row reads a sample after the first predicted step (on A34's artefact: the
    observed samples after it changed, the start the same); no reading of the val days in A34's report or summaries;
