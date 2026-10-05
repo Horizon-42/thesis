@@ -1614,7 +1614,8 @@ def test_the_behaviour_check_refuses_a_law_that_reads_a_vertical_path(monkeypatc
         moved = conformance.fly_moved(batch, params, words)
         difference = conformance.Difference(expected=1)
         for ref, result in zip(reference, moved):
-            conformance.compare(ref, replace(result, verdict=ref.verdict), difference, "KXXX:test")
+            conformance.compare(ref, replace(result, verdict=ref.verdict), difference, "KXXX:test",
+                                bounds_m=conformance.STATE_BOUNDS_M["moved"])
         return difference
 
     clean = differences()

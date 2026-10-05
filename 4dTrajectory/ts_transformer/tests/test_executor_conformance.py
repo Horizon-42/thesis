@@ -29,9 +29,9 @@ def _flown(params=None):
     return conformance.flight_results(flown, [verdict])[0]
 
 
-def _compare(reference, flown):
+def _compare(reference, flown, mode="batch"):
     difference = conformance.Difference(expected=1)
-    conformance.compare(reference, flown, difference, "KXXX:f1")
+    conformance.compare(reference, flown, difference, "KXXX:f1", bounds_m=conformance.STATE_BOUNDS_M[mode])
     return difference
 
 
@@ -172,9 +172,40 @@ def test_every_way_of_flying_gives_the_same_flown_states(monkeypatch):
             ours = flown[mode][j]
             if mode in conformance.UNJUDGED:
                 ours = replace(ours, verdict=flown["batch"][j].verdict)
-            difference = _compare(flown["batch"][j], ours)
+            difference = _compare(flown["batch"][j], ours, mode)
             assert difference.passed, (mode, j, difference.mismatches)
             assert difference.horizontal_m < 1e-6 and difference.vertical_m < 1e-6
+
+
+def moved_states(reference, column, by):
+    """``reference`` with one state column moved by ``by`` at its middle cycle."""
+    states = reference.states.copy()
+    states[reference.done // 2, column] += by
+    return _with(reference, states=states)
+
+
+def test_the_moved_way_has_its_own_horizontal_bound(tmp_path, monkeypatch):
+    """A33 (the user's choice): the way ``moved`` compares positions horizontally within `MOVED_HORIZONTAL_BOUND_M` (the
+    chart moved sideways changes the rounding) and heights within `STATE_BOUND_M`, as every other way; every way has
+    its bounds; the bounds are recorded with the reference."""
+    assert set(conformance.STATE_BOUNDS_M) == set(conformance.MODES)
+    reference = _flown()
+    metre_in_lat = 1.0 / METRES_PER_DEG_LAT
+    assert conformance.STATE_BOUND_M < 10.0 * conformance.STATE_BOUND_M < conformance.MOVED_HORIZONTAL_BOUND_M
+    off = moved_states(reference, LAT, 10.0 * conformance.STATE_BOUND_M * metre_in_lat)
+    assert not _compare(reference, off).passed and _compare(reference, off, "moved").passed
+    assert not _compare(reference, moved_states(reference, LAT, 2.0 * conformance.MOVED_HORIZONTAL_BOUND_M
+                                                * metre_in_lat), "moved").passed
+    assert not _compare(reference, moved_states(reference, ALT, 10.0 * conformance.STATE_BOUND_M), "moved").passed
+    # through the check: the same flown result passes as ``moved`` and is refused as ``batch``
+    executor, _, batch = _spec_dir(tmp_path, monkeypatch, [reference])
+    conformance.write_reference(executor, tmp_path / "instructions", batch=batch)
+    monkeypatch.setattr(conformance, "MODES", {"batch": lambda b, p, w: [off], "moved": lambda b, p, w: [off]})
+    checked = conformance.check(executor, tmp_path / "instructions", batch=batch)
+    assert not checked.differences["batch"].passed and checked.differences["moved"].passed
+    payload = json.loads((executor / conformance.DIRECTORY / "reference.json").read_text())
+    assert payload["bounds"]["states_m"]["moved"] == [conformance.MOVED_HORIZONTAL_BOUND_M, conformance.STATE_BOUND_M]
+
 
 
 def _spec_dir(tmp_path, monkeypatch, results, *, keys=("KXXX:f1",)):
@@ -213,7 +244,7 @@ def test_the_reference_is_written_once_and_checked_against_its_own_spec_and_flig
     monkeypatch.setattr(conformance, "input_digests", lambda batch, params, words: ["moved"])
     with pytest.raises(ValueError, match="the inputs of 1 reference flights moved"):
         conformance.check(executor, instructions, batch=batch)
-    monkeypatch.setattr(conformance, "STATE_BOUND_M", 1e-3)
+    monkeypatch.setitem(conformance.STATE_BOUNDS_M, "staggered", (1e-5, 1e-6))
     with pytest.raises(ValueError, match="made under the bounds"):
         conformance.check(executor, instructions, batch=batch)
     record["sha256"] = "t" * 64
@@ -221,7 +252,7 @@ def test_the_reference_is_written_once_and_checked_against_its_own_spec_and_flig
         conformance.check(executor, instructions, batch=batch)
     monkeypatch.setattr(conformance, "MODES", {"batch": lambda batch, params, words: []})
     record["sha256"] = "s" * 64
-    monkeypatch.setattr(conformance, "STATE_BOUND_M", 1e-6)
+    monkeypatch.setitem(conformance.STATE_BOUNDS_M, "staggered", (conformance.STATE_BOUND_M, conformance.STATE_BOUND_M))
     monkeypatch.setattr(conformance, "input_digests", lambda batch, params, words: ["in-KXXX:f1"])
     with pytest.raises(ValueError, match="flew 0 of the reference's 1 flights"):
         conformance.check(executor, instructions, batch=batch)

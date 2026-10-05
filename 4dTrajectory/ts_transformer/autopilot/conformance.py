@@ -20,8 +20,9 @@ flight with its reference up to the cycle it was done at:
 THE LAWS READ NO VERTICAL PATH (vocabulary §5.2, D81), checked the same way: the way ``moved`` flies the reference's
 flights as a single-aircraft batch with every candidate's vertical path changed (`MOVED_PATH`: its threshold crossing
 height, glidepath angle and decision altitude) and the dynamics' chart moved (`MOVED_ORIGIN`: its origin north, east
-and up), and requires the same states, commands, limits and end cycles; only the judge's verdict, which reads the
-vertical paths, may differ.
+and up), and requires the same states (horizontally within `MOVED_HORIZONTAL_BOUND_M`, `STATE_BOUNDS_M`), commands, limits and end
+cycles; only the judge's
+verdict, which reads the vertical paths, may differ.
 
 Before flying, each flight's INPUTS are compared with the reference's digests (`input_digests`: the state it starts
 from, its airframe, frame, thrust and approach speed, its time limit, its words and runway, the runways' geometry and
@@ -67,7 +68,8 @@ from ts_transformer.repo_layout import git_state, repo_relative
 #: v3 (A19, A20): no word clock's observed rows in a flight's input digest; the airport elevation E in it (D58).
 #: v4 (A29, D73): no digest of the executor's code or of this checker.
 #: v5 (A32): the train flights with a labelled go-around added (§7.2 #3); the frame at the airport reference (D81).
-REFERENCE_SCHEMA = "ts-executor-conformance-reference-v5"
+#: v6 (A33): the bounds recorded with the reference are each way's (`STATE_BOUNDS_M`; the moved way's own horizontal one).
+REFERENCE_SCHEMA = "ts-executor-conformance-reference-v6"
 #: The reference's flights: the replay gate's draw on the training days, every airport alike, and up to
 #: `GO_AROUND_PER_AIRPORT` more of each airport with a labelled go-around, so that the go-around climb and the held
 #: airspeed are flown (vocabulary §7.2 #3).
@@ -76,6 +78,13 @@ GO_AROUND_PER_AIRPORT = 10
 #: How far apart two flown states may be, metres, horizontally or vertically — the single-flight executor's bound
 #: against the batched one (instruction-v3's fleet check, 7,426 live segments within 1.6e-8 m; now the spec's reference).
 STATE_BOUND_M = 1e-6
+#: The horizontal bound of the way ``moved`` (the user, 2026-10-05, A33: its own bound): moving the chart's origin
+#: sideways changes the rounding of every cycle's position — on the 285 reference flights of A33's scratch spec,
+#: 1.1–2.2e-6 m horizontally on 11 flights, every limit, mode and end cycle the same; the vertical paths changed alone fly
+#: the states bit for bit, an origin moved 15 m up alone 2.5e-8 m, so its vertical bound stays `STATE_BOUND_M` (Claude's
+#: reading: the looser bound only where the rounding needs it). A law reading a vertical path moves states by metres
+#: (the test law reading the threshold crossing height: 10.8 m).
+MOVED_HORIZONTAL_BOUND_M = 1e-4
 #: How far apart any other two floats may be (speed m/s, angles rad, mass kg, commands, wanted rates, sentence times,
 #: a verdict's check numbers).
 ROUNDOFF = 1e-6
@@ -231,6 +240,9 @@ MODES: dict[str, Callable[[replay.Batch, ExecutorParams, Words], list[FlightResu
     "batch": fly_batch, "staggered": fly_staggered, "single": fly_single, "moved": fly_moved}
 #: The ways whose verdict is not compared: ``moved`` changes what the judge reads.
 UNJUDGED = ("moved",)
+#: Each way's bounds on its states, metres (horizontal, vertical).
+STATE_BOUNDS_M = {"batch": (STATE_BOUND_M, STATE_BOUND_M), "staggered": (STATE_BOUND_M, STATE_BOUND_M),
+                  "single": (STATE_BOUND_M, STATE_BOUND_M), "moved": (MOVED_HORIZONTAL_BOUND_M, STATE_BOUND_M)}
 
 
 # ---- the reference on disk
@@ -282,7 +294,7 @@ def load_results(path: Path, verdicts: Sequence[dict[str, Any]]) -> list[FlightR
 # ---- comparing a flight with its reference
 
 def bounds() -> dict[str, float]:
-    return {"state_m": STATE_BOUND_M, "roundoff": ROUNDOFF}
+    return {"states_m": {mode: list(pair) for mode, pair in STATE_BOUNDS_M.items()}, "roundoff": ROUNDOFF}
 
 
 @dataclasses.dataclass
@@ -340,8 +352,10 @@ def _verdict_differences(a: Any, b: Any, where: str, out: list[str]) -> None:
         out.append(f"verdict {where}: {a!r}, {b!r}")
 
 
-def compare(reference: FlightResult, flown: FlightResult, difference: Difference, name: str) -> None:
-    """Add flight ``name``'s comparison to ``difference``."""
+def compare(reference: FlightResult, flown: FlightResult, difference: Difference, name: str, *,
+            bounds_m: tuple[float, float]) -> None:
+    """Add flight ``name``'s comparison to ``difference``, its states within ``bounds_m`` (horizontal, vertical; the
+    way's `STATE_BOUNDS_M`)."""
     problems: list[str] = []
     for result in (reference, flown):
         rows = {"states": len(result.states),
@@ -367,7 +381,7 @@ def compare(reference: FlightResult, flown: FlightResult, difference: Difference
     other = max(gap for gap, _ in others)
     if apart_lat or apart_lon or apart_alt or any(apart for _, apart in others):
         problems.append("a NaN or an infinity where the reference has another value")
-    if horizontal_m > STATE_BOUND_M or vertical_m > STATE_BOUND_M:
+    if horizontal_m > bounds_m[0] or vertical_m > bounds_m[1]:
         problems.append(f"states {horizontal_m:.3g} m apart horizontally, {vertical_m:.3g} m vertically")
     if other > ROUNDOFF:
         problems.append(f"a float {other:.3g} apart")
@@ -503,7 +517,7 @@ def check(executor_dir: Path, instructions: Path, *, modes: Sequence[str] | None
         if mode in UNJUDGED:
             flown = [dataclasses.replace(result, verdict=ref.verdict) for result, ref in zip(flown, reference)]
         for name, ref, result in zip(payload["flights"], reference, flown, strict=True):
-            compare(ref, result, difference, name)
+            compare(ref, result, difference, name, bounds_m=STATE_BOUNDS_M[mode])
         out[mode] = difference
     return Checked(out)
 
