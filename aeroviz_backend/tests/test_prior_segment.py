@@ -68,9 +68,10 @@ class Flown:
 
 @pytest.fixture(autouse=True)
 def claim_on_disk(monkeypatch):
-    """The prior's run holds the claim the fixture's val set names (the fixture's paths are not on disk)."""
+    """The prior's run holds the claim the fixture's val set names, its readout written (the fixture's paths are not on
+    disk: `checkpoint.written_claim` stood in for)."""
     held = {REPO_ROOT / "fixture/prior": "fixture/readout_val"}
-    monkeypatch.setattr(prior_segments, "validation_claim",
+    monkeypatch.setattr(prior_segments, "written_claim",
                         lambda prior_dir, reader: held[prior_dir] if prior_dir in held else None)
     return held
 
@@ -160,13 +161,13 @@ def test_a_request_flies_the_sentence_it_names_and_says_what_it_flew(world):
     assert answer["sentence"] == prior_segments.CLOSED_LOOP and answer["stored"]["horizontalM"] < STATE_BOUND_M
 
 
-class ExecutorChecked(Exception):
-    """What a conformance check that failed would raise."""
+class SetOpened(Exception):
+    """What opening the set would raise: here, the sign that it was reached."""
 
 
 class CheckedBackend(SyntheticBackend):
     def executor_for(self, sample):
-        raise ExecutorChecked("the executor conformance ran")
+        raise SetOpened("the set's executor spec was opened")
 
 
 def write_extra_set(world, name, sample):
@@ -195,14 +196,14 @@ def test_the_claimed_validation_set_flies_its_val_flights(world):
 
 def test_a_val_flight_of_an_unclaimed_set_is_refused_before_any_executor_check(world):
     """An unclaimed set's val flight, and a claim on a set that is not val (and a val set with no claim), are refused by
-    name; the split is refused before `executor_for` runs the conformance check (this backend's would raise)."""
+    name; the split is refused before the set is opened (`executor_for`: this backend's raises)."""
     train = world["sample"]
     flight = {**train["flights"][0], "split": SEALED_READINGS[0]}
     stray = write_extra_set(world, "stray", {**train, "flights": [flight]})
     backend = CheckedBackend(stray, world["flown"])
     with pytest.raises(RequestRefused, match="'val'"):
         backend.prior.fly(request(world, setId="stray"))
-    with pytest.raises(ExecutorChecked):             # a train flight of the unclaimed set does reach the check
+    with pytest.raises(SetOpened):             # a train flight of the unclaimed set does reach the check
         CheckedBackend(world["root"], world["flown"]).prior.fly(request(world, clientId="train"))
     claim = world["val_sample"]["source"]["validationClaim"]
     claimed = write_extra_set(world, "claimed_train", {**train, "source": {**train["source"], "validationClaim": claim}})
@@ -220,10 +221,10 @@ def test_a_claim_the_disk_does_not_hold_or_a_forged_claim_is_refused_by_name(wor
     backend = CheckedBackend(world["root"], world["flown"])
     held = dict(claim_on_disk)
     claim_on_disk.clear()                                            # the prior's run holds no claim
-    with pytest.raises(RequestRefused, match="holds no claim of"):
+    with pytest.raises(RequestRefused, match="holds no written claim of"):
         backend.prior.fly(request(world, setId=FIXTURE_VAL_SET, flightKey=flight, clientId="disk"))
     claim_on_disk[REPO_ROOT / "fixture/prior"] = REPO_ROOT / "fixture/another_readout"      # another readout's claim
-    with pytest.raises(RequestRefused, match="holds no claim of"):
+    with pytest.raises(RequestRefused, match="holds no written claim of"):
         backend.prior.fly(request(world, setId=FIXTURE_VAL_SET, flightKey=flight, clientId="other"))
     claim_on_disk.update(held)
     for field, message in (("reader", "validationClaim.reader"), ("prior", "validationClaim.prior"),
@@ -289,6 +290,25 @@ def test_the_warm_up_opens_every_listed_prior_set_and_says_what_it_skipped(world
     lines = []
     SyntheticBackend(tmp_path, world["flown"]).prior.warm_up(lines.append)
     assert "skipped" in lines[0] and prior_files.INDEX_SCHEMA in lines[0] and "0 sets ready" in lines[-1]
+
+
+class LockWatched(SyntheticBackend):
+    """Records, at each opening of a set, whether the request lock is held."""
+
+    def set_flown(self, sample, split, interval_s, instructions, params, words, opened=None):
+        self.held.append(self._lock.locked())
+        return super().set_flown(sample, split, interval_s, instructions, params, words, opened)
+
+
+def test_the_backend_warm_up_opens_the_prior_sets_without_the_request_lock(world):
+    """A43: a set is opened under its own lock, never the request lock, so a request waits only for the set it needs —
+    the prior's sets too; the backend's warm-up opens them after stage A's."""
+    backend = LockWatched(world["root"], world["flown"])
+    backend.held = []
+    lines = []
+    backend.warm_up(lines.append)
+    assert backend.held and not any(backend.held)
+    assert any(line.startswith("prior warm-up:") and "sets ready" in line for line in lines)
 
 
 class FakeAutopilot:

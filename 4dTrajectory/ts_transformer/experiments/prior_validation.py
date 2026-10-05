@@ -40,7 +40,8 @@ from ts_transformer.instructions.grammar import column_words
 from ts_transformer.instructions.labeller.interval import interval_rows, on_interval_rows
 from ts_transformer.instructions.words import COLUMNS, RUNWAY, UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.prior.checkpoint import claim_validation_read, open_prior, readable_identity
+from ts_transformer.prior.checkpoint import (CLAIM_SPENT_BY, claim_validation_read, open_prior, readable_identity,
+                                             spend_validation_claim)
 from ts_transformer.prior.inputs import Heard
 from ts_transformer.prior.procedure import PROCEDURE_MASKS, Final, ProcedureMasks, airport_finals
 from ts_transformer.prior.selection import SIDES, side
@@ -127,6 +128,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("the formal readout reads the val days, a smoke the select days (D85)")
     prior_dir, instructions, executor_dir, out = (path if path.is_absolute() else REPO_ROOT / path
                                                   for path in (args.prior, args.instructions, args.executor, args.out))
+    if out.exists() and not (out / CLAIM_SPENT_BY).exists():
+        parser.error(f"{out} exists without its {CLAIM_SPENT_BY}: a run that stopped; move it aside "
+                     f"({out.name}.aborted-<UTC>, outline E8) and run again to the same output")
     if out.exists():
         parser.error(f"{out} exists; the validation days are read once (D85)")
     git = git_state()
@@ -167,6 +171,8 @@ def main(argv: list[str] | None = None) -> int:
     write_json_atomic(out / "readout.json", {
         "schema": VALIDATION_SCHEMA, "split": args.split, "selection": selection,
         "teacher_forced": {"pooled": pooled, "airports": loss}, "masks_on_labelled_words": blocked})
+    if args.split == "val":
+        spend_validation_claim(prior_dir, "prior_validation", out)        # its readout written: the read is spent (D119)
     print(json.dumps({"out": str(out), "loss_per_step": pooled["loss_per_step"]}))
     return 0
 

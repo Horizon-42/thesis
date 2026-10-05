@@ -21,14 +21,15 @@ import numpy as np
 import torch
 
 from ts_transformer.autopilot.closed_loop import require_conforming_closed_loop
-from ts_transformer.autopilot.start import Loop, start
+from ts_transformer.autopilot.start import NO_MOVE, Loop, start_moved
 from ts_transformer.experiments.prior_speaking_loop import Generated, SpeakingLoop, flight_numbers
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import ClosedLoopSentence, closed_loop_sentences, load_spec, signals_flights
 from ts_transformer.instructions.faults import faulty_flights
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.prior.checkpoint import claim_validation_read, open_prior, readable_identity
+from ts_transformer.prior.checkpoint import (CLAIM_SPENT_BY, claim_validation_read, open_prior, readable_identity,
+                                             spend_validation_claim)
 from ts_transformer.prior.source import require_selection_of
 from ts_transformer.prior.training_files import CLAIM_READER
 from ts_transformer.prior.landings import LandingIndex
@@ -94,12 +95,13 @@ def read_sentences(out: Path) -> tuple[dict[str, Any], list[Stored]]:
 
 
 def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Mapping[int, ClosedLoopSentence],
-                  flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
+                  observed: Mapping[int, np.ndarray], flights: Mapping[int, Mapping[str, Any]], geometries: Mapping[str, AirportGeometry],
                   landings: Mapping[str, LandingIndex], finals: Mapping[str, Sequence[Final]], words: Words, *,
                   interval_s: float, variant: str, numbers: Sequence[np.random.Generator],
                   device: torch.device, temperature: float = 1.0) -> list[Generated]:
-    """The closed loop of the flights ``order`` of ``loop`` (`autopilot.start.start`; module docstring): ``sentences``
-    and ``flights`` (their records in the split's signals) by their place in the signals; ``landings`` each airport's
+    """The closed loop of the flights ``order`` of ``loop`` (`autopilot.start.start_moved`; module docstring):
+    ``sentences``, ``observed`` (the start's observed rows) and ``flights`` (their records in the split's signals) by
+    their place in the signals; ``landings`` each airport's
     roster landings (each flight is given its airport's, D105); ``numbers`` each flight's source of random numbers, in
     ``order`` (`flight_numbers`: five a row said, D96)."""
     if len(numbers) != len(order):
@@ -107,7 +109,7 @@ def speak_and_fly(model: Prior, loop: Loop, order: Sequence[int], sentences: Map
     if loop.most_go_arounds != MOST_GO_AROUNDS:
         raise ValueError(f"the loop was started for {loop.most_go_arounds} go-arounds a flight, the bound is "
                          f"{MOST_GO_AROUNDS} (D68)")
-    speaking = SpeakingLoop(model, loop, order, sentences, flights, geometries,
+    speaking = SpeakingLoop(model, loop, order, sentences, observed, flights, geometries,
                             [landings[flights[i]["airport"]] for i in order], finals, words,
                             interval_s=interval_s, variant=variant, device=device, temperature=temperature)
     while speaking.observing:
@@ -185,8 +187,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     absolute = [p if p.is_absolute() else REPO_ROOT / p for p in (args.prior, args.instructions, args.executor, args.out)]
     prior_dir, instructions, executor_dir, out = absolute
+    if out.exists() and not (out / CLAIM_SPENT_BY).exists():
+        parser.error(f"{out} exists without its {CLAIM_SPENT_BY}: a run that stopped; move it aside "
+                     f"({out.name}.aborted-<UTC>, outline E8) and run again to the same output")
     if out.exists():
         parser.error(f"{out} exists; a readout is never overwritten")
+    small = [name for name in ("per_airport", "samples", "chunk") if getattr(args, name) < 1]
+    if small:                                   # options are checked before the val read is claimed (D119)
+        parser.error(f"--{small[0].replace('_', '-')} is at least 1")
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("a readout that is not a smoke needs a clean tree")
@@ -199,6 +207,10 @@ def main(argv: list[str] | None = None) -> int:
     model = checkpoint.model.to(device)
     finals = {code: airport_finals(geometry) for code, geometry in geometries.items()}
     spec = load_spec(instructions)
+    airports = args.airports or sorted(geometries)
+    unknown = sorted(set(airports) - set(geometries))
+    if unknown:                                 # an option is checked before the val read is claimed (D119)
+        parser.error(f"airports {unknown} are not the artefact's {sorted(geometries)}")
     if args.split == "val":                     # the base's one validation readout (D85): never a smoke, read once
         if args.smoke or checkpoint.run["held_out"] is not None or checkpoint.run["sample"] is not None:
             parser.error("the validation days are read only by the base's formal readout (D85)")
@@ -208,10 +220,6 @@ def main(argv: list[str] | None = None) -> int:
     flights = signals_flights(instructions, args.split)
     # withheld from the model (D82), read for the readout: each flight's stratum (D70) and stored outcome (D74)
     strata = {i: sentence.withheld.stratum for i, sentence in sentences.items()}
-    airports = args.airports or sorted(geometries)
-    unknown = sorted(set(airports) - set(geometries))
-    if unknown:
-        parser.error(f"airports {unknown} are not the artefact's {sorted(geometries)}")
     empty = sorted(set(airports) - {flights[i]["airport"] for i in sentences})
     if empty:
         parser.error(f"airports {empty} have no closed-loop sentence in {args.split}")
@@ -221,10 +229,12 @@ def main(argv: list[str] | None = None) -> int:
     for sample in range(args.samples):
         for begin in range(0, len(drawn), args.chunk):
             chunk = drawn[begin: begin + args.chunk]
-            loop, order = start(instructions, args.split, interval_s, {i: sentences[i] for i in chunk}, executor_dir,
-                                most_go_arounds=MOST_GO_AROUNDS, device=device)
+            # the start's own observed rows (`NO_MOVE`: the stored sentence's, bit for bit) are what the speaker reads
+            loop, order, observed = start_moved(instructions, args.split, interval_s, {i: sentences[i] for i in chunk},
+                                                executor_dir, {i: NO_MOVE for i in chunk},
+                                                most_go_arounds=MOST_GO_AROUNDS, device=device)
             generated += [(sample, g) for g in speak_and_fly(
-                model, loop, order, sentences, dict(enumerate(flights)), geometries, landings, finals, loop.words,
+                model, loop, order, sentences, observed, dict(enumerate(flights)), geometries, landings, finals, loop.words,
                 interval_s=interval_s, variant=model.config.variant,
                 numbers=[flight_numbers(args.seed, sample, i) for i in order], device=device,
                 temperature=TEMPERATURE)]
@@ -274,6 +284,8 @@ def main(argv: list[str] | None = None) -> int:
     write_json_atomic(out / "readout.json", {"selection": selection, **{
         name: readout([g for g in sentences_only if sides[g.index] == name], airports_of, strata, grids)
         for name in SIDES}})
+    if args.split == "val":
+        spend_validation_claim(prior_dir, CLAIM_READER, out)               # its readout written: the read is spent (D119)
     print(json.dumps({"out": str(out), "sentences": len(generated)}))
     return 0
 

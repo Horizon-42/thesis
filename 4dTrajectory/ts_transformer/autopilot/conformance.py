@@ -30,7 +30,7 @@ vertical paths): inputs that moved are refused by name — the data under the
 reference changed, which says nothing about the executor.
 
 The check runs in every process that opens the spec, before its work (`require_conforming_executor`, called by
-`replay.open_executor`: the replay, the start of a closed loop, the closed-loop reading, the backend at its start): a
+`replay.open_executor`: the replay, the start of a closed loop, the closed-loop reading; not the backend, which runs no check at its start, D73, A43): a
 flight off its reference refuses by name, and the caller records each way's largest differences as information. There is
 no passed record and no digest of code.
 """

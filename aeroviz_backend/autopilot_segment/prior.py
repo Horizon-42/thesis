@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -33,7 +34,7 @@ from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.instructions.artefact import SEALED_READINGS
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.io_utils import utc_now
-from ts_transformer.prior.checkpoint import validation_claim
+from ts_transformer.prior.checkpoint import written_claim
 from ts_transformer.repo_layout import REPO_ROOT
 from ts_transformer.prior import training_files as prior_files
 
@@ -86,6 +87,7 @@ class PriorSegments:
     def __init__(self, backend: Any) -> None:
         self.backend = backend
         self._val: Any = None
+        self._val_guard = threading.Lock()      # the warm-up and a request may both make it first
 
     def splits_of(self, sample: dict[str, Any]) -> tuple[str, ...]:
         """The splits the set's flights may be of (outline D109): the claimed validation set's are the sealed readings
@@ -114,21 +116,23 @@ class PriorSegments:
         alone, its caches its own. Made on first use (`AutopilotSegmentBackend.__init__` builds this object)."""
         from aeroviz_backend.autopilot_segment.backend import AutopilotSegmentBackend
 
-        if self._val is None:
-            self._val = AutopilotSegmentBackend(splits=SEALED_READINGS, airports_root=self.backend.airports_root)
+        with self._val_guard:
+            if self._val is None:
+                self._val = AutopilotSegmentBackend(splits=SEALED_READINGS, airports_root=self.backend.airports_root)
         return self._val
 
     def flying(self, sample: dict[str, Any]) -> Any:
         """The service whose splits are the set's: the validation service for a claimed set, else the backend. A claimed
-        set is flown only when the prior's run holds the claim it names, on disk (D85)."""
+        set is flown only when the prior's run holds the claim it names, on disk, with its readout written (D85,
+        D119)."""
         self.splits_of(sample)
         claim = sample["source"]["validationClaim"]
         if claim is None:
             return self.backend
-        held = validation_claim(REPO_ROOT / claim["prior"], claim["reader"])      # repository-relative names
+        held = written_claim(REPO_ROOT / claim["prior"], claim["reader"])         # repository-relative names
         if held != claim["readout"]:
-            raise RequestRefused(f"set {sample['setId']}: the prior {claim['prior']} holds no claim of {claim['readout']} "
-                                 f"by {claim['reader']} (it holds {held})")
+            raise RequestRefused(f"set {sample['setId']}: the prior {claim['prior']} holds no written claim of "
+                                 f"{claim['readout']} by {claim['reader']} (it holds {held})")
         return self.val_service()
 
     def listed(self, airport: str, set_id: str) -> dict[str, Any]:
@@ -143,8 +147,9 @@ class PriorSegments:
             raise NotListed(str(error)) from None
 
     def warm_up(self, log: Callable[[str], None] = print) -> None:
-        """Every prior set opened at its Δ ahead of its first request (as stage A's warm-up does its sets), under the
-        request lock; a set it cannot open is skipped with its reason."""
+        """Every prior set opened at its Δ ahead of its first request (as stage A's warm-up does its sets): each set under
+        its own lock (stage A's `set_flown`), never under the request lock; a set it cannot open is skipped with its
+        reason."""
         started, opened_sets = time.perf_counter(), 0
         for index in sorted(self.backend.airports_root.glob(f"*/training/{prior_files.INDEX_FILE}")):
             airport = index.parent.parent.name
@@ -155,17 +160,16 @@ class PriorSegments:
                 continue
             for entry in sets:
                 began = time.perf_counter()
-                with self.backend._lock:
-                    try:
-                        sample = self.listed(airport, entry["id"])
-                        service = self.flying(sample)
-                        instructions, _, params, _, words = self.backend.executor_for(sample)
-                        service.set_flown(sample, sample["cohort"]["split"], float(sample["model"]["rowIntervalS"]),
-                                          instructions, params, words)
-                    except Exception as error:   # noqa: BLE001 — a prefetch: logged by type; a request gets it whole
-                        log(f"prior warm-up: {airport} {entry['id']} skipped — {type(error).__name__}: "
-                            f"{str(error).split('; ')[0]}")
-                        continue
+                try:
+                    sample = self.listed(airport, entry["id"])
+                    service = self.flying(sample)
+                    instructions, _, params, _, words = self.backend.executor_for(sample)
+                    service.set_flown(sample, sample["cohort"]["split"], float(sample["model"]["rowIntervalS"]),
+                                      instructions, params, words)
+                except Exception as error:   # noqa: BLE001 — a prefetch: logged by type; a request gets it whole
+                    log(f"prior warm-up: {airport} {entry['id']} skipped — {type(error).__name__}: "
+                        f"{str(error).split('; ')[0]}")
+                    continue
                 opened_sets += 1
                 log(f"prior warm-up: {airport} {entry['id']}: {len(sample['flights'])} flights opened in "
                     f"{time.perf_counter() - began:.1f} s")
@@ -201,7 +205,7 @@ class PriorSegments:
                 raise NotListed(f"Training set {set_id} at {airport} has no flight {flight_key}")
             item = items[0]
             service = self.flying(sample)
-            _require_split(item["split"], service.splits)       # before any check runs (A37): `executor_for` runs the conformance
+            _require_split(item["split"], service.splits)       # before the set is opened (A37)
             if which == CLOSED_LOOP:
                 said = None
             else:

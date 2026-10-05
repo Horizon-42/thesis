@@ -320,3 +320,45 @@ def test_the_memory_check_takes_the_batch_of_the_most_row_candidates(words):
     most, longest = largest_batches(sentences, 64)
     assert [sentences[i].rows for i in most] == [31] and sentences[most[0]].candidates.shape[1] == 8
     assert [sentences[i].rows for i in longest] == [60]
+
+
+def test_the_runner_prints_the_selection_of_train_and_select_only(tmp_path, monkeypatch, capsys):
+    """D85, D120: the run counts the selection of every split for its identity, and prints train's and select's alone —
+    nothing of val is shown before the base's one validation readout."""
+    run_runner(tmp_path, monkeypatch, outcomes=("landed", "crossed_too_high"))
+    printed = capsys.readouterr().out
+    (line,) = [json.loads(text) for text in printed.splitlines() if text.startswith('{"artefact_selection"')]
+    assert set(line["artefact_selection"]) == {"train", "select"}
+    assert '"val"' not in printed
+
+
+def test_a_fold_through_the_runner_reads_nothing_of_its_held_out_airport_to_train(tmp_path, monkeypatch):
+    """§5 (D39): a fold's training reads nothing of its held-out airport — its sentences changed (every height 500 m up),
+    the checkpoint's weights and the history are the same, bit for bit; only the held-out score moves."""
+    import dataclasses
+
+    import torch
+
+    from ts_transformer.prior import source as source_module
+    from ts_transformer.prior.batch import OWN_FEATURES
+
+    a = run_runner(tmp_path / "a", monkeypatch, "--held-out", "KYYY", "--sample", "2", airports=("KXXX", "KYYY"))[2]
+    real = source_module.ArtefactSource.sentences
+
+    def moved(self, split, airport, *given, **named):
+        out = real(self, split, airport, *given, **named)
+        if airport != "KYYY":
+            return out
+        height = OWN_FEATURES.index("height_above_elevation")
+        return [dataclasses.replace(s, own=s.own + 0.5 * (np.arange(s.own.shape[1]) == height)) for s in out]
+
+    monkeypatch.setattr(source_module.ArtefactSource, "sentences", moved)
+    b = run_runner(tmp_path / "b", monkeypatch, "--held-out", "KYYY", "--sample", "2", airports=("KXXX", "KYYY"))[2]
+    weights = [torch.load(run / "checkpoint.pt", map_location="cpu", weights_only=False)["state"] for run in (a, b)]
+    assert weights[0].keys() == weights[1].keys()
+    assert all(torch.equal(weights[0][name], weights[1][name]) for name in weights[0])
+    histories = [json.loads((run / "history.json").read_text()) for run in (a, b)]
+    assert [[{k: v for k, v in row.items() if k != "seconds"} for row in h["epochs"]] for h in histories] == [
+        [{k: v for k, v in row.items() if k != "seconds"} for row in histories[0]["epochs"]]] * 2
+    held = [json.loads((run / "held_out.json").read_text())["loss_per_step"] for run in (a, b)]
+    assert held[0] != held[1]

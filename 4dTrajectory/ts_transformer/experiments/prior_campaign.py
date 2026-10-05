@@ -19,8 +19,9 @@ user reads them (D7).
 
 ONE BEHAVIOUR (D108). The campaign runs on a clean checkout. At its start it runs the behaviour check of the prior's
 code on fixed inputs (`prior_behaviour`, its own process: two steps of training on a fixed synthetic set and some rows
-said with fixed numbers, on the CPU with one thread) and records the answer (``campaign.json``); before each step it
-runs the check again, and an answer that differs, bit for bit, stops the campaign by name. The commit of each step is
+said with fixed numbers, on the CPU with one thread; the campaign's settings, `settings`, as the code on the disk sets
+them) and records the answer (``campaign.json``), refused unless its settings are those this process plans with;
+before each step it runs the check again, and an answer that differs, bit for bit, stops the campaign by name. The commit of each step is
 recorded as information and never compared (results of different code are comparable once the code is shown to
 behave the same on fixed inputs, never by an equal commit). A resume with other inputs is refused by name.
 
@@ -51,15 +52,15 @@ from pathlib import Path
 from typing import Any, Callable, NamedTuple, Sequence
 
 from ts_transformer.experiments.prior_free_generation import TEMPERATURE
-from ts_transformer.experiments.prior_select import CONFIGURATIONS, arm_name
+from ts_transformer.experiments.prior_select import CONFIGURATIONS, SELECTION, arm_name
 from ts_transformer.instructions.artefact import load_candidates
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.prior.speaker import MOST_GO_AROUNDS
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: The format of ``campaign.json``. v2 (B10, D108): the answer of the behaviour check and each step's commit (no commit
-#: of the campaign compared).
-CAMPAIGN_SCHEMA = "ts-prior-campaign-v2"
+#: of the campaign compared). v3 (B12, D108): the settings in the behaviour check's answer (the code on the disk's).
+CAMPAIGN_SCHEMA = "ts-prior-campaign-v3"
 #: The two seeds of §5 (the second: step 2's seed scale). The values are Claude's (§0.3).
 SEEDS = (1337, 2024)
 #: §5's configurations (`prior_select.CONFIGURATIONS`) as `prior_train`'s flags of the same names.
@@ -67,10 +68,9 @@ CONFIGURATION_FLAGS = {name: tuple(item for key, value in values.items()
                                    for item in (f"--{key.replace('_', '-')}", str(value)))
                        for name, values in CONFIGURATIONS.items()}
 #: The free generation of a fold at its held-out airport (§5: 200 flights × 2) and of the base on the val days.
-FREE_GENERATION = {"per_airport": 200, "samples": 2, "seed": 1337}
+FREE_GENERATION = {"per_airport": 200, "samples": 2, "seed": 1337, "chunk": 400}
 #: A smoke campaign's free generation: flights of each airport.
 SMOKE_FLIGHTS = 5
-SELECTION = "landed"
 
 
 class Step(NamedTuple):
@@ -111,7 +111,8 @@ def fold_steps(campaign: Path, record: dict[str, Any], configuration: str, varia
         out.append(Step(f"{arm}/{airport}/free_generation", "prior_free_generation",
                         ("--prior", str(run), *common, "--split", "select", "--airports", airport,
                          "--per-airport", str(flights), "--samples", str(FREE_GENERATION["samples"]),
-                         "--seed", str(FREE_GENERATION["seed"]), "--device", device, *smoke, "--out", str(generation)),
+                         "--seed", str(FREE_GENERATION["seed"]), "--chunk", str(FREE_GENERATION["chunk"]),
+                         "--device", device, *smoke, "--out", str(generation)),
                         generation, generation / "readout.json"))
     return out
 
@@ -152,8 +153,8 @@ def plan(campaign: Path, record: dict[str, Any], device: str) -> list[Step]:
     steps.append(Step("base/free_generation", "prior_free_generation",
                       ("--prior", str(base / "run"), *common, "--split", split,
                        "--per-airport", str(flights), "--samples", str(FREE_GENERATION["samples"]),
-                       "--seed", str(FREE_GENERATION["seed"]), "--device", device, *smoke,
-                       "--out", str(base / "free_generation")),
+                       "--seed", str(FREE_GENERATION["seed"]), "--chunk", str(FREE_GENERATION["chunk"]),
+                       "--device", device, *smoke, "--out", str(base / "free_generation")),
                       base / "free_generation", base / "free_generation" / "readout.json"))
     return steps
 
@@ -192,21 +193,22 @@ def run_behaviour(instructions: str) -> dict[str, Any]:
 
 
 def settings() -> dict[str, Any]:
-    """What the campaign's code decides of its steps beside the prior's code (the behaviour check): the seeds, the
-    selection, each configuration's flags, the free generation of a fold and of a smoke, free generation's temperature
-    and bound of go-arounds (D68). Recorded at the start and compared at a resume and before each step."""
+    """What the campaign's code decides of its steps beside the prior's code: the seeds, the selection, each
+    configuration's flags, the free generation of a fold and of a smoke, free generation's temperature and bound of
+    go-arounds (D68). The behaviour check's process gives them as the code on the disk sets them (D108)."""
     return {"seeds": list(SEEDS), "selection": SELECTION,
             "configurations": {name: list(flags) for name, flags in CONFIGURATION_FLAGS.items()},
             "free_generation": FREE_GENERATION, "smoke_flights": SMOKE_FLIGHTS, "temperature": TEMPERATURE,
             "most_go_arounds": MOST_GO_AROUNDS}
 
 
-def require_settings(campaign: Path, record: dict[str, Any]) -> None:
-    stored, now = record["settings"], settings()
-    if stored != now:
-        differ = sorted(key for key in set(stored) | set(now)
-                        if key not in stored or key not in now or stored[key] != now[key])
-        raise SystemExit(f"{campaign}: the campaign's code sets {differ} otherwise than at its start; stopped")
+def require_settings(campaign: Path, answer: dict[str, Any]) -> None:
+    """The settings of the code on the disk (the behaviour check's ``answer``) are those this process plans with."""
+    disk, here = answer["settings"], settings()
+    if disk != here:
+        differ = sorted(key for key in set(disk) | set(here)
+                        if key not in disk or key not in here or disk[key] != here[key])
+        raise SystemExit(f"{campaign}: the code on the disk sets {differ} otherwise than this campaign's process; stopped")
 
 
 def open_campaign(campaign: Path, instructions: Path, executor: Path, interval_s: float, git: dict[str, Any],
@@ -224,7 +226,7 @@ def open_campaign(campaign: Path, instructions: Path, executor: Path, interval_s
         changed = sorted(k for k, v in record.items() if stored[k] != v)
         if changed:
             raise SystemExit(f"{campaign}: started with other {changed}; a campaign is resumed with its own inputs")
-        require_settings(campaign, stored)
+        require_settings(campaign, stored["behaviour"])
         if alive_step(stored["running"]):
             raise SystemExit(f"{campaign}: its step {stored['running']['step']} still runs as PID "
                              f"{stored['running']['pid']}; stop it first")
@@ -232,9 +234,11 @@ def open_campaign(campaign: Path, instructions: Path, executor: Path, interval_s
     if campaign.exists() and any(campaign.iterdir()):
         raise SystemExit(f"{campaign} exists and is no campaign")
     campaign.mkdir(parents=True, exist_ok=True)
+    answer = behaviour(str(instructions))
+    require_settings(campaign, answer)
     record = {"schema": CAMPAIGN_SCHEMA, "written_utc": utc_now(), **record, "git": git,
-              "airports": sorted(load_candidates(instructions)), "seeds": list(SEEDS), "settings": settings(),
-              "behaviour": behaviour(str(instructions)), "steps": [], "aborted": [], "running": None}
+              "airports": sorted(load_candidates(instructions)), "seeds": list(SEEDS), "behaviour": answer,
+              "steps": [], "aborted": [], "running": None}
     write_json_atomic(path, record)
     return record
 
@@ -260,7 +264,6 @@ def run_campaign(campaign: Path, record: dict[str, Any], device: str,
         now = tree()
         if now["dirty"] and record["smoke"] is None:
             raise SystemExit(f"the tree has uncommitted changes before {step.name}; a campaign runs on a clean checkout")
-        require_settings(campaign, record)
         answer = behaviour(record["instructions"])
         if answer != record["behaviour"]:
             stored = record["behaviour"]

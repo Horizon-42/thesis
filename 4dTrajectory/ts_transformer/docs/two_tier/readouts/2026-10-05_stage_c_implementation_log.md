@@ -446,3 +446,29 @@ a short window (the flight inserted 8 s ahead of itself, lost at its first row);
   first sentence once.
 - **P36. The data term reads every train sentence of the base's selection into memory** (as stage B's training): the
   profile measures it.
+
+## 17 C11 parts 1–2; the order of `notes/stage_c.md` on stage B's round (2026-10-05)
+
+| Step | Commit | What |
+|---|---|---|
+| C11 parts 1–2 | `1945e19c` | `experiments/post_training_export.py` (the windows of a campaign's rounds flown with fixed numbers: the commanded flight's head from stage A, the traffic on its records, window B's moved observed rows, each round's sentence with the window's end), `post/training_files.py` (`aeroviz-training-window-index-v1` / `-sample-v1`, `index_post_v1.json`), `aeroviz_backend/autopilot_segment/window.py` (`POST /autopilot/window-segment`: window B from its moved start, a window ended at a loss stopped there unjudged). Reviewed three times (window B's moved rows written into the set; the lost window's live segment cut at the loss) |
+| Stage B's round, steps 1–3 | `6d5f2cc7`, merged into the branch | `dev-two-tier-v4-prior` (89845fa6 and later) and `dev-two-tier` merged; PRIOR_INTERFACE takes prior §7's new names (`readable_identity`, `validation_claim`, `holds_claim`, `require_selection_of`, `left_out`, `side`, `SIDES`, `REASONS`, `CELL`), each checked to exist (a new test, the reviewer's). No other change was needed: stage C takes the format names by import, calls no `kept`, reads its data term through `ArtefactSource` and takes a window ended at a loss from `said`/`states` (D118 item 6). Reviewed, no defect |
+
+The user's decision of 2026-10-05: stage A's and stage B's Training export is listed in vocabulary §6 and prior §7, and
+stage C imports exactly those names (`tests/test_architecture.py` TRAINING_EXPORT_NAMES): stage A's
+`training_export` (`FORMATS`, `candidate_hae_minus_msl_m`, `candidates_block`, `events`, `split_flights`,
+`vocabulary_block`), `training_flights` (`crossing_payload`, `last_state_cycle`), `training_attitude`
+(`attitude_payload`, `executor_attitude`), and stage B's `prior_training_export` `procedure_block`. The rows of §6 and §7
+are the designer's to write (requests file).
+
+Tests: stage C's files, the architecture test and the backend's window and prior segments on the merged branch, 136
+passed. The full suite waits for B5 (outline §5 rule 13). Step 6 waits for B12.
+
+**Proposals.**
+
+- **P37. The speaker's per-row records are not in a window set** (the probability of "go-around", the blocked words):
+  stage B's loop gives them only for a flight the executor ended (`generated`). If the view needs them for windows ended
+  at a loss, stage B's loop would give them for an ended flight too.
+- **P38. A window set's `procedure` block is stage B's `procedure_block`**; the three copies of the set-file helpers
+  (stages A, B, C) could become one module with the names as arguments (a follow-up, not built).
+- **P39. The temperature (D121)**: stage C's loop draws at temperature 1, as stage B's runs; no other value is proposed.

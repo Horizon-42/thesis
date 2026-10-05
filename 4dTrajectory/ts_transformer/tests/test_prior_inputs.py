@@ -99,6 +99,21 @@ def flight_and_index(split="train", i=1):
     return words, signals, record, index
 
 
+def real_key(record, index, runway, landing_time_utc):
+    """``record`` with a flight key of the real format (`flight_scenarios.identity.flight_key`:
+    ``<id>_<runway>_<icao24>_<landing time stamp>``) of ``runway`` and ``landing_time_utc``, and ``index`` with its own
+    landing (the one of the record's old key) under the new key."""
+    import re
+
+    key = f"TST123_{runway}_a1b2c3_{re.sub(r'[^0-9TZ]', '', landing_time_utc)}"
+    from ts_transformer.prior.inputs import own_flight_key
+
+    old = own_flight_key(record)
+    landings = tuple(replace(x, flight_key=key) if x.flight_key == old else x for x in index.landings)
+    return ({**record, "dataset_id": f"{record['airport']}:{key}", "runway": runway,
+             "landing_time_utc": landing_time_utc}, LandingIndex(index.runways, landings, index.sealed, index.days))
+
+
 def rows_of(sentence, record, index, words, interval_s, geometry=None, variant="full"):
     return sentence_rows(sentence, record, geometry or parallel_airport(), index, words, interval_s=interval_s,
                          split="train", variant=variant)
@@ -141,8 +156,8 @@ def test_the_motion_s_velocity_east_and_north_is_the_2_s_displacement():
 
 
 def test_only_positions_and_heights_give_the_motion():
-    """The stored track, ground speed and vertical rate (on observed rows, a fit with 7.5 s of the future) change no
-    input."""
+    """§2 (D25): the stored track, ground speed and vertical rate of the states (on the observed rows the start rule's
+    velocity, which at row 0 reads the row after it, D77) change no input."""
     words, signals, record, index = flight_and_index()
     sentence = prior_closed_loop_sentence(signals, words, interval_s=2.0).rows
     states = sentence.states.copy()
@@ -156,14 +171,18 @@ def test_only_positions_and_heights_give_the_motion():
 @pytest.mark.parametrize("interval_s", INTERVALS)
 def test_a_change_of_the_runway_word_leaves_the_rows_up_to_the_first_predicted_step_bit_for_bit(interval_s):
     """D23: the artefact writes the landed runway at the first predicted step; no input up to that step reads it — nor
-    the flight record's runway and landing time, nor its own landing in the index (another runway, 600 s earlier)."""
+    the flight record's runway and landing time, nor its own landing in the index (another runway, 600 s earlier), nor
+    its key of the real format (``<id>_<runway>_<icao24>_<landing time>``), which holds both and changes with them."""
     words, signals, record, index = flight_and_index()
+    record, index = real_key(record, index, record["runway"], record["landing_time_utc"])
     sentence = prior_closed_loop_sentence(signals, words, interval_s=interval_s, go_around=True).rows
     grid = sentence.grid.copy()
     grid[0, RUNWAY], grid[20, RUNWAY] = 1, 1
     (own,) = index.landings
-    moved = LandingIndex(index.runways, (Landing(own.time_s - 600.0, "09L", own.flight_key),), index.sealed, index.days)
-    other = {**record, "runway": "09L", "landing_time_utc": "2026-06-01T00:00:00Z"}
+    earlier = f"{np.datetime64(int(own.time_s - 600.0), 's')}Z"
+    other, moved = real_key(record, LandingIndex(index.runways, (Landing(own.time_s - 600.0, "09L", own.flight_key),),
+                                                 index.sealed, index.days), "09L", earlier)
+    assert other["dataset_id"] != record["dataset_id"]
     a = rows_of(sentence, record, index, words, interval_s)
     b = rows_of(replace(sentence, grid=grid), other, moved, words, interval_s)
     upto = slice(0, a.first_step + 1)

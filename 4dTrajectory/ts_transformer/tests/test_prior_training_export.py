@@ -202,6 +202,8 @@ def stage_b_fixture(tmp_path, monkeypatch, *, texts=False):
         val_heads = [{**json.loads(json.dumps(h)), "split": "val"} for h in heads]
         readout.update(split="val", smoke=False)
         (prior / "val_read_prior_free_generation.json").write_text(json.dumps({"out": str(val_dir)}))
+        val_dir.mkdir(exist_ok=True)
+        (val_dir / "readout.json").write_text("{}")                     # the readout written: the read spent (D119)
         patch.setattr(export, "build_airport", lambda *a, **k: (val_heads, geometry_))
         assert export.main(["--readout", str(val_dir), "--set-id", FIXTURE_VAL_SET, "--root", str(root),
                             "--per-airport", "1", "--smoke"]) == 0
@@ -382,8 +384,14 @@ def test_the_runner_writes_a_set_and_refuses_what_it_cannot_trust(tmp_path, monk
         export.main([*argv[:3], "val", *argv[4:]])
     assert sorted(p.relative_to(root) for p in root.rglob("*")) == before                # nothing more written
     (prior / "val_read_prior_free_generation.json").write_text(json.dumps({"out": str(tmp_path / "readout")}))
-    # the claimed one is exported (its flights as the train readout's: the synthetic artefact has no val sentences)
+    # the claimed one is exported once it is written (its flights as the train readout's: the synthetic artefact has
+    # no val sentences); a claimed read that stopped before its readout.json is not (D119)
     monkeypatch.setattr(export, "build_airport", lambda *a, **k: built[0])
+    assert not (tmp_path / "readout" / "readout.json").exists()
+    with pytest.raises(SystemExit, match="D119"):
+        export.main([*argv[:3], "val", *argv[4:]])
+    (tmp_path / "readout").mkdir(exist_ok=True)
+    (tmp_path / "readout" / "readout.json").write_text("{}")
     assert export.main([*argv[:3], "val", *argv[4:]]) == 0
 
 

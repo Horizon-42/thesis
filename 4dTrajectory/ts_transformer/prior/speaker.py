@@ -34,7 +34,7 @@ aircraft of a speaker, repeats permitted: their cache, procedure masks, words in
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, NamedTuple, Sequence
+from typing import Any, Callable, Mapping, NamedTuple, Sequence
 
 import numpy as np
 import torch
@@ -207,7 +207,13 @@ class Speaker:
     @torch.no_grad()
     def observe(self, rows: RowTensors, positions: Sequence[Position], extra: Any = None) -> None:
         """Encode observed rows (each aircraft's rows before its first predicted step), ``positions`` one a row; the
-        procedure masks take them on. ``extra``: the caller's input of the added modules (§7 item 5)."""
+        procedure masks take them on. ``extra``: the caller's input of the added modules (§7 item 5). Refused, before any
+        change, unless ``positions`` are one for each row and each aircraft."""
+        count, length = rows.present.shape[:2]
+        if len(positions) != length or any(len(np.atleast_1d(v)) != count
+                                           for at in positions for v in (at.e_m, at.n_m, at.height_m)):
+            raise ValueError(f"the positions of observed rows: one for each of the {length} rows and {count} aircraft, "
+                             f"got {len(positions)} rows of {sorted({len(np.atleast_1d(at.e_m)) for at in positions})}")
         if rows.first.any():
             raise ValueError("observed rows hold no first predicted step: the speaker says it")
         if self.permitted_rows:
@@ -222,12 +228,22 @@ class Speaker:
 
     @torch.no_grad()
     def speak(self, row: RowTensors, at: Position, numbers: np.ndarray, caller: Mapping[int, np.ndarray] | None = None,
-              extra: Any = None) -> np.ndarray:
+              extra: Any = None, accept: Callable[[np.ndarray], None] | None = None) -> np.ndarray:
         """Say one row (``row``: its inputs, ``[B, 1]``; ``at``: where each aircraft is): ``[B, 5]`` words, in the
         vocabulary's values. ``numbers``: ``[B, 5]`` the caller's uniform numbers in [0, 1) (`draw`); ``caller``: the
-        masks of a caller, by column; ``extra``: the caller's input of the added modules (§7 item 5)."""
+        masks of a caller, by column; ``extra``: the caller's input of the added modules (§7 item 5); ``accept``: the
+        caller's last step with the row's words before the speaker keeps it (a closed loop's executor, vocabulary D80):
+        when it refuses, the speaker is as it was (its cache's rows past the kept ones are written over). A row whose mark of
+        the first predicted step is not, for each aircraft, whether nothing is in force yet is refused before any change
+        (the masks of the first step read the mark: a later row marked first would draw without "unchanged")."""
         if row.present.shape[1] != 1:
             raise ValueError(f"a speaker says one row at a time, not {row.present.shape[1]}")
+        nothing = np.array([heard.state is None for heard in self._heard])
+        marked = row.first[:, 0].cpu().numpy()
+        if (marked != nothing).any():
+            wrong = np.flatnonzero(marked != nothing).tolist()
+            raise ValueError(f"aircraft {wrong[:5]}: the row's mark of the first predicted step is not whether nothing is "
+                             f"in force yet (the first step is the row said first)")
         require_eval(self.model, "the speaker")
         numbers = np.asarray(numbers, dtype=np.float64)
         if numbers.shape != (len(self._heard), len(COLUMNS)) or not ((numbers >= 0.0) & (numbers < 1.0)).all():
@@ -269,6 +285,8 @@ class Speaker:
         for heard_b, step, height, time_s in zip(heard, said, at.height_m, row.time_s[:, 0].tolist()):
             heard_b.hear(step, float(height), time_s)
         procedure.after_row(at.e_m, at.n_m, at.height_m, go_around)      # a row that ends G starts the stretch (D64)
+        if accept is not None:
+            accept(said)
         # the row is said: kept
         self.past, self.procedure, self._heard, self._last_s = past, procedure, heard, times[:, 0]
         self._go_arounds = self._go_arounds + (said[:, RUNWAY] == RUNWAY_GO_AROUND)

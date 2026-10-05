@@ -113,9 +113,106 @@ def test_the_readout_reads_the_val_days_once_and_gives_the_flights_outside_the_s
     config = json.loads((tmp_path / "readout" / "config.json").read_text())
     assert config["checks"] == {"stub": True} and config["selection"] == "landed"
     assert set(config["identity"]["selection"]["counts"]) == {"train", "select"}       # no val count shown (D85)
-    with pytest.raises(ValueError, match="read by prior_validation already"):     # read once (D85), wherever written
+    with pytest.raises(ValueError, match="run again only to its own output"):     # read once (D85, D119)
         runner.main([*argv, "--out", str(tmp_path / "again")])
     assert not (tmp_path / "again").exists()
+
+
+VAL_READERS = ("closed_loop_sentences", "faulty_flights", "signals_flights", "load_signals", "load_sentences")
+
+
+def val_reads_after_the_claim(monkeypatch, reader_module):
+    """Each read of the val days' sentences, stored outcomes, faulty-track marks or signals (`VAL_READERS`, wherever
+    they are imported) recorded with whether ``reader_module``'s claim of the val read came before it."""
+    from ts_transformer.instructions import artefact as artefact_module
+    from ts_transformer.instructions import faults as faults_module
+    from ts_transformer.prior import checkpoint as checkpoint_module
+    from ts_transformer.prior import source as source_module
+
+    claimed, reads = [], []
+    for module in (artefact_module, faults_module, source_module, checkpoint_module, reader_module):
+        for name in VAL_READERS:
+            if hasattr(module, name):
+                def read(directory, split, *given, _real=getattr(module, name), _name=name, **named):
+                    if split == "val":
+                        reads.append((_name, bool(claimed)))
+                    return _real(directory, split, *given, **named)
+
+                monkeypatch.setattr(module, name, read)
+    claim = reader_module.claim_validation_read
+    monkeypatch.setattr(reader_module, "claim_validation_read", lambda *given: (claimed.append(True), claim(*given)))
+    return reads
+
+
+def test_a_claim_is_written_and_spent_only_with_its_readout(tmp_path):
+    """D119: `written_claim` names a claimed output once its readout.json is there (None before: no claim, or a read
+    that stopped); `spend_validation_claim` refuses an output the claim does not name, or one without its readout."""
+    from ts_transformer.prior.checkpoint import (CLAIM_SPENT_BY, claim_validation_read, spend_validation_claim,
+                                                 validation_claim, written_claim)
+
+    prior, out = tmp_path / "prior", tmp_path / "readout"
+    prior.mkdir()
+    assert written_claim(prior, "reader") is None
+    claim_validation_read(prior, "reader", out)
+    assert validation_claim(prior, "reader") is not None and written_claim(prior, "reader") is None
+    out.mkdir()
+    with pytest.raises(ValueError, match=f"holds no {CLAIM_SPENT_BY}"):
+        spend_validation_claim(prior, "reader", out)
+    (out / CLAIM_SPENT_BY).write_text("{}")
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / CLAIM_SPENT_BY).write_text("{}")
+    with pytest.raises(ValueError, match="names"):
+        spend_validation_claim(prior, "reader", other)
+    assert written_claim(prior, "reader") == validation_claim(prior, "reader")
+    spend_validation_claim(prior, "reader", out)
+    assert "spent_utc" in json.loads((prior / "val_read_reader.json").read_text())
+
+
+def test_the_val_readout_reads_nothing_of_val_before_its_claim(tmp_path, monkeypatch):
+    """D85, D119: the sentences, the stored outcomes and the faulty-track marks of the val days are read only after the
+    claim."""
+    artefact, prior = base_prior(tmp_path, monkeypatch)
+    reads = val_reads_after_the_claim(monkeypatch, runner)
+    assert runner.main(["--prior", str(prior), "--instructions", str(artefact), "--executor",
+                        str(tmp_path / "executor"), "--device", "cpu", "--out", str(tmp_path / "readout")]) == 0
+    names = {name for name, _ in reads}
+    assert {"closed_loop_sentences", "faulty_flights"} <= names and all(after for _, after in reads), reads
+
+
+def test_a_val_read_that_stopped_before_its_readout_runs_again_to_its_own_output_only(tmp_path, monkeypatch, capsys):
+    """D119: a claim is spent when its readout is written. A read that stops after the claim (a crash, a kill) may run
+    again to the output it claimed, never to another; once written, the claim refuses every read."""
+    from ts_transformer.prior.checkpoint import claim_validation_read, validation_claim
+
+    artefact, prior = base_prior(tmp_path, monkeypatch)
+    argv = ["--prior", str(prior), "--instructions", str(artefact), "--executor", str(tmp_path / "executor"),
+            "--device", "cpu"]
+    evaluate = runner.evaluate
+
+    def crash(*given, **named):
+        raise RuntimeError("CUDA out of memory")
+
+    monkeypatch.setattr(runner, "evaluate", crash)
+    with pytest.raises(RuntimeError, match="out of memory"):
+        runner.main([*argv, "--out", str(tmp_path / "readout")])
+    assert validation_claim(prior, "prior_validation") is not None and not (tmp_path / "readout").exists()
+    monkeypatch.setattr(runner, "evaluate", evaluate)
+    with pytest.raises(ValueError, match="run again only to its own output"):
+        runner.main([*argv, "--out", str(tmp_path / "other")])
+    (tmp_path / "readout").mkdir()                                  # what a run stopped while writing leaves
+    with pytest.raises(SystemExit):
+        runner.main([*argv, "--out", str(tmp_path / "readout")])
+    assert "a run that stopped" in capsys.readouterr().err
+    (tmp_path / "readout").rmdir()                                  # moved aside: run again to its own output
+    assert runner.main([*argv, "--out", str(tmp_path / "readout")]) == 0
+    record = json.loads((prior / "val_read_prior_validation.json").read_text())
+    assert record["out"] == validation_claim(prior, "prior_validation") and "spent_utc" in record
+    with pytest.raises(ValueError, match="read by prior_validation already"):
+        claim_validation_read(prior, "prior_validation", tmp_path / "readout")
+    (tmp_path / "readout").rename(tmp_path / "archived")           # the readout moved away later: still spent
+    with pytest.raises(ValueError, match="read by prior_validation already"):
+        claim_validation_read(prior, "prior_validation", tmp_path / "readout")
 
 
 def test_a_smoke_reads_the_select_days_never_the_val_days(tmp_path, monkeypatch):

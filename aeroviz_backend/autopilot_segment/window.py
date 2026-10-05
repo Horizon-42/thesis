@@ -18,7 +18,8 @@ outcome, or the end of the row of its loss of separation) has no segment. A wind
 there live too (`fly_window_segment`): no segment runs past the window's last state, and none is judged — the judge has
 no outcome for a flight its caller ended (post-training D93).
 
-WARMED UP AT START (`warm_up`, run beside stage A's and stage B's): every listed window set opened at its Δ.
+WARMED UP AT START (`warm_up`, run beside stage A's and stage B's): every listed window set opened at its Δ, each under
+its own lock (stage A's `set_flown`), never the request lock.
 """
 
 from __future__ import annotations
@@ -112,8 +113,9 @@ class WindowSegments:
             raise NotListed(str(error)) from None
 
     def warm_up(self, log: Callable[[str], None] = print) -> None:
-        """Every window set opened at its Δ ahead of its first request (as stage A's warm-up does its sets), under the
-        request lock; a set it cannot open is skipped with its reason."""
+        """Every window set opened at its Δ ahead of its first request (as stage A's warm-up does its sets): each set under
+        its own lock (stage A's `set_flown`), never under the request lock; a set it cannot open is skipped with its
+        reason."""
         started, opened_sets = time.perf_counter(), 0
         for index in sorted(self.backend.airports_root.glob(f"*/training/{post_files.INDEX_FILE}")):
             airport = index.parent.parent.name
@@ -124,16 +126,15 @@ class WindowSegments:
                 continue
             for entry in sets:
                 began = time.perf_counter()
-                with self.backend._lock:
-                    try:
-                        sample = self.listed(airport, entry["id"])
-                        instructions, _, params, _, words = self.backend.executor_for(sample)
-                        self.backend.set_flown(sample, sample["cohort"]["split"], float(sample["model"]["rowIntervalS"]),
-                                               instructions, params, words)
-                    except Exception as error:   # noqa: BLE001 — a prefetch: logged by type; a request gets it whole
-                        log(f"window warm-up: {airport} {entry['id']} skipped — {type(error).__name__}: "
-                            f"{str(error).split('; ')[0]}")
-                        continue
+                try:
+                    sample = self.listed(airport, entry["id"])
+                    instructions, _, params, _, words = self.backend.executor_for(sample)
+                    self.backend.set_flown(sample, sample["cohort"]["split"], float(sample["model"]["rowIntervalS"]),
+                                           instructions, params, words)
+                except Exception as error:   # noqa: BLE001 — a prefetch: logged by type; a request gets it whole
+                    log(f"window warm-up: {airport} {entry['id']} skipped — {type(error).__name__}: "
+                        f"{str(error).split('; ')[0]}")
+                    continue
                 opened_sets += 1
                 log(f"window warm-up: {airport} {entry['id']}: {len(sample['windows'])} windows opened in "
                     f"{time.perf_counter() - began:.1f} s")
