@@ -160,13 +160,19 @@ class WindowLoop:
         return AircraftAt.of([(window.commanded.key, tuple(at[:3]), tuple(before[:3]), known, runway,
                                window.commanded.category, False, go_around)])
 
-    def _traffic(self, owns: Sequence[AircraftAt], others: Sequence[AircraftAt]):
-        """The traffic module's input of the row (each window's tokens, recorded for the loss)."""
+    def _traffic(self, owns: Sequence[AircraftAt], others: Sequence[AircraftAt]) -> tuple[Any, list[np.ndarray]]:
+        """The traffic module's input of the row and each window's tokens (`_keep` records them for the loss once the row
+        is kept)."""
         rows = [tokens(own, other, g, self.separations[g.code], self.step_s)
                 for own, other, g in zip(owns, others, self.geometries)]
+        return traffic_of([[row] for row in rows], self.device), rows
+
+    def _keep(self, rows: Sequence[np.ndarray], applies: np.ndarray | None = None) -> None:
+        """A row kept: each window's tokens of it recorded, and the windows whose speed-word mask acted there counted."""
         for b, row in enumerate(rows):
             self._tokens[b].append(row)
-        return traffic_of([[row] for row in rows], self.device)
+        if applies is not None:
+            self.speed_mask_rows += applies
 
     def _scene(self, b: int, own: AircraftAt, others: AircraftAt):
         g = self.geometries[b]
@@ -182,17 +188,18 @@ class WindowLoop:
         self._reading[b][t] = frozenset(key for key in others.keys if key in self.faults[b] and bool(reads_fault(
             scene.flight(key), np.array([time_s]), self.faults[b][key])[0]))
 
-    def _speed_masks(self, owns: Sequence[AircraftAt], others: Sequence[AircraftAt]) -> np.ndarray:
-        """``[B, words]`` the speed-word mask of each window at the start of the row (D110); every word for a window
-        whose aircraft is no longer flown."""
+    def _speed_masks(self, owns: Sequence[AircraftAt], others: Sequence[AircraftAt]) -> tuple[np.ndarray, np.ndarray]:
+        """``[B, words]`` the speed-word mask of each window at the start of the row (D110; every word for a window
+        whose aircraft is no longer flown), and ``[B]`` whether it acted (counted by `_keep` once the row is kept)."""
         out = np.ones((len(self.order), self.speed_words), dtype=bool)
+        applies = np.zeros(len(self.order), dtype=np.int64)
         for b in np.flatnonzero(self.speaking.alive):
             aircraft, scene = self._next[b][2:] if b in self._next else self._scene(b, owns[b], others[b])
             check = speed_check(scene, along_course_speeds(aircraft, scene, self.step_s), self.separations[
                 self.geometries[b].code], self.words, len(self.geometries[b].candidates))
             out[b] = check.permitted
-            self.speed_mask_rows[b] += check.applies
-        return out
+            applies[b] = check.applies
+        return out, applies
 
     # ---- the loop
     def observe(self) -> None:
@@ -202,18 +209,26 @@ class WindowLoop:
         others = [w.others_at(t) for w in self.windows]
         for b, other in enumerate(others):
             self._read(b, t, other)
-        self.speaking.observe(self._traffic(owns, others))
+        traffic, rows = self._traffic(owns, others)
+        self.speaking.observe(traffic)
+        self._keep(rows)
 
     def step(self, numbers: np.ndarray) -> np.ndarray:
         """Say and fly one row of every window (``numbers`` ``[B, 5]``, `SpeakingLoop.step`), then judge the
-        separation at the row flown to; a window whose commanded aircraft lost separation it answers for ends there."""
+        separation at the row flown to; a window whose commanded aircraft lost separation it answers for ends there. A row
+        the executor refuses is refused whole: the window's records are as they were."""
         t = self.speaking.t
         kept = [self._next[b] if b in self._next else None for b in range(len(self.order))]
         owns = [k[0] if k is not None else self._own(b) for b, k in enumerate(kept)]
         others = [k[1] if k is not None else w.others_at(t) for k, w in zip(kept, self.windows)]
         for b in np.flatnonzero(self.speaking.alive):
             self._read(b, t, others[b])
-        said = self.speaking.step(numbers, {SPEED: self._speed_masks(owns, others)}, self._traffic(owns, others))
+        masks, applies = self._speed_masks(owns, others)
+        traffic, rows = self._traffic(owns, others)
+        # a row the executor refuses (vocabulary D80) leaves the shared step as it was (prior §7 items 3 and 7): the
+        # window's records of it are kept only once it is kept
+        said = self.speaking.step(numbers, {SPEED: masks}, traffic)
+        self._keep(rows, applies)
         self._next = {}
         ended = np.zeros(len(self.order), dtype=bool)
         for b in np.flatnonzero(self.speaking.alive):

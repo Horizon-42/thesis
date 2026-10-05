@@ -282,3 +282,35 @@ def test_window_bs_moved_record_is_the_starts_moved_rows(setup):
     rows = slice(first_row, first_row + len(observed[0]))
     assert np.array_equal(np.column_stack((record.e_m[rows], record.n_m[rows], record.height_m[rows])), observed[0][:, :3])
     assert record.category == window.commanded.category and record.row_at(moved.first_step_s) == len(record.e_m) - 1
+
+
+def test_a_row_the_executor_refuses_leaves_the_windows_records_as_they_were(setup, monkeypatch):
+    """Vocabulary D80, prior §7 items 3 and 7: a row the executor refuses leaves the shared step as it was, and the window's
+    own records — its tokens for the loss and its speed-mask count — as they were too: they are kept only with the row
+    (the speed mask made to act on every row, so a count of a refused row would show)."""
+    from types import SimpleNamespace
+
+    from ts_transformer.autopilot.start import RowRefused
+
+    s = setup
+    loop = _window_loop(s, _with_module(s["base"]), s["windows"])
+    monkeypatch.setattr(post_window_loop, "speed_check", lambda scene, speeds, separation, words, candidates:
+                        SimpleNamespace(permitted=np.ones(loop.speed_words, dtype=bool), applies=True))
+    while loop.speaking.observing:
+        loop.observe()
+    row = np.stack([flight_numbers(7, 0, 0).random(len(COLUMNS))])
+    tokens, counted, t = [len(x) for x in loop._tokens], loop.speed_mask_rows.copy(), loop.speaking.t
+
+    def refuse(words):
+        raise RowRefused("refused for the test", "test")
+
+    monkeypatch.setattr(loop.speaking.loop, "step", refuse)
+    with pytest.raises(RowRefused):
+        loop.step(row)
+    assert [len(x) for x in loop._tokens] == tokens and np.array_equal(loop.speed_mask_rows, counted)
+    assert loop.speaking.t == t
+    monkeypatch.undo()
+    monkeypatch.setattr(post_window_loop, "speed_check", lambda scene, speeds, separation, words, candidates:
+                        SimpleNamespace(permitted=np.ones(loop.speed_words, dtype=bool), applies=True))
+    loop.step(row)                                                     # the same row, kept: recorded once
+    assert [len(x) for x in loop._tokens] == [n + 1 for n in tokens] and loop.speed_mask_rows.tolist() == [1]
