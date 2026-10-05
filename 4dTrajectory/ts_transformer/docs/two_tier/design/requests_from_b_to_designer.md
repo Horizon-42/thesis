@@ -38,9 +38,11 @@ Each is built as written. None changes a result the user has seen.
 
 ## 2 For stage A
 
-- `aeroviz_backend/autopilot_segment/backend.py` (A23's file) still names `index_prior_v1.json` in a comment, in
-  `AutopilotSegmentBackend.__init__`. Stage B's index is now `index_prior_v2.json` (`prior.training_files.INDEX_FILE`).
-  Stage B does not edit the file.
+- `aeroviz_backend/autopilot_segment/backend.py` (A23's file), line 107: the comment on stage B's own hook
+  (`self.prior = PriorSegments(self)`, added by B6's `aac93945` and listed in the log as a hook in A23's files) still
+  names `index_prior_v1.json`; stage B's index is now `index_prior_v2.json` (`prior.training_files.INDEX_FILE`). Stage
+  B has not edited the file since the rule (stage B does not edit stage A's code): the designer decides whether stage B
+  updates its own hook's comment or stage A does.
 - The synthetic artefact of the tests (`tests/support.py`, `labelled_instruction_artefact`) writes no
   `runway_ends_from` in `signals.json`, which the real artefacts record and A37's
   `training_export.candidate_hae_minus_msl_m` reads. Stage B's export tests add a stand-in
