@@ -77,7 +77,7 @@ The commits, dates, branches, test counts and measurements of every milestone ar
 | Claude's check of stage B | Done at `5313b6cd` (`readouts/2026-10-05_stage_b_check.zh.md`): no leak into the inputs; the corrections are B10 (D105–D108) |
 | B10 | Planned (§12): before B5's formal campaign |
 | B11 (D111) | Planned (§12): after vocabulary A40, before B5's formal campaign |
-| B5, B7 | Wait for B10, A34's artefact and Claude's check of stage A (§0.4) |
+| B5, B7 | Wait for B10, B11, A34's artefact and Claude's check of stage A (§0.4) |
 
 Proposals (where the design says nothing): none open.
 
@@ -94,7 +94,8 @@ Proposals (where the design says nothing): none open.
    | After A34 of stage A (the formal artefact with D77–D84) | The smoke of B3, free generation and the check at the formal size at Δ = 4 s again, on A34's artefact (the candidates of an airport can change, D78); the formal runs read A34's artefact |
    | Now, before B5's formal campaign (the user, 2026-10-05) | B9: the interface for the post-training (D96), on synthetic artefacts. Its change of free generation's draws comes before any formal free generation: a payload that an experiment writes is settled before the experiment runs |
    | Now, before B5's formal campaign (the user, 2026-10-05) | B10: the corrections of Claude's check of stage B (D105–D108), on synthetic artefacts; then B3's smoke and free generation on A34's artefact again. Its changes of free generation (the masks of D64 at the row that ends G, the region of D72, the shared step) come before any formal free generation |
-   | After B10, Claude's check of stage A (with A32–A37, vocabulary §12.2 item 8; A38 changes no artefact and does not hold B5) and the user's choice of Δ (outline §4); A32 holds vocabulary D86 (the export gives val flights for the base's validation readout) | B5; B6's publication of the folds and the base (the base's val set after vocabulary A39, outline D109); B7 |
+   | Now: stage A's line is merged (`dev-two-tier-v4` at `ed2530ae`, the user, 2026-10-05: A37–A40) | Stage B merges it and follows stage A's changes (`requests_from_a_to_designer.md` §2): A37 — the reason a flight ended from the judge's outcome (`judge.TIMEOUT`, vocabulary D90), the export's runway offset from `training_export.candidate_hae_minus_msl_m`; A38 — the copy of the closed loop's step (D106 (1)) takes the loop's own copy (`Loop.copy`), and a halted flight hears no words; A39 — B10's item of outline D109 with the splits given to the backend's service and to the frontend's reader. Then B11 (D111) |
+   | After B10, B11, Claude's check of stage A (with A32–A37, vocabulary §12.2 item 8; A38 changes no artefact and does not hold B5) and the user's choice of Δ (outline §4); A32 holds vocabulary D86 (the export gives val flights for the base's validation readout) | B5; B6's publication of the folds and the base (the base's val set after vocabulary A39, outline D109); B7 |
 
 2. The post-training (`post_training.md`) is developed in parallel with the end of stage B, on its own branch, made
    from this one (outline §4, §5 rule 1; D95). It reads only §7; it merges this branch when B9 is committed.
@@ -479,9 +480,14 @@ variants and selection rule of `instruction-v3`, the aircraft attention of a one
 **B11. The selection leaves out flights with a faulty observed track (D111).** After vocabulary A40 is on the stage A
 line that stage B merges; before B5's formal campaign. `prior/selection.py`: `landed` also leaves out a flight that
 stage A's `instructions/faults.py` marks; the selection record counts them apart (by split, airport and stratum). The
-change of the record is a change of the identity of a run's data (the checkpoint's schema). Tests: a marked flight that
-landed is left out under `landed` and kept under `all`; the record counts it apart; a marked flight's free generation
-is unchanged.
+change of the record is a change of the identity of a run's data (the checkpoint's schema; one new name with B10's
+changes, as both come before B5). The mark is read like the stored outcome (D75): it keeps or leaves a sentence and
+never reaches an input. Of the val days, the marks are counted in the identity and never printed (D85, as B10). Free
+generation's readout gives the flights left out for a faulty track apart from those left out by their outcome (a
+flight with a faulty start fails whatever is said: vocabulary D111). The report gives the selection's names for §7
+item 4 if they change. Tests: a marked flight that landed is left out under `landed` and kept under `all`; the record
+counts it apart; a change of a flight's mark changes no input of its rows; a marked flight's free generation is
+unchanged; the readout counts the two reasons apart.
 
 **B10. The corrections of Claude's check of stage B** (`readouts/2026-10-05_stage_b_check.zh.md`; D64, D72, D85,
 D105–D108). Now; before B5's formal campaign, because it changes free generation and the campaign runner. On synthetic
