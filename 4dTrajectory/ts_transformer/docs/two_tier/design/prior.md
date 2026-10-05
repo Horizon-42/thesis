@@ -63,11 +63,11 @@ The commits, dates, branches, test counts and measurements of every milestone ar
 | Part | State |
 |---|---|
 | B0–B4, B8 (§12) | Done on synthetic artefacts. B3's smoke, free generation and the formal-size check are run again on A34's artefact (§0.4) |
-| B3's smoke and the formal-size check | Done at Δ = 2 s on `v9_20261004`, at Δ = 4 s on `v11_20261004` / `v16_20261004`; on A34's artefact the memory check (A, C) and C's timing done, A's timing to run again (the log §1) |
+| B3's smoke and the formal-size check | Done at Δ = 2 s on `v9_20261004`, at Δ = 4 s on `v11_20261004` / `v16_20261004`; on A34's artefact the memory check (A, C) and the timing (A 26 s, C 36 s an epoch) done (the log §1) |
 | After A32 (D77–D87) | The prior reads a closed-loop sentence's rows alone and the withheld fields apart (D82); its export calls `split_flights` |
 | B5's tools | Built on synthetic artefacts: the first-step runway at the held-out airport, the base's validation readout, the campaign runner |
 | B6 | Started 2026-10-05 (the log §1) |
-| B9 (D96) | In work: items 1–5 committed (`1204fd8f`, `6a68ac67`, `0b050797`), review in work (the log §1) |
+| B9 (D96) | Done, reviewed twice: `1204fd8f`, `6a68ac67`, `0b050797`, `bb86a39f`, `5313b6cd`; full suite passed; the names for §7's "Code" column in the log §1 |
 | D90 / A37 | Stage B follows after A37's merge; a flight's end, flown record and aero parameters have no accessor yet: a gap for the user (the log §1) |
 | B5, B7 | Wait for A34's artefact and Claude's check of stage A (§0.4) |
 
