@@ -27,6 +27,7 @@ from ts_transformer.instructions.words import COLUMNS, RUNWAY
 from ts_transformer.prior.batch import RowTensors, SentenceRows, collate, require_words
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.runs import RunData
+from ts_transformer.prior.speaker import Permitted
 
 
 @dataclass(frozen=True)
@@ -102,25 +103,37 @@ def evaluate(model: Prior, sentences: Sequence[SentenceRows], tokens_per_batch: 
             "steps": steps}
 
 
-def masked_log_probability(model: Prior, rows: RowTensors, permitted: Any, extra: Any = None) -> torch.Tensor:
+def masked_log_probability(model: Prior, rows: RowTensors, permitted: Permitted, extra: Any = None) -> torch.Tensor:
     """``[B, R, 5]``: the log-probability of the words ``rows.targets`` at each asked row, under the speaker's records
-    ``permitted`` (`speaker.Permitted`: the words every mask permitted at each row it said, and its temperature),
-    teacher-forced with the caller's input of the added modules ``extra``, with gradients (D96 item 3); 0 at a row that
-    is not asked. An aircraft's k-th asked row reads the record of the k-th row the speaker said to it. At the
-    parameters that spoke, the probability is the one the speaker drew the word from (within the float tolerance); a
-    word the record blocks has probability 0."""
-    logits = model(rows, extra)
+    ``permitted`` (`speaker.Permitted`: the words every mask permitted at each row it said, the rows' times, the
+    temperature), teacher-forced with the caller's input of the added modules ``extra``, with gradients (D96 item 3); 0
+    at a row that is not asked. Each asked row reads the record of the row said at its time (refused when there is
+    none: records and rows of other aircraft or other rows); a record narrower than the batch's classes permits none of
+    the extra classes, one wider is refused unless its extra classes are all blocked. At the parameters that spoke, the
+    probability is the one the speaker drew the word from (within the float tolerance); a word the record blocks has
+    probability 0."""
     count, length = rows.asked.shape
-    said = permitted.masks[0].shape[1]
-    asked = rows.asked.cpu().numpy()
-    if (asked.sum(axis=1) > said).any():
-        raise ValueError(f"an aircraft has more asked rows than the {said} rows of its records")
+    if permitted.time_s.shape[0] != count:
+        raise ValueError(f"records of {permitted.time_s.shape[0]} aircraft for a batch of {count}")
+    asked, times = rows.asked.cpu().numpy(), rows.time_s.cpu().numpy()
+    said = []                                   # for each aircraft, (its asked rows, the record row of each)
+    for b in range(count):
+        where = np.flatnonzero(asked[b])
+        at = {float(t): k for k, t in enumerate(permitted.time_s[b])}
+        missing = [float(times[b, r]) for r in where if float(times[b, r]) not in at]
+        if missing:
+            raise ValueError(f"aircraft {b}: no record of the rows at {missing[:3]} s")
+        said.append((where, np.array([at[float(times[b, r])] for r in where], dtype=np.int64)))
+    logits = model(rows, extra)
     out = logits[0].new_zeros((count, length, len(logits)))
     for column, logit in enumerate(logits):
-        record = np.ones((count, length, logit.shape[-1]), dtype=bool)
-        for b in range(count):
-            where = np.flatnonzero(asked[b])
-            record[b, where] = permitted.masks[column][b, : len(where), : logit.shape[-1]]
+        width, stored = logit.shape[-1], permitted.masks[column]
+        if stored.shape[-1] > width and stored[..., width:].any():
+            raise ValueError(f"column {COLUMNS[column]}: the records permit a class past the batch's {width}")
+        stored = np.pad(stored[..., :width], ((0, 0), (0, 0), (0, max(0, width - stored.shape[-1]))))
+        record = np.ones((count, length, width), dtype=bool)
+        for b, (where, rows_said) in enumerate(said):
+            record[b, where] = stored[b, rows_said]
         masked = logit.masked_fill(~torch.as_tensor(record, device=logit.device), float("-inf"))
         log_p = torch.log_softmax(masked / permitted.temperature, dim=-1)
         chosen = log_p.gather(-1, rows.targets[..., column: column + 1])[..., 0]

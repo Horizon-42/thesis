@@ -17,6 +17,7 @@ import torch
 
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import STATE_COLUMNS
+from ts_transformer.instructions.labeller.interval import interval_rows
 from ts_transformer.prior.batch import RowTensors, row_tensors
 from ts_transformer.prior.inputs import Heard, state_inputs
 from ts_transformer.prior.landings import LandingIndex
@@ -44,7 +45,7 @@ class LoopRows:
         if not (len(self.keys) == len(self.entry_utc_s) == len(self.first_rows) == count):
             raise ValueError("one key, entry time and first row for each aircraft")
         self.variant, self.interval_s, self.step_s, self.device = variant, interval_s, step_s, device
-        self.every = int(round(interval_s / step_s))
+        self.every = interval_rows(interval_s, step_s)
         self.elevations = np.array([g.elevation_m for g in self.geometries])
         self._runways = [[self.landings[g.code].runways.index(c.ident) for c in g.candidates] for g in self.geometries]
 
