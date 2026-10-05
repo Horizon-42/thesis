@@ -110,7 +110,6 @@ const MIN_LOAD_FACTOR = 0;
 const MAX_LOAD_FACTOR = 3;
 const DEFAULT_CONTROLS: PanelControls = makeDefaultControls(null);
 const DEFAULT_INTEGRATOR_DT_S = 0.2;
-const DEFAULT_TRAJECTORY_DT_S = 0.5;
 const PLAYBACK_FRAME_DT_S = 0.2;
 const STEP_INTERVAL_MS = 120;
 const MAX_TRAIL_POINTS = 360;
@@ -160,19 +159,6 @@ const TARGET_DELTA_SYSTEMS: DynamicsComparisonSystem[] = [
 
 function usesLoadFactorControl(mode: PilotSimulationMode) {
   return mode === "loadFactor" || mode === "casadi";
-}
-
-function trajectoryOptimizerSimulationMode(
-  optimizer: TrajectoryOptimizer,
-): PilotSimulationMode {
-  // The CasADi optimisers (IPOPT and every direct-collocation defect-scheme
-  // variant) emit LoadFactorControl-shaped controls (T, mu, n_cmd), so
-  // playback must run the "casadi" simulation mode to interpret them.  All
-  // other optimisers emit alpha-based controls and play back via alpha.
-  return optimizer === "casadiIpopt" ||
-    optimizer.startsWith("casadiDirectCollocation")
-    ? "casadi"
-    : "alpha";
 }
 
 /** The panel serves two workbench tasks and takes the task itself as its mode. */
@@ -259,7 +245,6 @@ export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
   const [stateSubsteps, setStateSubsteps] = useState(0);
   const [showAdvancedNumerics, setShowAdvancedNumerics] = useState(false);
   const [arrivalTimeS, setArrivalTimeS] = useState(DEFAULT_ARRIVAL_TIME_S);
-  const [trajectoryDtS, setTrajectoryDtS] = useState(DEFAULT_TRAJECTORY_DT_S);
   const [maxIterations, setMaxIterations] = useState(DEFAULT_MAX_ITERATIONS);
   const [optimizedTrajectory, setOptimizedTrajectory] =
     useState<TrajectoryOptimizationResult | null>(null);
@@ -526,8 +511,8 @@ export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
     target: targetGateState,
   });
 
-  // Drive the live readout from the optimized rollout sampled at the clock time.
-  const playbackOptimizer = optimizedTrajectory?.optimizer ?? DEFAULT_TRAJECTORY_OPTIMIZER;
+  // Drive the live readout from the optimized rollout sampled at the clock time. Every
+  // optimizer emits load-factor controls, so playback always reads in the "casadi" mode.
   const handlePlaybackSample = useCallback(
     (sample: TrajectorySample | null) => {
       if (!sample) {
@@ -537,13 +522,13 @@ export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
       setPlaybackSnapshot(
         trajectorySampleToSnapshot(
           sample,
-          trajectoryOptimizerSimulationMode(playbackOptimizer),
+          "casadi",
           initialState.aircraftType,
           initialState.massKg,
         ),
       );
     },
-    [playbackOptimizer, initialState.aircraftType, initialState.massKg],
+    [initialState.aircraftType, initialState.massKg],
   );
 
   useOptimizedTrajectoryPlayback({
@@ -1145,12 +1130,6 @@ export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
     clearOptimizedPlayback();
   }
 
-  function updateTrajectoryDt(value: number) {
-    if (!Number.isFinite(value)) return;
-    setTrajectoryDtS(clamp(value, 0.02, 2));
-    clearOptimizedPlayback();
-  }
-
   function updateMaxIterations(value: number) {
     if (!Number.isFinite(value)) return;
     setMaxIterations(Math.round(clamp(value, 1, 10000)));
@@ -1218,7 +1197,6 @@ export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
         nSegPerPhase: constrained ? nSegPerPhase : undefined,
         stateSubsteps: stateSubsteps > 0 ? stateSubsteps : undefined,
         arrivalTimeS,
-        dtS: trajectoryDtS,
         maxIterations,
         procedureConstraint,
       });
@@ -1783,17 +1761,6 @@ export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
               />
             </label>
             <label>
-              <span>dt</span>
-              <EnglishNumberInput
-                value={trajectoryDtS}
-                min={0.02}
-                max={2}
-                step="0.02"
-                disabled={targetControlsDisabled}
-                onCommit={updateTrajectoryDt}
-              />
-            </label>
-            <label>
               <span>Max iter</span>
               <EnglishNumberInput
                 value={maxIterations}
@@ -1929,10 +1896,6 @@ export default function PilotPanel({ mode: activeMode }: PilotPanelProps) {
                 <div>
                   <dt>Final</dt>
                   <dd>{formatNumberInputValue(optimizedTrajectory.finalTimeS)} s</dd>
-                </div>
-                <div>
-                  <dt>dt</dt>
-                  <dd>{formatNumberInputValue(optimizedTrajectory.dtS)} s</dd>
                 </div>
                 <div>
                   <dt>Segment</dt>
@@ -2497,7 +2460,7 @@ function trajectorySampleToSnapshot(
   const control: PilotControls = {
     thrustN: sample.thrustN,
     bankDeg: sample.bankDeg,
-    attackDeg: sample.attackDeg ?? 0,
+    attackDeg: 0,
   };
   if (sample.loadFactor !== undefined) {
     control.loadFactor = sample.loadFactor;

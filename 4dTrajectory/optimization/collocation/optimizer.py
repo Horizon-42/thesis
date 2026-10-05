@@ -355,6 +355,7 @@ class CollocationOptimizer:
         seed_error = None
         nlp, lbw, ubw, lbg, ubg, x0, layout = self._build(
             initial_state, target_state, max_duration, extra_rows=extra_rows)
+        build_s = time.perf_counter() - started
         if initial_guess is not None:
             x0 = list(initial_guess)
         elif cold_start:
@@ -366,6 +367,7 @@ class CollocationOptimizer:
                 # surfaces if the free-time solve below also fails (rather than vanishing).
                 seed_error = str(exc)
             cold_s = time.perf_counter() - cs_started
+        setup_started = time.perf_counter()
         solver = _components._make_nlp_solver(nlp, self.solver_backend, self.verbose, self.max_iterations)
         ft_started = time.perf_counter()
         sol = solver(x0=x0, lbx=lbw, ubx=ubw, lbg=lbg, ubg=ubg)
@@ -375,6 +377,7 @@ class CollocationOptimizer:
             raise ValueError(f"collocation free-time optimization failed: {status}{detail}")
         ft_s = time.perf_counter() - ft_started
         self.last_solve_timings = {
+            "buildS": build_s, "solverSetupS": ft_started - setup_started,     # the NLP graph; nlpsol's setup
             "coldStartS": cold_s, "freeTimeSolveS": ft_s, "solveTotalS": time.perf_counter() - started,
         }
         return self._extract(np.array(sol["x"]).reshape(-1), layout)
@@ -766,8 +769,8 @@ class CollocationOptimizer:
         a = self.aircraft
         return {
             "max_thrust": a.engine.max_thrust_total_n,
-            "min_load_factor": 0.5,
-            "max_load_factor": 2.0,
+            "min_load_factor": _components.LOAD_FACTOR_RANGE[0],
+            "max_load_factor": _components.LOAD_FACTOR_RANGE[1],
             "min_terminal_speed": (
                 self.min_speed_ms if self.min_speed_ms is not None
                 else a.approach.minimum_speed_ms(mass_kg)

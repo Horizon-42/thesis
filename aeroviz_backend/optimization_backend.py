@@ -9,13 +9,9 @@ from aeroviz_backend import paths  # noqa: F401
 from aeroviz_backend.casadi_lock import CASADI_LOCK
 from aeroviz_backend.simulation_backend import (
     DEFAULT_AIRCRAFT_TYPE,
-    DEFAULT_DT,
     DEFAULT_STATE,
-    MAX_DT,
-    clamp,
     format_control,
     format_geodetic_state,
-    pilot_mass_kg,
     read_aircraft,
     read_float,
     read_geodetic_state,
@@ -23,25 +19,16 @@ from aeroviz_backend.simulation_backend import (
     read_required_mapping,
 )
 
-from geodetic_simulator import GeodeticSimulator, GeodeticState
-from casadi_optimizer import CasadiOptimizer
+from geodetic_simulator import GeodeticState
 from collocation import CollocationOptimizer
 from collocation.optimizer import DEFAULT_N_SEG_PER_PHASE  # single source (constrained mesh default = 3)
 from common import LoadFactorControl
-from least_squares_transcription_optimizor import LeastSquaresTranscriptionOptimizor
-from single_shooting_optimizor import SingleShootingOptimizor
-from simulator import Control
 from procedure.constraint import ProcedureConstraint
 from procedure.segments import build_constraint_segments
 from aeroviz_backend.trajectory_playback import (
     build_optimized_trajectory_playback,
     playback_terminal_drift_m,
 )
-from transcription_optimizor import TranscriptionOptimizor
-from variable_time_warm_start_transcription_optimizor import (
-    VariableTimeWarmStartTranscriptionOptimizor,
-)
-from warm_start_transcription_optimizor import WarmStartTranscriptionOptimizor
 
 
 DEFAULT_N_SEGMENTS = 10
@@ -50,7 +37,6 @@ DEFAULT_N_SEGMENTS = 10
 DEFAULT_MAX_ITERATIONS = 1000
 MIN_ARRIVAL_TIME_S = 1.0
 MAX_ARRIVAL_TIME_S = 1000.0
-MIN_OPTIMIZATION_DT = 0.001
 DEFAULT_OPTIMIZER = "casadiDirectCollocation"
 
 # Direct-collocation variants exposed as distinct optimizer names, each
@@ -96,26 +82,12 @@ MULTIPHASE_SCHEMES = {
     "casadiMultiphaseNormalizedFullTransportTrapezoidal": "trapezoidalNormalizedFullTransport",
     "casadiMultiphaseNormalizedFullTransportRk4": "rk4NormalizedFullTransport",
 }
-SUPPORTED_OPTIMIZERS = (
-    *DIRECT_COLLOCATION_SCHEMES,
-    *MULTIPHASE_SCHEMES,
-    "casadiIpopt",
-    "transcription",
-    "leastSquaresTranscription",
-    "warmStartTranscription",
-    "variableTimeWarmStartTranscription",
-    "singleShooting",
-)
-# CasADi optimisers are cached (their NLP is compiled once); the direct-
-# collocation variants additionally use the single-solve free-time path.
-CASADI_OPTIMIZERS = ("casadiIpopt", *DIRECT_COLLOCATION_SCHEMES)
+# Every optimizer is the collocation optimizer (the older scipy / multiple-shooting ones are archived:
+# 4dTrajectory/optimization/archive/legacy_optimizers_2026_10/).
+SUPPORTED_OPTIMIZERS = (*DIRECT_COLLOCATION_SCHEMES, *MULTIPHASE_SCHEMES)
 
 
 class OptimizationBackend:
-    def __init__(self) -> None:
-        self._casadi_optimizer_key = None
-        self._casadi_optimizer = None
-
     def optimize(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         # casadi NLP construction (the SXElem symbolic graph) is NOT thread-safe;
         # concurrent builds across ThreadingHTTPServer threads corrupt the heap and
@@ -147,7 +119,6 @@ class OptimizationBackend:
         )
         optimizer_name = read_optimizer(payload)
         arrival_time_s = read_arrival_time_s(payload)
-        dt = clamp(read_float(payload, "dtS", DEFAULT_DT), MIN_OPTIMIZATION_DT, MAX_DT)
         aircraft = read_aircraft(initial_payload, DEFAULT_AIRCRAFT_TYPE)
 
         initial_state = read_geodetic_state(initial_payload, DEFAULT_STATE, aircraft)
@@ -191,7 +162,6 @@ class OptimizationBackend:
         # forward into the playback CZML.  The breakdown is logged to the server
         # log (stderr) below.
         flow_started = time.perf_counter()
-        segment_durations = None
         if is_multiphase:
             # Multiphase transcription: an unconstrained start->first-fix transition phase (when
             # the start is away from the first fix) + one phase per procedure leg with its
@@ -203,48 +173,21 @@ class OptimizationBackend:
                 state_substeps=state_substeps,
                 max_iterations=max_iterations,
             )
-            build_s = time.perf_counter() - flow_started
-            solve_started = time.perf_counter()
-            final_time, node_control, node_state = optimizer.optimize_free_time(
-                initial_state, target_state, arrival_time_s,
-            )
-            segment_durations = optimizer.segment_durations_s
-            solve_s = time.perf_counter() - solve_started
         else:
-            optimizer = self.make_optimizer(
-                optimizer_name,
-                GeodeticSimulator(aircraft),
-                n_segments,
-                dt,
-                max_iterations,
-                arrival_time_s=arrival_time_s,
-                state_substeps=state_substeps,
+            optimizer = make_optimizer(
+                optimizer_name, aircraft, n_segments, max_iterations,
+                arrival_time_s=arrival_time_s, state_substeps=state_substeps,
             )
-            build_s = time.perf_counter() - flow_started
-            solve_started = time.perf_counter()
-            if optimizer_name in DIRECT_COLLOCATION_SCHEMES:
-                # Direct collocation includes T as a decision variable, so
-                # one solve returns both the optimal trajectory and the
-                # optimal arrival time -- no outer bisection needed.
-                final_time, node_control, node_state = optimizer.optimize_free_time(
-                    initial_state,
-                    target_state,
-                    arrival_time_s,
-                )
-            elif optimizer_name == "casadiIpopt":
-                # Multiple shooting uses a fixed-time NLP; finding the
-                # shortest feasible duration still requires bisecting on T.
-                final_time, node_control, node_state = optimizer.optimize_time_to_target(
-                    initial_state,
-                    target_state,
-                    arrival_time_s,
-                )
-            else:
-                final_time, node_control, node_state = optimizer.optimize_trajectory(
-                    initial_state,
-                    target_state,
-                )
-            solve_s = time.perf_counter() - solve_started
+        # Direct collocation includes T as a decision variable, so one solve returns both the
+        # optimal trajectory and the optimal arrival time -- no outer bisection needed.
+        final_time, node_control, node_state = optimizer.optimize_free_time(
+            initial_state, target_state, arrival_time_s,
+        )
+        segment_durations = optimizer.segment_durations_s if is_multiphase else None
+        # build = the symbolic NLP + casadi's solver setup (about half of a solve); solve = the rest
+        solve_breakdown = optimizer.last_solve_timings
+        build_s = solve_breakdown["buildS"] + solve_breakdown["solverSetupS"]
+        solve_s = time.perf_counter() - flow_started - build_s
 
         result = {
             "ok": True,
@@ -252,12 +195,8 @@ class OptimizationBackend:
             # Multiphase emits its own per-phase control mesh, so the actual control count is the
             # one to report (not the request's nSegments, which it ignores).
             "nSegments": len(node_control) if is_multiphase else n_segments,
-            "dtS": dt,
             "optimizer": optimizer_name,
-            "controls": [
-                format_optimizer_control(optimizer_name, control_values)
-                for control_values in node_control
-            ],
+            "controls": [format_control(LoadFactorControl(*control_values)) for control_values in node_control],
             "states": format_node_states(node_state, initial_state.m, aircraft.code),
         }
 
@@ -267,7 +206,6 @@ class OptimizationBackend:
         # stubbed in tests via ``build_optimized_trajectory_playback``.
         playback_started = time.perf_counter()
         playback = build_optimized_trajectory_playback(
-            optimizer_name,
             initial_state,
             node_control,
             float(final_time),
@@ -317,68 +255,24 @@ class OptimizationBackend:
             solve_s=solve_s,
             playback_s=playback_s,
             total_s=total_s,
-            solve_breakdown=getattr(optimizer, "last_solve_timings", None),
+            solve_breakdown=solve_breakdown,
         )
         return result
 
-    def make_optimizer(
-        self,
-        optimizer_name: str,
-        geodetic_simulator: GeodeticSimulator,
-        n_segments: int,
-        dt: float,
-        max_iterations: int,
-        arrival_time_s: float,
-        state_substeps: int | None = None,
-    ) -> Any:
-        if optimizer_name in CASADI_OPTIMIZERS:
-            # Cache one instance per (aircraft, mesh, dt, arrival_time, optimizer_name). This
-            # amortizes the ``casadiIpopt`` multiple-shooting solver, whose NLP is compiled once at
-            # construction. The direct-collocation ``CollocationOptimizer`` rebuilds its NLP per
-            # solve (initial/target are baked in, not parameters), so the cache only saves its cheap
-            # __init__ there — harmless, and it keeps one code path for all CasADi optimisers.
-            aircraft = geodetic_simulator.simulator.aircraft
-            key = (optimizer_name, aircraft.code, n_segments, dt, arrival_time_s,
-                   state_substeps, max_iterations)
-            if self._casadi_optimizer_key != key:
-                self._casadi_optimizer_key = key
-                self._casadi_optimizer = make_optimizer(
-                    optimizer_name,
-                    geodetic_simulator,
-                    n_segments,
-                    dt,
-                    max_iterations,
-                    arrival_time_s,
-                    state_substeps=state_substeps,
-                )
-            return self._casadi_optimizer
 
-        return make_optimizer(
-            optimizer_name,
-            geodetic_simulator,
-            n_segments,
-            dt,
-            max_iterations,
-            arrival_time_s,
-            state_substeps=state_substeps,
-        )
-
-
-def _scheme_for_optimizer(optimizer_name: str) -> str | None:
-    """The collocation scheme an optimizer name resolves to (None for non-collocation ones)."""
+def _scheme_for_optimizer(optimizer_name: str) -> str:
+    """The collocation scheme an optimizer name resolves to."""
     if optimizer_name in MULTIPHASE_SCHEMES:
         return MULTIPHASE_SCHEMES[optimizer_name]
-    return DIRECT_COLLOCATION_SCHEMES.get(optimizer_name)
+    return DIRECT_COLLOCATION_SCHEMES[optimizer_name]
 
 
 def log_optimizer_config(optimizer_name: str, constrained: bool) -> None:
     """One stderr line BEFORE the solve: the resolved collocation scheme decomposed into its
     FITTING (transcription) and DYNAMICS, so a failed or hanging solve's configuration is
-    visible up front (non-collocation optimizers log ``scheme=-``)."""
+    visible up front."""
     scheme = _scheme_for_optimizer(optimizer_name)
-    if scheme is None:
-        detail = "scheme=- fitting=- dynamics=-"
-    elif scheme == "reanchoredEnu":
+    if scheme == "reanchoredEnu":
         detail = "scheme=reanchoredEnu fitting=shooting dynamics=reanchoredEnu"
     elif scheme.startswith("localEnu"):
         fitting = {
@@ -428,24 +322,22 @@ def log_optimization_timing(
     solve_s: float,
     playback_s: float,
     total_s: float,
-    solve_breakdown: dict[str, float] | None = None,
+    solve_breakdown: dict[str, float],
 ) -> None:
     """Write the whole-flow optimization timing to the server log (stderr).
 
-    ``build`` is the NLP compile (≈0 on a cache hit), ``solve`` the optimiser
-    call, ``playback`` the control-rollout CZML build, ``total`` the sum.  When
-    the optimiser exposes a per-phase ``solve_breakdown`` (direct collocation:
-    the cold-start solve vs the free-time solve), those are interleaved so the
-    log shows the full pipeline rather than one lumped solve time.
+    ``build`` is the symbolic NLP plus casadi's solver setup, ``solve`` the rest of the optimiser
+    call, ``playback`` the control-rollout CZML build, ``total`` the sum. The optimiser's
+    ``solve_breakdown`` (the cold-start seed vs the free-time solve) is interleaved so the log shows
+    the full pipeline rather than one lumped solve time.
     """
     parts = [
         "[aeroviz-backend] optimization timing",
         f"optimizer={optimizer_name}",
         f"build={build_s:.3f}s",
     ]
-    if solve_breakdown:
-        parts.append(f"coldStart={solve_breakdown.get('coldStartS', 0.0):.3f}s")
-        parts.append(f"freeTime={solve_breakdown.get('freeTimeSolveS', 0.0):.3f}s")
+    parts.append(f"coldStart={solve_breakdown['coldStartS']:.3f}s")
+    parts.append(f"freeTime={solve_breakdown['freeTimeSolveS']:.3f}s")
     parts.extend([
         f"solve={solve_s:.3f}s",
         f"playback={playback_s:.3f}s",
@@ -469,85 +361,21 @@ def read_optimizer(payload: dict[str, Any]) -> str:
 
 def make_optimizer(
     optimizer_name: str,
-    geodetic_simulator: GeodeticSimulator,
+    aircraft: Any,
     n_segments: int,
-    dt: float,
     max_iterations: int,
     arrival_time_s: float,
     state_substeps: int | None = None,
-) -> Any:
-    if optimizer_name == "casadiIpopt":
-        return CasadiOptimizer(
-            n_segments=n_segments,
-            dt=dt,
-            max_duration=arrival_time_s,
-            aircraft=geodetic_simulator.simulator.aircraft,
-            mass_kg=pilot_mass_kg(geodetic_simulator.simulator.aircraft),
-        )
-
-    if optimizer_name in DIRECT_COLLOCATION_SCHEMES:
-        return CollocationOptimizer(
-            geodetic_simulator.simulator.aircraft,
-            scheme=DIRECT_COLLOCATION_SCHEMES[optimizer_name],
-            n_segments=n_segments,
-            max_duration=arrival_time_s,
-            state_substeps=state_substeps,
-            max_iterations=max_iterations,
-        )
-
-    if optimizer_name == "singleShooting":
-        return SingleShootingOptimizor(
-            geodetic_simulator,
-            n_control_segments=n_segments,
-            dt=dt,
-            max_iterations=max_iterations,
-        )
-
-    if optimizer_name == "leastSquaresTranscription":
-        return LeastSquaresTranscriptionOptimizor(
-            geodetic_simulator,
-            n_segments=n_segments,
-            dt=dt,
-            arrival_time_s=arrival_time_s,
-            max_iterations=max_iterations,
-        )
-
-    if optimizer_name == "warmStartTranscription":
-        return WarmStartTranscriptionOptimizor(
-            geodetic_simulator,
-            n_segments=n_segments,
-            dt=dt,
-            arrival_time_s=arrival_time_s,
-            max_iterations=max_iterations,
-        )
-
-    if optimizer_name == "variableTimeWarmStartTranscription":
-        return VariableTimeWarmStartTranscriptionOptimizor(
-            geodetic_simulator,
-            n_segments=n_segments,
-            dt=dt,
-            arrival_time_s=arrival_time_s,
-            max_iterations=max_iterations,
-        )
-
-    return TranscriptionOptimizor(
-        geodetic_simulator,
+) -> CollocationOptimizer:
+    """The unconstrained collocation optimizer for a ``DIRECT_COLLOCATION_SCHEMES`` name."""
+    return CollocationOptimizer(
+        aircraft,
+        scheme=DIRECT_COLLOCATION_SCHEMES[optimizer_name],
         n_segments=n_segments,
-        dt=dt,
-        arrival_time_s=arrival_time_s,
+        max_duration=arrival_time_s,
+        state_substeps=state_substeps,
         max_iterations=max_iterations,
     )
-
-
-def format_optimizer_control(
-    optimizer_name: str,
-    control_values: Any,
-) -> dict[str, float]:
-    # The CasADi + multiphase optimisers use the load-factor parameterisation
-    # (T, mu, n_cmd); the alpha-based optimisers use (T, mu, alpha).
-    if optimizer_name in CASADI_OPTIMIZERS or optimizer_name in MULTIPHASE_SCHEMES:
-        return format_control(LoadFactorControl(*control_values))
-    return format_control(Control(*control_values))
 
 
 def read_arrival_time_s(payload: dict[str, Any]) -> float:

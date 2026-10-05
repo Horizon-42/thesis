@@ -255,8 +255,6 @@ function parseSample(value: unknown): TrajectorySample {
   };
   const loadFactor = readOptionalNumber(value, "loadFactor");
   if (loadFactor !== null) sample.loadFactor = loadFactor;
-  const attackDeg = readOptionalNumber(value, "attackDeg");
-  if (attackDeg !== null) sample.attackDeg = attackDeg;
   return sample;
 }
 

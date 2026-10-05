@@ -35,10 +35,10 @@ import casadi as ca
 import numpy as np
 
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
-_OPT_DIR = Path(__file__).resolve().parent
+_OPT_DIR = Path(__file__).resolve().parents[1]
 if str(_OPT_DIR) not in sys.path:
     sys.path.insert(0, str(_OPT_DIR))
 
@@ -47,9 +47,8 @@ from aerodynamic_model.common import GeodeticState  # noqa: E402
 from aerodynamic_model.casadi_simulator import (  # noqa: E402
     aero_params_for_aircraft, make_geodetic_step_integrator,
 )
-from collocation import (  # noqa: E402
-    CollocationOptimizer, _SOLVER_BACKENDS,
-)
+from collocation import CollocationOptimizer  # noqa: E402
+from collocation.components import _SOLVER_BACKENDS  # noqa: E402
 
 _AIRCRAFT = {"A320": A320, "C172": C172}
 _R = 6_371_000.0

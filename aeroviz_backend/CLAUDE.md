@@ -12,9 +12,8 @@ frontend reads. Solver internals and defaults live in `4dTrajectory/CLAUDE.md`.
   `4dTrajectory/CLAUDE.md`.
 - **Worker sessions**: `AEROVIZ_WORKER_IDLE_TIMEOUT_S` (default 600) idle watchdog reclaims a
   stranded resident solver worker.
-- **Probe bug**: `build_optimized_trajectory_playback` needs a REAL optimizer name —
-  `simulation_mode_for_optimizer` on an unknown name selects the alpha-control mode and misreads
-  casadi load-factor controls (fake 8–11 km "drift").
+- **Playback**: every optimizer emits load-factor controls, so `build_optimized_trajectory_playback` flies them in
+  the "casadi" simulator mode (the alpha-control optimizers are archived, 2026-10-05).
 - Playback drift guard: `playbackDriftM` on every optimize response; stderr WARNING above
   `PLAYBACK_DRIFT_WARN_M = 50`.
 - **`POST /autopilot/segment`** (the `autopilot_segment/` package, the Training view's live executor; rewritten for stage A

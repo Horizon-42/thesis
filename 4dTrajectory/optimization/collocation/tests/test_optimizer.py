@@ -28,7 +28,8 @@ from aerodynamic_model.casadi_simulator import make_geodetic_step_integrator  # 
 from aircraft.aircraft_sets import A320  # noqa: E402
 from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
 
-from collocation import CollocationOptimizer, _DEFECT_SCHEMES, altitude_floor_m, ALTITUDE_FLOOR_MARGIN_M  # noqa: E402
+from collocation import CollocationOptimizer, altitude_floor_m, ALTITUDE_FLOOR_MARGIN_M  # noqa: E402
+from collocation.schemes import _DEFECT_SCHEMES  # noqa: E402
 from collocation import schemes as _schemes  # noqa: E402
 from collocation import components as _components  # noqa: E402
 from collocation import optimizer as _optimizer  # noqa: E402
@@ -325,6 +326,7 @@ def test_unconstrained_free_time_reaches_target():
     assert controls.shape == (opt.n_segments, 3)
     assert states.shape == (opt.n_segments, 6)
     assert final_time < 120.0 * 1.6 - 1.0                    # the time objective actually shrank T
+    assert set(opt.last_solve_timings) == {"buildS", "solverSetupS", "coldStartS", "freeTimeSolveS", "solveTotalS"}
     np.testing.assert_allclose(
         states[-1], [target.latitude, target.longitude, target.altitude, target.V, target.psi, target.gamma],
         atol=1e-2)

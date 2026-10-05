@@ -37,7 +37,6 @@ class TestTrajectoryPlayback(unittest.TestCase):
         ])
 
         playback = trajectory_playback.build_optimized_trajectory_playback(
-            "casadiDirectCollocation",
             _initial_state(),
             node_control,
             40.0,
@@ -85,7 +84,6 @@ class TestTrajectoryPlayback(unittest.TestCase):
         ])
 
         playback = trajectory_playback.build_optimized_trajectory_playback(
-            "casadiDirectCollocation",
             _initial_state(),
             node_control,
             40.0,
@@ -105,7 +103,6 @@ class TestTrajectoryPlayback(unittest.TestCase):
             [40000.0, math.radians(5.0), 1.0],
         ])
         playback = trajectory_playback.build_optimized_trajectory_playback(
-            "casadiDirectCollocation",
             _initial_state(),
             node_control,
             20.0,
@@ -125,7 +122,6 @@ class TestTrajectoryPlayback(unittest.TestCase):
             [40000.0, math.radians(20.0), 1.10],
         ])
         playback = trajectory_playback.build_optimized_trajectory_playback(
-            "casadiDirectCollocation",
             _initial_state(),
             node_control,
             20.0,
@@ -139,28 +135,14 @@ class TestTrajectoryPlayback(unittest.TestCase):
         self.assertIn("loadFactor", samples[0])
         self.assertIn("bankDeg", samples[0])
 
-    def test_alpha_optimizer_uses_attack_control(self):
-        node_control = np.array([[40000.0, math.radians(5.0), math.radians(3.0)]])
-        playback = trajectory_playback.build_optimized_trajectory_playback(
-            "transcription",
-            _initial_state(),
-            node_control,
-            10.0,
-            A320,
-        )
-        self.assertIsNotNone(playback)
-        self.assertIn("attackDeg", playback["samples"][0])
-        self.assertNotIn("loadFactor", playback["samples"][0])
-
     def test_returns_none_without_controls(self):
         self.assertIsNone(
             trajectory_playback.build_optimized_trajectory_playback(
-                "casadiDirectCollocation", _initial_state(), [], 40.0, A320,
+                _initial_state(), [], 40.0, A320,
             )
         )
         self.assertIsNone(
             trajectory_playback.build_optimized_trajectory_playback(
-                "casadiDirectCollocation",
                 _initial_state(),
                 np.array([[40000.0, 0.0, 1.0]]),
                 0.0,

@@ -50,13 +50,13 @@ from aeroviz_backend.simulation_backend import (
     read_snapshot_aero,
 )
 from aerodynamic_model.rollout import rollout_piecewise_constant
-from common import Control, GeodeticState, LoadFactorControl
+from common import GeodeticState, LoadFactorControl
 from geokit import haversine_m
 
 
-# Optimizers that emit LoadFactorControl-shaped controls (T, mu, n); everything
-# else emits alpha-based Control (T, mu, alpha).  Mirrors the frontend's
-# ``trajectoryOptimizerSimulationMode``.
+# Every optimizer emits load-factor controls (T, mu, n): the playback flies them in the simulator's
+# "casadi" mode (the alpha-control optimizers are archived, 2026-10-05).
+_SIMULATION_MODE = "casadi"
 
 _AIRCRAFT_MODEL_URI = "/models/aircraft.glb"
 _AIRCRAFT_ENTITY_ID = "optimized-trajectory-aircraft"
@@ -82,24 +82,13 @@ class TrajectorySample:
     bank_deg: float
     thrust_n: float
     segment_index: int
-    load_factor: float | None
-    attack_deg: float | None
+    load_factor: float
     lift_coefficient: float
     drag_coefficient: float
     actual_load_factor: float
 
 
-def simulation_mode_for_optimizer(optimizer_name: str) -> str:
-    # Covers casadiIpopt and every casadiDirectCollocation*/casadiMultiphase* defect-scheme
-    # variant (load-factor controls); everything else is alpha-based.
-    is_casadi = optimizer_name == "casadiIpopt" or optimizer_name.startswith(
-        ("casadiDirectCollocation", "casadiMultiphase")
-    )
-    return "casadi" if is_casadi else "alpha"
-
-
 def build_optimized_trajectory_playback(
-    optimizer_name: str,
     initial_state: GeodeticState,
     node_control: Any,
     final_time: float,
@@ -117,13 +106,11 @@ def build_optimized_trajectory_playback(
     if not controls or final_time <= 0.0:
         return None
 
-    simulation_mode = simulation_mode_for_optimizer(optimizer_name)
     samples = _rollout(
         initial_state,
         controls,
         float(final_time),
         aircraft,
-        simulation_mode,
         segment_durations=list(segment_durations) if segment_durations is not None else None,
     )
     if len(samples) < 2:
@@ -167,13 +154,12 @@ def _rollout(
     node_control: list[Any],
     final_time: float,
     aircraft: Any,
-    simulation_mode: str,
     segment_durations: list[float] | None = None,
 ) -> list[TrajectorySample]:
     output_dt = max(_MIN_OUTPUT_DT_S, final_time / _MAX_SAMPLES)
 
-    simulator = make_geodetic_simulator(aircraft, simulation_mode)
-    controls = [_build_control(row, simulation_mode) for row in node_control]
+    simulator = make_geodetic_simulator(aircraft, _SIMULATION_MODE)
+    controls = [_build_control(row) for row in node_control]
 
     def _log_truncation(t: float, exc: ValueError) -> None:
         # The replay left the valid flight envelope (e.g. altitude below ground).
@@ -196,35 +182,23 @@ def _rollout(
         on_truncate=_log_truncation,
     )
     return [
-        _make_sample(s.t, s.state, s.control, s.segment_index, simulator, simulation_mode)
+        _make_sample(s.t, s.state, s.control, s.segment_index, simulator)
         for s in rollout
     ]
 
 
-def _build_control(row: Any, simulation_mode: str) -> Control | LoadFactorControl:
-    thrust, bank_rad, third = (float(row[0]), float(row[1]), float(row[2]))
-    if simulation_mode == "casadi":
-        return LoadFactorControl(thrust=thrust, bank_rad=bank_rad, load_factor=third)
-    return Control(thrust=thrust, bank_rad=bank_rad, attack_rad=third)
+def _build_control(row: Any) -> LoadFactorControl:
+    return LoadFactorControl(thrust=float(row[0]), bank_rad=float(row[1]), load_factor=float(row[2]))
 
 
 def _make_sample(
     t: float,
     state: GeodeticState,
-    control: Control | LoadFactorControl,
+    control: LoadFactorControl,
     segment_index: int,
     simulator: Any,
-    simulation_mode: str,
 ) -> TrajectorySample:
-    load_factor = (
-        control.load_factor if isinstance(control, LoadFactorControl) else None
-    )
-    attack_deg = (
-        math.degrees(control.attack_rad) if isinstance(control, Control) else None
-    )
-    cl, cd, actual_load_factor = read_snapshot_aero(
-        simulator, state, control, simulation_mode
-    )
+    cl, cd, actual_load_factor = read_snapshot_aero(simulator, state, control, _SIMULATION_MODE)
     return TrajectorySample(
         t=t,
         lon=state.longitude,
@@ -236,8 +210,7 @@ def _make_sample(
         bank_deg=math.degrees(control.bank_rad),
         thrust_n=control.thrust,
         segment_index=segment_index,
-        load_factor=load_factor,
-        attack_deg=attack_deg,
+        load_factor=control.load_factor,
         lift_coefficient=cl,
         drag_coefficient=cd,
         actual_load_factor=actual_load_factor,
@@ -259,11 +232,8 @@ def _serialize_sample(sample: TrajectorySample) -> dict[str, Any]:
         "liftCoefficient": sample.lift_coefficient,
         "dragCoefficient": sample.drag_coefficient,
         "actualLoadFactor": sample.actual_load_factor,
+        "loadFactor": sample.load_factor,
     }
-    if sample.load_factor is not None:
-        payload["loadFactor"] = sample.load_factor
-    if sample.attack_deg is not None:
-        payload["attackDeg"] = sample.attack_deg
     return payload
 
 

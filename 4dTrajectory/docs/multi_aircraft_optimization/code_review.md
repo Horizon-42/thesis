@@ -11,6 +11,8 @@ Style: ASD-STE100 (Simplified Technical English). Units: SI.
 | Code changes in this branch | None. This document only records findings |
 | Findings | 13 (F1 to F13). 11 are verified on the code. 2 are judgement (F12 speed, F13 study scripts) |
 | Findings that the multi-aircraft design needs first | F4, F5, F6, F7 (see `design.md` §8, step T0) |
+| Fixed (branch `dev-optimizer-multi-aircraft`) | F7 `bbb18c52`; F1–F6, F8 (documented), F11 `5e3826f9`; F9, F10, F13 and F12 step 1 in the commit after the multi-aircraft M1 |
+| Open | F12 step 2 as measured: a reused solver per aircraft type (needs the user's decision) |
 | Decision state | The user accepted all 13 findings for a fix (2026-10-05): F4 to F7 first (step T0 of `design.md`), then F1, F2, F3, F8, F11; F12 measured first; then F9, F10, F13. The fixes go on their own branch, with a review at each step. Still open inside the findings: the IPOPT cap value of F8, and the target module of F4 |
 
 A finding is **verified** when this review read the code line and the line shows the defect. A finding is
@@ -170,7 +172,7 @@ it from `collocation.components`, or write in K4 that the backend has its own ca
 
 `collocation/__init__.py` exports `_DEFECT_SCHEMES` and `_SOLVER_BACKENDS` in `__all__`. The leading
 underscore says "private". Fix: export public names (`DEFECT_SCHEMES`, `SOLVER_BACKENDS`), or stop the
-export.
+export. **Done:** the export stopped; the two studies import them from their modules.
 
 ### F10 · Two control and state envelopes (verified, P3)
 
@@ -184,6 +186,9 @@ export.
 
 Fix: one envelope module, imported by both optimizers. Write the source of each limit (aircraft data or a
 stated modelling choice).
+
+**Done.** With `casadi_optimizer.py` archived, one envelope is left: `collocation.components` names
+`MAX_BANK_RAD` and `LOAD_FACTOR_RANGE` as a stated modelling choice; the optimizer reads them.
 
 ### F11 · Resume compares four identity fields (verified, P3)
 
@@ -210,6 +215,16 @@ Proposal:
    change only when the solve rate and the final times do not change on the fixed sample, or when the user
    accepts the measured change.
 
+**Measured** (2026-10-05, step 1 done: `last_solve_timings` has `buildS` and `solverSetupS`). On 12 KRDU
+scenarios in each mode, serial: the symbolic build takes a median 0.04 s; the `nlpsol` setup (casadi makes
+the derivatives) takes 1.06 s unconstrained and 0.73 s constrained; IPOPT takes 1.07 s and 0.93 s. Build
+and setup are a median 52 % and 48 % of a solve (5 % to 64 %). Thus step 2 (a cached defect `Function`)
+does not help: the build is small, and an `SX` call of a `Function` is expanded inline. The lever is the
+setup: make the initial and target states NLP parameters, and keep one solver per aircraft type, scheme
+and mesh layout, so that a batch makes few solvers. This can halve the CPU of a batch of successful solves.
+It changes the results in the last bits, so it needs the user's decision and a behaviour gate on the
+fixed sample.
+
 ### F13 · Older optimizers and study scripts (judgement, P3, user decision)
 
 - The batch uses three schemes only (`optimization_run_config.FITTING_SCHEMES`). `_DEFECT_SCHEMES` has 16
@@ -225,6 +240,13 @@ Proposal:
 Each of these items adds tests and maintenance. Proposal (the user decides): remove the older optimizers
 from the backend menu, and move them with their tests into `archive/` unchanged (the project's archive
 rule). Move the study scripts and their data into `optimization/studies/`.
+
+**Done.** The six optimizers and their seven tests are in
+`4dTrajectory/optimization/archive/legacy_optimizers_2026_10/` (unchanged, with a README); the backend menu,
+its optimizer cache (it existed for `casadiIpopt`'s compiled NLP), the alpha-control formatting and the
+playback's alpha path are gone; the frontend lost the six names (a sonnet agent). The five study scripts and
+their data are in `optimization/studies/`. Two comments in `ts_transformer` still name `casadi_optimizer.py`
+(`outputs/envelope.py`, `geometry/flyability.py`): ts code, left for its owner.
 
 ## 3. What this review did not find
 

@@ -49,7 +49,7 @@ import casadi as ca
 import numpy as np
 
 # Make ``aerodynamic_model`` importable when run as a script or module.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 

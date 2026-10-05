@@ -24,7 +24,7 @@ request spawns a fresh worker — the server self-heals and keeps running.
 
 Worker lifecycle (resident while the tab is open)
 -------------------------------------------------
-A persistent worker keeps casadi's compiled-NLP cache warm (fast repeated
+A persistent worker keeps casadi's cached dynamics functions warm (faster repeated
 solves) but holds hundreds of MB of casadi + numpy resident — dead weight on a
 memory-constrained machine once the user leaves the optimizer. So the worker is
 tied to the frontend tab's lifecycle:
@@ -213,7 +213,7 @@ class IsolatedRunner:
 
 # ── Worker entry points ───────────────────────────────────────────────────────
 # Module-level (so the 'spawn' start method can pickle them by reference) and each
-# reuses one backend per worker process, keeping casadi's compiled-NLP cache warm
+# reuses one backend per worker process, keeping casadi's cached dynamics functions warm
 # across requests in that worker.
 
 _WORKER_OPTIMIZER: Any = None

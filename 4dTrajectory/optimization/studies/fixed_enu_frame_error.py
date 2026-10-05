@@ -59,7 +59,7 @@ import numpy as np
 from geokit import EARTH_RADIUS_MEAN_M as _EARTH_RADIUS_M
 from geokit import haversine_m
 
-_AERODYNAMIC_MODEL_DIR = Path(__file__).resolve().parents[2] / "aerodynamic_model"
+_AERODYNAMIC_MODEL_DIR = Path(__file__).resolve().parents[3] / "aerodynamic_model"
 if str(_AERODYNAMIC_MODEL_DIR.parent) not in sys.path:
     sys.path.insert(0, str(_AERODYNAMIC_MODEL_DIR.parent))
 

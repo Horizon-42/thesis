@@ -8,13 +8,10 @@
 """
 
 from .optimizer import CollocationOptimizer
-from .schemes import _DEFECT_SCHEMES
-from .components import _SOLVER_BACKENDS, altitude_floor_m, ALTITUDE_FLOOR_MARGIN_M
+from .components import altitude_floor_m, ALTITUDE_FLOOR_MARGIN_M
 
 __all__ = [
     "CollocationOptimizer",
-    "_DEFECT_SCHEMES",
-    "_SOLVER_BACKENDS",
     "altitude_floor_m",
     "ALTITUDE_FLOOR_MARGIN_M",
 ]

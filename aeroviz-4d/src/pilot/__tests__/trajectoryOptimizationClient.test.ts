@@ -65,10 +65,9 @@ describe("optimizer orthogonal-axis decomposition (the panel-facing API)", () =>
 
 
 const request: TrajectoryOptimizationRequest = {
-  optimizer: "singleShooting",
+  optimizer: "casadiDirectCollocation",
   nSegments: 4,
   arrivalTimeS: 95,
-  dtS: 0.2,
   maxIterations: 25,
   initialState: {
     lon: -114.02,
@@ -100,12 +99,11 @@ describe("trajectoryOptimizationClient", () => {
   it("posts the optimization request to the backend", async () => {
     const responsePayload = {
       ok: true,
-      optimizer: "variableTimeWarmStartTranscription",
+      optimizer: "casadiDirectCollocation",
       finalTimeS: 80,
       nSegments: 4,
-      dtS: 0.2,
       controls: [
-        { thrustN: 12000, bankDeg: 1, attackDeg: 4 },
+        { thrustN: 12000, bankDeg: 1, attackDeg: 0, loadFactor: 1.2 },
       ],
       states: [
         request.targetState,
@@ -142,11 +140,10 @@ describe("trajectoryOptimizationClient", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         ok: true,
-        optimizer: "variableTimeWarmStartTranscription",
+        optimizer: "casadiDirectCollocation",
         finalTimeS: 80,
         nSegments: 4,
-        dtS: 0.2,
-        controls: [{ thrustN: 12000, bankDeg: 1, attackDeg: 4 }],
+          controls: [{ thrustN: 12000, bankDeg: 1, loadFactor: 1.2 }],
         states: [request.targetState],
         timings: { buildS: 0.06, solveS: 0.9, playbackS: 0.1, totalS: 1.06 },
       }), { status: 200, headers: { "Content-Type": "application/json" } }),
@@ -160,11 +157,10 @@ describe("trajectoryOptimizationClient", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         ok: true,
-        optimizer: "casadiIpopt",
+        optimizer: "casadiDirectCollocation",
         finalTimeS: 72,
         nSegments: 4,
-        dtS: 0.2,
-        controls: [
+          controls: [
           { thrustN: 12000, bankDeg: 1, loadFactor: 1.2 },
         ],
         states: [
@@ -178,16 +174,31 @@ describe("trajectoryOptimizationClient", () => {
 
     const result = await runTrajectoryOptimization({
       ...request,
-      optimizer: "casadiIpopt",
+      optimizer: "casadiDirectCollocation",
     });
 
-    expect(result.optimizer).toBe("casadiIpopt");
+    expect(result.optimizer).toBe("casadiDirectCollocation");
     expect(result.controls[0]).toEqual({
       thrustN: 12000,
       bankDeg: 1,
       attackDeg: 0,
       loadFactor: 1.2,
     });
+  });
+
+  it("refuses a control that carries no load factor", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        optimizer: "casadiDirectCollocation",
+        finalTimeS: 72,
+        nSegments: 4,
+        controls: [{ thrustN: 12000, bankDeg: 1, attackDeg: 4 }],
+        states: [request.targetState],
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    ));
+
+    await expect(runTrajectoryOptimization(request)).rejects.toThrow("invalid loadFactor");
   });
 
   it("accepts a multiphase optimizer name in the response", async () => {
@@ -197,8 +208,7 @@ describe("trajectoryOptimizationClient", () => {
         optimizer: "casadiMultiphaseNormalizedFullTransport",
         finalTimeS: 348,
         nSegments: 16,
-        dtS: 0.2,
-        controls: [{ thrustN: 12000, bankDeg: 1, loadFactor: 1.2 }],
+          controls: [{ thrustN: 12000, bankDeg: 1, loadFactor: 1.2 }],
         states: [request.targetState],
       }), { status: 200, headers: { "Content-Type": "application/json" } }),
     ));
@@ -211,6 +221,21 @@ describe("trajectoryOptimizationClient", () => {
     expect(result.optimizer).toBe("casadiMultiphaseNormalizedFullTransport");
   });
 
+  it("refuses a removed optimizer name in the response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        optimizer: "casadiIpopt",
+        finalTimeS: 72,
+        nSegments: 4,
+          controls: [{ thrustN: 12000, bankDeg: 1, loadFactor: 1.2 }],
+        states: [request.targetState],
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    ));
+
+    await expect(runTrajectoryOptimization(request)).rejects.toThrow("invalid optimizer");
+  });
+
   it("parses the procedure-constraint summary the backend echoes back", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
@@ -218,8 +243,7 @@ describe("trajectoryOptimizationClient", () => {
         optimizer: "casadiDirectCollocation",
         finalTimeS: 72,
         nSegments: 4,
-        dtS: 0.2,
-        controls: [{ thrustN: 12000, bankDeg: 1, loadFactor: 1.2 }],
+          controls: [{ thrustN: 12000, bankDeg: 1, loadFactor: 1.2 }],
         states: [request.targetState],
         procedureConstraintSummary: {
           waypointCount: 3,

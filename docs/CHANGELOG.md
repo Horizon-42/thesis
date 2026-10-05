@@ -1,5 +1,17 @@
 # AeroViz-4D Development Changelog
 
+### 2026-10-05 — The six older optimizers archived; studies moved; the collocation envelope named once
+
+- `code_review.md` F13/F10/F9/F12 (`4dTrajectory/docs/multi_aircraft_optimization/`): `transcription_optimizor`,
+  `least_squares_…`, `warm_start_…`, `variable_time_warm_start_…`, `single_shooting_optimizor`, `casadi_optimizer` and their
+  seven tests moved unchanged to `4dTrajectory/optimization/archive/legacy_optimizers_2026_10/`. The backend serves only the
+  collocation optimizers (menu, the casadiIpopt instance cache, alpha controls and the playback's alpha path removed);
+  the frontend dropped the six names. Five study scripts + data moved to `optimization/studies/`. `collocation` exports
+  only public names; `components.MAX_BANK_RAD` / `LOAD_FACTOR_RANGE` name the envelope.
+- F12 measured: the symbolic build ~0.04 s, casadi's `nlpsol` setup 0.7–1.1 s = about half of a solve;
+  `last_solve_timings` carries `buildS` and `solverSetupS`. A reused solver per aircraft type is the lever (open).
+- Gate: 20 KRDU flights bit-identical to the base code; 661 tests pass.
+
 ### 2026-10-05 — Multi-aircraft optimization M1: one optimized aircraft in its airport's recorded traffic
 
 - `4dTrajectory/optimization/traffic/` + runner `traffic_optimization.py` (design `4dTrajectory/docs/multi_aircraft_optimization/design.md`

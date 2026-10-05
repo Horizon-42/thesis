@@ -90,11 +90,15 @@ def _make_nlp_solver(nlp, solver_backend, verbose=False, max_iterations=DEFAULT_
 # Bounds and frame-conversion helpers
 # --------------------------------------------------------------------------
 
+#: The control envelope of every solve — a modelling choice, not aircraft data: bank within ±45° and a
+#: commanded load factor from 0.5 to 2.0 g (thrust runs from 0 to the aircraft's installed maximum).
+MAX_BANK_RAD = math.pi / 4.0
+LOAD_FACTOR_RANGE = (0.5, 2.0)
+
+
 def make_control_bounds(max_thrust: float, min_load_factor: float, max_load_factor: float):
-    # Identical envelope to ``casadi_optimizer.make_control_bounds`` so
-    # the two CasADi optimisers compete on the same control space.
     T_min, T_max = 0.0, max_thrust
-    mu_min, mu_max = -ca.pi / 4.0, ca.pi / 4.0
+    mu_min, mu_max = -MAX_BANK_RAD, MAX_BANK_RAD
     n_cmd_min, n_cmd_max = min_load_factor, max_load_factor
     return [T_min, mu_min, n_cmd_min], [T_max, mu_max, n_cmd_max]
 

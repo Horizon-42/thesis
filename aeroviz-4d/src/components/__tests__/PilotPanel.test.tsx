@@ -156,11 +156,10 @@ describe("PilotPanel", () => {
     mocks.fetchJson.mockResolvedValue(krduR05lyDocument);
     mocks.runTrajectoryOptimization.mockResolvedValue({
       ok: true,
-      optimizer: "casadiIpopt",
+      optimizer: "casadiDirectCollocation",
       finalTimeS: 100,
       nSegments: 10,
       arrivalTimeS: 100,
-      dtS: 0.2,
       controls: [
         { thrustN: 12000, bankDeg: 0, attackDeg: 0, loadFactor: 1.2 },
         { thrustN: 12000, bankDeg: 3, attackDeg: 0, loadFactor: 1.1 },
@@ -432,10 +431,6 @@ describe("PilotPanel", () => {
     const arrivalInput = screen.getByLabelText("Arrival time");
     fireEvent.change(arrivalInput, { target: { value: "96" } });
     fireEvent.blur(arrivalInput);
-    const trajectoryDtInput = screen.getByLabelText("dt");
-    expect((trajectoryDtInput as HTMLInputElement).value).toBe("0.5");
-    fireEvent.change(trajectoryDtInput, { target: { value: "5" } });
-    fireEvent.blur(trajectoryDtInput);
     fireEvent.click(within(targetEditor).getByRole("button", { name: "Close" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
@@ -467,9 +462,9 @@ describe("PilotPanel", () => {
       nSegments: 12,
       stateSubsteps: 24,
       arrivalTimeS: 96,
-      dtS: 2,
       maxIterations: 300,
     });
+    expect(request).not.toHaveProperty("dtS");
     // Unconstrained run: the request carries nSegments (whole-trajectory control count)
     // and NO procedure — not the per-leg nSegPerPhase / procedureConstraint.
     expect(request.procedureConstraint).toBeUndefined();
@@ -880,11 +875,10 @@ describe("PilotPanel", () => {
     document.body.innerHTML = '<div class="cesium-overlay-container"></div>';
     mocks.runTrajectoryOptimization.mockResolvedValueOnce({
       ok: true,
-      optimizer: "transcription",
+      optimizer: "casadiDirectCollocation",
       finalTimeS: 0.2,
       nSegments: 1,
-      dtS: 0.02,
-      controls: [{ thrustN: 12000, bankDeg: 0, attackDeg: 4 }],
+      controls: [{ thrustN: 12000, bankDeg: 0, loadFactor: 1.12 }],
       states: [],
       playback: {
         epochIso: "2026-01-01T00:00:00Z",
@@ -905,7 +899,7 @@ describe("PilotPanel", () => {
             liftCoefficient: 0.42,
             dragCoefficient: 0.041,
             actualLoadFactor: 1.12,
-            attackDeg: 4,
+            loadFactor: 1.12,
           },
         ],
       },

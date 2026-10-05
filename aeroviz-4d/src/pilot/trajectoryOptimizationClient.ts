@@ -5,7 +5,6 @@ import {
   readBoolean,
   readNumber,
   readOptionalNumber,
-  readPositiveNumber,
   readString,
 } from "./responseValidators";
 
@@ -43,15 +42,7 @@ export type TrajectoryOptimizer =
   // procedureConstraint in the request.
   | "casadiMultiphaseNormalizedFullTransport"
   | "casadiMultiphaseNormalizedFullTransportTrapezoidal"
-  | "casadiMultiphaseNormalizedFullTransportRk4"
-  // Legacy optimizers: still served by the backend, no longer offered in
-  // the UI (kept here so a response naming one still parses).
-  | "casadiIpopt"
-  | "transcription"
-  | "leastSquaresTranscription"
-  | "warmStartTranscription"
-  | "variableTimeWarmStartTranscription"
-  | "singleShooting";
+  | "casadiMultiphaseNormalizedFullTransportRk4";
 
 // ── Two-axis view of the direct-collocation family ─────────────────────────
 // The backend still takes a single ``optimizer`` string, but the UI exposes it
@@ -185,10 +176,8 @@ const GEODETIC_DYNAMICS: Record<string, OptimizerDynamics> = {
   "full|true": "geodeticNormalizedFullTransport",
 };
 
-/** Split a wire optimizer name into the orthogonal axes the panel edits. Defined only for the
- * editable direct-collocation / multiphase family; the 6 legacy names (casadiIpopt, transcription,
- * …) are parse-only (see `readOptimizer`) and are never fed here — the panel holds the axes as
- * state and seeds them from a canonical default, so a legacy name can never reach the editor. */
+/** Split a wire optimizer name into the orthogonal axes the panel edits (every
+ * `TrajectoryOptimizer` is in the direct-collocation / multiphase family). */
 export function decomposeOptimizer(optimizer: TrajectoryOptimizer): OptimizerParts {
   const { dynamics, fitting } = optimizerToParts(optimizer);
   if (dynamics === "geodeticMultiphase") {
@@ -236,7 +225,6 @@ export interface TrajectoryOptimizationRequest {
    * Omit for the optimizer's auto per-phase density (~3 s state step, capped at 16). */
   stateSubsteps?: number;
   arrivalTimeS: number;
-  dtS: number;
   maxIterations: number;
   /**
    * Optional canonical procedure constraint (see `data/procedureConstraint`).
@@ -268,7 +256,6 @@ export interface TrajectorySample {
   dragCoefficient: number;
   actualLoadFactor: number;
   loadFactor?: number;
-  attackDeg?: number;
 }
 
 /**
@@ -310,7 +297,6 @@ export interface TrajectoryOptimizationResult {
   optimizer: TrajectoryOptimizer;
   finalTimeS: number;
   nSegments: number;
-  dtS: number;
   controls: PilotControls[];
   states: PilotResetState[];
   playback: TrajectoryPlayback | null;
@@ -364,7 +350,6 @@ function parseTrajectoryOptimizationResult(
     optimizer: readOptimizer(value),
     finalTimeS: readNumber(value, "finalTimeS"),
     nSegments: readNumber(value, "nSegments"),
-    dtS: readPositiveNumber(value, "dtS"),
     controls: value.controls.map(parseControl),
     states: value.states.map(parseState),
     playback: parsePlayback(value.playback),
@@ -437,8 +422,6 @@ function parseSample(value: unknown): TrajectorySample {
   };
   const loadFactor = readOptionalNumber(value, "loadFactor");
   if (loadFactor !== null) sample.loadFactor = loadFactor;
-  const attackDeg = readOptionalNumber(value, "attackDeg");
-  if (attackDeg !== null) sample.attackDeg = attackDeg;
   return sample;
 }
 
@@ -464,13 +447,7 @@ function readOptimizer(value: Record<string, unknown>): TrajectoryOptimizer {
     nested === "casadiDirectCollocationNormalizedFullTransportRk4" ||
     nested === "casadiMultiphaseNormalizedFullTransport" ||
     nested === "casadiMultiphaseNormalizedFullTransportTrapezoidal" ||
-    nested === "casadiMultiphaseNormalizedFullTransportRk4" ||
-    nested === "casadiIpopt" ||
-    nested === "transcription" ||
-    nested === "leastSquaresTranscription" ||
-    nested === "warmStartTranscription" ||
-    nested === "variableTimeWarmStartTranscription" ||
-    nested === "singleShooting"
+    nested === "casadiMultiphaseNormalizedFullTransportRk4"
   ) {
     return nested;
   }
@@ -481,16 +458,11 @@ function parseControl(value: unknown): PilotControls {
   if (!isRecord(value)) {
     throw new Error("AeroViz backend optimization response has invalid control");
   }
-  const attackDeg = readOptionalNumber(value, "attackDeg");
-  const loadFactor = readOptionalNumber(value, "loadFactor");
-  if (attackDeg === null && loadFactor === null) {
-    throw new Error("AeroViz backend optimization response has invalid control");
-  }
   return {
     thrustN: readNumber(value, "thrustN"),
     bankDeg: readNumber(value, "bankDeg"),
-    attackDeg: attackDeg ?? 0,
-    ...(loadFactor === null ? {} : { loadFactor }),
+    attackDeg: 0,
+    loadFactor: readNumber(value, "loadFactor"),
   };
 }
 
