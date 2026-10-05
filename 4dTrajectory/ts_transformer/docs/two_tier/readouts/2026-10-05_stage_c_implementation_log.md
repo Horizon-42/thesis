@@ -20,7 +20,8 @@ Branch `dev-two-tier-v4-post`, worktree `.claude/worktrees/two-tier-v4-post`, ma
 | C2: the edge features and their conformance | Done on synthetic artefacts, `1b4d3cea` (reviewed); its reference on A34's train windows (§3) |
 | C3: "established", the separation judge on v4, the speed-word mask, the regulation text | Code `1b4d3cea` (reviewed); the text `86fc86d6` (`docs/literature/arrival_separation/README.md` §8); the user's decisions of 2026-10-05 (§7) in `ca15a2e5` (reviewed) |
 | The user's choices from C1's census | Decided: real : A : D = 1 : 1 : 1 in a round (§7). Open: the shifts of A and D (§4 P7) |
-| C4–C7 | Wait for B9 (prior D96) and the parts of A38 (vocabulary D97) on this branch |
+| C5, C7 | Done on synthetic artefacts and models, `3171da69` (reviewed), after B9 and `dev-two-tier` were merged (`52224585`, `68407e13`); §9 |
+| C4, C6 | Wait for B10 (prior D105, D106: each aircraft's landings, the shared step of the closed loop) and A38 (vocabulary D97: the copy of a loop) on this branch |
 | C8–C12 | Wait for B5's base, Claude's check of stage B, the moved start (C9) and the user's criteria (D7) |
 
 ## 2 C0–C3 (2026-10-05)
@@ -166,3 +167,46 @@ G from them.
 commanded record's labelled G stripped and refused, a row past the record refused, G checked as bool, the
 signal-index mapping and the G of a shifted record tested). The four stage C test files: 59 passed. The full ts
 suite at `ca15a2e5`, one test at a time (rule 13): 1,690 passed, 1 skipped, 18 min 11 s.
+
+## 9 C5 and C7 (2026-10-05)
+
+On the user's order: `dev-two-tier-v4-prior` (B9, `5313b6cd`) merged into this branch (`52224585`), then `dev-two-tier`
+(`68407e13`); C5 and C7 (C4 and C6 wait: §1). The user's decisions on Claude's check of stage B, now post-training
+D105–D107 and prior D105–D107 (B10): the window's landings follow its scene (C4), dropout off in the ratio and the KL and
+on in the data term (C7, as built), the closed loop's step one module of stage B (C4 calls it).
+
+**Commit** `3171da69` (code), reviewed by an independent reviewer (no blocking point; fixed before the commit: `one_pass`
+refused before any update unless one data batch for each, the counted rows masked by `where` so that a value of a row
+not counted cannot reach the loss, the copy at the start of the pass without gradients). Tests: the six stage C files
+and `test_architecture.py`, 72 passed; the full ts suite on 8 workers: 1,712 passed, 1 skipped, 5 min 2 s (stage B's
+smoke free generation and a test backend were running; no formal build).
+
+| What | Where |
+|---|---|
+| The traffic attention (C5, D98) | `post/traffic_attention.py` `TrafficAttention`, `Traffic`, `traffic_of`, `TrafficConfig` (`post-traffic-attention-v1`), `add_traffic_attention`, `traffic_modules`, `parameter_groups` |
+| The loss (C7) | `post/loss.py` `Samples`, `PassStart`, `surrogate`, `pull_to_base`, `data_term`, `update_loss`, `one_pass`, `stacked`; `CLIP`, `KL_WEIGHT`, `DATA_WEIGHT` |
+| B9's names in the import rule | `tests/test_architecture.py` `PRIOR_INTERFACE`: `prior/loop.py` `LoopRows`, `speaker.draw`, `speaker.Permitted`, `train.masked_log_probability` (stage B's log gives them for prior §7's Code column; §7 still reads "new, B9": for Claude) |
+
+**Proposals** (readings where the design says nothing):
+
+- **P11. The ratio and the pull per word.** Each column of each row is one word with its own ratio, clipped on its own,
+  and its own KL term, as the archived post-training (`archive/two_tier_v3_2026_10/prior/train.py` `flight_surrogate`,
+  `flight_kl`), not one ratio for the row's five words.
+- **P12. The ratio's denominator** is a frozen copy of the model at the start of the pass, scoring the same words under
+  the same records through `masked_log_probability` (the speaker's own `drawn_probability` is not in prior §7). At the
+  parameters that spoke it equals the speaker's probability within 1e-5 (a test).
+- **P13. The weight of a sample.** Each sample's sum over its counted words is divided by its counted rows, and the
+  samples are averaged. With C6, a continuation from a late branch point (few counted rows) then weighs as much as a
+  whole first sentence. Alternatives: divide the whole batch by its counted rows (each row weighs the same).
+- **P14. The pull reads the counted words only**, the same words as the surrogate; a first sentence that is in several
+  branch groups (C6) has its words counted once in each group.
+- **P15. No traffic is a sample without a scene.** `TrafficAttention(x, None)` gives zero: the data term's
+  single-aircraft samples (D36) go through `batch_nll`, which gives the model no ``extra``.
+- **P16. The shape of the module.** Each layer has its own token network (two linear layers, hidden 16 in the tests) and
+  an attention of 4 heads at the prior's width; the formal shape is not chosen (C8). Each layer embeds every padded
+  token, so the memory grows with B·R·N_max (N_max the most other aircraft of the batch): the reviewer's estimate at
+  configuration A, B = 64, R = 300, N_max = 30, approximately 9 GB — more than the GPU. C8 measures it at the formal
+  size; one token network shared by the layers would cut it (a design choice for the user).
+
+**Requests to stage B** (through the user; in B10 as prior D105, D106): each aircraft's landings in `LoopRows`; the
+closed loop's step as one module under `experiments/` with ``extra``, caller masks, an end by the caller and a copy.

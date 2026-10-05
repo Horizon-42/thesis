@@ -150,3 +150,21 @@ branch; before B5.
   add up to the sentences of the split; the artefact's files are unchanged after a run; a run under another rule
   than its identity's is refused by name.
 
+
+**B9. The interface for the post-training** (§4, §7; D96). Moved here from the design on 2026-10-05, after B9 was done.
+Now; before B5's formal campaign, because it changes the draws of free generation, and a payload that an experiment
+writes is settled before the experiment runs.
+
+- The six parts of D96 in `prior/` and `experiments/prior_free_generation.py`: the speaker's input of the added
+  modules, its random numbers (§4 "Drawing"), its records of the permitted words and its copy of chosen aircraft; the
+  log-probability of given words under records; the function of a loop's row, moved out of `speak_and_fly` into
+  `prior/`; the report gives the names of the new parts for the column "Code" of §7.
+- Free generation: each flight's random numbers from the seed and the flight; a new format name for its files; B6's
+  export and its smoke set follow the new name.
+- Tests: an aircraft's words with given numbers are the same when other aircraft join its batch (on a synthetic batch;
+  a difference only where a number falls within the float tolerance of a boundary, counted); the same numbers give the
+  same sentence; the log-probability under the records equals the probability that the speaker drew the word from;
+  a word that a record blocks has probability 0; a copy continued with the same inputs and numbers says what the
+  original says, bit for bit, in a batch of the same layout; a module that reads the input of item 5 gets it from the
+  speaker, and a module whose output is zero changes no word; free generation through the moved function of a loop's
+  row gives the same inputs, bit for bit, as before the move.
