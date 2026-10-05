@@ -166,11 +166,13 @@ sections that it names.
 8. Do not touch the checkouts of running experiments (`.claude/worktrees/step9-run` and others) or the main checkout.
 9. A defect that you find outside the milestone goes to `docs/code-health-followups.md` (an entry and a table row), not
    into the change.
-10. §0.3 of the stage's document is the implementer's log, and the only part of a design document that the implementer
-    writes (the user, 2026-10-04): at each milestone, the state and the commits, and each reading that the implementer
-    made where the design says nothing (a reading is a proposal until the user decides). The implementer changes no
-    other part of a design document: not the decisions, the design sections, the plan, the values or the key code
-    index. A gap in the design, or a reading that needs a change of the design, goes to the user; Claude writes the
+10. The stage's implementation log is the implementer's, and the only text about a stage that the implementer writes
+    (the user, 2026-10-04): at each milestone, the state and the commits, and each reading that the implementer made
+    where the design says nothing (a reading is a proposal until the user decides). The log is a file in `readouts/`
+    (stage A: `readouts/2026-10-05_stage_a_implementation_log.md`), not a section of the design document; §0.3 of the
+    design document holds only a short status table (part, state), which the implementer keeps current. The implementer
+    changes no other part of a design document: not the decisions, the design sections, the plan, the values or the key
+    code index. (Stage B's log is still prior §0.3 and moves to a file in `readouts/` the same way.) A gap in the design, or a reading that needs a change of the design, goes to the user; Claude writes the
     text that the user decides. The log is committed to `dev-two-tier` (the user's checkout), with explicit paths. At
     the end of a stage, the report gives the new code index, and Claude puts it into the key code index of the
     document.
